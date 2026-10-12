@@ -259,6 +259,21 @@ const publishWorkspace = (
     .map(shardId => computeWorkerShardCommitment(worker, shardId));
 };
 
+const phaseShardOperationCounts = (input: TsAccountWorkerPhasePayload): Map<number, number> => {
+  const shardRows = new Map<number, number>();
+  const operationAccountIds = input.phase === 'inbound'
+    ? input.inputs.map(row => row.accountId)
+    : [...input.txs.map(row => row.accountId), ...input.proposals.map(row => row.accountId)];
+  if (input.phase === 'outbound') {
+    operationAccountIds.unshift(...input.envelopeUpdates.map(row => row.accountId));
+  }
+  for (const accountId of operationAccountIds) {
+    const shardId = tsAccountLogicalShard(accountId);
+    shardRows.set(shardId, (shardRows.get(shardId) ?? 0) + 1);
+  }
+  return shardRows;
+};
+
 const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult> => {
   const worker = state;
   if (!worker) throw new Error('TS_ACCOUNT_WORKER_NOT_INITIALIZED');
@@ -333,17 +348,7 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
     : collectWorkerPostAccounts(worker);
   const materializeUs = Math.round((getPerfMs() - materializeStartedAt) * 1_000);
   const cpu = readThreadCpuUsage(cpuStartedAt);
-  const shardRows = new Map<number, number>();
-  const operationAccountIds = input.phase === 'inbound'
-    ? input.inputs.map(row => row.accountId)
-    : [...input.txs.map(row => row.accountId), ...input.proposals.map(row => row.accountId)];
-  if (input.phase === 'outbound') {
-    operationAccountIds.unshift(...input.envelopeUpdates.map(row => row.accountId));
-  }
-  for (const accountId of operationAccountIds) {
-    const shardId = tsAccountLogicalShard(accountId);
-    shardRows.set(shardId, (shardRows.get(shardId) ?? 0) + 1);
-  }
+  const shardRows = phaseShardOperationCounts(input);
   return {
     workerIndex: worker.workerIndex,
     effects,

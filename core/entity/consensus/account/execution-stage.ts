@@ -293,18 +293,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     };
   }
 
-  async beginEntityAccountFrame(request: AccountAuthorityFrameBeginRequest): Promise<void> {
-    if (normalizeEntityId(request.ownerEntityId) !== this.ownerEntityId) {
-      throw new Error(`ACCOUNT_AUTHORITY_FRAME_OWNER_MISMATCH:${this.ownerEntityId}:${request.ownerEntityId}`);
-    }
-    await this.discardOpenFrameAttempt();
-    this.unsupportedEntityTxTypes = [...new Set(request.entityTxs
-      .map(tx => tx.type)
-      .filter(type => type !== 'accountInput'))].sort();
-    // Entity fitting may reject one transaction after an isolated apply and
-    // rebuild the proposal. A retry is a new attempt against the same parent
-    // head, not a third Account phase. Rust reconciles its held path-copy
-    // candidate from expectedAccountsRoot before applying this batch.
+  private resetFrameQueues(): void {
     this.frameOpened = true;
     this.frameOutboundPrepared = false;
     this.frameBooksExecuted = false;
@@ -319,6 +308,21 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     this.proposalCursor = 0;
     this.generatedAdmissions = [];
     this.generatedAdmissionCursor = 0;
+  }
+
+  async beginEntityAccountFrame(request: AccountAuthorityFrameBeginRequest): Promise<void> {
+    if (normalizeEntityId(request.ownerEntityId) !== this.ownerEntityId) {
+      throw new Error(`ACCOUNT_AUTHORITY_FRAME_OWNER_MISMATCH:${this.ownerEntityId}:${request.ownerEntityId}`);
+    }
+    await this.discardOpenFrameAttempt();
+    this.unsupportedEntityTxTypes = [...new Set(request.entityTxs
+      .map(tx => tx.type)
+      .filter(type => type !== 'accountInput'))].sort();
+    // Entity fitting may reject one transaction after an isolated apply and
+    // rebuild the proposal. A retry is a new attempt against the same parent
+    // head, not a third Account phase. Rust reconciles its held path-copy
+    // candidate from expectedAccountsRoot before applying this batch.
+    this.resetFrameQueues();
     const prepareStartedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     const newAccounts = new Map<string, AccountAuthorityInputRequest['account']>();
     this.inboundRequests = inboundArrivals(request.entityTxs).flatMap(arrival => {

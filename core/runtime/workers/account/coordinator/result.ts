@@ -5,6 +5,7 @@ import type {
   TsAccountWorkerBatchResult,
   TsAccountWorkerEffect,
   TsAccountWorkerPhaseMetrics,
+  TsAccountWorkerPhaseResult,
   TsAccountWorkerSubroot,
 } from '../protocol';
 
@@ -28,6 +29,83 @@ export type ExpectedWorkerEffect = Readonly<{
   accountId: string;
 }>;
 
+const collectOrderedWorkerEffects = (
+  result: Pick<TsAccountWorkerPhaseResult, 'effects' | 'skippedProposals'>,
+  workerIndex: number,
+  expectedEffects: readonly ExpectedWorkerEffect[],
+  effects: Array<TsAccountWorkerEffect | undefined>,
+  skippedProposals: Map<number, string>,
+): void => {
+  for (const effect of result.effects) {
+    if (!Number.isSafeInteger(effect.order) || effect.order < 0 || effect.order >= effects.length) {
+      throw new Error(`TS_ACCOUNT_WORKER_EFFECT_ORDER_RANGE:${workerIndex}:${effect.order}:${effects.length}`);
+    }
+    if (effects[effect.order] !== undefined) {
+      throw new Error(`TS_ACCOUNT_WORKER_EFFECT_ORDER_DUPLICATE:${effect.order}`);
+    }
+    const expected = expectedEffects[effect.order];
+    if (
+      expected === undefined
+      || expected.workerIndex !== workerIndex
+      || expected.phase !== effect.phase
+      || expected.accountId !== effect.accountId
+    ) {
+      throw new Error(
+        `TS_ACCOUNT_WORKER_EFFECT_BINDING:${effect.order}:${workerIndex}:${effect.phase}:${effect.accountId}`,
+      );
+    }
+    effects[effect.order] = effect;
+  }
+  for (const skipped of result.skippedProposals) {
+    const expected = expectedEffects[skipped.order];
+    if (
+      !Number.isSafeInteger(skipped.order)
+      || expected === undefined
+      || expected.workerIndex !== workerIndex
+      || expected.phase !== 'outbound-proposal'
+      || expected.accountId !== skipped.accountId
+      || effects[skipped.order] !== undefined
+      || skippedProposals.has(skipped.order)
+    ) {
+      throw new Error(
+        `TS_ACCOUNT_WORKER_SKIPPED_PROPOSAL_BINDING:${workerIndex}:${skipped.order}:${skipped.accountId}`,
+      );
+    }
+    skippedProposals.set(skipped.order, skipped.accountId);
+  }
+};
+
+const workerPhaseMetrics = (
+  workerIndex: number,
+  result: TsAccountWorkerPhaseResult,
+  response: WorkerRequestResult,
+): TsAccountWorkerPhaseMetrics => {
+  const workMs = result.elapsedUs / 1_000;
+  const roundTripMs = response.roundTripMs;
+  return {
+    workerIndex,
+    operations: result.operations,
+    elapsedUs: result.elapsedUs,
+    heapUsedBytes: result.heapUsedBytes,
+    requestBytes: response.requestBytes,
+    responseBytes: response.responseBytes,
+    encodeMs: response.encodeMs,
+    decodeMs: response.decodeMs,
+    roundTripMs,
+    workMs,
+    waitMs: Math.max(0, roundTripMs - workMs),
+    transitionMs: result.timings.transitionUs / 1_000,
+    proposalMs: result.timings.proposalUs / 1_000,
+    rootMs: result.timings.rootUs / 1_000,
+    materializeMs: result.timings.materializeUs / 1_000,
+    workerEncodeMs: response.workerEncodeMs,
+    threadCpuUserMs: result.threadCpuUserUs / 1_000,
+    threadCpuSystemMs: result.threadCpuSystemUs / 1_000,
+    shardRows: result.shardRows,
+    operationsProfile: result.operationsProfile,
+  };
+};
+
 export const aggregateWorkerPhaseResults = (
   options: AggregateOptions,
 ): TsAccountWorkerBatchResult => {
@@ -40,43 +118,7 @@ export const aggregateWorkerPhaseResults = (
   const postAccounts = new Map<string, Readonly<{ account: Record<string, unknown>; entityAccountLeaf: string }>>();
   for (const { workerIndex, response } of options.responses) {
     const result = parseWorkerPhaseResult(response.value, workerIndex);
-    for (const effect of result.effects) {
-      if (!Number.isSafeInteger(effect.order) || effect.order < 0 || effect.order >= effects.length) {
-        throw new Error(`TS_ACCOUNT_WORKER_EFFECT_ORDER_RANGE:${workerIndex}:${effect.order}:${effects.length}`);
-      }
-      if (effects[effect.order] !== undefined) {
-        throw new Error(`TS_ACCOUNT_WORKER_EFFECT_ORDER_DUPLICATE:${effect.order}`);
-      }
-      const expected = options.expectedEffects[effect.order];
-      if (
-        expected === undefined
-        || expected.workerIndex !== workerIndex
-        || expected.phase !== effect.phase
-        || expected.accountId !== effect.accountId
-      ) {
-        throw new Error(
-          `TS_ACCOUNT_WORKER_EFFECT_BINDING:${effect.order}:${workerIndex}:${effect.phase}:${effect.accountId}`,
-        );
-      }
-      effects[effect.order] = effect;
-    }
-    for (const skipped of result.skippedProposals) {
-      const expected = options.expectedEffects[skipped.order];
-      if (
-        !Number.isSafeInteger(skipped.order)
-        || expected === undefined
-        || expected.workerIndex !== workerIndex
-        || expected.phase !== 'outbound-proposal'
-        || expected.accountId !== skipped.accountId
-        || effects[skipped.order] !== undefined
-        || skippedProposals.has(skipped.order)
-      ) {
-        throw new Error(
-          `TS_ACCOUNT_WORKER_SKIPPED_PROPOSAL_BINDING:${workerIndex}:${skipped.order}:${skipped.accountId}`,
-        );
-      }
-      skippedProposals.set(skipped.order, skipped.accountId);
-    }
+    collectOrderedWorkerEffects(result, workerIndex, options.expectedEffects, effects, skippedProposals);
     for (const subroot of result.subroots) {
       if (!options.needShardRoot) {
         throw new Error(`TS_ACCOUNT_WORKER_UNREQUESTED_SUBROOT:${workerIndex}:${subroot.shardId}`);
@@ -103,30 +145,7 @@ export const aggregateWorkerPhaseResults = (
         });
       }
     }
-    const workMs = result.elapsedUs / 1_000;
-    const roundTripMs = response.roundTripMs;
-    metrics.push({
-      workerIndex,
-      operations: result.operations,
-      elapsedUs: result.elapsedUs,
-      heapUsedBytes: result.heapUsedBytes,
-      requestBytes: response.requestBytes,
-      responseBytes: response.responseBytes,
-      encodeMs: response.encodeMs,
-      decodeMs: response.decodeMs,
-      roundTripMs,
-      workMs,
-      waitMs: Math.max(0, roundTripMs - workMs),
-      transitionMs: result.timings.transitionUs / 1_000,
-      proposalMs: result.timings.proposalUs / 1_000,
-      rootMs: result.timings.rootUs / 1_000,
-      materializeMs: result.timings.materializeUs / 1_000,
-      workerEncodeMs: response.workerEncodeMs,
-      threadCpuUserMs: result.threadCpuUserUs / 1_000,
-      threadCpuSystemMs: result.threadCpuSystemUs / 1_000,
-      shardRows: result.shardRows,
-      operationsProfile: result.operationsProfile,
-    });
+    metrics.push(workerPhaseMetrics(workerIndex, result, response));
   }
   const missingOrder = effects.findIndex((effect, order) =>
     effect === undefined && !skippedProposals.has(order));

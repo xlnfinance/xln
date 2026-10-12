@@ -546,15 +546,7 @@ export class TsAccountWorkerCoordinator {
     return result;
   }
 
-  /** Outbound Account proposal stage after Entity-owned work has completed. */
-  async prepareAccountFrames(input: TsProposeAccountFramesRequest): Promise<TsAccountWorkerBatchResult> {
-    const frameId = requireWorkerFrameId(input.frameId);
-    requireWorkerInteger(input.timestamp, 'TS_ACCOUNT_WORKER_OUTBOUND_TIMESTAMP_INVALID');
-    requireWorkerInteger(input.jHeight, 'TS_ACCOUNT_WORKER_OUTBOUND_JHEIGHT_INVALID');
-    this.#assertUsable();
-    if (this.#openFrameId !== frameId) {
-      throw new Error(`TS_ACCOUNT_WORKER_FRAME_NOT_OPEN:${frameId}:${this.#openFrameId ?? 'none'}`);
-    }
+  #outboundBuckets(input: TsProposeAccountFramesRequest) {
     const envelopeUpdateBuckets = Array.from({ length: this.#workerCount }, () =>
       [] as Array<typeof input.envelopeUpdates[number]>);
     for (const item of input.envelopeUpdates) {
@@ -618,6 +610,19 @@ export class TsAccountWorkerCoordinator {
       if (bucket === undefined) throw new Error(`TS_ACCOUNT_WORKER_PROPOSAL_BUCKET_MISSING:${workerIndex}`);
       bucket.push(proposal);
     }
+    return { envelopeUpdateBuckets, txBuckets, proposalBuckets };
+  }
+
+  /** Outbound Account proposal stage after Entity-owned work has completed. */
+  async prepareAccountFrames(input: TsProposeAccountFramesRequest): Promise<TsAccountWorkerBatchResult> {
+    const frameId = requireWorkerFrameId(input.frameId);
+    requireWorkerInteger(input.timestamp, 'TS_ACCOUNT_WORKER_OUTBOUND_TIMESTAMP_INVALID');
+    requireWorkerInteger(input.jHeight, 'TS_ACCOUNT_WORKER_OUTBOUND_JHEIGHT_INVALID');
+    this.#assertUsable();
+    if (this.#openFrameId !== frameId) {
+      throw new Error(`TS_ACCOUNT_WORKER_FRAME_NOT_OPEN:${frameId}:${this.#openFrameId ?? 'none'}`);
+    }
+    const { envelopeUpdateBuckets, txBuckets, proposalBuckets } = this.#outboundBuckets(input);
     const activeWorkerIndexes = this.#clients
       .map((_client, workerIndex) => workerIndex)
       .filter(workerIndex => {

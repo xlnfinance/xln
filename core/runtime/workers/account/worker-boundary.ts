@@ -183,11 +183,10 @@ const decodeInboundPayload = (
   };
 };
 
-const decodeOutboundPayload = (
+const decodeOutboundEnvelopeUpdates = (
   worker: TsAccountWorkerState,
   input: Record<string, unknown>,
-): TsAccountWorkerOutboundPayload => {
-  const createdAccountIds = new Set<string>();
+): TsAccountWorkerOutboundPayload['envelopeUpdates'] => {
   const envelopeUpdates = requireArray(
     input['envelopeUpdates'],
     'TS_ACCOUNT_WORKER_OUTBOUND_ENVELOPE_UPDATES',
@@ -219,6 +218,14 @@ const decodeOutboundPayload = (
     }
     return { accountId, update: update as AccountEnvelopeUpdate };
   });
+  return envelopeUpdates;
+};
+
+const decodeOutboundTransactions = (
+  worker: TsAccountWorkerState,
+  input: Record<string, unknown>,
+  createdAccountIds: Set<string>,
+): TsAccountWorkerOutboundPayload['txs'] => {
   const txs = requireArray(input['txs'], 'TS_ACCOUNT_WORKER_OUTBOUND_TXS').map((entry, index) => {
     const row = requireRecord(entry, `TS_ACCOUNT_WORKER_OUTBOUND_TXS_${index}`);
     const rawInitialAccount = row['initialAccount'];
@@ -254,6 +261,16 @@ const decodeOutboundPayload = (
       ...(counterpartyBoardAuthority ? { counterpartyBoardAuthority } : {}),
     };
   });
+  return txs;
+};
+
+const decodeOutboundPayload = (
+  worker: TsAccountWorkerState,
+  input: Record<string, unknown>,
+): TsAccountWorkerOutboundPayload => {
+  const createdAccountIds = new Set<string>();
+  const envelopeUpdates = decodeOutboundEnvelopeUpdates(worker, input);
+  const txs = decodeOutboundTransactions(worker, input, createdAccountIds);
   const proposals = requireArray(input['proposals'], 'TS_ACCOUNT_WORKER_OUTBOUND_PROPOSALS')
     .map((entry, index) => {
       const row = requireRecord(entry, `TS_ACCOUNT_WORKER_OUTBOUND_PROPOSAL_${index}`);

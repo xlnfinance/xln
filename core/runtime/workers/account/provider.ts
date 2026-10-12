@@ -548,6 +548,79 @@ export class TsAccountWorkerAuthority {
     });
   }
 
+  async #continueFailedProposals(
+    batch: AccountAuthorityEntityBatchOutbound,
+    coordinator: TsAccountWorkerCoordinator,
+    frameId: string,
+    localBoardAuthority: TsAccountWorkerCertifiedBoard | undefined,
+    preparedProposals: Parameters<typeof failedProposalContinuationRows>[1],
+  ) {
+    const generated = failedProposalContinuationRows(batch.entityState, preparedProposals);
+    const continuationProposalIds = [...new Set(generated.map(row => row.accountId))];
+    const continuationAdmitted = generated.length === 0 ? undefined : await coordinator.prepareAccountFrames({
+      frameId,
+      ...outboundFrameClock(batch),
+      ...(localBoardAuthority ? { localBoardAuthority } : {}),
+      envelopeUpdates: [],
+      txs: generated.map(row => {
+        const counterpartyBoardAuthority = certifiedBoardFor(this.#env, batch.entityState, row.accountId);
+        return {
+          accountId: row.accountId,
+          txs: row.input.txs,
+          ...(counterpartyBoardAuthority ? { counterpartyBoardAuthority } : {}),
+        };
+      }),
+      proposals: [],
+    });
+    if (continuationAdmitted) this.#recordPhase('proposal', continuationAdmitted);
+    materializeOutboundAccounts(batch, continuationAdmitted?.postAccounts ?? []);
+    const continuationAdmissions = continuationAdmitted?.effects ?? [];
+    const generatedAdmissions = generated.map((row, order) => {
+      const effect = continuationAdmissions[order];
+      if (
+        effect?.phase !== 'outbound-enqueue'
+        || effect.accountId !== row.accountId
+        || !effect.result.ok
+        || effect.result.admittedAccountTxCount !== 1
+      ) {
+        throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_GENERATED_ADMISSION:${order}:${row.accountId}`);
+      }
+      return { ...row, result: effect.result };
+    });
+    const continuationRequests = selectWorkerProposals(this.#env, batch, continuationProposalIds);
+    const continuation = await coordinator.finishAccountFrames({
+      frameId, ...outboundFrameClock(batch),
+      ...(localBoardAuthority ? { localBoardAuthority } : {}),
+      envelopeUpdates: [], txs: [], proposals: continuationRequests,
+    });
+    if (continuation) this.#recordPhase('proposal', continuation);
+    materializeOutboundAccounts(batch, continuation?.postAccounts ?? []);
+    const continuationProposals = continuation?.effects.map(effect => {
+      const order = effect.order;
+      const request = continuationRequests[order];
+      const accountId = request?.accountId;
+      if (!request || effect.phase !== 'outbound-proposal' || effect.accountId !== accountId) {
+        throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_CONTINUATION_PROPOSAL:${order}:${accountId ?? 'missing'}`);
+      }
+      const failures = 'failedHtlcLocks' in effect.result ? effect.result.failedHtlcLocks ?? [] : [];
+      if (failures.length > 0) {
+        const firstFailure = failures[0];
+        if (!firstFailure) throw new Error('TS_ACCOUNT_WORKER_PROVIDER_HTLC_FOLLOWUP_FAILURE_MISSING');
+        throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_HTLC_FOLLOWUP_CASCADE:${accountId}:${firstFailure.hashlock}`);
+      }
+      return { accountId: request.accountId, result: effect.result,
+        ...(request.selectedMempoolTxs === undefined ? {} : { selectedMempoolTxs: request.selectedMempoolTxs }) };
+    }) ?? [];
+    return {
+      generated,
+      continuationProposalIds,
+      continuationAdmitted,
+      generatedAdmissions,
+      continuation,
+      continuationProposals,
+    };
+  }
+
   async #executeOutbound(batch: AccountAuthorityEntityBatchOutbound) {
     const ownerEntityId = normalize(batch.ownerEntityId);
     const ownerReplicaKey = entityReplicaKey(ownerEntityId, batch.ownerSignerId);
@@ -608,62 +681,14 @@ export class TsAccountWorkerAuthority {
       return { accountId, result: effect.result,
         ...(request.selectedMempoolTxs === undefined ? {} : { selectedMempoolTxs: request.selectedMempoolTxs }) };
     });
-    const generated = failedProposalContinuationRows(batch.entityState, preparedProposals);
-    const continuationProposalIds = [...new Set(generated.map(row => row.accountId))];
-    const continuationAdmitted = generated.length === 0 ? undefined : await coordinator.prepareAccountFrames({
-      frameId,
-      ...outboundFrameClock(batch),
-      ...(localBoardAuthority ? { localBoardAuthority } : {}),
-      envelopeUpdates: [],
-      txs: generated.map(row => {
-        const counterpartyBoardAuthority = certifiedBoardFor(this.#env, batch.entityState, row.accountId);
-        return {
-          accountId: row.accountId,
-          txs: row.input.txs,
-          ...(counterpartyBoardAuthority ? { counterpartyBoardAuthority } : {}),
-        };
-      }),
-      proposals: [],
-    });
-    if (continuationAdmitted) this.#recordPhase('proposal', continuationAdmitted);
-    materializeOutboundAccounts(batch, continuationAdmitted?.postAccounts ?? []);
-    const continuationAdmissions = continuationAdmitted?.effects ?? [];
-    const generatedAdmissions = generated.map((row, order) => {
-      const effect = continuationAdmissions[order];
-      if (
-        effect?.phase !== 'outbound-enqueue'
-        || effect.accountId !== row.accountId
-        || !effect.result.ok
-        || effect.result.admittedAccountTxCount !== 1
-      ) {
-        throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_GENERATED_ADMISSION:${order}:${row.accountId}`);
-      }
-      return { ...row, result: effect.result };
-    });
-    const continuationRequests = selectWorkerProposals(this.#env, batch, continuationProposalIds);
-    const continuation = await coordinator.finishAccountFrames({
-      frameId, ...outboundFrameClock(batch),
-      ...(localBoardAuthority ? { localBoardAuthority } : {}),
-      envelopeUpdates: [], txs: [], proposals: continuationRequests,
-    });
-    if (continuation) this.#recordPhase('proposal', continuation);
-    materializeOutboundAccounts(batch, continuation?.postAccounts ?? []);
-    const continuationProposals = continuation?.effects.map(effect => {
-      const order = effect.order;
-      const request = continuationRequests[order];
-      const accountId = request?.accountId;
-      if (!request || effect.phase !== 'outbound-proposal' || effect.accountId !== accountId) {
-        throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_CONTINUATION_PROPOSAL:${order}:${accountId ?? 'missing'}`);
-      }
-      const failures = 'failedHtlcLocks' in effect.result ? effect.result.failedHtlcLocks ?? [] : [];
-      if (failures.length > 0) {
-        const firstFailure = failures[0];
-        if (!firstFailure) throw new Error('TS_ACCOUNT_WORKER_PROVIDER_HTLC_FOLLOWUP_FAILURE_MISSING');
-        throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_HTLC_FOLLOWUP_CASCADE:${accountId}:${firstFailure.hashlock}`);
-      }
-      return { accountId: request.accountId, result: effect.result,
-        ...(request.selectedMempoolTxs === undefined ? {} : { selectedMempoolTxs: request.selectedMempoolTxs }) };
-    }) ?? [];
+    const {
+      generated,
+      continuationProposalIds,
+      continuationAdmitted,
+      generatedAdmissions,
+      continuation,
+      continuationProposals,
+    } = await this.#continueFailedProposals(batch, coordinator, frameId, localBoardAuthority, preparedProposals);
     const postAccounts = new Map<string, TsAccountWorkerPostAccount>();
     for (const row of admitted?.postAccounts ?? []) postAccounts.set(row.accountId, row);
     for (const row of result.postAccounts ?? []) postAccounts.set(row.accountId, row);
