@@ -4,8 +4,6 @@
  *
  * Usage:
  *   console.log(formatRuntime(env));
- *   console.log(formatEntity(entityState));
- *   console.log(formatAccount(account, myEntityId));
  */
 
 import type { RuntimeReplica } from '../runtime/types';
@@ -266,7 +264,7 @@ export function formatRuntime(env: RuntimeReplica, options?: FormatOptions): str
 /**
  * Format entity state (E-Machine)
  */
-export function formatEntity(entity: EntityState, options?: FormatOptions): string {
+function formatEntity(entity: EntityState, options?: FormatOptions): string {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const indent = opts.indentSize || 0;
   const output: string[] = [];
@@ -367,7 +365,7 @@ export function formatEntity(entity: EntityState, options?: FormatOptions): stri
 /**
  * Format account machine state (A-Machine)
  */
-export function formatAccount(account: AccountReplica, myEntityId: string, options?: FormatOptions): string {
+function formatAccount(account: AccountReplica, myEntityId: string, options?: FormatOptions): string {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const indent = opts.indentSize || 0;
   const output: string[] = [];
