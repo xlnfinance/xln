@@ -200,7 +200,7 @@ export const decodeHubCoreRecord = (value: unknown): Record<string, unknown> => 
   requireExactBoundaryKeys(core, [
     'entityId', 'entityEncryptionPublicKey', 'height', 'timestamp', 'profile', 'config',
     'nonces', 'proposals', 'reserves', 'lastFinalizedJHeight',
-    'paybook',
+    'paybook', 'debtTotals',
   ], [
     'signerId', 'isProposer', 'prevFrameHash', 'externalWallet',
     'deferredAccountProposals', 'jBatchState', 'outDebtsByToken',

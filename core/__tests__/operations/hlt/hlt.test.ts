@@ -943,6 +943,7 @@ describe('production swap load evidence', () => {
       height: 4, timestamp: 5, profile: {}, config: {}, nonces: new Map(),
       proposals: new Map(), reserves: new Map(), lastFinalizedJHeight: 0,
       paybook: { entries: new Map(), feesEarned: 0n },
+      debtTotals: { incoming: new Map(), outgoing: new Map() },
       orderbookHubProfile: {
         entityId: `0x${'11'.repeat(32)}`, name: 'H1',
         spreadDistribution: {
@@ -954,6 +955,9 @@ describe('production swap load evidence', () => {
       },
     };
     expect(decodeHubMinTradeSize(core)).toBe(10_000_001n);
+    const { debtTotals: _debtTotals, ...withoutDebtTotals } = core;
+    expect(() => decodeHubMinTradeSize(withoutDebtTotals))
+      .toThrow('PRODUCTION_SWAP_LOAD_HUB_CORE_FIELDS_INVALID');
     expect(() => decodeHubMinTradeSize({ ...core, futureField: true }))
       .toThrow('PRODUCTION_SWAP_LOAD_HUB_CORE_FIELDS_INVALID');
   });
