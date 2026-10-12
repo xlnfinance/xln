@@ -134,7 +134,16 @@ The first harness run stopped before the loop on URL normalization; reusing the
 adapter's existing normalizer fixed the helper without production changes.
 No public activation, new payment or CI gate was claimed. Resume at the frozen
 fixture exception and required PR CI, not another cosmetic refactor.
-Next scheduled method review: 10:21 UTC.
+Method review, 10:27 UTC (scheduled 10:21): clean 090c79158 passed all six
+local financial/browser groups: 11 named React cases, lock-ahb (85 frames),
+25 funding/exit tests with 512 fuzz invocations, eight bytecode templates and
+38 source gates. The browser runner still served Vite dev, so these results
+cannot certify the prepared UI archive. Reuse that runner with an explicit
+artifact directory and the existing UI-only production test; verify served
+hashes and absence of debug hooks. Exercise the actual archive before adding
+CI wiring or another abstraction. This changes the next action, not release
+eligibility. The frozen-import/required-CI blocker is unchanged.
+Next scheduled method review: 10:51 UTC.
 Existing 30-minute heartbeat `xln-30` remains active. No external-model budget
 was spent or renewed. Earlier method evidence remains in the linked manifests:
 provider quota -> bounded first failure; existing authenticated history -> no

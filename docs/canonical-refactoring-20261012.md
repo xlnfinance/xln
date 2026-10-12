@@ -221,6 +221,16 @@ catch-up, not deployed recovery or full public P6. The candidate remains
 ineligible while frozen fixture imports and required CI are unresolved.
 [Build, package, first harness failure and recovery evidence](evidence/canonical-review-20261012/release-preparation-d4502ec94.json).
 
+Fresh clean `090c79158` verification passed **11/11 named React tests**, including
+P4/P5/P6, file/tower recovery, payment, deferred-lending rejection and reserve
+funding; no skips, flakes or errors. `lock-ahb` passed 85 frames; funding/exit
+passed 25 tests and 512 fuzz invocations, eight compiler templates matched,
+and all 38 source gates passed. The 5M bound is per operation; printed gas
+samples are not fuzz maxima. These isolated local tests use Anvil time control
+and Vite dev with a production Runtime bundle; they do not certify the compiled
+UI archive or real-clock Sepolia acceptance.
+[Commands, limits and compact evidence](evidence/canonical-review-20261012/rc-090c79158.json).
+
 The live queue stays in [todo.md](../todo.md). This table is the reviewed design,
 not another backlog or an instruction to run all changes together.
 

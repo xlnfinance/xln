@@ -1,9 +1,11 @@
 import { decodeRuntimeManifestEntries } from '../../hlt/boundary/worker-boundary';
 import type { ChildProcess } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { JsonRpcProvider, Wallet, parseEther } from 'ethers';
 import { requireBoundaryInteger, requireBoundaryRecord } from '../../../../protocol/boundary-validation';
+import { safeStringify } from '../../../../protocol/serialization';
 
 type WalletGate = {
   tests: string;
@@ -84,10 +86,22 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
   if (grep !== undefined && !/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,255}$/.test(grep)) {
     throw new Error('WALLET_TEST_GREP_INVALID');
   }
-  if (tests.some(test => !/^(?:[a-z0-9-]+\/)*e2e-[a-z0-9-]+\.spec\.ts$/.test(test))) throw new Error('WALLET_TEST_ARGUMENT_INVALID');
-  if (ui === 'react' && tests.some(test => /(?:^|\/)e2e-svelte-/.test(test))) throw new Error('WALLET_TEST_UI_MISMATCH:svelte');
-  // Financial assertions must exercise this candidate, never yesterday's bundle.
-  await waitForGateProcess(input.start('wallet-runtime-build', process.execPath, ['run', 'build'], {}), 'runtime-build');
+  if (tests.some(test => !/^(?:[a-z0-9-]+\/)*e2e-[a-z0-9-]+\.spec\.ts$/.test(test)))
+    throw new Error('WALLET_TEST_ARGUMENT_INVALID');
+  if (ui === 'react' && tests.some(test => /(?:^|\/)e2e-svelte-/.test(test)))
+    throw new Error('WALLET_TEST_UI_MISMATCH:svelte');
+  const artifactDir = process.env['XLN_LOCAL_PROD_SMOKE_WALLET_ARTIFACT_DIR'];
+  if (
+    artifactDir !== undefined &&
+    (!isAbsolute(artifactDir) || ui !== 'react' || tests.length !== 1 || tests[0] !== 'e2e-production-wallet.spec.ts')
+  )
+    throw new Error('WALLET_ARTIFACT_ARGUMENT_INVALID');
+  // Source runs rebuild this candidate; artifact runs preserve the supplied release bytes.
+  if (artifactDir === undefined)
+    await waitForGateProcess(
+      input.start('wallet-runtime-build', process.execPath, ['run', 'build'], {}),
+      'runtime-build',
+    );
   const port = input.rpcPort + 2;
   const origin = `http://127.0.0.1:${port}`;
   const report = join(input.workDir, 'wallet-results.json');
@@ -103,18 +117,33 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
   } finally {
     provider.destroy();
   }
-  const tower = input.start('wallet-tower', process.execPath, [
-    join(input.repoRoot, 'core/watchtower/standalone-server.ts'),
-    '--host', '127.0.0.1', '--port', String(towerPort),
-    '--db', join(input.workDir, 'watchtower'), '--quota-bytes', '4194304', '--max-bundles', '3',
-    '--enable-last-resort-agent', '--sweep-interval-ms', '1000',
-  ], {
-    XLN_WATCHTOWER_PRIVATE_KEY: towerSigner.privateKey,
-    XLN_WATCHTOWER_ALLOWED_RPC_URLS: [rpcUrl, `${origin}/rpc`, `http://127.0.0.1:${input.apiPort}/rpc`].join(','),
-  });
+  const tower = input.start(
+    'wallet-tower',
+    process.execPath,
+    [
+      join(input.repoRoot, 'core/watchtower/standalone-server.ts'),
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(towerPort),
+      '--db',
+      join(input.workDir, 'watchtower'),
+      '--quota-bytes',
+      '4194304',
+      '--max-bundles',
+      '3',
+      '--enable-last-resort-agent',
+      '--sweep-interval-ms',
+      '1000',
+    ],
+    {
+      XLN_WATCHTOWER_PRIVATE_KEY: towerSigner.privateKey,
+      XLN_WATCHTOWER_ALLOWED_RPC_URLS: [rpcUrl, `${origin}/rpc`, `http://127.0.0.1:${input.apiPort}/rpc`].join(','),
+    },
+  );
   await waitForService(tower, `${towerOrigin}/api/tower/healthz`);
   const env = {
-    NODE_ENV: 'development',
+    NODE_ENV: artifactDir === undefined ? 'development' : 'production',
     VITE_DEV_PORT: String(port),
     VITE_API_PROXY_TARGET: `http://127.0.0.1:${input.apiPort}`,
     XLN_VITE_FORCE_HTTP: '1',
@@ -122,7 +151,7 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
     VITE_XLN_WATCHTOWER_URL: towerOrigin,
     UI_E2E_TOWER_URL: towerOrigin,
     XLN_UI_STACK_ORIGIN: `http://127.0.0.1:${input.apiPort}`,
-    XLN_UI_RUNTIME_BUNDLE_DIR: join(input.repoRoot, 'frontend/static'),
+    XLN_UI_RUNTIME_BUNDLE_DIR: artifactDir === undefined ? join(input.repoRoot, 'frontend/static') : '',
     UI_E2E_BASE_URL: origin,
     UI_E2E_PORT: String(port),
     XLN_RDB_ROOT: input.workDir,
@@ -133,21 +162,46 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
   const server = input.start(
     'wallet-server',
     process.execPath,
-    ui === 'svelte' ? [
-      '--cwd', join(input.repoRoot, 'frontend'),
-      './node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(port), '--strictPort',
-    ] : [
-      join(input.repoRoot, 'ui/node_modules/vite/bin/vite.js'),
-      'ui',
-      '--host',
-      '127.0.0.1',
-      '--port',
-      String(port),
-      '--strictPort',
-    ],
+    ui === 'svelte'
+      ? [
+          '--cwd',
+          join(input.repoRoot, 'frontend'),
+          './node_modules/vite/bin/vite.js',
+          '--host',
+          '127.0.0.1',
+          '--port',
+          String(port),
+          '--strictPort',
+        ]
+      : [
+          join(input.repoRoot, 'ui/node_modules/vite/bin/vite.js'),
+          ...(artifactDir === undefined ? [] : ['preview']),
+          'ui',
+          ...(artifactDir === undefined ? [] : ['--outDir', artifactDir, '--base', '/']),
+          '--host',
+          '127.0.0.1',
+          '--port',
+          String(port),
+          '--strictPort',
+        ],
     env,
   );
   await waitForService(server, `${origin}/api/jurisdictions`);
+  if (artifactDir !== undefined) {
+    const hash = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+    const files = await Promise.all(
+      ['index.html', 'runtime.js', 'account-worker.js'].map(async path => {
+        const artifact = readFileSync(join(artifactDir, path));
+        const response = await fetch(`${origin}/${path}`, { signal: AbortSignal.timeout(10_000) });
+        const servedHash = hash(new Uint8Array(await response.arrayBuffer()));
+        const sha256 = hash(artifact);
+        if (!response.ok || servedHash !== sha256)
+          throw new Error(`WALLET_ARTIFACT_MISMATCH:${path}:${response.status}:${sha256}:${servedHash}`);
+        return { path, bytes: artifact.length, sha256 };
+      }),
+    );
+    writeFileSync(join(input.workDir, 'wallet-artifact.json'), safeStringify({ artifactDir, origin, files }, 2));
+  }
   await waitForRuntimeImportManifest(join(input.workDir, 'prod-mesh', 'runtime-import-manifest.json'));
   await waitForGateProcess(
     input.start(

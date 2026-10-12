@@ -29,7 +29,9 @@ the counter and finalization. Preserve the stopped DB and the funded wallet.
    Local wallet recovery separately holds 200 Test USDT in reserve; neither
    local result substitutes for deployed recovery.
 3. Consolidate duplicated wallet route/depth policy and strict Brainvault worker
-   admission, each behind its smallest actual failure and browser proof.
+   admission only after the prepared production UI archive passes its existing
+   UI-only funding/payment/reload test. Clean 090c79158 passes 11 named React
+   tests through Vite dev, not that archive; do not conflate the two.
 4. Finish current exit-gas, operational and exact-build mainnet evidence. Rust
    decoder/proof-codec refactors remain proposals until the freeze is reopened.
 
