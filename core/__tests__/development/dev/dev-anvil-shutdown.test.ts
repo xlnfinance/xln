@@ -51,7 +51,7 @@ test('launcher shutdown preserves Anvil code and the exact mined block across re
   const data = mkdtempSync(join(tmpdir(), 'xln-anvil-shutdown-regression-'));
   const launcher = Bun.spawn(['bun', '-e', launcherSource], {
     cwd: repo, stdout: Bun.file(join(data, 'launcher.log')), stderr: Bun.file(join(data, 'launcher-error.log')),
-    env: { ...process.env, XLN_DEV_DATA_ROOT: data, XLN_DEV_LOG_DIR: join(data, 'logs'),
+    env: { ...process.env, NODE_ENV: 'production', XLN_DEV_DATA_ROOT: data, XLN_DEV_LOG_DIR: join(data, 'logs'),
       XLN_HLT_ENGINE: 'ts', XLN_VITE_FORCE_HTTP: '1', XLN_DEV_SHUTDOWN_TIMEOUT_MS: '10000',
       XLN_DEV_CHILD_TERM_TIMEOUT_MS: '5000' },
   });

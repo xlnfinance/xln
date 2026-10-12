@@ -83,6 +83,29 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
   const runtimeBundle = join(root, 'runtime.js');
   const startedAtMs = Date.now() - 1_000;
   writeFileSync(runtimeBundle, 'export const ready = true;\n', 'utf8');
+  const cert = join(root, 'localhost.pem');
+  const key = join(root, 'localhost-key.pem');
+  // Exercise real loopback TLS without requiring a developer's private key.
+  const certificate = Bun.spawnSync(
+    [
+      'openssl',
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-days',
+      '1',
+      '-subj',
+      '/CN=localhost',
+      '-keyout',
+      key,
+      '-out',
+      cert,
+    ],
+    { stdout: 'pipe', stderr: 'pipe', timeout: 5_000 },
+  );
+  expect(certificate.exitCode, certificate.stderr.toString()).toBe(0);
 
   const api = Bun.serve({
     hostname: '127.0.0.1',
@@ -98,8 +121,8 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
     port: 0,
     ...(secure ? {
       tls: {
-        cert: Bun.file(join(repoRoot, 'frontend/localhost+3.pem')),
-        key: Bun.file(join(repoRoot, 'frontend/localhost+3-key.pem')),
+        cert: Bun.file(cert),
+        key: Bun.file(key),
       },
     } : {}),
     async fetch(request, server) {

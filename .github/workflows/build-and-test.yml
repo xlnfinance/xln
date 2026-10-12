@@ -229,24 +229,16 @@ jobs:
       # Bun segfaults when one process loads the whole test tree, so each
       # directory runs in its own process. Rust is frozen at tag
       # rscore-freeze-f1464e84e. Rust integration/parity suites are outside this
-      # TS launch job, not claimed green against changed TS codecs. The files below were red at
-      # f1464e84e; remove a file from the list in the same commit that makes it green.
+      # TS launch job, not claimed green against changed TS codecs. Real-runtime
+      # lifecycle tests run separately under the machine-wide stand lock.
       - name: Run TS unit tests one directory per process
         run: |
-          red_at_head=(
-            # Reads the developer TLS certificate frontend/localhost+3.pem.
-            core/__tests__/dev-readiness.test.ts
-            # Port-owner checks shell out to lsof; unverified (lsof hung on the verifying host).
-            core/__tests__/dev-process-lifecycle.test.ts
-            core/__tests__/dev-startup-hardening.test.ts
+          runtime_stands=(
             core/__tests__/development/dev/dev-anvil-shutdown.test.ts
-            core/__tests__/development/local/local-test-start-policy.test.ts
             core/__tests__/operations/hlt/sovereign-runtime-host.test.ts
-            core/__tests__/testing/runner/e2e-runner-isolation.test.ts
-            core/__tests__/testing/runner/e2e-runner-latency.test.ts
           )
           ignore=()
-          for file in "${red_at_head[@]}"; do ignore+=("--path-ignore-patterns=**/$file"); done
+          for file in "${runtime_stands[@]}"; do ignore+=("--path-ignore-patterns=**/$file"); done
           # Owner launch scope: new lending origination is rejected. Preserve
           # its frozen crash scenarios without claiming the product works;
           # deferred-entity-admission and historical proof/storage tests run.
@@ -265,6 +257,14 @@ jobs:
             if [ -n "$(find "$dir" -name '*.test.ts' -print -quit)" ]; then run_shard "$dir" "$dir"; fi
           done
           run_shard 'core/__tests__/*.test.ts' core/__tests__/*.test.ts
+          for file in "${runtime_stands[@]}"; do
+            echo "::group::$file"
+            bun run stand:status
+            if ! bun run stand:run --reason ci-unit-runtime --timeout-ms 180000 -- bun test "$file"; then
+              failed+=("$file")
+            fi
+            echo "::endgroup::"
+          done
           if [ "${#failed[@]}" -ne 0 ]; then
             echo "::error::failed unit shards: ${failed[*]}"
             exit 1

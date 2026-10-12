@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { readLocalTestListeningPortPids } from '../scripts/e2e/harness/local-test-port-lease';
 
 const repoRoot = resolve(import.meta.dir, '../..');
 const tempRoots: string[] = [];
@@ -92,10 +93,11 @@ describe('dev process lifecycle', () => {
       if (!wrapper.pid) throw new Error('WATCHTOWER_WRAPPER_PID_MISSING');
       cleanupPids.add(wrapper.pid);
       await waitUntil(() => {
-        try { return Bun.spawnSync(['lsof', '-ti', `TCP:${port}`, '-sTCP:LISTEN']).stdout.toString().trim().length > 0; }
-        catch { return false; }
+        return readLocalTestListeningPortPids([port]).has(port);
       }, `watchtower-port=${port}`);
-      const listenerPid = Number(Bun.spawnSync(['lsof', '-ti', `TCP:${port}`, '-sTCP:LISTEN']).stdout.toString().trim());
+      const listeners = readLocalTestListeningPortPids([port]).get(port)!;
+      expect(listeners).toHaveLength(1);
+      const listenerPid = listeners[0]!;
       expect(listenerPid).toBeGreaterThan(0);
       expect(listenerPid).not.toBe(wrapper.pid);
       cleanupPids.add(listenerPid);
