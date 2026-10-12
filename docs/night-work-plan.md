@@ -6,10 +6,11 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
 - Owner authorized the one active TS fixture import correction on October 12.
   The stale worker path is replaced by the canonical Runtime worker path;
-  settlement-execute-atomicity now passes 2/2 with 31 assertions (1.355s).
-  This first run was on the uncommitted patch, not release evidence. Next:
-  commit this bounded correction, run related settlement tests and `bun run check`
-  on the clean SHA, then update PR #73 and resolve its first required CI failure.
+  clean 01cde8881 passes all 97 settlement tests (528 assertions, 2.67s),
+  60 tests covering former CI failures (1,037 assertions, 859ms), and full
+  `bun run check` (38 source gates, source phase 28.518s).
+  Evidence: docs/evidence/canonical-review-20261012/fixture-import-01cde8881.json.
+  Next: update PR #73 and resolve its first required CI failure.
   Continue to Sepolia rollout/recovery after green CI. No other `rscore/` edit
   is authorized; the earlier pending-permission entries below are historical.
 
