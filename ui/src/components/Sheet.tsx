@@ -16,10 +16,14 @@ export function Sheet({
 	const dialog = useRef<HTMLDialogElement>(null);
 	useLayoutEffect(() => {
 		const node = dialog.current!;
-		// Native modal ownership makes the background inert and handles keyboard
-		// focus entry/restoration, including nested dialogs.
+		const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		// Native modal ownership makes the background inert and handles entry.
+		// Closing must return focus to the opener even if focus left the dialog.
 		node.showModal();
-		return () => node.close();
+		return () => {
+			node.close();
+			if (opener?.isConnected) opener.focus({ preventScroll: true });
+		};
 	}, []);
 
 	return (
