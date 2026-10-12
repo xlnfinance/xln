@@ -4,6 +4,7 @@ import {
   type ReserveUpdatedEvidence,
 } from '../../../jurisdiction/machine/events/event-evidence';
 import { parsePositiveDecimalUnits } from '../../../protocol/boundary/positive-decimal';
+import { getPerfMs } from '../../../support/time';
 
 export type TokenCatalogEntry = {
   tokenId?: number | string | null;
@@ -31,8 +32,8 @@ export const waitForReserveUpdatedEvidence = async (
   timeoutMs = 5000,
   pollMs = 50,
 ): Promise<ReserveUpdatedEvidence | null> => {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
+  const started = getPerfMs();
+  while (getPerfMs() - started < timeoutMs) {
     const event = findReserveUpdatedEvidence(env, entityId, tokenId, expectedMin);
     if (event) return event;
     await new Promise(resolve => setTimeout(resolve, pollMs));

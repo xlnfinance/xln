@@ -968,6 +968,105 @@ describe('validator J-prefix consensus', () => {
     );
   });
 
+  test.each(['missing', 'zero', 'case-duplicate'] as const)(
+    'rejects malformed local J-prefix config with %s shares by its explicit invariant code',
+    corruption => {
+      const env = createEmptyEnv(`j-prefix-invalid-shares-${corruption}`);
+      const validatorId = installOwnKey(env, 'invalid-shares-validator');
+      entityId = generateLazyEntityId([validatorId], 1n);
+      const state = makeState([validatorId]);
+      state.config.threshold = 1n;
+      const replica: EntityReplica = {
+        entityId,
+        signerId: validatorId,
+        entityEncPubKey: '',
+        state,
+        mempool: [],
+        isProposer: true,
+        jHistory: observedThrough(10, false),
+      };
+      const honest = buildLocalJPrefixAttestation(env, replica)!;
+      const attestations = new Map([[validatorId, honest]]);
+      expect(selectHighestWeightedCommonJPrefix(state, attestations)?.claim.scannedThroughHeight).toBe(10);
+
+      // Corrupt local configuration only; this is not peer-admissible input.
+      if (corruption === 'missing') delete state.config.shares[validatorId];
+      else if (corruption === 'zero') state.config.shares[validatorId] = 0n;
+      else state.config.shares[validatorId.toUpperCase()] = 1n;
+      expect(() => selectHighestWeightedCommonJPrefix(state, attestations)).toThrow(
+        `J_PREFIX_INVALID_VALIDATOR_SHARES:${validatorId}`,
+      );
+    },
+  );
+
+  test.each(['off-board signer', 'case-duplicate signer'] as const)(
+    'rejects current J-prefix input with %s without poisoning the next valid input',
+    async attack => {
+      const env = createEmptyEnv(`j-prefix-signer-reject-${attack}`);
+      env.quietRuntimeLogs = true;
+      const sourceId = installOwnKey(env, 'signer-reject-source');
+      const thirdId = installOwnKey(env, 'signer-reject-third');
+      const receiverId = installOwnKey(env, 'signer-reject-receiver');
+      const outsiderId = installOwnKey(env, 'signer-reject-outsider');
+      const validators = [sourceId, thirdId, receiverId];
+      entityId = generateLazyEntityId(validators, 3n);
+      const state = makeState(validators);
+      const replica: EntityReplica = {
+        entityId,
+        signerId: receiverId,
+        entityEncPubKey: '',
+        state,
+        mempool: [],
+        isProposer: false,
+        jHistory: observedThrough(10, false),
+      };
+      const honest = buildLocalJPrefixAttestation(env, { ...replica, signerId: sourceId })!;
+      const incoming = new Map([[sourceId, honest]]);
+      if (attack === 'off-board signer') {
+        const { signature: _signature, ...unsigned } = honest;
+        const outsiderVote = { ...unsigned, validatorId: outsiderId };
+        incoming.clear();
+        // The attacker owns this key and signs valid bytes; authorization must
+        // reject the current-round outsider before quorum shares are read.
+        incoming.set(outsiderId, {
+          ...outsiderVote,
+          signature: signAccountFrame(env, outsiderId, hashJPrefixAttestation(outsiderVote)),
+        });
+      } else {
+        incoming.set(sourceId.toUpperCase(), honest);
+      }
+      expect(() => selectHighestWeightedCommonJPrefix(state, incoming)).toThrow(
+        attack === 'off-board signer' ? 'J_PREFIX_UNKNOWN_OR_DUPLICATE_VALIDATOR' : 'J_PREFIX_DUPLICATE_SIGNER',
+      );
+
+      const rejected = await applyEntityInput(env, replica, {
+        entityId,
+        signerId: receiverId,
+        jPrefixAttestations: incoming,
+      });
+      expect(rejected.outcome).toEqual({
+        kind: 'rejected',
+        code: attack === 'off-board signer' ? 'J_PREFIX_ATTESTATION_REJECTED' : 'ENTITY_INPUT_INVALID',
+      });
+      expect(rejected.workingReplica.state).toEqual(state);
+      expect(rejected.workingReplica.jPrefixRound).toBeUndefined();
+      expect(rejected.outputs).toEqual([]);
+      expect(rejected.candidateEffects).toEqual([]);
+
+      const accepted = await applyEntityInput(env, rejected.workingReplica, {
+        entityId,
+        signerId: receiverId,
+        jPrefixAttestations: new Map([[sourceId, honest]]),
+      });
+      expect(accepted.outcome).toEqual({ kind: 'committed' });
+      expect([...accepted.workingReplica.jPrefixRound!.attestations.keys()].sort()).toEqual(
+        [sourceId, receiverId].sort(),
+      );
+      expect(accepted.workingReplica.jPrefixRound!.certificate).toBeUndefined();
+      expect(accepted.workingReplica.state).toEqual(state);
+    },
+  );
+
   test('authenticates stale votes as terminal no-ops, rejects forged stale votes, and defers future votes', async () => {
     const env = createEmptyEnv('j-prefix-stale-terminal');
     env.quietRuntimeLogs = true;

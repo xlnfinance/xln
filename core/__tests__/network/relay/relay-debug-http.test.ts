@@ -22,6 +22,31 @@ const call = async (
   return { status: response.status, body: await response.json() };
 };
 
+test('debug event limit rejects malformed integers instead of exposing the full timeline', async () => {
+  const store = createRelayStore('relay-test');
+  for (let i = 0; i < 201; i += 1) pushDebugEvent(store, { event: 'e2e_phase' });
+  for (const last of ['NaN', 'Infinity', '1.5', '1e2', '0x10', '-1', '', ' ', '1junk', '9007199254740993']) {
+    const result = await call(store, `/api/debug/events?last=${encodeURIComponent(last)}`);
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual({ ok: false, error: 'DEBUG_EVENTS_LAST_INVALID' });
+  }
+});
+
+test('debug event limit retains its default, bounds and most recent event order', async () => {
+  const store = createRelayStore('relay-test');
+  for (let i = 0; i < 201; i += 1) pushDebugEvent(store, { event: 'e2e_phase' });
+  for (const [query, limit, returned] of [
+    ['', 200, 200],
+    ['?last=2', 2, 2],
+    ['?last=0', 1, 1],
+    ['?last=5001', 5000, 201],
+  ] as const) {
+    const result = await call(store, `/api/debug/events${query}`);
+    expect(result).toMatchObject({ status: 200, body: { returned, filters: { last: limit } } });
+    expect(result.body.events).toEqual(store.debugEvents.slice(-limit));
+  }
+});
+
 test('browser errors enter the shared incident registry without exposing samples', async () => {
   const store = createRelayStore('relay-test');
   const ingested = await call(store, '/api/debug/events/ingest', {

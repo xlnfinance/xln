@@ -2,6 +2,7 @@ import type { RuntimeReplica } from '../../../runtime/types';
 import type { JAdapter } from '../../../jurisdiction/adapter';
 import { DEV_CHAIN_IDS } from '../../../jurisdiction/adapter';
 import { createStructuredLogger } from '../../../support/logger';
+import { getPerfMs } from '../../../support/time';
 import { getEntityReplicaById } from '../entities/lookup';
 import { withRuntimeCommittedRead } from '../../../runtime/frame/lifecycle/writer-lock';
 import { createBoundedLock } from '../../../support/bounded-lock';
@@ -38,8 +39,8 @@ const pollUntil = async (
   pollMs: number,
   timeoutMs: number,
 ): Promise<boolean> => {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
+  const started = getPerfMs();
+  while (getPerfMs() - started < timeoutMs) {
     if (await predicate()) return true;
     await new Promise(resolve => setTimeout(resolve, pollMs));
   }
@@ -92,8 +93,8 @@ export const waitForReserveUpdate = async (
   expectedMin: bigint,
   timeoutMs: number,
 ): Promise<bigint | null> => {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
+  const started = getPerfMs();
+  while (getPerfMs() - started < timeoutMs) {
     try {
       const current = await adapter.getReserves(entityId, tokenId);
       if (current >= expectedMin) return current;
