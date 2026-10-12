@@ -65,11 +65,8 @@ test('tower backup restores funded Account proofs, refuses overwrite and continu
 		const coverage = await page.getByTestId('watchtower-coverage-backup').innerText();
 		const match = coverage.match(/#([\d,]+)/);
 		if (!match?.[1]) throw new Error(`Tower supplied no backup height: ${coverage}`);
-		const before = await readWalletCheckpoint(page, Number(match[1].replaceAll(',', '')));
-		const expectedCanonicalRoot = await canonicalRoot(page, before.frame.height);
-		await test.info().attach('source-frame', { body: await journal(page, before.frame.height), contentType: 'application/json' });
-		await test.info().attach('source-accounts', { body: JSON.stringify(before), contentType: 'application/json' });
-		await source.close();
+		const initialCoverageHeight = Number(match[1].replaceAll(',', ''));
+		if (!Number.isSafeInteger(initialCoverageHeight) || initialCoverageHeight <= 0) throw new Error('TOWER_BACKUP_HEIGHT_INVALID');
 
 		const restoredPage = await target.newPage();
 		await restoredPage.goto('/');
@@ -81,7 +78,37 @@ test('tower backup restores funded Account proofs, refuses overwrite and continu
 			await restoredPage.getByTestId('restore-tower-url').fill(tower);
 			await restoredPage.getByRole('button', { name: 'Restore wallet', exact: true }).click();
 		};
-		await restore();
+		// Automatic backup may replace the displayed snapshot before discovery.
+		// Bind expectations to the exact bundle selected by this restore request.
+		const [response] = await Promise.all([
+			restoredPage.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/tower/restore'),
+			restore(),
+		]);
+		if (!response.ok()) throw new Error(`TOWER_RESTORE_HTTP_${response.status()}`);
+		const payload: unknown = await response.json();
+		if (!payload || typeof payload !== 'object' || !('receipt' in payload)) throw new Error('TOWER_RESTORE_RESPONSE_INVALID');
+		const receipt = payload.receipt;
+		if (!receipt || typeof receipt !== 'object' ||
+			!('height' in receipt) || typeof receipt.height !== 'number' || !Number.isSafeInteger(receipt.height) || receipt.height <= 0 ||
+			!('bundleHash' in receipt) || typeof receipt.bundleHash !== 'string' || !/^0x[0-9a-f]{64}$/.test(receipt.bundleHash)) {
+			throw new Error('TOWER_RESTORE_SELECTION_INVALID');
+		}
+		expect(payload).toMatchObject({
+			ok: true, receipt: { runtimeId: wallet.runtimeId },
+			bundles: [{ kind: 'snapshot', runtimeId: wallet.runtimeId, height: receipt.height, bundleHash: receipt.bundleHash }],
+		});
+		expect(receipt.height).toBeGreaterThanOrEqual(initialCoverageHeight);
+		// This form opens only after the canonical discovery path has authenticated
+		// the bundle; Gate keeps that immutable candidate until Save and open.
+		await expect(restoredPage.getByRole('heading', { name: 'Set a local password' })).toBeVisible();
+		const before = await readWalletCheckpoint(page, receipt.height);
+		const expectedCanonicalRoot = await canonicalRoot(page, before.frame.height);
+		await test.info().attach('restore-selection', {
+			body: JSON.stringify({ initialCoverageHeight, selectedHeight: receipt.height, bundleHash: receipt.bundleHash }), contentType: 'application/json',
+		});
+		await test.info().attach('source-frame', { body: await journal(page, before.frame.height), contentType: 'application/json' });
+		await test.info().attach('source-accounts', { body: JSON.stringify(before), contentType: 'application/json' });
+		await source.close();
 		await restoredPage.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
 		await restoredPage.getByLabel('Confirm password', { exact: true }).fill(LOCAL_PASSWORD);
 		await restoredPage.getByRole('button', { name: 'Save and open', exact: true }).click();
