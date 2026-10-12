@@ -1,0 +1,142 @@
+{
+  "sourceSha": "2d2115dc8cd2694cad4672d49ba7b08482098de2",
+  "tool": "xln1000/2",
+  "inputs": {
+    "tree": "2d2115dc8cd2694cad4672d49ba7b08482098de2",
+    "ledger": null,
+    "ci": null,
+    "worktreeNegativeEvidence": []
+  },
+  "kernel": {
+    "declaredKernelLoc": 96117,
+    "closureKernelLoc": 160413,
+    "declaredFiles": 545,
+    "closureFiles": 816,
+    "closureByTop": {
+      "core/entity": 42751,
+      "core/runtime": 22206,
+      "core/jurisdiction": 21782,
+      "core/storage": 19680,
+      "core/account": 17631,
+      "core/rscore": 8339,
+      "core/protocol": 7921,
+      "core/network": 4961,
+      "core/types": 3183,
+      "core/swapbook": 2643,
+      "core/extensions": 2250,
+      "core/hanko": 2130,
+      "core/support": 1730,
+      "core/paybook": 1181,
+      "core/lendbook": 761,
+      "core/api": 634,
+      "core/pathfinding": 424,
+      "core/config": 206
+    },
+    "edgesOutOfKernel": 464,
+    "infraEdges": 130,
+    "toolingEdges": 11,
+    "edgeTargets": {
+      "core/support": 279,
+      "core/runtime": 65,
+      "core/config": 55,
+      "core/paybook": 22,
+      "core/lendbook": 13,
+      "core/rscore": 11,
+      "core/network": 10,
+      "core/storage": 7,
+      "core/jurisdiction": 2
+    },
+    "toolingEdgeSample": [
+      {
+        "from": "core/account/consensus/frame/commit-transition.ts",
+        "to": "core/rscore/authority-wave.ts"
+      },
+      {
+        "from": "core/account/consensus/incoming/ack-commit.ts",
+        "to": "core/rscore/authority-wave.ts"
+      },
+      {
+        "from": "core/account/consensus/index.ts",
+        "to": "core/rscore/authority-wave.ts"
+      },
+      {
+        "from": "core/entity/consensus/frame/application.ts",
+        "to": "core/rscore/authority-wave.ts"
+      },
+      {
+        "from": "core/entity/tx/handlers/account/index.ts",
+        "to": "core/rscore/authority-wave.ts"
+      },
+      {
+        "from": "core/entity/tx/handlers/account/lifecycle/open-account.ts",
+        "to": "core/rscore/authority-wave.ts"
+      },
+      {
+        "from": "core/runtime/admit/entity-input-replica.ts",
+        "to": "core/rscore/authority-driver.ts"
+      },
+      {
+        "from": "core/runtime/admit/entity-input-replica.ts",
+        "to": "core/rscore/authority-wave.ts"
+      },
+      {
+        "from": "core/runtime/frame/intake/reducer.ts",
+        "to": "core/rscore/authority-wave.ts"
+      },
+      {
+        "from": "core/runtime/frame/intake/reducer.ts",
+        "to": "core/rscore/authority-driver.ts"
+      },
+      {
+        "from": "core/runtime/frame/process.ts",
+        "to": "core/rscore/authority-driver.ts"
+      }
+    ],
+    "solidityLoc": 6665,
+    "functions": 9945,
+    "over60": 375,
+    "excess": 19851,
+    "longest": {
+      "codeLines": 150,
+      "at": "core/rscore/shadow-wire.ts:685 shadowOutputRows"
+    },
+    "casts": 815,
+    "nonNull": 534,
+    "packages": [
+      "@ethereumjs/block",
+      "@ethereumjs/common",
+      "@ethereumjs/mpt",
+      "@ethereumjs/rlp",
+      "@ethereumjs/tx",
+      "@ethereumjs/util",
+      "@ethereumjs/vm",
+      "@noble/ciphers",
+      "@noble/curves",
+      "@noble/hashes",
+      "@noble/secp256k1",
+      "bip39",
+      "buffer",
+      "ethers",
+      "fs",
+      "hash-wasm",
+      "level",
+      "msgpackr",
+      "path",
+      "tronweb",
+      "ws"
+    ],
+    "excessRatio": 0.124,
+    "typeDebtPerK": 8.41
+  },
+  "originalCollectorSha256": "8b2785adbd60fc321efde1a4164cb554cf3fcfa4a3aec27b49c8039cbbc548fd",
+  "baseline": {
+    "sourceSha": "b07da2b8762d3398683f3f2c481ee65a8caedc41",
+    "closureCodeLines": 161062,
+    "closureFiles": 816
+  },
+  "delta": {
+    "closureCodeLines": -649,
+    "closureFiles": 0
+  },
+  "limitation": "Tree-only import closure; ledger/CI null. No overall readiness score copied. Net closure change spans the whole baseline-to-current range, not this patch alone."
+}

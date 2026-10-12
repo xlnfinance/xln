@@ -4,18 +4,16 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Current branch: codex/ts-worker-boundary. Verified financial source f163415eb:
-  234/234 focused tests, 158,704 assertions, 38 source gates. Fresh production
-  WAL has 708 frames, 2,600 payments and 1,040 swaps across 130 users; W1/W4/W8
-  replay all frames exactly. This is functional evidence, not live TPS; each
-  replay ends with one pending outbox item. Historical 498-frame replay still
-  fails identically at height 12 on the pre-move baseline and candidate.
-- Last green: clean 88f14ce5f, full check (38 source gates), 104/104 related
-  watcher tests (951 assertions), 3/3 real React payment journeys with no skips
-  or flakes, and public funding observed then recovered at Runtime height 138.
-  Earlier clean 7d3134853 has lock-ahb (85 frames), 25/25 funding/exit cases
-  with 512 fuzz invocations, and eight matching compiler templates. These
-  earlier checks are not relabelled as current-SHA evidence.
+- Current branch: codex/ts-worker-boundary. Last verified financial source
+  2d2115dc8: all six checks for the bounded deletion passed — 34/34 related
+  tests (1,249 assertions), 38 source gates, 708-frame mixed WAL exact on
+  W1/W4/W8, 3/3 React payment/reload, actual Sepolia event decoding, and the
+  stopped hub's cold replay (R4474, 128 retained frames). WAL replay retains
+  one final outbox item; no TPS claim. Cold replay stops before counter block
+  11897542, does not start network effects, and is not deployed catch-up.
+  Earlier clean 88f14ce5f has 104/104 watcher tests (951 assertions);
+  7d3134853 has lock-ahb (85 frames), 25/25 funding/exit cases, 512 fuzz
+  invocations and eight matching compiler templates. Keep original SHA binding.
 - First red: cross-j-opening-lifecycle.test.ts cannot resolve the relocated
   TS worker from rscore/fixtures/cross-j-opening/lifecycle.ts. The same old
   import exists in rscore/fixtures/entity-resident-group-e/group-e.ts. Owner
@@ -26,18 +24,19 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   passed, Unit Tests failed four cases. Those four are fixed locally; fresh
   eligible CI is still required after the fixture blocker. Main remains
   86d2a515; no merge or public deployment occurred during this cut.
-- Artifacts: docs/evidence/canonical-review-20261012/ts-worker-evidence.json
-  binds source SHAs, retained logs, replay reports, failure evidence and closure
-  measurements. The existing collector measures closure 160573 -> 160531 code
-  lines, 815 -> 816 files, direct core/rscore imports 18 -> 13. The moved
-  3857 worker lines are not deleted code. Private WAL/seeds are not published.
+- Artifacts: docs/evidence/canonical-review-20261012/null-stage-2d2115dc8.json
+  binds the latest commands, logs, replay, browser results and closure metrics.
+  The prior ts-worker-evidence.json retains the 498-frame historical WAL
+  failure at frame 12 on both pre-move baseline and candidate. Moving 3,857
+  worker lines is ownership correction, not deletion. Private WAL/seeds stay private.
 - Next single command after the two authorized import replacements:
   `bun test core/__tests__/rscore/parity/cross-j-opening-lifecycle.test.ts`
   Then the group-E consumers, exact-candidate source/browser/scenario checks
   and push HEAD:codex/production-qa-boundary for PR #73 required CI.
-- Next bounded deletion: always-null retired Entity-stage handles, about 120
-  lines and two kernel imports. Add the missing two-leg signed Account reject
-  regression first; preserve live TS workers, WAL/checkpoints and recording.
+- Latest deletion completed: null retired Entity-stage bookkeeping, 155
+  physical production lines; the real two-leg rollback regression adds 126.
+  Independent review found no blocker. Live TS workers, WAL/checkpoints and
+  recording remain; no root rscore/ or lending edits.
 - Public P6 on clean d388464db: original funding resumed without repeating
   payment or funding. Recovered exact signed states at Runtime 140/141; tower
   upload initially rejected its wallet RPC URL. A one-line explicit allowlist
@@ -51,12 +50,13 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   the counter (ethers Result cannot be cloned), then finalization evidence,
   and stopped after three repeats at 08:01 UTC. Public RPC returns 502;
   tower remains online. Both decoder fixes already exist in d51910eee.
-  Preserve stopped H1 DB/WAL, prove current-source replay plus the two real
-  receipts, then prepare an exact eligible build. Do not resend transactions.
+  Stopped H1 DB/WAL is preserved privately; current-source replay and the two
+  real receipts now pass. Prepare an exact eligible build; do not resend transactions.
   Local recovery retained one undeliverable outbox message while H1 was down.
-- Current static kernel closure is 160,563 code lines in 816 files, down 499
-  from the review baseline. QA imports remain zero; core/rscore imports remain 13. RPC pressure and restored-frontier fixes add 38 physical production lines
-  net; necessary recovery behavior is not claimed as deletion. Rust/lending unchanged.
+- Current static kernel closure: 160,413 code lines in 816 files, down 649
+  from the review baseline; QA imports zero, core/rscore imports 11. Necessary
+  recovery fixes are included in this net measurement; no aggregate score is
+  asserted without CI and ledger inputs. Rust/lending remain frozen.
 - Remaining release gates: required PR CI; ten consecutive green main runs;
   no kernel-to-rscore imports; deployed hub recovery and full public P6;
   start/finalize/reveal coverage; owner-reviewed release

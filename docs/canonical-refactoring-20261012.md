@@ -55,11 +55,11 @@ are retained; ledger and CI were disabled, so no overall readiness score is asse
 | Independent handling of watcher overload                                    | Existing window reduction handles mempool/RPC pressure; one cancellable cooldown controls manual and automatic polling; retained pressure prevents immediate regrowth | [Real proxy regressions](evidence/canonical-review-20261012/watcher-pressure-window-7d3134853.json)          |
 | Watcher re-fetching authenticated history after restore                     | Start from existing contiguous history, audit its canonical anchor/frontier, retain Entity-certified semantic progress                                                | [Restore regression and public funding](evidence/canonical-review-20261012/restored-frontier-88f14ce5f.json) |
 
-The last static measurement (`88f14ce5f`) is **160,563 kernel-closure code lines in
-816 files**, versus **161,062 / 816** at the review baseline: **499 fewer
+The last static measurement (`2d2115dc8`) is **160,413 kernel-closure code lines in
+816 files**, versus **161,062 / 816** at the review baseline: **649 fewer
 reachable code lines**. Direct QA imports are **0**; direct `core/rscore` imports
-are still **13**, reaching 8,418 lines. This is not yet a Rust-free kernel.
-[Exact collector output](evidence/canonical-review-20261012/restored-frontier-88f14ce5f-kernel.json).
+are **11**, down from 13 before the null-stage deletion, reaching 8,339 lines.
+This is not yet a Rust-free kernel. [Exact collector and verification](evidence/canonical-review-20261012/null-stage-2d2115dc8.json).
 
 Moving 3,857 worker lines corrects ownership and is not deletion. The QA handler
 was disconnected, not deleted. The two RPC-pressure fixes add 27 physical
@@ -121,14 +121,33 @@ The candidate is **not ready to merge**:
   one undeliverable outbox message. Required CI, ten consecutive green main
   runs and the owner-reviewed mainnet release package remain open.
 
-The next patch removes the always-null retired Entity-stage handle, its
-accept/discard bookkeeping and the now-unused partial-stage array. Real TS
-candidates, checkpoints and recording remain. The signed two-leg regression
-passes before and after: the first valid leg is visited, the second signature
-rejects, both full Entity/Account snapshots remain unchanged, no outboxes are
-published, and an intact retry matches the clean control. The expanded focused
-suite passes 34 tests / 1,249 assertions; these are development checks pending
-clean-SHA replay and source-gate evidence.
+Clean source `2d2115dc8cd2694cad4672d49ba7b08482098de2` removes the always-null
+retired Entity-stage handle, its accept/discard bookkeeping and partial-stage
+array: **155 physical production lines deleted net**, plus a **126-line real
+regression** (29 fewer source lines overall). TS candidates, checkpoints and
+recording remain. The signed two-leg regression passes before and after: the
+first valid leg is visited, the second signature rejects, both full Entity/Account
+snapshots remain unchanged, no outboxes are published, and an intact retry
+matches the clean control.
+
+All six checks for this bounded patch passed on that clean source:
+
+- 34 related tests / 1,249 assertions and all 38 source gates.
+- The same 708-frame production WAL is exact on TS W1/W4/W8, including ordered
+  outputs; each retains one outbox item as before. This is not TPS.
+- React payment/reload: 3/3, zero skips/flakes/unexpected results.
+- Real Sepolia counter/final calldata and receipts pass the canonical decoder;
+  the original Result proxy and repeated signature reproduce the old failures.
+  The changed start-receipt block passes seven actual-receipt/mutation checks.
+- The stopped deployed hub's private cold copy restores at R4474 with 128/128
+  retained frames verified. It stops at block 11897541 before the counter;
+  network effects were disabled by the existing read-only loader. This is not
+  deployed catch-up, and its Account correctly still records the active dispute.
+
+[Immutable commands, results and limitations](evidence/canonical-review-20261012/null-stage-2d2115dc8.json).
+The next release action is to resolve the two frozen TS fixture imports and run
+required PR CI before promoting a reviewed build. Do not restart the known-broken
+old hub or repeat the financial transactions to hide a deployment-version gap.
 
 ## Target ownership and deletion sequence
 
