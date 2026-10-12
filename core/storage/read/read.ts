@@ -1,4 +1,4 @@
-import { assertTypeScriptStorageFrame } from './native-authority-rejection';
+import { assertTypeScriptStorageFrame } from './integrity/native-authority';
 import type { BookState } from '../../swapbook';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';

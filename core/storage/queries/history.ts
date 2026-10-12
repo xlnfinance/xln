@@ -1,4 +1,4 @@
-import { assertTypeScriptStorageFrame } from '../read/native-authority-rejection';
+import { assertTypeScriptStorageFrame } from '../read/integrity/native-authority';
 import {
   buildRuntimeActivityEvents,
   dedupeRuntimeActivityEvents,

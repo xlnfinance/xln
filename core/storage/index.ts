@@ -101,7 +101,7 @@ import {
   validatePersistedAccountJClaimPathNode,
   validatePersistedCertifiedBoardPathNode,
 } from './schema/authoritative-schema';
-import { assertTypeScriptStorageNamespaces } from './read/native-authority-rejection';
+import { assertTypeScriptStorageNamespaces } from './read/integrity/native-authority';
 import type {
   PerfDeps,
   RuntimeDbLike,

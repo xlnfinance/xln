@@ -32,7 +32,7 @@ import {
   keyRscoreCheckpoint,
 } from '../../../storage/keys';
 import { buildRecoveryJournalFromStorageFrame } from '../../../storage/queries/history';
-import { assertTypeScriptStorageNamespaces } from '../../../storage/read/native-authority-rejection';
+import { assertTypeScriptStorageNamespaces } from '../../../storage/read/integrity/native-authority';
 import type { RuntimeFrame, StorageRscoreCheckpointRef } from '../../../storage/types';
 
 const opened: RuntimeReplica[] = [];

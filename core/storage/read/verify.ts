@@ -1,4 +1,4 @@
-import { assertTypeScriptStorageNamespaces } from './native-authority-rejection';
+import { assertTypeScriptStorageNamespaces } from './integrity/native-authority';
 import { computeCanonicalRuntimeStateHash } from '../canonical-hash';
 import { computeStorageFrameHash } from '../hashes';
 import { computeStorageReplicaMetaDigest } from '../replica/replica-meta-digest';
