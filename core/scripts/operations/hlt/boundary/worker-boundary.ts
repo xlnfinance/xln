@@ -251,7 +251,7 @@ export const decodePageItems = (value: unknown, code: string): unknown[] => {
 const ACCOUNT_VIEW_REQUIRED = [
   'state', 'status', 'mempool', 'mempoolCount', 'currentFrame', 'currentHeight',
   'rollbackCount', 'proofHeader',
-  'pendingWithdrawals', 'shadow',
+  'pendingWithdrawals', 'shadow', 'lendingRisk',
 ] as const;
 const ACCOUNT_VIEW_OPTIONAL = [
   'pendingFrame', 'pendingAccountInput', 'lastOutboundAckFrame',
