@@ -56,6 +56,7 @@ const readAssets = (page: Page) =>
     if (typeof usdc !== 'bigint' || typeof external.nativeBalance !== 'bigint')
       throw new Error('Assets raw balance unavailable');
     return {
+      signerId,
       external: usdc.toString(),
       native: external.nativeBalance.toString(),
       reserve: (active.core.reserves.get(1) ?? 0n).toString(),
@@ -91,7 +92,16 @@ test(
       const match = new URL(request.url()).pathname.match(/^\/api\/faucet\/(erc20|gas|reserve|offchain)$/);
       if (!match?.[1]) return;
       const body: unknown = request.postDataJSON();
-      if (!body || typeof body !== 'object' || !('amount' in body)) throw new Error('Faucet request amount missing');
+      if (!body || typeof body !== 'object') throw new Error('Faucet request body missing');
+      if (match[1] === 'gas') {
+        // The server chooses the gas grant; its exact credited amount is
+        // checked against the real native balance below, not invented here.
+        expect(body).not.toHaveProperty('amount');
+        if (!('userAddress' in body) || typeof body.userAddress !== 'string') throw new Error('Gas recipient missing');
+        requests.gas.push(body.userAddress);
+        return;
+      }
+      if (!('amount' in body)) throw new Error('Faucet request amount missing');
       requests[match[1] as FaucetKind].push(String(body.amount));
     });
     await enterStack(page);
@@ -182,7 +192,7 @@ test(
       await expect(page.getByTestId(balance)).toBeVisible();
       await expect(page.getByTestId(balance)).toHaveText('100.00 USDC');
     }
-    expect(requests).toEqual({ erc20: ['101', '100'], gas: ['0.1'], reserve: ['100'], offchain: ['100'] });
+    expect(requests).toEqual({ erc20: ['101', '100'], gas: [initial.signerId], reserve: ['100'], offchain: ['100'] });
     console.log(
       `FAUCETS_CONFIRMED external=${funded.external} reserve=${funded.reserve} account=${funded.owned} gasAdded=100000000000000000 requests=5 successful=4`,
     );
