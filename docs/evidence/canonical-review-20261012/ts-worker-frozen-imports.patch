@@ -1,0 +1,12 @@
+diff --git a/rscore/fixtures/cross-j-opening/lifecycle.ts b/rscore/fixtures/cross-j-opening/lifecycle.ts
+--- a/rscore/fixtures/cross-j-opening/lifecycle.ts
++++ b/rscore/fixtures/cross-j-opening/lifecycle.ts
+@@ -26,1 +26,1 @@
+-import { TsAccountWorkerAuthority } from '../../../core/rscore/ts-worker/provider';
++import { TsAccountWorkerAuthority } from '../../../core/runtime/workers/account/provider';
+diff --git a/rscore/fixtures/entity-resident-group-e/group-e.ts b/rscore/fixtures/entity-resident-group-e/group-e.ts
+--- a/rscore/fixtures/entity-resident-group-e/group-e.ts
++++ b/rscore/fixtures/entity-resident-group-e/group-e.ts
+@@ -3,1 +3,1 @@
+-import { TsAccountWorkerAuthority } from '../../../core/rscore/ts-worker/provider';
++import { TsAccountWorkerAuthority } from '../../../core/runtime/workers/account/provider';

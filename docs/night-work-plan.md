@@ -4,59 +4,48 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Verified source: `f774dbb7009e92521d5a7f5bfb836be5109f3506` on
-  `codex/ts-only-launcher`, with passing evidence-only follow-up `ed1a4034e`.
-  Its predecessor `c6215ccd3` passed all seven jobs in run 38204500382, but
-  that workflow_dispatch event does not satisfy GitHub's required PR checks.
-  PR #71 at `ca96f041d` and PR #72 at `8d7f1e742` now both have all seven
-  CI jobs green, including E2E. Main remains `86d2a515`. Consolidate the verified
-  launcher into PR #73 against main and let its synchronize event run eligible
-  pull_request checks; require all seven before merge. Do not use manual
-  workflow_dispatch as a substitute for PR-required checks.
-- Last green: clean `f774dbb70`: launcher 52/52 tests, 427 assertions; full check,
-  38 source gates; real production startup and 3/3 React payment journeys,
-  zero skipped/flaky. One existing selector rejects retired engines before setup;
-  deleting their build preflight and propagation removes 69 non-test lines net.
-  Prior clean `042026fe0`: 20/20 tests, 82 assertions, all four real RPC
-  SIGKILL boundaries; full check, 38 source gates. Trusted RPC binding now uses
-  live infrastructure without changing committed JReplica state. Production
-  code shrinks four lines net. The existing test proves exact roots after first
-  restore, a new committed event, second restore and adapter recreation.
-  Five offline recovery stages also passed: wrong RPC rejected, original frames
-  14–16 verified, signed checkpoint import and two cold restores. Financial
-  roots, Account envelopes and both outboxes agree. Original WAL bytes remain
-  unchanged in separate archives; the repaired DB explicitly starts a new
-  checkpoint chain, with a different frame hash.
-- First unresolved boundary: public P6 catch-up. Live startup of the repaired
-  profile succeeds, but RPC 429/timeouts prevent observing the existing 200 test
-  USDT reserve even in the uninterrupted 160-second trace. The watcher re-authenticated 576 blocks
-  through 11893966, already present in the original durable jHistory. Its cold
-  start uses the earlier certified Entity/J cursor 11893390, so Runtime height16
-  staying unchanged is expected. Do not repeat this short cold-start loop or
-  interpret it as lost WAL evidence. The raw upstream response proves PublicNode
-  quota rejection (-32005, HTTP 429). An isolated authenticated 128-block range
-  passed in 3.435s; that does not establish sustained availability. Two alternative
-  public providers did not pass basic availability. No new funding or dispute was
-  submitted, and no RPC configuration was changed.
-- Artifacts: `docs/evidence/canonical-review-20261012/rpc-transport-recovery.json`
-  binds tests, check, incident script, archive digests and live trace to clean
-  source. `p6-frame14-rebase.json` records the explicit checkpoint boundary.
-  Private recovered profile: `~/.config/xln/sepolia-p6-20261012b-rebased-frame14-20261012`;
-  seed remains in the original profile. Never publish the seed, signed private
-  recording or raw DB. Public P4/P5 and prior cold restore are in
-  `docs/evidence/rc-20261012/`. Live alpha still runs `7c3f63f98`.
-- Next single command after the final evidence commit/check:
-  `git push origin HEAD:codex/production-qa-boundary`.
-  Finish PR #73's eligible pull_request CI before merging it. The next
-  source cut moves active TS workers and their actual owners out of `core/rscore`,
-  without compatibility aliases; preserve WAL roots and positional outputs.
-  Public P6 needs an adequate RPC source and then actual
-  signatures, external tower, real clocks and a further cold restore.
-- Remaining final gates: ten consecutive green main CI runs; active TS worker
-  isolation from retired Rust tooling; public P6; external tower start/finalize/
-  reveal coverage; current exit-gas and owner-reviewed mainnet release package.
-  No extra dispute-start freeze, FIFO, one debt per debtor/creditor/token and
-  party-selected windows remain settled. No starter bond/governance redesign.
+- Current branch: codex/ts-worker-boundary. Verified financial source f163415eb:
+  234/234 focused tests, 158,704 assertions, 38 source gates. Fresh production
+  WAL has 708 frames, 2,600 payments and 1,040 swaps across 130 users; W1/W4/W8
+  replay all frames exactly. This is functional evidence, not live TPS; each
+  replay ends with one pending outbox item. Historical 498-frame replay still
+  fails identically at height 12 on the pre-move baseline and candidate.
+- Last green: clean d723e5827, full check (38 source gates) and lock-ahb
+  (85 frames). Clean e6fd12883 passed 3/3 React payment journeys; d723 only
+  restores unrelated formatting while retaining generated-output exclusions.
+  Generated account-worker.js is now untracked and rebuilt through the existing
+  generator. Rust and lending implementations remain unchanged.
+- First red: cross-j-opening-lifecycle.test.ts cannot resolve the relocated
+  TS worker from rscore/fixtures/cross-j-opening/lifecycle.ts. The same old
+  import exists in rscore/fixtures/entity-resident-group-e/group-e.ts. Owner
+  approval is pending for exactly these two import replacements because the
+  explicit no-write rscore/ rule remains. No aliases, copied executor or skipped
+  assertion should conceal this failure. Do not push this known-red candidate.
+- PR #73 still points to 72c38fa4b: six of seven required pull_request jobs
+  passed, Unit Tests failed four cases. Those four are fixed locally; fresh
+  eligible CI is still required after the fixture blocker. Main remains
+  86d2a515; no merge or public deployment occurred during this cut.
+- Artifacts: docs/evidence/canonical-review-20261012/ts-worker-evidence.json
+  binds source SHAs, retained logs, replay reports, failure evidence and closure
+  measurements. The existing collector measures closure 160573 -> 160531 code
+  lines, 815 -> 816 files, direct core/rscore imports 18 -> 13. The moved
+  3857 worker lines are not deleted code. Private WAL/seeds are not published.
+- Next single command after the two authorized import replacements:
+  bun test core/__tests__/rscore/parity/cross-j-opening-lifecycle.test.ts
+  Then the group-E consumers, exact-candidate source/browser/scenario checks
+  and push HEAD:codex/production-qa-boundary for PR #73 required CI.
+- Next bounded deletion: always-null retired Entity-stage handles, about 120
+  lines and two kernel imports. Add the missing two-leg signed Account reject
+  regression first; preserve live TS workers, WAL/checkpoints and recording.
+- Public P6 remains independent and unresolved: the funded profile recovers
+  correctly after explicit checkpoint rebase, but PublicNode returns HTTP 429
+  and -32005 during catch-up. No further funding or dispute was submitted.
+  Live alpha remains 7c3f63f98. Do not repeat unchanged short cold-start loops.
+- Remaining release gates: required PR CI; ten consecutive green main runs;
+  no kernel-to-rscore imports; public P6 with external tower and real clocks;
+  start/finalize/reveal coverage; current exit gas; owner-reviewed release
+  package. No dispute-start freeze, FIFO, one debt per debtor/creditor/token
+  and party-selected windows remain settled. No governance/bond redesign.
 
 Method review, 04:45 UTC: the recovery gap is closed, but a longer unchanged
 network retry did not close P6. Capture the first bounded raw failure before

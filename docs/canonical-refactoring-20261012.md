@@ -185,6 +185,59 @@ required PR checks, so merge remains blocked; the next combined candidate must
 run through the ordinary pull_request event. This is a CI invocation correction,
 not a test failure or permission to bypass branch protection.
 
+### Implemented: TS workers belong to the Runtime
+
+Fourteen active TS worker modules now live under `core/runtime/workers/account`.
+The Entity execution stage, inbound arrivals and leaf cache live with their
+Entity owners. All active production callers use these paths directly; no
+compatibility barrel or second executor was added. This moves 3,857 physical
+worker lines; it does not delete them. Six newly visible oversized functions
+were split into bounded execution phases without changing positional ordering.
+
+The existing collector measures kernel closure **160,573 -> 160,531 code lines**
+and direct kernel imports into `core/rscore` **18 -> 13**. The closure has 816
+files, one more than before this cut. Remaining reachable `core/rscore` code is
+8,418 lines: driver, recorder and checkpoint ownership still require work.
+This is a modest ownership improvement, not a Rust-free kernel.
+
+On clean `f163415eb`, the real production stand recorded **708 Runtime frames**,
+2,600 delivered payments and 1,040 matched swaps across 130 user Runtimes.
+TS W1/W4/W8 each replayed all 708 frames with identical roots and ordered
+effects; checkpoint and full recovery both passed. One final outbox item
+remains in each replay report, so this is not evidence of a fully drained stand
+or qualifying live TPS. Focused tests passed **234/234, 158,704 assertions**;
+the full check passed all 38 source gates.
+
+The older 498-frame transcript fails at height 12 with the same output-hash
+mismatch on both the baseline and candidate. That negative evidence remains;
+the fresh recording does not establish historical compatibility. Two stale HLT
+decoder schemas were fixed by requiring fields already emitted by the real
+RuntimeAdapter projectors. Tests now consume those real projectors; strict
+missing/unknown-field rejection remains, with no lending implementation change.
+
+The browser build exposed a tracked generated worker bundle. It is now ignored
+and rebuilt through the existing generator, like the runtime bundle; source
+and isolated build-artifact hashes remain enforced. Clean `e6fd12883` passed
+three payment journeys. After removing unrelated formatting changes, clean
+`d723e5827` passed the full check and `lock-ahb` (85 frames). These are separate
+source bindings, not a claim that every release gate passed on one SHA.
+
+The cut is **not ready to merge**. A focused lifecycle test cannot resolve the
+old worker path from two TS fixture files inside owner-frozen `rscore/`.
+The exact two-line import repair is awaiting the owner's narrow exception;
+neither Rust implementation nor frozen fixtures have been changed. PR #73's
+older head has six of seven required CI jobs green; its four known failures
+were repaired locally, but this new fixture failure must be closed before push.
+[Source bindings, failures, measurements and retained evidence](evidence/canonical-review-20261012/ts-worker-evidence.json).
+
+The next bounded deletion removes always-null retired Entity-stage handles
+and accept/discard bookkeeping, approximately 120 physical lines and two
+kernel imports. Preserve the live TS execution stage and checkpoint tooling.
+Before that deletion, add the missing real two-leg atomic rejection regression:
+valid first signed Account input, invalid second signature, both original roots
+and empty outboxes, then an intact retry. Existing sibling-cascade tests do not
+prove this specific rollback case.
+
 ## Target ownership and deletion sequence
 
 The live queue stays in [todo.md](../todo.md). This table is the reviewed design,
@@ -203,10 +256,10 @@ not another backlog or an instruction to run all changes together.
 
 The Rust Account/checkpoint candidate could remove **500–900 lines**; the Rust
 proof codec **70–130**. These are estimates before implementation, not measured
-savings or a reason to unfreeze Rust. Active TS worker code is **3,857 physical
-lines in 14 files** inside `core/rscore`; deleting that directory would break TS.
-The TS driver is 1,154 lines, but retained diagnostic/checkpoint consumers must
-be traced before claiming those lines removable.
+savings or a reason to unfreeze Rust. At the reviewed baseline, active TS worker
+code occupied **3,857 physical lines in 14 files** inside `core/rscore`; those
+files now live under Runtime. The reviewed TS driver was 1,154 lines, but retained
+diagnostic/checkpoint consumers must be traced before claiming those lines removable.
 
 The reviewed baseline mounted the same **1,412-line QA API** in two production
 hosts. That removal is now implemented and measured above. Moving the causal

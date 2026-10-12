@@ -1,0 +1,744 @@
+{
+  "schema": "xln-ts-worker-relocation-evidence-v1",
+  "status": "blocked: frozen fixture imports fail; exact-head CI is not green",
+  "sourceSha": "f163415ebaede96c86830299492ceb6a228b5b5f",
+  "scope": {
+    "engine": "typescript",
+    "recordingJurisdiction": "local Ethereum same-J production stand",
+    "workerOwner": "core/runtime/workers/account",
+    "movedWorkerFiles": 14,
+    "otherMoves": [
+      "core/rscore/authority/entity-stage.ts -> core/entity/consensus/account/execution-stage.ts",
+      "core/rscore/engine-leaf -> core/entity/state/engine-leaf"
+    ],
+    "interpretation": "Ownership relocation; 3857 physical worker lines were moved, not deleted. No Rust build/replay execution."
+  },
+  "recording": {
+    "manifestHash": "0x2fa25a4c4851b371122b58652af7664528999706c8ddcf18fc98673482ced8b1",
+    "manifestFileSha256": "68dc8022218abf46407c8a4435c8a60c0b3da4e538c42aacef282f4d9a6a832f",
+    "sourceBinding": {
+      "algorithm": "sha256",
+      "runtimeSeedHash": "0x1f2d1148378133726d0f93beb52bcccc9bdcda1121e521920b3057dc241ed01e",
+      "walTreeHash": "0x4ca7a3253d266836539c650ccc6d690f4889b03939f6cd605ffa67fc3a3c21ca"
+    },
+    "sourceProvenance": "ts-worker-recording-provenance.json.gz",
+    "frames": 708,
+    "firstHeight": 12,
+    "lastHeight": 719,
+    "users": 130,
+    "runtimeEntityInputs": 9731,
+    "outboxEnvelopes": 9580,
+    "paymentsDelivered": 2600,
+    "economicSwapsMatched": 1040,
+    "swapOrdersCancelled": 520,
+    "offeredWindowMs": 20000,
+    "cleanSource": {
+      "gitSha": "f163415ebaede96c86830299492ceb6a228b5b5f",
+      "gitDirtyFiles": 0,
+      "evidence": "Recording provenance and all three replay gate sections."
+    }
+  },
+  "validation": {
+    "workerReplay": {
+      "workers": [
+        1,
+        4,
+        8
+      ],
+      "verifiedFramesPerWorker": 708,
+      "exactBetweenWorkers": [
+        "runtimeFrames",
+        "effects",
+        "entityEffects",
+        "entityFrameEvents",
+        "localContinuations"
+      ],
+      "exactAgainstOriginalRecording": [
+        "runtimeFrames",
+        "effects"
+      ],
+      "independentWalCopies": true,
+      "standLock": "present in each replay gate",
+      "finalPendingOutboxByWorker": {
+        "1": 1,
+        "4": 1,
+        "8": 1
+      },
+      "inlineSameWalReplay": "not supported by this canonical CLI; no claim"
+    },
+    "focusedUnits": {
+      "passed": 234,
+      "failed": 0,
+      "assertions": 158704,
+      "files": 23,
+      "seconds": 13.76,
+      "log": "ts-worker-units-f163415e.log.gz",
+      "shaBinding": "Parent orchestration verified clean f163; the log itself does not embed its source SHA."
+    },
+    "sourceCheck": {
+      "command": "bun run check",
+      "sourceGatesPassed": 38,
+      "log": "ts-worker-check-f163415e.log.gz",
+      "shaBinding": "Parent orchestration verified clean f163; the log itself does not embed its source SHA."
+    },
+    "checkpointRecovery": {
+      "checkpointHeight": 711,
+      "checkpointReplayFrames": 8,
+      "checkpointRestartMs": 1655.143083,
+      "fullReplayFrames": 718,
+      "fullRestartMs": 18811.129291,
+      "runtimeId": "0x87a6441ba6ad3921348688cff6b75bf70a8787c4",
+      "schema": "xln-hlt-checkpoint-recovery-v1",
+      "targetHeight": 719
+    },
+    "subsequentCandidateChecks": {
+      "browser": {
+        "sha": "e6fd12883bdc58fdb809bf93b9fe31e3e010afcf",
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "cleanBefore": true,
+        "cleanAfter": true,
+        "cleanStatusEvidence": "Parent recorded git status before/after; browser report does not embed SHA.",
+        "report": "ts-worker-browser-e6fd1288.json.gz",
+        "log": "ts-worker-browser-e6fd1288.log.gz",
+        "limitation": "Not rerun at d723; keep the observed browser SHA distinct."
+      },
+      "sourceCheck": {
+        "sha": "d723e5827adfbb0eef926e749525211b0b5e6f7a",
+        "command": "bun run check",
+        "sourceGatesPassed": 38,
+        "log": "ts-worker-check-d723e582.log.gz",
+        "shaBinding": "Parent orchestration identifies d723; the log itself does not embed SHA."
+      },
+      "lockAhb": {
+        "sha": "d723e5827adfbb0eef926e749525211b0b5e6f7a",
+        "frames": 85,
+        "exitCode": 0,
+        "cleanBefore": true,
+        "cleanAfter": true,
+        "cleanStatusEvidence": "Parent recorded git status before/after.",
+        "log": "ts-worker-lock-ahb-d723e582.log.gz"
+      },
+      "provenanceRegression": {
+        "headBeforeCommit": "e6fd12883bdc58fdb809bf93b9fe31e3e010afcf",
+        "passed": 21,
+        "failed": 0,
+        "assertions": 137,
+        "files": 2,
+        "seconds": 0.875,
+        "log": "ts-worker-provenance-serial.log.gz",
+        "sourceBinding": "Serial regression before d723 commit; dirty status not independently embedded. Do not relabel as a clean d723 run."
+      },
+      "ci": {
+        "pullRequest": 73,
+        "remoteSha": "72c38fa4b9868f8be52416f5b157504e061719db",
+        "greenJobs": 6,
+        "totalJobs": 7,
+        "status": "not green",
+        "evidence": "Parent-reported remote status; four known failures fixed locally, new frozen-fixture failure confirmed locally. No passing CI claim for d723."
+      }
+    }
+  },
+  "firstFailures": [
+    {
+      "boundary": "Historical 498-frame production WAL",
+      "attemptSha": "8f0b9fb24742d2764658d1058fb285069bfa4069",
+      "recordedSourceSha": "f1464e84e916a65146c046b576a976c4359bcd25",
+      "recordedDirtyFiles": 39,
+      "firstHeight": 12,
+      "error": "RECOVERY_JOURNAL_OUTBOX_HASH_MISMATCH",
+      "expectedOutputDigest": "0x1edc526373955b37769aa427737ff5b9e955c7e448d8a62d922adc00173e282f",
+      "actualOutputDigest": "0x2c112e1c5f77fffa9a12a89ce57a87165f2c60db91a2fd1584de6d1d2f039628",
+      "disposition": "The identical height-12 outbox failure and digests reproduce on clean baseline 72c38fa4 before worker relocation and clean 8f0b9fb2 after it. This first failure is pre-existing; later historical replay compatibility is unproven. Fresh f163 recording passes. Verification was not bypassed.",
+      "log": "ts-worker-historical-wal-first-red.log.gz",
+      "baselineComparison": {
+        "beforeWorkerRelocationSha": "72c38fa4b9868f8be52416f5b157504e061719db",
+        "afterWorkerRelocationSha": "8f0b9fb24742d2764658d1058fb285069bfa4069",
+        "cleanSourceBoth": true,
+        "sameFirstFailure": true,
+        "report": "ts-worker-historical-wal-comparison.json.gz",
+        "baselineLog": "ts-worker-historical-baseline-parity.log.gz"
+      }
+    },
+    {
+      "boundary": "CI run 38206532850 Unit Tests",
+      "failures": 4,
+      "cause": "Tests and ordinary E2E capture still assumed retired Rust launch selection.",
+      "fixSha": "5fe28a1c5e34f12294739911013ff801a6bf06cd",
+      "focusedResult": {
+        "passed": 62,
+        "failed": 0,
+        "assertions": 1051
+      },
+      "disposition": "Removed unreachable ordinary native capture and preserved TS byte/candidate integrity plus early selector rejection.",
+      "log": "ts-worker-ci-38206532850-failures.log.gz"
+    },
+    {
+      "boundary": "Fresh recorder Hub core decoder",
+      "error": "PRODUCTION_SWAP_LOAD_HUB_CORE_FIELDS_INVALID:missing=none:extra=debtTotals",
+      "fixSha": "619a6de61fb2317fc4e6e32b8f216ec2b7a59edc",
+      "log": "ts-worker-hlt-debt-totals-first-red.log.gz"
+    },
+    {
+      "boundary": "Fresh recorder Account decoder",
+      "error": "PRODUCTION_SWAP_LOAD_ACCOUNT_FIELDS_INVALID:missing=none:extra=lendingRisk",
+      "fixSha": "f163415ebaede96c86830299492ceb6a228b5b5f",
+      "disposition": "Required the currently emitted field; real RuntimeAdapter projectors now feed Account and Hub tests. Strict missing/unknown field rejection remains. No lending implementation/admission changes.",
+      "focusedResult": {
+        "passed": 39,
+        "failed": 0,
+        "assertions": 1133
+      },
+      "log": "ts-worker-hlt-projection-first-red.log.gz"
+    },
+    {
+      "boundary": "e6fd first full check",
+      "error": "FUNCTION_DEBT_GREW over100=6 > 0",
+      "disposition": "Not reproduced by the subsequent scoped serial run; do not claim a determined root cause.",
+      "log": "ts-worker-check-e6fd1288-size-first-red.log.gz"
+    },
+    {
+      "boundary": "e6fd scoped serial full check",
+      "error": "ESLINT_DEBT_CHANGED",
+      "expectedCount": 324,
+      "actualCount": 324,
+      "cause": "Unrelated formatter import compression changed the exact debt hash.",
+      "fixSha": "d723e5827adfbb0eef926e749525211b0b5e6f7a",
+      "disposition": "Restored formatter-only churn; full check then passed 38 source gates. No debt-baseline update.",
+      "log": "ts-worker-check-e6fd1288-eslint-first-red.log.gz"
+    },
+    {
+      "boundary": "Cross-j-opening lifecycle fixture import",
+      "error": "Cannot find module '../../../core/rscore/ts-worker/provider'",
+      "test": "core/__tests__/rscore/parity/cross-j-opening-lifecycle.test.ts",
+      "observedResult": {
+        "passed": 0,
+        "failed": 1,
+        "errors": 1
+      },
+      "frozenPaths": [
+        "rscore/fixtures/cross-j-opening/lifecycle.ts",
+        "rscore/fixtures/entity-resident-group-e/group-e.ts"
+      ],
+      "disposition": "Confirmed pending blocker. Owner narrow exception requested but unanswered. No files under rscore/ were changed.",
+      "log": "ts-worker-frozen-fixture-first-red.log.gz"
+    }
+  ],
+  "structuralMetrics": {
+    "beforeSha": "72c38fa4b9868f8be52416f5b157504e061719db",
+    "afterSha": "f163415ebaede96c86830299492ceb6a228b5b5f",
+    "collector": "Existing XLN-1000 tree-only collector",
+    "closureCodeLoc": {
+      "before": 160573,
+      "after": 160531,
+      "delta": -42
+    },
+    "closureFiles": {
+      "before": 815,
+      "after": 816
+    },
+    "declaredKernelRscoreEdges": {
+      "before": 18,
+      "after": 13
+    },
+    "remainingReachableRscoreCodeLoc": 8418,
+    "limitations": "Static reachable closure, not dynamic call coverage or whole-repository deletion. Remaining 13 edges mean the no-rscore-import gate is not complete."
+  },
+  "limitations": [
+    "Functional production recording with 130 users; below the required 1000-user live TPS population. Replay durations are not live TPS.",
+    "One final pending outbox entry remains in every replay report; equality proves exact recovery commitments, not an empty final outbox.",
+    "Raw WAL, mesh seeds, runtime databases and snapshots are excluded. This public package is verifiable by checksums, but replay requires the privately retained bound WAL and seed.",
+    "Mainnet, public Sepolia P4-P6 and exact-head CI are not established by this package.",
+    "The dirty-after-build f163 browser run remains excluded. e6fd browser 3/3 is clean before/after; d723 check and lock-ahb pass separately. Frozen fixture imports and final CI still block completion."
+  ],
+  "secretReview": {
+    "knownSecretByteMatches": 0,
+    "scope": "Both recording mesh roots, canonical H1-H4/MM/load child seeds and their managed hub signer seeds checked in every packaged payload; JSON sensitive-key and log-token scan.",
+    "allowedMetadata": [
+      "meshSeedFile path only in existing provenance",
+      "runtimeSeedHash one-way commitment",
+      "fixed numeric property-test seeds in unit log"
+    ],
+    "excluded": [
+      "mesh seed files",
+      "raw WAL",
+      "private databases",
+      "snapshot bodies",
+      "Anvil state dumps"
+    ],
+    "perFile": [
+      {
+        "file": "ts-worker-parity-w1.json.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": [
+          "runtimeSeedHash"
+        ]
+      },
+      {
+        "file": "ts-worker-parity-w4.json.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": [
+          "runtimeSeedHash"
+        ]
+      },
+      {
+        "file": "ts-worker-parity-w8.json.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": [
+          "runtimeSeedHash"
+        ]
+      },
+      {
+        "file": "ts-worker-recording-provenance.json.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": [
+          "meshSeedFile"
+        ]
+      },
+      {
+        "file": "ts-worker-production-summary.json.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-checkpoint-recovery.json.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-record.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-parity.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-units-f163415e.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-check-f163415e.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-historical-wal-first-red.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-launcher-first-red.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-launcher-focused.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-launcher-isolation.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-hlt-debt-totals-first-red.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-hlt-risk-first-red.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-hlt-projection-first-red.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-hlt-projection-focused.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-kernel-before.json.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-kernel-f163415e.json.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-ci-38206532850-failures.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-browser-e6fd1288.json.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-browser-e6fd1288.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-check-d723e582.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-provenance-serial.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-lock-ahb-d723e582.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-frozen-fixture-first-red.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-historical-wal-comparison.json.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-historical-baseline-parity.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-check-e6fd1288-size-first-red.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      },
+      {
+        "file": "ts-worker-check-e6fd1288-eslint-first-red.log.gz",
+        "knownSecretMatches": 0,
+        "allowedMetadataKeys": []
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "file": "ts-worker-parity-w1.json.gz",
+      "sha256": "b1646a54424e5438b40dde3eb8fb02c50a8d0351497a9434b9ffe71e59fa6057",
+      "bytes": 142889,
+      "uncompressedSha256": "0236d5d14c1938db6040bec895e0a5ee941a920195960d648c2d4d754f1a6836",
+      "uncompressedBytes": 608134,
+      "source": ".logs/canonical-review-20261012/ts-worker-fresh-parity/ts-w1.json",
+      "sourceSha256": "0236d5d14c1938db6040bec895e0a5ee941a920195960d648c2d4d754f1a6836"
+    },
+    {
+      "file": "ts-worker-parity-w4.json.gz",
+      "sha256": "e48816fbaa46f428e1ce7583c1de9887333239e3ed1dd74935720b0299aed1cd",
+      "bytes": 142888,
+      "uncompressedSha256": "41620347a89048cd909ea24efbc37b453deb1998788ddc06911af7629c9c2676",
+      "uncompressedBytes": 608134,
+      "source": ".logs/canonical-review-20261012/ts-worker-fresh-parity/ts-w4.json",
+      "sourceSha256": "41620347a89048cd909ea24efbc37b453deb1998788ddc06911af7629c9c2676"
+    },
+    {
+      "file": "ts-worker-parity-w8.json.gz",
+      "sha256": "e335a8437e07a9ac4721d86895567da8deaad02fdd30cbe6166337fc3d382381",
+      "bytes": 142888,
+      "uncompressedSha256": "eb4ae46b5fb9a39dd412148ac5f5caf971c4a02be65507e128f1744792445d3e",
+      "uncompressedBytes": 608134,
+      "source": ".logs/canonical-review-20261012/ts-worker-fresh-parity/ts-w8.json",
+      "sourceSha256": "eb4ae46b5fb9a39dd412148ac5f5caf971c4a02be65507e128f1744792445d3e"
+    },
+    {
+      "file": "ts-worker-recording-provenance.json.gz",
+      "sha256": "d67baf9b119fed53611a1d02822ec9d056b42103b1557756a0955f37b6fd6893",
+      "bytes": 668,
+      "uncompressedSha256": "bc98dab82504ab5a13695ffd30fd9b605ce25d2e79242c9fa40a4fbe43af61c8",
+      "uncompressedBytes": 1194,
+      "source": ".logs/hlt-evidence/ts-worker-projections/PROVENANCE.json",
+      "sourceSha256": "bc98dab82504ab5a13695ffd30fd9b605ce25d2e79242c9fa40a4fbe43af61c8"
+    },
+    {
+      "file": "ts-worker-production-summary.json.gz",
+      "sha256": "78fefed950fab18ecaf96b9f0f3b00fe3a7d8b3ef01556fdf5aa558831984039",
+      "bytes": 404,
+      "uncompressedSha256": "5b87767f1be239751c1f52e9ede0b2de392fe52f5aee9ae235385e3aa301f06b",
+      "uncompressedBytes": 673,
+      "source": ".logs/hlt-evidence/ts-worker-projections/hlt-ts-h1-live.json",
+      "sourceSha256": "5b87767f1be239751c1f52e9ede0b2de392fe52f5aee9ae235385e3aa301f06b"
+    },
+    {
+      "file": "ts-worker-checkpoint-recovery.json.gz",
+      "sha256": "a2ba31910eda5d36cc42006cc63677b70e3726ea1e276a2494e1b4262c71828d",
+      "bytes": 196,
+      "uncompressedSha256": "e965a23c13229584f1a7767346bd39acf762e84a90a31dc2a87f21d9d876b9fc",
+      "uncompressedBytes": 289,
+      "source": ".logs/hlt-evidence/ts-worker-projections/checkpoint-recovery-report.json",
+      "sourceSha256": "e965a23c13229584f1a7767346bd39acf762e84a90a31dc2a87f21d9d876b9fc"
+    },
+    {
+      "file": "ts-worker-record.log.gz",
+      "sha256": "bc63e1e3b3cbf59eae63280ccf370861eaea4d34834e186fa528fbc464cf28d0",
+      "bytes": 32626,
+      "uncompressedSha256": "f5d5b2f57761cc9d83c37b017157143b7f68981b2d686cf880b45769145a6e34",
+      "uncompressedBytes": 2660145,
+      "source": ".logs/canonical-review-20261012/ts-worker-production-record-projections.log",
+      "sourceSha256": "f5d5b2f57761cc9d83c37b017157143b7f68981b2d686cf880b45769145a6e34"
+    },
+    {
+      "file": "ts-worker-parity.log.gz",
+      "sha256": "1d22c7679d2e60e03c52940b23ad1a1c421362c998a2f81e68269073f696b607",
+      "bytes": 477,
+      "uncompressedSha256": "66dfb818b7a5a1c4083e065b80a375480e0a5f679387a54235a16373aab0d91e",
+      "uncompressedBytes": 1319,
+      "source": ".logs/canonical-review-20261012/ts-worker-fresh-parity.log",
+      "sourceSha256": "66dfb818b7a5a1c4083e065b80a375480e0a5f679387a54235a16373aab0d91e"
+    },
+    {
+      "file": "ts-worker-units-f163415e.log.gz",
+      "sha256": "ef0baed34a3dc58d1ad7d97e3ed2a37a15f097668234adfe6af7e7ca43c06d54",
+      "bytes": 9926,
+      "uncompressedSha256": "377b40acb2c3e6d396bf7f91cd49051b1e50858a0c1429d4a062f40bd8c166ce",
+      "uncompressedBytes": 39720,
+      "source": ".logs/canonical-review-20261012/ts-worker-final-tests.log",
+      "sourceSha256": "377b40acb2c3e6d396bf7f91cd49051b1e50858a0c1429d4a062f40bd8c166ce"
+    },
+    {
+      "file": "ts-worker-check-f163415e.log.gz",
+      "sha256": "e685283efe9c1687b87c2ec46bc2452d3cd55a00043437b25725a1e56d7405ee",
+      "bytes": 14804,
+      "uncompressedSha256": "98013f67bbc5721a7a6862943381df608c677293df2f4ce32a69ed806b07d0fc",
+      "uncompressedBytes": 116963,
+      "source": ".logs/canonical-review-20261012/ts-worker-final-check.log",
+      "sourceSha256": "98013f67bbc5721a7a6862943381df608c677293df2f4ce32a69ed806b07d0fc"
+    },
+    {
+      "file": "ts-worker-historical-wal-first-red.log.gz",
+      "sha256": "69723a0391c3d485137945d69b2fd19c2a9cf1398d8ca855fe0501c65a265d40",
+      "bytes": 1109,
+      "uncompressedSha256": "da35a707c3379ef994024c62b2e893b46d6d3a74756b37530160c1a6c923126c",
+      "uncompressedBytes": 3122,
+      "source": ".logs/canonical-review-20261012/ts-worker-parity.log",
+      "sourceSha256": "da35a707c3379ef994024c62b2e893b46d6d3a74756b37530160c1a6c923126c"
+    },
+    {
+      "file": "ts-worker-launcher-first-red.log.gz",
+      "sha256": "34333000a5171e70338efb781be541254be7ce715675350015ecaaf347335097",
+      "bytes": 3248,
+      "uncompressedSha256": "b3e788909c4ae9a1ee67986810e053ac3c76b5147e74bc32e0caa9a272950ce4",
+      "uncompressedBytes": 11284,
+      "source": ".logs/canonical-review-20261012/ts-launcher-ci-first-red.log",
+      "sourceSha256": "b3e788909c4ae9a1ee67986810e053ac3c76b5147e74bc32e0caa9a272950ce4"
+    },
+    {
+      "file": "ts-worker-launcher-focused.log.gz",
+      "sha256": "34425616cd7849d172924fb96a356ab0008f26a6b14fb8295c7145a3e3886787",
+      "bytes": 2462,
+      "uncompressedSha256": "392e0107463747188af6e2f6ccfcdcf98ec3e585c2f25863d21226f002f6263f",
+      "uncompressedBytes": 7379,
+      "source": ".logs/canonical-review-20261012/ts-launcher-ci-focused.log",
+      "sourceSha256": "392e0107463747188af6e2f6ccfcdcf98ec3e585c2f25863d21226f002f6263f"
+    },
+    {
+      "file": "ts-worker-launcher-isolation.log.gz",
+      "sha256": "0e331f9523130e9d8426690b2178e53864af2d169417481b6b713fa6f6c00b20",
+      "bytes": 897,
+      "uncompressedSha256": "72aa27b3a53e9609e86c94a1a7c16469521b7fe5b59aba7f0115039348c46e8a",
+      "uncompressedBytes": 2385,
+      "source": ".logs/canonical-review-20261012/ts-launcher-ci-isolation.log",
+      "sourceSha256": "72aa27b3a53e9609e86c94a1a7c16469521b7fe5b59aba7f0115039348c46e8a"
+    },
+    {
+      "file": "ts-worker-hlt-debt-totals-first-red.log.gz",
+      "sha256": "42c01fc13417724f07455ff740990007d000b2cfa8942e81dc94e4416c1640a6",
+      "bytes": 2488,
+      "uncompressedSha256": "55dbad77f26e75e5970de031a328f7ee7576de327981722cd16bef7f43d53392",
+      "uncompressedBytes": 13704,
+      "source": ".logs/canonical-review-20261012/ts-worker-production-record.log",
+      "sourceSha256": "55dbad77f26e75e5970de031a328f7ee7576de327981722cd16bef7f43d53392"
+    },
+    {
+      "file": "ts-worker-hlt-risk-first-red.log.gz",
+      "sha256": "aa0d29d33ecd36ff3fb7b4e46161b681438c4dc87ac219e835588eae3553a609",
+      "bytes": 2646,
+      "uncompressedSha256": "7d0ad15f153edfef21e719c5c8c8a349dcefae0e6cb8cbe7a4d2ded03c54240b",
+      "uncompressedBytes": 14672,
+      "source": ".logs/canonical-review-20261012/ts-worker-production-record-619a6de61.log",
+      "sourceSha256": "7d0ad15f153edfef21e719c5c8c8a349dcefae0e6cb8cbe7a4d2ded03c54240b"
+    },
+    {
+      "file": "ts-worker-hlt-projection-first-red.log.gz",
+      "sha256": "66814eba749e3be56428fcc4a91cc7aac1b203b11ea76d7f2ae66f27b29bf445",
+      "bytes": 606,
+      "uncompressedSha256": "b1efb5984d678033c77a3802f42ed4348fe23c090cdfe4e062a4faff747eeb14",
+      "uncompressedBytes": 1105,
+      "source": ".logs/canonical-review-20261012/hlt-projection-first-red.log",
+      "sourceSha256": "b1efb5984d678033c77a3802f42ed4348fe23c090cdfe4e062a4faff747eeb14"
+    },
+    {
+      "file": "ts-worker-hlt-projection-focused.log.gz",
+      "sha256": "a7d9e8a89d4e0987e2daf264479c3812af651c2f3f7302eaa03146f4f0aaccc2",
+      "bytes": 1671,
+      "uncompressedSha256": "d974c7b93f8b806194ca7662c983be6e3c44b7561b4ad802140605b43b88ec0c",
+      "uncompressedBytes": 4767,
+      "source": ".logs/canonical-review-20261012/hlt-projection-focused.log",
+      "sourceSha256": "d974c7b93f8b806194ca7662c983be6e3c44b7561b4ad802140605b43b88ec0c"
+    },
+    {
+      "file": "ts-worker-kernel-before.json.gz",
+      "sha256": "c6e9392fc6bd4a4cdaf195a4c115bcc26924fea3ff8674c16dedcb56dcf3e8cc",
+      "bytes": 6735,
+      "uncompressedSha256": "53a92d210ae590e47cac6fa0ee8842849163c4496d33ab8aa876c485245c7fa6",
+      "uncompressedBytes": 35456,
+      "source": ".logs/canonical-review-20261012/ts-worker-kernel-before.json",
+      "sourceSha256": "53a92d210ae590e47cac6fa0ee8842849163c4496d33ab8aa876c485245c7fa6"
+    },
+    {
+      "file": "ts-worker-kernel-f163415e.json.gz",
+      "sha256": "42f2a81346e0f887a24e000597c4e07a53f24e199001c9b3dfed9474ee7b88dc",
+      "bytes": 6742,
+      "uncompressedSha256": "8e26770ea194c9a6b26dc399251d81237d09c7113b37df156a2737853cc6be0b",
+      "uncompressedBytes": 35546,
+      "source": ".logs/canonical-review-20261012/ts-worker-final-kernel.json",
+      "sourceSha256": "8e26770ea194c9a6b26dc399251d81237d09c7113b37df156a2737853cc6be0b"
+    },
+    {
+      "file": "ts-worker-ci-38206532850-failures.log.gz",
+      "sha256": "de18b25b81be52fe9a8fe3e30e581cae3ec5b369279b79344c75f34e5a70bcb8",
+      "bytes": 1089,
+      "uncompressedSha256": "20c3b736233b74b4f3b2765daff011702e228a2eb8f4cef7a2aa0579ab0dfdb8",
+      "uncompressedBytes": 3666,
+      "source": ".logs/canonical-review-20261012/ci-38206532850-unit.log",
+      "sourceSha256": "773eaf4a8a06df5baaac784f632f652c19e556d9c1e18493ad501a33268b1178",
+      "transformation": "Exact source lines around every (fail) entry; source line numbers retained."
+    },
+    {
+      "file": "ts-worker-browser-e6fd1288.json.gz",
+      "sha256": "c829481e77079f06d9e168df344c1d70bc33e643b753b252f0bd5517726db15d",
+      "bytes": 2422,
+      "uncompressedSha256": "4ff5f66f654fee4ef6eafdb88aa47e7c124358de2c66f6527d45824f3449ec1a",
+      "uncompressedBytes": 10332,
+      "source": "/var/folders/zq/fvt20j1s0fx3v9c8l41czctr0000gn/T/xln-local-prod-smoke-20000/wallet-results.json",
+      "sourceSha256": "4ff5f66f654fee4ef6eafdb88aa47e7c124358de2c66f6527d45824f3449ec1a"
+    },
+    {
+      "file": "ts-worker-browser-e6fd1288.log.gz",
+      "sha256": "14f33a35ae7e7e9db88993a6f838a12b2f044d22949552a13f12d8c98efdf5d8",
+      "bytes": 2013,
+      "uncompressedSha256": "803275ba4effc75c31b7358493bf9419bd0f70719a5f07c12f370c0cd25482a6",
+      "uncompressedBytes": 23741,
+      "source": ".logs/canonical-review-20261012/ts-worker-clean-browser.log",
+      "sourceSha256": "803275ba4effc75c31b7358493bf9419bd0f70719a5f07c12f370c0cd25482a6"
+    },
+    {
+      "file": "ts-worker-check-d723e582.log.gz",
+      "sha256": "f5b3cb0038da1206463f0e0a5a94c39d84203a2872e6f7cb032048817158fc84",
+      "bytes": 14995,
+      "uncompressedSha256": "c8c3bfdc4c8cb86392af28bf25e03e4fc078341928629e51188d41c29b31234a",
+      "uncompressedBytes": 117662,
+      "source": ".logs/canonical-review-20261012/ts-worker-clean-check-scoped.log",
+      "sourceSha256": "c8c3bfdc4c8cb86392af28bf25e03e4fc078341928629e51188d41c29b31234a"
+    },
+    {
+      "file": "ts-worker-provenance-serial.log.gz",
+      "sha256": "5fe434d31a9ffd88f89cdd6fcf49be3712a3c9f3d5c51844b4fa6855d27ef280",
+      "bytes": 1004,
+      "uncompressedSha256": "23f29c7490dbee12a5a47af1bcc74dbb47c03df8cf09c4b8c59f32722237d2d4",
+      "uncompressedBytes": 2613,
+      "source": ".logs/canonical-review-20261012/ts-worker-clean-provenance-serial.log",
+      "sourceSha256": "23f29c7490dbee12a5a47af1bcc74dbb47c03df8cf09c4b8c59f32722237d2d4"
+    },
+    {
+      "file": "ts-worker-lock-ahb-d723e582.log.gz",
+      "sha256": "a6cb6723ebffe433b26d0266f4bd88c22bd8fd442d167cbe2d33050910160569",
+      "bytes": 7630,
+      "uncompressedSha256": "5c46b894fe3b8a4e2e03954e878c55860a96cf9acfa403096ad409eca239c62f",
+      "uncompressedBytes": 65666,
+      "source": ".logs/canonical-review-20261012/ts-worker-clean-lock-ahb.log",
+      "sourceSha256": "5c46b894fe3b8a4e2e03954e878c55860a96cf9acfa403096ad409eca239c62f"
+    },
+    {
+      "file": "ts-worker-frozen-fixture-first-red.log.gz",
+      "sha256": "981015a5df2268953df847635ea8d1e07dc17da6ad45f3de3c4672e0f8e23850",
+      "bytes": 248,
+      "uncompressedSha256": "78e318072c6f66c3fbf6cf9453cb604a38264f9ef977356c123c2b080c41722b",
+      "uncompressedBytes": 392,
+      "source": ".logs/canonical-review-20261012/ts-worker-frozen-fixture-first-red.log",
+      "sourceSha256": "78e318072c6f66c3fbf6cf9453cb604a38264f9ef977356c123c2b080c41722b"
+    },
+    {
+      "file": "ts-worker-historical-wal-comparison.json.gz",
+      "sha256": "13e8bcfae148530af4632e8f9969be9a725c7b3c0c7657dc29d8c952e4e66fca",
+      "bytes": 642,
+      "uncompressedSha256": "da93237ec29fdb2865c540dd47d50764b40874f1b95d53d534a85712d07e2e8e",
+      "uncompressedBytes": 1591,
+      "source": ".logs/canonical-review-20261012/ts-worker-historical-wal-comparison.json",
+      "sourceSha256": "da93237ec29fdb2865c540dd47d50764b40874f1b95d53d534a85712d07e2e8e"
+    },
+    {
+      "file": "ts-worker-historical-baseline-parity.log.gz",
+      "sha256": "b76014c378b708a21f9cda0571da562d3e17daa670cd5c12d983e3f90ffd023d",
+      "bytes": 915,
+      "uncompressedSha256": "4285b8290831a247d7169587f6168d0c4792c3fd7e6c6abdde3c152932f73551",
+      "uncompressedBytes": 2830,
+      "source": ".logs/canonical-review-20261012/ts-worker-baseline-parity.log",
+      "sourceSha256": "4285b8290831a247d7169587f6168d0c4792c3fd7e6c6abdde3c152932f73551"
+    },
+    {
+      "file": "ts-worker-check-e6fd1288-size-first-red.log.gz",
+      "sha256": "c90ee99d28197ed036734d085889ce40fdda6c3449f2861efb1ff6cdf41019bd",
+      "bytes": 275,
+      "uncompressedSha256": "e37015740e27a948c0a2d904b432441d5dd30bef91f219441129fd49ebc70fc2",
+      "uncompressedBytes": 376,
+      "source": ".logs/canonical-review-20261012/ts-worker-clean-check.log",
+      "sourceSha256": "d00f6d14bace9d10d90a1e10c990ba1ac03142104bdfaac7d74b9c860e27a50f",
+      "transformation": "Exact first-failure excerpt with original source line numbers."
+    },
+    {
+      "file": "ts-worker-check-e6fd1288-eslint-first-red.log.gz",
+      "sha256": "115c3b2fd9c698b7bf026b5f254c48656dc6d24aeba7b09640d1b17cef98d90f",
+      "bytes": 388,
+      "uncompressedSha256": "08c287750c6251554fe12f6b75fb663bce2fcd8c1279d9b274c07632a59b9808",
+      "uncompressedBytes": 519,
+      "source": ".logs/canonical-review-20261012/ts-worker-clean-check-serial.log",
+      "sourceSha256": "714256424ae16adbf2ba771b8d84d516962347941dcf995f8a30b080be8e7cb8",
+      "transformation": "Exact first-failure excerpt with original source line numbers."
+    }
+  ],
+  "candidate": {
+    "sha": "d723e5827adfbb0eef926e749525211b0b5e6f7a",
+    "change": "Restore unrelated formatter import compression only; generated worker exclusions introduced by e6fd1288 remain.",
+    "releaseReady": false,
+    "blockedBy": [
+      "Two TypeScript fixture imports inside frozen rscore/ still target moved core/rscore/ts-worker/provider. Narrow owner exception requested but not approved.",
+      "Final exact-head CI not green; candidate must not be pushed as release-ready."
+    ]
+  },
+  "preparedImportRepair": {
+    "path": "ts-worker-frozen-imports.patch",
+    "sha256": "0d7cfe571e49993721055ad7abd1bc66e798f5b8a87a0a1f68d5f76ee3c54db7",
+    "applied": false,
+    "gitApplyCheckPassed": true,
+    "scope": "Exactly two TS import path replacements; no Rust or financial logic changes."
+  },
+  "additionalStaticFinding": {
+    "path": "rscore/fixtures/cross-j-entity-kinds/group-d.ts",
+    "kind": "type-only import",
+    "specifier": "../../../core/runtime/overlay",
+    "presentOnBaseline": "72c38fa4b9868f8be52416f5b157504e061719db",
+    "baselineTargetMissing": true,
+    "disposition": "Pre-existing frozen fixture diagnostic; not introduced by worker move. No source change."
+  }
+}
