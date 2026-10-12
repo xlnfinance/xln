@@ -52,8 +52,16 @@ const memoryDb = (entries: Array<[Buffer, unknown]> = []): RuntimeDbLike => {
       del: (key: Buffer) => values.delete(key.toString('hex')),
       write: async () => {},
     }),
-    keys: async function* () {
-      for (const key of Array.from(values.keys()).sort()) yield Buffer.from(key, 'hex');
+    keys: async function* (options?: { gte?: Buffer; lt?: Buffer; reverse?: boolean }) {
+      const keys = Array.from(values.keys())
+        .map(key => Buffer.from(key, 'hex'))
+        .sort(Buffer.compare);
+      if (options?.reverse) keys.reverse();
+      for (const key of keys) {
+        if (options?.gte && Buffer.compare(key, options.gte) < 0) continue;
+        if (options?.lt && Buffer.compare(key, options.lt) >= 0) continue;
+        yield key;
+      }
     },
   };
 };

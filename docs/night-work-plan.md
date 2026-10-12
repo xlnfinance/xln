@@ -4,6 +4,30 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
+
+Current checkpoint, 2026-10-12 20:01 UTC: PR #73 at d29c84c66 passed five of
+seven required jobs. E2E stopped at the incomplete recovery fixture (634/635
+core tests); Unit Tests found the same missing WAL frame plus missing debtTotals
+and a memory iterator ignoring its key range. All three test fixtures are now
+corrected without production changes or weaker assertions. Recovery uses the
+real WAL/current DB and checks nodes before HEAD publication. Related tests:
+30/30, 124 assertions, 2.40s. Next: full check, push this correction, then await
+exact-head CI before activating Sepolia. No owner question remains.
+
+Release preparation on clean d29c84c66: archived React payment/reload 1/1;
+current deployed contract templates match; copied stopped H1 caught up to
+R4475/J11897669 with 128/128 integrity frames, P6 dispute cleared, collateral
+zero, no RPC writes. The caught-up DB restores identically with current code
+and staged rollback 5e6d08a16. Both code/UI releases are prepared on the server;
+services were not changed and the public backend remains unavailable. Preserve
+funded state and tower RPC allowlist. After green CI: maintenance, cold backup,
+exact candidate start, financial state check, then public wallet drill.
+
+Method review: stop treating an imported test fixture as a valid persisted
+Runtime. The first red command now runs with a real stored frame; the existing
+validator stays strict. No new audit/metric/gate; source checks precede one new
+CI run. Three bounded local reproductions identified all observed CI failures.
+
 - Owner authorized the one active TS fixture import correction on October 12.
   The stale worker path is replaced by the canonical Runtime worker path;
   clean 01cde8881 passes all 97 settlement tests (528 assertions, 2.67s),
