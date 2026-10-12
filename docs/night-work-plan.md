@@ -33,12 +33,16 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   Earlier clean 88f14ce5f has 104/104 watcher tests (951 assertions);
   7d3134853 has lock-ahb (85 frames), 25/25 funding/exit cases, 512 fuzz
   invocations and eight matching compiler templates. Keep original SHA binding.
-- First red: cross-j-opening-lifecycle.test.ts cannot resolve the relocated
-  TS worker from rscore/fixtures/cross-j-opening/lifecycle.ts. The same old
-  import exists in rscore/fixtures/entity-resident-group-e/group-e.ts. Owner
-  approval is pending for exactly these two import replacements because the
-  explicit no-write rscore/ rule remains. No aliases, copied executor or skipped
-  assertion should conceal this failure. Do not push this known-red candidate.
+- First required-TS red, corrected at 11:19 UTC on clean 67a2a1dca:
+  settlement-execute-atomicity.test.ts cannot resolve the relocated TS worker
+  through rscore/fixtures/entity-resident-group-e/group-e.ts:3. The test fails
+  during import (319ms, zero assertions executed). Required CI already excludes
+  core/__tests__/rscore/, so the separate cross-J parity failure is outside this
+  release job. Narrow the pending owner exception to this one active fixture
+  import; do not copy its full Runtime setup, add an alias or weaken assertions.
+  Prepared patch: docs/evidence/canonical-review-20261012/ts-worker-active-fixture-import.patch.
+  Original clean-source output: docs/evidence/canonical-review-20261012/settlement-fixture-import-67a2a1dca.log.
+  Do not push this known-red candidate.
 - PR #73 still points to 72c38fa4b: six of seven required pull_request jobs
   passed, Unit Tests failed four cases. Those four are fixed locally; fresh
   eligible CI is still required after the fixture blocker. Main remains
@@ -51,9 +55,9 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   The prior ts-worker-evidence.json retains the 498-frame historical WAL
   failure at frame 12 on both pre-move baseline and candidate. Moving 3,857
   worker lines is ownership correction, not deletion. Private WAL/seeds stay private.
-- Next single command after the two authorized import replacements:
-  `bun test core/__tests__/rscore/parity/cross-j-opening-lifecycle.test.ts`
-  Then the group-E consumers, exact-candidate source/browser/scenario checks
+- Next single command after the one active fixture import is authorized and replaced:
+  `bun test core/__tests__/payments/settlement/settlement-execute-atomicity.test.ts`
+  Then related active TS consumers, exact-candidate source/browser/scenario checks
   and push HEAD:codex/production-qa-boundary for PR #73 required CI.
 - Release preparation on clean d4502ec94 is complete locally: real React
   production build, existing Git bundle/UI archive layout, 11/11 archived UI
@@ -109,6 +113,19 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   start/finalize/reveal coverage; owner-reviewed release
   package. No dispute-start freeze, FIFO, one debt per debtor/creditor/token
   and party-selected windows remain settled. No governance/bond redesign.
+
+Method review, 11:19 UTC: re-read the actual required CI discovery instead of
+repeating the frozen parity failure. One active TS settlement test, not both
+frozen fixtures, blocks that boundary. Its clean-67a2a1dca failure took 319ms;
+no heavy stand or broad suite was repeated. The existing Account reviewer found
+no equivalent TS fixture: direct Entity/Account helpers omit signed Runtime
+admission, final EntityFrame capture or routed outbox evidence. Recreating the
+full setup would duplicate about 180 lines for a one-line import repair. Keep
+all financial assertions and the frozen tree intact pending the narrower
+exception. No code was deleted and no new financial invariant was proved in
+this review. Next: apply that single authorized import repair and run the active
+settlement command above. The old two-line patch remains historical, not the
+requested release scope.
 
 Method review, 08:45 UTC: the previous half-hour closed a bounded deletion
 with 45/45 tests and 38 source gates, but no additional public-release gate.

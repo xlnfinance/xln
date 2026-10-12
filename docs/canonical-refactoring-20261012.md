@@ -104,10 +104,16 @@ remain in the [worker evidence](evidence/canonical-review-20261012/ts-worker-evi
 
 The candidate is **not ready to merge**:
 
-- Two frozen TS fixtures still import the relocated worker's old path. The
-  [exact two-line patch](evidence/canonical-review-20261012/ts-worker-frozen-imports.patch)
+- One active TS settlement test imports the relocated worker through frozen
+  `rscore/fixtures/entity-resident-group-e/group-e.ts:3`. Clean `67a2a1dca`
+  reproduces the import failure in 319ms, before any assertions. Required CI
+  already excludes `core/__tests__/rscore/`; the other broken cross-J fixture
+  is therefore outside that job. The
+  [one-line patch](evidence/canonical-review-20261012/ts-worker-active-fixture-import.patch)
   awaits the owner's narrow exception to the explicit no-write rule for `rscore/`.
-  No alias or skipped assertion hides this failure.
+  Existing TS helpers cannot preserve the full signed Runtime settlement test
+  without copying its setup; no alias, duplicate fixture or skipped assertion
+  hides the failure. The earlier two-line patch is historical.
 - PR #73 remains on older `72c38fa4b`: six of seven required pull-request jobs
   pass; Unit Tests fail four cases already fixed locally. Fresh eligible CI
   requires closing the fixture failure first. A successful manual workflow
@@ -173,7 +179,7 @@ assertions**, all **38 source gates**, the same **708-frame WAL on W1/W4/W8**,
 closure above. Each WAL replay still retains one outbox item; no TPS, fresh
 public-chain result or deployed-hub recovery is claimed.
 
-The next release action is to resolve the two frozen TS fixture imports and run
+The next release action is to resolve that active TS fixture import and run
 required PR CI before promoting a reviewed build. Do not restart the known-broken
 old hub or repeat the financial transactions to hide a deployment-version gap.
 

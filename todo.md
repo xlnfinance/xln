@@ -15,9 +15,11 @@ branch has not been pushed over its older head. The public alpha still runs
 `7c3f63f98`: its hub stopped on the P6 tower events; the external tower completed
 the counter and finalization. Preserve the stopped DB and the funded wallet.
 
-1. Resolve the two TS fixture imports under frozen `rscore/` using the prepared
-   two-line patch only after the requested owner exception. Then run the
-   affected settlement/opening tests and required pull_request CI. Seven green
+1. Resolve the one active TS fixture import under frozen `rscore/` using the
+   [one-line patch](docs/evidence/canonical-review-20261012/ts-worker-active-fixture-import.patch)
+   after the narrow owner exception. Run settlement-execute-atomicity first,
+   then related TS tests and required pull_request CI. The frozen cross-J parity
+   test is already excluded from that CI job and is not this blocker. Seven green
    manual-dispatch jobs do not satisfy required PR checks. Preserve strict protection.
 2. Promote an eligible reviewed Sepolia build and prove the existing hub catches
    up through counter block 11897542 and final block 11897550 without resending
@@ -40,7 +42,7 @@ Completed refactoring boundary on clean `fc4f267db`: native driver/storage hooks
 retired, obsolete native persisted data explicitly rejected, TS workers/WAL/crash
 proof/export retained. All six bounded checks pass; kernel closure is 150,930
 lines, 10,132 below the initial review, with no QA or core/rscore edges. This does
-not close the two frozen fixture imports or public deployment gap above.
+not close the active frozen-fixture dependency or public deployment gap above.
 [Review and exact evidence](docs/canonical-refactoring-20261012.md).
 
 ## Historical pre-freeze lending work — not current release scope
