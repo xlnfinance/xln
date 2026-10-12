@@ -90,7 +90,7 @@ export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
   'rscore/crates/entity-kernel/src': 11,
   'rscore/crates/entity-kernel/src/consensus': 11,
   'rscore/crates/entity-kernel/tests': 11,
-  'scripts/dev': 12,
+  'scripts/dev': 11,
   'tools': 11,
 };
 
