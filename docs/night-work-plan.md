@@ -48,8 +48,13 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   reserve 100 / collateral 100 at Runtime 138. Account frames 3 and 4 contain
   only this funding claim; no pending frame or mempool. Do not fund again.
   The earlier catch-up exit 124 remains failed evidence, not a green run.
-  Next: bounded fixture-only funding-stage resume from receipt and signed frame
-  history, then the unchanged payment/proof/tower path. No dispute yet submitted.
+  Clean 7748e1ec0 resumed the existing funding and signed both payments:
+  stale state at Runtime 140, latest state at 141. It then failed parsing an
+  absent tower receipt; HTTP status/body were obscured. No dispute submitted.
+  Recover the original proofs via read-only WAL replay at those exact heights,
+  inspect the existing tower receipt before any re-upload, and continue only
+  appointment preparation. Never rerun the two payments. Failure evidence:
+  docs/evidence/canonical-review-20261012/p6-prepare-7748e1ec0.json.
   Evidence: docs/evidence/canonical-review-20261012/restored-frontier-88f14ce5f.json.
   Live alpha remains 7c3f63f98; the client evidence does not change deployment.
 - Current static kernel closure is 160,563 code lines in 816 files, down 499
@@ -126,6 +131,15 @@ canonical cleanup rather than add a production shutdown path. Browser evidence
 must retain its enabling environment, not just the default startup command.
 Keep the funded P6 stage; resume only from exact signed history and receipt.
 No external-model budget was spent or renewed.
+
+Method review, 07:45 UTC: the restored-frontier fix closed public funding
+catch-up; the funded-stage resume then produced both signed payment states.
+Tower receipt handling is the new first failure. Its response was obscured by
+an early shape check, so acceptance is unknown. Change the next action from
+rerunning preparation to recovering exact committed proofs and reading the
+existing receipt before another upload. This preserves the original payments
+without a new protocol journal. Source check, related tests and three browser
+journeys passed; no P6 or CI completion is claimed. No external-model spend.
 
 ## Historical evidence and superseded scope
 

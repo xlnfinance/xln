@@ -1,0 +1,22 @@
+{
+  "sourceSha": "7748e1ec0b3f8f517242ee2a0489cf74b6c2598f",
+  "cleanBefore": true,
+  "cleanAfter": true,
+  "binding": "Parent observed clean Git status before and after this execution; the log does not embed it.",
+  "command": "bun run stand:run --reason p6-confirmed-funding-resume --timeout-ms 180000 -- bun .logs/crisis-20261011/run-public-p6.ts prepare",
+  "script": "jurisdictions/scripts/public-p6-runtime.ts",
+  "processExitCode": 1,
+  "completed": [
+    "Reused the confirmed R2C transaction at block 11897335; no new funding command.",
+    "Signed the 25-unit outgoing payment at Runtime height 140.",
+    "Signed the 25-unit return payment at Runtime height 141."
+  ],
+  "expectedFinalReserveRaw": "200000000",
+  "failure": "PUBLIC_P6_CONFIG_OBJECT_REQUIRED at object(accepted.receipt), public-p6-runtime.ts:488.",
+  "uncertainty": "The response status/body were not retained. Missing receipt does not establish whether the tower stored the appointment. Inspect existing receipt before uploading again.",
+  "next": "Recover the two original signed proofs by canonical read-only WAL replay. Inspect the tower response; never repeat either payment.",
+  "p6Passed": false,
+  "staleDisputeSubmitted": false,
+  "log": "p6-prepare-7748e1ec0.log.gz",
+  "limitations": "Public client execution with existing deployed server 7c3f63f98. The private profile, mnemonic and wrapper are not published. This is retained failure evidence, not release acceptance."
+}

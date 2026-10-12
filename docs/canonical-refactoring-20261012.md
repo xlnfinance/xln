@@ -116,6 +116,10 @@ The candidate is **not ready to merge**:
   Preparation timed out before observing the receipt; resume must prove this
   stage before continuing, never repeat funding. The earlier catch-up timeout
   (exit 124) is retained separately. No stale dispute or tower exit is claimed.
+  On `7748e1ec0`, funding-only resume passed and both payment states were signed
+  at Runtime 140/141. Preparation then failed on an absent tower receipt.
+  [Failure evidence](evidence/canonical-review-20261012/p6-prepare-7748e1ec0.json)
+  requires recovering the original proofs and inspecting the tower before retry.
 - No public deployment or mainnet acceptance follows from the local checks.
   The live alpha remains `7c3f63f98`; current P6, ten consecutive green main
   runs and the owner-reviewed release package remain open.

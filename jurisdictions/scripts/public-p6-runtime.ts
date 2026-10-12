@@ -485,10 +485,12 @@ try {
       body: JSON.stringify(appointment),
     });
     const accepted = object(await response.json());
+    if (!response.ok || accepted.ok !== true)
+      throw Error(
+        `PUBLIC_P6_APPOINTMENT_UPLOAD_FAILED:${response.status}:${String(accepted.error ?? 'INVALID_RESPONSE')}`,
+      );
     const receipt = object(accepted.receipt);
     if (
-      !response.ok ||
-      accepted.ok !== true ||
       receipt.bundleHash !== appointment.bundle.bundleHash ||
       receipt.lookupKey !== appointment.lookupKey ||
       receipt.appointmentSequence !== appointment.lastResortPayload!.appointmentSequence
