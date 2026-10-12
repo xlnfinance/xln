@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "title": "Resume from restored authenticated history; public funding observed and restored",
+  "sourceSha": "88f14ce5f3727d5fab4353d8b836a1d4db66c7f0",
+  "status": "restore-and-funding-proven-p6-not-complete",
+  "releaseReady": false,
+  "sourceBinding": {
+    "cleanBefore": true,
+    "cleanAfter": true,
+    "basis": "Root recorded clean committed source for check, related suite, public observations, offline restores and explicit browser run; packaging occurred afterward. Logs generally do not embed source SHA or Git status.",
+    "packagingCommit": "Assigned by the parent commit; not the execution SHA.",
+    "diagnosticRedGreen": "Pre-commit regression logs are diagnostic only; no independent clean-source assertion.",
+    "sourceFiles": [{"path":"core/jurisdiction/adapter/rpc/watcher/rpc-watcher-controller.ts","sha256":"8fb9271531156241211e9f34d34a79ae6bfd241e4a78bfdaddeb11e46964f956"},{"path":"core/jurisdiction/adapter/rpc/watcher/rpc-watcher-poll.ts","sha256":"62e2995a7fa4cd308c8f6a46078db8c90616a5d49cd7afe4fa867e22d0a7657b"},{"path":"core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts","sha256":"a52be4046d42cfc5de41340fbb8cf88cca6e42fbf2077d2ae2833625716ad02d"}]
+  },
+  "change": {
+    "productionFiles": 2,
+    "productionInsertions": 16,
+    "productionDeletions": 5,
+    "productionNetLines": 11,
+    "testLinesAdded": 15,
+    "behavior": "Seed the watcher from the common restored authenticated scan suffix. Audit canonical anchors/frontier before reporting or applying it; report scan progress without promoting the Entity-certified semantic cursor.",
+    "financialMathChanged": false
+  },
+  "regression": {
+    "redArtifact": "red",
+    "failure": "Restart re-read authenticated empty tail block 4724; corrected assertion expected it absent. Earlier anchor headers remain legitimate audit reads.",
+    "redPassed": 0,
+    "redFailed": 1,
+    "redAssertions": 28,
+    "redSeconds": 22.13,
+    "greenArtifact": "green",
+    "greenPassed": 1,
+    "greenAssertions": 39,
+    "greenSeconds": 23.7,
+    "safetyArtifact": "safety",
+    "safetyPassed": 7,
+    "safetyFilteredOut": 76,
+    "safetyAssertions": 21,
+    "safetySeconds": 0.586
+  },
+  "sameSourceChecks": {
+    "related": {"artifact":"related","passed":104,"failed":0,"assertions":951,"files":12,"seconds":28.82},
+    "check": {"artifact":"check","command":"bun run check","sourceGates":38,"outerParallelGates":3},
+    "browser": {"artifacts":["browser","browser-report"],"requiredEnv":{"XLN_LOCAL_PROD_SMOKE_WALLET_TESTS":"e2e-payment.spec.ts"},"command":"XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-payment.spec.ts bun tools/stand-lock.ts run --reason restored-frontier-react-payment --timeout-ms \"180000\" -- bun run prod:smoke:local","envBinding":"Root supplied this required environment; the shell log prints only the inner stand command.","expected":3,"unexpected":0,"skipped":0,"flaky":0,"errors":0,"playwrightDurationMs":27990.614,"includesCommittedPaymentReload":true,"durationScope":"Playwright only; excludes stand/bootstrap time."}
+  },
+  "commandCorrection": {
+    "priorManifest": "watcher-pressure-window-7d3134853.json",
+    "issue": "Its browser command omitted XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-payment.spec.ts. The archived report has three tests, but the displayed command alone does not reproduce them.",
+    "rule": "Default prod:smoke:local proves startup only. The explicit environment plus report in this source cohort is the reproducible payment-browser gate."
+  },
+  "publicFailures": {
+    "resume": {"artifact":"resume-timeout","exitCode":124,"lastObservedElapsedMs":120056,"lastObservedRuntimeHeight":82,"lastObservedReserveRaw":"200000000","interpretation":"Negative process outcome retained; it is not converted to success by observing funds before termination."},
+    "prepare": {"artifact":"prepare","exitCode":1,"error":"PUBLIC_P6_WAIT_FAILED:collateral-funded","interpretation":"Local observation timed out after broadcast. Later receipt status 1 proves the transaction itself succeeded; preparation did not complete here."},
+    "transport": "Public 429 persisted across completed catch-up attempts; no provider-performance claim."
+  },
+  "offlineBeforeR2c": {
+    "artifact": "offline-funded",
+    "processExitCode": 0,
+    "sourceSha": "88f14ce5f3727d5fab4353d8b836a1d4db66c7f0",
+    "runtimeHeight": 82,
+    "reserveRaw": "200000000",
+    "certifiedAndContiguousHeight": 11896102,
+    "watchStartBlock": 11896103,
+    "postStateHash": "0xd6f8fe2efd3541016e2d3c2b8a47bea951d60f2e5e44bf3f0e9141c812aa71bd",
+    "evidence": "Fresh offline reconstruction after the earlier public timeout, not merely the last live sample."
+  },
+  "r2c": {
+    "artifact": "r2c-state",
+    "probeCommand": "bun .logs/crisis-20261011/public-p6-state-probe.ts",
+    "commandBinding": "Parent-confirmed invocation; not embedded in the two-line output. Read-only probe source inspected at packaging; no private profile or script copied.",
+    "chainId": 11155111,
+    "rpc": "https://sepolia.xln.finance/rpc",
+    "depository": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+    "entityId": "0xd0aa872e92c2d6c5dc913ab4ee3600b1b144c097d898d29b23bb7aa63b881909",
+    "counterpartyId": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+    "tokenId": 1,
+    "accountKey": "0x87cffe0b2914b0e5eca809a296e2161dbd40fc928c5b5373bde00c815f2674f5",
+    "transactionHash": "0x1a186ce331ad64d4999914eb1a568d16796883d29d2ec40c706527d276e08638",
+    "receiptStatus": 1,
+    "receiptBlock": 11897335,
+    "receiptBlockHash": "0xfae78b08f4e60bf5284ab23fe000cf278adb70a37789ce12d3c9691a945c5793",
+    "gasUsed": "344201",
+    "pinnedStateReadBlock": 11897339,
+    "reserveRaw": "100000000",
+    "collateralRaw": "100000000",
+    "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "units": "Raw token units; no decimals/fiat conversion asserted.",
+    "readLimit": "Receipt and state are distinct observations: receipt block 11897335; state reads pinned together at 11897339."
+  },
+  "finalLiveObservation": {
+    "artifact": "r2c-final-catchup",
+    "processExitCode": 0,
+    "lastObservedElapsedMs": 5006,
+    "lastObservedRuntimeHeight": 138,
+    "lastObservedReserveRaw": "100000000",
+    "lastObservedCollateralRaw": "100000000",
+    "lastObservedCursor": 11897392,
+    "scope": "Last live sample; persisted state is established separately by offline-history below."
+  },
+  "offlineAfterR2c": {
+    "artifact": "offline-history",
+    "processExitCode": 0,
+    "sourceSha": "88f14ce5f3727d5fab4353d8b836a1d4db66c7f0",
+    "runtimeHeight": 138,
+    "reserveRaw": "100000000",
+    "collateralRaw": "100000000",
+    "certifiedAndContiguousHeight": 11897392,
+    "watchStartBlock": 11897393,
+    "postStateHash": "0x73f5384db188a23e8a80df96958e1f7ccfc57708a938f753257f2fffdacf5620",
+    "accountHeight": 4,
+    "accountHistoryHeights": [3,4],
+    "accountHistoryTxKinds": ["j_event_claim"],
+    "accountPendingFrame": false,
+    "accountMempoolLength": 0,
+    "receiptMatchedInAccountHistory": true,
+    "pendingScope": "No pending frame/mempool claim is made for other Accounts or the whole Runtime."
+  },
+  "p6": {
+    "passed": false,
+    "reason": "This evidence proves collateral funding and receipt recovery only. Account frames 3 and 4 contain j_event_claim; it does not prove a newer off-chain signed balance, stale-state dispute, tower counter, or finalization."
+  },
+  "kernel": {
+    "artifact": "kernel",
+    "closureCodeLines": 160563,
+    "closureFiles": 816,
+    "baselineSourceSha": "b07da2b8762d3398683f3f2c481ee65a8caedc41",
+    "baselineClosureCodeLines": 161062,
+    "reductionFromBaseline": 499,
+    "ledger": null,
+    "ci": null,
+    "overallReadinessScore": null,
+    "limitation": "Static import closure, not physical deletion or measured audit effort; the reduction covers the whole baseline-to-current range."
+  },
+  "priorContractAndLockCohort": {
+    "sourceSha": "7d31348533a5b9694d3fb67ecc8b287ad72c3532",
+    "manifest": "watcher-pressure-window-7d3134853.json",
+    "sha256": "2389a5321b7a8d7bd5797eabb8d66484e60fef358c07781b1472175dda612d5c",
+    "results": "8 bytecode templates, 25 funding/exit tests, 512 fuzz runs, lock-ahb 85 frames.",
+    "limitation": "References previous source evidence. None is represented as rerun on 88f14ce5f."
+  },
+  "secretReview": {
+    "copiedInputs": 17,
+    "sensitiveAssignmentCandidates": 0,
+    "privateProfilePathCandidates": 0,
+    "included": "Logs, public identities, receipt/event proofs, browser report and kernel metrics only.",
+    "excluded": "Private runtime/WAL/checkpoint databases, profile directories, seeds and private keys.",
+    "limitation": "Targeted output inspection and pattern scan; not a general secret-detection guarantee."
+  },
+  "limitations": [
+    "Clean-source status is root orchestration evidence; no fabricated embedded attestations.",
+    "Ephemeral diagnostic scripts and private profiles are excluded, so public run commands are provenance rather than standalone reproducers.",
+    "The current package supersedes neither CI nor the uncompleted P6 stale-state/tower proof."
+  ],
+  "artifacts": [
+    {"id":"red","file":"restored-frontier-88f14ce5f-red.log.gz","sha256":"7e8e0151378266fc2563a3278ec75ce959277290c5b1e6b6128eeb776db781f1","bytes":1226,"uncompressedSha256":"b6417ae50408c0a2b7ce7aaaf45543f638d4eb52b41f6d7b808d7047678c177b","uncompressedBytes":3002,"command":"bun tools/stand-lock.ts run \"--reason=p6-restored-frontier-corrected-red\" \"--timeout-ms=60000\" -- bun test core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts"},
+    {"id":"green","file":"restored-frontier-88f14ce5f-green.log.gz","sha256":"1ce2b6bfe9d7ae520f946dbb281625317e0202b98855f002db986be1657b8768","bytes":1032,"uncompressedSha256":"2ab08823ac5ee7419b5d22d7336041730e572d0cedd1ca4351ea409d241ed3e9","uncompressedBytes":3171,"command":"bun tools/stand-lock.ts run \"--reason=p6-restored-frontier-final-green\" \"--timeout-ms=60000\" -- bun test core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts"},
+    {"id":"safety","file":"restored-frontier-88f14ce5f-safety.log.gz","sha256":"d7170493134f07729e7f96a2b082bfc5e92c8baddfacd70656f2855df947407c","bytes":661,"uncompressedSha256":"dd102e024d677e65b5bc976ff1bc58675749958d6830ef138056ac7cd9bc8c12","uncompressedBytes":1642,"command":"bun tools/stand-lock.ts run \"--reason=p6-restored-frontier-safety\" \"--timeout-ms=60000\" -- bun test core/__tests__/jurisdiction/history/j-history-consensus.test.ts core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts --test-name-pattern \"late replica catch-up|restored empty|rewinds only|never rewinds|signed Entity-frame lock|registration base changed|stale observation mask\""},
+    {"id":"related","file":"restored-frontier-88f14ce5f-related.log.gz","sha256":"6bbf79a4f9b331861b5364fbce19a19e4be0941a6d3e080cc844871131f9a879","bytes":6654,"uncompressedSha256":"b8c1c28165ec6bf33b4787ca2e74efdf7443592022a0d84beeff2b16cd87edc5","uncompressedBytes":35309,"command":"bun tools/stand-lock.ts run --reason restored-frontier-related --timeout-ms \"60000\" -- bun test core/__tests__/jurisdiction/watchers core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts core/__tests__/jurisdiction/rpc/rpc-watcher-dispute-calldata.test.ts"},
+    {"id":"check","file":"restored-frontier-88f14ce5f-check.log.gz","sha256":"7a605b0ba49987f50e24c7b319834652e75544ada673a1ce939856d32fd02f33","bytes":14884,"uncompressedSha256":"ec00475bbed578863ebb8af4348791f645250236698d690fe190c9da3526136e","uncompressedBytes":116962,"command":"bun run check:short && bun run check:long"},
+    {"id":"first-catchup","file":"restored-frontier-88f14ce5f-first-catchup.log.gz","sha256":"6b0429d27c1ba6417a0f4742651465bd6b7f2f5fcda8abc1b091900f098e4479","bytes":1397,"uncompressedSha256":"3d35dabcbd45b0a4aa1837dedb00c907c784f7d5b6d56345e6fe4bc1d0d84cb6","uncompressedBytes":13560,"command":"bun tools/stand-lock.ts run --reason \"p6-restored-history-catchup\" --timeout-ms \"180000\" -- bun \".logs/crisis-20261011/trace-public-p6-catchup.ts\""},
+    {"id":"resume-timeout","file":"restored-frontier-88f14ce5f-resume-timeout.log.gz","sha256":"91d012cb8c33eeecab51db92e955de68baac46654ad65632f5d05a6a0f730b21","bytes":1541,"uncompressedSha256":"29576911d243cc88c3739d415e7536aab8243a76a053ec0de674a6c940931b6e","uncompressedBytes":11128,"command":"bun tools/stand-lock.ts run --reason \"p6-continue-preserved-history\" --timeout-ms \"180000\" -- bun \".logs/crisis-20261011/trace-public-p6-catchup.ts\""},
+    {"id":"clean-shutdown","file":"restored-frontier-88f14ce5f-clean-shutdown.log.gz","sha256":"8ee2b3814a403f12dc88d5dd8a20eb802e40a46963644ab4283afd2d11866f8b","bytes":834,"uncompressedSha256":"f64118a34b3970b03c13d9d6feeabb88a528d3201973f5e8eec59c43f7ae8176","uncompressedBytes":2057,"command":"bun tools/stand-lock.ts run --reason \"p6-funded-clean-shutdown\" --timeout-ms \"60000\" -- bun \".logs/crisis-20261011/trace-public-p6-catchup.ts\""},
+    {"id":"offline-funded","file":"restored-frontier-88f14ce5f-offline-funded.log.gz","sha256":"239e1116e9be2934e42d47ec4fb838cede80490c659188b6fda2ced363c8af16","bytes":478,"uncompressedSha256":"4d356873687b9ae32c8b35be7517b0b71ffd3e9b85bc30463958de6d5aca2728","uncompressedBytes":786,"command":"bun tools/stand-lock.ts run --reason \"p6-funded-offline-restore\" --timeout-ms \"60000\" -- bun \".logs/canonical-review-20261012/diagnose-p6-restored-cursor.ts\""},
+    {"id":"prepare","file":"restored-frontier-88f14ce5f-prepare.log.gz","sha256":"e81d2b6458ebba464122257e74a952076a5290a735e8fd55a593ccbe85e84424","bytes":3337,"uncompressedSha256":"5c161277d0a35c0ba14ff574482e3d6168e01768f7a4dd9d1cce78e865d97953","uncompressedBytes":10554,"command":"bun tools/stand-lock.ts run --reason \"public-p6-funded-prepare\" --timeout-ms \"180000\" -- bun \".logs/crisis-20261011/run-public-p6.ts\" prepare"},
+    {"id":"r2c-state","file":"restored-frontier-88f14ce5f-r2c-state.log.gz","sha256":"715789f19be649067c2a2e002df38c0a9ab2599843b122f20827980d03e20c47","bytes":263,"uncompressedSha256":"ee44478c4596226c001b764a701f1e4cdc7a1aac536b1b83b0877cca9a4896e1","uncompressedBytes":504,"command":null},
+    {"id":"r2c-catchup","file":"restored-frontier-88f14ce5f-r2c-catchup.log.gz","sha256":"857f5448749ace5d458769f2b372dd4dfb679a66771fbb09480bb4032828033e","bytes":3992,"uncompressedSha256":"06b4782f6b1242634234ea49bd5e09dfb440f64caaeddc73b73da61e974c4229","uncompressedBytes":25771,"command":"bun tools/stand-lock.ts run --reason \"p6-observe-existing-r2c\" --timeout-ms \"180000\" -- bun \".logs/crisis-20261011/trace-public-p6-catchup.ts\""},
+    {"id":"r2c-final-catchup","file":"restored-frontier-88f14ce5f-r2c-final-catchup.log.gz","sha256":"1a684cfc6d3c296a2e771312076ca6d8a4acc57a7b71a0190f02ddcb95d1da06","bytes":2133,"uncompressedSha256":"75b5d8526f18d9bc7b881048d565ef547958f2749c2df65ea191c3973ada76b6","uncompressedBytes":5129,"command":"bun tools/stand-lock.ts run --reason \"p6-observe-existing-r2c\" --timeout-ms \"180000\" -- bun \".logs/crisis-20261011/trace-public-p6-catchup.ts\""},
+    {"id":"offline-history","file":"restored-frontier-88f14ce5f-offline-history.log.gz","sha256":"56cbff18c22cc0b183f66bc7b0b53bf851835d9d63172a8ac8c755ff85c4e2dc","bytes":1188,"uncompressedSha256":"faefa10396a951aa83fd5916688b2e51aced8a33c567747fa86f37627215705a","uncompressedBytes":4493,"command":"bun tools/stand-lock.ts run --reason \"p6-funded-account-history\" --timeout-ms \"60000\" -- bun \".logs/canonical-review-20261012/diagnose-p6-restored-cursor.ts\""},
+    {"id":"browser","file":"restored-frontier-88f14ce5f-browser.log.gz","sha256":"d73ecad16f1afd97323ffdda2550a86fc6b386e1dc1961501dc836ea3f669da5","bytes":2064,"uncompressedSha256":"9dfa419fd6baa021ff7267a43d27cc78972cab376d4f2e199e120da66552180b","uncompressedBytes":23829,"command":"bun tools/stand-lock.ts run --reason restored-frontier-react-payment --timeout-ms \"180000\" -- bun run prod:smoke:local"},
+    {"id":"browser-report","file":"restored-frontier-88f14ce5f-browser-report.json.gz","sha256":"8f54edbc5b463b83f1101fe84d3d70d2947cf0291efeca45d4201ff16da24227","bytes":2427,"uncompressedSha256":"b83b28270f9a1d02565cdf45705d44109181123ad349abc46537cd012aeb7d0f","uncompressedBytes":10355,"command":null},
+    {"id":"kernel","file":"restored-frontier-88f14ce5f-kernel.json","sha256":"df75f75cdcdd07087ae0745de2afd03ba25f1ce709ab15e1ba6f20ea93a29ba5","bytes":3492,"command":null}
+  ]
+}

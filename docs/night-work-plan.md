@@ -10,11 +10,12 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   replay all frames exactly. This is functional evidence, not live TPS; each
   replay ends with one pending outbox item. Historical 498-frame replay still
   fails identically at height 12 on the pre-move baseline and candidate.
-- Last green: clean 7d3134853, full check (38 source gates), 104/104 related
-  watcher tests (947 assertions), 3/3 real React payment journeys with no skips
-  or flakes, lock-ahb (85 frames), and 25/25 funding/exit cases with 512 fuzz
-  invocations. Eight production compiler templates match. All five local
-  checks share this SHA; public P6 and full CI remain incomplete.
+- Last green: clean 88f14ce5f, full check (38 source gates), 104/104 related
+  watcher tests (951 assertions), 3/3 real React payment journeys with no skips
+  or flakes, and public funding observed then recovered at Runtime height 138.
+  Earlier clean 7d3134853 has lock-ahb (85 frames), 25/25 funding/exit cases
+  with 512 fuzz invocations, and eight matching compiler templates. These
+  earlier checks are not relabelled as current-SHA evidence.
 - First red: cross-j-opening-lifecycle.test.ts cannot resolve the relocated
   TS worker from rscore/fixtures/cross-j-opening/lifecycle.ts. The same old
   import exists in rscore/fixtures/entity-resident-group-e/group-e.ts. Owner
@@ -37,24 +38,23 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 - Next bounded deletion: always-null retired Entity-stage handles, about 120
   lines and two kernel imports. Add the missing two-leg signed Account reject
   regression first; preserve live TS workers, WAL/checkpoints and recording.
-- Public P6 remains independent and unresolved: the funded profile recovers
-  correctly after explicit checkpoint rebase, but PublicNode returns HTTP 429
-  and -32005 during catch-up. Shared cancellable cooldown fixes the reproduced
-  9.535 ms retry; retained pressure also prevents immediate window regrowth.
-  The proxy trace scans 1,048 authenticated blocks. A subsequent direct-upstream
-  trace scans 940 blocks and last observes Runtime height 40, reserve 0; these
-  are not post-shutdown financial reads. Both routes still return 429.
-  No further funding or dispute was submitted.
-  Live alpha remains 7c3f63f98. Do not repeat unchanged short cold-start loops.
-  An identical 128-block authenticated range succeeds once through each route
-  (proxy 3,813 ms, direct 2,124 ms); this does not establish sustained capacity.
-  Next diagnosis is offline: compare restored authenticated jHistory with the
-  watcher start cursor. The direct trace repeatedly reads the prior trace's
-  range without advancing Runtime height. Do not infer persistence from that
-  observation alone or skip history without verifying the restored boundary.
-- Current static kernel closure is 160,552 code lines in 816 files, down 510
-  from the review baseline. QA imports remain zero; core/rscore imports remain 13. RPC fixes add 27 physical production lines net; this is necessary new
-  pressure control, not claimed code deletion. Rust and lending are unchanged.
+- Public P6: fixed restored watchers re-fetching 1,064 authenticated blocks.
+  Existing contiguous history now starts the session; canonical anchor/frontier
+  audits and Entity-certified semantic cursors remain authoritative. The same
+  profile reached reserve 200, then submitted R2C 100 successfully: transaction
+  0x1a186ce331ad64d4999914eb1a568d16796883d29d2ec40c706527d276e08638,
+  block 11897335, gas 344201. Preparation timed out awaiting local observation,
+  but subsequent catch-up exited zero and offline replay independently confirms
+  reserve 100 / collateral 100 at Runtime 138. Account frames 3 and 4 contain
+  only this funding claim; no pending frame or mempool. Do not fund again.
+  The earlier catch-up exit 124 remains failed evidence, not a green run.
+  Next: bounded fixture-only funding-stage resume from receipt and signed frame
+  history, then the unchanged payment/proof/tower path. No dispute yet submitted.
+  Evidence: docs/evidence/canonical-review-20261012/restored-frontier-88f14ce5f.json.
+  Live alpha remains 7c3f63f98; the client evidence does not change deployment.
+- Current static kernel closure is 160,563 code lines in 816 files, down 499
+  from the review baseline. QA imports remain zero; core/rscore imports remain 13. RPC pressure and restored-frontier fixes add 38 physical production lines
+  net; necessary recovery behavior is not claimed as deletion. Rust/lending unchanged.
 - Remaining release gates: required PR CI; ten consecutive green main runs;
   no kernel-to-rscore imports; public P6 with external tower and real clocks;
   start/finalize/reveal coverage; owner-reviewed release
@@ -116,6 +116,16 @@ upstream before another wallet cold start. A one-off success proves availability
 only. This isolates transport contention without changing consensus, providers
 or history. Preserve the pending fixture exception and avoid expanding the
 refactor while required CI cannot run on the complete candidate.
+
+Method review, 07:15 UTC: compare durable authenticated history with the restart
+cursor before blaming network capacity. The real restore regression reproduced
+duplicate reads; its small fix let the public profile reach its funding. Do not
+call an observed balance a passing run before process exit and an independent
+restore. A diagnostic timeout exposed its missing DB cleanup; use the existing
+canonical cleanup rather than add a production shutdown path. Browser evidence
+must retain its enabling environment, not just the default startup command.
+Keep the funded P6 stage; resume only from exact signed history and receipt.
+No external-model budget was spent or renewed.
 
 ## Historical evidence and superseded scope
 

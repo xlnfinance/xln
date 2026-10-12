@@ -44,25 +44,26 @@ are retained; ledger and CI were disabled, so no overall readiness score is asse
 
 ## Implemented ownership changes
 
-| Removed duplication or wrong owner                                          | Canonical owner and preserved behavior                                                                                                                                | Evidence                                                                                               |
-| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Move's second outgoing-debt scan                                            | Runtime `debtTotals.outgoing`; 21 claims of 50 against 1,500 reserve correctly leave 450, including tokens omitted by bounded details                                 | [First patch](evidence/canonical-review-20261012/verification.json)                                    |
-| Duplicate output coalescing and unused readiness executable                 | Existing ordered output merge and retained readiness runner; equivocation still rejects                                                                               | [First patch](evidence/canonical-review-20261012/verification.json)                                    |
-| Runtime imports of QA and both production QA HTTP mounts                    | Runtime owns pure tracing; scenario CLI owns ASCII; tooling retains QA handler                                                                                        | [QA boundary](evidence/canonical-review-20261012/qa-boundary.json)                                     |
-| Ordinary launcher Rust selectors, authority propagation and build preflight | TS-only production launch rejects retired selectors before process preparation                                                                                        | [Launcher](evidence/canonical-review-20261012/ts-only-launcher.json)                                   |
-| Active TS workers and Entity stages under `core/rscore`                     | Runtime owns 14 worker modules; Entity owns execution stage, inbound arrivals and leaf cache; no compatibility alias                                                  | [Worker boundary](evidence/canonical-review-20261012/ts-worker-evidence.json)                          |
-| RPC binding mutating committed state on restore                             | Live infrastructure owns configured RPC selection; restored Runtime roots remain exact                                                                                | [Two cold restores and profile repair](evidence/canonical-review-20261012/rpc-transport-recovery.json) |
-| Independent handling of watcher overload                                    | Existing window reduction handles mempool/RPC pressure; one cancellable cooldown controls manual and automatic polling; retained pressure prevents immediate regrowth | [Real proxy regressions](evidence/canonical-review-20261012/watcher-pressure-window-7d3134853.json)    |
+| Removed duplication or wrong owner                                          | Canonical owner and preserved behavior                                                                                                                                | Evidence                                                                                                     |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Move's second outgoing-debt scan                                            | Runtime `debtTotals.outgoing`; 21 claims of 50 against 1,500 reserve correctly leave 450, including tokens omitted by bounded details                                 | [First patch](evidence/canonical-review-20261012/verification.json)                                          |
+| Duplicate output coalescing and unused readiness executable                 | Existing ordered output merge and retained readiness runner; equivocation still rejects                                                                               | [First patch](evidence/canonical-review-20261012/verification.json)                                          |
+| Runtime imports of QA and both production QA HTTP mounts                    | Runtime owns pure tracing; scenario CLI owns ASCII; tooling retains QA handler                                                                                        | [QA boundary](evidence/canonical-review-20261012/qa-boundary.json)                                           |
+| Ordinary launcher Rust selectors, authority propagation and build preflight | TS-only production launch rejects retired selectors before process preparation                                                                                        | [Launcher](evidence/canonical-review-20261012/ts-only-launcher.json)                                         |
+| Active TS workers and Entity stages under `core/rscore`                     | Runtime owns 14 worker modules; Entity owns execution stage, inbound arrivals and leaf cache; no compatibility alias                                                  | [Worker boundary](evidence/canonical-review-20261012/ts-worker-evidence.json)                                |
+| RPC binding mutating committed state on restore                             | Live infrastructure owns configured RPC selection; restored Runtime roots remain exact                                                                                | [Two cold restores and profile repair](evidence/canonical-review-20261012/rpc-transport-recovery.json)       |
+| Independent handling of watcher overload                                    | Existing window reduction handles mempool/RPC pressure; one cancellable cooldown controls manual and automatic polling; retained pressure prevents immediate regrowth | [Real proxy regressions](evidence/canonical-review-20261012/watcher-pressure-window-7d3134853.json)          |
+| Watcher re-fetching authenticated history after restore                     | Start from existing contiguous history, audit its canonical anchor/frontier, retain Entity-certified semantic progress                                                | [Restore regression and public funding](evidence/canonical-review-20261012/restored-frontier-88f14ce5f.json) |
 
-The last static measurement (`7d3134853`) is **160,552 kernel-closure code lines in
-816 files**, versus **161,062 / 816** at the review baseline: **510 fewer
+The last static measurement (`88f14ce5f`) is **160,563 kernel-closure code lines in
+816 files**, versus **161,062 / 816** at the review baseline: **499 fewer
 reachable code lines**. Direct QA imports are **0**; direct `core/rscore` imports
 are still **13**, reaching 8,418 lines. This is not yet a Rust-free kernel.
-[Exact collector output](evidence/canonical-review-20261012/watcher-pressure-window-7d3134853-kernel.json).
+[Exact collector output](evidence/canonical-review-20261012/restored-frontier-88f14ce5f-kernel.json).
 
 Moving 3,857 worker lines corrects ownership and is not deletion. The QA handler
 was disconnected, not deleted. The two RPC-pressure fixes add 27 physical
-production lines net. Closure and physical-line deltas are different measures;
+production lines net; the restored-frontier fix adds another 11. Closure and physical-line deltas are different measures;
 no overall XLN-1000 readiness score is asserted without CI and ledger inputs.
 
 ## Current verified boundary and remaining failures
@@ -83,6 +84,13 @@ finalization is 4,453,117 gas; one-token start/finalize samples are
 449,300 / 399,142. Printed fuzz samples are not claimed maxima. Local time warp
 does not replace public real-clock evidence.
 
+The subsequent clean source `88f14ce5f3727d5fab4353d8b836a1d4db66c7f0`
+passes 104/104 related tests with 951 assertions, all 38 source gates and
+3/3 React payment/reload journeys with zero skips or flakes. The restore
+regression retains canonical anchor checks while forbidding duplicate reads of
+already authenticated intermediate blocks. Contract and `lock-ahb` results
+above remain bound to their earlier SHA, not relabelled as this candidate.
+
 On the preceding worker source `f163415eb`, a real mixed production WAL has
 708 frames, 2,600 delivered payments and 1,040 matched swaps across 130 user
 Runtimes. TS W1/W4/W8 reproduce every root and ordered output; checkpoint and
@@ -101,10 +109,13 @@ The candidate is **not ready to merge**:
   pass; Unit Tests fail four cases already fixed locally. Fresh eligible CI
   requires closing the fixture failure first. A successful manual workflow
   dispatch does not satisfy required PR checks; protection remains unchanged.
-- Public P6 has not reached the already-funded reserve. Proxy and direct
-  upstream both return 429. The direct trace authenticates 940 blocks and last
-  observes Runtime height 40, reserve 0; no dispute is submitted. Single-range
-  successes prove availability only. [Transport evidence](evidence/canonical-review-20261012/public-rpc-transport-d81a0ed9f.json).
+- Public P6 funding now reached durable Runtime state: reserve 100 and
+  collateral 100 Test USDT at Runtime height 138, independently restored from
+  a private DB copy. The R2C receipt succeeded in block 11897335 using 344,201
+  gas. Account frames 3 and 4 contain only that authenticated funding claim.
+  Preparation timed out before observing the receipt; resume must prove this
+  stage before continuing, never repeat funding. The earlier catch-up timeout
+  (exit 124) is retained separately. No stale dispute or tower exit is claimed.
 - No public deployment or mainnet acceptance follows from the local checks.
   The live alpha remains `7c3f63f98`; current P6, ten consecutive green main
   runs and the owner-reviewed release package remain open.

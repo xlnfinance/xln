@@ -3,8 +3,9 @@
 // then recover the same Runtime after the external tower has finalized its exit.
 import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { HDNodeWallet, JsonRpcProvider, getBytes, isAddress } from 'ethers';
+import { HDNodeWallet, JsonRpcProvider, ZeroHash, getBytes, isAddress } from 'ethers';
 import type { EntityTx, RuntimeInput } from '../../core/api/public/runtime-module';
+import type { AccountFrame } from '../../core/types/account';
 import { withRuntimeCommittedRead } from '../../core/runtime/frame/lifecycle/writer-lock';
 import { accountNetBalance } from '../../frontend/src/lib/utils/ui/accountBalance';
 import { safeParse, safeStringify } from '../../core/protocol/serialization';
@@ -12,6 +13,11 @@ import { requireBigInt } from '../../core/protocol/boundary/boundary-primitives'
 import { Depository__factory } from '../typechain-types';
 import { assertCanonicalRpcContractStack } from '../../core/orchestrator/bootstrap/contract-readiness';
 import { getJurisdictionIdentityRef } from '../../core/jurisdiction/machine/jurisdiction-runtime';
+import { computeAccountKey } from '../../core/jurisdiction/adapter/events/contract-codec';
+import { decodeInt512 } from '../../core/protocol/crypto/abi-money';
+import { extractCanonicalDepositoryEventArgs } from '../../core/jurisdiction/adapter/events/depository-event-codec';
+import { rawEventToJEvents } from '../../core/jurisdiction/adapter/events/j-event-payloads';
+import { canonicalJurisdictionEventKey } from '../../core/jurisdiction/machine/events/event-normalization';
 
 const mode = process.argv[2];
 if (mode !== 'prepare' && mode !== 'recover') throw Error('PUBLIC_P6_MODE_REQUIRED');
@@ -47,8 +53,7 @@ const contracts = {
   deltaTransformer: address('deltaTransformer'),
 };
 const name = configured.name;
-if (configured.chainId !== 11155111 || typeof name !== 'string')
-  throw Error('PUBLIC_P6_SEPOLIA_REQUIRED');
+if (configured.chainId !== 11155111 || typeof name !== 'string') throw Error('PUBLIC_P6_SEPOLIA_REQUIRED');
 const url = 'https://sepolia.xln.finance';
 const rpc = `${url}/rpc`;
 const hub = '0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6';
@@ -58,9 +63,12 @@ const entityId = xln.generateLazyEntityId([signerId], 1n).toLowerCase();
 xln.registerSignerKey(seed, signerId, getBytes(signer.privateKey));
 const env = await xln.main(seed, {
   numericSignerPrewarmCount: 1,
-  trustedJurisdictionRpcBindings: [{
-    jurisdictionRef: getJurisdictionIdentityRef({ chainId: 11155111, contracts }), rpcUrl: rpc,
-  }],
+  trustedJurisdictionRpcBindings: [
+    {
+      jurisdictionRef: getJurisdictionIdentityRef({ chainId: 11155111, contracts }),
+      rpcUrl: rpc,
+    },
+  ],
 });
 const provider = new JsonRpcProvider(rpc, 11155111, { cacheTimeout: -1 });
 const depository = Depository__factory.connect(contracts.depository, provider);
@@ -75,6 +83,27 @@ const balance = () => {
   const delta = a.state.deltas.get(1);
   if (!delta) throw Error('PUBLIC_P6_TOKEN_MISSING');
   return accountNetBalance(xln.deriveDelta(delta, a.state.leftEntity === entityId));
+};
+const fundingEvent = (frame: AccountFrame) => {
+  const tx = frame.accountTxs[0];
+  if (frame.accountTxs.length !== 1 || tx?.type !== 'j_event_claim' || tx.data.events.length !== 1)
+    throw Error('PUBLIC_P6_RESUME_REQUIRES_FUNDING_ONLY_FRAME');
+  const event = tx.data.events[0]!;
+  if (
+    event.type !== 'AccountSettled' ||
+    !event.transactionHash ||
+    !event.blockHash ||
+    event.blockNumber !== tx.data.jHeight ||
+    event.blockHash !== tx.data.jBlockHash ||
+    event.data.leftEntity !== account().state.leftEntity ||
+    event.data.rightEntity !== account().state.rightEntity ||
+    event.data.tokenId !== 1 ||
+    event.data.nonce !== 0 ||
+    event.data.collateral !== '100000000' ||
+    BigInt(event.data.ondelta) !== (account().state.leftEntity === entityId ? 100_000_000n : 0n)
+  )
+    throw Error('PUBLIC_P6_RESUME_FUNDING_EVENT_MISMATCH');
+  return event;
 };
 const send = (input: RuntimeInput) => {
   xln.validateRuntimeInputAdmission(env, input);
@@ -240,29 +269,140 @@ try {
         },
       ]);
     await wait('account-open', () => Boolean(state()?.accounts.get(hub)?.currentFrame) && !account().pendingFrame);
-    if (balance() !== 0n || account().state.deltas.get(1)!.collateral !== 0n || account().activeDispute)
-      throw Error('PUBLIC_P6_PREPARE_REQUIRES_EMPTY_ACCOUNT');
-    if ((await provider.getBalance(signerId)) === 0n)
-      await post('/api/faucet/gas', { userAddress: signerId, jurisdiction: name });
     // WAL replay does not imply the J watcher has caught up. Read the contract
     // before funding; then require the real watcher to commit that balance.
     // A failed HTTP response must never cause this fixture to fund twice.
-    const observedReserve = await depository._reserves(entityId, 1);
-    const expectedReserve = observedReserve === 0n ? 100_000_000n : observedReserve;
-    if (expectedReserve < 100_000_000n) throw Error('PUBLIC_P6_EXISTING_RESERVE_TOO_SMALL');
-    if (observedReserve === 0n) {
-      const intent = `${directory}/funding-requested.json`;
-      if (await Bun.file(intent).exists()) throw Error('PUBLIC_P6_FUNDING_PENDING_INSPECT_CHAIN');
-      await Bun.write(intent, safeStringify({ sourceSha, entityId, amount: 100_000_000n }));
-      await post('/api/faucet/reserve', { userEntityId: entityId, tokenId: 1, tokenSymbol: 'USDT', amount: '100' });
-    }
-    console.log(safeStringify({ stage: 'reserve-chain-baseline', reserve: expectedReserve }));
-    await wait('reserve-funded', () => state()?.reserves.get(1) === expectedReserve);
-    entity([
-      { type: 'r2c', data: { counterpartyId: hub, tokenId: 1, amount: 100_000_000n } },
-      { type: 'j_broadcast', data: {} },
+    const block = await provider.getBlock('latest');
+    if (!block) throw Error('PUBLIC_P6_BLOCK_MISSING');
+    const accountKey = computeAccountKey(entityId, hub);
+    const [chainAccount, chainCollateral, observedReserve] = await Promise.all([
+      depository._accounts(accountKey, { blockTag: block.number }),
+      depository._collaterals(accountKey, 1, { blockTag: block.number }),
+      depository._reserves(entityId, 1, { blockTag: block.number }),
     ]);
+    if (chainAccount.disputeHash !== ZeroHash || chainAccount.nonce !== 0n || account().activeDispute)
+      throw Error('PUBLIC_P6_PREPARE_CHAIN_STAGE_INVALID');
+    let expectedReserve: bigint;
+    let resumedFrameHash: string | undefined;
+    if (chainCollateral.collateral === 0n && decodeInt512(chainCollateral.ondelta) === 0n) {
+      if (balance() !== 0n || account().state.deltas.get(1)!.collateral !== 0n)
+        throw Error('PUBLIC_P6_PREPARE_REQUIRES_EMPTY_ACCOUNT');
+      expectedReserve = observedReserve === 0n ? 100_000_000n : observedReserve;
+      if (expectedReserve < 100_000_000n) throw Error('PUBLIC_P6_EXISTING_RESERVE_TOO_SMALL');
+      if ((await provider.getBalance(signerId)) === 0n)
+        await post('/api/faucet/gas', { userAddress: signerId, jurisdiction: name });
+      if (observedReserve === 0n) {
+        const intent = `${directory}/funding-requested.json`;
+        if (await Bun.file(intent).exists()) throw Error('PUBLIC_P6_FUNDING_PENDING_INSPECT_CHAIN');
+        await Bun.write(intent, safeStringify({ sourceSha, entityId, amount: 100_000_000n }));
+        await post('/api/faucet/reserve', { userEntityId: entityId, tokenId: 1, tokenSymbol: 'USDT', amount: '100' });
+      }
+      console.log(safeStringify({ stage: 'reserve-chain-baseline', reserve: expectedReserve }));
+      await wait('reserve-funded', () => state()?.reserves.get(1) === expectedReserve);
+      entity([
+        { type: 'r2c', data: { counterpartyId: hub, tokenId: 1, amount: 100_000_000n } },
+        { type: 'j_broadcast', data: {} },
+      ]);
+    } else {
+      const ownedOndelta = account().state.leftEntity === entityId ? 100_000_000n : 0n;
+      if (chainCollateral.collateral !== 100_000_000n || decodeInt512(chainCollateral.ondelta) !== ownedOndelta)
+        throw Error('PUBLIC_P6_RESUME_COLLATERAL_MISMATCH');
+      await wait(
+        'funding-observed',
+        () =>
+          state()?.reserves.get(1) === observedReserve &&
+          account().state.deltas.get(1)!.collateral === 100_000_000n &&
+          !account().pendingFrame &&
+          account().mempool.length === 0,
+      );
+      const funded = await withRuntimeCommittedRead(env, async () => {
+        const current = account().currentFrame!;
+        if (current.height > 10_000 || balance() !== 100_000_000n || account().state.deltas.get(1)!.offdelta !== 0n)
+          throw Error('PUBLIC_P6_RESUME_ACCOUNT_STAGE_INVALID');
+        const event = fundingEvent(current);
+        const key = canonicalJurisdictionEventKey(event);
+        const history = await xln.readPersistedAccountFrameHistory(env, entityId, hub, current.height);
+        const first = history.findIndex(frame =>
+          frame.accountTxs.some(
+            tx =>
+              tx.type === 'j_event_claim' &&
+              tx.data.events.some(value => value.transactionHash === event.transactionHash),
+          ),
+        );
+        if (first < 0) throw Error('PUBLIC_P6_RESUME_FUNDING_HISTORY_MISSING');
+        // Require the initial claim, not a truncated suffix beginning at its
+        // peer confirmation. This fixture starts with empty claim trees.
+        const initial = history[first]!.accountTxs[0]!;
+        if (
+          initial.type !== 'j_event_claim' ||
+          initial.data.leftProof?.nodes.length !== 0 ||
+          initial.data.rightProof?.nodes.length !== 0
+        )
+          throw Error('PUBLIC_P6_RESUME_INITIAL_FUNDING_CLAIM_MISSING');
+        const suffix = history.slice(first);
+        for (const [index, frame] of suffix.entries()) {
+          if (
+            frame.height !== suffix[0]!.height + index ||
+            canonicalJurisdictionEventKey(fundingEvent(frame)) !== key ||
+            (index > 0 && frame.prevFrameHash !== suffix[index - 1]!.stateHash)
+          )
+            throw Error('PUBLIC_P6_RESUME_FUNDING_HISTORY_MISMATCH');
+        }
+        if (suffix.at(-1)!.stateHash !== current.stateHash || suffix.at(-1)!.height !== current.height)
+          throw Error('PUBLIC_P6_RESUME_FUNDING_HISTORY_INCOMPLETE');
+        return { event, key, frameHash: current.stateHash };
+      });
+      const receipt = await provider.getTransactionReceipt(funded.event.transactionHash!);
+      const log = receipt?.logs.find(
+        value =>
+          value.index === funded.event.logIndex && value.address.toLowerCase() === contracts.depository.toLowerCase(),
+      );
+      const parsed = log && depository.interface.parseLog({ topics: [...log.topics], data: log.data });
+      if (
+        !receipt ||
+        receipt.status !== 1 ||
+        receipt.blockNumber > block.number ||
+        receipt.blockNumber !== funded.event.blockNumber ||
+        receipt.blockHash !== funded.event.blockHash ||
+        !log ||
+        !parsed
+      )
+        throw Error('PUBLIC_P6_RESUME_FUNDING_RECEIPT_MISMATCH');
+      const events = rawEventToJEvents(
+        {
+          name: parsed.name,
+          args: extractCanonicalDepositoryEventArgs(parsed),
+          blockNumber: receipt.blockNumber,
+          blockHash: receipt.blockHash,
+          transactionHash: receipt.hash,
+          logIndex: log.index,
+        },
+        entityId,
+      );
+      const ownerReserve =
+        account().state.leftEntity === entityId ? funded.event.data.leftReserve : funded.event.data.rightReserve;
+      if (
+        events.length !== 1 ||
+        canonicalJurisdictionEventKey(events[0]!) !== funded.key ||
+        BigInt(ownerReserve) !== observedReserve ||
+        account().currentFrame!.stateHash !== funded.frameHash
+      )
+        throw Error('PUBLIC_P6_RESUME_FUNDING_STATE_CHANGED');
+      expectedReserve = observedReserve + chainCollateral.collateral;
+      resumedFrameHash = funded.frameHash;
+      console.log(
+        safeStringify({ stage: 'collateral-funding-resumed', transactionHash: receipt.hash, expectedReserve }),
+      );
+    }
     await wait('collateral-funded', () => balance() === 100_000_000n && !account().pendingFrame);
+    if (
+      resumedFrameHash &&
+      (account().currentFrame!.stateHash !== resumedFrameHash ||
+        account().mempool.length ||
+        account().activeDispute ||
+        state()!.reserves.get(1) !== expectedReserve - 100_000_000n)
+    )
+      throw Error('PUBLIC_P6_RESUME_FUNDING_STATE_CHANGED');
     entity([
       {
         type: 'directPayment',
