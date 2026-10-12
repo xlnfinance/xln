@@ -4,9 +4,10 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core even with zero protected files. No WIP commits.
 
-- Current SHA: verified source `d51910eeea249b56db4bf63d9157cbf2cd3be201`
-  on `codex/rc-wallet-recovery`; the following commit records evidence and owner
-  corrections only.
+- Current SHA: PR #70 source `976b126fa093c6a9bc9952e83eb7dac9f13c5952`
+  on `codex/rc-wallet-recovery`; runtime code matches the React-verified d519.
+  The next change fixes the stale expected release-test list and records public
+  Sepolia evidence. https://github.com/xlnfinance/xln/pull/70
   Owner approved PRs with mandatory green CI on 2026-10-12. Main protection is
   enabled: all seven build-and-test jobs, strict up-to-date checks, required PR,
   administrators included, no force pushes/deletions. This replaces direct-main-only.
@@ -21,6 +22,11 @@ Keep frozen-core even with zero protected files. No WIP commits.
   Every recorded run started and ended with a clean tree and held the stand lock
   where required. P5 deliberately exhausts hub reserves: keep P6 in its separate
   release stand, rather than combining those tests against one funded hub.
+  Public green: P4/P5 on clean 976b126fa and current Sepolia bytecode,
+  with real clocks. P4 returns all 85 test USDT collateral, gas start 933174 /
+  finalize 241109. P5 pays 95 of a 110 test USDT claim and records 15 debt,
+  gas start 933994 / finalize 767286. Both waited 24 chain seconds against a
+  signed 10-second window, then separately proved a 5 test USDT external withdrawal.
 - First red resolved: P6 exposed three distinct production faults. The watcher
   retained a signature cleared by Depository's final event, then passed ethers
   Result proxies into durable state, then CounterDisputeRegistered changed an
@@ -31,12 +37,21 @@ Keep frozen-core even with zero protected files. No WIP commits.
   Main CI 38189132378 finished 6/7 green including all E2E; unit failures were
   two shallow Linux /tmp fixtures. Both now use owned data children, preserving
   the production reset guard. Local launcher/preflight checks are green.
+  PR CI 38192080486: five jobs green; E2E stopped before browsers because
+  release-gate-order.test.ts still expected the old three groups. The focused
+  regression reproduced both failures; its expected list now requires all four
+  groups including P6 and file recovery. Focused checks 10/10 and the complete
+  release-integrity command pass. Unit CI was still running when this was recorded.
 - Artifacts: clean evidence docs/evidence/rc-20261012/react-d51910eee.json
   includes the ten cases, Account recovery snapshots, receipts, gas and log hashes.
   The obsolete hash/signature-only export and its test decoder are removed;
   actual encrypted restore plus on-chain exit replaces that coverage.
-- Next: `bun run check`, commit the owned evidence/documentation paths, push
-  the branch, create/attach a PR and inspect its required Linux CI checks.
+  Public receipts, block timestamps and gas are in
+  docs/evidence/rc-20261012/sepolia-976b126fa.json. The public wallet/hub/tower
+  still run 7c3f63f98; the 976b126fa UI archive is prepared but not deployed.
+- Next: `bun run check`, inspect the remaining unit CI result, commit owned
+  paths and update PR #70. After green CI, rehearse current-state recovery and
+  prepare the synchronized public wallet/hub/tower rollout before fresh P6.
 - Remaining final gates: ten consecutive green main runs; production Rust/QA
   isolation; current-source public Sepolia P4-P6 with real clocks; external tower
   coverage; exact-build owner-reviewed release package. Owner correction:

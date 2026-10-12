@@ -1,0 +1,322 @@
+{
+  "recordedAt": "2026-10-12T01:40:33.547642+00:00",
+  "sourceSha": "976b126fa093c6a9bc9952e83eb7dac9f13c5952",
+  "sourceTreeCleanBeforeAndAfter": true,
+  "scope": "P4/P5 contract and signed-batch acceptance on public Sepolia, using the committed production proof script. This does not certify a refreshed public wallet/hub or P6.",
+  "chainId": 11155111,
+  "clockManipulation": false,
+  "canonicalBytecode": {
+    "sourceSha": "976b126fa093c6a9bc9952e83eb7dac9f13c5952",
+    "chainId": 11155111,
+    "canonicalStackBytecodeVerified": true,
+    "observedAt": "2026-10-12T01:31:58.719Z",
+    "block": 11895621,
+    "contracts": [
+      {
+        "name": "account",
+        "address": "0x1a1C16E886385A4720952b0D2b3845A258d559a9",
+        "codeHash": "0x4b23f853f902325ca5b231fcc5fcaae9fde7a89eded60ee092cc5f03f5d62647"
+      },
+      {
+        "name": "entityProvider",
+        "address": "0xa4f82fcB80D6198Fb64F75D7B8242643Ca3c960C",
+        "codeHash": "0x39d53eecbc11d78aec8c2b96c40c8e53e1fcde5b8bad03d8538a41707b28d3ff"
+      },
+      {
+        "name": "depository",
+        "address": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+        "codeHash": "0x70a5b9b30932d6add71c24a56ad624ede560d53ea01b3b8870ddd0b525ddfe33"
+      },
+      {
+        "name": "deltaTransformer",
+        "address": "0x3189d71877F2CE96922FC88d0e9E56f6078A7D04",
+        "codeHash": "0xf0b6c12143a14da9143b650dbb23895da3b01482dc352c2bb90b5ef76cf01b98"
+      }
+    ],
+    "token": {
+      "address": "0x4d6cF5B015567B598B5961f9662Fce6e5267d774",
+      "name": "Tether USD Test",
+      "decimals": 6
+    }
+  },
+  "commands": [
+    "PUBLIC_CHAIN_PRIVATE_KEY=<dedicated Keychain-derived P4 signer> PUBLIC_PROOF_ALLOW_TEST_TOKEN_MINT=1 bun jurisdictions/scripts/public-proof-smoke.ts --jurisdiction=ethereum-sepolia --deposit=100000000 --settle=10000000 --withdraw=5000000",
+    "PUBLIC_CHAIN_PRIVATE_KEY=<dedicated Keychain-derived P5 signer> PUBLIC_PROOF_ALLOW_TEST_TOKEN_MINT=1 bun jurisdictions/scripts/public-proof-smoke.ts --jurisdiction=ethereum-sepolia --deposit=100000000 --settle=10000000 --withdraw=5000000 --unsecured-claim=25000000"
+  ],
+  "cases": [
+    {
+      "scenario": "P4",
+      "sourceSha": "976b126fa093c6a9bc9952e83eb7dac9f13c5952",
+      "chainId": 11155111,
+      "sourceTreeCleanBeforeAndAfter": true,
+      "exclusiveStandLock": true,
+      "productionProofScript": "jurisdictions/scripts/public-proof-smoke.ts",
+      "result": {
+        "kind": "PUBLIC_PROOF_SMOKE",
+        "jurisdictionId": "ethereum-sepolia",
+        "compiler": "0.8.36",
+        "ownerEntityId": "0xa93cdca4bf92411821d49cc6c62a01b11a796863334fb3c6fa5f5e5fbda16f4a",
+        "ownerIsLeft": false,
+        "counterpartyEntityId": "0x4e1db5a138686dcfd52733389c6cb8278aba06ff29c8faf3ca28d0612d7a1731",
+        "accountKey": "0x4e1db5a138686dcfd52733389c6cb8278aba06ff29c8faf3ca28d0612d7a1731a93cdca4bf92411821d49cc6c62a01b11a796863334fb3c6fa5f5e5fbda16f4a",
+        "tokenMintTransactionHash": "0x9c657bdfb3a96127cfc5c9ee1396a2b58b4a3c9663cc28c511a734d7c8d4382a",
+        "depositTransactionHash": "0x4e20e4397d443b2d501f72cb5b706d5825a40c0319d881c070cb2cba684eb022",
+        "settlementTransactionHash": "0xd5c1cbe656b1f02f0836e08875f0aab0833f2c95b2a862461e92d614f61d51ff",
+        "collateralFundingTransactionHash": "0x434b56403dde07c3e2898fdd9073508cbd07f01f4777e749372bcdce2af3da11",
+        "fundedCollateral": "85000000",
+        "unsecuredClaim": "0",
+        "collectedUnsecured": "0",
+        "remainingDebt": "0",
+        "debtCreditor": null,
+        "debtIndex": null,
+        "finalCollateral": "0",
+        "disputeStartTransactionHash": "0xedf388986a6bef507a3c7d6c1001135c7a0c61d380fb1c38928b01ff4b9fd48c",
+        "disputeFinalizeTransactionHash": "0xeb42df8264a94e3919722f25690b4c07a3ba837a9570a1ae8fe0a45dbfc732e5",
+        "withdrawalTransactionHash": "0x62aa37a950166bd52a94e55d7fc622f33bb014d041fd4c2f6e28def47c606c12",
+        "disputeWindowSeconds": 10,
+        "ownerReserve": "85000000",
+        "counterpartyReserve": "10000000"
+      },
+      "receipts": [
+        {
+          "kind": "tokenMintTransactionHash",
+          "hash": "0x9c657bdfb3a96127cfc5c9ee1396a2b58b4a3c9663cc28c511a734d7c8d4382a",
+          "status": 1,
+          "blockNumber": 11895633,
+          "blockHash": "0x622124deb89ad15ab399259fd0d9741998b3e4006078000c859564b650fbfdd4",
+          "timestamp": 1791768852,
+          "from": "0x62eA762f3e507FB34991fc2aE8FE598651C60DF8",
+          "to": "0x4d6cF5B015567B598B5961f9662Fce6e5267d774",
+          "gasUsed": "140210",
+          "gasPrice": "1000016",
+          "feeWei": "140212243360"
+        },
+        {
+          "kind": "depositTransactionHash",
+          "hash": "0x4e20e4397d443b2d501f72cb5b706d5825a40c0319d881c070cb2cba684eb022",
+          "status": 1,
+          "blockNumber": 11895635,
+          "blockHash": "0x021aeee5895bf11683303a2032b546f44d613d93153b2683a61867b79c5e9683",
+          "timestamp": 1791768876,
+          "from": "0x62eA762f3e507FB34991fc2aE8FE598651C60DF8",
+          "to": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+          "gasUsed": "335162",
+          "gasPrice": "1000016",
+          "feeWei": "335167362592"
+        },
+        {
+          "kind": "settlementTransactionHash",
+          "hash": "0xd5c1cbe656b1f02f0836e08875f0aab0833f2c95b2a862461e92d614f61d51ff",
+          "status": 1,
+          "blockNumber": 11895636,
+          "blockHash": "0x13e8fd0e0ebecc97b5a9abfd311142ee4c607da6c51f9eb20e2ed5664634242b",
+          "timestamp": 1791768888,
+          "from": "0x62eA762f3e507FB34991fc2aE8FE598651C60DF8",
+          "to": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+          "gasUsed": "389847",
+          "gasPrice": "1000016",
+          "feeWei": "389853237552"
+        },
+        {
+          "kind": "collateralFundingTransactionHash",
+          "hash": "0x434b56403dde07c3e2898fdd9073508cbd07f01f4777e749372bcdce2af3da11",
+          "status": 1,
+          "blockNumber": 11895637,
+          "blockHash": "0x80c461aa4c9eba54c1d0cd7b6edbe48c4c0c7e82e5cceae945e708b0b09462b5",
+          "timestamp": 1791768900,
+          "from": "0x62eA762f3e507FB34991fc2aE8FE598651C60DF8",
+          "to": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+          "gasUsed": "246317",
+          "gasPrice": "1000016",
+          "feeWei": "246320941072"
+        },
+        {
+          "kind": "disputeStartTransactionHash",
+          "hash": "0xedf388986a6bef507a3c7d6c1001135c7a0c61d380fb1c38928b01ff4b9fd48c",
+          "status": 1,
+          "blockNumber": 11895638,
+          "blockHash": "0x0220606a73ee87032192788329dec14874f8aca818108e9a4db5b7e5da93bba2",
+          "timestamp": 1791768912,
+          "from": "0x62eA762f3e507FB34991fc2aE8FE598651C60DF8",
+          "to": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+          "gasUsed": "933174",
+          "gasPrice": "1000016",
+          "feeWei": "933188930784"
+        },
+        {
+          "kind": "disputeFinalizeTransactionHash",
+          "hash": "0xeb42df8264a94e3919722f25690b4c07a3ba837a9570a1ae8fe0a45dbfc732e5",
+          "status": 1,
+          "blockNumber": 11895640,
+          "blockHash": "0x14f3da7d134ea3ed071cb2a782975be8b1fd4ab2167ab5bd8e9518bdd42832bc",
+          "timestamp": 1791768936,
+          "from": "0x62eA762f3e507FB34991fc2aE8FE598651C60DF8",
+          "to": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+          "gasUsed": "241109",
+          "gasPrice": "1000016",
+          "feeWei": "241112857744"
+        },
+        {
+          "kind": "withdrawalTransactionHash",
+          "hash": "0x62aa37a950166bd52a94e55d7fc622f33bb014d041fd4c2f6e28def47c606c12",
+          "status": 1,
+          "blockNumber": 11895641,
+          "blockHash": "0x9282f171114f817ff25d8edb587b25e3f8f04b9730d4cf7d59dc3ffbcb05fb38",
+          "timestamp": 1791768948,
+          "from": "0x62eA762f3e507FB34991fc2aE8FE598651C60DF8",
+          "to": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+          "gasUsed": "256764",
+          "gasPrice": "1000016",
+          "feeWei": "256768108224"
+        }
+      ],
+      "realElapsedDisputeSeconds": 24,
+      "clockManipulation": false,
+      "logSha256": "9e9d05f9dc28ef21ff408478133e6fe6fae122363022d8dedcaf401398ba1c6f"
+    },
+    {
+      "scenario": "P5",
+      "sourceSha": "976b126fa093c6a9bc9952e83eb7dac9f13c5952",
+      "chainId": 11155111,
+      "sourceTreeCleanBeforeAndAfter": true,
+      "exclusiveStandLock": true,
+      "productionProofScript": "jurisdictions/scripts/public-proof-smoke.ts",
+      "result": {
+        "kind": "PUBLIC_PROOF_SMOKE",
+        "jurisdictionId": "ethereum-sepolia",
+        "compiler": "0.8.36",
+        "ownerEntityId": "0x703c1e7a000eb3d2cda4bca8d8c941955c3c448c5484360f1d5e7a04e37e0313",
+        "ownerIsLeft": false,
+        "counterpartyEntityId": "0x369bb81f1d0f95d50f9f9c6c1182907a69d9f0ba3fa172bbc2deaab2f753ecd4",
+        "accountKey": "0x369bb81f1d0f95d50f9f9c6c1182907a69d9f0ba3fa172bbc2deaab2f753ecd4703c1e7a000eb3d2cda4bca8d8c941955c3c448c5484360f1d5e7a04e37e0313",
+        "tokenMintTransactionHash": "0xdcb86072717f40ca476763d47b21ab34f85bbc64a01fcd5727f0bb6bb488024a",
+        "depositTransactionHash": "0x5410142fda51ef2a206ea31d03726ef03cd656af1ab6e0ed6e96d1b1515ea94c",
+        "settlementTransactionHash": "0x2b5fd7e6fd484b328420f464705a61f261bbb0749a656b9f0f9d3c99096447b1",
+        "collateralFundingTransactionHash": "0xd88cb4ece4a68b5e7537ed823c9f96d5204d58a20b42ef5d728f432285a800a7",
+        "fundedCollateral": "85000000",
+        "unsecuredClaim": "25000000",
+        "collectedUnsecured": "10000000",
+        "remainingDebt": "15000000",
+        "debtCreditor": "0x703c1e7a000eb3d2cda4bca8d8c941955c3c448c5484360f1d5e7a04e37e0313",
+        "debtIndex": "0",
+        "finalCollateral": "0",
+        "disputeStartTransactionHash": "0x051fd77c8a06a1879e6a254c34405bdb3d798d6f9c9f918dd96085f46a93d599",
+        "disputeFinalizeTransactionHash": "0x4f991da99ffbac9f75f7c8f30fa73f31506e3a4452287e43bad341fc47598ea0",
+        "withdrawalTransactionHash": "0x65d79f09c750b16da2a0b784aec28e4c7e6d93769ff47636a5414c9fc00f8656",
+        "disputeWindowSeconds": 10,
+        "ownerReserve": "95000000",
+        "counterpartyReserve": "0"
+      },
+      "receipts": [
+        {
+          "kind": "tokenMintTransactionHash",
+          "hash": "0xdcb86072717f40ca476763d47b21ab34f85bbc64a01fcd5727f0bb6bb488024a",
+          "status": 1,
+          "blockNumber": 11895644,
+          "blockHash": "0x43f5f8cbcbdf2fd85f3650daf7ca7b16db2cf18e01700b0e00d12fd94c836814",
+          "timestamp": 1791768984,
+          "from": "0x0DC3E8143c08FEf6561BD9b20Bae7d7ad78b992c",
+          "to": "0x4d6cF5B015567B598B5961f9662Fce6e5267d774",
+          "gasUsed": "140210",
+          "gasPrice": "1000016",
+          "feeWei": "140212243360"
+        },
+        {
+          "kind": "depositTransactionHash",
+          "hash": "0x5410142fda51ef2a206ea31d03726ef03cd656af1ab6e0ed6e96d1b1515ea94c",
+          "status": 1,
+          "blockNumber": 11895646,
+          "blockHash": "0x72ffe9bef6b038eb6112be8323cea761de1ea18f8e307d2683bedba9eabe4f9b",
+          "timestamp": 1791769008,
+          "from": "0x0DC3E8143c08FEf6561BD9b20Bae7d7ad78b992c",
+          "to": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+          "gasUsed": "335178",
+          "gasPrice": "1000016",
+          "feeWei": "335183362848"
+        },
+        {
+          "kind": "settlementTransactionHash",
+          "hash": "0x2b5fd7e6fd484b328420f464705a61f261bbb0749a656b9f0f9d3c99096447b1",
+          "status": 1,
+          "blockNumber": 11895647,
+          "blockHash": "0x70ab7f615ea93e210a38247f1fdeec485fd9caf8a5bb3c1cfad0034f06f47d7e",
+          "timestamp": 1791769020,
+          "from": "0x0DC3E8143c08FEf6561BD9b20Bae7d7ad78b992c",
+          "to": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+          "gasUsed": "389819",
+          "gasPrice": "1000016",
+          "feeWei": "389825237104"
+        },
+        {
+          "kind": "collateralFundingTransactionHash",
+          "hash": "0xd88cb4ece4a68b5e7537ed823c9f96d5204d58a20b42ef5d728f432285a800a7",
+          "status": 1,
+          "blockNumber": 11895648,
+          "blockHash": "0x6aa1bfb176c7cb187ccf55448304349d9afe1653c480ca7a91820ee226403dba",
+          "timestamp": 1791769032,
+          "from": "0x0DC3E8143c08FEf6561BD9b20Bae7d7ad78b992c",
+          "to": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+          "gasUsed": "246333",
+          "gasPrice": "1000016",
+          "feeWei": "246336941328"
+        },
+        {
+          "kind": "disputeStartTransactionHash",
+          "hash": "0x051fd77c8a06a1879e6a254c34405bdb3d798d6f9c9f918dd96085f46a93d599",
+          "status": 1,
+          "blockNumber": 11895649,
+          "blockHash": "0xb27c5bbe181c219c87e499aca178464e1f62988c87a0c34172d30b593b279c51",
+          "timestamp": 1791769044,
+          "from": "0x0DC3E8143c08FEf6561BD9b20Bae7d7ad78b992c",
+          "to": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+          "gasUsed": "933994",
+          "gasPrice": "1000016",
+          "feeWei": "934008943904"
+        },
+        {
+          "kind": "disputeFinalizeTransactionHash",
+          "hash": "0x4f991da99ffbac9f75f7c8f30fa73f31506e3a4452287e43bad341fc47598ea0",
+          "status": 1,
+          "blockNumber": 11895651,
+          "blockHash": "0xb84276d4606b4100788beab2f770be5265b3fa56448ff7abaee79d832021f184",
+          "timestamp": 1791769068,
+          "from": "0x0DC3E8143c08FEf6561BD9b20Bae7d7ad78b992c",
+          "to": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+          "gasUsed": "767286",
+          "gasPrice": "1000016",
+          "feeWei": "767298276576"
+        },
+        {
+          "kind": "withdrawalTransactionHash",
+          "hash": "0x65d79f09c750b16da2a0b784aec28e4c7e6d93769ff47636a5414c9fc00f8656",
+          "status": 1,
+          "blockNumber": 11895652,
+          "blockHash": "0xc41274f13dbf8378a58dd87a10af59f0f53e2981acc6905e4fd5953eaa83bc48",
+          "timestamp": 1791769080,
+          "from": "0x0DC3E8143c08FEf6561BD9b20Bae7d7ad78b992c",
+          "to": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+          "gasUsed": "256764",
+          "gasPrice": "1000016",
+          "feeWei": "256768108224"
+        }
+      ],
+      "realElapsedDisputeSeconds": 24,
+      "clockManipulation": false,
+      "logSha256": "874603689d14488e2d4a0082f9f9e2972e7a8ff5f7bae99718d803cd80b5c4f8"
+    }
+  ],
+  "limits": [
+    "The dedicated proof Entities are controlled test fixtures, not unaffiliated commercial activity or MML evidence.",
+    "P4 returns 85 test USDT collateral; P5 pays 95 of a 110 test USDT claim and records the remaining 15 as unsecured debt. Each flow separately verifies a 5 test USDT external withdrawal.",
+    "Both signed dispute windows are 10 seconds; actual inclusion elapsed 24 seconds from start to finalize. These timings do not validate longer governance/signature-expiry combinations.",
+    "These are one-token measurements, not the worst-case exit-gas proof.",
+    "Public P6 on the updated tower/runtime, public-wallet rollout and the exact mainnet release package remain outstanding."
+  ],
+  "uiPreparation": {
+    "sourceSha": "976b126fa093c6a9bc9952e83eb7dac9f13c5952",
+    "command": "NODE_ENV=production bun run --cwd ui build",
+    "exitCode": 0,
+    "archiveSha256": "794175f2a2df0fda0cf9d7a24e37acd65d75139444e3b4545507119919fd4688",
+    "deployed": false
+  }
+}
