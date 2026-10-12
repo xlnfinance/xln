@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ethers } from 'ethers';
 
-import { createEmptyEnv } from '../../../runtime';
+import { createEmptyEnv, processRuntime } from '../../../runtime';
 import { safeStringify } from '../../../protocol/serialization';
 import { deriveSignerAddressSync, getSignerPrivateKey } from '../../../account/crypto';
 import { encodeSingleSignerBoard, generateLazyEntityId, hashBoard } from '../../../entity/factory';
@@ -375,8 +375,11 @@ describe('RPC J-watcher backlog drain', () => {
     ));
     expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 511);
 
-    const retainedPressureGate = rpcProxy.armBlockNumberGate();
     const successfulRetryAt = performance.now();
+    // Commit the first real observed range so the next poll can advance.
+    // One success must not restore the larger burst while pressure remains.
+    await processRuntime(env);
+    const retainedPressureGate = rpcProxy.armBlockNumberGate();
     const retainedPressurePoll = pollWatcher();
     await waitForGate('retained-pressure', retainedPressureGate, retainedPressurePoll);
     try {
@@ -385,6 +388,7 @@ describe('RPC J-watcher backlog drain', () => {
       retainedPressureGate.release();
     }
     await retainedPressurePoll;
+    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 1023);
 
     await processJEvents(env);
 

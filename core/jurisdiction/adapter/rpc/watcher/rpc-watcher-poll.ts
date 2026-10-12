@@ -283,5 +283,8 @@ export const runWatcherPoll = async (request: PollRequest): Promise<void> => {
   if (!committed) return;
   rememberScanProgress(session, services, toBlock);
   session.transientFailures = 0;
-  session.maxBlocksPerPoll = nextWatcherPollWindow(session.maxBlocksPerPoll, true);
+  // Retained RPC pressure must suppress both retry bursts and window regrowth.
+  if (session.rpcCooldown.backoffMs === 0) {
+    session.maxBlocksPerPoll = nextWatcherPollWindow(session.maxBlocksPerPoll, true);
+  }
 };
