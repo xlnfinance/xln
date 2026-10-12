@@ -937,7 +937,7 @@ const ensureHubMeshReserves = async (
     input.hubBootstraps,
     step => input.markProgress(`local-reserve:${step}`),
   );
-  return health.targetMet === true;
+  return health.ok === true && (!canDeployHubDefaultTokens(input.jurisdiction.chainId) || health.targetMet === true);
 };
 
 const advanceHubMeshBootstrap = async (

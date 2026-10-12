@@ -79,28 +79,16 @@ describe('runtime import readiness gate', () => {
     });
   });
 
-  test('blocks import when reserve targets are not fully met even if core system is up', () => {
+  test('allows live import after valid reserve spending while bootstrap targets remain diagnostic', () => {
     const health = baseReadyHealth();
-    health.degraded = ['bootstrapReserveTargets'];
     health.bootstrapReserves = { ...health.bootstrapReserves, targetMet: false };
 
-    expect(resolveRuntimeImportReadiness(health)).toEqual({
+    expect(resolveRuntimeImportReadiness(health)).toEqual({ ok: true });
+    health.bootstrapReserves = { ...health.bootstrapReserves, ok: false };
+    expect(resolveRuntimeImportReadiness(health)).toMatchObject({
       ok: false,
       status: 503,
-      error: 'RUNTIME_IMPORT_NETWORK_NOT_READY',
-      reason: 'degraded:bootstrapReserveTargets',
-      category: 'TransientRace',
-      code: 'BOOTSTRAP_RESERVE_TARGETS_NOT_READY',
-      retryable: true,
-      fatal: false,
-      failure: {
-        category: 'TransientRace',
-        code: 'BOOTSTRAP_RESERVE_TARGETS_NOT_READY',
-        message: 'bootstrapReserveTargets',
-        retryable: true,
-        fatal: false,
-      },
-      degraded: ['bootstrapReserveTargets'],
+      reason: 'bootstrap-reserves-not-ready',
     });
   });
 

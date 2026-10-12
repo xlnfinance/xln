@@ -5,28 +5,28 @@ Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
 
-Current checkpoint, 2026-10-12 20:01 UTC: PR #73 at d29c84c66 passed five of
-seven required jobs. E2E stopped at the incomplete recovery fixture (634/635
-core tests); Unit Tests found the same missing WAL frame plus missing debtTotals
-and a memory iterator ignoring its key range. All three test fixtures are now
-corrected without production changes or weaker assertions. Recovery uses the
-real WAL/current DB and checks nodes before HEAD publication. Related tests:
-30/30, 124 assertions, 2.40s. Next: full check, push this correction, then await
-exact-head CI before activating Sepolia. No owner question remains.
+Current checkpoint, 2026-10-12 20:34 UTC: PR #73 passed all seven required
+CI jobs on clean 336cdbe32 and merged as d1eb4f2d7. The private Sepolia rollout
+restored actual H1 state through R4477/J11898053, with coreOk=true. Startup did
+not finish: it requires the original 2,000,000 USDT bootstrap target after the
+valid P6 exit left 1,999,800 USDT. Public ingress remains in maintenance and
+both services stopped; preserve current WAL and the original cold backup.
+No new owner decision is required.
 
-Release preparation on clean d29c84c66: archived React payment/reload 1/1;
-current deployed contract templates match; copied stopped H1 caught up to
-R4475/J11897669 with 128/128 integrity frames, P6 dispute cleared, collateral
-zero, no RPC writes. The caught-up DB restores identically with current code
-and staged rollback 5e6d08a16. Both code/UI releases are prepared on the server;
-services were not changed and the public backend remains unavailable. Preserve
-funded state and tower RPC allowlist. After green CI: maintenance, cold backup,
-exact candidate start, financial state check, then public wallet drill.
+The stopped deployed H1 copy cold-restores through the pinned 336cdbe32 source:
+128/128 integrity frames, reconstructed root verified, P6 dispute cleared and
+collateral zero. No network adapters or transaction submission in this check.
+Evidence: docs/evidence/canonical-review-20261012/release-336cdbe32.json.
+This proves deployed financial recovery, not public wallet availability.
 
-Method review: stop treating an imported test fixture as a valid persisted
-Runtime. The first red command now runs with a real stored frame; the existing
-validator stays strict. No new audit/metric/gate; source checks precede one new
-CI run. Three bounded local reproductions identified all observed CI failures.
+Method review: green local dev funding does not prove public-chain restart
+after withdrawals. Follow the first deployed boundary: operational reserves
+must gate service readiness, while initial dev funding targets remain explicit
+bootstrap diagnostics. Do not replenish the 200 USDT to hide the defect or
+weaken storage/empty-reserve checks. The minimal TS startup/import fix passes 72 related tests and 1,055 assertions.
+Static review confirms dev H2/H3 funding and zero-reserve rejection remain.
+Next: check the committed candidate and real compiled-wallet/bootstrap path,
+then require a new PR with exact-head green CI before public activation.
 
 - Owner authorized the one active TS fixture import correction on October 12.
   The stale worker path is replaced by the canonical Runtime worker path;
