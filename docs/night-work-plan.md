@@ -81,6 +81,18 @@ report path relocation separately from deleted logic and reachable audit size.
 Discover candidate paths before opening them: repeated guessed-path failures
 added no evidence. Rust implementations and their parked changes remain frozen.
 
+Method review, 05:45 UTC: the old 498-frame transcript fails at the same frame
+and with identical hashes on both the baseline and worker candidate. Preserve
+that failure; a fresh clean-source recording now replays all 708 frames exactly
+in TS W1/W4/W8. HLT fixtures now use the real projection emitters, which exposed
+two stale decoder schemas before the recording could succeed. A browser build
+also rewrites a tracked generated worker bundle: resolve its build ownership and
+repeat the clean-source browser/scenario proof before publishing this cut.
+Do not count moved code as deletion or generated artifacts as independent source.
+The next deletion proposal is bounded to always-null retired stage handles;
+finish this candidate's evidence and eligible PR CI before expanding its scope.
+No external-model budget was spent or renewed.
+
 ## Historical evidence and superseded scope
 
 Owner priority, 2026-10-11 17:28 UTC: ship a public Sepolia deployment and usable

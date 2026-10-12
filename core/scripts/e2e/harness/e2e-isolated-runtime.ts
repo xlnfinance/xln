@@ -5,12 +5,7 @@ import { freemem, loadavg, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
 import { compareStableText } from '../../../protocol/serialization';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
-import type {
-  QaCodeFingerprint,
-  QaPerfChildSample,
-  QaPerfSample,
-  QaPerfSummary,
-} from '../../../qa/types';
+import type { QaCodeFingerprint, QaPerfChildSample, QaPerfSample, QaPerfSummary } from '../../../qa/types';
 export type { QaPerfSummary } from '../../../qa/types';
 
 export type E2ECodeFingerprint = QaCodeFingerprint & { buildInputHash: string };
@@ -21,11 +16,7 @@ export type E2ECodeFingerprint = QaCodeFingerprint & { buildInputHash: string };
  * Allocation must be known before children start, while drift checks must
  * remain usable after a shard is already running.
  */
-const DEV_RESERVED_PORTS = new Set([
-  8080, 8081, 8082, 8087, 8088,
-  8092, 8093, 8094, 8095,
-  8545, 8546, 9100, 17_999,
-]);
+const DEV_RESERVED_PORTS = new Set([8080, 8081, 8082, 8087, 8088, 8092, 8093, 8094, 8095, 8545, 8546, 9100, 17_999]);
 
 export type E2EShardPorts = {
   rpc: number;
@@ -138,12 +129,14 @@ export const isE2EBuildInputPath = (file: string): boolean => {
 
 const E2E_GENERATED_OUTPUTS = new Set([
   'frontend/static/runtime.js',
+  'frontend/static/account-worker.js',
   'ui/public/runtime.js',
+  'ui/public/account-worker.js',
 ]);
 
 export const isE2ECodeInputPath = (file: string): boolean => {
   const path = file.replaceAll('\\', '/').replace(/^\.\//, '');
-  // These tracked bundles are outputs, not candidate authority. Dev watchers may
+  // These generated bundles are outputs, not candidate authority. Dev watchers may
   // rebuild them while an isolated run uses its own immutable runtime bundle.
   return !E2E_GENERATED_OUTPUTS.has(path);
 };

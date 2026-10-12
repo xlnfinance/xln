@@ -30,20 +30,24 @@ const createE2EBuildCacheFixture = (root: string, codeHash: string) => {
   writeFileSync(artifacts.runtimeBundlePath, 'runtime-v1', 'utf8');
   writeFileSync(join(artifacts.svelteKitOutDir, 'output/server/manifest.js'), 'manifest-v1', 'utf8');
   writeFileSync(join(artifacts.frontendBuildDir, 'index.html'), '<main>v1</main>', 'utf8');
-  writeFileSync(join(root, 'manifest.json'), JSON.stringify({
-    version: 1,
-    buildInputHash: codeHash,
-    artifactHash: computeE2EBuildArtifactHash(artifacts),
-    createdAt: '2026-07-17T00:00:00.000Z',
-  }));
+  writeFileSync(
+    join(root, 'manifest.json'),
+    JSON.stringify({
+      version: 1,
+      buildInputHash: codeHash,
+      artifactHash: computeE2EBuildArtifactHash(artifacts),
+      createdAt: '2026-07-17T00:00:00.000Z',
+    }),
+  );
   return artifacts;
 };
 
 describe('isolated E2E runner resources', () => {
   test('canonical package E2E commands never exceed the machine-wide lease pool', () => {
     const scripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts as Record<string, string>;
-    const canonicalCommands = Object.entries(scripts)
-      .filter(([name, command]) => name.startsWith('test:e2e:') && command.includes('run-e2e-parallel-isolated.ts'));
+    const canonicalCommands = Object.entries(scripts).filter(
+      ([name, command]) => name.startsWith('test:e2e:') && command.includes('run-e2e-parallel-isolated.ts'),
+    );
     expect(canonicalCommands.length).toBeGreaterThan(0);
     for (const [name, command] of canonicalCommands) {
       const match = command.match(/--shards=(\d+)/);
@@ -93,8 +97,9 @@ describe('isolated E2E runner resources', () => {
     try {
       expect(first.basePort).toBe(50_000);
       expect(second.basePort).toBe(50_020);
-      await expect(acquireLocalTestPortLease({ slotBases, timeoutMs: 0 }))
-        .rejects.toThrow('LOCAL_TEST_PORT_SLOTS_EXHAUSTED');
+      await expect(acquireLocalTestPortLease({ slotBases, timeoutMs: 0 })).rejects.toThrow(
+        'LOCAL_TEST_PORT_SLOTS_EXHAUSTED',
+      );
       expect(LOCAL_TEST_STACK_BASES).toHaveLength(7);
     } finally {
       first.release();
@@ -112,8 +117,9 @@ describe('isolated E2E runner resources', () => {
       const workerLeases = await acquireAvailableE2EWorkerPortLeases(3, { slotBases });
       try {
         expect(workerLeases.map(lease => lease.basePort)).toEqual([50_120, 50_140]);
-        await expect(acquireLocalTestPortLease({ slotBases, timeoutMs: 0 }))
-          .rejects.toThrow('LOCAL_TEST_PORT_SLOTS_EXHAUSTED');
+        await expect(acquireLocalTestPortLease({ slotBases, timeoutMs: 0 })).rejects.toThrow(
+          'LOCAL_TEST_PORT_SLOTS_EXHAUSTED',
+        );
       } finally {
         for (const lease of workerLeases) lease.release();
       }
@@ -124,13 +130,19 @@ describe('isolated E2E runner resources', () => {
 
   test('keeps sibling worker guards held until abort cleanup settles', async () => {
     let finishSibling!: () => void;
-    const sibling = new Promise<void>(resolveSibling => { finishSibling = resolveSibling; });
+    const sibling = new Promise<void>(resolveSibling => {
+      finishSibling = resolveSibling;
+    });
     let observedError: unknown;
     let settled = false;
     const waiting = awaitE2EWorkersBeforeLeaseRelease(
       [Promise.reject(new Error('primary-worker-failed')), sibling],
-      error => { observedError = error; },
-    ).finally(() => { settled = true; });
+      error => {
+        observedError = error;
+      },
+    ).finally(() => {
+      settled = true;
+    });
 
     await Bun.sleep(0);
     expect((observedError as Error)?.message).toBe('primary-worker-failed');
@@ -178,9 +190,11 @@ describe('isolated E2E runner resources', () => {
     expect(runner).toContain('codeFingerprint.buildInputHash,');
     expect(runner).not.toContain('prepareIsolatedE2EBuild(logsDir, codeFingerprint.codeHash');
     expect(runner).not.toContain("runE2ECommand('bun', ['run', 'build']");
-    expect(runner).toContain("const webUrl = `http://localhost:${webPort}`");
+    expect(runner).toContain('const webUrl = `http://localhost:${webPort}`');
     expect(runner).toContain("XLN_VITE_FORCE_HTTP: '1'");
-    expect(runner).toContain("PW_PROFILE: args.pwProject === 'brainvault' || args.pwProject === 'webkit-mobile' ? args.pwProject : ''");
+    expect(runner).toContain(
+      "PW_PROFILE: args.pwProject === 'brainvault' || args.pwProject === 'webkit-mobile' ? args.pwProject : ''",
+    );
     expect(runner).toContain('Math.min(args.stackTimeoutMs, 30_000)');
     expect(viteConfig).toContain("const FORCE_HTTP = process.env['XLN_VITE_FORCE_HTTP'] === '1'");
     expect(runtimeImport).not.toContain("return 'http://127.0.0.1:8082'");
@@ -290,15 +304,12 @@ describe('isolated E2E runner resources', () => {
     ]);
   });
 
-
   test('fails loud when source bytes drift during an E2E run', () => {
     const start = 'a'.repeat(64);
     const end = 'b'.repeat(64);
 
     expect(() => assertE2ECodeFingerprintStable(start, start)).not.toThrow();
-    expect(() => assertE2ECodeFingerprintStable(start, end)).toThrow(
-      `E2E_CODE_DRIFT:start=${start}:end=${end}`,
-    );
+    expect(() => assertE2ECodeFingerprintStable(start, end)).toThrow(`E2E_CODE_DRIFT:start=${start}:end=${end}`);
   });
 
   test('reuses only an exact build cache and fails strict reuse on byte corruption', () => {
@@ -313,9 +324,7 @@ describe('isolated E2E runner resources', () => {
       expect(decision.action).toBe('rebuild');
       if (decision.action !== 'rebuild') throw new Error('EXPECTED_BUILD_CACHE_REBUILD');
       expect(decision.reason).toStartWith('E2E_BUILD_CACHE_CORRUPT:');
-      expect(() => decideE2EBuildCache(artifacts, codeHash, true)).toThrow(
-        'E2E_BUILD_CACHE_CORRUPT:',
-      );
+      expect(() => decideE2EBuildCache(artifacts, codeHash, true)).toThrow('E2E_BUILD_CACHE_CORRUPT:');
 
       const freshArtifacts = createE2EBuildCacheFixture(root, codeHash);
       expect(decideE2EBuildCache(freshArtifacts, 'b'.repeat(64), false)).toEqual({
@@ -341,9 +350,7 @@ describe('isolated E2E runner resources', () => {
         writeFileSync(resolve(root, file), `${file}:v1`);
       }
       const original = computeE2EBuildInputHash(files, root);
-      expect(computeE2EBuildInputHash(files, root, '1.4.0')).not.toBe(
-        computeE2EBuildInputHash(files, root, '1.3.14'),
-      );
+      expect(computeE2EBuildInputHash(files, root, '1.4.0')).not.toBe(computeE2EBuildInputHash(files, root, '1.3.14'));
       writeFileSync(resolve(root, files[0]!), 'runner:changed');
       writeFileSync(resolve(root, files[1]!), 'test:changed');
       expect(computeE2EBuildInputHash(files, root)).toBe(original);
@@ -385,6 +392,8 @@ describe('isolated E2E runner resources', () => {
     expect(isE2ECodeInputPath('core/runtime.ts')).toBe(true);
     expect(isE2ECodeInputPath('frontend/src/app.ts')).toBe(true);
     expect(isE2ECodeInputPath('frontend/static/runtime.js')).toBe(false);
+    expect(isE2ECodeInputPath('frontend/static/account-worker.js')).toBe(false);
     expect(isE2ECodeInputPath('ui/public/runtime.js')).toBe(false);
+    expect(isE2ECodeInputPath('ui/public/account-worker.js')).toBe(false);
   });
 });
