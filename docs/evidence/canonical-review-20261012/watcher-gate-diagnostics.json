@@ -1,0 +1,49 @@
+{
+  "sourceSha": "8d7f1e7428e95c52bb4244b90418909e311d3aa9",
+  "cleanBeforeAndAfterExecution": true,
+  "change": "Three RPC fixture gate handshakes race poll completion. Premature completion fails with stage, scan progress, actual header trace and watching status; releases and disarms the gate.",
+  "checks": [
+    {
+      "command": "bun run stand:run --reason watcher-gate-handshake --timeout-ms 180000 -- bun test core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts",
+      "passed": 1,
+      "failed": 0,
+      "assertions": 28,
+      "standLockHeld": true
+    },
+    {
+      "command": "bun run stand:run --reason watcher-gate-jurisdiction-shard --timeout-ms 180000 -- bun test core/__tests__/jurisdiction",
+      "passed": 444,
+      "failed": 0,
+      "files": 70,
+      "assertions": 2181,
+      "standLockHeld": true
+    },
+    {
+      "command": "bun run check",
+      "status": "passed",
+      "sourceGatesPassed": 38
+    }
+  ],
+  "limitations": [
+    "This improves failure diagnosis; it does not establish or claim to fix the CI-only 60-second timeout.",
+    "The 4700-block backlog, real 429/HTTP timeout, state invariants and test deadline remain unchanged.",
+    "No new production behavior, alternative watcher, retry policy or mock was introduced."
+  ],
+  "artifacts": [
+    {
+      "path": "watcher-gate-focused.log.gz",
+      "sha256": "2741f7898e5905a9dd1002ce09ab662d41be21aff5e184c5d58cbb70b5a83e76",
+      "uncompressedSha256": "9be600c88c74a4e4884221eda92f034d193385d4c288db3376fa98ebda035062"
+    },
+    {
+      "path": "watcher-gate-shard.log.gz",
+      "sha256": "008d03cb4af2d4170665527972dfe42d45f5588f63f4fa6d48dd70b23c9f0f90",
+      "uncompressedSha256": "a790f22c336af1f8de170216c84ec146a9b631a8a5678e2fe412081fa2f92baa"
+    },
+    {
+      "path": "watcher-gate-check.log.gz",
+      "sha256": "dddc7298765a59ffb8c8c63fe16458189a96475b6ce879ac6cf1173e681c21e8",
+      "uncompressedSha256": "b1626aa0be6544ac05ecfb5140a4b28b6bd168266fc0f9d9b6db0d33b8067996"
+    }
+  ]
+}

@@ -105,6 +105,20 @@ All 18 remaining tooling edges point to `core/rscore`, whose reachable 11,691
 code lines include active TS code that cannot simply be removed.
 [Exact measurements, commands and retained logs](evidence/canonical-review-20261012/qa-boundary.json).
 
+The next CI failure separated browser readiness from financial behavior: a
+shared history-row locator focused Home after the URL changed but before Activity
+mounted. One existing Activity-only readiness assertion fixes the test; the real
+keyboard/resize journey and 38 source checks passed on clean `ca96f041d`.
+[Retained trace diagnosis and execution evidence](evidence/canonical-review-20261012/receipt-navigation.json).
+
+CI run 38200437268 on `f257ad8eb` passed its E2E job and five other jobs, but its
+jurisdiction unit shard timed out in the backlog fixture. A full local shard
+passed 444/444 on `f48eca1a`; the CI-only cause remains unresolved. Gate handshakes
+now fail explicitly if a poll completes before the expected request, preserving
+all assertions and the 60-second limit. That diagnostic change on clean `8d7f1e742`
+passed its focused case, all 444 jurisdiction tests, and 38 source checks.
+[Diagnostic scope and retained logs](evidence/canonical-review-20261012/watcher-gate-diagnostics.json).
+
 ## Target ownership and deletion sequence
 
 The live queue stays in [todo.md](../todo.md). This table is the reviewed design,

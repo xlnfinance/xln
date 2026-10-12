@@ -4,12 +4,15 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Current source: `34fec44123ca495ad6730f8b4c8c05263b0c4d0a` on
-  `codex/production-qa-boundary`, based on PR #72 at `f257ad8eb`.
-  PR #71 now carries the tower-restore test fix at `999396327`; PR #72 is
-  stacked on it. Main remains `86d2a515`. Neither PR is approved for merge
+- Current source: `bbd33b1bbff2b14b130c27b153915818fbcf0c35` on
+  `codex/production-qa-boundary` (PR #73), merging PR #72 at `8d7f1e742`.
+  PR #71 now carries the Activity readiness test fix at `ca96f041d`; PR #72 is
+  stacked on it. Main remains `86d2a515`. No PR is approved for merge
   until all required CI jobs pass on its exact candidate.
-- Last green: QA separation on clean `34fec4412`: 53/53 units / 1,912 assertions,
+- Last green: clean `8d7f1e742`: focused backlog 1/1, full jurisdiction shard
+  444/444 / 2,181 assertions, and check / 38 source gates. Receipt focus browser
+  1/1 and check / 38 on clean `ca96f041d`. QA separation on clean `34fec4412`:
+  53/53 units / 1,912 assertions,
   full check / 38 source gates, React payment and reload 1/1 with no skips/flakes,
   live QA route 404. `lock-ahb` passed 85 frames on `2b2c1081c`; subsequent change
   only made formatter helpers private. Kernel closure shrank 454 code lines;
@@ -25,9 +28,11 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   the first authenticated range through block 11893390; later retries retain it.
   Main CI 38197082078 and old PR runs 38198105230/38198345234 all failed the same
   tower-restore expectation race; the selected-snapshot fix is now submitted.
-  New PR #71 run 38200202391 failed earlier in React receipt focus after viewport
-  resize (`e2e-payment.spec.ts:260`); recovery was not reached. Investigate the
-  trace before assuming the old failure or rerunning unchanged CI.
+  PR #71 run 38200202391's receipt-focus fixture navigation race is fixed.
+  PR #72 run 38200437268 finished 6/7 green including E2E, with only the backlog
+  unit test exceeding 60 seconds. Its exact failing phase is unknown. Explicit
+  gate/poll race diagnostics now preserve stage and state; this is not a claim
+  that the CI-only timeout is fixed. The next run must supply that evidence.
 - Artifacts: `docs/evidence/canonical-review-20261012/` records the original
   eight-scope review and `rpc-restore-followup.json` with clean-source tests,
   browser/check logs and the explicitly failed public P6 run. `qa-boundary.json`
@@ -35,8 +40,10 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   Public P4/P5 and
   cold restore remain in `docs/evidence/rc-20261012/`. The live public alpha
   still runs `7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621`.
-- Next single action: finish the QA separation PR, then fix the first verified
-  React receipt/viewport CI failure in PR #71 and revalidate PR #72.
+- Next single action: inspect exact-candidate CI for PR #71 (`ca96f041d`) and
+  PR #72 (`8d7f1e742`). Keep QA PR #73 stacked until the base is green; its old
+  run 38201516918 was cancelled after the parent changed. Revalidate the final
+  QA candidate rather than repeatedly running stale stacked combinations.
   For public P6, identify the slow RPC method/range before another identical
   retry; never skip chain history or manufacture ingress. The next structural
   cut separates active TS workers from retired Rust hooks. Rust proposals stay read-only.
@@ -53,7 +60,7 @@ restore expectations to the snapshot selected by discovery, not a moving display
 The attempted public retries did not complete P6; retain their exact failure and
 stop repeating unchanged requests. Before any external retry, read chain state
 and preserve submission intent. The 30-minute review heartbeat `xln-30` remains
-active; no external-model budget was spent or renewed.
+  active; no external-model budget was spent or renewed.
 
 ## Historical evidence and superseded scope
 
