@@ -1,0 +1,109 @@
+{
+  "sourceSha": "c6215ccd3a0c2100038c1ef6ca24dc708384e6c8",
+  "cleanBefore": true,
+  "cleanAfter": true,
+  "result": "Public P6 remains unproved. Recovered Runtime starts; public RPC throughput prevents reaching the existing reserve in a bounded live session.",
+  "uninterruptedTrace": {
+    "standLocked": true,
+    "budgetMs": 180000,
+    "traceMs": 160000,
+    "runtimeHeight": 17,
+    "observedReserve": "0",
+    "throughHeight": 11893966,
+    "fundingRequests": 0,
+    "disputeTransactions": 0
+  },
+  "firstRawFailure": {
+    "host": "sepolia.xln.finance",
+    "upstream": "PublicNode",
+    "httpStatus": 429,
+    "rpcCode": -32005,
+    "message": "Rate limit exceeded.",
+    "retryAfter": null,
+    "request": "128 eth_getBlockByNumber calls"
+  },
+  "isolatedRange": {
+    "from": 11893967,
+    "to": 11894094,
+    "headers": 128,
+    "fullBlockReceiptRequests": 6,
+    "logs": 0,
+    "elapsedMs": 3435,
+    "receiptRootsVerified": true,
+    "limitation": "One isolated successful range does not prove sustained catch-up or P6."
+  },
+  "alternatives": {
+    "date": "2026-10-12",
+    "scope": "Two provider candidates; basic read-only availability only. No suitable replacement confirmed; no configuration changes.",
+    "targetRange": [
+      11893967,
+      11894094
+    ],
+    "providers": [
+      {
+        "endpoint": "https://eth-sepolia.api.onfinality.io/public",
+        "officialSources": [
+          "https://onfinality.io/en/networks/eth-sepolia",
+          "https://documentation.onfinality.io/support/ethereum"
+        ],
+        "documentedPublicRequestsPerSecond": 5,
+        "documentedEthGetBlockReceipts": true,
+        "observations": [
+          {
+            "method": "eth_chainId",
+            "httpStatus": 200,
+            "elapsedMs": 486,
+            "result": "0xaa36a7"
+          },
+          {
+            "method": "eth_getBlockByNumber",
+            "block": 11893967,
+            "httpStatus": 429,
+            "elapsedMs": 137,
+            "errorCode": -32029,
+            "errorMessage": "Too Many Requests, Please apply an OnFinality API key or contact us to receive a higher rate limit"
+          }
+        ],
+        "ethGetBlockReceiptsProbed": false,
+        "stoppedAfterRateLimit": true
+      },
+      {
+        "endpoint": "https://public.1rpc.io/sepolia",
+        "officialSources": [
+          "https://docs.1rpc.io/overview/supported-networks"
+        ],
+        "observations": [
+          {
+            "method": "eth_chainId",
+            "elapsedMs": 5003,
+            "error": "TimeoutError: The operation timed out."
+          }
+        ],
+        "captureLimitation": "An earlier basic probe yielded before output and its session handle was not retained. Its outcome is unknown. A second read of the same endpoint produced the recorded timeout; no third provider was probed.",
+        "historicalHeaderVerified": false,
+        "ethGetBlockReceiptsVerified": false
+      }
+    ],
+    "fullAuthenticatedRangeProbed": false
+  },
+  "decision": "Keep the current configuration until a replacement passes authenticated reads. Do not skip history, change committed blockDelayMs after replay, add funding again, or count this as P6 acceptance.",
+  "methodReview": {
+    "time": "2026-10-12T04:45:00Z",
+    "change": "Capture the first bounded raw RPC failure before repeating a long live session. Once the upstream quota is established, continue independent TS canonicalization rather than retry unchanged.",
+    "paidModelBudgetRenewed": false
+  },
+  "logs": [
+    {
+      "path": "docs/evidence/canonical-review-20261012/p6-repaired-uninterrupted-catchup.log.gz",
+      "sha256": "03b8abe6878d95697911f3a0ae811f1ab0290ff718f2835635b67f79747704be"
+    },
+    {
+      "path": "docs/evidence/canonical-review-20261012/p6-first-live-rpc-rejection.log.gz",
+      "sha256": "d1b9cd3ce4b4bf3c8fe9fcd6cffec3b497e86caa8f7f855a66d3243412d4e661"
+    },
+    {
+      "path": "docs/evidence/canonical-review-20261012/p6-authenticated-rpc-rejection.log.gz",
+      "sha256": "5b3eb8813280d3f5005a6deac9ab948f7ebbce12941c28567c0e64038a3ddd69"
+    }
+  ]
+}

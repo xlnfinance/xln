@@ -111,7 +111,7 @@ describe('orchestrator child secret channel', () => {
       XLN_MESH_RESET_TOKEN: 'mesh-reset-token',
     };
     expect(buildManagedRuntimeChildSecretEnv(sourceEnv, false)).toEqual({ KEEP_FOR_CHILD: 'kept' });
-    const hubEnv = buildHubChildProcessEnv({
+    const hubOptions = {
       hubName: 'H2',
       dbPath: '/tmp/h2',
       brainvaultOwnerPath: '/tmp/h2/brainvault-owner.json',
@@ -121,10 +121,15 @@ describe('orchestrator child secret channel', () => {
       orchestratorOwnerId: 'owner',
       startupTimeoutMs: 1_000,
       sourceEnv,
-    });
+    };
+    const hubEnv = buildHubChildProcessEnv(hubOptions);
     expect(hubEnv['KEEP_FOR_CHILD']).toBe('kept');
     expect(hubEnv['XLN_ORCHESTRATOR_OPERATOR_TOKEN']).toBeUndefined();
     expect(hubEnv['XLN_MESH_RESET_TOKEN']).toBeUndefined();
+    for (const key of ['XLN_RSCORE_AUTHORITY', 'XLN_RSCORE_SHADOW', 'XLN_HUB_RSCORE_AUTHORITY_H2']) {
+      expect(() => buildHubChildProcessEnv({ ...hubOptions, sourceEnv: { ...sourceEnv, [key]: '1' } }))
+        .toThrow(`HUB_ENGINE_RETIRED:${key}:typescript-only`);
+    }
   });
 
   test('managed child secret handshake fails with the child spawn error', async () => {

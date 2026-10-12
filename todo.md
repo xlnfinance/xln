@@ -18,11 +18,12 @@ preserved; the public alpha has not yet been updated to the new candidate.
    green CI. [Review and measured first patch](docs/canonical-refactoring-20261012.md)
    retain all eight areas' proposals without making a second live queue.
 2. Complete reserve-confirmation rollout and public P6 from the recovered profile:
-   public RPC 429/timeouts still prevent observing its existing funding within
-   60 seconds. Preserve authenticated history and avoid duplicate funding. Use genuine
+   the raw PublicNode response confirms a quota limit; a 160-second uninterrupted
+   run still did not observe existing funding. Preserve authenticated history and avoid duplicate funding. Use genuine
    old/new signatures, external tower, real clocks and fresh recovery.
-3. Land the verified production QA separation (454 fewer reachable kernel code
-   lines), then remove retired Rust execution hooks while retaining active TS
+3. Land the verified production QA separation in combined PR #73 (454 fewer
+   reachable kernel code lines), then reject retired Rust launch selectors before
+   setup and delete their build preflight. Remove retired runtime hooks while retaining active TS
    workers; prove exact roots, positional outbox and recovery.
 4. Consolidate duplicated wallet route/depth policy and strict Brainvault worker
    admission, each behind its smallest actual failure and browser proof.

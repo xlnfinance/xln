@@ -4,8 +4,9 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Verified source: `042026fe09d855e9a3126e2f44be662cc5af3144` on
-  `codex/restore-rpc-transport`, descended from QA PR #73 at `c4566fd81`.
+- Verified source: `c6215ccd3a0c2100038c1ef6ca24dc708384e6c8` in combined
+  PR #73 against main. The next isolated launcher cut is on
+  `codex/ts-only-launcher`; do not change the running final-candidate CI head.
   PR #71 at `ca96f041d` and PR #72 at `8d7f1e742` now both have all seven
   CI jobs green, including E2E. Main remains `86d2a515`. Consolidate the final
   candidate in PR #73 against main and require its own seven green jobs before
@@ -22,11 +23,15 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   checkpoint chain, with a different frame hash.
 - First unresolved boundary: public P6 catch-up. Live startup of the repaired
   profile succeeds, but RPC 429/timeouts prevent observing the existing 200 test
-  USDT reserve in the 60-second trace. The watcher re-authenticated 576 blocks
+  USDT reserve even in the uninterrupted 160-second trace. The watcher re-authenticated 576 blocks
   through 11893966, already present in the original durable jHistory. Its cold
   start uses the earlier certified Entity/J cursor 11893390, so Runtime height16
   staying unchanged is expected. Do not repeat this short cold-start loop or
-  interpret it as lost WAL evidence. No new funding or dispute was submitted.
+  interpret it as lost WAL evidence. The raw upstream response proves PublicNode
+  quota rejection (-32005, HTTP 429). An isolated authenticated 128-block range
+  passed in 3.435s; that does not establish sustained availability. Two alternative
+  public providers did not pass basic availability. No new funding or dispute was
+  submitted, and no RPC configuration was changed.
 - Artifacts: `docs/evidence/canonical-review-20261012/rpc-transport-recovery.json`
   binds tests, check, incident script, archive digests and live trace to clean
   source. `p6-frame14-rebase.json` records the explicit checkpoint boundary.
@@ -34,25 +39,24 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   seed remains in the original profile. Never publish the seed, signed private
   recording or raw DB. Public P4/P5 and prior cold restore are in
   `docs/evidence/rc-20261012/`. Live alpha still runs `7c3f63f98`.
-- Next single command: run the existing catch-up trace on the repaired profile
-  for 160 seconds within the 180-second stand budget, keeping one Runtime alive.
-  Verify progress above 11893966 and then reserve observation. Preserve the
-  authenticated read path; do not tune production RPC policy before this test.
-  Finish final-candidate PR CI in parallel, then public P6 with actual signatures,
-  external tower, real clocks and a further cold restore.
+- Next single command: run the focused launcher regression after its stable
+  TS-only patch. Remove the retired Rust build preflight and authority propagation;
+  use the existing selector to reject retired engines before setup. Finish PR #73's
+  own CI before merging it. Public P6 needs an adequate RPC source and then actual
+  signatures, external tower, real clocks and a further cold restore.
 - Remaining final gates: ten consecutive green main CI runs; active TS worker
   isolation from retired Rust tooling; public P6; external tower start/finalize/
   reveal coverage; current exit-gas and owner-reviewed mainnet release package.
   No extra dispute-start freeze, FIFO, one debt per debtor/creditor/token and
   party-selected windows remain settled. No starter bond/governance redesign.
 
-Method review, 04:15 UTC: recovery precedes RPC tuning. An offline prefix replay
-isolated the first divergence in 0.535 seconds. The next block closed the
-reproduced recovery gap with ordinary hash verification and explicit checkpoint
-provenance. The short live retry then established that startup re-reads an already
-durable tail. Keep one bounded live session for catch-up rather than repeatedly
-restarting it. Existing 30-minute heartbeat `xln-30` remains active; no external
-model budget was spent or renewed.
+Method review, 04:45 UTC: the recovery gap is closed, but a longer unchanged
+network retry did not close P6. Capture the first bounded raw failure before
+another long run; the raw response identified the provider quota. Continue the
+independent TS launcher cut instead of rotating unverified providers or repeating
+the same catch-up. Evidence: `docs/evidence/canonical-review-20261012/p6-rpc-quota.json`.
+Existing 30-minute heartbeat `xln-30` remains active; no external-model budget was
+spent or renewed.
 
 ## Historical evidence and superseded scope
 

@@ -214,6 +214,35 @@ test('ordinary dev uses a kernel-held machine-wide singleton', () => {
   replacement.release();
 });
 
+test('dev rejects retired engine activation before setup in every launch mode', async () => {
+  const root = join(mkdtempSync(join(tmpdir(), 'xln-dev-retired-engine-')), 'not-created');
+  tempRoots.push(resolve(root, '..'));
+  const selectors = {
+    XLN_HLT_ENGINE: 'ts',
+    XLN_RSCORE_AUTHORITY: '0',
+    XLN_RSCORE_SHADOW: '0',
+    XLN_HUB_RSCORE_AUTHORITY_H2: '0',
+  };
+  for (const [key, value] of [
+    ['XLN_HLT_ENGINE', 'rust'],
+    ['XLN_RSCORE_AUTHORITY', '1'],
+    ['XLN_RSCORE_SHADOW', '1'],
+    ['XLN_HUB_RSCORE_AUTHORITY_H2', '1'],
+  ] as const) {
+    for (const args of [[], ['--mode=debug'], ['--clean']]) {
+      const result = await run('bun', ['scripts/dev/run-dev.ts', ...args], {
+        // The port guard is a second fail-stop: a missing engine rejection
+        // must never let this negative test reset a running developer stack.
+        env: { ...selectors, [key]: value, XLN_PORT_BASE: '17800', XLN_DEV_DATA_ROOT: root },
+      });
+      expect(result.code).not.toBe(0);
+      expect(result.stderr).toContain(`HUB_ENGINE_RETIRED:${key}:typescript-only`);
+      expect(result.stdout).not.toContain('[dev] verifying native H1:');
+      expect(existsSync(root)).toBeFalse();
+    }
+  }
+});
+
 test('dev reuse never masks invalid ports or unrelated listener failures', () => {
   expect(isDevSingletonConflict(new Error('DEV_ALREADY_RUNNING'))).toBe(false);
   expect(

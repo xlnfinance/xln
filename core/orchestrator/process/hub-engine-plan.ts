@@ -33,12 +33,19 @@ export const canonicalHubEngine = (
     throw new Error(`HUB_ENGINE_NAME_INVALID:${hubName}`);
   }
   const selected = String(env['XLN_HLT_ENGINE'] || 'ts').trim();
-  if (selected !== 'ts' && selected !== 'rust') {
+  if (selected === 'rust') {
+    throw new Error('HUB_ENGINE_RETIRED:XLN_HLT_ENGINE:typescript-only');
+  }
+  if (selected !== 'ts') {
     throw new Error(`HUB_ENGINE_SELECTOR_INVALID:${selected}`);
   }
-  // H1 is a role, not an implementation. The explicit workload selector owns
-  // its production engine; the remaining mesh hubs are TypeScript processes.
-  return normalized === 'H1' && selected === 'rust' ? 'rust' : 'typescript';
+  const retiredFlag = Object.keys(env).find(
+    key =>
+      env[key] === '1' &&
+      (key === 'XLN_RSCORE_AUTHORITY' || key === 'XLN_RSCORE_SHADOW' || key.startsWith('XLN_HUB_RSCORE_AUTHORITY_')),
+  );
+  if (retiredFlag) throw new Error(`HUB_ENGINE_RETIRED:${retiredFlag}:typescript-only`);
+  return 'typescript';
 };
 
 export type RustHubProcessConfig = Readonly<{
@@ -67,7 +74,7 @@ export type RustHubProcessPlan = Readonly<{
   nativeDb: string;
 }>;
 
-export const RSCORE_RUNTIME_BUILD_COMMAND =
+const RSCORE_RUNTIME_BUILD_COMMAND =
   'cargo --config rscore/.cargo/config.toml build --release --locked --manifest-path rscore/Cargo.toml -p xln-rscore-process --bin xlnrs';
 
 const newestRustBuildInputMs = (path: string): number => {

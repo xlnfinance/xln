@@ -158,6 +158,13 @@ Both predecessor PR candidates now have seven successful CI jobs, including E2E:
 [PR 72 run](evidence/canonical-review-20261012/ci-38202183279-final.json).
 The final combined candidate still needs its own required CI.
 
+The uninterrupted 160-second P6 follow-up still did not reach the existing reserve.
+A bounded raw-response capture identifies PublicNode's HTTP 429 / -32005 quota
+error. Neither of two alternative public providers passed basic availability;
+configuration is unchanged. The 04:45 UTC method review replaces repeated long
+retries with first-error capture and resumes the independent TS launcher cut.
+[Retained evidence and availability limits](evidence/canonical-review-20261012/p6-rpc-quota.json).
+
 ## Target ownership and deletion sequence
 
 The live queue stays in [todo.md](../todo.md). This table is the reviewed design,

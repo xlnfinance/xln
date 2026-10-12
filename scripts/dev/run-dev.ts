@@ -11,6 +11,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 
 import { stopProcessGroup } from '../../core/scripts/e2e/runners/process-group';
+import { canonicalHubEngine } from '../../core/orchestrator/process/hub-engine-plan';
 import { acquireStandLock, releaseStandLock, readStandLockHolder, standLockRoot, standLockCapacity, STAND_LOCK_TOKEN_ENV, type StandLockGrant } from '../../tools/stand-lock';
 
 export const DEV_SINGLETON_PORT = 17_999;
@@ -96,7 +97,6 @@ const parseInvocation = (): { mode: DevMode; commands: readonly DevCommand[] } =
     return {
       mode: 'default',
       commands: [
-        ['bun', 'scripts/dev/checks/check-rscore-runtime-freshness.ts'],
         ['bash', 'scripts/dev/prepare-start.sh'],
         ['bash', 'scripts/dev/run-dev.sh'],
       ],
@@ -111,7 +111,6 @@ const parseInvocation = (): { mode: DevMode; commands: readonly DevCommand[] } =
       return {
         mode,
         commands: [
-          ['bun', 'scripts/dev/checks/check-rscore-runtime-freshness.ts'],
           ['bash', 'scripts/dev/prepare-start.sh'],
           ['bash', 'scripts/dev/run-dev.sh'],
         ],
@@ -224,6 +223,7 @@ export const runDevCommands = async (
 };
 
 const runDev = async (): Promise<number> => {
+  canonicalHubEngine('H1');
   if (process.env['XLN_PORT_BASE']) throw new Error('DEV_PORT_OVERRIDE_FORBIDDEN:XLN_PORT_BASE');
   const { mode, commands } = parseInvocation();
   let lease: DevSingletonLease;
