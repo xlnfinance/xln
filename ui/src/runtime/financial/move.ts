@@ -23,8 +23,6 @@ import {
 	routeRequiresExplicitExternalAllowance,
 	type MoveEndpoint,
 } from '@xln/frontend/lib/components/Entity/move-routes';
-import { getEmbeddedEnv } from '../adapter';
-import { sendEntityTxs } from '../tx';
 import { getXLN } from '../xln-loader';
 import type { WalletView } from '../views';
 
@@ -107,23 +105,16 @@ export function draftReserveDelta(entityId: string, batch: JBatch | null | undef
 	return delta;
 }
 
-export function openOutgoingDebt(frame: RuntimeAdapterViewFrame | null, tokenId: number): bigint {
-	let total = 0n;
-	for (const debt of frame?.activeEntity?.core?.outDebtsByToken?.get(tokenId)?.values() ?? []) {
-		if (debt.status === 'open') total += debt.remainingAmount;
-	}
-	return total;
-}
-
 /** What can leave each place right now, for one token. */
-export function availableAt(place: MoveEndpoint, wallet: WalletView, tokenId: number, sourceAccountId: string, external: ExternalTokenRow[]): bigint {
+export function availableAt(place: MoveEndpoint, wallet: Pick<WalletView, 'entityId' | 'frame' | 'accounts'>, tokenId: number, sourceAccountId: string, external: ExternalTokenRow[]): bigint {
 	const core = wallet.frame?.activeEntity?.core;
 	switch (place) {
 		case 'external':
 			return external.find(row => row.tokenId === tokenId)?.balance ?? 0n;
 		case 'reserve': {
 			const reserve = (core?.reserves?.get(tokenId) ?? 0n) + draftReserveDelta(wallet.entityId, core?.jBatchState?.batch, tokenId);
-			const debt = openOutgoingDebt(wallet.frame, tokenId);
+			// Detail rows are bounded; the runtime totals include every outstanding debt.
+			const debt = core?.debtTotals.outgoing.get(tokenId) ?? 0n;
 			return reserve > debt ? reserve - debt : 0n;
 		}
 		case 'account': {
@@ -257,6 +248,7 @@ export function buildMoveTxs(self: string, intent: MoveIntent, mode: MoveMode): 
 }
 
 export async function submitMove(entityId: string, signerId: string, intent: MoveIntent, mode: MoveMode): Promise<void> {
+	const { sendEntityTxs } = await import('../tx');
 	await sendEntityTxs(entityId, signerId, buildMoveTxs(entityId, intent, mode));
 }
 
@@ -268,6 +260,7 @@ export { isExternalTransferMoveRoute };
 // ---------------------------------------------------------------------------
 
 async function signerPrivateKey(signerId: string): Promise<Uint8Array> {
+	const { getEmbeddedEnv } = await import('../adapter');
 	const env = getEmbeddedEnv();
 	if (!env) throw new Error('ONCHAIN_ACTIONS_NEED_A_LOCAL_RUNTIME');
 	// Hosted boot and recovery register the exact signer keys, including the
@@ -278,6 +271,7 @@ async function signerPrivateKey(signerId: string): Promise<Uint8Array> {
 }
 
 export async function hostedJAdapter(entityId: string, signerId: string) {
+	const { getEmbeddedEnv } = await import('../adapter');
 	const env = getEmbeddedEnv();
 	if (!env) throw new Error('ONCHAIN_ACTIONS_NEED_A_LOCAL_RUNTIME');
 	const xln = await getXLN();

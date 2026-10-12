@@ -2,15 +2,12 @@ import type { RuntimeReplica, RoutedEntityInput } from '../types';
 import { entityInputHasCrossJurisdictionIntraRuntimeTx } from '../../extensions/cross-j/boundary';
 import { createStructuredLogger, shortId } from '../../support/logger';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
-import {
-  copyRoutedOutputForMerge,
-} from './identity';
 import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-output';
 import { resolveReplayOutputRuntimeRoute } from './replay-output-route';
 import {
   isTriggerOnlyOutput,
   isTxBearingOutput,
-  mergeRoutedEntityOutput,
+  dedupeEntityOutputs,
   resolveGossipBoardSignerIds,
   toDeliverableEntityInput,
   type PlannedRemoteOutput,
@@ -22,33 +19,6 @@ const routeLog = createStructuredLogger('network.route');
 type PlannedEntityOutput =
   | { kind: 'local'; output: RoutedEntityInput }
   | { kind: 'remote'; output: PlannedRemoteOutput };
-
-const dedupeEntityOutputs = (
-  outputs: RoutedEntityInput[],
-  graph: PreparedOutputGraph,
-): RoutedEntityInput[] => {
-  const deduped = new Map<string, RoutedEntityInput>();
-  const mutableMergeTargets = new Set<RoutedEntityInput>();
-  for (const output of outputs.flatMap(candidate => graph.split(candidate))) {
-    const key = graph.prepare(output).routeKey;
-    const existing = deduped.get(key);
-    if (existing) {
-      const target = mutableMergeTargets.has(existing) ? existing : copyRoutedOutputForMerge(existing);
-      if (target !== existing) {
-        deduped.set(key, target);
-        mutableMergeTargets.add(target);
-      }
-      mergeRoutedEntityOutput(target, output);
-      graph.invalidate(target);
-    } else {
-      const target = copyRoutedOutputForMerge(output);
-      graph.adopt(output, target);
-      mutableMergeTargets.add(target);
-      deduped.set(key, target);
-    }
-  }
-  return [...deduped.values()];
-};
 
 const resolveLocalEntityOutput = (
   env: RuntimeReplica,
