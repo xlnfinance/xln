@@ -4,7 +4,7 @@ import type { RuntimeAdapterViewFrame, RuntimeReplica, XLNModule } from '../../c
 import type { RuntimeAdapter } from '../../core/api/runtime-adapter/types';
 import { enterStack } from './stack';
 import { privateChain } from './dispute-chain';
-import { requireBoundaryRecord, requireBoundaryString } from '../../core/protocol/boundary-validation';
+import { requireBoundaryRecord } from '../../core/protocol/boundary-validation';
 
 type FaucetKind = 'erc20' | 'gas' | 'reserve' | 'offchain';
 type DebugWindow = Window & {
@@ -157,10 +157,13 @@ test(
     const gasResponse = await clickFaucet(page, 'gas');
     const gasReceipt = requireBoundaryRecord(await gasResponse.json(), 'GAS_RECEIPT_INVALID');
     expect(gasReceipt).toMatchObject({ success: true, type: 'gas', userAddress: initial.signerId });
-    const gasAdded = parseEther(requireBoundaryString(gasReceipt['amount'], 'GAS_AMOUNT_INVALID'));
+    const gasAmount = gasReceipt['amount'];
+    const txHash = gasReceipt['txHash'];
+    if (typeof gasAmount !== 'string' || typeof txHash !== 'string' || !/^0x[0-9a-f]{64}$/i.test(txHash))
+      throw new Error('Gas grant amount or transaction hash missing');
+    const gasAdded = parseEther(gasAmount);
     expect(gasAdded).toBeGreaterThan(0n);
     expect(gasAdded).toBeLessThanOrEqual(parseEther('0.1'));
-    const txHash = requireBoundaryString(gasReceipt['txHash'], 'GAS_TX_HASH_INVALID');
     const provider = privateChain(baseURL);
     try {
       const transaction = await provider.getTransaction(txHash);
