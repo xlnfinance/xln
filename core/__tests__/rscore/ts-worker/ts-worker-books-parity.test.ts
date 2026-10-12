@@ -3,7 +3,7 @@ import {
   applyBookIntentProgram,
   createBookIntentProgram,
 } from '../../../entity/books/book-intents';
-import { TsAccountWorkerCoordinator } from '../../../rscore/ts-worker/coordinator';
+import { TsAccountWorkerCoordinator } from '../../../runtime/workers/account/coordinator';
 import { encodeCanonicalConsensusBytes } from '../../../protocol/serialization/binary-codec';
 import { computeIntegrityDigest } from '../../../support/bytes/integrity-checksum';
 

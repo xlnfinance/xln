@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { authorityDriverEnabled } from '../../../../runtime/config/account-execution';
 
 /** Replay phase: restore one H1 checkpoint and deterministically execute its WAL tail. */
 
@@ -7,10 +8,9 @@ import { printAuthorityRecordReport } from '../../../../rscore/authority-wave';
 import {
   accountAuthorityExecutionLedger,
   printAccountAuthorityExecutionLedger,
-} from '../../../../rscore/authority/entity-stage';
+} from '../../../../entity/consensus/account/execution-stage';
 import { rscoreTransportBytes } from '../../../../rscore/client';
 import {
-  authorityDriverEnabled,
   printAuthorityDriverReport,
   shutdownAuthorityDriver,
 } from '../../../../rscore/authority-driver';
@@ -87,7 +87,7 @@ import {
   canonicalTsAccountWorkerCount,
   TsAccountWorkerAuthority,
   type TsAccountWorkerTelemetry,
-} from '../../../../rscore/ts-worker';
+} from '../../../../runtime/workers/account';
 
 configureCryptoPoolEntry(new URL('../../../../protocol/crypto/crypto-pool.ts', import.meta.url));
 

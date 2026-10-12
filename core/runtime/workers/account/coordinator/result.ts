@@ -1,5 +1,5 @@
 import { parseWorkerPhaseResult, type WorkerRequestResult } from '../coordinator-client';
-import { getPerfMs } from '../../../support/time';
+import { getPerfMs } from '../../../../support/time';
 import { TsAccountCanonicalRoot, tsAccountWorkerForShard } from '../sharding';
 import type {
   TsAccountWorkerBatchResult,

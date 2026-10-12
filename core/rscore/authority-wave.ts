@@ -1006,7 +1006,7 @@ const soleClock = (
  * One arrival as the engine reads it: its index, the account it moves, and
  * the exact Account input envelope the counterparty sent.
  */
-export type AuthorityCertifiedBoard = Readonly<Pick<
+type AuthorityCertifiedBoard = Readonly<Pick<
   CertifiedBoardRecord,
   | 'boardHash'
   | 'previousBoardHash'

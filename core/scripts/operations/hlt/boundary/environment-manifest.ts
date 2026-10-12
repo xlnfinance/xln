@@ -11,7 +11,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../../protocol/boundary-validation';
-import { canonicalTsAccountWorkerCount } from '../../../../rscore/ts-worker/provider';
+import { canonicalTsAccountWorkerCount } from '../../../../runtime/workers/account/provider';
 
 export type HltAccountWorkerEvidence = number | 'unknown';
 

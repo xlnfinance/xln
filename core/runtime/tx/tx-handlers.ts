@@ -1,6 +1,6 @@
 import { applyNumberedRegistrationReplacement } from '../registration/numbered/numbered-registration-replacement';
 import { applyRecordJPreparedTransaction } from '../j-submit/prepared-transaction';
-import { engineAccountValueHash } from '../../rscore/engine-leaf/leaf-cache';
+import { engineAccountValueHash } from '../../entity/state/engine-leaf/leaf-cache';
 import { buildDefaultEntitySwapPairs, getTokenIdsForJurisdiction } from '../../account/utils';
 import { applyRuntimeStorageChanges } from '../observability/env-events';
 import { normalizeEntitySwapTradingPairs } from '../swap-cmd/swap-pairs';

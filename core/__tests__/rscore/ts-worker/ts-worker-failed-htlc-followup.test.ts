@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
 import { createEmptyEnv } from '../../../runtime';
-import { TsAccountWorkerAuthority } from '../../../rscore/ts-worker';
+import { TsAccountWorkerAuthority } from '../../../runtime/workers/account';
 import { createJReplica } from '../../../scenarios/harness/boot';
 import { buildPreparedCrossJurisdictionRoute, buildCrossJurisdictionPullBinding } from '../../../extensions/cross-j';
 import { selectCrossJOpeningAccountProposalTxs } from '../../../entity/transition/cross-j-proposer-materialization';

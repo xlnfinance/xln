@@ -11,17 +11,17 @@ import { createAccountConsensusContext } from '../../../entity/account/account-c
 import { generateLazyEntityId } from '../../../entity/factory';
 import { signEntityHashes } from '../../../hanko/signing';
 import { safeStringify } from '../../../protocol/serialization';
-import { aggregateWorkerPhaseResults } from '../../../rscore/ts-worker/coordinator/result';
-import { TsAccountCanonicalRoot } from '../../../rscore/ts-worker/sharding';
-import { TsAccountWorkerCoordinator } from '../../../rscore/ts-worker/coordinator';
+import { aggregateWorkerPhaseResults } from '../../../runtime/workers/account/coordinator/result';
+import { TsAccountCanonicalRoot } from '../../../runtime/workers/account/sharding';
+import { TsAccountWorkerCoordinator } from '../../../runtime/workers/account/coordinator';
 import {
   createWorkerJClaimAttempt,
   pruneWorkerJClaimNodes,
-} from '../../../rscore/ts-worker/worker-j-claim-attempt';
+} from '../../../runtime/workers/account/worker-j-claim-attempt';
 import type {
   TsAccountWorkerEffect,
   TsAccountWorkerPhaseResult,
-} from '../../../rscore/ts-worker/protocol';
+} from '../../../runtime/workers/account/protocol';
 import type { AccountJClaimNode } from '../../../types/finance/account-j-claims';
 import type { AccountInput, AccountTx } from '../../../types/account';
 import type { JReplica } from '../../../types/jurisdiction-runtime';

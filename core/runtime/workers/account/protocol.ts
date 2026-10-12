@@ -2,24 +2,27 @@ import type {
   AccountInput,
   AccountReplica,
   AccountTx,
-} from '../../types/account';
+} from '../../../types/account';
 import type {
   HandleAccountInputResult,
   ProposeAccountFrameResult,
-} from '../../account/consensus/types';
-import type { JReplica } from '../../types/jurisdiction-runtime';
-import type { AccountJClaimNode } from '../../types/finance/account-j-claims';
-import type { PersistentRadixNodeCommitment } from '../../protocol/state/persistent-radix-value-map';
-import type { OpCounterSnapshot } from '../../support/performance/op-counters';
-import type { AccountAuthorityCommittedHanko } from '../../entity/runtime-context';
-import type { AuthorityCertifiedBoard } from '../authority-wave';
-import type { BookIntent } from '../../entity/books/book-intents';
-import type { PaybookEntry } from '../../entity/types';
-import type { AccountEnvelopeUpdate } from '../../account/envelope/entity-update';
+} from '../../../account/consensus/types';
+import type { JReplica } from '../../../types/jurisdiction-runtime';
+import type { AccountJClaimNode } from '../../../types/finance/account-j-claims';
+import type { PersistentRadixNodeCommitment } from '../../../protocol/state/persistent-radix-value-map';
+import type { OpCounterSnapshot } from '../../../support/performance/op-counters';
+import type { AccountAuthorityCommittedHanko } from '../../../entity/runtime-context';
+import type { CertifiedBoardRecord } from '../../../types/entity-board-registry';
+import type { BookIntent } from '../../../entity/books/book-intents';
+import type { PaybookEntry } from '../../../entity/types';
+import type { AccountEnvelopeUpdate } from '../../../account/envelope/entity-update';
 
-export type TsAccountWorkerCertifiedBoard = AuthorityCertifiedBoard & Readonly<{
-  entityId: string;
-}>;
+export type TsAccountWorkerCertifiedBoard = Readonly<
+  Pick<
+    CertifiedBoardRecord,
+    'entityId' | 'boardHash' | 'previousBoardHash' | 'previousBoardValidUntil' | 'activatedAtJHeight' | 'logIndex'
+  >
+>;
 
 export type TsAccountWorkerOptions = Readonly<{
   ownerEntityId: string;

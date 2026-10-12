@@ -1,7 +1,7 @@
 import {
   PAYBOOK_PHYSICAL_SLOT_COUNT,
   paybookPhysicalSlot,
-} from '../../entity/books/book-intents';
+} from '../../../entity/books/book-intents';
 import type { TsBookWorkerPayload, TsBookWorkerResult } from './protocol';
 
 const reduceSlot = (slot: TsBookWorkerPayload['slots'][number]) => {

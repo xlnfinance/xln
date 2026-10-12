@@ -1,6 +1,6 @@
 import {
   createSequentialTransportValueCodec,
-} from '../../protocol/serialization/binary-codec';
+} from '../../../protocol/serialization/binary-codec';
 
 export class TsAccountWorkerTransferEncoder {
   readonly #codec = createSequentialTransportValueCodec();

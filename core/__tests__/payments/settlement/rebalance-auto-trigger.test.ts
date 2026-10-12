@@ -6,7 +6,7 @@ import {
 } from '../../../account/state/persistent-state-map';
 import { applyAccountTxToMutableReplica } from '../../../account/tx/apply';
 import { checkAutoRebalance } from '../../../account/tx/handlers/rebalance/request-collateral';
-import { createWorkerConsensusContext, type TsAccountWorkerState } from '../../../rscore/ts-worker/worker-state';
+import { createWorkerConsensusContext, type TsAccountWorkerState } from '../../../runtime/workers/account/worker-state';
 import { makeAccount } from '../../helpers/cross-j';
 
 const userId = `0x${'11'.repeat(32)}`;

@@ -1,3 +1,4 @@
+import { authorityDriverEnabled } from './config/account-execution';
 export { getLiveJAdapter, getLiveJAdapterEntries } from './j-submit/live-jadapters';
 
 // The testnet exposes one canonical runtime contract. Breaking changes replace
@@ -42,7 +43,6 @@ import {
   notifyRuntimeStateChanged,
 } from './frame/notifications';
 import {
-  authorityDriverEnabled,
   discardAuthorityRuntime,
   restoreAuthorityExact,
   setAuthorityRuntimeSuppressed,

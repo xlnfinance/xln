@@ -6,7 +6,7 @@ import type { AccountAuthorityEntityStageCapability } from '../../../entity/runt
 import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
 import type { EntityState } from '../../../entity/types';
 import { createEmptyEnv } from '../../../runtime';
-import { TsAccountWorkerAuthority } from '../../../rscore/ts-worker';
+import { TsAccountWorkerAuthority } from '../../../runtime/workers/account';
 import { createJReplica } from '../../../scenarios/harness/boot';
 import type { AccountReplica, AccountTx } from '../../../types/account';
 import {

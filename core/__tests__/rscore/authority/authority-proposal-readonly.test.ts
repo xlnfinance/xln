@@ -4,8 +4,8 @@ import { requireAccountDeltaTransformerAddress } from '../../../account/consensu
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
 import { resolveInboundAccount } from '../../../entity/tx/handlers/account/inbound-account';
-import { runAccountAuthorityEntityStage } from '../../../rscore/authority/entity-stage';
-import { TsAccountWorkerAuthority } from '../../../rscore/ts-worker';
+import { runAccountAuthorityEntityStage } from '../../../entity/consensus/account/execution-stage';
+import { TsAccountWorkerAuthority } from '../../../runtime/workers/account';
 import { createEmptyEnv } from '../../../runtime';
 import { createJReplica } from '../../../scenarios/harness/boot';
 import { addr, entity, makeJurisdiction, makeState } from '../../helpers/cross-j';

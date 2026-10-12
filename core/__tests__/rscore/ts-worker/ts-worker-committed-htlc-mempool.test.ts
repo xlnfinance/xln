@@ -14,7 +14,7 @@ import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { safeStringify } from '../../../protocol/serialization';
 import { cloneIsolatedAccountInput } from '../../../protocol/state/account-input-clone';
 import { createEmptyEnv } from '../../../runtime';
-import { TsAccountWorkerCoordinator } from '../../../rscore/ts-worker';
+import { TsAccountWorkerCoordinator } from '../../../runtime/workers/account';
 import { createJReplica } from '../../../scenarios/harness/boot';
 import type { AccountInput, AccountReplica, AccountTx } from '../../../types/account';
 import { makeAccount, makeJurisdiction } from '../../helpers/cross-j';

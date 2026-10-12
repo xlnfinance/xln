@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
 import { createEmptyEnv } from '../../../runtime';
-import { installTsAccountWorkerAuthority } from '../../../rscore/ts-worker/provider';
+import { installTsAccountWorkerAuthority } from '../../../runtime/workers/account/provider';
 
 const priorWorkerCount = process.env['XLN_TS_ACCOUNT_WORKERS'];
 const priorHubName = process.env['XLN_HUB_NAME'];

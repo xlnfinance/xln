@@ -1,13 +1,13 @@
 import {
   collectReachableAccountJClaimNodes,
   hashAccountJClaimNode,
-} from '../../account/j-claims/j-claim-accumulator';
-import type { AccountReplica } from '../../types/account';
+} from '../../../account/j-claims/j-claim-accumulator';
+import type { AccountReplica } from '../../../types/account';
 import type {
   AccountJClaimNode,
   AccountJClaimNodeChanges,
   AccountJClaimNodeStore,
-} from '../../types/finance/account-j-claims';
+} from '../../../types/finance/account-j-claims';
 
 export type WorkerJClaimAttempt = Readonly<{
   store: AccountJClaimNodeStore;

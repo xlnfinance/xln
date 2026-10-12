@@ -10,9 +10,9 @@
  * TypeScript takes that Account for writing, so a leaf cannot outlive the
  * bytes it certified. With verification on, both digests are compared.
  */
-import { computeEntityAccountValueHash } from '../../entity/consensus/state-root';
-import type { AccountValueHash } from '../../entity/state/persistent-account-map';
-import type { AccountReplica } from '../../types/account';
+import { computeEntityAccountValueHash } from '../../consensus/state-root';
+import type { AccountValueHash } from '../persistent-account-map';
+import type { AccountReplica } from '../../../types/account';
 import { peekEngineAccountLeaf } from './leaf-registry';
 import { RSCORE_CUTOVER_VERIFY } from './verify';
 

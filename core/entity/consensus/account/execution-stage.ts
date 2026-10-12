@@ -1,13 +1,13 @@
 import type {
   AccountAuthorityInputRequest,
   AccountAuthorityProposalRequest,
-} from '../../account/consensus/context';
+} from '../../../account/consensus/context';
 import type {
   HandleAccountInputResult,
   ProposeAccountFrameResult,
-} from '../../account/consensus/types';
-import type { AccountTxBatch, AccountInput, AccountTx } from '../../types/account';
-import type { EntityTx } from '../../types/entity-tx';
+} from '../../../account/consensus/types';
+import type { AccountTxBatch, AccountInput, AccountTx } from '../../../types/account';
+import type { EntityTx } from '../../../types/entity-tx';
 import type {
   AccountAuthorityFrameBeginRequest,
   AccountAuthorityFrameBooksRequest,
@@ -15,15 +15,15 @@ import type {
   AccountAuthorityFrameOutboundRequest,
   AccountAuthorityEntityStageCapability,
   EntityRuntimeContext,
-} from '../../entity/runtime-context';
-import { accountInputApplied } from '../../account/consensus/result';
-import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
-import { inboundArrivals } from '../round/inbound';
-import { safeStringify } from '../../protocol/serialization';
-import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
-import { getPerfMs } from '../../support/time';
-import type { AccountEnvelopeUpdate } from '../../account/envelope/entity-update';
-import { acceptsExternalAccountInput } from '../../account/consensus/dispute/policy';
+} from '../../runtime-context';
+import { accountInputApplied } from '../../../account/consensus/result';
+import { requirePersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { inboundArrivals } from '../../account/inbound-arrivals';
+import { safeStringify } from '../../../protocol/serialization';
+import { countOp, OP_COUNTERS_ENABLED } from '../../../support/performance/op-counters';
+import { getPerfMs } from '../../../support/time';
+import type { AccountEnvelopeUpdate } from '../../../account/envelope/entity-update';
+import { acceptsExternalAccountInput } from '../../../account/consensus/dispute/policy';
 
 const countFrameApplyPhase = (name: string, startedAt: number): void => {
   if (!OP_COUNTERS_ENABLED) return;
@@ -155,7 +155,6 @@ export type AccountAuthorityEntityTransition = Readonly<{
 export const resolveAccountAuthorityEntityStageOptions = (
   configuration: AccountAuthorityEntityStageConfiguration,
   transition: AccountAuthorityEntityTransition,
-  _migrationRecorderEnabled: boolean,
 ): AccountAuthorityEntityStageOptions | null => {
   const mode = configuration.accountAuthorityExecutionMode;
   const provider = configuration.accountAuthorityEntityStageProvider;

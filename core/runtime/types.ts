@@ -739,7 +739,7 @@ export interface RuntimeReplica {
   /** Canonical Account authority is installed before the first Runtime frame. */
   accountAuthorityExecutionMode?: 'cutover' | undefined;
   /** Process-local Account executor; never part of Runtime state or WAL. */
-  accountAuthorityEntityStageProvider?: import('../rscore/authority/entity-stage').AccountAuthorityEntityStageProvider | undefined;
+  accountAuthorityEntityStageProvider?: import('../entity/consensus/account/execution-stage').AccountAuthorityEntityStageProvider | undefined;
   /** Active for one EntityInput and always cleared before returning to Runtime. */
   accountAuthorityEntityStage?: import('../entity/runtime-context').AccountAuthorityEntityStageCapability | undefined;
   /**

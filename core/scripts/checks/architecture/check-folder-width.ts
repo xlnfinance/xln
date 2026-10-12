@@ -82,7 +82,7 @@ export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
   'core/__tests__/runtime/ingress': 11,
   'core/__tests__/runtime/observability': 11,
   'core/orchestrator/process': 12,
-  'core/rscore/ts-worker': 13,
+  'core/runtime/workers/account': 13,
   'core/scripts/e2e/harness': 11,
   'core/scripts/operations/hlt': 12,
   'frontend/src/lib/stores': 11,

@@ -15,8 +15,8 @@ import { FailureDispositionError } from '../../../protocol/errors/failure-taxono
 import { createSettlementWorkspaceHash } from '../../../account/tx/handlers/settlement/transition';
 import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import { selectSettlementContinuation } from '../../../entity/consensus/account/settlement-continuation';
-import { runAccountAuthorityEntityStage } from '../../../rscore/authority/entity-stage';
-import { TsAccountWorkerAuthority } from '../../../rscore/ts-worker';
+import { runAccountAuthorityEntityStage } from '../../../entity/consensus/account/execution-stage';
+import { TsAccountWorkerAuthority } from '../../../runtime/workers/account';
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
 import { applyAccountInput } from '../../../account/consensus';
 import { accountInputFailureMessage } from '../../../account/consensus/result';

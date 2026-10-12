@@ -73,6 +73,14 @@ main-targeted PR normally so synchronize starts pull_request CI; do not rerun
 manual dispatch or weaken branch protection. Consolidating the tested launcher
 now avoids publishing another PR stack whose non-main base does not trigger CI.
 
+Method review, 05:15 UTC: the launcher deletion reached a clean-source payment
+artifact before the next ownership move. Required CI now runs through the proper
+pull_request event. Keep one implementer on the worker move and start review only
+after writes stop. Compare an existing bound WAL before recording another one;
+report path relocation separately from deleted logic and reachable audit size.
+Discover candidate paths before opening them: repeated guessed-path failures
+added no evidence. Rust implementations and their parked changes remain frozen.
+
 ## Historical evidence and superseded scope
 
 Owner priority, 2026-10-11 17:28 UTC: ship a public Sepolia deployment and usable

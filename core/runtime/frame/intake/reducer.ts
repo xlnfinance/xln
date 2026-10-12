@@ -1,3 +1,4 @@
+import { authorityDriverEnabled } from '../../config/account-execution';
 import { hasVerifiedEntityCommitPrecertificate } from '../../../entity/consensus/commit/precheck';
 import { mergeEntityInputs } from '../../../entity/consensus';
 import { retireAppliedLocalOutputs } from '../../delivery/local-outbox';
@@ -9,11 +10,10 @@ import {
 } from '../../../rscore/authority-wave';
 import {
   armAuthorityWave,
-  authorityDriverEnabled,
   authorityRuntimeSuppressed,
   captureAuthorityWave,
 } from '../../../rscore/authority-driver';
-import { installTsAccountWorkerAuthority } from '../../../rscore/ts-worker/provider';
+import { installTsAccountWorkerAuthority } from '../../workers/account/provider';
 import { createStructuredLogger } from '../../../support/logger';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';

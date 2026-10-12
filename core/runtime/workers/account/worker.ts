@@ -1,14 +1,14 @@
 /** Bun Worker entry for the resident TypeScript Account-shard prototype. */
 
-import { applyAccountInput, proposeAccountFrame } from '../../account/consensus';
-import { applyAccountEnvelopeUpdate } from '../../account/envelope/entity-update';
-import type { AccountConsensusContext } from '../../account/consensus/context';
-import type { HandleAccountInputResult } from '../../account/consensus/types';
-import { forkAccountReplicaShell } from '../../account/state/account-replica-shell';
-import type { AccountReplica } from '../../types/account';
-import { getPerfMs } from '../../support/time';
-import { diffOpCounters, snapshotOpCounters } from '../../support/performance/op-counters';
-import { safeStringify } from '../../protocol/serialization';
+import { applyAccountInput, proposeAccountFrame } from '../../../account/consensus';
+import { applyAccountEnvelopeUpdate } from '../../../account/envelope/entity-update';
+import type { AccountConsensusContext } from '../../../account/consensus/context';
+import type { HandleAccountInputResult } from '../../../account/consensus/types';
+import { forkAccountReplicaShell } from '../../../account/state/account-replica-shell';
+import type { AccountReplica } from '../../../types/account';
+import { getPerfMs } from '../../../support/time';
+import { diffOpCounters, snapshotOpCounters } from '../../../support/performance/op-counters';
+import { safeStringify } from '../../../protocol/serialization';
 import {
   createWorkerJClaimAttempt,
   pruneWorkerJClaimNodes,
@@ -40,7 +40,7 @@ import type {
   TsAccountWorkerResponseEnvelope,
   TsAccountWorkerSubroot,
 } from './protocol';
-import { accountHasProposableMempoolForEntity } from '../../entity/consensus/account/mempool-eligibility';
+import { accountHasProposableMempoolForEntity } from '../../../entity/consensus/account/mempool-eligibility';
 
 type WorkerScope = {
   postMessage(value: unknown, transfer?: Transferable[]): void;

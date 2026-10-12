@@ -164,7 +164,7 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
   // script no longer contains literally.
   expect(runtimeWatcher).toContain('bun --no-orphans build "$entry"');
   expect(runtimeWatcher).toContain('watch_bundle core/api/public/browser.ts frontend/static/runtime.js');
-  expect(runtimeWatcher).toContain('watch_bundle core/rscore/ts-worker/worker.ts frontend/static/account-worker.js');
+  expect(runtimeWatcher).toContain('watch_bundle core/runtime/workers/account/worker.ts frontend/static/account-worker.js');
   expect(runtimeWatcher).toContain('--external buffer');
   // Blank bundler lines stay out of the dev log; the guard prints only
   // non-whitespace output (it was previously written as the inverted skip).

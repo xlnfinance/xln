@@ -2,8 +2,8 @@ import {
   computeRadixMerkleBranchHashFromSlots,
   computeRadixMerkleEdgeHash,
   EMPTY_RADIX_MERKLE_ROOT,
-} from '../../protocol/state/radix-merkle';
-import type { PersistentRadixNodeCommitment } from '../../protocol/state/persistent-radix-value-map';
+} from '../../../protocol/state/radix-merkle';
+import type { PersistentRadixNodeCommitment } from '../../../protocol/state/persistent-radix-value-map';
 
 export const TS_ACCOUNT_LOGICAL_SHARDS = 4_096;
 const TS_ACCOUNT_SHARD_NIBBLES = 3;

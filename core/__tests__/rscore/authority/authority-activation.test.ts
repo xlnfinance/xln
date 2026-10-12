@@ -1,11 +1,11 @@
+import { authorityDriverEnabled } from '../../../runtime/config/account-execution';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
-  authorityDriverEnabled,
   authoritySessionIdentityFor,
 } from '../../../rscore/authority-driver';
 import { authorityRecordEnabled } from '../../../rscore/authority-wave';
 import { createEmptyEnv } from '../../../runtime';
-import { installTsAccountWorkerAuthority } from '../../../rscore/ts-worker/provider';
+import { installTsAccountWorkerAuthority } from '../../../runtime/workers/account/provider';
 
 const H1 = `0x${'11'.repeat(20)}`;
 const LANE = `0x${'22'.repeat(20)}`;

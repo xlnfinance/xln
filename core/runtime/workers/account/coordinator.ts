@@ -1,5 +1,5 @@
-import { projectPortableAccountDoc } from '../../storage/read/projections';
-import { buildCanonicalJReplicaSnapshot } from '../../storage/wal/snapshot';
+import { projectPortableAccountDoc } from '../../../storage/read/projections';
+import { buildCanonicalJReplicaSnapshot } from '../../../storage/wal/snapshot';
 import {
   createBalancedTsAccountShardAssignment,
   normalizeTsWorkerAccountId,
@@ -31,12 +31,12 @@ import {
   requireWorkerInteger,
   TsAccountWorkerClient,
 } from './coordinator-client';
-import type { BookIntentSlot } from '../../entity/books/book-intents';
+import type { BookIntentSlot } from '../../../entity/books/book-intents';
 import {
   PAYBOOK_PHYSICAL_SLOT_COUNT,
   paybookPhysicalSlot,
-} from '../../entity/books/book-intents';
-import type { EntityState, PaybookEntry } from '../../entity/types';
+} from '../../../entity/books/book-intents';
+import type { EntityState, PaybookEntry } from '../../../entity/types';
 import {
   aggregateWorkerPhaseResults,
   type ExpectedWorkerEffect,

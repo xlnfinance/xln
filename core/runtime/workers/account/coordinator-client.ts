@@ -1,5 +1,5 @@
 import { TsAccountWorkerTransferDecoder, TsAccountWorkerTransferEncoder } from './codec';
-import { getPerfMs } from '../../support/time';
+import { getPerfMs } from '../../../support/time';
 import type {
   TsAccountWorkerInitResult,
   TsAccountWorkerPhaseResult,

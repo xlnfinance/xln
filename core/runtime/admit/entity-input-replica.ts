@@ -1,3 +1,4 @@
+import { authorityDriverEnabled } from '../config/account-execution';
 import { applyEntityInput } from '../../entity/consensus/index.ts';
 import type { EntityInputOutcome } from '../../entity/consensus/index.ts';
 import type { EntityOutput, EntityInput, EntityReplica } from '../../entity/types.ts';
@@ -16,7 +17,6 @@ import {
   RuntimeEntityInputApplyError,
 } from './entity-input-contract.ts';
 import {
-  authorityDriverEnabled,
   authorityRuntimeSuppressed,
   authorityEntityStageHandle,
   type AuthorityEntityStageHandle,
@@ -30,7 +30,7 @@ import {
   resolveAccountAuthorityEntityStageOptions,
   type AccountAuthorityEntityStageOptions,
   type AccountAuthorityEntityOccurrence,
-} from '../../rscore/authority/entity-stage.ts';
+} from '../../entity/consensus/account/execution-stage.ts';
 
 export type AppliedEntityReplicaInput = {
   outcome: EntityInputOutcome;
@@ -198,7 +198,6 @@ const resolveReplicaAuthorityStage = (
         deferProposal,
         ...(requiredEntityTxIndex === undefined ? {} : { requiredEntityTxIndex }),
       },
-      migrationRecordingEnabled,
     ),
   };
 };

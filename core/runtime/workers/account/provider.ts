@@ -1,38 +1,39 @@
-import type { HandleAccountInputResult, ProposeAccountFrameResult } from '../../account/consensus/types';
-import { replaceAccountReplica } from '../../account/state/candidate-overlay';
-import { rememberEngineAccountLeaf } from '../engine-leaf/leaf-registry';
-import { authorityDriverEnabled } from '../authority-driver';
+import { authorityDriverEnabled } from '../../config/account-execution';
+import type { HandleAccountInputResult, ProposeAccountFrameResult } from '../../../account/consensus/types';
+import { replaceAccountReplica } from '../../../account/state/candidate-overlay';
+import { rememberEngineAccountLeaf } from '../../../entity/state/engine-leaf/leaf-registry';
+
 import {
   hydrateAccountDocFromStorage,
   projectPortableAccountDoc,
-} from '../../storage/read/projections';
+} from '../../../storage/read/projections';
 import {
   assertStorageAccountDocBinding,
   validateStorageAccountDocValue,
-} from '../../storage/schema/schema-state-docs';
-import type { RuntimeReplica } from '../../runtime/types';
-import type { StorageAccountDoc } from '../../storage/types';
-import type { AccountInput, AccountTxBatch } from '../../types/account';
-import type { AccountJClaimNode } from '../../types/finance/account-j-claims';
-import { collectReachableAccountJClaimNodes } from '../../account/j-claims/j-claim-accumulator';
-import { getAccountJClaimNodeStore } from '../../entity/account/account-j-claim-node-store';
+} from '../../../storage/schema/schema-state-docs';
+import type { RuntimeReplica } from '../../types';
+import type { StorageAccountDoc } from '../../../storage/types';
+import type { AccountInput, AccountTxBatch } from '../../../types/account';
+import type { AccountJClaimNode } from '../../../types/finance/account-j-claims';
+import { collectReachableAccountJClaimNodes } from '../../../account/j-claims/j-claim-accumulator';
+import { getAccountJClaimNodeStore } from '../../../entity/account/account-j-claim-node-store';
 import type {
   AccountAuthorityEntityBatchInbound,
   AccountAuthorityEntityBatchOutbound,
   AccountAuthorityEntityOccurrence,
   AccountAuthorityEntityStageProvider,
-} from '../authority/entity-stage';
-import type { AccountAuthorityInputRequest } from '../../account/consensus/context';
-import { safeStringify } from '../../protocol/serialization';
-import { getPerfMs } from '../../support/time';
+} from '../../../entity/consensus/account/execution-stage';
+import type { AccountAuthorityInputRequest } from '../../../account/consensus/context';
+import { safeStringify } from '../../../protocol/serialization';
+import { getPerfMs } from '../../../support/time';
 import {
   countOp,
   OP_COUNTERS_ENABLED,
   type OpCounterSnapshot,
-} from '../../support/performance/op-counters';
-import { failedProposalHtlcFollowup } from '../../entity/consensus/account/failed-proposal-followups';
-import { selectCrossJOpeningAccountProposalTxs } from '../../entity/transition/cross-j-proposer-materialization';
-import { accountHankoWitnessRequirements } from '../../entity/consensus/input/hanko-witness';
+} from '../../../support/performance/op-counters';
+import { failedProposalHtlcFollowup } from '../../../entity/consensus/account/failed-proposal-followups';
+import { selectCrossJOpeningAccountProposalTxs } from '../../../entity/transition/cross-j-proposer-materialization';
+import { accountHankoWitnessRequirements } from '../../../entity/consensus/input/hanko-witness';
 import { TsAccountWorkerCoordinator } from './coordinator';
 import { assertAccountRootMatch } from './root-divergence';
 import type {
@@ -44,7 +45,7 @@ import type {
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardRecord,
-} from '../../jurisdiction/machine/board-registry';
+} from '../../../jurisdiction/machine/board-registry';
 
 type WorkerTotals = {
   operations: number;
@@ -364,7 +365,7 @@ export class TsAccountWorkerAuthority {
   async #executeBooks(input: Readonly<{
     ownerEntityId: string;
     ownerSignerId: string;
-    request: import('../../entity/runtime-context').AccountAuthorityFrameBooksRequest;
+    request: import('../../../entity/runtime-context').AccountAuthorityFrameBooksRequest;
   }>): Promise<void> {
     const ownerReplicaKey = entityReplicaKey(input.ownerEntityId, input.ownerSignerId);
     const coordinator = await this.#coordinators.get(ownerReplicaKey);
@@ -375,7 +376,7 @@ export class TsAccountWorkerAuthority {
   }
 
   async #installCommittedAccountHankos(
-    request: import('../../entity/runtime-context').AccountAuthorityCommittedHankosRequest
+    request: import('../../../entity/runtime-context').AccountAuthorityCommittedHankosRequest
       & Readonly<{ ownerSignerId: string }>,
   ): Promise<void> {
     const ownerReplicaKey = entityReplicaKey(request.ownerEntityId, request.ownerSignerId);

@@ -1,33 +1,33 @@
-import type { AccountConsensusContext } from '../../account/consensus/context';
-import { computeEntityAccountValueHash } from '../../entity/consensus/state-root';
-import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
-import { verifyHankoForHash } from '../../hanko/signing';
-import { hashAccountJClaimNode } from '../../account/j-claims/j-claim-accumulator';
-import type { AccountReplica } from '../../types/account';
+import type { AccountConsensusContext } from '../../../account/consensus/context';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { verifyHankoForHash } from '../../../hanko/signing';
+import { hashAccountJClaimNode } from '../../../account/j-claims/j-claim-accumulator';
+import type { AccountReplica } from '../../../types/account';
 import type {
   AccountJClaimNode,
   AccountJClaimNodeStore,
-} from '../../types/finance/account-j-claims';
-import type { JReplica } from '../../types/jurisdiction-runtime';
+} from '../../../types/finance/account-j-claims';
+import type { JReplica } from '../../../types/jurisdiction-runtime';
 import {
   assertStorageAccountDocBinding,
   validateStorageAccountDocValue,
-} from '../../storage/schema/schema-state-docs';
+} from '../../../storage/schema/schema-state-docs';
 import {
   hydrateAccountDocFromStorage,
   projectPortableAccountDoc,
-} from '../../storage/read/projections';
+} from '../../../storage/read/projections';
 import {
   normalizeTsWorkerAccountId,
   TS_ACCOUNT_LOGICAL_SHARDS,
   tsAccountLogicalShard,
   tsAccountLogicalShardPath,
 } from './sharding';
-import { attachHankoWitnessesToState } from '../../entity/consensus/input/hanko-witness';
+import { attachHankoWitnessesToState } from '../../../entity/consensus/input/hanko-witness';
 import {
   commitEntityAccountCandidate,
   createEntityAccountCandidateMap,
-} from '../../entity/state/candidate-map';
+} from '../../../entity/state/candidate-map';
 import type {
   TsAccountWorkerInstallHankosPayload,
   TsAccountWorkerInstallHankosResult,
@@ -251,7 +251,7 @@ export const installWorkerCommittedHankos = (
   }
   const accountIds: string[] = [];
   const seenAccounts = new Set<string>();
-  const witnesses = new Map<string, import('../../entity/consensus/input/hanko-witness').HankoWitnessEntry>();
+  const witnesses = new Map<string, import('../../../entity/consensus/input/hanko-witness').HankoWitnessEntry>();
   for (const row of input.rows) {
     const accountId = requireWorkerAccount(worker, row.accountId);
     if (seenAccounts.has(accountId)) {

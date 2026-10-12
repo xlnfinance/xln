@@ -1,3 +1,4 @@
+import { authorityDriverEnabled } from '../config/account-execution';
 /**
  * Canonical Runtime frame transaction: validate, mutate an isolated candidate,
  * commit the authoritative WAL, publish live state, then run external effects.
@@ -28,7 +29,6 @@ import {
 } from '../observability/env-events';
 import {
   failStopAuthorityFrame,
-  authorityDriverEnabled,
   finalizeAuthorityFrameAfterWal,
   discardAuthorityRuntime,
   prepareAuthorityCheckpoint,

@@ -1,8 +1,8 @@
-import type { AccountTx } from '../../types/account';
-import type { AccountEnvelopeUpdate } from '../../account/envelope/entity-update';
-import { decodeAccountInput } from '../../account/validation/input-validation';
-import { parseAccountJClaimNode } from '../../account/j-claims/j-claim-codec';
-import { validateJReplicas } from '../../storage/wal/runtime-machine-schema/j';
+import type { AccountTx } from '../../../types/account';
+import type { AccountEnvelopeUpdate } from '../../../account/envelope/entity-update';
+import { decodeAccountInput } from '../../../account/validation/input-validation';
+import { parseAccountJClaimNode } from '../../../account/j-claims/j-claim-codec';
+import { validateJReplicas } from '../../../storage/wal/runtime-machine-schema/j';
 import { normalizeTsWorkerAccountId } from './sharding';
 import {
   requireWorkerAccount,

@@ -14,7 +14,7 @@ const IGNORED_HELPER_NAMES = new Set(['main', 'run', 'usage']);
 const ROLES: Readonly<Record<string, readonly Implementation[]>> = {
   'account/entity execution engine': [
     { label: 'TS in-thread (core/account+entity)', paths: ['core/account', 'core/entity'], status: 'canonical' },
-    { label: 'TS worker (core/rscore/ts-worker)', paths: ['core/rscore/ts-worker'], status: 'active' },
+    { label: 'TS worker (core/runtime/workers/account)', paths: ['core/runtime/workers/account'], status: 'active' },
     {
       label: 'Rust (rscore/crates engine+entity-kernel+runtime+batch)',
       paths: ['rscore/crates/engine', 'rscore/crates/entity-kernel', 'rscore/crates/runtime', 'rscore/crates/batch'],

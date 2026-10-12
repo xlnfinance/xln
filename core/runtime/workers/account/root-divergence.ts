@@ -18,8 +18,8 @@
  * Diagnostics only: this never repairs a root and never suppresses the halt.
  */
 
-import type { EntityAccountMap } from '../../entity/state/persistent-account-map';
-import { safeStringify } from '../../protocol/serialization';
+import type { EntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { safeStringify } from '../../../protocol/serialization';
 import type { TsAccountWorkerBatchResult, TsAccountWorkerPostAccount } from './protocol';
 import { tsAccountLogicalShard } from './sharding';
 

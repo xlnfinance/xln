@@ -22,6 +22,7 @@
  * answer could disagree with the WAL.
  */
 
+import { authorityDriverEnabled, type AuthorityRuntimeScope } from '../runtime/config/account-execution';
 import { createHash } from 'node:crypto';
 
 import { createStructuredLogger } from '../support/logger';
@@ -66,39 +67,6 @@ import { entityOwnedSectionDigests, entitySnapshotWire } from './entity/snapshot
 import { type RscoreEntityRound } from './entity/round-wire';
 
 const authorityLog = createStructuredLogger('rscore.authority');
-
-type AuthorityRuntimeScope = Pick<
-  RuntimeReplica,
-  'runtimeId' | 'accountAuthoritySuppressed'
->;
-
-const authorityTargetRuntimeId = (): string | undefined => {
-  const configured = process.env['XLN_RSCORE_AUTHORITY_RUNTIME_ID'];
-  if (configured === undefined || configured === '') return undefined;
-  if (!/^0x[0-9a-f]{40}$/.test(configured)) {
-    throw new Error(`RSCORE_AUTHORITY_RUNTIME_ID_INVALID:${configured}`);
-  }
-  return configured;
-};
-
-/**
- * Authority is process-configured but Runtime-scoped. HLT packs hundreds of
- * sovereign Runtime replicas into one process, so inheriting the flag must
- * never silently hand all of them to the H1 engine. Omitting the target keeps
- * the single-Runtime production process behavior; packed hosts name H1
- * explicitly.
- */
-export const authorityDriverEnabled = (env?: AuthorityRuntimeScope): boolean => {
-  if (process.env['XLN_RSCORE_AUTHORITY'] !== '1') return false;
-  if (env?.accountAuthoritySuppressed === true) return false;
-  const target = authorityTargetRuntimeId();
-  if (target === undefined || env === undefined) return true;
-  const runtimeId = String(env.runtimeId ?? '');
-  if (!/^0x[0-9a-f]{40}$/.test(runtimeId)) {
-    throw new Error(`RSCORE_AUTHORITY_RUNTIME_ID_MISSING:${runtimeId}`);
-  }
-  return runtimeId === target;
-};
 
 /**
  * A read-only replay never writes, so nothing it does can become durable —
