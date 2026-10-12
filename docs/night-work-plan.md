@@ -27,9 +27,14 @@ Method review: private preview proved boot but missed the real reverse proxy.
 A public pay→nested-route reload caught the remaining operational defect.
 Keep the first failed evidence and resume exactly after accepted financial
 actions; do not rerun funding. No new protocol code, metrics or owner question.
-Next single step: commit the evidence and matching nginx deployment-template
-correction through a follow-up PR; retain deployed e4 while remaining mainnet
-acceptance evidence is reviewed. Rust, lending and contract code unchanged.
+PR #76 contains the evidence and matching nginx deployment-template correction.
+Its first head was behind the PR #75 merge commit despite identical runtime
+files. Synchronize with reviewed main and run the required checks before push.
+Start follow-up branches from fetched main to avoid wasting a CI run under
+strict branch protection. No deployment or financial action is repeated.
+Next single step: bring PR #76 through seven required green jobs and normal
+merge; retain deployed e4 while remaining mainnet acceptance evidence is reviewed.
+Rust, lending and contract code unchanged.
 
 - Owner authorized the one active TS fixture import correction on October 12.
   The stale worker path is replaced by the canonical Runtime worker path;
