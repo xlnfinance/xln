@@ -330,7 +330,7 @@ nginx (inside the 443 server block, before `location /`):
 location = /ui { return 301 /ui/; }
 location ^~ /ui/ {
     alias /root/xln-ui/ui/dist/;
-    try_files $uri $uri/ /ui/index.html;
+    try_files $uri /ui/index.html;
     add_header Content-Security-Policy "frame-ancestors 'self'" always;
     location ~* /ui/assets/ { expires 1y; add_header Cache-Control "public, immutable"; }
     location ~* /ui/(runtime|account-worker)\.js$ { add_header Cache-Control "no-store, must-revalidate"; }
@@ -339,6 +339,10 @@ location ^~ /ui/ {
 
 The wallet loads `/ui/runtime.js` (its own bundle pair) and talks to the same
 `/api/*`, `/ws` and `/relay` surfaces as the SvelteKit app.
+
+Do not add a `$uri/` directory probe: the React `/assets` screen shares its name
+with the build's assets directory. Reloading that screen must serve the wallet
+entrypoint, not request a directory listing and return 403.
 
 ### `/c` and `/c.txt`
 
