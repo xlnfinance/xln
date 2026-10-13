@@ -478,8 +478,10 @@ export const decodeStandardSolidityRevertData = (revertData: string, log: Revert
 // by IP and recovers on its own. Treating it as fatal permanently halted the
 // jurisdiction watcher, and every later restart short-circuited on the recorded
 // fatal. It belongs with 503, which already lives in this list.
+// A pending header can be null or reported as block-not-found. Both retry the
+// complete authenticated window; malformed headers and finalized reorgs remain fatal.
 export const isTransientRpcUnavailableError = (error: unknown): boolean =>
-  /J_HISTORY_HEADER_MISSING:height=\d+ error=none|J_RECEIPT_RANGE_REORG|J_RECEIPT_RANGE_PARENT_MISMATCH|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|Unexpected end of JSON input|PROXY_UPSTREAM_TIMEOUT|RPC_BATCH_TIMEOUT:\d+|RPC_BATCH_HTTP_429|RPC_BATCH_HTTP_50[0234]|429 Too Many Requests|50[0234] (Bad Gateway|Gateway Timeout|Service Unavailable|Internal Server Error)|server response (429|50[0234])|responseStatus["': ]+(429|50[0234])/i.test(
+  /J_HISTORY_HEADER_MISSING:height=\d+ error=none(?:$|\s)|(?:J_HISTORY_HEADER_MISSING:height=\d+ error=|J_RECEIPT_BATCH_CALL_FAILED:\d+:eth_getBlockByNumber:)block not found with number 0x[0-9a-f]+(?:$|\s)|J_RECEIPT_RANGE_REORG|J_RECEIPT_RANGE_PARENT_MISMATCH|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|Unexpected end of JSON input|PROXY_UPSTREAM_TIMEOUT|RPC_BATCH_TIMEOUT:\d+|RPC_BATCH_HTTP_429|RPC_BATCH_HTTP_50[0234]|429 Too Many Requests|50[0234] (Bad Gateway|Gateway Timeout|Service Unavailable|Internal Server Error)|server response (429|50[0234])|responseStatus["': ]+(429|50[0234])/i.test(
     rpcErrorText(error),
   );
 
