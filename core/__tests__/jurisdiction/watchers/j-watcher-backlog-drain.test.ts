@@ -57,7 +57,7 @@ type RpcGateControl = {
 type RpcGateProxy = {
   rpcUrl: string;
   armBlockNumberGate(): RpcGateControl;
-  armHeaderBatchGate(status?: 429): RpcGateControl;
+  armHeaderBatchGate(status?: 429 | 'missing-header'): RpcGateControl;
   takeHeaderBlocks(): number[];
   close(): Promise<void>;
 };
@@ -128,12 +128,12 @@ const startAnvil = async (): Promise<ManagedAnvil> => {
 };
 
 const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
-  let armedGate: { target: 'block-number' | 'headers'; status?: 429 } | null = null;
+  let armedGate: { target: 'block-number' | 'headers'; status?: 429 | 'missing-header' } | null = null;
   let enteredResolve: (() => void) | null = null;
   let releasePromise: Promise<void> | null = null;
   let releaseResolve: (() => void) | null = null;
   const headerBlocks: number[] = [];
-  const armGate = (target: 'block-number' | 'headers', status?: 429): RpcGateControl => {
+  const armGate = (target: 'block-number' | 'headers', status?: 429 | 'missing-header'): RpcGateControl => {
     if (armedGate || releasePromise) throw new Error('J_WATCHER_RPC_GATE_ALREADY_ARMED');
     armedGate = { target, ...(status === undefined ? {} : { status }) };
     const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
@@ -156,7 +156,7 @@ const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
     port: 0,
     async fetch(request) {
       const body = await request.text();
-      type RpcCall = { method?: string; params?: unknown[] };
+      type RpcCall = { id: number; method?: string; params?: unknown[] };
       const payload = JSON.parse(body) as RpcCall | RpcCall[];
       const methods = Array.isArray(payload) ? payload.map((entry) => entry.method) : [payload.method];
       const headerBatch = Array.isArray(payload) && payload.length > 1 &&
@@ -177,6 +177,12 @@ const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
         if (!releasePromise) throw new Error('J_WATCHER_RPC_GATE_RELEASE_MISSING');
         await releasePromise;
         if (gate.status === 429) return new Response('Too Many Requests', { status: 429 });
+        if (gate.status === 'missing-header' && Array.isArray(payload)) {
+          return Response.json(payload.map(entry => ({
+            jsonrpc: '2.0', id: entry.id,
+            error: { code: -32000, message: `block not found with number ${entry.params?.[0]}` },
+          })));
+        }
       }
       return await fetch(upstreamUrl, {
         method: 'POST',
@@ -337,11 +343,11 @@ describe('RPC J-watcher backlog drain', () => {
     });
     const beforeFailures = failureState();
     rpcProxy.takeHeaderBlocks();
-    const rateLimitGate = rpcProxy.armHeaderBatchGate(429);
-    const rateLimitedPoll = pollWatcher();
-    await waitForGate('rate-limit', rateLimitGate, rateLimitedPoll);
-    rateLimitGate.release();
-    await rateLimitedPoll;
+    const missingHeaderGate = rpcProxy.armHeaderBatchGate('missing-header');
+    const missingHeaderPoll = pollWatcher();
+    await waitForGate('missing-header', missingHeaderGate, missingHeaderPoll);
+    missingHeaderGate.release();
+    await missingHeaderPoll;
     expect(failureState()).toEqual(beforeFailures);
     expect(adapter.isWatching()).toBe(true);
     expect(rpcProxy.takeHeaderBlocks()).toHaveLength(128);
@@ -353,7 +359,7 @@ describe('RPC J-watcher backlog drain', () => {
     await waitForGate('timeout', timeoutGate, timedOutPoll);
     try {
       // A manual drain shares transport cooldown with the automatic timer.
-      // The real proxy must not receive another header request immediately after 429.
+      // A not-yet-available header uses the same cooldown as other RPC pressure.
       expect(performance.now() - retryStartedAt).toBeGreaterThanOrEqual(900);
       // Let the real HTTP batch deadline abort the held request; no fake clock.
       await Promise.all([timedOutPoll, joinedTimedOutPoll]);

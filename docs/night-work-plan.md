@@ -5,7 +5,25 @@ Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
 
-Current checkpoint, 2026-10-12 22:20 UTC: public Sepolia is running clean
+Current checkpoint, 2026-10-13 23:20 UTC: PR #76 passed 7/7 required jobs and
+merged as 96a65a1f5. A live check found Sepolia API 502: H1 had stopped at
+08:42 UTC after three provider `block not found with number` errors. The same
+missing headers are now available with a continuous parent chain. A private
+cold H1 copy was retained; one restart restored the existing WAL and health,
+without resetting state or sending new funds. Tower remained online.
+
+First correction: the single transient-RPC predicate accepts that exact
+header-availability response from both canonical header readers. Invalid
+headers, unrelated RPC methods and finalized reorgs still fail. The real Anvil
+counterexample preserves cursor, mempool and reserve before a successful retry.
+Next single step: commit the correction, validate its clean SHA, and bring its
+PR through seven green jobs before replacing the recovered e4 deployment.
+Method: a successful payment/reload does not establish sustained RPC liveness;
+retain the actual provider error and test it through the full reader/controller.
+Old inactive checkouts are sparse and recoverable; their Git objects and
+untracked files remain. Financial stores and the current rollback are untouched.
+
+Previous release checkpoint, 2026-10-12 22:20 UTC: public Sepolia is running clean
 e4db444ee (PR #75 green 7/7, merged as 5f764adfa). All 11 served UI files match
 the built manifest. H1 and tower are healthy; P6 remains finalized, collateral
 zero. No contract change or WAL rewind. Free ethPandaOps is now configured in
@@ -32,8 +50,7 @@ Its first head was behind the PR #75 merge commit despite identical runtime
 files. Synchronize with reviewed main and run the required checks before push.
 Start follow-up branches from fetched main to avoid wasting a CI run under
 strict branch protection. No deployment or financial action is repeated.
-Next single step: bring PR #76 through seven required green jobs and normal
-merge; retain deployed e4 while remaining mainnet acceptance evidence is reviewed.
+PR #76 is now merged; its original CI source SHA remains in the release evidence.
 Rust, lending and contract code unchanged.
 
 - Owner authorized the one active TS fixture import correction on October 12.

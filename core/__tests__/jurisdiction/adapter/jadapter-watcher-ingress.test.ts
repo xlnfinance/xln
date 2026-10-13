@@ -374,6 +374,23 @@ describe('JAdapter watcher ingress', () => {
     expect(isTransientRpcUnavailableError(new Error('execution reverted: INSUFFICIENT_RESERVE'))).toBe(false);
   });
 
+  test('RPC missing-block responses retry while malformed authority evidence remains fatal', () => {
+    // Exact Sepolia incident: the provider announced a tip before serving its header.
+    for (const message of [
+      'J_HISTORY_HEADER_MISSING:height=11904945 error=block not found with number 0xb5a7b1',
+      'J_RECEIPT_BATCH_CALL_FAILED:1:eth_getBlockByNumber:block not found with number 0x1',
+    ]) expect(isTransientRpcUnavailableError(new Error(message))).toBe(true);
+    for (const message of [
+      'J_HISTORY_HEADER_MISSING:height=11904945 error=invalid params',
+      'J_HISTORY_HEADER_MISSING:height=11904945 error=block not found with number 0xwrong',
+      'J_HISTORY_HEADER_NUMBER_MISMATCH:expected=11904945:actual=11904944',
+      'J_HISTORY_HEADER_PARENT_MISMATCH:height=11904945',
+      'J_HISTORY_FINALIZED_REORG:11904945',
+      'J_RECEIPT_BATCH_CALL_FAILED:1:eth_call:block not found with number 0x1',
+      'block not found with number 0xb5a7b1',
+    ]) expect(isTransientRpcUnavailableError(new Error(message))).toBe(false);
+  });
+
   test('RPC watcher bounds historical catch-up without skipping the safe tip', () => {
     expect(resolveWatcherPollToBlock(1, 10_000, 256)).toBe(256);
     expect(resolveWatcherPollToBlock(1, 190_000)).toBe(256);
