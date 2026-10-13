@@ -1,0 +1,266 @@
+{
+  "sourceSha": "4c4413992b1f11a5cbdcb5e1fcaed7dafa69483c",
+  "sourceCleanAtLocalChecks": true,
+  "mainnetReady": false,
+  "incident": {
+    "detectedAt": "2026-10-13T23:09:00Z",
+    "hubStoppedAt": "2026-10-13T08:42:05Z",
+    "publicStatus": 502,
+    "cause": "A temporarily unavailable block header was classified as fatal and exhausted three controller recoveries.",
+    "provider": "https://rpc.sepolia.ethpandaops.io",
+    "missingHeader": 11904945,
+    "headersNowAvailable": [
+      11904941,
+      11904942,
+      11904943,
+      11904944,
+      11904945
+    ],
+    "parentChainValid": true,
+    "initialRecovery": "One restart after a private cold copy; replayed existing WAL.",
+    "privateColdBackupSha256": "e1d30c9f07cc3bd1d197614d3837ce42ca759809bf5e31ec9d0e500a16e2f819"
+  },
+  "change": {
+    "canonicalOwner": "core/jurisdiction/adapter/rpc-public.ts:isTransientRpcUnavailableError",
+    "behavior": "Retry exact block-not-found errors from both header readers through the existing complete-window retry path.",
+    "fatalChecksRetained": [
+      "malformed header",
+      "header number mismatch",
+      "finalized reorg",
+      "unrelated RPC method"
+    ],
+    "contractsChanged": false,
+    "walFormatChanged": false
+  },
+  "local": {
+    "adapterTests": 50,
+    "adapterAssertions": 247,
+    "realAnvilTests": 1,
+    "realAnvilAssertions": 39,
+    "realAnvilSeconds": 24.12,
+    "sourceGates": 38,
+    "reactProductionBuild": true,
+    "financialInvariant": "A failed header batch advances neither scan cursor nor finalized Entity state, reserve or mempool; successful retry recovers the real event beyond 4096 historical blocks."
+  },
+  "preDeploymentWallet": {
+    "publicSource": "e4db444ee98abf9cc567b8f9bd431d97c1414b95",
+    "existingBalance": "75.00 test USDT",
+    "javascriptErrors": 0,
+    "additionalFunding": 0,
+    "additionalPayments": 0,
+    "firstObservation": "30-second wait expired while the wallet was syncing.",
+    "followupObservation": "The same profile opened within a 170-second observation budget. Exact duration was not recorded; this is not proof of the 60-second mainnet recovery gate."
+  },
+  "scope": "Ethereum Sepolia test deployment. No real-money or mainnet readiness claim.",
+  "pr": {
+    "headRefOid": "4c4413992b1f11a5cbdcb5e1fcaed7dafa69483c",
+    "mergeCommit": {
+      "oid": "1fcd38b378fadb840a8095e55abd2445e2c8d36b"
+    },
+    "mergedAt": "2026-10-13T23:53:14Z",
+    "state": "MERGED",
+    "url": "https://github.com/xlnfinance/xln/pull/77"
+  },
+  "ci": {
+    "run": "https://github.com/xlnfinance/xln/actions/runs/38484324519",
+    "requiredJobsPassed": 7,
+    "requiredJobsTotal": 7,
+    "unitJobSeconds": 926,
+    "e2eJobSeconds": 1368
+  },
+  "deployment": {
+    "sourceSha": "4c4413992b1f11a5cbdcb5e1fcaed7dafa69483c",
+    "sourceClean": true,
+    "seconds": 37,
+    "publicUiFilesVerified": 11,
+    "publicOrigin": "https://sepolia.xln.finance",
+    "coldBackup": "/var/lib/xln/sepolia-20261011/backups/release-4c4413992-20261013T235318Z",
+    "walRewound": false,
+    "providerConfigurationChanged": false,
+    "p6": {
+      "block": 11909497,
+      "blockHash": "0x9e7de24a4409a3912e2ffad8e2e025ab42e187ec7f851086ce64ec67e640dab8",
+      "collateral": "0",
+      "activeDispute": false,
+      "transactionsSent": 0
+    },
+    "towerHealthy": true,
+    "h1Healthy": true
+  },
+  "publicWallet": {
+    "kind": "PUBLIC_POST_DEPLOY_RELOAD",
+    "durationMs": 15869,
+    "source": "4c4413992b1f11a5cbdcb5e1fcaed7dafa69483c",
+    "total": "$75.00",
+    "additionalFunding": 0,
+    "additionalPayments": 0,
+    "errors": [],
+    "assertedTokenBalance": "75.00 USDT",
+    "transport": "Actual public production UI/API/RPC; no interception or debug state",
+    "initialHarnessFailure": "The balance assertion targeted the connection row, which has no balance. Corrected to the existing token-net-USDT test id; application code unchanged.",
+    "screenshot": "post-deploy-wallet.png"
+  },
+  "evidenceScope": "Local L1/L2, full check/build and public post-deployment journey ran with clean committed source 4c4413992. The first helper-selector error is retained; no funding/payment action was repeated.",
+  "nextStep": "Measure cold wallet recovery against the 60-second mainnet gate on the deployed source. The successful warm reopen/reload is not that proof.",
+  "proofFiles": [
+    {
+      "path": "after-config.sha256",
+      "bytes": 446,
+      "sha256": "ac408eeac2e31c6d83e9882ca1e00bcf0c26fcdd4a30656de72447130b84bc09"
+    },
+    {
+      "path": "availability-and-retention.log",
+      "bytes": 2061,
+      "sha256": "eb5d076ff7e4869ab2fb46c243bc9773a3e18dfb585df06666fe97b48550d739"
+    },
+    {
+      "path": "candidate-p6-chain.json",
+      "bytes": 160,
+      "sha256": "499f2c53f41e53c49be0f023ea99ce9cad53b150621b6da0c7a79c00a4882918"
+    },
+    {
+      "path": "candidate-p6-local.json",
+      "bytes": 1147,
+      "sha256": "5f511b1778c29133f0ae84a611dca4fb43d54c718a1c8cb8b0146ca9b8fecdf2"
+    },
+    {
+      "path": "candidate-tower.json",
+      "bytes": 603,
+      "sha256": "76b81e23efba6dbb358bc1fbf28e19a515c0553b51ea9bb3b3f02857c20be355"
+    },
+    {
+      "path": "check-4c4413992.log",
+      "bytes": 117665,
+      "sha256": "8cbaede251860a26fd84371f273dd6ceafbb336907b2b8d065f32b0eca835d70"
+    },
+    {
+      "path": "ci-final.json",
+      "bytes": 898,
+      "sha256": "35c32d4f0d1a04b4b398492bfbf2dda3b79461dd6ae5e46029f4658821a690b4"
+    },
+    {
+      "path": "ci-run.json",
+      "bytes": 19481,
+      "sha256": "4628988914533ce6e304790d038cfb69e8c40ac83eda6bf27e003746d094bad9"
+    },
+    {
+      "path": "clean-4c4413992-l1.log",
+      "bytes": 6509,
+      "sha256": "56c56c3fea440cfc7636b5c2822b2fd037b9910a4c8fb762b89e5e37f3ad8234"
+    },
+    {
+      "path": "clean-4c4413992-l2.log",
+      "bytes": 3164,
+      "sha256": "3119b5b4dbfcc7f4d15c1547145f11371efa882bae4ac068b18d47af74cd56ae"
+    },
+    {
+      "path": "inactive-checkout-retention.log",
+      "bytes": 408,
+      "sha256": "1d29f8a8860ce091d7e48969f8638c2fc3426bf3a3eb921f391a43811a0a7b92"
+    },
+    {
+      "path": "incident-fatal.log",
+      "bytes": 4857,
+      "sha256": "389fc23a20d0c3a2294abec0155bd1d147a8b737d0d54db89a5847e89d6ab06d"
+    },
+    {
+      "path": "l1-before.log",
+      "bytes": 909,
+      "sha256": "0bb8ac1efc43a8aac8e751ad1c4a7c1fc6145577529b13ae3560088d26e6ccac"
+    },
+    {
+      "path": "l2-real-anvil.log",
+      "bytes": 1292,
+      "sha256": "4f538279367571ad42241d871ec1ae1611f3781881bca9a245273afdda060d41"
+    },
+    {
+      "path": "post-deploy-wallet-selector-error.log",
+      "bytes": 2418,
+      "sha256": "fda96f42614b962be357a7dc440632041da25f7493906eea496533bc76046342"
+    },
+    {
+      "path": "post-deploy-wallet.log",
+      "bytes": 330,
+      "sha256": "fe0f31815eb50ec043354255ced75bd4d51e501fdd9e5fca9fcc0759ccd6f007"
+    },
+    {
+      "path": "post-deploy-wallet.ts",
+      "bytes": 2506,
+      "sha256": "ad38dd436b297f84f77fadc802e6b6e93573a223b0fd0334e322b22ee76a5fa9"
+    },
+    {
+      "path": "pr-merged.json",
+      "bytes": 224,
+      "sha256": "096000172e13cd08bbb1569627ba45a814360b7fe3abbfed4379863ce6264c92"
+    },
+    {
+      "path": "promote.log",
+      "bytes": 848,
+      "sha256": "6f5c9df75f7b6f8318aec275bff3d23ce504ee188d99e20a736a42ab6566936e"
+    },
+    {
+      "path": "promote.sh",
+      "bytes": 10340,
+      "sha256": "bae45829855f5c860886d672316586075f1fe807ba038cae23fe35cd0704a5b5"
+    },
+    {
+      "path": "public-assets.log",
+      "bytes": 497,
+      "sha256": "3c72757ee2193160ac2b7323b643658c1e8c91e6d5f610edb9c0af2c726fc544"
+    },
+    {
+      "path": "public-health.json",
+      "bytes": 4323,
+      "sha256": "df6e1b7ba61e40f6ffd4679f7c39933442261a6790ff4244cb07a198046c242a"
+    },
+    {
+      "path": "public-restored-balance.log",
+      "bytes": 1682,
+      "sha256": "ca796586b3f16161a8f158f0b34cfce113a1a7adcdac745a26ecda5ebe4ded01"
+    },
+    {
+      "path": "public-restored-wallet-long.log",
+      "bytes": 208,
+      "sha256": "0064e6577fa7a74cfd38b01755ae5cdf8309914cc73cc363b6b088b67f3c7d75"
+    },
+    {
+      "path": "release-4c4413992-manifest.json",
+      "bytes": 2296,
+      "sha256": "c23041cc8be84f6bd97e92041e80ece00e8b0c5a8e8c8715f453225b14696503"
+    },
+    {
+      "path": "release-4c4413992-public-assets.json",
+      "bytes": 561,
+      "sha256": "b14202645254bac37461aae449822f6bf4b50c850322c184334ed45875eb272b"
+    },
+    {
+      "path": "retention-before-promote.log",
+      "bytes": 294,
+      "sha256": "36f53b615fc74b47acc6401bc87730a5513b8367513f7f4d0948861f21fca891"
+    },
+    {
+      "path": "stage.log",
+      "bytes": 1647,
+      "sha256": "5f489acc36291edcb6dbd4ab5fbfdc43f67b4789573293ef0d63fa9824861c01"
+    },
+    {
+      "path": "stage.sh",
+      "bytes": 1495,
+      "sha256": "429799e345e2a646a608f9a1cef57b95038c019555c4f729d27d48348fad9664"
+    },
+    {
+      "path": "state.sha256",
+      "bytes": 149,
+      "sha256": "6915b0aa566b9df64723129f2dc8fe9b47fb60fac1a67f09aff5f5847cf70b99"
+    },
+    {
+      "path": "ui-build-4c4413992.log",
+      "bytes": 5081,
+      "sha256": "75b779dbc9274bc49fb892df3ad9db29e1b81cee0f53701d294e5114ded64cbf"
+    }
+  ],
+  "proofArchive": {
+    "path": "proof.tar.gz",
+    "sha256": "4c25f8e7e91613d45f265a61dfe950df266b1765d0b1befe94af14de1ce3e43c"
+  }
+}
