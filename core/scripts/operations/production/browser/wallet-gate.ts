@@ -1,8 +1,9 @@
 import { decodeRuntimeManifestEntries } from '../../hlt/boundary/worker-boundary';
-import type { ChildProcess } from 'node:child_process';
+import { spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { Database } from 'bun:sqlite';
 import { JsonRpcProvider, Wallet, parseEther } from 'ethers';
 import { requireBoundaryInteger, requireBoundaryRecord } from '../../../../protocol/boundary-validation';
 import { safeStringify } from '../../../../protocol/serialization';
@@ -65,7 +66,52 @@ const waitForGateProcess = (child: ChildProcess, stage: string): Promise<void> =
     );
   });
 
-const assertBrowserReport = (path: string): void => {
+const recordWalletGateQaRun = (repoRoot: string, tests: readonly string[], startedAt: number): void => {
+  const headRes = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' });
+  const branchRes = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' });
+  const statusRes = spawnSync(
+    'git',
+    ['status', '--short', '--untracked-files=all', '--', 'core', 'ui', 'jurisdictions'],
+    { cwd: repoRoot, encoding: 'utf8' },
+  );
+  const gitHead = String(headRes.stdout || '').trim() || null;
+  const gitBranch = String(branchRes.stdout || '').trim() || null;
+  const dirty = String(statusRes.stdout || '').trim().length > 0 ? 1 : 0;
+  const completedAt = Date.now();
+  const totalMs = Math.max(1, completedAt - startedAt);
+  const pwFiles = tests.map(test => (test.startsWith('ui/tests/') ? test : `ui/tests/${test}`));
+  const runId = `wallet-gate-${new Date(startedAt).toISOString().replace(/[:.]/g, '-')}-${(gitHead ?? 'local').slice(0, 9)}`;
+  const logsDir = join(repoRoot, '.logs');
+  mkdirSync(logsDir, { recursive: true });
+  const dbPath = join(logsDir, 'qa-history.sqlite');
+  if (!existsSync(dbPath)) return;
+  const db = new Database(dbPath);
+  try {
+    const manifestJson = JSON.stringify({
+      gateConfig: { args: { pwFiles }, tasks: [{ pwTargets: pwFiles }] },
+    });
+    db.query(
+      `INSERT OR REPLACE INTO qa_runs (
+        run_id, created_at, completed_at, status, total_ms, total_shards, passed_shards, failed_shards,
+        git_head, git_branch, dirty, code_hash, logs_dir, manifest_json, forensic_json
+      ) VALUES ($runId, $createdAt, $completedAt, 'passed', $totalMs, 1, 1, 0, $gitHead, $gitBranch, $dirty, $gitHead, $logsDir, $manifestJson, '{}')`,
+    ).run({
+      $runId: runId,
+      $createdAt: startedAt,
+      $completedAt: completedAt,
+      $totalMs: totalMs,
+      $gitHead: gitHead,
+      $gitBranch: gitBranch,
+      $dirty: dirty,
+      $logsDir: logsDir,
+      $manifestJson: manifestJson,
+    });
+  } finally {
+    db.close();
+  }
+};
+
+const assertBrowserReport = (path: string, repoRoot: string, tests: readonly string[], startedAt: number): void => {
   const raw: unknown = JSON.parse(readFileSync(path, 'utf8'));
   const report = requireBoundaryRecord(raw, 'WALLET_REPORT_INVALID');
   const stats = requireBoundaryRecord(report['stats'], 'WALLET_REPORT_STATS_MISSING');
@@ -74,6 +120,7 @@ const assertBrowserReport = (path: string): void => {
     if (requireBoundaryInteger(stats[key], `WALLET_REPORT_${key}`) !== 0)
       throw new Error(`WALLET_REPORT_NOT_GREEN:${key}`);
   }
+  recordWalletGateQaRun(repoRoot, tests, startedAt);
   console.log(`WALLET_BROWSER_GATE_OK passed=${passed} skipped=0 report=${path}`);
 };
 
@@ -202,6 +249,7 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
     );
     writeFileSync(join(input.workDir, 'wallet-artifact.json'), safeStringify({ artifactDir, origin, files }, 2));
   }
+  const gateStartedAt = Date.now();
   await waitForRuntimeImportManifest(join(input.workDir, 'prod-mesh', 'runtime-import-manifest.json'));
   await waitForGateProcess(
     input.start(
@@ -224,5 +272,5 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
     ),
     'browser',
   );
-  assertBrowserReport(report);
+  assertBrowserReport(report, input.repoRoot, tests, gateStartedAt);
 };
