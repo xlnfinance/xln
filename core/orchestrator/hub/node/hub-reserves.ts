@@ -17,7 +17,7 @@ import {
   tokenCatalogForHubJurisdiction,
   waitForTokenCatalog,
 } from './token-catalog';
-import { normalizeEntityRef as normalizeEntityId } from '../../../support/boundary-guards';
+import { normalizeEntityRef } from '../../../support/boundary-guards';
 
 /** Hub process state the reserve bootstrap reads; hub-node owns every field. */
 export type HubReserveDeps = Readonly<{
@@ -28,7 +28,7 @@ export type HubReserveDeps = Readonly<{
   finishTiming: (stage: 'reserve_funding', startedAt: number) => void;
 }>;
 
-export { normalizeEntityId };
+export const normalizeEntityId = normalizeEntityRef;
 
 const requireJAdapterForEntity = (env: RuntimeReplica, entityId: string, purpose: string): JAdapter => {
   const adapter = getEntityJAdapter(env, entityId);

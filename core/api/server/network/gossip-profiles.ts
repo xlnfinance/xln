@@ -2,7 +2,7 @@ import type { RuntimeReplica } from '../../../runtime/types';
 import type { Profile } from '../../../entity/profile';
 import { normalizeRuntimeKey, type RelayStore } from '../../../network/relay/store';
 import { safeStringify } from '../../../protocol/serialization';
-import { normalizeEntityRef as normalizeEntityId } from '../../../support/boundary-guards';
+import { normalizeEntityRef } from '../../../support/boundary-guards';
 
 const buildKnownProfileBundle = (
   input: {
@@ -11,7 +11,7 @@ const buildKnownProfileBundle = (
     entityId: string;
   },
 ): { profile: Profile | null; peers: Profile[] } => {
-  const target = normalizeEntityId(input.entityId);
+  const target = normalizeEntityRef(input.entityId);
   if (!target) return { profile: null, peers: [] };
 
   // Both stores are already keyed by canonical EntityId. Never rebuild or scan
@@ -28,11 +28,11 @@ const buildKnownProfileBundle = (
 
   const peerIds = new Set<string>();
   for (const peerId of Array.isArray(profile.publicAccounts) ? profile.publicAccounts : []) {
-    const normalized = normalizeEntityId(peerId);
+    const normalized = normalizeEntityRef(peerId);
     if (normalized) peerIds.add(normalized);
   }
   for (const account of Array.isArray(profile.accounts) ? profile.accounts : []) {
-    const normalized = normalizeEntityId(account?.counterpartyId);
+    const normalized = normalizeEntityRef(account?.counterpartyId);
     if (normalized) peerIds.add(normalized);
   }
 
@@ -45,7 +45,7 @@ const buildKnownProfileBundle = (
 };
 
 export const gossipProfileEntityId = (request: Request): string => {
-  const entityId = normalizeEntityId(new URL(request.url).searchParams.get('entityId'));
+  const entityId = normalizeEntityRef(new URL(request.url).searchParams.get('entityId'));
   return /^0x[0-9a-f]{64}$/.test(entityId) ? entityId : '';
 };
 
@@ -100,7 +100,7 @@ export const buildDebugEntitiesPayload = (input: {
     metadata: Profile['metadata'];
   }>;
 } => {
-  const q = normalizeEntityId(input.query);
+  const q = normalizeEntityRef(input.query);
   const limit = Math.max(1, Math.min(5000, Number(input.limit || 1000)));
   const onlineOnly = input.onlineOnly === true;
   const entities = Array.from(input.relayStore.gossipProfiles.entries())

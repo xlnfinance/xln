@@ -3,7 +3,7 @@ import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import { isLiquidSwapToken } from '../../account/utils';
 import { parseJurisdictionStackIdentity } from '../../jurisdiction/machine/jurisdiction-stack';
-import { normalizeEntityRef as normalizeEntityId } from '../../support/boundary-guards';
+import { normalizeEntityRef } from '../../support/boundary-guards';
 
 const normalizeJurisdiction = (value: string): string => String(value || '').trim().toLowerCase();
 
@@ -132,7 +132,7 @@ export function deriveCanonicalCrossJurisdictionBookOwnerForLegs(
   const sourceOwnsBook = sourceKey[0] < targetKey[0] || (
     sourceKey[0] === targetKey[0] && sourceKey[1] < targetKey[1]
   );
-  return normalizeEntityId(
+  return normalizeEntityRef(
     sourceOwnsBook
       ? sourceHubEntityId
       : targetHubEntityId,

@@ -1,5 +1,5 @@
 import type { RuntimeInput } from '../types';
-import { normalizeEntityRef as normalizeEntityId } from '../../support/boundary-guards';
+import { normalizeEntityRef } from '../../support/boundary-guards';
 
 export type DebtEnforcementProjectionRuntimeInputParams = {
   entityId: string;
@@ -37,7 +37,7 @@ const normalizeTimestamp = (timestamp: number): number => {
 export function buildDebtEnforcementRuntimeInputFromProjection(
   params: DebtEnforcementProjectionRuntimeInputParams,
 ): RuntimeInput {
-  const entityId = normalizeEntityId(params.entityId);
+  const entityId = normalizeEntityRef(params.entityId);
   if (!entityId) throw new Error('DEBT_ENFORCEMENT_ENTITY_REQUIRED');
   const jurisdictionName = String(params.jurisdictionName || '').trim();
   if (!jurisdictionName) throw new Error(`ENTITY_JURISDICTION_MISSING: entity=${entityId}`);
