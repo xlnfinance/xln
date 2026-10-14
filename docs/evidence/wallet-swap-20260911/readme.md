@@ -31,9 +31,9 @@ post-reload IndexedDB/WAL. Run the second command only after the first succeeds.
 
 ```sh
 bun run stand:status
-XLN_SWAP_E2E_DIR=/tmp/xln-swap-proof bun run stand:run --reason swap-proof --timeout-ms 60000 -- bun ui/node_modules/playwright/cli.js test -c ui/playwright.config.ts ui/tests/e2e-swap.spec.ts --grep 'same-network swap'
+XLN_SWAP_E2E_DIR=docs/evidence/archive-tmp/xln-swap-proof bun run stand:run --reason swap-proof --timeout-ms 60000 -- bun ui/node_modules/playwright/cli.js test -c ui/playwright.config.ts ui/tests/e2e-swap.spec.ts --grep 'same-network swap'
 bun run stand:status
-XLN_SWAP_E2E_DIR=/tmp/xln-swap-proof bun run stand:run --reason swap-recovery-proof --timeout-ms 60000 -- bun ui/node_modules/playwright/cli.js test -c ui/playwright.config.ts ui/tests/e2e-swap.spec.ts --grep 'unlock after swap'
+XLN_SWAP_E2E_DIR=docs/evidence/archive-tmp/xln-swap-proof bun run stand:run --reason swap-recovery-proof --timeout-ms 60000 -- bun ui/node_modules/playwright/cli.js test -c ui/playwright.config.ts ui/tests/e2e-swap.spec.ts --grep 'unlock after swap'
 ```
 
 Only public identity and financial evidence are committed here. Browser storage
@@ -47,6 +47,6 @@ The bounded swap/reload phase passed in 48.7 s and the initial recovery phase in
 recovery across the two phases, not a fast combined journey, Cross-J swaps,
 TS/Rust parity, live TPS or production readiness.
 
-Regression logs: `/tmp/xln-swap-final-regressions.log` (53 tests, 263 assertions),
-`/tmp/xln-swap-financial-final.log`, `/tmp/xln-swap-recovery-candidate.log`,
-`/tmp/xln-swap-related-faucet.log`. Final gate: `/tmp/xln-swap-final-check.log`.
+Regression logs: `docs/evidence/archive-tmp/xln-swap-final-regressions.log` (53 tests, 263 assertions),
+`docs/evidence/archive-tmp/xln-swap-financial-final.log`, `docs/evidence/archive-tmp/xln-swap-recovery-candidate.log`,
+`docs/evidence/archive-tmp/xln-swap-related-faucet.log`. Final gate: `docs/evidence/archive-tmp/xln-swap-final-check.log`.

@@ -20,16 +20,16 @@ TypeScript and Rust implement the same important accounting problems.
 | Existing React lending lifecycle | Failed at lending_fund | Production rejects ACCOUNT_TX_KIND_OUT_OF_PROFILE; not rerun after the known D3 boundary |
 | Full check after Solidity checkpoint | Not green | Artifact drift, storage budget and Solidity invariants15/15 now pass; next first red was compact/full Account UI types. Targeted type fix passes; the full check has not yet been rerun on it |
 
-Logs: `/tmp/xln-lending-existing-ts-20260907.log`,
-`/tmp/xln-lending-ts-vector-20260907.log`,
-`/tmp/xln-lending-existing-rust-20260907.log`,
-`/tmp/xln-ui-lending-principal-r1-20260907.log`,
-`/tmp/xln-ui-pay-lending-full-check-20260907.log` (historical first blocker),
-`/tmp/xln-ui-recovery-policy-full-check-r3-20260907.log` (latest full check).
+Logs: `docs/evidence/archive-tmp/xln-lending-existing-ts-20260907.log`,
+`docs/evidence/archive-tmp/xln-lending-ts-vector-20260907.log`,
+`docs/evidence/archive-tmp/xln-lending-existing-rust-20260907.log`,
+`docs/evidence/archive-tmp/xln-ui-lending-principal-r1-20260907.log`,
+`docs/evidence/archive-tmp/xln-ui-pay-lending-full-check-20260907.log` (historical first blocker),
+`docs/evidence/archive-tmp/xln-ui-recovery-policy-full-check-r3-20260907.log` (latest full check).
 Numeric counterexamples and executable reproduction:
-`/tmp/xln-lending-accounting-counterexamples-20260907.json`,
-`/tmp/xln-lending-accounting-counterexamples-20260907.test.ts`,
-`/tmp/xln-lending-accounting-counterexamples-20260907.log`.
+`docs/evidence/archive-tmp/xln-lending-accounting-counterexamples-20260907.json`,
+`docs/evidence/archive-tmp/xln-lending-accounting-counterexamples-20260907.test.ts`,
+`docs/evidence/archive-tmp/xln-lending-accounting-counterexamples-20260907.log`.
 
 ## What exists
 

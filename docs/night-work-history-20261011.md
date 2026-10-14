@@ -21,15 +21,15 @@ Current owner direction — 2026-10-10:
 
 Recovery timeout follow-up — 2026-10-09, base96d361e04 plus local edits:
 - Original unchanged focused test passed1/1 in3.23s,8 assertions:
-  .logs/mainnet-20261007/live-head-focused-20261009.log. Full-suite failure was
+  docs/evidence/archive-logs/mainnet-20261007/live-head-focused-20261009.log. Full-suite failure was
   Bun's default5s wall budget; no digest mismatch observed. Set this one signed
   four-entity durable replay integration test to the standard30s budget, keeping
   every semantic assertion. Related recovery suite50/50,262 assertions,28.13s:
-  .logs/mainnet-20261007/live-head-related-20261009.log.
+  docs/evidence/archive-logs/mainnet-20261007/live-head-related-20261009.log.
 - Dev restored successfully after previous run, then gracefully stopped again
   (PID92696) for the full rerun; owner authorization persists.
 - ACTIVE full unit: exec handle95541, shared stand reason full-unit-recovery-budget,
-  timeout1200s. Log .logs/mainnet-20261007/unit-recovery-budget-20261009.log.
+  timeout1200s. Log docs/evidence/archive-logs/mainnet-20261007/unit-recovery-budget-20261009.log.
   Poll existing handle; do not restart. No full-green claim yet. Next run
   bun run check after this exits, then remaining current replay/live/UI gates.
   Pending local owned changes: dev launcher lock, dev startup hardening test,
@@ -41,15 +41,15 @@ Latest state — 2026-10-09, BrainVault site commit96d361e04:
 - A different task restarted dev during the next full unit run. Pending local
   fix in scripts/dev/run-dev.ts makes dev hold the existing shared stand lock
   and validates inherited tokens. Startup/shutdown regression28/28 passed in
-  .logs/mainnet-20261007/dev-stand-exclusion.log. Do not stage unrelated UI edits.
+  docs/evidence/archive-logs/mainnet-20261007/dev-stand-exclusion.log. Do not stage unrelated UI edits.
 - Full unit with this fix:4971 pass,1 fail,228620 assertions,803 files,348.09s.
   Shutdown passed. First remaining failure: live-head-account-restore.test.ts,
   three pinned hub accounts, Bun default5000ms timeout. No semantic mismatch
   observed. Reproduce focused before changing its wall budget. Log:
-  .logs/mainnet-20261007/unit-exclusive-dev.log. Full green NOT claimed.
+  docs/evidence/archive-logs/mainnet-20261007/unit-exclusive-dev.log. Full green NOT claimed.
 - BrainVault site:10 languages,45 keys each;2 tests/532 assertions and31 site
   gates passed. Agent browser evidence20 desktop/mobile language combinations.
-  .logs/brainvault-product-20261009/ contains manifest, screenshots, logs and
+  docs/evidence/archive-logs/brainvault-product-20261009/ contains manifest, screenshots, logs and
   static-site.tar.gz. Local preview127.0.0.1:5197; not published.
 - BrainVault package check87 pass/4 fail: existing source-manifest mismatch,
   stale documented wallet line count, nested package check, GPU folder width.
@@ -60,7 +60,7 @@ Latest state — 2026-10-09, BrainVault site commit96d361e04:
 
 Full unit pass attempt — 2026-10-09, base6797c86dd plus concurrent UI work:
 - Strict semantic completeness enabled. Root suite4965 pass,3 fail,0 skips,
-  228544 assertions,803 files,322.04s. Log .logs/mainnet-20261007/unit-20261009.log.
+  228544 assertions,803 files,322.04s. Log docs/evidence/archive-logs/mainnet-20261007/unit-20261009.log.
   Required six-file subprocess phase separately passed19/19,154 assertions;
   root failure prevented the wrapper from reaching it. This is NOT full green.
 - Watchtower counter-dispute test repeated RED: stale cached nonce. Its custom
@@ -78,7 +78,7 @@ Full unit pass attempt — 2026-10-09, base6797c86dd plus concurrent UI work:
   the requested decision; do not skip the test or count it green. No repeated
   run while the same port owner remains. Other isolated gates can still run.
 - Whole check PASSED handle84986 exit0,39 source gates; log
-  .logs/mainnet-20261007/unit-fixes-20261009-check.log.
+  docs/evidence/archive-logs/mainnet-20261007/unit-fixes-20261009-check.log.
 - Next: approved isolated shutdown test and complete unit/UI rerun.
   Unrelated frontend/UI edits remain unstaged here.
 
@@ -88,7 +88,7 @@ Cross-J orderId rejection fixed — 2026-10-09, base74623a0a7:
   preparation, using the existing Account restriction. Transport remains strict.
 - Tests prove bad intent preserves state and the next valid intent applies:
   TS related79/79, Rust entity-kernel221/221. Logs order-id-ts-related.log and
-  order-id-rust-green.log under .logs/mainnet-20261007; red logs retained.
+  order-id-rust-green.log under docs/evidence/archive-logs/mainnet-20261007; red logs retained.
 - Live native Ethereum/TRON passed after submitting the bad intent to Rust:
   explicit CROSS_J_ORDER_ID_INVALID reject,then2 settled routes,4 exact Account
   balances/peer roots,zero pending queues,and exact SIGKILL frame37 restoration.
@@ -99,7 +99,7 @@ Cross-J orderId rejection fixed — 2026-10-09, base74623a0a7:
   user frames with exact roots/ordered outputs. Logs order-id-replay-*.log.
 - Whole bun run check PASSED handle92432 exit0 (39 gates,40 Rust executables),
   and full contracts201/201 PASSED handle58427. Logs order-id-check.log and
-  order-id-contracts.log under .logs/mainnet-20261007.
+  order-id-contracts.log under docs/evidence/archive-logs/mainnet-20261007.
 - NEXT: current full unit with strict semantic completeness, then full Svelte/React
   E2E on both engines under the stand lock. No mainnet readiness or push claimed.
   Concurrent frontend/UI work is outside this patch and must not be staged here.
@@ -112,11 +112,11 @@ Latest verification — 2026-10-09, HEAD4d8ee444c plus narrow maintenance:
   translated that canonical document without changing owner decisions or Russian
   conversation preference. No policy exclusions added.
 - Whole bun run check PASSED handle20155 exit0:39 source gates,40 Rust executables,
-  Svelte0 errors/0 warnings. Log .logs/mainnet-20261007/check-20261009-driver-location-2.log.
+  Svelte0 errors/0 warnings. Log docs/evidence/archive-logs/mainnet-20261007/check-20261009-driver-location-2.log.
 - Genuine live native cross-J repeated PASSED handle99079 exit0: Ethereum31337 and
   Java TVM2414086651,2 routes,4 Accounts,exact economic deltas and peer roots,
   zero pending ACK/queues; SIGKILL restored identical frame36.
-  Evidence .logs/mainnet-20261007/native-rust-cross/attempt-20261009-location/;
+  Evidence docs/evidence/archive-logs/mainnet-20261007/native-rust-cross/attempt-20261009-location/;
   code150baa3c81930346f9b5a146f6137065acb0315d9f184db6738a78d0bb637888,
   binary780994d4d1a5b2227313c281418fcba85ec8f37dfb128a0eac825a583dbbf030.
 - NEXT: reproduce/fix early typed rejection of colon-containing cross-J orderId
@@ -129,7 +129,7 @@ Owner-requested checkpoint — source frozen for commit:
 - Genuine native Rust Ethereum31337 / Java TVM2414086651 cross-J PASSED:
   2/2 routes,4/4 Account exact balances and peer roots, zero pending ACK/queues,
   SIGKILL restoration exact frame36/root. Artifact native-rust-cross/attempt3/
-  under .logs/mainnet-20261007; code037e3784ac942ca29c6235c5a90950f3139ddac0fa1a47e79dbbf88537a5a27f,
+  under docs/evidence/archive-logs/mainnet-20261007; code037e3784ac942ca29c6235c5a90950f3139ddac0fa1a47e79dbbf88537a5a27f,
   binary574cf20533fbebf6a316d1823265676c8e3bb35ff95c09a50fa7cec1edb52b4e.
 - Previous failure came from test orderIds containing colon, forbidden by both
   Account engines. Driver now uses canonical IDs. Transport correctly failed
@@ -150,7 +150,7 @@ Current first production blocker — native Ethereum/TRON cross-J:
 - New permanent native-rust-cross.ts reaches genuine Ethereum31337 and Java
   TVM2414086651. Four TS-user/native-hub Accounts and credit pass, then first
   cross-J intent fails RRS_TRANSPORT_OUTBOX:cross-j-incomplete-cohort at height31.
-  Evidence .logs/mainnet-20261007/native-rust-cross/attempt2/ plus
+  Evidence docs/evidence/archive-logs/mainnet-20261007/native-rust-cross/attempt2/ plus
   native-rust-cross-4.log; new driver candidate hash is in candidate.json.
 - cross_recovery exclusively owns minimal outbound cohort correction and L1.
   tron_completion exclusively owns driver and repeated live verification,
@@ -223,7 +223,7 @@ Current verified production result — root19:
 - Instant-funded native Rust custody browser gate PASSED1/1,0skips,18.5s.
   Actual2USDC inbound Instant, two SIGKILL/reopens, recovered UI Pay1USDC,
   exact balances/roots and exactly-once receipt. Handle40197 terminal0.
-  Evidence .logs/mainnet-20261007/react-custody-rust-19/ and adjacent source file.
+  Evidence docs/evidence/archive-logs/mainnet-20261007/react-custody-rust-19/ and adjacent source file.
   Main34ee0b19e unstaged diff hash7f88a6fdc1f135ed990fff6c200ceafa4f64b5acb4ef2a145d59ce9f4f51ab70;
   binary327f7ac1d0e5615eddcd380538ea4d04cfaa6019c63991fe66d4bf3bd21e65a4.
 - Readiness race fixed by waiting for the actual canonical validated unexpired
@@ -310,7 +310,7 @@ release; they do not block local work.
 Current production boundary, 2026-10-08 09:34 UTC:
 - Rust root13 isolated Instant-funded custody case reaches derive/openAccount,
   then H2 rejects funding: HTLC_PAYMENT_PROFILE_MATCH_COUNT:<owner>:0.
-  .logs/mainnet-20261007/react-custody-rust-13/server.log115; handle89763
+  docs/evidence/archive-logs/mainnet-20261007/react-custody-rust-13/server.log115; handle89763
   terminal1,32.4s. Binary9491e0170699f667d638380389db12ef29f116859210ab80923e7f6b81b806bf.
   Native has inbound gossip but no outgoing signed profile publisher. First fix:
   native_ui_import owns transport frame/reactor/latest public-profile slot;
@@ -341,7 +341,7 @@ Current verification boundary, 2026-10-08 — native custody origin:
   Rust11 terminal39338 exit0,1pass0skip18.3s; actual2USDC funding,
   SIGKILL/reopen, Instant Pay1USDC, second restart, exact balances/roots,
   retained WAL and one receipt. Artifacts react-custody-rust-11 under
-  .logs/mainnet-20261007; binary SHA256
+  docs/evidence/archive-logs/mainnet-20261007; binary SHA256
   a7c702423338eb6ce5594e019252dc88ef564d5a28f22c47e8c30ed407e2e91c.
   HEAD1f2ac885521a49f32ff094b96b8e1e1c1fccdcb8 plus dirty candidate;
   full source evidence is adjacent to the run, not HEAD alone.
@@ -567,7 +567,7 @@ Current browser boundary, 2026-10-08 06:18 UTC:
   full Rust112pass25fail1externalAI exclusion and TS137pass with browser-health
   errors are stale. Focused greens above must not be called full release proof.
 - Immutable replay16/16 recording hashes verified; final commands in
-  .logs/mainnet-20261007/final-gate-commands.txt and React production-gates.txt.
+  docs/evidence/archive-logs/mainnet-20261007/final-gate-commands.txt and React production-gates.txt.
   One locked stand; source/docs frozen during fingerprinted full runs. No
   deployment with funds authorized yet; no paid external calls or usage resets.
 - Reviewer DTO offer-cap concern is not reproduced through admission: both
@@ -674,7 +674,7 @@ Current browser boundary, 2026-10-08 04:10 UTC:
 Current browser boundary, 2026-10-08 04:00 UTC:
 - Full native Rust Svelte run:112 passed,25 failed,1 external-AI exclusion,
   0 flaky,1266.6s. Evidence `svelte-full-rust-final-1.log`,
-  `.logs/e2e-parallel/20261008-031338-005/`; source hash
+  `docs/evidence/archive-logs/e2e-parallel/20261008-031338-005/`; source hash
   7a883d97d1eedb7c9434a1f3781e9a1511030f612a73f28dfa54f40bb4af8adb.
 - Five of seven isolated financial regressions now pass strict browser health:
   native sibling faucet, full/partial/disputed cross-J, full bidirectional AHB
@@ -705,7 +705,7 @@ candidate remains unverified; prior core gates are evidence, not release success
 Current browser boundary, 2026-10-08 03:10 UTC:
 - Complete Svelte TS run4:137 passed,0 failed,1 excluded external-AI test,
   0 flaky;1210.0s. Overall exit1 because strict browser health found two issues.
-  Evidence `svelte-full-ts-final-4.log`, `.logs/e2e-parallel/20261008-024458-239/`;
+  Evidence `svelte-full-ts-final-4.log`, `docs/evidence/archive-logs/e2e-parallel/20261008-024458-239/`;
   source hash a93d25bf64a77547b70deb9541a8bc85a92f03876b0b134d6572e4535f5162e2.
 - Tower recovery UI500 root cause: recovered Entity was published before its
   live Runtime binding; renderer used the empty bootstrap Runtime. Ordering fix
@@ -728,7 +728,7 @@ existing handles, and distinguish passing assertions from browser-health gates.
 Previous browser boundary, 2026-10-08 02:30 UTC:
 - Complete Svelte TS E2E executed all138 targets:135 passed,2 failed,1 excluded
   external-AI mascot test,0 flaky; wall1218.8s. Evidence
-  `svelte-full-ts-final-3.log` and `.logs/e2e-parallel/20261008-020843-646/`.
+  `svelte-full-ts-final-3.log` and `docs/evidence/archive-logs/e2e-parallel/20261008-020843-646/`.
 - First remaining production journey: wiped-wallet tower recovery reaches UI500
   ENTITY_JURISDICTION_MISSING. Restored env already has2 Entity replicas/2 J;
   diagnose exact selected Entity/runtime/config before changing recovery or UI.
@@ -813,17 +813,17 @@ Latest verified continuation, 2026-10-08 01:14 UTC (supersedes older statuses):
 Method: freeze shared source during stands, preserve artifacts explicitly with
 XLN_KEEP_TEST_ARTIFACTS=1, and run complete browser suites next. Do not count
 old/erased browser outputs as current evidence or claim mainnet readiness.
-Evidence paths above are relative to `.logs/mainnet-20261007/`.
+Evidence paths above are relative to `docs/evidence/archive-logs/mainnet-20261007/`.
 
 Latest verified continuation (base `1f2ac885` plus recorded shared diff):
 - Native newer-counterproof dispute passed the full economic gate in 103.546s:
   old proof 1, counterproof 3, automatic retry, final Account nonce 3 and closed
   dispute; reserves/debts preserved for all three checked tokens. Evidence:
-  `.logs/mainnet-20261007/native-counterproof-economic-finality/`.
+  `docs/evidence/archive-logs/mainnet-20261007/native-counterproof-economic-finality/`.
 - Actual native Rust H1 executed a TVM withdrawal: reserve 100→0, external
   balance 0→100, nonce 0→1, canonical solidified receipt at block 481. SIGKILL
   recovery replayed nine frames with the exact pre-crash height 10 and root.
-  Evidence: `.logs/mainnet-20261007/native-rust-financial/attempt3/`.
+  Evidence: `docs/evidence/archive-logs/mainnet-20261007/native-rust-financial/attempt3/`.
 - Immutable TVM replay attempt 25 passed all 172/172 tail frames on Rust W1
   and W4 (hub 98, user 74), including both native checkpoint/WAL restarts.
   Root, ordered event/effect/outbox and post-state comparisons stayed strict.
@@ -898,7 +898,7 @@ Current continuation, 2026-10-07 22:37 UTC (supersedes older boundary positions 
   reserve 100→0, entity nonce 0→1, old transaction absent. The second-SIGKILL
   boundary now passes with one execution and retired pending raw; `rust_tron_submit` owns it within the existing
   explicitly configured RPC-attested policy. Evidence directory:
-  `.logs/mainnet-20261007/tron-financial-expiry/`.
+  `docs/evidence/archive-logs/mainnet-20261007/tron-financial-expiry/`.
 - Native counterproof's next book-removal error was traced to a pre-chain price
   rejection/cancellation, not its J event. That actual cancellation defect remains
   open. A valid resting quote will isolate the requested counterproof boundary;
@@ -917,7 +917,7 @@ Earlier continuation, 2026-10-07 22:30 UTC:
 - Full native TVM browser path through the real orchestrator and three TS hubs
   passed solidified withdrawal, exact recipient +1,000,000, and zero browser/HTTP
   errors with unchanged source fingerprint. Evidence directory:
-  `.logs/mainnet-20261007/native-browser-orchestrator-origin-fixed/`.
+  `docs/evidence/archive-logs/mainnet-20261007/native-browser-orchestrator-origin-fixed/`.
   This proves TS hub ingress, not native Rust H1 equivalence.
 - Actual native H1 SIGKILL now passes checkpoint restoration and exposes a nested
   prepared-transaction WAL envelope. The projection fix and round-trip regression
@@ -926,7 +926,7 @@ Earlier continuation, 2026-10-07 22:30 UTC:
   touchedBookEntities; roots and ordered outputs there match. Full replay remains open.
 - Expired native numbered registration passed replacement-WAL, second SIGKILL,
   restart and one registration (ordinal 5→6). Evidence:
-  `.logs/mainnet-20261007/tron-registration-replacement-final/`.
+  `docs/evidence/archive-logs/mainnet-20261007/tron-registration-replacement-final/`.
   Rust replacement transition now passes 3/3 captured-WAL tests; full live Rust
   registration and financial replacement crash gates remain open.
 
@@ -937,7 +937,7 @@ requires relinking, and avoid Cargo incremental cache growth during final checks
 No complete current release-suite or mainnet-readiness claim is justified yet.
 
 Latest verified boundaries (2026-10-07, base `1f2ac885`, shared working diff):
-- Newest TRON evidence: `.logs/mainnet-20261007/tron-parity/recording-manifest.json`
+- Newest TRON evidence: `docs/evidence/archive-logs/mainnet-20261007/tron-parity/recording-manifest.json`
   binds 16 artifacts; real TVM WAL has roots for 174/174 frames and exact TS
   replay covers 172/172 tail frames. Native Rust reaches frame 2 with equal
   financial root/outputs but divergent storage hash; exact component comparison
@@ -951,7 +951,7 @@ Latest verified boundaries (2026-10-07, base `1f2ac885`, shared working diff):
   canonical receipt re-read was added. Native headers must be read/validated
   without ethers' EVM-only `stateRoot` formatter. Exactly one registration,
   ordinal 3→4, duplicate retry stays 4; unit tests 13/13. Source/artifact hashes:
-  `.logs/mainnet-20261007/tron-registration-finality-current/manifest.json`.
+  `docs/evidence/archive-logs/mainnet-20261007/tron-registration-finality-current/manifest.json`.
   Actual TVM reorg remains untested; mutated real-fixture tests are not a reorg drill.
 - Native browser withdrawal reached reserve 0, recipient +1,000,000 and nonce 1.
   A stricter rerun found shutdown preceded solidity finality; checked-in browser
@@ -970,7 +970,7 @@ Latest verified boundaries (2026-10-07, base `1f2ac885`, shared working diff):
 - Native cross-J plus real process restart passed in 40.8 seconds after using
   the Entity's authenticated J-history anchor instead of clamping it to a
   lagging global cursor. Worker evidence comes from native readiness (8 workers).
-  Evidence: `.logs/mainnet-20261007/native-cross-recovery-cursor.log` and its
+  Evidence: `docs/evidence/archive-logs/mainnet-20261007/native-cross-recovery-cursor.log` and its
   `production-cross-swap-recovery-report.json` in the sibling directory.
 - TS conflicting precommit merge regression and active forged/genuine vote
   tests passed 43/43; evidence `ts-precommit-{red,green,active}.log` in that
@@ -981,19 +981,19 @@ Latest verified boundaries (2026-10-07, base `1f2ac885`, shared working diff):
   exact restart (hub R99 / user R76). External Alice received 10,000,000 tokens;
   reserves/collateral returned to zero. TronWeb's generated namespace bug was
   fixed with a version-pinned Bun patch, and SDK tests passed 22/22. Evidence:
-  `.logs/mainnet-20261007/tron-current/verified-manifest.json`. These earlier
+  `docs/evidence/archive-logs/mainnet-20261007/tron-current/verified-manifest.json`. These earlier
   stages do not substitute for the current native Rust parity/live J gates.
 - Svelte Rust full run stopped after three passes at the operator screenshot
   test, which incorrectly required five TS admin imports. Existing native H1
   has a separate HTTP operator surface. Corrected focused test verifies four
   exact imports plus native H1 identity/roots/readiness and passed semantically,
   but concurrent code drift invalidated the runner's final candidate gate.
-  Evidence: `.logs/e2e-parallel/20261007-205435-133/`. Native remote wallet/time
+  Evidence: `docs/evidence/archive-logs/e2e-parallel/20261007-205435-133/`. Native remote wallet/time
   machine is not implemented; the screenshot checks H2's supported adapter.
 - Contract underfunded C2R/R2E regression passed after replacing stale monetary
   hashing with the canonical helper. Related Depository-part-1 now passes 50/50
   with exact uint256/Int512/Int768/Uint768 assertions. Evidence:
-  `.logs/mainnet-20261007/contracts-money-domain-final.log`. The later complete
+  `docs/evidence/archive-logs/mainnet-20261007/contracts-money-domain-final.log`. The later complete
   contract result is recorded above; no global full-green claim.
 
 Current ownership: `rust_tron` owns native watcher/schema/exact replay;
@@ -1018,7 +1018,7 @@ by each wake-up. Inspect current processes and continue existing work first.
 
 Previously observed milestones before this session resumed: native fresh-device wallet
 recovery including two settled payments passed in 17.980 seconds;
-`/tmp/xln-native-wallet-recovery-green/`. That temporary artifact is no longer
+`docs/evidence/archive-tmp/xln-native-wallet-recovery-green/`. That temporary artifact is no longer
 present on 2026-10-07, so fresh release evidence must be regenerated.
 Root dependency `secp256k1` was upgraded
 from 4.0.5 to 5.0.2 after a minimal native Worker crash reproduction; related
@@ -1040,41 +1040,41 @@ Next work, in priority order:
    E2E on both engines, immutable replay/live J, contract gates and `bun run check`.
    Keep failed/skipped/stale evidence explicit; then complete operational gates.
 
-Read-only audit snapshot: `/tmp/xln-final-audit-20261001`, base
+Read-only audit snapshot: `docs/evidence/archive-tmp/xln-final-audit-20261001`, base
 `1f2ac885521a49f32ff094b96b8e1e1c1fccdcb8`, manifest SHA256
 `7c586ec3765ccb9e806a059643265989e172e4ea60d1fb8bdb9ec5c1bf27a7d7`.
-Historical contract and Rust report locations were `/tmp/xln-audit-contracts-final.txt`
-and `/tmp/xln-audit-rust-final.txt`; these and the temporary TS precommit
+Historical contract and Rust report locations were `docs/evidence/archive-tmp/xln-audit-contracts-final.txt`
+and `docs/evidence/archive-tmp/xln-audit-rust-final.txt`; these and the temporary TS precommit
 reproducer are no longer present on 2026-10-07. TS audit stopped before its final
 report. Revalidate findings against the live diff before fixing or reporting
-them as resolved. Preserve new execution artifacts in `.logs/mainnet-20261007/`.
+them as resolved. Preserve new execution artifacts in `docs/evidence/archive-logs/mainnet-20261007/`.
 
 First resumed command: under the stand lock, run the existing native Runtime
 test `rejected_runtime_output_does_not_stop_live_ingress_or_admit_batch_prefix`
 with Cargo (`xln-rscore-runtime`, `--lib`). It now exercises reducer processing
 and following honest work in the current diff. Result: 1 passed, 0 failed,
 0 ignored; test body 0.13 seconds. Log:
-`.logs/mainnet-20261007/native-reject.log`.
+`docs/evidence/archive-logs/mainnet-20261007/native-reject.log`.
 
 Resumed `bun run check` passed after two concrete fixes: package-scoped Cargo
 cleanup removed 8.1 GiB of generated runtime build files; the exhaustive process
 error-code match now includes `AccountMempoolAdmissionRejected`. Process
 `cargo check --all-targets` passed; the Account mempool regression passed 1/1.
-Full check evidence: `.logs/mainnet-20261007/check-process-error-code.log`
+Full check evidence: `docs/evidence/archive-logs/mainnet-20261007/check-process-error-code.log`
 (exit 0, source gates 39/39). Earlier failed logs remain available.
 
 Full Svelte E2E finished in 1,243.5 seconds: 137 tests passed, one external AI
 mascot test skipped; strict browser health reported zero issues. Do not call
 this 138 executed tests or native Rust coverage. Manifest:
-`.logs/e2e-parallel/20261007-182800-960/manifest.json`; code hash
+`docs/evidence/archive-logs/e2e-parallel/20261007-182800-960/manifest.json`; code hash
 `a0d87d3d75d416373a250dca2d057cb38e84edec1e3528d70cf20e28478eae61`, base SHA
 `1f2ac885521a49f32ff094b96b8e1e1c1fccdcb8` with uncommitted changes.
 Headless TS full run passed 18/18 in 75.8 seconds:
-`.logs/mainnet-20261007/ts-scenarios-full.log`. Current browser gate:
+`docs/evidence/archive-logs/mainnet-20261007/ts-scenarios-full.log`. Current browser gate:
 React through `local-prod-smoke.ts` / `runWalletBrowserGate`: TS passed 42/42,
 zero skips: 40 ordinary tests plus early-finalization rejection (1) and complete
 pay/swap/cross-J/dispute/recovered-reserve move journey (1). JSON reports live in
-`.logs/mainnet-20261007/react-ts-{current,dispute,journey}/wallet-results.json`.
+`docs/evidence/archive-logs/mainnet-20261007/react-ts-{current,dispute,journey}/wallet-results.json`.
 Native release build passed in 29.87 seconds; see `native-release-build.log` and
 `native-binary.sha256` in the same evidence directory. React Rust also passed
 42/42, zero skips: reports `react-rust-{current,dispute,journey}/wallet-results.json`.
@@ -1086,7 +1086,7 @@ contract fixture, exact replay and final operational gates listed above.
 
 First current blocker (20:12 UTC): full Svelte Rust stopped at cross-J partial
 fill cancellation: 2 passed, 1 failed, remaining targets not run. Original
-manifest `.logs/e2e-parallel/20261007-194642-439/manifest.json`; unchanged focused
+manifest `docs/evidence/archive-logs/e2e-parallel/20261007-194642-439/manifest.json`; unchanged focused
 reproduction also failed (`svelte-rust-partial-repro.log`). The 25 WETH remainder
 stayed executable after cancel and eventually filled completely.
 Confirmed cause: `resident.rs::local_financial_view_requests` omitted the offer
@@ -1095,8 +1095,8 @@ no-op. Added exact offer lookup and named regression
 `committed_swap_cancel_requests_its_offer_for_cross_j_book_removal` (red then green).
 After release rebuild, focused E2E progressed to a new failure:
 `RRS_TRANSPORT_OUTBOX:cross-j-incomplete-cohort` at Runtime height 96. Evidence:
-`.logs/e2e-parallel/20261007-201140-436/shard-0/` and
-`.logs/mainnet-20261007/svelte-rust-partial-fixed.log`. No live test remains.
+`docs/evidence/archive-logs/e2e-parallel/20261007-201140-436/shard-0/` and
+`docs/evidence/archive-logs/mainnet-20261007/svelte-rust-partial-fixed.log`. No live test remains.
 Resolved at 20:41 UTC: frame 96 contained ACK plus both matching closes. Rust
 only inferred pairs when the entire destination group had exactly two rows.
 Added exact-pair selection beside unrelated ACKs and a real-WAL regression
@@ -1105,7 +1105,7 @@ Transport tests 9/9 passed. Next E2E exposed a stale test snapshot: automatic J
 collateral had updated both replicas, but the assertion retained the earlier
 client snapshot. It now compares current replicas while retaining exact fill
 and hold checks. Focused E2E passed, manifest
-`.logs/e2e-parallel/20261007-204026-907/manifest.json`. Full `bun run check` passed
+`docs/evidence/archive-logs/e2e-parallel/20261007-204026-907/manifest.json`. Full `bun run check` passed
 again (`check-cross-cancel.log`, source gates 39/39). Next: full Svelte Rust;
 latest run log `svelte-rust-full-after-cancel.log`.
 
@@ -1114,7 +1114,7 @@ spending). Claude auth reports Max but generation failed: expired OAuth could
 not refresh; CLI also warned `claude-opus-5-5` unrecognized. No review produced,
 no fallback model used. Owner was asked to reauthenticate and confirm exact model
 identifier. Immutable patch packet and failure are under
-`.logs/mainnet-20261007/opus-review/`; regenerate the packet after later edits.
+`docs/evidence/archive-logs/mainnet-20261007/opus-review/`; regenerate the packet after later edits.
 Keep existing Svelte artifacts with `--keep-test-artifacts` on scenario runs.
 
 ## Preserved upstream handoff — dated 2026-09-30
@@ -1732,7 +1732,7 @@ reproduces R22 frame/root and Entity frame 5 exactly. Submitted transaction
 hashes match both observed receipts. Evidence:
 `docs/evidence/tron-native-release-20260918/wallet-proof.json`.
 Full `bun run check` passes: 39 source gates / 40.949 seconds,
-`/tmp/xln-tron-wallet-final-check.log`; diff check and 28 evidence hashes pass.
+`docs/evidence/archive-tmp/xln-tron-wallet-final-check.log`; diff check and 28 evidence hashes pass.
 Current reuse is `--wallet-restore`; prior nonce-2 `--entity-restore` is historical.
 One initial harness attempt failed before submission because the Bun driver had
 not started the normal Runtime loop; that lifecycle setup is fixed. No core
@@ -1753,7 +1753,7 @@ Failures remain recorded. Current reuse is `--entity-restore`; authority-only
 `--runtime-restore` cannot restore the newly imported Foundation signer.
 Evidence: `docs/evidence/tron-native-release-20260918/entity-restore.json`.
 Full check passes, 39 source gates / 40.288 seconds, log
-`/tmp/xln-tron-entity-final-check-retry.log`; diff whitespace check passes.
+`docs/evidence/archive-tmp/xln-tron-entity-final-check-retry.log`; diff whitespace check passes.
 The first full run had an unrelated advisor process-group cleanup `EPERM`;
 focused 4/4 and unchanged full retry pass, intermittent cause remains unresolved.
 Next native gap: wallet-originated financial work and ETH↔native-Tron execution;
@@ -1768,7 +1768,7 @@ Immediate owner priority: install the first native build on the owner's physical
 iPhone 17 Pro, connect to `https://xln.finance`, and prove one real public-testnet
 payment. Public-testnet connection/demo testing is now explicitly authorized;
 this does not authorize mainnet spending or destructive public-ledger resets.
-Current build: `/tmp/xln-ios-prod-testnet-device/Build/Products/Debug-iphoneos/App.app`.
+Current build: `docs/evidence/archive-tmp/xln-ios-prod-testnet-device/Build/Products/Debug-iphoneos/App.app`.
 Physical-device compilation and bundled production origin/recovery configuration
 pass. Signing fails because no development team/valid signing identity exists.
 The known phone is unavailable; direct USB inspection finds no iPhone even after
@@ -1925,7 +1925,7 @@ regression has since passed on the separate stand described above.
 Source verification: the current candidate passes full `bun run check` under
 its 60-second stand lock (39 source gates; `check:src` 54.646 seconds). UI
 typecheck and the iPhone simulator build also pass. Log:
-`/tmp/xln-native-session-check.log`. The previous iOS folder-width failure was
+`docs/evidence/archive-tmp/xln-native-session-check.log`. The previous iOS folder-width failure was
 fixed by grouping the three native bridge files in `App/runtime`, without
 changing the limit. BrainVault E2E category tags remain fixed (195 tests).
 No push or deployment. Actual iPhone UI financial acceptance, native Tron,
@@ -1954,7 +1954,7 @@ live depth. Reference-price fiat valuation remains a limitation.
 Next: canonical cross-chain and lending surfaces, retaining the recovery blockers. No native-Tron or all-platform acceptance claim.
 
 A second saved local stand failed restart with truncated Anvil state JSON.
-Keep `/tmp/xln-native-release-hGfpwg` intact. Separate fresh test stands unblock
+Keep `docs/evidence/archive-tmp/xln-native-release-hGfpwg` intact. Separate fresh test stands unblock
 app checks without certifying preserved-state recovery. No public deployment,
 real-money transaction, commit or push.
 
@@ -1993,7 +1993,7 @@ No seed-only reconstruction, timeout increase or chain reset was used. A combine
 fresh-login/swap/unlock process exceeded 60 s and remains a performance limit;
 these two bounded runs prove financial recovery, not a fast combined journey.
 Proof: `docs/evidence/wallet-swap-20260911/proof.json`.
-Logs: `/tmp/xln-swap-financial-final.log`, `/tmp/xln-swap-recovery-final.log`.
+Logs: `docs/evidence/archive-tmp/xln-swap-financial-final.log`, `docs/evidence/archive-tmp/xln-swap-recovery-final.log`.
 
 The first test failure was an outdated Manage-faucet helper racing asynchronous
 capacity UI; this swap test now uses the primary Home faucet. The next production
@@ -2002,8 +2002,8 @@ and verifies ordered outputs without loading unused Entity contexts or Runtime
 trees. React joins repeated reads of the same pending query and catches up after
 completion without resetting the incremental Activity page. The missing-ACK-row
 regression still rejects corrupted output evidence. Storage/history/fee tests:
-53 passed, 263 assertions (`/tmp/xln-swap-final-regressions.log`).
-Final candidate gate log: `/tmp/xln-swap-final-check.log`.
+53 passed, 263 assertions (`docs/evidence/archive-tmp/xln-swap-final-regressions.log`).
+Final candidate gate log: `docs/evidence/archive-tmp/xln-swap-final-check.log`.
 
 Next: shared wallet creation/recovery in React and Svelte. Full TS/Rust parity,
 native primary-only/Cross-J configuration, live Rust J and full frontend acceptance
@@ -2015,7 +2015,7 @@ Dev startup fix is committed as `a64d3a340`: repeating ordinary `bun run dev`
 checks the existing wallet endpoint and exits 0 without starting processes or
 resetting data. Explicit clean/mode requests retain the singleton rejection.
 Three focused regressions and the real repeated command pass; full check passes
-in `/tmp/xln-dev-repeat-final-check.log`.
+in `docs/evidence/archive-tmp/xln-dev-repeat-final-check.log`.
 
 The selected two-user payment boundary passes in three bounded runs against the
 preserved devnet: fresh Alice + 100 USDC (28.2 s), fresh Bob + 100 USDC (28.6 s),
@@ -2028,13 +2028,13 @@ Both Account roots/balances survive reload, pending/mempool are empty, and raw
 receipts contain one matching sender initiation/finalization and receiver receipt.
 Proof: `docs/evidence/wallet-transfer-20260911/proof.json`.
 The separate invalid amount/recipient/revoked-quote E2E passes in 30.2 s.
-Full current-candidate check passes: `/tmp/xln-two-wallet-final-check.log`.
-Logs: `/tmp/xln-two-wallet-alice.log`, `/tmp/xln-two-wallet-bob.log`,
-`/tmp/xln-two-wallet-receive.log`. The test retains 50-second case deadlines;
+Full current-candidate check passes: `docs/evidence/archive-tmp/xln-two-wallet-final-check.log`.
+Logs: `docs/evidence/archive-tmp/xln-two-wallet-alice.log`, `docs/evidence/archive-tmp/xln-two-wallet-bob.log`,
+`docs/evidence/archive-tmp/xln-two-wallet-receive.log`. The test retains 50-second case deadlines;
 preparation exports actual browser IndexedDB/WAL, not a seed-only reconstruction.
 
 The original single-case fresh-login/payment/reload still exceeds 50 seconds:
-`/tmp/xln-payment-paged-history.log`. Diagnostics isolated overlapping Activity
+`docs/evidence/archive-tmp/xln-payment-paged-history.log`. Diagnostics isolated overlapping Activity
 history reads holding committed-reader leases after reload. Per-frame DB batching
 and a smaller Activity page did not close that case and were removed. This
 performance blocker remains open; the staged financial result does not erase it.
@@ -2050,7 +2050,7 @@ Current committed scan SHA: `645125eb2`. Fresh Home plus one-click 100 USDC
 is green on the preserved primary chain at 193219 blocks: Home 23337 ms,
 funded 25358 ms, Account height 4, no pending Account proposal, Runtime
 inputs, committed readers or queued writers. Evidence:
-`/tmp/xln-faucet-final-demo.log` (27.0 s test, 27.6 s runner).
+`docs/evidence/archive-tmp/xln-faucet-final-demo.log` (27.0 s test, 27.6 s runner).
 The existing five-second faucet assertion and application deadlines are unchanged.
 
 The first receipt failure came from embedded payment-terminal reads bypassing
@@ -2065,30 +2065,30 @@ batching of Activity event reads did not resolve the boundary and was removed.
 Real-WAL tests compare incremental pages against full reads at limits 2 and 20,
 including the rolling scan boundary, and prove receipt reads hold a stable
 head while a real commit queues. The focused run has 24 passing tests and
-142 assertions: `/tmp/xln-faucet-final-regression.log`.
+142 assertions: `docs/evidence/archive-tmp/xln-faucet-final-regression.log`.
 
 Next command: rerun `ui/tests/e2e-payment.spec.ts --project=chromium --trace=off`
 under stand-lock, without editing UI modules during the run. This spec now
 uses the verified Home faucet; its exact payment/fee/receipt/reload assertions
 remain. The separate Assets helper is still red with `faucet-offchain` disabled
-(`/tmp/xln-payment-activity-fixed.log`) and requires later investigation.
+(`docs/evidence/archive-tmp/xln-payment-activity-fixed.log`) and requires later investigation.
 Remaining gates: final `bun run check`, scoped commit, two-sided user payment,
 swap/reload, shared wallet creation, exact TS/Rust replay and live Rust J.
 
 ## Current scan candidate and next wallet boundary — 2026-09-10
 
 Fresh React Home is reached in 23,057 ms on the preserved chain at primary
-finalized height 191569. `/tmp/xln-chain-range-demo.log` records the actual
+finalized height 191569. `docs/evidence/archive-tmp/xln-chain-range-demo.log` records the actual
 milestone; the following faucet assertion remains red after five seconds in
 Preparing, so this is successful login evidence, not a complete wallet flow.
 The payment spec reaches faucet preparation in 31.3 seconds instead of dying
 in chain scan; it also exposed a payment-terminal historical-read race:
 `STORAGE_DIRECT_HISTORICAL_READ_FORBIDDEN:requested=101:materialized=201:checkpoint=1`.
-Evidence: `/tmp/xln-payment-range.log`. Investigate that read boundary and
+Evidence: `docs/evidence/archive-tmp/xln-payment-range.log`. Investigate that read boundary and
 the pending credit confirmation next; do not increase application deadlines.
 
 The fresh CPU profile contains 33,058 samples; local-history copying owns
-7,025 (21.3%). `/tmp/xln-chain-profile/cpu.json` and `runtime.js.map` preserve
+7,025 (21.3%). `docs/evidence/archive-tmp/xln-chain-profile/cpu.json` and `runtime.js.map` preserve
 the profile and source mapping. The selected fix batches up to 2048 fully
 authenticated headers per watcher poll, retaining the 128-call RPC cap and
 the complete post-receipt reorg fence. Hash normalization validates the same
@@ -2097,16 +2097,16 @@ The attempted native Map clone did not remove the observed boundary and was
 discarded. Payment tracing generated 650 MB before timeout; `--trace=off`
 keeps the original financial assertions and 50-second test deadline.
 
-136 focused tests pass in `/tmp/xln-chain-range-regression.log`; its remaining
+136 focused tests pass in `docs/evidence/archive-tmp/xln-chain-range-regression.log`; its remaining
 integration fixture initially blocked on an unread Anvil stdout pipe. Both
 stdout and stderr are now consumed. An obsolete empty-tail expectation also
 fails with the original 256-block window (723 versus 724), independently of
-this change: `/tmp/xln-chain-backlog-control.log`. Corrected expectations keep
+this change: `docs/evidence/archive-tmp/xln-chain-backlog-control.log`. Corrected expectations keep
 the Entity-finalized anchor and financial reserves unchanged while tracking
 authenticated local history. The 4700-block, multi-page real Anvil integration
 now passes all 20 assertions in 8.47 seconds, including Runtime snapshot restore
-and watcher shutdown (`/tmp/xln-chain-backlog-final.log`). `bun run check` and
-`git diff --check` pass (`/tmp/xln-chain-range-check.log`). No push.
+and watcher shutdown (`docs/evidence/archive-tmp/xln-chain-backlog-final.log`). `bun run check` and
+`git diff --check` pass (`docs/evidence/archive-tmp/xln-chain-range-check.log`). No push.
 
 ## Aged-chain wallet verification — 2026-09-10
 
@@ -2114,14 +2114,14 @@ Verified candidate `589b6bb02f4affacd82b0b7f3f91f9145c0dc78b` on main.
 The bloom and local-history changes are already committed in `de42eea2e`;
 the faucet assertion is in `589b6bb02`. HANDOFF.md predates both.
 History plus receipt regressions pass: 91 tests, 376 assertions, 2.83 seconds
-(`/tmp/xln-chain-history-current.log`). The existing React demo test passes
+(`docs/evidence/archive-tmp/xln-chain-history-current.log`). The existing React demo test passes
 under stand-lock on the preserved long chain: Home plus one-click 100 USDC,
 54.2 seconds test time, 55.1 seconds runner time. Primary Entity finalized
 and scanned height 190360, one retained header, zero mempool entries.
 The second jurisdiction was still scanning (172359); this run does not prove
 its readiness, a payment, swap, or recovery. No chain reset or timeout change.
-Evidence: `/tmp/xln-chain-login-current.log`. `bun run check` exits zero and
-`git diff --check` passes (`/tmp/xln-current-check.log`). Unrelated workspace
+Evidence: `docs/evidence/archive-tmp/xln-chain-login-current.log`. `bun run check` exits zero and
+`git diff --check` passes (`docs/evidence/archive-tmp/xln-current-check.log`). Unrelated workspace
 deletions and the existing generated worker change remain outside this work.
 The current task's Goal API returned null; an active Goal is not established.
 Viewing automation `automation` returned a UI card without model-readable
@@ -2185,10 +2185,10 @@ manual pendingOutputs edit did not isolate the Hub. Reuse processWithOffline and
 assert a deferred Hub input, unchanged Hub committed height while offline and a
 new commit after reconnection. The updated TS scenario passes 93 frames and
 actually defers one Hub input. Evidence:
-`/tmp/xln-lock-ahb-offline-witness-after.log`. This is not native H1 coverage.
+`docs/evidence/archive-tmp/xln-lock-ahb-offline-witness-after.log`. This is not native H1 coverage.
 An initial run failed before scenario execution on the workspace size gate;
 inactive rebuildable debug artifacts were moved intact to
-`/tmp/xln-debug-cache-egor-20260910-2020`. No user database was moved or reset.
+`docs/evidence/archive-tmp/xln-debug-cache-egor-20260910-2020`. No user database was moved or reset.
 
 Execution correction after source inspection: the latest owner request swaps H1,
 not every client validator into Rust. `multi-sig.ts` gives its hub one validator
@@ -2201,20 +2201,20 @@ whole-Runtime BFT as a separately unfulfilled capability; do not call it proven.
 Do not add more importer prerequisites before reaching the requested H1 boundary.
 Live unchanged `mm-mesh` passes with H1 Rust22.4s and H1 TS21.6s; this proves
 bootstrap/book readiness/empty queues, not equal wall-clock-dependent live roots.
-Logs `/tmp/xln-h1-rust-scenario-current.log`, `/tmp/xln-h1-ts-scenario-current.log`.
+Logs `docs/evidence/archive-tmp/xln-h1-rust-scenario-current.log`, `docs/evidence/archive-tmp/xln-h1-ts-scenario-current.log`.
 Added explicit `--hub-engine=ts|rust` to the scenario launcher. Rust selection on
 the other still-in-process scenarios now fails before launch instead of silently
 running TS and creating false native evidence. Missing/empty/unknown selector rejects.
 Boundary tests3/3; explicit `--hub-engine=rust` overriding inherited TS also passes
 unchanged mm-mesh22.95s, with actual h1/rscore-native storage:
-`/tmp/xln-h1-selector-rust.log`, `/tmp/xln-h1-selector-rust/prod-mesh/h1/rscore-native`.
+`docs/evidence/archive-tmp/xln-h1-selector-rust.log`, `docs/evidence/archive-tmp/xln-h1-selector-rust/prod-mesh/h1/rscore-native`.
 Remaining task: shared external-H1 execution boundary for the in-process scenarios;
 scenario body/financial assertions stay unchanged. The six-engine111-frame replay
 remains separate exact-root evidence and is not all-scenario coverage.
 
 Fresh unchanged lock-ahb reference at7a3b07930: TS succeeds through frame93,
-checkpoint1 +92 inputs. Recording `/tmp/xln-lock-ahb-current-recording.json`, log
-`/tmp/xln-lock-ahb-current-recording.log`; file SHA256
+checkpoint1 +92 inputs. Recording `docs/evidence/archive-tmp/xln-lock-ahb-current-recording.json`, log
+`docs/evidence/archive-tmp/xln-lock-ahb-current-recording.log`; file SHA256
 `3bc740917ada5c381aa10c9fe50de54dfde0fa5c3738619b1531e770ae1c4674`, manifest
 `0x3c4418a53f61a742db83f03e15edc8738f2a86886b29b8f292f3301ea3a16f91`.
 First post-checkpoint input contains three importReplica transactions. No Rust
@@ -2269,8 +2269,8 @@ against the unmodified recording's first post-checkpoint input. One test execute
 `frame2 tx0 importReplica: FIELDS:runtimeTxs[0]:missing=none:extra=entityId`.
 The decoder globally assumes `{type,data}`, while this canonical transaction also
 has `entityId,signerId`; recognizing those fields alone does not implement import.
-Evidence: `/tmp/xln-recorded-first-native-admission.log`; diagnostic test source
-saved to `/tmp/xln-recorded-first-native-admission.rs` and removed from production
+Evidence: `docs/evidence/archive-tmp/xln-recorded-first-native-admission.log`; diagnostic test source
+saved to `docs/evidence/archive-tmp/xln-recorded-first-native-admission.rs` and removed from production
 source. This is the real input through the production decoder, not full WAL replay.
 Next: implement canonical replica import with authority/key/state ownership, then
 repeat this admission and full recording. Do not claim parity from admission alone.
@@ -2281,8 +2281,8 @@ every local signer `isProposer:true` and did not reject a local key outside the 
 It now derives the role from validator order and rejects non-members, matching TS
 import authority. Both new tests fail against the previous code and pass with the
 fix; the complete Runtime library passes 347/347, no skips. Logs:
-`/tmp/xln-native-replica-authority-before.log`,
-`/tmp/xln-native-runtime-authority-regression.log`.
+`docs/evidence/archive-tmp/xln-native-replica-authority-before.log`,
+`docs/evidence/archive-tmp/xln-native-runtime-authority-regression.log`.
 This does not implement `importReplica` decoding/execution or native BFT; the original
 recorded admission remains red. Continue there, without relabeling this prerequisite
 as scenario parity.
@@ -2295,11 +2295,11 @@ startup retains its existing single-label CLI and supplies a one-element keyring
 The keyring still derives each configured base's existing jurisdiction labels, never
 guesses labels from persisted signer addresses, and rejects empty/duplicate configuration.
 Tests cover 13 local scenario validators and the existing hub jurisdiction keys: 3/3.
-Full check39/39: `/tmp/xln-native-scenario-keyring-check.log`.
+Full check39/39: `docs/evidence/archive-tmp/xln-native-scenario-keyring-check.log`.
 This does not yet provide live multi-validator execution or importReplica execution.
 Production regression replay passes 6/6 (TS/Rust W1/W4/W8), 111 frames, in168.3s
-under the stand lock. Evidence `/tmp/xln-production-parity-keyring-regression.log`
-and `.logs/hlt-evidence/2026-09-07T22-27-58-651Z/replays/1789001911958-parity.json`.
+under the stand lock. Evidence `docs/evidence/archive-tmp/xln-production-parity-keyring-regression.log`
+and `docs/evidence/archive-logs/hlt-evidence/2026-09-07T22-27-58-651Z/replays/1789001911958-parity.json`.
 Native binary SHA256 `0xb29a074d7383fc94a192f1292799b3ccd1e7febb2f1b016febf7476fd29f45c7`.
 This is the existing mixed single-validator artifact, not the missing multisig scenario
 and not live TPS. Next action remains actual importReplica transition, with these
@@ -2312,7 +2312,7 @@ replay does not establish every scenario on native Rust. The scenario runner inv
 the TS Runtime directly; embedded Rust authority is explicitly retired. Use native
 xlnrs production scenarios and retain the same financial assertions, not an engine
 environment flag on a TS-only runner. First current native artifact: cross-J full fill
-and process restart/recovery, W1, /tmp/xln-native-cross-recovery-w1-20260909.log.
+and process restart/recovery, W1, docs/evidence/archive-tmp/xln-native-cross-recovery-w1-20260909.log.
 After individual scenario equivalence, measure current TS and Rust W1/W4 on identical
 production H1 load, collect phase profiles and optimize only measured bottlenecks.
 There is no current W1/W4 TPS matrix or established largest phase. Historical W8
@@ -2324,10 +2324,10 @@ W1 cross-chain full fill passes; restarting the same production processes expose
 RRS_RESTORE_ENTITY_GRAPH:ROOT_COUNT:2 during the next checkpoint projection.
 Projection now selects its exact owner's manifest from the shared Runtime graph;
 full hydration still rejects foreign/multiple roots. Named Rust regression1/1 and
-root check39/39 pass (/tmp/xln-native-owner-regression.log, /tmp/xln-native-owner-check.log).
+root check39/39 pass (docs/evidence/archive-tmp/xln-native-owner-regression.log, docs/evidence/archive-tmp/xln-native-owner-check.log).
 Repeated real swap/restart advances past that error and exposes the NEXT boundary:
 RRS_STORAGE_CHECKPOINT_REQUIRED:101. Evidence:
-/tmp/xln-native-cross-recovery-w1-r3-20260909/server.log.
+docs/evidence/archive-tmp/xln-native-cross-recovery-w1-r3-20260909/server.log.
 Storage enforces Runtime-relative cadence but projection only requests checkpoints
 from Entity outputs. Align checkpoint preparation with canonical durable HEAD cadence,
 then rerun this exact production artifact before any broader scenario or E2E.
@@ -2344,29 +2344,29 @@ No new durable state, fallback or relaxed storage validation. Regression advance
 empty WAL tail on reopen. Genesis socket coalescing still proves two authenticated
 inputs -> one Runtime frame with zero economic outputs; frame1 now materializes as TS.
 Rust W1 cross-J full fill + process restart recovery passes in36.9s:
-/tmp/xln-native-cross-recovery-w1-r4-20260909/production-cross-swap-recovery-report.json.
+docs/evidence/archive-tmp/xln-native-cross-recovery-w1-r4-20260909/production-cross-swap-recovery-report.json.
 Hub92->120, load25->35, settled route preserved. This is economic descendant recovery,
 NOT equal full-state hashes at different heights. Check39/39 passes:
-/tmp/xln-native-cadence-check-r2.log. Next: same native scenario W4, TS equivalents,
+docs/evidence/archive-tmp/xln-native-cadence-check-r2.log. Next: same native scenario W4, TS equivalents,
 then remaining named scenarios and updated exact replay; no E2E yet.
 
 ### Post-fix evidence and method review — 2026-09-09 00:47 UTC
 
 At52e5190a4, cross-J full fill + replacement/recovery passes TS/Rust W1/W4 (4/4).
 All reports agree source10201020000, target10200000000, settled, different server PIDs.
-Artifacts: /tmp/xln-native-cross-recovery-w1-r4-20260909,
-/tmp/xln-native-cross-recovery-w4-20260909, /tmp/xln-ts-cross-recovery-w1-20260909,
-/tmp/xln-ts-cross-recovery-w4-20260909. Those use the launcher's default fail-fast policy;
+Artifacts: docs/evidence/archive-tmp/xln-native-cross-recovery-w1-r4-20260909,
+docs/evidence/archive-tmp/xln-native-cross-recovery-w4-20260909, docs/evidence/archive-tmp/xln-ts-cross-recovery-w1-20260909,
+docs/evidence/archive-tmp/xln-ts-cross-recovery-w4-20260909. Those use the launcher's default fail-fast policy;
 they prove happy-path financial recovery, not production rejection handling.
 Exact111-frame replay also passes6/6 TS/Rust W1/W4/W8 on binary
 0xde0d43a94696325c28ad5d35d108be16abb32fa1a6865fbc7313a3bfb3770af0.
-Result .logs/hlt-evidence/2026-09-07T22-27-58-651Z/replays/1788914371662-parity.json.
-Log /tmp/xln-parity-checkpoint-fix-20260909.log. No parity assertion weakened.
+Result docs/evidence/archive-logs/hlt-evidence/2026-09-07T22-27-58-651Z/replays/1788914371662-parity.json.
+Log docs/evidence/archive-tmp/xln-parity-checkpoint-fix-20260909.log. No parity assertion weakened.
 Production NODE_ENV=production mm-mesh adversaries pass4/4: hub-kill and mm-restart,
-each with TS and Rust H1 W4. Logs /tmp/xln-native-hub-kill-prod-w4-20260909.log,
-/tmp/xln-ts-hub-kill-prod-w4-20260909.log,
-/tmp/xln-rust-mm-restart-prod-w4-20260909.log,
-/tmp/xln-ts-mm-restart-prod-w4-20260909.log. Checks prove PID replacement and restored
+each with TS and Rust H1 W4. Logs docs/evidence/archive-tmp/xln-native-hub-kill-prod-w4-20260909.log,
+docs/evidence/archive-tmp/xln-ts-hub-kill-prod-w4-20260909.log,
+docs/evidence/archive-tmp/xln-rust-mm-restart-prod-w4-20260909.log,
+docs/evidence/archive-tmp/xln-ts-mm-restart-prod-w4-20260909.log. Checks prove PID replacement and restored
 same/cross books. They are not independent payment-conservation or TPS evidence.
 Initial hub-kill used default dev fail-fast and correctly halted a TS neighbour on
 unexpected socket close; explicitly rerun production policy without changing core.
@@ -2380,20 +2380,20 @@ coverage, current W1/W4 TPS/profile and both frontend E2E remain unfinished.
 Current-binary Rust W1/W4 production live J gates both pass: 5000/5000 payments,
 freeze/business-input rejection/finalized dispute, plus r2r/r2c/c2r with independent
 on-chain reserve/collateral arithmetic. Functional five-second runs, NOT TPS.
-Artifacts /tmp/xln-native-j-dispute-move-w1-20260909 and
-/tmp/xln-native-j-dispute-move-w4-20260909, dispute and settlement JSON reports.
+Artifacts docs/evidence/archive-tmp/xln-native-j-dispute-move-w1-20260909 and
+docs/evidence/archive-tmp/xln-native-j-dispute-move-w4-20260909, dispute and settlement JSON reports.
 Critical remaining implementation gap: native Entity consensus is single-signer.
 RuntimeEntityInput::decode rejects proposedFrame/hashPrecommits/hashPrecommitFrame/
 leaderTimeoutVote; restore rejects multi-validator authority with SINGLE_SIGNER_REQUIRED.
 Therefore multi-sig and multi-validator company scenarios cannot currently pass natively.
 Do not remove those guards without implementing the corresponding TS BFT transitions.
 Recorded the real TS multi-sig132-frame input/output trace, 1514792 bytes:
-/tmp/xln-multisig-native-oracle-20260909/inputs.json. First proposal at Runtime5,
+docs/evidence/archive-tmp/xln-multisig-native-oracle-20260909/inputs.json. First proposal at Runtime5,
 first precommit at6;92 proposedFrame inputs and102 hashPrecommits inputs.
 The existing --trail is only UI graph evidence; new --input-trace=FILE preserves raw
 scenario wire inputs/outputs using the existing scoped collector. It refuses empty
 traces and all-scenario runs. This is NOT a checkpoint/WAL/root parity artifact.
-Check39/39 passed at /tmp/xln-bft-input-trace-check.log.
+Check39/39 passed at docs/evidence/archive-tmp/xln-bft-input-trace-check.log.
 Next implementation boundary: native processing of the actual Runtime5 proposal,
 with TS Entity consensus as the canonical algorithm; do not substitute more one-signer
 smokes for the owner's requested all-scenario native equivalence.
@@ -2405,18 +2405,18 @@ Scenario runner --recording=FILE now exports the existing signed RuntimeRecordin
 It refuses a recording without a journal tail. Initial run failed correctly at
 RECOVERY_BUNDLE_JOURNAL_CANONICAL_STATE_HASH_REQUIRED:height=2; enabling the existing
 hash cadence, without weakening bundle validation, makes the repeated scenario pass.
-Artifact /tmp/xln-multisig-native-oracle-20260909/recording.json: checkpoint1,
+Artifact docs/evidence/archive-tmp/xln-multisig-native-oracle-20260909/recording.json: checkpoint1,
 131 WAL frames through132. Independent TS restore from that file reaches root
 0x5a6d0688542333ad8af4134fbdf1fcbe8af89f59750a7c6f13173bd16bcb6dba.
 Manifest 0xea42e714864df2b00d7a1a5e6e101927b9131cbd2077676e9b93c3ed540dae4c.
-Logs /tmp/xln-multisig-persisted-r2-20260909.log and
-/tmp/xln-multisig-recording-replay-20260909.log. This is TS evidence, not native parity.
+Logs docs/evidence/archive-tmp/xln-multisig-persisted-r2-20260909.log and
+docs/evidence/archive-tmp/xln-multisig-recording-replay-20260909.log. This is TS evidence, not native parity.
 Native BFT requires more than admitting new fields: Runtime apply currently immediately
 certifies the resident result; EntitySingleSigner also emits single-member Hankos.
 Reuse the existing resident Account base/candidate mechanism for speculative state,
 and port TS authenticated proposal replay, manifest signature collection, quorum commit
 and output publication before removing single-signer guards. No protocol changes made.
-Root check39/39 passed at /tmp/xln-multisig-recording-check.log.
+Root check39/39 passed at docs/evidence/archive-tmp/xln-multisig-recording-check.log.
 The portable restore is read-only recovery evidence; it is NOT a certified W1/W4
 authority benchmark. Setting worker-count environment variables alone does not
 prove which executor the recovery path used.
@@ -2424,11 +2424,11 @@ prove which executor the recovery path used.
 ### Window checkpoint — 2026-09-09 01:10 UTC
 
 SHA1d686464d. Last green: bun run check,39/39,
-/tmp/xln-multisig-recording-check.log. First executed native red: actual TS Runtime5
+docs/evidence/archive-tmp/xln-multisig-recording-check.log. First executed native red: actual TS Runtime5
 proposal decoded by RuntimeEntityInput::decode gives
 EntityInputFieldUnsupported("proposedFrame"),0/1 tests,0 ignored.
-Log /tmp/xln-native-bft-first-boundary-r2.log; temporary regression body retained at
-/tmp/xln-native-bft-first-boundary-regression.rs. Temporary test insertion was removed;
+Log docs/evidence/archive-tmp/xln-native-bft-first-boundary-r2.log; temporary regression body retained at
+docs/evidence/archive-tmp/xln-native-bft-first-boundary-regression.rs. Temporary test insertion was removed;
 production source is unchanged. The first diagnostic filter matched0 tests and is
 NOT evidence; only the r2 log contains the executed failure.
 Next single diagnostic command (already-built diagnostic binary, not release binary):
@@ -2452,10 +2452,10 @@ Owner explicitly interrupted the sequence for a narrow Home faucet UX fix and Qu
 (2026-09-08 23:44 UTC). Restore the scenario/parity-first sequence after that fix.
 Quorum job `faucet-ux-20260909-01`: one completed GLM-5.3 low subscription review of the
 textual UX proposal, not a code audit or screenshot review. No retry; USD0.25 reservation
-retained because actual cash cost is unknown. Result `/tmp/xln-faucet-ux-quorum-result.json`.
+retained because actual cash cost is unknown. Result `docs/evidence/archive-tmp/xln-faucet-ux-quorum-result.json`.
 Compact faucet follows the old Svelte inline layout; one committed success message and
 one-click funding retained. Tour E2E 2/2 in 15.2s:
-`/tmp/xln-faucet-ux-r2-20260909/wallet-results.json`. UI types green.
+`docs/evidence/archive-tmp/xln-faucet-ux-r2-20260909/wallet-results.json`. UI types green.
 
 ### Scenario/parity acceptance — 2026-09-08 23:57 UTC
 
@@ -2463,24 +2463,24 @@ All 18 canonical TS scenarios passed individually on isolated RPC chains under t
 lock at `ad0742a62`: rebalance, lock-ahb, htlc-lazy, ahb, swap, settle, htlc-4hop, grid,
 swap-market, multi-sig, company-ipo, rapid-fire, settle-rebalance, processbatch,
 dispute-lifecycle, dispute-transformer, cross-j, mm-mesh. Logs:
-`/tmp/xln-scenario-<id>-20260909.log`. IPO includes durable recovery at height212 with root
+`docs/evidence/archive-tmp/xln-scenario-<id>-20260909.log`. IPO includes durable recovery at height212 with root
 `0xd9ce07f383f95fe337ecac978ce0028d389d469c736d1c23d5d4887b6c85b8e0`.
 Cross-J/MM run child Runtimes (outer Frames:0 is not zero economic execution).
 
 New binary semantic replay: 6/6 TS/Rust W1/W4/W8, 111 frames, all checked roots and ordered
-outputs equal; 170.2s. `/tmp/xln-parity-scenarios-20260909.log`, canonical result
-`.logs/qa/hlt/replays/1788911794633-parity.json`. Logging restricted to runtime scope to
+outputs equal; 170.2s. `docs/evidence/archive-tmp/xln-parity-scenarios-20260909.log`, canonical result
+`docs/evidence/archive-logs/qa/hlt/replays/1788911794633-parity.json`. Logging restricted to runtime scope to
 avoid Entity log overhead; assertions unchanged. No resume/provenance bypass used.
 Binary SHA256 `7bfc2c7ad6a058af6ce7f29e493f9ffbe590693ea1b604a2ed3e39b365cf6461`.
 Native live J + c2r settlement passed with 5,000/5,000 payments; Account32->38, jNonce25->29.
-`/tmp/xln-live-j-final-20260909.log`. Five-second functional window is NOT TPS evidence.
+`docs/evidence/archive-tmp/xln-live-j-final-20260909.log`. Five-second functional window is NOT TPS evidence.
 Production/cfg(test) compilation is in the green check39/39. The 111-frame WAL still does
 not by itself prove transaction-kind completeness or all adversarial scenario variants.
 
 ### Independent Quorum review — 2026-09-08 23:59 UTC
 
 One code/evidence packet at `ad0742a62`, job `cross-remainder-review-20260909-01`, completed
-GLM-5.3 low subscription; no retries. Result `/tmp/xln-cross-review-quorum-result.json`.
+GLM-5.3 low subscription; no retries. Result `docs/evidence/archive-tmp/xln-cross-review-quorum-result.json`.
 USD0.25 reservation retained; cash unknown. Findings were independently checked:
 
 1. Claimed restored price substitution: disproved by the exact partial-fill snapshot test.
@@ -2498,7 +2498,7 @@ Capacity, hosted entry, sovereignty and catch-up are green. Hosted now verifies 
 connected Account entity ID against /api/hubs, not stale UI wording; absent servers fail.
 Full same-wallet journey passed in21.8s: funding, Pay25, same-chain/cross-chain swaps,
 dispute finality, recovered reserve moved to H2, reload and exact preserved state.
-Artifact `/tmp/xln-ui-journey-r5-20260909/wallet-results.json`.
+Artifact `docs/evidence/archive-tmp/xln-ui-journey-r5-20260909/wallet-results.json`.
 The journey requires a fresh private genesis at least three days old; configured with
 ANVIL_GENESIS_TIMESTAMP=1788652800. The launcher supports this optional genesis setting,
 rejects its use with persisted chain state, and never changes host authentication clocks.
@@ -2533,9 +2533,9 @@ Automation `xln-10` reports on this task every ten minutes and expires with this
 
 Acceptance evidence at 2026-09-08 22:27 UTC:
 
-- TS/Rust W1/W4/W8 exact replay: 6/6 engines, 111 frames; `.logs/qa/hlt/replays/1788905603729-parity.json`.
-- Real browser Cross-J: 1/1, 21.5s, both legs, no holds, reload recovery; `.logs/qa/wallet/cross-j-ts-20260908/`.
-- Real browser dispute: 1/1, 14.3s, early rejection and exact 100 USDC release; `.logs/qa/wallet/dispute-ts-20260908/`.
+- TS/Rust W1/W4/W8 exact replay: 6/6 engines, 111 frames; `docs/evidence/archive-logs/qa/hlt/replays/1788905603729-parity.json`.
+- Real browser Cross-J: 1/1, 21.5s, both legs, no holds, reload recovery; `docs/evidence/archive-logs/qa/wallet/cross-j-ts-20260908/`.
+- Real browser dispute: 1/1, 14.3s, early rejection and exact 100 USDC release; `docs/evidence/archive-logs/qa/wallet/dispute-ts-20260908/`.
 - Browser evidence above uses the diagnostic UI against isolated production servers. It does not claim production-build coverage.
 - Final acceptance requires scenarios, E2E, parity and all applicable gates green; skips do not count as passes.
 
@@ -2554,8 +2554,8 @@ HLT measured sequentially: 1,000 sovereign users, five processes, 8 workers, 20-
 - TS: 20,000/20,000 completed, 672.65 payments/s, complete at 29,733ms, drain at 29,896ms.
   REJECT for TPS acceptance: the five-second drain deadline is 25,000ms.
 - Rust: 20,000/20,000 completed, 952.38 TPS, complete at 21,000ms, drain at 22,787ms; no pending ACKs.
-- Reports: `/tmp/xln-tps-ts-20260909/hlt-payment-load-report.json` and
-  `/tmp/xln-tps-rust-20260909/hlt-payment-load-report.json`.
+- Reports: `docs/evidence/archive-tmp/xln-tps-ts-20260909/hlt-payment-load-report.json` and
+  `docs/evidence/archive-tmp/xln-tps-rust-20260909/hlt-payment-load-report.json`.
 - The existing HLT checker incorrectly started the five-second drain after settlement. Fixed the
   publication gate to enforce the offered-window deadline; actual reports now reject TS and accept Rust.
   Focused genesis and HLT regressions: 50/50, 1,190 assertions.
@@ -2570,7 +2570,7 @@ scope: it is not full Cross-J parity. Fix the first divergence before expanding 
 Committed signed fill ratios round both remaining amounts; Rust incorrectly reapplied fresh-order
 lot admission to the remainder. The focused regression now covers two fills separated by an
 orderbook snapshot/restore. Entity-kernel unit suite: 207/207 green. Fresh native build and the same browser Cross-J run passed (1/1, no skips):
-`/tmp/xln-ui-cross-rust-r3-20260909/wallet-results.json`. Final exact replay and
+`docs/evidence/archive-tmp/xln-ui-cross-rust-r3-20260909/wallet-results.json`. Final exact replay and
 `bun run check` remain required.
 The owner reported the wallet gate at `/settings`; code shows disconnected sessions display
 Gate without changing the URL. A reload clears memory-only unlocked seeds; no evidence yet
@@ -2578,10 +2578,10 @@ identifies whether this specific session reloaded, was locked, or disconnected.
 
 ### Verified partial-fill milestone — 2026-09-08 23:18 UTC
 
-`bun run check`: 39/39 green (`/tmp/xln-cross-final-check.log`). Native Cross-J browser:
+`bun run check`: 39/39 green (`docs/evidence/archive-tmp/xln-cross-final-check.log`). Native Cross-J browser:
 1/1 green; entity-kernel 207/207. Six-engine replay reached five completed configurations
 before the 180-second wall limit killed Rust W8. Do not claim a new six-engine verdict.
-Evidence: `/tmp/xln-cross-fixed-parity.log`. Resume correctly refuses the dirty shared tree
+Evidence: `docs/evidence/archive-tmp/xln-cross-fixed-parity.log`. Resume correctly refuses the dirty shared tree
 (`HLT_MIXED_PARITY_RESUME_REQUIRES_CLEAN_TREE`); preserve unrelated owner changes and do not
 bypass provenance. Previous complete 6/6 evidence remains tied to the earlier binary.
 Next: complete bounded parity with valid provenance; TS five-second HLT drain remains red.
@@ -2593,8 +2593,8 @@ and tower restoration on a clean device (1). Move conserves all 100 USDC and dra
 work. Tower recovery compares the canonical Runtime root and Account proofs, then refuses
 an overwrite of existing local storage. Reports:
 
-- `/tmp/xln-ui-move-manage-r2-20260909/wallet-results.json` (3/3, 27.5s).
-- `/tmp/xln-ui-tower-restore-r3-20260909/wallet-results.json` (1/1, 18.8s).
+- `docs/evidence/archive-tmp/xln-ui-move-manage-r2-20260909/wallet-results.json` (3/3, 27.5s).
+- `docs/evidence/archive-tmp/xln-ui-tower-restore-r3-20260909/wallet-results.json` (1/1, 18.8s).
   The Manage test had a case-sensitive stale label (90s wasted); fixed and bounded to 60s.
   The tower test dynamically imported core into Vite and triggered dependency optimization
   and a page reload. It now bundles the unchanged canonical hash helper before opening a
@@ -2652,7 +2652,7 @@ and final four-engine replay/check. Lending remains excluded.
 ## Current evidence and constraints
 
 Runtime units: 238/238, 1896 assertions, 18.03s.
-Money suites: 748/748, 29,500 assertions, 15.77s; /tmp/xln-core-money-final-r2.log.
+Money suites: 748/748, 29,500 assertions, 15.77s; docs/evidence/archive-tmp/xln-core-money-final-r2.log.
 Native live Cross-J exposed a real missing secondary Entity at genesis.
 Canonical native control reads and explicit isolated endpoints are fixed.
 Two-owner genesis and untouched sibling checkpoint/WAL recovery now pass
@@ -2677,14 +2677,14 @@ fixed with 337 Rust runtime tests and exact TS oracle; original WAL retained.
 Restart first red: J_PREFIX_PENDING_RANGE_WITHOUT_OBSERVATION at Runtime91,
 Entity87, J base44/attestable47. Restore accepted J evidence consistently;
 no clearing pending work, fallback, new durable oracle or success claim.
-Immutable artifacts: /tmp/xln-core-native-cross-j-r8-20260907.
+Immutable artifacts: docs/evidence/archive-tmp/xln-core-native-cross-j-r8-20260907.
 J-submit partition 66/66; separate real-RPC SIGKILL recovery has exact money
 proof but still leaks a process resource after both adapter closes. Diagnose
 the resource owner; do not hide with process.exit or increase the timeout.
 Primary TS RPC scenarios 7/7: lock-ahb, swap, settle, dispute-lifecycle,
 dispute-transformer, cross-j, company-ipo (recovery exact at height 211).
 Fresh immutable Cross-J replay 4/4 engines, 66 frames:
-/tmp/xln-core-four-replay-r1.log. Rust self-cycle regression 2/2.
+docs/evidence/archive-tmp/xln-core-four-replay-r1.log. Rust self-cycle regression 2/2.
 Current check: frontend and all 38 Rust test executables passed; the complete
 check timed out at 60s during parity compilation, so it is not green.
 Account SIGKILL/commitment focused cluster: 11/11, including 3 real crash/recover
@@ -2693,7 +2693,7 @@ browser E2E. Native live Pay/Move/Dispute and same-J Swap have earlier functiona
 artifacts; rerun when new core changes require it. No TPS or mainnet-ready claim.
 
 The J-watcher fixture is still protected by macOS uchg. Prepared patch
-/tmp/xln-j-watcher-int512.patch has a verified 6/6 copy; owner answer to the
+docs/evidence/archive-tmp/xln-j-watcher-int512.patch has a verified 6/6 copy; owner answer to the
 existing protection question is pending. Do not silently bypass that question.
 
 One machine, one heavy stand; normal verification process limit 60s, existing
@@ -2753,7 +2753,7 @@ bytes), fixed owned-only Lending funding in both engines and Rust multi-clause
 dispute bytes/arguments. Production Rust Move now passes R2R/R2C/C2R with exact
 chain balances plus 5000/5000 payments and dispute under NODE_ENV=production.
 The same immutable 66-frame Cross-J WAL remains exact in TS W1/W4 and Rust W1/W4
-after the Rust changes: `/tmp/xln-draft1-four-replay.log`.
+after the Rust changes: `docs/evidence/archive-tmp/xln-draft1-four-replay.log`.
 
 Do not extend a coarse signer-lane catch to hide the native duplicate-execute
 failure. TS evicts the exact outer command; Rust must preserve that boundary,
@@ -2777,7 +2777,7 @@ managed allowance reported USD9.50 after this and the previous unresolvedUSD0.25
 Historical USD100 hold is unchanged. Opinion errors were rejected against real
 TS vectors. Source packet/results: `/Users/zigota/quorum/data/packets/dispute-chunk-20260907-01/`.
 
-Source: `/private/tmp/claude-501/-Users-zigota-xln/1eb1a950-0843-45d1-863f-bdeb86d3d990/scratchpad/report/draft1.pdf`,
+Source: `docs/evidence/archive-tmp/claude-501/-Users-zigota-xln/1eb1a950-0843-45d1-863f-bdeb86d3d990/scratchpad/report/draft1.pdf`,
 19 pages read. Treat the report as evidence to verify, not protocol authority.
 Pages 5 and 6 contain an unfinished findings table and an empty parity matrix.
 Do not adopt its proposed wallet deletion, permanent Rust scope reduction, risk-cap
@@ -2789,7 +2789,7 @@ removal or compiler changes as owner decisions.
    Fix the first failing production transition before expanding the test scope.
 2. Restore meaningful money and recovery regressions on the current ABI. The fresh
    four-file run is 61 pass, 7 fail, 1 error in 2.40 seconds; evidence:
-   `/tmp/xln-draft1-first-boundaries.log`. Failures include three settlement
+   `docs/evidence/archive-tmp/xln-draft1-first-boundaries.log`. Failures include three settlement
    transitions, two Runtime atomicity cases, stale committed-output dispatch
    dependencies and a removed ensureDelta import. Diagnose fixture drift versus
    production defects; preserve semantic assertions and never blindly repin goldens.
@@ -2837,8 +2837,8 @@ drop the ACK, weaken readiness, or change financial state. One transport owner
 is adding lifecycle preparation using the existing direct-route API and a real
 authenticated WebSocket regression, including late profiles and an unready peer.
 The same frozen journey will run immediately after the scoped fix is reviewed.
-Evidence: /tmp/xln-ui-journey-r5-pending-delivery-20260907.json and
-/tmp/xln-ui-journey-isolated-1788736707195. Startup18.965s, browser38.454s.
+Evidence: docs/evidence/archive-tmp/xln-ui-journey-r5-pending-delivery-20260907.json and
+docs/evidence/archive-tmp/xln-ui-journey-isolated-1788736707195. Startup18.965s, browser38.454s.
 In parallel, the already reviewed compact-view fix gets a fresh read-only Svelte
 browser proof; owner storage is preserved. No broad audit or heavy TVM run before
 the UI boundary is resolved. Native TVM preparation types now pass after a
@@ -2855,7 +2855,7 @@ does not prove the currently prohibited production lifecycle. Preserve that red.
 Pay R7 now passes 1/1 in 23.2 s: invalid drafts, revocation of an old recipient
 quote, exactly one initiated/finalized payment after double click, exact fee/debit,
 same-wallet roots/balances/activity after reload and no repeated receipt. Evidence:
-/tmp/xln-ui-payment-edges-r7-20260907.log. Shared Activity deliberately suppresses
+docs/evidence/archive-tmp/xln-ui-payment-edges-r7-20260907.log. Shared Activity deliberately suppresses
 raw htlcPayment inputs: its assertion now uses the certified HtlcInitiated event.
 Cross-swap R3 and its same-wallet recovery now pass. The full check remains
 pending. This is no release completion claim.
@@ -2865,7 +2865,7 @@ live admission. Two actual-handler accounting counterexamples reproduce in109ms:
 own balance0+credit100 can fund pool100; spent loan100 restored with owned R2C101,
 then repay101/revoke0 becomes loan=repaid while Account debt100 remains. R2C is a
 controlled finality input, not a chain run. Evidence:
-/tmp/xln-lending-accounting-counterexamples-20260907.json. Findings and remaining
+docs/evidence/archive-tmp/xln-lending-accounting-counterexamples-20260907.json. Findings and remaining
 term-claim/approval/default/full-width issues: docs/lending-review-2026-09-07.md.
 The owner was asked whether the hub retains the term-deposit liability or the
 depositor accepts a pool loss. No Lending economics/admission was changed.
@@ -2911,8 +2911,8 @@ R4 completed all six financial operations and exact historical Runtime/Account
 recovery, then failed the live drain: pendingNetworkOutputs=1 for15s, other16
 queues zero, Runtime height47 unchanged. USDC40,001,976 atoms is inH2 and WETH
 5,997,400,200,000,000 atoms is inReserve. Do not call the full journey green.
-Artifact: /tmp/xln-ui-journey-isolated-1788736248194; log:
-/tmp/xln-ui-journey-isolated-r4-20260907.log. The browser phase took38.055s,
+Artifact: docs/evidence/archive-tmp/xln-ui-journey-isolated-1788736248194; log:
+docs/evidence/archive-tmp/xln-ui-journey-isolated-r4-20260907.log. The browser phase took38.055s,
 startup19.401s; cleanup completed and stand is free.
 Read-only delivery review found a plausible cold-route liveness cycle: loop work
 requires canDeliver(target), but lazy direct route preparation happens inside
@@ -2927,7 +2927,7 @@ zero debt and actual pending/mempool/pull counts. Its first red was an obsolete
 test oracle: a 49.995 receipt is below the actual 500-USDT auto-collateral
 threshold, so the correct request count and charged fee are exactly zero.
 The committed tariff and policy remain checked; production policy was not changed.
-Artifact: /tmp/xln-ui-cross-swap-isolated-1788733346809/economic-evidence.json.
+Artifact: docs/evidence/archive-tmp/xln-ui-cross-swap-isolated-1788733346809/economic-evidence.json.
 Next: prove reload of this same identity and operation, then actual signed-proof
 export. Lending review is delivered; its two economics choices remain pending.
 Do not rerun the known D3 rejection or enable unsafe accounting.
@@ -2939,7 +2939,7 @@ birth/modify times, live process identities and chain IDs before targeted remova
 Foundry usage fell from97.29 to10.28GiB; both owner PIDs87762/87763 and their live
 cache directories remained, and both chain heights advanced. No dev reset,
 history deletion or guard bypass. Evidence:
-/tmp/xln-orphan-anvil-cleanup-20260907-{before,after}.json.
+docs/evidence/archive-tmp/xln-orphan-anvil-cleanup-20260907-{before,after}.json.
 For future starts, both wrappers now pass Anvil's actual --cache-path option;
 TMPDIR alone does not redirect its persisted-state cache. Shell syntax passes;
 existing owner processes have not been restarted.
@@ -2950,11 +2950,11 @@ preserves historical Runtime h23 frame/post-state hashes and both Account roots,
 balances, credit, tariffs and settled routes. Exactly two accepted preparations
 share one Runtime frame; each Account retains one lock and one close, with no
 repeated execution or pending work. Artifact:
-/tmp/xln-ui-cross-swap-isolated-1788733836717/economic-recovery-evidence.json.
+docs/evidence/archive-tmp/xln-ui-cross-swap-isolated-1788733836717/economic-recovery-evidence.json.
 Funded proof export passes1/1 in18.9s: downloaded frame/dispute Hankos match the
 wallet's committed historical read surface (not independent cryptographic
 verification), followed by Desk/command-palette navigation. Evidence:
-/tmp/xln-ui-sovereignty-r1-20260907.log.
+docs/evidence/archive-tmp/xln-ui-sovereignty-r1-20260907.log.
 
 Full check then exposed an exact downward unsafe-type ratchet mismatch:
 proof-builder removed batchStruct! via union narrowing. Independent AST comparison
@@ -2981,7 +2981,7 @@ The corrected dev Anvil cache path has an actual private-node proof: mined4096
 blocks into its isolated cache, graceful shutdown, restart with exact height4096
 and unchanged account balance; global cache directory set stayed unchanged.
 Two orderly shutdowns completed; owner nodes untouched. Evidence:
-/tmp/xln-dev-anvil-cache-path-r2-20260907.log. The first diagnostic call's five-second
+docs/evidence/archive-tmp/xln-dev-anvil-cache-path-r2-20260907.log. The first diagnostic call's five-second
 bulk-RPC timeout was fixed by four bounded1024-block calls, not a longer test budget.
 
 The remaining old full UI journey is not evidence: it requests excessive faucet
@@ -3013,7 +3013,7 @@ Method review at 21:24: real faucet and isolated dispute artifacts are now green
 Faucet: four funding destinations, 13.6 s; dispute R6: 14.5 s plus 18.63 s
 startup, exact one payout of 100 USDC, the scheduled wake bound to the sent
 batch and chain receipt, early-finalize rejection, closed UI and empty queues.
-Evidence: /tmp/xln-ui-dispute-isolated-r6-20260907.log. Do not rerun unchanged
+Evidence: docs/evidence/archive-tmp/xln-ui-dispute-isolated-r6-20260907.log. Do not rerun unchanged
 private stands. Next first UI boundary: lending principal roundtrip with real
 100-USDC faucet fixture, true mempoolCount, whole-limit 10% buffer, and visible
 collateral tariff before close. Then actual cross-swap; the old journey has a
@@ -3041,7 +3041,7 @@ gas request adds 0.1 ETH. Five requests include one rejected 101-USDC public
 faucet mint, then four successes; no duplicate issuance. Credit remains zero
 until explicit approval, then 110 USDC. Home/Desk expose the faucet directly;
 Assets shows current Account/Reserve balances and one persistent result/error.
-Evidence: /tmp/xln-ui-faucet-four-balances-r2-20260906.log and its screenshots.
+Evidence: docs/evidence/archive-tmp/xln-ui-faucet-four-balances-r2-20260906.log and its screenshots.
 Corrected true-queue assertions passed Move LEFT/RIGHT and funded same-wallet
 Pay recovery (3 passed; combined 55 s budget stopped the fourth from starting).
 That fourth empty-wallet recovery passed separately in 16.8 s.
@@ -3328,7 +3328,7 @@ evidence of a settlement bug. Use the same real UI actions with sufficient fixtu
 2. Native Tron: official java-tron 4.8.2.1, mainnet feature settings and JDK17 run locally.
    All eight contracts deployed. Real deposit/withdrawal passed: reserve 0→1,000,000→0,
    nonce 1→2, external balance restored, solid receipts and canonical events observed.
-   Evidence: /tmp/xln-tron-native-20260905/economic.json. Native cross-j replay remains.
+   Evidence: docs/evidence/archive-tmp/xln-tron-native-20260905/economic.json. Native cross-j replay remains.
    The canonical provisioner now accepts the actual native graph with distinct contract
    addresses, native endpoints and solid finality (14.019 s including boot; verification
    86 ms). All nine compiled creation/runtime templates match the earlier graph. Continue
@@ -3348,17 +3348,17 @@ evidence of a settlement bug. Use the same real UI actions with sufficient fixtu
    Activation and payout now wait for solidity. Reserve returns to 0, external balance
    to 1,000,000,000,000; the failed transaction preserves nonce 1 and payout advances
    it to 2. Execution 20.761 s plus boot 11.513 s. Original failure evidence remains in
-   /tmp/xln-tron-native-20260905/governance-r1; final evidence is economic.json and
-   /tmp/xln-tron-native-governance-r1-finality-recovery-20260905.log. This is direct L1
+   docs/evidence/archive-tmp/xln-tron-native-20260905/governance-r1; final evidence is economic.json and
+   docs/evidence/archive-tmp/xln-tron-native-governance-r1-finality-recovery-20260905.log. This is direct L1
    contract evidence and does not close the native J authority-proof decision.
 3. Receive/Pay UI: browser R10 passed in 28.926 seconds: credit 25→27.5, own reserve
    top-up 25.000025 including route fee, return to enabled Pay with no automatic send.
-   Evidence: /tmp/xln-react-capacity-1788573224783. Downstream fee-capacity correction
+   Evidence: docs/evidence/archive-tmp/xln-react-capacity-1788573224783. Downstream fee-capacity correction
    is included. A real LevelDB activity-view repair race was then reproduced and fixed
    under the existing per-path view queue; authoritative commits remain independent.
    R10 has zero activity-view gap warnings. Same-j Swap then passed in 24.100 seconds:
    199.999992 USDC debited, 0.0799760016 WETH received, permanent credit 0.0879824 WETH,
-   zero pending work. Evidence: /tmp/xln-react-swap-1788573446670/browser.log.
+   zero pending work. Evidence: docs/evidence/archive-tmp/xln-react-swap-1788573446670/browser.log.
    Fresh-wallet Cross setup passed in 22.381 s after restoring the existing vault's
    per-jurisdiction signer/import path. A subsequent 0.03 WETH receiving intent explicitly
    granted 0.033 credit without pre-click money movement, but had no opposite MM market.
@@ -3367,22 +3367,22 @@ evidence of a settlement bug. Use the same real UI actions with sufficient fixtu
    gross 10,198.98 USDT received, net 10,197.860102 plus a signed 1.119898 collateral
    request fee. Account frame 6 proves net + fee = gross; debt and pending work are zero,
    permanent credit remains 11,218.878 USDT. Evidence:
-   /tmp/xln-react-cross-swap-1788576931486/browser.log. The auto-rebalance fee was not
+   docs/evidence/archive-tmp/xln-react-cross-swap-1788576931486/browser.log. The auto-rebalance fee was not
    disclosed before Swap. The corrected R14 now shows the existing committed tariff
    and conditional nature before submission, without inventing an exact future net quote.
    Same-J and Cross pass together: startup 18.761 s, browser 19.338 s, two tests with
    fresh wallet contexts and one stand bootstrap. Mobile fee text clears the Swap button
    by 12 px with zero horizontal overflow. Evidence:
-   /tmp/xln-react-cross-swap-1788578133651/browser.log. Receive/Pay R13 also passes in
+   docs/evidence/archive-tmp/xln-react-cross-swap-1788578133651/browser.log. Receive/Pay R13 also passes in
    29.489 s, including the explicit default-credit CTA, 25→27.5 permanent limit, own
    reserve top-up and return to review without auto-send. Evidence:
-   /tmp/xln-react-capacity-1788578008372/browser.log. Lending R1 reached the first real
+   docs/evidence/archive-tmp/xln-react-capacity-1788578008372/browser.log. Lending R1 reached the first real
    failure before position creation: the UI exposes Offer, but canonical TS/Rust live
    admission rejects lending_fund under D3. Account state remains unchanged; a real
    worker/stage regression proves the error. Aggregate logging now retains both apply
    and discard causes. Spectrum/close payout and fee assertions were not reached.
-   Evidence: /tmp/xln-react-lending-1788578675867/browser.log and
-   /tmp/xln-lending-stage-diagnostic-green.log. Existing Lending handlers and direct
+   Evidence: docs/evidence/archive-tmp/xln-react-lending-1788578675867/browser.log and
+   docs/evidence/archive-tmp/xln-lending-stage-diagnostic-green.log. Existing Lending handlers and direct
    semantic vectors exist in both engines; these do not prove live admission/consensus.
 4. Current R7 production plus real process replacement/recovery passes in 38.681 s;
    one cross-j swap settles in 625 ms. PID 95392→95745, both routes settled. Frozen
@@ -3401,7 +3401,7 @@ evidence of a settlement bug. Use the same real UI actions with sufficient fixtu
    native restart: 67 frames, 68 runtime-root comparisons, all five ordered comparison
    counts 67, 108 inputs, 104 outputs, both Account roots exact. Whole driver wall:
    W1 1.444 s, W4 0.607 s; these are replay measurements, not TPS. Evidence:
-   /tmp/xln-cross-j-parity-r7-20260906-1633/rust-worker-comparison.json and
+   docs/evidence/archive-tmp/xln-cross-j-parity-r7-20260906-1633/rust-worker-comparison.json and
    rust-context29-fixed-w{1,4}-20260906.log in the original R7 replay directory.
    Public summary: docs/evidence/r7-parity-20260906/summary.json.
    Next production boundary is live Rust J settlement on this binary. Its first
@@ -3413,17 +3413,17 @@ evidence of a settlement bug. Use the same real UI actions with sufficient fixtu
    port the existing authenticated readiness control and recipient outbox gate to
    native transport, with local readiness owned by actual startup J catch-up.
    Current TS readiness/outbox regressions pass 4/4, 86 assertions, 361 ms.
-   Evidence: /tmp/xln-rust-live-j-r7-20260906/server.log (first rejection line 37;
+   Evidence: docs/evidence/archive-tmp/xln-rust-live-j-r7-20260906/server.log (first rejection line 37;
    1,000 authenticated/rejected sessions and zero inputs at line 1038).
-   Source: /tmp/xln-cross-j-wal-r7-20260905/recording-manifest.json; replay/import:
-   /tmp/xln-cross-j-parity-r7-20260905. Original signed checkpoint fields, snapshot,
+   Source: docs/evidence/archive-tmp/xln-cross-j-wal-r7-20260905/recording-manifest.json; replay/import:
+   docs/evidence/archive-tmp/xln-cross-j-parity-r7-20260905. Original signed checkpoint fields, snapshot,
    tail and source binding remain exact after offline import (140→154 rows).
    Prior cross-j WAL binds checkpoint 22 and 35 frames through 57, with 64 Entity
    inputs and 56 outputs. TS W1 and W4 verify every frame/root and ordered output. All five
    per-frame evidence arrays match exactly; the recording contains one pending outbox at
    its first failure boundary, so this replay is not a drained live TPS claim. Manifest:
-   /tmp/xln-cross-j-wal-r4-20260905/recording-manifest.json. Report:
-   /tmp/xln-cross-j-parity-r4-20260905/ts-worker-comparison.json. Native exact range,
+   docs/evidence/archive-tmp/xln-cross-j-wal-r4-20260905/recording-manifest.json. Report:
+   docs/evidence/archive-tmp/xln-cross-j-parity-r4-20260905/ts-worker-comparison.json. Native exact range,
    whole-Runtime checkpoint root, plural Entity restore and offline Account import pass.
    The canonical imported manifest preserves five signed checkpoint fields and the source
    binding; its source WAL is frozen separately from each mutable replay copy. Rust now
@@ -3437,8 +3437,8 @@ evidence of a settlement bug. Use the same real UI actions with sufficient fixtu
    the single cross-j swap settled in 650 ms. Frozen R6 checkpoint 24 and tail 25–89
    contain 65 frames, 105 Entity inputs and 104 outbox envelopes. TS W1 (2.837 s) and
    W4 (3.115 s) match every frame and all five evidence arrays exactly. Manifest:
-   /tmp/xln-cross-j-wal-r6-20260905/recording-manifest.json; comparison:
-   /tmp/xln-cross-j-parity-r6-20260905/ts-worker-comparison.json. Rust W1 matches 25–42
+   docs/evidence/archive-tmp/xln-cross-j-wal-r6-20260905/recording-manifest.json; comparison:
+   docs/evidence/archive-tmp/xln-cross-j-parity-r6-20260905/ts-worker-comparison.json. Rust W1 matches 25–42
    and first diverges at 43: all 23 sections of both committed Entity states agree,
    but two pending Account proposal roots differ. Exact candidate logging and caller
    inspection isolated cross_pull_lock.createdHeight: TS passes J height, Rust passed
@@ -3486,14 +3486,14 @@ evidence of a settlement bug. Use the same real UI actions with sufficient fixtu
    financial roots preserved. Fresh R7 above replaces this defective production
    artifact; no historical dirty-mark behavior was added to Rust.
    The old TS replay evidence verifies roots/events/outbox, not independent regeneration
-   of the recorded touch list. Evidence: /tmp/xln-cross-j-parity-r6-20260905/
+   of the recorded touch list. Evidence: docs/evidence/archive-tmp/xln-cross-j-parity-r6-20260905/
    recording-native-import.json.w1.diffs/first-divergence-h73.json and
    rust-h72-transport-complete-l1.log in the same directory.
-   Evidence: /tmp/xln-cross-j-parity-r6-20260905/rust-w1-policy.log.stderr and
+   Evidence: docs/evidence/archive-tmp/xln-cross-j-parity-r6-20260905/rust-w1-policy.log.stderr and
    ts-h44-diagnostic/section-comparison.json within the same evidence directory.
    Production r5 cross-swap plus full process replacement/recovery passed in 42.866 s;
    swap 627 ms, all Account/runtime pending work drained. Initial base remains immutable.
-   Evidence: /tmp/xln-cross-j-wal-r5-20260905.log.
+   Evidence: docs/evidence/archive-tmp/xln-cross-j-wal-r5-20260905.log.
 5. Quorum remains standalone in /Users/zigota/quorum. Record useful independent judgments,
    provenance and costs; paid review must resolve a concrete uncertainty, not displace work.
 6. Full check exposed and resolved import cycles, two new lint violations and 14 GiB of
@@ -3507,7 +3507,7 @@ evidence of a settlement bug. Use the same real UI actions with sufficient fixtu
    eight bilateral asset copies verify the movement, with fee 0 under that fixture's policy.
    Four focused EDR Solidity tests pass: initial 100 billion supplies, old-board financial
    rejection and retained historical dispute authorization. Logs:
-   /tmp/xln-company-ipo-20260905.log and /tmp/xln-company-governance-20260905.log.
+   docs/evidence/archive-tmp/xln-company-ipo-20260905.log and docs/evidence/archive-tmp/xln-company-governance-20260905.log.
 
 ## Historical overnight external-model authorization
 
@@ -3564,7 +3564,7 @@ Scope: one read-only audit each of keys/unlock, payment state, and recovery/publ
 against 57b48293e8161513c39e0154d167b1968f9ed4a7. Authorization is this request only;
 no retries or model substitution. Claude Code2.1.259, requested claude-fable-5-1,
 effort high, Read/Grep/Glob only, immutable source snapshot in
-/tmp/xln-audit-57b48293e. Auth status confirmed claude.ai Max subscription, first-party.
+docs/evidence/archive-tmp/xln-audit-57b48293e. Auth status confirmed claude.ai Max subscription, first-party.
 First invocation returned “out of usage credits”, modelUsage empty, reported cost0;
 no audit was produced and the other two were not launched. No paid API route used.
 Prepared packets and exact failure are in that directory. Quorum paid reservations unchanged.

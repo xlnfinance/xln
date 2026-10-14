@@ -16,13 +16,13 @@ the real 25-USDC swap filled, its receipt matched both balances, and selecting
 WETH changed the headline from 75.000001 USDC to 0.0099970002 WETH. Both menu
 implementations left the menu open during the initial selection tests; the
 canonical UI now uses a native asset-selection sheet with full-width rows.
-Log: `/tmp/xln-balance-sheet-e2e.log`; stand:
+Log: `docs/evidence/archive-tmp/xln-balance-sheet-e2e.log`; stand:
 `/var/folders/zq/fvt20j1s0fx3v9c8l41czctr0000gn/T/xln-native-session-jyo189`.
 
 The real Chromium swap regression also passed, comparing both selected
 headlines with committed account balances through independent base-unit
 conversion. No page/auth errors. Final browser run plus startup/shutdown:
-32.4 seconds, exit zero, stand released. Log: `/tmp/xln-web-balance-final.log`.
+32.4 seconds, exit zero, stand released. Log: `docs/evidence/archive-tmp/xln-web-balance-final.log`.
 Playwright now requests graceful dev-launcher shutdown, so it can stop its
 separately owned service groups; the initial default shutdown required targeted
 cleanup. Its temporary data directory must exist before launching the stand:
@@ -39,7 +39,7 @@ valuation remains unimplemented; the new headline does not imply one.
 Final validation: UI TypeScript check passes, unsigned physical-device build
 passes with both bundled origins `https://xln.finance`, and `bun run check`
 passes all 39 source gates (44.801-second source phase). Logs:
-`/tmp/xln-balance-device-final.log`, `/tmp/xln-balance-final-check.log`.
+`docs/evidence/archive-tmp/xln-balance-device-final.log`, `docs/evidence/archive-tmp/xln-balance-final-check.log`.
 Whitespace check passes and stand is free. A fresh device/signing inspection
 still finds only simulators and zero valid signing identities; no install claim.
 
@@ -61,8 +61,8 @@ both balances against the receipt using exact decimal arithmetic.
 
 Runner: `bun run stand:run --reason native-swap-ui-exact-receipt --timeout-ms
 180000 -- bun scripts/native/run-session.ts ios-ui-swap`. It requires the local
-runtime bundle compiled into `/tmp/xln-ios-ui-derived` and the English simulator
-keyboard. Log: `/tmp/xln-ios-swap-ui-final.log`; data:
+runtime bundle compiled into `docs/evidence/archive-tmp/xln-ios-ui-derived` and the English simulator
+keyboard. Log: `docs/evidence/archive-tmp/xln-ios-swap-ui-final.log`; data:
 `/var/folders/zq/fvt20j1s0fx3v9c8l41czctr0000gn/T/xln-native-session-6sFBsD`.
 The first run reached an actual fill but its assertion searched for `Closed`
 instead of the exposed accessibility label `Status, Closed`; only the test
@@ -70,7 +70,7 @@ selector/navigation and exact receipt comparisons changed. No financial fix or
 mock was needed. Production API/recovery resources were restored afterward.
 Final `bun run check` passes all 39 source gates (44.248-second source phase),
 `git diff --check` passes, and the stand is free. Log:
-`/tmp/xln-ios-swap-check.log`.
+`docs/evidence/archive-tmp/xln-ios-swap-check.log`.
 
 Observed product gap: the $109.99 headline after swapping from 100 USDC uses
 the shared frontend's fixed WETH reference price ($3,500), while this test market
@@ -99,7 +99,7 @@ custody and Anvil chains. No financial mocks or wallet-only test hooks were used
 
 Artifacts: `output/ios-payment-2026-09-18/payment-full.mp4` (86.055 seconds),
 `payment-demo.mp4` in the same directory (34.279-second excerpt), and screenshots
-under `attachments/`. Full log: `/tmp/xln-ios-ui-e2e-7.log`. Stand data:
+under `attachments/`. Full log: `docs/evidence/archive-tmp/xln-ios-ui-e2e-7.log`. Stand data:
 `/var/folders/zq/fvt20j1s0fx3v9c8l41czctr0000gn/T/xln-native-session-vrNfmX`.
 
 This work fixed an iOS 27 launch failure by adopting UIKit's scene lifecycle,
@@ -118,16 +118,16 @@ The complete iOS 26.5 UI payment then passed in 92.977 seconds, including the
 updated Confirmed receipt and background lock of the funded wallet. Independent
 custody verification confirmed 1.000001 USDC for `usr_fe10be0a78aa498f95e8`;
 see [iOS 26.5 receipt](ios26-ui-custody-receipt.json). Full stand: 114.975 seconds,
-exit zero, lock released. Log: `/tmp/xln-ios26-payment-final.log`. The recording
+exit zero, lock released. Log: `docs/evidence/archive-tmp/xln-ios26-payment-final.log`. The recording
 and six screenshots are under `output/ios-payment-2026-09-18/ios26/`.
 Production API/recovery resources were restored to `https://xln.finance` after
-the local runs; test products remain isolated in `/tmp/xln-ios-ui-derived`.
+the local runs; test products remain isolated in `docs/evidence/archive-tmp/xln-ios-ui-derived`.
 
 Final candidate: unsigned device compilation passes, and `bun run check`
 passes all 39 source gates (43.713-second source phase). `git diff --check`
-passes and the stand is free. Logs: `/tmp/xln-ios-final-device-build.log` and
-`/tmp/xln-ios-final-check.log`. Device artifact:
-`/tmp/xln-ios-prod-testnet-device/Build/Products/Debug-iphoneos/App.app`.
+passes and the stand is free. Logs: `docs/evidence/archive-tmp/xln-ios-final-device-build.log` and
+`docs/evidence/archive-tmp/xln-ios-final-check.log`. Device artifact:
+`docs/evidence/archive-tmp/xln-ios-prod-testnet-device/Build/Products/Debug-iphoneos/App.app`.
 This artifact has the verified public API/recovery origins but cannot be
 installed until device signing is configured. The latest 51.1-second video
 excerpt is `output/ios-payment-2026-09-18/ios26/payment-demo.mp4`.
@@ -162,7 +162,7 @@ physical camera capture, an iOS UI payment or payment on xln.finance. The test
 delivers the genuine custody invoice payload to the native command bridge.
 The reusable runner is `bun run stand:run --reason native-qr-real-custody-payment
 --timeout-ms 180000 -- bun scripts/native/run-session.ts payments/qr-payment.js`.
-Log: `/tmp/xln-native-qr-custody-e2e.log`. Data:
+Log: `docs/evidence/archive-tmp/xln-native-qr-custody-e2e.log`. Data:
 `/var/folders/zq/fvt20j1s0fx3v9c8l41czctr0000gn/T/xln-native-session-NNXZEE`.
 
 This run found and fixed a real integration failure: custody uses catalog key
@@ -216,11 +216,11 @@ Verification completed:
 - Full `bun run check` passes: 39 source gates, 41.022-second source phase.
   The first run caught the app directory's file-count limit; the scanner was
   moved into `payment/`, then the full check passed without weakening the rule.
-  Log: `/tmp/xln-native-qr-final-check.log`. Stand released; diff whitespace clean.
+  Log: `docs/evidence/archive-tmp/xln-native-qr-final-check.log`. Stand released; diff whitespace clean.
 
-Logs: `/tmp/xln-native-qr-tests.log`, `/tmp/xln-native-qr-types.log`,
-`/tmp/xln-native-qr-runtime-build.log`, `/tmp/xln-native-qr-browser.log`,
-`/tmp/xln-native-qr-device-build.log`.
+Logs: `docs/evidence/archive-tmp/xln-native-qr-tests.log`, `docs/evidence/archive-tmp/xln-native-qr-types.log`,
+`docs/evidence/archive-tmp/xln-native-qr-runtime-build.log`, `docs/evidence/archive-tmp/xln-native-qr-browser.log`,
+`docs/evidence/archive-tmp/xln-native-qr-device-build.log`.
 
 Still required: native compilation, camera permission/scan tests on the phone,
 signed installation and an actual public-testnet payment receipt. Fresh public
@@ -232,8 +232,8 @@ three hub frame-head failures (10,313,244 / 13,336,516 / 13,336,514 bytes agains
 5,666,667). The process manager has accumulated 4,876 server restarts. This is
 an existing restart loop, not a missing camera feature or a successful recovery.
 Health and filtered process metadata are saved in
-`/tmp/xln-native-payment-service-health.json` and
-`/tmp/xln-native-payment-service-processes.json`. Recovery/reset authorization
+`docs/evidence/archive-tmp/xln-native-payment-service-health.json` and
+`docs/evidence/archive-tmp/xln-native-payment-service-processes.json`. Recovery/reset authorization
 and Xcode setup remain unresolved; no remote files or services were changed.
 
 Latest owner-confirmation recheck: `xcrun devicectl list devices` exits 69 because
@@ -244,10 +244,10 @@ setup and Apple-account signing. Fresh public `/api/health` returns HTTP 200 but
 `coreOk=false` and `systemOk=false`, including `HUBS_NOT_READY` and
 `MARKET_MAKER_CHILD_INACTIVE`. No physical install or public payment is claimed.
 
-- Artifact: `/tmp/xln-ios-prod-testnet-device/Build/Products/Debug-iphoneos/App.app`.
+- Artifact: `docs/evidence/archive-tmp/xln-ios-prod-testnet-device/Build/Products/Debug-iphoneos/App.app`.
 - Bundle: `finance.xln.wallet`, native SwiftUI with the canonical TS Runtime in WebKit.
 - Both bundled API and recovery origins are `https://xln.finance`.
-- Compilation command: `xcodebuild -project frontend/ios/App/App.xcodeproj -scheme App -configuration Debug -destination 'generic/platform=iOS' -derivedDataPath /tmp/xln-ios-prod-testnet-device -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=NO build`.
+- Compilation command: `xcodebuild -project frontend/ios/App/App.xcodeproj -scheme App -configuration Debug -destination 'generic/platform=iOS' -derivedDataPath docs/evidence/archive-tmp/xln-ios-prod-testnet-device -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=NO build`.
 - Signed build fails: development team is required. `security find-identity -v -p codesigning` reports zero valid identities. An unsigned build is not installable acceptance.
 - Known iPhone 17 Pro remains unavailable. CoreDevice lock-state request fails with error 1011; direct USB registry shows display/hubs but no iPhone. Owner reports USB connected, unlocked and Developer Mode enabled; the host observations still disagree.
 - Xcode first-launch component setup was attempted. GUI relaunch reports `kLSIncompatibleApplicationVersionErr` (-10664); CLI compilation works. No credential was requested or read.
@@ -271,13 +271,13 @@ Full `bun run check` passes, 39 source gates, 40.030-second source phase.
 `git diff --check` passes; heavy stand released.
 
 Logs on this Mac:
-- `/tmp/xln-ios-prod-testnet-runtime-build.log`
-- `/tmp/xln-ios-prod-testnet-device-build.log` (signing failure)
-- `/tmp/xln-ios-prod-testnet-device-compile.log` (unsigned compilation pass)
-- `/tmp/xln-ios-prod-testnet-check.log`
-- `/tmp/xln-prod-testnet-health.json`
-- `/tmp/xln-prod-testnet-jurisdictions.json`
-- `/tmp/xln-prod-testnet-tower-health.json`
+- `docs/evidence/archive-tmp/xln-ios-prod-testnet-runtime-build.log`
+- `docs/evidence/archive-tmp/xln-ios-prod-testnet-device-build.log` (signing failure)
+- `docs/evidence/archive-tmp/xln-ios-prod-testnet-device-compile.log` (unsigned compilation pass)
+- `docs/evidence/archive-tmp/xln-ios-prod-testnet-check.log`
+- `docs/evidence/archive-tmp/xln-prod-testnet-health.json`
+- `docs/evidence/archive-tmp/xln-prod-testnet-jurisdictions.json`
+- `docs/evidence/archive-tmp/xln-prod-testnet-tower-health.json`
 
 Next: establish actual device connectivity and valid signing, then install. A
 successful payment additionally requires repairing the production hub failure
@@ -298,5 +298,5 @@ Remote state sizes: JDB 680 MB, hub mesh 6.7 GB, tower 356 KB; remote free disk
 the dirty shared source tree; unrelated changes must not be silently published.
 
 Full repository check after the new test passes (39 source gates, 41.711-second
-source phase), log `/tmp/xln-release-recovery-final-check.log`. Physical device
+source phase), log `docs/evidence/archive-tmp/xln-release-recovery-final-check.log`. Physical device
 access remains unavailable, and signing identity count remains zero.

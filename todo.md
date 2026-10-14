@@ -159,13 +159,13 @@ Canonical product and evidence contract: [launch-design.md](docs/launch-design.m
   `RRS_NATIVE_RESTORE_STORAGE:RRS_ENTITY_CONTEXT_FRAME_REFS`. Native h29 context keys
   and digests are complete; the reader confuses canonical encoded-key order with raw
   string order. Fix that decoder boundary and repeat R7 before W4/live J/final gates.
-  Evidence: `/tmp/xln-cross-j-wal-r7-20260905.log` and
-  `/tmp/xln-cross-j-parity-r7-20260905/rust-w1.stderr.log`.
+  Evidence: `docs/evidence/archive-tmp/xln-cross-j-wal-r7-20260905.log` and
+  `docs/evidence/archive-tmp/xln-cross-j-parity-r7-20260905/rust-w1.stderr.log`.
   Fixes preserve exact startup signer inventories, authenticated Runtime output
   boundaries/source frames and replay-only WAL routes; live guards remain strict.
   Focused Runtime regressions: 87 tests / 330 assertions / 2.89 s.
 - Runtime output/readiness changes have focused TS and Rust vectors. A fresh production
-  cross-j WAL is bound at `/tmp/xln-cross-j-wal-r4-20260905/recording-manifest.json`:
+  cross-j WAL is bound at `docs/evidence/archive-tmp/xln-cross-j-wal-r4-20260905/recording-manifest.json`:
   checkpoint 22, tail through 57, 35 frames, 64 Entity inputs, 56 outputs. TS W1/W4
   replay verifies every frame and all five per-frame evidence arrays agree exactly.
   Rust restores the original signed checkpoint through canonical offline Account import;
@@ -192,7 +192,7 @@ Canonical product and evidence contract: [launch-design.md](docs/launch-design.m
   real payment/recovery regression passes 31 assertions in 2.12 s and preserves
   cumulative checkpoint overlay. Fresh R7 above passes this boundary. Prior TS replay checks did not
   independently regenerate this touch list.
-  Evidence: `/tmp/xln-cross-j-parity-r6-20260905/recording-native-import.json.w1.diffs/first-divergence-h73.json`.
+  Evidence: `docs/evidence/archive-tmp/xln-cross-j-parity-r6-20260905/recording-native-import.json.w1.diffs/first-divergence-h73.json`.
   Completeness remains a final gate.
 - Evidence-mode restart exposed two startup dependency errors and a real crypto worker
   process-liveness failure (pending job, process exits 0). Both are fixed and r5 restart
@@ -205,7 +205,7 @@ Canonical product and evidence contract: [launch-design.md](docs/launch-design.m
   Buyback now proves exact committed movement of 10 billion CONTROL and 1 trillion
   six-decimal USDT base units, fee 0 under that fixture's policy, across eight asset
   copies. This is one buyback, not eight operations. All 211 frames survive persistence
-  reload with the same root. Evidence: `/tmp/xln-company-ipo-20260905.log`.
+  reload with the same root. Evidence: `docs/evidence/archive-tmp/xln-company-ipo-20260905.log`.
   Four existing Solidity tests passed in 266 ms on current compiled source/bytecode:
   initial emission for Foundation/numbered Entity and retired-board rejection for batch,
   C2R and settlement, while historical dispute signatures remain accepted. These are
