@@ -1,4 +1,5 @@
 {
+  "recordedCommit": "f7ba455fce1c6ebb2c42b4a6a472ad9db403b9be",
   "finding": "Activation was observed before native solidification; restart recovered53 and reminted empty54",
   "lines": [
     "07:31:42.023 INFO  [DPosMiner] [DB](DynamicPropertiesStore.java:2227) Update latest block header id = 0000000000000036b691a01e69b18d9f33b5c0bac42e0d1404198a8b1890498a.",

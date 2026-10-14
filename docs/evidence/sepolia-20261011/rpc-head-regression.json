@@ -1,4 +1,5 @@
 {
+  "recordedCommit": "a3cc31669800cef74708c58252641ee55eeffe17",
   "kind": "PUBLIC_RPC_HEAD_CONSISTENCY_REGRESSION",
   "depositTransactionHash": "0xb199543f6a6ca1beb678f6ed768e4fea06b52435c347d2446b16428a165f0a1c",
   "depositBlock": 11893379,

@@ -1,1 +1,93 @@
-{"entityInputCount":0,"evidence":[{"activationHeight":25,"blockHash":"0x0000000000000019f7e1baf8dd3df490dab9ac0bfb5c2c62e2c15040722dc4de","boardHash":"0xaf753962fee609c6524d70d99be856ff1fdae7e822b56bb1730cead828d8dd47","chainId":1208511695,"confirmationDepth":0,"data":"0x00000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001","emitter":"0xab6abc55418b5bcb067cf909725500fe08a125dc","entityId":"0x0000000000000000000000000000000000000000000000000000000000000001","finality":"tron-solidified","logIndex":3,"observedHeadHeight":69,"observedThroughHeight":68,"observedTipBlockHash":"0x0000000000000044d22be747ee63ecdf994b5ff81a33de7a148902b67c78f095","rawLogDigest":"0x7ea5cce4c1dc1a2349a62ddda9cba75d543931e5ca7bb7b72826d9aa6c464125","receiptKind":"tron-rpc-attested","receiptLogIndex":3,"rpcEndpointHash":"0xa704d6936120aaab71551e75f1487fc125406bd0911182baeaa8ceb29426e9a6","source":"FoundationBootstrapped","stackKey":"0x0714c629a5921cbed73ad40a5d172b838b8353a73ef52437c32e4e804631671a","topics":["0xb0887eed9a1aa3118afaf26b345c629ec7b797fb3d121bbd5dd62580b361c9bd","0x000000000000000000000000928c9af0651632157ef27a2cf17ca72c575a4d21","0xaf753962fee609c6524d70d99be856ff1fdae7e822b56bb1730cead828d8dd47"],"transactionHash":"0xf8884178ffab0c191f8c798f8d424f6f191eee28305e471d6cdfad0085120b1b","transactionIndex":0,"version":1,"witnessRuntimeId":"0x8945df63134623390b7320a9b6055c4700023d8d","witnessSignature":"0x7577a5aa59e96ca9c1507e2081a04d2b81c3a40ac1d0820d0f3308509327599f3bb8835722f1e9a82de07debe79f9654fcfe004d107fc22b2388ecdbf5c26f2e01"},{"activationHeight":49,"blockHash":"0x0000000000000031cefea299fc44334cde22b6673ce7477480ded0a6a30f6ac3","boardHash":"0xaf753962fee609c6524d70d99be856ff1fdae7e822b56bb1730cead828d8dd47","chainId":1208511695,"confirmationDepth":0,"data":"0xaf753962fee609c6524d70d99be856ff1fdae7e822b56bb1730cead828d8dd47","emitter":"0xab6abc55418b5bcb067cf909725500fe08a125dc","entityId":"0x0000000000000000000000000000000000000000000000000000000000000002","finality":"tron-solidified","logIndex":3,"observedHeadHeight":69,"observedThroughHeight":68,"observedTipBlockHash":"0x0000000000000044d22be747ee63ecdf994b5ff81a33de7a148902b67c78f095","rawLogDigest":"0x2b93ee3cb8e57e867a185fdc191690054a7f6dc5670fbb09765bd382ec67a3be","receiptKind":"tron-rpc-attested","receiptLogIndex":3,"rpcEndpointHash":"0xa704d6936120aaab71551e75f1487fc125406bd0911182baeaa8ceb29426e9a6","source":"EntityRegistered","stackKey":"0x0714c629a5921cbed73ad40a5d172b838b8353a73ef52437c32e4e804631671a","topics":["0xc9234525033c1ac098f69b4dc192ce416b13f69ec0b6de127022496be73337fd","0x0000000000000000000000000000000000000000000000000000000000000002","0x0000000000000000000000000000000000000000000000000000000000000002"],"transactionHash":"0xec7ef84e84bdb9818843d2733bb0ebee37ccb38411dc1472e48f1a7f04b946ee","transactionIndex":0,"version":1,"witnessRuntimeId":"0x8945df63134623390b7320a9b6055c4700023d8d","witnessSignature":"0x495043683db1307d408bc2365a80ecf6c356a55dbbd9e77e204419442ebaa16d13d72df424df662d67f7b6f21210a2d8b7d330fc41747b3135a4adce7e737d9300"}],"frameHash":"0x4dd36b45d4d69f54985b0411809b3f65f5b28abf40554a14e5295bc0afd90aa8","frameHeight":4,"freshObservationEvidence":true,"head":{"accountMerkleRadix":16,"epochMaxBytes":9007199254740991,"epochReplayBytes":14864,"latestHeight":4,"latestMaterializedHeight":1,"latestSnapshotHeight":1,"retainSnapshots":9007199254740991,"retainedWalBytes":24005,"schemaVersion":5,"snapshotPeriodFrames":10000},"kind":"NATIVE_RESTORED_WATCHER_ACCEPTED_POLL","originalEvidencePreserved":true,"pollCompletion":"await adapter.pollNow resolved before processRuntime; both fresh observations accepted in WAL h4","postStateHash":"0x47fcd8e493e2d5fcf0d1a9f27da5bc4030328e4500b997ac09f4709486a6be9f","runtimeTxKinds":["recordAuthenticatedJAuthority","recordAuthenticatedJAuthority"],"sameClaims":true,"watcherErrorCount":0}
+{
+  "recordedCommit": "f7ba455fce1c6ebb2c42b4a6a472ad9db403b9be",
+  "entityInputCount": 0,
+  "evidence": [
+    {
+      "activationHeight": 25,
+      "blockHash": "0x0000000000000019f7e1baf8dd3df490dab9ac0bfb5c2c62e2c15040722dc4de",
+      "boardHash": "0xaf753962fee609c6524d70d99be856ff1fdae7e822b56bb1730cead828d8dd47",
+      "chainId": 1208511695,
+      "confirmationDepth": 0,
+      "data": "0x00000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001",
+      "emitter": "0xab6abc55418b5bcb067cf909725500fe08a125dc",
+      "entityId": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "finality": "tron-solidified",
+      "logIndex": 3,
+      "observedHeadHeight": 69,
+      "observedThroughHeight": 68,
+      "observedTipBlockHash": "0x0000000000000044d22be747ee63ecdf994b5ff81a33de7a148902b67c78f095",
+      "rawLogDigest": "0x7ea5cce4c1dc1a2349a62ddda9cba75d543931e5ca7bb7b72826d9aa6c464125",
+      "receiptKind": "tron-rpc-attested",
+      "receiptLogIndex": 3,
+      "rpcEndpointHash": "0xa704d6936120aaab71551e75f1487fc125406bd0911182baeaa8ceb29426e9a6",
+      "source": "FoundationBootstrapped",
+      "stackKey": "0x0714c629a5921cbed73ad40a5d172b838b8353a73ef52437c32e4e804631671a",
+      "topics": [
+        "0xb0887eed9a1aa3118afaf26b345c629ec7b797fb3d121bbd5dd62580b361c9bd",
+        "0x000000000000000000000000928c9af0651632157ef27a2cf17ca72c575a4d21",
+        "0xaf753962fee609c6524d70d99be856ff1fdae7e822b56bb1730cead828d8dd47"
+      ],
+      "transactionHash": "0xf8884178ffab0c191f8c798f8d424f6f191eee28305e471d6cdfad0085120b1b",
+      "transactionIndex": 0,
+      "version": 1,
+      "witnessRuntimeId": "0x8945df63134623390b7320a9b6055c4700023d8d",
+      "witnessSignature": "0x7577a5aa59e96ca9c1507e2081a04d2b81c3a40ac1d0820d0f3308509327599f3bb8835722f1e9a82de07debe79f9654fcfe004d107fc22b2388ecdbf5c26f2e01"
+    },
+    {
+      "activationHeight": 49,
+      "blockHash": "0x0000000000000031cefea299fc44334cde22b6673ce7477480ded0a6a30f6ac3",
+      "boardHash": "0xaf753962fee609c6524d70d99be856ff1fdae7e822b56bb1730cead828d8dd47",
+      "chainId": 1208511695,
+      "confirmationDepth": 0,
+      "data": "0xaf753962fee609c6524d70d99be856ff1fdae7e822b56bb1730cead828d8dd47",
+      "emitter": "0xab6abc55418b5bcb067cf909725500fe08a125dc",
+      "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+      "finality": "tron-solidified",
+      "logIndex": 3,
+      "observedHeadHeight": 69,
+      "observedThroughHeight": 68,
+      "observedTipBlockHash": "0x0000000000000044d22be747ee63ecdf994b5ff81a33de7a148902b67c78f095",
+      "rawLogDigest": "0x2b93ee3cb8e57e867a185fdc191690054a7f6dc5670fbb09765bd382ec67a3be",
+      "receiptKind": "tron-rpc-attested",
+      "receiptLogIndex": 3,
+      "rpcEndpointHash": "0xa704d6936120aaab71551e75f1487fc125406bd0911182baeaa8ceb29426e9a6",
+      "source": "EntityRegistered",
+      "stackKey": "0x0714c629a5921cbed73ad40a5d172b838b8353a73ef52437c32e4e804631671a",
+      "topics": [
+        "0xc9234525033c1ac098f69b4dc192ce416b13f69ec0b6de127022496be73337fd",
+        "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "0x0000000000000000000000000000000000000000000000000000000000000002"
+      ],
+      "transactionHash": "0xec7ef84e84bdb9818843d2733bb0ebee37ccb38411dc1472e48f1a7f04b946ee",
+      "transactionIndex": 0,
+      "version": 1,
+      "witnessRuntimeId": "0x8945df63134623390b7320a9b6055c4700023d8d",
+      "witnessSignature": "0x495043683db1307d408bc2365a80ecf6c356a55dbbd9e77e204419442ebaa16d13d72df424df662d67f7b6f21210a2d8b7d330fc41747b3135a4adce7e737d9300"
+    }
+  ],
+  "frameHash": "0x4dd36b45d4d69f54985b0411809b3f65f5b28abf40554a14e5295bc0afd90aa8",
+  "frameHeight": 4,
+  "freshObservationEvidence": true,
+  "head": {
+    "accountMerkleRadix": 16,
+    "epochMaxBytes": 9007199254740991,
+    "epochReplayBytes": 14864,
+    "latestHeight": 4,
+    "latestMaterializedHeight": 1,
+    "latestSnapshotHeight": 1,
+    "retainSnapshots": 9007199254740991,
+    "retainedWalBytes": 24005,
+    "schemaVersion": 5,
+    "snapshotPeriodFrames": 10000
+  },
+  "kind": "NATIVE_RESTORED_WATCHER_ACCEPTED_POLL",
+  "originalEvidencePreserved": true,
+  "pollCompletion": "await adapter.pollNow resolved before processRuntime; both fresh observations accepted in WAL h4",
+  "postStateHash": "0x47fcd8e493e2d5fcf0d1a9f27da5bc4030328e4500b997ac09f4709486a6be9f",
+  "runtimeTxKinds": [
+    "recordAuthenticatedJAuthority",
+    "recordAuthenticatedJAuthority"
+  ],
+  "sameClaims": true,
+  "watcherErrorCount": 0
+}
