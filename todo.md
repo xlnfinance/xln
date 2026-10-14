@@ -6,52 +6,32 @@ product backlog; long-term work belongs in `docs/roadmap.md`.
 September 30 implementation and verification: [J/E/A continuation](docs/jea-continuation.md).
 The 138-target E2E snapshot and green full check are dated evidence, not mainnet acceptance.
 
-## Current execution order — 2026-10-12
+## Current execution order — 2026-10-14
 
-The current [owner profile](docs/owner-profile.md#agreed-release) owns scope:
-TS, React and Ethereum same-J; Rust and production lending are frozen.
-PR #70 is merged. PR #73 remains blocked on required CI; the current cleanup
-branch has not been pushed over its older head. The public alpha still runs
-`7c3f63f98`: its hub stopped on the P6 tower events; the external tower completed
-the counter and finalization. Preserve the stopped DB and the funded wallet.
+Scope: TS, React, Ethereum same-J. Rust and new production lending are frozen.
+Public Sepolia runs clean `4c4413992`: PR #77 passed all seven required checks
+and merged. H1 and tower are healthy; the existing P6 dispute is finalized with
+zero collateral. The reviewed RPC fix retries temporary missing headers without
+advancing incomplete authenticated state. Contracts and WAL were preserved.
 
-1. Resolve the one active TS fixture import under frozen `rscore/` using the
-   [one-line patch](docs/evidence/canonical-review-20261012/ts-worker-active-fixture-import.patch)
-   after the narrow owner exception. Run settlement-execute-atomicity first,
-   then related TS tests and required pull_request CI. The frozen cross-J parity
-   test is already excluded from that CI job and is not this blocker. Seven green
-   manual-dispatch jobs do not satisfy required PR checks. Preserve strict protection.
-2. Promote an eligible reviewed Sepolia build and prove the existing hub catches
-   up through counter block 11897542 and final block 11897550 without resending
-   money. Clean d4502ec94 now catches up a private stopped-H1 copy through real
-   Sepolia J11898153 and cold-restores at R4476: exact root/outbox, 128 retained
-   frames, P6 Account dispute cleared and its collateral zero. No chain writes or public service
-   changes occurred. The React/source package is prepared but ineligible while
-   CI is red. [Local preparation proof](docs/evidence/canonical-review-20261012/release-preparation-d4502ec94.json).
-   Local wallet recovery separately holds 200 Test USDT in reserve; neither
-   local result substitutes for deployed recovery.
-3. Require the corrected production UI artifact gate in CI. Clean 5e6d08a16
-   passes UI-only funding/payment/reload on its compiled archive (1/1); the
-   earlier d450 UI exposed debug commands on localhost and is superseded.
-   The same existing CI/release runner now builds and tests production files.
-   Defer route/depth-policy and Brainvault consolidation until required CI.
-4. Finish current exit-gas, operational and exact-build mainnet evidence. Rust
-   decoder/proof-codec refactors remain proposals until the freeze is reopened.
+1. Remove the obsolete mainnet preflight requirement to finish deferred lending.
+   Run the existing production admission rejection and historical-proof tests
+   instead. Keep all financial, recovery, topology and soak requirements.
+2. Verify the clean candidate with the source and money-invariant checks, then
+   execute the existing release integration gate and fix its first real failure.
+   No more repeats of green faucet/payment/recovery demonstrations.
+3. Finish outstanding exact-build mainnet evidence and prepare the owner-reviewed
+   deployment package. Public Sepolia is usable testnet evidence, not mainnet approval.
 
-Completed refactoring boundary on clean `fc4f267db`: native driver/storage hooks
-retired, obsolete native persisted data explicitly rejected, TS workers/WAL/crash
-proof/export retained. All six bounded checks pass; kernel closure is 150,930
-lines, 10,132 below the initial review, with no QA or core/rscore edges. This does
-not close the active frozen-fixture dependency or public deployment gap above.
-[Review and exact evidence](docs/canonical-refactoring-20261012.md).
-
-Owner-supplied critical-findings review is complete on clean `9fa2a4bf6`:
-strict debug-limit/RPC-chain-ID admission, one checked quorum-weight lookup and
-monotonic faucet waits. Relevant source tests: 102/102; RPC integration: 11/11;
-real React faucets/delayed funding: 2/2; full `bun run check` passed. Claimed
-remote J-prefix halt and Map divergence did not reproduce. Earlier failed
-browser runs are retained in the [SHA-bound evidence](docs/evidence/canonical-review-20261012/critical-boundaries-9fa2a4bf6.json).
-This does not resolve the frozen-fixture or deployment blockers above.
+Completed: public React faucet 100 test USDT → pay 25 → retain 75 → reload;
+fresh-device file recovery 6.157 seconds and fresh tower recovery 5.968 seconds.
+Three new profiles, one wallet/Account; seven authenticated snapshots preserve
+all 16 compared Account state and signature fields. Tampered ciphertext rejects.
+See [deployed release](docs/evidence/sepolia-header-20261013/release-4c4413992.json)
+and [cold recovery](docs/evidence/sepolia-cold-recovery-20261014/recovery-4c4413992.json).
+Earlier frozen-import, P6 catch-up and CI boot blockers are resolved; do not
+repeat the old promotion/funding commands. The latest handoff lives in
+[the work plan](docs/night-work-plan.md).
 
 ## Historical pre-freeze lending work — not current release scope
 

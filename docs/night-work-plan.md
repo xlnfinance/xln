@@ -23,10 +23,26 @@ The first post-deploy helper targeted a connection row instead of the token
 balance; its failure is retained and the existing token selector verifies USDT.
 Evidence: docs/evidence/sepolia-header-20261013/release-4c4413992.json.
 
-Next single step: measure cold wallet recovery on this deployed source against
-the 60-second mainnet gate. The old profile needed more than a 30-second first
-observation after a long offline interval; success under a 170-second budget
-and today's warm 15.869-second reopen/reload do not prove that cold-recovery gate.
+Current boundary, 2026-10-14: cold recovery passed on the deployed 4c4413992
+bundle, checked from clean a57f633e9. File restore took 6.157 seconds; explicit
+fresh tower upload/restore took 5.968 seconds (60-second limit). Three fresh
+profiles recovered the same 75 test USDT and co-signed Account frame 6. All 16
+Account state/signature/dispute fields match across seven authenticated exports;
+modified ciphertext is rejected. One wallet/one Account is the sample, not a
+fleet-wide guarantee. No money operation was repeated. Evidence:
+`docs/evidence/sepolia-cold-recovery-20261014/recovery-4c4413992.json`.
+The current test profile is selected by the private `active-profile.json` pointer
+under `~/.config/xln/sepolia-cold-recovery-4c4413992/`; do not reopen its older
+profiles concurrently or resume the original e4db444ee browser profile.
+
+The first preflight failure was a hard-coded requirement to finish deferred
+lending before running any checks. Remove that obsolete list/function and run
+the existing local/peer typed-rejection and historical-proof vectors in the
+money-invariants step. No lending, Rust, contract or financial rule changes.
+Next single step: run the corrected immutable candidate through source and
+money-invariant checks, then the existing release integration gate to its first
+failure. Keep mandatory CI, real exit, three-hub/tower and soak evidence intact.
+
 Method review: reproduce the actual provider failure in the existing full-window
 reader before broad checks; never repeat accepted funding/payment actions. Most
 verification wall time was CI (22m48s E2E, parallel 15m26s unit), not local Anvil
