@@ -22,6 +22,7 @@ pub(crate) fn account_tx_kind(tx: &AccountTx) -> &'static str {
         AccountTx::SetCreditLimit { .. } => "set_credit_limit",
         AccountTx::RebalancePolicy { .. } => "rebalance_policy",
         AccountTx::LendingFund { .. } => "lending_fund",
+        AccountTx::LendingRate { .. } => "lending_rate",
         AccountTx::LendingBorrowRequest { .. } => "lending_borrow_request",
         AccountTx::LendingRepay { .. } => "lending_repay",
         AccountTx::LendingDisburse { .. } => "lending_disburse",

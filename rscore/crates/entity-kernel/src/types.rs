@@ -9,8 +9,8 @@ use xln_rscore_protocol::{
 };
 
 use crate::lendbook::LendingState;
-use crate::swapbook::{OrderbookState, PairPolicy};
 use crate::scheduler::CrontabState;
+use crate::swapbook::{OrderbookState, PairPolicy};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JurisdictionScope {

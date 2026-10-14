@@ -37,11 +37,12 @@ fn optional_u32(
     }
 }
 
-fn lending_term(value: &AbiValue) -> Result<LendingTermId, AccountWireRestoreError> {
+fn lending_term(value: &AbiValue, savings: bool) -> Result<LendingTermId, AccountWireRestoreError> {
     match integer(value)? {
         0 => Ok(LendingTermId::OneHour),
         1 => Ok(LendingTermId::OneDay),
         2 => Ok(LendingTermId::OneMonth),
+        3 if savings => Ok(LendingTermId::Demand),
         value => Err(invalid(format!("LENDING_TERM:{value}"))),
     }
 }
@@ -242,45 +243,70 @@ fn lending_fund(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreErro
         lender_entity_id: text(&fields[3])?.to_owned(),
         token_id: token(&fields[4])?,
         amount: bigint(&fields[5], "amount")?,
-        term_id: lending_term(&fields[6])?,
+        term_id: lending_term(&fields[6], true)?,
         interest_bps: i64::try_from(integer(&fields[7])?)
             .map_err(|_| invalid("LENDING_INTEREST_BPS"))?,
     })
 }
 
+fn lending_rate(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
+    let fields = exact(fields, 7, "lendingRate")?;
+    Ok(AccountTx::LendingRate {
+        position_id: text(&fields[1])?.to_owned(),
+        hub_entity_id: text(&fields[2])?.to_owned(),
+        lender_entity_id: text(&fields[3])?.to_owned(),
+        token_id: token(&fields[4])?,
+        claim_hash: text(&fields[5])?.to_owned(),
+        interest_bps: i64::try_from(integer(&fields[6])?)
+            .map_err(|_| invalid("LENDING_INTEREST_BPS"))?,
+    })
+}
+
 fn lending_borrow_request(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
-    let fields = exact(fields, 8, "lendingBorrowRequest")?;
+    let fields = exact(fields, 10, "lendingBorrowRequest")?;
     Ok(AccountTx::LendingBorrowRequest {
+        expires_at: unsigned(&fields[8], "expiresAt")?,
+        max_late_ms: unsigned(&fields[9], "maxLateMs")?,
         request_id: text(&fields[1])?.to_owned(),
         hub_entity_id: text(&fields[2])?.to_owned(),
         borrower_entity_id: text(&fields[3])?.to_owned(),
         token_id: unsigned(&fields[4], "tokenId")?,
         amount: bigint(&fields[5], "amount")?,
-        term_id: lending_term(&fields[6])?,
+        term_id: lending_term(&fields[6], false)?,
         max_interest_bps: i64::try_from(integer(&fields[7])?)
             .map_err(|_| invalid("LENDING_MAX_INTEREST_BPS"))?,
     })
 }
 
 fn lending_repay(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
-    let fields = exact(fields, 6, "lendingRepay")?;
+    let fields = exact(fields, 7, "lendingRepay")?;
     Ok(AccountTx::LendingRepay {
         loan_id: text(&fields[1])?.to_owned(),
         hub_entity_id: text(&fields[2])?.to_owned(),
         borrower_entity_id: text(&fields[3])?.to_owned(),
         token_id: token(&fields[4])?,
         amount: bigint(&fields[5], "amount")?,
+        claim_hash: text(&fields[6])?.to_owned(),
     })
 }
 
 fn lending_disburse(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
-    let fields = exact(fields, 6, "lendingDisburse")?;
+    let fields = exact(fields, 13, "lendingDisburse")?;
     Ok(AccountTx::LendingDisburse {
         loan_id: text(&fields[1])?.into(),
         hub_entity_id: text(&fields[2])?.into(),
         borrower_entity_id: text(&fields[3])?.into(),
         token_id: token(&fields[4])?,
         amount: bigint(&fields[5], "amount")?,
+        term_id: lending_term(&fields[6], false)?,
+        interest_bps: i64::try_from(integer(&fields[7])?)
+            .map_err(|_| invalid("LENDING_INTEREST_BPS"))?,
+        request_id: text(&fields[8])?.into(),
+        max_interest_bps: i64::try_from(integer(&fields[9])?)
+            .map_err(|_| invalid("LENDING_MAX_INTEREST_BPS"))?,
+        expires_at: unsigned(&fields[10], "expiresAt")?,
+        max_late_ms: unsigned(&fields[11], "maxLateMs")?,
+        late_ms: unsigned(&fields[12], "lateMs")?,
     })
 }
 
@@ -449,6 +475,7 @@ pub fn transaction(value: &AbiValue) -> Result<AccountTx, AccountWireRestoreErro
         8 => swap_resolve(fields),
         9 => j_event_claim(fields),
         10 => lending_fund(fields),
+        25 => lending_rate(fields),
         11 => lending_borrow_request(fields),
         12 => lending_repay(fields),
         24 => lending_disburse(fields),

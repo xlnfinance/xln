@@ -328,12 +328,13 @@ pub(crate) fn apply_to_candidate(
             proposer,
         ),
         AccountTx::LendingFund { .. }
+        | AccountTx::LendingRate { .. }
         | AccountTx::LendingBorrowRequest { .. }
         | AccountTx::LendingRepay { .. }
         | AccountTx::LendingDisburse { .. }
         | AccountTx::LendingCloseRequest { .. }
         | AccountTx::LendingClosePayout { .. } => {
-            crate::tx::handlers::lending::apply(candidate, tx, proposer)
+            crate::tx::handlers::lending::apply(candidate, tx, proposer, context)
         }
         AccountTx::RequestCollateral {
             token_id,

@@ -92,7 +92,18 @@ fn event_hash_and_frame_value_match_typescript_goldens() {
 
 #[test]
 fn account_settled_is_pending_then_finalized_once() {
-    let base = replica();
+    // Custody observation updates a previously agreed asset; it cannot admit
+    // an asset into the Account proof on behalf of the two signers.
+    let base = SequentialAccountEngine::apply(
+        &replica(),
+        Side::Left,
+        &AccountTx::AddDelta {
+            token_id: TokenId::new(1).expect("token"),
+        },
+    )
+    .expect("agreed asset")
+    .committed()
+    .expect("asset candidate");
     let raw = raw_claim(7, settled_event());
     let left = SequentialAccountEngine::apply(
         &base,

@@ -334,6 +334,24 @@ fn projected_tx_value(
                 ("interestBps".to_string(), number_i64(*interest_bps)?),
             ],
         ),
+        AccountTx::LendingRate {
+            position_id,
+            hub_entity_id,
+            lender_entity_id,
+            token_id,
+            claim_hash,
+            interest_bps,
+        } => (
+            "lending_rate",
+            vec![
+                ("positionId".to_string(), text(position_id)),
+                ("hubEntityId".to_string(), text(hub_entity_id)),
+                ("lenderEntityId".to_string(), text(lender_entity_id)),
+                ("tokenId".to_string(), token(*token_id)),
+                ("claimHash".to_string(), text(claim_hash)),
+                ("interestBps".to_string(), number_i64(*interest_bps)?),
+            ],
+        ),
         AccountTx::LendingBorrowRequest {
             request_id,
             hub_entity_id,
@@ -342,6 +360,8 @@ fn projected_tx_value(
             amount,
             term_id,
             max_interest_bps,
+            expires_at,
+            max_late_ms,
         } => (
             "lending_borrow_request",
             vec![
@@ -352,6 +372,8 @@ fn projected_tx_value(
                 ("amount".to_string(), big(amount)),
                 ("termId".to_string(), text(term_id.wire_name())),
                 ("maxInterestBps".to_string(), number_i64(*max_interest_bps)?),
+                ("expiresAt".to_string(), number(*expires_at)?),
+                ("maxLateMs".to_string(), number(*max_late_ms)?),
             ],
         ),
         AccountTx::LendingRepay {
@@ -360,6 +382,7 @@ fn projected_tx_value(
             borrower_entity_id,
             token_id,
             amount,
+            claim_hash,
         } => (
             "lending_repay",
             vec![
@@ -368,6 +391,7 @@ fn projected_tx_value(
                 ("borrowerEntityId".to_string(), text(borrower_entity_id)),
                 ("tokenId".to_string(), token(*token_id)),
                 ("amount".to_string(), big(amount)),
+                ("claimHash".to_string(), text(claim_hash)),
             ],
         ),
         AccountTx::LendingDisburse {
@@ -376,6 +400,13 @@ fn projected_tx_value(
             borrower_entity_id,
             token_id,
             amount,
+            term_id,
+            interest_bps,
+            request_id,
+            max_interest_bps,
+            expires_at,
+            max_late_ms,
+            late_ms,
         } => (
             "lending_disburse",
             vec![
@@ -384,6 +415,13 @@ fn projected_tx_value(
                 ("borrowerEntityId".to_string(), text(borrower_entity_id)),
                 ("tokenId".to_string(), token(*token_id)),
                 ("amount".to_string(), big(amount)),
+                ("termId".to_string(), text(term_id.wire_name())),
+                ("interestBps".to_string(), number_i64(*interest_bps)?),
+                ("requestId".to_string(), text(request_id)),
+                ("maxInterestBps".to_string(), number_i64(*max_interest_bps)?),
+                ("expiresAt".to_string(), number(*expires_at)?),
+                ("maxLateMs".to_string(), number(*max_late_ms)?),
+                ("lateMs".to_string(), number(*late_ms)?),
             ],
         ),
         AccountTx::LendingCloseRequest {

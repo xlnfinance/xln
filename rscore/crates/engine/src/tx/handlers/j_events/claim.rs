@@ -38,23 +38,30 @@ pub(crate) fn apply_j_event_claim(
         .set_j_claim_accumulators(transition.left, transition.right);
     let (message, outputs, consensus_effects) = match transition.status {
         JClaimStatus::Pending => (
-            "📥 J-event claim authenticated and retained",
+            "📥 J-event claim authenticated and retained".to_string(),
             Vec::new(),
             Vec::new(),
         ),
-        JClaimStatus::Idempotent => ("ℹ️ j_event_claim idempotent", Vec::new(), Vec::new()),
-        JClaimStatus::Stale => ("ℹ️ j_event_claim stale", Vec::new(), Vec::new()),
+        JClaimStatus::Idempotent => ("ℹ️ j_event_claim idempotent".into(), Vec::new(), Vec::new()),
+        JClaimStatus::Stale => ("ℹ️ j_event_claim stale".into(), Vec::new(), Vec::new()),
         JClaimStatus::Finalized => {
             let finalized = apply_finalized_events(replica, &transition.events, tx.j_height)?;
             (
-                "✅ J-event claim finalized bilaterally",
+                if finalized.unadmitted == 0 {
+                    "✅ J-event claim finalized bilaterally".into()
+                } else {
+                    format!(
+                        "✅ J-event claim finalized bilaterally; unadmitted asset rows excluded: {}",
+                        finalized.unadmitted
+                    )
+                },
                 vec![finalized.output],
                 finalized.consensus_effects,
             )
         }
     };
     Ok(MutationDecision::with_outputs_and_effects(
-        vec![message.into()],
+        vec![message],
         outputs,
         consensus_effects,
     ))

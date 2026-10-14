@@ -103,12 +103,15 @@ fn transaction(name: &str) -> LocalEntityFinancialTx {
             amount: BigInt::from(2_500),
             term_id: LendingTermId::OneDay,
             max_interest_bps: 150,
+            expires_at: 5_000,
+            max_late_ms: 86_400_000,
         }),
         "lendingRepay" => LocalEntityFinancialTx::LendingRepay(LendingRepayEntityTx {
             hub_entity_id: PEER.into(),
             loan_id: "loan-0327fd9035d42518".into(),
             token_id: token(1),
             amount: BigInt::from(2_525),
+            claim_hash: "0xbb90f6a8798ec5519fcd2c8b45c92a2780980f35a3ded297efef54f6ebbee7c6".into(),
         }),
         "lendingClosePosition" => {
             LocalEntityFinancialTx::LendingClosePosition(LendingClosePositionEntityTx {

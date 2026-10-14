@@ -103,6 +103,71 @@ describe('Entity-frame j_broadcast continuation ownership', () => {
     expect(selected.reserveToReserve).toEqual([]);
     expect(remainder.reserveToReserve).toHaveLength(1);
   });
+
+  test('a reverting ERC-20 withdrawal cannot share processBatch with a counter-dispute', () => {
+    const batchState = initJBatch();
+    batchState.batch.counterDisputes.push({
+      counterentity: entity('55'),
+      counterNonce: 2,
+      proposerIsLeft: true,
+    } as never);
+    batchState.batch.reserveToExternalToken.push({
+      receivingEntity: entity('99'),
+      tokenId: 1,
+      amount: 7n,
+    });
+
+    const { selected, remainder, disputePriority } = takeBroadcastBatch(batchState.batch);
+    expect(disputePriority).toBe(true);
+    expect(selected.counterDisputes).toHaveLength(1);
+    expect(selected.reserveToExternalToken).toEqual([]);
+    expect(remainder.counterDisputes).toEqual([]);
+    expect(remainder.reserveToExternalToken).toEqual([{
+      receivingEntity: entity('99'),
+      tokenId: 1,
+      amount: 7n,
+    }]);
+  });
+
+  test('a reverting ERC-20 withdrawal cannot share processBatch with a hash-ladder registration', () => {
+    const batchState = initJBatch();
+    batchState.batch.hashLadderRegistrations.push({
+      counterpartyEntity: entity('55'),
+      targetRole: true,
+      fullHash: secret('67'),
+      partialRoot: secret('68'),
+      witness: {
+        fillRatio: 1,
+        fullSecret: secret('00'),
+        reveals: [secret('01'), secret('02'), secret('03'), secret('04')],
+      },
+    });
+    batchState.batch.reserveToExternalToken.push({
+      receivingEntity: entity('99'),
+      tokenId: 1,
+      amount: 7n,
+    });
+
+    const { selected, remainder, disputePriority } = takeBroadcastBatch(batchState.batch);
+    expect(disputePriority).toBe(true);
+    expect(selected.hashLadderRegistrations).toHaveLength(1);
+    expect(selected.reserveToExternalToken).toEqual([]);
+    expect(remainder.hashLadderRegistrations).toEqual([]);
+    expect(remainder.reserveToExternalToken).toHaveLength(1);
+  });
+
+  test('ordinary withdrawal-only drafts still broadcast as one batch', () => {
+    const batchState = initJBatch();
+    batchState.batch.reserveToExternalToken.push({
+      receivingEntity: entity('99'),
+      tokenId: 1,
+      amount: 7n,
+    });
+    const { selected, remainder, disputePriority } = takeBroadcastBatch(batchState.batch);
+    expect(disputePriority).toBe(false);
+    expect(selected.reserveToExternalToken).toHaveLength(1);
+    expect(remainder.reserveToExternalToken).toEqual([]);
+  });
 });
 
 

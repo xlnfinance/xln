@@ -195,6 +195,7 @@ fn lending_term(
         "1h" => Ok(LendingTermId::OneHour),
         "1d" => Ok(LendingTermId::OneDay),
         "1m" => Ok(LendingTermId::OneMonth),
+        "demand" => Ok(LendingTermId::Demand),
         _ => Err(invalid(kind, "TERM_ID")),
     }
 }
@@ -753,8 +754,17 @@ fn lending_borrow(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, Enti
     let data = object(frame_data(tx, KIND)?, KIND)?;
     exact_fields(
         data,
-        &["requestId", "hubEntityId", "tokenId", "amount", "termId"],
-        &["maxInterestBps"],
+        &[
+            "requestId",
+            "hubEntityId",
+            "tokenId",
+            "amount",
+            "termId",
+            "maxInterestBps",
+            "expiresAt",
+            "maxLateMs",
+        ],
+        &[],
         KIND,
     )?;
     let max_interest_bps = optional_field(data, "maxInterestBps")
@@ -771,6 +781,8 @@ fn lending_borrow(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, Enti
             amount: bigint(field(data, "amount", KIND)?, KIND, "AMOUNT")?,
             term_id: lending_term(field(data, "termId", KIND)?, KIND)?,
             max_interest_bps,
+            expires_at: u64_number(field(data, "expiresAt", KIND)?, KIND, "EXPIRES_AT")?,
+            max_late_ms: u64_number(field(data, "maxLateMs", KIND)?, KIND, "MAX_LATE_MS")?,
         },
     ))
 }
@@ -791,6 +803,7 @@ fn lending_repay(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, Entit
             .to_ascii_lowercase(),
         token_id: token(field(data, "tokenId", KIND)?, KIND)?,
         amount: bigint(field(data, "amount", KIND)?, KIND, "AMOUNT")?,
+        claim_hash: String::new(),
     }))
 }
 

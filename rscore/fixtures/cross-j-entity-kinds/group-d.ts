@@ -33,7 +33,7 @@ import {
 import type { EntityCandidateEffect, EntityReplica, EntityState } from '../../../core/entity/types';
 import type { EntityTx } from '../../../core/types/entity-tx';
 import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from '../../../core/types/cross-jurisdiction';
-import type { RuntimeOverlayRecord } from '../../../core/runtime/overlay';
+import type { RuntimeOverlayRecord } from '../../../core/types/account';
 
 const SEED = 'cross-j-entity-kinds-group-d-v1';
 const NOW = 10_000;

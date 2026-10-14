@@ -820,7 +820,7 @@ impl AccountConsensus {
                 || draft.proposer_is_left != proposer_is_left
                 || draft.nonce <= j_nonce
         });
-        let nonce = self.next_proof_nonce.max(j_nonce + 1);
+        let nonce = self.minimum_safe_settlement_nonce(j_nonce);
         if !changed {
             // Nothing new to sign; a proof already certified for exactly this
             // body travels with the acknowledgement instead.
@@ -1130,6 +1130,28 @@ impl AccountConsensus {
         self.next_proof_nonce
     }
 
+    /// Parity target: `getMinimumSafeSettlementNonce`
+    /// (core/protocol/settlement/operations.ts).
+    fn minimum_safe_settlement_nonce(&self, j_nonce: u64) -> u64 {
+        j_nonce
+            .saturating_add(1)
+            .max(self.next_proof_nonce)
+            .max(
+                self.dispute
+                    .as_ref()
+                    .map(|proof| proof.nonce)
+                    .unwrap_or(0)
+                    .saturating_add(1),
+            )
+            .max(
+                self.counterparty_dispute
+                    .as_ref()
+                    .map(|proof| proof.nonce)
+                    .unwrap_or(0)
+                    .saturating_add(1),
+            )
+    }
+
     pub(crate) fn settlement_execution_context(
         &self,
         proposer_board_authority: Option<crate::CertifiedBoardAuthority>,
@@ -1262,9 +1284,9 @@ impl AccountConsensus {
                     && draft.nonce > j_nonce
             }));
         }
-        let nonce = candidate_next_proof_nonce
-            .max(self.next_proof_nonce)
-            .max(j_nonce + 1);
+        let nonce = self
+            .minimum_safe_settlement_nonce(j_nonce)
+            .max(candidate_next_proof_nonce);
         let identity = candidate.state().identity();
         self.dispute = Some(DisputeDraft {
             hanko: None,

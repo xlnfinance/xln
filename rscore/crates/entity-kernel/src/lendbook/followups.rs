@@ -14,6 +14,7 @@ fn term_ms(term: LendingTermId) -> u64 {
         LendingTermId::OneHour => 3_600_000,
         LendingTermId::OneDay => 86_400_000,
         LendingTermId::OneMonth => 2_592_000_000,
+        LendingTermId::Demand => 31_536_000_000,
     }
 }
 
@@ -207,6 +208,13 @@ pub(super) fn apply_borrow(
             borrower_entity_id: proposer.to_string(),
             token_id: token,
             amount: amount.clone(),
+            term_id: pool.term_id,
+            interest_bps: i64::from(pool.interest_bps),
+            request_id: request_id.clone(),
+            max_interest_bps: i64::from(pool.interest_bps),
+            expires_at: 0,
+            max_late_ms: 0,
+            late_ms: 0,
         },
     ));
     Ok(())

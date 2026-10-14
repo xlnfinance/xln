@@ -9,8 +9,8 @@ use crate::j_batch::{
     FinalDisputeProof, InitialDisputeProof, JBatch, JBatchState, SecretReveal,
     proof_body_from_engine, proof_body_hash,
 };
-use crate::swapbook::SameJOutputDelta;
 use crate::paybook::PaybookChanges;
+use crate::swapbook::SameJOutputDelta;
 use crate::{EntityFrameEvent, EntityKernelError, EntityStateSlice, LocalEntityOutput};
 
 use super::types::{
@@ -552,34 +552,12 @@ fn start(
     } else {
         right_arguments
     };
-    let (starter_counter_arguments, starter_counter_proof_commitment) = dispute
-        .local_dispute
-        .as_ref()
-        .filter(|candidate| {
-            candidate.nonce > counter.nonce
-                || (candidate.nonce == counter.nonce
-                    && candidate.proposer_is_left
-                    && !counter.proposer_is_left)
-        })
-        .map(|candidate| {
-            let (left, right) = build_arguments(
-                state,
-                paybook,
-                dispute,
-                counterparty,
-                Some(dispute.owner_is_left),
-            )?;
-            Ok::<_, EntityKernelError>((
-                if dispute.owner_is_left { left } else { right },
-                counter_commitment(
-                    candidate.nonce,
-                    candidate.proposer_is_left,
-                    candidate.proof_body_hash,
-                ),
-            ))
-        })
-        .transpose()?
-        .unwrap_or_else(|| (Vec::new(), ZERO_WORD));
+    // Start with the peer's stored signed proof, as TS buildStarterArguments
+    // does. A newer local draft nonce is not evidence of a separately admitted
+    // counter branch and cannot authorize arguments reconstructed from current
+    // state. Binding it changed the Account envelope and J batch at WAL h474.
+    let starter_counter_arguments = Vec::new();
+    let starter_counter_proof_commitment = ZERO_WORD;
     if cross_jurisdiction_route_id.is_some()
         && state
             .j_batch_state
@@ -1683,6 +1661,62 @@ mod tests {
                 "⏳ Dispute prepared vs 0202; evidence currently stable, queue disputeStart when ready",
                 "⚔️ Dispute started vs 0202 (test) - account frozen, use jBroadcast to commit",
             ],
+        );
+    }
+
+    #[test]
+    fn prepare_dispute_h474_does_not_bind_a_local_draft_as_counter_evidence() {
+        let mut state = state(1_000);
+        let mut counter = counterparty_proof();
+        counter.nonce = 97;
+        let mut views = account_view("active", None, None, Some(counter.clone()));
+        views
+            .get_mut(PEER)
+            .unwrap()
+            .dispute
+            .as_mut()
+            .unwrap()
+            .local_dispute = Some(xln_rscore_engine::DisputeDraft {
+            hanko: None,
+            hash: [0x55; 32],
+            proof_body_hash: counter.proof_body_hash,
+            nonce: 99,
+            proposer_is_left: false,
+        });
+        let mut mutations = Vec::new();
+        apply_prepare(
+            &mut state,
+            &PaybookChanges::default(),
+            PrepareDisputeEntityTx {
+                counterparty_entity_id: PEER.into(),
+                description: Some("hlt-authority-production-dispute".into()),
+                min_cooldown_ms: 0,
+                cross_jurisdiction_route_id: None,
+                starter_initial_arguments: None,
+            },
+            &views,
+            None,
+            &mut mutations,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+        .expect("prepare dispute from the peer's stored proof");
+        let proof = &state.j_batch_state.as_ref().unwrap().batch.dispute_starts[0];
+        assert_eq!(proof.nonce, U256::from(97));
+        assert_eq!(proof.starter_counter_proof_commitment, ZERO_WORD);
+        assert!(proof.starter_counter_arguments.is_empty());
+        let AccountEnvelopeMutation::ReplaceDisputeLifecycle {
+            active_dispute: Some(active),
+            ..
+        } = &mutations.last().unwrap().1
+        else {
+            panic!("missing active dispute")
+        };
+        let active = object(active, "test", "active").unwrap();
+        assert_eq!(
+            text_field(active, "starterCounterProofCommitment"),
+            Some(hex(&ZERO_WORD).as_str())
         );
     }
 

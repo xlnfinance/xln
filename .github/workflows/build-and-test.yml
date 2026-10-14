@@ -228,9 +228,9 @@ jobs:
         run: bun run env:build
 
       # Bun segfaults when one process loads the whole test tree, so each
-      # directory runs in its own process. Rust is frozen at tag
-      # rscore-freeze-f1464e84e. Rust integration/parity suites are outside this
-      # TS launch job, not claimed green against changed TS codecs. Real-runtime
+      # directory runs in its own process. Owner 2026-10-14 lifted the Rust
+      # freeze. This job stays the TS suite; `rscore:check` is a separate gate
+      # and is required once it is green on the pushed SHA. Real-runtime
       # lifecycle tests run separately under the machine-wide stand lock.
       - name: Run TS unit tests one directory per process
         run: |

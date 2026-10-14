@@ -72,6 +72,7 @@ fn term(value: &CanonicalValue, path: &str) -> Result<LendingTermId, EntityKerne
         "1h" => Ok(LendingTermId::OneHour),
         "1d" => Ok(LendingTermId::OneDay),
         "1m" => Ok(LendingTermId::OneMonth),
+        "demand" => Ok(LendingTermId::Demand),
         _ => Err(invalid(format!("TERM:{path}"))),
     }
 }

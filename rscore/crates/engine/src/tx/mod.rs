@@ -12,9 +12,10 @@ use num_bigint::BigInt;
 
 use crate::{CanonicalValue, HtlcLockTx, HtlcResolveTx, JEventClaimTx, StateError, TokenId};
 
-pub const ACCOUNT_TX_TYPES: [&str; 21] = [
+pub const ACCOUNT_TX_TYPES: [&str; 22] = [
     "direct_payment",
     "lending_fund",
+    "lending_rate",
     "lending_borrow_request",
     "lending_repay",
     "lending_disburse",
@@ -39,17 +40,19 @@ pub const ACCOUNT_TX_TYPES: [&str; 21] = [
 /// Canonical live Account admission profile shared with TypeScript
 /// (`core/account/tx/admission-policy.ts`).
 ///
-/// Lending was held outside the profile while its lifecycle was incomplete: an
-/// overdue loan stayed `active` forever, stranding the lender's capital and the
-/// borrower's credit line. `9acd5e3e6` closed that hole with TS/Rust parity, so
-/// the six `lending_*` variants are now inside the production profile.
-///
-/// A variant refused here is still canonically hashable, so historical signed
-/// frames keep verifying; it is only kept out of new local and peer work.
+/// Launch profile: lending is deferred. Decode and hash every variant so
+/// historical signed claims remain evidence for contract exit; refuse new
+/// local and peer admission before mutation. Collateral alone secures recovery.
 pub(crate) fn account_tx_admission_error(tx: &AccountTx) -> Option<StateError> {
-    /// Wire names refused by live admission. Mirrors the TypeScript
-    /// `OUT_OF_PROFILE_TX_KINDS` set, which is empty for the same reason.
-    const OUT_OF_PROFILE_TX_KINDS: [&str; 0] = [];
+    const OUT_OF_PROFILE_TX_KINDS: [&str; 7] = [
+        "lending_fund",
+        "lending_rate",
+        "lending_borrow_request",
+        "lending_repay",
+        "lending_disburse",
+        "lending_close_request",
+        "lending_close_payout",
+    ];
     OUT_OF_PROFILE_TX_KINDS
         .contains(&tx.wire_name())
         .then(|| StateError::AccountTxKindOutOfProfile(tx.wire_name()))
@@ -66,6 +69,7 @@ pub enum LendingTermId {
     OneHour,
     OneDay,
     OneMonth,
+    Demand,
 }
 
 impl LendingTermId {
@@ -74,6 +78,16 @@ impl LendingTermId {
             Self::OneHour => "1h",
             Self::OneDay => "1d",
             Self::OneMonth => "1m",
+            Self::Demand => "demand",
+        }
+    }
+
+    pub const fn wire_tag(self) -> u8 {
+        match self {
+            Self::OneHour => 0,
+            Self::OneDay => 1,
+            Self::OneMonth => 2,
+            Self::Demand => 3,
         }
     }
 }
@@ -176,6 +190,14 @@ pub enum AccountTx {
         term_id: LendingTermId,
         interest_bps: i64,
     },
+    LendingRate {
+        position_id: String,
+        hub_entity_id: String,
+        lender_entity_id: String,
+        token_id: TokenId,
+        claim_hash: String,
+        interest_bps: i64,
+    },
     LendingBorrowRequest {
         request_id: String,
         hub_entity_id: String,
@@ -186,6 +208,8 @@ pub enum AccountTx {
         amount: BigInt,
         term_id: LendingTermId,
         max_interest_bps: i64,
+        expires_at: u64,
+        max_late_ms: u64,
     },
     LendingRepay {
         loan_id: String,
@@ -193,6 +217,7 @@ pub enum AccountTx {
         borrower_entity_id: String,
         token_id: TokenId,
         amount: BigInt,
+        claim_hash: String,
     },
     LendingDisburse {
         loan_id: String,
@@ -200,6 +225,13 @@ pub enum AccountTx {
         borrower_entity_id: String,
         token_id: TokenId,
         amount: BigInt,
+        term_id: LendingTermId,
+        interest_bps: i64,
+        request_id: String,
+        max_interest_bps: i64,
+        expires_at: u64,
+        max_late_ms: u64,
+        late_ms: u64,
     },
     LendingCloseRequest {
         position_id: String,
@@ -249,6 +281,7 @@ impl AccountTx {
         match self {
             Self::DirectPayment { .. } => "direct_payment",
             Self::LendingFund { .. } => "lending_fund",
+            Self::LendingRate { .. } => "lending_rate",
             Self::LendingBorrowRequest { .. } => "lending_borrow_request",
             Self::LendingRepay { .. } => "lending_repay",
             Self::LendingDisburse { .. } => "lending_disburse",

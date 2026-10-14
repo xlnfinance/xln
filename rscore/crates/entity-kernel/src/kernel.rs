@@ -9,13 +9,13 @@ use xln_rscore_protocol::CanonicalValue;
 use crate::commitment::compute_commitments;
 use crate::j_events::apply_committed_j_event_claim;
 use crate::local_financial::{LocalAccountFinancialView, apply_local_entity_financial_txs};
-use crate::swapbook::{
-    OrderbookPairJob, OrderbookPairResult, PreparedOrderbookStage, SameJOffer, SameJOutputDelta,
-    install_orderbook_outputs, prepare_orderbook_outputs, validate_orderbook_outputs,
-};
 use crate::paybook::{
     PaybookChanges, PaybookEffects, committed_htlc_lock, committed_htlc_resolve,
     direct_payment_forward, revealed_secret_followup, timed_out_followup,
+};
+use crate::swapbook::{
+    OrderbookPairJob, OrderbookPairResult, PreparedOrderbookStage, SameJOffer, SameJOutputDelta,
+    install_orderbook_outputs, prepare_orderbook_outputs, validate_orderbook_outputs,
 };
 use crate::types::{AccountProposalWork, TargetedAccountTx};
 use crate::{
@@ -623,6 +623,7 @@ fn apply_commit_transitions(
                 }
             }
             AccountTx::LendingFund { .. }
+            | AccountTx::LendingRate { .. }
             | AccountTx::LendingBorrowRequest { .. }
             | AccountTx::LendingRepay { .. }
             | AccountTx::LendingDisburse { .. }

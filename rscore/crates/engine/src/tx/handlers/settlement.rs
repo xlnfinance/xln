@@ -229,6 +229,25 @@ fn apply_upsert(
     if let Some(previous) = current.as_ref() {
         plan_hold_release(account, &workspace_view(previous)?, &mut planned)?;
     }
+    // Commit the token footprint before a Hanko can escape. A later older
+    // dispute may clear the workspace while its higher-nonce signature remains
+    // executable; canonical zero rows keep that future exit budget reserved.
+    for token in compiled
+        .diffs
+        .iter()
+        .map(|diff| diff.token_id)
+        .chain(compiled.forgive.iter().copied())
+    {
+        if account.state().delta(token).is_none() {
+            planned.insert(
+                token,
+                account
+                    .state()
+                    .delta_or_zero(token)
+                    .map_err(|error| error.to_string())?,
+            );
+        }
+    }
     plan_hold_add(account, &compiled.diffs, &mut planned)?;
     publish_deltas(account, planned)?;
     account.state_mut().set_settlement_workspace(workspace);

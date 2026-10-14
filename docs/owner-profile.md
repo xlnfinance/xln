@@ -80,9 +80,9 @@ to MML; counting accounts or gross turnover does not replace GDP attribution.
 - Current scope, updated 2026-10-11: TypeScript, React `ui/`, Ethereum same-J.
   Sepolia verification precedes the Ethereum mainnet canary. This supersedes
   the October 10 multi-engine, multi-wallet and multi-jurisdiction scope.
-- Rust `rscore/` is frozen at `rscore-freeze-f1464e84e`; the owner withdrew the
-  book-refactor exception for this release. Park unfinished Rust edits without
-  committing them. Svelte wallet development is frozen; its landing remains.
+- Owner 2026-10-14 lifted the Rust freeze: edit and commit `rscore/`. Tag
+  `rscore-freeze-f1464e84e` is history. Work and push on `main`; do not keep
+  `codex/` branches. Svelte wallet development stays frozen; its landing remains.
   TRON, XLNC, Base, cross-J as a headline, lending in production, companies/IPO,
   native clients and custody are deferred. Apply the exact freeze and reopening
   rules in [AGENTS.md](../AGENTS.md); do not repeat excluded release gates.

@@ -28,8 +28,8 @@ mod lendbook;
 mod local_control;
 mod local_financial;
 mod local_tx;
-mod swapbook;
 mod paybook;
+mod swapbook;
 pub use paybook::secret_ack_trigger_at;
 mod prepared_context;
 #[path = "support/proposal.rs"]
@@ -138,15 +138,6 @@ pub use local_tx::{
     AdmittedLocalEntityTx, CrossJurisdictionRuntimeOutput, LocalEntityTx, decode_local_entity_tx,
     is_cross_jurisdiction_entity_tx_kind,
 };
-pub use swapbook::{
-    BookOrder, BookPricePageEntrySnapshot, BookPricePageSnapshot, BookSideLevel, BookState,
-    BookStateSnapshot, ORDERBOOK_PRICE_SCALE, OrderbookState, OrderbookStateSnapshot,
-    PairDimensions, PairPolicy, SameJOffer, Side, canonical_pair_orientation,
-    canonical_pair_policy, canonical_token_decimals, compute_book_commitment_hash,
-    is_canonical_liquid_token,
-};
-#[cfg(feature = "bench")]
-pub use swapbook::{OrderbookBenchmarkResult, run_orderbook_benchmark};
 pub use prepared_context::{
     DecodedOnionLayer, DecryptedHtlcLayer, DecryptedHtlcMaterializeInput,
     HtlcMaterializeEnvironment, HtlcMaterializeInput, PreparedAccountView, PreparedContextError,
@@ -187,6 +178,15 @@ pub use snapshot::{
 pub use storage_projection::{
     EntityStorageProjection, EntityStorageProjectionError, project_entity_storage,
 };
+pub use swapbook::{
+    BookOrder, BookPricePageEntrySnapshot, BookPricePageSnapshot, BookSideLevel, BookState,
+    BookStateSnapshot, ORDERBOOK_PRICE_SCALE, OrderbookState, OrderbookStateSnapshot,
+    PairDimensions, PairPolicy, SameJOffer, Side, canonical_pair_orientation,
+    canonical_pair_policy, canonical_token_decimals, compute_book_commitment_hash,
+    is_canonical_liquid_token,
+};
+#[cfg(feature = "bench")]
+pub use swapbook::{OrderbookBenchmarkResult, run_orderbook_benchmark};
 pub use types::{
     AccountProposalWork, CommittedAccountTransition, ControlBoardSupporterVote,
     DeterministicContext, EntityCanonicalCollection, EntityJOutput, EntityKernelCommitments,

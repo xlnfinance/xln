@@ -16,6 +16,7 @@ test('all six lending AccountTx variants match the shared TypeScript semantic ve
     'lending_borrow_request',
     'lending_disburse',
     'lending_repay',
+    'lending_repay',
     'lending_fund',
     'lending_close_request',
     'lending_close_payout',

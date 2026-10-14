@@ -4,8 +4,8 @@ use sha3::{Digest, Keccak256};
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, JS_MAX_SAFE_INTEGER};
 
 use crate::j_batch::{
-    EntityAmount, ExternalTokenToReserve, JBatch, JBatchFeeOverrides, ReserveToCollateral,
-    ReserveToExternalToken, ReserveToReserve, SentJBatch,
+    EntityAmount, ExternalTokenToReserve, HashLadderRegistration, HashLadderWitness, JBatch,
+    JBatchFeeOverrides, ReserveToCollateral, ReserveToExternalToken, ReserveToReserve, SentJBatch,
 };
 use crate::{
     CanonicalEntityTx, EntityFrameAuthority, EntityFrameEvent, EntityJOutput, EntityKernelError,
@@ -1394,6 +1394,8 @@ fn has_dispute_priority(source: &JBatch) -> bool {
     !source.dispute_starts.is_empty()
         || !source.counter_disputes.is_empty()
         || !source.dispute_finalizations.is_empty()
+        || !source.reveal_secrets.is_empty()
+        || !source.hash_ladder_registrations.is_empty()
 }
 
 pub(crate) fn has_queued_batch_work(state: &JBatchState) -> bool {
@@ -2856,6 +2858,35 @@ mod tests {
             source.dispute_finalizations[1..]
         );
         assert_eq!(remainder.reserve_to_reserve, source.reserve_to_reserve);
+    }
+
+    #[test]
+    fn broadcast_keeps_erc20_withdrawal_out_of_a_hash_ladder_batch() {
+        let withdrawal = ReserveToExternalToken {
+            receiving_entity: [0x99; 32],
+            token_id: U256::one(),
+            amount: U256::from(7),
+        };
+        let source = JBatch {
+            reserve_to_external_token: vec![withdrawal.clone()],
+            hash_ladder_registrations: vec![HashLadderRegistration {
+                counterparty_entity: [0x55; 32],
+                target_role: true,
+                full_hash: [0x67; 32],
+                partial_root: [0x68; 32],
+                witness: HashLadderWitness {
+                    fill_ratio: 1,
+                    full_secret: [0; 32],
+                    reveals: [[1; 32], [2; 32], [3; 32], [4; 32]],
+                },
+            }],
+            ..JBatch::default()
+        };
+        let (selected, remainder) = take_broadcast_batch(&source);
+        assert_eq!(selected.hash_ladder_registrations.len(), 1);
+        assert!(selected.reserve_to_external_token.is_empty());
+        assert!(remainder.hash_ladder_registrations.is_empty());
+        assert_eq!(remainder.reserve_to_external_token, vec![withdrawal]);
     }
 
     #[test]

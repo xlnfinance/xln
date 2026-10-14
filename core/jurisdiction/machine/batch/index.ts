@@ -1,6 +1,3 @@
-import { DepositoryBounds__factory } from '../../../../jurisdictions/typechain-types/factories/DepositoryBounds__factory';
-import { decodeSignedAmount } from '../../../protocol/crypto/abi-money';
-import { requireArray, requireBoundaryRecord } from '../../../protocol/boundary/boundary-primitives';
 /**
  * J-Batch Aggregator System
  *
@@ -15,296 +12,51 @@ import { requireArray, requireBoundaryRecord } from '../../../protocol/boundary/
  */
 
 import { ethers } from 'ethers';
-import type { ProofBodyStruct } from '../../../../jurisdictions/typechain-types/Depository.sol/Depository.js';
-import { validateJBatch } from '../batch-validation';
-import type { JurisdictionConfig } from '../../../entity/types';
-import type { RuntimeFailureSignal } from '../../../protocol/errors/failure-taxonomy';
 import { normalizeEntityId, compareEntityIds } from '../../../entity/id';
 import { createStructuredLogger, shortHash, shortId } from '../../../support/logger';
 import { PROOF_BODY_ABI } from '../../../protocol/dispute/proof-body';
-import { encodeCooperativeUpdateDiff, hashDepositoryBatchHankoPayload } from '../../../hanko/onchain-domain';
+import {
+  J_BATCH_CONTRACT_LIMITS,
+  batchOpCount,
+  requireArrayRoom,
+  requireBatchRoom,
+} from './limits';
+import type {
+  HashLadderRegistration,
+  JBatch,
+  JBatchState,
+  SettlementBatchOp,
+} from './types';
+
+export type {
+  HashLadderRegistration,
+  JBatch,
+  JBatchState,
+  JBatchStatus,
+  OptionalDisputeArgumentWarning,
+  SanitizedOptionalDisputeArgument,
+  SentJBatch,
+  SettlementBatchOp,
+} from './types';
+export {
+  J_BATCH_CONTRACT_LIMITS,
+  assertDisputeArgumentsWithinContractLimits,
+  assertDisputeProofBodyWithinContractLimits,
+  assertJBatchWithinContractLimits,
+  batchOpCount,
+  getJBatchContractLimitIssue,
+  sanitizeOptionalDisputeArgument,
+  sanitizeOptionalDisputeStarterArgumentPair,
+} from './limits';
+export {
+  computeBatchHankoHash,
+  decodeJBatch,
+  encodeJBatch,
+  materializeAbiValue,
+} from './codec';
 
 const jBatchLog = createStructuredLogger('j.batch');
-
-/**
- * Batch structure matching Depository.sol (lines 203-231)
- */
-export interface JBatch {
-  // Reserve ↔ External Token (deposits/withdrawals to/from blockchain)
-  reserveToExternalToken: Array<{
-    receivingEntity: string;
-    tokenId: number;
-    amount: bigint;
-  }>;
-  externalTokenToReserve: Array<{
-    entity: string;
-    contractAddress: string;
-    externalTokenId: bigint;
-    tokenType: number;
-    internalTokenId: number;
-    amount: bigint;
-  }>;
-
-  // Reserve ↔ Reserve (entity-to-entity transfers)
-  reserveToReserve: Array<{
-    receivingEntity: string;
-    tokenId: number;
-    amount: bigint;
-  }>;
-
-  // Reserve → Collateral (fund account)
-  reserveToCollateral: Array<{
-    tokenId: number;
-    receivingEntity: string; // Which entity is depositing
-    pairs: Array<{
-      entity: string; // Counterparty in the account
-      amount: bigint;
-    }>;
-  }>;
-
-  // Collateral → Reserve (C2R shortcut - expands to Settlement on-chain)
-  collateralToReserve: Array<{
-    counterparty: string;
-    tokenId: number;
-    amount: bigint;
-    nonce: number; // signed nonce (must be > stored account nonce)
-    sig: string; // counterparty hanko (still bilateral)
-  }>;
-
-  // Settlements - MUST match Solidity Settlement struct exactly
-  settlements: Array<{
-    leftEntity: string;
-    rightEntity: string;
-    diffs: Array<{
-      tokenId: number;
-      leftDiff: bigint;
-      rightDiff: bigint;
-      collateralDiff: bigint;
-      ondeltaDiff: bigint;
-    }>;
-    forgiveDebtsInTokenIds: number[];
-    sig: string; // Hanko signature (required when there are changes)
-    nonce: number; // Settlement nonce
-  }>;
-
-  // Dispute proofs (active in Depository.sol) - unified nonce model
-  disputeStarts: Array<{
-    counterentity: string;
-    nonce: number; // unified nonce (must be > stored account nonce)
-    proposerIsLeft: boolean;
-    proofbodyHash: string;
-    initialProofbody: ProofBodyStruct;
-    watchSeed: string;
-    sig: string;
-    starterInitialArguments: string;
-    starterCounterArguments: string;
-    starterCounterProofCommitment: string;
-  }>;
-  counterDisputes: Array<{
-    counterentity: string;
-    initialNonce: number;
-    initialProofbodyHash: string;
-    counterNonce: number;
-    proposerIsLeft: boolean;
-    counterProofbody: ProofBodyStruct;
-    sig: string;
-  }>;
-  disputeFinalizations: Array<{
-    counterentity: string;
-    initialNonce: number; // nonce when dispute was started
-    finalNonce: number; // signed finalize nonce; unilateral timeout path may keep equal to initialNonce
-    proposerIsLeft: boolean;
-    initialProofbodyHash: string;
-    finalProofbody: ProofBodyStruct;
-    starterArguments: string;
-    otherArguments: string;
-    sig: string;
-    startedByLeft: boolean;
-    cooperative: false;
-    /**
-     * Runtime-only submission gate for timeout-authorized proofs. This is the
-     * exact authenticated L1 deadline and is deliberately not ABI-encoded.
-     */
-    submitNotBeforeTimestamp?: number;
-  }>;
-
-  // HTLC secret reveals (on-chain hashlock unlocks)
-  revealSecrets: Array<{
-    transformer: string;
-    secret: string;
-  }>;
-
-  // Independent Sprites-like public evidence. The outer processBatch Hanko
-  // authenticates the revealing Entity; counterpartyEntity derives the exact
-  // bilateral Account namespace and has no authority outside that namespace.
-  hashLadderRegistrations: Array<{
-    counterpartyEntity: string;
-    targetRole: boolean;
-    fullHash: string;
-    partialRoot: string;
-    witness: {
-      fillRatio: number;
-      fullSecret: string;
-      reveals: [string, string, string, string];
-    };
-  }>;
-}
-
-/** Batch lifecycle: current accumulates, sentBatch tracks one in-flight submission */
-type JBatchStatus = 'empty' | 'accumulating' | 'sent' | 'failed';
-
-/** In-flight batch snapshot (authoritative until HankoBatchProcessed arrives). */
-export interface SentJBatch {
-  batch: JBatch;
-  batchHash: string;
-  encodedBatch: string;
-  entityNonce: number;
-  firstSubmittedAt: number;
-  lastSubmittedAt: number;
-  submitAttempts: number;
-  feeOverrides?: Extract<import('../../../types/jurisdiction-runtime').JTx, { type: 'batch' }>['data']['feeOverrides'];
-  txHash?: string;
-  lastFailure?: {
-    message: string;
-    failedAt: number;
-    failure: RuntimeFailureSignal;
-  };
-  terminalFailure?: {
-    message: string;
-    failedAt: number;
-    failure?: RuntimeFailureSignal;
-  };
-}
-
-/**
- * JBatch state for an entity
- */
-export interface JBatchState {
-  batch: JBatch;
-  jurisdiction: JurisdictionConfig | null;
-  lastBroadcast: number;
-  broadcastCount: number;
-  failedAttempts: number;
-
-  // Lifecycle tracking
-  status: JBatchStatus;
-  sentBatch?: SentJBatch;
-  /**
-   * Still-valid operations recovered from an invalidated immutable sentBatch.
-   * They are broadcast before the editable draft and never merged into it:
-   * two individually valid 50-op batches may not form one contract-valid batch.
-   */
-  recoveryBatches?: JBatch[];
-  /** A protocol-forced draft must broadcast as soon as the in-flight batch clears. */
-  autoBroadcastDraft?: boolean;
-  entityNonce?: number; // Entity nonce used for this batch (for replay prevention)
-}
-
-export const J_BATCH_CONTRACT_LIMITS = {
-  maxTotalOps: 50,
-  maxSettlements: 32,
-  maxSettlementDiffs: 32,
-  maxSettlementForgivenessIds: 32,
-  maxDisputeStarts: 8,
-  maxCounterDisputes: 8,
-  // One transformer-capable finalization plus 100% gas reserve fits the
-  // EIP-7825 2^24 transaction cap; independent disputes use independent txs.
-  maxDisputeFinalizations: 1,
-  maxReserveToCollateralPairs: 64,
-  maxReserveToCollateralPairsTotal: 256,
-  maxSecretReveals: 32,
-  maxHashLadderRegistrations: 32,
-  maxEncodedBatchBytes: 256 * 1024,
-  maxDisputeProofBodyBytes: 176 * 1024,
-  maxDisputeStarterArgumentsBytes: 64 * 1024,
-  maxDisputeProofTokens: 128,
-  maxDisputeTransformers: 32,
-} as const;
-
-const requireBatchRoom = (batch: JBatch, operation: string, addedOps = 1): void => {
-  const nextSize = batchOpCount(batch) + Math.max(0, addedOps);
-  if (nextSize > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
-    throw new Error(
-      `J_BATCH_LIMIT_EXCEEDED: ${operation} would exceed total ops ` +
-        `${nextSize}/${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`,
-    );
-  }
-};
-
-const requireArrayRoom = (name: string, currentLength: number, added: number, max: number): void => {
-  const nextLength = currentLength + Math.max(0, added);
-  if (nextLength > max) {
-    throw new Error(`J_BATCH_LIMIT_EXCEEDED: ${name} ${nextLength}/${max}`);
-  }
-};
-
-export function getJBatchContractLimitIssue(batch: JBatch): string | null {
-  const totalOps = batchOpCount(batch);
-  if (totalOps > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
-    return `total ops ${totalOps}/${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`;
-  }
-  if (batch.settlements.length > J_BATCH_CONTRACT_LIMITS.maxSettlements) {
-    return `settlements ${batch.settlements.length}/${J_BATCH_CONTRACT_LIMITS.maxSettlements}`;
-  }
-  if (batch.disputeStarts.length > J_BATCH_CONTRACT_LIMITS.maxDisputeStarts) {
-    return `disputeStarts ${batch.disputeStarts.length}/${J_BATCH_CONTRACT_LIMITS.maxDisputeStarts}`;
-  }
-  if (batch.counterDisputes.length > J_BATCH_CONTRACT_LIMITS.maxCounterDisputes) {
-    return `counterDisputes ${batch.counterDisputes.length}/${J_BATCH_CONTRACT_LIMITS.maxCounterDisputes}`;
-  }
-  if (batch.disputeFinalizations.length > J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations) {
-    return `disputeFinalizations ${batch.disputeFinalizations.length}/${J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations}`;
-  }
-  if (batch.revealSecrets.length > J_BATCH_CONTRACT_LIMITS.maxSecretReveals) {
-    return `revealSecrets ${batch.revealSecrets.length}/${J_BATCH_CONTRACT_LIMITS.maxSecretReveals}`;
-  }
-  if (batch.hashLadderRegistrations.length > J_BATCH_CONTRACT_LIMITS.maxHashLadderRegistrations) {
-    return `hashLadderRegistrations ${batch.hashLadderRegistrations.length}/${J_BATCH_CONTRACT_LIMITS.maxHashLadderRegistrations}`;
-  }
-  for (const [index, op] of batch.reserveToCollateral.entries()) {
-    if (op.tokenId <= 0 || !Number.isSafeInteger(op.tokenId)) {
-      return `reserveToCollateral[${index}].tokenId must be a positive safe integer`;
-    }
-    if (op.pairs.length === 0) {
-      return `reserveToCollateral[${index}].pairs must not be empty`;
-    }
-    if (op.pairs.some(pair => pair.amount <= 0n)) {
-      return `reserveToCollateral[${index}].pairs amounts must be positive`;
-    }
-    if (op.pairs.length > J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairs) {
-      return `reserveToCollateral[${index}].pairs ${op.pairs.length}/${J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairs}`;
-    }
-  }
-  const reserveToCollateralPairCount = batch.reserveToCollateral.reduce(
-    (count, operation) => count + operation.pairs.length,
-    0,
-  );
-  if (reserveToCollateralPairCount > J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairsTotal) {
-    return (
-      `reserveToCollateral.pairs total ${reserveToCollateralPairCount}/` +
-      `${J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairsTotal}`
-    );
-  }
-  for (const [index, settlement] of batch.settlements.entries()) {
-    if (settlement.diffs.length > J_BATCH_CONTRACT_LIMITS.maxSettlementDiffs) {
-      return `settlements[${index}].diffs ${settlement.diffs.length}/${J_BATCH_CONTRACT_LIMITS.maxSettlementDiffs}`;
-    }
-    if (settlement.forgiveDebtsInTokenIds.length > J_BATCH_CONTRACT_LIMITS.maxSettlementForgivenessIds) {
-      return (
-        `settlements[${index}].forgiveDebtsInTokenIds ` +
-        `${settlement.forgiveDebtsInTokenIds.length}/${J_BATCH_CONTRACT_LIMITS.maxSettlementForgivenessIds}`
-      );
-    }
-  }
-  return null;
-}
-
-export function assertJBatchWithinContractLimits(batch: JBatch, context = 'jBatch'): void {
-  const issue = getJBatchContractLimitIssue(batch);
-  if (issue) {
-    throw new Error(`J_BATCH_LIMIT_EXCEEDED: ${context}: ${issue}`);
-  }
-}
+const PROOF_BODY_PARAM = ethers.ParamType.from(PROOF_BODY_ABI);
 
 /**
  * Create empty batch (2019src.txt line 3368)
@@ -332,235 +84,6 @@ export function createEmptyBatch(): JBatch {
  * bytes from those submitted on-chain.
  */
 export const cloneJBatch = (batch: JBatch): JBatch => structuredClone(batch);
-
-// The linked bounds contract exposes the exact Types.Batch accepted by
-// Depository.processBatch(bytes). Generated artifacts are the sole ABI owner.
-const getDepositoryBatchParam = (): ethers.ParamType => {
-  const method = DepositoryBounds__factory.createInterface().getFunction('assertBatch');
-  const batch = method?.inputs[0];
-  if (!batch || batch.baseType !== 'tuple') throw new Error('J_BATCH_ABI_SCHEMA_MISSING');
-  return batch;
-};
-const DEPOSITORY_BATCH_PARAM = getDepositoryBatchParam();
-
-const PROOF_BODY_PARAM = ethers.ParamType.from(PROOF_BODY_ABI);
-
-const encodedHexBytes = (value: string, label: string): number => {
-  if (!/^0x(?:[0-9a-fA-F]{2})*$/.test(value)) {
-    throw new Error(`J_DISPUTE_HEX_INVALID:${label}`);
-  }
-  return (value.length - 2) / 2;
-};
-
-export function assertDisputeProofBodyWithinContractLimits(
-  proofbody: ProofBodyStruct,
-  context: string,
-  /** ABI encoding of `proofbody` when the caller already produced it (avoids a second encode). */
-  encodedProofBody?: string,
-): void {
-  if (proofbody.tokenIds.length !== proofbody.offdeltas.length) {
-    throw new Error(`J_DISPUTE_PROOFBODY_LENGTH_MISMATCH:${context}`);
-  }
-  if (proofbody.tokenIds.length > J_BATCH_CONTRACT_LIMITS.maxDisputeProofTokens) {
-    throw new Error(`J_DISPUTE_PROOFBODY_TOKEN_LIMIT:${context}:${proofbody.tokenIds.length}`);
-  }
-  if (proofbody.transformers.length > J_BATCH_CONTRACT_LIMITS.maxDisputeTransformers) {
-    throw new Error(`J_DISPUTE_PROOFBODY_TRANSFORMER_LIMIT:${context}:${proofbody.transformers.length}`);
-  }
-  for (let index = 1; index < proofbody.tokenIds.length; index += 1) {
-    if (BigInt(proofbody.tokenIds[index - 1]!) >= BigInt(proofbody.tokenIds[index]!)) {
-      throw new Error(`J_DISPUTE_PROOFBODY_TOKEN_ORDER_INVALID:${context}:${index}`);
-    }
-  }
-  const encoded = encodedProofBody ?? ethers.AbiCoder.defaultAbiCoder().encode([PROOF_BODY_PARAM], [proofbody]);
-  const size = encodedHexBytes(encoded, `${context}.proofbody`);
-  if (size > J_BATCH_CONTRACT_LIMITS.maxDisputeProofBodyBytes) {
-    throw new Error(
-      `J_DISPUTE_PROOFBODY_BYTES_EXCEEDED:${context}:${size}/${J_BATCH_CONTRACT_LIMITS.maxDisputeProofBodyBytes}`,
-    );
-  }
-}
-
-export function assertDisputeArgumentsWithinContractLimits(argumentsHex: readonly string[], context: string): void {
-  const sizes = argumentsHex.map((value, index) => encodedHexBytes(value, `${context}[${index}]`));
-  const total = sizes.reduce((sum, size) => sum + size, 0);
-  if (total > J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes) {
-    throw new Error(
-      `J_DISPUTE_ARGUMENT_BYTES_EXCEEDED:${context}:${total}/${J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes}`,
-    );
-  }
-}
-
-export type OptionalDisputeArgumentWarning = Readonly<{
-  code:
-    | 'DISPUTE_OPTIONAL_ARGUMENT_MALFORMED'
-    | 'DISPUTE_OPTIONAL_ARGUMENT_OVERSIZED'
-    | 'DISPUTE_OPTIONAL_ARGUMENT_AGGREGATE_OVERSIZED';
-  context: string;
-  originalBytes: number;
-  limitBytes: number;
-}>;
-
-export type SanitizedOptionalDisputeArgument = Readonly<{
-  value: string;
-  warnings: readonly OptionalDisputeArgumentWarning[];
-}>;
-
-const estimatedArgumentBytes = (value: unknown): number =>
-  typeof value === 'string' && value.startsWith('0x') ? Math.max(0, Math.floor((value.length - 2) / 2)) : 0;
-
-/**
- * DESIGN INVARIANT — dynamic transformer arguments are evidence, never dispute
- * authority. They can change until submission and are deliberately not bound
- * by the owner's Hanko. A malformed/over-budget outer wrapper therefore
- * becomes empty evidence; the signed ProofBody transformer alone decides
- * whether empty evidence is valid. Do not replace this with an outer revert or
- * zero-delta substitution: transformer code/revert/OOG/output remain strict and a
- * failure keeps the dispute active. Regression: dispute-arguments.test.ts.
- */
-export function sanitizeOptionalDisputeArgument(value: unknown, context: string): SanitizedOptionalDisputeArgument {
-  if (value === '0x') return { value, warnings: [] };
-  let size: number;
-  try {
-    if (typeof value !== 'string') throw new Error('not hex');
-    size = encodedHexBytes(value, context);
-  } catch {
-    return {
-      value: '0x',
-      warnings: [
-        {
-          code: 'DISPUTE_OPTIONAL_ARGUMENT_MALFORMED',
-          context,
-          originalBytes: estimatedArgumentBytes(value),
-          limitBytes: J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes,
-        },
-      ],
-    };
-  }
-  if (size > J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes) {
-    return {
-      value: '0x',
-      warnings: [
-        {
-          code: 'DISPUTE_OPTIONAL_ARGUMENT_OVERSIZED',
-          context,
-          originalBytes: size,
-          limitBytes: J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes,
-        },
-      ],
-    };
-  }
-  try {
-    ethers.AbiCoder.defaultAbiCoder().decode(['bytes[]'], value);
-  } catch {
-    return {
-      value: '0x',
-      warnings: [
-        {
-          code: 'DISPUTE_OPTIONAL_ARGUMENT_MALFORMED',
-          context,
-          originalBytes: size,
-          limitBytes: J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes,
-        },
-      ],
-    };
-  }
-  return { value, warnings: [] };
-}
-
-export function sanitizeOptionalDisputeStarterArgumentPair(
-  initialValue: unknown,
-  counterValue: unknown,
-  context: string,
-): Readonly<{
-  initial: string;
-  counter: string;
-  warnings: readonly OptionalDisputeArgumentWarning[];
-}> {
-  const initial = sanitizeOptionalDisputeArgument(initialValue, `${context}.initial`);
-  const counter = sanitizeOptionalDisputeArgument(counterValue, `${context}.counter`);
-  const warnings = [...initial.warnings, ...counter.warnings];
-  const total =
-    encodedHexBytes(initial.value, `${context}.initial`) + encodedHexBytes(counter.value, `${context}.counter`);
-  if (total <= J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes) {
-    return { initial: initial.value, counter: counter.value, warnings };
-  }
-  warnings.push({
-    code: 'DISPUTE_OPTIONAL_ARGUMENT_AGGREGATE_OVERSIZED',
-    context: `${context}.counter`,
-    originalBytes: total,
-    limitBytes: J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes,
-  });
-  return { initial: initial.value, counter: '0x', warnings };
-}
-
-export function encodeJBatch(batch: JBatch): string {
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  const contractBatch = {
-    ...batch,
-    settlements: batch.settlements.map(settlement => ({
-      ...settlement,
-      diffs: settlement.diffs.map(encodeCooperativeUpdateDiff),
-    })),
-  };
-  const encoded = abiCoder.encode([DEPOSITORY_BATCH_PARAM], [contractBatch]);
-  const size = encodedHexBytes(encoded, 'encodedBatch');
-  if (size > J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes) {
-    throw new Error(`J_BATCH_ENCODED_BYTES_EXCEEDED:${size}/${J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes}`);
-  }
-  return encoded;
-}
-
-/**
- * Decode by the ABI schema instead of Result.toObject().
- *
- * ethers refuses to objectify an unnamed tuple. Solidity permits those tuples
- * inside named structures, so a valid processBatch containing a dispute proof
- * used to fail only after it reached the watcher. The ParamType tree is the
- * authority: every consensus-facing object key comes from the pinned ABI, while
- * positional Result values remain an untrusted transport representation.
- */
-export const materializeAbiValue = (param: ethers.ParamType, value: unknown, context: string): unknown => {
-  if (param.baseType === 'array') {
-    const itemParam = param.arrayChildren;
-    if (!itemParam || !Array.isArray(value)) {
-      throw new Error(`J_BATCH_ABI_ARRAY_INVALID:${context}`);
-    }
-    return Array.from(value, (item, index) => materializeAbiValue(itemParam, item, `${context}[${index}]`));
-  }
-  if (param.baseType !== 'tuple') return value;
-  if (!param.components || !Array.isArray(value)) {
-    throw new Error(`J_BATCH_ABI_TUPLE_INVALID:${context}`);
-  }
-  return Object.fromEntries(
-    param.components.map((component, index) => {
-      if (!component.name) throw new Error(`J_BATCH_ABI_COMPONENT_UNNAMED:${context}[${index}]`);
-      return [component.name, materializeAbiValue(component, value[index], `${context}.${component.name}`)];
-    }),
-  );
-};
-
-const decodeSettlementAmounts = (value: unknown): void => {
-  const batch = requireBoundaryRecord(value, 'J_BATCH_ABI_RESULT');
-  for (const rawSettlement of requireArray(batch['settlements'], 'J_BATCH_ABI_SETTLEMENTS')) {
-    const settlement = requireBoundaryRecord(rawSettlement, 'J_BATCH_ABI_SETTLEMENT');
-    for (const rawDiff of requireArray(settlement['diffs'], 'J_BATCH_ABI_DIFFS')) {
-      const diff = requireBoundaryRecord(rawDiff, 'J_BATCH_ABI_DIFF');
-      for (const field of ['leftDiff', 'rightDiff', 'collateralDiff', 'ondeltaDiff']) {
-        diff[field] = decodeSignedAmount(diff[field]);
-      }
-    }
-  }
-};
-
-export function decodeJBatch(encodedBatch: string): JBatch {
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  const decoded = abiCoder.decode([DEPOSITORY_BATCH_PARAM], encodedBatch);
-  const batch = materializeAbiValue(DEPOSITORY_BATCH_PARAM, decoded[0], 'batch');
-  decodeSettlementAmounts(batch);
-  validateJBatch(batch, 'J_BATCH_ABI_RESULT');
-  return batch;
-}
 
 export function summarizeBatch(batch: JBatch): Record<string, unknown> {
   const sample = <T>(arr: T[]) => (arr.length > 0 ? arr[0] : null);
@@ -713,15 +236,6 @@ export function getDraftBatchReserveDelta(entityId: string, batch: JBatch | null
 export { getOpenOutgoingDebtTotals, simulateDraftBatchReserveAvailability } from './reserve-simulation';
 export type { DraftBatchReserveIssue } from './reserve-simulation';
 
-export function computeBatchHankoHash(
-  chainId: bigint,
-  depositoryAddress: string,
-  encodedBatch: string,
-  nonce: bigint,
-): string {
-  return hashDepositoryBatchHankoPayload({ chainId, depositoryAddress }, encodedBatch, nonce);
-}
-
 /**
  * Initialize jBatch state for entity
  */
@@ -770,23 +284,6 @@ export function isBatchEmpty(batch: JBatch): boolean {
     batch.reserveToExternalToken.length === 0 &&
     batch.revealSecrets.length === 0 &&
     batch.hashLadderRegistrations.length === 0
-  );
-}
-
-/** Count total operations in a batch */
-export function batchOpCount(batch: JBatch): number {
-  return (
-    batch.reserveToReserve.length +
-    batch.reserveToCollateral.length +
-    batch.collateralToReserve.length +
-    batch.settlements.length +
-    batch.disputeStarts.length +
-    batch.counterDisputes.length +
-    batch.disputeFinalizations.length +
-    batch.externalTokenToReserve.length +
-    batch.reserveToExternalToken.length +
-    batch.revealSecrets.length +
-    batch.hashLadderRegistrations.length
   );
 }
 
@@ -927,8 +424,6 @@ function detectPureC2R(
 
   return { isPureC2R: false };
 }
-
-type SettlementBatchOp = JBatch['settlements'][number];
 
 const sameHexBytes = (left: string, right: string): boolean => left.toLowerCase() === right.toLowerCase();
 
@@ -1258,8 +753,6 @@ export function batchAddHashLadderRegistration(
     targetRole: registration.targetRole,
   });
 }
-
-type HashLadderRegistration = JBatch['hashLadderRegistrations'][number];
 
 const hashLadderRegistrationKey = (
   registration: Pick<HashLadderRegistration, 'counterpartyEntity' | 'fullHash' | 'partialRoot'>,
