@@ -5,23 +5,35 @@ Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
 
-Current checkpoint, 2026-10-13 23:20 UTC: PR #76 passed 7/7 required jobs and
-merged as 96a65a1f5. A live check found Sepolia API 502: H1 had stopped at
-08:42 UTC after three provider `block not found with number` errors. The same
-missing headers are now available with a continuous parent chain. A private
-cold H1 copy was retained; one restart restored the existing WAL and health,
-without resetting state or sending new funds. Tower remained online.
+Current checkpoint, 2026-10-13 23:56 UTC: public Sepolia now runs clean
+4c4413992. PR #77 passed all seven required jobs (unit job 15m26s, E2E job
+22m48s) and merged as 1fcd38b37. The 37-second promotion preserved the WAL,
+contracts and provider configuration. H1 and tower are healthy; P6 remains
+finalized with collateral zero at block 11909497. All 11 served UI files match
+the built manifest. The existing wallet reopened and reloaded in 15.869 seconds:
+75.00 test USDT, zero JavaScript errors, no repeated funding or payments.
 
-First correction: the single transient-RPC predicate accepts that exact
-header-availability response from both canonical header readers. Invalid
-headers, unrelated RPC methods and finalized reorgs still fail. The real Anvil
-counterexample preserves cursor, mempool and reserve before a successful retry.
-Next single step: commit the correction, validate its clean SHA, and bring its
-PR through seven green jobs before replacing the recovered e4 deployment.
-Method: a successful payment/reload does not establish sustained RPC liveness;
-retain the actual provider error and test it through the full reader/controller.
-Old inactive checkouts are sparse and recoverable; their Git objects and
-untracked files remain. Financial stores and the current rollback are untouched.
+The incident was a provider block-not-found response incorrectly classified as
+fatal; it stopped H1 at 08:42 UTC. A private cold copy and one restart recovered
+the old release before this fix. The single retry predicate now covers both
+canonical header readers; malformed headers and finalized reorgs remain fatal.
+Clean-source verification: 50 adapter tests / 247 assertions, the real Anvil
+backlog test / 39 assertions (24.12s), full check (38 source gates), React build.
+The first post-deploy helper targeted a connection row instead of the token
+balance; its failure is retained and the existing token selector verifies USDT.
+Evidence: docs/evidence/sepolia-header-20261013/release-4c4413992.json.
+
+Next single step: measure cold wallet recovery on this deployed source against
+the 60-second mainnet gate. The old profile needed more than a 30-second first
+observation after a long offline interval; success under a 170-second budget
+and today's warm 15.869-second reopen/reload do not prove that cold-recovery gate.
+Method review: reproduce the actual provider failure in the existing full-window
+reader before broad checks; never repeat accepted funding/payment actions. Most
+verification wall time was CI (22m48s E2E, parallel 15m26s unit), not local Anvil
+(24.12s). No new production abstraction or protocol choice. Old inactive clean
+checkouts are sparse and recoverable; Git objects, untracked files, current code,
+rollback and financial stores remain. Archived system journals freed 67.1 MiB.
+Mainnet remains unapproved; Rust, lending and Solidity are unchanged.
 
 Previous release checkpoint, 2026-10-12 22:20 UTC: public Sepolia is running clean
 e4db444ee (PR #75 green 7/7, merged as 5f764adfa). All 11 served UI files match
