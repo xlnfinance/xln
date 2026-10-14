@@ -9,6 +9,10 @@ import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { recordRuntimeTraceForTesting } from '../observability/runtime-trace';
 import { createStructuredLogger } from '../../support/logger';
 import { flushCommittedNetworkOutputs } from './dispatch';
+import { ensureRuntimeConfig } from '../loop/loop-environment';
+import { enqueueRuntimeContinuation, enqueueRuntimeInputs } from '../loop/loop-envelope';
+import { collectReplicaMempoolWakeInputs, generateHookPings } from '../loop/loop-work';
+import { notifyRuntimeFrameCommitted } from './notifications';
 import type { createRuntimeLoopApi } from '../loop/loop.ts';
 import { materializePendingJurisdictionImportResults } from '../j-submit/jurisdiction-import';
 import { requireRuntimeMempool } from '../mempool/input-queue';
@@ -37,6 +41,8 @@ import { createRuntimeProcessProfile, type RuntimeProcessProfile } from './proce
 import { restoreUndurableRuntimeInput } from './intake/recovery';
 import {
   applyRejectedIngressPolicy,
+  discardRejectedEntityInput,
+  RuntimeInputDiscardedError,
   type RejectedEntityIngressEvidence,
 } from './intake/discard';
 import { startRuntimeFrame, type RuntimeFrameStart } from './lifecycle/start';
@@ -52,46 +58,12 @@ import { getLiveJAdapterEntries } from '../j-submit/live-jadapters';
 
 const runtimeLog = createStructuredLogger('runtime');
 
-type RuntimeLoopProcessDeps = Pick<
-  ReturnType<typeof createRuntimeLoopApi>,
-  | 'ensureRuntimeConfig'
-  | 'enqueueRuntimeInputs'
-  | 'enqueueRuntimeContinuation'
-  | 'collectReplicaMempoolWakeInputs'
-  | 'generateHookPings'
-  | 'hasRuntimeWork'
-  | 'isRuntimeFrameReady'
-  | 'prioritizeJEventFrame'
-  | 'applyEntityInputFrameCap'
-  | 'applyEntityTxFrameCap'
-  | 'discardRejectedEntityInput'
-  | 'RuntimeInputDiscardedError'
-  | 'getRuntimeWorkReason'
->;
-
-type RuntimeRecoveryProcessDeps = Pick<
-  ReturnType<typeof createRuntimeRecoveryApi>,
-  | 'applyDeterministicRuntimeOutputPlan'
-  | 'reconcileCommittedRuntimeInfraEffects'
->;
-
-type RuntimeStorageProcessDeps = Pick<
-  ReturnType<typeof createRuntimeStorageApi>,
-  'saveEnvToDB' | 'RuntimeFrameStorageError'
->;
-
 export type RuntimeProcessDeps = {
-  loop: RuntimeLoopProcessDeps;
-  recovery: RuntimeRecoveryProcessDeps;
-  storage: RuntimeStorageProcessDeps;
-  attachEventEmitters(env: RuntimeReplica): void;
+  loop: Pick<ReturnType<typeof createRuntimeLoopApi>, 'hasRuntimeWork' | 'isRuntimeFrameReady' | 'getRuntimeWorkReason'>;
+  recovery: Pick<ReturnType<typeof createRuntimeRecoveryApi>, 'reconcileCommittedRuntimeInfraEffects'>;
+  storage: Pick<ReturnType<typeof createRuntimeStorageApi>, 'saveEnvToDB' | 'RuntimeFrameStorageError'>;
   applyRuntimeInput: RuntimeInputReducer;
-  setApplyAllowed(env: RuntimeReplica, allowed: boolean): void;
-  getRuntimeOutputRoutingDeps(): ReturnType<
-    ReturnType<typeof createRuntimeLoopApi>['getRuntimeOutputRoutingDeps']
-  >;
-  notifyEnvChange(env: RuntimeReplica): void;
-  notifyRuntimeFrameCommitted(env: RuntimeReplica, input: RuntimeInput): void;
+  getRuntimeOutputRoutingDeps(): ReturnType<ReturnType<typeof createRuntimeLoopApi>['getRuntimeOutputRoutingDeps']>;
 };
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
@@ -104,20 +76,19 @@ const collectRuntimeIngress = async (
   profile: RuntimeProcessProfile,
   deps: RuntimeProcessDeps,
 ): Promise<RuntimeIngressDecision> => {
-  const { loop } = deps;
   const ingressTimestamp = env.scenarioMode ? (env.state.timestamp ?? 0) : getWallClockMs();
   if (env.pendingOutputs?.length) {
-    loop.enqueueRuntimeContinuation(env, env.pendingOutputs, undefined, undefined, ingressTimestamp);
+    enqueueRuntimeContinuation(env, env.pendingOutputs, undefined, undefined, ingressTimestamp);
     env.pendingOutputs = [];
   }
   if (env.networkInbox?.length) {
-    loop.enqueueRuntimeContinuation(env, env.networkInbox, undefined, undefined, ingressTimestamp);
+    enqueueRuntimeContinuation(env, env.networkInbox, undefined, undefined, ingressTimestamp);
     env.networkInbox = [];
   }
   profile.mark('ingressQueues');
 
   await materializePendingJurisdictionImportResults(env, runtimeTx => {
-    loop.enqueueRuntimeContinuation(
+    enqueueRuntimeContinuation(
       env,
       undefined,
       [runtimeTx],
@@ -126,12 +97,11 @@ const collectRuntimeIngress = async (
     );
   });
   profile.mark('jurisdictionImports');
-
   profile.mark('enqueue');
 
-  if (!loop.hasRuntimeWork(env)) return { ready: false, outcome: 'no-work' };
+  if (!deps.loop.hasRuntimeWork(env)) return { ready: false, outcome: 'no-work' };
   const gateTimestamp = env.scenarioMode ? (env.state.timestamp ?? 0) : getWallClockMs();
-  if (!loop.isRuntimeFrameReady(env, gateTimestamp)) {
+  if (!deps.loop.isRuntimeFrameReady(env, gateTimestamp)) {
     return { ready: false, outcome: 'not-ready' };
   }
   profile.mark('frameReady');
@@ -152,9 +122,8 @@ type RuntimeFrameCandidate = {
 const buildRuntimeFrameInput = (
   env: RuntimeReplica,
   mempool: RuntimeInput,
-  deps: RuntimeProcessDeps,
 ): RuntimeInput => {
-  const replicaWakes = deps.loop.collectReplicaMempoolWakeInputs(env);
+  const replicaWakes = collectReplicaMempoolWakeInputs(env);
   const automaticInputs = [
     ...replicaWakes.entityInputs,
     ...replicaWakes.accountInputs,
@@ -238,7 +207,6 @@ const openRuntimeFrameCandidate = (
   liveState: RuntimeLifecycleState,
   frame: FrameExecutionState,
   profile: RuntimeProcessProfile,
-  deps: RuntimeProcessDeps,
 ): RuntimeFrameCandidate => {
   const quietRuntimeLogs = liveEnv.quietRuntimeLogs === true;
   const frameTimestamp = resolveRuntimeFrameTimestamp(
@@ -247,10 +215,7 @@ const openRuntimeFrameCandidate = (
   );
   // Due scheduler work belongs to the frame being detached, not to arrivals
   // that may race in while this single writer awaits storage or signatures.
-  // Compute against the candidate timestamp without publishing that timestamp:
-  // public readers must continue to observe the committed frame until WAL
-  // accepts this candidate.
-  deps.loop.generateHookPings(liveEnv, frameTimestamp, frameTimestamp);
+  generateHookPings(liveEnv, frameTimestamp, frameTimestamp);
   const mempoolQueuedAt = requireRuntimeMempool(liveEnv).queuedAt;
   const transaction = createRuntimeFrameTransaction(liveEnv);
   frame.transaction = transaction;
@@ -262,7 +227,7 @@ const openRuntimeFrameCandidate = (
   for (const { adapter } of getLiveJAdapterEntries(env)) {
     adapter.setQuietLogs?.(quietRuntimeLogs);
   }
-  const runtimeInput = buildRuntimeFrameInput(env, mempool, deps);
+  const runtimeInput = buildRuntimeFrameInput(env, mempool);
   recordRuntimeFrameIngress(env, runtimeInput, mempoolQueuedAt);
   liveState.inFlightEntityInputs = runtimeInput.entityInputs.length;
   return {
@@ -331,7 +296,6 @@ const publishCommittedRuntimeFrame = (
   appliedInput: RuntimeInput | undefined,
   quietLogs: boolean,
   profile: RuntimeProcessProfile,
-  deps: RuntimeProcessDeps,
 ): RuntimeFrameCommitResult => {
   if (!frame.transaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_COMMIT');
   frame.commitDisposition = 'committed';
@@ -355,7 +319,7 @@ const publishCommittedRuntimeFrame = (
         height: env.state.height,
       });
     }
-    deps.notifyRuntimeFrameCommitted(env, appliedInput);
+    notifyRuntimeFrameCommitted(env, appliedInput);
   }
   return { env, state, staleWriterStopped: false };
 };
@@ -376,10 +340,6 @@ const commitRuntimeFrame = async (
 ): Promise<RuntimeFrameCommitResult> => {
   if (!frame.transaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_COMMIT');
   if (!options.frameAdvanced) {
-    // Candidate time is needed while evaluating due work, but timestamp is
-    // canonical Runtime State. If no frame advanced there is no WAL record,
-    // so publishing the candidate timestamp would create state that vanishes
-    // after restart. Restore the committed clock before releasing readers.
     candidateEnv.state.timestamp = options.frameTimestampBeforeTick;
     for (const { adapter } of getLiveJAdapterEntries(candidateEnv)) {
       adapter.setBlockTimestamp?.(options.frameTimestampBeforeTick);
@@ -411,7 +371,6 @@ const commitRuntimeFrame = async (
       options.appliedInput,
       options.quietLogs,
       profile,
-      deps,
     );
   } catch (error) {
     if (error instanceof deps.storage.RuntimeFrameStorageError) {
@@ -445,15 +404,7 @@ const applyRuntimeFrameCandidate = async (
     candidate.mempoolQueuedAt,
     frame,
     profile,
-    {
-      prioritizeJEventFrame: deps.loop.prioritizeJEventFrame,
-      applyEntityTxFrameCap: deps.loop.applyEntityTxFrameCap,
-      applyEntityInputFrameCap: deps.loop.applyEntityInputFrameCap,
-    },
   );
-  // Frame caps first split the detached ingress into current and deferred
-  // work. Validate that final current frame, otherwise the reducer's prepared
-  // ingress cache can apply the pre-cap batch while the same tail is requeued.
   candidate.state.runtimeFramePhase = 'candidate.mutate';
   beginRuntimeFrameMutation(candidate, frame, deps);
   candidate.state.runtimeFramePhase = 'apply';
@@ -465,10 +416,7 @@ const applyRuntimeFrameCandidate = async (
     candidate.quietRuntimeLogs,
     frame,
     profile,
-    {
-      applyRuntimeInput: deps.applyRuntimeInput,
-      setApplyAllowed: deps.setApplyAllowed,
-    },
+    { applyRuntimeInput: deps.applyRuntimeInput },
   );
 };
 
@@ -486,10 +434,6 @@ const planAppliedRuntimeOutputs = (
     routing,
     profile,
     quietRuntimeLogs,
-    {
-      applyOutputPlan: deps.recovery.applyDeterministicRuntimeOutputPlan,
-      generateHookPings: deps.loop.generateHookPings,
-    },
   );
   profile.metrics.jOutputs = applied.jOutbox.length;
   return { routing, outputPlan };
@@ -530,7 +474,6 @@ const applyAndCommitRuntimeFrame = async (
     processState,
     frame,
     profile,
-    deps,
   );
   let env = candidate.env;
   let state = candidate.state;
@@ -546,16 +489,13 @@ const applyAndCommitRuntimeFrame = async (
       mempoolQueuedAt: candidate.mempoolQueuedAt,
       frameTimestampBeforeTick: started.frameTimestampBeforeTick,
       discardMalformedRemoteInput: (input, cause) =>
-        deps.loop.discardRejectedEntityInput(liveEnv, input, cause),
-      discardedError: cause => new deps.loop.RuntimeInputDiscardedError(cause),
+        discardRejectedEntityInput(liveEnv, input, cause),
+      discardedError: cause => new RuntimeInputDiscardedError(cause),
     }, error, options);
     env = rollback.env;
     state = rollback.state;
     return rollback.error;
   };
-  // Preflight every accepted input's shape before mutation so a malformed tail
-  // cannot commit a valid prefix. Frame caps then select a prefix that is
-  // revalidated with the per-frame counts the whole ingress may exceed.
   candidate.state.runtimeFramePhase = 'candidate.validate';
   deps.applyRuntimeInput.validate(candidate.env, candidate.runtimeInput, { frameLimits: false });
   candidate.state.runtimeFramePhase = 'candidate.prepare';
@@ -594,11 +534,7 @@ const applyAndCommitRuntimeFrame = async (
     commit.env,
     buildRuntimePostCommitInput(applied, planned, frameAdvanced, started),
     profile,
-    {
-      enqueueRuntimeInputs: deps.loop.enqueueRuntimeContinuation,
-      reconcileRuntimeInfraEffects: deps.recovery.reconcileCommittedRuntimeInfraEffects,
-      notifyEnvChange: deps.notifyEnvChange,
-    },
+    { reconcileRuntimeInfraEffects: deps.recovery.reconcileCommittedRuntimeInfraEffects },
   );
   return {
     env: commit.env,
@@ -624,13 +560,13 @@ const processRuntimeFrameOnce = async (
   inputs: EntityInput[] | undefined,
 ): Promise<RuntimeReplica> => {
   const liveEnv = env;
-  deps.loop.ensureRuntimeConfig(env);
+  ensureRuntimeConfig(env);
   const processState = ensureRuntimeInfrastructure(env);
   processState.runtimeFramePhase = 'writer.wait';
   assertRuntimeWriterAcceptingIngress(processState);
   if (inputs?.length) {
     const ingressTimestamp = env.scenarioMode ? (env.state.timestamp ?? 0) : getWallClockMs();
-    deps.loop.enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp);
+    enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp);
   }
   const releaseProcessLock = await acquireRuntimeFrameWriter(processState);
   processState.runtimeFramePhase = 'frame.start';
@@ -641,10 +577,7 @@ const processRuntimeFrameOnce = async (
     const started = await startRuntimeFrame(
       env,
       profile,
-      {
-        attachEventEmitters: deps.attachEventEmitters,
-        collectIngress: (target, processProfile) => collectRuntimeIngress(target, processProfile, deps),
-      },
+      { collectIngress: (target, processProfile) => collectRuntimeIngress(target, processProfile, deps) },
     );
     if (!started.ready) return env;
     const committed = await applyAndCommitRuntimeFrame(
@@ -658,18 +591,11 @@ const processRuntimeFrameOnce = async (
     env = committed.env;
     if (committed.staleWriterStopped) return env;
     profile.outcome = 'completed';
-    // Owner canon (docs/reject-policy.md): the transition typed and dropped
-    // each sender-caused rejection without reading process env; this is the
-    // loop's single policy read for the frame, and it runs only once the frame
-    // is durable. A halt here therefore never rolls back honest work and never
-    // marks the Runtime mutated-and-unreadable — fail-fast surfaces the peer
-    // or the bug to the caller, production keeps serving.
     applyRejectedIngressPolicy(committed.rejectedIngress);
     return env;
   } catch (error) {
     const failure = await handleRuntimeFrameFailure(error, liveEnv, frame, {
       isStorageError: candidate => candidate instanceof deps.storage.RuntimeFrameStorageError,
-      isDiscardedInputError: candidate => candidate instanceof deps.loop.RuntimeInputDiscardedError,
     });
     env = failure.env;
     if (!failure.inputDropped) throw failure.error;

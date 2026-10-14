@@ -17,6 +17,7 @@ import {
   type RuntimeProcessProfile,
 } from './process-profile';
 import { assertCrossJLocalCohorts } from '../delivery/topology/cross-j-topology';
+import { ENV_APPLY_ALLOWED_KEY, writeRuntimeMetadata } from '../loop/loop-environment';
 import type { EntityInfraContext } from '../../types/entity/infra-context';
 import type { RejectedEntityIngressEvidence } from './intake/discard';
 
@@ -33,7 +34,7 @@ export type RuntimeInputApplyResult = {
 
 export type RuntimeFrameApplyDeps = {
   applyRuntimeInput(env: RuntimeReplica, input: RuntimeInput): Promise<RuntimeInputApplyResult>;
-  setApplyAllowed(env: RuntimeReplica, allowed: boolean): void;
+  setApplyAllowed?(env: RuntimeReplica, allowed: boolean): void;
 };
 
 export type RuntimeFrameApplyOutput = {
@@ -99,8 +100,10 @@ export const applyPreparedRuntimeFrame = async (
         runtimeLog.debug('tick.runtime_txs.processing', { runtimeTxs: input.runtimeTxs.length });
       }
     }
+    const setApplyAllowed =
+      deps.setApplyAllowed ?? ((target: RuntimeReplica, allowed: boolean) => writeRuntimeMetadata(target, ENV_APPLY_ALLOWED_KEY, allowed));
     try {
-      deps.setApplyAllowed(env, true);
+      setApplyAllowed(env, true);
       const reducerStartedAt = profile.enabled ? getPerfMs() : 0;
       const result = await deps.applyRuntimeInput(env, input);
       // A Runtime frame may create/import both siblings together, never leave
@@ -130,7 +133,7 @@ export const applyPreparedRuntimeFrame = async (
       refreshScheduledWakeIndex(env, changedEntityIds);
       profile.mark('fingerprints');
     } finally {
-      deps.setApplyAllowed(env, false);
+      setApplyAllowed(env, false);
     }
   }
   jOutbox = [...(env.infrastructure?.pendingCommittedJOutbox ?? []), ...jOutbox];

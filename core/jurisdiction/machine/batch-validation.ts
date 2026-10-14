@@ -52,6 +52,10 @@ const money: FieldValidator = (value, code) => assertUint256(requireBigInt(value
 const signedMoney: FieldValidator = (value, code) => assertSignedAmount(requireBigInt(value, code), code);
 const string: FieldValidator = (value, code) => requireString(value, code);
 const bool: FieldValidator = (value, code) => requireBoolean(value, code);
+const literalFalse: FieldValidator = (value, code) => {
+  if (requireBoolean(value, code) !== false) throw new Error(`${code}_MUST_BE_FALSE`);
+  return false;
+};
 
 export const validateProofBody = (value: unknown, code: string): unknown => {
   const proof = requireBoundaryRecord(value, code);
@@ -187,7 +191,7 @@ export function validateJBatch(value: unknown, code: string): asserts value is J
       otherArguments: string,
       sig: string,
       startedByLeft: bool,
-      cooperative: bool,
+      cooperative: literalFalse,
     },
     {
       submitNotBeforeTimestamp: integer,

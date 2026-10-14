@@ -33,8 +33,8 @@ const HEX_HASH = /^0x[0-9a-fA-F]{64}$/;
 const isPublic = (jurisdiction: Jurisdiction): boolean =>
   !LOCAL_CHAIN_IDS.has(jurisdiction.chainId) && !/127\.0\.0\.1|localhost|^\//.test(jurisdiction.rpc);
 
-const hasCurrentSepoliaBytecode = (repo: Repo, activePublic: ReadonlySet<string>): boolean => {
-  if (!activePublic.has('ethereum-sepolia')) return false;
+const hasCurrentSepoliaBytecode = (repo: Repo, publicJurisdictions: ReadonlySet<string>): boolean => {
+  if (!publicJurisdictions.has('ethereum-sepolia')) return false;
   const evidence = readJsonAt<ContractsEvidence>(repo, CONTRACTS_EVIDENCE_FILE);
   const binding = lastTouch(repo, CONTRACTS_EVIDENCE_FILE);
   if (!evidence || !binding || changedSince(repo, binding, COVERED)) return false;
@@ -47,8 +47,8 @@ const hasCurrentSepoliaBytecode = (repo: Repo, activePublic: ReadonlySet<string>
   );
 };
 
-const hasCurrentPublicDispute = (repo: Repo, activePublic: ReadonlySet<string>): boolean => {
-  if (!activePublic.has('ethereum-sepolia')) return false;
+const hasCurrentPublicDispute = (repo: Repo, publicJurisdictions: ReadonlySet<string>): boolean => {
+  if (!publicJurisdictions.has('ethereum-sepolia')) return false;
   const watchtower = readJsonAt<WatchtowerEvidence>(repo, WATCHTOWER_EVIDENCE_FILE);
   const source = watchtower?.source ?? lastTouch(repo, WATCHTOWER_EVIDENCE_FILE) ?? '';
   if (!watchtower || !commitKnown(repo, source) || changedSince(repo, source, COVERED)) return false;
@@ -67,9 +67,10 @@ export const measurePublicJ = (repo: Repo): Axis => {
   const publicByStatus = (status: string): string[] =>
     entries.filter(([, item]) => isPublic(item) && item.status === status).map(([id]) => id);
   const activeSet = new Set(publicByStatus('active'));
+  const configuredPublicSet = new Set([...publicByStatus('active'), ...publicByStatus('pending')]);
   const sub = {
-    headBytecodeOnPublicJ: hasCurrentSepoliaBytecode(repo, activeSet) ? 1 : 0,
-    realTimeDisputeOnPublicJ: hasCurrentPublicDispute(repo, activeSet) ? 1 : 0,
+    headBytecodeOnPublicJ: hasCurrentSepoliaBytecode(repo, configuredPublicSet) ? 1 : 0,
+    realTimeDisputeOnPublicJ: hasCurrentPublicDispute(repo, configuredPublicSet) ? 1 : 0,
     mainnet: activeSet.has('ethereum') || activeSet.has('ethereum-mainnet') ? 1 : 0,
   };
   const score = 40 * weightedSum(sub, WEIGHTS);

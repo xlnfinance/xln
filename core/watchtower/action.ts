@@ -370,7 +370,7 @@ type WatchtowerSweepOptions = {
         otherArguments: string;
         sig: string;
         startedByLeft: boolean;
-        cooperative: boolean;
+        cooperative: false;
       },
       lastResortWindowSeconds: number,
       appointmentSequence: number,
