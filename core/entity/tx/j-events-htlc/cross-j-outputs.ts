@@ -6,8 +6,7 @@ import type { EntityTx } from '../../../types/entity-tx';
 import { crossJurisdictionRouteSigner } from '../../../extensions/cross-j/boundary';
 import { buildCrossJurisdictionFillNoticeTx } from '../../../extensions/cross-j/fill-notice';
 import type { CrossJurisdictionFillInstruction } from '../../../extensions/cross-j/orderbook';
-
-const normalizeEntityRef = (value: string): string => String(value || '').trim().toLowerCase();
+import { normalizeEntityRef } from '../../../support/boundary-guards';
 
 export const crossJurisdictionRouteSignerHint = (
   route: CrossJurisdictionSwapRoute,

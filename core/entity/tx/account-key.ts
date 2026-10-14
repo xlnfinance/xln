@@ -1,6 +1,7 @@
 import type { EntityState } from '../types';
+import { normalizeEntityRef } from '../../support/boundary-guards';
 
-export const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+export { normalizeEntityRef };
 
 export const findAccountKey = (state: EntityState, counterpartyId: string): string | null => {
   const target = normalizeEntityRef(counterpartyId);

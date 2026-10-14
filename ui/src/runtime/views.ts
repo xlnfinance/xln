@@ -99,7 +99,10 @@ export type WalletView = {
 		net: number;
 		sendCapacity: number;
 		receiveCapacity: number;
+		feesEarned: number;
+		mmlExposure: number;
 	};
+	paybookFeesEarned: bigint;
 	loading: boolean;
 	error: string | null;
 	refresh: () => void;
@@ -217,6 +220,7 @@ export function useWallet(entityId: string | null): WalletView {
 		if (!debtTotals) throw new Error('WALLET_DEBT_TOTALS_MISSING');
 		const totals = walletTokenTotals({ onchain, reserves, accounts, jurisdiction, debtTotals });
 
+		const paybookFeesEarned = core?.paybook?.feesEarned ?? 0n;
 		const usd = {
 			onchain: 0,
 			reserve: 0,
@@ -228,6 +232,8 @@ export function useWallet(entityId: string | null): WalletView {
 			net: 0,
 			sendCapacity: 0,
 			receiveCapacity: 0,
+			feesEarned: usdOf(1, paybookFeesEarned),
+			mmlExposure: 0,
 		};
 		for (const total of totals) {
 			usd.onchain += usdOf(total.tokenId, total.onchain);
@@ -244,6 +250,14 @@ export function useWallet(entityId: string | null): WalletView {
 				if (account.disputed) continue;
 				usd.sendCapacity += usdOf(token.tokenId, token.derived.outCapacity);
 				usd.receiveCapacity += usdOf(token.tokenId, token.derived.inCapacity);
+				if (!account.isHub && token.signed !== 0n) {
+					const absPos = token.signed > 0n ? token.signed : -token.signed;
+					const unsecuredPart = token.signed > 0n
+						? (token.derived.outPeerCredit < absPos ? token.derived.outPeerCredit : absPos)
+						: (token.derived.inOwnCredit < absPos ? token.derived.inOwnCredit : absPos);
+					const securedPart = absPos - unsecuredPart;
+					usd.mmlExposure += usdOf(token.tokenId, securedPart) + 0.5 * usdOf(token.tokenId, unsecuredPart);
+				}
 			}
 		}
 
@@ -262,6 +276,7 @@ export function useWallet(entityId: string | null): WalletView {
 			reserves,
 			totals,
 			usd,
+			paybookFeesEarned,
 			loading: read.loading,
 			error: read.error,
 			refresh: read.refresh,

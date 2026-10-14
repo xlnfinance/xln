@@ -1,4 +1,5 @@
 {
+  "recordedCommit": "4c0a9bc4ec82f8e91272e92882f7f4864f5cd519",
   "missingInventory": {
     "sourceLog": "p6-stopped-hub-replay-missing-inventory.log",
     "sourceSha256": "3a5af011919480219869dba30cece4e7b91cdd5d6a901d951f7dcdbbe04dbff6",

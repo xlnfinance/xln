@@ -275,14 +275,14 @@ The existing requestCollateral cannot be renamed to lease without implementing t
 | Browser                | Mobile/desktop, light/dark, keyboard/screen reader, console, reduced motion, ETA≠finality                              |
 
 First the smallest failing boundary, then a production-equivalent scenario, then the overall `bun run check`.
-A real React run R10 (`/tmp/xln-react-capacity-1788573224783`) verified Receive:
+A real React run R10 (`docs/evidence/archive-tmp/xln-react-capacity-1788573224783`) verified Receive:
 25 USDC → an explicit permanent grant of 27.5, and Pay→Move: 25.000025 with a fee → one batch
 → return to the available Pay without auto-sending. Startup 17.970 s, browser process 10.956 s,
 0 page/MAC/auth errors and activity-view gap warnings. The run includes a fix
 for the funding quote with different fees on the edges and asynchronous reading of the native transport config.
 The ordinary Swap separately passed through a fresh wallet in 24.100 s with startup:
 199.999992 USDC debited, 0.0799760016 WETH received, permanent limit 0.0879824 WETH,
-zero pending work. Artifact: `/tmp/xln-react-swap-1788573446670/browser.log`.
+zero pending work. Artifact: `docs/evidence/archive-tmp/xln-react-swap-1788573446670/browser.log`.
 The Lending browser scenario and lease execution are not yet proven.
 This document does not claim financial, browser, or release readiness for the feature.
 
@@ -292,8 +292,8 @@ This document does not claim financial, browser, or release readiness for the fe
 Accounts with H1, two local EVM jurisdictions. The name `Tron` for the second network here
 denotes a second Anvil; this run **does not prove native TVM**.
 Test: [e2e-cross-swap.spec.ts](../ui/tests/e2e-cross-swap.spec.ts).
-Artifact: `/tmp/xln-react-cross-swap-1788576931486/browser.log`;
-screenshot: `/tmp/xln-cross-receive-spectrum.png`. Startup 18.820 s, browser 8.319 s,
+Artifact: `docs/evidence/archive-tmp/xln-react-cross-swap-1788576931486/browser.log`;
+screenshot: `docs/evidence/archive-tmp/xln-cross-receive-spectrum.png`. Startup 18.820 s, browser 8.319 s,
 1 pass, 0 page/MAC/auth errors. This is proof of a specific path, not a release gate.
 
 | Check            | Actual result                                                                                                                                                                |
@@ -346,7 +346,7 @@ behavior, policy, and automatic actions have not been changed.
 
 React Cross R12 verified these conditions before the manual Swap and repeated the exact economics of R10:
 1 pass, startup 18.419 s, browser 13.178 s, 0 page/MAC/auth errors.
-Artifact: `/tmp/xln-react-cross-swap-1788577815409/browser.log`.
+Artifact: `docs/evidence/archive-tmp/xln-react-cross-swap-1788577815409/browser.log`.
 The exact pre-Swap strings are saved in `preSwapDisclosure`, including
 `Gross receive: 10198.98 USDT before fees.` and
 `H1 collateral tariff: 0.1 USDT base + 0 USDT gas + 1 bps of the collateral requested.`
@@ -354,7 +354,7 @@ The UI policy version 1 matched the signed `request_collateral` in Account frame
 Its root: `0x3f8ca2e92ca4b041070da3922c8f250d7857d587df4dc4a3a83d7c2a04399391`.
 
 Mobile 390×844: horizontal overflow 0 px; screenshots
-`/tmp/xln-cross-receive-fees-mobile.png` and `/tmp/xln-cross-receive-fees-desktop.png`
+`docs/evidence/archive-tmp/xln-cross-receive-fees-mobile.png` and `docs/evidence/archive-tmp/xln-cross-receive-fees-desktop.png`
 were taken after the routine disappearance of the toast. After execution, the link genuinely opened
 the receiving Account, the Collateral tab in Manage, and USDT. The balances, debt, permanent credit,
 and the single cross-swap did not change upon navigation; preserving the draft on return
@@ -376,14 +376,14 @@ A subsequent regression on the same candidate runtime:
 - Receive/Pay R13: the explicit credit choice was updated, then a separate `Extend credit limit`.
   The previous checks are preserved: 27.5 USDC limit preview, Move 25.000025, one batch,
   return to the pre-filled Pay without auto-sending. Startup 18.890 s + browser 10.599 s,
-  1 pass. Artifact: `/tmp/xln-react-capacity-1788578008372/browser.log`.
+  1 pass. Artifact: `docs/evidence/archive-tmp/xln-react-capacity-1788578008372/browser.log`.
 - Same-J + Cross R14: one bootstrap 18.761 s, two fresh wallets/contexts in one
   sequential browser run 19.338 s, 2 pass. Same-J debited 199.999992 USDC,
   received 0.0799760016 WETH; permanent limit 0.0879824 WETH. Cross repeated the exact
-  gross/net/signed-fee checks. Artifact: `/tmp/xln-react-cross-swap-1788578133651/browser.log`.
+  gross/net/signed-fee checks. Artifact: `docs/evidence/archive-tmp/xln-react-cross-swap-1788578133651/browser.log`.
 - Root removed only Swap from the existing mobile sticky selector. R14 checks the
   geometry: disclosure bottom 735.5625 px, Swap top 747.5625 px — a 12 px gap,
-  horizontal overflow 0. The fresh `/tmp/xln-cross-receive-fees-mobile.png`
+  horizontal overflow 0. The fresh `docs/evidence/archive-tmp/xln-cross-receive-fees-mobile.png`
   visually confirms the visible text and link. The Pay/Move/Spectrum sticky behavior
   was not changed by this fix. In both runs, 0 page/MAC/auth errors.
 
@@ -398,14 +398,14 @@ The first real React Lending R1 from 2026-09-05 stopped before closing:
 a fresh wallet received 200 USDC via the faucet; clicking `Offer to the pool` for 200 USDC,
 1 day, 100 bps triggered a runtime fail-stop `ACCOUNT_AUTHORITY_ENTITY_STAGE_APPLY_DISCARD_FAILED`.
 The hub pool remained empty. Startup 19.013 s, browser 22.158 s, exit 1; the stand was released.
-Artifact: `/tmp/xln-react-lending-1788578675867/browser.log`; the full browser trace —
-`/tmp/xln-react-lending-1788578675867/artifacts/e2e-lending-lending-close--e96ce-e-a-manual-committed-payout/trace.zip`.
-Extracted console: `/tmp/xln-lending-r1-console.json`. The existing logging
+Artifact: `docs/evidence/archive-tmp/xln-react-lending-1788578675867/browser.log`; the full browser trace —
+`docs/evidence/archive-tmp/xln-react-lending-1788578675867/artifacts/e2e-lending-lending-close--e96ce-e-a-manual-committed-payout/trace.zip`.
+Extracted console: `docs/evidence/archive-tmp/xln-lending-r1-console.json`. The existing logging
 has no nested `AggregateError.errors[]`, so the original exception is not
 established by this artifact. The runtime fix belongs to a separate TS owner; the UI does not bypass the failure.
 
 The TS owner then reproduced the original exception on a real worker:
-`ACCOUNT_TX_KIND_OUT_OF_PROFILE:lending_fund`; log `/tmp/xln-lending-worker-boundary.log`.
+`ACCOUNT_TX_KIND_OUT_OF_PROFILE:lending_fund`; log `docs/evidence/archive-tmp/xln-lending-worker-boundary.log`.
 The cause lies in the canonical admission profile, earlier than the execution of the Lending handler.
 Repeating the browser run or changing Spectrum before this boundary is resolved is not required;
 allowing transaction kinds must be accompanied by a check of the readiness of the TS/Rust handlers.

@@ -7,10 +7,12 @@ import { getWallClockMs } from '../../../support/time';
 import { dispatchCommittedEntityOutputs, runCommittedRecoveryBarrier } from '../dispatch';
 import type { RuntimeFrameOutputPlan } from '../plan';
 import type { RuntimeProcessProfile } from '../process-profile';
+import { enqueueRuntimeContinuation } from '../../loop/loop-envelope';
+import { notifyRuntimeStateChanged } from '../notifications';
 import type { RuntimeOutputRoutingDeps } from '../../delivery/topology/output-routing';
 
 export type CommittedRuntimeEffectDeps = {
-  enqueueRuntimeInputs(
+  enqueueRuntimeInputs?(
     env: RuntimeReplica,
     inputs?: Parameters<RuntimeJOutboxQueue>[1],
     runtimeTxs?: RuntimeTx[],
@@ -18,7 +20,7 @@ export type CommittedRuntimeEffectDeps = {
     explicitTimestamp?: number,
   ): void;
   reconcileRuntimeInfraEffects(env: RuntimeReplica, runtimeTxs: readonly RuntimeTx[]): Promise<void>;
-  notifyEnvChange(env: RuntimeReplica): void;
+  notifyEnvChange?(env: RuntimeReplica): void;
 };
 
 export type CommittedRuntimeEffects = {
@@ -43,6 +45,7 @@ export const runCommittedRuntimeEffects = async (
   profile: RuntimeProcessProfile,
   deps: CommittedRuntimeEffectDeps,
 ): Promise<void> => {
+  const enqueueInputs = deps.enqueueRuntimeInputs ?? enqueueRuntimeContinuation;
   const state = ensureRuntimeInfrastructure(env);
   await runCommittedRecoveryBarrier(
     env,
@@ -54,7 +57,7 @@ export const runCommittedRuntimeEffects = async (
 
   await deps.reconcileRuntimeInfraEffects(env, effects.appliedInput?.runtimeTxs ?? []);
   await materializePendingJurisdictionImportResults(env, runtimeTx => {
-    deps.enqueueRuntimeInputs(
+    enqueueInputs(
       env,
       undefined,
       [runtimeTx],
@@ -65,7 +68,7 @@ export const runCommittedRuntimeEffects = async (
   profile.mark('runtimeInfra');
 
   if (effects.queuedJSubmitRetries.length > 0) {
-    deps.enqueueRuntimeInputs(env, undefined, effects.queuedJSubmitRetries, undefined, env.state.timestamp);
+    enqueueInputs(env, undefined, effects.queuedJSubmitRetries, undefined, env.state.timestamp);
   }
 
   await dispatchCommittedEntityOutputs(env, effects.changedEntityIds, effects.outputPlan, effects.routing);
@@ -73,7 +76,7 @@ export const runCommittedRuntimeEffects = async (
   profile.metrics.pendingNetworkAfter = env.pendingNetworkOutputs?.length ?? 0;
 
   await submitRuntimeJOutbox(env, effects.jOutbox, {
-    enqueueRuntimeInputs: deps.enqueueRuntimeInputs,
+    enqueueRuntimeInputs: enqueueInputs,
   });
   profile.mark('jOutbox');
 
@@ -83,6 +86,6 @@ export const runCommittedRuntimeEffects = async (
     await assertRuntimeStateStrict(env);
     profile.mark('strict');
   }
-  deps.notifyEnvChange(env);
+  (deps.notifyEnvChange ?? notifyRuntimeStateChanged)(env);
   profile.mark('notify');
 };

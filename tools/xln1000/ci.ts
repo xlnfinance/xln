@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { run, type Repo } from './repo';
 
 const WORKFLOW = 'build-and-test';
-const CONTRACTS_JOB = 'Contracts';
+const CONTRACTS_JOBS = ['Contracts', 'Runtime Checks'] as const;
 const RECENT_RUNS = 20;
 
 type RunRow = Readonly<{ databaseId: number; headSha: string; conclusion: string; status: string }>;
@@ -32,7 +32,7 @@ const contractsLog = (repo: Repo, runId: string, jobId: number): string => {
   return log;
 };
 
-/** Hardhat (mocha) titles: `✔ title (12ms)` passes, `  1) title` failures; suite-name failure headers are skipped. */
+/** Hardhat (mocha) titles (`✔ title`) and Foundry titles (`[PASS] test_...()`) from the Contracts job log. */
 const parseHardhatLog = (log: string): { pass: Set<string>; fail: Set<string> } => {
   const pass = new Set<string>();
   const fail = new Set<string>();
@@ -40,8 +40,12 @@ const parseHardhatLog = (log: string): { pass: Set<string>; fail: Set<string> } 
     const body = line.replace(/^.*?\d{4}-\d\d-\d\dT[\d:.]+Z /, '');
     const passed = /^\s*✔ (.+?)(?: \(\d+ms\))?\s*$/.exec(body);
     if (passed?.[1]) pass.add(passed[1].trim());
+    const foundryPass = /^\s*\[PASS\] ([A-Za-z0-9_]+)\(/.exec(body);
+    if (foundryPass?.[1]) pass.add(foundryPass[1].trim());
     const failed = /^\s{2,6}\d+\) (.+?)\s*$/.exec(body);
     if (failed?.[1] && !/^\s*\d+\) [A-Z][A-Za-z]+$/.test(body)) fail.add(failed[1].replace(/:$/, '').trim());
+    const foundryFail = /^\s*\[FAIL[^\]]*\] ([A-Za-z0-9_]+)\(/.exec(body);
+    if (foundryFail?.[1]) fail.add(foundryFail[1].trim());
   }
   for (const title of fail) pass.delete(title);
   return { pass, fail };
@@ -80,10 +84,10 @@ export const fetchCi = (repo: Repo): CiEvidence => {
   if (!atSha) return { ...empty, recent: recentGreen(runs) };
   const runId = String(atSha.databaseId);
   const jobs = (JSON.parse(gh(repo, ['run', 'view', runId, '--json', 'jobs'])) as { jobs: JobRow[] }).jobs;
-  const contracts = jobs.find(job => job.name === CONTRACTS_JOB);
-  const parsed = contracts
-    ? parseHardhatLog(contractsLog(repo, runId, contracts.databaseId))
-    : { pass: new Set<string>(), fail: new Set<string>() };
+  const targetJobs = jobs.filter(job => (CONTRACTS_JOBS as readonly string[]).includes(job.name));
+  const combinedLog = targetJobs.map(job => contractsLog(repo, runId, job.databaseId)).join('\n');
+  const parsed =
+    targetJobs.length > 0 ? parseHardhatLog(combinedLog) : { pass: new Set<string>(), fail: new Set<string>() };
   return {
     workflow: WORKFLOW,
     runId,
@@ -98,7 +102,7 @@ export const fetchCi = (repo: Repo): CiEvidence => {
 
 export const ciVetoes = (repo: Repo, ci: CiEvidence | null): string[] => {
   if (!ci) return [];
-  const red = [...ci.hardhatFail].sort().map(title => `CI_RED_AT_SHA (${CONTRACTS_JOB}): ${title}`);
+  const red = [...ci.hardhatFail].sort().map(title => `CI_RED_AT_SHA (${CONTRACTS_JOBS[0]}): ${title}`);
   const failed = Object.values(ci.jobs).some(conclusion => conclusion === 'failure');
   return failed ? [...red, `CI_FAILED_AT_SHA: ${WORKFLOW} run ${String(ci.runId)} at ${repo.short}`] : red;
 };

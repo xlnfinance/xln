@@ -1,6 +1,5 @@
 import type { AccountReplica } from '../../types/account';
-
-const normalizeEntityId = (value: string): string => value.trim().toLowerCase();
+import { normalizeEntityRef } from '../../support/boundary-guards';
 
 const accountMatchesCounterparty = (
   account: AccountReplica | null | undefined,
@@ -8,11 +7,11 @@ const accountMatchesCounterparty = (
   counterpartyEntityId: string,
 ): boolean => {
   if (!account) return false;
-  const owner = normalizeEntityId(ownerEntityId);
-  const counterparty = normalizeEntityId(counterpartyEntityId);
+  const owner = normalizeEntityRef(ownerEntityId);
+  const counterparty = normalizeEntityRef(counterpartyEntityId);
   if (!owner || !counterparty) return false;
-  const left = normalizeEntityId(account.state.leftEntity);
-  const right = normalizeEntityId(account.state.rightEntity);
+  const left = normalizeEntityRef(account.state.leftEntity);
+  const right = normalizeEntityRef(account.state.rightEntity);
   return (left === owner && right === counterparty) || (right === owner && left === counterparty);
 };
 
@@ -21,14 +20,14 @@ export const findAccountByCounterparty = (
   ownerEntityId: string,
   counterpartyEntityId: string,
 ): AccountReplica | null => {
-  const counterparty = normalizeEntityId(counterpartyEntityId);
+  const counterparty = normalizeEntityRef(counterpartyEntityId);
   if (!counterparty) return null;
   // Accounts are keyed by counterparty id; the scan below covers keys that
   // were stored in a different case.
   const direct = accounts.get(counterparty);
   if (direct) return direct;
   for (const [key, account] of accounts) {
-    if (normalizeEntityId(key) === counterparty || accountMatchesCounterparty(account, ownerEntityId, counterparty)) {
+    if (normalizeEntityRef(key) === counterparty || accountMatchesCounterparty(account, ownerEntityId, counterparty)) {
       return account;
     }
   }

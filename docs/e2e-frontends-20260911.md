@@ -7,13 +7,13 @@ fresh successful execution are three different kinds of evidence.
 ## Discovery and execution boundaries
 
 - React discovery: **37 cases in 29 files**, using `ui/playwright.config.ts`.
-  Log: `/tmp/xln-react-e2e-list.log`.
+  Log: `docs/evidence/archive-tmp/xln-react-e2e-list.log`.
 - Root Chromium discovery: **144 cases in 53 files**, including Svelte, admin,
   runtime and site tests. This is not a comparable wallet coverage percentage.
   Command: `E2E_BASE_URL=http://localhost:8080 E2E_API_BASE_URL=http://localhost:8082
 E2E_RESET_BASE_URL=http://localhost:8082 bunx playwright test '\.spec\.ts$'
 --list --reporter=list`. This lists cases only; it does not reset any chain.
-  Log: `/tmp/xln-svelte-spec-discovery-final.log`.
+  Log: `docs/evidence/archive-tmp/xln-svelte-spec-discovery-final.log`.
 - The root isolated runner selects `playwright.config.ts`; fast targets are in
   `core/scripts/e2e/runners/run-e2e-fast.ts`. Neither includes the separate React
   configuration. A successful root run is not React acceptance.
@@ -21,7 +21,7 @@ E2E_RESET_BASE_URL=http://localhost:8082 bunx playwright test '\.spec\.ts$'
   mostly in Svelte/core files. It does not execute flows or prove React parity.
 - Fresh bounded execution of React faucet plus cross/dispute/journey:
   **1 passed, 3 skipped**, 47.2 seconds. The skipped tests must not count as green.
-  Log: `/tmp/xln-home-final-faucet-coverage.log`.
+  Log: `docs/evidence/archive-tmp/xln-home-final-faucet-coverage.log`.
 
 ## Financial paths
 
@@ -73,14 +73,14 @@ manual scale ceiling). Browser checks compare measured bar lengths to live USD
 amounts and check clipping on desktop/mobile. Full wallet amounts and financial
 transitions are unchanged.
 
-Fresh Move logs: `/tmp/xln-react-move-coverage.log` and
-`/tmp/xln-react-move-right-coverage.log`. Each conserves 100 USDC and ends with
+Fresh Move logs: `docs/evidence/archive-tmp/xln-react-move-coverage.log` and
+`docs/evidence/archive-tmp/xln-react-move-right-coverage.log`. Each conserves 100 USDC and ends with
 zero draft/sent batch operations, pending Account proposals and mempool entries.
 
 Final candidate checks: `bun run --cwd ui check` and `bun run check` passed
-(`/tmp/xln-home-ui-check-final.log`, `/tmp/xln-home-final-check-clean.log`).
+(`docs/evidence/archive-tmp/xln-home-ui-check-final.log`, `docs/evidence/archive-tmp/xln-home-final-check-clean.log`).
 The first full check stopped at the 50-GiB generated-workspace budget; removing
 rebuildable E2E-build and Rust-incremental caches brought it below the limit.
 No wallet or devnet database was removed, and no budget was raised.
 Final mixed-wallet browser verification passed in 20.8 seconds, including
-unclipped mobile account labels: `/tmp/xln-home-mobile-final.log`.
+unclipped mobile account labels: `docs/evidence/archive-tmp/xln-home-mobile-final.log`.

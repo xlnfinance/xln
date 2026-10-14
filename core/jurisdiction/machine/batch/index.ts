@@ -120,7 +120,7 @@ export interface JBatch {
     otherArguments: string;
     sig: string;
     startedByLeft: boolean;
-    cooperative: boolean;
+    cooperative: false;
     /**
      * Runtime-only submission gate for timeout-authorized proofs. This is the
      * exact authenticated L1 deadline and is deliberately not ABI-encoded.
@@ -634,17 +634,14 @@ export function preflightBatchForE2(entityId: string, batch: JBatch): string[] {
       .keccak256(ethers.AbiCoder.defaultAbiCoder().encode([PROOF_BODY_PARAM], [f.finalProofbody]))
       .toLowerCase();
     const initialProofbodyHash = String(f.initialProofbodyHash || '').toLowerCase();
-    if (f.cooperative && (!f.sig || f.sig === '0x')) {
-      issues.push(`cooperative dispute finalize missing sig (${f.counterentity.slice(-4)})`);
-    }
-    if (!f.cooperative && f.sig && f.sig !== '0x') {
+    if (f.sig && f.sig !== '0x') {
       const initialNonce = typeof f.initialNonce === 'bigint' ? f.initialNonce : BigInt(f.initialNonce);
       const finalNonce = typeof f.finalNonce === 'bigint' ? f.finalNonce : BigInt(f.finalNonce);
       if (initialNonce >= finalNonce) {
         issues.push(`dispute finalization nonce order (${f.counterentity.slice(-4)})`);
       }
     }
-    if (!f.cooperative && (!f.sig || f.sig === '0x') && finalProofbodyHash !== initialProofbodyHash) {
+    if ((!f.sig || f.sig === '0x') && finalProofbodyHash !== initialProofbodyHash) {
       issues.push(
         `unilateral dispute finalization proof hash mismatch (${f.counterentity.slice(-4)}): ` +
           `initial=${initialProofbodyHash.slice(0, 10)} final=${finalProofbodyHash.slice(0, 10)}`,

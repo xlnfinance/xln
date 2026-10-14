@@ -1,9 +1,10 @@
+import { attachEventEmitters } from '../../observability/env-events';
 import type { RuntimeReplica } from '../../types';
 import type { RuntimeProcessProfile } from '../process-profile';
 import { getWallClockMs } from '../../../support/time';
 
 export type RuntimeFrameStartDeps = {
-  attachEventEmitters(env: RuntimeReplica): void;
+  attachEventEmitters?(env: RuntimeReplica): void;
   collectIngress(
     env: RuntimeReplica,
     profile: RuntimeProcessProfile,
@@ -35,7 +36,7 @@ export const startRuntimeFrame = async (
   env.lastProcessEnteredAt = Date.now();
   env.activeProcessProgressAt = env.lastProcessEnteredAt;
   env.activeProcessProgressStep = 'entered';
-  if (!env.emit) deps.attachEventEmitters(env);
+  if (!env.emit) (deps.attachEventEmitters ?? attachEventEmitters)(env);
   await stopAtDebugFrame(env);
 
   const ingress = await deps.collectIngress(env, profile);

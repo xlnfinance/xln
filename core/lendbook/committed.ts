@@ -17,9 +17,7 @@ import {
   applyLendingClosePayout,
   applyLendingCloseRequest,
 } from './lifecycle';
-
-const normalizeEntityRef = (value: unknown): string =>
-  String(value || '').toLowerCase();
+import { normalizeEntityRef } from '../support/boundary-guards';
 
 export type LendingFollowupContext = {
   state: EntityState;

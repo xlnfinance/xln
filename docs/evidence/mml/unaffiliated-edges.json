@@ -1,0 +1,5 @@
+{
+  "sourceSha": "891d404fe9410a4ca88597cc861a944bae559ce6",
+  "policy": "Only unaffiliated commercial entity pairs on a real-funds public Jurisdiction count. Hub hops, operator entities, market makers and testnet tokens are excluded (affiliated or isHubOrOperatorEdge = true).",
+  "edges": []
+}

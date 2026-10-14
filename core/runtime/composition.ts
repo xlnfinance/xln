@@ -5,7 +5,6 @@ export { getLiveJAdapter, getLiveJAdapterEntries } from './j-submit/live-jadapte
 export const RUNTIME_SCHEMA_VERSION = 1;
 
 import { assertBrowserVMJurisdiction } from '../jurisdiction/adapter/browservm/browservm-registry';
-import { attachEventEmitters } from './observability/env-events';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica } from './types';
 import { createPersistenceQueries } from '../storage/queries';
@@ -38,7 +37,6 @@ import {
   type RuntimeLocalSigner,
 } from './replica/bootstrap';
 import {
-  notifyRuntimeFrameCommitted,
   notifyRuntimeStateChanged,
 } from './frame/notifications';
 
@@ -72,7 +70,6 @@ const {
   ENV_APPLY_ALLOWED_KEY,
   ENV_REPLAY_MODE_KEY,
   readRuntimeMetadata,
-  writeRuntimeMetadata,
   ensureRuntimeConfig,
   getRuntimeStorageDb,
   getStorageDb,
@@ -258,14 +255,8 @@ processRuntimeImpl = createRuntimeProcessor({
   loop: runtimeLoopApi,
   recovery: runtimeRecoveryApi,
   storage: runtimeStorageApi,
-  attachEventEmitters,
   applyRuntimeInput,
-  setApplyAllowed: (env, allowed) => {
-    writeRuntimeMetadata(env, ENV_APPLY_ALLOWED_KEY, allowed);
-  },
   getRuntimeOutputRoutingDeps,
-  notifyEnvChange: notifyRuntimeStateChanged,
-  notifyRuntimeFrameCommitted,
 });
 
 export const waitForRuntimeProcessingIdle = runtimeStorageApi.waitForRuntimeProcessingIdle;

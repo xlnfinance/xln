@@ -9,6 +9,7 @@ import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import { buildCertifiedEntityHeadPlan } from './replica/entity-head';
+import { normalizeEntityRef } from '../support/boundary-guards';
 
 export type CanonicalFrameEntityHash = {
   entityId: string;
@@ -20,8 +21,6 @@ const VOLATILE_FIELDS = new Set([
   'ethersProvider',
   'provider',
 ]);
-
-const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
 
 const hashCanonical = (value: unknown): string =>
   ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(value)));
@@ -108,7 +107,7 @@ export const canonicalizeStorageAuditValue = (value: unknown): unknown =>
   canonicalizeStorageAuditValueAt(value, [], '$');
 
 export const computeCanonicalEntityHash = (replica: EntityReplica): CanonicalFrameEntityHash => {
-  const entityId = normalizeEntityId(replica.entityId || replica.state?.entityId || '');
+  const entityId = normalizeEntityRef(replica.entityId || replica.state?.entityId || '');
   return {
     entityId,
     cellCount: 1,
@@ -137,7 +136,7 @@ export const computeCanonicalRuntimeStateHash = (
     timestamp,
     entities: entityHashes
       .map((entry) => ({
-        entityId: normalizeEntityId(entry.entityId),
+        entityId: normalizeEntityRef(entry.entityId),
         hash: entry.hash,
         cellCount: entry.cellCount,
       }))

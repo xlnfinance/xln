@@ -4,6 +4,9 @@ import type {
   PlannedRemoteOutput,
   RuntimeOutputRoutingDeps,
 } from '../delivery/topology/output-routing';
+import { applyRecoveryRuntimeOutputPlan } from '../delivery/recovery-output';
+import { enqueueRuntimeContinuation } from '../loop/loop-envelope';
+import { generateHookPings } from '../loop/loop-work';
 import type { RuntimeProcessProfile } from './process-profile';
 import type { PreparedOutputGraph } from '../delivery/prepared-output';
 
@@ -16,12 +19,12 @@ export type RuntimeFrameOutputPlan = {
 };
 
 export type RuntimeFrameOutputPlanningDeps = {
-  applyOutputPlan(
+  applyOutputPlan?(
     env: RuntimeReplica,
     entityOutbox: readonly RoutedEntityInput[],
     routing: RuntimeOutputRoutingDeps,
   ): RuntimeFrameOutputPlan;
-  generateHookPings(env: RuntimeReplica): void;
+  generateHookPings?(env: RuntimeReplica): void;
 };
 
 export const planRuntimeFrameOutputs = (
@@ -30,9 +33,13 @@ export const planRuntimeFrameOutputs = (
   routing: RuntimeOutputRoutingDeps,
   profile: RuntimeProcessProfile,
   quietLogs: boolean,
-  deps: RuntimeFrameOutputPlanningDeps,
+  deps: RuntimeFrameOutputPlanningDeps = {},
 ): RuntimeFrameOutputPlan => {
-  const plan = deps.applyOutputPlan(env, entityOutbox, routing);
+  const applyPlan =
+    deps.applyOutputPlan ??
+    ((target: RuntimeReplica, outbox: readonly RoutedEntityInput[], routingDeps: RuntimeOutputRoutingDeps) =>
+      applyRecoveryRuntimeOutputPlan(target, outbox, routingDeps, enqueueRuntimeContinuation));
+  const plan = applyPlan(env, entityOutbox, routing);
   profile.metrics.localOutputs = plan.localOutputs.length;
   profile.metrics.remoteOutputs = plan.remoteOutputs.length;
   profile.mark('planOutputs');
@@ -45,6 +52,6 @@ export const planRuntimeFrameOutputs = (
 
   // Hooks scheduled by the just-applied frame run on the next Runtime tick.
   // Re-evaluating the deterministic index here avoids wall-clock polling.
-  deps.generateHookPings(env);
+  (deps.generateHookPings ?? generateHookPings)(env);
   return plan;
 };

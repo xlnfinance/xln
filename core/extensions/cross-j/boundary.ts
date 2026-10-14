@@ -2,6 +2,7 @@ import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction'
 import type { EntityInput } from '../../entity/types';
 import type { EntityTx } from '../../types/entity-tx';
 import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
+import { normalizeEntityRef } from '../../support/boundary-guards';
 
 /**
  * Cross-j Entity effects travel only as one committed Runtime output. The
@@ -40,7 +41,6 @@ export const entityInputHasCrossJurisdictionIntraRuntimeTx = (
   getEffectiveEntityInputTxs(input).some(isCrossJurisdictionIntraRuntimeTx)
 ) : false;
 
-const normalizeEntityRef = (value: unknown): string => String(value || '').trim().toLowerCase();
 const normalizeRuntimeRef = (value: unknown): string => String(value || '').trim().toLowerCase();
 
 export type CrossJurisdictionRouteRuntimeResolver = (

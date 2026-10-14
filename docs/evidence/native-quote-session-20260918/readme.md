@@ -6,7 +6,7 @@ The initial session regression is native-host evidence. Actual iPhone UI
 acceptance is recorded separately below; neither proves native Tron/public testnet.
 
 Current result: the native session regression passes all four cases on a new,
-isolated live local stand (`/tmp/xln-native-release-zEZarI`). An unexpired old
+isolated live local stand (`docs/evidence/archive-tmp/xln-native-release-zEZarI`). An unexpired old
 quote rejects after lock, an invalid boot and an invalid BrainVault attempt;
 balance stays at 100 USDC. A fresh quote pays one USDC, leaves 99 USDC and rejects
 a second confirmation. See `quote-session-result.json`. This is real WebKit and
@@ -16,8 +16,8 @@ The first isolated attempt uncovered another bug: starting a replacement native
 session disconnected the UI adapter without closing the prior Runtime. After an
 invalid boot, the next open collided with the still-live identity. Native boot
 and BrainVault entry now await canonical runtime shutdown before beginning a
-replacement. Logs: `/tmp/xln-isolated-native-quote.log` (failure),
-`/tmp/xln-native-session-fixed.log` (four passes).
+replacement. Logs: `docs/evidence/archive-tmp/xln-isolated-native-quote.log` (failure),
+`docs/evidence/archive-tmp/xln-native-session-fixed.log` (four passes).
 
 The original saved dev stand remains separate and unrepaired. Independently
 hashing the saved Anvil header for block 90211 reproduces the reported RPC hash,
@@ -28,8 +28,8 @@ the original header was lost. No accepted finality or history was rewritten.
 The updated iPhone simulator app builds successfully, including the native host
 fix. Three transport/controller files moved into `frontend/ios/App/App/runtime`;
 Xcode references were updated and the folder-width check now passes. Build log:
-`/tmp/xln-ios-session-build.log`; artifact:
-`/tmp/xln-ios-derived/Build/Products/Debug-iphonesimulator/App.app`.
+`docs/evidence/archive-tmp/xln-ios-session-build.log`; artifact:
+`docs/evidence/archive-tmp/xln-ios-derived/Build/Products/Debug-iphonesimulator/App.app`.
 This artifact targets the configured local API. The subsequent actual iPhone
 acceptance and its scope are recorded below.
 
@@ -70,7 +70,7 @@ Evidence: `swap-minimum-result.json`; harness `scripts/native/tests/swap-minimum
 Focused market/quote checks: 23 passed, 96 assertions. UI typecheck passes.
 Full `bun run check` passes after this change: 39 source gates, source phase
 40.313 seconds; frontend phase 23.092 seconds. Log:
-`/tmp/xln-market-min-final-check.log`. The rebuilt iPhone app then passed actual UI acceptance: a 25-USDC quote,
+`docs/evidence/archive-tmp/xln-market-min-final-check.log`. The rebuilt iPhone app then passed actual UI acceptance: a 25-USDC quote,
 explicit incoming test credit, completed swap with exact fee, matching token
 balances, and a one-USDC quote rejected before confirmation. Video
 `output/ios-release-2026-09-18/swap-proof.mp4` (125.145 seconds) includes the
@@ -78,7 +78,7 @@ completed receipt around 80 seconds. Screenshots: `swap-confirmed.png`,
 `swap-minimum-protected.png`, and `live-orderbook.png` in the same output folder.
 The Market screen also displays real hub depth. This does not prove arbitrary
 resting-order cancellation or every market flow. Build log:
-`/tmp/xln-ios-swap-build.log`. Stand: `/tmp/xln-native-release-CoXOPY`.
+`docs/evidence/archive-tmp/xln-ios-swap-build.log`. Stand: `docs/evidence/archive-tmp/xln-native-release-CoXOPY`.
 
 The Home fiat total uses reference prices, which differ from the local market
 price: after swapping, it displays $109.99 while exact token balances are
@@ -86,10 +86,10 @@ price: after swapping, it displays $109.99 while exact token balances are
 source/freshness remains a UX limitation to address before release.
 
 A saved isolated stand failed restart because its Anvil state JSON was truncated
-at column 439827. Data `/tmp/xln-native-release-hGfpwg` was preserved; startup
-log `/tmp/xln-iphone-flow-preserve.log`. The payment recording used a separate
-new stand `/tmp/xln-native-release-rK735w`; the swap regression used
-`/tmp/xln-native-release-5P16QN`. This does not resolve saved-chain recovery or
+at column 439827. Data `docs/evidence/archive-tmp/xln-native-release-hGfpwg` was preserved; startup
+log `docs/evidence/archive-tmp/xln-iphone-flow-preserve.log`. The payment recording used a separate
+new stand `docs/evidence/archive-tmp/xln-native-release-rK735w`; the swap regression used
+`docs/evidence/archive-tmp/xln-native-release-5P16QN`. This does not resolve saved-chain recovery or
 the original immediate-close race. Both chains here are Anvil; native Tron,
 ETH↔Tron execution, lending, and all-platform release acceptance remain open.
 
@@ -112,10 +112,10 @@ databases to erase the failure.
 After the live hub/recovery boundary is repaired, reproduce from repository root:
 
 ```sh
-mkdir -p /tmp/xln-native-session-probe
-xcrun swiftc -swift-version 5 frontend/ios/App/App/runtime/NativeSockets.swift scripts/native/tests/quote-session.swift -o /tmp/xln-native-session-probe/probe
+mkdir -p docs/evidence/archive-tmp/xln-native-session-probe
+xcrun swiftc -swift-version 5 frontend/ios/App/App/runtime/NativeSockets.swift scripts/native/tests/quote-session.swift -o docs/evidence/archive-tmp/xln-native-session-probe/probe
 bun run stand:status
-bun run stand:run --reason native-quote-session-regression --timeout-ms 60000 -- /tmp/xln-native-session-probe/probe scripts/native/tests/quote-session.js
+bun run stand:run --reason native-quote-session-regression --timeout-ms 60000 -- docs/evidence/archive-tmp/xln-native-session-probe/probe scripts/native/tests/quote-session.js
 ```
 
 The harness opens a real WebKit window, uses isolated ephemeral storage and
@@ -135,8 +135,8 @@ Focused regression: a real in-process EVM adapter and Runtime receive continued
 unrelated import requests. The old waiter failed after 10 seconds; the revised
 waiter completes while subsequent input remains queued. A conflicting chain ID
 still rejects. Two tests pass (five assertions). Runtime typecheck and production
-function-size check pass. Logs: `/tmp/xln-hub-j-import-final.log` and
-`/tmp/xln-runtime-types.log`.
+function-size check pass. Logs: `docs/evidence/archive-tmp/xln-hub-j-import-final.log` and
+`docs/evidence/archive-tmp/xln-runtime-types.log`.
 
 A bounded restart used the existing canonical dev supervisor with
 `XLN_MESH_PRESERVE_STATE_ON_RESET=1`, omitting the destructive preparation step.
@@ -157,7 +157,7 @@ open; the import fix is not proof of complete recovery or release readiness.
 The earlier source check failed on iOS folder width. After the native session
 fix and file grouping, full `bun run check` passes under the 60-second stand
 lock: 39 source gates, source phase 54.646 seconds. Log:
-`/tmp/xln-native-session-check.log`. UI typecheck and the iPhone simulator build
+`docs/evidence/archive-tmp/xln-native-session-check.log`. UI typecheck and the iPhone simulator build
 also pass. Nothing was committed, pushed or deployed.
 
 
@@ -184,14 +184,14 @@ code and a mined block's number/hash across reload: one test, five assertions,
 No mocks or finality bypass were used in this new regression.
 
 This repairs normal dev shutdown, not arbitrary abrupt crashes. The original
-`db/dev` inconsistent history and `/tmp/xln-native-release-hGfpwg` truncated
+`db/dev` inconsistent history and `docs/evidence/archive-tmp/xln-native-release-hGfpwg` truncated
 snapshot remain unchanged. Immediate wallet lock during payment is still open.
 
 Final verification for the shutdown fix: related lifecycle tests 30/30 (172
 assertions), real-Anvil reload regression 1/1 (5 assertions), full `bun run check`
 passed (39 source gates, source phase 40.564 seconds), and `git diff --check`
-passed. Logs: `/tmp/xln-dev-shutdown-lifecycle.log` and
-`/tmp/xln-shutdown-recovery-final-check.log`. An existing lifecycle test's PID
+passed. Logs: `docs/evidence/archive-tmp/xln-dev-shutdown-lifecycle.log` and
+`docs/evidence/archive-tmp/xln-shutdown-recovery-final-check.log`. An existing lifecycle test's PID
 selection was corrected: its fixture process and the cache-pruner are separate
 children, so parsing all PIDs as one number previously produced NaN. The new
 snapshot/reload regression uses actual Anvil. No commit, push or deployment.
@@ -223,7 +223,7 @@ updated runtime and Swift iOS simulator build pass and were installed on
 XLNReleaseAcceptance, iPhone 17 Pro/iOS 26.5. No iPhone 18 simulator is available.
 The live regression above uses the real macOS WKWebView/native socket probe;
 installation itself is not another iPhone UI test. Logs:
-`/tmp/xln-immediate-lock-full-check.log`, `/tmp/xln-immediate-lock-ios-build.log`.
+`docs/evidence/archive-tmp/xln-immediate-lock-full-check.log`, `docs/evidence/archive-tmp/xln-immediate-lock-ios-build.log`.
 
 ## Delayed peer reply — 2026-09-18
 
@@ -264,4 +264,4 @@ Final candidate validation: full `bun run check` passes (39 source gates,
 39.887-second source phase). The updated runtime/Swift iPhone simulator build
 passes and is installed; installed public resources exactly match the build.
 No fresh SwiftUI interaction test is implied. Logs:
-`/tmp/xln-consensus-drain-final-check.log`, `/tmp/xln-consensus-drain-ios-build.log`.
+`docs/evidence/archive-tmp/xln-consensus-drain-final-check.log`, `docs/evidence/archive-tmp/xln-consensus-drain-ios-build.log`.

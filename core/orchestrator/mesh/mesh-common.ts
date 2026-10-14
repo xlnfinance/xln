@@ -8,6 +8,8 @@ import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 import { findAccountByCounterparty } from '../../account/state/account-lookup';
 import { assertEntityProposalAction } from '../../entity/auth/authorization';
 import { normalizeSignedEntityCommand } from '../../entity/command/command-codec';
+import { sleep } from '../../support/boundary-guards';
+export { sleep };
 export { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../account/config/defaults';
 export {
@@ -44,10 +46,6 @@ export const planMarketMakerIdentityLabels = (
   }));
 export const BOOTSTRAP_POLL_MS = Math.max(10, Number(process.env['BOOTSTRAP_POLL_MS'] || '50'));
 const RUNTIME_SETTLE_POLL_MS = Math.max(5, Number(process.env['RUNTIME_SETTLE_POLL_MS'] || '10'));
-
-export const sleep = async (ms: number): Promise<void> => {
-  await new Promise(resolve => setTimeout(resolve, ms));
-};
 
 export type MarketMakerEntityJurisdictionConfig = {
   name: string;

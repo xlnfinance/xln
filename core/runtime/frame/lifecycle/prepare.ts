@@ -9,6 +9,11 @@ import {
 import type { RuntimeReplica, RuntimeInput } from '../../types';
 import { applyEntityHeightDurabilityBarrier } from '../../mempool/entity-height-barrier';
 import { runtimeJInputFramePrefixLength } from '../../mempool/input-validation';
+import {
+  applyEntityInputFrameCap,
+  applyEntityTxFrameCap,
+  prioritizeJEventFrame,
+} from '../../loop/loop-work';
 import { LIMITS } from '../../../config/constants';
 import type { FrameExecutionState } from '../intake/execution-state';
 import {
@@ -18,9 +23,9 @@ import {
 } from '../process-profile';
 
 export type RuntimeFramePreparationDeps = {
-  prioritizeJEventFrame(input: RuntimeInput, mempool: RuntimeInput, timestamp: number): boolean;
-  applyEntityTxFrameCap(input: RuntimeInput, mempool: RuntimeInput, limit: number, timestamp: number): boolean;
-  applyEntityInputFrameCap(input: RuntimeInput, mempool: RuntimeInput, limit: number, timestamp: number): boolean;
+  prioritizeJEventFrame?(input: RuntimeInput, mempool: RuntimeInput, timestamp: number): boolean;
+  applyEntityTxFrameCap?(input: RuntimeInput, mempool: RuntimeInput, limit: number, timestamp: number): boolean;
+  applyEntityInputFrameCap?(input: RuntimeInput, mempool: RuntimeInput, limit: number, timestamp: number): boolean;
 };
 
 const applyJInputFrameCap = (input: RuntimeInput, mempool: RuntimeInput, timestamp: number): void => {
@@ -43,7 +48,7 @@ export const prepareRuntimeFrameInput = async (
   queuedAt: number | undefined,
   frame: FrameExecutionState,
   profile: RuntimeProcessProfile,
-  deps: RuntimeFramePreparationDeps,
+  deps: RuntimeFramePreparationDeps = {},
 ): Promise<{ hasInput: boolean; jEventPrioritized: boolean }> => {
   profile.metrics.runtimeTxs = input.runtimeTxs.length;
   profile.metrics.entityInputs = input.entityInputs.length;
@@ -56,15 +61,15 @@ export const prepareRuntimeFrameInput = async (
   frame.inputDrained = true;
 
   const timestamp = queuedAt ?? env.state.timestamp ?? 0;
-  const jEventPrioritized = deps.prioritizeJEventFrame(input, mempool, timestamp);
+  const jEventPrioritized = (deps.prioritizeJEventFrame ?? prioritizeJEventFrame)(input, mempool, timestamp);
   input.entityInputs = prioritizeEntityConsensusInputs(input.entityInputs, entityInput =>
     hasVerifiedEntityCommitPrecertificate(env, entityInput));
   applyEntityHeightDurabilityBarrier(env, input, mempool, timestamp);
-  deps.applyEntityTxFrameCap(input, mempool, state.maxEntityTxsPerFrame ?? 0, timestamp);
+  (deps.applyEntityTxFrameCap ?? applyEntityTxFrameCap)(input, mempool, state.maxEntityTxsPerFrame ?? 0, timestamp);
   // Wakes and requeued deferred work join the detached mempool outside
   // admission, so even an uncapped Runtime bounds the frame by the per-input
   // limit; the remainder waits for the next frame.
-  deps.applyEntityInputFrameCap(
+  (deps.applyEntityInputFrameCap ?? applyEntityInputFrameCap)(
     input,
     mempool,
     Math.min(state.maxEntityInputsPerFrame || LIMITS.MAX_RUNTIME_INPUT_ENTITY_INPUTS, LIMITS.MAX_RUNTIME_INPUT_ENTITY_INPUTS),

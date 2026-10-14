@@ -15,12 +15,13 @@ import {
   markCrossJurisdictionBookAdmissionClosed,
 } from '../../extensions/cross-j/orderbook';
 import { createStructuredLogger, shortOrder } from '../../support/logger';
+import { normalizeEntityRef } from '../../support/boundary-guards';
 
 type CommittedSwapCancel = Readonly<{ offerId: string; accountId: string }>;
 
 const crossJBookLog = createStructuredLogger('crossj.orderbook');
 
-export const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+export { normalizeEntityRef };
 
 export const deterministicEntityTimestamp = (state: EntityState, env?: EntityRuntimeContext): number =>
   Number(state.timestamp || env?.state.timestamp || 0);

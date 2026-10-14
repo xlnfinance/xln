@@ -11,18 +11,17 @@ import {
 } from './index';
 import { TIMING } from '../../config/constants';
 import { toUnixS, unixSToUnixMs } from '../../protocol/units';
-
-const normalizeEntityId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+import { normalizeEntityRef } from '../../support/boundary-guards';
 
 const accountForLeg = (
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
   leg: 'source' | 'target',
 ) => {
-  const self = normalizeEntityId(state.entityId);
+  const self = normalizeEntityRef(state.entityId);
   const routeLeg = route[leg];
-  const entity = normalizeEntityId(routeLeg.entityId);
-  const counterparty = normalizeEntityId(routeLeg.counterpartyEntityId);
+  const entity = normalizeEntityRef(routeLeg.entityId);
+  const counterparty = normalizeEntityRef(routeLeg.counterpartyEntityId);
   const expectedAccount = self === entity
     ? counterparty
     : self === counterparty
@@ -66,11 +65,11 @@ const responseWindowForEntity = (
   entityId: string,
 ): number => {
   const routeLeg = route[leg];
-  const leftEntity = normalizeEntityId(routeLeg.entityId) < normalizeEntityId(routeLeg.counterpartyEntityId)
-    ? normalizeEntityId(routeLeg.entityId)
-    : normalizeEntityId(routeLeg.counterpartyEntityId);
+  const leftEntity = normalizeEntityRef(routeLeg.entityId) < normalizeEntityRef(routeLeg.counterpartyEntityId)
+    ? normalizeEntityRef(routeLeg.entityId)
+    : normalizeEntityRef(routeLeg.counterpartyEntityId);
   const config = routeDisputeConfig(route, leg);
-  return normalizeEntityId(entityId) === leftEntity
+  return normalizeEntityRef(entityId) === leftEntity
     ? config.leftResponseSeconds
     : config.rightResponseSeconds;
 };
@@ -104,11 +103,11 @@ const assertLocalCrossJDisputeClock = (
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
 ): void => {
-  const self = normalizeEntityId(state.entityId);
-  const onSourceLeg = self === normalizeEntityId(route.source.entityId)
-    || self === normalizeEntityId(route.source.counterpartyEntityId);
-  const onTargetLeg = self === normalizeEntityId(route.target.entityId)
-    || self === normalizeEntityId(route.target.counterpartyEntityId);
+  const self = normalizeEntityRef(state.entityId);
+  const onSourceLeg = self === normalizeEntityRef(route.source.entityId)
+    || self === normalizeEntityRef(route.source.counterpartyEntityId);
+  const onTargetLeg = self === normalizeEntityRef(route.target.entityId)
+    || self === normalizeEntityRef(route.target.counterpartyEntityId);
   if (onSourceLeg) committedCrossJSourceResponseWindowMs(state, route);
   if (onTargetLeg) committedCrossJTargetResponseWindowMs(state, route);
 };

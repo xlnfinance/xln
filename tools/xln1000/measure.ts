@@ -57,7 +57,7 @@ const measureAxes = (repo: Repo, ledger: Ledger | null, ci: CiEvidence | null): 
     measureFeedback(ledger),
     measureProcess(repo, kernel.closureLoc),
     measurePublicJ(repo),
-    measureMml(),
+    measureMml(repo),
   ];
 };
 

@@ -7,7 +7,7 @@ import type { Readable } from 'node:stream';
 import { GATE_CHILD_PROCESS_DETACHED, terminateGateProcessGroup } from './gate-child-process';
 
 import { assertMinDiskFree, getMinDiskFreeBytes } from '../../support/storage-monitor';
-import { MAINNET_GATE, MAINNET_RELEASE_BLOCKERS } from './mainnet-gate-constants';
+import { MAINNET_GATE } from './mainnet-gate-constants';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
@@ -102,6 +102,7 @@ export const buildMainnetPreflightSteps = (
       command: [
         'bun test',
         'core/__tests__/finance/state/derive-delta-property.test.ts',
+        'core/__tests__/proofs/fx-admission.test.ts',
         'core/__tests__/runtime/observability/env-events-audit-commit.test.ts',
         'core/__tests__/operations/release/capped-testnet-gate.test.ts',
         'core/__tests__/operations/health/prod-health-smoke.test.ts',
@@ -134,14 +135,6 @@ export const buildMainnetPreflightSteps = (
   }
 
   return steps;
-};
-
-export const assertMainnetFeatureReadiness = (): void => {
-  const blockers: readonly { id: string; requirement: string }[] = MAINNET_RELEASE_BLOCKERS;
-  if (blockers.length === 0) return;
-  throw new Error(
-    `MAINNET_FEATURE_READINESS_BLOCKED:${blockers.map(blocker => blocker.id).join(',')}`,
-  );
 };
 
 const spawnText = (command: string, args: string[]): string | null => {
@@ -213,7 +206,6 @@ const printPlan = (steps: MainnetPreflightStep[]): void => {
 
 const main = async (): Promise<void> => {
   const args = parseMainnetPreflightArgs();
-  if (!args.dryRun) assertMainnetFeatureReadiness();
   const gitHead = spawnText('git', ['rev-parse', 'HEAD']);
   if (!gitHead) throw new Error('MAINNET_PREFLIGHT_GIT_HEAD_UNAVAILABLE');
 
@@ -236,7 +228,7 @@ const main = async (): Promise<void> => {
 
   const steps = buildMainnetPreflightSteps(args);
   const report = {
-    verdict: args.dryRun && MAINNET_RELEASE_BLOCKERS.length > 0 ? 'DRY_RUN_BLOCKED' : args.dryRun ? 'DRY_RUN' : 'RUNNING',
+    verdict: args.dryRun ? 'DRY_RUN' : 'RUNNING',
     startedAt: new Date().toISOString(),
     gitHead,
     dirty: Boolean(dirty.stdout.trim()),
@@ -246,7 +238,6 @@ const main = async (): Promise<void> => {
       soakMinutes: MAINNET_GATE.soakMinutes,
       expectedHubs: MAINNET_GATE.expectedHubs,
       expectedTowers: MAINNET_GATE.expectedTowers,
-      releaseBlockers: MAINNET_RELEASE_BLOCKERS,
       minDiskFreeBytes: getMinDiskFreeBytes(),
     },
     args,

@@ -2,6 +2,7 @@ import type { AccountState, Delta, DerivedDelta } from '../types/account';
 import type { EntityTx } from '../types/entity-tx';
 import { UINT256_MAX } from '../protocol/boundary/integer-ranges';
 import { isLeftEntity } from '../protocol/identity/entity-id';
+import { normalizeEntityRef } from '../support/boundary-guards';
 import { deriveDelta } from './utils';
 import { createDefaultDelta } from './state/delta';
 import { canonicalAccountDisputeConfig, type AccountDisputeConfig } from './config/dispute-config';
@@ -76,22 +77,21 @@ export type AccountFundingPlan = Readonly<{
   requiredDeposit: bigint;
 }>;
 
-const normalizeEntityId = (value: string): string => value.trim().toLowerCase();
 const nonNegative = (value: bigint): bigint => (value < 0n ? 0n : value);
 const ceilRatio = (value: bigint, numerator: bigint, denominator: bigint): bigint =>
   (value * numerator + denominator - 1n) / denominator;
 
 const readCapacity = (input: AccountCapacityViewInput) => {
-  const owner = normalizeEntityId(input.ownerEntityId);
-  const counterparty = normalizeEntityId(input.counterpartyEntityId);
+  const owner = normalizeEntityRef(input.ownerEntityId);
+  const counterparty = normalizeEntityRef(input.counterpartyEntityId);
   if (!owner || !counterparty || owner === counterparty) throw new Error('ACCOUNT_CAPACITY_ENTITIES_INVALID');
   if (!Number.isSafeInteger(input.tokenId) || input.tokenId <= 0) {
     throw new Error(`ACCOUNT_CAPACITY_TOKEN_INVALID:${input.tokenId}`);
   }
   if (input.account) {
     const parties = new Set([
-      normalizeEntityId(input.account.leftEntity),
-      normalizeEntityId(input.account.rightEntity),
+      normalizeEntityRef(input.account.leftEntity),
+      normalizeEntityRef(input.account.rightEntity),
     ]);
     if (!parties.has(owner) || !parties.has(counterparty) || parties.size !== 2) {
       throw new Error(`ACCOUNT_CAPACITY_PARTIES_INVALID:owner=${owner}:counterparty=${counterparty}`);

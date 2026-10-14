@@ -100,7 +100,7 @@ Fresh execution rejects existing progress; resume only permits pre-submission
 setup. An uncertain submitted intent requires WAL inspection, never a rebuilt
 signed route with a new timestamp. The final driver passes a focused strict
 TypeScript check. Full `bun run check` passes, 39 source gates / 40.864 seconds,
-log `/tmp/xln-cross-swap-final-check.log`. All 43 evidence hashes and whitespace
+log `docs/evidence/archive-tmp/xln-cross-swap-final-check.log`. All 43 evidence hashes and whitespace
 checks pass. Chain processes are stopped and the stand is free.
 
 Still open: withdrawal of swapped claims, lending, rendered web/iOS acceptance
@@ -111,7 +111,7 @@ This is private-chain semantic evidence, not public release or GDP attribution.
 
 Earlier wallet-stage verification: full `bun run check` passes, 39 source
 gates in 40.949 seconds; `git diff --check` and all 28 evidence file hashes pass.
-Full-check log: `/tmp/xln-tron-wallet-final-check.log`. No commit, push or public
+Full-check log: `docs/evidence/archive-tmp/xln-tron-wallet-final-check.log`. No commit, push or public
 deployment was performed.
 
 `wallet-proof.json` ties the frontend's real `e2r` / `r2e` / `j_broadcast`
@@ -159,11 +159,11 @@ financial state exactly. This remains a private-chain proof, not the physical
 iPhone/public-testnet demo or an ETH↔Tron swap.
 
 Receipt-ingestion validation: `bun run check` passed, 39 source gates in 40.288 seconds;
-`git diff --check` passes. Log: `/tmp/xln-tron-entity-final-check-retry.log`.
+`git diff --check` passes. Log: `docs/evidence/archive-tmp/xln-tron-entity-final-check-retry.log`.
 The first broad run failed in the unrelated advisor process-group cleanup test
 with `EPERM`; the focused process suite passed 4/4, then the full unchanged
 retry passed. That intermittent cleanup failure is recorded, not claimed fixed.
-First log: `/tmp/xln-tron-entity-final-check.log`.
+First log: `docs/evidence/archive-tmp/xln-tron-entity-final-check.log`.
 
 ## Entity financial ingestion and recovery
 
@@ -318,7 +318,7 @@ Both chain processes are stopped and the stand is free. The manifest now covers
 36 verified evidence hashes.
 
 Full repository check passes after this driver change: 39 source gates,
-40.512-second source phase. Log: `/tmp/xln-cross-network-final-check.log`.
+40.512-second source phase. Log: `docs/evidence/archive-tmp/xln-cross-network-final-check.log`.
 
 At this earlier import milestone, cross-J financial execution was still open;
 the later swap proof above now covers one credit-backed match. Rendered wallet
@@ -327,5 +327,5 @@ No public deployment, real USDT or complete release is claimed.
 
 Previous authority-only verification: `bun run check` passed (39 source gates, 41.711-second source
 phase), `git diff --check` passes, and the native process has stopped with the
-stand lock released. Full-check log: `/tmp/xln-release-recovery-final-check.log`.
+stand lock released. Full-check log: `docs/evidence/archive-tmp/xln-release-recovery-final-check.log`.
 Nothing was committed, pushed or publicly deployed.

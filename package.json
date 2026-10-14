@@ -271,7 +271,7 @@
     "demo": "echo 'See docs/governance-architecture.md for governance demo and examples'",
     "check:dead-code:report": "bunx knip --no-progress",
     "check:no-vacuous-validation": "bun core/scripts/checks/policy/check-no-vacuous-validation.ts",
-    "check:contract-invariants": "bun core/scripts/e2e/runners/run-with-test-cleanup.ts --reason=contract-invariants --child-cwd=jurisdictions --keep-test-artifacts -- forge test --match-contract DepositoryInvariants"
+    "check:contract-invariants": "bun core/scripts/e2e/runners/run-with-test-cleanup.ts --reason=contract-invariants --child-cwd=jurisdictions --keep-test-artifacts -- forge test --match-contract \"DepositoryInvariants|DisputeIngressGas\""
   },
   "keywords": [],
   "author": "",

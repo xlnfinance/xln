@@ -1,6 +1,7 @@
 import type { RuntimeReplica } from '../../types';
 import { requireRuntimeMempool } from '../../mempool/input-queue';
 import { haltRuntimeRequiresOperator } from '../../replica/lifecycle';
+import { RuntimeInputDiscardedError } from '../intake/discard';
 import {
   prependOlderRuntimeInput,
 } from '../transaction';
@@ -11,7 +12,7 @@ type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
 export type RuntimeFrameFailureDeps = {
   isStorageError(error: unknown): boolean;
-  isDiscardedInputError(error: unknown): boolean;
+  isDiscardedInputError?(error: unknown): boolean;
 };
 
 export type RuntimeFrameFailure = {
@@ -63,7 +64,7 @@ export const handleRuntimeFrameFailure = async (
     return {
       env: liveEnv,
       error: rollbackError,
-      inputDropped: deps.isDiscardedInputError(rollbackError),
+      inputDropped: (deps.isDiscardedInputError ?? ((candidate: unknown) => candidate instanceof RuntimeInputDiscardedError))(rollbackError),
     };
   }
 

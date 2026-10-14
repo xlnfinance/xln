@@ -5,6 +5,7 @@
  * Static field keys let a checkpoint overwrite exactly the changed values.
  */
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
+import { exactKeys, record } from '../../support/boundary-guards';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
 import { readRawOrNull , iterateKeys } from '../database/level';
 import type { RuntimeDbLike, StorageAccountDoc } from '../types';
@@ -166,19 +167,6 @@ const fieldDescriptors = (
   byteLength: value.byteLength,
   chunkCount: rows.length === 1 && rows[0]?.key.byteLength === 66 ? 0 : rows.length,
 }));
-
-const record = (value: unknown, code: string): Record<string, unknown> => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(code);
-  return value as Record<string, unknown>;
-};
-
-const exactKeys = (value: Record<string, unknown>, expected: readonly string[], code: string): void => {
-  const actual = Object.keys(value).sort();
-  const sorted = [...expected].sort();
-  if (actual.length !== sorted.length || actual.some((key, index) => key !== sorted[index])) {
-    throw new Error(`${code}_FIELDS:${actual.join(',')}`);
-  }
-};
 
 const decodeHash = (value: unknown, code: string): string => {
   if (typeof value !== 'string' || !/^0x[0-9a-f]{64}$/.test(value)) throw new Error(code);

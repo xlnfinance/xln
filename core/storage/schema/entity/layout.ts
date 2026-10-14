@@ -8,6 +8,7 @@
  */
 import type { EntityState } from '../../../entity/types';
 import { computeIntegrityDigest } from '../../../support/bytes/integrity-checksum';
+import { exactKeys, record } from '../../../support/boundary-guards';
 import { decodeBuffer, encodeBuffer } from '../../codec/codec';
 import { iterateKeys, readRawOrNull } from '../../database/level';
 import {
@@ -121,19 +122,6 @@ const manifestValue = (
     throw new Error(`STORAGE_ENTITY_MANIFEST_TOO_LARGE:${value.byteLength}`);
   }
   return value;
-};
-
-const record = (value: unknown, code: string): Record<string, unknown> => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(code);
-  return value as Record<string, unknown>;
-};
-
-const exactKeys = (value: Record<string, unknown>, expected: readonly string[], code: string): void => {
-  const actual = Object.keys(value).sort();
-  const sorted = [...expected].sort();
-  if (actual.length !== sorted.length || actual.some((key, index) => key !== sorted[index])) {
-    throw new Error(`${code}_FIELDS:${actual.join(',')}`);
-  }
 };
 
 const decodeHash = (value: unknown, code: string): string => {

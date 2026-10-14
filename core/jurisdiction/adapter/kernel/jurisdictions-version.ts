@@ -1,9 +1,7 @@
 import { createHash } from 'node:crypto';
+import { isRecord } from '../../../support/boundary-guards';
 
 type JsonLike = null | boolean | number | string | JsonLike[] | { [key: string]: JsonLike };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const sortJson = (value: unknown): JsonLike => {
   if (value === null) return null;

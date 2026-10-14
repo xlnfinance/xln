@@ -16,12 +16,10 @@ import {
   type ChildSecrets,
   writeInheritedChildSecrets,
 } from '../../support/process/child-secrets';
+import { sleep } from '../../support/boundary-guards';
 
 const DEFAULT_CHILD_READY_TIMEOUT_MS = 120_000;
 const LOG_TAIL_LINES = 80;
-const sleep = async (ms: number): Promise<void> => {
-  await new Promise(resolve => setTimeout(resolve, ms));
-};
 
 const assertChildStillRunning = (child: ManagedChild | null): void => {
   if (!child || !hasManagedChildExited(child)) return;

@@ -1,0 +1,83 @@
+{
+  "recordedCommit": "9079d5b4a02e126889cf184cf6b0e9cafbd8149f",
+  "source": "4c4413992b1f11a5cbdcb5e1fcaed7dafa69483c",
+  "testCheckout": "a57f633e913315a799ae1ae98d30998dca629aaa",
+  "cleanCheckout": true,
+  "publicUrl": "https://sepolia.xln.finance",
+  "samples": {
+    "wallets": 1,
+    "accounts": 1,
+    "freshProfiles": 3
+  },
+  "fileRecoveryMs": 6157,
+  "freshTowerRecoveryMs": 5968,
+  "olderTowerRecoveryMs": 5534,
+  "slaMs": 60000,
+  "balance": "75.00 test USDT",
+  "accountHeight": 6,
+  "fundingRequests": 0,
+  "additionalPayments": 0,
+  "pageErrors": 0,
+  "signedAccountFieldsCompared": 16,
+  "authenticatedSnapshotsCompared": 7,
+  "ciphertextTamperingRejected": true,
+  "limitations": [
+    "Single-wallet production recovery samples, not a fleet-wide SLA or a complete mainnet acceptance result.",
+    "Runtime snapshots differ in height; the committed Account and its signed evidence remain identical.",
+    "The first tower run selected the existing R88 backup; the final run explicitly uploaded R90 and restored the authenticated latest R90 receipt.",
+    "No chain writes, repeated faucet claims or payments. Existing private browser profiles must not be run concurrently."
+  ],
+  "privateActiveProfilePointer": "/Users/zigota/.config/xln/sepolia-cold-recovery-4c4413992/active-profile.json",
+  "proofArchive": "proof.tar.gz",
+  "redaction": "Private backup lookup key removed from public logs and receipts; seeds and encrypted backup bodies excluded.",
+  "files": [
+    {
+      "path": "file-restore.ts",
+      "sha256": "13fbae6560ca7fedd36bd0098b7061f0509fa6de14bbdea10150ceda67e33d5c"
+    },
+    {
+      "path": "tower-restore.ts",
+      "sha256": "6530949ef244c9908a864dd7faab71efeb639e48ebe34c9e42156c7d2dae1ea9"
+    },
+    {
+      "path": "tower-latest-restore.ts",
+      "sha256": "2ffc6607e4a1bb8d267b0159ff8bb417d73cbed89074e704c49c336af0b6d077"
+    },
+    {
+      "path": "compare-signed-accounts.ts",
+      "sha256": "6198e28396e56b79c671232fa4d9cdc9a3debf664d3559470490c6ab63b2e93b"
+    },
+    {
+      "path": "file-result.json",
+      "sha256": "29c8da6c470dbccf016f502f5d60ca931bfad814d59c0669765d43fb73c68fe8"
+    },
+    {
+      "path": "tower-result.json",
+      "sha256": "2f0c2483c25137a50d40ed62041c1ac616925488ce9976d83916fd07b7c7b36c"
+    },
+    {
+      "path": "tower-latest-result.json",
+      "sha256": "31af1d19b6d10cb0313c2f98275bc8cd0876b9d480e45e21e6bc639f0eac5354"
+    },
+    {
+      "path": "signed-account-equality.json",
+      "sha256": "bbc88de97ffa933d86f6658d3246560a73d2b6b78855d8de47c98c70a6c6606b"
+    },
+    {
+      "path": "file-restore.log",
+      "sha256": "3d3ba3d0f215533ddb8ea332de64a46c38c9f8f8b1ae4a8ebcc9058f0b47f889"
+    },
+    {
+      "path": "tower-restore.log",
+      "sha256": "ca8c9087ff4acebacf84bdef311af1e6a4e27251407fbc6234b61584eb8000ee"
+    },
+    {
+      "path": "tower-latest-restore.log",
+      "sha256": "c59e4b0dad6a5aa1909bacd85d55a628dff0a41f1d3591725a44879272e73323"
+    },
+    {
+      "path": "signed-account-equality.log",
+      "sha256": "4736f7479afa808e88f91af174528dc42103e37d5f097deb1a7872813dc5ae2d"
+    }
+  ]
+}

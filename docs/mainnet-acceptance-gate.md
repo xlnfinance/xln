@@ -5,7 +5,10 @@
 This document is the strict release gate for the next public xln launch loop.
 Owner update 2026-10-11: participation is open, including the owner, friends and
 other users spending their own funds. There is no global protocol funding ceiling.
-The current scope is TypeScript, React and Ethereum same-J, including lending.
+The current scope is TypeScript, React and Ethereum same-J. New lending admission
+is deferred by the October 12 owner correction; signed historical claims remain
+valid exit evidence. The preflight executes the canonical local/peer admission
+rejection tests instead of requiring completion of the deferred product.
 Sepolia evidence precedes mainnet. Financial, signer-authority and recovery gates
 remain mandatory. Existing `capped-testnet` command names identify the historical
 operator gate; they no longer promise or require a monetary cap.
@@ -22,7 +25,7 @@ Date: 2026-10-11
 
 | Item | Decision |
 |------|----------|
-| Launch scope | TypeScript, React, Ethereum same-J and lending |
+| Launch scope | TypeScript, React, Ethereum same-J; new lending admission deferred |
 | Value cap | None at protocol level; each creditor accepts its own bilateral risk |
 | Soak duration | 1 hour uninterrupted for capped testnet |
 | External audit | Optional for testnet and mainnet, owner decision 2026-10-10; engineering/security gates remain required |
@@ -131,7 +134,7 @@ Required scope:
 - direct payments
 - same-account swaps
 - cross-j swaps
-- lending if present in the UI
+- lending unavailable for new admission; signed historical claims remain verifiable
 - persistence/WAL restore
 - contracts and RPC settlement
 - relay/P2P/hub topology
@@ -191,7 +194,7 @@ Report format:
 | Last-resort dispute | Tower acts only after valid breach condition and only with newer proof | watchtower dispute unit/e2e coverage |
 | Payments | Direct payment survives reload, recovery, and hub reconnect | e2e full and browser drill |
 | Swaps | Same-account and cross-j swaps settle or fail loudly | e2e full, flow coverage, cross-j tests |
-| Lending | UI lending flows match core/account state and fail closed | e2e full, lending unit/e2e evidence |
+| Deferred lending | Wallet availability follows production admission; local admission and remote AccountInput reject without mutation and historical claims remain hashable | `core/__tests__/proofs/fx-admission.test.ts`, React availability |
 | Landing | Landing does not bypass cap, security, recovery, or onboarding warnings | browser drill and console evidence |
 | Topology | One tower and three hubs are healthy from the production endpoint | `bun run prod:health` plus deployment health payload |
 | Ops | Rollback, secrets, RPCs, gas funding, and alerts are explicit | ops runbook drill evidence |

@@ -1,4 +1,5 @@
 {
+  "recordedCommit": "566c850b37f37b5d0c713a84070bfcb9a6bc6d22",
   "kind": "NATIVE_TRON_RESTORED_WAL_PROOF",
   "originalHeight": 4,
   "restoredFromHeight": 5,
