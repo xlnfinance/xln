@@ -11,8 +11,7 @@ import {
 } from './index';
 import { TIMING } from '../../config/constants';
 import { toUnixS, unixSToUnixMs } from '../../protocol/units';
-
-const normalizeEntityId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+import { normalizeEntityRef as normalizeEntityId } from '../../support/boundary-guards';
 
 const accountForLeg = (
   state: EntityState,

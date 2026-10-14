@@ -1,4 +1,5 @@
 import type { RuntimeInput } from '../types';
+import { normalizeEntityRef as normalizeEntityId } from '../../support/boundary-guards';
 
 export type DebtEnforcementProjectionRuntimeInputParams = {
   entityId: string;
@@ -8,8 +9,6 @@ export type DebtEnforcementProjectionRuntimeInputParams = {
   signerId?: string;
   timestamp: number;
 };
-
-const normalizeEntityId = (entityId: string): string => String(entityId || '').trim().toLowerCase();
 
 const normalizeTokenId = (tokenId: number): number => {
   const normalized = Number(tokenId);

@@ -9,6 +9,7 @@ import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import { buildCertifiedEntityHeadPlan } from './replica/entity-head';
+import { normalizeEntityRef as normalizeEntityId } from '../support/boundary-guards';
 
 export type CanonicalFrameEntityHash = {
   entityId: string;
@@ -20,8 +21,6 @@ const VOLATILE_FIELDS = new Set([
   'ethersProvider',
   'provider',
 ]);
-
-const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
 
 const hashCanonical = (value: unknown): string =>
   ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(value)));

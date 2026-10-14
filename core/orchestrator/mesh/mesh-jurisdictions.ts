@@ -1,6 +1,7 @@
 import { clearJurisdictionsCache, loadJurisdictions } from '../../jurisdiction/adapter/kernel/jurisdiction-loader';
 import { getJurisdictionIdentityRef } from '../../jurisdiction/machine/jurisdiction-runtime';
 import { isLoopbackUrl, normalizeLoopbackUrl, toPublicRpcUrl } from '../../network/p2p/loopback-url';
+import { isRecord } from '../../support/boundary-guards';
 
 type MeshJurisdictionConfig = {
   name: string;
@@ -20,9 +21,6 @@ type MeshJurisdictionConfig = {
 export type ResolvedMeshJurisdictionConfig = MeshJurisdictionConfig & {
   contracts: Required<NonNullable<MeshJurisdictionConfig['contracts']>>;
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;

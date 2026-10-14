@@ -12,6 +12,7 @@ import {
   type OrderbookExtState,
 } from '../../../../../swapbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../../support/logger';
+import { normalizeEntityRef } from '../../../../../support/boundary-guards';
 import {
   buildCrossJurisdictionCancelInstruction,
   crossJurisdictionBookAdmissionKeyFor,
@@ -39,8 +40,6 @@ export interface RoutedOrderbookCancels {
   localBookCancels: SwapCancelRequestEvent[];
   outputs: EntityInput[];
 }
-
-const normalizeEntityRef = (value: string): string => String(value || '').trim().toLowerCase();
 
 /**
  * A cross-j cancel commits on the source Account, while the canonical book can

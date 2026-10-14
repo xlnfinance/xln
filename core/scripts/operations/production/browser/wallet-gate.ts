@@ -87,7 +87,7 @@ const recordWalletGateQaRun = (repoRoot: string, tests: readonly string[], start
   if (!existsSync(dbPath)) return;
   const db = new Database(dbPath);
   try {
-    const manifestJson = JSON.stringify({
+    const manifestJson = safeStringify({
       gateConfig: { args: { pwFiles }, tasks: [{ pwTargets: pwFiles }] },
     });
     db.query(

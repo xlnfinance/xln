@@ -4,8 +4,7 @@ import { requestRuntimeLoopWake } from '../mempool/input-queue.ts';
 import { getRemainingRuntimeFrameDelayMs } from './loop-work.ts';
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope.ts';
 import { hasQueuedOrPendingAccountWork } from '../../entity/consensus/account/work-index';
-
-const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+import { sleep } from '../../support/boundary-guards';
 
 export type RuntimeDrainDeps = {
   processRuntime(env: RuntimeReplica): Promise<unknown>;

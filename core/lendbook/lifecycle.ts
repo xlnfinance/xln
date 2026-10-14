@@ -5,10 +5,9 @@ import { lendingLoanRepaymentAmount, lendingPositionCloseAmount } from './state'
 import type { LendingFollowupContext } from './committed';
 import type { AccountTxTarget } from '../entity/tx/handlers/account/orderbook/queue';
 import { createStructuredLogger, shortId } from '../support/logger';
+import { normalizeEntityRef } from '../support/boundary-guards';
 
 const lendingLog = createStructuredLogger('entity.lending');
-
-const normalizeEntityRef = (value: unknown): string => String(value || '').toLowerCase();
 
 const retireDisputedLoan = (state: EntityState, loan: LendingLoan): void => {
   if (loan.status === 'repaid' || loan.status === 'disputed') return;

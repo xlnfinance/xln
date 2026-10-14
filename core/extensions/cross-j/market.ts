@@ -3,8 +3,8 @@ import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import { isLiquidSwapToken } from '../../account/utils';
 import { parseJurisdictionStackIdentity } from '../../jurisdiction/machine/jurisdiction-stack';
+import { normalizeEntityRef as normalizeEntityId } from '../../support/boundary-guards';
 
-const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
 const normalizeJurisdiction = (value: string): string => String(value || '').trim().toLowerCase();
 
 const requireStackIdentity = (jurisdiction: string, errorCode: string) => {

@@ -1,6 +1,5 @@
 import type { AccountReplica } from '../../types/account';
-
-const normalizeEntityId = (value: string): string => value.trim().toLowerCase();
+import { normalizeEntityRef as normalizeEntityId } from '../../support/boundary-guards';
 
 const accountMatchesCounterparty = (
   account: AccountReplica | null | undefined,

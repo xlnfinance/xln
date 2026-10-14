@@ -2,8 +2,7 @@ import type { RuntimeReplica } from '../../../runtime/types';
 import type { Profile } from '../../../entity/profile';
 import { normalizeRuntimeKey, type RelayStore } from '../../../network/relay/store';
 import { safeStringify } from '../../../protocol/serialization';
-
-const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
+import { normalizeEntityRef as normalizeEntityId } from '../../../support/boundary-guards';
 
 const buildKnownProfileBundle = (
   input: {

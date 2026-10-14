@@ -1,6 +1,7 @@
 /** Bounded physical rows for large authoritative WAL and checkpoint values. */
 
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
+import { exactKeys, record } from '../../support/boundary-guards';
 import type { RuntimeDbLike } from '../types';
 import { keyBoundedValueChunk } from '../keys';
 import {
@@ -24,21 +25,6 @@ type BoundedValueManifest = Readonly<{
 }>;
 
 export type BoundedStorageRow = Readonly<{ key: Buffer; value: Buffer }>;
-
-const exactKeys = (value: Record<string, unknown>, expected: readonly string[], code: string): void => {
-  const actual = Object.keys(value).sort();
-  const canonical = [...expected].sort();
-  if (actual.length !== canonical.length || actual.some((key, index) => key !== canonical[index])) {
-    throw new Error(`${code}_FIELDS:${actual.join(',')}`);
-  }
-};
-
-const record = (value: unknown, code: string): Record<string, unknown> => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value) || value instanceof Map) {
-    throw new Error(code);
-  }
-  return value as Record<string, unknown>;
-};
 
 const validateManifest = (value: unknown): BoundedValueManifest => {
   const manifest = record(value, 'STORAGE_BOUNDED_MANIFEST_REQUIRED');

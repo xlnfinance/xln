@@ -1,5 +1,6 @@
 import { decryptRuntimeRecoveryBundle } from '../bundle/crypto';
 import { deriveRuntimeSignerAddress, normalizeRuntimeId } from '../bundle/seed-identity';
+import { isRecord } from '../../../support/boundary-guards';
 import type { EncryptedRuntimeRecoveryBundleV1, RuntimeRecoveryBundleV1, TowerReceiptV1 } from '../bundle/types';
 import type {
   RuntimeRecoveryCandidate,
@@ -15,9 +16,6 @@ import type {
  * bundle is a contradiction: it is rejected loudly instead of being restored
  * into this identity.
  */
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
 
 const isEncryptedRuntimeRecoveryBundle = (value: unknown): value is EncryptedRuntimeRecoveryBundleV1 => {
   if (!isRecord(value)) return false;

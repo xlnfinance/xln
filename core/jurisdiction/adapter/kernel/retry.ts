@@ -2,6 +2,7 @@ import type { JAdapter, JAdapterConfig } from '../types';
 import { createJAdapter } from './factory';
 import { classifyJAdapterFailure } from './failure';
 import { resolveJurisdictionTransport } from './jurisdiction-loader';
+import { sleep } from '../../../support/boundary-guards';
 
 type RetryOptions = {
   attempts?: number;
@@ -10,8 +11,6 @@ type RetryOptions = {
   factory?: (config: JAdapterConfig) => Promise<JAdapter>;
   onRetry?: (attempt: number, attempts: number, error: unknown) => void;
 };
-
-const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 const errorText = (error: unknown): string => {
   if (error instanceof Error) {

@@ -15,6 +15,7 @@ import {
 } from '../../protocol/state/persistent-radix-value-map';
 import { radixMerklePathSlots } from '../../protocol/state/radix-merkle';
 import { encodeBuffer } from '../codec/codec';
+import { exactKeys, isRecord } from '../../support/boundary-guards';
 import {
   keyLiveBookBranch,
   keyLiveBookLeaf,
@@ -47,17 +48,6 @@ export type StorageBookGraphChanges = Readonly<{
   puts: readonly StorageBookGraphRow[];
   dels: readonly Buffer[];
 }>;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const exactKeys = (record: Record<string, unknown>, expected: readonly string[], code: string): void => {
-  const actual = Object.keys(record).sort();
-  const sorted = [...expected].sort();
-  if (actual.length !== sorted.length || actual.some((key, index) => key !== sorted[index])) {
-    throw new Error(`${code}_FIELDS:${actual.join(',')}`);
-  }
-};
 
 const integer = (value: unknown, code: string): number => {
   if (!Number.isSafeInteger(value) || Number(value) < 0) throw new Error(code);

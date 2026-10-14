@@ -14,8 +14,7 @@ import {
   type OrderbookExtState,
   type Side,
 } from '..';
-
-const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+import { normalizeEntityRef } from '../../support/boundary-guards';
 
 const crossJurisdictionBookOrderIdFor = (sourceEntityId: string, orderId: string): string =>
   `${normalizeEntityRef(sourceEntityId)}:${String(orderId)}`;

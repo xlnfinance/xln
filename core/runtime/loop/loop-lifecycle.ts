@@ -24,8 +24,8 @@ import {
   waitForRuntimeWorkDrained,
 } from './loop-drain.ts';
 import { emitRuntimeLoopError, reportFatalLoopError } from './loop-failure.ts';
+import { sleep } from '../../support/boundary-guards';
 
-const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
 export type RuntimeLoopConfig = {
