@@ -57,6 +57,8 @@ const implementationLines = (repo: Repo, implementation: Implementation): number
     path => !isTestPath(path) && (!implementation.extension || implementation.extension.test(path)),
   );
 
+const isActiveImplementation = (status: Status): boolean => status === 'canonical' || status === 'active';
+
 const measureRoles = (repo: Repo) =>
   Object.entries(ROLES).map(([role, implementations]) => {
     const rows = implementations.map(item => ({
@@ -64,7 +66,7 @@ const measureRoles = (repo: Repo) =>
       status: item.status,
       lines: implementationLines(repo, item),
     }));
-    const counted = rows.filter(row => row.lines >= COUNTED_LINES);
+    const counted = rows.filter(row => row.lines >= COUNTED_LINES && isActiveImplementation(row.status));
     return { role, rows, count: counted.length, counted: counted.map(row => `${row.label} [${row.status}]`) };
   });
 

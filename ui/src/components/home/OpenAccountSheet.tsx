@@ -120,6 +120,7 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
           value={targetId}
           onChange={event => { const id = event.target.value.trim().toLowerCase(); setTargetId(id); setCreditText(wallet.hubs.has(id) ? plainAmount(getHubOpeningCredit(meta.decimals), meta.decimals) : '0'); }}
           spellCheck={false}
+          data-testid="open-account-target"
         />
       </div>
       {targetId && !compatibleTarget ? <p className="note" role="alert">Choose a counterparty in the same jurisdiction and contract stack. Unknown networks cannot be verified.</p> : null}
@@ -132,6 +133,7 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
             inputMode="decimal"
             value={creditText}
             onChange={event => setCreditText(event.target.value)}
+            data-testid="open-account-credit"
           />
           <span className="muted">{meta.symbol}</span>
         </div>
@@ -186,6 +188,7 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
         className="btn"
         disabled={!/^0x[0-9a-f]{64}$/.test(targetId) || !compatibleTarget || submitting}
         onClick={() => void openAccount()}
+        data-testid="open-account-submit"
       >
         {submitting ? 'Proposing…' : 'Propose account'}
       </button>

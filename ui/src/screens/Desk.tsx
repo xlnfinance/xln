@@ -111,6 +111,12 @@ export function Desk() {
 						{formatUsd(wallet.usd.sendCapacity)} · {formatUsd(wallet.usd.receiveCapacity)}
 					</div>
 				</div>
+				<div className="card" data-testid="desk-revenue">
+					<div className="k">MML edge · Routing fees</div>
+					<div className="v num" style={{ fontSize: 18 }}>
+						{formatUsd(wallet.usd.mmlExposure)} · {formatUsd(wallet.usd.feesEarned)}
+					</div>
+				</div>
 			</div>
 
 			<div className="desk-grid">
