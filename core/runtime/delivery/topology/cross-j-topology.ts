@@ -2,7 +2,8 @@ import {
   resolveCrossJurisdictionRuntimeTopology,
   type CrossJurisdictionRuntimeTopology,
 } from '../../../extensions/cross-j/boundary';
-import { normalizeRuntimeId } from '../../../network/p2p/auth/runtime-id';
+import { normalizeRuntimeId } from '../../../protocol/identity/runtime-id';
+import { normalizeEntityRef } from '../../../support/boundary-guards';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import { getLocalEntitySignerKeys, hasLocalSignerForEntitySigner } from '../../loop/loop-identity.ts';
 import type { RuntimeReplica } from '../../types';
@@ -19,8 +20,6 @@ export type CrossJTopologyDeps = {
   resolveRuntimeId(entityId: string, signerId: string): string | null;
 };
 
-const normalize = (value: unknown): string => String(value || '').trim().toLowerCase();
-
 const ownerPair = (route: CrossJurisdictionSwapRoute, role: OwnerRole): readonly [Owner, Owner] => {
   const pair: readonly [Owner, Owner] = role === 'user'
     ? [
@@ -31,10 +30,10 @@ const ownerPair = (route: CrossJurisdictionSwapRoute, role: OwnerRole): readonly
         { entityId: route.source.counterpartyEntityId, signerId: route.sourceHubSignerId || '' },
         { entityId: route.target.entityId, signerId: route.targetHubSignerId || '' },
       ];
-  if (pair.some(owner => !normalize(owner.entityId) || !normalize(owner.signerId))) {
+  if (pair.some(owner => !normalizeEntityRef(owner.entityId) || !normalizeEntityRef(owner.signerId))) {
     throw new Error(`CROSS_J_RUNTIME_TOPOLOGY_INVALID:${route.orderId}:${role.toUpperCase()}_OWNER_MISSING`);
   }
-  if (normalize(pair[0].entityId) === normalize(pair[1].entityId)) {
+  if (normalizeEntityRef(pair[0].entityId) === normalizeEntityRef(pair[1].entityId)) {
     throw new Error(`CROSS_J_RUNTIME_TOPOLOGY_INVALID:${route.orderId}:${role.toUpperCase()}_SIBLINGS_NOT_DISTINCT`);
   }
   return pair;
@@ -90,7 +89,7 @@ export const assertCrossJLocalCohorts = (
 ): void => {
   const localOwnerKeys = deps === defaultLocalOwnerDeps ? getLocalEntitySignerKeys(env) : null;
   const isLocal = (owner: Owner): boolean => localOwnerKeys
-    ? localOwnerKeys.has(`${normalize(owner.entityId)}\u0000${normalize(owner.signerId)}`)
+    ? localOwnerKeys.has(`${normalizeEntityRef(owner.entityId)}\u0000${normalizeEntityRef(owner.signerId)}`)
     : deps.hasLocalSignerForEntitySigner(env, owner.entityId, owner.signerId);
   for (const replica of env.state.eReplicas.values()) {
     if (!isLocal(replica)) continue;

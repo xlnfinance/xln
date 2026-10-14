@@ -13,11 +13,10 @@ import {
 } from '../../../../jurisdiction/machine/jurisdiction-runtime';
 import type { EntityTxReducerResult } from '../../apply';
 import { getEntityLeaderState } from '../../../consensus/leader';
+import { normalizeEntityRef } from '../../../../support/boundary-guards';
 
 const MIN_GAS_BUMP_BPS = 0;
 const MAX_GAS_BUMP_BPS = 20_000; // +200%
-
-const normalizeId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
 /**
  * Reject a terminal local retry at proposer ingress, before it enters Entity
@@ -36,7 +35,7 @@ export const assertLocalJRebroadcastAllowed = (replica: EntityReplica): void => 
   if (
     !sent ||
     !local?.terminalFailure ||
-    normalizeId(local.batchHash) !== normalizeId(sent.batchHash) ||
+    normalizeEntityRef(local.batchHash) !== normalizeEntityRef(sent.batchHash) ||
     local.entityNonce !== sent.entityNonce ||
     local.batchGeneration !== replica.state.jBatchState?.broadcastCount
   ) return;

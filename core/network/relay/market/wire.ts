@@ -2,7 +2,8 @@ import {
   requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
-} from '../../../protocol/boundary-validation';
+  requireString,
+} from '../../../protocol/boundary/boundary-primitives';
 import { compareStableText, deserializeTaggedJson, serializeTaggedJson } from '../../../protocol/serialization';
 import { XLN_PROTOCOL_VERSION, type XlnProtocolVersion } from '../../../protocol/version';
 import { isJurisdictionStackRef } from '../../../jurisdiction/machine/jurisdiction-stack';
@@ -64,11 +65,6 @@ const MARKET_REQUEST_TYPES = new Set<MarketMessageType>([
 ]);
 const MARKET_RESPONSE_TYPES = new Set(['ack', 'error', 'market_snapshot', 'market_status']);
 const DEFAULT_MAX_MARKET_MESSAGE_BYTES = 1_048_576;
-
-const requireString = (value: unknown, code: string): string => {
-  if (typeof value !== 'string' || value.length === 0) throw new Error(code);
-  return value;
-};
 
 const requireUnsignedDecimal = (value: unknown, code: string, allowZero: boolean): string => {
   const text = requireString(value, code);

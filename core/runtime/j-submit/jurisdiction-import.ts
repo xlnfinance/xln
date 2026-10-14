@@ -2,6 +2,7 @@ import { normalizeJurisdictionImportRequest, normalizeJurisdictionImportAddress,
 import { ethers } from 'ethers';
 
 import { createJAdapterWithRetry } from '../../jurisdiction/adapter/kernel/retry';
+import { errorMessage } from '../../support/boundary-guards';
 import { createStructuredLogger } from '../../support/logger';
 import type { JAdapter, JAdapterConfig } from '../../jurisdiction/adapter/types';
 import { safeStringify } from '../../protocol/serialization';
@@ -23,7 +24,6 @@ type CompleteImportJRuntimeTx = Extract<RuntimeTx, { type: 'completeImportJ' }>;
 
 const LOCAL_J_IMPORT_RESULT = Symbol.for('xln.runtime.j-import-result.local');
 const jurisdictionImportLog = createStructuredLogger('runtime.jurisdiction_import');
-const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 const IMPORT_RETRY_BASE_MS = 5_000;
 const IMPORT_RETRY_MAX_MS = 300_000;
 

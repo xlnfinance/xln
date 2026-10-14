@@ -9,6 +9,7 @@
 // Browser-compatible: Use isBrowser check instead of fs
 import { resolveNativeTransportHost } from './native-host';
 import { isBrowser } from '../../../support/platform-crypto';
+import { errorMessage } from '../../../support/boundary-guards';
 import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { createStructuredLogger } from '../../../support/logger';
 import {
@@ -380,8 +381,6 @@ export function loadJurisdictions(): JurisdictionsData {
     throw new Error(`JURISDICTIONS_LOAD_FAILED:path=${filePath || 'unknown'}:${message}`);
   }
 }
-
-const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 const fetchBrowserJurisdictions = async (signal: AbortSignal): Promise<Response> => {
   let response: Response;

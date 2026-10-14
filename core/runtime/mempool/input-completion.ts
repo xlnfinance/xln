@@ -1,4 +1,5 @@
 import { safeStringify } from '../../protocol/serialization';
+import { sleep } from '../../support/boundary-guards';
 import type { RuntimeInput, RuntimeReplica } from '../types';
 import type { RuntimeFrame } from '../../storage/types';
 
@@ -133,8 +134,6 @@ export const findPersistedRuntimeInputHeight = async (
   }
   return null;
 };
-
-const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 /** Operational waiter only: proves the exact submitted input reached Runtime WAL. */
 export const waitForRuntimeInputCommitted = async (input: {

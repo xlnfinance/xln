@@ -5,7 +5,7 @@ import type {
   RuntimeEntityInputsEnvelope,
 } from '../types';
 import { createStructuredLogger, shortId } from '../../support/logger';
-import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
+import { normalizeRuntimeId } from '../../protocol/identity/runtime-id';
 import { getWallClockMs } from '../../support/time';
 import { validateDeliverableEntityInput } from '../delivery/topology/routing-validation';
 import {

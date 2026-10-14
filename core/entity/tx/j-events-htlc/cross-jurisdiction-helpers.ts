@@ -14,8 +14,6 @@ import * as crossJurisdictionBoundary from '../../../extensions/cross-j/boundary
 import type { EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 
-const normalizeAddress = (value: unknown): string => String(value || '').trim().toLowerCase();
-
 export const findCrossJurisdictionOfferRoute = (
   state: EntityState,
   orderId: string,
@@ -104,10 +102,10 @@ const routeSignerHintForLocalEntity = (
   route: CrossJurisdictionSwapRoute,
 ): string | null => {
   const local = normalizeEntityRef(state.entityId);
-  if (normalizeEntityRef(route.source.entityId) === local) return normalizeAddress(route.sourceSignerId);
-  if (normalizeEntityRef(route.source.counterpartyEntityId) === local) return normalizeAddress(route.sourceHubSignerId);
-  if (normalizeEntityRef(route.target.entityId) === local) return normalizeAddress(route.targetHubSignerId);
-  if (normalizeEntityRef(route.target.counterpartyEntityId) === local) return normalizeAddress(route.targetSignerId);
+  if (normalizeEntityRef(route.source.entityId) === local) return normalizeEntityRef(route.sourceSignerId);
+  if (normalizeEntityRef(route.source.counterpartyEntityId) === local) return normalizeEntityRef(route.sourceHubSignerId);
+  if (normalizeEntityRef(route.target.entityId) === local) return normalizeEntityRef(route.targetHubSignerId);
+  if (normalizeEntityRef(route.target.counterpartyEntityId) === local) return normalizeEntityRef(route.targetSignerId);
   return null;
 };
 
@@ -138,7 +136,7 @@ export const validateCrossJurisdictionLocalBinding = (
   }
   const signerHint = routeSignerHintForLocalEntity(state, route);
   if (signerHint) {
-    const validators = new Set((state.config.validators || []).map(normalizeAddress).filter(Boolean));
+    const validators = new Set((state.config.validators || []).map(normalizeEntityRef).filter(Boolean));
     if (validators.size > 0 && !validators.has(signerHint)) {
       return `route signer ${signerHint} is not a validator for local entity`;
     }

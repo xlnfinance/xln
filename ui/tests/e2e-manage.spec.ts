@@ -35,8 +35,15 @@ test.describe('wallet UI account management', () => {
 			await expect.poll(() => page.locator('section.card').count(), { timeout: CHAIN_TIMEOUT }).toBeGreaterThan(before);
 		}
 
-		// Dispute: prepare freezes the account, the on-chain start joins the batch.
+		// Counterfactual clauses extension tab: previews CREATE2 address and signed allowance bounds.
 		await page.getByTestId('account-manage').click();
+		await page.getByTestId('manage-tab-clauses').click();
+		await expect(page.getByTestId('clauses-panel')).toBeVisible();
+		await expect(page.getByTestId('clause-create2-address')).toContainText('0x');
+		await page.getByTestId('clause-template-call-option').click();
+		await expect(page.getByTestId('clause-preview')).toContainText('0 gas');
+
+		// Dispute: prepare freezes the account, the on-chain start joins the batch.
 		await page.getByTestId('manage-tab-dispute').click();
 		await page.getByTestId('dispute-prepare').click();
 		await page.getByTestId('dispute-prepare-confirm').click();

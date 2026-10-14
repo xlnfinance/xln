@@ -1,7 +1,7 @@
 import type { RuntimeReplica, RoutedEntityInput } from '../types';
 import { entityInputHasCrossJurisdictionIntraRuntimeTx } from '../../extensions/cross-j/boundary';
 import { createStructuredLogger, shortId } from '../../support/logger';
-import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
+import { normalizeRuntimeId } from '../../protocol/identity/runtime-id';
 import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-output';
 import { resolveReplayOutputRuntimeRoute } from './replay-output-route';
 import {

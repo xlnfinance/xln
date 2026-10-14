@@ -3,7 +3,7 @@ import type { EntityTx } from '../types/entity-tx';
 import { UINT256_MAX } from '../protocol/boundary/integer-ranges';
 import { isLeftEntity } from '../protocol/identity/entity-id';
 import { normalizeEntityRef } from '../support/boundary-guards';
-import { deriveDelta } from './utils';
+import { deriveDelta, nonNegative } from './utils';
 import { createDefaultDelta } from './state/delta';
 import { canonicalAccountDisputeConfig, type AccountDisputeConfig } from './config/dispute-config';
 
@@ -77,7 +77,6 @@ export type AccountFundingPlan = Readonly<{
   requiredDeposit: bigint;
 }>;
 
-const nonNegative = (value: bigint): bigint => (value < 0n ? 0n : value);
 const ceilRatio = (value: bigint, numerator: bigint, denominator: bigint): bigint =>
   (value * numerator + denominator - 1n) / denominator;
 

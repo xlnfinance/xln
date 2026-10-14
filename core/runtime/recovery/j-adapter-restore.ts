@@ -3,6 +3,7 @@ import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { BrowserVMProvider, JAdapter, JAdapterConfig } from '../../jurisdiction/adapter/types';
 import { createJAdapterWithRetry } from '../../jurisdiction/adapter/kernel/retry';
+import { errorMessage } from '../../support/boundary-guards';
 import { createStructuredLogger } from '../../support/logger';
 import { getJurisdictionIdentityRef } from '../../jurisdiction/machine/jurisdiction-runtime';
 import { buildCanonicalJReplicaSnapshot } from '../../storage/wal/snapshot';
@@ -13,7 +14,6 @@ import {
 } from '../j-submit/live-jadapters';
 
 const infraLog = createStructuredLogger('runtime.restore');
-const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 export type TrustedJurisdictionRpcBinding = {
   jurisdictionRef: string;

@@ -31,6 +31,7 @@ const KERNEL_ROOTS = [
     'registration',
     'delivery',
     'observability',
+    'checkpoint',
   ].map(directory => `core/runtime/${directory}/`),
 ];
 const TOOLING_DIRS = [

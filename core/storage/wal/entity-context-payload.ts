@@ -23,6 +23,7 @@ import type {
 import type { Profile } from '../../entity/profile';
 import { validateEntityInfraContext } from '../../entity/consensus/frame/infra-context-validation';
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
+import { exactKeys } from '../../support/boundary-guards';
 import {
   toEntityContextPayloadHash,
   type EntityContextPayloadHash,
@@ -141,14 +142,6 @@ const assertAppliedReplicaEntity = (
 const record = (value: unknown, code: string): Record<string, unknown> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(code);
   return value as Record<string, unknown>;
-};
-
-const exactKeys = (value: Record<string, unknown>, expected: readonly string[], code: string): void => {
-  const actual = Object.keys(value).sort();
-  const canonical = [...expected].sort();
-  if (actual.length !== canonical.length || actual.some((key, index) => key !== canonical[index])) {
-    throw new Error(`${code}_FIELDS:${actual.join(',')}`);
-  }
 };
 
 const payloadBudgetLabel = (payload: StoredEntityContextRow): string => {

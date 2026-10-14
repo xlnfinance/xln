@@ -14,7 +14,7 @@ import { logDebug } from '../support/logger';
 
 // CRITICAL: Default credit is 0 - credit must be explicitly extended via set_credit_limit
 const BASE_CREDIT_LIMIT = 0n;
-const nonNegative = (value: bigint): bigint => (value < 0n ? 0n : value);
+export const nonNegative = (value: bigint): bigint => (value < 0n ? 0n : value);
 
 type DeltaPerspective = Omit<DerivedDelta, 'delta' | 'collateral' | 'totalCapacity' | 'ascii'>;
 

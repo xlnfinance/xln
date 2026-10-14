@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Sheet } from '../Sheet';
+import { ClausesPanel } from './ClausesPanel';
 import { DisputeControls } from './DisputeControls';
 import { useApp } from '../../runtime/store';
 import { sendEntityTxs } from '../../runtime/tx';
@@ -7,7 +8,7 @@ import { formatMoney, parseAmount, plainAmount } from '../../runtime/format';
 import { getTokenMeta, knownTokenIds } from '../../runtime/token-meta';
 import type { AccountView, WalletView } from '../../runtime/views';
 import { buildAddTokenTx, buildRequestCollateralTx, collateralFee, counterpartyFeePolicy, requestCreditFromHub } from '../../runtime/financial/manage';
-export type ManageTab = 'collateral' | 'credit' | 'token' | 'dispute';
+export type ManageTab = 'collateral' | 'credit' | 'token' | 'clauses' | 'dispute';
 
 export function ManageSheet({ account, wallet, onClose, initialTab }: { account: AccountView; wallet: WalletView; onClose: () => void; initialTab?: ManageTab }) {
 	const toast = useApp(s => s.toast);
@@ -66,6 +67,7 @@ export function ManageSheet({ account, wallet, onClose, initialTab }: { account:
 		{ id: 'collateral', label: 'Collateral' },
 		...(account.isHub ? [{ id: 'credit' as const, label: 'Credit' }] : []),
 		{ id: 'token', label: 'Add token' },
+		{ id: 'clauses', label: 'Clauses' },
 		{ id: 'dispute', label: 'Dispute' },
 	];
 
@@ -223,6 +225,8 @@ export function ManageSheet({ account, wallet, onClose, initialTab }: { account:
 					</button>
 				</div>
 			) : null}
+
+			{tab === 'clauses' ? <ClausesPanel account={account} /> : null}
 
 			{tab === 'dispute' ? <DisputeControls account={account} wallet={wallet} onClose={onClose} /> : null}
 		</Sheet>

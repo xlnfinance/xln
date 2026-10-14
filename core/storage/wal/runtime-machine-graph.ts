@@ -8,6 +8,7 @@
  * width, and the root hashes the logical value, never the physical rows.
  */
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
+import { exactKeys } from '../../support/boundary-guards';
 import { createStructuredLogger } from '../../support/logger';
 import { isRuntimePerfProfileEnabled } from '../../support/performance/runtime-flags';
 
@@ -78,18 +79,6 @@ const record = (value: unknown, code: string): Record<string, unknown> => {
     throw new Error(code);
   }
   return value as Record<string, unknown>;
-};
-
-const exactKeys = (
-  value: Record<string, unknown>,
-  keys: readonly string[],
-  code: string,
-): void => {
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
-  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
-    throw new Error(`${code}_FIELDS:${actual.join(',')}`);
-  }
 };
 
 const index = (value: unknown, code: string): number => {

@@ -1,6 +1,6 @@
 import type { RuntimeReplica, RoutedEntityInput } from '../types';
 import { hasEntityCommitCertificate } from '../../entity/auth/signatures';
-import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
+import { normalizeRuntimeId } from '../../protocol/identity/runtime-id';
 import { txFingerprint } from '../../protocol/state/tx-multiset';
 import { safeStringify } from '../../protocol/serialization';
 import { hashEntityLeaderVoteBody } from '../../entity/consensus/leader';
