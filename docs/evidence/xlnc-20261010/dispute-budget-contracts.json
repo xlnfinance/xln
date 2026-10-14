@@ -1,7 +1,8 @@
 {
+  "sourceSha": "9079d5b4a02e126889cf184cf6b0e9cafbd8149f",
   "command": "forge test --match-contract \"TransformerFaultModes|DisputeGasAdmissionTest|BatchBoundsTest\" --fuzz-runs 128 -vv",
   "standLockHeld": true,
-  "passed": 40,
+  "passed": 43,
   "failed": 0,
   "skipped": 0,
   "fuzzRuns": 128,
@@ -11,9 +12,9 @@
     {
       "name": "testFuzz_budget5m_combinedStockFrontier",
       "transactionGas": {
-        "start": 3269800,
+        "start": 3514280,
         "reveal": 229875,
-        "finalize": 3512364
+        "finalize": 3740840
       }
     },
     {
@@ -24,18 +25,25 @@
       }
     },
     {
+      "name": "test_budget5m_fullWidthSavings18MaxStarter",
+      "transactionGas": {
+        "start": 3418280,
+        "finalize": 3552680
+      }
+    },
+    {
       "name": "test_budget5m_irrelevantSecrets",
       "transactionGas": {
-        "start": 2994600,
-        "finalize": 4450683
+        "start": 2997160,
+        "finalize": 4453117
       }
     },
     {
       "name": "test_budget5m_maxStarterMmFrontier",
       "transactionGas": {
-        "start": 3405480,
+        "start": 3423400,
         "reveal": 851958,
-        "finalize": 3907784
+        "finalize": 3925229
       }
     },
     {
@@ -48,54 +56,69 @@
     {
       "name": "test_budget5m_mixed32",
       "transactionGas": {
-        "start": 689127,
-        "finalize": 1174043
+        "start": 694062,
+        "finalize": 1181849
       }
     },
     {
       "name": "test_budget5m_mixedWithRevealedPulls",
       "transactionGas": {
-        "start": 704718,
+        "start": 709674,
         "reveal": 696346,
-        "finalize": 1379061
+        "finalize": 1387255
       }
     },
     {
       "name": "test_budget5m_mmFrontier",
       "transactionGas": {
-        "start": 938427,
+        "start": 947367,
         "reveal": 851958,
-        "finalize": 2248664
+        "finalize": 2263413
       }
     },
     {
       "name": "test_budget5m_partialPulls18",
       "transactionGas": {
-        "start": 938439,
+        "start": 947367,
         "reveal": 1002252,
-        "finalize": 2248664
+        "finalize": 2263413
       }
     },
     {
       "name": "test_budget5m_payments32",
       "transactionGas": {
-        "start": 689127,
-        "finalize": 1206513
+        "start": 694050,
+        "finalize": 1214143
       }
     },
     {
       "name": "test_budget5m_revealedPulls18",
       "transactionGas": {
-        "start": 613087,
+        "start": 616772,
         "reveal": 851958,
-        "finalize": 1002520
+        "finalize": 1008774
+      }
+    },
+    {
+      "name": "test_budget5m_savings80MaxStarter",
+      "transactionGas": {
+        "start": 3912360,
+        "finalize": 3930280
+      }
+    },
+    {
+      "name": "test_budget5m_savingsMixedMaxStarter",
+      "transactionGas": {
+        "start": 3364520,
+        "reveal": 463028,
+        "finalize": 3402920
       }
     },
     {
       "name": "test_budget5m_swaps32",
       "transactionGas": {
-        "start": 689115,
-        "finalize": 1061609
+        "start": 694062,
+        "finalize": 1069591
       }
     },
     {

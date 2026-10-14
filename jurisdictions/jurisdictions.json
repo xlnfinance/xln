@@ -113,7 +113,7 @@
       },
       "explorer": "https://sepolia.etherscan.io",
       "currency": "ETH",
-      "status": "pending",
+      "status": "active",
       "description": "Ethereum Sepolia XLN deployment",
       "tokens": {
         "USDT": {
