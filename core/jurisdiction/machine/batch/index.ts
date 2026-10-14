@@ -32,11 +32,8 @@ export type {
   HashLadderRegistration,
   JBatch,
   JBatchState,
-  JBatchStatus,
   OptionalDisputeArgumentWarning,
-  SanitizedOptionalDisputeArgument,
   SentJBatch,
-  SettlementBatchOp,
 } from './types';
 export {
   J_BATCH_CONTRACT_LIMITS,

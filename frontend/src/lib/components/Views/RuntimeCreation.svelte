@@ -1326,6 +1326,8 @@
     if (creatingRuntime) return;
     nodeDerivationAbort?.abort();
     nodeDerivationAbort = null;
+    passwordSetupRuntimeId = null;
+    pendingPasswordOpen = null;
     phase = 'input';
     terminateWorkers();
     resetRecoveryDecision();
@@ -1390,7 +1392,7 @@
 {/snippet}
 
 {#if passwordSetupRuntimeId}
-  <WalletPasswordForm runtimeId={passwordSetupRuntimeId} seed={mnemonic24} on:unlocked={continuePasswordOpen} />
+  <WalletPasswordForm runtimeId={passwordSetupRuntimeId} seed={mnemonic24} {scheme} onCancel={reset} on:unlocked={continuePasswordOpen} />
 {:else}
 <div class="brainvault-wrapper" class:embedded class:scheme-light={scheme === 'light'}>
   <!-- Hierarchical Navigation (only in standalone mode) -->

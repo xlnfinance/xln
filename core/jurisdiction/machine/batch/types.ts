@@ -103,7 +103,7 @@ export interface JBatch {
   }>;
 }
 
-export type JBatchStatus = 'empty' | 'accumulating' | 'sent' | 'failed';
+type JBatchStatus = 'empty' | 'accumulating' | 'sent' | 'failed';
 
 export interface SentJBatch {
   batch: JBatch;
