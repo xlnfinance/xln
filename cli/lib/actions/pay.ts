@@ -1,4 +1,4 @@
-import type { RuntimeInput } from '../runtime-types';
+import { buildPaymentRuntimeInput } from '../../../core/api/payments/command';
 import type { CliSession } from '../session';
 import { submitQueued } from '../session';
 import { findAccount } from '../accounts';
@@ -6,69 +6,6 @@ import { ensureCliProfiles } from '../profile-barrier';
 import { quoteHtlcPaymentRoute } from '../../../core/runtime.ts';
 
 export type DeliveryMode = 'direct' | 'trusted' | 'instant' | 'async';
-
-export const buildPaymentInput = (input: {
-  entityId: string;
-  signerId: string;
-  targetEntityId: string;
-  amount: bigint;
-  tokenId: number;
-  route: string[];
-  deliveryMode: DeliveryMode;
-  maxSenderDebit: bigint;
-  description?: string;
-}): RuntimeInput => {
-  const targetEntityId = input.targetEntityId.toLowerCase();
-  const route = input.route.map(id => id.toLowerCase());
-  const usesDirect = input.deliveryMode === 'direct' || input.deliveryMode === 'trusted';
-  if (input.amount <= 0n) throw new Error('Payment amount must be positive');
-  if (route.length < 2) throw new Error('Route requires at least sender and recipient');
-  if (input.deliveryMode === 'direct' && route.length !== 2) {
-    throw new Error('Direct delivery requires a bilateral route');
-  }
-  const trustedGatewayEntityId =
-    input.deliveryMode === 'trusted' && route.length === 3 ? route[1] : undefined;
-  if (input.deliveryMode === 'trusted' && !trustedGatewayEntityId) {
-    throw new Error('Trusted delivery requires exactly one gateway hop');
-  }
-
-  return {
-    runtimeTxs: [],
-    entityInputs: [
-      {
-        entityId: input.entityId.toLowerCase(),
-        signerId: input.signerId,
-        entityTxs: [
-          usesDirect
-            ? {
-                type: 'directPayment',
-                data: {
-                  targetEntityId,
-                  tokenId: input.tokenId,
-                  amount: input.amount,
-                  route,
-                  deliveryMode: input.deliveryMode === 'trusted' ? 'trusted' : 'direct',
-                  ...(trustedGatewayEntityId ? { trustedGatewayEntityId } : {}),
-                  ...(input.description ? { description: input.description } : {}),
-                },
-              }
-            : {
-                type: 'htlcPayment',
-                data: {
-                  targetEntityId,
-                  tokenId: input.tokenId,
-                  amount: input.amount,
-                  maxSenderDebit: input.maxSenderDebit,
-                  route,
-                  deliveryMode: input.deliveryMode === 'instant' ? 'instant' : 'async',
-                  ...(input.description ? { description: input.description } : {}),
-                },
-              },
-        ],
-      },
-    ],
-  };
-};
 
 /** Resolve a simple route: direct bilateral, else via a single known hub counterparty. */
 export const resolveSimpleRoute = (
@@ -122,16 +59,14 @@ export const sendPayment = async (
   const senderDebit = usesHtlc
     ? quoteHtlcPaymentRoute(session.env.gossip.getProfiles(), route, args.tokenId, args.amount).senderLockAmount
     : args.amount;
-  const input = buildPaymentInput({
+  const input = buildPaymentRuntimeInput({
     entityId: session.entityId,
     signerId: session.signerId,
     targetEntityId: args.to,
-    amount: args.amount,
     tokenId: args.tokenId,
-    route,
+    route: { path: route, recipientAmount: args.amount, senderAmount: senderDebit, totalFee: senderDebit - args.amount },
     deliveryMode: args.mode,
-    maxSenderDebit: senderDebit,
-    description: args.description,
+    description: args.description ?? '',
   });
   return submitQueued(session.env, input, 'payment', 30_000);
 };

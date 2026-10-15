@@ -220,11 +220,14 @@
       "structuralDebt": 0,
       "sourceGlobs": [
         "core/api/runtime-adapter/**/*.ts",
+        "core/api/payments/**/*.ts",
         "core/api/server/**/*.ts",
         "custody/**/*.ts"
       ],
       "testGlobs": [
         "core/__tests__/**/*radapter*",
+        "core/__tests__/api/runtime-adapter/agent-payments.test.ts",
+        "core/__tests__/api/runtime-adapter/mpp-payments.test.ts",
         "core/__tests__/**/*rpc*",
         "tests/unit/brainvault-*.test.ts"
       ],
@@ -727,11 +730,14 @@
       ],
       "sourceGlobs": [
         "core/api/runtime-adapter/**/*.ts",
+        "core/api/payments/**/*.ts",
         "core/api/server/**/*.ts",
         "custody/**/*.ts"
       ],
       "testGlobs": [
         "core/__tests__/**/*radapter*",
+        "core/__tests__/api/runtime-adapter/agent-payments.test.ts",
+        "core/__tests__/api/runtime-adapter/mpp-payments.test.ts",
         "core/__tests__/**/*rpc*",
         "tests/unit/brainvault-*.test.ts"
       ]
@@ -751,11 +757,14 @@
       ],
       "sourceGlobs": [
         "core/api/runtime-adapter/**/*.ts",
+        "core/api/payments/**/*.ts",
         "core/api/server/**/*.ts",
         "custody/**/*.ts"
       ],
       "testGlobs": [
         "core/__tests__/**/*radapter*",
+        "core/__tests__/api/runtime-adapter/agent-payments.test.ts",
+        "core/__tests__/api/runtime-adapter/mpp-payments.test.ts",
         "core/__tests__/**/*rpc*",
         "tests/unit/brainvault-*.test.ts"
       ]

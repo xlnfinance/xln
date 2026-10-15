@@ -1,8 +1,27 @@
 # Current xln execution handoff
 
-Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
-Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
-Keep frozen-core, PRs with seven required green jobs, no WIP commits.
+Current task, 2026-10-15: agent-payment interoperability. Owner requested an
+evidence-based comparison of MPP, x402 and Yellow plus an SDK integration path.
+MPP already has channels; Yellow already has signed-state challenges. The
+implemented experimental `xln/charge` method uses `mppx@0.13.5`, the existing
+RuntimeAdapter and Paybook. UI and CLI now share the payment command builder;
+the duplicate CLI builder is removed. See `docs/agent-payments.md` for scope.
+Development verification: 76 targeted tests / 2,703 assertions passed; full
+`bun run check` passed (38 source gates, frontend and React type checks).
+The existing payment form remained usable with zero captured browser errors.
+These are development checks, not clean-SHA economic or release evidence.
+
+Method review: an SDK challenge test alone missed custom invoice binding.
+Inspecting the installed SDK exposed the gap; explicit stable binding and a
+cross-order credential regression now reject it. Do not substitute transport
+tests for a real economic payment, or count vendor traffic as unaffiliated trade.
+Next single step: complete one funded same-J MPP invoice and retry it after a lost
+response/restart, proving exactly one economic debit under the existing stand lock.
+No live MPP payment, package publication or new mainnet readiness is claimed.
+
+Current AGENTS.md prevails: work on main, Rust freeze lifted on 2026-10-14,
+lending production admission still deferred. Historical checkpoints below retain
+their original scope and are not new authorizations or current release evidence.
 
 
 Current checkpoint, 2026-10-13 23:56 UTC: public Sepolia now runs clean
