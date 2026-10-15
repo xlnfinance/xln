@@ -167,6 +167,7 @@ const walletE2eSteps: GateStep[] = (
     ['React dispute E2E', 'e2e-dispute-finality.spec.ts', 'dispute'],
     ['React offline protection E2E', 'e2e-dispute-protection.spec.ts', 'protection'],
     ['React recovery E2E', 'e2e-tower-restore.spec.ts,e2e-file-restore.spec.ts,e2e-sovereignty.spec.ts', 'recovery'],
+    ['React onboarding and ownership E2E', 'e2e-demo-sync.spec.ts,e2e-tutorial-company.spec.ts', 'ownership'],
   ] as const
 )
   .map<GateStep>(([name, tests, directory]) => ({

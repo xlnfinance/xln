@@ -1,16 +1,26 @@
 # Current xln execution handoff
 
-Owner correction, 2026-10-15: work on the actual React wallet through mainnet
-readiness and publish the changes to GitHub through mandatory green CI. The
-separate Arrakis scenario UI was rejected. Remove it instead of extending it.
-Current first observable failure: saved wallet chain catch-up stalled with
-`J_WATCHER_DRAIN_STALLED`, authenticated scan 0 despite retained local history.
-Fresh device-encrypted test wallet now opens the ordinary Home without password
-or scripted tutorial. Verify funding, a user-chosen payment and reopening the
-same wallet; fix the first failed boundary before extending company coverage.
-Existing dev stand and wallet databases are preserved. Mainnet is not approved.
-Implementation/check time UNKNOWN. Rule under trial: one real wallet journey
-before further feature or audit expansion. Next: verify the funded wallet reload.
+Owner update, 2026-10-15: stop manual traversal; run automated wallet E2E,
+commit/push the owned changes through PR #82 and finish after its CI result.
+The detached Arrakis page/service is removed. The ordinary React wallet now
+supports an encrypted device-local test identity without a password, guarded
+to local/test chains at creation and boot. Existing password wallets remain.
+Clean source SHA aae078a68 was exercised through payment, swap, reserve deposit,
+collateral funding, cooperative return, external withdrawal and reload. A real
+numbered Entity and both share classes also survived reload. Evidence is in
+`docs/evidence/wallet-20261015/proof-aae078a68.json`; these are local-chain facts,
+not Sepolia dispute or mainnet acceptance evidence.
+
+The next candidate fixes the observed share display error: the full jurisdiction
+catalog supplies token units; ERC20 external balances remain a separate view.
+The existing company E2E now asserts exact CONTROL/DIVIDEND amounts on Home;
+it and the funded test-wallet reload E2E join the mandatory CI gate.
+Implementation/check total time UNKNOWN. Method correction: stop manual
+expansion once a failure has an automated regression; do not run builds during
+a financial action because Vite HMR disconnects the live module adapter.
+Next: run `bun run check`, push this candidate, and inspect its first failing
+required CI step. Preserve dev databases and the running dev stand. No mainnet
+readiness claim: current-public-chain P4–P6, soak and release package remain gates.
 
 Historical handoffs below are not current release claims.
 

@@ -4,6 +4,7 @@ import { removePasswordVault } from '../../../frontend/src/lib/security/password
 import { create } from 'zustand';
 import type { RuntimeAdapterStatus } from '@xln/core/api/public/runtime-module';
 import type { ExternalWalletRow } from './financial/external';
+import type { TokenCatalogEntry } from './token-meta';
 import { applyDesign, readDesign, saveDesign, type DesignPrefs } from './design';
 
 export type ThemeName = 'dark' | 'light';
@@ -166,7 +167,8 @@ type AppState = {
 
 	/** The signer's on-chain balances, read from the jurisdiction adapter when this page hosts the runtime. */
 	externalRows: ExternalWalletRow[];
-	setExternalRows: (rows: ExternalWalletRow[]) => void;
+	tokenCatalog: TokenCatalogEntry[];
+	setExternalWallet: (rows: ExternalWalletRow[], catalog: TokenCatalogEntry[]) => void;
 
 	selectedTokenId: number;
 	setSelectedTokenId: (tokenId: number) => void;
@@ -296,7 +298,8 @@ export const useApp = create<AppState>((set, get) => ({
 	setActiveEntityId: entityId => set({ activeEntityId: entityId }),
 
 	externalRows: [],
-	setExternalRows: rows => set({ externalRows: rows }),
+	tokenCatalog: [],
+	setExternalWallet: (rows, catalog) => set({ externalRows: rows, tokenCatalog: catalog }),
 
 	selectedTokenId: 1,
 	setSelectedTokenId: tokenId => set({ selectedTokenId: tokenId }),

@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { isAddress } from 'ethers';
 import { postJson, resolveApiBase } from '../http';
 import { useApp } from '../store';
+import type { TokenCatalogEntry } from '../token-meta';
 import { hostedJAdapter } from './move';
 import { requireAdapter } from '../adapter';
 import type { RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
@@ -35,6 +36,7 @@ export type ExternalWallet = {
 	headBlockNumber: number;
 	native: bigint | null;
 	rows: ExternalWalletRow[];
+	catalog: TokenCatalogEntry[];
 };
 
 const normalize = (value: unknown): string =>
@@ -48,7 +50,7 @@ export async function readExternalWallet(entityId: string, signerId: string): Pr
 	const jadapter = await hostedJAdapter(entityId, signerId);
 	const registry = await jadapter.getTokenRegistry();
 	// readWalletSnapshot reads ERC-20 balanceOf/allowance. ERC-1155 company
-	// classes share one provider address and belong to the Ownership view.
+	// classes share one provider address; keep their metadata in the full catalog.
 	const tokens = registry.filter(token => token.tokenType === 0 && isAddress(token.address));
 	const depository = normalize(jadapter.addresses.depository);
 	const headBlockNumber = Number(await (jadapter.getCurrentBlockNumber?.() ?? jadapter.provider.getBlockNumber()));
@@ -75,7 +77,9 @@ export async function readExternalWallet(entityId: string, signerId: string): Pr
 			...(error ? { error } : {}),
 		};
 	});
-	return { owner: normalize(signerId), depository, headBlockNumber, native: snapshot.nativeBalance, rows };
+	return { owner: normalize(signerId), depository, headBlockNumber, native: snapshot.nativeBalance, rows,
+		catalog: registry.map(token => ({ tokenId: Number(token.tokenId), symbol: token.symbol, name: token.name, decimals: token.decimals })),
+	};
 }
 
 /** Remote wallets use the same validated HTTP catalog/snapshot reader as the full wallet. */
@@ -88,7 +92,8 @@ async function readRemoteExternalWallet(entityId: string, signerId: string): Pro
 	const depository = String(frame.activeEntity?.core?.config.jurisdiction?.depositoryAddress || '');
 	if (!isAddress(depository)) throw new Error('JURISDICTION_DEPOSITORY_UNAVAILABLE');
 	const apiBase = resolveApiBase();
-	const tokens = (await fetchExternalTokenCatalog(apiBase, entityId)).filter(token => token.tokenType === 0);
+	const registry = await fetchExternalTokenCatalog(apiBase, entityId);
+	const tokens = registry.filter(token => token.tokenType === 0);
 	const snapshot = await requestExternalWalletSnapshot(
 		apiBase,
 		entityId,
@@ -115,7 +120,9 @@ async function readRemoteExternalWallet(entityId: string, signerId: string): Pro
 			...(error ? { error } : {}),
 		};
 	});
-	return { owner: normalize(signerId), depository, headBlockNumber, native: snapshot.nativeBalance, rows };
+	return { owner: normalize(signerId), depository, headBlockNumber, native: snapshot.nativeBalance, rows,
+		catalog: registry.map(token => ({ tokenId: Number(token.tokenId), symbol: token.symbol, name: token.symbol, decimals: token.decimals })),
+	};
 }
 
 export type FaucetKind = 'erc20' | 'gas' | 'reserve' | 'offchain';
@@ -187,7 +194,7 @@ export async function requestFaucet(
  */
 export function useExternalWalletSync(entityId: string, signerId: string) {
 	const height = useApp(s => s.height);
-	const setExternalRows = useApp(s => s.setExternalRows);
+	const setExternalWallet = useApp(s => s.setExternalWallet);
 	const [snapshot, setSnapshot] = useState({ entityId: '', error: '' });
 	const [attempt, setAttempt] = useState(0);
 	useEffect(() => {
@@ -197,7 +204,7 @@ export function useExternalWalletSync(entityId: string, signerId: string) {
 			readExternalWallet(entityId, signerId)
 				.then(wallet => {
 					if (!cancelled) {
-						setExternalRows(wallet.rows);
+						setExternalWallet(wallet.rows, wallet.catalog);
 						setSnapshot({ entityId, error: '' });
 					}
 				})
@@ -209,7 +216,7 @@ export function useExternalWalletSync(entityId: string, signerId: string) {
 			cancelled = true;
 			clearTimeout(timer);
 		};
-	}, [entityId, signerId, height, setExternalRows, attempt]);
+	}, [entityId, signerId, height, setExternalWallet, attempt]);
 	return {
 		ready: Boolean(entityId) && snapshot.entityId === entityId,
 		error: snapshot.error,

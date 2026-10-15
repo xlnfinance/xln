@@ -12,7 +12,10 @@ test(
     await page.getByTestId('nav-manage').locator('visible=true').first().click();
     await page.getByTestId('manage-assets').click();
     await page.getByTestId('faucet-gas').click();
-    await expect(page.getByTestId('external-wallet')).toContainText(/0\.1(?:0+)? ETH/, { timeout: 15_000 });
+    await expect.poll(async () => {
+      const text = await page.getByTestId('external-wallet').innerText();
+      return Number(text.match(/([0-9.]+) ETH/)?.[1] ?? 0);
+    }, { timeout: 15_000 }).toBeGreaterThan(0);
     await page.getByTestId('wallet-tutorial').click();
     await page.getByTestId('tour-chapter').selectOption('company');
     await page.getByTestId('entity-formation').locator('summary').click();
@@ -31,6 +34,12 @@ test(
     await page.getByTestId('release-shares').click();
     await expect(page.getByTestId('shares-control')).toHaveText('100,000,000,000', { timeout: 20_000 });
     await expect(page.getByTestId('shares-dividend')).toHaveText('100,000,000,000');
+    // The full registry, not ERC20 wallet balances, defines every screen's units.
+    await page.getByTestId('nav-home').locator('visible=true').first().click();
+    const number = BigInt(entityId!).toString();
+    await expect(page.getByTestId(`token-net-CONTROL-${number}`)).toHaveText('100,000,000,000');
+    await expect(page.getByTestId(`token-net-DIVIDEND-${number}`)).toHaveText('100,000,000,000');
+    await expect(page.getByTestId('token-row-?')).toHaveCount(0);
     await page.setViewportSize({ width: 1280, height: 1100 });
     await page.getByTestId('jurisdiction-banner').scrollIntoViewIfNeeded();
     await page.screenshot({ path: '../output/tutorial-company.png' });

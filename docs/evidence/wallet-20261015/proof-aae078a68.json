@@ -1,0 +1,63 @@
+{
+  "sourceSha": "aae078a68f99c08f0609612ba947309bd7f73caf",
+  "sourceTreeCleanDuringFundingExitAndFinalReload": true,
+  "scope": "Local Ethereum chain 31337; ordinary React wallet, browser-operated, no chain clock changes or database reset. Earlier create/pay/swap actions preceded the commit; funding/exit/final reload were checked on the named clean SHA.",
+  "runtimeId": "0xe0b970109f7f8533e4ccc37d2d523d354fc7bcab",
+  "entityId": "0x70741072aafc929a7d8d0241c2b461aad23e12b6d346fdbb5e156acf76507a30",
+  "actions": [
+    "Fresh encrypted test wallet opened ordinary Home without a password.",
+    "One 100 test USDC grant and one user-form payment of 5 USDC to H1; reload restored 95 USDC without resending.",
+    "One swap spent 24.999999 USDC and received 0.0099970002 WETH after fee.",
+    "External wallet received 20 test USDC; 10 moved into reserve.",
+    "Reserve funded Account collateral by 5 USDC; cooperative settlement returned all 5 to reserve.",
+    "All 10 reserve USDC withdrawn to the same signer external address.",
+    "Registered Sirocco Compute through Ownership and released both share classes.",
+    "Final browser reload restored the same identity, personal balances and numbered Entity."
+  ],
+  "finalPersonalBalances": {
+    "accountUSDC": "70.000001",
+    "accountWETH": "0.0099970002",
+    "externalUSDC": "20",
+    "reserveUSDC": "0",
+    "collateralUSDC": "0"
+  },
+  "company": {
+    "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+    "name": "Sirocco Compute",
+    "registrationTx": "0xbbb903323f7cdfe8ff55f1d3e31211c82eae17f0549ca5e99de1bcd95888f899",
+    "controlReserve": "100000000000",
+    "dividendReserve": "100000000000"
+  },
+  "checks": {
+    "uiRuntimeUnit": {
+      "passed": 55,
+      "failed": 0,
+      "assertions": 185
+    },
+    "onboardingAndEncryption": {
+      "passed": 15,
+      "failed": 0,
+      "assertions": 50
+    },
+    "financialInvariants": {
+      "passed": 59,
+      "failed": 0,
+      "assertions": 20752
+    },
+    "bunRunCheck": "passed; 38 source checks plus frontend and React checks",
+    "reactProductionBuild": "passed",
+    "securityAuditPack": "passed; existing repository checks, not an external security audit"
+  },
+  "screenshot": "home-aae078a68.jpg",
+  "openFindings": [
+    "Company shares appeared as Unknown with 18-decimal display on Home: next candidate corrects full-registry metadata.",
+    "A previously saved Tour wallet showed J_WATCHER_DRAIN_STALLED before this new-wallet test; its old-wallet failure was not reproduced or fixed.",
+    "Ownership takeover proposal preimage and repeated treasury release remain unverified."
+  ],
+  "notProved": [
+    "Sepolia or mainnet acceptance",
+    "Unilateral dispute and offline watchtower on current public bytecode",
+    "Company share trading or control handover in this wallet traversal",
+    "All wallet scenarios"
+  ]
+}

@@ -81,7 +81,7 @@ export function switchActiveEntity(entityId: string): void {
 	const next = normalizeEntityId(String(entityId || ''));
 	const app = useApp.getState();
 	if (!next || normalizeEntityId(String(app.activeEntityId || '')) === next) return;
-	app.setExternalRows([]);
+	app.setExternalWallet([], []);
 	app.clearToasts();
 	useReceipts.getState().dismiss();
 	app.setActiveEntityId(next);
