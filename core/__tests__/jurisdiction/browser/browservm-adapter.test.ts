@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
+import { ERC20Mock__factory } from '../../../../jurisdictions/typechain-types';
 
 import { encodeSingleSignerBoard } from '../../../entity/factory';
 import { createJAdapter } from '../../../jurisdiction/adapter';
@@ -50,6 +51,26 @@ const makeReplica = (entityId: string, signerId: string): EntityReplica =>
   }) as EntityReplica;
 
 describe('BrowserVM JAdapter boundary', () => {
+  test('reads a newly registered ERC20 from its contract without changing EVM state', async () => {
+    const adapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
+    try {
+      const token = await new ERC20Mock__factory(adapter.signer).deploy('Spice', 'SPICE', 6, 1_000_000n, { gasLimit: 5_000_000n });
+      await token.waitForDeployment();
+      const address = await token.getAddress();
+      await (await token.approve(adapter.addresses.depository, 1n)).wait();
+      await (await adapter.depository.adminRegisterExternalToken({
+        entity: ethers.ZeroHash, contractAddress: address, externalTokenId: 0,
+        tokenType: 0, internalTokenId: 0, amount: 1n,
+      })).wait();
+      if (!adapter.captureStateRoot) throw new Error('BROWSERVM_STATE_ROOT_READER_MISSING');
+      const before = ethers.hexlify(await adapter.captureStateRoot());
+      const registered = (await adapter.getTokenRegistry()).find(item => item.address.toLowerCase() === address.toLowerCase());
+      expect(registered).toMatchObject({ symbol: 'SPICE', name: 'Spice', decimals: 6, tokenType: 0 });
+      expect(registered?.tokenId).toBe(4);
+      expect(ethers.hexlify(await adapter.captureStateRoot())).toBe(before);
+    } finally { await adapter.close(); }
+  }, 30_000);
+
   test('uses the Runtime-owned clock for absolute scenario dispute deadlines', async () => {
     const adapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
     const env = createEmptyEnv('browservm-scenario-clock');

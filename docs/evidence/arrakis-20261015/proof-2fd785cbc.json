@@ -1,0 +1,379 @@
+{
+  "sourceSha": "2fd785cbc62deeb379efc851741c4328a9b55648",
+  "cleanSource": true,
+  "environment": "loopback React development build + private BrowserVM, memory-only; no public RPC",
+  "checks": {
+    "browserStepsPassed": 8,
+    "browserStepsTotal": 8,
+    "browserReloadSnapshotUnchanged": true,
+    "completedPurchaseRetryUnchanged": true,
+    "newWorldLaunchPassed": true,
+    "staleWorldCommandRejected": true,
+    "outOfOrderCommandRejected": true,
+    "browserConsoleErrors": 0,
+    "narrowViewportWidth": 487,
+    "narrowDocumentScrollWidth": 487,
+    "browserVmTestsPassed": 11,
+    "browserVmAssertions": 75,
+    "browserVmTestSeconds": 1.59,
+    "publicChainEvidence": false,
+    "serverCrashRecoveryTested": false
+  },
+  "afterPurchase": {
+    "completed": [
+      "launch",
+      "pay",
+      "buy"
+    ],
+    "next": "settle",
+    "busy": null,
+    "error": null,
+    "height": 158,
+    "runtimeId": "0xbd662426303bcdb1942d21e64c72888b9e07e552",
+    "tokens": [
+      {
+        "id": 4,
+        "symbol": "SPICE",
+        "decimals": 6
+      },
+      {
+        "id": 5,
+        "symbol": "SIR.CONTROL",
+        "decimals": 0
+      },
+      {
+        "id": 6,
+        "symbol": "SIR.DIVIDEND",
+        "decimals": 0
+      }
+    ],
+    "entities": [
+      {
+        "role": "investor",
+        "name": "You \u00b7 House Meridian",
+        "id": "0x0000000000000000000000000000000000000000000000000000000000000003",
+        "height": 15,
+        "threshold": "1",
+        "validators": [
+          "0xfc5bbbdf555d029a84ca29cc9c68b466d489f0d5"
+        ],
+        "balances": [
+          {
+            "tokenId": 4,
+            "reserve": "0",
+            "secured": "1000000000000",
+            "receivable": "0",
+            "debt": "0",
+            "net": "1000000000000"
+          },
+          {
+            "tokenId": 5,
+            "reserve": "0",
+            "secured": "0",
+            "receivable": "60000000000",
+            "debt": "0",
+            "net": "60000000000"
+          },
+          {
+            "tokenId": 6,
+            "reserve": "0",
+            "secured": "0",
+            "receivable": "0",
+            "debt": "0",
+            "net": "0"
+          }
+        ]
+      },
+      {
+        "role": "company",
+        "name": "Sirocco Harvesting",
+        "id": "0x0000000000000000000000000000000000000000000000000000000000000005",
+        "height": 20,
+        "threshold": "2",
+        "validators": [
+          "0xfc5bbbdf555d029a84ca29cc9c68b466d489f0d5",
+          "0xe0ff7a657a888acadf7988587085f127dbb5122a",
+          "0x383a294012acdbc64c1f20709adccf66d3ccd7f4"
+        ],
+        "balances": [
+          {
+            "tokenId": 4,
+            "reserve": "0",
+            "secured": "0",
+            "receivable": "6000000000000",
+            "debt": "0",
+            "net": "6000000000000"
+          },
+          {
+            "tokenId": 5,
+            "reserve": "40000000000",
+            "secured": "0",
+            "receivable": "0",
+            "debt": "0",
+            "net": "40000000000"
+          },
+          {
+            "tokenId": 6,
+            "reserve": "0",
+            "secured": "100000000000",
+            "receivable": "0",
+            "debt": "0",
+            "net": "100000000000"
+          }
+        ]
+      },
+      {
+        "role": "courier",
+        "name": "Caravan Logistics",
+        "id": "0x0000000000000000000000000000000000000000000000000000000000000004",
+        "height": 13,
+        "threshold": "1",
+        "validators": [
+          "0x8144bfa3ef8cc2eefce24ea89edc50b5a90c3ebe"
+        ],
+        "balances": [
+          {
+            "tokenId": 4,
+            "reserve": "6999900000000",
+            "secured": "95000000",
+            "receivable": "0",
+            "debt": "0",
+            "net": "6999995000000"
+          },
+          {
+            "tokenId": 5,
+            "reserve": "0",
+            "secured": "0",
+            "receivable": "0",
+            "debt": "0",
+            "net": "0"
+          },
+          {
+            "tokenId": 6,
+            "reserve": "0",
+            "secured": "0",
+            "receivable": "0",
+            "debt": "0",
+            "net": "0"
+          }
+        ]
+      },
+      {
+        "role": "market",
+        "name": "Arrakis Exchange",
+        "id": "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "height": 31,
+        "threshold": "1",
+        "validators": [
+          "0xbd662426303bcdb1942d21e64c72888b9e07e552"
+        ],
+        "balances": [
+          {
+            "tokenId": 4,
+            "reserve": "0",
+            "secured": "6000005000000",
+            "receivable": "0",
+            "debt": "6000000000000",
+            "net": "5000000"
+          },
+          {
+            "tokenId": 5,
+            "reserve": "0",
+            "secured": "60000000000",
+            "receivable": "0",
+            "debt": "60000000000",
+            "net": "0"
+          },
+          {
+            "tokenId": 6,
+            "reserve": "0",
+            "secured": "0",
+            "receivable": "0",
+            "debt": "0",
+            "net": "0"
+          }
+        ]
+      }
+    ]
+  },
+  "completedWorld": {
+    "completed": [
+      "launch",
+      "pay",
+      "buy",
+      "settle",
+      "propose",
+      "activate",
+      "treasury",
+      "sell"
+    ],
+    "next": null,
+    "busy": null,
+    "error": null,
+    "height": 260,
+    "runtimeId": "0xbd662426303bcdb1942d21e64c72888b9e07e552",
+    "tokens": [
+      {
+        "id": 4,
+        "symbol": "SPICE",
+        "decimals": 6
+      },
+      {
+        "id": 5,
+        "symbol": "SIR.CONTROL",
+        "decimals": 0
+      },
+      {
+        "id": 6,
+        "symbol": "SIR.DIVIDEND",
+        "decimals": 0
+      }
+    ],
+    "entities": [
+      {
+        "role": "investor",
+        "name": "You \u00b7 House Meridian",
+        "id": "0x0000000000000000000000000000000000000000000000000000000000000003",
+        "height": 35,
+        "threshold": "1",
+        "validators": [
+          "0xfc5bbbdf555d029a84ca29cc9c68b466d489f0d5"
+        ],
+        "balances": [
+          {
+            "tokenId": 4,
+            "reserve": "0",
+            "secured": "2000000000000",
+            "receivable": "0",
+            "debt": "0",
+            "net": "2000000000000"
+          },
+          {
+            "tokenId": 5,
+            "reserve": "60000000000",
+            "secured": "0",
+            "receivable": "0",
+            "debt": "10000000000",
+            "net": "50000000000"
+          },
+          {
+            "tokenId": 6,
+            "reserve": "0",
+            "secured": "0",
+            "receivable": "0",
+            "debt": "0",
+            "net": "0"
+          }
+        ]
+      },
+      {
+        "role": "company",
+        "name": "Sirocco Harvesting",
+        "id": "0x0000000000000000000000000000000000000000000000000000000000000005",
+        "height": 36,
+        "threshold": "1",
+        "validators": [
+          "0xfc5bbbdf555d029a84ca29cc9c68b466d489f0d5"
+        ],
+        "balances": [
+          {
+            "tokenId": 4,
+            "reserve": "0",
+            "secured": "0",
+            "receivable": "5000000000000",
+            "debt": "0",
+            "net": "5000000000000"
+          },
+          {
+            "tokenId": 5,
+            "reserve": "39999999999",
+            "secured": "0",
+            "receivable": "10000000000",
+            "debt": "0",
+            "net": "49999999999"
+          },
+          {
+            "tokenId": 6,
+            "reserve": "0",
+            "secured": "100000000000",
+            "receivable": "0",
+            "debt": "0",
+            "net": "100000000000"
+          }
+        ]
+      },
+      {
+        "role": "courier",
+        "name": "Caravan Logistics",
+        "id": "0x0000000000000000000000000000000000000000000000000000000000000004",
+        "height": 14,
+        "threshold": "1",
+        "validators": [
+          "0x8144bfa3ef8cc2eefce24ea89edc50b5a90c3ebe"
+        ],
+        "balances": [
+          {
+            "tokenId": 4,
+            "reserve": "6999900000000",
+            "secured": "95000000",
+            "receivable": "0",
+            "debt": "0",
+            "net": "6999995000000"
+          },
+          {
+            "tokenId": 5,
+            "reserve": "0",
+            "secured": "0",
+            "receivable": "0",
+            "debt": "0",
+            "net": "0"
+          },
+          {
+            "tokenId": 6,
+            "reserve": "0",
+            "secured": "0",
+            "receivable": "0",
+            "debt": "0",
+            "net": "0"
+          }
+        ]
+      },
+      {
+        "role": "market",
+        "name": "Arrakis Exchange",
+        "id": "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "height": 64,
+        "threshold": "1",
+        "validators": [
+          "0xbd662426303bcdb1942d21e64c72888b9e07e552"
+        ],
+        "balances": [
+          {
+            "tokenId": 4,
+            "reserve": "0",
+            "secured": "5000005000000",
+            "receivable": "0",
+            "debt": "5000000000000",
+            "net": "5000000"
+          },
+          {
+            "tokenId": 5,
+            "reserve": "0",
+            "secured": "0",
+            "receivable": "10000000000",
+            "debt": "10000000000",
+            "net": "0"
+          },
+          {
+            "tokenId": 6,
+            "reserve": "0",
+            "secured": "0",
+            "receivable": "0",
+            "debt": "0",
+            "net": "0"
+          }
+        ]
+      }
+    ]
+  }
+}

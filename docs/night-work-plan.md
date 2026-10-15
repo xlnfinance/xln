@@ -1,5 +1,41 @@
 # Current xln execution handoff
 
+Current result, 2026-10-15: PR #80 merged as e24ac5d37 after 7/7 required CI.
+Arrakis implementation 2fd785cbc was exercised from a clean source tree: 8/8
+browser actions, exact purchase balances, 60% settled CONTROL, 2-of-3 to 1-of-1
+board activation, successor treasury transfer and resale. Browser reload and
+completed-purchase retry preserved the entire snapshot. Stale-world and
+out-of-order commands returned 409 without changing state. Creating and launching
+a new world also passed; that fresh funded world is left for the owner at
+localhost:5183/arrakis. Browser console: zero errors; narrow layout 487px had
+no horizontal overflow. BrowserVM tests: 11 passed / 75 assertions in 1.59s.
+Full `bun run check` passed the candidate (38 source gates plus frontend and
+React checks). Evidence: `docs/evidence/arrakis-20261015/proof-2fd785cbc.json`.
+The demo service remains a separate loopback-only interactive simnet process;
+no existing stand process, chain clock or database was reset. Server restart
+recovery is explicitly not claimed. Next single step: publish the Arrakis PR
+and address its first failing required CI job, if any.
+
+
+Current, 2026-10-15: PR #80 SHA 335171567 has all seven required CI jobs green
+(run 38683211907). E2E took 16m23s; unit tests 14m1s. Arrakis now has an
+interactive React route at localhost:5183/arrakis and a loopback-only private
+EVM service (`bun run demo:arrakis`). The first browser traversal completed
+8/8 steps: launch, Spice payment, CONTROL purchase, reserve settlement, board
+proposal, activation, successor treasury transfer and resale. This is a local
+orchestrated simnet, not public-chain/mainnet evidence or MML commerce.
+The new-token path exposed a BrowserVM registry bug: it only knew startup
+ERC20s. Registry reads now query the registered ERC20; its focused regression
+passes (1 test, 3 assertions, 1.061s). The next candidate also funds Depository
+with actual Spice matching its two 7M reserve grants. Rerun a new private world,
+verify reload and completed-action retry, then `bun run check` and publish.
+Existing dev stand and its databases are untouched. Current demo world is
+memory-only and explicitly says server restart creates a new world.
+Method trial block 2/2: named CI output reached seven green jobs; browser-first
+execution exposed metadata and backing setup issues before expansion. Keep the
+bounded-log habit. Total implementation time UNKNOWN; no separate score or log.
+
+
 Checkpoint, 2026-10-15 04:44 UTC: PR #80 candidate d0764c00f completed six
 of seven CI jobs successfully. E2E stopped before browser journeys in
 `security:audit-pack`: the Hanko scan expected the batch hashing implementation

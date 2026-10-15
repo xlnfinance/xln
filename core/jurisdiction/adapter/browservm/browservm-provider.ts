@@ -596,19 +596,30 @@ export class BrowserVMProvider {
 
   /** Token registry (symbol → metadata) */
   async getTokenRegistry(): Promise<JTokenInfo[]> {
-    const knownErc20 = new Map(
-      Array.from(this.tokenRegistry.values()).map(token => [token.tokenId, token] as const),
-    );
     const length = await this.getTokensLength();
     const tokens: JTokenInfo[] = [];
     for (let tokenId = 1; tokenId < length; tokenId += 1) {
       const metadata = await this.getRegisteredTokenMetadata(tokenId);
       if (metadata.tokenType === 0) {
-        const known = knownErc20.get(tokenId);
-        if (!known || known.address.toLowerCase() !== metadata.contractAddress.toLowerCase()) {
-          throw new Error(`BROWSERVM_TOKEN_METADATA_UNAVAILABLE:${tokenId}`);
+        const iface = this.erc20Interface;
+        if (!iface) throw new Error('ERC20 artifact not loaded');
+        const read = async (field: 'name' | 'symbol' | 'decimals') => {
+          const result = await this.runReadOnlyCall({
+            to: createAddressFromString(metadata.contractAddress), caller: this.deployerAddress,
+            data: ethers.getBytes(iface.encodeFunctionData(field)), gasLimit: 100_000n,
+          });
+          if (result.execResult.exceptionError) throw new Error(`BROWSERVM_TOKEN_METADATA_UNAVAILABLE:${tokenId}:${field}`);
+          return iface.decodeFunctionResult(field, result.execResult.returnValue)[0];
+        };
+        // Registry identity comes from Depository, metadata from that ERC20.
+        // A token registered after boot must not depend on the default faucet list.
+        const name = String(await read('name')).trim(), symbol = String(await read('symbol')).trim();
+        const decimals = Number(await read('decimals'));
+        if (!name || !symbol || !Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
+          throw new Error(`BROWSERVM_TOKEN_METADATA_INVALID:${tokenId}`);
         }
-        tokens.push(known);
+        tokens.push({ tokenId, tokenType: 0, externalTokenId: metadata.externalTokenId,
+          address: metadata.contractAddress, name, symbol, decimals });
         continue;
       }
       if (!this.entityProviderAddress) throw new Error('EntityProvider not deployed');
