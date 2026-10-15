@@ -180,6 +180,10 @@ describe('disposable Runtime activity view', () => {
       await commitRuntimeTick(env);
       await commitRuntimeTick(env);
       await commitRuntimeTick(env);
+      // Lost disposable receipts require replay while the live writer wants
+      // to replace the materialized graph. The adapter lease must cover both
+      // repair and page reads, including the captured replay predecessor.
+      await resetRuntimeActivityViewAtFloor(env, 2);
       const read = resolveRuntimeAdapterRead<RuntimeAdapterFrameReceiptResponse>(
         {
           env,
@@ -198,7 +202,7 @@ describe('disposable Runtime activity view', () => {
             ),
         },
         'frame-receipts',
-        { fromHeight: 2, toHeight: 5, eventNames: ['RuntimeTick'] },
+        { fromHeight: 3, toHeight: 5, eventNames: ['RuntimeTick'] },
       );
       expect(await captured.promise).toBe(4);
       writer = commitRuntimeTick(env);
@@ -209,13 +213,14 @@ describe('disposable Runtime activity view', () => {
       const page = await read;
       expect(page.toHeight).toBe(4);
       expect(page.receipts.map(receipt => [receipt.height, receipt.logs.map(log => log.message)])).toEqual([
-        [2, ['RuntimeTick']],
         [3, ['RuntimeTick']],
         [4, ['RuntimeTick']],
       ]);
       await writer;
       expect(await getPersistedLatestHeight(env)).toBe(5);
       expect(env.infrastructure?.activeCommittedReaders).toBe(0);
+      expect((await readPersistedRuntimeActivityJournal(env, 5))?.logs.map(log => log.message))
+        .toEqual(['RuntimeTick']);
     } finally {
       resume.resolve();
       await writer;

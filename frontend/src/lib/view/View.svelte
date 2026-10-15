@@ -176,28 +176,6 @@
     )} ${token.symbol}`;
   };
 
-  const readEmbeddedPaymentReceipts = async (
-    request: PaymentTerminalReadRequest,
-  ): Promise<PaymentTerminalReceiptPage> => {
-    const rawEnv = getEnv();
-    const env = rawEnv ? (unwrapLiveRuntimeEnv(rawEnv) ?? rawEnv) : null;
-    if (!env) throw new Error('PAYMENT_TERMINAL_EMBEDDED_ENV_UNAVAILABLE');
-    if (normalizeRuntimeId(env.runtimeId) !== request.runtimeId) {
-      throw new Error(`PAYMENT_TERMINAL_RUNTIME_MISMATCH:${request.runtimeId}`);
-    }
-    const xln = get(xlnInstance);
-    if (!xln) throw new Error('PAYMENT_TERMINAL_RUNTIME_API_UNAVAILABLE');
-    const receipts = [];
-    let scannedThroughHeight = request.fromHeight - 1;
-    for (let height = request.fromHeight; height <= request.toHeight; height += 1) {
-      const journal = await xln.readPersistedRuntimeActivityJournal(env, height);
-      if (!journal) break;
-      receipts.push({ height, logs: journal.logs ?? [] });
-      scannedThroughHeight = height;
-    }
-    return { scannedThroughHeight, receipts };
-  };
-
   const readPaymentTerminalReceipts = async (
     request: PaymentTerminalReadRequest,
   ): Promise<PaymentTerminalReceiptPage> => {
@@ -209,7 +187,6 @@
     if (normalizeRuntimeId(handle.runtimeId) !== request.runtimeId) {
       throw new Error(`PAYMENT_TERMINAL_ADAPTER_MISMATCH:${request.runtimeId}`);
     }
-    if (handle.mode === 'embedded') return readEmbeddedPaymentReceipts(request);
     const response = await adapter.read<RuntimeAdapterFrameReceiptResponse>('frame-receipts', {
       fromHeight: request.fromHeight,
       toHeight: request.toHeight,

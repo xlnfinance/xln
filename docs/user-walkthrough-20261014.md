@@ -46,3 +46,32 @@ was funded, and no financial transaction was sent. No more questions were asked.
 
 Next executable UI step requires an already-open test wallet. The task is partial;
 this report does not claim perfect behavior or mainnet acceptance.
+
+## Payment-status read race — 2026-10-15
+
+Owner report: `STORAGE_DIRECT_HISTORICAL_READ_FORBIDDEN`, requested Entity
+state 101, materialized state 201, checkpoint 1. Starting source: `69f3dd47a`.
+This error is a failed receipt read; it does not establish payment failure.
+
+The Svelte View bypassed RAdapter only in embedded mode and called the storage
+journal reader directly once per height. Repair can select a materialized replay
+base that the unblocked frame writer replaces before restoration. The remote
+and React receipt paths already hold the RAdapter committed-read lease.
+
+Removed the 23-line embedded bypass and wired the existing frame-receipts
+reader into the embedded adapter. Both modes now use one bounded receipt query
+under the existing lease. Storage guards, payment execution and persisted data
+are unchanged; no transfer was repeated.
+
+Verification:
+- 21 tests passed, 94 assertions: activity/recovery and terminal-monitor suites.
+- Extended the existing real LevelDB concurrency regression: lost receipt view,
+  historical replay, queued checkpoint writer, exact returned events, then
+  successful writer completion and a readable next receipt.
+- `bun run check` passed (38 source gates, Svelte validation/build, React types).
+- Local Vite page reloaded without captured console errors. The available
+  browser tab is at wallet creation, so the owner's authenticated payment and
+  its balance remain unverified. Do not interpret this as a live payment pass.
+
+NEXT: read the original payment receipt in the existing unlocked wallet after
+loading this fix; do not submit the payment again.
