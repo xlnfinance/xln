@@ -357,7 +357,7 @@ export function Assets() {
                     onClick={() => void faucet('gas')}
                     data-testid="faucet-gas"
                   >
-                    {busy === 'faucet-gas' ? 'Sending…' : '0.1 ETH for gas to my on-chain wallet'}
+                    {busy === 'faucet-gas' ? 'Sending…' : 'Get test ETH for gas'}
                   </button>
                   <button
                     type="button"

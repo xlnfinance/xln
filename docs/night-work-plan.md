@@ -1,5 +1,20 @@
 # Current xln execution handoff
 
+Owner correction, 2026-10-15: work on the actual React wallet through mainnet
+readiness and publish the changes to GitHub through mandatory green CI. The
+separate Arrakis scenario UI was rejected. Remove it instead of extending it.
+Current first observable failure: saved wallet chain catch-up stalled with
+`J_WATCHER_DRAIN_STALLED`, authenticated scan 0 despite retained local history.
+Fresh device-encrypted test wallet now opens the ordinary Home without password
+or scripted tutorial. Verify funding, a user-chosen payment and reopening the
+same wallet; fix the first failed boundary before extending company coverage.
+Existing dev stand and wallet databases are preserved. Mainnet is not approved.
+Implementation/check time UNKNOWN. Rule under trial: one real wallet journey
+before further feature or audit expansion. Next: verify the funded wallet reload.
+
+Historical handoffs below are not current release claims.
+
+
 Current result, 2026-10-15: PR #80 merged as e24ac5d37 after 7/7 required CI.
 Arrakis implementation 2fd785cbc was exercised from a clean source tree: 8/8
 browser actions, exact purchase balances, 60% settled CONTROL, 2-of-3 to 1-of-1

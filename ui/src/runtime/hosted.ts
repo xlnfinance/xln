@@ -1,3 +1,4 @@
+import { assertDemoNetwork } from '@xln/frontend/lib/config/demo-accounts';
 import { getOpenAccountRebalancePolicyData, hydrateJurisdictionPolicyDefaults } from '@xln/frontend/lib/utils/onboarding/onboardingPreferences';
 import { sendRuntimeInput } from './commands';
 import { getXLN } from './xln-loader';
@@ -231,6 +232,7 @@ export type HostedVaultOptions = {
  */
 export async function bootHostedVault(seed: string, options: HostedVaultOptions): Promise<void> {
 	const { stack } = options;
+	if (options.kind === 'test') assertDemoNetwork(stack.jurisdictions.map(chain => chain.chainId));
 	const step = (text: string): void => options.onStep?.(text);
 	useApp.getState().setBooting(true);
 	try {

@@ -1,3 +1,5 @@
+import { protectVaultSecrets, unprotectVaultSecrets } from '../../../frontend/src/lib/security/vaultProtection';
+import { assertDemoNetwork } from '../../../frontend/src/lib/config/demo-accounts';
 import { useNavigate } from 'react-router-dom';
 import { HDNodeWallet } from 'ethers';
 import { explainWalletError } from '@xln/frontend/lib/utils/ui/walletError';
@@ -100,20 +102,36 @@ export function Gate() {
 
 	const NO_STACK = 'No xln network answers at this address. Open the wallet from a running stack (bun run dev, or xln.finance/ui).';
 
-	/** The demo uses the same encrypted local wallet and reopen path as an import. */
+	const testNetwork = useMemo(() => {
+		if (!stack) return false;
+		try {
+			assertDemoNetwork(stack.jurisdictions.map(chain => chain.chainId));
+			return true;
+		} catch {
+			return false;
+		} // Capability check; bootstrap validates again before opening keys.
+	}, [stack]);
+
 	const learn = (): void => {
 		void run(async () => {
 			if (!stack) throw new Error(NO_STACK);
+			assertDemoNetwork(stack.jurisdictions.map(chain => chain.chainId));
+			setBusyStep('Creating your test wallet');
 			const seed = HDNodeWallet.createRandom().mnemonic?.phrase;
 			if (!seed) throw new Error('MNEMONIC_GENERATION_FAILED');
 			const id = runtimeIdForSeed(seed).toLowerCase();
-			setPasswordEntry({ id, name: 'Tour wallet', seed, open: async unlocked => {
-				await bootHostedVault(unlocked, {
-					vaultId: id, vaultName: 'Tour wallet', kind: 'mnemonic', selfLabel: 'Alice', stack, onStep: setBusyStep,
+			const deviceProtection = await protectVaultSecrets(id, { seed }, null);
+			useApp.getState().addVault({ id, name: 'Test wallet', kind: 'test', createdAt: Date.now(), deviceProtection });
+			await bootHostedVault(seed, {
+				vaultId: id,
+				vaultName: 'Test wallet',
+				kind: 'test',
+				selfLabel: 'Test wallet',
+				stack,
+				onStep: setBusyStep,
 				});
+			useApp.getState().setTour({ active: false, index: 0 });
 				navigate('/', { replace: true });
-				useApp.getState().setTour({ active: true, index: 0 });
-			} });
 		});
 	};
 
@@ -209,6 +227,25 @@ export function Gate() {
 			setMode('remote');
 			return;
 		}
+		if (vault.kind === 'test') {
+			void run(async () => {
+				if (!stack) throw new Error(NO_STACK);
+				assertDemoNetwork(stack.jurisdictions.map(chain => chain.chainId));
+				if (!vault.deviceProtection) throw new Error('This device no longer has this test wallet key. Restore with its recovery phrase.');
+				setBusyStep('Opening your test wallet');
+				const secrets = await unprotectVaultSecrets(vault.id, vault.deviceProtection);
+				if (!secrets || runtimeIdForSeed(secrets.seed).toLowerCase() !== vault.id.toLowerCase()) throw new Error('Test wallet key unavailable or identity mismatch. Restore with its recovery phrase.');
+				await bootHostedVault(secrets.seed, {
+					vaultId: vault.id,
+					vaultName: vault.name,
+					kind: 'test',
+					selfLabel: vault.name,
+					stack,
+					onStep: setBusyStep,
+				});
+			});
+			return;
+		}
 		if (hasPasswordVault(vault.id)) {
 			setPasswordEntry({ id: vault.id, name: vault.name, open: async seed => {
 				if (!stack) throw new Error(NO_STACK);
@@ -286,7 +323,7 @@ export function Gate() {
 				</p>
 			) : null}
 
-			{mode === 'landing' && <GateWelcome onMode={setMode} onUnlock={unlockVault} onLearn={learn} networkReady={Boolean(stack)} />}
+			{mode === 'landing' && <GateWelcome onMode={setMode} onUnlock={unlockVault} onLearn={learn} testNetwork={testNetwork} />}
 
 			{mode === 'create' && (
 				<form

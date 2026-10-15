@@ -5,12 +5,12 @@ type Props = {
   onMode: (mode: 'create' | 'import' | 'remote') => void;
   onUnlock: (vault: VaultMeta) => void;
   onLearn: () => void;
-  networkReady: boolean;
+  testNetwork: boolean;
 };
 
 const identity = (vault: VaultMeta) => `${vault.name} · ${vault.id.slice(-8)}`;
 
-export function GateWelcome({ onMode, onUnlock, onLearn, networkReady }: Props) {
+export function GateWelcome({ onMode, onUnlock, onLearn, testNetwork }: Props) {
   const vaults = useApp(s => s.vaults).filter(vault => vault.kind !== 'sandbox');
   const activeId = useApp(s => s.activeVaultId);
   const selected = vaults.find(vault => vault.id === activeId) ?? vaults[0];
@@ -56,26 +56,21 @@ export function GateWelcome({ onMode, onUnlock, onLearn, networkReady }: Props) 
           )}
         </section>
       )}
+      {testNetwork && (
       <section className="gate-start">
         {!selected && (
           <>
-            <h2>Try your first payment</h2>
-            <p className="muted">Get test money, send it, then try a swap. We’ll guide you.</p>
+              <h2>Open a test wallet</h2>
+              <p className="muted">Use the full wallet on the test network. Choose your own payments and trades.</p>
           </>
         )}
-        <button
-          type="button"
-          className={`btn ${selected ? 'quiet' : ''}`}
-          onClick={onLearn}
-          disabled={!networkReady}
-          data-testid="gate-learn"
-        >
-          {selected ? 'Try the guided demo' : 'Try with test money'}
+          <button type="button" className={`btn ${selected ? 'quiet' : ''}`} onClick={onLearn} data-testid="gate-learn">
+            Open a test wallet
           <Icon name="arrow" size={16} />
         </button>
-        <p className="note">Demo funds have no real value.</p>
-        {import.meta.env.DEV && <a className="btn quiet" href="/arrakis">Explore Arrakis · trade shares and take control</a>}
+          <p className="note">No password needed. Encrypted on this device. Test funds only.</p>
       </section>
+      )}
       <details className="gate-advanced">
         <summary>Advanced connection</summary>
         <button type="button" className="btn quiet" onClick={() => onMode('remote')}>

@@ -19,7 +19,6 @@ import { Assets } from './screens/Assets';
 import { Lending } from './screens/Lending';
 import { Ownership } from './screens/Ownership';
 import { Sovereignty } from './screens/Sovereignty';
-import { Arrakis } from './screens/Arrakis';
 import { Desk } from './screens/Desk';
 
 /** `/#pay/<invoice>` is the canonical wallet link; it opens Pay with the invoice applied. */
@@ -46,7 +45,6 @@ function HomeOrDesk() {
 }
 
 export default function App() {
-	const location = useLocation();
 	const status = useApp(s => s.adapterStatus);
 	const booting = useApp(s => s.booting);
 	const activeEntityId = useApp(s => s.activeEntityId);
@@ -59,8 +57,6 @@ export default function App() {
 		if (!connected) return;
 		return startPaymentTerminal();
 	}, [connected]);
-
-	if (import.meta.env.DEV && location.pathname === '/arrakis') return <Arrakis />;
 
 	if (!connected) {
 		return (

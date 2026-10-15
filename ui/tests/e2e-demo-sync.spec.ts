@@ -5,10 +5,7 @@ import { readWalletCheckpoint } from './stack';
 // Capture compact scan evidence without recording every historical RPC payload.
 test.use({ trace: 'off', video: 'off' });
 
-test(
-	'guided demo preserves its funded Runtime and Account heads after a password unlock',
-	{ tag: '@resilience' },
-	async ({ page }, info) => {
+test('test wallet preserves its funded Runtime and Account heads without a password', { tag: '@resilience' }, async ({ page }, info) => {
 		test.setTimeout(60_000);
 		page.on('console', message => {
 			if (message.type() === 'error') console.error('DEMO_BROWSER_ERROR', message.text());
@@ -18,12 +15,7 @@ test(
 		console.log('DEMO_STAGE start');
 		const startedAt = Date.now();
 		await page.getByTestId('gate-learn').click({ timeout: 10_000 });
-		await expect(page.getByRole('heading', { name: 'Set a local password' })).toBeVisible();
-		await expect(page.getByTestId('home-total')).toHaveCount(0);
-		const password = 'demo-recovery-test-password';
-		await page.getByLabel('Password', { exact: true }).fill(password);
-		await page.getByLabel('Confirm password', { exact: true }).fill(password);
-		await page.getByRole('button', { name: 'Save and open', exact: true }).click();
+	await expect(page.locator('input[type="password"]')).toHaveCount(0);
 		console.log('DEMO_STAGE syncing');
 		try {
 			await expect(page.getByTestId('home-total')).toBeVisible({ timeout: 55_000 });
@@ -41,9 +33,7 @@ test(
 			const balance = await page.getByTestId('home-total').innerText();
 			await page.reload({ waitUntil: 'domcontentloaded' });
 			await page.getByRole('button', { name: 'Continue', exact: true }).click();
-			await expect(page.getByRole('heading', { name: 'Unlock wallet' })).toBeVisible();
-			await page.getByLabel('Password', { exact: true }).fill(password);
-			await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+		await expect(page.locator('input[type="password"]')).toHaveCount(0);
 			await expect(page.getByTestId('home-total')).toHaveText(balance);
 			const restored = await readWalletCheckpoint(page, before.frame.height);
 			expect(restored.runtimeId).toBe(before.runtimeId);
@@ -99,5 +89,4 @@ test(
 			await info.attach('chain-sync-status', { body: JSON.stringify(evidence), contentType: 'application/json' });
 			console.log('DEMO_CHAIN_SYNC_STATUS', JSON.stringify(evidence));
 		}
-	},
-);
+});

@@ -10,6 +10,7 @@ export function Vault() {
   const sessionSeeds = useApp(s => s.sessionSeeds);
   const removeVault = useApp(s => s.removeVault);
   const toast = useApp(s => s.toast);
+  const [forgetting, setForgetting] = useState(false);
   const [revealing, setRevealing] = useState(false);
   const [revealConfirmed, setRevealConfirmed] = useState(false);
 
@@ -17,7 +18,9 @@ export function Vault() {
   const seed = activeVaultId ? sessionSeeds[activeVaultId] : undefined;
 
   const lock = (): void => {
-    void lockEmbeddedRuntime().catch(error => toast(`Wallet stopped with an error: ${error instanceof Error ? error.message : String(error)}`));
+    void lockEmbeddedRuntime().catch(error =>
+      toast(`Wallet stopped with an error: ${error instanceof Error ? error.message : String(error)}`),
+    );
   };
 
   return (
@@ -41,20 +44,38 @@ export function Vault() {
           <Icon name="lock" size={14} /> Lock
         </button>
         {activeVault && activeVault.kind !== 'sandbox' && (
-          <button
-            type="button"
-            className="btn danger sm"
-            onClick={() => {
-              removeVault(activeVault.id);
-              lock();
-              toast('Vault forgotten on this device. The name and passphrase still recover it anywhere.');
-            }}
-          >
+          <button type="button" className="btn danger sm" onClick={() => setForgetting(true)}>
             <Icon name="trash" size={14} /> Forget vault
           </button>
         )}
       </div>
 
+      {forgetting && activeVault && (
+        <Sheet title="Forget this wallet?" onClose={() => setForgetting(false)}>
+          <p className="note">
+            This removes its key from this device. Save your recovery phrase and encrypted backup first; they are needed
+            to recover your funds.
+          </p>
+          <button
+            type="button"
+            className="btn danger"
+            onClick={() => {
+              void lockEmbeddedRuntime()
+                .then(() => removeVault(activeVault.id))
+                .then(
+                  () => toast('Wallet forgotten on this device.'),
+                  error =>
+                    toast(
+                      `Could not forget wallet: ${error instanceof Error ? error.message : String(error)}`,
+                      'danger',
+                    ),
+                );
+            }}
+          >
+            I saved my recovery details · Forget wallet
+          </button>
+        </Sheet>
+      )}
       {revealing && seed && (
         <Sheet
           title="Recovery phrase"

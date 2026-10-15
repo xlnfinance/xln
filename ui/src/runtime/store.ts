@@ -1,3 +1,4 @@
+import { deleteVaultDeviceKey, type ProtectedVaultSecrets } from '../../../frontend/src/lib/security/vaultProtection';
 import { niceUsdPerPx } from './bar-scale';
 import { removePasswordVault } from '../../../frontend/src/lib/security/passwordVault';
 import { create } from 'zustand';
@@ -10,7 +11,7 @@ export type ThemeName = 'dark' | 'light';
 /** Comfort = the phone-first screens; Desk = the dense desktop console on wide viewports. */
 export type Density = 'comfort' | 'desk';
 
-export type VaultKind = 'brainvault' | 'mnemonic' | 'sandbox' | 'remote';
+export type VaultKind = 'brainvault' | 'mnemonic' | 'sandbox' | 'remote' | 'test';
 
 export type VaultMeta = {
 	id: string;
@@ -18,6 +19,7 @@ export type VaultMeta = {
 	kind: VaultKind;
 	createdAt: number;
 	brainvault?: { factor: number };
+	deviceProtection?: ProtectedVaultSecrets;
 	remote?: { wsUrl: string };
 };
 
@@ -143,7 +145,7 @@ type AppState = {
 	vaults: VaultMeta[];
 	activeVaultId: string | null;
 	addVault: (vault: VaultMeta) => void;
-	removeVault: (id: string) => void;
+	removeVault: (id: string) => Promise<void>;
 	setActiveVault: (id: string | null) => void;
 
 	/** Unlocked seed phrases, memory only. Never persisted. */
@@ -198,7 +200,11 @@ export const useApp = create<AppState>((set, get) => ({
 	tour: (() => {
 		try {
 			const raw = JSON.parse(localStorage.getItem(TOUR_KEY) || '{}') as { index?: number; completed?: boolean };
-			return { active: false, index: Number.isInteger(raw.index) ? Number(raw.index) : 0, completed: raw.completed === true };
+			return {
+				active: false,
+				index: Number.isInteger(raw.index) ? Number(raw.index) : 0,
+				completed: raw.completed === true,
+			};
 		} catch {
 			return { active: false, index: 0, completed: false };
 		}
@@ -250,7 +256,9 @@ export const useApp = create<AppState>((set, get) => ({
 		persistVaults(vaults);
 		set({ vaults });
 	},
-	removeVault: id => {
+	removeVault: async id => {
+		const vault = get().vaults.find(v => v.id === id);
+		if (vault?.deviceProtection) await deleteVaultDeviceKey(id, vault.deviceProtection);
 		removePasswordVault(id);
 		const vaults = get().vaults.filter(v => v.id !== id);
 		persistVaults(vaults);
@@ -296,7 +304,9 @@ export const useApp = create<AppState>((set, get) => ({
 	toasts: [],
 	toast: (text, kind = 'info', key) => {
 		const id = ++toastSeq;
-		set({ toasts: [...get().toasts.filter(toast => !key || toast.key !== key), { id, text, kind, ...(key ? { key } : {}) }] });
+		set({
+			toasts: [...get().toasts.filter(toast => !key || toast.key !== key), { id, text, kind, ...(key ? { key } : {}) }],
+		});
 		if (kind !== 'danger') setTimeout(() => get().dismissToast(id), 4000);
 	},
 	dismissToast: id => set({ toasts: get().toasts.filter(t => t.id !== id) }),
