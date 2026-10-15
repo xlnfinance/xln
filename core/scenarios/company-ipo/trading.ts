@@ -17,7 +17,6 @@ import {
   COMPANY_SHARE_PRICE_TICKS,
   CONTROL_BUYBACK_AMOUNT,
   CONTROL_IPO_AMOUNT,
-  USDT,
   type CompanyScenarioActors,
   type CompanyShareTokens,
 } from './model';
@@ -87,12 +86,12 @@ const initializeBooks = async (
     data: {
       name: 'Company Securities Hub',
       spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
-      referenceTokenId: USDT,
+      referenceTokenId: actors.currency.tokenId,
       usdQuoteAuthorityEntityId: actors.boardCompany.id,
       minTradeSize: 0n,
       supportedPairs: [
-        pairId(shares.controlTokenId, USDT),
-        pairId(shares.dividendTokenId, USDT),
+        pairId(shares.controlTokenId, actors.currency.tokenId),
+        pairId(shares.dividendTokenId, actors.currency.tokenId),
       ],
     },
   }]);
@@ -111,7 +110,7 @@ const placeTreasuryOffers = async (
       giveTokenId: shares.controlTokenId,
       giveTokenDecimals: 0,
       giveAmount: CONTROL_IPO_AMOUNT,
-      wantTokenId: USDT,
+      wantTokenId: actors.currency.tokenId,
       wantTokenDecimals: 6,
       wantAmount: quotes.controlSale,
       ...deriveSwapNetAuthorization(quotes.controlSale, 1),
@@ -122,7 +121,7 @@ const placeTreasuryOffers = async (
       giveTokenId: shares.dividendTokenId,
       giveTokenDecimals: 0,
       giveAmount: 100n,
-      wantTokenId: USDT,
+      wantTokenId: actors.currency.tokenId,
       wantTokenDecimals: 6,
       wantAmount: quotes.dividendSale,
       ...deriveSwapNetAuthorization(quotes.dividendSale, 1),
@@ -155,7 +154,7 @@ const completeInvestorPurchase = async (
   await executeCompanyAction(env, actors.investor, [offer({
     counterpartyEntityId: actors.hub.id,
     offerId: 'investor-control-bid',
-    giveTokenId: USDT,
+    giveTokenId: actors.currency.tokenId,
     giveTokenDecimals: 6,
     giveAmount: quote,
     wantTokenId: shares.controlTokenId,
@@ -179,7 +178,7 @@ const completeBuyback = async (
   await executeCompanyAction(env, actors.boardCompany, [offer({
     counterpartyEntityId: actors.hub.id,
     offerId: 'company-control-buyback',
-    giveTokenId: USDT,
+    giveTokenId: actors.currency.tokenId,
     giveTokenDecimals: 6,
     giveAmount: quote,
     wantTokenId: shares.controlTokenId,
@@ -193,7 +192,7 @@ const completeBuyback = async (
     giveTokenId: shares.controlTokenId,
     giveTokenDecimals: 0,
     giveAmount: CONTROL_BUYBACK_AMOUNT,
-    wantTokenId: USDT,
+    wantTokenId: actors.currency.tokenId,
     wantTokenDecimals: 6,
     wantAmount: quote,
     ...deriveSwapNetAuthorization(quote, 1),
@@ -229,8 +228,8 @@ const prepareBuybackFinancialCheck = (
   const transfers = [
     [actors.investor.id, actors.hub.id, shares.controlTokenId, CONTROL_BUYBACK_AMOUNT],
     [actors.hub.id, actors.boardCompany.id, shares.controlTokenId, CONTROL_BUYBACK_AMOUNT],
-    [actors.boardCompany.id, actors.hub.id, USDT, quote],
-    [actors.hub.id, actors.investor.id, USDT, quote - fee],
+    [actors.boardCompany.id, actors.hub.id, actors.currency.tokenId, quote],
+    [actors.hub.id, actors.investor.id, actors.currency.tokenId, quote - fee],
   ] as const;
   const checks = transfers.flatMap(([sender, receiver, tokenId, amount]) =>
     ([[sender, receiver], [receiver, sender]] as const).map(([entityId, peerId]) => {
@@ -256,7 +255,7 @@ const assertDividendOfferResting = (
   shares: CompanyShareTokens,
 ): void => {
   const hub = findReplica(env, actors.hub.id)[1];
-  const dividendBook = hub.state.orderbookExt?.books.get(pairId(shares.dividendTokenId, USDT));
+  const dividendBook = hub.state.orderbookExt?.books.get(pairId(shares.dividendTokenId, actors.currency.tokenId));
   if (!dividendBook || dividendBook.orders.size !== 1) {
     const books = [...(hub.state.orderbookExt?.books ?? [])]
       .map(([key, book]) => `${key}:${book.orders.size}`)
@@ -269,16 +268,26 @@ const assertDividendOfferResting = (
   }
 };
 
-export const runCompanyMarket = async (
-  env: RuntimeReplica,
-  actors: CompanyScenarioActors,
-  shares: CompanyShareTokens,
+/** The interactive demo and automated scenario submit the same offers. */
+export const openCompanyMarket = async (
+  env: RuntimeReplica, actors: CompanyScenarioActors, shares: CompanyShareTokens,
 ): Promise<void> => {
-  const quotes = deriveMarketQuotes();
   await initializeBooks(env, actors, shares);
-  await placeTreasuryOffers(env, actors, shares, quotes);
-  await completeInvestorPurchase(env, actors, shares, quotes.controlSale);
+  await placeTreasuryOffers(env, actors, shares, deriveMarketQuotes());
+};
+
+export const purchaseCompanyControl = async (
+  env: RuntimeReplica, actors: CompanyScenarioActors, shares: CompanyShareTokens,
+): Promise<void> => {
+  await completeInvestorPurchase(env, actors, shares, deriveMarketQuotes().controlSale);
   assertDividendOfferResting(env, actors, shares);
+};
+
+export const runCompanyMarket = async (
+  env: RuntimeReplica, actors: CompanyScenarioActors, shares: CompanyShareTokens,
+): Promise<void> => {
+  await openCompanyMarket(env, actors, shares);
+  await purchaseCompanyControl(env, actors, shares);
 };
 
 export const runCompanyBuyback = async (

@@ -15,10 +15,9 @@ import { executeCompanyAction } from './governance';
 import {
   CONTROL_SUPPLY,
   CONTROL_IPO_AMOUNT,
-  COMPANY_USDT_FUNDING,
+  COMPANY_QUOTE_FUNDING,
   DIVIDEND_SUPPLY,
-  USDT,
-  USDT_UNIT,
+  QUOTE_UNIT,
   type CompanyActor,
   type CompanyScenarioActors,
   type CompanyShareTokens,
@@ -83,10 +82,10 @@ export const prepareCompanyAccounts = async (
     await executeCompanyAction(env, actor, [accountOpenTx(env, actor, actors.hub)]);
     assertAccount(env, actor, actors.hub);
   }
-  const usdtFunding = COMPANY_USDT_FUNDING;
+  const quoteFunding = COMPANY_QUOTE_FUNDING;
   await fundEntities(env, actors.jadapter, [
-    { id: actors.soloCompany.id, tokenId: USDT, amount: usdtFunding },
-    { id: actors.investor.id, tokenId: USDT, amount: usdtFunding },
+    { id: actors.soloCompany.id, tokenId: actors.currency.tokenId, amount: quoteFunding },
+    { id: actors.investor.id, tokenId: actors.currency.tokenId, amount: quoteFunding },
   ]);
   const shareCapacity = [
     [shares.controlTokenId, CONTROL_SUPPLY] as const,
@@ -96,17 +95,17 @@ export const prepareCompanyAccounts = async (
     [shares.controlTokenId, CONTROL_IPO_AMOUNT],
     [shares.dividendTokenId, DIVIDEND_SUPPLY],
   ]);
-  await fundCollateral(env, actors.investor, actors.hub, [[USDT, usdtFunding]]);
-  await fundCollateral(env, actors.soloCompany, actors.hub, [[USDT, 100n * USDT_UNIT]]);
+  await fundCollateral(env, actors.investor, actors.hub, [[actors.currency.tokenId, quoteFunding]]);
+  await fundCollateral(env, actors.soloCompany, actors.hub, [[actors.currency.tokenId, 100n * QUOTE_UNIT]]);
   // The hub temporarily intermediates the two bilateral legs. Each recipient
   // grants it only the asset it may owe on that Account; maker collateral
   // remains separately held on the seller's own side.
-  await executeCompanyAction(env, actors.boardCompany, creditTxs(actors.hub, [[USDT, usdtFunding]]));
+  await executeCompanyAction(env, actors.boardCompany, creditTxs(actors.hub, [[actors.currency.tokenId, quoteFunding]]));
   await executeCompanyAction(env, actors.investor, creditTxs(actors.hub, shareCapacity));
   await executeCompanyAction(env, actors.hub, [
-    ...creditTxs(actors.boardCompany, [...shareCapacity, [USDT, usdtFunding]]),
-    ...creditTxs(actors.investor, [...shareCapacity, [USDT, usdtFunding]]),
-    ...creditTxs(actors.soloCompany, [[USDT, usdtFunding]]),
+    ...creditTxs(actors.boardCompany, [...shareCapacity, [actors.currency.tokenId, quoteFunding]]),
+    ...creditTxs(actors.investor, [...shareCapacity, [actors.currency.tokenId, quoteFunding]]),
+    ...creditTxs(actors.soloCompany, [[actors.currency.tokenId, quoteFunding]]),
   ]);
 };
 
@@ -118,14 +117,14 @@ export const proveOrdinaryCompanyPayment = async (
     type: 'directPayment',
     data: {
       targetEntityId: actors.hub.id,
-      tokenId: USDT,
-      amount: 5n * USDT_UNIT,
+      tokenId: actors.currency.tokenId,
+      amount: 5n * QUOTE_UNIT,
       route: [actors.soloCompany.id, actors.hub.id],
       deliveryMode: 'direct',
       description: 'company-operating-payment',
     },
   }]);
   const delta = findReplica(env, actors.soloCompany.id)[1]
-    .state.accounts.get(actors.hub.id)?.state.deltas.get(USDT)?.offdelta;
+    .state.accounts.get(actors.hub.id)?.state.deltas.get(actors.currency.tokenId)?.offdelta;
   if (delta === undefined || delta === 0n) throw new Error('COMPANY_ORDINARY_PAYMENT_NOT_COMMITTED');
 };

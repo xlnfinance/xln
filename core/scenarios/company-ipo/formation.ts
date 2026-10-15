@@ -109,6 +109,7 @@ export const formCompanyActors = async (env: RuntimeReplica): Promise<CompanySce
   return {
     jadapter,
     jurisdiction,
+    currency: { tokenId: 3, symbol: 'USDT' },
     hub: singleActor(hub, jurisdiction),
     investor: singleActor(investor, jurisdiction),
     soloCompany: singleActor(soloCompany, jurisdiction),

@@ -74,6 +74,7 @@ export function GateWelcome({ onMode, onUnlock, onLearn, networkReady }: Props) 
           <Icon name="arrow" size={16} />
         </button>
         <p className="note">Demo funds have no real value.</p>
+        {import.meta.env.DEV && <a className="btn quiet" href="/arrakis">Explore Arrakis · trade shares and take control</a>}
       </section>
       <details className="gate-advanced">
         <summary>Advanced connection</summary>

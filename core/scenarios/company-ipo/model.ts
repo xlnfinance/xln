@@ -10,6 +10,7 @@ export type CompanyActor = Readonly<{
 }>;
 
 export type CompanyScenarioActors = Readonly<{
+  currency: Readonly<{ tokenId: number; symbol: string }>;
   jadapter: JAdapter;
   jurisdiction: JurisdictionConfig;
   hub: CompanyActor;
@@ -25,12 +26,11 @@ export type CompanyShareTokens = Readonly<{
   dividendExternalTokenId: bigint;
 }>;
 
-export const USDT = 3;
-export const USDT_UNIT = 1_000_000n;
+export const QUOTE_UNIT = 1_000_000n;
 export const CONTROL_SUPPLY = 100_000_000_000n;
 export const DIVIDEND_SUPPLY = 100_000_000_000n;
 export const CONTROL_IPO_AMOUNT = CONTROL_SUPPLY * 60n / 100n;
 export const CONTROL_BUYBACK_AMOUNT = CONTROL_SUPPLY * 10n / 100n;
-/** Minimum exact orderbook tick: $0.0001 per zero-decimal share. */
+/** Minimum exact orderbook tick: 0.0001 quote units per zero-decimal share. */
 export const COMPANY_SHARE_PRICE_TICKS = 1n;
-export const COMPANY_USDT_FUNDING = 7_000_000n * USDT_UNIT;
+export const COMPANY_QUOTE_FUNDING = 7_000_000n * QUOTE_UNIT;
