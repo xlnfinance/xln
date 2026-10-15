@@ -1,5 +1,19 @@
 # Current xln execution handoff
 
+Checkpoint, 2026-10-15 04:44 UTC: PR #80 candidate d0764c00f completed six
+of seven CI jobs successfully. E2E stopped before browser journeys in
+`security:audit-pack`: the Hanko scan expected the batch hashing implementation
+in `batch/index.ts`, but the refactor moved it to `batch/codec.ts`. Reproduced
+locally with `bun run security:consensus-hanko`; the corrected scan checks the
+exact chain/address/batch/nonce arguments and one direct domain-hash call.
+The complete `bun run security:audit-pack` now passes in 0.48 seconds. No
+financial or contract code changed; the live dev stand remains untouched.
+Next single command: `bun run check`, then publish this fix to PR #80 and
+observe the next CI boundary. Company gameplay and browser E2E remain unproved.
+Method trial block 1/2: a single named CI job log identified the stale assertion;
+no broad log search or heavy rerun. Investigation/check time about four minutes;
+the preceding remote E2E job took 11m21s before reaching this failure.
+
 Owner update, 2026-10-15: PR plus mandatory CI is authorized. The direct-main
 publication conflict is resolved; preserve protection. Existing PR #80 contains
 the first three unpublished commits. Its failing unused-surface exports are
@@ -27,8 +41,9 @@ job output. A search through `.logs` produced oversized irrelevant content in
 this block. Next two blocks should reach the first production failure without
 that waste. Review methods every 30 active minutes (two-minute cap); evaluate
 the reviewer every four blocks (five-minute cap). Existing gates remain unchanged.
-Next single step: publish the checked candidate through PR #80, then verify one
-registered Entity/share journey in React before extending the demo interface.
+The checked candidate is published through PR #80. After its required CI is
+green, verify one registered Entity/share journey in React before extending
+the demo interface.
 
 Current task, 2026-10-15: agent-payment interoperability and the agent-focused
 landing. The live local H2/H3 Account path now completes MPP payment and access;
