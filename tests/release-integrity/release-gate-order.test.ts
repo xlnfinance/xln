@@ -59,6 +59,7 @@ describe('release gate ordering', () => {
         'e2e-dispute-finality.spec.ts',
         'e2e-dispute-protection.spec.ts',
         'e2e-tower-restore.spec.ts,e2e-file-restore.spec.ts,e2e-sovereignty.spec.ts',
+        'e2e-demo-sync.spec.ts,e2e-tutorial-company.spec.ts',
       ]);
       for (const command of browserCommands) {
         expect(command).toContain('bun run stand:run');
