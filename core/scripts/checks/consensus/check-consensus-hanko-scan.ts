@@ -101,7 +101,7 @@ const hankoCodecPath = 'core/hanko/codec.ts';
 const hankoClaimsPath = 'core/hanko/claims.ts';
 const hankoBatchPath = 'core/hanko/batch.ts';
 const onchainHankoDomainPath = 'core/hanko/onchain-domain.ts';
-const jBatchPath = 'core/jurisdiction/machine/batch/index.ts';
+const jBatchPath = 'core/jurisdiction/machine/batch/codec.ts';
 const rpcAdapterPaths = [
   'core/jurisdiction/adapter/rpc-public.ts',
   'core/jurisdiction/adapter/rpc/rpc-adapter.ts',
@@ -360,7 +360,8 @@ assertIncludes(hankoClaims, 'claim.delays.boardChangeDelay', hankoClaimsPath);
 
 assertIncludes(onchainHankoDomain, "ethers.toUtf8Bytes('XLN_DEPOSITORY_HANKO_V1')", onchainHankoDomainPath);
 assertIncludes(onchainHankoDomain, '[DEPOSITORY_BATCH_HANKO_DOMAIN, chainId, depositoryAddress, encodedBatch, requireUint(nonce,', onchainHankoDomainPath);
-assertIncludes(jBatch, 'return hashDepositoryBatchHankoPayload(', jBatchPath);
+assertIncludes(jBatch, 'hashDepositoryBatchHankoPayload({ chainId, depositoryAddress }, encodedBatch, nonce)', jBatchPath);
+assertDirectCallCount(jBatchPath, 'hashDepositoryBatchHankoPayload', 1);
 assertIncludes(hankoBatch, 'const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);', hankoBatchPath);
 assertIncludes(depository, 'bytes32 public constant DOMAIN_SEPARATOR = keccak256("XLN_DEPOSITORY_HANKO_V1");', depositoryPath);
 assertIncludes(depository, 'Account.computeBatchHankoHash(DOMAIN_SEPARATOR, encodedBatch, nonce)', depositoryPath);

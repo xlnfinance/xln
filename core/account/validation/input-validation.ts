@@ -1,8 +1,10 @@
 import {
+  requireBoolean,
   requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
-} from '../../protocol/boundary-validation';
+  requireString,
+} from '../../protocol/boundary/boundary-primitives';
 import type {
   AccountBoardHankoRefresh,
   AccountDisputeHanko,
@@ -13,16 +15,6 @@ import type {
 } from '../../types/account';
 import { decodeAccountFrame } from './frame-validation';
 import { canonicalAccountDisputeConfig } from '../config/dispute-config';
-
-const requireString = (value: unknown, code: string): string => {
-  if (typeof value !== 'string' || value.length === 0) throw new Error(code);
-  return value;
-};
-
-const requireBoolean = (value: unknown, code: string): boolean => {
-  if (typeof value !== 'boolean') throw new Error(code);
-  return value;
-};
 
 const decodeAccountDomain = (value: unknown, code: string): AccountStateDomain => {
   const domain = requireBoundaryRecord(value, code);

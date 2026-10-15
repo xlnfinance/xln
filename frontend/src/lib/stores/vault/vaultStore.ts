@@ -1,3 +1,4 @@
+import { assertDemoNetwork } from '#lib/config/demo-accounts.ts';
 import { closeRuntimeSession, suspendRuntimeActivity } from '#lib/security/runtimeSession.ts';
 import { hasPasswordVault, removePasswordVault } from '#lib/security/passwordVault.ts';
 import { derived, get, writable } from 'svelte/store';
@@ -1114,6 +1115,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   const primaryConfig = resolveJurisdictionConfig(jurisdictions);
   const primaryBlockTimeMs = requireJurisdictionBlockTimeMs(primaryConfig.blockTimeMs, 'VaultStore.restore.primary');
   const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
+  if (runtime.loginType === 'demo') assertDemoNetwork(defaultJurisdictionImports.map(({ config }) => config.chainId));
   const primaryJurisdictionName =
     defaultJurisdictionImports[0]?.name || String(primaryConfig.name || 'primary').trim() || 'primary';
   const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(primaryConfig), baseOrigin);
@@ -1924,6 +1926,7 @@ export const vaultOperations = {
           'VaultStore.createRuntime.primary',
         );
         const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
+        if (runtime.loginType === 'demo') assertDemoNetwork(defaultJurisdictionImports.map(({ config }) => config.chainId));
         const primaryJurisdictionName =
           defaultJurisdictionImports[0]?.name || String(primaryConfig.name || 'primary').trim() || 'primary';
         const secondaryJurisdictionImports = defaultJurisdictionImports.slice(1);

@@ -11,12 +11,10 @@ transitions, one canonical production path, no silent fallback.
 
 This scope prevails over older plans in `docs/` and over the history in `todo.md`.
 
-- Engine: TypeScript is the only canonical engine. Rust `rscore/` is frozen at tag
-  `rscore-freeze-f1464e84e`: no commits under `rscore/` and no Rust gates in `check` or the
-  release gates until the owner lifts the freeze. Lift conditions: a frozen protocol spec v1
-  with shared vectors; measured demand above 500 tps on one hub; multisig in scope.
-- Owner reaffirmation 2026-10-12: park unfinished Rust changes without committing
-  them. The earlier book-refactor exception is withdrawn for this release.
+- Engine: TypeScript is the canonical engine. Owner 2026-10-14 lifted the Rust freeze:
+  `rscore/` may be edited and committed. Tag `rscore-freeze-f1464e84e` is history, not a lock.
+  Rust gates return to `check` only after `bun run rscore:check` is green on that commit.
+- Owner 2026-10-12 park of unfinished Rust is withdrawn. Commit the tree; do not stash it.
 - Wallet: React `ui/` is the only wallet. Svelte `frontend/` is frozen: no new wallet
   features; only landing/static copy and build health change there.
 - First jurisdiction: Ethereum same-J (Sepolia, then a mainnet canary).
@@ -28,7 +26,11 @@ This scope prevails over older plans in `docs/` and over the history in `todo.md
   admission rejection and the corresponding wallet availability; do not extend
   or repair the lending implementation. Existing signed claims remain evidence
   for contract exit; only collateral secures recovery.
-- Deferred: TRON, XLNC, Base, cross-J as a headline, companies/IPO,
+- Owner 2026-10-15 reopens companies/shares/control for an experimental local
+  Arrakis demo using the existing EntityProvider, Paybook and swapbook. This is
+  not approval to admit companies/IPO in the mainnet release. Spice is a test
+  asset, not a renamed stablecoin or a claim of dollar backing.
+- Deferred for mainnet: TRON, XLNC, Base, cross-J as a headline, companies/IPO,
   iOS/Electron/extension and custody.
 - MML counts only obligations between unaffiliated Entities. A payment routed through a hub
   counts once, on the commercial edge; hub hops and affiliated transfers never count.
@@ -164,8 +166,10 @@ Do not duplicate or weaken it.
 
 ## GIT AND SHARED WORKSPACE
 
-- Owner decision 2026-10-12: work on `codex/` branches and merge through PRs with mandatory green CI.
-  This replaces direct-main-only. Do not bypass branch protection; worktrees still require owner request.
+- Owner decision 2026-10-15: publish through PRs with mandatory green CI and
+  preserve branch protection. This replaces the October 14 direct-push rule.
+  Use temporary `codex/` branches for new PRs; existing PR branches may be
+  continued. Never force-push `main`.
 - Preserve unrelated user changes. Failed verification is not a release-ready commit.
 - No `wip:` commits on main. Commit only owned paths with `git commit -- <paths>`.
 - Before a shared-tree commit, stop concurrent writers, run formatting and `git diff --check`.

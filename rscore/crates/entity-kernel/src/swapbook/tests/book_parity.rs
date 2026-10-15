@@ -216,10 +216,7 @@ fn apply_step(
 fn typescript_book_operations_replay_with_identical_events_and_commitments() {
     let fixture: Fixture = serde_json::from_str(FIXTURE).expect("orderbook book fixture");
     assert_eq!(fixture.version, 1);
-    assert_eq!(
-        fixture.canonical_source,
-        "TypeScript core/swapbook/core.ts"
-    );
+    assert_eq!(fixture.canonical_source, "TypeScript core/swapbook/core.ts");
     let dimensions = PairDimensions {
         base_token_decimals: fixture.base_token_decimals,
         quote_token_decimals: fixture.quote_token_decimals,

@@ -237,6 +237,8 @@ pub struct LendingBorrowEntityTx {
     pub amount: BigInt,
     pub term_id: LendingTermId,
     pub max_interest_bps: u16,
+    pub expires_at: u64,
+    pub max_late_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -245,6 +247,7 @@ pub struct LendingRepayEntityTx {
     pub loan_id: String,
     pub token_id: TokenId,
     pub amount: BigInt,
+    pub claim_hash: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

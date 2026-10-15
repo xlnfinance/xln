@@ -23,7 +23,7 @@ import {
 } from '../../../core/runtime';
 import { selectPotentialCrossJAccountInputPairs } from '../../../core/runtime/delivery/topology/entity-routing';
 import { computeCanonicalStateHashFromEnv } from '../../../core/storage/canonical-hash';
-import { TsAccountWorkerAuthority } from '../../../core/rscore/ts-worker/provider';
+import { TsAccountWorkerAuthority } from '../../../core/runtime/workers/account/provider';
 import { prepareRuntimeOutputRows } from '../../../core/storage/wal/outbox-payload';
 import { applyCertifiedEntityHeadPlan, buildCertifiedEntityHeadPlan } from '../../../core/storage/replica/entity-head';
 import type { EntityInput } from '../../../core/entity/types';

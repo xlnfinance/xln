@@ -2287,3 +2287,10 @@
     background: var(--l-accent-soft);
     color: var(--l-accent);
   }
+
+  .test-wallet-note {
+    margin: 16px 0 24px;
+    color: var(--theme-text-secondary, #a8a29e);
+    font-size: 13px;
+    line-height: 1.6;
+  }

@@ -901,6 +901,7 @@ pub(crate) fn decode_tx(value: &AbiValue) -> Result<AccountTx, ProcessError> {
         8 => decode_swap_resolve(fields),
         9 => decode_j_event_claim(fields),
         10 => decode_lending_fund(fields),
+        25 => decode_lending_rate(fields),
         11 => decode_lending_borrow_request(fields),
         12 => decode_lending_repay(fields),
         24 => decode_lending_disburse(fields),
@@ -934,11 +935,12 @@ fn decode_canonical_tx(
     Ok(build(data))
 }
 
-fn decode_lending_term(value: &AbiValue) -> Result<LendingTermId, ProcessError> {
+fn decode_lending_term(value: &AbiValue, savings: bool) -> Result<LendingTermId, ProcessError> {
     match integer(value)? {
         0 => Ok(LendingTermId::OneHour),
         1 => Ok(LendingTermId::OneDay),
         2 => Ok(LendingTermId::OneMonth),
+        3 if savings => Ok(LendingTermId::Demand),
         value => Err(ProcessError::Tag {
             field: "lendingTerm",
             value,
@@ -954,45 +956,70 @@ fn decode_lending_fund(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
         lender_entity_id: text(&fields[3])?.into(),
         token_id: token(&fields[4])?,
         amount: bigint(&fields[5], "amount")?,
-        term_id: decode_lending_term(&fields[6])?,
+        term_id: decode_lending_term(&fields[6], true)?,
         interest_bps: i64::try_from(integer(&fields[7])?)
             .map_err(|_| ProcessError::Expected("interestBps"))?,
     })
 }
 
+fn decode_lending_rate(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 7, "lendingRate")?;
+    Ok(AccountTx::LendingRate {
+        position_id: text(&fields[1])?.into(),
+        hub_entity_id: text(&fields[2])?.into(),
+        lender_entity_id: text(&fields[3])?.into(),
+        token_id: token(&fields[4])?,
+        claim_hash: text(&fields[5])?.into(),
+        interest_bps: i64::try_from(integer(&fields[6])?)
+            .map_err(|_| ProcessError::Expected("interestBps"))?,
+    })
+}
+
 fn decode_lending_borrow_request(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
-    let fields = exact(fields, 8, "lendingBorrowRequest")?;
+    let fields = exact(fields, 10, "lendingBorrowRequest")?;
     Ok(AccountTx::LendingBorrowRequest {
+        expires_at: unsigned(&fields[8], "expiresAt")?,
+        max_late_ms: unsigned(&fields[9], "maxLateMs")?,
         request_id: text(&fields[1])?.into(),
         hub_entity_id: text(&fields[2])?.into(),
         borrower_entity_id: text(&fields[3])?.into(),
         token_id: unsigned(&fields[4], "tokenId")?,
         amount: bigint(&fields[5], "amount")?,
-        term_id: decode_lending_term(&fields[6])?,
+        term_id: decode_lending_term(&fields[6], false)?,
         max_interest_bps: i64::try_from(integer(&fields[7])?)
             .map_err(|_| ProcessError::Expected("maxInterestBps"))?,
     })
 }
 
 fn decode_lending_repay(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
-    let fields = exact(fields, 6, "lendingRepay")?;
+    let fields = exact(fields, 7, "lendingRepay")?;
     Ok(AccountTx::LendingRepay {
         loan_id: text(&fields[1])?.into(),
         hub_entity_id: text(&fields[2])?.into(),
         borrower_entity_id: text(&fields[3])?.into(),
         token_id: token(&fields[4])?,
         amount: bigint(&fields[5], "amount")?,
+        claim_hash: text(&fields[6])?.into(),
     })
 }
 
 fn decode_lending_disburse(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
-    let fields = exact(fields, 6, "lendingDisburse")?;
+    let fields = exact(fields, 13, "lendingDisburse")?;
     Ok(AccountTx::LendingDisburse {
         loan_id: text(&fields[1])?.into(),
         hub_entity_id: text(&fields[2])?.into(),
         borrower_entity_id: text(&fields[3])?.into(),
         token_id: token(&fields[4])?,
         amount: bigint(&fields[5], "amount")?,
+        term_id: decode_lending_term(&fields[6], false)?,
+        interest_bps: i64::try_from(integer(&fields[7])?)
+            .map_err(|_| ProcessError::Expected("interestBps"))?,
+        request_id: text(&fields[8])?.into(),
+        max_interest_bps: i64::try_from(integer(&fields[9])?)
+            .map_err(|_| ProcessError::Expected("maxInterestBps"))?,
+        expires_at: unsigned(&fields[10], "expiresAt")?,
+        max_late_ms: unsigned(&fields[11], "maxLateMs")?,
+        late_ms: unsigned(&fields[12], "lateMs")?,
     })
 }
 

@@ -7,7 +7,7 @@ import {
   buildPaymentPanelViewFromRuntimeView,
 } from '../../../frontend/src/lib/components/Entity/payments/payment-panel-view';
 import { hasCertifiedEntityEncryptionKey } from '../../../frontend/src/lib/components/Entity/payment-routing';
-import { buildPaymentRuntimeInput } from '../../../frontend/src/lib/components/Entity/payments/runtime/payment-command';
+import { buildPaymentRuntimeInput } from '../../../core/api/payments/command';
 
 const SOURCE = `0x${'11'.repeat(32)}`;
 const HUB = `0x${'22'.repeat(32)}`;

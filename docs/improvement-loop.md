@@ -4,9 +4,10 @@ Owner direction, 2026-10-11: autonomously prepare a usable mainnet candidate,
 reduce unnecessary code and follow the release scope in [AGENTS.md](../AGENTS.md):
 TypeScript, React and Ethereum same-J, first Sepolia and then a mainnet canary.
 The current scope and freeze decisions live in [owner-profile.md](owner-profile.md#agreed-release).
-Rust and production lending remain frozen; Svelte changes are limited to
-landing/static copy and build health. The October 12 request authorizes a
-repository-wide TS/Rust refactoring review, not a second launch engine.
+Production lending remains deferred; the owner lifted the Rust freeze on
+October 14, with TypeScript still the launch engine. Svelte changes are limited
+to landing/static copy and build health. October 15 reopens company shares and
+control for an experimental local demo, not mainnet company admission.
 
 Owner request, 2026-10-11: diagnose the development trajectory, improve the
 repository and make this loop learn from results. The [crisis review](crisis-review-20261011.md)
@@ -121,7 +122,7 @@ to judge these changes. Do not add ceremonies, dashboards or quality scores mere
 to make the process look more Japanese. Simplicity is compatible with continuous
 revision; aesthetic imperfection never excuses incorrect financial state.
 
-Every 30 minutes, spend at most five minutes reviewing: which acceptance gap
+Every 30 minutes of active work, spend at most two minutes reviewing: which acceptance gap
 closed, what actually failed, and how much time was spent without new evidence.
 After two failures with unchanged evidence, do not repeat the command: preserve
 its inputs and first divergence, narrow observation or change the hypothesis.
@@ -147,6 +148,37 @@ weaker assertion or changed scope is not an improvement. Keep an unsuccessful
 method change only if it produced new evidence that explains the next action.
 This improves the development process and retained instructions; it does not
 claim to modify model weights or become more intelligent automatically.
+
+## Reviewing the review
+
+Owner request, 2026-10-15: improve execution and periodically test whether the
+improvement mechanism itself is useful. Keep two feedback levels only; a third
+recursive review would consume the work it is supposed to improve.
+
+- After four work blocks, spend at most five minutes comparing the last method
+  change against its stated prediction and the preceding comparable blocks.
+  Use existing closed/reopened gaps, artifact time and verification time; do not
+  introduce another score. Mark missing measurements unknown.
+- Keep a method change only if it produced a useful artifact, earlier failure
+  isolation, less repeated work or stronger evidence. Otherwise revert the
+  method change, not a financial invariant, and record the counterexample.
+- Inspect the reviewer itself: did it repeat stale plans, inflate completion,
+  read irrelevant files, request settled decisions, or replace execution with
+  prose? Remove one source of waste. Never weaken an acceptance assertion to
+  improve reported progress.
+- At each completed journey, ask which next task removes friction for an
+  independent payer or service provider. Demo traffic, treasury reshuffles,
+  affiliated agents and speculative token turnover are not MML evidence.
+  Market adoption and shortest time to MML remain hypotheses, not guarantees.
+- Use the existing `xln-30` heartbeat and the current handoff only. No second
+  scheduler, reflection agent or parallel journal. One short handoff records
+  result, evidence, elapsed work/check time, rule under trial, and next command.
+  Idle or unchanged blocked work produces no report or automatic rerun. A stop
+  instruction pauses the heartbeat; completion pauses it until new authority.
+
+The reflection budget is at most thirteen minutes per two active hours. The
+rest belongs to implementation and verification. No historical external-model
+budget, usage reset, new spending or production authority is renewed by this loop.
 
 ## Evidence coverage out of 1000
 

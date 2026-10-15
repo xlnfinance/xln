@@ -485,7 +485,7 @@
       const bootingRemoteRuntime = shouldBootRemoteRuntime();
       if (!bootingRemoteRuntime) {
         await vaultOperations.initialize();
-        if ($activeRuntime && (!$activeRuntime.seed || !hasPasswordVault($activeRuntime.id))) {
+        if ($activeRuntime && (!$activeRuntime.seed || ($activeRuntime.loginType !== 'demo' && !hasPasswordVault($activeRuntime.id)))) {
           error.set(`RUNTIME_LOCKED:${$activeRuntime.id}`);
           return;
         }

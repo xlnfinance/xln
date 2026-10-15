@@ -5,7 +5,7 @@ import {
   getJurisdictionStackId,
 } from '@xln/core/api/public/runtime-module';
 import { hasCertifiedEntityEncryptionKey, normalizeEntityId } from '../payment-routing';
-import { buildPaymentRuntimeInput } from '../payments/runtime/payment-command';
+import { buildPaymentRuntimeInput } from '@xln/core/api/payments/command';
 import { quotePaymentCandidateRoutes } from '../payments/runtime/payment-route-quote';
 import type { PaymentPanelView } from '../payments/payment-panel-view';
 import { planSameJSwapCommand, resolveSameJSwapPartyRoles } from '../swap/commands/same-j-swap-command';

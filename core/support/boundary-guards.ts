@@ -22,3 +22,6 @@ export const normalizeEntityRef = (value: unknown): string =>
     .toLowerCase();
 
 export const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+export const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);

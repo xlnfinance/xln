@@ -68,6 +68,22 @@ const account = (lock?: AccountReplica['state']['locks'] extends { get(key: stri
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
       jNonce: 0,
+      subcontracts: PersistentAccountStateMap.fromEntries('subcontracts', [[
+        'loan-0327fd9035d42518',
+        {
+          kind: 'loan',
+          tokenId: 1,
+          creditorIsLeft: true,
+          principal: 2_500n,
+          interestBps: 100,
+          openedAt: 1_000,
+          accruedAt: 1_000,
+          accruedInterest: 0n,
+          interestRemainder: 0n,
+          termMs: 86_400_000,
+          lateMs: 86_400_000,
+        },
+      ]]),
     },
     status: 'active', mempool: [], currentHeight: 0, rollbackCount: 0,
     currentFrame: {
@@ -240,6 +256,7 @@ export const executeSameJFinancialEntitySemanticVector = async () => {
     data: {
       requestId: 'borrow-2222222222222222', hubEntityId: PEER, tokenId: 1,
       amount: 2_500n, termId: '1d', maxInterestBps: 150,
+      maxLateMs: 86_400_000, expiresAt: 5_000,
     },
   };
   const repay: Extract<EntityTx, { type: 'lendingRepay' }> = {

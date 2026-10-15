@@ -40,6 +40,12 @@
   </div>
 
   <div class="topbar-links">
+    {#if variant === 'transparent'}
+      <a href="/#integrate" class="topbar-link">Build</a>
+      <a href="/docs" class="topbar-link">Docs</a>
+      <a href="https://github.com/xlnfinance/xln" class="topbar-link optional-link" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="/app" class="topbar-link">Test wallet ↗</a>
+    {:else}
     <a href="/app" class="topbar-link" class:active={currentPath === '/app'}>App</a>
     <a href="/market-cap" class="topbar-link" class:active={currentPath === '/market-cap'}>Market Cap</a>
     <a href="/install" class="topbar-link" class:active={currentPath === '/install'}>Install</a>
@@ -80,6 +86,7 @@
         </div>
       </Dropdown>
     </div>
+    {/if}
   </div>
 </nav>
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildPaymentRuntimeInput } from '../../../../frontend/src/lib/components/Entity/payments/runtime/payment-command';
+import { buildPaymentRuntimeInput } from '../../../api/payments/command';
 import {
   quotePaymentCandidateRoutes,
   quoteRequiredInboundForForward,
@@ -77,7 +77,7 @@ describe('shared payment command helpers', () => {
     expect(buildPaymentRuntimeInput({
       entityId: 'alice',
       signerId: 'alice-signer',
-      targetEntityId: 'stale-target',
+      targetEntityId: 'bob',
       tokenId: 1,
       deliveryMode: 'instant',
       description: '  invoice  ',
@@ -102,6 +102,14 @@ describe('shared payment command helpers', () => {
       }],
       jInputs: [],
     });
+  });
+
+  test('rejects a stale route instead of replacing the intended recipient', () => {
+    expect(() => buildPaymentRuntimeInput({
+      entityId: 'alice', signerId: 'alice-signer', targetEntityId: 'carol',
+      tokenId: 1, deliveryMode: 'instant', description: '',
+      route: { path: ['alice', 'bob'], totalFee: 0n, senderAmount: 10n, recipientAmount: 10n },
+    })).toThrow('Payment route endpoints mismatch');
   });
 
   test('preserves direct and trusted route admission rules', () => {

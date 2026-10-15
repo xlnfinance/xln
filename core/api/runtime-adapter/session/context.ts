@@ -13,6 +13,7 @@ import type { RuntimeFrame, StorageHead } from '../../../storage/types';
 import type { StorageAccountDoc, StorageEntityViewPage } from '../../../storage';
 import { RuntimeAdapterError, requireRuntimeAdapterCommandReady, toRuntimeAdapterErrorPayload } from '../errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from '../security/rate-limit';
+import { errorMessage } from '../../../support/boundary-guards';
 import { createStructuredLogger } from '../../../support/logger';
 import type {
   RuntimeAdapterAuthLevel,
@@ -122,7 +123,7 @@ export type RuntimeAdapterDiagnostic = () => RuntimeAdapterResponseDiagnostic;
 const RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES = 2 * 1024 * 1024;
 
 export const runtimeAdapterLog = createStructuredLogger('runtime.radapter');
-export const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+export { errorMessage };
 
 const readPositiveNumberEnv = (name: string, defaultValue: number): number => {
   const raw = typeof process !== 'undefined' ? process.env[name] : undefined;

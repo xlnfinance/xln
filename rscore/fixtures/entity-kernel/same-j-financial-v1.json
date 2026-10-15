@@ -41,7 +41,7 @@
         "0x2222222222222222222222222222222222222222222222222222222222222222"
       ],
       "accountTxDigests": [
-        "0x8bf5b9b509aa5cfddeb3c9a743aa06f6ce049a220cb7b3319f4c238436ddbd27"
+        "0x3903f8c0709f4a8499c3897b19b52f951f9a1a8ac5a7f1bdf9550975bef6135d"
       ],
       "accountTxTypes": [
         "lending_borrow_request"
@@ -58,8 +58,10 @@
             "__xlnType": "BigInt",
             "value": "2500"
           },
+          "expiresAt": 5000,
           "hubEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
           "maxInterestBps": 150,
+          "maxLateMs": 86400000,
           "requestId": "borrow-2222222222222222",
           "termId": "1d",
           "tokenId": 1
@@ -76,7 +78,7 @@
         "0x2222222222222222222222222222222222222222222222222222222222222222"
       ],
       "accountTxDigests": [
-        "0x5ed4ae4e60fd1ff7f3766735702f6524fa02cb49c9312dea0214718b941ef246"
+        "0x48a14949410c8ec681ae92d55774cfe4134bb6bf6175001afcf7088e03c974a4"
       ],
       "accountTxTypes": [
         "lending_repay"

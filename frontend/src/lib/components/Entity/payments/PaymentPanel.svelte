@@ -37,7 +37,7 @@
     type PaymentPanelView,
     type PaymentReplicaView,
   } from './payment-panel-view';
-  import { buildPaymentRuntimeInput } from './runtime/payment-command';
+  import { buildPaymentRuntimeInput } from '@xln/core/api/payments/command';
   import {
     quotePaymentCandidateRoutes,
     type PaymentRouteQuote,

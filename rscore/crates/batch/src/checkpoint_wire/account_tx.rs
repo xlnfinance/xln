@@ -198,6 +198,22 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             integer(lending_term(*term_id)),
             integer(*interest_bps),
         ],
+        AccountTx::LendingRate {
+            position_id,
+            hub_entity_id,
+            lender_entity_id,
+            token_id,
+            claim_hash,
+            interest_bps,
+        } => vec![
+            integer(25),
+            AbiValue::Text(position_id.clone()),
+            AbiValue::Text(hub_entity_id.clone()),
+            AbiValue::Text(lender_entity_id.clone()),
+            integer(token_id.get()),
+            AbiValue::Text(claim_hash.clone()),
+            integer(*interest_bps),
+        ],
         AccountTx::LendingBorrowRequest {
             request_id,
             hub_entity_id,
@@ -206,6 +222,8 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             amount,
             term_id,
             max_interest_bps,
+            expires_at,
+            max_late_ms,
         } => vec![
             integer(11),
             AbiValue::Text(request_id.clone()),
@@ -215,6 +233,8 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             encode_bigint(amount),
             integer(lending_term(*term_id)),
             integer(*max_interest_bps),
+            integer(*expires_at),
+            integer(*max_late_ms),
         ],
         AccountTx::LendingRepay {
             loan_id,
@@ -222,6 +242,7 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             borrower_entity_id,
             token_id,
             amount,
+            claim_hash,
         } => vec![
             integer(12),
             AbiValue::Text(loan_id.clone()),
@@ -229,6 +250,7 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             AbiValue::Text(borrower_entity_id.clone()),
             integer(token_id.get()),
             encode_bigint(amount),
+            AbiValue::Text(claim_hash.clone()),
         ],
         AccountTx::LendingDisburse {
             loan_id,
@@ -236,6 +258,13 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             borrower_entity_id,
             token_id,
             amount,
+            term_id,
+            interest_bps,
+            request_id,
+            max_interest_bps,
+            expires_at,
+            max_late_ms,
+            late_ms,
         } => vec![
             integer(24),
             AbiValue::Text(loan_id.clone()),
@@ -243,6 +272,13 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             AbiValue::Text(borrower_entity_id.clone()),
             integer(token_id.get()),
             encode_bigint(amount),
+            integer(lending_term(*term_id)),
+            integer(*interest_bps),
+            AbiValue::Text(request_id.clone()),
+            integer(*max_interest_bps),
+            integer(*expires_at),
+            integer(*max_late_ms),
+            integer(*late_ms),
         ],
         AccountTx::LendingCloseRequest {
             position_id,
@@ -302,11 +338,7 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
 }
 
 const fn lending_term(value: LendingTermId) -> u8 {
-    match value {
-        LendingTermId::OneHour => 0,
-        LendingTermId::OneDay => 1,
-        LendingTermId::OneMonth => 2,
-    }
+    value.wire_tag()
 }
 
 fn jurisdiction_event(value: &JurisdictionEvent) -> Result<AbiValue, AccountWireEncodeError> {

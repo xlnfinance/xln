@@ -1,4 +1,4 @@
-import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
+import { normalizeRuntimeId } from '../../protocol/identity/runtime-id';
 import type { RoutedEntityInput, RuntimeReplica } from '../types';
 
 const REPLAY_OUTPUT_RUNTIME_ROUTES = Symbol.for('xln.runtime.replay.output-runtime-routes');

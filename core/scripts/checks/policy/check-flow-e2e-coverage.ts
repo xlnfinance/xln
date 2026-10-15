@@ -172,7 +172,7 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'pay',
-    file: 'frontend/src/lib/components/Entity/payments/runtime/payment-command.ts',
+    file: 'core/api/payments/command.ts',
     patterns: [
       'export const buildPaymentRuntimeInput',
       "type: 'htlcPayment'",

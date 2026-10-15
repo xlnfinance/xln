@@ -1,0 +1,232 @@
+{
+  "afterFirst": {
+    "merchant": {
+      "collateral": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "leftAllowance": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "leftCreditLimit": {
+        "__xlnType": "BigInt",
+        "value": "2000000000000"
+      },
+      "leftHold": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "offdelta": {
+        "__xlnType": "BigInt",
+        "value": "3000000"
+      },
+      "ondelta": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "rightAllowance": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "rightCreditLimit": {
+        "__xlnType": "BigInt",
+        "value": "2000000000000"
+      },
+      "rightHold": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "tokenId": 1
+    },
+    "merchantCapacity": {
+      "__xlnType": "BigInt",
+      "value": "2000003000000"
+    },
+    "merchantHeight": 9,
+    "payer": {
+      "collateral": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "leftAllowance": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "leftCreditLimit": {
+        "__xlnType": "BigInt",
+        "value": "2000000000000"
+      },
+      "leftHold": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "offdelta": {
+        "__xlnType": "BigInt",
+        "value": "3000000"
+      },
+      "ondelta": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "rightAllowance": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "rightCreditLimit": {
+        "__xlnType": "BigInt",
+        "value": "2000000000000"
+      },
+      "rightHold": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "tokenId": 1
+    },
+    "payerCapacity": {
+      "__xlnType": "BigInt",
+      "value": "1999997000000"
+    },
+    "payerHeight": 9
+  },
+  "before": {
+    "merchant": {
+      "collateral": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "leftAllowance": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "leftCreditLimit": {
+        "__xlnType": "BigInt",
+        "value": "2000000000000"
+      },
+      "leftHold": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "offdelta": {
+        "__xlnType": "BigInt",
+        "value": "2000000"
+      },
+      "ondelta": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "rightAllowance": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "rightCreditLimit": {
+        "__xlnType": "BigInt",
+        "value": "2000000000000"
+      },
+      "rightHold": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "tokenId": 1
+    },
+    "merchantCapacity": {
+      "__xlnType": "BigInt",
+      "value": "2000002000000"
+    },
+    "merchantHeight": 7,
+    "payer": {
+      "collateral": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "leftAllowance": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "leftCreditLimit": {
+        "__xlnType": "BigInt",
+        "value": "2000000000000"
+      },
+      "leftHold": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "offdelta": {
+        "__xlnType": "BigInt",
+        "value": "2000000"
+      },
+      "ondelta": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "rightAllowance": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "rightCreditLimit": {
+        "__xlnType": "BigInt",
+        "value": "2000000000000"
+      },
+      "rightHold": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "tokenId": 1
+    },
+    "payerCapacity": {
+      "__xlnType": "BigInt",
+      "value": "1999998000000"
+    },
+    "payerHeight": 7
+  },
+  "elapsedMs": 2498.060125,
+  "lost": {
+    "exit": 1,
+    "pid": 34094
+  },
+  "mcpRetry": {
+    "exit": 0,
+    "pid": 34128
+  },
+  "order": {
+    "amount": "1000000",
+    "currency": "xln:eip155:31337/depository:0xa513e6e4b8f2a923d98304ec87f64353c4d5c853/token:1",
+    "fromHeight": 98493,
+    "orderId": "local-mpp-78027987-35c4-454a-be6c-04b7825d157c",
+    "recipient": "0x7eb6948e41d03ecbe84016295810c3369b772a93b04f0f171c44dc387133373f"
+  },
+  "paidRequests": 3,
+  "received": [
+    {
+      "amount": "1000000",
+      "event": "HtlcReceived",
+      "hashlock": "0x38232363b00c52f3338fb873d2de2db1abe286aa0cf6852e7eb5baefa6f0060e",
+      "height": 98496
+    }
+  ],
+  "retry": {
+    "exit": 0,
+    "pid": 34113
+  },
+  "runtimeProvenance": "Existing locked dev stand; not restarted or rebuilt by this proof",
+  "sent": [
+    {
+      "amount": "1000000",
+      "event": "HtlcInitiated",
+      "hashlock": "0x38232363b00c52f3338fb873d2de2db1abe286aa0cf6852e7eb5baefa6f0060e",
+      "height": 98493
+    },
+    {
+      "amount": "1000000",
+      "event": "HtlcFinalized",
+      "hashlock": "0x38232363b00c52f3338fb873d2de2db1abe286aa0cf6852e7eb5baefa6f0060e",
+      "height": 98494
+    }
+  ],
+  "sourceDirty": false,
+  "sourceSha": "7ab4f41281bb2167690420396b069b1e42858c80",
+  "x402Retry": {
+    "exit": 0,
+    "pid": 34125
+  }
+}

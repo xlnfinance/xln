@@ -1,20 +1,19 @@
 import { assertCrossJurisdictionSwapTargetReady } from './swap-command-plan';
+import { normalizeEntityRef } from '../../support/boundary-guards';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { RuntimeReplica } from '../types';
-
-const normalizeId = (value: string): string => value.trim().toLowerCase();
 
 /** Resolve the target Account from the owning Runtime before invoking the pure Account check. */
 export const assertCrossJurisdictionSwapTargetReadyInEnv = (
   env: RuntimeReplica,
   route: CrossJurisdictionSwapRoute,
 ): void => {
-  const targetEntityId = normalizeId(route.target.counterpartyEntityId);
-  const targetSignerId = normalizeId(route.targetSignerId || '');
-  const hubEntityId = normalizeId(route.target.entityId);
+  const targetEntityId = normalizeEntityRef(route.target.counterpartyEntityId);
+  const targetSignerId = normalizeEntityRef(route.targetSignerId || '');
+  const hubEntityId = normalizeEntityRef(route.target.entityId);
   const replica = [...env.state.eReplicas.values()].find(candidate => (
-    normalizeId(candidate.entityId || candidate.state?.entityId || '') === targetEntityId &&
-    (!targetSignerId || normalizeId(candidate.signerId || '') === targetSignerId)
+    normalizeEntityRef(candidate.entityId || candidate.state?.entityId || '') === targetEntityId &&
+    (!targetSignerId || normalizeEntityRef(candidate.signerId || '') === targetSignerId)
   ));
   assertCrossJurisdictionSwapTargetReady(
     route,

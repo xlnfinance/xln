@@ -1,3 +1,4 @@
+mod authorization;
 mod payment;
 mod validation;
 
@@ -18,6 +19,7 @@ pub(crate) fn apply(
     replica: &mut AccountReplica,
     tx: &AccountTx,
     proposer: Side,
+    context: Option<&crate::AccountExecutionContext>,
 ) -> Result<MutationDecision, TransitionError> {
     match tx {
         AccountTx::LendingFund {
@@ -40,21 +42,15 @@ pub(crate) fn apply(
                 interest_bps: *interest_bps,
             },
         ),
-        AccountTx::LendingBorrowRequest {
-            request_id,
-            hub_entity_id,
-            borrower_entity_id,
-            amount,
-            max_interest_bps,
-            ..
-        } => borrow_request(
+        AccountTx::LendingBorrowRequest { .. } => authorization::borrow_request(
             replica,
+            tx,
             proposer,
-            request_id,
-            hub_entity_id,
-            borrower_entity_id,
-            amount,
-            *max_interest_bps,
+            context
+                .ok_or(TransitionError::ExecutionContextRequired(
+                    "lending_borrow_request",
+                ))?
+                .committed_timestamp,
         ),
         AccountTx::LendingRepay {
             loan_id,
@@ -62,6 +58,7 @@ pub(crate) fn apply(
             borrower_entity_id,
             token_id,
             amount,
+            ..
         } => repay(
             replica,
             proposer,
@@ -77,6 +74,7 @@ pub(crate) fn apply(
             borrower_entity_id,
             token_id,
             amount,
+            ..
         } => disburse(
             replica,
             proposer,
@@ -162,30 +160,6 @@ fn fund(
         "lending_fund",
     )?;
     consume_if_applied(replica, result, key, LendingIntentKind::Fund)
-}
-
-fn borrow_request(
-    replica: &mut AccountReplica,
-    proposer: Side,
-    request_id: &str,
-    hub: &str,
-    borrower: &str,
-    amount: &BigInt,
-    interest_bps: i64,
-) -> Result<MutationDecision, TransitionError> {
-    require_intent_id(request_id, "borrow")?;
-    require_role(replica, proposer, "BORROWER", borrower)?;
-    require_counterparty(replica, borrower, hub)?;
-    positive_amount(amount, "LENDING_BORROW")?;
-    validate_interest_bps(interest_bps)?;
-    consume_intent(
-        replica,
-        format!("borrow:{}", normalize(request_id)),
-        LendingIntentKind::Borrow,
-    )?;
-    Ok(MutationDecision::applied(vec![format!(
-        "Lending borrow request {request_id} committed"
-    )]))
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { buildOpenHubAccountInput } from '../lib/actions/open-account';
-import { buildPaymentInput, ensureCliPaymentProfiles } from '../lib/actions/pay';
+import { ensureCliPaymentProfiles } from '../lib/actions/pay';
+import { buildPaymentRuntimeInput } from '../../core/api/payments/command';
 import { buildMoveInput } from '../lib/actions/move';
 import { buildReceiveInvoice } from '../lib/actions/pay';
 import { normalizeNativeDeepLinkPath } from '../../frontend/src/lib/native/deeplink';
@@ -47,27 +48,25 @@ describe('cli action builders', () => {
   });
 
   test('direct payment vs htlc payment', () => {
-    const direct = buildPaymentInput({
+    const direct = buildPaymentRuntimeInput({
       entityId: '0xa',
       signerId: '0xs',
       targetEntityId: '0xb',
-      amount: 5n,
       tokenId: 1,
-      route: ['0xa', '0xb'],
+      route: { path: ['0xa', '0xb'], recipientAmount: 5n, senderAmount: 5n, totalFee: 0n },
       deliveryMode: 'direct',
-      maxSenderDebit: 5n,
+      description: '',
     });
     expect(direct.entityInputs[0]?.entityTxs[0]?.type).toBe('directPayment');
 
-    const htlc = buildPaymentInput({
+    const htlc = buildPaymentRuntimeInput({
       entityId: '0xa',
       signerId: '0xs',
       targetEntityId: '0xc',
-      amount: 5n,
       tokenId: 1,
-      route: ['0xa', '0xb', '0xc'],
+      route: { path: ['0xa', '0xb', '0xc'], recipientAmount: 5n, senderAmount: 5n, totalFee: 0n },
       deliveryMode: 'instant',
-      maxSenderDebit: 5n,
+      description: '',
     });
     expect(htlc.entityInputs[0]?.entityTxs[0]?.type).toBe('htlcPayment');
   });

@@ -11,7 +11,7 @@ import {
   getConfiguredOfficialFoundationSignerId,
   loadJurisdictions,
 } from '../../jurisdiction/adapter/kernel/jurisdiction-loader';
-import { isRuntimeId } from '../../network/p2p/auth/runtime-id';
+import { isRuntimeId } from '../../protocol/identity/runtime-id';
 import {
   provisionEntityEncryptionKey,
   requireEntityEncryptionPrivateKey,

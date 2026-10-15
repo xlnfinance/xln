@@ -5,29 +5,75 @@
       "name": "borrower-lifecycle",
       "steps": [
         {
-          "accountStateRoot": "0xd52967ca99552afa84fb37ba95e4bd895e749bcff66c0f890175205d9ad574b7",
+          "accountStateRoot": "0xb4703e6ec942fbe49c6d82a3bbc1a9a92d018c944baaed21071135929d39c287",
           "byLeft": false,
-          "deltasRoot": "0xd0f6c4d2d2ecf5393b499adcbca31364f13ee59e1892455d3998e669f74eff39",
+          "claimEntries": [],
+          "deltasRoot": "0xf66377c7a0319b17aea4ce46035d2057ea03d1863e44f75e5ddbf4f92ef6bf8e",
           "events": [
             "Lending borrow request borrow-2222222222222222 committed"
           ],
           "intentEntries": [
+            [
+              "authorize:0xf45e7baa687b1eb87b882f023e762cf7d70a8020b056d24b6d6f1d571ea20a61",
+              "borrow"
+            ],
             [
               "borrow:borrow-2222222222222222",
               "borrow"
             ]
           ],
           "leftCreditLimit": "20000",
-          "lendingIntentsRoot": "0x22a0a937381062092ae37831b2e620b5771b154279048cf8b73adc515ab15538",
+          "lendingIntentsRoot": "0x7c17e0f971db1437b1aee5e9f58d53f4dd8008f6c247ab55c72c73f1fc264298",
           "offdelta": "0",
           "outputCount": 0,
           "rightCreditLimit": "20000",
-          "txType": "lending_borrow_request"
+          "subcontractsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "timestamp": 1000,
+          "txType": "lending_borrow_request",
+          "txWire": [
+            11,
+            "borrow-2222222222222222",
+            "0x1010101010101010101010101010101010101010101010101010101010101010",
+            "0x3030303030303030303030303030303030303030303030303030303030303030",
+            1,
+            "2500",
+            1,
+            150,
+            5000,
+            86400000
+          ]
         },
         {
-          "accountStateRoot": "0x203b78d5de9c96a1cf256bc423f7de3719f1f4d29556c2e37ba213b16c80491f",
+          "accountStateRoot": "0x72bc432ce788842f2364174ee3b045a15ba116cf3bc59d34cc7ae2ed7b2a03d2",
           "byLeft": true,
-          "deltasRoot": "0x976d4aa614528a04f130a48894313e5602bd0fba30eb27ae0cc9de5affa0dcf1",
+          "claimEntries": [
+            [
+              "loan-0327fd9035d42518",
+              {
+                "accruedAt": 1000,
+                "accruedInterest": {
+                  "__xlnType": "BigInt",
+                  "value": "0"
+                },
+                "creditorIsLeft": true,
+                "interestBps": 100,
+                "interestRemainder": {
+                  "__xlnType": "BigInt",
+                  "value": "0"
+                },
+                "kind": "loan",
+                "lateMs": 86400000,
+                "openedAt": 1000,
+                "principal": {
+                  "__xlnType": "BigInt",
+                  "value": "2500"
+                },
+                "termMs": 86400000,
+                "tokenId": 1
+              }
+            ]
+          ],
+          "deltasRoot": "0xb38a75d29b75212348ce5e07f8f35ded30938e6dec3017d381aabb89fad90a68",
           "events": [
             "💸 Sent 2500 token 1 to Entity 3030 (xln:lending_disburse)"
           ],
@@ -46,14 +92,94 @@
           "offdelta": "-2500",
           "outputCount": 0,
           "rightCreditLimit": "20000",
-          "txType": "lending_disburse"
+          "subcontractsRoot": "0x55e4edac8409ec307314c6936ca177d2e4382e37383face92ab1591d0eba0d29",
+          "timestamp": 1000,
+          "txType": "lending_disburse",
+          "txWire": [
+            24,
+            "loan-0327fd9035d42518",
+            "0x1010101010101010101010101010101010101010101010101010101010101010",
+            "0x3030303030303030303030303030303030303030303030303030303030303030",
+            1,
+            "2500",
+            1,
+            100,
+            "borrow-2222222222222222",
+            150,
+            5000,
+            86400000,
+            86400000
+          ]
         },
         {
-          "accountStateRoot": "0x2773fb65ee004ae4e16f5bb53db5b5de55711a71a655b7c41fd448eb208d12fc",
+          "accountStateRoot": "0x72e7020d010fa475af6587a64bdfd1d225ade2d93a091ff0ccefdaa0455ced0e",
           "byLeft": false,
-          "deltasRoot": "0xb8e1b93e520293113e8a6ea2e63ec701146ea7f56688f63f1aefe338a2133450",
+          "claimEntries": [
+            [
+              "loan-0327fd9035d42518",
+              {
+                "accruedAt": 43201000,
+                "accruedInterest": {
+                  "__xlnType": "BigInt",
+                  "value": "0"
+                },
+                "creditorIsLeft": true,
+                "interestBps": 100,
+                "interestRemainder": {
+                  "__xlnType": "BigInt",
+                  "value": "432000000000"
+                },
+                "kind": "loan",
+                "lateMs": 86400000,
+                "openedAt": 1000,
+                "principal": {
+                  "__xlnType": "BigInt",
+                  "value": "1500"
+                },
+                "termMs": 86400000,
+                "tokenId": 1
+              }
+            ]
+          ],
+          "deltasRoot": "0x7f88565bc56dd77b41f9ac5bc3fa98393adc9a56eed67857b59122e5d6f4d358",
           "events": [
-            "💰 Received 2525 token 1 from Entity 3030 (xln:lending_repay)"
+            "💰 Received 1012 token 1 from Entity 3030 (xln:lending_repay)"
+          ],
+          "intentEntries": [
+            [
+              "borrow:borrow-2222222222222222",
+              "borrow"
+            ],
+            [
+              "disburse:loan-0327fd9035d42518",
+              "disburse"
+            ]
+          ],
+          "leftCreditLimit": "20000",
+          "lendingIntentsRoot": "0x9ff075b49662492faa43131b77e795451e686578eb57384f3d00d9c08ead4d6b",
+          "offdelta": "-1488",
+          "outputCount": 0,
+          "rightCreditLimit": "20000",
+          "subcontractsRoot": "0xbda3e39ed3c5973394ad8371e036118bfc479b5088fc58f804332782a88a7cad",
+          "timestamp": 43201000,
+          "txType": "lending_repay",
+          "txWire": [
+            12,
+            "loan-0327fd9035d42518",
+            "0x1010101010101010101010101010101010101010101010101010101010101010",
+            "0x3030303030303030303030303030303030303030303030303030303030303030",
+            1,
+            "1012",
+            "0xbb90f6a8798ec5519fcd2c8b45c92a2780980f35a3ded297efef54f6ebbee7c6"
+          ]
+        },
+        {
+          "accountStateRoot": "0xf12d586462ef576b94ddf3729c995f792c83fc0d1fedca94f5bac8d5bc3a12fb",
+          "byLeft": false,
+          "claimEntries": [],
+          "deltasRoot": "0xf00d68bf7096582dadfb852c6a93b1e40b72efc3410140eee78302ebd2180b2c",
+          "events": [
+            "💰 Received 1508 token 1 from Entity 3030 (xln:lending_repay)"
           ],
           "intentEntries": [
             [
@@ -71,10 +197,21 @@
           ],
           "leftCreditLimit": "20000",
           "lendingIntentsRoot": "0xd5b8648bb91bb4062f493cfabdd92bad89d25e4ccf1fcf334c75973af3d78c28",
-          "offdelta": "25",
+          "offdelta": "20",
           "outputCount": 0,
           "rightCreditLimit": "20000",
-          "txType": "lending_repay"
+          "subcontractsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "timestamp": 86401000,
+          "txType": "lending_repay",
+          "txWire": [
+            12,
+            "loan-0327fd9035d42518",
+            "0x1010101010101010101010101010101010101010101010101010101010101010",
+            "0x3030303030303030303030303030303030303030303030303030303030303030",
+            1,
+            "5000",
+            "0xe03bc417430df8f9c850df50a5f922e695927aa7d50418a283e5369bf4873f48"
+          ]
         }
       ]
     },
@@ -82,9 +219,36 @@
       "name": "lender-lifecycle",
       "steps": [
         {
-          "accountStateRoot": "0xc1594768bc3eb20861c501bdff01c2edf7382d7a1385763fee05404f3679de65",
+          "accountStateRoot": "0x991e81b9c7c46970adb87e1321a1f2e738c06f723413acaffedccda68b86803b",
           "byLeft": false,
-          "deltasRoot": "0x8b2f57f5a7ff67570d909be30dc18ab49bfe3b2d1751bdedb143ae090718ee43",
+          "claimEntries": [
+            [
+              "lend-1111111111111111",
+              {
+                "accruedAt": 1000,
+                "accruedInterest": {
+                  "__xlnType": "BigInt",
+                  "value": "0"
+                },
+                "creditorIsLeft": false,
+                "interestBps": 100,
+                "interestRemainder": {
+                  "__xlnType": "BigInt",
+                  "value": "0"
+                },
+                "kind": "savings",
+                "lateMs": 0,
+                "openedAt": 1000,
+                "principal": {
+                  "__xlnType": "BigInt",
+                  "value": "10000"
+                },
+                "termMs": 86400000,
+                "tokenId": 1
+              }
+            ]
+          ],
+          "deltasRoot": "0x347f7429a6f7a6950db85a270ce4c178aa81dbb2ad1f3f7164a8113a58e508a3",
           "events": [
             "💰 Received 10000 token 1 from Entity 2020 (xln:lending_fund)"
           ],
@@ -99,12 +263,51 @@
           "offdelta": "10000",
           "outputCount": 0,
           "rightCreditLimit": "20000",
-          "txType": "lending_fund"
+          "subcontractsRoot": "0xf5ba03c9db7ed88d6b05ed5c5130a5ff3a06942ae0f54f3155b96349727767fc",
+          "timestamp": 1000,
+          "txType": "lending_fund",
+          "txWire": [
+            10,
+            "lend-1111111111111111",
+            "0x1010101010101010101010101010101010101010101010101010101010101010",
+            "0x2020202020202020202020202020202020202020202020202020202020202020",
+            1,
+            "10000",
+            1,
+            100
+          ]
         },
         {
-          "accountStateRoot": "0x4291f1c50778ec7966a286d4a7890aaa20350086bc18754289d6145d3e9b9afc",
+          "accountStateRoot": "0xf119a52ad856e06d509c0b481132d0bf3f8b694630b3912dd6307cbb5cb88e5b",
           "byLeft": false,
-          "deltasRoot": "0x8b2f57f5a7ff67570d909be30dc18ab49bfe3b2d1751bdedb143ae090718ee43",
+          "claimEntries": [
+            [
+              "lend-1111111111111111",
+              {
+                "accruedAt": 1000,
+                "accruedInterest": {
+                  "__xlnType": "BigInt",
+                  "value": "0"
+                },
+                "creditorIsLeft": false,
+                "interestBps": 100,
+                "interestRemainder": {
+                  "__xlnType": "BigInt",
+                  "value": "0"
+                },
+                "kind": "savings",
+                "lateMs": 0,
+                "openedAt": 1000,
+                "principal": {
+                  "__xlnType": "BigInt",
+                  "value": "10000"
+                },
+                "termMs": 86400000,
+                "tokenId": 1
+              }
+            ]
+          ],
+          "deltasRoot": "0x347f7429a6f7a6950db85a270ce4c178aa81dbb2ad1f3f7164a8113a58e508a3",
           "events": [
             "Lending close request lend-1111111111111111 committed"
           ],
@@ -123,14 +326,23 @@
           "offdelta": "10000",
           "outputCount": 0,
           "rightCreditLimit": "20000",
-          "txType": "lending_close_request"
+          "subcontractsRoot": "0xf5ba03c9db7ed88d6b05ed5c5130a5ff3a06942ae0f54f3155b96349727767fc",
+          "timestamp": 1000,
+          "txType": "lending_close_request",
+          "txWire": [
+            14,
+            "lend-1111111111111111",
+            "0x1010101010101010101010101010101010101010101010101010101010101010",
+            "0x2020202020202020202020202020202020202020202020202020202020202020"
+          ]
         },
         {
-          "accountStateRoot": "0x95b704b09fe5ebe387393e04e55cd88b1efcbb8beeab6b9ddc034e0c88dac9e7",
+          "accountStateRoot": "0xc4ed05878b1871a6479ad4fee21d4ee24c75774fd2d386ffb117fc40fc47acd2",
           "byLeft": true,
-          "deltasRoot": "0x24bf3769ff86d5ec381efd79a77152942e63d3b702ef56d7832d27c5ef21325b",
+          "claimEntries": [],
+          "deltasRoot": "0xdf45402436da9cae870141435bb21945e697daac17e865643f2d51410819c76a",
           "events": [
-            "💸 Sent 10025 token 1 to Entity 2020 (xln:lending_close_payout)"
+            "💸 Sent 10100 token 1 to Entity 2020 (xln:lending_close_payout)"
           ],
           "intentEntries": [
             [
@@ -148,10 +360,20 @@
           ],
           "leftCreditLimit": "20000",
           "lendingIntentsRoot": "0xa5b09d086aacb643ff5e812a9600145cb8544327fa44cde5e1e4c9f3c9108cc8",
-          "offdelta": "-25",
+          "offdelta": "-100",
           "outputCount": 0,
           "rightCreditLimit": "20000",
-          "txType": "lending_close_payout"
+          "subcontractsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "timestamp": 86401000,
+          "txType": "lending_close_payout",
+          "txWire": [
+            15,
+            "lend-1111111111111111",
+            "0x1010101010101010101010101010101010101010101010101010101010101010",
+            "0x2020202020202020202020202020202020202020202020202020202020202020",
+            1,
+            "10100"
+          ]
         }
       ]
     }

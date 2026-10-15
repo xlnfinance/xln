@@ -15,10 +15,10 @@ use xln_rscore_protocol::{
 };
 
 use crate::lendbook::canonical_lending_state;
+use crate::scheduler::canonical_crontab_state;
 use crate::swapbook::{
     BookOrder, BookState, OrderbookState, SameJOffer, Side, compute_book_commitment_hash,
 };
-use crate::scheduler::canonical_crontab_state;
 use crate::{
     AccountProposalWork, EntityConsensusSection, EntityKernelCommitments, EntityKernelError,
     EntityKernelOutput, EntityProfile, EntityReferral, EntityStateSlice, HubProfile,

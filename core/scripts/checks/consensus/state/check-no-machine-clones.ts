@@ -1,4 +1,5 @@
 import ts from 'typescript';
+import { resolve } from 'node:path';
 
 import { collectSealValueGraphViolations } from './check-no-machine-seal-value';
 
@@ -102,9 +103,10 @@ const rootExpression = (node: ts.Expression): ts.Expression => {
   return current;
 };
 
+const coreRoot = `${resolve('core').replaceAll('\\', '/')}/`;
 const sourceFiles = program.getSourceFiles().filter(source => {
   const path = source.fileName.replaceAll('\\', '/');
-  return path.includes('/core/') &&
+  return path.startsWith(coreRoot) &&
     !path.includes('/core/__tests__/') &&
     !path.includes('/core/scenarios/') &&
     !path.includes('/core/qa/') &&

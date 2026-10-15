@@ -1,0 +1,21 @@
+$ bun cli/scripts/agent-payments/proof.ts ".logs/agent-payments-7ab4f4128"
+lost-response 1  230 |                     challenge: selectedChallenge,
+231 |                     credential,
+232 |                     transactionHash: MethodResponse.getTransactionHash(selected.method, credential),
+233 |                 });
+234 |                 try {
+235 |                     response = await baseFetch(paymentInput, {
+                                           ^
+TypeError: The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()
+  path: "http://127.0.0.1:52367/invoice",
+ errno: 0,
+  code: "ECONNRESET"
+
+      at async <anonymous> (/Users/zigota/xln/node_modules/mppx/dist/client/internal/Fetch.js:235:38)
+
+Bun v1.4.0 (macOS arm64)
+
+restarted-client 0 {"body":"{\"orderId\":\"local-mpp-78027987-35c4-454a-be6c-04b7825d157c\",\"resource\":\"paid research result\"}","pid":34113,"receipt":"eyJtZXRob2QiOiJ4bG4iLCJzdGF0dXMiOiJzdWNjZXNzIiwicmVmZXJlbmNlIjoiMHgzODIzMjM2M2IwMGM1MmYzMzM4ZmI4NzNkMmRlMmRiMWFiZTI4NmFhMGNmNjg1MmU3ZWI1YmFlZmE2ZjAwNjBlIiwidGltZXN0YW1wIjoiMjAyNi0xMC0xNVQwNDowMzo1NS43MjVaIn0","status":200} 
+x402-client 0 {"body":"{\"orderId\":\"local-mpp-78027987-35c4-454a-be6c-04b7825d157c\",\"resource\":\"paid research result\"}","pid":34125,"receipt":"eyJtZXRob2QiOiJ4bG4iLCJzdGF0dXMiOiJzdWNjZXNzIiwicmVmZXJlbmNlIjoiMHgzODIzMjM2M2IwMGM1MmYzMzM4ZmI4NzNkMmRlMmRiMWFiZTI4NmFhMGNmNjg1MmU3ZWI1YmFlZmE2ZjAwNjBlIiwidGltZXN0YW1wIjoiMjAyNi0xMC0xNVQwNDowMzo1NS43MjVaIn0","status":200} 
+mcp-client 0 {"pid":34128,"protocol":"mcp","result":{"_meta":{"org.paymentauth/receipt":{"challengeId":"hTKhNZvLbBMuVZsXe5dmJe5rB-s9rogl7gqhFaYhCr4","method":"xln","reference":"0x38232363b00c52f3338fb873d2de2db1abe286aa0cf6852e7eb5baefa6f0060e","status":"success","timestamp":"2026-10-15T04:03:55.725Z"}},"content":[{"text":"paid research result","type":"text"}],"receipt":{"challengeId":"hTKhNZvLbBMuVZsXe5dmJe5rB-s9rogl7gqhFaYhCr4","method":"xln","reference":"0x38232363b00c52f3338fb873d2de2db1abe286aa0cf6852e7eb5baefa6f0060e","status":"success","timestamp":"2026-10-15T04:03:55.725Z"}}} 
+MPP_PROOF_PASSED .logs/agent-payments-7ab4f4128

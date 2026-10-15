@@ -175,6 +175,8 @@ fn extended_transactions() -> Vec<(&'static str, AccountTx)> {
                 amount: BigInt::from(10),
                 term_id: xln_rscore_engine::LendingTermId::OneDay,
                 max_interest_bps: 100,
+                expires_at: 5_000,
+                max_late_ms: 86_400_000,
             },
         ),
         (
@@ -185,6 +187,7 @@ fn extended_transactions() -> Vec<(&'static str, AccountTx)> {
                 borrower_entity_id: "0xborrower".to_string(),
                 token_id: token,
                 amount: BigInt::from(10),
+                claim_hash: format!("0x{}", "cc".repeat(32)),
             },
         ),
         (
@@ -195,6 +198,13 @@ fn extended_transactions() -> Vec<(&'static str, AccountTx)> {
                 borrower_entity_id: "0xborrower".to_string(),
                 token_id: token,
                 amount: BigInt::from(10),
+                term_id: xln_rscore_engine::LendingTermId::OneDay,
+                interest_bps: 100,
+                request_id: "request-1".to_string(),
+                max_interest_bps: 100,
+                expires_at: 5_000,
+                max_late_ms: 86_400_000,
+                late_ms: 0,
             },
         ),
         (
@@ -511,17 +521,22 @@ fn out_of_range_policy_version_reaching_the_hash_is_an_admission_bug() {
     );
 }
 
-/// Lending is inside the production profile since `9acd5e3e6` completed the
-/// overdue-loan settlement, so local admission takes every lending kind — the
-/// same verdict as TypeScript `enqueue admits %s into the mempool`.
+/// Launch profile: local admission rejects every lending kind before the
+/// mempool. Historical frames stay hashable — same verdict as TypeScript
+/// `enqueue rejects %s without mutation`.
 #[test]
-fn admits_every_lending_kind_into_the_mempool() {
+fn rejects_every_lending_kind_before_the_mempool() {
     for (kind, tx) in extended_transactions() {
         let (mut left, _right) = parties();
-        left.account
+        let error = left
+            .account
             .admit_txs(vec![tx.clone()], "test")
-            .unwrap_or_else(|error| panic!("{kind} must admit: {error}"));
-        assert_eq!(left.account.mempool(), std::slice::from_ref(&tx), "{kind}");
+            .expect_err(&format!("{kind} must reject"));
+        assert!(
+            error.to_string().contains("ACCOUNT_TX_KIND_OUT_OF_PROFILE"),
+            "{kind} must be refused by the launch profile: {error}",
+        );
+        assert!(left.account.mempool().is_empty(), "{kind}");
         assert!(
             xln_rscore_engine::is_frame_hashable(&tx),
             "{kind} frame verification must remain available",
@@ -559,14 +574,8 @@ fn an_incoming_lending_frame_is_judged_by_lending_semantics_not_the_profile() {
             Err(error) => error.to_string(),
         };
         assert!(
-            !reason.contains("ACCOUNT_TX_KIND_OUT_OF_PROFILE"),
-            "{kind} must not be refused by the profile: {reason}",
-        );
-        // Positive evidence that preflight let it through: the verdict comes
-        // from the lending handler replaying the transaction.
-        assert!(
-            reason.contains("LENDING_"),
-            "{kind} must be judged by the lending handler: {reason}",
+            reason.contains("ACCOUNT_TX_KIND_OUT_OF_PROFILE"),
+            "{kind} must be refused by the launch profile: {reason}",
         );
         assert_eq!(right.account.current_height(), 0);
         assert!(right.account.mempool().is_empty(), "{kind}");

@@ -736,8 +736,62 @@ fn lending_term(
         "1h" => Ok(LendingTermId::OneHour),
         "1d" => Ok(LendingTermId::OneDay),
         "1m" => Ok(LendingTermId::OneMonth),
+        "demand" => Ok(LendingTermId::Demand),
         _ => Err(invalid(operation_index, path, "VALUE_INVALID")),
     }
+}
+
+fn decode_lending_rate(
+    value: &Map<String, Value>,
+    operation_index: u64,
+    path: &str,
+) -> Result<AccountTx, AccountInputJsonError> {
+    exact_fields(
+        value,
+        &[
+            "positionId",
+            "hubEntityId",
+            "lenderEntityId",
+            "tokenId",
+            "claimHash",
+            "interestBps",
+        ],
+        &[],
+        operation_index,
+        path,
+    )?;
+    Ok(AccountTx::LendingRate {
+        position_id: text(
+            field(value, "positionId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.positionId"),
+        )?,
+        hub_entity_id: text(
+            field(value, "hubEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.hubEntityId"),
+        )?,
+        lender_entity_id: text(
+            field(value, "lenderEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.lenderEntityId"),
+        )?,
+        token_id: token_id(
+            field(value, "tokenId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.tokenId"),
+        )?,
+        claim_hash: text(
+            field(value, "claimHash", operation_index, path)?,
+            operation_index,
+            &format!("{path}.claimHash"),
+        )?,
+        interest_bps: signed(
+            field(value, "interestBps", operation_index, path)?,
+            operation_index,
+            &format!("{path}.interestBps"),
+        )?,
+    })
 }
 
 fn decode_lending_fund(
@@ -814,12 +868,24 @@ fn decode_lending_borrow_request(
             "amount",
             "termId",
             "maxInterestBps",
+            "expiresAt",
+            "maxLateMs",
         ],
         &[],
         operation_index,
         path,
     )?;
     Ok(AccountTx::LendingBorrowRequest {
+        expires_at: unsigned(
+            field(value, "expiresAt", operation_index, path)?,
+            operation_index,
+            &format!("{path}.expiresAt"),
+        )?,
+        max_late_ms: unsigned(
+            field(value, "maxLateMs", operation_index, path)?,
+            operation_index,
+            &format!("{path}.maxLateMs"),
+        )?,
         request_id: text(
             field(value, "requestId", operation_index, path)?,
             operation_index,
@@ -871,6 +937,7 @@ fn decode_lending_repay(
             "borrowerEntityId",
             "tokenId",
             "amount",
+            "claimHash",
         ],
         &[],
         operation_index,
@@ -902,6 +969,11 @@ fn decode_lending_repay(
             operation_index,
             &format!("{path}.amount"),
         )?,
+        claim_hash: text(
+            field(value, "claimHash", operation_index, path)?,
+            operation_index,
+            &format!("{path}.claimHash"),
+        )?,
     })
 }
 
@@ -918,6 +990,13 @@ fn decode_lending_disburse(
             "borrowerEntityId",
             "tokenId",
             "amount",
+            "termId",
+            "interestBps",
+            "requestId",
+            "maxInterestBps",
+            "expiresAt",
+            "maxLateMs",
+            "lateMs",
         ],
         &[],
         operation_index,
@@ -948,6 +1027,41 @@ fn decode_lending_disburse(
             field(value, "amount", operation_index, path)?,
             operation_index,
             &format!("{path}.amount"),
+        )?,
+        term_id: lending_term(
+            field(value, "termId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.termId"),
+        )?,
+        interest_bps: signed(
+            field(value, "interestBps", operation_index, path)?,
+            operation_index,
+            &format!("{path}.interestBps"),
+        )?,
+        request_id: text(
+            field(value, "requestId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.requestId"),
+        )?,
+        max_interest_bps: signed(
+            field(value, "maxInterestBps", operation_index, path)?,
+            operation_index,
+            &format!("{path}.maxInterestBps"),
+        )?,
+        expires_at: unsigned(
+            field(value, "expiresAt", operation_index, path)?,
+            operation_index,
+            &format!("{path}.expiresAt"),
+        )?,
+        max_late_ms: unsigned(
+            field(value, "maxLateMs", operation_index, path)?,
+            operation_index,
+            &format!("{path}.maxLateMs"),
+        )?,
+        late_ms: unsigned(
+            field(value, "lateMs", operation_index, path)?,
+            operation_index,
+            &format!("{path}.lateMs"),
         )?,
     })
 }
@@ -1565,6 +1679,7 @@ fn decode_account_tx_at(
     match kind.as_str() {
         "direct_payment" => decode_direct_payment(data, operation_index, &data_path),
         "lending_fund" => decode_lending_fund(data, operation_index, &data_path),
+        "lending_rate" => decode_lending_rate(data, operation_index, &data_path),
         "lending_borrow_request" => {
             decode_lending_borrow_request(data, operation_index, &data_path)
         }

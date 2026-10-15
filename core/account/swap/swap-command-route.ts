@@ -3,9 +3,8 @@ import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionVenueIdForLegs,
 } from '../../extensions/cross-j/market';
+import { normalizeEntityRef } from '../../support/boundary-guards';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
-
-const normalizeId = (value: string): string => String(value || '').trim().toLowerCase();
 
 const stableIdHash = (input: string): string => {
   let hash = 0xcbf29ce484222325n;
@@ -33,8 +32,8 @@ export const buildDeterministicSwapOfferId = (input: Readonly<{
   const seed = [
     logicalTimestamp,
     logicalHeight,
-    normalizeId(input.sourceEntityId),
-    normalizeId(input.counterpartyEntityId),
+    normalizeEntityRef(input.sourceEntityId),
+    normalizeEntityRef(input.counterpartyEntityId),
     input.sellToken,
     input.buyToken,
     input.sellAmount.toString(),

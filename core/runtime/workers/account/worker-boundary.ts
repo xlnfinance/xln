@@ -9,6 +9,13 @@ import {
   requireWorkerOwnedAccountId,
   type TsAccountWorkerState,
 } from './worker-state';
+import {
+  requireArray,
+  requireBoolean,
+  requireBoundaryInteger,
+  requireBoundaryRecord,
+  requireString,
+} from '../../../protocol/boundary/boundary-primitives';
 import type {
   TsAccountWorkerInboundPayload,
   TsAccountWorkerCertifiedBoard,
@@ -17,30 +24,8 @@ import type {
   TsAccountWorkerPhasePayload,
 } from './protocol';
 
-const requireRecord = (value: unknown, code: string): Record<string, unknown> => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(code);
-  return value as Record<string, unknown>;
-};
-
-const requireArray = (value: unknown, code: string): unknown[] => {
-  if (!Array.isArray(value)) throw new Error(code);
-  return value;
-};
-
-const requireString = (value: unknown, code: string): string => {
-  if (typeof value !== 'string' || value.length === 0) throw new Error(code);
-  return value;
-};
-
-const requireInteger = (value: unknown, code: string): number => {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error(code);
-  return value;
-};
-
-const requireBoolean = (value: unknown, code: string): boolean => {
-  if (typeof value !== 'boolean') throw new Error(code);
-  return value;
-};
+const requireRecord = requireBoundaryRecord;
+const requireInteger = requireBoundaryInteger;
 
 const requireBytes32 = (value: unknown, code: string): string => {
   const normalized = requireString(value, code).toLowerCase();

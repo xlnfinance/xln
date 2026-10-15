@@ -6,6 +6,7 @@ use crate::{AccountOutput, AccountReplica, AccountSettledEvent, JurisdictionEven
 pub(crate) struct FinalizedAccountEvents {
     pub output: AccountOutput,
     pub consensus_effects: Vec<AccountConsensusEffect>,
+    pub unadmitted: usize,
 }
 
 pub(crate) fn apply_finalized_events(
@@ -15,12 +16,19 @@ pub(crate) fn apply_finalized_events(
 ) -> Result<FinalizedAccountEvents, StateError> {
     let mut previous_nonce = replica.state().j_nonce();
     let mut first_token = None;
+    let mut unadmitted = 0;
     for event in events {
         let JurisdictionEvent::AccountSettled(settled) = event else {
             continue;
         };
         validate_settled(replica, settled, previous_nonce)?;
-        apply_settled(replica, settled)?;
+        // A receipt proves custody, not consent to enlarge the signed asset
+        // list. Unsolicited donations must not consume the peer's exit budget.
+        if replica.state().delta(settled.token_id).is_some() {
+            apply_settled(replica, settled)?;
+        } else {
+            unadmitted += 1;
+        }
         previous_nonce = previous_nonce.max(settled.nonce);
         first_token.get_or_insert(settled.token_id);
     }
@@ -35,18 +43,25 @@ pub(crate) fn apply_finalized_events(
     .map_err(StateError::JClaim)?
     .into_iter()
     .collect();
-    let delta = replica
-        .state()
-        .delta(token_id)
-        .ok_or_else(|| StateError::JClaim("ACCOUNT_SETTLED_DELTA_MISSING".into()))?;
+    let observed = events
+        .iter()
+        .rev()
+        .find_map(|event| match event {
+            JurisdictionEvent::AccountSettled(settled) if settled.token_id == token_id => {
+                Some(settled)
+            }
+            _ => None,
+        })
+        .ok_or_else(|| StateError::JClaim("ACCOUNT_J_CLAIM_ACCOUNT_SETTLED_REQUIRED".into()))?;
     Ok(FinalizedAccountEvents {
         output: AccountOutput::AccountSettledFinalized {
             token_id,
             j_height,
-            collateral: delta.collateral().clone(),
-            ondelta: delta.ondelta().clone(),
+            collateral: observed.collateral.clone(),
+            ondelta: observed.ondelta.clone(),
         },
         consensus_effects,
+        unadmitted,
     })
 }
 
@@ -167,6 +182,35 @@ mod tests {
             ondelta: 0.into(),
             nonce,
         })
+    }
+
+    #[test]
+    fn unsolicited_custody_preserves_the_agreed_asset_set_and_first_funding() {
+        for include_admitted in [true, false] {
+            let mut account = replica();
+            let token = TokenId::new(1).unwrap();
+            let mut empty = account.state().delta(token).unwrap().clone();
+            empty.apply_j_settlement(&0.into(), &0.into()).unwrap();
+            account.state_mut().put_delta(empty).unwrap();
+            let mut events = Vec::new();
+            for id in if include_admitted { 1 } else { 2 }..=128 {
+                let JurisdictionEvent::AccountSettled(mut event) = settled(125, 0) else {
+                    unreachable!()
+                };
+                event.token_id = TokenId::new(id).unwrap();
+                events.push(JurisdictionEvent::AccountSettled(event));
+            }
+            let applied = apply_finalized_events(&mut account, &events, 44).unwrap();
+            assert_eq!(applied.unadmitted, 127);
+            assert_eq!(account.state().delta_count(), 1);
+            assert_eq!(
+                account.state().delta(token).unwrap().collateral(),
+                &BigInt::from(if include_admitted { 125 } else { 0 })
+            );
+            assert_eq!(account.state().j_nonce(), 0);
+            assert_eq!(account.state().last_finalized_j_height(), 44);
+            assert!(applied.consensus_effects.is_empty());
+        }
     }
 
     #[test]

@@ -1,19 +1,21 @@
 # Egor's working profile for xln
 
-Updated 2026-10-12 from the owner's recorded decisions and release correction.
+Updated 2026-10-15 from the owner's recorded decisions and release correction.
 Purpose: select useful work autonomously and bring xln to a verifiable mainnet
 release. Newer owner instructions and the project's technical rules prevail.
 These are working preferences, not a psychological assessment or permission
 for unlimited actions.
 
-Owner decision, 2026-10-12: changes go through pull requests with required green
-CI and branch protection, replacing the previous direct-main-only rule. Use
-`codex/` branches; commit only owned paths and keep unrelated parked work intact.
+Owner decision, 2026-10-15: changes go through pull requests with required green
+CI and branch protection, replacing the October 14 direct-push rule. Use
+temporary `codex/` branches for new PRs; continue an existing PR branch when
+appropriate. Commit only owned paths and preserve unrelated work.
 
-Owner exception, 2026-10-12: repair the single TypeScript worker import in
+Historical owner exception, 2026-10-12: repair the single TypeScript worker import in
 `rscore/fixtures/entity-resident-group-e/group-e.ts`, then bring PR #73 through
 required green CI and continue the authorized Sepolia release. This permits
-only that import correction under `rscore/`; the Rust freeze remains in force.
+only that import correction under `rscore/`; the wider October 14 authorization
+below supersedes that historical Rust freeze.
 
 Owner instruction, 2026-10-11: prefer the simpler, more reliable general mechanism
 that covers several use cases. Minimize code; delete redundant paths when retained
@@ -80,12 +82,23 @@ to MML; counting accounts or gross turnover does not replace GDP attribution.
 - Current scope, updated 2026-10-11: TypeScript, React `ui/`, Ethereum same-J.
   Sepolia verification precedes the Ethereum mainnet canary. This supersedes
   the October 10 multi-engine, multi-wallet and multi-jurisdiction scope.
-- Rust `rscore/` is frozen at `rscore-freeze-f1464e84e`; the owner withdrew the
-  book-refactor exception for this release. Park unfinished Rust edits without
-  committing them. Svelte wallet development is frozen; its landing remains.
+- Owner 2026-10-14 lifted the Rust freeze: edit and commit `rscore/`. Tag
+  `rscore-freeze-f1464e84e` is history. The later October 15 decision requires
+  PRs and green CI. Svelte wallet development stays frozen; its landing remains.
   TRON, XLNC, Base, cross-J as a headline, lending in production, companies/IPO,
   native clients and custody are deferred. Apply the exact freeze and reopening
   rules in [AGENTS.md](../AGENTS.md); do not repeat excluded release gates.
+- Owner 2026-10-15 requests a complete experimental local economy demo:
+  Arrakis desert theme, Spice test currency, tradable Entity shares and a proved
+  change in control. Reuse the canonical payment, swap and board paths; keep
+  companies outside mainnet admission. Original desert art and fictional
+  companies should carry the theme without implying film endorsement. The
+  current control handover requires a synced minority validator as successor;
+  arbitrary outsider recovery is not proved by that flow.
+- Owner 2026-10-15 requests a self-improving working process. Use the existing
+  two-level [execution review](improvement-loop.md#reviewing-the-review), with
+  bounded reflection time and explicit evidence. Improve methods and retained
+  instructions; do not promise self-modified model weights or market dominance.
 - Required evidence covers funding, payments, same-J swaps, disputes, exit,
   crash recovery and wallet recovery through the selected production paths.
   Headless scenarios, browser journeys and public-chain verification are distinct;

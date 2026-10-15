@@ -1,10 +1,8 @@
 import { readFileSync } from 'fs';
 
 import { safeStringify } from '../../protocol/serialization';
+import { errorMessage } from '../../support/boundary-guards';
 import { buildRuntimeStateDiffReportFromJson } from './runtime-state-diff';
-
-const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
 
 const readStateFile = (path: string, side: 'LEFT' | 'RIGHT'): string => {
   try {

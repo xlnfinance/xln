@@ -69,16 +69,26 @@ type PreparedBroadcast = {
 };
 
 
+const hasTimeCriticalJBatchOps = (batch: JBatch): boolean =>
+  batch.disputeStarts.length > 0
+  || batch.counterDisputes.length > 0
+  || batch.disputeFinalizations.length > 0
+  || batch.revealSecrets.length > 0
+  || batch.hashLadderRegistrations.length > 0;
+
+/**
+ * One processBatch is atomic. A reverting ERC-20 withdrawal
+ * (`reserveToExternalToken` → Depository E3/E11) must never share the
+ * transaction with a counter-dispute, reveal, hash-ladder registration or
+ * finalization. Time-critical ops take this broadcast; withdrawals wait.
+ */
 export const takeBroadcastBatch = (current: JBatch): {
   selected: JBatch;
   remainder: JBatch;
   disputePriority: boolean;
 } => {
   const selected = cloneJBatch(current);
-  const disputePriority =
-    selected.disputeStarts.length > 0
-    || selected.counterDisputes.length > 0
-    || selected.disputeFinalizations.length > 0;
+  const disputePriority = hasTimeCriticalJBatchOps(selected);
   if (!disputePriority) {
     return { selected, remainder: createEmptyBatch(), disputePriority: false };
   }

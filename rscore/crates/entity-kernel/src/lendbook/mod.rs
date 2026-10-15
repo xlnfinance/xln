@@ -75,6 +75,7 @@ pub fn settle_overdue_lending_loans(
 fn hub_entity_id(tx: &AccountTx) -> &str {
     match tx {
         AccountTx::LendingFund { hub_entity_id, .. }
+        | AccountTx::LendingRate { hub_entity_id, .. }
         | AccountTx::LendingBorrowRequest { hub_entity_id, .. }
         | AccountTx::LendingRepay { hub_entity_id, .. }
         | AccountTx::LendingDisburse { hub_entity_id, .. }
@@ -94,6 +95,7 @@ pub(crate) fn apply_committed_lending_followup(
     if !matches!(
         transition.tx,
         AccountTx::LendingFund { .. }
+            | AccountTx::LendingRate { .. }
             | AccountTx::LendingBorrowRequest { .. }
             | AccountTx::LendingRepay { .. }
             | AccountTx::LendingDisburse { .. }
@@ -145,6 +147,9 @@ pub(crate) fn apply_committed_lending_followup(
         )?,
         tx @ AccountTx::LendingClosePayout { .. } => {
             terminal::apply_close_payout(lending, tx, proposer, &hub, now)?
+        }
+        AccountTx::LendingRate { .. } => {
+            return Err(EntityKernelError::lending("RATE_FOLLOWUP_OUT_OF_PROFILE"));
         }
         _ => unreachable!(),
     }
@@ -265,6 +270,8 @@ mod tests {
                     amount: BigInt::from(2_500),
                     term_id: LendingTermId::OneDay,
                     max_interest_bps: 150,
+                    expires_at: 5_000,
+                    max_late_ms: 86_400_000,
                 },
             ),
             Some(&view),
@@ -299,6 +306,7 @@ mod tests {
                     borrower_entity_id: BORROWER.into(),
                     token_id: token(),
                     amount: BigInt::from(2_525),
+                    claim_hash: format!("0x{}", "cc".repeat(32)),
                 },
             ),
             Some(&LocalAccountFinancialView {
@@ -415,6 +423,8 @@ mod tests {
                     amount: BigInt::from(2_500),
                     term_id: LendingTermId::OneDay,
                     max_interest_bps: 150,
+                    expires_at: 5_000,
+                    max_late_ms: 86_400_000,
                 },
             ),
             Some(&view),

@@ -699,12 +699,12 @@ test('credit and collateral configure forms submit RuntimeInput through shared c
 
 test('payment panel submits RuntimeInput through shared command path', () => {
   const paymentSource = readFileSync('frontend/src/lib/components/Entity/payments/PaymentPanel.svelte', 'utf8');
-  const paymentCommandSource = readFileSync('frontend/src/lib/components/Entity/payments/runtime/payment-command.ts', 'utf8');
+  const paymentCommandSource = readFileSync('core/api/payments/command.ts', 'utf8');
   const accountWorkspaceSource = readFileSync('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte', 'utf8');
 
   expect(paymentSource).toContain('export let submitRuntimeInput');
   expect(paymentSource).toContain('await submitRuntimeInput(buildPaymentRuntimeInput({');
-  expect(paymentSource).toContain("import { buildPaymentRuntimeInput } from './runtime/payment-command'");
+  expect(paymentSource).toContain("import { buildPaymentRuntimeInput } from '@xln/core/api/payments/command'");
   expect(paymentCommandSource).toContain('): RuntimeInput => {');
   expect(paymentCommandSource).toContain('runtimeTxs: [],');
   expect(paymentCommandSource).toContain('entityInputs: [{');

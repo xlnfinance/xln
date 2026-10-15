@@ -1,8 +1,87 @@
 # Current xln execution handoff
 
-Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
-Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
-Keep frozen-core, PRs with seven required green jobs, no WIP commits.
+Checkpoint, 2026-10-15 04:44 UTC: PR #80 candidate d0764c00f completed six
+of seven CI jobs successfully. E2E stopped before browser journeys in
+`security:audit-pack`: the Hanko scan expected the batch hashing implementation
+in `batch/index.ts`, but the refactor moved it to `batch/codec.ts`. Reproduced
+locally with `bun run security:consensus-hanko`; the corrected scan checks the
+exact chain/address/batch/nonce arguments and one direct domain-hash call.
+The complete `bun run security:audit-pack` now passes in 0.48 seconds. No
+financial or contract code changed; the live dev stand remains untouched.
+Next single command: `bun run check`, then publish this fix to PR #80 and
+observe the next CI boundary. Company gameplay and browser E2E remain unproved.
+Method trial block 1/2: a single named CI job log identified the stale assertion;
+no broad log search or heavy rerun. Investigation/check time about four minutes;
+the preceding remote E2E job took 11m21s before reaching this failure.
+
+Owner update, 2026-10-15: PR plus mandatory CI is authorized. The direct-main
+publication conflict is resolved; preserve protection. Existing PR #80 contains
+the first three unpublished commits. Its failing unused-surface exports are
+already removed in the verified local candidate. Continue that PR with an
+accurate expanded title/body instead of duplicating its dependent changes.
+
+New product priority: propose and build the experimental Arrakis economy using
+the canonical engine. First vertical slice: Spice payment, CONTROL purchase,
+settlement into reserve, board activation, then a payment authorized by the
+successor. Three fictional service companies (harvesting, transport, compute)
+give agents something to buy. CONTROL and DIVIDEND remain distinct; holding
+DIVIDEND does not imply an implemented payout mechanism. Spice must be an actual
+test asset with its own registry identity, not a renamed USDT balance.
+
+Inspected boundary: `company-ipo` already assembles that control lifecycle,
+but its successor starts as a minority validator and its harness advances local
+time. Neither a new live run nor arbitrary outsider takeover is proved here.
+The currently open `/app` route is the frozen Svelte wallet, not React; it shows
+share issuance unavailable for a lazy Entity and no eligible takeover target.
+Build the new user journey in React `ui/`, reusing existing ownership/swap code.
+Preserve the live dev stand and its wallet data; do not reset it for the demo.
+
+Method trial: replace broad log searches with bounded named-file or structured
+job output. A search through `.logs` produced oversized irrelevant content in
+this block. Next two blocks should reach the first production failure without
+that waste. Review methods every 30 active minutes (two-minute cap); evaluate
+the reviewer every four blocks (five-minute cap). Existing gates remain unchanged.
+The checked candidate is published through PR #80. After its required CI is
+green, verify one registered Entity/share journey in React before extending
+the demo interface.
+
+Current task, 2026-10-15: agent-payment interoperability and the agent-focused
+landing. The live local H2/H3 Account path now completes MPP payment and access;
+lost HTTP response, fresh payer process, official x402 fetch and a separate stdio
+MCP server all reuse one saved intent. Balance/height checks and committed events
+show one debit, one credit and no second economic operation. The fixture uses
+unsecured test credit, not on-chain USDC or unaffiliated MML commerce. The existing
+Runtime stand was preserved; this is not a Runtime crash/recovery test.
+
+The actual payment exposed sender-finality preceding receiver ACK commit.
+Merchant verification now waits for its own committed receipt; timeout never
+permits a new charge. A durable SQLite intent store is shared across adapters.
+Payment SDK and landing CSP tests: 24 passed / 60 assertions. Landing removed roughly 4,600 lines
+of obsolete CBDC pitch, rankings and invitation UI. Desktop/mobile navigation
+and browser console were checked; Svelte reported zero errors/warnings.
+See `docs/agent-payments.md` for integration, competitors and remaining limits.
+
+Method review: two fault-injection attempts exposed Bun's HTTP behavior, not a
+new payment bug (empty 200, then automatic socket retry). The harness now rejects
+missing resource/receipt and drops all paid responses until process exit. It
+resumed the saved original order instead of paying again while debugging.
+Full check exposed an undiscovered subprocess entrypoint, duplicate import and
+unnecessary exported type. Those are removed/fixed. The machine-clone gate also
+mistook dependency paths containing `/core/` for XLN source; it now checks the
+actual repository core root. Its financial checks remain unchanged. Do not turn
+local evidence into mainnet or cross-vendor interoperability claims.
+Full `bun run check` passes: 38 source gates, frontend build/check and React types.
+Clean adapter SHA `7ab4f4128` passed the complete proof in 2,498ms, with one
+initiated/finalized/received event and unchanged Account after MPP/x402/MCP retries.
+Evidence: `docs/evidence/agent-payments-20261015/proof-7ab4f4128.json` and adjacent
+transcript/check summary. Runtime stand PID 64551 stayed unchanged throughout.
+Publication reached GH006, requiring a PR and all seven status checks. The
+owner subsequently authorized PR plus mandatory CI; see the current step above.
+Local landing is at localhost:8081/; no Runtime redeploy.
+
+Current AGENTS.md prevails: PR plus green CI, Rust freeze lifted on 2026-10-14,
+lending production admission still deferred. Historical checkpoints below retain
+their original scope and are not new authorizations or current release evidence.
 
 
 Current checkpoint, 2026-10-13 23:56 UTC: public Sepolia now runs clean
