@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, tick } from 'svelte';
   import { allRuntimes, vaultOperations } from '#lib/stores/vault/vaultStore.ts';
   import { hasPasswordVault, savePasswordVault, unlockPasswordVault } from '#lib/security/passwordVault.ts';
   import { deleteVaultDeviceKey } from '#lib/security/vaultProtection.ts';
@@ -9,6 +9,7 @@
   export let onCancel: (() => void) | undefined = undefined;
   const dispatch = createEventDispatcher<{ unlocked: void; recover: void }>();
   let password = '', confirmation = '', error = '', busy = false;
+  let passwordInput: HTMLInputElement;
   let protectedHere = hasPasswordVault(runtimeId);
   $: wallet = $allRuntimes.find(value => value.id.toLowerCase() === runtimeId.toLowerCase());
   $: setup = !protectedHere && Boolean(seed || wallet?.seed);
@@ -32,7 +33,10 @@
       }
       dispatch('unlocked');
     } catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
-    finally { confirmation = ''; busy = false; }
+    finally {
+      confirmation = ''; busy = false;
+      if (error) { await tick(); passwordInput?.focus(); }
+    }
   }
 </script>
 
@@ -42,7 +46,7 @@
       <h1>{setup ? 'Set a local password' : 'Unlock wallet'}</h1>
       {#if protectedHere || setup}
         <label for="local-wallet-password">Password</label>
-        <input id="local-wallet-password" type="password" bind:value={password} autocomplete={setup ? 'new-password' : 'current-password'} required minlength={setup ? 8 : undefined} disabled={busy} />
+        <input id="local-wallet-password" type="password" bind:this={passwordInput} bind:value={password} autocomplete={setup ? 'new-password' : 'current-password'} required minlength={setup ? 8 : undefined} disabled={busy} />
         {#if setup}
           <label for="local-wallet-confirm">Confirm password</label>
           <input id="local-wallet-confirm" type="password" bind:value={confirmation} autocomplete="new-password" required disabled={busy} />

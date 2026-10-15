@@ -36,7 +36,9 @@
     getShardCount,
     hexToBytes,
   } from '@xln/brainvault/core';
-  import { DEMO_ACCOUNTS } from '#lib/config/demo-accounts.ts';
+  import { assertDemoNetwork, DEMO_ACCOUNTS } from '#lib/config/demo-accounts.ts';
+  import { fetchJurisdictions } from '#lib/stores/vault/vault-bootstrap.ts';
+  import { listDefaultJurisdictionImports } from '#lib/stores/vault/vault-helpers.ts';
   import {
     getRuntimeControllerAdapter,
     runtimeControllerHandle,
@@ -182,6 +184,9 @@
   let showAdvanced = false;
 
   let createLoginType: 'manual' | 'demo' = 'manual';
+  const localTestEntry = typeof window !== 'undefined' && ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+  let testEntry = localTestEntry;
+  let openingTestWallet = false;
 
   // Input state
   let name = '';
@@ -346,15 +351,34 @@
     if (demoLabel !== null) {
       const demo = DEMO_ACCOUNTS.find((candidate) => candidate.label === demoLabel);
       if (!demo) throw new Error(`TESTNET_DEMO_ACCOUNT_UNKNOWN:${demoLabel}`);
-      inputMode = 'brainvault';
-      name = demo.name;
-      passphrase = demo.password;
-      shardInput = demo.factor;
-      createLoginType = 'demo';
       window.history.replaceState(null, '', '/app');
-      queueMicrotask(() => void startDerivation());
+      queueMicrotask(() => void openTestWallet(`Test ${demo.label}`));
     }
   });
+
+  async function openTestWallet(label = 'Test wallet'): Promise<void> {
+    if (openingTestWallet || unlockRuntimeId) return;
+    openingTestWallet = true;
+    derivationError = '';
+    const entropy = new Uint8Array(32);
+    try {
+      if ($runtimeControllerHandle.mode !== 'embedded') throw new Error('Open test wallets in browser mode.');
+      const imports = listDefaultJurisdictionImports(await fetchJurisdictions());
+      assertDemoNetwork(imports.map(({ config }) => config.chainId));
+      crypto.getRandomValues(entropy);
+      mnemonic24 = await entropyToMnemonic(entropy);
+      ethereumAddress = await deriveEthereumAddress(mnemonic24);
+      createLoginType = 'demo';
+      await createXlnWalletFromCurrentSeed(label, { forceFresh: true });
+    } catch (error) {
+      derivationError = error instanceof Error ? error.message : String(error);
+    } finally {
+      entropy.fill(0);
+      clearSensitiveWalletMaterial();
+      createLoginType = 'manual';
+      openingTestWallet = false;
+    }
+  }
 
   let lastDeriveRequest = 0;
   $: if ($deriveRequestSignal !== lastDeriveRequest) {
@@ -481,7 +505,7 @@
     } = {},
   ): Promise<boolean> {
     if (!mnemonic24 || !ethereumAddress || creatingRuntime) return false;
-    if (!hasPasswordVault(ethereumAddress)) {
+    if (createLoginType !== 'demo' && !hasPasswordVault(ethereumAddress)) {
       passwordSetupRuntimeId = ethereumAddress;
       pendingPasswordOpen = () => createXlnWalletFromCurrentSeed(labelOverride, options);
       return false;
@@ -503,7 +527,7 @@
           devicePassphrase: devicePassphrase || undefined,
           recoveryCandidate: options.recoveryCandidate,
           skipRecoveryRestore: !options.recoveryCandidate,
-          unlockDurationMs,
+          unlockDurationMs: createLoginType === 'demo' ? null : unlockDurationMs,
         });
         entityId = runtime.signers[0]?.entityId || entityId;
       }
@@ -1452,12 +1476,32 @@
         {#if embedded && savedVaults.length > 0 && !unlockRuntimeId}
           <div class="creation-context-bar">
             <div class="creation-context-copy">Create another wallet</div>
-            <button type="button" class="back-to-create" on:click={closeWalletEntry}>
+            <button type="button" class="back-to-create" disabled={openingTestWallet} on:click={closeWalletEntry}>
               Back to wallet
             </button>
           </div>
         {/if}
 
+        {#if testEntry && !unlockRuntimeId}
+          <div class="wallet-create-title">
+            <div>
+              <span class="section-eyebrow">Test network</span>
+              <h1>Try xln</h1>
+              <p>Pay, receive and swap test assets. No password or recovery phrase to enter.</p>
+            </div>
+          </div>
+          <button class="derive-btn" disabled={openingTestWallet} on:click={() => openTestWallet()}>
+            {openingTestWallet ? 'Opening your wallet…' : 'Open test wallet'}
+          </button>
+          <p class="test-wallet-note">Stays open on this browser. Clearing browser data loses this test wallet. Test assets only.</p>
+          <button class="back-to-create" disabled={openingTestWallet} on:click={() => { testEntry = false; }}>
+            Create or restore a personal wallet
+          </button>
+          {#if derivationError}<div class="matrix-status error" role="alert">{derivationError}</div>{/if}
+        {:else}
+        {#if localTestEntry && !unlockRuntimeId}
+          <button class="back-to-create" on:click={() => { reset(); testEntry = true; }}>← Back to test network</button>
+        {/if}
         <div class="input-mode-tabs" role="tablist" aria-label="Wallet setup mode">
           <button
             id="wallet-mode-brainvault"
@@ -1491,13 +1535,15 @@
 
         <div class="wallet-create-title">
           <div>
-            <h1>{unlockRuntimeId ? 'Unlock your wallet' : rehearsalMode !== null
+            <h1>{unlockRuntimeId ? 'Restore your wallet' : rehearsalMode !== null
               ? 'Verify recovery'
               : inputMode === 'brainvault'
               ? 'Create xln wallet'
               : 'Create or restore from seed'}</h1>
             <p>{unlockRuntimeId
-              ? 'Enter the original vault name and secret, or recovery phrase, to reopen your saved wallet.'
+              ? inputMode === 'mnemonic'
+                ? 'Enter the original 12- or 24-word recovery phrase for this wallet.'
+                : 'Use the original vault name, secret and work factor for this wallet.'
               : rehearsalMode !== null
               ? 'Re-enter the same recovery inputs. Only the public wallet fingerprint was kept from the first run.'
               : inputMode === 'brainvault'
@@ -1564,17 +1610,19 @@
                 {/if}
               </svg>
             </button>
-            <button
-              class="suggest-btn"
-              on:click={suggestPassphrase}
-              type="button"
-              title="Generate a random passphrase"
-              aria-label="Generate a random passphrase"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M20 7h-9m9 10h-9M4 7h.01M4 17h.01M7 4l-3 3 3 3M7 17l-3 3 3 3"/>
-              </svg>
-            </button>
+            {#if !unlockRuntimeId && rehearsalMode === null}
+              <button
+                class="suggest-btn"
+                on:click={suggestPassphrase}
+                type="button"
+                title="Generate a random passphrase"
+                aria-label="Generate a random passphrase"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M20 7h-9m9 10h-9M4 7h.01M4 17h.01M7 4l-3 3 3 3M7 17l-3 3 3 3"/>
+                </svg>
+              </button>
+            {/if}
           </div>
         </div>
 
@@ -1681,55 +1729,24 @@
           role="tabpanel"
           aria-labelledby="wallet-mode-mnemonic"
         >
-          <div class="tradeoff-card" data-testid="mnemonic-tradeoffs">
-            <div class="tradeoff-heading">
-              <span class="section-eyebrow">{WALLET_MODE_TRADEOFFS.mnemonic.eyebrow}</span>
-              <p>{WALLET_MODE_TRADEOFFS.mnemonic.summary}</p>
-            </div>
-            <div class="tradeoff-grid">
-              <div class="tradeoff-list benefit-list" role="list" aria-label="Benefits">
-                {#each WALLET_MODE_TRADEOFFS.mnemonic.benefits as item}
-                  <div role="listitem"><span aria-hidden="true">+</span><p>{item}</p></div>
-                {/each}
+          {#if !unlockRuntimeId && rehearsalMode === null}
+            <div class="mnemonic-generate-row">
+              <div>
+                <span class="section-eyebrow">New wallet</span>
+                <strong>Create a fresh seed</strong>
+                <p>Generated locally from cryptographic randomness.</p>
               </div>
-              <div class="tradeoff-list cost-list" role="list" aria-label="Costs">
-                {#each WALLET_MODE_TRADEOFFS.mnemonic.costs as item}
-                  <div role="listitem"><span aria-hidden="true">−</span><p>{item}</p></div>
-                {/each}
-                {#if WALLET_MODE_TRADEOFFS.mnemonic.linkedCost}
-                  <div role="listitem">
-                    <span aria-hidden="true">−</span>
-                    <p>
-                      {WALLET_MODE_TRADEOFFS.mnemonic.linkedCost.text}
-                      <a
-                        href={WALLET_MODE_TRADEOFFS.mnemonic.linkedCost.href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >{WALLET_MODE_TRADEOFFS.mnemonic.linkedCost.linkText}</a>
-                    </p>
-                  </div>
-                {/if}
-              </div>
+              <button
+                class="generate-mnemonic-btn"
+                on:click={generateRandomMnemonic}
+                type="button"
+              >
+                Generate 24-word seed
+              </button>
             </div>
-            {@render recoverySecurityWarning()}
-          </div>
 
-          <div class="mnemonic-generate-row">
-            <div>
-              <span class="section-eyebrow">New wallet</span>
-              <strong>Create a fresh seed</strong>
-              <p>Generated locally from cryptographic randomness.</p>
-            </div>
-            <button
-              class="generate-mnemonic-btn"
-              on:click={generateRandomMnemonic}
-              type="button"
-            >
-              Generate 24-word seed
-            </button>
-          </div>
-
-          <div class="mnemonic-divider"><span>or paste an existing seed</span></div>
+            <div class="mnemonic-divider"><span>or paste an existing seed</span></div>
+          {/if}
 
           <div class="input-group mnemonic-input-group">
             <div class="mnemonic-label-row">
@@ -1758,6 +1775,41 @@
               <p><strong>Keep it offline.</strong> Anyone with these words controls this wallet.</p>
             </div>
           {/if}
+          <details class="mnemonic-advanced">
+            <summary>Recovery and security</summary>
+            <div class="tradeoff-card" data-testid="mnemonic-tradeoffs">
+              <div class="tradeoff-heading">
+                <span class="section-eyebrow">{WALLET_MODE_TRADEOFFS.mnemonic.eyebrow}</span>
+                <p>{WALLET_MODE_TRADEOFFS.mnemonic.summary}</p>
+              </div>
+              <div class="tradeoff-grid">
+                <div class="tradeoff-list benefit-list" role="list" aria-label="Benefits">
+                  {#each WALLET_MODE_TRADEOFFS.mnemonic.benefits as item}
+                    <div role="listitem"><span aria-hidden="true">+</span><p>{item}</p></div>
+                  {/each}
+                </div>
+                <div class="tradeoff-list cost-list" role="list" aria-label="Costs">
+                  {#each WALLET_MODE_TRADEOFFS.mnemonic.costs as item}
+                    <div role="listitem"><span aria-hidden="true">−</span><p>{item}</p></div>
+                  {/each}
+                  {#if WALLET_MODE_TRADEOFFS.mnemonic.linkedCost}
+                    <div role="listitem">
+                      <span aria-hidden="true">−</span>
+                      <p>
+                        {WALLET_MODE_TRADEOFFS.mnemonic.linkedCost.text}
+                        <a
+                          href={WALLET_MODE_TRADEOFFS.mnemonic.linkedCost.href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >{WALLET_MODE_TRADEOFFS.mnemonic.linkedCost.linkText}</a>
+                      </p>
+                    </div>
+                  {/if}
+                </div>
+              </div>
+              {@render recoverySecurityWarning()}
+            </div>
+          </details>
         </div>
         {/if}
 
@@ -1807,6 +1859,7 @@
         </button>
         {#if derivationError}
           <div class="matrix-status error">{derivationError}</div>
+        {/if}
         {/if}
         {/if}
 

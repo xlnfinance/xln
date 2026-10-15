@@ -72,7 +72,7 @@
     <div>
       <div class="hero-badge">LOCAL TOOLS</div>
       <h2 id="testnet-tools-heading">Test identities</h2>
-      <p>Disposable Brain Vault wallets for local scenarios. They use no saved production identity.</p>
+      <p>Open a test wallet in one click. No password or seed phrase; saved on this browser for local sandbox and Sepolia testing.</p>
     </div>
     <div class="demo-grid">
       {#each DEMO_ACCOUNTS as account}

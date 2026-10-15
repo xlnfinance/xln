@@ -75,3 +75,55 @@ Verification:
 
 NEXT: read the original payment receipt in the existing unlocked wallet after
 loading this fix; do not submit the payment again.
+
+## One-click network testing — 2026-10-15
+
+Owner explicitly requested removing password/seed ceremony from network testing.
+Starting source: `0fb738a68`. Local `/app` now starts with **Open test wallet**;
+manual BrainVault and mnemonic entry remain available under the secondary action.
+This is a change to the requested local Svelte surface, not a second release wallet.
+
+Removed the disposable BrainVault password generator. A new test identity uses
+256 bits of cryptographic entropy and the existing Runtime creation path, with
+the existing encrypted device-key storage and a non-expiring local unlock lease.
+No shared password, plaintext seed storage, alternate runtime or financial logic
+was added. Existing password-protected wallets still require their own secret.
+Test creation and bootstrap/reopen reject jurisdictions other than the local
+Anvil pair (31337/31338) and Ethereum Sepolia (11155111). Clearing browser data or
+explicitly locking a test wallet can make it unavailable without its recovery seed;
+the entry screen explicitly describes disposable, browser-local storage.
+
+The first reload exposed a second UI gate: `/app` required a password record even
+when the device key had successfully restored the test identity. Corrected that
+gate for `loginType=demo` only; a missing seed still requires unlocking.
+
+Browser observations on the final working candidate:
+- One click opened a new wallet without a credential field or seed confirmation.
+- Reload reopened the same Entity `0x94dbb2b187fd368c5f69cdc3a2f36976de777fbc493446305a6452443117db9d`.
+- The local Reserve faucet credited 100 test USDC. Another reload retained the
+  same Entity and 100 USDC reserve. Available-to-pay remained zero: reserve has
+  not yet been allocated to an Account.
+- Assets, Pay, Receive and Swap forms opened. Empty Pay submission remained
+  disabled. No payment or swap was submitted, and no original payment was repeated.
+- Personal-wallet entry, mnemonic tab, Back to test network and Back to wallet
+  worked; the funded wallet remained selected. Seed security details are collapsed.
+- No captured browser console errors on the reload.
+
+Verification: 17 focused tests, 64 assertions, zero failures; complete
+`bun run check` passed, including all 38 source gates, frontend checks/build and
+React types. These were development-candidate runs, not clean-SHA release evidence.
+[Checks](evidence/user-walkthrough-20261014/quick-entry/verification.tar.gz),
+[entry](evidence/user-walkthrough-20261014/quick-entry/entry.png),
+[funded wallet after reload](evidence/user-walkthrough-20261014/quick-entry/reopened-funded-wallet.png).
+
+The original Chrome wallet was located but remains password-locked; its original
+payment is still unverified. Recovery UI now omits random-secret/new-seed generation
+when restoring an existing wallet, and a failed password submission restores input
+focus; those two recovery changes have compilation coverage, not a completed live
+recovery proof in this pass.
+
+Method correction: distinguish a saved-wallet recovery journey from disposable
+network testing. Prove create → reload → same identity → funded reload before
+expanding the test list. Do not mistake opening a form for completing its operation.
+Next: connect the new test wallet to H1 and exercise Account funding and receipts;
+never resend the owner's original payment.
