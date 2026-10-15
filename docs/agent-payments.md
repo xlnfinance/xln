@@ -227,3 +227,11 @@ live Runtime provenance is reported separately from the adapter source SHA.
 Concurrent independent orders still require serialization of the owner's command
 lane. Published packages, automatic swaps, delegated budgets, broader failure
 coverage and mainnet release approval remain separate work.
+
+Clean adapter source `7ab4f41281bb2167690420396b069b1e42858c80` passed this complete
+proof in 2,498ms on 2026-10-15: one initiated, one finalized, one received event;
+all three access transports returned the paid result without another Account
+update. This duration includes the whole small fixture, not a latency/TPS benchmark.
+[Balances and event evidence](evidence/agent-payments-20261015/proof-7ab4f4128.json),
+[process transcript](evidence/agent-payments-20261015/transcript-7ab4f4128.txt),
+[verification commands](evidence/agent-payments-20261015/checks-7ab4f4128.txt).

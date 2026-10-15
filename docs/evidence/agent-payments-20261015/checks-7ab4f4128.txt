@@ -1,0 +1,66 @@
+Adapter source: 7ab4f4128 (clean for the live proof)
+bun run check: PASS on source candidate before commit
+PASS check:frontend-file-size 157ms
+PASS check:contract-artifact-drift 649ms
+PARALLEL_CHECKS_OK gates=2
+PASS check:dead-code 2732ms
+PASS check:contract-invariants 11798ms
+PASS check:build 10106ms
+PASS check:advisor 1211ms
+PASS check:single-live-todo 222ms
+PASS check:script-entrypoints 23ms
+PASS check:proof-program 34ms
+PASS frozen-core:check 97ms
+PASS check:svelte 13773ms
+PARALLEL_CHECKS_OK gates=2
+PASS check:frontend 16272ms
+PASS check:audit-registry 14922ms
+PASS check:runtime-doc-paths 20ms
+PASS check:folder-width 110ms
+PASS check:state-machine-size 351ms
+PASS eslint-ratchet 18677ms
+PASS unsafe-types 700ms
+PASS frontend-unsafe-types 335ms
+PASS determinism 61ms
+PASS no-weak-collections 442ms
+PASS runtime-dependencies 1009ms
+PASS fints-negative-types 1914ms
+PASS fints-compiler-policy 197ms
+PASS fints-decoder-authority 729ms
+PASS nested-hash-coverage 178ms
+SOUNDCHECK_OK gates=10
+PASS soundcheck:fast 18691ms
+PASS check:production-function-size 651ms
+PASS check:single-runtime-mempool 111ms
+PASS check:frame-candidate-isolation 16ms
+PASS check:e2e-categories 5857ms
+PASS check:no-readonly-account-mutation 1041ms
+PASS check:patricia-hot-path 142ms
+PASS check:path-keyed-storage 1023ms
+PASS check:account-frame-single-transition 147ms
+PASS check:no-machine-clones 2629ms
+PASS check:no-hot-full-machine-scans 2260ms
+PASS check:canonical-vocabulary 973ms
+PASS check:minimal-runtime-wal 1681ms
+PASS check:j-event-catalog 57ms
+PASS check:english-source 637ms
+PASS check:derive-delta-invariants 19ms
+PASS check:orderbook-price-pages 1726ms
+PASS check:no-active-infra-in-state-machine 21ms
+PASS check:no-manual-delta-math 57ms
+PASS check:ui-types 7068ms
+PASS check:no-vacuous-validation 230ms
+PASS check:no-legacy 554ms
+PASS check:runtime-contract-types 1012ms
+PASS security:failure-taxonomy 27ms
+PASS security:swap-cancel-canonical 19ms
+PASS check:runtime-types 822ms
+PASS check:canonical-payment-surface 1214ms
+PASS check:unused-surface 2484ms
+PARALLEL_CHECKS_OK gates=38
+PASS check:src 25915ms
+PARALLEL_CHECKS_OK gates=3
+Focused tests: 24 pass, 0 fail, 60 assertions (MPP, agent boundary, landing CSP)
+CLI proof types: tsc .logs/tsconfig-agent-proof.json --rootDir . --noEmit: PASS
+Landing browser: desktop/mobile, Build/FAQ/wallet navigation; zero captured JS errors.
+Scope: existing local Runtime stand, test bilateral credit; no mainnet or Runtime restart proof.

@@ -26,8 +26,16 @@ mistook dependency paths containing `/core/` for XLN source; it now checks the
 actual repository core root. Its financial checks remain unchanged. Do not turn
 local evidence into mainnet or cross-vendor interoperability claims.
 Full `bun run check` passes: 38 source gates, frontend build/check and React types.
-Next single step: replay the complete payment/access proof
-from a clean committed adapter SHA, saving sanitized evidence under docs/evidence.
+Clean adapter SHA `7ab4f4128` passed the complete proof in 2,498ms, with one
+initiated/finalized/received event and unchanged Account after MPP/x402/MCP retries.
+Evidence: `docs/evidence/agent-payments-20261015/proof-7ab4f4128.json` and adjacent
+transcript/check summary. Runtime stand PID 64551 stayed unchanged throughout.
+Publication reached a concrete blocker: GitHub rejected direct main push with
+GH006, requiring a PR and all seven status checks. Current AGENTS.md requires
+direct main and withdrew the feature-branch workflow. A narrow owner question
+requests a temporary PR branch without weakening protection; answer is pending.
+Next single step: after that decision, publish the verified checkpoint through
+the accepted workflow. Local landing is at localhost:8081/; no Runtime redeploy.
 
 Current AGENTS.md prevails: work on main, Rust freeze lifted on 2026-10-14,
 lending production admission still deferred. Historical checkpoints below retain
