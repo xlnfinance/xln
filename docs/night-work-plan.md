@@ -1,5 +1,35 @@
 # Current xln execution handoff
 
+Owner update, 2026-10-15: PR plus mandatory CI is authorized. The direct-main
+publication conflict is resolved; preserve protection. Existing PR #80 contains
+the first three unpublished commits. Its failing unused-surface exports are
+already removed in the verified local candidate. Continue that PR with an
+accurate expanded title/body instead of duplicating its dependent changes.
+
+New product priority: propose and build the experimental Arrakis economy using
+the canonical engine. First vertical slice: Spice payment, CONTROL purchase,
+settlement into reserve, board activation, then a payment authorized by the
+successor. Three fictional service companies (harvesting, transport, compute)
+give agents something to buy. CONTROL and DIVIDEND remain distinct; holding
+DIVIDEND does not imply an implemented payout mechanism. Spice must be an actual
+test asset with its own registry identity, not a renamed USDT balance.
+
+Inspected boundary: `company-ipo` already assembles that control lifecycle,
+but its successor starts as a minority validator and its harness advances local
+time. Neither a new live run nor arbitrary outsider takeover is proved here.
+The currently open `/app` route is the frozen Svelte wallet, not React; it shows
+share issuance unavailable for a lazy Entity and no eligible takeover target.
+Build the new user journey in React `ui/`, reusing existing ownership/swap code.
+Preserve the live dev stand and its wallet data; do not reset it for the demo.
+
+Method trial: replace broad log searches with bounded named-file or structured
+job output. A search through `.logs` produced oversized irrelevant content in
+this block. Next two blocks should reach the first production failure without
+that waste. Review methods every 30 active minutes (two-minute cap); evaluate
+the reviewer every four blocks (five-minute cap). Existing gates remain unchanged.
+Next single step: publish the checked candidate through PR #80, then verify one
+registered Entity/share journey in React before extending the demo interface.
+
 Current task, 2026-10-15: agent-payment interoperability and the agent-focused
 landing. The live local H2/H3 Account path now completes MPP payment and access;
 lost HTTP response, fresh payer process, official x402 fetch and a separate stdio
@@ -30,14 +60,11 @@ Clean adapter SHA `7ab4f4128` passed the complete proof in 2,498ms, with one
 initiated/finalized/received event and unchanged Account after MPP/x402/MCP retries.
 Evidence: `docs/evidence/agent-payments-20261015/proof-7ab4f4128.json` and adjacent
 transcript/check summary. Runtime stand PID 64551 stayed unchanged throughout.
-Publication reached a concrete blocker: GitHub rejected direct main push with
-GH006, requiring a PR and all seven status checks. Current AGENTS.md requires
-direct main and withdrew the feature-branch workflow. A narrow owner question
-requests a temporary PR branch without weakening protection; answer is pending.
-Next single step: after that decision, publish the verified checkpoint through
-the accepted workflow. Local landing is at localhost:8081/; no Runtime redeploy.
+Publication reached GH006, requiring a PR and all seven status checks. The
+owner subsequently authorized PR plus mandatory CI; see the current step above.
+Local landing is at localhost:8081/; no Runtime redeploy.
 
-Current AGENTS.md prevails: work on main, Rust freeze lifted on 2026-10-14,
+Current AGENTS.md prevails: PR plus green CI, Rust freeze lifted on 2026-10-14,
 lending production admission still deferred. Historical checkpoints below retain
 their original scope and are not new authorizations or current release evidence.
 

@@ -26,7 +26,11 @@ This scope prevails over older plans in `docs/` and over the history in `todo.md
   admission rejection and the corresponding wallet availability; do not extend
   or repair the lending implementation. Existing signed claims remain evidence
   for contract exit; only collateral secures recovery.
-- Deferred: TRON, XLNC, Base, cross-J as a headline, companies/IPO,
+- Owner 2026-10-15 reopens companies/shares/control for an experimental local
+  Arrakis demo using the existing EntityProvider, Paybook and swapbook. This is
+  not approval to admit companies/IPO in the mainnet release. Spice is a test
+  asset, not a renamed stablecoin or a claim of dollar backing.
+- Deferred for mainnet: TRON, XLNC, Base, cross-J as a headline, companies/IPO,
   iOS/Electron/extension and custody.
 - MML counts only obligations between unaffiliated Entities. A payment routed through a hub
   counts once, on the commercial edge; hub hops and affiliated transfers never count.
@@ -162,8 +166,10 @@ Do not duplicate or weaken it.
 
 ## GIT AND SHARED WORKSPACE
 
-- Owner decision 2026-10-14: work on `main` and push there. The 2026-10-12 `codex/` branch
-  rule is withdrawn. Do not keep feature branches. Do not force-push `main`.
+- Owner decision 2026-10-15: publish through PRs with mandatory green CI and
+  preserve branch protection. This replaces the October 14 direct-push rule.
+  Use temporary `codex/` branches for new PRs; existing PR branches may be
+  continued. Never force-push `main`.
 - Preserve unrelated user changes. Failed verification is not a release-ready commit.
 - No `wip:` commits on main. Commit only owned paths with `git commit -- <paths>`.
 - Before a shared-tree commit, stop concurrent writers, run formatting and `git diff --check`.
