@@ -10,7 +10,7 @@ const readXlnMppReceipt = async (
   realm: string,
   request: XlnMppRequest,
   hashlock: string,
-): Promise<Receipt.Receipt> => {
+): Promise<Receipt.Receipt | null> => {
   if (request.recipient.toLowerCase() !== options.recipient.toLowerCase() || request.currency !== options.currency) {
     throw new Error('MPP_XLN_MERCHANT_MISMATCH');
   }
@@ -53,6 +53,23 @@ const readXlnMppReceipt = async (
       }
     fromHeight = page.toHeight + 1;
   }
+  return null;
+};
+
+const waitForReceipt = async (
+  options: XlnMppServerOptions,
+  realm: string,
+  request: XlnMppRequest,
+  hashlock: string,
+) => {
+  // Sender commit precedes the receiver's final ACK commit. Absence during that
+  // interval is pending evidence, never permission to charge the order again.
+  const deadline = performance.now() + 5_000;
+  do {
+    const receipt = await readXlnMppReceipt(options, realm, request, hashlock);
+    if (receipt) return receipt;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } while (performance.now() < deadline);
   throw new Error('MPP_XLN_PAYMENT_NOT_RECEIVED');
 };
 
@@ -63,5 +80,5 @@ export const xlnMppServer = (options: XlnMppServerOptions) =>
     // Bind every invoice field, including its original receipt scan boundary.
     stableBinding: request => request,
     broadcast: ({ credential }) =>
-      readXlnMppReceipt(options, credential.challenge.realm, credential.challenge.request, credential.payload.hashlock),
+      waitForReceipt(options, credential.challenge.realm, credential.challenge.request, credential.payload.hashlock),
   });

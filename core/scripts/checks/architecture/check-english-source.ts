@@ -26,7 +26,6 @@ const MULTILINGUAL_FILES = new Set([
   'debates/server.ts',
   'debates/tests/viral-surface.spec.ts',
   'frontend/src/lib/ai/xln-guide-context.ts',
-  'frontend/src/lib/components/Landing/content.ts',
   'frontend/src/lib/i18n/index.ts',
   'frontend/src/lib/i18n/locales/ru.json',
 ]);

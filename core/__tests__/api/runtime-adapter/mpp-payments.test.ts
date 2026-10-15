@@ -1,10 +1,12 @@
 import { expect, test } from 'bun:test';
 import { Challenge, Credential, Store } from 'mppx';
-import { Mppx } from 'mppx/server';
+import { Mppx, Transport } from 'mppx/server';
 import { RemoteRuntimeAdapter } from '../../../api/runtime-adapter/remote';
 import { xlnMppClient } from '../../../api/payments/mpp-client';
 import { xlnMppServer } from '../../../api/payments/mpp-server';
 import { xlnMppCommandId, xlnMppMethod } from '../../../api/payments/mpp-method';
+import { xlnX402Client, xlnX402Server } from '../../../api/payments/x402';
+import { decodePaymentRequiredHeader } from '@x402/core/http';
 
 const recipient = `0x${'11'.repeat(32)}`;
 const currency = `xln:eip155:11155111/depository:0x${'22'.repeat(20)}/token:1`;
@@ -91,4 +93,66 @@ test('the client rejects an unapproved merchant before using the runtime', async
     { methods: [xlnMppMethod] },
   );
   await expect(client.createCredential({ challenge })).rejects.toThrow('MPP_XLN_OFFER_NOT_AUTHORIZED');
+});
+
+test('x402 advertises an explicit upfront XLN scheme, not an EVM exact transfer', async () => {
+  const serve = xlnX402Server({
+    adapter,
+    recipient,
+    currency,
+    realm,
+    secretKey: 'test-x402-secret-for-tests-32-bytes',
+  });
+  const response = await serve(order, new Request(url), () => {
+    throw new Error('UNPAID_ACCESS');
+  });
+  expect(response.status).toBe(402);
+  const header = response.headers.get('PAYMENT-REQUIRED');
+  if (!header) throw new Error('Missing x402 challenge');
+  const required = decodePaymentRequiredHeader(header);
+  const accepted = required.accepts[0];
+  if (!accepted) throw new Error('Missing payment requirements');
+  expect(accepted).toMatchObject({
+    scheme: 'xln',
+    network: 'eip155:11155111',
+    asset: currency,
+    amount: order.amount,
+    payTo: recipient,
+    extra: { paymentFlow: 'upfront' },
+  });
+  const client = xlnX402Client({
+    adapter,
+    recipient,
+    currency,
+    realm,
+    maxDebit: '1100',
+    entityId: `0x${'55'.repeat(32)}`,
+    signerId: `0x${'66'.repeat(20)}`,
+    intents: Store.memory(),
+  });
+  await expect(client.createPaymentPayload(2, { ...accepted, amount: '1' })).rejects.toThrow('X402_XLN_TERMS_MISMATCH');
+  await expect(client.createPaymentPayload(1, accepted)).rejects.toThrow('X402_XLN_VERSION_UNSUPPORTED');
+  const invalid = await serve(order, new Request(url, { headers: { 'PAYMENT-SIGNATURE': 'invalid' } }), () => {
+    throw new Error('UNVERIFIED_ACCESS');
+  });
+  expect(invalid.status).toBe(402);
+});
+
+test('MCP uses the same XLN invoice through the SDK transport', async () => {
+  const server = Mppx.create({
+    realm,
+    secretKey: 'test-mcp-secret-for-tests-32-bytes',
+    transport: Transport.mcp(),
+    methods: [xlnMppServer({ adapter, recipient, currency })],
+  });
+  const result = await server.charge(order)({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'paid_research' },
+  });
+  expect(result.status).toBe(402);
+  if (result.status !== 402) throw new Error('UNPAID_MCP_ACCESS');
+  expect(result.challenge.error?.code).toBe(-32042);
+  expect(result.challenge.error?.data?.challenges[0]?.request).toEqual(order);
 });

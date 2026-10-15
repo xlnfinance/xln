@@ -12,7 +12,7 @@ pretend an XLN Account claim is an EVM token-transfer receipt.
 
 Start with **invoice payments through `mppx`**, whose public Method API accepts
 custom client/server implementations. Its existing HTTP/MCP transports should
-own transport framing. A separate x402 scheme is a later compatibility adapter,
+own transport framing. The x402 scheme is a compatibility adapter,
 not a second payment implementation. Mppx supporting both protocols does not
 automatically make a custom XLN method compatible with x402 facilitators.
 The merchant must explicitly enable XLN. This adapter cannot pay an arbitrary
@@ -26,6 +26,7 @@ rail would need its own liquidity, fee and failure model; that is not implemente
 | Is x402 used? | Coinbase reported 230M+ transactions and $54M+ volume on 2026-09-22. | It has distribution worth integrating with; these are vendor counters, not verified independent commerce. |
 | Does MPP already use channels? | Tempo Sessions uses TIP-1034 unidirectional channels, cumulative signed vouchers, local verification and periodic settlement. | Off-chain micropayments are not a unique XLN feature. |
 | Does Yellow have disputes? | Nitrolite v1 uses mutually signed user/Node channel states, ChannelHub challenges and timeout close. | Enforceable state is not unique either. Compare concrete failure/recovery behavior. |
+| Who else overlaps? | Fiber implements a multi-asset payment/swap channel network with watchtowers. Lightning Labs publishes L402 agent tools and an MCP server. Interledger specifies bilateral obligations with pre/post-funding. | Neither bilateral credit nor agent-friendly channel payments are unique to XLN. |
 | Is there one objective winner? | No common workload, hardware, custody/risk assumptions or failure experiment was run here. | Do not publish invented latency, TPS, security or overall rankings. |
 
 Primary sources:
@@ -35,6 +36,13 @@ Primary sources:
 [Yellow architecture](https://docs.yellow.org/nitrolite/learn/introduction/architecture-at-a-glance/),
 [Yellow recovery](https://docs.yellow.org/nitrolite/learn/core-concepts/challenge-response/),
 [Yellow v1 SDK surface](https://docs.yellow.org/nitrolite/api-reference/).
+
+Additional primary sources checked 2026-10-15:
+[Fiber implementation](https://github.com/nervosnetwork/fiber),
+[Lightning Agent Tools](https://github.com/lightninglabs/lightning-agent-tools),
+[L402 access protocol](https://docs.lightning.engineering/the-lightning-network/l402),
+[Interledger bilateral account model](https://interledger.org/developers/rfcs/interledger-protocol/).
+These establish overlapping mechanisms and published tools, not comparative adoption or security rankings.
 
 The [x402 site](https://x402.org/) displayed 75.41M transactions and $24.24M for
 its labelled last-30-days window when checked. That page does not establish a
@@ -137,6 +145,45 @@ cap are checked before retry. Store.memory is suitable only for disposable tests
 production needs durable atomic storage. Losing this store loses application
 idempotency, even though the Runtime still retains its command frontier.
 
+`cli/lib/agent-payments/intent-store.ts` provides a SQLite AtomicStore with FULL
+synchronous commits and transactional create-if-absent. It stores application
+intents, not a second financial ledger. Sender completion can precede the
+merchant's final Account ACK; verification waits up to five seconds for the
+merchant's committed receipt. Timeout still never grants access or creates a new order.
+
+## x402 and MCP adapters
+
+`xlnX402Client` registers the experimental **xln** scheme with the official
+`@x402/fetch@2.28.0` client. `xlnX402Server` is Fetch-compatible middleware using
+official x402 codecs and the same MPP invoice verifier. It declares `upfront`
+payment flow: the transfer precedes resource access. It does not masquerade as
+`exact` EVM authorization. The settlement reference is an XLN hashlock, with
+`extra.settlement=xln-bilateral` and `extra.onchain=false`.
+
+```ts
+import { wrapFetchWithPaymentFromConfig } from '@x402/fetch';
+import { xlnX402Client, xlnX402Server } from '../core/api/payments/x402';
+
+const payFetch = wrapFetchWithPaymentFromConfig(fetch, {
+  schemes: [{ network, client: xlnX402Client(payerOptions) }],
+  spendControls: { allowedAssets: [{ network, asset: currency, maxAmountPerPayment: maxDebit }] },
+});
+const response = await payFetch(invoiceUrl);
+const serve = xlnX402Server({ ...merchantOptions, realm, secretKey });
+return serve(order, request, () => Response.json(fulfilledOrder));
+```
+
+MCP needs no second payment implementation. Register `xlnMppServer` with
+`Mppx.create({ ..., transport: Transport.mcpSdk() })`; gate the tool with
+`payment.charge(order)({ _meta: extra._meta })`. Wrap the official MCP client
+with `McpClient.wrap(client, { methods: [xlnMppClient(payerOptions)] })` from
+`mppx/mcp/client`. The runnable stdio example is
+`cli/scripts/agent-payments/mcp-merchant.ts`.
+
+Keep the same trusted realm, merchant order and intent store across all three
+interfaces. A protocol switch must not allocate a fresh payment. These are
+opt-in repository adapters, not published packages or standard registration.
+
 ## Where XLN can earn an advantage
 
 The hypothesis is one reusable bilateral relationship for payments, atomic swaps,
@@ -166,13 +213,17 @@ The server's explicit stable binding also rejects an otherwise valid credential
 issued for a different same-priced order or receipt-history boundary. The SDK's
 default generic binding does not include these custom invoice fields.
 
-These are boundary and SDK integration tests, **not** a completed live MPP payment
-or an interoperability certification. Required next evidence is one funded
-same-J payer and merchant completing `402 -> payment -> receipt -> resource`,
-then lost-response/restart retry with exactly one economic debit, followed by
-wrong asset/domain/recipient, forged receipt and concurrent-order cases. Run that
-against the existing stand under its machine lock. No second heavy stand is started.
+`bun cli/scripts/agent-payments/proof.ts <private-output-directory>` runs against
+the existing locked local dev H2/H3 stand. It sends one 1-test-USDC Account payment,
+drops the paid HTTP response, restarts the payer process, then retrieves the same
+resource through MPP, x402 and a separate MCP server process. Assertions compare
+both bilateral balances, collateral, Account heights and exactly one initiated,
+finalized and received event. Reusing the output directory resumes that same order.
 
-Only after that flow passes should the same backend be exposed through an x402
-scheme and the SDK's MCP transport. Publishing packages, claiming standard
-registration, auto-swapping, delegated keys and mainnet enablement remain unimplemented.
+The local fixture uses accepted bilateral credit with zero collateral. These are
+test Accounts under one operator, not mainnet funds, secured recovery or MML volume.
+The proof does not restart the underlying Runtime or prove all crash points;
+live Runtime provenance is reported separately from the adapter source SHA.
+Concurrent independent orders still require serialization of the owner's command
+lane. Published packages, automatic swaps, delegated budgets, broader failure
+coverage and mainnet release approval remain separate work.

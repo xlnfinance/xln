@@ -1,23 +1,33 @@
 # Current xln execution handoff
 
-Current task, 2026-10-15: agent-payment interoperability. Owner requested an
-evidence-based comparison of MPP, x402 and Yellow plus an SDK integration path.
-MPP already has channels; Yellow already has signed-state challenges. The
-implemented experimental `xln/charge` method uses `mppx@0.13.5`, the existing
-RuntimeAdapter and Paybook. UI and CLI now share the payment command builder;
-the duplicate CLI builder is removed. See `docs/agent-payments.md` for scope.
-Development verification: 76 targeted tests / 2,703 assertions passed; full
-`bun run check` passed (38 source gates, frontend and React type checks).
-The existing payment form remained usable with zero captured browser errors.
-These are development checks, not clean-SHA economic or release evidence.
+Current task, 2026-10-15: agent-payment interoperability and the agent-focused
+landing. The live local H2/H3 Account path now completes MPP payment and access;
+lost HTTP response, fresh payer process, official x402 fetch and a separate stdio
+MCP server all reuse one saved intent. Balance/height checks and committed events
+show one debit, one credit and no second economic operation. The fixture uses
+unsecured test credit, not on-chain USDC or unaffiliated MML commerce. The existing
+Runtime stand was preserved; this is not a Runtime crash/recovery test.
 
-Method review: an SDK challenge test alone missed custom invoice binding.
-Inspecting the installed SDK exposed the gap; explicit stable binding and a
-cross-order credential regression now reject it. Do not substitute transport
-tests for a real economic payment, or count vendor traffic as unaffiliated trade.
-Next single step: complete one funded same-J MPP invoice and retry it after a lost
-response/restart, proving exactly one economic debit under the existing stand lock.
-No live MPP payment, package publication or new mainnet readiness is claimed.
+The actual payment exposed sender-finality preceding receiver ACK commit.
+Merchant verification now waits for its own committed receipt; timeout never
+permits a new charge. A durable SQLite intent store is shared across adapters.
+Payment SDK and landing CSP tests: 24 passed / 60 assertions. Landing removed roughly 4,600 lines
+of obsolete CBDC pitch, rankings and invitation UI. Desktop/mobile navigation
+and browser console were checked; Svelte reported zero errors/warnings.
+See `docs/agent-payments.md` for integration, competitors and remaining limits.
+
+Method review: two fault-injection attempts exposed Bun's HTTP behavior, not a
+new payment bug (empty 200, then automatic socket retry). The harness now rejects
+missing resource/receipt and drops all paid responses until process exit. It
+resumed the saved original order instead of paying again while debugging.
+Full check exposed an undiscovered subprocess entrypoint, duplicate import and
+unnecessary exported type. Those are removed/fixed. The machine-clone gate also
+mistook dependency paths containing `/core/` for XLN source; it now checks the
+actual repository core root. Its financial checks remain unchanged. Do not turn
+local evidence into mainnet or cross-vendor interoperability claims.
+Full `bun run check` passes: 38 source gates, frontend build/check and React types.
+Next single step: replay the complete payment/access proof
+from a clean committed adapter SHA, saving sanitized evidence under docs/evidence.
 
 Current AGENTS.md prevails: work on main, Rust freeze lifted on 2026-10-14,
 lending production admission still deferred. Historical checkpoints below retain
