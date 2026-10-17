@@ -3,7 +3,7 @@ import { niceUsdPerPx } from './bar-scale';
 import { removePasswordVault } from '../../../frontend/src/lib/security/passwordVault';
 import { create } from 'zustand';
 import type { RuntimeAdapterStatus } from '@xln/core/api/public/runtime-module';
-import type { ExternalWalletRow } from './financial/external';
+import type { ExternalWallet } from './financial/external';
 import type { TokenCatalogEntry } from './token-meta';
 import { applyDesign, readDesign, saveDesign, type DesignPrefs } from './design';
 
@@ -165,10 +165,10 @@ type AppState = {
 	activeEntityId: string | null;
 	setActiveEntityId: (entityId: string | null) => void;
 
-	/** The signer's on-chain balances, read from the jurisdiction adapter when this page hosts the runtime. */
-	externalRows: ExternalWalletRow[];
+	/** The active signer's current chain snapshot; memory only, independent of Runtime frame cadence. */
+	externalWallet: ExternalWallet | null;
 	tokenCatalog: TokenCatalogEntry[];
-	setExternalWallet: (rows: ExternalWalletRow[], catalog: TokenCatalogEntry[]) => void;
+	setExternalWallet: (wallet: ExternalWallet | null) => void;
 
 	selectedTokenId: number;
 	setSelectedTokenId: (tokenId: number) => void;
@@ -297,9 +297,9 @@ export const useApp = create<AppState>((set, get) => ({
 	activeEntityId: null,
 	setActiveEntityId: entityId => set({ activeEntityId: entityId }),
 
-	externalRows: [],
+	externalWallet: null,
 	tokenCatalog: [],
-	setExternalWallet: (rows, catalog) => set({ externalRows: rows, tokenCatalog: catalog }),
+	setExternalWallet: wallet => set({ externalWallet: wallet, tokenCatalog: wallet?.catalog ?? [] }),
 
 	selectedTokenId: 1,
 	setSelectedTokenId: tokenId => set({ selectedTokenId: tokenId }),

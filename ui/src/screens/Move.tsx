@@ -1,4 +1,3 @@
-import { getEmbeddedEnv } from '../runtime/adapter';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { HOME, PageHead } from '../components/PageHead';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -16,8 +15,6 @@ import {
 	availableAt,
 	awaitingCounterparty,
 	buildMoveRouteSteps,
-	depositoryAddress,
-	externalTokens,
 	hasSentBatch,
 	isExternalTransferMoveRoute,
 	isMoveRouteSupported,
@@ -60,7 +57,6 @@ export function Move() {
 	const [targetEntityId, setTargetEntityId] = useState('');
 	const [reserveRecipientId, setReserveRecipientId] = useState('');
 	const [externalRecipient, setExternalRecipient] = useState('');
-	const [depository, setDepository] = useState('');
 	const [busy, setBusy] = useState<MoveMode | 'approve' | 'direct' | null>(null);
 	const fundingRequest = useMemo(() => {
 		try { return { funding: readPaymentFunding(params), error: '' }; }
@@ -85,10 +81,11 @@ export function Move() {
 	}, [funding, fundingStarted, fundingReady, fundingKey, navigate]);
 
 	const meta = getTokenMeta(tokenId);
-	const externalRows = useApp(s => s.externalRows);
-	const external = useMemo(() => getEmbeddedEnv()
-		? externalRows.filter(row => row.tokenId > 0 && !row.error).map(row => ({ tokenAddress: row.address, tokenId: row.tokenId, balance: row.balance, allowance: row.allowance }))
-		: externalTokens(wallet.frame, wallet.signerId, depository, externalRows), [externalRows, wallet.frame, wallet.signerId, depository]);
+	const externalWallet = useApp(s => s.externalWallet);
+	const external = useMemo(() => (externalWallet?.rows ?? [])
+		.filter(row => row.tokenId > 0 && !row.error)
+		.map(row => ({ tokenAddress: row.address, tokenId: row.tokenId, balance: row.balance, allowance: row.allowance })),
+	[externalWallet]);
 	const externalRow = external.find(row => row.tokenId === tokenId) ?? null;
 	const accounts = wallet.accounts.filter(account => !account.disputed);
 	const firstAccount = accounts[0]?.counterpartyId ?? '';
@@ -96,10 +93,6 @@ export function Move() {
 		if (!sourceAccountId && firstAccount) setSourceAccountId(firstAccount);
 		if (!targetHubId && firstAccount) setTargetHubId(firstAccount);
 	}, [firstAccount, sourceAccountId, targetHubId]);
-	useEffect(() => {
-		if (!wallet.entityId || !wallet.signerId) return;
-		void depositoryAddress(wallet.entityId, wallet.signerId).then(setDepository);
-	}, [wallet.entityId, wallet.signerId]);
 
 	const amount = useMemo(() => {
 		try {

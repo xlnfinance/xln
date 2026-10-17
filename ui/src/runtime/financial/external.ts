@@ -187,39 +187,62 @@ export async function requestFaucet(
 	}
 }
 
-/**
- * Keeps the store's on-chain rows fresh for the active entity: one read per
- * committed runtime frame, throttled, embedded runtimes only (a remote runtime
- * feeds the same numbers through its own watcher into `core.externalWallet`).
- */
+const EXTERNAL_WALLET_REFRESH = 'xln-external-wallet-refresh';
+
+/** One snapshot owner serves Assets, Home and Move, including explicit faucet/refresh requests. */
+export function requestExternalWalletRefresh(): void {
+  window.dispatchEvent(new Event(EXTERNAL_WALLET_REFRESH));
+}
+
 export function useExternalWalletSync(entityId: string, signerId: string) {
-	const height = useApp(s => s.height);
-	const setExternalWallet = useApp(s => s.setExternalWallet);
-	const [snapshot, setSnapshot] = useState({ entityId: '', error: '' });
-	const [attempt, setAttempt] = useState(0);
-	useEffect(() => {
-		if (!entityId || !signerId) return;
-		let cancelled = false;
-		const timer = setTimeout(() => {
-			readExternalWallet(entityId, signerId)
-				.then(wallet => {
-					if (!cancelled) {
-						setExternalWallet(wallet.rows, wallet.catalog);
-						setSnapshot({ entityId, error: '' });
-					}
-				})
-				.catch(error => {
-					if (!cancelled) setSnapshot({ entityId: '', error: error instanceof Error ? error.message : String(error) });
-				});
-		}, 400);
-		return () => {
-			cancelled = true;
-			clearTimeout(timer);
-		};
-	}, [entityId, signerId, height, setExternalWallet, attempt]);
-	return {
-		ready: Boolean(entityId) && snapshot.entityId === entityId,
-		error: snapshot.error,
-		retry: () => setAttempt(value => value + 1),
-	};
+  const setExternalWallet = useApp(s => s.setExternalWallet);
+  const [snapshot, setSnapshot] = useState({ entityId: '', error: '' });
+  useEffect(() => {
+    if (!entityId || !signerId) return;
+    let cancelled = false;
+    let reading = false;
+    let requested = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async (): Promise<void> => {
+      if (reading) {
+        requested = true;
+        return;
+      }
+      clearTimeout(timer);
+      reading = true;
+      requested = false;
+      try {
+        const wallet = await readExternalWallet(entityId, signerId);
+        if (!cancelled) {
+          setExternalWallet(wallet);
+          setSnapshot({ entityId, error: '' });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setExternalWallet(null);
+          setSnapshot({ entityId: '', error: error instanceof Error ? error.message : String(error) });
+        }
+      } finally {
+        reading = false;
+        // An external ERC20 receipt need not create a Runtime frame. Poll only
+        // after the previous read completes; frame traffic must not starve it.
+        if (!cancelled) timer = setTimeout(() => void refresh(), requested ? 0 : 3_000);
+      }
+    };
+    const request = (): void => {
+      void refresh();
+    };
+    window.addEventListener(EXTERNAL_WALLET_REFRESH, request);
+    timer = setTimeout(request, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      window.removeEventListener(EXTERNAL_WALLET_REFRESH, request);
+    };
+  }, [entityId, signerId, setExternalWallet]);
+  return {
+    ready: Boolean(entityId) && snapshot.entityId === entityId,
+    error: snapshot.error,
+    retry: requestExternalWalletRefresh,
+  };
 }

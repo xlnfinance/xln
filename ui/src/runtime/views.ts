@@ -137,7 +137,7 @@ function readPendingReserveByToken(entityId: string, jBatchState: JBatchState | 
 export function useWallet(entityId: string | null): WalletView {
 	const read = useViewFrame(entityId);
 	const frame = read.data;
-	const externalRows = useApp(s => s.externalRows);
+	const externalWallet = useApp(s => s.externalWallet);
 
 	return useMemo<WalletView>(() => {
 		const xln = peekXLN();
@@ -188,17 +188,9 @@ export function useWallet(entityId: string | null): WalletView {
 		accounts.sort((a, b) => (a.isHub === b.isHub ? a.label.localeCompare(b.label) : a.isHub ? -1 : 1));
 
 		const onchainByToken = new Map<number, bigint>();
-		for (const perOwner of core?.externalWallet?.balances?.values() ?? []) {
-			for (const record of perOwner.values()) {
-				if (typeof record.tokenId !== 'number' || record.balance <= 0n) continue;
-				onchainByToken.set(record.tokenId, (onchainByToken.get(record.tokenId) ?? 0n) + record.balance);
-			}
-		}
-		// An embedded runtime has no watcher feeding externalWallet; the page reads the chain itself.
-		if (onchainByToken.size === 0) {
-			for (const row of externalRows) {
-				if (row.balance > 0n && row.tokenId > 0) onchainByToken.set(row.tokenId, (onchainByToken.get(row.tokenId) ?? 0n) + row.balance);
-			}
+		// Signer balances use the same current chain snapshot as Assets and Move.
+		for (const row of externalWallet?.rows ?? []) {
+			if (!row.error && row.balance > 0n && row.tokenId > 0) onchainByToken.set(row.tokenId, row.balance);
 		}
 		const onchain: PlaceRow[] = Array.from(onchainByToken.entries())
 			.map(([tokenId, amount]) => ({ tokenId, amount, pending: 0n, jurisdiction }))
@@ -281,7 +273,7 @@ export function useWallet(entityId: string | null): WalletView {
 			error: read.error,
 			refresh: read.refresh,
 		};
-	}, [frame, entityId, externalRows, read.loading, read.error, read.refresh]);
+	}, [frame, entityId, externalWallet, read.loading, read.error, read.refresh]);
 }
 
 export type SwapOfferView = {

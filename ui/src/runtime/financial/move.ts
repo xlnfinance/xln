@@ -1,6 +1,5 @@
 import { isAddress } from 'ethers';
 import type { EntityTx, JBatch, RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
-import type { ExternalWalletRow } from './external';
 import {
 	buildBroadcastTx,
 	buildExternalToReserveTx,
@@ -51,48 +50,6 @@ export type MoveIntent = {
 };
 
 export type ExternalTokenRow = { tokenAddress: string; tokenId: number; balance: bigint; allowance: bigint | null };
-
-/**
- * On-chain balances for this signer, by token. A watched runtime records them in
- * externalWallet; an embedded runtime has no watcher, so the page's own chain read
- * (`pageRows`, the same rows Home shows) stands in when that record is empty.
- */
-export function externalTokens(
-	frame: RuntimeAdapterViewFrame | null,
-	signerId: string,
-	depository: string,
-	pageRows: readonly ExternalWalletRow[],
-): ExternalTokenRow[] {
-	const wallet = frame?.activeEntity?.core?.externalWallet;
-	const owner = normalizeId(signerId);
-	const rows = new Map<string, ExternalTokenRow>();
-	for (const [ownerKey, byToken] of wallet?.balances?.entries() ?? []) {
-		if (owner && normalizeId(ownerKey) !== owner) continue;
-		for (const record of byToken.values()) {
-			if (typeof record.tokenId !== 'number') continue;
-			const tokenAddress = normalizeId(record.tokenAddress);
-			rows.set(tokenAddress, { tokenAddress, tokenId: record.tokenId, balance: record.balance, allowance: null });
-		}
-	}
-	const spender = normalizeId(depository);
-	for (const [ownerKey, byKey] of wallet?.allowances?.entries() ?? []) {
-		if (owner && normalizeId(ownerKey) !== owner) continue;
-		for (const record of byKey.values()) {
-			if (spender && normalizeId(record.spender) !== spender) continue;
-			const row = rows.get(normalizeId(record.tokenAddress));
-			if (row) row.allowance = record.allowance;
-		}
-	}
-	if (rows.size === 0) {
-		for (const row of pageRows) {
-			// The native coin pays gas and never moves through the Depository.
-			if (row.tokenId <= 0 || row.allowance === null || !row.address) continue;
-			const tokenAddress = normalizeId(row.address);
-			rows.set(tokenAddress, { tokenAddress, tokenId: row.tokenId, balance: row.balance, allowance: row.allowance });
-		}
-	}
-	return [...rows.values()].sort((a, b) => a.tokenId - b.tokenId);
-}
 
 /** Reserve movement already queued in the draft batch, so "available" never double-spends. */
 export function draftReserveDelta(entityId: string, batch: JBatch | null | undefined, tokenId: number): bigint {
@@ -296,14 +253,6 @@ export async function hostedJAdapter(entityId: string, signerId: string) {
 	const jadapter = xln.getEntityJAdapter(env, entityId, signerId);
 	if (!jadapter) throw new Error('JURISDICTION_ADAPTER_UNAVAILABLE');
 	return jadapter;
-}
-
-export async function depositoryAddress(entityId: string, signerId: string): Promise<string> {
-	try {
-		return normalizeId((await hostedJAdapter(entityId, signerId)).addresses.depository);
-	} catch {
-		return '';
-	}
 }
 
 /** ERC20 approval for the Depository, as the signer; waits until the chain reports it. */

@@ -73,7 +73,7 @@ export function useServedEntities(enabled = true): ServedEntity[] {
  *
  * Every screen renders from `activeEntityId`, so the switch is the store write
  * plus dropping what belonged to the entity we are leaving: the signer's
- * on-chain rows (read per entity, and only refreshed on the next frame), the
+ * on-chain rows (read per entity, and refreshed independently of Runtime frames), the
  * toasts the screen we were on raised, and any receipt drained from the old
  * entity's frames. Callers own navigation: the screen we land on is theirs.
  */
@@ -81,7 +81,7 @@ export function switchActiveEntity(entityId: string): void {
 	const next = normalizeEntityId(String(entityId || ''));
 	const app = useApp.getState();
 	if (!next || normalizeEntityId(String(app.activeEntityId || '')) === next) return;
-	app.setExternalWallet([], []);
+	app.setExternalWallet(null);
 	app.clearToasts();
 	useReceipts.getState().dismiss();
 	app.setActiveEntityId(next);

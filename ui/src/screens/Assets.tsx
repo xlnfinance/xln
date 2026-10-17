@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MANAGE, PageHead } from '../components/PageHead';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Bar } from '../components/Bars';
@@ -11,7 +11,7 @@ import { formatMoney, parseAmount, shortId } from '../runtime/format';
 import { getTokenMeta, knownTokenIds } from '../runtime/token-meta';
 import { usdOf } from '../runtime/financial/prices';
 import { useWallet } from '../runtime/views';
-import { requestFaucet, readExternalWallet, type ExternalWallet, type FaucetKind } from '../runtime/financial/external';
+import { requestFaucet, requestExternalWalletRefresh, type FaucetKind } from '../runtime/financial/external';
 import { debtGroups, enforceDebts, type DebtGroup } from '../runtime/financial/debts';
 import { getAdapter } from '../runtime/adapter';
 import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
@@ -27,11 +27,8 @@ export function Assets() {
   const faucetOnly = hash === '#faucets';
   const entityId = useApp(s => s.activeEntityId);
   const toast = useApp(s => s.toast);
-  const height = useApp(s => s.height);
   const wallet = useWallet(entityId);
-  const [external, setExternal] = useState<ExternalWallet | null>(null);
-  const [externalError, setExternalError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const external = useApp(s => s.externalWallet);
   const [busy, setBusy] = useState<string | null>(null);
   const [faucetAmount, setFaucetAmount] = useState('100');
   const [faucetTokenId, setFaucetTokenId] = useState(1);
@@ -60,24 +57,6 @@ export function Assets() {
     if (hash === '#faucets') document.getElementById('faucets')?.scrollIntoView({ block: 'start' });
   }, [hash]);
 
-  const refresh = useCallback(async () => {
-    if (!wallet.entityId || !wallet.signerId) return;
-    setLoading(true);
-    try {
-      setExternal(await readExternalWallet(wallet.entityId, wallet.signerId));
-      setExternalError('');
-    } catch (error) {
-      setExternal(null);
-      setExternalError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setLoading(false);
-    }
-  }, [wallet.entityId, wallet.signerId]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh, height]);
-
   const run = async (key: string, label: string, work: () => Promise<void>): Promise<void> => {
     setBusy(key);
     if (key.startsWith('faucet-')) setFaucetNotice({ kind: 'pending', text: 'Requesting test money…' });
@@ -85,7 +64,7 @@ export function Assets() {
       await work();
       if (key.startsWith('faucet-')) setFaucetNotice({ kind: 'accepted', text: label });
       else toast(label);
-      void refresh();
+      requestExternalWalletRefresh();
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       if (key.startsWith('faucet-')) setFaucetNotice({ kind: 'error', text });
@@ -127,8 +106,8 @@ export function Assets() {
             <div className="card" data-testid="external-wallet">
               <div className="sect" style={{ marginTop: 0 }}>
                 <h3 className="caps">On-chain wallet</h3>
-                <button type="button" className="more" onClick={() => void refresh()} disabled={loading}>
-                  {loading ? 'Reading…' : 'Refresh'}
+                <button type="button" className="more" onClick={requestExternalWalletRefresh}>
+                  Refresh
                 </button>
               </div>
               <div className="kv">
@@ -137,7 +116,13 @@ export function Assets() {
                   <CopyId value={wallet.signerId} label="Signer address" />
                 </span>
               </div>
-              <p className="note">Gas and fungible tokens at your signing address. Company share reserves are in <button type="button" className="more" onClick={() => navigate('/ownership')}>Ownership</button>; external NFT and share balances are not shown here.</p>
+              <p className="note">
+                Gas and fungible tokens at your signing address. Company share reserves are in{' '}
+                <button type="button" className="more" onClick={() => navigate('/ownership')}>
+                  Ownership
+                </button>
+                ; external NFT and share balances are not shown here.
+              </p>
               {external ? (
                 <>
                   <div className="kv">
@@ -190,11 +175,7 @@ export function Assets() {
                 </>
               ) : (
                 <p className="note" style={{ marginTop: 8 }}>
-                  {externalError
-                    ? externalError.includes('LOCAL_RUNTIME')
-                      ? 'A remote runtime does not expose the signer wallet here. Read it from the chain explorer.'
-                      : externalError
-                    : 'Reading the chain…'}
+                  Reading the chain…
                 </p>
               )}
             </div>
