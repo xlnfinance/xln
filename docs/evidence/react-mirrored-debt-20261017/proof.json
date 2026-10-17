@@ -1,0 +1,181 @@
+{
+  "before": {
+    "accountHeight": 4,
+    "collateral": "0",
+    "debts": [],
+    "delta": "0",
+    "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+    "dispute": null,
+    "disputeConfig": {
+      "leftResponseSeconds": 5,
+      "rightResponseSeconds": 5
+    },
+    "draftStarts": 0,
+    "entityNonce": 0,
+    "height": 16,
+    "mempool": 0,
+    "pending": false,
+    "reserve": "0",
+    "sent": false,
+    "status": "active"
+  },
+  "chainDebt": {
+    "amount": {
+      "__xlnType": "BigInt",
+      "value": "150000000"
+    },
+    "blockHash": "0x9a21c1ae46d1b421618278b9da1ba171193cf1c6d7336b181734c97d4682b9fb",
+    "creditor": "0x9a2dedea7e937e9e0099c6a7d09cea53d254058278c9a5dc3a2bdbc9221bb667",
+    "debtIndex": {
+      "__xlnType": "BigInt",
+      "value": "0"
+    },
+    "debtor": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+    "finalProofbodyHash": "0x7c34480fd2338f0f9da13e1e787a5c212057b92a0e4a61e88ba65881f12dc7ad",
+    "nonce": {
+      "__xlnType": "BigInt",
+      "value": "5"
+    },
+    "tokenId": {
+      "__xlnType": "BigInt",
+      "value": "1"
+    },
+    "transactionHash": "0xd430f6b0a3fe2476a661a633c8e74565c0b29619c6a9ad964ff844094d721333"
+  },
+  "drafted": {
+    "accountHeight": 5,
+    "collateral": "0",
+    "debts": [],
+    "delta": "150000000",
+    "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+    "dispute": {
+      "disputeTimeout": 0,
+      "finalizeQueued": false,
+      "initialNonce": 5,
+      "initialProofbodyHash": "0x7c34480fd2338f0f9da13e1e787a5c212057b92a0e4a61e88ba65881f12dc7ad",
+      "initialProposerIsLeft": false,
+      "jNonce": 0,
+      "observedOnChain": false,
+      "startedByLeft": false,
+      "starterCounterProofCommitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "disputeConfig": {
+      "leftResponseSeconds": 5,
+      "rightResponseSeconds": 5
+    },
+    "draftStarts": 1,
+    "entityNonce": 0,
+    "height": 19,
+    "mempool": 0,
+    "pending": false,
+    "reserve": "0",
+    "sent": false,
+    "status": "disputed"
+  },
+  "final": {
+    "accountHeight": 5,
+    "collateral": "0",
+    "debts": [
+      {
+        "createdAmount": "150000000",
+        "debtId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de:1:0:43:0xd430f6b0a3fe2476a661a633c8e74565c0b29619c6a9ad964ff844094d721333",
+        "direction": "out",
+        "paidAmount": "0",
+        "remainingAmount": "150000000",
+        "status": "open"
+      }
+    ],
+    "delta": "0",
+    "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+    "dispute": null,
+    "disputeConfig": {
+      "leftResponseSeconds": 5,
+      "rightResponseSeconds": 5
+    },
+    "draftStarts": 0,
+    "entityNonce": 1,
+    "height": 38,
+    "mempool": 0,
+    "pending": false,
+    "reserve": "0",
+    "sent": false,
+    "status": "disputed"
+  },
+  "mirrored": [
+    [
+      {
+        "createdAmount": "150000000",
+        "debtId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de:1:0:43:0xd430f6b0a3fe2476a661a633c8e74565c0b29619c6a9ad964ff844094d721333",
+        "direction": "out",
+        "paidAmount": "0",
+        "remainingAmount": "150000000",
+        "status": "open"
+      }
+    ],
+    [
+      {
+        "createdAmount": "150000000",
+        "debtId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de:1:0:43:0xd430f6b0a3fe2476a661a633c8e74565c0b29619c6a9ad964ff844094d721333",
+        "direction": "in",
+        "paidAmount": "0",
+        "remainingAmount": "150000000",
+        "status": "open"
+      }
+    ]
+  ],
+  "paid": {
+    "accountHeight": 5,
+    "collateral": "0",
+    "debts": [],
+    "delta": "150000000",
+    "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+    "dispute": null,
+    "disputeConfig": {
+      "leftResponseSeconds": 5,
+      "rightResponseSeconds": 5
+    },
+    "draftStarts": 0,
+    "entityNonce": 0,
+    "height": 18,
+    "mempool": 0,
+    "pending": false,
+    "reserve": "0",
+    "sent": false,
+    "status": "active"
+  },
+  "started": {
+    "accountHeight": 5,
+    "blockHash": "0x185414724377337e73770a249a47cbd53634d9daf60f7f14da25f263fde2dc98",
+    "collateral": "0",
+    "debts": [],
+    "delta": "150000000",
+    "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+    "dispute": {
+      "batchNonce": 1,
+      "disputeStartTimestamp": 1792269796,
+      "disputeTimeout": 1792269806,
+      "finalizeQueued": false,
+      "initialNonce": 5,
+      "initialProofbodyHash": "0x7c34480fd2338f0f9da13e1e787a5c212057b92a0e4a61e88ba65881f12dc7ad",
+      "initialProposerIsLeft": false,
+      "jNonce": 5,
+      "observedBlockNumber": 41,
+      "observedOnChain": true,
+      "startedByLeft": false,
+      "starterCounterProofCommitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "disputeConfig": {
+      "leftResponseSeconds": 5,
+      "rightResponseSeconds": 5
+    },
+    "draftStarts": 0,
+    "entityNonce": 1,
+    "height": 24,
+    "mempool": 0,
+    "pending": false,
+    "reserve": "0",
+    "sent": false,
+    "status": "disputed",
+    "txHash": "0x518fce695d59810752bff64d826f63dab2f8a50c1c4bfc3fae818de23364e485"
+  }
+}
