@@ -1,0 +1,43 @@
+{
+  "baseSha": "2e2cc07698d83df357d92fb0f256346b7164442e",
+  "problem": "P4 chain/WAL finality passed, but the UI assertion still expected retired Available to pay text instead of current Payment capacity.",
+  "change": "Update only the expected label; zero capacity and all receipt, nonce, deadline, payout, debt, reload and external withdrawal assertions remain.",
+  "productionChanged": false,
+  "limits": [
+    "Private local chain with its signed window advanced through existing test controls; not public-chain or wall-clock soak evidence.",
+    "Full release gate and all product flows remain unproved."
+  ],
+  "cases": [
+    {
+      "name": "p4",
+      "stats": {
+        "startTime": "2026-10-17T05:16:02.857Z",
+        "duration": 17625.620000000003,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "standSeconds": 39.08,
+      "reportPath": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/dispute-p4-fixed/wallet-results.json",
+      "reportSha256": "bad351abf8e9e8aef2041a8882591af2ecac9c820765443f4adc11d803fbb987",
+      "financialEvidence": "p4-financial.json"
+    },
+    {
+      "name": "p5",
+      "stats": {
+        "startTime": "2026-10-17T05:16:47.675Z",
+        "duration": 22465.029,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "standSeconds": 43.89,
+      "reportPath": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/dispute-p5-fixed/wallet-results.json",
+      "reportSha256": "15fab2e2173ce04bff1beb41596c0af210c1b83c67cd8a7cdb37f4316bea0427",
+      "financialEvidence": "p5-financial.json"
+    }
+  ],
+  "testSha256": "20e702a2ca390cec5f297af4f97dc69d1ff38831a4d023a5702053120bbe3a2f"
+}

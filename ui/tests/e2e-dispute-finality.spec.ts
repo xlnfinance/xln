@@ -263,7 +263,7 @@ for (const shortfall of [false, true])
         ]);
         expect(finished.incomingDebt).toBe(shortfall ? '50000000' : '0');
         await expect(page.getByTestId('token-net-USDC')).toHaveText(netText);
-        await expect(page.getByTestId('home-send-capacity')).toContainText('Available to pay: $0.00');
+        await expect(page.getByTestId('home-send-capacity')).toContainText('Payment capacity: $0.00');
         await expect(page.getByTestId('home-reserve').locator('strong')).toHaveText(shortfall ? '$200.00' : '$100.00');
         await expect(page.getByTestId('home-risk').locator('strong')).toHaveText(shortfall ? '$50.00' : '$0.00');
         await page.locator(`[data-testid="account-row"][data-counterparty-id="${hubId}"]`).click();

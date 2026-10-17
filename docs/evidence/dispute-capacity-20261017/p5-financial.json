@@ -1,0 +1,35 @@
+{
+  "mode": "canonical-auto-after-ui-start-and-early-prevention",
+  "finalChain": {
+    "collateral": "0",
+    "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "nonce": "8",
+    "ondelta": "0",
+    "peerReserve": "0",
+    "reserve": "200000000",
+    "timeout": 0
+  },
+  "finalTx": "0x24947b78341930341849c7e837fa5c861adf85bc11de09b35aaadd41d9c7dbd1",
+  "sourceBatch": {
+    "batchHash": "0xdffee2396d0dccf36c9caade9bfb2a8952ad66f63c250f185e43ff328ee9c28c",
+    "entityNonce": 3
+  },
+  "startTx": "0xbdab914781c423975398e194124adbbdbb0090b360e095632b95b06730209af4",
+  "deadlineBlock": {
+    "hash": "0x0b3e3644a97e6bbecabf2a3cc1c35b0fa85b3e7fd416b4dbe43ee27430484191",
+    "number": 49,
+    "timestamp": 1792304221
+  },
+  "incomingDebt": "50000000",
+  "withdrawal": {
+    "after": {
+      "__xlnType": "BigInt",
+      "value": "200000000"
+    },
+    "before": {
+      "__xlnType": "BigInt",
+      "value": "0"
+    },
+    "signerId": "0xd0f00e98ff1913b7573fb10bb2d1f8dc37de57c4"
+  }
+}

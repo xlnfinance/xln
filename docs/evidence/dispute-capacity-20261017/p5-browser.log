@@ -1,0 +1,8 @@
+
+Running 1 test using 1 worker
+
+(node:85760) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `bun --trace-warnings ...` to show where the warning was created)
+  ✓  1 [chromium] › ui/tests/e2e-dispute-finality.spec.ts:33:2 › P5 UI dispute pays 200 of a 250 USDC claim and preserves 50 USDC of unsecured debt @functional (21.7s)
+
+  1 passed (22.5s)
