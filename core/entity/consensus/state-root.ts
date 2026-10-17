@@ -211,7 +211,7 @@ const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
  * state is recovered from WAL; local Hankos are attached after the committed
  * hash exists and would otherwise make the commitment circular.
  */
-const ACCOUNT_ENTITY_EXCLUDED_FIELDS = [
+export const ACCOUNT_ENTITY_EXCLUDED_FIELDS = [
   // Coordination state remains in the live Account replica and recovery WAL,
   // but it is not certified financial state. Committing it here made Entity
   // roots depend on scheduling, retries, and worker timing.

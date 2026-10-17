@@ -1,0 +1,429 @@
+$ bun tools/stand-lock.ts run --reason checkpoint-current-recovery --timeout-ms "60000" -- bun test core/__tests__/runtime/ingress/recovery/deferred-entity-admission.test.ts core/__tests__/storage/runtime/storage-canonical-hash.test.ts core/__tests__/storage/recovery/storage-crash-recovery.test.ts core/__tests__/storage/recovery/portable/local-commit-outbox-replay.test.ts core/__tests__/storage/history/storage-frame-journal-retention.test.ts core/__tests__/jurisdiction/submission/recovery/j-submit-crash-recovery.test.ts core/__tests__/jurisdiction/submission/recovery/j-submit-real-rpc-crash-recovery.test.ts core/__tests__/jurisdiction/submission/recovery/j-submit-durability.test.ts core/__tests__/storage/recovery/checkpoint/replica-evidence.test.ts
+bun test v1.4.0 (34cbb9a40)
+
+core/__tests__/storage/recovery/storage-crash-recovery.test.ts:
+(pass) storage crash recovery > copies path-keyed certified-board nodes before publishing recovered current head [149.15ms]
+(pass) storage crash recovery > rejects current DB state that is ahead of the authoritative Runtime WAL [47.93ms]
+
+core/__tests__/storage/runtime/storage-canonical-hash.test.ts:
+(pass) canonical storage hash is deterministic across Map insertion order [2.31ms]
+(pass) WAL Runtime-machine snapshot cannot alias later live infrastructure mutations [1.11ms]
+(pass) canonical storage audit values reject ambiguous or lossy JavaScript values [0.20ms]
+(pass) storage frame integrity commits Runtime checkpoint graph root, never a blob [0.18ms]
+(pass) per-frame post-state hash commits replayed state and frame coordinates [0.07ms]
+(pass) per-frame Runtime root trusts BrowserVM stateRoot instead of rehashing trie bytes [0.09ms]
+(pass) replay oracle excludes local operator config and active J-adapter selector [0.02ms]
+(pass) replay oracle canonicalizes empty optional Runtime input queues [0.02ms]
+(pass) replay oracle excludes process-local Runtime lifecycle failures [0.02ms]
+(pass) canonical storage hash is deterministic across orderbook pair index insertion order [1.82ms]
+(pass) canonical storage hash reacts to consensus state [0.41ms]
+(pass) canonical Entity hash excludes validator-private J history [0.27ms]
+(pass) validator-local HTLC notes neither diverge shared storage nor leak into Entity core [0.51ms]
+(pass) canonical storage rejects conflicting validator replicas of one Entity [0.32ms]
+(pass) storage projection round-trip preserves canonical account optional-field shape [0.73ms]
+(pass) replica metadata projection omits transient mempool while preserving durable layout and J state [0.11ms]
+(pass) immediate replica metadata encoding matches the persistent recovery view [0.10ms]
+(pass) live replica metadata omits transient commitment caches at every in-flight state level [0.55ms]
+
+core/__tests__/storage/history/storage-frame-journal-retention.test.ts:
+[ERROR][runtime] recovery.frame.failed {"error":"RECOVERY_JOURNAL_POST_STATE_HASH_MISMATCH:height=2:expected=0x9999999999999999999999999999999999999999999999999999999999999999:actual=0x3c7c3664395f08e21fb3ace5b05bb1160b8d0e0004c56ffa7b7902a352745bfc:diagnostics={\"actualComponents\":[{\"key\":\"infrastructure\",\"valueHash\":\"0xd8b3dc11e96fed77e3a8d27fb3e49abb9867fdd03d8db94319d849be2bfdeb5b\"},{\"key\":\"jReplicas\",\"valueHash\":\"0xf555217f6b61f0b884e5971cd36aaa013dc09fadac4c9e693ce6e07828f36f76\"},{\"key\":\"runtimeId\",\"valueHash\":\"0x7b49aa405f8620831bf11ffccf7f124ed61d755af53f30caf29d5097e7f9447e\"}],\"componentMismatches\":null,\"frameTimestamp\":1792219442532,\"hasRecordedMachine\":false,\"height\":2,\"recordedSnapshotComponents\":null,\"replayTimestamp\":1792219442532,\"replicaMetaDigest\":\"0xab3de96a049abd6ce8052c60f9636a4144a60e947279f6a173118f34177097ae\",\"runtimeOutputCount\":0,\"runtimeOutputsDigest\":\"0x56cc30822c85fae6a34ca5bd7047a22371f2bc0101275dc7240013b675347827\",\"runtimeTxTypes\":[\"importReplica\"]}","height":2,"stack":"Error: RECOVERY_JOURNAL_POST_STATE_HASH_MISMATCH:height=2:expected=0x9999999999999999999999999999999999999999999999999999999999999999:actual=0x3c7c3664395f08e21fb3ace5b05bb1160b8d0e0004c56ffa7b7902a352745bfc:diagnostics={\"actualComponents\":[{\"key\":\"infrastructure\",\"valueHash\":\"0xd8b3dc11e96fed77e3a8d27fb3e49abb9867fdd03d8db94319d849be2bfdeb5b\"},{\"key\":\"jReplicas\",\"valueHash\":\"0xf555217f6b61f0b884e5971cd36aaa013dc09fadac4c9e693ce6e07828f36f76\"},{\"key\":\"runtimeId\",\"valueHash\":\"0x7b49aa405f8620831bf11ffccf7f124ed61d755af53f30caf29d5097e7f9447e\"}],\"componentMismatches\":null,\"frameTimestamp\":1792219442532,\"hasRecordedMachine\":false,\"height\":2,\"recordedSnapshotComponents\":null,\"replayTimestamp\":1792219442532,\"replicaMetaDigest\":\"0xab3de96a049abd6ce8052c60f9636a4144a60e947279f6a173118f34177097ae\",\"runtimeOutputCount\":0,\"runtimeOutputsDigest\":\"0x56cc30822c85fae6a34ca5bd7047a22371f2bc0101275dc7240013b675347827\",\"runtimeTxTypes\":[\"importReplica\"]}\n    at verifyRecoveryJournalFrame (/Users/zigota/xln/core/storage/recovery/journal/verification.ts:258:15)\n    at <anonymous> (/Users/zigota/xln/core/storage/recovery/journal/index.ts:176:7)\n    at processTicksAndRejections (native:7:39)\n    at toThrow (unknown)\n    at <anonymous> (/Users/zigota/xln/core/__tests__/storage/history/storage-frame-journal-retention.test.ts:186:18)\n    at processTicksAndRejections (native:7:39)"}
+(pass) storage frame journal retention > replay rejects a validly rechained divergent post-state at its first height [112.43ms]
+(pass) storage frame journal retention > accounts authoritative frame journals in retained history bytes [41.60ms]
+(pass) storage frame journal retention > Account history excludes an unacknowledged collision branch [40.58ms]
+(pass) storage frame journal retention > Account history counts only the other side's ACK as commit evidence [39.78ms]
+(pass) storage frame journal retention > keeps Runtime activity logs outside the authoritative WAL frame [40.44ms]
+(pass) storage frame journal retention > stores only the chained R-frame between sparse canonical checkpoints [45.18ms]
+(pass) storage frame journal retention > returns null for a checkpoint view that was legitimately pruned by a newer snapshot [131.14ms]
+[INFO][entity] input.received {"entity":"0xe0d00a6cdccf95424eed500772796ef3197f5a935a4b0f277f9bb45e52ef98e3","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6d25","ts":1792219443296,"txs":["profile-update"]}
+[INFO][entity] input.received {"entity":"0xe0d00a6cdccf95424eed500772796ef3197f5a935a4b0f277f9bb45e52ef98e3","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6d25","ts":1792219443296,"txs":["profile-update"]}
+(pass) storage frame journal retention > retained snapshots keep every replay frame after the oldest retained base [987.11ms]
+[network] ROUTE_P2P_UNAVAILABLE {
+  targetRuntimeId: "0x95b2e9c40895b3eac2d09e1f4a215ffd5516e2e8",
+  outputs: [
+    {
+      entityId: "0xd3d3201e774209930e6f72752c859f8e4ce239b0e00f45210ba2ce994a0be840",
+      signerId: "0x95b2e9c40895b3eac2d09e1f4a215ffd5516e2e8",
+      sourceRuntimeFrame: [Object ...],
+      accountInputs: [
+        [Object ...]
+      ],
+    }
+  ],
+}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0x8f43a3a14c0c0fe3a6e47812a1ef1ee8fcde8af9","targets":[{"count":1,"deliverable":false,"runtimeId":"0x95b2e9c40895b3eac2d09e1f4a215ffd5516e2e8"}]}
+(pass) storage frame journal retention > historical entity listing keeps remote Account endpoints out of the local Entity keyspace [342.60ms]
+(pass) storage frame journal retention > retained checkpoint preserves replica lineage metadata after the live head advances [429.18ms]
+[ERROR][runtime.storage] runtime_wal.open_failed {"error":"Error: Database is not open"}
+(pass) storage frame journal retention > preserves both the frame write failure and authoritative probe failure [30.58ms]
+(pass) storage frame journal retention > refuses to overwrite an already persisted runtime frame [37.52ms]
+(pass) storage frame journal retention > stale same-height writer stops when the frame is already persisted [38.81ms]
+(pass) storage frame journal retention > stale lower-height writer can be stopped without appending or corrupting head [38.09ms]
+(pass) storage frame journal retention > server writer fencing rejects an already held namespace lock before appending [39.19ms]
+(pass) storage frame journal retention > server writer fencing does not steal an expired lock while its pid is still alive [39.15ms]
+[INFO][runtime.tx] replica.imported_from_certified_checkpoint {"entity":"0xdcdf3ba1262280e8696abffed1f43bacb9480c809dd0b57c8d600a39b622f75e","head":"genesis","height":0,"signer":"0xd464510d6552ffe985989fc26490340175200a2a"}
+[ERROR][runtime.storage] runtime_wal.open_failed {"error":"Error: STORAGE_VERIFY_REPLICA_META_DIGEST_MISMATCH: height=1 expected=0xca043f03493797be4fe76bde8e6e33fce026fb124fd91c1fb7ebc36ec8302d49 actual=0x4d037f1c6ee2ececc418e17ffeef18409a278a262714575cf5ae0ca852fce912"}
+[ERROR][runtime] load_env_from_db.failed {"error":"Error: STORAGE_VERIFY_REPLICA_META_DIGEST_MISMATCH: height=1 expected=0xca043f03493797be4fe76bde8e6e33fce026fb124fd91c1fb7ebc36ec8302d49 actual=0x4d037f1c6ee2ececc418e17ffeef18409a278a262714575cf5ae0ca852fce912"}
+(pass) storage frame journal retention > latest restore trusts authoritative history meta and rejects its deletion against the frame digest [126.34ms]
+(pass) storage frame journal retention > stores one minimal Runtime replay journal [38.72ms]
+[network] ROUTE_P2P_UNAVAILABLE {
+  targetRuntimeId: "0xc95475a328b97c4675fa71bbaa195ec326507f1c",
+  outputs: [
+    {
+      entityId: "0x91f37d7609e7faa382d68f73802bcdb84735b80a81fe8c0b8cec0bae1e981749",
+      signerId: "0xc95475a328b97c4675fa71bbaa195ec326507f1c",
+      sourceRuntimeFrame: [Object ...],
+      accountInputs: [
+        [Object ...]
+      ],
+    }
+  ],
+}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xde0599cc43b536116290d26e9f5b75c9d53ec8d4","targets":[{"count":1,"deliverable":false,"runtimeId":"0xc95475a328b97c4675fa71bbaa195ec326507f1c"}]}
+[INFO][entity] input.received {"entity":"0xbad2cf91109d46d25eadac3fd18741f3b2155bdabd3dfc0f09851e5ff616d54a","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"c8d4","ts":1792219445108,"txs":["openAccount"]}
+[INFO][entity] input.received {"entity":"0xbad2cf91109d46d25eadac3fd18741f3b2155bdabd3dfc0f09851e5ff616d54a","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"c8d4","ts":1792219445108,"txs":["openAccount"]}
+(pass) storage frame journal retention > persists the bounded transport outbox and restores the exact committed delivery [924.20ms]
+[ERROR][runtime] load_env_from_db.failed {"error":"Error: STORAGE_SAFETY_OVERRIDE_FORBIDDEN_IN_PRODUCTION: flags=XLN_STORAGE_SKIP_VERIFY_ON_OPEN"}
+[ERROR][runtime] load_env_from_db.failed {"error":"Error: STORAGE_SAFETY_OVERRIDE_FORBIDDEN_IN_PRODUCTION: flags=XLN_STORAGE_FORCE_RESTORE"}
+[ERROR][runtime] load_env_from_db.failed {"error":"Error: STORAGE_SAFETY_OVERRIDE_FORBIDDEN_IN_PRODUCTION: flags=XLN_STORAGE_SYNC_WRITES"}
+[ERROR][runtime] load_env_from_db.failed {"error":"Error: STORAGE_SAFETY_OVERRIDE_FORBIDDEN_IN_PRODUCTION: flags=XLN_STORAGE_WAL_SYNC"}
+(pass) storage frame journal retention > production refuses storage safety override flags [43.64ms]
+(pass) storage frame journal retention > production chains every WAL frame without rebuilding the canonical replay oracle by default [40.77ms]
+[ERROR][runtime.storage] runtime_wal.open_failed {"error":"Error: STORAGE_ENTITY_FIELD_BYTES_MISMATCH:21:51:63"}
+[ERROR][runtime] load_env_from_db.failed {"error":"Error: STORAGE_ENTITY_FIELD_BYTES_MISMATCH:21:51:63"}
+(pass) storage frame journal retention > canonical frame hash fails restore when snapshot body loses state [59.93ms]
+[INFO][entity] input.received {"entity":"0x66c9db98befe1b4df814310658f9d73dfa5a9e550ca2ceef01eb2585ca06c19b","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"3422","ts":1792219446488,"txs":["profile-update"]}
+[INFO][entity] input.received {"entity":"0x66c9db98befe1b4df814310658f9d73dfa5a9e550ca2ceef01eb2585ca06c19b","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"3422","ts":1792219446794,"txs":["profile-update"]}
+(pass) storage frame journal retention > rotates current storage epoch after byte-threshold snapshot and keeps frame tail usable [658.22ms]
+[INFO][entity] input.received {"entity":"0xe8c09138a535acd2cf2c5acea6d5b12f4444f4d444f76e4eb77e61622809902e","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"354a","ts":1792219447619,"txs":["profile-update"]}
+(pass) storage frame journal retention > prunes finalized Runtime WAL frames without retaining Account history copies [1149.08ms]
+(pass) storage frame journal retention > fails closed when the authoritative Runtime WAL is lost [205.98ms]
+(pass) storage frame journal retention > rejects a torn snapshot head that points at a missing manifest [40.43ms]
+(pass) storage frame journal retention > rejects a snapshot head that points past the latest frame [39.00ms]
+(pass) storage frame journal retention > rejects a snapshot manifest with the wrong height [38.01ms]
+(pass) storage frame journal retention > rejects a snapshot manifest when the materialized frame is missing [38.26ms]
+(pass) storage frame journal retention > rejects a snapshot manifest when the frame was not materialized [37.68ms]
+(pass) storage frame journal retention > rejects corrupted or torn replica metadata in a published snapshot [70.36ms]
+[INFO][entity] input.received {"entity":"0x54d1d6d0681ec13faa7b607de0328da385132779d95e68ec22a12b5ba8db3236","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"5562","ts":1792219448479,"txs":["profile-update"]}
+[INFO][entity] input.received {"entity":"0x54d1d6d0681ec13faa7b607de0328da385132779d95e68ec22a12b5ba8db3236","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"5562","ts":1792219449041,"txs":["profile-update"]}
+(pass) storage frame journal retention > rebuilds materialization overlay after restart between checkpoints [695.30ms]
+
+core/__tests__/jurisdiction/submission/recovery/j-submit-durability.test.ts:
+(pass) durable validator-local J submit state > committed batch without an attempt is due immediately [26.59ms]
+(pass) durable validator-local J submit state > queued retry becomes a no-op after authenticated finality retires its sealed batch [0.33ms]
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0x91bff335fc1418a6f51ddf444da9bf43f4c99a20b50d14729ac4b53d95e8df7b","entityId":"3131","jurisdictionName":"j-submit-durability","outcome":"reconciled"}
+[INFO][runtime.jsubmit] sealed_batch.durable_abort_reconciled {"attemptId":"0x91bff335fc1418a6f51ddf444da9bf43f4c99a20b50d14729ac4b53d95e8df7b","entityId":"3131","jurisdictionName":"j-submit-durability"}
+(pass) durable validator-local J submit state > finalized nonce-collision quarantine suppresses retries and reconciles a durable outbox before I/O [0.73ms]
+(pass) durable validator-local J submit state > attempt RuntimeTx records local attempt before exposing external outbox [0.19ms]
+(pass) durable validator-local J submit state > terminal result is local, replayable, and cannot change Entity consensus hash [0.79ms]
+(pass) durable validator-local J submit state > known broadcast hash survives a transient result and the next committed retry [0.27ms]
+(pass) durable validator-local J submit state > transient result starts backoff from the persisted attempt timestamp [0.20ms]
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0x91bff335fc1418a6f51ddf444da9bf43f4c99a20b50d14729ac4b53d95e8df7b","entityId":"3131","jurisdictionName":"j-submit-durability","outcome":"eventBarrier"}
+[INFO][runtime.jsubmit] outbox.deferred_for_j_events {"authenticatedJInputs":1,"jurisdictionName":"j-submit-durability"}
+(pass) durable validator-local J submit state > authenticated J input defers external I/O and makes the batch immediately retryable [0.45ms]
+(pass) durable validator-local J submit state > an in-flight preparation alone owns its attempt result, even behind an event barrier [0.18ms]
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0x91bff335fc1418a6f51ddf444da9bf43f4c99a20b50d14729ac4b53d95e8df7b","entityId":"3131","jurisdictionName":"j-submit-durability","outcome":"eventBarrier"}
+[INFO][runtime.jsubmit] tx.failure_deferred_for_j_events {"authenticatedJInputs":1,"entityId":"3131","jurisdictionName":"j-submit-durability"}
+[ERROR][runtime.jsubmit] tx.submit_failed {"entityId":"3131","error":"staticCall revert: E5()","jurisdictionName":"j-submit-durability","type":"batch"}
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0x4f1b43283b162d55083177a0bb2fe84ac2ca3d82af8cfdcf54b6d5c4f449bf8c","entityId":"3131","jurisdictionName":"j-submit-durability","outcome":"terminalFailure"}
+(pass) durable validator-local J submit state > authenticated J input arriving during a failed submit defers failure classification [0.92ms]
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0x91bff335fc1418a6f51ddf444da9bf43f4c99a20b50d14729ac4b53d95e8df7b","entityId":"3131","jurisdictionName":"j-submit-durability","outcome":"submitted"}
+(pass) durable validator-local J submit state > empty J-prefix liveness does not starve an otherwise valid submit [0.33ms]
+(pass) durable validator-local J submit state > structured adapter failure and bounded message survive the durable replica snapshot [0.23ms]
+(pass) durable validator-local J submit state > forged J-submit RuntimeTx is rejected outside replay [0.14ms]
+(pass) durable validator-local J submit state > queued retry cannot overlap a durable pending attempt [0.16ms]
+(pass) durable validator-local J submit state > late result retires only its old pending attempt and cannot corrupt a newer attempt [0.29ms]
+(pass) durable validator-local J submit state > exact duplicate result is idempotent but a conflicting payload for the same attempt fails closed [0.25ms]
+(pass) durable validator-local J submit state > conflicting duplicate of a prior recorded attempt still fails after a newer result [0.33ms]
+(pass) durable validator-local J submit state > dedupe journal is deterministically bounded and retained across replica restore [24.52ms]
+(pass) durable validator-local J submit state > old RPC result retires only its exact old attempt and is idempotent beside a new pending batch [0.46ms]
+(pass) durable validator-local J submit state > queued event barrier fences the same unsigned attempt until its result commits [0.30ms]
+(pass) durable validator-local J submit state > completed unsigned event barrier never re-enters submit and cannot change its recorded reason [0.22ms]
+(pass) durable validator-local J submit state > stale pre-preparation outbox cannot contradict a committed result after authenticated finality [0.28ms]
+(pass) durable validator-local J submit state > prepared bytes survive transient and submitted results and move once into the next attempt [0.77ms]
+(pass) durable validator-local J submit state > pending outbox rejects a conflicting payload that reuses an attempt id [0.21ms]
+
+core/__tests__/jurisdiction/submission/recovery/j-submit-crash-recovery.test.ts:
+[JAdapter] Mode: browservm, chainId=31337
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] onAny registered (1 callbacks)
+[Boot] j-submit-real-terminal-rejection: env + jadapter + jReplica "j-submit-real-terminal-rejection Demo" ready
+[Boot] computeBoardHash(signer=0x64d1810f0ec310c1ae21f27ad91444ea754e4639): addr=0x64d1810f0ec310c1ae21f27ad91444ea754e4639, boardHash=0xdba27177f89347cf...
+[Boot] computeBoardHash(signer=0xcd8d9e10f1ca9ee87c09a0f7435f4a7c5c88926a): addr=0xcd8d9e10f1ca9ee87c09a0f7435f4a7c5c88926a, boardHash=0x19080c05e5ec6ef0...
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"4639","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0002","finalizedJHeight":22,"txs":1}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"926a","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0003","finalizedJHeight":22,"txs":1}
+[INFO][runtime] apply.profile {"elapsedMs":507,"entityInputs":2,"entityTxs":0,"height":3,"jOutputs":0,"outputs":0,"phases":[{"ms":0,"name":"validateMerge"},{"ms":2,"name":"runtimeTxs"},{"ms":0,"name":"atomicCrossJAdmission"},{"ms":505,"name":"entityApply"},{"ms":0,"name":"finalize"},{"ms":0,"name":"remainder"}],"runtimeTxs":9}
+[Boot] Registered 2 entities: Sender(0002), Receiver(0003)
+[BrowserVM] Funded 0x00000000... with 100 of token 1
+[BrowserVM] debugFundReserves: logs=1
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"4639","range":"23-23","root":"0x2791538b.."}
+[Boot] Funded 1 entities
+[system] RECOVERY_BACKUP_BARRIER_FAILED {
+  height: 6,
+  remoteOutputCount: 0,
+  jInputCount: 1,
+  reason: "CRASH_AFTER_INTENT_COMMIT",
+}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"4639","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0002","finalizedJHeight":22,"txs":1}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000003","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"926a","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"926a","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0003","finalizedJHeight":22,"txs":1}
+[INFO][runtime] apply.profile {"elapsedMs":512,"entityInputs":2,"entityTxs":0,"height":3,"jOutputs":0,"outputs":0,"phases":[{"ms":0,"name":"validateMerge"},{"ms":2,"name":"runtimeTxs"},{"ms":0,"name":"atomicCrossJAdmission"},{"ms":510,"name":"entityApply"},{"ms":0,"name":"finalize"},{"ms":0,"name":"remainder"}],"runtimeTxs":9}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":401,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"4639","range":"23-23","root":"0x2791538b.."}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":501,"txs":["r2r"]}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":601,"txs":["j_broadcast"]}
+[system] RECOVERY_BACKUP_BARRIER_FAILED {
+  height: 7,
+  remoteOutputCount: 0,
+  jInputCount: 1,
+  reason: "CRASH_AFTER_ATTEMPT_COMMIT",
+}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"4639","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0002","finalizedJHeight":22,"txs":1}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000003","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"926a","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"926a","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0003","finalizedJHeight":22,"txs":1}
+[INFO][runtime] apply.profile {"elapsedMs":502,"entityInputs":2,"entityTxs":0,"height":3,"jOutputs":0,"outputs":0,"phases":[{"ms":0,"name":"validateMerge"},{"ms":2,"name":"runtimeTxs"},{"ms":0,"name":"atomicCrossJAdmission"},{"ms":500,"name":"entityApply"},{"ms":0,"name":"finalize"},{"ms":0,"name":"remainder"}],"runtimeTxs":9}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":401,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"4639","range":"23-23","root":"0x2791538b.."}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":501,"txs":["r2r"]}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":601,"txs":["j_broadcast"]}
+[BrowserVM] processBatch: calling contract with hanko (nonce=1)...
+[BrowserVM] processBatch raw logs: 3
+   Log 0: topics=3, data=32 bytes
+   Log 1: topics=3, data=32 bytes
+   Log 2: topics=3, data=32 bytes
+[BrowserVM] ✅ Batch processed: 3 events
+   - ReserveUpdated
+   - ReserveUpdated
+   - HankoBatchProcessed
+[system] RECOVERY_BACKUP_BARRIER_FAILED {
+  height: 7,
+  remoteOutputCount: 0,
+  jInputCount: 1,
+  reason: "PAUSE_AFTER_SCHEDULER_COMMIT",
+}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"4639","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0002","finalizedJHeight":22,"txs":1}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000003","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"926a","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"926a","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0003","finalizedJHeight":22,"txs":1}
+[INFO][runtime] apply.profile {"elapsedMs":548,"entityInputs":2,"entityTxs":0,"height":3,"jOutputs":0,"outputs":0,"phases":[{"ms":0,"name":"validateMerge"},{"ms":2,"name":"runtimeTxs"},{"ms":0,"name":"atomicCrossJAdmission"},{"ms":546,"name":"entityApply"},{"ms":0,"name":"finalize"},{"ms":0,"name":"remainder"}],"runtimeTxs":9}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":401,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"4639","range":"23-23","root":"0x2791538b.."}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":501,"txs":["r2r"]}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":601,"txs":["j_broadcast"]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"4639","range":"24-24","root":"0x04816f93.."}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"926a","range":"23-24","root":"0xa8293dd2.."}
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0xe53ecc3cd77bcba61629ae629bd8e061f7eec63697f0d59e5528042ba1256c03","entityId":"0002","jurisdictionName":"j-submit-real-terminal-rejection Demo","outcome":"reconciled"}
+[INFO][runtime.jsubmit] sealed_batch.durable_abort_reconciled {"attemptId":"0xe53ecc3cd77bcba61629ae629bd8e061f7eec63697f0d59e5528042ba1256c03","entityId":"0002","jurisdictionName":"j-submit-real-terminal-rejection Demo"}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"4639","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0002","finalizedJHeight":22,"txs":1}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000003","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"926a","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"926a","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0003","finalizedJHeight":22,"txs":1}
+[INFO][runtime] apply.profile {"elapsedMs":534,"entityInputs":2,"entityTxs":0,"height":3,"jOutputs":0,"outputs":0,"phases":[{"ms":0,"name":"validateMerge"},{"ms":2,"name":"runtimeTxs"},{"ms":0,"name":"atomicCrossJAdmission"},{"ms":532,"name":"entityApply"},{"ms":0,"name":"finalize"},{"ms":0,"name":"remainder"}],"runtimeTxs":9}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":401,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"4639","range":"23-23","root":"0x2791538b.."}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":501,"txs":["r2r"]}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":601,"txs":["j_broadcast"]}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":801,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"4639","range":"24-24","root":"0x04816f93.."}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000003","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"926a","ts":801,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"926a","range":"23-24","root":"0xa8293dd2.."}
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0xe53ecc3cd77bcba61629ae629bd8e061f7eec63697f0d59e5528042ba1256c03","entityId":"0002","jurisdictionName":"j-submit-real-terminal-rejection Demo","outcome":"reconciled"}
+[INFO][runtime.jsubmit] sealed_batch.durable_abort_reconciled {"attemptId":"0xe53ecc3cd77bcba61629ae629bd8e061f7eec63697f0d59e5528042ba1256c03","entityId":"0002","jurisdictionName":"j-submit-real-terminal-rejection Demo"}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"4639","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0002","finalizedJHeight":22,"txs":1}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000003","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"926a","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"926a","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0003","finalizedJHeight":22,"txs":1}
+[INFO][runtime] apply.profile {"elapsedMs":502,"entityInputs":2,"entityTxs":0,"height":3,"jOutputs":0,"outputs":0,"phases":[{"ms":0,"name":"validateMerge"},{"ms":2,"name":"runtimeTxs"},{"ms":0,"name":"atomicCrossJAdmission"},{"ms":500,"name":"entityApply"},{"ms":0,"name":"finalize"},{"ms":0,"name":"remainder"}],"runtimeTxs":9}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":401,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"4639","range":"23-23","root":"0x2791538b.."}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":501,"txs":["r2r"]}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":601,"txs":["j_broadcast"]}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":801,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"4639","range":"24-24","root":"0x04816f93.."}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000003","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"926a","ts":801,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"926a","range":"23-24","root":"0xa8293dd2.."}
+(pass) J submit crash recovery > recovers a lost submit result from an authenticated BrowserVM JEvent [4308.42ms]
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"4639","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0002","finalizedJHeight":22,"txs":1}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000003","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"926a","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"926a","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0003","finalizedJHeight":22,"txs":1}
+[INFO][runtime] apply.profile {"elapsedMs":507,"entityInputs":2,"entityTxs":0,"height":3,"jOutputs":0,"outputs":0,"phases":[{"ms":0,"name":"validateMerge"},{"ms":2,"name":"runtimeTxs"},{"ms":0,"name":"atomicCrossJAdmission"},{"ms":505,"name":"entityApply"},{"ms":0,"name":"finalize"},{"ms":0,"name":"remainder"}],"runtimeTxs":9}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":401,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"4639","range":"23-23","root":"0x2791538b.."}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":501,"txs":["r2r"]}
+(pass) J submit crash recovery > reopens exact J-submit state after real SIGKILL before-intent [1935.33ms]
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"4639","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0002","finalizedJHeight":22,"txs":1}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000003","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"926a","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"926a","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0003","finalizedJHeight":22,"txs":1}
+[INFO][runtime] apply.profile {"elapsedMs":508,"entityInputs":2,"entityTxs":0,"height":3,"jOutputs":0,"outputs":0,"phases":[{"ms":0,"name":"validateMerge"},{"ms":2,"name":"runtimeTxs"},{"ms":0,"name":"atomicCrossJAdmission"},{"ms":506,"name":"entityApply"},{"ms":0,"name":"finalize"},{"ms":0,"name":"remainder"}],"runtimeTxs":9}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":401,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"4639","range":"23-23","root":"0x2791538b.."}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":501,"txs":["r2r"]}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":601,"txs":["j_broadcast"]}
+(pass) J submit crash recovery > reopens exact J-submit state after real SIGKILL after-durable-intent [1940.19ms]
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"4639","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0002","finalizedJHeight":22,"txs":1}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000003","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"926a","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"926a","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0003","finalizedJHeight":22,"txs":1}
+[INFO][runtime] apply.profile {"elapsedMs":526,"entityInputs":2,"entityTxs":0,"height":3,"jOutputs":0,"outputs":0,"phases":[{"ms":0,"name":"validateMerge"},{"ms":2,"name":"runtimeTxs"},{"ms":0,"name":"atomicCrossJAdmission"},{"ms":523,"name":"entityApply"},{"ms":1,"name":"finalize"},{"ms":0,"name":"remainder"}],"runtimeTxs":9}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":401,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"4639","range":"23-23","root":"0x2791538b.."}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":501,"txs":["r2r"]}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":601,"txs":["j_broadcast"]}
+(pass) J submit crash recovery > reopens exact J-submit state after real SIGKILL after-rpc-submit-before-result [1948.45ms]
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"4639","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0002","finalizedJHeight":22,"txs":1}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000003","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"926a","ts":301,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"926a","range":"3-22","root":"0x68bc9951.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0003","finalizedJHeight":22,"txs":1}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":401,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"4639","range":"23-23","root":"0x2791538b.."}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":501,"txs":["r2r"]}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":601,"txs":["j_broadcast"]}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000002","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"4639","ts":801,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"4639","range":"24-24","root":"0x04816f93.."}
+[INFO][entity] input.received {"entity":"0x0000000000000000000000000000000000000000000000000000000000000003","frame":"none","jPrefixAttestations":1,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"926a","ts":801,"txs":[]}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"926a","range":"23-24","root":"0xa8293dd2.."}
+(pass) J submit crash recovery > reopens exact J-submit state after real SIGKILL after-durable-result [1942.81ms]
+
+core/__tests__/jurisdiction/submission/recovery/j-submit-real-rpc-crash-recovery.test.ts:
+J_SUBMIT_REAL_RPC_CHILD_START:crash
+J_SUBMIT_REAL_RPC_CHILD_EXIT:crash:137:SIGKILL
+J_SUBMIT_REAL_RPC_CHILD_START:recover
+J_SUBMIT_REAL_RPC_CHILD_EXIT:recover:0:null
+(pass) applies a mined processBatch JEvent after the runtime is SIGKILLed before its result is durable [3752.80ms]
+J_SUBMIT_REAL_RPC_CHILD_START:pending-crash
+J_SUBMIT_REAL_RPC_CHILD_EXIT:pending-crash:137:SIGKILL
+J_SUBMIT_REAL_RPC_CHILD_START:pending-recover
+J_SUBMIT_REAL_RPC_CHILD_EXIT:pending-recover:0:null
+J_SUBMIT_PENDING_RECOVERY_PROOF {"canonicalHash":"0x8cf0c5e1a08333c04d6c8ac902b92845a7f529899fcd77c9c35d725f7eabdd2d","height":13,"logs":1,"priorNonce":24,"status":1,"submitCalls":0,"txHash":"0xae371974d6569ef9e46fea34c4d2704ce1bafc27dc8a56478456621b6ab4baf9"}
+(pass) restores a pending broadcast hash after SIGKILL and polls it without a second transaction [3871.83ms]
+J_SUBMIT_REAL_RPC_CHILD_START:accepted-crash
+J_SUBMIT_REAL_RPC_CHILD_EXIT:accepted-crash:137:SIGKILL
+J_SUBMIT_REAL_RPC_CHILD_START:pending-recover
+J_SUBMIT_REAL_RPC_CHILD_EXIT:pending-recover:0:null
+J_SUBMIT_PENDING_RECOVERY_PROOF {"canonicalHash":"0x6d4fcd3dcc38155291eafdc8f2e710feb5170756e4922931d0780a92d5620fcb","height":13,"logs":1,"priorNonce":24,"status":1,"submitCalls":0,"txHash":"0xae371974d6569ef9e46fea34c4d2704ce1bafc27dc8a56478456621b6ab4baf9"}
+(pass) recovers the exact signed batch after node acceptance and SIGKILL before any result WAL [3582.85ms]
+J_SUBMIT_REAL_RPC_CHILD_START:prepared-crash
+J_SUBMIT_REAL_RPC_CHILD_EXIT:prepared-crash:137:SIGKILL
+J_SUBMIT_REAL_RPC_CHILD_START:prepared-recover
+J_SUBMIT_REAL_RPC_CHILD_EXIT:prepared-recover:0:null
+J_SUBMIT_PENDING_RECOVERY_PROOF {"observed":[24,24],"reservedNonce":23}
+(pass) reserves a committed EVM nonce after SIGKILL before broadcast and after a rejected new preparation [3207.19ms]
+
+core/__tests__/runtime/ingress/recovery/deferred-entity-admission.test.ts:
+[INFO][entity.tx.account-admin] hub_config.updated {"entity":"390f","feePolicyChanged":true,"matchingStrategy":"amount","policyVersion":1,"routingFeePPM":1,"swapTakerFeeBps":0}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingSetTerms","type":"lendingSetTerms"}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingApprove","type":"lendingApprove"}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingOffer","type":"lendingOffer"}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingBorrow","type":"lendingBorrow"}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingRepay","type":"lendingRepay"}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingClosePosition","type":"lendingClosePosition"}
+[ERROR][runtime.entity_inputs] entity_input.rejected {"entityId":"0x7f10719a52970af771e02fcd8e4938f67af28839c6c504af6d3f6d6693af390f","origin":"local","rejectionCode":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingSetTerms","signerId":"0xf336d8e63a3d6de61ccae7e2697878dcb825c369","txType":"lendingSetTerms"}
+[ERROR][runtime.entity_inputs] entity_input.rejected {"entityId":"0x7f10719a52970af771e02fcd8e4938f67af28839c6c504af6d3f6d6693af390f","origin":"local","rejectionCode":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingApprove","signerId":"0xf336d8e63a3d6de61ccae7e2697878dcb825c369","txType":"lendingApprove"}
+[ERROR][runtime.entity_inputs] entity_input.rejected {"entityId":"0x7f10719a52970af771e02fcd8e4938f67af28839c6c504af6d3f6d6693af390f","origin":"local","rejectionCode":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingOffer","signerId":"0xf336d8e63a3d6de61ccae7e2697878dcb825c369","txType":"lendingOffer"}
+[ERROR][runtime.entity_inputs] entity_input.rejected {"entityId":"0x7f10719a52970af771e02fcd8e4938f67af28839c6c504af6d3f6d6693af390f","origin":"local","rejectionCode":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingBorrow","signerId":"0xf336d8e63a3d6de61ccae7e2697878dcb825c369","txType":"lendingBorrow"}
+[ERROR][runtime.entity_inputs] entity_input.rejected {"entityId":"0x7f10719a52970af771e02fcd8e4938f67af28839c6c504af6d3f6d6693af390f","origin":"local","rejectionCode":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingRepay","signerId":"0xf336d8e63a3d6de61ccae7e2697878dcb825c369","txType":"lendingRepay"}
+[ERROR][runtime.entity_inputs] entity_input.rejected {"entityId":"0x7f10719a52970af771e02fcd8e4938f67af28839c6c504af6d3f6d6693af390f","origin":"local","rejectionCode":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingClosePosition","signerId":"0xf336d8e63a3d6de61ccae7e2697878dcb825c369","txType":"lendingClosePosition"}
+[INFO][entity.tx.account-admin] hub_config.updated {"entity":"390f","feePolicyChanged":false,"matchingStrategy":"amount","policyVersion":1,"routingFeePPM":1,"swapTakerFeeBps":0}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingOffer","type":"lendingOffer"}
+[WARN][runtime.entity_inputs] entity_input.batch_tx_evicted {"entity":"0x7f10719a52970af771e02fcd8e4938f67af28839c6c504af6d3f6d6693af390f","rejection":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingOffer","signer":"0xf336d8e63a3d6de61ccae7e2697878dcb825c369","txType":"lendingOffer"}
+[INFO][entity.tx.account-admin] hub_config.updated {"entity":"390f","feePolicyChanged":false,"matchingStrategy":"amount","policyVersion":1,"routingFeePPM":1,"swapTakerFeeBps":0}
+(pass) deferred Entity commands preserve the same signer queue (fail-fast=0) [309.44ms]
+[INFO][entity.tx.account-admin] hub_config.updated {"entity":"c9d3","feePolicyChanged":true,"matchingStrategy":"amount","policyVersion":1,"routingFeePPM":1,"swapTakerFeeBps":0}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingSetTerms","type":"lendingSetTerms"}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingApprove","type":"lendingApprove"}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingOffer","type":"lendingOffer"}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingBorrow","type":"lendingBorrow"}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingRepay","type":"lendingRepay"}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingClosePosition","type":"lendingClosePosition"}
+[ERROR][runtime.entity_inputs] entity_input.rejected {"entityId":"0xa100ce77d9c558e69ac59c9d81b98d887d1f0b37cada82a4fbf02a7fd0ffc9d3","origin":"local","rejectionCode":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingSetTerms","signerId":"0x1c161d87b0ab4a8a9895ab64dea19a6fc26796e0","txType":"lendingSetTerms"}
+[ERROR][runtime.entity_inputs] entity_input.rejected {"entityId":"0xa100ce77d9c558e69ac59c9d81b98d887d1f0b37cada82a4fbf02a7fd0ffc9d3","origin":"local","rejectionCode":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingApprove","signerId":"0x1c161d87b0ab4a8a9895ab64dea19a6fc26796e0","txType":"lendingApprove"}
+[ERROR][runtime.entity_inputs] entity_input.rejected {"entityId":"0xa100ce77d9c558e69ac59c9d81b98d887d1f0b37cada82a4fbf02a7fd0ffc9d3","origin":"local","rejectionCode":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingOffer","signerId":"0x1c161d87b0ab4a8a9895ab64dea19a6fc26796e0","txType":"lendingOffer"}
+[ERROR][runtime.entity_inputs] entity_input.rejected {"entityId":"0xa100ce77d9c558e69ac59c9d81b98d887d1f0b37cada82a4fbf02a7fd0ffc9d3","origin":"local","rejectionCode":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingBorrow","signerId":"0x1c161d87b0ab4a8a9895ab64dea19a6fc26796e0","txType":"lendingBorrow"}
+[ERROR][runtime.entity_inputs] entity_input.rejected {"entityId":"0xa100ce77d9c558e69ac59c9d81b98d887d1f0b37cada82a4fbf02a7fd0ffc9d3","origin":"local","rejectionCode":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingRepay","signerId":"0x1c161d87b0ab4a8a9895ab64dea19a6fc26796e0","txType":"lendingRepay"}
+[ERROR][runtime.entity_inputs] entity_input.rejected {"entityId":"0xa100ce77d9c558e69ac59c9d81b98d887d1f0b37cada82a4fbf02a7fd0ffc9d3","origin":"local","rejectionCode":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingClosePosition","signerId":"0x1c161d87b0ab4a8a9895ab64dea19a6fc26796e0","txType":"lendingClosePosition"}
+[INFO][entity.tx.account-admin] hub_config.updated {"entity":"c9d3","feePolicyChanged":false,"matchingStrategy":"amount","policyVersion":1,"routingFeePPM":1,"swapTakerFeeBps":0}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingOffer","type":"lendingOffer"}
+[WARN][runtime.entity_inputs] entity_input.batch_tx_evicted {"entity":"0xa100ce77d9c558e69ac59c9d81b98d887d1f0b37cada82a4fbf02a7fd0ffc9d3","rejection":"ENTITY_TX_KIND_OUT_OF_PROFILE:lendingOffer","signer":"0x1c161d87b0ab4a8a9895ab64dea19a6fc26796e0","txType":"lendingOffer"}
+[INFO][entity.tx.account-admin] hub_config.updated {"entity":"c9d3","feePolicyChanged":false,"matchingStrategy":"amount","policyVersion":1,"routingFeePPM":1,"swapTakerFeeBps":0}
+(pass) deferred Entity commands preserve the same signer queue (fail-fast=1) [284.91ms]
+
+core/__tests__/storage/recovery/checkpoint/replica-evidence.test.ts:
+(pass) checkpoint cannot erase validator-local currentFrameHanko despite equal consensus roots [38.46ms]
+(pass) checkpoint cannot erase validator-local currentDisputeProofHanko despite equal consensus roots [8.88ms]
+(pass) checkpoint preserves the exact cached ACK certificate, not just its signed hash [11.97ms]
+
+core/__tests__/storage/recovery/portable/local-commit-outbox-replay.test.ts:
+[JAdapter] Mode: browservm, chainId=31337
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] onAny registered (1 callbacks)
+[Boot] local-commit-outbox: env + jadapter + jReplica "local-commit-outbox Demo" ready
+[INFO][runtime.tx] replica.imported_from_certified_checkpoint {"entity":"0xeada7f723614aa40a03cc71e37a05350fb245f7f46358c137287a372ac10c03e","head":"genesis","height":0,"signer":"0xbd26828c0b29806395669a0dde7aaed7398b7320"}
+[INFO][runtime.loop-work] entity.mempool_wake_suppressed {"entityHeight":0,"entityId":"0xeada7f723614aa40a03cc71e37a05350fb245f7f46358c137287a372ac10c03e","hasLockedFrame":false,"hasProposal":true,"jPrefixCertificate":false,"mempool":1,"mempoolTxTypes":["entityCommand"],"reason":"proposal-in-flight","signerId":"0xf356709c5b96a1770680abd60f85a9adc970b2f2"}
+[INFO][entity] input.received {"entity":"0xeada7f723614aa40a03cc71e37a05350fb245f7f46358c137287a372ac10c03e","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"b2f2","ts":201,"txs":["chatMessage"]}
+[INFO][entity] input.received {"entity":"0xeada7f723614aa40a03cc71e37a05350fb245f7f46358c137287a372ac10c03e","frame":"0x998d17e2","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":false,"signer":"7320","ts":301,"txs":[]}
+[INFO][entity] input.received {"entity":"0xeada7f723614aa40a03cc71e37a05350fb245f7f46358c137287a372ac10c03e","frame":"none","jPrefixAttestations":0,"mempool":1,"precommits":1,"proposal":"0x998d17e2","proposer":true,"signer":"b2f2","ts":401,"txs":[]}
+(pass) already-certified local Entity commits drain after WAL reopen without appending a frame [1223.08ms]
+
+ 91 pass
+ 0 fail
+ 558 expect() calls
+Ran 91 tests across 9 files. [35.65s]

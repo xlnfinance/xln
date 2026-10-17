@@ -1,0 +1,81 @@
+{
+  "baseSha": "262161d86448285cbc042d42901140e64c87a316",
+  "firstRed": {
+    "command": "bun core/scenarios/run.ts --set=all",
+    "error": "RECOVERY_JOURNAL_OUTBOX_HASH_MISMATCH:height=249",
+    "outboxIndex": 8,
+    "field": "entityTxs[0].data.ack.disputeHanko.hanko",
+    "checkpointHeight": 211,
+    "genesisReplayThrough249": "passed",
+    "checkpointReplayThrough249": "failed",
+    "lostCheckpointFields": [
+      "replicas.0x0000000000000000000000000000000000000000000000000000000000000005:0x4b21c2cf6f4503196feeedb1d49a092d0b5e76bf.accounts[0].currentDisputeProofHanko",
+      "replicas.0x0000000000000000000000000000000000000000000000000000000000000005:0x4b21c2cf6f4503196feeedb1d49a092d0b5e76bf.accounts[0].currentFrameHanko",
+      "replicas.0x0000000000000000000000000000000000000000000000000000000000000005:0x4b21c2cf6f4503196feeedb1d49a092d0b5e76bf.accounts[0].lastOutboundAckFrame.response.ack.disputeHanko.hanko",
+      "replicas.0x0000000000000000000000000000000000000000000000000000000000000005:0x4b21c2cf6f4503196feeedb1d49a092d0b5e76bf.accounts[0].lastOutboundAckFrame.response.ack.frameHanko"
+    ]
+  },
+  "repair": "Require exact Account envelope equality, using the canonical consensus-excluded field list, before materializing a shared Entity graph. Keep previous checkpoint plus ordered WAL until convergence. No reader, format, hash rule or certificate normalization changed.",
+  "tradeoff": "Multi-local-validator quorum certificate differences may defer checkpoints and extend retained WAL. This is not a bounded-retention or soak completion claim.",
+  "l1": {
+    "red": {
+      "pass": 0,
+      "fail": 3,
+      "assertions": 15
+    },
+    "green": {
+      "pass": 9,
+      "fail": 0,
+      "assertions": 47,
+      "seconds": 0.697
+    }
+  },
+  "l2": {
+    "command": "bun core/scenarios/run.ts company-ipo --mode=rpc --single",
+    "exit": 0,
+    "frames": 296,
+    "recoveryRoot": "0x75c4f5d54dfcf5cc5c3c109c864a56275f74da2a528440f5d6210f81b0c8dd80",
+    "wallSeconds": "UNKNOWN (within stand 60-second budget)",
+    "scope": "Existing shared-recovery stress scenario, no new company admission"
+  },
+  "recovery": {
+    "pass": 91,
+    "fail": 0,
+    "assertions": 558,
+    "seconds": 35.698
+  },
+  "browser": {
+    "command": "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-demo-sync.spec.ts bun run prod:smoke:local",
+    "pass": 1,
+    "skipped": 0,
+    "seconds": 29.924,
+    "uncaughtConsoleErrorsObserved": 0,
+    "freshRuntimeBuild": true,
+    "assertions": "Exact funded Runtime/Account heads and balance preserved after real browser reload",
+    "artifactPath": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/checkpoint-wallet-recovery",
+    "assetSha256": {
+      "runtime.js": "afb102e8dc2804651b1e73531f81f30f011ce7a139b792f53e9611a4ce500001",
+      "account-worker.js": "5eb1a38aa8d02a663289ba35ba286e2d8067d373bb7bc31e80a61887ad15a945"
+    }
+  },
+  "check": {
+    "exit": 0,
+    "sourceGates": 38,
+    "topGates": 3,
+    "seconds": 25.881
+  },
+  "sourceSha256": {
+    "core/entity/consensus/state-root.ts": "ae633b5d5dacb779f6fa5294d05a7027995665e74eabd907f4a8f908a2700a18",
+    "core/storage/replica/replicas.ts": "b076011f5dfaaed8dde0a86a5b5794a2ee5f39a781ee5953e1764f0e4af5f2a7",
+    "core/__tests__/storage/recovery/checkpoint/replica-evidence.test.ts": "52e491bad9662e0b43e710552841881f9dffca3e8d6eeaf52e2d5e171aea5304"
+  },
+  "rawLogSha256": {
+    "checkpoint-local-evidence-red": "21277b52c0b185d6057b976ac5d6308e669ff81bbf67a9d79b7462cd54eae9a3",
+    "checkpoint-final-l1": "c5714f7332b870114735c8ea765bdb6f0b0a8620192871338485cc69b099f5fa",
+    "checkpoint-company-recovery": "60264efb32bb29016dea3b35e083ca82bc7000e948f7c1b34c997e7934696afc",
+    "checkpoint-current-recovery": "6ab9d160a45d342d256940d4309ae9d6cfb97d681aac74ec32f9e9bffcf465d4",
+    "checkpoint-final-check": "195e34b01a8ce90350df7c33b9c6f61df743b99106cbe8213391f4932008e79c"
+  },
+  "preservedFailure": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/recovery-frame249-262161d86/preservation.json",
+  "remaining": "Full integrated gates, authenticated public topology, public-chain proofs, rollback, required uninterrupted soak, operator package and MacBook catch-up remain incomplete."
+}

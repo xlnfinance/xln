@@ -20,6 +20,14 @@ BrowserVM roots, current/pending consensus envelopes, and every non-terminal
 outbox record. Recovery MUST NOT need an overlay or cache that existed only in
 RAM before the crash.
 
+A materialized Entity graph is shared by its local validator replicas. Its
+checkpoint admission must therefore compare both certified roots and the
+Account envelope fields excluded from those roots, including exact local
+Hanko and cached ACK bytes. Different valid quorum subsets can sign the same
+hash; replacing one subset changes later replayed output. Until those envelopes
+converge, retain the previous checkpoint and ordered WAL. This may extend WAL
+retention for multi-validator runtimes; never discard evidence to force a cut.
+
 There is one authoritative LevelDB for the current graph, Runtime WAL, outbox,
 and authoritative heads. Entity and Account certified-frame history is stored
 in separate history databases and read on demand. History is never live state.

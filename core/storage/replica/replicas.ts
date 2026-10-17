@@ -12,14 +12,20 @@ import { encodeReplicaMeta } from '../read/projections';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
 import type { StorageReplicaLookup } from '../types';
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
-import { computeCanonicalEntityConsensusStateHash } from '../../entity/consensus/state-root';
+import {
+  ACCOUNT_ENTITY_EXCLUDED_FIELDS,
+  computeCanonicalEntityConsensusStateHash,
+} from '../../entity/consensus/state-root';
+import { canonicalConsensusValuesEqual } from '../../protocol/serialization/binary-codec';
 import { projectCertifiedEntityFrameLinkIdentity } from '../../entity/consensus/frame/lineage';
 
 /**
  * A compact materialized Entity graph has one committed state per Entity.
  * Validator-local lag is replay state, so a checkpoint must wait until every
- * local replica names the same height/head/root; otherwise it would need to
- * duplicate an unbounded Account/Book graph in replica metadata.
+ * local replica names the same height/head/root AND recoverable Account
+ * envelope. Equal signed roots exclude local quorum certificates: selecting
+ * one validator's certificate would change another validator's replayed ACK.
+ * Keep the earlier checkpoint plus ordered WAL until those bytes converge.
  */
 export const areStorageCheckpointReplicasConverged = (env: RuntimeReplica): boolean => {
   const endpoints = new Map<string, { state: EntityState; height: number; head: string; root?: string }>();
@@ -37,6 +43,22 @@ export const areStorageCheckpointReplicasConverged = (env: RuntimeReplica): bool
     if (existing.state === replica.state) continue;
     existing.root ??= computeCanonicalEntityConsensusStateHash(existing.state);
     if (existing.root !== computeCanonicalEntityConsensusStateHash(replica.state)) return false;
+    if (!accountCheckpointEnvelopesEqual(existing.state, replica.state)) return false;
+  }
+  return true;
+};
+
+/** Cold checkpoint admission only; no historical reads or second durable graph. */
+const accountCheckpointEnvelopesEqual = (left: EntityState, right: EntityState): boolean => {
+  if (left.accounts === right.accounts) return true;
+  if (left.accounts.size !== right.accounts.size) return false;
+  for (const [counterpartyId, account] of left.accounts) {
+    const other = right.accounts.get(counterpartyId);
+    if (!other) return false;
+    if (account === other) continue;
+    for (const field of ACCOUNT_ENTITY_EXCLUDED_FIELDS) {
+      if (account[field] !== other[field] && !canonicalConsensusValuesEqual(account[field], other[field])) return false;
+    }
   }
   return true;
 };

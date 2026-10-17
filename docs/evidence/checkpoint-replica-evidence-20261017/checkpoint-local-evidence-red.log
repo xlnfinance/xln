@@ -1,0 +1,52 @@
+$ bun tools/stand-lock.ts run --reason checkpoint-local-evidence-red --timeout-ms "60000" -- bun test core/__tests__/storage/recovery/checkpoint/replica-evidence.test.ts
+bun test v1.4.0 (34cbb9a40)
+
+core/__tests__/storage/recovery/checkpoint/replica-evidence.test.ts:
+50 |
+51 | for (const field of ['currentFrameHanko', 'currentDisputeProofHanko'] as const) {
+52 |   test(`checkpoint cannot erase validator-local ${field} despite equal consensus roots`, async () => {
+53 |     const { env, account, left, right, install } = await fixture();
+54 |     install({ ...account, [field]: left }, { ...account, [field]: right });
+55 |     expect(areStorageCheckpointReplicasConverged(env)).toBe(false);
+                                                            ^
+error: expect(received).toBe(expected)
+
+Expected: false
+Received: true
+
+      at <anonymous> (/Users/zigota/xln/core/__tests__/storage/recovery/checkpoint/replica-evidence.test.ts:55:56)
+(fail) checkpoint cannot erase validator-local currentFrameHanko despite equal consensus roots [78.01ms]
+50 |
+51 | for (const field of ['currentFrameHanko', 'currentDisputeProofHanko'] as const) {
+52 |   test(`checkpoint cannot erase validator-local ${field} despite equal consensus roots`, async () => {
+53 |     const { env, account, left, right, install } = await fixture();
+54 |     install({ ...account, [field]: left }, { ...account, [field]: right });
+55 |     expect(areStorageCheckpointReplicasConverged(env)).toBe(false);
+                                                            ^
+error: expect(received).toBe(expected)
+
+Expected: false
+Received: true
+
+      at <anonymous> (/Users/zigota/xln/core/__tests__/storage/recovery/checkpoint/replica-evidence.test.ts:55:56)
+(fail) checkpoint cannot erase validator-local currentDisputeProofHanko despite equal consensus roots [10.65ms]
+71 |         ack: { height: 1, frameHash: hash, frameHanko: hanko },
+72 |       },
+73 |     },
+74 |   });
+75 |   install(cached(left), cached(right));
+76 |   expect(areStorageCheckpointReplicasQuiescent(env)).toBe(false);
+                                                          ^
+error: expect(received).toBe(expected)
+
+Expected: false
+Received: true
+
+      at <anonymous> (/Users/zigota/xln/core/__tests__/storage/recovery/checkpoint/replica-evidence.test.ts:76:54)
+(fail) checkpoint preserves the exact cached ACK certificate, not just its signed hash [12.32ms]
+
+ 0 pass
+ 3 fail
+ 15 expect() calls
+Ran 3 tests across 1 file. [447.00ms]
+error: script "stand:run" exited with code 1

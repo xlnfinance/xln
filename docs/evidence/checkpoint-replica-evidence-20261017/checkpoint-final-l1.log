@@ -1,0 +1,20 @@
+$ bun tools/stand-lock.ts run --reason "checkpoint-final-l1" --timeout-ms "60000" -- bun test core/__tests__/storage/recovery/checkpoint/replica-evidence.test.ts core/__tests__/storage/schema/storage-entity-head.test.ts
+bun test v1.4.0 (34cbb9a40)
+
+core/__tests__/storage/schema/storage-entity-head.test.ts:
+(pass) certified Entity current head > checkpoint persists one full head and restore advances its exact H+1 parent [78.82ms]
+(pass) certified Entity current head > Runtime replica-meta digest binds the compact current certificate, not repeated frame bodies [35.88ms]
+(pass) certified Entity current head > durable replica metadata excludes every speculative Entity overlay [31.69ms]
+(pass) certified Entity current head > rejects retired anchor-only metadata instead of recovering a carried root [30.57ms]
+(pass) certified Entity current head > checkpoint convergence and quiescence remain exact replica barriers [29.61ms]
+(pass) certified Entity current head > ordinary WAL selects the highest replica but rejects a same-height state fork [29.18ms]
+
+core/__tests__/storage/recovery/checkpoint/replica-evidence.test.ts:
+(pass) checkpoint cannot erase validator-local currentFrameHanko despite equal consensus roots [40.35ms]
+(pass) checkpoint cannot erase validator-local currentDisputeProofHanko despite equal consensus roots [10.62ms]
+(pass) checkpoint preserves the exact cached ACK certificate, not just its signed hash [9.47ms]
+
+ 9 pass
+ 0 fail
+ 47 expect() calls
+Ran 9 tests across 2 files. [658.00ms]
