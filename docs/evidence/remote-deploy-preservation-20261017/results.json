@@ -1,0 +1,49 @@
+{
+  "baseline": "733542dfbe7c95dce1ea197699f4a8ba625d0814",
+  "guardSha256": "1999930c2ebed8a6216d8d0fe064db66ce13143f3416bb5d0eae9a47b2939d77",
+  "results": [
+    {
+      "name": "deploy-checkout-before",
+      "command": [
+        "python3",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/reproduce-remote-checkout-loss.py"
+      ],
+      "exitCode": 1,
+      "seconds": 0.39,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/deploy-checkout-before.log",
+      "logSha256": "b63500548db38da7f4ec283edd909768c136a528733ab3efd18dce8ea7db310d"
+    },
+    {
+      "name": "deploy-checkout-l1-final",
+      "command": [
+        "bun",
+        "test",
+        "scripts/deployment/prepare-remote-main.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 2.798,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/deploy-checkout-l1-final.log",
+      "logSha256": "03d1d6cc2b079eca0af0e7f5ed75df191f46597b15eae11c5cd7a92dc900e3a7"
+    },
+    {
+      "name": "deploy-checkout-transport",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "deploy-checkout-transport",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "python3",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/verify-remote-checkout-transport.py"
+      ],
+      "exitCode": 0,
+      "seconds": 17.283,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/deploy-checkout-transport.log",
+      "logSha256": "cd03bff5d165e6820ca83d47ca85357572dc081cc14641715c1df2bdb7670b3c"
+    }
+  ],
+  "archiveSha256": "9023e80d0e694b317ac9aa29c460a84dd66f75d3dbc397baa8224e3dfe22b204"
+}

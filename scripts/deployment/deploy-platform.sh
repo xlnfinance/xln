@@ -28,7 +28,7 @@
 #
 # Safety boundaries
 #   * Remote `--push` refuses non-main, tracked changes, and untracked files.
-#   * Remote deploy hard-resets the remote checkout to `origin/main`.
+#   * Remote deploy requires clean main and fast-forwards to the published SHA.
 #   * Production persistence belongs under `${XLN_STATE_ROOT:-/var/lib/xln}`;
 #     checkout-local state is migrated once and never treated as authoritative.
 #   * `--reset-mesh` is the destructive production mode. The existing public
@@ -1269,15 +1269,6 @@ if [ -n "$REMOTE_HOST" ]; then
     exit 1
   fi
 
-  ORIGIN_URL="$(git remote get-url origin 2>/dev/null || printf '%s' 'https://github.com/xlnfinance/xln.git')"
-  case "$ORIGIN_URL" in
-    git@github.com:*)
-      ORIGIN_URL="https://github.com/${ORIGIN_URL#git@github.com:}"
-      ;;
-    ssh://git@github.com/*)
-      ORIGIN_URL="https://github.com/${ORIGIN_URL#ssh://git@github.com/}"
-      ;;
-  esac
   remote_frontend_archive=""
   if [ "$BUILD_FRONTEND" = "1" ]; then
     build_remote_frontend_archive
@@ -1296,11 +1287,11 @@ if [ -n "$REMOTE_HOST" ]; then
     git push origin main
   fi
 
-  # Remote deploy keeps the checkout self-healing. Frontend compilation happens on the
-  # caller so Vite cannot OOM-kill live Anvil processes on the production host.
-  # A remote checkout is disposable. Durable production state exists only under
-  # /var/lib/xln, so every deploy cleans the checkout before binding exact bytes.
-  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else XLN_DIR=/root/xln; mkdir -p \"\$XLN_DIR\"; fi; cd \"\$XLN_DIR\"; PATH=\"\$HOME/.bun/bin:\$PATH\"; if [ ! -d .git ]; then echo '[deploy] remote checkout missing .git; reinitializing repository'; git init; fi; if ! git remote get-url origin >/dev/null 2>&1; then git remote add origin '$ORIGIN_URL'; else git remote set-url origin '$ORIGIN_URL'; fi; git fetch origin main; git cat-file -e '$EXPECTED_DEPLOY_SHA^{commit}'; git merge-base --is-ancestor '$EXPECTED_DEPLOY_SHA' origin/main; git reset --hard; git clean -fd; git checkout -B main '$EXPECTED_DEPLOY_SHA'; git reset --hard '$EXPECTED_DEPLOY_SHA'; test \"\$(git rev-parse HEAD)\" = '$EXPECTED_DEPLOY_SHA'; git clean -fd;"
+  # The same preservation guard runs in real-Git regression fixtures. Inline its
+  # current bytes because the remote checkout still contains the previous release.
+  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else echo 'REMOTE_DEPLOY_CHECKOUT_MISSING' >&2; exit 1; fi; cd \"\$XLN_DIR\"; PATH=\"\$HOME/.bun/bin:\$PATH\"; EXPECTED_DEPLOY_SHA='$EXPECTED_DEPLOY_SHA';
+$(cat "$SCRIPT_DIR/prepare-remote-main.sh")
+"
   if [ -n "$remote_frontend_archive" ]; then
     remote_cmd="$remote_cmd rm -rf frontend/build; tar -xzf '$remote_frontend_archive' -C frontend; rm -f '$remote_frontend_archive';"
   fi
