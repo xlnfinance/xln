@@ -340,10 +340,8 @@ export async function bootHostedVault(seed: string, options: HostedVaultOptions)
 			useApp.getState().toast('The network relay is not reachable. Reconnect before opening your hub account from Home.', 'danger');
 		}
 
-		step('Publishing your profile');
-		if (!options.recovery && String(findReplicaState(env, entityId)?.state?.profile?.name || '') !== options.selfLabel) {
-			await sendEntity(entityId, signerId, [{ type: 'profile-update', data: { profile: { entityId, name: options.selfLabel, bio: '', website: '' } } }]);
-		}
+		// importEntity initializes a new profile. Unlock/recovery must preserve the
+		// committed profile, including an explicitly published name, bio and website.
 
 		const hub = stack.hubs.find(entry => entry.online) ?? stack.hubs[0];
 		if (hub && online && !accountReady(env, entityId, hub.entityId)) {
