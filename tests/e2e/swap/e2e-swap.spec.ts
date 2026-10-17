@@ -1,5 +1,6 @@
+import { safeStringify } from '../../../core/protocol/serialization';
 import { verifySwapFlip } from '../../utils/browser/swap-flip';
-import { verifyBookFill } from '../../utils/browser/swap-book-fill';
+import { executeBookFill, verifyBookFill } from '../../utils/browser/swap-book-fill';
 import { createWalletIdentity, LOCAL_PASSWORD } from '../../../ui/tests/wallet-ui';
 import { verifyRestingSwapCancellation } from '../../../ui/tests/swap-cancellation';
 /**
@@ -2243,20 +2244,21 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     await verifySwapFlip(page, testInfo, 'bid');
   });
 
-  test('swap can buy from asks and then sell back into bids on the same book', { tag: '@functional' }, async ({ page }) => {
-    const accountRef = await prepareOrderbookClickTest(page);
-    const buyResult = await timedStep('swap_roundtrip.buy_fill', () =>
-      executeOrderbookClickFill(page, accountRef, 'lowest-ask'));
-    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
-      preferredAccountId: buyResult.routedCounterpartyId,
-      scope: 'Selected',
-      minSources: 1,
-    });
-    await timedStep('swap_roundtrip.sell_fill', () =>
-      executeOrderbookClickFill(page, accountRef, 'highest-bid', {
-        scope: 'selected',
-        preferredAccountId: buyResult.routedCounterpartyId,
-      }));
+  test('swap can buy from asks and then sell back into bids on the same book', { tag: '@functional' }, async ({ page }, info) => {
+    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+    const wallet = await createWalletIdentity(page, 'book-roundtrip', randomMnemonic());
+    await expect(page.getByTestId('account-row').first()).toBeVisible();
+    const buy = await verifyBookFill(page, info, wallet.entityId, 'ask');
+    await page.getByTestId('nav-home').locator('visible=true').first().click();
+    const sell = await executeBookFill(page, info, wallet.entityId, buy.hubId, 'bid', 0);
+    expect(sell.hubId).toBe(buy.hubId);
+    expect(sell.before).toEqual(buy.after);
+    expect(sell.orders.items).toHaveLength(2);
+    expect(BigInt(sell.after.usdc)).toBe(BigInt(buy.before.usdc) - buy.debit + sell.received);
+    expect(BigInt(sell.after.weth)).toBe(BigInt(buy.before.weth) + buy.received - sell.debit);
+    expect(BigInt(sell.after.usdc)).toBeLessThan(BigInt(buy.before.usdc));
+    expect(BigInt(sell.after.weth)).toBeGreaterThanOrEqual(0n);
+    await info.attach('current-book-roundtrip', { body: safeStringify({ entityId: wallet.entityId, runtimeId: wallet.runtimeId, buy, sell }), contentType: 'application/json' });
   });
 
   test('swap manual price override after book click uses the edited limit price', { tag: '@functional' }, async ({ page }) => {
