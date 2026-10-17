@@ -1,0 +1,118 @@
+[
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "rebalance-h3-baseline",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts::runtime2: H1=10k, H3=1k; second 550 via H3 fails before rebalance, passes after"
+    ],
+    "exitCode": 0,
+    "seconds": 48.473,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-h3-baseline.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "rebalance-h3-exact-receipts",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts::runtime2: H1=10k, H3=1k; second 550 via H3 fails before rebalance, passes after"
+    ],
+    "exitCode": 0,
+    "seconds": 44.642,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-h3-exact-receipts.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "rebalance-h3-final-check",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "run",
+      "check"
+    ],
+    "exitCode": 0,
+    "seconds": 26.846,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-h3-final-check.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "rebalance-h3-related-h2",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts::rt1->h1->h2->rt2: second 550 fails before rebalance, passes after H2 R2C"
+    ],
+    "exitCode": 0,
+    "seconds": 42.77,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-h3-related-h2.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "rebalance-h3-types",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/rebalance-bar/typecheck.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 4.832,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-h3-types.log"
+  }
+]
