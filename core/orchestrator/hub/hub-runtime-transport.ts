@@ -1,4 +1,5 @@
-import { findPaymentRoutes, readFrameReceipts } from '../../api/server/network/rpc-ws';
+import { readFrameReceipts } from '../../api/server/network/rpc-ws';
+import { findPaymentRoutes } from '../../api/runtime-adapter/read/payment-routes';
 import type { DirectWebSocket } from '../../network/p2p/direct-runtime-bun';
 import {
   createDirectRuntimeWsRoute,

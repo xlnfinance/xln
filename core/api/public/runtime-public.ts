@@ -32,6 +32,7 @@ export type {
 export { enqueueRuntimeInput } from '../../runtime/mempool/input-queue';
 export { resolveRuntimeAdapterRead, EmbeddedRuntimeAdapter, RemoteRuntimeAdapter } from '../runtime-adapter';
 export { readRuntimeFrameReceipts } from '../runtime-adapter/frame-receipts';
+export { findPaymentRoutes } from '../runtime-adapter/read/payment-routes';
 export type {
   RuntimeAdapter,
   RuntimeAdapterConfig,

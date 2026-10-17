@@ -2,7 +2,6 @@ import { closeRuntimeSession } from '../../../frontend/src/lib/security/runtimeS
 import type {
 	RuntimeAdapter,
 	RuntimeAdapterConfig,
-	RuntimeAdapterPaymentRoutesResponse,
 	RuntimeAdapterReadQuery,
 } from '@xln/core/api/runtime-adapter/types';
 import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
@@ -141,50 +140,10 @@ export async function connectEmbedded(seed: string, recovery?: RuntimeRecoveryCa
 				xln.readPersistedAccountSwapHistoryPage(target, entityId, counterpartyId, options),
 			readAccountFrameHistory: (entityId: string, counterpartyId: string, limit: number) =>
 				xln.readPersistedAccountFrameHistory(target, entityId, counterpartyId, limit),
-			findPaymentRoutes: (query?: RuntimeAdapterReadQuery) => findEmbeddedPaymentRoutes(target, query),
+			findPaymentRoutes: (query?: RuntimeAdapterReadQuery) => xln.findPaymentRoutes(target, query),
 		}),
 	});
 
-	// Mirrors the server rpc-ws findPaymentRoutes so read('payment-routes')
-	// behaves identically in embedded and remote mode.
-	const findEmbeddedPaymentRoutes = async (
-		target: RuntimeReplica,
-		query: RuntimeAdapterReadQuery = {},
-	): Promise<RuntimeAdapterPaymentRoutesResponse> => {
-		const sourceEntityId = String(query.sourceEntityId || '').trim().toLowerCase();
-		const targetEntityId = String(query.targetEntityId || '').trim().toLowerCase();
-		if (!/^0x[0-9a-f]{64}$/.test(sourceEntityId) || !/^0x[0-9a-f]{64}$/.test(targetEntityId)) {
-			throw new Error('payment route endpoints must be 32-byte entity ids');
-		}
-		const fundingAccountId = query.fundingAccountId?.trim().toLowerCase();
-		if (fundingAccountId !== undefined && !/^0x[0-9a-f]{64}$/.test(fundingAccountId)) throw new Error('funding account must be a 32-byte entity id');
-		const tokenId = Number(query.tokenId);
-		const amount = BigInt(String(query.amount || '0'));
-		if (!Number.isSafeInteger(tokenId) || tokenId <= 0 || amount <= 0n) {
-			throw new Error('payment route query requires positive tokenId and amount');
-		}
-		await xln.ensureGossipProfiles(target, [sourceEntityId, targetEntityId]);
-		const graph = target.gossip?.getNetworkGraph?.();
-		const routes = (await graph?.findPaths?.(sourceEntityId, targetEntityId, amount, tokenId, fundingAccountId)) ?? [];
-		if (routes.length === 0) {
-			throw new Error(`no payment route from ${sourceEntityId} to ${targetEntityId}`);
-		}
-		return {
-			routes: routes.map(route => ({
-				path: route.path,
-				hops: route.hops.map(hop => ({
-					from: hop.from,
-					to: hop.to,
-					fee: hop.fee.toString(),
-					feePPM: hop.feePPM,
-				})),
-				totalFee: route.totalFee.toString(),
-				senderAmount: route.totalAmount.toString(),
-				recipientAmount: amount.toString(),
-				probability: route.probability,
-			})),
-		};
-	};
 
 	await adapter.connect({ mode: 'embedded', seed });
 	currentAdapter = adapter;

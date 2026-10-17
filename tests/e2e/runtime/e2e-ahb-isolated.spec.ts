@@ -1,3 +1,4 @@
+import { formatMoney } from '../../../ui/src/runtime/format';
 /**
  * E2E: Alice and Bob run in separate browser contexts on the same origin, connect to one hub,
  * exchange HTLC payments in both directions, validate persisted HTLC receipts, reject overspend,
@@ -7,16 +8,18 @@
  * IndexedDB/localStorage state, not two runtimes multiplexed inside one browser page.
  */
 
-import { test, expect, type BrowserContext, type Page } from '../../global-setup.mts';
+import { test, expect, allowBrowserIssue, type BrowserContext, type Page } from '../../global-setup.mts';
 import { ethers } from 'ethers';
-import { deriveDelta } from '../../../core/account/utils';
+import type { RuntimeReplica, XLNModule } from '../../../core/api/public/runtime-module';
+import { createWalletIdentity, LOCAL_PASSWORD } from '../../../ui/tests/wallet-ui';
+import { prepareUiPayment, openPayWorkspace, fillUiPaymentIntent } from '../../utils/runtime/e2e-pay-ui';
 import { ensureE2EBaseline } from '../../utils/e2e-baseline';
 import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
 } from '../../utils/runtime/e2e-account-ui';
 import { connectRuntimeToHub, waitForReceiveReadyGossipProfiles } from '../../utils/e2e-connect';
-import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
+import { gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
 import {
   getPersistedReceiptCursor,
   getPersistedRuntimeDbMeta,
@@ -28,7 +31,6 @@ const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const API_BASE_URL = requireIsolatedBaseUrl('E2E_API_BASE_URL');
 const LONG_E2E = process.env.E2E_LONG === '1';
 const INIT_TIMEOUT = 30_000;
-const SETTLE_MS = 10_000;
 // The full gate runs eight complete browser+Anvil stacks. Durable event
 // delivery normally finishes well inside this in isolation; the larger wait
 // prevents host contention from being misreported as a consensus failure.
@@ -40,77 +42,11 @@ type HubFeeConfig = {
   baseFee: bigint;
 };
 
-type GossipProfile = {
-  entityId: string;
-  runtimeId?: string;
-  metadata?: {
-    runtimeId?: string;
-    isHub?: boolean;
-    routingFeePPM?: number;
-    baseFee?: string | number | bigint;
-    jurisdiction?: JurisdictionLike;
-  };
-};
-
-type JurisdictionLike = {
-  chainId?: unknown;
-  depositoryAddress?: unknown;
-};
-
-type AccountView = {
-  deltas?: Map<number, unknown>;
-  pendingFrame?: { height?: number };
-  currentHeight?: number;
-  mempool?: unknown[];
-};
-
-type EntityReplicaView = {
-  position?: {
-    jurisdiction?: JurisdictionLike;
-  };
-  state?: {
-    accounts?: Map<string, AccountView>;
-    config?: {
-      jurisdiction?: JurisdictionLike;
-    };
-  };
-};
-
-type FrameLogEntryView = {
-  id?: number;
-  message?: string;
-  entityId?: string;
-  data?: Record<string, unknown>;
-};
-
-type DeltaSnapshot = {
-  ondelta: string;
-  offdelta: string;
-  collateral: string;
-  leftCreditLimit: string;
-  rightCreditLimit: string;
-  leftAllowance: string;
-  rightAllowance: string;
-  leftHold: string;
-  rightHold: string;
-};
-
-type TestWindow = typeof window & {
+type TestWindow = Window & {
   __xln?: {
-    runtimeConnectivity?: {
-      relayUrls?: string[];
-    };
-  };
-  isolatedEnv?: {
-    runtimeId?: string;
-    frameLogs?: FrameLogEntryView[];
-    state?: {
-      height?: number;
-      eReplicas?: Map<string, EntityReplicaView>;
-    };
-    gossip?: {
-      getProfiles?: () => GossipProfile[];
-    };
+    env(): RuntimeReplica | null;
+    xln(): Promise<XLNModule>;
+    store: { getState(): { activeEntityId: string | null } };
   };
 };
 
@@ -119,16 +55,6 @@ const calcFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint =>
 
 const afterFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint =>
   amount - calcFee(amount, feePPM, baseFee);
-
-function jurisdictionStackKey(jurisdiction: unknown): string {
-  const value = jurisdiction as JurisdictionLike | null | undefined;
-  const depository = String(value?.depositoryAddress || '').trim().toLowerCase();
-  if (!depository) return '';
-  const chainId = Number(value?.chainId);
-  return Number.isFinite(chainId) && chainId > 0
-    ? `stack:${Math.floor(chainId)}:${depository}`
-    : `stack:${depository}`;
-}
 
 function assertHtlcReceivedPayload(
   event: { data?: Record<string, unknown> },
@@ -185,20 +111,6 @@ function requiredInbound(desiredForward: bigint, feePPM: bigint, baseFee: bigint
   return low;
 }
 
-function relayToApiBase(relayUrl: string | null | undefined): string | null {
-  if (!relayUrl) return null;
-  try {
-    const relay = new URL(relayUrl);
-    const protocol =
-      relay.protocol === 'wss:' ? 'https:' :
-      relay.protocol === 'ws:' ? 'http:' :
-      relay.protocol;
-    return `${protocol}//${relay.host}`;
-  } catch {
-    return null;
-  }
-}
-
 function mirrorConsole(page: Page, tag: string): void {
   page.on('console', (msg) => {
     const text = msg.text();
@@ -214,128 +126,65 @@ function mirrorConsole(page: Page, tag: string): void {
   });
 }
 
-async function getActiveApiBase(page: Page): Promise<string> {
-  if (process.env.E2E_API_BASE_URL) return API_BASE_URL;
-  const runtimeApi = await page.evaluate(() => {
-    const view = window as TestWindow;
-    const relay = view.__xln?.runtimeConnectivity?.relayUrls?.[0] ?? null;
-    return typeof relay === 'string' ? relay : null;
-  });
-  return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
-}
-
 async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs = 30_000): Promise<void> {
-  const apiBaseUrl = await getActiveApiBase(page);
-  const advertised = await page.evaluate(async ({ apiBaseUrl, entityId, timeoutMs }) => {
-    const target = String(entityId).toLowerCase();
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < timeoutMs) {
-      try {
-        const response = await fetch(`${apiBaseUrl}/api/debug/entities?limit=5000&q=${encodeURIComponent(entityId)}`);
-        if (response.ok) {
-          const body = await response.json() as { entities?: Array<{ entityId?: string; runtimeId?: string }> };
-          const entities = Array.isArray(body.entities) ? body.entities : [];
-          const hit = entities.find((entry) => String(entry.entityId || '').toLowerCase() === target);
-          if (hit?.runtimeId) return true;
-        }
-      } catch {
-        // Best effort only.
-      }
-
-      try {
-        const view = window as TestWindow;
-        const profiles = view.isolatedEnv?.gossip?.getProfiles?.() ?? [];
-        const hit = profiles.find((profile) => String(profile.entityId || '').toLowerCase() === target);
-        if (hit?.runtimeId || hit?.metadata?.runtimeId) return true;
-      } catch {
-        // Retry.
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-    return false;
-  }, { apiBaseUrl, entityId, timeoutMs });
-
-  expect(advertised, `entity ${entityId.slice(0, 12)} must be visible in relay directory or gossip`).toBe(true);
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async target => {
+          const debug = (window as TestWindow).__xln;
+          const env = debug?.env();
+          if (!debug || !env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+          await (await debug.xln()).ensureGossipProfiles(env, [target]);
+          return env.gossip
+            .getProfiles()
+            .some(
+              profile =>
+                profile.entityId.toLowerCase() === target.toLowerCase() &&
+                Boolean(profile.runtimeId || profile.metadata?.runtimeId),
+            );
+        }, entityId),
+      { timeout: timeoutMs },
+    )
+    .toBe(true);
 }
 
 async function discoverHubs(page: Page): Promise<string[]> {
-  const apiBaseUrl = await getActiveApiBase(page);
-  for (let attempt = 0; attempt < 45; attempt += 1) {
-    const activeJurisdiction = await page.evaluate(() => {
-      const stackKey = (jurisdiction: unknown): string => {
-        const value = jurisdiction as { chainId?: unknown; depositoryAddress?: unknown } | null | undefined;
-        const depository = String(value?.depositoryAddress || '').trim().toLowerCase();
-        if (!depository) return '';
-        const chainId = Number(value?.chainId);
-        return Number.isFinite(chainId) && chainId > 0
-          ? `stack:${Math.floor(chainId)}:${depository}`
-          : `stack:${depository}`;
-      };
-      const view = window as TestWindow;
-      const runtimeId = String(view.isolatedEnv?.runtimeId || '').toLowerCase();
-      for (const [key, replica] of view.isolatedEnv?.state?.eReplicas?.entries?.() || []) {
-        const [, signerId] = String(key || '').split(':');
-        if (String(signerId || '').toLowerCase() !== runtimeId) continue;
-        return stackKey(replica?.state?.config?.jurisdiction) || stackKey(replica?.position?.jurisdiction);
-      }
-      return '';
-    });
-
-    const fromGossip = await page.evaluate((targetJurisdiction) => {
-      const stackKey = (jurisdiction: unknown): string => {
-        const value = jurisdiction as { chainId?: unknown; depositoryAddress?: unknown } | null | undefined;
-        const depository = String(value?.depositoryAddress || '').trim().toLowerCase();
-        if (!depository) return '';
-        const chainId = Number(value?.chainId);
-        return Number.isFinite(chainId) && chainId > 0
-          ? `stack:${Math.floor(chainId)}:${depository}`
-          : `stack:${depository}`;
-      };
-      const view = window as TestWindow;
-      try {
-        view.XLN?.refreshGossip?.(view.isolatedEnv);
-      } catch {
-        // Best effort.
-      }
-      const profiles = view.isolatedEnv?.gossip?.getProfiles?.() ?? [];
-      const ids = profiles
-        .filter((profile) => profile.metadata?.isHub === true)
-        .filter((profile) => stackKey(profile.metadata?.jurisdiction) === targetJurisdiction)
-        .map((profile) => profile.entityId)
-        .filter((entityId): entityId is string => typeof entityId === 'string');
-      return Array.from(new Set(ids));
-    }, activeJurisdiction);
-    if (fromGossip.length > 0) return fromGossip;
-
-    try {
-      const response = await page.request.get(`${apiBaseUrl}/api/debug/entities`);
-      if (response.ok()) {
-        const body = await response.json() as {
-          entities?: Array<{ entityId?: string; isHub?: boolean; metadata?: { jurisdiction?: JurisdictionLike } }>;
-        };
-        const ids = (Array.isArray(body.entities) ? body.entities : [])
-          .filter((entry) => entry.isHub === true)
-          .filter((entry) => jurisdictionStackKey(entry.metadata?.jurisdiction) === activeJurisdiction)
-          .map((entry) => entry.entityId)
-          .filter((entityId): entityId is string => typeof entityId === 'string');
-        const unique = Array.from(new Set(ids));
-        if (unique.length > 0) return unique;
-      }
-    } catch {
-      // Retry.
-    }
-
-    await page.waitForTimeout(500);
-  }
-
-  return [];
+  let hubs: string[] = [];
+  await expect
+    .poll(
+      async () => {
+        hubs = await page.evaluate(async () => {
+          const debug = (window as TestWindow).__xln;
+          const env = debug?.env();
+          const entityId = debug?.store.getState().activeEntityId;
+          if (!debug || !env || !entityId) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+          const entity = [...env.state.eReplicas.values()].find(replica => replica.entityId === entityId);
+          const jurisdiction = entity?.state.config.jurisdiction;
+          if (!jurisdiction) throw new Error('CURRENT_WALLET_JURISDICTION_MISSING');
+          (await debug.xln()).refreshGossip(env);
+          return env.gossip
+            .getProfiles()
+            .filter(
+              profile =>
+                profile.metadata?.isHub === true &&
+                profile.metadata.jurisdiction?.chainId === jurisdiction.chainId &&
+                profile.metadata.jurisdiction?.depositoryAddress.toLowerCase() ===
+                  jurisdiction.depositoryAddress.toLowerCase(),
+            )
+            .map(profile => profile.entityId);
+        });
+        return hubs.length;
+      },
+      { timeout: 15_000 },
+    )
+    .toBeGreaterThan(0);
+  return hubs;
 }
 
 async function getHubFeeConfig(page: Page, hubId: string): Promise<HubFeeConfig> {
   const fee = await page.evaluate((targetHubId) => {
     const view = window as TestWindow;
-    const profiles = view.isolatedEnv?.gossip?.getProfiles?.() ?? [];
+    const profiles = view.__xln?.env()?.gossip?.getProfiles?.() ?? [];
     const profile = profiles.find((entry) =>
       String(entry.entityId || '').toLowerCase() === String(targetHubId || '').toLowerCase(),
     );
@@ -360,78 +209,21 @@ async function getHubFeeConfig(page: Page, hubId: string): Promise<HubFeeConfig>
   };
 }
 
-async function waitForSenderSpend(
-  page: Page,
-  counterpartyId: string,
-  baseline: number,
-  minSpend: number,
-  timeoutMs = 30_000,
-): Promise<{ latest: number; spent: number }> {
-  const startedAt = Date.now();
-  let latest = baseline;
-  let spent = 0;
-  while (Date.now() - startedAt < timeoutMs) {
-    latest = await getRenderedOutboundForAccount(page, counterpartyId);
-    spent = baseline - latest;
-    if (spent >= minSpend) return { latest, spent };
-    await page.waitForTimeout(250);
-  }
-  throw new Error(
-    `Timed out waiting for sender spend on ${counterpartyId.slice(0, 10)} ` +
-    `(baseline=${baseline} latest=${latest} spent=${spent} minSpend=${minSpend})`,
-  );
-}
-
 async function outCapRaw(page: Page, entityId: string, cpId: string): Promise<bigint> {
-  const delta = await page.evaluate(({ cpId, entityId }) => {
-    const view = window as TestWindow;
-    const env = view.isolatedEnv;
-    if (!env?.state?.eReplicas) return null;
-
-    for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
-      if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
-      const account = replica?.state?.accounts?.get?.(cpId);
-      const rawDelta = account?.state?.deltas?.get?.(1);
-      if (!rawDelta || typeof rawDelta !== 'object') return null;
-
-      const raw = rawDelta as Record<string, unknown>;
-      const readBig = (value: unknown): string => {
-        if (typeof value === 'bigint') return value.toString();
-        if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return String(value);
-        if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return value.trim();
-        return '0';
-      };
-
-      return {
-        ondelta: readBig(raw.ondelta),
-        offdelta: readBig(raw.offdelta),
-        collateral: readBig(raw.collateral),
-        leftCreditLimit: readBig(raw.leftCreditLimit),
-        rightCreditLimit: readBig(raw.rightCreditLimit),
-        leftAllowance: readBig(raw.leftAllowance),
-        rightAllowance: readBig(raw.rightAllowance),
-        leftHold: readBig(raw.leftHold),
-        rightHold: readBig(raw.rightHold),
-      } satisfies DeltaSnapshot;
-    }
-
-    return null;
-  }, { entityId, cpId });
-
-  if (!delta) return 0n;
-
-  return deriveDelta({
-    tokenId: 1,
-    ondelta: BigInt(delta.ondelta),
-    offdelta: BigInt(delta.offdelta),
-    collateral: BigInt(delta.collateral),
-    leftCreditLimit: BigInt(delta.leftCreditLimit),
-    rightCreditLimit: BigInt(delta.rightCreditLimit),
-    leftAllowance: BigInt(delta.leftAllowance),
-    rightAllowance: BigInt(delta.rightAllowance),
-    leftHold: BigInt(delta.leftHold),
-    rightHold: BigInt(delta.rightHold),
-  }, String(entityId).toLowerCase() < String(cpId).toLowerCase()).outCapacity;
+  const value = await page.evaluate(
+    async ({ cpId, entityId }) => {
+      const debug = (window as TestWindow).__xln;
+      const env = debug?.env();
+      if (!debug || !env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+      const replica = [...env.state.eReplicas.values()].find(entry => entry.entityId === entityId);
+      const account = replica?.state.accounts.get(cpId);
+      const delta = account?.state.deltas.get(1);
+      if (!account || !delta) throw new Error('CURRENT_WALLET_ACCOUNT_DELTA_MISSING');
+      return (await debug.xln()).deriveDelta(delta, account.state.leftEntity === entityId).outCapacity.toString();
+    },
+    { entityId, cpId },
+  );
+  return BigInt(value);
 }
 
 async function waitForSenderSpendRaw(
@@ -469,16 +261,16 @@ async function waitForAccountIdle(
   while (Date.now() - startedAt < timeoutMs) {
     last = await page.evaluate(({ counterpartyId, entityId }) => {
       const view = window as TestWindow;
-      if (!view.isolatedEnv?.state?.eReplicas) {
+      if (!view.__xln?.env()?.state?.eReplicas) {
         return { hasAccount: false, height: 0, pendingHeight: null, mempoolLen: 0 };
       }
-      for (const [replicaKey, replica] of view.isolatedEnv.state.eReplicas.entries()) {
+      for (const [replicaKey, replica] of view.__xln?.env().state.eReplicas.entries()) {
         if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
         const account = replica.state?.accounts?.get(counterpartyId);
         if (!account) return { hasAccount: false, height: 0, pendingHeight: null, mempoolLen: 0 };
         return {
           hasAccount: true,
-          height: Number(account.currentHeight || 0),
+          height: Number(account.currentHeight),
           pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
           mempoolLen: Number(account.mempool?.length || 0),
         };
@@ -506,11 +298,11 @@ async function faucet(page: Page, entityId: string, hubEntityId: string): Promis
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     const runtimeId = await page.evaluate(() => {
       const view = window as TestWindow;
-      return view.isolatedEnv?.runtimeId ?? null;
+      return view.__xln?.env()?.runtimeId ?? null;
     });
-    const apiBaseUrl = await getActiveApiBase(page);
+    const apiBaseUrl = API_BASE_URL;
     if (!runtimeId) {
-      result = { ok: false, status: 0, data: { error: 'missing runtimeId in isolatedEnv' } };
+      result = { ok: false, status: 0, data: { error: 'CURRENT_WALLET_RUNTIME_ID_MISSING' } };
       break;
     }
 
@@ -554,7 +346,6 @@ async function faucet(page: Page, entityId: string, hubEntityId: string): Promis
   }
 
   expect(result.ok, `faucet failed: ${JSON.stringify(result.data)}`).toBe(true);
-  await page.waitForTimeout(SETTLE_MS);
 }
 
 function toDisplayed(amount: bigint): number {
@@ -569,40 +360,6 @@ function expectRenderedDeltaClose(actualDelta: number, expectedDelta: number, la
   ).toBeLessThanOrEqual(0.000000001);
 }
 
-async function openPayWorkspace(page: Page): Promise<void> {
-  const accountsTab = page.getByTestId('tab-accounts').first();
-  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
-  const invoiceInput = page.locator('#payment-invoice-input').first();
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < 15_000) {
-    await accountsTab.click().catch(() => {});
-    const mobileToggle = page.getByTestId('account-workspace-mobile-toggle').first();
-    if (await mobileToggle.isVisible().catch(() => false)) {
-      await mobileToggle.click().catch(() => {});
-    }
-    const candidateLocators = [
-      page.getByTestId('account-workspace-tab-pay'),
-      page.locator('.workspace-rail').getByRole('button', { name: /^Pay$/i }),
-    ];
-    for (const locator of candidateLocators) {
-      const count = await locator.count().catch(() => 0);
-      for (let index = 0; index < count; index += 1) {
-        const payTab = locator.nth(index);
-        if (await payTab.isVisible().catch(() => false)) {
-          await payTab.click().catch(() => {});
-          if (await invoiceInput.isVisible({ timeout: 1000 }).catch(() => false)) {
-            return;
-          }
-        }
-      }
-    }
-    if (await invoiceInput.isVisible({ timeout: 500 }).catch(() => false)) return;
-    await page.waitForTimeout(250);
-  }
-  throw new Error('payment form did not become visible after selecting Accounts -> Pay');
-}
-
 async function reloadAppForProject(
   page: Page,
   appBaseUrl: string,
@@ -613,25 +370,10 @@ async function reloadAppForProject(
   } else {
     await page.reload({ waitUntil: 'domcontentloaded' });
   }
-  await page.locator('button.wallet').first().click();
-  const setup = page.getByRole('heading', { name: 'Set a local password', exact: true });
-  const unlock = page.getByRole('heading', { name: 'Unlock wallet', exact: true });
-  await expect(setup.or(unlock)).toBeVisible({ timeout: 20_000 });
-  await page.getByLabel('Password', { exact: true }).fill('ahb-reload-password');
-  if (await setup.isVisible()) {
-    await page.getByLabel('Confirm password', { exact: true }).fill('ahb-reload-password');
-    await page.getByRole('button', { name: 'Save and open', exact: true }).click();
-  } else {
-    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
-  }
-  await expect(page.getByTestId('tab-accounts').first()).toBeVisible({ timeout: 20_000 });
-}
-
-async function fillPayIntent(page: Page, targetEntityId: string): Promise<void> {
-  const invoiceInput = page.locator('#payment-invoice-input').first();
-  await expect(invoiceInput).toBeVisible({ timeout: 10_000 });
-  await invoiceInput.click();
-  await invoiceInput.fill(targetEntityId);
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
+  await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+  await expect(page.getByTestId('nav-home').locator('visible=true').first()).toBeVisible();
 }
 
 async function pay(
@@ -642,49 +384,37 @@ async function pay(
   route: string[],
   amount: bigint,
 ): Promise<void> {
-  void from;
-  void signerId;
-  void route;
-
-  await openPayWorkspace(page);
-
-  await fillPayIntent(page, to);
-
-  const amountInput = page.locator('#payment-amount-input');
-  await expect(amountInput).toBeVisible({ timeout: 10_000 });
-  await amountInput.click();
-  await amountInput.fill(ethers.formatUnits(amount, USDC_DECIMALS));
-
-  const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();
-  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
-  await findRoutesBtn.click();
-  await expect(page.locator('text=/1 hop|route/i').first()).toBeVisible({ timeout: 15_000 });
-
-  const payNowBtn = page.getByRole('button', { name: 'Pay now' }).first();
-  await expect(payNowBtn).toBeEnabled({ timeout: 10_000 });
-  await payNowBtn.click();
-  await page.waitForTimeout(200);
+  expect(route[0]).toBe(from);
+  expect(signerId).toMatch(/^0x[0-9a-f]{40}$/i);
+  await prepareUiPayment(page, { recipientEntityId: to, amount, tokenId: 1, routeEntityIds: route });
+  const hub = route[1];
+  if (!hub) throw new Error('PAYMENT_TEST_ROUTE_MISSING_HUB');
+  // Quote must refresh the actual sender graph before admission; a test must not prefill its cache.
+  await waitForReceiveReadyGossipProfiles(page, [from, hub, to], hub);
+  await page.getByTestId('pay-submit').click();
 }
 
-async function attemptOverspend(page: Page, to: string, amount: bigint): Promise<void> {
+async function attemptOverspend(page: Page, from: string, to: string, amount: bigint): Promise<void> {
   await openPayWorkspace(page);
-  await fillPayIntent(page, to);
-
-  const amountInput = page.locator('#payment-amount-input');
-  await expect(amountInput).toBeVisible({ timeout: 10_000 });
-  await amountInput.click();
-  await amountInput.fill(ethers.formatUnits(amount, USDC_DECIMALS));
-
-  const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();
-  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
-  await findRoutesBtn.click();
-  await page.waitForTimeout(500);
-
-  const payNowBtn = page.getByRole('button', { name: 'Pay now' }).first();
-  if (await payNowBtn.isEnabled().catch(() => false)) {
-    await payNowBtn.click();
-    await page.waitForTimeout(300);
-  }
+  // Deliberately exceeding capacity must miss routing, never submit financial work.
+  // Require this exact negative-case diagnostic; unrelated route misses still fail.
+  const expectedMiss = `[network] GOSSIP_ROUTE_MISS {source: ${from}, target: ${to}, tokenId: 1, retries: 3}`;
+  allowBrowserIssue({
+    type: 'console',
+    severity: 'warning',
+    message: new RegExp(`^${expectedMiss.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
+  });
+  const routeMiss = page.waitForEvent(
+    'console',
+    message => message.type() === 'warning' && message.text() === expectedMiss,
+  );
+  await fillUiPaymentIntent(page, to, amount, 1);
+  const quoting = page.getByText('Quoting routes…', { exact: true });
+  await expect(quoting).toBeVisible();
+  await expect(quoting).toBeHidden();
+  await expect(page.getByTestId('pay-submit')).toBeDisabled();
+  await expect(page.getByTestId('pay-quote')).toHaveCount(0);
+  await routeMiss;
 }
 
 async function runtimeDbMeta(page: Page): Promise<{
@@ -705,8 +435,10 @@ async function runtimeDbMeta(page: Page): Promise<{
 async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<void> {
   await page.waitForFunction(({ targetRuntimeId }) => {
     const view = window as TestWindow;
-    return String(view.isolatedEnv?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase()
-      && Number(view.isolatedEnv?.state?.eReplicas?.size || 0) > 0;
+    return (
+      String(view.__xln?.env()?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase() &&
+      Number(view.__xln?.env()?.state?.eReplicas?.size || 0) > 0
+    );
   }, { targetRuntimeId: runtimeId }, { timeout: INIT_TIMEOUT });
 }
 
@@ -726,23 +458,17 @@ async function waitForRuntimeInputDrain(page: Page, label: string, timeoutMs = 1
   await expect
     .poll(async () => {
       return await page.evaluate(() => {
-        const view = window as TestWindow & {
-          isolatedEnv?: {
-            runtimeInput?: { runtimeTxs?: unknown[]; entityInputs?: unknown[]; jInputs?: unknown[] };
-            runtimeMempool?: { runtimeTxs?: unknown[]; entityInputs?: unknown[]; jInputs?: unknown[] };
-          };
-        };
-        const input = view.isolatedEnv?.runtimeInput;
-        const mempool = view.isolatedEnv?.runtimeMempool;
-        const inputCount =
-          Number(input?.runtimeTxs?.length || 0) +
-          Number(input?.entityInputs?.length || 0) +
-          Number(input?.jInputs?.length || 0);
-        const mempoolCount =
-          Number(mempool?.runtimeTxs?.length || 0) +
-          Number(mempool?.entityInputs?.length || 0) +
-          Number(mempool?.jInputs?.length || 0);
-        return inputCount === 0 && mempoolCount === 0;
+        const env = (window as TestWindow).__xln?.env();
+        if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+        const mempool = env.runtimeMempool;
+        return (
+          mempool.runtimeTxs.length === 0 &&
+          mempool.entityInputs.length === 0 &&
+          (mempool.jInputs?.length ?? 0) === 0 &&
+          (env.pendingOutputs?.length ?? 0) === 0 &&
+          (env.pendingNetworkOutputs?.length ?? 0) === 0 &&
+          (env.networkInbox?.length ?? 0) === 0
+        );
       });
     }, {
       timeout: timeoutMs,
@@ -781,8 +507,8 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
       ]);
 
       console.log('[E2E] create isolated runtimes');
-      const alice = await createRuntimeIdentity(alicePage, 'alice', selectDemoMnemonic('alice'));
-      const bob = await createRuntimeIdentity(bobPage, 'bob', selectDemoMnemonic('bob'));
+      const alice = await createWalletIdentity(alicePage, 'alice', selectDemoMnemonic('alice'));
+      const bob = await createWalletIdentity(bobPage, 'bob', selectDemoMnemonic('bob'));
       expect(alice.entityId).not.toBe(bob.entityId);
 
       await Promise.all([
@@ -815,20 +541,75 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
 
       console.log('[E2E] forward HTLC Alice -> Hub -> Bob');
       const forwardAmount = toUsdcUnits(10);
-      const expectedForwardSpend = toDisplayed(requiredInbound(forwardAmount, hubFee.feePPM, hubFee.baseFee));
+      const expectedForwardSpend = requiredInbound(forwardAmount, hubFee.feePPM, hubFee.baseFee);
+      const aliceBeforeForwardRaw = await outCapRaw(alicePage, alice.entityId, hubId);
       const bobBeforeForward = await getRenderedOutboundForAccount(bobPage, hubId);
       const bobForwardCursor = await getPersistedReceiptCursor(bobPage);
       const aliceForwardFinalizeCursor = await getPersistedReceiptCursor(alicePage);
-      await waitForReceiveReadyGossipProfiles(alicePage, [alice.entityId, hubId, bob.entityId], hubId);
-      await pay(alicePage, alice.entityId, alice.signerId, bob.entityId, [alice.entityId, hubId, bob.entityId], forwardAmount);
+      const readiness = await Promise.all(
+        [alicePage, bobPage].map(walletPage =>
+          walletPage.evaluate(
+            ({ recipient, hub }) => {
+              const env = (window as TestWindow).__xln?.env();
+              if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+              return {
+                runtimeId: env.runtimeId,
+                recipientProfile: env.gossip.getProfiles().find(profile => profile.entityId === recipient),
+                localAccounts: [...env.state.eReplicas.values()].map(replica => ({
+                  entityId: replica.entityId,
+                  height: replica.state.height,
+                  accounts: [...replica.state.accounts].map(([id, account]) => ({
+                    id,
+                    height: account.currentHeight,
+                    pending: account.pendingFrame?.height,
+                  })),
+                })),
+                hub,
+              };
+            },
+            { recipient: bob.entityId, hub: hubId },
+          ),
+        ),
+      );
+      expect(
+        readiness[0]?.recipientProfile?.accounts.some(account => account.counterpartyId === hubId),
+        'sender starts with the genuinely stale recipient profile',
+      ).toBe(false);
+      expect(
+        readiness[1]?.recipientProfile?.accounts.some(account => account.counterpartyId === hubId),
+        'recipient has already published its committed Hub account',
+      ).toBe(true);
+      console.log(
+        '[E2E] stale-profile regression',
+        readiness.map(entry => ({
+          runtimeId: entry.runtimeId,
+          accounts: entry.recipientProfile?.accounts.map(account => account.counterpartyId),
+          updatedAt: entry.recipientProfile?.lastUpdated,
+        })),
+      );
 
-      const forwardSpend = await waitForSenderSpend(alicePage, hubId, aliceAfterFaucet, expectedForwardSpend);
+      await pay(
+        alicePage,
+        alice.entityId,
+        alice.signerId,
+        bob.entityId,
+        [alice.entityId, hubId, bob.entityId],
+        forwardAmount,
+      );
+
+      const forwardSpend = await waitForSenderSpendRaw(
+        alicePage,
+        alice.entityId,
+        hubId,
+        aliceBeforeForwardRaw,
+        expectedForwardSpend,
+      );
       const aliceForwardFinalizeEvent = await waitForPersistedFrameEventMatch(alicePage, {
         eventName: 'HtlcFinalized',
         entityId: alice.entityId,
         cursor: aliceForwardFinalizeCursor,
         timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
-        predicate: (event) => String(event.data?.amount || '') === forwardAmount.toString(),
+        predicate: event => String(event.data?.amount || '') === forwardAmount.toString(),
       });
       assertHtlcFinalizedPayload(aliceForwardFinalizeEvent, alice.entityId, hubId, forwardAmount);
       const bobForwardReceiveEvent = await waitForPersistedFrameEventMatch(bobPage, {
@@ -836,7 +617,7 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
         entityId: bob.entityId,
         cursor: bobForwardCursor,
         timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
-        predicate: (event) => String(event.data?.amount || '') === forwardAmount.toString(),
+        predicate: event => String(event.data?.amount || '') === forwardAmount.toString(),
       });
       assertHtlcReceivedPayload(bobForwardReceiveEvent, bob.entityId, hubId, forwardAmount);
       const bobAfterForward = await waitForRenderedOutboundForAccountDelta(
@@ -846,31 +627,39 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
         toDisplayed(forwardAmount),
       );
       expect(forwardSpend.spent).toBeGreaterThanOrEqual(expectedForwardSpend);
-      expectRenderedDeltaClose(
-        bobAfterForward - bobBeforeForward,
-        toDisplayed(forwardAmount),
-        'bob forward receive',
-      );
+      expectRenderedDeltaClose(bobAfterForward - bobBeforeForward, toDisplayed(forwardAmount), 'bob forward receive');
 
       console.log('[E2E] reverse HTLC Bob -> Hub -> Alice');
       await waitForAccountIdle(bobPage, bob.entityId, hubId);
       await waitForAccountIdle(alicePage, alice.entityId, hubId);
       const reverseAmount = toUsdcUnits(5);
-      const expectedReverseSpend = toDisplayed(requiredInbound(reverseAmount, hubFee.feePPM, hubFee.baseFee));
+      const expectedReverseSpend = requiredInbound(reverseAmount, hubFee.feePPM, hubFee.baseFee);
+      const bobBeforeReverseRaw = await outCapRaw(bobPage, bob.entityId, hubId);
       const aliceBeforeReverse = await getRenderedOutboundForAccount(alicePage, hubId);
-      const bobBeforeReverse = await getRenderedOutboundForAccount(bobPage, hubId);
       const aliceReverseCursor = await getPersistedReceiptCursor(alicePage);
       const bobReverseFinalizeCursor = await getPersistedReceiptCursor(bobPage);
-      await waitForReceiveReadyGossipProfiles(bobPage, [bob.entityId, hubId, alice.entityId], hubId);
-      await pay(bobPage, bob.entityId, bob.signerId, alice.entityId, [bob.entityId, hubId, alice.entityId], reverseAmount);
+      await pay(
+        bobPage,
+        bob.entityId,
+        bob.signerId,
+        alice.entityId,
+        [bob.entityId, hubId, alice.entityId],
+        reverseAmount,
+      );
 
-      const reverseSpend = await waitForSenderSpend(bobPage, hubId, bobAfterForward, expectedReverseSpend);
+      const reverseSpend = await waitForSenderSpendRaw(
+        bobPage,
+        bob.entityId,
+        hubId,
+        bobBeforeReverseRaw,
+        expectedReverseSpend,
+      );
       const bobReverseFinalizeEvent = await waitForPersistedFrameEventMatch(bobPage, {
         eventName: 'HtlcFinalized',
         entityId: bob.entityId,
         cursor: bobReverseFinalizeCursor,
         timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
-        predicate: (event) => String(event.data?.amount || '') === reverseAmount.toString(),
+        predicate: event => String(event.data?.amount || '') === reverseAmount.toString(),
       });
       assertHtlcFinalizedPayload(bobReverseFinalizeEvent, bob.entityId, hubId, reverseAmount);
       const aliceReverseReceiveEvent = await waitForPersistedFrameEventMatch(alicePage, {
@@ -878,7 +667,7 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
         entityId: alice.entityId,
         cursor: aliceReverseCursor,
         timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
-        predicate: (event) => String(event.data?.amount || '') === reverseAmount.toString(),
+        predicate: event => String(event.data?.amount || '') === reverseAmount.toString(),
       });
       assertHtlcReceivedPayload(aliceReverseReceiveEvent, alice.entityId, hubId, reverseAmount);
       const aliceAfterReverse = await waitForRenderedOutboundForAccountDelta(
@@ -894,7 +683,12 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
         toDisplayed(reverseAmount),
         'alice reverse receive',
       );
-      expect(bobBeforeReverse - bobAfterReverse).toBeGreaterThanOrEqual(expectedReverseSpend);
+      // Rendered capacities deliberately round to two decimals; fee/debit authority uses exact base units above.
+      expect(bobAfterReverse).toBe(Number(formatMoney(reverseSpend.latest, USDC_DECIMALS).replaceAll(',', '')));
+      console.log('[E2E] exact debits', {
+        forward: forwardSpend.spent.toString(),
+        reverse: reverseSpend.spent.toString(),
+      });
       await waitForAccountIdle(alicePage, alice.entityId, hubId);
       await waitForAccountIdle(bobPage, bob.entityId, hubId);
       await waitForRuntimeInputDrain(alicePage, 'alice');
@@ -937,8 +731,14 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
         const bobSecondForwardCursor = await getPersistedReceiptCursor(bobPage);
         const aliceSecondForwardFinalizeCursor = await getPersistedReceiptCursor(alicePage);
 
-        await waitForReceiveReadyGossipProfiles(alicePage, [alice.entityId, hubId, bob.entityId], hubId);
-        await pay(alicePage, alice.entityId, alice.signerId, bob.entityId, [alice.entityId, hubId, bob.entityId], secondForwardAmount);
+        await pay(
+          alicePage,
+          alice.entityId,
+          alice.signerId,
+          bob.entityId,
+          [alice.entityId, hubId, bob.entityId],
+          secondForwardAmount,
+        );
 
         const secondForwardSpend = await waitForSenderSpendRaw(
           alicePage,
@@ -952,7 +752,7 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
           entityId: alice.entityId,
           cursor: aliceSecondForwardFinalizeCursor,
           timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
-          predicate: (event) => String(event.data?.amount || '') === secondForwardAmount.toString(),
+          predicate: event => String(event.data?.amount || '') === secondForwardAmount.toString(),
         });
         assertHtlcFinalizedPayload(aliceSecondFinalizeEvent, alice.entityId, hubId, secondForwardAmount);
         const bobSecondReceiveEvent = await waitForPersistedFrameEventMatch(bobPage, {
@@ -960,7 +760,7 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
           entityId: bob.entityId,
           cursor: bobSecondForwardCursor,
           timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
-          predicate: (event) => String(event.data?.amount || '') === secondForwardAmount.toString(),
+          predicate: event => String(event.data?.amount || '') === secondForwardAmount.toString(),
         });
         assertHtlcReceivedPayload(bobSecondReceiveEvent, bob.entityId, hubId, secondForwardAmount);
 
@@ -1000,7 +800,7 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
         await waitForAccountIdle(bobPage, bob.entityId, hubId);
         const aliceBeforeOverspend = aliceAfterSecondForward;
         const overspendUnits = Math.max(1, Math.ceil(aliceBeforeOverspend) + 1);
-        await attemptOverspend(alicePage, bob.entityId, toUsdcUnits(overspendUnits));
+        await attemptOverspend(alicePage, alice.entityId, bob.entityId, toUsdcUnits(overspendUnits));
         const aliceAfterOverspend = await getRenderedOutboundForAccount(alicePage, hubId);
         expect(aliceAfterOverspend, 'overspend should not change alice balance').toBe(aliceBeforeOverspend);
 
@@ -1014,6 +814,8 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
       }
 
       console.log('[E2E] capture persistence state before reload');
+      const aliceRawBeforeReload = await outCapRaw(alicePage, alice.entityId, hubId);
+      const bobRawBeforeReload = await outCapRaw(bobPage, bob.entityId, hubId);
       const aliceDbBefore = await runtimeDbMeta(alicePage);
       const bobDbBefore = await runtimeDbMeta(bobPage);
       expect(aliceDbBefore.latestHeight, 'alice WAL height must advance').toBeGreaterThan(0);
@@ -1044,10 +846,20 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
       const aliceDbAfter = await runtimeDbMeta(alicePage);
       const bobDbAfter = await runtimeDbMeta(bobPage);
 
+      expect(await outCapRaw(alicePage, alice.entityId, hubId), 'alice exact base units survive reload').toBe(
+        aliceRawBeforeReload,
+      );
+      expect(await outCapRaw(bobPage, bob.entityId, hubId), 'bob exact base units survive reload').toBe(
+        bobRawBeforeReload,
+      );
       expect(aliceAfterReload, 'alice balance must survive reload').toBe(expectedAliceAfterReload);
       expect(bobAfterReload, 'bob balance must survive reload').toBe(expectedBobAfterReload);
-      expect(aliceDbAfter.latestHeight, 'alice replay height must survive reload').toBeGreaterThanOrEqual(aliceDbBefore.latestHeight);
-      expect(bobDbAfter.latestHeight, 'bob replay height must survive reload').toBeGreaterThanOrEqual(bobDbBefore.latestHeight);
+      expect(aliceDbAfter.latestHeight, 'alice replay height must survive reload').toBeGreaterThanOrEqual(
+        aliceDbBefore.latestHeight,
+      );
+      expect(bobDbAfter.latestHeight, 'bob replay height must survive reload').toBeGreaterThanOrEqual(
+        bobDbBefore.latestHeight,
+      );
     } finally {
       await Promise.all([
         aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),
