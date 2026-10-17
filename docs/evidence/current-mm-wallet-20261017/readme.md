@@ -46,3 +46,25 @@ records are linked by exact SHA in that directory's handoff.
 
 No production runtime, contracts, bytecode, frozen-core or storage schema edits.
 This is not full E2E, aggregate release, public-chain, soak or mainnet readiness.
+
+## Release coverage selector follow-up
+
+On clean `365d1562db0f65b5c4cb51b24aa5ade0cc387e6d`, the original MM test
+passed1/1 in55.022s; verifier38+3/push28.800s passed. The next release gate,
+`bun run test:e2e:coverage`, failed because it required the retired
+`swap-ticket-to-network` selector and its Svelte-specific assertion text.
+The requirement now pins current React cross mode, the destination Account
+selector and exact selected `targetEntityId` assertion. No financial requirement
+was removed. Red and green commands both completed in0.042s; green checks60
+required markers (pay14, recovery4, swap7, cross-j14, frontend21).
+This structural check is not browser execution. The unchanged real browser
+proof remains the clean365d1562d full300USDC/partial25WETH lifecycle.
+
+On that same clean SHA, all76 runtime-core files required by the release runner
+passed639tests/3528assertions across five bounded processes. Actual real-clock
+tower defense took46.979s, RPC SIGKILL recovery4tests14.505s; no time warps or
+omitted tests. Two preceding combined attempts hit60s and are not counted as
+passes. Release integrity63tests/513assertions plus1contract passed17.615s;
+bilateral collision/current recovery passed4.728s. Aggregate release remains
+open. Exact commands, group union, outputs and hashes are in
+`release-runtime-proof-365d1562d.json` and the associated evidence directory.

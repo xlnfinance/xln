@@ -100,8 +100,9 @@ const requirements: CoverageRequirement[] = [
     area: 'cross-j',
     file: 'tests/e2e-cross-j-swap-helpers-a.ts',
     patterns: [
-      'swap-ticket-to-network',
-      'cross route selection must remain selected after the reactive UI update',
+      "page.getByTestId('swap-cross-mode').click()",
+      "hasText: 'Your other account'",
+      'await expect(routeSelect).toHaveValue(targetEntityId.toLowerCase());',
     ],
   },
   {
