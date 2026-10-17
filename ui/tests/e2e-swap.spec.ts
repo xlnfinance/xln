@@ -178,7 +178,7 @@ test(
       (await page.getByTestId('home-total').innerText()).replaceAll(',', '').replace('−', '-'), decimals,
     ).toString();
     await expect.poll(() => headlineUnits(6)).toBe(after.usdc);
-    await page.getByTestId('home-asset-2').click();
+    await page.getByTestId('home-balance-asset').selectOption('2');
     await expect.poll(() => headlineUnits(18)).toBe(after.weth);
     await expect(page.getByTestId('home-send-capacity')).toContainText('WETH');
     await mkdir(directory, { recursive: true });

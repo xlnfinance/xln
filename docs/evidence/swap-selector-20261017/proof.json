@@ -1,0 +1,23 @@
+{
+  "baseSha": "606fcab64f37d4ac28568487c5620291da3fe834",
+  "path": "ui/tests/e2e-swap.spec.ts",
+  "sha256": "13eb3cb34f41f987ec03a71a603ed1bfe0c894738d31b93d94c525b8a80b4461",
+  "problem": "Real swap completed, but test waited for retired home-asset-2 until 60-second stand timeout. Trace shows click waiting for the absent selector.",
+  "fix": "Select WETH through the current home-balance-asset select; preserve every financial/history/reload assertion.",
+  "failedEvidence": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-mesh-606fcab64/wallet-artifacts",
+  "focused": {
+    "passed": 1,
+    "seconds": 31.1
+  },
+  "fullSpec": {
+    "passed": 2,
+    "skipped": 0,
+    "failed": 0,
+    "standSeconds": 36.91,
+    "browserSeconds": 16.2,
+    "log": "browser.log"
+  },
+  "command": "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-swap.spec.ts bun run stand:run --reason mainnet-wallet-swap-recovery --timeout-ms 60000 -- bun run prod:smoke:local",
+  "productionChanged": false,
+  "limits": "Local private chain and real React/runtime/worker, not Sepolia or mainnet. Full release gate and soak remain unproved."
+}

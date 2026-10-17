@@ -1,0 +1,14 @@
+
+Running 2 tests using 1 worker
+
+(node:82476) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `bun --trace-warnings ...` to show where the warning was created)
+SWAP_HOME_MS 3995
+SWAP_COMMITTED accountHeight=6 usdcDebit=99999996 wethReceived=39988000800000000 permanentWethCredit=39992000000000000 root=0x4d5896367b75579a8795a809b83434db47c7d2fe89851c3535fb40aaf9864fa2
+SWAP_HISTORY_MS 6800 fee 3999200000000
+SWAP_RELOADED_TO_LOCKED_WALLET_MS 7340
+  ✓  1 [chromium] › ui/tests/e2e-swap.spec.ts:14:0 › same-network swap confirms exact amounts and fee once before reload @functional (8.6s)
+SWAP_RECOVERY_PROVEN_MS 5740
+  ✓  2 [chromium] › ui/tests/e2e-swap.spec.ts:213:0 › unlock after swap reload preserves exact balances and one terminal history record @functional (7.1s)
+
+  2 passed (16.2s)
