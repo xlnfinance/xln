@@ -1,4 +1,5 @@
 import { readMarketRoutes } from './cross-market';
+import { expectBilateralCommit } from './cross-account';
 import { expect, test, type Page } from '@playwright/test';
 import { formatUnits } from 'ethers';
 import type { RuntimeAdapterViewFrame, RuntimeReplica, XLNModule } from '../../core/api/public/runtime-module';
@@ -492,6 +493,14 @@ for (const scenario of [
     expect(after.target.root).not.toBe(prepared.target.root);
     expect(after.target.credit).toBe(prepared.target.credit);
     expect(after.source.routes).toEqual(after.target.routes);
+    const bilateral = await Promise.all([
+      expectBilateralCommit(page, sourceHubLabel, { entityId: sourceEntityId, hubId: sourceHubId, tokenId: 1 }),
+      expectBilateralCommit(page, sourceHubLabel, {
+        entityId: targetEntityId,
+        hubId: targetHubId,
+        tokenId: receiveTokenId,
+      }),
+    ]);
     // Open the actual receiving Account only after proving the trade. Filling a
     // new draft must not send it, and navigation makes no draft-preservation claim.
     await page.getByTestId('swap-give').fill('1');
@@ -576,6 +585,7 @@ for (const scenario of [
         after,
         afterSettings,
         afterRecovery,
+        bilateral,
         recoveryBefore,
         recoveredHistory,
         recoveryCurrent,

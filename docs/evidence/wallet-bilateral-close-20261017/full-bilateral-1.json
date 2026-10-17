@@ -1,0 +1,18 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "full-bilateral",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "run",
+    "prod:smoke:local"
+  ],
+  "exitCode": 0,
+  "seconds": 42.167,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/full-bilateral-1.log"
+}

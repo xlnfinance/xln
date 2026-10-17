@@ -1,0 +1,158 @@
+{
+  "bilateral": [
+    {
+      "clientState": {
+        "delta": {
+          "collateral": "0",
+          "leftAllowance": "0",
+          "leftCreditLimit": "0",
+          "leftHold": "0",
+          "offdelta": "2999917601281757840",
+          "ondelta": "0",
+          "rightAllowance": "0",
+          "rightCreditLimit": "14520000000000000000",
+          "rightHold": "0",
+          "tokenId": "2"
+        },
+        "height": 7,
+        "mempool": 0,
+        "pending": false,
+        "root": "0x9a0d80c5c2176bc5fddfc9d73da4c6baee87be373bcacb5f44efc8525957f4bb"
+      },
+      "entityId": "0xd960dcb0ed4af228b7e12e474af2acda587256d5e026f74525a60a5392f78ac1",
+      "hubId": "0xdbb764d0d5829babc619e54bee4ca02967c3b523c6bb94bc214c527e366c2926",
+      "hubState": {
+        "delta": {
+          "collateral": "0",
+          "leftAllowance": "0",
+          "leftCreditLimit": "0",
+          "leftHold": "0",
+          "offdelta": "2999917601281757840",
+          "ondelta": "0",
+          "rightAllowance": "0",
+          "rightCreditLimit": "14520000000000000000",
+          "rightHold": "0",
+          "tokenId": "2"
+        },
+        "height": 7,
+        "mempool": 0,
+        "pending": false,
+        "root": "0x9a0d80c5c2176bc5fddfc9d73da4c6baee87be373bcacb5f44efc8525957f4bb"
+      },
+      "tokenId": 2
+    },
+    {
+      "clientState": {
+        "delta": {
+          "collateral": "0",
+          "leftAllowance": "0",
+          "leftCreditLimit": "30493900000",
+          "leftHold": "0",
+          "offdelta": "-25492456445",
+          "ondelta": "0",
+          "rightAllowance": "0",
+          "rightCreditLimit": "0",
+          "rightHold": "0",
+          "tokenId": "1"
+        },
+        "height": 5,
+        "mempool": 0,
+        "pending": false,
+        "root": "0xa2d2dc2552176ddf11db3265806128ce06dccbdbb1656c268b244673079c3178"
+      },
+      "entityId": "0xdbf9f9587097e3cb403e52a4b2e2fae13f7050649cb2171806aa270ffed7865c",
+      "hubId": "0x3f0df9e5f2a819c3c80bc5844c313158b86c93705a33d85eb09d321ed13c42cb",
+      "hubState": {
+        "delta": {
+          "collateral": "0",
+          "leftAllowance": "0",
+          "leftCreditLimit": "30493900000",
+          "leftHold": "0",
+          "offdelta": "-25492456445",
+          "ondelta": "0",
+          "rightAllowance": "0",
+          "rightCreditLimit": "0",
+          "rightHold": "0",
+          "tokenId": "1"
+        },
+        "height": 5,
+        "mempool": 0,
+        "pending": false,
+        "root": "0xa2d2dc2552176ddf11db3265806128ce06dccbdbb1656c268b244673079c3178"
+      },
+      "tokenId": 1
+    }
+  ],
+  "consoleErrors": [],
+  "errors": [],
+  "remainderLots": {
+    "__xlnType": "BigInt",
+    "value": "1999916"
+  },
+  "route": {
+    "filledSource": "10200082398718242160",
+    "filledTarget": "25495105955",
+    "orderId": "swap-mvc3b33q-8-2d8z5zikrtkx4",
+    "status": "settled"
+  },
+  "sourceAfter": {
+    "height": 7,
+    "holds": "0",
+    "inCapacity": "11520082398718242160",
+    "mempool": 0,
+    "owned": "2999917601281757840",
+    "pending": false,
+    "pulls": 0,
+    "routes": [
+      {
+        "filledSource": "10200082398718242160",
+        "filledTarget": "25495105955",
+        "orderId": "swap-mvc3b33q-8-2d8z5zikrtkx4",
+        "status": "settled"
+      }
+    ]
+  },
+  "sourceBefore": {
+    "height": 4,
+    "holds": "0",
+    "inCapacity": "1320000000000000000",
+    "mempool": 0,
+    "owned": "13200000000000000000",
+    "pending": false,
+    "pulls": 0,
+    "routes": []
+  },
+  "sourceFeeRequests": [],
+  "sourceFees": "0",
+  "targetAfter": {
+    "height": 5,
+    "holds": "0",
+    "inCapacity": "5001443555",
+    "mempool": 0,
+    "owned": "25492456445",
+    "pending": false,
+    "pulls": 0,
+    "routes": [
+      {
+        "filledSource": "10200082398718242160",
+        "filledTarget": "25495105955",
+        "orderId": "swap-mvc3b33q-8-2d8z5zikrtkx4",
+        "status": "settled"
+      }
+    ]
+  },
+  "targetBefore": {
+    "height": 2,
+    "holds": "0",
+    "inCapacity": "30493900000",
+    "mempool": 0,
+    "owned": "0",
+    "pending": false,
+    "pulls": 0,
+    "routes": []
+  },
+  "targetFeeRequests": [
+    "2649510"
+  ],
+  "targetFees": "2649510"
+}

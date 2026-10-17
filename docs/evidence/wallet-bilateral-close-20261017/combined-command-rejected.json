@@ -1,0 +1,18 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "bilateral-clean",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "run",
+    "prod:smoke:local"
+  ],
+  "exitCode": 1,
+  "seconds": 21.134,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/bilateral-clean-27ab5e353.log"
+}

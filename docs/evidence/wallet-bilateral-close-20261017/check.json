@@ -1,0 +1,18 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "bilateral-check",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "run",
+    "check"
+  ],
+  "exitCode": 0,
+  "seconds": 25.887,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/bilateral-check.log"
+}

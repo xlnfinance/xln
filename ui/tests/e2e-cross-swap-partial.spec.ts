@@ -13,6 +13,7 @@ import type { RuntimeAdapter } from '../../core/api/runtime-adapter/types';
 import { getSwapLotScaleForDecimals, requantizeRemainingSwapAtPriceForDimensions } from '../../core/swapbook';
 import { safeStringify } from '../../core/protocol/serialization';
 import { enterStack, readWalletCheckpoint } from './stack';
+import { expectBilateralCommit } from './cross-account';
 
 type DebugWindow = Window & {
   __xln?: { env(): RuntimeReplica | null; adapter(): RuntimeAdapter | null; xln(): Promise<XLNModule> };
@@ -82,17 +83,16 @@ const readCollateralFees = (page: Page, leg: Leg, fromHeight: number, toHeight: 
       const frames = await (
         await debug.xln()
       ).readPersistedAccountFrameHistory(env, entityId, hubId, toHeight, { maxAccountHeight: toHeight });
-      return frames
-        .filter(frame => frame.height > fromHeight)
-        .flatMap(frame =>
-          frame.accountTxs.flatMap(tx =>
-            tx.type === 'request_collateral' && (tx.data.feeTokenId ?? tx.data.tokenId) === tokenId
-              ? [String(tx.data.feeAmount)]
-              : [],
-          ),
-        )
-        .reduce((sum, fee) => sum + BigInt(fee), 0n)
-        .toString();
+      const committed = frames.filter(frame => frame.height > fromHeight);
+      if (committed.some(frame => frame.accountTxs.some(tx => tx.type === 'rebalance_refund')))
+        throw new Error('UNEXPECTED_REBALANCE_REFUND');
+      return committed.flatMap(frame =>
+        frame.accountTxs.flatMap(tx =>
+          tx.type === 'request_collateral' && (tx.data.feeTokenId ?? tx.data.tokenId) === tokenId
+            ? [String(tx.data.feeAmount)]
+            : [],
+        ),
+      );
     },
     { ...leg, fromHeight, toHeight },
   );
@@ -355,13 +355,24 @@ test(
       filledTarget: expectedFilledTarget.toString(),
     });
     expect(targetAfter.routes.find(entry => entry.orderId === orderId)).toEqual(settled);
-    const [sourceFees, targetFees] = await Promise.all([
+    const [sourceFeeRequests, targetFeeRequests] = await Promise.all([
       readCollateralFees(page, source, sourceBefore.height, sourceAfter.height),
       readCollateralFees(page, target, targetBefore.height, targetAfter.height),
     ]);
+    expect(targetFeeRequests, 'exactly one signed target collateral fee in this close interval').toHaveLength(1);
+    const sourceFees = sourceFeeRequests.reduce((sum, fee) => sum + BigInt(fee), 0n).toString();
+    const targetFees = targetFeeRequests.reduce((sum, fee) => sum + BigInt(fee), 0n).toString();
+    expect(BigInt(targetFees)).toBeGreaterThan(0n);
+    expect(BigInt(targetFees)).toBeLessThan(expectedFilledTarget);
     // Only the filled part leaves; the unfilled remainder returns to the wallet.
     expect(BigInt(sourceBefore.owned) - BigInt(sourceAfter.owned)).toBe(expectedFilledSource + BigInt(sourceFees));
     expect(BigInt(targetAfter.owned) + BigInt(targetFees)).toBe(expectedFilledTarget);
+    // Compare current replicas: J finality may advance after the close snapshot.
+    // The independent exact close economics above must still hold.
+    const bilateral = await Promise.all([
+      expectBilateralCommit(page, hubName, source),
+      expectBilateralCommit(page, hubName, target),
+    ]);
     expect(errors).toEqual([]);
     expect(consoleErrors).toEqual([]);
     console.log(
@@ -376,6 +387,9 @@ test(
         targetAfter,
         sourceFees,
         targetFees,
+        sourceFeeRequests,
+        targetFeeRequests,
+        bilateral,
         errors,
         consoleErrors,
       }),

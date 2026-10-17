@@ -1,0 +1,37 @@
+{
+  "baseSha": "358417a684cfb17ea09471f154b8c7253ce1cf0c",
+  "change": "Retain full/partial real wallet financial assertions and additionally require exact both-participant Account height, state root and every Delta field, with empty pending/mempool. Partial close requires exactly one positive signed collateral fee, below gross receipt; refunds reject loudly. No production change.",
+  "evidence": {
+    "partial": "1/1,32.467s; signed fee2649510 base units; both legs equal",
+    "full": "1/1,42.167s;300USDC same-asset cross plus current WAL recovery"
+  },
+  "limits": "Existing TS local mesh, not native/parity/mainnet evidence. Original root MM gate remains unresolved: old setup and cross-book clicking are not proven by these tests. No ledger clearing or skip.",
+  "sourceSha256": {
+    "ui/tests/cross-account.ts": "94edb5972bbbd520ca06b4022049f95d6788f796fe56d65282e80a1208debefa",
+    "ui/tests/cross-market.ts": "fc03f7fd92e216b239ad22f1ba4c0626866e7b2db00f1ae6a5895dcfae8b5db7",
+    "ui/tests/e2e-cross-swap.spec.ts": "173bea90b2e0f1a91baf88275e1bf266506e3002fce46d0193157a83825e6376",
+    "ui/tests/e2e-cross-swap-partial.spec.ts": "45ce795328087e35db68f95f2580695cffe4bb8ed7cf722c83bfc87a75350b00"
+  },
+  "rawHashes": {
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/partial-bilateral-1/wallet-browser.log": "ca5f03ad17a9365229eeb49613053de7e168f10eef1f28b754509266382cf3e9",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/full-bilateral-1/wallet-browser.log": "922b78e68bba4809c5b8f46cc207a8ee62022db3ecb7b6ad4202fa0d59e26d1e",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/bilateral-check.log": "ae1d734a1e0e330317b1fe9100b6986cc115f0db769a47cbadf80eda257e319c"
+  },
+  "reproduce": {
+    "command": "bun run stand:run --reason bilateral --timeout-ms 60000 -- bun run prod:smoke:local",
+    "runs": [
+      {
+        "XLN_LOCAL_PROD_SMOKE_DIR": "<fresh full artifact directory>",
+        "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS": "e2e-cross-swap.spec.ts",
+        "XLN_LOCAL_PROD_SMOKE_WALLET_GREP": "same-asset"
+      },
+      {
+        "XLN_LOCAL_PROD_SMOKE_DIR": "<fresh partial artifact directory>",
+        "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS": "e2e-cross-swap-partial.spec.ts",
+        "XLN_LOCAL_PROD_SMOKE_WALLET_GREP": "partly filled"
+      }
+    ],
+    "sequential": true,
+    "reason": "Harness intentionally accepts only literal safe grep characters; combined regex | was rejected before browser launch."
+  }
+}
