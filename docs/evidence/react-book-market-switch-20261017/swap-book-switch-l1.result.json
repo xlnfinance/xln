@@ -1,0 +1,11 @@
+{
+  "command": [
+    "bun",
+    "test",
+    "ui/src/runtime/financial/relay-book-snapshot.test.ts",
+    "ui/src/runtime/financial/orderbook-quote.test.ts"
+  ],
+  "exitCode": 0,
+  "seconds": 0.172,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-book-switch-l1.log"
+}

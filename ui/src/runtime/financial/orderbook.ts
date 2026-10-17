@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { StorageEntityCoreDoc } from '@xln/core/storage/types';
 import type { AccountState } from '@xln/core/api/public/runtime-module';
 import { decodeMarketWireResponse, encodeMarketWireMessage } from '@xln/core/network/relay/market/wire';
-import { normalizeMarketPairId } from '@xln/core/network/relay/market/identifiers';
+import type { RelayMarketSnapshotPayload } from '@xln/core/network/relay/market/aggregate';
+import type { MarketSideLevel } from '@xln/core/network/relay/market/snapshot';
+import { selectRelaySnapshot } from './relay-book-snapshot';
 import { resolveOrderbookRelayWsUrl, type BrowserLocationLike } from '@xln/frontend/lib/components/Trading/orderbook-relay-url';
 import { getAdapter } from '../adapter';
 import { useAdapterRead } from '../hooks';
@@ -115,10 +117,7 @@ export function bookFromHostedAccounts(
 // Relay market stream, for hubs this runtime does not host.
 // ---------------------------------------------------------------------------
 
-type RelayLevel = { price: string; size: string; total: string; orderCount?: number; ownerIds?: string[] };
-type RelaySnapshot = { sources: Array<{ hubEntityId: string; minTradeSize: string | null }>; pairId: string; bids: RelayLevel[]; asks: RelayLevel[]; spread: string | null; lastTradePrice: string | null; updatedAt: number };
-
-function relayLevels(levels: RelayLevel[], ownEntityId: string, lotScale: bigint): BookLevel[] {
+function relayLevels(levels: MarketSideLevel[], ownEntityId: string, lotScale: bigint): BookLevel[] {
 	const own = normalizeId(ownEntityId);
 	return levels.map(level => ({
 		priceTicks: BigInt(level.price),
@@ -136,7 +135,7 @@ const RELAY_STALE_MS = 15_000;
  * URL resolution as the SvelteKit OrderbookPanel; one socket per hook.
  */
 function useRelayBook(input: { enabled: boolean; hubId: string; relayUrl: string; pairId: string; depth: number; ownEntityId: string; lotScale: bigint; pageLocation?: BrowserLocationLike }) {
-	const [snapshot, setSnapshot] = useState<RelaySnapshot | null>(null);
+	const [latestSnapshot, setSnapshot] = useState<RelayMarketSnapshotPayload | null>(null);
 	const [status, setStatus] = useState<BookView['status']>('syncing');
 	const [error, setError] = useState<string | null>(null);
 	const socketRef = useRef<WebSocket | null>(null);
@@ -179,8 +178,8 @@ function useRelayBook(input: { enabled: boolean; hubId: string; relayUrl: string
 				return;
 			}
 			if (message.type === 'market_snapshot') {
-				const payload = message.payload as unknown as RelaySnapshot;
-				if (normalizeMarketPairId(payload.pairId) !== input.pairId) return;
+				const payload = selectRelaySnapshot(message.payload, input.hubId, input.pairId);
+				if (!payload) return;
 				setSnapshot(payload);
 				setStatus('live');
 			} else if (message.type === 'market_status') {
@@ -212,6 +211,8 @@ function useRelayBook(input: { enabled: boolean; hubId: string; relayUrl: string
 
 	return useMemo(() => {
 		if (!input.enabled) return null;
+		// A retained response belongs to its published market, never the next render's labels or units.
+		const snapshot = selectRelaySnapshot(latestSnapshot, input.hubId, input.pairId);
 		const minimum = snapshot?.sources.find(source => source.hubEntityId === input.hubId)?.minTradeSize;
 		const stale = snapshot ? Date.now() - snapshot.updatedAt > RELAY_STALE_MS : false;
 		return {
@@ -220,11 +221,11 @@ function useRelayBook(input: { enabled: boolean; hubId: string; relayUrl: string
 			asks: snapshot ? relayLevels(snapshot.asks, input.ownEntityId, input.lotScale) : [],
 			spreadTicks: snapshot?.spread ? BigInt(snapshot.spread) : null,
 			lastTradeTicks: snapshot?.lastTradePrice ? BigInt(snapshot.lastTradePrice) : null,
-			status: stale && status === 'live' ? ('syncing' as const) : status,
+			status: (!snapshot || stale) && status === 'live' ? ('syncing' as const) : status,
 			updatedAt: snapshot?.updatedAt ?? 0,
 			error,
 		};
-	}, [input.enabled, input.hubId, input.ownEntityId, input.lotScale, snapshot, status, error]);
+	}, [input.enabled, input.hubId, input.pairId, input.ownEntityId, input.lotScale, latestSnapshot, status, error]);
 }
 
 /**

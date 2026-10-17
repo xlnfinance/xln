@@ -1,0 +1,10 @@
+{
+  "baselineCount": 35,
+  "currentCount": 35,
+  "introducedCount": 0,
+  "newSharedDiagnostics": 0,
+  "introduced": [],
+  "scope": "Strict same-options comparison against exact preserved baseline source, via compiler host; baseline errors remain unresolved, not a whole-file type pass. No project gate changed.",
+  "fullComparison": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-book-switch/type-comparison.json",
+  "sha256": "d0e96bbb4b9294b1b7be5604ae5d8d349b56fc67898a61cc37ce3da51f7f47c3"
+}

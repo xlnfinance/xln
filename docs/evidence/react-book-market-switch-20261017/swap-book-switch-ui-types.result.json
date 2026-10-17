@@ -1,0 +1,12 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "--cwd",
+    "ui",
+    "check"
+  ],
+  "exitCode": 0,
+  "seconds": 6.447,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-book-switch-ui-types.log"
+}

@@ -1,3 +1,4 @@
+import { verifyBookSwitching } from '../../utils/browser/swap-book-switch';
 import { verifyRestingLimit } from '../../utils/browser/swap-resting-limit';
 import { verifyPriceBandRejection } from '../../utils/browser/swap-price-band';
 import { safeStringify } from '../../../core/protocol/serialization';
@@ -1746,13 +1747,6 @@ async function readAvailableFromSizing(page: Page): Promise<number> {
   return available;
 }
 
-async function selectSwapAccount(page: Page, accountId: string): Promise<void> {
-  const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
-  await expect(accountSelect).toBeVisible({ timeout: 20_000 });
-  await accountSelect.selectOption(accountId);
-  await page.waitForTimeout(200);
-}
-
 function shiftDisplayedPrice(value: string, delta: number): string {
   const parsed = Number.parseFloat(normalizeDisplayedPriceText(value));
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -2232,47 +2226,14 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     await verifyRestingLimit(page, info, wallet.entityId, 5_000_000_000_000_000n, price => price - 100n);
   });
 
-  test('swap scope and account switching clears stale rows and stale book hint state', { tag: '@resilience' }, async ({ page }) => {
-    const accountRef = await prepareOrderbookClickTest(page);
-
-    await ensureSwapScope(page, 'selected');
-    await selectSwapAccount(page, accountRef.hubIds[0]!);
-    await selectSwapPairSide(page, 'WETH/USDC', 'buy');
-    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
-      preferredAccountId: accountRef.hubIds[0]!,
-      scope: 'Selected',
-      minSources: 1,
-    });
-    await expectOrderbookHasAnyVisibleLiquidity(page, { timeoutMs: 10_000, minSources: 1, maxSources: 1 });
-
-    const asks = page.getByTestId('orderbook-ask-row');
-    await expect(asks.last()).toBeVisible({ timeout: 20_000 });
-    await asks.last().click();
-    await expect(page.getByTestId('swap-ticket-rate').first()).not.toHaveValue('', { timeout: 10_000 });
-
-    await selectSwapAccount(page, accountRef.hubIds[1]!);
-    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
-      preferredAccountId: accountRef.hubIds[1]!,
-      scope: 'Selected',
-      minSources: 1,
-    });
-    await expectOrderbookHasAnyVisibleLiquidity(page, { timeoutMs: 10_000, minSources: 1, maxSources: 1 });
-
-    await ensureSwapScope(page, 'aggregated');
-    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
-      preferredAccountId: accountRef.hubIds[1]!,
-      scope: 'Aggregated',
-      minSources: 3,
-    });
-    await expectOrderbookHasAnyVisibleLiquidity(page, { timeoutMs: 10_000, minSources: 3, maxSources: 3 });
-
-    await selectSwapPairSide(page, 'USDC/USDT', 'buy');
-    await waitForSwapOrderbookLiquidity(page, 'USDC/USDT', {
-      preferredAccountId: accountRef.hubIds[1]!,
-      scope: 'Aggregated',
-      minSources: 3,
-    });
-    await expectOrderbookHasAnyVisibleLiquidity(page, { timeoutMs: 10_000, minSources: 3, maxSources: 3 });
-  });
+  test(
+    'swap scope and account switching clears stale rows and stale book hint state',
+    { tag: '@resilience' },
+    async ({ page }, info) => {
+      await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+      await createWalletIdentity(page, 'book-switch', randomMnemonic());
+      await verifyBookSwitching(page, info);
+    },
+  );
 
 });

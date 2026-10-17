@@ -1,0 +1,41 @@
+{
+  "beforeNames": [
+    "swap shows visible depth on all canonical pairs and selected books",
+    "swap orderbook shows terminal no-market state when relay stream never returns a snapshot",
+    "swap orderbook shows terminal error state when relay rejects the market subscription",
+    "swap orderbook pair dropdown updates same-chain form tokens",
+    "swap place WETH/USDC offer survives reload",
+    "swap place and cancel from UI updates state machine",
+    "swap orderbook lowest ask click fills immediately at displayed book price",
+    "swap orderbook highest bid click fills immediately at displayed book price",
+    "swap orderbook mid price click fills immediately at displayed book price",
+    "swap flip keeps the displayed receive amount as the next source amount",
+    "swap flip keeps the sell-side displayed receive amount as the next source amount",
+    "swap can buy from asks and then sell back into bids on the same book",
+    "swap manual price override after book click uses the edited limit price",
+    "swap rejects price beyond 30% from current orderbook",
+    "swap rejects sell price beyond 30% from current orderbook",
+    "swap keeps a within-band wide limit as a resting order instead of filling immediately",
+    "swap scope and account switching clears stale rows and stale book hint state"
+  ],
+  "afterNames": [
+    "swap shows visible depth on all canonical pairs and selected books",
+    "swap orderbook shows terminal no-market state when relay stream never returns a snapshot",
+    "swap orderbook shows terminal error state when relay rejects the market subscription",
+    "swap orderbook pair dropdown updates same-chain form tokens",
+    "swap place WETH/USDC offer survives reload",
+    "swap place and cancel from UI updates state machine",
+    "swap orderbook lowest ask click fills immediately at displayed book price",
+    "swap orderbook highest bid click fills immediately at displayed book price",
+    "swap orderbook mid price click fills immediately at displayed book price",
+    "swap flip keeps the displayed receive amount as the next source amount",
+    "swap flip keeps the sell-side displayed receive amount as the next source amount",
+    "swap can buy from asks and then sell back into bids on the same book",
+    "swap manual price override after book click uses the edited limit price",
+    "swap rejects price beyond 30% from current orderbook",
+    "swap rejects sell price beyond 30% from current orderbook",
+    "swap keeps a within-band wide limit as a resting order instead of filling immediately",
+    "swap scope and account switching clears stale rows and stale book hint state"
+  ],
+  "sameNamesAndOrder": true
+}

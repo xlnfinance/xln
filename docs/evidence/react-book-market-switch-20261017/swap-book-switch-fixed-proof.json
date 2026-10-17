@@ -1,0 +1,395 @@
+[
+  {
+    "name": "book-switch-WETH/USDC \u00b7 H2",
+    "data": [
+      {
+        "header": "WETH/USDC \u00b7 H1",
+        "rows": [
+          "2,508.0000",
+          "2,506.2500",
+          "2,505.0000",
+          "2,503.7500",
+          "2,503.0000",
+          "2,502.5000",
+          "2,502.0000",
+          "2,501.5000",
+          "2,501.0000",
+          "2,500.5000",
+          "2,499.5000",
+          "2,499.0000",
+          "2,498.5000",
+          "2,498.0000",
+          "2,497.5000",
+          "2,497.0000",
+          "2,496.2500",
+          "2,495.0000",
+          "2,493.7500",
+          "2,492.0000"
+        ],
+        "status": "live"
+      },
+      {
+        "header": "WETH/USDC \u00b7 H2",
+        "rows": [],
+        "status": "syncing"
+      },
+      {
+        "header": "WETH/USDC \u00b7 H2",
+        "rows": [],
+        "status": "syncing"
+      },
+      {
+        "header": "WETH/USDC \u00b7 H2",
+        "rows": [
+          "2,508.0000",
+          "2,506.2500",
+          "2,505.0000",
+          "2,503.7500",
+          "2,503.0000",
+          "2,502.5000",
+          "2,502.0000",
+          "2,501.5000",
+          "2,501.0000",
+          "2,500.5000",
+          "2,499.5000",
+          "2,499.0000",
+          "2,498.5000",
+          "2,498.0000",
+          "2,497.5000",
+          "2,497.0000",
+          "2,496.2500",
+          "2,495.0000",
+          "2,493.7500",
+          "2,492.0000"
+        ],
+        "status": "live"
+      }
+    ]
+  },
+  {
+    "name": "book-switch-WETH/USDC \u00b7 H3",
+    "data": [
+      {
+        "header": "WETH/USDC \u00b7 H2",
+        "rows": [
+          "2,508.0000",
+          "2,506.2500",
+          "2,505.0000",
+          "2,503.7500",
+          "2,503.0000",
+          "2,502.5000",
+          "2,502.0000",
+          "2,501.5000",
+          "2,501.0000",
+          "2,500.5000",
+          "2,499.5000",
+          "2,499.0000",
+          "2,498.5000",
+          "2,498.0000",
+          "2,497.5000",
+          "2,497.0000",
+          "2,496.2500",
+          "2,495.0000",
+          "2,493.7500",
+          "2,492.0000"
+        ],
+        "status": "live"
+      },
+      {
+        "header": "WETH/USDC \u00b7 H3",
+        "rows": [],
+        "status": "syncing"
+      },
+      {
+        "header": "WETH/USDC \u00b7 H3",
+        "rows": [],
+        "status": "syncing"
+      },
+      {
+        "header": "WETH/USDC \u00b7 H3",
+        "rows": [
+          "2,508.0000",
+          "2,506.2500",
+          "2,505.0000",
+          "2,503.7500",
+          "2,503.0000",
+          "2,502.5000",
+          "2,502.0000",
+          "2,501.5000",
+          "2,501.0000",
+          "2,500.5000",
+          "2,499.5000",
+          "2,499.0000",
+          "2,498.5000",
+          "2,498.0000",
+          "2,497.5000",
+          "2,497.0000",
+          "2,496.2500",
+          "2,495.0000",
+          "2,493.7500",
+          "2,492.0000"
+        ],
+        "status": "live"
+      }
+    ]
+  },
+  {
+    "name": "book-switch-USDC/USDT \u00b7 H3",
+    "data": [
+      {
+        "header": "WETH/USDC \u00b7 H3",
+        "rows": [
+          "2,508.0000",
+          "2,506.2500",
+          "2,505.0000",
+          "2,503.7500",
+          "2,503.0000",
+          "2,502.5000",
+          "2,502.0000",
+          "2,501.5000",
+          "2,501.0000",
+          "2,500.5000",
+          "2,499.5000",
+          "2,499.0000",
+          "2,498.5000",
+          "2,498.0000",
+          "2,497.5000",
+          "2,497.0000",
+          "2,496.2500",
+          "2,495.0000",
+          "2,493.7500",
+          "2,492.0000"
+        ],
+        "status": "live"
+      },
+      {
+        "header": "USDC/USDT \u00b7 H3",
+        "rows": [],
+        "status": "syncing"
+      },
+      {
+        "header": "USDC/USDT \u00b7 H3",
+        "rows": [
+          "1.0016",
+          "1.0012",
+          "1.0010",
+          "1.0008",
+          "1.0006",
+          "1.0005",
+          "1.0004",
+          "1.0003",
+          "1.0002",
+          "1.0001",
+          "0.9999",
+          "0.9998",
+          "0.9997",
+          "0.9996",
+          "0.9995",
+          "0.9994",
+          "0.9992",
+          "0.9990",
+          "0.9988",
+          "0.9984"
+        ],
+        "status": "live"
+      }
+    ]
+  },
+  {
+    "name": "book-switch-accounts",
+    "data": {
+      "after": [
+        {
+          "height": 4,
+          "holds": [
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 1
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 2
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 3
+            }
+          ],
+          "mempool": 0,
+          "offers": 0,
+          "pending": false,
+          "root": "0xe77aeae56a71658c6819dc2d88ac20a947411beb87b55d1f61477aadf36f8a7d",
+          "usdc": "100000000",
+          "usdcSpendable": "100000000",
+          "weth": "0",
+          "wethCapacity": "0",
+          "wethCredit": "0"
+        },
+        {
+          "height": 2,
+          "holds": [
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 1
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 2
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 3
+            }
+          ],
+          "mempool": 0,
+          "offers": 0,
+          "pending": false,
+          "root": "0xf875ac881213c2ad339b2b951807bc8842dec2718cc305e61653f9c2bedc51d2",
+          "usdc": "0",
+          "usdcSpendable": "0",
+          "weth": "0",
+          "wethCapacity": "0",
+          "wethCredit": "0"
+        },
+        {
+          "height": 2,
+          "holds": [
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 1
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 2
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 3
+            }
+          ],
+          "mempool": 0,
+          "offers": 0,
+          "pending": false,
+          "root": "0xb638b64c4f23c34627fef4d93d38438b7ff9445856efbd16fd26779e61e7cd1a",
+          "usdc": "0",
+          "usdcSpendable": "0",
+          "weth": "0",
+          "wethCapacity": "0",
+          "wethCredit": "0"
+        }
+      ],
+      "before": [
+        {
+          "height": 4,
+          "holds": [
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 1
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 2
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 3
+            }
+          ],
+          "mempool": 0,
+          "offers": 0,
+          "pending": false,
+          "root": "0xe77aeae56a71658c6819dc2d88ac20a947411beb87b55d1f61477aadf36f8a7d",
+          "usdc": "100000000",
+          "usdcSpendable": "100000000",
+          "weth": "0",
+          "wethCapacity": "0",
+          "wethCredit": "0"
+        },
+        {
+          "height": 2,
+          "holds": [
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 1
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 2
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 3
+            }
+          ],
+          "mempool": 0,
+          "offers": 0,
+          "pending": false,
+          "root": "0xf875ac881213c2ad339b2b951807bc8842dec2718cc305e61653f9c2bedc51d2",
+          "usdc": "0",
+          "usdcSpendable": "0",
+          "weth": "0",
+          "wethCapacity": "0",
+          "wethCredit": "0"
+        },
+        {
+          "height": 2,
+          "holds": [
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 1
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 2
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 3
+            }
+          ],
+          "mempool": 0,
+          "offers": 0,
+          "pending": false,
+          "root": "0xb638b64c4f23c34627fef4d93d38438b7ff9445856efbd16fd26779e61e7cd1a",
+          "usdc": "0",
+          "usdcSpendable": "0",
+          "weth": "0",
+          "wethCapacity": "0",
+          "wethCredit": "0"
+        }
+      ],
+      "hubs": [
+        {
+          "id": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+          "name": "H1"
+        },
+        {
+          "id": "0xd17a4b8415a7e91e805da270fcd0a85e03a093845d8661b80656eb9d00f6a3e5",
+          "name": "H2"
+        },
+        {
+          "id": "0x9a2dedea7e937e9e0099c6a7d09cea53d254058278c9a5dc3a2bdbc9221bb667",
+          "name": "H3"
+        }
+      ]
+    }
+  }
+]

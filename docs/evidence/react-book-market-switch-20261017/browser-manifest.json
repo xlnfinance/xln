@@ -1,0 +1,33 @@
+{
+  "candidate": {
+    "candidateId": "8e056a56892153f003f59a4550ac39628823d4946b99d9cab3a36ff7815fc53e",
+    "gitHead": "3a32480ecd134aefa739fad8fbc9d41ec890fd71",
+    "codeHash": "b4295955204dfdc287a98847f4ba854c7e5adb1d1be0b2bd217c4867bed5ef3c",
+    "gateConfigHash": "1949bb1393612c738280c550fbcd842285d9423f0e104586917f5a8cd6edc5f3"
+  },
+  "runId": "20261017-230437-427",
+  "status": "passed",
+  "totalMs": 28520,
+  "browserHealth": {
+    "issueCount": 0,
+    "errorCount": 0,
+    "warningCount": 0,
+    "networkFailureCount": 0,
+    "httpErrorCount": 0,
+    "severity": "OK",
+    "reason": "Browser event stream is clean",
+    "since": 0,
+    "owner": "browser",
+    "evidence": [
+      {
+        "label": "issues",
+        "value": 0
+      }
+    ]
+  },
+  "passedShards": 1,
+  "failedShards": 0,
+  "cancelledShards": 0,
+  "fullManifest": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-book-switch-fixed-boundary/run-manifest.json",
+  "sha256": "b748856cd2017a3861f72efcf08936fe3d63d2711f2d4e0651101f97ddd34808"
+}
