@@ -10,7 +10,8 @@ import { verifyRestingSwapCancellation } from '../../../ui/tests/swap-cancellati
  * cleanly through the UI, and that the scenario runners still produce partial fills after reload-safe setup.
  */
 import { test, expect, type Locator, type Page } from '../../global-setup.mts';
-import { Wallet } from 'ethers';
+import { Wallet, formatUnits, parseUnits } from 'ethers';
+import { readAccount, readOrders } from '../../../ui/tests/swap-evidence';
 import { timedStep } from '../../utils/e2e-timing.mts';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, getHealth } from '../../utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit as connectRuntimeToSharedHubWithCredit } from '../../utils/e2e-connect';
@@ -2261,55 +2262,114 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     await info.attach('current-book-roundtrip', { body: safeStringify({ entityId: wallet.entityId, runtimeId: wallet.runtimeId, buy, sell }), contentType: 'application/json' });
   });
 
-  test('swap manual price override after book click uses the edited limit price', { tag: '@functional' }, async ({ page }) => {
-    const accountRef = await prepareOrderbookClickTest(page);
-    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
-      preferredAccountId: accountRef.counterpartyId,
-      scope: 'Aggregated',
-      minSources: 3,
-    });
-
-    const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
-    await expect(accountSelect).toBeVisible({ timeout: 20_000 });
-    await ensureSwapScope(page, 'selected');
-    await selectSwapAccount(page, accountRef.counterpartyId);
-
-    const amountInput = page.getByTestId('swap-ticket-amount').first();
-    const priceInput = page.getByTestId('swap-ticket-rate').first();
-    const placeButton = page.getByTestId('swap-ticket-submit').first();
-    await selectSwapPairSide(page, 'WETH/USDC', 'buy');
-    await expect(amountInput).toBeVisible({ timeout: 20_000 });
-    await page.waitForTimeout(120);
-
-    const asks = page.getByTestId('orderbook-ask-row');
-    await expect(asks.last()).toBeVisible({ timeout: 20_000 });
-    const clickedAskText = String(await asks.last().locator('.price').textContent() || '').trim();
-    await asks.last().click();
-
-    const availableQuote = await readAvailableFromSizing(page);
-    expect(availableQuote, 'buy-side available quote must be positive').toBeGreaterThan(0);
-    await amountInput.fill(formatDecimalForInput(Math.min(availableQuote, 25)));
-    await expect(priceInput).toHaveValue(normalizeDisplayedPriceText(clickedAskText), { timeout: 10_000 });
-    const editedPrice = shiftDisplayedPrice(clickedAskText, -0.01);
-    await priceInput.fill(editedPrice);
-    await expect(priceInput).toHaveValue(editedPrice);
-    await expect(placeButton).toBeEnabled({ timeout: 10_000 });
-    await placeButton.click();
-
-    const firstRow = page.getByTestId('swap-open-order-row').first();
-    await expect(firstRow).toBeVisible({ timeout: 30_000 });
-    await expect(firstRow.locator('td').nth(2)).toHaveText(editedPrice, { timeout: 10_000 });
-
-    const cancelButton = firstRow.getByTestId('swap-open-order-cancel');
-    await expect(cancelButton).toBeVisible({ timeout: 10_000 });
-    await cancelButton.click();
-    await expect
-      .poll(async () => await page.getByTestId('swap-open-order-row').count(), {
-        timeout: 60_000,
-        intervals: [100, 250, 500, 1000],
-      })
-      .toBe(0);
-  });
+  test(
+    'swap manual price override after book click uses the edited limit price',
+    { tag: '@functional' },
+    async ({ page }, info) => {
+      await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+      const wallet = await createWalletIdentity(page, 'edited-limit', randomMnemonic());
+      await page.getByTestId('home-faucet').click();
+      await expect(page.getByTestId('test-money-status')).toHaveText('100 USDC received');
+      await page.getByTestId('account-row').first().click();
+      const hubId = new URL(page.url()).pathname.split('/accounts/')[1];
+      if (!hubId || !/^0x[0-9a-f]{64}$/.test(hubId)) throw new Error('SWAP_HUB_ID_MISSING');
+      await page.getByTestId('back').click();
+      await page.getByTestId('home-swap').click();
+      const book = page.getByTestId('orderbook').locator('visible=true').first();
+      await expect(book).toHaveAttribute('data-status', 'live');
+      const ask = book.getByTestId('book-row-ask').last();
+      await expect(ask).toBeVisible();
+      const clickedPrice = parseUnits((await ask.locator('.bk-price').innerText()).replaceAll(',', ''), 4);
+      expect(clickedPrice).toBeGreaterThan(0n);
+      await ask.click();
+      const preview = page.locator('.kv').filter({ hasText: 'Limit price' });
+      const readPreviewPrice = async () => {
+        const [price] = (await preview.locator('.v').innerText()).split(' ');
+        if (!price) throw new Error('SWAP_LIMIT_PREVIEW_MISSING');
+        return parseUnits(price.replaceAll(',', ''), 4);
+      };
+      expect(await readPreviewPrice()).toBe(clickedPrice);
+      // A 0.01-WETH lot makes quote base units equal four-decimal price ticks.
+      // The signed order must bind the edited 1%-lower limit, never the clicked ask.
+      const editedPrice = (clickedPrice * 99n) / 100n;
+      const give = page.getByTestId('swap-give');
+      const want = page.getByTestId('swap-want');
+      await give.fill(formatUnits(editedPrice, 6));
+      await want.fill('0.01');
+      await expect.poll(readPreviewPrice).toBe(editedPrice);
+      expect(parseUnits(await give.inputValue(), 6)).toBe(editedPrice);
+      expect(parseUnits(await want.inputValue(), 18)).toBe(10_000_000_000_000_000n);
+      const before = await readAccount(page, hubId);
+      expect(before.usdc).toBe('100000000');
+      expect(before.weth).toBe('0');
+      expect(before.offers).toBe(0);
+      expect((await readOrders(page, hubId)).items).toHaveLength(0);
+      const submit = page.getByTestId('swap-submit');
+      await expect(submit).toBeEnabled();
+      await submit.click();
+      await expect
+        .poll(async () => {
+          const account = await readAccount(page, hubId);
+          return { offers: account.offers, pending: account.pending, mempool: account.mempool };
+        })
+        .toEqual({ offers: 1, pending: false, mempool: 0 });
+      const resting = await readAccount(page, hubId);
+      const history = await readOrders(page, hubId);
+      expect(history.items).toHaveLength(1);
+      const [order] = history.items;
+      if (!order) throw new Error('EDITED_LIMIT_ORDER_MISSING');
+      expect(order.priceTicks).toBe(editedPrice);
+      expect(order.priceTicks).not.toBe(clickedPrice);
+      expect(order.originalGiveAmount).toBe(editedPrice);
+      expect(order.originalWantAmount).toBe(10_000_000_000_000_000n);
+      expect(order.resolves).toHaveLength(0);
+      expect(order.closed).toBe(false);
+      expect(resting.usdc).toBe(before.usdc);
+      expect(resting.weth).toBe(before.weth);
+      expect(BigInt(before.usdcSpendable) - BigInt(resting.usdcSpendable)).toBe(order.originalGiveAmount);
+      const cancel = page.getByTestId('swap-offer-cancel');
+      await expect(cancel).toHaveCount(1);
+      await expect(cancel.locator('xpath=ancestor::div[contains(@class,"row")][1]')).toContainText(
+        `${formatUnits(editedPrice, 6)} USDC for 0.01 WETH`,
+      );
+      await cancel.click();
+      await expect
+        .poll(async () => {
+          const account = await readAccount(page, hubId);
+          return { offers: account.offers, pending: account.pending, mempool: account.mempool };
+        })
+        .toEqual({ offers: 0, pending: false, mempool: 0 });
+      const canceled = await readAccount(page, hubId);
+      const closed = await readOrders(page, hubId);
+      expect(closed.items).toHaveLength(1);
+      const [closedOrder] = closed.items;
+      if (!closedOrder) throw new Error('EDITED_LIMIT_CANCELLATION_MISSING');
+      expect(closedOrder.offerId).toBe(order.offerId);
+      expect(closedOrder.priceTicks).toBe(editedPrice);
+      expect(closedOrder.closed).toBe(true);
+      expect(closedOrder.cancelRequested).toBe(true);
+      expect(closedOrder.resolves).toHaveLength(1);
+      expect(closedOrder.resolves[0]).toMatchObject({ fillRatio: 0, cancelRemainder: true, comment: 'cancel_request' });
+      expect(canceled.usdc).toBe(before.usdc);
+      expect(canceled.weth).toBe(before.weth);
+      expect(canceled.usdcSpendable).toBe(before.usdcSpendable);
+      expect(canceled.holds.every((hold) => hold.outgoing === '0' && hold.incoming === '0')).toBe(true);
+      await expect(cancel).toHaveCount(0);
+      await info.attach('current-edited-limit', {
+        body: safeStringify({
+          entityId: wallet.entityId,
+          clickedPrice,
+          editedPrice,
+          before,
+          resting,
+          history,
+          canceled,
+          closed,
+        }),
+        contentType: 'application/json',
+      });
+    },
+  );
 
   test('swap rejects price beyond 30% from current orderbook', { tag: '@resilience' }, async ({ page }) => {
     const accountRef = await prepareOrderbookClickTest(page);

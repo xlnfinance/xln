@@ -1,0 +1,18 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "swap-edited-limit-preparation",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "test",
+    "core/__tests__/payments/swap/swap-order-preparation.test.ts"
+  ],
+  "exitCode": 0,
+  "seconds": 0.237,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-edited-limit-preparation.log"
+}
