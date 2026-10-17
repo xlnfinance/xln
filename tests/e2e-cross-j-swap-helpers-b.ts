@@ -81,7 +81,7 @@ export async function expectCrossOrderbookReady(
         ?.trim()
         .toLowerCase() || '';
     const relayUrl = normalizeWs(String(panelEl?.getAttribute('data-relay-url') || ''));
-    const env = (window as CrossRuntimeWindow).isolatedEnv as any;
+    const env = (window as CrossRuntimeWindow).__xln?.env() as any;
     const rawProfiles =
       typeof env?.gossip?.getProfiles === 'function' ? env.gossip.getProfiles() : env?.gossip?.profiles;
     const profiles =
@@ -472,7 +472,7 @@ export async function placeCrossOrder(
             return {
               amount,
               price,
-              isolated: summarizeEnv(view.isolatedEnv),
+              isolated: summarizeEnv(view.__xln?.env()),
               live: summarizeEnv(view.__xln_env),
             };
           });
@@ -643,7 +643,7 @@ export async function readCrossState(
   return await page.evaluate(
     ({ identity, hubId }) => {
       const view = window as CrossRuntimeWindow;
-      const env = view.isolatedEnv;
+      const env = view.__xln?.env();
       const connectivity = view.__xln?.runtimeConnectivity;
       const entityNeedle = String(identity.entityId || '').toLowerCase();
       const signerNeedle = String(identity.signerId || '').toLowerCase();
@@ -922,7 +922,7 @@ export async function waitForCrossPullFlow(
       readCrossState(page, target, targetHubId),
     ]);
     const replicas = await page.evaluate(() => {
-      const env = (window as CrossRuntimeWindow).isolatedEnv;
+      const env = (window as CrossRuntimeWindow).__xln?.env();
       return Array.from(env?.state.eReplicas?.entries?.() || []).map(([key, replica]: [string, any]) => {
         const state = replica?.state;
         return {
@@ -1000,7 +1000,7 @@ export async function readCrossResolveSnapshots(
 ): Promise<CrossResolveSnapshot[]> {
   return await page.evaluate(
     ({ entityId, counterpartyId }) => {
-      const env = (window as CrossRuntimeWindow).isolatedEnv;
+      const env = (window as CrossRuntimeWindow).__xln?.env();
       const recordOf = (value: unknown): Record<string, unknown> =>
         value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
       const owner = String(entityId || '').toLowerCase();
@@ -1160,7 +1160,7 @@ export async function waitForLatestCrossResolveSnapshot(
   } catch (error) {
     const debug = await page.evaluate(
       ({ entityId, counterpartyId }) => {
-        const env = (window as CrossRuntimeWindow).isolatedEnv;
+        const env = (window as CrossRuntimeWindow).__xln?.env();
         const owner = String(entityId || '').toLowerCase();
         const cp = String(counterpartyId || '').toLowerCase();
         const out: any[] = [];
@@ -1278,7 +1278,7 @@ export async function waitForCrossOffersCleared(
   } catch (error) {
     const debug = await page.evaluate(
       ({ identity, hubId }) => {
-        const env = (window as CrossRuntimeWindow).isolatedEnv;
+        const env = (window as CrossRuntimeWindow).__xln?.env();
         const out: any[] = [];
         for (const [key, replica] of env?.state.eReplicas?.entries?.() || []) {
           const state = replica?.state;

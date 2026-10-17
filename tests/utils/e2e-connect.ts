@@ -1,3 +1,4 @@
+import type { RuntimeReplica } from '../../core/api/public/runtime-module';
 import { expect, type Page } from '@playwright/test';
 import { getTokenInfo } from '../../core/account/utils';
 import { enqueueEntityTxs } from './runtime/e2e-runtime-input';
@@ -39,47 +40,31 @@ async function readSelectedUiRuntimeIdentity(page: Page): Promise<{ entityId: st
   return selected;
 }
 
+type CurrentRuntimeWindow = Window & {
+  __xln?: { env(): RuntimeReplica | null; store: { getState(): { activeEntityId: string | null } } };
+};
+
 async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
-  const ok = await page.evaluate(async () => {
-    type Connectivity = { connected?: boolean; connect?: () => void; reconnect?: () => void };
-    const view = window as typeof window & { __xln?: { runtimeConnectivity?: Connectivity } };
-
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 20_000) {
-      const connectivity = view.__xln?.runtimeConnectivity;
-      if (connectivity?.connected === true) return true;
-      if (typeof connectivity?.connect === 'function') {
-        try { connectivity.connect(); } catch {}
-      } else if (typeof connectivity?.reconnect === 'function') {
-        try { connectivity.reconnect(); } catch {}
-      }
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-
-    return view.__xln?.runtimeConnectivity?.connected === true;
-  });
-
-  expect(ok, `[${tag}] runtime must be online`).toBe(true);
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const env = (window as CurrentRuntimeWindow).__xln?.env();
+          if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+          const p2p = env.infrastructure?.p2p;
+          if (!p2p) throw new Error('CURRENT_WALLET_P2P_MISSING');
+          return p2p.isConnected();
+        }),
+      { timeout: 20_000, message: `[${tag}] runtime must be online` },
+    )
+    .toBe(true);
 }
 
 async function nudgeRuntimeOnline(page: Page): Promise<void> {
   await page.evaluate(() => {
-    type Connectivity = { connected?: boolean; connect?: () => void; reconnect?: () => void };
-    const connectivity = (window as typeof window & {
-      __xln?: { runtimeConnectivity?: Connectivity };
-    }).__xln?.runtimeConnectivity;
-    if (!connectivity || connectivity.connected === true) return;
-    if (typeof connectivity.connect === 'function') {
-      try { connectivity.connect(); } catch {}
-      return;
-    }
-    if (typeof connectivity.reconnect === 'function') {
-      try { connectivity.reconnect(); } catch {}
-    }
-  }).catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes('Execution context was destroyed')) return;
-    throw error;
+    const p2p = (window as CurrentRuntimeWindow).__xln?.env()?.infrastructure?.p2p;
+    if (!p2p) throw new Error('CURRENT_WALLET_P2P_MISSING');
+    if (!p2p.isConnected()) p2p.connect();
   });
 }
 
@@ -93,188 +78,31 @@ async function isAccountReady(
 ): Promise<boolean> {
   return page.evaluate(
     async ({ entityId, signerId, hubId, tokenIds, timeoutMs }) => {
-      const env = (window as typeof window & {
-        isolatedEnv?: {
-          state?: {
-            eReplicas?: Map<string, {
-              state?: {
-                accounts?: Map<string, {
-                  deltas?: Map<number, unknown>;
-                  pendingFrame?: unknown;
-                  currentHeight?: number;
-                }>;
-              };
-            }>;
-          };
-        };
-      }).isolatedEnv;
-      if (!env?.state?.eReplicas) return false;
-
-      const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
-      const resolveCounterpartyAccount = (
-        accounts: Map<string, {
-          state: {
-            deltas: Map<number, unknown>;
-            leftEntity: string;
-            rightEntity: string;
-          };
-          pendingFrame?: unknown;
-          currentHeight?: number;
-          currentFrame?: { height?: number };
-          proofHeader?: { fromEntity?: string; toEntity?: string };
-        }>,
-        ownerEntityId: string,
-        counterpartyEntityId: string,
-      ) => {
-        const owner = normalizeEntityId(ownerEntityId);
-        const target = normalizeEntityId(counterpartyEntityId);
-        const accountBelongsToPair = (account: {
-          state: { leftEntity: string; rightEntity: string };
-          proofHeader?: { fromEntity?: string; toEntity?: string };
-        } | null | undefined): boolean => {
-          if (!account) return false;
-          const proofFrom = normalizeEntityId(account.proofHeader?.fromEntity);
-          const proofTo = normalizeEntityId(account.proofHeader?.toEntity);
-          if (proofFrom || proofTo) return proofFrom === owner && proofTo === target;
-          const left = normalizeEntityId(account.state.leftEntity);
-          const right = normalizeEntityId(account.state.rightEntity);
-          return (left === owner && right === target) || (left === target && right === owner);
-        };
-        const direct = accounts.get(target) ?? accounts.get(String(counterpartyEntityId || ''));
-        if (accountBelongsToPair(direct)) return direct;
-        for (const [accountKey, account] of accounts.entries()) {
-          if (normalizeEntityId(accountKey) === target && accountBelongsToPair(account)) return account;
-          const left = normalizeEntityId(account.state.leftEntity);
-          const right = normalizeEntityId(account.state.rightEntity);
-          if ((left === owner && right === target) || (right === owner && left === target)) return account;
-          if (accountBelongsToPair(account)) return account;
-        }
-        return null;
-      };
-
+      const env = (window as CurrentRuntimeWindow).__xln?.env();
+      if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
       const startedAt = Date.now();
-	      while (Date.now() - startedAt <= timeoutMs) {
-	        for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
-	          const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
-	          if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
-	          if (String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
-	          const accounts = replica.state?.accounts;
-	          const account = accounts instanceof Map
-	            ? resolveCounterpartyAccount(accounts, entityId, hubId)
-	            : null;
-	          if (!account) continue;
-	          const hasDelta = tokenIds.every((tokenId) => {
-	            if (!(account.state.deltas instanceof Map)) return false;
-	            for (const [deltaTokenId] of account.state.deltas.entries()) {
-	              if (Number(deltaTokenId) === tokenId) return true;
-	            }
-	            return false;
-	          });
-	          const noPending = !account.pendingFrame;
-	          const hasFrame = Number(account.currentHeight || 0) > 0;
-	          if (hasDelta && noPending && hasFrame) return true;
-	        }
+      do {
+        const replica = env.state.eReplicas.get(`${entityId}:${signerId}`.toLowerCase());
+        const account = replica?.state.accounts.get(hubId.toLowerCase());
+        if (
+          account &&
+          account.currentHeight > 0 &&
+          !account.pendingFrame &&
+          tokenIds.every(tokenId => account.state.deltas.has(tokenId))
+        )
+          return true;
         if (timeoutMs <= 0) break;
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } while (Date.now() - startedAt < timeoutMs);
       return false;
     },
     { entityId, signerId, hubId, tokenIds: [...tokenIds], timeoutMs },
   );
 }
 
-async function dismissOnboardingIfVisible(page: Page): Promise<void> {
-  const onboarding = page.locator('.onboarding').first();
-  if (!await onboarding.isVisible().catch(() => false)) return;
-  const startUsingButton = onboarding.getByRole('button', { name: /Start( using xln)?|Continue/i }).first();
-
-  const setupError = onboarding.locator('.error-msg').first();
-  const readSetupError = async (): Promise<string> => {
-    if (!await setupError.isVisible().catch(() => false)) return '';
-    return String(await setupError.innerText({ timeout: 1_000 }).catch(() => '')).trim();
-  };
-  const waitForSetupToFinish = async (context: string): Promise<void> => {
-    const deadline = Date.now() + DEFAULT_OPEN_TIMEOUT_MS;
-    let lastText = '';
-    while (Date.now() < deadline) {
-      if (!await onboarding.isVisible().catch(() => false)) return;
-      const errorText = await readSetupError();
-      if (errorText) throw new Error(`${context}: ${errorText}`);
-      lastText = String(await onboarding.innerText({ timeout: 1_000 }).catch(() => '')).replace(/\s+/g, ' ').slice(0, 500);
-      await page.waitForTimeout(500);
-    }
-    throw new Error(`${context}: onboarding did not complete. Last visible state: ${lastText || 'empty'}`);
-  };
-
-  const initialError = await readSetupError();
-  if (initialError) {
-    throw new Error(`onboarding setup failed before workspace open: ${initialError}`);
-  }
-  if (!await startUsingButton.isVisible().catch(() => false)) {
-    await waitForSetupToFinish('onboarding setup already in progress');
-    return;
-  }
-
-  const riskCheckbox = page.getByRole('checkbox', {
-    name: /I understand.*testnet software|I understand and accept the risks/i,
-  }).first();
-  if (await riskCheckbox.isVisible().catch(() => false)) {
-    const checked = await riskCheckbox.isChecked().catch(() => false);
-    if (!checked) await riskCheckbox.check({ timeout: 2000 }).catch(() => null);
-  }
-
-  await startUsingButton.click({ force: true, timeout: 5_000 }).catch(() => null);
-  await page.evaluate(() => {
-    const start = Array.from(document.querySelectorAll('button'))
-      .find((button) => /^Start$/i.test(String(button.textContent || '').trim()));
-    start?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-  }).catch(() => null);
-
-  const postClickError = await readSetupError();
-  if (postClickError) {
-    throw new Error(`onboarding setup failed after Start: ${postClickError}`);
-  }
-  await waitForSetupToFinish('onboarding setup after Start');
-}
-
 async function openAccountsWorkspace(page: Page): Promise<void> {
-  await dismissOnboardingIfVisible(page);
-  const accountsTab = page.getByTestId('tab-accounts').first();
-  const accountList = page.getByTestId('account-list-wrapper').first();
-  const workspaceTabs = page.locator('nav[aria-label="Account workspace"]').first();
-  const activeWalletGate = page.getByRole('heading', { name: /XLN wallet available/i }).first();
-  const isAccountsWorkspaceVisible = async () =>
-    await accountList.isVisible().catch(() => false)
-      || await workspaceTabs.isVisible().catch(() => false);
-
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    await dismissOnboardingIfVisible(page);
-    if (await isAccountsWorkspaceVisible()) break;
-    if (await activeWalletGate.isVisible().catch(() => false)) {
-      await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
-      await page.waitForTimeout(500);
-      await dismissOnboardingIfVisible(page);
-      continue;
-    }
-    if (await accountsTab.isVisible().catch(() => false)) {
-      await accountsTab.click({ timeout: 5_000 });
-      await page.waitForTimeout(300);
-      continue;
-    }
-  }
-
-  await dismissOnboardingIfVisible(page);
-  await expect
-    .poll(async () => {
-      await dismissOnboardingIfVisible(page);
-      return await isAccountsWorkspaceVisible();
-    }, {
-      timeout: 20_000,
-      intervals: [200, 400, 800],
-      message: 'accounts workspace must be visible',
-    })
-    .toBe(true);
+  await page.getByTestId('nav-home').locator('visible=true').first().click();
+  await expect(page.getByTestId('home-pay')).toBeVisible({ timeout: 20_000 });
 }
 
 async function openWorkspaceTab(page: Page, tabTestId: string): Promise<void> {
@@ -358,8 +186,8 @@ async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
 }
 
 async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
-  await ensureHubCardVisible(page, hubId);
   if (await hasRenderedCommittedAccountCard(page, hubId)) return;
+  await ensureHubCardVisible(page, hubId);
   if (await hasExportedRuntimeP2P(page)) {
     await waitForHubRuntimeTransportReady(page, hubId);
   } else {
@@ -667,78 +495,17 @@ async function waitForRenderedCommittedAccountCard(
 }
 
 async function waitForHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 20_000): Promise<void> {
-  let lastProfileState: unknown = null;
-  try {
-    await expect
-      .poll(
-      async () => page.evaluate(async (targetHubId) => {
-        type Connectivity = {
-          connected?: boolean;
-          connecting?: boolean;
-          relayUrls?: string[];
-          reconnectState?: unknown;
-          profiles?: Array<{ entityId?: string; runtimeId?: string }>;
-          connect?: () => void;
-          reconnect?: () => void;
-          ensureProfiles?: (ids: string[]) => Promise<boolean>;
-        };
-        const view = window as typeof window & { __xln?: { runtimeConnectivity?: Connectivity } };
-        const target = String(targetHubId || '').toLowerCase();
-        const getProfile = () => view.__xln?.runtimeConnectivity?.profiles?.find((candidate) =>
-          String(candidate?.entityId || '').toLowerCase() === target,
-        );
-        const profile = getProfile();
-        if (String(profile?.runtimeId || '').trim()) return true;
-
-        const connectivity = view.__xln?.runtimeConnectivity;
-        if (!connectivity) {
-          return { ok: false, reason: 'missing-connectivity-boundary', profileCount: 0 };
-        }
-
-        const connectedBefore = connectivity.connected ?? null;
-        if (!connectedBefore) {
-          if (typeof connectivity.connect === 'function') {
-            try { connectivity.connect(); } catch {}
-          } else if (typeof connectivity.reconnect === 'function') {
-            try { connectivity.reconnect(); } catch {}
-          }
-          await new Promise((resolve) => setTimeout(resolve, 250));
-        }
-
-        const ensureResult = await connectivity.ensureProfiles?.([target]).catch((error) =>
-          error instanceof Error ? error.message : String(error),
-        );
-        const refreshedProfile = getProfile();
-        const refreshed = view.__xln?.runtimeConnectivity;
-        return {
-          ok: Boolean(String(refreshedProfile?.runtimeId || '').trim()),
-          reason: refreshedProfile ? 'profile-without-runtime' : 'missing-profile',
-          connectedBefore,
-          connectedAfter: refreshed?.connected ?? null,
-          connecting: refreshed?.connecting ?? null,
-          relayUrls: refreshed?.relayUrls ?? [],
-          reconnectState: refreshed?.reconnectState ?? null,
-          ensureResult,
-          profileCount: refreshed?.profiles?.length || 0,
-          targetRuntimeId: String(refreshedProfile?.runtimeId || '').trim(),
-        };
-      }, hubId).then((state) => {
-        lastProfileState = state;
-        return state === true || Boolean((state as { ok?: boolean } | null)?.ok);
-      }),
-      {
-        timeout: timeoutMs,
-        intervals: [100, 250, 500],
-        message: `hub ${hubId.slice(0, 10)} must have a gossip runtime route before connect`,
-      },
-      )
-      .toBe(true);
-  } catch (error) {
-    throw new Error(
-      `${error instanceof Error ? error.message : String(error)}\n` +
-      `lastHubProfileState=${stringifyDebug(lastProfileState)}`,
-    );
-  }
+  await expect
+    .poll(
+      () =>
+        page.evaluate(hubId => {
+          const env = (window as CurrentRuntimeWindow).__xln?.env();
+          if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+          return Boolean(env.gossip.getProfile(hubId.toLowerCase())?.runtimeId);
+        }, hubId),
+      { timeout: timeoutMs, message: `hub ${hubId.slice(0, 10)} must have a gossip runtime route` },
+    )
+    .toBe(true);
 }
 
 async function waitForPublicHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 20_000): Promise<void> {
@@ -789,101 +556,30 @@ async function waitForPublicHubRuntimeProfile(page: Page, hubId: string, timeout
 
 async function waitForHubRuntimeTransportReady(page: Page, hubId: string, timeoutMs = 30_000): Promise<void> {
   await waitForHubRuntimeProfile(page, hubId, timeoutMs);
-  let lastStatus: unknown = null;
-  try {
-    await expect
-      .poll(
-      async () => page.evaluate(async (targetHubId) => {
-        type Connectivity = {
-          connected?: boolean;
-          profiles?: Array<{ entityId?: string; runtimeId?: string; wsUrl?: string | null }>;
-          directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean; lastError?: string; lastErrorAt?: number }>;
-          connect?: () => void;
-          reconnect?: () => void;
-          ensureProfiles?: (ids: string[]) => Promise<boolean>;
-        };
-        const view = window as typeof window & { __xln?: { runtimeConnectivity?: Connectivity } };
-        const target = String(targetHubId || '').toLowerCase();
-        const connectivity = view.__xln?.runtimeConnectivity;
-        const profile = connectivity?.profiles?.find((candidate) =>
-          String(candidate?.entityId || '').toLowerCase() === target,
-        );
-        const runtimeId = String(profile?.runtimeId || '').trim().toLowerCase();
-        if (!connectivity || !runtimeId) {
-          await connectivity?.ensureProfiles?.([target]).catch(() => false);
-          return { ok: false, reason: 'missing-profile-or-connectivity', runtimeId };
-        }
-
-        const relayConnected = connectivity.connected === true;
-        if (!relayConnected) {
-          if (typeof connectivity.connect === 'function') {
-            try { connectivity.connect(); } catch {}
-          } else if (typeof connectivity.reconnect === 'function') {
-            try { connectivity.reconnect(); } catch {}
-          }
-        }
-
-        const directEndpoint = String(profile?.wsUrl || '').trim();
-        const directAllowed = (() => {
-          if (!directEndpoint) return false;
-          if (String(window.location?.protocol || '').toLowerCase() !== 'https:') return true;
-          try {
-            const parsed = new URL(directEndpoint);
-            if (parsed.protocol === 'wss:') return true;
-            if (parsed.protocol !== 'ws:') return false;
-            const host = String(parsed.hostname || '').toLowerCase();
-            return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
-          } catch {
-            return false;
-          }
-        })();
-        if (directAllowed) {
-          const directPeers = view.__xln?.runtimeConnectivity?.directPeers ?? [];
-          const peer = directPeers.find((entry) => String(entry.runtimeId || '').toLowerCase() === runtimeId);
-          return {
-            ok: peer?.open === true || relayConnected,
-            reason: peer?.open === true ? 'direct-open' : relayConnected ? 'relay-open' : 'transport-not-open',
-            runtimeId,
-            directEndpoint,
-            directAllowed,
-            relayConnected,
-            directPeers,
-          };
-        }
-
-        return {
-          // Recipient presence is deliberately private. The actual payment or
-          // profile exchange proves delivery; readiness only proves our relay.
-          ok: relayConnected,
-          reason: relayConnected ? 'relay-open' : 'relay-not-open',
-          runtimeId,
-          directEndpoint,
-          directAllowed,
-          relayConnected,
-          directPeers: view.__xln?.runtimeConnectivity?.directPeers ?? [],
-        };
-      }, hubId).then((status) => {
-        lastStatus = status;
-        return Boolean(status.ok);
-      }),
-      {
-        timeout: timeoutMs,
-        intervals: [100, 250, 500],
-        message: `hub ${hubId.slice(0, 10)} transport route must be open before account tx`,
-      },
-      )
-      .toBe(true);
-  } catch (error) {
-    throw new Error(
-      `${error instanceof Error ? error.message : String(error)}\n` +
-      `lastTransportStatus=${stringifyDebug(lastStatus)}`,
-    );
-  }
-
-  expect(
-    Boolean((lastStatus as { ok?: boolean } | null)?.ok),
-    `hub transport route not ready: ${stringifyDebug(lastStatus)}`,
-  ).toBe(true);
+  await expect
+    .poll(
+      () =>
+        page.evaluate(hubId => {
+          const env = (window as CurrentRuntimeWindow).__xln?.env();
+          const p2p = env?.infrastructure?.p2p;
+          if (!env || !p2p) throw new Error('CURRENT_WALLET_P2P_MISSING');
+          const profile = env.gossip.getProfile(hubId.toLowerCase());
+          if (!profile?.runtimeId) return false;
+          if (p2p.isConnected()) return true;
+          p2p.connect();
+          if (!profile.wsUrl) return false;
+          const endpoint = new URL(profile.wsUrl);
+          const directAllowed =
+            window.location.protocol !== 'https:' ||
+            endpoint.protocol === 'wss:' ||
+            (endpoint.protocol === 'ws:' && ['localhost', '127.0.0.1', '::1', '[::1]'].includes(endpoint.hostname));
+          return (
+            directAllowed && p2p.getDirectPeerState().some(peer => peer.runtimeId === profile.runtimeId && peer.open)
+          );
+        }, hubId),
+      { timeout: timeoutMs, message: `hub ${hubId.slice(0, 10)} transport route must be open before account tx` },
+    )
+    .toBe(true);
 }
 
 async function enqueueOpenAccount(
@@ -1131,96 +827,19 @@ async function getAccountOpenStatus(
 ): Promise<AccountOpenStatus> {
   return page.evaluate(
     ({ entityId, signerId, hubId }) => {
-      const env = (window as typeof window & {
-        isolatedEnv?: {
-          state?: {
-            eReplicas?: Map<string, {
-              state?: {
-                accounts?: Map<string, {
-                  state: {
-                    deltas: Map<number, unknown>;
-                    leftEntity: string;
-                    rightEntity: string;
-                  };
-                  pendingFrame?: { height?: number };
-                  currentHeight?: number;
-                }>;
-              };
-            }>;
-          };
-        };
-      }).isolatedEnv;
-      if (!env?.state?.eReplicas) {
-        return { exists: false, hasDelta: false, pendingHeight: null, currentHeight: 0 };
-      }
-
-      const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
-      const resolveCounterpartyAccount = (
-        accounts: Map<string, {
-          state: {
-            deltas: Map<number, unknown>;
-            leftEntity: string;
-            rightEntity: string;
-          };
-          pendingFrame?: { height?: number };
-          currentHeight?: number;
-          currentFrame?: { height?: number };
-          proofHeader?: { fromEntity?: string; toEntity?: string };
-        }>,
-        ownerEntityId: string,
-        counterpartyEntityId: string,
-      ) => {
-        const owner = normalizeEntityId(ownerEntityId);
-        const target = normalizeEntityId(counterpartyEntityId);
-        const accountBelongsToPair = (account: {
-          state: { leftEntity: string; rightEntity: string };
-          proofHeader?: { fromEntity?: string; toEntity?: string };
-        } | null | undefined): boolean => {
-          if (!account) return false;
-          const proofFrom = normalizeEntityId(account.proofHeader?.fromEntity);
-          const proofTo = normalizeEntityId(account.proofHeader?.toEntity);
-          if (proofFrom || proofTo) return proofFrom === owner && proofTo === target;
-          const left = normalizeEntityId(account.state.leftEntity);
-          const right = normalizeEntityId(account.state.rightEntity);
-          return (left === owner && right === target) || (left === target && right === owner);
-        };
-        const direct = accounts.get(target) ?? accounts.get(String(counterpartyEntityId || ''));
-        if (accountBelongsToPair(direct)) return direct;
-        for (const [accountKey, account] of accounts.entries()) {
-          if (normalizeEntityId(accountKey) === target && accountBelongsToPair(account)) return account;
-          const left = normalizeEntityId(account.state.leftEntity);
-          const right = normalizeEntityId(account.state.rightEntity);
-          if ((left === owner && right === target) || (right === owner && left === target)) return account;
-          if (accountBelongsToPair(account)) return account;
-        }
-        return null;
-      };
-
-      for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
-        const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
-        if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
-        if (String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
-	        const accounts = replica.state?.accounts;
-	        const account = accounts instanceof Map
-	          ? resolveCounterpartyAccount(accounts, entityId, hubId)
-	          : null;
-	        if (!account) continue;
-	        const hasTokenOneDelta = (() => {
-	          if (!(account.state.deltas instanceof Map)) return false;
-	          for (const [deltaTokenId] of account.state.deltas.entries()) {
-	            if (Number(deltaTokenId) === 1) return true;
-	          }
-	          return false;
-	        })();
-	        return {
-	          exists: true,
-	          hasDelta: hasTokenOneDelta,
-	          pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
-	          currentHeight: Number(account.currentHeight || 0),
-	        };
-      }
-
-      return { exists: false, hasDelta: false, pendingHeight: null, currentHeight: 0 };
+      const env = (window as CurrentRuntimeWindow).__xln?.env();
+      if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+      const account = env.state.eReplicas
+        .get(`${entityId}:${signerId}`.toLowerCase())
+        ?.state.accounts.get(hubId.toLowerCase());
+      return account
+        ? {
+            exists: true,
+            hasDelta: account.state.deltas.has(1),
+            pendingHeight: account.pendingFrame?.height ?? null,
+            currentHeight: account.currentHeight,
+          }
+        : { exists: false, hasDelta: false, pendingHeight: null, currentHeight: 0 };
     },
     { entityId, signerId, hubId },
   );
@@ -1391,10 +1010,23 @@ async function waitForHubAccountReady(
   tokenIds: readonly number[],
 ): Promise<void> {
   let lastStatus: HubAccountStatus = { error: 'not-run' };
+  let lastEvidence = '';
   await expect.poll(
     async () => {
       lastStatus = await readHubAccountStatus(page, userEntityId, hubId, tokenIds);
       const tokens = Array.isArray(lastStatus.tokens) ? lastStatus.tokens : [];
+      const evidence = stringifyDebug({
+        hubId,
+        userEntityId,
+        success: lastStatus.success,
+        hasAccount: lastStatus.hasAccount,
+        ready: lastStatus.ready,
+        tokens,
+      });
+      if (evidence !== lastEvidence) {
+        console.log(`[HUB_ACCOUNT_READINESS] ${evidence}`);
+        lastEvidence = evidence;
+      }
       const tokenReady = tokenIds.every(tokenId => {
         const token = tokens.find(entry => Number(entry.tokenId) === Number(tokenId));
         return Boolean(token?.hasDelta) && BigInt(String(token?.hubOutCapacity || '0')) > 0n;
@@ -1415,37 +1047,26 @@ async function waitForHubAccountReady(
 }
 
 async function hasExportedRuntimeEnv(page: Page): Promise<boolean> {
-  return await page.evaluate(() => {
-    const env = (window as typeof window & { isolatedEnv?: { runtimeId?: unknown } }).isolatedEnv;
-    return Boolean(env && typeof env === 'object' && String(env.runtimeId || '').trim());
-  });
+  return page.evaluate(() => Boolean((window as CurrentRuntimeWindow).__xln?.env()?.runtimeId));
 }
 
 async function hasExportedRuntimeP2P(page: Page): Promise<boolean> {
-  return await page.evaluate(() => {
-    const connectivity = (window as typeof window & {
-      __xln?: { runtimeConnectivity?: { runtimeId?: string } };
-    }).__xln?.runtimeConnectivity;
-    return Boolean(connectivity?.runtimeId);
-  }).catch(() => false);
+  return page.evaluate(() => Boolean((window as CurrentRuntimeWindow).__xln?.env()?.infrastructure?.p2p));
 }
 
 async function hasRenderedCommittedAccountCard(page: Page, hubId: string): Promise<boolean> {
-  return page.evaluate((targetHubId) => {
-    const normalizeEntityId = (value: string): string => String(value || '').trim().toLowerCase();
-    const target = normalizeEntityId(targetHubId);
-    const cards = Array.from(document.querySelectorAll('.account-preview'));
-    const card = cards.find((entry) => {
-      const rawCounterpartyId = String(
-        entry.getAttribute('data-counterparty-id')
-        || entry.querySelector('.entity-id, .id, [data-entity-id]')?.textContent
-        || '',
-      ).trim();
-      return normalizeEntityId(rawCounterpartyId) === target;
-    });
-    if (!card) return false;
-    const text = String(card.textContent || '');
-    return !/Awaiting first frame/i.test(text);
+  if (!(await page.locator(`[data-testid="account-row"][data-counterparty-id="${hubId.toLowerCase()}"]`).isVisible()))
+    return false;
+  return page.evaluate(hubId => {
+    const debug = (window as CurrentRuntimeWindow).__xln;
+    if (!debug) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+    const env = debug.env();
+    const owner = debug.store.getState().activeEntityId;
+    if (!env || !owner) throw new Error('CURRENT_WALLET_OWNER_MISSING');
+    return [...env.state.eReplicas.values()].some(
+      replica =>
+        replica.entityId === owner && (replica.state.accounts.get(hubId.toLowerCase())?.currentHeight ?? 0) > 0,
+    );
   }, hubId);
 }
 
@@ -1577,7 +1198,6 @@ export async function connectRuntimeToHubWithCredit(
   }
 
   for (const tokenId of tokenIds) {
-    if (canUseDefaultUiConnect && tokenId === 1) continue;
     await extendCreditToken(page, identity, hubId, tokenId, creditAmountDisplay);
   }
 

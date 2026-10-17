@@ -1,124 +1,38 @@
 import { randomUUID } from 'node:crypto';
 import { expect, type Page } from '@playwright/test';
-
-type RuntimeEnv = {
-  state: {
-    eReplicas: Map<string, unknown>;
-  };
-};
-
-type EntityTxInput = {
-  entityId: string;
-  signerId: string;
-  entityTxs: unknown[];
-};
+import type { RuntimeAdapter, RuntimeReplica, XLNModule } from '../../../core/api/public/runtime-module';
+import { decodeLocalRuntimeInput } from '../../../core/runtime/decode';
 
 type RuntimeTxEnqueueInput = {
   runtimeTxs: unknown[];
-  entityInputs: EntityTxInput[];
+  entityInputs: { entityId: string; signerId: string; entityTxs: unknown[] }[];
+};
+type EnqueueEntityTxOptions = { requireLocalReplica?: boolean };
+type RuntimeWindow = Window & {
+  __xln?: { env(): RuntimeReplica | null; adapter(): RuntimeAdapter | null; xln(): Promise<XLNModule> };
 };
 
-type EnqueueEntityTxOptions = {
-  requireLocalReplica?: boolean;
-};
-
-const ENQUEUE_STATUS_PREFIX = 'xln:e2e:enqueue:';
-
-const isTransientEvaluateError = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error);
-  return /Execution context was destroyed|Cannot find context|Target page, context or browser has been closed|Navigation/i.test(message);
-};
-
-async function waitForRuntimeWindow(page: Page): Promise<void> {
-  await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {});
-  await page.waitForFunction(() => Boolean((window as typeof window & { isolatedEnv?: unknown }).isolatedEnv), undefined, {
-    timeout: 10_000,
-  }).catch(() => {});
-}
-
-async function waitForRuntimeIngress(page: Page): Promise<void> {
-  await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {});
-  await page.waitForFunction(() => {
-    const target = window as typeof window & {
-      __xln?: { runtimeIngress?: { submit?: unknown } };
-    };
-    return typeof target.__xln?.runtimeIngress?.submit === 'function';
-  }, undefined, { timeout: 10_000 });
-}
-
-async function evaluateWithRuntimeRetry<TResult, TArg>(
-  page: Page,
-  pageFunction: (arg: TArg) => TResult | Promise<TResult>,
-  arg: TArg,
-  label: string,
-): Promise<TResult> {
-  let lastError: unknown = null;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      await waitForRuntimeWindow(page);
-      return await page.evaluate(pageFunction, arg);
-    } catch (error) {
-      lastError = error;
-      if (!isTransientEvaluateError(error) || attempt === 4) break;
-      await page.waitForTimeout(250 * (attempt + 1)).catch(() => {});
-    }
-  }
-  if (lastError instanceof Error) throw lastError;
-  throw new Error(`${label} failed: ${String(lastError)}`);
-}
-
-async function readEnqueueStatus(page: Page, storageKey: string): Promise<string | null> {
-  return await page.evaluate((key) => sessionStorage.getItem(key), storageKey).catch(() => null);
-}
-
+/** Submit once through current owner admission, then observe the real Runtime drain. */
 export async function enqueueRuntimeInput(page: Page, input: RuntimeTxEnqueueInput): Promise<void> {
-  const storageKey = `${ENQUEUE_STATUS_PREFIX}${randomUUID()}`;
-  let lastError: unknown = null;
-
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      await waitForRuntimeIngress(page);
-      const result = await page.evaluate(async ({ input, storageKey }) => {
-        const priorStatus = sessionStorage.getItem(storageKey);
-        if (priorStatus === 'committed') return { ok: true, alreadyCommitted: true };
-        if (priorStatus === 'started') {
-          return { ok: false, error: 'enqueueRuntimeInput already started; refusing duplicate enqueue' };
-        }
-
-        const runtimeWindow = window as typeof window & {
-          __xln?: {
-            runtimeIngress?: {
-              submit: (input: RuntimeTxEnqueueInput) => Promise<unknown>;
-            };
-          };
-        };
-        const runtimeIngress = runtimeWindow.__xln?.runtimeIngress;
-        if (!runtimeIngress) return { ok: false, error: 'live runtime ingress missing' };
-
-        sessionStorage.setItem(storageKey, 'started');
-        await runtimeIngress.submit(input);
-        sessionStorage.setItem(storageKey, 'committed');
-        return { ok: true };
-      }, { input, storageKey });
-
-      expect(result.ok, result.error || 'enqueueRuntimeInput failed').toBe(true);
-      return;
-    } catch (error) {
-      lastError = error;
-      if (!isTransientEvaluateError(error) || attempt === 4) break;
-
-      const status = await readEnqueueStatus(page, storageKey);
-      if (status === 'committed') return;
-      if (status === 'started') {
-        throw new Error('enqueueRuntimeInput may already be committed; refusing duplicate enqueue', { cause: error });
-      }
-
-      await page.waitForTimeout(250 * (attempt + 1)).catch(() => {});
-    }
-  }
-
-  if (lastError instanceof Error) throw lastError;
-  throw new Error(`enqueueRuntimeInput failed: ${String(lastError)}`);
+  const validated = decodeLocalRuntimeInput(input, 'E2E_RUNTIME_INPUT');
+  const storageKey = `xln:e2e:enqueue:${randomUUID()}`;
+  await page.evaluate(
+    async ({ input, storageKey }) => {
+      const debug = (window as RuntimeWindow).__xln;
+      const env = debug?.env();
+      const adapter = debug?.adapter();
+      if (!debug || !env || !adapter) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+      if (sessionStorage.getItem(storageKey)) throw new Error('E2E_INPUT_ALREADY_SUBMITTED');
+      // A lost browser context after send must never cause an automatic duplicate.
+      sessionStorage.setItem(storageKey, 'started');
+      await adapter.send(input);
+      sessionStorage.setItem(storageKey, 'accepted');
+      const drained = await (await debug.xln()).waitForRuntimeWorkDrained(env, 10_000, 0);
+      if (!drained) throw new Error('E2E_RUNTIME_INPUT_DRAIN_TIMEOUT');
+      sessionStorage.setItem(storageKey, 'drained');
+    },
+    { input: validated, storageKey },
+  );
 }
 
 export async function enqueueEntityTxs(
@@ -129,29 +43,15 @@ export async function enqueueEntityTxs(
   options: EnqueueEntityTxOptions = {},
 ): Promise<void> {
   if (options.requireLocalReplica !== false) {
-    const replicaCheck = await evaluateWithRuntimeRetry(page, ({ entityId, signerId }) => {
-      const runtimeWindow = window as typeof window & {
-        isolatedEnv?: RuntimeEnv;
-      };
-      const env = runtimeWindow.isolatedEnv;
-      if (!env) return { ok: false, error: 'isolatedEnv missing' };
-      const expectedKey = `${entityId}:${signerId}`.toLowerCase();
-      const replicaKeys = Array.from(env.state.eReplicas.keys(), (key) => String(key).toLowerCase());
-      if (!replicaKeys.includes(expectedKey)) {
-        return { ok: false, error: `local replica ${expectedKey} missing` };
-      }
-      return { ok: true };
-    }, { entityId, signerId }, 'replica check');
-
-    expect(replicaCheck.ok, replicaCheck.error || `replica check failed for ${entityId}`).toBe(true);
+    const present = await page.evaluate(
+      ({ entityId, signerId }) => {
+        const env = (window as RuntimeWindow).__xln?.env();
+        if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+        return env.state.eReplicas.has(`${entityId}:${signerId}`.toLowerCase());
+      },
+      { entityId, signerId },
+    );
+    expect(present, `local replica ${entityId}:${signerId} must exist before owner admission`).toBe(true);
   }
-
-  await enqueueRuntimeInput(page, {
-    runtimeTxs: [],
-    entityInputs: [{
-      entityId,
-      signerId,
-      entityTxs,
-    }],
-  });
+  await enqueueRuntimeInput(page, { runtimeTxs: [], entityInputs: [{ entityId, signerId, entityTxs }] });
 }

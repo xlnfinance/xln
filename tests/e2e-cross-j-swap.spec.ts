@@ -15,7 +15,7 @@ import {
   aggregateExpectedCrossBookDepth,
   configurePair,
   configureTokens,
-  createRuntimeIdentityViaStore,
+  createWalletIdentity,
   dismissSwapCompletionModal,
   ensureDirectHubAccount,
   expectBrowserConsoleClean,
@@ -238,6 +238,40 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
   );
 
   test(
+    'current React wallet admits explicit hub credit and reads committed account collections',
+    { tag: '@functional' },
+    async ({ page }) => {
+      const baseline = await ensureE2EBaseline(page, {
+        apiBaseUrl: API_BASE_URL,
+        requireMarketMaker: true,
+        requireHubMesh: true,
+        minHubCount: 3,
+      });
+      const hubId = getPrimaryHubId(baseline);
+      const hubApi = getPrimaryHubApiBaseUrl(baseline, hubId);
+      const targetHub = await getSecondaryHubInfo(page, hubId, getPrimaryHubName(baseline, hubId), hubApi);
+      await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 });
+      const phrase = Wallet.createRandom().mnemonic?.phrase;
+      if (!phrase) throw new Error('TEST_WALLET_PHRASE_MISSING');
+      const source = await createWalletIdentity(page, 'current-account-setup', phrase);
+      await waitForDefaultJurisdictionReplicas(page, 'current-account-setup');
+      const target = await importRpc2SiblingEntity(page, phrase, 'current-account-setup');
+      // Same production setup as the full MM lifecycle below; this regression
+      // isolates explicit USDC consent and persistent Account collection reads.
+      await connectRuntimeToHubWithCredit(page, source, hubId, '10000', SWAP_TOKENS);
+      await ensureDirectHubAccount(page, target, targetHub.entityId, SWAP_TOKENS);
+      await faucetOffchain(page, hubApi, source.entityId, hubId, USDC, '300');
+      await waitForOutCapAtLeast(page, source.entityId, hubId, USDC, tokenAmount(USDC, 300n));
+      await openSwapWorkspace(page);
+      await selectSourceChainInSwap(page, source.entityId);
+      await selectCounterpartyInSwap(page, hubId);
+      await configureTokens(page, USDC, USDT);
+      await expect(page.getByTestId('swap-give')).toBeVisible();
+      await expect(page.getByTestId('swap-submit')).toBeDisabled();
+    },
+  );
+
+  test(
     'real MM full fill auto-closes and partial fill closes manually on both legs',
     { tag: '@functional' },
     async ({ page }, testInfo) => {
@@ -272,7 +306,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
 
       await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 });
       const mnemonic = Wallet.createRandom().mnemonic!.phrase;
-      const source = await createRuntimeIdentityViaStore(page, 'cross-real-mm', mnemonic);
+      const source = await createWalletIdentity(page, 'cross-real-mm', mnemonic);
       await waitForDefaultJurisdictionReplicas(page, 'cross-real-mm');
       const target = await importRpc2SiblingEntity(page, mnemonic, 'cross-real-mm');
       await connectRuntimeToHubWithCredit(page, source, hubId, '10000', SWAP_TOKENS);
@@ -628,7 +662,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       );
       const mnemonic = Wallet.createRandom().mnemonic!.phrase;
       const source = await timedStep('cross_j_no_market.create_runtime', () =>
-        createRuntimeIdentityViaStore(page, 'cross-no-market', mnemonic),
+        createWalletIdentity(page, 'cross-no-market', mnemonic),
       );
       await timedStep('cross_j_no_market.default_jurisdictions', () =>
         waitForDefaultJurisdictionReplicas(page, 'cross-no-market'),
@@ -740,7 +774,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       );
       const mnemonic = Wallet.createRandom().mnemonic!.phrase;
       await timedStep('cross_j_tron_rebalance.create_runtime', () =>
-        createRuntimeIdentityViaStore(page, 'cross-tron-rebalance', mnemonic),
+        createWalletIdentity(page, 'cross-tron-rebalance', mnemonic),
       );
       await timedStep('cross_j_tron_rebalance.default_jurisdictions', () =>
         waitForDefaultJurisdictionReplicas(page, 'cross-tron-rebalance'),
@@ -810,7 +844,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       );
       const mnemonic = Wallet.createRandom().mnemonic!.phrase;
       const source = await timedStep('cross_j_auto_setup.create_runtime', () =>
-        createRuntimeIdentityViaStore(page, 'cross-auto-setup', mnemonic),
+        createWalletIdentity(page, 'cross-auto-setup', mnemonic),
       );
       await timedStep('cross_j_auto_setup.default_jurisdictions', () =>
         waitForDefaultJurisdictionReplicas(page, 'cross-auto-setup'),
@@ -954,7 +988,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           async () =>
             page.evaluate(
               ({ entityId, hubId, tokenId }) => {
-                const env = (window as CrossRuntimeWindow).isolatedEnv;
+                const env = (window as CrossRuntimeWindow).__xln?.env();
                 const owner = String(entityId).toLowerCase();
                 const counterparty = String(hubId).toLowerCase();
                 const replica = Array.from(env?.state.eReplicas?.values?.() || []).find(
@@ -1018,7 +1052,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       );
       const mnemonic = Wallet.createRandom().mnemonic!.phrase;
       const source = await timedStep('cross_j_wrong_side.create_runtime', () =>
-        createRuntimeIdentityViaStore(page, 'cross-wrong-side', mnemonic),
+        createWalletIdentity(page, 'cross-wrong-side', mnemonic),
       );
       await timedStep('cross_j_wrong_side.default_jurisdictions', () =>
         waitForDefaultJurisdictionReplicas(page, 'cross-wrong-side'),
@@ -1099,7 +1133,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       );
       const mnemonic = Wallet.createRandom().mnemonic!.phrase;
       const testnetEntity = await timedStep('cross_j_stable_quote.create_runtime', () =>
-        createRuntimeIdentityViaStore(page, 'cross-stable-quote', mnemonic),
+        createWalletIdentity(page, 'cross-stable-quote', mnemonic),
       );
       await timedStep('cross_j_stable_quote.default_jurisdictions', () =>
         waitForDefaultJurisdictionReplicas(page, 'cross-stable-quote'),
@@ -1275,10 +1309,10 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         const aliceMnemonic = Wallet.createRandom().mnemonic!.phrase;
         const bobMnemonic = Wallet.createRandom().mnemonic!.phrase;
         const alice = await timedStep('cross_j_swap.alice.create_runtime', () =>
-          createRuntimeIdentityViaStore(alicePage, 'alice-cross', aliceMnemonic),
+          createWalletIdentity(alicePage, 'alice-cross', aliceMnemonic),
         );
         const bob = await timedStep('cross_j_swap.bob.create_runtime', () =>
-          createRuntimeIdentityViaStore(bobPage, 'bob-cross', bobMnemonic),
+          createWalletIdentity(bobPage, 'bob-cross', bobMnemonic),
         );
         await Promise.all([
           timedStep('cross_j_swap.alice.default_jurisdictions', () =>

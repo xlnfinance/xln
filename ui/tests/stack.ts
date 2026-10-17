@@ -7,8 +7,8 @@ import type { StorageHead } from '../../core/storage/types';
 import type { RuntimeAdapter } from '../../core/api/runtime-adapter/types';
 import type { RuntimeAdapterFrameSummary } from '../../core/api/runtime-adapter/resolve';
 
-export const BOOT_TIMEOUT = 180_000;
-export const LOCAL_PASSWORD = 'e2e-local-wallet-password';
+import { BOOT_TIMEOUT, LOCAL_PASSWORD, importStackPhraseUi } from './wallet-ui';
+export { BOOT_TIMEOUT, LOCAL_PASSWORD, importStackPhraseUi } from './wallet-ui';
 
 type DebugWindow = Window & {
   __xln?: {
@@ -36,22 +36,6 @@ export async function assertSelectedNativeHub(hubId: string): Promise<void> {
   } finally {
     await native.stop();
   }
-}
-
-/** Import through the public wallet UI, including production builds without diagnostics. */
-export async function importStackPhraseUi(page: Page, phrase: string): Promise<void> {
-  await expect(page.getByTestId('gate-stack')).toHaveAttribute('data-state', 'online', { timeout: 20_000 });
-  await page.getByRole('button', { name: /Restore a wallet/ }).click();
-  await page.locator('textarea').fill(phrase);
-  await page.locator('button[type="submit"]').click();
-  await expect(page.getByRole('heading', { name: 'Set a local password' })).toBeVisible({ timeout: BOOT_TIMEOUT });
-  await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
-  await page.getByLabel('Confirm password', { exact: true }).fill(LOCAL_PASSWORD);
-  await page.getByRole('button', { name: 'Save and open', exact: true }).click();
-  // Surface the first recovery invariant immediately instead of timing out on Home.
-  await expect(page.locator('[data-testid="nav-home"]:visible, [role="alert"]').first()).toBeVisible({ timeout: BOOT_TIMEOUT });
-  const errors = await page.getByRole('alert').allTextContents();
-  if (errors.length > 0) throw new Error(`WALLET_BOOT_FAILED:${errors.join('\n')}`);
 }
 
 async function importStackPhrase(page: Page, phrase: string): Promise<Omit<StackWallet, 'phrase'>> {
