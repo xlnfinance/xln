@@ -402,6 +402,10 @@ const run = async () => {
   await waitForLineOrError(alice, /P2P_HTLC_SENT|P2P_PAYMENT_SENT/, errorMatchers);
   console.log('[P2P] Alice HTLC sent');
   await waitForLineOrError(bob, /P2P_HTLC_RECEIVED|P2P_PAYMENT_RECEIVED/, errorMatchers);
+  // Deliberately inspect Hub after both peers finish: completion must remain
+  // provable when the observer never saw the route's transient paybook entry.
+  if (!hub.proc.stdin?.writable) throw new Error('P2P_HUB_STDIN_UNAVAILABLE');
+  hub.proc.stdin.write('P2P_VERIFY_SETTLEMENT\n');
   await waitForLineOrError(hub, /P2P_END_TO_END_SETTLED/, errorMatchers);
   console.log('✅ P2P relay test passed');
 

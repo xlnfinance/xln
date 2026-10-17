@@ -1,0 +1,675 @@
+$ bun tools/stand-lock.ts run --reason "mainnet-p2p-final-regression" --timeout-ms "60000" -- sh -c "bun test core/__tests__/network/p2p/p2p-shutdown-drain.test.ts && bun run test:p2p:relay"
+bun test v1.4.0 (34cbb9a40)
+
+core/__tests__/network/p2p/p2p-shutdown-drain.test.ts:
+(pass) offline target and ingress rejection are loud transport failures [48.61ms]
+(pass) direct runtime rejection is a visible transport error, never a retry hint [30.14ms]
+(pass) direct peer close during an established quiesce is visible but non-fatal [29.89ms]
+(pass) authenticated direct peer outage retires its session without halting the Runtime [27.88ms]
+(pass) node websocket async send failures retain exact envelope correlation [11.67ms]
+[WARN][runtime.wsClient] initial_connect.closed {"summary":"WS_UNEXPECTED_CLOSE:runtime=0x1111111111111111111111111111111111111111:url=ws://127.0.0.1:1/relay:generation=0:code=4009:reason=duplicate-runtime:helloAcknowledged=0:readyState=3:buffered=0"}
+(pass) a pre-auth socket close remains eligible for explicit initial retry [0.35ms]
+[WS] WS_UNEXPECTED_CLOSE:runtime=0x1111111111111111111111111111111111111111:url=ws://127.0.0.1:1/relay:generation=0:code=4009:reason=authenticated-session-lost:helloAcknowledged=0:readyState=3:buffered=0
+(pass) an authenticated socket close remains fatal [0.04ms]
+(pass) websocket client remains closed until the authenticated hello settles [629.08ms]
+(pass) websocket shutdown waits for the transport close handshake [29.75ms]
+(pass) websocket shutdown rejects a missing close handshake [12.48ms]
+(pass) websocket shutdown observes a close racing listener registration [0.12ms]
+(pass) connect racing terminal shutdown cannot publish a late socket [0.11ms]
+(pass) failed stale-socket drain retains the handle for retry [11.47ms]
+(pass) concurrent websocket shutdown callers await the same drain [27.35ms]
+(pass) synchronous websocket close retains ownership for a later awaited drain [27.39ms]
+(pass) synchronous websocket close keeps a missing handshake loud during awaited drain [10.59ms]
+(pass) p2p start has no duplicate bootstrap poll before slow reconciliation [223.20ms]
+(pass) p2p shutdown aborts an in-flight retry delay [71.70ms]
+(pass) p2p shutdown drains every client before reporting aggregate failure [74.30ms]
+(pass) relay reconfiguration removes active ownership and final shutdown drains the retiree [28.69ms]
+(pass) direct endpoint removal retires the exact client before transport selection can reuse it [25.81ms]
+(pass) closing p2p rejects late direct-client creation [26.41ms]
+(pass) runtime lifecycle clears attachment only through drained shutdown [6.43ms]
+(pass) synchronous stop retains transport ownership for a later awaited drain [0.12ms]
+(pass) synchronous runtime stop preserves actual P2P clients until awaited drain [53.33ms]
+(pass) runtime lifecycle retains the quiesced handle when drain fails [0.12ms]
+
+ 26 pass
+ 0 fail
+ 88 expect() calls
+Ran 26 tests across 1 file. [1.77s]
+$ bun core/scripts/e2e/runners/run-with-test-cleanup.ts --reason=p2p-relay -- bun core/scenarios/network/p2p-relay.ts
+test artifact budget (p2p-relay): workspace=30.24GiB budgeted=5.20GiB / 50GiB
+[P2P] Using relay port 20000
+[hub] P2P_NODE_CONFIG role=hub relayUrl=ws://127.0.0.1:20000 relayPort=20000 isHub=true
+[hub] [P2P-NODE] Runtime event loop started
+[hub] [INFO][runtime.jurisdiction_import] jurisdiction.import_start {"chainId":31337,"mode":"browservm","name":"arrakis"}
+[hub] [BrowserVM] Loaded artifacts from typechain factories
+[hub] [BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[hub] [BrowserVM] Unlimited contract size enabled for simnet
+[hub] [BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[hub] [BrowserVM] Deploying Account library...
+[hub] [BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[hub] [BrowserVM] Deploying HankoVerifier library...
+[hub] [BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[hub] [BrowserVM] Deploying EntityProvider...
+[hub] [BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[hub] [BrowserVM] Deploying DeltaTransformer...
+[hub] [BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[hub] [BrowserVM] Deploying Depository with canonical linked libraries...
+[hub] [BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[hub] [BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[hub] [BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[hub] [BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[hub] [BrowserVM] Serialized state: 565 trie nodes, version=1
+[hub] [INFO][runtime.jurisdiction_import] jurisdiction.ready {"blockNumber":"0","chainId":31337,"name":"arrakis"}
+[hub] [BrowserVM] Loaded artifacts from typechain factories
+[hub] [BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[hub] [BrowserVM] Unlimited contract size enabled for simnet
+[hub] [BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[hub] [BrowserVM] Deploying Account library...
+[hub] [BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[hub] [BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[hub] [BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[hub] [BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[hub] [BrowserVM] Deploying Depository with canonical linked libraries...
+[hub] [BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[hub] [BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[hub] [BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[hub] [BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[hub] [BrowserVM] Restored state: 565 trie nodes, root 029f3e27e6e350bc...
+[hub] [BrowserVM] onAny registered (1 callbacks)
+[hub] P2P_JADAPTER_READY role=hub mode=browservm
+[hub] [INFO][relay.standalone] service.listen {"host":"127.0.0.1","port":20000,"serverId":"hub"}
+P2P_RELAY_READY host=127.0.0.1 port=20000
+[P2P] Running smoke check - connecting to relay...
+[P2P] ✅ Smoke check passed - relay accepting connections
+[P2P] Hub relay ready - spawning alice/bob NOW
+[P2P] Waiting for all nodes ready...
+[hub] [INFO][entity] input.received {"entity":"0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6963","ts":1792216479017,"txs":["setHubConfig","profile-update"]}
+[hub] [INFO][entity.tx.account-admin] hub_config.updated {"entity":"1df7","feePolicyChanged":true,"matchingStrategy":"amount","policyVersion":1,"routingFeePPM":1,"swapTakerFeeBps":0}
+[hub] 🔧 P2P_CONFIG: role=hub entityId=1df7
+[hub] P2P_DIRECT_READY host=127.0.0.1 port=20001
+P2P_NODE_READY role=hub runtimeId=0xc4e65922e20c3a00acee89908549d2ea1d045c43 entityId=0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7
+P2P_HUB_WAITING_FOR_PROFILES
+[hub] 🔍 getProfileByName('alice'): Searching in 1 profiles
+[hub] 🔍 NOT FOUND 'alice' (names: hub)
+[alice] P2P_NODE_CONFIG role=alice relayUrl=ws://127.0.0.1:20000 relayPort=0 isHub=false
+[bob] P2P_NODE_CONFIG role=bob relayUrl=ws://127.0.0.1:20000 relayPort=0 isHub=false
+[alice] [P2P-NODE] Runtime event loop started
+[bob] [P2P-NODE] Runtime event loop started
+[alice] [INFO][runtime.jurisdiction_import] jurisdiction.import_start {"chainId":31337,"mode":"browservm","name":"arrakis"}
+[bob] [INFO][runtime.jurisdiction_import] jurisdiction.import_start {"chainId":31337,"mode":"browservm","name":"arrakis"}
+[alice] [BrowserVM] Loaded artifacts from typechain factories
+[alice] [BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[alice] [BrowserVM] Unlimited contract size enabled for simnet
+[alice] [BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[alice] [BrowserVM] Deploying Account library...
+[bob] [BrowserVM] Loaded artifacts from typechain factories
+[bob] [BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[bob] [BrowserVM] Unlimited contract size enabled for simnet
+[bob] [BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[bob] [BrowserVM] Deploying Account library...
+[bob] [BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[bob] [BrowserVM] Deploying HankoVerifier library...
+[alice] [BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[alice] [BrowserVM] Deploying HankoVerifier library...
+[bob] [BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[bob] [BrowserVM] Deploying EntityProvider...
+[alice] [BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[alice] [BrowserVM] Deploying EntityProvider...
+[hub] 🔍 getProfileByName('alice'): Searching in 1 profiles
+🔍 NOT FOUND 'alice' (names: hub)
+[bob] [BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[bob] [BrowserVM] Deploying DeltaTransformer...
+[bob] [BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[alice] [BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[alice] [BrowserVM] Deploying DeltaTransformer...
+[alice] [BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[bob] [BrowserVM] Deploying Depository with canonical linked libraries...
+[alice] [BrowserVM] Deploying Depository with canonical linked libraries...
+[bob] [BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[alice] [BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[bob] [BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[alice] [BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[bob] [BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[alice] [BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[bob] [BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[alice] [BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[bob] [BrowserVM] Serialized state: 565 trie nodes, version=1
+[alice] [BrowserVM] Serialized state: 565 trie nodes, version=1
+[bob] [INFO][runtime.jurisdiction_import] jurisdiction.ready {"blockNumber":"0","chainId":31337,"name":"arrakis"}
+[alice] [INFO][runtime.jurisdiction_import] jurisdiction.ready {"blockNumber":"0","chainId":31337,"name":"arrakis"}
+[bob] [BrowserVM] Loaded artifacts from typechain factories
+[bob] [BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[alice] [BrowserVM] Loaded artifacts from typechain factories
+[bob] [BrowserVM] Unlimited contract size enabled for simnet
+[bob] [BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[alice] [BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[alice] [BrowserVM] Unlimited contract size enabled for simnet
+[alice] [BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[bob] [BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[alice] [BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[bob] [BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[alice] [BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[bob] [BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[alice] [BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[bob] [BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[alice] [BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[bob] [BrowserVM] Deploying Depository with canonical linked libraries...
+[alice] [BrowserVM] Deploying Depository with canonical linked libraries...
+[bob] [BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[alice] [BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[bob] [BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[alice] [BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[bob] [BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[alice] [BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[bob] [BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[alice] [BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[bob] [BrowserVM] Restored state: 565 trie nodes, root 029f3e27e6e350bc...
+[alice] [BrowserVM] Restored state: 565 trie nodes, root 029f3e27e6e350bc...
+[bob] [BrowserVM] onAny registered (1 callbacks)
+[bob] P2P_JADAPTER_READY role=bob mode=browservm
+[alice] [BrowserVM] onAny registered (1 callbacks)
+[alice] P2P_JADAPTER_READY role=alice mode=browservm
+[bob] [INFO][entity] input.received {"entity":"0x4f71ab124d975bcc1d97ed29c4ab1f6e076ca2647560df270abf5fd59c036ffc","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"571e","ts":1792216479749,"txs":["profile-update"]}
+[alice] [INFO][entity] input.received {"entity":"0x344844c011f15051fccb2bf9355ec55693caea50fa81b06cddd3030952005f74","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"c95f","ts":1792216479750,"txs":["profile-update"]}
+[hub] 🔍 getProfileByName('alice'): Searching in 1 profiles
+🔍 NOT FOUND 'alice' (names: hub)
+[hub] 🔍 getProfileByName('alice'): Searching in 1 profiles
+🔍 NOT FOUND 'alice' (names: hub)
+[hub] 🔍 getProfileByName('alice'): Searching in 1 profiles
+🔍 NOT FOUND 'alice' (names: hub)
+[bob] 🔧 P2P_CONFIG: role=bob entityId=6ffc
+[bob] P2P_NODE_READY role=bob runtimeId=0x2a1588dd712d14c6b05d7456b8ae2d7a773c093d entityId=0x4f71ab124d975bcc1d97ed29c4ab1f6e076ca2647560df270abf5fd59c036ffc
+[bob] 🔍 getProfileByName('hub'): Searching in 1 profiles
+🔍 NOT FOUND 'hub' (names: bob)
+[bob] [INFO][p2p.lifecycle] gossip.accepted {"count":1,"entities":["c41df7"]}
+[alice] 🔧 P2P_CONFIG: role=alice entityId=5f74
+[alice] P2P_NODE_READY role=alice runtimeId=0xb05b345cc5cbe045320a7dfd7003409296917ccf entityId=0x344844c011f15051fccb2bf9355ec55693caea50fa81b06cddd3030952005f74
+[P2P] All nodes ready
+[P2P] All nodes connected to relay ws://127.0.0.1:20000
+[alice] 🔍 getProfileByName('hub'): Searching in 1 profiles
+🔍 NOT FOUND 'hub' (names: alice)
+[alice] [INFO][p2p.lifecycle] gossip.accepted {"count":1,"entities":["c41df7"]}
+[hub] 🔍 getProfileByName('alice'): Searching in 1 profiles
+🔍 NOT FOUND 'alice' (names: hub)
+[bob] 🔍 getProfileByName('hub'): Searching in 2 profiles
+[bob] 🔍 FOUND 'hub': 1df7 accounts=0 ts=1792216479018
+[bob] [P2P_DEBUG] bob sees hub {
+  entityId: "0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7",
+  runtimeId: "0xc4e65922e20c3a00acee89908549d2ea1d045c43",
+  wsUrl: "ws://127.0.0.1:20001/ws",
+  accounts: [],
+  hasEntityEncryptionPublicKey: true,
+}
+P2P_HUB_PROFILE_READY
+[hub] [INFO][p2p.lifecycle] gossip.accepted {"count":1,"entities":["036ffc"]}
+[alice] 🔍 getProfileByName('hub'): Searching in 2 profiles
+🔍 FOUND 'hub': 1df7 accounts=0 ts=1792216479018
+[alice] [P2P_DEBUG] alice sees hub {
+  entityId: "0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7",
+  runtimeId: "0xc4e65922e20c3a00acee89908549d2ea1d045c43",
+  wsUrl: "ws://127.0.0.1:20001/ws",
+  accounts: [],
+  hasEntityEncryptionPublicKey: true,
+}
+P2P_HUB_PROFILE_READY
+[bob] [INFO][entity] input.received {"entity":"0x4f71ab124d975bcc1d97ed29c4ab1f6e076ca2647560df270abf5fd59c036ffc","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"571e","ts":1792216480437,"txs":["openAccount"]}
+[hub] [INFO][p2p.lifecycle] gossip.accepted {"count":1,"entities":["005f74"]}
+[alice] [INFO][entity] input.received {"entity":"0x344844c011f15051fccb2bf9355ec55693caea50fa81b06cddd3030952005f74","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"c95f","ts":1792216480455,"txs":["openAccount"]}
+[hub] [INFO][entity] input.received {"entity":"0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6963","ts":1792216480437,"txs":["accountInput"]}
+[hub] [INFO][entity] input.received {"entity":"0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6963","ts":1792216480455,"txs":["accountInput"]}
+[bob] [INFO][entity] input.received {"entity":"0x4f71ab124d975bcc1d97ed29c4ab1f6e076ca2647560df270abf5fd59c036ffc","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"571e","ts":1792216480437,"txs":["accountInput"]}
+[alice] [P2P_DEBUG] wait-account-ready round=5 {
+  mempoolTxs: [],
+  proposalHeight: null,
+  lockedHeight: null,
+  isProposer: true,
+}
+[alice] [P2P_DEBUG] wait-account-ready round=5 {
+  account: {
+    exists: true,
+    currentHeight: 0,
+    currentFrameHeight: 0,
+    pendingFrameHeight: 1,
+    pendingFrameTxs: [ "add_delta", "add_delta", "add_delta" ],
+    mempoolTxs: [],
+    locks: [],
+  },
+  delta: null,
+}
+[alice] [P2P_DEBUG] wait-account-ready round=5 {
+  pendingOutputs: [],
+  pendingNetworkOutputs: [],
+  networkInbox: [],
+}
+[bob] [P2P_DEBUG] wait-account-ready round=5 {
+  mempoolTxs: [],
+  proposalHeight: null,
+  lockedHeight: null,
+  isProposer: true,
+}
+[bob] [P2P_DEBUG] wait-account-ready round=5 {
+  account: {
+    exists: true,
+    currentHeight: 2,
+    currentFrameHeight: 2,
+    pendingFrameHeight: null,
+    pendingFrameTxs: [],
+    mempoolTxs: [],
+    locks: [],
+  },
+  delta: {
+    offdelta: "0",
+    ondelta: "0",
+    collateral: "0",
+    leftCreditLimit: "0",
+    rightCreditLimit: "0",
+    leftAllowance: "0",
+    rightAllowance: "0",
+  },
+}
+[bob] [P2P_DEBUG] wait-account-ready round=5 {
+  pendingOutputs: [],
+  pendingNetworkOutputs: [],
+  networkInbox: [],
+}
+[hub] [INFO][entity] input.received {"entity":"0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6963","ts":1792216480455,"txs":["accountInput"]}
+[alice] [INFO][entity] input.received {"entity":"0x344844c011f15051fccb2bf9355ec55693caea50fa81b06cddd3030952005f74","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"c95f","ts":1792216480455,"txs":["accountInput"]}
+[bob] BOB: Waiting for hub to extend credit...
+[hub] 🔍 getProfileByName('alice'): Searching in 3 profiles
+🔍 FOUND 'alice': 5f74 accounts=0 ts=1792216479751
+[hub] 🔍 getProfileByName('bob'): Searching in 3 profiles
+🔍 FOUND 'bob': 6ffc accounts=0 ts=1792216479750
+[hub] [P2P_DEBUG] hub sees alice {
+  entityId: "0x344844c011f15051fccb2bf9355ec55693caea50fa81b06cddd3030952005f74",
+  runtimeId: "0xb05b345cc5cbe045320a7dfd7003409296917ccf",
+  wsUrl: null,
+  accounts: [],
+  hasEntityEncryptionPublicKey: true,
+}
+[hub] [P2P_DEBUG] hub sees bob {
+  entityId: "0x4f71ab124d975bcc1d97ed29c4ab1f6e076ca2647560df270abf5fd59c036ffc",
+  runtimeId: "0x2a1588dd712d14c6b05d7456b8ae2d7a773c093d",
+  wsUrl: null,
+  accounts: [],
+  hasEntityEncryptionPublicKey: true,
+}
+P2P_GOSSIP_READY
+HUB: Waiting for alice/bob to open accounts...
+[P2P] Gossip ready
+[hub] [P2P_DEBUG] hub account after open {
+  account: {
+    exists: true,
+    currentHeight: 1,
+    currentFrameHeight: 1,
+    pendingFrameHeight: 2,
+    pendingFrameTxs: [ "rebalance_policy", "rebalance_policy", "rebalance_policy" ],
+    mempoolTxs: [],
+    locks: [],
+  },
+  delta: {
+    offdelta: "0",
+    ondelta: "0",
+    collateral: "0",
+    leftCreditLimit: "0",
+    rightCreditLimit: "0",
+    leftAllowance: "0",
+    rightAllowance: "0",
+  },
+}
+[hub] [P2P_DEBUG] hub account after open {
+  account: {
+    exists: true,
+    currentHeight: 2,
+    currentFrameHeight: 2,
+    pendingFrameHeight: null,
+    pendingFrameTxs: [],
+    mempoolTxs: [],
+    locks: [],
+  },
+  delta: {
+    offdelta: "0",
+    ondelta: "0",
+    collateral: "0",
+    leftCreditLimit: "0",
+    rightCreditLimit: "0",
+    leftAllowance: "0",
+    rightAllowance: "0",
+  },
+}
+[hub] [INFO][entity] input.received {"entity":"0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6963","ts":1792216480455,"txs":["accountInput"]}
+[hub] [INFO][entity] input.received {"entity":"0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6963","ts":1792216480596,"txs":["extendCredit","extendCredit"]}
+[hub] [INFO][entity.tx.account-admin] extend_credit.queued {"amount":{"__xlnType":"BigInt","value":"500000000000000000000000"},"counterparty":"5f74","entity":"1df7","tokenId":1}
+[hub] [INFO][entity.tx.account-admin] extend_credit.queued {"amount":{"__xlnType":"BigInt","value":"500000000000000000000000"},"counterparty":"6ffc","entity":"1df7","tokenId":1}
+[alice] ALICE: Waiting for hub to extend credit...
+[hub] HUB: Waiting for Alice/Bob to acknowledge credit extension...
+[alice] [INFO][entity] input.received {"entity":"0x344844c011f15051fccb2bf9355ec55693caea50fa81b06cddd3030952005f74","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"c95f","ts":1792216480596,"txs":["accountInput"]}
+[bob] [INFO][entity] input.received {"entity":"0x4f71ab124d975bcc1d97ed29c4ab1f6e076ca2647560df270abf5fd59c036ffc","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"571e","ts":1792216480596,"txs":["accountInput"]}
+[alice] ALICE: ✅ Hub extended credit to us
+ALICE: Extending credit back to hub...
+[hub] [INFO][entity] input.received {"entity":"0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6963","ts":1792216480596,"txs":["accountInput"]}
+[alice] [INFO][entity] input.received {"entity":"0x344844c011f15051fccb2bf9355ec55693caea50fa81b06cddd3030952005f74","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"c95f","ts":1792216480612,"txs":["extendCredit"]}
+[bob] [P2P_DEBUG] wait-credit-limit round=5 {
+  account: {
+    exists: true,
+    currentHeight: 3,
+    currentFrameHeight: 3,
+    pendingFrameHeight: null,
+    pendingFrameTxs: [],
+    mempoolTxs: [],
+    locks: [],
+  },
+  delta: {
+    offdelta: "0",
+    ondelta: "0",
+    collateral: "0",
+    leftCreditLimit: "500000000000000000000000",
+    rightCreditLimit: "0",
+    leftAllowance: "0",
+    rightAllowance: "0",
+  },
+}
+[P2P_DEBUG] wait-credit-limit round=5 {
+  pendingOutputs: [],
+  pendingNetworkOutputs: [],
+  networkInbox: [],
+}
+[hub] [INFO][p2p.lifecycle] gossip.accepted {"count":1,"entities":["005f74"]}
+[alice] [INFO][entity.tx.account-admin] extend_credit.queued {"amount":{"__xlnType":"BigInt","value":"500000000000000000000000"},"counterparty":"1df7","entity":"5f74","tokenId":1}
+[hub] [INFO][p2p.lifecycle] gossip.accepted {"count":1,"entities":["036ffc"]}
+[hub] [INFO][entity] input.received {"entity":"0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6963","ts":1792216480596,"txs":["accountInput"]}
+[bob] BOB: ✅ Hub extended credit to us
+BOB: Extending credit back to hub...
+[bob] [INFO][entity] input.received {"entity":"0x4f71ab124d975bcc1d97ed29c4ab1f6e076ca2647560df270abf5fd59c036ffc","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"571e","ts":1792216480628,"txs":["extendCredit"]}
+[bob] [INFO][entity.tx.account-admin] extend_credit.queued {"amount":{"__xlnType":"BigInt","value":"500000000000000000000000"},"counterparty":"1df7","entity":"6ffc","tokenId":1}
+[hub] [INFO][entity] input.received {"entity":"0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6963","ts":1792216480612,"txs":["accountInput"]}
+[hub] [INFO][entity] input.received {"entity":"0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6963","ts":1792216480628,"txs":["accountInput"]}
+[alice] [INFO][entity] input.received {"entity":"0x344844c011f15051fccb2bf9355ec55693caea50fa81b06cddd3030952005f74","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"c95f","ts":1792216480612,"txs":["accountInput"]}
+[bob] [INFO][entity] input.received {"entity":"0x4f71ab124d975bcc1d97ed29c4ab1f6e076ca2647560df270abf5fd59c036ffc","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"571e","ts":1792216480628,"txs":["accountInput"]}
+[alice] ALICE CAPACITY CHECK:
+  alice→Hub credit: 500000000000000000000000 (we can owe hub)
+  Hub→alice credit: 500000000000000000000000 (hub can owe us)
+[alice] ✅ ALICE: Bilateral capacity verified
+[hub] [INFO][p2p.lifecycle] gossip.accepted {"count":1,"entities":["005f74"]}
+[hub] [P2P_DEBUG] hub-alice after hub credit ACK {
+  account: {
+    exists: true,
+    currentHeight: 4,
+    currentFrameHeight: 4,
+    pendingFrameHeight: null,
+    pendingFrameTxs: [],
+    mempoolTxs: [],
+    locks: [],
+  },
+  delta: {
+    offdelta: "0",
+    ondelta: "0",
+    collateral: "0",
+    leftCreditLimit: "500000000000000000000000",
+    rightCreditLimit: "500000000000000000000000",
+    leftAllowance: "0",
+    rightAllowance: "0",
+  },
+}
+[hub] [P2P_DEBUG] hub-bob after hub credit ACK {
+  account: {
+    exists: true,
+    currentHeight: 4,
+    currentFrameHeight: 4,
+    pendingFrameHeight: null,
+    pendingFrameTxs: [],
+    mempoolTxs: [],
+    locks: [],
+  },
+  delta: {
+    offdelta: "0",
+    ondelta: "0",
+    collateral: "0",
+    leftCreditLimit: "500000000000000000000000",
+    rightCreditLimit: "500000000000000000000000",
+    leftAllowance: "0",
+    rightAllowance: "0",
+  },
+}
+HUB: Re-announcing profile with updated accounts...
+[hub] P2P_HUB_READY
+[hub] [INFO][p2p.lifecycle] gossip.accepted {"count":1,"entities":["036ffc"]}
+[bob] BOB CAPACITY CHECK:
+  bob→Hub credit: 500000000000000000000000 (we can owe hub)
+  Hub→bob credit: 500000000000000000000000 (hub can owe us)
+✅ BOB: Bilateral capacity verified
+[bob] [INFO][entity] input.received {"entity":"0x4f71ab124d975bcc1d97ed29c4ab1f6e076ca2647560df270abf5fd59c036ffc","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"571e","ts":1792216480667,"txs":["extendCredit"]}
+[bob] [INFO][entity.tx.account-admin] extend_credit.queued {"amount":{"__xlnType":"BigInt","value":"500000000000000000000000"},"counterparty":"1df7","entity":"6ffc","tokenId":1}
+[hub] [INFO][entity] input.received {"entity":"0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6963","ts":1792216480667,"txs":["accountInput"]}
+[bob] [INFO][entity] input.received {"entity":"0x4f71ab124d975bcc1d97ed29c4ab1f6e076ca2647560df270abf5fd59c036ffc","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"571e","ts":1792216480667,"txs":["accountInput"]}
+[bob] P2P_BOB_READY
+[P2P] Bob credit ready
+[alice] 🔍 getProfileByName('bob'): Searching in 2 profiles
+🔍 NOT FOUND 'bob' (names: alice,hub)
+[alice] [INFO][p2p.lifecycle] gossip.accepted {"count":2,"entities":["005f74","036ffc"]}
+[bob] [P2P_DEBUG] wait-payment round=5 {
+  account: {
+    exists: true,
+    currentHeight: 5,
+    currentFrameHeight: 5,
+    pendingFrameHeight: null,
+    pendingFrameTxs: [],
+    mempoolTxs: [],
+    locks: [],
+  },
+  delta: {
+    offdelta: "0",
+    ondelta: "0",
+    collateral: "0",
+    leftCreditLimit: "500000000000000000000000",
+    rightCreditLimit: "500000000000000000000000",
+    leftAllowance: "0",
+    rightAllowance: "0",
+  },
+}
+[P2P_DEBUG] wait-payment round=5 {
+  pendingOutputs: [],
+  pendingNetworkOutputs: [],
+  networkInbox: [],
+}
+[bob] [P2P_DEBUG] wait-payment round=10 {
+  account: {
+    exists: true,
+    currentHeight: 5,
+    currentFrameHeight: 5,
+    pendingFrameHeight: null,
+    pendingFrameTxs: [],
+    mempoolTxs: [],
+    locks: [],
+  },
+  delta: {
+    offdelta: "0",
+    ondelta: "0",
+    collateral: "0",
+    leftCreditLimit: "500000000000000000000000",
+    rightCreditLimit: "500000000000000000000000",
+    leftAllowance: "0",
+    rightAllowance: "0",
+  },
+}
+[P2P_DEBUG] wait-payment round=10 {
+  pendingOutputs: [],
+  pendingNetworkOutputs: [],
+  networkInbox: [],
+}
+[bob] [P2P_DEBUG] wait-payment round=15 {
+  account: {
+    exists: true,
+    currentHeight: 5,
+    currentFrameHeight: 5,
+    pendingFrameHeight: null,
+    pendingFrameTxs: [],
+    mempoolTxs: [],
+    locks: [],
+  },
+  delta: {
+    offdelta: "0",
+    ondelta: "0",
+    collateral: "0",
+    leftCreditLimit: "500000000000000000000000",
+    rightCreditLimit: "500000000000000000000000",
+    leftAllowance: "0",
+    rightAllowance: "0",
+  },
+}
+[P2P_DEBUG] wait-payment round=15 {
+  pendingOutputs: [],
+  pendingNetworkOutputs: [],
+  networkInbox: [],
+}
+[alice] 🔍 getProfileByName('bob'): Searching in 3 profiles
+[alice] 🔍 FOUND 'bob': 6ffc accounts=1 ts=1792216480628
+🔍 getProfileByName('bob'): Searching in 3 profiles
+🔍 FOUND 'bob': 6ffc accounts=1 ts=1792216480628
+[alice] [P2P_DEBUG] alice sees bob {
+  entityId: "0x4f71ab124d975bcc1d97ed29c4ab1f6e076ca2647560df270abf5fd59c036ffc",
+  runtimeId: "0x2a1588dd712d14c6b05d7456b8ae2d7a773c093d",
+  wsUrl: null,
+  accounts: [ "1df7" ],
+  hasEntityEncryptionPublicKey: true,
+}
+[alice] ================================================================================
+ALICE SENDING HTLC PAYMENT TO BOB
+  Alice entityId: 0x344844c011f15051fccb2bf9355ec55693caea50fa81b06cddd3030952005f74
+  Hub entityId: 0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7
+  Bob entityId: 0x4f71ab124d975bcc1d97ed29c4ab1f6e076ca2647560df270abf5fd59c036ffc
+[alice]   Route: Alice -> Hub -> Bob
+  Amount: $1000 USDC
+================================================================================
+[alice] [INFO][entity] input.received {"entity":"0x344844c011f15051fccb2bf9355ec55693caea50fa81b06cddd3030952005f74","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"c95f","ts":1792216480889,"txs":["htlcPayment"]}
+[bob] [P2P_DEBUG] wait-payment round=20 {
+  account: {
+    exists: true,
+    currentHeight: 5,
+    currentFrameHeight: 5,
+    pendingFrameHeight: null,
+    pendingFrameTxs: [],
+    mempoolTxs: [],
+    locks: [],
+  },
+  delta: {
+    offdelta: "0",
+    ondelta: "0",
+    collateral: "0",
+    leftCreditLimit: "500000000000000000000000",
+    rightCreditLimit: "500000000000000000000000",
+    leftAllowance: "0",
+    rightAllowance: "0",
+  },
+}
+[P2P_DEBUG] wait-payment round=20 {
+  pendingOutputs: [],
+  pendingNetworkOutputs: [],
+  networkInbox: [],
+}
+[alice] ALICE: htlcPayment tx submitted to runtime
+[alice] [P2P_DEBUG] alice after HTLC submit {
+  mempoolTxs: [],
+  proposalHeight: null,
+  lockedHeight: null,
+  isProposer: true,
+}
+[alice] [P2P_DEBUG] alice-hub account after HTLC {
+  account: {
+    exists: true,
+    currentHeight: 4,
+    currentFrameHeight: 4,
+    pendingFrameHeight: 5,
+    pendingFrameTxs: [ "htlc_lock" ],
+    mempoolTxs: [],
+    locks: [],
+  },
+  delta: {
+    offdelta: "0",
+    ondelta: "0",
+    collateral: "0",
+    leftCreditLimit: "500000000000000000000000",
+    rightCreditLimit: "500000000000000000000000",
+    leftAllowance: "0",
+    rightAllowance: "0",
+  },
+}
+[hub] [INFO][entity] input.received {"entity":"0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6963","ts":1792216480889,"txs":["accountInput"]}
+[alice] [INFO][entity] input.received {"entity":"0x344844c011f15051fccb2bf9355ec55693caea50fa81b06cddd3030952005f74","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"c95f","ts":1792216480889,"txs":["accountInput"]}
+[bob] [INFO][entity] input.received {"entity":"0x4f71ab124d975bcc1d97ed29c4ab1f6e076ca2647560df270abf5fd59c036ffc","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"571e","ts":1792216480889,"txs":["accountInput"]}
+[hub] [INFO][entity] input.received {"entity":"0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6963","ts":1792216480889,"txs":["accountInput"]}
+[bob] [INFO][entity] input.received {"entity":"0x4f71ab124d975bcc1d97ed29c4ab1f6e076ca2647560df270abf5fd59c036ffc","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"571e","ts":1792216480889,"txs":["accountInput"]}
+[alice] [INFO][entity] input.received {"entity":"0x344844c011f15051fccb2bf9355ec55693caea50fa81b06cddd3030952005f74","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"c95f","ts":1792216480889,"txs":["accountInput"]}
+[bob] P2P_HTLC_RECEIVED
+P2P_PAYMENT_RECEIVED
+[hub] [INFO][entity] input.received {"entity":"0xa47d1916a292629b42d50e55789b8000aa0a823a8bdf8fb315d38cd53ec41df7","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"6963","ts":1792216480889,"txs":["accountInput"]}
+[alice] P2P_HTLC_SENT
+P2P_PAYMENT_SENT
+[P2P] Alice HTLC sent
+[hub] [P2P_DEBUG] hub settled alice {
+  account: {
+    exists: true,
+    currentHeight: 6,
+    currentFrameHeight: 6,
+    pendingFrameHeight: null,
+    pendingFrameTxs: [],
+    mempoolTxs: [],
+    locks: [],
+  },
+  delta: {
+    offdelta: "-1000001000001000001000",
+    ondelta: "0",
+    collateral: "0",
+    leftCreditLimit: "500000000000000000000000",
+    rightCreditLimit: "500000000000000000000000",
+    leftAllowance: "0",
+    rightAllowance: "0",
+  },
+}
+[hub] [P2P_DEBUG] hub settled bob {
+  account: {
+    exists: true,
+    currentHeight: 7,
+    currentFrameHeight: 7,
+    pendingFrameHeight: null,
+    pendingFrameTxs: [],
+    mempoolTxs: [],
+    locks: [],
+  },
+  delta: {
+    offdelta: "1000000000000000000000",
+    ondelta: "0",
+    collateral: "0",
+    leftCreditLimit: "500000000000000000000000",
+    rightCreditLimit: "500000000000000000000000",
+    leftAllowance: "0",
+    rightAllowance: "0",
+  },
+}
+P2P_END_TO_END_SETTLED
+✅ P2P relay test passed
+real 7.48
+user 9.12
+sys 21.75

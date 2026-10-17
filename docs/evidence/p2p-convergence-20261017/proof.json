@@ -1,0 +1,55 @@
+{
+  "baseSha": "b3c8202b41e688be4bf3f7d10c2ea180f976797b",
+  "scope": "P2P scenario observer coordination; real authenticated WebSocket participants; no Runtime/Account/transport implementation change",
+  "failure": {
+    "initialSeconds": 20.96,
+    "deterministicReproductionSeconds": 20.99,
+    "exit": 1,
+    "message": "Timeout waiting for /P2P_END_TO_END_SETTLED/ from hub",
+    "state": {
+      "observedHtlcRoute": false,
+      "accountsSettled": true,
+      "paybook": 0,
+      "aliceAccountHeight": 6,
+      "bobAccountHeight": 7,
+      "pendingFrames": 0,
+      "mempoolTransactions": 0,
+      "locks": 0
+    }
+  },
+  "repair": "Parent requests Hub convergence inspection only after Alice and Bob report local completion; Hub requires both Accounts, empty paybook and the unchanged no-pending/no-mempool/no-lock predicate. It no longer needs to observe transient paybook occupancy. The final state is logged.",
+  "regression": {
+    "command": "bun run test:p2p:relay",
+    "lateObserverAlwaysExercised": true,
+    "exit": 0,
+    "seconds": 5.71
+  },
+  "related": {
+    "command": "bun test core/__tests__/network/p2p/p2p-shutdown-drain.test.ts && bun run test:p2p:relay",
+    "unitTests": 26,
+    "assertions": 88,
+    "exit": 0,
+    "seconds": 7.48
+  },
+  "sources": {
+    "core/scenarios/network/p2p-node.ts": "f0f0c83c36fc8c6ffc1a364fdafed0042646403f232dfd44e64b245effa5f436",
+    "core/scenarios/network/p2p-relay.ts": "77e902daf177353c4c722c1632c500a87cb411c06438df98b9c06c687cb29370"
+  },
+  "rawLogSha256": {
+    "p2p-relay-b3c8202b4.log": "bf5c0d8ad8961b7dbb2cbbbeb2b35838c781cc987eef9efb07a2e0b5a0a1bb36",
+    "p2p-late-observer-red.log": "06621d9d4de98c0d1909632d75e4e377bd260c2be8cf4bafccb6206becc4dab9",
+    "p2p-late-observer-fixed.log": "80c52398fba75258ed1a45b80c9e8ecb64b03380de1d0d737045cec4f1c09dd4",
+    "p2p-final-regression.log": "712de637b5d857679b9d182f0f464e2229d33c96fc1d3d9c8aaeb70ea2691b48"
+  },
+  "logPresentation": "Trailing spaces removed only in repository copies; original stdout remains in external evidence directory.",
+  "files": {
+    "p2p-final-regression.log": "712de637b5d857679b9d182f0f464e2229d33c96fc1d3d9c8aaeb70ea2691b48",
+    "p2p-late-observer-fixed.log": "80c52398fba75258ed1a45b80c9e8ecb64b03380de1d0d737045cec4f1c09dd4",
+    "p2p-late-observer-red.log": "06621d9d4de98c0d1909632d75e4e377bd260c2be8cf4bafccb6206becc4dab9",
+    "p2p-relay-b3c8202b4.log": "bf5c0d8ad8961b7dbb2cbbbeb2b35838c781cc987eef9efb07a2e0b5a0a1bb36"
+  },
+  "limitations": [
+    "Chain adapter in this canonical relay gate is BrowserVM; evidence proves real network consensus, not public-chain settlement",
+    "No aggregate release, uninterrupted soak or mainnet readiness claim"
+  ]
+}

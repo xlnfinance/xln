@@ -888,13 +888,15 @@ const run = async () => {
 
     console.log('P2P_HUB_READY');
 
-    let observedHtlcRoute = false;
+    // The background Runtime may complete a route between observer polls.
+    // Start this check after both peers certify their local payment result;
+    // never require observation of a transient paybook entry as proof of work.
+    await waitForOrchestratorSignal('P2P_VERIFY_SETTLEMENT');
     let reportedEndToEndSettlement = false;
     // Hub stays alive until the orchestrator observes bilateral convergence.
     while (true) {
       await processRuntime(env);
       const hubReplica = env.state.eReplicas.get(`${entityId}:${signerId}`);
-      observedHtlcRoute ||= (hubReplica?.state.paybook.entries.size ?? 0) > 0;
       const accountsSettled = hubReplica
         ? Array.from(hubReplica.state.accounts.values()).every(account =>
             !account.pendingFrame
@@ -902,12 +904,15 @@ const run = async () => {
             && account.state.locks.size === 0)
         : false;
       if (
-        observedHtlcRoute
-        && !reportedEndToEndSettlement
-        && hubReplica?.state.paybook.entries.size === 0
+        !reportedEndToEndSettlement
+        && hubReplica?.state.accounts.has(aliceProfile.entityId)
+        && hubReplica.state.accounts.has(bobProfile.entityId)
+        && hubReplica.state.paybook.entries.size === 0
         && accountsSettled
       ) {
         reportedEndToEndSettlement = true;
+        logAccountState(env, entityId, signerId, aliceProfile.entityId, 'hub settled alice');
+        logAccountState(env, entityId, signerId, bobProfile.entityId, 'hub settled bob');
         console.log('P2P_END_TO_END_SETTLED');
       }
       await new Promise(resolve => setTimeout(resolve, 100));  // Process every 100ms
