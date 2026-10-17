@@ -1,223 +1,161 @@
+import type { RuntimeReplica, XLNModule, RuntimeAdapterActivityPage } from '../core/api/public/runtime-module';
+import type { RuntimeAdapterInspection } from '../ui/src/runtime/adapter';
 /**
  * E2E dispute coverage for account UI, settlement batching, reserve return, and reload persistence.
  *
  * These tests prove that a disputed bilateral account can be started from the UI, finalized into reserve,
- * extended with post-dispute settlement actions, and restored after reload without losing batch history.
+ * permanently closed, and restored after reload without losing batch history.
  */
-import { test, expect, type Locator, type Page } from './global-setup.mts';
+import { test, expect, type Page } from './global-setup.mts';
 import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing.mts';
 import { APP_BASE_URL, resetProdServer } from './utils/e2e-baseline';
-import { gotoApp as gotoSharedApp, createRuntimeIdentity } from './utils/e2e-demo-users';
-import { connectHub } from './utils/e2e-connect';
-import {
-  getPersistedReceiptCursor,
-  waitForPersistedFrameEventMatch,
-} from './utils/e2e-runtime-receipts';
-import {
-  clickWithDialogAccept,
-  openAccountWorkspaceTab,
-  startDisputeFromManageUi,
-} from './utils/e2e-account-workspace';
+import { gotoApp as gotoSharedApp } from './utils/e2e-demo-users';
+import { createWalletIdentity, LOCAL_PASSWORD } from '../ui/tests/wallet-ui';
+import { connectRuntimeToHub } from './utils/e2e-connect';
 import { capturePageScreenshot } from './utils/e2e-screenshots';
 import { getJurisdictionStackId } from '../core/jurisdiction/machine/jurisdiction-stack';
+
+type CurrentWalletWindow = Window & {
+  __xln?: {
+    env(): RuntimeReplica | null;
+    xln(): Promise<XLNModule>;
+    adapter(): RuntimeAdapterInspection | null;
+    store: { getState(): { activeEntityId: string | null } };
+  };
+};
 
 const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
 const ISOLATED_BASELINE_READY = process.env.E2E_ISOLATED_BASELINE_READY === '1';
-const MAX_BATCH_MINE_BLOCKS = 100;
-const MINE_BLOCKS_TIMEOUT_MS = 90_000;
 const E2E_DISPUTE_RESPONSE_SECONDS = 5;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function randomMnemonic(): string {
-  return Wallet.createRandom().mnemonic!.phrase;
+  const mnemonic = Wallet.createRandom().mnemonic;
+  if (!mnemonic) throw new Error('DISPUTE_MNEMONIC_UNAVAILABLE');
+  return mnemonic.phrase;
 }
 
-function relayToApiBase(relayUrl: string | null | undefined): string | null {
-  if (!relayUrl) return null;
-  try {
-    const relay = new URL(relayUrl);
-    const protocol =
-      relay.protocol === 'wss:' ? 'https:' :
-      relay.protocol === 'ws:' ? 'http:' :
-      relay.protocol;
-    return `${protocol}//${relay.host}`;
-  } catch {
-    return null;
-  }
+async function getActiveApiBase(): Promise<string> {
+  const apiBase = process.env.E2E_API_BASE_URL;
+  if (!apiBase) throw new Error('DISPUTE_STAND_API_BASE_REQUIRED');
+  return apiBase.replace(/\/+$/, '');
 }
 
-async function getActiveApiBase(page: Page): Promise<string> {
-  if (process.env.E2E_API_BASE_URL) return process.env.E2E_API_BASE_URL;
-  const runtimeApi = await page.evaluate(() => {
-    const connectivity = (window as typeof window & {
-      __xln?: { runtimeConnectivity?: { relayUrls?: string[] } };
-    }).__xln?.runtimeConnectivity;
-    const relay = connectivity?.relayUrls?.[0] ?? null;
-    return typeof relay === 'string' ? relay : null;
-  });
-  return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
-}
-
-/**
- * Base URL for operator-only hub routes. The orchestrator stamps everything it
- * forwards to a hub as coming from a public proxy, so those routes must be
- * asked of the hub's own port. Falls back to the orchestrator when health does
- * not publish hub URLs, which keeps deployments that hide them working.
- */
-async function hubDebugApiBase(page: Page, apiBase: string, hubEntityId?: string): Promise<string> {
-  const health = await page.request.get(`${apiBase}/api/health`)
-    .then(response => (response.ok() ? response.json() : null))
-    .catch(() => null) as { hubs?: Array<{ entityId?: string; apiUrl?: string }> } | null;
-  const hubs = health?.hubs ?? [];
-  const wanted = String(hubEntityId || '').trim().toLowerCase();
-  const match = wanted
-    ? hubs.find(hub => String(hub.entityId || '').trim().toLowerCase() === wanted)
-    : undefined;
-  const apiUrl = String((match ?? hubs.find(hub => hub.apiUrl))?.apiUrl || '').trim();
-  return apiUrl ? apiUrl.replace(/\/+$/, '') : apiBase;
+/** Require operator facts from the exact selected hub. */
+async function hubDebugApiBase(page: Page, apiBase: string, hubEntityId: string): Promise<string> {
+  const response = await page.request.get(`${apiBase}/api/health`);
+  if (!response.ok()) throw new Error(`DISPUTE_HUB_HEALTH_HTTP:${response.status()}`);
+  const health = (await response.json()) as { hubs?: Array<{ entityId?: string; apiUrl?: string }> };
+  const hub = health.hubs?.find(hub => hub.entityId?.toLowerCase() === hubEntityId.toLowerCase());
+  if (!hub?.apiUrl) throw new Error(`DISPUTE_HUB_API_UNAVAILABLE:${hubEntityId}`);
+  return hub.apiUrl.replace(/\/+$/, '');
 }
 
 async function ensureHubAccountOpen(
   page: Page,
+  identity: { entityId: string; signerId: string },
   disputeMode: 'auto' | 'manual' = 'auto',
 ): Promise<{ entityId: string; signerId: string; counterpartyId: string }> {
-  const apiBase = await getActiveApiBase(page);
+  const apiBase = await getActiveApiBase();
   const response = await page.request.get(`${apiBase}/api/debug/entities`);
   expect(response.ok(), 'debug entities endpoint must be available').toBe(true);
-  const body = await response.json() as {
+  const body = (await response.json()) as {
     entities?: Array<{ entityId?: string; isHub?: boolean; name?: string; metadata?: { name?: string } }>;
   };
-  const hubs = (Array.isArray(body.entities) ? body.entities : [])
-    .filter((entity) => entity.isHub === true && typeof entity.entityId === 'string');
-  const preferredHub = hubs.find((entity) => {
-    const name = String(entity.name || entity.metadata?.name || '').trim().toUpperCase();
+  const hubs = (Array.isArray(body.entities) ? body.entities : []).filter(
+    entity => entity.isHub === true && typeof entity.entityId === 'string',
+  );
+  const preferredHub = hubs.find(entity => {
+    const name = String(entity.name || entity.metadata?.name || '')
+      .trim()
+      .toUpperCase();
     return disputeMode === 'manual' ? name === 'H2' : name !== 'H2';
   });
   const hubId = preferredHub?.entityId;
-  expect(
-    typeof hubId === 'string' && hubId.length > 0,
-    `${disputeMode} dispute hub must be available`,
-  ).toBe(true);
+  expect(typeof hubId === 'string' && hubId.length > 0, `${disputeMode} dispute hub must be available`).toBe(true);
 
-  await connectHub(page, hubId!, disputeMode === 'manual'
-    ? {
-        disputeConfig: {
-          leftResponseSeconds: E2E_DISPUTE_RESPONSE_SECONDS,
-          rightResponseSeconds: E2E_DISPUTE_RESPONSE_SECONDS,
-        },
-      }
-    : {});
+  if (!hubId) throw new Error('DISPUTE_HUB_UNAVAILABLE');
+  await connectRuntimeToHub(
+    page,
+    identity,
+    hubId,
+    disputeMode === 'manual'
+      ? {
+          disputeConfig: {
+            leftResponseSeconds: E2E_DISPUTE_RESPONSE_SECONDS,
+            rightResponseSeconds: E2E_DISPUTE_RESPONSE_SECONDS,
+          },
+        }
+      : {},
+  );
 
-  const identity = await page.evaluate(() => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        runtimeId?: string;
-        state?: {
-          eReplicas?: Map<string, unknown>;
-        };
-      };
-    }).isolatedEnv;
-    if (!env?.state?.eReplicas) return null;
-
-    const runtimeId = String(env.runtimeId || '').toLowerCase();
-    for (const replicaKey of env.state.eReplicas.keys()) {
-      const [entityId, signerId] = String(replicaKey).split(':');
-      if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
-      if (runtimeId && String(signerId).toLowerCase() !== runtimeId) continue;
-      return { entityId, signerId };
-    }
-
-    return null;
-  });
-
-  expect(identity, 'runtime must expose a local entity after connectHub').not.toBeNull();
   return {
-    entityId: identity!.entityId,
-    signerId: identity!.signerId,
-    counterpartyId: hubId!,
+    entityId: identity.entityId,
+    signerId: identity.signerId,
+    counterpartyId: hubId,
   };
 }
 
-async function readLocalReserveState(page: Page, entityId: string, opts?: { allowUnavailable?: boolean }): Promise<bigint> {
-  const value = await page.evaluate(async ({ entityId }) => {
-    const env = (window as any).isolatedEnv;
-    if (!env?.state?.eReplicas) return null;
-    const entityLower = String(entityId || '').toLowerCase();
-    for (const [key, rep] of env.state.eReplicas.entries()) {
-      const [eid] = String(key).split(':');
-      if (String(eid || '').toLowerCase() !== entityLower) continue;
-      const reserves = rep?.state?.reserves;
-      let reserve: unknown = null;
-      if (reserves?.get) {
-        reserve = reserves.get(1);
-        if (reserve === undefined) reserve = reserves.get(1n);
-        if (reserve === undefined) reserve = reserves.get('1');
-      } else if (reserves && typeof reserves === 'object') {
-        reserve = (reserves as Record<string, unknown>)[1] ?? (reserves as Record<string, unknown>)['1'] ?? null;
-      }
-      return typeof reserve === 'bigint' ? reserve.toString() : String(reserve ?? '0');
-    }
-    return null;
-  }, { entityId });
-  if (!value) {
-    if (opts?.allowUnavailable) return 0n;
-    throw new Error('Unable to read local reserve state');
-  }
+async function readLocalReserveState(page: Page, entityId: string): Promise<bigint> {
+  const value = await page.evaluate(entityId => {
+    const env = (window as CurrentWalletWindow).__xln?.env();
+    if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+    const replica = [...env.state.eReplicas.values()].find(entry => entry.entityId === entityId);
+    if (!replica) throw new Error(`DISPUTE_ENTITY_MISSING:${entityId}`);
+    return (replica.state.reserves.get(1) ?? 0n).toString();
+  }, entityId);
   return BigInt(value);
 }
 
 async function readOnchainReserveViaAnvil(
   page: Page,
   entityId: string,
-  opts?: { allowUnavailable?: boolean; hubEntityId?: string },
+  opts: { hubEntityId: string },
 ): Promise<bigint> {
-  const apiBase = await getActiveApiBase(page);
-  const jurisdiction = await page.evaluate(({ entityId }) => {
-    const env = (window as any).isolatedEnv;
-    if (!env?.state?.eReplicas) return null;
-    const entityLower = String(entityId || '').toLowerCase();
-    for (const [key, rep] of env.state.eReplicas.entries()) {
-      const [eid] = String(key).split(':');
-      if (String(eid || '').toLowerCase() !== entityLower) continue;
-      const config = rep?.state?.config?.jurisdiction || null;
-      if (config && typeof config === 'object') {
-        return {
-          chainId: Number(config.chainId),
-          depositoryAddress: String(config.depositoryAddress || '').trim(),
-        };
-      }
-      return null;
-    }
-    return null;
-  }, { entityId }).catch(() => null);
+  const apiBase = await getActiveApiBase();
+  const jurisdiction = await page
+    .evaluate(
+      ({ entityId }) => {
+        const env = (window as CurrentWalletWindow).__xln?.env();
+        if (!env?.state?.eReplicas) return null;
+        const entityLower = String(entityId || '').toLowerCase();
+        for (const [key, rep] of env.state.eReplicas.entries()) {
+          const [eid] = String(key).split(':');
+          if (String(eid || '').toLowerCase() !== entityLower) continue;
+          const config = rep?.state?.config?.jurisdiction || null;
+          if (config && typeof config === 'object') {
+            return {
+              chainId: Number(config.chainId),
+              depositoryAddress: String(config.depositoryAddress || '').trim(),
+            };
+          }
+          return null;
+        }
+        return null;
+      },
+      { entityId },
+    )
+    .catch(() => null);
   const jurisdictionRef = getJurisdictionStackId(jurisdiction);
   const params = new URLSearchParams({
     entityId,
     tokenId: '1',
   });
   if (jurisdictionRef) params.set('jurisdiction', jurisdictionRef);
-  if (opts?.hubEntityId) params.set('hubEntityId', opts.hubEntityId);
+  if (opts.hubEntityId) params.set('hubEntityId', opts.hubEntityId);
   // Anything the orchestrator forwards to a hub is stamped as coming from a
   // public proxy, so the hub refuses operator-only routes like /api/debug/*.
   // Ask the hub that owns the reserve directly; its own port is local operator.
-  const debugBase = await hubDebugApiBase(page, apiBase, opts?.hubEntityId);
-  const response = await page.request.get(
-    `${debugBase}/api/debug/reserve?${params.toString()}`,
-  );
+  const debugBase = await hubDebugApiBase(page, apiBase, opts.hubEntityId);
+  const response = await page.request.get(`${debugBase}/api/debug/reserve?${params.toString()}`);
   if (!response.ok()) {
-    if (opts?.allowUnavailable) return 0n;
     const bodyText = await response.text().catch(() => '');
     throw new Error(`Unable to read on-chain reserve: status=${response.status()} body=${bodyText}`);
   }
   const bodyText = await response.text();
   const body = JSON.parse(bodyText) as { reserve?: string };
   if (typeof body.reserve !== 'string') {
-    if (opts?.allowUnavailable) return 0n;
     throw new Error(`Unable to read on-chain reserve: body=${bodyText}`);
   }
   return BigInt(body.reserve);
@@ -227,7 +165,7 @@ async function readAccountState(
   page: Page,
   entityId: string,
   signerId: string,
-  counterpartyId: string
+  counterpartyId: string,
 ): Promise<{
   exists: boolean;
   status: string;
@@ -240,58 +178,48 @@ async function readAccountState(
   jBatchDisputeStarts: number;
   jBatchDisputeFinalizations: number;
 }> {
-  return await page.evaluate(async ({ entityId, signerId, counterpartyId }) => {
-    const env = (window as any).isolatedEnv;
-    if (!env?.state?.eReplicas) {
+  return await page.evaluate(
+    async ({ entityId, signerId, counterpartyId }) => {
+      const env = (window as CurrentWalletWindow).__xln?.env();
+      if (!env?.state?.eReplicas) {
+        return {
+          exists: false,
+          status: '',
+          activeDispute: false,
+          disputeTimeout: 0,
+          disputeStartTimestamp: 0,
+          leftResponseSeconds: 0,
+          rightResponseSeconds: 0,
+          block: 0,
+          jBatchDisputeStarts: 0,
+          jBatchDisputeFinalizations: 0,
+        };
+      }
+      const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
+        const [eid, sid] = String(k).split(':');
+        return (
+          String(eid || '').toLowerCase() === String(entityId).toLowerCase() &&
+          String(sid || '').toLowerCase() === String(signerId).toLowerCase()
+        );
+      });
+      const rep = key ? env.state.eReplicas.get(key) : null;
+      const account = rep?.state?.accounts?.get?.(counterpartyId);
+      const batch = rep?.state?.jBatchState?.batch;
       return {
-        exists: false,
-        status: '',
-        activeDispute: false,
-        disputeTimeout: 0,
-        disputeStartTimestamp: 0,
-        leftResponseSeconds: 0,
-        rightResponseSeconds: 0,
+        exists: !!account,
+        status: String(account?.status || ''),
+        activeDispute: !!account?.activeDispute,
+        disputeTimeout: Number(account?.activeDispute?.disputeTimeout || 0),
+        disputeStartTimestamp: Number(account?.activeDispute?.disputeStartTimestamp || 0),
+        leftResponseSeconds: Number(account?.state?.disputeConfig?.leftResponseSeconds || 0),
+        rightResponseSeconds: Number(account?.state?.disputeConfig?.rightResponseSeconds || 0),
         block: 0,
-        jBatchDisputeStarts: 0,
-        jBatchDisputeFinalizations: 0,
+        jBatchDisputeStarts: Number(batch?.disputeStarts?.length || 0),
+        jBatchDisputeFinalizations: Number(batch?.disputeFinalizations?.length || 0),
       };
-    }
-    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
-      const [eid, sid] = String(k).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const rep = key ? env.state.eReplicas.get(key) : null;
-    const account = rep?.state?.accounts?.get?.(counterpartyId);
-    const batch = rep?.state?.jBatchState?.batch;
-    return {
-      exists: !!account,
-      status: String(account?.status || ''),
-      activeDispute: !!account?.activeDispute,
-      disputeTimeout: Number(account?.activeDispute?.disputeTimeout || 0),
-      disputeStartTimestamp: Number(account?.activeDispute?.disputeStartTimestamp || 0),
-      leftResponseSeconds: Number(account?.state?.disputeConfig?.leftResponseSeconds || 0),
-      rightResponseSeconds: Number(account?.state?.disputeConfig?.rightResponseSeconds || 0),
-      block: 0,
-      jBatchDisputeStarts: Number(batch?.disputeStarts?.length || 0),
-      jBatchDisputeFinalizations: Number(batch?.disputeFinalizations?.length || 0),
-    };
-  }, { entityId, signerId, counterpartyId });
-}
-
-async function readCurrentChainBlock(page: Page): Promise<number> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const body = await postRpc(page, 'eth_blockNumber', []);
-      expect(typeof body.result === 'string', `unexpected eth_blockNumber body: ${JSON.stringify(body)}`).toBe(true);
-      return Number.parseInt(body.result!, 16);
-    } catch (error) {
-      lastError = error;
-      await sleep(100 * (attempt + 1));
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    },
+    { entityId, signerId, counterpartyId },
+  );
 }
 
 async function readCurrentChainTimestamp(page: Page): Promise<number> {
@@ -304,7 +232,7 @@ async function readCurrentChainTimestamp(page: Page): Promise<number> {
 }
 
 async function postRpc(page: Page, method: string, params: unknown[]): Promise<{ result?: unknown; error?: unknown }> {
-  const apiBase = await getActiveApiBase(page);
+  const apiBase = await getActiveApiBase();
   // The stack serves JSON-RPC at /rpc; /api/rpc has no route and 404s.
   const response = await page.request.post(`${apiBase}/rpc`, {
     data: {
@@ -317,7 +245,7 @@ async function postRpc(page: Page, method: string, params: unknown[]): Promise<{
   const text = await response.text();
   let body: { result?: unknown; error?: unknown } = {};
   try {
-    body = text ? JSON.parse(text) as { result?: unknown; error?: unknown } : {};
+    body = text ? (JSON.parse(text) as { result?: unknown; error?: unknown }) : {};
   } catch {
     body = { error: text.slice(0, 500) };
   }
@@ -328,57 +256,6 @@ async function postRpc(page: Page, method: string, params: unknown[]): Promise<{
 
 async function mineOneBlock(page: Page): Promise<void> {
   await postRpc(page, 'evm_mine', []);
-}
-
-async function mineBlocks(page: Page, count: number): Promise<void> {
-  const blocks = Math.max(0, Math.floor(count));
-  if (blocks <= 0) return;
-  const startBlock = await readCurrentChainBlock(page);
-  const targetBlock = startBlock + blocks;
-  const deadline = Date.now() + MINE_BLOCKS_TIMEOUT_MS;
-  let chunkLimit = Math.min(blocks, MAX_BATCH_MINE_BLOCKS);
-  const errors: string[] = [];
-
-  while (Date.now() < deadline) {
-    const currentBlock = await readCurrentChainBlock(page);
-    if (currentBlock >= targetBlock) return;
-    const chunk = Math.min(targetBlock - currentBlock, chunkLimit);
-    try {
-      await mineBlockChunk(page, chunk);
-      chunkLimit = Math.min(MAX_BATCH_MINE_BLOCKS, Math.max(chunkLimit, chunk));
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
-      const afterFailureBlock = await readCurrentChainBlock(page).catch(() => currentBlock);
-      if (afterFailureBlock > currentBlock) {
-        chunkLimit = Math.max(1, Math.floor(chunkLimit / 2));
-        continue;
-      }
-      if (chunkLimit > 1) {
-        chunkLimit = Math.max(1, Math.floor(chunkLimit / 2));
-        continue;
-      }
-      throw new Error(`block mining stalled at ${currentBlock}/${targetBlock}: ${errors.slice(-5).join(' | ')}`);
-    }
-  }
-  throw new Error(`timed out mining to block ${targetBlock}: ${errors.slice(-5).join(' | ')}`);
-}
-
-async function mineBlockChunk(page: Page, blocks: number): Promise<void> {
-  if (blocks <= 1) {
-    await mineOneBlock(page);
-    return;
-  }
-  const quantity = `0x${blocks.toString(16)}`;
-  const errors: string[] = [];
-  for (const method of ['anvil_mine', 'hardhat_mine']) {
-    try {
-      await postRpc(page, method, [quantity]);
-      return;
-    } catch (error) {
-      errors.push(`${method}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  throw new Error(`batch block mining unavailable for ${blocks} blocks: ${errors.join(' | ')}`);
 }
 
 /** Advance the deterministic E2E chain to the contract's unix-second deadline. */
@@ -399,7 +276,7 @@ async function readAccountMeta(
   page: Page,
   entityId: string,
   signerId: string,
-  counterpartyId: string
+  counterpartyId: string,
 ): Promise<{
   frameHeight: number;
   hasCounterpartyDisputeProof: boolean;
@@ -407,195 +284,40 @@ async function readAccountMeta(
   counterpartyDisputeProofBodyHash: string;
   counterpartyDisputeProofNonce: number | null;
 }> {
-  return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
-    const env = (window as any).isolatedEnv;
-    if (!env?.state?.eReplicas) {
-      return {
-        frameHeight: 0,
-        hasCounterpartyDisputeProof: false,
-        pendingFrame: false,
-        counterpartyDisputeProofBodyHash: '',
-        counterpartyDisputeProofNonce: null,
-      };
-    }
-    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
-      const [eid, sid] = String(k).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const rep = key ? env.state.eReplicas.get(key) : null;
-    const account = rep?.state?.accounts?.get?.(counterpartyId);
-    return {
-      frameHeight: Number(account?.currentHeight || 0),
-      hasCounterpartyDisputeProof: !!account?.counterpartyDisputeProofHanko,
-      pendingFrame: !!account?.pendingFrame,
-      counterpartyDisputeProofBodyHash: String(account?.counterpartyDisputeProofBodyHash || ''),
-      counterpartyDisputeProofNonce:
-        typeof account?.counterpartyDisputeProofNonce === 'number'
-          ? Number(account.counterpartyDisputeProofNonce)
-          : null,
-    };
-  }, { entityId, signerId, counterpartyId });
-}
-
-async function readAccountCollateralState(
-  page: Page,
-  entityId: string,
-  signerId: string,
-  counterpartyId: string,
-  tokenId: number,
-): Promise<bigint> {
-  const raw = await page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
-    const env = (window as any).isolatedEnv;
-    if (!env?.state?.eReplicas) return '0';
-    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
-      const [eid, sid] = String(k).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const rep = key ? env.state.eReplicas.get(key) : null;
-    const account = rep?.state?.accounts?.get?.(counterpartyId);
-    const delta = account?.state?.deltas?.get?.(tokenId);
-    return String(delta?.collateral || '0');
-  }, { entityId, signerId, counterpartyId, tokenId });
-  return BigInt(String(raw || '0'));
-}
-
-async function readAccountWithdrawableCollateralState(
-  page: Page,
-  entityId: string,
-  signerId: string,
-  counterpartyId: string,
-  tokenId: number,
-): Promise<bigint> {
-  const raw = await page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
-    const runtimeWindow = window as typeof window & {
-      isolatedEnv?: unknown;
-      XLN?: {
-        deriveDelta?: (delta: unknown, isLeft: boolean) => { outCollateral?: bigint; outTotalHold?: bigint };
-      };
-    };
-    const env = runtimeWindow.isolatedEnv as {
-      state?: {
-        eReplicas?: Map<string, {
-          state?: {
-            accounts?: Map<string, {
-              leftEntity?: string;
-              rightEntity?: string;
-              deltas?: Map<number, unknown>;
-            }>;
-          };
-        }>;
-      };
-    } | undefined;
-    if (!env?.state?.eReplicas) return '0';
-    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
-      const [eid, sid] = String(k).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const replica = key ? env.state.eReplicas.get(key) : null;
-    const account = replica?.state?.accounts?.get?.(counterpartyId);
-    const delta = account?.state?.deltas?.get?.(tokenId);
-    const deriveDelta = runtimeWindow.XLN?.deriveDelta;
-    if (!delta || typeof deriveDelta !== 'function') return '0';
-    const owner = String(entityId || '').toLowerCase();
-    const left = String(account?.state?.leftEntity || '').toLowerCase();
-    const right = String(account?.state?.rightEntity || '').toLowerCase();
-    if (owner !== left && owner !== right) return '0';
-    const derived = deriveDelta(delta, owner === left);
-    const outCollateral = typeof derived?.outCollateral === 'bigint' ? derived.outCollateral : 0n;
-    const outTotalHold = typeof derived?.outTotalHold === 'bigint' ? derived.outTotalHold : 0n;
-    return String(outCollateral > outTotalHold ? outCollateral - outTotalHold : 0n);
-  }, { entityId, signerId, counterpartyId, tokenId });
-  return BigInt(String(raw || '0'));
-}
-
-async function readAccountProgress(
-  page: Page,
-  entityId: string,
-  signerId: string,
-  counterpartyId: string,
-): Promise<{ exists: boolean; currentHeight: number; pendingFrame: boolean }> {
-  const result = await page.evaluate(({ entityId, signerId, counterpartyId }) => {
-    const findAccount = (
-      accounts: Map<string, {
-        counterpartyEntityId?: string;
-        leftEntity?: string;
-        rightEntity?: string;
-      }> | null | undefined,
-      ownerId: string,
-      cpId: string,
-    ) => {
-      if (!(accounts instanceof Map)) return null;
-      const owner = String(ownerId || '').toLowerCase();
-      const cp = String(cpId || '').toLowerCase();
-      for (const [accountKey, account] of accounts.entries()) {
-        if (String(accountKey || '').toLowerCase() === cp) return account;
-        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
-          ? String(account.counterpartyEntityId).toLowerCase()
-          : '';
-        if (canonicalCp === cp) return account;
-        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
-        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
-        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
+  return await page.evaluate(
+    ({ entityId, signerId, counterpartyId }) => {
+      const env = (window as CurrentWalletWindow).__xln?.env();
+      if (!env?.state?.eReplicas) {
+        return {
+          frameHeight: 0,
+          hasCounterpartyDisputeProof: false,
+          pendingFrame: false,
+          counterpartyDisputeProofBodyHash: '',
+          counterpartyDisputeProofNonce: null,
+        };
       }
-      return null;
-    };
-
-    const env = (window as any).isolatedEnv;
-    if (!env?.state?.eReplicas) {
-      return { exists: false, currentHeight: 0, pendingFrame: false };
-    }
-
-    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
-      const [eid, sid] = String(k).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const rep = key ? env.state.eReplicas.get(key) : null;
-    const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
-
-    return {
-      exists: !!account,
-      currentHeight: Number(account?.currentHeight || 0),
-      pendingFrame: !!account?.pendingFrame,
-    };
-  }, { entityId, signerId, counterpartyId });
-
-  return {
-    exists: !!result.exists,
-    currentHeight: Number(result.currentHeight || 0),
-    pendingFrame: !!result.pendingFrame,
-  };
-}
-
-async function readAccountTxTypePresence(
-  page: Page,
-  entityId: string,
-  signerId: string,
-  counterpartyId: string,
-  txType: string,
-): Promise<{ mempool: boolean; pending: boolean; history: boolean }> {
-  return await page.evaluate(({ entityId, signerId, counterpartyId, txType }) => {
-    const env = (window as any).isolatedEnv;
-    if (!env?.state?.eReplicas) return { mempool: false, pending: false, history: false };
-    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
-      const [eid, sid] = String(k).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const rep = key ? env.state.eReplicas.get(key) : null;
-    const account = rep?.state?.accounts?.get?.(counterpartyId);
-    const hasMempool = Array.isArray(account?.mempool) && account.mempool.some((tx: any) => String(tx?.type || '') === txType);
-    const hasPending = Array.isArray(account?.pendingFrame?.accountTxs)
-      && account.pendingFrame.accountTxs.some((tx: any) => String(tx?.type || '') === txType);
-    const hasHistory = Array.isArray(account?.frameHistory)
-      && account.frameHistory.some((frame: any) =>
-        Array.isArray(frame?.accountTxs) && frame.accountTxs.some((tx: any) => String(tx?.type || '') === txType),
-      );
-    return { mempool: !!hasMempool, pending: !!hasPending, history: !!hasHistory };
-  }, { entityId, signerId, counterpartyId, txType });
+      const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
+        const [eid, sid] = String(k).split(':');
+        return (
+          String(eid || '').toLowerCase() === String(entityId).toLowerCase() &&
+          String(sid || '').toLowerCase() === String(signerId).toLowerCase()
+        );
+      });
+      const rep = key ? env.state.eReplicas.get(key) : null;
+      const account = rep?.state?.accounts?.get?.(counterpartyId);
+      return {
+        frameHeight: Number(account?.currentHeight || 0),
+        hasCounterpartyDisputeProof: !!account?.counterpartyDisputeProofHanko,
+        pendingFrame: !!account?.pendingFrame,
+        counterpartyDisputeProofBodyHash: String(account?.counterpartyDisputeProofBodyHash || ''),
+        counterpartyDisputeProofNonce:
+          typeof account?.counterpartyDisputeProofNonce === 'number'
+            ? Number(account.counterpartyDisputeProofNonce)
+            : null,
+      };
+    },
+    { entityId, signerId, counterpartyId },
+  );
 }
 
 function parseUiAmount(text: string): number {
@@ -609,364 +331,74 @@ function parseUiAmount(text: string): number {
 }
 
 async function ensureEntityWorkspaceVisible(page: Page, entityId?: string): Promise<void> {
-  if (!entityId) return;
-  const canonicalEntityId = entityId.toLowerCase();
-  const entityTrigger = page.getByTestId('context-current').first();
-  const triggerVisible = await entityTrigger.isVisible({ timeout: 5_000 }).catch(() => false);
-  if (!triggerVisible) return;
-  if (String(await entityTrigger.getAttribute('data-entity-id') || '').toLowerCase() === canonicalEntityId) return;
-
-  await entityTrigger.click();
-  const runtimeRows = page.locator('[data-testid="context-runtime-group"]');
-  const runtimeCount = await runtimeRows.count();
-  let entityOption: Locator | null = null;
-  for (let index = 0; index < runtimeCount; index += 1) {
-    await runtimeRows.nth(index).click();
-    const candidate = page.locator(
-      `[data-testid="context-runtime-focus"] [data-testid="context-entity-row"][data-entity-id="${canonicalEntityId}"]`,
-    ).first();
-    if (await candidate.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      entityOption = candidate;
-      break;
-    }
-  }
-
-  if (!entityOption) throw new Error(`CONTEXT_ENTITY_NOT_FOUND:${canonicalEntityId}`);
-  await entityOption.click();
-  await expect.poll(async () => {
-    return String(await entityTrigger.getAttribute('data-entity-id') || '').toLowerCase();
-  }, { timeout: 20_000, intervals: [250, 500, 1000] }).toBe(canonicalEntityId);
+  if (entityId)
+    await expect
+      .poll(() => page.evaluate(() => (window as CurrentWalletWindow).__xln?.store.getState().activeEntityId))
+      .toBe(entityId);
+  await expect(page.getByTestId('nav-home').locator('visible=true').first()).toBeVisible();
 }
 
 async function ensureAccountWorkspaceVisible(page: Page, counterpartyId?: string, entityId?: string): Promise<void> {
   await ensureEntityWorkspaceVisible(page, entityId);
-
-  const accountsTab = page.getByTestId('tab-accounts').first();
-  const accountList = page.getByTestId('account-list-wrapper').first();
-  const workspaceTabs = page.locator('nav[aria-label="Account workspace"]').first();
-  const isAccountsWorkspaceVisible = async () =>
-    await accountList.isVisible({ timeout: 500 }).catch(() => false)
-      || await workspaceTabs.isVisible({ timeout: 500 }).catch(() => false);
-
-  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    if (await isAccountsWorkspaceVisible()) break;
-    if (await accountsTab.isVisible({ timeout: 500 }).catch(() => false)) {
-      await accountsTab.click();
-      await page.waitForTimeout(300);
-      continue;
-    }
-    break;
-  }
-
-  await expect.poll(async () => await isAccountsWorkspaceVisible(), {
-    timeout: 20_000,
-    intervals: [200, 400, 800],
-    message: 'accounts workspace must be visible',
-  }).toBe(true);
-
-  if (!counterpartyId) {
-    return;
-  }
-
-  const accountPreview = page.locator('.account-preview').filter({ hasText: counterpartyId }).first();
-  await expect(accountPreview).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('nav-home').locator('visible=true').first().click();
+  await expect(page.getByTestId('home-accounts')).toBeVisible();
+  if (counterpartyId)
+    await expect(page.locator(`[data-testid="account-row"][data-counterparty-id="${counterpartyId}"]`)).toBeVisible();
 }
 
 async function ensureEntityShellVisible(page: Page): Promise<void> {
-  const accountsTab = page.getByTestId('tab-accounts').first();
-  const assetsTab = page.getByTestId('tab-assets').first();
-  await expect
-    .poll(
-      async () =>
-        (await accountsTab.isVisible({ timeout: 300 }).catch(() => false))
-        || (await assetsTab.isVisible({ timeout: 300 }).catch(() => false)),
-      {
-        timeout: 20_000,
-        intervals: [200, 400, 800],
-        message: 'entity shell tabs must be visible',
-      },
-    )
-    .toBe(true);
+  await expect(page.getByTestId('nav-home').locator('visible=true').first()).toBeVisible();
 }
 
-async function returnToEntityShell(page: Page): Promise<void> {
-  await ensureEntityShellVisible(page);
-}
-
-async function readReserveBalanceUi(
-  page: Page,
-  symbol: string = 'USDC',
-  counterpartyId?: string,
-  entityId?: string,
-): Promise<number> {
-  await ensureAccountWorkspaceVisible(page, counterpartyId, entityId);
-  const assetsTab = page.getByTestId('tab-assets').first();
-  await expect(assetsTab).toBeVisible({ timeout: 20_000 });
-  await assetsTab.click();
-
-  const refreshButton = page.getByTestId('asset-ledger-refresh').first();
-  if (await refreshButton.isVisible({ timeout: 1_500 }).catch(() => false)) {
-    await refreshButton.click();
-  }
-
-  const balance = page.getByTestId(`reserve-balance-${symbol}`).first();
-  await expect(balance).toBeVisible({ timeout: 20_000 });
-  const text = (await balance.textContent())?.trim() ?? '0';
-  return parseUiAmount(text);
+async function readReserveBalanceUi(page: Page, symbol = 'USDC'): Promise<number> {
+  await page.getByTestId('nav-manage').locator('visible=true').first().click();
+  await page.getByTestId('manage-assets').click();
+  const balance = page.getByTestId('faucet-reserve-balance');
+  await expect(balance).toContainText(symbol);
+  return parseUiAmount(await balance.innerText());
 }
 
 async function readAccountsCardOwedUi(page: Page): Promise<number> {
-  const owedNode = page.getByTestId('accounts-card-owed').first();
-  const visible = await owedNode.isVisible({ timeout: 1_000 }).catch(() => false);
-  if (!visible) return 0;
-  const text = (await owedNode.textContent())?.trim() ?? '0';
-  return parseUiAmount(text);
-}
-
-async function faucetReserve(page: Page, entityId: string, amount: string = '10'): Promise<void> {
-  const apiBase = await getActiveApiBase(page);
-  const response = await page.request.post(`${apiBase}/api/faucet/reserve`, {
-    data: {
-      userEntityId: entityId,
-      tokenId: 1,
-      tokenSymbol: 'USDC',
-      amount,
-    },
-  });
-  expect(response.ok(), 'reserve faucet api must succeed').toBe(true);
-  const body = await response.json() as { success?: boolean; error?: string };
-  expect(body.success, body.error || 'reserve faucet api failed').toBe(true);
-}
-
-async function getVisibleAssetMoveWorkspace(page: Page): Promise<Locator> {
-  await ensureAssetsWorkspaceVisible(page);
-  const assetsTab = page.getByTestId('tab-assets').first();
-  await expect(assetsTab).toBeVisible({ timeout: 20_000 });
-  await assetsTab.click();
-
-  const moveTab = page.getByTestId('asset-tab-move').first();
-  await expect(moveTab).toBeVisible({ timeout: 20_000 });
-  await moveTab.click();
-
-  const workspace = page.locator('[data-testid="move-workspace-assets"]:visible').first();
-  await expect(workspace).toBeVisible({ timeout: 20_000 });
-  return workspace;
-}
-
-async function ensurePrivateAccountOpenViaUi(
-  page: Page,
-  entityId: string,
-  signerId: string,
-  counterpartyId: string,
-): Promise<void> {
-  const already = await readAccountProgress(page, entityId, signerId, counterpartyId);
-  if (already.exists && !already.pendingFrame && already.currentHeight > 0) return;
-
-  const accountsTab = page.getByTestId('tab-accounts').first();
-  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
-  await accountsTab.click();
-
-  const openWorkspaceTab = page.locator('.account-workspace-tab').filter({ hasText: /Open Account/i }).first();
-  await expect(openWorkspaceTab).toBeVisible({ timeout: 20_000 });
-  await openWorkspaceTab.click();
-
-  const privateInput = page.locator('.open-private-form .entity-input input').first();
-  await expect(privateInput).toBeVisible({ timeout: 20_000 });
-  await privateInput.fill(counterpartyId);
-  await privateInput.press('Tab');
-
-  const openButton = page.locator('.open-private-form .btn-add').first();
-  await expect(openButton).toBeEnabled({ timeout: 20_000 });
-    await openButton.click();
-
-  await expect.poll(async () => {
-    const state = await readAccountProgress(page, entityId, signerId, counterpartyId);
-    return state.exists && !state.pendingFrame && state.currentHeight > 0;
-  }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
-}
-
-async function queueFundR2CViaUi(
-  page: Page,
-  counterpartyId: string,
-  amount: string,
-): Promise<void> {
-  const workspace = await getVisibleAssetMoveWorkspace(page);
-  await workspace.getByTestId('move-source-reserve').click();
-  await workspace.getByTestId('move-target-account').click();
-
-  await selectEntityInputValue(workspace, 'move-target-counterparty-picker', counterpartyId);
-
-  const amountInput = workspace.getByTestId('move-amount');
-  await expect(amountInput).toBeVisible({ timeout: 20_000 });
-  await amountInput.fill(amount);
-
-  const fundButton = workspace.getByTestId('move-confirm');
-  await expect(fundButton).toBeEnabled({ timeout: 20_000 });
-  await fundButton.click();
-}
-
-async function queueWithdrawC2RViaUi(
-  page: Page,
-  sourceAccountId: string,
-  reserveRecipientEntityId: string,
-  amount: string,
-): Promise<void> {
-  const workspace = await getVisibleAssetMoveWorkspace(page);
-  await workspace.getByTestId('move-source-account').click();
-  await workspace.getByTestId('move-target-reserve').click();
-  await selectEntityInputValue(workspace, 'move-source-account-picker', sourceAccountId);
-  await selectEntityInputValue(workspace, 'move-reserve-recipient-picker', reserveRecipientEntityId);
-
-  const amountInput = workspace.getByTestId('move-amount');
-  await expect(amountInput).toBeVisible({ timeout: 20_000 });
-  await amountInput.fill(amount);
-
-  const withdrawButton = workspace.getByTestId('move-confirm');
-  await expect(withdrawButton).toBeEnabled({ timeout: 20_000 });
-  await withdrawButton.click();
-}
-
-async function queueTransferR2RViaUi(
-  page: Page,
-  recipientEntityId: string,
-  amount: string,
-): Promise<void> {
-  const workspace = await getVisibleAssetMoveWorkspace(page);
-  await workspace.getByTestId('move-source-reserve').click();
-  await workspace.getByTestId('move-target-reserve').click();
-
-  await selectEntityInputValue(workspace, 'move-reserve-recipient-picker', recipientEntityId);
-
-  const amountInput = workspace.getByTestId('move-amount');
-  await expect(amountInput).toBeVisible({ timeout: 20_000 });
-  await amountInput.fill(amount);
-
-  await expect(workspace.getByTestId('move-route-summary')).toContainText('Reserve → Reserve', { timeout: 20_000 });
-  const transferButton = workspace.getByTestId('move-confirm');
-  await expect(transferButton).toBeEnabled({ timeout: 20_000 });
-  await transferButton.click();
-}
-
-async function ensureAssetsWorkspaceVisible(page: Page): Promise<void> {
-  await ensureEntityWorkspaceVisible(page);
-  await returnToEntityShell(page);
-  const assetsTab = page.getByTestId('tab-assets').first();
-  await expect(assetsTab).toBeVisible({ timeout: 20_000 });
-}
-
-async function selectEntityInputValue(
-  root: Page | Locator,
-  testId: string,
-  entityId: string,
-): Promise<void> {
-  const selector = root.getByTestId(testId).first();
-  await expect(selector).toBeVisible({ timeout: 20_000 });
-
-  const target = String(entityId || '').trim().toLowerCase();
-  const targetProbe = target.slice(0, 12);
-  const hasTargetSelection = async (): Promise<boolean> => {
-    const selectedIds = await selector.locator('.dropdown-item.selected .item-id').allTextContents().catch(() => []);
-    if (selectedIds.some((value) => String(value || '').trim().toLowerCase() === target)) return true;
-    const closedTrigger = selector.locator('.closed-trigger').first();
-    if (await closedTrigger.isVisible().catch(() => false)) {
-      const text = String(await closedTrigger.textContent().catch(() => '')).toLowerCase();
-      if (text.includes(targetProbe)) return true;
-    }
-    const selectorText = String(await selector.textContent().catch(() => '')).toLowerCase();
-    return selectorText.includes(targetProbe);
-  };
-
-  if (await hasTargetSelection()) return;
-
-  const openSelector = async (): Promise<void> => {
-    const closedTrigger = selector.locator('.closed-trigger').first();
-    if (await closedTrigger.isVisible().catch(() => false)) {
-      await closedTrigger.click();
-      return;
-    }
-    const dropdownToggle = selector.locator('.dropdown-toggle').first();
-    if (await dropdownToggle.isVisible().catch(() => false)) {
-      await dropdownToggle.click();
-    }
-  };
-
-  const input = selector.locator('input').first();
-  const option = selector.getByTestId(`${testId}-option-${target}`).first();
-  const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline) {
-    await openSelector();
-    await expect(input).toBeVisible({ timeout: 20_000 });
-    await input.fill('');
-    await input.fill(entityId);
-
-    if (await hasTargetSelection()) {
-      return;
-    }
-
-    if (await option.isVisible().catch(() => false)) {
-      await option.dispatchEvent('mousedown', { buttons: 1 });
-      await expect.poll(hasTargetSelection, {
-        timeout: 3_000,
-        intervals: [100, 250, 500],
-      }).toBe(true);
-    } else {
-      await input.press('Enter');
-      await expect.poll(hasTargetSelection, {
-        timeout: 3_000,
-        intervals: [100, 250, 500],
-      }).toBe(true);
-    }
-    if (await hasTargetSelection()) return;
-  }
-
-  await openSelector().catch(() => undefined);
-  const availableOptions = await selector.locator('.dropdown-item .item-id').allTextContents().catch(() => []);
-  const currentText = String(await selector.textContent().catch(() => ''));
-  throw new Error(
-    `Failed to select ${entityId} in ${testId}; current=${currentText}; options=${availableOptions.join(',')}`,
-  );
+  await page.getByTestId('nav-manage').locator('visible=true').first().click();
+  const row = page.getByTestId('manage-position').locator('.kv').filter({ hasText: 'You owe' });
+  await expect(row).toBeVisible();
+  return parseUiAmount(await row.locator('.v').innerText());
 }
 
 async function seedDisputePreconditions(
   page: Page,
   entityId: string,
   signerId: string,
-  counterpartyId: string
+  counterpartyId: string,
 ): Promise<void> {
   const before = await readAccountMeta(page, entityId, signerId, counterpartyId);
-  let seeded = false;
-  let lastError = 'seed-not-attempted';
+  await page.evaluate(
+    async ({ entityId, counterpartyId }) => {
+      const env = (window as CurrentWalletWindow).__xln?.env();
+      if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+      const runtimeId = String(env.runtimeId || '').toLowerCase();
+      const response = await fetch(`${window.location.origin}/api/faucet/offchain`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userEntityId: entityId,
+          userRuntimeId: runtimeId,
+          tokenId: 1,
+          amount: '100',
+          hubEntityId: counterpartyId,
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body?.success) {
+        throw new Error(body?.error || `offchain faucet failed (${response.status})`);
+      }
+    },
+    { entityId, signerId, counterpartyId },
+  );
 
-  for (let attempt = 0; attempt < 3 && !seeded; attempt++) {
-    try {
-      await page.evaluate(async ({ entityId, signerId, counterpartyId }) => {
-        const env = (window as any).isolatedEnv;
-        if (!env) throw new Error('isolatedEnv missing');
-        const runtimeId = String(env.runtimeId || '').toLowerCase();
-        const repKey = Array.from(env.state.eReplicas?.keys?.() || []).find((k: string) => {
-          const [eid, sid] = String(k).split(':');
-          return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-            && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-        });
-        const response = await fetch(`${window.location.origin}/api/faucet/offchain`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userEntityId: entityId,
-            userRuntimeId: runtimeId,
-            tokenId: 1,
-            amount: '100',
-            hubEntityId: counterpartyId,
-          }),
-        });
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok || !body?.success) {
-          throw new Error(body?.error || `offchain faucet failed (${response.status})`);
-        }
-      }, { entityId, signerId, counterpartyId });
-
-      await expect.poll(async () => {
+  await expect
+    .poll(
+      async () => {
         const current = await readAccountMeta(page, entityId, signerId, counterpartyId);
         const hasFreshProofHash =
           current.counterpartyDisputeProofBodyHash.length > 0 &&
@@ -974,10 +406,8 @@ async function seedDisputePreconditions(
         const hasFreshProofNonce =
           typeof current.counterpartyDisputeProofNonce === 'number' &&
           current.counterpartyDisputeProofNonce > 0 &&
-          (
-            before.counterpartyDisputeProofNonce === null ||
-            current.counterpartyDisputeProofNonce > before.counterpartyDisputeProofNonce
-          );
+          (before.counterpartyDisputeProofNonce === null ||
+            current.counterpartyDisputeProofNonce > before.counterpartyDisputeProofNonce);
         return {
           frameAdvanced: current.frameHeight > before.frameHeight,
           hasProof: current.hasCounterpartyDisputeProof,
@@ -987,144 +417,48 @@ async function seedDisputePreconditions(
           proofHash: current.counterpartyDisputeProofBodyHash,
           proofNonce: current.counterpartyDisputeProofNonce,
         };
-      }, { timeout: 45_000, intervals: [500, 1000, 2000] }).toMatchObject({
-        frameAdvanced: true,
-        hasProof: true,
-        pendingFrame: false,
-        freshProofHash: true,
-        freshProofNonce: true,
-      });
-
-      seeded = true;
-    } catch (error: any) {
-      lastError = error?.message || String(error);
-      await page.waitForTimeout(1000);
-    }
-  }
-
-  if (!seeded) {
-    throw new Error(`Unable to seed dispute preconditions: ${lastError}`);
-  }
+      },
+      { timeout: 45_000, intervals: [500, 1000, 2000] },
+    )
+    .toMatchObject({
+      frameAdvanced: true,
+      hasProof: true,
+      pendingFrame: false,
+      freshProofHash: true,
+      freshProofNonce: true,
+    });
 }
 
-async function broadcastPendingBatchViaUi(
-  page: Page,
-  entityId?: string,
-  signerId?: string,
-  counterpartyId?: string,
-): Promise<void> {
-  if (entityId) {
-    await ensureEntityWorkspaceVisible(page, entityId);
-    await ensureEntityShellVisible(page);
-  }
-
-  const isDisputeStartAlreadySubmitted = (snapshot: Awaited<ReturnType<typeof readJBatchSnapshot>> | null) =>
-    !!snapshot && (
-      snapshot.sentDisputeStarts > 0
-      || (snapshot.lastBatchStatus === 'confirmed' && snapshot.lastBatchOps.disputeStarts > 0)
-    );
-
-  const readSnapshot = async () =>
-    entityId && signerId ? await readJBatchSnapshot(page, entityId, signerId) : null;
-
-  const initialSnapshot = await readSnapshot();
-  if (isDisputeStartAlreadySubmitted(initialSnapshot)) {
-    return;
-  }
-
-  const accountsTab = page.getByTestId('tab-accounts').first();
-  if (await accountsTab.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await accountsTab.click();
-  }
-
-  const signButton = page.getByTestId('settle-sign-broadcast').first();
-  try {
-    await expect.poll(async () => {
-      if (isDisputeStartAlreadySubmitted(await readSnapshot())) return 'submitted';
-      if (await signButton.isVisible({ timeout: 250 }).catch(() => false)) return 'button';
-      return 'waiting';
-    }, { timeout: 30_000, intervals: [250, 500, 1000] }).toMatch(/^(button|submitted)$/);
-  } catch (error) {
-    const snapshot = await readSnapshot();
-    const accountState = entityId && signerId && counterpartyId
-      ? await readDisputeDebug(page, entityId, signerId, counterpartyId)
-      : null;
-    const visibleControls = await page.evaluate(() => ({
-      pendingBanner: !!document.querySelector('[data-testid="workspace-pending-banner"]'),
-      signBroadcast: !!document.querySelector('[data-testid="settle-sign-broadcast"]'),
-      rebroadcast: !!document.querySelector('[data-testid="settle-rebroadcast"]'),
-      activeLens: document.querySelector('[data-testid="entity-workspace"]')?.getAttribute('data-lens') || '',
-    }));
-    throw new Error(
-      `settle-sign-broadcast unavailable: ${(error as Error).message} ` +
-      `snapshot=${JSON.stringify(snapshot)} accountState=${JSON.stringify(accountState)} controls=${JSON.stringify(visibleControls)}`,
-    );
-  }
-  if (isDisputeStartAlreadySubmitted(await readSnapshot())) {
-    return;
-  }
-  await expect(signButton).toBeEnabled({ timeout: 30_000 });
-  let dialogMessage = '';
-  const onDialog = async (dialog: any) => {
-    dialogMessage = dialog?.message?.() || '';
-    await dialog.accept();
-  };
-  page.on('dialog', onDialog);
-  try {
-    await signButton.click();
-  } finally {
-    page.off('dialog', onDialog);
-  }
-  await page.waitForTimeout(500);
-  if (dialogMessage) {
-    const snapshot = entityId && signerId
-      ? await readJBatchSnapshot(page, entityId, signerId)
-      : null;
-    throw new Error(
-      `settle-sign-broadcast alert: ${dialogMessage}` +
-      (snapshot ? ` snapshot=${JSON.stringify(snapshot)}` : ''),
-    );
-  }
+async function broadcastPendingBatchViaUi(page: Page, entityId: string): Promise<void> {
+  await ensureEntityWorkspaceVisible(page, entityId);
+  await page.getByTestId('nav-home').locator('visible=true').first().click();
+  await expect(page.getByTestId('pending-batch')).toContainText('Dispute start');
+  await page.getByTestId('batch-broadcast').click();
+  await expect(page.getByTestId('pending-batch')).toHaveCount(0);
 }
 
-async function clearBatchViaUi(page: Page): Promise<void> {
-  const clearButton = page.getByTestId('settle-clear-batch').first();
-  await expect(clearButton).toBeVisible({ timeout: 30_000 });
-  await expect(clearButton).toBeEnabled({ timeout: 30_000 });
-  await clickWithDialogAccept(page, async () => {
-    await clearButton.click();
-  });
-  await page.waitForTimeout(400);
+async function ensureNoSentBatchLatch(page: Page, entityId: string, signerId: string): Promise<void> {
+  // A confirmed batch must clear through canonical J finality; never erase a stuck submission in a test.
+  await expect
+    .poll(async () => (await readJBatchSnapshot(page, entityId, signerId)).sentExists, {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+    })
+    .toBe(false);
 }
 
-async function ensureNoSentBatchLatch(
-  page: Page,
-  entityId: string,
-  signerId: string,
-): Promise<void> {
+async function assertBatchHistoryVisible(page: Page, entityId: string, signerId: string): Promise<void> {
   await ensureEntityWorkspaceVisible(page, entityId);
   await ensureEntityShellVisible(page);
-  const initial = await readJBatchSnapshot(page, entityId, signerId);
-  if (!initial.sentExists) return;
-
-  await clearBatchViaUi(page);
-  await expect.poll(async () => {
-    const snap = await readJBatchSnapshot(page, entityId, signerId);
-    return snap.sentExists;
-  }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(false);
-}
-
-async function assertBatchHistoryVisible(
-  page: Page,
-  entityId: string,
-  signerId: string,
-): Promise<void> {
-  await ensureEntityWorkspaceVisible(page, entityId);
-  await ensureEntityShellVisible(page);
-  await expect.poll(async () => {
-    const snapshot = await readJBatchSnapshot(page, entityId, signerId);
-    return snapshot.batchHistoryCount;
-  }, { timeout: 20_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(0);
+  await expect
+    .poll(
+      async () => {
+        const snapshot = await readJBatchSnapshot(page, entityId, signerId);
+        return snapshot.batchHistoryCount;
+      },
+      { timeout: 20_000, intervals: [500, 1000, 2000] },
+    )
+    .toBeGreaterThan(0);
 }
 
 async function startDisputeFromManageWorkspace(
@@ -1133,264 +467,129 @@ async function startDisputeFromManageWorkspace(
   signerId: string,
   counterpartyId: string,
 ): Promise<void> {
-  await ensureEntityWorkspaceVisible(page, entityId);
-  try {
-    await startDisputeFromManageUi(page, counterpartyId, async () => {
-      const state = await readAccountState(page, entityId, signerId, counterpartyId);
-      return state.jBatchDisputeStarts > 0;
-    }, async () => {
-      const state = await readAccountState(page, entityId, signerId, counterpartyId);
-      return state.status === 'dispute_preparing' || state.jBatchDisputeStarts > 0;
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const state = await readAccountState(page, entityId, signerId, counterpartyId).catch(() => null);
-    throw new Error(`disputeStart UI did not queue disputeStart: ${message} state=${JSON.stringify(state)}`);
-  }
+  await ensureAccountWorkspaceVisible(page, counterpartyId, entityId);
+  await page.locator(`[data-testid="account-row"][data-counterparty-id="${counterpartyId}"]`).click();
+  await page.getByTestId('account-manage').click();
+  await page.getByTestId('manage-tab-dispute').click();
+  await page.getByTestId('dispute-prepare').click();
+  await page.getByTestId('dispute-prepare-confirm').click();
+  await expect
+    .poll(async () => (await readAccountState(page, entityId, signerId, counterpartyId)).jBatchDisputeStarts, {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+    })
+    .toBeGreaterThan(0);
 }
 
 async function readDisputeDebug(
   page: Page,
   entityId: string,
   signerId: string,
-  counterpartyId: string
+  counterpartyId: string,
 ): Promise<{
   status: string;
   activeDispute: boolean;
   jBatchDisputeStarts: number;
   pendingEntityInputs: number;
-  messages: string[];
   hasProofHanko: boolean;
 }> {
-  return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
-    const env = (window as any).isolatedEnv;
-    if (!env?.state?.eReplicas) {
-      return {
-        status: '',
-        activeDispute: false,
-        jBatchDisputeStarts: 0,
-        pendingEntityInputs: 0,
-        messages: [],
-        hasProofHanko: false,
-      };
-    }
-    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
-      const [eid, sid] = String(k).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const rep = key ? env.state.eReplicas.get(key) : null;
-    const account = rep?.state?.accounts?.get?.(counterpartyId);
-    return {
-      status: String(account?.status || ''),
-      activeDispute: !!account?.activeDispute,
-      jBatchDisputeStarts: Number(rep?.state?.jBatchState?.batch?.disputeStarts?.length || 0),
-      pendingEntityInputs: Number(env?.runtimeInput?.entityInputs?.length || 0),
-      messages: Array.isArray(rep?.state?.messages) ? rep.state.messages.slice(-6).map((m: any) => String(m)) : [],
-      hasProofHanko: !!account?.counterpartyDisputeProofHanko,
-    };
-  }, { entityId, signerId, counterpartyId });
-}
-
-async function readJBatchSnapshot(
-  page: Page,
-  entityId: string,
-  signerId: string,
-): Promise<{
-  pendingDisputeStarts: number;
-  pendingReserveToCollateral: number;
-  pendingCollateralToReserve: number;
-  pendingReserveToReserve: number;
-  sentExists: boolean;
-  sentDisputeStarts: number;
-  sentReserveToCollateral: number;
-  sentCollateralToReserve: number;
-  sentReserveToReserve: number;
-  batchHistoryCount: number;
-  lastBatchTxHash: string;
-  lastBatchStatus: string;
-  lastBatchOpCount: number;
-  lastBatchJBlock: number;
-  lastBatchOps: Record<string, number>;
-  replicaMempoolTxTypes: string[];
-  proposalTxTypes: string[];
-  recentMessages: string[];
-  activeJurisdiction: string;
-  entityJurisdiction: {
-    name: string;
-    address: string;
-    depositoryAddress: string;
-    entityProviderAddress: string;
-    chainId: number;
-  };
-  jReplicas: Array<{
-    name: string;
-    depositoryAddress: string;
-    entityProviderAddress: string;
-    chainId: number;
-    rpcCount: number;
-  }>;
-}> {
-  return await page.evaluate(async ({ entityId, signerId }) => {
-    const env = (window as any).isolatedEnv;
-    if (!env?.state?.eReplicas) {
-      return {
-        pendingDisputeStarts: 0,
-        pendingReserveToCollateral: 0,
-        pendingCollateralToReserve: 0,
-        pendingReserveToReserve: 0,
-        sentExists: false,
-        sentDisputeStarts: 0,
-        sentReserveToCollateral: 0,
-        sentCollateralToReserve: 0,
-        sentReserveToReserve: 0,
-        batchHistoryCount: 0,
-        lastBatchTxHash: '',
-        lastBatchStatus: '',
-        lastBatchOpCount: 0,
-        lastBatchJBlock: 0,
-        lastBatchOps: {},
-        replicaMempoolTxTypes: [],
-        proposalTxTypes: [],
-        recentMessages: [],
-        activeJurisdiction: '',
-        entityJurisdiction: {
-          name: '',
-          address: '',
-          depositoryAddress: '',
-          entityProviderAddress: '',
-          chainId: 0,
-        },
-        jReplicas: [],
-      };
-    }
-
-    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
-      const [eid, sid] = String(k).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const rep = key ? env.state.eReplicas.get(key) : null;
-    const pending = rep?.state?.jBatchState?.batch;
-    const sent = rep?.state?.jBatchState?.sentBatch?.batch;
-    const adapter = (window as any).__xln?.adapter;
-    if (!adapter?.query?.activity) {
-      throw new Error('XLN_RUNTIME_ADAPTER_ACTIVITY_QUERY_MISSING');
-    }
-    const activity = await adapter.query.activity({
-      entityId,
-      kind: 'onchain',
-      limit: 500,
-      scanLimit: 2_000,
-    });
-    const history = Array.from(activity?.events || [])
-      .filter((event: any) => event?.rawType === 'HankoBatchProcessed')
-      .map((event: any) => ({
-        txHash: String(event?.hash || ''),
-        status: 'confirmed',
-        jBlockNumber: Number(String(event?.subtitle || '').match(/J#(\d+)/)?.[1] || event?.height || 0),
-        operations: {},
-      }));
-    const last = history.length > 0 ? history[history.length - 1] : null;
-    const lastOps = (last?.operations && typeof last.operations === 'object') ? last.operations : {};
-    const jurisdiction = rep?.state?.config?.jurisdiction;
-    const jReplicas = Array.from(env.state.jReplicas?.values?.() || []).map((jr: any) => ({
-      name: String(jr?.name || ''),
-      depositoryAddress: String(jr?.depositoryAddress || jr?.contracts?.depository || ''),
-      entityProviderAddress: String(jr?.entityProviderAddress || jr?.contracts?.entityProvider || ''),
-      chainId: Number(jr?.chainId || jr?.jadapter?.chainId || 0),
-      rpcCount: Array.isArray(jr?.rpcs) ? jr.rpcs.length : 0,
-    }));
-
-    return {
-      pendingDisputeStarts: Number(pending?.disputeStarts?.length || 0),
-      pendingReserveToCollateral: Number(pending?.reserveToCollateral?.length || 0),
-      pendingCollateralToReserve: Number(pending?.collateralToReserve?.length || 0),
-      pendingReserveToReserve: Number(pending?.reserveToReserve?.length || 0),
-      sentExists: !!rep?.state?.jBatchState?.sentBatch,
-      sentDisputeStarts: Number(sent?.disputeStarts?.length || 0),
-      sentReserveToCollateral: Number(sent?.reserveToCollateral?.length || 0),
-      sentCollateralToReserve: Number(sent?.collateralToReserve?.length || 0),
-      sentReserveToReserve: Number(sent?.reserveToReserve?.length || 0),
-      batchHistoryCount: Number(history.length || 0),
-      lastBatchTxHash: String(last?.txHash || ''),
-      lastBatchStatus: String(last?.status || ''),
-      lastBatchOpCount: Number(last?.opCount || 0),
-      lastBatchJBlock: Number(last?.jBlockNumber || 0),
-      lastBatchOps: {
-        reserveToCollateral: Number(lastOps?.reserveToCollateral || 0),
-        collateralToReserve: Number(lastOps?.collateralToReserve || 0),
-        reserveToReserve: Number(lastOps?.reserveToReserve || 0),
-        disputeStarts: Number(lastOps?.disputeStarts || 0),
-        disputeFinalizations: Number(lastOps?.disputeFinalizations || 0),
-        settlements: Number(lastOps?.settlements || 0),
-      },
-      replicaMempoolTxTypes: Array.isArray(rep?.mempool)
-        ? rep.mempool.map((tx: any) => String(tx?.type || ''))
-        : [],
-      proposalTxTypes: Array.isArray(rep?.proposal?.txs)
-        ? rep.proposal.txs.map((tx: any) => String(tx?.type || ''))
-        : [],
-      recentMessages: Array.isArray(rep?.state?.messages)
-        ? rep.state.messages.slice(-8).map((message: unknown) => String(message || ''))
-        : [],
-      activeJurisdiction: String(env.activeJurisdiction || ''),
-      entityJurisdiction: {
-        name: String(jurisdiction?.name || ''),
-        address: String(jurisdiction?.address || ''),
-        depositoryAddress: String(jurisdiction?.depositoryAddress || ''),
-        entityProviderAddress: String(jurisdiction?.entityProviderAddress || ''),
-        chainId: Number(jurisdiction?.chainId || 0),
-      },
-      jReplicas,
-    };
-  }, { entityId, signerId });
-}
-
-async function readSettlementWorkspaceSnapshot(
-  page: Page,
-  entityId: string,
-  signerId: string,
-  counterpartyId: string,
-): Promise<{
-  exists: boolean;
-  status: string;
-  memo: string;
-  version: number;
-  opTypes: string[];
-}> {
-  return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
-    const env = (window as Window & {
-      isolatedEnv?: {
-        state?: {
-          eReplicas?: Map<string, { state?: { accounts?: Map<string, { settlementWorkspace?: unknown }> } }>;
+  return await page.evaluate(
+    ({ entityId, signerId, counterpartyId }) => {
+      const env = (window as CurrentWalletWindow).__xln?.env();
+      if (!env?.state?.eReplicas) {
+        return {
+          status: '',
+          activeDispute: false,
+          jBatchDisputeStarts: 0,
+          pendingEntityInputs: 0,
+          hasProofHanko: false,
         };
+      }
+      const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
+        const [eid, sid] = String(k).split(':');
+        return (
+          String(eid || '').toLowerCase() === String(entityId).toLowerCase() &&
+          String(sid || '').toLowerCase() === String(signerId).toLowerCase()
+        );
+      });
+      const rep = key ? env.state.eReplicas.get(key) : null;
+      const account = rep?.state?.accounts?.get?.(counterpartyId);
+      return {
+        status: String(account?.status || ''),
+        activeDispute: !!account?.activeDispute,
+        jBatchDisputeStarts: Number(rep?.state?.jBatchState?.batch?.disputeStarts?.length || 0),
+        pendingEntityInputs: Number(env.runtimeMempool.entityInputs.length || 0),
+        hasProofHanko: !!account?.counterpartyDisputeProofHanko,
       };
-    }).isolatedEnv;
-    const replicas = env?.state?.eReplicas;
-    if (!(replicas instanceof Map)) {
-      return { exists: false, status: '', memo: '', version: 0, opTypes: [] };
-    }
+    },
+    { entityId, signerId, counterpartyId },
+  );
+}
 
-    const key = Array.from(replicas.keys()).find((rawKey) => {
-      const [eid, sid] = String(rawKey).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const replica = key ? replicas.get(key) : null;
-    const account = replica?.state?.accounts?.get?.(counterpartyId);
-    const workspace = account?.settlementWorkspace as
-      | { status?: unknown; memo?: unknown; version?: unknown; ops?: Array<{ type?: unknown }> }
-      | undefined;
+async function readJBatchSnapshot(page: Page, entityId: string, signerId: string) {
+  return page.evaluate(
+    async ({ entityId, signerId }) => {
+      const debug = (window as CurrentWalletWindow).__xln;
+      const env = debug?.env();
+      const adapter = debug?.adapter();
+      const replica = env?.state.eReplicas.get(`${entityId}:${signerId}`);
+      if (!replica || !adapter) throw new Error('DISPUTE_BATCH_OWNER_UNAVAILABLE');
+      const activity = await adapter.read<RuntimeAdapterActivityPage>('activity', {
+        entityId,
+        kind: 'onchain',
+        limit: 500,
+        scanLimit: 2_000,
+      });
+      // Activity is newest first. Only observed HankoBatchProcessed events count;
+      // queued commands or submission attempts are not chain confirmations.
+      const history = activity.events.filter(event => event.rawType === 'HankoBatchProcessed');
+      const last = history[0];
+      const block = last?.subtitle.match(/J#(\d+)/)?.[1];
+      if (last && !block) throw new Error(`DISPUTE_BATCH_J_BLOCK_MISSING:${last.id}`);
+      return {
+        pendingDisputeStarts: replica.state.jBatchState?.batch.disputeStarts.length ?? 0,
+        sentExists: Boolean(replica.state.jBatchState?.sentBatch),
+        batchHistoryCount: history.length,
+        batchEventIds: history.map(event => event.id),
+        lastBatchStatus: last?.status ?? '',
+        lastBatchJBlock: Number(block ?? 0),
+      };
+    },
+    { entityId, signerId },
+  );
+}
 
-    return {
-      exists: !!workspace,
-      status: String(workspace?.status || ''),
-      memo: String(workspace?.memo || ''),
-      version: Number(workspace?.version || 0),
-      opTypes: Array.isArray(workspace?.ops) ? workspace.ops.map((op) => String(op?.type || '')) : [],
-    };
-  }, { entityId, signerId, counterpartyId });
+async function readSignedClaim(page: Page, entityId: string, counterpartyId: string): Promise<bigint> {
+  const amount = await page.evaluate(
+    async ({ entityId, counterpartyId }) => {
+      const debug = (window as CurrentWalletWindow).__xln;
+      const env = debug?.env();
+      const replica = [...(env?.state.eReplicas.values() ?? [])].find(replica => replica.entityId === entityId);
+      const account = replica?.state.accounts.get(counterpartyId);
+      const delta = account?.state.deltas.get(1);
+      if (!debug || !account || !delta || account.pendingFrame || !account.counterpartyDisputeProofHanko)
+        throw new Error('DISPUTE_SIGNED_USDC_CLAIM_UNAVAILABLE');
+      const xln = await debug.xln();
+      const d = xln.deriveDelta(delta, xln.isLeftEntity(entityId, counterpartyId));
+      return (d.outCollateral + d.outPeerCredit - d.inOwnCredit).toString();
+    },
+    { entityId, counterpartyId },
+  );
+  return BigInt(amount);
+}
+
+async function assertClosedAccountUi(page: Page, counterpartyId: string): Promise<void> {
+  await ensureAccountWorkspaceVisible(page, counterpartyId);
+  const row = page.locator(`[data-testid="account-row"][data-counterparty-id="${counterpartyId}"]`);
+  await expect(row).toContainText('Closed after dispute');
+  await row.click();
+  await expect(page.getByTestId('account-status')).toHaveText('Closed after dispute');
+  await expect(page.getByTestId('account-dispute-state')).toHaveText(
+    'Dispute finalized. This account is permanently closed.',
+  );
+  await expect(page.getByTestId('account-extend-credit')).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Pay', exact: true })).toBeDisabled();
+  await expect(page.getByTestId('account-dispute')).toHaveCount(0);
 }
 
 test.describe('E2E Dispute Flow', () => {
@@ -1405,35 +604,48 @@ test.describe('E2E Dispute Flow', () => {
   });
 
   // Scenario: trigger a dispute from the entity workspace, observe reserve returning after finalize,
-  // then continue with post-dispute R2R/R2C/C2R coverage and confirm reload restores the final state.
+  // then confirm reload restores finality and the permanently closed Account.
   test('entity workspace dispute lifecycle returns reserve', { tag: '@resilience' }, async ({ page }, testInfo) => {
     test.setTimeout(LONG_E2E ? 420_000 : 300_000);
-    page.on('console', (msg) => {
+    page.on('console', msg => {
       if (msg.type() === 'error') {
         process.stdout.write(`[BROWSER:error] ${msg.text()}\n`);
       }
     });
 
-    await timedStep('dispute.goto_app', () => gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 500 }));
-    await timedStep('dispute.create_runtime', () => createRuntimeIdentity(page, `dispute-rt-${Date.now()}`, randomMnemonic()));
+    await timedStep('dispute.goto_app', () =>
+      gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 500 }),
+    );
+    const identity = await timedStep('dispute.create_runtime', () =>
+      createWalletIdentity(page, `dispute-rt-${Date.now()}`, randomMnemonic()),
+    );
     // H1/H3 may correctly finalize as the counterparty immediately after DisputeStarted.
     // Use H2's explicit manual mode so this lifecycle test deterministically observes
     // the active state before advancing to the timeout and finalization stages.
-    const accountRef = await timedStep('dispute.ensure_hub_account', () => ensureHubAccountOpen(page, 'manual'));
-    await timedStep('dispute.seed_preconditions', () => seedDisputePreconditions(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId));
+    const accountRef = await timedStep('dispute.ensure_hub_account', () =>
+      ensureHubAccountOpen(page, identity, 'manual'),
+    );
+    await timedStep('dispute.seed_preconditions', () =>
+      seedDisputePreconditions(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
+    );
 
-    const localReserveBefore = await readLocalReserveState(page, accountRef.entityId, { allowUnavailable: true });
+    const localReserveBefore = await readLocalReserveState(page, accountRef.entityId);
     expect(localReserveBefore).toBeGreaterThanOrEqual(0n);
     const reserveBefore = await readOnchainReserveViaAnvil(page, accountRef.entityId, {
       hubEntityId: accountRef.counterpartyId,
     });
-    const reserveBeforeUi = await readReserveBalanceUi(page, 'USDC');
+    const claim = await readSignedClaim(page, accountRef.entityId, accountRef.counterpartyId);
+    expect(claim, 'the real offchain faucet committed exactly 100 USDC of signed value').toBe(100_000_000n);
+    const hubReserve = await readOnchainReserveViaAnvil(page, accountRef.counterpartyId, {
+      hubEntityId: accountRef.counterpartyId,
+    });
+    expect(hubReserve, 'this fully collectible claim needs liquid hub reserve').toBeGreaterThanOrEqual(claim);
+    expect(await readReserveBalanceUi(page, 'USDC')).toBe(Number(reserveBefore) / 1_000_000);
     const batchBeforeDispute = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
 
     try {
-      await timedStep(
-        'dispute.ui_start_dispute',
-        () => startDisputeFromManageWorkspace(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
+      await timedStep('dispute.ui_start_dispute', () =>
+        startDisputeFromManageWorkspace(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
       );
     } catch (error) {
       const debug = await readDisputeDebug(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
@@ -1441,44 +653,73 @@ test.describe('E2E Dispute Flow', () => {
       throw new Error(`disputeStart not observed via UI click. cause=${message} debug=${JSON.stringify(debug)}`);
     }
     await timedStep('dispute.wait_batch_queue_dispute_start', async () => {
-      await expect.poll(async () => {
-        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-        return snap.pendingDisputeStarts;
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(batchBeforeDispute.pendingDisputeStarts);
+      await expect
+        .poll(
+          async () => {
+            const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+            return snap.pendingDisputeStarts;
+          },
+          { timeout: 60_000, intervals: [500, 1000, 2000] },
+        )
+        .toBeGreaterThan(batchBeforeDispute.pendingDisputeStarts);
     });
     const disputeQueued = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
     const disputeHistoryBeforeBroadcast = disputeQueued.batchHistoryCount;
 
-    await timedStep('dispute.broadcast_start_batch', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId));
+    await timedStep('dispute.broadcast_start_batch', () => broadcastPendingBatchViaUi(page, accountRef.entityId));
     await timedStep('dispute.wait_batch_history_confirmed', async () => {
       try {
-        await expect.poll(async () => {
-          const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-          return {
-            batchHistoryCount: snap.batchHistoryCount,
-            lastBatchStatus: snap.lastBatchStatus,
-            lastBatchOps: snap.lastBatchOps,
-          };
-        }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toMatchObject({
-          batchHistoryCount: expect.any(Number),
-          lastBatchStatus: 'confirmed',
-        });
-        await expect.poll(async () => {
-          const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-          return snap.batchHistoryCount;
-        }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(disputeHistoryBeforeBroadcast);
+        await expect
+          .poll(
+            async () => {
+              const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+              return {
+                batchHistoryCount: snap.batchHistoryCount,
+                lastBatchStatus: snap.lastBatchStatus,
+              };
+            },
+            { timeout: 120_000, intervals: [500, 1000, 2000] },
+          )
+          .toMatchObject({
+            batchHistoryCount: expect.any(Number),
+            lastBatchStatus: 'recorded',
+          });
+        await expect
+          .poll(
+            async () => {
+              const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+              return snap.batchHistoryCount;
+            },
+            { timeout: 120_000, intervals: [500, 1000, 2000] },
+          )
+          .toBeGreaterThan(disputeHistoryBeforeBroadcast);
       } catch {
         const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
         throw new Error(`dispute broadcast not finalized. snapshot=${JSON.stringify(snap)}`);
       }
     });
 
-    let disputedState = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+    let disputedState = await readAccountState(
+      page,
+      accountRef.entityId,
+      accountRef.signerId,
+      accountRef.counterpartyId,
+    );
     await timedStep('dispute.wait_active_dispute', async () => {
-      await expect.poll(async () => {
-        disputedState = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-        return disputedState.activeDispute;
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
+      await expect
+        .poll(
+          async () => {
+            disputedState = await readAccountState(
+              page,
+              accountRef.entityId,
+              accountRef.signerId,
+              accountRef.counterpartyId,
+            );
+            return disputedState.activeDispute;
+          },
+          { timeout: 60_000, intervals: [500, 1000, 2000] },
+        )
+        .toBe(true);
     });
     expect(disputedState.activeDispute, 'dispute must become active after disputeStart broadcast').toBe(true);
     await ensureAccountWorkspaceVisible(page, undefined, accountRef.entityId);
@@ -1495,146 +736,147 @@ test.describe('E2E Dispute Flow', () => {
 
     const currentChainTimestamp = await readCurrentChainTimestamp(page);
     expect(disputedState.disputeStartTimestamp, 'disputeStartTimestamp should be set').toBeGreaterThan(0);
-    expect(disputedState.disputeTimeout, 'disputeTimeout should be a future unix timestamp')
-      .toBeGreaterThan(currentChainTimestamp);
+    expect(disputedState.disputeTimeout, 'disputeTimeout should be a future unix timestamp').toBeGreaterThan(
+      currentChainTimestamp,
+    );
     expect(disputedState.disputeTimeout).toBe(
-      disputedState.disputeStartTimestamp
-      + disputedState.leftResponseSeconds
-      + disputedState.rightResponseSeconds,
+      disputedState.disputeStartTimestamp + disputedState.leftResponseSeconds + disputedState.rightResponseSeconds,
     );
 
     const finalizeBatchBefore = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
     await timedStep('dispute.wait_timeout_seconds', () => waitForUnixSeconds(page, disputedState.disputeTimeout));
     await timedStep('dispute.wait_auto_finalize_history_confirmed', async () => {
-      await expect.poll(async () => {
-        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-        return {
-          batchHistoryCount: snap.batchHistoryCount,
-          lastBatchStatus: snap.lastBatchStatus,
-        };
-      }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toMatchObject({
-        batchHistoryCount: expect.any(Number),
-        lastBatchStatus: 'confirmed',
-      });
-      await expect.poll(async () => {
-        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-        return snap.batchHistoryCount;
-      // The signed test Account uses a short seconds-based response policy so
-      // the real scheduler clock reaches the deadline without weakening the
-      // production defaults exercised by ordinary hub connections.
-      }, { timeout: 180_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(finalizeBatchBefore.batchHistoryCount);
+      await expect
+        .poll(
+          async () => {
+            const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+            return {
+              batchHistoryCount: snap.batchHistoryCount,
+              lastBatchStatus: snap.lastBatchStatus,
+            };
+          },
+          { timeout: 120_000, intervals: [500, 1000, 2000] },
+        )
+        .toMatchObject({
+          batchHistoryCount: expect.any(Number),
+          lastBatchStatus: 'recorded',
+        });
+      await expect
+        .poll(
+          async () => {
+            const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+            return snap.batchHistoryCount;
+            // The signed test Account uses a short seconds-based response policy so
+            // the real scheduler clock reaches the deadline without weakening the
+            // production defaults exercised by ordinary hub connections.
+          },
+          { timeout: 180_000, intervals: [500, 1000, 2000] },
+        )
+        .toBeGreaterThan(finalizeBatchBefore.batchHistoryCount);
     });
     await timedStep('dispute.wait_finalize_applied', async () => {
-      await expect.poll(async () => {
-        const state = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-        return !state.activeDispute && state.status === 'disputed';
-      }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBe(true);
+      await expect
+        .poll(
+          async () => {
+            const state = await readAccountState(
+              page,
+              accountRef.entityId,
+              accountRef.signerId,
+              accountRef.counterpartyId,
+            );
+            return !state.activeDispute && state.status === 'disputed';
+          },
+          { timeout: 120_000, intervals: [500, 1000, 2000] },
+        )
+        .toBe(true);
     });
 
     const reserveAfter = await readOnchainReserveViaAnvil(page, accountRef.entityId, {
       hubEntityId: accountRef.counterpartyId,
     });
-    expect(
-      reserveAfter >= 0n,
-      `reserve must stay readable after dispute finalize (before=${reserveBefore}, after=${reserveAfter})`
-    ).toBe(true);
+    expect(reserveAfter, 'finalization collects the exact signed claim into reserve').toBe(reserveBefore + claim);
+    await expect.poll(() => readLocalReserveState(page, accountRef.entityId)).toBe(reserveAfter);
+    console.log(`DISPUTE_EXACT_MONEY claim=${claim} reserveBefore=${reserveBefore} reserveAfter=${reserveAfter}`);
     await timedStep('dispute.wait_ui_reserve_balance', async () => {
-      await expect.poll(async () => {
-        return await readReserveBalanceUi(page, 'USDC');
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThanOrEqual(0);
+      await expect
+        .poll(
+          async () => {
+            return await readReserveBalanceUi(page, 'USDC');
+          },
+          { timeout: 60_000, intervals: [500, 1000, 2000] },
+        )
+        .toBe(Number(reserveAfter) / 1_000_000);
     });
     await timedStep('dispute.wait_ui_accounts_owed_zero', async () => {
-      await expect.poll(async () => {
-        return await readAccountsCardOwedUi(page);
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeLessThanOrEqual(0);
-    });
-    await page.waitForTimeout(1200);
-
-    // Finalized disputed account is hidden from main list and moved to "Disputed Accounts".
-    await timedStep('dispute.open_accounts_after_finalize', async () => {
-      await ensureEntityWorkspaceVisible(page, accountRef.entityId);
-      await ensureEntityShellVisible(page);
-    });
-    await timedStep('dispute.wait_hidden_from_main_list', async () => {
-      await expect.poll(async () => {
-        return await page.locator('.account-preview').filter({ hasText: accountRef.counterpartyId }).count();
-      }, { timeout: 30_000, intervals: [500, 1000, 2000] }).toBe(0);
+      await expect
+        .poll(
+          async () => {
+            return await readAccountsCardOwedUi(page);
+          },
+          { timeout: 60_000, intervals: [500, 1000, 2000] },
+        )
+        .toBeLessThanOrEqual(0);
     });
 
-    // If dispute finalize submit got stuck as sentBatch (no finalized event), clear latch for next flow.
-    await timedStep('dispute.ensure_no_sent_batch_latch', () => ensureNoSentBatchLatch(page, accountRef.entityId, accountRef.signerId));
+    // Current React keeps the closed Account visible as evidence, with financial actions disabled.
+    await timedStep('dispute.closed_account_ui', () => assertClosedAccountUi(page, accountRef.counterpartyId));
+    await timedStep('dispute.confirmed_batch_released', () =>
+      ensureNoSentBatchLatch(page, accountRef.entityId, accountRef.signerId),
+    );
 
     await assertBatchHistoryVisible(page, accountRef.entityId, accountRef.signerId);
 
     const finalSnapshot = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-    expect(finalSnapshot.batchHistoryCount).toBeGreaterThanOrEqual(1);
-    expect(finalSnapshot.lastBatchStatus).toBe('confirmed');
+    expect(finalSnapshot.batchHistoryCount).toBe(batchBeforeDispute.batchHistoryCount + 2);
+    expect(finalSnapshot.lastBatchStatus).toBe('recorded');
     expect(finalSnapshot.lastBatchJBlock).toBeGreaterThan(0);
-    await timedStep('dispute.reload_clear_stale_sent_batch', () =>
-      ensureNoSentBatchLatch(page, accountRef.entityId, accountRef.signerId));
+    await timedStep('dispute.reload_confirm_batch_released', () =>
+      ensureNoSentBatchLatch(page, accountRef.entityId, accountRef.signerId),
+    );
 
     // Reload hard-assert: WAL restore keeps finalized dispute + batch history.
     await timedStep('dispute.reload_page', async () => {
       await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.locator('button.wallet').first().click();
-      await expect(page.getByRole('heading', { name: 'Set a local password', exact: true })).toBeVisible({ timeout: 10_000 });
-      await page.getByLabel('Password', { exact: true }).fill('dispute-reload-password');
-      await page.getByLabel('Confirm password', { exact: true }).fill('dispute-reload-password');
-      await page.getByRole('button', { name: 'Save and open', exact: true }).click();
-      await page.waitForFunction(() => {
-        const env = (window as any).isolatedEnv;
-        return !!env?.runtimeId && Number(env?.state?.eReplicas?.size || 0) > 0;
-      }, { timeout: 60_000 });
+      await page.getByRole('button', { name: 'Continue', exact: true }).click();
+      await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
+      await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+      await page.waitForFunction(
+        ({ runtimeId, entityId }) => {
+          const debug = (window as CurrentWalletWindow).__xln;
+          return debug?.env()?.runtimeId === runtimeId && debug.store.getState().activeEntityId === entityId;
+        },
+        identity,
+        { timeout: 10_000 },
+      );
     });
     await timedStep('dispute.reload_assert_reserve', async () => {
-      await expect.poll(async () => await readOnchainReserveViaAnvil(page, accountRef.entityId, {
-        allowUnavailable: true,
-        hubEntityId: accountRef.counterpartyId,
-      }), {
-        timeout: 60_000,
-        intervals: [500, 1000, 2000],
-      }).toBeGreaterThanOrEqual(reserveAfter);
-    });
-    await timedStep('dispute.reload_assert_hidden_disputed_account', async () => {
-      await expect.poll(async () => {
-        return await page.locator('.account-preview').filter({ hasText: accountRef.counterpartyId }).count();
-      }, { timeout: 45_000, intervals: [500, 1000, 2000] }).toBe(0);
+      await expect
+        .poll(
+          async () =>
+            await readOnchainReserveViaAnvil(page, accountRef.entityId, {
+              hubEntityId: accountRef.counterpartyId,
+            }),
+          {
+            timeout: 60_000,
+            intervals: [500, 1000, 2000],
+          },
+        )
+        .toBe(reserveAfter);
     });
     await timedStep('dispute.reload_assert_finalized_disputed_entry', async () => {
-      await ensureAccountWorkspaceVisible(page, undefined, accountRef.entityId);
-      const openAccountButton = page.getByRole('button', { name: /^Open Account$/ }).first();
-      await expect(openAccountButton).toBeVisible({ timeout: 10_000 });
-      await openAccountButton.click();
-      const disputedRow = page.locator('.disputed-row').filter({ hasText: accountRef.counterpartyId }).first();
-      await expect(disputedRow).toBeVisible({ timeout: 60_000 });
-      await expect(disputedRow).toContainText('Permanently closed after finalized dispute');
-      await expect(disputedRow.getByRole('button')).toHaveCount(0);
-      await capturePageScreenshot(page, testInfo, 'dispute-finalized-recovery-desktop.png', {
-        fullPage: false,
-        ux: {
-          title: 'desktop finalized dispute',
-          group: 'Disputes',
-          description: 'Reloaded wallet shows the finalized disputed account and recovery action.',
-          platform: 'desktop',
-          tags: ['dispute', 'history', 'reload'],
-        },
-      });
+      await assertClosedAccountUi(page, accountRef.counterpartyId);
+      await capturePageScreenshot(page, testInfo, 'dispute-finalized-recovery-desktop.png', { fullPage: false });
     });
     await timedStep('dispute.reload_assert_batch_history', async () => {
-      await expect.poll(async () => {
-        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-        return {
-          batchHistoryCount: snap.batchHistoryCount,
-          lastBatchStatus: snap.lastBatchStatus,
-        };
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toMatchObject({
-        batchHistoryCount: expect.any(Number),
-        lastBatchStatus: 'confirmed',
-      });
-      await expect.poll(async () => {
-        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-        return snap.batchHistoryCount;
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThanOrEqual(1);
+      await expect
+        .poll(
+          async () => {
+            const snapshot = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+            return snapshot.batchEventIds;
+          },
+          { timeout: 10_000, intervals: [100, 250, 500] },
+        )
+        .toEqual(finalSnapshot.batchEventIds);
     });
   });
 
@@ -1642,57 +884,64 @@ test.describe('E2E Dispute Flow', () => {
   // and history must reflect the dispute lifecycle without entering account panel UI.
   test('entity settle workspace Sign & Broadcast submits dispute batch', { tag: '@resilience' }, async ({ page }) => {
     test.setTimeout(LONG_E2E ? 240_000 : 120_000);
-    page.on('console', (msg) => {
+    page.on('console', msg => {
       if (msg.type() === 'error') {
         process.stdout.write(`[BROWSER:error] ${msg.text()}\n`);
       }
     });
 
-    await timedStep('dispute_broadcast.goto_app', () => gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 500 }));
-    await timedStep('dispute_broadcast.create_runtime', () => createRuntimeIdentity(page, `dispute-ui-broadcast-rt-${Date.now()}`, randomMnemonic()));
-    const accountRef = await timedStep('dispute_broadcast.ensure_hub_account', () => ensureHubAccountOpen(page));
-    await timedStep(
-      'dispute_broadcast.seed_preconditions',
-      () => seedDisputePreconditions(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
+    await timedStep('dispute_broadcast.goto_app', () =>
+      gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 500 }),
+    );
+    const identity = await timedStep('dispute_broadcast.create_runtime', () =>
+      createWalletIdentity(page, `dispute-ui-broadcast-rt-${Date.now()}`, randomMnemonic()),
+    );
+    const accountRef = await timedStep('dispute_broadcast.ensure_hub_account', () =>
+      ensureHubAccountOpen(page, identity),
+    );
+    await timedStep('dispute_broadcast.seed_preconditions', () =>
+      seedDisputePreconditions(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
     );
 
-    await timedStep(
-      'dispute_broadcast.start_dispute',
-      () => startDisputeFromManageWorkspace(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
+    await timedStep('dispute_broadcast.start_dispute', () =>
+      startDisputeFromManageWorkspace(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
     );
-    await timedStep('dispute_broadcast.broadcast', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId));
+    await timedStep('dispute_broadcast.broadcast', () => broadcastPendingBatchViaUi(page, accountRef.entityId));
 
     await timedStep('dispute_broadcast.wait_batch_history_confirmed', async () => {
-      await expect.poll(async () => {
-        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-        return {
-          batchHistoryCount: snap.batchHistoryCount,
-          lastBatchStatus: snap.lastBatchStatus,
-        };
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toMatchObject({
-        batchHistoryCount: expect.any(Number),
-        lastBatchStatus: 'confirmed',
-      });
-      await expect.poll(async () => {
-        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-        return snap.batchHistoryCount;
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThanOrEqual(1);
+      await expect
+        .poll(
+          async () => {
+            const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+            return {
+              batchHistoryCount: snap.batchHistoryCount,
+              lastBatchStatus: snap.lastBatchStatus,
+            };
+          },
+          { timeout: 60_000, intervals: [500, 1000, 2000] },
+        )
+        .toMatchObject({
+          batchHistoryCount: expect.any(Number),
+          lastBatchStatus: 'recorded',
+        });
+      await expect
+        .poll(
+          async () => {
+            const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+            return snap.batchHistoryCount;
+          },
+          { timeout: 60_000, intervals: [500, 1000, 2000] },
+        )
+        .toBeGreaterThanOrEqual(1);
     });
 
-    await timedStep('dispute_broadcast.wait_hidden_disputed_entry', async () => {
-      await page.getByRole('button', { name: /^Open Account$/ }).click();
-      const disputedRow = page.locator('.disputed-row').filter({ hasText: accountRef.counterpartyId }).first();
-      await expect(disputedRow).toBeVisible({ timeout: 60_000 });
-      await expect(disputedRow).toContainText(/Active dispute in progress|Permanently closed after finalized dispute/);
-      const disputedText = await disputedRow.textContent();
-      const preview = page.locator('.account-preview').filter({ hasText: accountRef.counterpartyId });
-      if (disputedText?.includes('Permanently closed after finalized dispute')) {
-        await expect(preview).toHaveCount(0);
-        await expect(disputedRow.getByRole('button')).toHaveCount(0);
-      } else {
-        await expect(preview).toHaveCount(1);
-        await expect(disputedRow.getByRole('button', { name: /^Open$/i })).toBeVisible({ timeout: 60_000 });
-      }
+    await timedStep('dispute_broadcast.current_disputed_entry', async () => {
+      await ensureAccountWorkspaceVisible(page, accountRef.counterpartyId, accountRef.entityId);
+      const row = page.locator(`[data-testid="account-row"][data-counterparty-id="${accountRef.counterpartyId}"]`);
+      await expect(row).toContainText(/Dispute in progress|Closed after dispute/);
+      await row.click();
+      await expect(page.getByTestId('account-extend-credit')).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Pay', exact: true })).toBeDisabled();
     });
   });
 });
