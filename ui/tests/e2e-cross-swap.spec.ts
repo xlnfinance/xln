@@ -6,9 +6,7 @@ import type { RuntimeAdapter } from '../../core/api/runtime-adapter/types';
 import { getCrossJurisdictionRouteRemainingAmounts } from '../../core/extensions/cross-j/orderbook';
 import { requantizeRemainingSwapAtPriceForDimensions } from '../../core/swapbook';
 import { safeStringify } from '../../core/protocol/serialization';
-import {
-  selectMarketMakerCrossRoutes,
-} from '../../core/scripts/operations/hlt/cross/cross-boundary';
+import { selectMarketMakerCrossRoutes } from '../../core/scripts/operations/hlt/cross/cross-boundary';
 import { enterStack, fundFromHub, reopenStack } from './stack';
 
 type DebugWindow = Window & {
@@ -25,126 +23,171 @@ type CrossParties = {
 async function readOppositeMarket(parties: Pick<CrossParties, 'sourceHubId' | 'targetHubId'>, hubLabel: string) {
   const routes = await readMarketRoutes(parties.targetHubId, hubLabel);
   return selectMarketMakerCrossRoutes(routes, parties.targetHubId, parties.sourceHubId).map(route => ({
-    orderId: route.orderId, status: route.status, venueId: route.venueId, priceTicks: route.priceTicks,
-    source: route.source, target: route.target, filledSource: route.filledSourceAmount,
-    filledTarget: route.filledTargetAmount, remaining: getCrossJurisdictionRouteRemainingAmounts(route),
+    orderId: route.orderId,
+    status: route.status,
+    venueId: route.venueId,
+    priceTicks: route.priceTicks,
+    source: route.source,
+    target: route.target,
+    filledSource: route.filledSourceAmount,
+    filledTarget: route.filledTargetAmount,
+    remaining: getCrossJurisdictionRouteRemainingAmounts(route),
   }));
 }
 
 /** Observe committed account balances and route state. No setup or financial mutation bypasses the UI. */
-const readCross = (page: Page, parties: CrossParties) =>
-  page.evaluate(async ids => {
-    const debug = (window as DebugWindow).__xln;
-    const runtime = debug?.env();
-    const adapter = debug?.adapter();
-    if (!debug || !runtime || !adapter) throw new Error('Wallet runtime diagnostics unavailable');
-    const xln = await debug.xln();
-    const readLeg = async (entityId: string, counterpartyEntityId: string, tokenId: number) => {
-      const account = await adapter.read<NonNullable<RuntimeAdapterViewFrame['activeEntity']>['accounts']['items'][number]>(
-        `entity/${entityId}/account/${counterpartyEntityId}`,
-      );
-      const delta = account.state.deltas.get(tokenId);
-      const isLeft = xln.isLeftEntity(entityId, counterpartyEntityId);
-      const derived = delta ? xln.deriveDelta(delta, isLeft) : null;
-      const policy = account.shadow.rebalance.policy.get(tokenId);
-      const tariff = account.state.rebalanceFeePolicies?.get(tokenId)?.[isLeft ? 'right' : 'left'];
-      if (!policy || !tariff) throw new Error(`Committed collateral policy unavailable: ${entityId}:${tokenId}`);
-      const capacity = xln.readAccountCapacity({
-        account: account.state,
-        ownerEntityId: entityId,
-        counterpartyEntityId,
-        tokenId,
-      });
-      const replica = [...runtime.state.eReplicas.values()].find(entry => entry.entityId === entityId);
-      if (!replica) throw new Error(`Missing local cross owner: ${entityId}`);
-      const routes = [...(replica.state.crossJurisdictionSwaps?.values() ?? [])]
-        .filter(
-          route =>
-            route.source.entityId === ids.sourceEntityId && route.target.counterpartyEntityId === ids.targetEntityId,
-        )
-        .map(route => ({
-          orderId: route.orderId,
-          status: route.status,
-          filledSource: String(route.filledSourceAmount ?? 0n),
-          filledTarget: String(route.filledTargetAmount ?? 0n),
-        }));
-      return {
-        height: account.currentHeight,
-        root: account.currentFrame.accountStateRoot,
-        // Funding can be rebalanced on-chain. Count the canonical owned collateral
-        // and receivable, never undrawn credit or signed Δ alone for the right owner.
-        balance: derived ? (derived.outCollateral + derived.outPeerCredit).toString() : '0',
-        uncollateralized: derived?.outPeerCredit.toString() ?? '0',
-        debt: derived?.inOwnCredit.toString() ?? '0',
-        collateral: delta?.collateral.toString() ?? '0',
-        ondelta: delta?.ondelta.toString() ?? '0',
-        offdelta: delta?.offdelta.toString() ?? '0',
-        incoming: capacity.inCapacity.toString(),
-        credit: capacity.peerCreditLimit.toString(),
-        pending: Boolean(account.pendingFrame),
-        mempool: account.mempoolCount,
-        pulls: account.state.pulls?.size ?? 0,
-        rebalancePolicy: {
-          r2cRequestSoftLimit: policy.r2cRequestSoftLimit.toString(),
-          hardLimit: policy.hardLimit.toString(),
-          maxAcceptableFee: policy.maxAcceptableFee.toString(),
-        },
-        feePolicy: {
-          policyVersion: tariff.policyVersion,
-          baseFee: tariff.baseFee.toString(),
-          gasFee: tariff.gasFee.toString(),
-          liquidityFeeBps: tariff.liquidityFeeBps.toString(),
-        },
-        routes,
+const readCross = (page: Page, parties: CrossParties, atHeight?: number) =>
+  page.evaluate(
+    async ({ ids, atHeight }) => {
+      const debug = (window as DebugWindow).__xln;
+      const runtime = debug?.env();
+      const adapter = debug?.adapter();
+      if (!debug || !runtime || !adapter) throw new Error('Wallet runtime diagnostics unavailable');
+      const xln = await debug.xln();
+      const readLeg = async (entityId: string, counterpartyEntityId: string, tokenId: number) => {
+        const account = await adapter.read<
+          NonNullable<RuntimeAdapterViewFrame['activeEntity']>['accounts']['items'][number]
+        >(`entity/${entityId}/account/${counterpartyEntityId}`, atHeight === undefined ? undefined : { atHeight });
+        const delta = account.state.deltas.get(tokenId);
+        const isLeft = xln.isLeftEntity(entityId, counterpartyEntityId);
+        const derived = delta ? xln.deriveDelta(delta, isLeft) : null;
+        const policy = account.shadow.rebalance.policy.get(tokenId);
+        const tariff = account.state.rebalanceFeePolicies?.get(tokenId)?.[isLeft ? 'right' : 'left'];
+        if (!policy || !tariff) throw new Error(`Committed collateral policy unavailable: ${entityId}:${tokenId}`);
+        const capacity = xln.readAccountCapacity({
+          account: account.state,
+          ownerEntityId: entityId,
+          counterpartyEntityId,
+          tokenId,
+        });
+        const core = await adapter.read<NonNullable<RuntimeAdapterViewFrame['activeEntity']>['core']>(
+          `entity/${entityId}`,
+          atHeight === undefined ? undefined : { atHeight },
+        );
+        const routes = [...(core.crossJurisdictionSwaps?.values() ?? [])]
+          .filter(
+            route =>
+              route.source.entityId === ids.sourceEntityId && route.target.counterpartyEntityId === ids.targetEntityId,
+          )
+          .map(route => ({
+            orderId: route.orderId,
+            status: route.status,
+            filledSource: String(route.filledSourceAmount ?? 0n),
+            filledTarget: String(route.filledTargetAmount ?? 0n),
+          }));
+        return {
+          height: account.currentHeight,
+          root: account.currentFrame.accountStateRoot,
+          // Funding can be rebalanced on-chain. Count the canonical owned collateral
+          // and receivable, never undrawn credit or signed Δ alone for the right owner.
+          balance: derived ? (derived.outCollateral + derived.outPeerCredit).toString() : '0',
+          uncollateralized: derived?.outPeerCredit.toString() ?? '0',
+          debt: derived?.inOwnCredit.toString() ?? '0',
+          collateral: delta?.collateral.toString() ?? '0',
+          ondelta: delta?.ondelta.toString() ?? '0',
+          offdelta: delta?.offdelta.toString() ?? '0',
+          incoming: capacity.inCapacity.toString(),
+          credit: capacity.peerCreditLimit.toString(),
+          pending: Boolean(account.pendingFrame),
+          mempool: account.mempoolCount,
+          pulls: account.state.pulls?.size ?? 0,
+          rebalancePolicy: {
+            r2cRequestSoftLimit: policy.r2cRequestSoftLimit.toString(),
+            hardLimit: policy.hardLimit.toString(),
+            maxAcceptableFee: policy.maxAcceptableFee.toString(),
+          },
+          feePolicy: {
+            policyVersion: tariff.policyVersion,
+            baseFee: tariff.baseFee.toString(),
+            gasFee: tariff.gasFee.toString(),
+            liquidityFeeBps: tariff.liquidityFeeBps.toString(),
+          },
+          routes,
+        };
       };
-    };
-    return {
-      source: await readLeg(ids.sourceEntityId, ids.sourceHubId, 1),
-      target: await readLeg(ids.targetEntityId, ids.targetHubId, ids.receiveTokenId),
-    };
-  }, parties);
+      return {
+        source: await readLeg(ids.sourceEntityId, ids.sourceHubId, 1),
+        target: await readLeg(ids.targetEntityId, ids.targetHubId, ids.receiveTokenId),
+      };
+    },
+    { ids: parties, atHeight },
+  );
 
 /** Persisted WAL and signed bilateral frames prove recovery without using current roots as a historical oracle. */
 const readCrossRecoveryProof = (page: Page, parties: CrossParties, orderId: string, atHeight?: number) =>
-  page.evaluate(async ({ parties: ids, orderId, atHeight }) => {
-    const debug = (window as DebugWindow).__xln;
-    const env = debug?.env();
-    const adapter = debug?.adapter();
-    if (!debug || !env || !adapter) throw new Error('Cross recovery storage unavailable');
-    const xln = await debug.xln();
-    const height = atHeight ?? await xln.getPersistedLatestHeight(env);
-    const frame = await xln.readPersistedStorageFrameRecord(env, height);
-    if (!frame?.frameHash) throw new Error(`Cross recovery WAL frame missing: ${height}`);
-    const preparations: { height: number; entityId: string; frameHash: string; orderId: string }[] = [];
-    for (let cursor = 1; cursor <= height; cursor++) {
-      const accepted = await xln.readPersistedStorageFrameRecord(env, cursor);
-      if (!accepted?.frameHash) throw new Error(`Cross accepted WAL frame missing: ${cursor}`);
-      for (const input of accepted.runtimeInput.entityInputs) for (const tx of input.entityTxs ?? []) {
-        if (tx.type === 'prepareCrossJurisdictionSwap' && tx.data.route.orderId === orderId) {
-          preparations.push({ height: cursor, entityId: input.entityId, frameHash: accepted.frameHash, orderId });
-        }
+  page.evaluate(
+    async ({ parties: ids, orderId, atHeight }) => {
+      const debug = (window as DebugWindow).__xln;
+      const env = debug?.env();
+      const adapter = debug?.adapter();
+      if (!debug || !env || !adapter) throw new Error('Cross recovery storage unavailable');
+      const xln = await debug.xln();
+      const height = atHeight ?? (await xln.getPersistedLatestHeight(env));
+      const frame = await xln.readPersistedStorageFrameRecord(env, height);
+      if (!frame?.frameHash) throw new Error(`Cross recovery WAL frame missing: ${height}`);
+      const preparations: { height: number; entityId: string; frameHash: string; orderId: string }[] = [];
+      for (let cursor = 1; cursor <= height; cursor++) {
+        const accepted = await xln.readPersistedStorageFrameRecord(env, cursor);
+        if (!accepted?.frameHash) throw new Error(`Cross accepted WAL frame missing: ${cursor}`);
+        for (const input of accepted.runtimeInput.entityInputs)
+          for (const tx of input.entityTxs ?? []) {
+            if (tx.type === 'prepareCrossJurisdictionSwap' && tx.data.route.orderId === orderId) {
+              preparations.push({ height: cursor, entityId: input.entityId, frameHash: accepted.frameHash, orderId });
+            }
+          }
       }
-    }
-    const accounts = [];
-    for (const [entityId, hubId] of [[ids.sourceEntityId, ids.sourceHubId], [ids.targetEntityId, ids.targetHubId]] as const) {
-      const account = await adapter.read<NonNullable<RuntimeAdapterViewFrame['activeEntity']>['accounts']['items'][number]>(
-        `entity/${entityId}/account/${hubId}`, { atHeight: height },
-      );
-      const frames = await xln.readPersistedAccountFrameHistory(env, entityId, hubId, account.currentHeight, {
-        maxAccountHeight: account.currentHeight,
-      });
-      const pullIds = new Set(frames.flatMap(signed => signed.accountTxs.flatMap(tx =>
-        tx.type === 'cross_pull_lock' && tx.data.crossJurisdictionRoute.orderId === orderId ? [tx.data.pullId] : [],
-      )));
-      const executions = frames.flatMap(signed => signed.accountTxs.flatMap(tx =>
-        (tx.type === 'cross_pull_lock' || tx.type === 'cross_pull_close') && pullIds.has(tx.data.pullId)
-          ? [{ height: signed.height, stateHash: signed.stateHash, root: signed.accountStateRoot, type: tx.type, pullId: tx.data.pullId }]
-          : [],
-      ));
-      accounts.push({ entityId, hubId, height: account.currentHeight, root: account.currentFrame.accountStateRoot, executions });
-    }
-    return { runtimeId: adapter.runtimeId, frame: { height, frameHash: frame.frameHash, postStateHash: frame.postStateHash }, preparations, accounts };
-  }, { parties, orderId, atHeight });
+      const accounts = [];
+      for (const [entityId, hubId] of [
+        [ids.sourceEntityId, ids.sourceHubId],
+        [ids.targetEntityId, ids.targetHubId],
+      ] as const) {
+        const account = await adapter.read<
+          NonNullable<RuntimeAdapterViewFrame['activeEntity']>['accounts']['items'][number]
+        >(`entity/${entityId}/account/${hubId}`, { atHeight: height });
+        const frames = await xln.readPersistedAccountFrameHistory(env, entityId, hubId, account.currentHeight, {
+          maxAccountHeight: account.currentHeight,
+        });
+        const pullIds = new Set(
+          frames.flatMap(signed =>
+            signed.accountTxs.flatMap(tx =>
+              tx.type === 'cross_pull_lock' && tx.data.crossJurisdictionRoute.orderId === orderId
+                ? [tx.data.pullId]
+                : [],
+            ),
+          ),
+        );
+        const executions = frames.flatMap(signed =>
+          signed.accountTxs.flatMap(tx =>
+            (tx.type === 'cross_pull_lock' || tx.type === 'cross_pull_close') && pullIds.has(tx.data.pullId)
+              ? [
+                  {
+                    height: signed.height,
+                    stateHash: signed.stateHash,
+                    root: signed.accountStateRoot,
+                    type: tx.type,
+                    pullId: tx.data.pullId,
+                  },
+                ]
+              : [],
+          ),
+        );
+        accounts.push({
+          entityId,
+          hubId,
+          height: account.currentHeight,
+          root: account.currentFrame.accountStateRoot,
+          executions,
+        });
+      }
+      return {
+        runtimeId: adapter.runtimeId,
+        frame: { height, frameHash: frame.frameHash, postStateHash: frame.postStateHash },
+        preparations,
+        accounts,
+      };
+    },
+    { parties, orderId, atHeight },
+  );
 
 // The maker's committed projection is read through a privileged runtime
 // connection, whose address comes from a runtime import manifest that only the
@@ -250,51 +293,42 @@ test(
     await expect(feeDisclosure).toContainText(
       'no committed collateral fee policy available. This does not mean zero fees.',
     );
-    await page.getByRole('button', { name: `Open incoming account with ${sourceHubLabel}`, exact: true }).click();
-    const spectrum = page.getByTestId('receive-spectrum');
-    await expect(spectrum).toBeVisible({ timeout: 15_000 });
-    await expect(spectrum).toContainText('Tron');
-    await expect(spectrum).toContainText(receiveToken.symbol);
-    await expect(spectrum).toContainText('This preparation submits no collateral request.');
-    await expect(page.getByTestId('swap-rebalance-tariff')).toBeVisible({ timeout: 5_000 });
-    const before = await readCross(page, parties);
+    // Current Swap submits target capacity setup with the order. Drafting must
+    // not open an Account or grant credit before the user presses Swap.
+    const before = await page.evaluate(async ids => {
+      const debug = (window as DebugWindow).__xln;
+      const env = debug?.env();
+      if (!debug || !env) throw new Error('Wallet diagnostics unavailable');
+      const xln = await debug.xln();
+      const source = [...env.state.eReplicas.values()].find(replica => replica.entityId === ids.sourceEntityId);
+      const target = [...env.state.eReplicas.values()].find(replica => replica.entityId === ids.targetEntityId);
+      const account = source?.state.accounts.get(ids.sourceHubId);
+      const delta = account?.state.deltas.get(1);
+      if (!source || !target || !delta) throw new Error('Funded source or target owner missing');
+      const derived = xln.deriveDelta(delta, xln.isLeftEntity(ids.sourceEntityId, ids.sourceHubId));
+      return {
+        source: { balance: String(derived.outCollateral + derived.outPeerCredit), debt: String(derived.inOwnCredit) },
+        targetAccountPresent: target.state.accounts.has(ids.targetHubId),
+        routes: [source, target].map(replica => [...(replica.state.crossJurisdictionSwaps?.keys() ?? [])]),
+      };
+    }, parties);
     expect(BigInt(before.source.balance)).toBeGreaterThanOrEqual(take.effectiveGive);
     expect(BigInt(before.source.balance)).toBeLessThanOrEqual(100_000_000n);
     expect(before.source.debt).toBe('0');
-    expect(before.target.balance).toBe('0');
-    expect(before.target.incoming).toBe('0');
-    expect(before.target.credit).toBe('0');
-    await expect(page.getByTestId('receive-spectrum-slider')).toHaveValue('0');
-    const chooseCredit = spectrum.getByRole('button', { name: 'Accept it as credit instead', exact: true });
-    await expect(chooseCredit).toBeEnabled();
+    expect(before.targetAccountPresent).toBe(false);
+    expect(before.routes).toEqual([[], []]);
     const submit = page.getByTestId('swap-submit');
-    await expect(submit).toBeDisabled();
-    await page.screenshot({ path: '/tmp/xln-cross-receive-spectrum.png', fullPage: true });
-    await chooseCredit.click();
-    await expect(page.getByTestId('receive-spectrum-slider')).toHaveValue('100');
-    await expect(spectrum.getByRole('checkbox')).toBeChecked();
-    const chosen = await readCross(page, parties);
-    expect(chosen.source.balance).toBe(before.source.balance);
-    expect(chosen.target.balance).toBe(before.target.balance);
-    expect(chosen.target.credit).toBe('0');
-    expect(chosen.source.routes).toEqual([]);
-    expect(chosen.target.routes).toEqual([]);
-    await expect(submit).toBeDisabled();
-    await expect(page.getByTestId('receive-spectrum-confirm')).toHaveText('Extend credit limit');
-    await page.getByTestId('receive-spectrum-confirm').click();
-    await expect(spectrum).toHaveCount(0, { timeout: 15_000 });
     await expect(submit).toBeEnabled();
-    await expect(feeDisclosure).toBeVisible();
+    await expect(
+      page.getByText(`Placing this order also prepares incoming capacity with ${sourceHubLabel}.`, { exact: false }),
+    ).toBeVisible();
     await expect(feeDisclosure).toContainText(
       `Gross receive: ${formatUnits(take.effectiveWant, receiveToken.decimals)} ${receiveToken.symbol}`,
     );
-    await expect(page.getByTestId('swap-rebalance-tariff')).toContainText('0.1 USDT base + 0 USDT gas + 1 bps');
-    const disclosedPolicyVersion = await page.getByTestId('swap-rebalance-tariff').getAttribute('data-policy-version');
     await expect(feeDisclosure).toContainText('If your account automatically requests collateral after receiving');
     await expect(feeDisclosure).toContainText(
       'The final fee and net amount depend on your account policy and balance at that time.',
     );
-    await expect(feeDisclosure.getByRole('link')).toHaveAttribute('href', `/accounts/${targetHubId}`);
     const preSwapDisclosure = await feeDisclosure.innerText();
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(feeDisclosure).toBeVisible();
@@ -308,23 +342,15 @@ test(
     await page.screenshot({ path: '/tmp/xln-cross-receive-fees-mobile.png', fullPage: true });
     await page.setViewportSize({ width: 1280, height: 860 });
     await page.screenshot({ path: '/tmp/xln-cross-receive-fees-desktop.png', fullPage: true });
-    const prepared = await readCross(page, parties);
-    expect(prepared.source.balance).toBe(before.source.balance);
-    expect(prepared.target.balance).toBe(before.target.balance);
-    expect(prepared.target.credit).toBe((take.effectiveWant + (take.effectiveWant + 9n) / 10n).toString());
-    expect(prepared.target.rebalancePolicy.r2cRequestSoftLimit).not.toBe(prepared.target.rebalancePolicy.hardLimit);
-    expect(take.effectiveWant).toBeLessThan(BigInt(prepared.target.rebalancePolicy.r2cRequestSoftLimit));
-    expect(prepared.target.feePolicy).toEqual({
-      policyVersion: Number(disclosedPolicyVersion),
-      baseFee: '100000',
-      gasFee: '0',
-      liquidityFeeBps: '1',
-    });
-    expect(disclosedPolicyVersion).toBe(String(prepared.target.feePolicy.policyVersion));
-    expect(prepared.source.routes).toEqual([]);
-    expect(prepared.target.routes).toEqual([]);
-    console.log(`CROSS_TICKET_READY ${safeStringify({ parties, maker, take, before, prepared })}`);
     await submit.click();
+    await expect(page.getByTestId('swap-give')).toHaveValue('', { timeout: 15_000 });
+    // A new unsent draft renders the now-committed receiving tariff. Submission
+    // clears the old ticket; do not race its transient fee disclosure.
+    await page.getByTestId('swap-give').fill('1');
+    await page.getByTestId('swap-want').fill('1');
+    await expect(page.getByTestId('swap-rebalance-tariff')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('swap-rebalance-tariff')).toContainText('0.1 USDT base + 0 USDT gas + 1 bps');
+    const disclosedPolicyVersion = await page.getByTestId('swap-rebalance-tariff').getAttribute('data-policy-version');
     let observedProgress = '';
     await expect
       .poll(
@@ -360,8 +386,30 @@ test(
         { pending: false, mempool: 0, pulls: 0 },
       ]);
     const after = await readCross(page, parties);
+    const completedRoute = after.source.routes[0];
+    if (!completedRoute) throw new Error('Committed cross route missing');
+    const recoveryBefore = await readCrossRecoveryProof(page, parties, completedRoute.orderId);
+    const intentHeight = recoveryBefore.preparations[0]?.height;
+    if (intentHeight === undefined || intentHeight < 2) throw new Error('Cross intent WAL boundary missing');
+    // Read the actual persisted state immediately before the paired intent,
+    // after bilateral target setup. Never infer it from today's balance.
+    const prepared = await readCross(page, parties, intentHeight - 1);
+    expect(prepared.source.balance).toBe(before.source.balance);
+    expect(prepared.target.balance).toBe('0');
+    expect(prepared.target.incoming).toBe(take.effectiveWant.toString());
+    expect(prepared.target.credit).toBe(take.effectiveWant.toString());
+    expect(prepared.target.rebalancePolicy.r2cRequestSoftLimit).not.toBe(prepared.target.rebalancePolicy.hardLimit);
+    expect(prepared.source.routes).toEqual([]);
+    expect(prepared.target.routes).toEqual([]);
+    expect(prepared.target.feePolicy).toEqual({
+      policyVersion: Number(disclosedPolicyVersion),
+      baseFee: '100000',
+      gasFee: '0',
+      liquidityFeeBps: '1',
+    });
+    expect(take.effectiveWant).toBeLessThan(BigInt(prepared.target.rebalancePolicy.r2cRequestSoftLimit));
     const sourceDebit = BigInt(before.source.balance) - BigInt(after.source.balance);
-    const targetReceived = BigInt(after.target.balance) - BigInt(before.target.balance);
+    const targetReceived = BigInt(after.target.balance) - BigInt(prepared.target.balance);
     const feeEvidence = await page.evaluate(
       async ids => {
         const debug = (window as DebugWindow).__xln;
@@ -397,7 +445,9 @@ test(
     expect(after.target.rebalancePolicy).toEqual(prepared.target.rebalancePolicy);
     expect(after.target.feePolicy).toEqual(prepared.target.feePolicy);
     expect(after.target.uncollateralized).toBe(take.effectiveWant.toString());
-    expect(BigInt(after.target.uncollateralized)).toBeLessThan(BigInt(after.target.rebalancePolicy.r2cRequestSoftLimit));
+    expect(BigInt(after.target.uncollateralized)).toBeLessThan(
+      BigInt(after.target.rebalancePolicy.r2cRequestSoftLimit),
+    );
     expect(feeEvidence).toEqual([]);
     const collateralFeePaid = feeEvidence.reduce((sum, fee) => sum + BigInt(fee.fee), 0n);
     expect(collateralFeePaid).toBe(0n);
@@ -415,6 +465,7 @@ test(
     // new draft must not send it, and navigation makes no draft-preservation claim.
     await page.getByTestId('swap-give').fill('1');
     await page.getByTestId('swap-want').fill('1');
+    await expect(feeDisclosure.getByRole('link')).toHaveAttribute('href', `/accounts/${targetHubId}`);
     await feeDisclosure.getByRole('link').click();
     await expect(page).toHaveURL(new RegExp(`/accounts/${targetHubId}$`));
     await expect(page.getByTestId('account-manage')).toBeEnabled();
@@ -433,9 +484,6 @@ test(
       expect(afterSettings[side].routes).toEqual(after[side].routes);
     }
     const accountUrl = page.url();
-    const completedRoute = after.source.routes[0];
-    if (!completedRoute) throw new Error('Committed cross route missing before recovery');
-    const recoveryBefore = await readCrossRecoveryProof(page, parties, completedRoute.orderId);
     expect(recoveryBefore.runtimeId).toBe(wallet.runtimeId);
     expect(recoveryBefore.preparations.map(input => input.entityId)).toEqual([targetEntityId, sourceEntityId]);
     expect(new Set(recoveryBefore.preparations.map(input => input.frameHash)).size).toBe(1);
@@ -444,15 +492,29 @@ test(
     }
     await page.reload({ waitUntil: 'domcontentloaded' });
     await reopenStack(page, wallet);
-    const recoveredHistory = await readCrossRecoveryProof(page, parties, completedRoute.orderId, recoveryBefore.frame.height);
+    const recoveredHistory = await readCrossRecoveryProof(
+      page,
+      parties,
+      completedRoute.orderId,
+      recoveryBefore.frame.height,
+    );
     expect(recoveredHistory).toEqual(recoveryBefore);
-    await expect.poll(async () => {
-      const state = await readCross(page, parties);
-      return [state.source, state.target].map(leg => ({ pending: leg.pending, mempool: leg.mempool, pulls: leg.pulls }));
-    }, { timeout: 10_000 }).toEqual([
-      { pending: false, mempool: 0, pulls: 0 },
-      { pending: false, mempool: 0, pulls: 0 },
-    ]);
+    await expect
+      .poll(
+        async () => {
+          const state = await readCross(page, parties);
+          return [state.source, state.target].map(leg => ({
+            pending: leg.pending,
+            mempool: leg.mempool,
+            pulls: leg.pulls,
+          }));
+        },
+        { timeout: 10_000 },
+      )
+      .toEqual([
+        { pending: false, mempool: 0, pulls: 0 },
+        { pending: false, mempool: 0, pulls: 0 },
+      ]);
     const afterRecovery = await readCross(page, parties);
     for (const side of ['source', 'target'] as const) {
       expect(afterRecovery[side].balance).toBe(afterSettings[side].balance);
@@ -466,7 +528,9 @@ test(
     expect(recoveryCurrent.frame.height).toBeGreaterThanOrEqual(recoveryBefore.frame.height);
     expect(recoveryCurrent.runtimeId).toBe(recoveryBefore.runtimeId);
     expect(recoveryCurrent.preparations).toEqual(recoveryBefore.preparations);
-    expect(recoveryCurrent.accounts.map(account => account.executions)).toEqual(recoveryBefore.accounts.map(account => account.executions));
+    expect(recoveryCurrent.accounts.map(account => account.executions)).toEqual(
+      recoveryBefore.accounts.map(account => account.executions),
+    );
     const evidence = safeStringify(
       {
         scope: 'two local EVM jurisdictions; not native TVM',

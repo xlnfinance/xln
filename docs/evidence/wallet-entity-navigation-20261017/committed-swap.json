@@ -1,0 +1,599 @@
+{
+  "after": {
+    "source": {
+      "balance": "50000000",
+      "collateral": "0",
+      "credit": "110000000",
+      "debt": "0",
+      "feePolicy": {
+        "baseFee": "100000",
+        "gasFee": "0",
+        "liquidityFeeBps": "1",
+        "policyVersion": 1
+      },
+      "height": 6,
+      "incoming": "60000000",
+      "mempool": 0,
+      "offdelta": "-50000000",
+      "ondelta": "0",
+      "pending": false,
+      "pulls": 0,
+      "rebalancePolicy": {
+        "hardLimit": "10000000000",
+        "maxAcceptableFee": "15000000",
+        "r2cRequestSoftLimit": "500000000"
+      },
+      "root": "0xca7da0548c8681bac2d8b658652be6bc1921e0a1dc25ba26059c940058f7cc9c",
+      "routes": [
+        {
+          "filledSource": "50000000",
+          "filledTarget": "49995000",
+          "orderId": "swap-mvc29nyt-8-2i7u1qe0m94x0",
+          "status": "settled"
+        }
+      ],
+      "uncollateralized": "50000000"
+    },
+    "target": {
+      "balance": "49995000",
+      "collateral": "0",
+      "credit": "49995000",
+      "debt": "0",
+      "feePolicy": {
+        "baseFee": "100000",
+        "gasFee": "0",
+        "liquidityFeeBps": "1",
+        "policyVersion": 1
+      },
+      "height": 4,
+      "incoming": "0",
+      "mempool": 0,
+      "offdelta": "49995000",
+      "ondelta": "0",
+      "pending": false,
+      "pulls": 0,
+      "rebalancePolicy": {
+        "hardLimit": "10000000000",
+        "maxAcceptableFee": "15000000",
+        "r2cRequestSoftLimit": "500000000"
+      },
+      "root": "0x8479c9af0ce81fb602f9b581b9b0c397b3a92fddfbad831e40132a576c58ba1d",
+      "routes": [
+        {
+          "filledSource": "50000000",
+          "filledTarget": "49995000",
+          "orderId": "swap-mvc29nyt-8-2i7u1qe0m94x0",
+          "status": "settled"
+        }
+      ],
+      "uncollateralized": "49995000"
+    }
+  },
+  "afterRecovery": {
+    "source": {
+      "balance": "50000000",
+      "collateral": "0",
+      "credit": "110000000",
+      "debt": "0",
+      "feePolicy": {
+        "baseFee": "100000",
+        "gasFee": "0",
+        "liquidityFeeBps": "1",
+        "policyVersion": 1
+      },
+      "height": 6,
+      "incoming": "60000000",
+      "mempool": 0,
+      "offdelta": "-50000000",
+      "ondelta": "0",
+      "pending": false,
+      "pulls": 0,
+      "rebalancePolicy": {
+        "hardLimit": "10000000000",
+        "maxAcceptableFee": "15000000",
+        "r2cRequestSoftLimit": "500000000"
+      },
+      "root": "0xca7da0548c8681bac2d8b658652be6bc1921e0a1dc25ba26059c940058f7cc9c",
+      "routes": [
+        {
+          "filledSource": "50000000",
+          "filledTarget": "49995000",
+          "orderId": "swap-mvc29nyt-8-2i7u1qe0m94x0",
+          "status": "settled"
+        }
+      ],
+      "uncollateralized": "50000000"
+    },
+    "target": {
+      "balance": "49995000",
+      "collateral": "0",
+      "credit": "49995000",
+      "debt": "0",
+      "feePolicy": {
+        "baseFee": "100000",
+        "gasFee": "0",
+        "liquidityFeeBps": "1",
+        "policyVersion": 1
+      },
+      "height": 4,
+      "incoming": "0",
+      "mempool": 0,
+      "offdelta": "49995000",
+      "ondelta": "0",
+      "pending": false,
+      "pulls": 0,
+      "rebalancePolicy": {
+        "hardLimit": "10000000000",
+        "maxAcceptableFee": "15000000",
+        "r2cRequestSoftLimit": "500000000"
+      },
+      "root": "0x8479c9af0ce81fb602f9b581b9b0c397b3a92fddfbad831e40132a576c58ba1d",
+      "routes": [
+        {
+          "filledSource": "50000000",
+          "filledTarget": "49995000",
+          "orderId": "swap-mvc29nyt-8-2i7u1qe0m94x0",
+          "status": "settled"
+        }
+      ],
+      "uncollateralized": "49995000"
+    }
+  },
+  "afterSettings": {
+    "source": {
+      "balance": "50000000",
+      "collateral": "0",
+      "credit": "110000000",
+      "debt": "0",
+      "feePolicy": {
+        "baseFee": "100000",
+        "gasFee": "0",
+        "liquidityFeeBps": "1",
+        "policyVersion": 1
+      },
+      "height": 6,
+      "incoming": "60000000",
+      "mempool": 0,
+      "offdelta": "-50000000",
+      "ondelta": "0",
+      "pending": false,
+      "pulls": 0,
+      "rebalancePolicy": {
+        "hardLimit": "10000000000",
+        "maxAcceptableFee": "15000000",
+        "r2cRequestSoftLimit": "500000000"
+      },
+      "root": "0xca7da0548c8681bac2d8b658652be6bc1921e0a1dc25ba26059c940058f7cc9c",
+      "routes": [
+        {
+          "filledSource": "50000000",
+          "filledTarget": "49995000",
+          "orderId": "swap-mvc29nyt-8-2i7u1qe0m94x0",
+          "status": "settled"
+        }
+      ],
+      "uncollateralized": "50000000"
+    },
+    "target": {
+      "balance": "49995000",
+      "collateral": "0",
+      "credit": "49995000",
+      "debt": "0",
+      "feePolicy": {
+        "baseFee": "100000",
+        "gasFee": "0",
+        "liquidityFeeBps": "1",
+        "policyVersion": 1
+      },
+      "height": 4,
+      "incoming": "0",
+      "mempool": 0,
+      "offdelta": "49995000",
+      "ondelta": "0",
+      "pending": false,
+      "pulls": 0,
+      "rebalancePolicy": {
+        "hardLimit": "10000000000",
+        "maxAcceptableFee": "15000000",
+        "r2cRequestSoftLimit": "500000000"
+      },
+      "root": "0x8479c9af0ce81fb602f9b581b9b0c397b3a92fddfbad831e40132a576c58ba1d",
+      "routes": [
+        {
+          "filledSource": "50000000",
+          "filledTarget": "49995000",
+          "orderId": "swap-mvc29nyt-8-2i7u1qe0m94x0",
+          "status": "settled"
+        }
+      ],
+      "uncollateralized": "49995000"
+    }
+  },
+  "before": {
+    "routes": [
+      [],
+      []
+    ],
+    "source": {
+      "balance": "100000000",
+      "debt": "0"
+    },
+    "targetAccountPresent": false
+  },
+  "collateralFeePaid": {
+    "__xlnType": "BigInt",
+    "value": "0"
+  },
+  "collateralSettings": {
+    "accountUrl": "http://127.0.0.1:20002/accounts/0xca628701fe295265c0e36c84455b59404c06feb323fd1c7e7a908247b72aabb1",
+    "token": "USDT"
+  },
+  "disclosedPolicyVersion": "1",
+  "faucetDifference": "0",
+  "faucetNetAfterRebalance": "100000000",
+  "faucetRequested": "100000000",
+  "feeEvidence": [],
+  "maker": {
+    "orderId": "mmx-2aabb1-3e2da0-3-1-c48de6a8b8d29c4cae2dfbc358e57f51567595806af2c0aa353255e83cb4b8d1-sell-1",
+    "priceTicks": {
+      "__xlnType": "BigInt",
+      "value": "9999"
+    },
+    "remaining": {
+      "fillRatio": 0,
+      "filledSourceAmount": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "filledTargetAmount": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "sourceRemaining": {
+        "__xlnType": "BigInt",
+        "value": "10198980000"
+      },
+      "sourceTotal": {
+        "__xlnType": "BigInt",
+        "value": "10198980000"
+      },
+      "targetRemaining": {
+        "__xlnType": "BigInt",
+        "value": "10200000000"
+      },
+      "targetTotal": {
+        "__xlnType": "BigInt",
+        "value": "10200000000"
+      }
+    },
+    "source": {
+      "amount": {
+        "__xlnType": "BigInt",
+        "value": "10198980000"
+      },
+      "counterpartyEntityId": "0xca628701fe295265c0e36c84455b59404c06feb323fd1c7e7a908247b72aabb1",
+      "entityId": "0x2dcee5041716f6080d03c8ae21b00931ecc8815a1233c599cef3c8149acc9eed",
+      "jurisdiction": "stack:31338:0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+      "tokenId": 3
+    },
+    "status": "resting",
+    "target": {
+      "amount": {
+        "__xlnType": "BigInt",
+        "value": "10200000000"
+      },
+      "counterpartyEntityId": "0x4d6ce774c45b8451110dd7c038a0ae4526301cb703c48f342faff891016164fb",
+      "entityId": "0x0c24ba2f2e6a5d975683900ce3dd4e32b33ed4130041938433fa19fc3d3e2da0",
+      "jurisdiction": "stack:31337:0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+      "tokenId": 1
+    },
+    "venueId": "cross:stack:31337:0xa513e6e4b8f2a923d98304ec87f64353c4d5c853:1/stack:31338:0xa513e6e4b8f2a923d98304ec87f64353c4d5c853:3"
+  },
+  "mobileLayout": {
+    "fee": {
+      "height": 143.25,
+      "width": 350,
+      "x": 20,
+      "y": 1252.6875
+    },
+    "submit": {
+      "height": 44,
+      "width": 350,
+      "x": 20,
+      "y": 1411.9375
+    }
+  },
+  "mobileOverflow": 0,
+  "noCollateralRequestReason": "uncollateralized peer credit remains below the committed automatic threshold",
+  "parties": {
+    "receiveTokenId": 3,
+    "sourceEntityId": "0x33805b165492e50154ad64c957975f2d782ace530bde9222485e3e9b75610c41",
+    "sourceHubId": "0x0c24ba2f2e6a5d975683900ce3dd4e32b33ed4130041938433fa19fc3d3e2da0",
+    "targetEntityId": "0x93532bacb7a7f0f998688ec29dea3970d0c1ad2cbde70e8fd5d94ab35eb90d78",
+    "targetHubId": "0xca628701fe295265c0e36c84455b59404c06feb323fd1c7e7a908247b72aabb1"
+  },
+  "preSwapDisclosure": "Gross receive: 49.995 USDT before fees.\n\nThe receiving account has no committed collateral fee policy available. This does not mean zero fees.\n\nIf your account automatically requests collateral after receiving, its fee is deducted from your balance. The final fee and net amount depend on your account policy and balance at that time.",
+  "prepared": {
+    "source": {
+      "balance": "100000000",
+      "collateral": "0",
+      "credit": "110000000",
+      "debt": "0",
+      "feePolicy": {
+        "baseFee": "100000",
+        "gasFee": "0",
+        "liquidityFeeBps": "1",
+        "policyVersion": 1
+      },
+      "height": 4,
+      "incoming": "10000000",
+      "mempool": 0,
+      "offdelta": "-100000000",
+      "ondelta": "0",
+      "pending": false,
+      "pulls": 0,
+      "rebalancePolicy": {
+        "hardLimit": "10000000000",
+        "maxAcceptableFee": "15000000",
+        "r2cRequestSoftLimit": "500000000"
+      },
+      "root": "0x6742d7be12c04bc0707d09b7f46cff4932a19ca1cc9b4bfabb3bfea1f5fffd7a",
+      "routes": [],
+      "uncollateralized": "100000000"
+    },
+    "target": {
+      "balance": "0",
+      "collateral": "0",
+      "credit": "49995000",
+      "debt": "0",
+      "feePolicy": {
+        "baseFee": "100000",
+        "gasFee": "0",
+        "liquidityFeeBps": "1",
+        "policyVersion": 1
+      },
+      "height": 2,
+      "incoming": "49995000",
+      "mempool": 0,
+      "offdelta": "0",
+      "ondelta": "0",
+      "pending": false,
+      "pulls": 0,
+      "rebalancePolicy": {
+        "hardLimit": "10000000000",
+        "maxAcceptableFee": "15000000",
+        "r2cRequestSoftLimit": "500000000"
+      },
+      "root": "0x5f8683a3b7c4fd0087854a4cdf688a5812f3f788e62c237bd36a5b35949f06de",
+      "routes": [],
+      "uncollateralized": "0"
+    }
+  },
+  "recoveredHistory": {
+    "accounts": [
+      {
+        "entityId": "0x33805b165492e50154ad64c957975f2d782ace530bde9222485e3e9b75610c41",
+        "executions": [
+          {
+            "height": 5,
+            "pullId": "0x57839adb58e53fc561f1973fea1862ba1ea1c6b8d853f7f63a58456588d1a094",
+            "root": "0x0df4d68dc9eba157e993f78882d66cc75bd89d6759cbbe8dc0a372143782bcad",
+            "stateHash": "0x6514b50a8ddd8dd87fa6e22f01c3438031af4bee4016b01648aca8cb28b9afdf",
+            "type": "cross_pull_lock"
+          },
+          {
+            "height": 6,
+            "pullId": "0x57839adb58e53fc561f1973fea1862ba1ea1c6b8d853f7f63a58456588d1a094",
+            "root": "0xca7da0548c8681bac2d8b658652be6bc1921e0a1dc25ba26059c940058f7cc9c",
+            "stateHash": "0x491bd512dd3ff75319596962c2186f60f1fa7cc476c935e69728166ea87075d5",
+            "type": "cross_pull_close"
+          }
+        ],
+        "height": 6,
+        "hubId": "0x0c24ba2f2e6a5d975683900ce3dd4e32b33ed4130041938433fa19fc3d3e2da0",
+        "root": "0xca7da0548c8681bac2d8b658652be6bc1921e0a1dc25ba26059c940058f7cc9c"
+      },
+      {
+        "entityId": "0x93532bacb7a7f0f998688ec29dea3970d0c1ad2cbde70e8fd5d94ab35eb90d78",
+        "executions": [
+          {
+            "height": 3,
+            "pullId": "0x7b75270835ab68dc2e137ac02201357f5fff0e5939429465fefcd7fad694c0dd",
+            "root": "0x3f40ef693838f72229d658e69628369118fe471a7b9b14c2f52e17aac771b8ac",
+            "stateHash": "0xd36f1139947c918265a842fb0b95528003692fd6069c24dd59861bcfc6ae1de9",
+            "type": "cross_pull_lock"
+          },
+          {
+            "height": 4,
+            "pullId": "0x7b75270835ab68dc2e137ac02201357f5fff0e5939429465fefcd7fad694c0dd",
+            "root": "0x8479c9af0ce81fb602f9b581b9b0c397b3a92fddfbad831e40132a576c58ba1d",
+            "stateHash": "0xe5bc94a6a2301fce14d897acf14daa12f493a69ad85c788f66514437e2037654",
+            "type": "cross_pull_close"
+          }
+        ],
+        "height": 4,
+        "hubId": "0xca628701fe295265c0e36c84455b59404c06feb323fd1c7e7a908247b72aabb1",
+        "root": "0x8479c9af0ce81fb602f9b581b9b0c397b3a92fddfbad831e40132a576c58ba1d"
+      }
+    ],
+    "frame": {
+      "frameHash": "0x369c08d1dee44436fae07d21bf76a496bcfbb5ad3f2065ccf1a0e0a448264d4c",
+      "height": 22,
+      "postStateHash": "0x73d62d3c47acf7c7e66ea5148199e4aa2ca87d85626a4e6c73c1e55b21e0ec79"
+    },
+    "preparations": [
+      {
+        "entityId": "0x93532bacb7a7f0f998688ec29dea3970d0c1ad2cbde70e8fd5d94ab35eb90d78",
+        "frameHash": "0x5f863f5658c49359f357e52466b1f30b526b7b720330509d83897584113cf8eb",
+        "height": 20,
+        "orderId": "swap-mvc29nyt-8-2i7u1qe0m94x0"
+      },
+      {
+        "entityId": "0x33805b165492e50154ad64c957975f2d782ace530bde9222485e3e9b75610c41",
+        "frameHash": "0x5f863f5658c49359f357e52466b1f30b526b7b720330509d83897584113cf8eb",
+        "height": 20,
+        "orderId": "swap-mvc29nyt-8-2i7u1qe0m94x0"
+      }
+    ],
+    "runtimeId": "0x56618e0c84b5166a6fbf1383ef8d1f03640f9d36"
+  },
+  "recoveryBefore": {
+    "accounts": [
+      {
+        "entityId": "0x33805b165492e50154ad64c957975f2d782ace530bde9222485e3e9b75610c41",
+        "executions": [
+          {
+            "height": 5,
+            "pullId": "0x57839adb58e53fc561f1973fea1862ba1ea1c6b8d853f7f63a58456588d1a094",
+            "root": "0x0df4d68dc9eba157e993f78882d66cc75bd89d6759cbbe8dc0a372143782bcad",
+            "stateHash": "0x6514b50a8ddd8dd87fa6e22f01c3438031af4bee4016b01648aca8cb28b9afdf",
+            "type": "cross_pull_lock"
+          },
+          {
+            "height": 6,
+            "pullId": "0x57839adb58e53fc561f1973fea1862ba1ea1c6b8d853f7f63a58456588d1a094",
+            "root": "0xca7da0548c8681bac2d8b658652be6bc1921e0a1dc25ba26059c940058f7cc9c",
+            "stateHash": "0x491bd512dd3ff75319596962c2186f60f1fa7cc476c935e69728166ea87075d5",
+            "type": "cross_pull_close"
+          }
+        ],
+        "height": 6,
+        "hubId": "0x0c24ba2f2e6a5d975683900ce3dd4e32b33ed4130041938433fa19fc3d3e2da0",
+        "root": "0xca7da0548c8681bac2d8b658652be6bc1921e0a1dc25ba26059c940058f7cc9c"
+      },
+      {
+        "entityId": "0x93532bacb7a7f0f998688ec29dea3970d0c1ad2cbde70e8fd5d94ab35eb90d78",
+        "executions": [
+          {
+            "height": 3,
+            "pullId": "0x7b75270835ab68dc2e137ac02201357f5fff0e5939429465fefcd7fad694c0dd",
+            "root": "0x3f40ef693838f72229d658e69628369118fe471a7b9b14c2f52e17aac771b8ac",
+            "stateHash": "0xd36f1139947c918265a842fb0b95528003692fd6069c24dd59861bcfc6ae1de9",
+            "type": "cross_pull_lock"
+          },
+          {
+            "height": 4,
+            "pullId": "0x7b75270835ab68dc2e137ac02201357f5fff0e5939429465fefcd7fad694c0dd",
+            "root": "0x8479c9af0ce81fb602f9b581b9b0c397b3a92fddfbad831e40132a576c58ba1d",
+            "stateHash": "0xe5bc94a6a2301fce14d897acf14daa12f493a69ad85c788f66514437e2037654",
+            "type": "cross_pull_close"
+          }
+        ],
+        "height": 4,
+        "hubId": "0xca628701fe295265c0e36c84455b59404c06feb323fd1c7e7a908247b72aabb1",
+        "root": "0x8479c9af0ce81fb602f9b581b9b0c397b3a92fddfbad831e40132a576c58ba1d"
+      }
+    ],
+    "frame": {
+      "frameHash": "0x369c08d1dee44436fae07d21bf76a496bcfbb5ad3f2065ccf1a0e0a448264d4c",
+      "height": 22,
+      "postStateHash": "0x73d62d3c47acf7c7e66ea5148199e4aa2ca87d85626a4e6c73c1e55b21e0ec79"
+    },
+    "preparations": [
+      {
+        "entityId": "0x93532bacb7a7f0f998688ec29dea3970d0c1ad2cbde70e8fd5d94ab35eb90d78",
+        "frameHash": "0x5f863f5658c49359f357e52466b1f30b526b7b720330509d83897584113cf8eb",
+        "height": 20,
+        "orderId": "swap-mvc29nyt-8-2i7u1qe0m94x0"
+      },
+      {
+        "entityId": "0x33805b165492e50154ad64c957975f2d782ace530bde9222485e3e9b75610c41",
+        "frameHash": "0x5f863f5658c49359f357e52466b1f30b526b7b720330509d83897584113cf8eb",
+        "height": 20,
+        "orderId": "swap-mvc29nyt-8-2i7u1qe0m94x0"
+      }
+    ],
+    "runtimeId": "0x56618e0c84b5166a6fbf1383ef8d1f03640f9d36"
+  },
+  "recoveryCurrent": {
+    "accounts": [
+      {
+        "entityId": "0x33805b165492e50154ad64c957975f2d782ace530bde9222485e3e9b75610c41",
+        "executions": [
+          {
+            "height": 5,
+            "pullId": "0x57839adb58e53fc561f1973fea1862ba1ea1c6b8d853f7f63a58456588d1a094",
+            "root": "0x0df4d68dc9eba157e993f78882d66cc75bd89d6759cbbe8dc0a372143782bcad",
+            "stateHash": "0x6514b50a8ddd8dd87fa6e22f01c3438031af4bee4016b01648aca8cb28b9afdf",
+            "type": "cross_pull_lock"
+          },
+          {
+            "height": 6,
+            "pullId": "0x57839adb58e53fc561f1973fea1862ba1ea1c6b8d853f7f63a58456588d1a094",
+            "root": "0xca7da0548c8681bac2d8b658652be6bc1921e0a1dc25ba26059c940058f7cc9c",
+            "stateHash": "0x491bd512dd3ff75319596962c2186f60f1fa7cc476c935e69728166ea87075d5",
+            "type": "cross_pull_close"
+          }
+        ],
+        "height": 6,
+        "hubId": "0x0c24ba2f2e6a5d975683900ce3dd4e32b33ed4130041938433fa19fc3d3e2da0",
+        "root": "0xca7da0548c8681bac2d8b658652be6bc1921e0a1dc25ba26059c940058f7cc9c"
+      },
+      {
+        "entityId": "0x93532bacb7a7f0f998688ec29dea3970d0c1ad2cbde70e8fd5d94ab35eb90d78",
+        "executions": [
+          {
+            "height": 3,
+            "pullId": "0x7b75270835ab68dc2e137ac02201357f5fff0e5939429465fefcd7fad694c0dd",
+            "root": "0x3f40ef693838f72229d658e69628369118fe471a7b9b14c2f52e17aac771b8ac",
+            "stateHash": "0xd36f1139947c918265a842fb0b95528003692fd6069c24dd59861bcfc6ae1de9",
+            "type": "cross_pull_lock"
+          },
+          {
+            "height": 4,
+            "pullId": "0x7b75270835ab68dc2e137ac02201357f5fff0e5939429465fefcd7fad694c0dd",
+            "root": "0x8479c9af0ce81fb602f9b581b9b0c397b3a92fddfbad831e40132a576c58ba1d",
+            "stateHash": "0xe5bc94a6a2301fce14d897acf14daa12f493a69ad85c788f66514437e2037654",
+            "type": "cross_pull_close"
+          }
+        ],
+        "height": 4,
+        "hubId": "0xca628701fe295265c0e36c84455b59404c06feb323fd1c7e7a908247b72aabb1",
+        "root": "0x8479c9af0ce81fb602f9b581b9b0c397b3a92fddfbad831e40132a576c58ba1d"
+      }
+    ],
+    "frame": {
+      "frameHash": "0x3161d23eec923f83e1e7a143f016a4fb8a462253f066600c847053e00ba99022",
+      "height": 24,
+      "postStateHash": "0x74d70d0b729f58b83b991e4d9d90a4d12ce4eab21ab012762929547b859b6cc5"
+    },
+    "preparations": [
+      {
+        "entityId": "0x93532bacb7a7f0f998688ec29dea3970d0c1ad2cbde70e8fd5d94ab35eb90d78",
+        "frameHash": "0x5f863f5658c49359f357e52466b1f30b526b7b720330509d83897584113cf8eb",
+        "height": 20,
+        "orderId": "swap-mvc29nyt-8-2i7u1qe0m94x0"
+      },
+      {
+        "entityId": "0x33805b165492e50154ad64c957975f2d782ace530bde9222485e3e9b75610c41",
+        "frameHash": "0x5f863f5658c49359f357e52466b1f30b526b7b720330509d83897584113cf8eb",
+        "height": 20,
+        "orderId": "swap-mvc29nyt-8-2i7u1qe0m94x0"
+      }
+    ],
+    "runtimeId": "0x56618e0c84b5166a6fbf1383ef8d1f03640f9d36"
+  },
+  "scope": "two local EVM jurisdictions; not native TVM",
+  "sourceDebit": {
+    "__xlnType": "BigInt",
+    "value": "50000000"
+  },
+  "take": {
+    "effectiveGive": {
+      "__xlnType": "BigInt",
+      "value": "50000000"
+    },
+    "effectiveWant": {
+      "__xlnType": "BigInt",
+      "value": "49995000"
+    },
+    "releasedGiveDust": {
+      "__xlnType": "BigInt",
+      "value": "0"
+    }
+  },
+  "targetReceived": {
+    "__xlnType": "BigInt",
+    "value": "49995000"
+  }
+}

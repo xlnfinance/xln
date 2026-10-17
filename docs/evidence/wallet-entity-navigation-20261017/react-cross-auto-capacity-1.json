@@ -1,0 +1,18 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "react-cross-auto-capacity-1",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "run",
+    "prod:smoke:local"
+  ],
+  "exitCode": 1,
+  "seconds": 37.103,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/react-cross-auto-capacity-1.log"
+}

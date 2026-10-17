@@ -1,0 +1,18 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "wallet-entity-navigation-check",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "run",
+    "check"
+  ],
+  "exitCode": 0,
+  "seconds": 26.851,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/wallet-entity-navigation-check.log"
+}

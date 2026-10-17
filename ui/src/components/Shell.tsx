@@ -109,11 +109,10 @@ export function Shell({ children }: { children: ReactNode }) {
 
       <main className="main" id="wallet-content" tabIndex={-1}>
         <JurisdictionBanner wallet={wallet} />
+        {/* Asset refresh must not remount the guide and replay its chapter navigation. */}
+        <Tour />
         {assets.ready ? (
-          <>
-            <Tour />
-            {children}
-          </>
+          <>{children}</>
         ) : (
           <section className="stack" role={assets.error ? 'alert' : 'status'}>
             <p>{assets.error ? 'Could not load your assets.' : 'Loading your assets…'}</p>

@@ -1,0 +1,13 @@
+{
+  "command": [
+    "bunx",
+    "--no-install",
+    "prettier",
+    "--write",
+    "ui/src/components/Shell.tsx",
+    "ui/tests/e2e-cross-swap.spec.ts"
+  ],
+  "exitCode": 0,
+  "seconds": 0.192,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/cross-wallet-format.log"
+}

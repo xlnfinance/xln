@@ -1,0 +1,39 @@
+{
+  "baseSha": "01a134d5151c59d0bc0704e2b59478cefbbdccdb",
+  "boundary": "Receiving-account navigation changed URL but returned to Swap when an Entity change refreshed external assets and remounted Tour.",
+  "productionFix": "Keep the existing Tour mounted across external asset refresh; no financial or durable format changes.",
+  "regression": "Current React full swap, exact target setup in persisted pre-intent state, ordered same-frame paired preparation, signed Account lock/close, receiving account settings, no financial mutation from draft/navigation and exact checkpoint/WAL reload.",
+  "retiredTestExpectations": "Removed deleted manual receive-spectrum controls and their optional 10% credit buffer from this swap test. The canonical automatic planner grants the exact required amount (creditBufferBps=0), asserted from persisted state. Existing policy/fee/balance/recovery assertions retained.",
+  "counts": {
+    "browserPassed": 1,
+    "browserSkipped": 0,
+    "browserUnexpected": 0,
+    "browserFlaky": 0,
+    "browserConsoleWarningsOrErrors": 0,
+    "plannerTests": 25,
+    "plannerAssertions": 191
+  },
+  "limitations": [
+    "Local EVM chains only; not native TVM or public-chain evidence.",
+    "Original root MM full/partial spec remains blocked by retired helper globals; selective-rerun ledger unchanged.",
+    "Partial-fill browser, full release/E2E, public operator/dispute, uninterrupted soak and MacBook sync remain open."
+  ],
+  "sourceSha256": {
+    "ui/src/components/Shell.tsx": "d732b6a14330b1673d2971fcb0c096e5c8ce4783c3d4400f57dfe6ba9023ebe4",
+    "ui/tests/e2e-cross-swap.spec.ts": "6b2e209218fc89b41844be2ce8601f0c039a28760d4f2118be65ecdc23bf9083"
+  },
+  "artifacts": {
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/react-cross-auto-capacity-3/wallet-results.json": "207e288c3c49c267ddf55641e45e48bc27a34aa0307d58f1785ba10f1bf5abc0",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/react-cross-auto-capacity-3/wallet-browser.log": "ee3918db70a911d6df7e44c7d9ed2f2a4ade4bee6ea6780cc4606036aa066c58",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/react-cross-auto-capacity-3/wallet-runtime-build.log": "f8d25d24d2b6de67b4edee61c0892d88741323a4553dde1083b59d39c6a6496f",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/react-cross-auto-capacity-2/wallet-browser.log": "b3388d2b965e279c9dc6f4281443b5921f617dd656a60d802cc1fb6bff4d9125"
+  },
+  "sourceCheck": {
+    "exitCode": 0,
+    "seconds": 26.851,
+    "sourceGates": 38,
+    "topLevelGates": 3,
+    "rawLogSha256": "ec381caf7c90981faa7624e1b7f66d1599426bdf4d0d0f39adc53a5e705a4d64",
+    "committedLogNormalization": "Trailing whitespace removed; exact raw log retained at result.log"
+  }
+}
