@@ -1,10 +1,12 @@
-import { expect, test, type Page } from '../../global-setup.mts';
-import { Interface, MaxUint256, formatUnits, parseUnits } from 'ethers';
+import { allowBrowserIssue, expect, test, type Page } from '../../global-setup.mts';
+import { Interface, JsonRpcProvider, MaxUint256, formatUnits, parseUnits } from 'ethers';
+import { createWalletIdentity } from '../../../ui/tests/wallet-ui';
+import { exerciseAssetFaucets } from '../../../ui/tests/assets-faucet';
 import { deriveDelta } from '../../../core/account/utils';
 import type { JBatch } from '../../../core/jurisdiction/machine/batch';
 import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL, waitForNamedHubs } from '../../utils/e2e-baseline';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic, switchToRuntimeId } from '../../utils/e2e-demo-users';
-import { connectRuntimeToHub, connectRuntimeToHubWithCredit, waitForReceiveReadyGossipProfiles } from '../../utils/e2e-connect';
+import { connectRuntimeToHub, waitForReceiveReadyGossipProfiles } from '../../utils/e2e-connect';
 import {
   getRenderedAccountSpendableBalance,
   getRenderedExternalBalance,
@@ -76,46 +78,6 @@ async function selectAssetFaucetToken(page: Page, symbol: string): Promise<void>
   await expect(select).toBeVisible({ timeout: 20_000 });
   await select.selectOption(symbol);
   await expect(select).toHaveValue(symbol, { timeout: 20_000 });
-}
-
-async function expectFaucetModes(
-  page: Page,
-  symbol: string,
-  expected: {
-    reserveVisible: boolean;
-    reserveEnabled: boolean;
-    accountVisible: boolean;
-  },
-): Promise<void> {
-  await selectAssetFaucetToken(page, symbol);
-  const externalButton = page.getByTestId(`external-faucet-${symbol}`).first();
-  const reserveButton = page.getByTestId(`reserve-faucet-${symbol}`).first();
-  const accountButton = page.getByTestId(`account-faucet-${symbol}`).first();
-
-  await expect(externalButton).toBeVisible({ timeout: 20_000 });
-  await expect(externalButton).toBeEnabled({ timeout: 20_000 });
-  if (expected.reserveVisible) {
-    await expect(reserveButton).toBeVisible({ timeout: 20_000 });
-  } else {
-    await expect(reserveButton).toHaveCount(0);
-  }
-  if (expected.reserveVisible && expected.reserveEnabled) {
-    await expect(reserveButton).toBeEnabled({ timeout: 20_000 });
-  } else if (expected.reserveVisible) {
-    await expect(reserveButton).toBeDisabled({ timeout: 20_000 });
-  }
-
-  if (expected.accountVisible) {
-    await expect(accountButton).toBeVisible({ timeout: 20_000 });
-    await expect(accountButton).toBeEnabled({ timeout: 20_000 });
-  } else {
-    await expect(accountButton).toHaveCount(0);
-  }
-}
-
-async function clickExternalFaucet(page: Page, symbol: string): Promise<void> {
-  await selectAssetFaucetToken(page, symbol);
-  await page.getByTestId(`external-faucet-${symbol}`).first().click();
 }
 
 async function clickReserveFaucet(page: Page, symbol: string): Promise<unknown> {
@@ -677,101 +639,6 @@ async function refreshReserveBalance(page: Page, symbol: string): Promise<number
   return getRenderedReserveBalance(page, symbol);
 }
 
-async function readBrowserReserveDebug(page: Page): Promise<unknown> {
-  return await page.evaluate(() => {
-    const readBig = (value: unknown): string => {
-      if (typeof value === 'bigint') return value.toString();
-      if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-      if (typeof value === 'string') return value;
-      return '';
-    };
-    const serializeMap = <K, V>(map: Map<K, V> | undefined, valueReader: (value: V) => unknown = (value) => value): Record<string, unknown> => {
-      const out: Record<string, unknown> = {};
-      if (!map || typeof map.entries !== 'function') return out;
-      for (const [key, value] of map.entries()) {
-        out[String(key)] = valueReader(value);
-      }
-      return out;
-    };
-    const win = window as typeof window & {
-      isolatedEnv?: {
-        runtimeId?: string;
-        timestamp?: number;
-        eReplicas?: Map<string, {
-          entityId?: string;
-          signerId?: string;
-          state?: {
-            height?: number;
-            reserves?: Map<number | string, bigint>;
-            jBatchState?: { entityNonce?: number; status?: string; sentBatch?: unknown };
-          };
-        }>;
-        jReplicas?: Map<string, { blockNumber?: bigint | number; lastBlockTimestamp?: number }>;
-        runtimeMempool?: {
-          entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }>;
-          runtimeTxs?: unknown[];
-          jInputs?: unknown[];
-        };
-        infrastructure?: {
-          recentJEvents?: Array<{
-            name?: string;
-            blockNumber?: number;
-            transactionHash?: string;
-            args?: Record<string, unknown>;
-          }>;
-        };
-      };
-    };
-    const env = win.isolatedEnv;
-    const entities = Array.from(env?.state?.eReplicas?.entries?.() ?? []).map(([key, replica]) => ({
-      key,
-      entityId: replica.entityId,
-      signerId: replica.signerId,
-      height: replica.state?.height ?? null,
-      reserves: serializeMap(replica.state?.reserves, readBig),
-      jBatchState: replica.state?.jBatchState
-        ? {
-            entityNonce: replica.state.jBatchState.entityNonce,
-            status: replica.state.jBatchState.status,
-            hasSentBatch: !!replica.state.jBatchState.sentBatch,
-          }
-        : null,
-    }));
-    const jReplicas = Array.from(env?.state?.jReplicas?.entries?.() ?? []).map(([name, replica]) => ({
-      name,
-      blockNumber: readBig(replica.blockNumber),
-      lastBlockTimestamp: replica.lastBlockTimestamp ?? null,
-    }));
-    const ledger = Array.from(document.querySelectorAll('[data-testid^="asset-row-"]')).map((row) => {
-      const testid = row.getAttribute('data-testid') || '';
-      const symbol = testid.replace(/^asset-row-/, '');
-      const read = (kind: string): string | null =>
-        row.querySelector(`[data-testid="${kind}-balance-${symbol}"]`)?.getAttribute('data-raw-amount') ?? null;
-      return {
-        symbol,
-        external: read('external'),
-        reserve: read('reserve'),
-        account: row.querySelector(`[data-testid="account-spendable-${symbol}"]`)?.getAttribute('data-raw-amount') ?? null,
-      };
-    });
-    return {
-      runtimeId: env?.runtimeId ?? null,
-      timestamp: env?.state?.timestamp ?? null,
-      entities,
-      jReplicas,
-      mempool: {
-        entityInputs: env?.runtimeMempool?.entityInputs?.map((input) => ({
-          entityId: input.entityId,
-          txTypes: input.entityTxs?.map((tx) => tx.type) ?? [],
-        })) ?? [],
-        runtimeTxs: env?.runtimeMempool?.runtimeTxs?.length ?? 0,
-        jInputs: env?.runtimeMempool?.jInputs?.length ?? 0,
-      },
-      ledger,
-    };
-  });
-}
-
 async function refreshAccountSpendableBalance(page: Page, symbol: string): Promise<number> {
   await openAssetsTab(page);
   await page.getByTestId('asset-ledger-refresh').first().click();
@@ -895,92 +762,36 @@ function expectExactDelta(
   }
 }
 
-test('asset faucet exposes correct modes and funds every supported token', { tag: '@functional' }, async ({ page }) => {
-  test.setTimeout(LONG_E2E ? 240_000 : 180_000);
-
-  await timedStep('faucet.baseline', async () => {
-    await ensureE2EBaseline(page, {
-      timeoutMs: LONG_E2E ? 240_000 : 180_000,
-      requireHubMesh: true,
-      requireMarketMaker: false,
-      minHubCount: 3,
+for (const symbol of ['USDC', 'WETH', 'USDT']) {
+  test(`asset faucet exposes correct modes and funds ${symbol}`, { tag: '@functional' }, async ({ page }, testInfo) => {
+    test.setTimeout(50_000);
+    await ensureE2EBaseline(page, { requireHubMesh: true, requireMarketMaker: false, minHubCount: 3 });
+    await gotoApp(page, { appBaseUrl: APP_BASE_URL });
+    await createWalletIdentity(page, 'alice', selectDemoMnemonic('alice'));
+    // The rejected grant is an asserted negative path; every other browser issue remains fatal.
+    allowBrowserIssue({
+      type: 'http',
+      severity: 'warning',
+      url: new URL('/api/faucet/erc20', APP_BASE_URL).href,
+      method: 'POST',
+      status: 413,
+      message: 'HTTP 413',
     });
-  });
-
-  let alice: { entityId: string; signerId: string; runtimeId: string } | null = null;
-  await timedStep('faucet.runtime', async () => {
-    await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
-    await page.evaluate((apiBaseUrl: string) => {
-      (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__ = apiBaseUrl;
-      localStorage.setItem('xln-api-base-url', apiBaseUrl);
-    }, API_BASE_URL);
-    alice = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
-    await switchToRuntimeId(page, alice.runtimeId);
-  });
-
-  const hubs = await waitForNamedHubs(page, ['H1'], { timeoutMs: ROUTE_TIMEOUT_MS });
-  const [usdcToken, wethToken, usdtToken] = await Promise.all([
-    getApiToken(page, 'USDC'),
-    getApiToken(page, 'WETH'),
-    getApiToken(page, 'USDT'),
-  ]);
-  await timedStep('faucet.open-account', async () => {
-    await connectRuntimeToHubWithCredit(
-      page,
-      { entityId: alice!.entityId, signerId: alice!.signerId },
-      hubs.h1,
-      '10000',
-      [usdcToken.tokenId, wethToken.tokenId, usdtToken.tokenId],
-    );
-  });
-
-  await timedStep('faucet.mode-matrix', async () => {
-    await openAssetsTab(page);
-    const selectorOptions = await page.getByTestId('asset-faucet-symbol').first().locator('option').evaluateAll(
-      (nodes) => nodes.map((node) => String((node as HTMLOptionElement).value || '').trim()).filter((value) => value.length > 0),
-    );
-    expect(selectorOptions).toEqual(expect.arrayContaining(['ETH', 'WETH', 'USDT', 'USDC']));
-
-    for (const symbol of selectorOptions) {
-      if (symbol === 'ETH') {
-        await expectFaucetModes(page, symbol, { reserveVisible: false, reserveEnabled: false, accountVisible: false });
-        continue;
-      }
-      await expectFaucetModes(page, symbol, { reserveVisible: true, reserveEnabled: true, accountVisible: true });
+    allowBrowserIssue({
+      type: 'console',
+      severity: 'warning',
+      url: new URL('/ui/assets', APP_BASE_URL).href,
+      message: 'Failed to load resource: the server responded with a status of 413 (Payload Too Large)',
+    });
+    const provider = new JsonRpcProvider(`${API_BASE_URL}/rpc`, 31337, { staticNetwork: true, cacheTimeout: -1 });
+    try {
+      // This mesh's existing public faucet cap is 10^21 tokens; the production-profile caller uses 100.
+      await exerciseAssetFaucets(page, provider, testInfo, symbol, expect, '1000000000000000000001');
+    } finally {
+      provider.destroy();
     }
   });
-
-  await timedStep('faucet.eth.external', async () => {
-    const beforeExternal = await refreshExternalBalance(page, 'ETH');
-    await clickExternalFaucet(page, 'ETH');
-    await expect.poll(async () => refreshExternalBalance(page, 'ETH'), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeExternal);
-  });
-
-  for (const symbol of ['WETH', 'USDT', 'USDC'] as const) {
-    await timedStep(`faucet.${symbol}.external`, async () => {
-      const beforeExternal = await refreshExternalBalance(page, symbol);
-      await clickExternalFaucet(page, symbol);
-      await expect.poll(async () => refreshExternalBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeExternal);
-    });
-
-    await timedStep(`faucet.${symbol}.reserve`, async () => {
-      const beforeReserve = await refreshReserveBalance(page, symbol);
-      await clickReserveFaucet(page, symbol);
-      try {
-        await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeReserve);
-      } catch (error) {
-        console.log(`[move reserve debug ${symbol}] ${JSON.stringify(await readBrowserReserveDebug(page), null, 2)}`);
-        throw error;
-      }
-    });
-
-    await timedStep(`faucet.${symbol}.account`, async () => {
-      const beforeAccount = await refreshAccountSpendableBalance(page, symbol);
-      await clickAccountFaucet(page, symbol);
-      await expect.poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeAccount);
-    });
-  }
-});
+}
 
 test('move tab covers all routed paths on isolated runtimes', { tag: '@functional' }, async ({ page, browser }, testInfo) => {
   test.setTimeout(LONG_E2E ? 420_000 : 300_000);

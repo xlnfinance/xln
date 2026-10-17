@@ -1,0 +1,262 @@
+{
+  "usdc": {
+    "funded": {
+      "capacity": "10000000",
+      "credit": "110000000",
+      "decimals": 6,
+      "external": "100000000",
+      "mempool": 0,
+      "native": "20245856520000000",
+      "owned": "100000000",
+      "pending": false,
+      "reserve": "100000000",
+      "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e",
+      "symbol": "USDC",
+      "tokenId": 1
+    },
+    "gasAdded": {
+      "__xlnType": "BigInt",
+      "value": "10106639760000000"
+    },
+    "gasTransaction": "0x229b01f167b5ba96fc9aa7f252cff45ce3dc16000c92adbff594929be10cf8d2",
+    "initial": {
+      "capacity": "0",
+      "credit": "0",
+      "decimals": 6,
+      "external": "0",
+      "mempool": 0,
+      "native": "0",
+      "owned": "0",
+      "pending": false,
+      "reserve": "0",
+      "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e",
+      "symbol": "USDC",
+      "tokenId": 1
+    },
+    "rejected": {
+      "capacity": "0",
+      "credit": "0",
+      "decimals": 6,
+      "external": "0",
+      "mempool": 0,
+      "native": "0",
+      "owned": "0",
+      "pending": false,
+      "reserve": "0",
+      "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e",
+      "symbol": "USDC",
+      "tokenId": 1
+    },
+    "requests": {
+      "erc20": [
+        "1000000000000000000001",
+        "100"
+      ],
+      "gas": [
+        "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+      ],
+      "offchain": [
+        "100"
+      ],
+      "reserve": [
+        "100"
+      ]
+    },
+    "symbol": "USDC"
+  },
+  "weth": {
+    "funded": {
+      "capacity": "10000000000000000000",
+      "credit": "110000000000000000000",
+      "decimals": 18,
+      "external": "100000000000000000000",
+      "mempool": 0,
+      "native": "20245856540000000",
+      "owned": "100000000000000000000",
+      "pending": false,
+      "reserve": "100000000000000000000",
+      "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e",
+      "symbol": "WETH",
+      "tokenId": 2
+    },
+    "gasAdded": {
+      "__xlnType": "BigInt",
+      "value": "10106639780000000"
+    },
+    "gasTransaction": "0xe05c32bf0e3b5782d712c8675f78129e224631c54d66685db4b6c7779d453965",
+    "initial": {
+      "capacity": "0",
+      "credit": "0",
+      "decimals": 18,
+      "external": "0",
+      "mempool": 0,
+      "native": "0",
+      "owned": "0",
+      "pending": false,
+      "reserve": "0",
+      "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e",
+      "symbol": "WETH",
+      "tokenId": 2
+    },
+    "rejected": {
+      "capacity": "0",
+      "credit": "0",
+      "decimals": 18,
+      "external": "0",
+      "mempool": 0,
+      "native": "0",
+      "owned": "0",
+      "pending": false,
+      "reserve": "0",
+      "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e",
+      "symbol": "WETH",
+      "tokenId": 2
+    },
+    "requests": {
+      "erc20": [
+        "1000000000000000000001",
+        "100"
+      ],
+      "gas": [
+        "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+      ],
+      "offchain": [
+        "100"
+      ],
+      "reserve": [
+        "100"
+      ]
+    },
+    "symbol": "WETH"
+  },
+  "usdt": {
+    "funded": {
+      "capacity": "10000000",
+      "credit": "110000000",
+      "decimals": 6,
+      "external": "100000000",
+      "mempool": 0,
+      "native": "20245856520000000",
+      "owned": "100000000",
+      "pending": false,
+      "reserve": "100000000",
+      "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e",
+      "symbol": "USDT",
+      "tokenId": 3
+    },
+    "gasAdded": {
+      "__xlnType": "BigInt",
+      "value": "10106639760000000"
+    },
+    "gasTransaction": "0x229b01f167b5ba96fc9aa7f252cff45ce3dc16000c92adbff594929be10cf8d2",
+    "initial": {
+      "capacity": "0",
+      "credit": "0",
+      "decimals": 6,
+      "external": "0",
+      "mempool": 0,
+      "native": "0",
+      "owned": "0",
+      "pending": false,
+      "reserve": "0",
+      "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e",
+      "symbol": "USDT",
+      "tokenId": 3
+    },
+    "rejected": {
+      "capacity": "0",
+      "credit": "0",
+      "decimals": 6,
+      "external": "0",
+      "mempool": 0,
+      "native": "0",
+      "owned": "0",
+      "pending": false,
+      "reserve": "0",
+      "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e",
+      "symbol": "USDT",
+      "tokenId": 3
+    },
+    "requests": {
+      "erc20": [
+        "1000000000000000000001",
+        "100"
+      ],
+      "gas": [
+        "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+      ],
+      "offchain": [
+        "100"
+      ],
+      "reserve": [
+        "100"
+      ]
+    },
+    "symbol": "USDT"
+  },
+  "production-usdc": {
+    "funded": {
+      "capacity": "10000000",
+      "credit": "110000000",
+      "decimals": 6,
+      "external": "100000000",
+      "mempool": 0,
+      "native": "20164743900000000",
+      "owned": "100000000",
+      "pending": false,
+      "reserve": "100000000",
+      "signerId": "0x749f73cb1255168819ecaa7bf37c4b22aef0e9bd",
+      "symbol": "USDC",
+      "tokenId": 1
+    },
+    "gasAdded": {
+      "__xlnType": "BigInt",
+      "value": "10071447500000000"
+    },
+    "gasTransaction": "0xc02c56cc42b46f03422ac25f95123c71c38271183ef8005f8173fa85f4e0486f",
+    "initial": {
+      "capacity": "0",
+      "credit": "0",
+      "decimals": 6,
+      "external": "0",
+      "mempool": 0,
+      "native": "0",
+      "owned": "0",
+      "pending": false,
+      "reserve": "0",
+      "signerId": "0x749f73cb1255168819ecaa7bf37c4b22aef0e9bd",
+      "symbol": "USDC",
+      "tokenId": 1
+    },
+    "rejected": {
+      "capacity": "0",
+      "credit": "0",
+      "decimals": 6,
+      "external": "0",
+      "mempool": 0,
+      "native": "0",
+      "owned": "0",
+      "pending": false,
+      "reserve": "0",
+      "signerId": "0x749f73cb1255168819ecaa7bf37c4b22aef0e9bd",
+      "symbol": "USDC",
+      "tokenId": 1
+    },
+    "requests": {
+      "erc20": [
+        "101",
+        "100"
+      ],
+      "gas": [
+        "0x749f73cb1255168819ecaa7bf37c4b22aef0e9bd"
+      ],
+      "offchain": [
+        "100"
+      ],
+      "reserve": [
+        "100"
+      ]
+    },
+    "symbol": "USDC"
+  }
+}
