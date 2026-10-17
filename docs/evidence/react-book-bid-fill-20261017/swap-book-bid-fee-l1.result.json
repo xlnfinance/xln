@@ -1,0 +1,11 @@
+{
+  "command": [
+    "bun",
+    "test",
+    "core/__tests__/payments/settlement/rebalance-auto-trigger.test.ts",
+    "core/__tests__/payments/settlement/rebalance-financial.test.ts"
+  ],
+  "exitCode": 0,
+  "seconds": 0.275,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-book-bid-fee-l1.log"
+}

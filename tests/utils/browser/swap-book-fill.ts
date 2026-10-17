@@ -1,6 +1,8 @@
+import { rebalanceFeeFor } from '../../../core/account/tx/handlers/rebalance/request-collateral';
+import { fundFromHubUi } from '../../../ui/tests/fund-from-hub';
 import { expect, type Page, type TestInfo, type Request } from '../../global-setup.mts';
 import { parseUnits } from 'ethers';
-import type { RuntimeAdapterViewFrame } from '../../../core/api/public/runtime-module';
+import type { RuntimeReplica, XLNModule, RuntimeAdapterViewFrame } from '../../../core/api/public/runtime-module';
 import { safeStringify } from '../../../core/protocol/serialization';
 import { deriveSwapFillPolicyFee } from '../../../core/account/swap/swap-net-authorization';
 import { readAccount, readOrders, type DebugWindow } from '../../../ui/tests/swap-evidence';
@@ -34,32 +36,90 @@ const readDeltas = (page: Page, entityId: string, hubId: string) =>
     { entityId, hubId },
   );
 
+const readCollateralPolicy = (page: Page, entityId: string, hubId: string, tokenId: number) =>
+  page.evaluate(
+    async ids => {
+      const debug = (window as DebugWindow).__xln;
+      const adapter = debug?.adapter();
+      if (!debug || !adapter) throw new Error('COLLATERAL_POLICY_ADAPTER_MISSING');
+      const account = await adapter.read<Account>(`entity/${ids.entityId}/account/${ids.hubId}`);
+      const xln = await debug.xln();
+      return (
+        account.state.rebalanceFeePolicies?.get(ids.tokenId)?.[
+          xln.isLeftEntity(ids.entityId, ids.hubId) ? 'right' : 'left'
+        ] ?? null
+      );
+    },
+    { entityId, hubId, tokenId },
+  );
+
+const readCollateralFees = (page: Page, entityId: string, hubId: string, beforeHeight: number, afterHeight: number) =>
+  page.evaluate(
+    async ids => {
+      const debug = (window as Window & { __xln?: { env(): RuntimeReplica | null; xln(): Promise<XLNModule> } }).__xln;
+      const env = debug?.env();
+      if (!debug || !env) throw new Error('COLLATERAL_FEE_RUNTIME_MISSING');
+      const frames = await (
+        await debug.xln()
+      ).readPersistedAccountFrameHistory(env, ids.entityId, ids.hubId, ids.afterHeight, {
+        maxAccountHeight: ids.afterHeight,
+      });
+      return frames
+        .filter(frame => frame.height > ids.beforeHeight)
+        .flatMap(frame =>
+          frame.accountTxs
+            .filter(tx => tx.type === 'request_collateral')
+            .map(tx => ({
+              height: frame.height,
+              stateHash: frame.stateHash,
+              root: frame.accountStateRoot,
+              tokenId: tx.data.tokenId,
+              feeTokenId: tx.data.feeTokenId ?? tx.data.tokenId,
+              amount: tx.data.amount,
+              fee: tx.data.feeAmount,
+              policyVersion: tx.data.policyVersion,
+            })),
+        );
+    },
+    { entityId, hubId, beforeHeight, afterHeight },
+  );
+
 /** One actual book click must bind the ticket, signed fill, balances and both Account owners. */
-export async function verifyBookAskFill(page: Page, info: TestInfo, entityId: string): Promise<void> {
+export async function verifyBookFill(page: Page, info: TestInfo, entityId: string, side: 'ask' | 'bid'): Promise<void> {
   await page.getByTestId('home-faucet').click();
   await expect(page.getByTestId('test-money-status')).toHaveText('100 USDC received');
   await page.getByTestId('account-row').first().click();
   const hubId = new URL(page.url()).pathname.split('/accounts/')[1];
   if (!hubId || !/^0x[0-9a-f]{64}$/.test(hubId)) throw new Error('SWAP_HUB_ID_MISSING');
   await page.getByTestId('back').click();
+  if (side === 'bid') await fundFromHubUi(page, expect, '1', 'WETH');
   await page.getByTestId('home-swap').click();
   const book = page.getByTestId('orderbook').locator('visible=true').first();
   await expect(book).toHaveAttribute('data-status', 'live');
-  const ask = book.getByTestId('book-row-ask').last();
+  const ask = side === 'ask' ? book.getByTestId('book-row-ask').last() : book.getByTestId('book-row-bid').first();
   await expect(ask).toBeVisible();
   const displayedPrice = await ask.locator('.bk-price').innerText();
   const priceTicks = parseUnits(displayedPrice.replaceAll(',', ''), 4);
   expect(priceTicks).toBeGreaterThan(0n);
   await ask.click();
+  const giveTokenId = side === 'ask' ? 1 : 2;
+  const wantTokenId = side === 'ask' ? 2 : 1;
   const ticket = {
-    give: parseUnits(await page.getByTestId('swap-give').inputValue(), 6).toString(),
-    want: parseUnits(await page.getByTestId('swap-want').inputValue(), 18).toString(),
+    giveTokenId,
+    wantTokenId,
+    give: parseUnits(await page.getByTestId('swap-give').inputValue(), side === 'ask' ? 6 : 18).toString(),
+    want: parseUnits(await page.getByTestId('swap-want').inputValue(), side === 'ask' ? 18 : 6).toString(),
   };
   const prepared = await page.evaluate(async amounts => {
     const debug = (window as DebugWindow).__xln;
     if (!debug) throw new Error('SWAP_DIAGNOSTICS_MISSING');
     const xln = await debug.xln();
-    const order = xln.prepareSwapOrder(1, 2, BigInt(amounts.give), BigInt(amounts.want));
+    const order = xln.prepareSwapOrder(
+      amounts.giveTokenId,
+      amounts.wantTokenId,
+      BigInt(amounts.give),
+      BigInt(amounts.want),
+    );
     if (!order) throw new Error('SWAP_PREPARATION_FAILED');
     return {
       give: order.effectiveGive.toString(),
@@ -75,8 +135,9 @@ export async function verifyBookAskFill(page: Page, info: TestInfo, entityId: st
   const feeBps = Number(feeMatch[1]);
   const before = await readAccount(page, hubId);
   expect(before.usdc).toBe('100000000');
-  expect(before.weth).toBe('0');
+  expect(before.weth).toBe(side === 'ask' ? '0' : '1000000000000000000');
   expect(before.offers).toBe(0);
+  const collateralPolicy = await readCollateralPolicy(page, entityId, hubId, wantTokenId);
   const submit = page.getByTestId('swap-submit');
   await expect(submit).toBeEnabled();
   const started = Date.now();
@@ -95,7 +156,8 @@ export async function verifyBookAskFill(page: Page, info: TestInfo, entityId: st
         async () => {
           const account = await readAccount(page, hubId);
           return {
-            received: BigInt(account.weth) > 0n,
+            received:
+              side === 'ask' ? BigInt(account.weth) > BigInt(before.weth) : BigInt(account.usdc) > BigInt(before.usdc),
             pending: account.pending,
             mempool: account.mempool,
             offers: account.offers,
@@ -122,9 +184,22 @@ export async function verifyBookAskFill(page: Page, info: TestInfo, entityId: st
     expect(fill.fillRatio).toBe(65535);
     expect(fill.executionGiveAmount).toBe(order.originalGiveAmount);
     expect(fill.executionWantAmount).toBe(order.originalWantAmount);
-    expect(BigInt(before.usdc) - BigInt(after.usdc)).toBe(fill.executionGiveAmount);
-    expect(BigInt(after.weth) - BigInt(before.weth)).toBe(fill.executionWantAmount - fill.feeAmount);
-    expect(fill.feeTokenId).toBe(2);
+    const debit = side === 'ask' ? BigInt(before.usdc) - BigInt(after.usdc) : BigInt(before.weth) - BigInt(after.weth);
+    const received =
+      side === 'ask' ? BigInt(after.weth) - BigInt(before.weth) : BigInt(after.usdc) - BigInt(before.usdc);
+    expect(debit).toBe(fill.executionGiveAmount);
+    const collateralFees = await readCollateralFees(page, entityId, hubId, before.height, after.height);
+    expect(collateralFees).toHaveLength(side === 'ask' ? 0 : 1);
+    for (const fee of collateralFees) {
+      if (!collateralPolicy) throw new Error('SIGNED_COLLATERAL_POLICY_MISSING');
+      expect(fee.feeTokenId).toBe(wantTokenId);
+      expect(fee.tokenId).toBe(wantTokenId);
+      expect(fee.policyVersion).toBe(collateralPolicy.policyVersion);
+      expect(fee.fee).toBe(rebalanceFeeFor(collateralPolicy, fee.amount));
+    }
+    const collateralFee = collateralFees.reduce((sum, fee) => sum + fee.fee, 0n);
+    expect(received + collateralFee).toBe(fill.executionWantAmount - fill.feeAmount);
+    expect(fill.feeTokenId).toBe(wantTokenId);
     expect(fill.feeAmount).toBe(
       deriveSwapFillPolicyFee(
         { giveAmount: order.originalGiveAmount, wantAmount: order.originalWantAmount },
@@ -175,7 +250,7 @@ export async function verifyBookAskFill(page: Page, info: TestInfo, entityId: st
     const idleStartMs = Date.now() - started;
     await page.waitForTimeout(6_000);
     const idleEndMs = Date.now() - started;
-    await info.attach('current-book-ask-fill', {
+    await info.attach(`current-book-${side}-fill`, {
       body: safeStringify({
         entityId,
         hubId,
@@ -184,6 +259,9 @@ export async function verifyBookAskFill(page: Page, info: TestInfo, entityId: st
         ticket,
         prepared,
         feeBps,
+        collateralPolicy,
+        collateralFees,
+        collateralFee,
         before,
         after,
         orders,

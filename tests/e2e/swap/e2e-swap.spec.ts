@@ -1,4 +1,4 @@
-import { verifyBookAskFill } from '../../utils/browser/swap-book-fill';
+import { verifyBookFill } from '../../utils/browser/swap-book-fill';
 import { createWalletIdentity, LOCAL_PASSWORD } from '../../../ui/tests/wallet-ui';
 import { verifyRestingSwapCancellation } from '../../../ui/tests/swap-cancellation';
 /**
@@ -2211,15 +2211,14 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
     const wallet = await createWalletIdentity(page, 'book-ask', randomMnemonic());
     await expect(page.getByTestId('account-row').first()).toBeVisible();
-    await verifyBookAskFill(page, testInfo, wallet.entityId);
+    await verifyBookFill(page, testInfo, wallet.entityId, 'ask');
   });
 
-  test('swap orderbook highest bid click fills immediately at displayed book price', { tag: '@functional' }, async ({ page }) => {
-    const accountRef = await prepareOrderbookClickTest(page);
-
-    await timedStep('swap_click.highest_bid_fills', () =>
-      executeOrderbookClickFill(page, accountRef, 'highest-bid'),
-    );
+  test('swap orderbook highest bid click fills immediately at displayed book price', { tag: '@functional' }, async ({ page }, testInfo) => {
+    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+    const wallet = await createWalletIdentity(page, 'book-bid', randomMnemonic());
+    await expect(page.getByTestId('account-row').first()).toBeVisible();
+    await verifyBookFill(page, testInfo, wallet.entityId, 'bid');
   });
 
   test('swap orderbook mid price click fills immediately at displayed book price', { tag: '@functional' }, async ({ page }) => {
