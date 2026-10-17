@@ -1,0 +1,99 @@
+{
+  "base": "d472fea06e8ad9c1c47051c478d3d32d9ac92975",
+  "results": [
+    {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=8",
+        "xln.finance",
+        "timeout 45s python3 -"
+      ],
+      "exitCode": 0,
+      "seconds": 1.519,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/operator-routing-current.log"
+    },
+    {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "nginx-wallet-before",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/nginx-wallet-gateway/nginx-gateway.ts"
+      ],
+      "exitCode": 1,
+      "seconds": 0.881,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/nginx-wallet-before.log"
+    },
+    {
+      "command": [
+        "bun",
+        "test",
+        "scripts/deployment/configure-wallet-nginx.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 0.163,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/nginx-wallet-l1.log"
+    },
+    {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "nginx-wallet-browser",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/nginx-wallet-gateway/production-gateway-stand.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 28.618,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/nginx-wallet-browser.log"
+    },
+    {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "nginx-wallet-regressions",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "scripts/deployment/configure-wallet-nginx.test.ts",
+        "scripts/deployment/prepare-remote-main.test.ts",
+        "core/__tests__/operations/release/react-deploy-revision.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 2.958,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/nginx-wallet-regressions.log"
+    },
+    {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=8",
+        "xln.finance",
+        "timeout 35s python3 -"
+      ],
+      "exitCode": 0,
+      "seconds": 1.179,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/nginx-wallet-deployed-config.log"
+    }
+  ],
+  "publicActivation": false,
+  "productionRuntimeChanged": false
+}

@@ -724,6 +724,8 @@ PY
     return 1
   fi
 
+  bun "$SCRIPT_DIR/configure-wallet-nginx.ts" "$available"
+
   nginx -t
   systemctl reload nginx
 

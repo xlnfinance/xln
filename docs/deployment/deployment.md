@@ -322,10 +322,13 @@ history; it only fast-forwards main to the exact published SHA. Unsupported old
 single-root archives are rejected before either current generated build changes.
 
 The canonical Bun static handler owns `/ui/`, deep-route reloads, `/ui/runtime.js`
-and `/account-worker.js`. The existing nginx application proxy must route those
-requests to that handler. Do not install an alias to a separate wallet checkout.
-Keep API/relay authorization, TLS and other access protections unchanged; compare
-the active operator configuration before rollout.
+and `/account-worker.js`. Platform deployment includes
+`scripts/deployment/nginx-wallet.conf` in the existing application host; its
+`^~ /ui/` route takes precedence over the generic static asset regex and forwards
+to that handler. The worker has an exact route, and `/ui` redirects with its query
+intact. The installer rejects ambiguous hosts or competing wallet routes. Do not
+install an alias to a separate wallet checkout. API/relay authorization, TLS and
+other hosts remain unchanged; compare the active configuration before rollout.
 
 A current artifact is not proof of readiness: retain its matching build, browser,
 financial and recovery evidence. The central signed release scope includes `ui/`;
