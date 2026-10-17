@@ -1070,7 +1070,8 @@ describe('audit fail-fast regressions', () => {
       data: {
         kind: 'upsert',
         revision: 1,
-        ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
+        // Channel withdrawal reserves collateral; reserve-to-reserve transfer does not.
+        ops: [{ type: 'c2r', tokenId: 1, amount: 4n }],
         executorIsLeft: true,
       },
     };

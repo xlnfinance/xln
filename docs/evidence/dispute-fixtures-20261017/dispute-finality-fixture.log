@@ -1,0 +1,14 @@
+$ bun tools/stand-lock.ts run --reason mainnet-dispute-finality-regression --timeout-ms "60000" -- bun test "core/__tests__/testing/audit/audit-failfast-regressions-part-5.test.ts" -t "DisputeFinalized invalidates"
+bun test v1.4.0 (34cbb9a40)
+
+core/__tests__/testing/audit/audit-failfast-regressions-part-5.test.ts:
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x1212121212121212121212121212121212121212121212121212121212121212","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x3434343434343434343434343434343434343434343434343434343434343434","status":"disputed"}
+[INFO][j.event] dispute_finalized.applied {"block":22,"broadcastQueued":false,"counterparty":"3434","entity":"1212","ownSentBatchWillAck":false,"removedDraft":0,"removedRecovery":0,"removedSent":0,"sender":"1212"}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"1","range":"1-22","root":"0x91a6c802.."}
+(pass) audit fail-fast regressions > DisputeFinalized invalidates a competing settlement workspace and its deferred retry [66.03ms]
+
+ 1 pass
+ 18 filtered out
+ 0 fail
+ 6 expect() calls
+Ran 1 test across 1 file. [410.00ms]

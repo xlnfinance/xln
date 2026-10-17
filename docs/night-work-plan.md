@@ -1,5 +1,17 @@
 # Current xln execution handoff
 
+CURRENT — owner mainnet-readiness goal, 2026-10-17.
+
+- Candidate: clean main `1106172843e93933420fd30802387d82b16c369a`, published directly through the installed local verification hook. The 65 supplied source paths and 8 evidence files are integrated; Studio audit worktree and three local/three remote task refs are retired after byte preservation and ancestry proof. MacBook bridge returned blocked: local verify reported VERIFY_CHILD_STREAMS_OPEN_AFTER_CLEANUP; sync/cleanup is still unconfirmed; guarded catch-up and all owner archives remain preserved. Never reapply the old overlay.
+- Launch scope: TypeScript, React, Ethereum same-J. Deferred lending and other launch deferrals remain. No Arrakis reactivation, PR/CI dependency, real-funds operation, mainnet activation or external model/audit authorization is implied by old entries below.
+- Current exact evidence: source check 38+3 gates and clean pre-push verification; money preflight 59/59 tests, 20,752 assertions (0.68s); existing security pack green (0.60s). Required evidence coverage: 2/10 attached on this SHA (source and security). Release integration, full browser acceptance, watchtower, uninterrupted one-hour soak, topology health, complete browser/F12 flow evidence and rollback remain UNKNOWN. The recent 8-check gateway run is narrower than the complete product gate.
+- Actual release boundary: release-integrity passed 63 tests / 513 assertions plus one real contract test (18.58s). The next runtime family failed 2/143 on obsolete fixtures: r2r expected a channel hold and a secret-ACK deadline lacked its upstream Account. Using c2r and a real active inbound HTLC preserves all original assertions; related 155/155 tests / 1,225 assertions pass (26.48s). Ordinary commands stay within 60s under the capacity-one stand. Aggregate gate/soak procedures with longer requirements need an explicitly supported managed run; a truncated run cannot count as complete.
+- Implementation duration: inherited integration is recorded in its final report; current fixture repair/check duration approximately 8 minutes; no production edit. Method hypothesis: execute the next existing release component before editing machinery or widening scope; preserve all financial assertions. Disproof: any component failure identifies its exact first assertion for a smaller regression.
+- Next single command: `bun run stand:run --reason mainnet-dispute-fixture-check --timeout-ms 60000 -- bun run check` after `bun run stand:status`.
+- Artifacts: `/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/`; inherited handoff `/Users/zigota/agent-jobs/xln-autonomous-finish-20261017/final-result.json`. Keep this CURRENT section as the bounded reflection/handoff; do not create another task catalog. Update it every 30 active minutes or at a safe continuation boundary with actual result, first remaining failure, duration, method hypothesis and next command.
+
+Historical handoffs below are not current release claims.
+
 Owner update, 2026-10-15: stop manual traversal; run automated wallet E2E,
 commit/push the owned changes through PR #82 and finish after its CI result.
 The detached Arrakis page/service is removed. The ordinary React wallet now
@@ -21,9 +33,6 @@ a financial action because Vite HMR disconnects the live module adapter.
 Next: run `bun run check`, push this candidate, and inspect its first failing
 required CI step. Preserve dev databases and the running dev stand. No mainnet
 readiness claim: current-public-chain P4–P6, soak and release package remain gates.
-
-Historical handoffs below are not current release claims.
-
 
 Current result, 2026-10-15: PR #80 merged as e24ac5d37 after 7/7 required CI.
 Arrakis implementation 2fd785cbc was exercised from a clean source tree: 8/8

@@ -1,0 +1,35 @@
+{
+  "baseSha": "1106172843e93933420fd30802387d82b16c369a",
+  "scope": "Two release regression fixtures; no production behavior changes",
+  "failure": {
+    "tests": 143,
+    "passed": 141,
+    "failed": 2,
+    "log": "runtime-audit-110617284.log"
+  },
+  "repair": [
+    "Use collateral withdrawal c2r so the dispute-finality race starts with a real four-unit channel hold. Preserve all six assertions.",
+    "Provide the active upstream Account and eight-unit inbound HTLC required for a secret-ACK deadline. Preserve all seven assertions, including dispute proof secret."
+  ],
+  "focused": {
+    "passed": 2,
+    "assertions": 13
+  },
+  "related": {
+    "passed": 155,
+    "failed": 0,
+    "assertions": 1225,
+    "seconds": 26.48,
+    "log": "runtime-audit-fixed.log"
+  },
+  "limitations": [
+    "No production or browser code changes.",
+    "Full release integration, watchtower, product journeys, topology rollback and uninterrupted one-hour soak remain unproved."
+  ],
+  "logs": {
+    "dispute-finality-fixture.log": "f4f27e292cb105282ed12e9b92f0ba9c9208828e57ff6b23f4d0c93e73d48eab",
+    "secret-evidence-fixture.log": "6c4bcca801857cc930656fd429cd0212c06a7fdde70a781cc3572543d862c7dd",
+    "runtime-audit-fixed.log": "57cf86cec39b98b6823c616cbf5c9487d7bf8685e157d25a80acf2767621f7a5",
+    "runtime-audit-110617284.log": "4c6e19379a9539e1e95976aec622efe66aba9e38f9b89e857f37fa62fa864db5"
+  }
+}

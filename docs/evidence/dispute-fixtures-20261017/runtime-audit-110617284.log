@@ -1,0 +1,576 @@
+$ bun tools/stand-lock.ts run --reason mainnet-runtime-audit-family --timeout-ms "60000" -- bun test "core/__tests__/testing/audit/audit-failfast-regressions-part-1.test.ts" "core/__tests__/testing/audit/audit-failfast-regressions-part-2.test.ts" "core/__tests__/testing/audit/audit-failfast-regressions-part-3.test.ts" "core/__tests__/testing/audit/audit-failfast-regressions-part-4.test.ts" "core/__tests__/testing/audit/audit-failfast-regressions-part-5.test.ts" "core/__tests__/testing/audit/audit-failfast-regressions-part-6.test.ts"
+bun test v1.4.0 (34cbb9a40)
+
+core/__tests__/testing/audit/audit-failfast-regressions-part-5.test.ts:
+(pass) audit fail-fast regressions > Entity flush does not re-carry LEFT winning proposal after simultaneous-frame collision [85.18ms]
+(pass) audit fail-fast regressions > failed proposal keeps queued txs, including late arrivals, instead of wiping the mempool [38.66ms]
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x1212121212121212121212121212121212121212121212121212121212121212","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x3434343434343434343434343434343434343434343434343434343434343434","status":"disputed"}
+[INFO][j.event] dispute_finalized.applied {"block":22,"broadcastQueued":true,"counterparty":"3434","entity":"1212","ownSentBatchWillAck":false,"removedDraft":1,"removedRecovery":0,"removedSent":1,"sender":"3434"}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"1","range":"1-22","root":"0xe5faec21.."}
+(pass) audit fail-fast regressions > DisputeFinalized retires an invalidated sealed batch and requeues its remaining operations [35.38ms]
+(pass) audit fail-fast regressions > DisputeFinalized rejects missing signed final body before mutating account state [30.07ms]
+(pass) audit fail-fast regressions > DisputeFinalized rejects an oversized nonce before mutating account state [28.58ms]
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x1212121212121212121212121212121212121212121212121212121212121212","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x3434343434343434343434343434343434343434343434343434343434343434","status":"disputed"}
+[INFO][j.event] dispute_finalized.applied {"block":22,"broadcastQueued":false,"counterparty":"3434","entity":"1212","ownSentBatchWillAck":false,"removedDraft":0,"removedRecovery":0,"removedSent":0,"sender":"1212"}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"1","range":"1-22","root":"0xda73ded9.."}
+(pass) audit fail-fast regressions > selected equal-nonce LEFT finality adopts N instead of inventing N+1 [28.40ms]
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x1212121212121212121212121212121212121212121212121212121212121212","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x3434343434343434343434343434343434343434343434343434343434343434","status":"disputed"}
+[INFO][j.event] dispute_finalized.applied {"block":22,"broadcastQueued":false,"counterparty":"3434","entity":"1212","ownSentBatchWillAck":false,"removedDraft":0,"removedRecovery":0,"removedSent":0,"sender":"1212"}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"1","range":"1-22","root":"0xda73ded9.."}
+(pass) audit fail-fast regressions > DisputeFinalized accepts a winning body that is not our committed state [28.13ms]
+(pass) audit fail-fast regressions > DisputeFinalized rejects malformed token/offdelta shape instead of clearing every delta [27.54ms]
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x1212121212121212121212121212121212121212121212121212121212121212","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x3434343434343434343434343434343434343434343434343434343434343434","status":"disputed"}
+[INFO][j.event] dispute_finalized.applied {"block":22,"broadcastQueued":false,"counterparty":"3434","entity":"1212","ownSentBatchWillAck":false,"removedDraft":0,"removedRecovery":0,"removedSent":0,"sender":"1212"}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"1","range":"1-22","root":"0x937eb158.."}
+(pass) audit fail-fast regressions > DisputeFinalized clears every frozen proof token and retires offchain fields [30.98ms]
+1080 |     fixture.account.state.settlementWorkspace!.settlementHash = `0x${'81'.repeat(32)}`;
+1081 |     fixture.account.mempool.push(structuredClone(upsertTx));
+1082 |     fixture.state.deferredAccountProposals = new Map([
+1083 |       [fixture.counterpartyId, fixture.account.state.settlementWorkspace!.workspaceHash],
+1084 |     ]);
+1085 |     expect(fixture.account.state.deltas.get(1)?.leftHold).toBe(4n);
+                                                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 4n
+Received: 0n
+
+      at <anonymous> (/Users/zigota/xln/core/__tests__/testing/audit/audit-failfast-regressions-part-5.test.ts:1085:59)
+(fail) audit fail-fast regressions > DisputeFinalized invalidates a competing settlement workspace and its deferred retry [28.79ms]
+(pass) audit fail-fast regressions > disputeFinalize waits for on-chain DisputeStarted before drafting a finalization [26.68ms]
+(pass) audit fail-fast regressions > disputeFinalize uses signed counter-proof and counter starter arguments when a newer proof is available [29.05ms]
+(pass) audit fail-fast regressions > auto-approved settlement nonce outranks stale high-nonce dispute proofs [33.60ms]
+(pass) audit fail-fast regressions > settlement finalization activates post-settlement dispute hash atomically [0.87ms]
+(pass) audit fail-fast regressions > disputeStart rejects unsupported counter argument override instead of silently ignoring it [25.88ms]
+(pass) audit fail-fast regressions > j_rebroadcast resubmits the exact sent batch without mutating ops [27.62ms]
+[INFO][entity] input.received {"entity":"0xaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae","frame":"none","jPrefixAttestations":0,"mempool":0,"precommits":0,"proposal":"none","proposer":true,"signer":"1","ts":0,"txs":["j_rebroadcast"]}
+(pass) audit fail-fast regressions > j_rebroadcast refuses a terminally failed sent batch instead of retrying the same bad tx [27.46ms]
+(pass) audit fail-fast regressions > htlc_lock refuses to add more than the configured per-account cap [0.17ms]
+(pass) audit fail-fast regressions > cross-j committed cross_pull_close followup rejects malformed binary instead of skipping it [26.03ms]
+
+core/__tests__/testing/audit/audit-failfast-regressions-part-4.test.ts:
+(pass) audit fail-fast regressions > entity validator signs only the secondary hash manifest emitted by local replay [49.80ms]
+(pass) audit fail-fast regressions > entity catch-up commit rejects a secondary hash not emitted by local replay [29.61ms]
+(pass) audit fail-fast regressions > swap_offer refuses to add more than the configured per-account cap [0.22ms]
+[INFO][account] proposal.profile {"counterparty":"6353f908","entity":"499ae2d1","height":1,"optimisticBatch":false,"phases":[{"ms":0,"name":"admission"},{"ms":18980,"name":"validateTxs"},{"ms":0,"name":"stateRoot"},{"ms":6,"name":"frameHash"},{"ms":0,"name":"frameValidation"},{"ms":0,"name":"disputeProof"},{"ms":5,"name":"finalize"},{"ms":0,"name":"remainder"}],"stateRoot":{},"totalMs":18991,"txTypes":["add_delta"],"txs":10000}
+(pass) audit fail-fast regressions > proposeAccountFrame accepts the configured maximum transaction count [19024.88ms]
+(pass) audit fail-fast regressions > proposeAccountFrame bundles the last outbound ACK into the next frame for loss recovery [35.59ms]
+(pass) audit fail-fast regressions > credit-limit-only frame reuses unchanged on-chain dispute proof [33.96ms]
+(pass) audit fail-fast regressions > consumed dispute proof nonce reseals current state without historical evidence caches [31.34ms]
+(pass) audit fail-fast regressions > account frame property matrix preserves explicit zero jHeight through receive, replay, and ACK commit [886.00ms]
+(pass) audit fail-fast regressions > account storage keeps last outbound ACK so restored runtimes can bundle the next frame [0.09ms]
+(pass) audit fail-fast regressions > expired HTLC never rolls back its signed pending Account frame [26.08ms]
+(pass) audit fail-fast regressions > restored Account resolves its counterparty proposer from the certified frame Hanko without gossip [28.02ms]
+(pass) audit fail-fast regressions > restored pending frame validates its exact cached input without automatic resend [27.46ms]
+(pass) audit fail-fast regressions > applyAccountInput re-acks duplicate committed frames when the original ACK was lost [30.73ms]
+(pass) audit fail-fast regressions > Entity flush batches ACK and successor without mutating live Entity replicas [33.37ms]
+(pass) audit fail-fast regressions > duplicate committed frame returns ACK only and never re-carries a pending proposal [31.89ms]
+[WARN][account.replay] input.duplicate_ack_rebuilt {"currentHeight":10,"from":"9ca6","height":10}
+(pass) audit fail-fast regressions > applyAccountInput rebuilds ACK when duplicate cache was lost [31.40ms]
+(pass) audit fail-fast regressions > applyAccountInput accepts only the exact authenticated ACK of the current frame [31.68ms]
+(pass) audit fail-fast regressions > applyAccountInput rejects a non-current ACK after dispute freeze clears pending frame [29.79ms]
+(pass) audit fail-fast regressions > applyAccountInput rejects an ACK for a frame that was never locally proposed [29.34ms]
+[WARN][account] frame.state_root_mismatch {"height":1,"lastFinalizedJHeight":0,"leftPendingJClaims":{"count":{"__xlnType":"BigInt","value":"0"},"root":"0x28d6270b93b646f63b2ecec1cc811a6a27b0916954b6211a214379f8cc25c5c2","version":1},"localAccountStateRoot":"0x057952a03786e2d930f67a7c03d6a85ad50335e0992187ecb1bfc793c245eb49","localAccountStateSectionHashes":{"commitments":"0x4117d70472a839d0ba5b01ee9cbbb52ef971267cb7441fa0ab128728eac946a9","financial":"0x57574e59cc618cce3119181de15a884e43d1c63a331d4c212d301b741c119711","identity":"0xf9f8181279b166ee548ac95956a7a649bc630109b33fc22477ca56c1decc0b78","jurisdiction":"0x7bccc58b1259ef66590e21ecf46e9ed8389a1cd6a0dead3c41015cc88b52a99e","rebalance":"0x197c7ecea3ca31b62db990ce3e3fd269b6ed6be26a8c0d250a2b74cb6b3b1a0c"},"receivedAccountStateRoot":"0xbdf723678c36931d1ebf59055c356fa804016a71bb0e1ef04351706e93deadb7","rightPendingJClaims":{"count":{"__xlnType":"BigInt","value":"0"},"root":"0x28d6270b93b646f63b2ecec1cc811a6a27b0916954b6211a214379f8cc25c5c2","version":1},"txs":["set_credit_limit"]}
+(pass) audit fail-fast regressions > applyAccountInput rejects a signed LEFT proposal claiming its own LEFT credit limit changed [30.46ms]
+(pass) audit fail-fast regressions > applyAccountInput rejects dispute Hanko hash mismatch before committing frame [30.14ms]
+(pass) audit fail-fast regressions > invalid simultaneous proposal cannot roll back the pending frame [31.59ms]
+(pass) audit fail-fast regressions > LEFT always wins a valid same-height collision regardless of settlement evidence [30.80ms]
+(pass) audit fail-fast regressions > deadline rejection preserves the complete live Account and warmed commitment cache [32.30ms]
+
+core/__tests__/testing/audit/audit-failfast-regressions-part-6.test.ts:
+(pass) audit fail-fast regressions > cross-j fill ack admission secondary index requires matching route hash [25.03ms]
+(pass) audit fail-fast regressions > committed cross-j output is independent of Runtime topology [0.07ms]
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9090909090909090909090909090909090909090909090909090909090909090","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x9191919191919191919191919191919191919191919191919191919191919191","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9090909090909090909090909090909090909090909090909090909090909090","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x9191919191919191919191919191919191919191919191919191919191919191","status":"dispute_preparing"}
+[ERROR][entity.dispute] start.hanko_missing {"counterparty":"9191"}
+(pass) audit fail-fast regressions > prepareDispute removes same-account orderbook rows before disputeStart [26.82ms]
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9292929292929292929292929292929292929292929292929292929292929292","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x9393939393939393939393939393939393939393939393939393939393939393","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9292929292929292929292929292929292929292929292929292929292929292","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x9393939393939393939393939393939393939393939393939393939393939393","status":"dispute_preparing"}
+[ERROR][entity.dispute] start.hanko_missing {"counterparty":"9393"}
+(pass) audit fail-fast regressions > prepareDispute routes remote cross-j removal from the committed book signer [26.54ms]
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9292929292929292929292929292929292929292929292929292929292929292","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x9393939393939393939393939393939393939393939393939393939393939393","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9292929292929292929292929292929292929292929292929292929292929292","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x9393939393939393939393939393939393939393939393939393939393939393","status":"dispute_preparing"}
+[ERROR][entity.dispute] start.hanko_missing {"counterparty":"9393"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9292929292929292929292929292929292929292929292929292929292929292","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x9393939393939393939393939393939393939393939393939393939393939393","status":"dispute_preparing"}
+[ERROR][entity.dispute] start.hanko_missing {"counterparty":"9393"}
+(pass) audit fail-fast regressions > prepareDispute freezes account and removes orderbook rows without queuing on-chain disputeStart [25.82ms]
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9494949494949494949494949494949494949494949494949494949494949494","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x9595959595959595959595959595959595959595959595959595959595959595","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9494949494949494949494949494949494949494949494949494949494949494","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x9595959595959595959595959595959595959595959595959595959595959595","status":"dispute_preparing"}
+[ERROR][entity.dispute] start.hanko_missing {"counterparty":"9595"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9494949494949494949494949494949494949494949494949494949494949494","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x9595959595959595959595959595959595959595959595959595959595959595","status":"dispute_preparing"}
+[ERROR][entity.dispute] start.hanko_missing {"counterparty":"9595"}
+(pass) audit fail-fast regressions > disputeStart freezes optimistic traffic and treats an unknown HTLC secret as optional evidence [25.24ms]
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9494949494949494949494949494949494949494949494949494949494949494","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x9696969696969696969696969696969696969696969696969696969696969696","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9494949494949494949494949494949494949494949494949494949494949494","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x9696969696969696969696969696969696969696969696969696969696969696","status":"dispute_preparing"}
+[ERROR][entity.dispute] start.hanko_missing {"counterparty":"9696"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9494949494949494949494949494949494949494949494949494949494949494","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x9696969696969696969696969696969696969696969696969696969696969696","status":"dispute_preparing"}
+[ERROR][entity.dispute] start.hanko_missing {"counterparty":"9696"}
+(pass) audit fail-fast regressions > disputeStart ignores stale HTLC routes whose live lock is already gone [24.84ms]
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9696969696969696969696969696969696969696969696969696969696969696","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":["swap_resolve"],"rightEntity":"0x9797979797979797979797979797979797979797979797979797979797979797","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9696969696969696969696969696969696969696969696969696969696969696","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":["swap_resolve"],"rightEntity":"0x9797979797979797979797979797979797979797979797979797979797979797","status":"dispute_preparing"}
+[ERROR][entity.dispute] start.hanko_missing {"counterparty":"9797"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9696969696969696969696969696969696969696969696969696969696969696","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":["swap_resolve"],"rightEntity":"0x9797979797979797979797979797979797979797979797979797979797979797","status":"dispute_preparing"}
+[ERROR][entity.dispute] start.hanko_missing {"counterparty":"9797"}
+(pass) audit fail-fast regressions > disputeStart folds evidence tx mempool into dispute arguments instead of blocking [25.35ms]
+[INFO][account] proposal.frame_create {"frameMax":10000,"mempool":1,"txs":["cross_pull_close"]}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9624d8eede5ca26e361a4fb003ab7cbc86f2759ac31ce108b900721450f63a2b","restoredPendingEvidence":["cross_pull_close"],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":["cross_pull_close"],"rightEntity":"0xabababababababababababababababababababababababababababababababab","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9624d8eede5ca26e361a4fb003ab7cbc86f2759ac31ce108b900721450f63a2b","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":["cross_pull_close"],"rightEntity":"0xabababababababababababababababababababababababababababababababab","status":"dispute_preparing"}
+[ERROR][entity.dispute] start.hanko_missing {"counterparty":"abab"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9624d8eede5ca26e361a4fb003ab7cbc86f2759ac31ce108b900721450f63a2b","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":["cross_pull_close"],"rightEntity":"0xabababababababababababababababababababababababababababababababab","status":"dispute_preparing"}
+[ERROR][entity.dispute] start.hanko_missing {"counterparty":"abab"}
+(pass) audit fail-fast regressions > disputeStart treats pending cross_pull_close as foldable dispute evidence [27.98ms]
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x9898989898989898989898989898989898989898989898989898989898989898","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x9999999999999999999999999999999999999999999999999999999999999999","status":"disputed"}
+[INFO][account.handler] input.dropped_frozen_account {"ack":false,"counterparty":"9999","height":1,"txs":["set_credit_limit"]}
+(pass) audit fail-fast regressions > disputeFinalize queues the exact proof despite unknown HTLC evidence and stale optimistic traffic [28.00ms]
+
+core/__tests__/testing/audit/audit-failfast-regressions-part-2.test.ts:
+[WARN][account.preflight] frame.stale_accepted {"collateralPriorityRisk":false,"height":1,"staleByMs":600000,"txs":["set_credit_limit"]}
+(pass) audit fail-fast regressions > signed non-deadline account frame remains valid after a ten-minute outage [33.72ms]
+(pass) audit fail-fast regressions > Entity flush batches a committed peer J-claim ACK with the local claim [36.58ms]
+(pass) audit fail-fast regressions > account frame structure rejects future skew but permits old and regressed signed frames [0.04ms]
+(pass) audit fail-fast regressions > HTLC secret enforcement reserve closes on either entity time or finalized J-height [0.03ms]
+(pass) audit fail-fast regressions > late invalid HTLC preimage never becomes dispute evidence [0.11ms]
+[INFO][account.dispute-policy] freeze {"leftEntity":"0xa9fffaba4811cc02fb5481714e0e9b16897677e908d9bb18aa75d096f7920bfe","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0xed10f040b62f9af46eba93094a8c6ba0d76cd513bf18eef94e896375795b5b96","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0xa9fffaba4811cc02fb5481714e0e9b16897677e908d9bb18aa75d096f7920bfe","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0xed10f040b62f9af46eba93094a8c6ba0d76cd513bf18eef94e896375795b5b96","status":"dispute_preparing"}
+[ERROR][entity.dispute] start.hanko_missing {"counterparty":"0bfe"}
+695 |       secretAckStartedAt: env.state.timestamp,
+696 |       secretAckDeadlineAt: env.state.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS,
+697 |     });
+698 |     expect(
+699 |       collectDerivedDeadlines(applied.newState).find((deadline) => deadline.id === `htlc-secret-ack:${hashlock}`),
+700 |     ).toEqual({
+            ^
+error: expect(received).toEqual(expected)
+
+- {
+-   "data": {
+-     "counterpartyEntityId": "0x7373737373737373737373737373737373737373737373737373737373737373",
+-     "hashlock": "0x67dc28c71bfb8c2fca69257c4b39fa99fb989eacb0d5be0f112fd2711fe469a6",
+-   },
+-   "id": "htlc-secret-ack:0x67dc28c71bfb8c2fca69257c4b39fa99fb989eacb0d5be0f112fd2711fe469a6",
+-   "triggerAt": 130000,
+-   "type": "htlc_secret_ack_timeout",
+- }
++ undefined
+
+- Expected  - 9
++ Received  + 1
+
+      at <anonymous> (/Users/zigota/xln/core/__tests__/testing/audit/audit-failfast-regressions-part-2.test.ts:700:7)
+(fail) audit fail-fast regressions > late signed HTLC secret is retained as evidence and prepares a dispute [33.57ms]
+[INFO][account.dispute-policy] freeze {"leftEntity":"0xa4e28a8a5a2cd678878343d7f8fae7b71db0dad5d0096b0d28506c94ff5baaa8","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0xbf9c18d63b3fb8e04d8e69cecf9adc080196271789b916497fce93c6c5ebc8ce","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0xa4e28a8a5a2cd678878343d7f8fae7b71db0dad5d0096b0d28506c94ff5baaa8","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0xbf9c18d63b3fb8e04d8e69cecf9adc080196271789b916497fce93c6c5ebc8ce","status":"dispute_preparing"}
+[ERROR][entity.dispute] start.hanko_missing {"counterparty":"aaa8"}
+(pass) audit fail-fast regressions > signed deterministic replay failure freezes only the account and retains evidence [31.37ms]
+[WARN][account.settle] workspace.transition_rejected {"error":"SETTLEMENT_HANKO_NONCE_MISMATCH:8:9:j=0:next=9:local=0:peer=0","kind":"hanko"}
+[WARN][account] frame.stale_settlement_hanko_rejected {"error":"Frame application failed: SETTLEMENT_HANKO_NONCE_MISMATCH:8:9:j=0:next=9:local=0:peer=0","height":1}
+[WARN][account.settle] workspace.transition_rejected {"error":"SETTLEMENT_HANKO_NONCE_MISMATCH:8:9:j=0:next=9:local=0:peer=0","kind":"hanko"}
+[WARN][account] frame.stale_settlement_hanko_rejected {"error":"Frame application failed: SETTLEMENT_HANKO_NONCE_MISMATCH:8:9:j=0:next=9:local=0:peer=0","height":1}
+[WARN][entity.tx] skipped_error {"error":"ENTITY_FRAME_TX_FAILED: type=accountInput error=ACCOUNT_INPUT_INPUT_REJECTED:ACCOUNT_INPUT_FRAME_STALE_SETTLEMENT_HANKO:Frame application failed: SETTLEMENT_HANKO_NONCE_MISMATCH:8:9:j=0:next=9:local=0:peer=0","type":"accountInput"}
+(pass) audit fail-fast regressions > signed stale settlement Hanko is rejected without mutating or disputing the account [32.24ms]
+(pass) audit fail-fast regressions > receiver-local preflight rejects stale creation of unenforceable HTLC locks [0.04ms]
+(pass) audit fail-fast regressions > receiver-local preflight does not wall-clock-gate cross-j pull close [0.38ms]
+(pass) audit fail-fast regressions > receiver-local preflight blocks payer HTLC timeout using future peer J-height [0.08ms]
+(pass) audit fail-fast regressions > incoming HTLC mutation uses the same Entity enforcement clock as preflight [0.56ms]
+(pass) audit fail-fast regressions > receiver-local preflight follows HTLC transitions before checking reused ids [0.06ms]
+[WARN][account] frame.validation_failed {"rejection":{"code":"ACCOUNT_TX_VALIDATION","kind":"validation","message":"Payment delivery mode must be direct or trusted"},"txType":"direct_payment"}
+(pass) audit fail-fast regressions > failed account tx mutations do not leak into later valid txs in the same proposal [28.61ms]
+(pass) audit fail-fast regressions > proposer and receiver use the exact Entity frame timestamp for pull state [28.82ms]
+[INFO][account] proposal.frame_create {"frameMax":10000,"mempool":1,"txs":["set_credit_limit"]}
+[INFO][account] proposal.frame_create {"frameMax":10000,"mempool":1,"txs":["set_credit_limit"]}
+(pass) audit fail-fast regressions > nested Account proposal accepts a future committed Entity timestamp across validator ticks [30.04ms]
+(pass) audit fail-fast regressions > profile update preserves the committed Entity timestamp across validator ticks [48.69ms]
+(pass) audit fail-fast regressions > r2c quote expiry uses the committed Entity timestamp across validator ticks [49.44ms]
+[ERROR][entity.tx] failed_invariant {"error":"OPEN_ACCOUNT_WATCH_SEED_REQUIRED","type":"openAccount"}
+(pass) audit fail-fast regressions > openAccount rejects an unmaterialized watch seed and replays the signed seed identically [53.77ms]
+(pass) audit fail-fast regressions > proposeAccountFrame throws instead of dropping invalid cross-j pull close [25.47ms]
+(pass) audit fail-fast regressions > proposeAccountFrame throws instead of dropping invalid cross-j swap offer [25.03ms]
+[WARN][account] frame.validation_failed {"rejection":{"code":"ACCOUNT_TX_VALIDATION","kind":"validation","message":"Payment delivery mode must be direct or trusted"},"txType":"direct_payment"}
+(pass) audit fail-fast regressions > proposeAccountFrame keeps valid swap_resolve txs when optimistic batch validation falls back [27.30ms]
+(pass) audit fail-fast regressions > same-chain offers match and queue both resolves in one hub Entity frame [33.97ms]
+(pass) audit fail-fast regressions > entity frame commits mark the entity core doc dirty for storage replay [206.43ms]
+[ERROR][entity.tx] failed_invariant {"error":"dispatcher is not a function. (In 'dispatcher(env, entityState, entityTx, {\n      ...options,\n      accountConsensusContext: options?.accountConsensusContext ?? createAccountConsensusContext(env, void 0, entityState),\n      storageChanges: reducerStorageChanges,\n      candidateEffects: reducerCandidateEffects\n    })', 'dispatcher' is undefined)","type":"__unknown__"}
+(pass) audit fail-fast regressions > entity reducers return exact storage changes and invalidate account Merkle cache only after success [32.66ms]
+(pass) audit fail-fast regressions > crontab-only canonical mutations stay local until Entity frame commit [31.24ms]
+(pass) audit fail-fast regressions > single-signer j_broadcast attaches consensus hanko to J batch output [35.44ms]
+
+core/__tests__/testing/audit/audit-failfast-regressions-part-3.test.ts:
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x3434343434343434343434343434343434343434343434343434343434343434","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0xf4c1a732617ef39784a98d334e1d6b3d8af9caaaa1fdc17041de020f1272f698","status":"disputed"}
+[INFO][j.event] dispute_finalized.applied {"block":22,"broadcastQueued":false,"counterparty":"3434","entity":"f698","ownSentBatchWillAck":false,"removedDraft":0,"removedRecovery":0,"removedSent":0,"sender":"f698"}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"d148","range":"1-22","root":"0xc27b400c.."}
+(pass) audit fail-fast regressions > finalized j-events mark mutated account docs dirty for storage replay [40.14ms]
+(pass) audit fail-fast regressions > j_abort_sent_batch does not requeue dispute finalize after on-chain finalize already cleared activeDispute [24.98ms]
+(pass) audit fail-fast regressions > j_abort_sent_batch never resurrects dispute finalize into current batch [26.09ms]
+[Boot] RPC http://127.0.0.1:64218 unavailable, auto-starting local anvil (chainId=31337, port=64218)
+[JAdapter] Mode: rpc (http://127.0.0.1:64218), chainId=31337
+[INFO][jadapter.rpc] contracts.deploy.start {"chainId":31337}
+[INFO][jadapter.rpc] contracts.deploy.ready {"account":"0x5FbDB2315678afecb367f032d93F642f64180aa3","chainId":31337,"deltaTransformer":"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9","depository":"0xa513E6E4b8f2a923D98304ec87F64353C4D5C853","entityProvider":"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0","tokens":["USDC","WETH","USDT"]}
+📤 [JAdapter:rpc] submitTx type=batch entity=7321
+[ERROR][runtime.jsubmit] tx.submit_failed {"entityId":"7321","error":"AggregateError","jurisdictionName":"Testnet","type":"batch"}
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0x63d94bf3e875ab4ff74b3c6c9e9ea1382dca98641c307ab12eff68c2fc859be7","entityId":"7321","jurisdictionName":"Testnet","outcome":"transientFailure"}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+(pass) audit fail-fast regressions > submitRuntimeJOutbox queues a durable transient result without poisoning Entity consensus [601.01ms]
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] processBatch: calling contract with hanko (nonce=1)...
+[BrowserVM] processBatch revert: {"error":"revert","errorType":"EVMError"}
+  returnData: 0x88d0662b
+  revertReason: E5()
+[BrowserVM] Hanko entity=0xb2af9be2..., nonce=1 expectedNext=1
+[BrowserVM] Batch summary: {"counterDisputes":{"count":0,"sample":null},"disputeFinalizations":{"count":1,"sample":{"cooperative":false,"counterentity":"0xbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd","finalNonce":0,"finalProofbody":{"leftResponseSeconds":10,"offdeltas":[],"rightResponseSeconds":10,"tokenIds":[],"transformers":[],"watchSeed":"0xf1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1"},"initialNonce":0,"initialProofbodyHash":"0x0000000000000000000000000000000000000000000000000000000000000000","otherArguments":"0x","proposerIsLeft":true,"sig":"0x","startedByLeft":true,"starterArguments":"0x"}},"disputeStarts":{"count":0,"sample":null},"externalTokenToReserve":{"count":0,"sample":null},"hashLadderRegistrations":{"count":0,"sample":null},"reserveToCollateral":{"count":0,"sample":null},"reserveToExternalToken":{"count":0,"sample":null},"reserveToReserve":{"count":0,"sample":null},"revealSecrets":{"count":0,"sample":null},"settlements":{"count":0,"sample":null}}
+[ERROR][runtime.jsubmit] tx.submit_failed {"entityId":"4796","error":"Batch processing failed: revert (E5())","jurisdictionName":"Testnet","type":"batch"}
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0x69f7d6ab8c224f6ef506a54b2faa620db48a5a45d6a047475b0518b4b7568859","entityId":"4796","jurisdictionName":"Testnet","outcome":"terminalFailure"}
+(pass) audit fail-fast regressions > submitRuntimeJOutbox never reads contract account state to reconcile a dispute batch [170.23ms]
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] processBatch: calling contract with hanko (nonce=1)...
+[BrowserVM] processBatch revert: {"error":"revert","errorType":"EVMError"}
+  returnData: 0x88d0662b
+  revertReason: E5()
+[BrowserVM] Hanko entity=0xb2af9be2..., nonce=1 expectedNext=1
+[BrowserVM] Batch summary: {"counterDisputes":{"count":0,"sample":null},"disputeFinalizations":{"count":1,"sample":{"cooperative":false,"counterentity":"0xbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd","finalNonce":0,"finalProofbody":{"leftResponseSeconds":10,"offdeltas":[],"rightResponseSeconds":10,"tokenIds":[],"transformers":[],"watchSeed":"0xf1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1"},"initialNonce":0,"initialProofbodyHash":"0x0000000000000000000000000000000000000000000000000000000000000000","otherArguments":"0x","proposerIsLeft":true,"sig":"0x","startedByLeft":true,"starterArguments":"0x"}},"disputeStarts":{"count":0,"sample":null},"externalTokenToReserve":{"count":0,"sample":null},"hashLadderRegistrations":{"count":0,"sample":null},"reserveToCollateral":{"count":0,"sample":null},"reserveToExternalToken":{"count":0,"sample":null},"reserveToReserve":{"count":0,"sample":null},"revealSecrets":{"count":0,"sample":null},"settlements":{"count":0,"sample":null}}
+[ERROR][runtime.jsubmit] tx.submit_failed {"entityId":"4796","error":"Batch processing failed: revert (E5())","jurisdictionName":"Testnet","type":"batch"}
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0x69f7d6ab8c224f6ef506a54b2faa620db48a5a45d6a047475b0518b4b7568859","entityId":"4796","jurisdictionName":"Testnet","outcome":"terminalFailure"}
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] Funded 0x968ffd55... with 2 of token 1
+[BrowserVM] debugFundReserves: logs=1
+🔊 [BrowserVM] emitEvents ENTRY: raw logs=1, callbacks=0
+🔊 [BrowserVM] emitEvents: parsed 1 events
+   📣 EVENT: ReserveUpdated | {"entity":"0x968ffd557496232cb355d83fc7291af7f5897d0866db544f277f9959a1a6e44a","
+[BrowserVM] processBatch: calling contract with hanko (nonce=1)...
+[BrowserVM] processBatch raw logs: 3
+   Log 0: topics=3, data=32 bytes
+   Log 1: topics=3, data=32 bytes
+   Log 2: topics=3, data=32 bytes
+🔊 [BrowserVM] emitEvents ENTRY: raw logs=3, callbacks=0
+🔊 [BrowserVM] emitEvents: parsed 2 events
+   📣 EVENT: ReserveUpdated | {"entity":"0x968ffd557496232cb355d83fc7291af7f5897d0866db544f277f9959a1a6e44a","
+   📣 EVENT: HankoBatchProcessed | {"batchHash":"0xd892f14473ff6eed230bd9f09d44cc044cf201101b24f3cc485b62404b7b3662
+[BrowserVM] ✅ Batch processed: 2 events
+   - ReserveUpdated
+   - HankoBatchProcessed
+✅ [JAdapter:browservm] Batch executed (1 ops) block=23
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0xec2ba374ffae3eea230dd281629568985dbabf49dd778b02f52e963a00406b29","entityId":"e44a","jurisdictionName":"Testnet","outcome":"submitted"}
+(pass) audit fail-fast regressions > submitRuntimeJOutbox classifies submit results without reading contract finality [185.94ms]
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] processBatch: calling contract with hanko (nonce=1)...
+[BrowserVM] processBatch revert: {"error":"revert","errorType":"EVMError"}
+  returnData: 0x88d0662b
+  revertReason: E5()
+[BrowserVM] Hanko entity=0xb2af9be2..., nonce=1 expectedNext=1
+[BrowserVM] Batch summary: {"counterDisputes":{"count":0,"sample":null},"disputeFinalizations":{"count":1,"sample":{"cooperative":false,"counterentity":"0xbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd","finalNonce":0,"finalProofbody":{"leftResponseSeconds":10,"offdeltas":[],"rightResponseSeconds":10,"tokenIds":[],"transformers":[],"watchSeed":"0xf1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1"},"initialNonce":0,"initialProofbodyHash":"0x0000000000000000000000000000000000000000000000000000000000000000","otherArguments":"0x","proposerIsLeft":true,"sig":"0x","startedByLeft":true,"starterArguments":"0x"}},"disputeStarts":{"count":0,"sample":null},"externalTokenToReserve":{"count":0,"sample":null},"hashLadderRegistrations":{"count":0,"sample":null},"reserveToCollateral":{"count":0,"sample":null},"reserveToExternalToken":{"count":0,"sample":null},"reserveToReserve":{"count":0,"sample":null},"revealSecrets":{"count":0,"sample":null},"settlements":{"count":0,"sample":null}}
+[ERROR][runtime.jsubmit] tx.submit_failed {"entityId":"4796","error":"Batch processing failed: revert (E5())","jurisdictionName":"Testnet","type":"batch"}
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0x69f7d6ab8c224f6ef506a54b2faa620db48a5a45d6a047475b0518b4b7568859","entityId":"4796","jurisdictionName":"Testnet","outcome":"terminalFailure"}
+(pass) audit fail-fast regressions > submitRuntimeJOutbox keeps E5 fatal without matching finalized-dispute evidence [71.70ms]
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] processBatch: calling contract with hanko (nonce=1)...
+[BrowserVM] processBatch revert: {"error":"revert","errorType":"EVMError"}
+  returnData: 0xbf608974
+  revertReason: E3()
+[BrowserVM] Hanko entity=0x3bde420f..., nonce=1 expectedNext=1
+[BrowserVM] Batch summary: {"counterDisputes":{"count":0,"sample":null},"disputeFinalizations":{"count":0,"sample":null},"disputeStarts":{"count":0,"sample":null},"externalTokenToReserve":{"count":0,"sample":null},"hashLadderRegistrations":{"count":0,"sample":null},"reserveToCollateral":{"count":0,"sample":null},"reserveToExternalToken":{"count":1,"sample":{"amount":{"__xlnType":"BigInt","value":"1"},"receivingEntity":"0x000000000000000000000000dcfafabfc4ce8d87e4efc64997031b9591682850","tokenId":1}},"reserveToReserve":{"count":0,"sample":null},"revealSecrets":{"count":0,"sample":null},"settlements":{"count":0,"sample":null}}
+[ERROR][runtime.jsubmit] tx.submit_failed {"entityId":"0546","error":"Batch processing failed: revert (E3())","jurisdictionName":"Testnet","type":"batch"}
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0xac5e71d81b987a53921740d06ef612e2c3c11e4d275078bd9d12384daaa15cd5","entityId":"0546","jurisdictionName":"Testnet","outcome":"terminalFailure"}
+(pass) audit fail-fast regressions > submitRuntimeJOutbox queues terminal staticCall result without mutating Entity consensus [103.50ms]
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[WARN][runtime.jsubmit] sealed_batch.non_local_skipped {"entityId":"aeae","runtime":"11111111","signer":"22222222"}
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0x091821b8fd23c2dcfc08755689ef522f23b454bbff3aa0dedd306a3fd306acbd","entityId":"aeae","jurisdictionName":"Testnet","outcome":"terminalFailure"}
+(pass) audit fail-fast regressions > submitRuntimeJOutbox skips sealed batches owned by another runtime signer [82.20ms]
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] Funded 0xf6a10445... with 2 of token 1
+[BrowserVM] debugFundReserves: logs=1
+🔊 [BrowserVM] emitEvents ENTRY: raw logs=1, callbacks=0
+🔊 [BrowserVM] emitEvents: parsed 1 events
+   📣 EVENT: ReserveUpdated | {"entity":"0xf6a10445438eea06f1d78b23b867c8c92a61789bc72017dd3aa33dd66cbe22a0","
+[BrowserVM] processBatch: calling contract with hanko (nonce=1)...
+[BrowserVM] processBatch raw logs: 3
+   Log 0: topics=3, data=32 bytes
+   Log 1: topics=3, data=32 bytes
+   Log 2: topics=3, data=32 bytes
+🔊 [BrowserVM] emitEvents ENTRY: raw logs=3, callbacks=0
+🔊 [BrowserVM] emitEvents: parsed 2 events
+   📣 EVENT: ReserveUpdated | {"entity":"0xf6a10445438eea06f1d78b23b867c8c92a61789bc72017dd3aa33dd66cbe22a0","
+   📣 EVENT: HankoBatchProcessed | {"batchHash":"0x8acd5c6a0334e29e53c8c73607a1c9ddbc577e3af6a05cd435e87fed36e8bcd2
+[BrowserVM] ✅ Batch processed: 2 events
+   - ReserveUpdated
+   - HankoBatchProcessed
+✅ [JAdapter:browservm] Batch executed (1 ops) block=23
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0x9e971a53ebcfa16bbf3bd319750b64cf3ec333697bc6e78988d7e492848bc762","entityId":"22a0","jurisdictionName":"Testnet","outcome":"submitted"}
+(pass) audit fail-fast regressions > submitRuntimeJOutbox submits RuntimeReplica-local multi-signer batches even when runtimeId differs [94.26ms]
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4905415
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[INFO][runtime.jsubmit] tx.result_queued {"attemptId":"0xda4407bccd9b7ffc42f22b5af74b4e712fc22dfacde4dcc5e0d585c2b601040b","entityId":"acac","jurisdictionName":"Testnet","outcome":"terminalFailure"}
+(pass) audit fail-fast regressions > submitRuntimeJOutbox rejects non-empty consensus batch before adapter when hanko is missing [83.94ms]
+(pass) audit fail-fast regressions > request_collateral checks prepaid fee against derived outCapacity [0.22ms]
+(pass) audit fail-fast regressions > request_collateral keeps an existing pending request immutable [0.05ms]
+(pass) audit fail-fast regressions > auto-rebalance never tops up an existing pending request [0.16ms]
+(pass) audit fail-fast regressions > auto-rebalance fee policy ignores live sibling topology [28.29ms]
+(pass) audit fail-fast regressions > explicit rebalance policy AccountTx binds the snapshot to proposer side and token [1.08ms]
+(pass) audit fail-fast regressions > rebalance policy rejects non-bigint fee terms before mutating Account state [0.14ms]
+(pass) audit fail-fast regressions > auto-rebalance output order survives compact storage map canonicalization [0.80ms]
+[INFO][entity.tx.account-admin] hub_config.updated {"entity":"1616","feePolicyChanged":true,"matchingStrategy":"amount","policyVersion":4,"routingFeePPM":1,"swapTakerFeeBps":0}
+(pass) audit fail-fast regressions > setHubConfig publishes an explicit fee policy into every established Account lane [25.82ms]
+(pass) audit fail-fast regressions > bilateral rebalance policies survive compact storage decode with strict shape validation [0.58ms]
+(pass) audit fail-fast regressions > post-frame auto-rebalance uses explicit owner role and committed exact fees [52.44ms]
+(pass) audit fail-fast regressions > private rebalance policy immediately queues collateral for existing exposure [24.41ms]
+(pass) audit fail-fast regressions > auto-rebalance does not top up pending request fee when liquidity fee grows [0.08ms]
+(pass) audit fail-fast regressions > entity proposal fails fast when prevFrameHash is missing above genesis [29.11ms]
+(pass) audit fail-fast regressions > entity mempool admission rejects overflow before clone and push [26.49ms]
+(pass) audit fail-fast regressions > rejected remote entity input creates neither applied receipt nor route hint [25.57ms]
+[WARN][entity] commit.catch_up_state_replayed {"frame":"0x334717d0..","height":1}
+(pass) audit fail-fast regressions > entity commit catch-up derives committed state only from local replay [33.96ms]
+
+core/__tests__/testing/audit/audit-failfast-regressions-part-1.test.ts:
+[network] ROUTE_TARGET_RUNTIME_UNKNOWN {
+  entityId: "0x2222222222222222222222222222222222222222222222222222222222222222",
+  txTypes: [ "registerCrossJurisdictionSwap" ],
+  output: {
+    entityId: "0x2222222222222222222222222222222222222222222222222222222222222222",
+    signerId: "0x0202020202020202020202020202020202020202",
+    sourceRuntimeFrame: {
+      height: 0,
+      timestamp: 0,
+    },
+    entityTxs: [
+      [Object ...]
+    ],
+  },
+}
+(pass) audit fail-fast regressions > cross-j system entity txs reject every raw ingress outside committed runtimeOutput [26.43ms]
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN: Cross-j Entity inputs require a committed authenticated runtimeOutput envelope {\"entityId\":\"0x1111111111111111111111111111111111111111111111111111111111111111\",\"from\":\"0x9999999999999999999999999999999999999999\",\"txTypes\":[\"prepareCrossJurisdictionSwap\"]}","discardedInputs":1,"entityId":"0x1111111111111111111111111111111111111111111111111111111111111111","rejectedInputsDump":"[{\"entityId\":\"0x1111111111111111111111111111111111111111111111111111111111111111\",\"entityTxs\":[{\"data\":{\"route\":{}},\"type\":\"prepareCrossJurisdictionSwap\"}],\"from\":\"0x9999999999999999999999999999999999999999\",\"signerId\":\"0x0101010101010101010101010101010101010101\"}]","signerId":"0x0101010101010101010101010101010101010101","sourceRuntimeHeight":null,"sourceRuntimeId":"0x9999999999999999999999999999999999999999","txTypes":["prepareCrossJurisdictionSwap"]}
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN: Cross-j Entity inputs require a committed authenticated runtimeOutput envelope {\"entityId\":\"0x1111111111111111111111111111111111111111111111111111111111111111\",\"from\":\"0x9999999999999999999999999999999999999999\",\"txTypes\":[\"prepareCrossJurisdictionSwap\"]}","discardedInputs":1,"entityId":"0x1111111111111111111111111111111111111111111111111111111111111111","rejectedInputsDump":"[{\"entityId\":\"0x1111111111111111111111111111111111111111111111111111111111111111\",\"entityTxs\":[{\"data\":{\"route\":{}},\"type\":\"prepareCrossJurisdictionSwap\"}],\"from\":\"0x9999999999999999999999999999999999999999\",\"signerId\":\"0x0101010101010101010101010101010101010101\"}]","signerId":"0x0101010101010101010101010101010101010101","sourceRuntimeHeight":null,"sourceRuntimeId":"0x9999999999999999999999999999999999999999","txTypes":["prepareCrossJurisdictionSwap"]}
+(pass) audit fail-fast regressions > live runtime discards remote cross-j ingress without retaining attacker bytes [28.34ms]
+[network] ENTITY_INPUT_SIGNER_HINT_RETARGETED {
+  entityId: "0x29d375c672ca4ec0dc34c8f7bac2ff92c174003307709b3acd0b1393ea326062",
+  inputSignerId: "0xb262000000000000000000000000000000000000",
+  resolvedReplicaKey: "0x29d375c672ca4ec0dc34c8f7bac2ff92c174003307709b3acd0b1393ea326062:0x8383838383838383838383838383838383838383",
+  txTypes: [],
+}
+[network] ENTITY_INPUT_SIGNER_HINT_RETARGETED {
+  entityId: "0x29d375c672ca4ec0dc34c8f7bac2ff92c174003307709b3acd0b1393ea326062",
+  inputSignerId: "0xb262000000000000000000000000000000000000",
+  resolvedReplicaKey: "0x29d375c672ca4ec0dc34c8f7bac2ff92c174003307709b3acd0b1393ea326062:0x8383838383838383838383838383838383838383",
+  txTypes: [],
+}
+(pass) audit fail-fast regressions > runtime ingress retargets stale signer hints only when the local target entity has one replica [28.21ms]
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"RUNTIME_REPLICA_NOT_FOUND: Entity input target replica missing from projected Runtime frame {\"entityId\":\"0x2c4f680ec343766c75c60ccee671cfc41b840e9843af2a85eb04b4b6caf05d40\",\"siblingKeys\":[\"0x2c4f680ec343766c75c60ccee671cfc41b840e9843af2a85eb04b4b6caf05d40:0x8585858585858585858585858585858585858585\"],\"signerId\":\"0x8686868686868686868686868686868686868686\"}","discardedInputs":1,"entityId":"0x2c4f680ec343766c75c60ccee671cfc41b840e9843af2a85eb04b4b6caf05d40","rejectedInputsDump":"[{\"entityId\":\"0x2c4f680ec343766c75c60ccee671cfc41b840e9843af2a85eb04b4b6caf05d40\",\"entityTxs\":[{\"data\":{\"creditAmount\":{\"__xlnType\":\"BigInt\",\"value\":\"1\"},\"targetEntityId\":\"0x8787878787878787878787878787878787878787878787878787878787878787\",\"tokenId\":1},\"type\":\"openAccount\"}],\"signerId\":\"0x8686868686868686868686868686868686868686\"}]","signerId":"0x8686868686868686868686868686868686868686","sourceRuntimeHeight":null,"sourceRuntimeId":null,"txTypes":["openAccount"]}
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"RUNTIME_REPLICA_NOT_FOUND: Entity input target replica missing from projected Runtime frame {\"entityId\":\"0x2c4f680ec343766c75c60ccee671cfc41b840e9843af2a85eb04b4b6caf05d40\",\"siblingKeys\":[\"0x2c4f680ec343766c75c60ccee671cfc41b840e9843af2a85eb04b4b6caf05d40:0x8585858585858585858585858585858585858585\"],\"signerId\":\"0x8686868686868686868686868686868686868686\"}","discardedInputs":1,"entityId":"0x2c4f680ec343766c75c60ccee671cfc41b840e9843af2a85eb04b4b6caf05d40","rejectedInputsDump":"[{\"entityId\":\"0x2c4f680ec343766c75c60ccee671cfc41b840e9843af2a85eb04b4b6caf05d40\",\"entityTxs\":[{\"data\":{\"creditAmount\":{\"__xlnType\":\"BigInt\",\"value\":\"1\"},\"targetEntityId\":\"0x8787878787878787878787878787878787878787878787878787878787878787\",\"tokenId\":1},\"type\":\"openAccount\"}],\"signerId\":\"0x8686868686868686868686868686868686868686\"}]","signerId":"0x8686868686868686868686868686868686868686","sourceRuntimeHeight":null,"sourceRuntimeId":null,"txTypes":["openAccount"]}
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"RUNTIME_REPLICA_NOT_FOUND: Entity input target replica missing from projected Runtime frame {\"entityId\":\"0x2c4f680ec343766c75c60ccee671cfc41b840e9843af2a85eb04b4b6caf05d40\",\"siblingKeys\":[\"0x2c4f680ec343766c75c60ccee671cfc41b840e9843af2a85eb04b4b6caf05d40:0x8585858585858585858585858585858585858585\"],\"signerId\":\"0x8686868686868686868686868686868686868686\"}","discardedInputs":1,"entityId":"0x2c4f680ec343766c75c60ccee671cfc41b840e9843af2a85eb04b4b6caf05d40","rejectedInputsDump":"[{\"entityId\":\"0x2c4f680ec343766c75c60ccee671cfc41b840e9843af2a85eb04b4b6caf05d40\",\"entityTxs\":[{\"data\":{\"creditAmount\":{\"__xlnType\":\"BigInt\",\"value\":\"1\"},\"targetEntityId\":\"0x8787878787878787878787878787878787878787878787878787878787878787\",\"tokenId\":1},\"type\":\"openAccount\"}],\"signerId\":\"0x8686868686868686868686868686868686868686\"}]","signerId":"0x8686868686868686868686868686868686868686","sourceRuntimeHeight":null,"sourceRuntimeId":null,"txTypes":["openAccount"]}
+(pass) audit fail-fast regressions > a stale signer hint on a tx-bearing input is one typed reject: recorded in both policy modes, surfaced under fail-fast, dropped without halting in production, never mutating the live replica [27.22ms]
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"RUNTIME_REPLICA_NOT_FOUND: Entity input target replica missing from projected Runtime frame {\"entityId\":\"0x35d2cce0081bb48956f0da842200ea352d776669c648aca331c09074b814c973\",\"siblingKeys\":[\"0x35d2cce0081bb48956f0da842200ea352d776669c648aca331c09074b814c973:0x9595959595959595959595959595959595959595\"],\"signerId\":\"0x9696969696969696969696969696969696969696\"}","discardedInputs":1,"entityId":"0x35d2cce0081bb48956f0da842200ea352d776669c648aca331c09074b814c973","rejectedInputsDump":"[{\"entityId\":\"0x35d2cce0081bb48956f0da842200ea352d776669c648aca331c09074b814c973\",\"entityTxs\":[{\"data\":{\"creditAmount\":{\"__xlnType\":\"BigInt\",\"value\":\"1\"},\"targetEntityId\":\"0x9797979797979797979797979797979797979797979797979797979797979797\",\"tokenId\":1},\"type\":\"openAccount\"}],\"from\":\"0x9494949494949494949494949494949494949494\",\"signerId\":\"0x9696969696969696969696969696969696969696\"}]","signerId":"0x9696969696969696969696969696969696969696","sourceRuntimeHeight":null,"sourceRuntimeId":"0x9494949494949494949494949494949494949494","txTypes":["openAccount"]}
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"RUNTIME_REPLICA_NOT_FOUND: Entity input target replica missing from projected Runtime frame {\"entityId\":\"0x35d2cce0081bb48956f0da842200ea352d776669c648aca331c09074b814c973\",\"siblingKeys\":[\"0x35d2cce0081bb48956f0da842200ea352d776669c648aca331c09074b814c973:0x9595959595959595959595959595959595959595\"],\"signerId\":\"0x9696969696969696969696969696969696969696\"}","discardedInputs":1,"entityId":"0x35d2cce0081bb48956f0da842200ea352d776669c648aca331c09074b814c973","rejectedInputsDump":"[{\"entityId\":\"0x35d2cce0081bb48956f0da842200ea352d776669c648aca331c09074b814c973\",\"entityTxs\":[{\"data\":{\"creditAmount\":{\"__xlnType\":\"BigInt\",\"value\":\"1\"},\"targetEntityId\":\"0x9797979797979797979797979797979797979797979797979797979797979797\",\"tokenId\":1},\"type\":\"openAccount\"}],\"from\":\"0x9494949494949494949494949494949494949494\",\"signerId\":\"0x9696969696969696969696969696969696969696\"}]","signerId":"0x9696969696969696969696969696969696969696","sourceRuntimeHeight":null,"sourceRuntimeId":"0x9494949494949494949494949494949494949494","txTypes":["openAccount"]}
+(pass) audit fail-fast regressions > live runtime drops a remote stale-signer input without halting [25.86ms]
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"ENTITY_FRAME_TX_FAILED: type=openAccount error=RUNTIME_REPLICA_NOT_FOUND: test","discardedInputs":1,"entityId":"0x9898989898989898989898989898989898989898989898989898989898989898","rejectedInputsDump":"[{\"entityId\":\"0x9898989898989898989898989898989898989898989898989898989898989898\",\"entityTxs\":[],\"signerId\":\"0x9999999999999999999999999999999999999999\"}]","signerId":"0x9999999999999999999999999999999999999999","sourceRuntimeHeight":null,"sourceRuntimeId":null,"txTypes":[]}
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"ENTITY_FRAME_TX_FAILED: type=openAccount error=RUNTIME_REPLICA_NOT_FOUND: test","discardedInputs":2,"entityId":"0x9898989898989898989898989898989898989898989898989898989898989898","rejectedInputsDump":"[{\"entityId\":\"0x9898989898989898989898989898989898989898989898989898989898989898\",\"entityTxs\":[],\"signerId\":\"0x9999999999999999999999999999999999999999\"},{\"entityId\":\"0x9898989898989898989898989898989898989898989898989898989898989898\",\"entityTxs\":[{\"data\":{\"creditAmount\":{\"__xlnType\":\"BigInt\",\"value\":\"1\"},\"targetEntityId\":\"0x9595959595959595959595959595959595959595959595959595959595959595\",\"tokenId\":1},\"type\":\"openAccount\"}],\"signerId\":\"0x9999999999999999999999999999999999999999\"}]","signerId":"0x9999999999999999999999999999999999999999","sourceRuntimeHeight":null,"sourceRuntimeId":null,"txTypes":["openAccount"]}
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"ENTITY_FRAME_TX_FAILED: type=openAccount error=RUNTIME_REPLICA_NOT_FOUND: test","discardedInputs":1,"entityId":"0x9898989898989898989898989898989898989898989898989898989898989898","rejectedInputsDump":"[{\"entityId\":\"0x9898989898989898989898989898989898989898989898989898989898989898\",\"entityTxs\":[],\"from\":\"0x9797979797979797979797979797979797979797\",\"signerId\":\"0x9999999999999999999999999999999999999999\"}]","signerId":"0x9999999999999999999999999999999999999999","sourceRuntimeHeight":null,"sourceRuntimeId":"0x9797979797979797979797979797979797979797","txTypes":[]}
+(pass) audit fail-fast regressions > runtime discards only the malformed remote origin lane [50.49ms]
+(pass) audit fail-fast regressions > invalid locally-authored ingress remains fail-fast [24.52ms]
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"EntityInput.entityTxs_0_TYPE_UNKNOWN:definitely_unknown_entity_tx","discardedInputs":1,"entityId":"0xbac1a84aee435ca7f7b6bc89f5dcb298471095c4fc213601605fee4377cbcbd3","rejectedInputsDump":"[{\"entityId\":\"0xbac1a84aee435ca7f7b6bc89f5dcb298471095c4fc213601605fee4377cbcbd3\",\"entityTxs\":[{\"data\":{},\"type\":\"definitely_unknown_entity_tx\"}],\"from\":\"0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"signerId\":\"0x87d35ed2ff8b642b458eefbae96f120462d71b8f\"}]","signerId":"0x87d35ed2ff8b642b458eefbae96f120462d71b8f","sourceRuntimeHeight":null,"sourceRuntimeId":"0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","txTypes":["definitely_unknown_entity_tx"]}
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"EntityInput.entityTxs_0_TYPE_UNKNOWN:definitely_unknown_entity_tx","discardedInputs":1,"entityId":"0xbac1a84aee435ca7f7b6bc89f5dcb298471095c4fc213601605fee4377cbcbd3","rejectedInputsDump":"[{\"entityId\":\"0xbac1a84aee435ca7f7b6bc89f5dcb298471095c4fc213601605fee4377cbcbd3\",\"entityTxs\":[{\"data\":{},\"type\":\"definitely_unknown_entity_tx\"}],\"from\":\"0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"signerId\":\"0x87d35ed2ff8b642b458eefbae96f120462d71b8f\"}]","signerId":"0x87d35ed2ff8b642b458eefbae96f120462d71b8f","sourceRuntimeHeight":null,"sourceRuntimeId":"0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","txTypes":["definitely_unknown_entity_tx"]}
+[WARN][entity.tx] skipped_error {"error":"DIRECT_PAYMENT_ROUTE_REQUIRED:target=0xd3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3","type":"directPayment"}
+[WARN][runtime.entity_inputs] entity_input.batch_tx_evicted {"entity":"0xc539a585a2ac804173571ffa92a3ffd49214e866c5cb25160e5eac48fdd2d145","rejection":"DIRECT_PAYMENT_ROUTE_REQUIRED:target=0xd3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3","signer":"0x2535a0fa746d301d579c2eb0696aa7fff1186913","txType":"directPayment"}
+[ERROR][entity.tx] failed_invariant {"error":"SWAP_REQUEST_ACCOUNT_MISSING:placeSwapOffer:entity=0x289c7092cf4c427c6cefe438f8ae217e374588093903525472cb0f957b584769:counterparty=0xd4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4","type":"placeSwapOffer"}
+[ERROR][runtime] apply_input.failed {"error":"RUNTIME_ENTITY_INPUT_APPLY_FAILED:entity=0x289c7092cf4c427c6cefe438f8ae217e374588093903525472cb0f957b584769:signer=0xca31d06f872a09dab367cb0a9eeb73152fa05526:txs=none:proposal=no:cause=SWAP_REQUEST_ACCOUNT_MISSING:placeSwapOffer:entity=0x289c7092cf4c427c6cefe438f8ae217e374588093903525472cb0f957b584769:counterparty=0xd4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4","stack":"RuntimeEntityInputApplyError: RUNTIME_ENTITY_INPUT_APPLY_FAILED:entity=0x289c7092cf4c427c6cefe438f8ae217e374588093903525472cb0f957b584769:signer=0xca31d06f872a09dab367cb0a9eeb73152fa05526:txs=none:proposal=no:cause=SWAP_REQUEST_ACCOUNT_MISSING:placeSwapOffer:entity=0x289c7092cf4c427c6cefe438f8ae217e374588093903525472cb0f957b584769:counterparty=0xd4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4\n    at <anonymous> (/Users/zigota/xln/core/runtime/admit/entity-input-replica.ts:189:15)\n    at processTicksAndRejections (native:7:39)\n    at toThrow (unknown)\n    at <anonymous> (/Users/zigota/xln/core/__tests__/testing/audit/audit-failfast-regressions-part-1.test.ts:1021:15)\n    at processTicksAndRejections (native:7:39)\nCaused by: FailureDispositionError: SWAP_REQUEST_ACCOUNT_MISSING:placeSwapOffer:entity=0x289c7092cf4c427c6cefe438f8ae217e374588093903525472cb0f957b584769:counterparty=0xd4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4\n    at haltRuntimeFailure (/Users/zigota/xln/core/protocol/errors/failure-taxonomy.ts:45:7)\n    at requireSwapAccount (/Users/zigota/xln/core/entity/tx/handlers/payments/swap-requests.ts:32:11)\n    at handlePlaceSwapOfferRequest (/Users/zigota/xln/core/entity/tx/handlers/payments/swap-requests.ts:51:3)\n    at <anonymous> (/Users/zigota/xln/core/entity/tx/apply.ts:597:54)\n    at <anonymous> (/Users/zigota/xln/core/entity/consensus/frame/application.ts:316:24)\n    at applyEntityTxsInOrder (/Users/zigota/xln/core/entity/consensus/frame/application.ts:382:34)\n    at processTicksAndRejections (native:7:39)\n    at toThrow (unknown)\n    at <anonymous> (/Users/zigota/xln/core/__tests__/testing/audit/audit-failfast-regressions-part-1.test.ts:1021:15)\n    at processTicksAndRejections (native:7:39)"}
+[ERROR][runtime.entity_inputs] entity_input.rejected {"cause":"RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET","entityId":"0xbac1a84aee435ca7f7b6bc89f5dcb298471095c4fc213601605fee4377cbcbd3","inputIndex":0,"rejectionCode":"unroutable-ingress","signerId":"0x87d35ed2ff8b642b458eefbae96f120462d71b8f"}
+[WARN][entity.tx] skipped_error {"error":"DIRECT_PAYMENT_ROUTE_REQUIRED:target=0xd1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1","type":"directPayment"}
+[WARN][runtime.entity_inputs] entity_input.batch_tx_evicted {"entity":"0xf2c839276d085f3cc44cf10c4176371d35851d8a5550229f3432d26bb94dd81c","rejection":"DIRECT_PAYMENT_ROUTE_REQUIRED:target=0xd1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1","signer":"0xdd0490f391c84e25cac140bcfd4b2a93b7d752a4","txType":"directPayment"}
+(pass) audit fail-fast regressions > malformed frames are isolated while invalid local schema remains fatal [1128.40ms]
+(pass) audit fail-fast regressions > local signer resolution prefers an available local signer over a stale configured validator [25.80ms]
+(pass) audit fail-fast regressions > sparse WAL replay resolves an Account output from its atomically stored signer witness [28.67ms]
+(pass) audit fail-fast regressions > runtime input admission rejects tx-bearing stale signer before enqueue [26.99ms]
+(pass) audit fail-fast regressions > hub mesh bootstrap loop fail-fasts unexpected errors instead of logging forever [0.17ms]
+(pass) audit fail-fast regressions > runtime input admission accounts for importReplica earlier in the same batch [27.04ms]
+(pass) audit fail-fast regressions > cross-j salvage routes tx-bearing output to route target signer over stale gossip signer [26.89ms]
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"RUNTIME_REPLICA_NOT_FOUND: Entity input target replica missing from projected Runtime frame {\"entityId\":\"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4\",\"siblingKeys\":[\"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4:0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\",\"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4:0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1\"],\"signerId\":\"0xcccccccccccccccccccccccccccccccccccccccc\"}","discardedInputs":1,"entityId":"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4","rejectedInputsDump":"[{\"entityId\":\"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4\",\"entityTxs\":[],\"signerId\":\"0xcccccccccccccccccccccccccccccccccccccccc\"}]","signerId":"0xcccccccccccccccccccccccccccccccccccccccc","sourceRuntimeHeight":null,"sourceRuntimeId":null,"txTypes":[]}
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"RUNTIME_REPLICA_NOT_FOUND: Entity input target replica missing from projected Runtime frame {\"entityId\":\"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4\",\"siblingKeys\":[\"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4:0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\",\"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4:0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1\"],\"signerId\":\"0xcccccccccccccccccccccccccccccccccccccccc\"}","discardedInputs":1,"entityId":"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4","rejectedInputsDump":"[{\"entityId\":\"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4\",\"entityTxs\":[],\"signerId\":\"0xcccccccccccccccccccccccccccccccccccccccc\"}]","signerId":"0xcccccccccccccccccccccccccccccccccccccccc","sourceRuntimeHeight":null,"sourceRuntimeId":null,"txTypes":[]}
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"RUNTIME_REPLICA_NOT_FOUND: Entity input target replica missing from projected Runtime frame {\"entityId\":\"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4\",\"siblingKeys\":[\"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4:0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\",\"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4:0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1\"],\"signerId\":\"0xcccccccccccccccccccccccccccccccccccccccc\"}","discardedInputs":1,"entityId":"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4","rejectedInputsDump":"[{\"entityId\":\"0x3db2b880cc3c7c47267085fe01aa7d56b2f2b5826945987b4109b8a3d2c07db4\",\"entityTxs\":[],\"signerId\":\"0xcccccccccccccccccccccccccccccccccccccccc\"}]","signerId":"0xcccccccccccccccccccccccccccccccccccccccc","sourceRuntimeHeight":null,"sourceRuntimeId":null,"txTypes":[]}
+(pass) audit fail-fast regressions > an ambiguous local target signer is one typed reject: recorded in both policy modes, surfaced under fail-fast, dropped without halting in production, never mutating either replica [25.57ms]
+(pass) audit fail-fast regressions > rejects an oversized ingress atomically before it enters the Runtime mempool [27.24ms]
+(pass) audit fail-fast regressions > safeStringify throws instead of hashing a placeholder string [0.05ms]
+(pass) audit fail-fast regressions > hanko verification lets an already-verified child satisfy its parent threshold [4.21ms]
+(pass) audit fail-fast regressions > registered hanko verification accepts a board that matches local registered config [33.21ms]
+(pass) audit fail-fast regressions > registered hanko verification rejects forged self-contained board without local board of record [1.56ms]
+(pass) audit fail-fast regressions > registered hanko verification rejects forged board even when signer is a real validator [28.17ms]
+(pass) audit fail-fast regressions > j_event rejects non-validator signer ids before observation aggregation [29.34ms]
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"9607","range":"1-2","root":"0xae4abc59.."}
+(pass) audit fail-fast regressions > single-validator j_event observations must still be signed by the claimed signer [30.05ms]
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"ea2d","range":"1-3","root":"0x7c02de3b.."}
+[WARN][j.event] account_settled.account_missing {"counterparty":"4242"}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"ea2d","range":"4-4","root":"0xf61f6406.."}
+(pass) audit fail-fast regressions > AccountSettled applies explicit zero reserve instead of leaving stale local balance [27.82ms]
+[ERROR][entity.tx] failed_invariant {"error":"j_event rejected: invalid proposer signature for 0x4eb7a61f91c0f1818ae3a279ddfd057a0c27b342","type":"j_event"}
+(pass) audit fail-fast regressions > j_event auth rejects are fatal inside applyEntityTx [29.16ms]
+[ERROR][entity.tx] failed_invariant {"error":"SWAP_REQUEST_ACCOUNT_MISSING:placeSwapOffer:entity=0x6262626262626262626262626262626262626262626262626262626262626262:counterparty=0x6363636363636363636363636363636363636363636363636363636363636363","type":"placeSwapOffer"}
+[ERROR][entity.tx] failed_invariant {"error":"SWAP_REQUEST_ACCOUNT_MISSING:proposeCancelSwap:entity=0x6262626262626262626262626262626262626262626262626262626262626262:counterparty=0x6363636363636363636363636363636363636363636363636363636363636363","type":"proposeCancelSwap"}
+(pass) audit fail-fast regressions > swap requests fail loud when the target account is missing [33.02ms]
+[WARN][entity.tx] skipped_error {"error":"DIRECT_PAYMENT_ROUTE_REQUIRED:target=0x6666666666666666666666666666666666666666666666666666666666666666","type":"directPayment"}
+[WARN][entity.tx] skipped_error {"error":"DIRECT_PAYMENT_ROUTE_START_INVALID:entity=0x6464646464646464646464646464646464646464646464646464646464646464:route0=0x6565656565656565656565656565656565656565656565656565656565656565:target=0x6666666666666666666666666666666666666666666666666666666666666666","type":"directPayment"}
+[WARN][entity.tx] skipped_error {"error":"DIRECT_PAYMENT_ROUTE_END_INVALID:entity=0x6464646464646464646464646464646464646464646464646464646464646464:last=0x6868686868686868686868686868686868686868686868686868686868686868:target=0x6666666666666666666666666666666666666666666666666666666666666666","type":"directPayment"}
+[WARN][entity.tx] skipped_error {"error":"DIRECT_PAYMENT_DELIVERY_MODE_INVALID:undefined","type":"directPayment"}
+[WARN][entity.tx] skipped_error {"error":"DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING:entity=0x6464646464646464646464646464646464646464646464646464646464646464:nextHop=0x6767676767676767676767676767676767676767676767676767676767676767:target=0x6666666666666666666666666666666666666666666666666666666666666666","type":"directPayment"}
+(pass) audit fail-fast regressions > direct payment rejects invalid route topology without an invariant halt [27.68ms]
+[WARN][entity.tx] skipped_error {"error":"DIRECT_PAYMENT_ROUTE_REQUIRED:target=0x6262626262626262626262626262626262626262626262626262626262626262","type":"directPayment"}
+(pass) audit fail-fast regressions > entity frame aborts instead of partially committing after a skipped tx [35.41ms]
+(pass) audit fail-fast regressions > entity frame keeps reducer storage changes local until exact commit [31.17ms]
+[ERROR][runtime.input_discard] entity_input.discarded {"action":"discarded","cause":"RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN: Cross-j Entity inputs require a committed authenticated runtimeOutput envelope {\"entityId\":\"0xdf8245df05fb22c8c90af8638e4473c7f97a47f10b1e024bfbf009acc014dce9\",\"from\":\"0x2020202020202020202020202020202020202020\",\"txTypes\":[\"registerCrossJurisdictionSwap\"]}","discardedInputs":1,"entityId":"0xdf8245df05fb22c8c90af8638e4473c7f97a47f10b1e024bfbf009acc014dce9","rejectedInputsDump":"[{\"entityId\":\"0xdf8245df05fb22c8c90af8638e4473c7f97a47f10b1e024bfbf009acc014dce9\",\"entityTxs\":[{\"data\":{\"route\":{\"bookOwnerEntityId\":\"0x4141414141414141414141414141414141414141414141414141414141414141\",\"hubEntityId\":\"0x4141414141414141414141414141414141414141414141414141414141414141\",\"orderId\":\"route-derived-hint-attack\",\"source\":{\"counterpartyEntityId\":\"0x4141414141414141414141414141414141414141414141414141414141414141\",\"entityId\":\"0xdf8245df05fb22c8c90af8638e4473c7f97a47f10b1e024bfbf009acc014dce9\"},\"target\":{\"counterpartyEntityId\":\"0xd1711bb20d05e59efdd6d5e464a9f1316c045bc6bb7b7d8de1425a0a84074d8e\",\"entityId\":\"0x4242424242424242424242424242424242424242424242424242424242424242\"}}},\"type\":\"registerCrossJurisdictionSwap\"}],\"from\":\"0x2020202020202020202020202020202020202020\",\"signerId\":\"0x3333333333333333333333333333333333333333\"}]","signerId":"0x3333333333333333333333333333333333333333","sourceRuntimeHeight":null,"sourceRuntimeId":"0x2020202020202020202020202020202020202020","txTypes":["registerCrossJurisdictionSwap"]}
+(pass) audit fail-fast regressions > cross-j remote route cannot seed missing sibling runtime hints before topology validation [29.12ms]
+(pass) audit fail-fast regressions > cross-j order admission requires the atomic prepared route [27.14ms]
+(pass) audit fail-fast regressions > committed source pull advances source route to resting before fill notice [27.68ms]
+(pass) audit fail-fast regressions > cross-j same-token swap_offer quantizes by jurisdiction market side [0.70ms]
+(pass) audit fail-fast regressions > market maker cross amount fitting round-trips through account swap_offer for both market sides [1.82ms]
+(pass) audit fail-fast regressions > target-side cross-j book owner admits the atomic remote source route [24.62ms]
+(pass) audit fail-fast regressions > htlc_resolve(error) cannot be used by payer to cancel an active lock before expiry [0.18ms]
+
+2 tests failed:
+(fail) audit fail-fast regressions > DisputeFinalized invalidates a competing settlement workspace and its deferred retry [28.79ms]
+(fail) audit fail-fast regressions > late signed HTLC secret is retained as evidence and prepares a dispute [33.57ms]
+
+ 141 pass
+ 2 fail
+ 1170 expect() calls
+Ran 143 tests across 6 files. [26.27s]
+error: script "stand:run" exited with code 1
+real 26.31
+user 34.67
+sys 12.30

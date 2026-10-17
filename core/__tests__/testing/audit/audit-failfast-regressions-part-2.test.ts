@@ -660,6 +660,31 @@ describe('audit fail-fast regressions', () => {
     receiverState.timestamp = env.state.timestamp;
     receiverState.lastFinalizedJHeight = 1;
     receiverState.accounts.set(left.entityId, receiver);
+    // A secret-ACK deadline needs an actionable upstream Account. Keep the
+    // longer inbound lock live while the late downstream reveal enters dispute.
+    const upstreamIsLeft = isLeftEntity(upstreamEntityId, right.entityId);
+    const upstream = makeProposalAccount(
+      [],
+      upstreamIsLeft ? upstreamEntityId : right.entityId,
+      upstreamIsLeft ? right.entityId : upstreamEntityId,
+    );
+    upstream.state.deltas = upstream.state.deltas.updated(1, {
+      ...createDefaultDelta(1),
+      leftHold: upstreamIsLeft ? amount + 1n : 0n,
+      rightHold: upstreamIsLeft ? 0n : amount + 1n,
+    });
+    upstream.state.locks = upstream.state.locks.updated(upstreamLockId, {
+      lockId: upstreamLockId,
+      hashlock,
+      timelock: BigInt(env.state.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS + HTLC_ENFORCEMENT_RESERVE_MS),
+      revealBeforeHeight: 200,
+      amount: amount + 1n,
+      tokenId: 1,
+      senderIsLeft: upstreamIsLeft,
+      createdHeight: 0,
+      createdTimestamp: 0,
+    });
+    receiverState.accounts.set(upstreamEntityId, upstream);
     // A fee-charging forwarder: the entry keeps the inbound amount, the
     // outbound lock carries it minus the fee. Equal amounts hid a
     // PAYBOOK_AMOUNT_CONFLICT halt on every late downstream reveal.
@@ -696,7 +721,7 @@ describe('audit fail-fast regressions', () => {
       secretAckDeadlineAt: env.state.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS,
     });
     expect(
-      collectDerivedDeadlines(applied.newState).find((deadline) => deadline.id === `htlc-secret-ack:${hashlock}`),
+      collectDerivedDeadlines(applied.newState).find(deadline => deadline.id === `htlc-secret-ack:${hashlock}`),
     ).toEqual({
       id: `htlc-secret-ack:${hashlock}`,
       triggerAt: env.state.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS,
