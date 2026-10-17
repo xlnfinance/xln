@@ -1,0 +1,19 @@
+{
+  "runtimeId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e",
+  "originalLock": [
+    {
+      "clientId": "502C1D1A2CF84C8A2045515476D6CF88",
+      "mode": "exclusive",
+      "name": "xln-active-runtime"
+    }
+  ],
+  "finalLock": [
+    {
+      "clientId": "502C1D1A2CF84C8A2045515476D6CF88",
+      "mode": "exclusive",
+      "name": "xln-active-runtime"
+    }
+  ],
+  "projectionRelays": [],
+  "projectionWorkers": []
+}

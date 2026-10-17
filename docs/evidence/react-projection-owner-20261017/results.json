@@ -1,0 +1,155 @@
+[
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "projection-owner-current",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/runtime/e2e-active-tab-lock.spec.ts::projection route cannot evict an active embedded Runtime owner"
+    ],
+    "exitCode": 1,
+    "seconds": 28.354,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/projection-owner-current.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "projection-owner-react",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/runtime/e2e-active-tab-lock.spec.ts::projection route cannot evict an active embedded Runtime owner"
+    ],
+    "exitCode": 1,
+    "seconds": 26.023,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/projection-owner-react.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "projection-owner-lock-proof",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/runtime/e2e-active-tab-lock.spec.ts::projection route cannot evict an active embedded Runtime owner"
+    ],
+    "exitCode": 0,
+    "seconds": 28.724,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/projection-owner-lock-proof.log"
+  },
+  {
+    "command": [
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/projection-owner/typecheck.ts"
+    ],
+    "exitCode": 1,
+    "seconds": 4.616,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/projection-owner-types.log"
+  },
+  {
+    "command": [
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/projection-owner/typecheck.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 4.504,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/projection-owner-types-final.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "browser-writer-current",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/recovery/e2e-storage-writer-lock.spec.ts::same-namespace restores serialize and a stale writer cannot overwrite the winner"
+    ],
+    "exitCode": 0,
+    "seconds": 29.779,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/browser-writer-current.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "tab-handoff-root-current",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/runtime/e2e-active-tab-lock.spec.ts::second /app tab takes ownership and first becomes inactive"
+    ],
+    "exitCode": 0,
+    "seconds": 17.121,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/tab-handoff-root-current.log"
+  }
+]
