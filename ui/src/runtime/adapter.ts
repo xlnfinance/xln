@@ -66,6 +66,8 @@ export function disconnectAdapter(): void {
 	currentAdapter?.disconnect();
 	currentAdapter = null;
 	currentEnv = null;
+	// Entity selection belongs to this connection; a new adapter must not inherit its authority context.
+	useApp.getState().setActiveEntityId(null);
 	useApp.getState().setAdapterState({ status: 'disconnected', height: 0, commandReady: false });
 }
 
