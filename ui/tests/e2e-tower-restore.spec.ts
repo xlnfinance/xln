@@ -132,7 +132,9 @@ test('tower backup restores funded Account proofs, refuses overwrite and continu
 		expect((await readWalletCheckpoint(restoredPage, before.frame.height)).accounts).toEqual(before.accounts);
 		const restoredMoney = await readUsdcAccount(restoredPage, wallet.entityId);
 		expect(restoredMoney.owned).toBe('100000000');
-		const fromHeight = (await readWalletCheckpoint(restoredPage)).frame.height;
+		// Receipt ranges are inclusive. The imported checkpoint intentionally has no
+		// earlier activity journal; the new payment belongs only to later frames.
+		const fromHeight = (await readWalletCheckpoint(restoredPage)).frame.height + 1;
 		await restoredPage.getByTestId('home-pay').click();
 		await restoredPage.getByTestId('pay-to').fill('H2');
 		await restoredPage.getByTestId('pay-amount').fill('1');
