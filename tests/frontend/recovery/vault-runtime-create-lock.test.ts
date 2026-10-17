@@ -168,14 +168,18 @@ describe('vault runtime creation lock', () => {
 
   test('locked runtimes cannot derive signer keys and render the vault gate', () => {
     const store = read('frontend/src/lib/stores/vault/vaultStore.ts');
-    const panel = read('frontend/src/lib/view/UserModePanel.svelte');
+    const panel = read('ui/src/App.tsx');
+    const adapter = read('ui/src/runtime/adapter.ts');
 
     expect(store).toContain('if (!runtime?.seed) return null;');
     expect(store).toContain('if (!runtime?.seed || signerIndex >= runtime.signers.length) return null;');
     expect(store).toContain('assertRuntimeAuthorityLease(runtime);');
     expect(store).toContain('VAULT_UNLOCK_EXPIRED:');
     expect(store).toContain('await vaultOperations.lockExpiredRuntimeLeases();');
-    expect(panel).toContain('const activeVaultLocked = $derived(');
-    expect(panel).toContain('(!hasSigner || activeVaultLocked)');
+    expect(panel).toContain("const connected = status === 'connected' && !booting && Boolean(activeEntityId);");
+    expect(panel).toContain('if (!connected)');
+    expect(panel).toContain('<Gate />');
+    expect(adapter).toContain('useApp.getState().lockAll();');
+    expect(adapter).toContain('env.runtimeSeed = undefined;');
   });
 });

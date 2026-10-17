@@ -1,3 +1,4 @@
+import { adoptActiveTabLock, initializeActiveTabLock } from '../../../frontend/src/lib/utils/control/activeTabLock';
 import { closeRuntimeSession } from '../../../frontend/src/lib/security/runtimeSession';
 import type {
 	RuntimeAdapter,
@@ -31,6 +32,7 @@ let currentAdapter: RuntimeAdapter | null = null;
 let currentEnv: RuntimeReplica | null = null;
 let detach: (() => void) | null = null;
 let closing: Promise<void> | null = null;
+let releaseOwnership: (() => void) | null = null;
 
 export function getAdapter(): RuntimeAdapter | null {
 	return currentAdapter;
@@ -69,7 +71,11 @@ export function disconnectAdapter(): void {
 
 /** Stop accepted work before revoking the in-memory signing authority. */
 export function lockEmbeddedRuntime(): Promise<void> {
-  if (!closing) closing = closeAndLockRuntime().finally(() => { closing = null; });
+  // Keep a failed close rejected until reload; adopting this lease again must
+  // never bypass a Runtime that failed to quiesce.
+  if (!closing) closing = closeAndLockRuntime().then(() => {
+    closing = null;
+  });
   return closing;
 }
 
@@ -78,14 +84,19 @@ async function closeAndLockRuntime(): Promise<void> {
   const seed = env?.runtimeSeed;
   disconnectAdapter();
   useApp.getState().lockAll();
-  if (!env) return;
-  const xln = await getXLN();
-  try {
-    await closeRuntimeSession(env, xln);
-  } finally {
-    if (seed) xln.clearSignerKeys(seed);
-    env.runtimeSeed = undefined;
+  if (env) {
+    const xln = await getXLN();
+    try {
+      await closeRuntimeSession(env, xln);
+    } finally {
+      if (seed) xln.clearSignerKeys(seed);
+      env.runtimeSeed = undefined;
+    }
   }
+  // A failed drain retains the lease: a second Runtime must not sign against
+  // the same namespace until all accepted work and database handles are closed.
+  releaseOwnership?.();
+  releaseOwnership = null;
 }
 
 export async function connectEmbedded(seed: string, recovery?: RuntimeRecoveryCandidate): Promise<RuntimeAdapter> {
@@ -144,8 +155,30 @@ export async function connectEmbedded(seed: string, recovery?: RuntimeRecoveryCa
 		}),
 	});
 
-
-	await adapter.connect({ mode: 'embedded', seed });
+  // Password authentication precedes this call. Reuse the observer's canonical
+  // origin-wide lease; its takeover callback drains the previous signer before
+  // the new Runtime may open storage or connect to the relay.
+  const bootstrapFinished = Promise.withResolvers<void>();
+  const relinquish = async (): Promise<void> => {
+    // main() owns an opening Runtime before currentEnv is available. A takeover
+    // during that await must wait for its owner to be able to drain and close it.
+    await bootstrapFinished.promise;
+    await lockEmbeddedRuntime();
+  };
+  releaseOwnership = adoptActiveTabLock(relinquish) ?? (await initializeActiveTabLock(relinquish));
+  try {
+    await adapter.connect({ mode: 'embedded', seed });
+  } catch (error) {
+    try {
+      await lockEmbeddedRuntime();
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], 'WALLET_BOOT_AND_CLEANUP_FAILED');
+    }
+    xln.clearSignerKeys(seed);
+    throw error;
+  } finally {
+    bootstrapFinished.resolve();
+  }
 	currentAdapter = adapter;
 	attach(adapter);
 	return adapter;
