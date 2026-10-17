@@ -326,7 +326,7 @@ export function Pay() {
 					{routes && routes.length > 0 && usable.length === 0 && <p style={{ color: 'var(--dispute)', fontSize: 13 }}>No route matches this delivery mode.</p>}
 
 					{chosen && (
-						<div className="card tight" data-testid="pay-quote" data-sender-amount={chosen.senderAmount.toString()} data-recipient-amount={chosen.recipientAmount.toString()} data-fee-amount={chosen.totalFee.toString()}>
+						<div className="card tight" data-testid="pay-quote" data-route-path={chosen.path.join(',')} data-sender-amount={chosen.senderAmount.toString()} data-recipient-amount={chosen.recipientAmount.toString()} data-fee-amount={chosen.totalFee.toString()}>
 							<div className="kv mobile-only">
 								<span className="k">Route</span>
 								<span className="hops">
@@ -390,7 +390,7 @@ export function Pay() {
 										{usable.length - 1} other {usable.length - 1 === 1 ? 'route' : 'routes'}
 									</summary>
 									{usable.map((route, index) => (
-										<button key={route.path.join('>')} type="button" className={`route-card${route === chosen ? ' active' : ''}`} onClick={() => setRouteIndex(index)}>
+										<button key={route.path.join('>')} data-route-path={route.path.join(',')} type="button" className={`route-card${route === chosen ? ' active' : ''}`} onClick={() => setRouteIndex(index)}>
 											<span className="hops" style={{ justifyContent: 'flex-start' }}>
 												{route.path.map((hop, hopIndex) => (
 													<span key={`${hop}-${hopIndex}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>

@@ -1,4 +1,4 @@
-import type { RuntimeReplica } from '../../core/api/public/runtime-module';
+import type { RuntimeReplica, XLNModule } from '../../core/api/public/runtime-module';
 import { expect, type Page } from '@playwright/test';
 import { getTokenInfo } from '../../core/account/utils';
 import { enqueueEntityTxs } from './runtime/e2e-runtime-input';
@@ -147,144 +147,20 @@ async function openWorkspaceTab(page: Page, tabTestId: string): Promise<void> {
   // Responsive screenshot layouts can hide the already-active tab. In that case the requested workspace is open.
 }
 
-function compactEntityLabel(entityId: string): string {
-  return `${entityId.slice(0, 10)}...${entityId.slice(-6)}`;
-}
-
-async function resolveHubCardLabel(page: Page, hubId: string): Promise<string> {
-  const resolved = await page.evaluate((targetHubId) => {
-    const view = window as typeof window & {
-      isolatedEnv?: {
-        gossip?: {
-          getProfiles?: () => Array<{ entityId?: string; metadata?: { name?: string }; name?: string }>;
-        };
-      };
-    };
-    const profiles = view.isolatedEnv?.gossip?.getProfiles?.() || [];
-    const match = profiles.find((profile) => String(profile?.entityId || '').toLowerCase() === String(targetHubId || '').toLowerCase());
-    return String(match?.metadata?.name || match?.name || '').trim();
-  }, hubId);
-  return resolved || compactEntityLabel(hubId);
-}
-
-async function resolveHubCardLocator(page: Page, hubId: string, root = page.locator('body')) {
-  const hubIdNorm = hubId.toLowerCase();
-  const exactHubCard = root.locator(`.hub-card[data-hub-entity-id="${hubIdNorm}"]`).first();
-  if (await exactHubCard.isVisible().catch(() => false)) return exactHubCard;
-
-  const hubCardLabel = await resolveHubCardLabel(page, hubId);
-  return root.locator('.hub-card').filter({ hasText: hubCardLabel }).first();
-}
-
-async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
-  await openWorkspaceTab(page, 'account-workspace-tab-open');
-  const panel = page.locator('.hub-panel').first();
-  await expect(panel).toBeVisible({ timeout: 20_000 });
-  // Discovery updates reactively; wait for the exact identity after gossip arrives.
-  const hubCard = panel.locator(`.hub-card[data-hub-entity-id="${hubId.toLowerCase()}"]`).first();
-  await expect(hubCard, `hub ${hubId} must appear in hub discovery`).toBeVisible({ timeout: 20_000 });
-}
-
 async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
+  await openAccountsWorkspace(page);
   if (await hasRenderedCommittedAccountCard(page, hubId)) return;
-  await ensureHubCardVisible(page, hubId);
-  if (await hasExportedRuntimeP2P(page)) {
-    await waitForHubRuntimeTransportReady(page, hubId);
-  } else {
-    await waitForPublicHubRuntimeProfile(page, hubId);
-  }
-  if (await hasRenderedCommittedAccountCard(page, hubId)) return;
-
-  let lastUiState = 'not-read';
-  let connectClicked = false;
-  try {
-    await expect
-      .poll(
-        async () => {
-          if (await hasRenderedCommittedAccountCard(page, hubId)) {
-            lastUiState = 'committed-account-card';
-            return true;
-          }
-
-          const panel = page.locator('.hub-panel').first();
-          if (!await panel.isVisible().catch(() => false)) {
-            lastUiState = 'hub-panel-missing';
-            return false;
-          }
-
-          const hubCard = await resolveHubCardLocator(page, hubId, panel);
-          if (!await hubCard.isVisible().catch(() => false)) {
-            lastUiState = 'hub-card-missing';
-            return false;
-          }
-
-          const inlineError = panel.locator('.error-banner').first();
-          if (await inlineError.isVisible().catch(() => false)) {
-            const message = String(await inlineError.textContent().catch(() => '') || '').trim();
-            if (message) throw new Error(`HUB_CONNECT_UI_ERROR:${message}`);
-          }
-
-          const dataState = String(await hubCard.getAttribute('data-connection-state').catch(() => '') || '').toLowerCase();
-          if (connectClicked) {
-            lastUiState = `connect-clicked-awaiting-state:${dataState || 'unknown'}`;
-            return false;
-          }
-          if (dataState === 'open') {
-            lastUiState = 'open-awaiting-committed-card';
-            return false;
-          }
-          if (dataState === 'opening') {
-            lastUiState = 'opening-awaiting-committed-card';
-            return false;
-          }
-
-          const connectByTestId = hubCard.getByTestId('hub-connect-button').first();
-          const connectButton = connectByTestId;
-          if (
-            await connectButton.isVisible().catch(() => false)
-            && await connectButton.isEnabled().catch(() => false)
-          ) {
-            try {
-              await connectButton.click({ timeout: 5_000 });
-              connectClicked = true;
-              lastUiState = 'connect-clicked';
-            } catch (clickError) {
-              if (await hasRenderedCommittedAccountCard(page, hubId)) {
-                lastUiState = 'connect-click-raced-committed-account-card';
-                return true;
-              }
-              const message = clickError instanceof Error ? clickError.message : String(clickError);
-              if (/detached from the DOM|not visible|Timeout/i.test(message)) {
-                connectClicked = true;
-                lastUiState = `connect-click-raced:${message.split('\n')[0]?.slice(0, 120) || 'transient click race'}`;
-                return false;
-              }
-              throw clickError;
-            }
-            return false;
-          }
-
-          const text = await hubCard.innerText({ timeout: 1_000 }).catch(() => '');
-          lastUiState = `state=${dataState || 'unknown'} text=${text.replace(/\s+/g, ' ').slice(0, 180)}`;
-          return false;
-        },
-        {
-          timeout: DEFAULT_OPEN_TIMEOUT_MS,
-          intervals: [100, 250, 500],
-          message: `hub ${hubId} must render a committed account card after Connect`,
-        },
-      )
-      .toBe(true);
-  } catch (error) {
-    const localRuntime = await readLocalConnectRuntimeDiagnostic(page, hubId).catch((debugError) => ({
-      error: debugError instanceof Error ? debugError.message : String(debugError),
-    }));
-    throw new Error(
-      `${error instanceof Error ? error.message : String(error)}\n` +
-      `lastHubConnectUiState=${lastUiState}\n` +
-      `localRuntime=${stringifyDebug(localRuntime)}`,
-    );
-  }
+  await waitForHubRuntimeTransportReady(page, hubId);
+  await page.getByRole('button', { name: 'Connect another account', exact: true }).click();
+  const sheet = page.getByRole('dialog', { name: 'Open account', exact: true });
+  await expect(sheet).toBeVisible();
+  await sheet.getByTestId('open-account-target').fill(hubId);
+  await sheet.getByTestId('open-account-credit').fill(DEFAULT_CREDIT_AMOUNT_DISPLAY);
+  const submit = sheet.getByTestId('open-account-submit');
+  await expect(submit).toBeEnabled();
+  await submit.click();
+  await expect(sheet).toBeHidden();
+  await waitForRenderedCommittedAccountCard(page, hubId, 'public React account proposal');
 }
 
 async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Promise<unknown> {
@@ -1232,27 +1108,16 @@ export async function waitForReceiveReadyGossipProfiles(
     await expect
       .poll(
         async () => page.evaluate(async ({ targets, hub }) => {
-          type Connectivity = {
-            ensureProfiles?: (ids: string[]) => Promise<boolean>;
-            profiles?: Array<{
-              entityId?: string;
-              accounts?: Array<{ counterpartyId?: string }>;
-            }>;
-          };
-          const view = window as typeof window & {
-            __xln?: { runtimeConnectivity?: Connectivity };
-            isolatedEnv?: {
-              gossip?: {
-                getProfiles?: () => Array<{
-                  entityId?: string;
-                  accounts?: Array<{ counterpartyId?: string }>;
-                }>;
-              };
-            };
-          };
-          const connectivity = view.__xln?.runtimeConnectivity;
-          await connectivity?.ensureProfiles?.(targets).catch(() => false);
-          const profiles = view.isolatedEnv?.gossip?.getProfiles?.() ?? connectivity?.profiles ?? [];
+          const debug = (
+            window as Window & {
+              __xln?: { env(): RuntimeReplica | null; xln(): Promise<XLNModule> };
+            }
+          ).__xln;
+          const env = debug?.env();
+          if (!debug || !env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+          const xln = await debug.xln();
+          await xln.ensureGossipProfiles(env, targets);
+          const profiles = env.gossip.getProfiles();
           const byId = new Map<string, (typeof profiles)[number]>();
           for (const profile of profiles) {
             const id = String(profile?.entityId || '').toLowerCase();

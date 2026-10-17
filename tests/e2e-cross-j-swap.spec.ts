@@ -1,3 +1,4 @@
+import { createWalletIdentity } from '../ui/tests/wallet-ui';
 import type { AccountFrame } from '../core/types/account';
 import { Wallet, formatUnits } from 'ethers';
 import { crossJurisdictionBookQtyLots } from '../core/swapbook';
@@ -15,7 +16,6 @@ import {
   aggregateExpectedCrossBookDepth,
   configurePair,
   configureTokens,
-  createWalletIdentity,
   dismissSwapCompletionModal,
   ensureDirectHubAccount,
   expectBrowserConsoleClean,

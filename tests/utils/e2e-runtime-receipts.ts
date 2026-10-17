@@ -1,3 +1,4 @@
+import type { RuntimeReplica, XLNModule } from '../../core/api/public/runtime-module';
 import { type Page } from '@playwright/test';
 
 export type PersistedReceiptCursor = {
@@ -18,24 +19,7 @@ export type PersistedFrameEvent = {
 };
 
 type RuntimeWindow = typeof window & {
-  __xln?: {
-    instance?: PersistedRuntimeApi;
-  };
-  isolatedEnv?: {
-    runtimeId?: string;
-    dbNamespace?: string;
-    state?: {
-      height?: number;
-    };
-  };
-};
-
-type PersistedRuntimeApi = {
-  getPersistedLatestHeight: (env: unknown) => Promise<number>;
-  listPersistedCheckpointHeights: (env: unknown) => Promise<number[]>;
-  readPersistedFrameJournal: (env: unknown, height: number) => Promise<unknown>;
-  readPersistedCheckpointSnapshot: (env: unknown, height: number) => Promise<unknown>;
-  readPersistedRuntimeActivityJournal: (env: unknown, height: number) => Promise<PersistedFrameJournalView>;
+  __xln?: { env(): RuntimeReplica | null; xln(): Promise<XLNModule> };
 };
 
 type PersistedFrameJournalView = {
@@ -60,9 +44,9 @@ type PersistedFrameReadResult = {
 async function readRuntimeDbMeta(page: Page): Promise<PersistedDbMeta> {
   return page.evaluate(async () => {
     const view = window as RuntimeWindow;
-    const runtimeHeight = Number(view.isolatedEnv?.state?.height || 0);
-    const env = view.isolatedEnv;
-    const XLN = view.__xln?.instance;
+    const runtimeHeight = Number(view.__xln?.env()?.state.height || 0);
+    const env = view.__xln?.env();
+    const XLN = await view.__xln?.xln();
     if (!env) throw new Error('PERSISTED_RUNTIME_ENV_UNAVAILABLE');
     if (!XLN?.getPersistedLatestHeight) throw new Error('PERSISTED_RUNTIME_API_UNAVAILABLE');
 
@@ -91,8 +75,8 @@ export async function getPersistedRuntimeDbMeta(page: Page): Promise<PersistedDb
 export async function getPersistedReceiptCursor(page: Page): Promise<PersistedReceiptCursor> {
   const latestHeight = await page.evaluate(async () => {
     const view = window as RuntimeWindow;
-    const env = view.isolatedEnv;
-    const XLN = view.__xln?.instance;
+    const env = view.__xln?.env();
+    const XLN = await view.__xln?.xln();
     if (!env) throw new Error('PERSISTED_RUNTIME_ENV_UNAVAILABLE');
     if (!XLN?.getPersistedLatestHeight) throw new Error('PERSISTED_RUNTIME_API_UNAVAILABLE');
     return Number(await XLN.getPersistedLatestHeight(env) || 0);
@@ -106,11 +90,11 @@ async function readPersistedFrameEvents(
 ): Promise<PersistedFrameReadResult> {
   return page.evaluate(async ({ nextHeight }) => {
     const view = window as RuntimeWindow;
-    const runtimeHeight = Number(view.isolatedEnv?.state?.height || 0);
-    const env = view.isolatedEnv;
+    const runtimeHeight = Number(view.__xln?.env()?.state.height || 0);
+    const env = view.__xln?.env();
     const events: PersistedFrameEvent[] = [];
 
-    const XLN = view.__xln?.instance;
+    const XLN = await view.__xln?.xln();
     if (!env) throw new Error('PERSISTED_RUNTIME_ENV_UNAVAILABLE');
     if (!XLN?.getPersistedLatestHeight) throw new Error('PERSISTED_RUNTIME_API_UNAVAILABLE');
 

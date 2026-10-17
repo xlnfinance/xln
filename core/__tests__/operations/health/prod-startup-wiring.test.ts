@@ -448,13 +448,19 @@ describe('production startup wiring', () => {
     expect(p2pStart).toBeGreaterThan(awaitedClear);
   });
 
-  test('production payment smoke only reads persisted receipts from a real debug runtime env', () => {
+  test('production payment smoke requires current runtime receipts and React history', () => {
     const paymentSmoke = readFileSync(join(repoRoot, 'tests/e2e/payments/e2e-payment-smoke.spec.ts'), 'utf8');
     const receiptHelper = readFileSync(join(repoRoot, 'tests/utils/e2e-runtime-receipts.ts'), 'utf8');
 
-    expect(paymentSmoke).toContain("Boolean(env && typeof env === 'object' && String(env.runtimeId || '').trim())");
-    expect(paymentSmoke).toContain('if (await hasActivityDebugQuery(page))');
-    expect(paymentSmoke).toContain("page.getByTestId('entity-history-event').count()");
+    expect(paymentSmoke).toContain('const senderCursor = await getPersistedReceiptCursor(senderPage)');
+    expect(paymentSmoke).toContain('const recipientCursor = await getPersistedReceiptCursor(recipientPage)');
+    expect(paymentSmoke).not.toContain('supportsPersistedReceipts');
+    expect(paymentSmoke).not.toContain('hasActivityDebugQuery');
+    expect(paymentSmoke).toContain("page.getByTestId('activity-row')");
+    expect(paymentSmoke).toContain("adapter.read<{ events: ActivityApiEvent[] }>('activity'");
+    expect(receiptHelper).toContain('const env = view.__xln?.env()');
+    expect(receiptHelper).toContain('const XLN = await view.__xln?.xln()');
+    expect(receiptHelper).toContain('if (!frame) break');
     expect(receiptHelper).toContain("throw new Error('PERSISTED_RUNTIME_ENV_UNAVAILABLE')");
     expect(receiptHelper).toContain("throw new Error('PERSISTED_RUNTIME_API_UNAVAILABLE')");
     expect(receiptHelper).not.toContain('catch {\n      return { cursor: { nextHeight }');

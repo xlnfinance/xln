@@ -72,14 +72,19 @@ async function getRenderedCapacityForAccount(
   direction: RenderedCapacityDirection,
 ): Promise<number> {
   const target = normalizeEntityId(counterpartyId);
-  const cards = await readRenderedAccountCards(page);
-  const match = cards.find((card) => normalizeEntityId(card.counterpartyId) === target) ?? null;
-  if (!match) {
-    throw new Error(
-      `No rendered account card for ${counterpartyId}. Visible=${cards.map((card) => card.counterpartyId || 'unknown').join(',') || 'none'}`,
-    );
+  if (!new URL(page.url()).pathname.endsWith(`/accounts/${target}`)) {
+    await page.getByTestId('nav-home').locator('visible=true').first().click();
+    await page.locator(`[data-testid="account-row"][data-counterparty-id="${target}"]`).click();
   }
-  return direction === 'outbound' ? match.outbound : match.inbound;
+  const label = direction === 'outbound' ? 'send up to ' : 'receive up to ';
+  const text = await page
+    .getByTestId('account-lane-USDC')
+    .locator('.dcap span')
+    .filter({ hasText: new RegExp(`^${label}`) })
+    .innerText();
+  const amount = text.slice(label.length).replace(/,/g, '').trim();
+  if (!/^\d+(?:\.\d+)?$/.test(amount)) throw new Error(`INVALID_RENDERED_ACCOUNT_CAPACITY:${text}`);
+  return Number(amount);
 }
 
 async function getRenderedPrimaryCapacity(page: Page, selectors: string): Promise<number> {

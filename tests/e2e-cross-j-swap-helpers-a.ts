@@ -1,4 +1,3 @@
-import { importStackPhraseUi } from '../ui/tests/wallet-ui';
 import type { RuntimeReplica } from '../core/runtime/types';
 import type { XLNModule } from '../core/api/public/runtime-module';
 import { HDNodeWallet, Mnemonic, getIndexedAccountPath } from 'ethers';
@@ -781,38 +780,6 @@ export async function waitForDefaultJurisdictionReplicas(page: Page, label: stri
     .toMatchObject({ entityJurisdictionCount: 2 });
 }
 
-export async function createWalletIdentity(page: Page, label: string, mnemonic: string): Promise<RuntimeIdentity> {
-  await importStackPhraseUi(page, mnemonic.trim().split(/\s+/).join(' '));
-  await page.waitForFunction(
-    () => {
-      const debug = (
-        window as Window & {
-          __xln?: { env: () => RuntimeReplica | null; store: { getState: () => { activeEntityId: string | null } } };
-        }
-      ).__xln;
-      return Boolean(debug && debug.env()?.runtimeId && debug.store.getState().activeEntityId);
-    },
-    undefined,
-    { timeout: 150_000 },
-  );
-  const identity = await page.evaluate(() => {
-    const debug = (
-      window as Window & {
-        __xln?: { env: () => RuntimeReplica | null; store: { getState: () => { activeEntityId: string | null } } };
-      }
-    ).__xln;
-    if (!debug) throw new Error('WALLET_DIAGNOSTICS_UNAVAILABLE');
-    const env = debug.env();
-    const entityId = debug.store.getState().activeEntityId;
-    if (!env || !entityId || !env.runtimeId) throw new Error('WALLET_IDENTITY_UNAVAILABLE');
-    const replicas = [...env.state.eReplicas.values()].filter(replica => replica.entityId === entityId);
-    const [replica] = replicas;
-    if (replicas.length !== 1 || !replica) throw new Error(`WALLET_SIGNER_NOT_UNIQUE:${entityId}:${replicas.length}`);
-    return { entityId, signerId: replica.signerId, runtimeId: env.runtimeId };
-  });
-  expect(identity.runtimeId, `${label} public wallet import must select its Runtime`).toMatch(/^0x[a-fA-F0-9]{40}$/);
-  return identity;
-}
 
 export async function faucetOffchain(
   page: Page,

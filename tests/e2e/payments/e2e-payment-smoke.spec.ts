@@ -1,3 +1,6 @@
+import type { RuntimeReplica, XLNModule } from '../../../core/api/public/runtime-module';
+import type { RuntimeAdapter } from '../../../core/api/runtime-adapter/types';
+import { createWalletIdentity, LOCAL_PASSWORD } from '../../../ui/tests/wallet-ui';
 import { test, expect, type BrowserContext, type Page } from '../../global-setup.mts';
 import { Wallet } from 'ethers';
 import {
@@ -7,13 +10,9 @@ import {
 import { requireApiBaseUrl } from '../../utils/e2e-base-url';
 import { ensureE2EBaseline } from '../../utils/e2e-baseline';
 import { connectRuntimeToHub, waitForReceiveReadyGossipProfiles } from '../../utils/e2e-connect';
-import { APP_BASE_URL, createRuntimeIdentity, gotoApp } from '../../utils/e2e-demo-users';
+import { APP_BASE_URL, gotoApp } from '../../utils/e2e-demo-users';
 import { submitUiPayment } from '../../utils/runtime/e2e-pay-ui';
-import { openAccountWorkspaceTab } from '../../utils/e2e-account-workspace';
-import {
-  getPersistedReceiptCursor,
-  waitForPersistedFrameEventMatch,
-} from '../../utils/e2e-runtime-receipts';
+import { getPersistedReceiptCursor, waitForPersistedFrameEventMatch } from '../../utils/e2e-runtime-receipts';
 
 const API_BASE_URL = requireApiBaseUrl();
 const TEST_TIMEOUT_MS = process.env.E2E_LONG === '1' ? 300_000 : 240_000;
@@ -39,11 +38,8 @@ type ActivityApiEvent = {
   counterpartyId?: string;
 };
 
-type RuntimeAdapterDebugSurface = {
-  query?: {
-    activity?: <T = unknown>(query: Record<string, unknown>) => Promise<T>;
-  };
-  status?: () => { runtimeId?: string; connected?: boolean };
+type CurrentWalletWindow = Window & {
+  __xln?: { env(): RuntimeReplica | null; xln(): Promise<XLNModule>; adapter(): RuntimeAdapter | null };
 };
 
 function isExpectedUiPaymentActivity(event: ActivityApiEvent): boolean {
@@ -57,11 +53,7 @@ function isExpectedUiPaymentActivity(event: ActivityApiEvent): boolean {
   } catch {
     return false;
   }
-  return (
-    (type === 'payment' || rawType.includes('payment') || title.includes('payment')) &&
-    amount >= PAYMENT_AMOUNT &&
-    amount < 8n * 10n ** 18n
-  );
+  return (type === 'payment' || rawType.includes('payment') || title.includes('payment')) && amount === PAYMENT_AMOUNT;
 }
 
 function isTransientActivityReadError(error: unknown): boolean {
@@ -82,82 +74,43 @@ function randomLabel(prefix: string): string {
 function logPage(page: Page, tag: string): string[] {
   const errors: string[] = [];
   const watcherDebug = process.env.E2E_WATCHER_DEBUG === '1';
-  page.on('console', (msg) => {
+  page.on('console', msg => {
     const text = msg.text();
     if (msg.type() === 'error') errors.push(text);
     if (
-      msg.type() === 'error' || text.includes('HTLC') || text.includes('Payment') || text.includes('[E2E]') ||
+      msg.type() === 'error' ||
+      text.includes('HTLC') ||
+      text.includes('Payment') ||
+      text.includes('[E2E]') ||
       (watcherDebug && /jadapter|J_WATCH|j_watch/i.test(text))
     ) {
       process.stdout.write(`[${tag}] ${text.slice(0, 300)}\n`);
     }
   });
-  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('pageerror', error => errors.push(error.message));
   return errors;
 }
 
 async function readJWatcherDiagnostics(page: Page): Promise<unknown> {
   return page.evaluate(() => {
-    type ReplicaState = {
-      entityId?: string;
-      lastFinalizedJHeight?: number;
-      config?: { jurisdiction?: { name?: string; chainId?: number; depositoryAddress?: string } };
-      jHistoryFinality?: { finalizedThroughHeight?: number; tipBlockHash?: string; jurisdictionRef?: string };
-    };
-    type EntityReplica = {
-      entityId?: string;
-      signerId?: string;
-      state?: ReplicaState;
-      jHistory?: {
-        jurisdictionRef?: string;
-        scannedThroughHeight?: number;
-        tipBlockHash?: string;
-        blockHashes?: Map<number, string>;
-      };
-    };
-    type JurisdictionReplica = {
-      name?: string;
-      chainId?: number;
-      blockNumber?: bigint;
-      depositoryAddress?: string;
-      rpcs?: string[];
-      jadapter?: { chainId?: number };
-    };
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        eReplicas?: Map<string, EntityReplica>;
-        jReplicas?: Map<string, JurisdictionReplica>;
-      };
-    }).isolatedEnv;
+    const env = (window as CurrentWalletWindow).__xln?.env();
+    if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
     return {
-      jurisdictions: [...(env?.state?.jReplicas?.entries() ?? [])].map(([key, replica]) => ({
+      jurisdictions: [...env.state.jReplicas.entries()].map(([key, replica]) => ({
         key,
         name: replica.name,
         chainId: replica.chainId,
-        adapterChainId: replica.jadapter?.chainId,
-        blockNumber: String(replica.blockNumber ?? ''),
-        depositoryAddress: replica.contracts?.depository,
+        blockNumber: String(replica.blockNumber),
+        depositoryAddress: replica.contracts.depository,
         rpcs: replica.rpcs,
       })),
-      entities: [...(env?.state?.eReplicas?.entries() ?? [])].map(([key, replica]) => {
-        const finalizedHeight = Number(replica.state?.lastFinalizedJHeight ?? 0);
-        return {
-          key,
-          entityId: replica.entityId,
-          signerId: replica.signerId,
-          jurisdiction: replica.state?.config?.jurisdiction,
-          finalizedHeight,
-          finality: replica.state?.jHistoryFinality,
-          history: replica.jHistory
-            ? {
-                jurisdictionRef: replica.jHistory.jurisdictionRef,
-                scannedThroughHeight: replica.jHistory.scannedThroughHeight,
-                tipBlockHash: replica.jHistory.tipBlockHash,
-                finalizedBlockHash: replica.jHistory.blockHashes?.get(finalizedHeight),
-              }
-            : null,
-        };
-      }),
+      entities: [...env.state.eReplicas.entries()].map(([key, replica]) => ({
+        key,
+        entityId: replica.entityId,
+        signerId: replica.signerId,
+        finalizedHeight: replica.state.lastFinalizedJHeight,
+        finality: replica.state.jHistoryFinality,
+      })),
     };
   });
 }
@@ -165,12 +118,14 @@ async function readJWatcherDiagnostics(page: Page): Promise<unknown> {
 async function discoverPrimaryHub(page: Page): Promise<string> {
   const response = await page.request.get(`${API_BASE_URL}/api/debug/entities?limit=5000`);
   expect(response.ok(), 'debug entities endpoint must be reachable').toBe(true);
-  const body = await response.json() as { entities?: HubDirectoryEntry[] };
+  const body = (await response.json()) as { entities?: HubDirectoryEntry[] };
   const hubs = (Array.isArray(body.entities) ? body.entities : [])
-    .filter((entry) => entry.isHub === true && entry.online !== false)
+    .filter(entry => entry.isHub === true && entry.online !== false)
     .sort((a, b) => {
       const rank = (name: string | undefined): number => {
-        const normalized = String(name || '').trim().toUpperCase();
+        const normalized = String(name || '')
+          .trim()
+          .toUpperCase();
         if (normalized === 'H3') return 0;
         if (normalized === 'H2') return 1;
         if (normalized === 'H1') return 2;
@@ -185,61 +140,36 @@ async function discoverPrimaryHub(page: Page): Promise<string> {
 }
 
 async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs = CONSENSUS_TIMEOUT_MS): Promise<void> {
-  const ok = await expect
+  await expect
     .poll(
-      async () => {
-        const inGossip = await page.evaluate((targetEntityId) => {
-          const view = window as typeof window & {
-            XLN?: { refreshGossip?: (env: unknown) => void };
-            isolatedEnv?: {
-              gossip?: {
-                getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; metadata?: { runtimeId?: string } }>;
-              };
-            };
-          };
-          try {
-            view.XLN?.refreshGossip?.(view.isolatedEnv);
-          } catch {
-            // best effort
-          }
-          const profiles = view.isolatedEnv?.gossip?.getProfiles?.() || [];
-          return profiles.some((profile) => {
-            const id = String(profile?.entityId || '').toLowerCase();
-            return id === String(targetEntityId || '').toLowerCase()
-              && Boolean(profile?.runtimeId || profile?.metadata?.runtimeId);
-          });
-        }, entityId).catch(() => false);
-        if (inGossip) return true;
-
-        const response = await page.request.get(
-          `${API_BASE_URL}/api/debug/entities?limit=5000&q=${encodeURIComponent(entityId)}`,
-        );
-        if (!response.ok()) return false;
-        const body = await response.json() as { entities?: Array<{ entityId?: string; runtimeId?: string }> };
-        return (Array.isArray(body.entities) ? body.entities : []).some((entry) =>
-          String(entry.entityId || '').toLowerCase() === entityId.toLowerCase() && Boolean(entry.runtimeId),
-        );
-      },
-      { timeout: timeoutMs, intervals: [500, 1000, 1500] },
+      () =>
+        page.evaluate(async target => {
+          const debug = (window as CurrentWalletWindow).__xln;
+          const env = debug?.env();
+          if (!debug || !env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+          await (await debug.xln()).ensureGossipProfiles(env, [target]);
+          return env.gossip
+            .getProfiles()
+            .some(
+              profile =>
+                profile.entityId.toLowerCase() === target.toLowerCase() &&
+                Boolean(profile.runtimeId || profile.metadata?.runtimeId),
+            );
+        }, entityId),
+      { timeout: timeoutMs, intervals: [200, 400, 800] },
     )
     .toBe(true);
-
-  void ok;
-}
-
-async function hasExportedRuntimeEnv(page: Page): Promise<boolean> {
-  return await page.evaluate(() => {
-    const env = (window as typeof window & { isolatedEnv?: { runtimeId?: unknown } }).isolatedEnv;
-    return Boolean(env && typeof env === 'object' && String(env.runtimeId || '').trim());
-  });
 }
 
 async function getActiveRuntimeId(page: Page): Promise<string> {
   const runtimeId = await page.evaluate(() => {
-    const fromUi = document.querySelector<HTMLElement>('[data-testid="context-current"]')?.dataset?.runtimeId;
-    if (fromUi) return String(fromUi).trim();
-    const view = window as typeof window & { isolatedEnv?: { runtimeId?: string } };
-    return String(view.isolatedEnv?.runtimeId || '').trim();
+    const env = (
+      window as Window & {
+        __xln?: { env(): import('../../../core/runtime/types').RuntimeReplica | null };
+      }
+    ).__xln?.env();
+    if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+    return env.runtimeId;
   });
   expect(runtimeId, 'runtimeId must be visible in UI or runtime env').toBeTruthy();
   return runtimeId;
@@ -250,23 +180,27 @@ async function faucetOffchain(page: Page, entityId: string, hubEntityId: string)
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     const runtimeId = await getActiveRuntimeId(page);
 
-    const response = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
-      data: {
-        userEntityId: entityId,
-        userRuntimeId: runtimeId,
-        hubEntityId,
-        tokenId: 1,
-        amount: '100',
-      },
-    }).catch((error) => ({
-      ok: () => false,
-      status: () => 0,
-      json: async () => ({ error: error instanceof Error ? error.message : String(error) }),
-    }));
+    const response = await page.request
+      .post(`${API_BASE_URL}/api/faucet/offchain`, {
+        data: {
+          userEntityId: entityId,
+          userRuntimeId: runtimeId,
+          hubEntityId,
+          tokenId: 1,
+          amount: '100',
+        },
+      })
+      .catch(error => ({
+        ok: () => false,
+        status: () => 0,
+        json: async () => ({ error: error instanceof Error ? error.message : String(error) }),
+      }));
 
-    const body = await response.json().catch(() => ({} as Record<string, unknown>));
+    const body = await response.json().catch(() => ({}) as Record<string, unknown>);
     const ok = response.ok();
-    process.stdout.write(`[PAY-SMOKE][FAUCET] attempt=${attempt} status=${response.status()} body=${JSON.stringify(body)}\n`);
+    process.stdout.write(
+      `[PAY-SMOKE][FAUCET] attempt=${attempt} status=${response.status()} body=${JSON.stringify(body)}\n`,
+    );
     if (ok) return;
 
     lastError = JSON.stringify(body);
@@ -307,39 +241,25 @@ async function waitForSenderSpend(
 }
 
 async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<void> {
-  if (await hasExportedRuntimeEnv(page)) {
-    await page.waitForFunction(({ targetRuntimeId }) => {
-      const view = window as typeof window & {
-        isolatedEnv?: import('../../../core/api/public/runtime-module').RuntimeReplica;
-        __xln?: { runtimeConnectivity?: { connected?: boolean } };
-      };
-      const env = view.isolatedEnv;
-      if (!env || env.runtimeId.toLowerCase() !== targetRuntimeId.toLowerCase() || env.state.eReplicas.size === 0) return false;
+  await page.waitForFunction(
+    targetRuntimeId => {
+      const env = (window as CurrentWalletWindow).__xln?.env();
+      if (!env || env.runtimeId.toLowerCase() !== targetRuntimeId.toLowerCase() || env.state.eReplicas.size === 0)
+        return false;
       const accounts = [...env.state.eReplicas.values()].flatMap(entity => [...entity.state.accounts.values()]);
-      // Restored money must be usable online with delivery acknowledged before
-      // this recovery test closes its contexts, not merely readable from disk.
-      return view.__xln?.runtimeConnectivity?.connected === true
-        && (env.pendingNetworkOutputs?.length ?? 0) === 0
-        && (env.pendingOutputs?.length ?? 0) === 0
-        && (env.networkInbox?.length ?? 0) === 0
-        && env.runtimeMempool.entityInputs.length === 0
-        && accounts.every(account => !account.pendingFrame && !account.pendingAccountInput && account.mempool.length === 0);
-    }, { targetRuntimeId: runtimeId }, { timeout: CONSENSUS_TIMEOUT_MS });
-    return;
-  }
-
-  await expect
-    .poll(async () => {
-      const trigger = page.getByTestId('context-current').first();
-      if (!await trigger.isVisible().catch(() => false)) return false;
-      const activeRuntimeId = String(await trigger.getAttribute('data-runtime-id') || '').trim().toLowerCase();
-      return activeRuntimeId === runtimeId.toLowerCase();
-    }, {
-      timeout: CONSENSUS_TIMEOUT_MS,
-      intervals: [500, 1000, 1500],
-      message: `runtime ${runtimeId.slice(0, 10)} must be re-selected after reload`,
-    })
-    .toBe(true);
+      // Recovery must restore usable online money and drain acknowledged delivery.
+      return (
+        env.infrastructure?.p2p?.isConnected() === true &&
+        (env.pendingNetworkOutputs?.length ?? 0) === 0 &&
+        (env.pendingOutputs?.length ?? 0) === 0 &&
+        (env.networkInbox?.length ?? 0) === 0 &&
+        env.runtimeMempool.entityInputs.length === 0 &&
+        accounts.every(account => !account.pendingFrame && !account.pendingAccountInput && account.mempool.length === 0)
+      );
+    },
+    runtimeId,
+    { timeout: CONSENSUS_TIMEOUT_MS },
+  );
 }
 
 async function countRuntimeActivityEvents(
@@ -350,25 +270,23 @@ async function countRuntimeActivityEvents(
 ): Promise<number> {
   let events: ActivityApiEvent[];
   try {
-    events = await page.evaluate(async ({ targetEntityId, sourceParams }) => {
-      const view = window as typeof window & {
-        __xln?: {
-          adapter?: RuntimeAdapterDebugSurface;
-        };
-      };
-      const readActivity = view.__xln?.adapter?.query?.activity;
-      if (!readActivity) throw new Error('E2E_ACTIVITY_QUERY_UNAVAILABLE');
-      const kind = sourceParams.kind && sourceParams.kind !== 'all' ? sourceParams.kind : undefined;
-      const types = sourceParams.types ? String(sourceParams.types).split(',').filter(Boolean) : undefined;
-      const body = await readActivity<{ events?: ActivityApiEvent[] }>({
-        entityId: targetEntityId,
-        ...(kind ? { kind } : {}),
-        ...(types ? { types } : {}),
-        limit: 80,
-        scanLimit: types?.length ? 1000 : 100,
-      });
-      return Array.isArray(body.events) ? body.events : [];
-    }, { targetEntityId: entityId, sourceParams: params });
+    events = await page.evaluate(
+      async ({ targetEntityId, sourceParams }) => {
+        const adapter = (window as CurrentWalletWindow).__xln?.adapter();
+        if (!adapter) throw new Error('E2E_ACTIVITY_QUERY_UNAVAILABLE');
+        const kind = sourceParams.kind && sourceParams.kind !== 'all' ? sourceParams.kind : undefined;
+        const types = sourceParams.types ? String(sourceParams.types).split(',').filter(Boolean) : undefined;
+        const body = await adapter.read<{ events: ActivityApiEvent[] }>('activity', {
+          entityId: targetEntityId,
+          ...(kind ? { kind } : {}),
+          ...(types ? { types } : {}),
+          limit: 80,
+          scanLimit: types?.length ? 1000 : 100,
+        });
+        return Array.isArray(body.events) ? body.events : [];
+      },
+      { targetEntityId: entityId, sourceParams: params },
+    );
   } catch (error) {
     if (isTransientActivityReadError(error)) return 0;
     throw error;
@@ -377,302 +295,232 @@ async function countRuntimeActivityEvents(
   return events.filter(predicate).length;
 }
 
-async function hasActivityDebugQuery(page: Page): Promise<boolean> {
-  return page.evaluate(() => {
-    const view = window as typeof window & {
-      __xln?: {
-        adapter?: RuntimeAdapterDebugSurface;
-      };
-    };
-    return typeof view.__xln?.adapter?.query?.activity === 'function';
-  });
-}
-
-async function verifyEntityActivityHistory(page: Page, entityId: string, options: { requirePaymentFilter?: boolean } = {}): Promise<void> {
-  const hasDebugQuery = await hasActivityDebugQuery(page);
-  if (hasDebugQuery) {
+async function verifyEntityActivityHistory(
+  page: Page,
+  entityId: string,
+  options: { requirePaymentFilter?: boolean } = {},
+): Promise<void> {
+  for (const kind of ['all', 'offchain']) {
     await expect
-      .poll(
-        () => countRuntimeActivityEvents(
-          page,
-          entityId,
-          { kind: 'all' },
-          isExpectedUiPaymentActivity,
-        ),
-        {
-          timeout: CONSENSUS_TIMEOUT_MS,
-          intervals: [500, 1000, 1500],
-          message: `activity API must expose payment history for ${entityId.slice(0, 12)}`,
-        },
-      )
-      .toBeGreaterThan(0);
-  }
-
-  await openAccountWorkspaceTab(page, 'history');
-  await expect(page.getByTestId('entity-history-panel')).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
-  await expect(page.locator('.settlement-panel .batch-card')).toHaveCount(0);
-  await expect
-    .poll(() => page.getByTestId('entity-history-event').count(), {
-      timeout: CONSENSUS_TIMEOUT_MS,
-      intervals: [500, 1000, 1500],
-      message: 'entity history should render at least one event',
-    })
-    .toBeGreaterThan(0);
-
-  if (await hasActivityDebugQuery(page)) {
-    await expect
-      .poll(
-        () => countRuntimeActivityEvents(
-          page,
-          entityId,
-          { kind: 'offchain' },
-          isExpectedUiPaymentActivity,
-        ),
-        {
-          timeout: CONSENSUS_TIMEOUT_MS,
-          intervals: [500, 1000, 1500],
-          message: 'history panel adapter must expose off-chain payment history',
-        },
-      )
-      .toBeGreaterThan(0);
-  }
-
-  await page.getByTestId('history-kind-offchain').click();
-  await expect
-    .poll(() => page.getByTestId('entity-history-event').count(), {
-      timeout: CONSENSUS_TIMEOUT_MS,
-      intervals: [500, 1000, 1500],
-      message: 'off-chain history tab should keep payment events visible',
-    })
-    .toBeGreaterThan(0);
-
-  if (options.requirePaymentFilter) {
-    await page.getByTestId('history-type-payment').click();
-    await expect
-      .poll(() => page.getByTestId('entity-history-event').count(), {
+      .poll(() => countRuntimeActivityEvents(page, entityId, { kind }, isExpectedUiPaymentActivity), {
         timeout: CONSENSUS_TIMEOUT_MS,
-        intervals: [500, 1000, 1500],
-        message: 'payment filter should keep payment events visible',
+        intervals: [200, 400, 800],
+        message: `durable ${kind} activity must include the exact 7 USDC payment`,
       })
       .toBeGreaterThan(0);
-    await expect(
-      page.getByTestId('history-event-amount').filter({ hasText: /^7(\.|$)/ }).first(),
-    ).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
-    await expect
-      .poll(() => page.getByTestId('entity-history-event').evaluateAll((rows) => rows.filter((row) => {
-        const amount = row.querySelector('[data-testid="history-event-amount"]')?.textContent?.trim() || '';
-        const text = row.textContent || '';
-        return /^7(\.|$)/.test(amount) && text.includes('Payment');
-      }).length), {
-        timeout: CONSENSUS_TIMEOUT_MS,
-        intervals: [500, 1000, 1500],
-        message: 'sender history should render the UI payment row',
-      })
-      .toBeGreaterThan(0);
-    if (HISTORY_SCREENSHOT_PATH) {
-      await page.screenshot({ path: HISTORY_SCREENSHOT_PATH, fullPage: true });
-    }
-    await page.getByTestId('history-clear-filters').click();
   }
-
-  await page.getByTestId('history-search').fill('payment');
-  await expect
-    .poll(() => page.getByTestId('entity-history-event').count(), {
-      timeout: CONSENSUS_TIMEOUT_MS,
-      intervals: [500, 1000, 1500],
-      message: 'search should find payment history',
-    })
-    .toBeGreaterThan(0);
-  await page.getByTestId('history-clear-filters').click();
-
-  await page.getByTestId('history-mode-infinite').click();
-  await expect(page.getByTestId('history-load-older')).toBeVisible();
-  await page.getByTestId('history-mode-timeframe').click();
-  await expect(page.getByTestId('history-from')).toBeVisible();
-  await expect(page.getByTestId('history-to')).toBeVisible();
-  await page.getByTestId('history-kind-onchain').click();
-  await expect(page.getByTestId('entity-history-panel')).toBeVisible();
+  await page.getByTestId('nav-activity').locator('visible=true').first().click();
+  const rows = page.getByTestId('activity-row');
+  await expect(rows.first()).toBeVisible();
+  await page.getByRole('button', { name: 'Payments', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Payments', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    rows
+      .locator('.aa')
+      .filter({ hasText: /^[+−-]?7(?:\.0+)? USDC$/ })
+      .first(),
+  ).toBeVisible();
+  if (options.requirePaymentFilter && HISTORY_SCREENSHOT_PATH) {
+    await page.screenshot({ path: HISTORY_SCREENSHOT_PATH, fullPage: true });
+  }
+  await page.getByTestId('activity-search').fill('payment');
+  await expect(rows.first()).toBeVisible();
+  await page.getByTestId('activity-search').fill('');
+  // Current Activity has date filters directly; retired infinite/timeframe toggles are not wallet behavior.
+  await expect(page.getByLabel('From', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Until', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'On-chain', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'On-chain', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'All', exact: true }).click();
+  await expect(rows.first()).toBeVisible();
 }
 
 test.describe('Payment Smoke', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
-  test('fresh runtimes can open accounts, faucet, pay, and reload persisted state', { tag: '@functional' }, async ({ browser, page, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent }) => {
-    let senderContext: BrowserContext | null = null;
-    let recipientContext: BrowserContext | null = null;
+  test(
+    'fresh runtimes can open accounts, faucet, pay, and reload persisted state',
+    { tag: '@functional' },
+    async ({ browser, page, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent }) => {
+      let senderContext: BrowserContext | null = null;
+      let recipientContext: BrowserContext | null = null;
 
-    try {
-      if (USE_BASELINE) {
-        await ensureE2EBaseline(page, {
-          requireHubMesh: true,
-          requireMarketMaker: false,
-          minHubCount: 3,
-          timeoutMs: CONSENSUS_TIMEOUT_MS * 3,
-        });
-      }
+      try {
+        if (USE_BASELINE) {
+          await ensureE2EBaseline(page, {
+            requireHubMesh: true,
+            requireMarketMaker: false,
+            minHubCount: 3,
+            timeoutMs: CONSENSUS_TIMEOUT_MS * 3,
+          });
+        }
 
-      const contextOptions = { ignoreHTTPSErrors: true, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent };
-      senderContext = await browser.newContext(contextOptions);
-      recipientContext = await browser.newContext(contextOptions);
+        const contextOptions = { ignoreHTTPSErrors: true, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent };
+        senderContext = await browser.newContext(contextOptions);
+        recipientContext = await browser.newContext(contextOptions);
 
-      const senderPage = await senderContext.newPage();
-      const recipientPage = await recipientContext.newPage();
-      const senderErrors = logPage(senderPage, 'SENDER');
-      const recipientErrors = logPage(recipientPage, 'RECIPIENT');
+        const senderPage = await senderContext.newPage();
+        const recipientPage = await recipientContext.newPage();
+        const senderErrors = logPage(senderPage, 'SENDER');
+        const recipientErrors = logPage(recipientPage, 'RECIPIENT');
 
-      await Promise.all([
-        gotoApp(senderPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
-        gotoApp(recipientPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
-      ]);
-
-      for (const walletPage of [senderPage, recipientPage]) {
-        expect(walletPage.viewportSize()).toEqual(viewport);
-        const device = await walletPage.evaluate(() => ({ width: window.innerWidth, touch: matchMedia('(pointer: coarse)').matches }));
-        expect(device.touch).toBe(hasTouch);
-        console.log('[PAY-SMOKE-DEVICE]', { viewport, isMobile, hasTouch, ...device });
-      }
-
-      const sender = await createRuntimeIdentity(senderPage, randomLabel('prodpay-a'), randomMnemonic(), {
-        requireOnline: false,
-      });
-      const recipient = await createRuntimeIdentity(recipientPage, randomLabel('prodpay-b'), randomMnemonic(), {
-        requireOnline: false,
-      });
-      expect(sender.entityId).not.toBe(recipient.entityId);
-
-      const hubId = await discoverPrimaryHub(senderPage);
-      process.stdout.write(
-        `[PAY-SMOKE] baseline=${USE_BASELINE ? 'yes' : 'no'} sender=${sender.entityId} recipient=${recipient.entityId} hub=${hubId}\n`,
-      );
-
-      await Promise.all([
-        connectRuntimeToHub(senderPage, sender, hubId, { requireOnline: false }),
-        connectRuntimeToHub(recipientPage, recipient, hubId, { requireOnline: false }),
-      ]);
-
-      await Promise.all([
-        waitForEntityAdvertised(senderPage, sender.entityId),
-        waitForEntityAdvertised(senderPage, recipient.entityId),
-        waitForEntityAdvertised(recipientPage, sender.entityId),
-        waitForEntityAdvertised(recipientPage, recipient.entityId),
-      ]);
-
-      const senderBeforeFaucet = await getRenderedOutboundForAccount(senderPage, hubId);
-      await faucetOffchain(senderPage, sender.entityId, hubId);
-      const senderAfterFaucet = await waitForRenderedOutboundForAccountDelta(senderPage, hubId, senderBeforeFaucet, 100, {
-        timeoutMs: CONSENSUS_TIMEOUT_MS,
-      });
-      expect(senderAfterFaucet).toBeGreaterThan(senderBeforeFaucet);
-
-      const recipientBeforePayment = await getRenderedOutboundForAccount(recipientPage, hubId);
-      const supportsPersistedReceipts =
-        await hasExportedRuntimeEnv(senderPage)
-        && await hasExportedRuntimeEnv(recipientPage);
-      const senderCursor = supportsPersistedReceipts ? await getPersistedReceiptCursor(senderPage) : null;
-      const recipientCursor = supportsPersistedReceipts ? await getPersistedReceiptCursor(recipientPage) : null;
-
-      await waitForReceiveReadyGossipProfiles(senderPage, [sender.entityId, hubId, recipient.entityId], hubId);
-      await submitUiPayment(senderPage, {
-        recipientEntityId: recipient.entityId,
-        amount: PAYMENT_AMOUNT,
-        tokenId: 1,
-        routeEntityIds: [hubId, recipient.entityId],
-      });
-
-      if (supportsPersistedReceipts && senderCursor && recipientCursor) {
-        const [senderFinalize, recipientReceive] = await Promise.all([
-          waitForPersistedFrameEventMatch(senderPage, {
-            cursor: senderCursor,
-            eventName: 'HtlcFinalized',
-            entityId: sender.entityId,
-            timeoutMs: CONSENSUS_TIMEOUT_MS,
-            predicate: (event) => String(event.data?.amount || '') === PAYMENT_AMOUNT.toString(),
-          }),
-          waitForPersistedFrameEventMatch(recipientPage, {
-            cursor: recipientCursor,
-            eventName: 'HtlcReceived',
-            entityId: recipient.entityId,
-            timeoutMs: CONSENSUS_TIMEOUT_MS,
-            predicate: (event) => String(event.data?.amount || '') === PAYMENT_AMOUNT.toString(),
-          }),
+        await Promise.all([
+          gotoApp(senderPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
+          gotoApp(recipientPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
         ]);
 
-        expect(String(senderFinalize.data?.toEntity || '').toLowerCase(), 'sender finalized through chosen hub').toBe(hubId.toLowerCase());
-        expect(String(recipientReceive.data?.fromEntity || '').toLowerCase(), 'recipient should receive from hub hop').toBe(hubId.toLowerCase());
-      }
+        for (const walletPage of [senderPage, recipientPage]) {
+          expect(walletPage.viewportSize()).toEqual(viewport);
+          const device = await walletPage.evaluate(() => ({
+            width: window.innerWidth,
+            touch: matchMedia('(pointer: coarse)').matches,
+          }));
+          expect(device.touch).toBe(hasTouch);
+          console.log('[PAY-SMOKE-DEVICE]', { viewport, isMobile, hasTouch, ...device });
+        }
 
-      const recipientAfterPayment = await waitForRenderedOutboundForAccountDelta(
-        recipientPage,
-        hubId,
-        recipientBeforePayment,
-        Number(PAYMENT_AMOUNT / 10n ** USDC_DECIMALS),
-        { timeoutMs: CONSENSUS_TIMEOUT_MS },
-      );
-      const senderAfterPayment = await waitForSenderSpend(
-        senderPage,
-        hubId,
-        senderAfterFaucet,
-        Number(PAYMENT_AMOUNT / 10n ** USDC_DECIMALS),
-      );
+        const sender = await createWalletIdentity(senderPage, randomLabel('prodpay-a'), randomMnemonic());
+        const recipient = await createWalletIdentity(recipientPage, randomLabel('prodpay-b'), randomMnemonic());
+        expect(sender.entityId).not.toBe(recipient.entityId);
 
-      await Promise.all([
-        verifyEntityActivityHistory(senderPage, sender.entityId, { requirePaymentFilter: true }),
-        verifyEntityActivityHistory(recipientPage, recipient.entityId),
-      ]);
+        const hubId = await discoverPrimaryHub(senderPage);
+        process.stdout.write(
+          `[PAY-SMOKE] baseline=${USE_BASELINE ? 'yes' : 'no'} sender=${sender.entityId} recipient=${recipient.entityId} hub=${hubId}\n`,
+        );
 
-      await Promise.all([
-        senderPage.reload({ waitUntil: 'domcontentloaded' }),
-        recipientPage.reload({ waitUntil: 'domcontentloaded' }),
-      ]);
-      const unlockAfterReload = async (reloadedPage: Page): Promise<void> => {
-        await reloadedPage.locator('button.wallet').first().click();
-        await expect(reloadedPage.getByRole('heading', { name: 'Set a local password', exact: true })).toBeVisible();
-        await reloadedPage.getByLabel('Password', { exact: true }).fill('payment-reload-password');
-        await reloadedPage.getByLabel('Confirm password', { exact: true }).fill('payment-reload-password');
-        await reloadedPage.getByRole('button', { name: 'Save and open', exact: true }).click();
-      };
-      await Promise.all([
-        unlockAfterReload(senderPage),
-        unlockAfterReload(recipientPage),
-      ]);
-      await Promise.all([
-        gotoApp(senderPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
-        gotoApp(recipientPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
-      ]);
-      await Promise.all([
-        waitForRestoredRuntime(senderPage, sender.runtimeId),
-        waitForRestoredRuntime(recipientPage, recipient.runtimeId),
-      ]);
+        await Promise.all([
+          connectRuntimeToHub(senderPage, sender, hubId, { requireOnline: false }),
+          connectRuntimeToHub(recipientPage, recipient, hubId, { requireOnline: false }),
+        ]);
 
-      await expect
-        .poll(() => getRenderedOutboundForAccount(senderPage, hubId), {
-          timeout: CONSENSUS_TIMEOUT_MS,
-          intervals: [500, 1000, 1500],
-        })
-        .toBe(senderAfterPayment);
-      await expect
-        .poll(() => getRenderedOutboundForAccount(recipientPage, hubId), {
-          timeout: CONSENSUS_TIMEOUT_MS,
-          intervals: [500, 1000, 1500],
-        })
-        .toBe(recipientAfterPayment);
+        await Promise.all([
+          waitForEntityAdvertised(senderPage, sender.entityId),
+          waitForEntityAdvertised(senderPage, recipient.entityId),
+          waitForEntityAdvertised(recipientPage, sender.entityId),
+          waitForEntityAdvertised(recipientPage, recipient.entityId),
+        ]);
 
-      const runtimeErrors = [...senderErrors, ...recipientErrors];
-      if (runtimeErrors.length > 0 || process.env.E2E_DEBUG_J === '1') {
-        const diagnostics = {
-          sender: await readJWatcherDiagnostics(senderPage),
-          recipient: await readJWatcherDiagnostics(recipientPage),
+        const senderBeforeFaucet = await getRenderedOutboundForAccount(senderPage, hubId);
+        await faucetOffchain(senderPage, sender.entityId, hubId);
+        const senderAfterFaucet = await waitForRenderedOutboundForAccountDelta(
+          senderPage,
+          hubId,
+          senderBeforeFaucet,
+          100,
+          {
+            timeoutMs: CONSENSUS_TIMEOUT_MS,
+          },
+        );
+        expect(senderAfterFaucet).toBeGreaterThan(senderBeforeFaucet);
+
+        const recipientBeforePayment = await getRenderedOutboundForAccount(recipientPage, hubId);
+        const senderCursor = await getPersistedReceiptCursor(senderPage);
+        const recipientCursor = await getPersistedReceiptCursor(recipientPage);
+
+        await waitForReceiveReadyGossipProfiles(senderPage, [sender.entityId, hubId, recipient.entityId], hubId);
+        await submitUiPayment(senderPage, {
+          recipientEntityId: recipient.entityId,
+          amount: PAYMENT_AMOUNT,
+          tokenId: 1,
+          routeEntityIds: [hubId, recipient.entityId],
+        });
+
+        {
+          const [senderFinalize, recipientReceive] = await Promise.all([
+            waitForPersistedFrameEventMatch(senderPage, {
+              cursor: senderCursor,
+              eventName: 'HtlcFinalized',
+              entityId: sender.entityId,
+              timeoutMs: CONSENSUS_TIMEOUT_MS,
+              predicate: event => String(event.data?.amount || '') === PAYMENT_AMOUNT.toString(),
+            }),
+            waitForPersistedFrameEventMatch(recipientPage, {
+              cursor: recipientCursor,
+              eventName: 'HtlcReceived',
+              entityId: recipient.entityId,
+              timeoutMs: CONSENSUS_TIMEOUT_MS,
+              predicate: event => String(event.data?.amount || '') === PAYMENT_AMOUNT.toString(),
+            }),
+          ]);
+
+          expect(String(senderFinalize.data?.toEntity || '').toLowerCase(), 'sender finalized through chosen hub').toBe(
+            hubId.toLowerCase(),
+          );
+          expect(
+            String(recipientReceive.data?.fromEntity || '').toLowerCase(),
+            'recipient should receive from hub hop',
+          ).toBe(hubId.toLowerCase());
+        }
+
+        const recipientAfterPayment = await waitForRenderedOutboundForAccountDelta(
+          recipientPage,
+          hubId,
+          recipientBeforePayment,
+          Number(PAYMENT_AMOUNT / 10n ** USDC_DECIMALS),
+          { timeoutMs: CONSENSUS_TIMEOUT_MS },
+        );
+        const senderAfterPayment = await waitForSenderSpend(
+          senderPage,
+          hubId,
+          senderAfterFaucet,
+          Number(PAYMENT_AMOUNT / 10n ** USDC_DECIMALS),
+        );
+
+        await Promise.all([
+          verifyEntityActivityHistory(senderPage, sender.entityId, { requirePaymentFilter: true }),
+          verifyEntityActivityHistory(recipientPage, recipient.entityId),
+        ]);
+
+        await Promise.all([
+          senderPage.reload({ waitUntil: 'domcontentloaded' }),
+          recipientPage.reload({ waitUntil: 'domcontentloaded' }),
+        ]);
+        const unlockAfterReload = async (reloadedPage: Page): Promise<void> => {
+          await reloadedPage.getByRole('button', { name: 'Continue', exact: true }).click();
+          await reloadedPage.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
+          await reloadedPage.getByRole('button', { name: 'Unlock', exact: true }).click();
+          await expect(reloadedPage.getByTestId('nav-home').locator('visible=true').first()).toBeVisible();
         };
-        process.stdout.write(`[PAY-SMOKE][RUNTIME-DIAGNOSTICS] ${JSON.stringify(diagnostics)}\n`);
-      }
-      expect(runtimeErrors, 'payment runtime pages must not emit console/page errors').toEqual([]);
+        await Promise.all([unlockAfterReload(senderPage), unlockAfterReload(recipientPage)]);
+        await Promise.all([
+          gotoApp(senderPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
+          gotoApp(recipientPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
+        ]);
+        await Promise.all([
+          waitForRestoredRuntime(senderPage, sender.runtimeId),
+          waitForRestoredRuntime(recipientPage, recipient.runtimeId),
+        ]);
 
-      process.stdout.write(
-        `[PAY-SMOKE] PASS senderAfter=${senderAfterPayment} recipientAfter=${recipientAfterPayment} amount=${PAYMENT_AMOUNT.toString()}\n`,
-      );
-    } finally {
-      await senderContext?.close().catch(() => {});
-      await recipientContext?.close().catch(() => {});
-    }
-  });
+        await expect
+          .poll(() => getRenderedOutboundForAccount(senderPage, hubId), {
+            timeout: CONSENSUS_TIMEOUT_MS,
+            intervals: [500, 1000, 1500],
+          })
+          .toBe(senderAfterPayment);
+        await expect
+          .poll(() => getRenderedOutboundForAccount(recipientPage, hubId), {
+            timeout: CONSENSUS_TIMEOUT_MS,
+            intervals: [500, 1000, 1500],
+          })
+          .toBe(recipientAfterPayment);
+
+        const runtimeErrors = [...senderErrors, ...recipientErrors];
+        if (runtimeErrors.length > 0 || process.env.E2E_DEBUG_J === '1') {
+          const diagnostics = {
+            sender: await readJWatcherDiagnostics(senderPage),
+            recipient: await readJWatcherDiagnostics(recipientPage),
+          };
+          process.stdout.write(`[PAY-SMOKE][RUNTIME-DIAGNOSTICS] ${JSON.stringify(diagnostics)}\n`);
+        }
+        expect(runtimeErrors, 'payment runtime pages must not emit console/page errors').toEqual([]);
+
+        process.stdout.write(
+          `[PAY-SMOKE] PASS senderAfter=${senderAfterPayment} recipientAfter=${recipientAfterPayment} amount=${PAYMENT_AMOUNT.toString()}\n`,
+        );
+      } finally {
+        await senderContext?.close().catch(() => {});
+        await recipientContext?.close().catch(() => {});
+      }
+    },
+  );
 });
