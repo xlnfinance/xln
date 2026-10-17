@@ -1,0 +1,322 @@
+{
+  "deployedRuntimeSha": "33260898b968f1b6c70ea0b702048f1997598466",
+  "sourceBaseSha": "77c81b9786ce818769df6c5925c119be0a878e76",
+  "checks": {
+    "pm2-shutdown-policy-trace": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "python3 /root/xln-deployment-evidence/33260898b/trace-pm2.py"
+      ],
+      "exitCode": 0,
+      "seconds": 1.475,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-shutdown-policy-trace.log"
+    },
+    "pm2-supervision-before": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "python3 /root/xln-deployment-evidence/33260898b/assert-supervision.py"
+      ],
+      "exitCode": 1,
+      "seconds": 1.047,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-supervision-before.log"
+    },
+    "pm2-parent-only-restart": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pm2-parent-only-restart --timeout-ms 60000 -- python3 /root/xln-deployment-evidence/33260898b/pm2-shutdown/restart.py"
+      ],
+      "exitCode": 0,
+      "seconds": 40.497,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-parent-only-restart.log"
+    },
+    "pm2-supervision-after": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "python3 /root/xln-deployment-evidence/33260898b/assert-supervision.py && python3 - <<'PY'\nimport json,pathlib\np=pathlib.Path(\"/root/xln-deployment-evidence/33260898b\");old=json.loads((p/\"after-restart-ready.json\").read_text())[\"ownedBunProcesses\"]\noldserver=1007238;retired=[x[\"pid\"] for x in old if x[\"pid\"]==oldserver or x[\"ppid\"]==oldserver]\nassert len(retired)==7\nassert all(not pathlib.Path(\"/proc/\"+str(pid)).exists() for pid in retired),\"OLD_RUNTIME_PROCESS_STILL_ALIVE\"\nprint(json.dumps({\"retiredRuntimeProcesses\":retired,\"allGone\":True}))\nPY"
+      ],
+      "exitCode": 0,
+      "seconds": 1.416,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-supervision-after.log"
+    },
+    "pm2-shutdown-current-h1": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pm2-shutdown-current-h1 --timeout-ms 60000 -- bun /root/xln-deployment-evidence/33260898b/pm2-shutdown/compare-history.ts --hub=H1"
+      ],
+      "exitCode": 0,
+      "seconds": 6.862,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-shutdown-current-h1.log"
+    },
+    "pm2-shutdown-current-h2": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pm2-shutdown-current-h2 --timeout-ms 60000 -- bun /root/xln-deployment-evidence/33260898b/pm2-shutdown/compare-history.ts --hub=H2"
+      ],
+      "exitCode": 0,
+      "seconds": 4.328,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-shutdown-current-h2.log"
+    },
+    "pm2-shutdown-current-h3": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pm2-shutdown-current-h3 --timeout-ms 60000 -- bun /root/xln-deployment-evidence/33260898b/pm2-shutdown/compare-history.ts --hub=H3"
+      ],
+      "exitCode": 0,
+      "seconds": 17.105,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-shutdown-current-h3.log"
+    },
+    "pm2-quiesce-related": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "pm2-quiesce-related",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/orchestrator/process/node-runtime-quiesce.test.ts",
+        "core/__tests__/orchestrator/health/runtime-quiescence-health.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 1.13,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-quiesce-related.log"
+    },
+    "pm2-parent-watch-related": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "pm2-parent-watch-related",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/orchestrator/process/orchestrator-lifecycle-logging.test.ts",
+        "core/__tests__/orchestrator/process/orchestrator-supervision.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 0.321,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-parent-watch-related.log"
+    },
+    "pm2-parent-crash-recovery": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pm2-parent-crash-recovery --timeout-ms 60000 -- python3 /root/xln-deployment-evidence/33260898b/pm2-parent-crash/restart.py"
+      ],
+      "exitCode": 0,
+      "seconds": 42.426,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-parent-crash-recovery.log"
+    },
+    "pm2-parent-crash-h1": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pm2-parent-crash-h1 --timeout-ms 60000 -- bun /root/xln-deployment-evidence/33260898b/pm2-parent-crash/compare-history.ts --hub=H1"
+      ],
+      "exitCode": 0,
+      "seconds": 6.105,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-parent-crash-h1.log"
+    },
+    "pm2-parent-crash-h2": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pm2-parent-crash-h2 --timeout-ms 60000 -- bun /root/xln-deployment-evidence/33260898b/pm2-parent-crash/compare-history.ts --hub=H2"
+      ],
+      "exitCode": 0,
+      "seconds": 4.746,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-parent-crash-h2.log"
+    },
+    "pm2-parent-crash-h3": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pm2-parent-crash-h3 --timeout-ms 60000 -- bun /root/xln-deployment-evidence/33260898b/pm2-parent-crash/compare-history.ts --hub=H3"
+      ],
+      "exitCode": 0,
+      "seconds": 16.639,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-parent-crash-h3.log"
+    },
+    "pm2-persist-supervision": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "python3 /root/xln-deployment-evidence/33260898b/pm2-shutdown/persist.py"
+      ],
+      "exitCode": 0,
+      "seconds": 1.491,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-persist-supervision.log"
+    },
+    "pm2-final-operator-health": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pm2-final-operator-health --timeout-ms 60000 -- bun core/scripts/operations/production/prod-health-smoke.ts --url=http://127.0.0.1:8080 --expected-hubs=3 --require-hub-self-relay --expected-towers=1 --tower-url=http://127.0.0.1:9100/api/tower/healthz --require-clean-source --require-source-match --expected-git-head=33260898b968f1b6c70ea0b702048f1997598466 --expected-code-hash=33260898b968f1b6c70ea0b702048f1997598466"
+      ],
+      "exitCode": 0,
+      "seconds": 0.853,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pm2-final-operator-health.log"
+    }
+  },
+  "supervision": {
+    "treekill": false,
+    "killTimeoutMs": 60000,
+    "serviceEnvironmentUnchanged": true,
+    "otherConfigurationUnchanged": true,
+    "unrelatedProcessesUnchanged": true,
+    "previousDumpSha256": "da5401318fcb879a8d6635fc902322a6c18372810c823d9260a54df8df814b3d",
+    "savedDumpSha256": "14d965ab5d46c1481b4d6ab86358a387eaafff41f73505c4fea9e9c88c572b69"
+  },
+  "normalRestart": {
+    "sha": "33260898b968f1b6c70ea0b702048f1997598466",
+    "elapsedSeconds": 39.633,
+    "managedRecoveryDurationMs": 35054,
+    "dataReset": false,
+    "newServerPid": 1012666,
+    "treekill": false,
+    "killTimeoutMs": 60000,
+    "protectedFilesUnchanged": true,
+    "unrelatedProcessesUnchanged": true,
+    "failureMarkers": {
+      "NAPI FATAL ERROR": 0,
+      "Bun has crashed": 0,
+      "panic:": 0,
+      "quiesce.post_failed": 0,
+      "quiesce.refused": 0,
+      "shutdown failed:": 0,
+      "child.stop_timeout_sigkill": 0
+    },
+    "errorDeltaBytes": 4164,
+    "errorDeltaSha256": "392de7a3f3903d453a6f4e3db02a38deac1d416199c6f0063c1798ca14c9dc33",
+    "stages": [
+      {
+        "step": "current-state-snapshot",
+        "elapsedSeconds": 0.722,
+        "at": 1792258122642
+      },
+      {
+        "step": "parent-only-restart-request-completed",
+        "elapsedSeconds": 2.524,
+        "at": 1792258124444
+      },
+      {
+        "step": "current-recovery-ready",
+        "elapsedSeconds": 39.632,
+        "at": 1792258161553
+      }
+    ]
+  },
+  "parentCrash": {
+    "sha": "33260898b968f1b6c70ea0b702048f1997598466",
+    "elapsedSeconds": 41.401,
+    "managedRecoveryDurationMs": 36669,
+    "dataReset": false,
+    "fault": "SIGKILL exact orchestrator parent",
+    "oldProcessIdentitiesGone": [
+      1012896,
+      1012754,
+      1012839,
+      1012760,
+      1012666,
+      1012843,
+      1012766
+    ],
+    "newServerPid": 1014368,
+    "treekill": false,
+    "killTimeoutMs": 60000,
+    "protectedFilesUnchanged": true,
+    "unrelatedProcessesUnchanged": true,
+    "failureMarkers": {
+      "NAPI FATAL ERROR": 0,
+      "Bun has crashed": 0,
+      "panic:": 0,
+      "shutdown failed:": 0
+    },
+    "errorDeltaBytes": 1640,
+    "errorDeltaSha256": "bc028369e95142c80e7a0f2657f661cef14ceba2303ac5e757364edb58199999",
+    "stages": [
+      {
+        "step": "current-state-snapshot",
+        "elapsedSeconds": 0.948,
+        "at": 1792258455645
+      },
+      {
+        "step": "exact-orchestrator-sigkill",
+        "elapsedSeconds": 0.957,
+        "at": 1792258455653
+      },
+      {
+        "step": "current-recovery-ready",
+        "elapsedSeconds": 41.246,
+        "at": 1792258495943
+      }
+    ]
+  },
+  "noTestnetReset": true,
+  "noMainnetClaim": true
+}

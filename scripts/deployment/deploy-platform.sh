@@ -1241,8 +1241,10 @@ run_local_deploy() {
       run_or_fail_deploy "primary Anvil did not persist a valid checkpoint" wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil-state.json"
       run_or_fail_deploy "secondary Anvil did not persist a valid checkpoint" wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil2-state.json"
 
+      # The orchestrator owns child quiesce/termination. PM2 must signal only it;
+      # 60s covers HTTP drain (5s), quiesce (5s), pause and two child deadlines (40s).
       export XLN_PROD_DEPLOY_STARTED_AT_MS="$(bun -e 'console.log(Date.now())')"
-      run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/operations/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
+      run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/operations/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M --no-treekill --kill-timeout 60000
       run_or_fail_deploy "failed to start xln-watchtower via pm2" pm2 start scripts/operations/start-watchtower.sh --name xln-watchtower --interpreter bash --max-memory-restart 256M
       if ! wait_for_watchtower; then
         fail_deploy_with_debug "official watchtower did not become healthy"
@@ -1263,7 +1265,7 @@ run_local_deploy() {
       # Recreate from the wrapper on every non-fresh deploy. Restarting the existing PM2
       # entry can preserve an old direct command/env and silently drop wrapper defaults.
       pm2 delete xln-server >/dev/null 2>&1 || true
-      run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/operations/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
+      run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/operations/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M --no-treekill --kill-timeout 60000
     fi
     pm2 save
   else

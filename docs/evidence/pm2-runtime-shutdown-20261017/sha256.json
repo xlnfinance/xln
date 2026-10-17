@@ -1,0 +1,14 @@
+{
+  "results.json": {
+    "sha256": "d697b0dc7a7ab91bb7ffe669c73840f7c4aef6433b171914383f3707ffb60f1e",
+    "bytes": 12219
+  },
+  "readme.md": {
+    "sha256": "c90e90057ef314d7a0575f6085cc25042816ffe8c2f09ac8b684812bf3d3db46",
+    "bytes": 4248
+  },
+  "command-evidence.tar.gz": {
+    "sha256": "e47579ca32acf765af13a12bb0f68ad4c3d810a33f5724e2fc69c807ac682a8d",
+    "bytes": 21643
+  }
+}

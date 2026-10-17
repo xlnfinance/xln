@@ -28,6 +28,18 @@ Only API incidents, health and metrics receive the capability. Authenticated req
 (or loopback HTTP) and reject redirects; separate tower URLs and the wallet request receive no token.
 A missing/wrong capability remains an authorization failure, not permission to skip incident checks.
 
+## Orchestrator shutdown ownership
+
+Start `xln-server` with PM2 `--no-treekill --kill-timeout 60000`, as the canonical
+platform deploy does. The orchestrator owns child quiesce and termination; PM2's
+default tree signal races that sequence and its default1.6s grace preempts it.
+The current normal shutdown hierarchy requires up to50.15s. Existing parent-liveness
+watches still close managed children when their exact parent disappears.
+
+[Actual normal and parent-crash drills](../evidence/pm2-runtime-shutdown-20261017/readme.md)
+record supervision before/after, old process identities, current-WAL financial-state
+comparisons and unchanged unrelated owners. Preserve the current stores on restart.
+
 ## Pinned runtime executable
 
 `package.json` owns the exact Bun version. Startup and deployment reject a different
