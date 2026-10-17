@@ -1,0 +1,96 @@
+[
+  {
+    "name": "token-selection-before-assertion",
+    "data": {
+      "next": {
+        "give": "100",
+        "placeholder": "99.99",
+        "want": ""
+      },
+      "previous": {
+        "give": "100",
+        "want": "0.039992001599680063"
+      }
+    }
+  },
+  {
+    "name": "token-selection-proof",
+    "data": {
+      "after": {
+        "height": 4,
+        "holds": [
+          {
+            "incoming": "0",
+            "outgoing": "0",
+            "tokenId": 1
+          },
+          {
+            "incoming": "0",
+            "outgoing": "0",
+            "tokenId": 2
+          },
+          {
+            "incoming": "0",
+            "outgoing": "0",
+            "tokenId": 3
+          }
+        ],
+        "mempool": 0,
+        "offers": 0,
+        "pending": false,
+        "root": "0xaaf618f4abca88093e0db00ec23fd9c13ca4d3c5011f63bd14a431f495aa1191",
+        "usdc": "100000000",
+        "usdcSpendable": "100000000",
+        "weth": "0",
+        "wethCapacity": "0",
+        "wethCredit": "0"
+      },
+      "before": {
+        "height": 4,
+        "holds": [
+          {
+            "incoming": "0",
+            "outgoing": "0",
+            "tokenId": 1
+          },
+          {
+            "incoming": "0",
+            "outgoing": "0",
+            "tokenId": 2
+          },
+          {
+            "incoming": "0",
+            "outgoing": "0",
+            "tokenId": 3
+          }
+        ],
+        "mempool": 0,
+        "offers": 0,
+        "pending": false,
+        "root": "0xaaf618f4abca88093e0db00ec23fd9c13ca4d3c5011f63bd14a431f495aa1191",
+        "usdc": "100000000",
+        "usdcSpendable": "100000000",
+        "weth": "0",
+        "wethCapacity": "0",
+        "wethCredit": "0"
+      },
+      "final": {
+        "give": "0.01",
+        "placeholder": "24.995",
+        "want": ""
+      },
+      "hubId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+      "ordersBefore": {
+        "accountId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+        "entityId": "0xf64ec2d76a342d970410528b41f932528053992b729d43273b94af019a73da9e",
+        "items": [],
+        "latestHeight": 4,
+        "nextCursor": null
+      },
+      "previous": {
+        "give": "100",
+        "want": "0.039992001599680063"
+      }
+    }
+  }
+]

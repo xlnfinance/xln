@@ -219,6 +219,7 @@ export function Swap() {
 		? counterpartyFeePolicy({ state: receivingAccount }, xln.isLeftEntity(receivingOwnerId, receivingHubId), wantTokenId)
 		: null;
 
+	// Asset pickers invalidate an explicit pair-specific limit; Flip intentionally preserves both swapped amounts.
 	const flip = (): void => {
 		setGiveTokenId(wantTokenId);
 		setWantTokenId(giveTokenId);
@@ -353,7 +354,10 @@ export function Swap() {
 							<input className="input big" placeholder="0.00" inputMode="decimal" value={giveText} onChange={event => setGiveText(event.target.value)} data-testid="swap-give" />
 							<TokenPicker
 								tokenId={giveTokenId}
-								onChange={setGiveTokenId}
+								onChange={tokenId => {
+									if (tokenId !== giveTokenId) setWantText('');
+									setGiveTokenId(tokenId);
+								}}
 								{...(mode === 'same' ? { exclude: wantTokenId } : {})}
 								{...(wallet.jurisdiction ? { chip: wallet.jurisdiction } : {})}
 							/>
@@ -381,7 +385,10 @@ export function Swap() {
 							/>
 							<TokenPicker
 								tokenId={wantTokenId}
-								onChange={setWantTokenId}
+								onChange={tokenId => {
+									if (tokenId !== wantTokenId) setWantText('');
+									setWantTokenId(tokenId);
+								}}
 								{...(mode === 'same' ? { exclude: giveTokenId } : {})}
 								{...(mode === 'cross' && targetEntity?.jurisdiction?.name ? { chip: targetEntity.jurisdiction.name } : {})}
 							/>

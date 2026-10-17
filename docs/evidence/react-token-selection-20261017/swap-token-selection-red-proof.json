@@ -1,0 +1,16 @@
+[
+  {
+    "name": "token-selection-before-assertion",
+    "data": {
+      "next": {
+        "give": "100",
+        "placeholder": "0.00",
+        "want": "0.039992001599680063"
+      },
+      "previous": {
+        "give": "100",
+        "want": "0.039992001599680063"
+      }
+    }
+  }
+]

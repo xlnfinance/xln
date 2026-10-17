@@ -1,0 +1,11 @@
+# Token selection invalidates the previous pair's limit
+
+On base `0ef0b0666b20c6eab7c6b9c609e97c4d1687bbe7`, the real React wallet retained `0.039992001599680063` after its receive token changed from WETH to USDT. The amount belonged to the old pair and exceeded USDT's six decimal places; it also prevented the existing indicative quote from updating. The smallest actual browser reproduction failed40.313s at the assertion that the old receive limit must be cleared. Its complete observed values and failing result are retained alongside this report.
+
+Both existing asset-picker callbacks now clear the explicit receive amount only when the selected token changes. The current quote computation then prices the new pair. No new state, pricing formula or effect is added. Flip remains a distinct action that exchanges both token ids and exact entered amounts; changing a receive asset keeps the user's pay amount. The displayed quote remains indicative and canonical admission still binds the eventual signed order.
+
+The existing root pair-selection case now exercises the only wallet, React. It proves actual USDC/USDT and WETH/USDT market subscriptions, correct token labels including the original USDT→USDC orientation, current quotes99.99USDT for100USDC and24.995USDT for0.01WETH, and exact unchanged Account roots/money/history. It neither submits an order nor injects/fakes a feed. The corrected browser passes1/1 in46.569s with zero strict browser issues. All17 root test names/order remain; the newly uncalled retired dropdown reader with unchecked non-null assertions is deleted.
+
+Both Flip directions, signed manual-limit cancellation, strict types, final unweakened check and clean-SHA verification remain required before publication. Their exact results and final source identity are recorded outside the checkout at `/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-token-selection-publication.json`; this avoids changing the verified build fingerprint while tests run. Reproduce using the adjacent full command records, canonical capacity-one stand and60000ms outer budget.
+
+There are no core/protocol/Rust/contract/WAL changes. The prior current-format recovery evidence is unchanged. This is a bounded wallet correctness fix, not complete browser-suite, public deployment, Sepolia, soak or mainnet readiness evidence.

@@ -1,0 +1,30 @@
+{
+  "candidate": {
+    "candidateId": "b951420959a5dac8289fb0a6db7d1b2ed6aa58a6ec66b22450c10edcdb632290",
+    "gitHead": "0ef0b0666b20c6eab7c6b9c609e97c4d1687bbe7",
+    "codeHash": "c7d1ac05d50b3272d96c71680a545185bf3b95fb76cdf1746ad2afa3ce7d011f",
+    "gateConfigHash": "16320dace6e770a7b4da5a242dd226808a377f46bb93d445177bfffe15d26892"
+  },
+  "status": "failed",
+  "browserHealth": {
+    "issueCount": 0,
+    "errorCount": 0,
+    "warningCount": 0,
+    "networkFailureCount": 0,
+    "httpErrorCount": 0,
+    "severity": "OK",
+    "reason": "Browser event stream is clean",
+    "since": 0,
+    "owner": "browser",
+    "evidence": [
+      {
+        "label": "issues",
+        "value": 0
+      }
+    ]
+  },
+  "passedShards": 0,
+  "failedShards": 1,
+  "fullManifest": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-token-selection-red-boundary/run-manifest.json",
+  "sha256": "a037d4f1955be5b55cee06cb5be365433fc404c567a95d35dda0a1662a745966"
+}
