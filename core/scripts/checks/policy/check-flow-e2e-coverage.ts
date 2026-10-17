@@ -68,7 +68,10 @@ const requirements: CoverageRequirement[] = [
       'restores a wiped runtime from standalone tower backup',
       'deriveRuntimeRecoveryLookupKey',
       '/api/tower/receipt/',
-      '/app#reset',
+      "expect((await context.storageState()).origins).toEqual([])",
+      "getByTestId('restore-from-tower').check()",
+      'expect(backedUpBalance).toBe(100)',
+      "expect(after.usdcOffdelta, 'tower restore must preserve the exact funded Account delta').toBe(",
     ],
   },
   {

@@ -26,3 +26,7 @@ bun run stand:run --reason tower-funded-recovery --timeout-ms 60000 -- \
 ```
 
 Final clean-commit browser, build/runtime/worker identities, fullcheck, verifier/push result and failed boundaries are preserved under `/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/`, named `tower-*`; `handoff.json` links the exact published SHA and Git's `xln-verification/<SHA>/` evidence. No Rust, Solidity, frozen-core, financial transition or persisted-format changes belong to this slice. This local-chain component does not establish the aggregate release/fullE2E gate, public-chain operations, rollback or uninterrupted1hsoak. MacBook synchronization remains independently unconfirmed.
+
+Published wallet proof: clean `2e745d405d0c5ef712c353cf735a195c262e0b7c`, browser1/1 in58.495s including canonical rebuild; zero browser errors, warnings, failed requests or HTTP errors. Exact selected sender amount3000003 base units; recipient3000000. Fullcheck38+3 in26.603s; clean verifier and push29.423s, origin/main independently matched.
+
+The subsequent executable flow-coverage contract failed in0.017s because it required the removed `/app#reset` route string. Its recovery requirement now checks the actual empty-profile assertion, explicit current restore control,100USDC funded backup and exact restored delta assertion. All existing identity/receipt markers remain. This is a source-coverage guard update, not a substitute for the real clean-commit browser evidence above; the behavioral test and runtime are unchanged.
