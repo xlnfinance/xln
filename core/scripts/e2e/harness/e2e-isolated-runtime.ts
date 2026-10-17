@@ -34,6 +34,7 @@ export type E2EShardPorts = {
   web: number;
   custody: number;
   custodyDaemon: number;
+  watchtower: number;
   runtimeChildren: number[];
 };
 
@@ -67,6 +68,7 @@ export const deriveE2EShardPorts = (basePort: number, shard: number): E2EShardPo
     web: offset + 4,
     custody: offset + 7,
     custodyDaemon: offset + 8,
+    watchtower: offset + 10,
     runtimeChildren: [offset + 12, offset + 13, offset + 14, offset + 15],
   };
 };

@@ -1797,6 +1797,7 @@ const runShard = async (
   const webPort = shardPorts.web;
   const custodyPort = shardPorts.custody;
   const custodyDaemonPort = shardPorts.custodyDaemon;
+  const watchtowerPort = shardPorts.watchtower;
   const rpcUrl = `http://127.0.0.1:${rpcPort}`;
   const rpc2Url = `http://127.0.0.1:${rpc2Port}`;
   const apiUrl = `http://127.0.0.1:${apiPort}`;
@@ -1925,6 +1926,7 @@ const runShard = async (
       rpc2Port,
       apiPort,
       webPort,
+      watchtowerPort,
       apiPort + 10,
       apiPort + 11,
       apiPort + 12,
@@ -2049,6 +2051,7 @@ const runShard = async (
           XLN_STORAGE_HISTORY_PATH: join(shardPaths.rdbRoot, 'storage-health-history.json'),
           XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
           XLN_EPHEMERAL_TESTNET: '1',
+          XLN_WATCHTOWER_PROXY_PORTS: String(watchtowerPort),
           // Same default the deployed stack ships with (scripts/operations/start-server.sh).
           // Tests reach the faucet through the preview proxy, so they arrive as
           // ordinary callers rather than the local operator. The deployed cap
@@ -2230,6 +2233,7 @@ const runShard = async (
         PW_OUTPUT_DIR: shardPaths.resultsDir,
         E2E_BASE_URL: webUrl,
         E2E_API_BASE_URL: apiUrl,
+        E2E_WATCHTOWER_PORT: String(watchtowerPort),
         E2E_RUNTIME_BUNDLE_PATH: buildArtifacts.runtimeBundlePath,
         E2E_ANVIL_RPC: rpcUrl,
         E2E_ANVIL_RPC2: rpc2Url,

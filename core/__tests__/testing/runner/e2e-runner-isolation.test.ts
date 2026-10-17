@@ -84,6 +84,7 @@ describe('isolated E2E runner resources', () => {
       web: 20_004,
       custody: 20_007,
       custodyDaemon: 20_008,
+      watchtower: 20_010,
       runtimeChildren: [20_012, 20_013, 20_014, 20_015],
     });
     expect(() => assertE2EShardPortsIsolated(8_545, 1)).toThrow('E2E_DEV_PORT_OVERLAP');

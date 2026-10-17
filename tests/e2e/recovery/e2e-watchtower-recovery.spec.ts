@@ -1,3 +1,4 @@
+import type { RuntimeReplica, XLNModule } from '../../../core/api/public/runtime-module';
 /**
  * E2E recovery coverage for standalone watchtower backups.
  *
@@ -10,8 +11,7 @@
  *    state from the watchtower instead of booting as a fresh empty wallet.
  */
 
-import { allowBrowserIssue, expect, test, type BrowserContext, type Page } from '../../global-setup.mts';
-import { createServer } from 'node:net';
+import { expect, test, type BrowserContext, type Page } from '../../global-setup.mts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,16 +24,19 @@ import {
   waitForRenderedOutboundForAccountDelta,
 } from '../../utils/runtime/e2e-account-ui';
 import { deriveBrainvaultOracle } from '../../utils/runtime/e2e-brainvault';
-import { connectRuntimeToHub } from '../../utils/e2e-connect';
+import { connectRuntimeToHub, waitForReceiveReadyGossipProfiles } from '../../utils/e2e-connect';
 import { deriveSignerAddressFromMnemonic, gotoApp } from '../../utils/e2e-demo-users';
-import { submitUiPayment } from '../../utils/runtime/e2e-pay-ui';
-import {
-  getPersistedReceiptCursor,
-  waitForPersistedFrameEventMatch,
-} from '../../utils/e2e-runtime-receipts';
+import { prepareUiPayment } from '../../utils/runtime/e2e-pay-ui';
+import { getPersistedReceiptCursor, waitForPersistedFrameEventMatch } from '../../utils/e2e-runtime-receipts';
 import { closeRuntimeContext, closeRuntimePage } from '../../utils/runtime/e2e-runtime-shutdown.mts';
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+type CurrentWalletWindow = Window & {
+  __xln?: {
+    env(): RuntimeReplica | null;
+    xln(): Promise<XLNModule>;
+    store: { getState(): { activeEntityId: string | null; activeVaultId: string | null } };
+  };
+};
 
 const LONG_E2E = process.env.E2E_LONG === '1';
 const TEST_TIMEOUT_MS = LONG_E2E ? 240_000 : 180_000;
@@ -49,7 +52,9 @@ type WatchtowerChild = {
 };
 
 function randomBrainvaultPassphrase(): string {
-  return Wallet.createRandom().mnemonic!.phrase;
+  const mnemonic = Wallet.createRandom().mnemonic;
+  if (!mnemonic) throw new Error('RECOVERY_TEST_MNEMONIC_MISSING');
+  return mnemonic.phrase;
 }
 
 function randomLabel(prefix: string): string {
@@ -61,51 +66,23 @@ function deriveRuntimeRecoveryLookupKey(runtimeId: string, runtimeSeed: string):
 }
 
 async function expectPersistedRuntimeSeedProtected(page: Page, runtimeId: string): Promise<void> {
-  const persisted = await page.evaluate((targetRuntimeId) => {
-    try {
-      const raw = localStorage.getItem('xln-vaults');
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as {
-        runtimes?: Record<string, { id?: string; seed?: string; mnemonic12?: string }>;
-      };
-      for (const runtime of Object.values(parsed.runtimes || {})) {
-        if (String(runtime?.id || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase()) {
-          return {
-            found: true,
-            hasSeed: typeof runtime.seed === 'string' && runtime.seed.length > 0,
-            hasMnemonic12: typeof runtime.mnemonic12 === 'string' && runtime.mnemonic12.length > 0,
-          };
-        }
-      }
-      return { found: false, hasSeed: false, hasMnemonic12: false };
-    } catch {
-      return null;
-    }
-  }, runtimeId);
-  expect(persisted, `persisted runtime metadata missing for ${runtimeId.slice(0, 12)}`).not.toBeNull();
-  expect(persisted?.found, `persisted runtime metadata missing for ${runtimeId.slice(0, 12)}`).toBe(true);
-  expect(persisted?.hasSeed, 'runtime seed must not be persisted in plaintext').toBe(false);
-  expect(persisted?.hasMnemonic12, 'compatibility mnemonic must not be persisted in plaintext').toBe(false);
-}
-
-async function getFreePort(): Promise<number> {
-  return await new Promise<number>((resolve, reject) => {
-    const server = createServer();
-    server.unref();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (!address || typeof address === 'string') {
-        server.close();
-        reject(new Error('Failed to reserve port'));
-        return;
-      }
-      const port = address.port;
-      server.close((error) => {
-        if (error) reject(error);
-        else resolve(port);
-      });
-    });
+  const saved = await page.evaluate(
+    id => ({
+      activeId: (window as CurrentWalletWindow).__xln?.store.getState().activeVaultId,
+      metadata: localStorage.getItem('xln-ui-vaults'),
+      encrypted: localStorage.getItem(`xln-password-vault:${id}`),
+    }),
+    runtimeId,
+  );
+  expect(saved.activeId).toBe(runtimeId);
+  expect(saved.metadata).not.toBeNull();
+  expect(saved.metadata).not.toMatch(/"(?:seed|mnemonic12|mnemonic)"\s*:/);
+  expect(saved.encrypted).not.toBeNull();
+  expect(JSON.parse(saved.encrypted ?? 'null')).toMatchObject({
+    version: 1,
+    ciphertext: expect.any(String),
+    salt: expect.any(String),
+    iv: expect.any(String),
   });
 }
 
@@ -115,7 +92,7 @@ async function waitForTowerHealth(baseUrl: string, timeoutMs = 20_000): Promise<
     try {
       const response = await fetch(`${baseUrl}/healthz`);
       if (response.ok) {
-        const payload = await response.json() as { ok?: boolean; service?: string };
+        const payload = (await response.json()) as { ok?: boolean; service?: string };
         if (payload.ok && payload.service === 'xln-watchtower') return;
       }
     } catch {
@@ -127,16 +104,21 @@ async function waitForTowerHealth(baseUrl: string, timeoutMs = 20_000): Promise<
 }
 
 async function startWatchtower(): Promise<WatchtowerChild> {
-  const port = await getFreePort();
+  const port = Number(process.env.E2E_WATCHTOWER_PORT);
+  if (!Number.isSafeInteger(port) || port <= 0 || port > 65_535) throw new Error('RECOVERY_LEASED_TOWER_PORT_REQUIRED');
   const dbRoot = await mkdtemp(join(tmpdir(), 'xln-watchtower-e2e-'));
   const proc = spawn(
     'bun',
     [
       'core/watchtower/standalone-server.ts',
-      '--host', '127.0.0.1',
-      '--port', String(port),
-      '--db', join(dbRoot, 'watchtower.level'),
-      '--quota-bytes', String(4 * 1024 * 1024),
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(port),
+      '--db',
+      join(dbRoot, 'watchtower.level'),
+      '--quota-bytes',
+      String(4 * 1024 * 1024),
     ],
     {
       cwd: process.cwd(),
@@ -144,8 +126,8 @@ async function startWatchtower(): Promise<WatchtowerChild> {
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
-  proc.stdout?.on('data', (chunk) => process.stdout.write(`[watchtower] ${chunk.toString()}`));
-  proc.stderr?.on('data', (chunk) => process.stderr.write(`[watchtower] ${chunk.toString()}`));
+  proc.stdout?.on('data', chunk => process.stdout.write(`[watchtower] ${chunk.toString()}`));
+  proc.stderr?.on('data', chunk => process.stderr.write(`[watchtower] ${chunk.toString()}`));
   const baseUrl = `http://127.0.0.1:${port}`;
   try {
     await waitForTowerHealth(baseUrl);
@@ -158,341 +140,98 @@ async function startWatchtower(): Promise<WatchtowerChild> {
 
 async function stopWatchtower(child: WatchtowerChild | null): Promise<void> {
   if (!child) return;
-  if (child.process.exitCode === null) {
+  if (child.process.exitCode === null && child.process.signalCode === null) {
     child.process.kill('SIGTERM');
     const deadline = Date.now() + 5_000;
-    while (child.process.exitCode === null && Date.now() < deadline) {
+    while (child.process.exitCode === null && child.process.signalCode === null && Date.now() < deadline) {
       await delay(100);
     }
-    if (child.process.exitCode === null) child.process.kill('SIGKILL');
+    if (child.process.exitCode === null && child.process.signalCode === null) {
+      child.process.kill('SIGKILL');
+      const killDeadline = Date.now() + 1_000;
+      while (child.process.exitCode === null && child.process.signalCode === null && Date.now() < killDeadline)
+        await delay(25);
+    }
   }
-  await rm(child.dbRoot, { recursive: true, force: true }).catch(() => undefined);
+  const exited = child.process.exitCode !== null || child.process.signalCode !== null;
+  if (!exited) throw new Error('RECOVERY_TOWER_PROCESS_STILL_RUNNING');
+  await rm(child.dbRoot, { recursive: true, force: true });
 }
 
-async function readLocalHubAccountState(page: Page, hubId: string): Promise<{
-  runtimeHeight: number;
-  accountExists: boolean;
-  currentHeight: number;
-  hasPendingFrame: boolean;
-  tokenIds: number[];
-}> {
-  return await page.evaluate((targetHubId) => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        runtimeId?: string;
-        state?: {
-          height?: number;
-          eReplicas?: Map<string, {
-            state?: {
-              accounts?: Map<string, {
-                currentHeight?: number;
-                pendingFrame?: unknown;
-                deltas?: Map<number, unknown>;
-              }>;
-            };
-          }>;
-        };
-      };
-    }).isolatedEnv;
-    const runtimeId = String(env?.runtimeId || '').toLowerCase();
-    if (!env?.state?.eReplicas) {
-      return {
-        runtimeHeight: 0,
-        accountExists: false,
-        currentHeight: 0,
-        hasPendingFrame: false,
-        tokenIds: [],
-      };
-    }
-    for (const [key, replica] of env.state.eReplicas.entries()) {
-      const [, signerId] = String(key).split(':');
-      if (String(signerId || '').toLowerCase() !== runtimeId) continue;
-      const account = replica?.state?.accounts?.get?.(targetHubId);
-      if (!account) continue;
-      const tokenIds = account.state.deltas instanceof Map
-        ? Array.from(account.state.deltas.keys()).map((tokenId) => Number(tokenId)).sort((a, b) => a - b)
-        : [];
-      return {
-        runtimeHeight: Number(env.state.height || 0),
-        accountExists: true,
-        currentHeight: Number(account.currentHeight || 0),
-        hasPendingFrame: !!account.pendingFrame,
-        tokenIds,
-      };
-    }
+async function readLocalHubAccountState(page: Page, hubId: string) {
+  return page.evaluate(targetHubId => {
+    const debug = (window as CurrentWalletWindow).__xln;
+    const env = debug?.env();
+    const entityId = debug?.store.getState().activeEntityId;
+    if (!env || !entityId) throw new Error('RECOVERY_ACCOUNT_OWNER_UNAVAILABLE');
+    const replicas = [...env.state.eReplicas.values()].filter(replica => replica.entityId === entityId);
+    const [replica] = replicas;
+    if (replicas.length !== 1 || !replica) throw new Error('RECOVERY_ACCOUNT_OWNER_NOT_UNIQUE');
+    const account = replica.state.accounts.get(targetHubId);
     return {
-      runtimeHeight: Number(env.state.height || 0),
-      accountExists: false,
-      currentHeight: 0,
-      hasPendingFrame: false,
-      tokenIds: [],
+      runtimeHeight: env.state.height,
+      hubId: targetHubId,
+      accountExists: Boolean(account),
+      currentHeight: account?.currentHeight ?? 0,
+      hasPendingFrame: Boolean(account?.pendingFrame),
+      usdcOffdelta: account?.state.deltas.get(1)?.offdelta.toString() ?? null,
+      tokenIds: account ? [...account.state.deltas.keys()].sort((a, b) => a - b) : [],
     };
   }, hubId);
 }
 
-async function readPrimaryLocalAccountState(page: Page): Promise<{
-  runtimeHeight: number;
-  hubId: string | null;
-  accountExists: boolean;
-  currentHeight: number;
-  hasPendingFrame: boolean;
-  tokenIds: number[];
-}> {
-  return await page.evaluate(() => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        runtimeId?: string;
-        state?: {
-          height?: number;
-          eReplicas?: Map<string, {
-            state?: {
-              accounts?: Map<string, {
-                currentHeight?: number;
-                pendingFrame?: unknown;
-                deltas?: Map<number, unknown>;
-              }>;
-            };
-          }>;
-        };
-      };
-    }).isolatedEnv;
-    const runtimeId = String(env?.runtimeId || '').toLowerCase();
-    const emptySnapshot = {
-      runtimeHeight: Number(env?.state?.height || 0),
-      hubId: null,
-      accountExists: false,
-      currentHeight: 0,
-      hasPendingFrame: false,
-      tokenIds: [] as number[],
-    };
-    if (!(env?.state?.eReplicas instanceof Map)) return emptySnapshot;
-
-    for (const [key, replica] of env.state.eReplicas.entries()) {
-      const [, signerId] = String(key).split(':');
-      if (String(signerId || '').toLowerCase() !== runtimeId) continue;
-      if (!(replica?.state?.accounts instanceof Map) || replica.state.accounts.size === 0) continue;
-      let best: {
-        hubId: string;
-        currentHeight: number;
-        hasPendingFrame: boolean;
-        tokenIds: number[];
-      } | null = null;
-      for (const [hubId, account] of replica.state.accounts.entries()) {
-        const candidate = {
-          hubId,
-          currentHeight: Number(account?.currentHeight || 0),
-          hasPendingFrame: Boolean(account?.pendingFrame),
-          tokenIds: account?.state?.deltas instanceof Map
-            ? Array.from(account.state.deltas.keys()).map((tokenId) => Number(tokenId)).sort((a, b) => a - b)
-            : [],
-        };
-        if (!best || candidate.currentHeight > best.currentHeight) {
-          best = candidate;
-        }
-      }
-      if (!best) return emptySnapshot;
-      return {
-        runtimeHeight: Number(env?.state?.height || 0),
-        hubId: best.hubId,
-        accountExists: true,
-        currentHeight: best.currentHeight,
-        hasPendingFrame: best.hasPendingFrame,
-        tokenIds: best.tokenIds,
-      };
-    }
-    return emptySnapshot;
+async function waitForLocalRuntimeIdentity(
+  page: Page,
+): Promise<{ entityId: string; signerId: string; runtimeId: string }> {
+  await page.waitForFunction(
+    () => {
+      const debug = (window as CurrentWalletWindow).__xln;
+      return Boolean(debug?.env()?.runtimeId && debug.store.getState().activeEntityId);
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
+  return page.evaluate(() => {
+    const debug = (window as CurrentWalletWindow).__xln;
+    const env = debug?.env();
+    const entityId = debug?.store.getState().activeEntityId;
+    if (!env?.runtimeId || !entityId) throw new Error('RECOVERY_CURRENT_IDENTITY_UNAVAILABLE');
+    const replicas = [...env.state.eReplicas.values()].filter(replica => replica.entityId === entityId);
+    const [replica] = replicas;
+    if (replicas.length !== 1 || !replica) throw new Error('RECOVERY_SIGNER_NOT_UNIQUE');
+    return { entityId, signerId: replica.signerId, runtimeId: env.runtimeId };
   });
-}
-
-async function waitForLocalRuntimeIdentity(page: Page): Promise<{ entityId: string; signerId: string; runtimeId: string }> {
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    const result = await page.evaluate(() => {
-      const env = (window as typeof window & {
-        isolatedEnv?: {
-          runtimeId?: string;
-          state?: {
-            eReplicas?: Map<string, unknown>;
-          };
-        };
-      }).isolatedEnv;
-      const runtimeId = String(env?.runtimeId || '').toLowerCase();
-      if (!runtimeId || !(env?.state?.eReplicas instanceof Map) || env.state.eReplicas.size === 0) {
-        return null;
-      }
-      for (const key of env.state.eReplicas.keys()) {
-        const [entityId, signerId] = String(key).split(':');
-        if (
-          /^0x[a-fA-F0-9]{64}$/.test(entityId || '')
-          && /^0x[a-fA-F0-9]{40}$/.test(signerId || '')
-          && String(signerId || '').toLowerCase() === runtimeId
-        ) {
-          return {
-            entityId,
-            signerId,
-            runtimeId,
-          };
-        }
-      }
-      return null;
-    });
-    if (result) return result;
-    await page.waitForTimeout(500);
-  }
-  throw new Error('local runtime identity must appear in isolatedEnv');
 }
 
 async function getActiveRuntimeId(page: Page): Promise<string> {
-  const runtimeId = await page.evaluate(() => {
-    const fromUi = document.querySelector<HTMLElement>('[data-testid="context-current"]')?.dataset?.runtimeId;
-    if (fromUi) return String(fromUi).trim();
-    return String((window as typeof window & { isolatedEnv?: { runtimeId?: string } }).isolatedEnv?.runtimeId || '').trim();
-  });
-  expect(runtimeId, 'active runtime id must be visible after tower restore').toBeTruthy();
-  return runtimeId;
+  return (await waitForLocalRuntimeIdentity(page)).runtimeId;
 }
 
 async function waitForRuntimeOnline(page: Page, label: string): Promise<void> {
-  const deadline = Date.now() + 30_000;
-  let last: Record<string, unknown> = {};
-  while (Date.now() < deadline) {
-    last = await page.evaluate(() => {
-        const env = (window as typeof window & {
-          isolatedEnv?: { runtimeId?: string; infrastructure?: { p2p?: unknown } };
-        }).isolatedEnv;
-        const connectivity = (window as typeof window & {
-          __xln?: {
-            runtimeConnectivity?: {
-              selectedRuntimeId?: string;
-              hasSelectedEnv?: boolean;
-              runtimeId?: string;
-              lifecyclePhase?: string | null;
-              loopActive?: boolean;
-              persistencePaused?: boolean;
-              connected?: boolean;
-              connecting?: boolean;
-              relayUrls?: string[];
-              reconnectState?: unknown;
-              connect?: () => void;
-              reconnect?: () => void;
-            };
-          };
-        }).__xln?.runtimeConnectivity;
-        if (!connectivity) return {
-          surface: false,
-          envRuntimeId: String(env?.runtimeId || ''),
-          hasP2P: Boolean(env?.infrastructure?.p2p),
-        };
-        if (connectivity.connected === true) return { connected: true };
-        if (typeof connectivity.connect === 'function') {
-          connectivity.connect();
-        } else if (typeof connectivity.reconnect === 'function') {
-          connectivity.reconnect();
-        }
-        return {
-          surface: true,
-          selectedRuntimeId: connectivity.selectedRuntimeId,
-          hasSelectedEnv: connectivity.hasSelectedEnv,
-          runtimeId: connectivity.runtimeId,
-          lifecyclePhase: connectivity.lifecyclePhase,
-          loopActive: connectivity.loopActive,
-          persistencePaused: connectivity.persistencePaused,
-          connected: connectivity.connected === true,
-          connecting: connectivity.connecting === true,
-          relayUrls: connectivity.relayUrls,
-          reconnectState: connectivity.reconnectState,
-          envRuntimeId: String(env?.runtimeId || ''),
-          hasP2P: Boolean(env?.infrastructure?.p2p),
-        };
-      }).catch(error => ({ evaluateError: error instanceof Error ? error.message : String(error) }));
-    if (last['connected'] === true) return;
-    await page.waitForTimeout(500);
-  }
-  throw new Error(
-    `${label} runtime must reconnect after restore: ${JSON.stringify({
-      ...last,
-      ui: await readRecoveryUiDiagnostics(page),
-    })}`,
-  );
-}
-
-async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs = CHANNEL_OP_TIMEOUT_MS): Promise<void> {
   await expect
-    .poll(async () => {
-      const local = await page.evaluate((targetEntityId) => {
-        const view = window as typeof window & {
-          __xln?: { instance?: { refreshGossip?: (env: unknown) => void } };
-          isolatedEnv?: {
-            gossip?: {
-              getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; metadata?: { runtimeId?: string } }>;
-            };
-          };
-        };
-        try {
-          view.__xln?.instance?.refreshGossip?.(view.isolatedEnv);
-        } catch {
-          // best effort
-        }
-        const profiles = view.isolatedEnv?.gossip?.getProfiles?.() || [];
-        return profiles.some((profile) =>
-          String(profile?.entityId || '').toLowerCase() === String(targetEntityId || '').toLowerCase()
-          && Boolean(profile?.runtimeId || profile?.metadata?.runtimeId),
-        );
-      }, entityId).catch(() => false);
-      if (local) return true;
-
-      const response = await page.request.get(
-        `${API_BASE_URL}/api/debug/entities?limit=5000&q=${encodeURIComponent(entityId)}`,
-      ).catch(() => null);
-      if (!response?.ok()) return false;
-      const body = await response.json().catch(() => ({})) as { entities?: Array<{ entityId?: string; runtimeId?: string }> };
-      return (Array.isArray(body.entities) ? body.entities : []).some((entry) =>
-        String(entry.entityId || '').toLowerCase() === entityId.toLowerCase() && Boolean(entry.runtimeId),
-      );
-    }, {
-      timeout: timeoutMs,
-      intervals: [500, 1_000, 1_500],
-      message: `entity ${entityId.slice(0, 10)} must be advertised for post-restore payment`,
-    })
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const p2p = (window as CurrentWalletWindow).__xln?.env()?.infrastructure?.p2p;
+          if (!p2p) throw new Error('RECOVERY_RUNTIME_P2P_UNAVAILABLE');
+          return p2p.isConnected();
+        }),
+      { timeout: 15_000, message: `${label} Runtime must be online` },
+    )
     .toBe(true);
 }
 
 async function faucetOffchain(page: Page, entityId: string, hubEntityId: string): Promise<void> {
-  let lastError = 'not-run';
-  for (let attempt = 1; attempt <= 6; attempt += 1) {
-    const runtimeId = await getActiveRuntimeId(page);
-    const response = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
-      data: {
-        userEntityId: entityId,
-        userRuntimeId: runtimeId,
-        hubEntityId,
-        tokenId: 1,
-        amount: '100',
-      },
-    }).catch((error) => ({
-      ok: () => false,
-      status: () => 0,
-      json: async () => ({ error: error instanceof Error ? error.message : String(error) }),
-    }));
-
-    const body = await response.json().catch(() => ({} as Record<string, unknown>));
-    if (response.ok()) return;
-    lastError = JSON.stringify(body);
-    const message = String((body as Record<string, unknown>).error || '');
-    const code = String((body as Record<string, unknown>).code || '');
-    const transient =
-      response.status() === 202 ||
-      response.status() === 409 ||
-      message.includes('pending') ||
-      message.includes('AWAITING') ||
-      message.includes('FAUCET_ACCOUNT_MISSING') ||
-      message.includes('SIGNER_RESOLUTION_FAILED') ||
-      code === 'FAUCET_TOKEN_SURFACE_NOT_READY';
-    if (!transient) break;
-    await page.waitForTimeout(1_500);
-  }
-
-  throw new Error(`post-restore faucet failed for ${entityId.slice(0, 10)} via ${hubEntityId.slice(0, 10)}: ${lastError}`);
+  const response = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
+    data: {
+      userEntityId: entityId,
+      userRuntimeId: await getActiveRuntimeId(page),
+      hubEntityId,
+      tokenId: 1,
+      amount: '100',
+    },
+  });
+  expect(response.ok(), `RECOVERY_FAUCET_FAILED:${await response.text()}`).toBe(true);
 }
 
 async function waitForSenderSpend(
@@ -502,7 +241,7 @@ async function waitForSenderSpend(
   minSpend: number,
 ): Promise<number> {
   return await expect
-    .poll(async () => baseline - await getRenderedOutboundForAccount(page, counterpartyId), {
+    .poll(async () => baseline - (await getRenderedOutboundForAccount(page, counterpartyId)), {
       timeout: CHANNEL_OP_TIMEOUT_MS,
       intervals: [250, 500, 1_000],
       message: 'restored sender must spend from recovered channel state',
@@ -515,129 +254,45 @@ async function createRuntimeViaUi(
   page: Page,
   label: string,
   passphrase: string,
-  options: { requireOnline?: boolean } = {},
+  options: { towerUrl?: string; restore?: boolean; requireOnline?: boolean } = {},
 ): Promise<{ entityId: string; signerId: string; runtimeId: string }> {
-  const brainvaultTab = page.getByRole('button', { name: 'BrainVault', exact: true }).first();
-  if (await brainvaultTab.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await brainvaultTab.click();
+  await expect(page.locator('[data-testid="gate-stack"][data-state="online"]')).toBeVisible();
+  await page.getByRole('button', { name: /Create a wallet/ }).click();
+  await page.getByLabel('Vault name', { exact: true }).fill(label);
+  await page.getByLabel('Passphrase', { exact: true }).fill(passphrase);
+  await page.getByRole('button', { name: 'Test 1 shard', exact: true }).click();
+  if (options.towerUrl) {
+    await page.getByText(/Backup and dispute protection ·/).click();
+    await page.getByLabel('Automatically back up this wallet').check();
+    await page.getByLabel('Backup tower', { exact: true }).fill(options.towerUrl);
   }
-  const displayNameInput = page.locator('#name').first();
-  await expect(displayNameInput).toBeVisible({ timeout: 20_000 });
-  await displayNameInput.fill(label);
-
-  const passphraseInput = page.locator('#passphrase').first();
-  await expect(passphraseInput).toBeVisible({ timeout: 15_000 });
-  await passphraseInput.fill(passphrase);
-
-  let factorOneButton = page.getByRole('button', { name: /^1\s+/i }).first();
-  if (!await factorOneButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    // Factor presets are collapsed under the "Advanced" (Security work factor) toggle now.
-    const advancedToggle = page.getByRole('button', { name: /Advanced/i }).first();
-    if (await advancedToggle.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      await advancedToggle.click();
-      factorOneButton = page.getByRole('button', { name: /^1\s+/i }).first();
-    }
+  if (options.restore) {
+    if (!options.towerUrl) throw new Error('RECOVERY_TOWER_REQUIRED');
+    await page.getByTestId('restore-from-tower').check();
+    await page.getByTestId('restore-tower-url').fill(options.towerUrl);
   }
-  if (await factorOneButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await factorOneButton.click({ force: true });
-  }
-
-  // The derive button is labelled by input mode: Brain Vault derives in the
-  // browser or on a node, a raw seed continues with the seed. "Derive wallet"
-  // and the older wallet-opening labels no longer exist in the UI.
-  const createButton = page.getByRole('button', {
-    name: /Derive wallet|Derive on node|Continue with seed|Verify recovery|Unlock wallet/i,
-  }).first();
-  await expect(createButton).toBeEnabled({ timeout: 15_000 });
-  await createButton.click({ force: true });
-  await page.waitForTimeout(400);
-
-  const restoreButton = page.getByRole('button', { name: /Restore selected backup/i }).first();
-  const freshButton = page.getByRole('button', { name: /Create new wallet/i }).first();
-  const decision = await Promise.race([
-    restoreButton.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'restore').catch(() => 'none'),
-    freshButton.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'fresh').catch(() => 'none'),
-    page.getByRole('checkbox', {
-      name: /I understand this is testnet software and I accept the associated risks/i,
-    }).first().waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'ready').catch(() => 'none'),
-  ]);
-  if (decision === 'restore') {
-    await restoreButton.click({ force: true });
-  } else if (decision === 'fresh') {
-    await freshButton.click({ force: true });
-  }
-
-  const termsCheckbox = page.getByRole('checkbox', {
-    name: /I understand this is testnet software and I accept the associated risks/i,
-  }).first();
-  // A restored backup carries its completed onboarding, so the wallet opens
-  // directly; the terms and Start step only follows a new wallet.
-  const needsOnboarding = decision !== 'restore' || await Promise.race([
-    termsCheckbox.waitFor({ state: 'visible', timeout: 75_000 }).then(() => true),
-    displayNameInput.waitFor({ state: 'hidden', timeout: 75_000 }).then(() => false),
-  ]);
-  if (needsOnboarding) {
-    await expect(termsCheckbox).toBeVisible({ timeout: 75_000 });
-    const checked = await termsCheckbox.isChecked().catch(() => false);
-    if (!checked) {
-      await termsCheckbox.check({ force: true });
-    }
-
-    const startButton = page.getByRole('button', { name: /^Start$/i }).first();
-    await expect(startButton).toBeEnabled({ timeout: 15_000 });
-    await startButton.click({ force: true });
-  }
-
+  await page
+    .getByRole('button', { name: options.restore ? 'Derive and restore' : 'Derive vault', exact: true })
+    .click();
+  await page.locator('[data-testid="nav-home"]:visible, [role="alert"]').first().waitFor({ timeout: 20_000 });
+  const errors = await page.getByRole('alert').allTextContents();
+  if (errors.length) throw new Error(`RECOVERY_WALLET_BOOT_FAILED:${errors.join(';')}`);
   const identity = await waitForLocalRuntimeIdentity(page);
-  if (!await displayNameInput.waitFor({ state: 'hidden', timeout: 30_000 }).then(() => true).catch(() => false)) {
-    throw new Error(
-      `runtime creation must finish after publishing identity: ${JSON.stringify(await readRecoveryUiDiagnostics(page))}`,
-    );
-  }
-  if (options.requireOnline !== false) {
-    await expect
-      .poll(async () => {
-        return await page.evaluate(() => {
-          const connectivity = (window as typeof window & {
-            __xln?: {
-              runtimeConnectivity?: {
-                connected?: boolean;
-                connect?: () => void;
-                reconnect?: () => void;
-              };
-            };
-          }).__xln?.runtimeConnectivity;
-          if (!connectivity) return false;
-          if (connectivity.connected === true) return true;
-          const start = typeof connectivity.connect === 'function'
-            ? connectivity.connect
-            : connectivity.reconnect;
-          if (typeof start === 'function') {
-            setTimeout(() => {
-              start();
-            }, 0);
-          }
-          return false;
-        }).catch(() => false);
-      }, {
-        timeout: 20_000,
-        intervals: [250, 500, 1_000],
-        message: 'runtime must come online after creation',
-      })
-      .toBe(true);
-  }
+  if (options.requireOnline !== false) await waitForRuntimeOnline(page, 'created');
   return identity;
 }
 
-async function waitForCommittedPrimaryLocalAccountState(page: Page) {
-  const deadline = Date.now() + 90_000;
-  let last: Awaited<ReturnType<typeof readPrimaryLocalAccountState>> | null = null;
-  while (Date.now() < deadline) {
-    last = await readPrimaryLocalAccountState(page);
-    if (last.accountExists && last.hubId && last.currentHeight > 0 && !last.hasPendingFrame) return last;
-    await delay(500);
-  }
-  throw new Error(`local hub account did not reach committed pre-wipe state: ${JSON.stringify(last)}`);
+async function waitForCommittedPrimaryLocalAccountState(page: Page, hubId: string) {
+  await expect
+    .poll(
+      async () => {
+        const state = await readLocalHubAccountState(page, hubId);
+        return state.accountExists && state.currentHeight > 0 && !state.hasPendingFrame;
+      },
+      { timeout: 15_000, message: 'the selected hub Account must be committed before backup' },
+    )
+    .toBe(true);
+  return readLocalHubAccountState(page, hubId);
 }
 
 async function waitForCommittedLocalHubAccountAdvance(
@@ -647,16 +302,17 @@ async function waitForCommittedLocalHubAccountAdvance(
   label: string,
 ): Promise<Awaited<ReturnType<typeof readLocalHubAccountState>>> {
   await expect
-    .poll(async () => {
-      const state = await readLocalHubAccountState(page, hubId);
-      return state.accountExists
-        && !state.hasPendingFrame
-        && state.currentHeight > baselineHeight;
-    }, {
-      timeout: CHANNEL_OP_TIMEOUT_MS,
-      intervals: [250, 500, 1_000],
-      message: `${label} must leave the hub account committed before the next payment`,
-    })
+    .poll(
+      async () => {
+        const state = await readLocalHubAccountState(page, hubId);
+        return state.accountExists && !state.hasPendingFrame && state.currentHeight > baselineHeight;
+      },
+      {
+        timeout: CHANNEL_OP_TIMEOUT_MS,
+        intervals: [250, 500, 1_000],
+        message: `${label} must leave the hub account committed before the next payment`,
+      },
+    )
     .toBe(true);
 
   const state = await readLocalHubAccountState(page, hubId);
@@ -674,7 +330,7 @@ async function waitForWatchtowerReceipt(
     try {
       const response = await fetch(`${baseUrl}/api/tower/receipt/${lookupKey}`);
       if (response.ok) {
-        const payload = await response.json() as {
+        const payload = (await response.json()) as {
           ok?: boolean;
           receipt?: { height?: number; storedBytes?: number };
         };
@@ -693,30 +349,6 @@ async function waitForWatchtowerReceipt(
   throw new Error(`watchtower receipt >= ${minHeight} did not appear for ${lookupKey.slice(0, 12)}`);
 }
 
-async function wipeBrowserRuntimeState(page: Page, context: BrowserContext, towerUrls: string[]): Promise<Page> {
-  await page.evaluate((urls) => {
-    const view = window as typeof window & {
-      __XLN_WATCHTOWERS__?: string[];
-    };
-    view.__XLN_WATCHTOWERS__ = urls;
-  }, towerUrls);
-  await closeRuntimePage(page);
-  const nextPage = await context.newPage();
-  captureRecoveryPageErrors(nextPage);
-  await nextPage.addInitScript((urls: string[]) => {
-    try {
-      window.localStorage.setItem('xln-watchtower-urls', JSON.stringify(urls));
-    } catch {
-      // about:blank documents in hardened browser contexts can deny localStorage.
-    }
-    (window as typeof window & { __XLN_WATCHTOWERS__?: string[] }).__XLN_WATCHTOWERS__ = urls;
-  }, towerUrls);
-  nextPage.once('dialog', dialog => dialog.accept());
-  await nextPage.goto(`${APP_BASE_URL}/app#reset`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await nextPage.waitForURL(`${APP_BASE_URL}/app`, { timeout: 30_000 });
-  return nextPage;
-}
-
 const recoveryPageErrors = new Map<Page, string[]>();
 const captureRecoveryPageErrors = (page: Page): void => {
   const errors: string[] = [];
@@ -727,37 +359,20 @@ const captureRecoveryPageErrors = (page: Page): void => {
 
 async function readRecoveryUiDiagnostics(page: Page): Promise<Record<string, unknown>> {
   const browser = await page.evaluate(() => {
-    const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        runtimeId?: string;
-        state?: {
-          height?: number;
-          eReplicas?: Map<string, unknown>;
-          jReplicas?: Map<string, unknown>;
-        };
-      };
-    }).isolatedEnv;
+    const debug = (window as CurrentWalletWindow).__xln;
+    const env = debug?.env();
     return {
-      href: window.location.href,
-      bodyText: String(document.body?.innerText || '').slice(0, 800),
-      selectedRuntimeId: String(selectedTrigger?.dataset?.runtimeId || ''),
-      selectedEntityId: String(selectedTrigger?.dataset?.entityId || ''),
-      selectedSignerId: String(selectedTrigger?.dataset?.signerId || ''),
-      envRuntimeId: String(env?.runtimeId || ''),
-      envHeight: Number(env?.state?.height || 0),
-      envReplicaCount: Number(env?.state?.eReplicas?.size || 0),
-      envReplicas: Array.from(env?.state?.eReplicas ?? []).map(([key, value]) => {
-        const replica = value as { entityId?: string; signerId?: string; state?: {
-          entityId?: string; config?: { jurisdiction?: unknown };
-        } };
-        return { key, entityId: replica.entityId, signerId: replica.signerId,
-          stateEntityId: replica.state?.entityId, jurisdiction: replica.state?.config?.jurisdiction };
-      }),
-      envJurisdictionCount: Number(env?.state?.jReplicas?.size || 0),
-      creationError: String(document.querySelector<HTMLElement>('.matrix-status.error')?.innerText || ''),
+      href: window.location.pathname,
+      selectedEntityId: debug?.store.getState().activeEntityId,
+      envRuntimeId: env?.runtimeId,
+      envHeight: env?.state.height,
+      envReplicas: [...(env?.state.eReplicas.values() ?? [])].map(replica => ({
+        entityId: replica.entityId,
+        signerId: replica.signerId,
+      })),
+      alerts: [...document.querySelectorAll('[role="alert"]')].map(node => node.textContent),
       visibleButtons: Array.from(document.querySelectorAll('button'))
-        .map((button) => String((button as HTMLButtonElement).innerText || '').trim())
+        .map(button => String((button as HTMLButtonElement).innerText || '').trim())
         .filter(Boolean)
         .slice(0, 12),
     };
@@ -765,14 +380,18 @@ async function readRecoveryUiDiagnostics(page: Page): Promise<Record<string, unk
   return { ...browser, pageErrors: recoveryPageErrors.get(page) ?? [] };
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout: () => Promise<Record<string, unknown>>): Promise<T> {
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => Promise<Record<string, unknown>>,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
     return await Promise.race([
       promise,
       new Promise<T>((_, reject) => {
         timer = setTimeout(async () => {
-          const diagnostics = await onTimeout().catch((error) => ({
+          const diagnostics = await onTimeout().catch(error => ({
             diagnosticsError: error instanceof Error ? error.message : String(error),
           }));
           reject(new Error(`timed out after ${timeoutMs}ms :: ${JSON.stringify(diagnostics)}`));
@@ -787,235 +406,272 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout:
 test.describe('watchtower runtime recovery', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
-  test('restores a wiped runtime from standalone tower backup and continues channel payments', { tag: '@resilience' }, async ({ page, context, browser }) => {
-    captureRecoveryPageErrors(page);
-    allowBrowserIssue({
-      type: 'http',
-      severity: 'error',
-      status: 503,
-      url: '/api/watchtower-proxy',
-    });
-    allowBrowserIssue({
-      type: 'console',
-      severity: 'error',
-      message: 'Failed to load resource: the server responded with a status of 503',
-    });
-    let recipientContext: BrowserContext | null = null;
-    const baselineHealth = await ensureE2EBaseline(page, {
-      timeoutMs: LONG_E2E ? 240_000 : 180_000,
-      autoResetGraceMs: LONG_E2E ? 12_000 : 8_000,
-    });
-    const baselineHubId =
-      baselineHealth.hubMesh?.hubIds?.[0]
-      ?? baselineHealth.hubs?.find((hub) => hub.online === true)?.entityId
-      ?? '';
-    expect(baselineHubId, 'watchtower recovery needs a live baseline hub').toMatch(/^0x[a-fA-F0-9]{64}$/);
+  test(
+    'restores a wiped runtime from standalone tower backup and continues channel payments',
+    { tag: '@resilience' },
+    async ({ page, context, browser }, testInfo) => {
+      captureRecoveryPageErrors(page);
+      const started = Date.now();
+      const mark = (stage: string) => console.log(`TOWER_STAGE ${stage} elapsedMs=${Date.now() - started}`);
+      let recipientContext: BrowserContext | null = null;
+      const baselineHealth = await ensureE2EBaseline(page, {
+        timeoutMs: LONG_E2E ? 240_000 : 180_000,
+        autoResetGraceMs: LONG_E2E ? 12_000 : 8_000,
+      });
+      const baselineHubId =
+        baselineHealth.hubMesh?.hubIds?.[0] ?? baselineHealth.hubs?.find(hub => hub.online === true)?.entityId ?? '';
+      expect(baselineHubId, 'watchtower recovery needs a live baseline hub').toMatch(/^0x[a-fA-F0-9]{64}$/);
 
-    const tower = await startWatchtower();
-    try {
-      await context.addInitScript((towerUrl: string) => {
-        try {
-          window.localStorage.setItem('xln-watchtower-urls', JSON.stringify([towerUrl]));
-        } catch {
-          // about:blank documents in hardened browser contexts can deny localStorage.
-        }
-        (window as typeof window & { __XLN_WATCHTOWERS__?: string[] }).__XLN_WATCHTOWERS__ = [towerUrl];
-      }, tower.baseUrl);
-      await page.addInitScript((towerUrl: string) => {
-        try {
-          window.localStorage.setItem('xln-watchtower-urls', JSON.stringify([towerUrl]));
-        } catch {
-          // about:blank documents in hardened browser contexts can deny localStorage.
-        }
-        (window as typeof window & { __XLN_WATCHTOWERS__?: string[] }).__XLN_WATCHTOWERS__ = [towerUrl];
-      }, tower.baseUrl);
+      const tower = await startWatchtower();
+      try {
+        const proxy = new URL('/api/watchtower-proxy', API_BASE_URL);
+        proxy.searchParams.set('target', tower.baseUrl);
+        proxy.searchParams.set('path', '/healthz');
+        const proxyResponse = await page.request.get(proxy.toString());
+        expect(proxyResponse.ok(), `TOWER_PROXY_HEALTH:${await proxyResponse.text()}`).toBe(true);
+        await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
 
-      await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+        const passphrase = randomBrainvaultPassphrase();
+        const label = `tower-restore-${Date.now()}`;
+        const brainvault = await deriveBrainvaultOracle(label, passphrase, 1);
+        const runtime = await withTimeout(
+          createRuntimeViaUi(page, label, passphrase, { towerUrl: tower.baseUrl }),
+          75_000,
+          async () => await readRecoveryUiDiagnostics(page),
+        );
+        expect(runtime.runtimeId.toLowerCase(), 'BrainVault UI must match the independent native oracle').toBe(
+          deriveSignerAddressFromMnemonic(brainvault.mnemonic24),
+        );
+        mark('created');
+        await expectPersistedRuntimeSeedProtected(page, runtime.runtimeId);
+        await connectRuntimeToHub(page, runtime, baselineHubId, { requireOnline: false });
+        const runtimeSeed = brainvault.mnemonic24;
 
-      const passphrase = randomBrainvaultPassphrase();
-      const label = `tower-restore-${Date.now()}`;
-      const brainvault = await deriveBrainvaultOracle(label, passphrase, 1);
-      const runtime = await withTimeout(
-        createRuntimeViaUi(page, label, passphrase),
-        75_000,
-        async () => await readRecoveryUiDiagnostics(page),
-      );
-      expect(runtime.runtimeId.toLowerCase(), 'BrainVault UI must match the independent native oracle').toBe(
-        deriveSignerAddressFromMnemonic(brainvault.mnemonic24),
-      );
-      await expectPersistedRuntimeSeedProtected(page, runtime.runtimeId);
-      await connectRuntimeToHub(page, runtime, baselineHubId, { requireOnline: false });
-      const runtimeSeed = brainvault.mnemonic24;
+        const lookupKey = deriveRuntimeRecoveryLookupKey(runtime.runtimeId, runtimeSeed);
+        const initial = await waitForCommittedPrimaryLocalAccountState(page, baselineHubId);
+        const initialBalance = await getRenderedOutboundForAccount(page, baselineHubId);
+        await faucetOffchain(page, runtime.entityId, baselineHubId);
+        const preWipe = await waitForCommittedLocalHubAccountAdvance(
+          page,
+          baselineHubId,
+          initial.currentHeight,
+          'pre-backup funding',
+        );
+        const backedUpBalance = await waitForRenderedOutboundForAccountDelta(page, baselineHubId, initialBalance, 100);
+        expect(backedUpBalance).toBe(100);
+        expect(preWipe.usdcOffdelta).not.toBeNull();
+        expect(BigInt(preWipe.usdcOffdelta ?? '0')).not.toBe(0n);
+        mark('account-committed');
+        expect(preWipe.accountExists, 'pre-wipe local account must exist').toBe(true);
+        expect(preWipe.hubId, 'pre-wipe local account must resolve a hub id').toBeTruthy();
+        const receipt = await waitForWatchtowerReceipt(tower.baseUrl, lookupKey, preWipe.runtimeHeight);
+        expect(
+          receipt.height,
+          'watchtower backup must cover the exact committed runtime state observed before wipe',
+        ).toBeGreaterThanOrEqual(preWipe.runtimeHeight);
+        mark('backup-receipt');
+        expect(receipt.storedBytes, 'watchtower backup must store encrypted runtime bytes').toBeGreaterThan(0);
 
-      const lookupKey = deriveRuntimeRecoveryLookupKey(runtime.runtimeId, runtimeSeed);
-      const preWipe = await waitForCommittedPrimaryLocalAccountState(page);
-      expect(preWipe.accountExists, 'pre-wipe local account must exist').toBe(true);
-      expect(preWipe.hubId, 'pre-wipe local account must resolve a hub id').toBeTruthy();
-      const receipt = await waitForWatchtowerReceipt(tower.baseUrl, lookupKey, preWipe.runtimeHeight);
-      expect(
-        receipt.height,
-        'watchtower backup must cover the exact committed runtime state observed before wipe',
-      ).toBeGreaterThanOrEqual(preWipe.runtimeHeight);
-      expect(receipt.storedBytes, 'watchtower backup must store encrypted runtime bytes').toBeGreaterThan(0);
+        await closeRuntimeContext(context);
+        mark('old-profile-closed');
+        context = await browser.newContext({ ignoreHTTPSErrors: true });
+        expect((await context.storageState()).origins).toEqual([]);
+        page = await context.newPage();
+        captureRecoveryPageErrors(page);
+        await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
 
-      page = await wipeBrowserRuntimeState(page, context, [tower.baseUrl]);
-      await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
-      await expect
-        .poll(async () => await page.evaluate(() => {
-          const w = window as typeof window & { __XLN_WATCHTOWERS__?: string[] };
-          return Array.isArray(w.__XLN_WATCHTOWERS__) ? w.__XLN_WATCHTOWERS__[0] || '' : '';
-        }), {
-          timeout: 10_000,
-          intervals: [100, 250, 500],
-          message: 'standalone tower override must survive reset navigation',
-        })
-        .toBe(tower.baseUrl);
+        const restored = await withTimeout(
+          createRuntimeViaUi(page, label, passphrase, { requireOnline: false, towerUrl: tower.baseUrl, restore: true }),
+          75_000,
+          async () => await readRecoveryUiDiagnostics(page),
+        );
+        mark('restored');
+        expect(restored.runtimeId.toLowerCase(), 'runtime id must stay stable across watchtower restore').toBe(
+          runtime.runtimeId.toLowerCase(),
+        );
 
-      const restored = await withTimeout(
-        createRuntimeViaUi(page, label, passphrase, { requireOnline: false }),
-        75_000,
-        async () => await readRecoveryUiDiagnostics(page),
-      );
-      expect(restored.runtimeId.toLowerCase(), 'runtime id must stay stable across watchtower restore').toBe(runtime.runtimeId.toLowerCase());
+        await expect
+          .poll(
+            async () => {
+              const state = await readLocalHubAccountState(page, preWipe.hubId);
+              return (
+                state.accountExists &&
+                !state.hasPendingFrame &&
+                state.currentHeight >= preWipe.currentHeight &&
+                state.tokenIds.join(',') === preWipe.tokenIds.join(',')
+              );
+            },
+            {
+              timeout: 90_000,
+              intervals: [500, 1_000, 1_500],
+              message: 'watchtower restore must recover the committed hub account state',
+            },
+          )
+          .toBe(true);
 
-      await expect
-        .poll(async () => {
-          const state = await readLocalHubAccountState(page, preWipe.hubId!);
-          return state.accountExists
-            && !state.hasPendingFrame
-            && state.currentHeight >= preWipe.currentHeight
-            && state.tokenIds.join(',') === preWipe.tokenIds.join(',');
-        }, {
-          timeout: 90_000,
-          intervals: [500, 1_000, 1_500],
-          message: 'watchtower restore must recover the committed hub account state',
-        })
-        .toBe(true);
+        const after = await readLocalHubAccountState(page, preWipe.hubId);
+        expect(after.usdcOffdelta, 'tower restore must preserve the exact funded Account delta').toBe(
+          preWipe.usdcOffdelta,
+        );
+        expect(await getRenderedOutboundForAccount(page, preWipe.hubId)).toBe(backedUpBalance);
+        expect(after.runtimeHeight, 'restored runtime height must be non-zero after tower recovery').toBeGreaterThan(0);
 
-      const after = await readLocalHubAccountState(page, preWipe.hubId!);
-      expect(after.runtimeHeight, 'restored runtime height must be non-zero after tower recovery').toBeGreaterThan(0);
+        const hubId = preWipe.hubId;
+        await waitForRuntimeOnline(page, 'restored sender');
+        await connectRuntimeToHub(page, restored, hubId, { requireOnline: false });
 
-      const hubId = preWipe.hubId!;
-      await waitForRuntimeOnline(page, 'restored sender');
-      await connectRuntimeToHub(page, restored, hubId, { requireOnline: false });
+        recipientContext = await browser.newContext({ ignoreHTTPSErrors: true });
+        const recipientPage = await recipientContext.newPage();
+        await gotoApp(recipientPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+        const recipient = await withTimeout(
+          createRuntimeViaUi(recipientPage, randomLabel('tower-recipient'), randomBrainvaultPassphrase(), {
+            requireOnline: false,
+          }),
+          75_000,
+          async () => await readRecoveryUiDiagnostics(recipientPage),
+        );
+        await waitForRuntimeOnline(recipientPage, 'post-restore recipient');
+        await connectRuntimeToHub(recipientPage, recipient, hubId, { requireOnline: false });
 
-      recipientContext = await browser.newContext({ ignoreHTTPSErrors: true });
-      const recipientPage = await recipientContext.newPage();
-      await gotoApp(recipientPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
-      const recipient = await withTimeout(
-        createRuntimeViaUi(
+        await Promise.all([
+          waitForReceiveReadyGossipProfiles(page, [restored.entityId, recipient.entityId, hubId], hubId),
+          waitForReceiveReadyGossipProfiles(recipientPage, [restored.entityId, recipient.entityId, hubId], hubId),
+        ]);
+
+        const senderBeforeFaucet = await getRenderedOutboundForAccount(page, hubId);
+        const senderCommittedBeforeFaucet = await readLocalHubAccountState(page, hubId);
+        await faucetOffchain(page, restored.entityId, hubId);
+        await waitForCommittedLocalHubAccountAdvance(
+          page,
+          hubId,
+          senderCommittedBeforeFaucet.currentHeight,
+          'post-restore faucet',
+        );
+        const senderAfterFaucet = await waitForRenderedOutboundForAccountDelta(page, hubId, senderBeforeFaucet, 100, {
+          timeoutMs: CHANNEL_OP_TIMEOUT_MS,
+        });
+
+        const recipientBeforePayment = await getRenderedOutboundForAccount(recipientPage, hubId);
+        const senderCursor = await getPersistedReceiptCursor(page);
+        const recipientCursor = await getPersistedReceiptCursor(recipientPage);
+
+        await prepareUiPayment(page, {
+          recipientEntityId: recipient.entityId,
+          amount: POST_RESTORE_PAYMENT_AMOUNT,
+          tokenId: 1,
+          routeEntityIds: [hubId, recipient.entityId],
+        });
+
+        const quotedSenderAmount = await page.getByTestId('pay-quote').getAttribute('data-sender-amount');
+        if (!quotedSenderAmount) throw new Error('RECOVERY_PAYMENT_QUOTE_MISSING');
+        const beforePayment = await readLocalHubAccountState(page, hubId);
+        await expect(page.getByTestId('pay-submit')).toBeEnabled();
+        await page.getByTestId('pay-submit').click();
+
+        await Promise.all([
+          waitForPersistedFrameEventMatch(page, {
+            cursor: senderCursor,
+            eventName: 'HtlcFinalized',
+            entityId: restored.entityId,
+            timeoutMs: CHANNEL_OP_TIMEOUT_MS,
+            predicate: event => String(event.data?.amount || '') === POST_RESTORE_PAYMENT_AMOUNT.toString(),
+          }),
+          waitForPersistedFrameEventMatch(recipientPage, {
+            cursor: recipientCursor,
+            eventName: 'HtlcReceived',
+            entityId: recipient.entityId,
+            timeoutMs: CHANNEL_OP_TIMEOUT_MS,
+            predicate: event => String(event.data?.amount || '') === POST_RESTORE_PAYMENT_AMOUNT.toString(),
+          }),
+        ]);
+
+        const senderAfterPayment = await waitForSenderSpend(
+          page,
+          hubId,
+          senderAfterFaucet,
+          Number(POST_RESTORE_PAYMENT_AMOUNT / 10n ** USDC_DECIMALS),
+        );
+        const recipientAfterPayment = await waitForRenderedOutboundForAccountDelta(
           recipientPage,
-          randomLabel('tower-recipient'),
-          randomBrainvaultPassphrase(),
-          { requireOnline: false },
-        ),
-        75_000,
-        async () => await readRecoveryUiDiagnostics(recipientPage),
-      );
-      await waitForRuntimeOnline(recipientPage, 'post-restore recipient');
-      await connectRuntimeToHub(recipientPage, recipient, hubId, { requireOnline: false });
+          hubId,
+          recipientBeforePayment,
+          Number(POST_RESTORE_PAYMENT_AMOUNT / 10n ** USDC_DECIMALS),
+          { timeoutMs: CHANNEL_OP_TIMEOUT_MS },
+        );
 
-      await Promise.all([
-        waitForEntityAdvertised(page, restored.entityId),
-        waitForEntityAdvertised(page, recipient.entityId),
-        waitForEntityAdvertised(recipientPage, restored.entityId),
-        waitForEntityAdvertised(recipientPage, recipient.entityId),
-      ]);
-
-      const senderBeforeFaucet = await getRenderedOutboundForAccount(page, hubId);
-      const senderCommittedBeforeFaucet = await readLocalHubAccountState(page, hubId);
-      await faucetOffchain(page, restored.entityId, hubId);
-      await waitForCommittedLocalHubAccountAdvance(
-        page,
-        hubId,
-        senderCommittedBeforeFaucet.currentHeight,
-        'post-restore faucet',
-      );
-      const senderAfterFaucet = await waitForRenderedOutboundForAccountDelta(page, hubId, senderBeforeFaucet, 100, {
-        timeoutMs: CHANNEL_OP_TIMEOUT_MS,
-      });
-
-      const recipientBeforePayment = await getRenderedOutboundForAccount(recipientPage, hubId);
-      const senderCursor = await getPersistedReceiptCursor(page);
-      const recipientCursor = await getPersistedReceiptCursor(recipientPage);
-
-      await submitUiPayment(page, {
-        recipientEntityId: recipient.entityId,
-        amount: POST_RESTORE_PAYMENT_AMOUNT,
-        tokenId: 1,
-        routeEntityIds: [hubId, recipient.entityId],
-      });
-
-      await Promise.all([
-        waitForPersistedFrameEventMatch(page, {
-          cursor: senderCursor,
-          eventName: 'HtlcFinalized',
-          entityId: restored.entityId,
-          timeoutMs: CHANNEL_OP_TIMEOUT_MS,
-          predicate: (event) => String(event.data?.amount || '') === POST_RESTORE_PAYMENT_AMOUNT.toString(),
-        }),
-        waitForPersistedFrameEventMatch(recipientPage, {
-          cursor: recipientCursor,
-          eventName: 'HtlcReceived',
-          entityId: recipient.entityId,
-          timeoutMs: CHANNEL_OP_TIMEOUT_MS,
-          predicate: (event) => String(event.data?.amount || '') === POST_RESTORE_PAYMENT_AMOUNT.toString(),
-        }),
-      ]);
-
-      const senderAfterPayment = await waitForSenderSpend(
-        page,
-        hubId,
-        senderAfterFaucet,
-        Number(POST_RESTORE_PAYMENT_AMOUNT / 10n ** USDC_DECIMALS),
-      );
-      const recipientAfterPayment = await waitForRenderedOutboundForAccountDelta(
-        recipientPage,
-        hubId,
-        recipientBeforePayment,
-        Number(POST_RESTORE_PAYMENT_AMOUNT / 10n ** USDC_DECIMALS),
-        { timeoutMs: CHANNEL_OP_TIMEOUT_MS },
-      );
-
-      await closeRuntimePage(page);
-      const reopenedSenderPage = await context.newPage();
-      await reopenedSenderPage.goto(`${APP_BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
-      await reopenedSenderPage.locator('button.wallet').first().click();
-      await expect(reopenedSenderPage.getByRole('heading', { name: 'Unlock wallet', exact: true })).toBeVisible();
-      await reopenedSenderPage.getByLabel('Password', { exact: true }).fill(passphrase);
-      await reopenedSenderPage.getByRole('button', { name: 'Unlock', exact: true }).click();
-      await gotoApp(reopenedSenderPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
-      await waitForRuntimeOnline(reopenedSenderPage, 'reopened restored sender');
-      await connectRuntimeToHub(reopenedSenderPage, restored, hubId, { requireOnline: false });
-      await expect
-        .poll(() => getRenderedOutboundForAccount(reopenedSenderPage, hubId), {
-          timeout: CHANNEL_OP_TIMEOUT_MS,
-          intervals: [500, 1_000, 1_500],
-          message: 'post-restore payment state must survive a closed-tab restart',
-        })
-        .toBe(senderAfterPayment);
-      await expect
-        .poll(() => getRenderedOutboundForAccount(recipientPage, hubId), {
-          timeout: CHANNEL_OP_TIMEOUT_MS,
-          intervals: [500, 1_000, 1_500],
-          message: 'recipient post-restore payment state must stay committed after sender tab restart',
-        })
-        .toBe(recipientAfterPayment);
-    } finally {
-      // Close every Runtime page before stopping the tower. Parallel teardown
-      // races the page's final appointment/health polls against tower shutdown
-      // and turns a successful recovery into a false connection-refused error.
-      const contextCleanup = await Promise.allSettled([
-        closeRuntimeContext(context),
-        ...(recipientContext ? [closeRuntimeContext(recipientContext)] : []),
-      ]);
-      const towerCleanup = await Promise.allSettled([stopWatchtower(tower)]);
-      const failures = [...contextCleanup, ...towerCleanup]
-        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-        .map((result) => result.reason);
-      if (failures.length > 0) {
-        throw new AggregateError(failures, 'WATCHTOWER_E2E_CLEANUP_FAILED');
+        const committedPayment = await waitForCommittedLocalHubAccountAdvance(
+          page,
+          hubId,
+          beforePayment.currentHeight,
+          'post-restore payment',
+        );
+        if (!beforePayment.usdcOffdelta || !committedPayment.usdcOffdelta)
+          throw new Error('RECOVERY_PAYMENT_DELTA_MISSING');
+        const debit = BigInt(committedPayment.usdcOffdelta) - BigInt(beforePayment.usdcOffdelta);
+        expect(debit < 0n ? -debit : debit, 'sender pays exactly the signed UI quote, including fees').toBe(
+          BigInt(quotedSenderAmount),
+        );
+        expect(recipientAfterPayment - recipientBeforePayment).toBe(3);
+        mark('post-restore-payment-committed');
+        await closeRuntimePage(page);
+        const reopenedSenderPage = await context.newPage();
+        await reopenedSenderPage.goto(`${APP_BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
+        await reopenedSenderPage.getByRole('button', { name: 'Continue', exact: true }).click();
+        await expect(reopenedSenderPage.getByRole('heading', { name: 'Unlock wallet', exact: true })).toBeVisible();
+        await reopenedSenderPage.getByLabel('Password', { exact: true }).fill(passphrase);
+        await reopenedSenderPage.getByRole('button', { name: 'Unlock', exact: true }).click();
+        await expect(reopenedSenderPage.locator('[data-testid="nav-home"]:visible').first()).toBeVisible({
+          timeout: 15_000,
+        });
+        await waitForRuntimeOnline(reopenedSenderPage, 'reopened restored sender');
+        mark('reopened-online');
+        expect(await waitForLocalRuntimeIdentity(reopenedSenderPage)).toEqual(restored);
+        await expectPersistedRuntimeSeedProtected(reopenedSenderPage, restored.runtimeId);
+        expect((await readLocalHubAccountState(reopenedSenderPage, hubId)).usdcOffdelta).toBe(
+          committedPayment.usdcOffdelta,
+        );
+        await connectRuntimeToHub(reopenedSenderPage, restored, hubId, { requireOnline: false });
+        await expect
+          .poll(() => getRenderedOutboundForAccount(reopenedSenderPage, hubId), {
+            timeout: CHANNEL_OP_TIMEOUT_MS,
+            intervals: [500, 1_000, 1_500],
+            message: 'post-restore payment state must survive a closed-tab restart',
+          })
+          .toBe(senderAfterPayment);
+        await expect
+          .poll(() => getRenderedOutboundForAccount(recipientPage, hubId), {
+            timeout: CHANNEL_OP_TIMEOUT_MS,
+            intervals: [500, 1_000, 1_500],
+            message: 'recipient post-restore payment state must stay committed after sender tab restart',
+          })
+          .toBe(recipientAfterPayment);
+        console.log(
+          JSON.stringify({
+            proof: 'tower-funded-recovery',
+            backedUpBalance,
+            quotedSenderAmount,
+            senderAfterPayment,
+            recipientAfterPayment,
+            restoredHeight: after.runtimeHeight,
+          }),
+        );
+        await reopenedSenderPage.screenshot({ path: testInfo.outputPath('tower-funded-recovery.png'), fullPage: true });
+      } finally {
+        // Close every Runtime page before stopping the tower. Parallel teardown
+        // races the page's final appointment/health polls against tower shutdown
+        // and turns a successful recovery into a false connection-refused error.
+        const contextCleanup = await Promise.allSettled([
+          closeRuntimeContext(context),
+          ...(recipientContext ? [closeRuntimeContext(recipientContext)] : []),
+        ]);
+        const towerCleanup = await Promise.allSettled([stopWatchtower(tower)]);
+        const failures = [...contextCleanup, ...towerCleanup]
+          .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+          .map(result => result.reason);
+        if (failures.length > 0) {
+          throw new AggregateError(failures, 'WATCHTOWER_E2E_CLEANUP_FAILED');
+        }
       }
-    }
-  });
+    },
+  );
 });
