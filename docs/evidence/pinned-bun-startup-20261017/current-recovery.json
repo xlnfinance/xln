@@ -1,0 +1,112 @@
+{
+  "sourceSha": "f3a14e6528415c7c98da7865eb6492becb8c1c61",
+  "normalRestart": true,
+  "dataReset": false,
+  "readinessMs": 77151,
+  "ordinaryObservationExit": 1,
+  "ordinaryObservationSeconds": 54.402,
+  "combinedHistoryQueryExit": 124,
+  "combinedHistoryQuerySeconds": 60.042,
+  "hubComparisons": [
+    {
+      "recoveryDurationMs": 77152,
+      "results": [
+        {
+          "accountViews": 10,
+          "advancements": [
+            {
+              "after": 3,
+              "before": 2,
+              "financialRoot": "0x84c8149f6380658b3f17ad30ab8c1ac0693c6a29744cc475a2bde8e6ec7deb4d",
+              "peer": "0xe2d88972225e766593519e423018cb6ff1050e948a29a42d56972a873b79ea15",
+              "reason": "New post-restart credit-policy frame links the preserved previous frame; all financial roots and balances unchanged"
+            }
+          ],
+          "beforeHeight": 118,
+          "currentFinancialRootsAndBalancesExact": true,
+          "currentHeight": 125,
+          "historicalAccountsExact": true,
+          "name": "H1"
+        }
+      ],
+      "source": {
+        "codeHash": "f3a14e6528415c7c98da7865eb6492becb8c1c61",
+        "computedAt": 1792254930896,
+        "dirty": false,
+        "gitBranch": "main",
+        "gitHead": "f3a14e6528415c7c98da7865eb6492becb8c1c61",
+        "height": 125,
+        "owner": "orchestrator"
+      }
+    },
+    {
+      "recoveryDurationMs": 77152,
+      "results": [
+        {
+          "accountViews": 6,
+          "advancements": [
+            {
+              "after": 3,
+              "before": 2,
+              "financialRoot": "0x62eef93ac27d83152c51491fba9647b3e5085e4a1dfbe11bf6566694a8326e93",
+              "peer": "0xe2d88972225e766593519e423018cb6ff1050e948a29a42d56972a873b79ea15",
+              "reason": "New post-restart credit-policy frame links the preserved previous frame; all financial roots and balances unchanged"
+            }
+          ],
+          "beforeHeight": 91,
+          "currentFinancialRootsAndBalancesExact": true,
+          "currentHeight": 95,
+          "historicalAccountsExact": true,
+          "name": "H2"
+        }
+      ],
+      "source": {
+        "codeHash": "f3a14e6528415c7c98da7865eb6492becb8c1c61",
+        "computedAt": 1792254930896,
+        "dirty": false,
+        "gitBranch": "main",
+        "gitHead": "f3a14e6528415c7c98da7865eb6492becb8c1c61",
+        "height": 125,
+        "owner": "orchestrator"
+      }
+    },
+    {
+      "recoveryDurationMs": 77152,
+      "results": [
+        {
+          "accountViews": 6,
+          "advancements": [
+            {
+              "after": 3,
+              "before": 2,
+              "financialRoot": "0x3d30210064a77a1878cd458468aeabe711fc1c41a9c5927e9a525db8085ca4f1",
+              "peer": "0xe2d88972225e766593519e423018cb6ff1050e948a29a42d56972a873b79ea15",
+              "reason": "New post-restart credit-policy frame links the preserved previous frame; all financial roots and balances unchanged"
+            }
+          ],
+          "beforeHeight": 80,
+          "currentFinancialRootsAndBalancesExact": true,
+          "currentHeight": 84,
+          "historicalAccountsExact": true,
+          "name": "H3"
+        }
+      ],
+      "source": {
+        "codeHash": "f3a14e6528415c7c98da7865eb6492becb8c1c61",
+        "computedAt": 1792254930896,
+        "dirty": false,
+        "gitBranch": "main",
+        "gitHead": "f3a14e6528415c7c98da7865eb6492becb8c1c61",
+        "height": 125,
+        "owner": "orchestrator"
+      }
+    }
+  ],
+  "backup": {
+    "path": "/root/xln-deployment-evidence/f3a14e652/recovery/current-format-before-restart.tar.gz",
+    "bytes": 1232713,
+    "sha256": "ba7611bde73ccaaaaee76f1bfb46415e7ed6021f304a769fac3725baf9c72455"
+  },
+  "exactReplayOutboxClaim": false,
+  "rollbackClaim": false
+}

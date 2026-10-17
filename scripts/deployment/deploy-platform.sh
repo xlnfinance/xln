@@ -58,6 +58,7 @@ IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
+source "$REPO_ROOT/scripts/lib/start-common.sh"
 if [ ! -f "$REPO_ROOT/package.json" ] || [ ! -d "$REPO_ROOT/core" ]; then
   echo "DEPLOY_REPOSITORY_ROOT_INVALID:path=$REPO_ROOT" >&2
   exit 1
@@ -208,6 +209,7 @@ build_hosted_wallet() {
 }
 
 build_remote_frontend_archive() {
+  xln_require_pinned_bun "$REPO_ROOT"
   local deploy_build_number
   deploy_build_number="$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
   echo "[deploy] building production frontend locally: $deploy_build_number"
@@ -1119,7 +1121,7 @@ fi
 }
 
 run_local_deploy() {
-  export PATH="$HOME/.bun/bin:$PATH"
+  xln_require_pinned_bun "$REPO_ROOT"
 
   if [ "$FRESH" = "1" ]; then
     if [ "$PRODUCTION" != "1" ]; then
@@ -1301,7 +1303,7 @@ if [ -n "$REMOTE_HOST" ]; then
 
   # The same preservation guard runs in real-Git regression fixtures. Inline its
   # current bytes because the remote checkout still contains the previous release.
-  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else echo 'REMOTE_DEPLOY_CHECKOUT_MISSING' >&2; exit 1; fi; cd \"\$XLN_DIR\"; PATH=\"\$HOME/.bun/bin:\$PATH\"; EXPECTED_DEPLOY_SHA='$EXPECTED_DEPLOY_SHA';
+  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else echo 'REMOTE_DEPLOY_CHECKOUT_MISSING' >&2; exit 1; fi; cd \"\$XLN_DIR\"; PATH=\"\$PATH:\$HOME/.bun/bin\"; EXPECTED_DEPLOY_SHA='$EXPECTED_DEPLOY_SHA';
 $(cat "$SCRIPT_DIR/prepare-remote-main.sh")
 "
   if [ -n "$remote_frontend_archive" ]; then

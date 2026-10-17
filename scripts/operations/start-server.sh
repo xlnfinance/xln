@@ -11,6 +11,7 @@ cd "$REPO_ROOT"
 source "$REPO_ROOT/scripts/lib/start-common.sh"
 source "$REPO_ROOT/scripts/lib/port-layout.sh"
 xln_configure_start_policy "$REPO_ROOT"
+xln_require_pinned_bun "$REPO_ROOT"
 
 RPC_PORT="${ANVIL_PORT:-$(xln_rpc_port)}"
 RPC2_PORT="${ANVIL2_PORT:-$(xln_rpc2_port)}"
@@ -100,7 +101,6 @@ export XLN_RUNTIME_PROCESS_SLOW_MS=${XLN_RUNTIME_PROCESS_SLOW_MS:-250}
 export XLN_ENTITY_FRAME_SLOW_MS=${XLN_ENTITY_FRAME_SLOW_MS:-250}
 export MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE=${MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:-1000}
 export ANVIL_TMPDIR=${ANVIL_TMPDIR:-${XLN_JDB_ROOT:-$REPO_ROOT/data}/tmp}
-export PATH="${HOME}/.bun/bin:$PATH"
 export XLN_MIN_DISK_FREE_BYTES=${XLN_MIN_DISK_FREE_BYTES:-$((5 * 1024 * 1024 * 1024))}
 
 # QA evidence root: persistent on prod (outside the /root/xln checkout that the
@@ -172,4 +172,4 @@ else
   ORCHESTRATOR_ARGS+=(--mm --custody)
 fi
 
-exec "${HOME}/.bun/bin/bun" "${ORCHESTRATOR_ARGS[@]}"
+exec "$XLN_START_BUN" "${ORCHESTRATOR_ARGS[@]}"

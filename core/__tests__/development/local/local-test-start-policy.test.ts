@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -136,4 +136,63 @@ test('owned local run roots reject dev and foreign data before reset', () => {
     .toThrow('LOCAL_RUN_ROOT_NOT_OWNED');
   expect(() => resetOwnedLocalRunRoot(join(repoRoot, 'db', 'dev'), repoRoot, 'test'))
     .toThrow('LOCAL_RUN_ROOT_OVERLAPS_DEV');
+});
+
+test('startup selects the actual PATH Bun only when it matches the repository pin', async () => {
+  const result = await run(
+    'bash',
+    [
+      '-ec',
+      'source scripts/lib/start-common.sh; xln_require_pinned_bun "$1"; "$XLN_START_BUN" --version',
+      'pinned-bun',
+      repoRoot,
+    ],
+    process.env,
+  );
+  expect(result.code).toBe(0);
+  expect(result.stdout.trim()).toBe(Bun.version);
+});
+
+test('startup rejects a different Bun pin before any following service action', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'xln-start-bun-pin-'));
+  tempRoots.push(root);
+  writeFileSync(join(root, 'package.json'), '{"packageManager":"bun@0.0.0"}');
+  const marker = join(root, 'service-started');
+  const result = await run(
+    'bash',
+    [
+      '-ec',
+      'source scripts/lib/start-common.sh; xln_require_pinned_bun "$1"; touch "$2"',
+      'pinned-bun-reject',
+      root,
+      marker,
+    ],
+    process.env,
+  );
+  expect(result.code).not.toBe(0);
+  expect(result.stderr).toContain(`XLN_BUN_VERSION_MISMATCH:expected=bun@0.0.0:actual=bun@${Bun.version}`);
+  expect(existsSync(marker)).toBeFalse();
+});
+
+test('actual fresh deployment rejects an unsupported Bun before deleting data or logs', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'xln-deploy-bun-pin-'));
+  tempRoots.push(root);
+  for (const directory of ['core', 'db', 'logs', 'scripts/deployment', 'scripts/lib']) {
+    mkdirSync(join(root, directory), { recursive: true });
+  }
+  for (const file of ['scripts/deployment/deploy-platform.sh', 'scripts/lib/start-common.sh']) {
+    writeFileSync(join(root, file), readFileSync(join(repoRoot, file)));
+  }
+  writeFileSync(join(root, 'package.json'), '{"packageManager":"bun@0.0.0"}');
+  writeFileSync(join(root, 'db', 'owner-data'), 'preserve data');
+  writeFileSync(join(root, 'logs', 'owner.log'), 'preserve evidence');
+  const result = await run(
+    'bash',
+    [join(root, 'scripts/deployment/deploy-platform.sh'), '--fresh', '--runtime-only'],
+    process.env,
+  );
+  expect(result.code).not.toBe(0);
+  expect(result.stderr).toContain('XLN_BUN_VERSION_MISMATCH');
+  expect(readFileSync(join(root, 'db', 'owner-data'), 'utf8')).toBe('preserve data');
+  expect(readFileSync(join(root, 'logs', 'owner.log'), 'utf8')).toBe('preserve evidence');
 });

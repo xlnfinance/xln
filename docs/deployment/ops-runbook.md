@@ -28,6 +28,21 @@ Only API incidents, health and metrics receive the capability. Authenticated req
 (or loopback HTTP) and reject redirects; separate tower URLs and the wallet request receive no token.
 A missing/wrong capability remains an authorization failure, not permission to skip incident checks.
 
+## Pinned runtime executable
+
+`package.json` owns the exact Bun version. Startup and deployment reject a different
+version before opening stores, creating keys, killing listeners or deleting fresh
+state. Configure each XLN service's PATH with the verified app-scoped Bun directory
+first; server, custody and watchtower execute the selected checked binary. Do not
+replace another application's global runtime to satisfy this requirement.
+
+Record archive/binary hashes and verify the selected executable with `bun --version`
+in the actual service environment. Preserve its current checkpoint/WAL before a
+controlled restart. A successful short crypto/worker test does not prove a previously
+observed shutdown crash fixed; capture old/new process ownership, exit logs and exact
+financial state after the actual restart. See
+[pinned runtime and recovery evidence](../evidence/pinned-bun-startup-20261017/readme.md).
+
 ## Regenerating obsolete testnet stores
 
 The owner-authorized October17 recovery is recorded in

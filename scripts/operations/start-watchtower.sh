@@ -10,9 +10,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 cd "$REPO_ROOT"
 source "$REPO_ROOT/scripts/lib/start-common.sh"
+xln_require_pinned_bun "$REPO_ROOT"
 RDB_ROOT="${XLN_RDB_ROOT:-$REPO_ROOT/db}"
 
-export PATH="${HOME}/.bun/bin:$PATH"
 export XLN_WATCHTOWER_PORT="${XLN_WATCHTOWER_PORT:-9100}"
 export XLN_WATCHTOWER_HOST="${XLN_WATCHTOWER_HOST:-127.0.0.1}"
 export XLN_WATCHTOWER_DB_PATH="${XLN_WATCHTOWER_DB_PATH:-$RDB_ROOT/watchtower/prod-main}"
@@ -40,7 +40,7 @@ if [ -z "${XLN_WATCHTOWER_PRIVATE_KEY:-}" ]; then
   mkdir -p "$(dirname "$XLN_WATCHTOWER_PRIVATE_KEY_FILE")"
   if [ ! -f "$XLN_WATCHTOWER_PRIVATE_KEY_FILE" ]; then
     umask 077
-    "${HOME}/.bun/bin/bun" -e "const { Wallet } = await import('ethers'); console.log(Wallet.createRandom().privateKey)" > "$XLN_WATCHTOWER_PRIVATE_KEY_FILE"
+    "$XLN_START_BUN" -e "const { Wallet } = await import('ethers'); console.log(Wallet.createRandom().privateKey)" > "$XLN_WATCHTOWER_PRIVATE_KEY_FILE"
   fi
   export XLN_WATCHTOWER_PRIVATE_KEY="$(tr -d '\r\n' < "$XLN_WATCHTOWER_PRIVATE_KEY_FILE")"
 fi
@@ -68,4 +68,4 @@ if [ "$XLN_PUSH_ENABLE" = "1" ]; then
   WATCHTOWER_ARGS+=(--enable-push-wake)
 fi
 
-exec "${HOME}/.bun/bin/bun" "${WATCHTOWER_ARGS[@]}"
+exec "$XLN_START_BUN" "${WATCHTOWER_ARGS[@]}"

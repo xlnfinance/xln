@@ -1,0 +1,18 @@
+{
+  "readme.md": {
+    "sha256": "66e5db7d6873f2856cb2313ba502c16a3e30f17299d78af99b9196757e8f7c0a",
+    "bytes": 4213
+  },
+  "linux-artifact.json": {
+    "sha256": "e985d9bcff946e6f9f1da75d9242b84dbd5013c7829d95040b5a5b04611b99e9",
+    "bytes": 445
+  },
+  "current-recovery.json": {
+    "sha256": "9fcf3c22faac9074e9a8b28133e09cc496e3cd95377d627cb73fec241e0f5021",
+    "bytes": 3786
+  },
+  "command-evidence.tar.gz": {
+    "sha256": "cc4f4389dd286c78097967d986cca5d4a73ba4b3923062978ef7c658d60a84d4",
+    "bytes": 50381
+  }
+}

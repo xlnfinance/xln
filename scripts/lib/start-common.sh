@@ -2,6 +2,21 @@
 
 XLN_START_ASSERT_ONLY_ACTIVE=0
 
+xln_require_pinned_bun() {
+  # Validate before opening stores or creating keys; preserve an app-scoped PATH.
+  local requested_repo_root="$1" expected actual
+  XLN_START_BUN="$(command -v bun)" || {
+    echo "XLN_BUN_NOT_FOUND" >&2
+    return 1
+  }
+  expected="$("$XLN_START_BUN" -p 'require(process.argv[1]).packageManager' "$requested_repo_root/package.json")" || return 1
+  actual="$("$XLN_START_BUN" --version)" || return 1
+  if [[ "$expected" != "bun@$actual" ]]; then
+    echo "XLN_BUN_VERSION_MISMATCH:expected=$expected:actual=bun@$actual:binary=$XLN_START_BUN" >&2
+    return 1
+  fi
+}
+
 xln_configure_start_policy() {
   local requested_repo_root="$1"
   local names=(

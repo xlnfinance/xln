@@ -6,6 +6,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 cd "$REPO_ROOT"
 source "$REPO_ROOT/scripts/lib/start-common.sh"
+xln_require_pinned_bun "$REPO_ROOT"
 source "$REPO_ROOT/scripts/lib/port-layout.sh"
 RDB_ROOT="${XLN_RDB_ROOT:-$REPO_ROOT/db}"
 
@@ -14,7 +15,6 @@ MAIN_API_PORT="${XLN_SERVER_PORT:-$(xln_web_port)}"
 DEFAULT_CUSTODY_DAEMON_PORT="$(xln_custody_daemon_port)"
 DEFAULT_CUSTODY_PORT="$(xln_custody_port)"
 
-export PATH="${HOME}/.bun/bin:$PATH"
 export USE_ANVIL=true
 export CUSTODY_MAIN_API_BASE_URL=${CUSTODY_MAIN_API_BASE_URL:-http://127.0.0.1:${MAIN_API_PORT}}
 export CUSTODY_MAIN_RPC_URL=${CUSTODY_MAIN_RPC_URL:-http://127.0.0.1:${MAIN_RPC_PORT}}
@@ -37,4 +37,4 @@ xln_kill_by_port "$CUSTODY_PORT" start-custody
 xln_kill_by_port "$CUSTODY_DAEMON_PORT" start-custody
 xln_kill_by_pattern "core/api/server/index.ts --port ${CUSTODY_DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${CUSTODY_DAEMON_PORT}" start-custody
 
-exec "${HOME}/.bun/bin/bun" core/scripts/operations/custody/start-custody-prod.ts
+exec "$XLN_START_BUN" core/scripts/operations/custody/start-custody-prod.ts
