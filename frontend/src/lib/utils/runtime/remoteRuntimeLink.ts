@@ -43,10 +43,37 @@ export function stripRemoteRuntimeLink(url: URL): URL {
   const clean = new URL(url);
   const hash = remoteParams(clean);
   const hasRemoteHash = REMOTE_LINK_KEYS.some(key => hash.has(key));
-  for (const key of REMOTE_LINK_KEYS) {
+  const importKeys = ['runtime-import-src', 'runtime-import'];
+  const hasImportHash = importKeys.some(key => hash.has(key));
+  for (const key of [...REMOTE_LINK_KEYS, ...importKeys]) {
     clean.searchParams.delete(key);
     hash.delete(key);
   }
-  if (hasRemoteHash) clean.hash = hash.toString();
+  if (hasRemoteHash || hasImportHash) clean.hash = hash.toString();
   return clean;
+}
+
+/** Current orchestrator manifests are fetched only from this wallet's server. */
+export function parseRemoteRuntimeImportLink(url: URL): string | null {
+  const keys = ['runtime-import-src', 'runtime-import'];
+  if (keys.some(key => url.searchParams.has(key))) throw new Error('REMOTE_RUNTIME_QUERY_BOOTSTRAP_FORBIDDEN');
+  const hash = remoteParams(url);
+  if (!keys.some(key => hash.has(key))) return null;
+  if ([...hash.keys()].length !== 1 || hash.getAll('runtime-import-src').length !== 1)
+    throw new Error('REMOTE_RUNTIME_IMPORT_LINK_FORMAT_INVALID');
+  const source = hash.get('runtime-import-src');
+  if (!source) throw new Error('REMOTE_RUNTIME_IMPORT_SOURCE_REQUIRED');
+  const endpoint = new URL(source, url);
+  if (
+    endpoint.origin !== url.origin ||
+    endpoint.username ||
+    endpoint.password ||
+    endpoint.hash ||
+    endpoint.pathname !== '/api/runtime-import' ||
+    endpoint.searchParams.get('access') !== 'admin' ||
+    [...endpoint.searchParams.keys()].some(key => key !== 'access') ||
+    endpoint.searchParams.getAll('access').length !== 1
+  )
+    throw new Error('REMOTE_RUNTIME_IMPORT_SOURCE_INVALID');
+  return endpoint.pathname + endpoint.search;
 }

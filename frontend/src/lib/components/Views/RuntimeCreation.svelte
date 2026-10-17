@@ -23,7 +23,7 @@
   import type { VaultUnlockDurationMs } from '#lib/security/vaultProtection.ts';
   import { deriveRequestSignal, vaultUiOperations } from '#lib/stores/vault/vaultUiStore.ts';
   import { writeRuntimeRecoveryDiscoveryStatus } from '#lib/utils/recovery/recoveryDiscoveryStatus.ts';
-  import { buildRemoteRuntimeRecoveryPeerSources } from '#lib/utils/onboarding/remoteRuntimeValidation.ts';
+  import { buildRemoteRuntimeRecoveryPeerSources } from '#lib/utils/onboarding/remoteRuntimeRecovery.ts';
   import {
     BRAINVAULT_V1,
     BRAINVAULT_V1_SPEC_ID,

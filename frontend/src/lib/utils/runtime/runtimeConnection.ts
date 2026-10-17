@@ -23,7 +23,7 @@ import {
   readRemoteRuntimeTokenAudience,
   resolveStoredRemoteRuntimeAuthKey,
 } from '../onboarding/remoteRuntimeImport';
-import { parseRemoteRuntimeLink, stripRemoteRuntimeLink } from './remoteRuntimeLink';
+import { parseRemoteRuntimeLink, parseRemoteRuntimeImportLink, stripRemoteRuntimeLink } from './remoteRuntimeLink';
 
 export const REMOTE_ACCEPT_PREFIX = 'xln-remote-runtime-accepted:';
 
@@ -142,30 +142,9 @@ export function readRemoteRuntimeRequestFromUrl(): RemoteRuntimeRequest | null {
   };
 }
 
-export function runtimeImportPayloadFromParams(params: URLSearchParams): string {
-  return String(params.get(REMOTE_RUNTIME_IMPORT_HASH_PARAM) || '').trim();
-}
-
-export function runtimeImportSourceFromParams(params: URLSearchParams): string {
-  return String(params.get(REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM) || '').trim();
-}
-
-export function readRemoteRuntimeImportPayloadFromHash(): string {
-  if (typeof window === 'undefined') return '';
-  const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-  const hash = rawHash.trim();
-  if (!hash) return '';
-  const params = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
-  return runtimeImportPayloadFromParams(params);
-}
-
 export function readRemoteRuntimeImportSourceFromHash(): string {
   if (typeof window === 'undefined') return '';
-  const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-  const hash = rawHash.trim();
-  if (!hash) return '';
-  const params = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
-  return runtimeImportSourceFromParams(params);
+  return parseRemoteRuntimeImportLink(new URL(window.location.href)) ?? '';
 }
 
 export function persistRemoteRuntimeRequest(request: RemoteRuntimeRequest): void {

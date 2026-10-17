@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import {
   parseRemoteRuntimeLink,
+  parseRemoteRuntimeImportLink,
   stripRemoteRuntimeLink,
 } from '../../../../frontend/src/lib/utils/runtime/remoteRuntimeLink';
 
@@ -54,4 +55,32 @@ test('remote endpoint cannot carry hidden credentials, query tokens, fragments o
       'REMOTE_RUNTIME_WS_REQUIRED',
     );
   }
+});
+
+test('current bulk source is same-origin, exact and scrubbed before any connection', () => {
+  const url = link(new URLSearchParams({ 'runtime-import-src': '/api/runtime-import?access=admin' }).toString());
+  expect(parseRemoteRuntimeImportLink(url)).toBe('/api/runtime-import?access=admin');
+  expect(parseRemoteRuntimeLink(url)).toBeNull();
+  expect(stripRemoteRuntimeLink(url).href).toBe('https://wallet.example/ui/');
+  expect(parseRemoteRuntimeImportLink(link('pay/0xabc?amount=2&token=1'))).toBeNull();
+});
+
+test('bulk links reject old inline payloads, mixed authority and foreign sources', () => {
+  for (const hash of [
+    'runtime-import={"entries":[]}',
+    'runtime-import-src=/api/runtime-import?access=admin&token=xlnra1.full.invalid',
+    'runtime-import-src=/api/runtime-import?access=admin&runtime-import-src=/other',
+    ...[
+      'https://evil.example/api/runtime-import?access=admin',
+      '/other?access=admin',
+      '/api/runtime-import?access=admin&access=admin',
+      '/api/runtime-import?access=public',
+      '/api/runtime-import?access=admin&token=secret',
+      'https://user:secret@wallet.example/api/runtime-import?access=admin',
+    ].map(source => new URLSearchParams({ 'runtime-import-src': source }).toString()),
+  ])
+    expect(() => parseRemoteRuntimeImportLink(link(hash))).toThrow();
+  expect(() =>
+    parseRemoteRuntimeImportLink(new URL('https://wallet.example/ui/?runtime-import-src=/api/runtime-import')),
+  ).toThrow('REMOTE_RUNTIME_QUERY_BOOTSTRAP_FORBIDDEN');
 });

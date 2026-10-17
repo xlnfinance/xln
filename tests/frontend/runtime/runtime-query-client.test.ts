@@ -722,14 +722,15 @@ test('health admin reads active runtime projections instead of debug event/entit
   expect(source).not.toContain('Registered Gossip Entities');
 });
 
-test('remote runtime validation uses typed query client reads with runtime-scoped cache', () => {
+test('one-shot import validation reads its authenticated adapter without observer state or cache', () => {
   const source = readFileSync('frontend/src/lib/utils/onboarding/remoteRuntimeValidation.ts', 'utf8');
-
-  expect(source).toContain('new RuntimeQueryClient(() => adapter, runtimeId)');
-  expect(source).toContain('queryClient.readHead()');
-  expect(source).toContain('queryClient.readEntities()');
+  // Each validation owns and closes a fresh connection. Observer-global caches
+  // must not determine the identity/Entity list displayed by React consent.
+  expect(source).toContain("adapter.read<StorageHead>('head'");
+  expect(source).toContain("adapter.read<RuntimeAdapterEntitySummary[]>('entities'");
   expect(source).toContain('remoteHubSummaryFromEntity');
   expect(source).toContain('hubEntities');
-  expect(source).not.toContain("adapter.read<StorageHead>('head'");
-  expect(source).not.toContain("adapter.read<RuntimeAdapterEntitySummary[]>('entities'");
+  expect(source).toContain('adapter.disconnect()');
+  expect(source).not.toContain('RuntimeQueryClient');
+  expect(source).not.toContain('runtimeController');
 });

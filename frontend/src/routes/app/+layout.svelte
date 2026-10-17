@@ -38,13 +38,12 @@
   } from '#lib/utils/control/activeTabLock.ts';
   import {
     describeRemoteRuntimeImportError,
-    parseRemoteRuntimeImportPayload,
   } from '#lib/utils/onboarding/remoteRuntimeImport.ts';
   import {
-    fetchRemoteRuntimeImportSource,
     importRemoteRuntimeEntries,
     persistActiveRemoteRuntimeImport,
   } from '#lib/utils/onboarding/remoteRuntimeImportFlow.ts';
+  import { fetchRemoteRuntimeImportSource } from '#lib/utils/onboarding/remoteRuntimeImportValidation.ts';
   import {
     consumeLocalRuntimePairing,
     readLocalRuntimeLaunchRequest,
@@ -53,7 +52,6 @@
   } from '#lib/utils/runtime/localRuntimePairing.ts';
   import {
     persistRemoteRuntimeRequest,
-    readRemoteRuntimeImportPayloadFromHash,
     readRemoteRuntimeImportSourceFromHash,
     readRemoteRuntimeRequestFromUrl,
     remoteAcceptKey,
@@ -155,16 +153,13 @@
     stripRemoteRuntimeParamsFromHistory();
   }
 
-  async function importRemoteRuntimesIntoApp(input: { payload?: string; source?: string }): Promise<void> {
-    const payload = String(input.payload || '').trim();
+  async function importRemoteRuntimesIntoApp(input: { source?: string }): Promise<void> {
     const source = String(input.source || '').trim();
-    if (!payload && !source) return;
+    if (!source) return;
     isLoading.set(true);
     error.set(null);
     try {
-      const entries = source
-        ? await fetchRemoteRuntimeImportSource(source)
-        : parseRemoteRuntimeImportPayload(payload);
+      const entries = await fetchRemoteRuntimeImportSource(source);
       const result = await importRemoteRuntimeEntries(entries);
       const first = result.validated[0]!;
       persistActiveRemoteRuntimeImport(first);
@@ -208,12 +203,10 @@
     parsedRemoteRequest?: ReturnType<typeof readRemoteRuntimeRequestFromUrl>,
   ): Promise<RemoteRuntimeBootstrapResult> {
     const pairingToken = readLocalRuntimePairingToken();
-    const importPayload = readRemoteRuntimeImportPayloadFromHash();
     const importSource = readRemoteRuntimeImportSourceFromHash();
     const remoteRequest = parsedRemoteRequest ?? readRemoteRuntimeRequestFromUrl();
     await pairLocalRuntimeIntoApp(pairingToken);
     await importRemoteRuntimesIntoApp({
-      payload: importPayload,
       source: importSource,
     });
     if (remoteRequest && remoteRuntimeRequiresConsent(remoteRequest)) {
@@ -232,14 +225,12 @@
   async function processRuntimeImportLocationChange(): Promise<void> {
     if (runtimeImportLocationInFlight || !hasActiveTabLock || isInactiveTabStandby()) return;
     const pairingToken = readLocalRuntimePairingToken();
-    const importPayload = readRemoteRuntimeImportPayloadFromHash();
     const importSource = readRemoteRuntimeImportSourceFromHash();
-    if (!pairingToken && !importPayload && !importSource) return;
+    if (!pairingToken && !importSource) return;
     runtimeImportLocationInFlight = true;
     try {
       await pairLocalRuntimeIntoApp(pairingToken);
       await importRemoteRuntimesIntoApp({
-        payload: importPayload,
         source: importSource,
       });
       await activateAppAfterRuntimeChoice();
@@ -518,11 +509,10 @@
 
     void (async () => {
       const pairingToken = readLocalRuntimePairingToken();
-      const importPayload = readRemoteRuntimeImportPayloadFromHash();
       const importSource = readRemoteRuntimeImportSourceFromHash();
       const remoteRequest = readRemoteRuntimeRequestFromUrl();
       if (await maybeHandleResetHash()) return;
-      const hasExplicitRemoteRuntimeBootstrap = Boolean(pairingToken || importPayload || importSource || remoteRequest);
+      const hasExplicitRemoteRuntimeBootstrap = Boolean(pairingToken || importSource || remoteRequest);
       if (isInactiveTabStandby()) {
         showInactiveTabStandby();
         return;

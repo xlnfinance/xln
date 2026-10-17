@@ -946,220 +946,122 @@ test(
   'runtime dropdown switches app-imported remote runtimes without manager route',
   { tag: '@functional' },
   async ({ page }) => {
-    test.setTimeout(480_000);
     const baseline = await ensureE2EBaseline(page, {
       requireHubMesh: true,
       requireMarketMaker: true,
       requireCustody: true,
       minHubCount: 3,
-      timeoutMs: 300_000,
       allowAutoReset: false,
     });
+    const hubs = await waitForNamedHubs(page, ['h1', 'h2'], { apiBaseUrl: API_BASE_URL });
+    const h1 = String(hubs.h1 || '').toLowerCase();
+    const h2 = String(hubs.h2 || '').toLowerCase();
     const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
     const h2Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H2');
-    const h1WsUrl = h1Endpoint.wsUrl;
-    const h2WsUrl = h2Endpoint.wsUrl;
-
     const h1Key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
-    await page.goto(
-      remoteRuntimeUrl('/app', h1WsUrl, h1Key),
-      {
-        waitUntil: 'domcontentloaded',
-      },
-    );
-    await acceptRemoteRuntimeConsent(page);
-    await page.waitForFunction(
-      expectedRuntimeId => String((window as any).__xln?.view?.runtimeId || '') === expectedRuntimeId,
-      h1Endpoint.runtimeId,
-      { timeout: REMOTE_E2E_WAIT_MS },
-    );
-
-    await page.getByTestId('context-current').click();
+    await page.goto(remoteRuntimeUrl('/app', h1Endpoint.wsUrl, h1Key), { waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: 'Connect', exact: true }).click();
+    await page.getByRole('button', { name: new RegExp(h1.slice(0, 18)) }).click();
+    await expect(page.getByTestId('home-entity-id')).toHaveText(h1);
     await expect(page.getByTestId('remote-runtime-manager')).toHaveCount(0);
     await expect(page.locator('.remote-manager-link')).toHaveCount(0);
-    await page.keyboard.press('Escape');
 
     const importUrl = await resolveRuntimeImportAppUrl(page, {
       appBaseUrl: APP_BASE_URL,
       apiBaseUrl: API_BASE_URL,
       access: 'admin',
     });
-    expect(importUrl).toContain('/app#runtime-import');
+    expect(importUrl).toContain('/app#runtime-import-src=');
     expect(importUrl).not.toContain('/radapter/manage');
-    await page.goto(importUrl, { waitUntil: 'domcontentloaded' });
-    const importSummary = await readRuntimeImportSummary(page, 120_000);
-    expect(importSummary.entries.some(entry => entry.runtimeId === h2Endpoint.runtimeId)).toBe(true);
-    expect(importSummary.failedCount ?? 0).toBe(0);
-
-    await page.getByTestId('context-current').click();
-    await page.evaluate(targetRuntimeId => {
-      const runtime = document.querySelector(
-        `[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`,
-      ) as HTMLElement | null;
-      if (!runtime) throw new Error(`REMOTE_RUNTIME_GROUP_MISSING:${targetRuntimeId}`);
-      runtime.click();
-    }, h2Endpoint.runtimeId);
-    await page.waitForFunction(
-      ({ targetRuntimeId }) => {
-        const focus = document.querySelector('[data-testid="context-runtime-focus"]');
-        return Array.from(focus?.querySelectorAll('[data-testid="context-entity-row"]') ?? []).some(row => {
-          const label = String(row.getAttribute('data-entity-label') || '').trim().toLowerCase();
-          return row.getAttribute('data-runtime-id') === targetRuntimeId
-            && (label === 'h2' || label.startsWith('h2 ') || label.startsWith('h2('));
-        });
-      },
-      { targetRuntimeId: h2Endpoint.runtimeId },
-      { timeout: REMOTE_E2E_WAIT_MS },
-    );
-    await page.evaluate(
-      ({ targetRuntimeId }) => {
-        const focus = document.querySelector('[data-testid="context-runtime-focus"]');
-        if (!focus) throw new Error('CONTEXT_RUNTIME_FOCUS_MISSING');
-        const row = Array.from(focus.querySelectorAll('[data-testid="context-entity-row"]')).find(candidate => {
-          const label = String(candidate.getAttribute('data-entity-label') || '').trim().toLowerCase();
-          return candidate.getAttribute('data-runtime-id') === targetRuntimeId
-            && (label === 'h2' || label.startsWith('h2 ') || label.startsWith('h2('));
-        }) as HTMLElement | undefined;
-        if (!row) throw new Error(`REMOTE_RUNTIME_ENTITY_ROW_MISSING:${targetRuntimeId}:h2`);
-        row.click();
-      },
-      { targetRuntimeId: h2Endpoint.runtimeId },
-    );
-
-    await page.waitForFunction(
-      expectedWsUrl => localStorage.getItem('xln-runtime-adapter-ws') === expectedWsUrl,
-      h2WsUrl,
-      { timeout: 90_000 },
-    );
-
-    const managerState = await page.evaluate(expectedWsUrl => {
-      const importsRaw = sessionStorage.getItem('xln-remote-runtime-imports') || '[]';
-      const imports = JSON.parse(importsRaw) as Array<{
-        label?: string;
-        wsUrl?: string;
-        access?: string;
-        entityCount?: number;
-      }>;
-      return {
-        activeWsUrl: localStorage.getItem('xln-runtime-adapter-ws'),
-        imports,
-        h2Import: imports.find(entry => entry.wsUrl === expectedWsUrl) || null,
-        sessionRegistryPresent: Boolean(sessionStorage.getItem('xln-remote-runtime-imports')),
-      };
-    }, h2WsUrl);
-
-    expect(managerState.activeWsUrl).toBe(h2WsUrl);
-    expect(managerState.sessionRegistryPresent).toBe(true);
-    expect(managerState.imports.length).toBeGreaterThanOrEqual(5);
-    expect(managerState.imports.length).toBeLessThanOrEqual(100);
-    expect(managerState.h2Import?.label).toBe('H2');
-    expect(managerState.h2Import?.access).toBe('admin');
-    expect(managerState.h2Import?.entityCount ?? 0).toBeGreaterThan(0);
-
-    await page.waitForFunction(
-      expectedRuntimeId => {
-        const root = window as typeof window & {
-          __xln?: {
-            view?: { runtimeId?: string };
-            adapter?: { status?: () => { connected?: boolean; authLevel?: string | null } };
-          };
-        };
-        const status = root.__xln?.adapter?.status?.();
-        return String(root.__xln?.view?.runtimeId || '') === expectedRuntimeId
-          && status?.connected === true
-          && status.authLevel === 'admin';
-      },
-      h2Endpoint.runtimeId,
-      { timeout: 90_000 },
-    );
-    await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-    await expect(page.locator('[data-testid="entity-lens-audit"]')).toHaveCount(0);
-    await expect(page.locator('[data-testid="entity-workspace-readonly"]')).toHaveCount(0);
-
-    const adminProjectionProbe = await page.evaluate(async () => {
-      const view = window as typeof window & {
-        __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
-        __xlnRuntimeCommands?: {
-          clear?: () => void;
-          latest?: {
-            status?: string;
-            error?: string | null;
-            inputSummary?: { entityInputs?: number; entityTxs?: number };
-          } | null;
-        };
-      };
-      const adapter = (view as any).__xln?.adapter;
-      const submit = (view as any).__xln?.submit;
-      if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
-      const waitUntilConnected = async () => {
-        const deadline = Date.now() + 30_000;
-        while (Date.now() < deadline) {
-          const status = adapter.status?.();
-          if (status?.connected === true && status.authLevel === 'admin') return;
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        const status = adapter.status?.();
-        throw new Error(`REMOTE_ADAPTER_NOT_CONNECTED:${status?.connected}:${status?.authLevel}`);
-      };
-      await waitUntilConnected();
-      (view as any).__xln?.commands?.clear?.();
-
-      type ViewFrame = {
-        activeEntity?: {
-          core?: {
-            entityId?: string;
-            signerId?: string;
-            profile?: { name?: string };
-          };
-          summary?: {
-            entityId?: string;
-          };
-        } | null;
-      };
-      const beforeFrame = await adapter.query.viewFrame<ViewFrame>({
-        accountsLimit: 1,
-        booksLimit: 1,
+    const sockets: string[] = [];
+    let submittedInputs = 0;
+    page.on('websocket', socket => {
+      sockets.push(socket.url());
+      socket.on('framesent', ({ payload }) => {
+        const message = decodeRuntimeAdapterMessage(payload);
+        if ('op' in message && message.op === 'send') submittedInputs += 1;
       });
-      const entityId = String(
-        beforeFrame.activeEntity?.core?.entityId || beforeFrame.activeEntity?.summary?.entityId || '',
-      ).toLowerCase();
-      const signerId = String(beforeFrame.activeEntity?.core?.signerId || '').toLowerCase();
-      const beforeName = String(beforeFrame.activeEntity?.core?.profile?.name || '');
-      const beforeHead = await adapter.query.head<{ latestHeight?: number }>();
-
-      const afterFrame = await adapter.query.viewFrame<ViewFrame>({
-        entityId,
-        accountsLimit: 1,
-        booksLimit: 1,
-      });
-      const afterHead = await adapter.query.head<{ latestHeight?: number }>();
-      const receipt = (view as any).__xln?.commands?.latest ?? null;
-
-      return {
-        authLevel: String(adapter.status().authLevel || ''),
-        entityId,
-        signerId,
-        beforeName,
-        afterName: String(afterFrame.activeEntity?.core?.profile?.name || ''),
-        beforeHeight: Number(beforeHead.latestHeight || 0),
-        afterHeight: Number(afterHead.latestHeight || 0),
-        submitPresent: Boolean(submit),
-        receiptStatus: String(receipt?.status || ''),
-        receiptError: String(receipt?.error || ''),
-        receiptEntityInputs: Number(receipt?.inputSummary?.entityInputs || 0),
-        receiptEntityTxs: Number(receipt?.inputSummary?.entityTxs || 0),
-      };
     });
-    expect(adminProjectionProbe.authLevel).toBe('admin');
-    expect(adminProjectionProbe.entityId).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(adminProjectionProbe.signerId).toMatch(/^0x[0-9a-f]{40}$/);
-    expect(adminProjectionProbe.submitPresent).toBe(false);
-    expect(adminProjectionProbe.receiptStatus).toBe('');
-    expect(adminProjectionProbe.receiptError).toBe('');
-    expect(adminProjectionProbe.receiptEntityInputs).toBe(0);
-    expect(adminProjectionProbe.receiptEntityTxs).toBe(0);
-    expect(adminProjectionProbe.afterName).toBe(adminProjectionProbe.beforeName);
-    expect(adminProjectionProbe.afterHeight).toBeGreaterThanOrEqual(adminProjectionProbe.beforeHeight);
+    await page.goto(importUrl, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('button', { name: 'Load runtime list', exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/ui\/$/);
+    expect(sockets).toEqual([]);
+    await page.getByRole('button', { name: 'Load runtime list', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Validate & attach', exact: true })).toBeVisible();
+    expect(sockets).toEqual([]);
+    await expect(page.getByText(h2Endpoint.wsUrl, { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Validate & attach', exact: true }).click();
+    const summary = await readRuntimeImportSummary(page);
+    expect(summary.ok).toBe(true);
+    expect(summary.failedCount).toBe(0);
+    expect(summary.failed).toEqual([]);
+    expect(summary.entries.length).toBeGreaterThanOrEqual(5);
+    expect(summary.entries.length).toBeLessThanOrEqual(100);
+    expect(summary.checked?.every(row => row.ok)).toBe(true);
+    const importedH2 = summary.entries.find(entry => entry.runtimeId === h2Endpoint.runtimeId);
+    expect(importedH2?.label).toBe('H2');
+    expect(importedH2?.access).toBe('admin');
+    expect(importedH2?.entityCount).toBeGreaterThan(0);
+    const saved = await page.evaluate(
+      () =>
+        JSON.parse(localStorage.getItem('xln-ui-vaults') || '[]') as Array<{
+          id: string;
+          name: string;
+          kind: string;
+          remote?: { wsUrl?: string };
+        }>,
+    );
+    expect(saved.length).toBeGreaterThanOrEqual(5);
+    expect(JSON.stringify(saved)).not.toContain('xlnra1.');
+    expect(saved.find(entry => entry.remote?.wsUrl === h2Endpoint.wsUrl)?.name).toBe('H2');
+    expect(await page.evaluate(() => (window as ReactRuntimeWindow).__xln?.adapter())).toBeNull();
+
+    await page.locator(`[data-testid="validated-runtime"][data-runtime-id="${h2Endpoint.runtimeId}"]`).click();
+    await expect(page.getByLabel('Runtime endpoint', { exact: true })).toHaveValue(h2Endpoint.wsUrl);
+    await expect(page.getByLabel('Access key · optional', { exact: true })).not.toHaveValue('');
+    expect(await page.evaluate(() => (window as ReactRuntimeWindow).__xln?.adapter())).toBeNull();
+    await page.getByRole('button', { name: 'Connect', exact: true }).click();
+    await page.getByRole('button', { name: new RegExp(h2.slice(0, 18)) }).click();
+    await expect(page.getByTestId('home-entity-id')).toHaveText(h2);
+    const projection = await page.evaluate(async entityId => {
+      const adapter = (window as ReactRuntimeWindow).__xln?.adapter();
+      if (!adapter) throw new Error('IMPORTED_RUNTIME_INSPECTION_MISSING');
+      type Frame = {
+        activeEntity?: {
+          core?: { entityId?: string; signerId?: string; profile?: { name?: string } };
+          summary?: { entityId?: string };
+        };
+      };
+      const before = await adapter.read<Frame>('view-frame', { entityId, accountsLimit: 1, booksLimit: 1 });
+      const headBefore = await adapter.read<{ latestHeight: number }>('head');
+      const after = await adapter.read<Frame>('view-frame', { entityId, accountsLimit: 1, booksLimit: 1 });
+      const headAfter = await adapter.read<{ latestHeight: number }>('head');
+      return {
+        runtimeId: adapter.runtimeId,
+        authLevel: adapter.authLevel,
+        commandReady: adapter.commandReady,
+        entityId: before.activeEntity?.core?.entityId || before.activeEntity?.summary?.entityId,
+        signerId: before.activeEntity?.core?.signerId,
+        beforeName: before.activeEntity?.core?.profile?.name,
+        afterName: after.activeEntity?.core?.profile?.name,
+        beforeHeight: headBefore.latestHeight,
+        afterHeight: headAfter.latestHeight,
+        sendPresent: 'send' in adapter,
+        submitPresent: 'submit' in ((window as ReactRuntimeWindow).__xln || {}),
+      };
+    }, h2);
+    expect(projection.runtimeId).toBe(h2Endpoint.runtimeId);
+    expect(projection.authLevel).toBe('admin');
+    expect(projection.commandReady).toBe(true);
+    expect(projection.entityId).toBe(h2);
+    expect(projection.signerId).toMatch(/^0x[0-9a-f]{40}$/);
+    expect(projection.sendPresent).toBe(false);
+    expect(projection.submitPresent).toBe(false);
+    expect(projection.beforeName).toBeTruthy();
+    expect(projection.afterName).toBe(projection.beforeName);
+    expect(projection.beforeHeight).toBeGreaterThan(0);
+    expect(projection.afterHeight).toBeGreaterThanOrEqual(projection.beforeHeight);
+    expect(submittedInputs).toBe(0);
   },
 );
 
@@ -1167,7 +1069,6 @@ test(
   'bulk remote runtime import link validates mesh, custody, and market maker runtimes in browser',
   { tag: '@functional' },
   async ({ browser }) => {
-    test.setTimeout(480_000);
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     try {
@@ -1177,175 +1078,97 @@ test(
         requireMarketMaker: true,
         requireCustody: true,
         minHubCount: 3,
-        timeoutMs: 300_000,
         allowAutoReset: false,
       });
-      expect(baseline.custody?.enabled, `custody must be enabled: ${JSON.stringify(baseline.custody ?? {})}`).toBe(
-        true,
-      );
-      expect(baseline.custody?.ok, `custody must be ready: ${JSON.stringify(baseline.custody ?? {})}`).toBe(true);
+      expect(baseline.custody?.enabled).toBe(true);
+      expect(baseline.custody?.ok).toBe(true);
       expectMarketMakerBooksHealthy(baseline);
-
-      const importResponse = await page.request.get(`${API_BASE_URL}/api/runtime-import?access=admin`, {
+      const response = await page.request.get(`${API_BASE_URL}/api/runtime-import?access=admin`, {
         headers: { 'Cache-Control': 'no-store' },
         timeout: 10_000,
       });
-      const importPayload = (await importResponse.json().catch(() => ({}))) as { importUrl?: string };
-      expect(importResponse.ok(), `runtime import payload=${JSON.stringify(importPayload)}`).toBe(true);
-      const importUrl = String(importPayload.importUrl || '');
-      const parsedImportUrl = new URL(importUrl);
-      expect(parsedImportUrl.pathname).toBe('/app');
-      expect(parsedImportUrl.search).toBe('');
-      expect(parsedImportUrl.hash).toContain('runtime-import-src=');
-      expect(importUrl).toContain('/app#runtime-import-src=');
-      expect(importUrl).not.toContain('/radapter/manage#runtime-import');
-      expect(importUrl).not.toContain('?runtimeList=');
-      expect(importUrl).not.toContain('&token=');
-      expect(importUrl).not.toContain('xlnra1.');
-      await page.goto(importUrl, { waitUntil: 'domcontentloaded' });
-      await expect
-        .poll(
-          async () =>
-            page.evaluate(storageKey => sessionStorage.getItem(storageKey), REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY),
-          { timeout: 120_000 },
-        )
-        .not.toBeNull();
-      const initialImportSummary = await page.evaluate(storageKey => {
-        const raw = sessionStorage.getItem(storageKey);
-        if (!raw) throw new Error('REMOTE_RUNTIME_IMPORT_SUMMARY_MISSING');
-        return JSON.parse(raw) as RuntimeImportSummary;
-      }, REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY);
-      expect(
-        initialImportSummary.ok,
-        `remote runtime validation failed: ${JSON.stringify(initialImportSummary.failed ?? [])}`,
-      ).toBe(true);
-      expect(initialImportSummary.entries.length).toBeGreaterThanOrEqual(5);
-
-      const importSummary = await readRuntimeImportSummary(page);
-      await expect(page.getByTestId('remote-runtime-bulk-import-screen')).toHaveCount(0);
-      await expect(page).toHaveURL(/\/app/);
-
-      expect(importSummary.ok).toBe(true);
-      expect(importSummary.entries.length).toBeGreaterThanOrEqual(5);
-      expect(importSummary.failedCount ?? 0).toBe(0);
-      expect(importSummary.failed ?? []).toEqual([]);
-      expect(importSummary.checked?.length ?? 0).toBeGreaterThanOrEqual(importSummary.entries.length);
-      expect((importSummary.checked ?? []).every(row => row.ok === true)).toBe(true);
-      const labels = new Set(importSummary.entries.map(entry => entry.label.toLowerCase()));
-      for (const label of ['h1', 'h2', 'h3', 'mm', 'custody']) {
-        expect(Array.from(labels), `import summary labels=${Array.from(labels).join(',')}`).toContain(label);
-      }
-      for (const entry of importSummary.entries) {
-        expect(entry.access, `${entry.label} imported access`).toBe('admin');
-        expect(entry.runtimeId, `${entry.label} runtime id`).toMatch(/^[a-z0-9:_-]+$/);
-        expect(entry.runtimeId, `${entry.label} runtime id`).not.toMatch(/^radapter:/);
-        expect(entry.entityCount, `${entry.label} entity count`).toBeGreaterThan(0);
-        expect(entry.wsUrl, `${entry.label} wsUrl`).toMatch(/^wss?:\/\/.+\/rpc$/);
-      }
-
-      const firstRuntimeId = importSummary.entries[0]!.runtimeId.toLowerCase();
-      await page.waitForFunction(
-        expectedRuntimeId => {
-          const view = window as typeof window & {
-            __xlnRuntimeView?: {
-              runtimeId?: string;
-              height?: number;
-              entities?: unknown[];
-              frame?: { entities?: unknown[] | null };
-            };
-          };
-          const runtimeView = (view as any).__xln?.view;
-          const entities = runtimeView?.entities ?? runtimeView?.frame?.entities ?? [];
-          return (
-            String(runtimeView?.runtimeId || '') === expectedRuntimeId &&
-            Number(runtimeView?.height || 0) > 0 &&
-            entities.length > 0
-          );
-        },
-        firstRuntimeId,
-        { timeout: REMOTE_E2E_WAIT_MS },
-      );
-
-      const browserHealth = (await page.evaluate(async () => {
-        const response = await fetch('/api/health', { cache: 'no-store' });
-        if (!response.ok) throw new Error(`HEALTH_FETCH_FAILED:${response.status}`);
-        return await response.json();
-      })) as Awaited<ReturnType<typeof ensureE2EBaseline>>;
-
-      expectHubMeshHealthy(browserHealth);
-      expect(browserHealth.custody?.ok, `custody health: ${JSON.stringify(browserHealth.custody ?? {})}`).toBe(true);
-      expectMarketMakerBooksHealthy(browserHealth);
-
-      const importedContextEntries = ['h1', 'h2', 'h3', 'mm', 'custody'].map(label => {
-        const entry = importSummary.entries.find(candidate => candidate.label.toLowerCase() === label);
+      expect(response.ok()).toBe(true);
+      const payload = (await response.json()) as { importUrl: string };
+      const importUrl = new URL(payload.importUrl);
+      expect(importUrl.pathname).toBe('/app');
+      expect(importUrl.search).toBe('');
+      expect(importUrl.hash).toContain('runtime-import-src=');
+      expect(importUrl.href).not.toContain('/radapter/manage');
+      expect(importUrl.href).not.toContain('?runtimeList=');
+      expect(importUrl.href).not.toContain('&token=');
+      expect(importUrl.href).not.toContain('xlnra1.');
+      await page.goto(importUrl.href, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('button', { name: 'Load runtime list', exact: true }).click();
+      await page.getByRole('button', { name: 'Validate & attach', exact: true }).click();
+      const summary = await readRuntimeImportSummary(page);
+      expect(summary.ok).toBe(true);
+      expect(summary.entries.length).toBeGreaterThanOrEqual(5);
+      expect(summary.failedCount).toBe(0);
+      expect(summary.failed).toEqual([]);
+      expect(summary.checked?.length).toBeGreaterThanOrEqual(summary.entries.length);
+      expect(summary.checked?.every(row => row.ok)).toBe(true);
+      await expect(page).toHaveURL(/\/ui\/$/);
+      const expected = ['h1', 'h2', 'h3', 'mm', 'custody'];
+      const primaryIds = new Map<string, string>();
+      for (const label of expected) {
+        const entry = summary.entries.find(row => row.label.toLowerCase() === label);
         if (!entry) throw new Error(`REMOTE_RUNTIME_IMPORT_ENTRY_MISSING:${label}`);
-        return {
-          label,
-          runtimeId: entry.runtimeId.toLowerCase(),
-        };
-      });
-
-      await page.getByTestId('context-current').click();
-      await expect(page.getByTestId('context-runtime-focus')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-      for (const entry of importedContextEntries) {
-        await page.evaluate(targetRuntimeId => {
-          const runtime = document.querySelector(
-            `[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`,
-          ) as HTMLElement | null;
-          if (!runtime) throw new Error(`REMOTE_RUNTIME_GROUP_MISSING:${targetRuntimeId}`);
-          runtime.click();
-        }, entry.runtimeId);
-        await page.waitForFunction(
-          ({ targetRuntimeId, targetLabel }) =>
-            Array.from(
-              document.querySelectorAll('[data-testid="context-runtime-focus"] [data-testid="context-entity-row"]'),
-            ).some(row => {
-              const label = String(row.getAttribute('data-entity-label') || '').trim().toLowerCase();
-              return row.getAttribute('data-runtime-id') === targetRuntimeId
-                && (label === targetLabel
-                  || label.startsWith(`${targetLabel} `)
-                  || label.startsWith(`${targetLabel}(`));
-            }),
-          { targetRuntimeId: entry.runtimeId, targetLabel: entry.label },
-          { timeout: REMOTE_E2E_WAIT_MS },
-        );
-        const row = await page.evaluate(
-          ({ targetRuntimeId, targetLabel }) => {
-            const group = document.querySelector(
-              `[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`,
-            );
-            const focus = document.querySelector('[data-testid="context-runtime-focus"]');
-            const candidate = Array.from(focus?.querySelectorAll('[data-testid="context-entity-row"]') ?? []).find(
-              element => {
-                const label = String(element.getAttribute('data-entity-label') || '').trim().toLowerCase();
-                return element.getAttribute('data-runtime-id') === targetRuntimeId
-                  && (label === targetLabel
-                    || label.startsWith(`${targetLabel} `)
-                    || label.startsWith(`${targetLabel}(`));
-              },
-            ) as HTMLElement | undefined;
-            if (!candidate) return null;
-            return {
-              label: String(candidate.getAttribute('data-entity-label') || '').trim().toLowerCase(),
-              groupText: group?.textContent?.replace(/\s+/g, ' ').trim().toLowerCase() || '',
-              text: candidate.textContent?.replace(/\s+/g, ' ').trim().toLowerCase() || '',
-              visible: candidate.getClientRects().length > 0,
-            };
-          },
-          { targetRuntimeId: entry.runtimeId, targetLabel: entry.label },
-        );
-        expect(row, `context row for ${entry.label} runtime ${entry.runtimeId}`).not.toBeNull();
-        expect(row!.visible, `context row visible for ${entry.label}`).toBe(true);
-        expect(
-          runtimeEntityLabelMatches(row!.label, entry.label),
-          `context row label ${row!.label} for ${entry.label}`,
-        ).toBe(true);
-        expect(row!.text, `context row text for ${entry.label}`).toContain(entry.label);
-        expect(row!.groupText, `context group source for ${entry.label}`).toContain('remote');
-        if (entry.label === 'mm' || entry.label === 'custody') {
-          expect(row!.text, `non-hub runtime ${entry.label} must not point at H3`).not.toContain('h3');
+        expect(entry.access).toBe('admin');
+        expect(entry.runtimeId).toMatch(/^0x[0-9a-f]{40}$/);
+        expect(entry.runtimeId).not.toMatch(/^radapter:/);
+        expect(entry.entityCount).toBeGreaterThan(0);
+        expect(entry.height).toBeGreaterThan(0);
+        expect(entry.wsUrl).toMatch(/^wss?:\/\/.+\/rpc$/);
+        const card = page.locator(`[data-testid="validated-runtime"][data-runtime-id="${entry.runtimeId}"]`);
+        await expect(card).toBeVisible();
+        const entityId = await card.getAttribute('data-entity-id');
+        const entityLabel = await card.getAttribute('data-entity-label');
+        expect(entityId).toMatch(/^0x[0-9a-f]{64}$/);
+        expect(runtimeEntityLabelMatches(entityLabel, label)).toBe(true);
+        await expect(card).toContainText(entry.label);
+        await expect(card).toContainText(entry.wsUrl);
+        if (!entityId) throw new Error(`REMOTE_PRIMARY_ENTITY_MISSING:${label}`);
+        primaryIds.set(label, entityId);
+        if (label === 'mm' || label === 'custody') {
+          expect(entityLabel?.toLowerCase()).not.toContain('h3');
+          expect(entityId).not.toBe(primaryIds.get('h3'));
         }
       }
+      await captureLocatorScreenshot(page.locator('.gate'), test.info(), 'runtime-import-desktop');
+      const viewport = page.viewportSize();
+      if (!viewport) throw new Error('BROWSER_VIEWPORT_REQUIRED');
+      await page.setViewportSize({ width: 390, height: 844 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+      await captureLocatorScreenshot(page.locator('.gate'), test.info(), 'runtime-import-mobile');
+      await page.setViewportSize(viewport);
+      const first = summary.entries[0];
+      if (!first) throw new Error('REMOTE_IMPORT_ENTRIES_EMPTY');
+      const entityId = primaryIds.get(first.label.toLowerCase());
+      if (!entityId) throw new Error('REMOTE_PRIMARY_ENTITY_MISSING');
+      await page.locator(`[data-testid="validated-runtime"][data-runtime-id="${first.runtimeId}"]`).click();
+      await page.getByRole('button', { name: 'Connect', exact: true }).click();
+      await page.getByRole('button', { name: new RegExp(entityId.slice(0, 18)) }).click();
+      await expect(page.getByTestId('home-entity-id')).toHaveText(entityId);
+      const live = await page.evaluate(async () => {
+        const adapter = (window as ReactRuntimeWindow).__xln?.adapter();
+        if (!adapter) throw new Error('REMOTE_IMPORT_INSPECTION_MISSING');
+        return {
+          runtimeId: adapter.runtimeId,
+          height: adapter.currentHeight,
+          entities: await adapter.read<unknown[]>('entities'),
+        };
+      });
+      expect(live.runtimeId).toBe(first.runtimeId);
+      expect(live.height).toBeGreaterThan(0);
+      expect(live.entities.length).toBeGreaterThan(0);
+      const health = (await page.evaluate(async () => {
+        const response = await fetch('/api/health', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HEALTH_FETCH_FAILED:${response.status}`);
+        return response.json();
+      })) as E2EHealthSnapshot;
+      expectHubMeshHealthy(health);
+      expect(health.custody?.ok).toBe(true);
+      expectMarketMakerBooksHealthy(health);
     } finally {
       await closeRuntimeContext(context);
     }

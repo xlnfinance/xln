@@ -1,4 +1,9 @@
-import { parseRemoteRuntimeLink, stripRemoteRuntimeLink } from '../../../frontend/src/lib/utils/runtime/remoteRuntimeLink';
+import { RemoteRuntimeImport } from '../components/RemoteRuntimeImport';
+import {
+	parseRemoteRuntimeLink,
+	parseRemoteRuntimeImportLink,
+	stripRemoteRuntimeLink,
+} from '../../../frontend/src/lib/utils/runtime/remoteRuntimeLink';
 import { protectVaultSecrets, unprotectVaultSecrets } from '../../../frontend/src/lib/security/vaultProtection';
 import { assertDemoNetwork } from '../../../frontend/src/lib/config/demo-accounts';
 import { useNavigate } from 'react-router-dom';
@@ -26,7 +31,7 @@ import { isValidMnemonic, runtimeIdForSeed } from '../runtime/keys';
 import { connectRemote, requireAdapter } from '../runtime/adapter';
 import type { RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
 
-type GateMode = 'landing' | 'create' | 'import' | 'remote';
+type GateMode = 'landing' | 'create' | 'import' | 'remote' | 'remote-import';
 
 export function Gate() {
 	const navigate = useNavigate();
@@ -61,13 +66,19 @@ export function Gate() {
 	const [backupEnabled, setBackupEnabled] = useState(() => Boolean(defaultTowerUrl()));
 	const [wsUrl, setWsUrl] = useState('wss://xln.finance/rpc');
 	const [authKey, setAuthKey] = useState('');
+	const [importSource, setImportSource] = useState('');
 	const [remoteEntities, setRemoteEntities] = useState<RuntimeAdapterEntitySummary[] | null>(null);
 	const deriveAbort = useRef<AbortController | null>(null);
 
 	useEffect(() => {
 		const url = new URL(window.location.href);
 		try {
+			const source = parseRemoteRuntimeImportLink(url);
 			const request = parseRemoteRuntimeLink(url);
+			if (source) {
+				setImportSource(source);
+				setMode('remote-import');
+			}
 			if (request) {
 				setWsUrl(request.wsUrl);
 				setAuthKey(request.authKey);
@@ -279,6 +290,18 @@ export function Gate() {
 		}
 		setMode('import');
 	};
+
+	if (mode === 'remote-import') return (
+		<RemoteRuntimeImport
+			source={importSource}
+			onBack={() => setMode('landing')}
+			onSelect={entry => {
+				setWsUrl(entry.wsUrl);
+				setAuthKey(entry.token);
+				setMode('remote');
+			}}
+		/>
+	);
 
 	if (passwordEntry) return <PasswordEntry {...passwordEntry} status={busyStep} onOpen={passwordEntry.open} onBack={() => { setPasswordEntry(null); setBusyStep(null); }} />;
 

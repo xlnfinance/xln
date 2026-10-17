@@ -1,23 +1,5 @@
 import type { Page } from '@playwright/test';
 
-type RuntimeImportPayload = {
-  importUrl?: unknown;
-  manifest?: unknown;
-  entries?: unknown;
-};
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-
-const manifestFromPayload = (payload: RuntimeImportPayload): unknown => {
-  if (isRecord(payload.manifest)) return payload.manifest;
-  if (Array.isArray(payload.entries)) return { entries: payload.entries };
-  return null;
-};
-
-const hasImportEntries = (manifest: unknown): boolean =>
-  isRecord(manifest) && Array.isArray(manifest.entries) && manifest.entries.length > 0;
-
 export const acceptRemoteRuntimeConsent = async (page: Page, timeoutMs = 15_000): Promise<void> => {
   const prompt = page.getByTestId('remote-runtime-login-screen');
   await prompt.waitFor({ state: 'visible', timeout: timeoutMs });
@@ -27,53 +9,20 @@ export const acceptRemoteRuntimeConsent = async (page: Page, timeoutMs = 15_000)
 
 export const resolveRuntimeImportAppUrl = async (
   page: Page,
-  options: {
-    appBaseUrl: string;
-    apiBaseUrl: string;
-    access?: 'admin';
-  },
+  options: { appBaseUrl: string; apiBaseUrl: string; access?: 'admin' },
 ): Promise<string> => {
-  const access = options.access ?? 'admin';
-  const bases = [
-    options.appBaseUrl,
-    options.apiBaseUrl,
-  ];
-  const candidates = Array.from(new Set(bases)).map((base) => {
-    const url = new URL('/api/runtime-import', base);
-    url.searchParams.set('access', access);
-    url.searchParams.set('allowPartial', '1');
-    return url.toString();
+  const endpoint = new URL('/api/runtime-import', options.appBaseUrl);
+  endpoint.searchParams.set('access', options.access ?? 'admin');
+  const response = await page.request.get(endpoint.toString(), {
+    headers: { 'Cache-Control': 'no-store' },
+    timeout: 10_000,
   });
-
-  const errors: string[] = [];
-  for (const candidate of candidates) {
-    const response = await page.request.get(candidate, {
-      headers: { 'Cache-Control': 'no-store' },
-      timeout: 10_000,
-    }).catch((error: unknown) => {
-      errors.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
-      return null;
-    });
-    if (!response) continue;
-    const payload = await response.json().catch(() => null) as RuntimeImportPayload | null;
-    if (!response.ok() || !payload) {
-      errors.push(`${candidate}: status=${response.status()}`);
-      continue;
-    }
-
-    const importUrl = String(payload.importUrl || '');
-    if (importUrl.includes('/app#runtime-import-src=') && !importUrl.includes('/radapter/manage')) {
-      return importUrl;
-    }
-
-    const manifest = manifestFromPayload(payload);
-    if (hasImportEntries(manifest)) {
-      const url = new URL('/app', options.appBaseUrl);
-      url.hash = `runtime-import=${encodeURIComponent(JSON.stringify(manifest))}`;
-      return url.toString();
-    }
-    errors.push(`${candidate}: runtime import payload missing importUrl/manifest`);
-  }
-
-  throw new Error(`RUNTIME_IMPORT_APP_URL_UNAVAILABLE:${errors.join(' | ')}`);
+  if (!response.ok()) throw new Error(`RUNTIME_IMPORT_APP_URL_UNAVAILABLE:${response.status()}`);
+  const payload: unknown = await response.json();
+  if (!payload || typeof payload !== 'object' || !('importUrl' in payload) || typeof payload.importUrl !== 'string')
+    throw new Error('RUNTIME_IMPORT_APP_URL_MISSING');
+  const url = new URL(payload.importUrl);
+  if (url.pathname !== '/app' || url.search || !url.hash.startsWith('#runtime-import-src='))
+    throw new Error('RUNTIME_IMPORT_APP_URL_INVALID');
+  return url.toString();
 };

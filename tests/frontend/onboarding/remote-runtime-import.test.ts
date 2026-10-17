@@ -19,14 +19,13 @@ import {
   parseRemoteRuntimeImportSourcePayload,
   type StoredRemoteRuntimeImportEntry,
 } from '../../../frontend/src/lib/utils/onboarding/remoteRuntimeImport';
-import { writeRemoteRuntimeImportSummary } from '../../../frontend/src/lib/utils/onboarding/remoteRuntimeImportFlow';
+import { writeRemoteRuntimeImportSummary } from '../../../frontend/src/lib/utils/onboarding/remoteRuntimeImportValidation';
 import {
   buildRemoteRuntimeRecoveryPeerSources,
   buildRuntimeWsRecoveryPeerSource,
   buildRuntimeWsRecoveryPeerSources,
-  selectPrimaryRemoteEntitySummary,
-  selectPrimaryRemoteHubSummary,
-} from '../../../frontend/src/lib/utils/onboarding/remoteRuntimeValidation';
+} from '../../../frontend/src/lib/utils/onboarding/remoteRuntimeRecovery';
+import { selectPrimaryRemoteEntitySummary, selectPrimaryRemoteHubSummary } from '../../../frontend/src/lib/utils/onboarding/remoteRuntimeValidation';
 
 const token = `xlnra1.full.${Date.now() + 60 * 60 * 1000}.aud.kid.jti.sig`;
 
@@ -175,6 +174,7 @@ describe('remote runtime import manager utilities', () => {
   test('parses live import source payloads from orchestrator', () => {
     const entries = parseRemoteRuntimeImportSourcePayload({
       manifest: {
+        v: 1,
         entries: [
           { label: 'H1', access: 'admin', wsUrl: 'ws://localhost:8092/rpc', token },
         ],
@@ -196,6 +196,7 @@ describe('remote runtime import manager utilities', () => {
       ok: true,
       ready: true,
       manifest: {
+        v: 1,
         entries: runtimeSpecs.map(([label, port], index) => ({
           label,
           access: 'admin',
@@ -227,6 +228,7 @@ describe('remote runtime import manager utilities', () => {
       partial: true,
       reason: 'system-not-ok',
       manifest: {
+        v: 1,
         entries: [
           { label: 'H1', access: 'admin', wsUrl: 'ws://localhost:8092/rpc', token },
           { label: 'H2', access: 'admin', wsUrl: 'ws://localhost:8093/rpc', token },
@@ -278,6 +280,7 @@ describe('remote runtime import manager utilities', () => {
   test('rejects a read token even when a manifest falsely labels it admin', () => {
     expect(() => parseRemoteRuntimeImportSourcePayload({
       manifest: {
+        v: 1,
         entries: [{
           label: 'H1',
           access: 'admin',
@@ -657,11 +660,11 @@ describe('remote runtime import manager utilities', () => {
     expect(appLayout).toContain('async function processRuntimeImportLocationChange()');
     expect(appLayout).toContain('await processRuntimeImportLocationChange();');
     expect(appLayout).toContain('fetchRemoteRuntimeImportSource(source)');
-    expect(appLayout).toContain('parseRemoteRuntimeImportPayload(payload)');
+    expect(appLayout).not.toContain('parseRemoteRuntimeImportPayload');
     expect(appLayout).toContain('persistActiveRemoteRuntimeImport(first)');
-    expect(appLayout).toContain('const hasExplicitRemoteRuntimeBootstrap = Boolean(pairingToken || importPayload || importSource || remoteRequest);');
+    expect(appLayout).toContain('const hasExplicitRemoteRuntimeBootstrap = Boolean(pairingToken || importSource || remoteRequest);');
     expect(appLayout).toContain('if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;');
-    expect(appLayout.indexOf('const importPayload = readRemoteRuntimeImportPayloadFromHash()')).toBeLessThan(
+    expect(appLayout.indexOf('const importSource = readRemoteRuntimeImportSourceFromHash()')).toBeLessThan(
       appLayout.indexOf('if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;'),
     );
     expect(appLayout).not.toContain('readRemoteRuntimeImportPayloadFromUrl');
@@ -669,8 +672,9 @@ describe('remote runtime import manager utilities', () => {
     expect(appLayout).not.toContain('redirectRemoteRuntimeImportToManager');
     expect(importFlow).toContain('export const importRemoteRuntimeEntries = async');
     expect(importFlow).toContain('runtimeOperations.upsertRemoteRuntimeImports(validated)');
-    expect(importFlow).toContain('failedCount: failed.length');
-    expect(importFlow).toContain('checked: RemoteRuntimeImportSummaryCheckedRow[]');
+    const validation = readFileSync('frontend/src/lib/utils/onboarding/remoteRuntimeImportValidation.ts', 'utf8');
+    expect(validation).toContain('failedCount: failed.length');
+    expect(validation).toContain('checked: RemoteRuntimeImportSummaryCheckedRow[]');
     expect(runtimeStore).not.toContain('Failed to hydrate remote runtime imports');
     expect(runtimeStore).not.toContain('Remote runtime import source hydration failed');
     expect(runtimeStore).not.toContain('console.warn');
@@ -706,4 +710,12 @@ describe('remote runtime import manager utilities', () => {
     expect(xlnStore).toContain('...(runtimeId ? { runtimeId } : {})');
     expect(xlnStore).not.toContain('const primaryHub = hubEntities[0] ?? null;\n  runtimes.update');
   });
+});
+
+
+test('server import manifests accept only the current explicit version', () => {
+  for (const v of [undefined, 0, 2, '1']) {
+    expect(() => parseRemoteRuntimeImportSourcePayload({ manifest: { v, entries: [] } }))
+      .toThrow('REMOTE_RUNTIME_IMPORT_MANIFEST_VERSION:expected=1');
+  }
 });

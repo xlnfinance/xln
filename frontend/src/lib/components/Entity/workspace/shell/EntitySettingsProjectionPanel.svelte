@@ -38,7 +38,7 @@
     readRuntimeRecoveryDiscoveryStatus,
     type RuntimeRecoveryDiscoveryStatus,
   } from '#lib/utils/recovery/recoveryDiscoveryStatus.ts';
-  import { buildRemoteRuntimeRecoveryPeerSources } from '#lib/utils/onboarding/remoteRuntimeValidation.ts';
+  import { buildRemoteRuntimeRecoveryPeerSources } from '#lib/utils/onboarding/remoteRuntimeRecovery.ts';
   import AddJMachine from '#lib/components/Jurisdiction/AddJMachine.svelte';
   import type { JMachineCreateDetail } from '#lib/components/Jurisdiction/import-jmachine-runtime.ts';
   import PushWakePanel from '#lib/components/Settings/PushWakePanel.svelte';

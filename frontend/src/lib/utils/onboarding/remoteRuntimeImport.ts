@@ -1,5 +1,5 @@
 import { normalizeWsConnectUrl } from '../runtime/wsUrl';
-import { isUnknownRecord as isRecord, parseJsonUnknown } from '#lib/utils/boundary/index.ts';
+import { isUnknownRecord as isRecord, parseJsonUnknown } from '../boundary/index.ts';
 import { REMOTE_RUNTIME } from '@xln/core/config/constants';
 
 export const REMOTE_RUNTIME_IMPORT_HASH_PARAM = REMOTE_RUNTIME.IMPORT_HASH_PARAM;
@@ -251,6 +251,7 @@ const storedHubFieldsFromSource = (source: Record<string, unknown>): Pick<
 
 export const parseRemoteRuntimeImportSourcePayload = (value: unknown): RemoteRuntimeImportEntry[] => {
   if (!isRecord(value) || !isRecord(value['manifest'])) throw new Error('REMOTE_RUNTIME_IMPORT_MANIFEST_MISSING');
+  if (value['manifest']['v'] !== 1) throw new Error('REMOTE_RUNTIME_IMPORT_MANIFEST_VERSION:expected=1');
   return entriesFromJson(value['manifest']);
 };
 
@@ -296,12 +297,6 @@ export const parseRemoteRuntimeImportText = (text: string): RemoteRuntimeImportE
     .filter(line => line && !line.startsWith('#'))
     .map(entryFromLine);
   return limitRemoteRuntimeImportEntries(entries);
-};
-
-export const parseRemoteRuntimeImportPayload = (payload: string): RemoteRuntimeImportEntry[] => {
-  const raw = String(payload || '').trim();
-  if (!raw) throw new Error('REMOTE_RUNTIME_IMPORT_PAYLOAD_EMPTY');
-  return parseRemoteRuntimeImportText(decodeBase64UrlUtf8(raw));
 };
 
 export const limitRemoteRuntimeImportEntries = <T extends RemoteRuntimeImportEntry>(entries: T[]): T[] => {

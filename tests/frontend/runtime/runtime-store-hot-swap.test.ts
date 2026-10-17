@@ -195,7 +195,7 @@ test('remote adapter resolver restores active auth from the remote runtime regis
 test('direct remote runtime URL reuses saved capability before showing paste prompt', () => {
   const source = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
   const readStart = source.indexOf('export function readRemoteRuntimeRequestFromUrl');
-  const payloadStart = source.indexOf('export function runtimeImportPayloadFromParams', readStart);
+  const payloadStart = source.indexOf('export function readRemoteRuntimeImportSourceFromHash', readStart);
   expect(readStart).toBeGreaterThan(0);
   expect(payloadStart).toBeGreaterThan(readStart);
   const readSource = source.slice(readStart, payloadStart);
@@ -221,7 +221,8 @@ test('remote projection never materializes fake RuntimeReplica snapshots', () =>
 });
 
 test('remote runtime bulk import validates with bounded parallelism', () => {
-  const source = readFileSync('frontend/src/lib/utils/onboarding/remoteRuntimeImportFlow.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/utils/onboarding/remoteRuntimeImportValidation.ts', 'utf8');
+  const flow = readFileSync('frontend/src/lib/utils/onboarding/remoteRuntimeImportFlow.ts', 'utf8');
   const appLayoutSource = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
   expect(existsSync('frontend/src/lib/components/Runtime/RemoteRuntimeManager.svelte')).toBe(true);
   expect(existsSync('frontend/src/routes/radapter/manage/+page.svelte')).toBe(false);
@@ -229,7 +230,7 @@ test('remote runtime bulk import validates with bounded parallelism', () => {
   expect(source).toContain('export const validateRemoteRuntimeImportEntries = async');
   expect(source).toContain('Array.from({ length: workerCount }');
   expect(source).toContain('await Promise.allSettled(workers)');
-  expect(source).toContain('const results = await validateRemoteRuntimeImportEntries(entries, {');
+  expect(flow).toContain('const results = await validateRemoteRuntimeImportEntries(entries, {');
   expect(source).toContain('failedCount: failed.length');
   expect(source).toContain('checked: RemoteRuntimeImportSummaryCheckedRow[]');
   expect(source).toContain('summarizeFailedRemoteRuntimeEntry');
