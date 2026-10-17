@@ -1,0 +1,143 @@
+{
+  "sourceBaseSha": "a2eaff04621cd373751c8ea6e2146bcada938d2c",
+  "ownedSourceSha256": {
+    "tests/e2e/runtime/e2e-runtime-persistence.spec.ts": "478d0e8dacd47dea61a1948cbad184e5c930aafe12b5e1fe4fc2bf58fff70f19",
+    "tests/utils/runtime/e2e-persistence-proof.ts": "72a48710637078a1317a7d65573989ee31999b9e71416fe422dc31e37838dd10"
+  },
+  "checks": {
+    "complex-wal-browser-baseline": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "complex-wal-browser",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--all",
+        "--strict-browser-health",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/runtime/e2e-runtime-persistence.spec.ts::reload restores complex runtime from a retained checkpoint plus WAL tail"
+      ],
+      "exitCode": 1,
+      "seconds": 50.666,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/complex-wal-browser-baseline.log"
+    },
+    "complex-wal-browser-react": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "complex-wal-browser",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--all",
+        "--strict-browser-health",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/runtime/e2e-runtime-persistence.spec.ts::reload restores complex runtime from a retained checkpoint plus WAL tail"
+      ],
+      "exitCode": 0,
+      "seconds": 31.103,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/complex-wal-browser-react.log"
+    },
+    "complex-wal-owned-types": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "complex-wal-types",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/complex-wal-browser/typecheck.ts"
+      ],
+      "exitCode": 1,
+      "seconds": 4.8,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/complex-wal-owned-types.log"
+    },
+    "complex-wal-owned-types-2": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "complex-wal-types",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/complex-wal-browser/typecheck.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 4.792,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/complex-wal-owned-types-2.log"
+    },
+    "complex-wal-recovery-related": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "complex-wal-recovery",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/storage/recovery/checkpoint/replica-evidence.test.ts",
+        "core/__tests__/storage/recovery/storage-sparse-wal-replay.test.ts",
+        "core/__tests__/storage/recovery/portable/recovery-checkpoint-outbox.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 10.629,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/complex-wal-recovery-related.log"
+    }
+  },
+  "browser": {
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "checkpoint": 17,
+    "walTail": [
+      18,
+      19,
+      20,
+      21
+    ],
+    "replayedFrames": 4,
+    "eachWalletUsdcAtomic": "200000000",
+    "strictBrowserHealth": true
+  },
+  "relatedTests": {
+    "passed": 5,
+    "failed": 0,
+    "assertions": 37
+  },
+  "limits": [
+    "Not aggregate full browser/release evidence",
+    "Not public Sepolia evidence",
+    "Not rollback or uninterrupted soak",
+    "No financial/storage/contract implementation changed"
+  ]
+}

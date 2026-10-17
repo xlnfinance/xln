@@ -1,0 +1,126 @@
+{
+  "walBefore": {
+    "latest": 21,
+    "checkpoint": 17,
+    "checkpoints": [
+      1,
+      12,
+      17
+    ],
+    "frames": [
+      {
+        "height": 18,
+        "frameHash": "0x94d9e5e9c1bf1d2dcbc2ff8ad929b102cb0a19c140b0fc7271aab4562349af2a",
+        "postStateHash": "0x5fcea16dd976eee5187bc003e3bba9e9779352fdf12aa1f6635700b6749e1119",
+        "runtimeOutputCount": 2,
+        "runtimeOutputsDigest": "0xcc8fe450678964e632e42eea64ca8c3b55ac4b2fd7791652e50ca701c38b6f92"
+      },
+      {
+        "height": 19,
+        "frameHash": "0x68565f9f2afd19efc71a32c37122107bcab105e3229226bdf3b40c07dcdc60e2",
+        "postStateHash": "0x4c938594540b36755b4d5bbe94e3b4bb8eff642354305fb8d59af5a500facbcd",
+        "runtimeOutputCount": 0,
+        "runtimeOutputsDigest": "0x56cc30822c85fae6a34ca5bd7047a22371f2bc0101275dc7240013b675347827"
+      },
+      {
+        "height": 20,
+        "frameHash": "0xd18310280ac4d4e6eeebb34a8be778e632cf2642bfea8e00f13c5310ac1462f8",
+        "postStateHash": "0x9fb74129336acbddf66ae7f881c1b97b7f0ca969019028d58c65c751458a2595",
+        "runtimeOutputCount": 2,
+        "runtimeOutputsDigest": "0x9ab70b47fa3faa1cf9574f4b5b44ca4a6f24bce444583a8ee3e7ca8d218a7722"
+      },
+      {
+        "height": 21,
+        "frameHash": "0xbea8399bb6e5d572b064241efcbeffe1f1796bc3399d06457b63d8d9e571bfd7",
+        "postStateHash": "0xcda78db57e9eb1bfb691f322470a450edfb1f2531e0bd1bf7c3cb60d47f3b5a5",
+        "runtimeOutputCount": 1,
+        "runtimeOutputsDigest": "0x463163e20f2878c2b4bdcc4ae43337b5d42a4824a4e6be3e851449b36a5a795d"
+      }
+    ],
+    "replay": null
+  },
+  "walAfter": {
+    "latest": 21,
+    "checkpoint": 17,
+    "checkpoints": [
+      1,
+      12,
+      17
+    ],
+    "frames": [
+      {
+        "height": 18,
+        "frameHash": "0x94d9e5e9c1bf1d2dcbc2ff8ad929b102cb0a19c140b0fc7271aab4562349af2a",
+        "postStateHash": "0x5fcea16dd976eee5187bc003e3bba9e9779352fdf12aa1f6635700b6749e1119",
+        "runtimeOutputCount": 2,
+        "runtimeOutputsDigest": "0xcc8fe450678964e632e42eea64ca8c3b55ac4b2fd7791652e50ca701c38b6f92"
+      },
+      {
+        "height": 19,
+        "frameHash": "0x68565f9f2afd19efc71a32c37122107bcab105e3229226bdf3b40c07dcdc60e2",
+        "postStateHash": "0x4c938594540b36755b4d5bbe94e3b4bb8eff642354305fb8d59af5a500facbcd",
+        "runtimeOutputCount": 0,
+        "runtimeOutputsDigest": "0x56cc30822c85fae6a34ca5bd7047a22371f2bc0101275dc7240013b675347827"
+      },
+      {
+        "height": 20,
+        "frameHash": "0xd18310280ac4d4e6eeebb34a8be778e632cf2642bfea8e00f13c5310ac1462f8",
+        "postStateHash": "0x9fb74129336acbddf66ae7f881c1b97b7f0ca969019028d58c65c751458a2595",
+        "runtimeOutputCount": 2,
+        "runtimeOutputsDigest": "0x9ab70b47fa3faa1cf9574f4b5b44ca4a6f24bce444583a8ee3e7ca8d218a7722"
+      },
+      {
+        "height": 21,
+        "frameHash": "0xbea8399bb6e5d572b064241efcbeffe1f1796bc3399d06457b63d8d9e571bfd7",
+        "postStateHash": "0xcda78db57e9eb1bfb691f322470a450edfb1f2531e0bd1bf7c3cb60d47f3b5a5",
+        "runtimeOutputCount": 1,
+        "runtimeOutputsDigest": "0x463163e20f2878c2b4bdcc4ae43337b5d42a4824a4e6be3e851449b36a5a795d"
+      }
+    ],
+    "replay": {
+      "checkpointHeight": 17,
+      "latestHeight": 21,
+      "label": "checkpoint:17",
+      "replayedFrames": 4
+    }
+  },
+  "before": {
+    "runtimeId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e",
+    "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+    "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e",
+    "entityCount": 2,
+    "historyPresent": false,
+    "out": "200000000",
+    "accountRoot": "0xb013f49d6720f4fbe3cf05ddd1084b31c10193123177172f398af616c5bd4806",
+    "offers": 0,
+    "pending": false,
+    "mempool": 0,
+    "accountStateSha256": "6c82edb46ad4067811edc1fadc65fcb259a2dc2203f2c2a5336a09b2e46f6122"
+  },
+  "after": {
+    "runtimeId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e",
+    "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+    "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e",
+    "entityCount": 2,
+    "historyPresent": false,
+    "out": "200000000",
+    "accountRoot": "0xb013f49d6720f4fbe3cf05ddd1084b31c10193123177172f398af616c5bd4806",
+    "offers": 0,
+    "pending": false,
+    "mempool": 0,
+    "accountStateSha256": "6c82edb46ad4067811edc1fadc65fcb259a2dc2203f2c2a5336a09b2e46f6122"
+  },
+  "bobBefore": {
+    "runtimeId": "0x9858effd232b4033e47d90003d41ec34ecaeda94",
+    "entityId": "0x1d8a05dddc8e7aa47378a8faf0d535708a24141fe068a60cc8291654ae9c83da",
+    "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94",
+    "entityCount": 2,
+    "historyPresent": false,
+    "out": "200000000",
+    "accountRoot": "0xc62f8dc468883fa4406d4c6b76e25aac07acf082ed17ba44560b290e16bed6b4",
+    "offers": 0,
+    "pending": false,
+    "mempool": 0,
+    "accountStateSha256": "900804733cd322aec6049106e949bb416394b232bbc09ad2854b47957f15afb0"
+  }
+}
