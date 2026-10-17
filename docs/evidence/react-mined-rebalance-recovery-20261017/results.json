@@ -1,0 +1,198 @@
+{
+  "sourceBaseSha": "ef572ca74d1437950672160b141957514321741a",
+  "sourceSha256": {
+    "tests/e2e/payments/e2e-rebalance-bar.spec.ts": "df8ce69070c2944b7788044b02ecdf96ccb137b008b1952c51c31ffa7ed13111"
+  },
+  "checks": {
+    "rebalance-crash-baseline": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-crash-baseline",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--all",
+        "--strict-browser-health",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts::persistence: mined rebalance survives H1 and user restart exactly once"
+      ],
+      "exitCode": 1,
+      "seconds": 25.246,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-crash-baseline.log"
+    },
+    "rebalance-crash-current-readers": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-crash-current-readers",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--all",
+        "--strict-browser-health",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts::persistence: mined rebalance survives H1 and user restart exactly once"
+      ],
+      "exitCode": 0,
+      "seconds": 32.343,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-crash-current-readers.log"
+    },
+    "rebalance-crash-real-rpc": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-crash-real-rpc",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/jurisdiction/submission/recovery/j-submit-real-rpc-crash-recovery.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 14.743,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-crash-real-rpc.log"
+    },
+    "rebalance-crash-types": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-crash-types",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/rebalance-bar/typecheck.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 4.844,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-crash-types.log"
+    },
+    "rebalance-crash-final-check": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-crash-final-check",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "run",
+        "check"
+      ],
+      "exitCode": 0,
+      "seconds": 26.556,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-crash-final-check.log"
+    },
+    "rebalance-crash-journal-proof": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-crash-journal-proof",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--all",
+        "--strict-browser-health",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts::persistence: mined rebalance survives H1 and user restart exactly once"
+      ],
+      "exitCode": 0,
+      "seconds": 46.284,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-crash-journal-proof.log"
+    },
+    "rebalance-crash-types-final": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-crash-types-final",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/rebalance-bar/typecheck.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 4.797,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-crash-types-final.log"
+    },
+    "rebalance-crash-final-check-2": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-crash-final-check",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "run",
+        "check"
+      ],
+      "exitCode": 0,
+      "seconds": 26.785,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-crash-final-check-2.log"
+    }
+  },
+  "browser": {
+    "passed": 1,
+    "failed": 0,
+    "strictBrowserHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 1792262657256,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    }
+  }
+}

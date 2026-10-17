@@ -1,0 +1,27 @@
+[
+  {
+    "canonicalHash": "0xc9c849c16facb086c94600709b19bb62e01ab8b1d74130899b40136cd3debd56",
+    "height": 13,
+    "logs": 1,
+    "priorNonce": 24,
+    "status": 1,
+    "submitCalls": 0,
+    "txHash": "0xc80f3e2dc9d2baa8d33fedaafade643f39cd80df68abeed9d9d65b2748e8b25e"
+  },
+  {
+    "canonicalHash": "0xe003286ba98ef293911466be126ba8326bda3ce8398491bf151efd9609cab739",
+    "height": 13,
+    "logs": 1,
+    "priorNonce": 24,
+    "status": 1,
+    "submitCalls": 0,
+    "txHash": "0xc80f3e2dc9d2baa8d33fedaafade643f39cd80df68abeed9d9d65b2748e8b25e"
+  },
+  {
+    "observed": [
+      24,
+      24
+    ],
+    "reservedNonce": 23
+  }
+]

@@ -13,7 +13,7 @@
  */
 import { allowBrowserIssue, allowDebugIncident, test, expect, type Browser, type BrowserContext, type Page } from '../../global-setup.mts';
 import { safeStringify } from '../../../core/protocol/serialization';
-import { createWalletIdentity } from '../../../ui/tests/wallet-ui';
+import { createWalletIdentity, LOCAL_PASSWORD } from '../../../ui/tests/wallet-ui';
 import type { RuntimeReplica, XLNModule } from '../../../core/api/public/runtime-module';
 import { deriveDelta, getTokenInfo } from '../../../core/account/utils';
 import { computeBatchHankoHash, decodeJBatch } from '../../../core/jurisdiction/machine/batch';
@@ -623,19 +623,21 @@ async function callTestnetRpc<T>(page: Page, method: string, params: unknown[] =
 }
 
 async function readActiveChainRebalanceState(page: Page, entityId: string, hubId: string) {
-  const jurisdiction = await page.evaluate((targetEntityId) => {
-    const env = (window as any).isolatedEnv;
+  const jurisdiction = await page.evaluate(targetEntityId => {
+    const env = (window as RebalanceWindow).__xln?.env();
     const replicas = env?.state?.eReplicas;
-    const replica = [...(replicas?.values?.() ?? [])].find((entry: any) =>
-      String(entry?.entityId || '').toLowerCase() === targetEntityId.toLowerCase());
+    const replica = [...(replicas?.values?.() ?? [])].find(
+      entry => String(entry?.entityId || '').toLowerCase() === targetEntityId.toLowerCase(),
+    );
     return replica?.state?.config?.jurisdiction ?? null;
-  }, entityId) as { chainId?: number; depositoryAddress?: string } | null;
+  }, entityId);
   const depository = String(jurisdiction?.depositoryAddress || '');
   const chainId = Number(jurisdiction?.chainId);
   if (!ethers.isAddress(depository)) throw new Error(`REBALANCE_DEPOSITORY_INVALID:${depository}`);
   if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new Error(`REBALANCE_CHAIN_ID_INVALID:${chainId}`);
   const data = COLLATERAL_INTERFACE.encodeFunctionData('_collaterals', [
-    computeAccountKey(entityId, hubId), USDC_TOKEN_ID,
+    computeAccountKey(entityId, hubId),
+    USDC_TOKEN_ID,
   ]);
   const raw = await callTestnetRpc<string>(page, 'eth_call', [{ to: depository, data }, 'latest']);
   const [collateral] = COLLATERAL_INTERFACE.decodeFunctionResult('_collaterals', raw);
@@ -1390,49 +1392,28 @@ function buildRebalanceFailureDump(input: {
   );
 }
 
-async function reloadRuntimeAndWaitReady(page: Page, rebalanceConsole: string[], timingLabel: string): Promise<void> {
+async function reloadRuntimeAndWaitReady(page: Page, timingLabel: string): Promise<void> {
+  const before = await page.evaluate(() => {
+    const env = (window as RebalanceWindow).__xln?.env();
+    if (!env) throw new Error('REBALANCE_RELOAD_RUNTIME_MISSING');
+    return { runtimeId: env.runtimeId, replicas: env.state.eReplicas.size };
+  });
   await timedStep(timingLabel, async () => {
     await page.reload({ waitUntil: 'domcontentloaded' });
-    try {
-      await page.waitForFunction(() => {
-        const env = (window as unknown as {
-          isolatedEnv?: {
-            runtimeId?: string;
-            state?: { eReplicas?: { size?: number } };
-          };
-        }).isolatedEnv;
-        return !!env?.runtimeId && Number(env?.state?.eReplicas?.size || 0) > 0;
-      }, { timeout: 60_000 });
-    } catch (error) {
-      const runtimeDebug = await page.evaluate(() => {
-        const env = (window as unknown as {
-          isolatedEnv?: {
-            runtimeId?: string;
-            state?: { eReplicas?: { size?: number } };
-          };
-        }).isolatedEnv;
-        const runtimesRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('xln-vaults') : null;
-        return {
-          hasEnv: !!env,
-          runtimeId: env?.runtimeId || null,
-          replicaCount: Number(env?.state?.eReplicas?.size || 0),
-          hasVaultsKey: !!runtimesRaw,
-          vaultsKeyLength: runtimesRaw?.length || 0,
-          location: window.location.href,
-        };
-      }).catch(() => ({
-        hasEnv: false,
-        runtimeId: null,
-        replicaCount: 0,
-        hasVaultsKey: false,
-        vaultsKeyLength: 0,
-        location: 'eval-failed',
-      }));
-      const tailConsole = rebalanceConsole.slice(-25);
-      throw new Error(
-        `reload restore failed: ${JSON.stringify(runtimeDebug)} :: ${(error as Error).message} :: consoleTail=${JSON.stringify(tailConsole)}`,
-      );
-    }
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+    await expect(page.getByTestId('nav-home').locator('visible=true').first()).toBeVisible();
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const env = (window as RebalanceWindow).__xln?.env();
+            return { runtimeId: env?.runtimeId, replicas: env?.state.eReplicas.size };
+          }),
+        { timeout: 60_000 },
+      )
+      .toEqual(before);
   });
 }
 
@@ -1871,16 +1852,16 @@ test.describe('Rebalance E2E', () => {
     const oldRestartCount = Number(h1Before!.restartCount || 0);
     const h1RuntimeId = healthBefore?.hubs?.find((hub) => hub.name === 'H1')?.runtimeId;
     const userRuntimeId = await page.evaluate(() => {
-      const view = window as typeof window & { isolatedEnv: { runtimeId: string } };
-      return view.isolatedEnv.runtimeId;
+      const env = (window as RebalanceWindow).__xln?.env();
+      if (!env) throw new Error('REBALANCE_CRASH_RUNTIME_MISSING');
+      return env.runtimeId;
     });
     expect(h1RuntimeId).toMatch(/^0x[0-9a-f]{40}$/);
     expect(userRuntimeId).toMatch(/^0x[0-9a-f]{40}$/);
     const h1WsUrl = await page.evaluate(runtimeId => {
-      const view = window as typeof window & { isolatedEnv: { gossip: {
-        getProfileByRuntimeId(id: string): { wsUrl?: string } | undefined;
-      } } };
-      const profile = view.isolatedEnv.gossip.getProfileByRuntimeId(runtimeId);
+      const env = (window as RebalanceWindow).__xln?.env();
+      if (!env) throw new Error('REBALANCE_CRASH_RUNTIME_MISSING');
+      const profile = env.gossip.getProfileByRuntimeId(runtimeId);
       if (!profile?.wsUrl) throw new Error('REBALANCE_CRASH_HUB_ENDPOINT_MISSING');
       return profile.wsUrl;
     }, h1RuntimeId!);
@@ -1980,20 +1961,26 @@ test.describe('Rebalance E2E', () => {
     expect(await countExactHankoBatchLogs(page, chainBefore.depository, hubId, crashBoundary.pending.batchHash)).toBe(1);
 
     await expect.poll(() => page.evaluate(({ entityId, hubId }) => {
-      const view = window as typeof window & { isolatedEnv: {
-        pendingNetworkOutputs?: unknown[];
-        state: { eReplicas: Map<string, { state: {
-          entityId: string; accounts: Map<string, { pendingFrame?: unknown }>;
-        } }> };
-      } };
-      const env = view.isolatedEnv;
-      const replica = [...env.state.eReplicas.values()].find((entry) => entry.state.entityId === entityId);
+      const env = (window as RebalanceWindow).__xln?.env();
+      if (!env) throw new Error('REBALANCE_RECOVERED_RUNTIME_MISSING');
+      const replica = [...env.state.eReplicas.values()].find(entry => entry.entityId === entityId);
       const account = replica?.state.accounts.get(hubId);
       if (!account) throw new Error('REBALANCE_RECOVERED_ACCOUNT_MISSING');
       return { retained: env.pendingNetworkOutputs?.length ?? 0, pendingAck: Boolean(account.pendingFrame) };
     }, { entityId, hubId }), { timeout: 15_000, intervals: [100, 250, 500] }).toEqual({ retained: 0, pendingAck: false });
 
-    await reloadRuntimeAndWaitReady(page, criticalConsole, 'rebalance_persist.reload_user_after_finality');
+    const readExactCycle = async () => (await readPersistedFrameEventsSinceCursor(page, {
+      cursor: cycleCursor,
+      entityId,
+      eventNames: ['request_collateral_committed', 'account_settled_finalized_bilateral'],
+    })).events.filter((event) => persistedEventHasAccountToken(event, hubId, USDC_TOKEN_ID));
+    const durableCycle = await readExactCycle();
+    expect(durableCycle.map((event) => event.message)).toEqual([
+      'request_collateral_committed',
+      'account_settled_finalized_bilateral',
+    ]);
+
+    await reloadRuntimeAndWaitReady(page, 'rebalance_persist.reload_user_after_finality');
     let finalState: Awaited<ReturnType<typeof readRebalanceState>> = null;
     await expect.poll(async () => {
       finalState = await readRebalanceState(page, hubId);
@@ -2007,17 +1994,8 @@ test.describe('Rebalance E2E', () => {
       claim.txHash.toLowerCase() === crashBoundary.pending.transactionHash.toLowerCase());
     expect(finalClaims).toHaveLength(2);
 
-    const readExactCycle = async () => (await readPersistedFrameEventsSinceCursor(page, {
-      cursor: cycleCursor,
-      entityId,
-      eventNames: ['request_collateral_committed', 'account_settled_finalized_bilateral'],
-    })).events.filter((event) => persistedEventHasAccountToken(event, hubId, USDC_TOKEN_ID));
-    const durableCycle = await readExactCycle();
-    expect(durableCycle.map((event) => event.message)).toEqual([
-      'request_collateral_committed',
-      'account_settled_finalized_bilateral',
-    ]);
-    expect(await readExactCycle(), 'journal order and receipts must survive user reload').toEqual(durableCycle);
+    const afterReloadCycle = await readExactCycle();
+    expect(afterReloadCycle, 'journal order and receipts must survive user reload').toEqual(durableCycle);
     expect(finalizedReceipt.frameHeight).toBeGreaterThan(crashBoundary.trigger.committed.frameHeight);
     expect(Number(finalizedReceipt.data?.jHeight)).toBe(minedJHeight);
     expect(new Set(finalClaims.map((claim) => `${claim.txHash}:${claim.nonce}:${claim.jHeight}`)).size).toBe(1);
@@ -2027,6 +2005,27 @@ test.describe('Rebalance E2E', () => {
     }
     expect(BigInt(finalState!.collateral) - BigInt(baseline!.collateral)).toBe(crashBoundary.requestedAmount);
     expect((await readActiveChainRebalanceState(page, entityId, hubId)).collateral).toBe(finalState!.collateral);
+    const finalHealth = await getHealth(page, API_BASE_URL);
+    const recoveredH1 = finalHealth?.process?.children?.find(child => child.role === 'hub' && child.name === 'H1');
+    await test.info().attach('mined-rebalance-recovery', {
+      contentType: 'application/json',
+      body: safeStringify({
+        oldPid,
+        recoveredPid: recoveredH1?.pid,
+        oldRestartCount,
+        restartCount: recoveredH1?.restartCount,
+        userRuntimeId,
+        chainBefore,
+        chainAfterRestart,
+        requestedAmount: crashBoundary.requestedAmount,
+        batch: crashBoundary.pending,
+        minedJHeight,
+        finalState,
+        finalClaims,
+        durableCycle,
+        afterReloadCycle,
+      }),
+    });
     expect(unexpectedUnavailableResponses, '503 is expected only for token discovery during the injected H1 outage').toEqual([]);
     expect(criticalConsole, `critical consensus/runtime errors:\n${criticalConsole.join('\n')}`).toEqual([]);
   });

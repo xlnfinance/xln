@@ -1,0 +1,135 @@
+{
+  "afterReloadCycle": [
+    {
+      "data": {
+        "accountId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+        "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+        "prepaidFee": "150000",
+        "requestedAmount": "499850000",
+        "requestedAt": 1792262656741,
+        "tokenId": 1
+      },
+      "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+      "frameHeight": 19,
+      "message": "request_collateral_committed"
+    },
+    {
+      "data": {
+        "accountId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+        "collateral": "499850000",
+        "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+        "jHeight": 40,
+        "ondelta": "0",
+        "tokenId": 1
+      },
+      "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+      "frameHeight": 22,
+      "message": "account_settled_finalized_bilateral"
+    }
+  ],
+  "batch": {
+    "batchHash": "0xc718bfd43c58eb7d21ecf82598ca9354ed61b2a79a8a7578d1e5dd94b9280e0f",
+    "entityNonce": {
+      "__xlnType": "BigInt",
+      "value": "1"
+    },
+    "transactionHash": "0x202ac2f682fd02ff652a556b8e738d261e75a0c0aa887e0e2d49c2f5a166c1ec"
+  },
+  "chainAfterRestart": {
+    "chainId": 31337,
+    "collateral": "499850000",
+    "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853"
+  },
+  "chainBefore": {
+    "chainId": 31337,
+    "collateral": "0",
+    "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853"
+  },
+  "durableCycle": [
+    {
+      "data": {
+        "accountId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+        "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+        "prepaidFee": "150000",
+        "requestedAmount": "499850000",
+        "requestedAt": 1792262656741,
+        "tokenId": 1
+      },
+      "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+      "frameHeight": 19,
+      "message": "request_collateral_committed"
+    },
+    {
+      "data": {
+        "accountId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+        "collateral": "499850000",
+        "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+        "jHeight": 40,
+        "ondelta": "0",
+        "tokenId": 1
+      },
+      "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+      "frameHeight": 22,
+      "message": "account_settled_finalized_bilateral"
+    }
+  ],
+  "finalClaims": [
+    {
+      "collateral": "499850000",
+      "frameHeight": 10,
+      "jHeight": 40,
+      "leftEntity": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+      "nonce": "0",
+      "ondelta": "0",
+      "rightEntity": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+      "tokenId": 1,
+      "txHash": "0x202ac2f682fd02ff652a556b8e738d261e75a0c0aa887e0e2d49c2f5a166c1ec"
+    },
+    {
+      "collateral": "499850000",
+      "frameHeight": 11,
+      "jHeight": 40,
+      "leftEntity": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+      "nonce": "0",
+      "ondelta": "0",
+      "rightEntity": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+      "tokenId": 1,
+      "txHash": "0x202ac2f682fd02ff652a556b8e738d261e75a0c0aa887e0e2d49c2f5a166c1ec"
+    }
+  ],
+  "finalState": {
+    "collateral": "499850000",
+    "currentHeight": 11,
+    "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+    "freeOutCollateral": "499850000",
+    "hasPolicy": true,
+    "hubDebt": "0",
+    "hubExposure": "499850000",
+    "hubFreeOutCollateral": "0",
+    "hubOutCollateral": "0",
+    "hubOutTotalHold": "0",
+    "inCapacity": "10000000000",
+    "inCollateral": "0",
+    "lastFinalizedJHeight": 40,
+    "leftPendingJClaims": "0",
+    "offdelta": "499850000",
+    "ondelta": "0",
+    "outCapacity": "499850000",
+    "outCollateral": "499850000",
+    "outTotalHold": "0",
+    "requested": "0",
+    "rightPendingJClaims": "0",
+    "totalDelta": "499850000",
+    "uncollateralized": "0"
+  },
+  "minedJHeight": 40,
+  "oldPid": 20953,
+  "oldRestartCount": 1,
+  "recoveredPid": 21096,
+  "requestedAmount": {
+    "__xlnType": "BigInt",
+    "value": "499850000"
+  },
+  "restartCount": 2,
+  "userRuntimeId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+}
