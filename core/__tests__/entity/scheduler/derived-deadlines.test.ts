@@ -31,29 +31,46 @@ const pendingAck = (hashlock: string, inboundEntity: string, deadline: number, s
 // The same fixture as the Rust `htlc_deadlines_*` tests in
 // rscore/crates/batch/src/resident_consensus.rs: both sides must drain
 // deadlines in (triggerAt, id) order with ties broken by the id text.
-const state = () => ({
-  entityId: id('1'),
-  timestamp: 1_000,
-  accounts: new Map([
-    [id('a'), { state: { locks: new Map([
-      ['lock-b', lock('lock-b', 200n)],
-      ['lock-z', lock('lock-z', 100n)],
-      ['lock-huge', lock('lock-huge', 2n ** 60n)],
-    ]) } }],
-    [id('b'), { state: { locks: new Map([
-      ['lock-a', lock('lock-a', 200n)],
-      ['lock-zero', lock('lock-zero', 0n)],
-    ]) } }],
-  ]),
-  paybook: {
-    feesEarned: 0n,
-    entries: new Map([
-      [id('7'), pendingAck(id('7'), id('b'), 200)],
-      [id('8'), { ...pendingAck(id('8'), id('b'), 150), secretAckPending: false }],
-      [id('9'), pendingAck(id('9'), id('a'), 300)],
+const state = () =>
+  ({
+    entityId: id('1'),
+    timestamp: 1_000,
+    accounts: new Map([
+      [
+        id('a'),
+        {
+          mempool: [],
+          state: {
+            locks: new Map([
+              ['lock-b', lock('lock-b', 200n)],
+              ['lock-z', lock('lock-z', 100n)],
+              ['lock-huge', lock('lock-huge', 2n ** 60n)],
+            ]),
+          },
+        },
+      ],
+      [
+        id('b'),
+        {
+          mempool: [],
+          state: {
+            locks: new Map([
+              ['lock-a', lock('lock-a', 200n)],
+              ['lock-zero', lock('lock-zero', 0n)],
+            ]),
+          },
+        },
+      ],
     ]),
-  },
-}) as any;
+    paybook: {
+      feesEarned: 0n,
+      entries: new Map([
+        [id('7'), pendingAck(id('7'), id('b'), 200)],
+        [id('8'), { ...pendingAck(id('8'), id('b'), 150), secretAckPending: false }],
+        [id('9'), pendingAck(id('9'), id('a'), 300)],
+      ]),
+    },
+  }) as any;
 
 describe('derived per-payment deadlines', () => {
   test('orders by triggerAt then id across accounts and paybook entries', () => {
@@ -94,21 +111,18 @@ describe('derived per-payment deadlines', () => {
   test('frozen-account-htlc-deadline-does-not-rewake', () => {
     // A frozen Account has no htlc_resolve consumer (tx-effects suppresses the
     // returned AccountTx), so a past timelock there must not keep re-arming
-    // the derived wake. Only the paybook secret-ack waits remain.
+    // the derived wake. Its secret-ACK waits have no dispute-start consumer either.
     const base = state();
     base.accounts.get(id('a')).status = 'dispute_preparing';
     base.accounts.get(id('b')).status = 'disputed';
-    expect(collectDerivedDeadlines(base, 1_000).map((deadline) => deadline.id)).toEqual([
-      `htlc-secret-ack:${id('7')}`,
-      `htlc-secret-ack:${id('9')}`,
-    ]);
-    expect(earliestDerivedDeadline(base)).toBe(200);
+    expect(collectDerivedDeadlines(base, 1_000)).toEqual([]);
+    expect(earliestDerivedDeadline(base)).toBeNull();
     base.paybook.entries.clear();
     expect(earliestDerivedDeadline(base)).toBeNull();
     // Returning to active (or an unset status) re-exposes the lock deadlines.
     base.accounts.get(id('a')).status = 'active';
     delete base.accounts.get(id('b')).status;
-    expect(collectDerivedDeadlines(base, 1_000).map((deadline) => deadline.id)).toEqual([
+    expect(collectDerivedDeadlines(base, 1_000).map(deadline => deadline.id)).toEqual([
       'htlc-timeout:lock-z',
       'htlc-timeout:lock-a',
       'htlc-timeout:lock-b',
@@ -165,7 +179,7 @@ describe('derived per-payment deadlines', () => {
     base.accounts.get(id('a')).state.locks.delete('lock-z');
     expect(earliestDerivedDeadline(base)).toBe(200);
     base.accounts.clear();
-    expect(earliestDerivedDeadline(base)).toBe(200);
+    expect(earliestDerivedDeadline(base)).toBeNull();
     base.paybook.entries.clear();
     expect(earliestDerivedDeadline(base)).toBeNull();
   });

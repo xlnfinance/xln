@@ -48,6 +48,34 @@ pub(crate) fn apply_request_collateral(
             "request_collateral: no delta for token {token_id}"
         )));
     }
+    let hub_side = if proposer == Side::Left {
+        Side::Right
+    } else {
+        Side::Left
+    };
+    let Some(policy) = replica
+        .state()
+        .rebalance_policy(token_id)
+        .and_then(|policy| policy.side(hub_side))
+    else {
+        return Ok(reject(format!(
+            "request_collateral: hub has no committed fee policy for token {token_id}"
+        )));
+    };
+    if policy_version != policy.policy_version() {
+        return Ok(reject(format!(
+            "request_collateral: policyVersion {policy_version} does not match hub policy v{}",
+            policy.policy_version()
+        )));
+    }
+    let required_fee = policy.base_fee()
+        + policy.gas_fee()
+        + amount * policy.liquidity_fee_bps() / BigInt::from(10_000);
+    if fee_amount < &required_fee {
+        return Ok(reject(format!(
+            "request_collateral: feeAmount {fee_amount} below hub policy fee {required_fee}"
+        )));
+    }
     if let Some(existing) = replica.state().requested_rebalance(token_id)
         && existing > &BigInt::from(0)
     {

@@ -4,6 +4,7 @@ import {
   getValidatorJExpectedBlockHash,
 } from '../../../machine/local-history';
 import type { RuntimeReplica } from '../../../../runtime/types';
+import { getJScanHistory } from '../../../../runtime/mempool/j-scan-carry';
 import {
   findWatcherJurisdictionReplica,
   getMinimumCommittedSignerJHeight,
@@ -187,14 +188,14 @@ const resolveExpectedParent = (
   parentHeight: number,
 ): { hash?: string; finalized: boolean } => {
   if (parentHeight <= 0) return { finalized: false };
-  const relevantReplicas = [...env.state.eReplicas.values()].filter(replica =>
+  const relevantReplicas = [...env.state.eReplicas.entries()].filter(([, replica]) =>
     isEntityReplicaRelevantToWatcher(env, replica, watcherReplica),
   );
   const hashes = new Set(
     relevantReplicas
-      .map(replica => getValidatorJExpectedBlockHash(
+      .map(([replicaKey, replica]) => getValidatorJExpectedBlockHash(
         replica.state,
-        replica.jHistory,
+        getJScanHistory(env, replicaKey, replica),
         parentHeight,
       ))
       .filter((hash): hash is string => Boolean(hash)),
@@ -203,7 +204,7 @@ const resolveExpectedParent = (
     throw new Error(`J_HISTORY_RANGE_PARENT_DIVERGENCE:height=${parentHeight}`);
   }
   const hash = [...hashes][0];
-  const finalized = hash !== undefined && relevantReplicas.some(replica => {
+  const finalized = hash !== undefined && relevantReplicas.some(([, replica]) => {
     const anchor = getEntityCertifiedJAnchor(replica.state);
     return anchor?.height === parentHeight && anchor.hash === hash;
   });

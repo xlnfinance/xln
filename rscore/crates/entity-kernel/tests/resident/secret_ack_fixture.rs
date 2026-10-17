@@ -14,6 +14,7 @@ pub(super) struct Case {
     pub missing_lock: bool,
     pub unknown_account: bool,
     pub active_dispute: bool,
+    pub frozen_status: Option<&'static str>,
     pub expired_lock: bool,
     pub ready_proof: bool,
     pub manual_prepare: bool,
@@ -133,6 +134,11 @@ pub(super) fn run_case(
                     None,
                     Some(CanonicalValue::Object(vec![])),
                 )
+                .unwrap();
+        }
+        if let Some(status) = case.frozen_status {
+            consensus
+                .replace_entity_dispute_lifecycle(status, None, None)
                 .unwrap();
         }
         seeds.push(AccountSeed {

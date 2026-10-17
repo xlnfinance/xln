@@ -1112,10 +1112,11 @@ describe('atomic settlement Account transition', () => {
 
   test('an Account frame creates the workspace and its holds without Entity-local prestate', async () => {
     const account = makeAccount(LEFT, RIGHT);
+    putDelta(account, { ...account.state.deltas.get(1)!, collateral: 100n, ondelta: 100n });
 
     const result = await upsert(account, {
       revision: 1,
-      ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
+      ops: [{ type: 'c2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
       memo: 'frame-only proposal',
     });
@@ -1876,7 +1877,9 @@ describe('atomic settlement Account transition', () => {
 
   test('a multi-token update plans on owned leaves and publishes old-release/new-add atomically', async () => {
     const account = makeAccount(LEFT, RIGHT);
+    putDelta(account, { ...account.state.deltas.get(1)!, collateral: 100n, ondelta: 100n });
     const token2 = createDefaultDelta(2);
+    token2.collateral = 100n;
     token2.leftCreditLimit = 100n;
     token2.rightCreditLimit = 100n;
     const unrelated = createDefaultDelta(3);
@@ -1888,13 +1891,13 @@ describe('atomic settlement Account transition', () => {
     const first = await upsert(account, {
       revision: 1,
       ops: [
-        { type: 'r2r', tokenId: 1, amount: 3n },
+        { type: 'c2r', tokenId: 1, amount: 3n },
         {
           type: 'rawDiff',
           tokenId: 2,
-          leftDiff: 2n,
-          rightDiff: -2n,
-          collateralDiff: 0n,
+          leftDiff: 0n,
+          rightDiff: 2n,
+          collateralDiff: -2n,
           ondeltaDiff: 0n,
         },
       ],
@@ -1910,13 +1913,13 @@ describe('atomic settlement Account transition', () => {
       revision: 2,
       previousWorkspaceHash: firstHash,
       ops: [
-        { type: 'r2r', tokenId: 1, amount: 1n },
+        { type: 'c2r', tokenId: 1, amount: 1n },
         {
           type: 'rawDiff',
           tokenId: 2,
-          leftDiff: 10n ** 31n,
-          rightDiff: -(10n ** 31n),
-          collateralDiff: 0n,
+          leftDiff: 0n,
+          rightDiff: 10n ** 31n,
+          collateralDiff: -(10n ** 31n),
           ondeltaDiff: 0n,
         },
       ],
@@ -1935,13 +1938,13 @@ describe('atomic settlement Account transition', () => {
       revision: 2,
       previousWorkspaceHash: firstHash,
       ops: [
-        { type: 'r2r', tokenId: 1, amount: 1n },
+        { type: 'c2r', tokenId: 1, amount: 1n },
         {
           type: 'rawDiff',
           tokenId: 2,
-          leftDiff: 4n,
-          rightDiff: -4n,
-          collateralDiff: 0n,
+          leftDiff: 0n,
+          rightDiff: 4n,
+          collateralDiff: -4n,
           ondeltaDiff: 0n,
         },
       ],
@@ -1960,10 +1963,11 @@ describe('atomic settlement Account transition', () => {
 
   test('submit requires the elected executor and exact workspace hash, then releases only workspace holds', async () => {
     const account = makeAccount(LEFT, RIGHT);
+    putDelta(account, { ...account.state.deltas.get(1)!, collateral: 100n, ondelta: 100n });
     putDelta(account, { ...account.state.deltas.get(1)!, rightHold: 7n });
     const first = await upsert(account, {
       revision: 1,
-      ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
+      ops: [{ type: 'c2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     });
     expect(first.ok).toBe(true);
@@ -2007,9 +2011,10 @@ describe('atomic settlement Account transition', () => {
 
   test('clear derives releases from the exact active workspace and removes it atomically', async () => {
     const account = makeAccount(LEFT, RIGHT);
+    putDelta(account, { ...account.state.deltas.get(1)!, collateral: 100n, ondelta: 100n });
     const first = await upsert(account, {
       revision: 1,
-      ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
+      ops: [{ type: 'c2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     });
     expect(first.ok).toBe(true);
@@ -2327,11 +2332,16 @@ describe('atomic settlement Account transition', () => {
 
   test('AccountSettled finality clears an unsigned workspace whose holds were based on old state', async () => {
     const account = makeAccount(LEFT, RIGHT);
-    expect((await upsert(account, {
-      revision: 1,
-      ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
-      executorIsLeft: false,
-    })).ok).toBe(true);
+    putDelta(account, { ...account.state.deltas.get(1)!, collateral: 100n, ondelta: 100n });
+    expect(
+      (
+        await upsert(account, {
+          revision: 1,
+          ops: [{ type: 'c2r', tokenId: 1, amount: 4n }],
+          executorIsLeft: false,
+        })
+      ).ok,
+    ).toBe(true);
     expect(account.state.deltas.get(1)?.leftHold).toBe(4n);
 
     applyFinalizedAccountJEvents(account, RIGHT, [accountSettledEvent(1)], TEST_DELTA_TRANSFORMER);
@@ -2343,11 +2353,16 @@ describe('atomic settlement Account transition', () => {
 
   test('R2C AccountSettled nonce zero clears an unsigned workspace with stale capacity holds', async () => {
     const account = makeAccount(LEFT, RIGHT);
-    expect((await upsert(account, {
-      revision: 1,
-      ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
-      executorIsLeft: false,
-    })).ok).toBe(true);
+    putDelta(account, { ...account.state.deltas.get(1)!, collateral: 100n, ondelta: 100n });
+    expect(
+      (
+        await upsert(account, {
+          revision: 1,
+          ops: [{ type: 'c2r', tokenId: 1, amount: 4n }],
+          executorIsLeft: false,
+        })
+      ).ok,
+    ).toBe(true);
     expect(account.state.jNonce).toBe(0);
     expect(account.state.deltas.get(1)?.leftHold).toBe(4n);
 
@@ -2451,11 +2466,17 @@ describe('atomic settlement Account transition', () => {
     const env = createEmptyEnv('settlement-transition-stale-j-abort');
     const jurisdiction = makeJurisdiction('settlement-transition', 31337, 'a1', 'b2');
     const state = makeState(LEFT, addr('35'), jurisdiction, RIGHT);
-    expect((await upsertOnState(state, RIGHT, {
-      revision: 1,
-      ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
-      executorIsLeft: false,
-    })).ok).toBe(true);
+    const funded = writableAccount(state, RIGHT);
+    putDelta(funded, { ...funded.state.deltas.get(1)!, collateral: 100n, ondelta: 100n });
+    expect(
+      (
+        await upsertOnState(state, RIGHT, {
+          revision: 1,
+          ops: [{ type: 'c2r', tokenId: 1, amount: 4n }],
+          executorIsLeft: false,
+        })
+      ).ok,
+    ).toBe(true);
     const account = writableAccount(state, RIGHT);
     const workspaceHash = account.state.settlementWorkspace!.workspaceHash;
     account.state.jNonce = 2;

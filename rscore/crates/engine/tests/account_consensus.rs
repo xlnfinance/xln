@@ -2402,6 +2402,14 @@ fn rebalance_policy_is_hashable_at_admission_and_cross_peer_replay() {
 #[test]
 fn fresh_request_collateral_emits_typed_receipt_but_duplicate_noop_does_not() {
     let (mut left, mut right) = parties();
+    commit_txs_bilaterally(
+        &mut right,
+        &mut left,
+        vec![hub_rebalance_fee_policy()],
+        1_699_999_999_999,
+        true,
+        false,
+    );
     let request = AccountTx::RequestCollateral {
         token_id: TokenId::new(1).expect("token"),
         amount: BigInt::from(100),
@@ -2474,6 +2482,65 @@ fn fresh_request_collateral_emits_typed_receipt_but_duplicate_noop_does_not() {
         panic!("expected duplicate proposal");
     };
     assert_eq!(duplicate.outputs_by_tx.as_slice(), &[Vec::new()]);
+}
+
+#[test]
+fn request_collateral_rejects_missing_stale_or_underpaid_committed_hub_policy() {
+    for (committed, version, fee, expected) in [
+        (false, 1, 1, "hub has no committed fee policy"),
+        (true, 2, 1, "does not match hub policy v1"),
+        (true, 1, 0, "below hub policy fee 1"),
+    ] {
+        let (mut user, mut hub) = parties();
+        if committed {
+            commit_txs_bilaterally(
+                &mut hub,
+                &mut user,
+                vec![hub_rebalance_fee_policy()],
+                1_699_999_999_999,
+                true,
+                false,
+            );
+        }
+        let before = user.account.replica().clone();
+        user.account
+            .admit_txs(
+                vec![AccountTx::RequestCollateral {
+                    token_id: TokenId::new(1).expect("token"),
+                    amount: BigInt::from(100),
+                    fee_token_id: Some(TokenId::new(1).expect("fee token")),
+                    fee_amount: BigInt::from(fee),
+                    policy_version: version,
+                }],
+                "committed-policy-regression",
+            )
+            .expect("admit request");
+        let ProposalOutcome::Idle { dropped } = propose_account_frame(
+            &mut user.account,
+            &user.identity,
+            1_700_000_000_000,
+            7,
+            &market(),
+        )
+        .expect("policy rejection") else {
+            panic!("unbacked request proposed");
+        };
+        assert_eq!(dropped.len(), 1);
+        assert!(dropped[0].rejection.message().contains(expected));
+        assert!(user.account.mempool().is_empty());
+        assert!(user.account.pending().is_none());
+        assert_eq!(
+            user.account
+                .replica()
+                .state()
+                .payment_profile_account_state_root()
+                .expect("after root"),
+            before
+                .state()
+                .payment_profile_account_state_root()
+                .expect("before root"),
+        );
+    }
 }
 
 #[test]

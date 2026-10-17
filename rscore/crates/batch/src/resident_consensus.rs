@@ -967,6 +967,36 @@ impl ResidentConsensusEngine {
             .collect())
     }
 
+    /// Secret-ACK deadlines have a consumer only on an existing active
+    /// Account without a dispute. Read the selected root, never a status cache.
+    pub fn selected_secret_ack_account_ids(
+        &mut self,
+        expected_accounts_root: [u8; 32],
+        account_ids: Vec<AccountId>,
+    ) -> Result<BTreeSet<AccountId>, BatchError> {
+        let requests = account_ids
+            .into_iter()
+            .filter(|id| self.signer_owners.contains_key(id))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|id| (id, ()))
+            .collect();
+        let rows =
+            self.forest
+                .read_selected(expected_accounts_root, requests, |_, account, ()| {
+                    Ok(active(account)?
+                        && account
+                            .replica()
+                            .envelope()
+                            .field("activeDispute")
+                            .is_none())
+                })?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, actionable)| actionable.then_some(id))
+            .collect())
+    }
+
     /// Check due HTLC lock ids on their owner workers without materializing
     /// Account replicas at the coordinator. The caller groups lock ids by
     /// Account because the resident worker protocol admits one row per shard
@@ -1724,7 +1754,7 @@ impl ResidentConsensusEngine {
                 changed,
                 proposable: proposable(account.as_ref())?,
                 has_rebalance_work: has_rebalance_work(account.as_ref())?,
-                lock_deadlines: lock_deadlines(account.as_ref()),
+                lock_deadlines: lock_deadlines(account.as_ref())?,
             };
             if changed && !need_accounts_root && !created {
                 Ok(ResidentAccountAction::PutUnsealed {
@@ -2582,7 +2612,7 @@ fn apply_outbound_work(
         proposal,
         proposable: proposable(&account)?,
         has_rebalance_work: has_rebalance_work(&account)?,
-        lock_deadlines: lock_deadlines(&account),
+        lock_deadlines: lock_deadlines(&account)?,
     };
     if changed || work.seal {
         let leaf = leaf_root(account_id, &account)?;
@@ -2628,13 +2658,31 @@ fn proposable_from_entries(
     Ok(ready)
 }
 
-/// TS `htlcTimeoutAt`: a lock's deadline is its `timelock` as a safe positive
-/// integer; other values never wake. Sorted by (timelock, lockId).
-fn lock_deadlines(account: &AccountConsensus) -> Vec<(String, u64)> {
+/// An inactive Account or an already queued/proposed resolve cannot act on a
+/// timeout. Re-arming that deadline would create a signed no-op wake each tick.
+fn lock_deadlines(account: &AccountConsensus) -> Result<Vec<(String, u64)>, BatchError> {
+    if !active(account)? {
+        return Ok(Vec::new());
+    }
+    let queued_resolves = account
+        .mempool()
+        .iter()
+        .chain(
+            account
+                .pending()
+                .into_iter()
+                .flat_map(|pending| pending.frame.txs.iter()),
+        )
+        .filter_map(|tx| match tx {
+            AccountTx::HtlcResolve(resolve) => Some(resolve.lock_id.as_str()),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
     let mut deadlines = account
         .replica()
         .state()
         .htlc_locks()
+        .filter(|lock| !queued_resolves.contains(lock.lock_id()))
         .filter_map(|lock| {
             u64::try_from(lock.timelock())
                 .ok()
@@ -2643,7 +2691,7 @@ fn lock_deadlines(account: &AccountConsensus) -> Vec<(String, u64)> {
         })
         .collect::<Vec<_>>();
     deadlines.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
-    deadlines
+    Ok(deadlines)
 }
 
 fn lock_deadlines_from_entries(
@@ -2651,7 +2699,7 @@ fn lock_deadlines_from_entries(
 ) -> Result<LockDeadlines, BatchError> {
     let mut deadlines = LockDeadlines::new();
     for (account_id, account, _) in entries {
-        set_lock_deadlines(&mut deadlines, *account_id, lock_deadlines(account));
+        set_lock_deadlines(&mut deadlines, *account_id, lock_deadlines(account)?);
     }
     Ok(deadlines)
 }

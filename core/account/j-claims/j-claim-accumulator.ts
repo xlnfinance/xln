@@ -1,3 +1,4 @@
+import { compareStableText } from '../../protocol/serialization';
 import type {
   AccountJClaimAccumulatorState,
   AccountJClaimMutationResult,
@@ -196,7 +197,7 @@ const collectTree = (
   if (BigInt(nodes.size) !== expectedNodes || BigInt(records.length) !== state.count) {
     throw new Error(`ACCOUNT_J_CLAIM_TREE_COUNT_MISMATCH:${state.count}:${nodes.size}:${records.length}`);
   }
-  records.sort((left, right) => left.jHeight - right.jHeight || left.side.localeCompare(right.side));
+  records.sort((left, right) => left.jHeight - right.jHeight || compareStableText(left.side, right.side));
   return { nodes, records };
 };
 

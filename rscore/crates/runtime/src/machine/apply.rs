@@ -919,7 +919,7 @@ fn derive_selected_finalized_j_height(previous: u64, runtime_txs: &[super::Runti
 
 fn internal_wake(
     state: &RuntimeEntityState,
-    replica: &RuntimeEntityReplica,
+    replica: &mut RuntimeEntityReplica,
     frame: &RuntimeFrameContext,
 ) -> Result<Option<RuntimeWake>, RuntimeMachineError> {
     let entity_mempool = !replica.entity_mempool.is_empty();
@@ -956,7 +956,7 @@ fn internal_wake(
 /// The jobs keep the historical hook ids so the wake wire is unchanged.
 fn derived_wake_jobs(
     state: &RuntimeEntityState,
-    replica: &RuntimeEntityReplica,
+    replica: &mut RuntimeEntityReplica,
     now: u64,
 ) -> Result<Vec<ScheduledWakeJob>, RuntimeMachineError> {
     let (_, due_locks) = replica
@@ -985,7 +985,36 @@ fn derived_wake_jobs(
             )
         })
         .collect::<std::collections::BTreeMap<_, _>>();
+    let ack_accounts = state
+        .entity
+        .paybook
+        .entries
+        .iter()
+        .filter(|(_, entry)| entry.secret_ack_pending && entry.secret.is_some())
+        .filter_map(|(_, entry)| entry.inbound_entity.as_ref())
+        .filter(|peer| state.entity.known_accounts.contains(*peer))
+        .map(|peer| {
+            parse_hex32(peer).map(AccountId::from_bytes).ok_or_else(|| {
+                RuntimeMachineError::ReplicaMetadata(format!(
+                    "SECRET_ACK_ACCOUNT_ID_INVALID:{peer}"
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let actionable = replica
+        .accounts
+        .selected_secret_ack_account_ids(state.accounts_root, ack_accounts)?
+        .into_iter()
+        .map(|id| render_word(id.as_bytes()))
+        .collect::<BTreeSet<_>>();
     for (_, entry) in state.entity.paybook.entries.iter() {
+        if !entry
+            .inbound_entity
+            .as_ref()
+            .is_some_and(|peer| actionable.contains(peer))
+        {
+            continue;
+        }
         let (Some(deadline), Some(started_at)) =
             (entry.secret_ack_deadline_at, entry.secret_ack_started_at)
         else {
@@ -2917,7 +2946,7 @@ fn apply_runtime_inner(
         for (key, state) in &replica.state.e_replicas {
             let live = replica
                 .e_replicas
-                .get(key)
+                .get_mut(key)
                 .ok_or(RuntimeMachineError::EntityOwnerMismatch)?;
             if let Some(wake) = internal_wake(state, live, &selected_context)? {
                 wakes.push(super::RuntimeEntityWake {
@@ -5252,6 +5281,10 @@ fn entity_encryption_seed<'a>(
         })
         .transpose()
 }
+
+#[cfg(test)]
+#[path = "tests/deadline_actionability.rs"]
+mod deadline_actionability;
 
 #[cfg(test)]
 mod tests {

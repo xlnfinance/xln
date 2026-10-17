@@ -63,6 +63,8 @@ const resolveCanonicalOffer = (
   };
   const data = tx.data;
   const restingMismatch =
+    (data.restingGiveTokenId !== undefined && data.restingGiveTokenId !== offer.giveTokenId) ||
+    (data.restingWantTokenId !== undefined && data.restingWantTokenId !== offer.wantTokenId) ||
     (data.restingGiveAmount !== undefined && data.restingGiveAmount !== canonical.give) ||
     (data.restingWantAmount !== undefined && data.restingWantAmount !== canonical.want) ||
     (data.restingQuantizedGive !== undefined && data.restingQuantizedGive !== canonical.quantizedGive) ||
@@ -177,7 +179,31 @@ const validateExecutionEconomics = (
       );
     }
   }
-  return validateFilledAmountBounds(fill, events);
+  const timeInForceFailure = validateTimeInForceClose(tx, canonical, fill, events);
+  return timeInForceFailure ?? validateFilledAmountBounds(fill, events);
+};
+
+/** The maker's signed IOC/FOK terms bind the resolving counterparty too.
+ * A partial IOC must cancel its remainder; FOK permits only a full fill or
+ * pure cancellation. Test actual amounts: a partial fill can round to the
+ * maximum wire ratio and must never become an authorized FOK full fill.
+ */
+const validateTimeInForceClose = (
+  tx: SwapResolveTx,
+  canonical: CanonicalOffer,
+  fill: ExecutionFill,
+  events: string[],
+): SwapResolveFailure | null => {
+  const timeInForce = canonical.offer.timeInForce;
+  const hasFill = fill.filledGive > 0n;
+  const fullFill = fill.filledGive === canonical.quantizedGive;
+  if (timeInForce === 1 && hasFill && !fullFill && !tx.data.cancelRemainder) {
+    return failure(events, `Swap offer ${tx.data.offerId} is IOC: cancel the unfilled remainder`);
+  }
+  if (timeInForce === 2 && hasFill && !fullFill) {
+    return failure(events, `Swap offer ${tx.data.offerId} is FOK: partial fill is not allowed`);
+  }
+  return null;
 };
 
 const validateSwapFeeAuthorization = (

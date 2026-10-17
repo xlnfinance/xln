@@ -572,6 +572,12 @@ interface RuntimeInfrastructure {
   stateMutationInFlight?: boolean;
   /** Entity inputs detached from the live mempool and owned by the active runtime frame. */
   inFlightEntityInputs?: number;
+  /**
+   * Newest header-only authenticated J scan page per Entity replica key, waiting
+   * for a Runtime frame with an Entity input for that replica. Never WAL State: after a crash
+   * the watcher rescans from the replica's recorded contiguous height.
+   */
+  carriedJScanTips?: Map<string, Extract<RuntimeTx, { type: 'observeJRange' }>>;
   p2p?: RuntimeP2P | null | undefined;
   /** Process-local inbound direct sessions that can deliver to verified Entity routes. */
   observeDirectOnlineEntityIds?: (entityIds: readonly string[]) => ReadonlySet<string>;

@@ -979,9 +979,40 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         R: Send + 'static,
         F: Fn(AccountId, &V, T) -> Result<R, BatchError> + Send + Sync + 'static,
     {
+        self.read_projected_head(entries, None, read)
+    }
+
+    /// Read only the parent-selected root; a newer uncommitted candidate must
+    /// never decide whether a committed Account can wake.
+    pub(crate) fn read_selected<T, R, F>(
+        &mut self,
+        expected_root: [u8; 32],
+        entries: Vec<(AccountId, T)>,
+        read: F,
+    ) -> Result<Vec<(AccountId, R)>, BatchError>
+    where
+        T: Send + 'static,
+        R: Send + 'static,
+        F: Fn(AccountId, &V, T) -> Result<R, BatchError> + Send + Sync + 'static,
+    {
+        let head = self.reconcile_head(expected_root)?.0;
+        self.read_projected_head(entries, Some(head), read)
+    }
+
+    fn read_projected_head<T, R, F>(
+        &mut self,
+        entries: Vec<(AccountId, T)>,
+        head: Option<ReconcileHead>,
+        read: F,
+    ) -> Result<Vec<(AccountId, R)>, BatchError>
+    where
+        T: Send + 'static,
+        R: Send + 'static,
+        F: Fn(AccountId, &V, T) -> Result<R, BatchError> + Send + Sync + 'static,
+    {
         let (lanes, _) = self.worker_batches(entries)?;
         let replies = self.workers.run_lanes(lanes, move |state, batch| {
-            read_head_worker_batch(state, batch, &read)
+            read_head_worker_batch(state, batch, head, &read)
         })?;
         let mut rows = Vec::new();
         for reply in replies.into_iter().flatten() {
@@ -2033,6 +2064,7 @@ where
 fn read_head_worker_batch<V, T, R, F>(
     state: &mut ResidentWorkerState<V>,
     batch: ShardMutationBatch<T>,
+    head: Option<ReconcileHead>,
     read: &F,
 ) -> Result<Vec<(usize, AccountId, R)>, BatchError>
 where
@@ -2050,7 +2082,11 @@ where
             return Err(BatchError::CandidateAccountNotFound(account_id));
         }
     };
-    let shard = active_resident_shard(resident);
+    let shard = match head {
+        Some(ReconcileHead::Base) => &resident.base,
+        Some(ReconcileHead::Inbound) => resident.inbound.as_ref().unwrap_or(&resident.base),
+        Some(ReconcileHead::Candidate) | None => active_resident_shard(resident),
+    };
     let mut rows = Vec::with_capacity(batch.entries.len());
     for (position, account_id, payload) in batch.entries {
         let current = shard
@@ -2537,6 +2573,39 @@ mod tests {
         assert_eq!(forest.materialized_shard_count().expect("count"), 2);
         assert_eq!(forest.len(), 3);
         assert_eq!(forest.accounts_root(), serial.root_hash());
+    }
+
+    #[test]
+    fn selected_head_reads_do_not_observe_or_promote_a_newer_candidate() {
+        for workers in [1, 4] {
+            let id = account(0x123, 0);
+            let mut forest = ResidentAccountForest::restore(workers, 7, vec![(id, 10, digest(10))])
+                .expect("restore");
+            let base = forest.accounts_root();
+            let inbound = forest
+                .apply_inbound(base, vec![(id, 20)], put)
+                .expect("inbound");
+            let candidate = forest
+                .apply_outbound(vec![(id, 30)], put)
+                .expect("candidate");
+            for (root, expected) in [
+                (base, 10),
+                (inbound.accounts_root, 20),
+                (candidate.accounts_root, 30),
+            ] {
+                let rows = forest
+                    .read_selected(root, vec![(id, ())], |_, value, ()| Ok(*value))
+                    .expect("selected read");
+                assert_eq!(rows, vec![(id, expected)]);
+            }
+            assert_eq!(
+                forest
+                    .read_head(vec![(id, ())], |_, value, ()| Ok(*value))
+                    .expect("head"),
+                vec![(id, 30)]
+            );
+            assert_eq!(forest.accounts_root(), candidate.accounts_root);
+        }
     }
 
     #[test]

@@ -47,7 +47,13 @@ fn resolve_canonical_offer(
     let mismatch = |declared: &Option<BigInt>, canonical: &BigInt| {
         declared.as_ref().is_some_and(|value| value != canonical)
     };
-    if mismatch(&tx.resting_give_amount, canonical.offer.give_amount())
+    if tx
+        .resting_give_token_id
+        .is_some_and(|id| id != canonical.offer.give_token_id())
+        || tx
+            .resting_want_token_id
+            .is_some_and(|id| id != canonical.offer.want_token_id())
+        || mismatch(&tx.resting_give_amount, canonical.offer.give_amount())
         || mismatch(&tx.resting_want_amount, canonical.offer.want_amount())
         || mismatch(&tx.resting_quantized_give, &canonical.quantized_give)
         || mismatch(&tx.resting_quantized_want, &canonical.quantized_want)
@@ -195,7 +201,28 @@ fn validate_execution_economics(
             }
         }
     }
+    validate_time_in_force(tx, canonical, fill)?;
     validate_filled_amount_bounds(fill)
+}
+
+// The maker's signed immediate-execution terms also bind the counterparty.
+// Compare actual amounts: a partial fill may round to the maximum wire
+// ratio, but it is still not a FOK full fill.
+fn validate_time_in_force(
+    tx: &SwapResolveTx<'_>,
+    canonical: &CanonicalOffer,
+    fill: &ExecutionFill,
+) -> Result<(), ValidationRejection> {
+    let has_fill = fill.filled_give > BigInt::from(0);
+    let full_fill = fill.filled_give == canonical.quantized_give;
+    if canonical.offer.time_in_force() == Some(1) && has_fill && !full_fill && !tx.cancel_remainder
+    {
+        return Err(rejected("SWAP_RESOLVE_IOC_REMAINDER_NOT_CANCELLED"));
+    }
+    if canonical.offer.time_in_force() == Some(2) && has_fill && !full_fill {
+        return Err(rejected("SWAP_RESOLVE_FOK_PARTIAL_FILL"));
+    }
+    Ok(())
 }
 
 fn validate_filled_amount_bounds(fill: &ExecutionFill) -> Result<(), ValidationRejection> {

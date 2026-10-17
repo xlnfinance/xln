@@ -1,20 +1,4 @@
-const SORTED_STRING_KEYS = Symbol.for('xln.sorted-string-map-keys');
-
-type SortedStringKeyCache = {
-  size: number;
-  keys: string[];
-};
-
-type IndexedStringMap<T> = Map<string, T> & {
-  [SORTED_STRING_KEYS]?: SortedStringKeyCache;
-};
-type MutableStringMap<T> = ReadonlyMap<string, T> & {
-  set(key: string, value: T): unknown;
-  delete(key: string): boolean;
-};
-
-export const compareAscii = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0;
+export const compareAscii = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
 const binarySearch = (keys: readonly string[], key: string): { found: boolean; index: number } => {
   let lo = 0;
@@ -28,29 +12,9 @@ const binarySearch = (keys: readonly string[], key: string): { found: boolean; i
   return { found: keys[lo] === key, index: lo };
 };
 
-const setCache = <T>(map: Map<string, T>, cache: SortedStringKeyCache): void => {
-  Object.defineProperty(map, SORTED_STRING_KEYS, {
-    configurable: true,
-    enumerable: false,
-    writable: true,
-    value: cache,
-  });
-};
-
-const invalidateSortedStringMapKeys = <T>(map: Map<string, T>): void => {
-  const indexed: IndexedStringMap<T> = map;
-  if (indexed[SORTED_STRING_KEYS]) delete indexed[SORTED_STRING_KEYS];
-};
-
-export const sortedStringMapKeys = <T>(map: ReadonlyMap<string, T>): readonly string[] => {
-  if (!(map instanceof Map)) return Array.from(map.keys()).sort(compareAscii);
-  const indexed: IndexedStringMap<T> = map;
-  const cached = indexed[SORTED_STRING_KEYS];
-  if (cached && cached.size === map.size) return cached.keys;
-  const keys = Array.from(map.keys()).sort(compareAscii);
-  setCache(map, { size: map.size, keys });
-  return keys;
-};
+/** Ascending ASCII keys; sorted per call — no cache, so in-place map mutation can never serve stale keys. */
+export const sortedStringMapKeys = <T>(map: ReadonlyMap<string, T>): readonly string[] =>
+  Array.from(map.keys()).sort(compareAscii);
 
 export const sortedStringMapStartIndex = (
   keys: readonly string[],
@@ -62,23 +26,4 @@ export const sortedStringMapStartIndex = (
   if (!cursor) return 0;
   const found = binarySearch(keys, cursor);
   return Math.min(keys.length, found.index + (found.found ? 1 : 0));
-};
-
-export const upsertSortedStringMapEntry = <T>(
-  map: MutableStringMap<T>,
-  key: string,
-  value: T,
-): void => {
-  const alreadyPresent = map.has(key);
-  map.set(key, value);
-  if (!alreadyPresent && map instanceof Map) invalidateSortedStringMapKeys(map);
-};
-
-export const removeSortedStringMapEntry = <T>(
-  map: MutableStringMap<T>,
-  key: string,
-): boolean => {
-  const deleted = map.delete(key);
-  if (deleted && map instanceof Map) invalidateSortedStringMapKeys(map);
-  return deleted;
 };

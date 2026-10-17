@@ -176,15 +176,12 @@ fn settle_transition_rejects_hold_overflow_without_publishing_prior_planned_hold
                 (
                     "ops".into(),
                     CanonicalValue::Array(vec![CanonicalValue::Object(vec![
-                        ("type".into(), CanonicalValue::String("rawDiff".into())),
+                        ("type".into(), CanonicalValue::String("c2r".into())),
                         (
                             "tokenId".into(),
                             CanonicalValue::Number(CanonicalNumber::from_u16(1)),
                         ),
-                        ("leftDiff".into(), CanonicalValue::BigInt((-1).into())),
-                        ("rightDiff".into(), CanonicalValue::BigInt((-1).into())),
-                        ("collateralDiff".into(), CanonicalValue::BigInt(2.into())),
-                        ("ondeltaDiff".into(), CanonicalValue::BigInt(1.into())),
+                        ("amount".into(), CanonicalValue::BigInt(1.into())),
                     ])]),
                 ),
             ]),

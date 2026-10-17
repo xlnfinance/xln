@@ -3,6 +3,10 @@ import { rmSync } from 'fs';
 import { join } from 'path';
 
 import { generateLazyEntityId } from '../../../entity/factory';
+import { LIMITS } from '../../../config/constants';
+import { enqueueJHistoryRange } from '../../../jurisdiction/adapter/events/history-ingress';
+import { markLocalRuntimeAdapterCommandTx } from '../../../runtime/command/frontier-auth';
+import { runtimeAdapterCommandLaneId } from '../../../runtime/command/frontier';
 import { initCrontab } from '../../../entity/scheduler';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
@@ -231,6 +235,98 @@ const closeTestEnv = async (env: RuntimeReplica): Promise<void> => {
 };
 
 describe('runtime frame atomicity', () => {
+  test.each([false, true])(
+    'full RuntimeTx capacity defers addressed Entity work until its carried J tip fits (quiesce=%s)',
+    async quiescing => {
+      const env = createEmptyEnv(`carried scan capacity ${TEST_RUN_ID}`);
+      env.scenarioMode = true;
+      env.quietRuntimeLogs = true;
+      env.runtimeConfig = { ...env.runtimeConfig, storage: { ...env.runtimeConfig?.storage, enabled: true } };
+      installJurisdiction(env);
+      cleanupNamespaces.push(env.dbNamespace!);
+      const baseline = localImportReplicaTx(env, 'a');
+      const key = `${baseline.entityId}:${baseline.signerId}`;
+      const committed: RuntimeInput[] = [];
+      const unsubscribe = registerRuntimeFrameCommitCallback(env, ({ runtimeInput }) => committed.push(runtimeInput));
+      try {
+        enqueueRuntimeInput(env, { runtimeTxs: [baseline], entityInputs: [] });
+        await processRuntime(env);
+        committed.length = 0;
+        const headers = Array.from({ length: 90 }, (_, i) => ({
+          jHeight: i + 1,
+          jBlockHash: `0x${(i + 1).toString(16).padStart(64, '0')}`,
+        }));
+        enqueueJHistoryRange(
+          env,
+          [],
+          90,
+          headers[89]!.jBlockHash,
+          jurisdiction.depositoryAddress,
+          headers,
+          jurisdiction.chainId,
+        );
+        expect(env.state.eReplicas.get(key)?.jHistory).toBeUndefined();
+        expect(env.infrastructure?.carriedJScanTips?.get(key)?.data.scannedThroughHeight).toBe(90);
+        const sibling = localImportReplicaTx(env, 'b');
+        enqueueRuntimeInput(env, { runtimeTxs: [sibling], entityInputs: [] });
+        await processRuntime(env);
+        committed.length = 0;
+        const laneId = runtimeAdapterCommandLaneId('capacity', 'accepted-order');
+        const runtimeTxs = Array.from({ length: LIMITS.MAX_RUNTIME_INPUT_RUNTIME_TXS }, (_, i) =>
+          markLocalRuntimeAdapterCommandTx({
+            type: 'recordRuntimeAdapterCommand' as const,
+            data: {
+              laneId,
+              sequence: i + 1,
+              commandId: `capacity-command:${i + 1}`,
+              inputHash: hash('42'),
+              expiresAtMs: null,
+            },
+          }),
+        );
+        const addressed: EntityInput = { entityId: baseline.entityId, signerId: baseline.signerId, entityTxs: [] };
+        enqueueRuntimeInput(env, { runtimeTxs, entityInputs: [addressed] });
+        await processRuntime(env);
+        expect(committed).toHaveLength(1);
+        expect(committed[0]?.runtimeTxs).toEqual(runtimeTxs);
+        // The pre-fix frame executed this input against stale history while its
+        // required 90-block carry was silently left outside the full WAL input.
+        expect(committed[0]?.entityInputs).toEqual([]);
+        expect(env.runtimeMempool?.entityInputs).toEqual([addressed]);
+        expect(env.infrastructure?.runtimeAdapterCommandFrontiers?.get(laneId)?.lastContiguousSequence).toBe(
+          LIMITS.MAX_RUNTIME_INPUT_RUNTIME_TXS,
+        );
+        expect(env.infrastructure?.carriedJScanTips?.get(key)?.data.scannedThroughHeight).toBe(90);
+        const fullRecord = await readStorageFrameRecord(getRuntimeWalDb(env), env.state.height);
+        expect(fullRecord?.runtimeInput.runtimeTxs).toHaveLength(LIMITS.MAX_RUNTIME_INPUT_RUNTIME_TXS);
+        expect(fullRecord?.runtimeInput.entityInputs).toEqual([]);
+        const newer: EntityInput = { entityId: sibling.entityId, signerId: sibling.signerId, entityTxs: [] };
+        enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [newer] });
+        if (quiescing) {
+          env.scenarioMode = false;
+          env.infrastructure!.persistenceQuiescing = true;
+          expect(() => enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [newer] })).toThrow(
+            'RUNTIME_INPUT_INGRESS_AFTER_PERSISTENCE_PAUSE',
+          );
+        }
+        await processRuntime(env);
+        expect(committed).toHaveLength(2);
+        expect(committed[1]?.runtimeTxs.map(tx => tx.type)).toEqual(['observeJRange']);
+        expect(committed[1]?.entityInputs).toEqual([addressed, newer]);
+        expect(env.state.eReplicas.get(key)?.jHistory?.contiguousThroughHeight).toBe(90);
+        expect(env.infrastructure?.carriedJScanTips?.size).toBe(0);
+        expect(env.runtimeMempool?.entityInputs).toEqual([]);
+        const nextRecord = await readStorageFrameRecord(getRuntimeWalDb(env), env.state.height);
+        expect(nextRecord?.runtimeInput.runtimeTxs.map(tx => tx.type)).toEqual(['observeJRange']);
+        expect(nextRecord?.runtimeInput.entityInputs).toHaveLength(2);
+      } finally {
+        unsubscribe();
+        await closeTestEnv(env);
+      }
+    },
+    60_000,
+  );
+
   test('frame stepping stops before draining input or advancing committed state and WAL', async () => {
     const env = createEmptyEnv(`frame stepping ${TEST_RUN_ID}`);
     env.runtimeConfig = { ...env.runtimeConfig, storage: { ...env.runtimeConfig?.storage, enabled: true } };

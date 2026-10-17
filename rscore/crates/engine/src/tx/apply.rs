@@ -263,10 +263,10 @@ pub(crate) fn apply_to_candidate(
             fill_numerator,
             fill_denominator,
             cancel_remainder,
-            // Carried for the frame hash; the transition does not read them.
+            // The comment is carried only for the frame hash.
             comment: _,
-            resting_give_token_id: _,
-            resting_want_token_id: _,
+            resting_give_token_id,
+            resting_want_token_id,
             fee_token_id,
             fee_amount,
             execution_give_amount,
@@ -288,6 +288,8 @@ pub(crate) fn apply_to_candidate(
                     fill_numerator: fill_numerator.clone(),
                     fill_denominator: fill_denominator.clone(),
                     cancel_remainder: *cancel_remainder,
+                    resting_give_token_id: *resting_give_token_id,
+                    resting_want_token_id: *resting_want_token_id,
                     fee_token_id: *fee_token_id,
                     fee_amount: fee_amount.clone(),
                     execution_give_amount: execution_give_amount.clone(),

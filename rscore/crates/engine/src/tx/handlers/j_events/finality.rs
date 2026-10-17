@@ -95,14 +95,33 @@ fn apply_settled(
 ) -> Result<(), StateError> {
     let mut delta = replica.state().delta_or_zero(event.token_id)?;
     let previous_collateral = delta.collateral().clone();
+    let previous_ondelta = delta.ondelta().clone();
     delta.apply_j_settlement(&event.collateral, &event.ondelta)?;
-    let increase = (&event.collateral - &previous_collateral).max(BigInt::from(0));
     replica.state_mut().put_delta(delta)?;
     let requested = replica
         .state()
         .requested_rebalance(event.token_id)
         .cloned()
         .unwrap_or_default();
+    let increase = if requested > BigInt::from(0) {
+        let fee_state = replica
+            .state()
+            .requested_rebalance_fee_state(event.token_id)
+            .ok_or_else(|| {
+                StateError::JClaim(format!(
+                    "REBALANCE_REQUEST_FEE_STATE_MISSING:token={}",
+                    event.token_id
+                ))
+            })?;
+        let share_growth = if fee_state.requested_by_left {
+            &event.collateral - &previous_collateral - (&event.ondelta - &previous_ondelta)
+        } else {
+            &event.ondelta - &previous_ondelta
+        };
+        share_growth.max(BigInt::from(0))
+    } else {
+        BigInt::from(0)
+    };
     if requested > BigInt::from(0) && increase > BigInt::from(0) {
         let remaining = (requested - increase).max(BigInt::from(0));
         if remaining > BigInt::from(0) {
@@ -295,5 +314,55 @@ mod tests {
                 .requested_rebalance_fee_state(token)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn account_settled_credits_only_growth_of_the_hubs_share() {
+        for (left_requester, collateral_growth, left_growth, remaining) in [
+            (true, 100, 100, 183),
+            (true, 80, 30, 133),
+            (true, 100, 0, 83),
+            (false, 100, 0, 183),
+            (false, 80, 30, 153),
+        ] {
+            let mut account = replica();
+            let token = TokenId::new(1).expect("token");
+            let prior = account.state().delta(token).expect("delta").clone();
+            account
+                .state_mut()
+                .put_requested_rebalance(token, 183.into())
+                .expect("request");
+            account
+                .state_mut()
+                .put_requested_rebalance_fee_state(
+                    token,
+                    RebalanceRequestFeeState {
+                        request_id: "hub-share".into(),
+                        fee_token_id: token,
+                        fee_paid_upfront: 1.into(),
+                        requested_amount: 183.into(),
+                        policy_version: 1,
+                        requested_at: 1,
+                        requested_by_left: left_requester,
+                        refund: None,
+                    },
+                )
+                .expect("fee state");
+            let JurisdictionEvent::AccountSettled(mut event) = settled(0, 1) else {
+                unreachable!()
+            };
+            event.collateral = prior.collateral() + collateral_growth;
+            event.ondelta = prior.ondelta() + left_growth;
+            apply_finalized_events(
+                &mut account,
+                &[JurisdictionEvent::AccountSettled(event)],
+                44,
+            )
+            .expect("finality");
+            assert_eq!(
+                account.state().requested_rebalance(token),
+                Some(&BigInt::from(remaining))
+            );
+        }
     }
 }

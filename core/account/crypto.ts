@@ -8,7 +8,7 @@ import { RecencyMemo } from '../support/collections/recency-memo';
 import * as secp256k1 from '@noble/secp256k1';
 import { countOpWithSite, OP_COUNTERS_ENABLED } from '../support/performance/op-counters';
 import { getPerfMs } from '../support/time';
-import { isBrowserRuntime } from '../support/platform-crypto';
+import { runtimeIsBrowser } from '../support/process/runtime-process';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { concatBytes } from '@noble/hashes/utils.js';
@@ -48,19 +48,19 @@ type SignerKeyStore = {
   mnemonic?: string;
 };
 
-let nativeSecp256k1: NativeSecp256k1 | null | undefined;
+let nativeSecp256k1: NativeSecp256k1 | undefined;
+// Node ESM has no global require. Resolve dependencies from the server host's
+// installation directory in both ESM and CommonJS. Browser windows and workers
+// never enter the host loader; an incomplete server installation fails loudly.
+const serverRequire = runtimeIsBrowser
+  ? undefined
+  : process.getBuiltinModule('module').createRequire(process.getBuiltinModule('path').resolve('package.json'));
 
 const getNativeSecp256k1 = (): NativeSecp256k1 | null => {
+  if (runtimeIsBrowser) return null;
   if (nativeSecp256k1 !== undefined) return nativeSecp256k1;
-  nativeSecp256k1 = null;
-  if (isBrowserRuntime()) return nativeSecp256k1;
-  try {
-    if (typeof require !== 'undefined') {
-      nativeSecp256k1 = require('secp256k1') as NativeSecp256k1;
-    }
-  } catch {
-    nativeSecp256k1 = null;
-  }
+  if (!serverRequire) throw new Error('NATIVE_SECP256K1_REQUIRE_UNAVAILABLE');
+  nativeSecp256k1 = serverRequire('secp256k1') as NativeSecp256k1;
   return nativeSecp256k1;
 };
 
@@ -68,25 +68,15 @@ const getNativeSecp256k1 = (): NativeSecp256k1 | null => {
 // Always install a sync HMAC implementation (Node/Bun native path, browser portable path).
 const installHmacSync = () => {
   if (secp256k1.utils.hmacSha256Sync) return;
-  const isBrowser = isBrowserRuntime();
-  const isNodeLike =
-    !isBrowser &&
-    (typeof (globalThis as RuntimeGlobal).Bun !== 'undefined' ||
-      (typeof process !== 'undefined' && !!process.versions?.node));
-  try {
-    if (isNodeLike && typeof require !== 'undefined') {
-      const crypto = require('crypto');
-      if (crypto && typeof crypto.createHmac === 'function') {
-        secp256k1.utils.hmacSha256Sync = (key: Uint8Array, ...messages: Uint8Array[]) => {
-          const hmac = crypto.createHmac('sha256', Buffer.from(key));
-          for (const msg of messages) hmac.update(Buffer.from(msg));
-          return new Uint8Array(hmac.digest());
-        };
-        return;
-      }
-    }
-  } catch (e) {
-    console.warn('Failed to configure secp256k1 HMAC via crypto:', e);
+  if (!runtimeIsBrowser) {
+    if (!serverRequire) throw new Error('SERVER_HMAC_REQUIRE_UNAVAILABLE');
+    const crypto = serverRequire('crypto');
+    secp256k1.utils.hmacSha256Sync = (key: Uint8Array, ...messages: Uint8Array[]) => {
+      const hmac = crypto.createHmac('sha256', Buffer.from(key));
+      for (const msg of messages) hmac.update(Buffer.from(msg));
+      return new Uint8Array(hmac.digest());
+    };
+    return;
   }
   secp256k1.utils.hmacSha256Sync = (key: Uint8Array, ...messages: Uint8Array[]) => {
     return hmac(sha256, key, concatBytes(...messages));
@@ -623,18 +613,15 @@ export function recoverAddressFromDigestSignature(
 ): string | null {
   if (messageBytes.length !== 32 || signature.length !== 64) return null;
   if (recovery !== 0 && recovery !== 1) return null;
+  // An unavailable server backend is an installation failure, outside the
+  // malformed-signature reject catch. Only browsers select the portable curve.
+  const native = getNativeSecp256k1();
   try {
     const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
-    const native = getNativeSecp256k1();
     const publicKey = native
       ? native.ecdsaRecover(signature, recovery, messageBytes, false)
       : secp256k1.recoverPublicKey(messageBytes, signature, recovery, false);
-    countOpWithSite(
-      'ecdsa.recover',
-      0,
-      2,
-      OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0,
-    );
+    countOpWithSite('ecdsa.recover', 0, 2, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0);
     return `0x${keccak256(publicKey.slice(1)).slice(-40)}`.toLowerCase();
   } catch {
     return null;

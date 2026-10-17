@@ -396,6 +396,12 @@ describe('RPC J-watcher backlog drain', () => {
     await retainedPressurePoll;
     expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 127);
 
+    // A pressure-limited page below the liveness interval stays ephemeral,
+    // but the next authenticated read must advance beyond it, not loop forever.
+    rpcProxy.takeHeaderBlocks();
+    await pollWatcher();
+    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 191);
+
     await processJEvents(env);
 
     const replica = env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`);
@@ -404,6 +410,7 @@ describe('RPC J-watcher backlog drain', () => {
       .toBeGreaterThanOrEqual(Number(reserveEvent?.blockNumber ?? 0));
     expect(replica?.state.lastFinalizedJHeight).toBeGreaterThanOrEqual(Number(reserveEvent?.blockNumber ?? 0));
 
+    const beforeEmptyTail = await provider.send('evm_snapshot', []);
     await provider.send('anvil_mine', ['0x1']);
     const authenticatedEmptyTail = await provider.getBlockNumber();
     await processJEvents(env);
@@ -412,13 +419,32 @@ describe('RPC J-watcher backlog drain', () => {
     expect(Number(env.state.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(durableSemanticHeight);
     expect(adapter.getWatcherScanProgress?.().scannedThroughHeight).toBe(authenticatedEmptyTail);
     const currentReplica = env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`);
-    expect(currentReplica?.jHistory?.scannedThroughHeight).toBe(authenticatedEmptyTail);
+    expect(currentReplica?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
     expect(currentReplica?.state.lastFinalizedJHeight).toBe(durableSemanticHeight);
 
+    // Reorg only the uncommitted carried suffix on the real chain. The
+    // certified anchor is unchanged; no durable rewind may be fabricated.
+    const replicaKey = `${entityId}:${SIGNER_ID}`;
+    const abandonedTip = env.infrastructure?.carriedJScanTips?.get(replicaKey)?.data.tipBlockHash;
+    expect(abandonedTip).toBeDefined();
+    expect(await provider.send('evm_revert', [beforeEmptyTail])).toBe(true);
+    await provider.send('evm_increaseTime', [10]);
+    await provider.send('anvil_mine', ['0x2']);
+    await pollWatcher();
+    expect(env.infrastructure?.carriedJScanTips?.has(replicaKey)).toBe(false);
+    expect(env.runtimeMempool?.runtimeTxs ?? []).toEqual([]);
+    expect(env.state.eReplicas.get(replicaKey)?.state.lastFinalizedJHeight).toBe(durableSemanticHeight);
+    await processJEvents(env);
+    const replacementTip = env.infrastructure?.carriedJScanTips?.get(replicaKey);
+    expect(replacementTip?.data.tipBlockHash).not.toBe(abandonedTip);
+    expect(replacementTip?.data.scannedThroughHeight).toBe(authenticatedEmptyTail + 1);
+    expect(env.state.eReplicas.get(replicaKey)?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
+
     // A watched ERC20 receipt can be perfectly authentic yet irrelevant to
-    // every Entity in this Runtime. The WAL retains authenticated local scan
-    // evidence, while the committed Entity anchor and financial state remain
-    // at the last relevant semantic event.
+    // every Entity in this Runtime. It advances only transient authenticated
+    // scan progress (carried into the next frame that addresses the Entity);
+    // WAL state remains event-driven and a restart safely rescans the bounded
+    // empty suffix.
     const [watchedToken] = await adapter.getTokenRegistry();
     if (!watchedToken) throw new Error('J_WATCHER_BACKLOG_WATCHED_TOKEN_MISSING');
     const watchedErc20 = new ethers.Contract(
@@ -435,8 +461,8 @@ describe('RPC J-watcher backlog drain', () => {
     await processJEvents(env);
 
     const afterIrrelevantLog = env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`);
-    expect(afterIrrelevantLog?.jHistory?.scannedThroughHeight).toBe(irrelevantLogHeight);
-    expect(afterIrrelevantLog?.jHistory?.contiguousThroughHeight).toBe(irrelevantLogHeight);
+    expect(afterIrrelevantLog?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
+    expect(afterIrrelevantLog?.jHistory?.contiguousThroughHeight).toBe(durableSemanticHeight);
     expect(afterIrrelevantLog?.state.lastFinalizedJHeight).toBe(durableSemanticHeight);
     expect(adapter.getWatcherScanProgress?.().scannedThroughHeight).toBe(irrelevantLogHeight);
 
@@ -447,10 +473,11 @@ describe('RPC J-watcher backlog drain', () => {
 
     expect(Number(restored.state.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(durableSemanticHeight);
     expect(restored.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.jHistory?.scannedThroughHeight)
-      .toBe(irrelevantLogHeight);
+      .toBe(durableSemanticHeight);
 
-    // Restoring a real authenticated suffix must not download it again. The
-    // certified anchor and local frontier still need a live canonical audit.
+    // Only committed history survives recovery. Re-authenticate every missing
+    // carried header from the certified anchor; never restore an ephemeral tip.
+    expect(restored.infrastructure?.carriedJScanTips?.size ?? 0).toBe(0);
     await adapter.stopWatchingAndWait();
     restored.scenarioMode = true;
     adapter.startWatching(restored);
@@ -459,7 +486,10 @@ describe('RPC J-watcher backlog drain', () => {
     const restartHeaders = [...new Set(rpcProxy.takeHeaderBlocks())].sort((left, right) => left - right);
     expect(restartHeaders).toContain(durableSemanticHeight);
     expect(restartHeaders).toContain(irrelevantLogHeight);
-    expect(restartHeaders).not.toContain(authenticatedEmptyTail);
+    expect(restartHeaders.filter(height => height > durableSemanticHeight)).toEqual(
+      Array.from({ length: irrelevantLogHeight - durableSemanticHeight }, (_, i) => durableSemanticHeight + i + 1),
+    );
+    expect(restored.state.eReplicas.get(replicaKey)?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
     expect(readScanProgress().scannedThroughHeight).toBe(irrelevantLogHeight);
     await adapter.stopWatchingAndWait();
     adapter.startWatching(env);

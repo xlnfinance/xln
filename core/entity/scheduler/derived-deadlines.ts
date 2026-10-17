@@ -14,6 +14,7 @@ import { isSecretAckPendingPayment, type SecretAckPendingPayment } from '../../p
 import { HTLC_ENFORCEMENT_RESERVE_MS } from '../../account/consensus/dispute/deadline-policy';
 import { compareStableText } from '../../protocol/serialization';
 import { canProcessAccountTxForDisputeStatus } from '../../account/consensus/dispute/policy';
+import type { AccountReplica, AccountTx } from '../../types/account';
 
 type DerivedHtlcTimeout = ScheduledHookBase<'htlc_timeout', {
   accountId: string;
@@ -42,16 +43,23 @@ export const compareDeadlines = (
 ): number => left.triggerAt - right.triggerAt || compareStableText(left.id, right.id);
 
 /** A peer withholding ACK cannot consume the signed lock's enforcement reserve. */
-const secretAckTriggerAt = (state: EntityState, entry: SecretAckPendingPayment): number => {
-  const account = state.accounts.get(entry.inboundEntity);
-  // The dispute lifecycle owns frozen locks; do not re-arm their past reserve every frame.
-  if (!account || !canProcessAccountTxForDisputeStatus(account.status)) return entry.secretAckDeadlineAt;
+const secretAckTriggerAt = (account: AccountReplica, entry: SecretAckPendingPayment): number => {
   const lock = account.state.locks.get(entry.hashlock);
   if (!lock) return entry.secretAckDeadlineAt;
   const enforcementAt = lock.timelock - BigInt(HTLC_ENFORCEMENT_RESERVE_MS);
   const ackAt = BigInt(entry.secretAckDeadlineAt);
   const startedAt = BigInt(entry.secretAckStartedAt);
   return Number(enforcementAt < startedAt ? startedAt : enforcementAt < ackAt ? enforcementAt : ackAt);
+};
+
+const hasQueuedResolve = (account: AccountReplica, lockId: string): boolean => {
+  const resolvesLock = (tx: AccountTx): boolean => tx.type === 'htlc_resolve' && tx.data.lockId === lockId;
+  return account.mempool.some(resolvesLock) || Boolean(account.pendingFrame?.accountTxs.some(resolvesLock));
+};
+
+const actionableSecretAckAccount = (state: EntityState, entry: SecretAckPendingPayment): AccountReplica | undefined => {
+  const account = state.accounts.get(entry.inboundEntity);
+  return account && canProcessAccountTxForDisputeStatus(account.status) && !account.activeDispute ? account : undefined;
 };
 
 const htlcTimeoutAt = (timelock: bigint | number | undefined): number | null => {
@@ -74,6 +82,7 @@ export const collectDerivedDeadlines = (state: EntityState, now?: number): Deriv
   for (const [accountId, account] of state.accounts.entries()) {
     if (!canProcessAccountTxForDisputeStatus(account.status)) continue;
     for (const lock of account.state.locks.values()) {
+      if (hasQueuedResolve(account, lock.lockId)) continue;
       const triggerAt = htlcTimeoutAt(lock.timelock);
       if (triggerAt === null || (now !== undefined && triggerAt > now)) continue;
       due.push({
@@ -86,7 +95,9 @@ export const collectDerivedDeadlines = (state: EntityState, now?: number): Deriv
   }
   for (const entry of state.paybook.entries.values()) {
     if (!isSecretAckPendingPayment(entry)) continue;
-    const triggerAt = secretAckTriggerAt(state, entry);
+    const account = actionableSecretAckAccount(state, entry);
+    if (!account) continue;
+    const triggerAt = secretAckTriggerAt(account, entry);
     if (now !== undefined && triggerAt > now) continue;
     due.push({
       id: `htlc-secret-ack:${entry.hashlock}`,
@@ -120,13 +131,15 @@ export const earliestDerivedDeadline = (state: EntityState): number | null => {
   for (const account of state.accounts.values()) {
     if (!canProcessAccountTxForDisputeStatus(account.status)) continue;
     for (const lock of account.state.locks.values()) {
+      if (hasQueuedResolve(account, lock.lockId)) continue;
       const triggerAt = htlcTimeoutAt(lock.timelock);
       if (triggerAt !== null && triggerAt < earliest) earliest = triggerAt;
     }
   }
   for (const entry of state.paybook.entries.values()) {
     if (isSecretAckPendingPayment(entry)) {
-      earliest = Math.min(earliest, secretAckTriggerAt(state, entry));
+      const account = actionableSecretAckAccount(state, entry);
+      if (account) earliest = Math.min(earliest, secretAckTriggerAt(account, entry));
     }
   }
   for (const loan of state.lending?.loans.values() ?? []) {

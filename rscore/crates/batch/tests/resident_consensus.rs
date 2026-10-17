@@ -441,7 +441,7 @@ fn rebalance_pair(
             0.into(),
         )
         .expect("delta");
-        AccountReplica::new(
+        let replica = AccountReplica::new(
             owner,
             AccountState::new(
                 identity,
@@ -450,7 +450,34 @@ fn rebalance_pair(
             )
             .expect("state"),
         )
-        .expect("replica")
+        .expect("replica");
+        let hub_side = if pair.payee == left {
+            xln_rscore_engine::Side::Left
+        } else {
+            xln_rscore_engine::Side::Right
+        };
+        xln_rscore_engine::SequentialAccountEngine::apply_with_context(
+            &replica,
+            hub_side,
+            &AccountTx::RebalancePolicy {
+                token_id: 1,
+                policy_version: 1,
+                base_fee: 1.into(),
+                liquidity_fee_bps: 0.into(),
+                gas_fee: 0.into(),
+            },
+            &xln_rscore_engine::AccountExecutionContext::with_market(
+                TIMESTAMP - 1,
+                TIMESTAMP - 1,
+                100,
+                0,
+                100,
+                fixture::market(),
+            ),
+        )
+        .expect("hub policy transition")
+        .committed()
+        .expect("committed hub policy")
     };
     let payer_seed = AccountSeed {
         account_id: pair.payer_account,

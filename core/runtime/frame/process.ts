@@ -138,11 +138,12 @@ const buildRuntimeFrameInput = (
     explicitKeys.add(key);
     return true;
   });
-  return {
+  const runtimeInput: RuntimeInput = {
     runtimeTxs: [...mempool.runtimeTxs],
     entityInputs: [...mempool.entityInputs, ...dedupedAutomaticInputs],
     ...(mempool.jInputs?.length ? { jInputs: [...mempool.jInputs] } : {}),
   };
+  return runtimeInput;
 };
 
 const recordRuntimeFrameIngress = (

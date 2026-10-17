@@ -22,13 +22,9 @@ const pageLimit = (value: number | undefined): number => {
 };
 
 /**
- * Cursor pagination over a hub-scale map (hundreds to thousands of accounts)
- * used to resort the full key set from scratch on every single page — an
- * O(N log N) sort plus an O(N) cursor scan per page, so draining one full
- * listing at the default page size cost O(N^2 log N). sortedStringMapKeys
- * caches the ascending key order on the map itself (invalidated only when a
- * key is added/removed), and the ascending path uses a binary-search cursor
- * seek — turning a full drain from O(N^2 log N) into O(N log N) total.
+ * Sort the current key set, then seek the ascending cursor by binary search.
+ * ReadonlyMap does not guarantee immutable ownership: a same-size delete and
+ * insert must be visible on the next page rather than reuse stale cached keys.
  */
 const pageKeys = (
   map: ReadonlyMap<string, unknown>,

@@ -34,6 +34,14 @@ const requestState = (
 const account = (): AccountReplica => {
   const replica = makeAccount(entity('11'), entity('22'));
   replica.currentHeight = 4;
+  replica.state.rebalanceFeePolicies = PersistentAccountStateMap.fromEntries('rebalanceFeePolicies', [
+    [
+      1,
+      {
+        right: { policyVersion: 1, baseFee: 1n, liquidityFeeBps: 0n, gasFee: 0n, updatedAt: 1 },
+      },
+    ],
+  ]);
   replica.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [
     [
       1,

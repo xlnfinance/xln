@@ -1,5 +1,7 @@
 import { isLeftEntity } from '../../protocol/identity/entity-id';
-import { requireBoundaryInteger } from '../../protocol/boundary-validation';
+import { requireBoundaryInteger, requireExactBoundaryKeys } from '../../protocol/boundary-validation';
+import { LIMITS } from '../../config/constants';
+import { HASHABLE_SWAP_OFFER_FIELDS } from '../../types/hash-coverage/account-nested';
 import {
   FinancialDataCorruptionError,
   validateObject,
@@ -37,8 +39,20 @@ const LENDING_INTENTS = new Set([
 
 const validateSwapOffers = (value: unknown, context: string): void => {
   const offers = validateAccountStateCollection(value, context);
+  if (offers.size > LIMITS.MAX_ACCOUNT_SWAP_OFFERS) {
+    throw new FinancialDataCorruptionError(`${context} offer limit exceeded`);
+  }
   for (const [offerId, value] of offers) {
     const offer = validateObject(value, `${context}.${String(offerId)}`);
+    requireExactBoundaryKeys(
+      offer,
+      HASHABLE_SWAP_OFFER_FIELDS.filter(field => field !== 'timeInForce' && field !== 'crossJurisdiction'),
+      ['timeInForce', 'crossJurisdiction'],
+      `${context}.fields`,
+    );
+    if (validateString(offer['offerId'], `${context}.offerId`) !== offerId) {
+      throw new FinancialDataCorruptionError(`${context} key must equal signed offerId`);
+    }
     try {
       assertSwapNetAuthorization({
         giveAmount: offer['giveAmount'] as bigint,
@@ -51,6 +65,29 @@ const validateSwapOffers = (value: unknown, context: string): void => {
         cause: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+};
+
+const validateDisputeProofMetadata = (account: Record<string, unknown>, context: string): void => {
+  for (const prefix of ['current', 'counterparty']) {
+    const fields = ['DisputeHash', 'DisputeProofBodyHash', 'DisputeProofNonce', 'DisputeProofProposerIsLeft'];
+    const present = fields.filter(field => account[`${prefix}${field}`] !== undefined).length;
+    const label = prefix === 'current' ? 'LOCAL' : 'COUNTERPARTY';
+    if (present !== 0 && present !== fields.length) {
+      throw new FinancialDataCorruptionError(`${context}:${label}_DISPUTE_PROOF_PARTIAL`);
+    }
+    const hanko = account[`${prefix}DisputeProofHanko`];
+    if (hanko !== undefined && present === 0) {
+      throw new FinancialDataCorruptionError(`${context}:${label}_DISPUTE_HANKO_WITHOUT_PROOF`);
+    }
+    if (present === 0) continue;
+    validateString(account[`${prefix}DisputeHash`], `${context}.${prefix}DisputeHash`);
+    validateString(account[`${prefix}DisputeProofBodyHash`], `${context}.${prefix}DisputeProofBodyHash`);
+    requireBoundaryInteger(account[`${prefix}DisputeProofNonce`], `${context}.${prefix}DisputeProofNonce`, 1);
+    if (typeof account[`${prefix}DisputeProofProposerIsLeft`] !== 'boolean') {
+      throw new FinancialDataCorruptionError(`${context}.${prefix}DisputeProofProposerIsLeft must be boolean`);
+    }
+    if (hanko !== undefined) validateString(hanko, `${context}.${prefix}DisputeProofHanko`);
   }
 };
 
@@ -161,6 +198,7 @@ function assertAccountReplica(
   requireBoundaryInteger(account['currentHeight'], `${context}.currentHeight`);
   validatePendingAccountProposal(account, context);
   requireBoundaryInteger(account['rollbackCount'], `${context}.rollbackCount`);
+  validateDisputeProofMetadata(account, context);
   assertAccountJClaimAccumulatorState(
     state['leftPendingJClaims'] as AccountReplica['state']['leftPendingJClaims'],
   );

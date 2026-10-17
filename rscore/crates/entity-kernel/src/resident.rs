@@ -2232,6 +2232,14 @@ fn apply_scheduled_wake(
         .into_iter()
         .filter_map(|(account, view)| view.dispute.map(|view| (account_text(account), view)))
         .collect::<BTreeMap<_, _>>();
+    let due_secret_acks = due_secret_acks
+        .into_iter()
+        .filter(|(_, peer)| {
+            dispute_views
+                .get(peer)
+                .is_some_and(|view| view.status == "active" && view.active_dispute.is_none())
+        })
+        .collect::<Vec<_>>();
 
     // Secret-ack deadlines are derived from paybook entries (frame-local
     // writes included). A deadline whose lock is still active needs a

@@ -4,6 +4,7 @@ import {
 } from '../../../machine/local-history';
 import type { EntityReplica } from '../../../../entity/types';
 import type { RuntimeReplica } from '../../../../runtime/types';
+import { getJScanHistory } from '../../../../runtime/mempool/j-scan-carry';
 import type { JReplica } from '../../../../types/jurisdiction-runtime';
 import { isEntityReplicaRelevantToWatcher } from '..';
 
@@ -52,11 +53,12 @@ export const collectWatcherCanonicalAudit = (
   }
   const localFrontiers = relevantReplicaEntries.flatMap(
     ([replicaKey, replica]) => {
-      if (!replica.jHistory) return [];
-      const height = Number(replica.jHistory.scannedThroughHeight);
+      const history = getJScanHistory(state, replicaKey, replica);
+      if (!history) return [];
+      const height = Number(history.scannedThroughHeight);
       const hash = getValidatorJExpectedBlockHash(
         replica.state,
-        replica.jHistory,
+        history,
         height,
       );
       if (!hash) {

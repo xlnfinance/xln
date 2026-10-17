@@ -1,7 +1,9 @@
 import type { JPrefixAttestation } from '../../../types/jurisdiction-events';
-import type { EntityInput } from '../../../entity/types';
+import type { EntityInput, EntityReplica } from '../../../entity/types';
 import type { RuntimeReplica, RuntimeInput, RuntimeTx } from '../../../runtime/types';
+import { BLOCKCHAIN } from '../../../config/constants';
 import { enqueueRuntimeInput } from '../../../runtime/mempool/input-queue';
+import { carryJScanTip, dropCarriedJScanTips } from '../../../runtime/mempool/j-scan-carry';
 import { createStructuredLogger, shortId } from '../../../support/logger';
 import { getJEventJurisdictionRef } from '../../machine/event-observation';
 import { recordValidatorJHistory } from '../../machine/local-history';
@@ -25,12 +27,16 @@ import {
 
 const log = createStructuredLogger('jadapter.history-ingress');
 
+type ObserveJRangeTx = Extract<RuntimeTx, { type: 'observeJRange' }>;
+
 export type JHistoryRangeRuntimeInput = {
   input: RuntimeInput;
   /** Replicas whose authenticated local scan observation must become durable. */
   scannedReplicaKeys: string[];
   /** Subset that generated a J-range and therefore must reach Entity finality. */
   finalityReplicaKeys: string[];
+  /** Header-only pages below the checkpoint interval; never Runtime work on their own. */
+  carriedScanTips: Array<{ replicaKey: string; tx: ObserveJRangeTx }>;
 };
 
 export type JHistoryRangeReplicaKeys = Pick<
@@ -102,6 +108,47 @@ const combineRuntimeInputs = (inputs: RuntimeInput[]): RuntimeInput | null => {
   return combined;
 };
 
+const buildScanTipObservation = (
+  env: RuntimeReplica,
+  replicaKey: string,
+  replica: EntityReplica,
+  current: EntityReplica['jHistory'],
+  data: ObserveJRangeTx['data'],
+) => {
+  // Retain every carried header in the eventual WAL input. Authenticate
+  // overlapping hashes through the canonical recorder before deduplicating.
+  const carried = env.infrastructure?.carriedJScanTips?.get(replicaKey)?.data.headers ?? [];
+  const headers = [
+    ...carried.filter(
+      header => header.jHeight > replica.state.lastFinalizedJHeight && header.jHeight <= data.scannedThroughHeight,
+    ),
+    ...(data.headers ?? []),
+  ];
+  const completeData = { ...data, ...(headers.length > 0 ? { headers } : {}) };
+  const scannedHistory = recordValidatorJHistory(current, completeData, replica.state);
+  const addsHeader = (height: number): boolean =>
+    scannedHistory.blockHashes.get(height) !== current?.blockHashes.get(height);
+  const changed =
+    !current ||
+    current.scannedThroughHeight !== scannedHistory.scannedThroughHeight ||
+    current.contiguousThroughHeight !== scannedHistory.contiguousThroughHeight ||
+    current.tipBlockHash !== scannedHistory.tipBlockHash ||
+    addsHeader(data.scannedThroughHeight) ||
+    headers.some(header => addsHeader(header.jHeight));
+  const scanTipObservation: ObserveJRangeTx | null = changed
+    ? {
+        type: 'observeJRange',
+        data: {
+          ...completeData,
+          ...(headers.length > 0
+            ? { headers: [...new Map(headers.map(header => [header.jHeight, header])).values()] }
+            : {}),
+        },
+      }
+    : null;
+  return { scannedHistory, scanTipObservation };
+};
+
 export function buildJHistoryRangeRuntimeInput(
   env: RuntimeReplica,
   newlyObservedInputs: RuntimeInput[],
@@ -133,6 +180,7 @@ export function buildJHistoryRangeRuntimeInput(
   const entityInputs: EntityInput[] = [];
   const scannedReplicaKeys: string[] = [];
   const finalityReplicaKeys: string[] = [];
+  const carriedScanTips: JHistoryRangeRuntimeInput['carriedScanTips'] = [];
   for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     if (watcherReplica && !isEntityReplicaRelevantToWatcher(env, replica, watcherReplica)) continue;
     const entityId = String(replica.state.entityId || replica.entityId || '').toLowerCase();
@@ -149,6 +197,10 @@ export function buildJHistoryRangeRuntimeInput(
     const baseHeight = Number(replica.state.lastFinalizedJHeight || 0);
     const observations = observationsByReplica.get(key) || [];
     if (scannedThroughHeight <= baseHeight) continue;
+    // Measure from the last recorded scan, not Entity finality: an idle Entity
+    // never advances finality, so the latter would checkpoint every poll after 100.
+    const lastRecordedScan = Math.max(baseHeight, replica.jHistory?.contiguousThroughHeight ?? baseHeight);
+    const scanCheckpointDue = scannedThroughHeight - lastRecordedScan >= BLOCKCHAIN.JBLOCK_LIVENESS_INTERVAL;
     const jurisdictionRef = getJEventJurisdictionRef(replica.state.config.jurisdiction);
     if (watcherReplica && jurisdictionRef !== watcherJurisdictionRef) {
       throw new Error(
@@ -160,38 +212,28 @@ export function buildJHistoryRangeRuntimeInput(
     for (const observation of observations) {
       tentativeHistory = recordValidatorJHistory(tentativeHistory, observation.data, replica.state);
     }
-    const normalizedTipBlockHash = String(tipBlockHash).toLowerCase();
-    const scanTipData = {
+    const { scannedHistory, scanTipObservation } = buildScanTipObservation(env, replicaKey, replica, tentativeHistory, {
       entityId,
       signerId,
       jurisdictionRef,
       scannedThroughHeight,
-      tipBlockHash: normalizedTipBlockHash,
+      tipBlockHash: String(tipBlockHash).toLowerCase(),
       ...(headers.length > 0 ? { headers } : {}),
       blocks: [],
-    };
-    // RPC may finish after this signer already committed the same scan. Validate
-    // every header before omitting an exact retry: a conflicting hash must still
-    // reject, while older missing headers (including the implicit tip) remain new evidence.
-    const scannedHistory = recordValidatorJHistory(tentativeHistory, scanTipData, replica.state);
-    const addsHeader = (height: number): boolean =>
-      scannedHistory.blockHashes.get(height) !== tentativeHistory?.blockHashes.get(height);
-    const shouldRecordScanTip =
-      !tentativeHistory ||
-      tentativeHistory.scannedThroughHeight !== scannedHistory.scannedThroughHeight ||
-      tentativeHistory.contiguousThroughHeight !== scannedHistory.contiguousThroughHeight ||
-      tentativeHistory.tipBlockHash !== scannedHistory.tipBlockHash ||
-      addsHeader(scannedThroughHeight) ||
-      headers.some(header => addsHeader(header.jHeight));
-    const scanTipObservation: Extract<RuntimeTx, { type: 'observeJRange' }> | null = shouldRecordScanTip
-      ? { type: 'observeJRange', data: scanTipData }
-      : null;
+    });
     if (scanTipObservation) tentativeHistory = scannedHistory;
     const hasDuePrefixAdvance = hasDueLocalJPrefixAdvance(replica.state, tentativeHistory);
-    // Authenticated progress must reach the WAL before the next financial input.
-    // Throttling it by 100 blocks can age a new 50-block HTLC past a peer's head.
-    // Header observations update local evidence, never manufacture Entity frames.
-    if (observations.length === 0 && !scanTipObservation && !hasDuePrefixAdvance) continue;
+    const hasDueJWork = observations.length > 0 || hasDuePrefixAdvance;
+    if (!hasDueJWork && !scanTipObservation) continue;
+    if (!hasDueJWork && scanTipObservation && !scanCheckpointDue) {
+      // Header-only progress below the checkpoint interval is not Runtime work:
+      // one WAL frame per poll made an idle wallet grow per block per chain.
+      // It is carried and must still reach the WAL before the next financial
+      // input, or a new 50-block HTLC ages past a peer's head; the Runtime
+      // frame builder attaches it in front of that input (see j-scan-carry).
+      carriedScanTips.push({ replicaKey, tx: markLocalJAuthorityRuntimeTx(scanTipObservation) });
+      continue;
+    }
     if (scanTipObservation) runtimeTxs.push(markLocalJAuthorityRuntimeTx(scanTipObservation));
     scannedReplicaKeys.push(replicaKey);
     // A semantic J event must hold the watcher cursor until the Entity has
@@ -232,11 +274,12 @@ export function buildJHistoryRangeRuntimeInput(
   // An observed event can already carry every header while this validator has
   // signed the current round. Preserve its finality fence without adding a
   // duplicate scan transaction; callers merge this with that observed input.
-  if (runtimeTxs.length === 0 && entityInputs.length === 0 && finalityReplicaKeys.length === 0) return null;
+  if (runtimeTxs.length === 0 && entityInputs.length === 0 && finalityReplicaKeys.length === 0 && carriedScanTips.length === 0) return null;
   return {
     input: { timestamp: scannedThroughHeight, runtimeTxs, entityInputs },
     scannedReplicaKeys: scannedReplicaKeys.sort(),
     finalityReplicaKeys: finalityReplicaKeys.sort(),
+    carriedScanTips,
   };
 }
 
@@ -273,6 +316,9 @@ export function enqueueJHistoryRange(
     : built?.input ?? null;
   if (input) enqueueRuntimeInput(env, input);
   if (!built) return { scannedReplicaKeys: [], finalityReplicaKeys: [] };
+  // An enqueued page starts at or below the carried page and reaches further.
+  dropCarriedJScanTips(env, built.scannedReplicaKeys);
+  for (const { replicaKey, tx } of built.carriedScanTips) carryJScanTip(env, replicaKey, tx);
   return {
     scannedReplicaKeys: built.scannedReplicaKeys,
     finalityReplicaKeys: built.finalityReplicaKeys,

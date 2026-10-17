@@ -160,6 +160,28 @@ fn due_secret_ack_active_dispute_and_unknown_account_are_idempotent() {
 }
 
 #[test]
+fn frozen_secret_ack_without_a_lock_does_not_terminate_or_reprepare() {
+    for status in ["dispute_preparing", "disputed"] {
+        for workers in [1, 4] {
+            let (result, mut accounts, peers) = run_case(
+                workers,
+                Case {
+                    missing_lock: true,
+                    frozen_status: Some(status),
+                    ..base_case()
+                },
+            );
+            assert_eq!(account_statuses(&mut accounts, &peers), [status]);
+            assert!(result.entity_frame_events.is_empty());
+            assert_eq!(result.state.paybook.entries.len(), 1);
+            let entry = result.state.paybook.entries.iter().next().unwrap().1;
+            assert!(entry.secret_ack_pending);
+            assert_eq!(entry.secret_ack_deadline_at, Some(DUE - 10));
+        }
+    }
+}
+
+#[test]
 fn due_secret_ack_with_expired_lock_keeps_prepare_in_same_frame_w1_w4() {
     let mut oracle = None;
     for workers in [1, 4] {

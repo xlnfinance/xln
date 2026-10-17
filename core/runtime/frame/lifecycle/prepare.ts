@@ -14,6 +14,7 @@ import {
   applyEntityTxFrameCap,
   prioritizeJEventFrame,
 } from '../../loop/loop-work';
+import { attachCarriedJScanTips } from '../../mempool/j-scan-carry';
 import { LIMITS } from '../../../config/constants';
 import type { FrameExecutionState } from '../intake/execution-state';
 import {
@@ -76,14 +77,24 @@ export const prepareRuntimeFrameInput = async (
     timestamp,
   );
   applyJInputFrameCap(input, mempool, timestamp);
+  if (!attachCarriedJScanTips(env, input)) {
+    // Runtime commands precede Entity work. A full accepted command batch must
+    // drain first; never execute a payment against the stale J head, overflow
+    // the WAL limit, or move a later Entity input ahead of the blocked prefix.
+    mempool.entityInputs = [...input.entityInputs, ...mempool.entityInputs];
+    mempool.queuedAt ??= timestamp;
+    input.entityInputs = [];
+  }
   frame.inputForRequeue = input;
 
   if (ACCOUNT_CAUSAL_TRACE) {
     const ingress = summarizeRuntimeAccountCausality(input.entityInputs);
     if (causalTraceContainsWork(ingress)) profile.metrics.accountCausality = { ingress, egress: [] };
   }
+  profile.metrics.runtimeTxs = input.runtimeTxs.length;
   profile.metrics.entityInputs = input.entityInputs.length;
   profile.metrics.entityTxs = countEntityTxs(input);
+  state.inFlightEntityInputs = input.entityInputs.length;
   const kinds = countEntityInputTxKinds(input.entityInputs);
   profile.metrics.txKinds = kinds.txKinds;
   profile.metrics.senders = kinds.senders;

@@ -1,5 +1,6 @@
 import type { RuntimeReplica, RuntimeTx } from '../../../runtime/types';
 import { enqueueRuntimeInput } from '../../../runtime/mempool/input-queue';
+import { dropCarriedJScanTips } from '../../../runtime/mempool/j-scan-carry';
 import { getEntityCertifiedJAnchor } from '../../machine/local-history';
 import { getJEventJurisdictionRef } from '../../machine/event-observation';
 import { markLocalJAuthorityRuntimeTx } from '../../machine/registration-evidence';
@@ -34,7 +35,9 @@ const enqueueScopedRewind = (
       }
       continue;
     }
+    const carried = env.infrastructure?.carriedJScanTips?.get(replicaKey);
     if (!replica.jHistory) {
+      if (carried) continue;
       if (requestedKeys) {
         throw new Error(`J_HISTORY_REWIND_TARGET_HISTORY_MISSING:${replicaKey}`);
       }
@@ -42,6 +45,7 @@ const enqueueScopedRewind = (
     }
     const anchor = getEntityCertifiedJAnchor(replica.state);
     if (anchor && replica.jHistory.scannedThroughHeight <= anchor.height) {
+      if (carried && conflictingHeight > anchor.height) continue;
       if (requestedKeys) {
         throw new Error(`J_HISTORY_REWIND_TARGET_NOT_PRIVATE:${replicaKey}`);
       }
@@ -73,12 +77,17 @@ const enqueueScopedRewind = (
       throw new Error(`J_HISTORY_REWIND_TARGET_REPLICA_MISSING:${replicaKey}`);
     }
   }
-  if (runtimeTxs.length === 0) return [];
+  if (runtimeTxs.length === 0) {
+    dropCarriedJScanTips(env, foundKeys);
+    return [];
+  }
   enqueueRuntimeInput(env, {
     timestamp: conflictingHeight,
     runtimeTxs,
     entityInputs: [],
   });
+  // Validate targets and admit the rewind before discarding transient evidence.
+  dropCarriedJScanTips(env, foundKeys);
   return replicaKeys.sort();
 };
 

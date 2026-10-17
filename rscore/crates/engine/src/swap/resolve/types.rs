@@ -13,6 +13,8 @@ pub(crate) struct SwapResolveTx<'a> {
     pub fill_numerator: Option<BigInt>,
     pub fill_denominator: Option<BigInt>,
     pub cancel_remainder: bool,
+    pub resting_give_token_id: Option<u32>,
+    pub resting_want_token_id: Option<u32>,
     pub fee_token_id: Option<u32>,
     pub fee_amount: Option<BigInt>,
     pub execution_give_amount: Option<BigInt>,

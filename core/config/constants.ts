@@ -239,6 +239,14 @@ export const BLOCKCHAIN = {
    */
   J_WATCHER_MAX_BLOCKS_PER_POLL: 256,
 
+  /** Header-only authenticated scan progress commits its own Runtime frame at
+   * most once per this many blocks past the replica's recorded contiguous scan.
+   * Between checkpoints it rides the next Runtime frame with an Entity input
+   * for that replica (runtime/mempool/j-scan-carry.ts).
+   * Rust `JBLOCK_LIVENESS_INTERVAL` (rscore processor/live.rs) uses the same value.
+   */
+  JBLOCK_LIVENESS_INTERVAL: 100,
+
   /** Maximum gas price willing to pay (in gwei) */
   MAX_GAS_PRICE_GWEI: 300,
 } as const;

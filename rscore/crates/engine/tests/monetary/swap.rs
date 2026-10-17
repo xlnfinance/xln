@@ -32,6 +32,10 @@ fn market() -> AccountExecutionContext {
 }
 
 fn resting_swap() -> AccountReplica {
+    resting_swap_with_time_in_force(None)
+}
+
+fn resting_swap_with_time_in_force(time_in_force: Option<u8>) -> AccountReplica {
     let max_signed = (BigInt::from(1) << 511_usize) - 1_u8;
     let credit = (BigInt::from(1) << 256_usize) - 1_u8;
     let rows = vec![
@@ -76,7 +80,7 @@ fn resting_swap() -> AccountReplica {
             want_amount: 2.into(),
             max_fee: 1.into(),
             min_net_receive: 1.into(),
-            time_in_force: None,
+            time_in_force,
             price_ticks: None,
             cross_jurisdiction: None,
         },
@@ -163,4 +167,78 @@ fn swap_resolve_rejects_unrepresentable_net_want_without_partial_give_or_hold_mu
         &BigInt::from(2)
     );
     assert_eq!(base.state().swap_offer_count(), 1);
+}
+
+#[test]
+fn swap_resolve_preserves_the_makers_immediate_execution_terms() {
+    for (tif, cancel, accepted) in [
+        (0, false, true),
+        (1, false, false),
+        (1, true, true),
+        (2, true, false),
+    ] {
+        let base = resting_swap_with_time_in_force(Some(tif));
+        let mut tx = resolve(0);
+        if let AccountTx::SwapResolve {
+            fill_ratio,
+            fill_numerator,
+            fill_denominator,
+            cancel_remainder,
+            execution_give_amount,
+            execution_want_amount,
+            ..
+        } = &mut tx
+        {
+            *fill_ratio = 32_768;
+            *fill_numerator = Some(1.into());
+            *fill_denominator = Some(2.into());
+            *cancel_remainder = cancel;
+            *execution_give_amount = Some(1.into());
+            *execution_want_amount = Some(1.into());
+        }
+        let before = base.state().deltas_root();
+        let result =
+            SequentialAccountEngine::apply_with_context(&base, Side::Right, &tx, &market())
+                .expect("typed time-in-force disposition");
+        assert_eq!(
+            result.verdict() == &AccountVerdict::Applied,
+            accepted,
+            "tif={tif} cancel={cancel} verdict={:?}",
+            result.verdict()
+        );
+        if !accepted {
+            assert!(result.candidate().is_none());
+            assert!(result.outputs().is_empty());
+            assert_eq!(base.state().deltas_root(), before);
+        }
+    }
+}
+
+#[test]
+fn swap_resolve_rejects_mismatched_resting_token_ids_before_mutation() {
+    let base = resting_swap();
+    for mismatch_give in [true, false] {
+        let mut tx = resolve(1);
+        if let AccountTx::SwapResolve {
+            resting_give_token_id,
+            resting_want_token_id,
+            ..
+        } = &mut tx
+        {
+            if mismatch_give {
+                *resting_give_token_id = Some(2);
+            } else {
+                *resting_want_token_id = Some(1);
+            }
+        }
+        let result =
+            SequentialAccountEngine::apply_with_context(&base, Side::Right, &tx, &market())
+                .expect("typed resting terms disposition");
+        let AccountVerdict::Rejected(reason) = result.verdict() else {
+            panic!("token mismatch accepted");
+        };
+        assert_eq!(reason.message(), "SWAP_RESOLVE_RESTING_TERMS_MISMATCH");
+        assert!(result.candidate().is_none());
+        assert!(result.outputs().is_empty());
+    }
 }

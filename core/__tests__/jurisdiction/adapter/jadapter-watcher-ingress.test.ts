@@ -35,6 +35,7 @@ import {
   stageSeenLogs,
   updateWatcherJurisdictionCursor,
 } from '../../../jurisdiction/adapter/watcher';
+import { collectWatcherCanonicalAudit, collectTargetedWatcherRewinds } from '../../../jurisdiction/adapter/watcher/observe/watcher-reconciliation';
 import { nextWatcherPollWindow } from '../../../jurisdiction/adapter/watcher/observe/watcher-poll-policy';
 import {
   enqueueRuntimeInput,
@@ -56,7 +57,9 @@ import { recordValidatorJHistory } from '../../../jurisdiction/machine/local-his
 import { createEmptyEnv } from '../../../runtime';
 import { applyRuntimeTx } from '../../../runtime/tx/tx-handlers';
 import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
-import type { RuntimeReplica, RuntimeTx } from '../../../runtime/types';
+import type { RuntimeInput, RuntimeReplica, RuntimeTx } from '../../../runtime/types';
+import { createCheckpointBarrierRuntimeTx } from '../../../runtime/checkpoint/barrier';
+import { attachCarriedJScanTips } from '../../../runtime/mempool/j-scan-carry';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { emptyEntityAccountMap } from '../../helpers/entity-account-map';
 
@@ -1026,7 +1029,7 @@ describe('JAdapter watcher ingress', () => {
     expect(resolveCommittedWatcherCursor(env, pending, 100, 0)).toBe(100);
   });
 
-  test('idle Entity records authenticated progress without creating financial frames', () => {
+  test('idle Entity carries empty scan progress and checkpoints it once per interval, not every poll', () => {
     const env = createEmptyEnv('idle-scan-checkpoint-interval');
     const entityId = `0x${'7b'.repeat(32)}`;
     const signerId = deriveSignerAddressSync('idle-scan-checkpoint-interval', '1').toLowerCase();
@@ -1051,9 +1054,13 @@ describe('JAdapter watcher ingress', () => {
         undefined,
         Array.from({ length: height - 100 }, (_, i) => ({ jHeight: i + 101, jBlockHash: blockHash(i + 101) })),
       );
-      expect(result.scannedReplicaKeys).toEqual([`${entityId}:${signerId}`]);
-      expect(env.runtimeMempool?.runtimeTxs.at(-1)?.type).toBe('observeJRange');
+      expect(result.scannedReplicaKeys).toEqual([]);
+      expect(env.runtimeMempool?.runtimeTxs ?? []).toEqual([]);
       expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
+      expect(env.infrastructure?.wakeRequested).not.toBe(true);
+      // Only the newest page is carried; it covers every older one.
+      const carried = [...(env.infrastructure?.carriedJScanTips?.values() ?? [])];
+      expect(carried.map(tx => tx.data.scannedThroughHeight)).toEqual([height]);
     }
     const due = enqueueJHistoryRange(
       env,
@@ -1065,9 +1072,11 @@ describe('JAdapter watcher ingress', () => {
     );
     expect(due.scannedReplicaKeys).toEqual([`${entityId}:${signerId}`]);
     expect(due.finalityReplicaKeys).toEqual([]);
+    expect(env.runtimeMempool?.runtimeTxs.map(tx => tx.type)).toEqual(['observeJRange']);
+    expect(env.infrastructure?.carriedJScanTips?.size ?? 0).toBe(0);
 
     // A sparse receipt ahead of the authenticated prefix must not suppress
-    // catch-up pages. Every authenticated page must remain recordable.
+    // catch-up pages. Only contiguous recorded progress resets the interval.
     replica.jHistory = {
       ...replica.jHistory,
       scannedThroughHeight: 1_000,
@@ -1091,7 +1100,12 @@ describe('JAdapter watcher ingress', () => {
       const key = `${id}:${signer}`;
       env.state.eReplicas.set(key, replica);
       const commit = async () => {
-        for (const tx of env.runtimeMempool!.runtimeTxs) await applyRuntimeTx(env, tx);
+        const input: RuntimeInput = {
+          runtimeTxs: [...env.runtimeMempool!.runtimeTxs],
+          entityInputs: [{ entityId: id, signerId: signer, entityTxs: [] }],
+        };
+        attachCarriedJScanTips(env, input);
+        for (const tx of input.runtimeTxs) await applyRuntimeTx(env, tx);
         env.runtimeMempool!.runtimeTxs = [];
       };
       enqueueJHistoryRange(env, [], 10, hash(10), undefined,
@@ -1113,7 +1127,8 @@ describe('JAdapter watcher ingress', () => {
 
     test('older implicit tip and gap headers remain new evidence until committed', async () => {
       const { env, key, commit } = await setup();
-      expect(enqueueJHistoryRange(env, [], 5, hash(5)).scannedReplicaKeys).toEqual([key]);
+      expect(enqueueJHistoryRange(env, [], 5, hash(5)).scannedReplicaKeys).toEqual([]);
+      expect(env.infrastructure?.carriedJScanTips?.has(key)).toBe(true);
       await commit();
       const history = env.state.eReplicas.get(key)!.jHistory!;
       expect(history.scannedThroughHeight).toBe(10);
@@ -1122,7 +1137,8 @@ describe('JAdapter watcher ingress', () => {
       expect(enqueueJHistoryRange(env, [], 5, hash(5)).scannedReplicaKeys).toEqual([]);
       expect(env.runtimeMempool!.runtimeTxs).toEqual([]);
       expect(enqueueJHistoryRange(env, [], 5, hash(5), undefined,
-        [{ jHeight: 3, jBlockHash: hash(3) }]).scannedReplicaKeys).toEqual([key]);
+        [{ jHeight: 3, jBlockHash: hash(3) }]).scannedReplicaKeys).toEqual([]);
+      expect(env.infrastructure?.carriedJScanTips?.has(key)).toBe(true);
       await commit();
       expect(env.state.eReplicas.get(key)!.jHistory!.blockHashes.get(3)).toBe(hash(3));
     });
@@ -1137,7 +1153,7 @@ describe('JAdapter watcher ingress', () => {
     });
   });
 
-  test('authenticated empty watcher progress below liveness records evidence without Entity work', () => {
+  test('authenticated empty watcher progress below liveness is carried, not Runtime work', () => {
     const seed = 'jadapter-empty-page-no-runtime-frame';
     const env = createEmptyEnv(seed);
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
@@ -1160,11 +1176,122 @@ describe('JAdapter watcher ingress', () => {
       })),
     );
 
-    expect(range).toEqual({ scannedReplicaKeys: [`${entityId}:${signerId}`], finalityReplicaKeys: [] });
-    expect(env.runtimeMempool?.runtimeTxs).toHaveLength(1);
-    expect(env.runtimeMempool?.runtimeTxs[0]?.type).toBe('observeJRange');
+    expect(range).toEqual({ scannedReplicaKeys: [], finalityReplicaKeys: [] });
+    expect(env.runtimeMempool?.runtimeTxs ?? []).toEqual([]);
     expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
-    expect(env.infrastructure?.wakeRequested).toBe(true);
+    expect(env.infrastructure?.wakeRequested).not.toBe(true);
+    expect([...(env.infrastructure?.carriedJScanTips?.keys() ?? [])]).toEqual([`${entityId}:${signerId}`]);
+  });
+
+  // Counterexample for 924bd1c97: an idle wallet must not commit one frame per
+  // poll, yet a payment after 90 idle blocks must not price its 50-block lock
+  // from a scan 90 blocks old. The carried page rides the payment's frame first.
+  test('carried scan page rides only a frame addressing its replica, never wakes or joins a barrier, and dies on rewind', async () => {
+    const seed = 'jadapter-carried-scan-piggyback';
+    const env = createEmptyEnv(seed);
+    const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const entityId = `0x${'7d'.repeat(32)}`;
+    const replicaKey = `${entityId}:${signerId}`;
+    const blockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
+    const replica = makeReplica(entityId, signerId, true);
+    replica.state.config.jurisdiction = makeJurisdiction('Carried page', 31337, `0x${'7e'.repeat(20)}`);
+    env.state.eReplicas.set(replicaKey, replica);
+    const carryThrough = (height: number): void => {
+      enqueueJHistoryRange(env, [], height, blockHash(height), undefined,
+        Array.from({ length: height }, (_, i) => ({ jHeight: i + 1, jBlockHash: blockHash(i + 1) })));
+    };
+    carryThrough(90);
+
+    const empty: RuntimeInput = { runtimeTxs: [], entityInputs: [] };
+    attachCarriedJScanTips(env, empty);
+    expect(empty.runtimeTxs).toEqual([]);
+    const barrier: RuntimeInput = { runtimeTxs: [createCheckpointBarrierRuntimeTx()], entityInputs: [] };
+    attachCarriedJScanTips(env, barrier);
+    expect(barrier.runtimeTxs.map(tx => tx.type)).toEqual(['checkpointBarrier']);
+
+    // A sibling's frame does not advance this replica's local scan.
+    const sibling: RuntimeInput = { runtimeTxs: [], entityInputs: [{ entityId: `0x${'7f'.repeat(32)}`, signerId, entityTxs: [] }] };
+    attachCarriedJScanTips(env, sibling);
+    expect(sibling.runtimeTxs).toEqual([]);
+
+    const work: RuntimeInput = {
+      runtimeTxs: [],
+      entityInputs: [{ entityId: entityId.toUpperCase().replace('0X', '0x'), signerId, entityTxs: [] }],
+    };
+    attachCarriedJScanTips(env, work);
+    expect(work.runtimeTxs.map(tx => tx.type)).toEqual(['observeJRange']);
+    expect(env.infrastructure?.carriedJScanTips?.size).toBe(0);
+    // The attached object keeps its local J authority mark.
+    for (const tx of work.runtimeTxs) await applyRuntimeTx(env, tx);
+    expect(env.state.eReplicas.get(replicaKey)?.jHistory?.contiguousThroughHeight).toBe(90);
+
+    carryThrough(95);
+    expect(env.infrastructure?.carriedJScanTips?.size).toBe(1);
+    enqueueJHistoryRewindForReplicaKeys(env, 95, blockHash(95), [replicaKey]);
+    expect(env.infrastructure?.carriedJScanTips?.size).toBe(0);
+  });
+
+  test('pressure-sized carried pages advance the watcher and join one contiguous durable observation', async () => {
+    const seed = 'jadapter-carried-pressure-pages';
+    const env = createEmptyEnv(seed);
+    const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const entityId = `0x${'7a'.repeat(32)}`;
+    const replicaKey = `${entityId}:${signerId}`;
+    const replica = makeReplica(entityId, signerId, true);
+    replica.state.config.jurisdiction = makeJurisdiction('Pressure pages', 31337, `0x${'7e'.repeat(20)}`);
+    env.state.eReplicas.set(replicaKey, replica);
+    const blockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
+    const readPage = (from: number, through: number) => enqueueJHistoryRange(
+      env, [], through, blockHash(through), undefined,
+      Array.from({ length: through - from + 1 }, (_, i) => ({
+        jHeight: from + i, jBlockHash: blockHash(from + i),
+      })),
+    );
+    expect(readPage(1, 64).scannedReplicaKeys).toEqual([]);
+    expect(replica.jHistory).toBeUndefined();
+    expect(env.runtimeMempool?.runtimeTxs ?? []).toEqual([]);
+    expect(getMinimumScannedSignerJHeight(env)).toBe(64);
+    expect(readPage(65, 128).scannedReplicaKeys).toEqual([replicaKey]);
+    const txs = env.runtimeMempool?.runtimeTxs ?? [];
+    expect(txs.map(tx => tx.type)).toEqual(['observeJRange']);
+    for (const tx of txs) await applyRuntimeTx(env, tx);
+    expect(env.state.eReplicas.get(replicaKey)?.jHistory?.contiguousThroughHeight).toBe(128);
+    expect(env.infrastructure?.carriedJScanTips?.size).toBe(0);
+  });
+
+  test('carried-only frontier is audited and discarded on reorg without fabricating durable history', () => {
+    const seed = 'jadapter-carried-reorg';
+    const env = createEmptyEnv(seed);
+    const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const entityId = `0x${'79'.repeat(32)}`;
+    const key = `${entityId}:${signerId}`;
+    const replica = makeReplica(entityId, signerId, true);
+    const jurisdiction = makeJurisdiction('Carried reorg', 31337, `0x${'7e'.repeat(20)}`);
+    replica.state.config.jurisdiction = jurisdiction;
+    const watcher = makeJReplica(jurisdiction.name, 0n, jurisdiction.depositoryAddress!, jurisdiction.chainId, jurisdiction.entityProviderAddress);
+    env.state.jReplicas.set(jurisdiction.name, watcher);
+    env.state.eReplicas.set(key, replica);
+    const blockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
+    const headers = Array.from({ length: 64 }, (_, i) => ({ jHeight: i + 1, jBlockHash: blockHash(i + 1) }));
+    enqueueJHistoryRange(env, [], 64, blockHash(64), undefined, headers);
+    enqueueJHistoryRange(env, [], 64, blockHash(64), undefined, headers);
+    expect(env.infrastructure?.carriedJScanTips?.get(key)?.data.headers).toHaveLength(64);
+    expect(replica.jHistory).toBeUndefined();
+    const audit = collectWatcherCanonicalAudit(env, watcher, 64);
+    expect(audit.auditHeights).toEqual([64]);
+    expect(audit.localFrontiers.map(frontier => [frontier.replicaKey, frontier.height, frontier.hash]))
+      .toEqual([[key, 64, blockHash(64)]]);
+    const replacement = `0x${'fe'.repeat(32)}`;
+    const rewinds = collectTargetedWatcherRewinds(audit, new Map([[64, replacement]]), 31337);
+    expect(rewinds.size).toBe(1);
+    for (const rewind of rewinds.values()) {
+      expect(enqueueJHistoryRewindForReplicaKeys(env, rewind.height, rewind.canonicalHash, rewind.replicaKeys)).toEqual([]);
+    }
+    expect(env.infrastructure?.carriedJScanTips?.size).toBe(0);
+    expect(env.runtimeMempool?.runtimeTxs ?? []).toEqual([]);
+    expect(getMinimumScannedSignerJHeight(env)).toBe(0);
+    expect(replica.jHistory).toBeUndefined();
+    expect(replica.state.lastFinalizedJHeight).toBe(0);
   });
 
   test('watcher does not enqueue the next authenticated page before the prior local scan is durable', () => {

@@ -2,7 +2,7 @@
  * Request Collateral Handler
  *
  * User requests hub to deposit collateral (R→C).
- * This is the V1 rebalance mechanism — no quotes, no custody, no bilateral negotiation.
+ * The opposite side's committed fee policy authorizes each signed request.
  *
  * Flow:
  * 1. Post-frame hook detects: outPeerCredit >= r2cRequestSoftLimit
@@ -14,7 +14,6 @@
  * Fee is prepaid by requester in the same bilateral frame, so hub never
  * fronts rebalance costs.
  *
- * Reference: 2019src.txt line 2976 (they_requested_deposit)
  */
 
 import type { AccountReplica, AccountTx } from '../../../../types/account';
@@ -23,13 +22,17 @@ import { commitDeltaDraft, createDeltaDraft, getOffdeltaRepresentationError } fr
 import { isLeftEntity } from '../../../../protocol/identity/entity-id';
 import { deriveDelta } from '../../../utils';
 import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
-import { getDefaultRebalanceBaseFeeForToken } from '../../../config/defaults';
 import type { ApplyAccountTxResult } from '../../apply-types';
 import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 
 type RequestCollateralTx = Extract<AccountTx, { type: 'request_collateral' }>;
 
-const validateCollateralRequest = (account: AccountReplica, data: RequestCollateralTx['data']): string | undefined => {
+// The requester is the signed frame side; only the other side's committed
+// policy authorizes the hub deposit. A self-selected cheap policy/version
+// must not debit a fee and create a request the hub never agreed to serve.
+const validateCollateralRequest = (
+  account: AccountReplica, data: RequestCollateralTx['data'], requesterIsLeft: boolean,
+): string | undefined => {
   if (data.amount <= 0n) return 'request_collateral: amount must be > 0';
   if (data.feeAmount < 0n) return 'request_collateral: feeAmount must be >= 0';
   if (!Number.isFinite(data.policyVersion) || data.policyVersion < 1) {
@@ -37,6 +40,15 @@ const validateCollateralRequest = (account: AccountReplica, data: RequestCollate
   }
   if (!account.state.deltas.has(data.tokenId)) {
     return `request_collateral: no delta for token ${data.tokenId}`;
+  }
+  const policy = account.state.rebalanceFeePolicies?.get(data.tokenId)?.[requesterIsLeft ? 'right' : 'left'];
+  if (!policy) return `request_collateral: hub has no committed fee policy for token ${data.tokenId}`;
+  if (data.policyVersion !== policy.policyVersion) {
+    return `request_collateral: policyVersion ${data.policyVersion} does not match hub policy v${policy.policyVersion}`;
+  }
+  const requiredFee = rebalanceFeeFor(policy, data.amount);
+  if (data.feeAmount < requiredFee) {
+    return `request_collateral: feeAmount ${data.feeAmount} below hub policy fee ${requiredFee}`;
   }
   return undefined;
 };
@@ -65,12 +77,12 @@ const storeCollateralRequest = (
 export function handleRequestCollateral(
   account: AccountDraftReplica,
   accountTx: RequestCollateralTx,
-  byLeft?: boolean,
-  currentTimestamp = 0,
+  byLeft: boolean,
+  currentTimestamp: number,
 ): ApplyAccountTxResult {
   const { tokenId, amount, feeTokenId, feeAmount } = accountTx.data;
 
-  const validationError = validateCollateralRequest(account, accountTx.data);
+  const validationError = validateCollateralRequest(account, accountTx.data, byLeft);
   if (validationError) return accountTxValidationRejected(validationError, []);
 
   const existingRequest = account.state.requestedRebalance.get(tokenId) ?? 0n;
@@ -83,7 +95,7 @@ export function handleRequestCollateral(
   // Deterministic request amount comes from frame payload.
   // Do not recompute from live outPeerCredit at commit time, otherwise the same tx
   // can produce different request sizes between propose/commit during races.
-  const requesterIsLeft = !!byLeft;
+  const requesterIsLeft = byLeft;
   // Validation established amount > 0, and this handler never clamps the
   // signed payload. Therefore the exact prepaid fee is already feeAmount.
   const effectiveFeeTarget = feeAmount;
@@ -159,10 +171,13 @@ export function handleRequestCollateral(
  */
 export interface RebalanceFeePolicy {
   policyVersion: number;
-  baseFee?: bigint;
+  baseFee: bigint;
   liquidityFeeBps: bigint;
   gasFee: bigint;
 }
+
+export const rebalanceFeeFor = (policy: RebalanceFeePolicy, amount: bigint): bigint =>
+  policy.baseFee + policy.gasFee + (amount * policy.liquidityFeeBps) / 10_000n;
 
 export function resolveAutoRebalanceFeePolicy(
   account: AccountReplica,
@@ -242,9 +257,7 @@ export function checkAutoRebalance(account: AccountReplica, ourEntityId: string,
     }
 
     if (rebalanceTrigger >= policy.r2cRequestSoftLimit) {
-      const liquidityFee = (outPeerCredit * feePolicy.liquidityFeeBps) / 10000n;
-      const baseFee = feePolicy.baseFee ?? getDefaultRebalanceBaseFeeForToken(tokenId);
-      const feeAmount = baseFee + feePolicy.gasFee + liquidityFee;
+      const feeAmount = rebalanceFeeFor(feePolicy, outPeerCredit);
 
       // Respect user policy ceiling for automated requests.
       if (feeAmount > policy.maxAcceptableFee) {

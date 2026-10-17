@@ -1,5 +1,6 @@
 import type { EntityReplica } from '../../../../entity/types';
 import type { RuntimeReplica } from '../../../../runtime/types';
+import { getJScanHistory } from '../../../../runtime/mempool/j-scan-carry';
 import type { JReplica } from '../../../../types/jurisdiction-runtime';
 import { getValidatorJContiguousThroughHeight } from '../../../machine/local-history';
 
@@ -154,12 +155,13 @@ export const getMinimumScannedSignerJHeight = (
   watcher?: JReplica,
 ): number | null => {
   let minimum: number | null = null;
-  for (const replica of env.state.eReplicas?.values() || []) {
+  for (const [replicaKey, replica] of env.state.eReplicas) {
     if (!isCurrentBoardWatcherReplica(replica)) continue;
     if (watcher && !isEntityReplicaRelevantToWatcher(env, replica, watcher)) continue;
+    const history = getJScanHistory(env, replicaKey, replica);
     const height = Number(
-      replica.jHistory
-        ? getValidatorJContiguousThroughHeight(replica.state, replica.jHistory)
+      history
+        ? getValidatorJContiguousThroughHeight(replica.state, history)
         : replica.state?.lastFinalizedJHeight ?? 0,
     );
     if (!Number.isSafeInteger(height) || height < 0) {

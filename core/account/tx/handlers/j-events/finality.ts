@@ -30,6 +30,27 @@ const assertAccountSettledEvent = (
   return nonce;
 };
 
+// Only growth of the hub's share serves its prepaid deposit request. The
+// requester's own r2c raises total collateral too, but must not consume the
+// hub's obligation or clear its pending submission.
+const creditServedRebalance = (
+  account: AccountDraftReplica, tokenId: number, collateralDiff: bigint, ondeltaDiff: bigint,
+): void => {
+  const requested = account.state.requestedRebalance.get(tokenId);
+  if (requested === undefined) return;
+  const feeState = account.state.requestedRebalanceFeeState.get(tokenId);
+  if (!feeState) throw new Error(`REBALANCE_REQUEST_FEE_STATE_MISSING:token=${tokenId}`);
+  const served = feeState.requestedByLeft ? collateralDiff - ondeltaDiff : ondeltaDiff;
+  if (served <= 0n) return;
+  const remaining = requested > served ? requested - served : 0n;
+  if (remaining > 0n) account.state.requestedRebalance.put(tokenId, remaining);
+  else {
+    account.state.requestedRebalance.del(tokenId);
+    account.state.requestedRebalanceFeeState.del(tokenId);
+  }
+  account.shadow.rebalance.submittedAtByToken.del(tokenId);
+};
+
 const applyAccountSettledEvent = (account: AccountDraftReplica, event: JurisdictionEvent): void => {
   if (event.type !== 'AccountSettled') return;
   const { tokenId, collateral, ondelta } = event.data;
@@ -41,20 +62,11 @@ const applyAccountSettledEvent = (account: AccountDraftReplica, event: Jurisdict
   if (!account.state.deltas.has(tokenIdNum)) return;
   const delta = createSettlementDeltaValue(account, tokenIdNum);
   const previousCollateral = delta.collateral;
+  const previousOndelta = delta.ondelta;
   delta.collateral = BigInt(collateral);
   delta.ondelta = BigInt(ondelta);
   commitDeltaDraft(account.state, delta);
-  const requested = account.state.requestedRebalance?.get(tokenIdNum) ?? 0n;
-  const increase = delta.collateral > previousCollateral ? delta.collateral - previousCollateral : 0n;
-  if (requested > 0n && increase > 0n) {
-    const remaining = requested > increase ? requested - increase : 0n;
-    if (remaining > 0n) account.state.requestedRebalance.put(tokenIdNum, remaining);
-    else {
-      account.state.requestedRebalance.del(tokenIdNum);
-      account.state.requestedRebalanceFeeState.del(tokenIdNum);
-    }
-    account.shadow.rebalance.submittedAtByToken.del(tokenIdNum);
-  }
+  creditServedRebalance(account, tokenIdNum, delta.collateral - previousCollateral, delta.ondelta - previousOndelta);
 };
 
 const activatePostSettlementProof = (

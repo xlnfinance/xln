@@ -1662,11 +1662,7 @@ fn plan_hold_add(
         let delta = planned_delta(account, planned, diff.token_id, "add")?;
         // TS validates both capacities before either hold representation.
         for (side, amount) in &holds {
-            let reserve_deposit = match side {
-                Side::Left => diff.left < BigInt::from(0) && diff.collateral > BigInt::from(0),
-                Side::Right => diff.right < BigInt::from(0) && diff.collateral > BigInt::from(0),
-            };
-            if !reserve_deposit && amount > &delta.perspective(*side).out_capacity {
+            if amount > &delta.perspective(*side).out_capacity {
                 let label = if *side == Side::Left { "left" } else { "right" };
                 return Err(format!(
                     "SETTLEMENT_HOLD_CAPACITY:{label}:token={}",
@@ -1687,16 +1683,16 @@ fn hold_plan(diff: &OpDiff) -> [(Side, BigInt); 2] {
     [
         (
             Side::Left,
-            if diff.left < BigInt::from(0) {
-                -&diff.left
+            if diff.ondelta < BigInt::from(0) {
+                -&diff.ondelta
             } else {
                 0.into()
             },
         ),
         (
             Side::Right,
-            if diff.right < BigInt::from(0) {
-                -&diff.right
+            if diff.collateral < diff.ondelta {
+                &diff.ondelta - &diff.collateral
             } else {
                 0.into()
             },
@@ -2011,7 +2007,7 @@ mod tests {
     }
 
     #[test]
-    fn upsert_and_clear_are_atomic_and_release_exact_holds() {
+    fn reserve_only_upsert_and_clear_preserve_channel_capacity() {
         let mut account = replica();
         let context = AccountExecutionContext::new(1_000, 1_000, 10, 0, 10);
         assert!(matches!(
@@ -2024,7 +2020,7 @@ mod tests {
                 .delta(TokenId::new(1).expect("token"))
                 .expect("delta")
                 .hold(Side::Left),
-            &BigInt::from(10)
+            &BigInt::from(0)
         );
         let workspace = workspace_view(account.state().settlement_workspace().expect("workspace"))
             .expect("view");
@@ -2057,6 +2053,37 @@ mod tests {
             &BigInt::from(0)
         );
         assert!(account.state().settlement_workspace().is_none());
+    }
+
+    #[test]
+    fn collateral_withdrawal_holds_the_withdrawing_side_until_clear() {
+        for side in [Side::Left, Side::Right] {
+            let mut account = replica();
+            let token = TokenId::new(1).expect("token");
+            account.state_mut().put_delta(Delta::new(
+                token, 100.into(), 60.into(), 0.into(), 0.into(), 0.into(),
+                0.into(), 0.into(), 0.into(), 0.into(),
+            ).expect("funded delta")).expect("delta");
+            let template = upsert();
+            let withdrawal = replace_fields(object(&template, "upsert").expect("fields"), &[(
+                "ops", CanonicalValue::Array(vec![CanonicalValue::Object(vec![
+                    ("type".into(), CanonicalValue::String("c2r".into())),
+                    ("tokenId".into(), number(1).expect("token")),
+                    ("amount".into(), CanonicalValue::BigInt(10.into())),
+                ])]),
+            )]);
+            let context = AccountExecutionContext::new(1_000, 1_000, 10, 0, 10);
+            assert!(matches!(apply(&mut account, &withdrawal, side, &context).expect("withdraw"), MutationDecision::Applied { .. }));
+            assert_eq!(account.state().delta(token).expect("delta").hold(side), &BigInt::from(10));
+            let workspace = workspace_view(account.state().settlement_workspace().expect("workspace")).expect("view");
+            let clear = CanonicalValue::Object(vec![
+                ("kind".into(), CanonicalValue::String("clear".into())),
+                ("revision".into(), number(workspace.revision).expect("revision")),
+                ("workspaceHash".into(), CanonicalValue::String(workspace.workspace_hash.into())),
+            ]);
+            assert!(matches!(apply(&mut account, &clear, side, &context).expect("clear"), MutationDecision::Applied { .. }));
+            assert_eq!(account.state().delta(token).expect("delta").hold(side), &BigInt::from(0));
+        }
     }
 
     #[test]

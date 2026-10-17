@@ -151,11 +151,15 @@ export const assertCanonicalSettlementWorkspace = (
   return expected;
 };
 
-const holdPlan = (diffs: readonly SettlementDiff[]): HoldPlan[] => diffs.map((diff) => ({
-  tokenId: diff.tokenId,
-  left: diff.leftDiff < 0n ? -diff.leftDiff : 0n,
-  right: diff.rightDiff < 0n ? -diff.rightDiff : 0n,
-}));
+// Reserve movements do not spend channel capacity. Hold only the decrease in
+// each side's collateral share, or a c2r can spend that share twice while a
+// harmless r2c/r2r incorrectly freezes existing off-chain purchasing power.
+const holdPlan = (diffs: readonly SettlementDiff[]): HoldPlan[] =>
+  diffs.map(diff => ({
+    tokenId: diff.tokenId,
+    left: diff.ondeltaDiff < 0n ? -diff.ondeltaDiff : 0n,
+    right: diff.collateralDiff < diff.ondeltaDiff ? diff.ondeltaDiff - diff.collateralDiff : 0n,
+  }));
 
 type SettlementDeltaPlan = Map<number, Delta>;
 
@@ -216,13 +220,10 @@ const planWorkspaceHoldAdd = (
   for (const plan of holdPlan(diffs)) {
     if (plan.left === 0n && plan.right === 0n) continue;
     const delta = deltaForPlan(draft, planned, plan.tokenId, 'add');
-    const workspaceDiff = diffs.find((diff) => diff.tokenId === plan.tokenId);
-    const leftReserveDeposit = (workspaceDiff?.leftDiff ?? 0n) < 0n && (workspaceDiff?.collateralDiff ?? 0n) > 0n;
-    const rightReserveDeposit = (workspaceDiff?.rightDiff ?? 0n) < 0n && (workspaceDiff?.collateralDiff ?? 0n) > 0n;
-    if (!leftReserveDeposit && plan.left > deriveDelta(delta, true).outCapacity) {
+    if (plan.left > deriveDelta(delta, true).outCapacity) {
       throw new Error(`SETTLEMENT_HOLD_CAPACITY:left:token=${plan.tokenId}`);
     }
-    if (!rightReserveDeposit && plan.right > deriveDelta(delta, false).outCapacity) {
+    if (plan.right > deriveDelta(delta, false).outCapacity) {
       throw new Error(`SETTLEMENT_HOLD_CAPACITY:right:token=${plan.tokenId}`);
     }
     const leftError = addHold(delta, 'left', plan.left);

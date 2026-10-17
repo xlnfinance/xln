@@ -1083,6 +1083,9 @@ describe('audit fail-fast regressions', () => {
     const accountMachine = {
       state: {
         deltas: new Map([[1, feeDelta]]),
+        rebalanceFeePolicies: new Map([
+          [1, { right: { policyVersion: 1, baseFee: 10n, gasFee: 0n, liquidityFeeBps: 0n, updatedAt: 1 } }],
+        ]),
         requestedRebalance: new Map<number, bigint>(),
         requestedRebalanceFeeState: new Map(),
       },
@@ -1120,6 +1123,9 @@ describe('audit fail-fast regressions', () => {
     const accountMachine = {
       state: {
         deltas: new Map([[1, delta]]),
+        rebalanceFeePolicies: new Map([
+          [1, { right: { policyVersion: 1, baseFee: 10n, gasFee: 0n, liquidityFeeBps: 0n, updatedAt: 1 } }],
+        ]),
         requestedRebalance: new Map<number, bigint>([[1, 590n]]),
         requestedRebalanceFeeState: new Map([
           [
