@@ -44,7 +44,7 @@ type CurrentRuntimeWindow = Window & {
   __xln?: { env(): RuntimeReplica | null; store: { getState(): { activeEntityId: string | null } } };
 };
 
-async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
+export async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
   await expect
     .poll(
       () =>
@@ -105,48 +105,6 @@ async function openAccountsWorkspace(page: Page): Promise<void> {
   await expect(page.getByTestId('home-pay')).toBeVisible({ timeout: 20_000 });
 }
 
-async function openWorkspaceTab(page: Page, tabTestId: string): Promise<void> {
-  await openAccountsWorkspace(page);
-  const tabs = page.getByTestId(tabTestId);
-  const readTabStatus = async (): Promise<'visible' | 'active-hidden' | 'missing'> => {
-    const count = await tabs.count();
-    for (let index = 0; index < count; index += 1) {
-      const tab = tabs.nth(index);
-      if (await tab.isVisible().catch(() => false)) return 'visible';
-      const [className, ariaSelected, dataState, ariaCurrent] = await Promise.all([
-        tab.getAttribute('class').catch(() => ''),
-        tab.getAttribute('aria-selected').catch(() => ''),
-        tab.getAttribute('data-state').catch(() => ''),
-        tab.getAttribute('aria-current').catch(() => ''),
-      ]);
-      const active = /\bactive\b/.test(String(className || ''))
-        || ariaSelected === 'true'
-        || dataState === 'active'
-        || ariaCurrent === 'page';
-      if (active) return 'active-hidden';
-    }
-    return 'missing';
-  };
-
-  await expect
-    .poll(readTabStatus, {
-      timeout: 20_000,
-      intervals: [200, 400, 800],
-      message: `${tabTestId} workspace tab must be visible or already active`,
-    })
-    .not.toBe('missing');
-
-  const count = await tabs.count();
-  for (let index = 0; index < count; index += 1) {
-    const tab = tabs.nth(index);
-    if (!await tab.isVisible().catch(() => false)) continue;
-    await tab.scrollIntoViewIfNeeded();
-    await tab.click({ timeout: 5_000 });
-    return;
-  }
-  // Responsive screenshot layouts can hide the already-active tab. In that case the requested workspace is open.
-}
-
 async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
   await openAccountsWorkspace(page);
   if (await hasRenderedCommittedAccountCard(page, hubId)) return;
@@ -164,195 +122,42 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
 }
 
 async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Promise<unknown> {
-  return page.evaluate(({ hubId }) => {
-    const view = window as typeof window & {
-      __xln?: {
-        runtimeConnectivity?: {
-          connected?: boolean;
-          directPeers?: unknown;
-          queue?: unknown;
-        };
-      };
-      isolatedEnv?: {
-        state?: {
-          height?: number;
-          timestamp?: number;
-          jReplicas?: Map<string, {
-            blockNumber?: bigint;
-            chainId?: number;
-            depositoryAddress?: string;
-          }>;
-          eReplicas?: Map<string, {
-            entityId?: string;
-            signerId?: string;
-            isProposer?: boolean;
-            mempool?: Array<{ type?: string; data?: unknown }>;
-            proposal?: { height?: number; txs?: Array<{ type?: string }> };
-            jHistory?: {
-              scannedThroughHeight?: number;
-              contiguousThroughHeight?: number;
-              eventBlocks?: Map<number, { events?: Array<{ type?: string }> }>;
-              blockHashes?: Map<number, string>;
-            };
-            jPrefixRound?: {
-              targetEntityHeight?: number;
-              attestations?: Map<string, unknown>;
-              certificate?: { selected?: { scannedThroughHeight?: number } };
-            };
-            state?: {
-              entityId?: string;
-              height?: number;
-              lastFinalizedJHeight?: number;
-              jHistoryFinality?: { scannedThroughHeight?: number; eventHistoryRoot?: string };
-              config?: {
-                threshold?: bigint;
-                validators?: string[];
-                shares?: Record<string, bigint>;
-                jurisdiction?: { name?: string; chainId?: number };
-              };
-              messages?: string[];
-              proposals?: Map<string, { status?: string; action?: { type?: string } }>;
-              accounts?: Map<string, {
-                currentHeight?: number;
-                pendingFrame?: { height?: number };
-                mempool?: Array<{ type?: string }>;
-                deltas?: Map<number, unknown>;
-              }>;
-            };
-          }>;
-        };
-        runtimeId?: string;
-        infrastructure?: {
-          halted?: boolean;
-          fatalDebugPayload?: unknown;
-          loopActive?: boolean;
-        };
-        runtimeInput?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
-        runtimeMempool?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
-        history?: Array<{
-          height?: number;
-          runtimeInput?: {
-            runtimeTxs?: Array<{ type?: string; data?: Record<string, unknown> }>;
-            entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }>;
-          };
-        }>;
-      };
-    };
-    const env = view.isolatedEnv;
-    const summarizeInputs = (inputs: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> | undefined) =>
-      (inputs || []).slice(-10).map((input) => ({
-        entityId: String(input.entityId || '').slice(-8),
-        txs: (input.entityTxs || []).map((tx) => String(tx?.type || '')),
-      }));
-    const normalize = (value: unknown): string => String(value || '').trim().toLowerCase();
-    const targetHub = normalize(hubId);
-    const replicas = Array.from(env?.state?.eReplicas?.entries?.() || []).map(([key, replica]) => {
-      const account = replica.state?.accounts instanceof Map
-        ? replica.state.accounts.get(targetHub) ?? null
-        : null;
-      return {
-        key,
-        entityId: replica.state?.entityId ?? replica.entityId ?? null,
-        signerId: replica.signerId ?? null,
-        stateHeight: Number(replica.state?.height || 0),
-        config: replica.state?.config ? {
-          threshold: String(replica.state.config.threshold ?? ''),
-          validators: replica.state.config.validators ?? [],
-          shares: Object.fromEntries(Object.entries(replica.state.config.shares || {}).map(([id, shares]) => [id, String(shares)])),
-          jurisdiction: replica.state.config.jurisdiction ?? null,
-        } : null,
-        isProposer: Boolean(replica.isProposer),
-        mempool: (replica.mempool || []).map((tx) => String(tx?.type || '')),
-        proposal: replica.proposal ? {
-          height: Number(replica.proposal.height || 0),
-          txs: (replica.proposal.txs || []).map((tx) => String(tx?.type || '')),
-        } : null,
-        jHistory: replica.jHistory ? {
-          scannedThroughHeight: Number(replica.jHistory.scannedThroughHeight || 0),
-          contiguousThroughHeight: Number(replica.jHistory.contiguousThroughHeight || 0),
-          eventBlockCount: replica.jHistory.eventBlocks instanceof Map ? replica.jHistory.eventBlocks.size : 0,
-          eventBlocks: replica.jHistory.eventBlocks instanceof Map
-            ? Array.from(replica.jHistory.eventBlocks.entries()).slice(-10).map(([height, block]) => ({
-                height,
-                events: (block.events || []).map((event) => String(event?.type || '')),
-              }))
-            : [],
-          blockHashCount: replica.jHistory.blockHashes instanceof Map ? replica.jHistory.blockHashes.size : 0,
-          firstBlockHashHeight: replica.jHistory.blockHashes instanceof Map
-            ? Number(replica.jHistory.blockHashes.keys().next().value || 0)
-            : 0,
-        } : null,
-        jPrefixRound: replica.jPrefixRound ? {
-          targetEntityHeight: Number(replica.jPrefixRound.targetEntityHeight || 0),
-          attestationCount: replica.jPrefixRound.attestations instanceof Map
-            ? replica.jPrefixRound.attestations.size
-            : 0,
-          certifiedThroughHeight: Number(replica.jPrefixRound.certificate?.selected?.scannedThroughHeight || 0),
-        } : null,
-        lastFinalizedJHeight: Number(replica.state?.lastFinalizedJHeight || 0),
-        jHistoryFinality: replica.state?.jHistoryFinality ? {
-          scannedThroughHeight: Number(replica.state.jHistoryFinality.scannedThroughHeight || 0),
-          eventHistoryRoot: replica.state.jHistoryFinality.eventHistoryRoot ?? null,
-        } : null,
-        messages: (replica.state?.messages || []).slice(-10),
-        accountIds: replica.state?.accounts instanceof Map
-          ? Array.from(replica.state.accounts.keys())
-          : [],
-        proposals: replica.state?.proposals instanceof Map
-          ? Array.from(replica.state.proposals.entries()).slice(-10).map(([id, proposal]) => ({
-              id,
-              status: proposal?.status ?? null,
-              actionType: proposal?.action?.type ?? null,
-            }))
-          : [],
-        hubAccount: account ? {
-          currentHeight: Number(account.currentHeight || 0),
-          pendingFrameHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
-          mempool: (account.mempool || []).map((tx) => String(tx?.type || '')),
-          deltaTokenIds: account.state.deltas instanceof Map ? Array.from(account.state.deltas.keys()).map(Number) : [],
-        } : null,
-      };
-    });
+  return page.evaluate(hubId => {
+    const env = (window as CurrentRuntimeWindow).__xln?.env();
+    if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+    const p2p = env.infrastructure?.p2p;
     return {
-      height: Number(env?.state?.height || 0),
-      timestamp: Number(env?.state?.timestamp || 0),
-      runtimeId: env?.runtimeId ?? null,
-      uiErrors: Array.from(document.querySelectorAll('.hub-panel .error-banner, [role="alert"], .toast'))
-        .map((entry) => String(entry.textContent || '').trim())
-        .filter(Boolean)
-        .slice(-10),
-      runtimeInput: summarizeInputs(env?.runtimeInput?.entityInputs),
-      runtimeMempool: summarizeInputs(env?.runtimeMempool?.entityInputs),
-      recentFrames: (env?.history || []).slice(-100).map((frame) => ({
-        height: Number(frame.height || 0),
-        runtimeTxs: (frame.runtimeInput?.runtimeTxs || []).map((tx) => {
-          const type = String(tx?.type || '');
-          if (type !== 'observeJRange') return { type };
-          const headers = Array.isArray(tx.data?.headers)
-            ? tx.data.headers as Array<{ jHeight?: number }>
-            : [];
-          return {
-            type,
-            entityId: String(tx.data?.entityId || '').slice(-8),
-            signerId: String(tx.data?.signerId || '').slice(-8),
-            jurisdictionRef: String(tx.data?.jurisdictionRef || ''),
-            scannedThroughHeight: Number(tx.data?.scannedThroughHeight || 0),
-            headerCount: headers.length,
-            firstHeader: Number(headers[0]?.jHeight || 0),
-            lastHeader: Number(headers.at(-1)?.jHeight || 0),
-          };
-        }),
-        entityInputs: summarizeInputs(frame.runtimeInput?.entityInputs),
+      height: env.state.height,
+      timestamp: env.state.timestamp,
+      runtimeId: env.runtimeId,
+      connected: p2p?.isConnected() ?? false,
+      directPeers: p2p?.getDirectPeerState() ?? [],
+      hubProfile: env.gossip.getProfile(hubId.toLowerCase()),
+      runtimeMempool: env.runtimeMempool.entityInputs.map(input => ({
+        entityId: input.entityId,
+        txs: input.entityTxs?.map(tx => tx.type) ?? [],
       })),
-      jurisdictions: Array.from(env?.state?.jReplicas?.entries?.() || []).map(([name, replica]) => ({
-        name,
-        blockNumber: String(replica.blockNumber ?? ''),
-        chainId: Number(replica.chainId ?? 0),
-        depositoryAddress: replica.contracts?.depository ?? null,
-      })),
-      replicas,
+      replicas: Array.from(env.state.eReplicas, ([key, replica]) => {
+        const account = replica.state.accounts.get(hubId.toLowerCase());
+        return {
+          key,
+          height: replica.state.height,
+          jHistoryFinality: replica.state.jHistoryFinality,
+          mempool: replica.mempool.map(tx => tx.type),
+          proposalHeight: replica.proposal?.height ?? null,
+          hubAccount: account
+            ? {
+                height: account.currentHeight,
+                root: account.currentFrame.accountStateRoot,
+                pendingHeight: account.pendingFrame?.height ?? null,
+                mempool: account.mempool.map(tx => tx.type),
+                deltas: Array.from(account.state.deltas),
+              }
+            : null,
+        };
+      }),
     };
-  }, { hubId });
+  }, hubId);
 }
 
 async function waitForRenderedCommittedAccountCard(
@@ -382,52 +187,6 @@ async function waitForHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 2
       { timeout: timeoutMs, message: `hub ${hubId.slice(0, 10)} must have a gossip runtime route` },
     )
     .toBe(true);
-}
-
-async function waitForPublicHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 20_000): Promise<void> {
-  let lastProfileState: unknown = null;
-  try {
-    await expect
-      .poll(
-        async () => {
-          const origin = new URL(page.url()).origin;
-          const url = new URL('/api/gossip/profile', origin);
-          url.searchParams.set('entityId', hubId);
-          const response = await page.request.get(url.toString()).catch((error) => ({
-            ok: () => false,
-            status: () => 0,
-            json: async () => ({ error: error instanceof Error ? error.message : String(error) }),
-          }));
-          const body = await response.json().catch(() => ({} as {
-            found?: boolean;
-            profile?: { entityId?: string; runtimeId?: string; metadata?: { runtimeId?: string } } | null;
-            error?: string;
-          }));
-          const profile = body.profile;
-          const entityMatches = String(profile?.entityId || '').toLowerCase() === hubId.toLowerCase();
-          const runtimeId = String(profile?.runtimeId || profile?.metadata?.runtimeId || '').trim();
-          lastProfileState = {
-            status: response.status(),
-            found: body.found,
-            entityMatches,
-            runtimeId,
-            error: body.error,
-          };
-          return response.ok() && body.found !== false && entityMatches && runtimeId.length > 0;
-        },
-        {
-          timeout: timeoutMs,
-          intervals: [250, 500, 1000],
-          message: `hub ${hubId.slice(0, 10)} must be discoverable through public gossip profile API before UI connect`,
-        },
-      )
-      .toBe(true);
-  } catch (error) {
-    throw new Error(
-      `${error instanceof Error ? error.message : String(error)}\n` +
-      `lastPublicHubProfileState=${stringifyDebug(lastProfileState)}`,
-    );
-  }
 }
 
 async function waitForHubRuntimeTransportReady(page: Page, hubId: string, timeoutMs = 30_000): Promise<void> {
@@ -479,54 +238,6 @@ async function enqueueOpenAccount(
       tokenId: 1,
     },
   }]);
-}
-
-async function selectConfigureAccount(page: Page, hubId: string): Promise<void> {
-  const selector = page.getByTestId('configure-account-selector').first();
-  await expect(selector).toBeVisible({ timeout: 20_000 });
-  const optionTestId = `configure-account-selector-option-${hubId.toLowerCase()}`;
-
-  const closedTrigger = selector.locator('.closed-trigger').first();
-  if (await closedTrigger.isVisible().catch(() => false)) {
-    if (await closedTrigger.textContent().then((text) => String(text || '').toLowerCase().includes(hubId.toLowerCase().slice(0, 10))).catch(() => false)) {
-      return;
-    }
-    await closedTrigger.click();
-  }
-
-  const input = selector.locator('input').first();
-  await expect(input).toBeVisible({ timeout: 20_000 });
-  await input.click();
-  await input.fill(hubId);
-  const option = page.getByTestId(optionTestId).first();
-  if (await option.isVisible().catch(() => false)) {
-    await option.dispatchEvent('mousedown');
-  } else {
-    const matchedOption = page.locator('.dropdown-item').filter({ hasText: hubId }).first();
-    await expect(matchedOption).toBeVisible({ timeout: 20_000 });
-    await matchedOption.dispatchEvent('mousedown');
-  }
-  await expect(selector.locator('.closed-trigger').first()).toContainText(hubId.slice(0, 10), { timeout: 20_000 });
-}
-
-async function openConfigureWorkspace(page: Page, hubId: string): Promise<void> {
-  await openWorkspaceTab(page, 'account-workspace-tab-configure');
-  await expect(page.locator('.configure-panel').first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('.configure-empty').first()).not.toBeVisible({ timeout: 20_000 });
-  await selectConfigureAccount(page, hubId);
-}
-
-async function addTokenToAccount(page: Page, hubId: string, tokenId: number): Promise<void> {
-  await openConfigureWorkspace(page, hubId);
-  const tokenTab = page.getByTestId('configure-tab-token').first();
-  await expect(tokenTab).toBeVisible({ timeout: 20_000 });
-  await tokenTab.click();
-  const tokenSelect = page.locator('.configure-token-select').first();
-  await expect(tokenSelect).toBeVisible({ timeout: 20_000 });
-  await tokenSelect.selectOption(String(tokenId));
-  const addButton = page.getByTestId('configure-token-add').first();
-  await expect(addButton).toBeEnabled({ timeout: 20_000 });
-  await addButton.click();
 }
 
 async function extendCreditToken(
@@ -645,10 +356,10 @@ async function assertNoLocalHubDivergence(
 ): Promise<void> {
   const [localStatus, hubStatus] = await Promise.all([
     getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId),
-    readHubAccountStatus(page, identity.entityId, hubId, tokenIds).catch((error) => ({
+    readHubAccountStatus(page, identity.entityId, hubId, tokenIds).catch((error): HubAccountStatus => ({
       success: false,
       error: error instanceof Error ? error.message : String(error),
-    } satisfies HubAccountStatus)),
+    })),
   ]);
 
   if (hubStatus.runtime?.halted) {
@@ -671,16 +382,16 @@ async function waitForHubBaseAccountReady(
     await waitForHubAccountReady(page, identity.entityId, hubId, [1]);
   } catch (error) {
     const [localStatus, hubStatus, debugState, relayDebug] = await Promise.all([
-      getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId).catch((statusError) => ({
+      getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId).catch(statusError => ({
         error: statusError instanceof Error ? statusError.message : String(statusError),
       })),
-      readHubAccountStatus(page, identity.entityId, hubId, [1]).catch((statusError) => ({
+      readHubAccountStatus(page, identity.entityId, hubId, [1]).catch(statusError => ({
         error: statusError instanceof Error ? statusError.message : String(statusError),
       })),
-      getConnectDebugState(page, identity, hubId).catch((debugError) => ({
+      readLocalConnectRuntimeDiagnostic(page, hubId).catch(debugError => ({
         error: debugError instanceof Error ? debugError.message : String(debugError),
       })),
-      readRelayDebugEvents(page, 20).catch((debugError) => ({
+      readRelayDebugEvents(page, 20).catch(debugError => ({
         error: debugError instanceof Error ? debugError.message : String(debugError),
       })),
     ]);
@@ -719,130 +430,6 @@ async function getAccountOpenStatus(
     },
     { entityId, signerId, hubId },
   );
-}
-
-async function getConnectDebugState(
-  page: Page,
-  identity: { entityId: string; signerId: string },
-  hubId: string,
-): Promise<unknown> {
-  return page.evaluate(({ identity, hubId }) => {
-    const view = window as typeof window & {
-      __xln?: {
-        runtimeConnectivity?: {
-          connected?: boolean;
-          directPeers?: unknown;
-          queue?: unknown;
-        };
-      };
-      isolatedEnv?: {
-        state?: {
-          height?: number;
-          timestamp?: number;
-          eReplicas?: Map<string, {
-            state?: {
-              messages?: string[];
-              accounts?: Map<string, {
-                currentHeight?: number;
-                pendingFrame?: { height?: number };
-                mempool?: Array<{ type?: string }>;
-                state?: {
-                  leftEntity?: string;
-                  rightEntity?: string;
-                };
-                proofHeader?: { fromEntity?: string; toEntity?: string };
-              }>;
-            };
-          }>;
-        };
-        runtimeInput?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
-        runtimeMempool?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
-        gossip?: { getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; metadata?: unknown }> };
-      };
-    };
-    const env = view.isolatedEnv;
-    const connectivity = view.__xln?.runtimeConnectivity;
-    const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
-    const resolveCounterpartyAccount = (
-      accounts: Map<string, {
-        currentHeight?: number;
-        pendingFrame?: { height?: number };
-        mempool?: Array<{ type?: string }>;
-        state?: {
-          leftEntity?: string;
-          rightEntity?: string;
-        };
-        proofHeader?: { fromEntity?: string; toEntity?: string };
-      }>,
-      ownerEntityId: string,
-      counterpartyEntityId: string,
-    ) => {
-      const owner = normalizeEntityId(ownerEntityId);
-      const target = normalizeEntityId(counterpartyEntityId);
-      const accountBelongsToPair = (account: {
-        state?: {
-          leftEntity?: string;
-          rightEntity?: string;
-        };
-        proofHeader?: { fromEntity?: string; toEntity?: string };
-      } | null | undefined): boolean => {
-        if (!account) return false;
-        const proofFrom = normalizeEntityId(account.proofHeader?.fromEntity);
-        const proofTo = normalizeEntityId(account.proofHeader?.toEntity);
-        if (proofFrom || proofTo) return proofFrom === owner && proofTo === target;
-        const left = normalizeEntityId(account.state?.leftEntity);
-        const right = normalizeEntityId(account.state?.rightEntity);
-        return (left === owner && right === target) || (left === target && right === owner);
-      };
-      const direct = accounts.get(target) ?? accounts.get(String(counterpartyEntityId || ''));
-      if (accountBelongsToPair(direct)) return direct;
-      for (const [accountKey, account] of accounts.entries()) {
-        if (normalizeEntityId(accountKey) === target && accountBelongsToPair(account)) return account;
-        const left = normalizeEntityId(account.state?.leftEntity);
-        const right = normalizeEntityId(account.state?.rightEntity);
-        if ((left === owner && right === target) || (right === owner && left === target)) return account;
-      }
-      return null;
-    };
-    const replica = env?.state?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
-    const accounts = replica?.state?.accounts;
-    const account = accounts instanceof Map
-      ? resolveCounterpartyAccount(accounts, identity.entityId, hubId)
-      : null;
-    const profile = env?.gossip?.getProfiles?.().find((candidate) =>
-      String(candidate?.entityId || '').toLowerCase() === String(hubId || '').toLowerCase(),
-    );
-    const summarizeInputs = (inputs: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> | undefined) =>
-      (inputs || []).slice(-10).map((input) => ({
-        entityId: String(input.entityId || '').slice(-8),
-        txs: (input.entityTxs || []).map((tx) => tx.type),
-      }));
-    return {
-      height: env?.state?.height,
-      timestamp: env?.state?.timestamp,
-      p2p: {
-        connected: connectivity?.connected ?? null,
-        directPeers: connectivity?.directPeers ?? null,
-        queue: connectivity?.queue ?? null,
-      },
-      account: account ? {
-        currentHeight: Number(account.currentHeight || 0),
-        pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
-        mempool: (account.mempool || []).map((tx) => tx.type),
-        leftEntity: String(account.state?.leftEntity || ''),
-        rightEntity: String(account.state?.rightEntity || ''),
-        proofFrom: String(account.proofHeader?.fromEntity || ''),
-        proofTo: String(account.proofHeader?.toEntity || ''),
-      } : null,
-      runtimeInput: summarizeInputs(env?.runtimeInput?.entityInputs),
-      runtimeMempool: summarizeInputs(env?.runtimeMempool?.entityInputs),
-      hubProfile: profile ? {
-        runtimeId: String(profile.runtimeId || ''),
-        metadata: profile.metadata,
-      } : null,
-      recentMessages: (replica?.state?.messages || []).slice(-8),
-    };
-  }, { identity, hubId });
 }
 
 async function readRelayDebugEvents(page: Page, last = 20): Promise<unknown> {
@@ -1063,7 +650,7 @@ export async function connectRuntimeToHubWithCredit(
       },
     ).toBe(true);
   } catch (error) {
-    const debugState = await getConnectDebugState(page, identity, hubId).catch((debugError) => ({
+    const debugState = await readLocalConnectRuntimeDiagnostic(page, hubId).catch(debugError => ({
       debugError: debugError instanceof Error ? debugError.message : String(debugError),
     }));
     throw new Error(

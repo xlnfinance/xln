@@ -3,23 +3,24 @@
  *
  * Flow and goals:
  * 1. Load the custody page and prove withdraw is rejected before any credited balance exists.
- * 2. Deposit cycle A opens the wallet directly from the custody invoice.
+ * 2. Deposit cycle A validates the canonical public wallet link and pays its invoice locally.
  * 3. Deposit cycle B copies the invoice and pastes it into the wallet pay screen.
- * 5. Both deposit modes must credit custody balance from persisted receipts.
- * 6. Later withdrawals still spend only from already credited custody balance.
+ * 4. Both invoices must credit custody balance from persisted receipts.
+ * 5. Later withdrawals still spend only from already credited custody balance.
  *
  * The same scenario then proves the custody backend refuses withdrawals before credit exists
  * and spends only from already credited offchain funds after the deposit lands.
  */
 
-import { test, expect, type BrowserContext, type Page } from './global-setup.mts';
+import { test, expect, type Page } from './global-setup.mts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { DaemonRpcClient, type DaemonFrameLog } from '../custody/daemon-client';
-import { deriveDelta } from '../core/account/utils';
+import { DaemonRpcClient } from '../custody/daemon-client';
+import type { RuntimeAdapterViewFrame, XLNModule } from '../core/api/public/runtime-module';
+import type { RuntimeAdapter } from '../core/api/runtime-adapter/types';
 import { startCustodySupport, stopManagedChild, type ManagedChild } from '../core/orchestrator/bootstrap/custody-bootstrap';
 import { selectPrimaryHubJurisdiction } from '../core/orchestrator/j-select/jurisdiction-select';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
@@ -27,8 +28,14 @@ import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
 } from './utils/runtime/e2e-account-ui';
-import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
-import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
+import {
+  connectRuntimeToHubWithCredit,
+  ensureRuntimeOnline,
+  waitForReceiveReadyGossipProfiles,
+} from './utils/e2e-connect';
+import { openPayWorkspace, chooseVisibleRoute } from './utils/runtime/e2e-pay-ui';
+import { gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
+import { createWalletIdentity } from '../ui/tests/wallet-ui';
 import { timedStep } from './utils/e2e-timing.mts';
 import { closeRuntimeContext } from './utils/runtime/e2e-runtime-shutdown.mts';
 
@@ -73,43 +80,8 @@ type FaucetAttemptResult = {
   data: Record<string, unknown>;
 };
 
-type WalletRuntimeView = typeof window & {
-  isolatedEnv?: {
-    runtimeId?: string;
-  };
-};
-
-type SerializedDeltaSnapshot = {
-  tokenId: string;
-  collateral: string;
-  ondelta: string;
-  offdelta: string;
-  leftCreditLimit: string;
-  rightCreditLimit: string;
-  leftAllowance: string;
-  rightAllowance: string;
-  leftHold: string;
-  rightHold: string;
-};
-
-type OffchainCapacitySnapshot = {
-  runtimeId: string;
-  reason: string;
-  delta: SerializedDeltaSnapshot | null;
-  iAmLeft: boolean;
-  replicas: Array<{
-    replicaKey: string;
-    entityId: string;
-    signerId: string;
-    accountCount: number;
-    accountMatches: Array<{
-      accountKey: string;
-      matchesCounterparty: boolean;
-      leftEntity: string;
-      rightEntity: string;
-      deltaKeys: string[];
-    }>;
-  }>;
+type WalletRuntimeView = Window & {
+  __xln?: { adapter(): RuntimeAdapter | null; xln(): Promise<XLNModule> };
 };
 
 type ApiTokenEntry = {
@@ -164,7 +136,7 @@ const resolvePrimaryCustodyJurisdictionId = async (): Promise<string> => {
 async function getApiToken(page: Page, symbol: string): Promise<ApiToken> {
   const response = await page.request.get(`${API_BASE_URL}/api/tokens`);
   expect(response.ok(), 'tokens endpoint must be available').toBe(true);
-  const body = await response.json().catch(() => ({} as { tokens?: ApiTokenEntry[] }));
+  const body: { tokens?: ApiTokenEntry[] } = await response.json();
   const tokens = Array.isArray(body.tokens) ? body.tokens : [];
   const match = tokens.find((token) => String(token.symbol || '').toUpperCase() === symbol.toUpperCase());
   expect(typeof match?.tokenId === 'number', `Missing ${symbol} tokenId`).toBe(true);
@@ -180,169 +152,6 @@ const toWsUrl = (baseUrl: string, pathname: string): string => {
   return url.toString();
 };
 
-async function ensureRuntimeProfileDownloaded(page: Page, entityId: string): Promise<void> {
-  const ok = await page.evaluate(async (targetEntityId: string) => {
-    const maybeWindow = window as typeof window & {
-      __xln?: {
-        runtimeConnectivity?: {
-          profiles?: Array<{ entityId?: string }>;
-          ensureProfiles?: (entityIds: string[]) => Promise<boolean>;
-          refreshGossip?: () => Promise<void> | void;
-        };
-      };
-    };
-    const target = String(targetEntityId || '').toLowerCase();
-    const hasProfile = (): boolean =>
-      (maybeWindow.__xln?.runtimeConnectivity?.profiles ?? [])
-        .some(profile => String(profile.entityId || '').toLowerCase() === target);
-
-    if (hasProfile()) return true;
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 15_000) {
-      const connectivity = maybeWindow.__xln?.runtimeConnectivity;
-      if (typeof connectivity?.ensureProfiles === 'function') {
-        const found = await connectivity.ensureProfiles([target]);
-        if (found && hasProfile()) return true;
-      }
-      if (typeof connectivity?.refreshGossip === 'function') {
-        await connectivity.refreshGossip();
-      }
-      if (hasProfile()) return true;
-      await new Promise(resolve => setTimeout(resolve, 300));
-    }
-    return hasProfile();
-  }, entityId);
-
-  expect(ok, `runtime must download gossip profile for ${entityId.slice(0, 12)}`).toBe(true);
-}
-
-async function waitForPopupRoutesAndSubmit(popup: Page, targetEntityId: string): Promise<void> {
-  const findRoutesButton = popup.getByRole('button', { name: /^Find routes?$/i });
-  const firstRoute = popup.locator('.route-option').first();
-  const routeError = popup.locator('.profile-preflight-error');
-  await popup.waitForTimeout(1_000);
-  if (await firstRoute.isVisible().catch(() => false)) {
-    await firstRoute.scrollIntoViewIfNeeded().catch(() => undefined);
-  } else if (await findRoutesButton.isVisible().catch(() => false)) {
-    await findRoutesButton.scrollIntoViewIfNeeded().catch(() => undefined);
-  }
-  const deadline = Date.now() + 25_000;
-  while (Date.now() < deadline) {
-    if (await firstRoute.isVisible().catch(() => false)) break;
-    if (!await findRoutesButton.isVisible().catch(() => false)) {
-      await popup.waitForTimeout(500);
-      continue;
-    }
-    console.log(`[custody:popup] finding routes url=${popup.url()}`);
-    await findRoutesButton.click();
-    try {
-      await expect(firstRoute).toBeVisible({ timeout: 4_000 });
-      break;
-    } catch {
-      const errorText = (await routeError.textContent().catch(() => '') || '').trim();
-      if (errorText) {
-        console.log(`[custody:popup] route retry after error: ${errorText}`);
-      }
-      await ensureRuntimeProfileDownloaded(popup, targetEntityId).catch(() => undefined);
-      await popup.waitForTimeout(1_000);
-    }
-  }
-  if (!await firstRoute.isVisible().catch(() => false)) {
-    const currentUrl = popup.url();
-    const currentError = (await routeError.textContent().catch(() => '') || '').trim();
-    const invoiceValue = await popup.locator('#payment-invoice-input').inputValue().catch(() => '');
-    throw new Error(
-      `Route not visible in wallet popup url=${currentUrl} error=${currentError || 'none'} invoice=${invoiceValue.slice(0, 96)}`,
-    );
-  }
-  await firstRoute.scrollIntoViewIfNeeded().catch(() => undefined);
-  await popup.locator('.route-option').first().click();
-  const sendOnSelectedRoute = popup.getByRole('button', { name: /^Send On Selected Route$/i });
-  if (await sendOnSelectedRoute.isVisible().catch(() => false)) {
-    await sendOnSelectedRoute.click();
-    return;
-  }
-  await popup.getByRole('button', { name: /^Pay Now$/i }).click();
-}
-
-async function ensureWalletAccountsTabVisible(page: Page): Promise<void> {
-  const accountList = page.getByTestId('account-list-wrapper').first();
-  const workspaceNav = page.locator('nav[aria-label="Account workspace"]').first();
-  const backButton = page.getByTestId('account-panel-back').first();
-  const accountsTab = page.getByTestId('tab-accounts').first();
-
-  if (await backButton.isVisible().catch(() => false)) {
-    await backButton.click();
-  }
-
-  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    if (
-      await accountList.isVisible().catch(() => false)
-      || await workspaceNav.isVisible().catch(() => false)
-    ) {
-      return;
-    }
-    await accountsTab.click();
-    await page.waitForTimeout(250);
-  }
-
-  await expect
-    .poll(async () => (
-      await accountList.isVisible().catch(() => false)
-      || await workspaceNav.isVisible().catch(() => false)
-    ), {
-      timeout: 20_000,
-      intervals: [200, 400, 800],
-      message: 'accounts tab shell must be visible before opening pay workspace',
-    })
-    .toBe(true);
-}
-
-async function openWalletPayWorkspace(page: Page, counterpartyId?: string): Promise<void> {
-  void counterpartyId;
-  await ensureWalletAccountsTabVisible(page);
-  const mainScroll = page.locator('.main-scroll').first();
-  const findVisibleSendTab = async (): Promise<Locator | null> => {
-    const navs = mainScroll.locator('nav[aria-label="Account workspace"]');
-    const navCount = await navs.count();
-    for (let i = 0; i < navCount; i += 1) {
-      const nav = navs.nth(i);
-      if (!(await nav.isVisible().catch(() => false))) continue;
-      const candidate = nav.getByTestId('account-workspace-tab-send').first();
-      if (await candidate.count()) return candidate;
-    }
-    return null;
-  };
-
-  let sendTab: Locator | null = null;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    sendTab = await findVisibleSendTab();
-    if (sendTab) break;
-    await mainScroll.evaluate((node, attemptIndex) => {
-      const target = node as HTMLElement;
-      target.scrollTo({ top: (attemptIndex + 1) * target.clientHeight, behavior: 'instant' });
-    }, attempt);
-    await page.waitForTimeout(250);
-  }
-
-  if (!sendTab) {
-    const mobileToggle = page.getByTestId('account-workspace-mobile-toggle').first();
-    if (await mobileToggle.isVisible().catch(() => false)) {
-      await mobileToggle.click();
-      sendTab = page.getByTestId('account-workspace-tab-send').first();
-    }
-  }
-  if (!sendTab || !(await sendTab.isVisible().catch(() => false))) {
-    throw new Error(`Send workspace tab not visible after workspace open url=${page.url()}`);
-  }
-  await expect(sendTab).toBeVisible({ timeout: 20_000 });
-  await sendTab.scrollIntoViewIfNeeded().catch(() => undefined);
-  await sendTab.click();
-  console.log(`[custody:wallet] opened send workspace url=${page.url()}`);
-  await expect(page.locator('#payment-invoice-input')).toBeVisible({ timeout: 20_000 });
-}
-
 async function faucetOffchain(
   page: Page,
   entityId: string,
@@ -355,10 +164,10 @@ async function faucetOffchain(
   for (let attempt = 1; attempt <= 15; attempt += 1) {
     const runtimeId = await page.evaluate(() => {
       const view = window as WalletRuntimeView;
-      return view.isolatedEnv?.runtimeId ?? null;
+      return view.__xln?.adapter()?.runtimeId ?? null;
     });
     if (!runtimeId) {
-      result = { ok: false, status: 0, data: { error: 'missing runtimeId in isolatedEnv' } };
+      result = { ok: false, status: 0, data: { error: 'current wallet adapter runtimeId missing' } };
       break;
     }
 
@@ -389,7 +198,6 @@ async function faucetOffchain(
     if (result.ok) break;
 
     const code = String(result.data.code || '');
-    const status = String(result.data.status || '');
     const transient =
       result.status === 202 ||
       result.status === 409 ||
@@ -399,36 +207,6 @@ async function faucetOffchain(
   }
 
   expect(result.ok, `offchain faucet failed: ${JSON.stringify(result.data)}`).toBe(true);
-}
-
-async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
-  const ok = await page.evaluate(async () => {
-    const maybeWindow = window as typeof window & {
-      __xln?: {
-        runtimeConnectivity?: {
-          connected?: boolean;
-          connect?: () => void;
-          reconnect?: () => void;
-        };
-      };
-    };
-
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 20_000) {
-      const connectivity = maybeWindow.__xln?.runtimeConnectivity;
-      if (connectivity?.connected === true) return true;
-      if (typeof connectivity?.connect === 'function') {
-        connectivity.connect();
-      } else if (typeof connectivity?.reconnect === 'function') {
-        connectivity.reconnect();
-      }
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-
-    return maybeWindow.__xln?.runtimeConnectivity?.connected === true;
-  });
-
-  expect(ok, `[${tag}] runtime must be online`).toBe(true);
 }
 
 async function waitForDaemonReceiptEvent(
@@ -491,132 +269,42 @@ async function waitForDaemonReceiptEvent(
   );
 }
 
-async function getOffchainOutboundCapacity(
+async function readOffchainOutboundCapacity(
   page: Page,
   ownerEntityId: string,
   counterpartyEntityId: string,
   tokenId: number,
-): Promise<bigint> {
-  const snapshot = await page.evaluate(
-    ({ ownerEntityId, counterpartyEntityId, tokenId }) => {
-      const view = window as typeof window & { isolatedEnv?: any };
-      const env = view.isolatedEnv;
-      const normalize = (raw: unknown): string => String(raw || '').trim().toLowerCase();
-      const accountMatchesCounterparty = (account: unknown, ownerNorm: string, counterpartyNorm: string): boolean => {
-        const accountRecord = account as {
-          counterpartyEntityId?: unknown;
-          leftEntity?: unknown;
-          rightEntity?: unknown;
-        };
-        const directCounterparty = normalize(accountRecord?.counterpartyEntityId);
-        if (directCounterparty === counterpartyNorm) return true;
-        const left = normalize(accountRecord?.leftEntity);
-        const right = normalize(accountRecord?.rightEntity);
-        if (!left || !right) return false;
-        return (left === ownerNorm && right === counterpartyNorm) || (right === ownerNorm && left === counterpartyNorm);
-      };
-      const serializeAmount = (value: unknown): string => String(typeof value === 'bigint' ? value : 0n);
-      const serializeDelta = (delta: unknown): SerializedDeltaSnapshot | null => {
-        if (!delta || typeof delta !== 'object') return null;
-        const record = delta as Record<string, unknown>;
-        return {
-          tokenId: serializeAmount(record.tokenId),
-          collateral: serializeAmount(record.collateral),
-          ondelta: serializeAmount(record.ondelta),
-          offdelta: serializeAmount(record.offdelta),
-          leftCreditLimit: serializeAmount(record.leftCreditLimit),
-          rightCreditLimit: serializeAmount(record.rightCreditLimit),
-          leftAllowance: serializeAmount(record.leftAllowance),
-          rightAllowance: serializeAmount(record.rightAllowance),
-          leftHold: serializeAmount(record.leftHold),
-          rightHold: serializeAmount(record.rightHold),
-        };
-      };
-      if (!env?.state?.eReplicas) {
-        return {
-          runtimeId: String(env?.runtimeId || ''),
-          reason: 'isolatedEnv missing',
-          delta: null,
-          iAmLeft: false,
-          replicas: [],
-        } satisfies OffchainCapacitySnapshot;
-      }
-      const ownerNorm = String(ownerEntityId || '').trim().toLowerCase();
-      const counterpartyNorm = String(counterpartyEntityId || '').trim().toLowerCase();
-      const runtimeSignerNorm = String(env.runtimeId || '').trim().toLowerCase();
-      const debugReplicas: OffchainCapacitySnapshot['replicas'] = [];
-      for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
-        const replicaParts = String(replicaKey || '').split(':');
-        const replicaEntityId = String(replicaParts[0] || '').trim().toLowerCase();
-        const replicaSignerId = String(replicaParts[1] || '').trim().toLowerCase();
-        const replicaDebug: OffchainCapacitySnapshot['replicas'][number] = {
-          replicaKey: String(replicaKey || ''),
-          entityId: replicaEntityId,
-          signerId: replicaSignerId,
-          accountCount: Number(replica?.state?.accounts?.size || 0),
-          accountMatches: [],
-        };
-        debugReplicas.push(replicaDebug);
-        if (replicaEntityId !== ownerNorm) continue;
-        if (runtimeSignerNorm && replicaSignerId !== runtimeSignerNorm) continue;
-        for (const [accountEntityId, account] of replica.state.accounts.entries()) {
-          const accountKeyNorm = String(accountEntityId || '').trim().toLowerCase();
-          const matchesCounterparty =
-            accountKeyNorm === counterpartyNorm || accountMatchesCounterparty(account, ownerNorm, counterpartyNorm);
-          const accountDebug: OffchainCapacitySnapshot['replicas'][number]['accountMatches'][number] = {
-            accountKey: String(accountEntityId || ''),
-            matchesCounterparty,
-            leftEntity: String(account?.state?.leftEntity || ''),
-            rightEntity: String(account?.state?.rightEntity || ''),
-            deltaKeys: account?.state?.deltas instanceof Map ? Array.from(account.state.deltas.keys()).map((value: unknown) => String(value)) : [],
-          };
-          replicaDebug.accountMatches.push(accountDebug);
-          if (!matchesCounterparty) {
-            continue;
-          }
-          const delta = account?.state?.deltas?.get?.(tokenId);
-          if (!delta) {
-            return {
-              runtimeId: String(env.runtimeId || ''),
-              reason: 'matching account missing token delta',
-              delta: null,
-              iAmLeft: false,
-              replicas: debugReplicas,
-            } satisfies OffchainCapacitySnapshot;
-          }
-          return {
-            runtimeId: String(env.runtimeId || ''),
-            reason: 'ok',
-            delta: serializeDelta(delta),
-            iAmLeft: String(account.state.leftEntity || '').trim().toLowerCase() === ownerNorm,
-            replicas: debugReplicas,
-          } satisfies OffchainCapacitySnapshot;
-        }
-      }
+) {
+  return page.evaluate(
+    async ({ ownerEntityId, counterpartyEntityId, tokenId }) => {
+      const debug = (window as WalletRuntimeView).__xln;
+      const adapter = debug?.adapter();
+      if (!debug || !adapter) throw new Error('CUSTODY_WALLET_ADAPTER_MISSING');
+      const frame = await adapter.read<RuntimeAdapterViewFrame>('view-frame', {
+        entityId: ownerEntityId,
+        accountsLimit: 100,
+      });
+      const entity = frame.activeEntity;
+      if (!entity || frame.activeEntityId !== ownerEntityId || entity.accounts.nextCursor !== null)
+        throw new Error('CUSTODY_WALLET_ACCOUNT_VIEW_INCOMPLETE');
+      const accounts = entity.accounts.items.filter(
+        account =>
+          account.state.leftEntity === counterpartyEntityId || account.state.rightEntity === counterpartyEntityId,
+      );
+      const [account] = accounts;
+      if (accounts.length !== 1 || !account) throw new Error(`CUSTODY_WALLET_ACCOUNT_NOT_UNIQUE:${accounts.length}`);
+      const delta = account.state.deltas.get(tokenId);
+      if (!delta) throw new Error(`CUSTODY_WALLET_TOKEN_MISSING:${tokenId}`);
+      const xln = await debug.xln();
       return {
-        runtimeId: String(env.runtimeId || ''),
-        reason: 'matching replica/account not found',
-        delta: null,
-        iAmLeft: false,
-        replicas: debugReplicas,
-      } satisfies OffchainCapacitySnapshot;
+        height: frame.height,
+        accountHeight: account.currentHeight,
+        accountRoot: account.currentFrame.accountStateRoot,
+        capacity: xln.deriveDelta(delta, xln.isLeftEntity(ownerEntityId, counterpartyEntityId)).outCapacity.toString(),
+      };
     },
     { ownerEntityId, counterpartyEntityId, tokenId },
   );
-  if (!snapshot?.delta) return 0n;
-  const derived = deriveDelta({
-    tokenId: Number(snapshot.delta.tokenId),
-    collateral: BigInt(snapshot.delta.collateral),
-    ondelta: BigInt(snapshot.delta.ondelta),
-    offdelta: BigInt(snapshot.delta.offdelta),
-    leftCreditLimit: BigInt(snapshot.delta.leftCreditLimit),
-    rightCreditLimit: BigInt(snapshot.delta.rightCreditLimit),
-    leftAllowance: BigInt(snapshot.delta.leftAllowance),
-    rightAllowance: BigInt(snapshot.delta.rightAllowance),
-    leftHold: BigInt(snapshot.delta.leftHold),
-    rightHold: BigInt(snapshot.delta.rightHold),
-  }, snapshot.iAmLeft);
-  return derived.outCapacity;
 }
 
 async function waitForOffchainOutboundCapacity(
@@ -631,64 +319,9 @@ async function waitForOffchainOutboundCapacity(
   await expect
     .poll(
       async () => {
-        const value = await getOffchainOutboundCapacity(page, ownerEntityId, counterpartyEntityId, tokenId);
-        const debug = await page.evaluate(
-          ({ ownerEntityId, counterpartyEntityId, tokenId }) => {
-            const view = window as typeof window & { isolatedEnv?: any };
-            const env = view.isolatedEnv;
-            const normalize = (raw: unknown): string => String(raw || '').trim().toLowerCase();
-            const accountMatchesCounterparty = (account: unknown, ownerNorm: string, counterpartyNorm: string): boolean => {
-              const accountRecord = account as {
-                counterpartyEntityId?: unknown;
-                leftEntity?: unknown;
-                rightEntity?: unknown;
-              };
-              const directCounterparty = normalize(accountRecord?.counterpartyEntityId);
-              if (directCounterparty === counterpartyNorm) return true;
-              const left = normalize(accountRecord?.leftEntity);
-              const right = normalize(accountRecord?.rightEntity);
-              if (!left || !right) return false;
-              return (left === ownerNorm && right === counterpartyNorm) || (right === ownerNorm && left === counterpartyNorm);
-            };
-            if (!env?.state?.eReplicas) {
-              return { runtimeId: String(env?.runtimeId || ''), reason: 'isolatedEnv missing', replicas: [] };
-            }
-            const ownerNorm = String(ownerEntityId || '').trim().toLowerCase();
-            const counterpartyNorm = String(counterpartyEntityId || '').trim().toLowerCase();
-            const runtimeSignerNorm = String(env.runtimeId || '').trim().toLowerCase();
-            const replicas: OffchainCapacitySnapshot['replicas'] = [];
-            for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
-              const replicaParts = String(replicaKey || '').split(':');
-              const replicaEntityId = String(replicaParts[0] || '').trim().toLowerCase();
-              const replicaSignerId = String(replicaParts[1] || '').trim().toLowerCase();
-              const replicaDebug: OffchainCapacitySnapshot['replicas'][number] = {
-                replicaKey: String(replicaKey || ''),
-                entityId: replicaEntityId,
-                signerId: replicaSignerId,
-                accountCount: Number(replica?.state?.accounts?.size || 0),
-                accountMatches: [],
-              };
-              replicas.push(replicaDebug);
-              if (replicaEntityId !== ownerNorm) continue;
-              if (runtimeSignerNorm && replicaSignerId !== runtimeSignerNorm) continue;
-              for (const [accountEntityId, account] of replica.state.accounts.entries()) {
-                replicaDebug.accountMatches.push({
-                  accountKey: String(accountEntityId || ''),
-                  matchesCounterparty:
-                    String(accountEntityId || '').trim().toLowerCase() === counterpartyNorm
-                    || accountMatchesCounterparty(account, ownerNorm, counterpartyNorm),
-                  leftEntity: String(account?.state?.leftEntity || ''),
-                  rightEntity: String(account?.state?.rightEntity || ''),
-                  deltaKeys: account?.state?.deltas instanceof Map ? Array.from(account.state.deltas.keys()).map((item: unknown) => String(item)) : [],
-                });
-              }
-            }
-            return { runtimeId: String(env.runtimeId || ''), reason: 'debug', tokenId, replicas };
-          },
-          { ownerEntityId, counterpartyEntityId, tokenId },
-        );
-        lastDebug = JSON.stringify(debug);
-        return value.toString();
+        const current = await readOffchainOutboundCapacity(page, ownerEntityId, counterpartyEntityId, tokenId);
+        lastDebug = JSON.stringify(current);
+        return current.capacity;
       },
       {
         timeout: timeoutMs,
@@ -697,9 +330,8 @@ async function waitForOffchainOutboundCapacity(
       },
     )
     .toBe(minimum.toString())
-    .catch((error) => {
-      const details = lastDebug.length > 0 ? ` debug=${lastDebug}` : '';
-      throw new Error(`${String(error)}${details}`);
+    .catch(error => {
+      throw new Error(`${String(error)} committedAccount=${lastDebug}`);
     });
 }
 
@@ -921,9 +553,8 @@ test.describe('E2E Custody Flow', () => {
       const fundingHubId = senderHubIds[1] ?? senderHubIds[0]!;
 
       await timedStep('custody.wallet.goto_app', () => gotoApp(walletPage));
-      const alice = await timedStep(
-        'custody.wallet.create_runtime',
-        () => createRuntimeIdentity(walletPage, 'alice', selectDemoMnemonic('alice')),
+      const alice = await timedStep('custody.wallet.create_runtime', () =>
+        createWalletIdentity(walletPage, 'alice', selectDemoMnemonic('alice')),
       );
       const usdcToken = await timedStep('custody.wallet.read_usdc_token', () => getApiToken(walletPage, 'USDC'));
       const usdtToken = await timedStep('custody.wallet.read_usdt_token', () => getApiToken(walletPage, 'USDT'));
@@ -1001,6 +632,7 @@ test.describe('E2E Custody Flow', () => {
           custodyBalances.set(tokenId, BigInt(String(token.amountMinor || '0')));
         }
       }
+      const financialProof: Array<Record<string, string | number>> = [];
       const depositCycles = [
         { whole: 3n, tokenId: usdcToken.tokenId, scale: usdcToken.scale },
         { whole: 10n, tokenId: usdtTokenId, scale: usdtToken.scale },
@@ -1023,35 +655,45 @@ test.describe('E2E Custody Flow', () => {
           const walletHref = (await custodyPage.locator('[data-open-wallet-href]').first().getAttribute('data-open-wallet-href'))?.trim() || '';
           expect(invoice).toMatch(/^0x[0-9a-f]{64}(?:\?|$)/i);
           expect(walletHref).toContain('/app#pay/');
+          const params = new URLSearchParams(invoice.slice(invoice.indexOf('?') + 1));
+          expect(invoice.startsWith(custodyIdentity.entityId)).toBe(true);
+          expect(params.get('token')).toBe(String(cycle.tokenId));
+          expect(params.get('amount')).toBe(cycle.whole.toString());
+          // The public link intentionally targets xln.finance. The isolated chain's
+          // funds stay in its local wallet; exercise the original invoice-paste flow.
+          const publicWallet = new URL(walletHref);
+          expect(publicWallet.origin).toBe('https://xln.finance');
+          expect(publicWallet.pathname).toBe('/app');
+          expect(decodeURIComponent(publicWallet.hash.slice('#pay/'.length))).toBe(invoice);
           if (cycleIndex === 1) {
             const copyButton = custodyPage.locator('[data-copy-invoice]').first();
             await copyButton.click();
             await expect(copyButton).toHaveText(/^Copied$/i, { timeout: 5_000 });
           }
           await walletPage.bringToFront();
-          await openWalletPayWorkspace(walletPage, fundingHubId);
-          const clearInvoiceButton = walletPage.getByRole('button', { name: /^Clear$/i }).first();
-          if (await clearInvoiceButton.isVisible().catch(() => false)) {
-            await clearInvoiceButton.click();
-          }
-          await walletPage.locator('#payment-invoice-input').fill(invoice);
-          console.log(`[custody:wallet] invoice-filled cycle=${cycleIndex + 1} url=${walletPage.url()} invoice=${invoice.slice(0, 120)}`);
-          await expect
-            .poll(async () => {
-              const current = await walletPage.locator('#payment-invoice-input').inputValue();
-              return {
-                hasId: current.startsWith(custodyIdentity.entityId),
-                hasToken: current.includes(`token=${cycle.tokenId}`),
-                hasAmount: current.includes(`amount=${cycle.whole.toString()}`),
-              };
-            }, { timeout: 5_000 })
-            .toEqual({ hasId: true, hasToken: true, hasAmount: true });
-          await waitForPopupRoutesAndSubmit(walletPage, custodyIdentity.entityId);
+          await openPayWorkspace(walletPage);
+          await walletPage.getByTestId('pay-to').fill(invoice);
+          await expect(walletPage.getByTestId('pay-to')).toHaveValue(custodyIdentity.entityId);
+          const restoredId = await walletPage.evaluate(() => (window as WalletRuntimeView).__xln?.adapter()?.runtimeId);
+          expect(restoredId).toBe(alice.runtimeId);
+          await expect(walletPage.getByTestId('pay-amount')).toHaveValue(cycle.whole.toString());
+          await waitForReceiveReadyGossipProfiles(
+            walletPage,
+            [alice.entityId, fundingHubId, custodyIdentity.entityId],
+            fundingHubId,
+          );
+          await chooseVisibleRoute(walletPage, [fundingHubId, custodyIdentity.entityId]);
+          await expect(walletPage.getByTestId('pay-quote')).toHaveAttribute(
+            'data-recipient-amount',
+            (cycle.whole * cycle.scale).toString(),
+          );
+          await expect(walletPage.getByTestId('pay-submit')).toBeEnabled();
+          await walletPage.getByTestId('pay-submit').click();
         });
         if (daemonClient) {
-          await timedStep(
-            `custody.deposit_cycle_${cycleIndex + 1}.wait_receipt`,
-            () => waitForDaemonReceiptEvent(daemonClient, {
+          const receiptClient = daemonClient;
+          await timedStep(`custody.deposit_cycle_${cycleIndex + 1}.wait_receipt`, () =>
+            waitForDaemonReceiptEvent(receiptClient, {
               entityId: custodyIdentity.entityId,
               eventName: 'HtlcReceived',
               fromHeight: daemonReceiptCursorBeforeDeposit,
@@ -1075,6 +717,12 @@ test.describe('E2E Custody Flow', () => {
         expect(BigInt(depositActivity.amountMinor)).toBe(depositMinor);
         expect(Number(depositActivity.tokenId)).toBe(cycle.tokenId);
         expect(dashboard.custody?.lastSyncError ?? null).toBeNull();
+        financialProof.push({
+          kind: 'deposit',
+          tokenId: cycle.tokenId,
+          amountMinor: depositActivity.amountMinor,
+          creditedBalanceMinor: readCustodyTokenMinor(dashboard, cycle.tokenId).toString(),
+        });
       }
 
       const withdrawCycles = [
@@ -1125,7 +773,19 @@ test.describe('E2E Custody Flow', () => {
             custodyBalances.get(cycle.tokenId) ?? 0n,
           ),
         );
+        financialProof.push({
+          kind: 'withdrawal',
+          tokenId: cycle.tokenId,
+          requestedAmountMinor: finalizedWithdrawal.requestedAmountMinor,
+          senderSpentMinor: finalizedWithdrawal.amountMinor,
+          feeMinor: finalizedWithdrawal.feeMinor,
+          creditedBalanceMinor: readCustodyTokenMinor(dashboard, cycle.tokenId).toString(),
+        });
       }
+      await test.info().attach('custody-financial-proof', {
+        body: JSON.stringify(financialProof, null, 2),
+        contentType: 'application/json',
+      });
     } finally {
       await closeRuntimeContext(context);
       await daemonClient?.close();

@@ -1,0 +1,30 @@
+[
+  {
+    "kind": "deposit",
+    "tokenId": 1,
+    "amountMinor": "3000000",
+    "creditedBalanceMinor": "3000000"
+  },
+  {
+    "kind": "deposit",
+    "tokenId": 3,
+    "amountMinor": "10000000",
+    "creditedBalanceMinor": "10000000"
+  },
+  {
+    "kind": "withdrawal",
+    "tokenId": 1,
+    "requestedAmountMinor": "2000000",
+    "senderSpentMinor": "2000002",
+    "feeMinor": "2",
+    "creditedBalanceMinor": "999998"
+  },
+  {
+    "kind": "withdrawal",
+    "tokenId": 3,
+    "requestedAmountMinor": "4000000",
+    "senderSpentMinor": "4000004",
+    "feeMinor": "4",
+    "creditedBalanceMinor": "5999996"
+  }
+]
