@@ -1,0 +1,9 @@
+{
+  "command": [
+    "bun",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-flip/type-compare.ts"
+  ],
+  "exitCode": 0,
+  "seconds": 10.575,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-flip-types.log"
+}

@@ -1,3 +1,4 @@
+import { verifySwapFlip } from '../../utils/browser/swap-flip';
 import { verifyBookFill } from '../../utils/browser/swap-book-fill';
 import { createWalletIdentity, LOCAL_PASSWORD } from '../../../ui/tests/wallet-ui';
 import { verifyRestingSwapCancellation } from '../../../ui/tests/swap-cancellation';
@@ -2228,62 +2229,18 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     );
   });
 
-  test('swap flip keeps the displayed receive amount as the next source amount', { tag: '@functional' }, async ({ page }) => {
-    await prepareOrderbookClickTest(page);
-    await ensureSwapScope(page, 'aggregated');
-    await selectSwapPairSide(page, 'WETH/USDC', 'buy');
-    await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
-
-    const asks = page.getByTestId('orderbook-ask-row');
-    await expect(asks.last()).toBeVisible({ timeout: 20_000 });
-    await asks.last().click();
-    await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
-
-    const amountInput = page.getByTestId('swap-ticket-amount').first();
-    const receiveInput = page.getByTestId('swap-ticket-receive-amount').first();
-    await expect(amountInput).toBeVisible({ timeout: 10_000 });
-    await expect(receiveInput).toBeVisible({ timeout: 10_000 });
-    const spendBefore = parseFirstNumber(await amountInput.inputValue());
-    const receiveBefore = parseFirstNumber(await receiveInput.locator('.swap-ticket-receive-value').textContent() || '');
-    expect(spendBefore, 'book click must populate source amount').toBeGreaterThan(0);
-    expect(receiveBefore, 'book click must populate receive amount').toBeGreaterThan(0);
-
-    await page.getByTestId('swap-ticket-flip').first().click();
-    await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
-    const flippedSourceAmount = parseFirstNumber(await amountInput.inputValue());
-    const flippedReceiveAmount = parseFirstNumber(await receiveInput.locator('.swap-ticket-receive-value').textContent() || '');
-    expect(Math.abs(flippedSourceAmount - receiveBefore), 'flip must not reinterpret USDC amount as WETH').toBeLessThan(0.000001);
-    expect(flippedSourceAmount, 'WETH source amount after flip must be much smaller than old USDC source amount').toBeLessThan(spendBefore / 100);
-    expect(flippedReceiveAmount, 'flipped receive should stay near the original spend notional').toBeGreaterThan(spendBefore * 0.99);
+  test('swap flip keeps the displayed receive amount as the next source amount', { tag: '@functional' }, async ({ page }, testInfo) => {
+    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+    await createWalletIdentity(page, 'flip-ask', randomMnemonic());
+    await expect(page.getByTestId('account-row').first()).toBeVisible();
+    await verifySwapFlip(page, testInfo, 'ask');
   });
 
-  test('swap flip keeps the sell-side displayed receive amount as the next source amount', { tag: '@functional' }, async ({ page }) => {
-    await prepareOrderbookClickTest(page);
-    await ensureSwapScope(page, 'aggregated');
-    await selectSwapPairSide(page, 'WETH/USDC', 'sell');
-    await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
-
-    const bids = page.getByTestId('orderbook-bid-row');
-    await expect(bids.first()).toBeVisible({ timeout: 20_000 });
-    await bids.first().click();
-    await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
-
-    const amountInput = page.getByTestId('swap-ticket-amount').first();
-    const receiveInput = page.getByTestId('swap-ticket-receive-amount').first();
-    await expect(amountInput).toBeVisible({ timeout: 10_000 });
-    await expect(receiveInput).toBeVisible({ timeout: 10_000 });
-    const spendBefore = parseFirstNumber(await amountInput.inputValue());
-    const receiveBefore = parseFirstNumber(await receiveInput.locator('.swap-ticket-receive-value').textContent() || '');
-    expect(spendBefore, 'sell-side book click must populate source amount').toBeGreaterThan(0);
-    expect(receiveBefore, 'sell-side book click must populate receive amount').toBeGreaterThan(0);
-
-    await page.getByTestId('swap-ticket-flip').first().click();
-    await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
-    const flippedSourceAmount = parseFirstNumber(await amountInput.inputValue());
-    const flippedReceiveAmount = parseFirstNumber(await receiveInput.locator('.swap-ticket-receive-value').textContent() || '');
-    expect(Math.abs(flippedSourceAmount - receiveBefore), 'sell-side flip must carry old USDC receive into new USDC source').toBeLessThan(0.000001);
-    expect(flippedSourceAmount, 'USDC source after sell-side flip must be much larger than old WETH source').toBeGreaterThan(spendBefore * 100);
-    expect(flippedReceiveAmount, 'sell-side flipped receive should stay near the original WETH spend').toBeGreaterThan(spendBefore * 0.99);
+  test('swap flip keeps the sell-side displayed receive amount as the next source amount', { tag: '@functional' }, async ({ page }, testInfo) => {
+    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+    await createWalletIdentity(page, 'flip-bid', randomMnemonic());
+    await expect(page.getByTestId('account-row').first()).toBeVisible();
+    await verifySwapFlip(page, testInfo, 'bid');
   });
 
   test('swap can buy from asks and then sell back into bids on the same book', { tag: '@functional' }, async ({ page }) => {

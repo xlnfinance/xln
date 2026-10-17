@@ -1,0 +1,11 @@
+# Swap direction preserves exact amounts and token units
+
+Base main51f3f3acecce13b4d2acae4ee9d231814edc94db. The original buy-side flip scenario failed43.797s at the retired Svelte runtime dropdown, before the amount checks. Both existing named directions now use the canonical React importer, live hub book and actual UI faucet. One focused helper owns the two symmetric assertions; no production code changes.
+
+The buy-side selected quote is100USDC for0.039992001599680063WETH. Flip must place exactly the latter string in the WETH source field and100 in the USDC receive field, with the token pickers exchanged. The sell-side applies the same condition to its actual best bid. Both verify strictly positive integer token amounts at the correct6/18 decimals and retain the original100x display-scale guard. The former approximate comparison and99% notional allowance are strengthened to exact string and integer-unit equality. A second flip restores every digit and both token identities.
+
+No swap is submitted. The complete current Account observation and durable order history must equal their pre-flip snapshots, including balances, credit, holds, Account root/height, mempool and absence of offers/history. This is quote-direction safety evidence, not an economic operation or throughput measurement. The existing selected-hub React book replaces retired Svelte aggregated controls; no fallback wallet was restored.
+
+Real buy-side browser1/1 passed33.188s; sell-side1/1 passed33.172s. Both strict browser-health manifests have zero issues. The actual browser is the smallest meaningful regression for the React event handler and its token pickers; no mirrored implementation unit test or mock was added. Strict same-options type comparison reports38 pre-existing root diagnostics and38 current, zero introduced/new-helper diagnostics (10.575s), not whole-file strict success. Exact commands/exits and safe attachments are included.
+
+Final fullcheck, clean committed browser and installed verifier/push evidence is stored in the existing durable autonomous job under evidence/swap-flip-* and swap-flip/clean-head. Runtime, WAL format, Rust and contracts remain unchanged. Remaining aggregate release/browser, public Sepolia, backend binary rollback, uninterrupted soak and MacBook synchronization are not waived.
