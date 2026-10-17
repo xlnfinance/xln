@@ -1,0 +1,153 @@
+[
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "rebalance-tail-baseline",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts::edge: rapid 8 faucets keep the sub-soft tail out of the pending collateral batch"
+    ],
+    "exitCode": 0,
+    "seconds": 28.877,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-tail-baseline.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "rebalance-tail-canonical-risk",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts::edge: rapid 8 faucets keep the sub-soft tail out of the pending collateral batch"
+    ],
+    "exitCode": 0,
+    "seconds": 40.792,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-tail-canonical-risk.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "rebalance-tail-exact-pending",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts::edge: rapid 8 faucets keep the sub-soft tail out of the pending collateral batch"
+    ],
+    "exitCode": 1,
+    "seconds": 28.474,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-tail-exact-pending.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "rebalance-tail-final-check",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "run",
+      "check"
+    ],
+    "exitCode": 0,
+    "seconds": 26.581,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-tail-final-check-2.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "rebalance-tail-final-check",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "run",
+      "check"
+    ],
+    "exitCode": 1,
+    "seconds": 0.238,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-tail-final-check.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "rebalance-tail-types",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/rebalance-bar/typecheck.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 4.724,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-tail-types-2.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "rebalance-tail-types",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/rebalance-bar/typecheck.ts"
+    ],
+    "exitCode": 1,
+    "seconds": 4.828,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-tail-types.log"
+  }
+]

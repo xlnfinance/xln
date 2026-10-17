@@ -1,0 +1,253 @@
+{
+  "chainBefore": {
+    "chainId": 31337,
+    "collateral": "0",
+    "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853"
+  },
+  "pendingProof": {
+    "firstTrigger": {
+      "committed": {
+        "data": {
+          "accountId": "0x9a2dedea7e937e9e0099c6a7d09cea53d254058278c9a5dc3a2bdbc9221bb667",
+          "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+          "prepaidFee": "150000",
+          "requestedAmount": "499850000",
+          "requestedAt": 1792263157759,
+          "tokenId": 1
+        },
+        "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+        "frameHeight": 21,
+        "message": "request_collateral_committed"
+      },
+      "faucets": 5,
+      "snapshot": {
+        "collateral": "0",
+        "currentHeight": 9,
+        "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+        "freeOutCollateral": "0",
+        "hasPolicy": true,
+        "hubDebt": "499850000",
+        "hubExposure": "499850000",
+        "hubFreeOutCollateral": "0",
+        "hubOutCollateral": "0",
+        "hubOutTotalHold": "0",
+        "inCapacity": "9500150000",
+        "inCollateral": "0",
+        "lastFinalizedJHeight": 0,
+        "leftPendingJClaims": "0",
+        "offdelta": "-499850000",
+        "ondelta": "0",
+        "outCapacity": "499850000",
+        "outCollateral": "0",
+        "outTotalHold": "0",
+        "requested": "499850000",
+        "rightPendingJClaims": "0",
+        "totalDelta": "-499850000",
+        "uncollateralized": "499850000"
+      }
+    },
+    "pending": {
+      "batchHash": "0x1fd3f2554de38f5bbb56d752c702c7b52ee79f1ad9195baf2f3e71f2ee32e73b",
+      "entityNonce": {
+        "__xlnType": "BigInt",
+        "value": "1"
+      },
+      "transactionHash": "0xad7507372116e15c149f817fe3652c082292bbc942d937f04d866455351ca78d"
+    },
+    "receipt": {
+      "blobGasPrice": "0x1",
+      "blockHash": "0x43115658344ad1d493797b7dd03578df6578453cdcacf49a6f7b47f5491b1dac",
+      "blockNumber": "0x28",
+      "blockTimestamp": 1792263158,
+      "contractAddress": null,
+      "cumulativeGasUsed": "0x2d5fd",
+      "effectiveGasPrice": "0x3bf7bfb4",
+      "from": "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc",
+      "gasUsed": "0x2d5fd",
+      "logs": [
+        {
+          "address": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+          "blockHash": "0x43115658344ad1d493797b7dd03578df6578453cdcacf49a6f7b47f5491b1dac",
+          "blockNumber": "0x28",
+          "blockTimestamp": "0x6ad3c3f6",
+          "data": "0x000000000000000000000000000000000000000000000000000001d18b7f04f0",
+          "logIndex": "0x0",
+          "removed": false,
+          "topics": [
+            "0xab4d21442efe134c3d0c087e2b687e9593a1c09176f498d37873210cde052c45",
+            "0x9a2dedea7e937e9e0099c6a7d09cea53d254058278c9a5dc3a2bdbc9221bb667",
+            "0x0000000000000000000000000000000000000000000000000000000000000001"
+          ],
+          "transactionHash": "0xad7507372116e15c149f817fe3652c082292bbc942d937f04d866455351ca78d",
+          "transactionIndex": "0x0"
+        },
+        {
+          "address": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+          "blockHash": "0x43115658344ad1d493797b7dd03578df6578453cdcacf49a6f7b47f5491b1dac",
+          "blockNumber": "0x28",
+          "blockTimestamp": "0x6ad3c3f6",
+          "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000209a2dedea7e937e9e0099c6a7d09cea53d254058278c9a5dc3a2bdbc9221bb6679d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de0000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000001d18b7f04f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001dcb1b100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001dcb1b10",
+          "logIndex": "0x1",
+          "removed": false,
+          "topics": [
+            "0x0f6fd032d913fef8dbe7c7c56a32bdf3a1f7dfe48663d4af3f0974dcfcadfbdd"
+          ],
+          "transactionHash": "0xad7507372116e15c149f817fe3652c082292bbc942d937f04d866455351ca78d",
+          "transactionIndex": "0x0"
+        },
+        {
+          "address": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+          "blockHash": "0x43115658344ad1d493797b7dd03578df6578453cdcacf49a6f7b47f5491b1dac",
+          "blockNumber": "0x28",
+          "blockTimestamp": "0x6ad3c3f6",
+          "data": "0x0000000000000000000000000000000000000000000000000000000000000001",
+          "logIndex": "0x2",
+          "removed": false,
+          "topics": [
+            "0x6ae7376aaf94e00d6598cb4305ba9943f431e6a66da007871ecddb33f054eda3",
+            "0x9a2dedea7e937e9e0099c6a7d09cea53d254058278c9a5dc3a2bdbc9221bb667",
+            "0x1fd3f2554de38f5bbb56d752c702c7b52ee79f1ad9195baf2f3e71f2ee32e73b"
+          ],
+          "transactionHash": "0xad7507372116e15c149f817fe3652c082292bbc942d937f04d866455351ca78d",
+          "transactionIndex": "0x0"
+        }
+      ],
+      "logsBloom": "0x00000000000001000000000000000000000000000000000040000000000000010000000000000000000000000000000000040000080000000000000000040000000000000000000008200000000400000000000010040000010000000000000000000000000000000000000008000000400000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000200000000000002040000000000040000000000000000000000000000020000000000000000000000000000000000000",
+      "status": "0x1",
+      "to": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+      "transactionHash": "0xad7507372116e15c149f817fe3652c082292bbc942d937f04d866455351ca78d",
+      "transactionIndex": "0x0",
+      "type": "0x2"
+    },
+    "tailStates": [
+      {
+        "collateral": "0",
+        "currentHeight": 10,
+        "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+        "freeOutCollateral": "0",
+        "hasPolicy": true,
+        "hubDebt": "599850000",
+        "hubExposure": "599850000",
+        "hubFreeOutCollateral": "0",
+        "hubOutCollateral": "0",
+        "hubOutTotalHold": "0",
+        "inCapacity": "9400150000",
+        "inCollateral": "0",
+        "lastFinalizedJHeight": 0,
+        "leftPendingJClaims": "0",
+        "offdelta": "-599850000",
+        "ondelta": "0",
+        "outCapacity": "599850000",
+        "outCollateral": "0",
+        "outTotalHold": "0",
+        "requested": "499850000",
+        "rightPendingJClaims": "0",
+        "totalDelta": "-599850000",
+        "uncollateralized": "599850000"
+      },
+      {
+        "collateral": "0",
+        "currentHeight": 11,
+        "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+        "freeOutCollateral": "0",
+        "hasPolicy": true,
+        "hubDebt": "699850000",
+        "hubExposure": "699850000",
+        "hubFreeOutCollateral": "0",
+        "hubOutCollateral": "0",
+        "hubOutTotalHold": "0",
+        "inCapacity": "9300150000",
+        "inCollateral": "0",
+        "lastFinalizedJHeight": 0,
+        "leftPendingJClaims": "0",
+        "offdelta": "-699850000",
+        "ondelta": "0",
+        "outCapacity": "699850000",
+        "outCollateral": "0",
+        "outTotalHold": "0",
+        "requested": "499850000",
+        "rightPendingJClaims": "0",
+        "totalDelta": "-699850000",
+        "uncollateralized": "699850000"
+      },
+      {
+        "collateral": "0",
+        "currentHeight": 12,
+        "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+        "freeOutCollateral": "0",
+        "hasPolicy": true,
+        "hubDebt": "799850000",
+        "hubExposure": "799850000",
+        "hubFreeOutCollateral": "0",
+        "hubOutCollateral": "0",
+        "hubOutTotalHold": "0",
+        "inCapacity": "9200150000",
+        "inCollateral": "0",
+        "lastFinalizedJHeight": 0,
+        "leftPendingJClaims": "0",
+        "offdelta": "-799850000",
+        "ondelta": "0",
+        "outCapacity": "799850000",
+        "outCollateral": "0",
+        "outTotalHold": "0",
+        "requested": "499850000",
+        "rightPendingJClaims": "0",
+        "totalDelta": "-799850000",
+        "uncollateralized": "799850000"
+      }
+    ]
+  },
+  "requestCommits": [
+    {
+      "data": {
+        "accountId": "0x9a2dedea7e937e9e0099c6a7d09cea53d254058278c9a5dc3a2bdbc9221bb667",
+        "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+        "prepaidFee": "150000",
+        "requestedAmount": "499850000",
+        "requestedAt": 1792263157759,
+        "tokenId": 1
+      },
+      "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+      "frameHeight": 21,
+      "message": "request_collateral_committed"
+    }
+  ],
+  "settled": {
+    "collateral": "499850000",
+    "currentHeight": 14,
+    "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+    "freeOutCollateral": "499850000",
+    "hasPolicy": true,
+    "hubDebt": "300000000",
+    "hubExposure": "799850000",
+    "hubFreeOutCollateral": "0",
+    "hubOutCollateral": "0",
+    "hubOutTotalHold": "0",
+    "inCapacity": "9700000000",
+    "inCollateral": "0",
+    "lastFinalizedJHeight": 40,
+    "leftPendingJClaims": "0",
+    "offdelta": "-799850000",
+    "ondelta": "499850000",
+    "outCapacity": "799850000",
+    "outCollateral": "499850000",
+    "outTotalHold": "0",
+    "requested": "0",
+    "rightPendingJClaims": "0",
+    "totalDelta": "-300000000",
+    "uncollateralized": "300000000"
+  },
+  "settlement": {
+    "data": {
+      "accountId": "0x9a2dedea7e937e9e0099c6a7d09cea53d254058278c9a5dc3a2bdbc9221bb667",
+      "collateral": "499850000",
+      "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+      "jHeight": 40,
+      "ondelta": "499850000",
+      "tokenId": 1
+    },
+    "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+    "frameHeight": 27,
+    "message": "account_settled_finalized_bilateral"
+  }
+}

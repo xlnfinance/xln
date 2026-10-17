@@ -868,7 +868,8 @@ async function readPairState(page: Page, counterpartyId: string, ownerEntityId?:
   const outPeerCredit = derived.outPeerCredit;
   const outCollateral = derived.outCollateral;
   const hubExposure = outPeerCredit + outCollateral;
-  const uncollateralized = outPeerCredit > outCollateral ? outPeerCredit - outCollateral : 0n;
+  // deriveDelta already excludes collateral from outPeerCredit.
+  const uncollateralized = outPeerCredit;
 
   return {
     currentHeight: Number(raw.currentHeight || 0),
@@ -1165,7 +1166,8 @@ async function readRebalanceState(page: Page, hubId: string) {
   const hubOutTotalHold = hubDerived.outTotalHold;
   const hubFreeOutCollateral = hubOutCollateral > hubOutTotalHold ? hubOutCollateral - hubOutTotalHold : 0n;
   const hubExposure = outPeerCredit + outCollateral;
-  const uncollateralized = outPeerCredit > outCollateral ? outPeerCredit - outCollateral : 0n;
+  // deriveDelta already excludes collateral from outPeerCredit.
+  const uncollateralized = outPeerCredit;
   return {
     entityId: String(raw.entityId || ''),
     requested: String(raw.requested || '0'),
@@ -2030,142 +2032,210 @@ test.describe('Rebalance E2E', () => {
     expect(criticalConsole, `critical consensus/runtime errors:\n${criticalConsole.join('\n')}`).toEqual([]);
   });
 
-  // Scenario: five faucets reach the inclusive 500 soft limit. Two more faucets while that
-  // request is pending remain below a fresh soft limit and must not top it up.
-  test('edge: rapid 8 faucets keep the sub-soft tail out of the pending collateral batch', { tag: '@resilience' }, async ({ page }) => {
-    let scenarioStartedAt = 0;
-    await timedStep('rebalance_edge.reset_server', () => resetProdServer(page));
-    await page.addInitScript(() => {
-      try {
-        localStorage.setItem('xln-app-mode', 'user');
-        localStorage.setItem('xln-onboarding-complete', 'true');
-      } catch {
-        // no-op
-      }
-    });
-    await timedStep('rebalance_edge.goto_app', () => gotoApp(page));
-    await timedStep('rebalance_edge.create_runtime', () => createWalletIdentity(page, `rebalance-edge-pending-${Date.now()}`, nextRebalanceMnemonic()));
-    await timedStep('rebalance_edge.ensure_runtime_online', () => ensureRuntimeOnline(page, 'edge-pending-post-create'));
+  // Scenario: five faucets reach the inclusive 500 soft limit. Three more faucets while the
+  // signed batch is held pending remain below a fresh soft limit and must not top it up.
+  test(
+    'edge: rapid 8 faucets keep the sub-soft tail out of the pending collateral batch',
+    { tag: '@resilience' },
+    async ({ page }) => {
+      let scenarioStartedAt = 0;
+      await timedStep('rebalance_edge.reset_server', () => resetProdServer(page));
+      await page.addInitScript(() => {
+        try {
+          localStorage.setItem('xln-app-mode', 'user');
+          localStorage.setItem('xln-onboarding-complete', 'true');
+        } catch {
+          // no-op
+        }
+      });
+      await timedStep('rebalance_edge.goto_app', () => gotoApp(page));
+      await timedStep('rebalance_edge.create_runtime', () =>
+        createWalletIdentity(page, `rebalance-edge-pending-${Date.now()}`, nextRebalanceMnemonic()),
+      );
+      await timedStep('rebalance_edge.ensure_runtime_online', () =>
+        ensureRuntimeOnline(page, 'edge-pending-post-create'),
+      );
 
-    const { entityId, signerId } = await timedStep('rebalance_edge.get_local_entity', () => getLocalEntity(page));
-    const hubId = await timedStep('rebalance_edge.discover_hub', () => discoverHub(page));
-    await timedStep('rebalance_edge.wait_hub_profile', () => waitForHubProfile(page, hubId));
-    await timedStep('rebalance_edge.connect_hub', () => connectHub(page, entityId, signerId, hubId));
-    // Start collection window after reset/bootstrap to avoid cross-test bleed.
-    scenarioStartedAt = Date.now();
-    await markE2EPhase(page, 'rebalance_edge.connected_hub', {
-      phase: 'setup',
-      entityId,
-      details: { hubId },
-    });
+      const { entityId, signerId } = await timedStep('rebalance_edge.get_local_entity', () => getLocalEntity(page));
+      const hubId = await timedStep('rebalance_edge.discover_hub', () => discoverHub(page));
+      await timedStep('rebalance_edge.wait_hub_profile', () => waitForHubProfile(page, hubId));
+      await timedStep('rebalance_edge.connect_hub', () => connectHub(page, entityId, signerId, hubId));
+      // Start collection window after reset/bootstrap to avoid cross-test bleed.
+      scenarioStartedAt = Date.now();
+      await markE2EPhase(page, 'rebalance_edge.connected_hub', {
+        phase: 'setup',
+        entityId,
+        details: { hubId },
+      });
 
-    // Trigger the first request from committed account state, not from accepted faucet API calls.
-    const edgeCursor = await getPersistedReceiptCursor(page);
-    const edgeBaseline = await readRebalanceState(page, hubId);
-    expect(edgeBaseline, 'edge baseline must exist').toBeTruthy();
-    const firstTrigger = await timedStep('rebalance_edge.drive_to_first_request', () =>
-      driveFaucetsUntilRequestCollateralCommitted(page, {
+      // Trigger the first request from committed account state, not from accepted faucet API calls.
+      const edgeCursor = await getPersistedReceiptCursor(page);
+      const edgeBaseline = await readRebalanceState(page, hubId);
+      expect(edgeBaseline, 'edge baseline must exist').toBeTruthy();
+      if (!edgeBaseline) throw new Error('REBALANCE_EDGE_BASELINE_MISSING');
+      const chainBefore = await readActiveChainRebalanceState(page, entityId, hubId);
+      const pendingProof = await timedStep('rebalance_edge.hold_batch_through_tail', async () => {
+        await callTestnetRpc<unknown>(page, 'evm_setAutomine', [false]);
+        try {
+          const firstTrigger = await driveFaucetsUntilRequestCollateralCommitted(page, {
+            entityId,
+            hubId,
+            scenarioStartedAt,
+            receiptCursor: edgeCursor,
+          });
+          expect(firstTrigger.faucets, 'the first request must start on the fifth 100-unit faucet').toBe(5);
+          const requestedAmount = BigInt(String(firstTrigger.committed.data?.requestedAmount));
+          expect(requestedAmount).toBeGreaterThan(0n);
+          const pending = await waitForPendingRebalanceBatch(page, {
+            chainId: chainBefore.chainId,
+            depository: chainBefore.depository,
+            entityId,
+            expectedAmount: requestedAmount,
+            hubId,
+          });
+          const tailStates: NonNullable<Awaited<ReturnType<typeof readRebalanceState>>>[] = [];
+          for (let index = 0; index < 3; index++) {
+            const before = await readRebalanceState(page, hubId);
+            if (!before) throw new Error('REBALANCE_EDGE_PENDING_ACCOUNT_MISSING');
+            expect(BigInt(before.requested)).toBe(requestedAmount);
+            expect(BigInt(before.collateral)).toBe(BigInt(edgeBaseline.collateral));
+            await faucet(page, entityId, hubId);
+            await waitForRebalanceStateProgress(page, hubId, {
+              currentHeight: before.currentHeight,
+              uncollateralized: BigInt(before.uncollateralized),
+              requested: BigInt(before.requested),
+              collateral: BigInt(before.collateral),
+              hubExposure: BigInt(before.hubExposure),
+              outCapacity: BigInt(before.outCapacity),
+            });
+            await expect
+              .poll(
+                async () => {
+                  const state = await readRebalanceState(page, hubId);
+                  if (!state) throw new Error('REBALANCE_EDGE_TAIL_ACCOUNT_MISSING');
+                  return {
+                    requested: BigInt(state.requested),
+                    collateral: BigInt(state.collateral),
+                    out: BigInt(state.outCapacity),
+                  };
+                },
+                { timeout: 15_000, intervals: [100, 250, 500] },
+              )
+              .toEqual({
+                requested: requestedAmount,
+                collateral: BigInt(edgeBaseline.collateral),
+                out: BigInt(before.outCapacity) + 100n * USDC_UNIT,
+              });
+            const state = await readRebalanceState(page, hubId);
+            if (!state) throw new Error('REBALANCE_EDGE_TAIL_ACCOUNT_MISSING');
+            tailStates.push(state);
+          }
+          const stillPending = await waitForPendingRebalanceBatch(page, {
+            chainId: chainBefore.chainId,
+            depository: chainBefore.depository,
+            entityId,
+            expectedAmount: requestedAmount,
+            hubId,
+          });
+          expect(stillPending, 'all eight faucets retain the exact signed pending batch').toEqual(pending);
+          expect((await readActiveChainRebalanceState(page, entityId, hubId)).collateral).toBe(chainBefore.collateral);
+          await callTestnetRpc<unknown>(page, 'anvil_mine', ['0x1']);
+          const receipt = await waitForTransactionReceipt(page, pending.transactionHash);
+          expect(receipt.status).toBe('0x1');
+          return { firstTrigger, pending, receipt, tailStates };
+        } finally {
+          await callTestnetRpc<unknown>(page, 'evm_setAutomine', [true]);
+        }
+      });
+      const firstRequestCommit = pendingProof.firstTrigger.committed;
+      const pendingSnapshot = pendingProof.firstTrigger.snapshot;
+      expect(pendingSnapshot, 'expected committed request before first finalize').toBeTruthy();
+      const settlement = await waitForPersistedFrameEventMatch(page, {
+        cursor: edgeCursor,
+        eventName: 'account_settled_finalized_bilateral',
+        entityId,
+        timeoutMs: 60_000,
+        predicate: event => persistedEventHasAccount(event, hubId),
+      });
+      const settled: { snapshot: Awaited<ReturnType<typeof readRebalanceState>> } = { snapshot: null };
+      await expect
+        .poll(
+          async () => {
+            settled.snapshot = await readRebalanceState(page, hubId);
+            return (
+              !!settled.snapshot &&
+              BigInt(settled.snapshot.requested || '0') === 0n &&
+              Number(settled.snapshot.lastFinalizedJHeight || 0) > Number(edgeBaseline?.lastFinalizedJHeight || 0)
+            );
+          },
+          { timeout: 30_000, intervals: [250, 500, 1000] },
+        )
+        .toBe(true);
+      const persisted = await readPersistedFrameEventsSinceCursor(page, {
+        cursor: edgeCursor,
+        eventNames: ['request_collateral_committed'],
+        entityId,
+      });
+      const requestCommits = persisted.events.filter(event => persistedEventHasAccount(event, hubId));
+      const diagnostics = await readRebalanceDiagnostics(page, hubId);
+      const { phaseMarkers, debugErrors, frameEvents } = await collectRebalanceDebugArtifacts(
+        page,
+        scenarioStartedAt,
+        hubId,
+      );
+      const debugDump = buildRebalanceFailureDump({
         entityId,
         hubId,
-        scenarioStartedAt,
-        receiptCursor: edgeCursor,
-      }));
-    await markE2EPhase(page, 'rebalance_edge.first_trigger_done', {
-      phase: 'trigger',
-      entityId,
-      details: {
-        hubId,
-        count: firstTrigger.faucets,
-        requestedAt: firstTrigger.committed?.data?.requestedAt,
-        snapshot: firstTrigger.snapshot,
-      },
-    });
-    const pendingSnapshot: any = firstTrigger.snapshot;
-    const firstRequestCommit: any = firstTrigger.committed;
-    expect(firstTrigger.faucets, 'the first request must start on the fifth 100-unit faucet').toBe(5);
-    await markE2EPhase(page, 'rebalance_edge.request_committed', {
-      phase: 'trigger-confirmed',
-      entityId,
-      details: {
-        hubId,
-        requestedAt: firstRequestCommit.requestedAt,
-        tokenId: firstRequestCommit.tokenId,
-        pendingSeen: BigInt(pendingSnapshot?.requested || '0') > 0n,
-      },
-    });
-    expect(firstRequestCommit, 'expected request_collateral_committed before first finalize').toBeTruthy();
-
-    // Clicks seven and eight add less than a new 500-unit soft limit.
-    for (let i = 0; i < 2; i++) {
-      const before = await readRebalanceState(page, hubId);
-      expect(before, `edge burst baseline ${i + 1} must exist`).toBeTruthy();
-      await faucet(page, entityId, hubId);
-      await waitForRebalanceStateProgress(page, hubId, {
-        currentHeight: Number(before?.currentHeight || 0),
-        uncollateralized: BigInt(before?.uncollateralized || '0'),
-        requested: BigInt(before?.requested || '0'),
-        collateral: BigInt(before?.collateral || '0'),
-        hubExposure: BigInt(before?.hubExposure || '0'),
-        outCapacity: BigInt(before?.outCapacity || '0'),
+        snapshot: settled.snapshot,
+        diagnostics,
+        rebalanceSteps: [],
+        stateTimeline: [
+          { atMs: 'pending-request', ...pendingSnapshot },
+          { atMs: 'settled', ...settled.snapshot },
+        ],
+        rebalanceConsole: [],
+        phaseMarkers,
+        debugErrors,
+        frameEvents,
       });
-    }
-    await markE2EPhase(page, 'rebalance_edge.second_burst_while_pending_done', {
-      phase: 'duplicate-guard',
-      entityId,
-      details: { hubId, count: 2 },
-    });
-    const settlement = await waitForPersistedFrameEventMatch(page, {
-      cursor: edgeCursor,
-      eventName: 'account_settled_finalized_bilateral',
-      entityId,
-      timeoutMs: 60_000,
-      predicate: (event) => persistedEventHasAccount(event, hubId),
-    });
-    const settled: { snapshot: Awaited<ReturnType<typeof readRebalanceState>> } = { snapshot: null };
-    await expect.poll(async () => {
-      settled.snapshot = await readRebalanceState(page, hubId);
-      return !!settled.snapshot
-        && BigInt(settled.snapshot.requested || '0') === 0n
-        && Number(settled.snapshot.lastFinalizedJHeight || 0) > Number(edgeBaseline?.lastFinalizedJHeight || 0);
-    }, { timeout: 30_000, intervals: [250, 500, 1000] }).toBe(true);
-    const persisted = await readPersistedFrameEventsSinceCursor(page, {
-      cursor: edgeCursor,
-      eventNames: ['request_collateral_committed'],
-      entityId,
-    });
-    const requestCommits = persisted.events.filter((event) => persistedEventHasAccount(event, hubId));
-    const diagnostics = await readRebalanceDiagnostics(page, hubId);
-    const { phaseMarkers, debugErrors, frameEvents } = await collectRebalanceDebugArtifacts(page, scenarioStartedAt, hubId);
-    const debugDump = buildRebalanceFailureDump({
-      entityId,
-      hubId,
-      snapshot: settled.snapshot,
-      diagnostics,
-      rebalanceSteps: [],
-      stateTimeline: [
-        { atMs: 'pending-request', ...pendingSnapshot },
-        { atMs: 'settled', ...settled.snapshot },
-      ],
-      rebalanceConsole: [],
-      phaseMarkers,
-      debugErrors,
-      frameEvents,
-    });
-    expect(
-      requestCommits.length,
-      `clicks seven and eight must not create a second durable collateral request\n${debugDump}`,
-    ).toBe(1);
-    expect(
-      settlement.frameHeight > firstRequestCommit.frameHeight,
-      `settlement must follow the durable collateral request\n${debugDump}`,
-    ).toBe(true);
-    const requestedAmount = BigInt(firstRequestCommit.data?.requestedAmount || '0');
-    expect(requestedAmount, `durable request amount must be positive\n${debugDump}`).toBeGreaterThan(0n);
-    expect(
-      BigInt(settled.snapshot?.collateral || '0') - BigInt(edgeBaseline?.collateral || '0'),
-      `one request must produce one exact collateral increase\n${debugDump}`,
-    ).toBe(requestedAmount);
-  });
+      expect(
+        requestCommits.length,
+        `clicks six through eight must not create a second durable collateral request\n${debugDump}`,
+      ).toBe(1);
+      expect(
+        settlement.frameHeight > firstRequestCommit.frameHeight,
+        `settlement must follow the durable collateral request\n${debugDump}`,
+      ).toBe(true);
+      const requestData = firstRequestCommit.data;
+      if (typeof requestData?.requestedAmount !== 'string' || typeof requestData.prepaidFee !== 'string') {
+        throw new Error('Committed collateral request must contain exact amount and prepaid fee strings');
+      }
+      const requestedAmount = BigInt(requestData.requestedAmount);
+      expect(requestedAmount, `durable request amount must be positive\n${debugDump}`).toBeGreaterThan(0n);
+      expect(
+        BigInt(settled.snapshot?.collateral || '0') - BigInt(edgeBaseline?.collateral || '0'),
+        `one request must produce one exact collateral increase\n${debugDump}`,
+      ).toBe(requestedAmount);
+      expect(pendingProof.firstTrigger.faucets + pendingProof.tailStates.length).toBe(8);
+      expect(BigInt(settled.snapshot?.uncollateralized ?? '')).toBe(300n * USDC_UNIT);
+      expect(BigInt(settled.snapshot?.hubDebt ?? '')).toBe(300n * USDC_UNIT);
+      expect(BigInt(settled.snapshot?.outCapacity ?? '') - BigInt(edgeBaseline.outCapacity)).toBe(
+        800n * USDC_UNIT - BigInt(requestData.prepaidFee),
+      );
+      expect(await countExactHankoBatchLogs(page, chainBefore.depository, hubId, pendingProof.pending.batchHash)).toBe(
+        1,
+      );
+      await page.getByTestId('nav-home').locator('visible=true').first().click();
+      await expect(page.getByTestId('home-risk').locator('strong')).toHaveText('$300.00');
+      await expect(page.getByTestId('home-secured').locator('strong')).toHaveText(
+        `$${Number(ethers.formatUnits(requestedAmount, USDC_DECIMALS)).toFixed(2)}`,
+      );
+      await test.info().attach('pending-rebalance-tail', {
+        contentType: 'application/json',
+        body: safeStringify({ pendingProof, chainBefore, settled: settled.snapshot, requestCommits, settlement }),
+      });
+    },
+  );
 
   // Scenario: force a full R2C -> C2R -> R2C loop and verify the account transitions through each
   // collateral phase without breaking cadence or losing finalization signal.
