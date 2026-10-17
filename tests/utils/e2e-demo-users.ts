@@ -747,116 +747,28 @@ export async function gotoApp(
     settleMs?: number;
   } = {},
 ): Promise<void> {
-  const appBaseUrl = options.appBaseUrl ?? APP_BASE_URL;
-  const initTimeoutMs = options.initTimeoutMs ?? DEFAULT_INIT_TIMEOUT;
+  const origin = new URL(options.appBaseUrl ?? APP_BASE_URL).origin;
+  const timeout = options.initTimeoutMs ?? DEFAULT_INIT_TIMEOUT;
+  const current = new URL(page.url());
+  // The gateway owns /app -> /ui/. Keep an open React route and its Runtime
+  // intact; credentials and recovery choices belong to each explicit test flow.
+  if (current.origin !== origin || !current.pathname.startsWith('/ui/')) {
+    await page.goto(`${origin}/app`, { waitUntil: 'domcontentloaded', timeout });
+  }
+  await expect(page).toHaveURL(new RegExp(`^${escapeRegex(origin)}/ui/`), { timeout });
+  await expect(
+    page
+      .locator(
+        [
+          '[data-testid="gate-stack"][data-state="online"]',
+          'nav[aria-label="Primary"]:visible',
+          '#wallet-password:visible',
+        ].join(', '),
+      )
+      .first(),
+  ).toBeVisible({ timeout });
   const settleMs = options.settleMs ?? 500;
-  const navigationTimeoutMs = Math.max(15_000, initTimeoutMs);
-  // Browser flows must stay same-origin in E2E and go through the preview /api proxy.
-  // Directly injecting the raw shard API URL into the page makes browser-only paths
-  // diverge from production and can bypass normal origin/proxy behavior.
-  const apiBaseUrl = appBaseUrl;
-  const installPageBindings = (configuredApiBaseUrl: string): void => {
-    const target = window as typeof window & {
-      __XLN_API_BASE_URL__?: string;
-      __xln?: Record<string, unknown>;
-      isolatedEnv?: unknown;
-    };
-    target.__XLN_API_BASE_URL__ = configuredApiBaseUrl;
-    Object.defineProperty(target, 'isolatedEnv', {
-      configurable: true,
-      enumerable: false,
-      get() {
-        const debugRoot = target.__xln;
-        return debugRoot?.liveRuntimeSnapshot || debugRoot?.env || null;
-      },
-    });
-    localStorage.setItem('xln-api-base-url', configuredApiBaseUrl);
-  };
-  await page.addInitScript(installPageBindings, apiBaseUrl);
-  // addInitScript covers future documents. Reset flows can finish their hard
-  // navigation before gotoApp is called, so install the same binding into the
-  // already-live app document before the readiness fast path returns.
-  if (/^https?:\/\//.test(page.url())) {
-    await page.evaluate(installPageBindings, apiBaseUrl);
-  }
-
-  const waitForAppReady = async (): Promise<boolean> => {
-    if (page.isClosed()) return false;
-    const unlock = page.locator('button:has-text("Unlock")');
-    if (await unlock.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await page.locator('input').first().fill('mml');
-      await unlock.click();
-      await page.waitForURL('**/app', { timeout: 10_000 });
-    }
-    try {
-      await page.waitForFunction(() => {
-        const isVisible = (selector: string): boolean => {
-          const element = document.querySelector(selector) as HTMLElement | null;
-          if (!element) return false;
-          const style = window.getComputedStyle(element);
-          if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
-            return false;
-          }
-          const rect = element.getBoundingClientRect();
-          return rect.width > 0 && rect.height > 0;
-        };
-        const errorVisible = isVisible('.error-screen');
-        const inactiveVisible = isVisible('[data-testid="inactive-tab-screen"]');
-        const viewVisible =
-          isVisible('.view-wrapper') ||
-          isVisible('nav[aria-label="Account workspace"]') ||
-          isVisible('[data-testid="account-workspace-mobile-toggle"]') ||
-          isVisible('[data-testid="app-runtime-ready"]');
-        const runtimeCreationVisible =
-          isVisible('#runtime-creation') ||
-          isVisible('.brainvault-wrapper') ||
-          isVisible('.quick-login-grid') ||
-          Boolean(Array.from(document.querySelectorAll('button')).find((button) => {
-            const label = (button.textContent || '').trim().toLowerCase();
-            return label === 'alice' || label === 'bob' || label === 'carol' || label === 'dave';
-          }));
-        return !errorVisible &&
-          !inactiveVisible &&
-          (viewVisible || runtimeCreationVisible);
-      }, { timeout: initTimeoutMs });
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const currentUrl = page.url();
-  if (currentUrl.includes('/app') && await waitForAppReady()) {
-    if (settleMs > 0) await page.waitForTimeout(settleMs);
-    return;
-  }
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    if (page.isClosed()) {
-      throw new Error('gotoApp aborted because page is already closed');
-    }
-    const attemptUrl = page.url();
-    if (attemptUrl.includes('/app')) {
-      await page.reload({ waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs });
-    } else {
-      await page.goto(`${appBaseUrl}/app`, { waitUntil: 'commit', timeout: navigationTimeoutMs });
-    }
-    if (await waitForAppReady()) {
-      if (settleMs > 0) await page.waitForTimeout(settleMs);
-      return;
-    }
-  }
-
-  const appDiagnostics = await page.evaluate(() => ({
-    href: window.location.href,
-    title: document.title,
-    bodyText: (document.body?.innerText || '').slice(0, 400),
-    hasLoading: Boolean(document.querySelector('.loading-screen')),
-    hasError: Boolean(document.querySelector('.error-screen')),
-    hasView: Boolean(document.querySelector('.view-wrapper')),
-    hasRuntimeCreation: Boolean(document.querySelector('#runtime-creation')),
-  })).catch(() => null);
-  throw new Error(`gotoApp failed to reach ready view: ${JSON.stringify(appDiagnostics)}`);
+  if (settleMs > 0) await page.waitForTimeout(settleMs);
 }
 
 export function selectDemoMnemonic(label: DemoUserName): string {

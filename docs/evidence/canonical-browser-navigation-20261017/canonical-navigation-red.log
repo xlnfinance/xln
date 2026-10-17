@@ -1,0 +1,30 @@
+$ bun tools/stand-lock.ts run --reason canonical-navigation-regression --timeout-ms "60000" -- bun "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts" --all --strict-browser-health "--shards=1" "--workers-per-shard=1" "--max-mm-concurrency=1" "--video=retain-on-failure" "--trace=retain-on-failure" "--screenshot=only-on-failure" "--max-failures=1" "--pw-files=tests/e2e/runtime/gateway/e2e-canonical-wallet-gateway.spec.ts"
+test artifact budget (e2e): workspace=31.80GiB budgeted=6.67GiB / 50GiB
+
+========================================================================
+E2E Parallel Runner (isolated stack per shard)
+========================================================================
+Shards   : 1
+Port pool: local-test-stack-v1 (7 machine-wide stacks)
+Workers/shard: 1
+MM concurrency: 1
+Reset concurrency: 1
+Max failures : 1
+Phase warn ms: 30000
+Prewait health: reset
+Browser health: strict
+QA category  : all
+Start target : 0
+Keep prior logs: no
+Artifacts    : video=retain-on-failure, trace=retain-on-failure, screenshot=only-on-failure
+Git HEAD     : 0d25ea966936 dirty
+Code hash    : dc4011edc1acccf4
+Build inputs : 2691821dc4488c61
+Logs     : /Users/zigota/xln/.logs/e2e-parallel/20261017-065041-474
+========================================================================
+
+♻️ isolated build cache rebuild: E2E_BUILD_CACHE_STALE:expected=2691821dc4488c61fdc827db94d80be006a561c7c0b75bb84700fabe01861201:actual=6acd6a03044653acb1dc15548de313bebd7946f9a5172e659a7322f97928c72c
+Targets  : 1/1 isolated test stack (starting at 0)
+Active lanes: 1/1 requested
+Build    : /Users/zigota/xln/.logs/e2e-build-cache
+error: script "stand:run" exited with code 124

@@ -1,0 +1,44 @@
+[
+  {
+    "type": "before",
+    "callId": "expect@39",
+    "stepId": "expect@39",
+    "startTime": 2450.55,
+    "class": "Test",
+    "method": "expect",
+    "title": "Expect \"toHaveAttribute\"",
+    "params": {
+      "expected": "data-state"
+    },
+    "stack": [
+      {
+        "file": "/Users/zigota/xln/tests/e2e/runtime/gateway/e2e-canonical-wallet-gateway.spec.ts",
+        "line": 23,
+        "column": 50
+      }
+    ]
+  },
+  {
+    "type": "before",
+    "callId": "pw:api@44",
+    "stepId": "pw:api@44",
+    "startTime": 2798.159,
+    "class": "Test",
+    "method": "pw:api",
+    "title": "Wait for function",
+    "params": {
+      "pollingInterval": "undefined",
+      "expression": "() => {\n        const isVisible = selector => {\n          const element = document.querySelector(selector);\n          if (!element) return false;\n          const style = window.getComputedStyle(element);\n          if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {\n            return false;\n          }\n          const rect = element.getBoundingClientRect();\n          return rect.width > 0 && rect.height > 0;\n        };\n        const errorVisible = isVisible('.error-screen');\n        const inactiveVisible = isVisible('[data-testid=\"inactive-tab-screen\"]');\n        const viewVisible = isVisible('.view-wrapper') || isVisible('nav[aria-label=\"Account workspace\"]') || isVisible('[data-testid=\"account-workspace-mobile-toggle\"]') || isVisible('[data-testid=\"app-runtime-ready\"]');\n        const runtimeCreationVisible = isVisible('#runtime-creation') || isVisible('.brainvault-wrapper') || isVisible('.quick-login-grid') || Boolean(Array.from(document.querySelectorAll('button')).find(button => {\n          const label = (button.textContent || '').trim().toLowerCase();\n          return label === 'alice' || label === 'bob' || label === 'carol' || label === 'dave';\n        }));\n        return !errorVisible && !inactiveVisible && (viewVisible || runtimeCreationVisible);\n      }",
+      "isFunction": "true",
+      "arg": "Object"
+    },
+    "stack": [
+      {
+        "file": "/Users/zigota/xln/tests/utils/e2e-demo-users.ts",
+        "line": 792,
+        "column": 18,
+        "function": "waitForAppReady"
+      }
+    ]
+  }
+]

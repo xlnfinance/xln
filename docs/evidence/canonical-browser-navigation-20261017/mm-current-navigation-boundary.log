@@ -1,0 +1,140 @@
+$ bun tools/stand-lock.ts run --reason mm-current-navigation-boundary --timeout-ms "60000" -- bun "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts" --all --strict-browser-health "--shards=1" "--workers-per-shard=1" "--max-mm-concurrency=1" "--video=retain-on-failure" "--trace=retain-on-failure" "--screenshot=only-on-failure" "--max-failures=1" "--pw-files=tests/e2e-cross-j-swap.spec.ts::real MM full fill auto-closes and partial fill closes manually on both legs"
+test artifact cleanup (e2e): removing .logs/e2e-parallel
+test artifact cleanup (e2e): removed .logs/e2e-parallel
+test artifact budget (e2e): workspace=31.80GiB budgeted=6.68GiB / 50GiB
+
+========================================================================
+E2E Parallel Runner (isolated stack per shard)
+========================================================================
+Shards   : 1
+Port pool: local-test-stack-v1 (7 machine-wide stacks)
+Workers/shard: 1
+MM concurrency: 1
+Reset concurrency: 1
+Max failures : 1
+Phase warn ms: 30000
+Prewait health: reset
+Browser health: strict
+QA category  : all
+Start target : 0
+Keep prior logs: no
+Artifacts    : video=retain-on-failure, trace=retain-on-failure, screenshot=only-on-failure
+Git HEAD     : 0d25ea966936 dirty
+Code hash    : 8cbb6fbc69b7b1bd
+Build inputs : 2691821dc4488c61
+Logs     : /Users/zigota/xln/.logs/e2e-parallel/20261017-065355-640
+========================================================================
+
+⏩ isolated build cache hit: /Users/zigota/xln/.logs/e2e-build-cache
+Targets  : 1/1 isolated test stack (starting at 0)
+Active lanes: 1/1 requested
+Build    : /Users/zigota/xln/.logs/e2e-build-cache
+❌ max failures reached (1/1); primary shard=0; aborting active E2E stacks immediately
+
+========================================================================
+E2E Summary
+========================================================================
+FAIL  shard=0      20.6s  phases[pre=26 anvil=209 api=514 health=14530 vite=539 pw=4729]  class=unknown  log=/Users/zigota/xln/.logs/e2e-parallel/20261017-065355-640/shard-0/logs/e2e.log
+      first-failure: tests/e2e-cross-j-swap.spec.ts:240:7 real MM full fill auto-closes and partial fill closes manually on both legs
+      rerun: bun core/scripts/e2e/runners/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --max-failures=1 '--pw-files=tests/e2e-cross-j-swap.spec.ts::real MM full fill auto-closes and partial fill closes manually on both legs' --pw-project=chromium --video=retain-on-failure --trace=retain-on-failure --screenshot=only-on-failure --prewait-health=reset --strict-browser-health --preserve-artifacts
+      capsule: /Users/zigota/xln/.logs/e2e-parallel/20261017-065355-640/shard-0/artifacts/playwright/failure-capsule.json
+      attachment[screenshot]: /Users/zigota/xln/.logs/e2e-parallel/20261017-065355-640/shard-0/artifacts/playwright/e2e-cross-j-swap-E2E-Cross-8cda2-loses-manually-on-both-legs-chromium/test-failed-1.png
+      attachment[video]: /Users/zigota/xln/.logs/e2e-parallel/20261017-065355-640/shard-0/artifacts/playwright/e2e-cross-j-swap-E2E-Cross-8cda2-loses-manually-on-both-legs-chromium/video.webm
+      attachment[error-context]: /Users/zigota/xln/.logs/e2e-parallel/20261017-065355-640/shard-0/artifacts/playwright/e2e-cross-j-swap-E2E-Cross-8cda2-loses-manually-on-both-legs-chromium/error-context.md
+      attachment[trace]: /Users/zigota/xln/.logs/e2e-parallel/20261017-065355-640/shard-0/artifacts/playwright/e2e-cross-j-swap-E2E-Cross-8cda2-loses-manually-on-both-legs-chromium/trace.zip
+      slow-steps: E2E-TIMING:cross_j_mm_fill.ensure_baseline=12ms
+------------------------------------------------------------------------
+Total wall time: 23.2s (23212ms)
+Git HEAD: 0d25ea966936f98e0833c89545d08546a9cb413e
+Code hash: 8cbb6fbc69b7b1bdc0ec068e1cc639a5074eb9e56b794fe8b12fedf2f99385c1
+Build input hash: 2691821dc4488c61fdc827db94d80be006a561c7c0b75bb84700fabe01861201
+Candidate ID: ccffd74cc5e1590b150ca2083d6d6ae5e67a32acec35386514dc52972be7eabf
+Gate config hash: f39efb3df192f554723ebe9438d3d63b75a1950289324d9bae5d55a7de6cc9f4
+Logs: /Users/zigota/xln/.logs/e2e-parallel/20261017-065355-640
+Primary failure: shard=0 class=playwright
+------------------------------------------------------------------------
+Benchmark: INSUFFICIENT suite=functional · cross-j-swap.real-mm-full-fill-auto
+Reason   : No previous comparable E2E run found.
+
+--- shard 0 (tail: /Users/zigota/xln/.logs/e2e-parallel/20261017-065355-640/shard-0/logs/e2e.log) ---
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    .logs/e2e-parallel/20261017-065355-640/shard-0/artifacts/playwright/e2e-cross-j-swap-E2E-Cross-8cda2-loses-manually-on-both-legs-chromium/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: .logs/e2e-parallel/20261017-065355-640/shard-0/artifacts/playwright/e2e-cross-j-swap-E2E-Cross-8cda2-loses-manually-on-both-legs-chromium/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    .logs/e2e-parallel/20261017-065355-640/shard-0/artifacts/playwright/e2e-cross-j-swap-E2E-Cross-8cda2-loses-manually-on-both-legs-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace .logs/e2e-parallel/20261017-065355-640/shard-0/artifacts/playwright/e2e-cross-j-swap-E2E-Cross-8cda2-loses-manually-on-both-legs-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+Testing stopped early after 1 maximum allowed failures.
+
+  1 failed
+    [chromium] › tests/e2e-cross-j-swap.spec.ts:240:7 › E2E Cross-J Swap Isolated Flow › real MM full fill auto-closes and partial fill closes manually on both legs @functional
+  1 error was not a part of any test, see above for details
+[timing] playwright=4729ms
+[forensics] wrote failure debug bundle: /Users/zigota/xln/.logs/e2e-parallel/20261017-065355-640/shard-0/artifacts/playwright/failure-debug
+[runner] shard teardown -> SIGTERM api pid=30542 reason=playwright_exit:code=1:signal=null
+[api:err] [H1:err] [network] DIRECT_RUNTIME_PEER_OFFLINE {
+[H1:err]   peerRuntimeId: "0x39fb68eb80713a6109d4c9e8f2ef10ec6426413c",
+[H1:err]   code: 1000,
+[api:err] [H1:err]   reason: "",
+[H1:err]   bufferedAmount: 0,
+[H1:err] }
+[H1:err] [network] DIRECT_RUNTIME_PEER_OFFLINE {
+[H1:err]   peerRuntimeId: "0x2908c9503d5aa63d9eb64a3f3d19fbe1995b849f",
+[H1:err]   code: 1000,
+[H1:err]   reason: "",
+[H1:err]   bufferedAmount: 0,
+[H1:err] }
+[H1:err] [network] DIRECT_RUNTIME_PEER_OFFLINE {
+[H1:err]   peerRuntimeId: "0x906eda94b06fb456b874f5425c5dfff10b33a53a",
+[H1:err]   code: 1000,
+[H1:err]   reason: "",
+[H1:err]   bufferedAmount: 0,
+[H1:err] }
+[H2:err] [network] DIRECT_RUNTIME_PEER_OFFLINE {
+[H2:err]   peerRuntimeId: "0x25242ed1ea518581cc2061f87178dbaf362e8903",
+[H2:err]   code: 1000,
+[H2:err]   reason: "",
+[H2:err]   bufferedAmount: 0,
+[H2:err] }
+[H2:err] [network] DIRECT_RUNTIME_PEER_OFFLINE {
+[H2:err]   peerRuntimeId: "0x2908c9503d5aa63d9eb64a3f3d19fbe1995b849f",
+[H2:err]   code: 1000,
+[H2:err]   reason: "",
+[H2:err]   bufferedAmount: 0,
+[H2:err] }
+[H2:err] [network] DIRECT_RUNTIME_PEER_OFFLINE {
+[H2:err]   peerRuntimeId: "0x906eda94b06fb456b874f5425c5dfff10b33a53a",
+[H2:err]   code: 1000,
+[H2:err]   reason: "",
+[H2:err]   bufferedAmount: 0,
+[H2:err] }
+[H3:err] [network] DIRECT_RUNTIME_PEER_OFFLINE {
+[H3:err]   peerRuntimeId: "0x25242ed1ea518581cc2061f87178dbaf362e8903",
+[H3:err]   code: 1000,
+[H3:err]   reason: "",
+[H3:err]   bufferedAmount: 0,
+[H3:err] }
+[H3:err] [network] DIRECT_RUNTIME_PEER_OFFLINE {
+[H3:err]   peerRuntimeId: "0x2908c9503d5aa63d9eb64a3f3d19fbe1995b849f",
+[H3:err]   code: 1000,
+[H3:err]   reason: "",
+[H3:err]   bufferedAmount: 0,
+[H3:err] }
+[H3:err] [network] DIRECT_RUNTIME_PEER_OFFLINE {
+[H3:err]   peerRuntimeId: "0x39fb68eb80713a6109d4c9e8f2ef10ec6426413c",
+[H3:err]   code: 1000,
+[H3:err]   reason: "",
+[H3:err]   bufferedAmount: 0,
+[H3:err] }
+
+error: script "stand:run" exited with code 1

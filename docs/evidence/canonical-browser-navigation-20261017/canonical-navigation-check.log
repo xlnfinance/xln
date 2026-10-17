@@ -1,0 +1,1282 @@
+$ bun tools/stand-lock.ts run --reason canonical-navigation-check --timeout-ms "60000" -- bun run check
+$ bun run check:short && bun run check:long
+$ bun tools/run-parallel-checks.ts check:contract-artifact-drift check:frontend-file-size
+$ bun run contracts:sync && git diff --exit-code -- frontend/static/contracts jurisdictions/typechain-types
+$ bun core/scripts/checks/policy/check-frontend-file-size.ts
+$ ./scripts/sync-contract-artifacts.sh
+Source file-size invariant passed (3086 files, max 3000 lines)
+PASS check:frontend-file-size 170ms
+[contracts-sync] verified cache hit; Solidity artifacts and TypeChain unchanged
+[contracts-sync] copying fresh contract artifacts to frontend/static
+[static] copied ../jurisdictions/artifacts/contracts/Account.sol/Account.json -> static/contracts/Account.json
+[static] copied ../jurisdictions/artifacts/contracts/Depository.sol/Depository.json -> static/contracts/Depository.json
+[static] copied ../jurisdictions/artifacts/contracts/DepositoryBounds.sol/DepositoryBounds.json -> static/contracts/DepositoryBounds.json
+[static] copied ../jurisdictions/artifacts/contracts/EntityProvider.sol/EntityProvider.json -> static/contracts/EntityProvider.json
+[static] copied ../jurisdictions/artifacts/contracts/HankoVerifier.sol/HankoVerifier.json -> static/contracts/HankoVerifier.json
+[static] copied ../jurisdictions/artifacts/contracts/HashLadderRegistry.sol/HashLadderRegistry.json -> static/contracts/HashLadderRegistry.json
+[static] copied ../jurisdictions/artifacts/contracts/custody/NftCustody.sol/NftCustody.json -> static/contracts/NftCustody.json
+[static] copied ../jurisdictions/artifacts/contracts/DeltaTransformer.sol/DeltaTransformer.json -> static/contracts/DeltaTransformer.json
+[static] copied ../jurisdictions/artifacts/contracts/ERC20Mock.sol/ERC20Mock.json -> static/contracts/ERC20Mock.json
+[static] files copied for build
+[contracts-sync] verifying compiler immutable metadata parity
+CONTRACT_IMMUTABLE_METADATA_PARITY_OK contracts=4
+[contracts-sync] done
+PASS check:contract-artifact-drift 687ms
+PARALLEL_CHECKS_OK gates=2
+$ bun tools/run-parallel-checks.ts check:src check:frontend check:ui-types
+$ bun tools/run-parallel-checks.ts soundcheck:fast check:contract-invariants check:dead-code check:audit-registry check:advisor check:single-live-todo check:script-entrypoints check:proof-program frozen-core:check check:e2e-categories check:runtime-doc-paths check:folder-width check:state-machine-size check:production-function-size check:single-runtime-mempool check:frame-candidate-isolation check:no-machine-clones check:no-readonly-account-mutation check:no-hot-full-machine-scans check:patricia-hot-path check:path-keyed-storage check:account-frame-single-transition check:minimal-runtime-wal check:orderbook-price-pages check:canonical-vocabulary check:english-source check:j-event-catalog check:runtime-contract-types check:derive-delta-invariants check:no-manual-delta-math check:no-active-infra-in-state-machine check:no-legacy check:no-vacuous-validation check:unused-surface check:canonical-payment-surface security:failure-taxonomy security:swap-cancel-canonical check:runtime-types
+$ cd frontend && bun run check
+$ bun run check:unsafe-types && bun copy-static-files.js && svelte-kit sync && bun ../tools/run-parallel-checks.ts check:svelte check:build
+$ bun tools/soundcheck.ts
+$ bunx knip --no-progress --include files,dependencies,unlisted,duplicates
+$ bun core/scripts/e2e/runners/run-with-test-cleanup.ts --reason=contract-invariants --child-cwd=jurisdictions --keep-test-artifacts -- forge test --match-contract "DepositoryInvariants|DisputeIngressGas"
+$ bun scripts/check-unsafe-types.ts
+FRONTEND_UNSAFE_TYPES_OK files=404 findings=0
+[static] copied ../jurisdictions/artifacts/contracts/Account.sol/Account.json -> static/contracts/Account.json
+[static] copied ../jurisdictions/artifacts/contracts/Depository.sol/Depository.json -> static/contracts/Depository.json
+[static] copied ../jurisdictions/artifacts/contracts/DepositoryBounds.sol/DepositoryBounds.json -> static/contracts/DepositoryBounds.json
+[static] copied ../jurisdictions/artifacts/contracts/EntityProvider.sol/EntityProvider.json -> static/contracts/EntityProvider.json
+[static] copied ../jurisdictions/artifacts/contracts/HankoVerifier.sol/HankoVerifier.json -> static/contracts/HankoVerifier.json
+[static] copied ../jurisdictions/artifacts/contracts/HashLadderRegistry.sol/HashLadderRegistry.json -> static/contracts/HashLadderRegistry.json
+[static] copied ../jurisdictions/artifacts/contracts/custody/NftCustody.sol/NftCustody.json -> static/contracts/NftCustody.json
+[static] copied ../jurisdictions/artifacts/contracts/DeltaTransformer.sol/DeltaTransformer.json -> static/contracts/DeltaTransformer.json
+[static] copied ../jurisdictions/artifacts/contracts/ERC20Mock.sol/ERC20Mock.json -> static/contracts/ERC20Mock.json
+[static] built brainvault worker (41335 bytes)
+[static] copied docs/ -> static/docs-catalog/ (156 docs)
+[static] llms static context regenerated (set XLN_STATIC_VERBOSE=1 for token breakdowns)
+[static] files copied for build
+$ svelte-check --tsconfig ./tsconfig.json --threshold error
+$ bun scripts/vite-build-check.ts
+PASS check:dead-code 2901ms
+$ bun node_modules/@typescript/native/bin/tsc -p tools/audit/tsconfig.json && bun tools/audit.ts validate && bun test ./tests/release-integrity/audit-registry.test.ts ./tests/release-integrity/audit-review-quorum.test.ts ./tests/release-integrity/audit-scope-integrity.test.ts
+vite v8.3.2 building ssr environment for production...
+transforming...
+test artifact cleanup (contract-invariants): preserving existing artifacts
+test artifact budget (contract-invariants): workspace=31.79GiB budgeted=6.69GiB / 50GiB
+AUDIT_REGISTRY_VALID modules=17 invariants=27 evidence=55 findings=17 agents=39
+bun test v1.4.0 (34cbb9a40)
+
+tests/release-integrity/audit-registry.test.ts:
+(pass) canonical audit registry > maps the complete module hierarchy with valid references and source ownership [387.55ms]
+No files changed, compilation skipped
+
+Ran 1 test for test/foundry/stress/DisputeIngressGas.t.sol:DisputeIngressGasTest
+[PASS] test_unsolicitedCompanySharesCannotEnlargeExitProof() (gas: 79496496)
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 74.30ms (65.27ms CPU time)
+✓ 4698 modules transformed.
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1  |  :global(body) { margin: 0; background: #08090c; color: #f7f3e8; }
+   |          ^
+2  |  :global(*) { box-sizing: border-box; }
+3  |
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1  |  :global(body) { margin: 0; background: #08090c; color: #f7f3e8; }
+2  |  :global(*) { box-sizing: border-box; }
+   |          ^
+3  |
+4  |  .quorum-shell {
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+11233 |    }
+11234 |
+11235 |    .swap-panel .orderbook-wrap :global(.orderbook-panel) {
+      |                                        ^
+11236 |      width: 100%;
+11237 |      min-width: 0;
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1  |    :global(body) {
+   |            ^
+2  |      background:
+3  |        radial-gradient(circle at top, rgba(196, 155, 71, 0.12), transparent 32%),
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+477 |    }
+478 |
+479 |    .ux-preview-card.hero :global(img) {
+    |                                  ^
+480 |      height: 232px;
+481 |    }
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+485 |    }
+486 |
+487 |    .ux-preview-card.compact :global(img) {
+    |                                     ^
+488 |      height: 92px;
+489 |    }
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+489 |    }
+490 |
+491 |    .ux-preview-card :global(img) {
+    |                             ^
+492 |      width: 100%;
+493 |      height: 96px;
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+581 |    }
+582 |
+583 |    .ux-shot :global(img) {
+    |                     ^
+584 |      width: 100%;
+585 |      height: 180px;
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+656 |    }
+657 |
+658 |    .ux-slideshow-image :global(img) {
+    |                                ^
+659 |      display: block;
+660 |      width: 100%;
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1177 |    }
+1178 |
+1179 |    .suite-preview :global(img) {
+     |                           ^
+1180 |      width: 100%;
+1181 |      height: 100%;
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1365 |    }
+1366 |
+1367 |    .playlist-thumb :global(img) {
+rendering chunks...
+     |                            ^
+1368 |      width: 100%;
+1369 |      height: 100%;
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1748 |      }
+1749 |
+1750 |      .ux-preview-card :global(img),
+     |                               ^
+1751 |      .ux-preview-card.hero :global(img),
+1752 |      .ux-preview-card.compact :global(img),
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1749 |
+1750 |      .ux-preview-card :global(img),
+1751 |      .ux-preview-card.hero :global(img),
+     |                                    ^
+1752 |      .ux-preview-card.compact :global(img),
+1753 |      .ux-shot :global(img) {
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1750 |      .ux-preview-card :global(img),
+1751 |      .ux-preview-card.hero :global(img),
+1752 |      .ux-preview-card.compact :global(img),
+     |                                       ^
+1753 |      .ux-shot :global(img) {
+1754 |        height: 150px;
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1751 |      .ux-preview-card.hero :global(img),
+1752 |      .ux-preview-card.compact :global(img),
+1753 |      .ux-shot :global(img) {
+     |                       ^
+1754 |        height: 150px;
+1755 |      }
+computing gzip size...
+.svelte-kit/output/server/.vite/manifest.json                                            22.60 kB │ gzip:   2.58 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.B2JNs7Oh.css                        0.29 kB │ gzip:   0.23 kB
+.svelte-kit/output/server/_app/immutable/assets/EntityIdentity.tCuX_uTD.css               1.14 kB │ gzip:   0.50 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.Bj4loYo6.css                        1.61 kB │ gzip:   0.63 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.DqzpG333.css                        1.64 kB │ gzip:   0.69 kB
+.svelte-kit/output/server/_app/immutable/assets/walletError.DVeJmvSp.css                  2.00 kB │ gzip:   0.70 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.D7Dszi11.css                        2.28 kB │ gzip:   0.86 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.BIJCFa7l.css                        2.56 kB │ gzip:   0.98 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.Bv-rnTga.css                        3.13 kB │ gzip:   0.95 kB
+[33m[INEFFECTIVE_DYNAMIC_IMPORT] [0m../core/hanko/signing.ts is dynamically imported by ../core/jurisdiction/adapter/rpc/write/rpc-batch-dispute-debug.ts but also statically imported by ../core/entity/profile/profile-signing.ts, ../core/jurisdiction/adapter/kernel/runtime-api.ts, dynamic import will not move module into another chunk.
+.svelte-kit/output/server/_app/immutable/assets/View.CoYujBV6.css                         4.14 kB │ gzip:   1.30 kB
+
+.svelte-kit/output/server/_app/immutable/assets/_page.Biar0u6H.css                        4.18 kB │ gzip:   1.10 kB
+[33m[INEFFECTIVE_DYNAMIC_IMPORT] [0m../core/protocol/crypto/fast/fast-keccak.ts is dynamically imported by ../core/support/performance/op-counters.ts but also statically imported by ../core/protocol/crypto/crypto-pool.ts, ../core/protocol/crypto/keccak-text.ts, dynamic import will not move module into another chunk.
+.svelte-kit/output/server/_app/immutable/assets/_page.DXLPVn_N.css                        4.80 kB │ gzip:   1.72 kB
+
+.svelte-kit/output/server/_app/immutable/assets/DeltaCapacityBar.BqGW_8Gk.css             5.11 kB │ gzip:   1.31 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.BiG9CjXa.css                        5.66 kB │ gzip:   1.42 kB
+.svelte-kit/output/server/_app/immutable/assets/ActivityHistoryPanel.bEAlNgsA.css         6.47 kB │ gzip:   1.71 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.CVGFxQ8Z.css                        6.81 kB │ gzip:   1.91 kB
+.svelte-kit/output/server/_app/immutable/assets/_layout.DCEWl5zU.css                      7.01 kB │ gzip:   1.62 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.B6YOQsPz.css                        7.59 kB │ gzip:   2.28 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.B27ALi_8.css                        8.03 kB │ gzip:   2.12 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.BVONRsMH.css                        8.32 kB │ gzip:   2.00 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.Dq66ltu3.css                        8.34 kB │ gzip:   1.96 kB
+.svelte-kit/output/server/_app/immutable/assets/ArchitectPanel.DXPQgx9q.css               9.65 kB │ gzip:   2.23 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.CXzl80dz.css                        9.75 kB │ gzip:   2.40 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.Cam-ZDqz.css                       12.43 kB │ gzip:   2.82 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.m8vqo6ZR.css                       13.98 kB │ gzip:   2.99 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.JmYGu2kW.css                       16.16 kB │ gzip:   3.34 kB
+.svelte-kit/output/server/_app/immutable/assets/qa.B8IfYcpT.css                          23.62 kB │ gzip:   5.04 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.C-hphQA3.css                       27.54 kB │ gzip:   5.30 kB
+.svelte-kit/output/server/_app/immutable/assets/vendor-dockview.BdyiAwQS.css             34.55 kB │ gzip:   4.15 kB
+.svelte-kit/output/server/_app/immutable/assets/remoteRuntimeImportFlow.BzcnK9yc.css     44.04 kB │ gzip:   8.55 kB
+.svelte-kit/output/server/_app/immutable/assets/_page._0spA1WI.css                       45.04 kB │ gzip:   8.31 kB
+.svelte-kit/output/server/_app/immutable/assets/_layout.D82FKbYa.css                     54.15 kB │ gzip:   9.05 kB
+.svelte-kit/output/server/_app/immutable/assets/DockRoot.CMhKxHNQ.css                   318.60 kB │ gzip:  52.62 kB
+.svelte-kit/output/server/entries/fallbacks/error.svelte.js                               0.08 kB │ gzip:   0.09 kB
+.svelte-kit/output/server/entries/pages/_page.ts.js                                       0.12 kB │ gzip:   0.12 kB │ map:     0.17 kB
+.svelte-kit/output/server/entries/pages/address/_entityId_/_page.ts.js                    0.14 kB │ gzip:   0.13 kB │ map:     0.20 kB
+.svelte-kit/output/server/entries/pages/app/_layout.ts.js                                 0.15 kB │ gzip:   0.14 kB │ map:     0.26 kB
+.svelte-kit/output/server/entries/pages/demo/_page.ts.js                                  0.15 kB │ gzip:   0.14 kB │ map:     0.26 kB
+.svelte-kit/output/server/entries/pages/embed/_page.ts.js                                 0.15 kB │ gzip:   0.14 kB │ map:     0.26 kB
+.svelte-kit/output/server/remote-entry.js                                                 0.16 kB │ gzip:   0.13 kB
+.svelte-kit/output/server/index.js                                                        0.17 kB │ gzip:   0.13 kB
+.svelte-kit/output/server/entries/pages/docs/_page.ts.js                                  0.17 kB │ gzip:   0.16 kB │ map:     0.30 kB
+.svelte-kit/output/server/entries/pages/rcpan/_page.ts.js                                 0.17 kB │ gzip:   0.16 kB │ map:     0.30 kB
+.svelte-kit/output/server/entries/pages/install/_page.ts.js                               0.18 kB │ gzip:   0.16 kB │ map:     0.30 kB
+.svelte-kit/output/server/entries/pages/releases/_page.ts.js                              0.18 kB │ gzip:   0.16 kB │ map:     0.30 kB
+.svelte-kit/output/server/entries/pages/_layout.ts.js                                     0.19 kB │ gzip:   0.15 kB │ map:     0.32 kB
+.svelte-kit/output/server/chunks/stableSort.js                                            0.20 kB │ gzip:   0.16 kB │ map:     0.31 kB
+.svelte-kit/output/server/entries/pages/admin/_page.ts.js                                 0.23 kB │ gzip:   0.19 kB │ map:     0.34 kB
+.svelte-kit/output/server/env.js                                                          0.23 kB │ gzip:   0.15 kB
+.svelte-kit/output/server/entries/pages/radapter/_page.ts.js                              0.29 kB │ gzip:   0.24 kB │ map:     0.51 kB
+.svelte-kit/output/server/entries/pages/app/_page.svelte.js                               0.78 kB │ gzip:   0.40 kB │ map:     0.78 kB
+.svelte-kit/output/server/chunks/toastStore.js                                            0.92 kB │ gzip:   0.44 kB │ map:     1.90 kB
+.svelte-kit/output/server/chunks/base64.js                                                1.39 kB │ gzip:   0.72 kB │ map:     2.44 kB
+.svelte-kit/output/server/chunks/boundary-validation.js                                   1.51 kB │ gzip:   0.67 kB │ map:     3.88 kB
+.svelte-kit/output/server/chunks/demoStory.js                                             1.81 kB │ gzip:   0.93 kB │ map:     3.02 kB
+.svelte-kit/output/server/entries/pages/address/_entityId_/_page.svelte.js                1.81 kB │ gzip:   0.72 kB │ map:    15.76 kB
+.svelte-kit/output/server/chunks/appStateStore.js                                         1.83 kB │ gzip:   0.75 kB │ map:     5.49 kB
+.svelte-kit/output/server/entries/pages/address/_page.svelte.js                           1.94 kB │ gzip:   0.85 kB │ map:     7.67 kB
+.svelte-kit/output/server/chunks/boundary.js                                              2.24 kB │ gzip:   0.78 kB │ map:     4.32 kB
+.svelte-kit/output/server/entries/pages/embed/_page.svelte.js                             2.43 kB │ gzip:   1.03 kB │ map:     5.83 kB
+[33m[PLUGIN_TIMINGS] [0mJavaScript callbacks ran for 2.8s of this 3.0s build (92%).
+.svelte-kit/output/server/entries/endpoints/rpc/_server.ts.js                             2.61 kB │ gzip:   1.04 kB │ map:     4.40 kB
+The slowest callbacks, timed inside each callback (the wait before a callback starts is excluded, the time it awaits is included):
+.svelte-kit/output/server/entries/endpoints/rpc2/_server.ts.js                            2.61 kB │ gzip:   1.04 kB │ map:     4.40 kB
+  - plugin vite-plugin-svelte:compile transform (70%, 2.1s, 1795 calls)
+.svelte-kit/output/server/chunks/safe-markdown.js                                         2.75 kB │ gzip:   1.07 kB │ map:     4.79 kB
+Additional callback time came from callbacks under 1s.
+.svelte-kit/output/server/chunks/resetEverything.js                                       2.93 kB │ gzip:   1.13 kB │ map:     5.34 kB
+See https://rolldown.rs/reference/InputOptions.checks#bundlertimings for more details.
+.svelte-kit/output/server/entries/pages/docs/_page.svelte.js                              3.04 kB │ gzip:   1.11 kB │ map:    35.14 kB
+
+.svelte-kit/output/server/chunks/derive.js                                                3.34 kB │ gzip:   1.32 kB │ map:     6.54 kB
+.svelte-kit/output/server/chunks/apiClient.js                                             3.58 kB │ gzip:   1.29 kB │ map:     7.17 kB
+.svelte-kit/output/server/entries/pages/demo/_page.svelte.js                              3.89 kB │ gzip:   1.54 kB │ map:     8.51 kB
+.svelte-kit/output/server/chunks/EntityIdentity.js                                        3.90 kB │ gzip:   1.13 kB │ map:     6.58 kB
+.svelte-kit/output/server/chunks/timeStore.js                                             4.06 kB │ gzip:   1.20 kB │ map:     8.91 kB
+.svelte-kit/output/server/entries/pages/testnet/_page.svelte.js                           4.39 kB │ gzip:   1.67 kB │ map:     8.45 kB
+.svelte-kit/output/server/entries/pages/app/_layout.svelte.js                             4.46 kB │ gzip:   1.56 kB │ map:    49.27 kB
+.svelte-kit/output/server/chunks/capacitor.js                                             4.91 kB │ gzip:   1.59 kB │ map:     9.15 kB
+.svelte-kit/output/server/entries/pages/reviews/_page.svelte.js                           4.98 kB │ gzip:   2.41 kB │ map:     7.56 kB
+.svelte-kit/output/server/chunks/proxy-safety.js                                          5.30 kB │ gzip:   1.97 kB │ map:     9.55 kB
+.svelte-kit/output/server/chunks/serialization.js                                         6.09 kB │ gzip:   1.97 kB │ map:    13.61 kB
+.svelte-kit/output/server/chunks/boundary2.js                                             6.24 kB │ gzip:   1.48 kB │ map:    11.56 kB
+.svelte-kit/output/server/entries/pages/install/_page.svelte.js                           6.41 kB │ gzip:   2.31 kB │ map:     8.28 kB
+.svelte-kit/output/server/entries/pages/runs/_page.svelte.js                              6.79 kB │ gzip:   2.05 kB │ map:    19.72 kB
+.svelte-kit/output/server/chunks/entityFactory.js                                         7.17 kB │ gzip:   2.26 kB │ map:    13.32 kB
+.svelte-kit/output/server/chunks/logger.js                                                7.28 kB │ gzip:   2.41 kB │ map:    16.62 kB
+.svelte-kit/output/server/chunks/claims.js                                                7.72 kB │ gzip:   2.45 kB │ map:    14.96 kB
+.svelte-kit/output/server/entries/pages/_page.svelte.js                                   9.24 kB │ gzip:   3.22 kB │ map:    11.57 kB
+.svelte-kit/output/server/entries/pages/releases/_page.svelte.js                          9.80 kB │ gzip:   3.18 kB │ map:    51.31 kB
+.svelte-kit/output/server/chunks/constants.js                                            10.66 kB │ gzip:   4.83 kB │ map:    23.27 kB
+.svelte-kit/output/server/entries/pages/unicast/_page.svelte.js                          10.73 kB │ gzip:   2.99 kB │ map:    33.02 kB
+.svelte-kit/output/server/chunks/runtimeConnection.js                                    10.81 kB │ gzip:   3.02 kB │ map:    19.48 kB
+.svelte-kit/output/server/entries/pages/qa/quorum/_page.svelte.js                        14.04 kB │ gzip:   4.29 kB │ map:    17.83 kB
+.svelte-kit/output/server/entries/pages/health/_page.svelte.js                           14.43 kB │ gzip:   4.11 kB │ map:   142.91 kB
+.svelte-kit/output/server/entries/pages/ai/__chatId__/_page.svelte.js                    16.78 kB │ gzip:   3.70 kB │ map:    70.55 kB
+.svelte-kit/output/server/chunks/DeltaCapacityBar.js                                     17.82 kB │ gzip:   3.27 kB │ map:    27.93 kB
+.svelte-kit/output/server/entries/pages/scenarios/_page.svelte.js                        18.06 kB │ gzip:   5.17 kB │ map:    41.01 kB
+.svelte-kit/output/server/entries/pages/qa/hlt/_page.svelte.js                           19.20 kB │ gzip:   5.62 kB │ map:    65.07 kB
+.svelte-kit/output/server/entries/pages/_layout.svelte.js                                19.66 kB │ gzip:   4.53 kB │ map:    93.56 kB
+.svelte-kit/output/server/chunks/View.js                                                 21.83 kB │ gzip:   6.19 kB │ map:    66.55 kB
+.svelte-kit/output/server/entries/pages/market-cap/_page.svelte.js                       31.23 kB │ gzip:   6.91 kB │ map:    72.85 kB
+.svelte-kit/output/server/chunks/ActivityHistoryPanel.js                                 37.41 kB │ gzip:   9.64 kB │ map:    76.51 kB
+.svelte-kit/output/server/chunks/walletError.js                                          51.18 kB │ gzip:  17.11 kB │ map:    73.75 kB
+.svelte-kit/output/server/chunks/settingsStore.js                                        51.33 kB │ gzip:  13.05 kB │ map:   106.34 kB
+.svelte-kit/output/server/chunks/networkTimelineSource.js                                63.83 kB │ gzip:  14.79 kB │ map:   127.88 kB
+.svelte-kit/output/server/entries/pages/qa/_page.svelte.js                               65.19 kB │ gzip:  14.96 kB │ map:   233.36 kB
+.svelte-kit/output/server/chunks/codec.js                                                70.49 kB │ gzip:  20.07 kB │ map:   180.20 kB
+.svelte-kit/output/server/entries/pages/rcpan/_page.svelte.js                            76.72 kB │ gzip:  18.57 kB │ map:   128.63 kB
+.svelte-kit/output/server/chunks/DockRoot.js                                             89.77 kB │ gzip:  22.61 kB │ map: 2,378.07 kB
+.svelte-kit/output/server/chunks/remoteRuntimeImportFlow.js                              96.68 kB │ gzip:  28.51 kB │ map:   204.74 kB
+.svelte-kit/output/server/chunks/profile.js                                             112.65 kB │ gzip:  28.28 kB │ map:   269.97 kB
+.svelte-kit/output/server/entries/pages/qa/quorum/_page.ts.js                           145.85 kB │ gzip:  24.34 kB │ map:   175.99 kB
+.svelte-kit/output/server/chunks/ArchitectPanel.js                                      149.53 kB │ gzip:  33.87 kB │ map:    83.06 kB
+.svelte-kit/output/server/chunks/vendor-svelte.js                                       280.04 kB │ gzip:  69.14 kB │ map:   574.32 kB
+.svelte-kit/output/server/chunks/vendor-icons.js                                        343.71 kB │ gzip:  33.30 kB │ map:   460.04 kB
+.svelte-kit/output/server/chunks/vaultStore.js                                        1,020.92 kB │ gzip: 233.42 kB │ map: 2,990.37 kB
+
+✓ built in 3.02s
+Analysing routes
+(node:31230) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Building app
+vite v8.3.2 building client environment for production...
+
+ WARN  manualChunks option is ignored because the codeSplitting option is specified.
+
+transforming...
+[plugin rolldown:vite-resolve] Module "crypto" has been externalized for browser compatibility, imported by "/Users/zigota/xln/core/protocol/crypto/fast/fast-aead.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin rolldown:vite-resolve] Module "crypto" has been externalized for browser compatibility, imported by "/Users/zigota/xln/core/protocol/crypto/fast/fast-x25519.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin rolldown:vite-resolve] Module "crypto" has been externalized for browser compatibility, imported by "/Users/zigota/xln/core/protocol/crypto/fast/fast-aead.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin rolldown:vite-resolve] Module "crypto" has been externalized for browser compatibility, imported by "/Users/zigota/xln/core/protocol/crypto/fast/fast-x25519.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin rolldown:vite-resolve] Module "fs" has been externalized for browser compatibility, imported by "/Users/zigota/xln/core/jurisdiction/adapter/kernel/jurisdiction-loader.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin rolldown:vite-resolve] Module "fs" has been externalized for browser compatibility, imported by "/Users/zigota/xln/core/jurisdiction/adapter/kernel/jurisdiction-loader.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+✓ 6238 modules transformed.
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1  |  :global(body) { margin: 0; background: #08090c; color: #f7f3e8; }
+   |          ^
+2  |  :global(*) { box-sizing: border-box; }
+3  |
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1  |  :global(body) { margin: 0; background: #08090c; color: #f7f3e8; }
+2  |  :global(*) { box-sizing: border-box; }
+   |          ^
+3  |
+4  |  .quorum-shell {
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+11443 |    }
+11444 |
+11445 |    .swap-panel .orderbook-wrap :global(.orderbook-panel) {
+      |                                        ^
+11446 |      width: 100%;
+11447 |      min-width: 0;
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1  |    :global(body) {
+   |            ^
+2  |      background:
+3  |        radial-gradient(circle at top, rgba(196, 155, 71, 0.12), transparent 32%),
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+477 |    }
+478 |
+479 |    .ux-preview-card.hero :global(img) {
+    |                                  ^
+480 |      height: 232px;
+481 |    }
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+485 |    }
+486 |
+487 |    .ux-preview-card.compact :global(img) {
+    |                                     ^
+488 |      height: 92px;
+489 |    }
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+489 |    }
+490 |
+491 |    .ux-preview-card :global(img) {
+    |                             ^
+492 |      width: 100%;
+493 |      height: 96px;
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+581 |    }
+582 |
+583 |    .ux-shot :global(img) {
+    |                     ^
+584 |      width: 100%;
+585 |      height: 180px;
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+656 |    }
+657 |
+658 |    .ux-slideshow-image :global(img) {
+    |                                ^
+659 |      display: block;
+660 |      width: 100%;
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1177 |    }
+1178 |
+1179 |    .suite-preview :global(img) {
+     |                           ^
+1180 |      width: 100%;
+1181 |      height: 100%;
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1365 |    }
+1366 |
+1367 |    .playlist-thumb :global(img) {
+     |                            ^
+1368 |      width: 100%;
+1369 |      height: 100%;
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1748 |      }
+1749 |
+1750 |      .ux-preview-card :global(img),
+     |                               ^
+1751 |      .ux-preview-card.hero :global(img),
+1752 |      .ux-preview-card.compact :global(img),
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1749 |
+1750 |      .ux-preview-card :global(img),
+1751 |      .ux-preview-card.hero :global(img),
+     |                                    ^
+1752 |      .ux-preview-card.compact :global(img),
+1753 |      .ux-shot :global(img) {
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1750 |      .ux-preview-card :global(img),
+1751 |      .ux-preview-card.hero :global(img),
+1752 |      .ux-preview-card.compact :global(img),
+     |                                       ^
+1753 |      .ux-shot :global(img) {
+1754 |        height: 150px;
+[lightningcss minify] 'global' is not recognized as a valid pseudo-class. Did you mean '::global' (pseudo-element) or is this a typo?
+1751 |      .ux-preview-card.hero :global(img),
+1752 |      .ux-preview-card.compact :global(img),
+1753 |      .ux-shot :global(img) {
+     |                       ^
+1754 |        height: 150px;
+1755 |      }
+rendering chunks...
+computing gzip size...
+.svelte-kit/output/client/_app/version.json                                               0.02 kB │ gzip:   0.04 kB
+.svelte-kit/output/client/_app/immutable/assets/jurisdictions.B-Ct9ELv.json               7.56 kB │ gzip:   2.33 kB
+.svelte-kit/output/client/.vite/manifest.json                                            33.31 kB │ gzip:   4.03 kB
+.svelte-kit/output/client/_app/immutable/assets/11.B2JNs7Oh.css                           0.29 kB │ gzip:   0.23 kB
+.svelte-kit/output/client/_app/immutable/assets/EntityIdentity.tCuX_uTD.css               1.14 kB │ gzip:   0.50 kB
+.svelte-kit/output/client/_app/immutable/assets/21.Bj4loYo6.css                           1.61 kB │ gzip:   0.63 kB
+[plugin builtin:vite-reporter]
+.svelte-kit/output/client/_app/immutable/assets/4.DqzpG333.css                            1.64 kB │ gzip:   0.69 kB
+(!) Some chunks are larger than 1500 kB after minification. Consider:
+.svelte-kit/output/client/_app/immutable/assets/walletError.DVeJmvSp.css                  2.00 kB │ gzip:   0.70 kB
+- Using dynamic import() to code-split the application
+.svelte-kit/output/client/_app/immutable/assets/5.D7Dszi11.css                            2.28 kB │ gzip:   0.86 kB
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+.svelte-kit/output/client/_app/immutable/assets/9.BIJCFa7l.css                            2.56 kB │ gzip:   0.98 kB
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+.svelte-kit/output/client/_app/immutable/assets/24.Bv-rnTga.css                           3.13 kB │ gzip:   0.95 kB
+[33m[INEFFECTIVE_DYNAMIC_IMPORT] [0m../core/protocol/crypto/fast/fast-keccak.ts is dynamically imported by ../core/support/performance/op-counters.ts but also statically imported by ../core/protocol/crypto/crypto-pool.ts, ../core/protocol/crypto/keccak-text.ts, dynamic import will not move module into another chunk.
+.svelte-kit/output/client/_app/immutable/assets/View.CoYujBV6.css                         4.14 kB │ gzip:   1.30 kB
+
+.svelte-kit/output/client/_app/immutable/assets/22.Biar0u6H.css                           4.18 kB │ gzip:   1.10 kB
+.svelte-kit/output/client/_app/immutable/assets/13.DXLPVn_N.css                           4.80 kB │ gzip:   1.72 kB
+.svelte-kit/output/client/_app/immutable/assets/DeltaCapacityBar.BqGW_8Gk.css             5.11 kB │ gzip:   1.31 kB
+.svelte-kit/output/client/_app/immutable/assets/20.BiG9CjXa.css                           5.66 kB │ gzip:   1.42 kB
+.svelte-kit/output/client/_app/immutable/assets/ActivityHistoryPanel.bEAlNgsA.css         6.47 kB │ gzip:   1.71 kB
+.svelte-kit/output/client/_app/immutable/assets/16.CVGFxQ8Z.css                           6.81 kB │ gzip:   1.91 kB
+.svelte-kit/output/client/_app/immutable/assets/17.B6YOQsPz.css                           7.59 kB │ gzip:   2.28 kB
+.svelte-kit/output/client/_app/immutable/assets/2.Ctyu698x.css                            7.79 kB │ gzip:   1.85 kB
+.svelte-kit/output/client/_app/immutable/assets/10.B27ALi_8.css                           8.03 kB │ gzip:   2.12 kB
+.svelte-kit/output/client/_app/immutable/assets/23.BVONRsMH.css                           8.32 kB │ gzip:   2.00 kB
+.svelte-kit/output/client/_app/immutable/assets/25.Dq66ltu3.css                           8.34 kB │ gzip:   1.96 kB
+.svelte-kit/output/client/_app/immutable/assets/ArchitectPanel.DXPQgx9q.css               9.65 kB │ gzip:   2.23 kB
+.svelte-kit/output/client/_app/immutable/assets/3.CXzl80dz.css                            9.75 kB │ gzip:   2.40 kB
+.svelte-kit/output/client/_app/immutable/assets/14.Cam-ZDqz.css                          12.43 kB │ gzip:   2.82 kB
+.svelte-kit/output/client/_app/immutable/assets/7.m8vqo6ZR.css                           13.98 kB │ gzip:   2.99 kB
+.svelte-kit/output/client/_app/immutable/assets/15.JmYGu2kW.css                          16.16 kB │ gzip:   3.34 kB
+.svelte-kit/output/client/_app/immutable/assets/qa.B8IfYcpT.css                          23.62 kB │ gzip:   5.04 kB
+.svelte-kit/output/client/_app/immutable/assets/12.C-hphQA3.css                          27.54 kB │ gzip:   5.30 kB
+.svelte-kit/output/client/_app/immutable/assets/remoteRuntimeImportFlow.BzcnK9yc.css     44.04 kB │ gzip:   8.55 kB
+.svelte-kit/output/client/_app/immutable/assets/19._0spA1WI.css                          45.04 kB │ gzip:   8.31 kB
+.svelte-kit/output/client/_app/immutable/assets/0.D82FKbYa.css                           54.15 kB │ gzip:   9.05 kB
+.svelte-kit/output/client/_app/immutable/assets/DockRoot.BojXnrMk.css                   363.75 kB │ gzip:  58.21 kB
+.svelte-kit/output/client/_app/immutable/chunks/DDokeOaS.js                               0.02 kB │ gzip:   0.04 kB
+.svelte-kit/output/client/_app/immutable/chunks/Co-bWUJ2.js                               0.03 kB │ gzip:   0.05 kB
+.svelte-kit/output/client/_app/immutable/chunks/7KiV7Qdp.js                               0.04 kB │ gzip:   0.06 kB
+.svelte-kit/output/client/_app/immutable/entry/payload.DSmR2FwN.js                        0.06 kB │ gzip:   0.07 kB
+.svelte-kit/output/client/_app/immutable/chunks/DHchhyd-.js                               0.07 kB │ gzip:   0.08 kB
+.svelte-kit/output/client/_app/immutable/chunks/jCQsxa2d.js                               0.11 kB │ gzip:   0.12 kB
+.svelte-kit/output/client/_app/immutable/nodes/6.CDT0roq4.js                              0.18 kB │ gzip:   0.16 kB
+.svelte-kit/output/client/_app/immutable/nodes/18.tuB8Hter.js                             0.23 kB │ gzip:   0.21 kB
+.svelte-kit/output/client/_app/immutable/chunks/C-Qm2nyQ.js                               0.29 kB │ gzip:   0.22 kB
+.svelte-kit/output/client/_app/immutable/nodes/1.COPCTz5d.js                              0.39 kB │ gzip:   0.27 kB
+.svelte-kit/output/client/_app/immutable/chunks/BDl0vcIK.js                               0.43 kB │ gzip:   0.31 kB
+.svelte-kit/output/client/_app/immutable/chunks/CblODBTZ.js                               0.45 kB │ gzip:   0.30 kB
+.svelte-kit/output/client/_app/immutable/chunks/Dzx-_1XW.js                               0.45 kB │ gzip:   0.33 kB
+.svelte-kit/output/client/_app/immutable/chunks/DllDWZYW.js                               0.50 kB │ gzip:   0.34 kB
+.svelte-kit/output/client/_app/immutable/chunks/I3Qg4JLt.js                               0.52 kB │ gzip:   0.35 kB
+.svelte-kit/output/client/_app/immutable/chunks/p88GcADm.js                               0.56 kB │ gzip:   0.37 kB
+.svelte-kit/output/client/_app/immutable/nodes/8.CGlXfeOG.js                              0.56 kB │ gzip:   0.34 kB
+.svelte-kit/output/client/_app/immutable/chunks/ChXJmz8u.js                               0.56 kB │ gzip:   0.35 kB
+.svelte-kit/output/client/_app/immutable/chunks/u6L4IyL4.js                               0.57 kB │ gzip:   0.38 kB
+.svelte-kit/output/client/_app/immutable/chunks/M5M7zgxa.js                               0.60 kB │ gzip:   0.42 kB
+.svelte-kit/output/client/_app/immutable/entry/start.DJbIO1fk.js                          0.62 kB │ gzip:   0.35 kB
+.svelte-kit/output/client/_app/immutable/chunks/BO50W4hU.js                               0.67 kB │ gzip:   0.40 kB
+.svelte-kit/output/client/_app/immutable/chunks/DE9NCKEX.js                               0.80 kB │ gzip:   0.48 kB
+.svelte-kit/output/client/_app/immutable/chunks/3YO-LQFe.js                               0.83 kB │ gzip:   0.39 kB
+.svelte-kit/output/client/_app/immutable/chunks/1MosIYbh.js                               0.85 kB │ gzip:   0.38 kB
+.svelte-kit/output/client/_app/immutable/chunks/BfvT6E0E.js                               0.88 kB │ gzip:   0.45 kB
+.svelte-kit/output/client/_app/immutable/chunks/B2zHPxu8.js                               1.00 kB │ gzip:   0.48 kB
+.svelte-kit/output/client/_app/immutable/chunks/BtC4lvIY.js                               1.06 kB │ gzip:   0.44 kB
+.svelte-kit/output/client/_app/immutable/chunks/c86ZJ59k.js                               1.08 kB │ gzip:   0.49 kB
+.svelte-kit/output/client/_app/immutable/chunks/DenFH5FT.js                               1.18 kB │ gzip:   0.54 kB
+.svelte-kit/output/client/_app/immutable/chunks/CrXB8F8O.js                               1.26 kB │ gzip:   0.71 kB
+.svelte-kit/output/client/_app/immutable/chunks/C0FnF6B9.js                               1.29 kB │ gzip:   0.71 kB
+.svelte-kit/output/client/_app/immutable/chunks/C0vKfRr3.js                               1.29 kB │ gzip:   0.76 kB
+.svelte-kit/output/client/_app/immutable/chunks/Bjy-W4x2.js                               1.36 kB │ gzip:   0.65 kB
+.svelte-kit/output/client/_app/immutable/chunks/CV3nZYX1.js                               1.39 kB │ gzip:   0.63 kB
+.svelte-kit/output/client/_app/immutable/chunks/BaNbYf_w.js                               1.39 kB │ gzip:   0.75 kB
+.svelte-kit/output/client/_app/immutable/chunks/yJEVmVe5.js                               1.47 kB │ gzip:   0.45 kB
+.svelte-kit/output/client/_app/immutable/chunks/BsMT6E_u.js                               1.48 kB │ gzip:   0.76 kB
+.svelte-kit/output/client/_app/immutable/chunks/7G153Qu6.js                               1.49 kB │ gzip:   0.72 kB
+.svelte-kit/output/client/_app/immutable/chunks/CNbgTmzJ.js                               1.64 kB │ gzip:   0.58 kB
+.svelte-kit/output/client/_app/immutable/chunks/BHYKnrSL.js                               1.74 kB │ gzip:   0.84 kB
+.svelte-kit/output/client/_app/immutable/chunks/CroplL_T.js                               2.00 kB │ gzip:   0.98 kB
+.svelte-kit/output/client/_app/immutable/nodes/11.Lu5WA8Xv.js                             2.07 kB │ gzip:   1.06 kB
+.svelte-kit/output/client/_app/immutable/chunks/BYIaIGWL.js                               2.14 kB │ gzip:   0.89 kB
+.svelte-kit/output/client/_app/immutable/chunks/Bxqw0xNO.js                               2.31 kB │ gzip:   1.05 kB
+.svelte-kit/output/client/_app/immutable/chunks/Cy0t0Lt3.js                               2.66 kB │ gzip:   1.17 kB
+.svelte-kit/output/client/_app/immutable/chunks/BEfP60aP.js                               2.90 kB │ gzip:   1.16 kB
+.svelte-kit/output/client/_app/immutable/nodes/9.DTP5TmIP.js                              3.27 kB │ gzip:   1.55 kB
+.svelte-kit/output/client/_app/immutable/chunks/BmemipWG.js                               3.30 kB │ gzip:   1.44 kB
+.svelte-kit/output/client/_app/immutable/chunks/C7uRHalA.js                               3.31 kB │ gzip:   1.15 kB
+.svelte-kit/output/client/_app/immutable/chunks/DT4lu53K.js                               3.35 kB │ gzip:   1.05 kB
+.svelte-kit/output/client/_app/immutable/chunks/IWC2jd_V.js                               3.35 kB │ gzip:   1.50 kB
+.svelte-kit/output/client/_app/immutable/chunks/DZ0mmsux.js                               3.44 kB │ gzip:   1.62 kB
+.svelte-kit/output/client/_app/immutable/chunks/DZ4k6PWT.js                               3.68 kB │ gzip:   1.73 kB
+.svelte-kit/output/client/_app/immutable/nodes/24.CL7Jci0K.js                             3.77 kB │ gzip:   1.69 kB
+.svelte-kit/output/client/_app/immutable/chunks/B2Vdfj29.js                               3.81 kB │ gzip:   1.68 kB
+.svelte-kit/output/client/_app/immutable/nodes/4.C7OislCx.js                              4.03 kB │ gzip:   1.84 kB
+.svelte-kit/output/client/_app/immutable/nodes/21.CGzicdYo.js                             4.49 kB │ gzip:   2.36 kB
+.svelte-kit/output/client/_app/immutable/chunks/CF0sZYmt.js                               5.29 kB │ gzip:   2.05 kB
+.svelte-kit/output/client/_app/immutable/chunks/DtRMkdRJ.js                               6.36 kB │ gzip:   2.59 kB
+.svelte-kit/output/client/_app/immutable/nodes/5.BjOITSCc.js                              7.34 kB │ gzip:   2.91 kB
+.svelte-kit/output/client/_app/immutable/nodes/13.o2X5iWw3.js                             7.56 kB │ gzip:   3.14 kB
+.svelte-kit/output/client/_app/immutable/nodes/3.Biv2EL8-.js                              9.34 kB │ gzip:   3.47 kB
+.svelte-kit/output/client/_app/immutable/entry/app.CJ5us4M7.js                            9.89 kB │ gzip:   3.74 kB
+.svelte-kit/output/client/_app/immutable/nodes/22.BHH74bTS.js                            10.45 kB │ gzip:   3.98 kB
+.svelte-kit/output/client/_app/immutable/chunks/Vqt6K03C.js                              11.95 kB │ gzip:   4.52 kB
+.svelte-kit/output/client/_app/immutable/nodes/25.DTn2wn7i.js                            12.77 kB │ gzip:   4.71 kB
+.svelte-kit/output/client/_app/immutable/chunks/BDGegt2M.js                              12.80 kB │ gzip:   3.52 kB
+.svelte-kit/output/client/_app/immutable/nodes/10.CYmgoJqH.js                            15.93 kB │ gzip:   5.64 kB
+.svelte-kit/output/client/_app/immutable/nodes/23.Cf_FWdmx.js                            16.33 kB │ gzip:   6.25 kB
+.svelte-kit/output/client/_app/immutable/chunks/HUdInDeH.js                              19.00 kB │ gzip:   4.23 kB
+.svelte-kit/output/client/_app/immutable/nodes/2.ettQhge2.js                             20.77 kB │ gzip:   7.59 kB
+.svelte-kit/output/client/_app/immutable/nodes/20.DXe6Gmnr.js                            21.28 kB │ gzip:   7.18 kB
+.svelte-kit/output/client/_app/immutable/chunks/BhFW1gla.js                              23.53 kB │ gzip:   6.74 kB
+.svelte-kit/output/client/_app/immutable/chunks/BAosrK0r.js                              23.71 kB │ gzip:   9.35 kB
+.svelte-kit/output/client/_app/immutable/nodes/14.CmCSPH72.js                            24.41 kB │ gzip:   7.37 kB
+.svelte-kit/output/client/_app/immutable/chunks/Dbx1aMtA.js                              26.54 kB │ gzip:   9.10 kB
+.svelte-kit/output/client/_app/immutable/chunks/DIp2n0Kl.js                              27.42 kB │ gzip:  10.72 kB
+.svelte-kit/output/client/_app/immutable/chunks/ANanLmPt.js                              27.45 kB │ gzip:  10.66 kB
+.svelte-kit/output/client/_app/immutable/nodes/7.BHPyHZYm.js                             27.47 kB │ gzip:   9.08 kB
+.svelte-kit/output/client/_app/immutable/nodes/16.mo0YFV2u.js                            31.98 kB │ gzip:  10.64 kB
+.svelte-kit/output/client/_app/immutable/nodes/0.CA63gVBd.js                             33.13 kB │ gzip:  12.31 kB
+.svelte-kit/output/client/_app/immutable/chunks/_4VjrwQN.js                              33.38 kB │ gzip:   9.86 kB
+.svelte-kit/output/client/_app/immutable/chunks/dKY5LJC6.js                              36.14 kB │ gzip:  14.62 kB
+.svelte-kit/output/client/_app/immutable/chunks/DJ1TFxtp.js                              39.37 kB │ gzip:  16.44 kB
+.svelte-kit/output/client/_app/immutable/chunks/RxlUzRn0.js                              40.86 kB │ gzip:  12.57 kB
+.svelte-kit/output/client/_app/immutable/chunks/5-j3PoLk.js                              41.70 kB │ gzip:  15.36 kB
+.svelte-kit/output/client/_app/immutable/nodes/19.B7SLZ6MM.js                            62.41 kB │ gzip:  19.75 kB
+.svelte-kit/output/client/_app/immutable/nodes/12.pF4quvCf.js                            73.30 kB │ gzip:  21.26 kB
+.svelte-kit/output/client/_app/immutable/chunks/m63HzX__.js                              80.57 kB │ gzip:  26.09 kB
+.svelte-kit/output/client/_app/immutable/nodes/15.CN-Q6tRq.js                           116.60 kB │ gzip:  34.53 kB
+.svelte-kit/output/client/_app/immutable/nodes/17.Di_4ufVs.js                           141.42 kB │ gzip:  28.33 kB
+.svelte-kit/output/client/_app/immutable/chunks/Dgm1NNb4.js                             155.08 kB │ gzip:  37.46 kB
+.svelte-kit/output/client/_app/immutable/chunks/DM4JWu_H.js                             243.58 kB │ gzip:  91.80 kB
+.svelte-kit/output/client/_app/immutable/chunks/CcysZXLJ.js                             317.42 kB │ gzip:  85.94 kB
+.svelte-kit/output/client/_app/immutable/chunks/D-rRimN2.js                             340.78 kB │ gzip:  99.24 kB
+.svelte-kit/output/client/_app/immutable/chunks/C-_BpKKL.js                             647.61 kB │ gzip: 178.31 kB
+.svelte-kit/output/client/_app/immutable/chunks/CdkG3SbJ.js                             689.51 kB │ gzip: 246.54 kB
+.svelte-kit/output/client/_app/immutable/chunks/Ba1tSnoo.js                           2,658.70 kB │ gzip: 707.37 kB
+
+✓ built in 3.93s
+(node:31230) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Prerendering
+
+
+> Using @sveltejs/adapter-static
+(node:31230) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Wrote site to "build"
+✔ done
+PASS check:build 9278ms
+
+Ran 15 tests for test/foundry/Depository.invariants.t.sol:DepositoryInvariants
+[PASS] invariant_accountNonceNeverDecreases() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 509   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 518   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 494   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 533   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 530   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 515   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 550   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 546   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 475   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 491   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 511   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_activeDebtCountMatchesQueue() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 509   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 518   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 494   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 533   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 530   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 515   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 550   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 546   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 475   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 491   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 511   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_callSummary() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 509   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 518   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 494   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 533   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 530   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 515   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 550   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 546   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 475   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 491   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 511   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_debtCursorNeverStrandsDebt() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 509   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 518   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 494   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 533   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 530   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 515   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 550   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 546   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 475   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 491   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 511   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_debtIsNotValue() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 509   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 518   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 494   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 533   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 530   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 515   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 550   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 546   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 475   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 491   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 511   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_debtOutstandingMatchesQueue() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 509   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 518   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 494   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 533   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 530   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 515   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 550   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 546   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 475   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 491   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 511   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_disputeNotFinalizableEarly() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 509   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 518   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 494   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 533   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 530   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 515   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 550   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 546   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 475   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 491   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 511   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_disputeNotFinalizableTwice() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 509   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 518   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 494   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 533   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 530   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 515   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 550   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 546   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 475   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 491   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 511   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_disputeNotRestartable() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 509   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 518   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 494   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 533   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 530   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 515   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 550   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 546   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 475   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 491   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 511   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_disputeStateIsConsistent() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 509   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 518   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 494   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 533   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 530   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 515   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 550   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 546   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 475   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 491   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 511   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_implicitFlashNeverProfits() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 509   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 518   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 494   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 533   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 530   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 515   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 550   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 546   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 475   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 491   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 511   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_reservesPlusCollateralPlusDebtNotInflated() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 509   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 518   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 494   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 533   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 530   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 515   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 550   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 546   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 475   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 491   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 511   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_valueConservation() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 509   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 518   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 494   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 533   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 530   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 515   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 550   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 546   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 475   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 491   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 511   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] test_meta_debtInvariantIsSensitive() (gas: 90941)
+[PASS] test_meta_valueConservationIsSensitive() (gas: 132082)
+Suite result: ok. 15 passed; 0 failed; 0 skipped; finished in 7.77s (65.26s CPU time)
+
+Ran 2 test suites in 7.77s (7.84s CPU time): 16 tests passed, 0 failed, 0 skipped (16 total tests)
+PASS check:contract-invariants 11764ms
+$ bun node_modules/@typescript/native/bin/tsc -p tools/advisor/tsconfig.json && bun test tests/release-integrity/advisor/advisor.test.ts tests/release-integrity/advisor/advisor-process.test.ts tests/release-integrity/advisor/advisor-concurrency.test.ts
+bun test v1.4.0 (34cbb9a40)
+
+tests/release-integrity/advisor/advisor-concurrency.test.ts:
+(pass) real simultaneous judges publish one evaluation and one correction without corrupting history [175.77ms]
+(pass) live readers only see complete event JSON during real concurrent publication [113.87ms]
+(pass) concurrent publication of the same event ID preserves exactly one complete original [40.72ms]
+
+tests/release-integrity/advisor/advisor-process.test.ts:
+(pass) a real child receives literal arguments and stdin without shell expansion [7.43ms]
+(pass) a real nonzero child is preserved as failure evidence [6.46ms]
+(pass) deadline kills the entire real process group including inherited-pipe children [307.17ms]
+(pass) a local CLI version probe uses the bounded process path without calling a model [4.67ms]
+
+tests/release-integrity/advisor/advisor.test.ts:
+(pass) job decoder rejects unsafe paths, unbounded work and guessed defaults [0.24ms]
+(pass) packet comes from the exact commit even while main files change [103.17ms]
+(pass) both adapters disable model tools, automatic resumption and repository context [0.56ms]
+(pass) preflight rejects fuzzy model matches and permissions added outside our override [0.14ms]
+(pass) structured final responses reject incomplete output, tool calls and silent model changes [0.28ms]
+(pass) event creation is exclusive and corrupted history fails loudly [2.13ms]
+(pass) evaluation binds a completed response and local evidence, with independent adjudication [4.56ms]
+(pass) evidence symlinks cannot escape the project and changed evidence cannot be blessed [2.07ms]
+(pass) stats exclude peer opinions and failed runs from quality but retain availability and unknown cost [0.36ms]
+(pass) an append-only correction supersedes a score without counting the response twice [0.09ms]
+(pass) history rejects a falsified response digest and filename identity [1.33ms]
+
+ 18 pass
+ 0 fail
+ 95 expect() calls
+Ran 18 tests across 3 files. [970.00ms]
+PASS check:advisor 1055ms
+$ bun core/scripts/checks/repository/check-single-live-todo.ts
+Single live TODO check passed (todo.md)
+PASS check:single-live-todo 207ms
+$ bun test ./core/__tests__/testing/tooling/script-entrypoints.test.ts
+bun test v1.4.0 (34cbb9a40)
+
+core/__tests__/testing/tooling/script-entrypoints.test.ts:
+(pass) repository command surface > root contains no command launchers [0.95ms]
+(pass) repository command surface > canonical command aliases resolve to the intended scripts [0.06ms]
+(pass) repository command surface > every local package entrypoint exists and direct launchers are executable [1.96ms]
+(pass) repository command surface > retired root and retired launchers stay absent [0.11ms]
+
+ 4 pass
+ 0 fail
+ 528 expect() calls
+Ran 4 tests across 1 file. [11.00ms]
+PASS check:script-entrypoints 23ms
+$ bun proofs/check.ts && bun test ./proofs/check.test.ts
+PROOF_PROGRAM_OK claims=10 complete=0 audits=12
+bun test v1.4.0 (34cbb9a40)
+
+proofs/check.test.ts:
+(pass) proof-program manifest gate > accepts the committed C1-C10 accountability manifest [0.64ms]
+(pass) proof-program manifest gate > rejects a completion claim without current independent audits [0.41ms]
+(pass) proof-program manifest gate > rejects missing evidence and a missing claim [0.29ms]
+
+ 3 pass
+ 0 fail
+ 5 expect() calls
+Ran 3 tests across 1 file. [8.00ms]
+PASS check:proof-program 35ms
+$ bun tools/frozen-core.ts check
+xln / FROZEN CORE / UNCHANGED
+root 0x4eccf4492e5d085b24162f86d327e003c36b7e2a90ad527db1653fde391946a7
+
+[D] xln/  0x4eccf4492e5d085b24162f86d327e003c36b7e2a90ad527db1653fde391946a7
+PASS frozen-core:check 95ms
+$ bun core/scripts/checks/policy/check-e2e-test-categories.ts
+(pass) canonical audit registry > fingerprints are deterministic and dependency-aware [10546.47ms]
+(pass) canonical audit registry > durable payment implementation and regressions are fingerprint-owned [0.31ms]
+(pass) canonical audit registry > coverage requires every current evidence class and becomes stale on fingerprint drift [2.05ms]
+(pass) canonical audit registry > one cross-module P1 blocks every invariant owner it affects [0.78ms]
+(pass) canonical audit registry > parsed timestamps choose the actual newest result, not lexical timezone order [0.29ms]
+(pass) canonical audit registry > fabricated evidence and malformed enums fail validation [0.74ms]
+Loading svelte-check in workspace: /Users/zigota/xln/frontend
+Getting Svelte diagnostics...
+
+svelte-check found 0 errors and 0 warnings
+PASS check:svelte 13322ms
+PARALLEL_CHECKS_OK gates=2
+PASS check:frontend 15739ms
+$ cd ui && bun node_modules/typescript/bin/tsc --noEmit -p tsconfig.json
+(pass) canonical audit registry > merge and release gates consume blockers, confidence, staleness, and coverage policy [3392.81ms]
+(pass) canonical audit registry > duplicate and dangling references fail loudly [1.44ms]
+
+tests/release-integrity/audit-review-quorum.test.ts:
+(pass) module scores require a current three-reviewer two-family 990 floor [2.14ms]
+
+tests/release-integrity/audit-scope-integrity.test.ts:
+(pass) atomic evidence cannot inflate sibling claims and remains reusable across SHAs [0.72ms]
+(pass) three narrow runs cannot form a whole-module review quorum [0.66ms]
+(pass) every claim-binding artifact field rejects relabeling [0.41ms]
+(pass) migration never upgrades broad module labels into unrecorded invariant claims [0.13ms]
+(pass) the exact-scope schema rejects missing fields before validation can crash [0.67ms]
+PASS eslint-ratchet 17936ms
+PASS unsafe-types 712ms
+PASS frontend-unsafe-types 325ms
+PASS determinism 57ms
+PASS no-weak-collections 419ms
+PASS runtime-dependencies 934ms
+PASS fints-negative-types 1950ms
+PASS fints-compiler-policy 205ms
+PASS fints-decoder-authority 735ms
+PASS nested-hash-coverage 161ms
+SOUNDCHECK_OK gates=10
+(pass) every effective module file has atomic scope while exclusions stay excluded [188.74ms]
+
+ 16 pass
+ 0 fail
+ 182 expect() calls
+Ran 16 tests across 3 files. [14.54s]
+PASS soundcheck:fast 17949ms
+$ bun core/scripts/checks/architecture/check-runtime-doc-paths.ts
+PASS check:audit-registry 15053ms
+$ bun core/scripts/checks/architecture/check-folder-width.ts
+RUNTIME_DOC_PATHS_OK runtime=45 docs=11
+PASS check:runtime-doc-paths 19ms
+$ bun core/scripts/checks/architecture/check-state-machine-size.ts
+FOLDER_WIDTH_OK dirs=2427 sourceFiles=4414 max=10/10 debt=core/__tests__/runtime/ingress:11,core/__tests__/runtime/observability:11,core/orchestrator/process:12,core/runtime/workers/account:13,core/scripts/e2e/harness:11,core/scripts/operations/hlt:12,frontend/src/lib/stores:11,jurisdictions/contracts:16,rscore/crates/entity-kernel/src:11,rscore/crates/entity-kernel/src/consensus:11,rscore/crates/entity-kernel/tests:11,scripts/dev:11,tools:11
+PASS check:folder-width 102ms
+$ bun core/scripts/checks/architecture/check-production-function-size.ts
+STATE_MACHINE_SIZE_OK files=478 maxFile=3000 over100=0/0 over150=0/0
+PASS check:state-machine-size 333ms
+$ bun core/scripts/checks/consensus/check-single-runtime-mempool.ts
+✅ RuntimeReplica has one live mempool: runtimeMempool
+PASS check:single-runtime-mempool 109ms
+$ bun core/scripts/checks/consensus/check-frame-candidate-isolation.ts
+✅ Every Entity frame uses a dirty-path candidate; no Runtime-owned mutation shortcut
+PASS check:frame-candidate-isolation 17ms
+$ bun core/scripts/checks/consensus/state/check-no-machine-clones.ts
+QA_E2E_CATEGORY_GATE_OK tests=248 functional=194 resilience=54
+PASS check:e2e-categories 5467ms
+$ bun core/scripts/checks/consensus/state/check-no-readonly-account-mutation.ts
+PRODUCTION_FUNCTION_SIZE_OK files=1143 maxFile=3000 over150=0/0
+PASS check:production-function-size 651ms
+$ bun core/scripts/checks/consensus/state/check-no-hot-full-machine-scans.ts
+NO_READONLY_ACCOUNT_MUTATION_OK
+PASS check:no-readonly-account-mutation 1009ms
+$ bun core/scripts/checks/consensus/state/check-patricia-hot-path.ts
+PATRICIA_HOT_PATH_OK
+PASS check:patricia-hot-path 145ms
+$ bun core/scripts/checks/consensus/state/check-path-keyed-storage.ts
+PATH_KEYED_STORAGE_OK files=1865
+PASS check:path-keyed-storage 994ms
+$ bun core/scripts/checks/consensus/state/check-account-frame-single-transition.ts
+NO_HOT_FULL_MACHINE_SCANS_OK
+PASS check:no-hot-full-machine-scans 2194ms
+$ bun core/scripts/checks/consensus/state/check-minimal-runtime-wal.ts
+ACCOUNT_FRAME_SINGLE_TRANSITION_OK
+PASS check:account-frame-single-transition 141ms
+$ bun core/scripts/checks/consensus/state/check-orderbook-price-pages.ts
+NO_MACHINE_CLONES_OK
+PASS check:no-machine-clones 2765ms
+$ bun core/scripts/checks/architecture/check-canonical-vocabulary.ts
+CANONICAL_VOCABULARY_OK required=18 importAliases=0
+PASS check:canonical-vocabulary 949ms
+$ bun core/scripts/checks/architecture/check-english-source.ts
+MINIMAL_RUNTIME_WAL_OK
+PASS check:minimal-runtime-wal 1576ms
+$ bun core/scripts/checks/consensus/check-j-event-catalog.ts
+ORDERBOOK_PRICE_PAGE_ARCHITECTURE_OK
+PASS check:orderbook-price-pages 1589ms
+J_EVENT_CATALOG_OK contracts=2
+PASS check:j-event-catalog 54ms
+$ bun node_modules/@typescript/native/bin/tsc -p tsconfig.runtime-contract-tests.json --noEmit --checkers 4 && bun core/scripts/checks/repository/check-test-import-resolution.ts
+$ bun tests/scripts/check-derive-delta-invariants.ts
+✅ deriveDelta invariants check passed
+PASS check:ui-types 6818ms
+PASS check:derive-delta-invariants 15ms
+$ bun core/scripts/checks/policy/check-no-manual-delta-math.ts
+✅ deriveDelta guard passed (385 files scanned)
+PASS check:no-manual-delta-math 164ms
+$ bun core/scripts/checks/policy/check-no-active-infra-in-state-machine.ts
+PASS check:no-active-infra-in-state-machine 30ms
+$ bun core/scripts/checks/policy/check-no-legacy.ts
+ENGLISH_SOURCE_OK checked=6569 multilingualAllowlist=18
+PASS check:english-source 633ms
+$ bun core/scripts/checks/policy/check-no-vacuous-validation.ts
+NO_VACUOUS_VALIDATION_OK files=206 rules=2
+PASS check:no-vacuous-validation 212ms
+$ bun core/scripts/checks/repository/check-unused-surface.ts
+NO_LEGACY_OK files=3568 allowlist=4
+PASS check:no-legacy 550ms
+$ bun test ./core/__tests__/payments/invariants/canonical-payment-surface.test.ts
+bun test v1.4.0 (34cbb9a40)
+
+core/__tests__/payments/invariants/canonical-payment-surface.test.ts:
+TEST_IMPORT_RESOLUTION_OK files=34 relativeImports=93
+PASS check:runtime-contract-types 1009ms
+$ bun core/scripts/checks/consensus/check-failure-taxonomy-scan.ts
+runtime failure taxonomy scan check passed
+PASS security:failure-taxonomy 29ms
+$ bun core/scripts/checks/consensus/check-swap-cancel-canonical-scan.ts
+swap cancel canonical scan check passed
+PASS security:swap-cancel-canonical 18ms
+$ bun run check:runtime-types:ts7
+$ bun node_modules/@typescript/native/bin/tsc -p tsconfig.runtime.json --noEmit --checkers 4
+PASS check:runtime-types 835ms
+(pass) retired payment transactions stay absent from active tracked files [1019.42ms]
+(pass) retired Entity and Account discriminants fail at their canonical decoders [0.52ms]
+(pass) retired dispute cooperative and hub min-fee fields fail their exact boundaries [21.47ms]
+(pass) each payment operation retains one explicit canonical transaction path [0.38ms]
+(pass) four payment modes stay distinct while retired swap alternatives fail loud [0.35ms]
+(pass) same-j offers are projected only by the counterparty matcher [0.09ms]
+(pass) public proof smoke exercises only the canonical timed dispute path [0.06ms]
+
+ 7 pass
+ 0 fail
+ 86 expect() calls
+Ran 7 tests across 1 file. [1233.00ms]
+PASS check:canonical-payment-surface 1249ms
+UNUSED_SURFACE_OK runtimeDebt=0 externalRuntime=45 nonRuntimeDebt=0 new=0 stale=0
+PASS check:unused-surface 2467ms
+PARALLEL_CHECKS_OK gates=38
+PASS check:src 25465ms
+PARALLEL_CHECKS_OK gates=3

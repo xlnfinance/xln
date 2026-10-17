@@ -1,0 +1,37 @@
+{
+  "baseSha": "0d25ea966936f98e0833c89545d08546a9cb413e",
+  "firstRed": "Real React /ui/ gate-stack was online, then shared gotoApp waited for retired Svelte selectors until outer60s timeout. Exact group29455 gone; stand free before rerun.",
+  "repair": "Use canonical gateway and React ready/locked/active surfaces. Preserve same-origin open /ui/ routes. Delete old password auto-entry, window isolatedEnv/API bindings and reload retries. Tests explicitly own credentials.",
+  "browser": {
+    "passed": 1,
+    "failed": 0,
+    "seconds": 21.692,
+    "strictBrowserHealth": true,
+    "runtimeWorkerRelayAndDeepReload": true,
+    "phaseWallMs": 18693,
+    "buildInputHash": "2691821dc4488c61fdc827db94d80be006a561c7c0b75bb84700fabe01861201"
+  },
+  "downstream": {
+    "command": "Existing real MM full/partial fill browser",
+    "exit": 1,
+    "seconds": 27.062,
+    "firstFailure": "__xln.vault.createRuntime unavailable",
+    "meaning": "Navigation now reaches current wallet; old spec still calls retired Svelte vault API. Financial fill assertions are NOT proved by this repair. No compatibility API restored.",
+    "artifact": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/mm-current-navigation-boundary"
+  },
+  "sourceSha256": {
+    "tests/utils/e2e-demo-users.ts": "5d21684c788065236784564032fee5d842e5ce2df7f590f837d8cc190ad6d7f3",
+    "tests/e2e/runtime/gateway/e2e-canonical-wallet-gateway.spec.ts": "525043021278d7199d70015b1d3ad94e750a6c03d107be36b59b978c19b56d02"
+  },
+  "rawLogSha256": {
+    "canonical-navigation-red": "b36601e9886713d587199c68ed6f17887c3bfbd386cc55b3371d496e8e6d3922",
+    "canonical-navigation-green": "13a5be60a494b4b486ba2cb753422dcf3920f37bfdd5e1decf76a427304f5041",
+    "mm-current-navigation-boundary": "b952e9feb436b5d8fb6d810c6a73743608dcf5e9591e1a5e61cbb83262b26a9c"
+  },
+  "check": {
+    "exit": 0,
+    "sourceGates": 38,
+    "topGates": 3,
+    "seconds": 26.211
+  }
+}

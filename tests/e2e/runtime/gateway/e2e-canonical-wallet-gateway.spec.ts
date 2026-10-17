@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { HDNodeWallet } from 'ethers';
 import { expect, test } from '../../../global-setup.mts';
+import { gotoApp } from '../../../utils/e2e-demo-users';
 const LOCAL_PASSWORD = 'e2e-local-wallet-password';
 
 test(
@@ -17,8 +18,10 @@ test(
     page.on('websocket', socket => {
       if (new URL(socket.url()).pathname === '/relay') socket.on('framereceived', () => relayFrames++);
     });
-    await page.goto('/app');
+    await gotoApp(page, { settleMs: 0 });
     await expect(page).toHaveURL(/\/ui\/$/);
+    await expect(page.getByTestId('gate-stack')).toHaveAttribute('data-state', 'online');
+    await gotoApp(page, { appBaseUrl: new URL(page.url()).origin, settleMs: 0 });
     const assets = [];
     for (const [url, file] of [
       ['/ui/runtime.js', 'runtime.js'],
@@ -48,11 +51,14 @@ test(
     await page.getByLabel('Confirm password', { exact: true }).fill(LOCAL_PASSWORD);
     await page.getByRole('button', { name: 'Save and open', exact: true }).click();
     await expect(page.getByTestId('account-row').first()).toBeVisible();
+    await gotoApp(page, { appBaseUrl: new URL(page.url()).origin, settleMs: 0 });
     expect(workers).toContain('/account-worker.js');
     expect(relayFrames).toBeGreaterThan(1);
     await page.goto('/ui/manage');
     await page.reload();
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await gotoApp(page, { appBaseUrl: new URL(page.url()).origin, settleMs: 0 });
+    await expect(page).toHaveURL(/\/ui\/manage$/);
     await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
     await page.getByRole('button', { name: 'Unlock', exact: true }).click();
     await expect(page.getByTestId('nav-manage').locator('visible=true')).toBeVisible();
