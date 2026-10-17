@@ -36,7 +36,8 @@ import {
   waitForPersistedFrameEventMatch,
   type PersistedFrameEvent,
 } from '../../utils/e2e-runtime-receipts';
-import { submitUiPayment } from '../../utils/runtime/e2e-pay-ui';
+import { prepareUiPayment, submitUiPayment } from '../../utils/runtime/e2e-pay-ui';
+import { readCommittedPayment } from '../../../ui/tests/payment-evidence';
 import { enqueueEntityTxs } from '../../utils/runtime/e2e-runtime-input';
 
 /**
@@ -449,39 +450,20 @@ async function waitForHubProfile(page: Page, hubId: string) {
 async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs = 60_000): Promise<void> {
   await expect
     .poll(
-      async () => {
-        const inGossip = await page.evaluate((targetEntityId) => {
-          const view = window as typeof window & {
-            XLN?: { refreshGossip?: (env: unknown) => void };
-            isolatedEnv?: {
-              gossip?: {
-                getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; metadata?: { runtimeId?: string } }>;
-              };
-            };
-          };
-          try {
-            view.XLN?.refreshGossip?.(view.isolatedEnv);
-          } catch {
-            // best effort
-          }
-          const profiles = view.isolatedEnv?.gossip?.getProfiles?.() || [];
-          return profiles.some((profile) =>
-            String(profile?.entityId || '').toLowerCase() === String(targetEntityId || '').toLowerCase()
-            && Boolean(profile?.runtimeId || profile?.metadata?.runtimeId),
-          );
-        }, entityId).catch(() => false);
-        if (inGossip) return true;
-
-        const response = await page.request.get(
-          `${API_BASE_URL}/api/debug/entities?limit=5000&q=${encodeURIComponent(entityId)}`,
-        );
-        if (!response.ok()) return false;
-        const body = await response.json() as { entities?: Array<{ entityId?: string; runtimeId?: string }> };
-        return (Array.isArray(body.entities) ? body.entities : []).some((entry) =>
-          String(entry.entityId || '').toLowerCase() === entityId.toLowerCase() && Boolean(entry.runtimeId),
-        );
-      },
-      { timeout: timeoutMs, intervals: [500, 1000, 1500] },
+      () =>
+        page.evaluate(async target => {
+          const debug = (window as RebalanceWindow).__xln;
+          const env = debug?.env();
+          if (!debug || !env) throw new Error('REBALANCE_RUNTIME_UNAVAILABLE');
+          await (await debug.xln()).ensureGossipProfiles(env, [target]);
+          return env.gossip
+            .getProfiles()
+            .some(
+              profile =>
+                profile.entityId.toLowerCase() === target.toLowerCase() && Boolean(profile.runtimeId),
+            );
+        }, entityId),
+      { timeout: timeoutMs, intervals: [200, 400, 800] },
     )
     .toBe(true);
 }
@@ -557,7 +539,9 @@ type OffchainFaucetResponse = {
 };
 
 
-async function faucet(page: Page, userEntityId: string, hubEntityId: string): Promise<OffchainFaucetResponse> {
+async function faucet(
+  page: Page, userEntityId: string, hubEntityId: string, amountUsd = '100',
+): Promise<OffchainFaucetResponse> {
   const runtimeId = await page.evaluate(() => (window as RebalanceWindow).__xln?.env()?.runtimeId || null);
   expect(runtimeId, 'runtimeId must exist before faucet').toBeTruthy();
   const deadline = Date.now() + 20_000;
@@ -565,7 +549,7 @@ async function faucet(page: Page, userEntityId: string, hubEntityId: string): Pr
   let lastStatus = 0;
   while (Date.now() < deadline) {
     const resp = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
-      data: { userEntityId, userRuntimeId: runtimeId, hubEntityId, tokenId: USDC_TOKEN_ID, amount: '100' },
+      data: { userEntityId, userRuntimeId: runtimeId, hubEntityId, tokenId: USDC_TOKEN_ID, amount: amountUsd },
     });
     const body = await resp.json().catch(() => ({}));
     if (resp.ok()) {
@@ -729,33 +713,6 @@ async function countExactHankoBatchLogs(
   return logs.length;
 }
 
-async function faucetAmount(page: Page, userEntityId: string, hubEntityId: string, amountUsd: string) {
-  const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
-  expect(runtimeId, 'runtimeId must exist before faucetAmount').toBeTruthy();
-  const deadline = Date.now() + 20_000;
-  let lastBody: any = null;
-  let lastStatus = 0;
-  while (Date.now() < deadline) {
-    const resp = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
-      data: { userEntityId, userRuntimeId: runtimeId, hubEntityId, tokenId: USDC_TOKEN_ID, amount: amountUsd },
-    });
-    const body = await resp.json().catch(() => ({}));
-    if (resp.ok()) return;
-    lastBody = body;
-    lastStatus = resp.status();
-    const code = String(body?.code || '');
-    if (
-      code !== 'FAUCET_ACCOUNT_NOT_READY' &&
-      code !== 'FAUCET_ACCOUNT_PENDING_FRAME' &&
-      code !== 'FAUCET_CLIENT_PENDING_FRAME'
-    ) {
-      break;
-    }
-    await page.waitForTimeout(300);
-  }
-  expect(false, `faucetAmount failed: status=${lastStatus} body=${JSON.stringify(lastBody)}`).toBe(true);
-}
-
 async function sendRoutedHtlcPayment(
   page: Page,
   fromEntityId: string,
@@ -764,42 +721,35 @@ async function sendRoutedHtlcPayment(
   route: string[],
   amountUsd: bigint,
   description: string,
-): Promise<void> {
-  const routeIds = route.map(id => id.toLowerCase());
-  await expect.poll(async () => page.evaluate(async (ids) => {
-    const view = window as any;
-    const connectivity = view.__xln?.runtimeConnectivity;
-    await connectivity?.ensureProfiles?.(ids).catch(() => false);
-    const profiles = view.isolatedEnv?.gossip?.getProfiles?.() ?? connectivity?.profiles ?? [];
-    const matches = (id: string) => profiles.filter((profile: any) =>
-      String(profile?.entityId || '').toLowerCase() === id);
-    for (const id of ids) if (matches(id).length !== 1) return `${id}:profiles=${matches(id).length}`;
-    for (let index = 0; index < ids.length - 1; index++) {
-      const left = matches(ids[index]!)[0];
-      const right = matches(ids[index + 1]!)[0];
-      const linked = left.accounts?.some((account: any) => String(account?.counterpartyId || '').toLowerCase() === ids[index + 1])
-        || right.accounts?.some((account: any) => String(account?.counterpartyId || '').toLowerCase() === ids[index]);
-      if (!linked) return `${ids[index]}->${ids[index + 1]}:account-missing`;
-    }
-    return 'ready';
-  }, routeIds), { timeout: 30_000, intervals: [200, 400, 800] }).toBe('ready');
-  await enqueueEntityTxs(page, fromEntityId, fromSignerId, [{
-    type: 'htlcPayment',
-    data: {
-      targetEntityId,
-      tokenId: USDC_TOKEN_ID,
-      amount: usdcUnits(amountUsd),
-      maxSenderDebit: usdcUnits(amountUsd) * 2n,
-      route,
-      description,
-      deliveryMode: 'instant',
-    },
-  }]);
+): Promise<{ senderAmount: string; recipientAmount: string; feeAmount: string }> {
+  const active = await getLocalEntity(page);
+  expect(active).toEqual({ entityId: fromEntityId, signerId: fromSignerId });
+  await prepareUiPayment(page, {
+    recipientEntityId: targetEntityId,
+    amount: usdcUnits(amountUsd),
+    tokenId: USDC_TOKEN_ID,
+    routeEntityIds: route,
+  });
+  const note = page.getByTestId('pay-note');
+  if (!(await note.isVisible())) await page.getByRole('button', { name: 'Add a note', exact: true }).click();
+  await note.fill(description);
+  const quote = page.getByTestId('pay-quote');
+  const senderAmount = await quote.getAttribute('data-sender-amount');
+  const recipientAmount = await quote.getAttribute('data-recipient-amount');
+  const feeAmount = await quote.getAttribute('data-fee-amount');
+  if (senderAmount === null || recipientAmount === null || feeAmount === null)
+    throw new Error('REBALANCE_QUOTE_AMOUNTS_MISSING');
+  expect(BigInt(senderAmount) - BigInt(recipientAmount)).toBe(BigInt(feeAmount));
+  await expect(page.getByTestId('pay-submit')).toBeEnabled();
+  await page.getByTestId('pay-submit').click();
+  return { senderAmount, recipientAmount, feeAmount };
 }
 
 async function readPairState(page: Page, counterpartyId: string, ownerEntityId?: string) {
-  const raw = await page.evaluate(({ counterpartyId, ownerEntityId }) => {
-    const env = (window as any).isolatedEnv;
+  const raw = await page.evaluate(async ({ counterpartyId, ownerEntityId }) => {
+    const debug = (window as RebalanceWindow).__xln;
+    if (!debug) throw new Error('REBALANCE_RUNTIME_UNAVAILABLE');
+    const env = debug.env();
     if (!env?.state?.eReplicas) return null;
     const ownerTarget = String(ownerEntityId || '').toLowerCase();
     for (const rep of env.state.eReplicas.values()) {
@@ -813,7 +763,9 @@ async function readPairState(page: Page, counterpartyId: string, ownerEntityId?:
       if (!delta) continue;
       const isLeft = replicaEntityId < String(counterpartyId).toLowerCase();
       const requested = accountState.requestedRebalance?.get?.(1) || 0n;
-      const history = Array.isArray(acc.frameHistory) ? acc.frameHistory : [];
+      const history = await (await debug.xln()).readPersistedAccountFrameHistory(
+        env, replicaEntityId, counterpartyId, 80,
+      );
       const pendingTxs = Array.isArray(acc?.pendingFrame?.accountTxs) ? acc.pendingFrame.accountTxs : [];
       const htlcFrames = [...history.slice(-80), ...(pendingTxs.length > 0 ? [{ accountTxs: pendingTxs }] : [])];
       const recentDirectPaymentDescriptions = history
@@ -2368,264 +2320,276 @@ test.describe('Rebalance E2E', () => {
     });
   });
 
-  // Scenario: multi-hop routing through H1 and H2 should fail on the second 550 payment before H2
-  // rebalances, then pass again after H2 completes R2C.
-  test('rt1->h1->h2->rt2: second 550 fails before rebalance, passes after H2 R2C', { tag: '@resilience' }, async ({ browser, page }) => {
-    let senderContext: BrowserContext | null = null;
-    let recipientContext: BrowserContext | null = null;
-    try {
-      await resetProdServer(page);
-
-      const rt1Label = `rt1-h1h2-${Date.now()}`;
-      const rt2Label = `rt2-h1h2-${Date.now() + 1}`;
-      const sender = await createLiveRuntimePage(browser, rt1Label, nextRebalanceMnemonic());
-      const recipient = await createLiveRuntimePage(browser, rt2Label, nextRebalanceMnemonic());
-      senderContext = sender.context;
-      recipientContext = recipient.context;
-      const senderPage = sender.page;
-      const recipientPage = recipient.page;
-      const rt1 = sender.entity;
-      const rt2 = recipient.entity;
-      expect(rt1.entityId.toLowerCase()).not.toBe(rt2.entityId.toLowerCase());
-
-      const { h1, h2 } = await discoverH1H2(recipientPage);
-      await Promise.all([
-        waitForHubProfile(senderPage, h1),
-        waitForHubProfile(senderPage, h2),
-        waitForHubProfile(recipientPage, h1),
-        waitForHubProfile(recipientPage, h2),
-        waitForEntityAdvertised(senderPage, rt2.entityId),
-        waitForEntityAdvertised(recipientPage, rt1.entityId),
-      ]);
-
-      await markE2EPhase(recipientPage, 'rebalance_h2.connect_recipient_start', {
-        entityId: rt2.entityId,
-        details: { hub: h2.slice(0, 10) },
-      });
-      await connectHubWithCredit(recipientPage, rt2.entityId, rt2.signerId, h2, 1_000n);
-      await setRebalancePolicy(recipientPage, rt2.entityId, rt2.signerId, h2, 500n, 10_000n, 20n);
-      await waitForPairIdle(recipientPage, h2, 20_000, rt2.entityId);
-
-      await markE2EPhase(senderPage, 'rebalance_h2.connect_sender_start', {
-        entityId: rt1.entityId,
-        details: { hub: h1.slice(0, 10) },
-      });
-      await connectHubWithCredit(senderPage, rt1.entityId, rt1.signerId, h1, 10_000n);
-      const senderBeforeFaucet = await readPairState(senderPage, h1, rt1.entityId);
-      expect(senderBeforeFaucet, 'rt1-h1 pair must exist before faucet').toBeTruthy();
-      await faucetAmount(senderPage, rt1.entityId, h1, '2000');
-      await waitForFundingLiquidityReady(senderPage, h1, BigInt(senderBeforeFaucet?.outCapacity || '0'), 180_000, rt1.entityId);
-
-      const baseline = await readPairState(recipientPage, h2, rt2.entityId);
-      expect(baseline, 'rt2-h2 baseline must exist').toBeTruthy();
-      const baselineDebt = BigInt(baseline?.hubExposure || baseline?.hubDebt || '0');
-
-      await waitForPairIdle(senderPage, h1, 60_000, rt1.entityId);
-      const senderBeforeP1 = await readPairState(senderPage, h1, rt1.entityId);
-      await sendRoutedHtlcPayment(
-        senderPage,
-        rt1.entityId,
-        rt1.signerId,
-        rt2.entityId,
-        [rt1.entityId, h1, h2, rt2.entityId],
-        550n,
-        'rt1->rt2 via h1,h2 htlc #1',
-      );
-      await waitForSenderHtlcLock(
-        senderPage,
-        h1,
-        senderBeforeP1?.recentHtlcHashlocks ?? [],
-        Number(senderBeforeP1?.recentHtlcLockCount || 0),
-        25_000,
-        rt1.entityId,
-      );
-
-      let afterP1: any = null;
-      await expect.poll(async () => {
-        afterP1 = await readPairState(recipientPage, h2, rt2.entityId);
-        return !!afterP1 && BigInt(afterP1.hubExposure || afterP1.hubDebt || '0') >= baselineDebt + usdcUnits(500n);
-      }, { timeout: 30_000 }).toBe(true);
-
-      const beforeP2Debt = BigInt(afterP1?.hubExposure || afterP1?.hubDebt || '0');
-      const rt2P2Cursor = await getPersistedReceiptCursor(recipientPage);
-      await waitForPairIdle(senderPage, h1, 60_000, rt1.entityId);
-      const senderBeforeP2 = await readPairState(senderPage, h1, rt1.entityId);
-      await sendRoutedHtlcPayment(
-        senderPage,
-        rt1.entityId,
-        rt1.signerId,
-        rt2.entityId,
-        [rt1.entityId, h1, h2, rt2.entityId],
-        550n,
-        'rt1->rt2 via h1,h2 htlc #2 pre-rebalance',
-      );
-      const p2Lock = await waitForSenderHtlcLock(
-        senderPage,
-        h1,
-        senderBeforeP2?.recentHtlcHashlocks ?? [],
-        Number(senderBeforeP2?.recentHtlcLockCount || 0),
-        25_000,
-        rt1.entityId,
-      ).catch(() => null);
-      const p2Hashlock = p2Lock?.hashlock ?? '';
-
-      await recipientPage.waitForTimeout(2_000);
-      type P2Observation = {
-        afterP2: Awaited<ReturnType<typeof readPairState>>;
-        p2HashSeen: boolean;
-        p2Received: boolean;
-        debtReachedFullPayment: boolean;
-        h2SettledDuringP2: boolean;
-        h2SettlementObserved: boolean;
-        receivedFrameHeight: number | null;
-        settlementFrameHeight: number | null;
-        rt2P2Events: Awaited<ReturnType<typeof readPersistedFrameEventsSinceCursor>>;
-      };
-      const readP2Observation = async (): Promise<P2Observation> => {
-        const afterP2 = await readPairState(recipientPage, h2, rt2.entityId);
-        expect(afterP2, 'rt2-h2 state after payment#2').toBeTruthy();
-        const p2HashSeen = !!p2Hashlock && Array.isArray(afterP2?.recentHtlcHashlocks) && afterP2.recentHtlcHashlocks.includes(p2Hashlock);
-        const rt2P2Events = await readPersistedFrameEventsSinceCursor(recipientPage, {
-          cursor: rt2P2Cursor,
-          eventNames: ['HtlcReceived', 'account_settled_finalized_bilateral'],
+  // Hold the actual H2 R2C pending:550 fits once, then fits again only after chain finality.
+  test(
+    'rt1->h1->h2->rt2: second 550 fails before rebalance, passes after H2 R2C',
+    { tag: '@resilience' },
+    async ({ browser, page }) => {
+      let senderContext: BrowserContext | null = null;
+      let recipientContext: BrowserContext | null = null;
+      let miningHeld = false;
+      try {
+        await resetProdServer(page);
+        const sender = await createLiveRuntimePage(
+          browser,
+          `rt1-h1h2-${Date.now()}`,
+          nextRebalanceMnemonic(),
+        );
+        senderContext = sender.context;
+        const recipient = await createLiveRuntimePage(
+          browser,
+          `rt2-h1h2-${Date.now()}`,
+          nextRebalanceMnemonic(),
+        );
+        recipientContext = recipient.context;
+        const senderPage = sender.page;
+        const recipientPage = recipient.page;
+        const rt1 = sender.entity;
+        const rt2 = recipient.entity;
+        expect(rt1.entityId.toLowerCase()).not.toBe(rt2.entityId.toLowerCase());
+        const { h1, h2 } = await discoverH1H2(recipientPage);
+        const route = [rt1.entityId, h1, h2, rt2.entityId];
+        await Promise.all([
+          waitForHubProfile(senderPage, h1),
+          waitForHubProfile(senderPage, h2),
+          waitForHubProfile(recipientPage, h1),
+          waitForHubProfile(recipientPage, h2),
+          waitForEntityAdvertised(senderPage, rt2.entityId),
+          waitForEntityAdvertised(recipientPage, rt1.entityId),
+        ]);
+        await connectHubWithCredit(recipientPage, rt2.entityId, rt2.signerId, h2, 1_000n);
+        await setRebalancePolicy(recipientPage, rt2.entityId, rt2.signerId, h2, 500n, 10_000n, 20n);
+        await waitForPairIdle(recipientPage, h2, 20_000, rt2.entityId);
+        await connectHubWithCredit(senderPage, rt1.entityId, rt1.signerId, h1, 10_000n);
+        // Keep sender funding inside its existing credit line: otherwise the first payment
+        // starts an unrelated H1 C2R that blocks the sender while H2 mining is held.
+        await setRebalancePolicy(senderPage, rt1.entityId, rt1.signerId, h1, 10_000n, 10_000n, 20n);
+        await faucet(senderPage, rt1.entityId, h1, '2000');
+        const senderBefore = await waitForFundingLiquidityReady(senderPage, h1, 0n, 30_000, rt1.entityId);
+        expect(BigInt(senderBefore.collateral)).toBe(0n);
+        expect(BigInt(senderBefore.outCapacity)).toBe(2_000n * USDC_UNIT);
+        const receiverBefore = await readPairState(recipientPage, h2, rt2.entityId);
+        if (!receiverBefore) throw new Error('ROUTED_RECIPIENT_ACCOUNT_MISSING');
+        expect(BigInt(receiverBefore.inCapacity)).toBe(1_000n * USDC_UNIT);
+        const recipientCursor = await getPersistedReceiptCursor(recipientPage);
+        const senderCursor = await getPersistedReceiptCursor(senderPage);
+        const chainBefore = await readActiveChainRebalanceState(recipientPage, rt2.entityId, h2);
+        await callTestnetRpc<unknown>(page, 'evm_setAutomine', [false]);
+        miningHeld = true;
+        const firstQuote = await sendRoutedHtlcPayment(
+          senderPage,
+          rt1.entityId,
+          rt1.signerId,
+          rt2.entityId,
+          route,
+          550n,
+          'H1-H2 payment before rebalance',
+        );
+        const [firstSent, firstReceived, request] = await Promise.all([
+          waitForPersistedFrameEventMatch(senderPage, {
+            cursor: senderCursor,
+            eventName: 'HtlcFinalized',
+            entityId: rt1.entityId,
+            predicate: event => String(event.data?.amount) === '550000000',
+            timeoutMs: 20_000,
+          }),
+          waitForPersistedFrameEventMatch(recipientPage, {
+            cursor: recipientCursor,
+            eventName: 'HtlcReceived',
+            entityId: rt2.entityId,
+            predicate: event => String(event.data?.amount) === '550000000',
+            timeoutMs: 20_000,
+          }),
+          waitForPersistedFrameEventMatch(recipientPage, {
+            cursor: recipientCursor,
+            eventName: 'request_collateral_committed',
+            entityId: rt2.entityId,
+            predicate: event => persistedEventHasAccountToken(event, h2, USDC_TOKEN_ID),
+            timeoutMs: 20_000,
+          }),
+        ]);
+        const data = request.data;
+        if (typeof data?.requestedAmount !== 'string' || typeof data.prepaidFee !== 'string')
+          throw new Error('ROUTED_REBALANCE_REQUEST_AMOUNT_MISSING');
+        expect(BigInt(data.requestedAmount) + BigInt(data.prepaidFee)).toBe(550n * USDC_UNIT);
+        const pendingInput = {
+          ...chainBefore,
           entityId: rt2.entityId,
-        });
-        const receivedEvent = rt2P2Events.events.find((event) =>
-          event.message === 'HtlcReceived' &&
-          (!p2Hashlock || String(event.data?.hashlock || '').toLowerCase() === p2Hashlock.toLowerCase()),
-        );
-        const settlementEvent = rt2P2Events.events.find((event) =>
-          event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h2),
-        );
-        const p2Received = !!receivedEvent;
-        const h2SettledDuringP2 = !!receivedEvent && !!settlementEvent &&
-          settlementEvent.frameHeight <= receivedEvent.frameHeight;
-        return {
-          afterP2,
-          p2HashSeen,
-          p2Received,
-          debtReachedFullPayment: BigInt(afterP2?.hubExposure || afterP2?.hubDebt || '0') >= beforeP2Debt + usdcUnits(500n),
-          h2SettledDuringP2,
-          h2SettlementObserved: !!settlementEvent,
-          receivedFrameHeight: receivedEvent?.frameHeight ?? null,
-          settlementFrameHeight: settlementEvent?.frameHeight ?? null,
-          rt2P2Events,
+          hubId: h2,
+          expectedAmount: BigInt(data.requestedAmount),
         };
-      };
-      let p2Observation = await readP2Observation();
-      if (
-        (p2Observation.p2HashSeen || p2Observation.p2Received || p2Observation.debtReachedFullPayment) &&
-        !p2Observation.h2SettledDuringP2
-      ) {
-        await expect.poll(async () => {
-          p2Observation = await readP2Observation();
-          return (p2Observation.p2Received && p2Observation.h2SettlementObserved) ||
-            !(p2Observation.p2HashSeen || p2Observation.p2Received || p2Observation.debtReachedFullPayment);
-        }, {
-          timeout: 10_000,
-          intervals: [250, 500, 1000],
-          message: 'payment#2 outcome must include H2 settle evidence before accepting debt growth',
-        }).toBe(true);
-      }
-      const { afterP2, p2HashSeen, p2Received, h2SettledDuringP2, rt2P2Events } = p2Observation;
-      if (p2HashSeen || p2Received || p2Observation.debtReachedFullPayment) {
+        const pending = await waitForPendingRebalanceBatch(page, pendingInput);
+        const firstPayment = await readCommittedPayment(senderPage, rt1.entityId, senderCursor.nextHeight);
+        expect(firstPayment.senderAmount).toBe(firstQuote.senderAmount);
+        expect(firstPayment.hashlock).toBe(String(firstReceived.data?.hashlock));
+        expect(String(firstSent.data?.toEntity).toLowerCase()).toBe(h1.toLowerCase());
+        expect(String(firstReceived.data?.fromEntity).toLowerCase()).toBe(h2.toLowerCase());
+        const senderAfterFirst = await waitForPairIdle(senderPage, h1, 20_000, rt1.entityId);
+        const receiverPending = await waitForPairIdle(recipientPage, h2, 20_000, rt2.entityId);
+        expect(BigInt(senderBefore.outCapacity) - BigInt(senderAfterFirst.outCapacity)).toBe(
+          BigInt(firstPayment.senderAmount),
+        );
+        expect(BigInt(receiverPending.outCapacity) - BigInt(receiverBefore.outCapacity)).toBe(
+          BigInt(data.requestedAmount),
+        );
+        expect(BigInt(receiverPending.inCapacity)).toBeLessThan(550n * USDC_UNIT);
+        expect(receiverPending.lastFinalizedJHeight).toBe(receiverBefore.lastFinalizedJHeight);
+        const rejectedSenderCursor = await getPersistedReceiptCursor(senderPage);
+        const rejectedRecipientCursor = await getPersistedReceiptCursor(recipientPage);
+        const rejectedQuote = await sendRoutedHtlcPayment(
+          senderPage,
+          rt1.entityId,
+          rt1.signerId,
+          rt2.entityId,
+          route,
+          550n,
+          'H1-H2 rejected before rebalance',
+        );
+        const rejection = await waitForPersistedFrameEventMatch(senderPage, {
+          cursor: rejectedSenderCursor,
+          entityId: rt1.entityId,
+          eventName: 'HtlcFailed',
+          timeoutMs: 20_000,
+        });
+        const senderAfterReject = await waitForPairIdle(senderPage, h1, 20_000, rt1.entityId);
+        const receiverAfterReject = await readPairState(recipientPage, h2, rt2.entityId);
+        expect(senderAfterReject.outCapacity).toBe(senderAfterFirst.outCapacity);
+        expect(senderAfterReject.mempoolLen).toBe(0);
+        expect(receiverAfterReject).toEqual(receiverPending);
+        const rejectedEvents = await readPersistedFrameEventsSinceCursor(senderPage, {
+          cursor: rejectedSenderCursor,
+          entityId: rt1.entityId,
+          eventNames: ['HtlcInitiated', 'HtlcFinalized', 'HtlcFailed'],
+        });
+        expect(rejectedEvents.events.map(event => event.message)).toEqual(['HtlcInitiated', 'HtlcFailed']);
+        expect(rejectedEvents.events[0]?.data?.hashlock).toBe(rejection.data?.hashlock);
+        expect(rejectedEvents.events[0]?.data?.senderAmount).toBe(rejectedQuote.senderAmount);
+        console.log('[rebalance-route-rejection]', safeStringify(rejection));
         expect(
-          p2Received,
-          `payment#2 economic success must have exact durable HtlcReceived evidence: ` +
-            `events=${JSON.stringify(rt2P2Events.events.slice(-24), null, 2)}`,
-        ).toBe(true);
-        expect(
-          h2SettledDuringP2,
-          `payment#2 passed before its persisted rebalance finalize evidence: ` +
-            `beforeDebt=${beforeP2Debt} afterDebt=${afterP2?.hubExposure || afterP2?.hubDebt || 'n/a'} ` +
-            `settlementFrame=${p2Observation.settlementFrameHeight} receivedFrame=${p2Observation.receivedFrameHeight} ` +
-            `events=${JSON.stringify(rt2P2Events.events.slice(-24), null, 2)}`,
-        ).toBe(true);
-      } else {
-        expect(
-          BigInt(afterP2?.hubExposure || afterP2?.hubDebt || '0') < beforeP2Debt + usdcUnits(500n),
-          'payment#2 should not increase debt by full 550 in pre-rebalance window',
-        ).toBe(true);
-      }
-
-      if (!p2Observation.h2SettlementObserved) {
-        await waitForPersistedFrameEventMatch(recipientPage, {
-          cursor: rt2P2Cursor,
+          (
+            await readPersistedFrameEventsSinceCursor(recipientPage, {
+              cursor: rejectedRecipientCursor,
+              entityId: rt2.entityId,
+              eventNames: ['HtlcReceived', 'account_settled_finalized_bilateral'],
+            })
+          ).events,
+        ).toHaveLength(0);
+        expect(await waitForPendingRebalanceBatch(page, pendingInput)).toEqual(pending);
+        expect((await readActiveChainRebalanceState(recipientPage, rt2.entityId, h2)).collateral).toBe(
+          chainBefore.collateral,
+        );
+        await callTestnetRpc<unknown>(page, 'evm_mine');
+        const receipt = await waitForTransactionReceipt(page, pending.transactionHash);
+        expect(BigInt(receipt.status ?? '0')).toBe(1n);
+        await callTestnetRpc<unknown>(page, 'evm_setAutomine', [true]);
+        miningHeld = false;
+        const settlement = await waitForPersistedFrameEventMatch(recipientPage, {
+          cursor: recipientCursor,
           eventName: 'account_settled_finalized_bilateral',
           entityId: rt2.entityId,
-          timeoutMs: 35_000,
-          predicate: (event) => persistedEventHasAccount(event, h2),
+          predicate: event => persistedEventHasAccountToken(event, h2, USDC_TOKEN_ID),
+          timeoutMs: 20_000,
         });
-      }
-
-      let rebDone: Awaited<ReturnType<typeof readPairState>> = null;
-      const rebalanceClearDeadline = Date.now() + 20_000;
-      while (Date.now() < rebalanceClearDeadline) {
-        rebDone = await readPairState(recipientPage, h2, rt2.entityId);
-        if (rebDone && BigInt(rebDone.requested || '0') === 0n && Number(rebDone.pendingHeight || 0) === 0 && Number(rebDone.mempoolLen || 0) === 0) {
-          break;
-        }
-        await recipientPage.waitForTimeout(400);
-      }
-      expect(rebDone, 'rt2-h2 rebalance snapshot must exist').toBeTruthy();
-      expect(BigInt(rebDone?.requested || '0') === 0n, 'requestedRebalance must be cleared after finalize').toBe(true);
-      if (!rebDone) throw new Error('rt2-h2 rebalance snapshot missing');
-
-      let afterP2PostRebalance: any = rebDone;
-      let p2PostRebalanceApplied =
-        BigInt(rebDone.hubExposure || rebDone.hubDebt || '0') >= beforeP2Debt + usdcUnits(500n);
-      const p2PostRebalanceDeadline = Date.now() + 10_000;
-      while (!p2PostRebalanceApplied && Date.now() < p2PostRebalanceDeadline) {
-        afterP2PostRebalance = await readPairState(recipientPage, h2, rt2.entityId);
-        p2PostRebalanceApplied =
-          BigInt(afterP2PostRebalance?.hubExposure || afterP2PostRebalance?.hubDebt || '0')
-            >= beforeP2Debt + usdcUnits(500n);
-        if (p2PostRebalanceApplied) break;
-        await recipientPage.waitForTimeout(400);
-      }
-      if (p2PostRebalanceApplied) {
+        expect(settlement.frameHeight).toBeGreaterThan(request.frameHeight);
+        const ready = await waitForRebalanceReceiveReady(recipientPage, {
+          localAccountId: rt2.entityId,
+          hubAccountId: h2,
+          requiredInCapacity: usdcUnits(550n),
+          minLocalFinalizedJHeight: receiverBefore.lastFinalizedJHeight,
+          timeoutMs: 20_000,
+        });
+        expect(Number(BigInt(receipt.blockNumber ?? '0'))).toBe(ready.lastFinalizedJHeight);
+        expect(
+          BigInt((await readActiveChainRebalanceState(recipientPage, rt2.entityId, h2)).collateral) -
+            BigInt(chainBefore.collateral),
+        ).toBe(BigInt(data.requestedAmount));
+        expect(await countExactHankoBatchLogs(page, chainBefore.depository, h2, pending.batchHash)).toBe(1);
+        const secondSenderCursor = await getPersistedReceiptCursor(senderPage);
+        const secondRecipientCursor = await getPersistedReceiptCursor(recipientPage);
+        const secondQuote = await sendRoutedHtlcPayment(
+          senderPage,
+          rt1.entityId,
+          rt1.signerId,
+          rt2.entityId,
+          route,
+          550n,
+          'H1-H2 payment after rebalance',
+        );
+        const [secondSent, secondReceived] = await Promise.all([
+          waitForPersistedFrameEventMatch(senderPage, {
+            cursor: secondSenderCursor,
+            eventName: 'HtlcFinalized',
+            entityId: rt1.entityId,
+            predicate: event => String(event.data?.amount) === '550000000',
+            timeoutMs: 20_000,
+          }),
+          waitForPersistedFrameEventMatch(recipientPage, {
+            cursor: secondRecipientCursor,
+            eventName: 'HtlcReceived',
+            entityId: rt2.entityId,
+            predicate: event => String(event.data?.amount) === '550000000',
+            timeoutMs: 20_000,
+          }),
+        ]);
+        const secondPayment = await readCommittedPayment(
+          senderPage,
+          rt1.entityId,
+          secondSenderCursor.nextHeight,
+        );
+        expect(secondPayment.senderAmount).toBe(secondQuote.senderAmount);
+        expect(secondPayment.hashlock).toBe(String(secondReceived.data?.hashlock));
+        expect(secondPayment.hashlock).not.toBe(firstPayment.hashlock);
+        expect(secondReceived.frameHeight).toBeGreaterThan(settlement.frameHeight);
+        expect(String(secondSent.data?.toEntity).toLowerCase()).toBe(h1.toLowerCase());
+        expect(String(secondReceived.data?.fromEntity).toLowerCase()).toBe(h2.toLowerCase());
+        const senderFinal = await waitForPairIdle(senderPage, h1, 20_000, rt1.entityId);
+        expect(BigInt(senderBefore.outCapacity) - BigInt(senderFinal.outCapacity)).toBe(
+          BigInt(firstPayment.senderAmount) + BigInt(secondPayment.senderAmount),
+        );
+        const receivedEvents = await readPersistedFrameEventsSinceCursor(recipientPage, {
+          cursor: recipientCursor,
+          entityId: rt2.entityId,
+          eventNames: ['HtlcReceived'],
+        });
+        expect(receivedEvents.events).toHaveLength(2);
+        expect(receivedEvents.events.map(event => String(event.data?.amount))).toEqual([
+          '550000000',
+          '550000000',
+        ]);
+        await test.info().attach('routed-rebalance-window', {
+          contentType: 'application/json',
+          body: safeStringify({
+            route,
+            firstQuote,
+            rejectedQuote,
+            secondQuote,
+            firstPayment,
+            secondPayment,
+            senderBefore,
+            senderAfterFirst,
+            senderAfterReject,
+            receiverAfterReject,
+            senderFinal,
+            receiverBefore,
+            receiverPending,
+            ready,
+            rejection,
+            pending,
+            receipt,
+            request,
+            settlement,
+            firstReceivedHeight: firstReceived.frameHeight,
+            secondReceivedHeight: secondReceived.frameHeight,
+          }),
+        });
         await recipientPage.screenshot({ path: 'test-results/rebalance-rt1-h1-h2-rt2.png', fullPage: true });
-        return;
+      } finally {
+        if (miningHeld) await callTestnetRpc<unknown>(page, 'evm_setAutomine', [true]);
+        await senderContext?.close();
+        await recipientContext?.close();
       }
-
-      const debtBeforeP3 = BigInt(rebDone.hubExposure || rebDone.hubDebt || '0');
-      await waitForPairIdle(senderPage, h1, 20_000, rt1.entityId);
-      const senderBeforeP3 = await readPairState(senderPage, h1, rt1.entityId);
-      await sendRoutedHtlcPayment(
-        senderPage,
-        rt1.entityId,
-        rt1.signerId,
-        rt2.entityId,
-        [rt1.entityId, h1, h2, rt2.entityId],
-        550n,
-        'rt1->rt2 via h1,h2 htlc #3 post-rebalance',
-      );
-      await waitForSenderHtlcLock(
-        senderPage,
-        h1,
-        senderBeforeP3?.recentHtlcHashlocks ?? [],
-        Number(senderBeforeP3?.recentHtlcLockCount || 0),
-        25_000,
-        rt1.entityId,
-      );
-
-      let afterP3: any = null;
-      await expect.poll(async () => {
-        afterP3 = await readPairState(recipientPage, h2, rt2.entityId);
-        return !!afterP3 && BigInt(afterP3.hubExposure || afterP3.hubDebt || '0') >= debtBeforeP3 + usdcUnits(500n);
-      }, { timeout: 30_000 }).toBe(true);
-      expect(afterP3, 'rt2-h2 state after payment#3').toBeTruthy();
-      await waitForPairIdle(recipientPage, h2, 20_000, rt2.entityId);
-      await recipientPage.waitForTimeout(2_000);
-
-      await recipientPage.screenshot({ path: 'test-results/rebalance-rt1-h1-h2-rt2.png', fullPage: true });
-    } finally {
-      await Promise.all([
-        senderContext?.close().catch(() => {}),
-        recipientContext?.close().catch(() => {}),
-      ]);
-    }
-  });
+    },
+  );
 
   // Scenario: same routed-capacity cliff as above, but through H3 with asymmetric hub credit so we
   // prove the failure/recovery logic is not specific to one hub pair.
@@ -2665,7 +2629,7 @@ test.describe('Rebalance E2E', () => {
       await connectHubWithCredit(senderPage, rt1.entityId, rt1.signerId, h3, 10_000n);
       const h3BeforeFaucet = await readPairState(senderPage, h3, rt1.entityId);
       expect(h3BeforeFaucet, 'runtime1-h3 pair must exist before faucet').toBeTruthy();
-      await faucetAmount(senderPage, rt1.entityId, h3, '2000');
+      await faucet(senderPage, rt1.entityId, h3, '2000');
       await waitForFundingLiquidityReady(senderPage, h3, BigInt(h3BeforeFaucet?.outCapacity || '0'), 180_000, rt1.entityId);
 
       const baseline = await readPairState(recipientPage, h3, rt2.entityId);

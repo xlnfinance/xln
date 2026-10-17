@@ -10,7 +10,7 @@ import { handleHtlcResolve } from '../../../account/tx/handlers/htlc/resolve';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { beginAccountCollectionOverlay } from '../../../account/state/account-overlay-map';
-import { addr, makeJurisdiction, makeState } from '../../helpers/cross-j';
+import { addr, makeAccount, makeJurisdiction, makeState } from '../../helpers/cross-j';
 
 const id = (byte: string): string => `0x${byte.repeat(64)}`;
 const domain = { chainId: 31337, depositoryAddress: `0x${'11'.repeat(20)}` };
@@ -169,6 +169,8 @@ describe('same-frame incoming HTLC followup', () => {
   test('committed downstream resolution queues upstream once across exact replay with a deterministic deadline', () => {
     const state = paymentState([[hashlock, { hashlock, tokenId: 1, amount: 10n, inboundEntity: id('1'), outboundEntity: id('3'), createdTimestamp: 1 }]]);
     state.timestamp = 10;
+    // Only an active inbound Account can consume the secret-ACK deadline.
+    state.accounts.set(id('1'), makeAccount(id('1'), state.entityId));
     const program = createBookIntentProgram();
     const accountTxs: Array<{ accountId: string; tx: unknown }> = [];
     const context = { env: {}, state, newState: state, outputs: [], accountTxs, candidateEffects: [] };
