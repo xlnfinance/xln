@@ -1,0 +1,14 @@
+{
+  "readme.md": {
+    "sha256": "7c3614ae20278c520e95c07583da039869d273e8fcc2f6a5ccc507b229190183",
+    "bytes": 2146
+  },
+  "offchain-proof.json": {
+    "sha256": "2068ed777f17d0e9e01e4fda3c00c78c55dab385e6202016df3490e9e5fb030f",
+    "bytes": 434
+  },
+  "command-evidence.tar.gz": {
+    "sha256": "e38d52d2fc0fc77fbdf81bc745b7b35d6b97e4c1dc7d70fa673702913899a7ca",
+    "bytes": 8942
+  }
+}

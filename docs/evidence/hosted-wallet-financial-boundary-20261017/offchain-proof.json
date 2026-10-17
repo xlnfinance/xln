@@ -1,0 +1,14 @@
+{
+  "origin": "https://xln.finance/ui/",
+  "fundedUnits": "100000000",
+  "recipientUnits": "25000000",
+  "senderUnits": "25000025",
+  "feeUnits": "25",
+  "hashlock": "0xe1d3dd9eb7e96df4beab3f8bb7913f2256c8db0355dc4bfc1cc5c5769c3371c0 · tap to copy",
+  "displayedAccount": "75.00 USDC",
+  "reloadDisplayPreserved": true,
+  "atomicBalanceProof": false,
+  "pageErrors": [],
+  "consoleHttpErrors": [],
+  "reserveTransferProved": false
+}

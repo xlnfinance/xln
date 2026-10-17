@@ -35,7 +35,7 @@ test(
       const path = new URL(request.url()).pathname;
       if (request.method() === 'POST' && path.startsWith('/api/faucet/')) faucets.push(path);
     });
-    await page.goto('/');
+    await page.goto('./');
     await importStackPhraseUi(page, phrase);
     expect(await page.evaluate(() => '__xln' in window)).toBe(!production);
     await expect(page.locator('script[src*="/@vite/client"]')).toHaveCount(production ? 0 : 1);
