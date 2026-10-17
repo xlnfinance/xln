@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, type Page } from '@playwright/test';
-import type { RuntimeAdapter, RuntimeReplica, XLNModule } from '../../../core/api/public/runtime-module';
+import type { RuntimeReplica, XLNModule } from '../../../core/api/public/runtime-module';
+import type { RuntimeAdapterInspection } from '../../../ui/src/runtime/adapter';
 import { decodeLocalRuntimeInput } from '../../../core/runtime/decode';
 
 type RuntimeTxEnqueueInput = {
@@ -9,7 +10,7 @@ type RuntimeTxEnqueueInput = {
 };
 type EnqueueEntityTxOptions = { requireLocalReplica?: boolean };
 type RuntimeWindow = Window & {
-  __xln?: { env(): RuntimeReplica | null; adapter(): RuntimeAdapter | null; xln(): Promise<XLNModule> };
+  __xln?: { env(): RuntimeReplica | null; adapter(): RuntimeAdapterInspection | null; xln(): Promise<XLNModule> };
 };
 
 /** Submit once through current owner admission, then observe the real Runtime drain. */
@@ -25,9 +26,22 @@ export async function enqueueRuntimeInput(page: Page, input: RuntimeTxEnqueueInp
       if (sessionStorage.getItem(storageKey)) throw new Error('E2E_INPUT_ALREADY_SUBMITTED');
       // A lost browser context after send must never cause an automatic duplicate.
       sessionStorage.setItem(storageKey, 'started');
-      await adapter.send(input);
+      const xln = await debug.xln();
+      // The same owner-admission class targets the existing Runtime; no connect,
+      // bootstrap, alternate queue or bypass of readiness/admission validation.
+      const owner = new xln.EmbeddedRuntimeAdapter({
+        getEnv: () => env,
+        enqueueRuntimeInput: xln.enqueueRuntimeInput,
+        validateRuntimeInputAdmission: xln.validateRuntimeInputAdmission,
+        registerRuntimePublishedCallback: xln.registerRuntimePublishedCallback,
+        submitCrossJurisdictionIntent: async (target, route) => {
+          await xln.submitCrossJurisdictionIntent(target, route);
+          return { delivered: true };
+        },
+      });
+      await owner.send(input);
       sessionStorage.setItem(storageKey, 'accepted');
-      const drained = await (await debug.xln()).waitForRuntimeWorkDrained(env, 10_000, 0);
+      const drained = await xln.waitForRuntimeWorkDrained(env, 10_000, 0);
       if (!drained) throw new Error('E2E_RUNTIME_INPUT_DRAIN_TIMEOUT');
       sessionStorage.setItem(storageKey, 'drained');
     },

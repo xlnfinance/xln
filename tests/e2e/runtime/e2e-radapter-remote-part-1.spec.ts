@@ -1,3 +1,4 @@
+import type { RuntimeAdapterInspection } from '../../../ui/src/runtime/adapter';
 import type { RuntimeAdapter, RuntimeAdapterViewFrame, RuntimeAdapterEntitySummary, RuntimeAdapterActivityPage } from '../../../core/api/public/runtime-module';
 import { allowBrowserIssue, allowDebugIncident, expect, test } from '../../global-setup.mts';
 
@@ -1195,45 +1196,16 @@ test(
     });
     page.on('pageerror', error => consoleProblems.push(`pageerror: ${error.message}`));
 
-    await page.goto(
-      remoteRuntimeUrl('/app', h1Endpoint.wsUrl, adminKey),
-      { waitUntil: 'domcontentloaded' },
-    );
-    await acceptRemoteRuntimeConsent(page);
-
-    await page.waitForFunction(
-      ({ expectedRuntimeId }) => {
-        const view = window as typeof window & {
-          __xlnRuntimeView?: { runtimeId?: string; height?: number };
-          __xlnRuntimeAdapter?: {
-            status: () => {
-              connected?: boolean;
-              authLevel?: string | null;
-              runtimeId?: string;
-              permissions?: string;
-            };
-          };
-        };
-        const status = (view as any).__xln?.adapter?.status();
-        return (
-          status?.connected === true &&
-          status.authLevel === 'admin' &&
-          status.permissions === 'write' &&
-          String((view as any).__xln?.view?.runtimeId || status.runtimeId || '') === expectedRuntimeId &&
-          Number((view as any).__xln?.view?.height || 0) > 0
-        );
-      },
-      { expectedRuntimeId: h1Endpoint.runtimeId },
-      { timeout: REMOTE_E2E_WAIT_MS },
-    );
-
+    await page.goto(remoteRuntimeUrl('/app', h1Endpoint.wsUrl, adminKey), { waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: 'Connect', exact: true }).click();
+    await page.getByRole('button', { name: new RegExp(h1.slice(0, 18)) }).click();
+    await expect(page.getByTestId('home-entity-id')).toHaveText(h1);
     const result = await page.evaluate(
       async ({ hubId }) => {
-        const view = window as typeof window & {
-          __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
-        };
-        const adapter = (view as any).__xln?.adapter;
-        if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+        const adapter = (
+          window as Window & { __xln?: { adapter: () => RuntimeAdapterInspection | null } }
+        ).__xln?.adapter();
+        if (!adapter) throw new Error('CURRENT_RUNTIME_INSPECTION_MISSING');
         type Head = { latestHeight?: number };
         type ViewFrame = {
           height?: number;
@@ -1242,19 +1214,33 @@ test(
           } | null;
         };
 
-        const statusBefore = adapter.status();
-        const headBefore = await adapter.query.head<Head>();
-        const frameBefore = await adapter.query.viewFrame<ViewFrame>({
+        const statusBefore = {
+          authLevel: adapter.authLevel,
+          runtimeId: adapter.runtimeId,
+          height: adapter.currentHeight,
+          commandReady: adapter.commandReady,
+        };
+        const headBefore = await adapter.read<Head>('head');
+        const frameBefore = await adapter.read<ViewFrame>('view-frame', {
           entityId: hubId,
           accountsLimit: 10,
           booksLimit: 1,
         });
 
-        const sendPresent = typeof adapter.send === 'function';
+        const sendPresent = 'send' in adapter;
 
-        const statusAfter = adapter.status();
-        const headAfter = await adapter.query.head<Head>();
-        const frameAfter = await adapter.query.viewFrame<ViewFrame>({
+        const after = (
+          window as Window & { __xln?: { adapter: () => RuntimeAdapterInspection | null } }
+        ).__xln?.adapter();
+        if (!after) throw new Error('CURRENT_RUNTIME_INSPECTION_LOST');
+        const statusAfter = {
+          authLevel: after.authLevel,
+          runtimeId: after.runtimeId,
+          height: after.currentHeight,
+          commandReady: after.commandReady,
+        };
+        const headAfter = await after.read<Head>('head');
+        const frameAfter = await after.read<ViewFrame>('view-frame', {
           entityId: hubId,
           accountsLimit: 10,
           booksLimit: 1,
@@ -1262,8 +1248,9 @@ test(
         return {
           authLevelBefore: String(statusBefore.authLevel || ''),
           authLevelAfter: String(statusAfter.authLevel || ''),
-          permissionsBefore: String(statusBefore.permissions || ''),
-          permissionsAfter: String(statusAfter.permissions || ''),
+          commandReadyBefore: statusBefore.commandReady,
+          runtimeId: statusBefore.runtimeId,
+          commandReadyAfter: statusAfter.commandReady,
           sendPresent,
           beforeHeight: Number(headBefore.latestHeight || statusBefore.height || 0),
           afterHeight: Number(headAfter.latestHeight || statusAfter.height || 0),
@@ -1283,8 +1270,9 @@ test(
 
     expect(result.authLevelBefore).toBe('admin');
     expect(result.authLevelAfter).toBe('admin');
-    expect(result.permissionsBefore).toBe('write');
-    expect(result.permissionsAfter).toBe('write');
+    expect(result.commandReadyBefore).toBe(true);
+    expect(result.runtimeId).toBe(h1Endpoint.runtimeId);
+    expect(result.commandReadyAfter).toBe(true);
     expect(result.sendPresent).toBe(false);
     expect(result.beforeHeight).toBeGreaterThan(0);
     expect(result.afterHeight).toBeGreaterThanOrEqual(result.beforeHeight);

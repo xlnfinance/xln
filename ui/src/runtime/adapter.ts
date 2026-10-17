@@ -203,11 +203,44 @@ export async function connectRemote(wsUrl: string, authKey?: string): Promise<Ru
 	return adapter;
 }
 
-/** Dev-only: lets the browser console and E2E debugging read the live adapter. */
+export type RuntimeAdapterInspection = Pick<
+  RuntimeAdapter,
+  | 'mode'
+  | 'runtimeId'
+  | 'serverFingerprint'
+  | 'status'
+  | 'currentHeight'
+  | 'nextCommandSequence'
+  | 'commandLaneKind'
+  | 'authLevel'
+  | 'commandReady'
+  | 'commandReadyReason'
+  | 'read'
+>;
+
+/** A metadata snapshot and bound reads, never the connection's command authority. */
+function inspectAdapter(): RuntimeAdapterInspection | null {
+  const adapter = currentAdapter;
+  if (!adapter) return null;
+  return Object.freeze({
+    mode: adapter.mode,
+    runtimeId: adapter.runtimeId,
+    serverFingerprint: adapter.serverFingerprint,
+    status: adapter.status,
+    currentHeight: adapter.currentHeight,
+    nextCommandSequence: adapter.nextCommandSequence,
+    commandLaneKind: adapter.commandLaneKind,
+    authLevel: adapter.authLevel,
+    commandReady: adapter.commandReady,
+    commandReadyReason: adapter.commandReadyReason,
+    read: adapter.read.bind(adapter),
+  });
+}
+/** Dev-only: lets the browser console and E2E debugging inspect committed data. */
 declare const __XLN_UI_DIAGNOSTICS__: boolean;
 if (import.meta.env.DEV || __XLN_UI_DIAGNOSTICS__) {
 	(window as typeof window & { __xln?: Record<string, unknown> }).__xln = {
-		adapter: () => currentAdapter,
+		adapter: inspectAdapter,
 		env: () => currentEnv,
 		xln: () => getXLN(),
 		store: useApp,
