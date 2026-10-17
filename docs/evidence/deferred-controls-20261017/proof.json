@@ -1,0 +1,34 @@
+{
+  "baseSha": "d960f31d7833f16d2f950c584be71c2730f13390",
+  "problem": "Actual browser found two visible Lend/Borrow tablists with duplicate test IDs. The obsolete upper controls differed from the current lower controls.",
+  "fix": "Delete only the obsolete upper tablist. Retain lower controls, current term selection, disabled submission and typed backend admission rejection. No lending engine or availability change.",
+  "regression": "Require exactly one Lend and Borrow control; preserve financial state and queues while browsing, then commit an exact real payment.",
+  "focused": {
+    "passed": 1,
+    "seconds": 31.35
+  },
+  "related": {
+    "passed": 4,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 54.83,
+    "log": "browser.log"
+  },
+  "production": {
+    "buildSeconds": 3.03,
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 36.99,
+    "log": "production-browser.log",
+    "assets": "served-assets.json"
+  },
+  "sourceHashes": {
+    "ui/src/screens/Lending.tsx": "4d1c47228eb5859a62e11d0935fb41a72cc3d04431e2c7d022e1265b0a44e525",
+    "ui/tests/e2e-lending-availability.spec.ts": "fc66792c09078618e329639d147c46af1ed07b7b0a1338c092e435628755a339"
+  },
+  "limits": [
+    "Local private-chain evidence; no mainnet activation or full readiness claim.",
+    "Public topology gate remains blocked by operator authentication; full aggregate release/E2E, public-chain evidence, rollback and uninterrupted one-hour soak remain open."
+  ]
+}

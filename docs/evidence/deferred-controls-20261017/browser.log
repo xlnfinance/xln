@@ -1,0 +1,44 @@
+
+Running 4 tests using 1 worker
+
+(node:92949) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `bun --trace-warnings ...` to show where the warning was created)
+  ✓  1 [chromium] › ui/tests/e2e-lending-availability.spec.ts:128:0 › deferred lending disables new commands and leaves the wallet able to pay @functional (9.1s)
+  ✓  2 [chromium] › ui/tests/e2e-payment.spec.ts:49:2 › wallet UI payment › invalid amounts and recipients cannot admit a payment or retain a revoked quote @functional (5.3s)
+PAYMENT_HOME_MS 3579
+PAYMENT_FUNDED_MS 4171
+PAYMENT_COMMITTED_MS 5374
+PAYMENT_RELOAD_MS 6560
+PAYMENT_RESTORED_MS 9840
+  ✓  3 [chromium] › ui/tests/e2e-payment.spec.ts:80:2 › wallet UI payment › pays the merchant through the hub and shows the committed receipt @functional (10.5s)
+RECOVERY_MODAL_FOCUS Shift+Tab {
+  inside: false,
+  browserBoundary: true,
+  nativeModal: true,
+  activeTag: "BODY",
+  documentFocused: false,
+}
+RECOVERY_MODAL_FOCUS Tab {
+  inside: true,
+  browserBoundary: false,
+  nativeModal: true,
+  activeTag: "BUTTON",
+  documentFocused: true,
+}
+RECOVERY_MODAL_FOCUS Tab {
+  inside: true,
+  browserBoundary: false,
+  nativeModal: true,
+  activeTag: "BUTTON",
+  documentFocused: true,
+}
+RECOVERY_MODAL_FOCUS Tab {
+  inside: true,
+  browserBoundary: false,
+  nativeModal: true,
+  activeTag: "BUTTON",
+  documentFocused: true,
+}
+  ✓  4 [chromium] › ui/tests/e2e-payment.spec.ts:204:0 › payment receipts and recovery dialogs keep keyboard focus inside and restore it on close @functional (8.2s)
+
+  4 passed (33.8s)

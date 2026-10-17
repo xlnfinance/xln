@@ -150,14 +150,6 @@ export function Lending() {
 						<p className="note">Lending runs through a hub. Open an account with one first.</p>
 					) : (
 						<>
-							<div className="segc" role="tablist">
-								<button type="button" role="tab" aria-selected={side === 'lend'} className={side === 'lend' ? 'active' : ''} onClick={() => { setSide('lend'); setRateText('100'); }} data-testid="lend-side-lend">
-									Lend
-								</button>
-								<button type="button" role="tab" aria-selected={side === 'borrow'} className={side === 'borrow' ? 'active' : ''} onClick={() => { setSide('borrow'); setRateText('250'); }} data-testid="lend-side-borrow">
-									Borrow
-								</button>
-							</div>
 							<div className="field">
 								<span className="field-label">Hub</span>
 								<div className="mode-grid">

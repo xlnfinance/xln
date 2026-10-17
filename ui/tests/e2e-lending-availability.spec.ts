@@ -169,6 +169,7 @@ test(
     await expect(page.getByTestId('lending-unavailable')).toContainText('Lending is unavailable in this release');
     await expect(page.getByTestId('lending-state')).toBeVisible();
     for (const side of ['lend', 'borrow']) {
+      await expect(page.getByTestId(`lend-side-${side}`)).toHaveCount(1);
       await page.getByTestId(`lend-side-${side}`).click();
       await page.getByTestId('lend-amount').fill('25');
       if (side === 'borrow') await page.getByTestId('lend-rate').fill('100');

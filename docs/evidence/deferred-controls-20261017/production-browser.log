@@ -1,0 +1,8 @@
+
+Running 1 test using 1 worker
+
+(node:93648) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `bun --trace-warnings ...` to show where the warning was created)
+  ✓  1 [chromium] › ui/tests/e2e-production-wallet.spec.ts:24:0 › production wallet imports, funds 100, moves reserve, pays 25 and preserves identity on reload @functional (14.8s)
+
+  1 passed (15.4s)

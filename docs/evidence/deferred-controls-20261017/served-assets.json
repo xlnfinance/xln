@@ -1,0 +1,21 @@
+{
+  "artifactDir": "/Users/zigota/xln/ui/dist",
+  "files": [
+    {
+      "bytes": 1917,
+      "path": "index.html",
+      "sha256": "0264f7d40d670ade1eb1b5f342e89a64e0eeafe0ff98c42b2071bc686c41d22a"
+    },
+    {
+      "bytes": 5944810,
+      "path": "runtime.js",
+      "sha256": "57d6df197e5671f7ff38d9500ab138758134b9ed3f8f64eccd9ca2492402277e"
+    },
+    {
+      "bytes": 2045527,
+      "path": "account-worker.js",
+      "sha256": "5eb1a38aa8d02a663289ba35ba286e2d8067d373bb7bc31e80a61887ad15a945"
+    }
+  ],
+  "origin": "http://127.0.0.1:20002"
+}
