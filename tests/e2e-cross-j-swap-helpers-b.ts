@@ -1,3 +1,6 @@
+import { formatUnits, parseUnits } from 'ethers';
+import { getTokenInfo } from '../core/account/utils';
+import { requantizeRemainingSwapAtPriceForDimensions } from '../core/swapbook';
 import { deriveTransferOffdeltaChange } from '../core/protocol/transform/delta-movement';
 import {
   API_BASE_URL,
@@ -9,7 +12,6 @@ import {
   TOKEN_SYMBOL_BY_ID,
   USDC,
   WETH,
-  configurePair,
   configureTokens,
   dismissSwapCompletionModal,
   escapeRegex,
@@ -257,17 +259,10 @@ export async function placeCrossOrder(
     hubId: string;
     targetEntityId: string;
     side: 'buy' | 'sell';
-    amount?: string;
-    price?: string;
+    amount: string;
+    price: string;
     fromTokenId?: number;
     toTokenId?: number;
-    clickBookSide?: 'ask' | 'bid';
-    expectedClickFromTokenId?: number;
-    expectedClickToTokenId?: number;
-    checkMultihopDeferred?: boolean;
-    expectSetupConsent?: boolean;
-    expectedBookDepth?: { expectedBidOffers: number; expectedAskOffers: number };
-    expectedAutoAmount?: number;
     screenshotPath?: string;
   },
 ): Promise<string> {
@@ -275,157 +270,40 @@ export async function placeCrossOrder(
   const emitPhaseTiming = (phase: string, startedAt: number): void => {
     console.log(`[E2E-TIMING] cross_j_order.${phase} ${Date.now() - startedAt}ms`);
   };
+  const fromTokenId = params.fromTokenId ?? (params.side === 'buy' ? USDC : WETH);
+  const toTokenId = params.toTokenId ?? (params.side === 'buy' ? WETH : USDC);
+  const giveDecimals = getTokenInfo(fromTokenId).decimals;
+  const wantDecimals = getTokenInfo(toTokenId).decimals;
+  const give = parseUnits(params.amount, giveDecimals);
+  const take = requantizeRemainingSwapAtPriceForDimensions(fromTokenId, toTokenId, give, parseUnits(params.price, 4), {
+    giveTokenDecimals: giveDecimals,
+    wantTokenDecimals: wantDecimals,
+  });
+  if (!take) throw new Error('CROSS_ORDER_NOT_REPRESENTABLE');
+  expect(take.effectiveGive, 'the requested source amount must be exactly representable').toBe(give);
   await openSwapWorkspace(page);
-  await dismissSwapCompletionModal(page);
   await selectSourceChainInSwap(page, params.source.entityId);
+  await selectCrossRoute(page, params.targetEntityId);
+  await configureTokens(page, fromTokenId, toTokenId);
   await selectCounterpartyInSwap(page, params.hubId);
-  if (params.fromTokenId && params.toTokenId && params.fromTokenId === params.toTokenId) {
-    await selectCrossRoute(page, params.targetEntityId);
-    await configureTokens(page, params.fromTokenId, params.toTokenId);
-  } else {
-    await configurePair(page, params.side);
-    await selectCrossRoute(page, params.targetEntityId);
-  }
-  await expectCrossOrderbookReady(page);
-  if (params.expectedBookDepth) {
-    const orderbook = page.getByTestId('swap-orderbook').first();
-    await expect(orderbook.getByTestId('orderbook-ask-row')).toHaveCount(params.expectedBookDepth.expectedAskOffers, {
-      timeout: 30_000,
-    });
-    await expect(orderbook.getByTestId('orderbook-bid-row')).toHaveCount(params.expectedBookDepth.expectedBidOffers, {
-      timeout: 30_000,
-    });
-    const displayedSizes = await orderbook.locator('.size').allTextContents();
-    expect(displayedSizes, 'stable cross MM depth should be visibly sized in thousands of tokens').toEqual(
-      expect.arrayContaining([expect.stringMatching(/K$/)]),
-    );
-    expect(displayedSizes, 'cross MM sizes must never expose raw million-lot counts').not.toEqual(
-      expect.arrayContaining([expect.stringMatching(/M$/)]),
-    );
-  }
-  await dismissSwapCompletionModal(page);
-  if (params.checkMultihopDeferred) {
-    await expectDirectCrossOrderbookReady(page);
-    await expectCrossOrderbookReady(page);
-  }
-  if (params.expectedAutoAmount !== undefined) {
-    await expect
-      .poll(
-        async () => Number(String(await page.getByTestId('swap-ticket-amount').first().inputValue()).replace(/,/g, '')),
-        {
-          timeout: 10_000,
-          intervals: [50, 100, 200],
-          message: 'opening the swap form must default to 100% canonical source capacity',
-        },
-      )
-      .toBeCloseTo(params.expectedAutoAmount, 6);
-  }
-  if (params.clickBookSide) {
-    const expectedFromTokenId = params.expectedClickFromTokenId ?? (params.clickBookSide === 'ask' ? USDC : WETH);
-    const expectedToTokenId = params.expectedClickToTokenId ?? (params.clickBookSide === 'ask' ? WETH : USDC);
-    await clickCrossOrderbookLevel(page, params.clickBookSide, expectedFromTokenId, expectedToTokenId);
-  }
-  const amountInput = page.getByTestId('swap-ticket-amount').first();
-  const priceInput = page.getByTestId('swap-ticket-rate').first();
-  const submit = page.getByTestId('swap-ticket-submit').first();
-  const safetyBanner = page.getByTestId('cross-j-safety-banner').first();
-  await expect(
-    safetyBanner,
-    'every cross-network order must disclose its online secret-relay and manual-close obligations',
-  ).toBeVisible({ timeout: 20_000 });
-  await expect(safetyBanner).toContainText('Stay online');
-  await expect(safetyBanner).toContainText('cancel the remaining order manually');
-  await expect(safetyBanner).toContainText('65,535 steps');
-  await expect(amountInput).toBeVisible({ timeout: 20_000 });
-  await expect(priceInput).toBeVisible({ timeout: 20_000 });
+  const safety = page.getByTestId('cross-swap-safety');
+  await expect(safety).toContainText('Stay online');
+  await expect(safety).toContainText('Cancel rest');
+  // React deliberately has no live cross-network quote. The caller supplies an
+  // explicit limit; the public book is only an observation, never an order UI.
+  await expect(page.getByTestId('swap-quote-note')).toContainText('not a live cross-network quote');
+  const amountInput = page.getByTestId('swap-give');
+  const minimumInput = page.getByTestId('swap-want');
+  const submit = page.getByTestId('swap-submit');
+  await amountInput.fill(params.amount);
+  await minimumInput.fill(formatUnits(take.effectiveWant, wantDecimals));
+  await expect(amountInput).toHaveValue(params.amount);
+  await expect(minimumInput).toHaveValue(formatUnits(take.effectiveWant, wantDecimals));
   const beforeSubmit = await readCrossState(page, params.source, params.hubId);
   const beforeHeight = beforeSubmit.currentHeight;
   const beforeRouteIds = new Set(beforeSubmit.routeSummaries.map(route => route.orderId));
   const beforeOfferIds = new Set(beforeSubmit.offerSummaries.map(offer => offer.offerId));
-  if (params.amount !== undefined) {
-    await amountInput.fill(params.amount);
-    await expect
-      .poll(() => amountInput.inputValue(), {
-        timeout: 10_000,
-        intervals: [50, 100, 250],
-        message: 'manual cross-j amount must remain owned by the user after reactive route updates',
-      })
-      .toBe(params.amount);
-  } else {
-    const autoAmount = Number(String(await amountInput.inputValue()).replace(/,/g, ''));
-    expect(autoAmount, 'book click must populate a positive source amount').toBeGreaterThan(0);
-    if (params.expectedAutoAmount !== undefined) {
-      expect(autoAmount, 'book click must size from the full canonical source capacity').toBeCloseTo(
-        params.expectedAutoAmount,
-        6,
-      );
-    }
-  }
-  if (params.screenshotPath) {
-    await page.screenshot({ path: params.screenshotPath, fullPage: true });
-  }
-  if (params.price !== undefined) await priceInput.fill(params.price);
-  if (params.expectSetupConsent) {
-    const consent = page.getByTestId('swap-setup-consent').first();
-    await expect(consent, 'one-click cross swap must disclose automatic target setup').toBeVisible({ timeout: 10_000 });
-    await expect(
-      consent.getByTestId('swap-setup-step'),
-      'target setup disclosure must include account + credit steps',
-    ).toHaveCount(2, { timeout: 10_000 });
-    await expect(
-      consent.locator('[data-step-id="target-account"]'),
-      'target account setup step must be visible',
-    ).toContainText('Create target account');
-    await expect(
-      consent.locator('[data-step-id="target-credit"]'),
-      'target credit setup step must be visible',
-    ).toContainText('Set inbound credit limit');
-    const errorText = (await page.getByTestId('swap-ticket-error').allTextContents()).join('\n');
-    expect(errorText, 'auto-setup must replace the old manual create-account blocker').not.toMatch(
-      /create target account|account setup required/i,
-    );
-  }
-  await expect
-    .poll(
-      async () => {
-        const routePicker = page.getByTestId('swap-route-picker').first();
-        const [receive, formErrorParts, amountState, parsedGiveAmount, canonicalGiveAmount] = await Promise.all([
-          page.getByTestId('swap-ticket-receive-amount').first().locator('.swap-ticket-receive-value').textContent(),
-          page.getByTestId('swap-ticket-error').allTextContents(),
-          routePicker.getAttribute('data-order-amount-state'),
-          routePicker.getAttribute('data-give-amount'),
-          routePicker.getAttribute('data-canonical-give-amount'),
-        ]);
-        const diagnostics = {
-          receive,
-          formError: formErrorParts.join('\n').trim(),
-          amountState,
-          parsedGiveAmount,
-          canonicalGiveAmount,
-          price: await priceInput.inputValue(),
-          giveToken: await routePicker.getAttribute('data-give-token'),
-          wantToken: await routePicker.getAttribute('data-want-token'),
-          giveDecimals: await routePicker.getAttribute('data-give-decimals'),
-        };
-        const ready =
-          Number(String(receive || '0').replace(/,/g, '')) > 0 &&
-          diagnostics.formError === '' &&
-          parsedGiveAmount !== null &&
-          parsedGiveAmount !== '0' &&
-          canonicalGiveAmount !== null &&
-          canonicalGiveAmount !== '0';
-        return {
-          ready,
-          diagnostics: ready ? '' : JSON.stringify(diagnostics),
-        };
-      },
-      {
-        timeout: 10_000,
-        intervals: [50, 100, 250],
-        message: 'cross-j manual amount must reach the canonical form state before submit',
-      },
-    )
-    .toEqual({ ready: true, diagnostics: '' });
+  if (params.screenshotPath) await page.screenshot({ path: params.screenshotPath, fullPage: true });
   await expect(submit).toBeEnabled({ timeout: 30_000 });
   emitPhaseTiming('pre_submit', flowStartedAt);
   const clickStartedAt = Date.now();
@@ -443,47 +321,12 @@ export async function placeCrossOrder(
           const state = await readCrossState(page, params.source, params.hubId);
           const newRoutes = state.routeSummaries.filter(route => !beforeRouteIds.has(route.orderId));
           const newOffers = state.offerSummaries.filter(offer => !beforeOfferIds.has(offer.offerId));
-          const formError = await page
-            .getByTestId('swap-ticket-error')
-            .first()
-            .textContent()
-            .catch(() => '');
-          const formValues = await page.evaluate(() => {
-            const amount = document.querySelector<HTMLInputElement>('[data-testid="swap-ticket-amount"]')?.value || '';
-            const price = document.querySelector<HTMLInputElement>('[data-testid="swap-ticket-rate"]')?.value || '';
-            const view = window as CrossRuntimeWindow & { __xln_env?: any };
-            const summarizeEnv = (env: any) => ({
-              runtimeId: String(env?.runtimeId || ''),
-              height: Number(env?.state.height || 0),
-              timestamp: Number(env?.state.timestamp || 0),
-              scenarioMode: Boolean(env?.scenarioMode),
-              lastProcessEnteredAt: Number(env?.lastProcessEnteredAt || 0),
-              minFrameDelayMs: Number(env?.runtimeConfig?.minFrameDelayMs || 0),
-              queuedAt: Number(env?.runtimeMempool?.queuedAt || 0),
-              runtimeInputTypes: Array.from(env?.runtimeInput?.entityInputs || []).map((input: any) => ({
-                entityId: String(input?.entityId || '').slice(-8),
-                txTypes: Array.from(input?.entityTxs || []).map((tx: any) => String(tx?.type || '')),
-              })),
-              mempoolTypes: Array.from(env?.runtimeMempool?.entityInputs || []).map((input: any) => ({
-                entityId: String(input?.entityId || '').slice(-8),
-                txTypes: Array.from(input?.entityTxs || []).map((tx: any) => String(tx?.type || '')),
-              })),
-            });
-            return {
-              amount,
-              price,
-              isolated: summarizeEnv(view.__xln?.env()),
-              live: summarizeEnv(view.__xln_env),
-            };
-          });
           lastSubmitState = {
             ok: newRoutes.length > 0 || newOffers.length > 0,
             routes: state.routes,
             offers: state.offers,
             newRoutes: newRoutes.map(route => ({ orderId: route.orderId, status: route.status })),
             newOffers: newOffers.map(offer => ({ offerId: offer.offerId, status: offer.status })),
-            formError: String(formError || '').trim(),
-            formValues,
             recentMessages: state.messages.slice(-8),
           };
           createdOrderId = newRoutes[0]?.orderId || newOffers[0]?.offerId || '';
@@ -1069,8 +912,7 @@ export async function readCrossResolveSnapshots(
           const targetHub = String(target.entityId || '').toLowerCase();
           const targetUser = String(target.counterpartyEntityId || '').toLowerCase();
           const matchesAccount =
-            (sourceUser === owner && sourceHub === cp) ||
-            (targetUser === owner && targetHub === cp);
+            (sourceUser === owner && sourceHub === cp) || (targetUser === owner && targetHub === cp);
           if (!matchesAccount) continue;
           const fillRatio = Number(route.cumulativeFillRatio || 0);
           const filledSource = BigInt(String(route.filledSourceAmount ?? '0'));

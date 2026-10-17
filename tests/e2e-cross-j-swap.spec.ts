@@ -1,5 +1,5 @@
 import type { AccountFrame } from '../core/types/account';
-import { Wallet } from 'ethers';
+import { Wallet, formatUnits } from 'ethers';
 import { crossJurisdictionBookQtyLots } from '../core/swapbook';
 import {
   API_BASE_URL,
@@ -320,6 +320,10 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       expect(fullSourceBefore.deltas[String(USDC)], 'source USDC delta must exist before full fill').toBeDefined();
       expect(fullTargetBefore.deltas[String(USDC)], 'target USDC delta must exist before full fill').toBeDefined();
 
+      const usdcBook = await readHubPairSnapshot(page, sourceHubProfile, usdcCrossPair!.pairId);
+      expectExactConfiguredDepth(usdcBook, usdcCrossBookDepth, 'published USDC cross market');
+      const fullBid = usdcBook.bids[0];
+      if (!fullBid) throw new Error('USDC_CROSS_BID_MISSING');
       const orderId = await placeCrossOrder(page, {
         source,
         hubId,
@@ -327,20 +331,11 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         side: 'sell',
         fromTokenId: USDC,
         toTokenId: USDC,
-        clickBookSide: 'bid',
-        expectedClickFromTokenId: USDC,
-        expectedClickToTokenId: USDC,
-        expectedBookDepth: usdcCrossBookDepth,
-        expectedAutoAmount: 300,
-        screenshotPath: testInfo.outputPath('cross-j-mm-configured-depth-hub-first.png'),
-      });
-      await expect(page.getByTestId('swap-ticket-from-token').first().locator('option:checked')).toHaveText('USDC');
-      await expect(page.getByTestId('swap-ticket-to-token').first().locator('option:checked')).toHaveText('USDC');
-      await expect(page.getByTestId('swap-ticket-from-network').first().locator('option:checked')).toContainText(
-        'Testnet',
-      );
-      await expect(page.getByTestId('swap-ticket-to-network').first().locator('option:checked')).toContainText('Tron');
 
+        amount: '300',
+        price: formatUnits(BigInt(fullBid.price), 4),
+        screenshotPath: testInfo.outputPath('cross-j-mm-explicit-minimum.png'),
+      });
       await waitForCrossPullFlow(page, source, target, hubId, targetHub.entityId, {
         sourceRouteId: orderId,
         targetRouteId: orderId,
@@ -435,7 +430,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         'receive',
         'full target Account',
       );
-      await expect(page.getByTestId('swap-open-order-row')).toHaveCount(0, { timeout: 15_000 });
+      await expect(page.getByTestId('cross-order-row')).toHaveCount(0, { timeout: 15_000 });
 
       await enqueueEntityTxs(page, target.entityId, target.signerId, [
         {
@@ -475,10 +470,9 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         side: 'sell',
         fromTokenId: WETH,
         toTokenId: USDC,
-        clickBookSide: 'bid',
-        expectedClickFromTokenId: WETH,
-        expectedClickToTokenId: USDC,
+
         amount: '25',
+        price: formatUnits(BigInt(wethUsdcBook.bids[0]!.price), 4),
       });
       const partial = { routeId: partialOrderId };
       await expect.poll(async () => {
@@ -512,9 +506,11 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           BigInt(pendingTargetState.deltas[String(USDC)].rightHold),
         'partial target remainder must remain held until explicit Clear',
       ).toBeGreaterThan(0n);
-      const clearButton = page.getByTestId('cross-swap-clear').first();
+      const clearButton = page
+        .locator(`[data-testid="cross-order-row"][data-order-id="${partialOrderId}"]`)
+        .getByTestId('cross-order-cancel-clear');
       await expect(clearButton, 'real MM partial remainder must expose Clear + Close').toBeVisible({ timeout: 20_000 });
-      await clearButton.click({ force: true });
+      await clearButton.click();
       await flushRuntime(page, 5);
       await Promise.all([
         waitForCrossRouteStatus(page, source, hubId, partial.routeId, ['settled'], 'real MM source clear'),
@@ -603,12 +599,16 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       // Independent fee oracle: signed committed request payloads, never the balance delta under test.
       const signedFees = await page.evaluate(async ({ entityId, hubId, fromHeight, throughHeight, tokenId }) => {
         const runtime = window as CrossRuntimeWindow;
-        const api = runtime.__xln?.instance;
-        if (!runtime.isolatedEnv || !api?.readPersistedAccountFrameHistory) {
+        const env = runtime.__xln?.env();
+        const api = await runtime.__xln?.xln();
+        if (!env || !api) {
           throw new Error('COMMITTED_ACCOUNT_HISTORY_UNAVAILABLE');
         }
         const frames: AccountFrame[] = await api.readPersistedAccountFrameHistory(
-          runtime.isolatedEnv, entityId, hubId, throughHeight - fromHeight,
+          env,
+          entityId,
+          hubId,
+          throughHeight - fromHeight,
           { maxAccountHeight: throughHeight },
         );
         const txs = frames.filter(frame => frame.height > fromHeight).flatMap(frame => frame.accountTxs);
@@ -910,10 +910,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           side: 'sell',
           amount: '0.01',
           price: '2490.0000',
-          clickBookSide: 'bid',
-          expectedClickFromTokenId: WETH,
-          expectedClickToTokenId: USDC,
-          expectSetupConsent: true,
+
         }),
       );
       const { profile } = (await cdp.send('Profiler.stop')) as {
@@ -1378,9 +1375,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
             side: 'sell',
             fromTokenId: USDT,
             toTokenId: USDT,
-            clickBookSide: 'ask',
-            expectedClickFromTokenId: USDT,
-            expectedClickToTokenId: USDT,
+
             amount: '25',
             price: '1',
           }),
@@ -1408,7 +1403,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
             hubId,
             targetEntityId: aliceRpc2.entityId,
             side: 'sell',
-            checkMultihopDeferred: true,
+
             amount: '0.03',
             price: '2500',
           }),
@@ -1419,7 +1414,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
             hubId: targetHubId,
             targetEntityId: bob.entityId,
             side: 'buy',
-            clickBookSide: 'ask',
+
             amount: '78',
             price: '2600',
           }),
@@ -1478,7 +1473,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
             hubId,
             targetEntityId: bobRpc2.entityId,
             side: 'sell',
-            clickBookSide: 'bid',
+
             amount: '0.01',
             price: '2500',
           }),
@@ -1533,7 +1528,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
             hubId: targetHubId,
             targetEntityId: bob.entityId,
             side: 'buy',
-            clickBookSide: 'ask',
+
             amount: '25',
             price: '2500',
           }),
@@ -1553,7 +1548,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
             hubId: targetHubId,
             targetEntityId: bob.entityId,
             side: 'buy',
-            clickBookSide: 'ask',
+
             amount: '25',
             price: '2500',
           }),
@@ -1678,7 +1673,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
             hubId: targetHubId,
             targetEntityId: bob.entityId,
             side: 'buy',
-            clickBookSide: 'ask',
+
             amount: '25',
             price: '2500',
           }),
