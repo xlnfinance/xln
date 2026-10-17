@@ -306,43 +306,30 @@ location ~ ^/rpc[2-8]$ {
 
 ### `/ui/` — the React wallet
 
-`https://xln.finance/ui/` serves `ui/dist` built with `bun run build:hosted`
-(vite `base=/ui/`, router basename and runtime bundle follow it). The build
-lives in a separate worktree (`/root/xln-ui`, detached at the exact commit in
-`/root/xln`) so a UI deploy never changes the checkout the pm2 services run from.
-Fetching a newer `origin/main` does not change that selected revision. Existing
-tracked edits and untracked, non-ignored files in the UI worktree block deployment:
+The canonical platform deployment builds both `frontend/build` (landing and
+observer) and `ui/dist` (React wallet) from the same checked main commit. The React
+build uses `NODE_ENV=production`, `base=/ui/` and the same-origin API/relay. Its
+runtime and Account worker bytes must match the landing/observer bundles.
 
 ```bash
-bun run deploy:ui        # = ssh root@xln.finance 'bash -s' < scripts/deployment/deploy-ui.sh
+bun run deploy:prod:frontend
 ```
 
-To select a different reviewed commit explicitly, set `XLN_UI_DEPLOY_SHA` in
-the remote command to its full 40-character SHA. It must be reachable from
-`origin/main`. A source revision alone does not prove current release gates;
-retain the matching build, browser and financial evidence before promotion.
-The central signed release scope includes `ui/`; a wallet source change must
-participate in the same approval as its Runtime source.
+This builds on the caller, packages both current roots, and installs the web
+artifact through the one platform deployment path. It creates no UI worktree.
+Remote checkout preparation refuses local edits, hidden index flags and divergent
+history; it only fast-forwards main to the exact published SHA. Unsupported old
+single-root archives are rejected before either current generated build changes.
 
-nginx (inside the 443 server block, before `location /`):
+The canonical Bun static handler owns `/ui/`, deep-route reloads, `/ui/runtime.js`
+and `/account-worker.js`. The existing nginx application proxy must route those
+requests to that handler. Do not install an alias to a separate wallet checkout.
+Keep API/relay authorization, TLS and other access protections unchanged; compare
+the active operator configuration before rollout.
 
-```nginx
-location = /ui { return 301 /ui/; }
-location ^~ /ui/ {
-    alias /root/xln-ui/ui/dist/;
-    try_files $uri /ui/index.html;
-    add_header Content-Security-Policy "frame-ancestors 'self'" always;
-    location ~* /ui/assets/ { expires 1y; add_header Cache-Control "public, immutable"; }
-    location ~* /ui/(runtime|account-worker)\.js$ { add_header Cache-Control "no-store, must-revalidate"; }
-}
-```
-
-The wallet loads `/ui/runtime.js` (its own bundle pair) and talks to the same
-`/api/*`, `/ws` and `/relay` surfaces as the SvelteKit app.
-
-Do not add a `$uri/` directory probe: the React `/assets` screen shares its name
-with the build's assets directory. Reloading that screen must serve the wallet
-entrypoint, not request a directory listing and return 403.
+A current artifact is not proof of readiness: retain its matching build, browser,
+financial and recovery evidence. The central signed release scope includes `ui/`;
+a wallet source change participates in the same release authority as Runtime.
 
 ### `/c` and `/c.txt`
 

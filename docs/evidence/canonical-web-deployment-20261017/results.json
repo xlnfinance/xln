@@ -1,0 +1,175 @@
+{
+  "baseline": "3f1cb2d5e90b5da1443a34c99d9903d26819542c",
+  "results": [
+    {
+      "name": "deploy-web-archive-before",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "deploy-web-archive-before",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "python3",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/reproduce-web-archive-gap.py"
+      ],
+      "exitCode": 1,
+      "seconds": 3.476,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/deploy-web-archive-before.log",
+      "logSha256": "4a9f766f972e36ee477f77683104d61b4cf26650f22c02733c1690260d43020d"
+    },
+    {
+      "name": "deploy-hosted-wallet-build",
+      "command": [
+        "env",
+        "NODE_ENV=production",
+        "XLN_UI_STACK_ORIGIN=",
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "deploy-hosted-wallet-build",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "run",
+        "--cwd",
+        "/Users/zigota/xln/ui",
+        "build:hosted"
+      ],
+      "exitCode": 0,
+      "seconds": 2.96,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/deploy-hosted-wallet-build.log",
+      "logSha256": "59ba699729465f9400e2186fa95c904e961a9386ae450c1e68d29c202ababbbd"
+    },
+    {
+      "name": "deploy-web-artifacts-l1",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "deploy-web-artifacts-l1",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "scripts/deployment/web-artifacts.test.ts",
+        "core/__tests__/operations/release/react-deploy-revision.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 13.988,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/deploy-web-artifacts-l1.log",
+      "logSha256": "f01f25cd1404dc6e868c5e9125d502367dc25a7ce15f525cc0097f3f5cc43884"
+    },
+    {
+      "name": "deploy-web-package-install",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "deploy-web-package-install",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "python3",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/install-current-web-artifact.py"
+      ],
+      "exitCode": 0,
+      "seconds": 5.056,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/deploy-web-package-install.log",
+      "logSha256": "798a38e00e48a5606a9bfab139ca50ef73fd4b12d2778f5f3bada703776ce2a9"
+    },
+    {
+      "name": "deploy-web-production-gateway",
+      "command": [
+        "env",
+        "XLN_HLT_ENGINE=ts",
+        "XLN_LOCAL_PROD_SMOKE_DIR=/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/deploy-web-gateway/run",
+        "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=gateway",
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "deploy-web-production-gateway",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/deploy-web-gateway/production-gateway-stand.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 29.08,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/deploy-web-production-gateway.log",
+      "logSha256": "636bfbe81858c24b2939ac83304b3e3fa2eeee2c33558c4450323e1c941c9b2a"
+    },
+    {
+      "name": "deploy-web-canonical-build",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "deploy-web-canonical-build",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bash",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/deploy-web-canonical-build/run-exact-build.sh"
+      ],
+      "exitCode": 0,
+      "seconds": 27.729,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/deploy-web-canonical-build.log",
+      "logSha256": "a546b21e5872bb34f324900ec73a530bfa5ec1c07313463eabccf91330be56e4"
+    },
+    {
+      "name": "deploy-web-final-regressions",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "deploy-web-final-regressions",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "scripts/deployment/prepare-remote-main.test.ts",
+        "scripts/deployment/web-artifacts.test.ts",
+        "core/__tests__/operations/release/react-deploy-revision.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 16.519,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/deploy-web-final-regressions.log",
+      "logSha256": "5403858769c688a8bb6dabac72858ef945f827bdca70b4a5be4e7e73791ff063"
+    }
+  ],
+  "browserChecks": 8,
+  "consoleCounts": {
+    "websocket": 4,
+    "warning": 4
+  },
+  "headlessWarnings": "four WebGL ReadPixels performance warnings while recording observer screenshots",
+  "archiveSha256": "98d2518b7196790750c9da1933dc9e162dc12bd61cb20d9128609b07dc85a93f",
+  "retired": [
+    "scripts/deployment/deploy-ui.sh",
+    "package deploy:ui command",
+    "separate detached React worktree build",
+    "positive test requiring that old worktree workflow",
+    "single-root deployment archive format"
+  ],
+  "retained": [
+    "main-only exact published source guard",
+    "React release authority assertions",
+    "landing and graph/scenario observer",
+    "canonical production static handler",
+    "current Runtime and Account worker bytes",
+    "typed custom-contract admission unavailable"
+  ]
+}

@@ -199,6 +199,14 @@ ensure_committed_contract_artifacts() {
   fi
 }
 
+build_hosted_wallet() {
+  (
+    cd "$REPO_ROOT/ui"
+    bun install --frozen-lockfile
+    NODE_ENV=production XLN_UI_STACK_ORIGIN= bun run build:hosted
+  )
+}
+
 build_remote_frontend_archive() {
   local deploy_build_number
   deploy_build_number="$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
@@ -212,8 +220,9 @@ build_remote_frontend_archive() {
     bun install --frozen-lockfile
     XLN_BUILD_NUMBER="$deploy_build_number" bun run build
   )
+  build_hosted_wallet
   PREBUILT_FRONTEND_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/xln-frontend-build.XXXXXX.tar.gz")"
-  COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -C frontend -czf "$PREBUILT_FRONTEND_ARCHIVE" build
+  bash "$SCRIPT_DIR/web-artifacts.sh" pack "$PREBUILT_FRONTEND_ARCHIVE"
 }
 
 wait_for_rpc_chain() {
@@ -1145,10 +1154,11 @@ run_local_deploy() {
       bun install --frozen-lockfile
       XLN_BUILD_NUMBER="$DEPLOY_BUILD_NUMBER" bun run build
     )
+    build_hosted_wallet
   else
     echo "[deploy] skipping frontend build (--runtime-only)"
-    if [ "$PRODUCTION" = "1" ] && [ ! -s frontend/build/index.html ]; then
-      echo "PRODUCTION_FRONTEND_ARTIFACT_MISSING: run a frontend deploy before runtime-only" >&2
+    if [ "$PRODUCTION" = "1" ] && { [ ! -s frontend/build/index.html ] || [ ! -s ui/dist/index.html ]; }; then
+      echo "PRODUCTION_WEB_ARTIFACT_MISSING: run a web deploy before runtime-only" >&2
       exit 1
     fi
   fi
@@ -1293,10 +1303,10 @@ if [ -n "$REMOTE_HOST" ]; then
 $(cat "$SCRIPT_DIR/prepare-remote-main.sh")
 "
   if [ -n "$remote_frontend_archive" ]; then
-    remote_cmd="$remote_cmd rm -rf frontend/build; tar -xzf '$remote_frontend_archive' -C frontend; rm -f '$remote_frontend_archive';"
+    remote_cmd="$remote_cmd bash scripts/deployment/web-artifacts.sh install '$remote_frontend_archive'; rm -f '$remote_frontend_archive';"
   fi
   if [ "$FRONTEND_ONLY" = "1" ]; then
-    remote_cmd="$remote_cmd test -s frontend/build/index.html; echo '[deploy] frontend artifact installed without runtime restart';"
+    remote_cmd="$remote_cmd test -s frontend/build/index.html; test -s ui/dist/index.html; echo '[deploy] web artifact installed without runtime restart';"
   else
     remote_cmd="$remote_cmd XLN_DEPLOY_USE_COMMITTED_CONTRACTS=1 ./scripts/deployment/deploy-platform.sh --runtime-only"
     if [ "$FRESH" = "1" ]; then
