@@ -51,8 +51,10 @@ type SwapResolveSnapshot = {
   fillNumerator: string;
   fillDenominator: string;
   cancelRemainder: boolean;
-  executionGiveAmount: string;
-  executionWantAmount: string;
+  executionGiveAmount: string | null;
+  executionWantAmount: string | null;
+  feeTokenId: number | null;
+  feeAmount: string | null;
   comment: string;
 };
 
@@ -291,51 +293,6 @@ async function configurePair(page: Page, pairLabel: string, side: 'buy' | 'sell'
   }
 }
 
-async function ensureOrderbookVisible(page: Page): Promise<void> {
-  if (
-    await page
-      .getByTestId('swap-orderbook')
-      .first()
-      .isVisible({ timeout: 500 })
-      .catch(() => false)
-  )
-    return;
-  const toggle = page.getByTestId('swap-ticket-orderbook-toggle').first();
-  await expect(toggle).toBeVisible({ timeout: 20_000 });
-  await toggle.click();
-  await expect(page.getByTestId('swap-orderbook').first()).toBeVisible({ timeout: 20_000 });
-}
-
-async function dismissSwapCompletionModalIfVisible(page: Page): Promise<void> {
-  const modalCloseButton = page.getByTestId('swap-completion-close').first();
-  if (!(await modalCloseButton.isVisible({ timeout: 500 }).catch(() => false))) return;
-  await modalCloseButton.click();
-  await expect(page.locator('.swap-modal-overlay')).toHaveCount(0, { timeout: 10_000 });
-}
-
-async function closeExpectedSwapCompletionModal(page: Page): Promise<void> {
-  const modalCloseButton = page.getByTestId('swap-completion-close').first();
-  await expect(modalCloseButton).toBeVisible({ timeout: 30_000 });
-  await modalCloseButton.click();
-  await expect(page.locator('.swap-modal-overlay')).toHaveCount(0, { timeout: 10_000 });
-}
-
-async function ensureSelectedScope(page: Page): Promise<void> {
-  await ensureOrderbookVisible(page);
-  const toggle = page.getByTestId('swap-scope-toggle').first();
-  await expect(toggle).toBeVisible({ timeout: 20_000 });
-  await expect
-    .poll(async () => String((await toggle.getAttribute('data-scope-mode').catch(() => '')) || '').trim(), {
-      timeout: 10_000,
-      intervals: [100, 250, 500],
-    })
-    .toBeTruthy();
-  if (String((await toggle.getAttribute('data-scope-mode')) || '').trim() !== 'selected') {
-    await toggle.click();
-  }
-  await expect(toggle).toHaveAttribute('data-scope-mode', 'selected', { timeout: 10_000 });
-}
-
 async function placeAliceSellOffer(page: Page, amount: string, price: string): Promise<void> {
   await configurePair(page, 'WETH/USDC', 'sell');
   await page.getByTestId('swap-give').fill(amount);
@@ -384,11 +341,11 @@ function priceTicksTextToDisplay(priceTicks: string): string {
 }
 
 async function readVisibleOrderbookPriceTicks(page: Page, side: 'ask' | 'bid'): Promise<number[]> {
-  const rows = page.getByTestId(side === 'ask' ? 'orderbook-ask-row' : 'orderbook-bid-row');
+  const rows = page.getByTestId('orderbook').locator('visible=true').first().getByTestId(`book-row-${side}`);
   const count = await rows.count();
   const out: number[] = [];
   for (let index = 0; index < count; index += 1) {
-    const text = normalizeDisplayedPriceText(String((await rows.nth(index).locator('.price').textContent()) || ''));
+    const text = normalizeDisplayedPriceText(String((await rows.nth(index).locator('.bk-price').textContent()) || ''));
     const value = Number.parseFloat(text);
     if (!Number.isFinite(value) || value <= 0) continue;
     out.push(Math.round(value * 10_000));
@@ -518,8 +475,10 @@ async function readSwapResolveSnapshotsFrom(
             fillNumerator: String(resolve.fillNumerator ?? '0'),
             fillDenominator: String(resolve.fillDenominator ?? '0'),
             cancelRemainder: Boolean(resolve.cancelRemainder),
-            executionGiveAmount: String(resolve.executionGiveAmount ?? '0'),
-            executionWantAmount: String(resolve.executionWantAmount ?? '0'),
+            executionGiveAmount: resolve.executionGiveAmount === null ? null : resolve.executionGiveAmount.toString(),
+            executionWantAmount: resolve.executionWantAmount === null ? null : resolve.executionWantAmount.toString(),
+            feeTokenId: resolve.feeTokenId,
+            feeAmount: resolve.feeAmount === null ? null : resolve.feeAmount.toString(),
             comment: String(resolve.comment || ''),
           });
         }
@@ -652,37 +611,12 @@ async function readFirstOpenOrderRemainingUi(page: Page): Promise<string> {
   return String((await remainingCell.textContent()) || '').trim();
 }
 
-async function expectClosedOrderRowStatus(page: Page, expected: RegExp, minimumCount = 1): Promise<void> {
-  const openClosedOrders = async (): Promise<void> => {
-    await dismissSwapCompletionModalIfVisible(page);
-    await page.getByTestId('swap-orders-tab-closed').first().click();
-  };
-  const waitForClosedRows = async (): Promise<void> => {
-    await expect
-      .poll(async () => await page.getByTestId('swap-closed-order-row').count(), {
-        timeout: 20_000,
-        intervals: [250, 500, 750],
-      })
-      .toBeGreaterThanOrEqual(minimumCount);
-  };
-
-  await openClosedOrders();
-  try {
-    await waitForClosedRows();
-  } catch {
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await unlockSavedWalletAfterReload(page);
-    await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 });
-    await openSwapWorkspace(page);
-    await selectCounterpartyInSwap(page);
-    await ensureSelectedScope(page);
-    await openClosedOrders();
-    await waitForClosedRows();
-  }
-
-  const firstClosedRow = page.getByTestId('swap-closed-order-row').first();
-  await expect(firstClosedRow).toBeVisible({ timeout: 20_000 });
-  await expect(firstClosedRow.locator('td').first()).toContainText(expected, { timeout: 10_000 });
+async function openSwapHistory(page: Page, hubId: string) {
+  await page.getByTestId('nav-activity').locator('visible=true').first().click();
+  await page.getByRole('button', { name: 'Swaps', exact: true }).click();
+  const history = page.getByRole('region', { name: 'Swap history', exact: true });
+  await history.getByRole('combobox').selectOption(hubId);
+  return history;
 }
 
 async function readSwapOfferCount(
@@ -739,7 +673,7 @@ test.describe('E2E Swap Isolated Flow', () => {
   test(
     'relay orderbook publishes new resting ask and bid to both subscribed users',
     { tag: '@functional' },
-    async ({ browser, page }) => {
+    async ({ browser, page }, testInfo) => {
       let aliceContext: BrowserContext | null = null;
       let bobContext: BrowserContext | null = null;
 
@@ -790,13 +724,13 @@ test.describe('E2E Swap Isolated Flow', () => {
         ]);
 
         await Promise.all([openSwapWorkspace(alicePage), openSwapWorkspace(bobPage)]);
-        await Promise.all([
-          selectCounterpartyInSwap(alicePage, hubId),
-          selectCounterpartyInSwap(bobPage, hubId),
-          ensureSelectedScope(alicePage),
-          ensureSelectedScope(bobPage),
-        ]);
+        await Promise.all([selectCounterpartyInSwap(alicePage, hubId), selectCounterpartyInSwap(bobPage, hubId)]);
 
+        for (const wallet of [alicePage, bobPage]) {
+          const book = wallet.getByTestId('orderbook').locator('visible=true').first();
+          await expect(book).toHaveAttribute('data-source', 'relay');
+          await expect(book).toHaveAttribute('data-status', 'live');
+        }
         const visibleRestingPrices = await chooseVisibleRestingPrices(alicePage);
 
         await placeAliceSellOffer(alicePage, '0.03', visibleRestingPrices.ask);
@@ -820,17 +754,8 @@ test.describe('E2E Swap Isolated Flow', () => {
           waitForOrderbookLevelVisible(bobPage, 'ask', restingAskPrice),
         ]);
 
-        await configurePair(bobPage, 'WETH/USDC', 'buy');
-        const bobAmountInput = bobPage.getByTestId('swap-ticket-amount').first();
-        const bobPriceInput = bobPage.getByTestId('swap-ticket-rate').first();
-        const bobSubmit = bobPage.getByTestId('swap-ticket-submit').first();
-        await expect(bobAmountInput).toBeVisible({ timeout: 20_000 });
-        await expect(bobPriceInput).toBeVisible({ timeout: 20_000 });
-        await bobAmountInput.fill('50');
-        await bobPriceInput.fill(visibleRestingPrices.bid);
-        await expect(bobSubmit).toBeEnabled({ timeout: 20_000 });
-        await bobSubmit.click();
-        await expect(bobPage.getByTestId('swap-open-order-row').first()).toBeVisible({ timeout: 30_000 });
+        await placeBobMatchingBuyOrder(bobPage, '50', visibleRestingPrices.bid);
+        await expect(bobPage.getByTestId('swap-offer-cancel')).toBeVisible();
         await expect
           .poll(async () => await readSwapOfferCount(bobPage, bob.entityId, bob.signerId, hubId), {
             timeout: 30_000,
@@ -874,7 +799,7 @@ test.describe('E2E Swap Isolated Flow', () => {
           ]),
         ]);
 
-        await alicePage.getByTestId('swap-open-order-cancel').first().click();
+        await alicePage.getByTestId('swap-offer-cancel').first().click();
         await expect
           .poll(async () => await readSwapOfferCount(alicePage, alice.entityId, alice.signerId, hubId), {
             timeout: 30_000,
@@ -887,7 +812,7 @@ test.describe('E2E Swap Isolated Flow', () => {
           waitForOrderbookLevelGone(bobPage, 'ask', restingAskPrice),
         ]);
 
-        await bobPage.getByTestId('swap-open-order-cancel').first().click();
+        await bobPage.getByTestId('swap-offer-cancel').first().click();
         await expect
           .poll(async () => await readSwapOfferCount(bobPage, bob.entityId, bob.signerId, hubId), {
             timeout: 30_000,
@@ -900,10 +825,23 @@ test.describe('E2E Swap Isolated Flow', () => {
           waitForOrderbookLevelGone(bobPage, 'bid', restingBidPrice),
         ]);
 
-        await Promise.all([
-          expectClosedOrderRowStatus(alicePage, /Canceled/i),
-          expectClosedOrderRowStatus(bobPage, /Canceled/i),
-        ]);
+        for (const peer of [
+          { page: alicePage, entityId: alice.entityId },
+          { page: bobPage, entityId: bob.entityId },
+        ]) {
+          const closed = await readClosedSwapResolveSnapshots(peer.page, peer.entityId, hubId);
+          expect(closed).toHaveLength(1);
+          expect(closed[0]?.cancelRemainder).toBe(true);
+          const history = await openSwapHistory(peer.page, hubId);
+          const order = history.getByTestId('swap-history-order');
+          await expect(order).toHaveCount(1);
+          await expect(order.locator('summary')).toContainText('Closed');
+          await order.locator('summary').click();
+          await expect(order).toContainText('Remainder cancelled');
+          expect(await holdTotal(peer.page, peer.entityId, hubId, 1)).toBe(0n);
+          expect(await holdTotal(peer.page, peer.entityId, hubId, 2)).toBe(0n);
+        }
+        await alicePage.screenshot({ path: testInfo.outputPath('peer-book-cancel.png'), fullPage: true });
       } finally {
         await Promise.all([
           aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),
@@ -916,7 +854,7 @@ test.describe('E2E Swap Isolated Flow', () => {
   test(
     'self-trade protection cancels a user taker before matching their own resting order',
     { tag: '@resilience' },
-    async ({ browser, page }) => {
+    async ({ browser, page }, testInfo) => {
       let aliceContext: BrowserContext | null = null;
 
       try {
@@ -954,7 +892,6 @@ test.describe('E2E Swap Isolated Flow', () => {
 
         await openSwapWorkspace(alicePage);
         await selectCounterpartyInSwap(alicePage, hubId);
-        await ensureSelectedScope(alicePage);
 
         const selfTradeAskPrice = await chooseInsideSpreadSelfTradeAskPrice(alicePage);
         await placeAliceSellOffer(alicePage, '0.03', selfTradeAskPrice);
@@ -967,12 +904,24 @@ test.describe('E2E Swap Isolated Flow', () => {
           })
           .toBe(1);
 
+        // The cancelled taker records no execution amount. Prove zero economic
+        // movement from the real Account instead of inventing zeros in history.
+        const beforeSelfTrade = await Promise.all([
+          outCap(alicePage, alice.entityId, hubId, 1),
+          outCap(alicePage, alice.entityId, hubId, 2),
+          holdTotal(alicePage, alice.entityId, hubId, 1),
+          holdTotal(alicePage, alice.entityId, hubId, 2),
+        ]);
         await placeBobMatchingBuyOrder(alicePage, '80', selfTradeAskPrice);
         const stpResolve = await waitForSwapResolveSnapshotByComment(alicePage, alice.entityId, hubId, /^STP:/);
         expect(stpResolve.cancelRemainder, 'self-trade taker must close without resting against own maker').toBe(true);
         expect(stpResolve.comment, 'self-trade resolve must identify STP in machine state').toMatch(/^STP:/);
-        expect(stpResolve.executionGiveAmount, 'pure self-trade prevention must not spend quote tokens').toBe('0');
-        expect(stpResolve.executionWantAmount, 'pure self-trade prevention must not receive base tokens').toBe('0');
+        expect(stpResolve.fillRatio, 'self-trade taker executes no fill').toBe(0);
+        expect(
+          stpResolve.executionGiveAmount,
+          'cancel-only history must not fabricate a monetary execution',
+        ).toBeNull();
+        expect(stpResolve.executionWantAmount).toBeNull();
 
         await expect
           .poll(async () => await readSwapOfferCount(alicePage, alice.entityId, alice.signerId, hubId), {
@@ -996,10 +945,27 @@ test.describe('E2E Swap Isolated Flow', () => {
             },
           )
           .toBe(true);
-        await expectClosedOrderRowStatus(alicePage, /Canceled/i);
-        await expect(alicePage.getByTestId('swap-closed-order-row').filter({ hasText: /STP:/i }).first()).toBeVisible({
-          timeout: 10_000,
-        });
+        await expect
+          .poll(
+            () =>
+              Promise.all([
+                outCap(alicePage, alice.entityId, hubId, 1),
+                outCap(alicePage, alice.entityId, hubId, 2),
+                holdTotal(alicePage, alice.entityId, hubId, 1),
+                holdTotal(alicePage, alice.entityId, hubId, 2),
+              ]),
+            { message: 'self-trade must preserve both token capacities and the original maker holds' },
+          )
+          .toEqual(beforeSelfTrade);
+        const history = await openSwapHistory(alicePage, hubId);
+        const stpOrder = history.getByTestId('swap-history-order').filter({ hasText: /STP:/ });
+        await expect(stpOrder).toHaveCount(1);
+        await expect(stpOrder.locator('summary')).toContainText('Closed');
+        await stpOrder.locator('summary').click();
+        await expect(stpOrder.getByText(/^STP:/)).toBeVisible();
+        await expect(stpOrder.locator('[data-field="gave"]')).toHaveText('Not recorded');
+        await expect(stpOrder.locator('[data-field="received"]')).toHaveText('Not recorded');
+        await alicePage.screenshot({ path: testInfo.outputPath('peer-self-trade.png'), fullPage: true });
       } finally {
         await aliceContext?.close().catch(() => {});
       }
@@ -1138,6 +1104,7 @@ test.describe('E2E Swap Isolated Flow', () => {
           wholeSwapTokenUnits(1, 75n).toString(),
         );
         expect(bobResolve.executionWantAmount, 'buyer receives full 0.03 WETH target').toBe('30000000000000000');
+        if (bobResolve.executionGiveAmount === null) throw new Error('EXECUTED_GIVE_AMOUNT_MISSING');
         expect(BigInt(bobResolve.executionGiveAmount), 'buyer source savings must be positive').toBeLessThan(
           wholeSwapTokenUnits(1, 78n),
         );
@@ -1281,8 +1248,14 @@ test.describe('E2E Swap Isolated Flow', () => {
           .toBe(0);
 
         const closed = await readClosedSwapResolveSnapshots(alicePage, alice.entityId, hubId);
-        const filledGive = closed.reduce((sum, fill) => sum + BigInt(fill.executionGiveAmount), 0n);
-        const filledWant = closed.reduce((sum, fill) => sum + BigInt(fill.executionWantAmount), 0n);
+        const filledGive = closed.reduce(
+          (sum, fill) => (fill.executionGiveAmount === null ? sum : sum + BigInt(fill.executionGiveAmount)),
+          0n,
+        );
+        const filledWant = closed.reduce(
+          (sum, fill) => (fill.executionWantAmount === null ? sum : sum + BigInt(fill.executionWantAmount)),
+          0n,
+        );
         expect(filledGive, 'exactly half of the original0.04WETH maker order executes').toBe(20_000_000_000_000_000n);
         expect(filledWant).toBe(50_000_000n);
         expect(closed.some(fill => fill.cancelRemainder)).toBe(true);
@@ -1447,7 +1420,7 @@ test.describe('E2E Swap Isolated Flow', () => {
   test(
     'repeated maker and taker cycles accumulate closed swap rows',
     { tag: '@functional' },
-    async ({ browser, page }) => {
+    async ({ browser, page }, testInfo) => {
       let aliceContext: BrowserContext | null = null;
       let bobContext: BrowserContext | null = null;
 
@@ -1494,12 +1467,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         ]);
 
         await Promise.all([openSwapWorkspace(alicePage), openSwapWorkspace(bobPage)]);
-        await Promise.all([
-          selectCounterpartyInSwap(alicePage, hubId),
-          selectCounterpartyInSwap(bobPage, hubId),
-          ensureSelectedScope(alicePage),
-          ensureSelectedScope(bobPage),
-        ]);
+        await Promise.all([selectCounterpartyInSwap(alicePage, hubId), selectCounterpartyInSwap(bobPage, hubId)]);
 
         for (let round = 1; round <= 3; round += 1) {
           await placeAliceSellOffer(alicePage, '0.01', '2500');
@@ -1529,34 +1497,46 @@ test.describe('E2E Swap Isolated Flow', () => {
             })
             .toBeGreaterThanOrEqual(round);
 
-          // Closed history is fetched only by an explicit user action; live
-          // refresh must never scan Account frame history for completion feedback.
-          await Promise.all([
-            alicePage.getByTestId('swap-orders-tab-closed').first().click(),
-            bobPage.getByTestId('swap-orders-tab-closed').first().click(),
-          ]);
-          await Promise.all([closeExpectedSwapCompletionModal(alicePage), closeExpectedSwapCompletionModal(bobPage)]);
-          for (const userPage of [alicePage, bobPage]) {
-            await userPage.getByTestId('swap-orders-tab-closed').first().click();
-            const rows = userPage.getByTestId('swap-closed-order-row');
+          // History remains an explicit Activity read, never an automatic
+          // Account-frame scan during the financial transition.
+          for (const peer of [
+            { page: alicePage, entityId: alice.entityId, give: '10000000000000000', want: '25000000', fee: null },
+            {
+              page: bobPage,
+              entityId: bob.entityId,
+              give: '25000000',
+              want: '10000000000000000',
+              fee: '1000000000000',
+            },
+          ]) {
+            const closed = await readClosedSwapResolveSnapshots(peer.page, peer.entityId, hubId);
+            expect(closed).toHaveLength(round);
+            for (const fill of closed) {
+              expect(fill.executionGiveAmount).toBe(peer.give);
+              expect(fill.executionWantAmount).toBe(peer.want);
+              expect(fill.feeAmount).toBe(peer.fee);
+              expect(fill.feeTokenId).toBe(peer.fee === null ? null : 2);
+            }
+            const history = await openSwapHistory(peer.page, hubId);
+            const rows = history.getByTestId('swap-history-order');
             await expect(rows).toHaveCount(round);
-            await expect(rows.first()).toContainText('Filled');
-            await expect(rows.first().getByTestId('swap-closed-execution')).toContainText(
-              userPage === alicePage ? /0\.01 WETH.*25 USDC/ : /25 USDC.*0\.01 WETH/,
-            );
-            await expect(rows.first().getByTestId('swap-closed-fee')).toBeVisible();
-            await userPage.getByTestId('swap-orders-tab-open').first().click();
+            const newest = rows.first();
+            await expect(newest.locator('summary')).toContainText('Closed');
+            await newest.locator('summary').click();
+            await expect(newest.locator(`[data-field="gave"][data-amount="${peer.give}"]`)).toBeVisible();
+            await expect(newest.locator(`[data-field="received"][data-amount="${peer.want}"]`)).toBeVisible();
+            if (peer.fee === null) await expect(newest.locator('[data-field="fee"]')).toHaveCount(0);
+            else await expect(newest.locator(`[data-field="fee"][data-amount="${peer.fee}"]`)).toBeVisible();
+            if (round < 3) {
+              await openSwapWorkspace(peer.page);
+              await selectCounterpartyInSwap(peer.page, hubId);
+            }
           }
         }
-
-        await Promise.all([
-          alicePage.getByTestId('swap-orders-tab-closed').first().click(),
-          bobPage.getByTestId('swap-orders-tab-closed').first().click(),
-        ]);
-        await Promise.all([
-          expect(alicePage.getByTestId('swap-closed-order-row')).toHaveCount(3, { timeout: 30_000 }),
-          expect(bobPage.getByTestId('swap-closed-order-row')).toHaveCount(3, { timeout: 30_000 }),
-        ]);
+        for (const userPage of [alicePage, bobPage]) {
+          await expect(userPage.getByTestId('swap-history-order')).toHaveCount(3);
+        }
+        await bobPage.screenshot({ path: testInfo.outputPath('peer-swap-cycles.png'), fullPage: true });
       } finally {
         await Promise.all([
           aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),

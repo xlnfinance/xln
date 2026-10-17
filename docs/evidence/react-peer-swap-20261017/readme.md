@@ -38,3 +38,21 @@ Run the command above with either exact title:
 - `swap round-trip both directions clears holds and updates closed history on both peers`
 
 Together with the earlier full/partial cases these are4/4 named peer scenarios, not the entire swap file or release gate. Console/page/network health is enforced by the canonical runner. Screenshots and complete run identities are archived under `peer-swap-multi-*-boundary` and `peer-swap-roundtrip-*-boundary`; final type/L1/check/clean-HEAD publication logs use `peer-swap-extra-*`. Required remaining file cases and integrated release/public-chain/operator/soak work remain unproved until exercised. No timeout or assertion was weakened.
+
+## Relay, self-trade and repeated-cycle continuation
+
+The remaining three browser scenarios now use current controls, completing the seven named browser paths in this file as individual bounded runs. This is not an aggregate release-gate or soak claim.
+
+- Relay book: two actual subscribed wallets observe new ask and bid at their exact entered four-decimal ticks, both persist across a second observation, and both disappear on both clients after explicit cancellation. The book must identify its source as relay and status as live. Each Account's cancellation is visible in current Activity history and both token holds return to zero. Baseline918261504 failed55.944s at the retired book toggle; current browser passed1/1 in41.117s.
+- Self-trade: the current engine cancels the taker with its STP evidence, leaves the maker resting, and preserves the exact before/after capacity and hold values of both tokens. The cancel-only stored row has zero fill ratio and null execution amounts; the UI shows Not recorded. The previous test reader invented string zero for null, falsely presenting absent monetary evidence as a zero-value execution. It now preserves null. The real no-spend/no-receive invariant is established by unchanged Account capacity/holds instead. Browser passed1/1 in31.580s.
+- Three cycles: both peers accumulate exactly three Closed records. Every cycle requires maker10000000000000000 WETH units for25000000 USDC units and reciprocal taker amounts. Maker has no recorded fee; the taker records exactly1000000000000 WETH units, with the matching fee field visible. History is fetched through explicit Activity navigation, and both wallet histories grow from1 to2 to3. Browser passed1/1 in46.869s. The old completion-modal, scope-toggle and reload-rescue helpers have no remaining callers and are deleted.
+
+The nullable history reader also keeps actual positive full/partial/multi/reverse execution checks exact. Partial-fill totals explicitly sum recorded executions and exclude cancel-only null records; missing filled-trade amounts cannot satisfy the positive amount assertions. Focused orderbook/same-J/limits tests passed20/20,107 assertions in0.292s; strict owned-file diagnostics0 in4.751s. The final unchanged candidate is checked and its clean committed scenarios run individually under60-second stand ownership. Exact logs, failures, source/build hashes and publication results use `peer-book-*`, `peer-self-trade-*`, `peer-cycles-*` and `peer-final-*` under the durable autonomy job. No production financial, Rust, Solidity, schema or frozen-core edits.
+
+Reproduction uses the same canonical command with the remaining exact titles:
+
+- `relay orderbook publishes new resting ask and bid to both subscribed users`
+- `self-trade protection cancels a user taker before matching their own resting order`
+- `repeated maker and taker cycles accumulate closed swap rows`
+
+All seven final clean candidate results must be read from their actual result JSON; prior component greens alone are not an unchanged-candidate claim. Full E2E/release, public-chain/operator/rollback, uninterrupted one-hour soak and MacBook catch-up remain open.
