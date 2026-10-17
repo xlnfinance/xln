@@ -59,6 +59,31 @@ records executable provenance, current-store backups, bounded restart, exact fin
 comparisons and HTTPS verification. Its retained shutdown warnings and release limits
 are part of the result.
 
+## Updating current testnet web artifacts without a reset
+
+For an already-authorized testnet update, preserve the previous generated web roots
+with `scripts/deployment/web-artifacts.sh pack <absolute-archive>` and record the
+archive digest, source SHA, live process identities and current financial snapshots.
+From the clean, checked and published local main, use the canonical
+`deploy-platform.sh --remote <configured-host> --frontend-only --production` path.
+It guards the remote fast-forward and installs both generated roots without restarting
+the backend. A new checkout SHA alone does not prove the running backend changed.
+
+If the update also requires an existing backend owner to reload, compare actual
+storage/financial compatibility first, retain its current stores, and use the exact
+parent-owned PM2 procedure above under the stand lock. Do not use `--update-env` to
+propagate the stand runner's environment into the service. Require exact historical
+Account/Runtime state plus current financial comparisons after recovery. Explain any
+new committed frames from their actual inputs and hash links; never waive a mismatch.
+
+For this compatible web-only rollback, the same `web-artifacts.sh install` command
+can reinstall the preserved archive. Verify every installed file and the public HTML,
+JavaScript, runtime and worker digests; exercise the real wallet and relay before
+returning to the current artifact. Preserve process owners and stores throughout.
+[Actual update and web round-trip evidence](../evidence/current-public-update-20261017/readme.md)
+records the exact candidate, first failed comparison and its complete explanation.
+This is not a backend rollback procedure or authorization for mainnet activation.
+
 ## Regenerating obsolete testnet stores
 
 The owner-authorized October17 recovery is recorded in

@@ -1,0 +1,420 @@
+{
+  "candidate": "efb6f5d4181114457cf3d62077c5d624b9fef9b3",
+  "previousSource": "33260898b968f1b6c70ea0b702048f1997598466",
+  "chainId": 31337,
+  "dataReset": false,
+  "financialAccountViews": 23,
+  "uniqueEconomicOperationCount": null,
+  "restart": {
+    "sha": "efb6f5d4181114457cf3d62077c5d624b9fef9b3",
+    "elapsedSeconds": 35.891,
+    "managedRecoveryDurationMs": 31824,
+    "dataReset": false,
+    "newServerPid": 1045083,
+    "treekill": false,
+    "killTimeoutMs": 60000,
+    "protectedFilesUnchanged": true,
+    "unrelatedProcessesUnchanged": true,
+    "failureMarkers": {
+      "NAPI FATAL ERROR": 0,
+      "Bun has crashed": 0,
+      "panic:": 0,
+      "quiesce.post_failed": 0,
+      "quiesce.refused": 0,
+      "shutdown failed:": 0,
+      "child.stop_timeout_sigkill": 0
+    },
+    "errorDeltaBytes": 4160,
+    "errorDeltaSha256": "f53968d23abd24ebb0ca34a6a663bfeca79ac68a3b7a34d65ee7b4d42244498e",
+    "stages": [
+      {
+        "step": "preserved-current-state-confirmed",
+        "elapsedSeconds": 0.232,
+        "at": 1792270614803
+      },
+      {
+        "step": "parent-only-restart-request-completed",
+        "elapsedSeconds": 1.995,
+        "at": 1792270616566
+      },
+      {
+        "step": "current-recovery-ready",
+        "elapsedSeconds": 35.891,
+        "at": 1792270650461
+      }
+    ]
+  },
+  "history": [
+    {
+      "recoveryDurationMs": 31824,
+      "results": [
+        {
+          "accountViews": 11,
+          "advancements": [
+            {
+              "after": 8,
+              "before": 7,
+              "financialRoot": "0x84c8149f6380658b3f17ad30ab8c1ac0693c6a29744cc475a2bde8e6ec7deb4d",
+              "peer": "0xe2d88972225e766593519e423018cb6ff1050e948a29a42d56972a873b79ea15",
+              "reason": "New post-restart credit-policy frame links the preserved previous frame; all financial roots and balances unchanged"
+            }
+          ],
+          "beforeHeight": 169,
+          "currentFinancialRootsAndBalancesExact": true,
+          "currentHeight": 172,
+          "historicalAccountsExact": true,
+          "name": "H1"
+        }
+      ],
+      "source": {
+        "codeHash": "efb6f5d4181114457cf3d62077c5d624b9fef9b3",
+        "computedAt": 1792270618086,
+        "dirty": false,
+        "gitBranch": "main",
+        "gitHead": "efb6f5d4181114457cf3d62077c5d624b9fef9b3",
+        "height": 172,
+        "owner": "orchestrator"
+      }
+    },
+    {
+      "recoveryDurationMs": 31824,
+      "results": [
+        {
+          "accountViews": 6,
+          "advancements": [
+            {
+              "after": 8,
+              "before": 7,
+              "financialRoot": "0x62eef93ac27d83152c51491fba9647b3e5085e4a1dfbe11bf6566694a8326e93",
+              "peer": "0xe2d88972225e766593519e423018cb6ff1050e948a29a42d56972a873b79ea15",
+              "reason": "New post-restart credit-policy frame links the preserved previous frame; all financial roots and balances unchanged"
+            }
+          ],
+          "beforeHeight": 135,
+          "currentFinancialRootsAndBalancesExact": true,
+          "currentHeight": 138,
+          "historicalAccountsExact": true,
+          "name": "H2"
+        }
+      ],
+      "source": {
+        "codeHash": "efb6f5d4181114457cf3d62077c5d624b9fef9b3",
+        "computedAt": 1792270618086,
+        "dirty": false,
+        "gitBranch": "main",
+        "gitHead": "efb6f5d4181114457cf3d62077c5d624b9fef9b3",
+        "height": 172,
+        "owner": "orchestrator"
+      }
+    },
+    {
+      "recoveryDurationMs": 31824,
+      "results": [
+        {
+          "accountViews": 6,
+          "advancements": [
+            {
+              "after": 8,
+              "before": 7,
+              "financialRoot": "0x3d30210064a77a1878cd458468aeabe711fc1c41a9c5927e9a525db8085ca4f1",
+              "peer": "0xe2d88972225e766593519e423018cb6ff1050e948a29a42d56972a873b79ea15",
+              "reason": "New post-restart credit-policy frame links the preserved previous frame; all financial roots and balances unchanged"
+            }
+          ],
+          "beforeHeight": 124,
+          "currentFinancialRootsAndBalancesExact": true,
+          "currentHeight": 127,
+          "historicalAccountsExact": true,
+          "name": "H3"
+        }
+      ],
+      "source": {
+        "codeHash": "efb6f5d4181114457cf3d62077c5d624b9fef9b3",
+        "computedAt": 1792270618086,
+        "dirty": false,
+        "gitBranch": "main",
+        "gitHead": "efb6f5d4181114457cf3d62077c5d624b9fef9b3",
+        "height": 172,
+        "owner": "orchestrator"
+      }
+    }
+  ],
+  "browser": {
+    "browser": {
+      "evidence": {
+        "mode": "public",
+        "origin": "https://xln.finance",
+        "assets": [
+          {
+            "path": "/ui/runtime.js",
+            "sha256": "714c22744cbc9fbbb626e192ba7ee3e878ed1513e16846f381938b5b9a01c54a",
+            "bytes": 5947436,
+            "mime": "text/javascript; charset=utf-8"
+          },
+          {
+            "path": "/account-worker.js",
+            "sha256": "5eb1a38aa8d02a663289ba35ba286e2d8067d373bb7bc31e80a61887ad15a945",
+            "bytes": 2045527,
+            "mime": "text/javascript; charset=utf-8"
+          }
+        ],
+        "workers": [
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js"
+        ],
+        "relayFrames": 12,
+        "pageErrors": [],
+        "checks": [
+          "app redirect",
+          "fresh embedded wallet/account",
+          "current runtime and worker MIME/hash",
+          "real worker initialization",
+          "relay traffic",
+          "deep route reload/unlock",
+          "compile with unavailable admission",
+          "observer graph"
+        ]
+      },
+      "issueCounts": {
+        "pageerror": 0,
+        "error": 0,
+        "warning": 0,
+        "http": 0,
+        "requestfailed": 0
+      }
+    },
+    "rollback-browser": {
+      "evidence": {
+        "mode": "public",
+        "origin": "https://xln.finance",
+        "assets": [
+          {
+            "path": "/ui/runtime.js",
+            "sha256": "714c22744cbc9fbbb626e192ba7ee3e878ed1513e16846f381938b5b9a01c54a",
+            "bytes": 5947436,
+            "mime": "text/javascript; charset=utf-8"
+          },
+          {
+            "path": "/account-worker.js",
+            "sha256": "5eb1a38aa8d02a663289ba35ba286e2d8067d373bb7bc31e80a61887ad15a945",
+            "bytes": 2045527,
+            "mime": "text/javascript; charset=utf-8"
+          }
+        ],
+        "workers": [
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js"
+        ],
+        "relayFrames": 13,
+        "pageErrors": [],
+        "checks": [
+          "app redirect",
+          "fresh embedded wallet/account",
+          "current runtime and worker MIME/hash",
+          "real worker initialization",
+          "relay traffic",
+          "deep route reload/unlock",
+          "compile with unavailable admission",
+          "observer graph"
+        ]
+      },
+      "issueCounts": {
+        "pageerror": 0,
+        "error": 0,
+        "warning": 0,
+        "http": 0,
+        "requestfailed": 0
+      }
+    },
+    "restore-browser": {
+      "evidence": {
+        "mode": "public",
+        "origin": "https://xln.finance",
+        "assets": [
+          {
+            "path": "/ui/runtime.js",
+            "sha256": "714c22744cbc9fbbb626e192ba7ee3e878ed1513e16846f381938b5b9a01c54a",
+            "bytes": 5947436,
+            "mime": "text/javascript; charset=utf-8"
+          },
+          {
+            "path": "/account-worker.js",
+            "sha256": "5eb1a38aa8d02a663289ba35ba286e2d8067d373bb7bc31e80a61887ad15a945",
+            "bytes": 2045527,
+            "mime": "text/javascript; charset=utf-8"
+          }
+        ],
+        "workers": [
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js",
+          "https://xln.finance/account-worker.js"
+        ],
+        "relayFrames": 14,
+        "pageErrors": [],
+        "checks": [
+          "app redirect",
+          "fresh embedded wallet/account",
+          "current runtime and worker MIME/hash",
+          "real worker initialization",
+          "relay traffic",
+          "deep route reload/unlock",
+          "compile with unavailable admission",
+          "observer graph"
+        ]
+      },
+      "issueCounts": {
+        "pageerror": 0,
+        "error": 0,
+        "warning": 0,
+        "http": 0,
+        "requestfailed": 0
+      }
+    }
+  },
+  "webRoundtrip": {
+    "rollback": {
+      "mode": "rollback",
+      "backendSource": "efb6f5d4181114457cf3d62077c5d624b9fef9b3",
+      "archiveSha256": "9eb715c0e843c03d858450a145f2aa33e2f78ef71669b8089b77f3c46b1f30f4",
+      "processesUnchanged": true,
+      "protectedFilesUnchanged": true,
+      "dataReset": false,
+      "backendRestart": false,
+      "filesVerified": 1338,
+      "delivered": {
+        "stage": "rollback",
+        "archiveSha256": "9eb715c0e843c03d858450a145f2aa33e2f78ef71669b8089b77f3c46b1f30f4",
+        "assets": [
+          {
+            "path": "/ui/",
+            "sha256": "0b5b2485ef1c5a816669e49ae1e981a65d153a710e076e488fb3dc0068306f15"
+          },
+          {
+            "path": "/ui/assets/index-rBu26xMm.js",
+            "sha256": "0048b4757711a09d206c835eca27b128058717fa2de95b20c49fa7d0801a6009"
+          }
+        ]
+      }
+    },
+    "restore": {
+      "mode": "restore",
+      "backendSource": "efb6f5d4181114457cf3d62077c5d624b9fef9b3",
+      "archiveSha256": "bf4fed2b56f93ee3faf17e445d77ee2ec4cb18faed377e56c9f4367db1d640f9",
+      "processesUnchanged": true,
+      "protectedFilesUnchanged": true,
+      "dataReset": false,
+      "backendRestart": false,
+      "filesVerified": 1385,
+      "delivered": {
+        "stage": "restore",
+        "archiveSha256": "bf4fed2b56f93ee3faf17e445d77ee2ec4cb18faed377e56c9f4367db1d640f9",
+        "assets": [
+          {
+            "path": "/ui/",
+            "sha256": "78e443161acce6c13c6e3f74be713c670de752d80caac6a9443c9cc5ab8abcba"
+          },
+          {
+            "path": "/ui/assets/index-BHT894W6.js",
+            "sha256": "0d41c81efae97260e0d757924173fca2d61e60a5b6406cacefe609cba57e1517"
+          }
+        ]
+      }
+    }
+  },
+  "limits": [
+    "Web artifact rollback only; no backend binary rollback was executed",
+    "Public Anvil testnet evidence, not Sepolia/mainnet financial evidence",
+    "Bounded quiescent recovery comparison, not uninterrupted soak or complete ordered-outbox replay",
+    "Initial naive current-height equality failed; historical Account/frame equality and exact linked post-restart credit-policy evidence explain all three advances",
+    "No production implementation changed in this evidence slice"
+  ]
+}

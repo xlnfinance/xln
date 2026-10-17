@@ -1,0 +1,207 @@
+[
+  {
+    "command": [
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-current/read-owner.sh"
+    ],
+    "exitCode": 0,
+    "seconds": 2.284,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-current-ownership.log"
+  },
+  {
+    "command": [
+      "ssh",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=10",
+      "xln.finance",
+      "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:run --reason current-testnet-preservation --timeout-ms 60000 -- bash -eu -c 'test \"$(git rev-parse HEAD)\" = 33260898b968f1b6c70ea0b702048f1997598466; test -z \"$(git status --porcelain)\"; test ! -e /root/xln-deployment-evidence/efb6f5d41/current-update/previous-web.tar.gz; bash scripts/deployment/web-artifacts.sh pack /root/xln-deployment-evidence/efb6f5d41/current-update/previous-web.tar.gz; sha256sum /root/xln-deployment-evidence/efb6f5d41/current-update/previous-web.tar.gz; bun /root/xln-deployment-evidence/efb6f5d41/current-update/snapshot.ts before'"
+    ],
+    "exitCode": 0,
+    "seconds": 7.9,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-current-preservation.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "current-testnet-web-artifact",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "scripts/deployment/deploy-platform.sh",
+      "--remote",
+      "xln.finance",
+      "--frontend-only",
+      "--production"
+    ],
+    "exitCode": 0,
+    "seconds": 28.894,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-current-web-deploy.log"
+  },
+  {
+    "command": [
+      "ssh",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=10",
+      "xln.finance",
+      "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:run --reason current-testnet-parent-restart --timeout-ms 60000 -- python3 /root/xln-deployment-evidence/efb6f5d41/current-update/restart.py"
+    ],
+    "exitCode": 0,
+    "seconds": 36.624,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-current-parent-restart.log"
+  },
+  {
+    "command": [
+      "ssh",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=10",
+      "xln.finance",
+      "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason current-testnet-financial-recovery --timeout-ms 60000 -- bun /root/xln-deployment-evidence/efb6f5d41/current-update/snapshot.ts after"
+    ],
+    "exitCode": 1,
+    "seconds": 1.414,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-current-financial-recovery.log"
+  },
+  {
+    "command": [
+      "ssh",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=10",
+      "xln.finance",
+      "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason current-testnet-exact-history --timeout-ms 60000 -- bash -e -c 'for hub in H1 H2 H3; do bun /root/xln-deployment-evidence/efb6f5d41/current-update/compare-history.ts --hub=$hub; done'"
+    ],
+    "exitCode": 0,
+    "seconds": 10.628,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-current-exact-history.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "current-public-wallet",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-current/public-browser.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 25.734,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-current-browser.log"
+  },
+  {
+    "command": [
+      "ssh",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=10",
+      "xln.finance",
+      "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason current-testnet-operator-health --timeout-ms 60000 -- bun core/scripts/operations/production/prod-health-smoke.ts --url=http://127.0.0.1:8080 --expected-hubs=3 --require-hub-self-relay --expected-towers=1 --tower-url=http://127.0.0.1:9100/api/tower/healthz --require-clean-source --require-source-match --expected-git-head=efb6f5d4181114457cf3d62077c5d624b9fef9b3 --expected-code-hash=efb6f5d4181114457cf3d62077c5d624b9fef9b3"
+    ],
+    "exitCode": 0,
+    "seconds": 0.743,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-current-operator-health.log"
+  },
+  {
+    "command": [
+      "ssh",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=10",
+      "xln.finance",
+      "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason current-testnet-web-rollback --timeout-ms 60000 -- python3 /root/xln-deployment-evidence/efb6f5d41/current-update/web-roundtrip.py rollback"
+    ],
+    "exitCode": 0,
+    "seconds": 16.211,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-current-web-rollback.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "current-public-web-rollback-browser",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-current/roundtrip-browser.ts",
+      "rollback"
+    ],
+    "exitCode": 0,
+    "seconds": 25.762,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-current-rollback-browser.log"
+  },
+  {
+    "command": [
+      "ssh",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=10",
+      "xln.finance",
+      "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason current-testnet-web-restore --timeout-ms 60000 -- python3 /root/xln-deployment-evidence/efb6f5d41/current-update/web-roundtrip.py restore"
+    ],
+    "exitCode": 0,
+    "seconds": 8.718,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-current-web-restore.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "current-public-web-restored-browser",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-current/roundtrip-browser.ts",
+      "restore"
+    ],
+    "exitCode": 0,
+    "seconds": 29.81,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-current-restored-browser.log"
+  },
+  {
+    "command": [
+      "ssh",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=10",
+      "xln.finance",
+      "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason restored-testnet-operator-health --timeout-ms 60000 -- bun core/scripts/operations/production/prod-health-smoke.ts --url=http://127.0.0.1:8080 --expected-hubs=3 --require-hub-self-relay --expected-towers=1 --tower-url=http://127.0.0.1:9100/api/tower/healthz --require-clean-source --require-source-match --expected-git-head=efb6f5d4181114457cf3d62077c5d624b9fef9b3 --expected-code-hash=efb6f5d4181114457cf3d62077c5d624b9fef9b3"
+    ],
+    "exitCode": 0,
+    "seconds": 1.196,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-current-final-health.log"
+  },
+  {
+    "command": [
+      "tailscale",
+      "status",
+      "--json"
+    ],
+    "exitCode": 1,
+    "seconds": 2.095,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/macbook-link-2102.log"
+  }
+]
