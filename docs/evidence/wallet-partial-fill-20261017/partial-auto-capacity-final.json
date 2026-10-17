@@ -1,0 +1,18 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "partial-auto-capacity-final",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "run",
+    "prod:smoke:local"
+  ],
+  "exitCode": 0,
+  "seconds": 32.998,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/partial-auto-capacity-final.log"
+}

@@ -1,0 +1,18 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "partial-current-74e62ced2",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "run",
+    "prod:smoke:local"
+  ],
+  "exitCode": 124,
+  "seconds": 60.978,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/partial-current-74e62ced2.log"
+}

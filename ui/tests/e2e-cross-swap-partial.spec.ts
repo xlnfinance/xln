@@ -35,34 +35,42 @@ const PRICE_SCALE = 10_000n;
 const MAX_FILL_RATIO = 65_535n;
 
 /** Committed balance, holds and pulls of one leg plus the owner's route view. */
-const readLeg = (page: Page, leg: Leg) =>
-  page.evaluate(async ({ entityId, hubId, tokenId }) => {
-    const debug = (window as DebugWindow).__xln;
-    const env = debug?.env();
-    const adapter = debug?.adapter();
-    if (!debug || !env || !adapter) throw new Error('Wallet diagnostics unavailable');
-    const xln = await debug.xln();
-    const account = await adapter.read<AccountDoc>(`entity/${entityId}/account/${hubId}`);
-    const delta = account.state.deltas.get(tokenId);
-    const derived = delta ? xln.deriveDelta(delta, xln.isLeftEntity(entityId, hubId)) : null;
-    const replica = [...env.state.eReplicas.values()].find(entry => entry.entityId === entityId);
-    if (!replica) throw new Error(`Missing local cross owner ${entityId}`);
-    return {
-      height: account.currentHeight,
-      owned: derived ? String(derived.outCollateral + derived.outPeerCredit - derived.inOwnCredit) : '0',
-      inCapacity: derived ? String(derived.inCapacity) : '0',
-      holds: derived ? String(derived.outTotalHold + derived.inTotalHold) : '0',
-      pending: Boolean(account.pendingFrame),
-      mempool: account.mempoolCount,
-      pulls: account.state.pulls?.size ?? 0,
-      routes: [...(replica.state.crossJurisdictionSwaps?.values() ?? [])].map(route => ({
-        orderId: route.orderId,
-        status: route.status,
-        filledSource: String(route.filledSourceAmount ?? 0n),
-        filledTarget: String(route.filledTargetAmount ?? 0n),
-      })),
-    };
-  }, leg);
+const readLeg = (page: Page, leg: Leg, atHeight?: number) =>
+  page.evaluate(
+    async ({ entityId, hubId, tokenId, atHeight }) => {
+      const debug = (window as DebugWindow).__xln;
+      const env = debug?.env();
+      const adapter = debug?.adapter();
+      if (!debug || !env || !adapter) throw new Error('Wallet diagnostics unavailable');
+      const xln = await debug.xln();
+      const account = await adapter.read<AccountDoc>(
+        `entity/${entityId}/account/${hubId}`,
+        atHeight === undefined ? undefined : { atHeight },
+      );
+      const delta = account.state.deltas.get(tokenId);
+      const derived = delta ? xln.deriveDelta(delta, xln.isLeftEntity(entityId, hubId)) : null;
+      const core = await adapter.read<NonNullable<RuntimeAdapterViewFrame['activeEntity']>['core']>(
+        `entity/${entityId}`,
+        atHeight === undefined ? undefined : { atHeight },
+      );
+      return {
+        height: account.currentHeight,
+        owned: derived ? String(derived.outCollateral + derived.outPeerCredit - derived.inOwnCredit) : '0',
+        inCapacity: derived ? String(derived.inCapacity) : '0',
+        holds: derived ? String(derived.outTotalHold + derived.inTotalHold) : '0',
+        pending: Boolean(account.pendingFrame),
+        mempool: account.mempoolCount,
+        pulls: account.state.pulls?.size ?? 0,
+        routes: [...(core.crossJurisdictionSwaps?.values() ?? [])].map(route => ({
+          orderId: route.orderId,
+          status: route.status,
+          filledSource: String(route.filledSourceAmount ?? 0n),
+          filledTarget: String(route.filledTargetAmount ?? 0n),
+        })),
+      };
+    },
+    { ...leg, atHeight },
+  );
 
 /** Collateral fees prepaid inside signed Account frames after `fromHeight`. */
 const readCollateralFees = (page: Page, leg: Leg, fromHeight: number, toHeight: number) =>
@@ -159,7 +167,11 @@ test(
   async ({ page }) => {
     test.setTimeout(120_000);
     const errors: string[] = [];
+    const consoleErrors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (message.type() === 'error') consoleErrors.push(message.text());
+    });
     const started = Date.now();
     const { routes, pairId } = await stackIds(page);
     // The first hub, then Tron stablecoin, whose book still bids for Testnet WETH.
@@ -235,18 +247,20 @@ test(
     await page.getByTestId('swap-give').fill(formatUnits(take.effectiveGive, 18));
     await page.getByTestId('swap-want').fill(formatUnits(take.effectiveWant, 6));
     const target: Leg = { entityId: targetEntityId, hubId: targetHubId, tokenId: receive.tokenId };
-    await page.getByRole('button', { name: `Open incoming account with ${hubName}`, exact: true }).click();
-    const spectrum = page.getByTestId('receive-spectrum');
-    await expect(spectrum).toBeVisible({ timeout: 20_000 });
-    await spectrum.getByRole('button', { name: 'Accept it as credit instead', exact: true }).click();
-    await expect(page.getByTestId('receive-spectrum-confirm')).toHaveText('Extend credit limit');
-    await page.getByTestId('receive-spectrum-confirm').click();
-    await expect(spectrum).toHaveCount(0, { timeout: 20_000 });
+    // The current Swap command opens/prepares the target after explicit submit;
+    // merely filling the ticket must not grant credit or create an Account.
+    const targetExists = await page.evaluate(({ entityId, hubId }) => {
+      const env = (window as DebugWindow).__xln?.env();
+      const replica = env && [...env.state.eReplicas.values()].find(entry => entry.entityId === entityId);
+      if (!replica) throw new Error(`Target owner missing: ${entityId}`);
+      return replica.state.accounts.has(hubId);
+    }, target);
+    expect(targetExists).toBe(false);
+    await expect(
+      page.getByText(`Placing this order also prepares incoming capacity with ${hubName}.`, { exact: false }),
+    ).toBeVisible();
     await expect(page.getByTestId('swap-submit')).toBeEnabled();
-
-    const [sourceBefore, targetBefore] = await Promise.all([readLeg(page, source), readLeg(page, target)]);
-    expect(targetBefore.owned).toBe('0');
-    expect(BigInt(targetBefore.inCapacity)).toBeGreaterThanOrEqual(take.effectiveWant);
+    const sourceBefore = await readLeg(page, source);
     expect(sourceBefore.routes).toEqual([]);
     console.log('CROSS_PARTIAL_READY_MS', Date.now() - started);
     await page.getByTestId('swap-submit').click();
@@ -255,6 +269,37 @@ test(
     await expect(row).toHaveCount(1, { timeout: 20_000 });
     const orderId = await row.getAttribute('data-order-id');
     if (!orderId) throw new Error('Cross order row has no order id');
+    // Inspect the actual persisted target just before the paired intent. Live
+    // balances may already be locked; they are not a preparation oracle.
+    const preparedHeight = await page.evaluate(
+      async ({ orderId, targetId, sourceId }) => {
+        const debug = (window as DebugWindow).__xln;
+        const env = debug?.env();
+        if (!debug || !env) throw new Error('Wallet recovery diagnostics unavailable');
+        const xln = await debug.xln();
+        const latest = await xln.getPersistedLatestHeight(env);
+        for (let height = 1; height <= latest; height++) {
+          const frame = await xln.readPersistedStorageFrameRecord(env, height);
+          if (!frame?.frameHash) throw new Error(`Accepted WAL frame missing: ${height}`);
+          const owners = frame.runtimeInput.entityInputs.flatMap(input =>
+            (input.entityTxs ?? []).flatMap(tx =>
+              tx.type === 'prepareCrossJurisdictionSwap' && tx.data.route.orderId === orderId ? [input.entityId] : [],
+            ),
+          );
+          if (owners.length === 0) continue;
+          if (height < 2 || owners.length !== 2 || owners[0] !== targetId || owners[1] !== sourceId)
+            throw new Error(`Paired intent order invalid: ${height}:${owners.join(',')}`);
+          return height - 1;
+        }
+        throw new Error(`Accepted cross intent missing: ${orderId}`);
+      },
+      { orderId, targetId: target.entityId, sourceId: source.entityId },
+    );
+    const targetBefore = await readLeg(page, target, preparedHeight);
+    expect(targetBefore.owned).toBe('0');
+    expect(targetBefore.inCapacity).toBe(take.effectiveWant.toString());
+    expect(targetBefore.holds).toBe('0');
+    expect(targetBefore.routes).toEqual([]);
     // The hub consumed the whole bid; the wallet's remainder rests in its book.
     let remainderLots = 0n;
     await expect
@@ -318,6 +363,7 @@ test(
     expect(BigInt(sourceBefore.owned) - BigInt(sourceAfter.owned)).toBe(expectedFilledSource + BigInt(sourceFees));
     expect(BigInt(targetAfter.owned) + BigInt(targetFees)).toBe(expectedFilledTarget);
     expect(errors).toEqual([]);
+    expect(consoleErrors).toEqual([]);
     console.log(
       'CROSS_PARTIAL_CLEARED',
       Date.now() - started,
@@ -330,6 +376,8 @@ test(
         targetAfter,
         sourceFees,
         targetFees,
+        errors,
+        consoleErrors,
       }),
     );
   },

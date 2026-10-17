@@ -1,0 +1,44 @@
+{
+  "baseSha": "74e62ced2d3af0735203b89a24f741b2be815e4f",
+  "change": "Replace deleted manual Swap incoming-capacity controls with canonical one-click automatic setup. Assert no target Account while drafting; read exact prepared capacity and zero holds/value from persisted pre-intent state, with paired target/source positional order.",
+  "preservedAssertions": [
+    "Real maker bid consumed and unfilled remainder rests",
+    "Entire source amount held before close",
+    "Manual cancellation removes public resting offer",
+    "Both legs settled at independently calculated ladder ratio",
+    "Exact source debit and target credit include fees from signed Account history",
+    "No remaining holds, pulls, pending frames or queued transactions"
+  ],
+  "additionalAssertions": [
+    "No browser page or console errors",
+    "Exact target capacity, zero target balance/holds/routes before intent"
+  ],
+  "scope": "Test-only changes. Local two-EVM fixture, no launch scope expansion, no native TVM/public-chain/mainnet/TPS claim.",
+  "stats": {
+    "startTime": "2026-10-17T07:23:16.747Z",
+    "duration": 10464.704,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "l1": {
+    "tests": 12,
+    "assertions": 84,
+    "seconds": 0.763
+  },
+  "sourceSha256": "c200778771f83d489586a3d08d9bae0bf0a6323671b042a59d81ad4c857bcb81",
+  "artifacts": {
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/partial-auto-capacity-final/wallet-browser.log": "7f3e841a92dcc183998ff0a887fdae62515bce82f87c4087f18315456087a28a",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/partial-auto-capacity-final/wallet-results.json": "df3c2bd433c8642ea6ffbd5dfe37950d305bcda9bf8d72c029a3f2cb9e21dc18",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/partial-auto-capacity-final/wallet-runtime-build.log": "dd29cba32e995daa89dc9fd4fbbd6adc9f20dc40c4c52ecc3adce1251d5268e6",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/partial-current-74e62ced2/wallet-browser.log": "f1b81162f50cb4b8010d86212274c908117643d0817bdb031f3e3b84e2a74713"
+  },
+  "check": {
+    "sourceGates": 38,
+    "topGates": 3,
+    "exit": 0,
+    "seconds": 26.266,
+    "rawLogSha256": "a55b8540019f28d19227a2fdd7edcdedbe7256076648472c85e6e95152743dfa"
+  }
+}

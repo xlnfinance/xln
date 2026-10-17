@@ -1,0 +1,71 @@
+{
+  "consoleErrors": [],
+  "errors": [],
+  "remainderLots": {
+    "__xlnType": "BigInt",
+    "value": "1999916"
+  },
+  "route": {
+    "filledSource": "10200082398718242160",
+    "filledTarget": "25495105955",
+    "orderId": "swap-mvc2l65w-8-2qx6uldt9p0rw",
+    "status": "settled"
+  },
+  "sourceAfter": {
+    "height": 7,
+    "holds": "0",
+    "inCapacity": "11520082398718242160",
+    "mempool": 0,
+    "owned": "2999917601281757840",
+    "pending": false,
+    "pulls": 0,
+    "routes": [
+      {
+        "filledSource": "10200082398718242160",
+        "filledTarget": "25495105955",
+        "orderId": "swap-mvc2l65w-8-2qx6uldt9p0rw",
+        "status": "settled"
+      }
+    ]
+  },
+  "sourceBefore": {
+    "height": 4,
+    "holds": "0",
+    "inCapacity": "1320000000000000000",
+    "mempool": 0,
+    "owned": "13200000000000000000",
+    "pending": false,
+    "pulls": 0,
+    "routes": []
+  },
+  "sourceFees": "0",
+  "targetAfter": {
+    "height": 5,
+    "holds": "0",
+    "inCapacity": "5001443555",
+    "mempool": 0,
+    "owned": "25492456445",
+    "pending": false,
+    "pulls": 0,
+    "routes": [
+      {
+        "filledSource": "10200082398718242160",
+        "filledTarget": "25495105955",
+        "orderId": "swap-mvc2l65w-8-2qx6uldt9p0rw",
+        "status": "settled"
+      }
+    ]
+  },
+  "targetBefore": {
+    "height": 2,
+    "holds": "0",
+    "inCapacity": "30493900000",
+    "mempool": 0,
+    "owned": "0",
+    "pending": false,
+    "pulls": 0,
+    "routes": []
+  },
+  "targetFees": "2649510",
+  "tradeMs": 8638
+}

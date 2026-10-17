@@ -1,0 +1,20 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "partial-fill-lifecycle",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "test",
+    "core/__tests__/cross-j/swap/lifecycle/cross-jurisdiction-fill-progress.test.ts",
+    "core/__tests__/cross-j/swap/lifecycle/cross-jurisdiction-removal-ack-idempotence.test.ts",
+    "core/__tests__/entity/tx/cross-j-pull-close-sealed-leaf.test.ts"
+  ],
+  "exitCode": 0,
+  "seconds": 0.763,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/partial-fill-lifecycle.log"
+}
