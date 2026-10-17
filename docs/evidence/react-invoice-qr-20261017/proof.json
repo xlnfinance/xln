@@ -1,0 +1,51 @@
+{
+  "ceiling": {
+    "__xlnType": "BigInt",
+    "value": "7000007"
+  },
+  "payment": {
+    "amount": "7000000",
+    "fee": "7",
+    "hashlock": "0x54cd99cc2a9899381e1766cc16d3a0b51716e64d87fe6d665de15258d7e01228",
+    "senderAmount": "7000007"
+  },
+  "received": {
+    "data": {
+      "amount": "7000000",
+      "description": "QR settle",
+      "elapsedMs": 1,
+      "entityId": "0x1d8a05dddc8e7aa47378a8faf0d535708a24141fe068a60cc8291654ae9c83da",
+      "fromEntity": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+      "hashlock": "0x54cd99cc2a9899381e1766cc16d3a0b51716e64d87fe6d665de15258d7e01228",
+      "jurisdictionId": "Testnet",
+      "lockId": "0x54cd99cc2a9899381e1766cc16d3a0b51716e64d87fe6d665de15258d7e01228",
+      "receivedAtMs": 1792261466759,
+      "startedAtMs": 1792261466759,
+      "toEntity": "0x1d8a05dddc8e7aa47378a8faf0d535708a24141fe068a60cc8291654ae9c83da",
+      "tokenId": 1
+    },
+    "entityId": "0x1d8a05dddc8e7aa47378a8faf0d535708a24141fe068a60cc8291654ae9c83da",
+    "frameHeight": 15,
+    "message": "HtlcReceived"
+  },
+  "sent": {
+    "data": {
+      "amount": "7000000",
+      "description": "QR settle",
+      "elapsedMs": 1,
+      "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+      "finalizedAtMs": 1792261466759,
+      "finalizedInMs": 1,
+      "fromEntity": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+      "hashlock": "0x54cd99cc2a9899381e1766cc16d3a0b51716e64d87fe6d665de15258d7e01228",
+      "jurisdictionId": "Testnet",
+      "lockId": "0x54cd99cc2a9899381e1766cc16d3a0b51716e64d87fe6d665de15258d7e01228",
+      "startedAtMs": 1792261466759,
+      "toEntity": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+      "tokenId": 1
+    },
+    "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+    "frameHeight": 17,
+    "message": "HtlcFinalized"
+  }
+}

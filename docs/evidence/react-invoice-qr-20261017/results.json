@@ -1,0 +1,154 @@
+{
+  "sourceBaseSha": "4288d6b48aaff1beedf5ab1cf5f60c08faeead7d",
+  "ownedSourceSha256": {
+    "tests/e2e/payments/e2e-invoice-qr.spec.ts": "635ca933e6f69900869b3fed88d0f4153730869180584db340e9613563129dd1"
+  },
+  "checks": {
+    "invoice-qr-baseline": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "invoice-qr-baseline",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--all",
+        "--strict-browser-health",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/payments/e2e-invoice-qr.spec.ts::creates QR in Receive and scans it into Pay"
+      ],
+      "exitCode": 1,
+      "seconds": 50.836,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/invoice-qr-baseline.log"
+    },
+    "invoice-qr-react": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "invoice-qr-react",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--all",
+        "--strict-browser-health",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/payments/e2e-invoice-qr.spec.ts::creates QR in Receive and scans it into Pay"
+      ],
+      "exitCode": 0,
+      "seconds": 28.871,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/invoice-qr-react.log"
+    },
+    "invoice-qr-types": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "invoice-qr-types",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/invoice-qr/typecheck.ts"
+      ],
+      "exitCode": 1,
+      "seconds": 4.834,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/invoice-qr-types.log"
+    },
+    "invoice-qr-types-2": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "invoice-qr-types",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/invoice-qr/typecheck.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 4.73,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/invoice-qr-types-2.log"
+    },
+    "invoice-qr-codec": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "invoice-qr-codec",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/development/frontend/frontend-xln-invoice.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 0.192,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/invoice-qr-codec.log"
+    },
+    "invoice-qr-final-check": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "invoice-qr-final-check",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "run",
+        "check"
+      ],
+      "exitCode": 0,
+      "seconds": 26.91,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/invoice-qr-final-check.log"
+    }
+  },
+  "browser": {
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "strictBrowserHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 0,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    }
+  }
+}
