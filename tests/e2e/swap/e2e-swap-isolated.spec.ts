@@ -1308,7 +1308,7 @@ test.describe('E2E Swap Isolated Flow', () => {
   test(
     'one resting maker order can be matched by two isolated takers until fully closed',
     { tag: '@functional' },
-    async ({ browser, page }) => {
+    async ({ browser, page }, testInfo) => {
       test.setTimeout(240_000);
       let aliceContext: BrowserContext | null = null;
       let bobContext: BrowserContext | null = null;
@@ -1412,28 +1412,28 @@ test.describe('E2E Swap Isolated Flow', () => {
         await waitForSwapResolveCountAtLeast(bobPage, bob.entityId, hubId, 1);
         await waitForSwapResolveCountAtLeast(carolPage, carol.entityId, hubId, 1);
 
-        await expect
-          .poll(async () => await alicePage.getByTestId('swap-open-order-row').count(), {
-            timeout: 30_000,
-            intervals: [250, 500, 750],
-          })
-          .toBe(0);
-
-        await dismissSwapCompletionModalIfVisible(alicePage);
-        await alicePage.getByTestId('swap-orders-tab-closed').first().click();
-        const closedRow = alicePage.getByTestId('swap-closed-order-row').first();
-        const closedVisible = await closedRow.isVisible({ timeout: 10_000 }).catch(() => false);
-        if (!closedVisible) {
-          await alicePage.reload({ waitUntil: 'domcontentloaded' });
-          await unlockSavedWalletAfterReload(alicePage);
-          await gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 });
-          await openSwapWorkspace(alicePage);
-          await selectCounterpartyInSwap(alicePage, hubId);
-          await ensureSelectedScope(alicePage);
-          await dismissSwapCompletionModalIfVisible(alicePage);
-          await alicePage.getByTestId('swap-orders-tab-closed').first().click();
+        await expect(alicePage.getByTestId('swap-offer-cancel')).toHaveCount(0);
+        const closed = await readClosedSwapResolveSnapshots(alicePage, alice.entityId, hubId);
+        expect(closed).toHaveLength(2);
+        expect(closed.map(fill => [fill.executionGiveAmount, fill.executionWantAmount])).toEqual([
+          ['20000000000000000', '50000000'],
+          ['40000000000000000', '100000000'],
+        ]);
+        await alicePage.getByTestId('nav-activity').locator('visible=true').first().click();
+        await alicePage.getByRole('button', { name: 'Swaps', exact: true }).click();
+        const history = alicePage.getByRole('region', { name: 'Swap history', exact: true });
+        await history.getByRole('combobox').selectOption(hubId);
+        const order = history.getByTestId('swap-history-order');
+        await expect(order).toHaveCount(1);
+        await expect(order.locator('summary')).toContainText('Closed · 2 executions');
+        await order.locator('summary').click();
+        for (const fill of closed) {
+          await expect(order.locator(`[data-field="gave"][data-amount="${fill.executionGiveAmount}"]`)).toBeVisible();
+          await expect(
+            order.locator(`[data-field="received"][data-amount="${fill.executionWantAmount}"]`),
+          ).toBeVisible();
         }
-        await expectClosedOrderRowStatus(alicePage, /Filled/i);
+        await alicePage.screenshot({ path: testInfo.outputPath('peer-swap-multi.png'), fullPage: true });
       } finally {
         await Promise.all([
           aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),
@@ -1569,7 +1569,7 @@ test.describe('E2E Swap Isolated Flow', () => {
   test(
     'swap round-trip both directions clears holds and updates closed history on both peers',
     { tag: '@functional' },
-    async ({ browser, page }) => {
+    async ({ browser, page }, testInfo) => {
       let aliceContext: BrowserContext | null = null;
       let bobContext: BrowserContext | null = null;
 
@@ -1618,12 +1618,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         ]);
 
         await Promise.all([openSwapWorkspace(alicePage), openSwapWorkspace(bobPage)]);
-        await Promise.all([
-          selectCounterpartyInSwap(alicePage, hubId),
-          selectCounterpartyInSwap(bobPage, hubId),
-          ensureSelectedScope(alicePage),
-          ensureSelectedScope(bobPage),
-        ]);
+        await Promise.all([selectCounterpartyInSwap(alicePage, hubId), selectCounterpartyInSwap(bobPage, hubId)]);
 
         await placeAliceSellOffer(alicePage, '0.01', '2500');
         await placeBobMatchingBuyOrder(bobPage, '25', '2500');
@@ -1652,11 +1647,6 @@ test.describe('E2E Swap Isolated Flow', () => {
           waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 1, wholeSwapTokenUnits(1, 20n)),
         ]);
 
-        await Promise.all([
-          dismissSwapCompletionModalIfVisible(alicePage),
-          dismissSwapCompletionModalIfVisible(bobPage),
-        ]);
-
         await placeAliceSellOffer(bobPage, '0.0095', '2600');
         await placeBobMatchingBuyOrder(alicePage, '24.7', '2600');
 
@@ -1679,15 +1669,46 @@ test.describe('E2E Swap Isolated Flow', () => {
           })
           .toBeGreaterThanOrEqual(2);
 
-        await Promise.all([
-          dismissSwapCompletionModalIfVisible(alicePage),
-          dismissSwapCompletionModalIfVisible(bobPage),
-        ]);
-
-        await Promise.all([
-          expectClosedOrderRowStatus(alicePage, /Filled/i, 1),
-          expectClosedOrderRowStatus(bobPage, /Filled/i, 1),
-        ]);
+        const peerExecutions = [
+          {
+            page: alicePage,
+            entityId: alice.entityId,
+            amounts: [
+              ['10000000000000000', '25000000'],
+              ['24700000', '9500000000000000'],
+            ],
+          },
+          {
+            page: bobPage,
+            entityId: bob.entityId,
+            amounts: [
+              ['25000000', '10000000000000000'],
+              ['9500000000000000', '24700000'],
+            ],
+          },
+        ];
+        for (const peer of peerExecutions) {
+          const closed = await readClosedSwapResolveSnapshots(peer.page, peer.entityId, hubId);
+          expect(closed).toHaveLength(2);
+          expect(closed.map(fill => [fill.executionGiveAmount, fill.executionWantAmount])).toEqual(
+            expect.arrayContaining(peer.amounts),
+          );
+          await peer.page.getByTestId('nav-activity').locator('visible=true').first().click();
+          await peer.page.getByRole('button', { name: 'Swaps', exact: true }).click();
+          const history = peer.page.getByRole('region', { name: 'Swap history', exact: true });
+          await history.getByRole('combobox').selectOption(hubId);
+          const orders = history.getByTestId('swap-history-order');
+          await expect(orders).toHaveCount(2);
+          for (const order of await orders.all()) {
+            await expect(order.locator('summary')).toContainText('Closed · 1 executions');
+            await order.locator('summary').click();
+          }
+          for (const [give, want] of peer.amounts) {
+            await expect(history.locator(`[data-field="gave"][data-amount="${give}"]`)).toBeVisible();
+            await expect(history.locator(`[data-field="received"][data-amount="${want}"]`)).toBeVisible();
+          }
+        }
+        await alicePage.screenshot({ path: testInfo.outputPath('peer-swap-roundtrip.png'), fullPage: true });
 
         await expect
           .poll(async () => await holdTotal(alicePage, alice.entityId, hubId, 1), {
