@@ -1,3 +1,4 @@
+import { verifyBookAskFill } from '../../utils/browser/swap-book-fill';
 import { createWalletIdentity, LOCAL_PASSWORD } from '../../../ui/tests/wallet-ui';
 import { verifyRestingSwapCancellation } from '../../../ui/tests/swap-cancellation';
 /**
@@ -2207,19 +2208,10 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
   }
 
   test('swap orderbook lowest ask click fills immediately at displayed book price', { tag: '@functional' }, async ({ page }, testInfo) => {
-    const accountRef = await prepareOrderbookClickTest(page);
-
-    const metrics = await timedStep('swap_click.lowest_ask_fills', () =>
-      executeOrderbookClickFill(page, accountRef, 'lowest-ask', { measureIdleRpcWindow: true }),
-    );
-    await testInfo.attach('swap-click-latency.json', {
-      body: Buffer.from(JSON.stringify({
-        schema: 'xln.qa.swap-click-latency.v1',
-        slaMs: 500,
-        ...metrics,
-      }, null, 2)),
-      contentType: 'application/json',
-    });
+    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+    const wallet = await createWalletIdentity(page, 'book-ask', randomMnemonic());
+    await expect(page.getByTestId('account-row').first()).toBeVisible();
+    await verifyBookAskFill(page, testInfo, wallet.entityId);
   });
 
   test('swap orderbook highest bid click fills immediately at displayed book price', { tag: '@functional' }, async ({ page }) => {

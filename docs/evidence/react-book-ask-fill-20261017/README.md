@@ -1,0 +1,13 @@
+# Book ask click binds the actual signed fill
+
+Base main c5f14b0f46ea3d4b0a57515b31bddd9bcc405115. The original required root browser case failed43.709s at the retired Svelte runtime dropdown, before any trade. It now enters the real React wallet and clicks the live book's lowest ask. The current React product selects a concrete hub book; retired All Hubs routing controls, Svelte completion modal and toast hooks are not restored. Other current multi-hub/peer trade evidence remains separate.
+
+The first port failed36.009s because the test removed grouping commas from its displayed-price expectation (2500.5000 versus2,500.5000). Keeping display text separate from integer ticks preserves exact equality; there is no numeric tolerance. The corrected real trade passed1/1 in32.528s with zero strict browser-health issues.
+
+Observed price2,500.5000 equals25005000 canonical ticks. The actual normalized ticket gives99,999,996 USDC base units for39,992,000,000,000,000 WETH base units. One signed full resolution (65535) has exactly those gross amounts, fee token2 and the exact committed fee policy amount. Final wallet holds4 USDC base units and39,988,000,800,000,000 WETH base units. Both Account owners commit the same height and every serialized Delta field; no pending frame, mempool, open offer or hold remains. Activity displays one Closed order and its exact execution/fee amounts.
+
+The placement notification is asserted exactly once; it is admission feedback, not falsely labeled a fully-filled receipt. Terminal evidence is the committed signed fill and visible durable Activity record. The former500ms attachment label was not an enforced assertion; observed49ms placement/171ms close are one local sample, not a latency SLA or TPS claim. The final helper retains the original6s idle RPC observation as diagnostic-only data and cleans up its listener.
+
+Focused order preparation and signed net authorization tests passed21/21 with78 assertions in0.265s. Strict comparison against exact baseline source reports38 existing root diagnostics and38 current, zero introduced/new-helper diagnostics (10.791s); it does not claim whole-file strict success. No compiler gate/baseline changed.
+
+Only the targeted browser caller and its focused observer/assertion helper change; production UI/runtime/Rust/contracts/schema are unchanged. Exact failures, commands, exits and safe financial attachment accompany this report. Final unchanged-candidate source check, clean committed browser (including6s RPC observation), verifier and push results live in the durable autonomous job under evidence/swap-book-* and swap-book/clean-head. Aggregate release, remaining full browser, public Sepolia, backend binary rollback and uninterrupted soak remain unproved.

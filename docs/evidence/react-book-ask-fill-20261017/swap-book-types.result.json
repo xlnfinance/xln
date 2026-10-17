@@ -1,0 +1,9 @@
+{
+  "command": [
+    "bun",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-book/type-compare.ts"
+  ],
+  "exitCode": 0,
+  "seconds": 10.791,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-book-types.log"
+}

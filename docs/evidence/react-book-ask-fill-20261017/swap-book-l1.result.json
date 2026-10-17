@@ -1,0 +1,11 @@
+{
+  "command": [
+    "bun",
+    "test",
+    "core/__tests__/payments/swap/swap-order-preparation.test.ts",
+    "core/__tests__/payments/swap/swap-net-authorization.test.ts"
+  ],
+  "exitCode": 0,
+  "seconds": 0.265,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-book-l1.log"
+}
