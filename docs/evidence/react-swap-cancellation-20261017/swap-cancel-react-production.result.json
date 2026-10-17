@@ -1,0 +1,22 @@
+{
+  "command": [
+    "env",
+    "XLN_HLT_ENGINE=ts",
+    "XLN_LOCAL_PROD_SMOKE_DIR=/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-cancel/react-production",
+    "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-swap-cancel.spec.ts",
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "swap-cancel-react-production",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "run",
+    "prod:smoke:local"
+  ],
+  "exitCode": 0,
+  "seconds": 38.94,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-cancel-react-production.log"
+}

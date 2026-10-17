@@ -1,10 +1,12 @@
+import { createWalletIdentity, LOCAL_PASSWORD } from '../../../ui/tests/wallet-ui';
+import { verifyRestingSwapCancellation } from '../../../ui/tests/swap-cancellation';
 /**
  * E2E swap coverage for the live UI and the built-in browser scenarios.
  *
  * These tests verify that swap offers can auto-prepare missing token capacity, place and cancel
  * cleanly through the UI, and that the scenario runners still produce partial fills after reload-safe setup.
  */
-import { test, expect, type Locator, type Page, type TestInfo } from '../../global-setup.mts';
+import { test, expect, type Locator, type Page } from '../../global-setup.mts';
 import { Wallet } from 'ethers';
 import { timedStep } from '../../utils/e2e-timing.mts';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, getHealth } from '../../utils/e2e-baseline';
@@ -98,23 +100,6 @@ async function readSelectedUiRuntimeIdentity(page: Page): Promise<{
   expect(selected.signerId, 'UI-selected signerId must be present').toMatch(/^0x[a-fA-F0-9]{40}$/);
   expect(selected.runtimeId, 'UI-selected runtimeId must be present').not.toBe('');
   return selected;
-}
-
-async function expectSelectedUiRuntimeIdentity(
-  page: Page,
-  expected: { entityId: string; signerId: string },
-): Promise<void> {
-  const selected = await readSelectedUiRuntimeIdentity(page);
-  expect(
-    {
-      entityId: selected.entityId.toLowerCase(),
-      signerId: selected.signerId.toLowerCase(),
-    },
-    'selected entity drift detected',
-  ).toEqual({
-    entityId: expected.entityId.toLowerCase(),
-    signerId: expected.signerId.toLowerCase(),
-  });
 }
 
 function orderbookRowTestId(side: 'ask' | 'bid'): string {
@@ -1038,51 +1023,6 @@ async function waitForSwapBilateralSettlementIdle(
       remoteReplicaProposal: 0,
       remoteReplicaLocked: 0,
     });
-}
-
-async function readSwapResolveCount(
-  page: Page,
-  entityId: string,
-  signerId: string,
-  counterpartyId: string,
-): Promise<number> {
-  return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
-    const findAccount = (accounts: any, ownerId: string, cpId: string) => {
-      if (!(accounts instanceof Map)) return null;
-      const owner = String(ownerId || '').toLowerCase();
-      const cp = String(cpId || '').toLowerCase();
-      for (const [accountKey, account] of accounts.entries()) {
-        if (String(accountKey || '').toLowerCase() === cp) return account;
-        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
-          ? String(account.counterpartyEntityId).toLowerCase()
-          : '';
-        if (canonicalCp === cp) return account;
-        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
-        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
-        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
-      }
-      return null;
-    };
-
-    const env = (window as any).isolatedEnv;
-    if (!env?.state.eReplicas) return 0;
-    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
-      const [eid, sid] = String(k).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const rep = key ? env.state.eReplicas.get(key) : null;
-    const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
-    if (!account) return 0;
-
-    let count = 0;
-    for (const frame of account.frameHistory || []) {
-      for (const tx of frame?.accountTxs || []) {
-        if (tx?.type === 'swap_resolve') count += 1;
-      }
-    }
-    return count;
-  }, { entityId, signerId, counterpartyId });
 }
 
 async function readPositiveSwapResolveCount(
@@ -2207,117 +2147,26 @@ test.describe('E2E Swap Flow', () => {
     });
   });
 
-  // Scenario: place a non-marketable order, cancel it from the UI, and verify both state machine
-  // and rendered order table clear before and after reload.
-  test('swap place and cancel from UI updates state machine', { tag: '@functional' }, async ({ page }) => {
-    const accountRef = await timedStep('swap.prepare_book', () => prepareOrderbookClickTest(page));
-
-    await expect(page.getByTestId('swap-orderbook')).toBeVisible({ timeout: 20_000 });
-    await timedStep('swap.assert_selected_entity_stable', () => expectSelectedUiRuntimeIdentity(page, accountRef));
-    const swapResolveCountBefore = await timedStep('swap.read_resolve_count_before', () =>
-      readSwapResolveCount(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
-    );
-
-    const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
-    const scopeToggle = page.getByTestId('swap-scope-toggle').first();
-    const placeButton = page.getByTestId('swap-ticket-submit').first();
-    await expect(accountSelect).toBeVisible({ timeout: 20_000 });
-    await expect(scopeToggle).toBeVisible({ timeout: 20_000 });
-    if (String(await scopeToggle.textContent() || '').trim() !== 'Selected') {
-      await scopeToggle.click();
-    }
-    await accountSelect.selectOption(accountRef.counterpartyId);
-    await page.waitForTimeout(200);
-    await timedStep('swap.configure_resting_buy', () => configureRestingBuyFromBestAsk(page, { maxQuote: 25 }));
-
-    await timedStep('swap.place_offer', async () => {
-      await placeButton.click();
-      await expect(page.getByTestId('swap-open-order-row').first()).toBeVisible({ timeout: 60_000 });
-    });
-    const openOrderRow = page.getByTestId('swap-open-order-row').first();
-    await timedStep('swap.capture_offer_row', async () => {
-      await expect(openOrderRow).toBeVisible({ timeout: 30_000 });
-    });
-
-    await timedStep('swap.assert_non_marketable_order_stays_open', async () => {
-      const remaining = await readFirstOpenOrderRemaining(page);
-      expect(remaining, 'non-marketable order must remain open before cancel').toBeGreaterThan(0);
-      await expect
-        .poll(
-          async () => await readSwapResolveCount(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
-          { timeout: 5_000, intervals: [250, 500, 1000] },
-        )
-        .toBe(swapResolveCountBefore);
-    });
-
-    const cancelButton = openOrderRow.getByTestId('swap-open-order-cancel');
-    await expect(cancelButton).toBeVisible({ timeout: 20_000 });
-    await timedStep('swap.cancel_offer', async () => {
-      await cancelButton.click();
-      await expect
-        .poll(async () => {
-          const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-          return (
-            state.accountSwapOffersSize === 0 ||
-            state.accountHasSwapCancelRequestInMempool ||
-            state.accountHasSwapCancelRequestInPendingFrame
-          );
-        }, { timeout: 60_000 })
-        .toBe(true);
-    });
-
-    await timedStep('swap.wait_closed_orderbook_ui', async () => {
-      await expect
-        .poll(async () => await page.getByTestId('swap-open-order-row').count(), { timeout: 60_000 })
-        .toBe(0);
-    });
-
-    await timedStep('swap.assert_post_close_state', async () => {
-      await expectSelectedUiRuntimeIdentity(page, accountRef);
-      const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-      expect(state.accountSwapOffersSize).toBe(0);
-      await page.getByTestId('swap-orders-tab-closed').first().click();
-      await expect
-        .poll(async () => await readClosedOrderTabCount(page), { timeout: 20_000 })
-        .toBeGreaterThan(0);
-    });
-
-    await timedStep('swap.assert_closed_tab_canceled_row', async () => {
-      const closedTab = page.getByTestId('swap-orders-tab-closed').first();
-      await expect(closedTab).toBeVisible({ timeout: 10_000 });
-      await closedTab.click();
-      const firstClosedRow = page.getByTestId('swap-closed-order-row').first();
-      await expect(firstClosedRow).toBeVisible({ timeout: 20_000 });
-      await expect(firstClosedRow.locator('td').first()).toContainText(/Canceled/i, { timeout: 10_000 });
-    });
-
-    await timedStep('swap.reload_page', async () => {
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(() => {
-        const env = (window as any).isolatedEnv;
-        return !!env?.runtimeId && Number(env?.state.eReplicas?.size || 0) > 0;
-      }, { timeout: 60_000 });
-      await unlockSavedWalletAfterReload(page);
-    });
-    await timedStep('swap.reload_assert_no_open_offer', async () => {
-      await expectSelectedUiRuntimeIdentity(page, accountRef);
-      await expect.poll(async () => {
-        const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-        return state.accountSwapOffersSize;
-      }, { timeout: 60_000 }).toBe(0);
-    });
-    await timedStep('swap.reload_assert_ui_no_rows', async () => {
-      await expect.poll(async () => await page.getByTestId('swap-open-order-row').count(), {
-        timeout: 60_000,
-      }).toBe(0);
-    });
-    await timedStep('swap.reload_assert_closed_row_persisted', async () => {
-      await openSwapWorkspace(page);
-      await selectCounterpartyInSwap(page, accountRef.counterpartyId);
-      await page.getByTestId('swap-orders-tab-closed').first().click();
-      const firstClosedRow = page.getByTestId('swap-closed-order-row').first();
-      await expect(firstClosedRow).toBeVisible({ timeout: 20_000 });
-      await expect(firstClosedRow.locator('td').first()).toContainText(/Canceled/i, { timeout: 10_000 });
+  test('swap place and cancel from UI updates state machine', { tag: '@functional' }, async ({ page }, info) => {
+    await verifyRestingSwapCancellation(page, info, expect, async () => {
+      await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+      const wallet = await createWalletIdentity(page, 'swap-cancel', randomMnemonic());
+      await expect(page.getByTestId('account-row').first()).toBeVisible();
+      return async () => {
+        await page.getByRole('button', { name: 'Continue', exact: true }).click();
+        await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
+        await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+        await page.getByTestId('nav-home').locator('visible=true').first().click();
+        await expect(page.getByTestId('home-entity-id')).toHaveText(wallet.entityId);
+        const runtimeId = await page.evaluate(() => {
+          const debug = (window as Window & { __xln?: { adapter(): { runtimeId: string } | null } }).__xln;
+          if (!debug) throw new Error('WALLET_DIAGNOSTICS_UNAVAILABLE');
+          const adapter = debug.adapter();
+          if (!adapter) throw new Error('RESTORED_SWAP_ADAPTER_MISSING');
+          return adapter.runtimeId;
+        });
+        expect(runtimeId).toBe(wallet.runtimeId);
+      };
     });
   });
 

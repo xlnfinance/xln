@@ -1,0 +1,14 @@
+# Current React resting-order cancellation and recovery
+
+Base main: `24e1143b4833e0e92d39e00ec9290585935d524f`.
+The original root browser scenario failed in44.252s at the retired Svelte runtime dropdown, before financial work. Both root and production UI runners now call one current React scenario. Obsolete unused selected-identity and frame-history resolve readers were deleted; current typed Account and durable swap-history readers remain.
+
+The real mobile wallet receives100USDC, selects the live H1 orderbook ask and requests a non-marketable25USDC order. Current canonical lot normalization yields22.731818USDC for0.01WETH in the observed run. The test requires the committed original amounts to equal the actual current prepareSwapOrder result; it does not misreport25USDC as the held amount. Exactly one unfilled offer holds22.731818USDC, leaving77.268182 spendable, with unchanged balances and exact incoming credit. An authenticated reload preserves the full Account snapshot and durable order history.
+
+Actual UI cancellation restores100USDC spendable and releases every hold without a trade: one matching resolution, fillRatio0, cancelRemainder=true and cancel_request. A second authenticated reload preserves closed history and exact Account state; Activity shows Closed and Remainder cancelled, and no cancel control remains. Runtime/Entity identity is checked through the real unlock path.
+
+An intermediate run hit the60s outer budget after financial assertions completed: the mobile Swap flow hides bottom navigation. The test now uses the visible Back control before Activity. No timeout or semantic assertion was weakened. The corrected root scenario passed1/1 in52.274s including build, with all strict browser-health counters zero. The separate actual production static wallet runner passed1/1 in38.940s overall, with no skipped/unexpected/flaky cases. Safe attachments are proof.json and production-proof.json.
+
+Focused Account cancellation/output/admission regressions passed6/6 with26 assertions in0.290s. Strict diagnostic comparison against exact baseline source reports41 baseline diagnostics versus38 current, zero introduced diagnostics and zero in the new shared scenario (9.416s). Remaining diagnostics belong to untouched root swap helpers/cases; this is not a whole-file strict-type pass. No type gate or baseline was weakened.
+
+Only tests and evidence change. Financial runtime, contracts, generated artifacts, Rust, current schema and WAL recovery implementation are unchanged. Exact commands/exits accompany this report; raw traces/logs remain in the durable autonomous job swap-cancel folder. Final full check, clean committed browser and installed verifier/publication are recorded in that job under evidence/swap-cancel-* and swap-cancel/clean-head. Component successes do not establish aggregate release, public-chain proof or soak acceptance.

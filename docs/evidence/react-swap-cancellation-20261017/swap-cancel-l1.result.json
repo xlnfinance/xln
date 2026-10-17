@@ -1,0 +1,19 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "swap-cancel-l1",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "test",
+    "core/__tests__/account/transactions/account-same-j-swap-output.test.ts",
+    "core/__tests__/account/transactions/account-swap-limits.test.ts"
+  ],
+  "exitCode": 0,
+  "seconds": 0.29,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-cancel-l1.log"
+}
