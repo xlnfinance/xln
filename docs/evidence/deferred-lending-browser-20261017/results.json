@@ -1,0 +1,131 @@
+{
+  "base": "7c092bc98cc34fbdb800522199f6603fa7e8b26f",
+  "results": [
+    {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "lending-root-before",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--all",
+        "--strict-browser-health",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/product/e2e-lending.spec.ts::funds hub pool, borrows from it, and repays from the Lending tab"
+      ],
+      "exitCode": 1,
+      "seconds": 48.323,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/lending-root-before-7c092bc98.log"
+    },
+    {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "lending-root-current",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--all",
+        "--strict-browser-health",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/product/e2e-lending.spec.ts::deferred lending disables new commands and leaves the wallet able to pay"
+      ],
+      "exitCode": 1,
+      "seconds": 18.158,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/lending-root-current.log"
+    },
+    {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "lending-root-current",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--all",
+        "--strict-browser-health",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/product/e2e-lending.spec.ts::deferred lending disables new commands and leaves the wallet able to pay"
+      ],
+      "exitCode": 0,
+      "seconds": 39.375,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/lending-root-current-2.log"
+    },
+    {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "lending-deferred-l1",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/runtime/ingress/recovery/deferred-entity-admission.test.ts",
+        "core/__tests__/proofs/fx-admission.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 1.033,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/lending-deferred-l1.log"
+    },
+    {
+      "command": [
+        "env",
+        "XLN_HLT_ENGINE=ts",
+        "XLN_LOCAL_PROD_SMOKE_DIR=/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/lending-react-current",
+        "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-lending-availability.spec.ts",
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "lending-react-current",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "run",
+        "prod:smoke:local"
+      ],
+      "exitCode": 0,
+      "seconds": 32.581,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/lending-react-current.log"
+    }
+  ],
+  "productionFinancialCodeChanged": false,
+  "assertionsRetained": 33,
+  "rootLedgerPendingBeforeReplacementRun": 1,
+  "rootLedgerPendingAfterSuccessfulReplacementRun": 0
+}

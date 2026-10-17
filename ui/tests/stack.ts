@@ -1,5 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { HDNodeWallet } from 'ethers';
+import { fundFromHubUi } from './fund-from-hub';
 import { attachRustH1 } from '../../core/scripts/operations/hlt/rust/rust-h1';
 import { LOCAL_TEST_STACK_BASES } from '../../core/scripts/e2e/harness/local-test-port-lease';
 import type { RuntimeAdapterViewFrame } from '../../core/api/public/runtime-module';
@@ -148,24 +149,5 @@ export async function readWalletCheckpoint(page: Page, atHeight?: number) {
 
 /** Ask the stack hub to pay `amount` USDC over credit (the network faucet); Home then shows the USDC lane. */
 export async function fundFromHub(page: Page, amount = '100'): Promise<void> {
-  await page.getByTestId('nav-manage').locator('visible=true').first().click();
-  await page.getByTestId('manage-assets').click();
-  await page.getByTestId('faucet-amount').fill(amount);
-  const spectrum = page.getByTestId('receive-spectrum');
-  if (await spectrum.isVisible()) {
-    await page.getByRole('button', { name: '0% collateral', exact: true }).click();
-    await page.getByTestId('receive-spectrum-confirm').click();
-    await expect(spectrum).toHaveCount(0, { timeout: 15_000 });
-  }
-  await expect(page.getByTestId('faucet-offchain')).toBeEnabled();
-  const [response] = await Promise.all([
-    page.waitForResponse(
-      response => new URL(response.url()).pathname === '/api/faucet/offchain' && response.request().method() === 'POST',
-    ),
-    page.getByTestId('faucet-offchain').click(),
-  ]);
-  expect(response.ok(), `Faucet admission failed: ${response.status()} ${await response.text()}`).toBe(true);
-  await expect(page.getByTestId('faucet-status')).toContainText('Payment requested.');
-  await page.getByTestId('nav-home').locator('visible=true').first().click();
-  await expect(page.getByTestId('token-net-USDC')).toBeVisible({ timeout: 90_000 });
+  await fundFromHubUi(page, expect, amount);
 }

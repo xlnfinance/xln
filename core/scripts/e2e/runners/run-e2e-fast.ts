@@ -68,7 +68,7 @@ const FAST_E2E_TARGETS = [
   },
   {
     file: 'tests/e2e/product/e2e-lending.spec.ts',
-    title: 'funds hub pool, borrows from it, and repays from the Lending tab',
+    title: 'deferred lending disables new commands and leaves the wallet able to pay',
   },
   {
     file: 'tests/e2e-dispute.spec.ts',
