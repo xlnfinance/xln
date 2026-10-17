@@ -1,0 +1,155 @@
+[
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "swap-offer-reload-baseline",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap place WETH/USDC offer survives reload"
+    ],
+    "exitCode": 1,
+    "seconds": 57.097,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-offer-reload-baseline.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "swap-offer-reload-current",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap place WETH/USDC offer survives reload"
+    ],
+    "exitCode": 0,
+    "seconds": 48.951,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-offer-reload-current.log"
+  },
+  {
+    "command": [
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-offer-reload/type-compare.ts"
+    ],
+    "exitCode": 1,
+    "seconds": 9.358,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-offer-reload-types.log"
+  },
+  {
+    "command": [
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-offer-reload/type-compare.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 9.383,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-offer-reload-types-fixed.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "swap-offer-reload-manual-limit",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap manual price override after book click uses the edited limit price"
+    ],
+    "exitCode": 0,
+    "seconds": 49.631,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-offer-reload-manual-limit.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "swap-offer-reload-wide-limit",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap keeps a within-band wide limit as a resting order instead of filling immediately"
+    ],
+    "exitCode": 0,
+    "seconds": 34.617,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-offer-reload-wide-limit.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "swap-offer-reload-mobile-cancel",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap place and cancel from UI updates state machine"
+    ],
+    "exitCode": 0,
+    "seconds": 40.371,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-offer-reload-mobile-cancel.log"
+  }
+]

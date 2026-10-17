@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Page, expect as PlaywrightExpect } from '@playwright/test';
 import type { RuntimeAdapterViewFrame, XLNModule } from '../../core/api/public/runtime-module';
 import type { RuntimeAdapter, RuntimeAdapterSwapHistoryPage } from '../../core/api/runtime-adapter/types';
 
@@ -63,3 +63,31 @@ export const readOrders = (page: Page, hubId: string) =>
     if (!adapter || !entityId) throw new Error('Wallet history unavailable');
     return adapter.read<RuntimeAdapterSwapHistoryPage>(`entity/${entityId}/account/${hub}/swap-history`, { limit: 25 });
   }, hubId);
+
+export const expectDeliveryDrained = async (page: Page, expect: typeof PlaywrightExpect): Promise<void> => {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const debug = (
+            window as Window & {
+              __xln?: { env(): import('../../core/api/public/runtime-module').RuntimeReplica | null };
+            }
+          ).__xln;
+          const env = debug?.env();
+          if (!env) throw new Error('SWAP_RUNTIME_UNAVAILABLE');
+          const entities = [...env.state.eReplicas.values()];
+          const accounts = entities.flatMap(entity => [...entity.state.accounts.values()]);
+          return {
+            network: env.pendingNetworkOutputs?.length ?? 0,
+            outputs: env.pendingOutputs?.length ?? 0,
+            inbox: env.networkInbox?.length ?? 0,
+            entityInputs: env.runtimeMempool.entityInputs.length,
+            pendingAccounts: accounts.filter(account => account.pendingFrame || account.pendingAccountInput).length,
+            accountMempool: accounts.reduce((count, account) => count + account.mempool.length, 0),
+          };
+        }),
+      { timeout: 15_000 },
+    )
+    .toEqual({ network: 0, outputs: 0, inbox: 0, entityInputs: 0, pendingAccounts: 0, accountMempool: 0 });
+};

@@ -2,7 +2,8 @@ import { expect, type Page, type TestInfo } from '../../global-setup.mts';
 import { formatUnits, parseUnits } from 'ethers';
 import { quoteAmountAtPriceForDecimals } from '../../../core/swapbook/types';
 import { safeStringify } from '../../../core/protocol/serialization';
-import { readAccount, readOrders } from '../../../ui/tests/swap-evidence';
+import { readAccount, readOrders, expectDeliveryDrained, type DebugWindow } from '../../../ui/tests/swap-evidence';
+import { LOCAL_PASSWORD } from '../../../ui/tests/wallet-ui';
 import { capturePageScreenshot } from '../e2e-screenshots';
 
 /** Bind the edited limit to a real signed unfilled obligation, then release exactly that hold. */
@@ -46,6 +47,11 @@ export async function verifyRestingLimit(
   await expect.poll(readPreviewPrice).toBe(editedPrice);
   expect(parseUnits(await give.inputValue(), 6)).toBe(quoteAmount);
   expect(parseUnits(await want.inputValue(), 18)).toBe(baseAmount);
+  const runtimeId = await page.evaluate(() => {
+    const adapter = (window as DebugWindow).__xln?.adapter();
+    if (!adapter) throw new Error('RESTING_RUNTIME_MISSING');
+    return adapter.runtimeId;
+  });
   const before = await readAccount(page, hubId);
   expect(before.usdc).toBe('100000000');
   expect(before.weth).toBe('0');
@@ -97,6 +103,37 @@ export async function verifyRestingLimit(
   await expect(workingBid).toHaveCount(1);
   expect(parseUnits((await workingBid.locator('.bk-price').innerText()).replaceAll(',', ''), 4)).toBe(editedPrice);
   expect(parseUnits((await workingBid.locator('.bk-size').innerText()).replaceAll(',', ''), 18)).toBe(baseAmount);
+  // Recovery must preserve the exact signed obligation and its published limit.
+  // Drain accepted work before closing the browser; never recreate or resubmit it.
+  await page.getByTestId('back').click();
+  await expect(page.getByTestId('home-total')).toBeVisible();
+  await expectDeliveryDrained(page, expect);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
+  await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+  await page.getByTestId('nav-home').locator('visible=true').first().click();
+  await expect(page.getByTestId('home-entity-id')).toHaveText(entityId);
+  expect(
+    await page.evaluate(() => {
+      const adapter = (window as DebugWindow).__xln?.adapter();
+      if (!adapter) throw new Error('RESTORED_RESTING_RUNTIME_MISSING');
+      return adapter.runtimeId;
+    }),
+  ).toBe(runtimeId);
+  const recovered = await readAccount(page, hubId);
+  const recoveredHistory = await readOrders(page, hubId);
+  expect(recovered).toEqual(resting);
+  expect(recoveredHistory).toEqual(history);
+  await page.getByTestId('home-swap').click();
+  await expect(book).toHaveAttribute('data-status', 'live');
+  await expect(cancel).toHaveCount(1);
+  await expect(cancel.locator('xpath=ancestor::div[contains(@class,"row")][1]')).toContainText(
+    `${formatUnits(quoteAmount, 6)} USDC for ${formatUnits(baseAmount, 18)} WETH`,
+  );
+  await expect(workingBid).toHaveCount(1);
+  expect(parseUnits((await workingBid.locator('.bk-price').innerText()).replaceAll(',', ''), 4)).toBe(editedPrice);
+  expect(parseUnits((await workingBid.locator('.bk-size').innerText()).replaceAll(',', ''), 18)).toBe(baseAmount);
   await capturePageScreenshot(page, info, 'swap-resting-order-open-desktop.png', {
     fullPage: false,
     ux: {
@@ -141,6 +178,9 @@ export async function verifyRestingLimit(
       before,
       resting,
       history,
+      runtimeId,
+      recovered,
+      recoveredHistory,
       canceled,
       closed,
     }),

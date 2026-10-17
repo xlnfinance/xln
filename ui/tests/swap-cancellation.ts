@@ -2,35 +2,7 @@ import type { Page, TestInfo, expect as PlaywrightExpect } from '@playwright/tes
 type Expect = typeof PlaywrightExpect;
 import { formatUnits, parseUnits } from 'ethers';
 import { safeStringify } from '../../core/protocol/serialization';
-import { readAccount, readOrders, type DebugWindow } from './swap-evidence';
-
-const expectDeliveryDrained = async (page: Page, expect: Expect): Promise<void> => {
-  await expect
-    .poll(
-      () =>
-        page.evaluate(() => {
-          const debug = (
-            window as Window & {
-              __xln?: { env(): import('../../core/api/public/runtime-module').RuntimeReplica | null };
-            }
-          ).__xln;
-          const env = debug?.env();
-          if (!env) throw new Error('SWAP_RUNTIME_UNAVAILABLE');
-          const entities = [...env.state.eReplicas.values()];
-          const accounts = entities.flatMap(entity => [...entity.state.accounts.values()]);
-          return {
-            network: env.pendingNetworkOutputs?.length ?? 0,
-            outputs: env.pendingOutputs?.length ?? 0,
-            inbox: env.networkInbox?.length ?? 0,
-            entityInputs: env.runtimeMempool.entityInputs.length,
-            pendingAccounts: accounts.filter(account => account.pendingFrame || account.pendingAccountInput).length,
-            accountMempool: accounts.reduce((count, account) => count + account.mempool.length, 0),
-          };
-        }),
-      { timeout: 15_000 },
-    )
-    .toEqual({ network: 0, outputs: 0, inbox: 0, entityInputs: 0, pendingAccounts: 0, accountMempool: 0 });
-};
+import { readAccount, readOrders, expectDeliveryDrained, type DebugWindow } from './swap-evidence';
 
 // Recovery must preserve the live obligation, not merely the displayed balance.
 // Cancellation must then release that exact hold without executing a trade.

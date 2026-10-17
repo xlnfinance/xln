@@ -1,0 +1,140 @@
+{
+  "swap-offer-reload-current": {
+    "candidate": {
+      "candidateId": "0a330afeca90e9c3d527de897de6636a4644ed464923ddf4832d705869573216",
+      "gitHead": "4d78d9aeb836be6ef84c87d1efc3dd321df496f0",
+      "codeHash": "44a1765efcb014b7f5d7efe80b2283fb1142f5b532e374552ed9749fc0cfb91b",
+      "gateConfigHash": "9bde6cdcc41f67c1f8e0f68059c1069ef70297ffe6b618df81c6a3caab36a853"
+    },
+    "browserHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 0,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    },
+    "status": "passed",
+    "artifact": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-offer-reload-current-boundary",
+    "hashes": {
+      "build-runtime.log": "395a34d520661737f763472adafc8fed0dc1fd909e55ad11d203bdd065343315",
+      "playwright-report.json": "f31327a4da4ed9a34fd4ffb5682b51c6c231a5fe3d866c0645ec5f16766e16b0",
+      "targets.json": "fbe2dcabe185de6f55e611185c4ff126d84590630cea279cbbd7d35b3f4ca14c",
+      "build-manifest.json": "b0a7af211a364c48e8d395bd3374a354cc61573e408a76eba8869e8efa4a28e8",
+      "run-manifest.json": "58cda69302c418eccf7dad049a7c6e0f37298d405091cd245c2730a3c0af2d6a",
+      "e2e.log": "feeda04cf3c0df5963c69400c14934ea5061da8cc80862f5d159889dcb377b9b"
+    }
+  },
+  "swap-offer-reload-manual-limit": {
+    "candidate": {
+      "candidateId": "5a3baa388e3ed395d5368d2fb6e57a621b6f877392310551e14f353ed2361c21",
+      "gitHead": "4d78d9aeb836be6ef84c87d1efc3dd321df496f0",
+      "codeHash": "0cd3f860c5bd1d2f89a85fbc87ea86b16fca124a8d604cae6277433f49bb4d9c",
+      "gateConfigHash": "09898b7c2f7fc8e210694cb23a1d1826b2702ff75bebcf4d82b9f2551f817ae3"
+    },
+    "browserHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 0,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    },
+    "status": "passed",
+    "artifact": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-offer-reload-manual-limit-boundary",
+    "hashes": {
+      "build-runtime.log": "dd744857cfa39099a0c6b13689e4fd8449f163e5392c3b756a0fc892138ea395",
+      "playwright-report.json": "c1f7e4ba807321d32bb1ab50757994fde3da26cd52a4fdaab62e9a2bde18578d",
+      "targets.json": "b6bbb6580df901ceab961e4cc5cb279629b0d11302cc3ff03c67567fe3bd531c",
+      "build-manifest.json": "abd3ccfc651a00fd796a4df3745100cf180258b51656dbbff93a7b43b7727f2c",
+      "run-manifest.json": "c01de288091c68c0d152603fcce63123c012c7c98c747307677d60edbef1d5ca",
+      "e2e.log": "47db69a16a64bbffe1007e1105bffb2dbde024819258fad6597a636cfc7b0c9e"
+    }
+  },
+  "swap-offer-reload-wide-limit": {
+    "candidate": {
+      "candidateId": "e513acbe2e379020a0619f919259463446f1d994fb5dd14519f24a772b298725",
+      "gitHead": "4d78d9aeb836be6ef84c87d1efc3dd321df496f0",
+      "codeHash": "0cd3f860c5bd1d2f89a85fbc87ea86b16fca124a8d604cae6277433f49bb4d9c",
+      "gateConfigHash": "af1e3be56f71038d8b7533e56c18a2adb8e8235bf39d36b4a57ae9fc04f8b80e"
+    },
+    "browserHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 0,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    },
+    "status": "passed",
+    "artifact": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-offer-reload-wide-limit-boundary",
+    "hashes": {
+      "playwright-report.json": "87b3984add02aa4ac33d226d87148589a9517e5f1e4e6f998f13e7723c4ab85f",
+      "targets.json": "5af47871644e9328d64f270f247035fde776d6b0578dccc6f520465b368342ce",
+      "build-manifest.json": "abd3ccfc651a00fd796a4df3745100cf180258b51656dbbff93a7b43b7727f2c",
+      "run-manifest.json": "d594f904d8cf97fa89a963d0d99e500c868876d5a0ce0359ac1c3e9d382c5061",
+      "e2e.log": "a1f88657aaa724cac26f59dae49fce5d23f4f91bdca16f9ba23a7650a3ee7c5d"
+    }
+  },
+  "swap-offer-reload-mobile-cancel": {
+    "candidate": {
+      "candidateId": "2c6ab4267d5e984c29f3659f31a91db4389f7c88ef526595003adb769dfb9169",
+      "gitHead": "4d78d9aeb836be6ef84c87d1efc3dd321df496f0",
+      "codeHash": "0cd3f860c5bd1d2f89a85fbc87ea86b16fca124a8d604cae6277433f49bb4d9c",
+      "gateConfigHash": "6a9a54db54688157936f1640f2f9b15c28b81b6519b7cf9839b15c9d71c2de0d"
+    },
+    "browserHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 0,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    },
+    "status": "passed",
+    "artifact": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-offer-reload-mobile-cancel-boundary",
+    "hashes": {
+      "playwright-report.json": "022bf4fca4834c8b7cb510a5d888de070af7694503a19fa79d3b72ad9c79ddab",
+      "targets.json": "3865f9b5952a22e9c0a58cc6eb0261a746305d9c83c5036b29ccf33b3f1f102e",
+      "build-manifest.json": "abd3ccfc651a00fd796a4df3745100cf180258b51656dbbff93a7b43b7727f2c",
+      "run-manifest.json": "90796ec2e519c4f23ccbbe477021fe1a67b20b437318e28073a04421d99aa51e",
+      "e2e.log": "885a9ac5ba302de10fed1fa054cf71ffc42dc83124f336296c66f6fb6c479a79"
+    }
+  }
+}

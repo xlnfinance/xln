@@ -1,0 +1,6 @@
+{
+  "tests/e2e/swap/e2e-swap.spec.ts": "a23508d62fd697fe48e32477aa01f8211a1b1500b79652a7256af06b75566dc0",
+  "tests/utils/browser/swap-resting-limit.ts": "5f31b24132499bf65e700141c501363a7c4db303df74d8d5eef3189f26e7e741",
+  "ui/tests/swap-evidence.ts": "f8a1edd33a6687e92eb7216bfffc8d414162095d530f6da1698bbc45b666bafa",
+  "ui/tests/swap-cancellation.ts": "bc10c2467a638d09c8bfedc142c937b223b6e87939ce01d2d1b7d0cc32b764e6"
+}

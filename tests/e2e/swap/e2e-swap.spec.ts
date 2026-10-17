@@ -62,15 +62,6 @@ async function gotoApp(page: Page): Promise<void> {
   });
 }
 
-async function unlockSavedWalletAfterReload(page: Page): Promise<void> {
-  await page.locator('button.wallet').first().click();
-  await expect(page.getByRole('heading', { name: 'Set a local password', exact: true })).toBeVisible({ timeout: 20_000 });
-  await page.getByLabel('Password', { exact: true }).fill('swap-reload-password');
-  await page.getByLabel('Confirm password', { exact: true }).fill('swap-reload-password');
-  await page.getByRole('button', { name: 'Save and open', exact: true }).click();
-  await expect(page.getByTestId('tab-accounts').first()).toBeVisible({ timeout: 20_000 });
-}
-
 async function dismissOnboardingIfVisible(page: Page): Promise<void> {
   const checkbox = page.locator('text=I understand and accept the risks of using this software').first();
   if (await checkbox.isVisible({ timeout: 1000 }).catch(() => false)) {
@@ -1061,17 +1052,6 @@ async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string)
     .toBe(String(targetAccount.value).trim().toLowerCase());
 }
 
-function parseFirstNumber(text: string): number {
-  const match = String(text || '').match(/-?\d[\d,]*(?:\.\d+)?/);
-  if (!match) return Number.NaN;
-  return Number.parseFloat(match[0]!.replace(/,/g, ''));
-}
-
-function formatDecimalForInput(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '0';
-  return value.toFixed(6).replace(/\.?0+$/, '');
-}
-
 function normalizeDisplayedPriceText(value: string): string {
   return String(value || '').replace(/,/g, '').trim();
 }
@@ -1724,48 +1704,6 @@ async function expectAllCanonicalSwapPairsHaveLiquidity(page: Page): Promise<voi
   }
 }
 
-async function readAvailableFromSizing(page: Page): Promise<number> {
-  const stat = page.getByTestId('swap-ticket-available').first();
-  await expect(stat).toBeVisible({ timeout: 20_000 });
-  const text = String((await stat.textContent()) || '');
-  const available = parseFirstNumber(text);
-  if (!Number.isFinite(available)) throw new Error(`Cannot parse available amount: ${text}`);
-  return available;
-}
-
-function shiftDisplayedPrice(value: string, delta: number): string {
-  const parsed = Number.parseFloat(normalizeDisplayedPriceText(value));
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error(`Cannot shift displayed price: ${value}`);
-  }
-  return Math.max(0.0001, parsed + delta).toFixed(4);
-}
-
-async function configureRestingBuyFromBestAsk(
-  page: Page,
-  options?: { maxQuote?: number },
-): Promise<{ restingPrice: string }> {
-  const amountInput = page.getByTestId('swap-ticket-amount').first();
-  const priceInput = page.getByTestId('swap-ticket-rate').first();
-  const placeButton = page.getByTestId('swap-ticket-submit').first();
-  await selectSwapPairSide(page, 'WETH/USDC', 'buy');
-  await expect(amountInput).toBeVisible({ timeout: 20_000 });
-  await expect(priceInput).toBeVisible({ timeout: 20_000 });
-
-  const asks = page.getByTestId('orderbook-ask-row');
-  await expect(asks.last()).toBeVisible({ timeout: 20_000 });
-  const bestAskText = String(await asks.last().locator('.price').textContent() || '').trim();
-  const availableQuote = await readAvailableFromSizing(page);
-  expect(availableQuote, 'buy-side available quote must be positive').toBeGreaterThan(0);
-  await amountInput.fill(formatDecimalForInput(Math.min(availableQuote, options?.maxQuote ?? 25)));
-
-  const restingPrice = shiftDisplayedPrice(bestAskText, -0.01);
-  await priceInput.fill(restingPrice);
-  await expect(priceInput).toHaveValue(restingPrice);
-  await expect(placeButton).toBeEnabled({ timeout: 10_000 });
-  return { restingPrice };
-}
-
 async function expectOrderbookHasAnyVisibleLiquidity(
   page: Page,
   options?: { timeoutMs?: number; minSources?: number; maxSources?: number },
@@ -1991,71 +1929,11 @@ test.describe('E2E Swap Flow', () => {
     },
   );
 
-	  // Scenario: place a valid non-marketable WETH/USDC offer through the visible swap UI
-  // and verify the open order survives a reload.
-  test('swap place WETH/USDC offer survives reload', { tag: '@resilience' }, async ({ page }) => {
-    const accountRef = await timedStep('swap_auto.prepare_book', () => prepareOrderbookClickTest(page));
-
-    const placeButton = page.getByTestId('swap-ticket-submit').first();
-    const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
-    const scopeToggle = page.getByTestId('swap-scope-toggle').first();
-    await expect(accountSelect).toBeVisible({ timeout: 20_000 });
-    await expect(scopeToggle).toBeVisible({ timeout: 20_000 });
-    if (String(await scopeToggle.textContent() || '').trim() !== 'Selected') {
-      await scopeToggle.click();
-    }
-    await accountSelect.selectOption(accountRef.counterpartyId);
-    await page.waitForTimeout(200);
-    const { restingPrice } = await timedStep('swap_auto.configure_resting_buy', () =>
-      configureRestingBuyFromBestAsk(page, { maxQuote: 25 }),
-    );
-    await expect(placeButton).toBeEnabled({ timeout: 5_000 });
-
-    await timedStep('swap_auto.place_offer', async () => {
-      await placeButton.click();
-      await expect(page.getByTestId('swap-open-order-row').first()).toBeVisible({ timeout: 60_000 });
-      await page.waitForFunction(
-        ({ entityId, accountId }) => {
-          const env = (window as any).isolatedEnv;
-          if (!env?.state.eReplicas || !(env.state.eReplicas instanceof Map)) return false;
-          const targetEntityId = String(entityId || '').toLowerCase();
-          const targetAccountId = String(accountId || '').toLowerCase();
-          const replica = Array.from(env.state.eReplicas.values()).find((candidate: any) =>
-            String(candidate?.entityId || '').toLowerCase() === targetEntityId,
-          );
-          const account = replica?.state?.accounts?.get?.(targetAccountId);
-          if (!account) return false;
-          const offerCount = account.state.swapOffers instanceof Map ? account.state.swapOffers.size : 0;
-          const pendingCount = Array.isArray(account.mempool) ? account.mempool.length : 0;
-          return offerCount > 0 && !account.pendingFrame && pendingCount === 0;
-        },
-        { entityId: accountRef.entityId, accountId: accountRef.counterpartyId },
-        { timeout: 60_000 },
-      );
-      await page.waitForTimeout(1200);
-    });
-
-    await timedStep('swap_auto.reload_page', async () => {
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(() => {
-        const env = (window as any).isolatedEnv;
-        return !!env?.runtimeId && Number(env?.state.eReplicas?.size || 0) > 0;
-      }, { timeout: 60_000 });
-      await unlockSavedWalletAfterReload(page);
-      await openSwapWorkspace(page);
-      await selectCounterpartyInSwap(page, accountRef.counterpartyId);
-      const accountSelectAfterReload = page.getByTestId('swap-ticket-hub-select').first();
-      const scopeToggleAfterReload = page.getByTestId('swap-scope-toggle').first();
-      if (String(await scopeToggleAfterReload.textContent() || '').trim() !== 'Selected') {
-        await scopeToggleAfterReload.click();
-      }
-      await accountSelectAfterReload.selectOption(accountRef.counterpartyId);
-    });
-    await timedStep('swap_auto.reload_assert_offer_persisted', async () => {
-      const firstRow = page.getByTestId('swap-open-order-row').first();
-      await expect(firstRow).toBeVisible({ timeout: 60_000 });
-      await expect(firstRow.locator('td').nth(2)).toHaveText(restingPrice, { timeout: 10_000 });
-    });
+  test('swap place WETH/USDC offer survives reload', { tag: '@resilience' }, async ({ page }, info) => {
+    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+    const wallet = await createWalletIdentity(page, 'resting-reload', randomMnemonic());
+    // Preserve the original best-ask minus0.01 limit and maximum25USDC order value.
+    await verifyRestingLimit(page, info, wallet.entityId, 9_000_000_000_000_000n, price => price - 100n);
   });
 
   test('swap place and cancel from UI updates state machine', { tag: '@functional' }, async ({ page }, info) => {

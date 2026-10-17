@@ -1,0 +1,260 @@
+{
+  "name": "current-edited-limit",
+  "value": {
+    "baseAmount": {
+      "__xlnType": "BigInt",
+      "value": "5000000000000000"
+    },
+    "before": {
+      "height": 4,
+      "holds": [
+        {
+          "incoming": "0",
+          "outgoing": "0",
+          "tokenId": 1
+        },
+        {
+          "incoming": "0",
+          "outgoing": "0",
+          "tokenId": 2
+        },
+        {
+          "incoming": "0",
+          "outgoing": "0",
+          "tokenId": 3
+        }
+      ],
+      "mempool": 0,
+      "offers": 0,
+      "pending": false,
+      "root": "0xcb485a2a2985cbba5a6e1803fdec00a1c903307e145f3ea92a9c77b6fecad5c8",
+      "usdc": "100000000",
+      "usdcSpendable": "100000000",
+      "weth": "0",
+      "wethCapacity": "0",
+      "wethCredit": "0"
+    },
+    "canceled": {
+      "height": 7,
+      "holds": [
+        {
+          "incoming": "0",
+          "outgoing": "0",
+          "tokenId": 1
+        },
+        {
+          "incoming": "0",
+          "outgoing": "0",
+          "tokenId": 2
+        },
+        {
+          "incoming": "0",
+          "outgoing": "0",
+          "tokenId": 3
+        }
+      ],
+      "mempool": 0,
+      "offers": 0,
+      "pending": false,
+      "root": "0x51534ab7d281ee8017728446e16d6b9a20389270ca6cff0cc6b2bedc48caaf82",
+      "usdc": "100000000",
+      "usdcSpendable": "100000000",
+      "weth": "0",
+      "wethCapacity": "5000000000000000",
+      "wethCredit": "5000000000000000"
+    },
+    "clickedPrice": {
+      "__xlnType": "BigInt",
+      "value": "25005000"
+    },
+    "closed": {
+      "accountId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+      "entityId": "0xb39f4913ccaf30e9289f4a5438f6bfd021ff3c897e7331c1fe66dca484ebac12",
+      "items": [
+        {
+          "cancelRequested": true,
+          "closed": true,
+          "createdHeight": 5,
+          "giveTokenId": 1,
+          "lastUpdatedHeight": 7,
+          "liveGiveAmount": null,
+          "liveWantAmount": null,
+          "offerId": "swap-mvd23c72-9-1sa331fgicp69",
+          "originalGiveAmount": {
+            "__xlnType": "BigInt",
+            "value": "12502450"
+          },
+          "originalWantAmount": {
+            "__xlnType": "BigInt",
+            "value": "5000000000000000"
+          },
+          "priceTicks": {
+            "__xlnType": "BigInt",
+            "value": "25004900"
+          },
+          "resolves": [
+            {
+              "cancelRemainder": true,
+              "comment": "cancel_request",
+              "executionGiveAmount": null,
+              "executionWantAmount": null,
+              "feeAmount": null,
+              "feeTokenId": null,
+              "fillDenominator": null,
+              "fillNumerator": null,
+              "fillRatio": 0,
+              "height": 7
+            }
+          ],
+          "wantTokenId": 2
+        }
+      ],
+      "latestHeight": 7,
+      "nextCursor": null
+    },
+    "editedPrice": {
+      "__xlnType": "BigInt",
+      "value": "25004900"
+    },
+    "entityId": "0xb39f4913ccaf30e9289f4a5438f6bfd021ff3c897e7331c1fe66dca484ebac12",
+    "history": {
+      "accountId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+      "entityId": "0xb39f4913ccaf30e9289f4a5438f6bfd021ff3c897e7331c1fe66dca484ebac12",
+      "items": [
+        {
+          "cancelRequested": false,
+          "closed": false,
+          "createdHeight": 5,
+          "giveTokenId": 1,
+          "lastUpdatedHeight": 5,
+          "liveGiveAmount": {
+            "__xlnType": "BigInt",
+            "value": "12502450"
+          },
+          "liveWantAmount": {
+            "__xlnType": "BigInt",
+            "value": "5000000000000000"
+          },
+          "offerId": "swap-mvd23c72-9-1sa331fgicp69",
+          "originalGiveAmount": {
+            "__xlnType": "BigInt",
+            "value": "12502450"
+          },
+          "originalWantAmount": {
+            "__xlnType": "BigInt",
+            "value": "5000000000000000"
+          },
+          "priceTicks": {
+            "__xlnType": "BigInt",
+            "value": "25004900"
+          },
+          "resolves": [],
+          "wantTokenId": 2
+        }
+      ],
+      "latestHeight": 5,
+      "nextCursor": null
+    },
+    "quoteAmount": {
+      "__xlnType": "BigInt",
+      "value": "12502450"
+    },
+    "recovered": {
+      "height": 5,
+      "holds": [
+        {
+          "incoming": "0",
+          "outgoing": "12502450",
+          "tokenId": 1
+        },
+        {
+          "incoming": "0",
+          "outgoing": "0",
+          "tokenId": 2
+        },
+        {
+          "incoming": "0",
+          "outgoing": "0",
+          "tokenId": 3
+        }
+      ],
+      "mempool": 0,
+      "offers": 1,
+      "pending": false,
+      "root": "0x1e1690fccc7e25cb9001400b491e2476b3e453398d2e0b2596044d73222b6a89",
+      "usdc": "100000000",
+      "usdcSpendable": "87497550",
+      "weth": "0",
+      "wethCapacity": "5000000000000000",
+      "wethCredit": "5000000000000000"
+    },
+    "recoveredHistory": {
+      "accountId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+      "entityId": "0xb39f4913ccaf30e9289f4a5438f6bfd021ff3c897e7331c1fe66dca484ebac12",
+      "items": [
+        {
+          "cancelRequested": false,
+          "closed": false,
+          "createdHeight": 5,
+          "giveTokenId": 1,
+          "lastUpdatedHeight": 5,
+          "liveGiveAmount": {
+            "__xlnType": "BigInt",
+            "value": "12502450"
+          },
+          "liveWantAmount": {
+            "__xlnType": "BigInt",
+            "value": "5000000000000000"
+          },
+          "offerId": "swap-mvd23c72-9-1sa331fgicp69",
+          "originalGiveAmount": {
+            "__xlnType": "BigInt",
+            "value": "12502450"
+          },
+          "originalWantAmount": {
+            "__xlnType": "BigInt",
+            "value": "5000000000000000"
+          },
+          "priceTicks": {
+            "__xlnType": "BigInt",
+            "value": "25004900"
+          },
+          "resolves": [],
+          "wantTokenId": 2
+        }
+      ],
+      "latestHeight": 5,
+      "nextCursor": null
+    },
+    "resting": {
+      "height": 5,
+      "holds": [
+        {
+          "incoming": "0",
+          "outgoing": "12502450",
+          "tokenId": 1
+        },
+        {
+          "incoming": "0",
+          "outgoing": "0",
+          "tokenId": 2
+        },
+        {
+          "incoming": "0",
+          "outgoing": "0",
+          "tokenId": 3
+        }
+      ],
+      "mempool": 0,
+      "offers": 1,
+      "pending": false,
+      "root": "0x1e1690fccc7e25cb9001400b491e2476b3e453398d2e0b2596044d73222b6a89",
+      "usdc": "100000000",
+      "usdcSpendable": "87497550",
+      "weth": "0",
+      "wethCapacity": "5000000000000000",
+      "wethCredit": "5000000000000000"
+    },
+    "runtimeId": "0x31213ea2e0fa4db14c2cc21eb9464173e9b57e58"
+  }
+}
