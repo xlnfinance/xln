@@ -27,7 +27,12 @@ const createE2EBuildCacheFixture = (root: string, codeHash: string) => {
   mkdirSync(join(artifacts.publicDir), { recursive: true });
   mkdirSync(join(artifacts.svelteKitOutDir, 'output/server'), { recursive: true });
   mkdirSync(artifacts.frontendBuildDir, { recursive: true });
+  mkdirSync(artifacts.walletBuildDir, { recursive: true });
   writeFileSync(artifacts.runtimeBundlePath, 'runtime-v1', 'utf8');
+  writeFileSync(join(artifacts.publicDir, 'account-worker.js'), 'worker-v1');
+  writeFileSync(join(artifacts.walletBuildDir, 'index.html'), '<main>Wallet</main>');
+  writeFileSync(join(artifacts.walletBuildDir, 'runtime.js'), 'runtime-v1');
+  writeFileSync(join(artifacts.walletBuildDir, 'account-worker.js'), 'worker-v1');
   writeFileSync(join(artifacts.svelteKitOutDir, 'output/server/manifest.js'), 'manifest-v1', 'utf8');
   writeFileSync(join(artifacts.frontendBuildDir, 'index.html'), '<main>v1</main>', 'utf8');
   writeFileSync(join(root, 'manifest.json'), JSON.stringify({
@@ -317,6 +322,10 @@ describe('isolated E2E runner resources', () => {
         'E2E_BUILD_CACHE_CORRUPT:',
       );
 
+      const walletArtifacts = createE2EBuildCacheFixture(root, codeHash);
+      writeFileSync(join(walletArtifacts.walletBuildDir, 'runtime.js'), 'stale-wallet-runtime');
+      expect(() => decideE2EBuildCache(walletArtifacts, codeHash, true)).toThrow('E2E_BUILD_CACHE_CORRUPT:');
+
       const freshArtifacts = createE2EBuildCacheFixture(root, codeHash);
       expect(decideE2EBuildCache(freshArtifacts, 'b'.repeat(64), false)).toEqual({
         action: 'rebuild',
@@ -327,13 +336,14 @@ describe('isolated E2E runner resources', () => {
     }
   });
 
-  test('build cache ignores runner-only drift but invalidates runtime and frontend inputs', () => {
+  test('build cache ignores runner-only drift but invalidates runtime, observer and wallet inputs', () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-e2e-build-inputs-'));
     const files = [
       'core/scripts/e2e/runners/run-e2e-parallel-isolated.ts',
       'core/__tests__/runner.test.ts',
       'core/runtime.ts',
       'frontend/src/app.ts',
+      'ui/src/App.tsx',
     ];
     try {
       for (const file of files) {
@@ -353,7 +363,10 @@ describe('isolated E2E runner resources', () => {
       expect(runtimeChanged).not.toBe(original);
 
       writeFileSync(resolve(root, files[3]!), 'frontend:changed');
-      expect(computeE2EBuildInputHash(files, root)).not.toBe(runtimeChanged);
+      const observerChanged = computeE2EBuildInputHash(files, root);
+      expect(observerChanged).not.toBe(runtimeChanged);
+      writeFileSync(resolve(root, 'ui/src/App.tsx'), 'wallet:changed');
+      expect(computeE2EBuildInputHash(files, root)).not.toBe(observerChanged);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

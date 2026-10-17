@@ -1,0 +1,27 @@
+$ bun tools/stand-lock.ts run --reason mainnet-wallet-cache-regression --timeout-ms "60000" -- bun test "core/__tests__/testing/runner/e2e-runner-isolation.test.ts" -t "invalidates runtime"
+bun test v1.4.0 (34cbb9a40)
+
+core/__tests__/testing/runner/e2e-runner-isolation.test.ts:
+355 |
+356 |       writeFileSync(resolve(root, files[3]!), 'frontend:changed');
+357 |       const observerChanged = computeE2EBuildInputHash(files, root);
+358 |       expect(observerChanged).not.toBe(runtimeChanged);
+359 |       writeFileSync(resolve(root, 'ui/src/App.tsx'), 'wallet:changed');
+360 |       expect(computeE2EBuildInputHash(files, root)).not.toBe(observerChanged);
+                                                              ^
+error: expect(received).not.toBe(expected)
+
+Expected: not "e387c4e40ce7fb08054ad608b492ba3b2fdfba751b6e9d1a35e2daf90eed5dd8"
+
+      at <anonymous> (/Users/zigota/xln/core/__tests__/testing/runner/e2e-runner-isolation.test.ts:360:57)
+(fail) isolated E2E runner resources > build cache ignores runner-only drift but invalidates runtime, observer and wallet inputs [2.92ms]
+
+ 0 pass
+ 18 filtered out
+ 1 fail
+ 5 expect() calls
+Ran 1 test across 1 file. [248.00ms]
+error: script "stand:run" exited with code 1
+real 0.28
+user 0.14
+sys 0.61

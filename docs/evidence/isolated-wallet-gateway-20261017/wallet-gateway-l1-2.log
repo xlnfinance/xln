@@ -1,0 +1,35 @@
+bun test v1.4.0 (34cbb9a40)
+
+core/__tests__/testing/runner/e2e-runner-isolation.test.ts:
+(pass) isolated E2E runner resources > canonical package E2E commands never exceed the machine-wide lease pool [0.25ms]
+(pass) isolated E2E runner resources > --help prints usage without acquiring a lease or starting a stack [95.32ms]
+(pass) isolated E2E runner resources > keeps every shard port away from the canonical dev stack [0.47ms]
+(pass) isolated E2E runner resources > leases machine-wide stack lanes without colliding across worktrees [102.86ms]
+(pass) isolated E2E runner resources > reserves only available worker lanes and reuses them without lease starvation [95.61ms]
+(pass) isolated E2E runner resources > keeps sibling worker guards held until abort cleanup settles [1.11ms]
+(pass) isolated E2E runner resources > places runtime, jurisdiction, logs, and artifacts below one shard root [0.07ms]
+(pass) isolated E2E runner resources > runner never reaps processes by command-line substring [0.27ms]
+(pass) isolated E2E runner resources > runner build and browser helpers cannot substitute shared dev resources [0.30ms]
+(pass) isolated E2E runner resources > artifact retention preserves evidence without skipping the parent run lease [29.01ms]
+(pass) isolated E2E runner resources > resumed runs resolve manifest metadata by stable shard id [0.05ms]
+(pass) isolated E2E runner resources > passes the provisioned shard jurisdiction registry into Playwright-owned child runtimes [0.09ms]
+(pass) isolated E2E runner resources > payment smoke shortcut runs through one isolated shard [0.17ms]
+(pass) isolated E2E runner resources > preserves commas inside an exact Playwright title selector [0.04ms]
+(pass) isolated E2E runner resources > fails loud when source bytes drift during an E2E run [0.04ms]
+(pass) isolated E2E runner resources > reuses only an exact build cache and fails strict reuse on byte corruption [4.16ms]
+(pass) isolated E2E runner resources > build cache ignores runner-only drift but invalidates runtime, observer and wallet inputs [2.32ms]
+(pass) isolated E2E runner resources > source drift probe uses metadata and detects changed bytes without content hashing [3.11ms]
+(pass) isolated E2E runner resources > generated runtime bundles cannot invalidate an isolated source candidate [0.02ms]
+
+core/__tests__/orchestrator/http/orchestrator-static-serving.test.ts:
+(pass) mesh uses the canonical static handler before its 404 [0.06ms]
+(pass) React owns prefix and deep reload while observer keeps its own pages [1.22ms]
+(pass) current runtime and Account worker retain JavaScript MIME and exact bytes [0.95ms]
+(pass) missing current bundles fail without consulting another build or returning HTML [0.83ms]
+(pass) encoded traversal cannot escape either asset owner [0.86ms]
+(pass) configured current wallet build is authoritative and missing builds fail loudly [0.34ms]
+
+ 25 pass
+ 0 fail
+ 149 expect() calls
+Ran 25 tests across 2 files. [589.00ms]

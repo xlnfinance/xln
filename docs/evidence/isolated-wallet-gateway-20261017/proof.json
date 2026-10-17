@@ -1,0 +1,100 @@
+{
+  "baseSha": "f6bf5ffd9cda69cc07f3d38b609159acf480e5ee",
+  "problem": "Isolated frontend preview /ui proxy targeted an unstarted React server on5183; UI sources and artifacts were absent from shared cache identity.",
+  "repair": "Build current React once in isolated cache; proxy /ui to real orchestrator canonical static handler using explicit XLN_UI_BUILD_DIR; same current runtime/worker pair for both app owners. Missing configured build fails loudly.",
+  "l1": {
+    "passed": 25,
+    "assertions": 149,
+    "seconds": 0.589,
+    "exit": 0
+  },
+  "browser": {
+    "passed": 1,
+    "seconds": 24.61,
+    "exit": 0,
+    "strictHealth": true,
+    "stats": {
+      "startTime": "2026-10-17T06:15:10.203Z",
+      "duration": 9233.148000000001,
+      "expected": 1,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "evidence": [
+      {
+        "assets": [
+          {
+            "url": "/ui/runtime.js",
+            "sha256": "4d75b97fb45b063098396fbdf4b75040ff7107317f6a08f49834e87129507939"
+          },
+          {
+            "url": "/account-worker.js",
+            "sha256": "5eb1a38aa8d02a663289ba35ba286e2d8067d373bb7bc31e80a61887ad15a945"
+          }
+        ],
+        "workers": [
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js",
+          "/account-worker.js"
+        ],
+        "relayFrames": 6
+      }
+    ],
+    "steps": [
+      "/app redirects /ui/",
+      "current JS MIME and exact SHA256",
+      "fresh wallet through public UI",
+      "real Account workers and relay",
+      "/ui/manage reload and unlock"
+    ]
+  },
+  "sourceSha256": {
+    "core/api/server/static-assets.ts": "ffb0a450bc9bf48332beff7e2e7550351895b8207e93495687c892d77f92bfde",
+    "core/scripts/e2e/harness/e2e-isolated-runtime.ts": "8237c513dbf036a7a1a89749c84bbd5ac1f0ab9348b25f7d212492656a3c4c82",
+    "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts": "f2dcc0cdfd8fa1421bf1234f7a26bc11393700e7d050fefd687d25a274fcf2df",
+    "core/__tests__/orchestrator/http/orchestrator-static-serving.test.ts": "ddb92b1d2c03aa49440000d262b2871bd7b4e93639850f699b680abb9a0c9ff3",
+    "core/__tests__/testing/runner/e2e-runner-isolation.test.ts": "22247c24dac7c72fbc3ed6c1215f0e300ebb2951f43d3b82e58e5de1cce1b5a5",
+    "tests/e2e/runtime/gateway/e2e-canonical-wallet-gateway.spec.ts": "98bd25c22fd7ed9f0b1fd94c34a12d278582c3e12996da68d8439ae6eb010115"
+  },
+  "rawLogSha256": {
+    "wallet-cache-red.log": "0b1db5c43716f7a28e7d62f17c533a89a51b25285077e9c4357b3ae1b2d7c67a",
+    "wallet-gateway-l1-2.log": "27c49420b0d007a823585ce75784b73c641c059aebee3f2ad73762aaef014c8a",
+    "isolated-canonical-wallet-2.log": "0ce382373b42fa9466fabc15f07176b14c6c905689d8b9e740106a99c07dc99e"
+  },
+  "logPresentation": "Repository log copies trim trailing whitespace; raw stdout retained in external job evidence.",
+  "limitations": [
+    "Old MM test still depends on retired Svelte helpers and is not green.",
+    "Full release, public chain and uninterrupted soak remain incomplete.",
+    "No financial protocol, Solidity or frozen-core changes."
+  ]
+}

@@ -55,6 +55,7 @@ export type E2EBuildArtifacts = {
   runtimeBundlePath: string;
   svelteKitOutDir: string;
   frontendBuildDir: string;
+  walletBuildDir: string;
 };
 
 export const deriveE2EShardPorts = (basePort: number, shard: number): E2EShardPorts => {
@@ -128,6 +129,9 @@ export const isE2EBuildInputPath = (file: string): boolean => {
     return !['frontend/node_modules/', 'frontend/.svelte-kit/', 'frontend/build/', 'frontend/dist/'].some(prefix =>
       path.startsWith(prefix),
     );
+  }
+  if (path.startsWith('ui/')) {
+    return !['ui/node_modules/', 'ui/dist/'].some(prefix => path.startsWith(prefix));
   }
   if (path.startsWith('jurisdictions/artifacts/')) return true;
   if (path.startsWith('docs/') || path.startsWith('scenarios/')) return true;

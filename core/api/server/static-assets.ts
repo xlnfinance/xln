@@ -25,7 +25,7 @@ export const serveStaticApp = async (
   request: Request,
   pathname: string,
   staticDir: string,
-  walletDir = resolve(process.cwd(), 'ui/dist'),
+  walletDir = resolve(process.env['XLN_UI_BUILD_DIR'] || 'ui/dist'),
 ): Promise<Response | null> => {
   if (request.method !== 'GET' && request.method !== 'HEAD') return null;
   let decoded: string;

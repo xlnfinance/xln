@@ -1,0 +1,50 @@
+$ bun tools/stand-lock.ts run --reason mainnet-isolated-canonical-wallet --timeout-ms "60000" -- bun "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts" --all --strict-browser-health "--shards=1" "--workers-per-shard=1" "--max-mm-concurrency=1" "--video=retain-on-failure" "--trace=retain-on-failure" "--screenshot=only-on-failure" "--max-failures=1" "--pw-files=tests/e2e/runtime/e2e-canonical-wallet-gateway.spec.ts"
+test artifact cleanup (e2e): removing .logs/e2e-parallel
+test artifact cleanup (e2e): removed .logs/e2e-parallel
+test artifact budget (e2e): workspace=31.77GiB budgeted=6.67GiB / 50GiB
+
+========================================================================
+E2E Parallel Runner (isolated stack per shard)
+========================================================================
+Shards   : 1
+Port pool: local-test-stack-v1 (7 machine-wide stacks)
+Workers/shard: 1
+MM concurrency: 1
+Reset concurrency: 1
+Max failures : 1
+Phase warn ms: 30000
+Prewait health: reset
+Browser health: strict
+QA category  : all
+Start target : 0
+Keep prior logs: no
+Artifacts    : video=retain-on-failure, trace=retain-on-failure, screenshot=only-on-failure
+Git HEAD     : f6bf5ffd9cda dirty
+Code hash    : 54517ceaad06c67f
+Build inputs : 6acd6a03044653ac
+Logs     : /Users/zigota/xln/.logs/e2e-parallel/20261017-061500-458
+========================================================================
+
+⏩ isolated build cache hit: /Users/zigota/xln/.logs/e2e-build-cache
+Targets  : 1/1 isolated test stack (starting at 0)
+Active lanes: 1/1 requested
+Build    : /Users/zigota/xln/.logs/e2e-build-cache
+
+========================================================================
+E2E Summary
+========================================================================
+PASS  shard=0      18.2s  phases[pre=26 anvil=211 api=512 health=5217 vite=824 pw=9485]  log=/Users/zigota/xln/.logs/e2e-parallel/20261017-061500-458/shard-0/logs/e2e.log
+------------------------------------------------------------------------
+Total wall time: 19.5s (19488ms)
+Git HEAD: f6bf5ffd9cda69cc07f3d38b609159acf480e5ee
+Code hash: 54517ceaad06c67f9fac7972a7c9d8821624fc1d8d198537357101f18036f02b
+Build input hash: 6acd6a03044653acb1dc15548de313bebd7946f9a5172e659a7322f97928c72c
+Candidate ID: a28baba482f1fcb10c370c335322c20d736da26e12e8b2b8a15ca9ec944f247d
+Gate config hash: 0f97b58413299ddf8a18aaf4ec846de5142c70a349fb3c22a0bead8c68b1d603
+Logs: /Users/zigota/xln/.logs/e2e-parallel/20261017-061500-458
+------------------------------------------------------------------------
+Benchmark: INSUFFICIENT suite=functional · canonical-wallet-gateway.canonical-gateway-initializes-react-wallet
+Reason   : No previous comparable E2E run found.
+real 24.61
+user 36.21
+sys 40.50

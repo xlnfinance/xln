@@ -52,3 +52,21 @@ test('encoded traversal cannot escape either asset owner', async () => {
   expect((await serve('/ui/%zz'))?.status).toBe(400);
   expect(await serve('/ui/', 'POST')).toBeNull();
 });
+
+test('configured current wallet build is authoritative and missing builds fail loudly', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'xln-wallet-owner-')); roots.push(root);
+  writeFileSync(join(root, 'index.html'), '<h1>Current isolated React artifact</h1>');
+  const previous = process.env['XLN_UI_BUILD_DIR'];
+  try {
+    process.env['XLN_UI_BUILD_DIR'] = root;
+    const request = new Request('http://localhost:8080/ui/manage');
+    const current = await serveStaticApp(request, '/ui/manage', join(root, 'observer'));
+    expect(current?.status).toBe(200);
+    expect(await current?.text()).toContain('Current isolated React artifact');
+    process.env['XLN_UI_BUILD_DIR'] = join(root, 'missing');
+    expect((await serveStaticApp(request, '/ui/manage', root))?.status).toBe(503);
+  } finally {
+    if (previous === undefined) delete process.env['XLN_UI_BUILD_DIR'];
+    else process.env['XLN_UI_BUILD_DIR'] = previous;
+  }
+});

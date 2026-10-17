@@ -1429,6 +1429,7 @@ export const deriveE2EBuildArtifacts = (
   runtimeBundlePath: join(cacheRoot, 'public', 'runtime.js'),
   svelteKitOutDir: join(cacheRoot, 'svelte-kit'),
   frontendBuildDir: join(cacheRoot, 'frontend'),
+  walletBuildDir: join(cacheRoot, 'wallet'),
 });
 
 type E2EBuildCacheManifest = {
@@ -1442,6 +1443,8 @@ const requiredE2EBuildArtifactPaths = (artifacts: E2EBuildArtifacts): string[] =
   artifacts.runtimeBundlePath,
   join(artifacts.svelteKitOutDir, 'output', 'server', 'manifest.js'),
   join(artifacts.frontendBuildDir, 'index.html'),
+  join(artifacts.publicDir, 'account-worker.js'),
+  ...['index.html', 'runtime.js', 'account-worker.js'].map(file => join(artifacts.walletBuildDir, file)),
 ];
 
 const assertRequiredE2EBuildArtifacts = (artifacts: E2EBuildArtifacts): void => {
@@ -1473,6 +1476,7 @@ export const computeE2EBuildArtifactHash = (artifacts: E2EBuildArtifacts): strin
   hashDirectory('public', artifacts.publicDir);
   hashDirectory('svelte-kit', artifacts.svelteKitOutDir);
   hashDirectory('frontend', artifacts.frontendBuildDir);
+  hashDirectory('wallet', artifacts.walletBuildDir);
   return hash.digest('hex');
 };
 
@@ -1589,16 +1593,39 @@ const prepareIsolatedE2EBuild = async (
         timeoutMs: 300000,
       },
     );
+    const walletBuildResult = await runE2ECommand(
+      'node',
+      [resolve(process.cwd(), 'ui/node_modules/vite/bin/vite.js'), 'build'],
+      {
+        cwd: resolve(process.cwd(), 'ui'),
+        log: buildLog,
+        timeoutMs: 60_000,
+        env: sanitizeChildProcessEnv({
+          ...process.env,
+          NODE_ENV: 'production',
+          XLN_UI_BASE: '/ui/',
+          XLN_UI_STACK_ORIGIN: '',
+          XLN_UI_DIAGNOSTICS: '1',
+          XLN_UI_BUILD_DIR: artifacts.walletBuildDir,
+        }),
+      },
+    );
     if (
-      !e2eCommandSucceeded(staticResult)
-      || !e2eCommandSucceeded(buildResult)
-      || !e2eCommandSucceeded(frontendBuildResult)
+      !e2eCommandSucceeded(walletBuildResult) ||
+      !e2eCommandSucceeded(staticResult) ||
+      !e2eCommandSucceeded(buildResult) ||
+      !e2eCommandSucceeded(frontendBuildResult)
     ) {
       throw new Error(
         `E2E_ISOLATED_PREBUILD_FAILED:static=${formatE2ECommandResult(staticResult)}:` +
-        `runtime=${formatE2ECommandResult(buildResult)}:` +
-        `frontend=${formatE2ECommandResult(frontendBuildResult)}:log=${buildLogPath}`,
+          `runtime=${formatE2ECommandResult(buildResult)}:` +
+          `frontend=${formatE2ECommandResult(frontendBuildResult)}:` +
+          `wallet=${formatE2ECommandResult(walletBuildResult)}:log=${buildLogPath}`,
       );
+    }
+    // Both app owners receive the one current Runtime/Account-worker build.
+    for (const file of ['runtime.js', 'account-worker.js']) {
+      cpSync(join(artifacts.publicDir, file), join(artifacts.walletBuildDir, file));
     }
     rmSync(artifacts.svelteKitOutDir, { recursive: true, force: true });
     cpSync(canonicalSvelteKitOutDir, artifacts.svelteKitOutDir, { recursive: true });
@@ -2017,6 +2044,7 @@ const runShard = async (
           ANVIL_RPC: rpcUrl,
           ANVIL_RPC2: rpc2Url,
           XLN_RDB_ROOT: shardPaths.rdbRoot,
+          XLN_UI_BUILD_DIR: buildArtifacts.walletBuildDir,
           XLN_JDB_ROOT: shardPaths.jdbRoot,
           XLN_STORAGE_HISTORY_PATH: join(shardPaths.rdbRoot, 'storage-health-history.json'),
           XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
@@ -2135,6 +2163,7 @@ const runShard = async (
           RPC_TRON: rpc2Url,
           VITE_DEV_PORT: String(webPort),
           VITE_API_PROXY_TARGET: apiUrl,
+          VITE_UI_PROXY_TARGET: apiUrl,
           ...(REACT_UI ? { XLN_UI_STACK_ORIGIN: apiUrl, XLN_UI_RUNTIME_BUNDLE_DIR: dirname(buildArtifacts.runtimeBundlePath), XLN_UI_BUILD_DIR: reactBuildDir } : {}),
           XLN_VITE_FORCE_HTTP: '1',
           VITE_CACHE_DIR: shardViteCacheDir,
@@ -2201,6 +2230,7 @@ const runShard = async (
         PW_OUTPUT_DIR: shardPaths.resultsDir,
         E2E_BASE_URL: webUrl,
         E2E_API_BASE_URL: apiUrl,
+        E2E_RUNTIME_BUNDLE_PATH: buildArtifacts.runtimeBundlePath,
         E2E_ANVIL_RPC: rpcUrl,
         E2E_ANVIL_RPC2: rpc2Url,
         XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
