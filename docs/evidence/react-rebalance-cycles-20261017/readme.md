@@ -1,0 +1,11 @@
+# Automatic collateral cycles in the React wallet
+
+The existing `faucet -> request_collateral -> secured bar` browser gate failed at retired Svelte creation controls (36.462s). Current React creation and the shared connectivity helper reached the real Account; the next read failed because it still used removed `window.isolatedEnv` (23.986s). Current Runtime/Entity readers then proved the first collateral cycle in 730ms, but the test waited for a retired Svelte coverage indicator (58.304s).
+
+The current React Home breakdown now must show zero unsecured funds and the exact secured amount. Both original collateral cycles remain: inclusive threshold admission, authenticated empty-prefix liveness, committed request before bilateral finalization, new height and settlement on the second cycle, attribution to the same Account pair, and two bilateral claims per settlement. The original 8s/10s cycle ceilings are unchanged. No production financial, UI, storage, contract or policy source changed.
+
+The actual test passes 1/1 in 29.008s with zero browser/network issues. Five 100-USDC faucets result in 499.85 secured USDC after the committed fee; the second cycle reaches 999.70. First/second finalization observations took 715ms/867ms at J heights140/141, Account heights11/19. Exact phase logs are in phases.json. The committed-candidate rerun additionally attaches request/finalization heights and bilateral claim counts.
+
+Related admission/finality tests pass14/14 with64 assertions in0.290s, including committed opposite-side hub fee policy and hub-share-only finality credit. Strict types for the entire owned test file initially exposed28 diagnostics; missing hub validation, typed event narrowing, unused locals, and a closure observation container were corrected without casts or reduced assertions. Final diagnostic count is recorded in results.json. Current source/check/clean-browser/verifier evidence is linked from the external rebalance-bar publication record.
+
+Only the named two-cycle browser is claimed here. Other persistence, rapid-tail, cyclic and multi-hop cases in this file still need their own current browser evidence; shared setup improvements are not a pass for them. Historical diagnostics/readers in those unexecuted cases are not restored production paths. No public-chain, aggregate release, rollback, soak, mainnet or TPS claim.

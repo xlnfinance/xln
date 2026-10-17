@@ -1,0 +1,243 @@
+{
+  "sourceBaseSha": "ee865fc1cb30537ae1b65b92c6b632b5cddf985b",
+  "sourceSha256": {
+    "tests/e2e/payments/e2e-rebalance-bar.spec.ts": "fc075b9244e75468f2f10c957d3d8dcd752c328645d52c06a70667d2c598f535"
+  },
+  "checks": {
+    "rebalance-bar-baseline": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-bar-baseline",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--all",
+        "--strict-browser-health",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts::faucet -> request_collateral -> secured bar"
+      ],
+      "exitCode": 1,
+      "seconds": 36.462,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-bar-baseline.log"
+    },
+    "rebalance-bar-react-setup": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-bar-react-setup",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--all",
+        "--strict-browser-health",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts::faucet -> request_collateral -> secured bar"
+      ],
+      "exitCode": 1,
+      "seconds": 23.986,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-bar-react-setup.log"
+    },
+    "rebalance-bar-current-readers": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-bar-current-readers",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--all",
+        "--strict-browser-health",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts::faucet -> request_collateral -> secured bar"
+      ],
+      "exitCode": 1,
+      "seconds": 58.304,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-bar-current-readers.log"
+    },
+    "rebalance-bar-current-ui": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-bar-current-ui",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--all",
+        "--strict-browser-health",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts::faucet -> request_collateral -> secured bar"
+      ],
+      "exitCode": 0,
+      "seconds": 29.008,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-bar-current-ui.log"
+    },
+    "rebalance-bar-types": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-bar-types",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/rebalance-bar/typecheck.ts"
+      ],
+      "exitCode": 1,
+      "seconds": 4.848,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-bar-types.log"
+    },
+    "rebalance-bar-types-2": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-bar-types",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/rebalance-bar/typecheck.ts"
+      ],
+      "exitCode": 1,
+      "seconds": 4.747,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-bar-types-2.log"
+    },
+    "rebalance-bar-types-3": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-bar-types",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/rebalance-bar/typecheck.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 4.773,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-bar-types-3.log"
+    },
+    "rebalance-bar-types-final": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-bar-types-final",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/rebalance-bar/typecheck.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 4.749,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-bar-types-final.log"
+    },
+    "rebalance-bar-related": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-bar-related",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/payments/settlement/rebalance-auto-trigger.test.ts",
+        "core/__tests__/payments/settlement/financial/rebalance-hub-credit.test.ts",
+        "core/__tests__/payments/settlement/rebalance-financial.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 0.29,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-bar-related.log"
+    },
+    "rebalance-bar-final-check": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "rebalance-bar-final-check",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "run",
+        "check"
+      ],
+      "exitCode": 0,
+      "seconds": 26.729,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/rebalance-bar-final-check.log"
+    }
+  },
+  "browser": {
+    "passed": 1,
+    "failed": 0,
+    "strictBrowserHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 0,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    }
+  }
+}

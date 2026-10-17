@@ -12,6 +12,9 @@
  * These tests exist to prove that rebalance is deterministic, visually correct, and replay-safe.
  */
 import { allowBrowserIssue, allowDebugIncident, test, expect, type Browser, type BrowserContext, type Page } from '../../global-setup.mts';
+import { safeStringify } from '../../../core/protocol/serialization';
+import { createWalletIdentity } from '../../../ui/tests/wallet-ui';
+import type { RuntimeReplica, XLNModule } from '../../../core/api/public/runtime-module';
 import { deriveDelta, getTokenInfo } from '../../../core/account/utils';
 import { computeBatchHankoHash, decodeJBatch } from '../../../core/jurisdiction/machine/batch';
 import { computeAccountKey } from '../../../core/jurisdiction/adapter/events/contract-codec';
@@ -20,11 +23,11 @@ import { timedStep } from '../../utils/e2e-timing.mts';
 import { APP_BASE_URL, API_BASE_URL, getHealth, resetProdServer, waitForNamedHubs } from '../../utils/e2e-baseline';
 import {
   gotoApp as gotoSharedApp,
-  createRuntime as createSharedRuntime,
   selectDemoMnemonic,
 } from '../../utils/e2e-demo-users';
 import {
   connectRuntimeToHub as connectRuntimeToSharedHub,
+  ensureRuntimeOnline,
   connectRuntimeToHubWithCredit,
 } from '../../utils/e2e-connect';
 import {
@@ -49,6 +52,14 @@ import { enqueueEntityTxs } from '../../utils/runtime/e2e-runtime-input';
  * A committed pending request is immutable; later exposure waits for the next
  * threshold cycle after the corresponding finalized event.
  */
+type RebalanceWindow = Window & {
+  __xln?: {
+    env(): RuntimeReplica | null;
+    xln(): Promise<XLNModule>;
+    store: { getState(): { activeEntityId: string | null } };
+  };
+};
+
 const INIT_TIMEOUT = 30_000;
 const USDC_TOKEN_ID = 1;
 const USDC_DECIMALS = getTokenInfo(USDC_TOKEN_ID).decimals;
@@ -103,20 +114,20 @@ type RelayTimelineEvent = {
 type PhaseMarker = {
   ts: number;
   label: string;
-  phase?: string;
-  entityId?: string;
+  phase?: string | undefined;
+  entityId?: string | undefined;
   details?: unknown;
 };
 
 type DebugErrorSummary = {
   ts: number;
   event: string;
-  level?: string;
-  category?: string;
-  message?: string;
-  runtimeId?: string;
-  entityId?: string;
-  reason?: string;
+  level?: string | undefined;
+  category?: string | undefined;
+  message?: string | undefined;
+  runtimeId?: string | undefined;
+  entityId?: string | undefined;
+  reason?: string | undefined;
   data?: unknown;
 };
 
@@ -322,7 +333,7 @@ async function readRecentFrameEvents(page: Page, counterpartyId: string): Promis
       }))
       : [];
 
-    for (const [key, rep] of env?.state?.eReplicas?.entries?.() || []) {
+    for (const rep of env?.state?.eReplicas?.values?.() || []) {
       const acc = rep?.state?.accounts?.get?.(counterpartyId);
       const history = Array.isArray(acc?.frameHistory)
         ? acc.frameHistory.slice(-12).map((frame: any) => ({
@@ -369,6 +380,7 @@ let rebalanceDemoUserCursor = 0;
 
 function nextRebalanceMnemonic(): string {
   const label = REBALANCE_DEMO_USERS[rebalanceDemoUserCursor % REBALANCE_DEMO_USERS.length];
+  if (!label) throw new Error('REBALANCE_DEMO_USER_UNAVAILABLE');
   rebalanceDemoUserCursor += 1;
   return selectDemoMnemonic(label);
 }
@@ -379,10 +391,6 @@ async function gotoApp(page: Page) {
     initTimeoutMs: INIT_TIMEOUT,
     settleMs: 500,
   });
-}
-
-async function createRuntime(page: Page, label: string, mnemonic: string) {
-  await createSharedRuntime(page, label, mnemonic);
 }
 
 async function createLiveRuntimePage(
@@ -401,47 +409,15 @@ async function createLiveRuntimePage(
   });
   const runtimePage = await context.newPage();
   await gotoApp(runtimePage);
-  await createRuntime(runtimePage, label, mnemonic);
+  await createWalletIdentity(runtimePage, label, mnemonic);
   await ensureRuntimeOnline(runtimePage, `${label}-online`);
   const entity = await getLocalEntity(runtimePage);
   return { context, page: runtimePage, entity };
 }
 
-async function ensureRuntimeOnline(page: Page, tag: string) {
-  await expect
-    .poll(async () => {
-      if (page.isClosed()) return false;
-      return await page.evaluate(() => {
-        type RuntimeConnectivity = {
-          connected?: boolean;
-          connect?: () => void;
-          reconnect?: () => void;
-        };
-        const connectivity = (window as typeof window & {
-          __xln?: { runtimeConnectivity?: RuntimeConnectivity };
-        }).__xln?.runtimeConnectivity;
-        if (!connectivity) return false;
-        if (connectivity.connected === true) return true;
-        const start = typeof connectivity.connect === 'function'
-          ? connectivity.connect
-          : connectivity.reconnect;
-        if (typeof start === 'function') {
-          setTimeout(() => {
-            try { start(); } catch {}
-          }, 0);
-        }
-        return false;
-      }).catch(() => false);
-    }, {
-      timeout: 20_000,
-      intervals: [250, 500, 1000],
-      message: `[${tag}] runtime must be online`,
-    })
-    .toBe(true);
-}
-
 async function discoverHub(page: Page): Promise<string> {
   const hubs = await waitForNamedHubs(page, ['h3'], { apiBaseUrl: API_BASE_URL });
+  if (!hubs.h3) throw new Error('REBALANCE_H3_UNAVAILABLE');
   return hubs.h3;
 }
 
@@ -450,27 +426,24 @@ async function discoverPrimaryHub(page: Page): Promise<string> {
   // its Entity nonce is already non-zero when the first user rebalance starts.
   // This is the production-shaped lazy-jBatch nonce lifecycle.
   const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
+  if (!hubs.h1) throw new Error('REBALANCE_H1_UNAVAILABLE');
   return hubs.h1;
 }
 
 async function waitForHubProfile(page: Page, hubId: string) {
-  const ok = await page.evaluate(async ({ hubId }) => {
-    const env = (window as any).isolatedEnv;
-    const XLN = (window as any).XLN;
-    const target = String(hubId).toLowerCase();
-    const start = Date.now();
-    while (Date.now() - start < 60_000) {
-      XLN?.refreshGossip?.(env);
-      const profiles = env?.gossip?.getProfiles?.() || [];
-      const profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === target);
-      if (profile?.metadata?.isHub === true) {
-        return true;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 800));
-    }
-    return false;
-  }, { hubId });
-  expect(ok, `hub profile not visible in local gossip for ${hubId.slice(0, 12)}`).toBe(true);
+  await expect
+    .poll(
+      () =>
+        page.evaluate(target => {
+          const env = (window as RebalanceWindow).__xln?.env();
+          if (!env) throw new Error('REBALANCE_RUNTIME_UNAVAILABLE');
+          return env.gossip
+            .getProfiles()
+            .some(profile => profile.entityId.toLowerCase() === target && profile.metadata?.isHub === true);
+        }, hubId.toLowerCase()),
+      { timeout: 60_000 },
+    )
+    .toBe(true);
 }
 
 async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs = 60_000): Promise<void> {
@@ -514,18 +487,16 @@ async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs =
 }
 
 async function getLocalEntity(page: Page): Promise<{ entityId: string; signerId: string }> {
-  const entity = await page.evaluate(() => {
-    const env = (window as any).isolatedEnv;
-    if (!env?.state?.eReplicas) return null;
-    for (const [key] of env.state.eReplicas.entries()) {
-      const [entityId, signerId] = String(key).split(':');
-      if (!entityId || !signerId) continue;
-      return { entityId, signerId };
-    }
-    return null;
+  return page.evaluate(() => {
+    const debug = (window as RebalanceWindow).__xln;
+    const env = debug?.env();
+    const entityId = debug?.store.getState().activeEntityId;
+    if (!env || !entityId) throw new Error('REBALANCE_RUNTIME_OWNER_UNAVAILABLE');
+    const replicas = [...env.state.eReplicas.values()].filter(replica => replica.entityId === entityId);
+    const [replica] = replicas;
+    if (replicas.length !== 1 || !replica) throw new Error('REBALANCE_ENTITY_NOT_UNIQUE');
+    return { entityId, signerId: replica.signerId };
   });
-  if (!entity) throw new Error('No local entity in isolatedEnv');
-  return entity;
 }
 
 async function connectHub(page: Page, entityId: string, signerId: string, hubId: string) {
@@ -547,11 +518,13 @@ async function connectHubWithCredit(
 
 async function discoverNamedHubs(page: Page): Promise<{ h1: string; h3: string }> {
   const hubs = await waitForNamedHubs(page, ['h1', 'h3'], { apiBaseUrl: API_BASE_URL });
+  if (!hubs.h1 || !hubs.h3) throw new Error('REBALANCE_H1_H3_UNAVAILABLE');
   return { h1: hubs.h1, h3: hubs.h3 };
 }
 
 async function discoverH1H2(page: Page): Promise<{ h1: string; h2: string }> {
   const hubs = await waitForNamedHubs(page, ['h1', 'h2'], { apiBaseUrl: API_BASE_URL });
+  if (!hubs.h1 || !hubs.h2) throw new Error('REBALANCE_H1_H2_UNAVAILABLE');
   return { h1: hubs.h1, h2: hubs.h2 };
 }
 
@@ -585,7 +558,7 @@ type OffchainFaucetResponse = {
 
 
 async function faucet(page: Page, userEntityId: string, hubEntityId: string): Promise<OffchainFaucetResponse> {
-  const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
+  const runtimeId = await page.evaluate(() => (window as RebalanceWindow).__xln?.env()?.runtimeId || null);
   expect(runtimeId, 'runtimeId must exist before faucet').toBeTruthy();
   const deadline = Date.now() + 20_000;
   let lastBody: any = null;
@@ -615,7 +588,7 @@ async function faucet(page: Page, userEntityId: string, hubEntityId: string): Pr
     }
     await page.waitForTimeout(300);
   }
-  expect(false, `faucet failed: status=${lastStatus} body=${JSON.stringify(lastBody)}`).toBe(true);
+  throw new Error(`faucet failed: status=${lastStatus} body=${JSON.stringify(lastBody)}`);
 }
 
 async function injectEmptyTestnetLiveness(page: Page): Promise<number> {
@@ -827,8 +800,9 @@ async function readPairState(page: Page, counterpartyId: string, ownerEntityId?:
     const env = (window as any).isolatedEnv;
     if (!env?.state?.eReplicas) return null;
     const ownerTarget = String(ownerEntityId || '').toLowerCase();
-    for (const [key, rep] of env.state.eReplicas.entries()) {
-      const replicaEntityId = String(rep?.state?.entityId || String(key).split(':')[0] || '').toLowerCase();
+    for (const rep of env.state.eReplicas.values()) {
+      if (typeof rep.entityId !== 'string') throw new Error('REBALANCE_REPLICA_ENTITY_MISSING');
+      const replicaEntityId = rep.entityId.toLowerCase();
       if (ownerTarget && replicaEntityId !== ownerTarget) continue;
       const acc = rep.state?.accounts?.get(counterpartyId);
       if (!acc) continue;
@@ -1045,7 +1019,7 @@ async function readAccountFlowState(page: Page, hubId: string) {
   return page.evaluate(({ hubId }) => {
     const env = (window as any).isolatedEnv;
     if (!env?.state?.eReplicas) return null;
-    for (const [key, rep] of env.state.eReplicas.entries()) {
+    for (const rep of env.state.eReplicas.values()) {
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
       const history = Array.isArray(acc.frameHistory) ? acc.frameHistory : [];
@@ -1080,12 +1054,14 @@ async function readAccountFlowState(page: Page, hubId: string) {
 
 async function readAccountJEventClaims(page: Page, hubId: string) {
   return page.evaluate(async ({ hubId }) => {
-    const env = (window as any).isolatedEnv;
+    const env = (window as RebalanceWindow).__xln?.env();
     if (!env?.state?.eReplicas) return null;
-    const readHistory = (window as any).__xln?.instance?.readPersistedAccountFrameHistory;
+    const debug = (window as RebalanceWindow).__xln;
+    if (!debug) throw new Error('REBALANCE_RUNTIME_UNAVAILABLE');
+    const readHistory = (await debug.xln()).readPersistedAccountFrameHistory;
     if (typeof readHistory !== 'function') throw new Error('PERSISTED_ACCOUNT_HISTORY_API_UNAVAILABLE');
     const target = String(hubId || '').toLowerCase();
-    for (const [key, rep] of env.state.eReplicas.entries()) {
+    for (const rep of env.state.eReplicas.values()) {
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
       const accountEntityId = String(rep.state?.entityId || '').toLowerCase();
@@ -1108,7 +1084,7 @@ async function readAccountJEventClaims(page: Page, hubId: string) {
           const payload = tx?.data || {};
           const events = Array.isArray(payload?.events) ? payload.events : [];
           for (const event of events) {
-            if (String(event?.type || '') !== 'AccountSettled') continue;
+            if (event.type !== 'AccountSettled') continue;
             const data = event?.data || {};
             claims.push({
               frameHeight: Number(frame?.height || 0),
@@ -1136,9 +1112,9 @@ async function readAccountJEventClaims(page: Page, hubId: string) {
 
 async function readRebalanceState(page: Page, hubId: string) {
   const raw = await page.evaluate(({ hubId }) => {
-    const env = (window as any).isolatedEnv;
+    const env = (window as RebalanceWindow).__xln?.env();
     if (!env?.state?.eReplicas) return null;
-    for (const [key, rep] of env.state.eReplicas.entries()) {
+    for (const rep of env.state.eReplicas.values()) {
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
       const accountState = acc.state;
@@ -1354,7 +1330,7 @@ async function readRebalanceDiagnostics(page: Page, hubId: string) {
     const target = String(hubId || '').toLowerCase();
     const profiles = env?.gossip?.getProfiles?.() || [];
     profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === target) || null;
-    for (const [key, rep] of env.state.eReplicas.entries()) {
+    for (const rep of env.state.eReplicas.values()) {
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
       return {
@@ -1411,8 +1387,6 @@ function buildRebalanceFailureDump(input: {
       stateTimeline: input.stateTimeline.slice(-60),
       console: input.rebalanceConsole.slice(-120),
     },
-    null,
-    2,
   );
 }
 
@@ -1472,7 +1446,7 @@ test.describe('Rebalance E2E', () => {
     let scenarioStartedAt = 0;
     const rebalanceConsole: string[] = [];
     const criticalConsole: string[] = [];
-    page.on('console', (msg) => {
+    page.on('console', msg => {
       const text = msg.text();
       if (/AUTO-REBALANCE|Auto-rebalance|request_collateral|counterparty-not-hub|missing-hub-fee-policy/.test(text)) {
         rebalanceConsole.push(text);
@@ -1489,21 +1463,25 @@ test.describe('Rebalance E2E', () => {
         localStorage.setItem('xln-onboarding-complete', 'true');
         const rawSettings = localStorage.getItem('xln-settings');
         const parsedSettings = rawSettings ? JSON.parse(rawSettings) : {};
-        localStorage.setItem('xln-settings', JSON.stringify({
-          ...parsedSettings,
-          balanceRefreshMs: 1000,
-        }));
+        localStorage.setItem(
+          'xln-settings',
+          JSON.stringify({
+            ...parsedSettings,
+            balanceRefreshMs: 1000,
+          }),
+        );
       } catch {
         // no-op
       }
     });
     await timedStep('rebalance.goto_app', () => gotoApp(page));
-    await timedStep('rebalance.create_runtime', () => createRuntime(page, `rebalance-${Date.now()}`, nextRebalanceMnemonic()));
+    await timedStep('rebalance.create_runtime', () =>
+      createWalletIdentity(page, `rebalance-${Date.now()}`, nextRebalanceMnemonic()),
+    );
     await timedStep('rebalance.ensure_runtime_online', () => ensureRuntimeOnline(page, 'post-create'));
 
     const { entityId, signerId } = await timedStep('rebalance.get_local_entity', () => getLocalEntity(page));
     const hubId = await timedStep('rebalance.discover_hub', () => discoverPrimaryHub(page));
-    const hubIsLeft = hubId.toLowerCase() < entityId.toLowerCase();
     await timedStep('rebalance.wait_hub_profile', () => waitForHubProfile(page, hubId));
     await timedStep('rebalance.connect_hub', () => connectHub(page, entityId, signerId, hubId));
     // Start collection window after reset/bootstrap to avoid cross-test bleed.
@@ -1527,7 +1505,8 @@ test.describe('Rebalance E2E', () => {
         hubId,
         scenarioStartedAt,
         receiptCursor: firstCycleCursor,
-      }));
+      }),
+    );
     await markE2EPhase(page, 'rebalance.faucet_burst_6x_done', {
       phase: 'trigger',
       entityId,
@@ -1587,9 +1566,9 @@ test.describe('Rebalance E2E', () => {
     expect(
       firstSecuredCycleMs,
       `first secured rebalance cycle should complete promptly on anvil (got ${firstSecuredCycleMs}ms)`,
-    // Eight isolated E2E stacks intentionally contend for the same host CPU and
-    // disk. Keep a hard regression ceiling here, while the runner's isolated
-    // benchmark records the useful protocol latency (normally about 1.5s).
+      // Eight isolated E2E stacks intentionally contend for the same host CPU and
+      // disk. Keep a hard regression ceiling here, while the runner's isolated
+      // benchmark records the useful protocol latency (normally about 1.5s).
     ).toBeLessThanOrEqual(8_000);
 
     const diagnostics = await readRebalanceDiagnostics(page, hubId);
@@ -1597,11 +1576,15 @@ test.describe('Rebalance E2E', () => {
       cursor: firstCycleCursor,
       eventName: 'account_settled_finalized_bilateral',
       entityId,
-      predicate: (event) =>
-        String(event.data?.accountId || '').toLowerCase() === hubId.toLowerCase()
-        && event.frameHeight > firstTrigger.committed.frameHeight,
+      predicate: event =>
+        String(event.data?.accountId || '').toLowerCase() === hubId.toLowerCase() &&
+        event.frameHeight > firstTrigger.committed.frameHeight,
     });
-    const { phaseMarkers, debugErrors, frameEvents } = await collectRebalanceDebugArtifacts(page, scenarioStartedAt, hubId);
+    const { phaseMarkers, debugErrors, frameEvents } = await collectRebalanceDebugArtifacts(
+      page,
+      scenarioStartedAt,
+      hubId,
+    );
     const debugDump = buildRebalanceFailureDump({
       entityId,
       hubId,
@@ -1623,18 +1606,21 @@ test.describe('Rebalance E2E', () => {
     expect(BigInt(snapshot.requested), `request_collateral must be cleared\n${debugDump}`).toBe(0n);
     expect(BigInt(snapshot.uncollateralized), `uncollateralized debt must be zero\n${debugDump}`).toBe(0n);
     expect(BigInt(snapshot.collateral), `collateral must be positive\n${debugDump}`).toBeGreaterThan(0n);
-    expect(BigInt(snapshot.hubDebt) <= BigInt(snapshot.collateral), `hubDebt must be fully collateralized\n${debugDump}`).toBe(true);
+    expect(
+      BigInt(snapshot.hubDebt) <= BigInt(snapshot.collateral),
+      `hubDebt must be fully collateralized\n${debugDump}`,
+    ).toBe(true);
     expect(snapshot.lastFinalizedJHeight, `jHeight must finalize (>0)\n${debugDump}`).toBeGreaterThan(0);
 
-    // UI assertion + final screenshot artifact
-    const accountCard = page.getByTestId('account-preview').first();
-    const readyIndicator = accountCard.getByTestId('account-status-coverage').filter({ hasText: '100%' }).first();
+    // The React balance breakdown must show the same fully secured exposure.
+    await page.getByTestId('nav-home').locator('visible=true').first().click();
+    const accountCard = page.getByTestId('account-row');
+    await expect(accountCard).toHaveCount(1);
+    const securedUsd = Number(ethers.formatUnits(BigInt(snapshot.collateral), USDC_DECIMALS)).toFixed(2);
     await timedStep('rebalance.wait_ready_indicator', async () => {
-      await expect(readyIndicator).toBeVisible({ timeout: 30_000 });
-      await expect(readyIndicator).toHaveClass(/cov-good/);
+      await expect(page.getByTestId('home-risk').locator('strong')).toHaveText('$0.00');
+      await expect(page.getByTestId('home-secured').locator('strong')).toHaveText(`$${securedUsd}`);
     });
-
-    await expect(accountCard).toBeVisible();
     await accountCard.screenshot({ path: 'test-results/rebalance-green-final.png' });
     await page.screenshot({ path: 'test-results/rebalance-green-fullpage.png', fullPage: true });
 
@@ -1643,7 +1629,7 @@ test.describe('Rebalance E2E', () => {
     // be able to trigger a second independent collateralization cycle.
     const claimSnapshotBeforeSecondCycle = await readAccountJEventClaims(page, hubId);
     const uniqueSettleKeysBefore = new Set(
-      (claimSnapshotBeforeSecondCycle?.claims || []).map((c) => `${c.txHash}:${c.nonce}:${c.jHeight}`),
+      (claimSnapshotBeforeSecondCycle?.claims || []).map(c => `${c.txHash}:${c.nonce}:${c.jHeight}`),
     );
     const currentHeightBefore = Number(snapshot.currentHeight || 0);
     const lastFinalizedJHeightBefore = Number(snapshot.lastFinalizedJHeight || 0);
@@ -1656,7 +1642,8 @@ test.describe('Rebalance E2E', () => {
         hubId,
         scenarioStartedAt,
         receiptCursor: secondCycleCursor,
-      }));
+      }),
+    );
     await markE2EPhase(page, 'rebalance.second_burst_8x_done', {
       phase: 'second-cycle-trigger',
       entityId,
@@ -1675,7 +1662,7 @@ test.describe('Rebalance E2E', () => {
         postSnapshot = await readRebalanceState(page, hubId);
         const claimSnapshotNow = await readAccountJEventClaims(page, hubId);
         const uniqueSettleKeysNow = new Set(
-          (claimSnapshotNow?.claims || []).map((c) => `${c.txHash}:${c.nonce}:${c.jHeight}`),
+          (claimSnapshotNow?.claims || []).map(c => `${c.txHash}:${c.nonce}:${c.jHeight}`),
         );
         const hasSecondSettlement =
           uniqueSettleKeysNow.size >= uniqueSettleKeysBefore.size + 1 ||
@@ -1709,10 +1696,10 @@ test.describe('Rebalance E2E', () => {
       cursor: secondCycleCursor,
       eventName: 'account_settled_finalized_bilateral',
       entityId,
-      predicate: (event) =>
-        String(event.data?.accountId || '').toLowerCase() === hubId.toLowerCase()
-        && event.frameHeight > secondTrigger.committed.frameHeight
-        && event.frameHeight > firstSettlement.frameHeight,
+      predicate: event =>
+        String(event.data?.accountId || '').toLowerCase() === hubId.toLowerCase() &&
+        event.frameHeight > secondTrigger.committed.frameHeight &&
+        event.frameHeight > firstSettlement.frameHeight,
     });
     expect(
       secondSecuredCycleMs,
@@ -1752,7 +1739,7 @@ test.describe('Rebalance E2E', () => {
         claimCounts.set(key, (claimCounts.get(key) || 0) + 1);
       }
       const hasNewSettlement = claimCounts.size >= uniqueSettleKeysBefore.size + 1;
-      const allBilateral = [...claimCounts.values()].every((n) => n === 2);
+      const allBilateral = [...claimCounts.values()].every(n => n === 2);
       if (hasNewSettlement && allBilateral) break;
       await page.waitForTimeout(500);
     }
@@ -1785,7 +1772,10 @@ test.describe('Rebalance E2E', () => {
     for (const c of claimSnapshot?.claims || []) {
       const hasLocal = c.leftEntity === userIdLower || c.rightEntity === userIdLower;
       const hasHub = c.leftEntity === hubIdLower || c.rightEntity === hubIdLower;
-      expect(hasLocal && hasHub, `misattributed AccountSettled claim pair: ${JSON.stringify(c)}\n${claimDebugDump}`).toBe(true);
+      expect(
+        hasLocal && hasHub,
+        `misattributed AccountSettled claim pair: ${JSON.stringify(c)}\n${claimDebugDump}`,
+      ).toBe(true);
     }
     const finalizedJHeightAdvanced = Number(postSnapshot?.lastFinalizedJHeight || 0) > lastFinalizedJHeightBefore;
     expect(
@@ -1794,10 +1784,29 @@ test.describe('Rebalance E2E', () => {
     ).toBe(true);
     if (claimCounts.size >= uniqueSettleKeysBefore.size + 1) {
       expect(
-        [...claimCounts.values()].every((n) => n === 2),
+        [...claimCounts.values()].every(n => n === 2),
         `each AccountSettled must be claimed exactly twice (bilateral): ${JSON.stringify(Object.fromEntries(claimCounts), null, 2)}\n${claimDebugDump}`,
       ).toBe(true);
     }
+    await test.info().attach('rebalance-cycles', {
+      contentType: 'application/json',
+      body: safeStringify({
+        first: {
+          state: snapshot,
+          requestFrame: firstTrigger.committed.frameHeight,
+          settlementFrame: firstSettlement.frameHeight,
+          milliseconds: firstSecuredCycleMs,
+        },
+        second: {
+          state: postSnapshot,
+          requestFrame: secondTrigger.committed.frameHeight,
+          settlementFrame: secondSettlement.frameHeight,
+          milliseconds: secondSecuredCycleMs,
+        },
+        bilateralClaims: Object.fromEntries(claimCounts),
+        livenessBursts,
+      }),
+    });
   });
 
   // Crash H1 immediately after the exact R2C receipt is mined. Recovery must
@@ -1841,7 +1850,7 @@ test.describe('Rebalance E2E', () => {
       }
     });
     await timedStep('rebalance_persist.goto_app', () => gotoApp(page));
-    await timedStep('rebalance_persist.create_runtime', () => createRuntime(page, `rebalance-persist-${Date.now()}`, nextRebalanceMnemonic()));
+    await timedStep('rebalance_persist.create_runtime', () => createWalletIdentity(page, `rebalance-persist-${Date.now()}`, nextRebalanceMnemonic()));
     await timedStep('rebalance_persist.ensure_runtime_online', () => ensureRuntimeOnline(page, 'rebalance-persist-post-create'));
 
     const { entityId, signerId } = await timedStep('rebalance_persist.get_local_entity', () => getLocalEntity(page));
@@ -2036,7 +2045,7 @@ test.describe('Rebalance E2E', () => {
       }
     });
     await timedStep('rebalance_edge.goto_app', () => gotoApp(page));
-    await timedStep('rebalance_edge.create_runtime', () => createRuntime(page, `rebalance-edge-pending-${Date.now()}`, nextRebalanceMnemonic()));
+    await timedStep('rebalance_edge.create_runtime', () => createWalletIdentity(page, `rebalance-edge-pending-${Date.now()}`, nextRebalanceMnemonic()));
     await timedStep('rebalance_edge.ensure_runtime_online', () => ensureRuntimeOnline(page, 'edge-pending-post-create'));
 
     const { entityId, signerId } = await timedStep('rebalance_edge.get_local_entity', () => getLocalEntity(page));
@@ -2113,12 +2122,12 @@ test.describe('Rebalance E2E', () => {
       timeoutMs: 60_000,
       predicate: (event) => persistedEventHasAccount(event, hubId),
     });
-    let settledSnapshot: Awaited<ReturnType<typeof readRebalanceState>> = null;
+    const settled: { snapshot: Awaited<ReturnType<typeof readRebalanceState>> } = { snapshot: null };
     await expect.poll(async () => {
-      settledSnapshot = await readRebalanceState(page, hubId);
-      return !!settledSnapshot
-        && BigInt(settledSnapshot.requested || '0') === 0n
-        && Number(settledSnapshot.lastFinalizedJHeight || 0) > Number(edgeBaseline?.lastFinalizedJHeight || 0);
+      settled.snapshot = await readRebalanceState(page, hubId);
+      return !!settled.snapshot
+        && BigInt(settled.snapshot.requested || '0') === 0n
+        && Number(settled.snapshot.lastFinalizedJHeight || 0) > Number(edgeBaseline?.lastFinalizedJHeight || 0);
     }, { timeout: 30_000, intervals: [250, 500, 1000] }).toBe(true);
     const persisted = await readPersistedFrameEventsSinceCursor(page, {
       cursor: edgeCursor,
@@ -2131,12 +2140,12 @@ test.describe('Rebalance E2E', () => {
     const debugDump = buildRebalanceFailureDump({
       entityId,
       hubId,
-      snapshot: settledSnapshot,
+      snapshot: settled.snapshot,
       diagnostics,
       rebalanceSteps: [],
       stateTimeline: [
         { atMs: 'pending-request', ...pendingSnapshot },
-        { atMs: 'settled', ...settledSnapshot },
+        { atMs: 'settled', ...settled.snapshot },
       ],
       rebalanceConsole: [],
       phaseMarkers,
@@ -2154,7 +2163,7 @@ test.describe('Rebalance E2E', () => {
     const requestedAmount = BigInt(firstRequestCommit.data?.requestedAmount || '0');
     expect(requestedAmount, `durable request amount must be positive\n${debugDump}`).toBeGreaterThan(0n);
     expect(
-      BigInt(settledSnapshot?.collateral || '0') - BigInt(edgeBaseline?.collateral || '0'),
+      BigInt(settled.snapshot?.collateral || '0') - BigInt(edgeBaseline?.collateral || '0'),
       `one request must produce one exact collateral increase\n${debugDump}`,
     ).toBe(requestedAmount);
   });
@@ -2173,7 +2182,7 @@ test.describe('Rebalance E2E', () => {
       }
     });
     await timedStep('rebalance_cycle.goto_app', () => gotoApp(page));
-    await timedStep('rebalance_cycle.create_runtime', () => createRuntime(page, `rebalance-cycle-${Date.now()}`, nextRebalanceMnemonic()));
+    await timedStep('rebalance_cycle.create_runtime', () => createWalletIdentity(page, `rebalance-cycle-${Date.now()}`, nextRebalanceMnemonic()));
     await timedStep('rebalance_cycle.ensure_runtime_online', () => ensureRuntimeOnline(page, 'cycle-post-create'));
 
     const { entityId, signerId } = await timedStep('rebalance_cycle.get_local_entity', () => getLocalEntity(page));
@@ -2397,7 +2406,6 @@ test.describe('Rebalance E2E', () => {
       const baseline = await readPairState(recipientPage, h2, rt2.entityId);
       expect(baseline, 'rt2-h2 baseline must exist').toBeTruthy();
       const baselineDebt = BigInt(baseline?.hubExposure || baseline?.hubDebt || '0');
-      const scenarioStartedAt = Date.now();
 
       await waitForPairIdle(senderPage, h1, 60_000, rt1.entityId);
       const senderBeforeP1 = await readPairState(senderPage, h1, rt1.entityId);
@@ -2650,7 +2658,6 @@ test.describe('Rebalance E2E', () => {
       const baseline = await readPairState(recipientPage, h3, rt2.entityId);
       expect(baseline, 'runtime2-h3 baseline must exist').toBeTruthy();
       const baselineDebt = BigInt(baseline?.hubDebt || baseline?.hubExposure || '0');
-      const scenarioStartedAt = Date.now();
 
       await waitForPairIdle(senderPage, h3, 60_000, rt1.entityId);
       await sendRoutedHtlcPayment(

@@ -1,0 +1,106 @@
+[
+  {
+    "label": "rebalance.connected_hub",
+    "phase": "setup",
+    "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+    "details": {
+      "hubId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da"
+    }
+  },
+  {
+    "label": "rebalance.faucet_burst_6x_done",
+    "phase": "trigger",
+    "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+    "details": {
+      "hubId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+      "count": 5,
+      "requestedAt": 1792261983758,
+      "snapshot": {
+        "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+        "requested": "499850000",
+        "collateral": "0",
+        "ondelta": "0",
+        "offdelta": "499850000",
+        "hubExposure": "499850000",
+        "hubDebt": "499850000",
+        "totalDelta": "499850000",
+        "inCollateral": "0",
+        "outCollateral": "0",
+        "outTotalHold": "0",
+        "freeOutCollateral": "0",
+        "inCapacity": "9500150000",
+        "outCapacity": "499850000",
+        "uncollateralized": "499850000",
+        "hubOutCollateral": "0",
+        "hubOutTotalHold": "0",
+        "hubFreeOutCollateral": "0",
+        "leftPendingJClaims": "0",
+        "lastFinalizedJHeight": 0,
+        "rightPendingJClaims": "0",
+        "currentHeight": 9,
+        "hasPolicy": true
+      }
+    }
+  },
+  {
+    "label": "rebalance.first_secured_cycle_observed",
+    "phase": "assert-ready",
+    "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+    "details": {
+      "hubId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+      "requested": "0",
+      "uncollateralized": "0",
+      "collateral": "499850000",
+      "jHeight": 140,
+      "frame": 11
+    }
+  },
+  {
+    "label": "rebalance.second_burst_8x_done",
+    "phase": "second-cycle-trigger",
+    "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+    "details": {
+      "hubId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+      "count": 5,
+      "requestedAt": 1792261986141,
+      "snapshot": {
+        "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+        "requested": "499850000",
+        "collateral": "499850000",
+        "ondelta": "0",
+        "offdelta": "999700000",
+        "hubExposure": "999700000",
+        "hubDebt": "499850000",
+        "totalDelta": "999700000",
+        "inCollateral": "0",
+        "outCollateral": "499850000",
+        "outTotalHold": "0",
+        "freeOutCollateral": "499850000",
+        "inCapacity": "9500150000",
+        "outCapacity": "999700000",
+        "uncollateralized": "0",
+        "hubOutCollateral": "0",
+        "hubOutTotalHold": "0",
+        "hubFreeOutCollateral": "0",
+        "leftPendingJClaims": "0",
+        "lastFinalizedJHeight": 140,
+        "rightPendingJClaims": "0",
+        "currentHeight": 17,
+        "hasPolicy": true
+      }
+    }
+  },
+  {
+    "label": "rebalance.second_secured_cycle_observed",
+    "phase": "second-cycle-ready",
+    "entityId": "0x9d9b994688372719a33eac156e9c6d63e50611a5a13330081c983cde0e7950de",
+    "details": {
+      "hubId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+      "requested": "0",
+      "uncollateralized": "0",
+      "collateral": "999700000",
+      "frame": 19,
+      "jHeight": 141
+    }
+  }
+]
