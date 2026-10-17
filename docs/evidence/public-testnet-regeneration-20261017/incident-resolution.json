@@ -1,0 +1,117 @@
+{
+  "head": "f3a14e6528415c7c98da7865eb6492becb8c1c61",
+  "resolved": [
+    {
+      "fingerprint": "reset_initial_failed-8b8d8e97",
+      "lastSeen": 1792252759419,
+      "count": 80208,
+      "reason": "Fresh canonical reset completed; all eight bootstrap stages ready."
+    },
+    {
+      "fingerprint": "restore_jadapter_failed-0774f713",
+      "lastSeen": 1792252759214,
+      "count": 102309,
+      "reason": "Failed obsolete store restore against unavailable RPC; verified coordinated reset and current live hub J adapters ready."
+    },
+    {
+      "fingerprint": "child_unexpected_exit-c186eeb2",
+      "lastSeen": 1792252759213,
+      "count": 147862,
+      "reason": "Previous restart-loop deployment retired; current three hubs and MM alive without child error."
+    },
+    {
+      "fingerprint": "error-f4e02b7f",
+      "lastSeen": 1792252759183,
+      "count": 112622,
+      "reason": "Specific RESTORE_JADAPTER_FAILED ECONNREFUSED retired by verified reset and current live RPC/bootstrap."
+    },
+    {
+      "fingerprint": "econnrefused-4288275e",
+      "lastSeen": 1792252759182,
+      "count": 112642,
+      "reason": "Both canonical Anvil chains restarted with verified chain IDs; current J adapters/bootstrap ready."
+    },
+    {
+      "fingerprint": "custody_bootstrap_failed-1d370915",
+      "lastSeen": 1790575251062,
+      "count": 16632,
+      "reason": "September failed bootstrap superseded by current custody healthy bootstrap."
+    },
+    {
+      "fingerprint": "hub_recovery_spawn_failed-08d92f22",
+      "lastSeen": 1790575177492,
+      "count": 8505,
+      "reason": "September H2 early exit superseded by current three healthy live hubs."
+    },
+    {
+      "fingerprint": "entity_frame_head_wire_limit_exceeded-8e5d41c2",
+      "lastSeen": 1790575177472,
+      "count": 9845,
+      "reason": "September oversized obsolete Entity-frame state explicitly discarded in verified coordinated testnet reset; current canonical fresh mesh committed and healthy. Not a claim old oversized frames are supported."
+    },
+    {
+      "fingerprint": "runtime_entity_input_apply_failed-b9d200c8",
+      "lastSeen": 1790575176926,
+      "count": 11262,
+      "reason": "September oversized obsolete Entity-frame state explicitly discarded in verified coordinated testnet reset; current canonical fresh mesh committed and healthy. Not a claim old oversized frames are supported."
+    },
+    {
+      "fingerprint": "entity_frame_head_wire_limit_exceeded-cf35593d",
+      "lastSeen": 1790575174777,
+      "count": 10664,
+      "reason": "September oversized obsolete Entity-frame state explicitly discarded in verified coordinated testnet reset; current canonical fresh mesh committed and healthy. Not a claim old oversized frames are supported."
+    },
+    {
+      "fingerprint": "runtime_entity_input_apply_failed-a1017623",
+      "lastSeen": 1790575174432,
+      "count": 12171,
+      "reason": "September oversized obsolete Entity-frame state explicitly discarded in verified coordinated testnet reset; current canonical fresh mesh committed and healthy. Not a claim old oversized frames are supported."
+    },
+    {
+      "fingerprint": "entity_frame_head_wire_limit_exceeded-7ee9a4f5",
+      "lastSeen": 1790575172715,
+      "count": 16511,
+      "reason": "September oversized obsolete Entity-frame state explicitly discarded in verified coordinated testnet reset; current canonical fresh mesh committed and healthy. Not a claim old oversized frames are supported."
+    },
+    {
+      "fingerprint": "runtime_entity_input_apply_failed-a64e798b",
+      "lastSeen": 1790575171841,
+      "count": 16532,
+      "reason": "September oversized obsolete Entity-frame state explicitly discarded in verified coordinated testnet reset; current canonical fresh mesh committed and healthy. Not a claim old oversized frames are supported."
+    },
+    {
+      "fingerprint": "_mesh_hub_-0a8ab9fc",
+      "lastSeen": 1790507387942,
+      "count": 27,
+      "reason": "September H1 abort superseded by current live H1 and committed mesh."
+    },
+    {
+      "fingerprint": "mm_unexpected_exit-7bf0f27c",
+      "lastSeen": 1789348777144,
+      "count": 1,
+      "reason": "September SIGKILL superseded by current MM offers-ready, no current failure."
+    },
+    {
+      "fingerprint": "runtime_halted-5be44192",
+      "lastSeen": 1788939901375,
+      "count": 1,
+      "reason": "September oversized obsolete Entity-frame state explicitly discarded in verified coordinated testnet reset; current canonical fresh mesh committed and healthy. Not a claim old oversized frames are supported."
+    },
+    {
+      "fingerprint": "runtime_halted-d6dce216",
+      "lastSeen": 1788939901343,
+      "count": 1,
+      "reason": "September oversized obsolete Entity-frame state explicitly discarded in verified coordinated testnet reset; current canonical fresh mesh committed and healthy. Not a claim old oversized frames are supported."
+    }
+  ],
+  "journalBackup": "/root/xln-deployment-evidence/f3a14e652/incident-journal-before-resolution.jsonl",
+  "journalBackupSha256": "227477bc0e0e7944786a2d757c4b5bdf1709b3f458f4abaeab7689fa21a7bae5",
+  "journalBackupBytes": 16728524,
+  "resetStartedAt": 1792253156924,
+  "resetCompletedAt": 1792253271522,
+  "openAfter": 0,
+  "protectedFilesUnchanged": true,
+  "unrelatedPm2Unchanged": true,
+  "recurrencePolicy": "store.ts updateDebugIncident unconditionally sets unread on a new event",
+  "at": 1792253848401
+}

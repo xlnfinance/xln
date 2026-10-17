@@ -28,6 +28,34 @@ Only API incidents, health and metrics receive the capability. Authenticated req
 (or loopback HTTP) and reject redirects; separate tower URLs and the wallet request receive no token.
 A missing/wrong capability remains an authorization failure, not permission to skip incident checks.
 
+## Regenerating obsolete testnet stores
+
+The owner-authorized October17 recovery is recorded in
+[public testnet evidence](../evidence/public-testnet-regeneration-20261017/readme.md).
+Its archived commands identify the exact namespaces and preservation guards; do not
+reuse a reset list against a different host without resolving its current owners.
+
+1. Build and hash the current canonical web artifact before stopping services.
+2. Record exact PM2 owners, protected seed/key hashes and modes, unrelated process
+   identities, and current source. Stop only the owning XLN services; verify zero
+   open handles and reject symlinked/unknown reset roots.
+3. Use `scripts/deployment/prepare-remote-main.sh` for a guarded fast-forward.
+   Delete only confirmed obsolete testnet stores; preserve current credentials,
+   job evidence and the sibling debug-incident journal. Install through
+   `scripts/deployment/web-artifacts.sh` and verify every installed file hash.
+4. Start existing canonical chain/runtime owners. Observe their bootstrap through
+   bounded checks without restarting a still-progressing managed service. Preserve
+   timeout results separately from later readiness observations.
+5. Snapshot incidents and health before resolving any historical incident. Require
+   its last occurrence to predate the replacement deployment and concrete evidence
+   its condition is gone. Resolve individually through the authenticated operator
+   API; never clear the journal to satisfy release health. Recurrence reopens it.
+6. Run exact-source `prod:health` with three hubs/self-relay and one tower, then
+   actual public HTTPS wallet/runtime/worker verification. Preserve all failures.
+
+These steps regenerate obsolete testnet data. They are not the current-format
+checkpoint/WAL recovery drill or a rollback proof, and do not authorize a mainnet reset.
+
 ## Alert Rules
 
 - Page immediately when `xln_core_ok == 0` for 2 minutes.

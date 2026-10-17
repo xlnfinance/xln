@@ -1,0 +1,50 @@
+{
+  "head": "f3a14e6528415c7c98da7865eb6492becb8c1c61",
+  "reason": "Coordinated regeneration of authorized disposable public Anvil testnet after malformed primary chain checkpoint; no old state attached to fresh chain",
+  "deleted": [
+    {
+      "path": "/var/lib/xln/jdb/anvil-state.json",
+      "kib": 328760,
+      "bytes": 336644259,
+      "sha256": "e751646355c5fab79fe36a4e4b52597c028c2eb9b2e8deb13cad38471cbda438"
+    },
+    {
+      "path": "/var/lib/xln/jdb/anvil2-state.json",
+      "kib": 737248,
+      "bytes": 754930072,
+      "sha256": "046b05271a094da2381416f7b264a063ccd02619f52cf99f5631266e0a20b570"
+    },
+    {
+      "path": "/var/lib/xln/rdb/core/prod-main",
+      "kib": 12,
+      "files": 1
+    },
+    {
+      "path": "/var/lib/xln/rdb/core/prod-mesh",
+      "kib": 8058600,
+      "files": 257570
+    },
+    {
+      "path": "/var/lib/xln/rdb/custody/prod",
+      "absent": true
+    },
+    {
+      "path": "/var/lib/xln/rdb/custody-tmp",
+      "absent": true
+    },
+    {
+      "path": "/var/lib/xln/rdb/watchtower/prod-main",
+      "kib": 348,
+      "files": 7
+    },
+    {
+      "path": "/var/lib/xln/rdb/watchtower/push-main",
+      "absent": true
+    }
+  ],
+  "openHandlesBeforeDelete": 0,
+  "protectedFilesUnchanged": true,
+  "unrelatedPm2Unchanged": true,
+  "resetMarkerCreated": "/var/lib/xln/rdb/core/.mesh-reset-once",
+  "remainingDisk": "Filesystem     1024-blocks     Used Available Capacity Mounted on\n/dev/vda2         48564512 32330804  14085796      70% /\n"
+}
