@@ -1,4 +1,5 @@
-import { Wallet } from 'ethers';
+import { createWalletIdentity, LOCAL_PASSWORD } from '../../../ui/tests/wallet-ui';
+import { gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
 import { decodeBinaryPayload, encodeBinaryPayload } from '../../../core/protocol/serialization/binary-codec';
 import { STORAGE_SCHEMA_VERSION } from '../../../core/storage/keys';
 import { allowBrowserIssue, expect, test, type Page } from '../../global-setup.mts';
@@ -8,7 +9,7 @@ type BrowserIssue = {
   message: string;
 };
 
-const INCOMPATIBLE_STORAGE_SCHEMA_VERSION = STORAGE_SCHEMA_VERSION + 1;
+const INCOMPATIBLE_STORAGE_SCHEMA_VERSION = STORAGE_SCHEMA_VERSION - 1;
 
 const mutateAuthoritativeStorageHeadToIncompatibleSchema = async (
   page: Page,
@@ -51,26 +52,29 @@ const mutateAuthoritativeStorageHeadToIncompatibleSchema = async (
   const encoded = Array.from(
     encodeBinaryPayload({ ...head, schemaVersion: INCOMPATIBLE_STORAGE_SCHEMA_VERSION }, 'msgpack'),
   );
-  await page.evaluate(async ({ id, bytes }) => {
-    const location = `db-${id}-wal`;
-    const databaseName = `level-js-${location}`;
-    const open = indexedDB.open(databaseName, 1);
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      open.onsuccess = () => resolve(open.result);
-      open.onerror = () => reject(open.error ?? new Error(`STORAGE_SCHEMA_E2E_DB_OPEN_FAILED:${databaseName}`));
-    });
-    try {
-      const transaction = db.transaction(location, 'readwrite');
-      transaction.objectStore(location).put(Uint8Array.from(bytes), new Uint8Array([0x20]));
-      await new Promise<void>((resolve, reject) => {
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () => reject(transaction.error ?? new Error('STORAGE_SCHEMA_E2E_HEAD_WRITE_ABORTED'));
-        transaction.onerror = () => reject(transaction.error ?? new Error('STORAGE_SCHEMA_E2E_HEAD_WRITE_FAILED'));
+  await page.evaluate(
+    async ({ id, bytes }) => {
+      const location = `db-${id}-wal`;
+      const databaseName = `level-js-${location}`;
+      const open = indexedDB.open(databaseName, 1);
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        open.onsuccess = () => resolve(open.result);
+        open.onerror = () => reject(open.error ?? new Error(`STORAGE_SCHEMA_E2E_DB_OPEN_FAILED:${databaseName}`));
       });
-    } finally {
-      db.close();
-    }
-  }, { id: runtimeId, bytes: encoded });
+      try {
+        const transaction = db.transaction(location, 'readwrite');
+        transaction.objectStore(location).put(Uint8Array.from(bytes), new Uint8Array([0x20]));
+        await new Promise<void>((resolve, reject) => {
+          transaction.oncomplete = () => resolve();
+          transaction.onabort = () => reject(transaction.error ?? new Error('STORAGE_SCHEMA_E2E_HEAD_WRITE_ABORTED'));
+          transaction.onerror = () => reject(transaction.error ?? new Error('STORAGE_SCHEMA_E2E_HEAD_WRITE_FAILED'));
+        });
+      } finally {
+        db.close();
+      }
+    },
+    { id: runtimeId, bytes: encoded },
+  );
   return {
     databaseName: currentBytes.databaseName,
     before,
@@ -107,138 +111,158 @@ const readPersistedStorageSchema = async (page: Page, runtimeId: string): Promis
   return Number(decodeBinaryPayload<{ schemaVersion: unknown }>(Uint8Array.from(bytes)).schemaVersion);
 };
 
-test.describe('Storage schema recovery', () => {
-  test('incompatible wallet storage fails closed and offers authenticated recovery before reset', { tag: '@resilience' }, async ({
-    page,
-  }, testInfo) => {
-    test.setTimeout(5 * 60_000);
-    for (const message of [
-      /runtime_wal\.open_failed .*STORAGE_SCHEMA_MISMATCH/,
-      /load_env_from_db\.failed .*STORAGE_SCHEMA_MISMATCH/,
-    ]) {
-      allowBrowserIssue({ type: 'console', severity: 'error', message });
-    }
-    const issues: BrowserIssue[] = [];
-    const observeBrowserIssues = (target: Page): void => {
-      target.on('console', message => {
-        if (message.type() === 'error' || message.type() === 'warning') {
-          issues.push({ type: 'console', message: message.text() });
-        }
+test.describe('Canonical storage schema rejection', () => {
+  test(
+    'rejects obsolete storage and regenerates current data only after explicit testnet reset',
+    { tag: '@resilience' },
+    async ({ page }, testInfo) => {
+      test.setTimeout(55_000);
+      for (const message of [
+        new RegExp(
+          `runtime_wal\\.open_failed .*STORAGE_SCHEMA_MISMATCH:stored=${INCOMPATIBLE_STORAGE_SCHEMA_VERSION}:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
+        ),
+        new RegExp(
+          `load_env_from_db\\.failed .*STORAGE_SCHEMA_MISMATCH:stored=${INCOMPATIBLE_STORAGE_SCHEMA_VERSION}:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
+        ),
+      ]) {
+        allowBrowserIssue({ type: 'console', severity: 'error', message });
+      }
+      const issues: BrowserIssue[] = [];
+      const observeBrowserIssues = (target: Page): void => {
+        target.on('console', message => {
+          if (message.type() === 'error' || message.type() === 'warning') {
+            issues.push({ type: 'console', message: message.text() });
+          }
+        });
+        target.on('pageerror', error => issues.push({ type: 'pageerror', message: error.message }));
+        target.on('requestfailed', request => {
+          const message = request.failure()?.errorText ?? 'request failed';
+          if (message !== 'net::ERR_ABORTED') issues.push({ type: 'requestfailed', message });
+        });
+        target.on('response', response => {
+          if (response.status() >= 400)
+            issues.push({ type: 'http', message: `${response.status()} ${response.url()}` });
+        });
+      };
+      observeBrowserIssues(page);
+
+      await gotoApp(page);
+      const { runtimeId, entityId } = await createWalletIdentity(page, 'schema-rejection', selectDemoMnemonic('alice'));
+      await page.getByTestId('nav-settings').first().click();
+      await page.getByRole('button', { name: 'Lock', exact: true }).click();
+      await expect(page.getByRole('button', { name: /Continue/ })).toBeVisible();
+
+      expect(issues).toEqual([]);
+      // A separate page guarantees a new JS realm and no retained Runtime/Level
+      // handles. A content-type navigation is insufficient: browsers may keep the
+      // original document alive when they treat that response as a download.
+      const recoveryPage = await page.context().newPage();
+      observeBrowserIssues(recoveryPage);
+      await page
+        .context()
+        .route('**/storage-fault-injection', route =>
+          route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>storage fault injection</title>' }),
+        );
+      await page.close();
+      await recoveryPage.goto('/storage-fault-injection', { waitUntil: 'domcontentloaded' });
+      const mutation = await mutateAuthoritativeStorageHeadToIncompatibleSchema(recoveryPage, runtimeId);
+      expect(mutation).toEqual({
+        databaseName: `level-js-db-${runtimeId}-wal`,
+        before: STORAGE_SCHEMA_VERSION,
+        after: INCOMPATIBLE_STORAGE_SCHEMA_VERSION,
       });
-      target.on('pageerror', error => issues.push({ type: 'pageerror', message: error.message }));
-      target.on('requestfailed', request => {
-        const message = request.failure()?.errorText ?? 'request failed';
-        if (message !== 'net::ERR_ABORTED') issues.push({ type: 'requestfailed', message });
-      });
-      target.on('response', response => {
-        if (response.status() >= 400) issues.push({ type: 'http', message: `${response.status()} ${response.url()}` });
-      });
-    };
-    observeBrowserIssues(page);
+      expect(await readPersistedStorageSchema(recoveryPage, runtimeId)).toBe(INCOMPATIBLE_STORAGE_SCHEMA_VERSION);
 
-    await page.goto('/app');
-    await expect.poll(() => page.evaluate(() => typeof window.__xln?.vault?.createRuntime)).toBe('function');
-    const mnemonic = Wallet.createRandom().mnemonic?.phrase;
-    if (!mnemonic) throw new Error('STORAGE_SCHEMA_E2E_MNEMONIC_GENERATION_FAILED');
-    const runtimeId = await page.evaluate(
-      async ({ seed }) => {
-        const operations = window.__xln?.vault;
-        if (typeof operations?.createRuntime !== 'function') {
-          throw new Error('STORAGE_SCHEMA_E2E_CREATE_RUNTIME_MISSING');
+      issues.length = 0;
+      await gotoApp(recoveryPage);
+      await recoveryPage.getByRole('button', { name: /Continue/ }).click();
+      await recoveryPage.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
+      await recoveryPage.getByRole('button', { name: 'Unlock', exact: true }).click();
+      await expect
+        .poll(() => readPersistedStorageSchema(recoveryPage, runtimeId))
+        .toBe(INCOMPATIBLE_STORAGE_SCHEMA_VERSION);
+      const errorScreen = recoveryPage.getByRole('alert');
+      await expect(errorScreen).toHaveText(
+        `STORAGE_SCHEMA_MISMATCH:stored=${INCOMPATIBLE_STORAGE_SCHEMA_VERSION}:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
+      );
+      await expect(recoveryPage.getByTestId('nav-home')).toHaveCount(0);
+      await expect(recoveryPage.getByTestId('storage-schema-recover')).toHaveCount(0);
+      expect(await readPersistedStorageSchema(recoveryPage, runtimeId)).toBe(INCOMPATIBLE_STORAGE_SCHEMA_VERSION);
+
+      for (const [name, width, height] of [
+        ['wide', 1920, 1080],
+        ['laptop', 1440, 900],
+        ['mobile', 390, 844],
+      ] as const) {
+        await recoveryPage.setViewportSize({ width, height });
+        await recoveryPage.screenshot({
+          path: testInfo.outputPath(`storage-schema-recovery-${name}.png`),
+          fullPage: true,
+        });
+      }
+
+      // Disposable testnet policy: the operator deletes only this stopped Runtime's
+      // obsolete stores. This is an explicit browser database operation, not a
+      // wallet migration/rescue path. Closing the realm releases every Level handle.
+      const resetPage = await recoveryPage.context().newPage();
+      observeBrowserIssues(resetPage);
+      await recoveryPage.close();
+      await resetPage.goto('/storage-fault-injection', { waitUntil: 'domcontentloaded' });
+      const reset = await resetPage.evaluate(async id => {
+        const prefix = `level-js-db-${id}-`;
+        const allowed = new Set(
+          ['wal', 'storage-current', 'storage-previous', 'infra', 'history-views'].map(suffix => prefix + suffix),
+        );
+        const before = (await indexedDB.databases())
+          .map(db => db.name)
+          .filter((name): name is string => typeof name === 'string')
+          .sort();
+        const owned = before.filter(name => name.startsWith(prefix));
+        if (!owned.includes(prefix + 'wal') || owned.some(name => !allowed.has(name))) {
+          throw new Error(`STORAGE_SCHEMA_RESET_UNEXPECTED_STORES:${JSON.stringify(owned)}`);
         }
-        const runtime = (await operations.createRuntime('schema-recovery-e2e', seed, {
-          loginType: 'manual',
-          requiresOnboarding: false,
-          skipRecoveryRestore: true,
-          recovery: { useDefaultTowers: false, towers: [] },
-        })) as { id?: unknown };
-        const id = String(runtime.id ?? '').toLowerCase();
-        if (!/^0x[0-9a-f]{40}$/.test(id)) throw new Error(`STORAGE_SCHEMA_E2E_RUNTIME_ID_INVALID:${id}`);
-        if (typeof operations.suspendAllRuntimeActivity !== 'function') {
-          throw new Error('STORAGE_SCHEMA_E2E_SUSPEND_MISSING');
+        const credentials = Object.entries(localStorage).sort(([a], [b]) => a.localeCompare(b));
+        if (!localStorage.getItem(`xln-password-vault:${id}`))
+          throw new Error('STORAGE_SCHEMA_RESET_PASSWORD_VAULT_MISSING');
+        for (const name of owned)
+          await new Promise<void>((resolve, reject) => {
+            const request = indexedDB.deleteDatabase(name);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error ?? new Error(`STORAGE_SCHEMA_RESET_FAILED:${name}`));
+            request.onblocked = () => reject(new Error(`STORAGE_SCHEMA_RESET_ACTIVE_HANDLE:${name}`));
+          });
+        const after = (await indexedDB.databases())
+          .map(db => db.name)
+          .filter((name): name is string => typeof name === 'string')
+          .sort();
+        const expected = before.filter(name => !owned.includes(name));
+        if (JSON.stringify(after) !== JSON.stringify(expected))
+          throw new Error('STORAGE_SCHEMA_RESET_UNRELATED_STORE_CHANGED');
+        if (
+          JSON.stringify(credentials) !==
+          JSON.stringify(Object.entries(localStorage).sort(([a], [b]) => a.localeCompare(b)))
+        ) {
+          throw new Error('STORAGE_SCHEMA_RESET_CREDENTIALS_CHANGED');
         }
-        await operations.suspendAllRuntimeActivity();
-        return id;
-      },
-      { seed: mnemonic },
-    );
-    await expect
-      .poll(() =>
-        page.evaluate(() => {
-          const snapshot = window.__xln?.liveRuntimeSnapshot as
-            | { runtimeId?: unknown; dbNamespace?: unknown }
-            | undefined;
-          return {
-            runtimeId: String(snapshot?.runtimeId ?? '').toLowerCase(),
-            dbNamespace: String(snapshot?.dbNamespace ?? '').toLowerCase(),
-          };
-        }),
-      )
-      .toEqual({ runtimeId, dbNamespace: runtimeId });
+        return { deleted: owned, preserved: after, credentialsPreserved: true };
+      }, runtimeId);
+      await testInfo.attach('explicit-testnet-reset', { body: JSON.stringify(reset), contentType: 'application/json' });
+      await gotoApp(resetPage);
+      await resetPage.getByRole('button', { name: /Continue/ }).click();
+      await resetPage.getByLabel('Password', { exact: true }).fill('wrong-password');
+      await resetPage.getByRole('button', { name: 'Unlock', exact: true }).click();
+      await expect(resetPage.getByRole('alert')).toContainText('Incorrect password');
+      await expect(resetPage.getByTestId('nav-home')).toHaveCount(0);
+      await resetPage.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
+      await resetPage.getByRole('button', { name: 'Unlock', exact: true }).click();
+      await expect(resetPage.getByTestId('home-entity-id')).toHaveText(entityId);
+      await expect.poll(() => readPersistedStorageSchema(resetPage, runtimeId)).toBe(STORAGE_SCHEMA_VERSION);
 
-    expect(issues).toEqual([]);
-    // A separate page guarantees a new JS realm and no retained Runtime/Level
-    // handles. A content-type navigation is insufficient: browsers may keep the
-    // original document alive when they treat that response as a download.
-    const recoveryPage = await page.context().newPage();
-    observeBrowserIssues(recoveryPage);
-    await recoveryPage.route('**/storage-fault-injection', route =>
-      route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>storage fault injection</title>' }),
-    );
-    await page.close();
-    await recoveryPage.goto('/storage-fault-injection', { waitUntil: 'domcontentloaded' });
-    const mutation = await mutateAuthoritativeStorageHeadToIncompatibleSchema(recoveryPage, runtimeId);
-    expect(mutation).toEqual({
-      databaseName: `level-js-db-${runtimeId}-wal`,
-      before: STORAGE_SCHEMA_VERSION,
-      after: INCOMPATIBLE_STORAGE_SCHEMA_VERSION,
-    });
-    expect(await readPersistedStorageSchema(recoveryPage, runtimeId)).toBe(INCOMPATIBLE_STORAGE_SCHEMA_VERSION);
-
-    issues.length = 0;
-    await recoveryPage.goto('/app', { waitUntil: 'domcontentloaded' });
-    await expect
-      .poll(() => readPersistedStorageSchema(recoveryPage, runtimeId))
-      .toBe(INCOMPATIBLE_STORAGE_SCHEMA_VERSION);
-    const errorScreen = recoveryPage.getByTestId('app-initialization-error');
-    await expect(errorScreen).toBeVisible({ timeout: 30_000 });
-    await expect(errorScreen.getByRole('heading', { name: 'Local runtime needs recovery' })).toBeVisible();
-    await expect(errorScreen).toContainText(`storage schema ${INCOMPATIBLE_STORAGE_SCHEMA_VERSION}`);
-    await expect(errorScreen).toContainText(`requires schema ${STORAGE_SCHEMA_VERSION}`);
-    await expect(errorScreen).toContainText('No incompatible data was applied or deleted');
-    await expect(recoveryPage.getByTestId('storage-schema-recover')).toBeVisible();
-    await expect(recoveryPage.getByTestId('storage-schema-reset')).toBeVisible();
-
-    for (const [name, width, height] of [
-      ['wide', 1920, 1080],
-      ['laptop', 1440, 900],
-      ['mobile', 390, 844],
-    ] as const) {
-      await recoveryPage.setViewportSize({ width, height });
-      await recoveryPage.screenshot({ path: testInfo.outputPath(`storage-schema-recovery-${name}.png`), fullPage: true });
-    }
-
-    await recoveryPage.getByTestId('storage-schema-recover').click();
-    const recoveryError = recoveryPage.getByTestId('storage-schema-recovery-error');
-    await expect(recoveryError).toContainText(`STORAGE_SCHEMA_RECOVERY_BACKUP_NOT_FOUND:${runtimeId}`, {
-      timeout: 30_000,
-    });
-    expect(await readPersistedStorageSchema(recoveryPage, runtimeId)).toBe(INCOMPATIBLE_STORAGE_SCHEMA_VERSION);
-
-    recoveryPage.once('dialog', async dialog => dialog.dismiss());
-    await recoveryPage.getByTestId('storage-schema-reset').click();
-    await expect(errorScreen).toBeVisible();
-    expect(await readPersistedStorageSchema(recoveryPage, runtimeId)).toBe(INCOMPATIBLE_STORAGE_SCHEMA_VERSION);
-
-    const resetComplete = recoveryPage.waitForEvent('load').catch(() => undefined);
-    recoveryPage.once('dialog', async dialog => dialog.accept());
-    await recoveryPage.getByTestId('storage-schema-reset').click();
-    await resetComplete;
-    await expect(recoveryPage.getByRole('heading', { name: 'Create xln wallet' })).toBeVisible({ timeout: 30_000 });
-
-    expect(issues.filter(issue => issue.type !== 'console')).toEqual([]);
-    expect(
-      issues.filter(issue => issue.type === 'console' && !issue.message.includes('STORAGE_SCHEMA_MISMATCH')),
-    ).toEqual([]);
-  });
+      expect(issues.filter(issue => issue.message.includes('STORAGE_SCHEMA_MISMATCH'))).toHaveLength(2);
+      expect(issues.filter(issue => issue.type !== 'console')).toEqual([]);
+      expect(
+        issues.filter(issue => issue.type === 'console' && !issue.message.includes('STORAGE_SCHEMA_MISMATCH')),
+      ).toEqual([]);
+    },
+  );
 });
