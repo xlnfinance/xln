@@ -1,0 +1,17 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "swap-resting-spread-book-types",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-resting-spread/type-compare.ts"
+  ],
+  "exitCode": 0,
+  "seconds": 9.305,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-resting-spread-book-types.log"
+}

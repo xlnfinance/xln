@@ -1,0 +1,27 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "swap-resting-spread-manual-regression",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+    "--all",
+    "--strict-browser-health",
+    "--shards=1",
+    "--workers-per-shard=1",
+    "--max-mm-concurrency=1",
+    "--video=retain-on-failure",
+    "--trace=retain-on-failure",
+    "--screenshot=only-on-failure",
+    "--max-failures=1",
+    "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap manual price override after book click uses the edited limit price"
+  ],
+  "exitCode": 0,
+  "seconds": 31.73,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-resting-spread-manual-regression.log"
+}

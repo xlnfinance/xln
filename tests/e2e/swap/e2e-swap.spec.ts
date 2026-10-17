@@ -1,3 +1,4 @@
+import { verifyRestingLimit } from '../../utils/browser/swap-resting-limit';
 import { verifyPriceBandRejection } from '../../utils/browser/swap-price-band';
 import { safeStringify } from '../../../core/protocol/serialization';
 import { verifySwapFlip } from '../../utils/browser/swap-flip';
@@ -11,8 +12,7 @@ import { verifyRestingSwapCancellation } from '../../../ui/tests/swap-cancellati
  * cleanly through the UI, and that the scenario runners still produce partial fills after reload-safe setup.
  */
 import { test, expect, type Locator, type Page } from '../../global-setup.mts';
-import { Wallet, formatUnits, parseUnits } from 'ethers';
-import { readAccount, readOrders } from '../../../ui/tests/swap-evidence';
+import { Wallet } from 'ethers';
 import { timedStep } from '../../utils/e2e-timing.mts';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, getHealth } from '../../utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit as connectRuntimeToSharedHubWithCredit } from '../../utils/e2e-connect';
@@ -1030,53 +1030,6 @@ async function waitForSwapBilateralSettlementIdle(
     });
 }
 
-async function readPositiveSwapResolveCount(
-  page: Page,
-  entityId: string,
-  signerId: string,
-  counterpartyId: string,
-): Promise<number> {
-  return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
-    const findAccount = (accounts: any, ownerId: string, cpId: string) => {
-      if (!(accounts instanceof Map)) return null;
-      const owner = String(ownerId || '').toLowerCase();
-      const cp = String(cpId || '').toLowerCase();
-      for (const [accountKey, account] of accounts.entries()) {
-        if (String(accountKey || '').toLowerCase() === cp) return account;
-        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
-          ? String(account.counterpartyEntityId).toLowerCase()
-          : '';
-        if (canonicalCp === cp) return account;
-        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
-        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
-        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
-      }
-      return null;
-    };
-
-    const env = (window as any).isolatedEnv;
-    if (!env?.state.eReplicas) return 0;
-    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
-      const [eid, sid] = String(k).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const rep = key ? env.state.eReplicas.get(key) : null;
-    const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
-    if (!account) return 0;
-
-    let count = 0;
-    for (const frame of account.frameHistory || []) {
-      for (const tx of frame?.accountTxs || []) {
-        if (tx?.type !== 'swap_resolve') continue;
-        const fillRatio = Number(tx?.data?.fillRatio || 0);
-        if (fillRatio > 0) count += 1;
-      }
-    }
-    return count;
-  }, { entityId, signerId, counterpartyId });
-}
-
 async function openSwapWorkspace(page: Page): Promise<void> {
   const accountsTab = page.getByTestId('tab-accounts').first();
   await expect(accountsTab).toBeVisible({ timeout: 20_000 });
@@ -1800,15 +1753,6 @@ async function selectSwapAccount(page: Page, accountId: string): Promise<void> {
   await page.waitForTimeout(200);
 }
 
-async function readFirstOpenOrderRemaining(page: Page): Promise<number> {
-  const remainingCell = page.getByTestId('swap-open-order-row').first().locator('td').nth(3);
-  await expect(remainingCell).toBeVisible({ timeout: 30_000 });
-  const text = String((await remainingCell.textContent()) || '');
-  const value = parseFirstNumber(text);
-  if (!Number.isFinite(value)) throw new Error(`Cannot parse remaining amount: ${text}`);
-  return value;
-}
-
 function shiftDisplayedPrice(value: string, delta: number): string {
   const parsed = Number.parseFloat(normalizeDisplayedPriceText(value));
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -2263,114 +2207,11 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     await info.attach('current-book-roundtrip', { body: safeStringify({ entityId: wallet.entityId, runtimeId: wallet.runtimeId, buy, sell }), contentType: 'application/json' });
   });
 
-  test(
-    'swap manual price override after book click uses the edited limit price',
-    { tag: '@functional' },
-    async ({ page }, info) => {
-      await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
-      const wallet = await createWalletIdentity(page, 'edited-limit', randomMnemonic());
-      await page.getByTestId('home-faucet').click();
-      await expect(page.getByTestId('test-money-status')).toHaveText('100 USDC received');
-      await page.getByTestId('account-row').first().click();
-      const hubId = new URL(page.url()).pathname.split('/accounts/')[1];
-      if (!hubId || !/^0x[0-9a-f]{64}$/.test(hubId)) throw new Error('SWAP_HUB_ID_MISSING');
-      await page.getByTestId('back').click();
-      await page.getByTestId('home-swap').click();
-      const book = page.getByTestId('orderbook').locator('visible=true').first();
-      await expect(book).toHaveAttribute('data-status', 'live');
-      const ask = book.getByTestId('book-row-ask').last();
-      await expect(ask).toBeVisible();
-      const clickedPrice = parseUnits((await ask.locator('.bk-price').innerText()).replaceAll(',', ''), 4);
-      expect(clickedPrice).toBeGreaterThan(0n);
-      await ask.click();
-      const preview = page.locator('.kv').filter({ hasText: 'Limit price' });
-      const readPreviewPrice = async () => {
-        const [price] = (await preview.locator('.v').innerText()).split(' ');
-        if (!price) throw new Error('SWAP_LIMIT_PREVIEW_MISSING');
-        return parseUnits(price.replaceAll(',', ''), 4);
-      };
-      expect(await readPreviewPrice()).toBe(clickedPrice);
-      // A 0.01-WETH lot makes quote base units equal four-decimal price ticks.
-      // The signed order must bind the edited 1%-lower limit, never the clicked ask.
-      const editedPrice = (clickedPrice * 99n) / 100n;
-      const give = page.getByTestId('swap-give');
-      const want = page.getByTestId('swap-want');
-      await give.fill(formatUnits(editedPrice, 6));
-      await want.fill('0.01');
-      await expect.poll(readPreviewPrice).toBe(editedPrice);
-      expect(parseUnits(await give.inputValue(), 6)).toBe(editedPrice);
-      expect(parseUnits(await want.inputValue(), 18)).toBe(10_000_000_000_000_000n);
-      const before = await readAccount(page, hubId);
-      expect(before.usdc).toBe('100000000');
-      expect(before.weth).toBe('0');
-      expect(before.offers).toBe(0);
-      expect((await readOrders(page, hubId)).items).toHaveLength(0);
-      const submit = page.getByTestId('swap-submit');
-      await expect(submit).toBeEnabled();
-      await submit.click();
-      await expect
-        .poll(async () => {
-          const account = await readAccount(page, hubId);
-          return { offers: account.offers, pending: account.pending, mempool: account.mempool };
-        })
-        .toEqual({ offers: 1, pending: false, mempool: 0 });
-      const resting = await readAccount(page, hubId);
-      const history = await readOrders(page, hubId);
-      expect(history.items).toHaveLength(1);
-      const [order] = history.items;
-      if (!order) throw new Error('EDITED_LIMIT_ORDER_MISSING');
-      expect(order.priceTicks).toBe(editedPrice);
-      expect(order.priceTicks).not.toBe(clickedPrice);
-      expect(order.originalGiveAmount).toBe(editedPrice);
-      expect(order.originalWantAmount).toBe(10_000_000_000_000_000n);
-      expect(order.resolves).toHaveLength(0);
-      expect(order.closed).toBe(false);
-      expect(resting.usdc).toBe(before.usdc);
-      expect(resting.weth).toBe(before.weth);
-      expect(BigInt(before.usdcSpendable) - BigInt(resting.usdcSpendable)).toBe(order.originalGiveAmount);
-      const cancel = page.getByTestId('swap-offer-cancel');
-      await expect(cancel).toHaveCount(1);
-      await expect(cancel.locator('xpath=ancestor::div[contains(@class,"row")][1]')).toContainText(
-        `${formatUnits(editedPrice, 6)} USDC for 0.01 WETH`,
-      );
-      await cancel.click();
-      await expect
-        .poll(async () => {
-          const account = await readAccount(page, hubId);
-          return { offers: account.offers, pending: account.pending, mempool: account.mempool };
-        })
-        .toEqual({ offers: 0, pending: false, mempool: 0 });
-      const canceled = await readAccount(page, hubId);
-      const closed = await readOrders(page, hubId);
-      expect(closed.items).toHaveLength(1);
-      const [closedOrder] = closed.items;
-      if (!closedOrder) throw new Error('EDITED_LIMIT_CANCELLATION_MISSING');
-      expect(closedOrder.offerId).toBe(order.offerId);
-      expect(closedOrder.priceTicks).toBe(editedPrice);
-      expect(closedOrder.closed).toBe(true);
-      expect(closedOrder.cancelRequested).toBe(true);
-      expect(closedOrder.resolves).toHaveLength(1);
-      expect(closedOrder.resolves[0]).toMatchObject({ fillRatio: 0, cancelRemainder: true, comment: 'cancel_request' });
-      expect(canceled.usdc).toBe(before.usdc);
-      expect(canceled.weth).toBe(before.weth);
-      expect(canceled.usdcSpendable).toBe(before.usdcSpendable);
-      expect(canceled.holds.every((hold) => hold.outgoing === '0' && hold.incoming === '0')).toBe(true);
-      await expect(cancel).toHaveCount(0);
-      await info.attach('current-edited-limit', {
-        body: safeStringify({
-          entityId: wallet.entityId,
-          clickedPrice,
-          editedPrice,
-          before,
-          resting,
-          history,
-          canceled,
-          closed,
-        }),
-        contentType: 'application/json',
-      });
-    },
-  );
+  test('swap manual price override after book click uses the edited limit price', { tag: '@functional' }, async ({ page }, info) => {
+    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+    const wallet = await createWalletIdentity(page, 'edited-limit', randomMnemonic());
+    await verifyRestingLimit(page, info, wallet.entityId, 10_000_000_000_000_000n, price => price * 99n / 100n);
+  });
 
   test('swap rejects price beyond 30% from current orderbook', { tag: '@resilience' }, async ({ page }, info) => {
     await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
@@ -2384,68 +2225,11 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     await verifyPriceBandRejection(page, info, 'bid');
   });
 
-test('swap keeps a within-band wide limit as a resting order instead of filling immediately', { tag: '@functional' }, async ({ page }, testInfo) => {
-    const accountRef = await prepareOrderbookClickTest(page);
-    const amountInput = page.getByTestId('swap-ticket-amount').first();
-    const priceInput = page.getByTestId('swap-ticket-rate').first();
-    const placeButton = page.getByTestId('swap-ticket-submit').first();
-
-    await selectSwapPairSide(page, 'WETH/USDC', 'buy');
-    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
-      preferredAccountId: accountRef.counterpartyId,
-      scope: 'Aggregated',
-      minSources: 3,
-    });
-    const resolveCountBefore = await readPositiveSwapResolveCount(
-      page,
-      accountRef.entityId,
-      accountRef.signerId,
-      accountRef.counterpartyId,
-    );
-    await timedStep('swap.configure_resting_buy', () => configureRestingBuyFromBestAsk(page, { maxQuote: 25 }));
-    await capturePageScreenshot(page, testInfo, 'swap-form-filled-resting-limit-desktop.png', {
-      fullPage: false,
-      ux: {
-        title: 'desktop resting limit form',
-        group: 'Swap',
-        description: 'Limit order configured inside the current orderbook band.',
-        platform: 'desktop',
-        tags: ['swap', 'limit-order'],
-      },
-    });
-    await placeButton.click();
-
-    await expect(page.getByTestId('swap-open-order-row').first()).toBeVisible({ timeout: 30_000 });
-    await capturePageScreenshot(page, testInfo, 'swap-resting-order-open-desktop.png', {
-      fullPage: false,
-      ux: {
-        title: 'desktop open resting order',
-        group: 'Swap',
-        description: 'Open order row after a resting limit order is placed.',
-        platform: 'desktop',
-        tags: ['swap', 'open-order'],
-      },
-    });
-    await expect
-      .poll(async () => await readPositiveSwapResolveCount(
-        page,
-        accountRef.entityId,
-        accountRef.signerId,
-        accountRef.counterpartyId,
-      ), { timeout: 5_000, intervals: [250, 500, 1000] })
-      .toBe(resolveCountBefore);
-    const remaining = await readFirstOpenOrderRemaining(page);
-    expect(remaining, 'within-band wide limit should remain fully open').toBeGreaterThan(0);
-
-    const cancelButton = page.getByTestId('swap-open-order-cancel').first();
-    await expect(cancelButton).toBeVisible({ timeout: 10_000 });
-    await cancelButton.click();
-    await expect
-      .poll(async () => await page.getByTestId('swap-open-order-row').count(), {
-        timeout: 60_000,
-        intervals: [100, 250, 500, 1000],
-      })
-      .toBe(0);
+  test('swap keeps a within-band wide limit as a resting order instead of filling immediately', { tag: '@functional' }, async ({ page }, info) => {
+    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+    const wallet = await createWalletIdentity(page, 'resting-spread', randomMnemonic());
+    // Preserve the original absolute0.01-USDC price reduction, inside the live spread.
+    await verifyRestingLimit(page, info, wallet.entityId, 5_000_000_000_000_000n, price => price - 100n);
   });
 
   test('swap scope and account switching clears stale rows and stale book hint state', { tag: '@resilience' }, async ({ page }) => {

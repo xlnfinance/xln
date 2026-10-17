@@ -1,0 +1,12 @@
+{
+  "root": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-resting-spread-manual-regression-boundary",
+  "files": {
+    "screenshots/shard-0/artifacts/playwright/e2e-swap-e2e-swap-E2E-Swap-e0e8c-uses-the-edited-limit-price-chromium/swap-resting-order-open-desktop.png": "0e18a5ff3d292cf2dbe8e87531f5a7a23879db5440f03b88a1b2f46cda6f681f",
+    "screenshots/shard-0/artifacts/playwright/e2e-swap-e2e-swap-E2E-Swap-e0e8c-uses-the-edited-limit-price-chromium/swap-form-filled-resting-limit-desktop.png": "27a2f889e05744fcb489d1148e111e959a08b9d5c2e0e9aedc18c076aa1a02f7",
+    "screenshots/shard-0/artifacts/playwright/e2e-swap-e2e-swap-E2E-Swap-e0e8c-uses-the-edited-limit-price-chromium/ux-gallery/desktop/swap-resting-order-open-desktop.png.json": "b9b4868011d414d25342a4955846f360635348f10043b713ffa96d2190e5a865",
+    "screenshots/shard-0/artifacts/playwright/e2e-swap-e2e-swap-E2E-Swap-e0e8c-uses-the-edited-limit-price-chromium/ux-gallery/desktop/swap-resting-order-open-desktop.png": "0e18a5ff3d292cf2dbe8e87531f5a7a23879db5440f03b88a1b2f46cda6f681f",
+    "screenshots/shard-0/artifacts/playwright/e2e-swap-e2e-swap-E2E-Swap-e0e8c-uses-the-edited-limit-price-chromium/ux-gallery/desktop/swap-form-filled-resting-limit-desktop.png": "27a2f889e05744fcb489d1148e111e959a08b9d5c2e0e9aedc18c076aa1a02f7",
+    "screenshots/shard-0/artifacts/playwright/e2e-swap-e2e-swap-E2E-Swap-e0e8c-uses-the-edited-limit-price-chromium/ux-gallery/desktop/swap-form-filled-resting-limit-desktop.png.json": "3ed076bf0f7b6b6e2b675532df9596d6503493eebeb2fffdd0efcd7ae54a967a"
+  },
+  "uniqueImages": 2
+}
