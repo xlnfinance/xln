@@ -1,0 +1,481 @@
+{
+  "candidate": "3c093db9098824efe2ce613dd4d75bcd26e3363a",
+  "candidateTree": "280c7ac462a448a359eb663e0bd9b647b2358de2",
+  "productionSourceUnchanged": true,
+  "dirtyDuringLaterCommands": [
+    "docs/night-work-plan.md"
+  ],
+  "releasePassed": false,
+  "counts": {
+    "commands": 19,
+    "passed": 16,
+    "timeouts": 3
+  },
+  "results": [
+    {
+      "name": "determinism-multi-sig-3c093db90.result",
+      "result": {
+        "command": [
+          "env",
+          "XLN_DETERMINISM_SCENARIOS=multi-sig",
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "determinism-multi-sig",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "run",
+          "check:determinism"
+        ],
+        "exitCode": 0,
+        "seconds": 13.382,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/determinism-multi-sig-3c093db90.log"
+      },
+      "logSha256": "d69fbe121caf8b58324148e6a21fc5629d43ae10d5eeca4d306463543114e14e"
+    },
+    {
+      "name": "determinism-remainder-3c093db90.result",
+      "result": {
+        "command": [
+          "env",
+          "XLN_DETERMINISM_SCENARIOS=company-ipo,settle-rebalance,processbatch,dispute-lifecycle,dispute-transformer",
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "determinism-remainder",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "run",
+          "check:determinism"
+        ],
+        "exitCode": 0,
+        "seconds": 34.922,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/determinism-remainder-3c093db90.log"
+      },
+      "logSha256": "2d7fa923b719be1eb3bf0ffb8e898588ec76ec6ccebda15ea99fd111e8246fc5"
+    },
+    {
+      "name": "mainnet-full-browser-3c093db90.result",
+      "result": {
+        "command": [
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "mainnet-full-browser",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "run",
+          "test:e2e:full"
+        ],
+        "exitCode": 124,
+        "seconds": 60.856,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/mainnet-full-browser-3c093db90.log"
+      },
+      "logSha256": "b984d78669160b7f6ee5a9a77bf7c77ea9eae377e3fce8f406e1be4bacc867d1"
+    },
+    {
+      "name": "mainnet-money-invariants-3c093db90.result",
+      "result": {
+        "command": [
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "mainnet-money-invariants",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "test",
+          "core/__tests__/finance/state/derive-delta-property.test.ts",
+          "core/__tests__/proofs/fx-admission.test.ts",
+          "core/__tests__/runtime/observability/env-events-audit-commit.test.ts",
+          "core/__tests__/operations/release/capped-testnet-gate.test.ts",
+          "core/__tests__/operations/health/prod-health-smoke.test.ts"
+        ],
+        "exitCode": 0,
+        "seconds": 0.694,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/mainnet-money-invariants-3c093db90.log"
+      },
+      "logSha256": "cb9ef00feabb3a6a2b9e561bb17e4bdb69cc020fcce6424cf08fe79fe128c5ee"
+    },
+    {
+      "name": "operator-h2-replacement-3c093db90.result",
+      "result": {
+        "command": [
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "operator-h2-replacement",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+          "--all",
+          "--strict-browser-health",
+          "--shards=1",
+          "--workers-per-shard=1",
+          "--max-mm-concurrency=1",
+          "--video=retain-on-failure",
+          "--trace=retain-on-failure",
+          "--screenshot=only-on-failure",
+          "--max-failures=1",
+          "--pw-files=tests/e2e-cross-j-swap.spec.ts::H2 process replacement restores authoritative health and exact configured public books"
+        ],
+        "exitCode": 0,
+        "seconds": 33.951,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/operator-h2-replacement-3c093db90.log"
+      },
+      "logSha256": "c0ecd91f49b6c9dc0bda7be6924451dfe18510cf293303869a3b4359f23768a3"
+    },
+    {
+      "name": "react-demo-component-3c093db90.result",
+      "result": {
+        "command": [
+          "env",
+          "XLN_HLT_ENGINE=ts",
+          "XLN_LOCAL_PROD_SMOKE_DIR=/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/react-demo-component-3c093db90",
+          "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-demo-sync.spec.ts",
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "react-demo-component",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "run",
+          "prod:smoke:local"
+        ],
+        "exitCode": 0,
+        "seconds": 29.078,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/react-demo-component-3c093db90.log"
+      },
+      "logSha256": "a2e83dc10395630c58f3f72d2a156b06b308ae6e0e5247fd539731b8b395a4a1"
+    },
+    {
+      "name": "react-ownership-component-3c093db90.result",
+      "result": {
+        "command": [
+          "env",
+          "XLN_HLT_ENGINE=ts",
+          "XLN_LOCAL_PROD_SMOKE_DIR=/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/react-ownership-component-3c093db90",
+          "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-tutorial-company.spec.ts",
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "react-ownership-component",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "run",
+          "prod:smoke:local"
+        ],
+        "exitCode": 0,
+        "seconds": 37.204,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/react-ownership-component-3c093db90.log"
+      },
+      "logSha256": "36ec90bf4249ba73d652b4dba65956f0c9650e38d536b4a3abf55e4b465926a9"
+    },
+    {
+      "name": "react-production-artifact-3c093db90.result",
+      "result": {
+        "command": [
+          "env",
+          "XLN_HLT_ENGINE=ts",
+          "XLN_LOCAL_PROD_SMOKE_WALLET_ARTIFACT_DIR=/Users/zigota/xln/ui/dist",
+          "XLN_LOCAL_PROD_SMOKE_DIR=/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/react-production-artifact-3c093db90",
+          "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-production-wallet.spec.ts",
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "react-production-artifact",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "run",
+          "prod:smoke:local"
+        ],
+        "exitCode": 0,
+        "seconds": 37.878,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/react-production-artifact-3c093db90.log"
+      },
+      "logSha256": "ca95fd6081ce435e0b14cd97652281604a4fcc1d4936ca5d84363030965f401c"
+    },
+    {
+      "name": "react-production-build-3c093db90.result",
+      "result": {
+        "command": [
+          "env",
+          "NODE_ENV=production",
+          "XLN_UI_BASE=/",
+          "XLN_UI_STACK_ORIGIN=",
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "react-production-build",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "run",
+          "--cwd",
+          "/Users/zigota/xln/ui",
+          "build"
+        ],
+        "exitCode": 0,
+        "seconds": 2.865,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/react-production-build-3c093db90.log"
+      },
+      "logSha256": "8db297d8607955bbf7d92fcfe04361faae888a1e6e51e46dd56ca83d3d9c4c5c"
+    },
+    {
+      "name": "release-all-scenarios-3c093db90.result",
+      "result": {
+        "command": [
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "release-all-scenarios",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "core/scenarios/run.ts",
+          "--set=all"
+        ],
+        "exitCode": 124,
+        "seconds": 60.034,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/release-all-scenarios-3c093db90.log"
+      },
+      "logSha256": "2f16861ac58ba6e61ac590019c319bb760e4af4fcf089973710482b9ba31a4d8"
+    },
+    {
+      "name": "release-bootstrap-rotation-3c093db90.result",
+      "result": {
+        "command": [
+          "env",
+          "XLN_HLT_ENGINE=ts",
+          "XLN_BOOTSTRAP_SOUNDCHECK_DIR=/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/bootstrap-rotation-3c093db90",
+          "XLN_BOOTSTRAP_TEMPLATE_DIR=/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/bootstrap-rotation-template-3c093db90",
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "release-bootstrap-rotation",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "run",
+          "prod:bootstrap:rotation"
+        ],
+        "exitCode": 0,
+        "seconds": 29.118,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/release-bootstrap-rotation-3c093db90.log"
+      },
+      "logSha256": "c91af2a68f1741f2fee71d77ae109d3321cdecac981cf8e7a5c421d70a984700"
+    },
+    {
+      "name": "release-cross-j-3c093db90.result",
+      "result": {
+        "command": [
+          "env",
+          "XLN_SCENARIO_DB_ROOT=/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/scenario-cross-j-3c093db90",
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "release-cross-j",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "core/scenarios/run.ts",
+          "cross-j",
+          "--mode=rpc",
+          "--single"
+        ],
+        "exitCode": 0,
+        "seconds": 10.187,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/release-cross-j-3c093db90.log"
+      },
+      "logSha256": "dcce93f7092a8028da931d65a4fb351c6aa195566d0d2ebfaff20fb0a8dcc690"
+    },
+    {
+      "name": "release-determinism-3c093db90.result",
+      "result": {
+        "command": [
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "release-determinism",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "run",
+          "check:determinism"
+        ],
+        "exitCode": 124,
+        "seconds": 60.095,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/release-determinism-3c093db90.log"
+      },
+      "logSha256": "15fe2e90fdd7bb2bccb1710cf77871b969c210642e5a014b5d32fa1dd454c780"
+    },
+    {
+      "name": "release-foundation-hanko-3c093db90.result",
+      "result": {
+        "command": [
+          "bun",
+          "run",
+          "foundation-release:verify"
+        ],
+        "exitCode": 0,
+        "seconds": 0.181,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/release-foundation-hanko-3c093db90.log"
+      },
+      "logSha256": "84ec6e270099cb3a414d41c2b0feb46030352aa799acd88cb34430837d06b4ea"
+    },
+    {
+      "name": "release-mm-mesh-3c093db90.result",
+      "result": {
+        "command": [
+          "env",
+          "XLN_SCENARIO_DB_ROOT=/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/scenario-mm-mesh-3c093db90",
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "release-mm-mesh",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "core/scenarios/run.ts",
+          "mm-mesh",
+          "--mode=rpc",
+          "--single"
+        ],
+        "exitCode": 0,
+        "seconds": 25.145,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/release-mm-mesh-3c093db90.log"
+      },
+      "logSha256": "4f036d71b548d2cd88b00bd042deecf914f8cfcc8e11610f7e2889e805250d7d"
+    },
+    {
+      "name": "release-p2p-relay-3c093db90.result",
+      "result": {
+        "command": [
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "release-p2p-relay",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "run",
+          "test:p2p:relay"
+        ],
+        "exitCode": 0,
+        "seconds": 5.677,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/release-p2p-relay-3c093db90.log"
+      },
+      "logSha256": "62eb0bf07cea5a2e8a9dc54b8a3a460a58b0d92c5a891af33f807fee863424a4"
+    },
+    {
+      "name": "release-rpc-system-3c093db90.result",
+      "result": {
+        "command": [
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "release-rpc-system",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "run",
+          "test:system:parallel"
+        ],
+        "exitCode": 0,
+        "seconds": 16.396,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/release-rpc-system-3c093db90.log"
+      },
+      "logSha256": "7f34b78711d270a1b623908a2ec6d71a883dcd66b7a178253546b40427050acf"
+    },
+    {
+      "name": "release-storage-hub10k-3c093db90.result",
+      "result": {
+        "command": [
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "release-storage-hub10k",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "run",
+          "bench:radapter:hub10k",
+          "--db-root=/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/storage-hub10k-3c093db90",
+          "--keep-db"
+        ],
+        "exitCode": 0,
+        "seconds": 1.298,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/release-storage-hub10k-3c093db90.log"
+      },
+      "logSha256": "deeab3509f6bfe67d2e5b1d38b65408a6dede93acb920c504f7378ebc745d5cc"
+    },
+    {
+      "name": "scenario-rapid-fire-3c093db90.result",
+      "result": {
+        "command": [
+          "env",
+          "XLN_SCENARIO_DB_ROOT=/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/scenario-rapid-fire-3c093db90",
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "scenario-rapid-fire",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "core/scenarios/run.ts",
+          "rapid-fire",
+          "--mode=rpc",
+          "--single"
+        ],
+        "exitCode": 0,
+        "seconds": 8.03,
+        "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/scenario-rapid-fire-3c093db90.log"
+      },
+      "logSha256": "81acfb9d218860c2541b91530a8748b5c7034bd76671ba0fa82438e45e75b1ea"
+    }
+  ],
+  "archiveSha256": "885322b6e2ed44ac54d46a7155b13e576ae07bbcce4bd7455e23441e330ddbc1"
+}
