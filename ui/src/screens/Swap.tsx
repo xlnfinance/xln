@@ -177,14 +177,16 @@ export function Swap() {
 		}
 	}, [wantText, impliedWantText, wantMeta.decimals]);
 
+	// Equal token ids on distinct jurisdictions identify different balances.
+	const sameToken = mode === 'same' && giveTokenId === wantTokenId;
 	const prepared = useMemo(() => {
-		if (!xln || !parsedGive || !parsedWant || giveTokenId === wantTokenId) return null;
+		if (!xln || !parsedGive || !parsedWant || sameToken) return null;
 		try {
 			return xln.prepareSwapOrder(giveTokenId, wantTokenId, parsedGive, parsedWant);
 		} catch {
 			return null;
 		}
-	}, [xln, giveTokenId, wantTokenId, parsedGive, parsedWant]);
+	}, [xln, sameToken, giveTokenId, wantTokenId, parsedGive, parsedWant]);
 
 	const feeBps = useMemo(() => {
 		if (!hub || mode !== 'same') return null;
@@ -195,7 +197,6 @@ export function Swap() {
 		}
 	}, [hub, mode, wallet.frameHeight]);
 
-	const sameToken = giveTokenId === wantTokenId;
 	const overCapacity = Boolean(prepared && prepared.effectiveGive > giveSpendable);
 
 	// Inbound room on the target account for what we want to receive.
@@ -350,7 +351,12 @@ export function Swap() {
 						</div>
 						<div className="field-row">
 							<input className="input big" placeholder="0.00" inputMode="decimal" value={giveText} onChange={event => setGiveText(event.target.value)} data-testid="swap-give" />
-							<TokenPicker tokenId={giveTokenId} onChange={setGiveTokenId} exclude={wantTokenId} {...(wallet.jurisdiction ? { chip: wallet.jurisdiction } : {})} />
+							<TokenPicker
+								tokenId={giveTokenId}
+								onChange={setGiveTokenId}
+								{...(mode === 'same' ? { exclude: wantTokenId } : {})}
+								{...(wallet.jurisdiction ? { chip: wallet.jurisdiction } : {})}
+							/>
 						</div>
 					</div>
 					<div className="flip">
@@ -376,7 +382,7 @@ export function Swap() {
 							<TokenPicker
 								tokenId={wantTokenId}
 								onChange={setWantTokenId}
-								exclude={giveTokenId}
+								{...(mode === 'same' ? { exclude: giveTokenId } : {})}
 								{...(mode === 'cross' && targetEntity?.jurisdiction?.name ? { chip: targetEntity.jurisdiction.name } : {})}
 							/>
 						</div>

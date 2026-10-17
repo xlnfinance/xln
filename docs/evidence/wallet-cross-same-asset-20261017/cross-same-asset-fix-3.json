@@ -1,0 +1,18 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "cross-same-asset-fix-3",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "run",
+    "prod:smoke:local"
+  ],
+  "exitCode": 0,
+  "seconds": 41.588,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/cross-same-asset-fix-3.log"
+}

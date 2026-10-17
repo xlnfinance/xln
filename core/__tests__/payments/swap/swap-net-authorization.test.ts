@@ -310,14 +310,19 @@ describe('swap net authorization', () => {
   test('rejects persisted Account offer state that omits authorization', () => {
     const account = resolvableAccount();
     expect(() => validateAccountReplica(account)).not.toThrow();
-    const offer = account.state.swapOffers.get('net-authorized-offer')!;
+    const offer = account.state.swapOffers.get('net-authorized-offer');
+    if (!offer) throw new Error('TEST_AUTHORIZED_OFFER_MISSING');
     const invalidOffer: Partial<SwapOffer> = { ...offer };
     delete invalidOffer.maxFee;
-    account.state.swapOffers = PersistentAccountStateMap.fromEntries('swapOffers', [
-      [offer.offerId, invalidOffer as SwapOffer],
-    ]);
-    expect(() => validateAccountReplica(account)).toThrow(
-      'AccountReplica.state.swapOffers.net-authorized-offer authorization is invalid',
+    const invalid = {
+      ...account,
+      state: {
+        ...account.state,
+        swapOffers: PersistentAccountStateMap.fromEntries('swapOffers', [[offer.offerId, invalidOffer]]),
+      },
+    };
+    expect(() => validateAccountReplica(invalid)).toThrow(
+      'AccountReplica.state.swapOffers.fields:missing=maxFee:extra=none',
     );
   });
 

@@ -174,7 +174,14 @@ export async function fundFromHub(page: Page, amount = '100'): Promise<void> {
     await expect(spectrum).toHaveCount(0, { timeout: 15_000 });
   }
   await expect(page.getByTestId('faucet-offchain')).toBeEnabled();
-  await page.getByTestId('faucet-offchain').click();
+  const [response] = await Promise.all([
+    page.waitForResponse(
+      response => new URL(response.url()).pathname === '/api/faucet/offchain' && response.request().method() === 'POST',
+    ),
+    page.getByTestId('faucet-offchain').click(),
+  ]);
+  expect(response.ok(), `Faucet admission failed: ${response.status()} ${await response.text()}`).toBe(true);
+  await expect(page.getByTestId('faucet-status')).toContainText('Payment requested.');
   await page.getByTestId('nav-home').locator('visible=true').first().click();
   await expect(page.getByTestId('token-net-USDC')).toBeVisible({ timeout: 90_000 });
 }

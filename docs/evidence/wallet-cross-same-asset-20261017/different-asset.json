@@ -1,0 +1,18 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "cross-other-asset-regression",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "run",
+    "prod:smoke:local"
+  ],
+  "exitCode": 0,
+  "seconds": 39.71,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/cross-other-asset-regression.log"
+}

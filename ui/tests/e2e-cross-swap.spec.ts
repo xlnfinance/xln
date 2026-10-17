@@ -199,10 +199,21 @@ test.skip(
   'needs the local-prod-smoke stand: XLN_RDB_ROOT with a prod-mesh runtime import manifest',
 );
 
-test(
-  'cross-network swap prepares target incoming capacity before both bilateral legs commit',
-  { tag: '@functional' },
-  async ({ page }) => {
+for (const scenario of [
+  {
+    receiveTokenId: 3,
+    giveAmount: 50_000_000n,
+    funding: '100',
+    title: 'cross-network swap prepares target incoming capacity before both bilateral legs commit',
+  },
+  {
+    receiveTokenId: 1,
+    giveAmount: 300_000_000n,
+    funding: '300',
+    title: 'cross-network same-asset swap prepares target capacity and commits both legs',
+  },
+])
+  test(scenario.title, { tag: '@functional' }, async ({ page }) => {
     test.setTimeout(50_000);
     const errors: string[] = [];
     const authErrors: string[] = [];
@@ -231,7 +242,8 @@ test(
     console.log(
       `CROSS_SETUP networks=${setup.networks.join(',')} ownedEntities=${setup.owners.map(owner => `${owner.entityId}@${owner.jurisdiction}`).join(',')}`,
     );
-    await fundFromHub(page, '100');
+    // Keep the real 300-USDC case within the public faucet's 100/request policy.
+    for (let funded = 0; funded < Number(scenario.funding); funded += 100) await fundFromHub(page, '100');
     await page.getByTestId('account-row').first().click();
     const sourceHubId = new URL(page.url()).pathname.split('/accounts/')[1];
     if (!sourceHubId || !/^0x[0-9a-f]{64}$/.test(sourceHubId)) throw new Error('Primary hub Account unavailable');
@@ -259,8 +271,8 @@ test(
       route =>
         route.status === 'resting' &&
         route.target.tokenId === 1 &&
-        route.source.tokenId === 3 &&
-        route.remaining.targetRemaining > 50_000_000n &&
+        route.source.tokenId === scenario.receiveTokenId &&
+        route.remaining.targetRemaining > scenario.giveAmount &&
         route.remaining.sourceRemaining > 0n,
     );
     if (!maker) throw new Error(`No executable cross-token USDC opposite quote: ${safeStringify(market)}`);
@@ -274,20 +286,37 @@ test(
     if (maker.priceTicks === undefined) throw new Error(`Resting cross quote has no price: ${maker.orderId}`);
     // Use the live maker's exact execution quantum, as swap-command-plan does.
     // A complete user order takes only part of this larger resting MM order.
-    const take = requantizeRemainingSwapAtPriceForDimensions(1, receiveTokenId, 50_000_000n, maker.priceTicks, {
+    const take = requantizeRemainingSwapAtPriceForDimensions(1, receiveTokenId, scenario.giveAmount, maker.priceTicks, {
       giveTokenDecimals: 6,
       wantTokenDecimals: receiveToken.decimals,
     });
-    if (!take) throw new Error(`Resting cross quote cannot execute within 50 USDC: ${maker.orderId}`);
+    if (!take)
+      throw new Error(
+        `Resting cross quote cannot execute within ${scenario.giveAmount} source units: ${maker.orderId}`,
+      );
     expect(take.effectiveGive).toBeGreaterThan(0n);
-    expect(take.effectiveGive).toBeLessThanOrEqual(50_000_000n);
+    expect(take.effectiveGive).toBeLessThanOrEqual(scenario.giveAmount);
     expect(take.effectiveGive).toBeLessThan(maker.remaining.targetRemaining);
     expect(take.effectiveWant).toBeGreaterThan(0n);
     expect(take.effectiveWant).toBeLessThan(maker.remaining.sourceRemaining);
     await page.getByTestId('swap-want').locator('..').getByRole('button').click();
+    await expect(page.getByRole('option', { name: new RegExp(`^${receiveToken.symbol}`) })).toBeVisible({
+      timeout: 5_000,
+    });
     await page.getByRole('option', { name: new RegExp(`^${receiveToken.symbol}`) }).click();
     await page.getByTestId('swap-give').fill(formatUnits(take.effectiveGive, 6));
     await page.getByTestId('swap-want').fill(formatUnits(take.effectiveWant, receiveToken.decimals));
+    if (receiveTokenId === 1) {
+      await page.getByRole('button', { name: 'Same network', exact: true }).click();
+      await expect(page.getByTestId('swap-want')).toHaveValue('');
+      await page.getByTestId('swap-want').fill(formatUnits(take.effectiveWant, receiveToken.decimals));
+      await expect(page.getByTestId('swap-submit')).toBeDisabled();
+      await expect(page.getByText('Choose two different tokens', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'Across networks', exact: true }).click();
+      await expect(page.getByTestId('swap-want')).toHaveValue('');
+      await page.getByTestId('swap-want').fill(formatUnits(take.effectiveWant, receiveToken.decimals));
+      await expect(page.getByTestId('swap-submit')).toBeEnabled();
+    }
     const parties = { sourceEntityId, sourceHubId, targetEntityId, targetHubId, receiveTokenId };
     const feeDisclosure = page.getByTestId('swap-receive-fees');
     await expect(feeDisclosure).toContainText(
@@ -313,7 +342,7 @@ test(
       };
     }, parties);
     expect(BigInt(before.source.balance)).toBeGreaterThanOrEqual(take.effectiveGive);
-    expect(BigInt(before.source.balance)).toBeLessThanOrEqual(100_000_000n);
+    expect(BigInt(before.source.balance)).toBeLessThanOrEqual(BigInt(scenario.funding) * 1_000_000n);
     expect(before.source.debt).toBe('0');
     expect(before.targetAccountPresent).toBe(false);
     expect(before.routes).toEqual([[], []]);
@@ -349,7 +378,9 @@ test(
     await page.getByTestId('swap-give').fill('1');
     await page.getByTestId('swap-want').fill('1');
     await expect(page.getByTestId('swap-rebalance-tariff')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('swap-rebalance-tariff')).toContainText('0.1 USDT base + 0 USDT gas + 1 bps');
+    await expect(page.getByTestId('swap-rebalance-tariff')).toContainText(
+      `0.1 ${receiveToken.symbol} base + 0 ${receiveToken.symbol} gas + 1 bps`,
+    );
     const disclosedPolicyVersion = await page.getByTestId('swap-rebalance-tariff').getAttribute('data-policy-version');
     let observedProgress = '';
     await expect
@@ -537,9 +568,9 @@ test(
         parties,
         maker,
         take,
-        faucetRequested: '100000000',
+        faucetRequested: (BigInt(scenario.funding) * 1_000_000n).toString(),
         faucetNetAfterRebalance: before.source.balance,
-        faucetDifference: (100_000_000n - BigInt(before.source.balance)).toString(),
+        faucetDifference: (BigInt(scenario.funding) * 1_000_000n - BigInt(before.source.balance)).toString(),
         before,
         prepared,
         after,
@@ -565,5 +596,4 @@ test(
     console.log(`CROSS_SWAP_COMMITTED ${evidence}`);
     expect(errors).toEqual([]);
     expect(authErrors).toEqual([]);
-  },
-);
+  });

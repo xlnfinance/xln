@@ -1,0 +1,73 @@
+{
+  "baseSha": "04f3b19f642a3b469fe5c4920518058b06fe7d9b",
+  "boundary": "React Swap incorrectly applied same-network equal-token restrictions to different jurisdictions; real USDC destination option absent.",
+  "fix": "Scope picker exclusion and equal-token preparation/rejection to same mode. Reuse canonical prepareSwapOrder/planSwapCommand without new financial formulas or runtime changes.",
+  "tests": [
+    "Retain original different-asset full swap and add real300-USDC same-asset cross case",
+    "Same-J equal tokens remain disabled even with a populated minimum",
+    "Both mode switches clear the minimum and require explicit re-entry",
+    "Target setup/paired intent order read from persisted WAL, signed lock/close and exact current recovery",
+    "Three real100-USDC faucet requests preserve public100/request policy; helper now fails loudly on unsuccessful API response",
+    "Missing maxFee remains rejected by the exact current strict-field boundary; no decoder changes or unsafe test cast"
+  ],
+  "browser": {
+    "passed": 1,
+    "skipped": 0,
+    "seconds": 41.588,
+    "sourceDebit": "300000000",
+    "targetReceived": "299970000",
+    "collateralFee": "0",
+    "consoleWarningsOrErrors": 0
+  },
+  "l1": {
+    "passed": 20,
+    "assertions": 58,
+    "seconds": 0.288
+  },
+  "scope": "Existing cross-J behavior; no launch scope expansion, public-chain proof, native TVM, TPS or mainnet readiness claim. Original root MM test/ledger remains unresolved.",
+  "sourceSha256": {
+    "ui/src/screens/Swap.tsx": "40286ae77b3b06166bee072ca1efd58ca2839b08f1e967dd33a3957f65e716f5",
+    "ui/tests/e2e-cross-swap.spec.ts": "7b5de71701d5d99532cc0d01e8afb08abf00e36f995750f12b635e54b5edc987",
+    "ui/tests/stack.ts": "d7c9a3ff1a8283d4cac06cd2d612313bafa5caa61dfca3ff00e65a4e32e25131",
+    "core/__tests__/payments/swap/swap-net-authorization.test.ts": "cb3890bf570f8d2b32a0bf7268f11ed88220c33a80ae9b4e2b3caa28222fed13"
+  },
+  "rawArtifacts": {
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/cross-same-asset-fix-3/wallet-browser.log": "2da30185c75d3ea51b50cedd93c9c0749f18288a6a97cc717667a082c1e25b0e",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/cross-same-asset-fix-3/wallet-results.json": "b4982cabcd6b8b3524de451e3c4d25b2ebfc43c60e91cd5cb3945450f3466c50",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/cross-same-asset-fix-2/wallet-browser.log": "d3e8ccbb5ecff18ef4560adc7ab32672b1e646538d2d05235ab39f103b7d88a1",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/same-asset-wallet-check.log": "5a666c3cbc8d9e700c87c94437d27b1a266a3c89abaa48ca6e62ab4ac3dc1a4c"
+  },
+  "reproduce": {
+    "PATH": "/opt/homebrew/bin:/Users/zigota/.local/bin:/Users/zigota/.bun/bin:/Users/zigota/.cargo/bin:/Users/zigota/.foundry/bin:$PATH",
+    "precondition": "bun run stand:status reports free",
+    "environment": {
+      "XLN_LOCAL_PROD_SMOKE_DIR": "<new isolated output directory>",
+      "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS": "e2e-cross-swap.spec.ts",
+      "XLN_LOCAL_PROD_SMOKE_WALLET_GREP": "same-asset"
+    },
+    "command": "bun run stand:run --reason same-asset-regression --timeout-ms 60000 -- bun run prod:smoke:local"
+  },
+  "differentAssetRegression": {
+    "passed": 1,
+    "skipped": 0,
+    "seconds": 39.71
+  },
+  "check": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "same-asset-wallet-check",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "run",
+      "check"
+    ],
+    "exitCode": 0,
+    "seconds": 26.305,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/same-asset-wallet-check.log"
+  }
+}
