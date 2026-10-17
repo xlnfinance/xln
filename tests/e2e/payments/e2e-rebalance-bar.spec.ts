@@ -1018,43 +1018,6 @@ async function sendDirectPaymentToHub(
   });
 }
 
-async function readAccountFlowState(page: Page, hubId: string) {
-  return page.evaluate(({ hubId }) => {
-    const env = (window as any).isolatedEnv;
-    if (!env?.state?.eReplicas) return null;
-    for (const rep of env.state.eReplicas.values()) {
-      const acc = rep.state?.accounts?.get(hubId);
-      if (!acc) continue;
-      const history = Array.isArray(acc.frameHistory) ? acc.frameHistory : [];
-      const recentTxTypes = history
-        .slice(-20)
-        .flatMap((frame: any) => (Array.isArray(frame?.accountTxs) ? frame.accountTxs : []))
-        .map((tx: any) => String(tx?.type || ''));
-      const recentHtlcHashlocks = history
-        .slice(-80)
-        .flatMap((frame: any) => (Array.isArray(frame?.accountTxs) ? frame.accountTxs : []))
-        .filter((tx: any) => tx?.type === 'htlc_lock' || tx?.type === 'htlc_resolve')
-        .map((tx: any) => String(tx?.data?.hashlock || ''))
-        .filter((hash: string) => hash.startsWith('0x') && hash.length > 10);
-      let accountLockCount = 0;
-      if (rep.state?.lockBook && typeof rep.state.lockBook.values === 'function') {
-        for (const lock of rep.state.lockBook.values()) {
-          if (String(lock?.accountId || '').toLowerCase() === String(hubId || '').toLowerCase()) {
-            accountLockCount += 1;
-          }
-        }
-      }
-      return {
-        currentHeight: Number(acc.currentHeight || 0),
-        recentTxTypes,
-        recentHtlcHashlocks,
-        accountLockCount,
-      };
-    }
-    return null;
-  }, { hubId });
-}
-
 async function readAccountJEventClaims(page: Page, hubId: string) {
   return page.evaluate(async ({ hubId }) => {
     const env = (window as RebalanceWindow).__xln?.env();
@@ -2237,191 +2200,172 @@ test.describe('Rebalance E2E', () => {
     },
   );
 
-  // Scenario: force a full R2C -> C2R -> R2C loop and verify the account transitions through each
-  // collateral phase without breaking cadence or losing finalization signal.
+  // Exercise actual chain R2C -> C2R -> R2C, including the strict C2R threshold.
   test('cycle R2C -> C2R -> R2C (100ms action cadence)', { tag: '@functional' }, async ({ page }) => {
-    let scenarioStartedAt = 0;
     await timedStep('rebalance_cycle.reset_server', () => resetProdServer(page));
-    await page.addInitScript(() => {
-      try {
-        localStorage.setItem('xln-app-mode', 'user');
-        localStorage.setItem('xln-onboarding-complete', 'true');
-      } catch {
-        // no-op
-      }
-    });
-    await timedStep('rebalance_cycle.goto_app', () => gotoApp(page));
-    await timedStep('rebalance_cycle.create_runtime', () => createWalletIdentity(page, `rebalance-cycle-${Date.now()}`, nextRebalanceMnemonic()));
-    await timedStep('rebalance_cycle.ensure_runtime_online', () => ensureRuntimeOnline(page, 'cycle-post-create'));
-
-    const { entityId, signerId } = await timedStep('rebalance_cycle.get_local_entity', () => getLocalEntity(page));
-    const hubId = await timedStep('rebalance_cycle.discover_hub', () => discoverHub(page));
-    const hubIsLeft = hubId.toLowerCase() < entityId.toLowerCase();
-    await timedStep('rebalance_cycle.wait_hub_profile', () => waitForHubProfile(page, hubId));
-    await timedStep('rebalance_cycle.connect_hub', () => connectHub(page, entityId, signerId, hubId));
-    // Start collection window after reset/bootstrap to avoid cross-test bleed.
-    scenarioStartedAt = Date.now();
-
-    // Keep cycle test focused on rebalance transitions only.
-    // HTLC E2E is validated by dedicated routed-payment coverage below.
-    const baselineFlow = await readAccountFlowState(page, hubId);
-    expect(baselineFlow, 'baseline account flow state must exist').toBeTruthy();
-    const phase1Baseline = await readRebalanceState(page, hubId);
-    expect(phase1Baseline, 'baseline rebalance state must exist').toBeTruthy();
-
-    const waitForState = async (
-      predicate: (snapshot: any) => boolean,
-      timeoutMs: number,
-      label: string,
-    ) => {
-      const start = Date.now();
-      let last: any = null;
-      while (Date.now() - start < timeoutMs) {
-        last = await readRebalanceState(page, hubId);
-        if (last && predicate(last)) return last;
-        await page.waitForTimeout(700);
-      }
-      throw new Error(`${label} timeout; last=${JSON.stringify(last, null, 2)}`);
+    await gotoApp(page);
+    await createWalletIdentity(page, `rebalance-cycle-${Date.now()}`, nextRebalanceMnemonic());
+    await ensureRuntimeOnline(page, 'cycle-post-create');
+    const { entityId, signerId } = await getLocalEntity(page);
+    const hubId = await discoverHub(page);
+    await waitForHubProfile(page, hubId);
+    await connectHub(page, entityId, signerId, hubId);
+    const scenarioStartedAt = Date.now();
+    type Snapshot = NonNullable<Awaited<ReturnType<typeof readRebalanceState>>>;
+    const readState = async (): Promise<Snapshot> => {
+      const snapshot = await readRebalanceState(page, hubId);
+      if (!snapshot) throw new Error('REBALANCE_CYCLE_ACCOUNT_MISSING');
+      return snapshot;
     };
-
-    // Phase 1: R2C (hub owes user, user auto-requests collateral)
-    const phase1SettlementCursor = await getPersistedReceiptCursor(page);
-    const phase1Trigger = await timedStep('rebalance_cycle.drive_phase1_request', () =>
-      driveFaucetsUntilRequestCollateralCommitted(page, {
+    const waitForState = async (predicate: (snapshot: Snapshot) => boolean) => {
+      const observed = { snapshot: await readState() };
+      await expect
+        .poll(
+          async () => {
+            observed.snapshot = await readState();
+            return predicate(observed.snapshot);
+          },
+          { timeout: 30_000, intervals: [100, 250, 500] },
+        )
+        .toBe(true);
+      return observed.snapshot;
+    };
+    const settleR2C = async () => {
+      const before = await readState();
+      const cursor = await getPersistedReceiptCursor(page);
+      const trigger = await driveFaucetsUntilRequestCollateralCommitted(page, {
         entityId,
         hubId,
         scenarioStartedAt,
-        receiptCursor: phase1SettlementCursor,
-      }));
-    const r2cSnapshot1 = await waitForState(
-      (s) =>
-        BigInt(s.requested) === 0n &&
-        BigInt(s.collateral) > BigInt(phase1Baseline!.collateral) &&
-        Number(s.lastFinalizedJHeight || 0) > Number(phase1Baseline!.lastFinalizedJHeight || 0),
-      45_000,
-      'phase1-r2c',
-    );
-    const phase1Settlement = await waitForPersistedFrameEventMatch(page, {
-      cursor: phase1SettlementCursor,
-      eventName: 'account_settled_finalized_bilateral',
-      entityId,
-      timeoutMs: 60_000,
-      predicate: (event) => persistedEventHasAccount(event, hubId),
-    });
-    expect(phase1Settlement.frameHeight).toBeGreaterThan(phase1Trigger.committed.frameHeight);
-    const collateralAfterFirstR2C = BigInt(r2cSnapshot1.collateral);
-    const c2rSoftLimitUnits = usdcUnits(500n);
-
-    // Phase 2: C2R (user repays enough so collateral becomes excess and hub withdraws to reserve)
-    const hubOwesUser = (snapshot: any): bigint => {
-      const d = BigInt(snapshot?.totalDelta || '0');
-      return hubIsLeft ? (d < 0n ? -d : 0n) : (d > 0n ? d : 0n);
-    };
-    if (!hubIsLeft) {
-      // When hub is on the right side, paying hub can free right-side outCollateral for C2R.
-      const c2rDebtTarget = usdcUnits(1n); // ~1 USD residual tolerance
-      for (let i = 0; i < 25; i++) {
-        const before = await readRebalanceState(page, hubId);
-        const debtUnits = before ? hubOwesUser(before) : 0n;
-        if (debtUnits <= c2rDebtTarget) break;
-        const paymentUsd = debtUnits / USDC_UNIT;
-        const payAmount = paymentUsd > 0n && paymentUsd < 100n ? paymentUsd : 100n;
-        await sendDirectPaymentToHub(page, entityId, signerId, hubId, payAmount);
-        await page.waitForTimeout(100);
-        if (before) {
-          await waitForState(
-            (s) => Number(s.currentHeight || 0) > Number(before.currentHeight || 0),
-            25_000,
-            `phase2-payment-commit-${i + 1}`,
-          );
-        }
-        const after = await readRebalanceState(page, hubId);
-        if (after && hubOwesUser(after) <= c2rDebtTarget) {
-          break;
-        }
-      }
-    }
-
-    // Hold-aware C2R: hub must not withdraw ring-fenced collateral.
-    // Wait until outbound holds clear (or become negligible) before expecting collateral pullback.
-    await waitForState(
-      (s) => BigInt(s.outTotalHold || '0') <= usdcUnits(1n),
-      120_000,
-      'phase2-hold-clear',
-    );
-    const preC2RSnapshot = await readRebalanceState(page, hubId);
-    expect(preC2RSnapshot, 'phase2 pre-C2R snapshot must exist').toBeTruthy();
-    const hubFreeOutBeforeC2R = BigInt(preC2RSnapshot?.hubFreeOutCollateral || '0');
-    const c2rShouldTrigger = hubFreeOutBeforeC2R > c2rSoftLimitUnits;
-
-    let c2rSnapshot: any;
-    if (c2rShouldTrigger) {
-      c2rSnapshot = await waitForState(
-        (s) =>
-          BigInt(s.hubFreeOutCollateral || '0') < hubFreeOutBeforeC2R &&
-          Number(s.lastFinalizedJHeight || 0) >= Number(r2cSnapshot1.lastFinalizedJHeight || 0),
-        220_000,
-        'phase2-c2r',
+        receiptCursor: cursor,
+      });
+      const snapshot = await waitForState(
+        state =>
+          BigInt(state.requested) === 0n &&
+          BigInt(state.uncollateralized) === 0n &&
+          BigInt(state.collateral) > BigInt(before.collateral) &&
+          state.lastFinalizedJHeight > before.lastFinalizedJHeight,
       );
-    } else {
-      await page.waitForTimeout(4_000);
-      c2rSnapshot = await readRebalanceState(page, hubId);
-    }
-    expect(c2rSnapshot, 'phase2 snapshot must exist').toBeTruthy();
-    const collateralAfterC2R = BigInt(c2rSnapshot?.collateral || '0');
-    const hubFreeOutAfterC2R = BigInt(c2rSnapshot?.hubFreeOutCollateral || '0');
-    if (c2rShouldTrigger) {
-      expect(
-        hubFreeOutAfterC2R < hubFreeOutBeforeC2R,
-        `expected C2R to decrease hub freeOutCollateral (${hubFreeOutBeforeC2R} -> ${hubFreeOutAfterC2R})`,
-      ).toBe(true);
-    } else {
-      expect(
-        hubFreeOutAfterC2R <= c2rSoftLimitUnits,
-        `C2R must not trigger when hub freeOutCollateral <= soft limit (freeOut=${hubFreeOutAfterC2R}, soft=${c2rSoftLimitUnits})`,
-      ).toBe(true);
-    }
-
-    // Phase 3: R2C again (hub owes user again and tops collateral back up)
-    const phase3SettlementCursor = await getPersistedReceiptCursor(page);
-    const phase3Trigger = await timedStep('rebalance_cycle.drive_phase3_request', () =>
-      driveFaucetsUntilRequestCollateralCommitted(page, {
+      const settlement = await waitForPersistedFrameEventMatch(page, {
+        cursor,
+        eventName: 'account_settled_finalized_bilateral',
         entityId,
-        hubId,
-        scenarioStartedAt,
-        maxFaucets: 28,
-        receiptCursor: phase3SettlementCursor,
-      }));
-    const phase3CollateralFloor = c2rShouldTrigger ? collateralAfterC2R : collateralAfterFirstR2C;
-    const r2cSnapshot2 = await waitForState(
-      (s) => {
-        const collateral = BigInt(s.collateral || '0');
-        const collateralReady = c2rShouldTrigger
-          ? collateral > phase3CollateralFloor
-          : collateral >= phase3CollateralFloor;
-        return collateralReady &&
-          Number(s.lastFinalizedJHeight || 0) > Number(c2rSnapshot?.lastFinalizedJHeight || r2cSnapshot1.lastFinalizedJHeight || 0);
-      },
-      180_000,
-      'phase3-r2c-again',
+        timeoutMs: 30_000,
+        predicate: event => persistedEventHasAccountToken(event, hubId, USDC_TOKEN_ID),
+      });
+      expect(trigger.faucets).toBe(5);
+      expect(settlement.frameHeight).toBeGreaterThan(trigger.committed.frameHeight);
+      return { trigger, snapshot, settlement };
+    };
+
+    // One request nets499.85USDC, below the unchanged500USDC C2R threshold.
+    // Two authentic cycles provide enough collateral to exercise a real withdrawal.
+    const first = await settleR2C();
+    const second = await settleR2C();
+    const chainBefore = await readActiveChainRebalanceState(page, entityId, hubId);
+    expect(BigInt(chainBefore.collateral)).toBe(999_700_000n);
+    expect(BigInt(second.snapshot.outCapacity)).toBe(999_700_000n);
+    const reserveInterface = new ethers.Interface([
+      'function _reserves(bytes32 entity,uint256 tokenId) view returns (uint256)',
+    ]);
+    const readHubReserve = async () => {
+      const data = reserveInterface.encodeFunctionData('_reserves', [hubId, USDC_TOKEN_ID]);
+      const raw = await callTestnetRpc<string>(page, 'eth_call', [
+        { to: chainBefore.depository, data },
+        'latest',
+      ]);
+      return String(reserveInterface.decodeFunctionResult('_reserves', raw)[0]);
+    };
+    const reserveBefore = await readHubReserve();
+    const c2rCursor = await getPersistedReceiptCursor(page);
+    const repayments: Snapshot[] = [];
+    // Both Entity orderings repay the same economic debt. Account authority is unchanged.
+    for (let i = 1; i <= 6; i++) {
+      const before = await readState();
+      await sendDirectPaymentToHub(page, entityId, signerId, hubId, 100n);
+      await page.waitForTimeout(100);
+      const snapshot = await waitForState(
+        state =>
+          state.currentHeight > before.currentHeight &&
+          BigInt(state.outCapacity) === BigInt(before.outCapacity) - 100n * USDC_UNIT &&
+          BigInt(state.outTotalHold) === 0n &&
+          BigInt(state.hubOutTotalHold) === 0n,
+      );
+      repayments.push(snapshot);
+      if (i <= 5) {
+        expect(BigInt(snapshot.hubFreeOutCollateral)).toBe(BigInt(i) * 100n * USDC_UNIT);
+        expect((await readActiveChainRebalanceState(page, entityId, hubId)).collateral).toBe(
+          chainBefore.collateral,
+        );
+        expect(await readHubReserve()).toBe(reserveBefore);
+      }
+    }
+    const c2r = await waitForState(
+      state =>
+        state.lastFinalizedJHeight > second.snapshot.lastFinalizedJHeight &&
+        BigInt(state.hubFreeOutCollateral) === 0n &&
+        BigInt(state.leftPendingJClaims) === 0n &&
+        BigInt(state.rightPendingJClaims) === 0n,
     );
-    const phase3Settlement = await waitForPersistedFrameEventMatch(page, {
-      cursor: phase3SettlementCursor,
+    const c2rSettlement = await waitForPersistedFrameEventMatch(page, {
+      cursor: c2rCursor,
       eventName: 'account_settled_finalized_bilateral',
       entityId,
-      timeoutMs: 60_000,
-      predicate: (event) => persistedEventHasAccount(event, hubId),
+      timeoutMs: 30_000,
+      predicate: event => persistedEventHasAccountToken(event, hubId, USDC_TOKEN_ID),
     });
-    expect(phase3Settlement.frameHeight).toBeGreaterThan(phase3Trigger.committed.frameHeight);
-    expect(phase3Settlement.frameHeight).toBeGreaterThan(phase1Settlement.frameHeight);
-
-    await page.screenshot({ path: 'test-results/rebalance-cycle-r2c-c2r-r2c.png', fullPage: true });
-
-    if (c2rShouldTrigger) {
-      expect(BigInt(r2cSnapshot2.collateral) > collateralAfterC2R, 'second R2C should increase collateral').toBe(true);
-    } else {
-      expect(BigInt(r2cSnapshot2.collateral) >= collateralAfterFirstR2C, 'R2C must keep collateral non-decreasing').toBe(true);
+    const chainAfter = await readActiveChainRebalanceState(page, entityId, hubId);
+    const reserveAfter = await readHubReserve();
+    expect(BigInt(chainBefore.collateral) - BigInt(chainAfter.collateral)).toBe(600n * USDC_UNIT);
+    expect(BigInt(reserveAfter) - BigInt(reserveBefore)).toBe(600n * USDC_UNIT);
+    expect(BigInt(c2r.outCapacity)).toBe(399_700_000n);
+    expect(BigInt(c2r.uncollateralized)).toBe(0n);
+    const history = await readAccountJEventClaims(page, hubId);
+    if (!history) throw new Error('REBALANCE_CYCLE_CLAIMS_MISSING');
+    const claims = history.claims.filter(claim => claim.jHeight === c2r.lastFinalizedJHeight);
+    expect(claims).toHaveLength(2);
+    const claim = claims[0];
+    if (!claim) throw new Error('REBALANCE_CYCLE_C2R_CLAIM_MISSING');
+    expect(new Set(claims.map(entry => `${entry.txHash}:${entry.nonce}:${entry.jHeight}`)).size).toBe(1);
+    for (const entry of claims) {
+      expect(entry.collateral).toBe(chainAfter.collateral);
+      expect([entry.leftEntity, entry.rightEntity].sort()).toEqual(
+        [entityId.toLowerCase(), hubId.toLowerCase()].sort(),
+      );
     }
+    const receipt = await waitForTransactionReceipt(page, claim.txHash);
+    expect(BigInt(receipt.status ?? '0')).toBe(1n);
+    expect(Number(BigInt(receipt.blockNumber ?? '0'))).toBe(c2r.lastFinalizedJHeight);
+
+    const third = await settleR2C();
+    expect(third.settlement.frameHeight).toBeGreaterThan(c2rSettlement.frameHeight);
+    expect(c2rSettlement.frameHeight).toBeGreaterThan(second.settlement.frameHeight);
+    const finalChain = await readActiveChainRebalanceState(page, entityId, hubId);
+    expect(BigInt(finalChain.collateral) - BigInt(chainAfter.collateral)).toBe(499_850_000n);
+    expect(BigInt(third.snapshot.collateral)).toBe(899_550_000n);
+    expect(BigInt(third.snapshot.uncollateralized)).toBe(0n);
+    await page.getByTestId('nav-home').locator('visible=true').first().click();
+    await expect(page.getByTestId('home-risk').locator('strong')).toHaveText('$0.00');
+    await expect(page.getByTestId('home-secured').locator('strong')).toHaveText('$899.55');
+    await page.screenshot({ path: 'test-results/rebalance-cycle-r2c-c2r-r2c.png', fullPage: true });
+    await test.info().attach('rebalance-chain-cycle', {
+      contentType: 'application/json',
+      body: safeStringify({
+        first,
+        second,
+        repayments,
+        c2r,
+        c2rSettlement,
+        claims,
+        receipt,
+        chainBefore,
+        chainAfter,
+        reserveBefore,
+        reserveAfter,
+        third,
+        finalChain,
+      }),
+    });
   });
 
   // Scenario: multi-hop routing through H1 and H2 should fail on the second 550 payment before H2
