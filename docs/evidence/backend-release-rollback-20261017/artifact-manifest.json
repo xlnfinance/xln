@@ -1,0 +1,189 @@
+{
+  "root": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/backend-rollback",
+  "files": {
+    "before.json": {
+      "sha256": "0929fd1e42ff052013b4258fbf9004d7195bb1845cf33b72abef2e39656f181c",
+      "bytes": 18365
+    },
+    "snapshot.ts": {
+      "sha256": "69f73c4e1856b541b1e8c1d0e07e665105699eec801b98d1889170a1c11765f5",
+      "bytes": 3535
+    },
+    "archive-probe.sh": {
+      "sha256": "73ade5fb596b94bfcfa533e675211cbe7cf734304718e037828c6d0a3ecf16cb",
+      "bytes": 481
+    },
+    "compatible-source.diff": {
+      "sha256": "227f8cd82567f9fc009bdf54b21b6e34f9536bdb55be32f9cd93317301900c63",
+      "bytes": 6359
+    },
+    "archive-probe.ts": {
+      "sha256": "de455fde8aef2d5749842aaa70a5e8f684f68c02cfa913c7c95ca9bcd514bd83",
+      "bytes": 282
+    },
+    "record-docs.py": {
+      "sha256": "2e00ab10efa98d9618e15e756377d61714eef5d9e59d208c41d131d2401ee439",
+      "bytes": 8257
+    },
+    "source.bundle": {
+      "sha256": "e4846d30a5a46d476d06e95f4086643390beebed9fd41231dfbd336ad2069b80",
+      "bytes": 1913385
+    },
+    "compatibility.json": {
+      "sha256": "f593207738be5534263e38c58626d9543763b5cab81ea5058201d17d967892a1",
+      "bytes": 1267
+    },
+    "rollback-browser.ts": {
+      "sha256": "a4c31bf4b6afa35980fda5960d0e2112b8edad8e7e45037b682558113d1761be",
+      "bytes": 1528
+    },
+    "prepare.sh": {
+      "sha256": "59a7faa9613769e690e57d454cb1411e682a0f0567078aa1f1967ec9a95608ff",
+      "bytes": 1131
+    },
+    "switch.py": {
+      "sha256": "6b2348cc52cf640f85b133a1c310cfa8127efd4f7ad208337cbb871a5ffe698e",
+      "bytes": 7123
+    },
+    "compare.sh": {
+      "sha256": "162164cf977c7515107c70a0dabda1ac254c73bb078d1eddce24810a0475e6c3",
+      "bytes": 766
+    },
+    "install-drill.sh": {
+      "sha256": "b0b74f32b65dd3391032e1297706dc9f263f88fc4b4d4494df3e91a6028632a1",
+      "bytes": 497
+    },
+    "prepare-local.py": {
+      "sha256": "da86744a06e936baf2c2adb1f7a44352a14e31e9d4bc1328e16226c4044a8461",
+      "bytes": 3543
+    },
+    "restore-browser.ts": {
+      "sha256": "d61bc46bd0ca14a5dc50f377eee3ccf63c5c9cea6b90b207aa8aebacd4a8a5cf",
+      "bytes": 1526
+    },
+    "snapshot-before-restore.ts": {
+      "sha256": "57911b1d9888f9bb3b39393b4200d68b769a8a70a068ebe0b13391d5bf336078",
+      "bytes": 3543
+    },
+    "current-source.tar": {
+      "sha256": "c00eab02b8ba078eec6e6866c751520c14845e631205869716c24155c7497c0c",
+      "bytes": 294850560
+    },
+    "prepare-restore.sh": {
+      "sha256": "fdbf3e8e608837003d8c383ffe19b63fd4591fd4f3622a2cf2f7feb9fd37e1c5",
+      "bytes": 744
+    },
+    "preflight.json": {
+      "sha256": "55a0a262e0f7e07231d3d5f9be5c4a8c8989188706bd4a6bced2a20b58fbb996",
+      "bytes": 224461
+    },
+    "run-phase.sh": {
+      "sha256": "d612e5a541ee25b8e47995f24599926810caa1957888a6adaca2ac22510d95f8",
+      "bytes": 852
+    },
+    "previous-source.tar": {
+      "sha256": "4d6ff9271e8084083e66ea52ef170e1e12d669e93b99612dd20700dab6a6da6a",
+      "bytes": 294369280
+    },
+    "preflight.py": {
+      "sha256": "953beac7f42eed7c6bb8a08f1ddc3185382cb85368b267e620eb8dfd2dfab42e",
+      "bytes": 3094
+    },
+    "rollback/switch-result.json": {
+      "sha256": "7a7902a2e3e70617df999a7f751fbbfb2d71a175915e4c8fa2a377be6d68f4f8",
+      "bytes": 1574
+    },
+    "rollback/history-comparison-H2.json": {
+      "sha256": "76f7256b5f5d8d4233a339e97440f7d64b005afb2e1e6fd51a1b87e4291c226b",
+      "bytes": 730
+    },
+    "rollback/history-comparison-H3.json": {
+      "sha256": "b655bdf53a51a3c0b860bba64c8bd2159332494a5968815d5afe3ca93f62e598",
+      "bytes": 730
+    },
+    "rollback/compare-history.ts": {
+      "sha256": "2422d8b69d13b8e74fa21e7a31bb30349e221e22e148d325578c7f356837ca30",
+      "bytes": 4751
+    },
+    "rollback/switch-progress.json": {
+      "sha256": "09c115ec5a1f67c0a8637c4e2ee8c7276485dc7680f5377929ac7ee5826ea5ee",
+      "bytes": 550
+    },
+    "rollback/history-comparison-H1.json": {
+      "sha256": "448f1eb4f1cddf63070b00765c1f9a89ce5e441165bd893300fa268bd3373794",
+      "bytes": 731
+    },
+    "rollback/browser/public-gateway-console.json": {
+      "sha256": "a79abf4f105e867356aa05d5bf1fccde672e209d0a26ea6d55ff53666b8a6d8f",
+      "bytes": 291
+    },
+    "rollback/browser/public-wallet.png": {
+      "sha256": "ed1b1dc36290b2e8201fae9b0ae5c733caee0562276c43f3afbf9c9231017a4e",
+      "bytes": 159769
+    },
+    "rollback/browser/public-gateway-evidence.json": {
+      "sha256": "63cf501ca079d4df0d7a6358b6b8c7187d419e641688d504878a4751ad70b071",
+      "bytes": 2250
+    },
+    "rollback/browser/remote-stand.log": {
+      "sha256": "32158a3afc57fc64868b482ed2cc554c91d036a1447787251d4d5c2caf4230b8",
+      "bytes": 306
+    },
+    "rollback/browser/public-observer.png": {
+      "sha256": "3c883be773f4a2c7f2d12b39fec045eeb2dd940a5a52c2a19249dcc1aba51edc",
+      "bytes": 161851
+    },
+    "restore/before.json": {
+      "sha256": "ba30a7bc8ef32df8e6a1a06d4412981490ece36b00240c9f5097d67b1981cc70",
+      "bytes": 18938
+    },
+    "restore/switch-result.json": {
+      "sha256": "7f5e5110453d135c49de64f70290e55c416a2dd603a77ac704b9585a117d02bc",
+      "bytes": 1573
+    },
+    "restore/history-comparison-H2.json": {
+      "sha256": "60ffa2abd68ed9bd090d6f3ffa2b72215b82d601f7bae6d4e5dc5f36b1777eb2",
+      "bytes": 731
+    },
+    "restore/history-comparison-H3.json": {
+      "sha256": "31285bbee21bbc563fb29f84bd590b24be4d7c189fe8c2eed810580c6bc83ce5",
+      "bytes": 731
+    },
+    "restore/compare-history.ts": {
+      "sha256": "6b2cb05a0bbb465f734aa718f0e4665ee89c63cbc370b768c2dea9d378fb0c5a",
+      "bytes": 4750
+    },
+    "restore/switch-progress.json": {
+      "sha256": "139dc1a006b2357e9ce520533ebfcf012b3d12d67c495d71ad163cced6929f58",
+      "bytes": 549
+    },
+    "restore/history-comparison-H1.json": {
+      "sha256": "b17bcde5391a1e9b552bd6800418b148b0feb174f41a935e7ff0c7cba4f8309e",
+      "bytes": 732
+    },
+    "restore/browser/public-gateway-console.json": {
+      "sha256": "3dcf21e5297d0bb0858f0afcd8e3bd441db2997353645459037d70f16e01d165",
+      "bytes": 564
+    },
+    "restore/browser/public-wallet.png": {
+      "sha256": "f7eccf899ba4ad1a24696038a685a60a928e6bfa2baedcf33d486d36a88cbed4",
+      "bytes": 159759
+    },
+    "restore/browser/public-gateway-evidence.json": {
+      "sha256": "329dd953a8b187617c69a92f572fbc18ea12b212b19218536c4e6d8c92cfb749",
+      "bytes": 2250
+    },
+    "restore/browser/remote-stand.log": {
+      "sha256": "f3142d90c237857fdcb3520f86339bffe1f1900b08c8e4eda32844185caf4a3d",
+      "bytes": 305
+    },
+    "restore/browser/public-observer.png": {
+      "sha256": "376f1b7945f02ae2eff3fa90a42c46c3b05bf24612004d1ab2d265ae8acc08dd",
+      "bytes": 151006
+    },
+    "final-health.json": {
+      "sha256": "9e7652a508fb7332f9a4cbf53ec0c7fa644f5683341f903f80909ec639b2397a",
+      "bytes": 581
+    }
+  }
+}

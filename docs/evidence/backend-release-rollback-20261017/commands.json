@@ -1,0 +1,190 @@
+[
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "backend-rollback-archive-boundary",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/backend-rollback/archive-probe.sh"
+    ],
+    "exitCode": 1,
+    "seconds": 1.727,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/backend-rollback-archive-boundary.log"
+  },
+  {
+    "command": [
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/backend-rollback/install-drill.sh"
+    ],
+    "exitCode": 1,
+    "seconds": 1.938,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/backend-rollback-invalid-source.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "backend-rollback-preservation",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/backend-rollback/prepare.sh"
+    ],
+    "exitCode": 0,
+    "seconds": 18.893,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/backend-rollback-preservation.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "backend-rollback-switch",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/backend-rollback/run-phase.sh",
+      "rollback"
+    ],
+    "exitCode": 0,
+    "seconds": 39.226,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/backend-rollback-switch.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "backend-rollback-financial-recovery",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/backend-rollback/compare.sh",
+      "rollback"
+    ],
+    "exitCode": 0,
+    "seconds": 13.159,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/backend-rollback-financial-recovery.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "backend-rollback-browser",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/backend-rollback/rollback-browser.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 27.852,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/backend-rollback-browser.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "backend-restore-preservation",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/backend-rollback/prepare-restore.sh"
+    ],
+    "exitCode": 0,
+    "seconds": 3.374,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/backend-restore-preservation.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "backend-restore-switch",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/backend-rollback/run-phase.sh",
+      "restore"
+    ],
+    "exitCode": 0,
+    "seconds": 39.456,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/backend-restore-switch.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "backend-restore-financial-recovery",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/backend-rollback/compare.sh",
+      "restore"
+    ],
+    "exitCode": 0,
+    "seconds": 14.081,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/backend-restore-financial-recovery.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "backend-restore-browser",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/backend-rollback/restore-browser.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 31.205,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/backend-restore-browser.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "backend-rollback-final-health",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "ssh",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=10",
+      "xln.finance",
+      "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason rollback-final-operator-health --timeout-ms 60000 -- bun core/scripts/operations/production/prod-health-smoke.ts --url=http://127.0.0.1:8080 --expected-hubs=3 --require-hub-self-relay --expected-towers=1 --tower-url=http://127.0.0.1:9100/api/tower/healthz --require-clean-source --require-source-match --expected-git-head=9967734624cd70bebf4bb60992791efc5a36cdc5 --expected-code-hash=9967734624cd70bebf4bb60992791efc5a36cdc5"
+    ],
+    "exitCode": 0,
+    "seconds": 0.936,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/backend-rollback-final-health.log"
+  }
+]

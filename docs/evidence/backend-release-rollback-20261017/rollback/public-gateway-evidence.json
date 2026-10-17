@@ -1,0 +1,64 @@
+{
+  "mode": "public",
+  "origin": "https://xln.finance",
+  "assets": [
+    {
+      "path": "/ui/runtime.js",
+      "sha256": "d7313d0747310acd1aceff33fe1ad30cf496edc7f6a41e195c2f6738d716ca12",
+      "bytes": 5947528,
+      "mime": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "/account-worker.js",
+      "sha256": "5eb1a38aa8d02a663289ba35ba286e2d8067d373bb7bc31e80a61887ad15a945",
+      "bytes": 2045527,
+      "mime": "text/javascript; charset=utf-8"
+    }
+  ],
+  "workers": [
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js",
+    "https://xln.finance/account-worker.js"
+  ],
+  "relayFrames": 14,
+  "pageErrors": [],
+  "checks": [
+    "app redirect",
+    "fresh embedded wallet/account",
+    "current runtime and worker MIME/hash",
+    "real worker initialization",
+    "relay traffic",
+    "deep route reload/unlock",
+    "compile with unavailable admission",
+    "observer graph"
+  ]
+}

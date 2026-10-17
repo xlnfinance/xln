@@ -1,0 +1,22 @@
+[
+  {
+    "kind": "websocket",
+    "url": "wss://xln.finance/relay"
+  },
+  {
+    "kind": "websocket",
+    "url": "wss://xln.finance:8090/ws"
+  },
+  {
+    "kind": "warning",
+    "text": "[WARN][network.route] output.retained {\"retained\":1,\"runtimeId\":\"0xea0f42dbc6942abbb5e6aa9a37950341aebecaf1\",\"targets\":[{\"count\":1,\"deliverable\":false,\"runtimeId\":\"0x849f1d236c7a2a1864d213aa1b275cd968875308\"}]}"
+  },
+  {
+    "kind": "websocket",
+    "url": "wss://xln.finance/relay"
+  },
+  {
+    "kind": "websocket",
+    "url": "wss://xln.finance:8090/ws"
+  }
+]

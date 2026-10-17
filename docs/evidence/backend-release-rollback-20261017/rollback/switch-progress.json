@@ -1,0 +1,27 @@
+[
+  {
+    "step": "guards-and-preservation-confirmed",
+    "elapsedSeconds": 0.287,
+    "at": 1792280716840
+  },
+  {
+    "step": "owned-runtime-tree-drained",
+    "elapsedSeconds": 1.965,
+    "at": 1792280718517
+  },
+  {
+    "step": "exact-compatible-source-selected",
+    "elapsedSeconds": 2.108,
+    "at": 1792280718661
+  },
+  {
+    "step": "same-managed-runtime-started",
+    "elapsedSeconds": 2.267,
+    "at": 1792280718819
+  },
+  {
+    "step": "current-checkpoint-wal-recovery-ready",
+    "elapsedSeconds": 35.524,
+    "at": 1792280752076
+  }
+]

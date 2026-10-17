@@ -1,0 +1,68 @@
+{
+  "source": "9967734624cd70bebf4bb60992791efc5a36cdc5",
+  "target": "efb6f5d4181114457cf3d62077c5d624b9fef9b3",
+  "elapsedSeconds": 36.122,
+  "managedRecoveryDurationMs": 31400,
+  "dataReset": false,
+  "oldServerPid": 1069917,
+  "newServerPid": 1074154,
+  "ownedBefore": [
+    1069917,
+    1070005,
+    1070011,
+    1070017,
+    1070093,
+    1070098,
+    1070149
+  ],
+  "ownedAfter": [
+    1074154,
+    1074234,
+    1074240,
+    1074246,
+    1074317,
+    1074321,
+    1074377
+  ],
+  "pinnedBun": "/root/.local/share/xln/toolchains/bun-1.4.0/bun",
+  "protectedFilesUnchanged": true,
+  "unrelatedProcessesUnchanged": true,
+  "webFilesUnchanged": 1486,
+  "failureMarkers": {
+    "NAPI FATAL ERROR": 0,
+    "Bun has crashed": 0,
+    "panic:": 0,
+    "quiesce.post_failed": 0,
+    "quiesce.refused": 0,
+    "shutdown failed:": 0,
+    "child.stop_timeout_sigkill": 0
+  },
+  "errorDeltaSha256": "e3990d603fc55eacc57b85277ec4417bfeacb1cd5327283190ee6db241e9e8b5",
+  "stages": [
+    {
+      "step": "guards-and-preservation-confirmed",
+      "elapsedSeconds": 0.287,
+      "at": 1792280716840
+    },
+    {
+      "step": "owned-runtime-tree-drained",
+      "elapsedSeconds": 1.965,
+      "at": 1792280718517
+    },
+    {
+      "step": "exact-compatible-source-selected",
+      "elapsedSeconds": 2.108,
+      "at": 1792280718661
+    },
+    {
+      "step": "same-managed-runtime-started",
+      "elapsedSeconds": 2.267,
+      "at": 1792280718819
+    },
+    {
+      "step": "current-checkpoint-wal-recovery-ready",
+      "elapsedSeconds": 35.524,
+      "at": 1792280752076
+    }
+  ]
+}
