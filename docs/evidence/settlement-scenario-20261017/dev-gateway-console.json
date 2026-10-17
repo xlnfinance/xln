@@ -1,0 +1,54 @@
+[
+  {
+    "kind": "websocket",
+    "url": "ws://localhost:8080/?token=0bA-k6Gg8HAw"
+  },
+  {
+    "kind": "websocket",
+    "url": "ws://localhost:8080/ui/?token=fN95KmTs4x4a"
+  },
+  {
+    "kind": "websocket",
+    "url": "ws://localhost:8080/relay"
+  },
+  {
+    "kind": "websocket",
+    "url": "ws://127.0.0.1:8092/ws"
+  },
+  {
+    "kind": "websocket",
+    "url": "ws://localhost:8080/ui/?token=fN95KmTs4x4a"
+  },
+  {
+    "kind": "websocket",
+    "url": "ws://localhost:8080/ui/?token=fN95KmTs4x4a"
+  },
+  {
+    "kind": "websocket",
+    "url": "ws://localhost:8080/relay"
+  },
+  {
+    "kind": "websocket",
+    "url": "ws://127.0.0.1:8092/ws"
+  },
+  {
+    "kind": "websocket",
+    "url": "ws://localhost:8080/?token=0bA-k6Gg8HAw"
+  },
+  {
+    "kind": "warning",
+    "text": "[.WebGL-0x10400571c00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels"
+  },
+  {
+    "kind": "warning",
+    "text": "[.WebGL-0x10400571c00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels"
+  },
+  {
+    "kind": "warning",
+    "text": "[.WebGL-0x10400571c00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels"
+  },
+  {
+    "kind": "warning",
+    "text": "[.WebGL-0x10400571c00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)"
+  }
+]

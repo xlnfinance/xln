@@ -1,0 +1,313 @@
+$ bun tools/stand-lock.ts run --reason mainnet-determinism-fixed --timeout-ms "60000" -- bun run check:determinism
+$ bun core/scripts/checks/architecture/check-determinism.ts
+Static determinism guard passed (388 files scanned)
+Determinism storage: /var/folders/zq/fvt20j1s0fx3v9c8l41czctr0000gn/T/xln-determinism-nN9Dcc
+== Scenario determinism oracle ==
+seed=determinism-test-seed-42 runs=2
+rpcBasePort=35200 freshAnvil=1
+
+[htlc-ack-recovery] Late HTLC ACK Recovery
+[Boot] RPC http://127.0.0.1:35200 unavailable, auto-starting local anvil (chainId=31337, port=35200)
+[JAdapter] Mode: rpc (http://127.0.0.1:35200), chainId=31337
+[INFO][jadapter.rpc] contracts.deploy.start {"chainId":31337}
+[INFO][jadapter.rpc] contracts.deploy.ready {"account":"0x5FbDB2315678afecb367f032d93F642f64180aa3","chainId":31337,"deltaTransformer":"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9","depository":"0xa513E6E4b8f2a923D98304ec87F64353C4D5C853","entityProvider":"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0","tokens":["USDC","WETH","USDT"]}
+[INFO][jadapter.rpc] watcher.start {"chainId":31337,"depth":0,"fromBlock":1,"pollMs":5000}
+[INFO][jadapter.rpc] watcher.ready {"chainId":31337,"mode":"manual","pollMs":5000}
+[Boot] htlc-ack-recovery: env + jadapter + jReplica "htlc-ack-recovery Demo" ready
+[INFO][jadapter.rpc] contracts.connect_from_replica.start {"account":"0x5FbDB2315678afecb367f032d93F642f64180aa3","chainId":31337,"deltaTransformer":"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9","depository":"0xa513E6E4b8f2a923D98304ec87F64353C4D5C853","entityProvider":"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"}
+[INFO][jadapter.rpc] contracts.connected {"account":"0x5FbDB2315678afecb367f032d93F642f64180aa3","chainId":31337,"deltaTransformer":"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9","depository":"0xa513E6E4b8f2a923D98304ec87F64353C4D5C853","entityProvider":"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"}
+[INFO][jadapter.rpc] watcher.start {"chainId":31337,"depth":0,"fromBlock":1,"pollMs":5000}
+[INFO][jadapter.rpc] watcher.ready {"chainId":31337,"mode":"manual","pollMs":5000}
+[INFO][jadapter.rpc] contracts.connect_from_replica.start {"account":"0x5FbDB2315678afecb367f032d93F642f64180aa3","chainId":31337,"deltaTransformer":"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9","depository":"0xa513E6E4b8f2a923D98304ec87F64353C4D5C853","entityProvider":"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"}
+[INFO][jadapter.rpc] contracts.connected {"account":"0x5FbDB2315678afecb367f032d93F642f64180aa3","chainId":31337,"deltaTransformer":"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9","depository":"0xa513E6E4b8f2a923D98304ec87F64353C4D5C853","entityProvider":"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"}
+[INFO][jadapter.rpc] watcher.start {"chainId":31337,"depth":0,"fromBlock":1,"pollMs":5000}
+[INFO][jadapter.rpc] watcher.ready {"chainId":31337,"mode":"manual","pollMs":5000}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][account.preflight] frame.stale_accepted {"collateralPriorityRisk":false,"height":4,"staleByMs":86330000,"txs":["htlc_resolve"]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][account.preflight] frame.stale_accepted {"collateralPriorityRisk":false,"height":4,"staleByMs":86330000,"txs":["htlc_resolve"]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][entity.crontab] htlc_secret_ack_timeout {"counterparty":"08a2","hashlock":"0xdcf5c604.."}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0bebfaea9cbf3cd7697b7f4503287149dc873c7b69e9362b1fb51905d06008a2","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x8c2e2aeda969521b74265e6c078042a524fbb3b4f01a866c8b9e01c0266b0118","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0bebfaea9cbf3cd7697b7f4503287149dc873c7b69e9362b1fb51905d06008a2","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x8c2e2aeda969521b74265e6c078042a524fbb3b4f01a866c8b9e01c0266b0118","status":"disputed"}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0bebfaea9cbf3cd7697b7f4503287149dc873c7b69e9362b1fb51905d06008a2","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x8c2e2aeda969521b74265e6c078042a524fbb3b4f01a866c8b9e01c0266b0118","status":"disputed"}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0bebfaea9cbf3cd7697b7f4503287149dc873c7b69e9362b1fb51905d06008a2","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x8c2e2aeda969521b74265e6c078042a524fbb3b4f01a866c8b9e01c0266b0118","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0bebfaea9cbf3cd7697b7f4503287149dc873c7b69e9362b1fb51905d06008a2","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x8c2e2aeda969521b74265e6c078042a524fbb3b4f01a866c8b9e01c0266b0118","status":"disputed"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0bebfaea9cbf3cd7697b7f4503287149dc873c7b69e9362b1fb51905d06008a2","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x8c2e2aeda969521b74265e6c078042a524fbb3b4f01a866c8b9e01c0266b0118","status":"disputed"}
+[WARN][network.direct_ws] session.closed {"bufferedAmount":0,"code":1006,"reason":"","runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931"}
+[WARN][network.direct_ws] session.closed {"bufferedAmount":0,"code":1006,"reason":"","runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  htlc-ack-recovery run 1/2: frames=13 hash=df50d739fca5
+[Boot] RPC http://127.0.0.1:35201 unavailable, auto-starting local anvil (chainId=31337, port=35201)
+[JAdapter] Mode: rpc (http://127.0.0.1:35201), chainId=31337
+[INFO][jadapter.rpc] contracts.deploy.start {"chainId":31337}
+[INFO][jadapter.rpc] contracts.deploy.ready {"account":"0x5FbDB2315678afecb367f032d93F642f64180aa3","chainId":31337,"deltaTransformer":"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9","depository":"0xa513E6E4b8f2a923D98304ec87F64353C4D5C853","entityProvider":"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0","tokens":["USDC","WETH","USDT"]}
+[INFO][jadapter.rpc] watcher.start {"chainId":31337,"depth":0,"fromBlock":1,"pollMs":5000}
+[INFO][jadapter.rpc] watcher.ready {"chainId":31337,"mode":"manual","pollMs":5000}
+[Boot] htlc-ack-recovery: env + jadapter + jReplica "htlc-ack-recovery Demo" ready
+[INFO][jadapter.rpc] contracts.connect_from_replica.start {"account":"0x5FbDB2315678afecb367f032d93F642f64180aa3","chainId":31337,"deltaTransformer":"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9","depository":"0xa513E6E4b8f2a923D98304ec87F64353C4D5C853","entityProvider":"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"}
+[INFO][jadapter.rpc] contracts.connected {"account":"0x5FbDB2315678afecb367f032d93F642f64180aa3","chainId":31337,"deltaTransformer":"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9","depository":"0xa513E6E4b8f2a923D98304ec87F64353C4D5C853","entityProvider":"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"}
+[INFO][jadapter.rpc] watcher.start {"chainId":31337,"depth":0,"fromBlock":1,"pollMs":5000}
+[INFO][jadapter.rpc] watcher.ready {"chainId":31337,"mode":"manual","pollMs":5000}
+[INFO][jadapter.rpc] contracts.connect_from_replica.start {"account":"0x5FbDB2315678afecb367f032d93F642f64180aa3","chainId":31337,"deltaTransformer":"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9","depository":"0xa513E6E4b8f2a923D98304ec87F64353C4D5C853","entityProvider":"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"}
+[INFO][jadapter.rpc] contracts.connected {"account":"0x5FbDB2315678afecb367f032d93F642f64180aa3","chainId":31337,"deltaTransformer":"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9","depository":"0xa513E6E4b8f2a923D98304ec87F64353C4D5C853","entityProvider":"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"}
+[INFO][jadapter.rpc] watcher.start {"chainId":31337,"depth":0,"fromBlock":1,"pollMs":5000}
+[INFO][jadapter.rpc] watcher.ready {"chainId":31337,"mode":"manual","pollMs":5000}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931","targets":[{"count":1,"deliverable":false,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704"}]}
+[WARN][account.preflight] frame.stale_accepted {"collateralPriorityRisk":false,"height":4,"staleByMs":86330000,"txs":["htlc_resolve"]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][account.preflight] frame.stale_accepted {"collateralPriorityRisk":false,"height":4,"staleByMs":86330000,"txs":["htlc_resolve"]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][entity.crontab] htlc_secret_ack_timeout {"counterparty":"08a2","hashlock":"0xdcf5c604.."}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0bebfaea9cbf3cd7697b7f4503287149dc873c7b69e9362b1fb51905d06008a2","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x8c2e2aeda969521b74265e6c078042a524fbb3b4f01a866c8b9e01c0266b0118","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0bebfaea9cbf3cd7697b7f4503287149dc873c7b69e9362b1fb51905d06008a2","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x8c2e2aeda969521b74265e6c078042a524fbb3b4f01a866c8b9e01c0266b0118","status":"disputed"}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0bebfaea9cbf3cd7697b7f4503287149dc873c7b69e9362b1fb51905d06008a2","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x8c2e2aeda969521b74265e6c078042a524fbb3b4f01a866c8b9e01c0266b0118","status":"disputed"}
+[WARN][network.route] output.retained {"retained":1,"runtimeId":"0xeebd2aa01693938328e5f2cb1270ef6f60d58704","targets":[{"count":1,"deliverable":false,"runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}]}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0bebfaea9cbf3cd7697b7f4503287149dc873c7b69e9362b1fb51905d06008a2","restoredPendingEvidence":[],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x8c2e2aeda969521b74265e6c078042a524fbb3b4f01a866c8b9e01c0266b0118","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0bebfaea9cbf3cd7697b7f4503287149dc873c7b69e9362b1fb51905d06008a2","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x8c2e2aeda969521b74265e6c078042a524fbb3b4f01a866c8b9e01c0266b0118","status":"disputed"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0bebfaea9cbf3cd7697b7f4503287149dc873c7b69e9362b1fb51905d06008a2","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x8c2e2aeda969521b74265e6c078042a524fbb3b4f01a866c8b9e01c0266b0118","status":"disputed"}
+[WARN][network.direct_ws] session.closed {"bufferedAmount":0,"code":1006,"reason":"","runtimeId":"0xbe6fc5d41b1ac898eb0214421ba0f00702447931"}
+[WARN][network.direct_ws] session.closed {"bufferedAmount":0,"code":1006,"reason":"","runtimeId":"0x52b6905528480a7686f45d61fa62091caa50ff39"}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  htlc-ack-recovery run 2/2: frames=13 hash=df50d739fca5
+
+[rebalance] Reserve Rebalance
+
+════════════════════════════════════════════════════════════════════════════════
+  MULTI-EDGE REBALANCE SCENARIO
+  Hub + Alice + Bob + Charlie + Dave
+  Direct R→C collateral top-up from user requests
+════════════════════════════════════════════════════════════════════════════════
+
+📦 Setting up JAdapter (rpc → http://127.0.0.1:35202)...
+[WARN][account.preflight] frame.stale_accepted {"collateralPriorityRisk":true,"height":9,"staleByMs":100,"txs":["request_collateral"]}
+[WARN][account.preflight] frame.stale_accepted {"collateralPriorityRisk":true,"height":9,"staleByMs":100,"txs":["request_collateral"]}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  rebalance run 1/2: frames=75 hash=bb1fbeb95822
+
+════════════════════════════════════════════════════════════════════════════════
+  MULTI-EDGE REBALANCE SCENARIO
+  Hub + Alice + Bob + Charlie + Dave
+  Direct R→C collateral top-up from user requests
+════════════════════════════════════════════════════════════════════════════════
+
+📦 Setting up JAdapter (rpc → http://127.0.0.1:35203)...
+[WARN][account.preflight] frame.stale_accepted {"collateralPriorityRisk":true,"height":9,"staleByMs":100,"txs":["request_collateral"]}
+[WARN][account.preflight] frame.stale_accepted {"collateralPriorityRisk":true,"height":9,"staleByMs":100,"txs":["request_collateral"]}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  rebalance run 2/2: frames=75 hash=bb1fbeb95822
+
+[lock-ahb] HTLC Multi-Hop (A→H→B)
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  lock-ahb run 1/2: frames=91 hash=01d712b329b7
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  lock-ahb run 2/2: frames=91 hash=01d712b329b7
+
+[htlc-lazy] Lazy-Entity HTLC
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  htlc-lazy run 1/2: frames=23 hash=652d7e650b00
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  htlc-lazy run 2/2: frames=23 hash=652d7e650b00
+
+[swap] Swap Orderbook
+✅ PHASE 1 COMPLETE!
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0000000000000000000000000000000000000000000000000000000000000002","restoredPendingEvidence":["swap_resolve"],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":["swap_resolve"],"rightEntity":"0x0000000000000000000000000000000000000000000000000000000000000003","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0000000000000000000000000000000000000000000000000000000000000002","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x0000000000000000000000000000000000000000000000000000000000000003","status":"disputed"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0000000000000000000000000000000000000000000000000000000000000002","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x0000000000000000000000000000000000000000000000000000000000000003","status":"disputed"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0000000000000000000000000000000000000000000000000000000000000002","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x0000000000000000000000000000000000000000000000000000000000000003","status":"disputed"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0000000000000000000000000000000000000000000000000000000000000002","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x0000000000000000000000000000000000000000000000000000000000000003","status":"disputed"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0000000000000000000000000000000000000000000000000000000000000002","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x0000000000000000000000000000000000000000000000000000000000000003","status":"disputed"}
+✅ PHASE 2 COMPLETE!
+✅ PHASE 3 COMPLETE!
+✅ ALL SWAP PHASES COMPLETE!
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  swap run 1/2: frames=76 hash=8b1e86a2188d
+✅ PHASE 1 COMPLETE!
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0000000000000000000000000000000000000000000000000000000000000002","restoredPendingEvidence":["swap_resolve"],"retainDeferredClaims":true,"retainOptionalEvidence":true,"retainedMempool":["swap_resolve"],"rightEntity":"0x0000000000000000000000000000000000000000000000000000000000000003","status":"dispute_preparing"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0000000000000000000000000000000000000000000000000000000000000002","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x0000000000000000000000000000000000000000000000000000000000000003","status":"disputed"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0000000000000000000000000000000000000000000000000000000000000002","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x0000000000000000000000000000000000000000000000000000000000000003","status":"disputed"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0000000000000000000000000000000000000000000000000000000000000002","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":true,"retainedMempool":[],"rightEntity":"0x0000000000000000000000000000000000000000000000000000000000000003","status":"disputed"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0000000000000000000000000000000000000000000000000000000000000002","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x0000000000000000000000000000000000000000000000000000000000000003","status":"disputed"}
+[INFO][account.dispute-policy] freeze {"leftEntity":"0x0000000000000000000000000000000000000000000000000000000000000002","restoredPendingEvidence":[],"retainDeferredClaims":false,"retainOptionalEvidence":false,"retainedMempool":[],"rightEntity":"0x0000000000000000000000000000000000000000000000000000000000000003","status":"disputed"}
+✅ PHASE 2 COMPLETE!
+✅ PHASE 3 COMPLETE!
+✅ ALL SWAP PHASES COMPLETE!
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  swap run 2/2: frames=76 hash=8b1e86a2188d
+
+[settle] Settlement Workspace
+═══════════════════════════════════════════════════════════════════════════════
+                    SETTLEMENT WORKSPACE TEST SCENARIO
+═══════════════════════════════════════════════════════════════════════════════
+
+📋 PHASE 0: SETUP
+[Boot] RPC http://127.0.0.1:35210 unavailable, auto-starting local anvil (chainId=31337, port=35210)
+[JAdapter] Mode: rpc (http://127.0.0.1:35210), chainId=31337
+✅ Created Alice (0002) and Hub (0003)
+📤 [JAdapter:rpc] submitTx type=mint entity=0002
+📤 [JAdapter:rpc] submitTx type=mint entity=0003
+✅ Account opened between Alice and Hub
+
+📋 TEST 1: Conservation Law Validation
+✅ Valid diff: -100 + 50 + 50 = 0
+✅ Invalid diff: -100 + 50 + 40 = -10
+
+📋 TEST 2: Auto-Approve Logic
+✅ Auto-approve logic works correctly
+
+📋 TEST 3: Settlement Workspace Propose
+✅ Settlement proposed: Alice → Hub
+📤 [JAdapter:rpc] submitTx type=batch entity=0002
+📤 [JAdapter:rpc] submitTx type=batch entity=0002
+
+📋 TEST 4: Settlement Workspace Update
+✅ Settlement updated by Hub
+
+📋 TEST 5: Settlement Approve
+✅ Alice approved settlement
+
+📋 TEST 6: Settlement Execute
+📤 [JAdapter:rpc] submitTx type=batch entity=0002
+✅ Settlement executed + on-chain confirmed
+
+📋 TEST 7: Settlement Reject
+✅ Settlement rejected - workspace cleared
+
+═══════════════════════════════════════════════════════════════════════════════
+                    ✅ ALL SETTLEMENT TESTS PASSED
+═══════════════════════════════════════════════════════════════════════════════
+
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  settle run 1/2: frames=75 hash=2266960e9fcb
+═══════════════════════════════════════════════════════════════════════════════
+                    SETTLEMENT WORKSPACE TEST SCENARIO
+═══════════════════════════════════════════════════════════════════════════════
+
+📋 PHASE 0: SETUP
+[Boot] RPC http://127.0.0.1:35211 unavailable, auto-starting local anvil (chainId=31337, port=35211)
+[JAdapter] Mode: rpc (http://127.0.0.1:35211), chainId=31337
+✅ Created Alice (0002) and Hub (0003)
+📤 [JAdapter:rpc] submitTx type=mint entity=0002
+📤 [JAdapter:rpc] submitTx type=mint entity=0003
+✅ Account opened between Alice and Hub
+
+📋 TEST 1: Conservation Law Validation
+✅ Valid diff: -100 + 50 + 50 = 0
+✅ Invalid diff: -100 + 50 + 40 = -10
+
+📋 TEST 2: Auto-Approve Logic
+✅ Auto-approve logic works correctly
+
+📋 TEST 3: Settlement Workspace Propose
+✅ Settlement proposed: Alice → Hub
+📤 [JAdapter:rpc] submitTx type=batch entity=0002
+📤 [JAdapter:rpc] submitTx type=batch entity=0002
+
+📋 TEST 4: Settlement Workspace Update
+✅ Settlement updated by Hub
+
+📋 TEST 5: Settlement Approve
+✅ Alice approved settlement
+
+📋 TEST 6: Settlement Execute
+📤 [JAdapter:rpc] submitTx type=batch entity=0002
+✅ Settlement executed + on-chain confirmed
+
+📋 TEST 7: Settlement Reject
+✅ Settlement rejected - workspace cleared
+
+═══════════════════════════════════════════════════════════════════════════════
+                    ✅ ALL SETTLEMENT TESTS PASSED
+═══════════════════════════════════════════════════════════════════════════════
+
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  settle run 2/2: frames=75 hash=2266960e9fcb
+
+[htlc-4hop] HTLC 4-Hop Chain
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  htlc-4hop run 1/2: frames=87 hash=97d73472b0d5
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  htlc-4hop run 2/2: frames=87 hash=97d73472b0d5
+
+[swap-market] Multi-Party Swap Market
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  swap-market run 1/2: frames=99 hash=586044d353b5
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  swap-market run 2/2: frames=99 hash=586044d353b5
+
+[multi-sig] Multi-Signer BFT
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  multi-sig run 1/2: frames=169 hash=934418989e59
+error: script "check:determinism" exited with code 143
+error: script "stand:run" exited with code 124
+real 60.08
+user 191.06
+sys 329.01

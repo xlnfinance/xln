@@ -345,10 +345,10 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   snap(env, 'Settlement proposed: reserve into collateral', {
     description: `Alice proposes to move ${usdc(COLLATERAL)} into collateral`,
     phase: 'propose',
-    what: `Alice proposes a settlement: move ${usdc(COLLATERAL)} of her reserve into the account as collateral. The amount is put on hold at once so it cannot be spent twice.`,
+    what: `Alice proposes a settlement: move ${usdc(COLLATERAL)} of her reserve into the account as collateral. This adds collateral and does not reserve existing Account payment capacity. The chain enforces the reserve debit when the signed settlement executes.`,
     why: 'Hub\'s position only improves, so Hub signs automatically. A settlement is a shared proposal both banks must sign before anything reaches the chain.',
-    tradfiParallel: 'Collateral locked per counterparty, earmarked while the instruction is matched.',
-    keyMetrics: [`On hold: ${usdc(COLLATERAL)}`],
+    tradfiParallel: 'A signed instruction to transfer reserve into pledged collateral.',
+    keyMetrics: ['Account hold: 0', `Proposed collateral deposit: ${usdc(COLLATERAL)}`],
   });
 
   await process(env, [{
@@ -381,16 +381,13 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   assert(aliceAccount.state.settlementWorkspace.revision === 1, 'Workspace should be revision 1');
   assert(aliceAccount.state.settlementWorkspace.lastModifiedByLeft === true, 'Alice (left) should be lastModifier');
 
-  // TEST: Verify settlement holds are set via frame consensus
-  // Alice proposes r2c (proposer=Alice) — compiled diff takes from Alice's reserve side
+  // R2C adds collateral; it must not lock existing bilateral payment capacity.
+  // C2R below exercises the opposite case through the same signed consensus path.
   const usdcDelta = aliceAccount.state.deltas.get(USDC_TOKEN_ID);
   assert(usdcDelta, 'USDC delta should exist', env);
   const aliceIsLeft = aliceAccount.state.leftEntity === ALICE_ID;
-  const holdField = aliceIsLeft ? 'leftHold' : 'rightHold';
-  const actualHold = aliceIsLeft ? (usdcDelta.leftHold || 0n) : (usdcDelta.rightHold || 0n);
-  const expectedHold = COLLATERAL;
-  console.log(`   HOLD CHECK: ${holdField}=${actualHold}, expected=${expectedHold}`);
-  assert(actualHold === expectedHold, `Settlement hold not set: expected ${expectedHold}, got ${actualHold}`, env);
+  assert(usdcDelta.leftHold === 0n && usdcDelta.rightHold === 0n,
+    'R2C must not create an Account hold', env);
 
   console.log(`✅ Settlement proposed: Alice → Hub`);
   console.log(`   Workspace revision: ${aliceAccount.state.settlementWorkspace.revision}`);
@@ -453,6 +450,16 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
     } }],
   }]);
   await converge(env, 20);
+  // Withdrawal must reserve the full departing share on both committed replicas:
+  // otherwise Alice could spend that same collateral before J finality.
+  for (const [owner, peer] of [[ALICE_ID, HUB_ID], [HUB_ID, ALICE_ID]] as const) {
+    const withdrawalDelta = findReplica(env, owner)[1].state.accounts.get(peer)?.state.deltas.get(USDC_TOKEN_ID);
+    assert(withdrawalDelta, 'C2R USDC delta should exist on both replicas', env);
+    assert((aliceIsLeft ? withdrawalDelta.leftHold : withdrawalDelta.rightHold) === COLLATERAL,
+      'C2R must hold exactly the withdrawn collateral share on both replicas', env);
+    assert((aliceIsLeft ? withdrawalDelta.rightHold : withdrawalDelta.leftHold) === 0n,
+      'C2R must preserve peer capacity', env);
+  }
   await process(env, [{
     entityId: ALICE_ID, signerId: ALICE_SIGNER,
     entityTxs: [{ type: 'settle_execute', data: { counterpartyEntityId: HUB_ID } }],
@@ -585,7 +592,7 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   snap(env, 'Hub counter-proposes: settle the whole net', {
     description: `Hub asks to settle the full ${usdc(NET_OWED)}`,
     phase: 'update',
-    what: `Hub replaces the terms: settle the whole net position. Alice pays ${usdc(NET_OWED)} from her reserve to Hub's, and her ${usdc(NET_OWED)} debt in the account is cleared. This is version 2 of the proposal, and Alice's ${usdc(NET_OWED)} goes on hold.`,
+    what: `Hub replaces the terms: settle the whole net position. Alice pays ${usdc(NET_OWED)} from her reserve to Hub's, and her ${usdc(NET_OWED)} debt in the account is cleared. This is version 2 of the proposal. Hub's outgoing Account capacity is held while its net claim is cleared; Alice's reserve debit is enforced on-chain.`,
     why: 'Both banks edit one shared proposal. Only the bank that did not make the last change can approve it, so nobody approves its own terms.',
     tradfiParallel: 'Matching a settlement instruction between two back offices before it is released.',
     keyMetrics: [`Proposed: ${usdc(NET_OWED)} (full net)`, 'Proposal version: 2'],
@@ -620,6 +627,10 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   assert(firstCompiledDiff.leftDiff === -NET_OWED, 'Compiled diff should reflect update (Alice leftDiff)');
   assert(firstCompiledDiff.rightDiff === NET_OWED, 'Compiled diff should reflect update (Hub rightDiff)');
   assert(firstCompiledDiff.ondeltaDiff === NET_OWED, 'Compiled diff should clear the net position (ondelta)');
+  const counterDelta = aliceAccount2.state.deltas.get(USDC_TOKEN_ID);
+  assert(counterDelta, 'Counter-proposal USDC delta should exist', env);
+  assert(counterDelta.leftHold === 0n && counterDelta.rightHold === NET_OWED,
+    'Net settlement must hold Hub capacity, not the reserve-paying Alice side', env);
 
   console.log(`✅ Settlement updated by Hub`);
   console.log(`   New revision: ${aliceAccount2.state.settlementWorkspace.revision}`);

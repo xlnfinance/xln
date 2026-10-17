@@ -1,0 +1,66 @@
+{
+  "baseSha": "1710bd0fad41ffc47682dd009dd161bdf1c587bf",
+  "sourceSha256": "dc8b7d01def2846890882e05d23b47ce44b6a1e081671b109d8e051eb1402671",
+  "scope": "Settlement scenario assertions/narration; financial transition implementation unchanged",
+  "failure": {
+    "exit": 1,
+    "seconds": 30.49,
+    "message": "settle: Settlement hold not set: expected 200000000000, got 0",
+    "stateEvidence": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/determinism-failure-1710bd0fa"
+  },
+  "repair": [
+    "R2C asserts zero Account holds",
+    "C2R asserts exact collateral hold on both committed replicas and zero peer hold",
+    "Net settlement asserts correct Hub-side hold instead of attributing a hold to reserve-paying Alice",
+    "Exact chain round-trip and signed settlement/reject/finality assertions preserved"
+  ],
+  "l1": {
+    "tests": 6,
+    "assertions": 26,
+    "exit": 0
+  },
+  "l2": {
+    "command": "XLN_DETERMINISM_SCENARIOS=settle bun run check:determinism && bun run build",
+    "runs": 2,
+    "framesEach": 75,
+    "hashPrefix": "2266960e9fcb",
+    "exit": 0,
+    "seconds": 5.0
+  },
+  "browser": {
+    "checks": 8,
+    "exit": 0,
+    "seconds": 33.37,
+    "origin": "http://localhost:8080",
+    "observer": "settle"
+  },
+  "aggregate": {
+    "command": "bun run check:determinism",
+    "exit": 124,
+    "seconds": 60.08,
+    "lastCompleted": "multi-sig run 1/2",
+    "cleanup": "stand free; no remaining anvil or check-determinism processes",
+    "passed": false
+  },
+  "limitations": [
+    "No full aggregate release/determinism pass",
+    "No public-chain/mainnet or soak claim"
+  ],
+  "files": {
+    "settlement-hold-l1.log": "09e24a2ca72b94234210dc3640a191dfd8d73a206844c786244519da49930e26",
+    "determinism-1710bd0fa.log": "009d7c94d03523109cb17d746b1bc6dd201570afee53fa16f720bfe90761fe2d",
+    "determinism-fixed.log": "f8f6e5336229a32107e2fc3653b9cad3f738a9acaef5a4d72f0cab617a8a4aaa",
+    "settlement-browser.log": "8fffc517af1babe0cac126f40cebcf15bb85d74a56055ed121960ce1e220be54",
+    "settlement-final-build.log": "a5eee551b74edd386ae3f7ed9d7a33c890993b9781fa1b920f431ebffe423821",
+    "dev-gateway-console.json": "50e77efdfc035b2240cb24003cd800c751a322906d7c25e2d6f8c48e29602e9d",
+    "dev-gateway-evidence.json": "ad017207cb0f425685befcd9a0527380bc2390ddadeb8096fb5625b64b557462"
+  },
+  "rawLogSha256": {
+    "settlement-hold-l1.log": "09e24a2ca72b94234210dc3640a191dfd8d73a206844c786244519da49930e26",
+    "determinism-1710bd0fa.log": "f1b905715b1fba97a6ee1a139caa0ad7e3045695ce896f334d2145a76bf7e123",
+    "determinism-fixed.log": "80bf80d7c53244a7f3dee2763bf4fdc4a05738755be738ac4f08ccbc1f88b21d",
+    "settlement-browser.log": "8fffc517af1babe0cac126f40cebcf15bb85d74a56055ed121960ce1e220be54",
+    "settlement-final-build.log": "fc1544d6e037507cb4bdf5dd09eced2efeb684088e691ada191c8907d5da32a4"
+  },
+  "logPresentation": "Repository log copies remove trailing spaces only for diff hygiene. Exact unmodified output is preserved under the external artifact evidence directory; raw hashes are recorded separately."
+}

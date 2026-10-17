@@ -1,0 +1,19 @@
+$ bun tools/stand-lock.ts run --reason "mainnet-settlement-hold-l1" --timeout-ms "60000" -- bun test core/__tests__/payments/settlement/financial/settlement-hold-plan.test.ts
+bun test v1.4.0 (34cbb9a40)
+
+core/__tests__/payments/settlement/financial/settlement-hold-plan.test.ts:
+(pass) settlement hold plan > settlement.c2r_holds_proposer_channel_share [5.28ms]
+(pass) settlement hold plan > settlement.c2r_by_right_holds_right_channel_share [0.56ms]
+[WARN][account.settle] workspace.transition_rejected {"error":"SETTLEMENT_PROJECTED_COLLATERAL_RANGE:token=[REDACTED]","kind":"upsert"}
+(pass) settlement hold plan > settlement.c2r_above_channel_share_capacity_is_rejected [0.54ms]
+(pass) settlement hold plan > settlement.r2c_places_no_channel_hold [0.55ms]
+(pass) settlement hold plan > settlement.r2r_places_no_channel_hold_and_no_capacity_check [0.51ms]
+(pass) settlement hold plan > settlement.raw_share_transfer_holds_only_the_losing_side [0.37ms]
+
+ 6 pass
+ 0 fail
+ 26 expect() calls
+Ran 6 tests across 1 file. [240.00ms]
+real 0.27
+user 0.14
+sys 0.60

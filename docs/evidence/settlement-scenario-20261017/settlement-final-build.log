@@ -1,0 +1,116 @@
+$ bun tools/stand-lock.ts run --reason mainnet-settlement-final --timeout-ms "60000" -- sh -c "XLN_DETERMINISM_SCENARIOS=settle bun run check:determinism && bun run build"
+$ bun core/scripts/checks/architecture/check-determinism.ts
+Static determinism guard passed (388 files scanned)
+Determinism storage: /var/folders/zq/fvt20j1s0fx3v9c8l41czctr0000gn/T/xln-determinism-Cbn2IJ
+== Scenario determinism oracle ==
+seed=determinism-test-seed-42 runs=2
+rpcBasePort=41480 freshAnvil=1
+filter=settle
+
+[settle] Settlement Workspace
+═══════════════════════════════════════════════════════════════════════════════
+                    SETTLEMENT WORKSPACE TEST SCENARIO
+═══════════════════════════════════════════════════════════════════════════════
+
+📋 PHASE 0: SETUP
+[Boot] RPC http://127.0.0.1:41480 unavailable, auto-starting local anvil (chainId=31337, port=41480)
+[JAdapter] Mode: rpc (http://127.0.0.1:41480), chainId=31337
+✅ Created Alice (0002) and Hub (0003)
+📤 [JAdapter:rpc] submitTx type=mint entity=0002
+📤 [JAdapter:rpc] submitTx type=mint entity=0003
+✅ Account opened between Alice and Hub
+
+📋 TEST 1: Conservation Law Validation
+✅ Valid diff: -100 + 50 + 50 = 0
+✅ Invalid diff: -100 + 50 + 40 = -10
+
+📋 TEST 2: Auto-Approve Logic
+✅ Auto-approve logic works correctly
+
+📋 TEST 3: Settlement Workspace Propose
+✅ Settlement proposed: Alice → Hub
+📤 [JAdapter:rpc] submitTx type=batch entity=0002
+📤 [JAdapter:rpc] submitTx type=batch entity=0002
+
+📋 TEST 4: Settlement Workspace Update
+✅ Settlement updated by Hub
+
+📋 TEST 5: Settlement Approve
+✅ Alice approved settlement
+
+📋 TEST 6: Settlement Execute
+📤 [JAdapter:rpc] submitTx type=batch entity=0002
+✅ Settlement executed + on-chain confirmed
+
+📋 TEST 7: Settlement Reject
+✅ Settlement rejected - workspace cleared
+
+═══════════════════════════════════════════════════════════════════════════════
+                    ✅ ALL SETTLEMENT TESTS PASSED
+═══════════════════════════════════════════════════════════════════════════════
+
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  settle run 1/2: frames=75 hash=2266960e9fcb
+═══════════════════════════════════════════════════════════════════════════════
+                    SETTLEMENT WORKSPACE TEST SCENARIO
+═══════════════════════════════════════════════════════════════════════════════
+
+📋 PHASE 0: SETUP
+[Boot] RPC http://127.0.0.1:41481 unavailable, auto-starting local anvil (chainId=31337, port=41481)
+[JAdapter] Mode: rpc (http://127.0.0.1:41481), chainId=31337
+✅ Created Alice (0002) and Hub (0003)
+📤 [JAdapter:rpc] submitTx type=mint entity=0002
+📤 [JAdapter:rpc] submitTx type=mint entity=0003
+✅ Account opened between Alice and Hub
+
+📋 TEST 1: Conservation Law Validation
+✅ Valid diff: -100 + 50 + 50 = 0
+✅ Invalid diff: -100 + 50 + 40 = -10
+
+📋 TEST 2: Auto-Approve Logic
+✅ Auto-approve logic works correctly
+
+📋 TEST 3: Settlement Workspace Propose
+✅ Settlement proposed: Alice → Hub
+📤 [JAdapter:rpc] submitTx type=batch entity=0002
+📤 [JAdapter:rpc] submitTx type=batch entity=0002
+
+📋 TEST 4: Settlement Workspace Update
+✅ Settlement updated by Hub
+
+📋 TEST 5: Settlement Approve
+✅ Alice approved settlement
+
+📋 TEST 6: Settlement Execute
+📤 [JAdapter:rpc] submitTx type=batch entity=0002
+✅ Settlement executed + on-chain confirmed
+
+📋 TEST 7: Settlement Reject
+✅ Settlement rejected - workspace cleared
+
+═══════════════════════════════════════════════════════════════════════════════
+                    ✅ ALL SETTLEMENT TESTS PASSED
+═══════════════════════════════════════════════════════════════════════════════
+
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+[INFO][jadapter.rpc] watcher.stopped {"chainId":31337}
+  settle run 2/2: frames=75 hash=2266960e9fcb
+
+== Summary ==
+PASS settle: frames=75 hash=2266960e9fcb
+$ ./scripts/build-runtime.sh
+[build-runtime] bundling core/api/public/browser.ts -> frontend/static/runtime.js
+Bundled 1703 modules in 61ms
+
+  runtime.js  5.95 MB  (entry point)
+
+[build-runtime] bundling core/runtime/workers/account/worker.ts -> frontend/static/account-worker.js
+Bundled 508 modules in 30ms
+
+  account-worker.js  2.0 MB  (entry point)
+
+[build-runtime] done: frontend/static/runtime.js + frontend/static/account-worker.js
+real 5.00
+user 11.66
+sys 16.38
