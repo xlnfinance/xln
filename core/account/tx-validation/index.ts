@@ -1,3 +1,4 @@
+import { rejectFailure } from '../../protocol/errors/failure-taxonomy';
 import type { AccountTx } from '../../types/account';
 import {
   type AccountTxDataSchema,
@@ -53,6 +54,9 @@ function assertDecodedAccountTx(
   requireExactBoundaryKeys(tx, ['type', 'data'], [], `${code}_FIELDS`);
   const type = tx['type'];
   if (typeof type !== 'string') throw new Error(`${code}_TYPE`);
+  if (type === 'subcontract_transition') {
+    throw rejectFailure('ACCOUNT_TX_KIND_OUT_OF_PROFILE', 'ACCOUNT_TX_KIND_OUT_OF_PROFILE:subcontract_transition');
+  }
   const data = requireBoundaryRecord(tx['data'], `${code}_DATA`);
   if (validateSpecialAccountTxData(type, data, `${code}_DATA`)) return;
   if (!isSimpleAccountTxType(type)) throw new Error(`${code}_TYPE_UNKNOWN:${type}`);

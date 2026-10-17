@@ -1066,6 +1066,42 @@ fn decode_lending_disburse(
     })
 }
 
+fn decode_credit_request(
+    value: &Map<String, Value>,
+    operation_index: u64,
+    path: &str,
+) -> Result<AccountTx, AccountInputJsonError> {
+    exact_fields(
+        value,
+        &["requestId", "requesterEntityId", "tokenId", "amount"],
+        &[],
+        operation_index,
+        path,
+    )?;
+    Ok(AccountTx::CreditRequest {
+        request_id: text(
+            field(value, "requestId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.requestId"),
+        )?,
+        requester_entity_id: text(
+            field(value, "requesterEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.requesterEntityId"),
+        )?,
+        token_id: token_id(
+            field(value, "tokenId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.tokenId"),
+        )?,
+        amount: tagged_bigint(
+            field(value, "amount", operation_index, path)?,
+            operation_index,
+            &format!("{path}.amount"),
+        )?,
+    })
+}
+
 fn decode_lending_close_request(
     value: &Map<String, Value>,
     operation_index: u64,
@@ -1687,6 +1723,7 @@ fn decode_account_tx_at(
         "lending_disburse" => decode_lending_disburse(data, operation_index, &data_path),
         "lending_close_request" => decode_lending_close_request(data, operation_index, &data_path),
         "lending_close_payout" => decode_lending_close_payout(data, operation_index, &data_path),
+        "credit_request" => decode_credit_request(data, operation_index, &data_path),
         "add_delta" => {
             exact_fields(data, &["tokenId"], &[], operation_index, &data_path)?;
             Ok(AccountTx::AddDelta {

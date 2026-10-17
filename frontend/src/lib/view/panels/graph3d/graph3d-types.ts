@@ -1,13 +1,6 @@
 import type * as THREE from 'three';
 import type { XLNModule } from '@xln/core/api/public/runtime-module';
 
-export type GraphJBlockHistoryEntry = {
-  blockNumber: bigint;
-  container: THREE.Group;
-  txCubes: THREE.Object3D[];
-  yOffset: number;
-};
-
 export type GraphXLNRuntime = Pick<
   XLNModule,
   'deriveDelta' | 'getTokenInfo' | 'getEntityShortId' | 'classifyBilateralState' | 'getAccountBarVisual'

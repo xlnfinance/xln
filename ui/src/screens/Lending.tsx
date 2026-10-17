@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { LENDING_TERM_MS, lendingLoanMaximumAmount } from '@xln/core/lendbook/state';
+import { MANAGE, PageHead } from '../components/PageHead';
 import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy';
-import { Icon } from '../components/Icons';
 import { TokenIcon } from '../components/TokenPicker';
 import { LendingClose } from '../components/LendingClose';
 import { LendingRepay } from '../components/LendingRepay';
@@ -31,7 +30,6 @@ const rate = (bps: number): string => `${(bps / 100).toFixed(2)}%`;
 const UNAVAILABLE = 'Lending is unavailable in this release';
 
 export function Lending() {
-	const navigate = useNavigate();
 	const entityId = useApp(s => s.activeEntityId);
 	const selectedTokenId = useApp(s => s.selectedTokenId);
 	const toast = useApp(s => s.toast);
@@ -137,14 +135,10 @@ export function Lending() {
 
 	return (
 		<div className="screen fade-in">
-			<div className="screen-header">
-				<span className="screen-title">
-					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
-						<Icon name="chevronLeft" size={18} />
-					</button>
-					Lending
-				</span>
-			</div>
+			<PageHead
+				title="Lending"
+				parent={MANAGE}
+			/>
 			{!offerAvailable || !borrowAvailable || !repayAvailable ? (
 				<p className="note" role="status" data-testid="lending-unavailable">{UNAVAILABLE}. Existing positions remain visible below.</p>
 			) : null}
@@ -156,6 +150,14 @@ export function Lending() {
 						<p className="note">Lending runs through a hub. Open an account with one first.</p>
 					) : (
 						<>
+							<div className="segc" role="tablist">
+								<button type="button" role="tab" aria-selected={side === 'lend'} className={side === 'lend' ? 'active' : ''} onClick={() => { setSide('lend'); setRateText('100'); }} data-testid="lend-side-lend">
+									Lend
+								</button>
+								<button type="button" role="tab" aria-selected={side === 'borrow'} className={side === 'borrow' ? 'active' : ''} onClick={() => { setSide('borrow'); setRateText('250'); }} data-testid="lend-side-borrow">
+									Borrow
+								</button>
+							</div>
 							<div className="field">
 								<span className="field-label">Hub</span>
 								<div className="mode-grid">
@@ -169,7 +171,7 @@ export function Lending() {
 							</div>
 							<div className="field">
 								<span className="field-label">Token</span>
-								<div className="mode-grid">
+								<div className="mode-grid compact">
 									{(hub?.tokens ?? []).map(token => (
 										<button key={token.tokenId} type="button" className={`mode-card${tokenId === token.tokenId ? ' active' : ''}`} onClick={() => setTokenId(token.tokenId)}>
 											<span className="t">{getTokenMeta(token.tokenId).symbol}</span>
@@ -195,7 +197,7 @@ export function Lending() {
 							</div>
 							<div className="field">
 								<span className="field-label">Term</span>
-								<div className="mode-grid">
+								<div className="mode-grid compact">
 									{LENDING_TERMS.filter(entry => side === 'lend' || entry.id !== 'demand').map(entry => (
 										<button key={entry.id} type="button" className={`mode-card${termId === entry.id ? ' active' : ''}`} onClick={() => setTermId(entry.id)}>
 											<span className="t">{entry.label}</span>

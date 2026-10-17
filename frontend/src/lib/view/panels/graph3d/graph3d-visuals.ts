@@ -1,9 +1,10 @@
 import * as THREE from 'three';
+import type { AccountAnnotationContext } from '#lib/network3d/timeline/accountAnnotation.ts';
 import type { Delta } from '@xln/core/api/public/runtime-module';
 import { createAccountBars } from '#lib/network3d/AccountBarRenderer.ts';
 import { toDerivedAccountData, type DerivedAccountData } from '#lib/network3d/derivedAccount.ts';
 import { getGraphThemeColors } from './graph3d-renderer';
-import type { GraphConnectionData, GraphEntityData, GraphEntityProfile, GraphTransactionLike, GraphXLNRuntime } from './graph3d-types';
+import type { GraphConnectionData, GraphEntityData, GraphEntityProfile, GraphXLNRuntime } from './graph3d-types';
 import { formatGraphMempoolTxLabel, type GraphAccountViewLike, type GraphReplicaLike } from './graph3d-helpers';
 
 function createTxLabelSprite(text: string): THREE.Sprite {
@@ -72,46 +73,6 @@ export function createMempoolTxCube(
     group.add(label);
   }
   return group;
-}
-
-export function createBlockContainer(options: {
-  blockNum: bigint;
-  txs: unknown[];
-  jMachinePosition: THREE.Vector3;
-  yOffset: number;
-  getTokenDecimals(tokenId: number): number;
-}): { container: THREE.Group; txCubes: THREE.Object3D[] } {
-  const container = new THREE.Group();
-  container.userData['blockNumber'] = options.blockNum;
-  container.position.copy(options.jMachinePosition);
-  container.position.y += options.yOffset;
-  const geometry = new THREE.BoxGeometry(12, 12, 12);
-  container.add(
-    new THREE.Mesh(
-      geometry,
-      new THREE.MeshPhongMaterial({
-        color: 0x4488aa,
-        emissive: 0x224455,
-        transparent: true,
-        opacity: 0.15,
-        side: THREE.DoubleSide,
-        shininess: 100,
-        depthWrite: false,
-      }),
-    ),
-  );
-  container.add(
-    new THREE.LineSegments(
-      new THREE.EdgesGeometry(geometry),
-      new THREE.LineBasicMaterial({ color: 0x66ccff, linewidth: 2 }),
-    ),
-  );
-  const txCubes = options.txs.slice(0, 9).map((tx, index) => {
-    const cube = createMempoolTxCube(index, options.getTokenDecimals, tx, Number(options.blockNum));
-    container.add(cube);
-    return cube;
-  });
-  return { container, txCubes };
 }
 
 export function getAccountTokenDelta(
@@ -221,16 +182,61 @@ export function createAccountMempoolBoxes(options: {
   });
 }
 
-export function positionEntityLabel(label: THREE.Sprite, entitySize: number): void {
+/** Above the sphere by default; below it when the bank's account lines rise toward a hub. */
+export function positionEntityLabel(label: THREE.Sprite, entitySize: number, below = false): void {
   const worldHeight = Number(label.userData['worldHeight']);
   if (!Number.isFinite(entitySize) || entitySize <= 0) throw new Error(`GRAPH_ENTITY_SIZE_INVALID:${entitySize}`);
   if (!Number.isFinite(worldHeight) || worldHeight <= 0) throw new Error(`GRAPH_LABEL_HEIGHT_INVALID:${worldHeight}`);
   label.scale.set((worldHeight * 4) / entitySize, worldHeight / entitySize, 1);
-  label.position.set(0, (entitySize + worldHeight / 2 + 1) / entitySize, 0);
+  label.position.set(0, ((below ? -1 : 1) * (entitySize + worldHeight / 2 + 1)) / entitySize, 0);
+}
+
+/** Presentation detail under a bank's name: its reserve, and how it just changed. */
+export type EntityLabelDetail = { text: string; change?: { text: string; positive: boolean } };
+
+export type EntityLabelContent = {
+  flag: string;
+  labelText: string;
+  key: string;
+  detail?: EntityLabelDetail;
+  /** Out of the narration's focus: drawn in readable grey instead of being faded out. */
+  dimmed?: boolean;
+};
+
+const LABEL_FONT = "Inter, 'Helvetica Neue', Arial, sans-serif";
+
+/** Two lines for a presentation: the name, then "reserve 2.0M" with a coloured change chip. */
+function drawPresentationLabel(context: CanvasRenderingContext2D, content: EntityLabelContent & { detail: EntityLabelDetail }): void {
+  const fit = (text: string, maxSize: number, weight: number): void => {
+    context.font = `${weight} ${maxSize}px ${LABEL_FONT}`;
+    const width = context.measureText(text).width;
+    if (width > 492) context.font = `${weight} ${Math.floor((maxSize * 492) / width)}px ${LABEL_FONT}`;
+  };
+  fit(content.labelText, 58, 800);
+  context.strokeText(content.labelText, 256, 40);
+  context.fillStyle = content.dimmed ? '#93a3b6' : '#00ff88';
+  context.fillText(content.labelText, 256, 40);
+  const change = content.detail.change;
+  const line = change ? `${content.detail.text}  ${change.text}` : content.detail.text;
+  fit(line, 40, 700);
+  const detailWidth = context.measureText(content.detail.text).width;
+  const lineWidth = context.measureText(line).width;
+  const start = 256 - lineWidth / 2;
+  context.textAlign = 'left';
+  context.strokeText(content.detail.text, start, 100);
+  context.fillStyle = content.dimmed ? '#7f8fa3' : '#e3f6ee';
+  context.fillText(content.detail.text, start, 100);
+  if (change) {
+    const changeStart = start + detailWidth + context.measureText('  ').width;
+    context.strokeText(change.text, changeStart, 100);
+    context.fillStyle = change.positive ? '#4ade80' : '#ff7a8a';
+    context.fillText(change.text, changeStart, 100);
+  }
+  context.textAlign = 'center';
 }
 
 export function createEntityLabel(
-  content: { flag: string; labelText: string; key: string },
+  content: EntityLabelContent,
   labelScale: number,
   isVrActive: boolean,
 ): THREE.Sprite {
@@ -244,18 +250,27 @@ export function createEntityLabel(
   context.textBaseline = 'middle';
   context.strokeStyle = '#000000';
   context.lineWidth = 5;
-  if (content.flag) {
+  // Long names shrink to the canvas instead of being clipped at its edges.
+  const fitFont = (maxSize: number): string => {
+    context.font = `bold ${maxSize}px sans-serif`;
+    const width = context.measureText(content.labelText).width;
+    const size = width > 492 ? Math.floor((maxSize * 492) / width) : maxSize;
+    return `bold ${size}px sans-serif`;
+  };
+  if (content.detail) {
+    drawPresentationLabel(context, { ...content, detail: content.detail });
+  } else if (content.flag) {
     context.font = '56px sans-serif';
     context.fillStyle = '#ffffff';
     context.fillText(content.flag, 256, 32);
-    context.font = 'bold 32px sans-serif';
+    context.font = fitFont(32);
     context.strokeText(content.labelText, 256, 90);
     context.fillStyle = '#FFD700';
     context.fillText(content.labelText, 256, 90);
   } else {
-    context.font = 'bold 64px sans-serif';
+    context.font = fitFont(64);
     context.strokeText(content.labelText, 256, 64);
-    context.fillStyle = '#00ff88';
+    context.fillStyle = content.dimmed ? '#93a3b6' : '#00ff88';
     context.fillText(content.labelText, 256, 64);
   }
   const texture = new THREE.CanvasTexture(canvas);
@@ -268,6 +283,8 @@ export function createEntityLabel(
   );
   sprite.userData['worldHeight'] = 2.2 * labelScale * (isVrActive ? 3 : 1);
   sprite.userData['contentKey'] = content.key;
+  // Focus dimming greys this label out by redrawing it; it must not also fade it.
+  sprite.userData['focusKeepsOpacity'] = true;
   return sprite;
 }
 
@@ -322,6 +339,11 @@ type GraphConnectionOptions = {
   theme: string;
   barsMode: 'close' | 'spread';
   portfolioScale: number;
+  barRadiusScale: number;
+  /** Presentation bar scale per token; null keeps the renderer's fixed token-value scale. */
+  capacityScale?: ReadonlyMap<number, number> | null;
+  /** Presentation: annotate each account with its collateral and unsecured debt. */
+  annotation?: AccountAnnotationContext | null;
   getEntitySize(entityId: string, tokenId: number): number;
 };
 
@@ -407,6 +429,9 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
     {
       barsMode: options.barsMode,
       portfolioScale: options.portfolioScale,
+      barRadiusScale: options.barRadiusScale,
+      capacityScale: options.capacityScale ?? null,
+      annotation: options.annotation ?? null,
       desyncDetected,
       bilateralState: barVisual,
       dispute: dispute
@@ -430,64 +455,6 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
   });
   for (const box of mempoolBoxes) options.graphWorld.add(box);
   return { bars, mempoolBoxes };
-}
-
-export function createDirectionalLightningMesh(connection: GraphConnectionData, accountTx: GraphTransactionLike | null | undefined): THREE.Mesh {
-  const positions = connection.line.geometry.getAttribute('position');
-  const start = new THREE.Vector3().fromBufferAttribute(positions, 0);
-  const end = new THREE.Vector3().fromBufferAttribute(positions, 1);
-  const amountUsd = accountTx?.data?.amount ? Number(accountTx.data.amount) / 1e18 : 0;
-  const radius = amountUsd > 0 ? Math.max(0.05, Math.min(Math.log10(amountUsd) * 0.08, 0.8)) : 0.08;
-  const color =
-    amountUsd <= 0
-      ? 0x00ccff
-      : amountUsd < 1_000
-        ? 0x0088ff
-        : amountUsd < 100_000
-          ? 0x00ccff
-          : amountUsd < 1_000_000
-            ? 0x00ff88
-            : amountUsd < 10_000_000
-              ? 0xffff00
-              : 0xff4444;
-  const bolt = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius, radius, start.distanceTo(end), 16),
-    new THREE.MeshLambertMaterial({
-      color,
-      transparent: true,
-      opacity: 0.95,
-      emissive: color,
-      emissiveIntensity: 2,
-    }),
-  );
-  bolt.position.copy(start.clone().lerp(end, 0.5));
-  bolt.quaternion.setFromUnitVectors(
-    new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3().subVectors(end, start).normalize(),
-  );
-  return bolt;
-}
-
-export function createBroadcastRippleMesh(position: THREE.Vector3, txType: string): THREE.Mesh {
-  const colors: Record<string, number> = {
-    r2c: 0x00ff88,
-    deposit_reserve: 0x00ff00,
-    withdraw_reserve: 0xff0000,
-    credit_from_reserve: 0xffaa00,
-    debit_to_reserve: 0xff44ff,
-  };
-  const ripple = new THREE.Mesh(
-    new THREE.TorusGeometry(0.5, 0.05, 16, 32),
-    new THREE.MeshBasicMaterial({
-      color: colors[txType] ?? 0x00ffff,
-      transparent: true,
-      opacity: 0.8,
-      side: THREE.DoubleSide,
-    }),
-  );
-  ripple.position.copy(position);
-  ripple.rotation.x = Math.PI / 2;
-  return ripple;
 }
 
 export function createGraphEntityNode(options: {
@@ -589,15 +556,47 @@ export function createGraphGrid(
   return grid;
 }
 
+/**
+ * The jurisdiction's name, whole: it is the one label naming the settlement layer, so it
+ * shrinks to fit instead of being cut. The block height shows only when it is known.
+ */
+/** Below the box (dock), or to its right (presentation: packets arrive from below). */
+export type JMachineLabelPlacement = 'below' | 'right';
+
+export function createJMachineLabelTexture(
+  name: string,
+  jHeight: number,
+  placement: JMachineLabelPlacement = 'below',
+): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('GRAPH_J_MACHINE_LABEL_CONTEXT_UNAVAILABLE');
+  canvas.width = 512;
+  canvas.height = 128;
+  const text = jHeight > 0 ? `${name} #${jHeight}` : name;
+  const family = '"Inter", "Helvetica Neue", Arial, sans-serif';
+  context.font = `600 52px ${family}`;
+  const width = context.measureText(text).width;
+  context.font = `600 ${width > 492 ? Math.floor((52 * 492) / width) : 52}px ${family}`;
+  context.fillStyle = '#9fd8ff';
+  context.textAlign = placement === 'right' ? 'left' : 'center';
+  context.textBaseline = 'middle';
+  context.fillText(text, placement === 'right' ? 10 : 256, 64);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  return texture;
+}
+
 export function createGraphJMachine(
   size = 25,
   position = { x: 0, y: 200, z: 0 },
   name = 'J-MACHINE',
   jHeight = 0,
+  labelPlacement: JMachineLabelPlacement = 'below',
 ): THREE.Group {
   const group = new THREE.Group();
   group.position.set(position.x, position.y, position.z);
-  group.userData = { type: 'jMachine', jurisdictionName: name, position };
+  group.userData = { type: 'jMachine', jurisdictionName: name, position, labelPlacement };
   const geometry = new THREE.BoxGeometry(size, size, size);
   group.add(
     new THREE.Mesh(
@@ -619,60 +618,29 @@ export function createGraphJMachine(
       new THREE.LineBasicMaterial({ color: 0x66ccff, linewidth: 2 }),
     ),
   );
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('GRAPH_J_MACHINE_LABEL_CONTEXT_UNAVAILABLE');
-  canvas.width = 256;
-  canvas.height = 64;
-  context.fillStyle = '#66ccff';
-  context.font = 'bold 28px monospace';
-  context.textAlign = 'center';
-  context.fillText(`${(name.split(' ')[0] || 'J').substring(0, 8)} (#${jHeight})`, 128, 40);
-  const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas) }));
-  label.scale.set(25, 6, 1);
-  label.position.set(0, -size / 2 - 8, 0);
+  const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: createJMachineLabelTexture(name, jHeight, labelPlacement), transparent: true }));
+  label.scale.set(size * 2, size * 0.5, 1);
+  if (labelPlacement === 'right') {
+    // Larger, left-aligned text, sprite centred half its width past the box's right face.
+    // "Right" is the viewer's right, so keepJMachineLabelBeside re-aims it as the camera moves.
+    label.scale.set(size * 3, size * 0.75, 1);
+    group.userData['labelOffset'] = size * 0.7 + size * 1.5;
+    label.position.set(size * 0.7 + size * 1.5, 0, 0);
+  } else {
+    label.position.set(0, -size / 2 - size * 0.66, 0);
+  }
   group.add(label);
   return group;
 }
 
-export function startProportionalBroadcast(options: {
-  graphWorld: THREE.Group;
-  position: THREE.Vector3;
-  transactionCount: number;
-  onComplete(sphere: THREE.Mesh): void;
-}): { sphere: THREE.Mesh; animationId: number } | null {
-  if (options.transactionCount === 0) return null;
-  const intensity = Math.min(options.transactionCount / 5, 1);
-  const maxScale = 30 + intensity * 70;
-  const duration = 800 + intensity * 700;
-  const geometry = new THREE.SphereGeometry(1, 32, 32);
-  const material = new THREE.MeshBasicMaterial({
-    color: 0x44ffaa,
-    transparent: true,
-    opacity: 0.3 + intensity * 0.3,
-    side: THREE.DoubleSide,
-  });
-  const sphere = new THREE.Mesh(geometry, material);
-  sphere.position.copy(options.position);
-  options.graphWorld.add(sphere);
-  const startTime = performance.now();
-  let animationId = 0;
-  const animate = () => {
-    const progress = Math.min((performance.now() - startTime) / duration, 1);
-    const scale = 1 + (1 - Math.pow(1 - progress, 2)) * maxScale;
-    sphere.scale.set(scale, scale, scale);
-    material.opacity = (0.3 + intensity * 0.3) * (1 - progress);
-    if (progress < 1) {
-      animationId = requestAnimationFrame(animate);
-      return;
-    }
-    options.graphWorld.remove(sphere);
-    geometry.dispose();
-    material.dispose();
-    options.onComplete(sphere);
-  };
-  animationId = requestAnimationFrame(animate);
-  return { sphere, animationId };
+/** Keeps a side-placed J-machine label to the viewer's right, whatever the camera angle. */
+export function keepJMachineLabelBeside(group: THREE.Group, camera: THREE.Camera): void {
+  if (group.userData['labelPlacement'] !== 'right') return;
+  const label = group.children.find((child) => child instanceof THREE.Sprite);
+  if (!label) return;
+  const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+  right.applyQuaternion(group.getWorldQuaternion(new THREE.Quaternion()).invert());
+  label.position.copy(right.multiplyScalar(Number(group.userData['labelOffset'])));
 }
 
 export function buildSimpleRadialLayout(

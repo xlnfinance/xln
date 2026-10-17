@@ -94,16 +94,15 @@ const args: Args = {
 
 const keys = readKeys(args.keysPath);
 const web = `http://localhost:${args.webHttpPort}`;
-const webTls = args.webScheme === 'https' ? `https://localhost:${args.webPort}` : null;
+const wallet = `${args.webScheme}://localhost:${args.webPort}/ui/`;
 const api = `http://127.0.0.1:${args.apiPort}`;
 const custody = `${args.custodyScheme}://localhost:${args.custodyPort}`;
 const custodyDaemon = `http://127.0.0.1:${args.custodyDaemonPort}`;
 const watchtower = `http://127.0.0.1:${args.watchtowerPort}`;
 
 const rows: LinkRow[] = [
-  { label: 'wallet', url: `${web}/app` },
-  ...(webTls ? [{ label: 'wallet tls', url: `${webTls}/app` }] : []),
-  { label: 'wallet new ui', url: `http://localhost:${args.uiPort}/` },
+  { label: 'wallet', url: wallet },
+  { label: 'network observer', url: `${web}/app?observer=1` },
   { label: 'remote admin import', url: keys.adminImportUrl! },
   { label: 'suggested runtimes', url: `${api}/api/runtime-import?access=admin` },
   { label: 'health admin', url: `${web}/health` },
@@ -133,7 +132,7 @@ console.log('-'.repeat(88));
 console.log(`runtime import key file: ${resolve(args.keysPath)}`);
 console.log('suggested runtimes endpoint lists fresh H/MM/Custody import tokens for the app runtime list.');
 console.log(`expected remote runtimes: ${expectedRemoteRuntimes}`);
-console.log(`local tls: ${webTls ? `enabled at ${webTls}` : 'disabled; localhost HTTP remains a secure browser context'}`);
+console.log(`local tls: ${args.webScheme === 'https' ? `enabled at ${wallet}` : 'disabled; localhost HTTP remains a secure browser context'}`);
 console.log('status/logs below: ANVIL, ANVIL2, MESH, WATCH, RUNTIME, VITE, VITE_HTTP, UI, READY');
 console.log(line);
 console.log('');

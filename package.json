@@ -314,7 +314,7 @@
     "mocha": "^11.8.0",
     "playwright": "^1.62.1",
     "prettier": "^3.9.6",
-    "solc": "0.8.25",
+    "solc": "0.8.36",
     "tronweb": "6.5.0",
     "typescript": "^5.9.3"
   },
@@ -323,6 +323,7 @@
     "@ethereumjs/common": "^10.1.3",
     "@ethereumjs/mpt": "^10.1.3",
     "@ethereumjs/rlp": "^10.1.3",
+    "@ethereumjs/statemanager": "^10.1.3",
     "@ethereumjs/tx": "^10.1.3",
     "@ethereumjs/util": "^10.1.3",
     "@ethereumjs/vm": "^10.1.3",

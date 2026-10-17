@@ -5,6 +5,7 @@ import App from './App';
 import './styles/tokens.css';
 import './styles/base.css';
 import './styles/app.css';
+import './styles/wallet.css';
 import './styles/home.css';
 
 const root = document.getElementById('root');

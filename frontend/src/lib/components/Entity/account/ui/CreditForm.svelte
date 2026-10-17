@@ -9,7 +9,6 @@
   import BigIntInput from '../../../Common/BigIntInput.svelte';
   import EntitySelect from '../../workspace/shell/EntitySelect.svelte';
   import { requireTokenDecimals } from '../../token-metadata';
-  import { optionalBoolean, optionalString, readJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
 
   export let entityId: string;
   export let actionRuntimeEnv: RuntimeReplica | null = null;
@@ -50,50 +49,34 @@
     );
   })();
 
-  type CreditEntityInput = {
-    entityId: string;
-    signerId: string;
-    entityTxs: Array<{
-      type: 'extendCredit';
-      data: {
-        counterpartyEntityId: string;
-        tokenId: number;
-        amount: bigint;
+  type CreditEntityTx =
+    | { type: 'extendCredit'; data: { counterpartyEntityId: string; tokenId: number; amount: bigint } }
+    | {
+        type: 'requestCredit';
+        data: { counterpartyEntityId: string; tokenId: number; amount: bigint; requestId: string };
       };
-    }>;
-  };
 
-  type CreditRequestResponse = {
-    success?: boolean;
-    status?: 'queued' | 'already_satisfied' | string;
-    error?: string;
-    approvedAmount?: string;
-    requestId?: string;
-    runtimeId?: string | null;
-  };
-
-  function decodeCreditRequestResponse(value: unknown): CreditRequestResponse {
-    const record = requireUnknownRecord(value, 'CREDIT_REQUEST_RESPONSE_INVALID');
-    rejectExtraKeys(record, ['success', 'status', 'error', 'approvedAmount', 'requestId', 'runtimeId'], 'CREDIT_REQUEST_RESPONSE_EXTRA_FIELD');
-    const nullableString = (raw: unknown, code: string): string | null | undefined => raw === null ? null : optionalString(raw, code);
-    const success = optionalBoolean(record['success'], 'CREDIT_REQUEST_SUCCESS_INVALID');
-    const status = optionalString(record['status'], 'CREDIT_REQUEST_STATUS_INVALID');
-    const error = optionalString(record['error'], 'CREDIT_REQUEST_ERROR_INVALID');
-    const approvedAmount = optionalString(record['approvedAmount'], 'CREDIT_REQUEST_AMOUNT_INVALID');
-    const requestId = optionalString(record['requestId'], 'CREDIT_REQUEST_ID_INVALID');
-    const runtimeId = nullableString(record['runtimeId'], 'CREDIT_REQUEST_RUNTIME_ID_INVALID');
-    const result: CreditRequestResponse = {};
-    if (success !== undefined) result.success = success;
-    if (status !== undefined) result.status = status;
-    if (error !== undefined) result.error = error;
-    if (approvedAmount !== undefined) result.approvedAmount = approvedAmount;
-    if (requestId !== undefined) result.requestId = requestId;
-    if (runtimeId !== undefined) result.runtimeId = runtimeId;
-    return result;
+  /** 'credit-<16 hex>': the Account replay id of one credit request. */
+  function newCreditRequestId(): string {
+    const bytes = new Uint8Array(8);
+    globalThis.crypto.getRandomValues(bytes);
+    return `credit-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
   }
 
-  async function submitExtendCredit(_successMessage: string) {
-    if (!effectiveCounterparty) return;
+  /**
+   * Extend: we set our own credit line to the counterparty. Request: we sign a
+   * `credit_request` inside the bilateral account; a hub answers after commit
+   * with its own credit line (capped per request, never lowering a larger one).
+   */
+  function buildCreditTx(counterpartyEntityId: string): CreditEntityTx {
+    const data = { counterpartyEntityId, tokenId: selectedTokenId, amount: creditAmountBigInt };
+    return mode === 'request'
+      ? { type: 'requestCredit', data: { ...data, requestId: newCreditRequestId() } }
+      : { type: 'extendCredit', data };
+  }
+
+  async function submitCredit(counterpartyEntityId: string) {
+    const label = mode === 'request' ? 'Credit request' : 'Credit action';
     try {
       const env = activeEnv;
       const handle = get(runtimeControllerHandle);
@@ -104,66 +87,23 @@
         || signerId
         || (env ? requireSignerIdForEntity(env, entityId, 'credit-form') : '');
       if (!resolvedSigner) throw new Error('Signer is required for credit command');
-
-      const input: CreditEntityInput = {
-        entityId,
-        signerId: resolvedSigner,
-        entityTxs: [{
-          type: 'extendCredit',
-          data: {
-            counterpartyEntityId: effectiveCounterparty,
-            tokenId: selectedTokenId,
-            amount: creditAmountBigInt,
-          },
-        }],
-      };
-
       if (!submitRuntimeInput) throw new Error('Credit command path is not connected');
-      await submitRuntimeInput({ runtimeTxs: [], entityInputs: [input], jInputs: [] });
+      const entityTxs = [buildCreditTx(counterpartyEntityId)];
+      await submitRuntimeInput({ runtimeTxs: [], entityInputs: [{ entityId, signerId: resolvedSigner, entityTxs }], jInputs: [] });
       creditAmountBigInt = 0n;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      errorLog.log('Credit action failed', 'Credit Form', { entityId, counterpartyId: effectiveCounterparty, err });
-      error.set(`Credit action failed: ${message}`);
+      errorLog.log(`${label} failed`, 'Credit Form', { entityId, counterpartyId: counterpartyEntityId, err });
+      error.set(`${label} failed: ${message}`);
     }
   }
 
-  async function extendCredit() {
-    if (submitting) throw new Error('CREDIT_SUBMISSION_IN_FLIGHT');
-    submitting = true;
-    try {
-      await submitExtendCredit(`Credit extended: ${activeXlnFunctions?.formatTokenAmount(selectedTokenId, creditAmountBigInt)}`);
-    } finally {
-      submitting = false;
-    }
-  }
-
-  async function requestCredit() {
+  async function submit() {
     if (submitting) throw new Error('CREDIT_SUBMISSION_IN_FLIGHT');
     if (!effectiveCounterparty) return;
     submitting = true;
     try {
-      if (!activeIsLive) throw new Error('Credit requests are only available in LIVE mode');
-      const apiBase = typeof window === 'undefined' ? '' : window.location.origin;
-      const response = await fetch(`${apiBase}/api/credit/request`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userEntityId: entityId,
-          hubEntityId: effectiveCounterparty,
-          tokenId: selectedTokenId,
-          amount: creditAmountBigInt.toString(),
-        }),
-      });
-      const result = decodeCreditRequestResponse(await readJsonUnknown(response));
-      if (!response.ok || result.success !== true) {
-        throw new Error(result.error || `Credit request failed (${response.status})`);
-      }
-      creditAmountBigInt = 0n;
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      errorLog.log('Credit request failed', 'Credit Form', { entityId, counterpartyId: effectiveCounterparty, err });
-      error.set(`Credit request failed: ${message}`);
+      await submitCredit(effectiveCounterparty);
     } finally {
       submitting = false;
     }
@@ -196,11 +136,11 @@
     />
     <div class="button-row">
       {#if mode === 'request'}
-        <button class="action-button tertiary" on:click={requestCredit} disabled={submitting || !effectiveCounterparty || creditAmountBigInt <= 0n}>
+        <button class="action-button tertiary" on:click={submit} disabled={submitting || !effectiveCounterparty || creditAmountBigInt <= 0n}>
           {submitting ? 'Submitting…' : 'Request Credit'}
         </button>
       {:else}
-        <button class="action-button secondary" on:click={extendCredit} disabled={submitting || !effectiveCounterparty || creditAmountBigInt <= 0n}>
+        <button class="action-button secondary" on:click={submit} disabled={submitting || !effectiveCounterparty || creditAmountBigInt <= 0n}>
           {submitting ? 'Submitting…' : 'Extend Credit'}
         </button>
       {/if}

@@ -7,7 +7,7 @@
 use thiserror::Error;
 
 /// Closed canonical EntityTx discriminant set shared with TypeScript.
-pub const ENTITY_TX_TYPES: [&str; 65] = [
+pub const ENTITY_TX_TYPES: [&str; 66] = [
     "accountInput",
     "admitCrossJurisdictionBookOrder",
     "boardHandover",
@@ -59,6 +59,7 @@ pub const ENTITY_TX_TYPES: [&str; 65] = [
     "registerCrossJurisdictionSwap",
     "removeCrossJurisdictionBookOrder",
     "requestCollateral",
+    "requestCredit",
     "requestCrossJurisdictionClear",
     "materializeCrossJurisdictionClear",
     "materializeCrossJurisdictionSwap",
@@ -130,6 +131,7 @@ pub enum EntityTxKind {
     RegisterCrossJurisdictionSwap,
     RemoveCrossJurisdictionBookOrder,
     RequestCollateral,
+    RequestCredit,
     RequestCrossJurisdictionClear,
     ResolveHtlcLock,
     RuntimeOutput,
@@ -206,6 +208,7 @@ impl EntityTxKind {
             "registerCrossJurisdictionSwap" => Self::RegisterCrossJurisdictionSwap,
             "removeCrossJurisdictionBookOrder" => Self::RemoveCrossJurisdictionBookOrder,
             "requestCollateral" => Self::RequestCollateral,
+            "requestCredit" => Self::RequestCredit,
             "requestCrossJurisdictionClear" => Self::RequestCrossJurisdictionClear,
             "resolveHtlcLock" => Self::ResolveHtlcLock,
             "runtimeOutput" => Self::RuntimeOutput,
@@ -278,6 +281,7 @@ impl EntityTxKind {
             Self::RegisterCrossJurisdictionSwap => "registerCrossJurisdictionSwap",
             Self::RemoveCrossJurisdictionBookOrder => "removeCrossJurisdictionBookOrder",
             Self::RequestCollateral => "requestCollateral",
+            Self::RequestCredit => "requestCredit",
             Self::RequestCrossJurisdictionClear => "requestCrossJurisdictionClear",
             Self::ResolveHtlcLock => "resolveHtlcLock",
             Self::RuntimeOutput => "runtimeOutput",

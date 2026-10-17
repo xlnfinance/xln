@@ -25,7 +25,7 @@ import { getLiveJAdapterEntries } from '../../runtime/j-submit/live-jadapters';
 import type { EntityInput } from '../../entity/types';
 import { ethers } from 'ethers';
 import { getBestAsk, getStaticSwapTokenDimensions, SWAP_LOT_SCALE } from '../../swapbook';
-import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig } from '../harness/boot';
+import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig, DEMO_JURISDICTION_NAME } from '../harness/boot';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
 import { formatRuntime } from '../../qa/runtime-ascii';
 import {
@@ -40,7 +40,11 @@ import {
   processJEvents,
   setScenarioStorageEnabled,
   syncChain,
+  formatTokenMoney,
+  snap,
 } from '../harness/helpers';
+import { disputeWindowText } from '../harness/story';
+import { tell } from '../harness/narration';
 import { createGossipLayer } from '../../network/p2p/gossip';
 import { getTokenInfo } from '../../account/utils';
 import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
@@ -113,6 +117,11 @@ const TRADE_USDC_MAIN_UNITS = TRADE_ETH * ETH_PRICE_MAIN;
 
 const usdcForEth = (ethUnits: bigint, price: bigint) => usdc(ethUnits * price);
 
+/** Narration money from whole units: `60,000 USDC`, `20 WETH`. */
+const usdcText = (units: bigint): string => formatTokenMoney(USDC_TOKEN_ID, usdc(units));
+const ethText = (units: bigint): string => formatTokenMoney(ETH_TOKEN_ID, eth(units));
+const priceText = (price: bigint): string => `${usdcText(price)} per ${getTokenInfo(ETH_TOKEN_ID).symbol}`;
+
 const CAROL_SELL_ETH = TRADE_ETH_DOUBLE;
 const CAROL_SELL_2_ETH = TRADE_ETH;
 const DAVE_BUY_ETH = TRADE_ETH_HALF;
@@ -120,17 +129,14 @@ const DAVE_SWEEP_ETH = CAROL_SELL_ETH + CAROL_SELL_2_ETH - DAVE_BUY_ETH;
 
 const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
 
-// Cross layout in depth (positions are RELATIVE to J-machine)
-const SWAP_RADIUS = 66; // 200 / 3 ≈ 66
-const SWAP_CENTER_Y = -40; // halfway to J-machine from previous center
-const SWAP_OUTER_Y = -80;
-
+// Fan below the dealer, in one plane facing the audience (positions are RELATIVE to J-machine):
+// the phase-2 traders sit on the wings, the phase-3 traders on the lower arc.
 const SWAP_POSITIONS: Record<string, { x: number; y: number; z: number }> = {
-  Hub: { x: 0, y: SWAP_CENTER_Y, z: 0 },
-  Alice: { x: -SWAP_RADIUS, y: SWAP_OUTER_Y, z: 0 },
-  Bob: { x: SWAP_RADIUS, y: SWAP_OUTER_Y, z: 0 },
-  Carol: { x: 0, y: SWAP_OUTER_Y, z: -SWAP_RADIUS },
-  Dave: { x: 0, y: SWAP_OUTER_Y, z: SWAP_RADIUS },
+  Hub: { x: 0, y: -40, z: 0 },
+  Alice: { x: -66, y: -62, z: 0 },
+  Bob: { x: 66, y: -62, z: 0 },
+  Carol: { x: -30, y: -98, z: 0 },
+  Dave: { x: 30, y: -98, z: 0 },
 };
 
 // Fill ratio constants (uint16)
@@ -281,12 +287,12 @@ export async function swap(env: RuntimeReplica): Promise<void> {
     jadapter = await ensureJAdapter(env);
     bindScenarioJReplica(
       env,
-      createJReplica(env, 'Swap Demo', jadapter.addresses.depository, J_MACHINE_POSITION),
+      createJReplica(env, DEMO_JURISDICTION_NAME, jadapter.addresses.depository, J_MACHINE_POSITION),
       jadapter,
     );
     jadapter.startWatching(env);
   }
-  const jurisdiction = createJurisdictionConfig('Swap Demo', jadapter.addresses.depository, jadapter.addresses.entityProvider);
+  const jurisdiction = createJurisdictionConfig(DEMO_JURISDICTION_NAME, jadapter.addresses.depository, jadapter.addresses.entityProvider);
   console.log('✅ JAdapter J-Machine created\n');
 
   // ============================================================================
@@ -294,6 +300,12 @@ export async function swap(env: RuntimeReplica): Promise<void> {
   // ============================================================================
   console.log('📦 Creating entities: Alice, Hub, Bob, Carol, Dave...');
 
+  snap(env, 'Five banks join the Depository', {
+    what: 'Alice, Hub, Bob, Carol and Dave register as entities on the Depository contract. Hub will act as a dealer; the others are its customers.',
+    why: 'This scenario shows foreign exchange inside bilateral accounts: two currencies, one dealer, and no pooled exchange account.',
+    tradfiParallel: 'Banks with accounts in the same settlement system, trading FX through a dealer bank.',
+    keyMetrics: ['Participants: 5', `Pair: ${getTokenInfo(ETH_TOKEN_ID).symbol}/${getTokenInfo(USDC_TOKEN_ID).symbol}`],
+  });
   const { registerEntities: bootRegisterEntities } = await import('../harness/boot');
   const registrationInputs = [
     { name: 'Alice', signer: '1', position: SWAP_POSITIONS['Alice'] || { x: 0, y: 0, z: 0 } },
@@ -319,6 +331,12 @@ export async function swap(env: RuntimeReplica): Promise<void> {
   // ============================================================================
   console.log('🔗 Opening Alice ↔ Hub bilateral account...');
 
+  snap(env, 'Alice opens an account with Hub', {
+    what: 'Alice opens one bilateral account with Hub. It can carry several currencies side by side.',
+    why: 'Every trade Alice makes with Hub will be a change to this one account, signed by both.',
+    tradfiParallel: 'A bilateral dealing relationship with a single co-signed record per counterparty.',
+  });
+
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
@@ -343,6 +361,13 @@ export async function swap(env: RuntimeReplica): Promise<void> {
   // Batch all credit extensions in parallel then wait for convergence
   // ETH: Hub→Alice + Alice→Hub (both sides need capacity)
   // USDC: Hub→Alice + Alice→Hub (both sides need capacity)
+
+  snap(env, 'Credit lines in two currencies', {
+    what: `Alice and Hub grant each other ${ethText(ETH_CAPACITY_UNITS)} and ${usdcText(USDC_CAPACITY_UNITS)} of credit.`,
+    why: 'Each bank sets how much the other may owe it, per currency, with no collateral behind it here. Trades settle inside the accounts within these limits, without moving reserves first.',
+    tradfiParallel: 'Bilateral FX settlement limits, one per currency, unsecured.',
+    keyMetrics: [`${getTokenInfo(ETH_TOKEN_ID).symbol} line: ${ethText(ETH_CAPACITY_UNITS)} each way`, `${getTokenInfo(USDC_TOKEN_ID).symbol} line: ${usdcText(USDC_CAPACITY_UNITS)} each way`],
+  });
 
   await process(env, [
     {
@@ -432,6 +457,11 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
 
   // Initialize hub's orderbook extension (required for RJEA flow)
   const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../../swapbook');
+  snap(env, 'Hub opens an order book', {
+    what: `Hub enables a ${getTokenInfo(ETH_TOKEN_ID).symbol}/${getTokenInfo(USDC_TOKEN_ID).symbol} order book. Customers send orders through their own account with Hub; Hub matches them.`,
+    why: 'Hub never takes custody of a pooled balance. Each fill is a change to the customer\'s own bilateral account, which the customer co-signs.',
+    tradfiParallel: 'A dealer internalising client FX flow, with every client\'s settlement confined to its own account.',
+  });
   await process(env, [{
     entityId: hub.id,
     signerId: hub.signer,
@@ -463,6 +493,11 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   console.log('📦 Adding Bob...');
   const bob = getRegisteredEntity('3');
 
+  snap(env, 'Bob connects to Hub', {
+    what: `Bob opens an account with Hub and they exchange the same credit lines: ${ethText(ETH_CAPACITY_UNITS)} and ${usdcText(USDC_CAPACITY_UNITS)} each way.`,
+    why: 'Alice and Bob never need an account with each other. Hub intermediates, and each side\'s risk stays inside its own account with Hub.',
+    tradfiParallel: 'Two clients of the same dealer bank, each with its own settlement line.',
+  });
   await commitRuntimeInput(env, { runtimeTxs: [createTestEntityImportRuntimeTx(env, {
     entityId: bob.id,
     signerId: bob.signer,
@@ -514,8 +549,25 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   console.log(`TEST: Alice SELL ${TRADE_ETH} ETH @ ${ETH_PRICE_MAIN}, Bob BUY ${TRADE_ETH_HALF} ETH @ ${ETH_PRICE_HIGH}`);
   console.log('═══════════════════════════════════════════════════════════════\n');
 
+  // A presentation starts here: the frames above are setup, summarised by this beat.
+  tell(env, {
+    title: 'Starting point: a dealer and two customers',
+    what: `On a local test chain, Hub runs a ${getTokenInfo(ETH_TOKEN_ID).symbol}/${getTokenInfo(USDC_TOKEN_ID).symbol} order book. Alice and Bob each have one account with Hub, with credit lines of ${ethText(ETH_CAPACITY_UNITS)} and ${usdcText(USDC_CAPACITY_UNITS)} each way and no collateral; nobody holds reserves on the Depository.`,
+    why: 'Every trade will be a change to a customer\'s own account with the dealer, signed by both. With credit lines alone, each side\'s exposure is unsecured up to its limits.',
+    tradfiParallel: 'Two clients of a dealer bank, each with its own unsecured settlement limits.',
+    keyMetrics: [`${getTokenInfo(ETH_TOKEN_ID).symbol} line: ${ethText(ETH_CAPACITY_UNITS)} each way`, `${getTokenInfo(USDC_TOKEN_ID).symbol} line: ${usdcText(USDC_CAPACITY_UNITS)} each way`, 'Collateral: 0'],
+    focusEntityIds: [alice.id, hub.id, bob.id],
+    condensePrior: true,
+  });
+
   // Step 1: Alice places swap_offer on Alice↔Hub account
   console.log(`📊 Step 1: Alice places swap_offer (${TRADE_ETH} ETH → ${TRADE_USDC_MAIN_UNITS} USDC)...`);
+  snap(env, `Alice offers ${ethText(TRADE_ETH)}`, {
+    what: `Alice places a limit order: sell ${ethText(TRADE_ETH)} for ${usdcText(TRADE_USDC_MAIN_UNITS)}, ${priceText(ETH_PRICE_MAIN)}. The order sits in her account with Hub.`,
+    why: 'The offer is part of the co-signed account state, so the capacity it uses is reserved and cannot be promised twice.',
+    tradfiParallel: 'A resting limit order with a dealer, pre-validated against the client\'s settlement line.',
+    keyMetrics: [`Sell: ${ethText(TRADE_ETH)}`, `Limit: ${priceText(ETH_PRICE_MAIN)}`],
+  });
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
@@ -563,6 +615,12 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   const bobWallStartedAt = getPerfMs();
   const processCpuUsage = globalThis.process?.cpuUsage?.bind(globalThis.process);
   const bobCpuStartedAt = processCpuUsage?.();
+  snap(env, `Bob buys ${ethText(TRADE_ETH_HALF)}: Alice and Bob each settle with Hub`, {
+    what: `Bob bids for ${ethText(TRADE_ETH_HALF)} at up to ${priceText(ETH_PRICE_HIGH)}. Hub matches him against Alice at her price. Each customer settles with Hub in their own account: Alice delivers ${ethText(TRADE_ETH_HALF)} and receives ${usdcText(TRADE_ETH_HALF * ETH_PRICE_MAIN)}; Bob receives ${ethText(TRADE_ETH_HALF)} and pays at Alice's price, below his limit.`,
+    why: 'Inside each account both currency legs change in one co-signed frame, so neither customer delivers one currency without receiving the other. The two accounts update separately; between them, Hub carries the risk.',
+    tradfiParallel: 'Not CLS: bilateral claims on the dealer inside unsecured credit lines, with no multilateral netting and no central bank money. In common with payment-versus-payment: each customer\'s two legs move together.',
+    keyMetrics: [`Bid: ${ethText(TRADE_ETH_HALF)}`, `Limit: ${priceText(ETH_PRICE_HIGH)}`],
+  });
   await process(env, [{
     entityId: bob.id,
     signerId: bob.signer,
@@ -718,12 +776,25 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   }
 
   console.log('  ✅ Phase 2 assertions passed');
+  tell(env, {
+    title: `Filled at Alice's price: ${ethText(TRADE_ETH_HALF)}`,
+    what: `Hub matched Bob against Alice. In Alice's account she delivered ${ethText(TRADE_ETH_HALF)} and received ${usdcText(TRADE_ETH_HALF * ETH_PRICE_MAIN)}; in Bob's account he received ${ethText(TRADE_ETH_HALF)} and paid for it in USDC at Alice's price. Each frame is co-signed by the customer and the dealer.`,
+    why: 'The fill is now part of each customer\'s own account state. Nothing reached the Depository: these are bilateral positions inside the credit lines.',
+    tradfiParallel: 'Each client\'s two legs settled together in its own account with the dealer.',
+    keyMetrics: [`Filled: ${ethText(TRADE_ETH_HALF)} at ${priceText(ETH_PRICE_MAIN)}`, `Alice receives: ${usdcText(TRADE_ETH_HALF * ETH_PRICE_MAIN)}`, `Left on Alice's order: ${ethText(TRADE_ETH - TRADE_ETH_HALF)}`],
+    focusEntityIds: [alice.id, hub.id, bob.id],
+  });
 
   // Clear residual open orders to isolate dispute test
   const [, aliceBeforeDispute] = findReplica(env, alice.id);
   const aliceHubAccountPreDispute = aliceBeforeDispute.state.accounts.get(hub.id);
   if (aliceHubAccountPreDispute?.state.swapOffers?.has('alice-sell-001')) {
     console.log('🧹 Cancelling leftover alice-sell-001 before dispute test...');
+    snap(env, 'Alice cancels the rest', {
+      what: `Alice cancels the unfilled ${ethText(TRADE_ETH - TRADE_ETH_HALF)} of her order. Hub co-signs the cancellation and the reserved capacity is released.`,
+      why: 'A cancellation is a signed account change like any other, so both sides agree exactly what is still open.',
+      tradfiParallel: 'Withdrawing a resting order with a dealer.',
+    });
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -757,6 +828,12 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   const bobDisputeBaselineUsdc = bobDisputeAccount?.state.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
 
   console.log(`📊 Alice: swap_offer (${disputeEth} ETH → ${disputeUsdc} USDC)`);
+  snap(env, `A second order: ${ethText(disputeEth)}`, {
+    what: `Alice offers ${ethText(disputeEth)} for ${usdcText(disputeUsdc)} again. This time she will stop responding halfway through.`,
+    why: 'The next steps show what protects the dealer when a customer disappears between two legs of a trade.',
+    tradfiParallel: 'Replacement-cost risk, not principal risk: Alice\'s signed order makes her leg enforceable, and Hub pays her nothing until it is.',
+    keyMetrics: [`Sell: ${ethText(disputeEth)}`, `Limit: ${priceText(ETH_PRICE_MAIN)}`],
+  });
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
@@ -777,6 +854,12 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   await converge(env);
 
   console.log(`📊 Bob: swap_offer (40% fill target)`);
+  snap(env, 'Bob buys 40% while Alice goes offline', {
+    what: `Bob buys ${ethText(disputeFillEth)}, 40% of Alice's order. Hub matches it and settles Bob's side, but Alice has gone offline and never co-signs her side of the fill.`,
+    why: 'Hub has settled with Bob and is owed the matching leg by Alice. It has paid Alice nothing, so what it risks is the cost of replacing her leg, not the principal.',
+    tradfiParallel: 'One side of a dealer\'s back-to-back trade settled, the other counterparty silent: a replacement-cost exposure.',
+    keyMetrics: [`Bid: ${ethText(disputeFillEth)} (40% of the order)`, `Limit: ${priceText(ETH_PRICE_MAIN)}`],
+  });
   await process(env, [{
     entityId: bob.id,
     signerId: bob.signer,
@@ -860,6 +943,12 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
 
   console.log('⚔️ Hub starts dispute (will enforce fillRatio via calldata)');
   dropAliceIngress();
+  snap(env, 'Hub disputes with the fill as evidence', {
+    what: 'Hub takes the Alice account to the Depository. The claim carries the last co-signed state plus the matched fill ratio, 40%, as evidence.',
+    why: 'Alice signed the order; the fill ratio proves how much of it was matched. The Depository can enforce Alice\'s leg without her cooperation.',
+    tradfiParallel: 'Close-out of an unsettled FX trade, enforced from the matched confirmation instead of trust.',
+    keyMetrics: ['Evidence: co-signed order + fill ratio 40%'],
+  });
   await process(env, [{
     entityId: hub.id,
     signerId: hub.signer,
@@ -883,6 +972,13 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
     `Dispute start must encode fill evidence (got ${draftedStart.starterInitialArguments})`,
   );
 
+  const swapChallengeWindow = disputeWindowText(findReplica(env, hub.id)[1].state.accounts.get(alice.id)!.state.disputeConfig);
+  snap(env, 'Dispute filed: the challenge window opens', {
+    what: `Hub submits the dispute to the Depository. Alice has ${swapChallengeWindow} to answer with a newer co-signed state; the demo fast-forwards the clock.`,
+    why: 'An older state loses only if the other side answers in time with a newer one, so each bank — or a watchtower — must watch the chain during the window. Alice has nothing newer: the fill is the latest thing she agreed to.',
+    tradfiParallel: 'Filing a claim with a set period for the counterparty to contest it.',
+    keyMetrics: [`Challenge window: ${swapChallengeWindow}`],
+  });
   await process(env, [{
     entityId: hub.id,
     signerId: hub.signer,
@@ -943,6 +1039,11 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
     `(${advanced.startUnix}→${advanced.finalUnix}, +${advanced.advancedSeconds}s)`,
   );
   // Entity clocks move only inside a signed frame; wake once after the jump.
+  snap(env, 'Window closes: finalization submitted', {
+    what: 'The challenge window ends with no newer state from Alice. The dispute finalization is drafted and submitted with the fill ratio attached.',
+    why: 'A deadline, not a negotiation, ends the dispute.',
+    tradfiParallel: 'The contest period lapses and the claim becomes enforceable.',
+  });
   await process(env);
 
   const readFinalize = (entityId: string) => {
@@ -1017,6 +1118,12 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
     }]);
   }
 
+  snap(env, 'Dispute settled on-chain', {
+    what: 'The Depository finalizes the account from the evidence, including Alice\'s 40% fill, and the account stays closed. These accounts run on credit lines alone, with no reserves or collateral on the Depository, so any amount one side still owes the other is booked on-chain as a debt in that currency.',
+    why: 'Hub\'s claim for the leg it settled with Bob is now an on-chain claim on Alice, created without her cooperation. What it recovers depends on her future reserves: credit without collateral is only as good as the debtor.',
+    tradfiParallel: 'The Depository applies the latest co-signed state mechanically; legal finality depends on governing law.',
+    keyMetrics: ['Enforced fill: 40%', 'Account status: closed'],
+  });
   for (let i = 0; i < 20; i++) {
     await process(env);
     await syncChain(env, 1);
@@ -1083,6 +1190,11 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
 
   // Open accounts with Hub
   console.log('🔗 Opening accounts with Hub...');
+  snap(env, 'Carol and Dave connect', {
+    what: `Carol and Dave open accounts with Hub and exchange the same two-currency credit lines: ${ethText(ETH_CAPACITY_UNITS)} and ${usdcText(USDC_CAPACITY_UNITS)} each way.`,
+    why: 'Adding a participant adds one bilateral account with the dealer. Nobody else\'s account changes.',
+    tradfiParallel: 'New clients onboarded to a dealer with their own settlement lines.',
+  });
   for (const entity of [carol, dave]) {
     await process(env, [
       { entityId: entity.id, signerId: entity.signer, entityTxs: [{ type: 'openAccount', data: {
@@ -1115,6 +1227,12 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
   // Carol places large SELL order
   // ============================================================================
   console.log(`📊 Carol places LARGE SELL: ${CAROL_SELL_ETH} ETH @ ${ETH_PRICE_LOW} USDC...`);
+  snap(env, `Carol offers ${ethText(CAROL_SELL_ETH)}`, {
+    what: `Carol places a large sell order: ${ethText(CAROL_SELL_ETH)} at ${priceText(ETH_PRICE_LOW)}.`,
+    why: 'Large orders rest in the book until buyers arrive; each partial fill settles on its own.',
+    tradfiParallel: 'A large resting offer with a dealer, filled in parts.',
+    keyMetrics: [`Sell: ${ethText(CAROL_SELL_ETH)}`, `Limit: ${priceText(ETH_PRICE_LOW)}`],
+  });
   await process(env, [{
     entityId: carol.id,
     signerId: carol.signer,
@@ -1147,6 +1265,12 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
   // Dave buys into Carol's sell
   // ============================================================================
   console.log(`\n📊 Dave BUYs ${DAVE_BUY_ETH} ETH @ ${ETH_PRICE_MAIN} (eats into Carol's sell)...`);
+  snap(env, `Dave buys ${ethText(DAVE_BUY_ETH)} at Carol's price`, {
+    what: `Dave bids for ${ethText(DAVE_BUY_ETH)} at up to ${priceText(ETH_PRICE_MAIN)} and is filled at Carol's ${priceText(ETH_PRICE_LOW)}. Carol receives ${usdcText(DAVE_BUY_ETH * ETH_PRICE_LOW)}.`,
+    why: 'The trade settles in the two bilateral accounts with Hub, Carol\'s and Dave\'s, each with both of its legs in one signed frame.',
+    tradfiParallel: 'Each client\'s two legs move together in its own account with the dealer.',
+    keyMetrics: [`Bid: ${ethText(DAVE_BUY_ETH)}`, `Limit: ${priceText(ETH_PRICE_MAIN)}`],
+  });
   await process(env, [{
     entityId: dave.id,
     signerId: dave.signer,
@@ -1165,6 +1289,14 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
     }],
   }]);
   await converge(env);
+  tell(env, {
+    title: `Filled at Carol's price: ${ethText(DAVE_BUY_ETH)}`,
+    what: `Dave was filled at Carol's ${priceText(ETH_PRICE_LOW)}, below his limit. Carol's account and Dave's account with Hub each changed by one co-signed frame with both legs.`,
+    why: 'Price improvement goes to the buyer: he pays the resting seller\'s price.',
+    tradfiParallel: 'Each client\'s two legs move together in its own account with the dealer.',
+    keyMetrics: [`Filled: ${ethText(DAVE_BUY_ETH)} at ${priceText(ETH_PRICE_LOW)}`, `Carol receives: ${usdcText(DAVE_BUY_ETH * ETH_PRICE_LOW)}`, `Carol's order left: ${ethText(CAROL_SELL_ETH - DAVE_BUY_ETH)}`],
+    focusEntityIds: [carol.id, hub.id, dave.id],
+  });
 
   // Print orderbook after trade
   const [, hubRep2] = findReplica(env, hub.id);
@@ -1178,6 +1310,12 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
   // Carol places another SELL
   // ============================================================================
   console.log(`\n📊 Carol places another SELL: ${CAROL_SELL_2_ETH} ETH @ ${ETH_PRICE_HIGH}...`);
+  snap(env, `Carol adds ${ethText(CAROL_SELL_2_ETH)} at ${priceText(ETH_PRICE_HIGH)}`, {
+    what: `Carol adds a second offer: ${ethText(CAROL_SELL_2_ETH)} at ${priceText(ETH_PRICE_HIGH)}. The book now has two price levels.`,
+    why: 'Each level is a separate signed offer inside Carol\'s account with Hub.',
+    tradfiParallel: 'A dealer\'s ladder of offers at increasing prices.',
+    keyMetrics: [`Asks: ${ethText(CAROL_SELL_ETH - DAVE_BUY_ETH)} at ${usdcText(ETH_PRICE_LOW)}, ${ethText(CAROL_SELL_2_ETH)} at ${usdcText(ETH_PRICE_HIGH)}`],
+  });
   await process(env, [{
     entityId: carol.id,
     signerId: carol.signer,
@@ -1209,6 +1347,17 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
   // Dave sweeps the book (eats both levels)
   // ============================================================================
   console.log(`\n📊 Dave SWEEPS BOOK: BUY ${DAVE_SWEEP_ETH} ETH @ ${ETH_PRICE_SWEEP} (eats all asks)...`);
+  const sweepLowEth = CAROL_SELL_ETH - DAVE_BUY_ETH;
+  // USDC each customer's account moved by the sweep, read from Hub's side of both accounts.
+  const usdcOffdelta = (customerId: string): bigint =>
+    findReplica(env, hub.id)[1].state.accounts.get(customerId)?.state.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
+  const sweepUsdcBefore = { carol: usdcOffdelta(carol.id), dave: usdcOffdelta(dave.id) };
+  snap(env, 'Dave sweeps the book', {
+    what: `Dave buys ${ethText(DAVE_SWEEP_ETH)} with a limit of ${priceText(ETH_PRICE_SWEEP)}. Hub fills him across both levels: ${ethText(sweepLowEth)} at ${usdcText(ETH_PRICE_LOW)} and ${ethText(CAROL_SELL_2_ETH)} at ${usdcText(ETH_PRICE_HIGH)}.`,
+    why: 'One order, several fills, every one settled with both legs in the bilateral accounts involved. The dealer ends flat; only the customers\' positions changed.',
+    tradfiParallel: 'An order walking a dealer\'s ladder, each fill settled with both legs together in the client\'s account.',
+    keyMetrics: [`Bid: ${ethText(DAVE_SWEEP_ETH)}`, `Limit: ${priceText(ETH_PRICE_SWEEP)}`],
+  });
   await process(env, [{
     entityId: dave.id,
     signerId: dave.signer,
@@ -1227,6 +1376,17 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
     }],
   }]);
   await converge(env);
+  const magnitude = (value: bigint): bigint => (value < 0n ? -value : value);
+  const davePaid = magnitude(usdcOffdelta(dave.id) - sweepUsdcBefore.dave);
+  const carolGot = magnitude(usdcOffdelta(carol.id) - sweepUsdcBefore.carol);
+  tell(env, {
+    title: 'The book is swept',
+    what: `Dave received ${ethText(DAVE_SWEEP_ETH)} across both price levels and paid ${formatTokenMoney(USDC_TOKEN_ID, davePaid)}; Carol received ${formatTokenMoney(USDC_TOKEN_ID, carolGot)}. ${davePaid === carolGot ? 'Hub passed both legs through and ends flat on this trade.' : `The difference, ${formatTokenMoney(USDC_TOKEN_ID, davePaid - carolGot)}, stays with Hub.`}`,
+    why: 'Every fill settled inside the two customers\' accounts with the dealer; no order is left resting.',
+    tradfiParallel: 'An order walking a dealer\'s ladder, each fill settled with both legs together in the client\'s account.',
+    keyMetrics: [`Filled: ${ethText(DAVE_SWEEP_ETH)}`, `Dave pays: ${formatTokenMoney(USDC_TOKEN_ID, davePaid)}`, 'Asks left: 0'],
+    focusEntityIds: [carol.id, hub.id, dave.id],
+  });
 
   // Final orderbook state
   const [, hubRepFinal] = findReplica(env, hub.id);

@@ -1162,7 +1162,8 @@ fn local_financial_view_requests(
                 AccountTx::LendingBorrowRequest { token_id, .. } => u32::try_from(*token_id)
                     .ok()
                     .and_then(|value| xln_rscore_engine::TokenId::new(value).ok()),
-                AccountTx::LendingRepay { token_id, .. } => Some(*token_id),
+                AccountTx::LendingRepay { token_id, .. }
+                | AccountTx::CreditRequest { token_id, .. } => Some(*token_id),
                 AccountTx::LendingCloseRequest { position_id, .. } => state
                     .lending
                     .as_ref()

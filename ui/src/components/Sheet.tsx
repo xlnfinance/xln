@@ -38,7 +38,7 @@ export function Sheet({
 			<div className="sheet-grab" />
 			<div className="sheet-header">
 				<span className="caps">{title ?? ''}</span>
-				<button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+				<button type="button" className="icon-btn" onClick={onClose} aria-label="Close" data-testid="sheet-close">
 					<Icon name="close" size={16} />
 				</button>
 			</div>

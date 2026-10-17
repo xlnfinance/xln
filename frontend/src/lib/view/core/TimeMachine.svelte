@@ -18,7 +18,7 @@
     type RuntimeViewHistoryScanState,
   } from '#lib/stores/runtimeViewStore.ts';
   import { toasts } from '#lib/stores/ui/toastStore.ts';
-  import { appState, appStateOperations } from '#lib/stores/appStateStore.ts';
+  import { appStateOperations } from '#lib/stores/appStateStore.ts';
   import {
     getXLN,
     refreshCurrentRuntimeProjection,
@@ -845,9 +845,9 @@
     <button
       class="dock-toggle-btn"
       data-testid="network-machine-mode-toggle"
-      on:click={() => appStateOperations.setMode($appState.mode === 'dev' ? 'user' : 'dev')}
+      on:click={() => window.location.assign('/ui/')}
     >
-      {$appState.mode === 'dev' ? 'User' : 'Dock'}
+      Wallet
     </button>
   </div>
 

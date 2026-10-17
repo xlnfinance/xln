@@ -15,6 +15,7 @@ import { Move } from './screens/Move';
 import { ActivityScreen } from './screens/Activity';
 import { SettingsScreen } from './screens/Settings';
 import { Manage } from './screens/Manage';
+import { CustomContracts } from './screens/CustomContracts';
 import { Assets } from './screens/Assets';
 import { Lending } from './screens/Lending';
 import { Ownership } from './screens/Ownership';
@@ -28,7 +29,9 @@ function useInvoiceDeepLink(): void {
 	useEffect(() => {
 		const raw = hash.startsWith('#') ? hash.slice(1) : hash;
 		if (!raw.toLowerCase().startsWith('pay/')) return;
-		navigate('/pay', { replace: true, state: { invoice: window.location.href } });
+		// Build the link from the hash this render saw, not the live address: a repeated effect
+		// (StrictMode, or a remount behind the Gate) runs after the first one already moved to /pay.
+		navigate('/pay', { replace: true, state: { invoice: new URL(`#${raw}`, window.location.href).href } });
 	}, [hash, navigate]);
 }
 
@@ -71,6 +74,7 @@ export default function App() {
 		<Shell>
 			<Routes>
 				<Route path="/" element={<HomeOrDesk />} />
+        <Route path="/manage/custom-contracts" element={<CustomContracts />} />
 				<Route path="/accounts/:counterpartyId" element={<AccountDetail />} />
 				<Route path="/pay" element={<Pay />} />
 				<Route path="/swap" element={<Swap />} />

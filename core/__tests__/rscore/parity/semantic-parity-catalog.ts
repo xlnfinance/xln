@@ -54,6 +54,16 @@ const ACCOUNT_LENDING_EVIDENCE = [
   'rscore/crates/engine/tests/lending_parity.rs',
   'rscore/fixtures/account-semantics/lending-v1.json',
 ] as const;
+const ACCOUNT_CREDIT_REQUEST_EVIDENCE = [
+  'core/__tests__/rscore/parity/account/credit-request.test.ts',
+  'rscore/crates/engine/tests/monetary/credit_request.rs',
+  'rscore/fixtures/account-semantics/credit-request-v1.json',
+] as const;
+const ENTITY_CREDIT_REQUEST_EVIDENCE = [
+  'core/__tests__/payments/invariants/credit-request.test.ts',
+  'rscore/crates/entity-kernel/src/local_financial/payments/credit_request.rs',
+  'rscore/crates/entity-kernel/src/account/credit_request.rs',
+] as const;
 const ACCOUNT_CROSS_J_EVIDENCE = [
   'core/__tests__/rscore/parity/account-cross-j-semantic-parity.test.ts',
   'rscore/crates/runtime/tests/account_cross_j_semantic_parity.rs',
@@ -126,6 +136,7 @@ export const ACCOUNT_TX_SEMANTIC_CATALOG = [
   covered('account', 'lending_close_payout', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
   covered('account', 'add_delta', 'core/account/tx/handlers/balance/add-delta.ts', ACCOUNT_BALANCE_EVIDENCE),
   covered('account', 'set_credit_limit', 'core/account/tx/handlers/balance/set-credit-limit.ts', ACCOUNT_BALANCE_EVIDENCE),
+  covered('account', 'credit_request', 'core/account/tx/handlers/balance/credit-request.ts', ACCOUNT_CREDIT_REQUEST_EVIDENCE),
   covered(
     'account',
     'request_collateral',
@@ -198,6 +209,7 @@ export const ENTITY_TX_SEMANTIC_CATALOG = [
   coveredEntity('registerCrossJurisdictionSwap', 'core/entity/tx/handlers/cross-j/setup.ts', CROSS_J_OPENING_LIFECYCLE_EVIDENCE),
   coveredEntity('removeCrossJurisdictionBookOrder', 'core/entity/tx/handlers/cross-j/book-order.ts', CROSS_J_ENTITY_KINDS_EVIDENCE),
   coveredEntity('requestCollateral', 'core/entity/tx/handlers/account/lifecycle/admin.ts', ENTITY_SAME_J_FINANCIAL_EVIDENCE),
+  coveredEntity('requestCredit', 'core/entity/tx/handlers/account/credit-request.ts', ENTITY_CREDIT_REQUEST_EVIDENCE),
   coveredEntity('requestCrossJurisdictionClear', 'core/entity/tx/handlers/cross-j/clear.ts', CROSS_J_ENTITY_KINDS_EVIDENCE),
   coveredEntity('materializeCrossJurisdictionClear', 'core/entity/tx/handlers/cross-j/clear.ts', CROSS_J_ENTITY_KINDS_EVIDENCE),
   coveredEntity('materializeCrossJurisdictionSwap', 'core/entity/tx/handlers/cross-j/setup.ts', CROSS_J_OPENING_LIFECYCLE_EVIDENCE),

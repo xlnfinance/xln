@@ -47,6 +47,19 @@ export const getDefaultRebalancePolicyForToken = (tokenId: number): RebalancePol
 export const getDefaultRebalanceBaseFeeForToken = (tokenId: number): bigint =>
   buildDefaultRebalanceBaseFee(tokenDecimals(tokenId));
 
+/**
+ * Largest credit line a hub grants in answer to one committed
+ * `credit_request`: 1,000 whole tokens. Deterministic protocol constant shared
+ * with Rust (`entity-kernel/src/credit_request.rs`); never read from env.
+ */
+const CREDIT_REQUEST_CAP_WHOLE = 1_000n;
+
+/** `undefined` for a token without canonical metadata: no automatic grant. */
+export const getCreditRequestCapForToken = (tokenId: number): bigint | undefined =>
+  getKnownTokenIds().includes(tokenId)
+    ? scaleWholeTokenAmount(CREDIT_REQUEST_CAP_WHOLE, tokenDecimals(tokenId))
+    : undefined;
+
 type ResolvedRebalancePolicy = {
   r2cRequestSoftLimit: bigint;
   hardLimit: bigint;

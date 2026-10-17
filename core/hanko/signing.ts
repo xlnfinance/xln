@@ -158,21 +158,80 @@ export async function inspectHankoForHash(
   };
 }
 
+type SingleSignerBoardShape = Readonly<{ weight: bigint; threshold: bigint }>;
+
 // One ABI board encode + keccak per proposal for the same signer was pure
-// repetition on a Hub; the single-signer board hash is a function of the address.
+// repetition on a Hub; the single-signer board hash is a function of the
+// address and its configured weight/threshold.
 const singleSignerBoardHashMemo = new Map<string, string>();
-const singleSignerBoardHashFor = (signerAddress: string): string => {
-  const cached = singleSignerBoardHashMemo.get(signerAddress);
+const singleSignerBoardHashFor = (signerAddress: string, shape: SingleSignerBoardShape): string => {
+  const memoKey = `${signerAddress}:${shape.weight}:${shape.threshold}`;
+  const cached = singleSignerBoardHashMemo.get(memoKey);
   if (cached !== undefined) return cached;
   const hash = hashBoard(encodeBoard({
     mode: 'proposer-based',
-    threshold: 1n,
+    threshold: shape.threshold,
     validators: [signerAddress],
-    shares: { [signerAddress]: 1n },
+    shares: { [signerAddress]: shape.weight },
   })).toLowerCase();
   if (singleSignerBoardHashMemo.size >= 4_096) singleSignerBoardHashMemo.clear();
-  singleSignerBoardHashMemo.set(signerAddress, hash);
+  singleSignerBoardHashMemo.set(memoKey, hash);
   return hash;
+};
+
+const configuredSingleSignerShape = (
+  env: EntityRuntimeContext,
+  entityId: string,
+  signerAddress: string,
+  config: ConsensusConfig,
+): SingleSignerBoardShape => {
+  const validator = config.validators.length === 1 ? config.validators[0] ?? null : null;
+  const address = validator === null
+    ? null
+    : publicKeyToAddress(validator) ?? normalizeAddress(getSignerAddress(env, validator) ?? '');
+  const weight = validator === null
+    ? undefined
+    : buildCanonicalShareMap(config.shares).get(canonicalSignerKey(validator));
+  if (address !== signerAddress.toLowerCase() || weight === undefined) {
+    throw new Error(`SINGLE_SIGNER_HANKO_SIGNER_OUTSIDE_BOARD: entityId=${entityId} signer=${signerAddress}`);
+  }
+  return { weight, threshold: config.threshold };
+};
+
+/**
+ * Board shape of the one validator signing for `entityId`.
+ *
+ * Signer: this Runtime's key `signerAddress`. Authority: the Entity's own
+ * config (candidate state, else every hosted replica). `isSingleSignerBoard`
+ * admits any `{signer: w, threshold: t}` with w >= t, and a lazy id hashes
+ * exactly that board. A hardcoded 1/1 claim for a formed `{A:2,t:2}` Entity
+ * reconstructed a foreign board, missed the lazy self-proof and demanded
+ * certified-registry membership a lazy id never has
+ * (CERTIFIED_BOARD_SIGNING_MEMBERSHIP_MISSING halted the Runtime). Rust signs
+ * the same configured shape (`SigningIdentity` weight/threshold). A key that
+ * no hosted config names proves only its own 1/1 lazy board; the caller's
+ * binding check still rejects every other id.
+ */
+const resolveSingleSignerBoardShape = (
+  env: EntityRuntimeContext,
+  entityId: string,
+  signerAddress: string,
+  authorityState?: EntityState,
+): SingleSignerBoardShape => {
+  const normalizedEntityId = entityId.toLowerCase();
+  const configs = authorityState
+    ? [authorityState.config]
+    : [...env.state.eReplicas.values()]
+        .filter((replica) => replica.state.entityId.toLowerCase() === normalizedEntityId)
+        .map((replica) => replica.state.config);
+  if (configs.length === 0) return { weight: 1n, threshold: 1n };
+  const [shape, ...others] = configs.map((config) =>
+    configuredSingleSignerShape(env, entityId, signerAddress, config));
+  if (!shape) throw new Error(`SINGLE_SIGNER_HANKO_CONFIG_MISSING:${entityId}`);
+  if (others.some((other) => other.weight !== shape.weight || other.threshold !== shape.threshold)) {
+    throw new Error(`SINGLE_SIGNER_HANKO_REPLICA_DIVERGENCE: entityId=${entityId}`);
+  }
+  return shape;
 };
 
 /**
@@ -196,7 +255,8 @@ const resolveSingleSignerHankoClaim = (
   if (!signerAddress) {
     throw new Error(`HANKO_SIGNER_ADDRESS_MISSING: entityId=${entityId} signerId=${signerId}`);
   }
-  const singleSignerBoardHash = singleSignerBoardHashFor(signerAddress);
+  const shape = resolveSingleSignerBoardShape(env, entityId, signerAddress, authorityState);
+  const singleSignerBoardHash = singleSignerBoardHashFor(signerAddress, shape);
   const normalizedEntityId = encodeQuorumEntityId(entityId);
   // This board hash is both the authority check and the exact lazy Entity
   // reconstruction. Rebuilding the same ABI board a second time was pure
@@ -221,8 +281,8 @@ const resolveSingleSignerHankoClaim = (
   return {
     entityId: normalizedEntityId as `0x${string}`,
     entityIndexes: [0n],
-    weights: [1n],
-    threshold: 1n,
+    weights: [shape.weight],
+    threshold: shape.threshold,
     ...resolveHankoBoardDelays(),
   };
 };

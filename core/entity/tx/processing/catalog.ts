@@ -1,3 +1,4 @@
+import { rejectFailure } from '../../../protocol/errors/failure-taxonomy';
 import type { EntityTx } from '../../../types/entity-tx';
 
 /**
@@ -26,7 +27,7 @@ export const ENTITY_TX_TYPES = [
   'prepareCrossJurisdictionSwap', 'prepareDispute', 'processHtlcTimeouts', 'profile-update',
   'propose', 'proposeAccountsNow', 'proposeCancelSwap', 'r2c', 'r2e', 'r2r',
   'registerCrossJurisdictionSwap', 'removeCrossJurisdictionBookOrder',
-  'requestCollateral', 'requestCrossJurisdictionClear',
+  'requestCollateral', 'requestCredit', 'requestCrossJurisdictionClear',
   'materializeCrossJurisdictionClear', 'materializeCrossJurisdictionSwap',
   'resolveHtlcLock',
   'runtimeOutput', 'scheduledWake', 'setHubConfig', 'setRebalancePolicy',
@@ -50,6 +51,9 @@ export const requireKnownEntityTxType = (
 ): EntityTx['type'] => {
   if (!value || typeof value !== 'object') throw new Error(`${code}_INVALID`);
   const type = (value as { type?: unknown }).type;
+  if (type === 'customContract') {
+    throw rejectFailure('ENTITY_TX_KIND_OUT_OF_PROFILE', 'ENTITY_TX_KIND_OUT_OF_PROFILE:customContract');
+  }
   if (typeof type !== 'string' || !KNOWN_ENTITY_TX_TYPES.has(type)) {
     throw new Error(`${code}_TYPE_UNKNOWN:${String(type)}`);
   }

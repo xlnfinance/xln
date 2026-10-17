@@ -40,6 +40,20 @@ This scope prevails over older plans in `docs/` and over the history in `todo.md
   Release authority stays the binary evidence-coverage gate (passed / frozen required checks) in
   [docs/improvement-loop.md](docs/improvement-loop.md) and [docs/mainnet-acceptance-gate.md](docs/mainnet-acceptance-gate.md).
 
+## CANONICAL TESTNET POLICY (owner decision 2026-10-17)
+
+- XLN is testnet. Obsolete profiles, frames and persisted data are disposable;
+  reject unsupported formats loudly and regenerate from current canonical code.
+- Delete retired code, old schema readers, compatibility aliases, migrations and
+  fallback behavior. Never infer old-format provenance or restore obsolete data.
+- Reset only verified XLN testnet stores after stopping their owning runtimes.
+  Preserve unrelated source edits, other apps, credentials, SSH/Dispatch access
+  and agents' job evidence. Current checkpoint plus ordered WAL recovery remains.
+- Routine canonical integration choices follow existing financial invariants.
+  Opaque custom-contract admission remains unavailable; bounded dispute-gas
+  enforcement is mandatory. Compiler/preview tooling and valid current signed
+  evidence exits may remain without admitting arbitrary new programs.
+
 ## EXECUTION PRIORITY
 
 This order overrides attractive side work:
@@ -129,7 +143,7 @@ Do not duplicate or weaken it.
 - No legacy behavior, compatibility aliases, fallback readers/writers, duplicate financial
   formulas, `v2`/`v3` branches or parallel implementations.
 - Replace the canonical path atomically and delete the retired one. Obsolete persisted data needs
-  an explicit offline migration or loud rejection.
+  loud rejection; no migration or compatibility reader.
 - Never add a stub, test-mode fake, conditional skip, temporary workaround or hidden compromise.
   If the canonical fix is below 90% confidence, stop and present the exact fork.
 - Do not create mocks/stubs unless the owner asks. Debug consensus using complete state evidence.
@@ -166,11 +180,12 @@ Do not duplicate or weaken it.
 
 ## GIT AND SHARED WORKSPACE
 
-- Owner decision 2026-10-15: publish through PRs with mandatory green CI and
-  preserve branch protection. This replaces the October 14 direct-push rule.
-  Use temporary `codex/` branches for new PRs; existing PR branches may be
-  continued. Never force-push `main`.
-- Preserve unrelated user changes. Failed verification is not a release-ready commit.
+- Owner decision 2026-10-17: combine both Mac histories and always work on `main`.
+  This replaces the October 15 PR/temporary-branch workflow. Do not create task
+  branches or worktrees or switch away from `main`. Never force-push `main`.
+- Preserve unrelated user changes on both Macs, including uncommitted owner files
+  held separately by the synchronization controller. Synchronization must not
+  discard or overwrite them. Failed verification is not a release-ready commit.
 - No `wip:` commits on main. Commit only owned paths with `git commit -- <paths>`.
 - Before a shared-tree commit, stop concurrent writers, run formatting and `git diff --check`.
 - Release evidence must name a committed SHA checked with a clean source tree;

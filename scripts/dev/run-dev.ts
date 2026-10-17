@@ -11,6 +11,8 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 
 import { stopProcessGroup } from '../../core/scripts/e2e/runners/process-group';
+import { selectDevWebTls } from './launcher/web-tls';
+import { fetchLoopback } from '../../core/orchestrator/server/loopback-fetch';
 import { canonicalHubEngine } from '../../core/orchestrator/process/hub-engine-plan';
 import { acquireStandLock, releaseStandLock, readStandLockHolder, standLockRoot, standLockCapacity, STAND_LOCK_TOKEN_ENV, type StandLockGrant } from '../../tools/stand-lock';
 
@@ -38,7 +40,9 @@ export const isDevSingletonConflict = (error: unknown): boolean =>
   error instanceof Error && error.cause instanceof Error && 'code' in error.cause && error.cause.code === 'EADDRINUSE';
 
 const reportRunningDev = async (): Promise<number> => {
-  const response = await fetch('http://localhost:5183/api/jurisdictions', {
+  const scheme = selectDevWebTls(import.meta.dir + '/../..') ? 'https' : 'http';
+  const origin = `${scheme}://localhost:8080`;
+  const response = await fetchLoopback(`${origin}/api/jurisdictions`, {
     signal: AbortSignal.timeout(3_000),
   });
   if (!response.ok) throw new Error(`DEV_RUNNING_UI_UNAVAILABLE:HTTP_${response.status}`);
@@ -52,7 +56,7 @@ const reportRunningDev = async (): Promise<number> => {
   ) {
     throw new Error('DEV_RUNNING_UI_UNAVAILABLE:INVALID_JURISDICTIONS');
   }
-  console.log('[dev] Already running. Wallet: http://localhost:5183/');
+  console.log(`[dev] Already running. Wallet: ${origin}/ui/`);
   console.log('[dev] Reusing the running stack; no processes or data were changed.');
   return 0;
 };

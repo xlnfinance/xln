@@ -40,6 +40,8 @@
   export let timelineHeight = 0;
   export let timelineTimestamp = 0;
   export let runtimeNodeLabels: string[] = [];
+  /** Presentation hides operator chrome; projection errors still surface. */
+  export let presentMode = false;
   export let onRuntimeScopeChange: (scope: string) => void = () => {};
   export let onCanonicityChange: (policy: RuntimeGraphCanonicity) => void = () => {};
   export let closeMiniPanel: () => void = () => {};
@@ -51,7 +53,7 @@
   export let exitVR: () => void = () => {};
 </script>
 
-<div class="graph3d-wrapper">
+<div class="graph3d-wrapper" class:present-mode={presentMode}>
   <div bind:this={container} class="graph3d-panel"></div>
 
   <div class="runtime-projection-controls" data-testid="graph-runtime-projection-controls">
@@ -87,14 +89,14 @@
     <span class="sr-only" data-testid="graph-runtime-node-summary">{runtimeNodeLabels.join(' · ')}</span>
   </div>
 
-  {#if projectionError || timelineRuntimeId}
+  {#if projectionError || (timelineRuntimeId && !presentMode)}
     <div class="runtime-status-stack">
       {#if projectionError}
         <div class="projection-error" role="alert" data-testid="graph-projection-error">
           {projectionError}
         </div>
       {/if}
-      {#if timelineRuntimeId}
+      {#if timelineRuntimeId && !presentMode}
         <div
           class="timeline-runtime-highlight"
           data-testid="network-machine-runtime-highlight"
@@ -171,6 +173,10 @@
 </div>
 
 <style>
+  .graph3d-wrapper.present-mode .runtime-projection-controls {
+    display: none;
+  }
+
   .graph3d-wrapper {
     width: 100%;
     height: 100%;

@@ -558,7 +558,6 @@
     dispatch('walletReady', { runtimeId });
     vaultUiOperations.hideVault();
     if (!embedded) {
-      appStateOperations.setMode('user');
       appStateOperations.setViewMode('home');
     }
   }
@@ -1112,7 +1111,6 @@
     clearSensitiveWalletMaterial();
     vaultUiOperations.hideVault();
     if (!embedded) {
-      appStateOperations.setMode('user');
       appStateOperations.setViewMode('home');
     }
   }

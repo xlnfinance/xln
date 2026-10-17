@@ -38,13 +38,15 @@ export function ManageSheet({ account, wallet, onClose, initialTab }: { account:
 	// What is actually worth covering: the part of what they owe that no
 	// collateral stands behind. Collateral past that secures nothing and still
 	// pays their fee, so the form says so instead of letting it happen quietly.
+	//
+	// The fee is prepaid in the same token, so it also shrinks what they owe by
+	// exactly the fee, and the hub never locks more than it owes. Requesting the
+	// uncovered amount itself therefore covers everything left after the fee
+	// with no remainder; asking for more leaves a pending tail that blocks the
+	// next request until the debt grows into it.
 	const uncoveredPromise = account.tokens.find(token => token.tokenId === tokenId)?.derived.outPeerCredit ?? 0n;
-	const grossToCover = useMemo(() => {
-		if (!policy || uncoveredPromise <= 0n) return 0n;
-		const denominator = 10_000n - policy.liquidityFeeBps;
-		if (denominator <= 0n) return 0n;
-		return ((uncoveredPromise + policy.baseFee + policy.gasFee) * 10_000n + denominator - 1n) / denominator;
-	}, [policy, uncoveredPromise]);
+	const coverAmount = policy && uncoveredPromise > 0n && collateralFee(policy, uncoveredPromise) < uncoveredPromise ? uncoveredPromise : 0n;
+	const excess = amount > uncoveredPromise ? amount - uncoveredPromise : 0n;
 
 	const run = async (label: string, work: () => Promise<void>): Promise<void> => {
 		setBusy(true);
@@ -103,11 +105,11 @@ export function ManageSheet({ account, wallet, onClose, initialTab }: { account:
 						<div className="field-row">
 							<input className="input big" placeholder="0.00" inputMode="decimal" value={amountText} onChange={event => setAmountText(event.target.value)} data-testid="collateral-amount" />
 							<span className="muted">{meta.symbol}</span>
-							{grossToCover > 0n ? (
+							{coverAmount > 0n ? (
 								<button
 									type="button"
 									className="btn quiet sm"
-									onClick={() => setAmountText(plainAmount(grossToCover, meta.decimals))}
+									onClick={() => setAmountText(plainAmount(coverAmount, meta.decimals))}
 									data-testid="collateral-cover-promise"
 								>
 									Cover the promise
@@ -146,10 +148,10 @@ export function ManageSheet({ account, wallet, onClose, initialTab }: { account:
 							{account.label} has not published a fee policy for {meta.symbol} on this account yet. The request needs their committed policy frame.
 						</p>
 					)}
-					{net > uncoveredPromise && uncoveredPromise >= 0n && amount > 0n ? (
+					{excess > 0n && amount > 0n ? (
 						<p className="note" style={{ color: 'var(--debt)' }}>
-							This locks {formatMoney(net - uncoveredPromise, meta.decimals)} {meta.symbol} more collateral than {account.label} owes you. The excess secures
-							nothing and you still pay their fee on it.
+							{account.label} only locks what it owes you, so {formatMoney(excess, meta.decimals)} {meta.symbol} of this request stays pending until it owes
+							you more, and blocks a new request meanwhile. You still pay their fee on it now.
 						</p>
 					) : null}
 					<button type="button" className="btn primary" disabled={account.disputed || busy || !policy || amount <= 0n || net <= 0n} onClick={() => void run(`Collateral request sent to ${account.label}`, async () => { await send([buildRequestCollateralTx(counterpartyId, tokenId, amount, policy!)]); })} data-testid="collateral-request">
@@ -161,7 +163,7 @@ export function ManageSheet({ account, wallet, onClose, initialTab }: { account:
 			{tab === 'credit' ? (
 				<div className="fade-in">
 					<p className="note">
-						Ask the hub to extend you a credit line in {meta.symbol}. The hub decides and commits the line; it lands on this account as “their credit line to you”.
+						Ask the hub to extend you a credit line in {meta.symbol}. Your signed request commits in this account; the hub answers with up to 1,000 {meta.symbol} per request, shown as “their credit line to you”.
 					</p>
 					<div className="field">
 						<span className="field-label">Token</span>
@@ -189,7 +191,8 @@ export function ManageSheet({ account, wallet, onClose, initialTab }: { account:
 							void run('Credit requested from the hub', async () => {
 								const value = parseAmount(creditText, meta.decimals);
 								if (value <= 0n) throw new Error('Enter a positive amount');
-								await requestCreditFromHub({ userEntityId: wallet.entityId, hubEntityId: counterpartyId, tokenId, amount: value });
+								if (!wallet.signerId) throw new Error('No signer for this entity');
+								await requestCreditFromHub({ entityId: wallet.entityId, signerId: wallet.signerId, hubEntityId: counterpartyId, tokenId, amount: value });
 							})
 						}
 						data-testid="credit-request"
@@ -197,7 +200,7 @@ export function ManageSheet({ account, wallet, onClose, initialTab }: { account:
 						{busy ? 'Asking…' : 'Request credit'}
 					</button>
 					<p className="note" style={{ marginTop: 8 }}>
-						Goes to the hub's HTTP API.
+						Signed inside your account with the hub; no operator access needed.
 					</p>
 				</div>
 			) : null}

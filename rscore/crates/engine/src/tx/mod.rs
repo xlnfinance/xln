@@ -12,7 +12,7 @@ use num_bigint::BigInt;
 
 use crate::{CanonicalValue, HtlcLockTx, HtlcResolveTx, JEventClaimTx, StateError, TokenId};
 
-pub const ACCOUNT_TX_TYPES: [&str; 22] = [
+pub const ACCOUNT_TX_TYPES: [&str; 23] = [
     "direct_payment",
     "lending_fund",
     "lending_rate",
@@ -23,6 +23,7 @@ pub const ACCOUNT_TX_TYPES: [&str; 22] = [
     "lending_close_payout",
     "add_delta",
     "set_credit_limit",
+    "credit_request",
     "request_collateral",
     "rebalance_refund",
     "rebalance_policy",
@@ -245,6 +246,15 @@ pub enum AccountTx {
         token_id: TokenId,
         amount: BigInt,
     },
+    /// The proposer asks its counterparty to extend credit to it. Committing
+    /// records only the `credit:<requestId>` intent; a hub answers after commit
+    /// with its own `SetCreditLimit` (entity-kernel `credit_request`).
+    CreditRequest {
+        request_id: String,
+        requester_entity_id: String,
+        token_id: TokenId,
+        amount: BigInt,
+    },
     RequestCollateral {
         token_id: TokenId,
         amount: BigInt,
@@ -289,6 +299,7 @@ impl AccountTx {
             Self::LendingClosePayout { .. } => "lending_close_payout",
             Self::AddDelta { .. } => "add_delta",
             Self::SetCreditLimit { .. } => "set_credit_limit",
+            Self::CreditRequest { .. } => "credit_request",
             Self::RequestCollateral { .. } => "request_collateral",
             Self::RebalanceRefund { .. } => "rebalance_refund",
             Self::RebalancePolicy { .. } => "rebalance_policy",

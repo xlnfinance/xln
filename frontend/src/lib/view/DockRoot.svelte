@@ -17,7 +17,6 @@
   import RuntimeCreation from '#lib/components/Views/RuntimeCreation.svelte';
   import RemoteRuntimeManager from '#lib/components/Runtime/RemoteRuntimeManager.svelte';
   import IndexedDbInspector from '#lib/components/Settings/IndexedDbInspector.svelte';
-  import UserModePanel from './UserModePanel.svelte';
   import EntityPanelWrapper from './panels/wrappers/EntityPanelWrapper.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
   import { panelBridge, type EntityOpenAction } from './utils/panelBridge';
@@ -29,6 +28,8 @@
   import 'dockview/dist/styles/dockview.css';
 
   export let embedMode = false;
+  /** Presentation stage (embed `present=1`): graph only, nothing restored or persisted. */
+  export let presentMode = false;
   export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
   export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
   export let runtimeFrameTimeIndex: Writable<number>;
@@ -88,7 +89,7 @@
   }
 
   function primaryDockReferencePanel(): string {
-    return 'wallet-main';
+    return 'graph3d';
   }
 
   function completeRequestedPanelActivation(panelId: string): void {
@@ -120,7 +121,7 @@
       workspaceReadyFrame = null;
       workspaceReady = true;
       if (pendingRequestedPanelId) activateRequestedPanel();
-      else dockview.getPanel('wallet-main')?.api.setActive();
+      else dockview.getPanel('graph3d')?.api.setActive();
     });
   }
 
@@ -236,17 +237,7 @@
               runtimeFrameHistory,
               runtimeFrameTimeIndex,
               graphInitSignal,
-            },
-          });
-        } else if (options.name === 'wallet') {
-          component = mount(UserModePanel, {
-            target: div,
-            props: {
-              runtimeFrameEnv,
-              runtimeFrameHistory,
-              runtimeFrameTimeIndex,
-              runtimeFrameIsLive,
-              dockMode: true,
+              presentMode,
             },
           });
         } else if (options.name === 'brainvault') {
@@ -384,14 +375,14 @@
       window.__dockview_instance = dockview;
     }
 
-    const savedLayout = localStorage.getItem('xln-workspace-layout');
+    const savedLayout = localStorage.getItem('xln-observer-layout');
     let shouldRestoreLayout = false;
     if (savedLayout && !mobileDockLayout) {
       try {
         const config = JSON.parse(savedLayout);
         if (config.dockview) shouldRestoreLayout = true;
       } catch {
-        localStorage.removeItem('xln-workspace-layout');
+        localStorage.removeItem('xln-observer-layout');
       }
     }
 
@@ -409,25 +400,12 @@
       });
 
       ensurePanel({
-        id: 'wallet-main',
-        component: 'wallet',
-        tabComponent: 'pinned-tab',
-        title: 'Main Wallet',
-        position: mobileDockLayout
-          ? { direction: 'within', referencePanel: 'graph3d' }
-          : { direction: 'right', referencePanel: 'graph3d' },
-        inactive: pendingRequestedPanelId
-          ? pendingRequestedPanelId !== 'wallet-main'
-          : mobileDockLayout,
-      });
-
-      ensurePanel({
         id: 'architect',
         component: 'architect',
         title: '🎬 Architect',
         position: mobileDockLayout
           ? { direction: 'within', referencePanel: 'graph3d' }
-          : { direction: 'below', referencePanel: 'wallet-main' },
+          : { direction: 'below', referencePanel: 'graph3d' },
         ...(mobileDockLayout
           ? { inactive: pendingRequestedPanelId !== 'architect' }
           : { initialHeight: Math.max(240, Math.floor(window.innerHeight * 0.32)) }),
@@ -463,9 +441,17 @@
       }
     };
 
-    ensureWorkspacePanels();
+    const ensurePresentationPanels = () => {
+      ensurePanel({ id: 'graph3d', component: 'graph3d', title: 'Graph3D' });
+    };
 
-    if (shouldRestoreLayout && savedLayout) {
+    if (presentMode) {
+      // A presentation is a fixed stage: the graph alone. The saved workspace layout is
+      // neither restored nor overwritten, so presenting never disturbs the operator's dock.
+      ensurePresentationPanels();
+      markWorkspaceReady();
+    } else if (shouldRestoreLayout && savedLayout) {
+      ensureWorkspacePanels();
       setTimeout(() => {
         try {
           const config = JSON.parse(savedLayout);
@@ -474,18 +460,17 @@
           markWorkspaceReady();
         } catch (err) {
           logDockRootDiagnostic('Layout restore failed; clearing saved workspace layout', err);
-          localStorage.removeItem('xln-workspace-layout');
-          localStorage.removeItem('xln-dockview-layout');
-          localStorage.removeItem('dockview-layout');
+          localStorage.removeItem('xln-observer-layout');
           markWorkspaceReady();
         }
       }, 100);
     } else {
+      ensureWorkspacePanels();
       markWorkspaceReady();
     }
 
     const graph3dApi = dockview.getPanel('graph3d');
-    if (graph3dApi) {
+    if (graph3dApi && !presentMode) {
       setTimeout(() => {
         if (mobileDockLayout) return;
         const widthPercent = embedMode ? 1.0 : 0.50;
@@ -500,7 +485,7 @@
 
     dockview.onDidLayoutChange(() => {
       if (saveLayoutTimer) clearTimeout(saveLayoutTimer);
-      if (mobileDockLayout) {
+      if (mobileDockLayout || presentMode) {
         saveLayoutTimer = null;
         return;
       }
@@ -511,7 +496,7 @@
             timestamp: new Date().toISOString(),
             dockview: dockview.toJSON(),
           };
-          localStorage.setItem('xln-workspace-layout', JSON.stringify(config));
+          localStorage.setItem('xln-observer-layout', JSON.stringify(config));
         } catch (err) {
           logDockRootDiagnostic('Failed to auto-save workspace layout', err);
         }
@@ -526,7 +511,7 @@
           ...(signerId ? { signerId } : {}),
           ...(action ? { action } : {}),
         });
-        dockview.getPanel('wallet-main')?.api.setActive();
+        dockview.getPanel('graph3d')?.api.setActive();
         return;
       }
       const panelId = `entity-${entityId}`;
@@ -593,16 +578,16 @@
   });
 </script>
 
-<div class="view-wrapper" class:embed-mode={embedMode} class:sidebar-open={embedMode && showSidebarInEmbed}>
+<div class="view-wrapper" class:embed-mode={embedMode} class:present-mode={presentMode} class:sidebar-open={embedMode && showSidebarInEmbed}>
   {#if !embedMode}
     <button
       type="button"
       class="dock-exit-btn"
       data-testid="dock-exit-user-mode"
-      on:click={() => appStateOperations.setMode('user')}
-      title="Return to the basic wallet"
+      on:click={() => window.location.assign('/ui/')}
+      title="Open the React wallet"
     >
-      User
+      Wallet
     </button>
   {/if}
   <div
@@ -628,7 +613,7 @@
     </div>
   {/if}
 
-  {#if embedMode}
+  {#if embedMode && !presentMode}
     <button
       class="embed-sidebar-toggle"
       class:sidebar-visible={showSidebarInEmbed}
@@ -709,6 +694,39 @@
 
   .time-machine-bar.embed {
     height: 48px;
+  }
+
+  /* Presentation stage: narration column on the left, the graph fills the rest. The column
+     itself is PresentationNarration (fixed), sized by this variable. */
+  .view-wrapper.present-mode {
+    --xln-present-narration-width: clamp(380px, 30vw, 540px);
+    background: #05080f;
+  }
+
+  .view-wrapper.present-mode .view-container,
+  .view-wrapper.present-mode .time-machine-bar {
+    margin-left: var(--xln-present-narration-width);
+    width: calc(100% - var(--xln-present-narration-width));
+  }
+
+  /* backdrop-filter would make the bar the containing block of the fixed narration card.
+     The bar draws nothing in a presentation (the narration card has the controls), so the
+     stage takes its height too. */
+  .view-wrapper.present-mode .time-machine-bar {
+    height: 0;
+    border-top: 0;
+    backdrop-filter: none;
+    background: transparent;
+  }
+
+  .view-wrapper.present-mode .view-container.with-timemachine {
+    height: 100dvh;
+  }
+
+  @media (max-width: 900px) {
+    .view-wrapper.present-mode {
+      --xln-present-narration-width: 0px;
+    }
   }
 
   :global(.dockview-theme-dark .dv-tab) {

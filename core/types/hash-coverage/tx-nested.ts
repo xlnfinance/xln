@@ -23,6 +23,7 @@ export const HASHABLE_ACCOUNT_TX_DATA_FIELDS = {
   lending_close_payout: ['positionId', 'hubEntityId', 'lenderEntityId', 'tokenId', 'amount'],
   add_delta: ['tokenId'],
   set_credit_limit: ['tokenId', 'amount'],
+  credit_request: ['requestId', 'requesterEntityId', 'tokenId', 'amount'],
   request_collateral: ['tokenId', 'amount', 'feeTokenId', 'feeAmount', 'policyVersion'],
   rebalance_refund: ['requestId', 'requestTokenId', 'amount', 'reason'],
   rebalance_policy: ['tokenId', 'policyVersion', 'baseFee', 'liquidityFeeBps', 'gasFee'],

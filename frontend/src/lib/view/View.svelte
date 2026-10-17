@@ -8,7 +8,6 @@
   import type { EnvSnapshot } from '@xln/core/runtime/types';
   import { toasts } from '#lib/stores/ui/toastStore.ts';
   import { paymentSpotlight } from '#lib/stores/network/paymentSpotlightStore.ts';
-  import UserModePanel from './UserModePanel.svelte';
   import CommandPalette from '../components/shared/CommandPalette.svelte';
   import {
     buildCommandPaletteView,
@@ -71,8 +70,9 @@
   export let layout: string = 'default'; void layout;
   export let networkMode: 'simnet' | 'testnet' | 'mainnet' = 'simnet'; void networkMode;
   export let embedMode = false;
+  /** Presentation mode (embed `present=1`): DockRoot renders a graph-dominant workspace. */
+  export let presentMode = false;
   export let scenarioId = '';
-  export let userMode = false;
   export let requestedPanelId: string | null = null;
 
   const localEnvStore = writable<RuntimeReplica | null>(null);
@@ -316,11 +316,9 @@
   $: if (typeof document !== 'undefined') {
     const isAppRoute = window.location.pathname === '/app' || window.location.pathname.startsWith('/app/');
     document.documentElement.setAttribute('data-xln-route-mode', isAppRoute ? 'app' : 'default');
-    document.documentElement.classList.toggle('xln-user-mode', userMode);
-    document.body.classList.toggle('xln-user-mode', userMode);
   }
 
-  $: dockRootPromise = userMode ? null : import('./DockRoot.svelte');
+  $: dockRootPromise = import('./DockRoot.svelte');
 
   onMount(async () => {
     void scenarioId;
@@ -382,8 +380,6 @@
   onDestroy(() => {
     if (typeof document !== 'undefined') {
       document.documentElement.setAttribute('data-xln-route-mode', 'default');
-      document.documentElement.classList.remove('xln-user-mode');
-      document.body.classList.remove('xln-user-mode');
     }
     unsubLocalEnvSync();
     unsubRuntimeEnv?.();
@@ -405,20 +401,12 @@
 />
 <PaymentSpotlight />
 
-{#if userMode}
-  <UserModePanel
-    runtimeFrameEnv={localEnvStore}
-    runtimeFrameRevision={localEnvRevisionStore}
-    runtimeFrameHistory={localHistoryStore}
-    runtimeFrameTimeIndex={localTimeIndex}
-    runtimeFrameIsLive={localIsLive}
-    liveEnvResolver={resolveLocalDebugEnv}
-  />
-{:else if dockRootPromise}
+{#if dockRootPromise}
   {#await dockRootPromise then module}
     <svelte:component
       this={module.default}
       {embedMode}
+      {presentMode}
       runtimeFrameEnv={localEnvStore}
       runtimeFrameHistory={localHistoryStore}
       runtimeFrameTimeIndex={localTimeIndex}

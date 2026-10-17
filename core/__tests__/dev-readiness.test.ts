@@ -28,7 +28,7 @@ test('dev wallet uses one shared web-origin list for relay authorization and rea
   expect(devChild).toContain('--relay-url "ws://127.0.0.1:${API_PORT}/relay"');
   expect(dev).toContain('DEV_RELAY_WEB_URLS="${DEV_WEB_SCHEME}://localhost:${WEB_PORT},http://localhost:${WEB_HTTP_PORT},http://localhost:${UI_PORT}"');
   expect(devChild).toContain('--relay-web-urls "$DEV_RELAY_WEB_URLS"');
-  expect(devChild).toContain('--web-url "http://localhost:${WEB_HTTP_PORT}"');
+  expect(devChild).toContain('--web-url "${DEV_WEB_SCHEME}://localhost:${WEB_PORT}"');
   expect(devChild).toContain('XLN_PUBLIC_FAUCET="${XLN_PUBLIC_FAUCET:-1}"');
   expect(devChild.match(/--relay-web-urls "\$DEV_RELAY_WEB_URLS"/g)).toHaveLength(2);
   expect(relayProxy).toContain('changeOrigin: false');

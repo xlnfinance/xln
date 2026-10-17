@@ -2,8 +2,8 @@ use num_bigint::BigInt;
 use sha3::{Digest as _, Keccak256};
 use xln_rscore_engine::{AccountTx, LendingTermId, TokenId};
 
-use crate::EntityKernelError;
 use crate::types::TargetedAccountTx;
+use crate::{EntityKernelError, LocalAccountFinancialView};
 
 use super::{LendingLoan, LendingLoanStatus, LendingPoolPosition, LendingPoolStatus, LendingState};
 
@@ -67,6 +67,45 @@ pub(super) fn require_empty_outputs(
     } else {
         Err(EntityKernelError::output("LENDING_TX_OUTPUTS"))
     }
+}
+
+pub(crate) fn projected_credit(
+    view: &LocalAccountFinancialView,
+    account_id: &str,
+    token_id: TokenId,
+    queued: &[TargetedAccountTx],
+) -> BigInt {
+    projected_credit_from(
+        view.owner_peer_credit_limit
+            .get(&token_id)
+            .cloned()
+            .unwrap_or_else(|| BigInt::from(0)),
+        account_id,
+        token_id,
+        queued,
+    )
+}
+
+/// The single credit-grant projection: the committed grant plus every write
+/// this frame already decided. Repay, close and the overdue settlement share
+/// it so no second grant formula can drift.
+pub(super) fn projected_credit_from(
+    committed: BigInt,
+    account_id: &str,
+    token_id: TokenId,
+    queued: &[TargetedAccountTx],
+) -> BigInt {
+    let mut value = committed;
+    for (_, tx) in queued.iter().filter(|(target, _)| target == account_id) {
+        match tx {
+            AccountTx::SetCreditLimit {
+                token_id: tx_token,
+                amount,
+            } if tx_token == &token_id => value = amount.clone(),
+            _ => {}
+        }
+    }
+    value
 }
 
 fn best_pool(

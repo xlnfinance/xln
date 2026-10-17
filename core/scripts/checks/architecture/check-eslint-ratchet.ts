@@ -15,8 +15,9 @@ type EslintFile = {
 };
 
 const DEBT_RULES = new Set(['import/no-duplicates', 'no-restricted-properties']);
-const DEBT_COUNT = 324;
-const DEBT_SHA256 = 'c47ded7a1f6957805480557c2b3f5c9549492ec3c2d594394fad39e533054deb';
+// Removed the retired HTTP credit-request test serializer; credit requests now use Account admission.
+const DEBT_COUNT = 323;
+const DEBT_SHA256 = '48191296c1e79303cf785c87dd454b32bef647bc7d44a31c52e841fdbb232a58';
 const outputPath = `${tmpdir()}/xln-eslint-${String(process.pid)}.json`;
 
 const result = spawnSync(

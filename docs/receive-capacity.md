@@ -83,9 +83,11 @@ amount as the exact all-in figure. A Move error/cancellation preserves the draft
 The return destination is restricted to the local Pay; the parameters do not allow an external redirect.
 Changing Entity/Account/J/token requires a new check, not a continuation with the old authorization.
 
-The existing credit API remains a separate Manage path. The identified risks of its `alreadySatisfied`
-and of the absolute grant are described in [credit.ts:82](../core/api/server/faucet/credit.ts#L82);
-the new Pay does not use this API and does not mask the problem with a frontend workaround.
+Requesting credit remains a separate Manage path. It is a bilateral `credit_request` AccountTx
+(`requestCredit` EntityTx); a hub answers after commit by raising its own line to
+`max(current line, min(requested, 1,000 whole tokens))` and never lowers a larger line
+([credit-request.ts](../core/entity/tx/handlers/account/credit-request.ts)). The new Pay does not
+use this path and does not mask missing capacity with a frontend workaround.
 
 ## the exact meaning of the choice
 

@@ -109,11 +109,12 @@ const RSCORE_ABI_VERSION = 1;
 // without manufacturing an Entity round.
 export const RSCORE_PROCESS_ABI_VERSION = 40;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
-const RSCORE_PROTOCOL_VERSION = 1;
+const RSCORE_PROTOCOL_VERSION = 2;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=36")
+// Reject both pre-integration tag-7 interpretations before decoding checkpoint rows.
+// sha256("xln.rscore.account:v1:protocol=2:storage=1:hanko:payment-v1:wire=40:intents=disburse7,credit8:tx=disburse24,rate25,credit27:subcontract=studio")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  '0d0e71b61e8319a6a3514059b0167b56f0b03a22422937731184b4b3a9cfaceb',
+  '4def305bfbff4575150ea9c6e50c90c0014bc96efa54aa939ac9694ab9bd6937',
   'hex',
 );
 

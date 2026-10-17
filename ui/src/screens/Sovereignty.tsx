@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
+import { MANAGE, PageHead } from '../components/PageHead';
 import { useNavigate } from 'react-router-dom';
 import { Bar } from '../components/Bars';
 import { CopyId } from '../components/CopyId';
 import { Icon } from '../components/Icons';
 import { Watchtower } from '../components/Watchtower';
 import { getAdapter, getEmbeddedEnv } from '../runtime/adapter';
+import { readRecovery } from '../runtime/recovery';
 import { useApp } from '../runtime/store';
 import { formatUsd, shortId, timeAgo } from '../runtime/format';
 import { useWallet } from '../runtime/views';
@@ -71,20 +73,32 @@ export function Sovereignty() {
 
 	return (
 		<div className="screen fade-in">
-			<div className="screen-header">
-				<span className="screen-title">
-					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
-						<Icon name="chevronLeft" size={18} />
-					</button>
-					Sovereignty
-				</span>
-			</div>
+			<PageHead title="Security and recovery" parent={MANAGE} />
+			{readRecovery(activeVaultId).towers.length === 0 ? (
+				<div className="notice" role="status" data-testid="backup-notice">
+					<Icon name="shield" size={16} />
+					<span>
+						<strong>Not backed up.</strong> Only this device holds the pages you and your counterparties signed. Add a watchtower below, or
+						save the evidence bundle somewhere safe.
+					</span>
+				</div>
+			) : null}
 			<div className="two-col">
 				<div>
 					<div className="hero" data-testid="sovereignty-hero">
-						<div className="hero-label">Enforceable right now</div>
-						<div className="display num" style={{ fontSize: 40, lineHeight: 1.1 }}>
-							{formatUsd(wallet.usd.onchain + wallet.usd.reserve + totals.secured)}
+						<div className="hero-pair">
+							<div>
+								<div className="hero-label">Enforceable right now</div>
+								<div className="display num" style={{ fontSize: 40, lineHeight: 1.1 }}>
+									{formatUsd(wallet.usd.onchain + wallet.usd.reserve + totals.secured)}
+								</div>
+							</div>
+							<div>
+								<div className="hero-label">At risk · no collateral</div>
+								<div className="display num" style={{ fontSize: 40, lineHeight: 1.1, color: totals.risk > 0 ? 'var(--risk)' : undefined }}>
+									{formatUsd(totals.risk)}
+								</div>
+							</div>
 						</div>
 						<div className="rb">
 							<Bar
@@ -108,7 +122,7 @@ export function Sovereignty() {
 								<i className="sw c-coll" /> Collateral behind what you are owed <b className="num">{formatUsd(totals.secured)}</b>
 							</span>
 							<span data-testid="sovereignty-risk">
-								<i className="sw c-risk" /> Promised <b className="num">{formatUsd(totals.risk)}</b>
+								<i className="sw c-risk" /> At risk <b className="num">{formatUsd(totals.risk)}</b>
 							</span>
 						</div>
 						<p className="note" style={{ marginTop: 10 }}>

@@ -210,7 +210,8 @@ export async function connectRemote(wsUrl: string, authKey?: string): Promise<Ru
 }
 
 /** Dev-only: lets the browser console and E2E debugging read the live adapter. */
-if (import.meta.env.DEV) {
+declare const __XLN_UI_DIAGNOSTICS__: boolean;
+if (import.meta.env.DEV || __XLN_UI_DIAGNOSTICS__) {
 	(window as typeof window & { __xln?: Record<string, unknown> }).__xln = {
 		adapter: () => currentAdapter,
 		env: () => currentEnv,

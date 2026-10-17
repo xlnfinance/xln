@@ -3,6 +3,7 @@ import { Bar } from '../Bars';
 import { Icon } from '../Icons';
 import { useApp } from '../../runtime/store';
 import { ACCENTS, MATERIALS, NUMBER_FONTS, RISK_COLORS } from '../../runtime/design';
+import { TOUR_STEPS } from '../../tour/steps';
 
 export function Appearance() {
   const navigate = useNavigate();
@@ -19,7 +20,7 @@ export function Appearance() {
       <div className="sect">
         <h3 className="caps">Appearance</h3>
       </div>
-      <div className="setting first">
+      <div className="setting first desktop-only">
         <div>
           <div className="t">Layout on wide screens</div>
           <div className="s">
@@ -191,7 +192,7 @@ export function Appearance() {
               ? 'Completed on this device, across wallets. Replay any time.'
               : tour.index > 0
                 ? `Paused at step ${tour.index + 1}.`
-                : 'Credit, payment, collateral, swap, dispute: five minutes on a live sandbox.'}
+                : 'Credit, payments, swaps, collateral, exit by dispute, proofs: about five minutes on a live sandbox.'}
           </div>
         </div>
         <span className="segc">
@@ -203,6 +204,25 @@ export function Appearance() {
           <button type="button" onClick={() => { setTour({ active: true, index: 0, completed: false }); navigate('/'); }} data-testid="tour-replay">
             {tour.completed || tour.index > 0 ? 'Replay' : 'Start'}
           </button>
+        </span>
+      </div>
+      <div className="setting">
+        <div>
+          <div className="t">Start from a chapter</div>
+          <div className="s">Choose a guide topic. You control every wallet action.</div>
+        </div>
+        <span className="chips tour-chapters">
+          {TOUR_STEPS.map((entry, index) => (
+            <button
+              key={entry.title}
+              type="button"
+              className={tour.active && tour.index === index ? 'active' : ''}
+              onClick={() => setTour({ active: true, index })}
+              data-testid={`tour-chapter-${entry.title.toLowerCase().replace(/\s+/g, '-')}`}
+            >
+              {entry.title}
+            </button>
+          ))}
         </span>
       </div>
     </>

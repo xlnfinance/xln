@@ -84,6 +84,7 @@ pub enum LendingIntentKind {
     Disburse,
     CloseRequest,
     ClosePayout,
+    CreditRequest,
 }
 
 impl LendingIntentKind {
@@ -95,6 +96,7 @@ impl LendingIntentKind {
             Self::Disburse => "disburse",
             Self::CloseRequest => "close-request",
             Self::ClosePayout => "close-payout",
+            Self::CreditRequest => "credit-request",
         }
     }
 }

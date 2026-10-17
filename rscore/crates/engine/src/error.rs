@@ -382,6 +382,12 @@ pub enum TransitionError {
     LendingDisburseLimitNegative(BigInt),
     #[error("ACCOUNT_TX_ROUTE_MISMATCH:lending")]
     LendingRouteMismatch,
+    #[error("CREDIT_REQUEST_ID_INVALID:{0}")]
+    CreditRequestIdInvalid(String),
+    #[error("CREDIT_REQUEST_REQUESTER_NOT_PROPOSER: claimed={claimed} proposer={proposer}")]
+    CreditRequestRequesterNotProposer { claimed: String, proposer: String },
+    #[error("CREDIT_REQUEST_TOKEN_NOT_ENABLED:{0}")]
+    CreditRequestTokenNotEnabled(TokenId),
     #[error("ACCOUNT_EXECUTION_CONTEXT_REQUIRED:{0}")]
     ExecutionContextRequired(&'static str),
     #[error("ACCOUNT_EXECUTION_CONTEXT_OUT_OF_RANGE:{field}:{value}")]

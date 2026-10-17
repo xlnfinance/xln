@@ -561,6 +561,17 @@ type EntityTxPayload =
       };
     }
   | {
+      // Ask the counterparty (a hub) to extend credit to this entity, inside
+      // bilateral Account consensus (`credit_request`, id `credit-<16 hex>`).
+      type: 'requestCredit';
+      data: {
+        counterpartyEntityId: string;
+        tokenId: number;
+        amount: bigint;
+        requestId: string;
+      };
+    }
+  | {
       type: 'lendingOffer';
       data: {
         positionId: string;

@@ -38,6 +38,9 @@ export const ACCOUNT_TX_LENDING_SCHEMAS = {
   lending_close_request: {
     required: { positionId: 'string', hubEntityId: 'string', lenderEntityId: 'string' },
   },
+  credit_request: {
+    required: { requestId: 'string', requesterEntityId: 'string', tokenId: 'integer', amount: 'bigint' },
+  },
   lending_close_payout: {
     required: {
       positionId: 'string', hubEntityId: 'string', lenderEntityId: 'string',

@@ -12,6 +12,14 @@ export async function connectNetwork(draft: NetworkDraft): Promise<void> {
   const input = networkInput(draft);
   const name = draft.name.trim();
   if (env.state.jReplicas.has(name)) throw new Error(`Network ${name} already exists`);
+  // One chain + Depository is one watcher identity; a second import of it is refused here, before
+  // the runtime ever sees a conflicting jurisdiction.
+  const depository = draft.contracts.depository.trim().toLowerCase();
+  for (const [existingName, replica] of env.state.jReplicas.entries()) {
+    if (Number(replica.chainId) === Number(draft.chainId) && String(replica.contracts?.depository ?? '').toLowerCase() === depository) {
+      throw new Error(`This network is already connected as ${existingName}`);
+    }
+  }
   const provider = new JsonRpcProvider(draft.rpc.trim(), undefined, { batchMaxCount: 1 });
   try {
     const network = await provider.getNetwork();

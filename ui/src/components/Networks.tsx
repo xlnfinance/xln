@@ -36,15 +36,15 @@ export function Networks() {
         <p className="note">Connect an existing xln deployment. Verify its network and contract addresses before using it.</p>
         <form onSubmit={event => { event.preventDefault(); void submit(); }}>
           {(Object.keys(LABELS) as Array<keyof typeof LABELS>).map(key => <label className="field" key={key}>{LABELS[key]}
-            <input className="input" required value={draft[key]} disabled={busy} onChange={event => setDraft(value => ({ ...value, [key]: event.target.value }))} />
+            <input className="input" data-testid={`network-${key}`} required value={draft[key]} disabled={busy} onChange={event => setDraft(value => ({ ...value, [key]: event.target.value }))} />
           </label>)}
           {CONTRACT_FIELDS.map(key => <label className="field" key={key}>{key}
-            <input className="input mono" required value={draft.contracts[key]} disabled={busy} onChange={event => setDraft(value => ({ ...value, contracts: { ...value.contracts, [key]: event.target.value } }))} />
+            <input className="input mono" data-testid={`network-contract-${key}`} required value={draft.contracts[key]} disabled={busy} onChange={event => setDraft(value => ({ ...value, contracts: { ...value.contracts, [key]: event.target.value } }))} />
           </label>)}
-          <button className="btn primary" disabled={busy}>{busy ? 'Verifying network…' : 'Verify and connect'}</button>
+          <button className="btn primary" data-testid="network-connect" disabled={busy}>{busy ? 'Verifying network…' : 'Verify and connect'}</button>
         </form>
       </details>
     </>}
-    {notice && <p className="note" role={notice.error ? 'alert' : 'status'}>{notice.text}</p>}
+    {notice && <p className="note" data-testid="network-notice" role={notice.error ? 'alert' : 'status'}>{notice.text}</p>}
   </details>;
 }

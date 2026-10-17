@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, type Plugin, type ViteDevServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { createReadStream, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,15 +11,14 @@ const RUNTIME_BUNDLE_WAIT_MS = 90_000;
 /**
  * Inside `bun run dev` the repo's runtime role rebuilds one bundle pair into
  * frontend/static on every core edit. Serve that pair here instead of a second
- * copy so both wallets always run the same core; a request that arrives while
+ * copy so the wallet and observer always run the same core; a request that arrives while
  * the first build is still running waits for the file rather than failing.
  */
-function sharedRuntimeBundle(dir: string): Plugin {
-	return {
-		name: 'xln-shared-runtime-bundle',
-		configureServer(server) {
+function sharedRuntimeBundle(dir: string, base: string): Plugin {
+	const install = (server: Pick<ViteDevServer, 'middlewares'>): void => {
 			server.middlewares.use((req, res, next) => {
-				const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+				const requestPath = new URL(req.url ?? '/', 'http://localhost').pathname;
+				const pathname = base !== '/' && requestPath.startsWith(base) ? '/' + requestPath.slice(base.length) : requestPath;
 				if (!RUNTIME_BUNDLES.has(pathname)) return next();
 				const file = join(dir, pathname.slice(1));
 				const deadline = Date.now() + RUNTIME_BUNDLE_WAIT_MS;
@@ -39,13 +38,17 @@ function sharedRuntimeBundle(dir: string): Plugin {
 				};
 				serve();
 			});
-		},
+	};
+	return {
+		name: 'xln-shared-runtime-bundle',
+		configureServer: install,
+		configurePreviewServer: install,
 	};
 }
 
 const sharedBundleDir = process.env['XLN_UI_RUNTIME_BUNDLE_DIR'];
 
-/** Path prefix the hosted build lives under (xln.finance/ui/). Dev and tests stay at the root. */
+/** Path prefix the hosted build lives under (xln.finance/ui/). The dev gateway sets the same prefix; standalone test stands may set their own base. */
 const base = process.env['XLN_UI_BASE'] ?? '/';
 /**
  * Dev only: the stack this dev server resolves to, exactly like frontend/vite.config.ts.
@@ -64,10 +67,11 @@ export default defineConfig(({ mode }) => ({
 	// SvelteKit wallet loads. Without it the shim has no value to carry and the
 	// page boots with dev semantics.
 	define: {
+		__XLN_UI_DIAGNOSTICS__: JSON.stringify(process.env['XLN_UI_DIAGNOSTICS'] === '1'),
 		__XLN_STACK_ORIGIN__: JSON.stringify(stackOrigin),
 		'process.env.NODE_ENV': JSON.stringify(process.env['NODE_ENV'] ?? 'development'),
 	},
-	plugins: [react(), ...(sharedBundleDir ? [sharedRuntimeBundle(sharedBundleDir)] : [])],
+	plugins: [react(), ...(sharedBundleDir ? [sharedRuntimeBundle(sharedBundleDir, base)] : [])],
 	server: {
 		port: 5183,
 		strictPort: true,
@@ -109,6 +113,7 @@ export default defineConfig(({ mode }) => ({
 		},
 	},
 	build: {
+		...(process.env['XLN_UI_BUILD_DIR'] ? { outDir: process.env['XLN_UI_BUILD_DIR'] } : {}),
 		target: 'es2022',
 		...(mode === 'ios' ? { outDir: '../native-dist', emptyOutDir: true } : {}),
 	},

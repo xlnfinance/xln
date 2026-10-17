@@ -26,18 +26,20 @@ fn cleanup(path: &std::path::Path) {
 }
 
 #[test]
-fn retired_schema_four_head_is_rejected_without_compatibility() {
-    let bytes = super::codec::encode_head(&super::types::StorageHead {
-        schema_version: 4,
-        ..super::types::StorageHead::default()
-    })
-    .expect("encode retired head fixture");
-    assert_eq!(
-        super::codec::decode_head(&bytes)
-            .expect_err("schema four must be rejected")
-            .to_string(),
-        "RRS_STORAGE_HEAD:schemaVersion",
-    );
+fn retired_storage_schema_heads_are_rejected_without_compatibility() {
+    for schema_version in [4, 5] {
+        let bytes = super::codec::encode_head(&super::types::StorageHead {
+            schema_version,
+            ..super::types::StorageHead::default()
+        })
+        .expect("encode retired head fixture");
+        assert_eq!(
+            super::codec::decode_head(&bytes)
+                .expect_err("retired schema must be rejected")
+                .to_string(),
+            "RRS_STORAGE_HEAD:schemaVersion",
+        );
+    }
 }
 
 fn output(value: &str) -> Vec<u8> {
@@ -1540,4 +1542,64 @@ fn storage_wall_decomposition_is_gated_and_does_not_change_wal_rows() {
     );
     drop(store);
     cleanup(&path);
+}
+
+#[test]
+fn current_typescript_storage_schema_head_round_trip() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let output = Command::new("bun")
+        .current_dir(&root)
+        .args([
+            "core/__tests__/fixtures/storage/native/schema-roundtrip.ts",
+            "emit",
+        ])
+        .output()
+        .expect("run current TS storage encoder");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let fixture: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let current =
+        super::codec::decode_head(&hex::decode(fixture["currentHead"].as_str().unwrap()).unwrap())
+            .expect("accept current TS head");
+    assert_eq!(current.schema_version, 6);
+    let old =
+        super::codec::decode_head(&hex::decode(fixture["oldHead"].as_str().unwrap()).unwrap())
+            .expect_err("reject actual TS old-five head bytes");
+    assert_eq!(old.to_string(), "RRS_STORAGE_HEAD:schemaVersion");
+    let native = super::types::StorageHead::default();
+    assert_eq!(native.schema_version, 6);
+    let bytes = super::codec::encode_head(&native).expect("produce native current head");
+    assert_eq!(super::codec::decode_head(&bytes).unwrap(), native);
+    let mut child = Command::new("bun")
+        .current_dir(&root)
+        .args([
+            "core/__tests__/fixtures/storage/native/schema-roundtrip.ts",
+            "head",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run current TS head validator");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(hex::encode(bytes).as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap().trim(),
+        "TS_CURRENT_HEAD_ACCEPTED"
+    );
 }

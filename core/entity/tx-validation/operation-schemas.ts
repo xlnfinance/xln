@@ -53,6 +53,11 @@ export const ENTITY_TX_OPERATION_SCHEMAS = {
   extendCredit: {
     required: { counterpartyEntityId: 'string', tokenId: 'integer', amount: 'bigint' },
   },
+  requestCredit: {
+    required: {
+      counterpartyEntityId: 'string', tokenId: 'integer', amount: 'bigint', requestId: 'string',
+    },
+  },
   lendingOffer: {
     required: {
       positionId: 'string', hubEntityId: 'string', tokenId: 'integer',

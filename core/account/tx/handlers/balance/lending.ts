@@ -62,6 +62,7 @@ const requireIntentId = (value: string, prefix: 'lend' | 'borrow' | 'loan'): voi
   }
 };
 
+/** The one Account intent ledger: lending and credit requests share it. */
 const consumeIntent = (
   account: AccountDraftReplica,
   key: string,

@@ -98,6 +98,22 @@ const steps: TourStep[] = [
   },
   ...FEATURE_CHAPTERS,
   {
+    id: 'balance', title: 'Credit and collateral',
+    instruction: () => 'Review how your balance is held. Unsecured credit depends on repayment; collateral backs an enforceable claim.',
+    target: () => 'home-balance-breakdown', route: () => '/',
+  },
+  {
+    id: 'cover', title: 'Request collateral',
+    instruction: () => 'Open Cover it on your hub account. Review the amount and on-chain fee before asking the hub to lock collateral.',
+    target: () => 'account-cover',
+    route: ctx => ctx.wallet.accounts[0] ? `/accounts/${ctx.wallet.accounts[0].counterpartyId}` : '/',
+  },
+  {
+    id: 'evidence', title: 'Keep your signed proofs',
+    instruction: () => 'Export your evidence bundle from Security and recovery. Keep the co-signed frames needed to enforce your collateral-backed claim.',
+    target: () => 'evidence-export', route: () => '/sovereignty',
+  },
+  {
     id: 'finish',
     title: 'Keep practising',
     instruction: () =>

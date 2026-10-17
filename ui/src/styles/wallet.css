@@ -1,0 +1,1580 @@
+/*
+ * Dashboard patterns shared by Home, Activity, Account and Manage: a page head
+ * with a breadcrumb, underline tabs, the balance panel, data tables and the
+ * quiet right-hand column of cards and resources.
+ */
+
+/* ---------- page head ---------- */
+
+.page-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-end;
+	gap: 16px;
+	margin-bottom: 22px;
+}
+
+.page-head > div {
+	min-width: 0;
+}
+
+.crumb {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 6px;
+	font-size: 13.5px;
+	font-weight: 600;
+	color: var(--accent);
+}
+
+button.crumb:hover {
+	color: var(--accent-2);
+}
+
+.page-title {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 10px;
+	font-size: 28px;
+	font-weight: 700;
+	letter-spacing: -0.025em;
+	line-height: 1.15;
+	color: var(--display);
+	overflow-wrap: anywhere;
+}
+
+.page-sub {
+	margin-top: 6px;
+	font-size: 13px;
+	color: var(--ink-2);
+}
+
+.page-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: none;
+}
+
+.page-head .entity-switch .avatar {
+	width: 36px;
+	height: 36px;
+	font-size: 15px;
+}
+
+/* ---------- underline tabs ---------- */
+
+.tabs {
+	display: flex;
+	gap: 26px;
+	border-bottom: 1px solid var(--line);
+	margin-bottom: 24px;
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+	display: none;
+}
+
+.tabs > button {
+	position: relative;
+	padding: 2px 0 12px;
+	font-size: 14.5px;
+	font-weight: 600;
+	color: var(--ink-2);
+	white-space: nowrap;
+	transition: color var(--dur-fast) var(--ease);
+}
+
+.tabs > button:hover {
+	color: var(--ink);
+}
+
+.tabs > button[aria-selected='true'],
+.tabs > button.active {
+	color: var(--accent);
+}
+
+.tabs > button[aria-selected='true']::after,
+.tabs > button.active::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: -1px;
+	height: 2px;
+	border-radius: 2px;
+	background: var(--accent);
+}
+
+/* ---------- dashboard grid ---------- */
+
+.dash {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 360px;
+	gap: 48px;
+	align-items: start;
+}
+
+.dash-main {
+	min-width: 0;
+}
+
+.dash-aside {
+	display: flex;
+	flex-direction: column;
+	gap: 32px;
+	min-width: 0;
+}
+
+@media (max-width: 1100px) {
+	.dash {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 36px;
+	}
+}
+
+/* ---------- balance panel: a tinted tray holding one lifted card ---------- */
+
+.panel {
+	background: var(--surface-2);
+	border-radius: 16px;
+	padding: 6px;
+	box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.panel-card {
+	background: var(--surface);
+	border-radius: 12px;
+	padding: 20px 22px 18px;
+	box-shadow: var(--shadow-card);
+	--fade: var(--surface);
+}
+
+.panel-token {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--ink);
+}
+
+.panel-token .faint {
+	font-weight: 500;
+	font-size: 13px;
+}
+
+.panel-amount {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin: 10px 0 4px;
+}
+
+.panel-amount .display {
+	font-size: 44px;
+	overflow-wrap: anywhere;
+}
+
+.panel-amount .sym {
+	font-size: 20px;
+	font-weight: 600;
+	color: var(--ink-2);
+	letter-spacing: -0.01em;
+}
+
+.panel-card .note {
+	margin-top: 4px;
+}
+
+.panel-card .actions {
+	margin: 18px 0 0;
+}
+
+.panel-card .rb {
+	margin-top: 16px;
+}
+
+.panel-foot {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px 14px;
+	padding: 12px 16px 8px;
+	font-size: 13px;
+	color: var(--ink-2);
+}
+
+.panel-foot > span {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+}
+
+.panel-foot strong {
+	font-weight: 600;
+	color: var(--ink);
+}
+
+.panel-foot .hash {
+	font-size: 12.5px;
+	color: var(--ink-2);
+}
+
+.panel-foot .dot {
+	width: 3px;
+	height: 3px;
+	border-radius: 50%;
+	background: var(--ink-3);
+}
+
+/* ---------- test-mode banner ---------- */
+
+.testmode {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 10px 14px;
+	margin: 0 0 22px;
+	padding: 10px 12px 10px 16px;
+	border-radius: 12px;
+	background: var(--debt-dim);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--debt) 28%, transparent);
+	font-size: 13px;
+}
+
+.testmode-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-weight: 650;
+	color: var(--debt);
+}
+
+.testmode-label::before {
+	content: '';
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: currentColor;
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--debt) 22%, transparent);
+}
+
+.testmode .note {
+	color: var(--ink-2);
+}
+
+.testmode > .btn {
+	margin-left: auto;
+	background: var(--surface);
+}
+
+.testmode > .more {
+	font-size: 13px;
+}
+
+.testmode > [role] {
+	flex-basis: 100%;
+	font-size: 12.5px;
+}
+
+.testmode > [role='status'] {
+	color: var(--coll);
+	font-weight: 500;
+}
+
+.testmode > [role='alert'] {
+	color: var(--dispute);
+}
+
+.testmode > .disclosure {
+	border: 0;
+	padding: 0;
+}
+
+.testmode > .disclosure[open] {
+	order: 10;
+	flex-basis: 100%;
+}
+
+.testmode .disclosure[open] > summary {
+	margin-bottom: 4px;
+}
+
+.testmode .disclosure > summary {
+	padding: 0;
+	font-size: 12px;
+	color: var(--ink-2);
+}
+
+/* ---------- stat strip (balance breakdown) ---------- */
+
+.stats {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 0;
+	margin-top: 16px;
+	border-radius: 12px;
+	box-shadow: var(--shadow-card);
+	background: var(--surface);
+	overflow: hidden;
+}
+
+.stat {
+	padding: 14px 16px 16px;
+	min-width: 0;
+}
+
+.stat + .stat {
+	box-shadow: inset 1px 0 0 var(--line);
+}
+
+.stat-label .sw {
+	margin-top: 4px;
+}
+
+.stat-label {
+	display: flex;
+	align-items: flex-start;
+	min-height: 32px;
+	gap: 7px;
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--ink-2);
+	line-height: 1.3;
+}
+
+.stat-value {
+	display: block;
+	margin-top: 6px;
+	font-size: 19px;
+	font-weight: 650;
+	letter-spacing: -0.02em;
+	color: var(--display);
+}
+
+.stat .note {
+	margin-top: 4px;
+	font-size: 12px;
+	line-height: 1.4;
+	color: var(--ink-3);
+}
+
+.sw {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	border-radius: 2px;
+	flex: none;
+}
+
+@media (max-width: 760px) {
+	.stats {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.stat:nth-child(3) {
+		box-shadow: inset 0 1px 0 var(--line);
+	}
+
+	.stat:nth-child(4) {
+		box-shadow: inset 1px 1px 0 var(--line);
+	}
+}
+
+/* ---------- data table (activity) ---------- */
+
+.dtable-head,
+.dtable .rt {
+	display: grid;
+	grid-template-columns: 34px minmax(0, 1.25fr) minmax(0, 1fr) minmax(max-content, 0.9fr) 104px 92px;
+	grid-template-areas: 'ic t p a s d';
+	align-items: center;
+	column-gap: 14px;
+}
+
+.dtable-head {
+	padding: 0 0 8px;
+	border-bottom: 1px solid var(--line);
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--ink-2);
+}
+
+.dtable-head .ha {
+	grid-area: a;
+	text-align: right;
+}
+
+.dtable-head .ht {
+	grid-area: t;
+}
+
+.dtable-head .hp {
+	grid-area: p;
+}
+
+.dtable-head .hs {
+	grid-area: s;
+}
+
+.dtable-head .hd {
+	grid-area: d;
+	text-align: right;
+}
+
+.dtable .row {
+	padding: 10px 0;
+}
+
+.dtable .row.first {
+	border-top: 0;
+}
+
+.dtable .rt .ev-ic {
+	grid-area: ic;
+	width: 30px;
+	height: 30px;
+}
+
+.dtable .rt .t {
+	grid-area: t;
+	min-width: 0;
+	display: block;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* Status reads as a pill, the same as account status. */
+.dtable .rt .as .state {
+	height: 22px;
+	padding: 0 8px;
+	border-radius: var(--radius-pill);
+	background: color-mix(in srgb, currentColor 12%, transparent);
+	font-weight: 600;
+}
+
+.dtable .rt .ap {
+	grid-area: p;
+	font-size: 13px;
+	color: var(--ink-2);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
+}
+
+.dtable .rt .aa {
+	grid-area: a;
+	text-align: right;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--display);
+	white-space: nowrap;
+}
+
+.dtable .rt .as {
+	grid-area: s;
+}
+
+/* No counterparty: a dash in the table, the clock on a phone where the date column folds away. */
+.dtable .rt .ap-time {
+	display: none;
+}
+
+.dtable .rt .ap:has(.ap-time)::before {
+	content: '—';
+	color: var(--ink-3);
+}
+
+.dtable .rt .ad {
+	grid-area: d;
+	text-align: right;
+	font-size: 12.5px;
+	color: var(--ink-2);
+	white-space: nowrap;
+}
+
+/* Narrow: two lines per movement, the way a phone statement reads. */
+@container (max-width: 640px) {
+	.dtable-head {
+		display: none;
+	}
+
+	.dtable .rt {
+		grid-template-columns: 34px minmax(0, 1fr) auto;
+		grid-template-areas:
+			'ic t a'
+			'ic p s';
+		row-gap: 2px;
+	}
+
+	.dtable .rt .ev-ic {
+		width: 34px;
+		height: 34px;
+	}
+
+	.dtable .rt .as {
+		justify-self: end;
+	}
+
+	.dtable .rt .ad {
+		display: none;
+	}
+
+	.dtable .rt .ap-time {
+		display: inline;
+	}
+
+	.dtable .rt .ap:has(.ap-time)::before {
+		content: none;
+	}
+}
+
+.dtable {
+	container-type: inline-size;
+}
+
+/* A picked row reads as selected without breaking the table rhythm. */
+.dtable .row.sel {
+	margin: 0 -12px;
+	padding: 10px 12px;
+	width: calc(100% + 24px);
+	border-radius: 10px;
+	background: var(--accent-dim);
+	border-top-color: transparent;
+}
+
+.dtable .row.sel + .row {
+	border-top-color: transparent;
+}
+
+/* ---------- toolbar ---------- */
+
+.toolbar {
+	display: grid;
+	grid-template-columns: minmax(160px, 1fr) auto auto;
+	gap: 10px;
+	align-items: center;
+	margin-bottom: 16px;
+}
+
+.toolbar-date {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--ink-2);
+}
+
+.toolbar-date .input.boxed {
+	width: 160px;
+	padding: 8px 10px;
+	font-size: 13px;
+}
+
+.toolbar > .input.boxed {
+	padding: 9px 12px;
+}
+
+@media (max-width: 760px) {
+	.toolbar {
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	}
+
+	.toolbar .input.boxed {
+		min-width: 0;
+	}
+
+	.toolbar > .input.boxed {
+		grid-column: 1 / -1;
+	}
+
+	.toolbar-date {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 4px;
+	}
+
+	.toolbar-date .input.boxed {
+		width: 100%;
+	}
+}
+
+.activity-receipt {
+	position: sticky;
+	top: 24px;
+}
+
+/* ---------- right column ---------- */
+
+.side-card {
+	display: flex;
+	flex-direction: column;
+}
+
+.side-title {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 10px;
+	font-size: 16px;
+	font-weight: 650;
+	letter-spacing: -0.01em;
+	color: var(--display);
+}
+
+.side-title .more {
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--accent);
+}
+
+.side-box {
+	background: var(--surface);
+	border-radius: 12px;
+	box-shadow: var(--shadow-card);
+	overflow: hidden;
+	--fade: var(--surface);
+}
+
+.side-hero {
+	padding: 14px 16px;
+	background: linear-gradient(180deg, var(--surface-2), var(--surface));
+	border-bottom: 1px solid var(--line);
+}
+
+.side-hero .display {
+	font-size: 24px;
+	font-weight: 600;
+	letter-spacing: -0.02em;
+}
+
+.side-hero .note {
+	margin-top: 4px;
+	font-size: 12px;
+}
+
+.side-box .kv {
+	padding: 11px 16px;
+	font-size: 13.5px;
+}
+
+.side-box .kv .k {
+	color: var(--ink);
+}
+
+.side-box .kv .v {
+	color: var(--ink-2);
+	font-weight: 500;
+}
+
+.side-box .row {
+	padding: 12px 16px;
+}
+
+.side-box .row.tappable:hover {
+	margin: 0;
+	padding: 12px 16px;
+	width: 100%;
+	border-radius: 0;
+}
+
+.side-box > .btn.quiet {
+	margin: 4px 16px 14px;
+	align-self: flex-start;
+}
+
+.resources {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.resource {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 7px 8px;
+	margin: 0 -8px;
+	border-radius: 8px;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--ink);
+	text-align: left;
+	transition: background var(--dur-fast) var(--ease);
+}
+
+.resource:hover {
+	background: var(--surface-2);
+}
+
+.resource-ic {
+	width: 28px;
+	height: 28px;
+	border-radius: 8px;
+	display: grid;
+	place-items: center;
+	background: var(--surface-2);
+	box-shadow: inset 0 0 0 1px var(--line);
+	color: var(--ink-2);
+	flex: none;
+}
+
+.resource .s {
+	display: block;
+	font-size: 12px;
+	font-weight: 400;
+	color: var(--ink-2);
+	margin-top: 1px;
+}
+
+.id-box {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px 8px 12px;
+	border-radius: 8px;
+	background: var(--surface-2);
+	box-shadow: inset 0 0 0 1px var(--line);
+	min-width: 0;
+}
+
+.id-box .hash {
+	flex: 1;
+	min-width: 0;
+	font-size: 12.5px;
+	color: var(--ink);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	word-break: normal;
+}
+
+.id-box .note {
+	font-size: 12px;
+}
+
+/* ---------- mobile ---------- */
+
+@media (max-width: 840px) {
+	.page-head {
+		margin-bottom: 16px;
+	}
+
+	.page-title {
+		font-size: 24px;
+	}
+
+	.page-head .entity-switch {
+		font-size: 22px;
+	}
+
+	.tabs {
+		margin-bottom: 18px;
+		gap: 22px;
+	}
+
+	.panel-card {
+		padding: 16px 16px 14px;
+	}
+
+	.panel-amount .display {
+		font-size: 38px;
+	}
+
+	.panel-card .actions .btn {
+		flex: 1 1 auto;
+		justify-content: center;
+	}
+
+	.testmode > .btn {
+		margin-left: 0;
+	}
+
+	.panel-foot .dot {
+		display: none;
+	}
+
+	.panel-foot {
+		flex-direction: column;
+		align-items: flex-start;
+	}
+}
+
+/* ---------- status pill ---------- */
+
+.status-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 24px;
+	padding: 0 10px;
+	border-radius: var(--radius-pill);
+	font-size: 12.5px;
+	font-weight: 600;
+	letter-spacing: 0;
+	background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.status-pill::before {
+	content: '';
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: currentColor;
+}
+
+.page-title .avatar {
+	width: 36px;
+	height: 36px;
+	font-size: 15px;
+}
+
+.page-sub .hash {
+	font-size: 12.5px;
+	color: var(--ink-2);
+}
+
+/* ---------- bilateral bar: thicker, rounded, legible ---------- */
+
+.dbar {
+	height: 10px;
+}
+
+.dbar .bar {
+	height: 100%;
+}
+
+.dbar .half.out .bar .seg:first-child {
+	border-top-left-radius: 99px;
+	border-bottom-left-radius: 99px;
+}
+
+.dbar .half.in .bar .seg:last-child {
+	border-top-right-radius: 99px;
+	border-bottom-right-radius: 99px;
+}
+
+.dbar .notch {
+	height: 18px;
+	width: 2px;
+	background: var(--display);
+}
+
+/* ---------- door grid (Manage) ---------- */
+
+.doors {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(188px, 1fr));
+	gap: 12px;
+	margin-bottom: 28px;
+}
+
+.door {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 16px;
+	border-radius: 12px;
+	background: var(--surface);
+	box-shadow: var(--shadow-card);
+	text-align: left;
+	transition:
+		box-shadow var(--dur-fast) var(--ease),
+		transform var(--dur-fast) var(--ease);
+}
+
+.door:hover {
+	box-shadow: var(--shadow-lift);
+	transform: translateY(-1px);
+}
+
+.door .resource-ic {
+	width: 32px;
+	height: 32px;
+	color: var(--accent);
+	background: var(--accent-dim);
+	box-shadow: none;
+}
+
+.door .t {
+	font-size: 14.5px;
+	font-weight: 650;
+	color: var(--display);
+}
+
+.door .s {
+	margin-top: 2px;
+	font-size: 12.5px;
+	color: var(--ink-2);
+	line-height: 1.4;
+}
+
+.account-links {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px 22px;
+	margin: 4px 0 16px;
+}
+
+
+
+/* ---------- gate: one sheet on a soft aurora ---------- */
+
+.gate {
+	position: relative;
+	isolation: isolate;
+	min-height: 100vh;
+	padding: 56px 20px;
+	background:
+		radial-gradient(60% 50% at 8% 0%, color-mix(in srgb, #a78bfa 38%, transparent), transparent 70%),
+		radial-gradient(50% 45% at 55% 0%, color-mix(in srgb, #fbbf8a 40%, transparent), transparent 70%),
+		radial-gradient(45% 45% at 100% 10%, color-mix(in srgb, #86efac 42%, transparent), transparent 70%),
+		radial-gradient(60% 60% at 100% 100%, color-mix(in srgb, #6ee7b7 28%, transparent), transparent 70%),
+		radial-gradient(60% 60% at 0% 100%, color-mix(in srgb, #c4b5fd 26%, transparent), transparent 70%), var(--bg);
+}
+
+:root[data-theme='dark'] .gate,
+:root:not([data-theme='light']) .gate {
+	background:
+		radial-gradient(60% 50% at 8% 0%, rgba(122, 115, 255, 0.28), transparent 70%),
+		radial-gradient(50% 45% at 60% 0%, rgba(251, 146, 60, 0.12), transparent 70%),
+		radial-gradient(45% 45% at 100% 10%, rgba(74, 222, 128, 0.14), transparent 70%),
+		radial-gradient(60% 60% at 0% 100%, rgba(167, 139, 250, 0.12), transparent 70%), var(--bg);
+}
+
+.gate-sheet {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 14px;
+	width: min(520px, 100%);
+	padding: 40px 40px 32px;
+	border-radius: 20px;
+	background: var(--surface);
+	box-shadow: var(--shadow-lift);
+	--fade: var(--surface);
+}
+
+.gate-sheet .gate-cards,
+.gate-sheet .gate-form {
+	width: 100%;
+}
+
+.gate-sheet .gate-title {
+	font-size: 28px;
+	font-weight: 700;
+}
+
+.gate-sheet .gate-entry-action {
+	padding: 12px 14px;
+	border-radius: 12px;
+	background: var(--surface-2);
+	box-shadow: inset 0 0 0 1px var(--line);
+	transition: box-shadow var(--dur-fast) var(--ease);
+}
+
+.gate-sheet .gate-entry-action:hover {
+	box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.gate-sheet .gate-entry-action > svg {
+	color: var(--accent);
+}
+
+.gate-sheet .gate-entry-actions {
+	border-top: 0;
+	padding-top: 4px;
+	gap: 10px;
+}
+
+.gate-sheet .gate-resume {
+	background: var(--surface-2);
+	box-shadow: inset 0 0 0 1px var(--line);
+	border: 0;
+}
+
+.password-form {
+	gap: 10px;
+}
+
+.password-form h1 {
+	font-size: 22px;
+	font-weight: 700;
+	letter-spacing: -0.02em;
+	color: var(--display);
+	margin-bottom: 6px;
+}
+
+.password-form label {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--ink);
+	margin-top: 4px;
+}
+
+.password-form .btn.primary {
+	margin-top: 10px;
+}
+
+.password-form .btn.quiet {
+	align-self: center;
+}
+
+@media (max-width: 560px) {
+	.gate {
+		padding: 20px 12px;
+	}
+
+	.gate-sheet {
+		padding: 28px 20px 24px;
+	}
+}
+
+/* Native selects keep their behaviour; only the chrome changes. */
+select.input {
+	appearance: none;
+	-webkit-appearance: none;
+	padding-right: 28px;
+	background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%238792a2' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+		right 10px center / 12px no-repeat;
+	cursor: pointer;
+}
+
+textarea.input.boxed.profile-bio {
+	font-family: var(--font-ui);
+	font-size: 14px;
+	min-height: 64px;
+}
+
+.chips.tour-chapters {
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	max-width: 400px;
+	overflow: visible;
+}
+
+/* ---------- review pass: shared polish ---------- */
+
+/* Dark theme: the lifted card must be lighter than its tray, never sunken into it. */
+:root[data-theme='dark'] .panel {
+	background: color-mix(in srgb, var(--bg) 55%, var(--surface));
+	box-shadow: inset 0 0 0 1px var(--line);
+}
+
+:root[data-theme='dark'] .panel-card {
+	background: var(--surface-2);
+	box-shadow:
+		0 0 0 1px var(--line-2),
+		0 10px 28px rgba(0, 0, 0, 0.35);
+	--fade: var(--surface-2);
+}
+
+/* Disclosures: one quiet chevron instead of the browser triangle. */
+details > summary {
+	list-style: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	cursor: pointer;
+}
+
+details > summary::-webkit-details-marker {
+	display: none;
+}
+
+details > summary::before {
+	content: '';
+	width: 12px;
+	height: 12px;
+	flex: none;
+	background: currentColor;
+	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4.5 3l3 3-3 3' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+		center / 12px no-repeat;
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4.5 3l3 3-3 3' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+		center / 12px no-repeat;
+	transition: transform var(--dur-fast) var(--ease);
+}
+
+details[open] > summary::before {
+	transform: rotate(90deg);
+}
+
+/* Option tiles: title, hint, amount in three weights. */
+.mode-card .t {
+	font-weight: 600;
+	color: var(--ink);
+}
+
+.mode-card .s {
+	font-size: 12px;
+	color: var(--ink-2);
+	line-height: 1.4;
+}
+
+.mode-card .v {
+	font-weight: 600;
+	margin-top: 8px;
+	color: var(--display);
+}
+
+.mode-card,
+.route-card {
+	border-radius: 10px;
+	border: 0;
+	box-shadow: var(--shadow-card);
+	transition: box-shadow var(--dur-fast) var(--ease);
+}
+
+.mode-card.active,
+.route-card.active {
+	box-shadow:
+		0 0 0 2px var(--accent),
+		var(--shadow-card);
+	background: var(--surface);
+}
+
+/* The bilateral bar sits on a hairline axis so its two halves read as one number line. */
+.dbar {
+	background: linear-gradient(var(--line-2), var(--line-2)) center / 100% 1px no-repeat;
+	margin: 6px 0 2px;
+}
+
+/* Sheets: a real title. */
+.sheet-header .caps {
+	font-size: 17px;
+	font-weight: 650;
+	letter-spacing: -0.015em;
+	color: var(--display);
+}
+
+.sheet-body ol,
+.sheet-body ul {
+	margin: 8px 0 0;
+	padding-left: 18px;
+}
+
+/* Values that must stay on one line: a hash, a status word. */
+.kv .v .hash,
+.kv .v .state {
+	white-space: nowrap;
+}
+
+.field-row {
+	flex-wrap: nowrap;
+}
+
+.field-row > .btn {
+	width: auto;
+	flex: none;
+	height: 38px;
+	padding: 0 14px;
+}
+
+@media (max-width: 760px) {
+	/* Long tab strips hint that they scroll. */
+	.tabs {
+		-webkit-mask-image: linear-gradient(90deg, #000 85%, transparent);
+		mask-image: linear-gradient(90deg, #000 85%, transparent);
+	}
+
+	.dtable .row {
+		border-radius: 0;
+	}
+
+	/* Doors become compact rows so the money summary stays near the top. */
+	.doors {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 8px;
+	}
+
+	.door {
+		flex-direction: row;
+		align-items: center;
+		padding: 12px 14px;
+	}
+
+	.door .s {
+		font-size: 12px;
+	}
+
+	.panel-card .actions.pills {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+
+	.panel-card .actions.pills .btn {
+		padding: 0 8px;
+	}
+
+	.testmode .note {
+		display: none;
+	}
+
+	.sheet-body {
+		padding-bottom: calc(26px + env(safe-area-inset-bottom, 0px));
+	}
+}
+
+/* The breakdown bar sits on a track: the full width is the fitted scale, so empty track is real headroom. */
+.wallet-breakdown > .bw {
+	height: 8px;
+	border-radius: 99px;
+	background: var(--surface-3);
+}
+
+.page-head {
+	flex-wrap: wrap;
+}
+
+/* Order book depth: one bar per level, against the deepest level, in the side's own color. */
+.bk-bar {
+	display: flex;
+	align-items: center;
+	height: 100%;
+}
+
+.bk-depth {
+	display: block;
+	height: 6px;
+	border-radius: 99px;
+	opacity: 0.55;
+	transition: width var(--dur-slow) var(--ease);
+}
+
+.bk-depth.bid {
+	background: var(--reserve);
+}
+
+.bk-depth.ask {
+	background: var(--dispute);
+}
+
+.desk-frame {
+	margin-left: 6px;
+	font-size: 11.5px;
+	font-variant-numeric: tabular-nums;
+}
+
+.hero-pair {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 16px 48px;
+	align-items: flex-end;
+}
+
+.lane-legend {
+	margin-top: 12px;
+	padding-top: 10px;
+	border-top: 1px solid var(--line);
+}
+
+.lane-legend .legend {
+	font-size: 12px;
+	gap: 6px 14px;
+}
+
+/* Gate: one main action first, the alternatives after a quiet divider. */
+.gate-or {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin: 4px 0;
+	font-size: 12px;
+	color: var(--ink-3);
+}
+
+.gate-or::before,
+.gate-or::after {
+	content: '';
+	flex: 1;
+	height: 1px;
+	background: var(--line);
+}
+
+.gate-sheet .gate-entry-action > svg {
+	width: 28px;
+	height: 28px;
+	padding: 6px;
+	border-radius: 8px;
+	background: var(--accent-dim);
+}
+
+/* Desk: the lane table takes the full width; recent activity and the book share the row below. */
+.desk-stack {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	min-width: 0;
+}
+
+.desk-stack .desk-grid {
+	grid-template-columns: minmax(0, 1fr) 360px;
+	gap: 16px;
+}
+
+/* A standing warning at the top of a screen: amber, one line of action. */
+.notice {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	margin: 0 0 20px;
+	padding: 12px 14px;
+	border-radius: 12px;
+	background: var(--debt-dim);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--debt) 28%, transparent);
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--ink);
+}
+
+.notice > svg {
+	color: var(--debt);
+	margin-top: 2px;
+}
+
+.notice strong {
+	color: var(--debt);
+}
+
+.account-tabs {
+	margin: 6px 0 4px;
+}
+
+/* ---------- review pass 3 ---------- */
+
+/* S2: an input inside a card keeps a visible box; only the big amount input stays bare. */
+.card .field .input:not(.big):not(select) {
+	border: 1px solid var(--line-2);
+	border-radius: 8px;
+	padding: 9px 12px;
+	background: var(--surface);
+}
+
+/* S3: tab-like segmented controls fill their track evenly; other segmented controls hug their content. */
+.segc[role='tablist'] {
+	display: grid;
+	grid-auto-flow: column;
+	grid-auto-columns: 1fr;
+	width: 100%;
+}
+
+.segc[role='tablist'] button {
+	height: 30px;
+}
+
+.segc {
+	align-self: flex-start;
+}
+
+/* S6: card heads align with their right-hand link. */
+.sect > h3,
+.sect > h2 {
+	margin: 0;
+}
+
+/* S7 fallback: option tiles never leave a lone orphan on a wide row. */
+.mode-grid {
+	grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+/* S11: secondary actions inside cards are quieter than the primary. */
+.card .btn:not(.primary):not(.quiet):not(.sm):not(.danger) {
+	height: 40px;
+	background: var(--surface-2);
+	box-shadow: none;
+}
+
+.card .btn:not(.primary):not(.quiet):not(.sm):not(.danger):hover:not(:disabled) {
+	background: var(--surface-3);
+}
+
+.panel-amount .display .dec {
+	font-size: 0.62em;
+	letter-spacing: 0;
+}
+
+.account-backing > span {
+	gap: 6px;
+}
+
+/* Order book numbers align on the decimal. */
+.bk-price,
+.bk-size {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+.bk-cols,
+.bk-row {
+	grid-template-columns: 88px 72px 1fr;
+}
+
+.bk-cols > span:nth-child(-n + 2) {
+	text-align: right;
+}
+
+.chips button {
+	border-style: solid;
+}
+
+@media (min-width: 761px) {
+	.doors {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+}
+
+@media (max-width: 760px) {
+	/* Mobile Home: five actions in one row, icon over label. */
+	.panel-card .actions.pills {
+		grid-template-columns: repeat(5, minmax(0, 1fr));
+		gap: 6px;
+	}
+
+	.panel-card .actions.pills .btn {
+		flex-direction: column;
+		height: auto;
+		padding: 10px 0 8px;
+		gap: 4px;
+		font-size: 11.5px;
+		border-radius: 12px;
+	}
+
+	/* Move: three compact place tiles per row; hints live on desktop. */
+	.mode-grid.places {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+
+	.mode-grid.places .mode-card .s {
+		display: none;
+	}
+
+	/* Settings must not widen the page. */
+	.setting {
+		flex-wrap: wrap;
+	}
+
+	.setting > .segc {
+		max-width: 100%;
+		overflow-x: auto;
+	}
+
+	.chips.tour-chapters {
+		max-width: 100%;
+		justify-content: flex-start;
+	}
+}
+
+/* The on-chain swatch is hollow so the three greens stay apart for every eye. */
+.sw.c-onchain,
+.legend i.c-onchain {
+	background: none;
+	box-shadow: inset 0 0 0 1.5px var(--reserve);
+}
+
+/* Receipt: one primary action, the record tools as quiet links under it. */
+.rcpt-more {
+	display: flex;
+	justify-content: center;
+	flex-wrap: wrap;
+	gap: 6px 20px;
+}
+
+.gate-stack.state {
+	justify-content: center;
+	font-size: 12.5px;
+}
+
+.crumb.static {
+	color: var(--ink-2);
+}
+
+.desk-actions {
+	margin: 0;
+	align-items: center;
+}
+
+.dispute-figures {
+	margin: 0 0 14px;
+	padding: 4px 14px;
+	border-radius: 10px;
+	background: var(--surface-2);
+	box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* A row that only exists on phones must not leave its divider behind on desktop. */
+@media (min-width: 1101px) {
+	.kv.mobile-only + .kv {
+		border-top: 0;
+	}
+}
+
+/* Receive: the code lives in the Share card, under the one action that matters. */
+.receive-qr {
+	display: block;
+	width: fit-content;
+	margin: 16px auto 4px;
+}
+
+.receive-qr img {
+	width: 200px;
+	height: 200px;
+}
+
+/* A disabled text action reads as unavailable, with its reason in the label, not as broken text. */
+.btn.quiet:disabled,
+.btn.ghost:disabled {
+	color: var(--ink-3);
+	cursor: not-allowed;
+	opacity: 1;
+}
+
+/* Settings is one continuous list of rows: rows keep their own dividers, no extra rhythm between them. */
+.two-col > .flat-col {
+	gap: 0;
+}
+
+@media (max-width: 760px) {
+	.flat-col .sect {
+		margin-top: 28px;
+	}
+}
+
+/* Compact option tiles: short labels (tokens, terms) sit three or more across, never alone on a row. */
+.mode-grid.compact {
+	grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+}
+
+/* Short values never wrap mid-word. */
+.field-row > .muted,
+.kv > .v[class*='st-'] {
+	white-space: nowrap;
+}
+
+/* The Security hero bar sits on a track like Home's breakdown. */
+.hero .rb .bw {
+	background: var(--surface-3);
+	border-radius: 99px;
+}
+
+.segc.spectrum-presets {
+	display: grid;
+	grid-auto-flow: column;
+	grid-auto-columns: 1fr;
+	width: 100%;
+	margin-top: 12px;
+}
+
+.segc.spectrum-presets button {
+	height: 30px;
+}

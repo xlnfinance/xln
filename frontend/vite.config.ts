@@ -1,3 +1,4 @@
+import { selectDevWebTls } from '../scripts/dev/launcher/web-tls.ts';
 import { kitOptions } from './kit-options.ts';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
@@ -27,24 +28,9 @@ import { configureWsProxyLifecycle } from './vite-ws-proxy-lifecycle.ts';
 // localhost remains a secure browser context over HTTP.
 const FORCE_HTTP = process.env['XLN_VITE_FORCE_HTTP'] === '1';
 
-// Check if HTTPS certs exist (try multiple locations)
-let certPath = './localhost+3.pem';
-let keyPath = './localhost+3-key.pem';
-let hasCerts = !FORCE_HTTP && fs.existsSync(certPath) && fs.existsSync(keyPath);
-
-// Fallback to localhost+2 certs
-if (!FORCE_HTTP && !hasCerts) {
-	certPath = './localhost+2.pem';
-	keyPath = './localhost+2-key.pem';
-	hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
-}
-
-// Fallback to LAN IP certs if localhost certs don't exist
-if (!FORCE_HTTP && !hasCerts) {
-	certPath = '../192.168.1.23+2.pem';
-	keyPath = '../192.168.1.23+2-key.pem';
-	hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
-}
+const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const tls = selectDevWebTls(REPO_ROOT, FORCE_HTTP);
+const hasCerts = tls !== null;
 
 if (!FORCE_HTTP && !hasCerts) {
 	console.warn('VITE_TLS_DISABLED: local certs missing; HTTP fallback active (run frontend/generate-certs.sh to enable TLS)');
@@ -53,6 +39,7 @@ if (!FORCE_HTTP && !hasCerts) {
 const DEV_HOST = '0.0.0.0';
 const DEV_PORT_RAW = Number(process.env['VITE_DEV_PORT'] || '8080');
 const DEV_PORT = Number.isFinite(DEV_PORT_RAW) && DEV_PORT_RAW > 0 ? Math.floor(DEV_PORT_RAW) : 8080;
+const UI_PROXY_TARGET = process.env['VITE_UI_PROXY_TARGET'] || 'http://127.0.0.1:5183';
 const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
 const API_PROXY_AGENT = API_PROXY_TARGET.startsWith('https:')
 	? new https.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 64 })
@@ -60,7 +47,6 @@ const API_PROXY_AGENT = API_PROXY_TARGET.startsWith('https:')
 const VITE_CACHE_DIR = process.env['VITE_CACHE_DIR'] || 'node_modules/.vite';
 /** Entries Vite crawls at boot so the dependency optimizer settles before traffic. */
 const WARMUP_CLIENT_FILES = ['./src/routes/+page.svelte', './src/routes/app/+page.svelte'];
-const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FRONTEND_ROOT = fileURLToPath(new URL('.', import.meta.url));
 const TYPECHAIN_INDEX = fileURLToPath(new URL('../jurisdictions/typechain-types/index.ts', import.meta.url));
 const RUNTIME_BUNDLE_PATH = resolve(
@@ -95,6 +81,7 @@ const hmrConfig = ENABLE_HMR ? {
 } : false;
 
 const proxyConfig = {
+      '/ui': { target: UI_PROXY_TARGET, ws: true, changeOrigin: false, configure: configureWsProxyLifecycle },
 	'/api': {
 		target: API_PROXY_TARGET,
 		agent: API_PROXY_AGENT,
@@ -286,10 +273,10 @@ export default defineConfig({
 		// Optimize Dep, which reads as a broken dev server rather than a cold one.
 		warmup: { clientFiles: WARMUP_CLIENT_FILES },
 		// HTTPS for dev server only (nginx handles production HTTPS)
-		...(hasCerts && {
+		...(tls && {
 			https: {
-				key: fs.readFileSync(keyPath),
-				cert: fs.readFileSync(certPath),
+				key: fs.readFileSync(tls.keyPath),
+				cert: fs.readFileSync(tls.certPath),
 			}
 		}),
 		// Allow ngrok and other tunnel hosts (for Oculus/mobile access)
@@ -316,10 +303,10 @@ export default defineConfig({
 		host: DEV_HOST,
 		port: DEV_PORT,
 		strictPort: true,
-		...(hasCerts && {
+		...(tls && {
 			https: {
-				key: fs.readFileSync(keyPath),
-				cert: fs.readFileSync(certPath),
+				key: fs.readFileSync(tls.keyPath),
+				cert: fs.readFileSync(tls.certPath),
 			}
 		}),
 		proxy: previewProxyConfig,

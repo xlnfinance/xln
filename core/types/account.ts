@@ -92,6 +92,7 @@ interface AccountRejectedFrameEvidence {
   frameHanko: HankoString;
 }
 
+
 export interface AccountExternalSubcontract {
   transformerAddress: string;
   encodedBatch: string;
@@ -136,7 +137,8 @@ export type AccountLendingIntentKind =
   | 'disburse'
   | 'close-request'
   | 'close-payout'
-  | 'dispute-close';
+  | 'dispute-close'
+  | 'credit-request';
 
 /** Immutable jurisdiction-stack identity shared by both Account replicas. */
 export type AccountStateDomain = {
@@ -778,6 +780,13 @@ export type AccountTx =
     }
   | { type: 'add_delta'; data: { tokenId: number } }
   | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint } }
+  | {
+      // The proposer (requester) asks its counterparty to extend credit to it.
+      // Committing records only the replay intent `credit:<requestId>`; a hub
+      // counterparty answers with its own `set_credit_limit` after commit.
+      type: 'credit_request';
+      data: { requestId: string; requesterEntityId: string; tokenId: number; amount: bigint };
+    }
   | {
       type: 'request_collateral';
       data: {

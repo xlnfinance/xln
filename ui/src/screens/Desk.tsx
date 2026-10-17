@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import { PageHead } from '../components/PageHead';
 import { useNavigate } from 'react-router-dom';
 import { Bar, DeltaBar, Legend } from '../components/Bars';
 import { EntitySwitcher } from '../components/EntitySwitcher';
@@ -53,38 +54,34 @@ export function Desk() {
 
 	return (
 		<div className="screen fade-in" data-testid="desk">
-			<div className="screen-header">
-				<span className="screen-title">
-					<EntitySwitcher
-						name={wallet.name}
-						status={
-							<span className="state st-settled" style={{ fontSize: 11 }}>
-								frame #{wallet.frameHeight.toLocaleString('en-US')} · <span className="num">1 px = ${usdPerPx.toLocaleString('en-US')}</span>
-							</span>
-						}
-					/>
-				</span>
-				<span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-					<span className="faint">
-						<span className="kbd">⌘K</span> jump
+			<PageHead
+				eyebrow={`Desk${wallet.jurisdiction ? ` · ${wallet.jurisdiction}` : ''}`}
+				title={<EntitySwitcher name={wallet.name} status={null} />}
+				sub={
+					<span className="num">
+						<span className="kbd">⌘K</span> jump · frame #{wallet.frameHeight.toLocaleString('en-US')} · 1 px = ${usdPerPx.toLocaleString('en-US')}
 					</span>
-					<button type="button" className="btn sm" onClick={() => navigate('/pay')} data-testid="desk-pay">
-						<Icon name="pay" size={14} /> Pay
-					</button>
-					<button type="button" className="btn sm" onClick={() => navigate('/swap')}>
-						<Icon name="swap" size={14} /> Swap
-					</button>
-					<button type="button" className="btn sm" onClick={() => navigate('/move')}>
-						<Icon name="arrow" size={14} /> Move
-					</button>
-					<button type="button" className="btn sm" onClick={() => navigate('/assets#faucets')} data-testid="home-faucet">
-						Test money · Faucet
-					</button>
-					<button type="button" className="icon-btn" onClick={() => navigate('/sovereignty')} aria-label="Sovereignty" title="Keys, proofs, what is at risk">
-						<Icon name="shield" size={18} />
-					</button>
-				</span>
-			</div>
+				}
+				actions={
+					<div className="actions pills desk-actions">
+						<button type="button" className="btn primary" onClick={() => navigate('/pay')} data-testid="desk-pay">
+							<Icon name="pay" size={15} /> Pay
+						</button>
+						<button type="button" className="btn" onClick={() => navigate('/swap')}>
+							<Icon name="swap" size={15} /> Swap
+						</button>
+						<button type="button" className="btn" onClick={() => navigate('/move')}>
+							<Icon name="arrow" size={15} /> Move
+						</button>
+						<button type="button" className="btn" onClick={() => navigate('/assets#faucets')} data-testid="home-faucet">
+							<Icon name="plus" size={15} /> Test money
+						</button>
+						<button type="button" className="icon-btn" onClick={() => navigate('/sovereignty')} aria-label="Security and recovery" title="Keys, proofs, what is at risk">
+							<Icon name="shield" size={17} />
+						</button>
+					</div>
+				}
+			/>
 
 			<div className="desk-stat">
 				<div className="card">
@@ -94,13 +91,13 @@ export function Desk() {
 					</div>
 				</div>
 				<div className="card">
-					<div className="k">Yours on-chain</div>
+					<div className="k">Enforceable</div>
 					<div className="v num" style={{ color: 'var(--reserve)' }}>
 						{formatUsd(wallet.usd.onchain + wallet.usd.reserve + wallet.usd.secured)}
 					</div>
 				</div>
 				<div className="card">
-					<div className="k">Promised</div>
+					<div className="k">At risk</div>
 					<div className="v num" style={{ color: 'var(--risk)' }}>
 						{formatUsd(wallet.usd.risk)}
 					</div>
@@ -119,8 +116,8 @@ export function Desk() {
 				</div>
 			</div>
 
-			<div className="desk-grid">
-				<div>
+			<div className="desk-stack">
+				<div className="desk-stack">
 					<PendingBatch wallet={wallet} compact />
 					<div className="card" style={{ padding: 0, overflowX: 'auto' }}>
 						<table className="desk-table" data-testid="desk-table">
@@ -129,11 +126,10 @@ export function Desk() {
 									<th>Account · lane</th>
 									<th>Position</th>
 									<th>Secured</th>
-									<th>Promised</th>
+									<th>At risk</th>
 									<th>You owe</th>
 									<th>Send · receive</th>
 									<th style={{ whiteSpace: 'nowrap' }}>Credit out · in</th>
-									<th>Frame</th>
 									<th className="bar-cell">−send ‖ receive+</th>
 								</tr>
 							</thead>
@@ -149,6 +145,7 @@ export function Desk() {
 												{account.dispute !== 'none' ? <span className="state st-dispute" style={{ marginLeft: 6 }}>{account.dispute === 'closed' ? 'closed' : 'dispute'}</span> : null}
 												{account.settlement === 'awaiting_you' ? <span className="state st-pending" style={{ marginLeft: 6 }}>sign</span> : null}
 												<span className="faint"> · {getTokenMeta(token.tokenId).symbol}</span>
+												<span className="faint desk-frame" title="Frames both sides signed">#{account.frameHeight.toLocaleString('en-US')}</span>
 											</td>
 											<td className={`num ${token.signed > 0n ? 'st-settled' : token.signed < 0n ? 'st-pending' : ''}`}>{formatSigned(token.signed, getTokenMeta(token.tokenId).decimals)}</td>
 											<td className="num" style={{ color: 'var(--coll)' }}>{secured > 0n ? money(token.tokenId, secured) : '—'}</td>
@@ -160,7 +157,6 @@ export function Desk() {
 											<td className="num faint">
 												{money(token.tokenId, d.peerCreditLimit)} · {money(token.tokenId, d.ownCreditLimit)}
 											</td>
-											<td className="num faint">#{account.frameHeight.toLocaleString('en-US')}</td>
 											<td className="bar-cell">
 												<DeltaBar derived={d} tokenId={token.tokenId} />
 											</td>
@@ -169,7 +165,7 @@ export function Desk() {
 								})}
 								{lanes.length === 0 && !wallet.loading ? (
 									<tr>
-										<td colSpan={9} className="note" style={{ textAlign: 'left' }}>
+										<td colSpan={8} className="note" style={{ textAlign: 'left' }}>
 											No accounts yet. Open one from Home.
 										</td>
 									</tr>
@@ -185,7 +181,6 @@ export function Desk() {
 									<td className="num faint">
 										{formatUsd(wallet.usd.sendCapacity)} · {formatUsd(wallet.usd.receiveCapacity)}
 									</td>
-									<td />
 									<td />
 									<td className="bar-cell">
 										<Bar
@@ -205,10 +200,21 @@ export function Desk() {
 					<div style={{ margin: '10px 0 0' }}>
 						<Legend places />
 					</div>
-				</div>
+					<div className="desk-grid">
+					<div className="card dtable">
+						<h3 className="caps">Recent</h3>
+						{recent.movements.slice(0, 8).map((movement, index) => (
+							<ActivityRow key={movement.id} movement={movement} names={wallet.names} first={index === 0} />
+						))}
+						{recent.movements.length === 0 && !recent.loading ? (
+							<p className="note" style={{ padding: '6px 0' }}>
+								Quiet so far.
+							</p>
+						) : null}
+					</div>
 				<div>
 					{hub ? (
-						<div className="card" style={{ padding: 0 }}>
+						<div className="card">
 							<Orderbook
 								book={book}
 								hubLabel={hub.label}
@@ -220,16 +226,7 @@ export function Desk() {
 							/>
 						</div>
 					) : null}
-					<div className="card">
-						<h3 className="caps">Recent</h3>
-						{recent.movements.slice(0, 8).map((movement, index) => (
-							<ActivityRow key={movement.id} movement={movement} names={wallet.names} first={index === 0} />
-						))}
-						{recent.movements.length === 0 && !recent.loading ? (
-							<p className="note" style={{ padding: '6px 0' }}>
-								Quiet so far.
-							</p>
-						) : null}
+				</div>
 					</div>
 				</div>
 			</div>

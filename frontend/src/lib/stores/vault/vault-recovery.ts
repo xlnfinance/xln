@@ -140,7 +140,6 @@ export const runtimeCreationInFlight = new Map<string, Promise<void>>();
 
 export const signerCreationInFlight = new Map<string, Promise<Signer | null>>();
 
-export const schemaMismatchRecoveryRuntimeIds = new Set<string>();
 
 export type CreateRuntimeOptions = {
   loginType?: 'manual' | 'demo' | undefined;

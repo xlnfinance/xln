@@ -33,21 +33,13 @@ export const decodeRuntimeConfig = (
   code: string,
 ): RuntimeReplica['runtimeConfig'] => {
   const config = requireBoundaryRecord(value, code);
-  // `snapshotIntervalFrames` decided nothing and is no longer produced, but a
-  // Runtime restored from a checkpoint written before its removal keeps it —
-  // here and in every snapshot that Runtime writes afterwards. That is
-  // deliberate: the runtime machine hash covers this config, so dropping the
-  // field changes the hash and every journal recorded before the removal stops
-  // replaying. Retiring it for existing databases is an explicit offline
-  // migration, not something a decoder does quietly under a running node.
-  // New Runtimes never have it.
   requireExactBoundaryKeys(config, ['minFrameDelayMs'], [
-    'loopIntervalMs', 'snapshotIntervalFrames',
+    'loopIntervalMs',
     'entityConsensusStateWarningBytes', 'advertiseProfileMirrors', 'performance', 'storage',
   ], `${code}_FIELDS`);
   requireBoundaryInteger(config['minFrameDelayMs'], `${code}_MINFRAMEDELAYMS`, 0);
   for (const field of [
-    'loopIntervalMs', 'snapshotIntervalFrames', 'entityConsensusStateWarningBytes',
+    'loopIntervalMs', 'entityConsensusStateWarningBytes',
   ]) if (config[field] !== undefined) requireFiniteNumber(config[field], `${code}_${field.toUpperCase()}`, 0);
   if (config['advertiseProfileMirrors'] !== undefined) {
     requireBoolean(config['advertiseProfileMirrors'], `${code}_ADVERTISE_PROFILE_MIRRORS`);

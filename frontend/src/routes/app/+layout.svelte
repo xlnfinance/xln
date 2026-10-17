@@ -5,7 +5,6 @@
   import RuntimeStateCard from '#lib/components/shared/RuntimeStateCard.svelte';
   import { hasPasswordVault } from '#lib/security/passwordVault.ts';
   import WalletUnlock from '#lib/components/Views/WalletUnlock.svelte';
-  import { appState } from '#lib/stores/appStateStore.ts';
   import {
     initializeXLN,
     refreshCurrentRuntimeProjection,
@@ -68,8 +67,6 @@
   let hasActiveTabLock = $state(false);
   let activeTabLockReady = $state(false);
   let resettingEverything = $state(false);
-  let recoveringStorage = $state(false);
-  let storageRecoveryError = $state('');
   let bootGeneration = $state(0);
   let passwordRuntimeId = $state('');
   $effect(() => {
@@ -134,25 +131,6 @@
       await resetEverything({ confirmed: true, reason: 'loading-screen' });
     } finally {
       resettingEverything = false;
-    }
-  }
-
-  async function handleStorageSchemaRecovery(): Promise<void> {
-    if (recoveringStorage || resettingEverything) return;
-    recoveringStorage = true;
-    storageRecoveryError = '';
-    try {
-      await vaultOperations.recoverSchemaMismatchedRuntimesFromConfiguredBackups();
-      error.set(null);
-      isLoading.set(true);
-      await bootApp();
-    } catch (recoveryError) {
-      storageRecoveryError = recoveryError instanceof Error
-        ? recoveryError.message
-        : String(recoveryError);
-      logAppShellDiagnostic('Storage schema recovery failed', recoveryError);
-    } finally {
-      recoveringStorage = false;
     }
   }
 
@@ -509,6 +487,13 @@
   }
 
   onMount(() => {
+    const params = new URLSearchParams(window.location.search);
+    const observer = params.get('observer') === '1' || params.get('locktest') === '1'
+      || params.get('embed') === '1' || params.has('e');
+    if (!observer) {
+      window.location.replace('/ui/');
+      return;
+    }
     let disposed = false;
 
     const handlePageHide = (event: PageTransitionEvent) => {
@@ -589,7 +574,7 @@
 </script>
 
 <svelte:head>
-  <title>xln - {$appState.mode === 'user' ? 'Wallet' : 'Network Workspace'}</title>
+  <title>xln - Network Observer</title>
 </svelte:head>
 
 {#if activeTabLockReady && !hasActiveTabLock && !$error}
@@ -658,35 +643,23 @@
 {:else if $error}
   <div class="error-screen" data-testid="app-initialization-error">
     {#if storageSchemaMismatch}
-      <h2>Local runtime needs recovery</h2>
+      <h2>Obsolete testnet data rejected</h2>
       <p class="schema-recovery-copy">
         This device has storage schema {storageSchemaMismatch.storedVersion}, while this build requires
         schema {storageSchemaMismatch.currentVersion}. No incompatible data was applied or deleted.
       </p>
       <p class="schema-recovery-copy">
-        Restore the latest authenticated encrypted backup first. Reset only if you intentionally want to
-        discard every local wallet and runtime on this device.
+        This obsolete testnet format cannot be restored. Reset the XLN testnet data and generate current data.
       </p>
       <div class="schema-recovery-actions">
         <button
-          class="primary-recovery-action"
-          data-testid="storage-schema-recover"
-          onclick={handleStorageSchemaRecovery}
-          disabled={recoveringStorage || resettingEverything}
-        >
-          {recoveringStorage ? 'Restoring...' : 'Restore encrypted backup'}
-        </button>
-        <button
           data-testid="storage-schema-reset"
           onclick={handleResetEverything}
-          disabled={recoveringStorage || resettingEverything}
+          disabled={resettingEverything}
         >
           {resettingEverything ? 'Resetting...' : 'Reset local data'}
         </button>
       </div>
-      {#if storageRecoveryError}
-        <p class="schema-recovery-error" data-testid="storage-schema-recovery-error">{storageRecoveryError}</p>
-      {/if}
       <details class="schema-recovery-details">
         <summary>Technical details</summary>
         <code>{$error}</code>
@@ -1002,19 +975,7 @@
     gap: 10px;
   }
 
-  .error-screen .primary-recovery-action {
-    border-color: color-mix(in srgb, var(--theme-accent, #facc15) 52%, transparent);
-    background: color-mix(in srgb, var(--theme-accent, #facc15) 28%, var(--theme-background, #09090b));
-    color: var(--theme-text-primary, white);
-  }
 
-  .schema-recovery-error {
-    max-width: 640px;
-    margin: 0;
-    color: var(--theme-danger, #ef4444);
-    text-align: center;
-    overflow-wrap: anywhere;
-  }
 
   .schema-recovery-details {
     max-width: min(720px, calc(100vw - 48px));

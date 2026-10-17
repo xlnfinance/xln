@@ -82,8 +82,9 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(banner.stdout).toContain('Wait for DEV_READY');
     expect(banner.stdout).toContain('wallet');
     expect(banner.stdout).toContain('http://localhost:8085/app');
-    expect(banner.stdout).toContain('wallet new ui');
-    expect(banner.stdout).toContain('http://localhost:5183/');
+    expect(banner.stdout).toContain('http://localhost:8084/ui/');
+    expect(banner.stdout).toContain('network observer');
+    expect(banner.stdout).not.toContain('http://localhost:5183/');
     expect(banner.stdout).not.toContain('https://localhost:8084/app');
     expect(banner.stdout).not.toContain('wallet browser QA');
     expect(banner.stdout).toContain('health admin');
@@ -126,8 +127,9 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
       stdio: 'pipe',
     });
     expect(tlsBanner.status, tlsBanner.stderr).toBe(0);
-    expect(tlsBanner.stdout).toContain('wallet tls');
-    expect(tlsBanner.stdout).toContain('https://localhost:8084/app');
+    expect(tlsBanner.stdout).toContain('wallet');
+    expect(tlsBanner.stdout).toContain('https://localhost:8084/ui/');
+    expect(tlsBanner.stdout).not.toContain('http://localhost:8084/ui/');
     expect(tlsBanner.stdout).toContain('https://localhost:8087');
     expect(tlsBanner.stdout).toContain('local tls: enabled');
   } finally {

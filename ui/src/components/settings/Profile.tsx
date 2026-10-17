@@ -54,7 +54,7 @@ export function Profile() {
         <div className="field-row">
           <input
             aria-label="Published name"
-            className="input"
+            className="input boxed"
             value={profileName}
             placeholder={wallet.name}
             onChange={event => setProfileName(event.target.value)}
@@ -72,7 +72,7 @@ export function Profile() {
         </div>
         <input
           aria-label="Website"
-          className="input"
+          className="input boxed"
           value={profileWebsite}
           placeholder="website · optional"
           onChange={event => setProfileWebsite(event.target.value)}
@@ -80,7 +80,7 @@ export function Profile() {
         />
         <textarea
           aria-label="About you"
-          className="input"
+          className="input boxed profile-bio"
           rows={2}
           value={profileBio}
           placeholder="a line about you · optional"

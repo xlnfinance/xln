@@ -249,6 +249,7 @@ export const decodeRscoreAccountTx = (value: unknown): AccountTx => {
     case 19: return decodeCanonicalTx(row, 'cross_pull_lock');
     case 20: return decodeCanonicalTx(row, 'cross_pull_close');
     case 23: return decodeCanonicalTx(row, 'settle_transition');
+    case 27: return decodeCreditRequest(row);
     default:
       return rscoreWireDecodeFail('tx.tag:unknown');
   }
@@ -295,6 +296,12 @@ const decodeLendingDisburse = (row: readonly unknown[]): AccountTx => {
     interestBps: rscoreWireUint(f[7], 'tx.interestBps'), requestId: rscoreWireText(f[8], 'tx.requestId'),
     maxInterestBps: rscoreWireUint(f[9], 'tx.maxInterestBps'), expiresAt: rscoreWireUint(f[10], 'tx.expiresAt'),
     maxLateMs: rscoreWireUint(f[11], 'tx.maxLateMs'), lateMs: rscoreWireUint(f[12], 'tx.lateMs') } };
+};
+const decodeCreditRequest = (row: readonly unknown[]): AccountTx => {
+  const f = rscoreWireTuple(row, 5, 'tx.creditRequest');
+  return { type: 'credit_request', data: { requestId: rscoreWireText(f[1], 'tx.requestId'),
+    requesterEntityId: rscoreWireText(f[2], 'tx.requesterEntityId'),
+    tokenId: rscoreWireUint(f[3], 'tx.tokenId'), amount: rscoreWireBig(f[4], 'tx.amount') } };
 };
 const decodeLendingCloseRequest = (row: readonly unknown[]): AccountTx => {
   const f = rscoreWireTuple(row, 4, 'tx.lendingCloseRequest');

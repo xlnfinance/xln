@@ -20,6 +20,13 @@ export type NetworkMachineCameraCue = {
   fov?: number;
 };
 
+/** One rung of a narrated ladder (bilateral → on-chain → legal finality). */
+export type NetworkMachineCueBadge = {
+  label: string;
+  detail: string;
+  tone: 'done' | 'bounded' | 'outside';
+};
+
 export type NetworkMachineCue = {
   id: string;
   at: NetworkMachineFrameRef;
@@ -35,6 +42,11 @@ export type NetworkMachineCue = {
   focusJMachineIds?: string[];
   camera?: NetworkMachineCameraCue;
   accent?: string;
+  badges?: NetworkMachineCueBadge[];
+  /** A presentation starts at this cue: every earlier step is setup it summarises. */
+  condensePrior?: boolean;
+  /** A presentation ends at this cue; later frames stay in the full timeline only. */
+  endsPresentation?: boolean;
 };
 
 export type NetworkMachineConfig = {
@@ -122,6 +134,16 @@ const refAsFrame = (ref: NetworkMachineFrameRef): RuntimeTimelineFrame => ({
   materialized: false,
 });
 
+const BADGE_TONES = new Set(['done', 'bounded', 'outside']);
+
+const normalizeBadges = (badges: NetworkMachineCueBadge[] | undefined): NetworkMachineCueBadge[] | undefined => {
+  if (!badges) return undefined;
+  return badges.map((badge) => {
+    if (!BADGE_TONES.has(badge?.tone)) throw new Error('NETWORK_MACHINE_CUE_BADGE_TONE_INVALID');
+    return { label: nonEmpty(badge.label, 'cue_badge_label'), detail: nonEmpty(badge.detail, 'cue_badge_detail'), tone: badge.tone };
+  });
+};
+
 const normalizeCue = (cue: NetworkMachineCue): NetworkMachineCue => {
   const at = normalizeRef(cue.at, 'cue_at');
   const until = cue.until ? normalizeRef(cue.until, 'cue_until') : undefined;
@@ -129,6 +151,7 @@ const normalizeCue = (cue: NetworkMachineCue): NetworkMachineCue => {
   const focusAccountIds = normalizeFocusIds(cue.focusAccountIds);
   const focusJMachineIds = normalizeFocusIds(cue.focusJMachineIds);
   const camera = normalizeCamera(cue.camera);
+  const badges = normalizeBadges(cue.badges);
   if (until && compareRuntimeTimelineFrames(refAsFrame(until), refAsFrame(at)) < 0) {
     throw new Error('NETWORK_MACHINE_CUE_RANGE_INVALID');
   }
@@ -147,6 +170,9 @@ const normalizeCue = (cue: NetworkMachineCue): NetworkMachineCue => {
     ...(focusJMachineIds ? { focusJMachineIds } : {}),
     ...(camera ? { camera } : {}),
     ...(cue.accent?.trim() ? { accent: cue.accent.trim() } : {}),
+    ...(badges ? { badges } : {}),
+    ...(cue.condensePrior === true ? { condensePrior: true } : {}),
+    ...(cue.endsPresentation === true ? { endsPresentation: true } : {}),
   };
 };
 
@@ -170,6 +196,18 @@ export const normalizeNetworkMachineConfig = (config: NetworkMachineConfig): Net
   };
 };
 
+/**
+ * The cue that speaks for a step. Cues stay active until their `until`, so several overlap;
+ * the most recent one is the current narration — the earlier ones are history.
+ */
+export const activeNetworkMachineCue = (cues: readonly NetworkMachineCue[]): NetworkMachineCue | null => {
+  for (let index = cues.length - 1; index >= 0; index -= 1) {
+    const cue = cues[index]!;
+    if (cue.title.trim()) return cue;
+  }
+  return null;
+};
+
 const cueIsActive = (cue: NetworkMachineCue, event: RuntimeTimelineFrame): boolean => {
   if (compareRuntimeTimelineFrames(event, refAsFrame(cue.at)) < 0) return false;
   return !cue.until || compareRuntimeTimelineFrames(event, refAsFrame(cue.until)) <= 0;
@@ -191,15 +229,55 @@ export const compileNetworkMachine = (
   const events = mergeRuntimeTimelineIndexes(selectedIndexes)
     .map((event) => event.changed[0]!)
     .filter((event) => config.timelineMode === 'all-frames' || event.graphChanged === true);
-  const steps = events.map((event, index): NetworkMachineStep => ({
+  const steps = events.flatMap((event) => {
+    const selection = selectMergedTimelineEvent(selectedIndexes, event);
+    return cueBeatsAt(config.cues, event).map((cues) => ({ event, selection, cues }));
+  }).map(({ event, selection, cues }, index): NetworkMachineStep => ({
     index,
     event,
-    selection: selectMergedTimelineEvent(selectedIndexes, event),
+    selection,
     activeRuntimeId: event.runtimeId,
     activeRuntimeColor: runtimeTimelineColor(event.runtimeId),
-    cues: config.cues.filter((cue) => cueIsActive(cue, event)),
+    cues,
   }));
   return { config, indexes: selectedIndexes, steps };
+};
+
+const startsAt = (cue: NetworkMachineCue, event: RuntimeTimelineFrame): boolean =>
+  compareRuntimeTimelineFrames(event, refAsFrame(cue.at)) === 0;
+
+/**
+ * The cue lists one frame presents. A frame normally is one step; when several cues begin on
+ * it (an announcement, then beats about the state it applied), each cue is a step of its own,
+ * spoken in order, so a narrated outcome never shares a card with the action before it.
+ */
+const cueBeatsAt = (cues: readonly NetworkMachineCue[], event: RuntimeTimelineFrame): NetworkMachineCue[][] => {
+  const active = cues.filter((cue) => cueIsActive(cue, event));
+  const starting = active.filter((cue) => startsAt(cue, event));
+  if (starting.length <= 1) return [active];
+  return starting.map((beat) => {
+    const later = new Set(starting.slice(starting.indexOf(beat) + 1));
+    return active.filter((cue) => !later.has(cue));
+  });
+};
+
+/**
+ * Presentation: the steps between the last condensing cue and the first ending cue. The
+ * condensing cue summarises the setup frames before it, so the audience starts at the state
+ * the story is about; an ending cue closes the story before later test frames.
+ */
+export const presentationNetworkMachine = (machine: NetworkMachine): NetworkMachine => {
+  let start = 0;
+  let end = machine.steps.length;
+  machine.steps.forEach((step, index) => {
+    const cue = activeNetworkMachineCue(step.cues);
+    if (!cue || !startsAt(cue, step.event)) return;
+    if (cue.condensePrior === true) start = index;
+    if (cue.endsPresentation === true && end === machine.steps.length) end = index + 1;
+  });
+  if (start === 0 && end === machine.steps.length) return machine;
+  if (end <= start) throw new Error(`NETWORK_MACHINE_PRESENTATION_RANGE_INVALID:${start}:${end}`);
+  return { ...machine, steps: machine.steps.slice(start, end).map((step, index) => ({ ...step, index })) };
 };
 
 export const parseNetworkMachineConfig = (value: string): NetworkMachineConfig => {
@@ -240,7 +318,7 @@ const decodeNetworkMachinePoint = (value: unknown, field: string): { x: number; 
 
 export const decodeNetworkMachineCue = (value: unknown): NetworkMachineCue => {
   const record = requireUnknownRecord(value, 'NETWORK_MACHINE_CUE_INVALID');
-  rejectExtraKeys(record, ['id', 'at', 'until', 'title', 'subtitle', 'what', 'why', 'tradfiParallel', 'keyMetrics', 'focusEntityIds', 'focusAccountIds', 'focusJMachineIds', 'camera', 'accent'], 'NETWORK_MACHINE_CUE_EXTRA_FIELD');
+  rejectExtraKeys(record, ['id', 'at', 'until', 'title', 'subtitle', 'what', 'why', 'tradfiParallel', 'keyMetrics', 'focusEntityIds', 'focusAccountIds', 'focusJMachineIds', 'camera', 'accent', 'badges', 'condensePrior', 'endsPresentation'], 'NETWORK_MACHINE_CUE_EXTRA_FIELD');
   const stringArray = (name: string): string[] | undefined => {
     const values = record[name];
     if (values === undefined) return undefined;
@@ -253,7 +331,10 @@ export const decodeNetworkMachineCue = (value: unknown): NetworkMachineCue => {
     (record['why'] !== undefined && typeof record['why'] !== 'string') ||
     (record['tradfiParallel'] !== undefined && typeof record['tradfiParallel'] !== 'string') ||
     (record['keyMetrics'] !== undefined && (!Array.isArray(record['keyMetrics']) || !record['keyMetrics'].every((metric) => typeof metric === 'string'))) ||
-    (record['accent'] !== undefined && typeof record['accent'] !== 'string')) throw new Error('NETWORK_MACHINE_CUE_FIELD_INVALID');
+    (record['accent'] !== undefined && typeof record['accent'] !== 'string') ||
+    (record['condensePrior'] !== undefined && record['condensePrior'] !== true) ||
+    (record['endsPresentation'] !== undefined && record['endsPresentation'] !== true)) throw new Error('NETWORK_MACHINE_CUE_FIELD_INVALID');
+  const badges = decodeNetworkMachineCueBadges(record['badges']);
   const focusEntityIds = stringArray('focusEntityIds');
   const focusAccountIds = stringArray('focusAccountIds');
   const focusJMachineIds = stringArray('focusJMachineIds');
@@ -283,5 +364,21 @@ export const decodeNetworkMachineCue = (value: unknown): NetworkMachineCue => {
     ...(focusJMachineIds === undefined ? {} : { focusJMachineIds }),
     ...(camera === undefined ? {} : { camera }),
     ...(record['accent'] === undefined ? {} : { accent: record['accent'] }),
+    ...(badges === undefined ? {} : { badges }),
+    ...(record['condensePrior'] === true ? { condensePrior: true } : {}),
+    ...(record['endsPresentation'] === true ? { endsPresentation: true } : {}),
   };
+};
+
+const decodeNetworkMachineCueBadges = (value: unknown): NetworkMachineCueBadge[] | undefined => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error('NETWORK_MACHINE_CUE_BADGES_INVALID');
+  return value.map((entry) => {
+    const badge = requireUnknownRecord(entry, 'NETWORK_MACHINE_CUE_BADGE_INVALID');
+    rejectExtraKeys(badge, ['label', 'detail', 'tone'], 'NETWORK_MACHINE_CUE_BADGE_EXTRA_FIELD');
+    const tone = badge['tone'];
+    if (typeof badge['label'] !== 'string' || typeof badge['detail'] !== 'string' ||
+      (tone !== 'done' && tone !== 'bounded' && tone !== 'outside')) throw new Error('NETWORK_MACHINE_CUE_BADGE_FIELD_INVALID');
+    return { label: badge['label'], detail: badge['detail'], tone };
+  });
 };

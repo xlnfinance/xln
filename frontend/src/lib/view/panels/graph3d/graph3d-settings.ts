@@ -118,3 +118,20 @@ export function writeBirdViewSettings(
 ): void {
   storage?.setItem(BIRD_VIEW_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
 }
+
+/**
+ * Renderer quality. Interactive keeps the dock responsive on a laptop; presentation is for a
+ * projector, where aliasing on thin account lines is the first thing an audience sees.
+ * Antialiasing is a WebGL context attribute, so quality is chosen once, at renderer creation.
+ */
+export type GraphRenderQuality = 'interactive' | 'presentation';
+
+export type GraphRenderQualityOptions = { antialias: boolean; maxPixelRatio: number };
+
+export const GRAPH_RENDER_QUALITY: Record<GraphRenderQuality, GraphRenderQualityOptions> = {
+  interactive: { antialias: false, maxPixelRatio: 1.5 },
+  presentation: { antialias: true, maxPixelRatio: 2 },
+};
+
+export const graphRenderQualityFor = (presentMode: boolean): GraphRenderQualityOptions =>
+  GRAPH_RENDER_QUALITY[presentMode ? 'presentation' : 'interactive'];

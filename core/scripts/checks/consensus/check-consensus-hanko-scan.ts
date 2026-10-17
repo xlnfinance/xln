@@ -341,7 +341,7 @@ assertOrder(entityFrame, entityFramePath, [
 
 assertIncludes(hankoSigning, 'throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signEntityHashes called without env.runtimeSeed', hankoSigningPath);
 assertIncludes(hankoSigning, 'const normalizedEntityId = encodeQuorumEntityId(entityId);', hankoSigningPath);
-assertIncludes(hankoSigning, 'const singleSignerBoardHash = singleSignerBoardHashFor(signerAddress);', hankoSigningPath);
+assertIncludes(hankoSigning, 'const singleSignerBoardHash = singleSignerBoardHashFor(signerAddress, shape);', hankoSigningPath);
 assertIncludes(hankoSigning, 'if (singleSignerBoardHash !== normalizedEntityId)', hankoSigningPath);
 assertNotMatches(
   hankoSigning,

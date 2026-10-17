@@ -20,3 +20,6 @@ mod settlement_freeze;
 
 #[path = "monetary/dispute_gas_budget.rs"]
 mod dispute_gas_budget;
+
+#[path = "monetary/credit_request.rs"]
+mod credit_request;

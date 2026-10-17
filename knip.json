@@ -45,7 +45,6 @@
     "buffer",
     "dockview",
     "chai-as-promised",
-    "solc",
     "electron",
     "@typescript/native",
     "@tsconfig/node20",

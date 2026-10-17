@@ -149,6 +149,7 @@ run_vite() {
   echo "VITE_STARTING port=${port} api=http://127.0.0.1:${API_PORT} logLevel=warn"
   run_owned env \
     VITE_DEV_PORT="$port" \
+    VITE_UI_PROXY_TARGET="http://127.0.0.1:${UI_PORT}" \
     VITE_API_PROXY_TARGET="http://127.0.0.1:${API_PORT}" \
     VITE_XLN_WATCHTOWER_URL="http://127.0.0.1:${WATCHTOWER_PORT}" \
     ANVIL_RPC="http://localhost:${RPC_PORT}" \
@@ -165,6 +166,8 @@ run_ui() {
   echo "UI_STARTING port=${UI_PORT} runtimeBundleDir=${REPO_ROOT}/frontend/static logLevel=warn"
   run_owned env \
     XLN_UI_RUNTIME_BUNDLE_DIR="$REPO_ROOT/frontend/static" \
+    XLN_UI_BASE=/ui/ \
+    XLN_UI_STACK_ORIGIN="http://127.0.0.1:${API_PORT}" \
     "$REPO_ROOT/ui/node_modules/.bin/vite" --port "$UI_PORT" --strictPort --logLevel warn
 }
 
@@ -229,7 +232,7 @@ case "$role" in
         --allow-reset \
         --custody-port "$CUSTODY_PORT" \
         --custody-daemon-port "$CUSTODY_DAEMON_PORT" \
-        --wallet-url "http://localhost:${WEB_HTTP_PORT}/app"
+        --wallet-url "${DEV_WEB_SCHEME}://localhost:${WEB_PORT}/ui/"
     ;;
   watchtower)
     run_owned bun --no-orphans core/watchtower/standalone-server.ts \
@@ -254,7 +257,7 @@ case "$role" in
   ready)
     run_owned bun scripts/dev/wait-dev-ready.ts \
       --api-url "http://127.0.0.1:${API_PORT}" \
-      --web-url "http://localhost:${WEB_HTTP_PORT}" \
+      --web-url "${DEV_WEB_SCHEME}://localhost:${WEB_PORT}" \
       --relay-web-urls "$DEV_RELAY_WEB_URLS" \
       --watchtower-url "http://127.0.0.1:${WATCHTOWER_PORT}" \
       --runtime-bundle "$DEV_RUNTIME_BUNDLE_PATH" \

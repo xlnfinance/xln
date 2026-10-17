@@ -133,25 +133,14 @@ describe('storage config', () => {
   });
 });
 
-test('a runtime config written before the dead snapshot knob was removed replays unchanged', () => {
-  // The runtime machine hash covers this config. Dropping a persisted field would
-  // change that hash and make every journal recorded before the removal fail
-  // to replay, so the field is carried through untouched.
-  const decoded = decodeRuntimeConfig(
+test('retired snapshotIntervalFrames is rejected instead of preserved in current checkpoints', () => {
+  expect(() => decodeRuntimeConfig(
     { minFrameDelayMs: 25, snapshotIntervalFrames: 7, storage: { snapshotPeriodFrames: 10_000 } },
     'TEST_RUNTIME_CONFIG',
-  ) as Record<string, unknown>;
-  expect(decoded['minFrameDelayMs']).toBe(25);
-  expect(decoded['snapshotIntervalFrames']).toBe(7);
-
-  // And it survives into the next snapshot that Runtime writes, because the
-  // hash covers the config: a Runtime restored from an old checkpoint keeps
-  // the field until an explicit offline migration retires it.
-  const env = createEmptyEnv('preserved-snapshot-knob');
-  env.runtimeConfig = decoded;
-  const snapshot = buildDurableRuntimeMachineSnapshot(env) as Record<string, unknown>;
-  const persisted = snapshot['runtimeConfig'] as Record<string, unknown>;
-  expect(persisted['snapshotIntervalFrames']).toBe(7);
+  )).toThrow('TEST_RUNTIME_CONFIG_FIELDS:missing=none:extra=snapshotIntervalFrames');
+  const env = createEmptyEnv('current-snapshot-config');
+  env.runtimeConfig = decodeRuntimeConfig({ minFrameDelayMs: 25, storage: { snapshotPeriodFrames: 10_000 } }, 'TEST_RUNTIME_CONFIG');
+  expect(buildDurableRuntimeMachineSnapshot(env).runtimeConfig).toEqual(env.runtimeConfig);
 });
 
 test('V1 runtime config rejects a missing frame cadence', () => {

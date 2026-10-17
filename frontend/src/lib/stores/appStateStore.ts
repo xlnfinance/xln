@@ -10,7 +10,6 @@ import { writable, get } from 'svelte/store';
 import { browser } from '$app/env';
 import { errorLog } from './errorLogStore';
 
-export type AppMode = 'user' | 'dev';
 export type ViewMode = 'home' | 'settings' | 'docs' | 'brainvault' | 'panels' | 'graph3d' | 'terminal';
 
 export interface NavigationSelection {
@@ -22,9 +21,6 @@ export interface NavigationSelection {
 }
 
 export interface AppState {
-  // Mode toggles (from modeStore)
-  mode: AppMode;
-
   // Landing page visibility (from uiStore)
   landingVisible: boolean;
 
@@ -60,7 +56,6 @@ function safeSetItem(key: string, value: string): void {
 // Load persisted state
 function loadState(): AppState {
   const defaultState: AppState = {
-    mode: 'user',
     landingVisible: true,
     viewMode: 'home',
     requestedDockPanel: null,
@@ -75,11 +70,9 @@ function loadState(): AppState {
 
   if (!browser) return defaultState;
 
-  const savedMode = safeGetItem('xln-app-mode');
   const savedViewMode = safeGetItem('xln-view-mode');
 
   return {
-    mode: (savedMode === 'dev' || savedMode === 'user') ? savedMode : 'user',
     landingVisible: true,
     viewMode: (savedViewMode === 'home' || savedViewMode === 'settings' || savedViewMode === 'docs' ||
                savedViewMode === 'brainvault' || savedViewMode === 'panels' || savedViewMode === 'graph3d' ||
@@ -97,7 +90,6 @@ function loadState(): AppState {
 
 // Save state to localStorage
 function saveState(state: AppState) {
-  safeSetItem('xln-app-mode', state.mode);
   safeSetItem('xln-view-mode', state.viewMode);
 }
 
@@ -109,12 +101,9 @@ appState.subscribe(state => saveState(state));
 
 // Operations
 export const appStateOperations = {
-  setMode(mode: AppMode) {
-    appState.update(s => ({ ...s, mode }));
-  },
 
   openDockPanel(panelId: string): void {
-    appState.update(s => ({ ...s, mode: 'dev', requestedDockPanel: panelId }));
+    appState.update(s => ({ ...s, requestedDockPanel: panelId }));
   },
 
   clearDockPanelRequest(panelId: string): void {

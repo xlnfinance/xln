@@ -17,22 +17,15 @@ describe('storage schema recovery UX', () => {
     expect(parseStorageSchemaMismatch(new Error('STORAGE_SCHEMA_INVALID:stored=oops'))).toBeNull();
   });
 
-  test('offers authenticated recovery before an explicit destructive reset', () => {
+  test('old testnet schemas expose rejection and reset without a backup-rescue reader', () => {
     const vault = readFileSync('frontend/src/lib/stores/vault/vaultStore.ts', 'utf8');
     const layout = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
-    const recoveryStart = vault.indexOf('async recoverSchemaMismatchedRuntimesFromConfiguredBackups()');
-    const recoveryEnd = vault.indexOf('\n  syncRuntime(', recoveryStart);
-    expect(recoveryStart).toBeGreaterThan(0);
-    expect(recoveryEnd).toBeGreaterThan(recoveryStart);
-    const recoverySource = vault.slice(recoveryStart, recoveryEnd);
-    expect(recoverySource.indexOf('discoverRuntimeRecoveryCandidates('))
-      .toBeLessThan(recoverySource.indexOf('restoreRuntimeFromRecoveryCandidate('));
-    expect(recoverySource).not.toContain('clearDB(');
-    expect(recoverySource).not.toContain('resetRuntimePersistence(');
-
+    expect(vault).not.toContain('recoverSchemaMismatchedRuntimesFromConfiguredBackups');
+    expect(vault).toContain('VAULT_OBSOLETE_PLAINTEXT_PROFILE:');
+    expect(vault).toContain('async restoreRuntimeFromRecoveryCandidate(');
     expect(layout).toContain('parseStorageSchemaMismatch($error)');
-    expect(layout).toContain('vaultOperations.recoverSchemaMismatchedRuntimesFromConfiguredBackups()');
-    expect(layout).toContain('data-testid="storage-schema-recover"');
+    expect(layout).toContain('Obsolete testnet data rejected');
+    expect(layout).not.toContain('data-testid="storage-schema-recover"');
     expect(layout).toContain('data-testid="storage-schema-reset"');
   });
 });

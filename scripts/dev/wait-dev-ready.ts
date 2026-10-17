@@ -357,7 +357,7 @@ if (import.meta.main) {
   }
   console.log(
     `DEV_READY totalElapsedMs=${outcome.totalElapsedMs} ` +
-    `probeElapsedMs=${outcome.probeElapsedMs} wallet=${input.webUrl}/app api=${input.apiUrl}`,
+    `probeElapsedMs=${outcome.probeElapsedMs} wallet=${input.webUrl}/ui/ api=${input.apiUrl}`,
   );
   await waitForShutdown();
 }

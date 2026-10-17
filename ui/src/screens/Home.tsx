@@ -1,37 +1,26 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CopyId } from '../components/CopyId';
-import { TokenRow, AccountRow } from '../components/home/Balances';
+import { TokenRow } from '../components/home/Balances';
 import { WalletScale } from '../components/home/WalletScale';
 import { BalanceDetails } from '../components/home/BalanceDetails';
-import { CreditDetails } from '../components/home/CreditDetails';
+import { BalancePanel } from '../components/home/BalancePanel';
+import { HomeAside } from '../components/home/HomeAside';
 import { TestMoney } from '../components/home/TestMoney';
 import { OpenAccountSheet } from '../components/home/OpenAccountSheet';
 import { EntitySwitcher } from '../components/EntitySwitcher';
 import { Icon } from '../components/Icons';
 import { PendingBatch } from '../components/PendingBatch';
 import { Sheet } from '../components/Sheet';
-import { useApp } from '../runtime/store';
-import { formatAmount, formatUsd } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
+import { CreditDetails } from '../components/home/CreditDetails';
+import { useApp } from '../runtime/store';
 import { useWallet } from '../runtime/views';
 import { USER_ACTIVITY_TYPES, useMovements } from '../runtime/financial/movements';
-import { ActivityRow } from './Activity';
-import { Help } from '../components/Help';
-import { Watchtower } from '../components/Watchtower';
-import { walletHelp } from '@xln/frontend/lib/utils/ui/walletHelp';
-import { usdOf } from '../runtime/financial/prices';
-import { useLendingBalance } from '../runtime/financial/lending-balance';
+import { ActivityHead, ActivityRow } from '../components/history/ActivityRow';
 
 export function Home() {
-  const commandReady = useApp(s => s.commandReady);
   const entityId = useApp(s => s.activeEntityId);
-  const places = useApp(s => s.places);
-  const scaleMode = useApp(s => s.scaleMode);
-  const setScaleMode = useApp(s => s.setScaleMode);
   const wallet = useWallet(entityId);
-  const lending = useLendingBalance(wallet);
-  const lendingUsd = [...lending.byToken].reduce((sum, [token, value]) => sum + usdOf(token, value), 0);
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState<ReadonlySet<number>>(() => new Set());
   const [showZero, setShowZero] = useState(false);
@@ -40,325 +29,131 @@ export function Home() {
   const [selectedToken, setSelectedToken] = useState(0);
   const accountIds = useMemo(() => wallet.accounts.map(account => account.counterpartyId), [wallet.accounts]);
   const recent = useMovements(entityId, USER_ACTIVITY_TYPES, 80, accountIds);
-  const movements = recent.movements.filter(row => row.kind !== 'account').slice(0, 5);
+  const movements = recent.movements.filter(row => row.kind !== 'account').slice(0, 6);
   const totals = wallet.totals.filter(total => showZero || total.active);
   const emptyCount = wallet.totals.filter(total => !total.active).length;
   const balanceTokens = wallet.totals.filter(total => total.active || total.tokenId === 1);
   const balanceToken = balanceTokens.find(total => total.tokenId === selectedToken);
-  const meta = balanceToken ? getTokenMeta(balanceToken.tokenId) : null;
-  const visibleNet = balanceToken
-    ? (places.onchain ? balanceToken.onchain : 0n) +
-      (places.reserve ? balanceToken.reserve : 0n) +
-      (places.accounts
-        ? balanceToken.receivable + balanceToken.owed + (lending.byToken.get(balanceToken.tokenId) ?? 0n)
-        : 0n)
-    : 0n;
-  const visibleUsd =
-    (places.onchain ? wallet.usd.onchain : 0) +
-    (places.reserve ? wallet.usd.reserve : 0) +
-    (places.accounts ? wallet.usd.receivable - wallet.usd.owed + lendingUsd : 0);
-  const lendingUnavailable = places.accounts && (lending.loading || Boolean(lending.error));
-  const money = (amount: bigint) =>
-    meta ? `${formatAmount(amount, meta.decimals, meta.decimals)} ${meta.symbol}` : '0';
-  const held = wallet.accounts.reduce(
-    (sum, account) =>
-      sum +
-      account.tokens
-        .filter(token => token.tokenId === balanceToken?.tokenId)
-        .reduce((amount, token) => amount + token.derived.outTotalHold, 0n),
-    0n,
-  );
-  const heldUsd = wallet.accounts.reduce(
-    (sum, account) =>
-      sum + account.tokens.reduce((value, token) => value + usdOf(token.tokenId, token.derived.outTotalHold), 0),
-    0,
-  );
-  const pendingAmount = meta ? (held > 0n ? money(held) : '') : heldUsd > 0 ? formatUsd(heldUsd) : '';
 
   return (
     <WalletScale>
-      <div className="screen-header">
-        <EntitySwitcher name={wallet.name} status={<span className="note">Wallet</span>} />
-        <button
-          type="button"
-          className="icon-btn"
-          onClick={() => navigate('/sovereignty')}
-          aria-label="Security and recovery"
-          data-testid="home-sovereignty"
-        >
-          <Icon name="shield" size={18} />
-        </button>
+      <TestMoney key={wallet.entityId} wallet={wallet} />
+      <header className="page-head">
+        <div>
+          <span className="crumb static">Wallet{wallet.jurisdiction ? ` · ${wallet.jurisdiction}` : ''}</span>
+          <EntitySwitcher name={wallet.name} status={null} />
+        </div>
+        <div className="page-actions">
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => navigate('/sovereignty')}
+            aria-label="Security and recovery"
+            title="Security and recovery"
+            data-testid="home-sovereignty"
+          >
+            <Icon name="shield" size={17} />
+          </button>
+        </div>
         <span hidden data-testid="home-entity-id">
           {wallet.entityId}
         </span>
-      </div>
-      <section className="wallet-overview" aria-label="Your balance">
-        <div className="wallet-balance-heading">
-          <span className="hero-label">
-            {places.onchain && places.reserve && places.accounts ? 'Total balance' : 'Selected balances'}
-          </span>
-          <select
-            className="wallet-asset-select"
-            aria-label="Balance asset"
-            data-testid="home-balance-asset"
-            value={balanceToken?.tokenId ?? 0}
-            onChange={event => setSelectedToken(Number(event.target.value))}
-          >
-            <option value={0}>All assets · USD estimate</option>
-            {balanceTokens.map(token => (
-              <option key={token.tokenId} value={token.tokenId}>
-                {getTokenMeta(token.tokenId).symbol}
-              </option>
-            ))}
-          </select>
+      </header>
+      <select className="wallet-asset-select" aria-label="Balance asset" data-testid="home-balance-asset"
+        value={balanceToken?.tokenId ?? 0} onChange={event => setSelectedToken(Number(event.target.value))}>
+        <option value={0}>All assets · USD estimate</option>
+        {balanceTokens.map(token => <option key={token.tokenId} value={token.tokenId}>{getTokenMeta(token.tokenId).symbol}</option>)}
+      </select>
+      <div className="dash">
+        <div className="dash-main">
+          <BalancePanel wallet={wallet} token={balanceToken} onAddMoney={() => setAddingMoney(true)} />
+          <PendingBatch wallet={wallet} compact />
+          <BalanceDetails wallet={wallet} token={balanceToken} />
+          <CreditDetails wallet={wallet} tokenId={balanceToken?.tokenId} />
+          <div className="wallet-sections">
+            <section aria-label="Assets">
+              <div className="sect">
+                <h3>Assets</h3>
+              </div>
+              {totals.map((total, index) => (
+                <TokenRow
+                  key={total.tokenId}
+                  total={total}
+                  wallet={wallet}
+                  first={index === 0}
+                  open={!collapsed.has(total.tokenId)}
+                  onToggle={() =>
+                    setCollapsed(previous => {
+                      const next = new Set(previous);
+                      if (next.has(total.tokenId)) next.delete(total.tokenId);
+                      else next.add(total.tokenId);
+                      return next;
+                    })
+                  }
+                  onAccount={id => navigate(`/accounts/${id}`)}
+                />
+              ))}
+              {totals.length === 0 && !wallet.loading && !wallet.error && (
+                <p className="note wallet-empty">No funds yet. Get test money above to make your first payment.</p>
+              )}
+              {emptyCount > 0 && (
+                <button
+                  type="button"
+                  className="more wallet-show-assets"
+                  aria-expanded={showZero}
+                  data-testid="home-show-zero"
+                  onClick={() => setShowZero(value => !value)}
+                >
+                  {showZero
+                    ? 'Hide zero balances'
+                    : `Show ${emptyCount} ${emptyCount === 1 ? 'asset' : 'assets'} with zero balance`}
+                </button>
+              )}
+            </section>
+            <section aria-label="Recent activity">
+              <div className="sect">
+                <h3>Recent activity</h3>
+                <button type="button" className="more" onClick={() => navigate('/activity')}>
+                  View all
+                </button>
+              </div>
+              <div className="dtable">
+                {movements.length > 0 ? <ActivityHead /> : null}
+                {recent.loading && (
+                  <p className="note" role="status">
+                    Loading recent activity…
+                  </p>
+                )}
+                {movements.map((movement, index) => (
+                  <ActivityRow
+                    key={movement.id}
+                    movement={movement}
+                    names={wallet.names}
+                    first={index === 0}
+                    onClick={() => navigate('/activity', { state: { movementId: movement.id } })}
+                  />
+                ))}
+                {movements.length === 0 &&
+                  !recent.loading &&
+                  !recent.error &&
+                  (recent.nextBeforeHeight !== null ? (
+                    <button type="button" className="more" onClick={() => navigate('/activity')}>
+                      Open full payment history
+                    </button>
+                  ) : (
+                    <p className="note wallet-empty">Your payments and swaps will appear here.</p>
+                  ))}
+              </div>
+              {recent.error && (
+                <p role="alert" className="note">
+                  Activity unavailable: {recent.error}
+                </p>
+              )}
+            </section>
+          </div>
         </div>
-        {wallet.frame && !lendingUnavailable ? (
-          <div className="display num wallet-total" data-testid="home-total">
-            {meta ? formatAmount(visibleNet, meta.decimals, meta.decimals) : formatUsd(visibleUsd)}
-          </div>
-        ) : (
-          <p className="hero-label" role="status">
-            {wallet.error || lending.error ? 'Total balance unavailable' : 'Updating total balance…'}
-          </p>
-        )}
-        {places.accounts && (lendingUsd !== 0 || lendingUnavailable) && (
-          <div className="note" data-testid="home-lending-balance">
-            {lendingUnavailable
-              ? 'Lending positions are being reconciled with your wallet.'
-              : `Lending deposits minus loans: ${meta ? money(lending.byToken.get(balanceToken!.tokenId) ?? 0n) : formatUsd(lendingUsd)} · reported by your hub`}
-            {lending.error && <p role="alert">{lending.error}</p>}
-            <details>
-              <summary>How lending affects my balance</summary>
-              <p>{walletHelp.lendingBalance}</p>
-            </details>
-            <button className="more" type="button" onClick={() => navigate('/lend')}>
-              View lending positions
-            </button>
-          </div>
-        )}
-        {wallet.frame && places.accounts && (
-          <p className="note" data-testid="home-send-capacity">
-            {!commandReady
-              ? 'Wallet connection stopped. Reopen the wallet to continue.'
-              : `Available to pay: ${meta ? money(balanceToken?.sendCapacity ?? 0n) : formatUsd(wallet.usd.sendCapacity)} · includes available credit`}
-          </p>
-        )}
-        {pendingAmount && (
-          <button type="button" className="wallet-pending" onClick={() => navigate('/activity')}>
-            {pendingAmount} pending · View activity <Icon name="chevronRight" size={14} />
-          </button>
-        )}
-      </section>
-      <div className="wallet-actions">
-        <button
-          type="button"
-          className="btn primary"
-          disabled={!commandReady || !wallet.frame || Boolean(wallet.error)}
-          onClick={() => navigate('/pay')}
-          data-testid="home-pay"
-          title={walletHelp.pay}
-        >
-          <Icon name="pay" size={18} />
-          Pay
-        </button>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => navigate('/receive')}
-          data-testid="home-receive"
-          title={walletHelp.receive}
-        >
-          <Icon name="receive" size={18} />
-          Receive
-        </button>
-        <button
-          type="button"
-          className="btn"
-          disabled={!commandReady || !wallet.frame || Boolean(wallet.error)}
-          onClick={() => navigate('/swap')}
-          data-testid="home-swap"
-          title={walletHelp.swap}
-        >
-          <Icon name="swap" size={18} />
-          Swap
-        </button>
-        <details className="wallet-more">
-          <summary>
-            More <Icon name="chevronDown" size={14} />
-          </summary>
-          <nav aria-label="All wallet functions">
-            {[
-              { to: '/move', label: 'Move', topic: 'move' },
-              { to: '/assets', label: 'Assets', topic: 'assets' },
-              { to: '/lend', label: 'Lending', topic: 'lending' },
-              { to: '/manage', label: 'Limits and disputes', topic: 'configure' },
-              { to: '/ownership', label: 'Ownership', topic: 'ownership' },
-              { to: '/activity', label: 'History', topic: 'history' },
-            ].map(action => (
-              <button
-                key={action.to}
-                type="button"
-                className="btn quiet sm"
-                title={walletHelp[action.topic]}
-                onClick={() => navigate(action.to)}
-              >
-                {action.label}
-              </button>
-            ))}
-          </nav>
-        </details>
+        <HomeAside wallet={wallet} token={balanceToken} onConnect={() => setOpening(true)} />
       </div>
-      {wallet.frame && !wallet.error && (
-        <>
-          <div className="wallet-finances">
-            <BalanceDetails wallet={wallet} token={balanceToken} />
-            {places.accounts && <CreditDetails wallet={wallet} tokenId={balanceToken?.tokenId} />}
-          </div>
-          <div className="wallet-scale-note note">
-            Equal value, equal length · {meta ? meta.symbol : 'USD estimates at fixed reference prices'}
-            <button
-              className="more"
-              type="button"
-              onClick={() => setScaleMode(scaleMode === 'auto' ? 'fixed' : 'auto')}
-            >
-              {scaleMode === 'auto' ? 'Auto scale' : 'Fixed scale · fit all'}
-            </button>
-          </div>
-        </>
-      )}
-      <TestMoney key={wallet.entityId} wallet={wallet} />
-      <PendingBatch wallet={wallet} compact />
-      <div className="wallet-sections">
-        <section aria-label="Assets">
-          <div className="sect">
-            <h3 className="caps">Assets</h3>
-            <button type="button" className="more" onClick={() => setAddingMoney(true)} data-testid="home-add-money">
-              Add money
-            </button>
-          </div>
-          {totals.map((total, index) => (
-            <TokenRow
-              key={total.tokenId}
-              total={total}
-              wallet={wallet}
-              first={index === 0}
-              open={!collapsed.has(total.tokenId)}
-              onToggle={() =>
-                setCollapsed(previous => {
-                  const next = new Set(previous);
-                  if (next.has(total.tokenId)) next.delete(total.tokenId);
-                  else next.add(total.tokenId);
-                  return next;
-                })
-              }
-              onAccount={id => navigate(`/accounts/${id}`)}
-            />
-          ))}
-          {totals.length === 0 && !wallet.loading && !wallet.error && (
-            <p className="note wallet-empty">No funds yet. Get test money above to make your first payment.</p>
-          )}
-          {emptyCount > 0 && (
-            <button
-              type="button"
-              className="more wallet-show-assets"
-              aria-expanded={showZero}
-              data-testid="home-show-zero"
-              onClick={() => setShowZero(value => !value)}
-            >
-              {showZero
-                ? 'Hide zero balances'
-                : `Show ${emptyCount} ${emptyCount === 1 ? 'asset' : 'assets'} with zero balance`}
-            </button>
-          )}
-        </section>
-        <section aria-label="Recent activity">
-          <div className="sect">
-            <h3 className="caps">Recent activity</h3>
-            <button type="button" className="more" onClick={() => navigate('/activity')}>
-              View all
-            </button>
-          </div>
-          {recent.loading && (
-            <p className="note" role="status">
-              Loading recent activity…
-            </p>
-          )}
-          {movements.map((movement, index) => (
-            <ActivityRow
-              key={movement.id}
-              movement={movement}
-              names={wallet.names}
-              first={index === 0}
-              onClick={() => navigate('/activity', { state: { movementId: movement.id } })}
-            />
-          ))}
-          {movements.length === 0 &&
-            !recent.loading &&
-            !recent.error &&
-            (recent.nextBeforeHeight !== null ? (
-              <button type="button" className="more" onClick={() => navigate('/activity')}>
-                Open full payment history
-              </button>
-            ) : (
-              <p className="note wallet-empty">Your payments and swaps will appear here.</p>
-            ))}
-          {recent.error && (
-            <p role="alert" className="note">
-              Activity unavailable: {recent.error}
-            </p>
-          )}
-        </section>
-      </div>
-      <footer className="wallet-details">
-        <Help topic="balance" label="What is included in my balance?" />
-        <details className="disclosure">
-          <summary>Wallet guide and protection</summary>
-          {['pay', 'receive', 'swap', 'move', 'lending', 'configure', 'open', 'protection'].map(topic => (
-            <Help
-              key={topic}
-              topic={topic}
-              label={
-                topic === 'configure'
-                  ? 'Limits and disputes'
-                  : topic === 'open'
-                    ? 'Connect a hub'
-                    : topic.charAt(0).toUpperCase() + topic.slice(1)
-              }
-            />
-          ))}
-          <Watchtower accountCount={wallet.accounts.length} />
-        </details>
-        <section className="wallet-connections" data-testid="home-accounts">
-          <h3 className="caps">Connected accounts</h3>
-          {wallet.accounts.map((account, index) => (
-            <AccountRow
-              key={account.counterpartyId}
-              account={account}
-              first={index === 0}
-              onClick={() => navigate(`/accounts/${account.counterpartyId}`)}
-            />
-          ))}
-          <button
-            type="button"
-            className="btn quiet sm"
-            onClick={() => setOpening(true)}
-            data-testid="home-open-account"
-          >
-            Connect another account
-          </button>
-        </section>
-        <details className="disclosure">
-          <summary>Wallet address and technical details</summary>
-          <div className="kv">
-            <span className="k">Payment address (Entity ID)</span>
-            <CopyId value={wallet.entityId} label="Entity ID" full />
-          </div>
-          <p className="note">Confirmed frame: {wallet.frameHeight}</p>
-        </details>
-        <button type="button" className="more" onClick={() => navigate('/move')} data-testid="home-move">
-          Transfer between accounts
-        </button>
-      </footer>
       {opening && <OpenAccountSheet wallet={wallet} onClose={() => setOpening(false)} />}
       {addingMoney && (
         <Sheet title="Add money" onClose={() => setAddingMoney(false)}>
@@ -372,7 +167,7 @@ export function Home() {
                 document.querySelector<HTMLElement>('[data-testid=home-faucet]')?.focus();
               }}
             >
-              Get test money
+              Get test USDC
             </button>
             <button type="button" className="btn" data-testid="add-money-request" onClick={() => navigate('/receive')}>
               Receive a payment

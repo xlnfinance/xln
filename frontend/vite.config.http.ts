@@ -26,6 +26,7 @@ const BUILD_NUMBER = (() => {
 
 const DEV_PORT_RAW = Number(process.env['VITE_DEV_PORT'] || '8081');
 const DEV_PORT = Number.isFinite(DEV_PORT_RAW) && DEV_PORT_RAW > 0 ? Math.floor(DEV_PORT_RAW) : 8081;
+const UI_PROXY_TARGET = process.env['VITE_UI_PROXY_TARGET'] || 'http://127.0.0.1:5183';
 const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
 const API_PROXY_AGENT = API_PROXY_TARGET.startsWith('https:')
   ? new https.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 64 })
@@ -74,6 +75,7 @@ export default defineConfig({
       : false,
     // Plain HTTP dev entrypoint mirrors the HTTPS config for QA/browser checks.
     proxy: {
+      '/ui': { target: UI_PROXY_TARGET, ws: true, changeOrigin: false, configure: configureWsProxyLifecycle },
       '/api': {
         target: API_PROXY_TARGET,
         agent: API_PROXY_AGENT,

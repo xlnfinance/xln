@@ -97,6 +97,7 @@ const CASES = [
   { type: 'registerCrossJurisdictionSwap', data: { route } },
   { type: 'removeCrossJurisdictionBookOrder', data: { orderId: 'order-1', sourceEntityId: A, sourceAccountId: B, route, reason: 'remove' } },
   { type: 'requestCollateral', data: { counterpartyEntityId: B, tokenId: 1, amount: 5n, feeTokenId: 1, feeAmount: 1n, policyVersion: 1 } },
+  { type: 'requestCredit', data: { counterpartyEntityId: B, tokenId: 1, amount: 5n, requestId: 'credit-0123456789abcdef' } },
   { type: 'requestCrossJurisdictionClear', data: { orderId: 'order-1', cancelRemainder: false, route } },
   { type: 'materializeCrossJurisdictionClear', data: { proposerSignerId: 'owner', orderId: 'order-1', binary: '0x01', proof } },
   { type: 'materializeCrossJurisdictionSwap', data: { proposerSignerId: 'owner', route } },
@@ -126,10 +127,10 @@ if (Bun.env['RSCORE_GENERATE_ENTITY_TX_WIRE'] === '1') {
     await Bun.write(VECTORS, `${safeStringify(rows, 2)}\n`);
   });
 } else describe('EntityTx wire', () => {
-  test('production TypeScript admission covers exactly the canonical 65-kind catalog', () => {
+  test('production TypeScript admission covers exactly the canonical 66-kind catalog', () => {
     expect(validatedCases().map(tx => tx.type)).toEqual([...ENTITY_TX_TYPES]);
     expect(vectors().map(row => row.name)).toEqual([...ENTITY_TX_TYPES]);
-    expect(new Set(ENTITY_TX_TYPES).size).toBe(65);
+    expect(new Set(ENTITY_TX_TYPES).size).toBe(66);
   });
   test('TypeScript writes the reviewed shared bytes', () => {
     const recorded = new Map(vectors().map(row => [row.name, row.bytes]));

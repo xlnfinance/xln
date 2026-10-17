@@ -496,6 +496,15 @@ fn apply_commit_transitions(
         )? {
             continue;
         }
+        if crate::credit_request::apply_committed_credit_request_followup(
+            state,
+            commit,
+            &transition,
+            local_account_views.get(&commit.account_id),
+            account_txs,
+        )? {
+            continue;
+        }
         if let Some(applied) = crate::cross_j::apply_committed_account_tx_followup(
             state,
             &commit.account_id,
@@ -633,6 +642,11 @@ fn apply_commit_transitions(
                     "COMMITTED_FOLLOWUP_NOT_HANDLED:{}",
                     transition.tx.wire_name()
                 )));
+            }
+            AccountTx::CreditRequest { .. } => {
+                return Err(EntityKernelError::output(
+                    "CREDIT_REQUEST_COMMITTED_FOLLOWUP_NOT_HANDLED",
+                ));
             }
             AccountTx::CrossPullLock { .. } | AccountTx::CrossPullClose { .. } => {
                 return Err(EntityKernelError::output(format!(

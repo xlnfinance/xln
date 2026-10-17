@@ -1,5 +1,4 @@
 import { getTokenInfo } from '../../../account/utils';
-import { scaleWholeTokenAmount } from '../../../types/finance/rebalance';
 import { type RuntimeReplica } from '../../../runtime/types';
 import type { JTokenInfo } from '../../../jurisdiction/adapter/types';
 import { getBootstrapTokenAmount } from '../../../jurisdiction/machine/config/bootstrap-economy';
@@ -17,12 +16,6 @@ export const HUB_MESH_CREDIT_AMOUNT = getBootstrapTokenAmount(
 );
 export const HUB_MESH_REQUIRED_HUBS = 3;
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
-
-const REQUEST_CREDIT_CAP_WHOLE = 1_000n;
-
-export const getRequestCreditCap = (tokenId: number): bigint => {
-  return scaleWholeTokenAmount(REQUEST_CREDIT_CAP_WHOLE, getTokenInfo(tokenId).decimals);
-};
 
 export const getHubMeshHealth = (env: RuntimeReplica | null, activeHubEntityIds: readonly string[]) => {
   if (!env) {

@@ -143,9 +143,9 @@ pub const PROCESS_ABI_VERSION: u64 = 40;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
-        protocol_version: 1,
+        protocol_version: 2,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=36")
+        // sha256("xln.rscore.account:v1:protocol=2:storage=1:hanko:payment-v1:wire=40:intents=disburse7,credit8:tx=disburse24,rate25,credit27:subcontract=studio")
         // wire=36: Entity snapshots carry the exact bounded command nonce
         // fence, so process restart preserves retry/equivocation semantics.
         // wire=35: Account input rows carry full peer/local board authority;
@@ -217,10 +217,11 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // prepared reply reports the engine's own execution microseconds. The fingerprint exists to
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
+        // sha256("xln.rscore.account:v1:protocol=2:storage=1:hanko:payment-v1:wire=40:disburse=7:credit-request=8")
         protocol_fingerprint: [
-            0x0d, 0x0e, 0x71, 0xb6, 0x1e, 0x83, 0x19, 0xa6, 0xa3, 0x51, 0x40, 0x59, 0xb0, 0x16,
-            0x7b, 0x56, 0xf0, 0xb0, 0x3a, 0x22, 0x42, 0x29, 0x37, 0x73, 0x11, 0x84, 0xb4, 0xb3,
-            0xa9, 0xcf, 0xac, 0xeb,
+            0x4d, 0xef, 0x30, 0x5b, 0xfb, 0xff, 0x45, 0x75, 0x15, 0x0e, 0xa9, 0xc6, 0xe5, 0x0c,
+            0x90, 0xc0, 0x01, 0x4b, 0xc9, 0x6e, 0xfa, 0x54, 0xaa, 0x93, 0x9a, 0xc9, 0x69, 0x4a,
+            0xb9, 0xbd, 0x69, 0x37,
         ],
     };
 

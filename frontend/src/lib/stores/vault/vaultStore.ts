@@ -53,7 +53,6 @@ import { registerDebugSurface } from '../../utils/runtime/debugSurface';
 
 import { generateLazyEntityIdPreview } from '../../utils/identity/lazyEntityId';
 
-import { parseStorageSchemaMismatch } from '../../utils/recovery/storageSchemaRecovery';
 
 import {
   deleteVaultDeviceKey,
@@ -112,7 +111,6 @@ import {
   requireEntityProviderDeploymentBlock,
   requireJurisdictionBlockTimeMs,
   runtimeCreationInFlight,
-  schemaMismatchRecoveryRuntimeIds,
   serializeVaultState,
   shouldSkipRuntimeRecoveryUploadAtHeight,
   signerCreationInFlight,
@@ -1026,9 +1024,6 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
       env = await xln.loadEnvFromDB(runtimeIdLower, runtimeSeed);
     }
   } catch (error) {
-    if (parseStorageSchemaMismatch(error)) {
-      schemaMismatchRecoveryRuntimeIds.add(runtimeIdLower);
-    }
     // A thrown durable-read error means storage exists but cannot be trusted.
     // Treating it like "no local data" would silently replace financial state
     // with a fresh Runtime. Missing storage is already represented by `null`;
@@ -1297,7 +1292,6 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     });
   }
 
-  schemaMismatchRecoveryRuntimeIds.delete(runtimeIdLower);
   return env;
 }
 
@@ -1716,41 +1710,6 @@ export const vaultOperations = {
     this.syncRuntime({ ...updatedRuntime, env: restoredEnv });
     toasts.info('Runtime restored from encrypted backup', 6_000);
     return updatedRuntime;
-  },
-
-  async recoverSchemaMismatchedRuntimesFromConfiguredBackups(): Promise<number> {
-    const runtimeIds = Array.from(schemaMismatchRecoveryRuntimeIds).sort();
-    if (runtimeIds.length === 0) {
-      throw new Error('STORAGE_SCHEMA_RECOVERY_NOT_PENDING');
-    }
-
-    const xln = await getXLN();
-    const state = get(runtimesState);
-    const plans: Array<{ runtimeId: string; candidate: RuntimeRecoveryCandidate }> = [];
-    for (const runtimeId of runtimeIds) {
-      const runtime = state.runtimes[runtimeId];
-      if (!runtime) throw new Error(`STORAGE_SCHEMA_RECOVERY_RUNTIME_MISSING:${runtimeId}`);
-      if (!runtime.seed) throw new Error(`STORAGE_SCHEMA_RECOVERY_VAULT_LOCKED:${runtimeId}`);
-      const discovery = await discoverRuntimeRecoveryCandidates(runtime.seed, {
-        ...(runtime.recovery ? { recovery: runtime.recovery } : {}),
-        xln,
-      });
-      const candidate = discovery.candidates[0];
-      if (!candidate) {
-        const detail = discovery.errors.slice(0, 3).join('|') || 'no_authenticated_backup';
-        throw new Error(`STORAGE_SCHEMA_RECOVERY_BACKUP_NOT_FOUND:${runtimeId}:${detail}`);
-      }
-      plans.push({ runtimeId, candidate });
-    }
-
-    // Discovery/decryption completes for every affected runtime before the
-    // first durable byte is replaced. The runtime verifier authenticates each
-    // bundle before persistRestoredEnvToDB publishes the new schema-2 head.
-    for (const plan of plans) {
-      await this.restoreRuntimeFromRecoveryCandidate(plan.runtimeId, plan.candidate);
-      schemaMismatchRecoveryRuntimeIds.delete(plan.runtimeId);
-    }
-    return plans.length;
   },
 
   syncRuntime(runtime: Runtime | null) {
@@ -2684,22 +2643,16 @@ export const vaultOperations = {
     initializePromise = (async () => {
       this.loadFromStorage();
       const loaded = get(runtimesState);
-      let migratedPlaintext = false;
       for (const runtime of Object.values(loaded.runtimes)) {
         if (runtime.seed) {
-          if (!runtime.protectedSecrets) {
-            await protectRuntimeForDevice(runtime, DEFAULT_VAULT_UNLOCK_DURATION_MS, persistVaultStateOrThrow);
-            migratedPlaintext = true;
-          } else {
-            scheduleVaultLock(runtime);
-          }
+          if (!runtime.protectedSecrets) throw new Error(`VAULT_OBSOLETE_PLAINTEXT_PROFILE:${runtime.id}`);
+          scheduleVaultLock(runtime);
           await installVaultRuntimeCommandJournalKeys(runtime.id, runtime.seed);
           delete runtime.devicePassphrase;
           continue;
         }
         await restoreRuntimeFromDevice(runtime);
       }
-      if (migratedPlaintext) this.saveToStorage();
       const current = get(runtimesState);
       const all = Object.values(current.runtimes);
       let xln: XLNModule | null = null;

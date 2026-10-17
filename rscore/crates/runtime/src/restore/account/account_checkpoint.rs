@@ -154,6 +154,7 @@ fn lending_entry(value: &AbiValue) -> Result<(String, LendingIntentKind), Accoun
         7 => LendingIntentKind::Disburse,
         5 => LendingIntentKind::CloseRequest,
         6 => LendingIntentKind::ClosePayout,
+        8 => LendingIntentKind::CreditRequest,
         value => return Err(invalid(format!("LENDING_KIND:{value}"))),
     };
     Ok((text(&fields[0])?.to_owned(), kind))

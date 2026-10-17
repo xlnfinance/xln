@@ -309,6 +309,8 @@ const validateStorageAccountStateMaps = (state: AccountState, code: string): voi
         assertLendingCovenant(row);
         continue;
       }
+      requireExactBoundaryKeys(row, ['transformerAddress', 'encodedBatch', 'allowances'],
+        ['leftArgumentsHash', 'rightArgumentsHash'], `${code}_SUBCONTRACT`);
       const address = requireStorageString(row['transformerAddress'], `${code}_TRANSFORMER`);
       if (!/^0x[0-9a-f]{40}$/.test(address)) throw new Error(`${code}_TRANSFORMER`);
       for (const allowance of requireStorageArray(row['allowances'], `${code}_ALLOWANCES`))

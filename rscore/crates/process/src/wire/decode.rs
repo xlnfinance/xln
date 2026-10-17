@@ -918,6 +918,7 @@ pub(crate) fn decode_tx(value: &AbiValue) -> Result<AccountTx, ProcessError> {
         23 => decode_canonical_tx(fields, "settleTransition", |data| {
             AccountTx::SettleTransition { data }
         }),
+        27 => decode_credit_request(fields),
         value => Err(ProcessError::Tag { field: "tx", value }),
     }
 }
@@ -1182,6 +1183,16 @@ fn decode_set_credit_limit(fields: &[AbiValue]) -> Result<AccountTx, ProcessErro
     Ok(AccountTx::SetCreditLimit {
         token_id: token(&fields[1])?,
         amount: bigint(&fields[2], "amount")?,
+    })
+}
+
+fn decode_credit_request(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 5, "creditRequest")?;
+    Ok(AccountTx::CreditRequest {
+        request_id: text(&fields[1])?.to_owned(),
+        requester_entity_id: text(&fields[2])?.to_owned(),
+        token_id: token(&fields[3])?,
+        amount: bigint(&fields[4], "amount")?,
     })
 }
 

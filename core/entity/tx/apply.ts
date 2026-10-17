@@ -71,6 +71,7 @@ import {
   handleLendingRepayEntityTx,
 } from './handlers/payments/lending';
 import { handleLendingPolicy } from './handlers/payments/lending-policy';
+import { handleRequestCreditEntityTx } from './handlers/account/credit-request';
 import {
   handleMaterializeCrossJurisdictionSwapEntityTx,
   handlePrepareCrossJurisdictionSwapEntityTx,
@@ -501,6 +502,11 @@ const entityTxDispatchers = {
   extendCredit: (_env, state, tx, options) => handleExtendCreditEntityTx(
     state,
     tx as Extract<EntityTx, { type: 'extendCredit' }>,
+    options?.mutableFrameState,
+  ),
+  requestCredit: (_env, state, tx, options) => handleRequestCreditEntityTx(
+    state,
+    tx as Extract<EntityTx, { type: 'requestCredit' }>,
     options?.mutableFrameState,
   ),
   lendingOffer: (_env, state, tx, options) => handleLendingOfferEntityTx(state, tx as Extract<EntityTx, { type: 'lendingOffer' }>, options?.mutableFrameState),

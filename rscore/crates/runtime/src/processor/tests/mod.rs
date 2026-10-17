@@ -44,6 +44,7 @@ mod local_profile_publication;
 mod origin_empty_route;
 mod profile_wire;
 mod signed_profile;
+mod storage_schema;
 #[path = "test_ws.rs"]
 mod test_ws;
 use test_ws::CanonicalWsServer;

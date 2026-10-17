@@ -42,6 +42,7 @@ export const TX_WIRE_CASES: { name: string; tx: AccountTx }[] = [
   { name: 'htlc_resolve/error-no-reason', tx: { type: 'htlc_resolve', data: { lockId: 'lock-1', outcome: 'error' } } },
   { name: 'add_delta', tx: { type: 'add_delta', data: { tokenId: 2 } } },
   { name: 'set_credit_limit', tx: { type: 'set_credit_limit', data: { tokenId: 1, amount: 1000n } } },
+  { name: 'credit_request', tx: { type: 'credit_request', data: { requestId: 'credit-0123456789abcdef', requesterEntityId: B, tokenId: 1, amount: 2500n } } },
   { name: 'request_collateral', tx: { type: 'request_collateral', data: { tokenId: 1, amount: 100n, feeTokenId: 2, feeAmount: 3n, policyVersion: 7 } } },
   { name: 'rebalance_refund', tx: { type: 'rebalance_refund', data: { requestId: 'rebalance-1', requestTokenId: 1, amount: 25n, reason: 'policy_mismatch' } } },
   { name: 'rebalance_policy', tx: { type: 'rebalance_policy', data: { tokenId: 1, policyVersion: 3, baseFee: 11n, liquidityFeeBps: 12n, gasFee: 13n } } },
@@ -109,6 +110,11 @@ if (Bun.env['RSCORE_GENERATE_TX_WIRE'] === '1') {
   test('old borrow and disburse rows cannot acquire unsigned late-interest terms', () => {
     expect(() => decodeRscoreAccountTx([11, 'borrow-1', A, B, 1, '50', 0, 300, 60000])).toThrow();
     expect(() => decodeRscoreAccountTx([24, 'loan-1', A, B, 1, '500', 1, 100, 'borrow-1', 300, 60000])).toThrow();
+  });
+
+  test('retired colliding account tags reject instead of acquiring another transaction meaning', () => {
+    expect(() => decodeRscoreAccountTx([24, ['obsolete-program']])).toThrow();
+    expect(() => decodeRscoreAccountTx([25, 'credit-0123456789abcdef', B, 1, '2500'])).toThrow();
   });
 
   test('TypeScript reads back the transaction it wrote', () => {

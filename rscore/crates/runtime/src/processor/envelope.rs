@@ -76,9 +76,6 @@ const STORAGE_CONFIG_FIELDS: [&str; 7] = [
 pub struct RuntimeOperatorConfig {
     pub loop_interval_ms: Option<u64>,
     pub min_frame_delay_ms: u64,
-    /// Import-only compatibility with checkpoints written before the dead
-    /// knob was removed. New native Runtimes leave this absent.
-    pub snapshot_interval_frames: Option<u64>,
     pub(crate) entity_consensus_state_warning_bytes: Option<u64>,
     pub(crate) advertise_profile_mirrors: Option<bool>,
     pub(crate) performance: Option<RuntimePerformanceConfig>,
@@ -179,13 +176,10 @@ impl RuntimeOperatorConfig {
     }
 
     fn insert_optionals(&self, output: &mut Map<String, Value>) {
-        for (field, value) in [
-            ("snapshotIntervalFrames", self.snapshot_interval_frames),
-            (
-                "entityConsensusStateWarningBytes",
-                self.entity_consensus_state_warning_bytes,
-            ),
-        ] {
+        for (field, value) in [(
+            "entityConsensusStateWarningBytes",
+            self.entity_consensus_state_warning_bytes,
+        )] {
             if let Some(value) = value {
                 output.insert(field.into(), Value::Number(Number::from(value)));
             }
@@ -476,7 +470,6 @@ fn decode_runtime_config(
         &["minFrameDelayMs"],
         &[
             "loopIntervalMs",
-            "snapshotIntervalFrames",
             "entityConsensusStateWarningBytes",
             "advertiseProfileMirrors",
             "performance",
@@ -487,7 +480,6 @@ fn decode_runtime_config(
     Ok(RuntimeOperatorConfig {
         loop_interval_ms: optional_safe_u64(object, "loopIntervalMs")?,
         min_frame_delay_ms: safe_u64(object, "minFrameDelayMs")?,
-        snapshot_interval_frames: optional_safe_u64(object, "snapshotIntervalFrames")?,
         entity_consensus_state_warning_bytes: optional_safe_u64(
             object,
             "entityConsensusStateWarningBytes",
@@ -1050,12 +1042,18 @@ mod tests {
     }
 
     #[test]
+    fn retired_snapshot_interval_is_rejected() {
+        let mut machine = fixture();
+        machine["runtimeConfig"]["snapshotIntervalFrames"] = json!(3);
+        assert!(decode_runtime_config(&machine["runtimeConfig"]).is_err());
+    }
+
+    #[test]
     fn full_runtime_config_round_trips_only_through_typed_fields() {
         let mut machine = fixture();
         machine["runtimeConfig"] = json!({
             "loopIntervalMs": 1,
             "minFrameDelayMs": 2,
-            "snapshotIntervalFrames": 3,
             "entityConsensusStateWarningBytes": 4,
             "advertiseProfileMirrors": false,
             "performance": {

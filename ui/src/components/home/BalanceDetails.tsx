@@ -38,7 +38,7 @@ export function BalanceDetails({ wallet, token }: { wallet: WalletView; token: T
       key: 'onchain' as const,
       id: 'home-onchain',
       label: 'Blockchain wallet',
-      description: 'Funds held directly at your blockchain address.',
+      description: 'Held directly at your blockchain address.',
     },
     {
       visible: places.reserve,
@@ -57,7 +57,7 @@ export function BalanceDetails({ wallet, token }: { wallet: WalletView; token: T
         {parts.map(part => (
           <div key={part.id} className={`balance-part${amount(part.key) === 0 ? ' empty' : ''}`}>
             <div data-testid={part.id}>
-              <span>
+              <span className="stat-label">
                 <i className={`sw c-${part.kind}`} />
                 {part.label}
               </span>
@@ -80,6 +80,7 @@ export function BalanceDetails({ wallet, token }: { wallet: WalletView; token: T
       {places.reserve && amount('pending') > 0 && (
         <p className="note st-pending">{money('pending')} depositing · not yet in your balance</p>
       )}
+      <p className="note wallet-breakdown-note">Fixed reference prices, not live market value.</p>
     </section>
   );
 }

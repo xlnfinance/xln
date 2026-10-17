@@ -182,6 +182,7 @@ const LENDING_KINDS = [
   'close-request',
   'close-payout',
   'disburse',
+  'credit-request',
 ] as const satisfies readonly (AccountLendingIntentKind | undefined)[];
 
 const decodeLending = (value: unknown, index: number): readonly [string, AccountLendingIntentKind] => {

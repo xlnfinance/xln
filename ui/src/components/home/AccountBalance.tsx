@@ -28,14 +28,14 @@ export function AccountBalance({
       <div className="account-backing">
         <span>
           <i className="sw c-coll" />
-          Backed by collateral{' '}
+          Collateral-backed{' '}
           <b className="num">
             {money(d.outCollateral)} {symbol}
           </b>
         </span>
         <span>
           <i className="sw c-risk" />
-          Without collateral{' '}
+          At risk{' '}
           <b className="num">
             {money(d.outPeerCredit)} {symbol}
           </b>

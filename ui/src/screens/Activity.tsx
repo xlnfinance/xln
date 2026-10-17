@@ -2,11 +2,13 @@ import { useLocation } from 'react-router-dom';
 import { SwapHistory } from '../components/history/SwapHistory';
 import { useEffect, useMemo, useState } from 'react';
 import { Sheet } from '../components/Sheet';
-import { ActivityRow } from '../components/history/ActivityRow';
+import { ActivityHead, ActivityRow } from '../components/history/ActivityRow';
+import { Icon } from '../components/Icons';
+import { PageHead } from '../components/PageHead';
 import { MovementDetail } from '../components/history/MovementDetail';
 import { exportCsv } from '../components/history/export';
 import { useApp } from '../runtime/store';
-import { dayLabel, formatUsd } from '../runtime/format';
+import { formatUsd } from '../runtime/format';
 import { useWallet } from '../runtime/views';
 import { usdOf } from '../runtime/financial/prices';
 import { USER_ACTIVITY_TYPES, useMovements } from '../runtime/financial/movements';
@@ -45,8 +47,9 @@ function EntityActivity({ entityId }: { entityId: string | null }) {
 	const filters = useMemo(() => ({
 		...(cursors.at(-1) !== null ? { beforeHeight: cursors.at(-1)! } : {}),
 		...(search.trim() ? { q: search.trim() } : {}),
-		...(from ? { fromTimestamp: new Date(from).getTime() } : {}),
-		...(to ? { toTimestamp: new Date(to).getTime() } : {}),
+		// Day filters: from the start of the first day to the end of the last, in local time.
+		...(from ? { fromTimestamp: new Date(`${from}T00:00:00`).getTime() } : {}),
+		...(to ? { toTimestamp: new Date(`${to}T23:59:59.999`).getTime() } : {}),
 		scanLimit: 1000,
 	}), [cursors, search, from, to]);
 	const types = FILTERS.find(entry => entry.id === filter)?.types ?? USER_ACTIVITY_TYPES;
@@ -81,82 +84,105 @@ function EntityActivity({ entityId }: { entityId: string | null }) {
 		return { received, sent, count };
 	}, [movements]);
 
-	let lastDay = '';
-	const rows = movements.map(movement => {
-		const day = movement.timestamp ? dayLabel(movement.timestamp) : `Frame ${movement.height}`;
-		const first = day !== lastDay;
-		lastDay = day;
-		return { movement, day, first };
-	});
+	const searching = search.trim();
 
 	return (
 		<div className="screen fade-in">
-			<div className="screen-header">
-				<span className="screen-title">Activity</span>
-				{filter !== 'swaps' && today.count > 0 ? (
-					<span className="note num" data-testid="activity-today" style={{ marginLeft: 12 }}>
-						This page today · in {formatUsd(today.received)} · out {formatUsd(today.sent)} · {today.count} {today.count === 1 ? 'movement' : 'movements'}
-					</span>
-				) : null}
-				{filter !== 'swaps' && movements.length > 0 ? (
-					<button type="button" className="btn quiet sm" onClick={() => exportCsv(movements)} data-testid="activity-export" title="Every movement shown here, with frame height and hash, for your books">
-						Export CSV
+			<PageHead
+				title="Activity"
+				eyebrow={`Wallet${wallet.jurisdiction ? ` · ${wallet.jurisdiction}` : ''}`}
+				sub={
+					filter === 'swaps' ? null : today.count > 0 ? (
+						<span className="num" data-testid="activity-today">
+							This page today · in {formatUsd(today.received)} · out {formatUsd(today.sent)} · {today.count}{' '}
+							{today.count === 1 ? 'movement' : 'movements'}
+						</span>
+					) : (
+						`${movements.length} ${movements.length === 1 ? 'movement' : 'movements'} on this page`
+					)
+				}
+				actions={
+					filter !== 'swaps' && movements.length > 0 ? (
+						<button type="button" className="btn sm" onClick={() => exportCsv(movements)} data-testid="activity-export" title="Every movement shown here, with frame height and hash, for your books">
+							<Icon name="download" size={14} />
+							Export CSV
+						</button>
+					) : null
+				}
+			/>
+			<div className="tabs">
+				{FILTERS.map(entry => (
+					<button
+						key={entry.id}
+						type="button"
+						className={filter === entry.id ? 'active' : ''}
+						aria-pressed={filter === entry.id}
+						onClick={() => {
+							setFilter(entry.id);
+							setCursors([null]);
+						}}
+					>
+						{entry.label}
 					</button>
-				) : null}
-				<span className="faint" style={{ fontSize: 12 }} hidden={filter === 'swaps'}>
-					{loading ? 'Loading stored history…' : `${movements.length} ${movements.length === 1 ? 'movement' : 'movements'}`}
-				</span>
+				))}
 			</div>
 			<div className="two-col activity">
 				<div>
-					{filter !== 'swaps' && <>
-					<input
-						className="input"
-						type="search"
-						placeholder="Search stored history"
-						value={search}
-						onChange={event => { setSearch(event.target.value); setCursors([null]); }}
-						data-testid="activity-search"
-						style={{ marginBottom: 8 }}
-					/>
-					<div className="actions" style={{ gridTemplateColumns: '1fr 1fr' }}>
-                        <label className="field">From<input className="input" type="datetime-local" value={from} onChange={event => { setFrom(event.target.value); setCursors([null]); }} /></label>
-                        <label className="field">Until<input className="input" type="datetime-local" value={to} onChange={event => { setTo(event.target.value); setCursors([null]); }} /></label>
-                    </div>
-                    {cursors.length > 1 && <button type="button" className="btn quiet sm" onClick={() => setCursors(value => value.slice(0, -1))}>Newer records</button>}
-                    </>}
-                    <div className="chips">
-						{FILTERS.map(entry => (
-							<button key={entry.id} type="button" className={filter === entry.id ? 'active' : ''} onClick={() => { setFilter(entry.id); setCursors([null]); }}>
-								{entry.label}
-							</button>
-						))}
-					</div>
-					{filter === 'swaps' && entityId ? <SwapHistory key={entityId} entityId={entityId} accountIds={accountIds} names={wallet.names} /> : null}
-					{filter !== 'swaps' && rows.map(({ movement, day, first }) => (
-						<div key={movement.id}>
-							{first ? <div className="caps day">{day}</div> : null}
-							<ActivityRow movement={movement} names={wallet.names} first={first} selected={movement.id === selected?.id} onClick={() => setSelectedId(movement.id)} />
+					{filter !== 'swaps' && (
+						<div className="toolbar">
+							<input
+								className="input boxed"
+								type="search"
+								placeholder="Search stored history"
+								value={search}
+								onChange={event => {
+									setSearch(event.target.value);
+									setCursors([null]);
+								}}
+								data-testid="activity-search"
+							/>
+							<label className="toolbar-date">
+								<span>From</span>
+								<input className="input boxed" type="date" value={from} onChange={event => { setFrom(event.target.value); setCursors([null]); }} />
+							</label>
+							<label className="toolbar-date">
+								<span>Until</span>
+								<input className="input boxed" type="date" value={to} onChange={event => { setTo(event.target.value); setCursors([null]); }} />
+							</label>
 						</div>
-					))}
+					)}
+					{filter !== 'swaps' && cursors.length > 1 && (
+						<button type="button" className="btn quiet sm" onClick={() => setCursors(value => value.slice(0, -1))}>
+							Newer records
+						</button>
+					)}
+					{filter === 'swaps' && entityId ? <SwapHistory key={entityId} entityId={entityId} accountIds={accountIds} names={wallet.names} /> : null}
+					{filter !== 'swaps' && (
+						<div className="dtable">
+							{movements.length > 0 ? <ActivityHead /> : null}
+							{movements.map((movement, index) => (
+								<ActivityRow key={movement.id} movement={movement} names={wallet.names} first={index === 0} selected={movement.id === selected?.id} onClick={() => setSelectedId(movement.id)} />
+							))}
+						</div>
+					)}
 					{filter !== 'swaps' && movements.length === 0 && !loading && !error && (
 						<p className="note" style={{ padding: '18px 0' }}>
-							{search.trim() ? `Nothing loaded matches "${search.trim()}".` : more ? 'No matching activity on this page.' : 'No matching activity.'}
+							{searching ? `Nothing loaded matches "${searching}".` : more ? 'No matching activity on this page.' : 'No matching activity.'}
 						</p>
 					)}
 					{filter !== 'swaps' && more && (
-						<div style={{ padding: '12px 0' }}>
+						<div style={{ padding: '14px 0' }}>
 							<button
 								type="button"
-								className="btn quiet sm"
+								className="btn sm"
 								onClick={() => { if (nextBeforeHeight !== null) setCursors(value => [...value, nextBeforeHeight]); }}
 								disabled={loading || Boolean(error)}
 								data-testid="activity-more"
 							>
 								{loading ? 'Loading…' : 'Earlier records'}
 							</button>
-							<span className="faint" style={{ fontSize: 12, marginLeft: 10 }}>
-								{search.trim()
+							<span className="faint" style={{ fontSize: 12, marginLeft: 12 }}>
+								{searching
 									? `Searching the ${loaded.length.toLocaleString('en-US')} movements on this page.`
 									: `Showing the ${loaded.length.toLocaleString('en-US')} movements on this page.`}
 							</span>
@@ -164,17 +190,13 @@ function EntityActivity({ entityId }: { entityId: string | null }) {
 					)}
 					{error && <p style={{ color: 'var(--dispute)', fontSize: 13 }}>{error}</p>}
 				</div>
-				{filter !== 'swaps' && <div className="aside desktop-only">
-					{selected ? (
-						<div className="card">
-							<MovementDetail movement={selected} names={wallet.names} />
+				{filter !== 'swaps' && (
+					<div className="aside desktop-only">
+						<div className="card activity-receipt">
+							{selected ? <MovementDetail movement={selected} names={wallet.names} /> : <p className="note">Select a movement to see its receipt.</p>}
 						</div>
-					) : (
-						<div className="card">
-							<p className="note">Select a movement to see its receipt.</p>
-						</div>
-					)}
-				</div>}
+					</div>
+				)}
 			</div>
 			{selected && !desktop && (
 				<div className="mobile-only">

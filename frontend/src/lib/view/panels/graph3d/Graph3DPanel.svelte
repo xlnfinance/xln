@@ -19,6 +19,10 @@ import { beginGraphGesture, emptyGraphGestureState, endGraphGesture, type GraphG
 import { ImmersiveWalletSurface } from "#lib/network3d/ImmersiveWalletSurface.ts";
 import { registerDebugSurface } from "#lib/utils/runtime/debugSurface.ts";
 import { networkMachineRuntime } from "#lib/stores/network/networkMachineRuntimeStore.ts";
+import { networkMachineDemo } from "#lib/stores/network/networkMachineDemoStore.ts";
+import { activeNetworkMachineCue } from "#lib/network3d/networkMachine.ts";
+import { deriveNetworkStepMotion, type NetworkMotionFlow, type NetworkStepMotion } from "#lib/network3d/timeline/networkStepMotion.ts";
+import { canonicalAccountId, resolveNetworkCueFocus, type NetworkCueFocus } from "#lib/network3d/timeline/networkCueFocus.ts";
 import { mergeRuntimeGraphProjections, requireActionableGraphNodeRuntimeId, type MergedRuntimeGraph, type RuntimeGraphCanonicity, type RuntimeGraphProjection } from "#lib/network3d/runtimeGraphProjection.ts";
 import { materializeRuntimeGraphReplicas } from "#lib/network3d/runtimeGraphRender.ts";
 import { connectedRuntimeGraphEntityIds, resolveRuntimeGraphLayout, type RuntimeGraphLayoutCache } from "#lib/network3d/runtimeGraphLayout.ts";
@@ -28,10 +32,8 @@ import {
   formatGraphDualConnectionAccountInfoFromReplicas,
   formatGraphEntityBalanceInfo,
   formatGraphEntityShortNameFromReplicas,
-  findGraphJReplica,
   findGraphReplicaByEntityId,
   formatGraphReserveBadge,
-  graphJReplicaHeight,
   getGraphEntityNameFromGossip,
   getGraphEntityFlag,
   getGraphSignerIdForEntity,
@@ -40,18 +42,17 @@ import {
   type GraphPaymentRoute,
   type GraphReplicaLike,
 } from "./graph3d-helpers";
-import { buildBirdViewSettings, readBirdViewSettings, writeBirdViewSettings, type BirdViewSettings } from "./graph3d-settings";
+import { buildBirdViewSettings, graphRenderQualityFor, readBirdViewSettings, writeBirdViewSettings, type BirdViewSettings } from "./graph3d-settings";
 import { createGraphRenderer, detachGraphObject3D, disposeGraphObject3D, getGraphThemeColors, type GraphRenderer } from "./graph3d-renderer";
 import {
   buildGraphAccountVisuals,
-  createBlockContainer,
   buildGraphConnection,
-  createBroadcastRippleMesh,
-  createDirectionalLightningMesh,
   createEntityLabel,
   createGraphEntityNode,
   createGraphGrid,
   createGraphJMachine,
+  createJMachineLabelTexture,
+  keepJMachineLabelBeside,
   createMempoolIndicator,
   createMempoolTxCube,
   deriveGraphEntry,
@@ -59,12 +60,18 @@ import {
   graphAccountMempoolCount,
   positionEntityLabel,
   positionMempoolIndicator,
-  startProportionalBroadcast,
   buildSimpleRadialLayout,
+  type EntityLabelContent,
 } from "./graph3d-visuals";
-import type { GraphConnectionData, GraphEntityData, GraphEntityProfile, GraphFrameActivity, GraphJBlockHistoryEntry, GraphRendererMode, GraphRipple, GraphTransactionLike, GraphXLNRuntime } from "./graph3d-types";
+import type { GraphConnectionData, GraphEntityData, GraphEntityProfile, GraphFrameActivity, GraphRendererMode, GraphRipple, GraphXLNRuntime } from "./graph3d-types";
+import { advanceMotionEffect, createMotionBlock, createMotionPacket, createMotionRipple, MOTION_KIND_STYLE, motionEffectObjects, type MotionAnchor, type MotionEffect, type MotionEndpoint, type MotionStyle } from "./presentation/graph3d-motion";
+import { advanceCameraTween, currentCameraShot, frameGraphPoints, presentationViewDirection, shotFromCameraCue, type CameraShot, type CameraTween } from "./presentation/graph3d-director";
+import { setGraphObjectDimmed } from "./graph3d-focus";
 import { buildRuntimeGraphProjections } from "./graph3d-runtime-projections";
 import { collectGraphTokenIds, getGraphEntitySizeForToken } from "./graph3d-actions";
+import { presentationCapacityScale as presentationCapacityScaleFor, stageBarRadiusScale, stageLabelScale, stagePacketScale, stageUnit } from "./graph3d-stage";
+import type { AccountAnnotationContext } from "#lib/network3d/timeline/accountAnnotation.ts";
+import { formatStageAmount, formatStageChange, reservesByEntity } from "#lib/network3d/timeline/presentationStage.ts";
 let showMiniPanel = false;
 let miniPanelEntityId = "";
 let miniPanelEntityName = "";
@@ -73,6 +80,8 @@ export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
 export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
 export let runtimeFrameTimeIndex: Writable<number>;
 export let graphInitSignal: Writable<boolean> | undefined = undefined;
+/** Presentation stage: projector-quality renderer, narrated camera, no persisted view state. */
+export let presentMode = false;
 $: initEnabled = graphInitSignal ? $graphInitSignal : true;
 $: env = (() => {
   const timeIdx = $runtimeFrameTimeIndex;
@@ -120,9 +129,11 @@ $: jurisdictionsData = mergedRuntimeGraph.jMachines.map((projection) => {
   return {
     name: projection.selected.name,
     jMachine: {
-      position: projection.selected.position || { x: 0, y: 600, z: 0 },
+      // Graph-frame replays carry no J replica position; float the machine over the network.
+      position: projection.selected.position || { x: 0, y: 55, z: 0 },
       capacity: 3,
-      jHeight: Number(projection.selected.height || 0),
+      // Only a materialized J replica knows its block height; a graph frame's is the R-frame.
+      jHeight: projection.selected.machine ? Number(projection.selected.height || 0) : 0,
       mempool: jr?.mempool || [],
       provenance: projection.provenance,
     },
@@ -155,28 +166,6 @@ const debug = {
 const reportGraphInitError = (error: unknown) => {
   debug.error("Graph initialization failed:", error);
 };
-const recordOf = (value: unknown): Record<string, unknown> | null =>
-  value !== null && typeof value === 'object' ? value as Record<string, unknown> : null;
-const graphTransactionOf = (value: unknown): GraphTransactionLike => {
-  const tx = recordOf(value);
-  if (!tx) return {};
-  const data = recordOf(tx['data']);
-  const amount = tx['amount'] ?? data?.['amount'];
-  return {
-    ...(typeof tx['type'] === 'string' ? { type: tx['type'] } : {}),
-    ...(typeof tx['kind'] === 'string' ? { kind: tx['kind'] } : {}),
-    ...(typeof tx['targetEntityId'] === 'string' ? { targetEntityId: tx['targetEntityId'] } : {}),
-    ...(typeof amount === 'string' || typeof amount === 'number' || typeof amount === 'bigint' ? { amount } : {}),
-    ...(data ? { data: {
-      ...(typeof data['amount'] === 'string' || typeof data['amount'] === 'number' || typeof data['amount'] === 'bigint' ? { amount: data['amount'] } : {}),
-      ...(typeof data['tokenId'] === 'number' ? { tokenId: data['tokenId'] } : {}),
-      ...(typeof data['targetEntityId'] === 'string' ? { targetEntityId: data['targetEntityId'] } : {}),
-      ...(typeof data['fromEntityId'] === 'string' ? { fromEntityId: data['fromEntityId'] } : {}),
-      ...(typeof data['toEntityId'] === 'string' ? { toEntityId: data['toEntityId'] } : {}),
-      ...(data['accountTx'] !== undefined ? { accountTx: graphTransactionOf(data['accountTx']) } : {}),
-    } } : {}),
-  };
-};
 const settingNumber = (value: unknown, key: string): number => {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`GRAPH_SETTING_NUMBER_INVALID:${key}`);
   return value;
@@ -206,39 +195,29 @@ let raycaster: THREE.Raycaster;
 let mouse: THREE.Vector2;
 let entityMeshMap = new Map<string, THREE.Object3D | undefined>();
 let jMachines: Map<string, THREE.Group> = new Map(); // jurisdiction name → J-Machine mesh
-$: jMachine = activeJurisdictionName ? jMachines.get(activeJurisdictionName) || null : null;
+/** Read on use: `jMachines` is mutated in place, which a reactive declaration would not see. */
+function activeJMachine(): THREE.Group | null {
+  return activeJurisdictionName ? jMachines.get(activeJurisdictionName) ?? null : null;
+}
 let jMachineTxBoxes: (THREE.Group | THREE.Mesh)[] = []; // Yellow tx cubes inside J-Machine (current mempool)
-let jBlockHistory: GraphJBlockHistoryEntry[] = []; // Last 3 committed blocks stacked above J-machine
-let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) problem)
 let broadcastEnabled = true;
-let jAutoProposerInterval: ReturnType<typeof setInterval> | null = null;
-let jProposalIntervalMs = 1000; // 1 second default - configurable
-let jAutoProposerEnabled = true; // Enable/disable auto-proposer
-let lastAnimatedFrameIndex = -1; // Track which frame we last animated (to avoid re-animating)
 let entities: GraphEntityData[] = [];
 let connections: GraphConnectionData[] = [];
-let particles: Array<{
-  mesh: THREE.Mesh;
-  connectionIndex: number;
-  progress: number;
-  speed: number;
-  type: string;
-  amount?: bigint;
-  direction?: "incoming" | "outgoing";
-}> = [];
-let entityInputStrikes: Array<{
-  line: THREE.Line;
-  startTime: number;
-  duration: number;
-}> = [];
+/** Transient payment motion of the current step. One source: `currentStepMotion()`. */
+let motionEffects: MotionEffect[] = [];
+let lastPlayedMotionKey = "";
+/** Live mode diffs each newly projected network against the one it replaces. */
+let liveMotionBaseline: { signature: string; projections: RuntimeGraphProjection[] } | null = null;
+let graphFocus: NetworkCueFocus | null = null;
+let appliedFocusKey = "";
+let directedCueId: string | null = null;
+let cameraTween: CameraTween | null = null;
 let currentFrameActivity: GraphFrameActivity = {
   activeEntities: new Set(),
   incomingFlows: new Map(),
   outgoingFlows: new Map(),
 };
-let connectionIndexMap: Map<string, number> = new Map();
 let animationId: number | null;
-let activeBroadcastSpheres: Array<{ sphere: THREE.Mesh; animationId: number }> = [];
 let hoveredObject: THREE.Object3D | null = null;
 function resetHoveredObjectHighlight(target: THREE.Object3D): void {
   if (!(target instanceof THREE.Mesh) && !(target instanceof THREE.Line)) return;
@@ -269,6 +248,7 @@ function loadBirdViewSettings(): BirdViewSettings {
   return readBirdViewSettings(typeof localStorage === "undefined" ? null : localStorage);
 }
 function saveBirdViewSettings(wasOpened: boolean = true) {
+  if (presentMode) return; // A presentation never rewrites the operator's saved view.
   const nextSettings = buildBirdViewSettings({
     barsMode,
     selectedTokenId,
@@ -322,12 +302,18 @@ let rotationZ: number = savedSettings.rotationZ; // 0-10000 (0 = stopped, 10000 
 let availableTokens: number[] = []; // Will be populated from actual token data
 let rendererMode: GraphRendererMode = "webgl";
 let labelScale: number = 2.0;
-let entitySizeMultiplier: number = 1.0;
+let entitySizeMultiplier: number = presentMode ? 1.4 : 1.0;
+/** Presentation: sizes follow the network's span (see graph3d-stage). 1 outside presentation. */
+let stageScale = 1;
+/** Presentation: one dollar scale for bars in every part (see graph3d-stage). */
+let presentationCapacityScale: Map<number, number> | null = null;
 let forceLayoutEnabled: boolean = true;
 let gridSize: number = 2000;
 let gridDivisions: number = 3;
-let gridOpacity: number = 0.4;
-let gridColor: string = "#ffffff"; // White for better contrast with 3x3 grid
+// A projector washes out mid-grey: presentation uses a deep navy stage and a quiet grid.
+const PRESENTATION_BACKGROUND = 0x060a13;
+let gridOpacity: number = presentMode ? 0.28 : 0.4;
+let gridColor: string = presentMode ? "#2f4c70" : "#ffffff"; // White for better contrast with 3x3 grid
 let autoRotate: boolean = false;
 let autoRotateSpeed: number = 0.5; // RPM
 let showFpsOverlay: boolean = false; // Controlled by settings
@@ -365,7 +351,7 @@ $: if (availableRoutes.length > 0 && selectedRouteIndex >= 0) {
 }
 $: if (scene && settings.theme) {
   const themeColors = getGraphThemeColors(settings.theme);
-  scene.background = new THREE.Color(themeColors.background);
+  scene.background = new THREE.Color(presentMode ? PRESENTATION_BACKGROUND : themeColors.background);
 }
 $: if (scene && jurisdictionsData) {
   const jurisdictionsArray = jurisdictionsData;
@@ -378,7 +364,9 @@ $: if (scene && jurisdictionsData) {
   }
   jurisdictionsArray.forEach((jurisdiction) => {
     if (!jMachines.has(jurisdiction.name)) {
-      const jMachineGroup = createJMachine(12, jurisdiction.jMachine.position, jurisdiction.name, jurisdiction.jMachine.jHeight); // 2x smaller for Fed Chair UX
+      // Presentation frames the network tightly; a smaller J-machine keeps the banks the subject.
+      const jMachineGroup = createGraphJMachine(presentMode ? 8 : 12, jurisdiction.jMachine.position, jurisdiction.name, jurisdiction.jMachine.jHeight, presentMode ? "right" : "below");
+      jMachineGroup.scale.setScalar(stageScale);
       graphWorld.add(jMachineGroup);
       jMachines.set(jurisdiction.name, jMachineGroup);
     }
@@ -388,182 +376,28 @@ $: if (scene && jurisdictionsData) {
     if (jMachineGroup) {
       const label = jMachineGroup.children.find((child) => child instanceof THREE.Sprite) as THREE.Sprite | undefined;
       if (label && label.material && label.material.map) {
-        const canvas = document.createElement("canvas");
-        const context = canvas.getContext("2d");
-        if (context) {
-          canvas.width = 256;
-          canvas.height = 64;
-          context.fillStyle = "#66ccff";
-          context.font = "bold 28px monospace";
-          context.textAlign = "center";
-          const shortName = (jurisdiction.name.split(" ")[0] ?? jurisdiction.name).substring(0, 8);
-          context.fillText(`${shortName} (#${jurisdiction.jMachine.jHeight})`, 128, 40);
-          const texture = new THREE.CanvasTexture(canvas);
-          label.material.map = texture;
-          label.material.needsUpdate = true;
-        }
+        label.material.map.dispose();
+        label.material.map = createJMachineLabelTexture(jurisdiction.name, jurisdiction.jMachine.jHeight, jMachineGroup.userData["labelPlacement"]);
+        label.material.needsUpdate = true;
       }
     }
   });
   const activeJurisdiction = jurisdictionsArray.find((x) => x.name === activeJurisdictionName);
   const activeJMachine = activeJurisdiction ? jMachines.get(activeJurisdiction.name) : undefined;
   if (activeJurisdiction && activeJMachine) {
-    const timeIdx = $runtimeFrameTimeIndex;
-    const historyFrames = $runtimeFrameHistory;
-    let prevMempoolSize = 0;
-    let prevFrame = null;
-    if (historyFrames && historyFrames.length > 0) {
-      const prevFrameIdx = timeIdx === -1 ? historyFrames.length - 2 : timeIdx - 1;
-      if (prevFrameIdx >= 0 && prevFrameIdx < historyFrames.length) {
-        prevFrame = historyFrames[prevFrameIdx];
-        const prevJReplicas = prevFrame?.state.jReplicas;
-        if (prevJReplicas) {
-          const prevJReplicaArr = Array.isArray(prevJReplicas) ? prevJReplicas : Array.from(prevJReplicas.values());
-          const prevJR = prevJReplicaArr.find((jr) => jr.name === activeJurisdiction.name);
-          prevMempoolSize = prevJR?.mempool?.length || 0;
-        }
-      }
-    }
+    // Mempool cubes are state: what the jurisdiction holds right now. Blocks and broadcasts
+    // are motion and come from the step source (playStepMotion), never from history scans.
     jMachineTxBoxes.forEach((cube) => {
-      if (cube && activeJMachine) {
-        activeJMachine.remove(cube);
-        disposeGraphObject3D(cube);
-      }
+      activeJMachine.remove(cube);
+      disposeGraphObject3D(cube);
     });
     jMachineTxBoxes = [];
-    const mempool = activeJurisdiction.jMachine.mempool || [];
-    const currentJHeight = activeJurisdiction.jMachine.jHeight || 0;
-    const nextBlockHeight = Number(currentJHeight) + 1;
-    mempool.forEach((tx, txIndex: number) => {
+    const nextBlockHeight = Number(activeJurisdiction.jMachine.jHeight || 0) + 1;
+    (activeJurisdiction.jMachine.mempool || []).forEach((tx, txIndex: number) => {
       const txCube = createMempoolTxCube(txIndex, getTokenDecimals, tx, nextBlockHeight);
       activeJMachine.add(txCube);
       jMachineTxBoxes.push(txCube);
     });
-    if (prevFrame) {
-      const prevJReplica = findGraphJReplica(prevFrame.state.jReplicas, activeJurisdiction.name);
-      const prevJHeight = graphJReplicaHeight(prevJReplica);
-      const currJHeightNum = Number(currentJHeight);
-      if (currJHeightNum > prevJHeight && prevMempoolSize > 0) {
-        const blockNumber = BigInt(currJHeightNum);
-        const prevMempool = prevJReplica?.mempool || [];
-        const { container: blockContainer, txCubes } = createBlockContainer({
-          blockNum: blockNumber,
-          txs: prevMempool,
-          jMachinePosition: activeJMachine.position,
-          yOffset: 15,
-          getTokenDecimals,
-        });
-        const blockSpacing = 15;
-        jBlockHistory.forEach((block) => {
-          block.yOffset += blockSpacing;
-          block.container.position.y = activeJMachine.position.y + block.yOffset;
-        });
-        blockContainer.position.copy(activeJMachine.position);
-        blockContainer.position.y += blockSpacing;
-        graphWorld.add(blockContainer);
-        jBlockHistory.push({
-          blockNumber,
-          container: blockContainer,
-          txCubes,
-          yOffset: blockSpacing,
-        });
-        while (jBlockHistory.length > 3) {
-          const oldBlock = jBlockHistory.shift();
-          if (oldBlock) {
-            graphWorld.remove(oldBlock.container);
-            disposeGraphObject3D(oldBlock.container);
-          }
-        }
-        createProportionalBroadcast(activeJMachine.position, prevMempoolSize);
-      }
-    }
-    const currentHeightNum = Number(currentJHeight);
-    const runtimeHistory = $runtimeFrameHistory || [];
-    if (runtimeHistory.length > 0 && currentHeightNum > 0) {
-      const blockBoundaries: Array<{ blockNum: number; txs: unknown[] }> = [];
-      for (let targetHeight = currentHeightNum - 1; targetHeight >= Math.max(0, currentHeightNum - 3); targetHeight--) {
-        const maxFrameIdx = $runtimeFrameTimeIndex >= 0 ? Math.min($runtimeFrameTimeIndex, runtimeHistory.length - 1) : runtimeHistory.length - 1;
-        let foundFrame = null;
-        let foundHeight = -1;
-        for (let frameIdx = maxFrameIdx; frameIdx >= 0; frameIdx--) {
-          const frame = runtimeHistory[frameIdx];
-          const frameJReplica = findGraphJReplica(frame?.state.jReplicas, activeJurisdiction.name);
-          const frameJHeight = graphJReplicaHeight(frameJReplica);
-          if (frameJHeight <= targetHeight && frameJHeight > 0) {
-            foundFrame = frameJReplica;
-            foundHeight = frameJHeight;
-            break;
-          }
-        }
-        if (foundFrame) {
-          const txs = foundFrame.mempool || [];
-          blockBoundaries.push({
-            blockNum: foundHeight + 1,
-            txs: txs.slice(0, 9),
-          });
-        } else {
-        }
-      }
-      const expectedBlocks = blockBoundaries.length;
-      if (jBlockHistory.length !== expectedBlocks || (jBlockHistory[0] && Number(jBlockHistory[0].blockNumber) !== blockBoundaries[0]?.blockNum)) {
-        jBlockHistory.forEach((block) => {
-          graphWorld.remove(block.container);
-          disposeGraphObject3D(block.container);
-        });
-        jBlockHistory = [];
-        blockBoundaries.reverse().forEach((boundary, idx) => {
-          const blockNum = BigInt(boundary.blockNum);
-          const yOffset = (blockBoundaries.length - idx) * 15; // Stack upward
-          const { container: blockContainer, txCubes } = createBlockContainer({
-            blockNum,
-            txs: boundary.txs,
-            jMachinePosition: activeJMachine.position,
-            yOffset,
-            getTokenDecimals,
-          });
-          graphWorld.add(blockContainer);
-          jBlockHistory.push({
-            blockNumber: blockNum,
-            container: blockContainer,
-            txCubes,
-            yOffset,
-          });
-        });
-      }
-    }
-  }
-}
-function createProportionalBroadcast(jMachinePos: THREE.Vector3, txCount: number) {
-  if (!scene || txCount === 0) return;
-  const broadcast = startProportionalBroadcast({
-    graphWorld,
-    position: jMachinePos,
-    transactionCount: txCount,
-    onComplete: (sphere) => {
-      activeBroadcastSpheres = activeBroadcastSpheres.filter((entry) => entry.sphere !== sphere);
-    },
-  });
-  if (broadcast) activeBroadcastSpheres.push(broadcast);
-}
-$: if (jMachine && $runtimeFrameTimeIndex === -1) {
-  const historyFrames = $runtimeFrameHistory;
-  const currentLen = historyFrames?.length || 0;
-  if (currentLen > lastAnimatedFrameIndex + 1) {
-    for (let i = lastAnimatedFrameIndex + 1; i < currentLen; i++) {
-      const frame = historyFrames[i];
-      const entityInputs = frame?.runtimeInput?.entityInputs || [];
-      entityInputs.forEach((entityInput) => {
-        const txs = entityInput.entityTxs ?? [];
-        txs.forEach((tx) => {
-          const graphTx = graphTransactionOf(tx);
-          const txKind = graphTx.kind || graphTx.type;
-          if (txKind === "payFromReserve" || txKind === "payToReserve" || txKind === "settleToReserve") {
-            addTxToJMachine(entityInput.entityId);
-          }
-        });
-      });
-    }
-    lastAnimatedFrameIndex = currentLen - 1;
   }
 }
 $: if (entities.length > 0) {
@@ -596,8 +430,10 @@ async function initAndSetup() {
     isVRSupported = false;
   }
   await initThreeJS();
+  // Store updates that arrived while the scene was being built were skipped (no scene yet);
+  // a presentation that opened on its first step would otherwise stay empty until the next.
+  updateNetworkData();
   animate();
-  startJAutoProposer();
 }
 $: if (initEnabled && !graphInitialized) {
   initAndSetup().catch(reportGraphInitError);
@@ -750,20 +586,10 @@ let resizeObserver: ResizeObserver | null = null;
 onDestroy(() => {
   immersiveWalletSurface?.dispose();
   immersiveWalletSurface = null;
-  if (jAutoProposerInterval) {
-    clearInterval(jAutoProposerInterval);
-    jAutoProposerInterval = null;
-  }
   if (resizeObserver && container) {
     resizeObserver.disconnect();
     resizeObserver = null;
   }
-  activeBroadcastSpheres.forEach(({ sphere, animationId: rafId }) => {
-    cancelAnimationFrame(rafId);
-    if (graphWorld) graphWorld.remove(sphere);
-    disposeGraphObject3D(sphere);
-  });
-  activeBroadcastSpheres = [];
   if (animationId) {
     cancelAnimationFrame(animationId);
     animationId = null;
@@ -781,17 +607,11 @@ onDestroy(() => {
     }
   }
   entityMeshMap.clear();
-  entityInputStrikes.forEach((strike) => {
-    if (strike.line && scene) {
-      graphWorld.remove(strike.line);
-      strike.line.geometry.dispose();
-      (strike.line.material as THREE.Material).dispose();
-    }
-  });
-  entityInputStrikes = [];
+  clearMotionEffects();
 });
 function createGrid() {
-  if (!scene) return;
+  // On a projector the floor grid's horizon reads as stray lines across the J-machine.
+  if (!scene || presentMode) return;
   gridHelper = createGraphGrid(gridColor, gridOpacity, gridSize, gridDivisions);
   graphWorld.add(gridHelper);
 }
@@ -801,48 +621,6 @@ function recreateGrid() {
     detachFromGraphWorld(gridHelper);
     createGrid();
   });
-}
-function createJMachine(size: number = 25, position: { x: number; y: number; z: number } = { x: 0, y: 200, z: 0 }, name: string = "J-MACHINE", jHeight: number = 0): THREE.Group {
-  return createGraphJMachine(size, position, name, jHeight);
-}
-function addTxToJMachine(_fromEntityId: string): THREE.Mesh | null {
-  if (!jMachine || !scene) return null;
-  const txGeometry = new THREE.BoxGeometry(2, 2, 2);
-  const txMaterial = new THREE.MeshPhongMaterial({
-    color: 0xffff00, // Yellow
-    emissive: 0x888800,
-    transparent: true,
-    opacity: 0.9,
-  });
-  const txCube = new THREE.Mesh(txGeometry, txMaterial);
-  const radius = 8; // Inside the 15-unit octahedron
-  const theta = Math.random() * Math.PI * 2;
-  const phi = Math.random() * Math.PI;
-  txCube.position.set(radius * Math.sin(phi) * Math.cos(theta), radius * Math.sin(phi) * Math.sin(theta), radius * Math.cos(phi));
-  jMachine.add(txCube);
-  jMachineTxBoxes.push(txCube);
-  if (jMachineTxBoxes.length >= jMachineCapacity) {
-    triggerBroadcast();
-  }
-  return txCube;
-}
-function triggerBroadcast() {
-  if (!broadcastEnabled || !jMachine || !scene) return;
-  jMachineTxBoxes.forEach((txCube) => {
-    if (jMachine) jMachine.remove(txCube);
-  });
-  jMachineTxBoxes = [];
-}
-function startJAutoProposer() {
-  if (jAutoProposerInterval) {
-    clearInterval(jAutoProposerInterval);
-  }
-  jAutoProposerInterval = setInterval(() => {
-    if (!jAutoProposerEnabled || !jMachine || !scene) return;
-    if (jMachineTxBoxes.length === 0) return;
-    triggerBroadcast();
-    gridPulseIntensity = 1.0;
-  }, jProposalIntervalMs);
 }
 async function initThreeJS() {
   if (renderer || scene) {
@@ -862,18 +640,19 @@ async function initThreeJS() {
   graphWorld.name = "xln-graph-world";
   scene.add(graphWorld);
   const themeColors = getGraphThemeColors(settings.theme);
-  scene.background = new THREE.Color(themeColors.background);
+  scene.background = new THREE.Color(presentMode ? PRESENTATION_BACKGROUND : themeColors.background);
   createGrid();
   const containerWidth = container.clientWidth || window.innerWidth;
   const containerHeight = container.clientHeight || window.innerHeight;
   camera = new THREE.PerspectiveCamera(
-    75,
+    presentMode ? 42 : 75, // A long lens keeps near and far banks the same size on a projector.
     containerWidth / containerHeight,
     0.01, // Near plane: zoom extremely close
     100000, // Far plane: see objects at extreme distances
   );
   camera.position.set(0.41, 572.94, 38.32); // AHB top-down view
-  const createdRenderer = await createGraphRenderer(rendererMode, { antialias: false }); // Disabled for performance
+  const quality = graphRenderQualityFor(presentMode);
+  const createdRenderer = await createGraphRenderer(rendererMode, { antialias: quality.antialias });
   if (!createdRenderer) {
     console.warn("[Graph3D] Renderer unavailable - skipping 3D init");
     return;
@@ -881,7 +660,7 @@ async function initThreeJS() {
   renderer = createdRenderer;
   renderer.xr.enabled = !(typeof navigator !== "undefined" && navigator.webdriver); // Keep XR off in automation
   renderer.setSize(containerWidth, containerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // Cap at 1.5 for performance
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.maxPixelRatio));
   container.appendChild(renderer.domElement);
   if (typeof window !== "undefined") {
     window.__debugScene = scene;
@@ -908,10 +687,12 @@ async function initThreeJS() {
         distance: camera.position.distanceTo(controls.target),
       });
     });
-    controls.addEventListener("start", () => {});
-    controls.addEventListener("end", () => {});
+    // A hand on the camera always wins over a narrated camera move.
+    controls.addEventListener("start", () => {
+      cameraTween = null;
+    });
     controls.target.set(cameraTarget.x, cameraTarget.y, cameraTarget.z);
-    if (savedSettings.camera) {
+    if (savedSettings.camera && !presentMode) {
       const cam = savedSettings.camera;
       camera.position.set(cam.position.x, cam.position.y, cam.position.z);
       controls.target.set(cam.target.x, cam.target.y, cam.target.z);
@@ -1170,27 +951,101 @@ async function exitVR() {
 }
 function fitCameraToEntities(preferredEntityIds: ReadonlySet<string> = new Set()) {
   if (!camera || !controls || entities.length === 0) return;
-  const preferredEntities = entities.filter((entity) => preferredEntityIds.has(entity.id));
-  const focusEntities = preferredEntities.length >= 2 ? preferredEntities : entities;
-  const box = new THREE.Box3();
-  focusEntities.forEach((entity) => {
-    box.expandByPoint(entity.position);
-  });
-  const center = new THREE.Vector3();
-  box.getCenter(center);
-  const size = new THREE.Vector3();
-  box.getSize(size);
-  const verticalFov = THREE.MathUtils.degToRad(camera.fov);
-  const verticalTangent = Math.tan(verticalFov / 2);
-  const horizontalTangent = verticalTangent * Math.max(camera.aspect, 0.1);
-  const projectedHeight = Math.hypot(size.y, size.z);
-  const fitWidth = size.x / (2 * horizontalTangent);
-  const fitHeight = projectedHeight / (2 * verticalTangent);
-  const distance = Math.max(fitWidth, fitHeight, 36) * 1.65;
-  const viewDirection = new THREE.Vector3(0, 1, 1).normalize();
-  camera.position.copy(center).addScaledVector(viewDirection, distance);
-  controls.target.copy(center);
+  const shot = presentMode ? overviewShot() : focusShot(preferredEntityIds);
+  if (!shot) return;
+  camera.position.copy(shot.position);
+  controls.target.copy(shot.target);
   controls.update();
+}
+/**
+ * A replayed graph frame names its jurisdiction but carries no position for it. Float the
+ * J-machine above the banks it settles, wherever the layout put them.
+ */
+function placeFloatingJMachines(): void {
+  if (entities.length === 0) return;
+  const box = new THREE.Box3().setFromPoints(entities.map((entity) => entity.position));
+  const center = box.getCenter(new THREE.Vector3());
+  // Clear the largest sphere and its label, so the J label never sits on a bank's name.
+  const clearance = Math.max(...entities.map((entity) => entity.mesh.scale.x)) + labelScale * 3 + 22;
+  for (const projection of mergedRuntimeGraph.jMachines) {
+    if (projection.selected.position) continue;
+    jMachines.get(projection.selected.name)?.position.set(center.x, box.max.y + clearance, center.z);
+  }
+}
+/**
+ * Presentation sizes follow the network's span, so a two-bank stage reads as large as a
+ * five-bank one. Labels are rebuilt only when the scale actually changes.
+ */
+function applyStageScale(): void {
+  const unit = stageUnit(entities.map((entity) => entity.position));
+  if (unit === stageScale && labelScale === stageLabelScale(unit)) return;
+  stageScale = unit;
+  labelScale = stageLabelScale(unit);
+  lastLabelUpdateTimeIndex = Number.NaN;
+  jMachines.forEach((group) => group.scale.setScalar(unit));
+}
+/** Presentation bar scale: one dollar scale across every part, sized to the stage unit. */
+function updatePresentationCapacityScale(): void {
+  if (!presentMode) {
+    presentationCapacityScale = null;
+    return;
+  }
+  const tokenIds = new Set<number>();
+  for (const replica of getTimeAwareReplicas().values()) {
+    for (const account of replica.state?.accounts?.values() ?? []) {
+      for (const tokenId of account?.state?.deltas?.keys() ?? []) tokenIds.add(Number(tokenId));
+    }
+  }
+  presentationCapacityScale = presentationCapacityScaleFor(
+    [...tokenIds].map((tokenId) => ({ tokenId, symbol: getTokenSymbol(tokenId), decimals: getTokenDecimals(tokenId) })),
+    stageScale,
+  );
+}
+/** Presentation: what each account holds, in words, above its bars. */
+function presentationAnnotation(): AccountAnnotationContext | null {
+  if (!presentMode || !XLN?.deriveDelta) return null;
+  const derive = XLN.deriveDelta;
+  return {
+    labelFor: (entityId) => String(mergedRuntimeGraph.nodes.find((node) => node.entityId === entityId)?.selected.label || getEntityShortName(entityId)),
+    formatAmount: (tokenId, amount) => formatStageAmount(amount, getTokenDecimals(tokenId)),
+    symbolOf: getTokenSymbol,
+    derive: (delta, isLeft) => derive(delta, isLeft),
+    lineHeight: 0.62 * labelScale,
+  };
+}
+/** Entity centres plus room for their labels, which are wider than the spheres. */
+function framedPoints(entityIds: ReadonlySet<string>, includeJMachine: boolean): THREE.Vector3[] {
+  const preferred = entities.filter((entity) => entityIds.has(entity.id));
+  const labelReach = 2.2 * labelScale * 2.2;
+  const points = (preferred.length >= 2 ? preferred : entities).flatMap((entity) => {
+    const radius = entity.mesh.scale.x;
+    return [
+      entity.position.clone().add(new THREE.Vector3(-labelReach, 0, 0)),
+      entity.position.clone().add(new THREE.Vector3(labelReach, radius + labelScale * 2.5, 0)),
+      entity.position.clone().add(new THREE.Vector3(0, -radius, 0)),
+      entity.position.clone().add(new THREE.Vector3(0, 0, radius)),
+      entity.position.clone().add(new THREE.Vector3(0, 0, -radius)),
+    ];
+  });
+  const jMachine = activeJMachine();
+  if (includeJMachine && jMachine && presentMode) {
+    // Box, the block that rises out of it, and the jurisdiction name to its right.
+    const unit = stageScale;
+    points.push(...[[0, 14], [-6, -6], [36, 0]].map(([x, y]) => jMachine.position.clone().add(new THREE.Vector3(x! * unit, y! * unit, 0))));
+  } else if (includeJMachine && jMachine) {
+    points.push(jMachine.position.clone().add(new THREE.Vector3(0, 10, 0)), jMachine.position.clone().add(new THREE.Vector3(0, -16, 0)));
+  }
+  return points;
+}
+function focusShot(entityIds: ReadonlySet<string>): CameraShot | null {
+  return frameGraphPoints(framedPoints(entityIds, false), camera, { padding: 1.65, minDistance: 36 });
+}
+/** The whole network plus its J-machine: the presentation's establishing shot. */
+function overviewShot(): CameraShot | null {
+  const points = framedPoints(new Set(), true);
+  const current = camera && controls ? camera.position.clone().sub(controls.target) : null;
+  const direction = presentationViewDirection(entities.map((entity) => entity.position), current);
+  return frameGraphPoints(points, camera, { padding: 1.08, minDistance: 50, direction });
 }
 function updateNetworkData() {
   if (!scene) return;
@@ -1256,9 +1111,18 @@ function updateNetworkData() {
     const isHub = top3Hubs.has(profile.entityId);
     createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub, currentReplicas);
   });
+  if (presentMode) applyStageScale();
+  placeFloatingJMachines();
   const graphSignature = [...mergedRuntimeGraph.sources.map((source) => source.runtimeId), ...mergedRuntimeGraph.nodes.map((node) => node.entityId), ...mergedRuntimeGraph.accounts.map((account) => account.accountId)].join("|");
-  if (!savedSettings.camera && graphSignature && graphSignature !== autoFittedGraphSignature) {
-    fitCameraToEntities(connectedRuntimeGraphEntityIds(mergedRuntimeGraph));
+  if (graphSignature && graphSignature !== autoFittedGraphSignature) {
+    // Presentation opens on the establishing shot, then lets directStep re-frame the current
+    // cue (or the overview) whenever the network grows. The dock keeps a saved camera.
+    if (presentMode) {
+      if (!autoFittedGraphSignature) fitCameraToEntities();
+      directedCueId = null;
+    } else if (!savedSettings.camera) {
+      fitCameraToEntities(connectedRuntimeGraphEntityIds(mergedRuntimeGraph));
+    }
     autoFittedGraphSignature = graphSignature;
   }
   if (connections.length > 0) {
@@ -1269,9 +1133,12 @@ function updateNetworkData() {
     selectedGraphEntityId = "";
   }
   updateGraphSelectionVisual();
+  updatePresentationCapacityScale();
   createConnections();
   applyNetworkMachineRuntimeHighlight();
-  createTransactionParticles();
+  const motion = currentStepMotion();
+  playStepMotion(motion);
+  directStep(motion);
 }
 function removeRuntimeHighlight(parent: THREE.Object3D): void {
   const existing = parent.getObjectByName("network-machine-runtime-highlight");
@@ -1285,7 +1152,9 @@ function removeRuntimeHighlight(parent: THREE.Object3D): void {
 }
 function applyNetworkMachineRuntimeHighlight(): void {
   const step = $networkMachineRuntime.selectedStep;
-  const activeRuntimeId = step?.activeRuntimeId || "";
+  // Runtime shells tell runtimes apart while debugging a merged network; a presentation
+  // replays one network, where a shell on every node is only noise.
+  const activeRuntimeId = presentMode ? "" : step?.activeRuntimeId || "";
   const activeColor = step?.activeRuntimeColor || "#ffffff";
   for (const entity of entities) {
     removeRuntimeHighlight(entity.mesh);
@@ -1312,10 +1181,7 @@ function clearNetwork() {
   entities = [];
   connections.forEach(detachConnectionVisuals);
   connections = [];
-  jBlockHistory.forEach((block) => detachFromGraphWorld(block.container));
-  jBlockHistory = [];
-  particles.forEach((particle) => detachFromGraphWorld(particle.mesh));
-  particles = [];
+  clearMotionEffects();
 }
 function applyForceDirectedLayout(profiles: GraphEntityProfile[], connectionMap: Map<string, Set<string>>) {
   if (!forceLayoutEnabled) {
@@ -1380,101 +1246,199 @@ function createConnections() {
       }
     }
   }
-  buildConnectionIndexMap();
 }
-function buildConnectionIndexMap() {
-  connectionIndexMap.clear();
-  connections.forEach((conn, index) => {
-    const key1 = `${conn.from}->${conn.to}`;
-    const key2 = `${conn.to}->${conn.from}`;
-    connectionIndexMap.set(key1, index);
-    connectionIndexMap.set(key2, index);
-  });
+// ---------------------------------------------------------------------------------------
+// Step motion: replay and live feed the same source; one function plays it.
+// ---------------------------------------------------------------------------------------
+const MOTION_FLOW_LIMIT = 24;
+/** Replay: the selected step's motion. Live: the change since the last projected network. */
+function currentStepMotion(): NetworkStepMotion | null {
+  const state = $networkMachineRuntime;
+  if (state.selectedStep) {
+    liveMotionBaseline = null;
+    return state.motion;
+  }
+  return liveStepMotion(graphProjections);
 }
-function createTransactionParticles() {
-  currentFrameActivity = {
-    activeEntities: new Set(),
-    incomingFlows: new Map(),
-    outgoingFlows: new Map(),
-  };
-  particles.forEach((particle) => detachFromGraphWorld(particle.mesh));
-  particles = [];
-  const timeIndex = $runtimeFrameTimeIndex;
-  if (!($runtimeFrameTimeIndex === -1) && $runtimeFrameHistory && timeIndex >= 0) {
-    const currentFrame = $runtimeFrameHistory[timeIndex];
-    const entityInputs = currentFrame?.runtimeInput?.entityInputs || [];
-    if (entityInputs.length > 0) {
-      entityInputs.forEach((entityInput) => {
-        const processingEntityId = entityInput.entityId;
-        currentFrameActivity.activeEntities.add(processingEntityId);
-        if (entityInput.entityTxs) {
-          entityInput.entityTxs.forEach((tx) => {
-            const graphTx = graphTransactionOf(tx);
-            if (graphTx.type === "accountInput" && graphTx.data?.fromEntityId && graphTx.data.toEntityId) {
-              const fromEntityId = graphTx.data.fromEntityId;
-              const toEntityId = graphTx.data.toEntityId;
-              triggerEntityInputStrike(fromEntityId, toEntityId);
-              if (!currentFrameActivity.outgoingFlows.has(fromEntityId)) {
-                currentFrameActivity.outgoingFlows.set(fromEntityId, []);
-              }
-              currentFrameActivity.outgoingFlows.get(fromEntityId)!.push(toEntityId);
-              createDirectionalLightning(fromEntityId, toEntityId, "outgoing", graphTx.data.accountTx);
-              if (!currentFrameActivity.incomingFlows.has(toEntityId)) {
-                currentFrameActivity.incomingFlows.set(toEntityId, []);
-              }
-              currentFrameActivity.incomingFlows.get(toEntityId)!.push(fromEntityId);
-              triggerEntityActivity(fromEntityId);
-              triggerEntityActivity(toEntityId);
-            } else if (graphTx.type && ["r2c", "reserve_to_collateral", "deposit_reserve", "withdraw_reserve"].includes(graphTx.type)) {
-              createBroadcastRipple(processingEntityId, graphTx.type);
-            } else if (graphTx.type === "payFromReserve" || graphTx.kind === "payFromReserve") {
-              const fromEntityId = processingEntityId;
-              const toEntityId = graphTx.targetEntityId || graphTx.data?.targetEntityId;
-              if (toEntityId) {
-                addTxToJMachine(fromEntityId);
-                triggerEntityActivity(fromEntityId);
-                triggerEntityActivity(toEntityId);
-              }
-            }
-          });
-        }
-      });
-    }
+function liveStepMotion(projections: RuntimeGraphProjection[]): NetworkStepMotion | null {
+  const signature = projections.map((projection) => `${projection.source.runtimeId}:${projection.source.height}`).sort().join("|");
+  const baseline = liveMotionBaseline;
+  if (baseline?.signature === signature) return null;
+  liveMotionBaseline = { signature, projections };
+  if (!baseline) return null;
+  return deriveNetworkStepMotion({ key: `live:${signature}`, previous: baseline.projections, current: projections, activity: [] });
+}
+/** A packet should land before the next step starts, at any playback speed. */
+function motionDurationMs(): number {
+  return Math.min(1500, Math.max(320, 950 / $networkMachineDemo.speed));
+}
+function formatMotionAmount(tokenId: number | undefined, amount: bigint | undefined): string | null {
+  if (tokenId === undefined || amount === undefined) return null;
+  const unit = 10n ** BigInt(getTokenDecimals(tokenId));
+  const value = Number(amount / unit) + Number(amount % unit) / Number(unit);
+  return `${new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value)} ${getTokenSymbol(tokenId)}`;
+}
+function flowLabel(flow: NetworkMotionFlow): string | null {
+  if (flow.kind === "ack" || flow.kind === "frame" || flow.kind === "account" || flow.kind === "j_claim") return null;
+  // A swap is two amounts changing hands at once; one number would hide the other leg.
+  if (flow.swapLegs) return `${formatMotionAmount(flow.swapLegs.give.tokenId, flow.swapLegs.give.amount)} ⇄ ${formatMotionAmount(flow.swapLegs.want.tokenId, flow.swapLegs.want.amount)}`;
+  // An order without a fill moves nothing yet: name it, never its limit amounts.
+  if (flow.kind === "swap") return "Order";
+  return formatMotionAmount(flow.tokenId, flow.amount) ?? MOTION_KIND_STYLE[flow.kind].label;
+}
+function resolveMotionEndpoint(endpoint: MotionEndpoint): MotionAnchor | null {
+  if (endpoint.kind === "jmachine") {
+    const jMachine = activeJMachine();
+    return jMachine ? { position: jMachine.position, radius: presentMode ? 4 * stageScale : 6 } : null;
+  }
+  const entity = entities.find((candidate) => candidate.id === endpoint.entityId);
+  return entity ? { position: entity.position, radius: entity.mesh.scale.x } : null;
+}
+function spawnPacket(from: MotionEndpoint, to: MotionEndpoint, style: MotionStyle, label: string | null, startMs: number, durationMs: number): void {
+  if (!resolveMotionEndpoint(from) || !resolveMotionEndpoint(to)) return;
+  // Presentation frames the whole network from further away; packets and their amounts
+  // must stay readable from the back of the room, so they follow the stage scale.
+  const scale = presentMode ? stagePacketScale(stageScale) : 1;
+  const { group, tail } = createMotionPacket({ ...style, radius: style.radius * scale }, label, 1.15 * labelScale);
+  graphWorld.add(group);
+  graphWorld.add(tail);
+  motionEffects.push({ type: "packet", group, tail, from, to, startMs, durationMs });
+}
+function spawnRipple(entityId: string, kind: "reserve" | "collateral" | "dispute", startMs: number, durationMs: number): void {
+  const entity = entities.find((candidate) => candidate.id === entityId);
+  if (!entity) return;
+  const mesh = createMotionRipple(kind);
+  graphWorld.add(mesh);
+  motionEffects.push({ type: "ripple", mesh, at: { kind: "entity", entityId }, startMs, durationMs, maxScale: entity.mesh.scale.x * 2.5 + 3 });
+}
+/** Finality spreads from the J-machine as a ring scaled to the network it settles. */
+function spawnFinalityRing(blocks: number, startMs: number, durationMs: number): void {
+  const box = new THREE.Box3().setFromPoints(entities.map((entity) => entity.position));
+  const span = box.getSize(new THREE.Vector3()).length();
+  const mesh = createMotionRipple("finality");
+  graphWorld.add(mesh);
+  motionEffects.push({ type: "ripple", mesh, at: { kind: "jmachine" }, startMs, durationMs: durationMs * (1.4 + Math.min(blocks, 4) * 0.15), maxScale: Math.max(12, span * 0.55) });
+}
+function resetFrameActivity(motion: NetworkStepMotion): void {
+  currentFrameActivity = { activeEntities: new Set(), incomingFlows: new Map(), outgoingFlows: new Map() };
+  for (const flow of motion.flows) {
+    if (flow.kind === "ack") continue;
+    currentFrameActivity.activeEntities.add(flow.fromEntityId);
+    currentFrameActivity.activeEntities.add(flow.toEntityId);
+    currentFrameActivity.outgoingFlows.set(flow.fromEntityId, [...(currentFrameActivity.outgoingFlows.get(flow.fromEntityId) ?? []), flow.toEntityId]);
+    currentFrameActivity.incomingFlows.set(flow.toEntityId, [...(currentFrameActivity.incomingFlows.get(flow.toEntityId) ?? []), flow.fromEntityId]);
+    triggerEntityActivity(flow.fromEntityId);
+    triggerEntityActivity(flow.toEntityId);
   }
 }
-function createDirectionalLightning(fromEntityId: string, toEntityId: string, direction: "incoming" | "outgoing", accountTx: GraphTransactionLike | undefined) {
-  const key = `${fromEntityId}->${toEntityId}`;
-  const connectionIndex = connectionIndexMap.get(key) ?? connectionIndexMap.get(`${toEntityId}->${fromEntityId}`) ?? -1;
-  if (connectionIndex === -1) return;
-  const connection = connections[connectionIndex];
-  if (!connection) return;
-  const bolt = createDirectionalLightningMesh(connection, accountTx);
-  graphWorld.add(bolt);
-  const amount = accountTx?.data?.amount;
-  particles.push({
-    mesh: bolt,
-    connectionIndex,
-    progress: 0,
-    speed: 0.02, // Full 3-phase cycle in ~2.5s
-    type: accountTx?.type || "unknown",
-    ...(typeof amount === 'bigint' ? { amount } : {}),
-    direction,
-  });
-}
-function createBroadcastRipple(entityId: string, txType: string) {
-  const entity = entities.find((e) => e.id === entityId);
-  if (!entity) return;
-  const ripple = createBroadcastRippleMesh(entity.position, txType);
-  graphWorld.add(ripple);
+function playJMotion(motion: NetworkStepMotion, startMs: number, durationMs: number): void {
+  const jMachine = activeJMachine();
+  if (!jMachine) return;
+  for (const entityId of motion.jSubmissions) {
+    spawnPacket({ kind: "entity", entityId }, { kind: "jmachine" }, MOTION_KIND_STYLE.j_submit, MOTION_KIND_STYLE.j_submit.label, startMs, durationMs);
+  }
+  if (motion.jFinalized === 0 || !broadcastEnabled) return;
+  const group = createMotionBlock(motion.jFinalized > 1 ? `${motion.jFinalized} blocks final` : "Block final");
+  group.scale.setScalar(stageScale);
+  graphWorld.add(group);
+  motionEffects.push({ type: "block", group, startMs, durationMs: durationMs * 2, rise: 22 * stageScale });
+  spawnFinalityRing(motion.jFinalized, startMs, durationMs);
   gridPulseIntensity = 1.0;
-  particles.push({
-    mesh: ripple,
-    connectionIndex: -1, // -1 indicates broadcast ripple (not connection-based)
-    progress: 0,
-    speed: 0.05,
-    type: `ripple_${txType}`,
-    amount: 0n, // No amount for ripples
-  });
+  const landed = new Set(motion.pulses.filter((pulse) => pulse.kind !== "dispute").map((pulse) => pulse.entityId));
+  for (const entityId of landed) {
+    spawnPacket({ kind: "jmachine" }, { kind: "entity", entityId }, MOTION_KIND_STYLE.j_finality, null, startMs + durationMs * 0.35, durationMs);
+  }
+}
+function playStepMotion(motion: NetworkStepMotion | null): void {
+  if (!motion || motion.key === lastPlayedMotionKey || !graphWorld) return;
+  lastPlayedMotionKey = motion.key;
+  const startMs = performance.now();
+  const durationMs = motionDurationMs();
+  resetFrameActivity(motion);
+  for (const flow of motion.flows.slice(0, MOTION_FLOW_LIMIT)) {
+    const isAck = flow.kind === "ack";
+    spawnPacket({ kind: "entity", entityId: flow.fromEntityId }, { kind: "entity", entityId: flow.toEntityId }, MOTION_KIND_STYLE[flow.kind], flowLabel(flow), startMs, isAck ? durationMs * 0.75 : durationMs);
+  }
+  for (const pulse of motion.pulses) spawnRipple(pulse.entityId, pulse.kind, startMs, durationMs * 1.4);
+  playJMotion(motion, startMs, durationMs);
+}
+function animateMotionEffects(nowMs: number): void {
+  let removed = false;
+  for (let index = motionEffects.length - 1; index >= 0; index -= 1) {
+    const effect = motionEffects[index]!;
+    if (advanceMotionEffect(effect, nowMs, resolveMotionEndpoint)) continue;
+    motionEffectObjects(effect).forEach(detachFromGraphWorld);
+    motionEffects.splice(index, 1);
+    removed = true;
+  }
+  if (removed) motionEffects = motionEffects;
+}
+function clearMotionEffects(): void {
+  motionEffects.forEach((effect) => motionEffectObjects(effect).forEach(detachFromGraphWorld));
+  motionEffects = [];
+}
+// ---------------------------------------------------------------------------------------
+// Step direction: the active cue's camera and focus.
+// ---------------------------------------------------------------------------------------
+const CAMERA_TWEEN_MS = 1400;
+function startCameraTween(to: CameraShot | null): void {
+  if (!to || !camera || !controls) return;
+  cameraTween = { from: currentCameraShot(camera, controls.target), to, startMs: performance.now(), durationMs: CAMERA_TWEEN_MS };
+}
+/**
+ * A cue with a camera flies there. In presentation, a cue without one returns to the
+ * establishing shot: the audience keeps the whole network and its J-machine in view, and
+ * the focus is carried by dimming. Only a cue change (or a growing network) moves the
+ * camera, so stepping inside one narration never yanks the view.
+ */
+function directStep(motion: NetworkStepMotion | null): void {
+  const step = $networkMachineRuntime.selectedStep;
+  const cue = step ? activeNetworkMachineCue(step.cues) : null;
+  graphFocus = resolveNetworkCueFocus(cue, step ? motion : null);
+  const cueId = cue?.id ?? "";
+  if (cueId === directedCueId) return;
+  directedCueId = cueId;
+  if (cue?.camera) {
+    startCameraTween(shotFromCameraCue(cue.camera, camera.fov));
+    return;
+  }
+  if (presentMode) startCameraTween(overviewShot());
+}
+function applyGraphFocus(): void {
+  const focus = graphFocus;
+  if (!focus) {
+    litEntityIds = null;
+    if (!appliedFocusKey) return;
+    appliedFocusKey = "";
+    entities.forEach((entity) => setGraphObjectDimmed(entity.mesh, false));
+    connections.forEach((connection) => {
+      setGraphObjectDimmed(connection.progressBars, false);
+      connection.mempoolBoxes.forEach((box) => setGraphObjectDimmed(box, false));
+    });
+    clearRouteHighlight();
+    if (availableRoutes.length > 0) highlightRoutePath(availableRoutes[selectedRouteIndex]);
+    return;
+  }
+  appliedFocusKey = focus.key;
+  const litAccounts = new Set(focus.accountIds);
+  const litEntities = new Set(focus.entityIds);
+  if (focus.includeEntityAccounts) {
+    for (const connection of connections) {
+      if (!focus.entityIds.has(connection.from) && !focus.entityIds.has(connection.to)) continue;
+      litAccounts.add(canonicalAccountId(connection.from, connection.to));
+      litEntities.add(connection.from).add(connection.to);
+    }
+  }
+  litEntityIds = litEntities;
+  for (const entity of entities) setGraphObjectDimmed(entity.mesh, !litEntities.has(entity.id));
+  for (const connection of connections) {
+    const lit = litAccounts.has(canonicalAccountId(connection.from, connection.to));
+    const line = connection.line.material as THREE.LineDashedMaterial;
+    line.opacity = lit ? 0.95 : 0.05;
+    line.color.setHex(lit ? 0x7dd3fc : 0x444444);
+    setGraphObjectDimmed(connection.progressBars, !lit);
+    connection.mempoolBoxes.forEach((box) => setGraphObjectDimmed(box, !lit));
+  }
 }
 function updateConnectionsForEntity(entityId: string) {
   connections.forEach((conn) => {
@@ -1522,6 +1486,9 @@ function createConnectionLine(fromEntity: GraphEntityData, toEntity: GraphEntity
       theme: settings.theme,
       barsMode,
       portfolioScale: settings.portfolioScale || 5000,
+      barRadiusScale: presentMode ? stageBarRadiusScale(stageScale) : 1,
+      capacityScale: presentationCapacityScale,
+      annotation: presentationAnnotation(),
       getEntitySize: getEntitySizeForToken,
     }),
   );
@@ -1538,24 +1505,57 @@ function createAccountBarsForConnection(fromEntity: GraphEntityData, toEntity: G
     theme: settings.theme,
     barsMode,
     portfolioScale: settings.portfolioScale || 5000,
+    barRadiusScale: presentMode ? stageBarRadiusScale(stageScale) : 1,
+    capacityScale: presentationCapacityScale,
+    annotation: presentationAnnotation(),
     getEntitySize: getEntitySizeForToken,
   });
 }
-function entityLabelContent(entityId: string) {
+/** Presentation: entities the current narration is about; null when nothing is dimmed. */
+let litEntityIds: ReadonlySet<string> | null = null;
+function entityLabelContent(entityId: string): EntityLabelContent {
   const projectedLabel = String(mergedRuntimeGraph.nodes.find((node) => node.entityId === entityId)?.selected.label || "").trim();
   const entityName = projectedLabel && projectedLabel.toLowerCase() !== entityId.toLowerCase() ? projectedLabel : getEntityShortName(entityId);
   const currentReplicas = getTimeAwareReplicas();
   const replica = findReplicaForEntity(entityId, currentReplicas);
   const flag = getGraphEntityFlag(replica?.signerId);
-  let balanceStr = "";
-  if (replica?.state?.reserves) {
-    const reserve = graphReserveValue(replica.state.reserves, String(selectedTokenId));
-    balanceStr = formatGraphReserveBadge(reserve, getTokenDecimals(selectedTokenId), getTokenSymbol(selectedTokenId));
-  }
+  const reserve = replica?.state?.reserves ? graphReserveValue(replica.state.reserves, String(selectedTokenId)) : 0n;
+  if (presentMode) return presentationLabelContent(entityId, entityName, reserve);
+  const balanceStr = replica?.state?.reserves ? formatGraphReserveBadge(reserve, getTokenDecimals(selectedTokenId), getTokenSymbol(selectedTokenId)) : "";
   return {
     flag,
     labelText: entityName + balanceStr,
     key: `${entityName}|${flag}|${balanceStr}|${labelScale}|${isVRActive ? "vr" : "screen"}`,
+  };
+}
+/**
+ * Presentation label: "Alice" over "reserve 2.0M" and, on the step that moved it, the change
+ * since the R-frame before ("+200K"). A bank with no reserve shows its name only.
+ */
+let previousReserves: { frames: unknown; tokenId: number; reserves: Map<string, bigint> } | null = null;
+/** Reserves one R-frame before the selected step, read once per step (labels redraw every frame). */
+function previousReserveOf(entityId: string): bigint | undefined {
+  const frames = $networkMachineRuntime.previousFrames;
+  if (frames.size === 0) return undefined;
+  if (previousReserves?.frames !== frames || previousReserves.tokenId !== selectedTokenId) {
+    previousReserves = { frames, tokenId: selectedTokenId, reserves: reservesByEntity(frames, selectedTokenId) };
+  }
+  return previousReserves.reserves.get(entityId);
+}
+function presentationLabelContent(entityId: string, entityName: string, reserve: bigint): EntityLabelContent {
+  const decimals = getTokenDecimals(selectedTokenId);
+  const previous = previousReserveOf(entityId);
+  const change = previous === undefined ? 0n : reserve - previous;
+  const dimmed = litEntityIds !== null && !litEntityIds.has(entityId);
+  const detail = reserve > 0n || change !== 0n
+    ? { text: `reserve ${formatStageAmount(reserve, decimals)}`, ...(change !== 0n ? { change: { text: formatStageChange(change, decimals), positive: change > 0n } } : {}) }
+    : undefined;
+  return {
+    flag: "",
+    labelText: entityName,
+    ...(detail ? { detail } : {}),
+    ...(dimmed ? { dimmed } : {}),
+    key: `${entityName}|${detail?.text ?? ""}|${detail?.change?.text ?? ""}|${dimmed}|${labelScale}`,
   };
 }
 function updateMempoolIndicators() {
@@ -1618,11 +1618,15 @@ function updateMempoolIndicators() {
 function updateEntityLabels() {
   if (!camera) return;
   const currentReplicas = getTimeAwareReplicas();
-  const currentTimeIndex = get(runtimeFrameTimeIndex);
+  // Either timeline moving (local Time Machine or NetworkMachine step) refreshes labels.
+  const currentTimeIndex = get(runtimeFrameTimeIndex) * 100_000 + $networkMachineRuntime.selectedStepIndex;
   const forceRecreateLabels = currentTimeIndex !== lastLabelUpdateTimeIndex;
   if (forceRecreateLabels) {
     lastLabelUpdateTimeIndex = currentTimeIndex;
   }
+  // Presentation: banks below the network's middle hang their names under the sphere, where
+  // no account line rises through them.
+  const middleY = entities.reduce((sum, entity) => sum + entity.position.y, 0) / Math.max(1, entities.length);
   entities.forEach((entity) => {
     const content = entityLabelContent(entity.id);
     const contentChanged = entity.label?.userData["contentKey"] !== content.key;
@@ -1641,10 +1645,12 @@ function updateEntityLabels() {
       graphWorld.remove(entity.label);
       entity.mesh.add(entity.label);
     }
-    positionEntityLabel(entity.label, entity.mesh.scale.x);
+    positionEntityLabel(entity.label, entity.mesh.scale.x, presentMode && entity.position.y < middleY - 1);
     const replica = findReplicaForEntity(entity.id, currentReplicas);
     const reserveAmount = graphReserveValue(replica?.state?.reserves, String(selectedTokenId));
     if (forceRecreateLabels) {
+      // Restore focus dimming first: the colours below are the base the next dim starts from.
+      setGraphObjectDimmed(entity.mesh, false);
       const material = entity.mesh.material as THREE.MeshLambertMaterial;
       if (material && !entity.mesh.userData["isFed"]) {
         material.transparent = false;
@@ -1677,7 +1683,6 @@ function animate() {
     animationId = requestAnimationFrame(animate);
   }
   animateCallCount++;
-  animateEntityInputStrikes();
   for (const grab of vrGrabs.values()) {
     const controllerWorldPosition = new THREE.Vector3().setFromMatrixPosition(grab.controller.matrixWorld);
     const controllerWorldRotation = new THREE.Matrix4().extractRotation(grab.controller.matrixWorld);
@@ -1737,6 +1742,9 @@ function animate() {
     camera.position.z = target.z + newZ;
     camera.lookAt(target);
   }
+  if (cameraTween && camera && controls && advanceCameraTween(cameraTween, performance.now(), camera, controls.target)) {
+    cameraTween = null;
+  }
   if (controls) {
     controls.update();
   } else {
@@ -1748,7 +1756,9 @@ function animate() {
   animateEntityPulses();
   updateEntityLabels();
   updateMempoolIndicators();
-  animateParticles();
+  applyGraphFocus();
+  if (presentMode && camera) jMachines.forEach((group) => keepJMachineLabelBeside(group, camera));
+  animateMotionEffects(performance.now());
   if (gridPulseIntensity > 0 && gridHelper) {
     gridPulseIntensity *= 0.95; // Exponential decay
     if (gridPulseIntensity < 0.01) gridPulseIntensity = 0;
@@ -1813,52 +1823,6 @@ function applyCollisionRepulsion() {
     needsConnectionRebuild = false;
     lastConnectionRebuild = now;
   }
-}
-function animateParticles() {
-  particles.forEach((particle, index) => {
-    particle.progress += particle.speed;
-    const maxProgress = 1.0;
-    if (particle.progress >= maxProgress) {
-      graphWorld.remove(particle.mesh);
-      particles.splice(index, 1);
-      return;
-    }
-    if (particle.connectionIndex === -1) {
-      const startRadius = 0.5;
-      const maxRadius = 5.0;
-      const currentRadius = startRadius + (maxRadius - startRadius) * particle.progress;
-      particle.mesh.scale.setScalar(currentRadius / startRadius);
-      const material = particle.mesh.material as THREE.MeshLambertMaterial;
-      material.opacity = 0.8 * (1 - particle.progress);
-      return;
-    }
-    const connection = connections[particle.connectionIndex];
-    if (!connection) return;
-    const material = particle.mesh.material as THREE.MeshLambertMaterial;
-    if (particle.progress < 0.45) {
-      const phase1Progress = particle.progress / 0.45; // 0 to 1
-      particle.mesh.scale.y = phase1Progress;
-      const fadeIn = Math.min(1, phase1Progress * 3);
-      material.opacity = 0.95 * fadeIn;
-      material.emissiveIntensity = 2.5 * fadeIn;
-      material.color.setHex(0x00ffff);
-    } else if (particle.progress < 0.55) {
-      const phase2Progress = (particle.progress - 0.45) / 0.1; // 0 to 1
-      particle.mesh.scale.y = 1.0;
-      material.opacity = 1.0;
-      material.emissiveIntensity = 4.0 * Math.sin(phase2Progress * Math.PI); // Peak at midpoint
-      const flashBrightness = Math.sin(phase2Progress * Math.PI);
-      material.color.setRGB(flashBrightness * 0.5, flashBrightness, 1.0);
-    } else {
-      const phase3Progress = (particle.progress - 0.55) / 0.45; // 0 to 1
-      particle.mesh.scale.y = 1.0;
-      const fadeOut = Math.max(0, 1 - phase3Progress);
-      material.opacity = 0.9 * fadeOut;
-      material.emissiveIntensity = 2.0 * fadeOut;
-      const dimFactor = 1 - phase3Progress * 0.5;
-      material.color.setRGB(0, 0.6 * dimFactor, 1.0 * dimFactor);
-    }
-  });
 }
 function animateEntityPulses() {
   const currentTime = Date.now();
@@ -1959,50 +1923,6 @@ function triggerEntityActivity(entityId: string) {
   if (entity) {
     entity.lastActivity = Date.now();
   }
-}
-function animateEntityInputStrikes() {
-  if (!scene) return;
-  const now = performance.now();
-  for (let i = entityInputStrikes.length - 1; i >= 0; i--) {
-    const strike = entityInputStrikes[i];
-    if (!strike) continue;
-    const elapsed = now - strike.startTime;
-    const progress = Math.min(elapsed / strike.duration, 1.0);
-    const material = strike.line.material as THREE.LineBasicMaterial;
-    material.opacity = 1.0 - progress;
-    if (progress >= 1.0) {
-      graphWorld.remove(strike.line);
-      strike.line.geometry.dispose();
-      material.dispose();
-      entityInputStrikes.splice(i, 1);
-    }
-  }
-}
-function triggerEntityInputStrike(fromEntityId: string, toEntityId: string) {
-  if (!scene || fromEntityId === toEntityId) {
-    if (fromEntityId === toEntityId) {
-    }
-    return;
-  }
-  const fromEntity = entities.find((e) => e.id === fromEntityId);
-  const toEntity = entities.find((e) => e.id === toEntityId);
-  if (!fromEntity || !toEntity) {
-    return;
-  }
-  const geometry = new THREE.BufferGeometry().setFromPoints([fromEntity.position.clone(), toEntity.position.clone()]);
-  const material = new THREE.LineBasicMaterial({
-    color: 0x00ffff, // Cyan
-    transparent: true,
-    opacity: 1.0,
-    linewidth: 2,
-  });
-  const line = new THREE.Line(geometry, material);
-  graphWorld.add(line);
-  entityInputStrikes.push({
-    line,
-    startTime: performance.now(),
-    duration: 100, // 100ms flash
-  });
 }
 function enforceSpacingConstraints() {
   let anyAdjusted = true;
@@ -2524,14 +2444,17 @@ function updateAvailableTokens() {
   }
 }
 let lastLabelUpdateTimeIndex = -999; // Track for label updates on frame change
+const PRESENTATION_MIN_ENTITY_SIZE = 2.2;
 function getEntitySizeForToken(entityId: string, tokenId: number): number {
-  return getGraphEntitySizeForToken({
+  const size = getGraphEntitySizeForToken({
     replicas: getTimeAwareReplicas(),
     entityId,
     tokenId,
     tokenDecimals: getTokenDecimals(tokenId),
     sizeMultiplier: entitySizeMultiplier,
   });
+  // Reserves still scale the sphere; a credit-only bank just never shrinks to a dot.
+  return presentMode ? Math.max(PRESENTATION_MIN_ENTITY_SIZE * stageScale, size) : size;
 }
 function checkEntityHasReserves(entityId: string): boolean {
   return graphEntityHasReserves(getTimeAwareReplicas(), entityId);
@@ -2624,7 +2547,7 @@ function handleVrAutoRotateClick(): void {
   bind:container
   {showMiniPanel} {miniPanelEntityId} {miniPanelEntityName} {miniPanelPosition} {runtimeFrameEnv} {runtimeFrameHistory} {runtimeFrameTimeIndex} {showFpsOverlay}
   {renderFps} {frameTime}
-  entityCount={entities.length} connectionCount={connections.length} particleCount={particles.length}
+  entityCount={entities.length} connectionCount={connections.length} particleCount={motionEffects.length} {presentMode}
   {barsMode} {isVRActive} {tooltip} {dualTooltip}
   runtimeScope={$runtimeGraphScope} runtimeScopeOptions={graphRuntimeOptions} canonicity={$runtimeGraphCanonicity} sourceCount={mergedRuntimeGraph.sources.length}
   desyncCount={graphDesyncCount} projectionError={graphProjectionError} runtimeNodeLabels={mergedRuntimeGraph.nodes.map((node) => node.selected.label)} timelineRuntimeId={$networkMachineRuntime.selectedStep?.activeRuntimeId ?? ''}

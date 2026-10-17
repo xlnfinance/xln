@@ -678,7 +678,10 @@ fn manifest_bytes(
         })
         .collect::<Result<Vec<_>, EntityCheckpointProjectionError>>()?;
     let bytes = crate::transport::msgpack::encode_framed(&object([
-        ("schemaVersion", Value::Number(5_u64.into())),
+        (
+            "schemaVersion",
+            Value::Number(crate::storage::STORAGE_SCHEMA_VERSION.into()),
+        ),
         ("fields", Value::Array(fields)),
         ("trees", Value::Array(trees)),
     ]))?;

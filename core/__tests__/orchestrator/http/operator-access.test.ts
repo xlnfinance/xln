@@ -98,7 +98,6 @@ describe('operator access', () => {
       '/api/debug/relay',
       '/api/debug/events',
       '/api/debug/incidents',
-      '/api/credit/request',
       '/api/runtime-import',
       '/api/control/p2p/stop',
     ]) {

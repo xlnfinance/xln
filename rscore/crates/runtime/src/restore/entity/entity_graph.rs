@@ -15,7 +15,7 @@ use crate::{
 
 use super::entity_tree::{EntityTreeRestoreError, hydrate_entity_tree};
 
-const STORAGE_SCHEMA_VERSION: u64 = 5;
+use crate::storage::STORAGE_SCHEMA_VERSION;
 const MAX_ENTITY_STORAGE_VALUE_BYTES: usize = 10_000;
 const ENTITY_PATH_TAGS: &[u8] = &[0x21, 0x36, 0x37, 0x38];
 
@@ -423,7 +423,8 @@ mod tests {
 
     #[test]
     fn checkpoint_projection_selects_owner_after_multi_entity_restart() {
-        let value = serde_json::json!({"schemaVersion":5,"fields":[],"trees":[]});
+        let value =
+            serde_json::json!({"schemaVersion":STORAGE_SCHEMA_VERSION,"fields":[],"trees":[]});
         let canonical = crate::canonical_value_from_tagged_json(&value).unwrap();
         let bytes = crate::encode_storage_payload(&canonical).unwrap();
         let rows = [0x11, 0x22]

@@ -17,10 +17,9 @@
 
 import type { RuntimeReplica } from '../../runtime/types';
 import { defaultAccountDisputeConfigForParties } from '../../account/config/dispute-config';
-import type { EntityInput } from '../../entity/types';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
-import { getProcess, usd, snap, assertRuntimeIdle, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, setScenarioStorageEnabled } from '../harness/helpers';
-import { bindScenarioJReplica, ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter, isScenarioJAdapterMissingError, resolveScenarioBoardSigner } from '../harness/boot';
+import { getProcess, usd, assertRuntimeIdle, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, setScenarioStorageEnabled } from '../harness/helpers';
+import { bindScenarioJReplica, ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, DEMO_JURISDICTION_NAME, getScenarioJAdapter, isScenarioJAdapterMissingError, resolveScenarioBoardSigner } from '../harness/boot';
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { isLeftEntity } from '../../account/utils';
 import { ethers } from 'ethers';
@@ -31,46 +30,13 @@ import { htlcRouteConvergenceCycleBudget } from './test-economy';
 import { readEntityFrameEventMessages } from '../../entity/frame-events';
 import { quoteHtlcPaymentRoute } from '../../pathfinding/htlc-quote';
 import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
+import { announce, tell } from '../harness/narration';
+import { AHB_ACCOUNTS, AHB_PAYMENTS, AHB_SETUP } from '../consensus/ahb-story';
+import { LOCK_PAYMENTS, LOCK_REBALANCE, LOCK_ROUTES, LOCK_SETUP } from './lock-ahb-story';
 
 const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(10_000_000);
 const SIGNER_PREFUND = usd(1_000_000);
-
-// Scenario transition wrapper: records a snapshot and optionally processes inputs.
-// This version accepts:
-// - env, title, opts (required)
-// - Optional 4th param: either EntityInput[] OR {expectedSolvency: bigint} to merge into opts
-async function pushSnapshot(
-  env: RuntimeReplica,
-  title: string,
-  opts: {
-    title?: string;
-    what?: string;
-    why?: string;
-    tradfiParallel?: string;
-    keyMetrics?: string[];
-    expectedSolvency?: bigint;
-    description?: string;
-  },
-  fourthArg?: EntityInput[] | { expectedSolvency?: bigint }
-): Promise<void> {
-  const process = await getProcess();
-
-  // Handle 4th arg: can be inputs array OR extra solvency opts
-  let inputs: EntityInput[] | undefined;
-  if (Array.isArray(fourthArg)) {
-    inputs = fourthArg;
-  } else if (fourthArg && typeof fourthArg === 'object' && 'expectedSolvency' in fourthArg) {
-    // Merge expectedSolvency into opts
-    opts = { ...opts, expectedSolvency: fourthArg.expectedSolvency };
-  }
-
-  snap(env, title, opts);
-  await process(env, inputs);
-}
-
-
-
 
 export async function lockAhb(env: RuntimeReplica): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'HTLC AHB');
@@ -96,7 +62,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     try {
       jadapter = getScenarioJAdapter(env);
       jurisdiction = createJurisdictionConfig(
-        env.activeJurisdiction || 'AHB Demo',
+        env.activeJurisdiction || DEMO_JURISDICTION_NAME,
         jadapter.addresses.depository,
         jadapter.addresses.entityProvider,
       );
@@ -104,7 +70,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       if (!isScenarioJAdapterMissingError(error)) throw error;
       // No jadapter attached — self-boot (browser path or direct CLI)
       jadapter = await ensureJAdapter(env);
-      const jReplicaName = 'AHB Demo';
+      const jReplicaName = DEMO_JURISDICTION_NAME;
       bindScenarioJReplica(
         env,
         createJReplica(env, jReplicaName, jadapter.addresses.depository),
@@ -118,17 +84,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       );
     }
 
-    // Define total system solvency - $10M minted to Hub
-    const TOTAL_SOLVENCY = usd(10_000_000);
-
-    snap(env, 'Jurisdiction Machine Deployed', {
-      description: 'Frame 0: Clean Slate - J-Machine Ready',
-      what: 'The J-Machine (Jurisdiction Machine) is deployed on-chain.',
-      why: 'Before entities exist, the jurisdiction infrastructure must be in place.',
-      tradfiParallel: 'Like the Federal Reserve deploying its Fedwire Funds Service.',
-      keyMetrics: ['J-Machine: Deployed', 'Entities: 0', 'Reserves: Empty'],
-      expectedSolvency: 0n,
-    });
+    announce(env, AHB_SETUP.deploy);
     await process(env); // Frame 0: No tokens yet
 
     // ============================================================================
@@ -136,10 +92,11 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // ============================================================================
     console.log('\n📦 Registering entities: Alice, Hub, Bob...');
 
+    // Same stage span as Part 1, so labels and bars read at the same size.
     const AHB_POSITIONS = {
-      Alice: { x: -20, y: -40, z: 0 },
+      Alice: { x: -40, y: -44, z: 0 },
       Hub:   { x: 0, y: -20, z: 0 },
-      Bob:   { x: 20, y: -40, z: 0 },
+      Bob:   { x: 40, y: -44, z: 0 },
     };
 
     const entities = await registerEntities(env, jadapter, [
@@ -180,14 +137,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       console.log('✅ Signer wallets prefunded');
     }
 
-    snap(env, 'Three Entities Deployed', {
-      description: 'Entities Created: Alice, Hub, Bob',
-      what: 'Alice, Hub, and Bob entities are now registered in the J-Machine.',
-      why: 'Before entities can transact, they must be registered in the jurisdiction.',
-      tradfiParallel: 'Like banks registering with the Federal Reserve.',
-      keyMetrics: ['Entities: 3', 'Reserves: $0', 'Accounts: None'],
-      expectedSolvency: 0n,
-    });
+    announce(env, AHB_SETUP.banks);
     await process(env);
 
     // ============================================================================
@@ -227,6 +177,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       throw new Error(`ASSERT FAIL Frame 1: Hub reserve = ${hubReserve1}, expected ${HUB_INITIAL_RESERVE}. J-event NOT delivered!`);
     }
     console.log(`✅ ASSERT Frame 1: Hub reserve = $${hubReserve1 / 10n**18n}M ✓`);
+    tell(env, AHB_SETUP.testBalances(HUB_INITIAL_RESERVE));
 
     // ============================================================================
     // STEP 2-4: Hub R2R Batch (Alice + Bob fundings)
@@ -234,14 +185,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     console.log('\n🔄 FRAME 2: Hub creating R2R batch (Alice + Bob)');
 
     // Hub creates TWO R2R operations in jBatch
-    snap(env, 'Initial Liquidity Provision', {
-      description: 'Initial State: Hub Funded',
-      what: 'Hub receives $10M USDC reserve on Depository.sol',
-      why: 'Reserves are the source of liquidity for off-chain accounts.',
-      tradfiParallel: 'Like a bank depositing USD reserves at the Federal Reserve.',
-      keyMetrics: ['Hub: $10M', 'Alice: $0', 'Bob: $0'],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
+    announce(env, LOCK_SETUP.fundBoth);
     await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,
@@ -269,17 +213,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
 
     console.log('✅ R2R operations added to Hub jBatch (2 operations)');
 
-    await pushSnapshot(env, 'Hub R2R batch created', {
-      title: 'R2R Batch Ready',
-      what: 'Hub created batch with 2 R2R transfers: $3M to Alice, $2M to Bob.',
-      why: 'Batching R2Rs for efficiency - one broadcast, multiple transfers.',
-      tradfiParallel: 'Like ACH batch file - multiple wire transfers in one submission.',
-      keyMetrics: [
-        'Batch: 2 R2R operations',
-        'Total: $5M USDC',
-        'Status: Pending broadcast',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    await process(env);
 
     // STEP 3: Hub broadcasts R2R batch
     console.log('\n⚡ FRAME 3: Hub broadcasts R2R batch');
@@ -295,16 +229,8 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
 
     console.log('✅ R2R batch queued to J-mempool (yellow cube)');
 
-    await pushSnapshot(env, 'R2R batch in J-mempool', {
-      title: 'J-Mempool: Yellow Cube #1',
-      what: 'R2R batch sits in J-mempool (yellow cube). Will execute after blockDelayMs.',
-      why: 'Visual feedback: batch queued, awaiting block time.',
-      tradfiParallel: 'Like SWIFT queue - message sent, pending settlement window.',
-      keyMetrics: [
-        'J-mempool: 1 batch (2 R2Rs)',
-        'Block delay: 300ms',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    announce(env, AHB_ACCOUNTS.awaitingBlock());
+    await process(env);
 
     // STEP 4: Advance time and process J-block
     console.log('\n⚡ FRAME 4: J-Block #1 processes R2R batch');
@@ -337,13 +263,8 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     }
     console.log('✅ ASSERT: R2R batch executed correctly ✓');
 
-    await pushSnapshot(env, 'Hub fundings complete', {
-      title: 'Hub Distributed Reserves',
-      what: 'Hub: $5M, Alice: $3M, Bob: $2M.',
-      why: 'Hub funded both entities for bilateral trading.',
-      tradfiParallel: 'Like correspondent bank funding smaller banks.',
-      keyMetrics: ['Hub: $5M', 'Alice: $3M', 'Bob: $2M']
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    tell(env, AHB_SETUP.funded);
+    await process(env);
 
     // ============================================================================
     // STEP 5-6: Alice → Bob R2R ($500K) - Peer-to-Peer Transfer
@@ -351,6 +272,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     console.log('\n🔄 FRAME 5: Alice → Bob R2R');
 
     // Alice sends R2R to Bob (demonstrates peer-to-peer, not just hub distribution)
+    announce(env, AHB_SETUP.aliceToBob);
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -374,11 +296,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       }]
     }]);
 
-    await pushSnapshot(env, 'Alice→Bob R2R in J-mempool', {
-      title: 'Peer-to-Peer Transfer',
-      what: 'Alice sends $500K to Bob (yellow cube #3).',
-      keyMetrics: ['Alice → Bob: $500K']
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    await process(env);
 
     // Process J-block
     console.log('\n⚡ FRAME 6: J-Block processes Alice→Bob');
@@ -398,18 +316,8 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     }
     console.log('✅ ASSERT: Alice→Bob R2R executed ✓');
 
-    await pushSnapshot(env, 'R2R Complete: All reserves distributed', {
-      title: 'Phase 1 Complete: Reserve Distribution',
-      what: 'Hub: $5M, Alice: $2.5M, Bob: $2.5M. Total: $10M preserved.',
-      why: 'R2R transfers complete. Now move to Phase 2: Bilateral Accounts.',
-      tradfiParallel: 'Like Fedwire settlement: instant, final, auditable.',
-      keyMetrics: [
-        'Hub: $5M reserve',
-        'Alice: $2.5M reserve',
-        'Bob: $2.5M reserve',
-        'Batches processed: 2 (3 R2Rs total)',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    tell(env, AHB_SETUP.reservesReady);
+    await process(env);
 
     // ============================================================================
     // PHASE 2: BILATERAL ACCOUNTS
@@ -447,18 +355,8 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     }
     console.log(`✅ ASSERT Frame 6: Alice-Hub accounts EXIST (both directions)`);
 
-    await pushSnapshot(env, 'Alice ↔ Hub: Account Created', {
-      title: 'Bilateral Account: Alice ↔ Hub (A-H)',
-      what: 'Alice opens bilateral account with Hub for instant off-chain payments.',
-      why: 'Bilateral accounts enable unlimited off-chain transactions with final on-chain settlement.',
-      tradfiParallel: 'Like opening a margin account: enables trading before settlement.',
-      keyMetrics: [
-        'Account A-H: CREATED',
-        'Collateral: $0 (empty)',
-        'Credit limits: Default',
-        'Ready for R2C prefunding',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    tell(env, AHB_SETUP.openAliceHub);
+    await process(env);
 
     // ============================================================================
     // STEP 7: Open Bob-Hub Bilateral Account
@@ -492,17 +390,8 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     }
     console.log(`✅ ASSERT Frame 7: Hub-Bob accounts EXIST (both directions)`);
 
-    await pushSnapshot(env, 'Bob ↔ Hub: Account Created', {
-      title: 'Bilateral Account: Bob ↔ Hub (B-H)',
-      what: 'Bob opens bilateral account with Hub. Now both spoke entities connected to hub.',
-      why: 'Star topology: Alice and Bob both connect to Hub. Hub routes payments between them.',
-      tradfiParallel: 'Like correspondent banking: small banks connect to large banks for interbank settlement.',
-      keyMetrics: [
-        'Account B-H: CREATED',
-        'Topology: Alice ↔ Hub ↔ Bob',
-        'Ready for credit extension',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    tell(env, AHB_SETUP.openBobHub);
+    await process(env);
 
     // ============================================================================
     // STEP 8: Alice R2C - Reserve to Collateral (BATCH CREATION)
@@ -514,6 +403,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
 
     // PROPER R→E→A FLOW for R2C:
     // Step 1: Entity creates r2c EntityTx → adds to jBatch
+    announce(env, AHB_ACCOUNTS.postCollateral(aliceCollateralAmount));
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -529,11 +419,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
 
     console.log('✅ Alice r2c added to jBatch');
 
-    await pushSnapshot(env, 'Alice R2C: jBatch created', {
-      title: 'R2C Batch Ready',
-      what: 'Alice R2C added to jBatch (not yet broadcast).',
-      keyMetrics: ['Batch: 1 R2C ($500K)']
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    await process(env);
 
     // Step 2: Alice broadcasts R2C batch (SEPARATE tick - important!)
     console.log('\n💰 FRAME 9: Alice broadcasts R2C batch');
@@ -549,11 +435,8 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
 
     console.log('✅ R2C batch queued to J-mempool');
 
-    await pushSnapshot(env, 'R2C in J-mempool', {
-      title: 'Yellow Cube #2',
-      what: 'R2C batch in J-mempool',
-      keyMetrics: ['J-mempool: 1 batch']
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    announce(env, AHB_ACCOUNTS.awaitingBlock());
+    await process(env);
 
     // Step 3: Advance time for J-block #2 to process
     console.log('\n⚡ FRAME 11: J-Block #2 processes R2C');
@@ -589,18 +472,8 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // CRITICAL: Verify bilateral sync after R2C collateral deposit
     assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'Frame 9 - Alice R2C Collateral');
 
-    await pushSnapshot(env, 'Alice R2C: $500K Reserve → Collateral', {
-      title: 'Reserve-to-Collateral (R2C): Alice → A-H Account',
-      what: 'Alice moves $500K from reserve to A-H account collateral. J-Machine processed batch.',
-      why: 'Collateral enables off-chain payments. Alice can now send up to $500K to Hub instantly.',
-      tradfiParallel: 'Like posting margin: Alice locks funds in the bilateral account as security.',
-      keyMetrics: [
-        'Alice Reserve: $2.5M → $2M (-$500K)',
-        'A-H Collateral: $0 → $500K',
-        'Alice outCapacity: $500K',
-        'Settlement broadcast to J-Machine',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY }); // R2C moves funds, doesn't create/destroy
+    tell(env, AHB_ACCOUNTS.collateralRecorded(aliceCollateralAmount, aliceReserve9 + aliceCollateralAmount, aliceReserve9));
+    await process(env);
 
     // ============================================================================
     // STEP 9: Bob Credit Extension - set_credit_limit
@@ -647,18 +520,10 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // Verify bilateral sync
     assertBilateralSync(env, bob.id, hub.id, USDC_TOKEN_ID, 'Frame 9 - Bob Credit Extension');
 
-    await pushSnapshot(env, 'Bob Credit Extension: $500K', {
-      title: 'Credit Extension: Bob → Hub',
-      what: 'Bob extends $500K credit limit to Hub in B-H account. Purely off-chain, no collateral.',
-      why: 'Credit extension allows Hub to owe Bob. Bob trusts Hub up to $500K.',
-      tradfiParallel: 'Like a credit line: Bob says "Hub can owe me up to $500K".',
-      keyMetrics: [
-        'B-H Credit Limit: $500K',
-        'Bob collateral: $0 (receiver)',
-        'Hub can owe Bob: $500K max',
-        'Ready for routed payment!',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY }); // Credit extension is off-chain, no on-chain impact
+    tell(env, AHB_ACCOUNTS.creditLine(bobCreditAmount));
+    // A presentation starts here: Part 1 already showed this setup.
+    tell(env, LOCK_SETUP.summary(aliceCollateralAmount, bobCreditAmount));
+    await process(env);
 
     // ============================================================================
     // STEP 10: Off-Chain Payment Alice → Hub → Bob
@@ -684,6 +549,8 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
 
     // Frame 10: Alice creates HTLC lock
     const htlc1 = rng.nextHashlock(); // Deterministic secret/hashlock
+    const senderLock1 = quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id, bob.id], USDC_TOKEN_ID, payment1).senderLockAmount;
+    announce(env, LOCK_PAYMENTS.lock(payment1, senderLock1));
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -693,7 +560,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           targetEntityId: bob.id,
           tokenId: USDC_TOKEN_ID,
           amount: payment1,
-          maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id, bob.id], USDC_TOKEN_ID, payment1).senderLockAmount,
+          maxSenderDebit: senderLock1,
           route: [alice.id, hub.id, bob.id],
           deliveryMode: 'async',
           description: 'HTLC Payment 1 of 2',
@@ -703,20 +570,15 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     }]);
     logPending();
 
-    await pushSnapshot(env, 'Frame 10: Alice initiates A→H→B', {
-      title: 'Payment 1/2: Alice → Hub',
-      what: 'Alice sends $125K, Hub receives and forwards proposal to Bob',
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    await process(env);
 
     // Frame 11: Hub + Alice process (Hub forwards to Bob, Alice gets ACK)
     console.log('🏃 FRAME 11: Hub forwards, Alice commits');
     await process(env);
     logPending();
 
-    await pushSnapshot(env, 'Frame 11: Hub forwards to Bob', {
-      title: 'Payment 1/2: Hub → Bob proposal',
-      what: 'Hub-Alice commits, Hub proposes to Bob',
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    announce(env, LOCK_PAYMENTS.forward);
+    await process(env);
 
     // Frame 12: Bob ACKs Hub
     console.log('🏃 FRAME 12: Bob ACKs Hub');
@@ -807,10 +669,10 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
 
     await converge(env, htlcRouteConvergenceCycleBudget(1));
 
-    await pushSnapshot(env, 'Frame 13: Payment 1 complete', {
-      title: 'Payment 1/2 Complete',
-      what: `A→H→B $125K done. A-H shift: -$125K, H-B shift: -$125K`,
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    const bobViewAfter1 = deriveDelta(findReplica(env, bob.id)[1].state.accounts.get(hub.id)!.state.deltas.get(USDC_TOKEN_ID)!, isLeftEntity(bob.id, hub.id));
+    tell(env, LOCK_PAYMENTS.settled(payment1, htlcFeePayment1));
+    tell(env, LOCK_PAYMENTS.finality(bobViewAfter1.outPeerCredit));
+    await process(env);
 
     // ============================================================================
     // PAYMENT 2: A → H → B ($125K) - Second payment, total shift = $250K
@@ -824,6 +686,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     console.log('\n🏃 FRAME 14: Alice initiates second A→H→B $125K');
 
     // Frame 14: Alice sends again
+    announce(env, LOCK_PAYMENTS.second(payment2));
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -842,19 +705,14 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     }]);
     logPending();
 
-    await pushSnapshot(env, 'Frame 14: Alice initiates second payment', {
-      title: 'Payment 2/2: Alice → Hub',
-      what: 'Second $125K payment to reach $250K total shift',
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    await process(env);
 
     // Frame 15: Hub forwards, Alice commits A-H
     console.log('🏃 FRAME 15: Hub forwards, Alice commits A-H');
     await process(env);
     logPending();
 
-    await pushSnapshot(env, 'Frame 15: Hub forwards second payment', {
-      title: 'Payment 2/2: Hub → Bob proposal',
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    await process(env);
 
     // Frame 16: Bob ACKs Hub
     console.log('🏃 FRAME 16: Bob ACKs Hub');
@@ -918,16 +776,9 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       }
     }
 
-    await pushSnapshot(env, 'Frame 17: Both payments complete - $250K shifted', {
-      title: '✅ Payments Complete: $250K A→B',
-      what: 'Two $125K payments complete. Total: $250K shifted from Alice to Bob via Hub.',
-      why: 'Hub now has $250K uninsured liability to Bob (TR=$250K). Rebalancing needed!',
-      keyMetrics: [
-        'A-H shift: -$250K (Alice paid Hub)',
-        'H-B shift: -$250K (Hub owes Bob)',
-        'TR (Total Risk): $250K uninsured',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    const bobViewAfter2 = deriveDelta(findReplica(env, bob.id)[1].state.accounts.get(hub.id)!.state.deltas.get(USDC_TOKEN_ID)!, isLeftEntity(bob.id, hub.id));
+    tell(env, AHB_PAYMENTS.bothDone(payment1 + payment2, bobViewAfter2.outPeerCredit, bobCreditAmount, payment1 + payment2));
+    await process(env);
 
     // ============================================================================
     // PHASE 4: REVERSE PAYMENT B→H→A (Bob pays Alice $50K via Hub)
@@ -945,6 +796,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
 
     // Frame 18: Bob initiates B→H→A
     console.log('🏃 FRAME 18: Bob initiates B→H→A $50K');
+    announce(env, LOCK_PAYMENTS.reverse(reversePayment));
     await process(env, [{
       entityId: bob.id,
       signerId: bob.signer,
@@ -970,10 +822,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     console.log(`   After Bob initiates: B-H offdelta=${bhDelta18}, H-A offdelta=${haExpected18}`);
     // Note: At this point Bob's local mempool has the tx but Hub hasn't received yet
 
-    await pushSnapshot(env, 'Frame 18: Bob initiates B→H→A', {
-      title: 'Reverse Payment: Bob → Hub',
-      what: 'Bob sends $50K to Alice via Hub. First hop: B→H',
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    await process(env);
 
     // Frame 19: Hub receives from Bob, forwards to Alice
     console.log('🏃 FRAME 19: Hub receives B→H, forwards to Alice');
@@ -999,10 +848,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       throw new Error(`B-H shift unexpected: got ${bhDelta19}, expected ${expectedBH19}`);
     }
 
-    await pushSnapshot(env, 'Frame 19: Hub forwards to Alice', {
-      title: 'Reverse Payment: Hub → Alice',
-      what: 'Hub receives B→H and forwards H→A proposal',
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    await process(env);
 
     // Frame 20: Alice ACKs Hub
     console.log('🏃 FRAME 20: Alice ACKs Hub');
@@ -1031,15 +877,10 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     }
     console.log(`✅ Reverse payment B→H→A verified: A-H=${ahDeltaRev}, B-H=${bhDeltaRev} (htlcFee=${htlcFee}, reverseFee=${reverseSenderGross - reversePayment})`);
 
-    await pushSnapshot(env, 'Frame 21: Reverse payment complete', {
-      title: '✅ Reverse Payment: $50K B→A',
-      what: 'Bob paid Alice $50K via Hub. Net position: $200K shifted A→B.',
-      keyMetrics: [
-        'A-H shift: -$200K (was -$250K)',
-        'B-H shift: -$200K (was -$250K)',
-        'TR: $200K (reduced from $250K)',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    const aliceViewNet = deriveDelta(findReplica(env, alice.id)[1].state.accounts.get(hub.id)!.state.deltas.get(USDC_TOKEN_ID)!, isLeftEntity(alice.id, hub.id));
+    const bobViewNet = deriveDelta(findReplica(env, bob.id)[1].state.accounts.get(hub.id)!.state.deltas.get(USDC_TOKEN_ID)!, isLeftEntity(bob.id, hub.id));
+    tell(env, LOCK_PAYMENTS.net(aliceViewNet.inCollateral, bobViewNet.outPeerCredit, payment1 + payment2 + reversePayment));
+    await process(env);
 
     // ============================================================================
     // PHASE 5: REBALANCING via Prepaid Request Model (Reserve → Collateral)
@@ -1097,20 +938,12 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     }
     console.log(`✅ Rebalance policy set: r2cRequestSoftLimit=$100K, maxFee=$10`);
 
-    await pushSnapshot(env, 'Frame 22: Bob sets rebalance policy', {
-      title: 'Rebalance Policy Set',
-      what: 'Bob tells Hub: "keep at least $100K collateral on our account".',
-      why: 'User-driven policy — Bob decides his risk tolerance, Hub executes.',
-      tradfiParallel: 'Like setting a margin maintenance requirement.',
-      keyMetrics: [
-        'r2cRequestSoftLimit: $100K',
-        'maxAcceptableFee: $10',
-        'H-B collateral: $0 (needs rebalancing)',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    tell(env, LOCK_REBALANCE.policy(usd(100_000), usd(10)));
+    await process(env);
 
     // STEP 23: Hub executes r2c
     console.log('\n🏦 FRAME 23: Hub deposits collateral (R→C)');
+    announce(env, LOCK_REBALANCE.post(rebalanceAmount));
 
     await process(env, [{
       entityId: hub.id,
@@ -1141,18 +974,10 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
 
     console.log(`✅ j_broadcast sent`);
 
-    await pushSnapshot(env, 'Frame 24: R→C batch in J-mempool', {
-      title: 'J-Mempool: R→C Deposit',
-      what: 'Hub deposits $200K reserve → H-B collateral. In J-mempool, awaiting block.',
-      why: 'R→C is unilateral (Hub giving) — no settlement signature needed.',
-      tradfiParallel: 'Like funding a margin account — bank deposits, no counterparty approval on-chain.',
-      keyMetrics: [
-        'J-mempool: 1 batch (R→C $200K)',
-        'Block delay: 300ms',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    announce(env, AHB_ACCOUNTS.awaitingBlock());
+    await process(env);
 
-    // STEP 25: Advance time and process J-mempool
+    // STEP 25: Advance time and process J-mempool.
     console.log('\n🏦 FRAME 25: Processing J-block...');
     console.log(`   Time advanced via syncChain (> 300ms blockDelayMs)`);
     await syncChain(env, 5);
@@ -1169,6 +994,8 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       throw new Error(`❌ ASSERT FAIL: H-B collateral = ${actual}, expected ${expectedHBCollateral}`);
     }
     console.log(`✅ ASSERT: H-B collateral ${hbPreCollateral} → ${hbDeltaRebal.collateral} (+$200K) ✓`);
+    const bobViewCovered = deriveDelta(findReplica(env, bob.id)[1].state.accounts.get(hub.id)!.state.deltas.get(USDC_TOKEN_ID)!, isLeftEntity(bob.id, hub.id));
+    tell(env, LOCK_REBALANCE.covered(hbDeltaRebal.collateral, bobViewCovered.outPeerCredit));
 
     // ✅ ASSERT: Hub reserve decreased by $200K
     const hubPostReserve = hubRepRebal.state.reserves.get(USDC_TOKEN_ID) || 0n;
@@ -1178,17 +1005,6 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     }
     console.log(`✅ ASSERT: Hub reserve ${hubPreReserve} → ${hubPostReserve} (-$200K) ✓`);
 
-    await pushSnapshot(env, 'Frame 25: Rebalancing complete', {
-      title: 'Rebalancing Complete',
-      what: 'Hub deposited $200K from reserve to H-B collateral.',
-      why: 'Prepaid model rebalancing: user policy gates requests, hub executes R→C.',
-      tradfiParallel: 'Like a margin top-up execution after policy trigger.',
-      keyMetrics: [
-        `H-B collateral: $0 → $${Number(expectedHBCollateral) / 1e18}K`,
-        `Hub reserve: -$200K`,
-        'Total Risk: reduced',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
 
     // ============================================================================
     // PHASE 6: HTLC TIMEOUT TEST
@@ -1201,6 +1017,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // Create HTLC that will timeout (Charlie doesn't reveal)
     console.log('📋 Creating test entity Charlie for timeout scenario...\n');
 
+    announce(env, LOCK_ROUTES.charlie(usd(50_000)));
     const charlieSigner = resolveScenarioBoardSigner(env, '6');
     const charlieEntityId = generateLazyEntityId([charlieSigner], 1n, env).toLowerCase();
     await commitRuntimeInput(env, {
@@ -1209,7 +1026,8 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
         signerId: charlieSigner,
         data: {
           isProposer: true,
-          position: { x: 400, y: 0, z: 0 },
+          profileName: 'Charlie',
+          position: { x: 0, y: -64, z: 0 }, // below Hub, its only counterparty
           config: {
             mode: 'proposer-based' as const,
             threshold: 1n,
@@ -1303,6 +1121,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // Create Hub2 for 4-hop test (Alice → Hub → Hub2 → Bob)
     console.log('📋 Creating Hub2 for 4-hop test...\n');
 
+    announce(env, LOCK_ROUTES.hub2);
     const hub2Signer = resolveScenarioBoardSigner(env, '5');
     const hub2EntityId = generateLazyEntityId([hub2Signer], 1n, env).toLowerCase();
     await commitRuntimeInput(env, {
@@ -1311,7 +1130,8 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
         signerId: hub2Signer,
         data: {
           isProposer: true,
-          position: { x: 200, y: 0, z: 0 },
+          profileName: 'Hub 2',
+          position: { x: 48, y: -10, z: 0 }, // beside Hub and above Bob: the extra hop
           config: {
             mode: 'proposer-based' as const,
             threshold: 1n,
@@ -1428,6 +1248,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     console.log(`🔒 Alice initiates 4-hop HTLC: Alice → Hub → Hub2 → Bob ($25k)\n`);
 
     const htlc4 = rng.nextHashlock(); // Deterministic secret/hashlock for 4-hop
+    announce(env, LOCK_ROUTES.threeHop(payment4Hop));
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -1463,6 +1284,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     console.log(`   Alice-Hub pendingFrame: ${aliceHubAccount4Hop?.pendingFrame?.height || 'none'}\n`);
 
     assert(aliceHubLockCount === 0, '4-hop: All locks cleared after reveal');
+    tell(env, LOCK_ROUTES.threeHopDone(payment4Hop));
 
     // Check fees (Hub and Hub2 should have earned)
     const [, hubRep4Hop] = findReplica(env, hub.id);

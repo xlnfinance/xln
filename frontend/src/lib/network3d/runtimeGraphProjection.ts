@@ -347,7 +347,8 @@ const nodeFromSummary = (
     jurisdiction: jurisdictionName(summary.jurisdiction),
     height: integer(core?.height ?? summary.height ?? source.height),
     timestamp: integer(core?.timestamp ?? source.timestamp),
-    position: null,
+    // Recorded trails carry the scenario's authored stage position; live summaries do not.
+    position: positionOf((summary as { position?: unknown }).position),
     replica: null,
     core,
   };

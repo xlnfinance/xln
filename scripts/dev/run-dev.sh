@@ -46,18 +46,7 @@ if [[ ! "$DEV_SHUTDOWN_TIMEOUT_MS" =~ ^[1-9][0-9]*$ ]]; then
   exit 1
 fi
 
-DEV_WEB_SCHEME=http
-if [[ "${XLN_VITE_FORCE_HTTP:-0}" != "1" ]]; then
-  for cert_base in \
-    "$REPO_ROOT/frontend/localhost+3" \
-    "$REPO_ROOT/frontend/localhost+2" \
-    "$REPO_ROOT/192.168.1.23+2"; do
-    if [[ -f "${cert_base}.pem" && -f "${cert_base}-key.pem" ]]; then
-      DEV_WEB_SCHEME=https
-      break
-    fi
-  done
-fi
+DEV_WEB_SCHEME="$(bun "$REPO_ROOT/scripts/dev/launcher/web-tls.ts")"
 DEV_CUSTODY_SCHEME=http
 case "${CUSTODY_HTTPS:-}" in
   1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]) DEV_CUSTODY_SCHEME=https ;;
@@ -70,7 +59,7 @@ export XLN_MESH_ROOT_SEED="${XLN_MESH_ROOT_SEED:-$(xln_read_or_create_operator_s
 export RPC_PORT RPC2_PORT API_PORT WEB_PORT WEB_HTTP_PORT CUSTODY_PORT CUSTODY_DAEMON_PORT WATCHTOWER_PORT UI_PORT
 export ANVIL_BLOCK_TIME DEV_LOG_DIR MESH_LOG_LEVEL DEV_VERBOSE RUNTIME_VERBOSE_LOGS XLN_LOG_WARN_STDOUT
 export DEV_DATA_ROOT XLN_RDB_ROOT XLN_JDB_ROOT XLN_STORAGE_HISTORY_PATH XLN_STORAGE_HEALTH_DEEP_SCAN ANVIL_TMPDIR XLN_DEV_PID_DIR XLN_DEV_OWNER_FILE
-export DEV_RUNTIME_BUNDLE_PATH DEV_STARTED_AT_MS DEV_READY_TIMEOUT_MS DEV_SHUTDOWN_TIMEOUT_MS DEV_CUSTODY_SCHEME DEV_RELAY_WEB_URLS
+export DEV_RUNTIME_BUNDLE_PATH DEV_STARTED_AT_MS DEV_READY_TIMEOUT_MS DEV_SHUTDOWN_TIMEOUT_MS DEV_WEB_SCHEME DEV_CUSTODY_SCHEME DEV_RELAY_WEB_URLS
 export XLN_DEV_SHUTDOWN_TIMEOUT_MS="$DEV_SHUTDOWN_TIMEOUT_MS"
 
 dev_cleanup_started=0
@@ -162,7 +151,7 @@ bun core/scripts/operations/development/print-dev-links.ts \
   --ui-port "${UI_PORT}" \
   --keys "$DEV_RADAPTER_KEYS_JSON"
 
-echo "DEV_BOOTING wallet=http://localhost:${WEB_HTTP_PORT}/app ui=http://localhost:${UI_PORT}/ api=http://127.0.0.1:${API_PORT}"
+echo "DEV_BOOTING wallet=${DEV_WEB_SCHEME}://localhost:${WEB_PORT}/ui/ observer=http://localhost:${WEB_HTTP_PORT}/app?observer=1 api=http://127.0.0.1:${API_PORT}"
 
 if [[ "$DEV_VERBOSE" != "1" ]]; then
   echo "anvil logs             ${DEV_LOG_DIR}/anvil-${RPC_PORT}.log"

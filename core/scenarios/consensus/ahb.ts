@@ -24,12 +24,16 @@ import {
   getScenarioJAdapter,
   isScenarioJAdapterMissingError,
   createJReplica,
+  DEMO_JURISDICTION_NAME,
   resolveScenarioBoardSigner,
   resolveScenarioJurisdictionAddress,
 } from '../harness/boot';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
-import { snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, advanceScenarioTime, advanceScenarioPastDisputeTimeout, readScenarioJurisdictionUnix, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput, setScenarioStorageEnabled } from '../harness/helpers';
+import { checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, advanceScenarioTime, advanceScenarioPastDisputeTimeout, readScenarioJurisdictionUnix, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, formatTokenMoney, syncChain, commitRuntimeInput, setScenarioStorageEnabled } from '../harness/helpers';
 import { formatRuntime } from '../../qa/runtime-ascii';
+import { announce, tell } from '../harness/narration';
+import { disputeWindowText } from '../harness/story';
+import { AHB_ACCOUNTS, AHB_PAYMENTS, AHB_REBALANCE, AHB_SETUP, AHB_STRESS_STORY } from './ahb-story';
 import { deriveDelta, isLeftEntity } from '../../account/utils';
 import { createGossipLayer } from '../../network/p2p/gossip';
 import { clearRuntimeFrameEvents } from '../../runtime/observability/env-events';
@@ -44,7 +48,6 @@ import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixtur
 import { ethers } from 'ethers';
 import {
   AHB_DEBUG,
-  AHB_JURISDICTION,
   AHB_STRESS,
   AHB_STRESS_AMOUNT_USD,
   AHB_STRESS_DRAIN_EVERY,
@@ -137,7 +140,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       jadapter = await ensureJAdapter(env);
       bindScenarioJReplica(
         env,
-        createJReplica(env, 'AHB Demo', jadapter.addresses.depository),
+        createJReplica(env, DEMO_JURISDICTION_NAME, jadapter.addresses.depository),
         jadapter,
       );
       jadapter.startWatching(env);
@@ -147,7 +150,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     const vm = browserVM as unknown as (RequiredBrowserVM | null);
 
     const arrakis = createJurisdictionConfig(
-      'AHB Demo',
+      DEMO_JURISDICTION_NAME,
       jadapter.addresses.depository,
       jadapter.addresses.entityProvider,
       resolveScenarioJurisdictionAddress(jadapter.mode),
@@ -164,18 +167,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     const SIGNER_PREFUND = usd(1_000_000);
     let usdcTokenAddress: string | null = null;
 
-    snap(env, 'Jurisdiction Machine Deployed', {
-      description: 'Frame 0: Clean Slate - J-Machine Ready',
-      what: 'The J-Machine (Jurisdiction Machine) is deployed on-chain. It represents the EVM smart contracts (Depository.sol, EntityProvider.sol) that will process settlements.',
-      why: 'Before entities exist, the jurisdiction infrastructure must be in place. Think of this as deploying the central bank\'s core settlement system.',
-      tradfiParallel: 'Like the Federal Reserve deploying its Fedwire Funds Service before banks can participate.',
-      keyMetrics: [
-        'J-Machine: Deployed at origin',
-        'Entities: 0 (none created yet)',
-        'Reserves: Empty',
-      ],
-      expectedSolvency: 0n, // Frame 0: No tokens yet
-    });
+    announce(env, AHB_SETUP.deploy);
     await process(env);
 
 // ============================================================================
@@ -225,6 +217,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
         signerId: signer,
         data: {
           isProposer: true,
+          profileName: name,
           position, // Explicit position for proper AHB triangle layout
           config: {
             mode: 'proposer-based' as const,
@@ -289,18 +282,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     console.log('\n📋 Skipping EntityProvider registration (lazy entities)');
 
     // Push Frame 0.5: Entities created but not yet funded
-    snap(env, 'Three Entities Deployed', {
-      description: 'Entities Created: Alice, Hub, Bob',
-      what: 'Alice, Hub, and Bob entities are now registered in the J-Machine. They appear in the 3D visualization but have no reserves yet (grey spheres).',
-      why: 'Before entities can transact, they must be registered in the jurisdiction. This establishes their identity and governance structure.',
-      tradfiParallel: 'Like banks registering with the Federal Reserve before opening for business.',
-      keyMetrics: [
-        'Entities: 3 (Alice, Hub, Bob)',
-        'Reserves: All $0 (grey - unfunded)',
-        'Accounts: None opened yet',
-      ],
-      expectedSolvency: 0n, // No tokens minted yet
-    });
+    announce(env, AHB_SETUP.banks);
     await process(env);
 
     // ============================================================================
@@ -346,18 +328,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }
     console.log(`✅ ASSERT Frame 1: Hub reserve = $${hubReserve1 / 10n**18n}M ✓`);
 
-    snap(env, 'Initial Liquidity Provision', {
-      description: 'Initial State: Hub Funded',
-      what: 'Hub entity receives $10M USDC reserve balance on Depository.sol (on-chain via BrowserVM)',
-      why: 'Reserve balances are the source of liquidity for off-chain bilateral accounts. Think of this as the hub depositing cash into its custody account.',
-      tradfiParallel: 'Like a correspondent bank depositing USD reserves at the Federal Reserve to enable wire transfers',
-      keyMetrics: [
-        'Hub Reserve: $10M USDC',
-        'Alice Reserve: $0 (grey - no funds)',
-        'Bob Reserve: $0 (grey - no funds)',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY, // $10M minted to Hub
-    });
+    tell(env, AHB_SETUP.testBalances(HUB_INITIAL_RESERVE));
     await process(env);
 
     // ============================================================================
@@ -381,18 +352,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       ]
     };
 
-    snap(env, 'R2R #1: TX Queued in Batch', {
-      description: 'Hub → Alice: R2R Pending in Batch',
-      what: 'Hub queues reserveToReserve(Alice, $3M). Operation is pending in the entity batch.',
-      why: 'Operations accumulate in the batch before a single broadcast to the J-Machine.',
-      tradfiParallel: 'Like staging a Fedwire before batch submission',
-      keyMetrics: [
-        'J-Batch: 1 pending op',
-        'Hub Reserve: $10M (unchanged)',
-        'Alice Reserve: $0 (unchanged)',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
+    announce(env, AHB_SETUP.toAlice);
     await process(env, [r2rTx1]);
 
     // ASSERT: jBatch should have 1 pending R2R op
@@ -428,21 +388,10 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       ]
     };
 
-    snap(env, 'R2R #2: Batch Broadcasted', {
-      description: 'Hub → Bob: Batch Pending in Mempool',
-      what: 'Hub adds reserveToReserve(Bob, $2M) and broadcasts the batch to the J-Machine.',
-      why: 'Multiple R2R ops are combined into a single batch for efficiency.',
-      tradfiParallel: 'Like sending a multi‑payment batch to Fedwire',
-      keyMetrics: [
-        'J-Machine mempool: 1 pending batch (2 ops)',
-        'Hub Reserve: $10M (unchanged)',
-        'Bob Reserve: $0 (unchanged)',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
+    announce(env, AHB_SETUP.toBob);
     await process(env, [r2rTx2]);
 
-    const jReplicaAfterR2R2 = env.state.jReplicas.get(AHB_JURISDICTION);
+    const jReplicaAfterR2R2 = env.state.jReplicas.get(DEMO_JURISDICTION_NAME);
     if (!jReplicaAfterR2R2) throw new Error('J-Machine not found');
     const pendingBatches = jReplicaAfterR2R2.mempool.length;
     // JAdapter submits batches immediately post-save, so mempool may already be cleared
@@ -472,19 +421,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     console.log(`  Alice: ${Number(fundedAliceReserves) / 1e18} USDC`);
     console.log(`  Bob: ${Number(fundedBobReserves) / 1e18} USDC`);
 
-    snap(env, 'J-Block #1: Hub Fundings Executed', {
-      description: 'Hub Fundings Complete: Alice & Bob funded',
-      what: 'Hub distributed $3M to Alice, $2M to Bob. Both entities now have reserve balances.',
-      why: 'Funding R2Rs executed first - entities need reserves before they can transact.',
-      tradfiParallel: 'Like initial capital injection: entities receive operating funds',
-      keyMetrics: [
-        'Hub: $5M reserve (remaining)',
-        'Alice: $3M reserve (funded)',
-        'Bob: $2M reserve (funded)',
-        'Next: Alice → Bob transfer',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
+    tell(env, AHB_SETUP.funded);
     await process(env);
 
     // ============================================================================
@@ -512,18 +449,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       ]
     };
 
-    snap(env, 'R2R: Alice → Bob Enters Mempool', {
-      description: 'Alice → Bob: R2R Pending in Mempool',
-      what: 'Alice (now funded with $3M) sends $500K to Bob. TX is PENDING in mempool.',
-      why: 'Alice has funds now! This demonstrates peer-to-peer R2R (not just Hub distribution).',
-      tradfiParallel: 'Interbank transfer: one funded bank pays another',
-      keyMetrics: [
-        'Alice: $3M reserve (has funds!)',
-        'Mempool: 1 pending tx',
-        'Next: J-Block #2 execution',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
+    announce(env, AHB_SETUP.aliceToBob);
     await process(env, [r2rTx3]);
 
     // ============================================================================
@@ -549,19 +475,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     console.log(`  Alice: ${Number(finalAliceReserves) / 1e18} USDC`);
     console.log(`  Bob: ${Number(finalBobReserves) / 1e18} USDC`);
 
-    snap(env, 'Phase 1 Complete: Reserve Distribution', {
-      description: 'R2R Complete: All reserves distributed',
-      what: 'Hub: $5M, Alice: $2.5M, Bob: $2.5M. Total: $10M preserved. All entities now have visible reserves.',
-      why: 'R2R transfers are pure on-chain settlement. Now we move to Phase 2: Bilateral Accounts.',
-      tradfiParallel: 'Like Fedwire settlement: instant, final, auditable transfers between reserve accounts',
-      keyMetrics: [
-        'Hub: $5M reserve',
-        'Alice: $2.5M reserve',
-        'Bob: $2.5M reserve',
-        'Next: Open bilateral accounts',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
+    tell(env, AHB_SETUP.reservesReady);
     await process(env);
 
     // ============================================================================
@@ -597,19 +511,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }
     console.log(`✅ ASSERT Frame 6: Alice-Hub account EXISTS`);
 
-    snap(env, 'Bilateral Account: Alice ↔ Hub (A-H)', {
-      description: 'Alice ↔ Hub: Account Created',
-      what: 'Alice opens bilateral account with Hub for instant off-chain payments.',
-      why: 'Bilateral accounts enable unlimited off-chain transactions with final on-chain settlement.',
-      tradfiParallel: 'Like opening a margin account: enables trading before settlement.',
-      keyMetrics: [
-        'Account A-H: CREATED',
-        'Collateral: $0 (empty)',
-        'Credit limits: Default',
-        'Ready for R2C prefunding',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
+    tell(env, AHB_SETUP.openAliceHub);
     await process(env);
 
     // ============================================================================
@@ -645,18 +547,9 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }
     console.log(`✅ ASSERT Frame 7: Hub-Bob accounts EXIST (both directions)`);
 
-    snap(env, 'Bilateral Account: Bob ↔ Hub (B-H)', {
-      description: 'Bob ↔ Hub: Account Created',
-      what: 'Bob opens bilateral account with Hub. Now both spoke entities connected to hub.',
-      why: 'Star topology: Alice and Bob both connect to Hub. Hub routes payments between them.',
-      tradfiParallel: 'Like correspondent banking: small banks connect to large banks for interbank settlement.',
-      keyMetrics: [
-        'Account B-H: CREATED',
-        'Topology: Alice ↔ Hub ↔ Bob',
-        'Ready for credit extension',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
+    tell(env, AHB_SETUP.openBobHub);
+    // A presentation starts here: the frames above are setup, summarised by this beat.
+    tell(env, { ...AHB_SETUP.summary, focusEntityIds: [alice.id, hub.id, bob.id] });
     await process(env);
 
     // ============================================================================
@@ -670,6 +563,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     // PROPER R→E→A FLOW for R2C:
     // Step 1: Entity creates r2c EntityTx → adds to jBatch
     // Step 2: Entity broadcasts via j_broadcast → generates jOutput → routes to J-mempool
+    announce(env, AHB_ACCOUNTS.postCollateral(aliceCollateralAmount));
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -691,7 +585,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
     // ASSERT: jOutput was routed and processed (J-machine auto-processes if blockDelayMs elapsed)
     // NOTE: process() auto-ticks J-machine, so batch may already be processed (not pending)
-    const jReplica = env.state.jReplicas.get('AHB Demo');
+    const jReplica = env.state.jReplicas.get(DEMO_JURISDICTION_NAME);
     if (!jReplica) throw new Error('J-Machine not found');
     console.log(`[Frame 8 ASSERT] J-Machine state: mempool=${jReplica.mempool.length}, blockNumber=${jReplica.blockNumber}`);
     // jOutput routing confirmed if EITHER batch is pending OR block was already processed
@@ -702,18 +596,6 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }
     console.log(`✅ ASSERT: jOutput routed successfully (processed or pending)`);
 
-    // Snapshot - shows batch pending in mempool
-    snap(env, 'J-Batch Pending: Alice R2C $500K', {
-      description: 'Alice R2C: Batch Created (Pending)',
-      what: 'Alice created jBatch for R2C. Batch sits in J-Machine mempool awaiting next block.',
-      why: 'Batches accumulate before on-chain submission. Yellow cube = pending batch.',
-      tradfiParallel: 'Like a wire transfer queued at end-of-day batch processing.',
-      keyMetrics: [
-        'jReplica mempool: 1 pending batch',
-        'Batch: R2C $500K Alice→A-H account',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
     await process(env);
 
     // ============================================================================
@@ -722,23 +604,12 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     console.log('\n⏳ FRAME 8.5: Mempool Delay - Batch pending in J-Machine');
 
     // Read jReplica for status display (read-only)
-    const jReplicaStatus = env.state.jReplicas?.get(AHB_JURISDICTION);
+    const jReplicaStatus = env.state.jReplicas?.get(DEMO_JURISDICTION_NAME);
     const elapsedMs = jReplicaStatus ? env.state.timestamp - (jReplicaStatus.lastBlockTimestamp || 0) : 0;
     const delayMs = jReplicaStatus?.blockDelayMs || 1000;
     console.log(`[Frame 8.5] elapsed=${elapsedMs}ms, blockDelayMs=${delayMs}ms`);
 
-    // Snapshot showing batch still pending in mempool (yellow cube persists)
-    snap(env, 'J-Batch Queued: Awaiting Block Creation', {
-      description: 'J-Machine: Mempool Processing Delay',
-      what: `Batch sits in mempool for ${delayMs}ms before on-chain submission.`,
-      why: 'Batching improves gas efficiency. Multiple settlements can be combined into one block.',
-      tradfiParallel: 'Like SWIFT netting - accumulate transactions, settle in batch.',
-      keyMetrics: [
-        `Mempool: ${jReplicaStatus?.mempool?.length || 0} batch(es) pending`,
-        `Block delay: ${delayMs}ms`,
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
+    announce(env, AHB_ACCOUNTS.awaitingBlock(delayMs));
     await process(env);
     
 
@@ -825,19 +696,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     });
     assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'Frame 9 - Alice R2C Collateral');
 
-    snap(env, 'Reserve-to-Collateral (R2C): Alice → A-H Account', {
-      description: 'Alice R2C: $500K Reserve → Collateral',
-      what: 'Alice moves $500K from reserve to A-H account collateral. J-Machine processed batch.',
-      why: 'Collateral enables off-chain payments. Alice can now send up to $500K to Hub instantly.',
-      tradfiParallel: 'Like posting margin: Alice locks funds in the bilateral account as security.',
-      keyMetrics: [
-        'Alice Reserve: $2.5M → $2M (-$500K)',
-        'A-H Collateral: $0 → $500K',
-        'Alice outCapacity: $500K',
-        'Settlement broadcast to J-Machine',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY, // R2C moves funds, doesn't create/destroy
-    });
+    tell(env, AHB_ACCOUNTS.collateralRecorded(aliceCollateralAmount, expectedAliceReserve9 + aliceCollateralAmount, aliceReserve9));
     await process(env);
 
     // ============================================================================
@@ -885,19 +744,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     // Verify bilateral sync
     assertBilateralSync(env, bob.id, hub.id, USDC_TOKEN_ID, 'Frame 9 - Bob Credit Extension');
 
-    snap(env, 'Credit Extension: Bob → Hub', {
-      description: 'Bob Credit Extension: $500K',
-      what: 'Bob extends $500K credit limit to Hub in B-H account. Purely off-chain, no collateral.',
-      why: 'Credit extension allows Hub to owe Bob. Bob trusts Hub up to $500K.',
-      tradfiParallel: 'Like a credit line: Bob says "Hub can owe me up to $500K".',
-      keyMetrics: [
-        'B-H Credit Limit: $500K',
-        'Bob collateral: $0 (receiver)',
-        'Hub can owe Bob: $500K max',
-        'Ready for routed payment!',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY, // Credit extension is off-chain, no on-chain impact
-    });
+    tell(env, AHB_ACCOUNTS.creditLine(bobCreditAmount));
     await process(env);
 
     // ============================================================================
@@ -911,6 +758,13 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       console.log(`   pending: [${pending.map(o => o.entityId.slice(-4)).join(',')}]`);
     };
 
+    // A bank's view of one account, through the canonical delta derivation.
+    const accountView = (viewer: typeof alice, counterparty: typeof alice) => {
+      const delta = findReplica(env, viewer.id)[1].state.accounts.get(counterparty.id)?.state.deltas.get(USDC_TOKEN_ID);
+      if (!delta) throw new Error(`AHB_ACCOUNT_VIEW_MISSING:${viewer.name}:${counterparty.name}`);
+      return deriveDelta(delta, isLeftEntity(viewer.id, counterparty.id));
+    };
+
     // Payment 1: A → H → B ($125K)
     console.log('\n⚡ FRAME 10: Off-Chain Payment A → H → B ($125K)');
     const payment1 = usd(125_000);
@@ -921,6 +775,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     console.log('🏃 FRAME 10: Alice initiates A→H→B $125K');
 
     // Frame 10: Alice sends to Hub
+    const senderLock1 = quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id, bob.id], USDC_TOKEN_ID, payment1).senderLockAmount;
+    announce(env, AHB_PAYMENTS.first(payment1, senderLock1));
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -930,7 +786,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
           targetEntityId: bob.id,
           tokenId: USDC_TOKEN_ID,
           amount: payment1,
-          maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id, bob.id], USDC_TOKEN_ID, payment1).senderLockAmount,
+          maxSenderDebit: senderLock1,
           route: [alice.id, hub.id, bob.id],
           deliveryMode: 'instant',
           description: 'Payment 1 of 2'
@@ -939,23 +795,14 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }]);
     logPending();
 
-    snap(env, 'Payment 1/2: Alice → Hub', {
-      description: 'Frame 10: Alice initiates A→H→B',
-      what: 'Alice sends $125K, Hub receives and forwards proposal to Bob',
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
     await process(env);
 
     // Frame 11: Hub + Alice process (Hub forwards to Bob, Alice gets ACK)
     console.log('🏃 FRAME 11: Hub forwards, Alice commits');
+    announce(env, AHB_PAYMENTS.forward);
     await process(env);
     logPending();
 
-    snap(env, 'Payment 1/2: Hub → Bob proposal', {
-      description: 'Frame 11: Hub forwards to Bob',
-      what: 'Hub-Alice commits, Hub proposes to Bob',
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
     await process(env);
 
     // Frame 12: Bob ACKs Hub
@@ -1000,11 +847,11 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }
     console.log(`   ✅ Payment 1: A-H=${ahDelta1}, H-B=${hbDelta1} (direction + fee spread verified)`);
 
-    snap(env, 'Payment 1/2 Complete', {
-      description: 'Frame 13: Payment 1 complete',
-      what: `A→H→B $125K done. A-H shift: -$125K, H-B shift: -$125K`,
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
+    const aliceAfterPayment1 = accountView(alice, hub);
+    const bobAfterPayment1 = accountView(bob, hub);
+    const route = [alice.id, hub.id, bob.id];
+    tell(env, { ...AHB_PAYMENTS.firstDone(bobAfterPayment1.outPeerCredit, aliceAfterPayment1.inCollateral), focusEntityIds: route });
+    tell(env, { ...AHB_PAYMENTS.firstFinality(bobAfterPayment1.outPeerCredit), focusEntityIds: route });
     await process(env);
 
     // ============================================================================
@@ -1014,6 +861,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     console.log('\n🏃 FRAME 14: Alice initiates second A→H→B $125K');
 
     // Frame 14: Alice sends again
+    announce(env, AHB_PAYMENTS.second(payment2));
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -1032,11 +880,6 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }]);
     logPending();
 
-    snap(env, 'Payment 2/2: Alice → Hub', {
-      description: 'Frame 14: Alice initiates second payment',
-      what: 'Second $125K payment to reach $250K total shift',
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
     await process(env);
 
     // Frame 15: Hub forwards, Alice commits A-H
@@ -1044,10 +887,6 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     await process(env);
     logPending();
 
-    snap(env, 'Payment 2/2: Hub → Bob proposal', {
-      description: 'Frame 15: Hub forwards second payment',
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
     await process(env);
 
     // Frame 16: Bob ACKs Hub
@@ -1094,17 +933,10 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       }
     }
 
-    snap(env, 'Payments Complete: $250K A→B', {
-      description: 'Frame 17: Both payments complete - $250K shifted',
-      what: 'Two $125K payments complete. Total: $250K shifted from Alice to Bob via Hub.',
-      why: 'Hub now has $250K uninsured liability to Bob (TR=$250K). Rebalancing needed!',
-      keyMetrics: [
-        'A-H shift: -$250K (Alice paid Hub)',
-        'H-B shift: -$250K (Hub owes Bob)',
-        'TR (Total Risk): $250K uninsured',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
+    const bobAfterPayments = accountView(bob, hub);
+    const aliceAfterPayments = accountView(alice, hub);
+    tell(env, { ...AHB_PAYMENTS.bothDone(payment1 + payment2, bobAfterPayments.outPeerCredit, bobCreditAmount, payment1 + payment2), focusEntityIds: route });
+    tell(env, { ...AHB_PAYMENTS.hubDefault(aliceCollateralAmount, aliceAfterPayments.inCollateral, bobAfterPayments.outPeerCredit, bobCreditAmount), focusEntityIds: route });
     await process(env);
 
     // ============================================================================
@@ -1119,6 +951,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
     // Frame 18: Bob initiates B→H→A
     console.log('🏃 FRAME 18: Bob initiates B→H→A $50K');
+    announce(env, AHB_PAYMENTS.reverse(reversePayment));
     await process(env, [{
       entityId: bob.id,
       signerId: bob.signer,
@@ -1144,11 +977,6 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     console.log(`   After Bob initiates: B-H offdelta=${bhDelta18}, H-A offdelta=${haExpected18}`);
     // Note: At this point Bob's local mempool has the tx but Hub hasn't received yet
 
-    snap(env, 'Reverse Payment: Bob → Hub', {
-      description: 'Frame 18: Bob initiates B→H→A',
-      what: 'Bob sends $50K to Alice via Hub. First hop: B→H',
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
     await process(env);
 
     // Frame 19: Hub receives from Bob, forwards to Alice
@@ -1173,11 +1001,6 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       throw new Error(`B-H exposure should not grow after reverse leg starts: before=${hbDeltaFinal}, after=${bhDelta19}`);
     }
 
-    snap(env, 'Reverse Payment: Hub → Alice', {
-      description: 'Frame 19: Hub forwards to Alice',
-      what: 'Hub receives B→H and forwards H→A proposal',
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
     await process(env);
 
     // Frame 20: Alice ACKs Hub
@@ -1216,16 +1039,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }
     console.log(`✅ Reverse payment verified: A-H=${ahDeltaRev}, B-H=${bhDeltaRev} (net exposure reduced)`);
 
-    snap(env, 'Reverse Payment: $50K B→A', {
-      description: 'Frame 21: Reverse payment complete',
-      what: 'Bob paid Alice $50K via Hub. Net position: $200K shifted A→B.',
-      keyMetrics: [
-        'A-H shift: -$200K (was -$250K)',
-        'B-H shift: -$200K (was -$250K)',
-        'TR: $200K (reduced from $250K)',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
+    const grossFlow = payment1 + payment2 + reversePayment;
+    tell(env, { ...AHB_PAYMENTS.netPosition(payment1 + payment2 - reversePayment, accountView(alice, hub).inCollateral, accountView(bob, hub).outPeerCredit, grossFlow), focusEntityIds: route });
     await process(env);
 
     // ============================================================================
@@ -1261,17 +1076,22 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     const aliceIsLeftAH = isLeftEntity(alice.id, hub.id);
     const ahLeftDiff = aliceIsLeftAH ? 0n : rebalanceAmount; // Hub receives reserve
     const ahRightDiff = aliceIsLeftAH ? rebalanceAmount : 0n;
-    const ahOndeltaDiff = aliceIsLeftAH ? rebalanceAmount : -rebalanceAmount; // Net-sender is Alice
+    // ondelta is LEFT's share of the collateral (Depository._applyAccountDelta). Hub takes
+    // its own share out: when Hub is LEFT its share shrinks by the amount; when Hub is RIGHT
+    // Alice's (left) share is untouched. Moving ondelta for a right-side withdrawal would
+    // hand Alice an unsecured claim on Hub of the same size.
+    const ahOndeltaDiff = aliceIsLeftAH ? 0n : -rebalanceAmount;
 
     const ahSettlementDiffs = [{
       tokenId: USDC_TOKEN_ID,
       leftDiff: ahLeftDiff,              // Hub reserve +$200K (side depends on ordering)
       rightDiff: ahRightDiff,
       collateralDiff: -rebalanceAmount,  // Account collateral -$200K
-      ondeltaDiff: ahOndeltaDiff,        // ondelta toward zero (settles off-chain debt)
+      ondeltaDiff: ahOndeltaDiff,        // left share changes only if Hub (left) withdraws
     }];
 
     // Step 1: Alice proposes settlement
+    announce(env, AHB_REBALANCE.release(rebalanceAmount, accountView(alice, hub).inCollateral));
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -1298,19 +1118,6 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
         data: { counterpartyEntityId: hub.id }
       }]
     }]);
-
-    snap(env, 'Rebalancing 1/2: Pull from Net-Sender', {
-      description: 'Frame 22: Alice-Hub Settlement initiated',
-      what: 'Hub withdraws $200K from Alice (net-sender) via A-H collateral.',
-      why: 'Alice spent $200K off-chain → excess collateral. Hub pulls to rebalance.',
-      tradfiParallel: 'Like margin release: net-sender\'s locked funds freed for redistribution.',
-      keyMetrics: [
-        'Alice = NET-SENDER (spent $200K)',
-        'A-H collateral: $500K → $300K',
-        'Hub reserve: +$200K (pulled)',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
 
     // ✅ Store pre-settlement state for assertions
     const [, alicePreSettle] = findReplica(env, alice.id);
@@ -1361,16 +1168,11 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
     console.log(`   A-H after settlement: collateral=${ahDeltaRebal?.collateral}, ondelta=${ahDeltaRebal?.ondelta}`);
 
-    snap(env, 'Rebalancing 1/2: Net-Sender Pulled', {
-      description: 'Frame 23: Alice-Hub Settlement complete',
-      what: 'Hub pulled $200K from Alice (net-sender). Ready to deposit to Bob.',
-      keyMetrics: [
-        'A-H collateral: $300K (Alice\'s excess released)',
-        'Hub reserve: +$200K (holding for Bob)',
-        'Next: deposit to net-receiver',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
+    // The settlement paid Hub its share; neither side may now hold an unsecured claim.
+    const aliceAfterRelease = accountView(alice, hub);
+    assert(aliceAfterRelease.inOwnCredit === 0n && aliceAfterRelease.outPeerCredit === 0n,
+      `A-H release left an unsecured position: alice owes ${aliceAfterRelease.inOwnCredit}, hub owes ${aliceAfterRelease.outPeerCredit}`, env);
+    tell(env, AHB_REBALANCE.released(rebalanceAmount, ahDeltaRebal.collateral, aliceAfterRelease.inCollateral));
     await process(env);
 
     // ============================================================================
@@ -1387,17 +1189,22 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     const hubIsLeftHB = isLeftEntity(hub.id, bob.id);
     const hbLeftDiff = hubIsLeftHB ? -rebalanceAmount : 0n; // Hub pays reserve
     const hbRightDiff = hubIsLeftHB ? 0n : -rebalanceAmount;
-    const hbOndeltaDiff = hubIsLeftHB ? rebalanceAmount : -rebalanceAmount; // Net-sender is Hub
+    // Hub's new collateral must back Bob's claim. Hub LEFT: its allocation rises by the
+    // deposit, cancelling its debt so Bob (right) owns the collateral. Hub RIGHT: Bob (left)
+    // already holds the claim as delta, so the collateral becomes his without moving ondelta.
+    // Moving ondelta down here would erase Bob's claim and give Hub the collateral.
+    const hbOndeltaDiff = hubIsLeftHB ? rebalanceAmount : 0n;
 
     const hbSettlementDiffs = [{
       tokenId: USDC_TOKEN_ID,
       leftDiff: hbLeftDiff,              // Hub reserve -$200K (side depends on ordering)
       rightDiff: hbRightDiff,
       collateralDiff: rebalanceAmount,   // Account collateral +$200K
-      ondeltaDiff: hbOndeltaDiff,         // ondelta toward zero (insures Bob's position)
+      ondeltaDiff: hbOndeltaDiff,         // collateral is allocated to Bob's claim
     }];
 
     // Step 1: Hub proposes settlement
+    announce(env, AHB_REBALANCE.collateralise(rebalanceAmount));
     await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,
@@ -1431,18 +1238,6 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     const hubPreHBReserve = hubPreHBSettle.state.reserves.get(USDC_TOKEN_ID) || 0n;
     console.log(`   H-B pre-settlement: collateral=${hbPreCollateral}, Hub reserve=${hubPreHBReserve}`);
 
-    snap(env, 'Rebalancing 2/2: Deposit to Net-Receiver', {
-      description: 'Frame 24: Hub-Bob Settlement initiated',
-      what: 'Hub deposits $200K to Bob (net-receiver) via H-B collateral.',
-      why: 'Bob received $200K off-chain → needs collateral. Hub deposits to insure.',
-      tradfiParallel: 'Like margin posting: net-receiver gets collateral backing.',
-      keyMetrics: [
-        'Bob = NET-RECEIVER (received $200K)',
-        'H-B collateral: $0 → $200K',
-        'Hub reserve: -$200K (deposited)',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
     await process(env);
 
     // Broadcast settlement to J-Machine via jOutput pattern
@@ -1486,16 +1281,11 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
     console.log(`   H-B after settlement: collateral=${hbDeltaRebal?.collateral}, ondelta=${hbDeltaRebal?.ondelta}`);
 
-    snap(env, 'Rebalancing 2/2: Net-Receiver Insured', {
-      description: 'Frame 25: Hub-Bob Settlement complete',
-      what: 'Hub deposited $200K to Bob (net-receiver). Bob now fully collateralized.',
-      keyMetrics: [
-        'H-B collateral: $200K',
-        'Bob\'s uninsured balance: $200K → $0',
-        'Rebalance complete!',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
+    // Bob's claim must now be his collateral, not erased: his share equals the deposit.
+    const bobAfterCollateral = accountView(bob, hub);
+    assert(bobAfterCollateral.outCollateral === rebalanceAmount && bobAfterCollateral.outPeerCredit === 0n,
+      `H-B deposit did not collateralise Bob: share=${bobAfterCollateral.outCollateral}, unsecured=${bobAfterCollateral.outPeerCredit}`, env);
+    tell(env, { ...AHB_REBALANCE.rebalanced(rebalanceAmount, ahDeltaRebal.collateral, bobAfterCollateral.outPeerCredit, grossFlow), focusEntityIds: route });
     await process(env);
 
     // ============================================================================
@@ -1503,19 +1293,6 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     // ============================================================================
     console.log('\n📊 FRAME 26: Final State - Rebalancing Complete');
 
-    snap(env, 'Rebalancing Complete: Zero Risk', {
-      description: 'Frame 26: Rebalancing Complete - TR = $0',
-      what: 'Net-sender (Alice) → Hub → Net-receiver (Bob). All positions collateralized.',
-      why: 'Rebalance moved collateral from spenders to receivers. Bob\'s uninsured risk eliminated.',
-      tradfiParallel: 'Like end-of-day netting: excess margin released, deficits covered.',
-      keyMetrics: [
-        'Bob\'s uninsured: $200K → $0',
-        'Alice (net-sender): collateral released',
-        'Bob (net-receiver): collateral deposited',
-        'System: 100% collateralized',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
-    });
     await process(env);
 
   // ============================================================================
@@ -1540,6 +1317,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   const hubToAlice = usd(5_000);
   const phase6Credit = usd(500_000); // Cover existing debt + payments
 
+  announce(env, AHB_STRESS_STORY.aliceCredit(phase6Credit));
   await process(env, [{
     entityId: alice.id,  // Alice is creditor
     signerId: alice.signer,
@@ -1585,6 +1363,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   console.log(`   Before: A-H offdelta = ${ahDeltaBefore}`);
 
   // CRITICAL: Send both payments in SAME process() call (simultaneous)
+  announce(env, AHB_STRESS_STORY.simultaneous(aliceToHub, hubToAlice));
   await process(env, [
     {
       entityId: alice.id,
@@ -1771,6 +1550,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
   const collateralDiff = disputeCollateralTarget - bobDelta7.collateral;
   const ondeltaDiff = disputeOndeltaTarget - bobDelta7.ondelta;
+  announce(env, AHB_STRESS_STORY.worstCase(disputeCollateralTarget, disputeCollateralTarget + disputeShortfall));
 
   if (collateralDiff !== 0n || ondeltaDiff !== 0n) {
     console.log('⚙️  Adjusting on-chain collateral/ondelta for dispute setup via SettlementWorkspace...');
@@ -1923,10 +1703,15 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   assert(bobDeltaTarget.collateral === disputeCollateralTarget, 'PHASE 7: collateral mismatch');
   assert(bobDeltaTarget.ondelta === disputeOndeltaTarget, 'PHASE 7: ondelta mismatch');
   assert(bobDeltaTarget.offdelta === disputeOffdeltaTarget, 'PHASE 7: offdelta mismatch');
+  const bobWorstCase = deriveDelta(bobDeltaTarget, isLeftEntity(bob.id, hub.id));
+  assert(bobWorstCase.outCollateral === disputeCollateralTarget && bobWorstCase.outPeerCredit === disputeShortfall,
+    `PHASE 7: worst case is not ${disputeCollateralTarget} covered + ${disputeShortfall} unsecured`, env);
+  tell(env, { ...AHB_STRESS_STORY.worstCaseReady(bobWorstCase.outCollateral, bobWorstCase.outPeerCredit), focusEntityIds: [hub.id, bob.id] });
 
   const hubReserveBeforeDrain = await jadapter.getReserves(hub.id, USDC_TOKEN_ID);
   if (hubReserveBeforeDrain > 0n) {
     console.log(`🧹 Draining Hub reserves to force debt: ${hubReserveBeforeDrain}`);
+    announce(env, AHB_STRESS_STORY.drain(hubReserveBeforeDrain));
     await submitReserveToReserveBatch(env, jadapter, hub.signer, hub.id, alice.id, USDC_TOKEN_ID, hubReserveBeforeDrain);
     await processJEvents(env);
     await process(env);
@@ -1945,6 +1730,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
   // 1) Bob freezes the bilateral lane and removes any Account-owned book rows.
   console.log('\n📝 STEP 1: Bob prepares dispute...');
+  announce(env, AHB_STRESS_STORY.bobExits);
   await process(env, [{
     entityId: bob.id,
     signerId: bob.signer,
@@ -1959,6 +1745,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
   // 2) Bob broadcasts to J-machine
   console.log('📤 STEP 2: Bob broadcasts dispute to J-machine...');
+  announce(env, AHB_STRESS_STORY.filed('Bob', disputeWindowText(bobHubDispute.state.disputeConfig)));
   await process(env, [{
     entityId: bob.id,
     signerId: bob.signer,
@@ -2225,6 +2012,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   assert(debtMessage.includes(hub.id.slice(-8)), 'H14: DebtCreated message should name Hub');
   assert(debtMessage.includes(bob.id.slice(-8)), 'H14: DebtCreated message should name Bob');
   console.log('   DebtCreated ledger verified: Hub owes Bob $50K USDC ✅');
+  tell(env, AHB_STRESS_STORY.bobPaid(bobReserveAfterDispute - bobReserveBeforeDispute, debt.remainingAmount));
 
   // H10 AUDIT FIX: Verify solvency AFTER dispute finalized. DisputeFinalized now
   // clears finalized collateral/ondelta in runtime state, matching Depository.sol.
@@ -2243,6 +2031,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   console.log('\n⚖️ PHASE 8: Independent-account dispute edge cases (early finalize)');
   // Bob-Hub is permanently closed by Phase 7. Exercise the remaining edge
   // cases on Alice-Hub instead of reviving finalized bilateral state.
+  announce(env, AHB_STRESS_STORY.aliceExits);
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
@@ -2259,6 +2048,11 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   const edgeDisputeStarts = aliceAfterEdgeStartAttempt.state.jBatchState?.batch.disputeStarts.length ?? 0;
   assert(edgeDisputeStarts > 0, 'PHASE 8: Alice disputeStart not enqueued');
 
+  const aliceHubDisputeConfig = aliceAfterEdgeStartAttempt.state.accounts.get(hub.id)?.state.disputeConfig;
+  if (!aliceHubDisputeConfig) throw new Error('PHASE 8: Alice-Hub dispute config missing');
+  const aliceReserveBeforeExit = await jadapter.getReserves(alice.id, USDC_TOKEN_ID);
+  const hubReserveBeforeExit = await jadapter.getReserves(hub.id, USDC_TOKEN_ID);
+  announce(env, AHB_STRESS_STORY.filed('Alice', disputeWindowText(aliceHubDisputeConfig)));
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
@@ -2291,7 +2085,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   // Starter tries to finalize before timeout (should fail)
   console.log('🧪 STEP 8a: Alice attempts early finalize (should fail)...');
   const edgeInfoBeforeFail = vm?.getAccountInfo ? await vm.getAccountInfo(alice.id, hub.id) : null;
-  const jRepEarly = env.state.jReplicas?.get('AHB Demo');
+  const jRepEarly = env.state.jReplicas?.get(DEMO_JURISDICTION_NAME);
   if (!jRepEarly) {
     throw new Error('PHASE 8: J-Machine not found for early finalize check');
   }
@@ -2379,6 +2173,10 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   const [, aliceEdgeFinal] = findReplica(env, alice.id);
   assert(!aliceEdgeFinal.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute not cleared after timeout');
   console.log('✅ Committed proof finalized after timeout and converged on both entities');
+  tell(env, AHB_STRESS_STORY.aliceRecovered(
+    (await jadapter.getReserves(alice.id, USDC_TOKEN_ID)) - aliceReserveBeforeExit,
+    (await jadapter.getReserves(hub.id, USDC_TOKEN_ID)) - hubReserveBeforeExit,
+  ));
 
   checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 8 POST-DISPUTE');
 
@@ -2487,6 +2285,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
         signerId: carol.signer,
         data: {
           isProposer: true,
+          profileName: carol.name,
           position: carolPosition,
           config: carolConfig
         }
@@ -2507,16 +2306,11 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }
     console.log(`✅ Prefunded ${carol.name} signer ${carol.signer} (${carolWallet.address.slice(0, 10)}...)`);
 
-    snap(env, 'Carol Joins (Cooperative Close Demo)', {
-      description: 'Carol is added after the main AHB flow for a clean cooperative close demo.',
-      what: 'New entity Carol joins the jurisdiction with a single-signer board.',
-      why: 'Demonstrate a clean cooperative close after the main dispute scenarios.',
-      tradfiParallel: 'A new participant opens an account after the main settlement cycle.',
-      keyMetrics: [
-        'Carol: Entity created',
-        'Reserves: $0 (pre-funding)',
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
+    announce(env, {
+      title: 'Carol joins after the failure test',
+      what: 'A new bank, Carol, registers on the Depository with its own signing key.',
+      why: 'The rest of the network keeps working: a new participant needs only its own account with a counterparty.',
+      tradfiParallel: 'A new participant joining the settlement system.',
     });
     await process(env);
 
@@ -2622,17 +2416,12 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     await process(env);
     await process(env);
 
-    snap(env, 'Carol Has Position with Hub', {
-      description: 'Hub extended credit and made a $15K payment to Carol, creating a real position to settle.',
-      what: 'Carol now has $15K owed to her by Hub (ondelta).',
-      why: 'Cooperative close must handle real positions, not just empty accounts.',
-      tradfiParallel: 'Closing a credit card with an outstanding balance that must be paid off.',
-      keyMetrics: [
-        `Carol collateral: ${formatUSD(carolCollateral)}`,
-        `Hub credit to Carol: ${formatUSD(hubCreditToCarol)}`,
-        `Hub payment to Carol: ${formatUSD(hubPaymentToCarol)}`,
-      ],
-      expectedSolvency: TOTAL_SOLVENCY,
+    tell(env, {
+      title: 'Carol has an open position with Hub',
+      what: `Carol posted ${formatTokenMoney(USDC_TOKEN_ID, carolCollateral)} of collateral, Hub granted her ${formatTokenMoney(USDC_TOKEN_ID, hubCreditToCarol)} of credit, and Hub paid her ${formatTokenMoney(USDC_TOKEN_ID, hubPaymentToCarol)} inside their account.`,
+      why: 'Closing an account cooperatively must settle a real position, not only an empty account.',
+      tradfiParallel: 'Terminating a bilateral agreement with an open position: the balance is settled before the account closes.',
+      keyMetrics: [`Carol collateral: ${formatTokenMoney(USDC_TOKEN_ID, carolCollateral)}`, `Hub paid Carol: ${formatTokenMoney(USDC_TOKEN_ID, hubPaymentToCarol)}`],
     });
     await process(env);
 
@@ -2657,7 +2446,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
         ]
       }]);
       await processUntil(env, () => {
-        const jRep = env.state.jReplicas?.get('AHB Demo');
+        const jRep = env.state.jReplicas?.get(DEMO_JURISDICTION_NAME);
         return jRep ? jRep.mempool.length === 0 : false;
       }, 20, 'Hub reserve replenish');
       await processJEvents(env);
@@ -2727,7 +2516,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       }]);
 
       await processUntil(env, () => {
-        const jRep = env.state.jReplicas?.get('AHB Demo');
+        const jRep = env.state.jReplicas?.get(DEMO_JURISDICTION_NAME);
         return jRep ? jRep.mempool.length === 0 : false;
       }, 40, 'Carol cooperative close');
 

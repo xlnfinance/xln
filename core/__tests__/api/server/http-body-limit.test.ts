@@ -47,3 +47,25 @@ test('a malformed server timeout env fails startup instead of becoming NaN', () 
   expect(child.exitCode).not.toBe(0);
   expect(child.stderr.toString()).toContain('ENV_POSITIVE_INTEGER_INVALID:TOKEN_CATALOG_TIMEOUT_MS:6s');
 });
+
+
+const post = (path: string, length: number): Request => new Request(`http://127.0.0.1${path}`, {
+  method: 'POST', body: new Uint8Array(length),
+});
+
+describe('server body limits at the canonical streamed boundary', () => {
+  test('the reported 1,102,884-byte wallet backup and the exact proxy ceiling are accepted', async () => {
+    expect(await enforceApiBodyLimit(post('/api/watchtower-proxy', 1_102_884))).toBeNull();
+    expect(await enforceApiBodyLimit(post('/api/watchtower-proxy', WATCHTOWER_PROXY_BODY_MAX_BYTES))).toBeNull();
+  });
+
+  test('the proxy refuses one byte over its ceiling without Content-Length', async () => {
+    expect((await enforceApiBodyLimit(post('/api/watchtower-proxy', WATCHTOWER_PROXY_BODY_MAX_BYTES + 1)))?.status).toBe(413);
+  });
+
+  test('other routes retain the ordinary 1 MiB limit', async () => {
+    expect(await enforceApiBodyLimit(post('/api/faucet/offchain', API_BODY_MAX_BYTES))).toBeNull();
+    expect((await enforceApiBodyLimit(post('/api/faucet/offchain', API_BODY_MAX_BYTES + 1)))?.status).toBe(413);
+    expect((await enforceApiBodyLimit(post('/rpc', 1_102_884)))?.status).toBe(413);
+  });
+});

@@ -17,22 +17,6 @@ export function GateWelcome({ onMode, onUnlock, onLearn, testNetwork }: Props) {
   const others = vaults.filter(vault => vault.id !== selected?.id);
   return (
     <div className="gate-cards gate-welcome fade-in">
-      <div className="gate-entry-actions">
-        <button type="button" className="gate-entry-action" onClick={() => onMode('create')}>
-          <Icon name="plus" size={18} />
-          <span>
-            <strong>Create a wallet</strong>
-            <small>Use a name and passphrase</small>
-          </span>
-        </button>
-        <button type="button" className="gate-entry-action" onClick={() => onMode('import')}>
-          <Icon name="receive" size={18} />
-          <span>
-            <strong>Restore a wallet</strong>
-            <small>Import a phrase · 12 or 24 words</small>
-          </span>
-        </button>
-      </div>
       {selected && (
         <section className="gate-resume">
           <p className="caps muted">Your saved wallet</p>
@@ -40,7 +24,7 @@ export function GateWelcome({ onMode, onUnlock, onLearn, testNetwork }: Props) {
           <p className="muted mono" title={selected.id}>
             Wallet · {selected.id.slice(-8)}
           </p>
-          <button type="button" className="btn" onClick={() => onUnlock(selected)}>
+          <button type="button" className="btn primary" onClick={() => onUnlock(selected)}>
             Continue <Icon name="arrow" size={16} />
           </button>
           {others.length > 0 && (
@@ -64,13 +48,32 @@ export function GateWelcome({ onMode, onUnlock, onLearn, testNetwork }: Props) {
               <p className="muted">Use the full wallet on the test network. Choose your own payments and trades.</p>
           </>
         )}
-          <button type="button" className={`btn ${selected ? 'quiet' : ''}`} onClick={onLearn} data-testid="gate-learn">
+          <button type="button" className={`btn ${selected ? 'quiet' : 'primary'}`} onClick={onLearn} data-testid="gate-learn">
             Open a test wallet
           <Icon name="arrow" size={16} />
         </button>
           <p className="note">No password needed. Encrypted on this device. Test funds only.</p>
       </section>
       )}
+      <div className="gate-or" aria-hidden>
+        <span>or</span>
+      </div>
+      <div className="gate-entry-actions">
+        <button type="button" className="gate-entry-action" onClick={() => onMode('create')}>
+          <Icon name="plus" size={18} />
+          <span>
+            <strong>Create a wallet</strong>
+            <small>Use a name and passphrase</small>
+          </span>
+        </button>
+        <button type="button" className="gate-entry-action" onClick={() => onMode('import')}>
+          <Icon name="receive" size={18} />
+          <span>
+            <strong>Restore a wallet</strong>
+            <small>Import a phrase · 12 or 24 words</small>
+          </span>
+        </button>
+      </div>
       <details className="gate-advanced">
         <summary>Advanced connection</summary>
         <button type="button" className="btn quiet" onClick={() => onMode('remote')}>

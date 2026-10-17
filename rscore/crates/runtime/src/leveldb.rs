@@ -1344,7 +1344,7 @@ mod tests {
 
     fn head_bytes(latest: u64, materialized: u64, snapshot: u64) -> Vec<u8> {
         let value = serde_json::json!({
-            "schemaVersion": 5,
+            "schemaVersion": crate::storage::STORAGE_SCHEMA_VERSION,
             "latestHeight": latest,
             "latestMaterializedHeight": materialized,
             "latestSnapshotHeight": snapshot,

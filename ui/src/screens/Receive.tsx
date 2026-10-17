@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { HOME, PageHead } from '../components/PageHead';
 import { useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { buildWalletPayHref, buildXlnInvoiceDeepLink, buildXlnInvoiceUri } from '$lib/utils/xlnInvoice';
-import { Bar } from '../components/Bars';
 import { CopyId } from '../components/CopyId';
 import { Icon } from '../components/Icons';
 import { TokenPicker } from '../components/TokenPicker';
@@ -10,7 +10,6 @@ import { ReceiveCapacity } from '../components/ReceiveCapacity';
 import { useApp } from '../runtime/store';
 import { formatMoney, parseAmount } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
-import { usdOf } from '../runtime/financial/prices';
 import { useWallet } from '../runtime/views';
 
 /**
@@ -67,23 +66,13 @@ export function Receive() {
 
 	return (
 		<div className="screen fade-in">
-			<div className="screen-header">
-				<span className="screen-title">
-					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
-						<Icon name="chevronLeft" size={18} />
-					</button>
-					Receive
-				</span>
-			</div>
+			<PageHead
+				title="Receive"
+				parent={HOME}
+			/>
 
 			<div className="two-col">
-			<div className="stack" style={{ alignItems: 'center' }}>
-				{qr && (
-					<div className="qr">
-						<img src={qr} alt="Invoice QR" />
-					</div>
-				)}
-
+			<div className="stack">
 				<div className="stack" style={{ width: '100%' }}>
 					<div className="field">
 						<div className="field-head">
@@ -99,9 +88,8 @@ export function Receive() {
 								}}
 							/>
 						</div>
-						<Bar segments={[{ usd: usdOf(selectedTokenId, receivable), kind: 'coll' }]} height={4} />
 					</div>
-					{accounts.length > 0 ? <label className="field">Prepare incoming account
+					{accounts.length > 0 ? <label className="field"><span className="field-label">Prepare incoming account</span>
 						<select className="input" value={hub?.counterpartyId ?? ''} onChange={event => setAccountId(event.target.value)} data-testid="receive-account">
 							{accounts.map(account => <option key={account.counterpartyId} value={account.counterpartyId}>{account.label} · {wallet.jurisdiction}</option>)}
 						</select>
@@ -113,7 +101,7 @@ export function Receive() {
 						disabled={hub.disputed} /> : null}
 					<div className="field">
 						<span className="field-label">Note · optional</span>
-						<input className="input" value={description} onChange={event => setDescription(event.target.value)} placeholder="What is this for?" />
+						<input className="input" value={description} onChange={event => setDescription(event.target.value)} placeholder="What is this for?" data-testid="receive-note" />
 					</div>
 				</div>
 
@@ -148,6 +136,11 @@ export function Receive() {
 					<button type="button" className="btn primary" style={{ marginTop: 14, width: '100%' }} onClick={() => void copy(walletHref, 'Payment link')} data-testid="receive-copy-link">
 						<Icon name="link" size={14} /> Copy payment link
 					</button>
+					{qr && (
+						<div className="qr receive-qr">
+							<img src={qr} alt="Invoice QR" />
+						</div>
+					)}
 					<button type="button" className="btn quiet" style={{ marginTop: 8, width: '100%' }} onClick={() => window.print()} data-testid="receive-print" title="The code and the amount on paper, or as a PDF to attach to an invoice">
 						Print / PDF
 					</button>
@@ -164,10 +157,11 @@ export function Receive() {
 					</details>
 				</div>
 				<div className="card">
-					<h3 className="caps">Your entity id</h3>
-					<p style={{ marginTop: 8 }}>
-						<CopyId value={entityId} label="Entity id" head={10} tail={6} />
-					</p>
+					<h3 className="caps">Entity ID</h3>
+					<div className="id-box" style={{ marginTop: 8 }}>
+						<CopyId value={entityId} label="Entity ID" full />
+						<Icon name="copy" size={14} />
+					</div>
 					<p className="note" style={{ marginTop: 10 }}>
 						Anyone with an account route to you can pay this id directly. Payments arrive instantly up to your inbound room.
 					</p>

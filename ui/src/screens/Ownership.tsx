@@ -1,8 +1,7 @@
 import { Formation } from '../components/Formation';
+import { MANAGE, PageHead } from '../components/PageHead';
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { CopyId } from '../components/CopyId';
-import { Icon } from '../components/Icons';
 import { useApp } from '../runtime/store';
 import { formatMoney, shortId } from '../runtime/format';
 import { useWallet } from '../runtime/views';
@@ -29,7 +28,6 @@ const formatUnix = (seconds: bigint): string => seconds > 0n ? new Date(Number(s
  * and a takeover of another entity this signer already validates.
  */
 export function Ownership() {
-	const navigate = useNavigate();
 	const entityId = useApp(s => s.activeEntityId);
 	const toast = useApp(s => s.toast);
 	const height = useApp(s => s.height);
@@ -81,14 +79,10 @@ export function Ownership() {
 
 	return (
 		<div className="screen fade-in">
-			<div className="screen-header">
-				<span className="screen-title">
-					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
-						<Icon name="chevronLeft" size={18} />
-					</button>
-					Ownership
-				</span>
-			</div>
+			<PageHead
+				title="Ownership"
+				parent={MANAGE}
+			/>
 			<Formation />
 			<div className="two-col">
 				<div>

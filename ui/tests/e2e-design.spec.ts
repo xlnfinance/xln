@@ -16,7 +16,7 @@ test.describe('wallet UI design presets', () => {
 		await page.getByRole('link', { name: 'Settings' }).first().click();
 		await expect(page.getByTestId('design-sample')).toBeVisible();
 		const html = page.locator('html');
-		await expect(html).toHaveAttribute('data-material', 'bank');
+		await expect(html).toHaveAttribute('data-material', 'obsidian');
 		const initialAccent = await cssVar(page, '--accent');
 
 		await page.getByTestId('design-material-terminal').click();

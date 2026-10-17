@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Legend } from '../components/Bars';
 import { CopyId } from '../components/CopyId';
+import { HOME, PageHead } from '../components/PageHead';
 import { Icon } from '../components/Icons';
 import { Sheet } from '../components/Sheet';
 import { TokenSection } from '../components/account/TokenSection';
@@ -85,28 +85,34 @@ export function AccountDetail() {
 						? 'Settling'
 						: 'Open';
 
+	const statusTone =
+		dispute && dispute.phase !== 'none' ? 'st-dispute' : account?.settlement === 'awaiting_you' ? 'st-pending' : 'st-settled';
+
 	return (
 		<div className="screen fade-in">
-			<div className="screen-header">
-				<span className="screen-title">
-					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
-						<Icon name="chevronLeft" size={18} />
-					</button>
-					<span>
-						<span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-							{label}
-							{account?.isHub ? <span className="chip hub">hub</span> : null}
+			<PageHead
+				parent={HOME}
+				title={
+					<>
+						<span className="avatar">{label.slice(0, 1).toUpperCase()}</span>
+						{label}
+						{account?.isHub ? <span className="chip hub">hub</span> : null}
+						<span className={`status-pill ${statusTone}`} data-testid="account-status">
+							{statusLabel}
 						</span>
-						<span style={{ display: 'block' }}>
-							<CopyId value={counterpartyId.toLowerCase()} label="Entity id" />
-						</span>
-					</span>
-				</span>
-			</div>
+					</>
+				}
+				sub={
+					<>
+						<CopyId value={counterpartyId.toLowerCase()} label="Entity ID" />
+						{wallet.jurisdiction ? ` · ${wallet.jurisdiction}` : ''} · {(account?.frameHeight ?? 0).toLocaleString('en-US')} frames signed
+					</>
+				}
+			/>
 
 			<div className="two-col">
 			<div>
-			<div className="actions" style={{ margin: '0 0 18px' }}>
+			<div className="actions pills" style={{ margin: '0 0 18px' }}>
 				<button type="button" className="btn primary" disabled={account?.disputed} onClick={() => navigate(`/pay?to=${counterpartyId.toLowerCase()}`)}>
 					<Icon name="pay" size={18} />
 					Pay
@@ -161,55 +167,43 @@ export function AccountDetail() {
 				</p>
 			) : null}
 			{account ? <SettlementCard account={account} wallet={wallet} /> : null}
-			{account && lanes.active.length > 0 ? (
-				<div style={{ margin: '0 0 12px' }}>
-					<Legend />
-				</div>
-			) : null}
-			{account && lanes.active.map(token => (
-				<TokenSection key={token.tokenId} token={token} disputed={account.disputed} closed={account.dispute === 'closed'} />
-			))}
-			{lanes.empty.length > 0 ? (
-				<button type="button" className="btn quiet" style={{ marginBottom: 14 }} onClick={() => setShowEmpty(value => !value)} data-testid="account-unused-lanes" data-open={showEmpty ? 'yes' : 'no'}>
-					{showEmpty ? 'Hide' : 'Show'} {lanes.empty.length} unused {lanes.empty.length === 1 ? 'token' : 'tokens'} ·{' '}
-					{lanes.empty.map(token => getTokenMeta(token.tokenId).symbol).join(', ')}
+			<div className="tabs account-tabs">
+				<button type="button" className={showFrames ? '' : 'active'} aria-pressed={!showFrames} onClick={() => setShowFrames(false)} data-testid="account-tab-balances">
+					Balances
 				</button>
-			) : null}
-			{account && showEmpty ? lanes.empty.map(token => <TokenSection key={token.tokenId} token={token} disputed={account.disputed} closed={account.dispute === 'closed'} />) : null}
-			<button
-				type="button"
-				className="btn quiet"
-				style={{ marginBottom: 14 }}
-				onClick={() => setShowFrames(value => !value)}
-				data-testid="account-frames-toggle"
-				data-open={showFrames ? 'yes' : 'no'}
-			>
-				{showFrames ? 'Hide' : 'Show'} the signed pages of this account
-			</button>
-			{showFrames ? <FrameHistory entityId={wallet.entityId} counterpartyId={counterpartyId.toLowerCase()} /> : null}
+				<button type="button" className={showFrames ? 'active' : ''} aria-pressed={showFrames} onClick={() => setShowFrames(true)} data-testid="account-tab-frames">
+					Signed frames
+				</button>
+			</div>
+			{showFrames ? (
+				<FrameHistory entityId={wallet.entityId} counterpartyId={counterpartyId.toLowerCase()} />
+			) : (
+				<>
+					{lanes.active.map(token => (
+						<TokenSection key={token.tokenId} token={token} disputed={account?.disputed ?? false} closed={account?.dispute === 'closed'} />
+					))}
+					{lanes.empty.length > 0 ? (
+						<div className="account-links">
+							<button type="button" className="btn quiet" onClick={() => setShowEmpty(value => !value)} data-testid="account-unused-lanes" data-open={showEmpty ? 'yes' : 'no'}>
+								{showEmpty ? 'Hide' : 'Show'} {lanes.empty.length} unused {lanes.empty.length === 1 ? 'token' : 'tokens'} ·{' '}
+								{lanes.empty.map(token => getTokenMeta(token.tokenId).symbol).join(', ')}
+							</button>
+						</div>
+					) : null}
+					{showEmpty ? lanes.empty.map(token => <TokenSection key={token.tokenId} token={token} disputed={account?.disputed ?? false} closed={account?.dispute === 'closed'} />) : null}
+				</>
+			)}
 			</div>
 			<div className="aside">
 				<div className="card">
-					<h3 className="caps">This account</h3>
-					<div className="kv" style={{ marginTop: 8 }}>
-						<span className="k">Counterparty</span>
-						<span className="v">{account?.isHub ? 'Hub' : 'Direct'}</span>
-					</div>
-					<div className="kv">
-						<span className="k">Network</span>
-						<span className="v">{wallet.jurisdiction || '—'}</span>
-					</div>
-					<div className="kv">
-						<span className="k">Frames signed</span>
-						<span className="v num">{(account?.frameHeight ?? 0).toLocaleString('en-US')}</span>
-					</div>
+					<h3 className="caps">What is at stake</h3>
 					{account ? (
 						(() => {
 							const safety = accountSafety(account);
 							return (
 								<>
 									<div className="kv" data-testid="account-exposure">
-										<span className="k">They owe you, uncovered</span>
+										<span className="k">At risk · they owe you</span>
 										<span className="v num" style={{ color: safety.riskUsd > 0 ? 'var(--risk)' : undefined }}>
 											{formatUsd(safety.riskUsd)}
 											{safety.riskUsd > 0 && account.isHub && account.dispute === 'none' ? (
@@ -239,12 +233,6 @@ export function AccountDetail() {
 							);
 						})()
 					) : null}
-					<div className="kv">
-						<span className="k">Status</span>
-						<span className={`v ${dispute && dispute.phase !== 'none' ? 'st-dispute' : account?.settlement === 'awaiting_you' ? 'st-pending' : 'st-settled'}`} data-testid="account-status">
-							{statusLabel}
-						</span>
-					</div>
 					<p className="note" style={{ marginTop: 12 }}>
 						Every frame here is signed by both of you. The credit line is your cap on what they can owe you; collateral is what is enforceable on-chain.
 					</p>

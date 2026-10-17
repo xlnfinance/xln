@@ -339,6 +339,7 @@ fn lending_entry(value: &AbiValue) -> Result<(String, LendingIntentKind), Proces
         7 => LendingIntentKind::Disburse,
         5 => LendingIntentKind::CloseRequest,
         6 => LendingIntentKind::ClosePayout,
+        8 => LendingIntentKind::CreditRequest,
         value => {
             return Err(ProcessError::Tag {
                 field: "lendingKind",
@@ -377,4 +378,31 @@ fn policy_snapshot(value: &AbiValue) -> Result<Option<RebalanceFeePolicySnapshot
         bigint(&fields[3], "gasFee")?,
         js_number(&fields[4], "updatedAt")?,
     )))
+}
+
+#[cfg(test)]
+mod intent_tag_tests {
+    use super::*;
+    use xln_rscore_abi::BodyTuple;
+
+    #[test]
+    fn current_intent_tags_decode_without_colliding() {
+        for (tag, expected) in [
+            (7, LendingIntentKind::Disburse),
+            (8, LendingIntentKind::CreditRequest),
+        ] {
+            let row = AbiValue::Tuple(BodyTuple::from_vec(vec![
+                AbiValue::Text("intent".into()),
+                AbiValue::Integer(tag),
+            ]));
+            assert_eq!(lending_entry(&row).expect("current intent").1, expected);
+        }
+        for tag in [3, 4, 9] {
+            let row = AbiValue::Tuple(BodyTuple::from_vec(vec![
+                AbiValue::Text("obsolete".into()),
+                AbiValue::Integer(tag),
+            ]));
+            assert!(lending_entry(&row).is_err());
+        }
+    }
 }

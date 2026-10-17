@@ -68,6 +68,7 @@ import { createMarketSubscriptionStack } from '../../network/relay/market/subscr
 import { encodeMarketWireMessage } from '../../network/relay/market/wire';
 import { decodeRelaySocketFrame } from './network/relay-frame';
 import { JSON_HEADERS, getErrorMessage, resolveRequiredAnvilRpc } from './utils';
+import { handleCustomContractsApi } from './custom-contracts';
 import { enforceFaucetPolicy } from './faucet/policy';
 import { ethers } from 'ethers';
 import {
@@ -102,7 +103,6 @@ import {
 } from './network/gossip-profiles';
 import { attachLiveJAdapter, getLiveJAdapter } from '../../runtime/j-submit/live-jadapters';
 import { maybeHandleDebugDumpsRequest } from './health/debug-dumps';
-import { handleCreditRequest } from './faucet/credit';
 import { handleLendingStateRequest } from './entities/lending';
 import { handleWatchtowerProxy } from './rpc/watchtower-proxy';
 import { withApiBodyLimit, WATCHTOWER_PROXY_BODY_MAX_BYTES } from './http-body-limit';
@@ -789,17 +789,6 @@ const maybeHandleFinancialApi = (
       getCurrentRuntimeHeight: currentRuntimeHeight,
     });
   }
-  if (pathname === '/api/credit/request' && req.method === 'POST') {
-    return handleCreditRequest({
-      req,
-      env,
-      headers,
-      activeHubEntityIds: relayStore.activeHubEntityIds,
-      enqueueRuntimeInput,
-      validateRuntimeInputAdmission,
-      getCurrentRuntimeHeight: currentRuntimeHeight,
-    });
-  }
   if (pathname === '/api/lending/state' && req.method === 'GET') {
     return handleLendingStateRequest({
       req,
@@ -818,6 +807,8 @@ const handleApiAgainstCommittedState = async (
   operatorAuthorized: boolean,
 ): Promise<Response> => {
   const headers = JSON_HEADERS;
+  const customContractsResponse = await handleCustomContractsApi(req, pathname, env);
+  if (customContractsResponse) return customContractsResponse;
   const controlResponse = await maybeHandleControlApi(req, pathname, env, headers);
   if (controlResponse) return controlResponse;
   if (pathname === '/rpc' && req.method === 'POST') {

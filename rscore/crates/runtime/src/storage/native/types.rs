@@ -177,7 +177,7 @@ pub(super) struct StorageHead {
 impl Default for StorageHead {
     fn default() -> Self {
         Self {
-            schema_version: 5,
+            schema_version: crate::storage::STORAGE_SCHEMA_VERSION,
             latest_height: 0,
             latest_materialized_height: 0,
             latest_snapshot_height: 0,

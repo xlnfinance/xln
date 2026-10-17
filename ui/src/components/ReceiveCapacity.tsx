@@ -123,12 +123,13 @@ function ReceiveCapacityIntent(props: Props) {
           New credit <b>{money(plan.creditIncrease)}</b>
         </span>
       </div>
-      <div className="actions spectrum-presets">
+      <div className="segc spectrum-presets" aria-label="Collateral share">
         {[0, 50, 100].map(value => (
           <button
             key={value}
             type="button"
-            className={`btn quiet${creditPercent === value ? ' active' : ''}`}
+            aria-pressed={creditPercent === value}
+            className={creditPercent === value ? 'active' : ''}
             disabled={busy || pendingLimit !== null || props.disabled}
             onClick={() => setCreditPercent(value)}
           >

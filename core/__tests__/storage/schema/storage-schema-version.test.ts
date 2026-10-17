@@ -89,12 +89,18 @@ describe('storage schema boundary', () => {
     await expect(readStorageHead(memoryDbWithHead(currentHead(4)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=4:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
     );
-    expect(STORAGE_SCHEMA_VERSION).toBe(5);
+    expect(STORAGE_SCHEMA_VERSION).toBe(6);
+  });
+
+  test('rejects pre-integration tag-7 checkpoints before decoding either history', async () => {
+    await expect(readStorageHead(memoryDbWithHead(currentHead(5)))).rejects.toThrow(
+      'STORAGE_SCHEMA_MISMATCH:stored=5:current=6:boundary=storage-head',
+    );
   });
 
   test('pins the one current frame format as one inseparable descriptor', () => {
     expect(STORAGE_FRAME_FORMAT).toEqual({
-      schemaVersion: 5,
+      schemaVersion: 6,
       domain: 'xln.storage.frame',
       postStateDomain: 'xln.storage.postState',
       algorithmId: 'sha256',

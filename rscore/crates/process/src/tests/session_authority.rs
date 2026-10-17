@@ -116,3 +116,25 @@ fn checkpoint_barrier_exports_only_the_expected_accepted_root() {
     };
     assert_eq!(changes.fields().len(), 4);
 }
+
+#[test]
+fn pre_integration_tag_seven_protocol_is_rejected_before_checkpoint_decode() {
+    let mut session = ProcessSession::new();
+    let mut obsolete = hello_authority(0, SEED, "1");
+    obsolete.binding.protocol_version = 1;
+    assert_error(
+        session.handle(obsolete).envelope,
+        "RSCORE_PROCESS_PROTOCOL_VERSION",
+    );
+    let mut obsolete = hello_authority(0, SEED, "1");
+    obsolete.binding.protocol_fingerprint = [
+        0x0d, 0x0e, 0x71, 0xb6, 0x1e, 0x83, 0x19, 0xa6, 0xa3, 0x51, 0x40, 0x59, 0xb0, 0x16, 0x7b,
+        0x56, 0xf0, 0xb0, 0x3a, 0x22, 0x42, 0x29, 0x37, 0x73, 0x11, 0x84, 0xb4, 0xb3, 0xa9, 0xcf,
+        0xac, 0xeb,
+    ];
+    assert_error(
+        session.handle(obsolete).envelope,
+        "RSCORE_PROCESS_PROTOCOL_FINGERPRINT",
+    );
+    assert_ok(session.handle(hello_authority(0, SEED, "1")).envelope);
+}

@@ -44,8 +44,8 @@ test('faucet can fund twice on the same page without duplicate payments', { tag:
       .toEqual({ owned: String(count * 100_000_000), pending: false, mempool: 0 });
     expect(requests).toHaveLength(count);
     await expect(page.getByTestId('home-balance-breakdown')).toBeVisible();
-    await expect(page.getByTestId('home-secured')).toHaveText('Backed by collateral$0.00');
-    await expect(page.getByTestId('home-risk')).toHaveText(`Without collateral$${count * 100}.00`);
+    await expect(page.getByTestId('home-secured')).toHaveText('Collateral-backed$0.00');
+    await expect(page.getByTestId('home-risk')).toHaveText(`At risk$${count * 100}.00`);
     await expect(page.getByTestId('token-row-USDC').locator('.account-funding .bw')).toBeVisible();
     await expect(page.getByTestId('token-row-USDC').locator('.account-limits')).toContainText(
       `Can send now${count * 100}.00 USDC`,

@@ -667,6 +667,8 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] => {
       return [3, tx.data.tokenId];
     case 'set_credit_limit':
       return [4, tx.data.tokenId, tx.data.amount.toString()];
+    case 'credit_request':
+      return [27, tx.data.requestId, tx.data.requesterEntityId, tx.data.tokenId, tx.data.amount.toString()];
     case 'rebalance_policy':
       return [
         5,

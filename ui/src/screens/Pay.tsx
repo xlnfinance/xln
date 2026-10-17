@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { HOME, PageHead } from '../components/PageHead';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import type { PaymentDeliveryMode } from '@xln/core/api/public/runtime-module';
 import { parseXlnInvoice, type ParsedXlnInvoice } from '$lib/utils/xlnInvoice';
@@ -12,7 +13,7 @@ import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
 import { useApp } from '../runtime/store';
 import { peekXLN } from '../runtime/xln-loader';
 import { DELIVERY_OPTIONS, eligibleRoutes, isEntityId, quotePaymentRoutes, routeModeError, submitPayment, type PaymentRouteQuote } from '../runtime/financial/payments';
-import { amountInputText, formatMoney, parseAmount, shortId } from '../runtime/format';
+import { amountInputText, formatMoney, formatLimit, parseAmount, shortId } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
 import { usdOf } from '../runtime/financial/prices';
 import { displayEntityName, useWallet, type AccountView } from '../runtime/views';
@@ -192,17 +193,15 @@ export function Pay() {
 
 	return (
 		<div className="screen fade-in">
-			<div className="screen-header">
-				<span className="screen-title">
-					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
-						<Icon name="chevronLeft" size={18} />
+			<PageHead
+				title="Pay"
+				parent={HOME}
+				actions={
+					<button type="button" className="icon-btn" onClick={() => setScanning(true)} aria-label="Scan invoice" data-testid="pay-scan">
+						<Icon name="scan" size={18} />
 					</button>
-					Pay
-				</span>
-				<button type="button" className="icon-btn" onClick={() => setScanning(true)} aria-label="Scan invoice">
-					<Icon name="scan" size={18} />
-				</button>
-			</div>
+				}
+			/>
 
 			<div className="two-col pay">
 				<div className="stack">
@@ -284,7 +283,7 @@ export function Pay() {
 						<div className="field-head">
 							<span>Amount</span>
 							<button type="button" className="btn quiet num" style={{ fontSize: 12 }} disabled={payMax <= 0n} onClick={() => setAmountText(amountInputText(payMax, meta.decimals))}>
-								Up to {formatMoney(payMax, meta.decimals)} instantly
+								Up to {formatLimit(payMax, meta.decimals)} instantly
 							</button>
 						</div>
 						<div className="field-row">
@@ -348,10 +347,6 @@ export function Pay() {
 											? `under 0.01 ${meta.symbol}`
 											: `${formatMoney(chosen.totalFee, meta.decimals)} ${meta.symbol}`}
 								</span>
-							</div>
-							<div className="kv">
-								<span className="k">Arrives</span>
-								<span className="v st-settled">Instantly</span>
 							</div>
 							<div className="kv">
 								<span className="k">Delivery</span>
@@ -437,7 +432,7 @@ export function Pay() {
 					</button>
 					{noteOpen && (
 						<div className="field fade-in">
-							<input className="input" value={description} onChange={event => setDescription(event.target.value)} placeholder="What is this for?" />
+							<input className="input" value={description} onChange={event => setDescription(event.target.value)} placeholder="What is this for?" data-testid="pay-note" />
 						</div>
 					)}
 
@@ -459,7 +454,8 @@ export function Pay() {
 							<h3 className="caps">Route</h3>
 							<div className="tl">
 								{chosen.path.map((hop, index) => {
-									const fee = chosen.hops[index - 1]?.fee ?? 0n;
+									// pathfinding puts the forwarding fee on the edge leaving the node that charges it.
+									const fee = chosen.hops[index]?.fee ?? 0n;
 									return (
 										<div key={`${hop}-${index}`} className="ev done">
 											<div className="t">

@@ -3,7 +3,7 @@ import type { JBatch } from '@xln/core/api/public/runtime-module';
 import { Icon } from './Icons';
 import { useApp } from '../runtime/store';
 import { sendEntityTxs } from '../runtime/tx';
-import { formatMoney } from '../runtime/format';
+import { formatMoney, shortId } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
 import { countBatchOps } from '../runtime/financial/move';
 import { displayEntityName, type WalletView } from '../runtime/views';
@@ -16,6 +16,11 @@ const MAX_BUMP_BPS = 16_000;
 type Item = { key: string; title: string; detail: string };
 
 const normalizeId = (value: unknown): String => String(value || '').trim().toLowerCase();
+/** A reserve-to-wallet recipient is an address left-padded to 32 bytes; the signer must see the address itself. */
+const walletAddress = (value: unknown): string => {
+	const hex = String(normalizeId(value));
+	return hex.length === 66 && /^0x0{24}/.test(hex) ? `0x${hex.slice(26)}` : hex;
+};
 
 /** One line per queued on-chain operation, in the order the Depository applies them. */
 export function batchItems(batch: JBatch, self: string, names: Map<string, string>): Item[] {
@@ -42,7 +47,7 @@ export function batchItems(batch: JBatch, self: string, names: Map<string, strin
 		for (const pair of op.pairs ?? []) items.push({ key: `r2c-${index}-${pair.entity}`, title: 'Reserve → Account', detail: `${money(op.tokenId, pair.amount)} with ${who(pair.entity)}` });
 	});
 	(batch.reserveToExternalToken ?? []).forEach((op, index) =>
-		items.push({ key: `r2e-${index}`, title: 'Reserve → Wallet', detail: `${money(op.tokenId, op.amount)} to ${String(op.receivingEntity || '').slice(0, 10)}…` }),
+		items.push({ key: `r2e-${index}`, title: 'Reserve → Wallet', detail: `${money(op.tokenId, op.amount)} to ${shortId(walletAddress(op.receivingEntity), 8, 6)}` }),
 	);
 	(batch.disputeStarts ?? []).forEach((_, index) => items.push({ key: `ds-${index}`, title: 'Dispute start', detail: 'on-chain proof' }));
 	(batch.counterDisputes ?? []).forEach((_, index) => items.push({ key: `cd-${index}`, title: 'Dispute answer', detail: 'on-chain proof' }));

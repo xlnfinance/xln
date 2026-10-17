@@ -13,6 +13,9 @@
  */
 
 import { createHash } from 'node:crypto';
+
+// React specs use their owning Playwright package and the same isolated J stand.
+const REACT_UI = process.argv.includes('--react-ui');
 import { spawn, spawnSync } from 'node:child_process';
 import {
   cpSync,
@@ -676,7 +679,7 @@ const listDynamicPlaywrightTargets = (
     'bunx',
     ['playwright', 'test', '--config', 'playwright.config.ts', '--list', '--reporter=json', file],
     {
-      cwd: process.cwd(),
+      cwd: REACT_UI ? resolve(process.cwd(), 'ui') : process.cwd(),
       env,
       stdio: 'pipe',
       encoding: 'utf8',
@@ -900,6 +903,7 @@ const attachPlaywrightMetadata = (
 ): PlaywrightTarget[] => {
   const sourceFiles = Array.from(new Set(sourceTargets.map(playwrightSourcePath))).sort();
   const tests = listPlaywrightTestMetadata(sourceFiles, {
+    ...(REACT_UI ? { cwd: 'ui' } : {}),
     ...(args.pwProject ? { project: args.pwProject } : {}),
     ...(args.pwProject === 'brainvault' || args.pwProject === 'webkit-mobile' ? { profile: args.pwProject } : {}),
   });
@@ -2091,7 +2095,15 @@ const runShard = async (
     }
 
     const shardViteCacheDir = join(shardPaths.root, 'vite-cache');
-    const shardSvelteKitOutDir = prepareShardSvelteKitOutDir(buildArtifacts.svelteKitOutDir, logsDir, shard, log);
+    const shardSvelteKitOutDir = REACT_UI ? '' : prepareShardSvelteKitOutDir(buildArtifacts.svelteKitOutDir, logsDir, shard, log);
+    const reactBuildDir = join(shardPaths.root, 'react-ui');
+    if (REACT_UI) {
+      const built = await runE2ECommand('node', [resolve(process.cwd(), 'ui/node_modules/vite/bin/vite.js'), 'build'], {
+        cwd: resolve(process.cwd(), 'ui'), log, timeoutMs: 60_000, signal: shardAbortController.signal,
+        env: { ...process.env, XLN_UI_STACK_ORIGIN: '', XLN_UI_BUILD_DIR: reactBuildDir, XLN_UI_DIAGNOSTICS: '1' },
+      });
+      if (!e2eCommandSucceeded(built)) throw new Error(`REACT_UI_BUILD_FAILED:${formatE2ECommandResult(built)}`);
+    }
     const viteStart = Date.now();
     // Spawn Vite directly. `bun run preview` starts an extra child node
     // process, so killing the Bun wrapper can leave `node .../vite preview`
@@ -2099,7 +2111,7 @@ const runShard = async (
     vite = spawn(
       'node',
       [
-        resolve(frontendRoot, 'node_modules', 'vite', 'bin', 'vite.js'),
+        resolve(process.cwd(), REACT_UI ? 'ui' : 'frontend', 'node_modules', 'vite', 'bin', 'vite.js'),
         'preview',
         '--mode',
         `xln-e2e-${basename(logsDir)}-${shard}`,
@@ -2110,7 +2122,7 @@ const runShard = async (
         '--strictPort',
       ],
       {
-        cwd: frontendRoot,
+        cwd: REACT_UI ? resolve(process.cwd(), 'ui') : frontendRoot,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: sanitizeChildProcessEnv({
           ...process.env,
@@ -2120,6 +2132,7 @@ const runShard = async (
           RPC_TRON: rpc2Url,
           VITE_DEV_PORT: String(webPort),
           VITE_API_PROXY_TARGET: apiUrl,
+          ...(REACT_UI ? { XLN_UI_STACK_ORIGIN: apiUrl, XLN_UI_RUNTIME_BUNDLE_DIR: dirname(buildArtifacts.runtimeBundlePath), XLN_UI_BUILD_DIR: reactBuildDir } : {}),
           XLN_VITE_FORCE_HTTP: '1',
           VITE_CACHE_DIR: shardViteCacheDir,
           XLN_SVELTE_KIT_OUT_DIR: shardSvelteKitOutDir,
@@ -2157,11 +2170,12 @@ const runShard = async (
     playwrightArgs.push(`--workers=${args.workersPerShard}`);
     playwrightArgs.push(`--reporter=${args.reporter},json`);
     if (args.maxFailures > 0) playwrightArgs.push(`--max-failures=${args.maxFailures}`);
-    for (const target of task.pwTargets) playwrightArgs.push(target);
+    for (const target of task.pwTargets) playwrightArgs.push(REACT_UI ? relative(resolve(process.cwd(), 'ui'), resolve(target)) : target);
     log.write(`[runner] playwright args: ${JSON.stringify(playwrightArgs)}\n`);
 
     const playwrightStart = Date.now();
     const playwrightResult = await runE2ECommand('bunx', playwrightArgs, {
+      ...(REACT_UI ? { cwd: resolve(process.cwd(), 'ui') } : {}),
       env: {
         ...process.env,
         // Keep isolated CI-style runs headless even if the parent shell has

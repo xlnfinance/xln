@@ -119,6 +119,7 @@ const writeScenarioTrail = async (
   seed: string,
   runtimeId: string,
   snapshots: readonly import('../runtime/types').EnvSnapshot[],
+  beats: readonly import('./harness/narration').ScenarioNarrationBeat[],
   destination: string,
 ): Promise<string> => {
   const { networkTrailFromSnapshots, serializeNetworkTrailV1 } = await import('./network-trail');
@@ -128,7 +129,7 @@ const writeScenarioTrail = async (
     ? requested
     : join(requested, `${scenario}-${utcTag()}.trail.json`);
   mkdirSync(dirname(trailPath), { recursive: true });
-  const trail = networkTrailFromSnapshots(runtimeId, snapshots);
+  const trail = networkTrailFromSnapshots(runtimeId, snapshots, beats);
   writeFileSync(trailPath, serializeNetworkTrailV1(trail), 'utf8');
   const manifestPath = trailPath.replace(/\.trail\.json$/, '.manifest.json');
   const manifest = {
@@ -490,6 +491,9 @@ async function main() {
     const { createEmptyEnv } = await import('../runtime');
     const seed = String(process.env['XLN_RUNTIME_SEED'] || `${scenarioName}-cli-seed-42`);
     let env = createEmptyEnv(seed);
+    // Narration beats are keyed by the Runtime the scenario was given, even if it returns another.
+    const { startScenarioNarration } = await import('./harness/narration');
+    const narration = startScenarioNarration(env);
     const trailDestination = trail;
     const trace = trailDestination || inputTrace
       ? (await import('../runtime/observability/runtime-trace')).startRuntimeTraceForTesting(env)
@@ -531,10 +535,11 @@ async function main() {
       if (trailDestination && trace) {
         const runtimeId = env.runtimeId;
         if (!runtimeId) throw new Error('SCENARIO_TRAIL_RUNTIME_ID_MISSING');
-        await writeScenarioTrail(scenarioName, seed, runtimeId, trace.snapshots, trailDestination);
+        await writeScenarioTrail(scenarioName, seed, runtimeId, trace.snapshots, narration.read(), trailDestination);
       }
     } finally {
       trace?.stop();
+      narration.stop();
     }
     recordSelectiveRerunPass('scenario', scenarioName);
 

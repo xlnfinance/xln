@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { explainWalletError } from '@xln/frontend/lib/utils/ui/walletError';
+import { HOME, PageHead } from '../components/PageHead';
 import type { AccountState, RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
 import { getJurisdictionStackId } from '@xln/core/api/public/runtime-module';
 import { DeltaBar, DeltaCaption } from '../components/Bars';
@@ -13,7 +14,7 @@ import { switchActiveEntity } from '../runtime/entities';
 import { peekXLN } from '../runtime/xln-loader';
 import { sendEntityTxs } from '../runtime/tx';
 import { compatibleSwapHubs, hubTakerFeeBps, jurisdictionRef, liveCrossOrders, planSwap, readAccountState, submitSwapPlan } from '../runtime/financial/swap';
-import { amountInputText, formatMoney, parseAmount, plainAmount } from '../runtime/format';
+import { amountInputText, formatMoney, formatLimit, parseAmount, plainAmount } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
 import { openSwapOffers, useWallet } from '../runtime/views';
 import { counterpartyFeePolicy } from '../runtime/financial/manage';
@@ -23,7 +24,6 @@ type Mode = 'same' | 'cross';
 const normalizeId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
 export function Swap() {
-	const navigate = useNavigate();
 	const [params] = useSearchParams();
 	const entityId = useApp(s => s.activeEntityId);
 	const toast = useApp(s => s.toast);
@@ -323,22 +323,20 @@ export function Swap() {
 
 	return (
 		<div className="screen fade-in">
-			<div className="screen-header">
-				<span className="screen-title">
-					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
-						<Icon name="chevronLeft" size={18} />
-					</button>
-					Swap
-				</span>
-				<span className="segc">
-					<button type="button" className={mode === 'same' ? 'active' : ''} onClick={() => { if (mode !== 'same') setWantText(''); setMode('same'); }}>
-						Same network
-					</button>
-					<button type="button" data-testid="swap-cross-mode" aria-pressed={mode === 'cross'} className={mode === 'cross' ? 'active' : ''} onClick={() => { if (mode !== 'cross') setWantText(''); setMode('cross'); }} disabled={otherEntities.length === 0}>
-						Across networks
-					</button>
-				</span>
-			</div>
+			<PageHead
+				title="Swap"
+				parent={HOME}
+				actions={
+					<span className="segc">
+						<button type="button" className={mode === 'same' ? 'active' : ''} onClick={() => { if (mode !== 'same') setWantText(''); setMode('same'); }}>
+							Same network
+						</button>
+						<button type="button" className={mode === 'cross' ? 'active' : ''} data-testid="swap-cross-mode" aria-pressed={mode === 'cross'} onClick={() => { if (mode !== 'cross') setWantText(''); setMode('cross'); }} disabled={otherEntities.length === 0}>
+							Across networks
+						</button>
+					</span>
+				}
+			/>
 
 			<div className="two-col pay">
 				<div className="stack">
@@ -346,7 +344,7 @@ export function Swap() {
 						<div className="field-head">
 							<span>You pay</span>
 							<button type="button" className="btn quiet num" style={{ fontSize: 12 }} disabled={giveSpendable <= 0n} onClick={() => setGiveText(amountInputText(giveSpendable, giveMeta.decimals))}>
-								Up to {formatMoney(giveSpendable, giveMeta.decimals)}
+								Up to {formatLimit(giveSpendable, giveMeta.decimals)}
 								{hub ? ` with ${hub.label}` : ''}
 							</button>
 						</div>
@@ -356,7 +354,7 @@ export function Swap() {
 						</div>
 					</div>
 					<div className="flip">
-						<button type="button" onClick={flip} aria-label="Flip">
+						<button type="button" onClick={flip} aria-label="Flip" data-testid="swap-flip">
 							<Icon name="swap" size={16} />
 						</button>
 					</div>
@@ -521,6 +519,17 @@ export function Swap() {
 						{submitting ? 'Placing…' : prepared ? `Swap ${giveMeta.symbol} for ${wantMeta.symbol}` : 'Swap'}
 					</button>
 
+					{hub && giveToken ? (
+						<div className="card">
+							<h3 className="caps">Your account with {hub.label}</h3>
+							<DeltaBar derived={giveToken.derived} tokenId={giveTokenId} />
+							<DeltaCaption derived={giveToken.derived} format={value => formatMoney(value, giveMeta.decimals)} />
+							<p className="note" style={{ marginTop: 12 }}>
+								The order rests on this account: a fill moves the balance you both sign, nothing moves on-chain.
+							</p>
+						</div>
+					) : null}
+
 					{hub && mode === 'same' ? (
 						<div className="mobile-only card">
 							<div className="sect" style={{ marginTop: 0 }}>
@@ -623,7 +632,7 @@ export function Swap() {
 											<span className="r">
 												<span className="state st-inflight">open</span>
 												<div>
-													<button type="button" className="btn quiet" style={{ fontSize: 12 }} disabled={cancelingId === offer.offerId} onClick={() => void cancel(offer.counterpartyId, offer.offerId)}>
+													<button type="button" className="btn quiet" style={{ fontSize: 12 }} disabled={cancelingId === offer.offerId} onClick={() => void cancel(offer.counterpartyId, offer.offerId)} data-testid="swap-offer-cancel">
 														{cancelingId === offer.offerId ? 'Canceling…' : 'Cancel'}
 													</button>
 												</div>
@@ -669,16 +678,6 @@ export function Swap() {
 									<div className="s">A shared secret links both legs. Stay online and use the order controls to clear fills or cancel the remainder; verify the final balances.</div>
 								</div>
 							</div>
-						</div>
-					) : null}
-					{hub && giveToken ? (
-						<div className="card">
-							<h3 className="caps">Your account with {hub.label}</h3>
-							<DeltaBar derived={giveToken.derived} tokenId={giveTokenId} />
-							<DeltaCaption derived={giveToken.derived} format={value => formatMoney(value, giveMeta.decimals)} />
-							<p className="note" style={{ marginTop: 12 }}>
-								The order rests on this account. Filled amounts move Δ, nothing moves on-chain.
-							</p>
 						</div>
 					) : null}
 					{hubs.length === 0 && (

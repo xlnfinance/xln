@@ -39,25 +39,31 @@ async function assertServer(): Promise<void> {
 	}
 }
 
-async function enterSandbox(page: Page): Promise<void> {
-	// The wallet is shot on the running stack (bun run dev): a fresh phrase, the account with the stack hub.
+const SHOT_PASSWORD = 'design-shots-local-password';
+
+/** Import a fresh phrase through the public Gate, including the local-password step. */
+async function importFresh(page: Page): Promise<void> {
 	await page.goto(BASE_URL);
 	await page.getByTestId('gate-stack').waitFor({ timeout: 20_000 });
-	await page.getByRole('button', { name: /Import a phrase/ }).click();
+	await page.getByRole('button', { name: /Restore a wallet/ }).click();
 	await page.locator('textarea').fill(HDNodeWallet.createRandom().mnemonic?.phrase ?? '');
 	await page.locator('button[type="submit"]').click();
+	await page.getByRole('heading', { name: 'Set a local password' }).waitFor({ timeout: BOOT_TIMEOUT });
+	await page.getByLabel('Password', { exact: true }).fill(SHOT_PASSWORD);
+	await page.getByLabel('Confirm password', { exact: true }).fill(SHOT_PASSWORD);
+	await page.getByRole('button', { name: 'Save and open', exact: true }).click();
 	await page.getByTestId('home-total').waitFor({ timeout: BOOT_TIMEOUT });
+}
+
+async function enterSandbox(page: Page): Promise<void> {
+	// The wallet is shot on the running stack (bun run dev): a fresh phrase, the account with the stack hub.
+	await importFresh(page);
 	try {
 		await page.getByTestId('account-row').first().waitFor({ timeout: 90_000 });
 	} catch (error) {
 		// The hub did not answer this wallet in time; a second fresh wallet usually does.
 		process.stderr.write(`hub account did not open, retrying with a new wallet: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}\n`);
-		await page.goto(BASE_URL);
-		await page.getByTestId('gate-stack').waitFor({ timeout: 20_000 });
-		await page.getByRole('button', { name: /Import a phrase/ }).click();
-		await page.locator('textarea').fill(HDNodeWallet.createRandom().mnemonic?.phrase ?? '');
-		await page.locator('button[type="submit"]').click();
-		await page.getByTestId('home-total').waitFor({ timeout: BOOT_TIMEOUT });
+		await importFresh(page);
 		await page.getByTestId('account-row').first().waitFor({ timeout: 90_000 });
 	}
 }

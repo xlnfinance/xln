@@ -78,6 +78,7 @@ pub(super) fn encode_lending_kind(value: &LendingIntentKind) -> AbiValue {
         LendingIntentKind::Disburse => 7,
         LendingIntentKind::CloseRequest => 5,
         LendingIntentKind::ClosePayout => 6,
+        LendingIntentKind::CreditRequest => 8,
     })
 }
 
@@ -103,4 +104,21 @@ pub(super) fn encode_requested_rebalance_fee_state(value: &RebalanceRequestFeeSt
         AbiValue::Bool(value.requested_by_left),
         refund,
     ])
+}
+
+#[cfg(test)]
+mod intent_tag_tests {
+    use super::*;
+
+    #[test]
+    fn current_checkpoint_intents_have_distinct_authorized_tags() {
+        assert_eq!(
+            encode_lending_kind(&LendingIntentKind::Disburse),
+            AbiValue::Integer(7)
+        );
+        assert_eq!(
+            encode_lending_kind(&LendingIntentKind::CreditRequest),
+            AbiValue::Integer(8)
+        );
+    }
 }

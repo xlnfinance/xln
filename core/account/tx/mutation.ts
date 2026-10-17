@@ -33,6 +33,7 @@ import {
 } from './handlers/settlement/transition';
 import { handleJEventClaim } from './handlers/j-events/claim';
 import { handleLendingAccountTx } from './handlers/balance/lending';
+import { handleCreditRequest } from './handlers/balance/credit-request';
 
 type MutationContext = {
   account: AccountDraftReplica;
@@ -180,6 +181,7 @@ export const applyAccountTxMutation = async (
   switch (tx.type) {
     case 'add_delta': return handleAddDelta(account.state, tx);
     case 'set_credit_limit': return handleSetCreditLimit(account.state, tx, byLeft);
+    case 'credit_request': return handleCreditRequest(account, tx, byLeft);
     case 'direct_payment': return handleDirectPayment(account, tx, byLeft);
     case 'lending_rate':
     case 'lending_fund':

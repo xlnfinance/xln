@@ -8,6 +8,7 @@ import { createStructuredLogger } from '../../../../support/logger';
 import { hashHtlcSecret } from '../../../../protocol/htlc/utils';
 import type { AccountTxTarget } from './orderbook/queue';
 import { applyCommittedLendingFollowup } from '../../../../lendbook/committed';
+import { applyCommittedCreditRequestFollowup } from './credit-request';
 import type { BookIntentSlotWriter } from '../../../books/book-intents';
 import {
   hasInboundPayment,
@@ -135,6 +136,13 @@ export function applyCommittedAccountFrameFollowups(
       counterpartyId,
       accountTx,
       committedFrame,
+      proposerIsLeft,
+      accountTxs,
+    );
+    applyCommittedCreditRequestFollowup(
+      newState,
+      counterpartyId,
+      accountTx,
       proposerIsLeft,
       accountTxs,
     );

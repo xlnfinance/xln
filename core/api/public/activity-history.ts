@@ -388,6 +388,20 @@ const eventFromAccountFrameTx = (
         amount: bigintText(data['amount']),
         rawType: txType,
       });
+    case 'credit_request':
+      return makeEvent(journal, index, {
+        kind: 'offchain',
+        type: 'account',
+        source: 'runtime_input',
+        direction: 'neutral',
+        title: 'Credit requested',
+        subtitle: `${bigintText(data['amount']) ?? '0'} token ${numberValue(data['tokenId']) ?? '?'}`,
+        status: 'updated',
+        ...base,
+        tokenId: numberValue(data['tokenId']),
+        amount: bigintText(data['amount']),
+        rawType: txType,
+      });
     case 'request_collateral':
       return makeEvent(journal, index, {
         kind: 'offchain',

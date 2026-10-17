@@ -38,6 +38,7 @@ import { handleMarketCapRequest } from './hub/market-cap-http';
 import { assertMinDiskFree, buildDiskSummary, getStorageHealth, getStorageHealthSnapshotSync } from '../support/storage-monitor';
 import { serveStaticApp } from '../api/server/static-assets';
 import { enforceFaucetPolicy } from '../api/server/faucet/policy';
+import { handleCustomContractsApi } from '../api/server/custom-contracts';
 import { handleWatchtowerProxy } from '../api/server/rpc/watchtower-proxy';
 import { withApiBodyLimit, WATCHTOWER_PROXY_BODY_MAX_BYTES } from '../api/server/http-body-limit';
 import { createAssistantProxyFromEnv, resolveAssistantDirectClientIp, resolveAssistantRateClientId } from '../api/server/assistant/proxy';
@@ -1777,6 +1778,9 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
     if (performanceResponse) return performanceResponse;
     const faucetPolicyResponse = await enforceFaucetPolicy(request, operatorAuthorized, process.env, headers);
     if (faucetPolicyResponse) return faucetPolicyResponse;
+
+    const customContractsResponse = await handleCustomContractsApi(request, pathname, null);
+    if (customContractsResponse) return customContractsResponse;
 
     const directClientIp = resolveAssistantDirectClientIp(serverRef, request);
     const assistantClientId = resolveAssistantRateClientId(request, directClientIp);

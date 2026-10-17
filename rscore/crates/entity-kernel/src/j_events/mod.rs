@@ -20,6 +20,7 @@ pub(crate) fn account_tx_kind(tx: &AccountTx) -> &'static str {
     match tx {
         AccountTx::AddDelta { .. } => "add_delta",
         AccountTx::SetCreditLimit { .. } => "set_credit_limit",
+        AccountTx::CreditRequest { .. } => "credit_request",
         AccountTx::RebalancePolicy { .. } => "rebalance_policy",
         AccountTx::LendingFund { .. } => "lending_fund",
         AccountTx::LendingRate { .. } => "lending_rate",
