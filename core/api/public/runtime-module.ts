@@ -88,6 +88,7 @@ export {
 } from '../../extensions/cross-j/market';
 export {
   getJurisdictionStackId,
+  parseJurisdictionStackIdentity,
 } from '../../jurisdiction/machine/jurisdiction-stack';
 
 // Re-export identity functions types

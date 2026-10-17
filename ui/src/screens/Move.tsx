@@ -25,6 +25,7 @@ import {
 	type MoveIntent,
 	type MoveMode,
 } from '../runtime/financial/move';
+import { moveTargetCounterparties } from '../runtime/financial/move-targets';
 import { displayEntityName, useWallet } from '../runtime/views';
 import { paymentReviewHref, readPaymentFunding } from '../runtime/financial/payment-funding';
 import { batchFundsAccount, claimFundingSubmission, fundingSubmissionKey, releaseFundingSubmission, useFundingSubmission } from '../runtime/financial/funding-submission';
@@ -38,9 +39,8 @@ const PLACE_LABEL: Record<MoveEndpoint, { title: string; hint: string; kind: 'on
 const isPlace = (value: string | null): value is MoveEndpoint => value === 'external' || value === 'reserve' || value === 'account';
 
 /**
- * Move money between the three places it lives. Same routes and the same
- * entity transactions as the SvelteKit Move workspace: reserve legs queue in
- * the on-chain batch, account legs open a bilateral settlement.
+ * Move money between the signer wallet, reserve and bilateral Accounts.
+ * Reserve legs queue in the on-chain batch; Account legs open a bilateral settlement.
  */
 export function Move() {
 	const navigate = useNavigate();
@@ -89,10 +89,18 @@ export function Move() {
 	const externalRow = external.find(row => row.tokenId === tokenId) ?? null;
 	const accounts = wallet.accounts.filter(account => !account.disputed);
 	const firstAccount = accounts[0]?.counterpartyId ?? '';
+	const recipientId = targetEntityId.trim().toLowerCase() || wallet.entityId;
+	const targetAccounts = moveTargetCounterparties({
+		self: wallet.entityId,
+		recipient: recipientId,
+		accounts,
+		summaries: wallet.summaries,
+		jurisdiction: wallet.frame?.activeEntity?.core?.config.jurisdiction,
+	});
 	useEffect(() => {
 		if (!sourceAccountId && firstAccount) setSourceAccountId(firstAccount);
-		if (!targetHubId && firstAccount) setTargetHubId(firstAccount);
-	}, [firstAccount, sourceAccountId, targetHubId]);
+		if (!targetHubId && firstAccount && recipientId === wallet.entityId) setTargetHubId(firstAccount);
+	}, [firstAccount, sourceAccountId, targetHubId, recipientId, wallet.entityId]);
 
 	const amount = useMemo(() => {
 		try {
@@ -107,8 +115,8 @@ export function Move() {
 		tokenId,
 		amount,
 		sourceAccountId,
-		targetEntityId: targetEntityId.trim().toLowerCase() || wallet.entityId,
-		targetHubId,
+		targetEntityId: recipientId,
+		targetHubId: targetAccounts.some(account => account.counterpartyId === targetHubId) ? targetHubId : '',
 		reserveRecipientId: reserveRecipientId.trim().toLowerCase() || wallet.entityId,
 		externalRecipient: externalRecipient.trim(),
 		tokenAddress: externalRow?.tokenAddress ?? '',
@@ -301,7 +309,8 @@ export function Move() {
 							<div className="field">
 								<span className="field-label">Into an account with</span>
 								<select className="input" disabled={Boolean(funding)} value={targetHubId} onChange={event => setTargetHubId(event.target.value)} data-testid="move-target-hub">
-									{accounts.map(account => (
+									<option value="">Select a counterparty</option>
+									{targetAccounts.map(account => (
 										<option key={account.counterpartyId} value={account.counterpartyId}>
 											{account.label}
 										</option>
@@ -310,7 +319,7 @@ export function Move() {
 							</div>
 							{!funding ? <div className="field">
 								<span className="field-label">Recipient entity · leave empty for yourself</span>
-								<input className="input" placeholder="0x… entity id" value={targetEntityId} onChange={event => setTargetEntityId(event.target.value)} />
+								<input className="input" placeholder="0x… entity id" value={targetEntityId} onChange={event => { setTargetEntityId(event.target.value); setTargetHubId(''); }} />
 							</div> : null}
 						</>
 					) : null}

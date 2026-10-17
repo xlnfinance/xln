@@ -1,0 +1,1684 @@
+{
+  "own-pass": {
+    "candidate": {
+      "candidateId": "63397d98232f138ae8e908c4910de648e99b073699ee1fe513d4e17f8e027713",
+      "gitHead": "bdfb5c08dc1651c19a28f53ee8b7a347aa0658ea",
+      "codeHash": "ee68ab1052367c5270fff91ca268884725e26ddf86e5b317e10de6f882a3b243",
+      "gateConfigHash": "815985bc5b7498a94202fef52cae8636ece0b580b4b106efba9c551e73f558fa"
+    },
+    "browserHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 0,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    },
+    "manifestSha256": "86eb665924c40d217e423816302447eb367ab77c1db6e98f756b159e355f295f",
+    "moves": [
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "100000000",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "100000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 1,
+            "external": "100000000",
+            "foreign": null,
+            "native": "9951217600872101",
+            "reserve": "120000000",
+            "runtimeHeight": 22,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "20",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "100000000",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "100000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "120000000",
+            "foreign": null,
+            "native": "10139216760000000",
+            "reserve": "100000000",
+            "runtimeHeight": 16,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "external",
+        "name": "e2r",
+        "receipts": [
+          {
+            "batchHash": "0xbd1bc4ea70b0cb73f6391ee9b6d8058816228faf8462cca379ddac7d9d958fa0",
+            "blockHash": "0xe1f0eebba00a004b2ea1abf67240819467c0be5f7251a123db11a081039f3ef5",
+            "nonce": 1,
+            "transactionHash": "0x62f76e6b6dbc832fe9beff3092d8346723c76b36358a7fdc6aad142114dd7b10"
+          }
+        ],
+        "remote": false,
+        "to": "reserve"
+      },
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 2,
+            "external": "100000000",
+            "foreign": null,
+            "native": "9951217600872101",
+            "reserve": "112000000",
+            "runtimeHeight": 30,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "8",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "100000000",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "100000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 1,
+            "external": "100000000",
+            "foreign": null,
+            "native": "9951217600872101",
+            "reserve": "120000000",
+            "runtimeHeight": 23,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "reserve",
+        "name": "r2a-self",
+        "receipts": [
+          {
+            "batchHash": "0xebcf67fc5d8f3f1cf981c2be454f397caf0905b72ff8eeb4514c0d519ff2c635",
+            "blockHash": "0xd4a19068f1fdfe9b2509a6e04f3aed9b52db90ba2d36375b1ae68079004a448b",
+            "nonce": 2,
+            "transactionHash": "0xfcd6fc413353701dd107af7a4ea86be5a3a1fe28d883aaa9c14a34fee96f0c35"
+          }
+        ],
+        "remote": false,
+        "to": "account"
+      },
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "105000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "105000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 3,
+            "external": "100000000",
+            "foreign": null,
+            "native": "9951217600872101",
+            "reserve": "115000000",
+            "runtimeHeight": 41,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "3",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 2,
+            "external": "100000000",
+            "foreign": null,
+            "native": "9951217600872101",
+            "reserve": "112000000",
+            "runtimeHeight": 30,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "account",
+        "name": "a2r-self",
+        "receipts": [
+          {
+            "batchHash": "0x3bf31e6fa8027ded66135141d6718fd5d270117bb798fd5dbe84a12dc8e8368e",
+            "blockHash": "0x43534f3b676f56505677eaf44fb65df007dc5956b4c87620183352a348b136e3",
+            "nonce": 3,
+            "transactionHash": "0x8eb9425dfb46f0eb0dcaea2cf8e9511ce52d17cb764ad3fe5e51c3c5146aa4b1"
+          }
+        ],
+        "remote": false,
+        "to": "reserve"
+      },
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "105000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "105000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 4,
+            "external": "102000000",
+            "foreign": null,
+            "native": "9951217600872101",
+            "reserve": "113000000",
+            "runtimeHeight": 47,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "2",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "105000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "105000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 3,
+            "external": "100000000",
+            "foreign": null,
+            "native": "9951217600872101",
+            "reserve": "115000000",
+            "runtimeHeight": 41,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "reserve",
+        "name": "r2e",
+        "receipts": [
+          {
+            "batchHash": "0xe04f095ca7769b918599bea71df7e8536f23c964905b1af536cd8f2a89c6fada",
+            "blockHash": "0x676d8b373bccfaddf843204672cdcf2b19fe880891c89b4e9f075e8d663fea53",
+            "nonce": 4,
+            "transactionHash": "0xfb7bbb0e8beaf8903ea06b7383e3f106e2ed95d7c964137826e2f4453a3b28d7"
+          }
+        ],
+        "remote": false,
+        "to": "external"
+      },
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "105000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "105000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 5,
+            "external": "102000000",
+            "foreign": null,
+            "native": "9951217600872101",
+            "reserve": "109000000",
+            "runtimeHeight": 52,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "4000000",
+            "runtimeHeight": 17,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "4",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "105000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "105000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 4,
+            "external": "102000000",
+            "foreign": null,
+            "native": "9951217600872101",
+            "reserve": "113000000",
+            "runtimeHeight": 47,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "reserve",
+        "name": "r2r-remote",
+        "receipts": [
+          {
+            "batchHash": "0x451b0e64dca5900e31323a8ddf43c9cdb1f88e650b01b983fba6e131039b91db",
+            "blockHash": "0x7fadb5f2b1eaa9659e33907f87ee856ceb4df5016f17c88b4d5ec99554e92852",
+            "nonce": 5,
+            "transactionHash": "0xcd56ba8cc72d51df28c2e461019bece7bff80bb73f526af749689c69e011312f"
+          }
+        ],
+        "remote": true,
+        "to": "reserve"
+      }
+    ]
+  },
+  "remote-pass": {
+    "candidate": {
+      "candidateId": "3e8b0e919f20e19a18cc061d51c4852e4d3e588b8cdfa12c1e2f74ae1df2e902",
+      "gitHead": "bdfb5c08dc1651c19a28f53ee8b7a347aa0658ea",
+      "codeHash": "981255b94473cae77d8af9c8d010ec2336a752cf90d4ac87291bfcb3825a7468",
+      "gateConfigHash": "61124beed7d2a568723f34d9c8b42f634ce97294253e4fd94409435fec3fcb04"
+    },
+    "browserHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 0,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    },
+    "manifestSha256": "614f560ca3429ffdbd2f754d5395fcaae0976c11ad3c2bea23780aecde0895cc",
+    "moves": [
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 1,
+            "external": "120000000",
+            "foreign": null,
+            "native": "10139216760000000",
+            "reserve": "92000000",
+            "runtimeHeight": 23,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "8",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "100000000",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "100000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "120000000",
+            "foreign": null,
+            "native": "10139216760000000",
+            "reserve": "100000000",
+            "runtimeHeight": 16,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "reserve",
+        "name": "prepare-collateral",
+        "receipts": [
+          {
+            "batchHash": "0xadb99dd51dd92883ee4f610e65b12ec53373e1ffce356815fdaa0ddcb1adb894",
+            "blockHash": "0xa3e3b65b5a4930661cdd7798f0fbd11c29f4510c3ea935b5ecd48b6f5a524184",
+            "nonce": 1,
+            "transactionHash": "0x844504dca486f8b82ed41005357337711c4427362151776d555102c6fe6094f9"
+          }
+        ],
+        "remote": false,
+        "to": "account"
+      },
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 2,
+            "external": "115000000",
+            "foreign": null,
+            "native": "9885903549312659",
+            "reserve": "92000000",
+            "runtimeHeight": 30,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "5000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "5000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 19,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "5",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 1,
+            "external": "120000000",
+            "foreign": null,
+            "native": "10139216760000000",
+            "reserve": "92000000",
+            "runtimeHeight": 23,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "external",
+        "name": "e2a-remote",
+        "receipts": [
+          {
+            "batchHash": "0x7f45c17fb0d38d89f6aa3cf25ddee457c2c59daa7e45f5a3d8024a58c5c01a28",
+            "blockHash": "0x2ca0853afffcbafc851faa771dd3d59f890a9979eee2d57d92ca946d7d57b08a",
+            "nonce": 2,
+            "transactionHash": "0x8709953c1335278fb1930d3f1a6b64005777a09d68ff701489ebb74d3d2dc218"
+          }
+        ],
+        "remote": true,
+        "to": "account"
+      },
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "107000000",
+              "collateral": "7000000",
+              "mempool": 0,
+              "owned": "107000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 3,
+            "external": "116000000",
+            "foreign": null,
+            "native": "9885903549312659",
+            "reserve": "92000000",
+            "runtimeHeight": 40,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "5000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "5000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 19,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "1",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 2,
+            "external": "115000000",
+            "foreign": null,
+            "native": "9885903549312659",
+            "reserve": "92000000",
+            "runtimeHeight": 30,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "5000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "5000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 19,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "account",
+        "name": "a2e",
+        "receipts": [
+          {
+            "batchHash": "0xcaabe2b22296dca3f57ab218923828a7dfd055dc75feb45b00c0e0d03470a144",
+            "blockHash": "0xda274fbde2b5b093822c79e506b9de6249b93138df6b45203786bc518b867ada",
+            "nonce": 3,
+            "transactionHash": "0x6298a5faf1cec9a8b05c3d48b73cf6d71817b7812f302d384450f8d1b6cd0f66"
+          }
+        ],
+        "remote": false,
+        "to": "external"
+      },
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "105000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "105000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 4,
+            "external": "116000000",
+            "foreign": null,
+            "native": "9885903549312659",
+            "reserve": "92000000",
+            "runtimeHeight": 51,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "7000000",
+              "collateral": "7000000",
+              "mempool": 0,
+              "owned": "7000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 23,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "2",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "107000000",
+              "collateral": "7000000",
+              "mempool": 0,
+              "owned": "107000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 3,
+            "external": "116000000",
+            "foreign": null,
+            "native": "9885903549312659",
+            "reserve": "92000000",
+            "runtimeHeight": 40,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "5000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "5000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 19,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "account",
+        "name": "a2a-remote",
+        "receipts": [
+          {
+            "batchHash": "0xd0dbeedde3208856f4ebccaefd8d444509dd560175535ec3751c468110c13ead",
+            "blockHash": "0x15f276fe0df70f0f2d46281087daf69ed0efe8156dc8a26ae1b8998d4052d304",
+            "nonce": 4,
+            "transactionHash": "0xbb7e662a545bb69127c98d8d9ee8cee7a95a3dc2e0d2aa8bc4d854f5d9110549"
+          }
+        ],
+        "remote": true,
+        "to": "account"
+      },
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "105000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "105000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 4,
+            "external": "109000000",
+            "foreign": null,
+            "native": "9834552704217233",
+            "reserve": "92000000",
+            "runtimeHeight": 51,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "7000000",
+              "collateral": "7000000",
+              "mempool": 0,
+              "owned": "7000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "7000000",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 23,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "7",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "105000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "105000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 4,
+            "external": "116000000",
+            "foreign": null,
+            "native": "9885903549312659",
+            "reserve": "92000000",
+            "runtimeHeight": 51,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "7000000",
+              "collateral": "7000000",
+              "mempool": 0,
+              "owned": "7000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 23,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "external",
+        "name": "e2e",
+        "receipts": [],
+        "remote": true,
+        "to": "external"
+      }
+    ]
+  },
+  "roundtrip-pass": {
+    "candidate": {
+      "candidateId": "e15fbd9783b4c223703c0d312a773075af6bd6d6a83805df2145f6a55fc936de",
+      "gitHead": "bdfb5c08dc1651c19a28f53ee8b7a347aa0658ea",
+      "codeHash": "ee68ab1052367c5270fff91ca268884725e26ddf86e5b317e10de6f882a3b243",
+      "gateConfigHash": "d209e58f7cf46fc2f3299f62e3b46440fc33b16ba6d9044abaaf125c60b6bca7"
+    },
+    "browserHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 0,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    },
+    "manifestSha256": "c70ed3d4900d572610a2afef96ea3d79880d7d47142b3b12c188dbde0270cd81",
+    "moves": [
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 1,
+            "external": "120000000",
+            "foreign": null,
+            "native": "10139216760000000",
+            "reserve": "92000000",
+            "runtimeHeight": 22,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "8",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "100000000",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "100000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "120000000",
+            "foreign": null,
+            "native": "10139216760000000",
+            "reserve": "100000000",
+            "runtimeHeight": 15,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "reserve",
+        "name": "prepare-collateral",
+        "receipts": [
+          {
+            "batchHash": "0xadb99dd51dd92883ee4f610e65b12ec53373e1ffce356815fdaa0ddcb1adb894",
+            "blockHash": "0x03a381058afa72fb76ed00b5dd01f1e1020d2ae33689faebfec498167f9bf8ee",
+            "nonce": 1,
+            "transactionHash": "0x844504dca486f8b82ed41005357337711c4427362151776d555102c6fe6094f9"
+          }
+        ],
+        "remote": false,
+        "to": "account"
+      },
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 2,
+            "external": "121250000",
+            "foreign": null,
+            "native": "10139216760000000",
+            "reserve": "90750000",
+            "runtimeHeight": 28,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "1.25",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 1,
+            "external": "120000000",
+            "foreign": null,
+            "native": "10139216760000000",
+            "reserve": "92000000",
+            "runtimeHeight": 22,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "reserve",
+        "name": "roundtrip-r2e",
+        "receipts": [
+          {
+            "batchHash": "0xb54b4bc9fe519696ac21c694cf123d868f525a7d0b29a97940dce28d3f86aa2e",
+            "blockHash": "0xc3f0b9ec64bff07b5b152245249eec85b7c4189fd4eaffd9719c9264397322ed",
+            "nonce": 2,
+            "transactionHash": "0x697efe30d64ebffd9aa5cadaf8e1d33b9fcb37b0e8ea5574858cca210fba37d7"
+          }
+        ],
+        "remote": false,
+        "to": "external"
+      },
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 3,
+            "external": "120000000",
+            "foreign": null,
+            "native": "9886032574544856",
+            "reserve": "90750000",
+            "runtimeHeight": 34,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "1250000",
+              "collateral": "1250000",
+              "mempool": 0,
+              "owned": "1250000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 20,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "1.25",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 2,
+            "external": "121250000",
+            "foreign": null,
+            "native": "10139216760000000",
+            "reserve": "90750000",
+            "runtimeHeight": 28,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 15,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "external",
+        "name": "roundtrip-e2a",
+        "receipts": [
+          {
+            "batchHash": "0x369b000c2ca883e6e951d4a6aa6d43506ac8a3909765f27e9ac6836a4fb1adb4",
+            "blockHash": "0x72f590846052af601c1d443d950da163d386090b0589cd715de143b394d3cdc0",
+            "nonce": 3,
+            "transactionHash": "0x36fc9317618d5808b9485430ec8ec0fe27b380a73cbbb699ce0edef37d58ec11"
+          }
+        ],
+        "remote": true,
+        "to": "account"
+      },
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "107500000",
+              "collateral": "7500000",
+              "mempool": 0,
+              "owned": "107500000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 4,
+            "external": "120000000",
+            "foreign": null,
+            "native": "9886032574544856",
+            "reserve": "91250000",
+            "runtimeHeight": 45,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "1250000",
+              "collateral": "1250000",
+              "mempool": 0,
+              "owned": "1250000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 20,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "0.5",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 3,
+            "external": "120000000",
+            "foreign": null,
+            "native": "9886032574544856",
+            "reserve": "90750000",
+            "runtimeHeight": 34,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "1250000",
+              "collateral": "1250000",
+              "mempool": 0,
+              "owned": "1250000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 20,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "account",
+        "name": "roundtrip-a2r",
+        "receipts": [
+          {
+            "batchHash": "0xe1110b6370ed804a36e5a675d779894390a0bc33337a65dcab438dc34f2bf1dc",
+            "blockHash": "0x1c160895d868d26598963422b42287e9efc9475ff0a7df4c6df181b166209d0c",
+            "nonce": 4,
+            "transactionHash": "0x9d0c50c4716b70db620e1146556f1b6b49fcbb50467c5ff8e15efd0be6f35400"
+          }
+        ],
+        "remote": false,
+        "to": "reserve"
+      },
+      {
+        "after": {
+          "alice": {
+            "account": {
+              "capacity": "107500000",
+              "collateral": "7500000",
+              "mempool": 0,
+              "owned": "107500000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 5,
+            "external": "120500000",
+            "foreign": null,
+            "native": "9886032574544856",
+            "reserve": "90750000",
+            "runtimeHeight": 51,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "1250000",
+              "collateral": "1250000",
+              "mempool": 0,
+              "owned": "1250000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 20,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "amount": "0.5",
+        "before": {
+          "alice": {
+            "account": {
+              "capacity": "107500000",
+              "collateral": "7500000",
+              "mempool": 0,
+              "owned": "107500000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 4,
+            "external": "120000000",
+            "foreign": null,
+            "native": "9886032574544856",
+            "reserve": "91250000",
+            "runtimeHeight": 45,
+            "signerId": "0xfc2077ca7f403cbeca41b1b0f62d91b5ea631b5e"
+          },
+          "bob": {
+            "account": {
+              "capacity": "1250000",
+              "collateral": "1250000",
+              "mempool": 0,
+              "owned": "1250000",
+              "pending": false
+            },
+            "allowance": "0",
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            },
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityNonce": 0,
+            "external": "0",
+            "foreign": null,
+            "native": "0",
+            "reserve": "0",
+            "runtimeHeight": 20,
+            "signerId": "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+          }
+        },
+        "from": "reserve",
+        "name": "roundtrip-r2e-final",
+        "receipts": [
+          {
+            "batchHash": "0x318ba07eff785804b162d95bcb4b7a02802ccbed61ce0680d6a2ebf8c3f3cb29",
+            "blockHash": "0x53370dcbe685a862d32d142db4dbeedf31a932511591343059f448595bf95240",
+            "nonce": 5,
+            "transactionHash": "0x696aea4943a8a5b02be52e809138a8e87675c3c5b0b8d29b01979d891744434e"
+          }
+        ],
+        "remote": false,
+        "to": "external"
+      }
+    ]
+  }
+}
