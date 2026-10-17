@@ -1,0 +1,52 @@
+$ bun tools/stand-lock.ts run --reason mainnet-control-probe-regression --timeout-ms "60000" -- bun "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts" --all --strict-browser-health "--shards=1" "--workers-per-shard=1" "--max-mm-concurrency=1" "--video=retain-on-failure" "--trace=retain-on-failure" "--screenshot=only-on-failure" "--max-failures=1" "--pw-files=tests/e2e-cross-j-swap.spec.ts::H2 process replacement restores authoritative health and exact configured public books"
+test artifact cleanup (e2e): removing .logs/e2e-parallel
+test artifact cleanup (e2e): removed .logs/e2e-parallel
+test artifact budget (e2e): workspace=31.47GiB budgeted=6.37GiB / 50GiB
+
+========================================================================
+E2E Parallel Runner (isolated stack per shard)
+========================================================================
+Shards   : 1
+Port pool: local-test-stack-v1 (7 machine-wide stacks)
+Workers/shard: 1
+MM concurrency: 1
+Reset concurrency: 1
+Max failures : 1
+Phase warn ms: 30000
+Prewait health: reset
+Browser health: strict
+QA category  : all
+Start target : 0
+Keep prior logs: no
+Artifacts    : video=retain-on-failure, trace=retain-on-failure, screenshot=only-on-failure
+Git HEAD     : 06a4701eada3 dirty
+Code hash    : 22b88b9e94e96ca1
+Build inputs : 2a8482fe290c22e6
+Logs     : /Users/zigota/xln/.logs/e2e-parallel/20261017-060532-520
+========================================================================
+
+⏩ isolated build cache hit: /Users/zigota/xln/.logs/e2e-build-cache
+Targets  : 1/1 isolated test stack (starting at 0)
+Active lanes: 1/1 requested
+Build    : /Users/zigota/xln/.logs/e2e-build-cache
+
+========================================================================
+E2E Summary
+========================================================================
+PASS  shard=0      27.3s  phases[pre=26 anvil=215 api=512 health=14431 vite=825 pw=9439]  log=/Users/zigota/xln/.logs/e2e-parallel/20261017-060532-520/shard-0/logs/e2e.log
+------------------------------------------------------------------------
+Total wall time: 28.6s (28643ms)
+Git HEAD: 06a4701eada300733f34a8a916f1fc1f3778a6b5
+Code hash: 22b88b9e94e96ca17c0273b3ab58edf1fe2aa4bc236d7a97e87d00e33e296e41
+Build input hash: 2a8482fe290c22e6fa615eadfd97a19be5e5ee0fad33bdfa84e5bee7342a8838
+Candidate ID: 79f539cba46f91eda869df3176542ab8735e21cc9403b305dd2982a6301462f5
+Gate config hash: 03bb654f20d3b68403c1c720ce6ec7c397836ff1d4085909de8a3d92bbd62dbe
+Logs: /Users/zigota/xln/.logs/e2e-parallel/20261017-060532-520
+------------------------------------------------------------------------
+Benchmark: OK suite=resilience · cross-j-swap.h2-process-replacement-restores-authoritative
+Compared : 20261017-055822-185 head=06a4701eada3 code=f63a820770a67ec1
+Reason   : Within thresholds vs 20261017-055822-185
+Causes   : code hash changed | current worktree is dirty
+real 33.57
+user 76.72
+sys 104.28

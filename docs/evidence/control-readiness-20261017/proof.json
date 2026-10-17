@@ -1,0 +1,44 @@
+{
+  "baseSha": "06a4701eada300733f34a8a916f1fc1f3778a6b5",
+  "sourceSha256": "027e64478ffc1bb3940e3b9c1d9aaf7c07dd5fd8937084cbaf0ca9c1c7f847c3",
+  "problem": "Generic /api boot probe reaches static fallback and503 when frontend/build is absent although orchestrator control listener is ready; deferred reset never begins.",
+  "productionReproduction": {
+    "seconds": 0.5,
+    "healthStatus": 200,
+    "oldApiStatus": 503,
+    "oldBody": "Application build missing",
+    "resetStartedAt": null,
+    "script": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/probe-control-readiness.ts"
+  },
+  "repair": "Probe existing /api/health for HTTP listener readiness. Preserve deferred reset and all post-reset core/topology readiness conditions.",
+  "regression": {
+    "case": "H2 process replacement restores authoritative health and exact configured public books",
+    "passed": 1,
+    "exit": 0,
+    "seconds": 33.57,
+    "apiBootMs": 512,
+    "fullTopologyMs": 14431,
+    "strictBrowserHealth": true
+  },
+  "downstreamBoundary": {
+    "case": "MM full and partial fill",
+    "apiBootMs": 511,
+    "fullTopologyMs": 14560,
+    "error": "Vite /ui proxy ECONNREFUSED 127.0.0.1:5183",
+    "exit": 124,
+    "seconds": 60.86,
+    "passed": false
+  },
+  "rawLogSha256": {
+    "control-readiness-repro.log": "298c8f9f955c965c580015dde80c003dce56036b13d6b34d6be9f8bd8a055533",
+    "control-probe-regression.log": "1dd0b9df64c1718ffa1bfd6072742d5f21c6a5f18236e41e097b890c80750553",
+    "mm-fill-browser-06a4701ea.log": "b8d1bf472627a4007f460c9411f59c508cabdadc14e1c7b1541e396350b86233",
+    "mm-fill-browser-fixed-probe.log": "0e9b4749557581d3e2e18aff9574d0d334bc99eeaffc11517242025503beec68"
+  },
+  "logPresentation": "Trailing spaces removed in repository copies only; exact stdout and process evidence retained externally.",
+  "limitations": [
+    "Full E2E and aggregate release remain incomplete",
+    "React /ui asset owner must be connected to isolated preview",
+    "No public-chain or mainnet readiness claim"
+  ]
+}

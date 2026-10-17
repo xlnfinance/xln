@@ -2051,7 +2051,10 @@ const runShard = async (
     );
     api.stdout.on('data', c => log.write(`[api] ${c.toString()}`));
     api.stderr.on('data', c => log.write(`[api:err] ${c.toString()}`));
-    await waitForHttpReady(`${apiUrl}/api`, args.stackTimeoutMs, shardAbortController.signal);
+    // Only control-listener readiness precedes the deferred reset. `/api` is
+    // a static-app route and may be 503 when the isolated build lives in cache.
+    // Full topology readiness is still required after hardResetShardBaseline.
+    await waitForHttpReady(`${apiUrl}/api/health`, args.stackTimeoutMs, shardAbortController.signal);
     markPhase('apiBoot', apiStart);
     throwIfAborted();
     if (args.prewaitHealth === 'reset') {

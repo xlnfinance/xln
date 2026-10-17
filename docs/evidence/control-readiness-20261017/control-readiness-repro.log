@@ -1,0 +1,5 @@
+$ bun tools/stand-lock.ts run --reason mainnet-control-readiness-repro --timeout-ms "60000" -- bun "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/probe-control-readiness.ts"
+{"healthStatus":200,"coreOk":false,"reset":{"completedAt":null,"failedAt":null,"inProgress":false,"lastError":null,"startedAt":null},"oldProbeStatus":503,"oldProbeBody":"Application build missing"}
+real 0.50
+user 0.67
+sys 0.94

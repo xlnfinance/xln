@@ -1,0 +1,35 @@
+$ bun tools/stand-lock.ts run --reason mainnet-mm-fill-correct-control-probe --timeout-ms "60000" -- bun "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts" --all --strict-browser-health "--shards=1" "--workers-per-shard=1" "--max-mm-concurrency=1" "--video=retain-on-failure" "--trace=retain-on-failure" "--screenshot=only-on-failure" "--max-failures=1" "--pw-files=tests/e2e-cross-j-swap.spec.ts::real MM full fill auto-closes and partial fill closes manually on both legs"
+test artifact cleanup (e2e): removing .logs/e2e-parallel
+test artifact cleanup (e2e): removed .logs/e2e-parallel
+test artifact budget (e2e): workspace=31.15GiB budgeted=6.07GiB / 50GiB
+
+========================================================================
+E2E Parallel Runner (isolated stack per shard)
+========================================================================
+Shards   : 1
+Port pool: local-test-stack-v1 (7 machine-wide stacks)
+Workers/shard: 1
+MM concurrency: 1
+Reset concurrency: 1
+Max failures : 1
+Phase warn ms: 30000
+Prewait health: reset
+Browser health: strict
+QA category  : all
+Start target : 0
+Keep prior logs: no
+Artifacts    : video=retain-on-failure, trace=retain-on-failure, screenshot=only-on-failure
+Git HEAD     : 06a4701eada3 dirty
+Code hash    : 22b88b9e94e96ca1
+Build inputs : 2a8482fe290c22e6
+Logs     : /Users/zigota/xln/.logs/e2e-parallel/20261017-060413-636
+========================================================================
+
+♻️ isolated build cache rebuild: E2E_BUILD_CACHE_STALE:expected=2a8482fe290c22e6fa615eadfd97a19be5e5ee0fad33bdfa84e5bee7342a8838:actual=0c9bd62b681d918452434d362beec90dbe8a0eab53a8ecbd807691308a037275
+Targets  : 1/1 isolated test stack (starting at 0)
+Active lanes: 1/1 requested
+Build    : /Users/zigota/xln/.logs/e2e-build-cache
+error: script "stand:run" exited with code 124
+real 60.86
+user 15.52
+sys 10.25
