@@ -1671,7 +1671,7 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
     ),
   ).toEqual([]);
   await expect(page.locator('#runtime-adapter')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Open app' })).toHaveAttribute('href', '/app');
+  await expect(page.getByRole('link', { name: 'Open app' })).toHaveAttribute('href', '/ui/');
 
   const adapterPanel = page.locator('#runtime-adapter');
   await adapterPanel.locator('input[placeholder="ws://127.0.0.1:8080/rpc"]').fill(wsUrl);
@@ -1689,44 +1689,67 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
     { timeout: REMOTE_E2E_WAIT_MS },
   );
 
-  await page.goto(`${APP_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=forbidden`, {
-    waitUntil: 'domcontentloaded',
+  // Editing the form does not change the already authenticated navigation target.
+  await adapterPanel.locator('input[placeholder="ws://127.0.0.1:8080/rpc"]').fill('wss://untrusted.invalid/rpc');
+  await adapterPanel.locator('input[placeholder="read/admin token"]').fill('unused-edited-key');
+  const openWallet = page.getByRole('link', { name: 'Open app', exact: true });
+  const walletHref = await openWallet.getAttribute('href');
+  if (!walletHref) throw new Error('HEALTH_REMOTE_WALLET_LINK_MISSING');
+  const link = new URL(walletHref, page.url());
+  expect(link.pathname).toBe('/ui/');
+  expect(link.search).toBe('');
+  expect(new URLSearchParams(link.hash.slice(1)).get('ws')).toBe(wsUrl);
+  expect(new URLSearchParams(link.hash.slice(1)).get('token')).toBe(adminKey);
+  const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
+  const h1 = String(hubs.h1).toLowerCase();
+  await openWallet.click();
+  await expect(page.getByLabel('Runtime endpoint', { exact: true })).toHaveValue(wsUrl);
+  await expect(page.getByLabel('Access key · optional', { exact: true })).toHaveValue(adminKey);
+  expect(new URL(page.url()).hash).toBe('');
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.getByRole('button', { name: new RegExp(h1.slice(0, 18)) }).click();
+  await expect(page.locator('[data-testid="nav-home"]:visible')).toBeVisible();
+  await expect(page.getByTestId('home-entity-id')).toHaveText(h1);
+  const appState = await page.evaluate(() => {
+    const adapter = (window as Window & { __xln?: { adapter: () => RuntimeAdapter | null } }).__xln?.adapter();
+    if (!adapter) throw new Error('HEALTH_REMOTE_WALLET_ADAPTER_MISSING');
+    return {
+      url: window.location.href,
+      runtimeId: adapter.runtimeId,
+      status: adapter.status,
+      authLevel: adapter.authLevel,
+      activeWsUrl: localStorage.getItem('xln-runtime-adapter-ws'),
+      storedAccess: localStorage.getItem('xln-runtime-adapter-access'),
+      sessionKey: sessionStorage.getItem('xln-runtime-adapter-key'),
+      persistentKey: localStorage.getItem('xln-runtime-adapter-key'),
+    };
   });
-  // Static hosting (adapter-static + nginx in prod) serves the prerendered
-  // shell with HTTP 200 for every route; the query-credential guard runs in
-  // the client router. Assert the rejection a static deployment actually
-  // enforces: the error page renders and the URL-borne token is never adopted.
-  await expect(page.getByRole('heading', { name: '400' })).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.getByText('REMOTE_RUNTIME_QUERY_BOOTSTRAP_FORBIDDEN')).toBeVisible();
-  await page.goto(`${APP_BASE_URL}/radapter`, { waitUntil: 'domcontentloaded' });
-  await expect(page).toHaveURL(/\/app$/);
-  await page.waitForFunction(
-    () => {
-      const view = window as typeof window & {
-        __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null } };
-      };
-      const status = (view as any).__xln?.adapter?.status();
-      return status?.connected === true && status.authLevel === 'admin';
-    },
-    null,
-    { timeout: REMOTE_E2E_WAIT_MS },
-  );
-  const appState = await page.evaluate(() => ({
-    url: window.location.href,
-    activeWsUrl: localStorage.getItem('xln-runtime-adapter-ws') || '',
-    storedAccess: localStorage.getItem('xln-runtime-adapter-access') || '',
-    sessionKey: sessionStorage.getItem('xln-runtime-adapter-key') || '',
-  }));
+  expect(appState.runtimeId).toBe(h1Endpoint.runtimeId);
+  expect(appState.status).toBe('connected');
+  expect(appState.authLevel).toBe('admin');
   expect(appState.url).not.toContain('runtime=remote');
   expect(appState.url).not.toContain('ws=');
   expect(appState.activeWsUrl).toBe(wsUrl);
   expect(appState.storedAccess).toBe('admin');
-  // The resumed session may hold any valid admin capability for this runtime:
-  // the bulk-import ledger mints its own token, and /app boot prefers that
-  // durable entry over the panel's session token. The contract is admin-level
-  // access to the same runtime, not byte-equality with the token minted above.
-  expect(appState.sessionKey.startsWith('xlnra1.')).toBe(true);
-  await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  expect(appState.sessionKey).toBe(adminKey);
+  expect(appState.persistentKey).toBeNull();
+
+  await page.goto(`${APP_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=forbidden`, {
+    waitUntil: 'domcontentloaded',
+  });
+  // Static deployments reject query capabilities in the client; no secret is adopted.
+  await expect(page.getByRole('heading', { name: '400' })).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByText('REMOTE_RUNTIME_QUERY_BOOTSTRAP_FORBIDDEN')).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem('xln-runtime-adapter-key'))).toBe(adminKey);
+  await page.goto(`${APP_BASE_URL}/radapter`, { waitUntil: 'domcontentloaded' });
+  await expect(page).toHaveURL(/\/ui\/$/);
+  // The current wallet does not infer permission to reconnect from another app's registry.
+  await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      (window as Window & { __xln?: { adapter: () => RuntimeAdapter | null } }).__xln?.adapter(),
+    ),
+  ).toBeNull();
 
   await page.goto(`${APP_BASE_URL}/admin`, { waitUntil: 'domcontentloaded' });
   await expect(page).toHaveURL(/\/health$/);

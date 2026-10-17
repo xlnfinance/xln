@@ -602,8 +602,9 @@ test('runtime adapter health panel uses shared RuntimeView store instead of owni
   expect(source).toContain('refreshRuntimeView({');
   expect(source).toContain('const head = $derived($runtimeView.head)');
   expect(source).toContain('const viewFrame = $derived($runtimeView.frame)');
-  expect(source).toContain("authKey.trim() && $runtimeControllerHandle.authLevel === 'admin'");
-  expect(source).toContain('persistRuntimeAdapterSession(wsUrl, authKey.trim())');
+  expect(source).toContain("request.authKey && $runtimeControllerHandle.authLevel === 'admin'");
+  expect(source).toContain('persistRuntimeAdapterSession(request.wsUrl, request.authKey)');
+  expect(source).toContain('const request = { wsUrl: wsUrl.trim(), authKey: authKey.trim() }');
   expect(source).not.toContain('runtimeQueryClient.readHead');
   expect(source).not.toContain('runtimeQueryClient.readViewFrame');
   expect(source).not.toContain('let head = $state');
@@ -621,7 +622,9 @@ test('radapter page redirects remote users into the canonical app workspace', ()
   expect(route).toContain("throw error(400, 'REMOTE_RUNTIME_QUERY_BOOTSTRAP_FORBIDDEN')");
   expect(route).toContain("throw redirect(307, '/app')");
   expect(route).not.toContain("searchParams.get('token'");
-  expect(panel).toContain('href="/app"');
+  expect(panel).toContain('href={walletHref}');
+  expect(panel).toContain("let walletHref = $state('/ui/')");
+  expect(panel).toContain("runtime: 'remote', ws: request.wsUrl, token: request.authKey");
   expect(panel).not.toContain('Runtime Adapter Inspector');
   expect(panel).not.toContain('autoConnect');
 });

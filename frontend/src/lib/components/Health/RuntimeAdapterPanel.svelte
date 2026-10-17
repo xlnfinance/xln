@@ -10,6 +10,7 @@
 
   let wsUrl = $state('');
   let authKey = $state('');
+  let walletHref = $state('/ui/');
   let selectedEntityId = $state('');
   let loading = $state(false);
   let error = $state<string | null>(null);
@@ -124,16 +125,18 @@
   async function connect(): Promise<void> {
     loading = true;
     error = null;
+    walletHref = '/ui/';
+    // Bind navigation to the request that authenticated, not fields edited during or after it.
+    const request = { wsUrl: wsUrl.trim(), authKey: authKey.trim() };
     try {
       await connectRuntimeAdapter({
         mode: 'remote',
-        wsUrl,
-        ...(authKey.trim() ? { authKey: authKey.trim() } : {}),
+        wsUrl: request.wsUrl,
+        ...(request.authKey ? { authKey: request.authKey } : {}),
       });
-      // Same-tab navigation to /app resumes this session: the capability is
-      // session-confined (sessionStorage), the endpoint is not a secret.
-      if (authKey.trim() && $runtimeControllerHandle.authLevel === 'admin') {
-        persistRuntimeAdapterSession(wsUrl, authKey.trim());
+      if (request.authKey && $runtimeControllerHandle.authLevel === 'admin') {
+        persistRuntimeAdapterSession(request.wsUrl, request.authKey);
+        walletHref = `/ui/#${new URLSearchParams({ runtime: 'remote', ws: request.wsUrl, token: request.authKey })}`;
       }
       await refresh();
     } catch (err) {
@@ -156,7 +159,7 @@
       <h2>Runtime Adapter</h2>
       <p class="sub">Remote runtime frame reader for health debugging</p>
     </div>
-    <a class="panel-link" href="/app">Open app</a>
+    <a class="panel-link" href={walletHref}>Open app</a>
   </div>
 
   <div class="status-line">
