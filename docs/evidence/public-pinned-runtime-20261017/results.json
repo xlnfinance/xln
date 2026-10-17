@@ -1,0 +1,496 @@
+{
+  "deployedSourceSha": "33260898b968f1b6c70ea0b702048f1997598466",
+  "checks": {
+    "pinned-bun-web-build": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "pinned-bun-web-build",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bash",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/operator-33260898b/build-exact-canonical.sh"
+      ],
+      "exitCode": 0,
+      "seconds": 17.888,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-web-build.log"
+    },
+    "pinned-bun-web-upload": {
+      "command": [
+        "scp",
+        "-q",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/operator-33260898b/web.tar.gz",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/operator-33260898b/web-manifest.json",
+        "xln.finance:/root/xln-deployment-evidence/33260898b/"
+      ],
+      "exitCode": 0,
+      "seconds": 4.949,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-web-upload.log"
+    },
+    "pinned-bun-remote-preflight": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && python3 - <<'PY'\nimport pathlib,json,hashlib,subprocess\np=pathlib.Path(\"/root/xln-deployment-evidence/33260898b\");m=json.loads((p/\"web-manifest.json\").read_text());assert hashlib.sha256((p/\"web.tar.gz\").read_bytes()).hexdigest()==m[\"sha256\"]\nprint(json.dumps(m));print(\"BUN=\"+subprocess.check_output([\"bun\",\"--version\"],text=True).strip())\nPY"
+      ],
+      "exitCode": 0,
+      "seconds": 1.179,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-remote-preflight.log"
+    },
+    "pinned-bun-remote-stop": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pinned-bun-current-wal-stop --timeout-ms 60000 -- python3 /root/xln-deployment-evidence/33260898b/transition.py stop"
+      ],
+      "exitCode": 0,
+      "seconds": 6.7,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-remote-stop.log"
+    },
+    "pinned-bun-remote-install": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pinned-bun-install-current --timeout-ms 60000 -- python3 /root/xln-deployment-evidence/33260898b/transition.py install"
+      ],
+      "exitCode": 0,
+      "seconds": 22.228,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-remote-install.log"
+    },
+    "pinned-bun-remote-start": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pinned-bun-start-current-wal --timeout-ms 60000 -- bash -ec \"python3 /root/xln-deployment-evidence/33260898b/transition.py start; python3 /root/xln-deployment-evidence/33260898b/observe.py\""
+      ],
+      "exitCode": 1,
+      "seconds": 41.909,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-remote-start.log"
+    },
+    "pinned-bun-remote-observe": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pinned-bun-current-readonly --timeout-ms 60000 -- python3 /root/xln-deployment-evidence/33260898b/observe.py"
+      ],
+      "exitCode": 0,
+      "seconds": 1.645,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-remote-observe.log"
+    },
+    "pinned-bun-current-h1": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pinned-bun-current-h1 --timeout-ms 60000 -- bun /root/xln-deployment-evidence/33260898b/compare-history.ts --hub=H1"
+      ],
+      "exitCode": 0,
+      "seconds": 5.962,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-current-h1.log"
+    },
+    "pinned-bun-current-h2": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pinned-bun-current-h2 --timeout-ms 60000 -- bun /root/xln-deployment-evidence/33260898b/compare-history.ts --hub=H2"
+      ],
+      "exitCode": 0,
+      "seconds": 17.298,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-current-h2.log"
+    },
+    "pinned-bun-current-h3": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pinned-bun-current-h3 --timeout-ms 60000 -- bun /root/xln-deployment-evidence/33260898b/compare-history.ts --hub=H3"
+      ],
+      "exitCode": 0,
+      "seconds": 15.997,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-current-h3.log"
+    },
+    "pinned-bun-shutdown-observation": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "python3 /root/xln-deployment-evidence/33260898b/capture-shutdown.py"
+      ],
+      "exitCode": 0,
+      "seconds": 0.775,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-shutdown-observation.log"
+    },
+    "pinned-bun-persist-runtime": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "python3 /root/xln-deployment-evidence/33260898b/persist-runtime.py"
+      ],
+      "exitCode": 0,
+      "seconds": 1.288,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-persist-runtime.log"
+    },
+    "pinned-bun-actual-restart": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pinned-bun-real-shutdown --timeout-ms 60000 -- python3 /root/xln-deployment-evidence/33260898b/pinned-restart/restart.py"
+      ],
+      "exitCode": 0,
+      "seconds": 45.053,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-actual-restart.log"
+    },
+    "pinned-restart-current-h1": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pinned-restart-current-h1 --timeout-ms 60000 -- bun /root/xln-deployment-evidence/33260898b/pinned-restart/compare-history.ts --hub=H1"
+      ],
+      "exitCode": 0,
+      "seconds": 5.859,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-restart-current-h1.log"
+    },
+    "pinned-restart-current-h2": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pinned-restart-current-h2 --timeout-ms 60000 -- bun /root/xln-deployment-evidence/33260898b/pinned-restart/compare-history.ts --hub=H2"
+      ],
+      "exitCode": 0,
+      "seconds": 18.064,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-restart-current-h2.log"
+    },
+    "pinned-restart-current-h3": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pinned-restart-current-h3 --timeout-ms 60000 -- bun /root/xln-deployment-evidence/33260898b/pinned-restart/compare-history.ts --hub=H3"
+      ],
+      "exitCode": 0,
+      "seconds": 15.937,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-restart-current-h3.log"
+    },
+    "pinned-bun-operator-health": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason pinned-bun-operator-health --timeout-ms 60000 -- bun core/scripts/operations/production/prod-health-smoke.ts --url=http://127.0.0.1:8080 --expected-hubs=3 --require-hub-self-relay --expected-towers=1 --tower-url=http://127.0.0.1:9100/api/tower/healthz --require-clean-source --require-source-match --expected-git-head=33260898b968f1b6c70ea0b702048f1997598466 --expected-code-hash=33260898b968f1b6c70ea0b702048f1997598466"
+      ],
+      "exitCode": 0,
+      "seconds": 1.192,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-operator-health.log"
+    },
+    "pinned-bun-public-gateway": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "pinned-bun-public-gateway",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/operator-33260898b/public-browser.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 39.233,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-public-gateway.log"
+    },
+    "pinned-bun-final-owner-proof": {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "xln.finance",
+        "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && python3 /root/xln-deployment-evidence/33260898b/after-restart-observe.py"
+      ],
+      "exitCode": 0,
+      "seconds": 1.106,
+      "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/pinned-bun-final-owner-proof.log"
+    }
+  },
+  "webArtifact": {
+    "sha": "33260898b968f1b6c70ea0b702048f1997598466",
+    "sha256": "70b35234ea35a3db9349e11be3538c6bde6c1571340c5ba5e292db231a9581c5",
+    "bytes": 61951864
+  },
+  "installedWebFileCount": 1338,
+  "gateway": {
+    "mode": "public",
+    "origin": "https://xln.finance",
+    "assets": [
+      {
+        "path": "/ui/runtime.js",
+        "sha256": "714c22744cbc9fbbb626e192ba7ee3e878ed1513e16846f381938b5b9a01c54a",
+        "bytes": 5947436,
+        "mime": "text/javascript; charset=utf-8"
+      },
+      {
+        "path": "/account-worker.js",
+        "sha256": "5eb1a38aa8d02a663289ba35ba286e2d8067d373bb7bc31e80a61887ad15a945",
+        "bytes": 2045527,
+        "mime": "text/javascript; charset=utf-8"
+      }
+    ],
+    "workers": [
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js"
+    ],
+    "relayFrames": 16,
+    "pageErrors": [],
+    "checks": [
+      "app redirect",
+      "fresh embedded wallet/account",
+      "current runtime and worker MIME/hash",
+      "real worker initialization",
+      "relay traffic",
+      "deep route reload/unlock",
+      "compile with unavailable admission",
+      "observer graph"
+    ]
+  },
+  "consoleErrorCount": 0,
+  "restart": {
+    "sha": "33260898b968f1b6c70ea0b702048f1997598466",
+    "elapsedSeconds": 44.114,
+    "managedRecoveryDurationMs": 39357,
+    "dataReset": false,
+    "backup": {
+      "path": "/root/xln-deployment-evidence/33260898b/pinned-restart/current-before-restart.tar.gz",
+      "bytes": 2416796,
+      "sha256": "1217cb98af4b483107c438faff6654307de0d6357af95291f2ea9d96674c97cd"
+    },
+    "protectedFilesUnchanged": true,
+    "unrelatedProcessesUnchanged": true,
+    "fatalMarkers": {
+      "NAPI FATAL ERROR": 0,
+      "Bun has crashed": 0,
+      "panic:": 0
+    },
+    "errorDeltaBytes": 4399,
+    "errorDeltaSha256": "c85ded72ca6030bdbfaaaf3e9369cdb0a138d9bba36fdc0ebb81661759ed1e6a",
+    "stages": [
+      {
+        "step": "current-state-snapshot",
+        "elapsedSeconds": 0.756,
+        "at": 1792257193609
+      },
+      {
+        "step": "server-stopped",
+        "elapsedSeconds": 2.098,
+        "at": 1792257194952
+      },
+      {
+        "step": "current-stores-zero-handles",
+        "elapsedSeconds": 2.734,
+        "at": 1792257195588
+      },
+      {
+        "step": "current-format-backup",
+        "elapsedSeconds": 2.902,
+        "at": 1792257195755
+      },
+      {
+        "step": "server-restarted-preserve-current-state",
+        "elapsedSeconds": 3.061,
+        "at": 1792257195915
+      },
+      {
+        "step": "current-recovery-ready",
+        "elapsedSeconds": 44.113,
+        "at": 1792257236967
+      }
+    ]
+  },
+  "currentComparisons": [
+    {
+      "recoveryDurationMs": 39357,
+      "results": [
+        {
+          "accountViews": 10,
+          "advancements": [
+            {
+              "after": 5,
+              "before": 4,
+              "financialRoot": "0x84c8149f6380658b3f17ad30ab8c1ac0693c6a29744cc475a2bde8e6ec7deb4d",
+              "peer": "0xe2d88972225e766593519e423018cb6ff1050e948a29a42d56972a873b79ea15",
+              "reason": "New post-restart credit-policy frame links the preserved previous frame; all financial roots and balances unchanged"
+            }
+          ],
+          "beforeHeight": 130,
+          "currentFinancialRootsAndBalancesExact": true,
+          "currentHeight": 134,
+          "historicalAccountsExact": true,
+          "name": "H1"
+        }
+      ],
+      "source": {
+        "codeHash": "33260898b968f1b6c70ea0b702048f1997598466",
+        "computedAt": 1792257197383,
+        "dirty": false,
+        "gitBranch": "main",
+        "gitHead": "33260898b968f1b6c70ea0b702048f1997598466",
+        "height": 133,
+        "owner": "orchestrator"
+      }
+    },
+    {
+      "recoveryDurationMs": 39357,
+      "results": [
+        {
+          "accountViews": 6,
+          "advancements": [
+            {
+              "after": 5,
+              "before": 4,
+              "financialRoot": "0x62eef93ac27d83152c51491fba9647b3e5085e4a1dfbe11bf6566694a8326e93",
+              "peer": "0xe2d88972225e766593519e423018cb6ff1050e948a29a42d56972a873b79ea15",
+              "reason": "New post-restart credit-policy frame links the preserved previous frame; all financial roots and balances unchanged"
+            }
+          ],
+          "beforeHeight": 100,
+          "currentFinancialRootsAndBalancesExact": true,
+          "currentHeight": 104,
+          "historicalAccountsExact": true,
+          "name": "H2"
+        }
+      ],
+      "source": {
+        "codeHash": "33260898b968f1b6c70ea0b702048f1997598466",
+        "computedAt": 1792257197383,
+        "dirty": false,
+        "gitBranch": "main",
+        "gitHead": "33260898b968f1b6c70ea0b702048f1997598466",
+        "height": 134,
+        "owner": "orchestrator"
+      }
+    },
+    {
+      "recoveryDurationMs": 39357,
+      "results": [
+        {
+          "accountViews": 6,
+          "advancements": [
+            {
+              "after": 5,
+              "before": 4,
+              "financialRoot": "0x3d30210064a77a1878cd458468aeabe711fc1c41a9c5927e9a525db8085ca4f1",
+              "peer": "0xe2d88972225e766593519e423018cb6ff1050e948a29a42d56972a873b79ea15",
+              "reason": "New post-restart credit-policy frame links the preserved previous frame; all financial roots and balances unchanged"
+            }
+          ],
+          "beforeHeight": 89,
+          "currentFinancialRootsAndBalancesExact": true,
+          "currentHeight": 93,
+          "historicalAccountsExact": true,
+          "name": "H3"
+        }
+      ],
+      "source": {
+        "codeHash": "33260898b968f1b6c70ea0b702048f1997598466",
+        "computedAt": 1792257197383,
+        "dirty": false,
+        "gitBranch": "main",
+        "gitHead": "33260898b968f1b6c70ea0b702048f1997598466",
+        "height": 134,
+        "owner": "orchestrator"
+      }
+    }
+  ],
+  "globalRuntimeReplaced": false,
+  "testnetReset": false,
+  "mainnetClaim": false
+}

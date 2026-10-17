@@ -42,6 +42,10 @@ controlled restart. A successful short crypto/worker test does not prove a previ
 observed shutdown crash fixed; capture old/new process ownership, exit logs and exact
 financial state after the actual restart. See
 [pinned runtime and recovery evidence](../evidence/pinned-bun-startup-20261017/readme.md).
+The [actual public pinned-runtime deployment](../evidence/public-pinned-runtime-20261017/readme.md)
+records executable provenance, current-store backups, bounded restart, exact financial
+comparisons and HTTPS verification. Its retained shutdown warnings and release limits
+are part of the result.
 
 ## Regenerating obsolete testnet stores
 
