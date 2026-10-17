@@ -1,0 +1,25 @@
+bun test v1.4.0 (34cbb9a40)
+
+core/__tests__/operations/health/prod-health-smoke.test.ts:
+(pass) prod health smoke ignores advisory bootstrap reserve target drift [0.06ms]
+(pass) prod health smoke still fails on real degraded subsystems
+(pass) prod health smoke treats typed fatal failures as authoritative [0.06ms]
+(pass) prod health smoke blocks every unresolved incident without leaking messages [0.10ms]
+(pass) prod health smoke queries unresolved incidents before ordinary health [0.07ms]
+(pass) prod health smoke reports hub relay-presence diagnostics [0.16ms]
+(pass) prod health smoke validates exact capped-testnet hub topology [0.04ms]
+(pass) prod health smoke builds tower health URLs without guessing proxy query shape [0.07ms]
+(pass) release health is bound to the exact clean deployed candidate [0.03ms]
+(pass) health capability authenticates the real operator boundary and refuses redirect or plaintext forwarding [0.24ms]
+(pass) health capability file is read without creating, changing or accepting malformed credentials [0.69ms]
+
+core/__tests__/orchestrator/http/operator-access.test.ts:
+(pass) operator access > does not expose authenticated Runtime presence as a public API [0.16ms]
+(pass) operator access > persists generated capabilities with owner-only permissions [0.47ms]
+(pass) operator access > rejects spoofed local headers and accepts only socket-local or bearer authority [0.10ms]
+(pass) operator access > allows CORS preflight but rejects every private node route before handling [0.31ms]
+
+ 15 pass
+ 0 fail
+ 76 expect() calls
+Ran 15 tests across 2 files. [160.00ms]

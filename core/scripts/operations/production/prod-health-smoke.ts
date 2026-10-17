@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
 
+import { readFileSync } from 'node:fs';
+
 type HealthSmokeArgs = {
   baseUrl: string;
+  operatorTokenFile: string | null;
   timeoutMs: number;
   allowDegraded: boolean;
   expectedHubs: number | null;
@@ -128,6 +131,7 @@ const parseArgs = (): HealthSmokeArgs => {
   }
   return {
     baseUrl,
+    operatorTokenFile: String(flags.get('--operator-token-file') || process.env['XLN_PROD_HEALTH_OPERATOR_TOKEN_FILE'] || '').trim() || null,
     timeoutMs,
     allowDegraded: flags.has('--allow-degraded'),
     expectedHubs,
@@ -146,11 +150,38 @@ const parseArgs = (): HealthSmokeArgs => {
   };
 };
 
-const fetchWithTimeout = async (url: string, timeoutMs: number): Promise<Response> => {
+export const readProdHealthOperatorToken = (path: string | null): string | null => {
+  if (path === null) return null;
+  const token = readFileSync(path, 'utf8').trim();
+  if (token.length < 32 || !/^[\x21-\x7e]+$/.test(token)) throw new Error('PROD_HEALTH_OPERATOR_TOKEN_INVALID');
+  return token;
+};
+
+/** A supplied capability stays on the explicitly selected API origin, never a redirect or tower. */
+export const prodHealthRequestOptions = (url: string, operatorToken: string | null): RequestInit => {
+  if (operatorToken === null) return {};
+  const target = new URL(url);
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(target.hostname);
+  if (
+    target.username ||
+    target.password ||
+    (target.protocol !== 'https:' && !(target.protocol === 'http:' && loopback))
+  ) {
+    throw new Error('PROD_HEALTH_OPERATOR_TRANSPORT_REQUIRES_TLS_OR_LOOPBACK');
+  }
+  return { headers: { authorization: `Bearer ${operatorToken}` }, redirect: 'error' };
+};
+
+const fetchWithTimeout = async (
+  url: string,
+  timeoutMs: number,
+  operatorToken: string | null = null,
+): Promise<Response> => {
+  const options = prodHealthRequestOptions(url, operatorToken);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { signal: controller.signal });
+    return await fetch(url, { ...options, signal: controller.signal });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     if (controller.signal.aborted) {
@@ -340,9 +371,11 @@ export const validateDeployedSource = (
 
 const main = async (): Promise<void> => {
   const args = parseArgs();
+  const operatorToken = readProdHealthOperatorToken(args.operatorTokenFile);
   const incidentsRes = await fetchWithTimeout(
     `${args.baseUrl}/api/debug/incidents?state=open&limit=1000`,
     args.timeoutMs,
+    operatorToken,
   );
   requireCondition(incidentsRes.ok, `/api/debug/incidents HTTP ${incidentsRes.status}`);
   const incidentsPayload = await incidentsRes.json() as { ok?: unknown; incidents?: unknown };
@@ -356,7 +389,7 @@ const main = async (): Promise<void> => {
     `OPEN_DEBUG_INCIDENTS_BLOCK_RELEASE:${JSON.stringify(blockingIncidents)}`,
   );
 
-  const healthRes = await fetchWithTimeout(`${args.baseUrl}/api/health`, args.timeoutMs);
+  const healthRes = await fetchWithTimeout(`${args.baseUrl}/api/health`, args.timeoutMs, operatorToken);
   requireCondition(healthRes.ok, `/api/health HTTP ${healthRes.status}`);
   const health = await healthRes.json() as {
     coreOk?: boolean;
@@ -375,7 +408,7 @@ const main = async (): Promise<void> => {
   let metrics = '';
   let metricsHttpStatus: number | null = null;
   try {
-    const diagnosticMetricsRes = await fetchWithTimeout(`${args.baseUrl}/api/metrics`, args.timeoutMs);
+    const diagnosticMetricsRes = await fetchWithTimeout(`${args.baseUrl}/api/metrics`, args.timeoutMs, operatorToken);
     metricsHttpStatus = diagnosticMetricsRes.status;
     if (diagnosticMetricsRes.ok) metrics = await diagnosticMetricsRes.text();
   } catch (error) {

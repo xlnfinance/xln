@@ -1,7 +1,12 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { isOperatorRequest } from '../../../orchestrator/hub/operator-access';
 
 import {
+  prodHealthRequestOptions,
+  readProdHealthOperatorToken,
   buildProdHealthFailureSummary,
   buildTowerHealthUrl,
   getBlockingOpenIncidents,
@@ -148,4 +153,45 @@ test('release health is bound to the exact clean deployed candidate', () => {
     'DEPLOYED_CODE_HASH_MISMATCH:expected=code-abc:actual=old-code',
     'DEPLOYED_SOURCE_DIRTY:true',
   ]);
+});
+
+
+test('health capability authenticates the real operator boundary and refuses redirect or plaintext forwarding', () => {
+  const token = 'a'.repeat(64);
+  const url = 'https://xln.finance/api/debug/incidents?state=open&limit=1000';
+  expect(isOperatorRequest(new Request(url), '203.0.113.5', token)).toBe(false);
+  const options = prodHealthRequestOptions(url, token);
+  expect(isOperatorRequest(new Request(url, options), '203.0.113.5', token)).toBe(true);
+  expect(isOperatorRequest(new Request(url, options), '203.0.113.5', 'b'.repeat(64))).toBe(false);
+  expect(options.redirect).toBe('error');
+  expect(prodHealthRequestOptions(url, null)).toEqual({});
+  for (const target of [
+    'http://xln.finance/api/health',
+    'https://user:password@xln.finance/api/health',
+    'ftp://localhost/api/health',
+  ]) {
+    expect(() => prodHealthRequestOptions(target, token)).toThrow(
+      'PROD_HEALTH_OPERATOR_TRANSPORT_REQUIRES_TLS_OR_LOOPBACK',
+    );
+  }
+  expect(prodHealthRequestOptions('http://127.0.0.1:8082/api/health', token).redirect).toBe('error');
+});
+
+test('health capability file is read without creating, changing or accepting malformed credentials', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'xln-health-capability-'));
+  const path = join(directory, 'operator-token');
+  try {
+    expect(readProdHealthOperatorToken(null)).toBeNull();
+    expect(() => readProdHealthOperatorToken(path)).toThrow();
+    const token = 'c'.repeat(64);
+    writeFileSync(path, `${token}\n`, { mode: 0o600 });
+    expect(readProdHealthOperatorToken(path)).toBe(token);
+    expect(readFileSync(path, 'utf8')).toBe(`${token}\n`);
+    for (const value of ['', 'short', `${token}\ninjected`, `${token}\0`]) {
+      writeFileSync(path, value);
+      expect(() => readProdHealthOperatorToken(path)).toThrow('PROD_HEALTH_OPERATOR_TOKEN_INVALID');
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

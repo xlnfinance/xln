@@ -15,6 +15,19 @@ curl -fsS https://xln.finance/api/metrics | grep -E 'xln_(core_ok|system_ok|disk
 bun run prod:health
 ```
 
+For remote operator health, supply the existing node capability through an owner-only file:
+
+```bash
+bun run prod:health --operator-token-file=/absolute/private/operator-token
+```
+
+`XLN_PROD_HEALTH_OPERATOR_TOKEN_FILE` supplies the same option for release/preflight scripts.
+The client reads the file without creating or rotating credentials. Obtain it through the existing
+operator access procedure; never put its contents in command arguments, logs or evidence.
+Only API incidents, health and metrics receive the capability. Authenticated requests require HTTPS
+(or loopback HTTP) and reject redirects; separate tower URLs and the wallet request receive no token.
+A missing/wrong capability remains an authorization failure, not permission to skip incident checks.
+
 ## Alert Rules
 
 - Page immediately when `xln_core_ok == 0` for 2 minutes.

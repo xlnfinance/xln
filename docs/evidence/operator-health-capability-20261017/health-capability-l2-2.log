@@ -1,0 +1,5 @@
+$ bun tools/stand-lock.ts run --reason mainnet-health-capability --timeout-ms "60000" -- bun "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/probe-health-capability.ts"
+{"actualOrchestrator":true,"incidents":[{"name":"missing","status":403},{"name":"wrong","status":403},{"name":"current","status":200}],"cliExit":1,"cliReachedCoreReadiness":true,"tokenLogged":false,"fullHealthClaim":false}
+real 0.52
+user 0.69
+sys 1.25

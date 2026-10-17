@@ -1,0 +1,34 @@
+{
+  "baseSha": "fc7efcd1ceb6f26946b11eba42e150f726185f46",
+  "firstRed": "Existing public prod:health invocation fails403 at /api/debug/incidents; CLI previously had no capability input.",
+  "repair": "Read explicitly supplied operator-token-file (or XLN_PROD_HEALTH_OPERATOR_TOKEN_FILE). Send bearer only to the selected API incidents/health/metrics; reject authenticated redirects and non-loopback plaintext. Server authorization unchanged.",
+  "l1": {
+    "passed": 15,
+    "assertions": 76,
+    "seconds": 0.16,
+    "exit": 0
+  },
+  "productionBoundary": {
+    "actualOrchestrator": true,
+    "forwardedRequestWithoutCapability": 403,
+    "wrongCapability": 403,
+    "currentCapability": 200,
+    "cliExit": 1,
+    "cliFirstFailure": "health.coreOk is not true (deferred mesh has not started)",
+    "probeExit": 0,
+    "seconds": 0.52,
+    "productionCredentialsUsed": false,
+    "fullTopologyHealthClaim": false
+  },
+  "sourceSha256": {
+    "core/scripts/operations/production/prod-health-smoke.ts": "195466b13ca8d2e5f2953a100653c2d0ec8988f2adfa973db3a1a89ef46ef46a",
+    "core/__tests__/operations/health/prod-health-smoke.test.ts": "7346ec148aa1283ba02437438dbc36619a62fcc22cf38469388695cbd126a60e"
+  },
+  "reproductionScript": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/probe-health-capability.ts",
+  "reproductionScriptSha256": "724f7dcbb83e12628a0c7161f5b24887ffce0ac450e996c41527d55aef08c7eb",
+  "rawLogSha256": {
+    "health-capability-l1-2.log": "9f8df2ec94f013278b71b694ebea4e25c1b22a247312fe752e8f170d35656638",
+    "health-capability-l2-2.log": "7a6887a12711b8f08db2f90ff0cdd1844cfb45639ef4ea972aacb3f216da7e98"
+  },
+  "remaining": "Owner/operator must provide existing capability and deploy/attest exact candidate through authorized procedure; public topology, public-chain, soak and rollback remain unproved."
+}
