@@ -56,7 +56,9 @@ const requirements: CoverageRequirement[] = [
     file: 'tests/e2e/payments/e2e-pay-deeplink.spec.ts',
     patterns: [
       'restores runtime and opens the pay screen from hash params',
-      '#payment-amount-input',
+      "getByTestId('pay-to')).toHaveValue(bob.entityId)",
+      "getByTestId('pay-amount')).toHaveValue('5')",
+      "getByTestId('pay-note')).toHaveValue('E2E direct pay deep link')",
     ],
   },
   {
@@ -117,11 +119,7 @@ const requirements: CoverageRequirement[] = [
   {
     area: 'frontend',
     file: 'frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte',
-    patterns: [
-      "label: 'Pay'",
-      '<PaymentPanel',
-      '<SwapPanel',
-    ],
+    patterns: ["label: 'Pay'", '<PaymentPanel', '<SwapPanel'],
   },
   {
     area: 'frontend',
@@ -149,27 +147,17 @@ const requirements: CoverageRequirement[] = [
   {
     area: 'frontend',
     file: 'frontend/src/lib/components/Entity/swap/swap-panel-helpers.ts',
-    patterns: [
-      'buildCrossSwapSetupSteps',
-      "CrossSwapSetupStepId = 'target-account' | 'target-credit'",
-    ],
+    patterns: ['buildCrossSwapSetupSteps', "CrossSwapSetupStepId = 'target-account' | 'target-credit'"],
   },
   {
     area: 'frontend',
     file: 'frontend/src/lib/components/Entity/swap/SwapOrderList.svelte',
-    patterns: [
-      'export let requestCrossClear',
-      'data-testid="cross-swap-clear"',
-    ],
+    patterns: ['export let requestCrossClear', 'data-testid="cross-swap-clear"'],
   },
   {
     area: 'frontend',
     file: 'frontend/src/lib/components/Entity/payments/PaymentPanel.svelte',
-    patterns: [
-      'data-testid="payment-amount-input"',
-      'await submitRuntimeInput(buildPaymentRuntimeInput({',
-      'Pay now',
-    ],
+    patterns: ['data-testid="payment-amount-input"', 'await submitRuntimeInput(buildPaymentRuntimeInput({', 'Pay now'],
   },
   {
     area: 'pay',

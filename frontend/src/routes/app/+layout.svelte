@@ -491,7 +491,10 @@
     const observer = params.get('observer') === '1' || params.get('locktest') === '1'
       || params.get('embed') === '1' || params.has('e');
     if (!observer) {
-      window.location.replace('/ui/');
+      // Payment requests live in the URL fragment and must survive the wallet handoff.
+      const walletUrl = new URL(window.location.href);
+      walletUrl.pathname = '/ui/';
+      window.location.replace(walletUrl.href);
       return;
     }
     let disposed = false;

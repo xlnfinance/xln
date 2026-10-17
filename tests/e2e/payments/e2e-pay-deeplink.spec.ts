@@ -1,21 +1,34 @@
+import type { RuntimeReplica } from '../../../core/api/public/runtime-module';
+import { createWalletIdentity, LOCAL_PASSWORD } from '../../../ui/tests/wallet-ui';
+import { chooseVisibleRoute } from '../../utils/runtime/e2e-pay-ui';
+import { waitForRenderedOutboundForAccountDelta } from '../../utils/runtime/e2e-account-ui';
 import { expect, test, type BrowserContext, type Page } from '../../global-setup.mts';
 import { APP_BASE_URL, ensureE2EBaseline, waitForNamedHubs } from '../../utils/e2e-baseline';
-import { connectRuntimeToHub } from '../../utils/e2e-connect';
-import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
-import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from '../../utils/e2e-runtime-receipts';
+import { connectRuntimeToHub, waitForReceiveReadyGossipProfiles } from '../../utils/e2e-connect';
+import { gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
+import { getPersistedReceiptCursor, waitForPersistedFrameEventMatch } from '../../utils/e2e-runtime-receipts';
 
 const TEST_TIMEOUT_MS = process.env.E2E_LONG === '1' ? 240_000 : 210_000;
 
 async function faucetOffchain(page: Page, entityId: string, hubId: string, runtimeId: string): Promise<void> {
-  const result = await page.evaluate(async ({ entityId, hubId, runtimeId }) => {
-    const response = await fetch('/api/faucet/offchain', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userEntityId: entityId, userRuntimeId: runtimeId, hubEntityId: hubId, tokenSymbol: 'USDC', amount: '100' }),
-    });
-    const data = await response.json().catch(() => ({}));
-    return { ok: response.ok, data };
-  }, { entityId, hubId, runtimeId });
+  const result = await page.evaluate(
+    async ({ entityId, hubId, runtimeId }) => {
+      const response = await fetch('/api/faucet/offchain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userEntityId: entityId,
+          userRuntimeId: runtimeId,
+          hubEntityId: hubId,
+          tokenSymbol: 'USDC',
+          amount: '100',
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      return { ok: response.ok, data };
+    },
+    { entityId, hubId, runtimeId },
+  );
 
   expect(result.ok, JSON.stringify(result.data)).toBe(true);
 }
@@ -42,12 +55,13 @@ test.describe('Canonical /app#pay deep link', () => {
       const hubId = hubs.h1;
 
       await gotoApp(aliceSetupPage);
-      const alice = await createRuntimeIdentity(aliceSetupPage, 'alice', selectDemoMnemonic('alice'));
+      const alice = await createWalletIdentity(aliceSetupPage, 'alice', selectDemoMnemonic('alice'));
       await connectRuntimeToHub(aliceSetupPage, alice, hubId);
       await faucetOffchain(aliceSetupPage, alice.entityId, hubId, alice.runtimeId);
+      await waitForRenderedOutboundForAccountDelta(aliceSetupPage, hubId, 0, 100);
 
       await gotoApp(bobPage);
-      const bob = await createRuntimeIdentity(bobPage, 'bob', selectDemoMnemonic('bob'));
+      const bob = await createWalletIdentity(bobPage, 'bob', selectDemoMnemonic('bob'));
       await connectRuntimeToHub(bobPage, bob, hubId);
       await aliceSetupPage.close();
 
@@ -56,51 +70,49 @@ test.describe('Canonical /app#pay deep link', () => {
         token: '1',
         amount: '5',
         desc: 'E2E direct pay deep link',
-        jId: 'arrakis',
       });
       const payUrl = `${APP_BASE_URL}/app#pay/${encodeURIComponent(`${bob.entityId}?${invoiceParams.toString()}`)}`;
       await payPage.goto(payUrl, { waitUntil: 'domcontentloaded' });
 
-      await payPage.locator('button.wallet').first().click();
-      const setup = payPage.getByRole('heading', { name: 'Set a local password', exact: true });
-      const unlock = payPage.getByRole('heading', { name: 'Unlock wallet', exact: true });
-      await expect(setup.or(unlock)).toBeVisible({ timeout: 20_000 });
-      await payPage.getByLabel('Password', { exact: true }).fill('pay-deeplink-password');
-      if (await setup.isVisible()) {
-        await payPage.getByLabel('Confirm password', { exact: true }).fill('pay-deeplink-password');
-        await payPage.getByRole('button', { name: 'Save and open', exact: true }).click();
-      } else {
-        await payPage.getByRole('button', { name: 'Unlock', exact: true }).click();
-      }
-
-      await expect(payPage.locator('.payment-panel')).toBeVisible({ timeout: 60_000 });
-      await expect(payPage.locator('#payment-amount-input')).toHaveValue('5');
-
-      const paymentCursor = await getPersistedReceiptCursor(bobPage);
-      const findRoutesBtn = payPage.getByRole('button', { name: /^Find routes?$/i });
-      const firstRoute = payPage.locator('.route-option').first();
-      // Restored invoices auto-route. Wait for either transition outcome instead
-      // of sampling once and then waiting only for the button that auto-routing
-      // intentionally removes when a route becomes ready.
-      await expect(firstRoute.or(findRoutesBtn).first()).toBeVisible({ timeout: 30_000 });
-      if (!(await firstRoute.isVisible().catch(() => false))) {
-        await findRoutesBtn.scrollIntoViewIfNeeded().catch(() => undefined);
-        await findRoutesBtn.click();
-        await expect(firstRoute).toBeVisible({ timeout: 30_000 });
-      }
-      await firstRoute.scrollIntoViewIfNeeded().catch(() => undefined);
-      await firstRoute.click();
-      const payNowBtn = payPage.getByRole('button', { name: /^Pay Now$/i });
-      await payNowBtn.scrollIntoViewIfNeeded().catch(() => undefined);
-      await expect(payNowBtn).toBeEnabled({ timeout: 15_000 });
-      await payNowBtn.click();
-
-      await waitForPersistedFrameEvent(bobPage, {
-        cursor: paymentCursor,
-        eventName: 'HtlcReceived',
-        entityId: bob.entityId,
-        timeoutMs: 45_000,
+      await payPage.getByRole('button', { name: 'Continue', exact: true }).click();
+      await payPage.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
+      await payPage.getByRole('button', { name: 'Unlock', exact: true }).click();
+      await expect(payPage.getByTestId('pay-to')).toHaveValue(bob.entityId);
+      await expect(payPage.getByTestId('pay-amount')).toHaveValue('5');
+      await expect(payPage.getByTestId('pay-note')).toHaveValue('E2E direct pay deep link');
+      const restoredId = await payPage.evaluate(() => {
+        const env = (window as Window & { __xln?: { env(): RuntimeReplica | null } }).__xln?.env();
+        if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+        return env.runtimeId;
       });
+      expect(restoredId).toBe(alice.runtimeId);
+      await waitForReceiveReadyGossipProfiles(payPage, [alice.entityId, hubId, bob.entityId], hubId);
+      await chooseVisibleRoute(payPage, [hubId, bob.entityId]);
+      const [senderCursor, recipientCursor] = await Promise.all([
+        getPersistedReceiptCursor(payPage),
+        getPersistedReceiptCursor(bobPage),
+      ]);
+      const payNowBtn = payPage.getByTestId('pay-submit');
+      await expect(payNowBtn).toBeEnabled();
+      await payNowBtn.click();
+      const [sent, received] = await Promise.all([
+        waitForPersistedFrameEventMatch(payPage, {
+          cursor: senderCursor,
+          eventName: 'HtlcFinalized',
+          entityId: alice.entityId,
+          predicate: event => String(event.data?.amount) === '5000000',
+          timeoutMs: 15_000,
+        }),
+        waitForPersistedFrameEventMatch(bobPage, {
+          cursor: recipientCursor,
+          eventName: 'HtlcReceived',
+          entityId: bob.entityId,
+          predicate: event => String(event.data?.amount) === '5000000',
+          timeoutMs: 15_000,
+        }),
+      ]);
+      expect(String(sent.data?.toEntity).toLowerCase()).toBe(hubId.toLowerCase());
+      expect(String(received.data?.fromEntity).toLowerCase()).toBe(hubId.toLowerCase());
     } finally {
       await aliceContext?.close();
       await bobContext?.close();
