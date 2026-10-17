@@ -1,0 +1,69 @@
+{
+  "after": {
+    "height": 6,
+    "holds": [
+      {
+        "incoming": "0",
+        "outgoing": "0",
+        "tokenId": 1
+      },
+      {
+        "incoming": "0",
+        "outgoing": "0",
+        "tokenId": 2
+      },
+      {
+        "incoming": "0",
+        "outgoing": "0",
+        "tokenId": 3
+      }
+    ],
+    "mempool": 0,
+    "offers": 0,
+    "pending": false,
+    "root": "0x221a80b8c4ead869c103af9a9da71da79f82fc3b3e720476b979a94935e07593",
+    "usdc": "100000000",
+    "usdcSpendable": "100000000",
+    "weth": "1000000000000000000",
+    "wethCapacity": "100000000000000000",
+    "wethCredit": "1100000000000000000"
+  },
+  "badPrice": {
+    "__xlnType": "BigInt",
+    "value": "14747050"
+  },
+  "before": {
+    "height": 6,
+    "holds": [
+      {
+        "incoming": "0",
+        "outgoing": "0",
+        "tokenId": 1
+      },
+      {
+        "incoming": "0",
+        "outgoing": "0",
+        "tokenId": 2
+      },
+      {
+        "incoming": "0",
+        "outgoing": "0",
+        "tokenId": 3
+      }
+    ],
+    "mempool": 0,
+    "offers": 0,
+    "pending": false,
+    "root": "0x221a80b8c4ead869c103af9a9da71da79f82fc3b3e720476b979a94935e07593",
+    "usdc": "100000000",
+    "usdcSpendable": "100000000",
+    "weth": "1000000000000000000",
+    "wethCapacity": "100000000000000000",
+    "wethCredit": "1100000000000000000"
+  },
+  "marketPrice": {
+    "__xlnType": "BigInt",
+    "value": "24995000"
+  },
+  "side": "bid"
+}

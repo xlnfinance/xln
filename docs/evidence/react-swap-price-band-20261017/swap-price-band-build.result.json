@@ -1,0 +1,18 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "swap-price-band-build",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "run",
+    "build"
+  ],
+  "exitCode": 0,
+  "seconds": 0.147,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-price-band-build.log"
+}

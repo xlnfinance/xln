@@ -1,3 +1,4 @@
+import { deriveSameOrderbookPriceBandBounds } from '../../../swapbook/price-band';
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
@@ -74,7 +75,6 @@ import {
   resolveLoadBatchRounds,
 } from '../../../scripts/operations/hlt/workload/worker-same-lanes';
 import {
-  deriveSameOrderbookPriceBandBounds,
   evaluateSameOrderbookPriceBand,
 } from '../../../entity/tx/handlers/account/orderbook/helpers';
 import { getSwapPairPolicyByBaseQuote } from '../../../account/utils';

@@ -1,3 +1,5 @@
+import { SWAP_CONSTANTS } from '@xln/core/config/constants';
+import { deriveSameOrderbookPriceBandBounds, resolveOrderbookPriceReference } from '@xln/core/swapbook/price-band';
 import type { BookView } from './orderbook';
 
 /** Canonical price unit: ticks per quote unit, four decimals. */
@@ -42,4 +44,15 @@ export function swapMinimumError(
   if (book.minTradeSize === null) return 'Waiting for the market minimum.';
   const quoteAmount = giveTokenId === book.quoteTokenId ? prepared.effectiveGive : prepared.effectiveWant;
   return quoteAmount < book.minTradeSize ? 'Amount is below the market minimum.' : null;
+}
+
+/** Preview the Entity's same-market band; admission still validates its committed book. */
+export function swapPriceBandError(book: Pick<BookView, 'bids' | 'asks'>, priceTicks: bigint): string | null {
+  const { anchor } = resolveOrderbookPriceReference(book.bids[0]?.priceTicks ?? null, book.asks[0]?.priceTicks ?? null);
+  // No policy is inferred for an empty remote book. The Entity owns that decision.
+  if (anchor === null) return null;
+  const { minAllowed, maxAllowed } = deriveSameOrderbookPriceBandBounds(anchor);
+  return priceTicks < minAllowed || priceTicks > maxAllowed
+    ? `Price must stay within ${SWAP_CONSTANTS.PRICE_REJECT_BPS / 100}% of the current orderbook.`
+    : null;
 }

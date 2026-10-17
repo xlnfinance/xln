@@ -24,7 +24,7 @@ import {
 } from '../../../account/config/dispute-config';
 import { LIMITS } from '../../../config/constants';
 import { readCliOption } from '../../../config/cli';
-import { deriveSameOrderbookPriceBandBounds } from '../../../entity/tx/handlers/account/orderbook/helpers';
+import { deriveSameOrderbookPriceBandBounds } from '../../../swapbook/price-band';
 import { readBooleanEnv, readPositiveIntegerEnv } from '../../../config/environment';
 import { resolveCrossJurisdictionRuntimeTopology } from '../../../extensions/cross-j/boundary';
 import {

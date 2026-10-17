@@ -1,3 +1,4 @@
+import { deriveSameOrderbookPriceBandBounds, resolveOrderbookPriceReference } from '../../../../../swapbook/price-band';
 import { haltRuntimeFailure } from "../../../../../protocol/errors/failure-taxonomy";
 
 import { LIMITS, SWAP_CONSTANTS } from '../../../../../config/constants';
@@ -377,16 +378,6 @@ export const evaluateSameOrderbookPriceBand = (input: {
   return {};
 };
 
-export const deriveSameOrderbookPriceBandBounds = (
-  anchor: bigint,
-): Readonly<{ minAllowed: bigint; maxAllowed: bigint }> => {
-  if (anchor <= 0n) throw new Error('ORDERBOOK_PRICE_BAND_ANCHOR_INVALID');
-  const offset =
-    (anchor * BigInt(SWAP_CONSTANTS.PRICE_REJECT_BPS)) /
-    BigInt(SWAP_CONSTANTS.BPS_BASE);
-  return { minAllowed: anchor - offset, maxAllowed: anchor + offset };
-};
-
 export const buildCrossMarketOfferFromBookOrder = (
   state: Pick<EntityState, 'entityId' | 'accounts' | 'crossJurisdictionBookAdmissions'>,
   namespacedOrderId: string,
@@ -510,12 +501,8 @@ export const resolvePairBandReference = (
   bestBid: bigint | null,
   bestAsk: bigint | null,
 ): { anchor: bigint | null; label: string } => {
-  if (bestBid !== null && bestAsk !== null) {
-    return { anchor: (bestBid + bestAsk) / 2n, label: 'midpoint' };
-  }
-  if (bestBid !== null) return { anchor: bestBid, label: 'bestBid' };
-  if (bestAsk !== null) return { anchor: bestAsk, label: 'bestAsk' };
-  if (!hasExplicitPairPolicy) return { anchor: null, label: 'unanchored' };
+  const market = resolveOrderbookPriceReference(bestBid, bestAsk);
+  if (market.anchor !== null || !hasExplicitPairPolicy) return market;
   return { anchor: pairPolicy.mmMidPriceTicks, label: 'policyMid' };
 };
 

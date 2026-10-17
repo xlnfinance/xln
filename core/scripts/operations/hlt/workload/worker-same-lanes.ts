@@ -28,7 +28,7 @@ import {
   type SwapLanePlan,
 } from './worker-same-plan';
 import { buildPacedOperationSchedule } from './operation-pacer';
-import { deriveSameOrderbookPriceBandBounds } from '../../../../entity/tx/handlers/account/orderbook/helpers';
+import { deriveSameOrderbookPriceBandBounds } from '../../../../swapbook/price-band';
 import { readLoadAccount, readLoadBook, type ConnectedRuntime } from '../worker-runtime';
 import type { SettlementAccountPair } from '../settlement-reader';
 

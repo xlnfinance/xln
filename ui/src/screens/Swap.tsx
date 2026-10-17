@@ -6,7 +6,7 @@ import type { AccountState, RuntimeAdapterEntitySummary } from '@xln/core/api/pu
 import { getJurisdictionStackId } from '@xln/core/api/public/runtime-module';
 import { DeltaBar, DeltaCaption } from '../components/Bars';
 import { Orderbook, type BookSide } from '../components/Orderbook';
-import { quoteAtBestLevel, quoteForBase, swapMinimumError, useOrderbook, type BookLevel } from '../runtime/financial/orderbook';
+import { quoteAtBestLevel, quoteForBase, swapMinimumError, swapPriceBandError, useOrderbook, type BookLevel } from '../runtime/financial/orderbook';
 import { Icon } from '../components/Icons';
 import { TokenPicker } from '../components/TokenPicker';
 import { useApp } from '../runtime/store';
@@ -228,7 +228,7 @@ export function Swap() {
 
 	const place = async (): Promise<void> => {
 		if (!wallet.frame || !hub || !prepared || !wallet.signerId) return;
-		if (mode === 'same' && swapMinimumError(book, giveTokenId, prepared)) return;
+		if (mode === 'same' && (swapMinimumError(book, giveTokenId, prepared) || swapPriceBandError(book, prepared.priceTicks))) return;
 		setSubmitting(true);
 		try {
 			const source = {
@@ -319,8 +319,8 @@ export function Swap() {
 	const mine = openSwapOffers(wallet.frame, wallet.entityId).filter(offer => offer.mine);
 	const crossOrders = liveCrossOrders(wallet.frame, wallet.entityId);
 	const networkLabel = (stack: string): string => wallet.summaries.find(summary => summary.jurisdiction && getJurisdictionStackId(summary.jurisdiction) === stack)?.jurisdiction?.name || stack;
-	const minimumError = mode === 'same' && prepared ? swapMinimumError(book, giveTokenId, prepared) : null;
-	const disabledReason = (mode === 'cross' ? targetAccountError || (!targetEntity || !targetHub ? 'Choose an available destination on the same hub runtime' : null) : null) ?? minimumError ?? (!hub ? 'No hub account to swap through' : sameToken ? 'Choose two different tokens' : overCapacity ? 'Exceeds what you can send' : null);
+	const marketError = mode === 'same' && prepared ? swapMinimumError(book, giveTokenId, prepared) ?? swapPriceBandError(book, prepared.priceTicks) : null;
+	const disabledReason = (mode === 'cross' ? targetAccountError || (!targetEntity || !targetHub ? 'Choose an available destination on the same hub runtime' : null) : null) ?? marketError ?? (!hub ? 'No hub account to swap through' : sameToken ? 'Choose two different tokens' : overCapacity ? 'Exceeds what you can send' : null);
 
 	return (
 		<div className="screen fade-in">

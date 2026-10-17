@@ -1,0 +1,16 @@
+# Canonical swap price band in React
+
+A real current-wallet regression on base `c710d99e3a777761e396aa66e35854545899a336` failed at `swap-submit.toBeDisabled`: a manual buy limit40% above the ask left Submit enabled (38.301s). The engine already enforces the30% anchor band; this observation establishes a missing wallet prevention check, not an executed loss or an engine bypass.
+
+React now uses the same canonical bounds and market anchor as Entity admission, in both the visible disabled reason and the submit handler. The existing bounds function moved to `core/swapbook/price-band.ts`; all matcher/MM/HLT callers import that owner directly, with no compatibility re-export. Bounds tokens are unchanged; the original printer-only comparison differed in line wrapping. Midpoint/one-sided selection is shared; the Entity retains its committed policy anchor for an empty book. The UI does not invent that remote policy. No threshold, financial transition, state/wire bytes, schema, contract, frozen hash or recovery rule changes. Cross-network mode remains unchanged.
+
+Observed behavior:
+
+- Buy+40% and sell-41% rejection:1/1 each,43.181s and45.795s. Prices3500.7000 and1474.7050 are blocked. The displayed reason names30%; Account observations (committed root/height, balances, holds and pending/mempool status) are unchanged and history stays empty. Both strict browser issue counts0.
+- The existing signed same-Account buy/sell roundtrip still passes1/1,45.026s, with exact fees/balances, bilateral equality, no remaining offers/holds and strict browser issues0.
+- Quotes and both existing matcher files:41/41,197assertions,0.326s, including exact boundary acceptance, one-tick-outside rejection, midpoint rather than one spread side, single-sided markets, signed matching/cancellation and snapshot restore.
+- Current ordered-WAL crash recovery:1/1,3assertions,10.224s. Canonical runtime+Account-worker build:exit0,0.147s. Root/helper strict comparison:38->38, zero introduced,9.398s; the38 existing root diagnostics remain explicit, not a whole-file type pass.
+
+Diff review caught an edit range accidentally including an unindented adjacent within-band case. Its exact HEAD bytes were restored before final verification. All17 existing root test names/order are preserved. The changed tests drive real React controls and real runtime/worker/relay/Account paths; no mock, skip, tolerance or exception is introduced. This is not full root-suite, release-gate, live TPS, Rust parity, Sepolia or mainnet proof.
+
+Reproduction uses the full commands in adjacent result records: canonical isolated browser runner with `--all --strict-browser-health --shards=1 --workers-per-shard=1 --max-mm-concurrency=1`, each named target under capacity-one `stand:run --timeout-ms 60000`. Full traces, candidate/build manifests and actual output remain under `/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/`. After clean-HEAD verification/publication, `swap-price-band-publication.json` links the exact immutable SHA, complete source manifest, verifier and bundle. Public testnet currently remains on efb6f5d41; this wallet fix is not claimed deployed there. The aggregate release/fullbrowser, public-chain proof, backend binary rollback, uninterrupted1hsoak and MacBook catch-up remain open.

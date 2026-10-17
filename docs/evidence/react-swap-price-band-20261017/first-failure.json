@@ -1,0 +1,8 @@
+{
+  "base": "c710d99e3a777761e396aa66e35854545899a336",
+  "commandResult": "swap-price-band-react-red.result.json",
+  "errors": [
+    "Testing stopped early after 1 maximum allowed failures.",
+    "Error: expect(locator).toBeDisabled() failed\n\nLocator:  getByTestId('swap-submit')\nExpected: disabled\nReceived: enabled\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toBeDisabled\" with timeout 5000ms\n  - waiting for getByTestId('swap-submit')\n    14 \u00d7 locator resolved to <button type=\"button\" class=\"btn primary\" data-testid=\"swap-submit\">\u2026</button>\n       - unexpected value \"enabled\"\n\n\n   at utils/browser/swap-price-band.ts:33\n\n  31 |   await page.getByTestId('swap-give').fill(side === 'ask' ? formatUnits(badPrice, 6) : '0.01');\n  32 |   await page.getByTestId('swap-want').fill(side === 'ask' ? '0.01' : formatUnits(badPrice, 6));\n> 33 |   await expect(page.getByTestId('swap-submit')).toBeDisabled();\n     |                                                 ^\n  34 |   await expect(page.getByText('Price must stay within 30% of the current orderbook.', { exact: true })).toBeVisible();\n  35 |   expect(await readAccount(page, hubId)).toEqual(before);\n  36 |   expect((await readOrders(page, hubId)).items).toHaveLength(0);\n    at verifyPriceBandRejection (/Users/zigota/xln/tests/utils/browser/swap-price-band.ts:33:49)\n    at /Users/zigota/xln/tests/e2e/swap/e2e-swap.spec.ts:2378:5"
+  ]
+}

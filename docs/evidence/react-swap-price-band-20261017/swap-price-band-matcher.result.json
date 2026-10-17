@@ -1,0 +1,20 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "swap-price-band-matcher",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "test",
+    "ui/src/runtime/financial/orderbook-quote.test.ts",
+    "core/__tests__/payments/orderbook/orderbook-matching-part-1.test.ts",
+    "core/__tests__/payments/orderbook/orderbook-matching-part-1b.test.ts"
+  ],
+  "exitCode": 0,
+  "seconds": 0.326,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-price-band-matcher.log"
+}

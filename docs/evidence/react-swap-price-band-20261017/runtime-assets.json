@@ -1,0 +1,14 @@
+{
+  "sourceBase": "c710d99e3a777761e396aa66e35854545899a336",
+  "candidate": "working price-band fix; exact committed manifest follows after clean verification",
+  "assets": {
+    "frontend/static/runtime.js": {
+      "bytes": 5947528,
+      "sha256": "d7313d0747310acd1aceff33fe1ad30cf496edc7f6a41e195c2f6738d716ca12"
+    },
+    "frontend/static/account-worker.js": {
+      "bytes": 2045527,
+      "sha256": "5eb1a38aa8d02a663289ba35ba286e2d8067d373bb7bc31e80a61887ad15a945"
+    }
+  }
+}

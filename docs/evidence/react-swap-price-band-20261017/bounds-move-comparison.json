@@ -1,0 +1,7 @@
+{
+  "formattedDeclarationEqual": false,
+  "canonicalBoundsTokensUnchanged": true,
+  "before": "export const deriveSameOrderbookPriceBandBounds = (anchor: bigint): Readonly<{\n    minAllowed: bigint;\n    maxAllowed: bigint;\n}> => {\n    if (anchor <= 0n)\n        throw new Error('ORDERBOOK_PRICE_BAND_ANCHOR_INVALID');\n    const offset = (anchor * BigInt(SWAP_CONSTANTS.PRICE_REJECT_BPS)) /\n        BigInt(SWAP_CONSTANTS.BPS_BASE);\n    return { minAllowed: anchor - offset, maxAllowed: anchor + offset };\n};",
+  "after": "export const deriveSameOrderbookPriceBandBounds = (anchor: bigint): Readonly<{\n    minAllowed: bigint;\n    maxAllowed: bigint;\n}> => {\n    if (anchor <= 0n)\n        throw new Error('ORDERBOOK_PRICE_BAND_ANCHOR_INVALID');\n    const offset = (anchor * BigInt(SWAP_CONSTANTS.PRICE_REJECT_BPS)) / BigInt(SWAP_CONSTANTS.BPS_BASE);\n    return { minAllowed: anchor - offset, maxAllowed: anchor + offset };\n};",
+  "scope": "TypeScript scanner skips only trivia: literal/token text is preserved. First printer comparison differed only in division-line wrapping. Static move evidence, not runtime/parity proof."
+}

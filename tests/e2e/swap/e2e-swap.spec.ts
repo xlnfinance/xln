@@ -1,3 +1,4 @@
+import { verifyPriceBandRejection } from '../../utils/browser/swap-price-band';
 import { safeStringify } from '../../../core/protocol/serialization';
 import { verifySwapFlip } from '../../utils/browser/swap-flip';
 import { executeBookFill, verifyBookFill } from '../../utils/browser/swap-book-fill';
@@ -2371,61 +2372,16 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     },
   );
 
-  test('swap rejects price beyond 30% from current orderbook', { tag: '@resilience' }, async ({ page }) => {
-    const accountRef = await prepareOrderbookClickTest(page);
-    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
-      preferredAccountId: accountRef.counterpartyId,
-      scope: 'Aggregated',
-      minSources: 3,
-    });
-
-    const amountInput = page.getByTestId('swap-ticket-amount').first();
-    const priceInput = page.getByTestId('swap-ticket-rate').first();
-    const placeButton = page.getByTestId('swap-ticket-submit').first();
-    await selectSwapPairSide(page, 'WETH/USDC', 'buy');
-
-    const asks = page.getByTestId('orderbook-ask-row');
-    await expect(asks.last()).toBeVisible({ timeout: 20_000 });
-    const bestAskText = String(await asks.last().locator('.price').textContent() || '').trim();
-    const bestAsk = Number.parseFloat(normalizeDisplayedPriceText(bestAskText));
-    expect(Number.isFinite(bestAsk) && bestAsk > 0, `best ask missing: ${bestAskText}`).toBe(true);
-
-    await amountInput.fill('10');
-    await priceInput.fill(String((bestAsk * 1.4).toFixed(4)));
-    await expect(placeButton).toBeDisabled({ timeout: 10_000 });
-    await expect(page.getByTestId('swap-ticket-error').first()).toContainText(/within 30% of the current orderbook/i, {
-      timeout: 10_000,
-    });
+  test('swap rejects price beyond 30% from current orderbook', { tag: '@resilience' }, async ({ page }, info) => {
+    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+    await createWalletIdentity(page, 'price-band-ask', randomMnemonic());
+    await verifyPriceBandRejection(page, info, 'ask');
   });
 
-  test('swap rejects sell price beyond 30% from current orderbook', { tag: '@resilience' }, async ({ page }) => {
-    const accountRef = await prepareOrderbookClickTest(page);
-    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
-      preferredAccountId: accountRef.counterpartyId,
-      scope: 'Aggregated',
-      minSources: 3,
-    });
-
-    const amountInput = page.getByTestId('swap-ticket-amount').first();
-    const priceInput = page.getByTestId('swap-ticket-rate').first();
-    const placeButton = page.getByTestId('swap-ticket-submit').first();
-    await selectSwapPairSide(page, 'WETH/USDC', 'sell');
-
-    const bids = page.getByTestId('orderbook-bid-row');
-    await expect(bids.first()).toBeVisible({ timeout: 20_000 });
-    const bestBidText = String(await bids.first().locator('.price').textContent() || '').trim();
-    const bestBid = Number.parseFloat(normalizeDisplayedPriceText(bestBidText));
-    expect(Number.isFinite(bestBid) && bestBid > 0, `best bid missing: ${bestBidText}`).toBe(true);
-
-    const available = await readAvailableFromSizing(page);
-    expect(available, 'sell-side available amount must be positive').toBeGreaterThan(0);
-    const sellAmount = Math.max(0.01, Math.min(available, 0.05));
-    await amountInput.fill(formatDecimalForInput(sellAmount));
-    await priceInput.fill(String((bestBid * 0.59).toFixed(4)));
-    await expect(placeButton).toBeDisabled({ timeout: 10_000 });
-    await expect(page.getByTestId('swap-ticket-error').first()).toContainText(/within 30% of the current orderbook/i, {
-      timeout: 10_000,
-    });
+  test('swap rejects sell price beyond 30% from current orderbook', { tag: '@resilience' }, async ({ page }, info) => {
+    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+    await createWalletIdentity(page, 'price-band-bid', randomMnemonic());
+    await verifyPriceBandRejection(page, info, 'bid');
   });
 
 test('swap keeps a within-band wide limit as a resting order instead of filling immediately', { tag: '@functional' }, async ({ page }, testInfo) => {

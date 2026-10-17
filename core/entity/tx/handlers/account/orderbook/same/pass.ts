@@ -1,3 +1,4 @@
+import { deriveSameOrderbookPriceBandBounds } from '../../../../../../swapbook/price-band';
 import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
 
 import type { EntityState } from '../../../../../types';
@@ -29,7 +30,6 @@ import {
 } from '../queue';
 import { resolveStoredOfferEntityRefs } from '../offers';
 import {
-  deriveSameOrderbookPriceBandBounds,
   parseNamespacedOrderId,
   resolvePairBandReference,
 } from '../helpers';

@@ -50,7 +50,7 @@ export function orientPair(tokenA: number, tokenB: number): { baseTokenId: numbe
 	return { baseTokenId: left, quoteTokenId: right, pairId };
 }
 
-export { quoteForBase, quoteAtBestLevel, swapMinimumError, PRICE_SCALE } from './orderbook-quote';
+export { quoteForBase, quoteAtBestLevel, swapMinimumError, swapPriceBandError, PRICE_SCALE } from './orderbook-quote';
 
 // ---------------------------------------------------------------------------
 // Hosted hub: the book is the union of resting offers on the hub's accounts.

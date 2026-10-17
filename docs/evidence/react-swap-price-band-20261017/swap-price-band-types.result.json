@@ -1,0 +1,17 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "swap-price-band-types",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-price-band/type-compare.ts"
+  ],
+  "exitCode": 0,
+  "seconds": 9.398,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-price-band-types.log"
+}
