@@ -1,0 +1,48 @@
+{
+  "rootPid": 1069917,
+  "ownedProcesses": [
+    {
+      "pid": 1069917,
+      "parent": 23445,
+      "startTicks": "755564632",
+      "exe": "/root/.local/share/xln/toolchains/bun-1.4.0/bun"
+    },
+    {
+      "pid": 1070005,
+      "parent": 1069917,
+      "startTicks": "755564803",
+      "exe": "/root/.local/share/xln/toolchains/bun-1.4.0/bun"
+    },
+    {
+      "pid": 1070011,
+      "parent": 1069917,
+      "startTicks": "755564809",
+      "exe": "/root/.local/share/xln/toolchains/bun-1.4.0/bun"
+    },
+    {
+      "pid": 1070017,
+      "parent": 1069917,
+      "startTicks": "755564817",
+      "exe": "/root/.local/share/xln/toolchains/bun-1.4.0/bun"
+    },
+    {
+      "pid": 1070093,
+      "parent": 1069917,
+      "startTicks": "755566452",
+      "exe": "/root/.local/share/xln/toolchains/bun-1.4.0/bun"
+    },
+    {
+      "pid": 1070098,
+      "parent": 1069917,
+      "startTicks": "755566459",
+      "exe": "/root/.local/share/xln/toolchains/bun-1.4.0/bun"
+    },
+    {
+      "pid": 1070149,
+      "parent": 1069917,
+      "startTicks": "755567920",
+      "exe": "/root/.local/share/xln/toolchains/bun-1.4.0/bun"
+    }
+  ],
+  "allPinned": true
+}

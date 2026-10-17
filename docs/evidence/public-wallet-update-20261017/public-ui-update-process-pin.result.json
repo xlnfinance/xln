@@ -1,0 +1,9 @@
+{
+  "command": [
+    "bash",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-996773462/check-processes.sh"
+  ],
+  "exitCode": 0,
+  "seconds": 0.893,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-ui-update-process-pin.log"
+}

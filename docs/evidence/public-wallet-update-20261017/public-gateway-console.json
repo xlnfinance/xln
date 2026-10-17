@@ -1,0 +1,18 @@
+[
+  {
+    "kind": "websocket",
+    "url": "wss://xln.finance/relay"
+  },
+  {
+    "kind": "websocket",
+    "url": "wss://xln.finance:8090/ws"
+  },
+  {
+    "kind": "websocket",
+    "url": "wss://xln.finance/relay"
+  },
+  {
+    "kind": "websocket",
+    "url": "wss://xln.finance:8090/ws"
+  }
+]

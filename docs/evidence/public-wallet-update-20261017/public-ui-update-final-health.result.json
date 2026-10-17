@@ -1,0 +1,22 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "public-ui-update-final-health",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "ssh",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=10",
+    "xln.finance",
+    "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason current-ui-operator-health --timeout-ms 60000 -- bun core/scripts/operations/production/prod-health-smoke.ts --url=http://127.0.0.1:8080 --expected-hubs=3 --require-hub-self-relay --expected-towers=1 --tower-url=http://127.0.0.1:9100/api/tower/healthz --require-clean-source --require-source-match --expected-git-head=9967734624cd70bebf4bb60992791efc5a36cdc5 --expected-code-hash=9967734624cd70bebf4bb60992791efc5a36cdc5"
+  ],
+  "exitCode": 0,
+  "seconds": 1.282,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-ui-update-final-health.log"
+}

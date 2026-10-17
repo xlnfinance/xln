@@ -1,0 +1,17 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "public-ui-update-financial-recovery",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bash",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-996773462/compare.sh"
+  ],
+  "exitCode": 0,
+  "seconds": 29.425,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-ui-update-financial-recovery.log"
+}

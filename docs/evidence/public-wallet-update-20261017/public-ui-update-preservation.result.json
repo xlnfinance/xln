@@ -1,0 +1,17 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "public-ui-update-preservation",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bash",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-996773462/prepare.sh"
+  ],
+  "exitCode": 0,
+  "seconds": 15.219,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-ui-update-preservation.log"
+}

@@ -1,0 +1,87 @@
+{
+  "source": "efb6f5d4181114457cf3d62077c5d624b9fef9b3",
+  "chainId": 31337,
+  "serverPid": 1045083,
+  "processes": [
+    {
+      "name": "pm2-logrotate",
+      "pid": 23457,
+      "status": "online",
+      "startedAt": 1790575263594
+    },
+    {
+      "name": "anvil",
+      "pid": 987928,
+      "status": "online",
+      "startedAt": 1792253094860
+    },
+    {
+      "name": "anvil2",
+      "pid": 987933,
+      "status": "online",
+      "startedAt": 1792253094869
+    },
+    {
+      "name": "xln-server",
+      "pid": 1045083,
+      "status": "online",
+      "startedAt": 1792270616539
+    },
+    {
+      "name": "xln-watchtower",
+      "pid": 1005251,
+      "status": "online",
+      "startedAt": 1792256933788
+    },
+    {
+      "name": "xln-sepolia",
+      "pid": 0,
+      "status": "stopped",
+      "startedAt": 1791935601971
+    },
+    {
+      "name": "xln-sepolia-watchtower",
+      "pid": 3397807,
+      "status": "online",
+      "startedAt": 1791935602001
+    }
+  ],
+  "webArchive": "/root/xln-deployment-evidence/996773462/ui-update/previous-web.tar.gz",
+  "webArchiveSha256": "bf4fed2b56f93ee3faf17e445d77ee2ec4cb18faed377e56c9f4367db1d640f9",
+  "protectedFilesUnchanged": true,
+  "dataReset": false,
+  "webFilesVerified": 1385,
+  "beforeSnapshotSha256": "50594f955d4c41354508081a77a89403b80c26b6db3bd9d0b58c53589aae2832",
+  "beforeHubs": [
+    {
+      "name": "H1",
+      "height": 200,
+      "accounts": 14,
+      "historicalFrame": {
+        "frameHash": "0xe527447aecc12549ca9632a385592266dc35c15eabeeff69a592c1cb1a1fe7a2",
+        "height": 200,
+        "postStateHash": "0x7912b9f044827667c3ff8f4fa45be4cfac57f60f3dd17ad7f969e7d1c9f18273"
+      }
+    },
+    {
+      "name": "H2",
+      "height": 155,
+      "accounts": 6,
+      "historicalFrame": {
+        "frameHash": "0xfed38c687497148fbf07b4a7929a6659e928b5f594df4d2fcc0732201a1f29f4",
+        "height": 155,
+        "postStateHash": "0x057934e598edf58ee90f4637beb27b878d9b7ada3d17db35d6d6c142d0c45e9d"
+      }
+    },
+    {
+      "name": "H3",
+      "height": 144,
+      "accounts": 6,
+      "historicalFrame": {
+        "frameHash": "0x23060d233984c75ec7fa5d2281905671bf7fc9ec46d969908d9856ac622da2d2",
+        "height": 144,
+        "postStateHash": "0x5572efbb4d8fe0cff3f181c8e86cddfa24326d1cfed33135206e16815f7881a1"
+      }
+    }
+  ]
+}

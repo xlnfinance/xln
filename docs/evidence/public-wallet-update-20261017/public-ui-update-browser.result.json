@@ -1,0 +1,17 @@
+{
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "public-ui-update-browser",
+    "--timeout-ms",
+    "60000",
+    "--",
+    "bun",
+    "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-996773462/public-browser.ts"
+  ],
+  "exitCode": 0,
+  "seconds": 27.391,
+  "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-ui-update-browser.log"
+}
