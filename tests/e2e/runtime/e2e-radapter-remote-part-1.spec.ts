@@ -1,3 +1,4 @@
+import type { RuntimeAdapter, RuntimeAdapterViewFrame, RuntimeAdapterEntitySummary, RuntimeAdapterActivityPage } from '../../../core/api/public/runtime-module';
 import { allowBrowserIssue, allowDebugIncident, expect, test } from '../../global-setup.mts';
 
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, getHealth, waitForNamedHubs } from '../../utils/e2e-baseline';
@@ -445,120 +446,100 @@ test.setTimeout(240_000);
 
 test('remote /app opens an existing hub runtime through radapter', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
-  const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
-  const h1 = String(hubs.h1 || '').toLowerCase();
-  expect(h1).toMatch(/^0x[0-9a-f]{64}$/);
-
-  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
-  const wsUrl = h1Endpoint.wsUrl;
-  const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
-  const url = remoteRuntimeUrl('/app', wsUrl, key);
-
-  const walletEvidence = page.waitForResponse(response =>
-    new URL(response.url()).pathname === '/api/external-wallet/snapshot' &&
-    response.request().method() === 'POST',
-  );
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await acceptRemoteRuntimeConsent(page);
-
-  await page.waitForFunction(
-    ({ hubId, expectedRuntimeId }) => {
-      const view = window as typeof window & {
-        __xlnRuntimeView?: {
-          runtimeId?: string;
-          entities?: Array<{ entityId?: string; isHub?: boolean; label?: string }>;
-          frame?: { entities?: Array<{ entityId?: string; isHub?: boolean; label?: string }> | null };
-        };
+  const hubs = await waitForNamedHubs(page, ['h1', 'h2', 'h3'], { apiBaseUrl: API_BASE_URL });
+  const h1 = String(hubs.h1).toLowerCase();
+  const endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const key = (await resolveRuntimeImportCapability(page, endpoint, 'admin')).token;
+  await page.goto(remoteRuntimeUrl('/app', endpoint.wsUrl, key), { waitUntil: 'domcontentloaded' });
+  await expect(page.getByLabel('Runtime endpoint', { exact: true })).toHaveValue(endpoint.wsUrl);
+  await expect(page.getByLabel('Access key · optional', { exact: true })).toHaveValue(key);
+  expect(new URL(page.url()).hash).toBe('');
+  // A capability in a URL is not consent. No connection or persistent credential precedes the click.
+  expect(
+    await page.evaluate(token => {
+      const debug = (window as Window & { __xln?: { adapter: () => RuntimeAdapter | null } }).__xln;
+      return {
+        connected: Boolean(debug?.adapter()),
+        leaked: [...Object.values(localStorage), ...Object.values(sessionStorage)].some(value => value.includes(token)),
       };
-      const runtimeView = (view as any).__xln?.view;
-      if (!runtimeView || String(runtimeView.runtimeId || '') !== expectedRuntimeId) return false;
-      const entities = runtimeView.entities ?? runtimeView.frame?.entities ?? [];
-      return entities.some(entity => String(entity.entityId || '').toLowerCase() === hubId && entity.isHub === true);
-    },
-    { hubId: h1, expectedRuntimeId: h1Endpoint.runtimeId },
-    { timeout: REMOTE_E2E_WAIT_MS },
-  );
+    }, key),
+  ).toEqual({ connected: false, leaked: false });
 
-  const snapshot = await page.evaluate(hubId => {
-    const view = window as typeof window & {
-      __xln?: {
-        view?: {
-          runtimeId?: string;
-          height?: number;
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.getByRole('button', { name: new RegExp(h1.slice(0, 18)) }).click();
+  await expect(page.locator('[data-testid="nav-home"]:visible')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  const snapshot = await page.evaluate(async hubId => {
+    const debug = (
+      window as Window & {
+        __xln?: {
+          adapter: () => RuntimeAdapter | null;
+          env: () => unknown;
+          store: { getState: () => { activeEntityId: string | null } };
         };
-        adapter?: {
-          status?: () => { connected?: boolean; authLevel?: string | null; height?: number };
-        };
-      };
-      __xlnRuntimeView?: {
-        runtimeId?: string;
-        height?: number;
-        entities?: Array<{ entityId?: string; isHub?: boolean; label?: string }>;
-        frame?: {
-          activeEntity?: {
-            summary?: { entityId?: string; isHub?: boolean; label?: string };
-            accounts?: { items?: unknown[]; totalItems?: number };
-          } | null;
-        } | null;
-      };
-    };
-    const runtimeView = (view as any).__xln?.view;
-    const debugRoot = view.__xln ?? {};
-    const rootAdapterStatus = debugRoot.adapter?.status?.() ?? null;
-    const entities = runtimeView?.entities ?? [];
-    const active = runtimeView?.frame?.activeEntity ?? null;
-    const activeSummary = active?.summary ?? null;
-    const hub =
-      entities.find(entity => String(entity.entityId || '').toLowerCase() === hubId && entity.isHub === true) ??
-      entities.find(entity => String(entity.entityId || '').toLowerCase() === hubId) ??
-      activeSummary;
+      }
+    ).__xln;
+    const adapter = debug?.adapter();
+    if (!debug || !adapter) throw new Error('CURRENT_REMOTE_ADAPTER_MISSING');
+    const frame = await adapter.read<RuntimeAdapterViewFrame>('view-frame', { entityId: hubId, accountsLimit: 10 });
+    const summaries = await adapter.read<RuntimeAdapterEntitySummary[]>('entities');
+    const hub = summaries.find(entity => entity.entityId === hubId);
+    const active = frame.activeEntity;
+    if (!hub || !active) throw new Error('REMOTE_HUB_PROJECTION_MISSING');
     return {
-      runtimeId: String(runtimeView?.runtimeId || ''),
-      height: Number(runtimeView?.height || 0),
-      replicaCount: entities.length,
-      hubName: String(hub?.label || ''),
-      hubIsHub: hub?.isHub === true,
-      accountCount: Number(active?.accounts?.totalItems ?? active?.accounts?.items?.length ?? 0),
-      loginText: document.body.textContent || '',
-      debugRootViewMatchesSnapshot: debugRoot.view === runtimeView,
-      debugRootAdapterConnected: rootAdapterStatus?.connected === true,
-      debugRootAdapterAuthLevel: rootAdapterStatus?.authLevel ?? null,
+      runtimeId: adapter.runtimeId,
+      status: adapter.status,
+      auth: adapter.authLevel,
+      mode: adapter.mode,
+      height: frame.height,
+      entityCount: summaries.length,
+      hubName: hub.label,
+      hubIsHub: hub.isHub,
+      accountCount: active.accounts.totalItems,
+      accountIds: active.accounts.items.map(account =>
+        account.state.leftEntity.toLowerCase() === hubId
+          ? account.state.rightEntity.toLowerCase()
+          : account.state.leftEntity.toLowerCase(),
+      ),
+      activeId: debug.store.getState().activeEntityId,
+      embeddedEnv: debug.env(),
     };
   }, h1);
-
-  const walletResponse = await walletEvidence;
-  const walletInput = await verifyExternalWalletSnapshotEvidence(page, walletResponse);
-  await verifySiblingWalletDomains(page, walletResponse.url(), walletInput, h1Endpoint.runtimeId);
-
-  expect(snapshot.runtimeId).toBe(h1Endpoint.runtimeId);
+  expect(snapshot.runtimeId).toBe(endpoint.runtimeId);
+  expect(snapshot.status).toBe('connected');
+  expect(snapshot.mode).toBe('remote');
+  expect(snapshot.auth).toBe('admin');
+  expect(snapshot.embeddedEnv).toBeNull();
   expect(snapshot.height).toBeGreaterThan(0);
-  expect(snapshot.replicaCount).toBeGreaterThan(0);
+  expect(snapshot.entityCount).toBeGreaterThan(0);
   expect(snapshot.hubIsHub).toBe(true);
   expect(snapshot.hubName.toLowerCase()).toContain('h1');
   expect(snapshot.accountCount).toBeGreaterThan(0);
   expect(snapshot.accountCount).toBeLessThanOrEqual(10);
-  expect(/quick login/i.test(snapshot.loginText)).toBe(false);
-  expect(snapshot.debugRootViewMatchesSnapshot).toBe(true);
-  expect(snapshot.debugRootAdapterConnected).toBe(true);
-  expect(snapshot.debugRootAdapterAuthLevel).toBe('admin');
-  await expect(page.getByTestId('context-current')).not.toContainText(/no runtime selected/i);
-  await expect(page.getByTestId('context-current')).toContainText(/\bH1\b/);
-  await expect(page.getByTestId('account-list-count')).toContainText(/\b\d+ Accounts\b/);
-  await expect(page.locator('[data-testid="account-list-wrapper"]')).toContainText(/0x[0-9a-f]{64}/i);
+  expect(snapshot.activeId).toBe(h1);
+  expect(snapshot.accountIds).toEqual(expect.arrayContaining([hubs.h2, hubs.h3]));
+  await expect(page.getByTestId('home-entity-id')).toHaveText(h1);
+  for (const hubId of [hubs.h2, hubs.h3])
+    await expect(page.locator(`[data-testid="account-row"][data-counterparty-id="${hubId}"]`)).toBeVisible();
 
-  await page.getByTestId('context-current').click();
-  const runtimeRows = page.getByTestId('context-entity-row');
-  await expect(runtimeRows.filter({ hasText: /\bH1\b/ }).first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await page.keyboard.press('Escape');
-  const accountPreviews = page.getByTestId('account-preview');
-  await expect(accountPreviews.filter({ hasText: /\bH2\b/ }).first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await expect(accountPreviews.filter({ hasText: /\bH3\b/ }).first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-
-  await page.getByTestId('account-workspace-tab-history').first().click();
-  await expect(page.locator('.settlement-panel')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.getByTestId('entity-history-panel').first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.getByTestId('entity-history-event').first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.locator('.settlement-panel')).not.toContainText('Settlement history requires a runtime frame');
+  // The remote wallet reads its real on-chain identity at the owning Runtime's API.
+  const walletEvidence = page.waitForResponse(
+    response =>
+      new URL(response.url()).pathname === '/api/external-wallet/snapshot' && response.request().method() === 'POST',
+  );
+  await page.getByRole('button', { name: /Assets and deposits/ }).click();
+  const walletResponse = await walletEvidence;
+  const walletInput = await verifyExternalWalletSnapshotEvidence(page, walletResponse);
+  await verifySiblingWalletDomains(page, walletResponse.url(), walletInput, endpoint.runtimeId);
+  await page.locator('[data-testid="nav-activity"]:visible').click();
+  await expect(page.getByTestId('activity-search')).toBeVisible();
+  const history = await page.evaluate(async entityId => {
+    const adapter = (window as Window & { __xln?: { adapter: () => RuntimeAdapter | null } }).__xln?.adapter();
+    if (!adapter) throw new Error('CURRENT_REMOTE_ADAPTER_MISSING');
+    return adapter.read<RuntimeAdapterActivityPage>('activity', { entityId, limit: 50 });
+  }, h1);
+  expect(history.events.length).toBeGreaterThan(0);
+  await expect(page.getByTestId('activity-row').first()).toBeVisible();
+  await expect(page.locator('main')).not.toContainText('Settlement history requires a runtime frame');
 });
 
 test(

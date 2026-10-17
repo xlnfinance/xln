@@ -23,7 +23,7 @@ import {
   readRemoteRuntimeTokenAudience,
   resolveStoredRemoteRuntimeAuthKey,
 } from '../onboarding/remoteRuntimeImport';
-import { normalizeWsConnectUrl } from './wsUrl';
+import { parseRemoteRuntimeLink, stripRemoteRuntimeLink } from './remoteRuntimeLink';
 
 export const REMOTE_ACCEPT_PREFIX = 'xln-remote-runtime-accepted:';
 
@@ -78,14 +78,6 @@ const ensureProjectionEmbeddedRuntimeOwnership = async (): Promise<void> => {
   await projectionRuntimeLockPromise;
 };
 
-export function normalizeRuntimeWsUrl(value: string): string {
-  const parsed = new URL(normalizeWsConnectUrl(String(value || '').trim()));
-  if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
-    throw new Error('REMOTE_RUNTIME_WS_REQUIRED');
-  }
-  return parsed.toString();
-}
-
 export function describeAuthKey(key: string): string {
   if (!key) return 'no key';
   if (key.startsWith('xlnra1.full.') || key.startsWith('xlnra1.admin.')) return 'full capability';
@@ -135,17 +127,10 @@ export function readRemoteRuntimeRequestFromUrl(): RemoteRuntimeRequest | null {
     stripRemoteRuntimeParamsFromHistory();
     throw new Error('REMOTE_RUNTIME_QUERY_BOOTSTRAP_FORBIDDEN');
   }
-  const hash = new URLSearchParams(window.location.hash.replace(/^#\??/, ''));
-  const mode = String(hash.get('runtime') || hash.get('adapter') || '').trim().toLowerCase();
-  const wsParam = String(hash.get('ws') || hash.get('runtimeWs') || '').trim();
-  if (mode !== 'remote' || !wsParam) return null;
-  const keyParam = String(
-    hash.get('token') || hash.get('authKey') || hash.get('key') || hash.get('auth') || '',
-  ).trim();
-  const wsUrl = normalizeRuntimeWsUrl(wsParam);
-  const authKey = keyParam.startsWith('xlnra1.')
-    ? keyParam
-    : resolveStoredRemoteRuntimeAuthKey(wsUrl).trim();
+  const request = parseRemoteRuntimeLink(new URL(window.location.href));
+  if (!request) return null;
+  const { wsUrl } = request;
+  const authKey = request.authKey || resolveStoredRemoteRuntimeAuthKey(wsUrl).trim();
   const requiresAuthPaste = !authKey;
   return {
     wsUrl,
@@ -223,7 +208,7 @@ export function remoteRuntimeRequiresConsent(request: RemoteRuntimeRequest): boo
 
 export function stripRemoteRuntimeParamsFromHistory(): void {
   if (typeof window === 'undefined') return;
-  const url = new URL(window.location.href);
+  const url = stripRemoteRuntimeLink(new URL(window.location.href));
   for (const key of RUNTIME_PARAM_KEYS) {
     url.searchParams.delete(key);
   }

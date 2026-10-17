@@ -1,3 +1,4 @@
+import { parseRemoteRuntimeLink, stripRemoteRuntimeLink } from '../../../frontend/src/lib/utils/runtime/remoteRuntimeLink';
 import { protectVaultSecrets, unprotectVaultSecrets } from '../../../frontend/src/lib/security/vaultProtection';
 import { assertDemoNetwork } from '../../../frontend/src/lib/config/demo-accounts';
 import { useNavigate } from 'react-router-dom';
@@ -62,6 +63,23 @@ export function Gate() {
 	const [authKey, setAuthKey] = useState('');
 	const [remoteEntities, setRemoteEntities] = useState<RuntimeAdapterEntitySummary[] | null>(null);
 	const deriveAbort = useRef<AbortController | null>(null);
+
+	useEffect(() => {
+		const url = new URL(window.location.href);
+		try {
+			const request = parseRemoteRuntimeLink(url);
+			if (request) {
+				setWsUrl(request.wsUrl);
+				setAuthKey(request.authKey);
+				setMode('remote');
+			}
+		} catch (error) {
+			setError(error instanceof Error ? error.message : String(error));
+		} finally {
+			const clean = stripRemoteRuntimeLink(url);
+			if (clean.href !== url.href) window.history.replaceState(window.history.state, '', clean);
+		}
+	}, []);
 
 	const work: BrainvaultWork | null = useMemo(() => {
 		const custom = customShards.trim();
@@ -462,6 +480,7 @@ export function Gate() {
 						connectRemoteRuntime();
 					}}
 				>
+					<p className="note">Connect only to a runtime you trust. This key authorizes access to the displayed endpoint; opening a link does not connect it.</p>
 					<label className="field">
 						<span className="field-label">Runtime endpoint</span>
 						<input className="input mono" value={wsUrl} onChange={e => setWsUrl(e.target.value)} autoFocus />

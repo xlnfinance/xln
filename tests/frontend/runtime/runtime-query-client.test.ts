@@ -200,13 +200,14 @@ test('automatic root refresh preserves the pinned RuntimeView Entity', () => {
 
 test('payment terminal observation follows the synchronous Entity selection', () => {
   const viewSource = readFileSync('frontend/src/lib/view/View.svelte', 'utf8');
-  const userModeSource = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
+  const walletTerminal = readFileSync('ui/src/runtime/financial/receipts.ts', 'utf8');
 
   expect(viewSource).toContain('const entityId = String(get(runtimeViewActiveEntityId)');
   expect(viewSource).toContain('runtimeViewActiveEntityId.subscribe(');
   expect(viewSource).not.toContain('const entityId = String(get(runtimeView).activeEntityId');
-  expect(userModeSource).toContain('if ($runtimeViewActiveEntityId !== selectedEntityId)');
-  expect(userModeSource).toContain('setRuntimeViewActiveEntityId(selectedEntityId);');
+  expect(walletTerminal).toContain('const state = useApp.getState();');
+  expect(walletTerminal).toContain("entityId: state.activeEntityId ?? ''");
+  expect(walletTerminal).toContain('const unsubscribe = useApp.subscribe(sync)');
 });
 
 test('runtime view height pushes cannot race the initial remote projection', () => {
@@ -246,7 +247,7 @@ test('runtime view catch-up retries back off instead of spinning', () => {
 test('persisted receipt probes reuse the live Runtime module singleton', () => {
   const source = readFileSync('tests/utils/e2e-runtime-receipts.ts', 'utf8');
 
-  expect(source).toContain('const XLN = view.__xln?.instance;');
+  expect(source).toContain('const XLN = await view.__xln?.xln();');
   expect(source).not.toContain('runtime.js');
   expect(source).not.toContain('await import(');
   expect(source).not.toContain('window.XLN');
@@ -283,9 +284,9 @@ test('activity history panel reads activity through RuntimeQueryClient only', ()
   expect(addressRouteSource).toContain("page.url.searchParams.get('runtimeId')");
   expect(addressRouteSource).toContain("runtimeOperations.selectRuntime(targetRuntimeId)");
   expect(addressRouteSource).toContain('Runtime ${targetRuntimeId} is not imported');
-  expect(paymentSmokeSource).toContain('__xln?.adapter?.query?.activity');
-  expect(paymentSmokeSource).toContain("openAccountWorkspaceTab(page, 'history')");
-  expect(paymentSmokeSource).toContain('history panel adapter must expose off-chain payment history');
+  expect(paymentSmokeSource).toContain("adapter.read<{ events: ActivityApiEvent[] }>('activity'");
+  expect(paymentSmokeSource).toContain("getByTestId('nav-activity')");
+  expect(paymentSmokeSource).toContain('durable ${kind} activity must include the exact 7 USDC payment');
   expect(paymentSmokeSource).not.toContain('/api/debug/activity');
   expect(paymentSmokeSource).not.toContain('readPersistedRuntimeActivityPage');
   expect(source).not.toContain('readPersistedRuntimeActivityPage');
@@ -522,7 +523,8 @@ test('runtime controller exposes only typed debug projection queries', () => {
   expect(queryClientSource).toContain('private async cachedRead<T>');
   expect(remoteE2ESource).toContain('RuntimeAdapterDebugSurface');
   expect(remoteE2ESource).toContain('adapter.query.viewFrame');
-  expect(remoteE2ESource).not.toContain('adapter.read');
+  expect(remoteE2ESource).toContain("adapter.read<RuntimeAdapterViewFrame>('view-frame'");
+  expect(remoteE2ESource).toContain("adapter.read<RuntimeAdapterActivityPage>('activity'");
   expect(remoteE2ESource).not.toContain('read: <T = unknown>');
 });
 

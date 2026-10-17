@@ -1,3 +1,4 @@
+import type { RuntimeAdapter, RuntimeAdapterViewFrame, RuntimeAdapterEntitySummary } from '../../../core/api/public/runtime-module';
 import { expect, type Page, type Response } from '@playwright/test';
 import { Interface } from 'ethers';
 
@@ -37,11 +38,12 @@ export const verifyWalletSnapshot = async (page: Page, input: WalletRequest, sna
   expect(snapshot.tokenErrors ?? []).toEqual([]);
   expect(snapshot.allowanceErrors ?? []).toEqual([]);
   const jurisdiction = entityJurisdiction ?? await page.evaluate(async entityId => {
-    const scope = window as typeof window & { __xln?: { adapter?: {
-      query: { viewFrame: (query: { entityId: string; accountsLimit: number; booksLimit: number }) => Promise<{ activeEntity: { core: { config: { jurisdiction: { address: string; chainId: number } } } } }> };
-    } } };
-    if (!scope.__xln?.adapter) throw new Error('E2E_REMOTE_ADAPTER_MISSING');
-    return (await scope.__xln.adapter.query.viewFrame({ entityId, accountsLimit: 1, booksLimit: 1 })).activeEntity.core.config.jurisdiction;
+    const adapter = (window as Window & { __xln?: { adapter: () => RuntimeAdapter | null } }).__xln?.adapter();
+    if (!adapter) throw new Error('E2E_REMOTE_ADAPTER_MISSING');
+    const frame = await adapter.read<RuntimeAdapterViewFrame>('view-frame', { entityId, accountsLimit: 1, booksLimit: 1 });
+    const jurisdiction = frame.activeEntity?.core.config.jurisdiction;
+    if (!jurisdiction) throw new Error('E2E_REMOTE_JURISDICTION_MISSING');
+    return jurisdiction;
   }, input.entityId);
   const rpc = async (method: string, params: unknown[]): Promise<unknown> => {
     const result = await page.request.post(jurisdiction.address, { data: { jsonrpc: '2.0', id: 1, method, params } });
@@ -86,10 +88,16 @@ export const verifyExternalWalletSnapshotEvidence = async (page: Page, response:
 
 export const verifySiblingWalletDomains = async (page: Page, endpoint: string, initial: WalletRequest, runtimeId: string): Promise<void> => {
   const siblings = await page.evaluate(async ownerRuntimeId => {
-    type Entity = { entityId: string; runtimeId: string; jurisdiction: { address: string; chainId: number; depositoryAddress: string } };
-    const scope = window as typeof window & { __xln?: { adapter?: { query: { entities: () => Promise<Entity[]> } } } };
-    if (!scope.__xln?.adapter) throw new Error('E2E_REMOTE_ADAPTER_MISSING');
-    return (await scope.__xln.adapter.query.entities()).filter(row => row.runtimeId.toLowerCase() === ownerRuntimeId.toLowerCase());
+    const adapter = (window as Window & { __xln?: { adapter: () => RuntimeAdapter | null } }).__xln?.adapter();
+    if (!adapter) throw new Error('E2E_REMOTE_ADAPTER_MISSING');
+    return (await adapter.read<RuntimeAdapterEntitySummary[]>('entities'))
+      .filter(row => row.runtimeId?.toLowerCase() === ownerRuntimeId.toLowerCase())
+      .map(row => {
+        const jurisdiction = row.jurisdiction;
+        if (!jurisdiction || typeof jurisdiction.address !== 'string' || typeof jurisdiction.chainId !== 'number'
+          || typeof jurisdiction.depositoryAddress !== 'string') throw new Error('E2E_REMOTE_JURISDICTION_INVALID');
+        return { entityId: row.entityId, jurisdiction: { address: jurisdiction.address, chainId: jurisdiction.chainId, depositoryAddress: jurisdiction.depositoryAddress } };
+      });
   }, runtimeId);
   expect(new Set(siblings.map(row => row.jurisdiction.chainId)).size).toBeGreaterThanOrEqual(2);
   const sourceHashes = new Set<string>();
