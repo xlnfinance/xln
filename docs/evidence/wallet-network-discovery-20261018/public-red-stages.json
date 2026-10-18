@@ -1,0 +1,107 @@
+[
+  {
+    "label": "fresh-account-visible",
+    "elapsedMs": 20668,
+    "state": {
+      "url": "https://xln.finance/ui/",
+      "alerts": [],
+      "headings": [
+        "How your money is held",
+        "Credit limits",
+        "Assets",
+        "Recent activity",
+        "Payment capacity",
+        "Connected accounts",
+        "Resources",
+        "Entity ID"
+      ],
+      "testIds": [
+        "logo",
+        "nav-home",
+        "nav-activity",
+        "nav-manage",
+        "nav-settings",
+        "jurisdiction-banner",
+        "jurisdiction-chain",
+        "wallet-tutorial",
+        "jurisdiction-stack",
+        "home-faucet",
+        "entity-switcher",
+        "entity-switcher-trigger",
+        "home-sovereignty",
+        "home-balance-asset",
+        "home-total",
+        "home-pay",
+        "home-receive",
+        "home-swap",
+        "home-add-money",
+        "home-move",
+        "home-balance-breakdown",
+        "home-secured",
+        "home-risk",
+        "home-onchain",
+        "home-reserve",
+        "home-credit-limits",
+        "home-show-zero",
+        "activity-row",
+        "home-accounts",
+        "account-row"
+      ]
+    }
+  },
+  {
+    "label": "network-probing",
+    "elapsedMs": 20846,
+    "state": {
+      "url": "https://xln.finance/ui/manage",
+      "alerts": [],
+      "headings": [
+        "xln",
+        "Imported vault"
+      ],
+      "testIds": [
+        "logo",
+        "gate-stack"
+      ]
+    }
+  },
+  {
+    "label": "real-stack-response",
+    "elapsedMs": 24889,
+    "url": "https://xln.finance/api/hubs?ts=1792284845212",
+    "status": 200,
+    "conditions": {
+      "ruleIds": [
+        "DF96DDF11425C65142872B287FD5A15F"
+      ]
+    }
+  },
+  {
+    "label": "unlocked-after-network",
+    "elapsedMs": 25021,
+    "state": {
+      "url": "https://xln.finance/ui/manage",
+      "alerts": [
+        "No xln network answers at this address. Open the wallet from a running stack (bun run dev, or xln.finance/ui)."
+      ],
+      "headings": [
+        "Unlock wallet"
+      ],
+      "testIds": []
+    }
+  },
+  {
+    "label": "failure",
+    "elapsedMs": 25031,
+    "state": {
+      "url": "https://xln.finance/ui/manage",
+      "alerts": [
+        "No xln network answers at this address. Open the wallet from a running stack (bun run dev, or xln.finance/ui)."
+      ],
+      "headings": [
+        "Unlock wallet"
+      ],
+      "testIds": []
+    }
+  }
+]

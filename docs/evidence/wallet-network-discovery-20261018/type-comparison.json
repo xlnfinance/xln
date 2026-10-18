@@ -1,0 +1,40 @@
+{
+  "baselineCount": 2,
+  "currentCount": 2,
+  "introducedCount": 0,
+  "newSharedDiagnostics": 0,
+  "baseline": [
+    {
+      "file": "tests/e2e/runtime/gateway/e2e-canonical-wallet-gateway.spec.ts",
+      "line": 30,
+      "code": 2345,
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "source": "url"
+    },
+    {
+      "file": "tests/e2e/runtime/gateway/e2e-canonical-wallet-gateway.spec.ts",
+      "line": 38,
+      "code": 2345,
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "source": "file"
+    }
+  ],
+  "current": [
+    {
+      "file": "tests/e2e/runtime/gateway/e2e-canonical-wallet-gateway.spec.ts",
+      "line": 31,
+      "code": 2345,
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "source": "url"
+    },
+    {
+      "file": "tests/e2e/runtime/gateway/e2e-canonical-wallet-gateway.spec.ts",
+      "line": 39,
+      "code": 2345,
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "source": "file"
+    }
+  ],
+  "introduced": [],
+  "scope": "Strict same-options comparison against exact preserved baseline source, via compiler host; baseline errors remain unresolved, not a whole-file type pass. No project gate changed."
+}

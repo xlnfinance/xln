@@ -36,7 +36,7 @@ type GateMode = 'landing' | 'create' | 'import' | 'remote' | 'remote-import';
 export function Gate() {
 	const navigate = useNavigate();
 	const [mode, setMode] = useState<GateMode>('landing');
-	const [passwordEntry, setPasswordEntry] = useState<{ id: string; name: string; seed?: string; open: (seed: string) => Promise<void> } | null>(null);
+	const [passwordEntry, setPasswordEntry] = useState<{ id: string; name: string; seed?: string; open: (seed: string, stack: Stack) => Promise<void> } | null>(null);
 
 	/** The xln stack serving this page (local orchestrator or xln.finance); null on a static host. */
 	const [stack, setStack] = useState<Stack | null | undefined>(undefined);
@@ -206,8 +206,8 @@ export function Gate() {
 			if (!stack) throw new Error(NO_STACK);
 			const recovery = await recoveryFor(seed);
 			setPhrase('');
-			setPasswordEntry({ id: vaultId, name: vaultOptions.vaultName, seed, open: async unlocked => {
-				await bootHostedVault(unlocked, { ...vaultOptions, stack, ...(recovery ? { recovery } : {}) });
+			setPasswordEntry({ id: vaultId, name: vaultOptions.vaultName, seed, open: async (unlocked, currentStack) => {
+				await bootHostedVault(unlocked, { ...vaultOptions, stack: currentStack, ...(recovery ? { recovery } : {}) });
 				rememberTower(vaultId);
 			} });
 			setBusyStep(null);
@@ -276,10 +276,9 @@ export function Gate() {
 			return;
 		}
 		if (hasPasswordVault(vault.id)) {
-			setPasswordEntry({ id: vault.id, name: vault.name, open: async seed => {
-				if (!stack) throw new Error(NO_STACK);
+			setPasswordEntry({ id: vault.id, name: vault.name, open: async (seed, currentStack) => {
 				if (runtimeIdForSeed(seed).toLowerCase() !== vault.id.toLowerCase()) throw new Error('Wallet identity mismatch.');
-				await bootHostedVault(seed, { vaultId: vault.id, vaultName: vault.name, kind: vault.kind, selfLabel: vault.name, stack, onStep: setBusyStep });
+				await bootHostedVault(seed, { vaultId: vault.id, vaultName: vault.name, kind: vault.kind, selfLabel: vault.name, stack: currentStack, onStep: setBusyStep });
 			} });
 			return;
 		}
@@ -303,7 +302,12 @@ export function Gate() {
 		/>
 	);
 
-	if (passwordEntry) return <PasswordEntry {...passwordEntry} status={busyStep} onOpen={passwordEntry.open} onBack={() => { setPasswordEntry(null); setBusyStep(null); }} />;
+	// Continue may precede discovery; use this render's validated stack when opening,
+	// never the value captured when the password screen was first selected.
+	if (passwordEntry) return <PasswordEntry {...passwordEntry} status={busyStep} onOpen={async seed => {
+		if (!stack) throw new Error(NO_STACK);
+		await passwordEntry.open(seed, stack);
+	}} onBack={() => { setPasswordEntry(null); setBusyStep(null); }} />;
 
 	if (busyStep) {
 		const etaSeconds =

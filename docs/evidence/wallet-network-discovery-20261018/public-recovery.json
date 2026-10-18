@@ -1,0 +1,39 @@
+{
+  "sha": "1ebc6803796b51b8e8c37704d273b24e4223eb8d",
+  "elapsedSeconds": 44.598,
+  "managedRecoveryDurationMs": 40528,
+  "dataReset": false,
+  "newServerPid": 1085657,
+  "treekill": false,
+  "killTimeoutMs": 60000,
+  "protectedFilesUnchanged": true,
+  "unrelatedProcessesUnchanged": true,
+  "failureMarkers": {
+    "NAPI FATAL ERROR": 0,
+    "Bun has crashed": 0,
+    "panic:": 0,
+    "quiesce.post_failed": 0,
+    "quiesce.refused": 0,
+    "shutdown failed:": 0,
+    "child.stop_timeout_sigkill": 0
+  },
+  "errorDeltaBytes": 4159,
+  "errorDeltaSha256": "6cbfb160508e0b3e4281a6bbbb04194235ece257166390e4162997fb781dd5dc",
+  "stages": [
+    {
+      "step": "preserved-current-state-confirmed",
+      "elapsedSeconds": 0.23,
+      "at": 1792284219576
+    },
+    {
+      "step": "parent-only-restart-request-completed",
+      "elapsedSeconds": 1.908,
+      "at": 1792284221255
+    },
+    {
+      "step": "current-recovery-ready",
+      "elapsedSeconds": 44.596,
+      "at": 1792284263942
+    }
+  ]
+}

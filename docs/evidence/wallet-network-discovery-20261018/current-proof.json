@@ -1,0 +1,66 @@
+{
+  "candidate": {
+    "candidateId": "31857e9a0c3f10553628ccb5a58536fda185d86dded6a7007048d6afde45d844",
+    "gitHead": "1ebc6803796b51b8e8c37704d273b24e4223eb8d",
+    "codeHash": "b2ea71567c9fad74a8150eac4aa419742655b9ce98bce65980d64f650fad1586",
+    "gateConfigHash": "e832388fede715eac01428ebd182c5795492b45efc70f2024adb117089da2b31"
+  },
+  "browserHealth": {
+    "issueCount": 0,
+    "errorCount": 0,
+    "warningCount": 0,
+    "networkFailureCount": 0,
+    "httpErrorCount": 0,
+    "severity": "OK",
+    "reason": "Browser event stream is clean",
+    "since": 0,
+    "owner": "browser",
+    "evidence": [
+      {
+        "label": "issues",
+        "value": 0
+      }
+    ]
+  },
+  "proofs": [
+    {
+      "identity": {
+        "entityId": "0xe9f1ecb02f4f27e2321e5d2070a4535f5aeae0d9e1cc41d79b8ccf08c941f1d2",
+        "signerId": "0xc337b33120e53f87321349914a4f58395e0625ca",
+        "runtimeId": "0xc337b33120e53f87321349914a4f58395e0625ca"
+      },
+      "before": {
+        "height": 4,
+        "root": "0xa88784b2c7f5035da620bb80870b66da409bcc989b45a7da854d62e75bf0e85f",
+        "pending": false,
+        "mempool": 0,
+        "offers": 0,
+        "usdc": "100000000",
+        "weth": "0",
+        "wethCredit": "0",
+        "wethCapacity": "0",
+        "usdcSpendable": "100000000",
+        "holds": [
+          {
+            "tokenId": 1,
+            "outgoing": "0",
+            "incoming": "0"
+          },
+          {
+            "tokenId": 2,
+            "outgoing": "0",
+            "incoming": "0"
+          },
+          {
+            "tokenId": 3,
+            "outgoing": "0",
+            "incoming": "0"
+          }
+        ]
+      },
+      "response": "http://localhost:20004/api/hubs?ts=1792285016991",
+      "responseStatus": 200,
+      "alerts": []
+    }
+  ]
+}

@@ -1,0 +1,274 @@
+[
+  {
+    "command": [
+      "python3",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-1ebc68037/inspect-local.py"
+    ],
+    "exitCode": 0,
+    "seconds": 1.946,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-relay-fix-inspection.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-relay-fix-preservation",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-1ebc68037/prepare.sh"
+    ],
+    "exitCode": 0,
+    "seconds": 16.171,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-relay-fix-preservation.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-relay-fix-deploy",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-1ebc68037/deploy.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 29.495,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-relay-fix-deploy.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-relay-fix-byte-proof",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-1ebc68037/post-install.sh"
+    ],
+    "exitCode": 0,
+    "seconds": 4.24,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-relay-fix-byte-proof.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-relay-fix-recovery",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-1ebc68037/restart.sh"
+    ],
+    "exitCode": 0,
+    "seconds": 47.701,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-relay-fix-recovery.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-relay-fix-financial-recovery",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-1ebc68037/compare.sh"
+    ],
+    "exitCode": 0,
+    "seconds": 39.186,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-relay-fix-financial-recovery.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-relay-fix-entry",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "python3",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-1ebc68037/public-entry.py"
+    ],
+    "exitCode": 0,
+    "seconds": 0.877,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-relay-fix-entry.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-relay-fix-browser",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-1ebc68037/public-browser.ts"
+    ],
+    "exitCode": 1,
+    "seconds": 53.831,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-relay-fix-browser.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-relay-fix-final-health",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "ssh",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=10",
+      "xln.finance",
+      "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason public-relay-fix-operator-health --timeout-ms 60000 -- bun core/scripts/operations/production/prod-health-smoke.ts --url=http://127.0.0.1:8080 --expected-hubs=3 --require-hub-self-relay --expected-towers=1 --tower-url=http://127.0.0.1:9100/api/tower/healthz --require-clean-source --require-source-match --expected-git-head=1ebc6803796b51b8e8c37704d273b24e4223eb8d --expected-code-hash=1ebc6803796b51b8e8c37704d273b24e4223eb8d"
+    ],
+    "exitCode": 0,
+    "seconds": 1.243,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-relay-fix-final-health.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-relay-fix-browser-diagnostic",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-1ebc68037/public-browser.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 31.169,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-relay-fix-browser-diagnostic.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-relay-fix-reload-observation",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-1ebc68037/reload-wrapper.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 38.697,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-relay-fix-reload-observation.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-reload-latency-baseline",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-1ebc68037/latency-wrapper.ts"
+    ],
+    "exitCode": 1,
+    "seconds": 26.718,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-reload-latency-baseline.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "gate-network-current",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/runtime/gateway/e2e-canonical-wallet-gateway.spec.ts::wallet unlock uses the network discovered after Continue"
+    ],
+    "exitCode": 0,
+    "seconds": 40.443,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/gate-network-current.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "gate-network-gateway-regression",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/runtime/gateway/e2e-canonical-wallet-gateway.spec.ts::canonical gateway initializes React wallet and Account worker from exact current assets"
+    ],
+    "exitCode": 0,
+    "seconds": 36.098,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/gate-network-gateway-regression.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "gate-network-types",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/gate-network/type-compare.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 4.927,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/gate-network-types.log"
+  }
+]

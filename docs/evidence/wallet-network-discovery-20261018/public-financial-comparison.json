@@ -1,0 +1,95 @@
+[
+  {
+    "recoveryDurationMs": 40528,
+    "results": [
+      {
+        "accountViews": 17,
+        "advancements": [
+          {
+            "after": 12,
+            "before": 11,
+            "financialRoot": "0x84c8149f6380658b3f17ad30ab8c1ac0693c6a29744cc475a2bde8e6ec7deb4d",
+            "peer": "0xe2d88972225e766593519e423018cb6ff1050e948a29a42d56972a873b79ea15",
+            "reason": "New post-restart credit-policy frame links the preserved previous frame; all financial roots and balances unchanged"
+          }
+        ],
+        "beforeHeight": 295,
+        "currentFinancialRootsAndBalancesExact": true,
+        "currentHeight": 298,
+        "historicalAccountsExact": true,
+        "name": "H1"
+      }
+    ],
+    "source": {
+      "codeHash": "1ebc6803796b51b8e8c37704d273b24e4223eb8d",
+      "computedAt": 1792284222814,
+      "dirty": false,
+      "gitBranch": "main",
+      "gitHead": "1ebc6803796b51b8e8c37704d273b24e4223eb8d",
+      "height": 303,
+      "owner": "orchestrator"
+    }
+  },
+  {
+    "recoveryDurationMs": 40528,
+    "results": [
+      {
+        "accountViews": 6,
+        "advancements": [
+          {
+            "after": 12,
+            "before": 11,
+            "financialRoot": "0x62eef93ac27d83152c51491fba9647b3e5085e4a1dfbe11bf6566694a8326e93",
+            "peer": "0xe2d88972225e766593519e423018cb6ff1050e948a29a42d56972a873b79ea15",
+            "reason": "New post-restart credit-policy frame links the preserved previous frame; all financial roots and balances unchanged"
+          }
+        ],
+        "beforeHeight": 231,
+        "currentFinancialRootsAndBalancesExact": true,
+        "currentHeight": 234,
+        "historicalAccountsExact": true,
+        "name": "H2"
+      }
+    ],
+    "source": {
+      "codeHash": "1ebc6803796b51b8e8c37704d273b24e4223eb8d",
+      "computedAt": 1792284222814,
+      "dirty": false,
+      "gitBranch": "main",
+      "gitHead": "1ebc6803796b51b8e8c37704d273b24e4223eb8d",
+      "height": 303,
+      "owner": "orchestrator"
+    }
+  },
+  {
+    "recoveryDurationMs": 40528,
+    "results": [
+      {
+        "accountViews": 6,
+        "advancements": [
+          {
+            "after": 12,
+            "before": 11,
+            "financialRoot": "0x3d30210064a77a1878cd458468aeabe711fc1c41a9c5927e9a525db8085ca4f1",
+            "peer": "0xe2d88972225e766593519e423018cb6ff1050e948a29a42d56972a873b79ea15",
+            "reason": "New post-restart credit-policy frame links the preserved previous frame; all financial roots and balances unchanged"
+          }
+        ],
+        "beforeHeight": 227,
+        "currentFinancialRootsAndBalancesExact": true,
+        "currentHeight": 230,
+        "historicalAccountsExact": true,
+        "name": "H3"
+      }
+    ],
+    "source": {
+      "codeHash": "1ebc6803796b51b8e8c37704d273b24e4223eb8d",
+      "computedAt": 1792284222814,
+      "dirty": false,
+      "gitBranch": "main",
+      "gitHead": "1ebc6803796b51b8e8c37704d273b24e4223eb8d",
+      "height": 303,
+      "owner": "orchestrator"
+    }
+  }
+]

@@ -1,0 +1,4 @@
+{
+  "ui/src/screens/Gate.tsx": "5b2ab49d4c14a77b34c926cadadc607f7e39710d289f26ac90a3f69f56535bde",
+  "tests/e2e/runtime/gateway/e2e-canonical-wallet-gateway.spec.ts": "fc419c17aabe16de53f63660df4a3ca24a23049a562a3f659296911623d5c541"
+}

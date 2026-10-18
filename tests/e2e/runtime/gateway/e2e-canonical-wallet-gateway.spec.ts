@@ -4,7 +4,8 @@ import { dirname, join } from 'node:path';
 import { HDNodeWallet } from 'ethers';
 import { expect, test } from '../../../global-setup.mts';
 import { gotoApp } from '../../../utils/e2e-demo-users';
-const LOCAL_PASSWORD = 'e2e-local-wallet-password';
+import { createWalletIdentity, LOCAL_PASSWORD } from '../../../../ui/tests/wallet-ui';
+import { readAccount, expectDeliveryDrained, type DebugWindow } from '../../../../ui/tests/swap-evidence';
 
 test(
   'canonical gateway initializes React wallet and Account worker from exact current assets',
@@ -68,3 +69,73 @@ test(
     });
   },
 );
+
+test('wallet unlock uses the network discovered after Continue', { tag: '@resilience' }, async ({ page }, info) => {
+  await gotoApp(page, { settleMs: 0 });
+  const phrase = HDNodeWallet.createRandom().mnemonic?.phrase;
+  if (!phrase) throw new Error('TEST_WALLET_MNEMONIC_MISSING');
+  const identity = await createWalletIdentity(page, 'network-discovery', phrase);
+  await page.getByTestId('home-faucet').click();
+  await expect(page.getByTestId('test-money-status')).toHaveText('100 USDC received');
+  await page.getByTestId('account-row').first().click();
+  const hubId = new URL(page.url()).pathname.split('/accounts/')[1];
+  if (!hubId || !/^0x[0-9a-f]{64}$/.test(hubId)) throw new Error('NETWORK_GATE_ACCOUNT_MISSING');
+  await page.getByTestId('back').click();
+  await expectDeliveryDrained(page, expect);
+  const before = await readAccount(page, hubId);
+  const origin = new URL(page.url()).origin;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Network.enable');
+  // Delay actual responses; no fabricated catalog, route handler or replacement wallet state.
+  await cdp.send('Network.emulateNetworkConditionsByRule', {
+    matchedNetworkConditions: [
+      { urlPattern: `${origin}/api/*`, latency: 2000, downloadThroughput: -1, uploadThroughput: -1 },
+    ],
+  });
+  try {
+    const navigationStarted = Date.now();
+    const detected = page.waitForResponse(
+      response =>
+        new URL(response.url()).pathname === '/api/hubs' &&
+        response.status() === 200 &&
+        response.request().timing().startTime >= navigationStarted,
+    );
+    await page.goto(`${origin}/ui/manage`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('gate-stack')).toHaveAttribute('data-state', 'probing');
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Unlock wallet' })).toBeVisible();
+    const response = await detected;
+    await response.finished();
+    await cdp.send('Network.emulateNetworkConditionsByRule', { matchedNetworkConditions: [] });
+    await page.evaluate(
+      () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+    );
+    await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+    await page
+      .locator('[data-testid="nav-home"]:visible, [role="alert"]')
+      .first()
+      .waitFor({ state: 'visible', timeout: 15000 });
+    const alerts = await page.getByRole('alert').allTextContents();
+    await info.attach('network-discovery-unlock', {
+      body: JSON.stringify({ identity, before, response: response.url(), responseStatus: response.status(), alerts }),
+      contentType: 'application/json',
+    });
+    expect(alerts).toEqual([]);
+    await page.getByTestId('nav-home').locator('visible=true').first().click();
+    await expect(page.getByTestId('home-entity-id')).toHaveText(identity.entityId);
+    const runtimeId = await page.evaluate(() => {
+      const debug = (window as DebugWindow).__xln;
+      if (!debug) throw new Error('WALLET_DIAGNOSTICS_UNAVAILABLE');
+      const adapter = debug.adapter();
+      if (!adapter) throw new Error('WALLET_ADAPTER_UNAVAILABLE');
+      return adapter.runtimeId;
+    });
+    expect(runtimeId).toBe(identity.runtimeId);
+    expect(await readAccount(page, hubId)).toEqual(before);
+    await page.screenshot({ path: info.outputPath('wallet-unlocked-after-network.png') });
+  } finally {
+    await cdp.send('Network.emulateNetworkConditionsByRule', { matchedNetworkConditions: [] });
+    await cdp.detach();
+  }
+});

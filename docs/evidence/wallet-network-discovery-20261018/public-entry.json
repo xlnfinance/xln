@@ -1,0 +1,10 @@
+{
+  "source": "1ebc6803796b51b8e8c37704d273b24e4223eb8d",
+  "indexSha256": "27876a0131edd6da606d18d815ca21c452a147ad003488272acd6bc11320a514",
+  "script": "/ui/assets/index-DvWApirK.js",
+  "scriptSha256": "8e23b3dffb46fd046e060216ae94f5e74962129dd71842878fca97c3c8460901",
+  "scriptBytes": 2181776,
+  "scriptMime": "text/javascript; charset=utf-8",
+  "publicBytesEqualBuiltArtifact": true,
+  "relayExpiryMessagePresent": true
+}
