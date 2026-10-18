@@ -1,0 +1,7 @@
+{
+  "tests/e2e/swap/e2e-swap.spec.ts": "22dde10b88d43d7ec2d6804f2a94397e510b7a0ee0a03aa9acc6df17d9abb33e",
+  "tests/utils/browser/swap-resting-limit.ts": "45cafb0eeb94dd2ee2917781d78897e71fc041a54c876653f01644afb6c00b72",
+  "ui/src/components/Orderbook.tsx": "eec76cda9d70abcf662fe854d12933ead25e52fb481284e03386f9baacac712b",
+  "ui/src/screens/Swap.tsx": "6676fa05954d385294f41012928dd1f8bb8a0b5c880b72252884dd8a9d2c8d39",
+  "core/swapbook/price-band.ts": "61d5044caa70f967d02b5076ee2851cb923fa4b0bc84cc12beb289c8d61d3f69"
+}

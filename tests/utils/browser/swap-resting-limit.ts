@@ -12,7 +12,7 @@ export async function verifyRestingLimit(
   info: TestInfo,
   entityId: string,
   baseAmount: bigint,
-  editPrice: (clickedPrice: bigint) => bigint,
+  editPrice: (clickedPrice: bigint, bestBid: bigint) => bigint,
 ): Promise<void> {
   await page.getByTestId('home-faucet').click();
   await expect(page.getByTestId('test-money-status')).toHaveText('100 USDC received');
@@ -35,7 +35,12 @@ export async function verifyRestingLimit(
     return parseUnits(price.replaceAll(',', ''), 4);
   };
   expect(await readPreviewPrice()).toBe(clickedPrice);
-  const editedPrice = editPrice(clickedPrice);
+  const bid = book.getByTestId('book-row-bid').first();
+  await expect(bid).toBeVisible();
+  const bestBid = parseUnits((await bid.locator('.bk-price').innerText()).replaceAll(',', ''), 4);
+  expect(bestBid).toBeGreaterThan(0n);
+  expect(bestBid).toBeLessThan(clickedPrice);
+  const editedPrice = editPrice(clickedPrice, bestBid);
   expect(editedPrice).toBeGreaterThan(0n);
   expect(editedPrice).toBeLessThan(clickedPrice);
   const quoteAmount = quoteAmountAtPriceForDecimals(18, 6, baseAmount, editedPrice);
@@ -174,6 +179,7 @@ export async function verifyRestingLimit(
       baseAmount,
       quoteAmount,
       clickedPrice,
+      bestBid,
       editedPrice,
       before,
       resting,

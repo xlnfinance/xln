@@ -1,0 +1,127 @@
+[
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "midpoint-limit-current",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap midpoint limit rests, survives reload and cancels without a worse fill"
+    ],
+    "exitCode": 0,
+    "seconds": 40.326,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/midpoint-limit-current.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "midpoint-limit-retired-current",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap midpoint limit rests, survives reload and cancels without a worse fill"
+    ],
+    "exitCode": 0,
+    "seconds": 39.033,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/midpoint-limit-retired-current.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "midpoint-limit-existing-regression",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap place WETH/USDC offer survives reload"
+    ],
+    "exitCode": 0,
+    "seconds": 38.06,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/midpoint-limit-existing-regression.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "midpoint-limit-l1",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "test",
+      "ui/src/runtime/financial/orderbook-quote.test.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 0.199,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/midpoint-limit-l1.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "midpoint-limit-types",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/midpoint-limit/type-compare.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 8.856,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/midpoint-limit-types.log"
+  },
+  {
+    "command": [
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/midpoint-limit/verify-retirement.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 0.127,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/midpoint-helper-retirement-final.log"
+  }
+]
