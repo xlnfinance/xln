@@ -1,0 +1,5 @@
+{
+  "ui/src/runtime/financial/orderbook.ts": "54a1efb3c868f798281d9a587a8775d24679f710a0eaf0dc743167207fd34502",
+  "tests/e2e/swap/e2e-swap.spec.ts": "9eb77accc245a9104538d2cc6019113df45c0c17fc577d4ca35c6cd03817098c",
+  "tests/utils/browser/market/relay-silence.ts": "124014c992e4aa94e4128b156d834042f448e57ead4818fe749c6df690c9106b"
+}

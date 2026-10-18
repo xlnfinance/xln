@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { StorageEntityCoreDoc } from '@xln/core/storage/types';
 import type { AccountState } from '@xln/core/api/public/runtime-module';
 import { decodeMarketWireResponse, encodeMarketWireMessage } from '@xln/core/network/relay/market/wire';
@@ -113,9 +113,7 @@ export function bookFromHostedAccounts(
 	};
 }
 
-// ---------------------------------------------------------------------------
-// Relay market stream, for hubs this runtime does not host.
-// ---------------------------------------------------------------------------
+// Relay market stream for hubs this runtime does not host.
 
 function relayLevels(levels: MarketSideLevel[], ownEntityId: string, lotScale: bigint): BookLevel[] {
 	const own = normalizeId(ownEntityId);
@@ -130,18 +128,15 @@ function relayLevels(levels: MarketSideLevel[], ownEntityId: string, lotScale: b
 
 const RELAY_STALE_MS = 15_000;
 
-/**
- * The relay's market feed for one hub and pair. Same wire protocol and same
- * URL resolution as the SvelteKit OrderbookPanel; one socket per hook.
- */
+/** One current relay subscription for the selected hub and pair. */
 function useRelayBook(input: { enabled: boolean; hubId: string; relayUrl: string; pairId: string; depth: number; ownEntityId: string; lotScale: bigint; pageLocation?: BrowserLocationLike }) {
 	const [latestSnapshot, setSnapshot] = useState<RelayMarketSnapshotPayload | null>(null);
 	const [status, setStatus] = useState<BookView['status']>('syncing');
 	const [error, setError] = useState<string | null>(null);
-	const socketRef = useRef<WebSocket | null>(null);
 
 	useEffect(() => {
 		if (!input.enabled || !input.hubId || !input.pairId) return;
+		setSnapshot(null);
 		const resolution = resolveOrderbookRelayWsUrl(input.relayUrl, input.pageLocation ?? (typeof window === 'undefined' ? null : window.location));
 		if (!resolution.url) {
 			setStatus('unavailable');
@@ -150,10 +145,23 @@ function useRelayBook(input: { enabled: boolean; hubId: string; relayUrl: string
 		}
 		let cancelled = false;
 		let seq = 0;
+		let deadline: ReturnType<typeof setTimeout> | undefined;
+		const unavailable = (reason: string) => {
+			if (cancelled) return;
+			clearTimeout(deadline);
+			setSnapshot(null);
+			setStatus('unavailable');
+			setError(reason);
+		};
+		// Expiry must render even when the relay sends nothing and no other state changes.
+		const awaitResponse = (remainingMs: number) => {
+			clearTimeout(deadline);
+			deadline = setTimeout(() => unavailable('The market feed is not responding. Waiting for fresh prices.'), remainingMs);
+		};
 		setStatus('syncing');
 		setError(null);
 		const socket = new WebSocket(resolution.url);
-		socketRef.current = socket;
+		awaitResponse(RELAY_STALE_MS);
 		socket.onopen = () => {
 			socket.send(
 				encodeMarketWireMessage({
@@ -174,39 +182,40 @@ function useRelayBook(input: { enabled: boolean; hubId: string; relayUrl: string
 			try {
 				message = decodeMarketWireResponse(event.data);
 			} catch (decodeError) {
-				setError(decodeError instanceof Error ? decodeError.message : String(decodeError));
+				unavailable(decodeError instanceof Error ? decodeError.message : String(decodeError));
 				return;
 			}
 			if (message.type === 'market_snapshot') {
 				const payload = selectRelaySnapshot(message.payload, input.hubId, input.pairId);
 				if (!payload) return;
+				const remainingMs = Math.min(RELAY_STALE_MS, RELAY_STALE_MS - (Date.now() - payload.updatedAt));
+				if (remainingMs <= 0) {
+					unavailable('The market prices are out of date. Waiting for fresh prices.');
+					return;
+				}
+				awaitResponse(remainingMs);
 				setSnapshot(payload);
+				setError(null);
 				setStatus('live');
 			} else if (message.type === 'market_status') {
+				clearTimeout(deadline);
+				setSnapshot(null);
+				setError(null);
 				setStatus('no-market');
 			} else if (message.type === 'error') {
-				setError(message.error);
-				setStatus('unavailable');
+				unavailable(message.error);
 			}
 		};
-		socket.onerror = () => {
-			if (!cancelled) {
-				setStatus('unavailable');
-				setError('RELAY_SOCKET_ERROR');
-			}
-		};
-		socket.onclose = () => {
-			if (!cancelled && status === 'live') setStatus('syncing');
-		};
+		socket.onerror = () => unavailable('The market connection failed. Reopen Swap to reconnect.');
+		socket.onclose = () => unavailable('The market connection closed. Reopen Swap to reconnect.');
 		return () => {
 			cancelled = true;
-			socketRef.current = null;
+			clearTimeout(deadline);
 			if (socket.readyState === WebSocket.OPEN) {
 				socket.send(encodeMarketWireMessage({ type: 'market_unsubscribe', id: `market_unsub_${Date.now()}`, pairs: [input.pairId] }));
 			}
 			socket.close();
 		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [input.enabled, input.hubId, input.relayUrl, input.pageLocation, input.pairId, input.depth]);
 
 	return useMemo(() => {
@@ -214,14 +223,13 @@ function useRelayBook(input: { enabled: boolean; hubId: string; relayUrl: string
 		// A retained response belongs to its published market, never the next render's labels or units.
 		const snapshot = selectRelaySnapshot(latestSnapshot, input.hubId, input.pairId);
 		const minimum = snapshot?.sources.find(source => source.hubEntityId === input.hubId)?.minTradeSize;
-		const stale = snapshot ? Date.now() - snapshot.updatedAt > RELAY_STALE_MS : false;
 		return {
 			minTradeSize: minimum == null ? null : BigInt(minimum),
 			bids: snapshot ? relayLevels(snapshot.bids, input.ownEntityId, input.lotScale) : [],
 			asks: snapshot ? relayLevels(snapshot.asks, input.ownEntityId, input.lotScale) : [],
 			spreadTicks: snapshot?.spread ? BigInt(snapshot.spread) : null,
 			lastTradeTicks: snapshot?.lastTradePrice ? BigInt(snapshot.lastTradePrice) : null,
-			status: (!snapshot || stale) && status === 'live' ? ('syncing' as const) : status,
+			status: !snapshot && status === 'live' ? ('syncing' as const) : status,
 			updatedAt: snapshot?.updatedAt ?? 0,
 			error,
 		};
@@ -231,7 +239,7 @@ function useRelayBook(input: { enabled: boolean; hubId: string; relayUrl: string
 /**
  * The hub's book for a token pair. A hub this runtime hosts (the sandbox, an
  * operator's own hub) is read from its accounts on every frame; any other hub
- * comes through the relay market stream, as in the SvelteKit panel.
+ * comes through the current relay market stream.
  */
 export function useOrderbook(input: {
 	hubId: string;

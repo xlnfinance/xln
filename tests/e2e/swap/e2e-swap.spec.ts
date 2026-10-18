@@ -1,3 +1,4 @@
+import { verifyRelaySilence } from '../../utils/browser/market/relay-silence';
 import { verifyAllBooks } from '../../utils/browser/swap-all-books';
 import { verifySwapTokenSelection } from '../../utils/browser/swap-token-selection';
 import { verifyBookSwitching } from '../../utils/browser/swap-book-switch';
@@ -1719,56 +1720,17 @@ test.describe('E2E Swap Flow', () => {
     },
   );
 
-	  test('swap orderbook shows terminal no-market state when relay stream never returns a snapshot', { tag: '@resilience' }, async ({ page }) => {
-    await timedStep('swap_no_market.goto_app', () => gotoApp(page));
-    await timedStep('swap_no_market.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
-    await timedStep('swap_no_market.create_runtime', () => createDemoRuntime(page, `swap-no-market-${Date.now()}`, randomMnemonic()));
-    const runtimeRef = await timedStep('swap_no_market.ensure_hub_account', () => ensureDeterministicSwapAccounts(page, 1));
-    const hubId = runtimeRef.hubIds[0]!;
+  test('swap orderbook becomes unavailable when the real relay cannot answer', { tag: '@resilience' }, async ({ page }, info) => {
+    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+    await createWalletIdentity(page, 'relay-silence', randomMnemonic());
+    await verifyRelaySilence(page, info);
+  });
 
-    await timedStep('swap_no_market.install_silent_relay', () => installSilentRelayWebSocket(page, { currentPage: true }));
-    await timedStep('swap_no_market.open_workspace', () => openSwapWorkspace(page));
-    await timedStep('swap_no_market.select_counterparty', () => selectCounterpartyInSwap(page, hubId));
-    await timedStep('swap_no_market.open_orderbook', async () => {
-      await ensureSwapOrderbookVisible(page);
-      await ensureSwapScope(page, 'selected');
-      await selectSwapPairSide(page, 'WETH/USDC', 'buy');
-    });
-
-    const orderbook = page.getByTestId('swap-orderbook').first();
-    const panel = orderbook.locator('.orderbook-panel').first();
-    await expect(orderbook, 'right-side swap orderbook must stay visible in terminal no-market state').toBeVisible({ timeout: 20_000 });
-    await expect(panel, 'orderbook panel must remain mounted while stream resolves terminally').toBeVisible({ timeout: 20_000 });
-    await expect
-      .poll(async () => String(await panel.getAttribute('data-pair-id') || ''), {
-        timeout: 10_000,
-        intervals: [100, 250, 500],
-        message: 'silent relay test must still subscribe to the selected same-chain market',
-      })
-      .toBe('1/2');
-    await expect
-      .poll(async () => hasSilentRelayMarketSubscribe(page, ['"1/2"']), {
-        timeout: 10_000,
-        intervals: [100, 250, 500],
-        message: 'orderbook must actually send a market subscription before terminal no-market is accepted',
-      })
-      .toBe(true);
-    await expect
-      .poll(async () => String(await panel.getAttribute('data-source-status') || ''), {
-        timeout: 12_000,
-        intervals: [250, 500, 1000],
-        message: 'silent relay must resolve to no-market instead of hanging in syncing',
-      })
-      .toBe('no-market');
-    await expect(page.getByTestId('orderbook-source-status').first()).toContainText(/No market/i, { timeout: 5_000 });
-    await expect(page.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing/i, { timeout: 5_000 });
-    await expect
-      .poll(async () => readOrderbookRowCounts(page), {
-        timeout: 5_000,
-        intervals: [100, 250, 500],
-      })
-      .toEqual({ asks: 0, bids: 0 });
-	  });
+  test('swap clears a live book when the real relay stops publishing', { tag: '@resilience' }, async ({ page }, info) => {
+    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+    await createWalletIdentity(page, 'relay-live-silence', randomMnemonic());
+    await verifyRelaySilence(page, info, 'live');
+  });
 
   test('swap orderbook shows terminal error state when relay rejects the market subscription', { tag: '@resilience' }, async ({ page }) => {
     await timedStep('swap_error.goto_app', () => gotoApp(page));

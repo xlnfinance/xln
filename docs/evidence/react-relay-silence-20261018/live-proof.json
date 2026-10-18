@@ -1,0 +1,108 @@
+{
+  "run": "relay-live-silence-final",
+  "attachments": [
+    {
+      "name": "real-relay-owner-before-pause",
+      "proof": {
+        "jurisdictions": "/Users/zigota/xln/.logs/e2e-parallel/20261018-003200-947/shard-0/rdb/mesh/jurisdictions.json",
+        "owner": {
+          "ownerId": "69351:1792283536063:e397cb55-0ea4-428e-b955-aa72bd2dd830",
+          "pid": 69351
+        }
+      }
+    },
+    {
+      "name": "real-relay-silence",
+      "proof": {
+        "before": {
+          "height": 4,
+          "holds": [
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 1
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 2
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 3
+            }
+          ],
+          "mempool": 0,
+          "offers": 0,
+          "pending": false,
+          "root": "0x9e8895b9c658b61383b2873710917e99b931eeabfb028d5dde0e25bd9c89c212",
+          "usdc": "100000000",
+          "usdcSpendable": "100000000",
+          "weth": "0",
+          "wethCapacity": "0",
+          "wethCredit": "0"
+        },
+        "elapsedMs": 15106,
+        "orders": {
+          "accountId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+          "entityId": "0x47e1908c3dc075542e823d460f68eb4c57dbd586a7ba8246229e505e0138660a",
+          "items": [],
+          "latestHeight": 4,
+          "nextCursor": null
+        },
+        "owner": {
+          "ownerId": "69351:1792283536063:e397cb55-0ea4-428e-b955-aa72bd2dd830",
+          "pid": 69351
+        },
+        "phase": "live"
+      }
+    },
+    {
+      "name": "real-relay-recovered",
+      "proof": {
+        "account": {
+          "height": 4,
+          "holds": [
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 1
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 2
+            },
+            {
+              "incoming": "0",
+              "outgoing": "0",
+              "tokenId": 3
+            }
+          ],
+          "mempool": 0,
+          "offers": 0,
+          "pending": false,
+          "root": "0x9e8895b9c658b61383b2873710917e99b931eeabfb028d5dde0e25bd9c89c212",
+          "usdc": "100000000",
+          "usdcSpendable": "100000000",
+          "weth": "0",
+          "wethCapacity": "0",
+          "wethCredit": "0"
+        },
+        "orders": {
+          "accountId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+          "entityId": "0x47e1908c3dc075542e823d460f68eb4c57dbd586a7ba8246229e505e0138660a",
+          "items": [],
+          "latestHeight": 4,
+          "nextCursor": null
+        },
+        "owner": {
+          "ownerId": "69351:1792283536063:e397cb55-0ea4-428e-b955-aa72bd2dd830",
+          "pid": 69351
+        },
+        "phase": "live"
+      }
+    }
+  ]
+}
