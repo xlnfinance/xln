@@ -1,0 +1,69 @@
+{
+  "sourceSha": "5580becabc34e798c12baef27a83d151bec592c8",
+  "tree": "0259ea35f9f5130e68a391b563e2f1b5642d4745",
+  "remoteEvidence": "/root/xln-deployment-evidence/5580becab/ui-update",
+  "localEvidence": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-5580becab",
+  "logs": [
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-inspection.log",
+      "sha256": "3a97ca979b2ccba9371abb242eca89310c2c86f7bce98ec3bf4ad0b361da16f1"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-preservation.log",
+      "sha256": "3014139361fd4642283db569a600d0ebfb6da7a5188b92d7526d03e215ee33b1"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-deploy.log",
+      "sha256": "05d49c27b155e081670ff65edba1187f59d8da7bda1fb9b45ad42e021d7ce96b"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-byte-proof.log",
+      "sha256": "af098c1645478bf18a8dc5148ce2cfb4f38b16410bd476d44fd6362cfe4a1ca5"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-recovery.log",
+      "sha256": "e260873e8d1df46173e7cbd49bee0af481ed8b0816deb82e79a96654a73f5eb2"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-financial-recovery.log",
+      "sha256": "0078321d49598c179baf8b224d81a7dd5fb025080834e8311980f82545aaeac8"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-entry.log",
+      "sha256": "21588469d05546c781b6438fafb26d45f735ab500eaeff898afbfff46cb48ccc"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-latency.log",
+      "sha256": "8a3ec9eb08b42ed63211aa347c4335e8603f66c2bcc57833d60cacb9891819c7"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-browser.log",
+      "sha256": "e20a071b3237f1267b19b9a07690181a5352d02169fefa92cc678dca4a3dcd8b"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-final-health.log",
+      "sha256": "fc1149e6fe42b57d336170b129be7a26664459545180c060f16f406b40f0851c"
+    }
+  ],
+  "scripts": {
+    "preflight.py": "080f736f4843ca6812dd163cb524ad9bedf6f4a1a1116099eb95334792ad8ea9",
+    "snapshot.ts": "f4dc69c2d75c25d54f1619c42f1946e06fc8ccf2c12c2abf036cafc2717a0bf9",
+    "restart.py": "02fa67b5ffecc34cc2017d1416b091a5fbc7423c0afc640224cb5a46e4d62a5d",
+    "compare-history.ts": "5ce4b32618916f3fa7fbc61042dc8f3381efbffbb1c9773f8f0e124886bbd0e6",
+    "deploy.ts": "755c6d832d8c4918697531397445185c89717be5fbd2b7d6204f8d0829f087c3",
+    "post-install.py": "eff326d54c05a77dddc3a491344449c1eeb3500e4ae18690e1b76d72901bb441",
+    "public-entry.py": "e5a81e672acd9501b15ffb6b4daa250442660c7724602aeae8965d622f51523c",
+    "gateway-browser.ts": "fb633f75a497782bec8849d493c8150432a257560541f3658e0c2424b7a673a4",
+    "reload-latency.ts": "f1ae11fb1d683453b03632bbc0fc24ebed53857ea9d3ac1ac9d9f8f1a681e384"
+  },
+  "screenshots": [
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-5580becab/browser-diagnostic/public-observer.png",
+      "sha256": "b077ee33ba2423b49e0e78fa3ccb0738f6afde62b02eec51c5d7f8b9c43a8c80"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-5580becab/browser-diagnostic/public-wallet.png",
+      "sha256": "79c79dbd31498b57912aa6c2ed1b6a5449a74bb1b96f03120da5e7427c719f6d"
+    }
+  ]
+}

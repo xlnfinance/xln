@@ -1,0 +1,194 @@
+{
+  "gateway": {
+    "mode": "public",
+    "origin": "https://xln.finance",
+    "assets": [
+      {
+        "path": "/ui/runtime.js",
+        "sha256": "d7313d0747310acd1aceff33fe1ad30cf496edc7f6a41e195c2f6738d716ca12",
+        "bytes": 5947528,
+        "mime": "text/javascript; charset=utf-8"
+      },
+      {
+        "path": "/account-worker.js",
+        "sha256": "5eb1a38aa8d02a663289ba35ba286e2d8067d373bb7bc31e80a61887ad15a945",
+        "bytes": 2045527,
+        "mime": "text/javascript; charset=utf-8"
+      }
+    ],
+    "workers": [
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js",
+      "https://xln.finance/account-worker.js"
+    ],
+    "relayFrames": 15,
+    "pageErrors": [],
+    "checks": [
+      "app redirect",
+      "fresh embedded wallet/account",
+      "current runtime and worker MIME/hash",
+      "real worker initialization",
+      "relay traffic",
+      "deep route reload/unlock",
+      "compile with unavailable admission",
+      "observer graph"
+    ]
+  },
+  "gatewayEvents": [
+    {
+      "kind": "websocket",
+      "url": "wss://xln.finance/relay"
+    },
+    {
+      "kind": "websocket",
+      "url": "wss://xln.finance:8090/ws"
+    },
+    {
+      "kind": "websocket",
+      "url": "wss://xln.finance/relay"
+    },
+    {
+      "kind": "websocket",
+      "url": "wss://xln.finance:8090/ws"
+    }
+  ],
+  "latencyStages": [
+    {
+      "label": "fresh-account-visible",
+      "elapsedMs": 20673,
+      "state": {
+        "url": "https://xln.finance/ui/",
+        "alerts": [],
+        "headings": [
+          "How your money is held",
+          "Credit limits",
+          "Assets",
+          "Recent activity",
+          "Payment capacity",
+          "Connected accounts",
+          "Resources",
+          "Entity ID"
+        ],
+        "testIds": [
+          "logo",
+          "nav-home",
+          "nav-activity",
+          "nav-manage",
+          "nav-settings",
+          "jurisdiction-banner",
+          "jurisdiction-chain",
+          "wallet-tutorial",
+          "jurisdiction-stack",
+          "home-faucet",
+          "entity-switcher",
+          "entity-switcher-trigger",
+          "home-sovereignty",
+          "home-balance-asset",
+          "home-total",
+          "home-pay",
+          "home-receive",
+          "home-swap",
+          "home-add-money",
+          "home-move",
+          "home-balance-breakdown",
+          "home-secured",
+          "home-risk",
+          "home-onchain",
+          "home-reserve",
+          "home-credit-limits",
+          "home-show-zero",
+          "activity-row",
+          "home-accounts",
+          "account-row"
+        ]
+      }
+    },
+    {
+      "label": "network-probing",
+      "elapsedMs": 20842,
+      "state": {
+        "url": "https://xln.finance/ui/manage",
+        "alerts": [],
+        "headings": [
+          "xln",
+          "Imported vault"
+        ],
+        "testIds": [
+          "logo",
+          "gate-stack"
+        ]
+      }
+    },
+    {
+      "label": "real-stack-response",
+      "elapsedMs": 24870,
+      "url": "https://xln.finance/api/hubs?ts=1792285820679",
+      "status": 200,
+      "conditions": {
+        "ruleIds": [
+          "9231F8A657F3003658EDC0907952B50C"
+        ]
+      }
+    },
+    {
+      "label": "unlocked-after-network",
+      "elapsedMs": 28821,
+      "state": {
+        "url": "https://xln.finance/ui/manage",
+        "alerts": [],
+        "headings": [],
+        "testIds": [
+          "logo",
+          "nav-home",
+          "nav-activity",
+          "nav-manage",
+          "nav-settings",
+          "jurisdiction-banner",
+          "jurisdiction-chain",
+          "wallet-tutorial",
+          "jurisdiction-stack"
+        ]
+      }
+    }
+  ],
+  "latencyEvents": [],
+  "publicEntry": {
+    "source": "5580becabc34e798c12baef27a83d151bec592c8",
+    "indexSha256": "21e1c53e2f3d6b10d9f0fd4095a93020fcd443b33b2256992bc009376d5937e1",
+    "script": "/ui/assets/index-D1nKZmuP.js",
+    "scriptSha256": "057942e980b14860c9a8a64cd98018b0600046bcc9e7d572a0eb5ee5bbb69104",
+    "scriptBytes": 2181810,
+    "scriptMime": "text/javascript; charset=utf-8",
+    "publicBytesEqualBuiltArtifact": true,
+    "relayExpiryMessagePresent": true
+  }
+}

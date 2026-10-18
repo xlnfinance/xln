@@ -1,0 +1,161 @@
+[
+  {
+    "command": [
+      "python3",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-5580becab/inspect-local.py"
+    ],
+    "exitCode": 0,
+    "seconds": 2.022,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-inspection.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-gate-fix-preservation",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-5580becab/prepare.sh"
+    ],
+    "exitCode": 0,
+    "seconds": 15.153,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-preservation.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-gate-fix-deploy",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-5580becab/deploy.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 40.605,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-deploy.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-gate-fix-byte-proof",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-5580becab/post-install.sh"
+    ],
+    "exitCode": 0,
+    "seconds": 3.854,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-byte-proof.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-gate-fix-recovery",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-5580becab/restart.sh"
+    ],
+    "exitCode": 0,
+    "seconds": 42.949,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-recovery.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-gate-fix-financial-recovery",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bash",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-5580becab/compare.sh"
+    ],
+    "exitCode": 0,
+    "seconds": 26.227,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-financial-recovery.log"
+  },
+  {
+    "command": [
+      "python3",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-5580becab/public-entry.py"
+    ],
+    "exitCode": 0,
+    "seconds": 0.832,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-entry.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-gate-fix-latency",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-5580becab/latency-wrapper.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 30.904,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-latency.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-gate-fix-browser",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/public-ui-update-5580becab/public-browser.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 29.8,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-browser.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "public-gate-fix-final-health",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "ssh",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=10",
+      "xln.finance",
+      "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.0:/root/.bun/bin:/root/.foundry/bin:$PATH && bun run stand:status && bun run stand:run --reason public-gate-fix-operator-health --timeout-ms 60000 -- bun core/scripts/operations/production/prod-health-smoke.ts --url=http://127.0.0.1:8080 --expected-hubs=3 --require-hub-self-relay --expected-towers=1 --tower-url=http://127.0.0.1:9100/api/tower/healthz --require-clean-source --require-source-match --expected-git-head=5580becabc34e798c12baef27a83d151bec592c8 --expected-code-hash=5580becabc34e798c12baef27a83d151bec592c8"
+    ],
+    "exitCode": 0,
+    "seconds": 0.785,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-final-health.log"
+  }
+]
