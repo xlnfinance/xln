@@ -1,0 +1,102 @@
+[
+  {
+    "name": "real-relay-rejection",
+    "data": {
+      "before": {
+        "height": 4,
+        "holds": [
+          {
+            "incoming": "0",
+            "outgoing": "0",
+            "tokenId": 1
+          },
+          {
+            "incoming": "0",
+            "outgoing": "0",
+            "tokenId": 2
+          },
+          {
+            "incoming": "0",
+            "outgoing": "0",
+            "tokenId": 3
+          }
+        ],
+        "mempool": 0,
+        "offers": 0,
+        "pending": false,
+        "root": "0x2d0288502679ccd25c4fba747eafd24551c4f574235a88caf88a1307317dfb07",
+        "usdc": "100000000",
+        "usdcSpendable": "100000000",
+        "weth": "0",
+        "wethCapacity": "0",
+        "wethCredit": "0"
+      },
+      "limit": {
+        "maxPerIp": 8,
+        "total": 0
+      },
+      "message": {
+        "code": "E_RATE_LIMITED",
+        "error": "market subscription IP capacity exceeded: max=8",
+        "inReplyTo": "market_sub_1792286215026_1",
+        "type": "error"
+      },
+      "orders": {
+        "accountId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+        "entityId": "0x4c8f77055f23ffc1233a5a6ee7fbdaebfd49b5bb6dba526c16c5a07ae4aed87d",
+        "items": [],
+        "latestHeight": 4,
+        "nextCursor": null
+      },
+      "owner": {
+        "ownerId": "86761:1792286191467:40ec52fe-22e5-4987-9468-18066518f135",
+        "pid": 86761
+      }
+    }
+  },
+  {
+    "name": "real-relay-capacity-recovered",
+    "data": {
+      "account": {
+        "height": 4,
+        "holds": [
+          {
+            "incoming": "0",
+            "outgoing": "0",
+            "tokenId": 1
+          },
+          {
+            "incoming": "0",
+            "outgoing": "0",
+            "tokenId": 2
+          },
+          {
+            "incoming": "0",
+            "outgoing": "0",
+            "tokenId": 3
+          }
+        ],
+        "mempool": 0,
+        "offers": 0,
+        "pending": false,
+        "root": "0x2d0288502679ccd25c4fba747eafd24551c4f574235a88caf88a1307317dfb07",
+        "usdc": "100000000",
+        "usdcSpendable": "100000000",
+        "weth": "0",
+        "wethCapacity": "0",
+        "wethCredit": "0"
+      },
+      "orders": {
+        "accountId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+        "entityId": "0x4c8f77055f23ffc1233a5a6ee7fbdaebfd49b5bb6dba526c16c5a07ae4aed87d",
+        "items": [],
+        "latestHeight": 4,
+        "nextCursor": null
+      },
+      "owner": {
+        "ownerId": "86761:1792286191467:40ec52fe-22e5-4987-9468-18066518f135",
+        "pid": 86761
+      }
+    }
+  }
+]

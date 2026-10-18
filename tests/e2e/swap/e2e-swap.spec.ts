@@ -1,3 +1,4 @@
+import { verifyRelayRejection } from '../../utils/browser/market/relay-rejection';
 import { verifyRelaySilence } from '../../utils/browser/market/relay-silence';
 import { verifyAllBooks } from '../../utils/browser/swap-all-books';
 import { verifySwapTokenSelection } from '../../utils/browser/swap-token-selection';
@@ -25,7 +26,6 @@ import {
   createRuntime as createSharedRuntime,
 } from '../../utils/e2e-demo-users';
 import { buildDefaultEntitySwapPairs, getTokenInfo } from '../../../core/account/utils';
-import { hasSilentRelayMarketSubscribe, installSilentRelayWebSocket } from '../../utils/e2e-silent-relay';
 
 const INIT_TIMEOUT = 30_000;
 const SWAP_CONNECT_TOKEN_IDS = [1, 2] as const;
@@ -1732,49 +1732,10 @@ test.describe('E2E Swap Flow', () => {
     await verifyRelaySilence(page, info, 'live');
   });
 
-  test('swap orderbook shows terminal error state when relay rejects the market subscription', { tag: '@resilience' }, async ({ page }) => {
-    await timedStep('swap_error.goto_app', () => gotoApp(page));
-    await timedStep('swap_error.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
-    await timedStep('swap_error.create_runtime', () => createDemoRuntime(page, `swap-error-${Date.now()}`, randomMnemonic()));
-    const runtimeRef = await timedStep('swap_error.ensure_hub_account', () => ensureDeterministicSwapAccounts(page, 1));
-    const hubId = runtimeRef.hubIds[0]!;
-
-    await timedStep('swap_error.install_error_relay', () =>
-      installSilentRelayWebSocket(page, { currentPage: true, errorOnSubscribe: true }));
-    await timedStep('swap_error.open_workspace', () => openSwapWorkspace(page));
-    await timedStep('swap_error.select_counterparty', () => selectCounterpartyInSwap(page, hubId));
-    await timedStep('swap_error.open_orderbook', async () => {
-      await ensureSwapOrderbookVisible(page);
-      await ensureSwapScope(page, 'selected');
-      await selectSwapPairSide(page, 'WETH/USDC', 'buy');
-    });
-
-    const orderbook = page.getByTestId('swap-orderbook').first();
-    const panel = orderbook.locator('.orderbook-panel').first();
-    await expect(orderbook, 'right-side swap orderbook must stay visible in terminal relay error state').toBeVisible({ timeout: 20_000 });
-    await expect(panel, 'orderbook panel must remain mounted after relay error').toBeVisible({ timeout: 20_000 });
-    await expect
-      .poll(async () => hasSilentRelayMarketSubscribe(page, ['"1/2"']), {
-        timeout: 10_000,
-        intervals: [100, 250, 500],
-        message: 'error relay test must subscribe before accepting terminal error state',
-      })
-      .toBe(true);
-    await expect
-      .poll(async () => String(await panel.getAttribute('data-source-status') || ''), {
-        timeout: 5_000,
-        intervals: [100, 250, 500],
-        message: 'relay error must resolve to terminal error instead of hanging in syncing',
-      })
-      .toBe('error');
-    await expect(page.getByTestId('orderbook-source-status').first()).toContainText(/E_UNKNOWN_HUB Unknown market hub/i, { timeout: 5_000 });
-    await expect(page.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing/i, { timeout: 5_000 });
-    await expect
-      .poll(async () => readOrderbookRowCounts(page), {
-        timeout: 5_000,
-        intervals: [100, 250, 500],
-      })
-      .toEqual({ asks: 0, bids: 0 });
+  test('swap orderbook shows terminal error state when relay rejects the market subscription', { tag: '@resilience' }, async ({ page }, info) => {
+    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+    await createWalletIdentity(page, 'relay-rejection', randomMnemonic());
+    await verifyRelayRejection(page, info);
   });
 
   test(

@@ -1,0 +1,92 @@
+[
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "relay-rejection-current",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap orderbook shows terminal error state when relay rejects the market subscription"
+    ],
+    "exitCode": 1,
+    "seconds": 46.01,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/relay-rejection-current.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "relay-rejection-current-2",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap orderbook shows terminal error state when relay rejects the market subscription"
+    ],
+    "exitCode": 0,
+    "seconds": 33.872,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/relay-rejection-current-2.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "relay-rejection-l1",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "test",
+      "core/__tests__/market/invariants/market-subscription-limiter.test.ts",
+      "core/__tests__/market/invariants/market-wire-codec.test.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 0.243,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/relay-rejection-l1.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "relay-rejection-types",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/relay-rejection/type-compare.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 9.356,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/relay-rejection-types.log"
+  }
+]

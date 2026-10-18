@@ -22,7 +22,7 @@ function processOwner(value: unknown): { pid: number; ownerId: string } {
   return { pid, ownerId };
 }
 
-async function ownedRelay(page: Page) {
+export async function requireOwnedRelay(page: Page) {
   expect(process.env['E2E_ISOLATED_STACK']).toBe('1');
   expect(['127.0.0.1', 'localhost']).toContain(new URL(API_BASE_URL).hostname);
   const baseline = process.env['E2E_BASELINE_HEALTH_JSON'];
@@ -60,7 +60,7 @@ export async function verifyRelaySilence(
   await expectDeliveryDrained(page, expect);
   const before = await readAccount(page, hubId);
   const orders = await readOrders(page, hubId);
-  const owner = await ownedRelay(page);
+  const owner = await requireOwnedRelay(page);
   await info.attach('real-relay-owner-before-pause', {
     body: safeStringify({ owner, jurisdictions: process.env['XLN_JURISDICTIONS_PATH'] }),
     contentType: 'application/json',
@@ -95,7 +95,7 @@ export async function verifyRelaySilence(
   } finally {
     if (frozen) process.kill(owner.pid, 'SIGCONT');
   }
-  expect(await ownedRelay(page)).toEqual(owner);
+  expect(await requireOwnedRelay(page)).toEqual(owner);
   await expect(book).toHaveAttribute('data-status', 'live');
   await expect(book.getByTestId('book-row-ask')).toHaveCount(10);
   await expect(book.getByTestId('book-row-bid')).toHaveCount(10);

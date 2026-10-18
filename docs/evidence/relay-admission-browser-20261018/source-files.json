@@ -1,0 +1,5 @@
+{
+  "tests/e2e/swap/e2e-swap.spec.ts": "68c3ac4c3daa69abea37c568d1c3a35bb697245aadf291611d10d6fe0b0d7bac",
+  "tests/utils/browser/market/relay-silence.ts": "2281841b828695a9248377a33182450d045b7d7e24d8e079f588eb5a6b4a3b70",
+  "tests/utils/browser/market/relay-rejection.ts": "c6c1898d47362961b6c6b76e621ffd6e3639bb598d0f27bbdc5a5efa65169be9"
+}
