@@ -1,0 +1,5 @@
+{
+  "tests/e2e/swap/e2e-swap.spec.ts": "7f69b56f830d971f3a9fd0ada746d9b0bb201f629c6d0e9b39bfd840209bc494",
+  "tests/utils/browser/swap-book-switch.ts": "311e09d5ec78ef2439aa99baf75f8c2422f4d06b425a0c8971a3b5ced79824b2",
+  "tests/utils/browser/swap-all-books.ts": "114546bb238c3e60fe726cd2f40c3ea0708588cb80461ae06f383e826c28d789"
+}

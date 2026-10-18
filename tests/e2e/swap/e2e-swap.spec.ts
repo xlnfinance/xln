@@ -1,3 +1,4 @@
+import { verifyAllBooks } from '../../utils/browser/swap-all-books';
 import { verifySwapTokenSelection } from '../../utils/browser/swap-token-selection';
 import { verifyBookSwitching } from '../../utils/browser/swap-book-switch';
 import { verifyRestingLimit } from '../../utils/browser/swap-resting-limit';
@@ -23,7 +24,6 @@ import {
   createRuntime as createSharedRuntime,
 } from '../../utils/e2e-demo-users';
 import { buildDefaultEntitySwapPairs, getTokenInfo } from '../../../core/account/utils';
-import { capturePageScreenshot } from '../../utils/e2e-screenshots';
 import { hasSilentRelayMarketSubscribe, installSilentRelayWebSocket } from '../../utils/e2e-silent-relay';
 
 const INIT_TIMEOUT = 30_000;
@@ -33,7 +33,6 @@ const CANONICAL_SWAP_PAIRS = buildDefaultEntitySwapPairs().map((pair) => ({
   label: `${getTokenInfo(pair.baseTokenId).symbol}/${getTokenInfo(pair.quoteTokenId).symbol}`,
 }));
 const CANONICAL_SWAP_PAIR_IDS = CANONICAL_SWAP_PAIRS.map((pair) => pair.pairId);
-const CANONICAL_SWAP_PAIR_LABELS = CANONICAL_SWAP_PAIRS.map((pair) => pair.label);
 const SWAP_TOKEN_BY_SYMBOL: Record<string, string> = {
   USDC: '1',
   WETH: '2',
@@ -1677,70 +1676,6 @@ async function executeOrderbookClickFill(
   }
 }
 
-async function expectAllCanonicalSwapPairsHaveLiquidity(page: Page): Promise<void> {
-  await ensureSwapScope(page, 'aggregated');
-  const expectedPairs = CANONICAL_SWAP_PAIR_LABELS;
-
-  for (const pairLabel of expectedPairs) {
-    await waitForSwapOrderbookLiquidity(page, pairLabel, { scope: 'Aggregated', minSources: 3 });
-    await expect
-      .poll(async () => {
-        const { asks, bids } = await readOrderbookRowCounts(page);
-        const uniqueSourceIds = await countUniqueOrderbookSources(page);
-        return { asks, bids, rows: asks + bids, sources: uniqueSourceIds };
-      }, {
-        timeout: 15_000,
-        intervals: [250, 500, 1000],
-        message: `orderbook for ${pairLabel} should have visible liquidity from 3 hubs`,
-      })
-      .toEqual(expect.objectContaining({
-        asks: 10,
-        bids: 10,
-        rows: 20,
-        sources: 3,
-      }));
-    await expect(page.getByTestId('orderbook-source-status').first()).toHaveText(/^Sources:\s*3$/i, { timeout: 15_000 });
-    await expectOrderbookHasAnyVisibleLiquidity(page, { timeoutMs: 5_000, minSources: 3, maxSources: 3 });
-  }
-}
-
-async function expectOrderbookHasAnyVisibleLiquidity(
-  page: Page,
-  options?: { timeoutMs?: number; minSources?: number; maxSources?: number },
-): Promise<void> {
-  const timeoutMs = options?.timeoutMs ?? 15_000;
-  await expect
-    .poll(
-      async () => {
-        const counts = await readOrderbookRowCounts(page);
-        const sources = await countUniqueOrderbookSources(page);
-        return { ...counts, sources };
-      },
-      { timeout: timeoutMs, intervals: [200, 400, 800] },
-    )
-    .toEqual(expect.objectContaining({
-      asks: expect.any(Number),
-      bids: expect.any(Number),
-      sources: expect.any(Number),
-    }));
-  await expect
-    .poll(async () => {
-      const counts = await readOrderbookRowCounts(page);
-      return counts.asks > 0 && counts.bids > 0;
-    }, { timeout: timeoutMs, intervals: [200, 400, 800] })
-    .toBe(true);
-  if (typeof options?.minSources === 'number') {
-    await expect
-      .poll(async () => await countUniqueOrderbookSources(page), { timeout: timeoutMs, intervals: [200, 400, 800] })
-      .toBeGreaterThanOrEqual(options.minSources);
-  }
-  if (typeof options?.maxSources === 'number') {
-    await expect
-      .poll(async () => await countUniqueOrderbookSources(page), { timeout: timeoutMs, intervals: [200, 400, 800] })
-      .toBeLessThanOrEqual(options.maxSources);
-  }
-}
-
 async function expectMarketMakerBooksHealthy(page: Page): Promise<void> {
   const health = await getHealth(page, API_BASE_URL);
   expect(health?.marketMaker?.ok, 'market maker health must be ready').toBe(true);
@@ -1749,6 +1684,7 @@ async function expectMarketMakerBooksHealthy(page: Page): Promise<void> {
   for (const hub of hubs) {
     expect(hub.ready, `market maker hub ${hub.hubEntityId} must be ready`).toBe(true);
     expect(hub.depthReady, `market maker hub ${hub.hubEntityId} must expose exact configured depth`).toBe(true);
+    expect((hub.pairs ?? []).map(pair => pair.pairId).sort()).toEqual([...CANONICAL_SWAP_PAIR_IDS].sort());
     let expectedHubOffers = 0;
     for (const pair of hub.pairs ?? []) {
       expect(pair.ready, `market maker pair ${pair.pairId} on hub ${hub.hubEntityId} must be ready`).toBe(true);
@@ -1758,36 +1694,6 @@ async function expectMarketMakerBooksHealthy(page: Page): Promise<void> {
       expectedHubOffers += Number(pair.expectedOffers);
     }
     expect(hub.offers, `market maker hub ${hub.hubEntityId} must contain only configured offers`).toBe(expectedHubOffers);
-  }
-}
-
-async function expectSelectedBooksHaveVisibleLiquidity(
-  page: Page,
-  pairLabels: string[],
-  selectedAccountIds: string[],
-): Promise<void> {
-  const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
-  await expect(accountSelect).toBeVisible({ timeout: 20_000 });
-  await ensureSwapScope(page, 'selected');
-  for (const accountId of selectedAccountIds) {
-    await accountSelect.selectOption(accountId);
-    await page.waitForTimeout(200);
-    for (const pairLabel of pairLabels) {
-      await selectSwapPairSide(page, pairLabel, 'buy');
-      await waitForSwapOrderbookLiquidity(page, pairLabel, {
-        preferredAccountId: accountId,
-        scope: 'Selected',
-        minSources: 1,
-      });
-      await expectOrderbookHasAnyVisibleLiquidity(page, {
-        timeoutMs: 10_000,
-        minSources: 1,
-        maxSources: 1,
-      });
-      const depth = await readOrderbookRowCounts(page);
-      expect(depth.asks, `${pairLabel} ${accountId} must expose exactly 10 committed asks`).toBe(10);
-      expect(depth.bids, `${pairLabel} ${accountId} must expose exactly 10 committed bids`).toBe(10);
-    }
   }
 }
 
@@ -1802,26 +1708,16 @@ test.describe('E2E Swap Flow', () => {
     }));
   });
 
-  test('swap shows visible depth on all canonical pairs and selected books', { tag: '@functional' }, async ({ page }, testInfo) => {
-    await timedStep('swap_pairs.goto_app', () => gotoApp(page));
-    await timedStep('swap_pairs.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
-    await timedStep('swap_pairs.create_runtime', () => createDemoRuntime(page, `swap-pairs-${Date.now()}`, randomMnemonic()));
-    const runtimeRef = await timedStep('swap_pairs.ensure_hub_accounts', () => ensureDeterministicSwapAccounts(page, 3));
-    await timedStep('swap_pairs.open_workspace', () => openSwapWorkspace(page));
-    const hubPrecedesLegs = await page.getByTestId('swap-ticket').first().evaluate((builder) => {
-      const hub = builder.querySelector('[data-testid="swap-ticket-hub-select"]');
-      const firstLeg = builder.querySelector('[data-testid="swap-ticket-from-network"]');
-      return Boolean(hub && firstLeg && (hub.compareDocumentPosition(firstLeg) & Node.DOCUMENT_POSITION_FOLLOWING));
-    });
-    expect(hubPrecedesLegs, 'Hub selector must be the first field before From/To').toBe(true);
-    await timedStep('swap_pairs.check_mm_health', () => expectMarketMakerBooksHealthy(page));
-    await timedStep('swap_pairs.check_aggregated_depth', () => expectAllCanonicalSwapPairsHaveLiquidity(page));
-    await capturePageScreenshot(page, testInfo, 'same-j-aggregated-exact-10x10.png');
-    await timedStep('swap_pairs.check_selected_depth', () =>
-      expectSelectedBooksHaveVisibleLiquidity(page, CANONICAL_SWAP_PAIR_LABELS, runtimeRef.hubIds.slice(0, 3)));
-    await capturePageScreenshot(page, testInfo, 'same-j-selected-exact-10x10.png');
-    await ensureSwapScope(page, 'aggregated');
-  });
+  test(
+    'swap shows visible depth on all canonical pairs and selected books',
+    { tag: '@functional' },
+    async ({ page }, info) => {
+      await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+      await createWalletIdentity(page, 'all-books', randomMnemonic());
+      await expectMarketMakerBooksHealthy(page);
+      await verifyAllBooks(page, info);
+    },
+  );
 
 	  test('swap orderbook shows terminal no-market state when relay stream never returns a snapshot', { tag: '@resilience' }, async ({ page }) => {
     await timedStep('swap_no_market.goto_app', () => gotoApp(page));

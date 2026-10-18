@@ -44,7 +44,7 @@ async function observeSwitch(page: Page, info: TestInfo, header: string, action:
   ).toEqual([]);
 }
 
-export async function verifyBookSwitching(page: Page, info: TestInfo): Promise<void> {
+export async function connectBookAccounts(page: Page): Promise<Array<{ name: string; id: string }>> {
   const health = await getHealth(page);
   const hubs = ['H1', 'H2', 'H3'].map(name => {
     const id = health?.hubs?.find(hub => hub.name === name && hub.online)?.entityId;
@@ -81,6 +81,11 @@ export async function verifyBookSwitching(page: Page, info: TestInfo): Promise<v
       })
       .toEqual({ usdc: true, pending: false, mempool: 0 });
   }
+  return hubs;
+}
+
+export async function verifyBookSwitching(page: Page, info: TestInfo): Promise<void> {
+  const hubs = await connectBookAccounts(page);
   const before = await Promise.all(hubs.map(hub => readAccount(page, hub.id)));
   await page.getByTestId('home-swap').click();
   const book = page.getByTestId('orderbook').locator('visible=true').first();

@@ -1,0 +1,128 @@
+[
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "swap-all-books-baseline",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap shows visible depth on all canonical pairs and selected books"
+    ],
+    "exitCode": 1,
+    "seconds": 44.38,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-all-books-baseline.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "swap-all-books-current",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap shows visible depth on all canonical pairs and selected books"
+    ],
+    "exitCode": 1,
+    "seconds": 32.057,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-all-books-current.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "swap-all-books-current-2",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap shows visible depth on all canonical pairs and selected books"
+    ],
+    "exitCode": 0,
+    "seconds": 32.538,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-all-books-current-2.log"
+  },
+  {
+    "command": [
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-all-books/type-compare.ts"
+    ],
+    "exitCode": 1,
+    "seconds": 9.409,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-all-books-types.log"
+  },
+  {
+    "command": [
+      "bun",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-all-books/type-compare.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 9.264,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-all-books-types-fixed.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "swap-all-books-switch-regression",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap scope and account switching clears stale rows and stale book hint state"
+    ],
+    "exitCode": 0,
+    "seconds": 31.012,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/swap-all-books-switch-regression.log"
+  }
+]

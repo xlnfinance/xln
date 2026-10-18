@@ -1,0 +1,70 @@
+{
+  "swap-all-books-current-2": {
+    "candidate": {
+      "candidateId": "32293ebca38ad8d7b85973b4fdb0eecbac80228f47912bf75a5e8e1d9b4ba671",
+      "gitHead": "1489ed79bff581ca354a56a9856aa36a503b9d7f",
+      "codeHash": "6291576ba1a43d7f66439cbdd2c63aed453b1365493f8ddd7ba85c679d369030",
+      "gateConfigHash": "4f10705fed5ad4314101775be8d8102b77aef9fcd47e29bee4c6aacf6f2c6b15"
+    },
+    "browserHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 0,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    },
+    "status": "passed",
+    "artifact": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-all-books-current-2-boundary",
+    "hashes": {
+      "playwright-report.json": "ffd632daeeceea06e247123653d9b6f12397b83e7d725bfae455f0598c467a18",
+      "targets.json": "8e5b29f183d778f8c852064aac257e4a204d2e8808921dda3677d1959b86130c",
+      "build-manifest.json": "21cee49a5ac27488e1a25611ad250c73501c418c5244e3504b82134b765e84be",
+      "run-manifest.json": "5a7b542ff6abe811b0685fdb651b0ed6f671c8d4b9928634d659777ecf2da421",
+      "e2e.log": "020046e48583e5545576520867205b68751e96a9947a18b0fe48b2248f262c1d"
+    }
+  },
+  "swap-all-books-switch-regression": {
+    "candidate": {
+      "candidateId": "70c4b618c028e10b9580177a495a21535208d2609704885f995d65d618cb4034",
+      "gitHead": "1489ed79bff581ca354a56a9856aa36a503b9d7f",
+      "codeHash": "c1542ea1cd6d9072d7010135c2261933f9d6fb9e5641dcede38e937f4173cf36",
+      "gateConfigHash": "1949bb1393612c738280c550fbcd842285d9423f0e104586917f5a8cd6edc5f3"
+    },
+    "browserHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 0,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    },
+    "status": "passed",
+    "artifact": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/swap-all-books-switch-regression-boundary",
+    "hashes": {
+      "playwright-report.json": "e427c66ad7a033f05734f79afbd408382a0ed55f9ab1dafeed14bb6899b233e6",
+      "targets.json": "ed09d3f7385f9416c5d767e191ddc5e01a7d1b8f5cf3b2802c3c84653907c692",
+      "build-manifest.json": "21cee49a5ac27488e1a25611ad250c73501c418c5244e3504b82134b765e84be",
+      "run-manifest.json": "c94ae963fadd599eb0ae6e2605b84baae617f3d516650bb837e8fe47b3093124",
+      "e2e.log": "445a069aa5c9bc310bcda68b82f8d8fae87dba837dafd83b24ac2f2ca7c6165b"
+    }
+  }
+}

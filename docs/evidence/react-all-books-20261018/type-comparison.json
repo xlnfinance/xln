@@ -1,0 +1,488 @@
+{
+  "baselineCount": 34,
+  "currentCount": 34,
+  "introducedCount": 0,
+  "newSharedDiagnostics": 0,
+  "baseline": [
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 224,
+      "code": 6133,
+      "message": "'ensureAnyHubAccountOpen' is declared but its value is never read.",
+      "source": "ensureAnyHubAccountOpen"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 388,
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => value is unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(key: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => value is unknown'.\n      Types of parameters 'key' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.\n  Overload 2 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(key: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => unknown'.\n      Types of parameters 'key' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.",
+      "source": "(key: string) => {"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 453,
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => value is unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(key: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => value is unknown'.\n      Types of parameters 'key' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.\n  Overload 2 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(key: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => unknown'.\n      Types of parameters 'key' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.",
+      "source": "(key: string) => {"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 572,
+      "code": 2339,
+      "message": "Property 'entityId' does not exist on type '{ ok: boolean; error: string; } | { orderAmount: string; orderPrice: string; giveTokenId: number; wantTokenId: number; giveOut: bigint; wantIn: bigint; budget: bigint; ok: boolean; entityId: string; signerId: string; counterpartyId: string; error?: never; }'.\n  Property 'entityId' does not exist on type '{ ok: boolean; error: string; }'.",
+      "source": "entityId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 573,
+      "code": 2339,
+      "message": "Property 'signerId' does not exist on type '{ ok: boolean; error: string; } | { orderAmount: string; orderPrice: string; giveTokenId: number; wantTokenId: number; giveOut: bigint; wantIn: bigint; budget: bigint; ok: boolean; entityId: string; signerId: string; counterpartyId: string; error?: never; }'.\n  Property 'signerId' does not exist on type '{ ok: boolean; error: string; }'.",
+      "source": "signerId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 574,
+      "code": 2339,
+      "message": "Property 'counterpartyId' does not exist on type '{ ok: boolean; error: string; } | { orderAmount: string; orderPrice: string; giveTokenId: number; wantTokenId: number; giveOut: bigint; wantIn: bigint; budget: bigint; ok: boolean; entityId: string; signerId: string; counterpartyId: string; error?: never; }'.\n  Property 'counterpartyId' does not exist on type '{ ok: boolean; error: string; }'.",
+      "source": "counterpartyId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 575,
+      "code": 2339,
+      "message": "Property 'giveTokenId' does not exist on type '{ ok: boolean; error: string; } | { orderAmount: string; orderPrice: string; giveTokenId: number; wantTokenId: number; giveOut: bigint; wantIn: bigint; budget: bigint; ok: boolean; entityId: string; signerId: string; counterpartyId: string; error?: never; }'.\n  Property 'giveTokenId' does not exist on type '{ ok: boolean; error: string; }'.",
+      "source": "giveTokenId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 576,
+      "code": 2339,
+      "message": "Property 'wantTokenId' does not exist on type '{ ok: boolean; error: string; } | { orderAmount: string; orderPrice: string; giveTokenId: number; wantTokenId: number; giveOut: bigint; wantIn: bigint; budget: bigint; ok: boolean; entityId: string; signerId: string; counterpartyId: string; error?: never; }'.\n  Property 'wantTokenId' does not exist on type '{ ok: boolean; error: string; }'.",
+      "source": "wantTokenId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 577,
+      "code": 2339,
+      "message": "Property 'orderAmount' does not exist on type '{ ok: boolean; error: string; } | { orderAmount: string; orderPrice: string; giveTokenId: number; wantTokenId: number; giveOut: bigint; wantIn: bigint; budget: bigint; ok: boolean; entityId: string; signerId: string; counterpartyId: string; error?: never; }'.\n  Property 'orderAmount' does not exist on type '{ ok: boolean; error: string; }'.",
+      "source": "orderAmount"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 578,
+      "code": 2339,
+      "message": "Property 'orderPrice' does not exist on type '{ ok: boolean; error: string; } | { orderAmount: string; orderPrice: string; giveTokenId: number; wantTokenId: number; giveOut: bigint; wantIn: bigint; budget: bigint; ok: boolean; entityId: string; signerId: string; counterpartyId: string; error?: never; }'.\n  Property 'orderPrice' does not exist on type '{ ok: boolean; error: string; }'.",
+      "source": "orderPrice"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 594,
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => value is unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => value is unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.\n  Overload 2 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.",
+      "source": "(k: string) => {"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 596,
+      "code": 2345,
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "source": "eid"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 596,
+      "code": 2345,
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "source": "sid"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 864,
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => value is unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => value is unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.\n  Overload 2 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.",
+      "source": "(k: string) => {"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 920,
+      "code": 2345,
+      "message": "Argument of type '([tokenId, delta]: [unknown, any]) => [string, { collateral: string; ondelta: string; offdelta: string; leftCreditLimit: string; rightCreditLimit: string; leftHold: string; rightHold: string; }]' is not assignable to parameter of type '(value: unknown, index: number, array: unknown[]) => [string, { collateral: string; ondelta: string; offdelta: string; leftCreditLimit: string; rightCreditLimit: string; leftHold: string; rightHold: string; }]'.\n  Types of parameters '__0' and 'value' are incompatible.\n    Type 'unknown' is not assignable to type '[unknown, any]'.",
+      "source": "([tokenId, delta]: [unknown, any]) => [\n          String(tokenId),\n          {\n            collateral: String(delta?.collateral ?? 0n),\n            ondelta: String(delta?.ondelta ?? 0n),\n            offdelta: String(delta?.offdelta ?? 0n),\n            leftCreditLimit: String(delta?.leftCreditLimit ?? 0n),\n            rightCreditLimit: String(delta?.rightCreditLimit ?? 0n),\n            leftHold: String(delta?.leftHold ?? 0n),\n            rightHold: String(delta?.rightHold ?? 0n),\n          },\n        ]"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1207,
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => value is unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => value is unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.\n  Overload 2 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.",
+      "source": "(k: string) => {"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1224,
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => value is unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => value is unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.\n  Overload 2 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.",
+      "source": "(k: string) => String(k).split(':')[0]?.toLowerCase() === String(counterpartyId).toLowerCase()"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1274,
+      "code": 2339,
+      "message": "Property 'offerId' does not exist on type '{}'.",
+      "source": "offerId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1275,
+      "code": 2339,
+      "message": "Property 'giveTokenId' does not exist on type '{}'.",
+      "source": "giveTokenId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1276,
+      "code": 2339,
+      "message": "Property 'wantTokenId' does not exist on type '{}'.",
+      "source": "wantTokenId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1277,
+      "code": 2339,
+      "message": "Property 'giveAmount' does not exist on type '{}'.",
+      "source": "giveAmount"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1278,
+      "code": 2339,
+      "message": "Property 'wantAmount' does not exist on type '{}'.",
+      "source": "wantAmount"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1279,
+      "code": 2339,
+      "message": "Property 'priceTicks' does not exist on type '{}'.",
+      "source": "priceTicks"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1280,
+      "code": 2339,
+      "message": "Property 'timeInForce' does not exist on type '{}'.",
+      "source": "timeInForce"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1281,
+      "code": 2339,
+      "message": "Property 'makerIsLeft' does not exist on type '{}'.",
+      "source": "makerIsLeft"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1282,
+      "code": 2339,
+      "message": "Property 'fromEntity' does not exist on type '{}'.",
+      "source": "fromEntity"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1283,
+      "code": 2339,
+      "message": "Property 'toEntity' does not exist on type '{}'.",
+      "source": "toEntity"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1348,
+      "code": 6133,
+      "message": "'scopeToggle' is declared but its value is never read.",
+      "source": "scopeToggle"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1415,
+      "code": 7053,
+      "message": "Element implicitly has an 'any' type because expression of type '1' can't be used to index type '{}'.\n  Property '1' does not exist on type '{}'.",
+      "source": "Array.from(replica.state.accounts.entries()).find(([key, value]: [unknown, any]) =>\n              String(key).toLowerCase() === counterpartyId.toLowerCase()\n              || String(value?.counterpartyEntityId || '').toLowerCase() === counterpartyId.toLowerCase(),\n            )?.[1]"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1415,
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => value is unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '([key, value]: [unknown, any]) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => value is unknown'.\n      Types of parameters '__0' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type '[unknown, any]'.\n  Overload 2 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '([key, value]: [unknown, any]) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => unknown'.\n      Types of parameters '__0' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type '[unknown, any]'.",
+      "source": "([key, value]: [unknown, any]) =>\n              String(key).toLowerCase() === counterpartyId.toLowerCase()\n              || String(value?.counterpartyEntityId || '').toLowerCase() === counterpartyId.toLowerCase()"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1616,
+      "code": 18048,
+      "message": "'after' is possibly 'undefined'.",
+      "source": "after"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1616,
+      "code": 18048,
+      "message": "'before' is possibly 'undefined'.",
+      "source": "before"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1618,
+      "code": 18048,
+      "message": "'after' is possibly 'undefined'.",
+      "source": "after"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1618,
+      "code": 18048,
+      "message": "'after' is possibly 'undefined'.",
+      "source": "after"
+    }
+  ],
+  "current": [
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 223,
+      "code": 6133,
+      "message": "'ensureAnyHubAccountOpen' is declared but its value is never read.",
+      "source": "ensureAnyHubAccountOpen"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 387,
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => value is unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(key: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => value is unknown'.\n      Types of parameters 'key' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.\n  Overload 2 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(key: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => unknown'.\n      Types of parameters 'key' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.",
+      "source": "(key: string) => {"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 452,
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => value is unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(key: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => value is unknown'.\n      Types of parameters 'key' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.\n  Overload 2 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(key: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => unknown'.\n      Types of parameters 'key' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.",
+      "source": "(key: string) => {"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 571,
+      "code": 2339,
+      "message": "Property 'entityId' does not exist on type '{ ok: boolean; error: string; } | { orderAmount: string; orderPrice: string; giveTokenId: number; wantTokenId: number; giveOut: bigint; wantIn: bigint; budget: bigint; ok: boolean; entityId: string; signerId: string; counterpartyId: string; error?: never; }'.\n  Property 'entityId' does not exist on type '{ ok: boolean; error: string; }'.",
+      "source": "entityId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 572,
+      "code": 2339,
+      "message": "Property 'signerId' does not exist on type '{ ok: boolean; error: string; } | { orderAmount: string; orderPrice: string; giveTokenId: number; wantTokenId: number; giveOut: bigint; wantIn: bigint; budget: bigint; ok: boolean; entityId: string; signerId: string; counterpartyId: string; error?: never; }'.\n  Property 'signerId' does not exist on type '{ ok: boolean; error: string; }'.",
+      "source": "signerId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 573,
+      "code": 2339,
+      "message": "Property 'counterpartyId' does not exist on type '{ ok: boolean; error: string; } | { orderAmount: string; orderPrice: string; giveTokenId: number; wantTokenId: number; giveOut: bigint; wantIn: bigint; budget: bigint; ok: boolean; entityId: string; signerId: string; counterpartyId: string; error?: never; }'.\n  Property 'counterpartyId' does not exist on type '{ ok: boolean; error: string; }'.",
+      "source": "counterpartyId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 574,
+      "code": 2339,
+      "message": "Property 'giveTokenId' does not exist on type '{ ok: boolean; error: string; } | { orderAmount: string; orderPrice: string; giveTokenId: number; wantTokenId: number; giveOut: bigint; wantIn: bigint; budget: bigint; ok: boolean; entityId: string; signerId: string; counterpartyId: string; error?: never; }'.\n  Property 'giveTokenId' does not exist on type '{ ok: boolean; error: string; }'.",
+      "source": "giveTokenId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 575,
+      "code": 2339,
+      "message": "Property 'wantTokenId' does not exist on type '{ ok: boolean; error: string; } | { orderAmount: string; orderPrice: string; giveTokenId: number; wantTokenId: number; giveOut: bigint; wantIn: bigint; budget: bigint; ok: boolean; entityId: string; signerId: string; counterpartyId: string; error?: never; }'.\n  Property 'wantTokenId' does not exist on type '{ ok: boolean; error: string; }'.",
+      "source": "wantTokenId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 576,
+      "code": 2339,
+      "message": "Property 'orderAmount' does not exist on type '{ ok: boolean; error: string; } | { orderAmount: string; orderPrice: string; giveTokenId: number; wantTokenId: number; giveOut: bigint; wantIn: bigint; budget: bigint; ok: boolean; entityId: string; signerId: string; counterpartyId: string; error?: never; }'.\n  Property 'orderAmount' does not exist on type '{ ok: boolean; error: string; }'.",
+      "source": "orderAmount"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 577,
+      "code": 2339,
+      "message": "Property 'orderPrice' does not exist on type '{ ok: boolean; error: string; } | { orderAmount: string; orderPrice: string; giveTokenId: number; wantTokenId: number; giveOut: bigint; wantIn: bigint; budget: bigint; ok: boolean; entityId: string; signerId: string; counterpartyId: string; error?: never; }'.\n  Property 'orderPrice' does not exist on type '{ ok: boolean; error: string; }'.",
+      "source": "orderPrice"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 593,
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => value is unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => value is unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.\n  Overload 2 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.",
+      "source": "(k: string) => {"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 595,
+      "code": 2345,
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "source": "eid"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 595,
+      "code": 2345,
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "source": "sid"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 863,
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => value is unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => value is unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.\n  Overload 2 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.",
+      "source": "(k: string) => {"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 919,
+      "code": 2345,
+      "message": "Argument of type '([tokenId, delta]: [unknown, any]) => [string, { collateral: string; ondelta: string; offdelta: string; leftCreditLimit: string; rightCreditLimit: string; leftHold: string; rightHold: string; }]' is not assignable to parameter of type '(value: unknown, index: number, array: unknown[]) => [string, { collateral: string; ondelta: string; offdelta: string; leftCreditLimit: string; rightCreditLimit: string; leftHold: string; rightHold: string; }]'.\n  Types of parameters '__0' and 'value' are incompatible.\n    Type 'unknown' is not assignable to type '[unknown, any]'.",
+      "source": "([tokenId, delta]: [unknown, any]) => [\n          String(tokenId),\n          {\n            collateral: String(delta?.collateral ?? 0n),\n            ondelta: String(delta?.ondelta ?? 0n),\n            offdelta: String(delta?.offdelta ?? 0n),\n            leftCreditLimit: String(delta?.leftCreditLimit ?? 0n),\n            rightCreditLimit: String(delta?.rightCreditLimit ?? 0n),\n            leftHold: String(delta?.leftHold ?? 0n),\n            rightHold: String(delta?.rightHold ?? 0n),\n          },\n        ]"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1206,
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => value is unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => value is unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.\n  Overload 2 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.",
+      "source": "(k: string) => {"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1223,
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => value is unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => value is unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.\n  Overload 2 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '(k: string) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => unknown'.\n      Types of parameters 'k' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type 'string'.",
+      "source": "(k: string) => String(k).split(':')[0]?.toLowerCase() === String(counterpartyId).toLowerCase()"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1273,
+      "code": 2339,
+      "message": "Property 'offerId' does not exist on type '{}'.",
+      "source": "offerId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1274,
+      "code": 2339,
+      "message": "Property 'giveTokenId' does not exist on type '{}'.",
+      "source": "giveTokenId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1275,
+      "code": 2339,
+      "message": "Property 'wantTokenId' does not exist on type '{}'.",
+      "source": "wantTokenId"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1276,
+      "code": 2339,
+      "message": "Property 'giveAmount' does not exist on type '{}'.",
+      "source": "giveAmount"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1277,
+      "code": 2339,
+      "message": "Property 'wantAmount' does not exist on type '{}'.",
+      "source": "wantAmount"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1278,
+      "code": 2339,
+      "message": "Property 'priceTicks' does not exist on type '{}'.",
+      "source": "priceTicks"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1279,
+      "code": 2339,
+      "message": "Property 'timeInForce' does not exist on type '{}'.",
+      "source": "timeInForce"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1280,
+      "code": 2339,
+      "message": "Property 'makerIsLeft' does not exist on type '{}'.",
+      "source": "makerIsLeft"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1281,
+      "code": 2339,
+      "message": "Property 'fromEntity' does not exist on type '{}'.",
+      "source": "fromEntity"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1282,
+      "code": 2339,
+      "message": "Property 'toEntity' does not exist on type '{}'.",
+      "source": "toEntity"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1347,
+      "code": 6133,
+      "message": "'scopeToggle' is declared but its value is never read.",
+      "source": "scopeToggle"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1414,
+      "code": 7053,
+      "message": "Element implicitly has an 'any' type because expression of type '1' can't be used to index type '{}'.\n  Property '1' does not exist on type '{}'.",
+      "source": "Array.from(replica.state.accounts.entries()).find(([key, value]: [unknown, any]) =>\n              String(key).toLowerCase() === counterpartyId.toLowerCase()\n              || String(value?.counterpartyEntityId || '').toLowerCase() === counterpartyId.toLowerCase(),\n            )?.[1]"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1414,
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => value is unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '([key, value]: [unknown, any]) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => value is unknown'.\n      Types of parameters '__0' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type '[unknown, any]'.\n  Overload 2 of 2, '(predicate: (value: unknown, index: number, obj: unknown[]) => unknown, thisArg?: any): unknown', gave the following error.\n    Argument of type '([key, value]: [unknown, any]) => boolean' is not assignable to parameter of type '(value: unknown, index: number, obj: unknown[]) => unknown'.\n      Types of parameters '__0' and 'value' are incompatible.\n        Type 'unknown' is not assignable to type '[unknown, any]'.",
+      "source": "([key, value]: [unknown, any]) =>\n              String(key).toLowerCase() === counterpartyId.toLowerCase()\n              || String(value?.counterpartyEntityId || '').toLowerCase() === counterpartyId.toLowerCase()"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1615,
+      "code": 18048,
+      "message": "'after' is possibly 'undefined'.",
+      "source": "after"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1615,
+      "code": 18048,
+      "message": "'before' is possibly 'undefined'.",
+      "source": "before"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1617,
+      "code": 18048,
+      "message": "'after' is possibly 'undefined'.",
+      "source": "after"
+    },
+    {
+      "file": "tests/e2e/swap/e2e-swap.spec.ts",
+      "line": 1617,
+      "code": 18048,
+      "message": "'after' is possibly 'undefined'.",
+      "source": "after"
+    }
+  ],
+  "introduced": [],
+  "scope": "Strict same-options comparison against exact preserved baseline source, via compiler host; baseline errors remain unresolved, not a whole-file type pass. No project gate changed."
+}
