@@ -1,0 +1,574 @@
+{
+  "ok": true,
+  "entityId": "0x76e075bd8b2e16b85ed3be78ac2755dcf9cddc780c746ee0d95f23c264709577",
+  "accounts": 100000,
+  "hotAccounts": 10000,
+  "books": 0,
+  "memoryMode": "hot",
+  "dbPath": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/mainnet-scale-f43fb38ee/db/76e075bd8b2e16b8",
+  "dbBytes": 73891389,
+  "dbBytesHuman": "70.47 MiB",
+  "peakRss": 1042644992,
+  "peakRssHuman": "994.34 MiB",
+  "rssCapBytes": 2147483648,
+  "rssCapHuman": "2.00 GiB",
+  "head": {
+    "accountMerkleRadix": 16,
+    "epochMaxBytes": 268435456,
+    "epochReplayBytes": 0,
+    "latestHeight": 14,
+    "latestMaterializedHeight": 14,
+    "latestSnapshotHeight": 0,
+    "retainSnapshots": 3,
+    "retainedWalBytes": 0,
+    "schemaVersion": 6,
+    "snapshotPeriodFrames": 256
+  },
+  "inMemoryAccounts": 10100,
+  "storageReadHeight": 2,
+  "readLatencyMs": {
+    "count": 4,
+    "min": 1.639,
+    "p50": 11.852,
+    "p95": 14.209,
+    "p99": 14.209,
+    "max": 23.592
+  },
+  "touchDurableMs": {
+    "count": 11,
+    "min": 9.114,
+    "p50": 10.235,
+    "p95": 11.848,
+    "p99": 11.848,
+    "max": 16.161
+  },
+  "newAfterReadMs": 14.276,
+  "newAfterReadDurableMs": 11.848,
+  "coldRestart": {
+    "openMs": 14.753,
+    "readFirstPageMs": 9.592,
+    "latestHeight": 14
+  },
+  "rotationProbe": null,
+  "events": [
+    {
+      "label": "start",
+      "atMs": 16.985,
+      "deltaMs": 16.985,
+      "heapUsed": 18406399,
+      "rss": 134561792
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 499.408,
+      "deltaMs": 482.423,
+      "heapUsed": 126608332,
+      "rss": 423018496,
+      "extra": {
+        "accounts": 5000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 980.599,
+      "deltaMs": 481.191,
+      "heapUsed": 112521943,
+      "rss": 556089344,
+      "extra": {
+        "accounts": 10000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 1392.14,
+      "deltaMs": 411.542,
+      "heapUsed": 224499258,
+      "rss": 707657728,
+      "extra": {
+        "accounts": 15000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 1807.009,
+      "deltaMs": 414.868,
+      "heapUsed": 336706509,
+      "rss": 791691264,
+      "extra": {
+        "accounts": 20000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 2230.721,
+      "deltaMs": 423.713,
+      "heapUsed": 448614515,
+      "rss": 909377536,
+      "extra": {
+        "accounts": 25000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 2647.542,
+      "deltaMs": 416.82,
+      "heapUsed": 237974902,
+      "rss": 925597696,
+      "extra": {
+        "accounts": 30000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 3062.339,
+      "deltaMs": 414.797,
+      "heapUsed": 351744087,
+      "rss": 945913856,
+      "extra": {
+        "accounts": 35000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 3481.893,
+      "deltaMs": 419.554,
+      "heapUsed": 237696165,
+      "rss": 943833088,
+      "extra": {
+        "accounts": 40000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 3891.062,
+      "deltaMs": 409.169,
+      "heapUsed": 351174499,
+      "rss": 944603136,
+      "extra": {
+        "accounts": 45000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 4307.328,
+      "deltaMs": 416.266,
+      "heapUsed": 123994645,
+      "rss": 998113280,
+      "extra": {
+        "accounts": 50000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 4702.737,
+      "deltaMs": 395.41,
+      "heapUsed": 237351404,
+      "rss": 1009827840,
+      "extra": {
+        "accounts": 55000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 5133.03,
+      "deltaMs": 430.293,
+      "heapUsed": 119871707,
+      "rss": 1009565696,
+      "extra": {
+        "accounts": 60000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 5532.215,
+      "deltaMs": 399.184,
+      "heapUsed": 232884842,
+      "rss": 1012580352,
+      "extra": {
+        "accounts": 65000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 5951.414,
+      "deltaMs": 419.199,
+      "heapUsed": 346015484,
+      "rss": 1012908032,
+      "extra": {
+        "accounts": 70000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 6393.256,
+      "deltaMs": 441.842,
+      "heapUsed": 120006456,
+      "rss": 1022083072,
+      "extra": {
+        "accounts": 75000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 6800.765,
+      "deltaMs": 407.509,
+      "heapUsed": 233085655,
+      "rss": 1021558784,
+      "extra": {
+        "accounts": 80000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 7216.364,
+      "deltaMs": 415.598,
+      "heapUsed": 345939590,
+      "rss": 1018871808,
+      "extra": {
+        "accounts": 85000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 7655.05,
+      "deltaMs": 438.686,
+      "heapUsed": 120025485,
+      "rss": 1024032768,
+      "extra": {
+        "accounts": 90000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 8055.333,
+      "deltaMs": 400.283,
+      "heapUsed": 232863938,
+      "rss": 1029947392,
+      "extra": {
+        "accounts": 95000
+      }
+    },
+    {
+      "label": "seed.bulk.graph",
+      "atMs": 8486.891,
+      "deltaMs": 431.558,
+      "heapUsed": 345707158,
+      "rss": 1029472256,
+      "extra": {
+        "accounts": 100000
+      }
+    },
+    {
+      "label": "storage-read.probe-height",
+      "atMs": 8487.676,
+      "deltaMs": 0.785,
+      "heapUsed": 345707158,
+      "rss": 1029537792,
+      "extra": {
+        "persistedHeight": 2,
+        "runtimeCurrentHeight": 3,
+        "storageBackedReason": "atHeight below current runtime height"
+      }
+    },
+    {
+      "label": "post-seed.gc",
+      "atMs": 8520.364,
+      "deltaMs": 32.689,
+      "heapUsed": 104579014,
+      "rss": 1031847936,
+      "extra": {
+        "gcMs": 32.635,
+        "heapDelta": -241128144,
+        "rssDelta": 2310144
+      }
+    },
+    {
+      "label": "server.ready",
+      "atMs": 8520.743,
+      "deltaMs": 0.379,
+      "heapUsed": 104579014,
+      "rss": 1032175616,
+      "extra": {
+        "wsUrl": "ws://127.0.0.1:56629/rpc"
+      }
+    },
+    {
+      "label": "adapter.connected",
+      "atMs": 8532.57,
+      "deltaMs": 11.827,
+      "heapUsed": 104584185,
+      "rss": 1034633216,
+      "extra": {
+        "height": 3,
+        "authLevel": "admin"
+      }
+    },
+    {
+      "label": "adapter.read.storage.first-page",
+      "atMs": 8556.19,
+      "deltaMs": 23.62,
+      "heapUsed": 104584185,
+      "rss": 1038827520,
+      "extra": {
+        "height": 2,
+        "items": 10,
+        "nextCursor": "0x00063aa659c0cc7e6a931b0ec52864e728aaea703bc90afc4dd7c79dbd1d119c"
+      }
+    },
+    {
+      "label": "adapter.read.storage.second-page",
+      "atMs": 8570.447,
+      "deltaMs": 14.257,
+      "heapUsed": 104584185,
+      "rss": 1042317312,
+      "extra": {
+        "items": 10,
+        "nextCursor": "0x000e7fb6ae25b1aee51184af6d4c93b7b75e8de4e5953b4376d629c4de86fd9d"
+      }
+    },
+    {
+      "label": "adapter.read.storage.desc-page",
+      "atMs": 8582.324,
+      "deltaMs": 11.877,
+      "heapUsed": 104584185,
+      "rss": 1038663680,
+      "extra": {
+        "items": 10,
+        "nextCursor": "0xfff8f0f38a8817cc9c5ad4370e8c67f64c544d560b036fcbdd0ae29b6041acd6"
+      }
+    },
+    {
+      "label": "adapter.read.storage.cold-account-id",
+      "atMs": 8584.085,
+      "deltaMs": 1.761,
+      "heapUsed": 104584185,
+      "rss": 1039106048,
+      "extra": {
+        "accountId": "0x8e5134d9b332a32d4d41d726e203c5aee8fb4c7a3067a115807c1ebaae692151",
+        "accountIndex": 99999,
+        "inMemory": false,
+        "items": 1,
+        "totalItems": 1
+      }
+    },
+    {
+      "label": "adapter.write.new-after-read",
+      "atMs": 8598.391,
+      "deltaMs": 14.306,
+      "heapUsed": 104584185,
+      "rss": 1042366464,
+      "extra": {
+        "count": 100,
+        "durableMs": 14.276,
+        "storageWriteMs": 11.848,
+        "inMemoryAccounts": 10100,
+        "height": 4
+      }
+    },
+    {
+      "label": "adapter.send.touch-round",
+      "atMs": 8611.603,
+      "deltaMs": 13.212,
+      "heapUsed": 104584185,
+      "rss": 1042644992,
+      "extra": {
+        "round": 1,
+        "start": 0,
+        "count": 100,
+        "wireMs": 12.171,
+        "durableMs": 10.235,
+        "height": 5
+      }
+    },
+    {
+      "label": "adapter.send.touch-round",
+      "atMs": 8624.689,
+      "deltaMs": 13.086,
+      "heapUsed": 104584185,
+      "rss": 1036992512,
+      "extra": {
+        "round": 2,
+        "start": 100,
+        "count": 100,
+        "wireMs": 11.663,
+        "durableMs": 10.671,
+        "height": 6
+      }
+    },
+    {
+      "label": "adapter.send.touch-round",
+      "atMs": 8637.371,
+      "deltaMs": 12.682,
+      "heapUsed": 104584185,
+      "rss": 1032814592,
+      "extra": {
+        "round": 3,
+        "start": 200,
+        "count": 100,
+        "wireMs": 11.7,
+        "durableMs": 10.331,
+        "height": 7
+      }
+    },
+    {
+      "label": "adapter.send.touch-round",
+      "atMs": 8648.577,
+      "deltaMs": 11.206,
+      "heapUsed": 104584185,
+      "rss": 1033273344,
+      "extra": {
+        "round": 4,
+        "start": 300,
+        "count": 100,
+        "wireMs": 10.192,
+        "durableMs": 9.114,
+        "height": 8
+      }
+    },
+    {
+      "label": "adapter.send.touch-round",
+      "atMs": 8660.56,
+      "deltaMs": 11.983,
+      "heapUsed": 104584185,
+      "rss": 1034633216,
+      "extra": {
+        "round": 5,
+        "start": 400,
+        "count": 100,
+        "wireMs": 10.94,
+        "durableMs": 9.773,
+        "height": 9
+      }
+    },
+    {
+      "label": "adapter.send.touch-round",
+      "atMs": 8672.287,
+      "deltaMs": 11.726,
+      "heapUsed": 104584185,
+      "rss": 1035419648,
+      "extra": {
+        "round": 6,
+        "start": 500,
+        "count": 100,
+        "wireMs": 10.681,
+        "durableMs": 9.776,
+        "height": 10
+      }
+    },
+    {
+      "label": "adapter.send.touch-round",
+      "atMs": 8683.862,
+      "deltaMs": 11.575,
+      "heapUsed": 104584185,
+      "rss": 1035829248,
+      "extra": {
+        "round": 7,
+        "start": 600,
+        "count": 100,
+        "wireMs": 10.568,
+        "durableMs": 9.771,
+        "height": 11
+      }
+    },
+    {
+      "label": "adapter.send.touch-round",
+      "atMs": 8694.941,
+      "deltaMs": 11.079,
+      "heapUsed": 104584185,
+      "rss": 1036435456,
+      "extra": {
+        "round": 8,
+        "start": 700,
+        "count": 100,
+        "wireMs": 9.994,
+        "durableMs": 9.237,
+        "height": 12
+      }
+    },
+    {
+      "label": "adapter.send.touch-round",
+      "atMs": 8712.988,
+      "deltaMs": 18.047,
+      "heapUsed": 128543902,
+      "rss": 1036894208,
+      "extra": {
+        "round": 9,
+        "start": 800,
+        "count": 100,
+        "wireMs": 16.985,
+        "durableMs": 16.161,
+        "height": 13
+      }
+    },
+    {
+      "label": "adapter.send.touch-round",
+      "atMs": 8726.694,
+      "deltaMs": 13.705,
+      "heapUsed": 131206579,
+      "rss": 1038598144,
+      "extra": {
+        "round": 10,
+        "start": 900,
+        "count": 100,
+        "wireMs": 10.93,
+        "durableMs": 11.587,
+        "height": 14
+      }
+    },
+    {
+      "label": "post-traffic.gc",
+      "atMs": 8743.068,
+      "deltaMs": 16.375,
+      "heapUsed": 58848996,
+      "rss": 1038598144,
+      "extra": {
+        "gcMs": 16.342,
+        "heapDelta": -72357583,
+        "rssDelta": 0
+      }
+    },
+    {
+      "label": "adapter.disconnected",
+      "atMs": 8743.238,
+      "deltaMs": 0.17,
+      "heapUsed": 58848996,
+      "rss": 1038630912
+    },
+    {
+      "label": "cold-restart.before-open.gc",
+      "atMs": 8752.554,
+      "deltaMs": 9.315,
+      "heapUsed": 57882412,
+      "rss": 1036025856,
+      "extra": {
+        "gcMs": 8.645,
+        "heapDelta": -966584,
+        "rssDelta": 32768
+      }
+    },
+    {
+      "label": "cold-restart.open",
+      "atMs": 8767.78,
+      "deltaMs": 15.227,
+      "heapUsed": 57882412,
+      "rss": 1036468224,
+      "extra": {
+        "openMs": 14.753,
+        "latestHeight": 14,
+        "latestMaterializedHeight": 14
+      }
+    },
+    {
+      "label": "cold-restart.read-first-page",
+      "atMs": 8777.392,
+      "deltaMs": 9.612,
+      "heapUsed": 57882412,
+      "rss": 1038221312,
+      "extra": {
+        "readMs": 9.592,
+        "accounts": 10,
+        "books": 0
+      }
+    }
+  ]
+}

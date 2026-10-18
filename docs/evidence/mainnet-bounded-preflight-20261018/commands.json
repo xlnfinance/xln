@@ -1,0 +1,165 @@
+[
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "midpoint-limit-clean",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--all",
+      "--strict-browser-health",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-mm-concurrency=1",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/swap/e2e-swap.spec.ts::swap midpoint limit rests, survives reload and cancels without a worse fill"
+    ],
+    "exitCode": 0,
+    "seconds": 51.69,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/midpoint-limit-clean.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "midpoint-limit-push",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "git",
+      "push",
+      "origin",
+      "main"
+    ],
+    "exitCode": 0,
+    "seconds": 30.149,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/midpoint-limit-push.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "mainnet-plan-f43fb38ee",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "run",
+      "gate:mainnet",
+      "--dry-run",
+      "--out",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/mainnet-plan-f43fb38ee.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.106,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/mainnet-plan-f43fb38ee.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "mainnet-scale-f43fb38ee",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "run",
+      "bench:radapter:hub100k:hot10k",
+      "--db-root",
+      "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/mainnet-scale-f43fb38ee/db"
+    ],
+    "exitCode": 0,
+    "seconds": 8.946,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/mainnet-scale-f43fb38ee.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "mainnet-money-f43fb38ee",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "test",
+      "core/__tests__/finance/state/derive-delta-property.test.ts",
+      "core/__tests__/proofs/fx-admission.test.ts",
+      "core/__tests__/runtime/observability/env-events-audit-commit.test.ts",
+      "core/__tests__/operations/release/capped-testnet-gate.test.ts",
+      "core/__tests__/operations/health/prod-health-smoke.test.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 0.716,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/mainnet-money-f43fb38ee.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "mainnet-audit-pack-f43fb38ee",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "run",
+      "security:audit-pack"
+    ],
+    "exitCode": 0,
+    "seconds": 0.608,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/mainnet-audit-pack-f43fb38ee.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "mainnet-tower-f43fb38ee",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "run",
+      "test:watchtower:smoke"
+    ],
+    "exitCode": 0,
+    "seconds": 3.401,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/mainnet-tower-f43fb38ee.log"
+  },
+  {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "midpoint-flow-coverage-f43fb38ee",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "run",
+      "test:e2e:coverage"
+    ],
+    "exitCode": 0,
+    "seconds": 0.045,
+    "log": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/midpoint-flow-coverage-f43fb38ee.log"
+  }
+]

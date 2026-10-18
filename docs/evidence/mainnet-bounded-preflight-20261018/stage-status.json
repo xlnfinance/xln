@@ -1,0 +1,63 @@
+{
+  "candidateSha": "f43fb38eefe8189d7507582196f6c1b413bba2e1",
+  "candidateTree": "52986b1289c99590abe29ffbd55314549eb811a1",
+  "completedExecutableStages": 5,
+  "totalExecutableStages": 9,
+  "mainnetReadiness": "NOT_DEMONSTRATED",
+  "stages": [
+    {
+      "name": "source and frontend checks",
+      "state": "passed",
+      "evidence": "/Users/zigota/xln/.git/xln-verification/f43fb38eefe8189d7507582196f6c1b413bba2e1/2026-10-18T01-29-36.935Z-09dd6e4c-a715-49bf-b724-5731cc50e2d3/result.json"
+    },
+    {
+      "name": "deterministic money invariants",
+      "state": "passed",
+      "tests": 61,
+      "assertions": 20769
+    },
+    {
+      "name": "security audit pack",
+      "state": "passed",
+      "scope": "Existing local source/AST checks; not external audit"
+    },
+    {
+      "name": "release integration gate",
+      "state": "incomplete",
+      "evidence": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/release-current-candidate.result.json",
+      "reason": "Prior aggregate timeout60.038s; required complete family is longer than the ordinary60s budget. Component passes are not an aggregate pass."
+    },
+    {
+      "name": "full browser e2e evidence",
+      "state": "incomplete",
+      "reason": "Required full matrix has no completed immutable-candidate aggregate artifact within authorized ordinary budget."
+    },
+    {
+      "name": "watchtower recovery smoke",
+      "state": "passed",
+      "seconds": 3.401
+    },
+    {
+      "name": "one tower / three hub health",
+      "state": "qualified-prior-production-equivalence",
+      "source": "5580becabc34e798c12baef27a83d151bec592c8",
+      "evidence": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/public-gate-fix-final-health.result.json",
+      "reason": "3hubs/1tower/0incidents; public source5580becab production files equal candidate. This is not exact candidate HEAD."
+    },
+    {
+      "name": "radapter100k bounded snapshot benchmark",
+      "state": "passed",
+      "seconds": 8.946
+    },
+    {
+      "name": "one-hour release soak",
+      "state": "not-run",
+      "reason": "Uninterrupted60minutes required; no shortened soak or unapproved process-budget increase."
+    }
+  ],
+  "otherOpenBoundaries": [
+    "Public signed RPC403 authorization and dedicated Sepolia signer funding before native-chain financial/exit proofs",
+    "MacBook synchronization/retirement unconfirmed; local Tailscale service unavailable01:02UTC, next allowed probe02:02UTC",
+    "Owner-only final mainnet deployment/activation and real-funds commitments are not authorized"
+  ]
+}

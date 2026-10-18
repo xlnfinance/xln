@@ -1,0 +1,71 @@
+{
+  "schema": 1,
+  "passed": true,
+  "problem": null,
+  "startedAt": "2026-10-18T01:29:36.935Z",
+  "finishedAt": "2026-10-18T01:30:04.239Z",
+  "durationMs": 27304,
+  "root": "/Users/zigota/xln",
+  "before": {
+    "head": "f43fb38eefe8189d7507582196f6c1b413bba2e1",
+    "tree": "52986b1289c99590abe29ffbd55314549eb811a1",
+    "branch": "main",
+    "tracked": [],
+    "untracked": [],
+    "hiddenTracked": []
+  },
+  "after": {
+    "head": "f43fb38eefe8189d7507582196f6c1b413bba2e1",
+    "tree": "52986b1289c99590abe29ffbd55314549eb811a1",
+    "branch": "main",
+    "tracked": [],
+    "untracked": [],
+    "hiddenTracked": []
+  },
+  "command": {
+    "argv": [
+      "/Users/zigota/.bun/bin/bun",
+      "run",
+      "check"
+    ],
+    "budgetMs": 60000,
+    "result": {
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "interrupted": null,
+      "error": null,
+      "cleanup": null
+    }
+  },
+  "tools": {
+    "bun": {
+      "executable": "/Users/zigota/.bun/bin/bun",
+      "version": "1.4.0",
+      "revision": "34cbb9a40b4bd1bd767d134a7065e66c2432a676"
+    },
+    "git": {
+      "exitCode": 0,
+      "output": "git version 2.54.0 (Apple Git-157)"
+    },
+    "node": {
+      "exitCode": 0,
+      "output": "v26.7.0"
+    },
+    "forge": {
+      "exitCode": 0,
+      "output": "forge Version: 1.7.1\nCommit SHA: 4072e48705af9d93e3c0f6e29e93b5e9a40caed8\nBuild Timestamp: 2026-05-08T07:54:31.470926000Z (1778226871)\nBuild Profile: dist"
+    },
+    "cargo": {
+      "exitCode": 0,
+      "output": "cargo 1.94.1 (29ea6fb6a 2026-03-24)"
+    },
+    "os": {
+      "platform": "darwin",
+      "release": "27.0.0",
+      "arch": "arm64",
+      "hostname": "zigotas-Mac-Studio.local"
+    }
+  },
+  "logPath": "/Users/zigota/xln/.git/xln-verification/f43fb38eefe8189d7507582196f6c1b413bba2e1/2026-10-18T01-29-36.935Z-09dd6e4c-a715-49bf-b724-5731cc50e2d3/check.log"
+}

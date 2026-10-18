@@ -1,0 +1,78 @@
+{
+  "verdict": "DRY_RUN",
+  "startedAt": "2026-10-18T01:30:16.195Z",
+  "gitHead": "f43fb38eefe8189d7507582196f6c1b413bba2e1",
+  "dirty": false,
+  "gitStatus": "",
+  "thresholds": {
+    "regressionThresholdPct": 20,
+    "soakMinutes": 60,
+    "expectedHubs": 3,
+    "expectedTowers": 1,
+    "minDiskFreeBytes": 5368709120
+  },
+  "args": {
+    "dryRun": true,
+    "allowDirty": false,
+    "includeSoak": true,
+    "includeScale": true,
+    "keepTestArtifacts": false,
+    "outPath": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/mainnet-plan-f43fb38ee.json"
+  },
+  "steps": [
+    {
+      "name": "source and frontend checks",
+      "category": "source",
+      "command": "bun run check",
+      "timeoutMs": 1200000
+    },
+    {
+      "name": "deterministic money invariants",
+      "category": "invariant",
+      "command": "bun test core/__tests__/finance/state/derive-delta-property.test.ts core/__tests__/proofs/fx-admission.test.ts core/__tests__/runtime/observability/env-events-audit-commit.test.ts core/__tests__/operations/release/capped-testnet-gate.test.ts core/__tests__/operations/health/prod-health-smoke.test.ts",
+      "timeoutMs": 240000
+    },
+    {
+      "name": "security audit pack",
+      "category": "security",
+      "command": "bun run security:audit-pack",
+      "timeoutMs": 120000
+    },
+    {
+      "name": "release integration gate",
+      "category": "release",
+      "command": "bun run gate:release",
+      "timeoutMs": 7200000
+    },
+    {
+      "name": "full browser e2e evidence",
+      "category": "e2e",
+      "command": "bun run test:e2e:full",
+      "timeoutMs": 7200000
+    },
+    {
+      "name": "watchtower recovery smoke",
+      "category": "recovery",
+      "command": "bun run test:watchtower:smoke",
+      "timeoutMs": 240000
+    },
+    {
+      "name": "one tower / three hub health",
+      "category": "health",
+      "command": "bun run prod:health:capped-testnet",
+      "timeoutMs": 180000
+    },
+    {
+      "name": "radapter 100k bounded snapshot benchmark",
+      "category": "scale",
+      "command": "bun run bench:radapter:hub100k:hot10k",
+      "timeoutMs": 2400000
+    },
+    {
+      "name": "one-hour release soak",
+      "category": "soak",
+      "command": "bun core/scripts/release/run-soak-gate.ts --profile=release --minutes=60",
+      "timeoutMs": 5400000
+    }
+  ]
+}

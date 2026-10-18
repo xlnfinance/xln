@@ -1,0 +1,37 @@
+{
+  "sourceSha": "f43fb38eefe8189d7507582196f6c1b413bba2e1",
+  "externalLogs": [
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/midpoint-limit-clean.log",
+      "sha256": "11a75ea8fd9b2fba3b858bc301dd6a33fd3db0c936e646ceb60cfa3153ec76e6"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/midpoint-limit-push.log",
+      "sha256": "136a3b917e9ce92cb9f9ad8d217b86aa43df81916340ee02eb8bbdf2d2ac617f"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/mainnet-plan-f43fb38ee.log",
+      "sha256": "8fba0357648f9eb89df76f84905eb7f3d38b8a95ab66f1396d8cf0d1c1857c3e"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/mainnet-scale-f43fb38ee.log",
+      "sha256": "26da9a72e6efcd5bdecf734a2b132e5b3e08f84b6663254bd29f44147ba1370a"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/mainnet-money-f43fb38ee.log",
+      "sha256": "aa74facc37798059ef1815ef892a51b4154a36c5f7a0f5d6763683ecc6fcba2d"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/mainnet-audit-pack-f43fb38ee.log",
+      "sha256": "7bb1ce8148d25137d1a35c78f6c8dc96009471535c2b82a460af15e47ce8be70"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/mainnet-tower-f43fb38ee.log",
+      "sha256": "b67672229faee12c1563b965f6300d12952a366bf7c436eab9a777f699e0eb89"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/midpoint-flow-coverage-f43fb38ee.log",
+      "sha256": "164b08ab0089466ffd58450ad8489954f903b9e8b1bb9764eee2add5da1e6b7c"
+    }
+  ]
+}
