@@ -100,7 +100,7 @@ const parseCanonicalBlock = (raw: unknown, height: number): CanonicalRpcBlock =>
 const readCanonicalBlocks = async (
   send: RpcSend,
   heights: readonly number[],
-  concurrentChunks: 1 | 2,
+  concurrentChunks: 1 | 2 | 4,
   sendBatch?: RpcBatchSend,
 ): Promise<CanonicalRpcBlock[]> => {
   const calls = heights.map((height): RpcBatchCall => ({
@@ -384,7 +384,7 @@ export const readAuthenticatedReceiptRange = async (
   const rangeHeights = Array.from({ length: toBlock - anchorHeight + 1 }, (_, index) => anchorHeight + index);
   // Native TRON already fans each chunk out to 12 scalar workers. Keep its
   // chunks sequential; overlap only Ethereum JSON-RPC batches within a pass.
-  const concurrentChunks = commitment === 'ethereum-trie' ? 2 : 1;
+  const concurrentChunks = commitment === 'ethereum-trie' ? 4 : 1;
   const rangeBlocks = await readCanonicalBlocks(send, rangeHeights, concurrentChunks, sendBatch);
   assertContiguousBlocks(rangeBlocks, profile.expectedParent);
   const blocks = rangeBlocks.filter(block => Number(parseReceiptQuantity(block.number, 'BLOCK_NUMBER')) >= fromBlock);

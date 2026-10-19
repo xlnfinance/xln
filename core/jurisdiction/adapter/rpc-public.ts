@@ -31,21 +31,17 @@ import type { JAdapterMode } from './types';
  */
 export const PROCESS_BATCH_TRANSFORMER_GAS_LIMIT = BigInt(BLOCKCHAIN.PROCESS_BATCH_GAS_LIMIT);
 
-export const resolveProcessBatchGasLimit = (
-  estimatedGasLimit: bigint,
-  batch: JBatch,
-  mode: JAdapterMode,
-): bigint => {
-  const transformerFinalizationCount = mode === 'tron'
-    ? 0
-    : batch.disputeFinalizations.filter(
-      finalization => finalization.finalProofbody.transformers.length > 0,
-    ).length;
+export const resolveProcessBatchGasLimit = (estimatedGasLimit: bigint, batch: JBatch, mode: JAdapterMode): bigint => {
+  const transformerFinalizationCount =
+    mode === 'tron'
+      ? 0
+      : batch.disputeFinalizations.filter(finalization => finalization.finalProofbody.transformers.length > 0).length;
   if (transformerFinalizationCount > 1) {
     throw new Error('J_TRANSFORMER_FINALIZATION_BATCH_LIMIT');
   }
   if (transformerFinalizationCount === 0) {
-    const hasDispute = batch.disputeStarts.length + batch.counterDisputes.length + batch.disputeFinalizations.length > 0;
+    const hasDispute =
+      batch.disputeStarts.length + batch.counterDisputes.length + batch.disputeFinalizations.length > 0;
     if (mode !== 'tron' && hasDispute && estimatedGasLimit > PROCESS_BATCH_TRANSFORMER_GAS_LIMIT) {
       throw new Error('J_DISPUTE_GAS_LIMIT');
     }
@@ -86,25 +82,29 @@ const toFinalizationHex = (value: unknown): string => {
 
 const depositoryTransactionInterface = Depository__factory.createInterface();
 const DISPUTE_PROOF_BODY_PARAM = ethers.ParamType.from(PROOF_BODY_ABI);
-const FINALIZATION_EVIDENCE_TYPES = [
-  'bytes32', 'uint256', 'bool', 'bool', 'bytes32', 'bytes32', 'bytes32',
-] as const;
+const FINALIZATION_EVIDENCE_TYPES = ['bytes32', 'uint256', 'bool', 'bool', 'bytes32', 'bytes32', 'bytes32'] as const;
 const hashCalldataProofBody = (proofbody: TxDisputeProofBodyEvidence['proofbody']): string =>
   ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode([DISPUTE_PROOF_BODY_PARAM], [proofbody]));
 const hashFinalizationEvidence = (candidate: TxFinalizationEvidence): string => {
   const starterArguments = candidate.startedByLeft ? candidate.leftArguments : candidate.rightArguments;
   const otherArguments = candidate.startedByLeft ? candidate.rightArguments : candidate.leftArguments;
-  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-    FINALIZATION_EVIDENCE_TYPES,
-    [candidate.initialProofbodyHash, candidate.finalNonce, candidate.proposerIsLeft, candidate.startedByLeft,
-      ethers.keccak256(starterArguments), ethers.keccak256(otherArguments), ethers.keccak256(candidate.sig)],
-  )).toLowerCase();
+  return ethers
+    .keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode(FINALIZATION_EVIDENCE_TYPES, [
+        candidate.initialProofbodyHash,
+        candidate.finalNonce,
+        candidate.proposerIsLeft,
+        candidate.startedByLeft,
+        ethers.keccak256(starterArguments),
+        ethers.keccak256(otherArguments),
+        ethers.keccak256(candidate.sig),
+      ]),
+    )
+    .toLowerCase();
 };
 
 /** Decode the exact signed ProofBody carried by every dispute transaction. */
-export const decodeDisputeProofBodyEvidenceCalldata = (
-  data: string,
-): TxDisputeProofBodyEvidence[] => {
+export const decodeDisputeProofBodyEvidenceCalldata = (data: string): TxDisputeProofBodyEvidence[] => {
   try {
     const parsed = depositoryTransactionInterface.parseTransaction({ data });
     if (!parsed) throw new Error('J_DISPUTE_PROOFBODY_CALLDATA_UNKNOWN');
@@ -181,18 +181,17 @@ export const resolveDisputeProofBodyEvidence = (
   args: Record<string, unknown>,
 ): TxDisputeProofBodyEvidence['proofbody'] => {
   const counterentity = toFinalizationHex(args['counterentity']);
-  const nonce = toFinalizationDecimal(
-    eventName === 'DisputeFinalized' ? args['initialNonce'] : args['nonce'],
-  );
+  const nonce = toFinalizationDecimal(eventName === 'DisputeFinalized' ? args['initialNonce'] : args['nonce']);
   const proofbodyHash = toFinalizationHex(
     eventName === 'DisputeFinalized' ? args['finalProofbodyHash'] : args['proofbodyHash'],
   );
-  const matched = candidates.find(candidate =>
-    candidate.eventName === eventName &&
-    candidate.counterentity === counterentity &&
-    (eventName === 'DisputeFinalized' ? candidate.initialNonce : candidate.nonce) === nonce &&
-    candidate.proofbodyHash.toLowerCase() === proofbodyHash.toLowerCase() &&
-    (eventName === 'DisputeFinalized' || candidate.proposerIsLeft === Boolean(args['proposerIsLeft']))
+  const matched = candidates.find(
+    candidate =>
+      candidate.eventName === eventName &&
+      candidate.counterentity === counterentity &&
+      (eventName === 'DisputeFinalized' ? candidate.initialNonce : candidate.nonce) === nonce &&
+      candidate.proofbodyHash.toLowerCase() === proofbodyHash.toLowerCase() &&
+      (eventName === 'DisputeFinalized' || candidate.proposerIsLeft === Boolean(args['proposerIsLeft'])),
   );
   if (!matched) throw new Error(`J_DISPUTE_PROOFBODY_EVIDENCE_NOT_FOUND:${eventName}:${nonce}`);
   return matched.proofbody;
@@ -270,10 +269,12 @@ export const resolveDisputeFinalizationEvidence = (
   const counterentity = String(args['counterentity'] ?? '').toLowerCase();
   const initialNonce = toFinalizationDecimal(args['initialNonce']);
   const finalizationEvidenceHash = toFinalizationHex(args['finalizationEvidenceHash']);
-  const matched = candidates.find(candidate =>
-    candidate.counterentity.toLowerCase() === counterentity &&
-    candidate.initialNonce === initialNonce &&
-    hashFinalizationEvidence(candidate) === finalizationEvidenceHash);
+  const matched = candidates.find(
+    candidate =>
+      candidate.counterentity.toLowerCase() === counterentity &&
+      candidate.initialNonce === initialNonce &&
+      hashFinalizationEvidence(candidate) === finalizationEvidenceHash,
+  );
   if (!matched) {
     throw new Error(`J_DISPUTE_FINALIZATION_EVIDENCE_NOT_FOUND:${normalizedHash}`);
   }
@@ -287,7 +288,7 @@ export const resolveDisputeFinalizationEvidence = (
 export const resolveWatcherPollToBlock = (
   fromBlock: number,
   safeToBlock: number,
-  maxBlocksPerPoll = BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL,
+  maxBlocksPerPoll: number = BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL,
 ): number => {
   if (!Number.isSafeInteger(fromBlock) || fromBlock < 1) {
     throw new Error(`J_WATCHER_FROM_BLOCK_INVALID:${String(fromBlock)}`);

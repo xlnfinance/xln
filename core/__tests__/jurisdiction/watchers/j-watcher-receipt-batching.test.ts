@@ -18,71 +18,84 @@ const blockFor = (height: number) => ({
 });
 
 describe('authenticated J watcher RPC batching', () => {
-  test('overlaps at most two chunks while preserving requested header order', async () => {
-    const calls = Array.from({ length: 257 }, (_, height) => ({ method: 'eth_getBlockByNumber', params: [height] }));
-    const first = Promise.withResolvers<void>();
-    const second = Promise.withResolvers<void>();
-    const entered = Promise.withResolvers<void>();
-    let active = 0;
-    let peak = 0;
-    const starts: number[] = [];
-    const pending = sendBatchInChunks(
-      async chunk => {
-        const start = Number(chunk[0]!.params[0]);
-        starts.push(start);
-        peak = Math.max(peak, ++active);
-        if (starts.length === 2) entered.resolve();
-        if (start === 0) await first.promise;
-        if (start === 128) await second.promise;
-        active--;
-        return chunk.map(call => call.params[0]);
-      },
-      calls,
-      2,
-    );
-    await entered.promise;
-    second.resolve();
-    await Promise.resolve();
-    expect(starts).toEqual([0, 128]);
-    first.resolve();
-    expect(await pending).toEqual(calls.map(call => call.params[0]));
-    expect(starts).toEqual([0, 128, 256]);
-    expect(peak).toBe(2);
-    expect(active).toBe(0);
-  });
+  test.each([2, 4] as const)(
+    'overlaps at most %i chunks while preserving requested header order',
+    async concurrency => {
+      const calls = Array.from({ length: concurrency * 128 + 1 }, (_, height) => ({
+        method: 'eth_getBlockByNumber',
+        params: [height],
+      }));
+      const first = Promise.withResolvers<void>();
+      const second = Promise.withResolvers<void>();
+      const entered = Promise.withResolvers<void>();
+      let active = 0;
+      let peak = 0;
+      const starts: number[] = [];
+      const pending = sendBatchInChunks(
+        async chunk => {
+          const start = Number(chunk[0]!.params[0]);
+          starts.push(start);
+          peak = Math.max(peak, ++active);
+          if (starts.length === concurrency) entered.resolve();
+          if (start === 0) await first.promise;
+          if (start === 128) await second.promise;
+          await Promise.resolve();
+          active--;
+          return chunk.map(call => call.params[0]);
+        },
+        calls,
+        concurrency,
+      );
+      await entered.promise;
+      second.resolve();
+      await Promise.resolve();
+      expect(starts).toEqual(Array.from({ length: concurrency }, (_, index) => index * 128));
+      first.resolve();
+      expect(await pending).toEqual(calls.map(call => call.params[0]));
+      expect(starts).toEqual(Array.from({ length: concurrency + 1 }, (_, index) => index * 128));
+      expect(peak).toBe(concurrency);
+      expect(active).toBe(0);
+    },
+  );
 
-  test('drains the in-flight sibling before rejecting a header pass without launching later chunks', async () => {
-    const calls = Array.from({ length: 257 }, (_, height) => ({ method: 'eth_getBlockByNumber', params: [height] }));
-    const sibling = Promise.withResolvers<void>();
-    const entered = Promise.withResolvers<void>();
-    const failure = new Error('J_RECEIPT_RANGE_REORG');
-    const starts: number[] = [];
-    let rejected = false;
-    const pending = sendBatchInChunks(
-      async chunk => {
-        const start = Number(chunk[0]!.params[0]);
-        starts.push(start);
-        if (start === 0) throw failure;
-        entered.resolve();
-        await sibling.promise;
-        return chunk.map(call => call.params[0]);
-      },
-      calls,
-      2,
-    ).catch(error => {
-      rejected = true;
-      return error;
-    });
-    await entered.promise;
-    await Promise.resolve();
-    expect(rejected).toBe(false);
-    sibling.resolve();
-    expect(await pending).toBe(failure);
-    expect(starts).toEqual([0, 128]);
-  });
+  test.each([2, 4] as const)(
+    'drains all %i in-flight chunks before rejecting without launching later chunks',
+    async concurrency => {
+      const calls = Array.from({ length: concurrency * 128 + 1 }, (_, height) => ({
+        method: 'eth_getBlockByNumber',
+        params: [height],
+      }));
+      const sibling = Promise.withResolvers<void>();
+      const entered = Promise.withResolvers<void>();
+      const failure = new Error('J_RECEIPT_RANGE_REORG');
+      const starts: number[] = [];
+      let rejected = false;
+      const pending = sendBatchInChunks(
+        async chunk => {
+          const start = Number(chunk[0]!.params[0]);
+          starts.push(start);
+          if (start === 0) throw failure;
+          entered.resolve();
+          await sibling.promise;
+          return chunk.map(call => call.params[0]);
+        },
+        calls,
+        concurrency,
+      ).catch(error => {
+        rejected = true;
+        return error;
+      });
+      await entered.promise;
+      await Promise.resolve();
+      expect(rejected).toBe(false);
+      sibling.resolve();
+      expect(await pending).toBe(failure);
+      expect(starts).toEqual(Array.from({ length: concurrency }, (_, index) => index * 128));
+    },
+  );
 
   test.each([
-    ['ethereum-trie', 2],
+    ['ethereum-trie', 4],
     ['tron-complete-receipts', 1],
   ] as const)('bounds %s header chunks without overlapping the two passes', async (commitment, expectedPeak) => {
     let active = 0;
@@ -92,7 +105,7 @@ describe('authenticated J watcher RPC batching', () => {
     const send = async (method: string): Promise<unknown> => {
       expect(['eth_getBlockReceipts', 'eth_getLogs']).toContain(method);
       expect(active).toBe(0);
-      expect(heights).toHaveLength(256);
+      expect(heights).toHaveLength(512);
       scalarMethods.push(method);
       return [];
     };
@@ -107,23 +120,23 @@ describe('authenticated J watcher RPC batching', () => {
     const result = await readAuthenticatedReceiptRange(
       send,
       2,
-      256,
+      512,
       ['0x000000000000000000000000000000000000dEaD'],
       { commitment },
       sendBatch,
     );
-    const passHeights = Array.from({ length: 256 }, (_, index) => index + 1);
+    const passHeights = Array.from({ length: 512 }, (_, index) => index + 1);
     expect(heights).toEqual([...passHeights, ...passHeights]);
     expect(result.headers.map(header => header.jHeight)).toEqual(passHeights.slice(1));
     expect(result.logs).toEqual([]);
     expect(peak).toBe(expectedPeak);
     expect(active).toBe(0);
     expect(scalarMethods).toEqual(
-      commitment === 'ethereum-trie' ? [] : [...Array<string>(255).fill('eth_getBlockReceipts'), 'eth_getLogs'],
+      commitment === 'ethereum-trie' ? [] : [...Array<string>(511).fill('eth_getBlockReceipts'), 'eth_getLogs'],
     );
   });
 
-  test.each([BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL, 256, 2048])(
+  test.each([BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL, BLOCKCHAIN.J_WATCHER_TRON_MAX_BLOCKS_PER_POLL, 256, 2048])(
     'reads %i headers in bounded RPC batches with the complete reorg fence',
     async rangeSize => {
       let scalarCalls = 0;
@@ -153,7 +166,7 @@ describe('authenticated J watcher RPC batching', () => {
       // The production window includes its preceding anchor in both passes.
       // A trailing one-header request adds two network round trips per window.
       if (rangeSize === BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL) {
-        expect(batches.map(batch => batch.length)).toEqual([128, 128, 128, 128]);
+        expect(batches.map(batch => batch.length)).toEqual(Array<number>(8).fill(128));
       }
       expect(batches.every(batch => batch.length <= 128)).toBe(true);
       expect(batches.reduce((total, batch) => total + batch.length, 0)).toBe(2 * (rangeSize + 1));

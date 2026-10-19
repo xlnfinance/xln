@@ -39,7 +39,10 @@ import {
   collectWatcherCanonicalAudit,
   collectTargetedWatcherRewinds,
 } from '../../../jurisdiction/adapter/watcher/observe/watcher-reconciliation';
-import { nextWatcherPollWindow } from '../../../jurisdiction/adapter/watcher/observe/watcher-poll-policy';
+import {
+  nextWatcherPollWindow,
+  watcherPollWindowLimit,
+} from '../../../jurisdiction/adapter/watcher/observe/watcher-poll-policy';
 import { enqueueRuntimeInput, isRuntimeMempoolCapacityError } from '../../../runtime/mempool/input-queue';
 import { findReserveUpdatedEvidence } from '../../../jurisdiction/machine/events/event-evidence';
 import { decodeAuthenticatedWatcherEvents } from '../../../jurisdiction/adapter/rpc-watcher-events';
@@ -508,8 +511,8 @@ describe('JAdapter watcher ingress', () => {
 
   test('RPC watcher bounds historical catch-up without skipping the safe tip', () => {
     expect(resolveWatcherPollToBlock(1, 10_000, 256)).toBe(256);
-    expect(resolveWatcherPollToBlock(1, 190_000)).toBe(255);
-    expect(resolveWatcherPollToBlock(257, 190_000)).toBe(511);
+    expect(resolveWatcherPollToBlock(1, 190_000)).toBe(511);
+    expect(resolveWatcherPollToBlock(257, 190_000)).toBe(767);
     expect(resolveWatcherPollToBlock(189_900, 190_000)).toBe(190_000);
     expect(resolveWatcherPollToBlock(257, 10_000, 256)).toBe(512);
     expect(resolveWatcherPollToBlock(9_900, 10_000, 256)).toBe(10_000);
@@ -535,8 +538,12 @@ describe('JAdapter watcher ingress', () => {
     expect(isRuntimeMempoolCapacityError(new Error('J_WATCHER_POLL', { cause: capacity }))).toBe(true);
     expect(nextWatcherPollWindow(256, false)).toBe(128);
     expect(nextWatcherPollWindow(1, false)).toBe(1);
-    expect(nextWatcherPollWindow(128, true)).toBe(255);
-    expect(nextWatcherPollWindow(256, true)).toBe(255);
+    expect(nextWatcherPollWindow(128, true)).toBe(256);
+    expect(nextWatcherPollWindow(256, true)).toBe(511);
+    expect(watcherPollWindowLimit('rpc')).toBe(511);
+    expect(watcherPollWindowLimit('tron')).toBe(255);
+    expect(nextWatcherPollWindow(128, true, watcherPollWindowLimit('tron'))).toBe(255);
+    expect(resolveWatcherPollToBlock(2, 1000, watcherPollWindowLimit('tron'))).toBe(256);
   });
 
   test('j-event ingress rejects during persistence quiesce before cursor or dedup mutation', () => {

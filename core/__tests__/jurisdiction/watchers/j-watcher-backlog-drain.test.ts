@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -37,7 +37,6 @@ const SIGNER_ID = deriveSignerAddressSync(RUNTIME_SEED, '2').toLowerCase();
 const LATE_SIGNER_ID = deriveSignerAddressSync(RUNTIME_SEED, '3').toLowerCase();
 const TOKEN_ID = 1;
 const RESERVE_AMOUNT = 123_456n;
-const BACKLOG_BLOCKS = 4700;
 
 const singleSignerEncodedBoard = (privateKey: Uint8Array): string =>
   encodeSingleSignerBoard(new ethers.Wallet(ethers.hexlify(privateKey)).address);
@@ -235,7 +234,7 @@ const stopAnvil = async (managed: ManagedAnvil): Promise<void> => {
   await rm(managed.tmpRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 };
 
-afterAll(async () => {
+afterEach(async () => {
   const cleanupErrors: unknown[] = [];
   try {
     if (adapter) await adapter.close();
@@ -252,368 +251,400 @@ afterAll(async () => {
   } catch (error) {
     cleanupErrors.push(error);
   }
+  adapter = null;
+  rpcProxy = null;
+  managedAnvil = null;
   if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, 'J_WATCHER_BACKLOG_CLEANUP_FAILED');
 });
 
 describe('RPC J-watcher backlog drain', () => {
-  test('delivers an authenticated event beyond 4096 historical blocks before returning', async () => {
-    managedAnvil = await startAnvil();
-    rpcProxy = startRpcGateProxy(managedAnvil.rpcUrl);
-    adapter = await createJAdapter({ mode: 'rpc', chainId: CHAIN_ID, rpcUrl: rpcProxy.rpcUrl, watchPollMs: 100 });
-    await adapter.deployStack();
+  test.each([
+    {
+      name: 'delivers an authenticated event beyond 4096 historical blocks before returning',
+      backlogBlocks: 4700,
+      pressure: false,
+    },
+    {
+      name: 'retains RPC pressure and recovers authenticated progress below the checkpoint interval',
+      backlogBlocks: 600,
+      pressure: true,
+    },
+  ])(
+    '$name',
+    async ({ backlogBlocks, pressure }) => {
+      managedAnvil = await startAnvil();
+      rpcProxy = startRpcGateProxy(managedAnvil.rpcUrl);
+      adapter = await createJAdapter({ mode: 'rpc', chainId: CHAIN_ID, rpcUrl: rpcProxy.rpcUrl, watchPollMs: 100 });
+      await adapter.deployStack();
 
-    const env = createEmptyEnv(RUNTIME_SEED);
-    env.scenarioMode = true;
-    env.state.timestamp = 1;
-    setScenarioStorageEnabled(env, false);
-    ensureSignerKeysFromSeed(env, ['2', '3'], RUNTIME_SEED);
+      const env = createEmptyEnv(RUNTIME_SEED);
+      env.scenarioMode = true;
+      env.state.timestamp = 1;
+      setScenarioStorageEnabled(env, false);
+      ensureSignerKeysFromSeed(env, ['2', '3'], RUNTIME_SEED);
 
-    const jurisdictionName = 'Backlog Drain';
-    const jReplica = createJReplica(env, jurisdictionName, adapter.addresses.depository);
-    jReplica.contracts = { ...jReplica.contracts, depository: adapter.addresses.depository };
-    jReplica.contracts = { ...jReplica.contracts, entityProvider: adapter.addresses.entityProvider };
-    jReplica.chainId = CHAIN_ID;
-    jReplica.watcherConfirmationDepth = 0;
-    jReplica.rpcs = [managedAnvil.rpcUrl];
-    jReplica.contracts = { ...adapter.addresses };
-    attachLiveJAdapter(env, jurisdictionName, adapter);
-    adapter.startWatching(env);
+      const jurisdictionName = 'Backlog Drain';
+      const jReplica = createJReplica(env, jurisdictionName, adapter.addresses.depository);
+      jReplica.contracts = { ...jReplica.contracts, depository: adapter.addresses.depository };
+      jReplica.contracts = { ...jReplica.contracts, entityProvider: adapter.addresses.entityProvider };
+      jReplica.chainId = CHAIN_ID;
+      jReplica.watcherConfirmationDepth = 0;
+      jReplica.rpcs = [managedAnvil.rpcUrl];
+      jReplica.contracts = { ...adapter.addresses };
+      attachLiveJAdapter(env, jurisdictionName, adapter);
+      adapter.startWatching(env);
 
-    const jurisdiction = createJurisdictionConfig(
-      jurisdictionName,
-      adapter.addresses.depository,
-      adapter.addresses.entityProvider,
-      managedAnvil.rpcUrl,
-      CHAIN_ID,
-    );
-    const signerPrivateKey = getSignerPrivateKey(env, SIGNER_ID);
-    const registeredEncodedBoard = singleSignerEncodedBoard(signerPrivateKey);
-    const registeredBoardHash = hashBoard(registeredEncodedBoard);
-    const nextEntityNumber = await adapter.entityProvider.nextNumber();
-    const registerReceipt = await (
-      await adapter.entityProvider.registerNumberedEntitiesBatch([registeredEncodedBoard])
-    ).wait();
-    if (!registerReceipt || registerReceipt.status !== 1) {
-      throw new Error('J_WATCHER_BACKLOG_ENTITY_REGISTRATION_FAILED');
-    }
-    const registeredEntityId = ethers.zeroPadValue(ethers.toBeHex(nextEntityNumber), 32).toLowerCase();
-    const signerAddress = new ethers.Wallet(ethers.hexlify(signerPrivateKey)).address;
-    const entityId = generateLazyEntityId([signerAddress], 1n).toLowerCase();
-    await commitRuntimeInput(env, {
-      runtimeTxs: [
-        createTestEntityImportRuntimeTx(env, {
-          entityId,
-          signerId: SIGNER_ID,
-          data: {
-            isProposer: true,
-            config: {
-              mode: 'proposer-based',
-              threshold: 1n,
-              validators: [SIGNER_ID],
-              shares: { [SIGNER_ID]: 1n },
-              jurisdiction,
-            },
-          },
-        }),
-      ],
-      entityInputs: [],
-    });
-
-    const provider = adapter.provider as ethers.JsonRpcProvider;
-    await provider.send('anvil_mine', [ethers.toQuantity(BACKLOG_BLOCKS)]);
-    const receiptEvents = await adapter.debugFundReserves(entityId, TOKEN_ID, RESERVE_AMOUNT);
-    const reserveEvent = receiptEvents.find(event => event.name === 'ReserveUpdated');
-    expect(Number(reserveEvent?.blockNumber ?? 0)).toBeGreaterThan(2 * 2048);
-
-    const pollWatcher = adapter.pollNow?.bind(adapter);
-    const readScanProgress = adapter.getWatcherScanProgress?.bind(adapter);
-    if (!pollWatcher || !readScanProgress) throw new Error('J_WATCHER_BACKLOG_POLL_API_MISSING');
-    const isWatching = adapter.isWatching.bind(adapter);
-    const takeHeaderBlocks = rpcProxy.takeHeaderBlocks;
-    const waitForGate = async (stage: string, gate: RpcGateControl, poll?: Promise<void>): Promise<void> => {
-      let timer: ReturnType<typeof setTimeout>;
-      const deadline = new Promise<{ status: 'timed-out' }>(resolve => {
-        timer = setTimeout(() => resolve({ status: 'timed-out' }), 5_000);
-      });
-      const result = await Promise.race([
-        gate.entered.then(() => ({ status: 'entered' }) as const),
-        ...(poll
-          ? [
-              poll.then(
-                () => ({ status: 'resolved' }) as const,
-                (error: unknown) => ({ status: 'rejected', error }) as const,
-              ),
-            ]
-          : []),
-        deadline,
-      ]).finally(() => clearTimeout(timer));
-      if (result.status === 'entered') return;
-      gate.release();
-      throw new Error(
-        `J_WATCHER_BACKLOG_GATE_NOT_REACHED:${stage}:${safeStringify({
-          poll: result.status,
-          scan: readScanProgress(),
-          isWatching: isWatching(),
-          headerBlocks: takeHeaderBlocks(),
-        })}`,
-        result.status === 'rejected' ? { cause: result.error } : undefined,
+      const jurisdiction = createJurisdictionConfig(
+        jurisdictionName,
+        adapter.addresses.depository,
+        adapter.addresses.entityProvider,
+        managedAnvil.rpcUrl,
+        CHAIN_ID,
       );
-    };
-    const fromBlock = getWatcherStartBlock(env, adapter.addresses.depository, CHAIN_ID);
-    const failureState = () =>
-      structuredClone({
-        scan: readScanProgress(),
-        jurisdictionHeight: env.state.jReplicas.get(jurisdictionName)?.blockNumber,
-        finalizedHeight: env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.lastFinalizedJHeight,
-        reserve: env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.reserves.get(TOKEN_ID),
-        mempool: env.runtimeMempool,
-      });
-    const beforeFailures = failureState();
-    rpcProxy.takeHeaderBlocks();
-    const missingHeaderGate = rpcProxy.armHeaderBatchGate('missing-header');
-    const missingHeaderPoll = pollWatcher();
-    await waitForGate('missing-header', missingHeaderGate, missingHeaderPoll);
-    missingHeaderGate.release();
-    await missingHeaderPoll;
-    expect(failureState()).toEqual(beforeFailures);
-    expect(adapter.isWatching()).toBe(true);
-    // The two chunks of this first pass are in flight together. Even when one
-    // header is unavailable, drain its sibling without committing any range.
-    expect(rpcProxy.takeHeaderBlocks().sort((left, right) => left - right)).toEqual(
-      Array.from({ length: 255 }, (_, index) => fromBlock + index),
-    );
-
-    const timeoutGate = rpcProxy.armHeaderBatchGate();
-    const retryStartedAt = performance.now();
-    const timedOutPoll = pollWatcher();
-    const joinedTimedOutPoll = pollWatcher();
-    await waitForGate('timeout', timeoutGate, timedOutPoll);
-    try {
-      // A manual drain shares transport cooldown with the automatic timer.
-      // A not-yet-available header uses the same cooldown as other RPC pressure.
-      expect(performance.now() - retryStartedAt).toBeGreaterThanOrEqual(900);
-      // Let the real HTTP batch deadline abort the held request; no fake clock.
-      await Promise.all([timedOutPoll, joinedTimedOutPoll]);
-    } finally {
-      timeoutGate.release();
-    }
-    expect(failureState()).toEqual(beforeFailures);
-    expect(adapter.isWatching()).toBe(true);
-    // The retry still begins at block 1, which has no preceding anchor.
-    expect(rpcProxy.takeHeaderBlocks()).toHaveLength(127);
-
-    // Both transient failures must shrink the actual poll: 255 -> 127 -> 63.
-    // Every successful response is forwarded from Anvil, including the fence.
-    await pollWatcher();
-    const readHeights = [...new Set(rpcProxy.takeHeaderBlocks())].sort((left, right) => left - right);
-    const anchorHeight = Math.max(1, fromBlock - 1);
-    expect(readHeights).toEqual(
-      Array.from({ length: fromBlock + 63 - anchorHeight }, (_, index) => anchorHeight + index),
-    );
-    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 62);
-
-    const successfulRetryAt = performance.now();
-    // Commit the first real observed range so the next poll can advance.
-    // One success must not restore the larger burst while pressure remains.
-    await processRuntime(env);
-    const retainedPressureGate = rpcProxy.armBlockNumberGate();
-    const retainedPressurePoll = pollWatcher();
-    await waitForGate('retained-pressure', retainedPressureGate, retainedPressurePoll);
-    try {
-      expect(performance.now() - successfulRetryAt).toBeGreaterThanOrEqual(1_400);
-    } finally {
-      retainedPressureGate.release();
-    }
-    await retainedPressurePoll;
-    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 125);
-
-    // A pressure-limited page below the liveness interval stays ephemeral,
-    // but the next authenticated read must advance beyond it, not loop forever.
-    rpcProxy.takeHeaderBlocks();
-    await pollWatcher();
-    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 188);
-
-    await processJEvents(env);
-
-    const replica = env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`);
-    expect(replica?.state.reserves.get(TOKEN_ID)).toBe(RESERVE_AMOUNT);
-    expect(Number(env.state.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBeGreaterThanOrEqual(
-      Number(reserveEvent?.blockNumber ?? 0),
-    );
-    expect(replica?.state.lastFinalizedJHeight).toBeGreaterThanOrEqual(Number(reserveEvent?.blockNumber ?? 0));
-
-    const beforeEmptyTail = await provider.send('evm_snapshot', []);
-    await provider.send('anvil_mine', ['0x1']);
-    const authenticatedEmptyTail = await provider.getBlockNumber();
-    await processJEvents(env);
-
-    const durableSemanticHeight = Number(reserveEvent?.blockNumber ?? 0);
-    expect(Number(env.state.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(durableSemanticHeight);
-    expect(adapter.getWatcherScanProgress?.().scannedThroughHeight).toBe(authenticatedEmptyTail);
-    const currentReplica = env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`);
-    expect(currentReplica?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
-    expect(currentReplica?.state.lastFinalizedJHeight).toBe(durableSemanticHeight);
-
-    // Reorg only the uncommitted carried suffix on the real chain. The
-    // certified anchor is unchanged; no durable rewind may be fabricated.
-    const replicaKey = `${entityId}:${SIGNER_ID}`;
-    const abandonedTip = env.infrastructure?.carriedJScanTips?.get(replicaKey)?.data.tipBlockHash;
-    expect(abandonedTip).toBeDefined();
-    expect(await provider.send('evm_revert', [beforeEmptyTail])).toBe(true);
-    await provider.send('evm_increaseTime', [10]);
-    await provider.send('anvil_mine', ['0x2']);
-    await pollWatcher();
-    expect(env.infrastructure?.carriedJScanTips?.has(replicaKey)).toBe(false);
-    expect(env.runtimeMempool?.runtimeTxs ?? []).toEqual([]);
-    expect(env.state.eReplicas.get(replicaKey)?.state.lastFinalizedJHeight).toBe(durableSemanticHeight);
-    await processJEvents(env);
-    const replacementTip = env.infrastructure?.carriedJScanTips?.get(replicaKey);
-    expect(replacementTip?.data.tipBlockHash).not.toBe(abandonedTip);
-    expect(replacementTip?.data.scannedThroughHeight).toBe(authenticatedEmptyTail + 1);
-    expect(env.state.eReplicas.get(replicaKey)?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
-
-    // A watched ERC20 receipt can be perfectly authentic yet irrelevant to
-    // every Entity in this Runtime. It advances only transient authenticated
-    // scan progress (carried into the next frame that addresses the Entity);
-    // WAL state remains event-driven and a restart safely rescans the bounded
-    // empty suffix.
-    const [watchedToken] = await adapter.getTokenRegistry();
-    if (!watchedToken) throw new Error('J_WATCHER_BACKLOG_WATCHED_TOKEN_MISSING');
-    const watchedErc20 = new ethers.Contract(
-      watchedToken.address,
-      ['function transfer(address to, uint256 amount) returns (bool)'],
-      adapter.signer,
-    );
-    const irrelevantTransfer = await watchedErc20.getFunction('transfer')(
-      '0x000000000000000000000000000000000000dEaD',
-      1n,
-    );
-    await irrelevantTransfer.wait();
-    const irrelevantLogHeight = await provider.getBlockNumber();
-    await processJEvents(env);
-
-    const afterIrrelevantLog = env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`);
-    expect(afterIrrelevantLog?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
-    expect(afterIrrelevantLog?.jHistory?.contiguousThroughHeight).toBe(durableSemanticHeight);
-    expect(afterIrrelevantLog?.state.lastFinalizedJHeight).toBe(durableSemanticHeight);
-    expect(adapter.getWatcherScanProgress?.().scannedThroughHeight).toBe(irrelevantLogHeight);
-
-    const restored = createEmptyEnv(RUNTIME_SEED);
-    if (!afterIrrelevantLog) throw new Error('J_WATCHER_BACKLOG_REPLICA_MISSING');
-    restored.state.eReplicas.set(`${entityId}:${SIGNER_ID}`, buildCanonicalEntityReplicaSnapshot(afterIrrelevantLog));
-    restoreDurableRuntimeSnapshot(restored, buildDurableRuntimeMachineSnapshot(env));
-
-    expect(Number(restored.state.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(durableSemanticHeight);
-    expect(restored.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.jHistory?.scannedThroughHeight).toBe(
-      durableSemanticHeight,
-    );
-
-    // Only committed history survives recovery. Re-authenticate every missing
-    // carried header from the certified anchor; never restore an ephemeral tip.
-    expect(restored.infrastructure?.carriedJScanTips?.size ?? 0).toBe(0);
-    await adapter.stopWatchingAndWait();
-    restored.scenarioMode = true;
-    adapter.startWatching(restored);
-    rpcProxy.takeHeaderBlocks();
-    await pollWatcher();
-    const restartHeaders = [...new Set(rpcProxy.takeHeaderBlocks())].sort((left, right) => left - right);
-    expect(restartHeaders).toContain(durableSemanticHeight);
-    expect(restartHeaders).toContain(irrelevantLogHeight);
-    expect(restartHeaders.filter(height => height > durableSemanticHeight)).toEqual(
-      Array.from({ length: irrelevantLogHeight - durableSemanticHeight }, (_, i) => durableSemanticHeight + i + 1),
-    );
-    expect(restored.state.eReplicas.get(replicaKey)?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
-    expect(readScanProgress().scannedThroughHeight).toBe(irrelevantLogHeight);
-    await adapter.stopWatchingAndWait();
-    adapter.startWatching(env);
-
-    const lateSignerPrivateKey = getSignerPrivateKey(env, LATE_SIGNER_ID);
-    const lateSignerAddress = new ethers.Wallet(ethers.hexlify(lateSignerPrivateKey)).address;
-    const lateEntityId = generateLazyEntityId([lateSignerAddress], 1n).toLowerCase();
-    await commitRuntimeInput(env, {
-      runtimeTxs: [
-        createTestEntityImportRuntimeTx(env, {
-          entityId: lateEntityId,
-          signerId: LATE_SIGNER_ID,
-          data: {
-            isProposer: true,
-            config: {
-              mode: 'proposer-based',
-              threshold: 1n,
-              validators: [LATE_SIGNER_ID],
-              shares: { [LATE_SIGNER_ID]: 1n },
-              jurisdiction,
+      const signerPrivateKey = getSignerPrivateKey(env, SIGNER_ID);
+      const registeredEncodedBoard = singleSignerEncodedBoard(signerPrivateKey);
+      const registeredBoardHash = hashBoard(registeredEncodedBoard);
+      const nextEntityNumber = await adapter.entityProvider.nextNumber();
+      const registerReceipt = await (
+        await adapter.entityProvider.registerNumberedEntitiesBatch([registeredEncodedBoard])
+      ).wait();
+      if (!registerReceipt || registerReceipt.status !== 1) {
+        throw new Error('J_WATCHER_BACKLOG_ENTITY_REGISTRATION_FAILED');
+      }
+      const registeredEntityId = ethers.zeroPadValue(ethers.toBeHex(nextEntityNumber), 32).toLowerCase();
+      const signerAddress = new ethers.Wallet(ethers.hexlify(signerPrivateKey)).address;
+      const entityId = generateLazyEntityId([signerAddress], 1n).toLowerCase();
+      await commitRuntimeInput(env, {
+        runtimeTxs: [
+          createTestEntityImportRuntimeTx(env, {
+            entityId,
+            signerId: SIGNER_ID,
+            data: {
+              isProposer: true,
+              config: {
+                mode: 'proposer-based',
+                threshold: 1n,
+                validators: [SIGNER_ID],
+                shares: { [SIGNER_ID]: 1n },
+                jurisdiction,
+              },
             },
-          },
-        }),
-      ],
-      entityInputs: [],
-    });
+          }),
+        ],
+        entityInputs: [],
+      });
 
-    await processJEvents(env);
+      const provider = adapter.provider as ethers.JsonRpcProvider;
+      await provider.send('anvil_mine', [ethers.toQuantity(backlogBlocks)]);
+      const receiptEvents = await adapter.debugFundReserves(entityId, TOKEN_ID, RESERVE_AMOUNT);
+      const reserveEvent = receiptEvents.find(event => event.name === 'ReserveUpdated');
+      expect(Number(reserveEvent?.blockNumber ?? 0)).toBeGreaterThan(backlogBlocks);
 
-    const lateReplica = env.state.eReplicas.get(`${lateEntityId}:${LATE_SIGNER_ID}`);
-    expect(lateReplica?.jHistory?.scannedThroughHeight).toBe(irrelevantLogHeight);
-    expect(lateReplica?.state.lastFinalizedJHeight).toBeLessThan(irrelevantLogHeight);
-    if (!lateReplica) throw new Error('J_WATCHER_BACKLOG_LATE_REPLICA_MISSING');
-    expect(
-      resolveObserverCertifiedBoardHash(lateReplica.state, getCertifiedBoardNodeStore(env), registeredEntityId),
-    ).toBe(registeredBoardHash.toLowerCase());
-    expect(env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.reserves.get(TOKEN_ID)).toBe(RESERVE_AMOUNT);
+      const pollWatcher = adapter.pollNow?.bind(adapter);
+      const readScanProgress = adapter.getWatcherScanProgress?.bind(adapter);
+      if (!pollWatcher || !readScanProgress) throw new Error('J_WATCHER_BACKLOG_POLL_API_MISSING');
+      const isWatching = adapter.isWatching.bind(adapter);
+      const takeHeaderBlocks = rpcProxy.takeHeaderBlocks;
+      const waitForGate = async (stage: string, gate: RpcGateControl, poll?: Promise<void>): Promise<void> => {
+        let timer: ReturnType<typeof setTimeout>;
+        const deadline = new Promise<{ status: 'timed-out' }>(resolve => {
+          timer = setTimeout(() => resolve({ status: 'timed-out' }), 5_000);
+        });
+        const result = await Promise.race([
+          gate.entered.then(() => ({ status: 'entered' }) as const),
+          ...(poll
+            ? [
+                poll.then(
+                  () => ({ status: 'resolved' }) as const,
+                  (error: unknown) => ({ status: 'rejected', error }) as const,
+                ),
+              ]
+            : []),
+          deadline,
+        ]).finally(() => clearTimeout(timer));
+        if (result.status === 'entered') return;
+        gate.release();
+        throw new Error(
+          `J_WATCHER_BACKLOG_GATE_NOT_REACHED:${stage}:${safeStringify({
+            poll: result.status,
+            scan: readScanProgress(),
+            isWatching: isWatching(),
+            headerBlocks: takeHeaderBlocks(),
+          })}`,
+          result.status === 'rejected' ? { cause: result.error } : undefined,
+        );
+      };
+      if (pressure) {
+        const fromBlock = getWatcherStartBlock(env, adapter.addresses.depository, CHAIN_ID);
+        const failureState = () =>
+          structuredClone({
+            scan: readScanProgress(),
+            jurisdictionHeight: env.state.jReplicas.get(jurisdictionName)?.blockNumber,
+            finalizedHeight: env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.lastFinalizedJHeight,
+            reserve: env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.reserves.get(TOKEN_ID),
+            mempool: env.runtimeMempool,
+          });
+        const beforeFailures = failureState();
+        rpcProxy.takeHeaderBlocks();
+        const missingHeaderGate = rpcProxy.armHeaderBatchGate('missing-header');
+        const missingHeaderPoll = pollWatcher();
+        await waitForGate('missing-header', missingHeaderGate, missingHeaderPoll);
+        missingHeaderGate.release();
+        await missingHeaderPoll;
+        expect(failureState()).toEqual(beforeFailures);
+        expect(adapter.isWatching()).toBe(true);
+        // The four chunks of this first pass are in flight together. Even when one
+        // header is unavailable, drain its sibling without committing any range.
+        expect(rpcProxy.takeHeaderBlocks().sort((left, right) => left - right)).toEqual(
+          Array.from({ length: 511 }, (_, index) => fromBlock + index),
+        );
 
-    await provider.send('anvil_mine', ['0x1']);
-    const shutdownGate = rpcProxy.armBlockNumberGate();
-    const inFlightPoll = adapter.pollNow?.();
-    if (!inFlightPoll) throw new Error('J_WATCHER_BACKLOG_POLL_API_MISSING');
-    await waitForGate('shutdown', shutdownGate, inFlightPoll);
-    let shutdownComplete = false;
-    const shutdown = adapter.stopWatchingAndWait().then(() => {
-      shutdownComplete = true;
-    });
-    await Bun.sleep(25);
-    expect(shutdownComplete).toBe(false);
-    shutdownGate.release();
-    await shutdown;
-    await inFlightPoll;
-    expect(adapter.isWatching()).toBe(false);
+        // A second unavailable header halves the Ethereum window again. Preserve
+        // the below-liveness checkpoint case after the subsequent real timeout.
+        const secondMissingGate = rpcProxy.armHeaderBatchGate('missing-header');
+        const secondMissingPoll = pollWatcher();
+        await waitForGate('second-missing-header', secondMissingGate, secondMissingPoll);
+        secondMissingGate.release();
+        await secondMissingPoll;
+        expect(failureState()).toEqual(beforeFailures);
+        expect(rpcProxy.takeHeaderBlocks().sort((left, right) => left - right)).toEqual(
+          Array.from({ length: 255 }, (_, index) => fromBlock + index),
+        );
 
-    // Exercise the actual automatic timer on the same real transport. The
-    // manual call below only joins a request already held by the proxy.
-    env.scenarioMode = false;
-    const automaticFailureGate = rpcProxy.armHeaderBatchGate(429);
-    adapter.startWatching(env);
-    await waitForGate('automatic-first-poll', automaticFailureGate);
-    const automaticFailure = pollWatcher();
-    automaticFailureGate.release();
-    await automaticFailure;
-    const automaticRetryGate = rpcProxy.armHeaderBatchGate(429);
-    const automaticRetryAt = performance.now();
-    await waitForGate('automatic-retry', automaticRetryGate);
-    const automaticRetry = pollWatcher();
-    try {
-      expect(performance.now() - automaticRetryAt).toBeGreaterThanOrEqual(900);
-    } finally {
-      automaticRetryGate.release();
-    }
-    await automaticRetry;
+        const timeoutGate = rpcProxy.armHeaderBatchGate();
+        const retryStartedAt = performance.now();
+        const timedOutPoll = pollWatcher();
+        const joinedTimedOutPoll = pollWatcher();
+        await waitForGate('timeout', timeoutGate, timedOutPoll);
+        try {
+          // A manual drain shares transport cooldown with the automatic timer.
+          // A not-yet-available header uses the same cooldown as other RPC pressure.
+          expect(performance.now() - retryStartedAt).toBeGreaterThanOrEqual(900);
+          // Let the real HTTP batch deadline abort the held request; no fake clock.
+          await Promise.all([timedOutPoll, joinedTimedOutPoll]);
+        } finally {
+          timeoutGate.release();
+        }
+        expect(failureState()).toEqual(beforeFailures);
+        expect(adapter.isWatching()).toBe(true);
+        // The retry still begins at block 1, which has no preceding anchor.
+        expect(rpcProxy.takeHeaderBlocks()).toHaveLength(127);
 
-    const cancelledGate = rpcProxy.armBlockNumberGate();
-    let requestedWhileCooling = false;
-    void cancelledGate.entered.then(() => {
-      requestedWhileCooling = true;
-    });
-    const coolingPoll = pollWatcher();
-    const joinedCoolingPoll = pollWatcher();
-    await Bun.sleep(25);
-    const stopStartedAt = performance.now();
-    try {
+        // All three failures shrink the actual poll: 511 -> 255 -> 127 -> 63.
+        // Every successful response is forwarded from Anvil, including the fence.
+        await pollWatcher();
+        const readHeights = [...new Set(rpcProxy.takeHeaderBlocks())].sort((left, right) => left - right);
+        const anchorHeight = Math.max(1, fromBlock - 1);
+        expect(readHeights).toEqual(
+          Array.from({ length: fromBlock + 63 - anchorHeight }, (_, index) => anchorHeight + index),
+        );
+        expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 62);
+
+        const successfulRetryAt = performance.now();
+        // Commit the first real observed range so the next poll can advance.
+        // One success must not restore the larger burst while pressure remains.
+        await processRuntime(env);
+        const retainedPressureGate = rpcProxy.armBlockNumberGate();
+        const retainedPressurePoll = pollWatcher();
+        await waitForGate('retained-pressure', retainedPressureGate, retainedPressurePoll);
+        try {
+          expect(performance.now() - successfulRetryAt).toBeGreaterThanOrEqual(1_400);
+        } finally {
+          retainedPressureGate.release();
+        }
+        await retainedPressurePoll;
+        expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 125);
+
+        // A pressure-limited page below the liveness interval stays ephemeral,
+        // but the next authenticated read must advance beyond it, not loop forever.
+        rpcProxy.takeHeaderBlocks();
+        await pollWatcher();
+        expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 188);
+      }
+
+      await processJEvents(env);
+
+      const replica = env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`);
+      expect(replica?.state.reserves.get(TOKEN_ID)).toBe(RESERVE_AMOUNT);
+      expect(Number(env.state.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBeGreaterThanOrEqual(
+        Number(reserveEvent?.blockNumber ?? 0),
+      );
+      expect(replica?.state.lastFinalizedJHeight).toBeGreaterThanOrEqual(Number(reserveEvent?.blockNumber ?? 0));
+
+      const beforeEmptyTail = await provider.send('evm_snapshot', []);
+      await provider.send('anvil_mine', ['0x1']);
+      const authenticatedEmptyTail = await provider.getBlockNumber();
+      await processJEvents(env);
+
+      const durableSemanticHeight = Number(reserveEvent?.blockNumber ?? 0);
+      expect(Number(env.state.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(durableSemanticHeight);
+      expect(adapter.getWatcherScanProgress?.().scannedThroughHeight).toBe(authenticatedEmptyTail);
+      const currentReplica = env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`);
+      expect(currentReplica?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
+      expect(currentReplica?.state.lastFinalizedJHeight).toBe(durableSemanticHeight);
+
+      // Reorg only the uncommitted carried suffix on the real chain. The
+      // certified anchor is unchanged; no durable rewind may be fabricated.
+      const replicaKey = `${entityId}:${SIGNER_ID}`;
+      const abandonedTip = env.infrastructure?.carriedJScanTips?.get(replicaKey)?.data.tipBlockHash;
+      expect(abandonedTip).toBeDefined();
+      expect(await provider.send('evm_revert', [beforeEmptyTail])).toBe(true);
+      await provider.send('evm_increaseTime', [10]);
+      await provider.send('anvil_mine', ['0x2']);
+      await pollWatcher();
+      expect(env.infrastructure?.carriedJScanTips?.has(replicaKey)).toBe(false);
+      expect(env.runtimeMempool?.runtimeTxs ?? []).toEqual([]);
+      expect(env.state.eReplicas.get(replicaKey)?.state.lastFinalizedJHeight).toBe(durableSemanticHeight);
+      await processJEvents(env);
+      const replacementTip = env.infrastructure?.carriedJScanTips?.get(replicaKey);
+      expect(replacementTip?.data.tipBlockHash).not.toBe(abandonedTip);
+      expect(replacementTip?.data.scannedThroughHeight).toBe(authenticatedEmptyTail + 1);
+      expect(env.state.eReplicas.get(replicaKey)?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
+
+      // A watched ERC20 receipt can be perfectly authentic yet irrelevant to
+      // every Entity in this Runtime. It advances only transient authenticated
+      // scan progress (carried into the next frame that addresses the Entity);
+      // WAL state remains event-driven and a restart safely rescans the bounded
+      // empty suffix.
+      const [watchedToken] = await adapter.getTokenRegistry();
+      if (!watchedToken) throw new Error('J_WATCHER_BACKLOG_WATCHED_TOKEN_MISSING');
+      const watchedErc20 = new ethers.Contract(
+        watchedToken.address,
+        ['function transfer(address to, uint256 amount) returns (bool)'],
+        adapter.signer,
+      );
+      const irrelevantTransfer = await watchedErc20.getFunction('transfer')(
+        '0x000000000000000000000000000000000000dEaD',
+        1n,
+      );
+      await irrelevantTransfer.wait();
+      const irrelevantLogHeight = await provider.getBlockNumber();
+      await processJEvents(env);
+
+      const afterIrrelevantLog = env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`);
+      expect(afterIrrelevantLog?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
+      expect(afterIrrelevantLog?.jHistory?.contiguousThroughHeight).toBe(durableSemanticHeight);
+      expect(afterIrrelevantLog?.state.lastFinalizedJHeight).toBe(durableSemanticHeight);
+      expect(adapter.getWatcherScanProgress?.().scannedThroughHeight).toBe(irrelevantLogHeight);
+
+      const restored = createEmptyEnv(RUNTIME_SEED);
+      if (!afterIrrelevantLog) throw new Error('J_WATCHER_BACKLOG_REPLICA_MISSING');
+      restored.state.eReplicas.set(`${entityId}:${SIGNER_ID}`, buildCanonicalEntityReplicaSnapshot(afterIrrelevantLog));
+      restoreDurableRuntimeSnapshot(restored, buildDurableRuntimeMachineSnapshot(env));
+
+      expect(Number(restored.state.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(durableSemanticHeight);
+      expect(restored.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.jHistory?.scannedThroughHeight).toBe(
+        durableSemanticHeight,
+      );
+
+      // Only committed history survives recovery. Re-authenticate every missing
+      // carried header from the certified anchor; never restore an ephemeral tip.
+      expect(restored.infrastructure?.carriedJScanTips?.size ?? 0).toBe(0);
       await adapter.stopWatchingAndWait();
-      await Promise.all([coolingPoll, joinedCoolingPoll]);
-      expect(performance.now() - stopStartedAt).toBeLessThan(500);
-      expect(requestedWhileCooling).toBe(false);
+      restored.scenarioMode = true;
+      adapter.startWatching(restored);
+      rpcProxy.takeHeaderBlocks();
+      await pollWatcher();
+      const restartHeaders = [...new Set(rpcProxy.takeHeaderBlocks())].sort((left, right) => left - right);
+      expect(restartHeaders).toContain(durableSemanticHeight);
+      expect(restartHeaders).toContain(irrelevantLogHeight);
+      expect(restartHeaders.filter(height => height > durableSemanticHeight)).toEqual(
+        Array.from({ length: irrelevantLogHeight - durableSemanticHeight }, (_, i) => durableSemanticHeight + i + 1),
+      );
+      expect(restored.state.eReplicas.get(replicaKey)?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
+      expect(readScanProgress().scannedThroughHeight).toBe(irrelevantLogHeight);
+      await adapter.stopWatchingAndWait();
+      adapter.startWatching(env);
+
+      const lateSignerPrivateKey = getSignerPrivateKey(env, LATE_SIGNER_ID);
+      const lateSignerAddress = new ethers.Wallet(ethers.hexlify(lateSignerPrivateKey)).address;
+      const lateEntityId = generateLazyEntityId([lateSignerAddress], 1n).toLowerCase();
+      await commitRuntimeInput(env, {
+        runtimeTxs: [
+          createTestEntityImportRuntimeTx(env, {
+            entityId: lateEntityId,
+            signerId: LATE_SIGNER_ID,
+            data: {
+              isProposer: true,
+              config: {
+                mode: 'proposer-based',
+                threshold: 1n,
+                validators: [LATE_SIGNER_ID],
+                shares: { [LATE_SIGNER_ID]: 1n },
+                jurisdiction,
+              },
+            },
+          }),
+        ],
+        entityInputs: [],
+      });
+
+      await processJEvents(env);
+
+      const lateReplica = env.state.eReplicas.get(`${lateEntityId}:${LATE_SIGNER_ID}`);
+      expect(lateReplica?.jHistory?.scannedThroughHeight).toBe(irrelevantLogHeight);
+      expect(lateReplica?.state.lastFinalizedJHeight).toBeLessThan(irrelevantLogHeight);
+      if (!lateReplica) throw new Error('J_WATCHER_BACKLOG_LATE_REPLICA_MISSING');
+      expect(
+        resolveObserverCertifiedBoardHash(lateReplica.state, getCertifiedBoardNodeStore(env), registeredEntityId),
+      ).toBe(registeredBoardHash.toLowerCase());
+      expect(env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.reserves.get(TOKEN_ID)).toBe(RESERVE_AMOUNT);
+
+      await provider.send('anvil_mine', ['0x1']);
+      const shutdownGate = rpcProxy.armBlockNumberGate();
+      const inFlightPoll = adapter.pollNow?.();
+      if (!inFlightPoll) throw new Error('J_WATCHER_BACKLOG_POLL_API_MISSING');
+      await waitForGate('shutdown', shutdownGate, inFlightPoll);
+      let shutdownComplete = false;
+      const shutdown = adapter.stopWatchingAndWait().then(() => {
+        shutdownComplete = true;
+      });
+      await Bun.sleep(25);
+      expect(shutdownComplete).toBe(false);
+      shutdownGate.release();
+      await shutdown;
+      await inFlightPoll;
       expect(adapter.isWatching()).toBe(false);
-    } finally {
-      cancelledGate.release();
-    }
-  }, 60_000);
+
+      // Exercise the actual automatic timer on the same real transport. The
+      // manual call below only joins a request already held by the proxy.
+      env.scenarioMode = false;
+      const automaticFailureGate = rpcProxy.armHeaderBatchGate(429);
+      adapter.startWatching(env);
+      await waitForGate('automatic-first-poll', automaticFailureGate);
+      const automaticFailure = pollWatcher();
+      automaticFailureGate.release();
+      await automaticFailure;
+      const automaticRetryGate = rpcProxy.armHeaderBatchGate(429);
+      const automaticRetryAt = performance.now();
+      await waitForGate('automatic-retry', automaticRetryGate);
+      const automaticRetry = pollWatcher();
+      try {
+        expect(performance.now() - automaticRetryAt).toBeGreaterThanOrEqual(900);
+      } finally {
+        automaticRetryGate.release();
+      }
+      await automaticRetry;
+
+      const cancelledGate = rpcProxy.armBlockNumberGate();
+      let requestedWhileCooling = false;
+      void cancelledGate.entered.then(() => {
+        requestedWhileCooling = true;
+      });
+      const coolingPoll = pollWatcher();
+      const joinedCoolingPoll = pollWatcher();
+      await Bun.sleep(25);
+      const stopStartedAt = performance.now();
+      try {
+        await adapter.stopWatchingAndWait();
+        await Promise.all([coolingPoll, joinedCoolingPoll]);
+        expect(performance.now() - stopStartedAt).toBeLessThan(500);
+        expect(requestedWhileCooling).toBe(false);
+        expect(adapter.isWatching()).toBe(false);
+      } finally {
+        cancelledGate.release();
+      }
+    },
+    60_000,
+  );
 });

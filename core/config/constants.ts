@@ -235,10 +235,13 @@ export const BLOCKCHAIN = {
   /** Admit authenticated catch-up progress before a public RPC range stalls.
    * A 2048-block receipt window can exceed the 60s drain deadline without
    * throttling. Smaller windows retain every header and the reorg fence;
-   * Including the preceding anchor, 255 blocks fill two 128-call RPC batches
-   * per pass. A 256-block window adds a one-header round trip to each fence.
+   * Including the preceding anchor, 511 Ethereum blocks fill four concurrent
+   * 128-call batches per pass. Both complete header passes remain mandatory.
+   * Native TRON reads every block's receipts and already fans out scalar RPCs;
+   * retain its smaller window and sequential header chunks.
    */
-  J_WATCHER_MAX_BLOCKS_PER_POLL: 255,
+  J_WATCHER_MAX_BLOCKS_PER_POLL: 511,
+  J_WATCHER_TRON_MAX_BLOCKS_PER_POLL: 255,
 
   /** Header-only authenticated scan progress commits its own Runtime frame at
    * most once per this many blocks past the replica's recorded contiguous scan.

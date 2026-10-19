@@ -1,7 +1,11 @@
 import { BLOCKCHAIN } from '../../../../config/constants';
 import type { RuntimeReplica } from '../../../../runtime/types';
 import { isRuntimeMempoolCapacityError } from '../../../../runtime/mempool/input-queue';
-import { nextWatcherPollWindow, nextWatcherRpcBackoffMs } from '../../watcher/observe/watcher-poll-policy';
+import {
+  nextWatcherPollWindow,
+  nextWatcherRpcBackoffMs,
+  watcherPollWindowLimit,
+} from '../../watcher/observe/watcher-poll-policy';
 import { isDebugEventEmitter } from '../../rpc-utils';
 import { haltProcessForFatalWatcherError, watcherErrorDetails, watcherErrorMessage } from '../rpc-boundary';
 import { rpcLog } from '../../rpc-public';
@@ -72,7 +76,7 @@ const createWatcherSession = (
     transientFailures: 0,
     lastTransientLogAtMs: 0,
     rpcCooldown: { backoffMs: 0, untilMs: 0, releaseWait: null },
-    maxBlocksPerPoll: BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL,
+    maxBlocksPerPoll: watcherPollWindowLimit(services.mode),
     txCounter: { value: 0, _seenLogs: { set: new Set<string>(), order: [] } },
     readWatchedErc20Tokens,
   };

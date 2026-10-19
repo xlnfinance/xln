@@ -23,16 +23,17 @@ export const MAX_RPC_BATCH_CALLS = 128;
 export const sendBatchInChunks = async (
   sendBatch: RpcBatchSend,
   calls: readonly RpcBatchCall[],
-  concurrentChunks: 1 | 2,
+  concurrentChunks: 1 | 2 | 4,
 ): Promise<unknown[]> => {
   if (calls.length <= MAX_RPC_BATCH_CALLS) return sendBatch(calls);
   const results: unknown[] = [];
   // Header chunks within one pass are independent. Settle every chunk promise
   // in this wave before returning or rejecting; retain request/result order.
   for (let offset = 0; offset < calls.length; offset += concurrentChunks * MAX_RPC_BATCH_CALLS) {
-    const chunks = [calls.slice(offset, offset + MAX_RPC_BATCH_CALLS)];
-    const next = calls.slice(offset + MAX_RPC_BATCH_CALLS, offset + 2 * MAX_RPC_BATCH_CALLS);
-    if (concurrentChunks === 2 && next.length > 0) chunks.push(next);
+    const chunks = Array.from(
+      { length: Math.min(concurrentChunks, Math.ceil((calls.length - offset) / MAX_RPC_BATCH_CALLS)) },
+      (_, index) => calls.slice(offset + index * MAX_RPC_BATCH_CALLS, offset + (index + 1) * MAX_RPC_BATCH_CALLS),
+    );
     const settled = await Promise.allSettled(chunks.map(async chunk => sendBatch(chunk)));
     for (const result of settled) {
       if (result.status === 'rejected') throw result.reason;

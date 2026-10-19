@@ -1,0 +1,114 @@
+{
+  "baseSHA": "152c25450b11abdb4f8d9d5b7ca4f5b072afe3b0",
+  "scope": "Runtime authenticated Ethereum window511/four128-callchunks; nativeTRON255/sequential unchanged; no durable format/financial formulas changed",
+  "firstRed": {
+    "artifact": "public-primary-f369fbdd2-02/result.json",
+    "desktopMs": 60002.975,
+    "desktopPass": false,
+    "mobileMs": 59239.396,
+    "passed": 2,
+    "expected": 4,
+    "unattempted": 1,
+    "servedBinding": "public-browser-version-f369fbdd2-02.json"
+  },
+  "measuredTarget": {
+    "artifact": "public-scan-growth-01/browser.jsonl",
+    "windowCounts": {
+      "rpc": 71,
+      "rpc2": 67
+    },
+    "medianBetweenWindowMs": {
+      "rpc": 371.604,
+      "rpc2": 369.356
+    },
+    "betweenWindowsRpcActiveMs": {
+      "rpc": 27204,
+      "rpc2": 25404
+    },
+    "limits": "Per-endpoint sums overlap; not additive critical-path durations. Existingtwochunkpairsalreadyoverlap276/276."
+  },
+  "browserCandidate": {
+    "artifact": "scan-window-candidate-01/result.json",
+    "homeMs": 43178.185708,
+    "passed": 1,
+    "errors": 0,
+    "runtimeSha256": "6aabb8fbd11f6a426992b0c05949ae9762c75937b3c48c1a73fbf62587a54b57",
+    "limits": "Actual StudioChromium/publicRPC; candidateassetsservedlocally;notdeployed"
+  },
+  "tests": {
+    "scan-window-l1-02": {
+      "passed": 79,
+      "assertions": 3771,
+      "seconds": 8.33,
+      "logSHA256": "05b33855784e5542d8f297140401f06ccc1c7a0f3eb235f57feab4d277dc7593"
+    },
+    "scan-window-pressure-l2-01": {
+      "passed": 1,
+      "assertions": 52,
+      "seconds": 32.57,
+      "logSHA256": "763a32476d7760a5ecb459a80b49af33e850dd82f36013c5bdc4a9e6d380fc96"
+    },
+    "scan-window-backlog-l2-01": {
+      "passed": 1,
+      "assertions": 38,
+      "seconds": 37.58,
+      "logSHA256": "6480ddc3911611b05fae2b15ae2fabd248c12fed7568fd58a4f99af52a564e1d"
+    }
+  },
+  "review": {
+    "patchSHA256": "dd9d94ee22af5f8d009b758d4778d51dd4e4e9f7dcb31e1aad094120c8a5c744",
+    "verdict": "Scoped no blocker, source review only. Later test-only split is not in reviewedpatch."
+  },
+  "remaining": "Final candidatecheck,checkedmainpush,frontenddeploy,servedbytes andactualpublicprimary/tutorial. Fullrelease/mainnet remain separate.",
+  "retainedFailures": {
+    "scan-window-l1-01": "78pass1fail: synchronous test chunk did not stay active; asynchronous vector corrected, production unchanged",
+    "scan-window-l2-01": "Exit124 at60s after combinedthreefaultcooldown+longbacklog; no passclaimed. Two namedboundedcases now eachpassed, allrecoveryassertionsretained."
+  },
+  "candidateSourceHashes": {
+    "core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts": "20fa6aab39353de14568f8853ce7152961b717e2cfeb2eccbffd5a450cc96136",
+    "core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts": "54923c8da0936148fb5658fcad4f78be1bdf4b440b0cf1d7c53f63ab7aa990fd",
+    "core/__tests__/jurisdiction/watchers/j-watcher-receipt-batching.test.ts": "555b3d351c4cd57e784d5d62a5342e013f10d0fae00b58106a374a4742d2bc84",
+    "core/config/constants.ts": "669058864035d85e58851329198cf54aaf002d300b5bda82b1c2b650081543a5",
+    "core/jurisdiction/adapter/receipt/reader.ts": "69160d171f4df9147cb3ad5d62a21ab54c36f28daf5f04dc8663bda4f609b69c",
+    "core/jurisdiction/adapter/rpc-public.ts": "ed07ca4c340c4a49ccc0b7542afdf24521a29de6eeafc1450868f402ec6d1636",
+    "core/jurisdiction/adapter/rpc-utils.ts": "893e7c3db18e1fc2e54c83d7382f747c59778ddcb73579af040e4fe9ab3e3e1e",
+    "core/jurisdiction/adapter/rpc/watcher/rpc-watcher-controller.ts": "0b7fd8ac57574199c533fb60af173cf1f3cdd92a3c680a1bb7d9e9e51051b2c3",
+    "core/jurisdiction/adapter/rpc/watcher/rpc-watcher-poll.ts": "bc6d55921f1ff1c12498554db8377db1509ce3e5ffa90fa661f7c99b47603714",
+    "core/jurisdiction/adapter/watcher/observe/watcher-poll-policy.ts": "560613a016cdbc0731da6aa641ae28fac7131d739d1bcaf84f77d481b4c55a7e"
+  },
+  "unchangedRuntimeAfterFormatting": "6aabb8fbd11f6a426992b0c05949ae9762c75937b3c48c1a73fbf62587a54b57",
+  "desktopMobileCandidate": {
+    "passed": 4,
+    "expected": 4,
+    "runtimeErrors": 0,
+    "artifact": "scan-window-primary-01/result.json",
+    "artifactSHA256": "8ec9ccc5360b313961dfbab9df4c5671af2e86f1fc1a18995e7f0a513dd43e49",
+    "checks": [
+      {
+        "view": "desktop",
+        "label": "Open a test wallet",
+        "pass": true,
+        "durationMs": 41610.90775
+      },
+      {
+        "view": "desktop",
+        "label": "Reload returning current-format wallet",
+        "pass": true,
+        "durationMs": 12795.603709000003
+      },
+      {
+        "view": "mobile",
+        "label": "Open a test wallet",
+        "pass": true,
+        "durationMs": 39282.492125
+      },
+      {
+        "view": "mobile",
+        "label": "Reload returning current-format wallet",
+        "pass": true,
+        "durationMs": 12394.735667
+      }
+    ]
+  },
+  "verificationBeforePublication": "bun run check and exact-SHA prepush proof required after this evidence file; not yet claimed by this file."
+}

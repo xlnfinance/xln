@@ -1,8 +1,5 @@
 import { compareStableText } from '../../../../protocol/serialization';
-import {
-  getEntityCertifiedJAnchor,
-  getValidatorJExpectedBlockHash,
-} from '../../../machine/local-history';
+import { getEntityCertifiedJAnchor, getValidatorJExpectedBlockHash } from '../../../machine/local-history';
 import type { RuntimeReplica } from '../../../../runtime/types';
 import { getJScanHistory } from '../../../../runtime/mempool/j-scan-carry';
 import {
@@ -15,24 +12,15 @@ import {
   resolveCommittedWatcherCursor,
   updateWatcherJurisdictionCursor,
 } from '../../watcher';
-import {
-  resolveWatcherPollToBlock,
-  rpcLog,
-} from '../../rpc-public';
+import { resolveWatcherPollToBlock, rpcLog } from '../../rpc-public';
 import {
   nextWatcherPollWindow,
+  watcherPollWindowLimit,
   shouldAuditCanonicalWatcherState,
 } from '../../watcher/observe/watcher-poll-policy';
-import {
-  assertAuthorityEvidenceCanonical,
-  reconcileWatcherCanonicalTip,
-} from './rpc-watcher-canonical';
+import { assertAuthorityEvidenceCanonical, reconcileWatcherCanonicalTip } from './rpc-watcher-canonical';
 import { applyAuthenticatedWatcherRange } from './rpc-watcher-ingress';
-import type {
-  RpcWatcherServices,
-  RpcWatcherSession,
-  RpcWatcherTrace,
-} from './rpc-watcher-types';
+import type { RpcWatcherServices, RpcWatcherSession, RpcWatcherTrace } from './rpc-watcher-types';
 
 type PollRequest = {
   session: RpcWatcherSession;
@@ -45,10 +33,7 @@ type PollRequest = {
 const isIngressPaused = (env: RuntimeReplica): boolean =>
   !!env.infrastructure?.persistenceQuiescing && !env.scenarioMode;
 
-const pauseForQuiesce = (
-  request: PollRequest,
-  details: Record<string, unknown>,
-): void => {
+const pauseForQuiesce = (request: PollRequest, details: Record<string, unknown>): void => {
   request.emitDebug({
     event: 'j_watch_paused_persistence_quiescing',
     lastSyncedBlock: request.session.lastSyncedBlock,
@@ -56,45 +41,21 @@ const pauseForQuiesce = (
   });
 };
 
-const commitScannedWatcherCursor = (
-  session: RpcWatcherSession,
-  services: RpcWatcherServices,
-): number => {
+const commitScannedWatcherCursor = (session: RpcWatcherSession, services: RpcWatcherServices): number => {
   const env = session.env;
-  const currentCursor = Math.max(
-    0,
-    getWatcherStartBlock(env, services.depositoryAddress, services.chainId) - 1,
-  );
-  const watcherReplica = findWatcherJurisdictionReplica(
-    env,
-    services.depositoryAddress,
-    services.chainId,
-  );
+  const currentCursor = Math.max(0, getWatcherStartBlock(env, services.depositoryAddress, services.chainId) - 1);
+  const watcherReplica = findWatcherJurisdictionReplica(env, services.depositoryAddress, services.chainId);
   if (!watcherReplica) {
-    throw new Error(
-      `J_WATCHER_JURISDICTION_NOT_FOUND:cursor:${services.chainId}:` +
-      services.depositoryAddress,
-    );
+    throw new Error(`J_WATCHER_JURISDICTION_NOT_FOUND:cursor:${services.chainId}:` + services.depositoryAddress);
   }
   // Empty authenticated tails are deliberately not durable Runtime progress.
   // Only the Entity-certified common prefix may advance the WAL cursor.
   const certifiedCursor = getMinimumCommittedSignerJHeight(env, watcherReplica);
-  const durableCandidate = certifiedCursor === null
-    ? currentCursor
-    : Math.min(session.lastSyncedBlock, certifiedCursor);
-  const resolvedCursor = resolveCommittedWatcherCursor(
-    env,
-    session.pendingBlocks,
-    durableCandidate,
-    currentCursor,
-  );
+  const durableCandidate =
+    certifiedCursor === null ? currentCursor : Math.min(session.lastSyncedBlock, certifiedCursor);
+  const resolvedCursor = resolveCommittedWatcherCursor(env, session.pendingBlocks, durableCandidate, currentCursor);
   if (resolvedCursor > currentCursor) {
-    updateWatcherJurisdictionCursor(
-      env,
-      resolvedCursor,
-      services.depositoryAddress,
-      services.chainId,
-    );
+    updateWatcherJurisdictionCursor(env, resolvedCursor, services.depositoryAddress, services.chainId);
   }
   return resolvedCursor;
 };
@@ -125,11 +86,7 @@ const rememberScanProgress = (
   services: RpcWatcherServices,
   scannedThroughHeight: number,
 ): void => {
-  const watcherReplica = findWatcherJurisdictionReplica(
-    session.env,
-    services.depositoryAddress,
-    services.chainId,
-  );
+  const watcherReplica = findWatcherJurisdictionReplica(session.env, services.depositoryAddress, services.chainId);
   if (!watcherReplica) return;
   const byReplica = new Map(Object.entries(session.scanProgress.replicaScannedThrough));
   for (const [key, replica] of session.env.state.eReplicas.entries()) {
@@ -137,10 +94,7 @@ const rememberScanProgress = (
     byReplica.set(key, Math.max(byReplica.get(key) ?? 0, scannedThroughHeight));
   }
   session.scanProgress = {
-    scannedThroughHeight: Math.max(
-      session.scanProgress.scannedThroughHeight,
-      scannedThroughHeight,
-    ),
+    scannedThroughHeight: Math.max(session.scanProgress.scannedThroughHeight, scannedThroughHeight),
     replicaScannedThrough: Object.fromEntries(
       [...byReplica.entries()].sort(([left], [right]) => compareStableText(left, right)),
     ),
@@ -169,12 +123,7 @@ const auditCanonicalStateWhenDue = async (
   request.trace.step = `verifyAuthorityEvidence:${currentBlock}`;
   await assertAuthorityEvidenceCanonical(session, session.env, currentBlock, request.services);
   request.trace.step = `verifyCanonicalTip:${session.lastSyncedBlock}`;
-  const rewound = await reconcileWatcherCanonicalTip(
-    session,
-    session.env,
-    request.services,
-    request.emitDebug,
-  );
+  const rewound = await reconcileWatcherCanonicalTip(session, session.env, request.services, request.emitDebug);
   session.lastCanonicalAuditAtMs = nowMs;
   if (!rewound) return false;
   session.pendingHistoryRange = null;
@@ -193,21 +142,21 @@ const resolveExpectedParent = (
   );
   const hashes = new Set(
     relevantReplicas
-      .map(([replicaKey, replica]) => getValidatorJExpectedBlockHash(
-        replica.state,
-        getJScanHistory(env, replicaKey, replica),
-        parentHeight,
-      ))
+      .map(([replicaKey, replica]) =>
+        getValidatorJExpectedBlockHash(replica.state, getJScanHistory(env, replicaKey, replica), parentHeight),
+      )
       .filter((hash): hash is string => Boolean(hash)),
   );
   if (hashes.size > 1) {
     throw new Error(`J_HISTORY_RANGE_PARENT_DIVERGENCE:height=${parentHeight}`);
   }
   const hash = [...hashes][0];
-  const finalized = hash !== undefined && relevantReplicas.some(([, replica]) => {
-    const anchor = getEntityCertifiedJAnchor(replica.state);
-    return anchor?.height === parentHeight && anchor.hash === hash;
-  });
+  const finalized =
+    hash !== undefined &&
+    relevantReplicas.some(([, replica]) => {
+      const anchor = getEntityCertifiedJAnchor(replica.state);
+      return anchor?.height === parentHeight && anchor.hash === hash;
+    });
   return hash === undefined ? { finalized } : { hash, finalized };
 };
 
@@ -224,45 +173,26 @@ export const runWatcherPoll = async (request: PollRequest): Promise<void> => {
   request.trace.step = 'eth_blockNumber';
   const currentBlock = await services.readCurrentBlockNumber();
   if (request.isCancelled()) return;
-  const safeHead = services.mode === 'tron'
-    ? await services.readSafeBlockNumber()
-    : currentBlock;
+  const safeHead = services.mode === 'tron' ? await services.readSafeBlockNumber() : currentBlock;
   const safeToBlock = safeHead - session.confirmationDepth;
   if (safeToBlock <= 0) return;
-  const watcherReplica = findWatcherJurisdictionReplica(
-    session.env,
-    services.depositoryAddress,
-    services.chainId,
-  );
+  const watcherReplica = findWatcherJurisdictionReplica(session.env, services.depositoryAddress, services.chainId);
   if (!watcherReplica) {
-    throw new Error(
-      `J_WATCHER_JURISDICTION_NOT_FOUND:poll:${services.chainId}:` +
-      services.depositoryAddress,
-    );
+    throw new Error(`J_WATCHER_JURISDICTION_NOT_FOUND:poll:${services.chainId}:` + services.depositoryAddress);
   }
   const minimumLocalScan = getMinimumScannedSignerJHeight(session.env, watcherReplica);
   const nextGlobalBlock = session.lastSyncedBlock + 1;
-  const fromBlock = Math.min(
-    nextGlobalBlock,
-    minimumLocalScan === null ? nextGlobalBlock : minimumLocalScan + 1,
-  );
+  const fromBlock = Math.min(nextGlobalBlock, minimumLocalScan === null ? nextGlobalBlock : minimumLocalScan + 1);
   if (await auditCanonicalStateWhenDue(request, currentBlock, fromBlock, safeToBlock)) return;
   if (waitForPendingHistory(request)) return;
   const committedCursor = commitScannedWatcherCursor(session, services);
   if (fromBlock > safeToBlock) {
     // The canonical audit validated the restored local frontier. Report that
     // scan without promoting the Entity-certified semantic cursor.
-    rememberScanProgress(
-      session,
-      services,
-      Math.min(Math.max(session.lastSyncedBlock, committedCursor), safeToBlock),
-    );
+    rememberScanProgress(session, services, Math.min(Math.max(session.lastSyncedBlock, committedCursor), safeToBlock));
     return;
   }
-  const toBlock = Math.min(
-    resolveWatcherPollToBlock(fromBlock, safeToBlock),
-    fromBlock + session.maxBlocksPerPoll - 1,
-  );
+  const toBlock = resolveWatcherPollToBlock(fromBlock, safeToBlock, session.maxBlocksPerPoll);
   request.trace.fromBlock = fromBlock;
   request.trace.toBlock = toBlock;
   const parent = resolveExpectedParent(session.env, watcherReplica, fromBlock - 1);
@@ -290,6 +220,10 @@ export const runWatcherPoll = async (request: PollRequest): Promise<void> => {
   session.transientFailures = 0;
   // Retained RPC pressure must suppress both retry bursts and window regrowth.
   if (session.rpcCooldown.backoffMs === 0) {
-    session.maxBlocksPerPoll = nextWatcherPollWindow(session.maxBlocksPerPoll, true);
+    session.maxBlocksPerPoll = nextWatcherPollWindow(
+      session.maxBlocksPerPoll,
+      true,
+      watcherPollWindowLimit(services.mode),
+    );
   }
 };
