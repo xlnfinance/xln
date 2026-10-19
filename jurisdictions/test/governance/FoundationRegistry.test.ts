@@ -1,13 +1,16 @@
 import { expect } from 'chai';
 import hre from 'hardhat';
+import { createWatchedErc20TokenReader } from '../../../core/jurisdiction/adapter/rpc-watcher-inputs.ts';
 
 import {
   boardHashOf,
   buildFoundationAction,
+  deployDepositoryStack,
   deployEntityProvider,
   deriveHardhatPrivateKey,
   encodeSingleSignerBoard,
   entityTransferFromTreasury,
+  foundationListExternalToken,
 } from '../helpers/hanko.ts';
 
 const { ethers } = await hre.network.getOrCreate('hardhat');
@@ -45,6 +48,51 @@ describe('Foundation authority', function () {
     };
     return { provider, signers, registerEntity };
   }
+
+  it('assigns stable token IDs only through a Foundation listing', async function () {
+    const { provider, signers } = await fixture();
+    const { depository } = await deployDepositoryStack(await provider.getAddress());
+    const token = await (await ethers.getContractFactory('ERC20Mock')).deploy('ERC20Mock', 'ERC20', 18, 1_000_000);
+    await token.waitForDeployment();
+    const tokenAddress = await token.getAddress();
+    const watcherDebugEvents: Record<string, unknown>[] = [];
+    const readWatchedTokens = createWatchedErc20TokenReader(
+      depository,
+      calls => Promise.all(calls.map(call => ethers.provider.send(call.method, call.params))),
+      payload => watcherDebugEvents.push(payload),
+    );
+    // Only Foundation authority through EntityProvider may list: neither an
+    // unrelated EOA nor the deployment admin has direct Depository authority.
+    await expect(
+      depository.connect(signers[1]).registerExternalToken(0, tokenAddress, 0),
+    ).to.be.revertedWithCustomError(depository, 'E2');
+    await expect(
+      depository.connect(signers[0]).registerExternalToken(0, tokenAddress, 0),
+    ).to.be.revertedWithCustomError(depository, 'E2');
+    expect(await readWatchedTokens()).to.deep.equal([]);
+    const argumentsHash = actionArgumentsHash(
+      ['address', 'uint8', 'address', 'uint256'],
+      [await depository.getAddress(), 0, tokenAddress, 0],
+    );
+    const listing = await buildFoundationAction(provider, await provider.FOUNDATION_REGISTER_TOKEN(), argumentsHash);
+    await expect(
+      provider.foundationRegisterExternalToken(
+        await depository.getAddress(),
+        0,
+        tokenAddress,
+        0,
+        listing.hankoData,
+        listing.actionNonce,
+      ),
+    )
+      .to.emit(depository, 'TokenRegistered')
+      .withArgs(1n, 0, tokenAddress, 0n);
+    expect(await readWatchedTokens()).to.deep.equal([{ tokenId: 1, address: tokenAddress.toLowerCase() }]);
+    await foundationListExternalToken(provider, await depository.getAddress(), 0, tokenAddress, 0);
+    expect(await depository.getTokensLength()).to.equal(2n);
+    expect(await readWatchedTokens()).to.deep.equal([{ tokenId: 1, address: tokenAddress.toLowerCase() }]);
+    expect(watcherDebugEvents).to.deep.equal([]);
+  });
 
   it('does not turn minority Foundation control ownership into admin authority', async function () {
     const { provider, signers } = await fixture();

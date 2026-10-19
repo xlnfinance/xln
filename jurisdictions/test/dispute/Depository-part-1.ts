@@ -10,7 +10,6 @@ import type { Depository, EntityProvider } from '../../typechain-types/index.js'
 import { Contract, type ContractTransactionReceipt } from 'ethers';
 import {
   addressEntityId,
-  buildFoundationAction,
   foundationListExternalToken,
   buildSingleSignerHanko,
   canonicalAccountKey,
@@ -22,7 +21,6 @@ import {
   encodeBatch,
   singleSignerLazyEntityId,
 } from '../helpers/hanko.ts';
-import { createWatchedErc20TokenReader } from '../../../core/jurisdiction/adapter/rpc-watcher-inputs.ts';
 const abi = ethers.AbiCoder.defaultAbiCoder();
 const DISPUTE_PROOF = 1;
 const MAX_FILL_RATIO = 65535n;
@@ -553,35 +551,6 @@ describe('Depository', () => {
       depository.connect(user0).processBatch(deposit.encodedBatch, deposit.hankoData, deposit.nonce),
     ).to.be.revertedWithCustomError(depository, 'E11');
     expect(await depository.getTokensLength()).to.equal(registryLengthBefore);
-  });
-  it('assigns stable token IDs only through a Foundation listing', async function () {
-    // Redesign: Depository.registerExternalToken admits only the EntityProvider;
-    // the deployment admin EOA (user0) is rejected like any other caller.
-    const { depository, erc20 } = await loadFixture(deployFixture);
-    const readWatchedTokens = createWatchedErc20TokenReader(depository, () => undefined);
-    const tokenAddress = await erc20.getAddress();
-    await expect(depository.connect(user1).registerExternalToken(0, tokenAddress, 0)).to.be.revertedWithCustomError(
-      depository,
-      'E2',
-    );
-    await expect(depository.connect(user0).registerExternalToken(0, tokenAddress, 0)).to.be.revertedWithCustomError(
-      depository,
-      'E2',
-    );
-    expect(await readWatchedTokens()).to.deep.equal([]);
-    const argumentsHash = ethers.keccak256(abi.encode(
-      ['address', 'uint8', 'address', 'uint256'],
-      [await depository.getAddress(), 0, tokenAddress, 0],
-    ));
-    const listing = await buildFoundationAction(entityProvider, await entityProvider.FOUNDATION_REGISTER_TOKEN(), argumentsHash);
-    await expect(entityProvider.foundationRegisterExternalToken(
-      await depository.getAddress(), 0, tokenAddress, 0, listing.hankoData, listing.actionNonce,
-    ))
-      .to.emit(depository, 'TokenRegistered')
-      .withArgs(1n, 0, tokenAddress, 0n);
-    expect(await readWatchedTokens()).to.deep.equal([{ tokenId: 1, address: tokenAddress.toLowerCase() }]);
-    await listExternalToken(depository, 0, tokenAddress, 0);
-    expect(await depository.getTokensLength()).to.equal(2n);
   });
   it('accepts ERC1155 custody without allocating an unregistered token ID', async function () {
     const { depository, erc1155 } = await loadFixture(deployFixture);

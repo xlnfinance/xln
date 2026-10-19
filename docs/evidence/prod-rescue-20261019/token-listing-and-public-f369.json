@@ -1,0 +1,4535 @@
+{
+  "baseSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+  "purpose": "Repair the real Foundation token-listing contract test after the registry reader gained an explicit batch sender; preserve actual public product evidence from the checked deployed frontend.",
+  "testPatchSha256": "5404bb9d3d2eb4aec660c2a17cc63161b96b486f4c1eca8041542760cb522ef0",
+  "productionAndSolidityUnchanged": true,
+  "release29": {
+    "running": false,
+    "pid": 73202,
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "release-current-29",
+      "--timeout-ms",
+      "7200000",
+      "--",
+      "bun",
+      "run",
+      "gate:release"
+    ],
+    "candidate": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+    "finishedSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+    "startedAt": "2026-10-19T10:27:20.627222+00:00",
+    "finishedAt": "2026-10-19T10:42:37.138476+00:00",
+    "exitCode": 1,
+    "seconds": 916.505986333,
+    "log": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/release-current-29.log",
+    "sha256": "31f1a365851728cd50ae095bff64b5cdf9fcdf40410a9741b0b0ecefdea94baf"
+  },
+  "regressionRed": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "token-listing-red",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-with-test-cleanup.ts",
+      "--reason=contracts-listing",
+      "--child-cwd=jurisdictions",
+      "--",
+      "bunx",
+      "hardhat",
+      "test",
+      "test/dispute/Depository-part-1.ts",
+      "--grep",
+      "assigns stable token IDs only through a Foundation listing"
+    ],
+    "candidate": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+    "exitCode": 1,
+    "seconds": 18.678285791,
+    "sha256": "cc27ffc06cfada6c9a6ce031068d119ba8ce9ed74f5800422ea4bf79a3264d50",
+    "artifactRoot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019"
+  },
+  "regressionGreen": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "token-listing-extracted-l1",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-with-test-cleanup.ts",
+      "--reason=contracts-listing",
+      "--child-cwd=jurisdictions",
+      "--",
+      "bunx",
+      "hardhat",
+      "test",
+      "test/governance/FoundationRegistry.test.ts"
+    ],
+    "baseSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+    "sourceHashes": {
+      "jurisdictions/test/dispute/Depository-part-1.ts": "8b440f02a10273abc23a08be8f816bc80d2a8bd03ad7a964991cfb860c01526d",
+      "jurisdictions/test/governance/FoundationRegistry.test.ts": "d43e0d5a53084e25fc64b10c8c01d3f712c4e3b6e3682c5059a15b559f56babb"
+    },
+    "sourceUnchanged": true,
+    "patchSha256": "5404bb9d3d2eb4aec660c2a17cc63161b96b486f4c1eca8041542760cb522ef0",
+    "exitCode": 0,
+    "seconds": 18.938988625,
+    "sha256": "6743bca02648e8cc5586a7ac905be68dfdbdd314f08dee1313cbcfd78aa60614",
+    "passed": 2,
+    "failed": 0,
+    "artifactRoot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019"
+  },
+  "fullContractSuite": {
+    "running": false,
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "token-listing-contract-full-02",
+      "--timeout-ms",
+      "240000",
+      "--",
+      "bun",
+      "run",
+      "test:contracts:full"
+    ],
+    "baseSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+    "sourceHashes": {
+      "jurisdictions/test/dispute/Depository-part-1.ts": "8b440f02a10273abc23a08be8f816bc80d2a8bd03ad7a964991cfb860c01526d",
+      "jurisdictions/test/governance/FoundationRegistry.test.ts": "d43e0d5a53084e25fc64b10c8c01d3f712c4e3b6e3682c5059a15b559f56babb"
+    },
+    "pid": 81638,
+    "exitCode": 0,
+    "seconds": 175.412819167,
+    "sourceUnchanged": true,
+    "sha256": "add8c15ebcd7945fd6ea056cbeb1203bb0cc16f7fb4d1b63015ef6ab36a8d58a",
+    "passed": 264,
+    "failed": 0,
+    "artifactRoot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019"
+  },
+  "exactCommandsOnBase": {
+    "unit": {
+      "command": "XLN_KEEP_TEST_ARTIFACTS=1 bun run stand:run --reason exact-unit-f369 --timeout-ms 7200000 -- bun run test:unit",
+      "candidate": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+      "exitCode": 0,
+      "observedFinishedAt": "2026-10-19T10:23:55.223484+00:00",
+      "passed": 5495,
+      "failed": 0,
+      "skipped": 1,
+      "assertions": 676430,
+      "phases": [
+        {
+          "name": "TS worker",
+          "passed": 53,
+          "seconds": 35.77,
+          "assertions": 41152
+        },
+        {
+          "name": "full roots",
+          "passed": 5420,
+          "skipped": 1,
+          "seconds": 1350.92,
+          "assertions": 635111
+        },
+        {
+          "name": "subprocess stdio",
+          "passed": 22,
+          "seconds": 5.18,
+          "assertions": 167
+        }
+      ],
+      "skip": "shared transaction semantic parity catalog: conditional RSCORE_REQUIRE_SEMANTIC_COMPLETENESS not enabled in exact default command; not proof of full Rust parity",
+      "sourceUnchanged": true,
+      "protectedDirtyPaths": ["brainvault/bun.lock", "brainvault/package.json"],
+      "artifact": "exact-test-unit-09.log",
+      "sha256": "2474bde60cdbf57fed1a1578aca066c02dbaa1a1a445d43db171563632188a43"
+    },
+    "test": {
+      "running": false,
+      "pid": 72196,
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "exact-test-f369",
+        "--timeout-ms",
+        "7200000",
+        "--",
+        "bun",
+        "run",
+        "test"
+      ],
+      "candidate": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+      "finishedSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+      "startedAt": "2026-10-19T10:23:55.482850+00:00",
+      "finishedAt": "2026-10-19T10:26:42.003434+00:00",
+      "exitCode": 0,
+      "seconds": 166.519196792,
+      "log": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/exact-test-03.log",
+      "sha256": "4667d9026b0478724ed519c785a23d4c789315df9cbc032c0510be5e2d1675c4",
+      "scenarios": {
+        "passed": 5,
+        "failed": 0
+      },
+      "browser": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "privateEvidence": {
+        "archive": "exact-test-03-private-artifacts.tar.gz",
+        "sha256": "aeacfbaf63a7fd1003da02921d423896e47d48beb81348de6df58091b2b082a2",
+        "notPublic": true
+      }
+    }
+  },
+  "public": {
+    "url": "https://xln.finance",
+    "frontendSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+    "backendSHA": "6d6d4bb4af6fcf2067f09cbbe330de3b6bca7440",
+    "versionBinding": {
+      "servedFrontendSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+      "servedBackendSHA": "6d6d4bb4af6fcf2067f09cbbe330de3b6bca7440",
+      "browserArtifact": "public-primary-f369fbdd2-01/result.json",
+      "browserArtifactSHA256": "a8a9e53f27cf037fd6b7c2d9d3e6b65c2886a3a26dbdc311e43896b3cf9621ca",
+      "canonicalBuild": "checked-web-build-03.json",
+      "matchedAssets": [
+        {
+          "view": "desktop",
+          "url": "https://xln.finance/ui/assets/index-BfsBhR2O.css",
+          "sha256": "6e4944544da1f6a72a5be3e9471e297ae63a91a63d80a89aae56650f8e12df76",
+          "bytes": 71473,
+          "contentType": "text/css; charset=utf-8"
+        },
+        {
+          "view": "desktop",
+          "url": "https://xln.finance/ui/assets/store-CeEpKONq.js",
+          "sha256": "8e36df53d8591bc6ec3da92e9b34a02a6149369f2c700751a3a269a0011a2434",
+          "bytes": 22968,
+          "contentType": "text/javascript; charset=utf-8"
+        },
+        {
+          "view": "desktop",
+          "url": "https://xln.finance/ui/assets/adapter-DArku3jg.js",
+          "sha256": "cf4e3a69a15a69782302f849f769abacc980075f48151c43c2faa409edb3f958",
+          "bytes": 1017733,
+          "contentType": "text/javascript; charset=utf-8"
+        },
+        {
+          "view": "desktop",
+          "url": "https://xln.finance/ui/assets/index-CY4PfIwR.js",
+          "sha256": "663e49136d864716cd8e477b73db8a1074d646097b6818cb41c53396ed12b5dc",
+          "bytes": 1167107,
+          "contentType": "text/javascript; charset=utf-8"
+        },
+        {
+          "view": "desktop",
+          "url": "https://xln.finance/ui/assets/index.esm-BD_kl2mU.js",
+          "sha256": "97ebb57b06882781b8b6f1e3984fbd4c1bb645ab860b570b5c163e7a6df9a2c1",
+          "bytes": 10516,
+          "contentType": "text/javascript; charset=utf-8"
+        },
+        {
+          "view": "desktop",
+          "url": "https://xln.finance/ui/runtime.js",
+          "sha256": "f80b9c90f4ec96a9068cab2c7b0b6188681d94f366b8075b7072646aec3239db",
+          "bytes": 5558504,
+          "contentType": "text/javascript; charset=utf-8"
+        },
+        {
+          "view": "desktop",
+          "url": "https://xln.finance/account-worker.js",
+          "sha256": "b1ae62723e1e3faa3fae3c736b94a7579aa532c0124720e1d58529bcd125335f",
+          "bytes": 1392158,
+          "contentType": "text/javascript; charset=utf-8"
+        },
+        {
+          "view": "mobile",
+          "url": "https://xln.finance/ui/assets/index-BfsBhR2O.css",
+          "sha256": "6e4944544da1f6a72a5be3e9471e297ae63a91a63d80a89aae56650f8e12df76",
+          "bytes": 71473,
+          "contentType": "text/css; charset=utf-8"
+        },
+        {
+          "view": "mobile",
+          "url": "https://xln.finance/ui/assets/store-CeEpKONq.js",
+          "sha256": "8e36df53d8591bc6ec3da92e9b34a02a6149369f2c700751a3a269a0011a2434",
+          "bytes": 22968,
+          "contentType": "text/javascript; charset=utf-8"
+        },
+        {
+          "view": "mobile",
+          "url": "https://xln.finance/ui/assets/adapter-DArku3jg.js",
+          "sha256": "cf4e3a69a15a69782302f849f769abacc980075f48151c43c2faa409edb3f958",
+          "bytes": 1017733,
+          "contentType": "text/javascript; charset=utf-8"
+        },
+        {
+          "view": "mobile",
+          "url": "https://xln.finance/ui/assets/index-CY4PfIwR.js",
+          "sha256": "663e49136d864716cd8e477b73db8a1074d646097b6818cb41c53396ed12b5dc",
+          "bytes": 1167107,
+          "contentType": "text/javascript; charset=utf-8"
+        },
+        {
+          "view": "mobile",
+          "url": "https://xln.finance/ui/assets/index.esm-BD_kl2mU.js",
+          "sha256": "97ebb57b06882781b8b6f1e3984fbd4c1bb645ab860b570b5c163e7a6df9a2c1",
+          "bytes": 10516,
+          "contentType": "text/javascript; charset=utf-8"
+        },
+        {
+          "view": "mobile",
+          "url": "https://xln.finance/ui/runtime.js",
+          "sha256": "f80b9c90f4ec96a9068cab2c7b0b6188681d94f366b8075b7072646aec3239db",
+          "bytes": 5558504,
+          "contentType": "text/javascript; charset=utf-8"
+        },
+        {
+          "view": "mobile",
+          "url": "https://xln.finance/account-worker.js",
+          "sha256": "b1ae62723e1e3faa3fae3c736b94a7579aa532c0124720e1d58529bcd125335f",
+          "bytes": 1392158,
+          "contentType": "text/javascript; charset=utf-8"
+        }
+      ],
+      "scope": "Actual public browser-loaded bytes match canonical checked frontend deploy. Backend binding is independently preserved by deploy03 financial snapshot and process comparison."
+    },
+    "primary": {
+      "passed": 4,
+      "expected": 4,
+      "checks": [
+        {
+          "view": "desktop",
+          "label": "Open a test wallet",
+          "url": "https://xln.finance/ui/",
+          "expected": "Actual Home click, visible total/account and enabled faucet within 60 seconds",
+          "pass": true,
+          "observed": "Home click succeeded; total/account visible and faucet enabled",
+          "durationMs": 39760.515084,
+          "rendererTimings": {
+            "timeOrigin": 1792403039856.1,
+            "observedAt": 41186.799999952316,
+            "longTasks": [
+              {
+                "startTime": 643.5,
+                "duration": 196
+              },
+              {
+                "startTime": 1466.199999988079,
+                "duration": 182
+              },
+              {
+                "startTime": 2154.599999964237,
+                "duration": 563
+              },
+              {
+                "startTime": 2754.899999976158,
+                "duration": 608
+              },
+              {
+                "startTime": 3377,
+                "duration": 60
+              },
+              {
+                "startTime": 7381.899999976158,
+                "duration": 63
+              },
+              {
+                "startTime": 8281.5,
+                "duration": 123
+              },
+              {
+                "startTime": 9541.399999976158,
+                "duration": 69
+              },
+              {
+                "startTime": 32911.19999998808,
+                "duration": 182
+              },
+              {
+                "startTime": 38217.5,
+                "duration": 734
+              },
+              {
+                "startTime": 38978.09999996424,
+                "duration": 213
+              },
+              {
+                "startTime": 40748.89999997616,
+                "duration": 53
+              }
+            ],
+            "longTasksSupported": true
+          },
+          "screenshot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-primary-f369fbdd2-01/desktop-primary.png"
+        },
+        {
+          "view": "desktop",
+          "label": "Reload returning current-format wallet",
+          "url": "https://xln.finance/ui/",
+          "expected": "Actual Home click, visible total/account and enabled faucet within 60 seconds",
+          "pass": true,
+          "observed": "Home click succeeded; total/account visible and faucet enabled",
+          "durationMs": 9210.096500000007,
+          "rendererTimings": {
+            "timeOrigin": 1792403081368.8,
+            "observedAt": 9214.399999976158,
+            "longTasks": [
+              {
+                "startTime": 776.2999999523163,
+                "duration": 68
+              },
+              {
+                "startTime": 1296.2999999523163,
+                "duration": 529
+              },
+              {
+                "startTime": 1857.2999999523163,
+                "duration": 584
+              },
+              {
+                "startTime": 3833.599999964237,
+                "duration": 57
+              },
+              {
+                "startTime": 4159.199999988079,
+                "duration": 753
+              },
+              {
+                "startTime": 5947.599999964237,
+                "duration": 229
+              },
+              {
+                "startTime": 7144.199999988079,
+                "duration": 64
+              },
+              {
+                "startTime": 7450,
+                "duration": 54
+              }
+            ],
+            "longTasksSupported": true
+          },
+          "screenshot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-primary-f369fbdd2-01/desktop-reload.png"
+        },
+        {
+          "view": "mobile",
+          "label": "Open a test wallet",
+          "url": "https://xln.finance/ui/",
+          "expected": "Actual Home click, visible total/account and enabled faucet within 60 seconds",
+          "pass": true,
+          "observed": "Home click succeeded; total/account visible and faucet enabled",
+          "durationMs": 40417.167250000006,
+          "rendererTimings": {
+            "timeOrigin": 1792403091197.9,
+            "observedAt": 41571.60000002384,
+            "longTasks": [
+              {
+                "startTime": 574.6000000238419,
+                "duration": 190
+              },
+              {
+                "startTime": 1239.699999988079,
+                "duration": 178
+              },
+              {
+                "startTime": 1870,
+                "duration": 528
+              },
+              {
+                "startTime": 2438.199999988079,
+                "duration": 611
+              },
+              {
+                "startTime": 3062.300000011921,
+                "duration": 57
+              },
+              {
+                "startTime": 7080,
+                "duration": 57
+              },
+              {
+                "startTime": 7895.199999988079,
+                "duration": 119
+              },
+              {
+                "startTime": 9176.300000011921,
+                "duration": 70
+              },
+              {
+                "startTime": 32896.10000002384,
+                "duration": 176
+              },
+              {
+                "startTime": 38690.40000003576,
+                "duration": 724
+              },
+              {
+                "startTime": 39439.90000003576,
+                "duration": 203
+              },
+              {
+                "startTime": 41215.30000001192,
+                "duration": 51
+              }
+            ],
+            "longTasksSupported": true
+          },
+          "screenshot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-primary-f369fbdd2-01/mobile-primary.png"
+        },
+        {
+          "view": "mobile",
+          "label": "Reload returning current-format wallet",
+          "url": "https://xln.finance/ui/",
+          "expected": "Actual Home click, visible total/account and enabled faucet within 60 seconds",
+          "pass": true,
+          "observed": "Home click succeeded; total/account visible and faucet enabled",
+          "durationMs": 9249.882167000003,
+          "rendererTimings": {
+            "timeOrigin": 1792403133005.4,
+            "observedAt": 9258.300000011921,
+            "longTasks": [
+              {
+                "startTime": 752.1000000238419,
+                "duration": 71
+              },
+              {
+                "startTime": 1245.5,
+                "duration": 516
+              },
+              {
+                "startTime": 1794.8999999761581,
+                "duration": 598
+              },
+              {
+                "startTime": 4237,
+                "duration": 757
+              },
+              {
+                "startTime": 6003.399999976158,
+                "duration": 218
+              },
+              {
+                "startTime": 7187.800000011921,
+                "duration": 62
+              }
+            ],
+            "longTasksSupported": true
+          },
+          "screenshot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-primary-f369fbdd2-01/mobile-reload.png"
+        }
+      ]
+    },
+    "returningTutorial": {
+      "servedSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+      "passed": 52,
+      "expected": 52,
+      "runtimeErrors": 0,
+      "initial": "public-tutorial-f369fbdd2-01/result.json",
+      "resume": "public-tutorial-f369-mobile-resume-01/result.json",
+      "reconciledFaucet": "faucet-boundary-reconciliation.json",
+      "originalHarnessFailureRetained": true,
+      "rows": [
+        {
+          "viewport": "desktop",
+          "id": "faucet",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "click",
+              "label": "Home",
+              "testId": "nav-home",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 14143.800000011921
+            },
+            {
+              "event": "change",
+              "label": "1. Get test money",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 14273.199999988079
+            },
+            {
+              "event": "click",
+              "label": "Get 100 test USDC",
+              "testId": "home-faucet",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 14684.699999988079
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Actual test grant +100 USDC; guide at Pay",
+          "elapsedMs": 1250,
+          "pathname": "/ui/",
+          "screenshot": "01-desktop-faucet.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "pay",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "2. Send your first payment",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 15379.699999988079
+            },
+            {
+              "event": "click",
+              "label": "Pay",
+              "testId": "home-pay",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 15470.300000011921
+            },
+            {
+              "event": "click",
+              "label": "pay-to",
+              "testId": "pay-to",
+              "url": "https://xln.finance/ui/pay",
+              "monotonicMs": 15976.099999964237
+            },
+            {
+              "event": "click",
+              "label": "pay-amount",
+              "testId": "pay-amount",
+              "url": "https://xln.finance/ui/pay",
+              "monotonicMs": 16204.300000011921
+            },
+            {
+              "event": "click",
+              "label": "Pay 25.00 USDC",
+              "testId": "pay-submit",
+              "url": "https://xln.finance/ui/pay",
+              "monotonicMs": 17189.099999964237
+            },
+            {
+              "event": "click",
+              "label": "Receipt",
+              "testId": "receipt-open",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 18615.80000001192
+            },
+            {
+              "event": "click",
+              "label": "Done",
+              "testId": "receipt-done",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 19018.399999976158
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Paid receipt 25 USDC; guide advanced to Trade",
+          "elapsedMs": 3883,
+          "pathname": "/ui/",
+          "screenshot": "02-desktop-pay.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "trade",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "3. Try a swap",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 19251.80000001192
+            },
+            {
+              "event": "click",
+              "label": "Swap",
+              "testId": "home-swap",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 19340.5
+            },
+            {
+              "event": "click",
+              "label": "swap-give",
+              "testId": "swap-give",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 19806.19999998808
+            },
+            {
+              "event": "click",
+              "label": "Swap USDC for WETH",
+              "testId": "swap-submit",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 19985.5
+            }
+          ],
+          "url": "https://xln.finance/ui/swap",
+          "observed": "Actual swap-submit advanced Trade to History through committed SwapFilled receipt",
+          "elapsedMs": 1778,
+          "pathname": "/ui/swap",
+          "screenshot": "03-desktop-trade.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "history",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "4. Find your payment and swap",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 21029.599999964237
+            },
+            {
+              "event": "click",
+              "label": "Activity",
+              "testId": "nav-activity",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 21116.099999964237
+            },
+            {
+              "event": "click",
+              "label": "Swap filled12:46filled12:46",
+              "testId": null,
+              "url": "https://xln.finance/ui/activity",
+              "monotonicMs": 22621.899999976158
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/activity",
+              "monotonicMs": 22670.5
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Actual activity row opened amount/status receipt",
+          "elapsedMs": 2040,
+          "pathname": "/ui/",
+          "screenshot": "04-desktop-history.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "jurisdiction",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "5. Know your jurisdiction",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 23113.5
+            },
+            {
+              "event": "click",
+              "label": "Contract stack",
+              "testId": null,
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 23236.69999998808
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 23316.599999964237
+            }
+          ],
+          "url": "https://xln.finance/ui/swap",
+          "observed": "Contract disclosure opened; two stack addresses",
+          "elapsedMs": 550,
+          "pathname": "/ui/swap",
+          "screenshot": "05-desktop-jurisdiction.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "cross",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "6. Swap across networks",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 23627
+            },
+            {
+              "event": "click",
+              "label": "Across networks",
+              "testId": "swap-cross-mode",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 23819.69999998808
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 23882.399999976158
+            }
+          ],
+          "url": "https://xln.finance/ui/receive",
+          "observed": "Cross-network mode selected; no cross-swap claimed",
+          "elapsedMs": 575,
+          "pathname": "/ui/receive",
+          "screenshot": "06-desktop-cross.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "receive",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "7. Request a payment",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 24211.399999976158
+            },
+            {
+              "event": "click",
+              "label": "receive-amount",
+              "testId": "receive-amount",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 24335.899999976158
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 24409.599999964237
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Receive amount5 and usable request-link control; no payment claimed",
+          "elapsedMs": 621,
+          "pathname": "/ui/",
+          "screenshot": "07-desktop-receive.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "hubs",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "8. Connect to a hub",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 24841.899999976158
+            },
+            {
+              "event": "click",
+              "label": "Connect another account",
+              "testId": "home-open-account",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 24950.599999964237
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 25424.80000001192
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 25486.599999964237
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Real Open account dialog and editable counterparty",
+          "elapsedMs": 1006,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "08-desktop-hubs.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "limits",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "9. Set credit limits",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 25847.599999964237
+            },
+            {
+              "event": "click",
+              "label": "Extend credit",
+              "testId": "account-extend-credit",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 25954.099999964237
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 26404.599999964237
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 26452.099999964237
+            }
+          ],
+          "url": "https://xln.finance/ui/move",
+          "observed": "Credit editor opened; no signed credit mutation claimed",
+          "elapsedMs": 901,
+          "pathname": "/ui/move",
+          "screenshot": "09-desktop-limits.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "move",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "10. Move and settle money",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 26752.5
+            },
+            {
+              "event": "click",
+              "label": "ReserveDepository escrow0.00 USDC",
+              "testId": "move-from-reserve",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 26927.099999964237
+            },
+            {
+              "event": "click",
+              "label": "AccountBilateral, instant0.00 USDC",
+              "testId": "move-to-account",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 26969.80000001192
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 27040.19999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/move",
+          "observed": "Reserve route and amount selected; no transfer claimed",
+          "elapsedMs": 544,
+          "pathname": "/ui/move",
+          "screenshot": "10-desktop-move.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "withdraw",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "11. Withdraw to your wallet",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 27296.599999964237
+            },
+            {
+              "event": "click",
+              "label": "ReserveDepository escrow0.00 USDC",
+              "testId": "move-from-reserve",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 27381.30000001192
+            },
+            {
+              "event": "click",
+              "label": "WalletOn-chain, in your signer0.00 USDC",
+              "testId": "move-to-external",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 27417.899999976158
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 27489.899999976158
+            }
+          ],
+          "url": "https://xln.finance/ui/lend",
+          "observed": "Reserve route and amount selected; no transfer claimed",
+          "elapsedMs": 491,
+          "pathname": "/ui/lend",
+          "screenshot": "11-desktop-withdraw.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "lending",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "12. Lend and withdraw",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 27794.19999998808
+            },
+            {
+              "event": "click",
+              "label": "lend-amount",
+              "testId": "lend-amount",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 27929.599999964237
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 27981.099999964237
+            }
+          ],
+          "url": "https://xln.finance/ui/lend",
+          "observed": "Savings amount edited; financial availability is separate",
+          "elapsedMs": 417,
+          "pathname": "/ui/lend",
+          "screenshot": "12-desktop-lending.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "borrow",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "13. Borrow with a known cost",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 28216.099999964237
+            },
+            {
+              "event": "click",
+              "label": "Borrow",
+              "testId": "lend-side-borrow",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 28303
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 28367.80000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/lend",
+          "observed": "Borrow mode and bank-approval requirement; no loan claimed",
+          "elapsedMs": 385,
+          "pathname": "/ui/lend",
+          "screenshot": "13-desktop-borrow.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "repay",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "14. Repay a loan",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 28601.899999976158
+            },
+            {
+              "event": "click",
+              "label": "How this works",
+              "testId": null,
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 28731.399999976158
+            },
+            {
+              "event": "click",
+              "label": "Refresh",
+              "testId": null,
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 28770.099999964237
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 28953.19999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/sovereignty",
+          "observed": "Pool refreshed; approved-loan prerequisite readable. No current loan; repayment transaction NOT VERIFIED",
+          "elapsedMs": 797,
+          "pathname": "/ui/sovereignty",
+          "screenshot": "14-desktop-repay.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "protection",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "15. Protect and recover",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 29411.19999998808
+            },
+            {
+              "event": "click",
+              "label": "watchtower-url",
+              "testId": "watchtower-url",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 29534.30000001192
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 29685.69999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/sovereignty",
+          "observed": "Tower editor accepts URL; no registration/recovery success claimed",
+          "elapsedMs": 592,
+          "pathname": "/ui/sovereignty",
+          "screenshot": "15-desktop-protection.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "recovery",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "16. Recover on a new device",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 30012.099999964237
+            },
+            {
+              "event": "click",
+              "label": "watchtower-url",
+              "testId": "watchtower-url",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 30149.30000001192
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 30266.399999976158
+            }
+          ],
+          "url": "https://xln.finance/ui/ownership",
+          "observed": "Tower editor accepts URL; no registration/recovery success claimed",
+          "elapsedMs": 517,
+          "pathname": "/ui/ownership",
+          "screenshot": "16-desktop-recovery.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "company",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "17. Create a company",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 30530.399999976158
+            },
+            {
+              "event": "click",
+              "label": "Create an entity",
+              "testId": null,
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 30787.599999964237
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 30855.80000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/ownership",
+          "observed": "Company form opened and name edited; no company registered",
+          "elapsedMs": 550,
+          "pathname": "/ui/ownership",
+          "screenshot": "17-desktop-company.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "shares",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "18. Manage company shares",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 31088.599999964237
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 31149.599999964237
+            }
+          ],
+          "url": "https://xln.finance/ui/ownership",
+          "observed": "Self-issued wallet prerequisite directs to real registration form; share issuance NOT VERIFIED",
+          "elapsedMs": 264,
+          "pathname": "/ui/ownership",
+          "screenshot": "18-desktop-shares.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "governance",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "19. Understand company control",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 31356.899999976158
+            },
+            {
+              "event": "click",
+              "label": "How this works",
+              "testId": null,
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 31500.5
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 31549
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "No eligible takeover target; current board-authority requirement readable. Governance transaction NOT VERIFIED",
+          "elapsedMs": 548,
+          "pathname": "/ui/",
+          "screenshot": "19-desktop-governance.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "balance",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "20. Credit and collateral",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 31914
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 32086.399999976158
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Balance composition readable; informational chapter",
+          "elapsedMs": 480,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "20-desktop-balance.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "cover",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "21. Request collateral",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 32396.599999964237
+            },
+            {
+              "event": "click",
+              "label": "Ask the hub to lock its own collateral for what it owes you",
+              "testId": "account-cover",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 32533.80000001192
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 33034.59999996424
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 33081.30000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/sovereignty",
+          "observed": "Collateral request editor opened; no collateral locked",
+          "elapsedMs": 948,
+          "pathname": "/ui/sovereignty",
+          "screenshot": "21-desktop-cover.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "evidence",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "22. Keep your signed proofs",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 33351.39999997616
+            },
+            {
+              "event": "click",
+              "label": "Save encrypted backup",
+              "testId": "evidence-export",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 33631.59999996424
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 33971.39999997616
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Nonempty signed evidence bundle downloaded privately; wallet restore NOT VERIFIED",
+          "elapsedMs": 970,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "22-desktop-evidence.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "dispute",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "23. Exit through a dispute",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 34331.5
+            },
+            {
+              "event": "click",
+              "label": "Take the last page you both signed to the chain. You never need the other side's permission.",
+              "testId": "account-dispute",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 34415.89999997616
+            },
+            {
+              "event": "click",
+              "label": "Dispute this account\u2026",
+              "testId": "dispute-prepare",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 34868.30000001192
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 34915.59999996424
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 34965.89999997616
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Explicit irreversible-action confirmation opened; dispute NOT submitted",
+          "elapsedMs": 876,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "23-desktop-dispute.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "completion",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "Finish Keep practising",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 35206.5
+            },
+            {
+              "event": "click",
+              "label": "Finish",
+              "testId": "tour-next",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 35262.59999996424
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Finish UI closes guide; failed chapter rows remain failures",
+          "elapsedMs": 291,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "24-desktop-completion.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "restart",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "click",
+              "label": "Continue",
+              "testId": null,
+              "url": "https://xln.finance/ui/settings",
+              "monotonicMs": 809.8000000119209
+            },
+            {
+              "event": "click",
+              "label": "Replay",
+              "testId": "tour-replay",
+              "url": "https://xln.finance/ui/settings",
+              "monotonicMs": 12760
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Settings Replay starts funded guide at Pay with no extra grant",
+          "elapsedMs": 13317,
+          "pathname": "/ui/",
+          "screenshot": "25-desktop-restart.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "returning-reload",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "7. Request a payment",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 13337.600000023842
+            },
+            {
+              "event": "click",
+              "label": "Continue",
+              "testId": null,
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 764.3999999761581
+            },
+            {
+              "event": "click",
+              "label": "Tutorial \u00b7 all features",
+              "testId": "wallet-tutorial",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 12754.599999964237
+            }
+          ],
+          "url": "https://xln.finance/ui/receive",
+          "observed": "Persistent native profile unlocks and resumes Receive chapter after reload",
+          "elapsedMs": 13187,
+          "pathname": "/ui/receive",
+          "screenshot": "26-desktop-returning-reload.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "faucet",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "1. Get test money",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 13296.199999988079
+            },
+            {
+              "event": "click",
+              "label": "Get 100 test USDC",
+              "testId": "home-faucet",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 13568.199999988079
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Original strict net+100 assertion failed. Independently downloaded settled incoming receipt proves100000000atomic USDC; signedAccount80 separate request_collateral fee154999 exactly reconciles449999724+100000000-154999=549844725. No repeated faucet click.",
+          "elapsedMs": 59678,
+          "pathname": "/ui/",
+          "screenshot": "27-mobile-faucet.png",
+          "originalResult": "fail",
+          "verificationArtifact": "faucet-boundary-reconciliation.json",
+          "originalArtifact": "public-tutorial-f369fbdd2-01/result.json",
+          "elapsedMsMeaning": "Original failed strict balance observation; later independent reconciliation is separately recorded."
+        },
+        {
+          "viewport": "mobile",
+          "id": "pay",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "2. Send your first payment",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 13665.100000023842
+            },
+            {
+              "event": "click",
+              "label": "Pay",
+              "testId": "home-pay",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 13768.300000011921
+            },
+            {
+              "event": "click",
+              "label": "pay-to",
+              "testId": "pay-to",
+              "url": "https://xln.finance/ui/pay",
+              "monotonicMs": 14232.699999988079
+            },
+            {
+              "event": "click",
+              "label": "pay-amount",
+              "testId": "pay-amount",
+              "url": "https://xln.finance/ui/pay",
+              "monotonicMs": 14562
+            },
+            {
+              "event": "click",
+              "label": "Pay 25.00 USDC",
+              "testId": "pay-submit",
+              "url": "https://xln.finance/ui/pay",
+              "monotonicMs": 15533.100000023842
+            },
+            {
+              "event": "click",
+              "label": "Receipt",
+              "testId": "receipt-open",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 17048.19999998808
+            },
+            {
+              "event": "click",
+              "label": "Done",
+              "testId": "receipt-done",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 17535.5
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Paid receipt 25 USDC; guide advanced to Trade",
+          "elapsedMs": 4025,
+          "pathname": "/ui/",
+          "screenshot": "01-mobile-pay.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "trade",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "3. Try a swap",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 17678.69999998808
+            },
+            {
+              "event": "click",
+              "label": "Swap",
+              "testId": "home-swap",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 17746.69999998808
+            },
+            {
+              "event": "click",
+              "label": "swap-give",
+              "testId": "swap-give",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 18214.600000023842
+            },
+            {
+              "event": "click",
+              "label": "Swap USDC for WETH",
+              "testId": "swap-submit",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 18529.5
+            }
+          ],
+          "url": "https://xln.finance/ui/swap",
+          "observed": "Actual swap-submit advanced Trade to History through committed SwapFilled receipt",
+          "elapsedMs": 1356,
+          "pathname": "/ui/swap",
+          "screenshot": "02-mobile-trade.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "history",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "4. Find your payment and swap",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 19043.5
+            },
+            {
+              "event": "click",
+              "label": "Back",
+              "testId": "back",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 19130.600000023842
+            },
+            {
+              "event": "click",
+              "label": "Activity",
+              "testId": "nav-activity",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 19427.600000023842
+            },
+            {
+              "event": "click",
+              "label": "Swap filled12:52filled12:52",
+              "testId": null,
+              "url": "https://xln.finance/ui/activity",
+              "monotonicMs": 20898.69999998808
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/activity",
+              "monotonicMs": 21370.100000023842
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/activity",
+              "monotonicMs": 21444.30000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Actual activity row opened amount/status receipt",
+          "elapsedMs": 2608,
+          "pathname": "/ui/",
+          "screenshot": "03-mobile-history.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "jurisdiction",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "5. Know your jurisdiction",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 21649.899999976158
+            },
+            {
+              "event": "click",
+              "label": "Contract stack",
+              "testId": null,
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 21779.899999976158
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 21854
+            }
+          ],
+          "url": "https://xln.finance/ui/swap",
+          "observed": "Contract disclosure opened; two stack addresses",
+          "elapsedMs": 403,
+          "pathname": "/ui/swap",
+          "screenshot": "04-mobile-jurisdiction.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "cross",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "6. Swap across networks",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 22053.30000001192
+            },
+            {
+              "event": "click",
+              "label": "Across networks",
+              "testId": "swap-cross-mode",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 22362
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 22427.19999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/receive",
+          "observed": "Cross-network mode selected; no cross-swap claimed",
+          "elapsedMs": 598,
+          "pathname": "/ui/receive",
+          "screenshot": "05-mobile-cross.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "receive",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "7. Request a payment",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 22677.69999998808
+            },
+            {
+              "event": "click",
+              "label": "receive-amount",
+              "testId": "receive-amount",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 22958.69999998808
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 23047.5
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Receive amount5 and usable request-link control; no payment claimed",
+          "elapsedMs": 576,
+          "pathname": "/ui/",
+          "screenshot": "06-mobile-receive.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "hubs",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "8. Connect to a hub",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 23244.19999998808
+            },
+            {
+              "event": "click",
+              "label": "Connect another account",
+              "testId": "home-open-account",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 23659.80000001192
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 24082.30000001192
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 24139.5
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Real Open account dialog and editable counterparty",
+          "elapsedMs": 1092,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "07-mobile-hubs.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "limits",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "9. Set credit limits",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 24335.899999976158
+            },
+            {
+              "event": "click",
+              "label": "Extend credit",
+              "testId": "account-extend-credit",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 24647.80000001192
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 25065.899999976158
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 25115.30000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/move",
+          "observed": "Credit editor opened; no signed credit mutation claimed",
+          "elapsedMs": 971,
+          "pathname": "/ui/move",
+          "screenshot": "08-mobile-limits.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "move",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "10. Move and settle money",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 25311.399999976158
+            },
+            {
+              "event": "click",
+              "label": "ReserveDepository escrow0.00 USDC",
+              "testId": "move-from-reserve",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 25612
+            },
+            {
+              "event": "click",
+              "label": "AccountBilateral, instant0.00 USDC",
+              "testId": "move-to-account",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 25660.100000023842
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 25726.69999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/move",
+          "observed": "Reserve route and amount selected; no transfer claimed",
+          "elapsedMs": 559,
+          "pathname": "/ui/move",
+          "screenshot": "09-mobile-move.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "withdraw",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "11. Withdraw to your wallet",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 25871.100000023842
+            },
+            {
+              "event": "click",
+              "label": "ReserveDepository escrow0.00 USDC",
+              "testId": "move-from-reserve",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 25946.600000023842
+            },
+            {
+              "event": "click",
+              "label": "WalletOn-chain, in your signer0.00 USDC",
+              "testId": "move-to-external",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 25993.100000023842
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 26057.30000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/lend",
+          "observed": "Reserve route and amount selected; no transfer claimed",
+          "elapsedMs": 341,
+          "pathname": "/ui/lend",
+          "screenshot": "10-mobile-withdraw.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "lending",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "12. Lend and withdraw",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 26215.80000001192
+            },
+            {
+              "event": "click",
+              "label": "lend-amount",
+              "testId": "lend-amount",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 26511.69999998808
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 26560.30000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/lend",
+          "observed": "Savings amount edited; financial availability is separate",
+          "elapsedMs": 444,
+          "pathname": "/ui/lend",
+          "screenshot": "11-mobile-lending.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "borrow",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "13. Borrow with a known cost",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 26662.30000001192
+            },
+            {
+              "event": "click",
+              "label": "Borrow",
+              "testId": "lend-side-borrow",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 26740.399999976158
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 26797
+            }
+          ],
+          "url": "https://xln.finance/ui/lend",
+          "observed": "Borrow mode and bank-approval requirement; no loan claimed",
+          "elapsedMs": 255,
+          "pathname": "/ui/lend",
+          "screenshot": "12-mobile-borrow.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "repay",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "14. Repay a loan",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 26917.30000001192
+            },
+            {
+              "event": "click",
+              "label": "How this works",
+              "testId": null,
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 27044.30000001192
+            },
+            {
+              "event": "click",
+              "label": "Refresh",
+              "testId": null,
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 27093
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 27263.19999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/sovereignty",
+          "observed": "Pool refreshed; approved-loan prerequisite readable. No current loan; repayment transaction NOT VERIFIED",
+          "elapsedMs": 620,
+          "pathname": "/ui/sovereignty",
+          "screenshot": "13-mobile-repay.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "protection",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "15. Protect and recover",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 27545
+            },
+            {
+              "event": "click",
+              "label": "watchtower-url",
+              "testId": "watchtower-url",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 27860
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 28010.399999976158
+            }
+          ],
+          "url": "https://xln.finance/ui/sovereignty",
+          "observed": "Tower editor accepts URL; no registration/recovery success claimed",
+          "elapsedMs": 642,
+          "pathname": "/ui/sovereignty",
+          "screenshot": "14-mobile-protection.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "recovery",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "16. Recover on a new device",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 28185.899999976158
+            },
+            {
+              "event": "click",
+              "label": "watchtower-url",
+              "testId": "watchtower-url",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 28305.19999998808
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 28427.899999976158
+            }
+          ],
+          "url": "https://xln.finance/ui/ownership",
+          "observed": "Tower editor accepts URL; no registration/recovery success claimed",
+          "elapsedMs": 396,
+          "pathname": "/ui/ownership",
+          "screenshot": "15-mobile-recovery.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "company",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "17. Create a company",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 28588.600000023842
+            },
+            {
+              "event": "click",
+              "label": "Create an entity",
+              "testId": null,
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 28846.899999976158
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 28908.600000023842
+            }
+          ],
+          "url": "https://xln.finance/ui/ownership",
+          "observed": "Company form opened and name edited; no company registered",
+          "elapsedMs": 436,
+          "pathname": "/ui/ownership",
+          "screenshot": "16-mobile-company.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "shares",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "18. Manage company shares",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 29029.600000023842
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 29075.30000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/ownership",
+          "observed": "Self-issued wallet prerequisite directs to real registration form; share issuance NOT VERIFIED",
+          "elapsedMs": 149,
+          "pathname": "/ui/ownership",
+          "screenshot": "17-mobile-shares.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "governance",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "19. Understand company control",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 29178
+            },
+            {
+              "event": "click",
+              "label": "How this works",
+              "testId": null,
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 29293.600000023842
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 29329
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "No eligible takeover target; current board-authority requirement readable. Governance transaction NOT VERIFIED",
+          "elapsedMs": 347,
+          "pathname": "/ui/",
+          "screenshot": "18-mobile-governance.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "balance",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "20. Credit and collateral",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 29540.69999998808
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 29908.899999976158
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Balance composition readable; informational chapter",
+          "elapsedMs": 549,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "19-mobile-balance.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "cover",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "21. Request collateral",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 30090.30000001192
+            },
+            {
+              "event": "click",
+              "label": "Ask the hub to lock its own collateral for what it owes you",
+              "testId": "account-cover",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 30393.600000023842
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 30825.600000023842
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 30872.600000023842
+            }
+          ],
+          "url": "https://xln.finance/ui/sovereignty",
+          "observed": "Collateral request editor opened; no collateral locked",
+          "elapsedMs": 976,
+          "pathname": "/ui/sovereignty",
+          "screenshot": "20-mobile-cover.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "evidence",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "22. Keep your signed proofs",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 31073.30000001192
+            },
+            {
+              "event": "click",
+              "label": "Save encrypted backup",
+              "testId": "evidence-export",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 31341.600000023842
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 31761.600000023842
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Nonempty signed evidence bundle downloaded privately; wallet restore NOT VERIFIED",
+          "elapsedMs": 873,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "21-mobile-evidence.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "dispute",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "23. Exit through a dispute",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 31949.100000023842
+            },
+            {
+              "event": "click",
+              "label": "Take the last page you both signed to the chain. You never need the other side's permission.",
+              "testId": "account-dispute",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 32250.600000023842
+            },
+            {
+              "event": "click",
+              "label": "Dispute this account\u2026",
+              "testId": "dispute-prepare",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 32648.30000001192
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 32693.80000001192
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 32748.30000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Explicit irreversible-action confirmation opened; dispute NOT submitted",
+          "elapsedMs": 938,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "22-mobile-dispute.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "completion",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "Finish Keep practising",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 32886.89999997616
+            },
+            {
+              "event": "click",
+              "label": "Finish",
+              "testId": "tour-next",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 32927.69999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Finish UI closes guide; failed chapter rows remain failures",
+          "elapsedMs": 169,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "23-mobile-completion.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "restart",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "click",
+              "label": "Continue",
+              "testId": null,
+              "url": "https://xln.finance/ui/settings",
+              "monotonicMs": 757.5999999642372
+            },
+            {
+              "event": "click",
+              "label": "Replay",
+              "testId": "tour-replay",
+              "url": "https://xln.finance/ui/settings",
+              "monotonicMs": 12765.199999988079
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Settings Replay starts funded guide at Pay with no extra grant",
+          "elapsedMs": 13024,
+          "pathname": "/ui/",
+          "screenshot": "24-mobile-restart.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "returning-reload",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "7. Request a payment",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 13046.899999976158
+            },
+            {
+              "event": "click",
+              "label": "Continue",
+              "testId": null,
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 752.3999999761581
+            },
+            {
+              "event": "click",
+              "label": "Tutorial \u00b7 all features",
+              "testId": "wallet-tutorial",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 12876.399999976158
+            }
+          ],
+          "url": "https://xln.finance/ui/receive",
+          "observed": "Persistent native profile unlocks and resumes Receive chapter after reload",
+          "elapsedMs": 13159,
+          "pathname": "/ui/receive",
+          "screenshot": "25-mobile-returning-reload.png"
+        }
+      ],
+      "scope": "Returning current-format wallet desktop/mobile,all23chapters+completion/restart/reload. Faucet click proven by exactgrossreceipt/netfee reconciliation; no duplicate faucet submission."
+    },
+    "freshTutorial": {
+      "servedFrontendSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+      "passed": 52,
+      "expected": 52,
+      "errors": 0,
+      "artifacts": [
+        "public-tutorial-f369-fresh-desktop-01/result.json",
+        "public-tutorial-f369-fresh-mobile-01/result.json"
+      ],
+      "rows": [
+        {
+          "viewport": "desktop",
+          "id": "faucet",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "1. Get test money",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 53138.59999996424
+            },
+            {
+              "event": "click",
+              "label": "Show 3 assets with zero balance",
+              "testId": "home-show-zero",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 53255
+            },
+            {
+              "event": "click",
+              "label": "Get 100 test USDC",
+              "testId": "home-faucet",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 53376.69999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Actual test grant +100 USDC; guide at Pay",
+          "elapsedMs": 1425,
+          "pathname": "/ui/",
+          "screenshot": "01-desktop-faucet.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "pay",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "2. Send your first payment",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 54552.39999997616
+            },
+            {
+              "event": "click",
+              "label": "Pay",
+              "testId": "home-pay",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 54642.39999997616
+            },
+            {
+              "event": "click",
+              "label": "pay-to",
+              "testId": "pay-to",
+              "url": "https://xln.finance/ui/pay",
+              "monotonicMs": 55132.59999996424
+            },
+            {
+              "event": "click",
+              "label": "pay-amount",
+              "testId": "pay-amount",
+              "url": "https://xln.finance/ui/pay",
+              "monotonicMs": 55376.89999997616
+            },
+            {
+              "event": "click",
+              "label": "Pay 25.00 USDC",
+              "testId": "pay-submit",
+              "url": "https://xln.finance/ui/pay",
+              "monotonicMs": 56395.5
+            },
+            {
+              "event": "click",
+              "label": "Receipt",
+              "testId": "receipt-open",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 57697.69999998808
+            },
+            {
+              "event": "click",
+              "label": "Done",
+              "testId": "receipt-done",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 58132.19999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Paid receipt 25 USDC; guide advanced to Trade",
+          "elapsedMs": 3833,
+          "pathname": "/ui/",
+          "screenshot": "02-desktop-pay.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "trade",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "3. Try a swap",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 58396.59999996424
+            },
+            {
+              "event": "click",
+              "label": "Swap",
+              "testId": "home-swap",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 58480
+            },
+            {
+              "event": "click",
+              "label": "swap-give",
+              "testId": "swap-give",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 58927.09999996424
+            },
+            {
+              "event": "click",
+              "label": "Swap USDC for WETH",
+              "testId": "swap-submit",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 59227.19999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/swap",
+          "observed": "Actual swap-submit advanced Trade to History through committed SwapFilled receipt",
+          "elapsedMs": 1908,
+          "pathname": "/ui/swap",
+          "screenshot": "03-desktop-trade.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "history",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "4. Find your payment and swap",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 60299.59999996424
+            },
+            {
+              "event": "click",
+              "label": "Activity",
+              "testId": "nav-activity",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 60393.39999997616
+            },
+            {
+              "event": "click",
+              "label": "Swap filled12:55filled12:55",
+              "testId": null,
+              "url": "https://xln.finance/ui/activity",
+              "monotonicMs": 61378.299999952316
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/activity",
+              "monotonicMs": 61424.19999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Actual activity row opened amount/status receipt",
+          "elapsedMs": 1461,
+          "pathname": "/ui/",
+          "screenshot": "04-desktop-history.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "jurisdiction",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "5. Know your jurisdiction",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 61770.39999997616
+            },
+            {
+              "event": "click",
+              "label": "Contract stack",
+              "testId": null,
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 61907.89999997616
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 61983
+            }
+          ],
+          "url": "https://xln.finance/ui/swap",
+          "observed": "Contract disclosure opened; two stack addresses",
+          "elapsedMs": 555,
+          "pathname": "/ui/swap",
+          "screenshot": "05-desktop-jurisdiction.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "cross",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "6. Swap across networks",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 62328.59999996424
+            },
+            {
+              "event": "click",
+              "label": "Across networks",
+              "testId": "swap-cross-mode",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 62445.5
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 62498.19999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/receive",
+          "observed": "Cross-network mode selected; no cross-swap claimed",
+          "elapsedMs": 502,
+          "pathname": "/ui/receive",
+          "screenshot": "06-desktop-cross.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "receive",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "7. Request a payment",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 62833.59999996424
+            },
+            {
+              "event": "click",
+              "label": "receive-amount",
+              "testId": "receive-amount",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 62957.799999952316
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 63057.799999952316
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Receive amount5 and usable request-link control; no payment claimed",
+          "elapsedMs": 566,
+          "pathname": "/ui/",
+          "screenshot": "07-desktop-receive.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "hubs",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "8. Connect to a hub",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 63409.59999996424
+            },
+            {
+              "event": "click",
+              "label": "Connect another account",
+              "testId": "home-open-account",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 63549.09999996424
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 64026.799999952316
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 64089.299999952316
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Real Open account dialog and editable counterparty",
+          "elapsedMs": 1038,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "08-desktop-hubs.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "limits",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "9. Set credit limits",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 64447.89999997616
+            },
+            {
+              "event": "click",
+              "label": "Extend credit",
+              "testId": "account-extend-credit",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 64550.59999996424
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 65009.69999998808
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 65058.69999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/move",
+          "observed": "Credit editor opened; no signed credit mutation claimed",
+          "elapsedMs": 891,
+          "pathname": "/ui/move",
+          "screenshot": "09-desktop-limits.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "move",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "10. Move and settle money",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 65345.39999997616
+            },
+            {
+              "event": "click",
+              "label": "ReserveDepository escrow0.00 USDC",
+              "testId": "move-from-reserve",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 65521.69999998808
+            },
+            {
+              "event": "click",
+              "label": "AccountBilateral, instant0.00 USDC",
+              "testId": "move-to-account",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 65558.19999998808
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 65628
+            }
+          ],
+          "url": "https://xln.finance/ui/move",
+          "observed": "Reserve route and amount selected; no transfer claimed",
+          "elapsedMs": 515,
+          "pathname": "/ui/move",
+          "screenshot": "10-desktop-move.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "withdraw",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "11. Withdraw to your wallet",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 65867.5
+            },
+            {
+              "event": "click",
+              "label": "ReserveDepository escrow0.00 USDC",
+              "testId": "move-from-reserve",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 65943.09999996424
+            },
+            {
+              "event": "click",
+              "label": "WalletOn-chain, in your signer0.00 USDC",
+              "testId": "move-to-external",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 65997.29999995232
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 66080.09999996424
+            }
+          ],
+          "url": "https://xln.finance/ui/lend",
+          "observed": "Reserve route and amount selected; no transfer claimed",
+          "elapsedMs": 499,
+          "pathname": "/ui/lend",
+          "screenshot": "11-desktop-withdraw.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "lending",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "12. Lend and withdraw",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 66379.79999995232
+            },
+            {
+              "event": "click",
+              "label": "lend-amount",
+              "testId": "lend-amount",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 66541
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 66612.09999996424
+            }
+          ],
+          "url": "https://xln.finance/ui/lend",
+          "observed": "Savings amount edited; financial availability is separate",
+          "elapsedMs": 446,
+          "pathname": "/ui/lend",
+          "screenshot": "12-desktop-lending.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "borrow",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "13. Borrow with a known cost",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 66829.59999996424
+            },
+            {
+              "event": "click",
+              "label": "Borrow",
+              "testId": "lend-side-borrow",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 66911.89999997616
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 66983.09999996424
+            }
+          ],
+          "url": "https://xln.finance/ui/lend",
+          "observed": "Borrow mode and bank-approval requirement; no loan claimed",
+          "elapsedMs": 385,
+          "pathname": "/ui/lend",
+          "screenshot": "13-desktop-borrow.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "repay",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "14. Repay a loan",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 67214.39999997616
+            },
+            {
+              "event": "click",
+              "label": "How this works",
+              "testId": null,
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 67322.69999998808
+            },
+            {
+              "event": "click",
+              "label": "Refresh",
+              "testId": null,
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 67379.19999998808
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 67507.89999997616
+            }
+          ],
+          "url": "https://xln.finance/ui/sovereignty",
+          "observed": "Pool refreshed; approved-loan prerequisite readable. No current loan; repayment transaction NOT VERIFIED",
+          "elapsedMs": 831,
+          "pathname": "/ui/sovereignty",
+          "screenshot": "14-desktop-repay.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "protection",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "15. Protect and recover",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 68048.29999995232
+            },
+            {
+              "event": "click",
+              "label": "watchtower-url",
+              "testId": "watchtower-url",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 68174.59999996424
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 68310.69999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/sovereignty",
+          "observed": "Tower editor accepts URL; no registration/recovery success claimed",
+          "elapsedMs": 575,
+          "pathname": "/ui/sovereignty",
+          "screenshot": "15-desktop-protection.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "recovery",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "16. Recover on a new device",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 68631.79999995232
+            },
+            {
+              "event": "click",
+              "label": "watchtower-url",
+              "testId": "watchtower-url",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 68763
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 68889
+            }
+          ],
+          "url": "https://xln.finance/ui/ownership",
+          "observed": "Tower editor accepts URL; no registration/recovery success claimed",
+          "elapsedMs": 508,
+          "pathname": "/ui/ownership",
+          "screenshot": "16-desktop-recovery.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "company",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "17. Create a company",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 69143.09999996424
+            },
+            {
+              "event": "click",
+              "label": "Create an entity",
+              "testId": null,
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 69390.89999997616
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 69464.09999996424
+            }
+          ],
+          "url": "https://xln.finance/ui/ownership",
+          "observed": "Company form opened and name edited; no company registered",
+          "elapsedMs": 549,
+          "pathname": "/ui/ownership",
+          "screenshot": "17-desktop-company.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "shares",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "18. Manage company shares",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 69692
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 69741.19999998808
+            }
+          ],
+          "url": "https://xln.finance/ui/ownership",
+          "observed": "Self-issued wallet prerequisite directs to real registration form; share issuance NOT VERIFIED",
+          "elapsedMs": 227,
+          "pathname": "/ui/ownership",
+          "screenshot": "18-desktop-shares.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "governance",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "19. Understand company control",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 69922.89999997616
+            },
+            {
+              "event": "click",
+              "label": "How this works",
+              "testId": null,
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 70075
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 70127.89999997616
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "No eligible takeover target; current board-authority requirement readable. Governance transaction NOT VERIFIED",
+          "elapsedMs": 618,
+          "pathname": "/ui/",
+          "screenshot": "19-desktop-governance.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "balance",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "20. Credit and collateral",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 70557.59999996424
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 70693.09999996424
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Balance composition readable; informational chapter",
+          "elapsedMs": 484,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "20-desktop-balance.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "cover",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "21. Request collateral",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 71040
+            },
+            {
+              "event": "click",
+              "label": "Ask the hub to lock its own collateral for what it owes you",
+              "testId": "account-cover",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 71135.69999998808
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 71623.09999996424
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 71676.09999996424
+            }
+          ],
+          "url": "https://xln.finance/ui/sovereignty",
+          "observed": "Collateral request editor opened; no collateral locked",
+          "elapsedMs": 1070,
+          "pathname": "/ui/sovereignty",
+          "screenshot": "21-desktop-cover.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "evidence",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "22. Keep your signed proofs",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 72114.09999996424
+            },
+            {
+              "event": "click",
+              "label": "Save encrypted backup",
+              "testId": "evidence-export",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 72173.69999998808
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 72949.89999997616
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Nonempty signed evidence bundle downloaded privately; wallet restore NOT VERIFIED",
+          "elapsedMs": 1219,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "22-desktop-evidence.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "dispute",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "23. Exit through a dispute",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 73349.19999998808
+            },
+            {
+              "event": "click",
+              "label": "Take the last page you both signed to the chain. You never need the other side's permission.",
+              "testId": "account-dispute",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 73422.29999995232
+            },
+            {
+              "event": "click",
+              "label": "Dispute this account\u2026",
+              "testId": "dispute-prepare",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 73877
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 73923.09999996424
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 73976.5
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Explicit irreversible-action confirmation opened; dispute NOT submitted",
+          "elapsedMs": 869,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "23-desktop-dispute.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "completion",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "Finish Keep practising",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 74211.39999997616
+            },
+            {
+              "event": "click",
+              "label": "Finish",
+              "testId": "tour-next",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 74256.5
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Finish UI closes guide; failed chapter rows remain failures",
+          "elapsedMs": 276,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "24-desktop-completion.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "restart",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "click",
+              "label": "Continue",
+              "testId": null,
+              "url": "https://xln.finance/ui/settings",
+              "monotonicMs": 768.1999999880791
+            },
+            {
+              "event": "click",
+              "label": "Replay",
+              "testId": "tour-replay",
+              "url": "https://xln.finance/ui/settings",
+              "monotonicMs": 10272.699999988079
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Settings Replay starts funded guide at Pay with no extra grant",
+          "elapsedMs": 10759,
+          "pathname": "/ui/",
+          "screenshot": "25-desktop-restart.png"
+        },
+        {
+          "viewport": "desktop",
+          "id": "returning-reload",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "7. Request a payment",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 10787.300000011921
+            },
+            {
+              "event": "click",
+              "label": "Continue",
+              "testId": null,
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 777.8000000119209
+            },
+            {
+              "event": "click",
+              "label": "Tutorial \u00b7 all features",
+              "testId": "wallet-tutorial",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 10320.800000011921
+            }
+          ],
+          "url": "https://xln.finance/ui/receive",
+          "observed": "Persistent native profile unlocks and resumes Receive chapter after reload",
+          "elapsedMs": 10756,
+          "pathname": "/ui/receive",
+          "screenshot": "26-desktop-returning-reload.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "faucet",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "1. Get test money",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 42016.700000047684
+            },
+            {
+              "event": "click",
+              "label": "Show 3 assets with zero balance",
+              "testId": "home-show-zero",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 42073.40000003576
+            },
+            {
+              "event": "click",
+              "label": "Get 100 test USDC",
+              "testId": "home-faucet",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 42185.80000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Actual test grant +100 USDC; guide at Pay",
+          "elapsedMs": 1253,
+          "pathname": "/ui/",
+          "screenshot": "01-mobile-faucet.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "pay",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "2. Send your first payment",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 43269.40000003576
+            },
+            {
+              "event": "click",
+              "label": "Pay",
+              "testId": "home-pay",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 43357.10000002384
+            },
+            {
+              "event": "click",
+              "label": "pay-to",
+              "testId": "pay-to",
+              "url": "https://xln.finance/ui/pay",
+              "monotonicMs": 43829.40000003576
+            },
+            {
+              "event": "click",
+              "label": "pay-amount",
+              "testId": "pay-amount",
+              "url": "https://xln.finance/ui/pay",
+              "monotonicMs": 44006.200000047684
+            },
+            {
+              "event": "click",
+              "label": "Pay 25.00 USDC",
+              "testId": "pay-submit",
+              "url": "https://xln.finance/ui/pay",
+              "monotonicMs": 44610.90000003576
+            },
+            {
+              "event": "click",
+              "label": "Receipt",
+              "testId": "receipt-open",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 45873.700000047684
+            },
+            {
+              "event": "click",
+              "label": "Done",
+              "testId": "receipt-done",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 46331.10000002384
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Paid receipt 25 USDC; guide advanced to Trade",
+          "elapsedMs": 3183,
+          "pathname": "/ui/",
+          "screenshot": "02-mobile-pay.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "trade",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "3. Try a swap",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 46454
+            },
+            {
+              "event": "click",
+              "label": "Swap",
+              "testId": "home-swap",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 46543.10000002384
+            },
+            {
+              "event": "click",
+              "label": "swap-give",
+              "testId": "swap-give",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 46989.30000001192
+            },
+            {
+              "event": "click",
+              "label": "Swap USDC for WETH",
+              "testId": "swap-submit",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 47293.80000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/swap",
+          "observed": "Actual swap-submit advanced Trade to History through committed SwapFilled receipt",
+          "elapsedMs": 1341,
+          "pathname": "/ui/swap",
+          "screenshot": "03-mobile-trade.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "history",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "4. Find your payment and swap",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 47793.60000002384
+            },
+            {
+              "event": "click",
+              "label": "Back",
+              "testId": "back",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 47890.700000047684
+            },
+            {
+              "event": "click",
+              "label": "Activity",
+              "testId": "nav-activity",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 48189.90000003576
+            },
+            {
+              "event": "click",
+              "label": "Swap filled12:58filled12:58",
+              "testId": null,
+              "url": "https://xln.finance/ui/activity",
+              "monotonicMs": 49159.700000047684
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/activity",
+              "monotonicMs": 49578.10000002384
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/activity",
+              "monotonicMs": 49619.30000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Actual activity row opened amount/status receipt",
+          "elapsedMs": 2003,
+          "pathname": "/ui/",
+          "screenshot": "04-mobile-history.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "jurisdiction",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "5. Know your jurisdiction",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 49806.40000003576
+            },
+            {
+              "event": "click",
+              "label": "Contract stack",
+              "testId": null,
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 49927.60000002384
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 50005.700000047684
+            }
+          ],
+          "url": "https://xln.finance/ui/swap",
+          "observed": "Contract disclosure opened; two stack addresses",
+          "elapsedMs": 370,
+          "pathname": "/ui/swap",
+          "screenshot": "05-mobile-jurisdiction.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "cross",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "6. Swap across networks",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 50177.700000047684
+            },
+            {
+              "event": "click",
+              "label": "Across networks",
+              "testId": "swap-cross-mode",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 50489.40000003576
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/swap",
+              "monotonicMs": 50538.60000002384
+            }
+          ],
+          "url": "https://xln.finance/ui/receive",
+          "observed": "Cross-network mode selected; no cross-swap claimed",
+          "elapsedMs": 562,
+          "pathname": "/ui/receive",
+          "screenshot": "06-mobile-cross.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "receive",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "7. Request a payment",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 50738.80000001192
+            },
+            {
+              "event": "click",
+              "label": "receive-amount",
+              "testId": "receive-amount",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 51038.90000003576
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 51105.80000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Receive amount5 and usable request-link control; no payment claimed",
+          "elapsedMs": 567,
+          "pathname": "/ui/",
+          "screenshot": "07-mobile-receive.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "hubs",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "8. Connect to a hub",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 51313.200000047684
+            },
+            {
+              "event": "click",
+              "label": "Connect another account",
+              "testId": "home-open-account",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 51625.80000001192
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 52075.10000002384
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 52141
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Real Open account dialog and editable counterparty",
+          "elapsedMs": 1018,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "08-mobile-hubs.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "limits",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "9. Set credit limits",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 52339.10000002384
+            },
+            {
+              "event": "click",
+              "label": "Extend credit",
+              "testId": "account-extend-credit",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 52626.200000047684
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 53040.200000047684
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 53090
+            }
+          ],
+          "url": "https://xln.finance/ui/move",
+          "observed": "Credit editor opened; no signed credit mutation claimed",
+          "elapsedMs": 935,
+          "pathname": "/ui/move",
+          "screenshot": "09-mobile-limits.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "move",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "10. Move and settle money",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 53272
+            },
+            {
+              "event": "click",
+              "label": "ReserveDepository escrow0.00 USDC",
+              "testId": "move-from-reserve",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 53572.90000003576
+            },
+            {
+              "event": "click",
+              "label": "AccountBilateral, instant0.00 USDC",
+              "testId": "move-to-account",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 53605.40000003576
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 53669.700000047684
+            }
+          ],
+          "url": "https://xln.finance/ui/move",
+          "observed": "Reserve route and amount selected; no transfer claimed",
+          "elapsedMs": 528,
+          "pathname": "/ui/move",
+          "screenshot": "10-mobile-move.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "withdraw",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "11. Withdraw to your wallet",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 53799.5
+            },
+            {
+              "event": "click",
+              "label": "ReserveDepository escrow0.00 USDC",
+              "testId": "move-from-reserve",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 53873.60000002384
+            },
+            {
+              "event": "click",
+              "label": "WalletOn-chain, in your signer0.00 USDC",
+              "testId": "move-to-external",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 53906.5
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/move",
+              "monotonicMs": 53981.200000047684
+            }
+          ],
+          "url": "https://xln.finance/ui/lend",
+          "observed": "Reserve route and amount selected; no transfer claimed",
+          "elapsedMs": 341,
+          "pathname": "/ui/lend",
+          "screenshot": "11-mobile-withdraw.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "lending",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "12. Lend and withdraw",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 54147.5
+            },
+            {
+              "event": "click",
+              "label": "lend-amount",
+              "testId": "lend-amount",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 54435.200000047684
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 54489.200000047684
+            }
+          ],
+          "url": "https://xln.finance/ui/lend",
+          "observed": "Savings amount edited; financial availability is separate",
+          "elapsedMs": 447,
+          "pathname": "/ui/lend",
+          "screenshot": "12-mobile-lending.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "borrow",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "13. Borrow with a known cost",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 54594.60000002384
+            },
+            {
+              "event": "click",
+              "label": "Borrow",
+              "testId": "lend-side-borrow",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 54670.200000047684
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 54736.60000002384
+            }
+          ],
+          "url": "https://xln.finance/ui/lend",
+          "observed": "Borrow mode and bank-approval requirement; no loan claimed",
+          "elapsedMs": 249,
+          "pathname": "/ui/lend",
+          "screenshot": "13-mobile-borrow.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "repay",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "14. Repay a loan",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 54845.700000047684
+            },
+            {
+              "event": "click",
+              "label": "How this works",
+              "testId": null,
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 54977.80000001192
+            },
+            {
+              "event": "click",
+              "label": "Refresh",
+              "testId": null,
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 55024.60000002384
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/lend",
+              "monotonicMs": 55173.700000047684
+            }
+          ],
+          "url": "https://xln.finance/ui/sovereignty",
+          "observed": "Pool refreshed; approved-loan prerequisite readable. No current loan; repayment transaction NOT VERIFIED",
+          "elapsedMs": 627,
+          "pathname": "/ui/sovereignty",
+          "screenshot": "14-mobile-repay.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "protection",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "15. Protect and recover",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 55485.200000047684
+            },
+            {
+              "event": "click",
+              "label": "watchtower-url",
+              "testId": "watchtower-url",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 55691.30000001192
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 55834.5
+            }
+          ],
+          "url": "https://xln.finance/ui/sovereignty",
+          "observed": "Tower editor accepts URL; no registration/recovery success claimed",
+          "elapsedMs": 524,
+          "pathname": "/ui/sovereignty",
+          "screenshot": "15-mobile-protection.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "recovery",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "16. Recover on a new device",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 56003.5
+            },
+            {
+              "event": "click",
+              "label": "watchtower-url",
+              "testId": "watchtower-url",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 56119.10000002384
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 56241.10000002384
+            }
+          ],
+          "url": "https://xln.finance/ui/ownership",
+          "observed": "Tower editor accepts URL; no registration/recovery success claimed",
+          "elapsedMs": 382,
+          "pathname": "/ui/ownership",
+          "screenshot": "16-mobile-recovery.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "company",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "17. Create a company",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 56398
+            },
+            {
+              "event": "click",
+              "label": "Create an entity",
+              "testId": null,
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 56657.10000002384
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 56727.80000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/ownership",
+          "observed": "Company form opened and name edited; no company registered",
+          "elapsedMs": 437,
+          "pathname": "/ui/ownership",
+          "screenshot": "17-mobile-company.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "shares",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "18. Manage company shares",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 56837.40000003576
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 56889.90000003576
+            }
+          ],
+          "url": "https://xln.finance/ui/ownership",
+          "observed": "Self-issued wallet prerequisite directs to real registration form; share issuance NOT VERIFIED",
+          "elapsedMs": 165,
+          "pathname": "/ui/ownership",
+          "screenshot": "18-mobile-shares.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "governance",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "19. Understand company control",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 57005
+            },
+            {
+              "event": "click",
+              "label": "How this works",
+              "testId": null,
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 57135.90000003576
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/ownership",
+              "monotonicMs": 57189.80000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "No eligible takeover target; current board-authority requirement readable. Governance transaction NOT VERIFIED",
+          "elapsedMs": 358,
+          "pathname": "/ui/",
+          "screenshot": "19-mobile-governance.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "balance",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "20. Credit and collateral",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 57373.80000001192
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 57742.90000003576
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Balance composition readable; informational chapter",
+          "elapsedMs": 539,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "20-mobile-balance.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "cover",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "21. Request collateral",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 57910.200000047684
+            },
+            {
+              "event": "click",
+              "label": "Ask the hub to lock its own collateral for what it owes you",
+              "testId": "account-cover",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 58219.90000003576
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 58676.80000001192
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 58725.200000047684
+            }
+          ],
+          "url": "https://xln.finance/ui/sovereignty",
+          "observed": "Collateral request editor opened; no collateral locked",
+          "elapsedMs": 1090,
+          "pathname": "/ui/sovereignty",
+          "screenshot": "21-mobile-cover.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "evidence",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "22. Keep your signed proofs",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 59003.700000047684
+            },
+            {
+              "event": "click",
+              "label": "Save encrypted backup",
+              "testId": "evidence-export",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 59145
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/sovereignty",
+              "monotonicMs": 59837.90000003576
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Nonempty signed evidence bundle downloaded privately; wallet restore NOT VERIFIED",
+          "elapsedMs": 1005,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "22-mobile-evidence.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "dispute",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "23. Exit through a dispute",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 60012.40000003576
+            },
+            {
+              "event": "click",
+              "label": "Take the last page you both signed to the chain. You never need the other side's permission.",
+              "testId": "account-dispute",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 60325.10000002384
+            },
+            {
+              "event": "click",
+              "label": "Dispute this account\u2026",
+              "testId": "dispute-prepare",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 60741.700000047684
+            },
+            {
+              "event": "click",
+              "label": "Close",
+              "testId": "sheet-close",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 60786
+            },
+            {
+              "event": "click",
+              "label": "Next chapter",
+              "testId": "tour-advance",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 60842.30000001192
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Explicit irreversible-action confirmation opened; dispute NOT submitted",
+          "elapsedMs": 989,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "23-mobile-dispute.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "completion",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "Finish Keep practising",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 61007.10000002384
+            },
+            {
+              "event": "click",
+              "label": "Finish",
+              "testId": "tour-next",
+              "url": "https://xln.finance/ui/accounts/[id]",
+              "monotonicMs": 61034.60000002384
+            }
+          ],
+          "url": "https://xln.finance/ui/accounts/0xdb710c89dd3d951ef05c4656396caf1b31ff2d385563c129b04caf1bad449377",
+          "observed": "Finish UI closes guide; failed chapter rows remain failures",
+          "elapsedMs": 168,
+          "pathname": "/ui/accounts/[id]",
+          "screenshot": "24-mobile-completion.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "restart",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "click",
+              "label": "Continue",
+              "testId": null,
+              "url": "https://xln.finance/ui/settings",
+              "monotonicMs": 754.1000000238419
+            },
+            {
+              "event": "click",
+              "label": "Replay",
+              "testId": "tour-replay",
+              "url": "https://xln.finance/ui/settings",
+              "monotonicMs": 10192.800000011921
+            }
+          ],
+          "url": "https://xln.finance/ui/",
+          "observed": "Settings Replay starts funded guide at Pay with no extra grant",
+          "elapsedMs": 10474,
+          "pathname": "/ui/",
+          "screenshot": "25-mobile-restart.png"
+        },
+        {
+          "viewport": "mobile",
+          "id": "returning-reload",
+          "result": "pass",
+          "expected": "Real chapter controls respond and guide reaches the asserted next state; financial execution only where explicitly asserted",
+          "clickedControls": [
+            {
+              "event": "change",
+              "label": "7. Request a payment",
+              "testId": "tour-chapter",
+              "url": "https://xln.finance/ui/",
+              "monotonicMs": 10499.800000011921
+            },
+            {
+              "event": "click",
+              "label": "Continue",
+              "testId": null,
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 738.1999999880791
+            },
+            {
+              "event": "click",
+              "label": "Tutorial \u00b7 all features",
+              "testId": "wallet-tutorial",
+              "url": "https://xln.finance/ui/receive",
+              "monotonicMs": 10013.5
+            }
+          ],
+          "url": "https://xln.finance/ui/receive",
+          "observed": "Persistent native profile unlocks and resumes Receive chapter after reload",
+          "elapsedMs": 10316,
+          "pathname": "/ui/receive",
+          "screenshot": "26-mobile-returning-reload.png"
+        }
+      ],
+      "scope": "Two separate new persistent profiles; actual Open a test wallet, all23chapters+completion/restart/reload, no storage injection"
+    },
+    "faucetReconciliation": {
+      "servedFrontendSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+      "servedBackendSHA": "6d6d4bb4af6fcf2067f09cbbe330de3b6bca7440",
+      "passed": true,
+      "expectedAtomic": {
+        "before": "449999724",
+        "grossFaucet": "100000000",
+        "separateCollateralRequestFee": "154999",
+        "after": "549844725"
+      },
+      "faucetReceipt": {
+        "id": "direct:0xd56742719dd4d9884ac462fe803d0a5472146de2:r260:runtime_input:0:direct_payment",
+        "kind": "payment",
+        "direction": "in",
+        "tokenId": 1,
+        "amount": "100000000",
+        "state": "settled",
+        "height": 260,
+        "timestamp": 1792403221673
+      },
+      "feeFrame": {
+        "height": 80,
+        "accountStateRoot": "0xe1f5875cbea91d452a6accbad501ae2d28e67492ab4a8fdc3fbbdb36b9902aaf",
+        "type": "request_collateral",
+        "amount": "549999724",
+        "feeAmount": "154999",
+        "feeTokenId": 1,
+        "policyVersion": 1
+      },
+      "swapOffersOpen": 0,
+      "pendingAccount": false,
+      "mempoolCount": 0,
+      "originalFailure": "public-tutorial-f369fbdd2-01/result.json:mobile/faucet exact+100 net balance ignored separately committed collateral fee",
+      "receiptPrivateSHA256": "a0ad47ca6ffb5176b65fc4bb800b177c67fed390f244ca292bc182d0e6c57f17",
+      "scope": "Read-only reconciliation of the existing actual UI faucet click; no repeated payment or fee. Fee is not waived or hidden."
+    },
+    "screenshot": "public-mobile-primary-f369.png",
+    "artifactRoot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019",
+    "scope": "104/104 actual tutorial transitions across fresh/returning desktop/mobile; original returning faucet net-balance assertion failure retained and reconciled with committed collateral fee. Advanced lesson navigation is not a claim that every financial prerequisite was executed. Mainnet readiness is not established."
+  },
+  "remaining": [
+    "Complete unchanged candidate check and exact-commit push verification.",
+    "Complete full release and uninterrupted hour soak.",
+    "Resolve current native compiler/artifact and public Nile deployment boundary before claiming native chain support.",
+    "Current public-chain/mainnet acceptance, dedicated signer funding and estimates remain separate gates."
+  ],
+  "preExtractionHistory": {
+    "regressionGreen": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "token-listing-green",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-with-test-cleanup.ts",
+        "--reason=contracts-listing",
+        "--child-cwd=jurisdictions",
+        "--",
+        "bunx",
+        "hardhat",
+        "test",
+        "test/dispute/Depository-part-1.ts",
+        "--grep",
+        "assigns stable token IDs only through a Foundation listing"
+      ],
+      "baseSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+      "sourceSha256": "53a017b30fc3d93d8e9e41429123846dbcc121eb7c79ba39d041b1c42003da1e",
+      "sourceUnchanged": true,
+      "exitCode": 0,
+      "seconds": 18.874780292,
+      "sha256": "b2e3f9cf612c53d1177419fd6e6957208e1f5d84beecfb1186e9c25462e4775a",
+      "artifactRoot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019"
+    },
+    "fullContractSuite": {
+      "running": false,
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "token-listing-contract-full",
+        "--timeout-ms",
+        "240000",
+        "--",
+        "bun",
+        "run",
+        "test:contracts:full"
+      ],
+      "baseSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+      "sourceSha256": "53a017b30fc3d93d8e9e41429123846dbcc121eb7c79ba39d041b1c42003da1e",
+      "sourceUnchanged": true,
+      "exitCode": 0,
+      "seconds": 175.897236792,
+      "sha256": "7f3c906954913e16b850bd5b815fd9d540f71c001ba70cec037f169cac8108af",
+      "passed": 264,
+      "failed": 0,
+      "artifactRoot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019"
+    },
+    "checkFailure": {
+      "running": false,
+      "command": ["bun", "run", "check"],
+      "baseSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+      "sourceHashes": {
+        "jurisdictions/test/dispute/Depository-part-1.ts": "53a017b30fc3d93d8e9e41429123846dbcc121eb7c79ba39d041b1c42003da1e",
+        "docs/evidence/prod-rescue-20261019/token-listing-and-public-f369.json": "6b6f8548f76961d22c7211cdaa6999d96593da0b3f4bbcfc5e7671851c0ed2f9",
+        "docs/evidence/prod-rescue-20261019/public-mobile-primary-f369.png": "458f7620a2f180de9039f129217de78ee2126ec29df15afe86433003f9b708b3"
+      },
+      "sourceUnchanged": true,
+      "exitCode": 1,
+      "seconds": 1.4560184999999999,
+      "sha256": "63af9adf0cb0abf3115fb4061b95f5a9223aac5d703a3688f62b89e33bdf3f6b"
+    },
+    "reason": "The first fix grew an existing2999-line file to3006 lines. The unchanged3000-line invariant rejected it. Move the cohesive Foundation listing test to the existing FoundationRegistry suite; preserve all assertions and add no exemption."
+  },
+  "ownedTests": [
+    "jurisdictions/test/dispute/Depository-part-1.ts",
+    "jurisdictions/test/governance/FoundationRegistry.test.ts"
+  ],
+  "testSourceHashes": {
+    "jurisdictions/test/dispute/Depository-part-1.ts": "8b440f02a10273abc23a08be8f816bc80d2a8bd03ad7a964991cfb860c01526d",
+    "jurisdictions/test/governance/FoundationRegistry.test.ts": "d43e0d5a53084e25fc64b10c8c01d3f712c4e3b6e3682c5059a15b559f56babb"
+  },
+  "review": {
+    "type": "Studio native Codex, bounded read-only stable patch review",
+    "result": "No blocker; all8semantic assertions retained; fresh canonical Foundation fixture; no tests or source writes by reviewer",
+    "scope": "Final two-test-file patch only; not release approval"
+  }
+}
