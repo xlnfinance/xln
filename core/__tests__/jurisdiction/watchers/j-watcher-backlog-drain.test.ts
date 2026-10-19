@@ -377,7 +377,11 @@ describe('RPC J-watcher backlog drain', () => {
     await missingHeaderPoll;
     expect(failureState()).toEqual(beforeFailures);
     expect(adapter.isWatching()).toBe(true);
-    expect(rpcProxy.takeHeaderBlocks()).toHaveLength(128);
+    // The two chunks of this first pass are in flight together. Even when one
+    // header is unavailable, drain its sibling without committing any range.
+    expect(rpcProxy.takeHeaderBlocks().sort((left, right) => left - right)).toEqual(
+      Array.from({ length: 255 }, (_, index) => fromBlock + index),
+    );
 
     const timeoutGate = rpcProxy.armHeaderBatchGate();
     const retryStartedAt = performance.now();

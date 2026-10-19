@@ -100,6 +100,7 @@ const parseCanonicalBlock = (raw: unknown, height: number): CanonicalRpcBlock =>
 const readCanonicalBlocks = async (
   send: RpcSend,
   heights: readonly number[],
+  concurrentChunks: 1 | 2,
   sendBatch?: RpcBatchSend,
 ): Promise<CanonicalRpcBlock[]> => {
   const calls = heights.map((height): RpcBatchCall => ({
@@ -107,7 +108,7 @@ const readCanonicalBlocks = async (
     params: [ethers.toQuantity(height), false],
   }));
   const rawBlocks = sendBatch
-    ? await sendBatchInChunks(sendBatch, calls)
+    ? await sendBatchInChunks(sendBatch, calls, concurrentChunks)
     : await mapConcurrent(calls, 16, call => send(call.method, call.params));
   if (rawBlocks.length !== heights.length) {
     throw new Error(`J_RECEIPT_BATCH_LENGTH_MISMATCH:expected=${heights.length}:actual=${rawBlocks.length}`);
@@ -381,7 +382,10 @@ export const readAuthenticatedReceiptRange = async (
   }
   const anchorHeight = fromBlock > 1 ? fromBlock - 1 : fromBlock;
   const rangeHeights = Array.from({ length: toBlock - anchorHeight + 1 }, (_, index) => anchorHeight + index);
-  const rangeBlocks = await readCanonicalBlocks(send, rangeHeights, sendBatch);
+  // Native TRON already fans each chunk out to 12 scalar workers. Keep its
+  // chunks sequential; overlap only Ethereum JSON-RPC batches within a pass.
+  const concurrentChunks = commitment === 'ethereum-trie' ? 2 : 1;
+  const rangeBlocks = await readCanonicalBlocks(send, rangeHeights, concurrentChunks, sendBatch);
   assertContiguousBlocks(rangeBlocks, profile.expectedParent);
   const blocks = rangeBlocks.filter(block => Number(parseReceiptQuantity(block.number, 'BLOCK_NUMBER')) >= fromBlock);
   const matchesWatchedBloom = createLogBloomMatcher([...addresses]);
@@ -400,7 +404,7 @@ export const readAuthenticatedReceiptRange = async (
   if (commitment === 'tron-complete-receipts') {
     await crossCheckTronLogs(send, fromBlock, toBlock, addresses, logs);
   }
-  const fenceBlocks = await readCanonicalBlocks(send, rangeHeights, sendBatch);
+  const fenceBlocks = await readCanonicalBlocks(send, rangeHeights, concurrentChunks, sendBatch);
   assertContiguousBlocks(fenceBlocks, profile.expectedParent);
   assertRangeFenceUnchanged(rangeBlocks, fenceBlocks);
   return {

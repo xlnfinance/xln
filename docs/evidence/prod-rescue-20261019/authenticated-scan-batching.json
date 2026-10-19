@@ -1,0 +1,178 @@
+{
+  "baseSHA": "6d6d4bb4af6fcf2067f09cbbe330de3b6bca7440",
+  "candidateSource": {
+    "main": "6d6d4bb4af6fcf2067f09cbbe330de3b6bca7440",
+    "patchSHA256": "9198a027dbaae077995b2b23ede78d427601564d77f1a4101cb65cf88676c212",
+    "paths": {
+      "core/jurisdiction/adapter/rpc-utils.ts": "81e6c8c6c3430b99b69b2ecdf6b7a5be59009b9b3fcdfff135c0adea43b9af4d",
+      "core/jurisdiction/adapter/receipt/reader.ts": "55a245c8d9a5664ef3f285f0a8d5207c2d065538ac1d2f5bfbf8a15df704e3c0",
+      "core/__tests__/jurisdiction/watchers/j-watcher-receipt-batching.test.ts": "c8543d4f38715717986bc64ca2520ce8858026e0f9a43792870eb6baa2563666",
+      "core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts": "dde6f22b9f3997c8c0b0c4a4b02e0479415ef14e44daac1891dfca12a81b7229"
+    },
+    "review": "tutorial_gates scoped final review: no blocker; native chunk bound retained; tests not run by reviewer"
+  },
+  "change": "Overlap at most two Ethereum header chunks of at most128 calls within each authenticated header pass. Keep native TRON chunks sequential. Preserve preceding anchor, dense coverage, all receipts and both full reorg fences. No new durable state or financial transition.",
+  "l1": {
+    "command": "bun test core/__tests__/jurisdiction/watchers/j-watcher-receipt-batching.test.ts core/__tests__/jurisdiction/watchers/j-watcher-receipt-root.test.ts",
+    "passed": 23,
+    "failed": 0,
+    "assertions": 1381,
+    "seconds": 1.73,
+    "logSHA256": "f3ddb7a51c633258bba8f9ff29475f42cdb5e00f9731f0eca6310c3feb0bb8cb"
+  },
+  "l2": {
+    "command": "bun run stand:run --reason authenticated-scan-profile-bounded-backlog --timeout-ms60000 -- bun test core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts",
+    "passed": 1,
+    "failed": 0,
+    "assertions": 50,
+    "testSeconds": 50.71148,
+    "logSHA256": "139e6190460534b92467b515a34b17a368cc4ae1542d7af44076d42f369e28a8",
+    "coverage": "Real Anvil backlog beyond4096 blocks; missing header, timeout/cooldown, carried suffix reorg, late import, current checkpoint recovery. All existing semantic assertions preserved."
+  },
+  "browser": [
+    {
+      "artifact": "public-scan-timing-01",
+      "kind": "original public baseline",
+      "resultSHA256": "b98155ca42842ede2acb5792d1dd26dc8589f7106a5760f766d5a31247de8845",
+      "analysisSHA256": "b5864591623d6d526a7a76f20826d113ef68d7c9ced0723e84d379a05ce11bb4",
+      "usableHomeMs": 46816.52775,
+      "passed": true,
+      "browserErrors": 0,
+      "runtimeSHA256": "ad1e3efc89718e5834fb6cbbf97a7c209aa37615deb10177922cb49f5849e1f7",
+      "endpoints": {
+        "/rpc": {
+          "headerHttp": 384,
+          "headerCalls": 32633,
+          "uniqueHeights": 14881,
+          "minHeight": 2,
+          "maxHeight": 14882,
+          "adjacentChunkPairs": 126,
+          "nonOverlappingPairs": 126,
+          "medianHttpMs": 51.21200002031401,
+          "sumPairWallMs": 17659.63200025726
+        },
+        "/rpc2": {
+          "headerHttp": 365,
+          "headerCalls": 30088,
+          "uniqueHeights": 14888,
+          "minHeight": 2,
+          "maxHeight": 14889,
+          "adjacentChunkPairs": 116,
+          "nonOverlappingPairs": 116,
+          "medianHttpMs": 51.543000008678064,
+          "sumPairWallMs": 15894.699999771547
+        }
+      }
+    },
+    {
+      "artifact": "candidate-scan-timing-01",
+      "kind": "candidate",
+      "resultSHA256": "ad3b076150e8d73eed771606e3818784b7e46c0f28b146fb7236ab4924e4cb06",
+      "analysisSHA256": "391e2047a1ca271260aa3711af8ad05602aee60a385aba3b00a2760b3894c42e",
+      "usableHomeMs": 44502.803374999996,
+      "passed": true,
+      "browserErrors": 0,
+      "runtimeSHA256": "f80b9c90f4ec96a9068cab2c7b0b6188681d94f366b8075b7072646aec3239db",
+      "endpoints": {
+        "/rpc": {
+          "headerHttp": 385,
+          "headerCalls": 32268,
+          "uniqueHeights": 14953,
+          "minHeight": 2,
+          "maxHeight": 14954,
+          "adjacentChunkPairs": 126,
+          "nonOverlappingPairs": 0,
+          "medianHttpMs": 58.441000001039356,
+          "sumPairWallMs": 12883.792999666184
+        },
+        "/rpc2": {
+          "headerHttp": 365,
+          "headerCalls": 30229,
+          "uniqueHeights": 14960,
+          "minHeight": 2,
+          "maxHeight": 14961,
+          "adjacentChunkPairs": 118,
+          "nonOverlappingPairs": 0,
+          "medianHttpMs": 60.84799999371171,
+          "sumPairWallMs": 10520.63599950634
+        }
+      }
+    },
+    {
+      "artifact": "baseline-scan-matched-01",
+      "kind": "public baseline with matched asset interception",
+      "resultSHA256": "7a2fc30667f092d9c028bd9f43d89de44266bc7a8285f14e85ce00604d4eace0",
+      "analysisSHA256": "dc5251764bb21b662ddc3f55b4eae03a559ea31dc7511d43ea0673c797199f7d",
+      "usableHomeMs": 49730.236750000004,
+      "passed": true,
+      "browserErrors": 0,
+      "runtimeSHA256": "ad1e3efc89718e5834fb6cbbf97a7c209aa37615deb10177922cb49f5849e1f7",
+      "endpoints": {
+        "/rpc": {
+          "headerHttp": 378,
+          "headerCalls": 31771,
+          "uniqueHeights": 14963,
+          "minHeight": 2,
+          "maxHeight": 14964,
+          "adjacentChunkPairs": 124,
+          "nonOverlappingPairs": 124,
+          "medianHttpMs": 56.81700000423007,
+          "sumPairWallMs": 19905.428999802098
+        },
+        "/rpc2": {
+          "headerHttp": 367,
+          "headerCalls": 30757,
+          "uniqueHeights": 14969,
+          "minHeight": 2,
+          "maxHeight": 14970,
+          "adjacentChunkPairs": 120,
+          "nonOverlappingPairs": 120,
+          "medianHttpMs": 57.961000013165176,
+          "sumPairWallMs": 17880.989000143018
+        }
+      }
+    },
+    {
+      "artifact": "candidate-scan-timing-02",
+      "kind": "candidate repeat",
+      "resultSHA256": "6df146d7491a5d93e830a322b31370938f764b07b16098570faa91f3bee0114e",
+      "analysisSHA256": "831bd8122ee6f2f40fb7d3ad5431b2e1a83c33ca88344619a4f54c02c810e528",
+      "usableHomeMs": 44071.780667,
+      "passed": true,
+      "browserErrors": 0,
+      "runtimeSHA256": "f80b9c90f4ec96a9068cab2c7b0b6188681d94f366b8075b7072646aec3239db",
+      "endpoints": {
+        "/rpc": {
+          "headerHttp": 380,
+          "headerCalls": 32294,
+          "uniqueHeights": 14969,
+          "minHeight": 2,
+          "maxHeight": 14970,
+          "adjacentChunkPairs": 126,
+          "nonOverlappingPairs": 0,
+          "medianHttpMs": 58.691499987617135,
+          "sumPairWallMs": 12490.998999564908
+        },
+        "/rpc2": {
+          "headerHttp": 360,
+          "headerCalls": 30254,
+          "uniqueHeights": 14976,
+          "minHeight": 2,
+          "maxHeight": 14977,
+          "adjacentChunkPairs": 118,
+          "nonOverlappingPairs": 0,
+          "medianHttpMs": 61.10700001590885,
+          "sumPairWallMs": 10002.46500049252
+        }
+      }
+    }
+  ],
+  "scope": "Candidate runtime/worker assets loaded locally in real Studio Chromium; actual public RPC and relay untouched. These candidate observations are not deployed-version proof. Public base frontend5456cc008c1326c31fc19fb93b56b70a85c9c8d8/backend6d6d4bb4af6fcf2067f09cbbe330de3b6bca7440.",
+  "limits": [
+    "Two candidate samples, one matched control; public chain and network vary. No statistical performance guarantee.",
+    "Cold startup remains approximately44seconds.",
+    "Native TRON concurrency regression is a boundary vector, not real native network acceptance.",
+    "Exact current unit/test, full release and mainnet acceptance still required."
+  ],
+  "review": "Read-only native Codex scoped review found no remaining blocker; no external model call."
+}
