@@ -1,0 +1,302 @@
+{
+  "baseSHA": "0f42cf0e57e16405f302629db54e16c48caadff6",
+  "purpose": "Allow the complete immutable checkpoint/WAL oracle to finish within a bounded release deadline. The observed complete run needed 606.57 seconds; the old 600-second deadline interrupted the final scenario.",
+  "source": {
+    "path": "core/scripts/release/run-release-gate.ts",
+    "sha256": "12bcb4798c5c8d580f45e821600772790922ad591d322da9a6d6940b948653b9",
+    "previousTimeoutMs": 600000,
+    "timeoutMs": 720000,
+    "scope": "Release runner time budget only. Runtime, Solidity, replay assertions, scenario selection and the owner two-hour full-release limit are unchanged."
+  },
+  "firstRed": {
+    "running": false,
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "release-current-30",
+      "--timeout-ms",
+      "7200000",
+      "--",
+      "bun",
+      "run",
+      "gate:release"
+    ],
+    "candidate": "0f42cf0e57e16405f302629db54e16c48caadff6",
+    "startedAt": "2026-10-19T11:15:36.187109+00:00",
+    "protectedDirtyPaths": ["brainvault/bun.lock", "brainvault/package.json"],
+    "initialGitStatus": " M brainvault/bun.lock\n M brainvault/package.json\n",
+    "pid": 87120,
+    "exitCode": 143,
+    "seconds": 1887.9469400829998,
+    "finishedAt": "2026-10-19T11:47:04.144120+00:00",
+    "finishedSHA": "0f42cf0e57e16405f302629db54e16c48caadff6",
+    "sourceStatusUnchanged": true,
+    "sha256": "470e2680464b31c9f79d039dadeca51923fe5e67c0248e8850b6241b15f4391d",
+    "passedSteps": 16,
+    "totalSteps": 34,
+    "failedStep": "deterministic replay oracle",
+    "failedStepSeconds": 600.4,
+    "completedOracleScenarios": 13,
+    "requiredOracleScenarios": 14,
+    "observedMismatch": false,
+    "interruptedScenario": "dispute-transformer",
+    "qualification": "Exit 143 at the internal 600-second deadline is a failed release, not a 14/14 pass."
+  },
+  "sameInterruptedArtifact": {
+    "commandResult": {
+      "running": false,
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "oracle-transformer-resume-01",
+        "--timeout-ms",
+        "180000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/replay-interrupted-oracle.ts"
+      ],
+      "candidate": "0f42cf0e57e16405f302629db54e16c48caadff6",
+      "startedAt": "2026-10-19T11:49:47.287319+00:00",
+      "pid": 97215,
+      "exitCode": 0,
+      "seconds": 11.732954333,
+      "sha256": "2519e89d2c228b44727713546ad2f06315f4eede9adb1c1cfd8a6266acefc568"
+    },
+    "replayResult": {
+      "input": "/Users/zigota/xln/.logs/determinism/1792409824706-94335/dispute-transformer/recording.json",
+      "inputSha256": "3a473124e32e6bf97a6cb655610f0aff9df3b2d1802379eb25d1c80c92e76d43",
+      "baseHeight": 1,
+      "targetHeight": 40,
+      "frames": 39,
+      "workers": [1, 4],
+      "evidenceHash": "000dc26c7d90460fb46f9f118b2542a1f05f850e83d6b0baf184903e6e79702e",
+      "finalHash": "0xee4004cbcb915989a5a0c3cbf8d524d0474ccecd34713d4eee0b208f4ac97a65",
+      "milliseconds": 10620.082875,
+      "inputUnchanged": true,
+      "passed": true
+    },
+    "scope": "Both worker counts consume the original interrupted immutable recording. Every frame is verified against its recorded post-state, replica commitment and ordered outbox; W1/W4 roots, events and effects also match. No new live recording was substituted."
+  },
+  "gateRegressions": {
+    "command": [
+      "bun",
+      "test",
+      "core/__tests__/testing/tooling/stand/process-group.test.ts",
+      "core/__tests__/operations/release/capped-testnet-gate.test.ts",
+      "core/__tests__/operations/release/mainnet-preflight-gate.test.ts"
+    ],
+    "exitCode": 0,
+    "passed": 18,
+    "failed": 0,
+    "assertions": 56,
+    "runnerSeconds": 3.27,
+    "logSha256": "a0bce6ebcbc1bdecedc67063f51c40c7c9cbba85772f592d4b46687dcdff6c9f",
+    "scope": "Includes real TERM-resistant descendant process-group cleanup; no timeout enforcement removed."
+  },
+  "completeOracle": {
+    "commandResult": {
+      "running": false,
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "oracle-budget-full-01",
+        "--timeout-ms",
+        "720000",
+        "--",
+        "bun",
+        "run",
+        "check:determinism"
+      ],
+      "baseSHA": "0f42cf0e57e16405f302629db54e16c48caadff6",
+      "sourcePath": "core/scripts/release/run-release-gate.ts",
+      "sourceSha256": "12bcb4798c5c8d580f45e821600772790922ad591d322da9a6d6940b948653b9",
+      "startedAt": "2026-10-19T11:52:26.636847+00:00",
+      "pid": 97847,
+      "exitCode": 0,
+      "seconds": 606.569528333,
+      "sourceUnchanged": true,
+      "finishedAt": "2026-10-19T12:02:33.170596+00:00",
+      "sha256": "2d2106b69ab3e9dfd141cdfc2931707896a47211cfb8b55b6ad01d7df2ff0fed"
+    },
+    "passedScenarios": 14,
+    "requiredScenarios": 14,
+    "walFrames": 1214,
+    "workers": [1, 4],
+    "scenarios": [
+      {
+        "baseHeight": 1,
+        "evidenceHash": "899bfbedefc04af608b772e7ffc195cca4838151506c8490bf2c3e32b339d31f",
+        "finalHash": "0x3464fbc291e22d3b229696b7bf233414bfa2c04bd725aee008d4527e6f9a22f7",
+        "frames": 17,
+        "recordingManifestHash": "0xe0eca2d782b959322cc523e8a93fa00dfd645cdb2cc40e53c4ac3c6eae22f813",
+        "scenario": "htlc-ack-recovery",
+        "targetHeight": 18,
+        "workers": [1, 4]
+      },
+      {
+        "baseHeight": 1,
+        "evidenceHash": "6da634a165acd7c11a2659614d7babadace4bb5144817476162cad179cfb26fc",
+        "finalHash": "0x3c9ad0c7c1ea2bc644fce6619357bb94c8616e8c9f71481c39ab2e68fa164bb8",
+        "frames": 75,
+        "recordingManifestHash": "0x41929df2218029b32df95057a15dad7f62e41c0039c107e78be8dfa72b0d453d",
+        "scenario": "rebalance",
+        "targetHeight": 76,
+        "workers": [1, 4]
+      },
+      {
+        "baseHeight": 1,
+        "evidenceHash": "a4990b24fb095f86b12526b973792d84505f149cb505ca3a1a7c9968d03c7a8e",
+        "finalHash": "0x238893e156283581a0c4d4044a39c391644c461dfced0f3344799a9312b6cf10",
+        "frames": 90,
+        "recordingManifestHash": "0x87beaace21a525204f40bea13349b15a2b5a573c263edd480a93ffee61fcbffb",
+        "scenario": "lock-ahb",
+        "targetHeight": 91,
+        "workers": [1, 4]
+      },
+      {
+        "baseHeight": 1,
+        "evidenceHash": "18557dcc044bfed7df522c9f86c60cda09717ccd7b0fa48a5d274d215426961f",
+        "finalHash": "0xf0d5e7c3d4a6e704b93313d0fe2ffdc02143772923eccb973746ba24eb07d5b6",
+        "frames": 22,
+        "recordingManifestHash": "0xbb5b9485310592e6a03511cd9368da2c4955c15409af5175e3a3d479026b554e",
+        "scenario": "htlc-lazy",
+        "targetHeight": 23,
+        "workers": [1, 4]
+      },
+      {
+        "baseHeight": 1,
+        "evidenceHash": "4bf22e0692b978c88be866cc608cea1fdf168a0fe63c311639a9b99d0bd149da",
+        "finalHash": "0xf7324b9e7782f1065bfd562dcd109397b9b69d7001d7adc454e5348f97623b2e",
+        "frames": 75,
+        "recordingManifestHash": "0x0c76215c848d09912e1ee66d120d1343b5cc72e41fb5d9125ca280b0c396a25d",
+        "scenario": "swap",
+        "targetHeight": 76,
+        "workers": [1, 4]
+      },
+      {
+        "baseHeight": 1,
+        "evidenceHash": "03bf6193d3880dd2976d41769223ce7a51425d2983e8f13a807c100bc134b6d1",
+        "finalHash": "0x47ffb7f785461400041696e1353314721f074e9ebb2ac860fa2466ac378a053c",
+        "frames": 75,
+        "recordingManifestHash": "0x23ec98b69ea519632286150743cce7cc42806d577403dead17a118c535815b57",
+        "scenario": "settle",
+        "targetHeight": 76,
+        "workers": [1, 4]
+      },
+      {
+        "baseHeight": 1,
+        "evidenceHash": "22266126e143c3a2b565290f6cabe03979dd7f7ff31a675433cf8a877cfac08d",
+        "finalHash": "0x1616c2d3a2a39380925beefab626e128e33244c48faa4e6720a533d25bbfc247",
+        "frames": 86,
+        "recordingManifestHash": "0xbae9d601433e773f13f4df2732e22f172c58f7411d7aa029a8373af7f7f78c46",
+        "scenario": "htlc-4hop",
+        "targetHeight": 87,
+        "workers": [1, 4]
+      },
+      {
+        "baseHeight": 1,
+        "evidenceHash": "d67349ea2cf237668b3c35d95c3a2ef02bc1ac117fe685dc231aaecbe4d9e4ad",
+        "finalHash": "0xa5bb7897240d5cf06860302fce9f242b7cad1249b9214dd6a164d19ebd6db728",
+        "frames": 98,
+        "recordingManifestHash": "0x74e2c31a57d594513e28f9e3248c916be2e3bacdc11891d609224075b8372f6c",
+        "scenario": "swap-market",
+        "targetHeight": 99,
+        "workers": [1, 4]
+      },
+      {
+        "baseHeight": 1,
+        "evidenceHash": "ff37972471d408be7b924d92f6230a711de7a48d29e845aaa1791a8a8e7d5412",
+        "finalHash": "0x9707f2d847e5ad25a2cb81bfee512863ad74576bbec23b2020b35b3ec439d72d",
+        "frames": 169,
+        "recordingManifestHash": "0x6a31456a9387bff0f0e06c95c19309c760e7af7d11937dfa75bbe003b3eef6c4",
+        "scenario": "multi-sig",
+        "targetHeight": 170,
+        "workers": [1, 4]
+      },
+      {
+        "baseHeight": 1,
+        "evidenceHash": "307d1beb55006a958c2257003324c91914bc31d100070240ca86ae956a17fbff",
+        "finalHash": "0x537ebe605471f2c12eba6dbc23f977161aa9c660972f73950e0d8fd52a58893a",
+        "frames": 295,
+        "recordingManifestHash": "0xca0b643979ba70bdcaafbdc8f51a6d99934a1b3f94b090ed915ccdf295f1fa15",
+        "scenario": "company-ipo",
+        "targetHeight": 296,
+        "workers": [1, 4]
+      },
+      {
+        "baseHeight": 1,
+        "evidenceHash": "26fa789bf276529d778b9ef9f7f33d367f449b8e4000b28898b1c724925e6728",
+        "finalHash": "0x7fa8fa691dde56a79724b59943f8c8f4804876a6ce67974b81cd5099e03094f8",
+        "frames": 108,
+        "recordingManifestHash": "0x7c9d0e737aa032945f3e9698a6c0341cebea5e181d9141ad5253645157cded5a",
+        "scenario": "settle-rebalance",
+        "targetHeight": 109,
+        "workers": [1, 4]
+      },
+      {
+        "baseHeight": 1,
+        "evidenceHash": "087f1178b21460886f96b838b968acf3077b5c2abaf25fd28011201cef57ffe2",
+        "finalHash": "0xca524cd7f9a1c4cc263590f0664d78fd332b3fcfb9962b9bcf5bf64b76113454",
+        "frames": 38,
+        "recordingManifestHash": "0x3c32fb7a86bb008d23ebd2ed746a9130e0a2075b8cdfa7d1baca6f908382d773",
+        "scenario": "processbatch",
+        "targetHeight": 39,
+        "workers": [1, 4]
+      },
+      {
+        "baseHeight": 1,
+        "evidenceHash": "36eedaeb61616a8a1c5fe29f2e10d80f57db6f64de619391be81c52199cbafa5",
+        "finalHash": "0x03ebf04e360d311b9e3be3ee929a518bf6929eeeba74cac6585f7111d8027794",
+        "frames": 27,
+        "recordingManifestHash": "0xe4438c934d90c4a058d946acab7a2e0ee7d1cdd6d3931bfb1eec9513eb2589a9",
+        "scenario": "dispute-lifecycle",
+        "targetHeight": 28,
+        "workers": [1, 4]
+      },
+      {
+        "baseHeight": 1,
+        "evidenceHash": "e78ac2ffe39c8ae81346885cd93eb114446cdb33d76d080e396a9d5597af574e",
+        "finalHash": "0xee4004cbcb915989a5a0c3cbf8d524d0474ccecd34713d4eee0b208f4ac97a65",
+        "frames": 39,
+        "recordingManifestHash": "0xf1a19a043fdd6295ccb583621c7854efdcad97537bacf8ec3470b0ec034afb1f",
+        "scenario": "dispute-transformer",
+        "targetHeight": 40,
+        "workers": [1, 4]
+      }
+    ],
+    "scope": "One uninterrupted complete command, without a scenario-selection override; checkpoint at height 1 plus every accepted WAL frame from 2 through the tip, including external J-submit results. The required scenario selection is unchanged."
+  },
+  "privateArtifacts": {
+    "previousPartialAndResume": {
+      "archive": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/release-current-30-oracle-private.tar.gz",
+      "sha256": "30d7f71d7d1b601fb398cb30eb0247885db900244850878bcd6d7de856781cf0",
+      "bytes": 3539924,
+      "private": true,
+      "scope": "Original13complete scenarios+interrupted final39frameWAL andsameartifactW1/W4resume. Notonecomplete14scenario invocation."
+    },
+    "completeDirectory": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/oracle-budget-full-01",
+    "policy": "Raw recordings, checkpoint/WAL and full state dumps remain private; this document publishes only counts and integrity metadata."
+  },
+  "historicalReplayRed": {
+    "artifact": "/Users/zigota/agent-jobs/xln-mainnet-autonomy-20261017/evidence/release-current-26.log:5889",
+    "limitation": "The original Entity 0002 submit error, frame 47 states and frame 48 accepted inputs were not retained. Later Entity 0003 stale-finality errors are different evidence; the original cause remains unproven.",
+    "currentOracle": "Commit 68711729e replaced comparison of two live runs with one immutable production checkpoint/WAL replay through TS W1/W4. The current complete 14/14 result does not reconstruct missing historical inputs."
+  },
+  "publicVersion": {
+    "frontendSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+    "backendSHA": "6d6d4bb4af6fcf2067f09cbbe330de3b6bca7440",
+    "scope": "This release-runner-only change requires no production runtime or frontend deployment."
+  },
+  "remaining": [
+    "Unchanged final candidate check and exact-SHA push verification.",
+    "The entire 34-step release on the checked commit; the previous 16/34 result is incomplete.",
+    "An uninterrupted one-hour soak and current native TVM, public Nile and Ethereum USDT deployment, finality, exit and recovery gates.",
+    "Mainnet funding, current gas/energy estimates and all acceptance gates; mainnet readiness is not established."
+  ]
+}
