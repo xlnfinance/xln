@@ -1,0 +1,43 @@
+{
+  "baseSHA": "5456cc008c1326c31fc19fb93b56b70a85c9c8d8",
+  "at": "2026-10-19T08:39:09.048467+00:00",
+  "problem": "Managed public server omitted NODE_ENV; a typed sender rejection reached fail-fast after committed Runtime frame791 and halted H1. Existing c14 backend deferred lending admission.",
+  "change": "Managed server defaults NODE_ENV to production, while preserving explicit environment overrides. Financial transitions and storage assertions unchanged.",
+  "sourceHashes": {
+    "scripts/operations/start-server.sh": "0259029493a8f779b6923b6119dd8459435e9ff8cee273f43122be9034d3272a",
+    "core/__tests__/support/process/managed-server-reject-policy.test.ts": "2d6411afdab4b2c1fa08eae00e06b001704b13d98e8a05582f38c4c203da5096"
+  },
+  "l1": {
+    "command": "bun test core/__tests__/support/process/managed-server-reject-policy.test.ts core/__tests__/runtime/ingress/recovery/lending-production-admission.test.ts",
+    "passed": 4,
+    "failed": 0,
+    "assertions": 44,
+    "seconds": 5.76,
+    "artifact": "managed-policy-l1-03.log"
+  },
+  "l2": {
+    "command": "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=lending/e2e-principal.spec.ts,e2e-tour.spec.ts bun run prod:smoke:local under stand lock",
+    "passed": 5,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 107.872956,
+    "artifact": "managed-policy-l2-01/wallet-results.json",
+    "scope": "Tutorial receipt negative/positive and Lending principal, partial/full repay, independent savings; two local EVM chains"
+  },
+  "check": {
+    "command": "bun run check",
+    "sourcePassed": 38,
+    "sourceTotal": 38,
+    "topPassed": 3,
+    "topTotal": 3,
+    "sourceSeconds": 191.646,
+    "artifact": "candidate-check-06.log"
+  },
+  "publicationStatus": "Not yet backend deployed. Actual public checkpoint/WAL recovery verification is required before restart.",
+  "limits": [
+    "Does not establish native TRON or mainnet readiness",
+    "Public backend currently stopped with exact-owner current-store backup; no reset",
+    "No disabled frozen-core assertion or financial assertion"
+  ],
+  "artifactRoot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019"
+}

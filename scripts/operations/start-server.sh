@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+# This managed server is a production service. Preserve explicit test overrides.
+export NODE_ENV=${NODE_ENV:-production}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
