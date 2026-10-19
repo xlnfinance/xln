@@ -1,0 +1,83 @@
+{
+  "baseSHA": "40c8cc92082a4f8809a9404cf86f84e8802dfc68",
+  "sourcePatchSHA256": "20383579d9e5ad942114062ad12c82c5ebf1fc74acc395e43e0e49048f31c0cb",
+  "sourcePaths": {
+    "core/api/server/rpc/tron-proxy.ts": "d12db22bd70c4a099e8c54690b825c8093cc9e6d72b526eb91fd4b585bd4c461",
+    "core/__tests__/operations/health/native-server-jurisdiction.test.ts": "e003c3dc31c19ddd81f966f0ceb4a7b9d81ace123ab1d3d1dd1cdfadcd1cc5b6"
+  },
+  "firstFailure": {
+    "artifact": "native-browser-boot-preparation-05/run-01/browser-result.json",
+    "sha256": "424e46bf522ba6b4ec73aaaa9e7d9ff63c9422ad3f7a4ab804967aaec5679c5a",
+    "passed": 3,
+    "expected": 4,
+    "operation": "POST /api/tron/2414086651/walletsolidity/getaccount",
+    "status": 400,
+    "serverCode": "TRON_PROXY_METHOD_DENIED",
+    "sameFailureFor": "walletsolidity/triggerconstantcontract"
+  },
+  "l1": {
+    "red": "native-wallet-proxy-l1-red-01.result.json",
+    "redPassed": 5,
+    "redFailed": 1,
+    "green": "native-wallet-proxy-l1-green-02.result.json",
+    "passed": 6,
+    "failed": 0,
+    "assertions": 25,
+    "seconds": 1.077456542,
+    "logSHA256": "a9c4b7fdbee3299e2d10f1bb5ebadf987816745e3df70b3448aec7f85e4a6e81"
+  },
+  "l2": {
+    "result": "native-browser-boot-current-06.result.json",
+    "resultSHA256": "b0bd627d78d603aeced0a16cdb7fd3956c89eebbbe4b1ee1ba77d09ede9c8ee2",
+    "manifestSHA256": "6b11bc8e4e6562a1e5f2abcccaaf50e31e2966620cd3f3a38ad68a32600c47c7",
+    "passed": 4,
+    "expected": 4,
+    "errors": 0,
+    "servedArtifactMatches": 15,
+    "servedArtifactExpected": 15,
+    "totalSeconds": 46.706626,
+    "createToHomeMs": 5901.022625,
+    "selectedChain": "Chain 2414086651",
+    "clickLabels": [
+      "Create a wallet Use a name and passphrase",
+      "Test 1 shard",
+      "Derive vault",
+      "Home",
+      "Home",
+      "Home",
+      "Home",
+      "Home"
+    ],
+    "sourceUnchanged": true,
+    "logSHA256": "100e73360b3245a0ee3a72ec9b256f2d65e0fb8808ecfd009aca74272589a462"
+  },
+  "preservation": {
+    "originalAllBytesUnchanged": true,
+    "copiedHistoricalWalUnchanged": {
+      "runtime": true,
+      "cross-runtime": true,
+      "same-j-runtime": true
+    },
+    "sourceStatusUnchanged": true,
+    "protectedForwardOwnersUnchanged": true,
+    "finalBindingError": null
+  },
+  "review": {
+    "artifact": "native-wallet-proxy-stable-02-review.json",
+    "sha256": "c014afb5f75d6ecc3ba05a314c8c8005788e2fcb1d1eeffdffb6898359b04791",
+    "scope": "Read-only two-file review; no release approval"
+  },
+  "capture": {
+    "path": "native-home.png",
+    "sha256": "fbf0840e6c4961fcb841677ce9290ffa86431b59b77e9c994518239ec69c5e9f",
+    "reviewed": true,
+    "vaultNameMasked": true
+  },
+  "limitations": [
+    "Private native JavaTVM, configured chain2414086651 and fresh browser Brainvault Test1shard preset. No public USDT or mainnet claim.",
+    "No hubs were provisioned in this boot experiment; native Pay/Swap/Cross/Lending browser execution remains outstanding.",
+    "No financial commands were clicked in this browser. No wallet secrets, storage or WAL are included here.",
+    "UI bytes match the previously published40c8 build. This API patch is local until separately checked, committed and deployed.",
+    "Exact unit/test/check and release evidence from base40c8 is not a certificate for the new source candidate."
+  ]
+}

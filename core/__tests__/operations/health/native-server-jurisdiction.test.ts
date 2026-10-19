@@ -54,3 +54,17 @@ test('native public transport keeps the actual browser HTTPS origin, independent
   expect(resolveNativeTransportHost('/api/tron/2414086651')).toBe('/api/tron/2414086651');
   expect(resolveNativeTransportHost('//evil.example', 'https://wallet.example')).toBe('//evil.example');
 });
+
+test('native wallet snapshot reads stay on the configured solidity node without opening signing or writes', async () => {
+  const { nativeRestUpstream } = await import('../../../api/server/rpc/tron-proxy');
+  for (const operation of ['getaccount', 'triggerconstantcontract']) {
+    const path = `/api/tron/2414086651/walletsolidity/${operation}`;
+    expect(nativeRestUpstream(data, path, 'POST')).toBe(`http://127.0.0.1:19091/walletsolidity/${operation}`);
+    expect(() => nativeRestUpstream(data, path, 'GET')).toThrow('TRON_PROXY_METHOD_DENIED');
+  }
+  for (const operation of ['gettransactionsign', 'triggersmartcontract', 'broadcasthex']) {
+    expect(() => nativeRestUpstream(data, `/api/tron/2414086651/walletsolidity/${operation}`, 'POST')).toThrow(
+      'TRON_PROXY_METHOD_DENIED',
+    );
+  }
+});

@@ -14,10 +14,12 @@ const FULL_METHODS = new Map([
   ['triggersmartcontract', ['POST']], ['broadcasthex', ['POST']],
 ]);
 
-// Solidified reads: the safe head, and an included transaction's raw_data so
-// the J watcher can bind dispute calldata to its sha256 txID.
+// Solidified reads: wallet balances/allowances remain on the same safe head,
+// and included transaction raw_data binds dispute calldata to its sha256 txID.
+// Signing, transaction construction and broadcasts never enter this read lane.
 const SOLIDITY_METHODS = new Map([
   ['getnowblock', ['GET', 'POST']], ['gettransactionbyid', ['POST']],
+  ['getaccount', ['POST']], ['triggerconstantcontract', ['POST']],
 ]);
 
 export function nativeRestUpstream(data: JurisdictionsData, pathname: string, method: string): string {
