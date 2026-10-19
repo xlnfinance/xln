@@ -18,7 +18,7 @@ const blockFor = (height: number) => ({
 });
 
 describe('authenticated J watcher RPC batching', () => {
-  test.each([2, 4] as const)(
+  test.each([2, 4, 8] as const)(
     'overlaps at most %i chunks while preserving requested header order',
     async concurrency => {
       const calls = Array.from({ length: concurrency * 128 + 1 }, (_, height) => ({
@@ -58,7 +58,7 @@ describe('authenticated J watcher RPC batching', () => {
     },
   );
 
-  test.each([2, 4] as const)(
+  test.each([2, 4, 8] as const)(
     'drains all %i in-flight chunks before rejecting without launching later chunks',
     async concurrency => {
       const calls = Array.from({ length: concurrency * 128 + 1 }, (_, height) => ({
@@ -95,9 +95,10 @@ describe('authenticated J watcher RPC batching', () => {
   );
 
   test.each([
-    ['ethereum-trie', 4],
+    ['ethereum-trie', 8],
     ['tron-complete-receipts', 1],
   ] as const)('bounds %s header chunks without overlapping the two passes', async (commitment, expectedPeak) => {
+    const rangeSize = commitment === 'ethereum-trie' ? 1023 : 511;
     let active = 0;
     let peak = 0;
     const heights: number[] = [];
@@ -105,7 +106,7 @@ describe('authenticated J watcher RPC batching', () => {
     const send = async (method: string): Promise<unknown> => {
       expect(['eth_getBlockReceipts', 'eth_getLogs']).toContain(method);
       expect(active).toBe(0);
-      expect(heights).toHaveLength(512);
+      expect(heights).toHaveLength(rangeSize + 1);
       scalarMethods.push(method);
       return [];
     };
@@ -120,12 +121,12 @@ describe('authenticated J watcher RPC batching', () => {
     const result = await readAuthenticatedReceiptRange(
       send,
       2,
-      512,
+      rangeSize + 1,
       ['0x000000000000000000000000000000000000dEaD'],
       { commitment },
       sendBatch,
     );
-    const passHeights = Array.from({ length: 512 }, (_, index) => index + 1);
+    const passHeights = Array.from({ length: rangeSize + 1 }, (_, index) => index + 1);
     expect(heights).toEqual([...passHeights, ...passHeights]);
     expect(result.headers.map(header => header.jHeight)).toEqual(passHeights.slice(1));
     expect(result.logs).toEqual([]);
@@ -166,7 +167,7 @@ describe('authenticated J watcher RPC batching', () => {
       // The production window includes its preceding anchor in both passes.
       // A trailing one-header request adds two network round trips per window.
       if (rangeSize === BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL) {
-        expect(batches.map(batch => batch.length)).toEqual(Array<number>(8).fill(128));
+        expect(batches.map(batch => batch.length)).toEqual(Array<number>(16).fill(128));
       }
       expect(batches.every(batch => batch.length <= 128)).toBe(true);
       expect(batches.reduce((total, batch) => total + batch.length, 0)).toBe(2 * (rangeSize + 1));

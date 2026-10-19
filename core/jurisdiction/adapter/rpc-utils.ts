@@ -23,7 +23,7 @@ export const MAX_RPC_BATCH_CALLS = 128;
 export const sendBatchInChunks = async (
   sendBatch: RpcBatchSend,
   calls: readonly RpcBatchCall[],
-  concurrentChunks: 1 | 2 | 4,
+  concurrentChunks: 1 | 2 | 4 | 8,
 ): Promise<unknown[]> => {
   if (calls.length <= MAX_RPC_BATCH_CALLS) return sendBatch(calls);
   const results: unknown[] = [];

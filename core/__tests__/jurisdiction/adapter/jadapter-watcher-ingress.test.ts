@@ -511,8 +511,8 @@ describe('JAdapter watcher ingress', () => {
 
   test('RPC watcher bounds historical catch-up without skipping the safe tip', () => {
     expect(resolveWatcherPollToBlock(1, 10_000, 256)).toBe(256);
-    expect(resolveWatcherPollToBlock(1, 190_000)).toBe(511);
-    expect(resolveWatcherPollToBlock(257, 190_000)).toBe(767);
+    expect(resolveWatcherPollToBlock(1, 190_000)).toBe(1023);
+    expect(resolveWatcherPollToBlock(257, 190_000)).toBe(1279);
     expect(resolveWatcherPollToBlock(189_900, 190_000)).toBe(190_000);
     expect(resolveWatcherPollToBlock(257, 10_000, 256)).toBe(512);
     expect(resolveWatcherPollToBlock(9_900, 10_000, 256)).toBe(10_000);
@@ -539,8 +539,9 @@ describe('JAdapter watcher ingress', () => {
     expect(nextWatcherPollWindow(256, false)).toBe(128);
     expect(nextWatcherPollWindow(1, false)).toBe(1);
     expect(nextWatcherPollWindow(128, true)).toBe(256);
-    expect(nextWatcherPollWindow(256, true)).toBe(511);
-    expect(watcherPollWindowLimit('rpc')).toBe(511);
+    expect(nextWatcherPollWindow(256, true)).toBe(512);
+    expect(nextWatcherPollWindow(512, true)).toBe(1023);
+    expect(watcherPollWindowLimit('rpc')).toBe(1023);
     expect(watcherPollWindowLimit('tron')).toBe(255);
     expect(nextWatcherPollWindow(128, true, watcherPollWindowLimit('tron'))).toBe(255);
     expect(resolveWatcherPollToBlock(2, 1000, watcherPollWindowLimit('tron'))).toBe(256);

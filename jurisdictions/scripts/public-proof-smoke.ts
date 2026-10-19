@@ -6,10 +6,7 @@ import { ethers } from 'ethers';
 
 import { generateLazyEntityId } from '../../core/entity/factory';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../../core/hanko/batch';
-import {
-  hashCooperativeUpdateHankoPayload,
-  hashDisputeProofHankoPayload,
-} from '../../core/hanko/onchain-domain';
+import { hashCooperativeUpdateHankoPayload, hashDisputeProofHankoPayload } from '../../core/hanko/onchain-domain';
 import { createEmptyBatch, type JBatch } from '../../core/jurisdiction/machine/batch';
 import { PROOF_BODY_ABI } from '../../core/protocol/dispute/proof-body';
 import { decodeInt512, decodeUint512, decodeUint768, encodeInt512 } from '../../core/protocol/crypto/abi-money';
@@ -26,7 +23,10 @@ type PublicJurisdiction = Readonly<{
 
 const argument = (name: string): string | undefined => {
   const prefix = `${name}=`;
-  return process.argv.slice(2).find((value) => value.startsWith(prefix))?.slice(prefix.length);
+  return process.argv
+    .slice(2)
+    .find(value => value.startsWith(prefix))
+    ?.slice(prefix.length);
 };
 
 const privateKey = String(process.env['PUBLIC_CHAIN_PRIVATE_KEY'] || '').trim();
@@ -99,19 +99,17 @@ const proofBodyHash = ethers.keccak256(
   ethers.AbiCoder.defaultAbiCoder().encode([ethers.ParamType.from(PROOF_BODY_ABI)], [proofBody]),
 );
 
-const gasOverrides = async (
-  estimate: () => Promise<bigint>,
-): Promise<{ gasLimit: bigint }> => {
+const gasOverrides = async (estimate: () => Promise<bigint>): Promise<{ gasLimit: bigint }> => {
   const estimated = await estimate();
   return { gasLimit: (estimated * 12n + 9n) / 10n };
 };
 
-let lastBatchBlock = 0;
+let lastConfirmedBlock = 0;
 const sendBatch = async (batch: JBatch): Promise<ethers.TransactionReceipt> => {
-  // A public RPC may load-balance across heads. Read the nonce and estimate at
-  // one block, never earlier than our last mined batch: otherwise a confirmed
-  // deposit can be followed by an E2 estimate against the preceding state.
-  const blockTag = ethers.toQuantity(Math.max(lastBatchBlock, await provider.getBlockNumber()));
+  // The provider may cache a head preceding our confirmed approval or batch.
+  // Pin nonce and estimate to one block at least as new as every prerequisite
+  // receipt: an older block has no allowance (E3) or a stale Entity nonce (E2).
+  const blockTag = ethers.toQuantity(Math.max(lastConfirmedBlock, await provider.getBlockNumber()));
   const currentNonce = await depository.entityNonces(ownerEntityId, { blockTag });
   const signed = prepareSignedBatch(
     batch,
@@ -137,19 +135,17 @@ const sendBatch = async (batch: JBatch): Promise<ethers.TransactionReceipt> => {
   const transaction = await depository.processBatch(signed.encodedBatch, signed.hankoData, signed.nextNonce, overrides);
   const receipt = await transaction.wait();
   if (!receipt || receipt.status !== 1) throw new Error(`PUBLIC_PROOF_BATCH_FAILED:${transaction.hash}`);
-  lastBatchBlock = receipt.blockNumber;
+  lastConfirmedBlock = Math.max(lastConfirmedBlock, receipt.blockNumber);
   return receipt;
 };
 
-const assertCustomError = async (
-  action: () => Promise<unknown>,
-  expectedName: string,
-): Promise<void> => {
+const assertCustomError = async (action: () => Promise<unknown>, expectedName: string): Promise<void> => {
   try {
     await action();
   } catch (error) {
-    const data = (error as { data?: unknown; info?: { error?: { data?: unknown } } }).data
-      ?? (error as { info?: { error?: { data?: unknown } } }).info?.error?.data;
+    const data =
+      (error as { data?: unknown; info?: { error?: { data?: unknown } } }).data ??
+      (error as { info?: { error?: { data?: unknown } } }).info?.error?.data;
     if (typeof data === 'string') {
       const parsed = depository.interface.parseError(data);
       if (parsed?.name === expectedName) return;
@@ -164,7 +160,7 @@ const waitForUnixTimestamp = async (targetTimestamp: number): Promise<void> => {
     const block = await provider.getBlock('latest');
     if (!block) throw new Error('PUBLIC_PROOF_LATEST_BLOCK_MISSING');
     if (block.timestamp >= targetTimestamp) return;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 4_000));
+    await new Promise(resolveWait => setTimeout(resolveWait, 4_000));
   }
 };
 
@@ -177,17 +173,22 @@ try {
   // linked code and immutable bindings as Runtime bootstrap before any approval
   // or deposit can spend the operator's funds.
   await assertCanonicalRpcContractStack(jurisdiction.rpc, jurisdiction.contracts, 'PUBLIC_PROOF', 10_000);
-  const [leftEntity, rightEntity] = BigInt(ownerEntityId) < BigInt(counterpartyEntityId)
-    ? [ownerEntityId, counterpartyEntityId]
-    : [counterpartyEntityId, ownerEntityId];
+  const [leftEntity, rightEntity] =
+    BigInt(ownerEntityId) < BigInt(counterpartyEntityId)
+      ? [ownerEntityId, counterpartyEntityId]
+      : [counterpartyEntityId, ownerEntityId];
   const accountKey = ethers.solidityPacked(['bytes32', 'bytes32'], [leftEntity, rightEntity]);
   const accountBefore = await depository._accounts(accountKey);
   const collateralBefore = await depository._collaterals(accountKey, 1);
-  if (accountBefore.disputeHash !== ethers.ZeroHash || collateralBefore.collateral !== 0n || decodeInt512(collateralBefore.ondelta) !== 0n) {
+  if (
+    accountBefore.disputeHash !== ethers.ZeroHash ||
+    collateralBefore.collateral !== 0n ||
+    decodeInt512(collateralBefore.ondelta) !== 0n
+  ) {
     throw new Error('PUBLIC_PROOF_REQUIRES_SETTLED_ACCOUNT');
   }
-  const ownerReserveBefore = await depository._reserves(ownerEntityId, 1) as bigint;
-  const counterpartyReserveBefore = await depository._reserves(counterpartyEntityId, 1) as bigint;
+  const ownerReserveBefore = (await depository._reserves(ownerEntityId, 1)) as bigint;
+  const counterpartyReserveBefore = (await depository._reserves(counterpartyEntityId, 1)) as bigint;
   // This controlled proof isolates one new claim. Prior FIFO obligations would
   // change who receives reserve collection; refuse them before spending funds.
   for (const entity of [ownerEntityId, counterpartyEntityId]) {
@@ -196,13 +197,10 @@ try {
     }
   }
   let tokenMintTransactionHash: string | null = null;
-  const tokenBalance = await tokenBalanceOf(wallet.address) as bigint;
+  const tokenBalance = (await tokenBalanceOf(wallet.address)) as bigint;
   if (tokenBalance < depositAmount) {
     if (!allowTestTokenMint) {
-      throw new Error(
-        `PUBLIC_PROOF_TOKEN_BALANCE_INSUFFICIENT:` +
-        `balance=${tokenBalance}:required=${depositAmount}`,
-      );
+      throw new Error(`PUBLIC_PROOF_TOKEN_BALANCE_INSUFFICIENT:` + `balance=${tokenBalance}:required=${depositAmount}`);
     }
     const mint = await tokenMint(
       wallet.address,
@@ -211,19 +209,20 @@ try {
     );
     const receipt = await mint.wait();
     if (!receipt || receipt.status !== 1) throw new Error(`PUBLIC_PROOF_TEST_TOKEN_MINT_FAILED:${mint.hash}`);
+    lastConfirmedBlock = Math.max(lastConfirmedBlock, receipt.blockNumber);
     tokenMintTransactionHash = mint.hash;
   }
 
-  const allowance = await tokenAllowance(wallet.address, jurisdiction.contracts.depository) as bigint;
+  const allowance = (await tokenAllowance(wallet.address, jurisdiction.contracts.depository)) as bigint;
   if (allowance < depositAmount) {
     const approval = await tokenApprove(
       jurisdiction.contracts.depository,
       ethers.MaxUint256,
-      await gasOverrides(
-        () => tokenApprove.estimateGas(jurisdiction.contracts.depository, ethers.MaxUint256),
-      ),
+      await gasOverrides(() => tokenApprove.estimateGas(jurisdiction.contracts.depository, ethers.MaxUint256)),
     );
-    await approval.wait();
+    const receipt = await approval.wait();
+    if (!receipt || receipt.status !== 1) throw new Error(`PUBLIC_PROOF_APPROVAL_FAILED:${approval.hash}`);
+    lastConfirmedBlock = Math.max(lastConfirmedBlock, receipt.blockNumber);
   }
 
   const deposit = createEmptyBatch();
@@ -238,20 +237,16 @@ try {
   const depositReceipt = await sendBatch(deposit);
 
   const settlementNonce = (accountBefore.nonce as bigint) + 1n;
-  const diffs = [{
-    tokenId: 1,
-    leftDiff: ownerIsLeft ? -settlementAmount : settlementAmount,
-    rightDiff: ownerIsLeft ? settlementAmount : -settlementAmount,
-    collateralDiff: 0n,
-    ondeltaDiff: 0n,
-  }];
-  const settlementHash = hashCooperativeUpdateHankoPayload(
-    domain,
-    accountKey,
-    settlementNonce,
-    diffs,
-    [],
-  );
+  const diffs = [
+    {
+      tokenId: 1,
+      leftDiff: ownerIsLeft ? -settlementAmount : settlementAmount,
+      rightDiff: ownerIsLeft ? settlementAmount : -settlementAmount,
+      collateralDiff: 0n,
+      ondeltaDiff: 0n,
+    },
+  ];
+  const settlementHash = hashCooperativeUpdateHankoPayload(domain, accountKey, settlementNonce, diffs, []);
   const settlement = createEmptyBatch();
   settlement.settlements.push({
     leftEntity: leftEntityId,
@@ -263,7 +258,7 @@ try {
   });
   const settlementReceipt = await sendBatch(settlement);
 
-  const replayNonce = await depository.entityNonces(ownerEntityId) + 1n;
+  const replayNonce = (await depository.entityNonces(ownerEntityId)) + 1n;
   const replaySigned = prepareSignedBatch(
     settlement,
     ownerEntityId,
@@ -273,11 +268,7 @@ try {
     replayNonce - 1n,
   );
   await assertCustomError(
-    () => depository.processBatch.staticCall(
-      replaySigned.encodedBatch,
-      replaySigned.hankoData,
-      replaySigned.nextNonce,
-    ),
+    () => depository.processBatch.staticCall(replaySigned.encodedBatch, replaySigned.hankoData, replaySigned.nextNonce),
     'E2',
   );
 
@@ -304,7 +295,10 @@ try {
   });
   const fundingReceipt = await sendBatch(funding);
   const funded = await depository._collaterals(accountKey, 1);
-  if (funded.collateral !== collateralAmount || decodeInt512(funded.ondelta) !== (ownerIsLeft ? collateralAmount : 0n)) {
+  if (
+    funded.collateral !== collateralAmount ||
+    decodeInt512(funded.ondelta) !== (ownerIsLeft ? collateralAmount : 0n)
+  ) {
     throw new Error('PUBLIC_PROOF_COLLATERAL_FUNDING_MISMATCH');
   }
   const disputeStart = createEmptyBatch();
@@ -348,11 +342,7 @@ try {
     tooEarlyNonce,
   );
   await assertCustomError(
-    () => depository.processBatch.staticCall(
-      tooEarly.encodedBatch,
-      tooEarly.hankoData,
-      tooEarly.nextNonce,
-    ),
+    () => depository.processBatch.staticCall(tooEarly.encodedBatch, tooEarly.hankoData, tooEarly.nextNonce),
     'E2',
   );
 
@@ -377,27 +367,37 @@ try {
   }
   const collectedUnsecured = ownerIsLeft ? expectedExit.reservePaid.rightToLeft : expectedExit.reservePaid.leftToRight;
   const remainingDebt = ownerIsLeft ? expectedExit.newDebt.rightToLeft : expectedExit.newDebt.leftToRight;
-  if (decodeUint768(await depository.debtOutstanding(counterpartyEntityId, 1)) !== remainingDebt ||
-      decodeUint768(await depository.debtOutstanding(ownerEntityId, 1)) !== 0n) {
+  if (
+    decodeUint768(await depository.debtOutstanding(counterpartyEntityId, 1)) !== remainingDebt ||
+    decodeUint768(await depository.debtOutstanding(ownerEntityId, 1)) !== 0n
+  ) {
     throw new Error('PUBLIC_PROOF_DEBT_PARITY_MISMATCH');
   }
-  const debtLogs = finalizationReceipt.logs.filter(log =>
-    log.address.toLowerCase() === jurisdiction.contracts.depository.toLowerCase() &&
-    log.topics[0] === depository.interface.getEvent('DebtCreated').topicHash);
+  const debtLogs = finalizationReceipt.logs.filter(
+    log =>
+      log.address.toLowerCase() === jurisdiction.contracts.depository.toLowerCase() &&
+      log.topics[0] === depository.interface.getEvent('DebtCreated').topicHash,
+  );
   if (debtLogs.length !== (remainingDebt > 0n ? 1 : 0)) throw new Error('PUBLIC_PROOF_DEBT_EVENT_COUNT_MISMATCH');
   let debtIndex: string | null = null;
   if (debtLogs.length === 1) {
     const log = debtLogs[0]!;
     const event = depository.interface.decodeEventLog('DebtCreated', log.data, log.topics);
     const row = await depository._debts(counterpartyEntityId, 1, event['debtIndex']);
-    if (event['debtor'] !== counterpartyEntityId || event['creditor'] !== ownerEntityId || event['tokenId'] !== 1n ||
-        decodeUint512(event['amount']) !== remainingDebt || row.creditor !== ownerEntityId || decodeUint512(row.amount) !== remainingDebt) {
+    if (
+      event['debtor'] !== counterpartyEntityId ||
+      event['creditor'] !== ownerEntityId ||
+      event['tokenId'] !== 1n ||
+      decodeUint512(event['amount']) !== remainingDebt ||
+      row.creditor !== ownerEntityId ||
+      decodeUint512(row.amount) !== remainingDebt
+    ) {
       throw new Error('PUBLIC_PROOF_DEBT_ROW_MISMATCH');
     }
     debtIndex = event['debtIndex'].toString();
   }
 
-  const tokenBalanceBeforeWithdrawal = await tokenBalanceOf(wallet.address) as bigint;
+  const tokenBalanceBeforeWithdrawal = (await tokenBalanceOf(wallet.address)) as bigint;
   const withdrawal = createEmptyBatch();
   withdrawal.reserveToExternalToken.push({
     receivingEntity: ethers.zeroPadValue(wallet.address, 32),
@@ -405,23 +405,24 @@ try {
     amount: withdrawalAmount,
   });
   const withdrawalReceipt = await sendBatch(withdrawal);
-  const tokenBalanceAfterWithdrawal = await tokenBalanceOf(wallet.address) as bigint;
+  const tokenBalanceAfterWithdrawal = (await tokenBalanceOf(wallet.address)) as bigint;
   if (tokenBalanceAfterWithdrawal !== tokenBalanceBeforeWithdrawal + withdrawalAmount) {
     throw new Error(
       `PUBLIC_PROOF_WITHDRAWAL_TOKEN_DELTA_MISMATCH:` +
-      `before=${tokenBalanceBeforeWithdrawal}:after=${tokenBalanceAfterWithdrawal}:amount=${withdrawalAmount}`,
+        `before=${tokenBalanceBeforeWithdrawal}:after=${tokenBalanceAfterWithdrawal}:amount=${withdrawalAmount}`,
     );
   }
 
   const ownerReserve = await depository._reserves(ownerEntityId, 1);
   const counterpartyReserve = await depository._reserves(counterpartyEntityId, 1);
-  const expectedOwnerReserve = ownerReserveBefore + depositAmount - settlementAmount - withdrawalAmount + collectedUnsecured;
+  const expectedOwnerReserve =
+    ownerReserveBefore + depositAmount - settlementAmount - withdrawalAmount + collectedUnsecured;
   const expectedCounterpartyReserve = counterpartyReserveBefore + settlementAmount - collectedUnsecured;
   if (ownerReserve !== expectedOwnerReserve || counterpartyReserve !== expectedCounterpartyReserve) {
     throw new Error(
       `PUBLIC_PROOF_RESERVE_PARITY_MISMATCH:` +
-      `owner=${ownerReserve}:${expectedOwnerReserve}:` +
-      `counterparty=${counterpartyReserve}:${expectedCounterpartyReserve}`,
+        `owner=${ownerReserve}:${expectedOwnerReserve}:` +
+        `counterparty=${counterpartyReserve}:${expectedCounterpartyReserve}`,
     );
   }
   console.log(

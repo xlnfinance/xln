@@ -266,7 +266,7 @@ describe('RPC J-watcher backlog drain', () => {
     },
     {
       name: 'retains RPC pressure and recovers authenticated progress below the checkpoint interval',
-      backlogBlocks: 600,
+      backlogBlocks: 1200,
       pressure: true,
     },
   ])(
@@ -386,30 +386,20 @@ describe('RPC J-watcher backlog drain', () => {
           });
         const beforeFailures = failureState();
         rpcProxy.takeHeaderBlocks();
-        const missingHeaderGate = rpcProxy.armHeaderBatchGate('missing-header');
-        const missingHeaderPoll = pollWatcher();
-        await waitForGate('missing-header', missingHeaderGate, missingHeaderPoll);
-        missingHeaderGate.release();
-        await missingHeaderPoll;
-        expect(failureState()).toEqual(beforeFailures);
-        expect(adapter.isWatching()).toBe(true);
-        // The four chunks of this first pass are in flight together. Even when one
-        // header is unavailable, drain its sibling without committing any range.
-        expect(rpcProxy.takeHeaderBlocks().sort((left, right) => left - right)).toEqual(
-          Array.from({ length: 511 }, (_, index) => fromBlock + index),
-        );
-
-        // A second unavailable header halves the Ethereum window again. Preserve
-        // the below-liveness checkpoint case after the subsequent real timeout.
-        const secondMissingGate = rpcProxy.armHeaderBatchGate('missing-header');
-        const secondMissingPoll = pollWatcher();
-        await waitForGate('second-missing-header', secondMissingGate, secondMissingPoll);
-        secondMissingGate.release();
-        await secondMissingPoll;
-        expect(failureState()).toEqual(beforeFailures);
-        expect(rpcProxy.takeHeaderBlocks().sort((left, right) => left - right)).toEqual(
-          Array.from({ length: 255 }, (_, index) => fromBlock + index),
-        );
+        // Start all eight chunks, then halve on each unavailable header. Drain
+        // every in-flight sibling without committing any partial range or state.
+        for (const window of [1023, 511, 255]) {
+          const missingHeaderGate = rpcProxy.armHeaderBatchGate('missing-header');
+          const missingHeaderPoll = pollWatcher();
+          await waitForGate(`missing-header-${window}`, missingHeaderGate, missingHeaderPoll);
+          missingHeaderGate.release();
+          await missingHeaderPoll;
+          expect(failureState()).toEqual(beforeFailures);
+          expect(adapter.isWatching()).toBe(true);
+          expect(rpcProxy.takeHeaderBlocks().sort((left, right) => left - right)).toEqual(
+            Array.from({ length: window }, (_, index) => fromBlock + index),
+          );
+        }
 
         const timeoutGate = rpcProxy.armHeaderBatchGate();
         const retryStartedAt = performance.now();
@@ -430,7 +420,7 @@ describe('RPC J-watcher backlog drain', () => {
         // The retry still begins at block 1, which has no preceding anchor.
         expect(rpcProxy.takeHeaderBlocks()).toHaveLength(127);
 
-        // All three failures shrink the actual poll: 511 -> 255 -> 127 -> 63.
+        // All four failures shrink the actual poll: 1023 -> 511 -> 255 -> 127 -> 63.
         // Every successful response is forwarded from Anvil, including the fence.
         await pollWatcher();
         const readHeights = [...new Set(rpcProxy.takeHeaderBlocks())].sort((left, right) => left - right);

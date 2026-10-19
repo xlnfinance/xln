@@ -1,0 +1,17 @@
+# Authenticated scan window experiment
+
+The public wallet on `27b633b47d58882cd504610627d0776c3dc3c8ea` passed 4/4 primary/reload checks and 104/104 tutorial control checks. Fresh desktop startup still took 56.5 seconds. RPC compression was active; linked browser traces showed repeated per-window RPC waits.
+
+The candidate doubles the Ethereum window from 511 to 1023 blocks and overlaps eight existing 128-call batches per pass. It preserves the preceding anchor, both complete header passes, their reorg fence, result order, failure draining, and pressure backoff. Native TRON remains 255 blocks with sequential header chunks. No financial transition, durable format, contract, or trust anchor changes.
+
+Two sequential fresh-browser pairs used the same observer and immutable runtime overlays against the actual public testnet. Control Home times were 53.498 and 50.223 seconds; candidate times were 38.655 and 45.094 seconds. Mean time improved 19.26%, with per-pair gains of 27.75% and 10.21%. Each variant has only two observations; the chain grew and network variation remains. All four had zero browser/RPC errors and zero HTTP 429. These overlays are experimental evidence, not a production deployment claim.
+
+The owning L1 suite passed 81/81 with 3,780 assertions. Two separately bounded real Anvil cases passed with 94 assertions, covering long authenticated backlog, unavailable headers and timeout pressure, reorg of a carried suffix, recovery rescanning and late import. The pressure fixture now has enough real blocks to exercise eight chunks and one additional failure before the unchanged 63-block recovery checks.
+
+The exact unit command then exposed a first-deposit E3 failure in the public proof CLI. A real Anvil reproduction preserved the original failure and measured cached head 12, confirmed approval block 13, zero allowance at 12 and full allowance at 13. Identical deposit calldata reverted at 12 and estimated 202,152 gas at 13. The fix applies the existing receipt block floor to mint and approval as well as batches, and checks the approval receipt status. It adds no retry or fallback. The owning regression passed 1/1 with 30 assertions in 48.69 seconds, retaining the complete financial proof and changed-code rejection. The original exact-unit failure itself did not record its block tag; the separate reproduction establishes the mechanism.
+
+The exact unit command passed 5,504 tests with 677,310 assertions, zero failures and one pre-existing semantic-completeness skip. The exact `bun run test` passed five RPC scenarios and one Chromium scenario. Full candidate build verification passed four desktop/mobile primary/reload checks with zero browser/RPC errors. Fresh times were 46.601 and 47.766 seconds; reloads were 13.779 and 12.588 seconds. These candidate browser checks used immutable assets on the public origin and are not deployed-version proof.
+
+Final check then identified four raw JSON serializers in the new test helper and its diagnostics. They now use the existing `safeStringify`; production source and all assertions are unchanged. The owning real-Anvil secured proof passed again: 1/1, 30 assertions, 49.818 seconds, with cached head 13 and approval block 14. Exact broad-command results above precede this test-only cleanup; their scope is recorded explicitly.
+
+`proof.json` binds the source, commands and durable Studio artifacts. Unchanged final check, committed-SHA pre-push check, checked publication, independent public clicks, full release and mainnet acceptance remain separate gates.

@@ -1,3 +1,4 @@
+import { approvalOrderingProxy } from './public-proof-approval-proxy';
 import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -67,6 +68,7 @@ test.each([
       ['anvil', '--host', '127.0.0.1', '--port', String(lease.basePort), '--chain-id', '31337', '--block-time', '1'],
       { stdout: 'ignore', stderr: 'inherit' },
     );
+    let proxy: ReturnType<typeof approvalOrderingProxy> | undefined;
     try {
       await waitForRpc(rpc);
       const deploymentPath = join(work, 'deployment.json');
@@ -88,6 +90,7 @@ test.each([
         await Bun.file(deploymentPath).json(),
         'PUBLIC_PROOF_DEPLOYMENT_INVALID',
       );
+      if (unsecuredClaim === 0n) proxy = approvalOrderingProxy(rpc);
       await mkdir(join(work, 'jurisdictions'));
       await Bun.write(
         join(work, 'jurisdictions/jurisdictions.json'),
@@ -95,7 +98,7 @@ test.each([
           jurisdictions: {
             rehearsal: {
               chainId: 31337,
-              rpc,
+              rpc: proxy ? proxy.url : rpc,
               contracts: deployment['contracts'],
               tokens: deployment['registeredTokens'],
             },
@@ -110,6 +113,22 @@ test.each([
       ];
       const proofEnv = { ...process.env, PUBLIC_CHAIN_PRIVATE_KEY: key };
       const output = await run(command, work, proofEnv);
+      if (proxy) {
+        const { approval, deposit } = proxy.evidence();
+        if (!approval || !deposit) throw new Error('APPROVAL_ORDERING_EVIDENCE_MISSING');
+        expect(BigInt(approval.cachedHead)).toBeLessThan(BigInt(approval.receiptBlock));
+        expect(approval.status).toBe('0x1');
+        expect(BigInt(approval.oldAllowance.result as string)).toBe(0n);
+        expect(BigInt(approval.confirmedAllowance.result as string)).toBeGreaterThanOrEqual(1000n);
+        expect(deposit['headReadsAfterApproval']).toBe(0);
+        const oldEstimate = requireBoundaryRecord(deposit['oldEstimate'], 'OLD_ESTIMATE_MISSING');
+        expect(requireBoundaryRecord(oldEstimate['error'], 'OLD_ESTIMATE_REVERT_MISSING')['data']).toBe('0xbf608974');
+        const confirmedEstimate = requireBoundaryRecord(deposit['confirmedEstimate'], 'CONFIRMED_ESTIMATE_MISSING');
+        expect(confirmedEstimate['error']).toBeUndefined();
+        expect(BigInt(confirmedEstimate['result'] as string)).toBeGreaterThan(0n);
+        expect(BigInt(deposit['blockTag'] as string)).toBeGreaterThanOrEqual(BigInt(approval.receiptBlock));
+        expect(requireBoundaryRecord(deposit['actual'], 'ACTUAL_ESTIMATE_MISSING')['error']).toBeUndefined();
+      }
       const report = requireBoundaryRecord(JSON.parse(output), 'PUBLIC_PROOF_REPORT_INVALID');
       expect(report['kind']).toBe('PUBLIC_PROOF_SMOKE');
       expect(report['ownerReserve']).toBe(unsecuredClaim === 0n ? '850' : '950');
@@ -149,6 +168,8 @@ test.each([
       await expect(run(command, work, proofEnv)).rejects.toThrow('PUBLIC_PROOF_CODE_MISMATCH:deltaTransformer');
       expect(await rpcCall(rpc, 'eth_getTransactionCount', [deployment['deployer'], 'pending'])).toBe(beforeNonce);
     } finally {
+      if (proxy) console.log('APPROVAL_ORDERING_FINAL:' + safeStringify(proxy.evidence()));
+      proxy?.stop();
       node.kill('SIGTERM');
       await node.exited;
       lease.release();

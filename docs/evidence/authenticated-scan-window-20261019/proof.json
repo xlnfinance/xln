@@ -1,0 +1,266 @@
+{
+  "baseSHA": "27b633b47d58882cd504610627d0776c3dc3c8ea",
+  "sourceHashes": {
+    "core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts": "9f50a6d2a8db8cefdb12aac165eee3d90d7b82b73c9a8cc13b4c03365359c8d1",
+    "core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts": "7cbd02287c3dc74ff76dc8325fb7c046419c7b5aaf8a46da716a497075be30c3",
+    "core/__tests__/jurisdiction/watchers/j-watcher-receipt-batching.test.ts": "916e9950450cf3940202eec09222e30df3c2bf7b2de93ce3239f877faac9acce",
+    "core/config/constants.ts": "103b3b639e0790361773ff9257a74e1f097dd7dc1ea47a83754027ddbeb181dd",
+    "core/jurisdiction/adapter/receipt/reader.ts": "22f438f1c0aacf59b2123bb725a8f565b4f282f7ca9ebaec57ccb7543188fc87",
+    "core/jurisdiction/adapter/rpc-utils.ts": "86b764227556305ce26de08c4730b7c0c86cc4a854a71f27bf15b592c0520dac"
+  },
+  "createdAt": "2026-10-19T18:26:40.839795+00:00",
+  "change": "Ethereum scan window1023 and at most8 concurrent128-call chunks perpass. NativeTRON255/1 unchanged.",
+  "invariants": [
+    "Bothcompleteheaderpasseswithprecedinganchor",
+    "Denseinclusivecoverage and reorgfence",
+    "Request/resultorder and drainallinflightchunks beforefailure",
+    "Transportpressure halving/cooldown",
+    "Financialstate/WAL/hash/authority unchanged"
+  ],
+  "experiment": {
+    "pairs": [
+      {
+        "control": {
+          "durationMs": 53498.192417000006,
+          "headerCalls": 78041,
+          "rpcHTTP": 1276,
+          "http429": 0,
+          "errors": 0,
+          "artifact": "scan-wave-control-01/result.json"
+        },
+        "candidate": {
+          "durationMs": 38654.57575,
+          "headerCalls": 80981,
+          "rpcHTTP": 1072,
+          "http429": 0,
+          "errors": 0,
+          "artifact": "scan-wave-candidate-01/result.json"
+        },
+        "improvementPercent": 27.746015325712538
+      },
+      {
+        "control": {
+          "durationMs": 50223.154,
+          "headerCalls": 79163,
+          "rpcHTTP": 1288,
+          "http429": 0,
+          "errors": 0,
+          "artifact": "scan-wave-control-02/result.json"
+        },
+        "candidate": {
+          "durationMs": 45094.210083,
+          "headerCalls": 81043,
+          "rpcHTTP": 1075,
+          "http429": 0,
+          "errors": 0,
+          "artifact": "scan-wave-candidate-02/result.json"
+        },
+        "improvementPercent": 10.21230947980687
+      }
+    ],
+    "sampleSizePerVariant": 2,
+    "meanImprovementPercent": 19.25597890303369,
+    "scope": "Sequential freshbrowser matchedobserver experiments on growingpublictestnet, onlyimmutable runtimebundleoverlay; notdeployedproof; perpairnetworkvariability remains. Both fullauthenticatedpasses/anchor retained. PublicAccountworkerunchanged, generatedcandidateworker differs solelyunused Jwindowconstant."
+  },
+  "checks": [
+    {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/scan-wave-l1-01.result.json",
+      "resultSHA256": "148b7d691532a1957cdc07d597aa7620150f5b847f0e2c870b2b9de1d7c2c439",
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/jurisdiction/watchers/j-watcher-receipt-batching.test.ts",
+        "core/__tests__/jurisdiction/watchers/j-watcher-receipt-root.test.ts",
+        "core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts"
+      ],
+      "seconds": 8.859960958,
+      "logSHA256": "cdee00a2b19abaed56a6e1bcdd104b0afb6179f5ea85a5b3510a02b375796991",
+      "sourceUnchanged": true
+    },
+    {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/scan-wave-backlog-l2-01.result.json",
+      "resultSHA256": "f1058e70bff3e422bdd568d181efe24097160f1bf873691d7ea2027f27dbd766",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "scan-wave-backlog-l2-01",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts",
+        "--test-name-pattern",
+        "beyond 4096"
+      ],
+      "seconds": 38.757376917,
+      "logSHA256": "cbe7098fc183d4ce898cc8db5cbe9d491c683723f4311945e5008487786e33c5",
+      "sourceUnchanged": true
+    },
+    {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/scan-wave-pressure-l2-01.result.json",
+      "resultSHA256": "43c449e1ecc316fb2313a4b3340571fd76d859bb9d18894a37df2902afdd8a93",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "scan-wave-pressure-l2-01",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts",
+        "--test-name-pattern",
+        "retains RPC pressure"
+      ],
+      "seconds": 56.717031416000005,
+      "logSHA256": "2176b725619430b2c0c2f3e9f0a74eba6a2b39d29d1d56a22d7e3d22ac210577",
+      "sourceUnchanged": true
+    }
+  ],
+  "counts": {
+    "L1": {
+      "passed": 81,
+      "failed": 0,
+      "assertions": 3780
+    },
+    "realL2": {
+      "passed": 2,
+      "failed": 0,
+      "assertions": 94,
+      "scope": "RealAnvil longbacklog, RPCmissingdata/timeout, carriedsuffixreorg, canonicalrecovery and lateimport."
+    }
+  },
+  "review": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/scan-wave-stable-review.json",
+    "sha256": "69ae7aecc46235a28344c076beb387beee15fdaa8f7e40fcc2e1ca3b235daf3c"
+  },
+  "priorPublicMilestone": {
+    "SHA": "27b633b47d58882cd504610627d0776c3dc3c8ea",
+    "tutorial": {
+      "passed": 104,
+      "expected": 104,
+      "failed": 0,
+      "skipped": 0,
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-tutorial-27b633b47-proof.json",
+      "sha256": "faa13dcfae346b04808ca2873b0d4cd09f459fd0a87acaf1ce2520d1d227444c",
+      "scope": "Actual public chaptercontrols/transitions/completion/Replay/reload onfresh/returningdesktop/mobile; advancedchaptersinspectroutes,notallfinancialoperations."
+    },
+    "boot": {
+      "passed": 4,
+      "expected": 4,
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-primary-27b633b47-02/result.json"
+    }
+  },
+  "remaining": [
+    "Unchanged final check and committed-SHA pre-push check",
+    "Checked main push/frontend deploy and actual public version/clicks",
+    "Current full release, owning financial/browser checks and one-hour soak",
+    "Public EVM/native TRON/mainnet financial acceptance; no mainnet-ready claim"
+  ],
+  "proofCliSourceHashes": {
+    "jurisdictions/scripts/public-proof-smoke.ts": "4c3bfde10eb54047ea86e8df962929f47b7db8de3f62b0bd943c211b4c54dcfc",
+    "core/__tests__/network/jurisdiction/public-proof-smoke.test.ts": "4c5e280c9d61ae33a8d22150bfa5a8869fb639174d95d4e6c264ca18a18de410",
+    "core/__tests__/network/jurisdiction/public-proof-approval-proxy.ts": "f109cfe955d1d1666ebea4d27682c6c4576366373e77931ce49405e9537739b3"
+  },
+  "proofCli": {
+    "cause": "The original CLI read cached head12 after successful approval receipt13. Allowance was0 at12 and MaxUint256 at13; identical signed deposit calldata estimated E3 at12 and202152gas at13. The original exact unit failure lacked blockTag evidence; the separate real-Anvil ordering reproduction demonstrates this concrete mechanism.",
+    "fix": "Nonce and estimate use one block no earlier than any confirmed mint/approval/batch receipt. Approval receipt status is checked. No retry, fallback, contract or financial-state transition changes.",
+    "regression": {
+      "passed": 1,
+      "failed": 0,
+      "assertions": 30,
+      "scope": "Real Anvil; genuine forwarded RPC responses; actual approval mined after client head; zero fresh head reads before deposit; unchanged settlement, collateral, real-clock dispute, withdrawal and changed-code rejection assertions."
+    },
+    "artifacts": [
+      {
+        "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/exact-test-unit-12.result.json",
+        "resultSHA256": "e47823110b7e5f0734755baf46eb4bd1e3ee4394507a1690770ca5412584af5b",
+        "exitCode": 1,
+        "seconds": 1413.84016,
+        "sourceUnchanged": true,
+        "logSHA256": "9cb934c0cecc90a0f8cd0bb209cc0cf882598e6922e169a0a0111f2a44cb5f78"
+      },
+      {
+        "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-proof-approval-red-01.result.json",
+        "resultSHA256": "d8718dbb20056d82fa2d769153f97378d5c06831ff2b7874033a076ff6ee8d8f",
+        "exitCode": 1,
+        "seconds": 13.786720708,
+        "sourceUnchanged": true,
+        "logSHA256": "37200cfba136c73f7bae0f1fbd0312a88511f6f16f2e52d638b9bccba74081ea"
+      },
+      {
+        "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-proof-approval-green-01.result.json",
+        "resultSHA256": "cc0d073d5dc0a08125d715239b050d4555202a52c05839a5d8bd5d25d71c3f4b",
+        "exitCode": 0,
+        "seconds": 48.694737458,
+        "sourceUnchanged": true,
+        "logSHA256": "017126c810058d992e31ee9a1db6e08b5fe1b1b842e26386994a56df45e36c97"
+      }
+    ],
+    "review": {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/approval-receipt-stable-review.json",
+      "sha256": "266d678284a853815d9b2df33a4e1ec4b1bce110dffda3a4dd38fb5f46100b2b"
+    }
+  },
+  "validationBeforeTestSerializerCleanup": {
+    "exactUnit": {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/exact-test-unit-13.result.json",
+      "resultSHA256": "72d74403dcbadc850c8fa9b490c4212bc859d0a435ccf5673ada24725c69cfe4",
+      "seconds": 1440.7264930420001,
+      "sourceUnchanged": true,
+      "logSHA256": "0647be45be0ee10eb19e3d5806059f2dd7845e78a0aebfb6a9ac1299afd57d59",
+      "passed": 5504,
+      "failed": 0,
+      "skipped": 1,
+      "assertions": 677310,
+      "skip": "Existing semantic parity completeness test requires RSCORE_REQUIRE_SEMANTIC_COMPLETENESS=1; this is not semantic-completeness evidence."
+    },
+    "exactTest": {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/exact-test-05.result.json",
+      "resultSHA256": "6ff996ea3e4cf18b4f8b08c79a3005f1220a7c4d4dcff8f0aaab4409adbe3b24",
+      "seconds": 163.12814766699998,
+      "sourceUnchanged": true,
+      "logSHA256": "bd8de3193bcf2555735da661d0c58e3ecb456c2c74ba84d0ccea87d802000172",
+      "rpcPassed": 5,
+      "chromiumPassed": 1
+    },
+    "cleanupScope": "Four raw JSON.stringify calls in two test files replaced by existing safeStringify. Production source and all test assertions unchanged. Full commands above predate that test-only cleanup; owning secured proof rerun below."
+  },
+  "finalProofCliSourceHashes": {
+    "jurisdictions/scripts/public-proof-smoke.ts": "4c3bfde10eb54047ea86e8df962929f47b7db8de3f62b0bd943c211b4c54dcfc",
+    "core/__tests__/network/jurisdiction/public-proof-smoke.test.ts": "f91c17bc4c6390c438a970dc6fd9438f1534e333252a836e99e852a22525febf",
+    "core/__tests__/network/jurisdiction/public-proof-approval-proxy.ts": "a01f25aeb82fcfc4b46a34de23f25dea9a3cd98d7533eaa3cdc4b929ed2ab853"
+  },
+  "postCleanupProof": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-proof-approval-green-02.result.json",
+    "resultSHA256": "5a71657dd82b76ca1e978232d85a0b4ea13aaa26359e08d51cf6317df4a77b8d",
+    "seconds": 49.818238084,
+    "sourceUnchanged": true,
+    "logSHA256": "bec65000fdd2beb0bccd72e6a13613f2f02329a7176a054a447751c833a444b0",
+    "passed": 1,
+    "failed": 0,
+    "assertions": 30,
+    "cachedHead": 13,
+    "approvalBlock": 14,
+    "oldEstimate": "E3 0xbf608974",
+    "actualBlockTag": 14,
+    "headReadsAfterApproval": 0
+  },
+  "canonicalCandidateBrowser": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/scan-wave-candidate-browser-proof-02.json",
+    "sha256": "5ca471d24d68fcaaad5f9e8539f8e380cf74a2662076772953eebe25d81f8464",
+    "passed": 4,
+    "failed": 0,
+    "browserRpcErrors": 0,
+    "desktopFreshSeconds": 46.600669959,
+    "desktopReloadSeconds": 13.779,
+    "mobileFreshSeconds": 47.766,
+    "mobileReloadSeconds": 12.588,
+    "scope": "Fresh canonical full build, immutable asset overlay on public origin; runtime/API unchanged by subsequent test-only serializer cleanup. Not a deployed proof."
+  }
+}
