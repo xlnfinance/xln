@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from './Icons';
 import { useApp } from '../runtime/store';
@@ -22,6 +22,7 @@ export function Tour() {
   const wallet = useWallet(useApp(s => s.activeEntityId));
   const { pathname } = useLocation();
   const [tick, setTick] = useState(0);
+  const guide = useRef<HTMLElement>(null);
   const index = Math.max(0, Math.min(tour.index, TOUR_STEPS.length - 1));
   const step = tour.active ? TOUR_STEPS[index] : undefined;
   const trade = useTradeCompletion(step?.id === 'trade', wallet.entityId);
@@ -43,6 +44,11 @@ export function Tour() {
   }, [step]);
 
   useEffect(() => {
+    // Reveal guidance after navigation/replay, without interrupting typing or guide ticks.
+    if (step) guide.current?.scrollIntoView({ block: 'center' });
+  }, [step, pathname]);
+
+  useEffect(() => {
     if (!target) return;
     const node = nodeFor(target);
     node?.classList.add('tutorial-target');
@@ -53,6 +59,7 @@ export function Tour() {
   const finish = step.id === 'finish';
   return (
     <section
+      ref={guide}
       className="tour tour-inline"
       data-testid="tour"
       data-step={step.id}

@@ -256,6 +256,27 @@ Required capabilities:
 5. Serve `/c` and `/c.txt` with permissive CORS and aggressive no-cache.
 6. Preserve the frame-ancestor policy expected by app and custody surfaces.
 
+RPC JSON compression belongs to `scripts/deployment/nginx/configure-rpc-nginx.ts`.
+It updates both RPC locations in the application host, preserves other directives
+and hosts, and requires the orchestrator upstream at `127.0.0.1:8080`. The
+orchestrator still enforces its method allowlist, 128-call batch limit, 256 KiB
+request limit and 8 MiB decoded response limit before Nginx compresses the body.
+The upstream must emit one valid JSON media type; a duplicated `Content-Type`
+value prevents MIME-based compression.
+
+Production frontend rollout applies this bounded configuration after installing
+the web artifact. For a checked configuration-only release:
+
+```bash
+bun run deploy --remote root@xln.finance --rpc-proxy-only --production
+```
+
+This path backs up the site, runs `nginx -t` before reloading Nginx, and restores
+the previous site on validation/reload failure. It does not build, restart Runtime
+services, reset stores, or invoke the broader custody/recovery configuration
+maintenance. Verify identity versus gzip decoded bytes, actual public startup,
+and unchanged backend process/storage evidence after rollout.
+
 ### Required proxy surfaces
 
 ```nginx

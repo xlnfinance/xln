@@ -182,7 +182,7 @@ describe('production startup wiring', () => {
       'bun run check:determinism',
     );
     expect(releaseGate).toContain(
-      "{ name: 'deterministic replay oracle', command: 'bun run check:determinism', timeoutMs: 600_000 }",
+      "{ name: 'deterministic replay oracle', command: 'bun run check:determinism', timeoutMs: 720_000 }",
     );
   });
 
@@ -420,6 +420,23 @@ describe('production startup wiring', () => {
     expect(deploy).not.toContain('remote_cmd="$remote_cmd --frontend"');
     expect(deploy).toContain('web artifact installed without runtime restart');
     expect(packageJson.scripts['deploy:prod:frontend']).toContain('--frontend-only');
+  });
+
+  test('production RPC compression shares one config owner and exits before runtime deployment', () => {
+    const deploy = readPlatformDeploy();
+    expect(deploy.match(/bun "\$SCRIPT_DIR\/nginx\/configure-rpc-nginx\.ts" "\$available"/g)).toHaveLength(2);
+    expect(deploy).not.toContain('common_headers =');
+    expect(deploy).toContain('./scripts/deployment/deploy-platform.sh --rpc-proxy-only --production;');
+    const boundary = deploy.lastIndexOf('if [ "$RPC_PROXY_ONLY" = "1" ]; then');
+    const localDispatch = deploy.slice(boundary);
+    expect(localDispatch).toContain('configure_production_rpc_proxy\n  exit 0');
+    expect(localDispatch.indexOf('exit 0')).toBeLessThan(localDispatch.indexOf('run_local_deploy'));
+    const start = deploy.indexOf('configure_production_rpc_proxy() {');
+    const scoped = deploy.slice(start, deploy.indexOf('ensure_production_nginx_site_consistency() {', start));
+    expect(scoped.indexOf('nginx -t')).toBeLessThan(scoped.indexOf('systemctl reload nginx'));
+    expect(scoped).toContain('cp -p "$backup" "$available"');
+    expect(scoped.slice(0, scoped.indexOf('systemctl reload nginx'))).not.toContain('return 0');
+    expect(scoped).not.toMatch(/pm2|reset|custody|wallet|ensure_production_nginx_site_consistency/);
   });
 
   test('production public discovery, recovery, and faucet routes are operational by default', () => {

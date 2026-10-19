@@ -32,7 +32,9 @@ const CORS_JSON_HEADERS = {
   'Access-Control-Allow-Methods': '*',
   'Access-Control-Allow-Headers': '*',
   'Access-Control-Expose-Headers': 'X-XLN-Proxy-Health-Polled, X-XLN-Proxy-Health-Poll-Ms, X-XLN-Proxy-Upstream-Ms, X-XLN-Proxy-Total-Ms',
-  'Content-Type': 'application/json',
+  // Keep the same key as upstream overrides: Headers appends differently cased
+  // object keys, producing an invalid comma-separated media type.
+  'content-type': 'application/json',
 };
 
 const MAX_RPC_PROXY_INDEX = 8;

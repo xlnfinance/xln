@@ -1,6 +1,14 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { enterStack } from './stack';
 import { fundFromHubUi } from './fund-from-hub';
+
+async function expectGuideInViewport(page: Page) {
+  const card = page.getByTestId('tour').locator('.tour-card');
+  await card.evaluate(async node => {
+    await Promise.all(node.getAnimations().map(animation => animation.finished));
+  });
+  await expect(card).toBeInViewport({ ratio: 1 });
+}
 
 test('an incoming WETH payment does not complete the swap exercise', { tag: '@functional' }, async ({ page }) => {
   test.setTimeout(60_000);
@@ -22,6 +30,17 @@ test(
   { tag: '@functional' },
   async ({ page }) => {
     test.setTimeout(60_000);
+    const requirements = { requireMarketMaker: true };
+    await expect
+      .poll(
+        async () => {
+          const response = await page.request.get('/api/health');
+          expect(response.ok()).toBe(true);
+          return (await response.json()).marketMaker;
+        },
+        { timeout: 20_000 },
+      )
+      .toMatchObject({ enabled: requirements.requireMarketMaker, ok: true });
     let grants = 0;
     page.on('request', request => {
       if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/faucet/offchain') grants++;
@@ -120,16 +139,37 @@ test(
     await expect(page.getByTestId('tour')).toHaveAttribute('data-target', 'back');
     await page.getByTestId('back').click();
     await expect(page.getByTestId('tour')).toHaveAttribute('data-target', 'home-pay');
+    await page.getByTestId('nav-settings').locator('visible=true').first().click();
+    await page.getByTestId('tour-replay').click();
+    await expect(page.getByTestId('tour')).toHaveAttribute('data-target', 'home-pay');
+    await expectGuideInViewport(page);
+    expect(grants).toBe(1);
   },
 );
 
-test('starting the guided demo from Settings opens Home and its faucet', { tag: '@functional' }, async ({ page }) => {
+async function verifySettingsReplay(page: Page, width: number) {
   test.setTimeout(60_000);
+  await page.setViewportSize({ width, height: 844 });
   await enterStack(page);
   await page.getByTestId('nav-settings').locator('visible=true').first().click();
   await expect(page).toHaveURL(/\/settings$/);
   await page.getByTestId('tour-replay').click();
   await expect(page.getByTestId('home-faucet')).toBeEnabled({ timeout: 40_000 });
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByTestId('tour')).toHaveAttribute('data-target', 'home-faucet');
+  const guide = page.getByTestId('tour');
+  await expect(guide).toHaveAttribute('data-target', 'home-faucet');
+  await expectGuideInViewport(page);
+  // Replaying an already active chapter must also reveal it after Settings navigation.
+  await page.getByTestId('nav-settings').locator('visible=true').first().click();
+  await page.getByTestId('tour-replay').click();
+  await expect(guide).toHaveAttribute('data-target', 'home-faucet');
+  await expectGuideInViewport(page);
+}
+
+test('Settings Replay reveals the guide and faucet on desktop', { tag: '@functional' }, async ({ page }) => {
+  await verifySettingsReplay(page, 1280);
+});
+
+test('Settings Replay reveals the guide and faucet on mobile', { tag: '@functional' }, async ({ page }) => {
+  await verifySettingsReplay(page, 390);
 });

@@ -20,8 +20,9 @@
 #                          is selected, build it locally and upload the artifact.
 #   --push                 With `--remote`, require clean `main` and push first.
 #   --fresh                Delete checkout-local `db/`, `db-tmp/`, and `logs/*.log`.
-#   --frontend-only        Install the prebuilt frontend artifact only.
+#   --frontend-only        Install web artifacts and production RPC proxy settings.
 #   --runtime-only         Skip frontend compilation and deploy Runtime services.
+#   --rpc-proxy-only       Validate/reload only production RPC proxy settings.
 #   --production           Enable production paths, health gates, and state roots.
 #   --code-only            Preserve existing production JDB/RDB mesh state.
 #   --reset-mesh           Delete and bootstrap production mesh state explicitly.
@@ -43,9 +44,10 @@
 #   xln state directories. Environment overrides are named `XLN_*` here.
 #
 # Outputs and failure contract
-#   Every mode refreshes dependencies and the browser Runtime bundle. Frontend
+#   Runtime deployments refresh dependencies and the browser Runtime bundle. Frontend
 #   output is rebuilt only when selected. PM2 processes restart when PM2 exists;
 #   production mode also installs nginx config and enforces health gates.
+#   RPC-proxy-only changes no application files, dependencies, processes or stores.
 #   `set -euo pipefail` is the default. Required builds, migrations, process
 #   starts, and health gates fail loud; optional cleanup probes are explicit.
 #
@@ -76,6 +78,7 @@ Options:
   --frontend            Build frontend (default).
   --frontend-only       Upload frontend without restarting Runtime.
   --runtime-only        Skip frontend build; production requires an artifact.
+  --rpc-proxy-only      Validate/reload only production RPC proxy settings.
   --production          Enable production state paths and health gates.
   --code-only           Preserve production mesh state.
   --reset-mesh          Explicitly reset production mesh state.
@@ -88,6 +91,7 @@ PUSH=0
 FRESH=0
 BUILD_FRONTEND=1
 FRONTEND_ONLY=0
+RPC_PROXY_ONLY=0
 PRODUCTION=0
 RESET_PRODUCTION_MESH=0
 PREBUILT_FRONTEND_ARCHIVE=""
@@ -147,6 +151,11 @@ while [ $# -gt 0 ]; do
       BUILD_FRONTEND=0
       shift
       ;;
+    --rpc-proxy-only)
+      RPC_PROXY_ONLY=1
+      BUILD_FRONTEND=0
+      shift
+      ;;
     --production)
       PRODUCTION=1
       shift
@@ -166,6 +175,13 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+if [ "$RPC_PROXY_ONLY" = "1" ]; then
+  if [ "$PRODUCTION" != "1" ] || [ "$FRESH" = "1" ] || [ "$RESET_PRODUCTION_MESH" = "1" ] || [ "$FRONTEND_ONLY" = "1" ] || [ "$BUILD_FRONTEND" = "1" ]; then
+    echo "RPC_PROXY_ONLY_REQUIRES_PRODUCTION_WITHOUT_BUILD_OR_RESET" >&2
+    exit 1
+  fi
+fi
 
 if [ "$FRONTEND_ONLY" = "1" ] && [ -z "$REMOTE_HOST" ]; then
   echo "FRONTEND_ONLY_REQUIRES_REMOTE" >&2
@@ -506,6 +522,27 @@ wait_for_custody() {
     "$deadline"
 }
 
+configure_production_rpc_proxy() {
+  local available="/etc/nginx/sites-available/xln" backup
+  [ -f "$available" ] || { echo "NGINX_RPC_SITE_MISSING:$available" >&2; return 1; }
+  backup="$(mktemp "${available}.rpc-backup.XXXXXX")"
+  cp -p "$available" "$backup"
+  if ! bun "$SCRIPT_DIR/nginx/configure-rpc-nginx.ts" "$available" || ! nginx -t; then
+    cp -p "$backup" "$available"
+    echo "NGINX_RPC_CONFIGURATION_REJECTED:restored=$backup" >&2
+    return 1
+  fi
+  # A prior deploy may have stopped after writing but before reload. Identical
+  # disk bytes do not establish the configuration of the active workers.
+  if ! systemctl reload nginx; then
+    cp -p "$backup" "$available"
+    nginx -t && systemctl reload nginx
+    echo "NGINX_RPC_RELOAD_FAILED:restored=$backup" >&2
+    return 1
+  fi
+  echo "[deploy] RPC proxy reloaded without runtime restart; previous=$backup"
+}
+
 ensure_production_nginx_site_consistency() {
   local available="/etc/nginx/sites-available/xln"
   local enabled="/etc/nginx/sites-enabled/xln"
@@ -598,44 +635,7 @@ if marker in text and "location /api/recovery/" not in text:
 PY
   fi
 
-  python3 - "$available" <<'PY'
-from pathlib import Path
-import re
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text()
-common_headers = """        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 300s;
-        proxy_connect_timeout 75s;
-"""
-primary = f"""    location = /rpc {{
-        proxy_pass http://127.0.0.1:8080;
-{common_headers}    }}
-"""
-extra = f"""
-    location ~ ^/rpc[2-8]$ {{
-        proxy_pass http://127.0.0.1:8080;
-{common_headers}    }}
-"""
-if re.search(r"\n    location = /rpc \{\n(?:        .*\n)*?    \}\n", text):
-    text = re.sub(r"\n    location = /rpc \{\n(?:        .*\n)*?    \}\n", "\n" + primary, text, count=1)
-elif "    location /api/ {\n" in text:
-    text = text.replace("    location /api/ {\n", primary + "\n    location /api/ {\n", 1)
-
-if "location ~ ^/rpc[2-8]$" not in text:
-    marker = primary
-    if marker in text:
-        text = text.replace(marker, marker + extra, 1)
-    elif "    location /api/ {\n" in text:
-        text = text.replace("    location /api/ {\n", extra + "\n    location /api/ {\n", 1)
-
-path.write_text(text)
-PY
+  bun "$SCRIPT_DIR/nginx/configure-rpc-nginx.ts" "$available"
 
   python3 - "$available" <<'PY'
 from pathlib import Path
@@ -1311,7 +1311,12 @@ $(cat "$SCRIPT_DIR/prepare-remote-main.sh")
   if [ -n "$remote_frontend_archive" ]; then
     remote_cmd="$remote_cmd bash scripts/deployment/web-artifacts.sh install '$remote_frontend_archive'; rm -f '$remote_frontend_archive';"
   fi
-  if [ "$FRONTEND_ONLY" = "1" ]; then
+  if [ "$RPC_PROXY_ONLY" = "1" ]; then
+    remote_cmd="$remote_cmd ./scripts/deployment/deploy-platform.sh --rpc-proxy-only --production;"
+  elif [ "$FRONTEND_ONLY" = "1" ]; then
+    if [ "$PRODUCTION" = "1" ]; then
+      remote_cmd="$remote_cmd ./scripts/deployment/deploy-platform.sh --rpc-proxy-only --production;"
+    fi
     remote_cmd="$remote_cmd test -s frontend/build/index.html; test -s ui/dist/index.html; echo '[deploy] web artifact installed without runtime restart';"
   else
     remote_cmd="$remote_cmd XLN_DEPLOY_USE_COMMITTED_CONTRACTS=1 ./scripts/deployment/deploy-platform.sh --runtime-only"
@@ -1330,6 +1335,11 @@ $(cat "$SCRIPT_DIR/prepare-remote-main.sh")
 
   echo "[deploy] running remote deploy on $REMOTE_HOST"
   ssh "$REMOTE_HOST" "$remote_cmd"
+  exit 0
+fi
+
+if [ "$RPC_PROXY_ONLY" = "1" ]; then
+  configure_production_rpc_proxy
   exit 0
 fi
 

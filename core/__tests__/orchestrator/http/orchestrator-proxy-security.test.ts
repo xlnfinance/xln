@@ -23,6 +23,7 @@ describe('orchestrator proxy security', () => {
       );
 
       expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('application/json;charset=utf-8');
       expect(forwarded).toBe('for=_xln_public_proxy');
     } finally {
       globalThis.fetch = originalFetch;
@@ -142,6 +143,7 @@ describe('orchestrator proxy security', () => {
         const endpoint = `/api/faucet/${kind}?chainId=31337`;
         const faucetResponse = await handlers.proxyAnyHubRequest(request(endpoint), endpoint);
         expect(faucetResponse.status).toBe(200);
+        expect(faucetResponse.headers.get('content-type')).toBe('application/json;charset=utf-8');
         expect(await faucetResponse.json()).toEqual({ success: true });
       }
       expect(requestedEngines).toEqual([undefined, 'typescript', 'typescript', 'typescript']);

@@ -1,3 +1,4 @@
+import { configureRpcNginx } from '../../../../scripts/deployment/nginx/configure-rpc-nginx';
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -197,6 +198,11 @@ describe('production startup wiring', () => {
 
     expect(target).toBeDefined();
     expect(target?.requireMarketMaker).toBe(true);
+
+    const tutorial = expandPlaywrightTargets(['ui/tests/e2e-tour.spec.ts']).find(
+      entry => entry.title === 'guide follows real funding, payment, swap and history without acknowledgement clicks',
+    );
+    expect(tutorial?.requireMarketMaker).toBe(true);
   });
 
   test('non-production Anvil harnesses keep bounded history in memory', () => {
@@ -454,7 +460,12 @@ describe('production startup wiring', () => {
     expect(startServer).toContain('MARKET_MAKER_API_YIELD_MS=${MARKET_MAKER_API_YIELD_MS:-25}');
     expect(deploy).toContain('curl --max-time 10 -fsS "$url"');
     expect(deploy).toContain('curl --max-time 10 -sS -X POST');
-    expect(deploy).toContain('location ~ ^/rpc[2-8]$');
+    expect(deploy).toContain('bun "$SCRIPT_DIR/nginx/configure-rpc-nginx.ts" "$available"');
+    const rpcSite = configureRpcNginx(
+      'server {\n    server_name xln.finance app.xln.finance;\n    location /api/ { return 404; }\n}\n',
+    );
+    expect(rpcSite).toContain('location ~ ^/rpc[2-8]$');
+    expect(rpcSite.match(/proxy_pass http:\/\/127.0.0.1:8080;/g)).toHaveLength(2);
     expect(deploy).toContain('public /rpc must proxy through orchestrator safety filter');
     expect(deploy).toContain('fail_deploy_with_debug "anvil2 did not become ready on :8546"');
     expect(deploy).toContain('bun scripts/deployment/watch-prod-bootstrap.ts http://127.0.0.1:8080/api/health 0');
