@@ -193,7 +193,7 @@ function EntityActivity({ entityId }: { entityId: string | null }) {
 				{filter !== 'swaps' && (
 					<div className="aside desktop-only">
 						<div className="card activity-receipt">
-							{selected ? <MovementDetail movement={selected} names={wallet.names} /> : <p className="note">Select a movement to see its receipt.</p>}
+							{selected ? <MovementDetail movement={selected} names={wallet.names} entityId={entityId!} /> : <p className="note">Select a movement to see its receipt.</p>}
 						</div>
 					</div>
 				)}
@@ -201,7 +201,7 @@ function EntityActivity({ entityId }: { entityId: string | null }) {
 			{selected && !desktop && (
 				<div className="mobile-only">
 					<Sheet title="Receipt" onClose={() => setSelectedId(null)}>
-						<MovementDetail movement={selected} names={wallet.names} />
+						<MovementDetail movement={selected} names={wallet.names} entityId={entityId!} />
 					</Sheet>
 				</div>
 			)}

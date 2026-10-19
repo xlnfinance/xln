@@ -1,3 +1,5 @@
+import type { RuntimeAdapterCrossOrder } from '../../../api/runtime-adapter/read/cross-order';
+import { acquireRuntimeFrameWriter } from '../../../runtime/frame/lifecycle/writer-lock';
 import { createEmptyEnv, saveEnvToDB, closeRuntimeDb, closeInfraDb } from '../../../runtime';
 import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
 import { readFileSync } from 'node:fs';
@@ -2809,4 +2811,140 @@ test('remote runtime adapter rejects a tampered server identity proof', async ()
   } finally {
     globalThis.WebSocket = previousWebSocket;
   }
+});
+
+
+const makeCrossOrderReadFixture = () => {
+  const env = makeEnv();
+  env.runtimeId = hubRuntimeId;
+  const replica = env.state.eReplicas.get(`${entityId}:signer`)!;
+  const sourceStack = 'stack:31337:0x0000000000000000000000000000000000000002';
+  const targetStack = 'stack:31338:0x0000000000000000000000000000000000000003';
+  const route: CrossJurisdictionSwapRoute = {
+    orderId: 'old/swap:1',
+    makerEntityId: entityId,
+    hubEntityId: counterpartyId,
+    source: {
+      jurisdiction: sourceStack,
+      entityId,
+      counterpartyEntityId: counterpartyId,
+      tokenId: 1,
+      amount: 50_000_000n,
+    },
+    target: {
+      jurisdiction: targetStack,
+      entityId: counterpartyId,
+      counterpartyEntityId: entityId,
+      tokenId: 1,
+      amount: 2_000_000_000_000_000_000n,
+    },
+    sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+    targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+    status: 'settled',
+    createdAt: 100,
+    updatedAt: 700,
+    fillNumerator: 1n,
+    fillDenominator: 2n,
+    cumulativeFillRatio: 32768,
+    filledSourceAmount: 25_000_000n,
+    filledTargetAmount: 1_000_000_000_000_000_000n,
+  };
+  replica.state.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
+  const path = `entity/${entityId}/cross-order/${encodeURIComponent(route.orderId)}`;
+  const read = () => resolveRuntimeAdapterRead<RuntimeAdapterCrossOrder>({ env }, path);
+  return { env, replica, route, path, read };
+};
+
+test('cross-order reads the exact old order, omitting secrets and detaching committed status', async () => {
+  const { replica, route, read } = makeCrossOrderReadFixture();
+  for (let i = 0; i < 25; i++) replica.state.crossJurisdictionSwaps!.set(`new-${i}`, { ...route, orderId: `new-${i}` });
+  const reveal = {
+    fillRatio: 32768,
+    fullSecret: 'private-test-preimage',
+    reveals: ['a', 'b', 'c', 'd'] as [string, string, string, string],
+  };
+  route.pendingSourceRegistryReveal = reveal;
+  route.pendingTargetRegistryReveal = reveal;
+  const result = await read();
+  expect(result).toEqual({
+    runtimeId: hubRuntimeId,
+    runtimeHeight: 7,
+    entityId,
+    entityHeight: 7,
+    orderId: 'old/swap:1',
+    status: 'settled',
+    updatedAt: 700,
+  });
+  route.status = 'clearing';
+  expect(result.status).toBe('settled');
+});
+
+test('cross-order does not promote positive fill, stored close proofs, or an uncommitted close proposal', async () => {
+  const { replica, route, read } = makeCrossOrderReadFixture();
+  route.status = 'clearing';
+  const proof = {
+    orderId: route.orderId,
+    routeHash: `0x${'11'.repeat(32)}`,
+    sourcePullId: 'source',
+    targetPullId: 'target',
+    fillRatio: 32768,
+    cumulativeSourceAmount: 25_000_000n,
+    cumulativeTargetAmount: 1_000_000_000_000_000_000n,
+    binaryHash: `0x${'22'.repeat(32)}`,
+    closeMode: 'partial_cancel_remainder' as const,
+  };
+  route.sourceCloseProof = proof;
+  route.targetCloseProof = proof;
+  const account = replica.state.accounts.get(counterpartyId)!;
+  account.pendingFrame = {
+    ...account.currentFrame,
+    height: account.currentHeight + 1,
+    accountTxs: [{ type: 'cross_pull_close', data: { pullId: 'source', binary: '0x', proof } }],
+  };
+  expect((await read()).status).toBe('clearing');
+  expect(route.filledSourceAmount).toBe(25_000_000n);
+  expect(account.currentHeight).toBe(1);
+});
+
+test('cross-order rejects wrong Entity, missing order, historical query and malformed encoding', async () => {
+  const { env, path, replica } = makeCrossOrderReadFixture();
+  env.state.eReplicas.set(`${counterpartyId}:signer`, {
+    ...replica,
+    entityId: counterpartyId,
+    state: { ...replica.state, entityId: counterpartyId, crossJurisdictionSwaps: new Map() },
+  });
+  await expect(resolveRuntimeAdapterRead({ env }, path.replace(entityId, counterpartyId))).rejects.toMatchObject({
+    code: 'E_NOT_FOUND',
+  });
+  await expect(resolveRuntimeAdapterRead({ env }, `entity/${entityId}/cross-order/missing`)).rejects.toMatchObject({
+    code: 'E_NOT_FOUND',
+  });
+  await expect(resolveRuntimeAdapterRead({ env }, path, { atHeight: 7 })).rejects.toMatchObject({
+    code: 'E_BAD_QUERY',
+  });
+  await expect(resolveRuntimeAdapterRead({ env }, `entity/${entityId}/cross-order/%ZZ`)).rejects.toMatchObject({
+    code: 'E_BAD_PATH',
+  });
+});
+
+test('cross-order waits for the Runtime writer and refuses uncommitted state after a halt', async () => {
+  const { env, route, read } = makeCrossOrderReadFixture();
+  const release = await acquireRuntimeFrameWriter(env.infrastructure!);
+  let resolved = false;
+  const pending = read().then(result => {
+    resolved = true;
+    return result;
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(resolved).toBe(false);
+  route.status = 'clearing';
+  env.state.height = 8;
+  release();
+  const result = await pending;
+  expect(result.runtimeHeight).toBe(8);
+  expect(result.status).toBe('clearing');
+  expect(env.infrastructure!.activeCommittedReaders).toBe(0);
+  env.infrastructure!.stateMutationInFlight = true;
+  await expect(read()).rejects.toThrow('RUNTIME_COMMITTED_STATE_UNAVAILABLE_RELOAD_REQUIRED');
 });

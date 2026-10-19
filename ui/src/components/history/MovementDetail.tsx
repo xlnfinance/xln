@@ -1,13 +1,17 @@
+import { CurrentCrossOrder } from './CurrentCrossOrder';
 import { CopyId } from '../CopyId';
 import { formatClock } from '../../runtime/format';
 import { displayEntityName } from '../../runtime/views';
 import { formatMovementAmount, movementParty, TONE_CLASS } from './ActivityRow';
 import type { Movement } from '../../runtime/financial/movements';
-export function MovementDetail({ movement, names }: { movement: Movement; names: Map<string, string> }) {
+export function MovementDetail({ movement, names, entityId }: { movement: Movement; names: Map<string, string>; entityId: string }) {
+	const orderId = movement.events.find(event => event.type === 'cross_swap' && event.orderId)?.orderId;
 	const amount = formatMovementAmount(movement);
 	const party = movementParty(movement, names);
 	return (
 		<>
+			{orderId && <CurrentCrossOrder key={`${entityId}:${orderId}`} entityId={entityId} orderId={orderId} />}
+			{orderId && <div className="caps" style={{ marginTop: 16 }}>Historical activity entry</div>}
 			<div className="rcpt" style={{ textAlign: 'left', padding: 0 }}>
 				<div className="caps">
 					{movement.kind} · <span className={TONE_CLASS[movement.tone]}>{movement.state}</span>

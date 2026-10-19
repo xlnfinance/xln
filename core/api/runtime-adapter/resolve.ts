@@ -46,6 +46,7 @@ import {
 } from './read/compact-view';
 import { projectHistoryFrameBatch, projectViewFrame } from './read/view-frame';
 import { projectGraphFrame } from './read/graph-frame';
+import { readCommittedCrossOrder } from './read/cross-order';
 
 import { calculateSolvency } from '../../runtime/swap-cmd/solvency';
 import { acquireRuntimeCommittedRead, withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
@@ -382,6 +383,10 @@ const resolveScopedRuntimeAdapterRead = async <T>(
   if (parts[0] === 'entity' && parts.length >= 2) {
     const entityId = parts[1];
     if (!entityId) throw new RuntimeAdapterError('E_BAD_PATH', 'entity id is required');
+
+    if (parts.length === 4 && parts[2] === 'cross-order' && typeof parts[3] === 'string') {
+      return readCommittedCrossOrder(ctx, entityId, parts[3], query) as T;
+    }
 
     if (parts.length === 3 && parts[2] === 'settlement-counters') {
       if (readAtHeight(query) !== null) {

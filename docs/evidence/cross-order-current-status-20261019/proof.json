@@ -1,0 +1,147 @@
+{
+  "scope": "Committed local Cross-swap status in Activity, distinct from immutable historical entry and destination settlement. No financial transitions, WAL format, contracts or backend runtime changes.",
+  "baseSHA": "c9f1b0872b1ee32ff5ccdbed0379e71ade2d8dbe",
+  "sourceHashes": {
+    "core/api/runtime-adapter/read/cross-order.ts": "5f603d7b223cca11247ed522d781a1270eeeabea7803b8d31e806a4b3b64ce94",
+    "core/api/runtime-adapter/resolve.ts": "0603d5e89059eaa53645225b3e3349f02026689f1681a19e9a737e72dc5eeaf8",
+    "ui/src/components/history/CurrentCrossOrder.tsx": "71eaf2ae764602579858a3faf6085da28d4e6a8b364f42b6b92e7d53a09edd1b",
+    "ui/src/components/history/MovementDetail.tsx": "72aaf8b84100485b0a6fed196baa747749440f8d42e220eba1705d7e57f0eae3",
+    "ui/src/screens/Activity.tsx": "78443621f1a7f13f8af26d195c03b73876ac3c990af260ed0a5c0abf81a90c4f",
+    "core/__tests__/api/runtime-adapter/radapter-part-1.test.ts": "d6e5883af630f1e1357de2e19a7d6514557a717ba61b4495a3fe06ae533659d9",
+    "ui/tests/cross-activity.ts": "2655529814e3d28fed7362215aae0ee29f9ac93917dae9c4c659988d423dfa5f",
+    "ui/tests/e2e-cross-swap.spec.ts": "9dc4ee15368929ac50b90c2225c97a32e7c1af63b502ff92e24c6e1b853995cb"
+  },
+  "l1": {
+    "passed": 4,
+    "failed": 0,
+    "assertions": 14,
+    "seconds": 2.4716665420000004,
+    "logSHA256": "da588c04110b955f62a42f3deba11f2a9cdeeb7a0e26a6dea3669f35646f7cf4",
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "cross-order-l1-03",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "test",
+      "core/__tests__/api/runtime-adapter/radapter-part-1.test.ts",
+      "--test-name-pattern",
+      "cross-order"
+    ]
+  },
+  "l2": {
+    "passed": 2,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 177.39629437500002,
+    "logSHA256": "69ae230fb788a083aeafe805a532f5e787b67cd976b8be74523d0333bd6024f5",
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "cross-order-l2-03",
+      "--timeout-ms",
+      "7200000",
+      "--",
+      "bun",
+      "core/scripts/operations/production/local-prod-smoke.ts"
+    ],
+    "sourceUnchanged": true,
+    "scope": "Real two-EVM Cross-swap, both bilateral commits, same-WAL recovery, current Activity status at widths1280/390. Not native TVM or public execution."
+  },
+  "scenarios": [
+    {
+      "scope": "two local EVM jurisdictions; not native TVM",
+      "activity": [
+        {
+          "historicalTitle": "Cross-j swap placed00:2650 USDC \u2192 49.995 USDTplaced00:26",
+          "orderId": "swap-mvfrlk4o-9-3r4u6llcoqv9y",
+          "status": "settled",
+          "width": 1280
+        },
+        {
+          "historicalTitle": "Cross-j swap placed00:2650 USDC \u2192 49.995 USDTplaced00:26",
+          "orderId": "swap-mvfrlk4o-9-3r4u6llcoqv9y",
+          "status": "settled",
+          "width": 390
+        }
+      ],
+      "sourceDebit": {
+        "__xlnType": "BigInt",
+        "value": "50000000"
+      },
+      "targetReceived": {
+        "__xlnType": "BigInt",
+        "value": "49995000"
+      },
+      "take": {
+        "effectiveGive": {
+          "__xlnType": "BigInt",
+          "value": "50000000"
+        },
+        "effectiveWant": {
+          "__xlnType": "BigInt",
+          "value": "49995000"
+        },
+        "releasedGiveDust": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        }
+      }
+    },
+    {
+      "scope": "two local EVM jurisdictions; not native TVM",
+      "activity": [
+        {
+          "historicalTitle": "Cross-j swap placed00:27300 USDC \u2192 299.97 USDCplaced00:27",
+          "orderId": "swap-mvfrmk8d-e-3ryqn4q8zzhje",
+          "status": "settled",
+          "width": 1280
+        },
+        {
+          "historicalTitle": "Cross-j swap placed00:27300 USDC \u2192 299.97 USDCplaced00:27",
+          "orderId": "swap-mvfrmk8d-e-3ryqn4q8zzhje",
+          "status": "settled",
+          "width": 390
+        }
+      ],
+      "sourceDebit": {
+        "__xlnType": "BigInt",
+        "value": "300000000"
+      },
+      "targetReceived": {
+        "__xlnType": "BigInt",
+        "value": "299970000"
+      },
+      "take": {
+        "effectiveGive": {
+          "__xlnType": "BigInt",
+          "value": "300000000"
+        },
+        "effectiveWant": {
+          "__xlnType": "BigInt",
+          "value": "299970000"
+        },
+        "releasedGiveDust": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        }
+      }
+    }
+  ],
+  "screenshots": {
+    "1-cross-order-1280.png": "3d899088f625b0a800f434cbfc0d5a8b9ff43d952ac5657690bc6e2c6d494c34",
+    "1-cross-order-390.png": "28eea03854fc5343ac7e9ed5c527c404da37593dc447f879bfad1e65848cf36a"
+  },
+  "limitations": [
+    "Public deployment and browser proof follow a checked commit; not claimed by this artifact.",
+    "The card reads local route status only. Proofs and positive fills do not upgrade it.",
+    "Current tokenRegistry metadata was absent after real WAL recovery in failed candidate01. Unreleased duplicate amount projection was removed; original financial and recovery assertions retained.",
+    "Full release, native chain acceptance and mainnet readiness remain separate."
+  ]
+}

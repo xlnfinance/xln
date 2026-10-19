@@ -1,3 +1,4 @@
+import { expectCrossActivity } from './cross-activity';
 import { readMarketRoutes } from './cross-market';
 import { expectBilateralCommit } from './cross-account';
 import { expect, test, type Page } from '@playwright/test';
@@ -571,9 +572,15 @@ for (const scenario of [
     expect(recoveryCurrent.accounts.map(account => account.executions)).toEqual(
       recoveryBefore.accounts.map(account => account.executions),
     );
+    const activity = await expectCrossActivity(page, {
+      entityId: sourceEntityId,
+      orderId: completedRoute.orderId,
+      status: completedRoute.status,
+    });
     const evidence = safeStringify(
       {
         scope: 'two local EVM jurisdictions; not native TVM',
+        activity,
         parties,
         maker,
         take,
