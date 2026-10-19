@@ -252,6 +252,16 @@ const libraryMarker = libraryName => {
 
 const stripHexPrefix = value => String(value).replace(/^0x/i, '');
 
+const tronRuntimeCodeHash = (contractName, contractInfo) => {
+  // getContract().bytecode includes constructor code. Only getContractInfo's
+  // runtimecode identifies the program executed after deployment.
+  const runtimeCode = contractInfo.runtimecode;
+  if (typeof runtimeCode !== 'string' || !/^(?:[0-9a-fA-F]{2})+$/.test(runtimeCode)) {
+    throw new Error(`TRON_DEPLOY_RUNTIME_CODE_INVALID:${contractName}`);
+  }
+  return require('ethers').keccak256(`0x${runtimeCode}`);
+};
+
 const tronAddressInfo = (tronWeb, address) => {
   const raw = String(address || '').trim();
   if (!raw) throw new Error('TRON deployment returned empty address');
@@ -377,13 +387,12 @@ const deployTronContract = async (tronWeb, contractName, parameters = [], librar
       console.log(
         `[tron-deploy] solid contract=${contractName} block=${receipt.blockNumber} energy=${receipt.receipt.energy_usage_total}`,
       );
-      const deployedCode = await tronWeb.trx.getContract(signed.contract_address);
-      if (!deployedCode.bytecode) throw new Error(`TRON_DEPLOY_CODE_MISSING:${contractName}`);
+      const deployedCode = await tronWeb.trx.getContractInfo(signed.contract_address);
       return {
         ...tronAddressInfo(tronWeb, signed.contract_address),
         deploymentBlock: receipt.blockNumber,
         transactionHash: signed.txID,
-        runtimeCodeHash: require('ethers').keccak256(`0x${stripHexPrefix(deployedCode.bytecode)}`),
+        runtimeCodeHash: tronRuntimeCodeHash(contractName, deployedCode),
       };
     }
     await new Promise(resolve => setTimeout(resolve, 250));
@@ -693,6 +702,7 @@ module.exports = {
   jurisdictionEntry,
   deployTron,
   deployTronContract,
+  tronRuntimeCodeHash,
   evmStablecoinFor,
   preflightEvmStablecoin,
   preflightTronStablecoin,

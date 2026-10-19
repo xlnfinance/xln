@@ -306,7 +306,12 @@ describe('mainnet chain deployment wiring', () => {
   test('TRON compiler uses pinned standard-json solc artifacts outside git', () => {
     const compile = readFileSync(join(repoRoot, 'jurisdictions/scripts/compile-tron.cjs'), 'utf8');
     const ignore = readFileSync(join(repoRoot, 'jurisdictions/.gitignore'), 'utf8');
-    expect(compile).toContain("const expectedCompiler = '0.8.25'");
+    const manifest = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
+    expect(manifest.devDependencies.solc).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(compile).toMatch(
+      /readFileSync\(path\.join\(workspaceRoot, 'package\.json'\), 'utf8'\)\)\.devDependencies\s*\.solc/,
+    );
+    expect(compile).toContain('TRON_SOLC_PIN_INVALID');
     expect(compile).toContain("[solcCli, '--standard-json']");
     expect(compile).toContain('TRON_SOLC_VERSION_MISMATCH');
     expect(compile).toContain('viaIR: true');

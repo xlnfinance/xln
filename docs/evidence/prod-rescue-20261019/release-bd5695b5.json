@@ -1,0 +1,304 @@
+{
+  "candidate": "bd5695b5bbd0343a5cc5df8e85c76b3e0ee38d91",
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "release-current-32",
+    "--timeout-ms",
+    "7200000",
+    "--",
+    "bun",
+    "run",
+    "gate:release"
+  ],
+  "startedAt": "2026-10-19T13:34:12.355501+00:00",
+  "finishedAt": "2026-10-19T14:37:57.680598+00:00",
+  "processSeconds": 3825.30534375,
+  "exitCode": 0,
+  "passedSteps": 34,
+  "requiredSteps": 34,
+  "sourceStatusUnchanged": true,
+  "protectedUnrelatedDirtyPaths": ["brainvault/bun.lock", "brainvault/package.json"],
+  "wholeTreeClean": false,
+  "logSha256": "90709b02b24a2e955e22d82616b81b398972b6768f7a33ae5a32bb25b9a79b46",
+  "steps": [
+    {
+      "name": "frontend generated aliases",
+      "secondsRounded": 2.7
+    },
+    {
+      "name": "source checks",
+      "secondsRounded": 152.5
+    },
+    {
+      "name": "release integrity tests",
+      "secondsRounded": 64.6
+    },
+    {
+      "name": "runtime core unit tests",
+      "secondsRounded": 381.4
+    },
+    {
+      "name": "bilateral same-height collision",
+      "secondsRounded": 22.8
+    },
+    {
+      "name": "diff whitespace check",
+      "secondsRounded": 0.1
+    },
+    {
+      "name": "flow E2E coverage contract",
+      "secondsRounded": 0.1
+    },
+    {
+      "name": "frontend check",
+      "secondsRounded": 82.9
+    },
+    {
+      "name": "contract full suite",
+      "secondsRounded": 182.0
+    },
+    {
+      "name": "signed exit gas budget",
+      "secondsRounded": 5.4
+    },
+    {
+      "name": "RPC settlement parity",
+      "secondsRounded": 18.8
+    },
+    {
+      "name": "security audit pack",
+      "secondsRounded": 2.9
+    },
+    {
+      "name": "storage WAL smoke",
+      "secondsRounded": 23.3
+    },
+    {
+      "name": "watchtower smoke",
+      "secondsRounded": 15.7
+    },
+    {
+      "name": "bootstrap soundcheck",
+      "secondsRounded": 198.6
+    },
+    {
+      "name": "bootstrap epoch rotation",
+      "secondsRounded": 114.3
+    },
+    {
+      "name": "deterministic replay oracle",
+      "secondsRounded": 608.4
+    },
+    {
+      "name": "real WebSocket P2P relay",
+      "secondsRounded": 24.3
+    },
+    {
+      "name": "all deterministic scenarios",
+      "secondsRounded": 418.4
+    },
+    {
+      "name": "RPC system scenarios",
+      "secondsRounded": 77.0
+    },
+    {
+      "name": "cross-j system scenario",
+      "secondsRounded": 32.8
+    },
+    {
+      "name": "MM mesh system scenario",
+      "secondsRounded": 93.8
+    },
+    {
+      "name": "hub 10k storage benchmark",
+      "secondsRounded": 6.7
+    },
+    {
+      "name": "frozen core final",
+      "secondsRounded": 0.4
+    },
+    {
+      "name": "Foundation release Hanko",
+      "secondsRounded": 0.8
+    },
+    {
+      "name": "React payment and admission E2E",
+      "secondsRounded": 199.2
+    },
+    {
+      "name": "React dispute E2E",
+      "secondsRounded": 171.7
+    },
+    {
+      "name": "React offline protection E2E",
+      "secondsRounded": 120.0
+    },
+    {
+      "name": "React file recovery E2E",
+      "secondsRounded": 179.4
+    },
+    {
+      "name": "React tower recovery E2E",
+      "secondsRounded": 153.1
+    },
+    {
+      "name": "React lending E2E",
+      "secondsRounded": 210.4
+    },
+    {
+      "name": "React onboarding and ownership E2E",
+      "secondsRounded": 133.8
+    },
+    {
+      "name": "React production build",
+      "secondsRounded": 3.0
+    },
+    {
+      "name": "React production artifact E2E",
+      "secondsRounded": 110.6
+    }
+  ],
+  "runtimeCore": {
+    "passed": 712,
+    "failed": 0,
+    "assertions": 4219,
+    "files": 82
+  },
+  "contracts": {
+    "passed": 264,
+    "entitlementVectors": 3072,
+    "priorDebtVectors": 168,
+    "mismatches": 0
+  },
+  "immutableWalOracle": {
+    "passed": 14,
+    "required": 14,
+    "frames": 1214,
+    "workers": [1, 4],
+    "resultsSha256": "e3626cdcd513a0572e33008a874fc95c38db1810b21686162b2328bb38b49d5d",
+    "privateArchive": {
+      "name": "release-current-32-oracle-private.tar.gz",
+      "sha256": "2d840636f6a70f66351fd7a11dc63d7008a58f33cd0c711bb835cb1dd5dd892b",
+      "bytes": 3542042
+    },
+    "scope": "One live production checkpoint/WAL per scenario; verified per-frame replay and exact final live hash."
+  },
+  "scenarioCatalog": {
+    "passed": 19,
+    "required": 19
+  },
+  "browser": {
+    "passed": 20,
+    "failed": 0,
+    "skipped": 0,
+    "flaky": 0,
+    "groups": [
+      {
+        "group": "react-dispute",
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "browserDurationMs": 94083.729,
+        "reportSha256": "4d3e29cbf8ba81bc0f4e4822de346a2810fe8fd41bcb23204c053adae6e3e30a"
+      },
+      {
+        "group": "react-file-recovery",
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "browserDurationMs": 102068.42199999999,
+        "reportSha256": "1f78a9789e5e30abd216e0d7ffdd6dd596a3d215bff597eb8f3312f096d0c2e7"
+      },
+      {
+        "group": "react-lending",
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "browserDurationMs": 133597.249,
+        "reportSha256": "c07c4e038d648477100d9edf35e28daaf04b86be8b69bf937e724a72f6516715"
+      },
+      {
+        "group": "react-ownership",
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "browserDurationMs": 56462.320999999996,
+        "reportSha256": "e300257109db96fd18fec68653875f0126d5ff03cbd5526531cf7250ac6ee95d"
+      },
+      {
+        "group": "react-payment",
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "browserDurationMs": 122350.589,
+        "reportSha256": "640e23751de98c2780ca982b46ae7ab29e75c24d588f435b43e37df986ccd56d"
+      },
+      {
+        "group": "react-production",
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "browserDurationMs": 31940.729,
+        "reportSha256": "99dae6fef7cf7495e51f6b0c6f3b6c807b7b36c910d98f07c83c755122261639"
+      },
+      {
+        "group": "react-protection",
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "browserDurationMs": 42272.233,
+        "reportSha256": "e6b06ffc7b7183380c5e3cdc12a145b35d64e0713d88586f24b907cf8e0993ee"
+      },
+      {
+        "group": "react-recovery",
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "browserDurationMs": 74385.21800000001,
+        "reportSha256": "c58a316113f8329c5f6be29329ddcde61517fcad05f672eb086f46472f6a19e3"
+      }
+    ],
+    "privateArchive": {
+      "name": "release-current-32-browser-private.tar.gz",
+      "bytes": 2549255,
+      "sha256": "1970e6ff260c3aba606bed43649a17e7478b76cbe0ded2848338aff1bd56d3e5"
+    }
+  },
+  "passwordlessRecovery": {
+    "freshHomeMs": 6467,
+    "fundedHomeMs": 7541,
+    "continueToRestoredHomeMs": 5876,
+    "scope": "Local release stand; timer excludes page.reload; original Runtime/Entity/frame/Account equality assertions passed."
+  },
+  "check": {
+    "exactSHA": "bd5695b5bbd0343a5cc5df8e85c76b3e0ee38d91",
+    "status": "VERIFY_PASS",
+    "sourceGates": 38,
+    "topGates": 3,
+    "artifact": "demo-reopen-push-01.log",
+    "logSha256": "91d5265c2bc4bd3a11552689e55e66948bbe0a1beabe1930015f74aecbef4250"
+  },
+  "public": {
+    "frontendSHA": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+    "backendSHA": "6d6d4bb4af6fcf2067f09cbbe330de3b6bca7440",
+    "tutorialTransitions": 104,
+    "scope": "Separate previously captured real public browser evidence; release32 runs the local production-equivalent stand."
+  },
+  "remaining": [
+    "Current native TVM/compiler/public Ethereum and TRON USDT deployment and financial acceptance",
+    "Full applicable browser/mainnet acceptance preflight and uninterrupted one-hour soak on final candidate",
+    "Public cold startup remains about40seconds; mainnet readiness not established"
+  ],
+  "privateEvidencePolicy": "Raw WAL, wallet storage, seeds, credentials and private archives excluded from public files."
+}

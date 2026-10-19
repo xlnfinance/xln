@@ -10,24 +10,31 @@ const contractsRoot = path.join(repoRoot, 'contracts');
 const buildRoot = path.join(repoRoot, 'build-tron');
 const artifactsRoot = path.join(buildRoot, 'contracts');
 const quiet = process.argv.includes('--quiet');
-const expectedCompiler = '0.8.25';
-const contractArgument = process.argv.slice(2).find((argument) => argument.startsWith('--contracts='));
+const expectedCompiler = JSON.parse(readFileSync(path.join(workspaceRoot, 'package.json'), 'utf8')).devDependencies
+  .solc;
+if (typeof expectedCompiler !== 'string' || !/^\d+\.\d+\.\d+$/.test(expectedCompiler)) {
+  throw new Error('TRON_SOLC_PIN_INVALID');
+}
+const contractArgument = process.argv.slice(2).find(argument => argument.startsWith('--contracts='));
 const selectedContracts = contractArgument ? contractArgument.slice('--contracts='.length).split(',') : ['*'];
-if (selectedContracts.some((name) => !/^([A-Za-z_][A-Za-z0-9_]*|\*)$/.test(name))) {
+if (selectedContracts.some(name => !/^([A-Za-z_][A-Za-z0-9_]*|\*)$/.test(name))) {
   throw new Error('TRON_SOLC_CONTRACT_SELECTION_INVALID');
 }
 if (contractArgument && process.argv.includes('--all')) throw new Error('TRON_SOLC_SELECTION_CONFLICT');
 
-const sourceFiles = (directory) => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-  const absolute = path.join(directory, entry.name);
-  if (entry.isDirectory()) return sourceFiles(absolute);
-  return entry.isFile() && entry.name.endsWith('.sol') ? [absolute] : [];
-});
+const sourceFiles = directory =>
+  readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const absolute = path.join(directory, entry.name);
+    if (entry.isDirectory()) return sourceFiles(absolute);
+    return entry.isFile() && entry.name.endsWith('.sol') ? [absolute] : [];
+  });
 
-const sources = Object.fromEntries(sourceFiles(contractsRoot).map((absolute) => [
-  path.relative(repoRoot, absolute).split(path.sep).join('/'),
-  { content: readFileSync(absolute, 'utf8') },
-]));
+const sources = Object.fromEntries(
+  sourceFiles(contractsRoot).map(absolute => [
+    path.relative(repoRoot, absolute).split(path.sep).join('/'),
+    { content: readFileSync(absolute, 'utf8') },
+  ]),
+);
 const importPattern = /import\s+(?:[^"']*?from\s+)?["']([^"']+)["']\s*;/g;
 const pendingSources = Object.keys(sources);
 for (let cursor = 0; cursor < pendingSources.length; cursor += 1) {
@@ -55,15 +62,20 @@ const input = {
     viaIR: true,
     evmVersion: 'cancun',
     outputSelection: {
-      '*': Object.fromEntries(selectedContracts.map((name) => [name, [
-          'abi',
-          'metadata',
-          'evm.bytecode.object',
-          'evm.bytecode.linkReferences',
-          'evm.deployedBytecode.object',
-          'evm.deployedBytecode.linkReferences',
-          'evm.deployedBytecode.immutableReferences',
-        ]])),
+      '*': Object.fromEntries(
+        selectedContracts.map(name => [
+          name,
+          [
+            'abi',
+            'metadata',
+            'evm.bytecode.object',
+            'evm.bytecode.linkReferences',
+            'evm.deployedBytecode.object',
+            'evm.deployedBytecode.linkReferences',
+            'evm.deployedBytecode.immutableReferences',
+          ],
+        ]),
+      ),
     },
   },
 };
@@ -71,7 +83,9 @@ const solcCli = path.resolve(workspaceRoot, 'node_modules', 'solc', 'solc.js');
 const versionResult = spawnSync('bun', [solcCli, '--version'], { encoding: 'utf8' });
 const compilerVersion = versionResult.stdout.trim();
 if (versionResult.status !== 0 || !compilerVersion.startsWith(`${expectedCompiler}+`)) {
-  throw new Error(`TRON_SOLC_VERSION_MISMATCH:expected=${expectedCompiler}:actual=${compilerVersion || versionResult.stderr}`);
+  throw new Error(
+    `TRON_SOLC_VERSION_MISMATCH:expected=${expectedCompiler}:actual=${compilerVersion || versionResult.stderr}`,
+  );
 }
 const compile = spawnSync('bun', [solcCli, '--standard-json'], {
   cwd: workspaceRoot,
@@ -91,10 +105,10 @@ for (const diagnostic of diagnostics) {
   if (diagnostic.severity === 'error') console.error(line);
   else if (!quiet) console.warn(line);
 }
-if (diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
+if (diagnostics.some(diagnostic => diagnostic.severity === 'error')) {
   throw new Error('TRON_SOLC_COMPILE_FAILED');
 }
-const emittedNames = new Set(Object.values(output.contracts || {}).flatMap((contracts) => Object.keys(contracts)));
+const emittedNames = new Set(Object.values(output.contracts || {}).flatMap(contracts => Object.keys(contracts)));
 for (const name of selectedContracts) {
   if (name !== '*' && !emittedNames.has(name)) throw new Error(`TRON_SOLC_CONTRACT_NOT_FOUND:${name}`);
 }

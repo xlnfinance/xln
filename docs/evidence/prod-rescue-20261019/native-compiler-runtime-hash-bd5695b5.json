@@ -1,0 +1,344 @@
+{
+  "baseSHA": "bd5695b5bbd0343a5cc5df8e85c76b3e0ee38d91",
+  "scope": "Native TRON deployment tooling only. Canonical root compiler pin and actual runtime bytecode evidence; no Solidity source, ABI, deployed public graph, production frontend or financial transition changes.",
+  "sourceHashes": {
+    "jurisdictions/scripts/compile-tron.cjs": "afe155bbc513b8d7ca7964565320649747679013adc21f481bb8aff6c62d9991",
+    "jurisdictions/scripts/deploy-chain-matrix.cjs": "1569e0b57b2e64402129bbaccc103b39de682915df57906f9eebac038eb87329",
+    "core/__tests__/operations/release/mainnet-chain-deploy-wiring.test.ts": "0188dc2b0980eb92683bdad11fd648d08331eaf2f89047b35e019e32f772ab7e",
+    "core/__tests__/operations/release/tron-runtime-code.test.ts": "177baa673dc1b867d1751907295e946e8c927cf7e98c039c4c4565b2cf7ee4b2",
+    "core/__tests__/fixtures/jurisdiction/tron-runtime-bytecode.json": "0486f1614fb78289fc2d111b6d0c3f9c3ebe51768d8a2507e939374dd257fdb1"
+  },
+  "firstFailures": [
+    {
+      "artifact": "native-nile-current-01.result.json",
+      "error": "Existing public Nile EntityProvider.shareDepository() reverted; remains unresolved. Read-only, no key."
+    },
+    {
+      "artifact": "native-compiler-guard-01.result.json",
+      "error": "TRON_SOLC_VERSION_MISMATCH:expected=0.8.25:actual=0.8.37+commit.f401782d.Emscripten.clang"
+    },
+    {
+      "artifact": "native-runtime-import-current-01.result.json",
+      "error": "Runtime import succeeded, subsequent bytecode review failed: getContract.bytecode is creation code, not runtime code. Original log/WAL retained."
+    }
+  ],
+  "verification": {
+    "l1": {
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/operations/release/mainnet-chain-deploy-wiring.test.ts",
+        "core/__tests__/operations/release/tron-runtime-code.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 1.322801833,
+      "logSha256": "0f32818d1d1e636e6a14e077c32b405ceb0c9f584df5f7ba7b02b822c5946850"
+    },
+    "l1Counts": {
+      "passed": 14,
+      "failed": 0,
+      "assertions": 109
+    },
+    "compiler": {
+      "running": false,
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "native-compiler-current-01",
+        "--timeout-ms",
+        "180000",
+        "--",
+        "bun",
+        "jurisdictions/scripts/compile-tron.cjs",
+        "--contracts=Account,DepositoryBounds,HashLadderRegistry,NftCustody,DeltaTransformer,HankoVerifier,EntityProvider,Depository,ERC20Mock"
+      ],
+      "baseSHA": "bd5695b5bbd0343a5cc5df8e85c76b3e0ee38d91",
+      "startedAt": "2026-10-19T14:47:02.861822+00:00",
+      "sourceHashes": {
+        "jurisdictions/scripts/compile-tron.cjs": "afe155bbc513b8d7ca7964565320649747679013adc21f481bb8aff6c62d9991",
+        "core/__tests__/operations/release/mainnet-chain-deploy-wiring.test.ts": "56cea2ee9dc69f2b69226a9e98a9521bad4cbcf752faa730cc1b493c846e36a1"
+      },
+      "pid": 55085,
+      "exitCode": 0,
+      "seconds": 98.89166066599999,
+      "finishedAt": "2026-10-19T14:48:41.755508+00:00",
+      "sourceUnchanged": true,
+      "logSha256": "380565430da8073a123dbaadc449435e16539f5362591a6d8d2572805ca38d0e"
+    },
+    "freshGraph": {
+      "running": false,
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "native-graph-current-01",
+        "--timeout-ms",
+        "600000",
+        "--",
+        "bun",
+        "scripts/tron/native-stand.ts",
+        "--deploy-graph"
+      ],
+      "baseSHA": "bd5695b5bbd0343a5cc5df8e85c76b3e0ee38d91",
+      "startedAt": "2026-10-19T14:50:21.458459+00:00",
+      "sourceHashes": {
+        "jurisdictions/scripts/compile-tron.cjs": "afe155bbc513b8d7ca7964565320649747679013adc21f481bb8aff6c62d9991",
+        "core/__tests__/operations/release/mainnet-chain-deploy-wiring.test.ts": "0188dc2b0980eb92683bdad11fd648d08331eaf2f89047b35e019e32f772ab7e",
+        "scripts/tron/native-stand.ts": "03afae98ac6aad7147061e22077fa0133a2d3ddc7a59dfc3fb20b50b0d686612",
+        "jurisdictions/scripts/deploy-chain-matrix.cjs": "55fb2d03db17e574855829c3df2a9cce15effc013262682efe350decdaf6e726"
+      },
+      "data": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/native-tvm-current-01",
+      "artifactReview": "native-artifact-review-after.json",
+      "artifactArchiveSha256": "b554a561c6034ae5dcf50ad6cf18bcdbc841fffec8822c6b1a1a1d8a220a527f",
+      "scope": "Fresh private native TVM graph, current compiler/sources; no public or real-funds deployment",
+      "pid": 55925,
+      "exitCode": 0,
+      "seconds": 91.6500085,
+      "finishedAt": "2026-10-19T14:51:53.110735+00:00",
+      "sourceUnchanged": true,
+      "logSha256": "753c47dfc918157d1abe009ebad503f393a63fb1a98a13436f20dc0190a94926"
+    },
+    "economic": {
+      "running": false,
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "native-economic-current-01",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "scripts/tron/native-stand.ts",
+        "--economic"
+      ],
+      "baseSHA": "bd5695b5bbd0343a5cc5df8e85c76b3e0ee38d91",
+      "startedAt": "2026-10-19T14:52:13.716708+00:00",
+      "sourceHashes": {
+        "jurisdictions/scripts/compile-tron.cjs": "afe155bbc513b8d7ca7964565320649747679013adc21f481bb8aff6c62d9991",
+        "scripts/tron/native-stand.ts": "03afae98ac6aad7147061e22077fa0133a2d3ddc7a59dfc3fb20b50b0d686612",
+        "scripts/tron/economic-roundtrip.ts": "c30bdce46d5ecde4d94c3f0c5f3b2bf214437833c57313cdebb8c370ff975247",
+        "jurisdictions/scripts/deploy-chain-matrix.cjs": "55fb2d03db17e574855829c3df2a9cce15effc013262682efe350decdaf6e726"
+      },
+      "data": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/native-tvm-current-01",
+      "scope": "Actual private TVM token/reserve signed deposit/withdrawal; not public issuer USDT or mainnet",
+      "pid": 56441,
+      "exitCode": 0,
+      "seconds": 36.488339167,
+      "sourceUnchanged": true,
+      "logSha256": "26c1ff6b56c637199ec0fdc0730c71879e155a17771634c5e287a8141bb5cfb8"
+    },
+    "sameWalRestoreAndRuntimeBytecodeReview": {
+      "running": false,
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "native-runtime-restore-current-01",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "scripts/tron/native-stand.ts",
+        "--runtime-restore",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/native-runtime-code-review.ts"
+      ],
+      "baseSHA": "bd5695b5bbd0343a5cc5df8e85c76b3e0ee38d91",
+      "startedAt": "2026-10-19T14:55:23.278777+00:00",
+      "data": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/native-tvm-current-01",
+      "pid": 57301,
+      "exitCode": 0,
+      "seconds": 29.785807917,
+      "logSha256": "70a46a6994389e10e3d8b444687d3ffa33a02727f6730f9b228c6e2a75fbdf9e"
+    },
+    "canonicalRuntimeHashRevalidation": {
+      "running": false,
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "native-runtime-hash-l2-01",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "scripts/tron/native-stand.ts",
+        "--verify-graph",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/native-token-hash-check.ts"
+      ],
+      "baseSHA": "bd5695b5bbd0343a5cc5df8e85c76b3e0ee38d91",
+      "startedAt": "2026-10-19T14:58:05.330489+00:00",
+      "data": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/native-tvm-current-01",
+      "pid": 57940,
+      "exitCode": 0,
+      "seconds": 23.643698584,
+      "logSha256": "d614f159140a6fdf97a0f58f61ef3acce740c807a183a9a940cbba984edb543a"
+    },
+    "runtimeHashAssertions": {
+      "passed": 6,
+      "expected": 6,
+      "transactionHash": "417bb9b25472c58c36431968b962e546fcb7d5c0c46cecc44187d39b6fe3379b",
+      "beforeHashKind": "creation bytecode (incorrect runtime label)",
+      "beforeHash": "0x4d3e11a335df12df82fc3b6af260fc3bd2e77758ae234d42f6f103a71a666ffb",
+      "runtimeCodeHash": "0x4dc3a0f3d1fca4a9be8180ee75dabe6ebf48a31ea7010b06cda234a66013ad75",
+      "scope": "Existing exact deployment transaction revalidated by canonical deployTronContract, no rebroadcast; returned code hash equals independent eth_getCode."
+    }
+  },
+  "artifactReview": {
+    "artifacts": 9,
+    "sourceHashesMatched": 87,
+    "sourceHashesChecked": 87,
+    "currentEvmAbisMatched": 9,
+    "soliditySourceChanges": false,
+    "settings": {
+      "solc": "0.8.37+commit.f401782d.Emscripten.clang",
+      "viaIR": true,
+      "evmVersion": "cancun",
+      "optimizerRuns": 1
+    },
+    "abiDelta": "Previous stale DeltaTransformer TVM artifact lacked current TermLoan Batch.loans and InvalidLendingCovenant. All current TVM ABIs equal existing current EVM ABIs; no TypeChain source regeneration needed.",
+    "contracts": [
+      {
+        "name": "Account",
+        "previousArtifactSha256": "ee72ba3800063f2e0410d314b676ec21c1e84bf0a65718674914c20dda15e3a7",
+        "artifactSha256": "766929c24ee9ca8806ffa5c80c48c1f93baf7a65680e2c736d29031def3e8da9",
+        "creationTemplateSha256": "f71ed645e77823efcdb32f0c50ab780e87662c56591686534e78f94316de80fe",
+        "runtimeTemplateSha256": "f97b60f1ca379c3009d9d7530546ab63ad444b4fbc97d4b57f2779f8af6dcd34",
+        "runtimeBytes": 22848,
+        "actualLinkedRuntimeCodeHash": "0xd4faa5ed507a86ae0066f8feec5bda1269736325c4794aa14e42b404410905ab",
+        "oldMislabeledCreationHash": "0x1803d4bb6c949420d22c9b4771e1cf632c2d78a908b2f204f2e997c30a47da03",
+        "transactionHash": "82bb17d0f9d11b96700bbd490cce5ceef6e0451708eb9ccba3ebadc5519d2eb0"
+      },
+      {
+        "name": "DeltaTransformer",
+        "previousArtifactSha256": "92e1ea82424cfba3ccc643ac1461c8c5af3e0f4130cf80582f2e232e49c59f38",
+        "artifactSha256": "b3683a5362c70f685e2b9ac5defe4672f283c1b3075b70fc9933b5de19fb9147",
+        "creationTemplateSha256": "352c758a8e3709558e2e06dd59d33c25568ecedbf6a1e1febc45801480782d8e",
+        "runtimeTemplateSha256": "75555a473e98ae15ef9bb6abadae62b59bcf1c3bc947619ad4188a739f0f149f",
+        "runtimeBytes": 8380,
+        "actualLinkedRuntimeCodeHash": "0x8abd8e7fde8971f86e1d4a57105ae70b3740b4c5e77f421e4563e9025e268161",
+        "oldMislabeledCreationHash": "0x3703bd263c4f60efeba14b2dbdc1f6e6bb4b0c0747bdee5540a7445ce93b3509",
+        "transactionHash": "fc21b832e24055a1ad8fcd45143c9b039d68eba8b5d4354f00508ae5f7961e00"
+      },
+      {
+        "name": "Depository",
+        "previousArtifactSha256": "fcc3c9ba28194ffef361fae3b724a87bf785a4543e4a3b7349e0b1045bbbf200",
+        "artifactSha256": "000109159730212fdffdb0a9bf07559cb4fa7e0127d897482525208a7087f7fe",
+        "creationTemplateSha256": "b5900fcde6a33a062d156d844cb13a5a16aa51175afad45611b702ced7ab0fa2",
+        "runtimeTemplateSha256": "495f565c403a50dea431373df3103d7182859e1dacb99e01e83dba234fee03d4",
+        "runtimeBytes": 22238,
+        "actualLinkedRuntimeCodeHash": "0x2b1db52f9bfd442b86c2e1b42f4b1420635fee8827e4bd0edfd7bf90a8ae0623",
+        "oldMislabeledCreationHash": "0x982672171f40677713b65ae659809e45f0bfee41729ff6010bd64cd9d5f34048",
+        "transactionHash": "efc680dc69cc23c331612bb7ca9d7f6fbf45746d7edf1b39bcb4764a17b04e63"
+      },
+      {
+        "name": "DepositoryBounds",
+        "previousArtifactSha256": "9fa37249c7daf1e9336bb7cdc8abf889237b0f1a8481adf21bfc7a4ee5dd1a5e",
+        "artifactSha256": "53aeccef4c9b0502c8bed9588ea9154b770c29965ca3a2cfca6c9ec82158f1ce",
+        "creationTemplateSha256": "e306bed0ab0f92dac136ed07b962c0d79a8416bf8450b3fe677ae0b25319c22e",
+        "runtimeTemplateSha256": "4e3209e31784ac0dab35feb9657e436ee371c3d729a54e016034361750b05c46",
+        "runtimeBytes": 4663,
+        "actualLinkedRuntimeCodeHash": "0xd06a0d78511115712988e7b60465750079842142246d8738bd11ee82a0965b29",
+        "oldMislabeledCreationHash": "0x78c259ba2a6fcbedbcfe6a004eda818a45a24dfe49e338f2d82064beb070f28a",
+        "transactionHash": "f6fb4ddc40f1fff189982c79b10ee79f9895aef0a3049dc223b9d034cc4989e5"
+      },
+      {
+        "name": "ERC20Mock",
+        "previousArtifactSha256": "06dbecdf953d7d53658c38289902c86098672880de0e70873a448e01f490a0f0",
+        "artifactSha256": "84e7f0f8e5d9fd4e22f80b9c9a279d20e0d486902db847f8b3790ce75acf2b77",
+        "creationTemplateSha256": "2d44333c9a5436bce6895566a96dd79b8443b36f9a260d7d643e1c8d527f02f3",
+        "runtimeTemplateSha256": "5f233f127032a1c771257e95c2c16c9d7eff7a0c6026eb246f4497551a5e351a",
+        "runtimeBytes": 1725,
+        "actualLinkedRuntimeCodeHash": "0x4dc3a0f3d1fca4a9be8180ee75dabe6ebf48a31ea7010b06cda234a66013ad75",
+        "oldMislabeledCreationHash": "0x4d3e11a335df12df82fc3b6af260fc3bd2e77758ae234d42f6f103a71a666ffb",
+        "transactionHash": "417bb9b25472c58c36431968b962e546fcb7d5c0c46cecc44187d39b6fe3379b"
+      },
+      {
+        "name": "EntityProvider",
+        "previousArtifactSha256": "48d8429dbccd259b8366956e3110ec34209b5d9b1515ef4651f55dcfcbcb8628",
+        "artifactSha256": "3b33e2dc2b4d8bbe81d11ef1e6796b1a94ec497c069f4736984eb0dac9c5b2db",
+        "creationTemplateSha256": "c330f0e27524867a881203d7417da5ee703dd74432ffa05964beca129ea0fe5c",
+        "runtimeTemplateSha256": "ab417fa35e2f01a3652c3aa7f55657bc62c28f1cafab285b5e06b70d8b06ff68",
+        "runtimeBytes": 19053,
+        "actualLinkedRuntimeCodeHash": "0xaf6a0f36671f3689665f838e8fbafff77201d245222de8945bdc3f200bc538e4",
+        "oldMislabeledCreationHash": "0x3af5620e8d1b0c567e77309ef0de24b19b2681eb9a77e51dfe39b594e99d3ccc",
+        "transactionHash": "d4ed0761b8056585640f7ebbbe473245640f8d7500bd65e4d9cc809aedb41c31"
+      },
+      {
+        "name": "HankoVerifier",
+        "previousArtifactSha256": "dc9f7d1aa683cb2c4051f252e7874dacf17859f388dbdf2596c257d83ae0f7f3",
+        "artifactSha256": "d2ab389d20a77c8a11dddad8f2c59957fe13202313277d2500489e275dbac486",
+        "creationTemplateSha256": "569311d99a84c11d70a3ca59d012d0cbd67a12a6c66129564afcccdcd18a8aee",
+        "runtimeTemplateSha256": "5d8eda501c02ff49397b1656c3860f524945016eb237f407cc4540317ba56fd4",
+        "runtimeBytes": 5305,
+        "actualLinkedRuntimeCodeHash": "0xa605be43622148cd23a6596e9586a4496a30e891937634081e22e22bfe0a98e3",
+        "oldMislabeledCreationHash": "0x2c27cc1d400823be13b27e485627902aaa55b9f42922239f6ef178b8a0d19dc4",
+        "transactionHash": "c502c069f4f199d825b4057e7e7f7c5d3da9d288fdd3c2b75d9d0555270db226"
+      },
+      {
+        "name": "HashLadderRegistry",
+        "previousArtifactSha256": "002207af14d77a61808c84c9250d164b9213eb0c50858fa0bc9393abb52d3714",
+        "artifactSha256": "63a7393b52529fbbec3175d194e038c9389b60a698dd69b2fedcb6cb2a36a660",
+        "creationTemplateSha256": "e18002dc281818fdcdc1e7f407dad4adb7a0c3b05633439d2239af6bf5be8885",
+        "runtimeTemplateSha256": "941108ebfd9abe7be1e034bf2a04b912d42a587910a5788d35f148b7bc05d761",
+        "runtimeBytes": 1643,
+        "actualLinkedRuntimeCodeHash": "0xe0f8ac92427b7642b5bf1435ac3a4be84cea41d0c960a2f41b9558b575712fd6",
+        "oldMislabeledCreationHash": "0xbef426f024fcc4c84a7c07aeadcab427a1017f6f4a870c70ac0d19386b2d8235",
+        "transactionHash": "89a4f8baf0c1586d5c7e5212298759585ac7fdfd783de3773a90f2e6c6a9fb6c"
+      },
+      {
+        "name": "NftCustody",
+        "previousArtifactSha256": "1309a48367e974b7f0fecf32856c927d2bb650c7371c1c77d18038f3ad8c1c30",
+        "artifactSha256": "4a4416b4a6548b05bab2be0f1b1e9971e65cf52172115c64cae59e30dc82cc73",
+        "creationTemplateSha256": "c535c6ec0620de2eddcdf80369aa1f5679e4f437293cf9471b3250a04d8db9f9",
+        "runtimeTemplateSha256": "3c45394a4224da86d70a13de2029523f8f7096fdd8f2cb0cc230beaafd797ce8",
+        "runtimeBytes": 2109,
+        "actualLinkedRuntimeCodeHash": "0xafb373d4774bd6973609cd43c00fa904b80f9fe2d63fce4f861f5e02d51b4f46",
+        "oldMislabeledCreationHash": "0xb6a87ccbefb2ff9989056399067a54a8ff0f8d780fc029440ae1d7856d578389",
+        "transactionHash": "1d78799163f6521afc4129a7390c78e1b38e90b7f14c1e2c7253c7cf9d0d606a"
+      }
+    ],
+    "nativeCodeReview": "9/9 actual getcontractinfo.runtimecode equals eth_getCode and compiled runtime templates with exact library addresses and recorded constructor immutable spans. Old graph evidence is retained, not silently relabeled."
+  },
+  "economic": {
+    "privateNativeChainId": 2414086651,
+    "token": "Repository ERC20Mock, XLN Local Test USD, 6 decimals; not Tether USDT",
+    "reserve": ["0", "1000000", "0"],
+    "externalBefore": "1000000000000",
+    "externalAfter": "1000000000000",
+    "nonce": ["0", "1", "2"]
+  },
+  "recovery": {
+    "sameRuntimeWal": true,
+    "restoredHeight": 3,
+    "restoredPostStateHash": "0x757504c7a3ee536631eefdb0474f6fc2c3438b713d55caa276e37acf912934d5",
+    "authorityClaimHash": "0x8e5534c80da9b25f432607bc3f443a21323189e661de2b0ae514a09882818ec0"
+  },
+  "publicVersions": {
+    "frontend": "f369fbdd27cd043dd385f1385bdf4d21576fec27",
+    "backend": "6d6d4bb4af6fcf2067f09cbbe330de3b6bca7440",
+    "deploymentNeededForThisToolingChange": false
+  },
+  "remaining": [
+    "Freshness rejection for explicit precompiled native artifacts remains separate: current run manually verified all87source hashes before any broadcast.",
+    "Public Nile canonical replacement and current public Ethereum/nativeTRON USDT flows/finality/exits/recovery remain pending.",
+    "Private native Pay/same-J Swap/Cross-swap/Lending owning financial/browser gates remain; reserve roundtrip does not prove those flows.",
+    "Uninterrupted one-hour soak and applicable final preflight remain; full release32 passed34/34 on prior committed bd5695b5.",
+    "Mainnet readiness unmeasured."
+  ],
+  "references": [
+    "https://developers.tron.network/reference/getcontractinfo",
+    "https://developers.tron.network/reference/eth_getcode"
+  ],
+  "privacy": "No wallet seed, private key, profile, raw WAL, raw receipt preimage or private browser trace included."
+}
