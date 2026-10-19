@@ -5,7 +5,7 @@ import type { WalletView } from '../runtime/views';
 export type TourContext = {
   wallet: WalletView;
   pathname: string;
-  baseline: Map<string, bigint>;
+  tradeFilled: boolean;
   dom: { has(id: string): boolean; value(id: string): string; text(id: string): string };
 };
 export type TourStep = {
@@ -19,11 +19,9 @@ export type TourStep = {
   prerequisite?: string;
   route?(ctx: TourContext): string;
   done?(ctx: TourContext): boolean;
-  enter?(ctx: TourContext): void;
 };
 const home = (ctx: TourContext, target: string) =>
   ctx.pathname === '/' ? target : ctx.dom.has('nav-home') ? 'nav-home' : 'back';
-const weth = (ctx: TourContext) => ctx.wallet.totals.find(token => token.tokenId === 2)?.net ?? 0n;
 
 /** Each step watches the result of a real action. No acknowledgement pages or automatic financial actions. */
 const steps: TourStep[] = [
@@ -83,9 +81,8 @@ const steps: TourStep[] = [
           ? 'Press Swap.'
           : !ctx.dom.value('swap-give').trim()
             ? 'Enter 25 in You pay. Leave You receive empty to use the live quote; review it before signing.'
-            : 'Review both amounts and the incoming credit notice, then place the order. This step completes when WETH arrives.',
-    enter: ctx => ctx.baseline.set('weth', weth(ctx)),
-    done: ctx => weth(ctx) > (ctx.baseline.get('weth') ?? weth(ctx)),
+            : 'Review both amounts and the incoming credit notice, then place the order. This step completes when your order executes, fully or partially.',
+    done: ctx => ctx.tradeFilled,
   },
   {
     id: 'history',

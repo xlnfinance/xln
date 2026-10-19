@@ -131,33 +131,34 @@ export function applyCommittedAccountFrameFollowups(
 
   for (const accountTx of committedFrame.accountTxs) {
     if (HEAVY_LOGS) accountFollowupLog.debug('frame.tx', { type: accountTx.type });
-    applyCommittedLendingFollowup(
-      newState,
-      counterpartyId,
-      accountTx,
-      committedFrame,
-      proposerIsLeft,
-      accountTxs,
-    );
-    applyCommittedCreditRequestFollowup(
-      newState,
-      counterpartyId,
-      accountTx,
-      proposerIsLeft,
-      accountTxs,
-    );
+    // The bilateral commit already validated these exact execution amounts.
+    // A proposal, cancellation, balance change, or rounded ratio is not a fill.
+    if (
+      accountTx.type === 'swap_resolve' &&
+      (accountTx.data.executionGiveAmount ?? 0n) > 0n &&
+      (accountTx.data.executionWantAmount ?? 0n) > 0n
+    ) {
+      candidateEffects.push({
+        kind: 'runtimeEvent',
+        eventName: 'SwapFilled',
+        data: {
+          entityId: newState.entityId,
+          counterpartyId,
+          offerId: accountTx.data.offerId,
+          accountHeight: committedFrame.height,
+          accountFrameHash: committedFrame.stateHash,
+          executionGiveAmount: accountTx.data.executionGiveAmount,
+          executionWantAmount: accountTx.data.executionWantAmount,
+        },
+      });
+    }
+    applyCommittedLendingFollowup(newState, counterpartyId, accountTx, committedFrame, proposerIsLeft, accountTxs);
+    applyCommittedCreditRequestFollowup(newState, counterpartyId, accountTx, proposerIsLeft, accountTxs);
 
     // Account frames are canonical once committed; update Entity-local
     // indexes only after commit, never while the proposal is tentative.
     if (accountTx.type === 'htlc_resolve') {
-      applyCommittedHtlcResolveFollowup(
-        newState,
-        counterpartyId,
-        accountTx,
-        env,
-        candidateEffects,
-        bookIntentSlot,
-      );
+      applyCommittedHtlcResolveFollowup(newState, counterpartyId, accountTx, env, candidateEffects, bookIntentSlot);
     }
   }
 }

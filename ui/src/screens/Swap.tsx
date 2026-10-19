@@ -18,6 +18,9 @@ import { amountInputText, formatMoney, formatLimit, parseAmount, plainAmount } f
 import { getTokenMeta } from '../runtime/token-meta';
 import { openSwapOffers, useWallet } from '../runtime/views';
 import { counterpartyFeePolicy } from '../runtime/financial/manage';
+import { getAdapter } from '../runtime/adapter';
+import { TOUR_STEPS } from '../tour/steps';
+import { useTutorialTrade } from '../tour/trade';
 
 type Mode = 'same' | 'cross';
 
@@ -228,59 +231,80 @@ export function Swap() {
 	};
 
 	const place = async (): Promise<void> => {
-		if (!wallet.frame || !hub || !prepared || !wallet.signerId) return;
-		if (mode === 'same' && (swapMinimumError(book, giveTokenId, prepared) || swapPriceBandError(book, prepared.priceTicks))) return;
-		setSubmitting(true);
-		try {
-			const source = {
-				entityId: wallet.entityId,
-				signerId: wallet.signerId,
-				hubEntityId: hub.counterpartyId,
-				jurisdiction: jurisdictionRef(wallet.frame),
-				account: (wallet.frame.activeEntity?.accounts.items.find(doc => {
-					const left = normalizeId(doc.state.leftEntity);
-					const right = normalizeId(doc.state.rightEntity);
-					return (left === wallet.entityId ? right : left) === hub.counterpartyId;
-				})?.state as AccountState | undefined) ?? null,
-			};
-			const target =
-				mode === 'cross' && targetEntity && targetHub
-					? {
-							entityId: normalizeId(targetEntity.entityId),
-							signerId: normalizeId(targetEntity.signerId),
-							hubEntityId: normalizeId(targetHub.entityId),
-							jurisdiction: getJurisdictionStackId(targetEntity.jurisdiction),
-							account: targetAccount ?? null,
-						}
-					: undefined;
-			const plan = await planSwap({
-				mode,
-				frame: wallet.frame,
-				source,
-				...(target ? { target } : {}),
-				giveTokenId,
-				giveTokenDecimals: giveMeta.decimals,
-				wantTokenId,
-				wantTokenDecimals: wantMeta.decimals,
-				giveAmount: prepared.effectiveGive,
-				priceTicks: prepared.priceTicks,
-				expectedWantAmount: prepared.effectiveWant,
-				routeValue: target ? `cross:${hub.counterpartyId}>${target.hubEntityId}` : `same:${hub.counterpartyId}`,
-			});
-			await submitSwapPlan(plan);
-			toast(
-				mode === 'cross'
-					? `Cross-network swap submitted: ${plainAmount(prepared.effectiveGive, giveMeta.decimals)} ${giveMeta.symbol} for ${plainAmount(prepared.effectiveWant, wantMeta.decimals)} ${wantMeta.symbol}`
-					: `Order placed: ${plainAmount(prepared.effectiveGive, giveMeta.decimals)} ${giveMeta.symbol} for ${plainAmount(prepared.effectiveWant, wantMeta.decimals)} ${wantMeta.symbol}`,
-			);
-			setGiveText('');
-			setWantText('');
-		} catch (error) {
-			toast(error instanceof Error ? error.message : String(error), 'danger');
-		} finally {
-			setSubmitting(false);
-		}
-	};
+    if (!wallet.frame || !hub || !prepared || !wallet.signerId) return;
+    if (
+      mode === 'same' &&
+      (swapMinimumError(book, giveTokenId, prepared) || swapPriceBandError(book, prepared.priceTicks))
+    )
+      return;
+    setSubmitting(true);
+    let tutorialOfferId: string | null = null;
+    try {
+      const source = {
+        entityId: wallet.entityId,
+        signerId: wallet.signerId,
+        hubEntityId: hub.counterpartyId,
+        jurisdiction: jurisdictionRef(wallet.frame),
+        account:
+          (wallet.frame.activeEntity?.accounts.items.find(doc => {
+            const left = normalizeId(doc.state.leftEntity);
+            const right = normalizeId(doc.state.rightEntity);
+            return (left === wallet.entityId ? right : left) === hub.counterpartyId;
+          })?.state as AccountState | undefined) ?? null,
+      };
+      const target =
+        mode === 'cross' && targetEntity && targetHub
+          ? {
+              entityId: normalizeId(targetEntity.entityId),
+              signerId: normalizeId(targetEntity.signerId),
+              hubEntityId: normalizeId(targetHub.entityId),
+              jurisdiction: getJurisdictionStackId(targetEntity.jurisdiction),
+              account: targetAccount ?? null,
+            }
+          : undefined;
+      const plan = await planSwap({
+        mode,
+        frame: wallet.frame,
+        source,
+        ...(target ? { target } : {}),
+        giveTokenId,
+        giveTokenDecimals: giveMeta.decimals,
+        wantTokenId,
+        wantTokenDecimals: wantMeta.decimals,
+        giveAmount: prepared.effectiveGive,
+        priceTicks: prepared.priceTicks,
+        expectedWantAmount: prepared.effectiveWant,
+        routeValue: target ? `cross:${hub.counterpartyId}>${target.hubEntityId}` : `same:${hub.counterpartyId}`,
+      });
+      const app = useApp.getState();
+      const runtimeId = getAdapter()?.runtimeId;
+      if (plan.mode === 'same' && app.tour.active && TOUR_STEPS[app.tour.index]?.id === 'trade' && runtimeId) {
+        tutorialOfferId = plan.offerId;
+        useTutorialTrade.getState().setPending({
+          runtimeId,
+          entityId: wallet.entityId,
+          counterpartyId: hub.counterpartyId,
+          offerId: plan.offerId,
+          fromHeight: app.height + 1,
+        });
+      }
+      await submitSwapPlan(plan);
+      toast(
+        mode === 'cross'
+          ? `Cross-network swap submitted: ${plainAmount(prepared.effectiveGive, giveMeta.decimals)} ${giveMeta.symbol} for ${plainAmount(prepared.effectiveWant, wantMeta.decimals)} ${wantMeta.symbol}`
+          : `Order placed: ${plainAmount(prepared.effectiveGive, giveMeta.decimals)} ${giveMeta.symbol} for ${plainAmount(prepared.effectiveWant, wantMeta.decimals)} ${wantMeta.symbol}`,
+      );
+      setGiveText('');
+      setWantText('');
+    } catch (error) {
+      if (tutorialOfferId && useTutorialTrade.getState().pending?.offerId === tutorialOfferId) {
+        useTutorialTrade.getState().setPending(null);
+      }
+      toast(error instanceof Error ? error.message : String(error), 'danger');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
 	const cancel = async (offerCounterpartyId: string, offerId: string): Promise<void> => {
 		if (!wallet.entityId || !wallet.signerId) return;

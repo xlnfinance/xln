@@ -1,0 +1,53 @@
+{
+  "baseSHA": "68711729ea1d4a04ec28060a53a5062a845de40e",
+  "status": "verified local candidate;publication pending at capture",
+  "cause": "Trade compared WETH balance;unrelated incoming payment falsely completed the chapter",
+  "change": "Only a committed SwapFilled receipt matching the volatile submitted Runtime/Entity/account/offer identity completes Trade. No Account-history scanning, persisted completion state or financial arithmetic changes. Partial execution is explicitly described.",
+  "l1": {
+    "passed": 17,
+    "failed": 0,
+    "assertions": 97
+  },
+  "browser": {
+    "exitCode": 0,
+    "stats": {
+      "startTime": "2026-10-19T07:52:56.629Z",
+      "duration": 63856.536,
+      "expected": 4,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "browserErrors": 0,
+    "reportSHA256": "ad995c7fe495bb7b2bd06d4982644d995e3172d07d00e87c0afaa259d772dbd9",
+    "logSHA256": "7f77b7335395b8310a93bdb597b85e39d62166e246203b98cc8942c63e0b179d",
+    "scope": "Real incomingWETH negative and actual funding/pay/swap/history positive;restart;local productionstand on two EVM chains,not nativeTRON"
+  },
+  "oldWalRecovery": {
+    "passed": true,
+    "sourceRecordingSHA256": "d1566aa2277360ae07e93af1f012f18929edffe93666a7030d0be8b71f82a800",
+    "frames": 75,
+    "workers": [1, 4],
+    "finalHash": "0xf7324b9e7782f1065bfd562dcd109397b9b69d7001d7adc454e5348f97623b2e",
+    "evidenceHash": "4bf22e0692b978c88be866cc608cea1fdf168a0fe63c311639a9b99d0bd149da",
+    "scope": "Existing pre-change current-format immutable swap recording: all recorded roots, metadata and ordered outbox verified; current-candidate W1/W4 ordered events/effects/account roots match. New SwapFilled diagnostics intentionally not claimed byte-identical to old diagnostic logs."
+  },
+  "frozenRoot": "0x4eccf4492e5d085b24162f86d327e003c36b7e2a90ad527db1653fde391946a7",
+  "sourceSHA256": {
+    "core/entity/tx/handlers/account/committed-frame-followups.ts": "c60976eef12d333482d71398582733baf22c5c54d5ade68d4620105f20b4d962",
+    "ui/src/components/Tour.tsx": "4cf5198e12843cf1760f35211bf4303ccdf008fffcebd7dda12309855f64b251",
+    "ui/src/screens/Swap.tsx": "6fcc4cf5451c296c9bfe104f04e456750103458399cf04563c1508804b49da8b",
+    "ui/src/tour/steps.ts": "56b98f9e866803e3c6916386c6ba038f68d4344ed06bace0bfc380b356c78020",
+    "ui/tests/e2e-tour.spec.ts": "cbea2bc651784656863dd640ff7a5c12c40d263e4f7605627ccfbeefd8398b2d",
+    "ui/src/tour/trade.ts": "eb4fdf9d6e32af8287ba12599f57b64367aebfd7be2dfc00b82693ca031a4ea5",
+    "ui/src/tour/use-trade.ts": "79c01a66a5094b1b17d0b70d3af5c41033114541370a4a555fbd86bd751aad5f",
+    "ui/src/tour/trade.test.ts": "f77770947c880a67d6b0c14077dc581ccde5a9c76265ac9c28960993f05f93bf",
+    "core/__tests__/entity/swap-filled-receipt.test.ts": "b353ef90896323542ff4086dbf8406dc756b4e3f8abcc1e27ae4b321bd242ae5"
+  },
+  "remaining": [
+    "Full unchanged check",
+    "Checked main push/deploy",
+    "Public incoming-WETH regression and full positive tutorial rerun",
+    "Fullrelease/nativeTRON/mainnet acceptance remain open"
+  ]
+}

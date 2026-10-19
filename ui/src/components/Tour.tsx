@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from './Icons';
 import { useApp } from '../runtime/store';
 import { useWallet } from '../runtime/views';
 import { TOUR_STEPS, type TourContext } from '../tour/steps';
+import { useTradeCompletion } from '../tour/use-trade';
 
 const nodeFor = (id: string): HTMLElement | undefined =>
   [...document.querySelectorAll<HTMLElement>(`[data-testid="${id}"]`)].find(node => node.getClientRects().length > 0);
@@ -20,25 +21,15 @@ export function Tour() {
   const setTour = useApp(s => s.setTour);
   const wallet = useWallet(useApp(s => s.activeEntityId));
   const { pathname } = useLocation();
-  const baseline = useRef(new Map<string, bigint>());
-  const entered = useRef('');
   const [tick, setTick] = useState(0);
-  const ctx = useMemo(() => ({ wallet, pathname, baseline: baseline.current, dom }), [wallet, pathname]);
   const index = Math.max(0, Math.min(tour.index, TOUR_STEPS.length - 1));
   const step = tour.active ? TOUR_STEPS[index] : undefined;
+  const trade = useTradeCompletion(step?.id === 'trade', wallet.entityId);
+  const ctx = useMemo(() => ({ wallet, pathname, tradeFilled: trade.filled, dom }), [wallet, pathname, trade.filled]);
   const target = step?.target(ctx) ?? '';
 
   useEffect(() => {
-    if (!step) {
-      entered.current = '';
-      return;
-    }
-    const key = `${wallet.entityId}:${step.id}`;
-    if (entered.current !== key) {
-      entered.current = key;
-      step.enter?.(ctx);
-    }
-    if (step.done?.(ctx)) setTour({ index: index + 1 });
+    if (step?.done?.(ctx)) setTour({ index: index + 1 });
   }, [step, ctx, index, setTour, tick]);
 
   useEffect(() => {
@@ -108,6 +99,7 @@ export function Tour() {
             </>
           )}
         </p>
+        {trade.error && <p role="alert">Could not verify the swap: {trade.error}</p>}
         <div className="tour-footer">
           <details className="tour-example" key={step.id}>
             <summary>How this works</summary>

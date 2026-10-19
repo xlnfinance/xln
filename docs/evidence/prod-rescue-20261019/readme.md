@@ -54,3 +54,12 @@ precede these final changes; focused L1/L2 verifies the changes.
 The unchanged final check, public served-version and tutorial verification, full
 release, native TRON and public-chain acceptance remain separate gates.
 Private browser profiles, wallet material, storage, WAL and traces are excluded.
+
+The first checked publication is `68711729ea1d4a04ec28060a53a5062a845de40e`;
+[its publication evidence](publication-68711729ea.json) records direct public
+asset hashes, 4/4 primary/reload checks and 52/52 tutorial actions. A separate
+real incoming-WETH exercise then reproduced false Trade completion. The
+[next candidate evidence](trade-receipt.json) binds completion to a committed
+receipt for the submitted order and records the negative/positive browser
+regressions plus recovery of the unchanged earlier swap WAL. Publication of
+that correction and final release/mainnet gates remain separate.

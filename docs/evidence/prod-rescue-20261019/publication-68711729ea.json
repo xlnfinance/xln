@@ -1,0 +1,50 @@
+{
+  "publishedSHA": "68711729ea1d4a04ec28060a53a5062a845de40e",
+  "publicURL": "https://xln.finance/ui/",
+  "check": {
+    "sourcePassed": 38,
+    "topPassed": 3,
+    "seconds": 189.472,
+    "artifact": "checked-main-push-01-result.json"
+  },
+  "deployment": {
+    "canonicalCommand": "bun run deploy:prod:frontend",
+    "servedFilesMatched": 49,
+    "installedFilesMatched": 1598,
+    "backendSourceSHA": "c14cabfba5c9396e8614b996ff5a60c2bdea36f8",
+    "backendProcessesUnchanged": true,
+    "historicalHubsVerified": 3,
+    "historicalAccountsVerified": 44
+  },
+  "publicPrimary": {
+    "passed": 4,
+    "freshDesktopMs": 43994.664792,
+    "freshMobileMs": 42555.115709,
+    "reloadDesktopMs": 9043.819375,
+    "reloadMobileMs": 9069.790584
+  },
+  "tutorial": {
+    "passed": 52,
+    "failed": 0,
+    "errors": 0,
+    "scope": "23 chapters plus completion/restart/reload, desktop and mobile; advanced prerequisite clicks do not establish financial execution"
+  },
+  "additionalRegression": {
+    "artifact": "public-trade-incoming-02/result.json",
+    "passed": false,
+    "observed": "Real incoming faucet0.001WETH with zero swap-submit clicks incorrectly advanced Trade to History"
+  },
+  "artifactSHA256": {
+    "public-served-68711729ea.json": "302befd7c5689485624413d5a01724ea53dba1c32aa4cbdbd36f5bc456672232",
+    "checked-web-build-01.json": "2ff7b31503e2c1acc46ce20be9bef0722c4db8ada2e66a1534f1970ba9eb2554",
+    "public-primary-68711729ea-02/result.json": "f4b06e86dd907e39197f97652f9dec948b658089278c276d4c6e13567154ea21",
+    "public-tutorial-68711729ea-01/result.json": "33fba81829213ab4105db52b2d7050e24c594aa6efe94f179545393ddc6c3e57",
+    "public-trade-incoming-02/result.json": "064c451cc406211111e6e8cc00915c48bba0096c5fa9a02a23786f90fa091c3c"
+  },
+  "remaining": [
+    "Cold boot remains42-44seconds",
+    "Trade completion regression is fixed in subsequent candidate,not yet published at capture",
+    "Public cross-swap/lending execution,full release/nativeTRON/mainnet acceptance remain separate",
+    "Before backend restart synchronize checked remote dependencies;frontend-only deployment retains old running backend"
+  ]
+}

@@ -1,5 +1,21 @@
 import { expect, test } from '@playwright/test';
 import { enterStack } from './stack';
+import { fundFromHubUi } from './fund-from-hub';
+
+test('an incoming WETH payment does not complete the swap exercise', { tag: '@functional' }, async ({ page }) => {
+  test.setTimeout(60_000);
+  await enterStack(page);
+  await page.getByTestId('wallet-tutorial').click();
+  await page.getByTestId('tour-chapter').selectOption('trade');
+  await expect(page.getByTestId('tour')).toHaveAttribute('data-step', 'trade');
+  await fundFromHubUi(page, expect, '0.001', 'WETH');
+  await expect(page.getByTestId('token-net-WETH')).toHaveText('0.001', { timeout: 20_000 });
+  // Observe several actual guide ticks after the financial credit committed.
+  for (let tick = 0; tick < 3; tick++) {
+    await page.waitForTimeout(200);
+    await expect(page.getByTestId('tour')).toHaveAttribute('data-step', 'trade');
+  }
+});
 
 test(
   'guide follows real funding, payment, swap and history without acknowledgement clicks',
