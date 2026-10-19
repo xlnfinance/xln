@@ -1,6 +1,17 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { serveStaticApp } from '../../core/api/server/static-assets';
@@ -29,7 +40,7 @@ beforeAll(() => {
   // Use the actual current builds; missing prerequisites are a failure, never a skip.
   const result = run(project, ['bash', script, 'pack', archive]);
   if (result.exitCode !== 0) throw new Error(result.stderr.toString());
-});
+}, 20_000);
 
 test('one archive installs the real hosted wallet, observer and identical current runtime/worker', async () => {
   const root = site();
@@ -72,7 +83,34 @@ test('rejects the obsolete single-root deploy archive before changing either cur
   expect(readFileSync(join(root, 'frontend/build/index.html'), 'utf8')).toBe(
     readFileSync(join(project, 'frontend/build/index.html'), 'utf8'),
   );
-}, 15_000);
+}, 30_000);
+
+test('installs public assets readable by the web server under a restrictive umask', () => {
+  const source = site();
+  expect(run(source, ['tar', '-xzf', archive]).exitCode).toBe(0);
+  const paths = ['frontend/build', 'ui/dist'].flatMap(directory => [
+    directory,
+    ...readdirSync(join(source, directory), { recursive: true }).map(path => join(directory, String(path))),
+  ]);
+  const files = paths.filter(path => statSync(join(source, path)).isFile());
+  const directories = paths.filter(path => statSync(join(source, path)).isDirectory());
+  const before = files.map(path => hash(readFileSync(join(source, path))));
+  for (const path of directories) chmodSync(join(source, path), 0o700);
+  for (const path of files) chmodSync(join(source, path), 0o600);
+  const restricted = join(temporary, 'restricted.tar.gz');
+  expect(run(source, ['bash', script, 'pack', restricted]).exitCode).toBe(0);
+  const target = site();
+  const privateFile = join(target, 'operator.env');
+  chmodSync(privateFile, 0o600);
+  const result = run(target, ['bash', '-c', 'umask 077; exec bash "$1" install "$2"', '--', script, restricted]);
+  expect(result.stderr.toString()).toBe('');
+  expect(result.exitCode).toBe(0);
+  expect([...new Set(directories.map(path => statSync(join(target, path)).mode & 0o777))]).toEqual([0o755]);
+  expect([...new Set(files.map(path => statSync(join(target, path)).mode & 0o777))]).toEqual([0o644]);
+  expect(files.map(path => hash(readFileSync(join(target, path))))).toEqual(before);
+  expect(statSync(privateFile).mode & 0o777).toBe(0o600);
+  expect(readFileSync(privateFile, 'utf8')).toBe('preserve operator configuration\n');
+}, 45_000);
 
 test('rejects a missing Account worker before replacing the existing wallet', () => {
   const incomplete = join(temporary, 'incomplete.tar.gz');
@@ -86,7 +124,7 @@ test('rejects a missing Account worker before replacing the existing wallet', ()
   expect(result.exitCode).not.toBe(0);
   expect(result.stderr.toString()).toContain('WEB_ARTIFACT_MISSING:ui/dist/account-worker.js');
   expect(readFileSync(join(root, 'ui/dist/index.html'), 'utf8')).toBe(before);
-}, 15_000);
+}, 30_000);
 
 test('refuses different runtime bytes between the observer and wallet', () => {
   const root = site();

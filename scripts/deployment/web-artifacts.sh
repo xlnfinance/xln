@@ -52,6 +52,10 @@ case "$mode" in
     trap 'rm -rf "$stage"' EXIT
     tar -xzf "$archive" -C "$stage"
     validate_web_builds "$stage"
+    # These validated trees contain public assets only. A private build umask
+    # must not make the installed site unreadable to the web server.
+    find "$stage/frontend/build" "$stage/ui/dist" -type d -exec chmod 755 {} +
+    find "$stage/frontend/build" "$stage/ui/dist" -type f -exec chmod 644 {} +
     # Reject incomplete/old artifacts before replacing either generated build.
     mkdir -p frontend ui
     rm -rf frontend/build ui/dist

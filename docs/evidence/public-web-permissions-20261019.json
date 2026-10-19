@@ -1,0 +1,104 @@
+{
+  "baseSHA": "19510373895db34187c085c7849e6677c8f5fc57",
+  "createdAt": "2026-10-19T19:56:12.863581+00:00",
+  "observedFailure": "After canonical frontend installation, / and /runtime.js returned Nginx403. Landing build directory was0700, index.html0600; /ui/ and API remained200. Backend process and81hubAccounts preserved.",
+  "cause": "A restrictive build umask survived archive extraction. Content hashes were correct but Nginx could not traverse the landing tree.",
+  "fix": "Normalize only the two validated public artifact trees to directories0755 and regular files0644 before replacing generated builds. No change to private files, financial source or stored data.",
+  "sourceHashes": {
+    "scripts/deployment/web-artifacts.sh": "0db645a87e1e671a275019a72f195bbf9d1ecdfd760e282e94547dc92882dd57",
+    "scripts/deployment/web-artifacts.test.ts": "8b21317c59938ae24882a56ae1c0ccabed901033e7e8d7f571865751f97597d4"
+  },
+  "redRegression": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/web-permissions-red-03.result.json",
+    "exitCode": 1,
+    "seconds": 37.21361425,
+    "logSHA256": "7853899e924f5f410e9648bc959ef18766aa9675ee6b4c8fa6a07688e06afd64",
+    "firstFailure": "Expected directory mode0755, observed0700 after successful installer exit."
+  },
+  "verification": {
+    "passed": 6,
+    "expected": 6,
+    "failed": 0,
+    "assertions": 40,
+    "checks": [
+      {
+        "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/web-permissions-rejections-02.result.json",
+        "resultSHA256": "3f5a08c9d5970fcbbc27e2c12e4b606949ae8a050253aba9c85d2f4703f88e6a",
+        "command": [
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "web-permissions-rejections-02",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "test",
+          "scripts/deployment/web-artifacts.test.ts",
+          "--timeout",
+          "60000",
+          "--test-name-pattern",
+          "obsolete single-root|missing Account worker"
+        ],
+        "passed": 2,
+        "failed": 0,
+        "assertions": 9,
+        "seconds": 54.984189083,
+        "sourceUnchanged": true,
+        "logSHA256": "183ac991f064288910615c403ff64957161d366faa0cd20fc30f11225c51c755"
+      },
+      {
+        "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/web-permissions-current-03.result.json",
+        "resultSHA256": "9df5589e2c5acfe9a2ea3cfd130de67dd0044e3e94ab82759d6df57ed5c2bec0",
+        "command": [
+          "bun",
+          "run",
+          "stand:run",
+          "--reason",
+          "web-permissions-current-03",
+          "--timeout-ms",
+          "60000",
+          "--",
+          "bun",
+          "test",
+          "scripts/deployment/web-artifacts.test.ts",
+          "--timeout",
+          "60000",
+          "--test-name-pattern",
+          "one archive|restrictive umask|refuses|rejects a link"
+        ],
+        "passed": 4,
+        "failed": 0,
+        "assertions": 31,
+        "seconds": 46.01670925,
+        "sourceUnchanged": true,
+        "logSHA256": "0b4ad065c0c6a7702e9e66a907022e980acdad9b88b22eb70575c2347808362e"
+      }
+    ],
+    "scope": "Actual current full build archives; restrictive umask; exact bytes and private-file0600 preservation; real static responses; rejection of old/incomplete/different-runtime/link archives. Two bounded runs cover all six cases on identical source hashes."
+  },
+  "harnessBudgets": "Actual full archive packing exceeded previous5s setup and15s rejection deadlines. Setup20s, rejection30s and new case45s remain inside separately bounded60s processes; all semantic assertions retained. Earlier timeout records preserved.",
+  "productionRepair": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/web-permissions-production-repair-01.json",
+    "sha256": "2f3e56ebd80c1dfcc19b583aa04b86d65e889f9d4fced9b65f3be79140e6c278",
+    "publicFiles": 1617,
+    "directories": 172,
+    "bytesUnchanged": true,
+    "scope": "Operational permission-only repair of the already checked195 web artifact; does not retroactively pass failed deployment07."
+  },
+  "repairedPublicBytes": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-served-07-after-permissions.json",
+    "sha256": "6e73910b636c0eebb2f7c904e1c1e18559977d9cd5200bfacfda101ed2c1da0b",
+    "verifiedURLs": 49,
+    "servedFrontendSHA": "19510373895db34187c085c7849e6677c8f5fc57",
+    "backendSHA": "27b633b47d58882cd504610627d0776c3dc3c8ea",
+    "actualBrowserClicksForThisSHA": "Not yet run"
+  },
+  "remaining": [
+    "Unchanged fullcheck and exact committed-SHA pre-pushcheck",
+    "Canonical deployment08 including independently observed installed modes and content hashes",
+    "Actual public primary4 and tutorial104; capture privacy review",
+    "Exact unit/test on final committed candidate, full release, native/public financial gates and soak; no mainnet-ready claim"
+  ]
+}
