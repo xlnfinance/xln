@@ -1,38 +1,38 @@
 {
-	"name": "xln-ui",
-	"private": true,
-	"version": "0.1.0",
-	"type": "module",
-	"scripts": {
-		"runtime:bundle": "XLN_RUNTIME_BUNDLE_OUT=ui/public/runtime.js bash ../scripts/build-runtime.sh",
-		"dev": "bun run runtime:bundle && vite",
-		"build": "bun run runtime:bundle && vite build",
-		"build:hosted": "XLN_UI_BASE=/ui/ bun run build",
-		"preview": "vite preview",
-		"check": "tsc --noEmit -p tsconfig.json",
-		"test:e2e": "bunx playwright test -c playwright.config.ts"
-	},
-	"dependencies": {
-		"ethers": "^6.13.4",
-		"events": "3.3.0",
-		"hash-wasm": "^4.12.0",
-		"jsqr": "^1.4.0",
-		"lucide-react": "^0.544.0",
-		"qrcode": "^1.5.4",
-		"react": "^19.2.8",
-		"react-dom": "^19.2.8",
-		"react-router-dom": "^7.1.1",
-		"zustand": "^5.0.2"
-	},
-	"devDependencies": {
-		"@playwright/test": "^1.62.1",
-		"@types/bun": "^1.3.14",
-		"@types/node": "^26.1.2",
-		"@types/qrcode": "^1.5.5",
-		"@types/react": "^19.0.0",
-		"@types/react-dom": "^19.0.0",
-		"@vitejs/plugin-react": "^4.3.4",
-		"typescript": "^5.9.3",
-		"vite": "^7.3.6"
-	}
+  "name": "xln-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "runtime:bundle": "XLN_RUNTIME_BUNDLE_OUT=ui/public/runtime.js bash ../scripts/build-runtime.sh",
+    "dev": "bun run runtime:bundle && vite",
+    "build": "bun run runtime:bundle && vite build",
+    "build:hosted": "XLN_UI_BASE=/ui/ bun run build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit -p tsconfig.json --checkers 4",
+    "test:e2e": "bunx playwright test -c playwright.config.ts"
+  },
+  "dependencies": {
+    "ethers": "^6.17.0",
+    "events": "3.3.0",
+    "hash-wasm": "^4.12.0",
+    "jsqr": "^1.4.0",
+    "lucide-react": "^1.59.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.4",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/bun": "^1.4.3",
+    "@types/node": "^26.6.5",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
 }

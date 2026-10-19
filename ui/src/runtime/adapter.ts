@@ -109,53 +109,55 @@ export async function connectEmbedded(seed: string, recovery?: RuntimeRecoveryCa
 
 	let env: RuntimeReplica | null = null;
 	const adapter = new xln.EmbeddedRuntimeAdapter({
-		getEnv: () => env,
-		main: async (runtimeSeed?: string | null) => {
-			// Serialize local bootstrap/import across tabs before either opens storage.
-			env = await navigator.locks.request(`xln-wallet-bootstrap:${runtimeIdForSeed(seed)}`, () =>
-				recovery ? restoreFreshRuntime(xln, seed, recovery) : xln.main(runtimeSeed ?? seed),
-			);
-			installHostedLivenessObserver(env);
-			currentEnv = env;
-			return env;
-		},
-		enqueueRuntimeInput: (target, input) => xln.enqueueRuntimeInput(target, input),
-		validateRuntimeInputAdmission: (target, input) => xln.validateRuntimeInputAdmission(target, input),
-		submitCrossJurisdictionIntent: async (target, route) => {
-			await xln.submitCrossJurisdictionIntent(target, route);
-			return { delivered: true as const };
-		},
-		controlRuntime: async (target, action) => {
-			if (action !== 'verify-chain') throw new Error(`UNSUPPORTED_RUNTIME_CONTROL:${String(action)}`);
-			return xln.verifyLiveRuntimeStorage(target);
-		},
-		registerRuntimePublishedCallback: (target, cb) => xln.registerRuntimePublishedCallback(target, cb),
-		buildReadContext: target => ({
-			readHead: () => xln.readPersistedStorageHead(target),
-			readFrame: (height: number) => xln.readPersistedStorageFrameRecord(target, height),
-			listCheckpoints: () => xln.listPersistedCheckpointHeights(target),
-			loadEntityState: (entityId: string, height: number) => xln.loadEntityStateFromStorageDb(target, entityId, height),
-			loadEntityAccountDoc: (entityId: string, counterpartyId: string, height: number) =>
-				xln.loadEntityAccountDocFromStorageDb(target, entityId, counterpartyId, height),
-			loadEntityViewPage: (entityId: string, height: number, query: unknown) =>
-				xln.loadEntityViewPageFromStorageDb(target, entityId, height, query as never),
-			listEntityIdsAtHeight: (height: number) => xln.listPersistedEntityIdsAtHeight(target, height),
-			readActivityPage: (opts: unknown) => xln.readPersistedRuntimeActivityPage(target, opts as never),
-			readFrameReceipts: query =>
-				xln.readRuntimeFrameReceipts(
-					{
-						latestHeight: () => xln.getPersistedLatestHeight(target),
-						journals: (from, to) => xln.readPersistedRuntimeActivityJournals(target, from, to),
-					},
-					query,
-				),
-			readAccountSwapHistoryPage: (entityId, counterpartyId, options) =>
-				xln.readPersistedAccountSwapHistoryPage(target, entityId, counterpartyId, options),
-			readAccountFrameHistory: (entityId: string, counterpartyId: string, limit: number) =>
-				xln.readPersistedAccountFrameHistory(target, entityId, counterpartyId, limit),
-			findPaymentRoutes: (query?: RuntimeAdapterReadQuery) => xln.findPaymentRoutes(target, query),
-		}),
-	});
+    getEnv: () => env,
+    main: async (runtimeSeed?: string | null) => {
+      // Serialize local bootstrap/import across tabs before either opens storage.
+      env = await navigator.locks.request(`xln-wallet-bootstrap:${runtimeIdForSeed(seed)}`, () =>
+        recovery ? restoreFreshRuntime(xln, seed, recovery) : xln.main(runtimeSeed ?? seed),
+      );
+      installHostedLivenessObserver(env);
+      currentEnv = env;
+      return env;
+    },
+    enqueueRuntimeInput: (target, input) => xln.enqueueRuntimeInput(target, input),
+    validateRuntimeInputAdmission: (target, input) => xln.validateRuntimeInputAdmission(target, input),
+    submitCrossJurisdictionIntent: async (target, route) => {
+      await xln.submitCrossJurisdictionIntent(target, route);
+      return { delivered: true as const };
+    },
+    controlRuntime: async (target, action) => {
+      if (action !== 'verify-chain') throw new Error(`UNSUPPORTED_RUNTIME_CONTROL:${String(action)}`);
+      return xln.verifyLiveRuntimeStorage(target);
+    },
+    registerRuntimePublishedCallback: (target, cb) => xln.registerRuntimePublishedCallback(target, cb),
+    buildReadContext: target => ({
+      readHead: () => xln.readPersistedStorageHead(target),
+      readFrame: (height: number) => xln.readPersistedStorageFrameRecord(target, height),
+      listCheckpoints: () => xln.listPersistedCheckpointHeights(target),
+      loadEntityState: (entityId: string, height: number) => xln.loadEntityStateFromStorageDb(target, entityId, height),
+      loadEntityAccountDoc: (entityId: string, counterpartyId: string, height: number) =>
+        xln.loadEntityAccountDocFromStorageDb(target, entityId, counterpartyId, height),
+      loadEntityViewPages: (entityIds: readonly string[], height: number, query?: RuntimeAdapterReadQuery) =>
+        xln.loadEntityViewPagesFromStorageDb(target, entityIds, height, query),
+      loadEntityViewPage: (entityId: string, height: number, query: unknown) =>
+        xln.loadEntityViewPageFromStorageDb(target, entityId, height, query as never),
+      listEntityIdsAtHeight: (height: number) => xln.listPersistedEntityIdsAtHeight(target, height),
+      readActivityPage: (opts: unknown) => xln.readPersistedRuntimeActivityPage(target, opts as never),
+      readFrameReceipts: query =>
+        xln.readRuntimeFrameReceipts(
+          {
+            latestHeight: () => xln.getPersistedLatestHeight(target),
+            journals: (from, to) => xln.readPersistedRuntimeActivityJournals(target, from, to),
+          },
+          query,
+        ),
+      readAccountSwapHistoryPage: (entityId, counterpartyId, options) =>
+        xln.readPersistedAccountSwapHistoryPage(target, entityId, counterpartyId, options),
+      readAccountFrameHistory: (entityId: string, counterpartyId: string, limit: number) =>
+        xln.readPersistedAccountFrameHistory(target, entityId, counterpartyId, limit),
+      findPaymentRoutes: (query?: RuntimeAdapterReadQuery) => xln.findPaymentRoutes(target, query),
+    }),
+  });
 
   // Password authentication precedes this call. Reuse the observer's canonical
   // origin-wide lease; its takeover callback drains the previous signer before

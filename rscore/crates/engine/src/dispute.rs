@@ -535,7 +535,7 @@ pub fn build_dispute_proof_body(
 }
 
 // Exact msgpackr atom envelope: magic byte + record definition + "atom" +
-// hex string. ABI batches are at least 224 bytes, hence always str16 below
+// hex string. ABI batches are at least 288 bytes, hence always str16 below
 // this 10,000-byte boundary. The independent TS vectors pin this overhead.
 fn clause_fits(clause: &DisputeTransformerClause) -> bool {
     let max: BigInt = (BigInt::from(1) << 256_u32) - 1;
@@ -684,8 +684,9 @@ fn pull_allowances(pulls: &[Pull]) -> Vec<DisputeAllowance> {
     finish_allowances(rows)
 }
 
-/// `abi.encode(DeltaTransformer.Batch)` — three arrays of static tuples, so
-/// each array is a length followed by its elements inline.
+/// `abi.encode(DeltaTransformer.Batch)` uses four arrays. The current Rust
+/// launch profile rejects loan covenant bodies, so its fourth array is empty.
+/// Omitting it changes the signed proof hash and invalidates the peer Hanko.
 fn encode_batch(
     payments: &[Payment],
     swaps: &[Swap],
@@ -719,7 +720,7 @@ fn encode_batch(
         pull_bytes.extend_from_slice(&word_from_u64(u64::from(pull.target_role)));
     }
 
-    let head = 32 * 3;
+    let head = 32 * 4;
     let mut encoded = Vec::new();
     // One tuple parameter, and the tuple is dynamic: the sequence starts with
     // the offset to it.
@@ -729,9 +730,13 @@ fn encode_batch(
     encoded.extend_from_slice(&word_from_u64(
         (head + payment_bytes.len() + swap_bytes.len()) as u64,
     ));
+    encoded.extend_from_slice(&word_from_u64(
+        (head + payment_bytes.len() + swap_bytes.len() + pull_bytes.len()) as u64,
+    ));
     encoded.extend_from_slice(&payment_bytes);
     encoded.extend_from_slice(&swap_bytes);
     encoded.extend_from_slice(&pull_bytes);
+    encoded.extend_from_slice(&word_from_u64(0));
     Ok(encoded)
 }
 
@@ -1004,7 +1009,7 @@ mod chunk_parity_tests {
                 .iter()
                 .map(|clause| clause.encoded_batch.len() * 2 + 26)
                 .collect::<Vec<_>>(),
-            [9754, 1434, 9754, 2074]
+            [9882, 1562, 9882, 2202]
         );
         let mut body = DisputeProofBody {
             watch_seed: [0x11; 32],
@@ -1018,7 +1023,7 @@ mod chunk_parity_tests {
         // and monotonically numbered hashes: binds ordering, ABI and allowances.
         assert_eq!(
             prefixed_hex(&Keccak256::digest(encode_proof_body(&body).unwrap())),
-            "0xa0b04028c75dceef2838a0600e26460f985504b50470580d2bd6465387bd8745"
+            "0x7331b0e30fbe6940ecbc6d33c9fb4e1a56820b0429a0c14e1ecf750cf1231b4f"
         );
         let pulls = (0..22)
             .map(|index| {
@@ -1047,12 +1052,12 @@ mod chunk_parity_tests {
                 .iter()
                 .map(|clause| clause.encoded_batch.len() * 2 + 26)
                 .collect::<Vec<_>>(),
-            [9882, 922]
+            [9562, 1498]
         );
         body.transformers.extend(clauses);
         assert_eq!(
             prefixed_hex(&Keccak256::digest(encode_proof_body(&body).unwrap())),
-            "0x0b9db7d6fce5dbd839e50e5610c827f1ee44089691d3e136b77a13682210b21b"
+            "0x0af26e0daa5e35620695a67d9b7cb4cad0b643b11cbd30a1fc68fe1d75bacfcf"
         );
     }
 

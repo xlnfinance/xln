@@ -1,0 +1,34 @@
+import parser from '@typescript-eslint/parser';
+import typescript from '@typescript-eslint/eslint-plugin';
+import imports from 'eslint-plugin-import';
+
+export default [
+  { ignores: ['dist/**'] },
+  {
+    files: ['**/*.ts'],
+    languageOptions: { parser, sourceType: 'module', ecmaVersion: 'latest' },
+    plugins: { '@typescript-eslint': typescript, import: imports },
+    rules: {
+      '@typescript-eslint/no-non-null-asserted-optional-chain': 'error',
+      'import/no-absolute-path': 'error',
+      'import/no-duplicates': 'error',
+      'import/no-self-import': 'error',
+      'no-case-declarations': 'error',
+      'no-empty': 'error',
+      'no-eval': 'error',
+      'no-extra-boolean-cast': 'error',
+      'no-fallthrough': 'error',
+      'no-implied-eval': 'error',
+      'no-new-func': 'error',
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'JSON',
+          property: 'stringify',
+          message: 'FINTECH_SAFETY: use safeStringify() for logs or a canonical codec for persisted/hashed data',
+        },
+      ],
+      'no-unsafe-finally': 'error',
+    },
+  },
+];

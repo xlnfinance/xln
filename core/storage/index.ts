@@ -11,23 +11,14 @@ import {
   boundedStorageRowsBytes,
   prepareBoundedStorageValueRows,
 } from './codec/bounded-value';
-import {
-  deleteKeyRange,
-  iterateKeys,
-  readRawOrNull,
-} from './database/level';
+import { readRequiredRaw, deleteKeyRange, iterateKeys, readRawOrNull } from './database/level';
 import {
   computeStorageFrameHash,
   computeStoragePostStateHash,
   computeRuntimePostStateComponentDigests,
   prepareStorageCanonicalStateHashes,
 } from './hashes';
-import {
-  createSnapshot,
-  listSnapshotHeights,
-  maybeRotateSnapshots,
-  pruneWalBeforeHeight,
-} from './database/lifecycle';
+import { createSnapshot, listSnapshotHeights, maybeRotateSnapshots, pruneWalBeforeHeight } from './database/lifecycle';
 import {
   buildBookDeletionsFromOverlay,
   buildDocPuts,
@@ -36,14 +27,8 @@ import {
   storageRefsFromOverlay,
 } from './schema/overlay-docs';
 import { storageOverlayRecordKey } from '../protocol/state/overlay';
-import {
-  applyCertifiedEntityHeadPlan,
-  buildRuntimeCheckpointHeadPlan,
-} from './replica/entity-head';
-import {
-  readStorageFrameRecord,
-  readStorageHead,
-} from './read/read';
+import { applyCertifiedEntityHeadPlan, buildRuntimeCheckpointHeadPlan } from './replica/entity-head';
+import { readStorageFrameRecord, readStorageHead } from './read/read';
 import {
   KEY_HEAD,
   KEY_LIVE_ACCOUNT,
@@ -80,22 +65,14 @@ import type { RuntimeReplica, RoutedEntityInput, RuntimeInput } from '../runtime
 import type { EntityContextPayloadHash } from '../protocol/hashes';
 import { readRuntimeFrameEvents } from '../runtime/observability/env-events';
 import { getCertifiedBoardNodeStore, hashCertifiedBoardNode } from '../jurisdiction/machine/board-registry';
-import {
-  hashAccountJClaimNode,
-} from '../account/j-claims/j-claim-accumulator';
+import { hashAccountJClaimNode } from '../account/j-claims/j-claim-accumulator';
 import {
   finalizePersistedAccountJClaimNodes,
   getAccountJClaimNodeStore,
   getSafePendingAccountJClaimDeletes,
 } from '../entity/account/account-j-claim-node-store';
-import {
-  buildStorageRuntimeMachineSnapshot,
-  buildReplayVerifiableRuntimePostStateView,
-} from './wal/snapshot';
-import {
-  verifyStorageSnapshotIntegrity,
-  verifyStorageTailIntegrity,
-} from './read/verify';
+import { buildStorageRuntimeMachineSnapshot, buildReplayVerifiableRuntimePostStateView } from './wal/snapshot';
+import { verifyStorageSnapshotIntegrity, verifyStorageTailIntegrity } from './read/verify';
 import { verifyLiveStorageIntegrity } from './read/integrity/live';
 import {
   validatePersistedAccountJClaimPathNode,
@@ -117,32 +94,17 @@ import type {
 import { resolveStorageRuntimeConfig } from './database/config';
 import { prepareStorageBookGraphWrite } from './commit/book-graph';
 import { prepareLiveStateGraph } from './commit/live-state-graph';
-import {
-  prepareRuntimeOutputRows,
-  type RuntimeOutputCommitment,
-} from './wal/outbox-payload';
+import { prepareRuntimeOutputRows, type RuntimeOutputCommitment } from './wal/outbox-payload';
 import { prepareEntityContextPayloadRows } from './wal/entity-context-payload';
 import { countOp, OP_COUNTERS_ENABLED } from '../support/performance/op-counters';
 import { prepareRuntimeMachineGraphWrite } from './wal/runtime-machine-graph';
-import {
-  preparePathKeyedAuxiliaryRows,
-  type AuxiliaryTreeOwner,
-} from './schema/nodes/path-keyed-auxiliary-nodes';
+import { preparePathKeyedAuxiliaryRows, type AuxiliaryTreeOwner } from './schema/nodes/path-keyed-auxiliary-nodes';
 import { appendRuntimeActivityViewFrame } from './history/runtime-activity-view';
 export { resolveStorageRuntimeConfig } from './database/config';
-export {
-  inspectStorage,
-} from './read/inspect';
-export {
-  seedFreshStorageEpoch,
-} from './database/lifecycle';
-export {
-  computeStorageFrameHash,
-  computeStoragePostStateHash,
-} from './hashes';
-export {
-  verifyStorageSnapshotAtHeight,
-} from './read/verify';
+export { inspectStorage } from './read/inspect';
+export { seedFreshStorageEpoch } from './database/lifecycle';
+export { computeStorageFrameHash, computeStoragePostStateHash } from './hashes';
+export { verifyStorageSnapshotAtHeight } from './read/verify';
 export {
   findStorageLatestSnapshotAtOrBelow,
   hydrateAccountJClaimRootNodesFromStorage,
@@ -157,16 +119,10 @@ export {
   readStorageFramePayloads,
   readStorageHead,
 } from './read/read';
-export {
-  verifyStorageTailIntegrity,
-} from './read/verify';
-export {
-  replaceRestoredStorageBase,
-} from './database/restore-import';
+export { verifyStorageTailIntegrity } from './read/verify';
+export { replaceRestoredStorageBase } from './database/restore-import';
 
-export type {
-  StorageEntityViewPage,
-} from './read/read';
+export type { StorageEntityViewPage } from './read/read';
 
 export type {
   RuntimeDbLike,
@@ -182,17 +138,17 @@ export type {
 const storageLog = createStructuredLogger('runtime.storage');
 
 const defaultStorageHead = (config: Required<StorageRuntimeConfig>): StorageHead => ({
-    schemaVersion: STORAGE_SCHEMA_VERSION,
-    latestHeight: 0,
-    latestMaterializedHeight: 0,
-    latestSnapshotHeight: 0,
-    snapshotPeriodFrames: config.snapshotPeriodFrames,
-    retainSnapshots: config.retainSnapshots,
-    epochMaxBytes: config.epochMaxBytes,
-    accountMerkleRadix: config.accountMerkleRadix,
-    epochReplayBytes: 0,
-    retainedWalBytes: 0,
-  });
+  schemaVersion: STORAGE_SCHEMA_VERSION,
+  latestHeight: 0,
+  latestMaterializedHeight: 0,
+  latestSnapshotHeight: 0,
+  snapshotPeriodFrames: config.snapshotPeriodFrames,
+  retainSnapshots: config.retainSnapshots,
+  epochMaxBytes: config.epochMaxBytes,
+  accountMerkleRadix: config.accountMerkleRadix,
+  epochReplayBytes: 0,
+  retainedWalBytes: 0,
+});
 
 const readHead = async (db: RuntimeDbLike, config: Required<StorageRuntimeConfig>): Promise<StorageHead> => {
   const head = await readStorageHead(db);
@@ -259,7 +215,7 @@ const synchronizeLiveStateProjection = async (
     const authoritativeKeys = new Set<string>();
     for await (const key of iterateKeys(walDb, { prefix })) {
       authoritativeKeys.add(key.toString('hex'));
-      const authoritative = await walDb.get(key);
+      const authoritative = await readRequiredRaw(walDb, key);
       if ((await readRawOrNull(currentDb, key))?.equals(authoritative)) continue;
       batch.put(key, authoritative);
       changed = true;
@@ -307,10 +263,7 @@ const AUXILIARY_PATH_FAMILIES: readonly AuxiliaryPathFamily[] = [
   },
 ] as const;
 
-const validateAuxiliaryPathValue = (
-  value: Buffer,
-  family: AuxiliaryPathFamily,
-): void => {
+const validateAuxiliaryPathValue = (value: Buffer, family: AuxiliaryPathFamily): void => {
   const decoded = decodeValidatedBuffer(value, family.validate);
   const actual = family.hashNode(decoded.node as never);
   if (actual !== decoded.hash) {
@@ -327,7 +280,7 @@ const synchronizeAuxiliaryPathFamily = async (
   const authoritativeKeys = new Set<string>();
   let changed = false;
   for await (const key of iterateKeys(walDb, { prefix: family.prefix })) {
-    const authoritative = await walDb.get(key);
+    const authoritative = await readRequiredRaw(walDb, key);
     validateAuxiliaryPathValue(authoritative, family);
     authoritativeKeys.add(key.toString('hex'));
     if ((await readRawOrNull(currentDb, key))?.equals(authoritative)) continue;

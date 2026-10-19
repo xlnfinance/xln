@@ -38,10 +38,17 @@ test(
     await page.getByTestId('nav-manage').locator('visible=true').first().click();
     await page.getByTestId('manage-lend').click();
     await page.getByTestId('lend-side-borrow').click();
-    await expect(page.getByText('A funded loan transfers principal to your account once', { exact: false })).toBeVisible();
+    await expect(page.getByText('Draws within it transfer principal once', { exact: false })).toBeVisible();
     await expect(page.getByTestId('receive-spectrum')).toHaveCount(0);
     await page.getByTestId('lend-side-lend').click();
+    await page.getByRole('button', { name: '1 day', exact: true }).click();
     await page.getByTestId('lend-amount').fill('100');
+    await expect(page.getByTestId('lend-rate')).toHaveValue('100');
+    // The funding UI already signed 110 USDC including its 10% buffer. It
+    // covers this 101 USDC maximum claim; no second risk grant is necessary.
+    expect(funded.credit).toBe('110000000');
+    await expect(page.getByTestId('lending-risk-consent')).toHaveCount(0);
+    await expect(page.getByTestId('lend-submit')).toBeEnabled();
     await page.getByTestId('lend-submit').click();
     await expect
       .poll(async () => (await readPools(page, parties)).map(pool => pool.status), { timeout: 15_000 })
@@ -50,12 +57,12 @@ test(
     const offered = await readAccount(page, parties);
     const savings = await readPools(page, parties);
     expect(savings).toHaveLength(1);
-    expect(savings[0]).toMatchObject({ principal: '100000000', available: '100000000', borrowed: '0' });
+    expect(savings[0]).toMatchObject({ principal: '100000000', status: 'open' });
     expect(offered.debt).toBe('0');
     expect(BigInt(funded.balance) - BigInt(offered.balance)).toBe(100000000n);
 
-    // After funding the pool, the hub owes no Account balance. The existing credit
-    // editor can lower the permanent grant to 1 USDC, creating a real receive deficit.
+    // The signed savings claim remains owed independently of the Account balance.
+    // Lowering the grant creates a real payout-capacity deficit, not a cancelled claim.
     await page.getByTestId('nav-home').locator('visible=true').first().click();
     await page.getByTestId('account-row').first().click();
     await page.getByRole('button', { name: 'Extend credit', exact: true }).click();
@@ -73,16 +80,19 @@ test(
     await expect(spectrum).toContainText('Testnet');
     await expect(spectrum).toContainText('This preparation submits no collateral request.');
     await expect(page.getByTestId('receive-spectrum-slider')).toHaveValue('0');
-    await expect(close).toBeDisabled();
+    // Withdrawal may be queued without capacity; this scenario prepares capacity
+    // first and proves that preparation alone never submits the withdrawal.
+    await expect(close).toBeEnabled();
     const before = await readAccount(page, parties);
     expect(before.incoming).toBe('1000000');
     await spectrum.getByRole('button', { name: 'Accept it as credit instead', exact: true }).click();
     await expect(page.getByTestId('receive-spectrum-slider')).toHaveValue('100');
     await expect(spectrum.getByRole('checkbox')).toBeChecked();
-    await expect(close).toBeDisabled();
+    await expect(close).toBeEnabled();
     const chosen = await readAccount(page, parties);
     expect(chosen.balance).toBe(before.balance);
     expect(chosen.credit).toBe(before.credit);
+    expect(chosen.closeRequests).toEqual([]);
     expect(await readPools(page, parties)).toEqual(savings);
     await expect(page.getByTestId('receive-spectrum-confirm')).toHaveText('Extend credit limit');
     await page.getByTestId('receive-spectrum-confirm').click();

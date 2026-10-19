@@ -56,9 +56,4 @@ export {
   setJBlockHeadersIngressTransform,
   setJEventIngressTransform,
   setJHistoryRangeIngressTransform,
-  type JBlockHeadersIngress,
-  type JEventIngressBatch,
-  type JHistoryRangeIngress,
 } from '../events/ingress-transform';
-
-export type { JEventIngress } from '../types';

@@ -1,19 +1,13 @@
 import ts from 'typescript';
 
-const configPath = ts.findConfigFile('.', ts.sys.fileExists, 'tsconfig.runtime.json');
+const configPath = ts.findConfigFile(process.cwd(), ts.sys.fileExists, 'tsconfig.runtime.json');
 if (!configPath) throw new Error('NO_HOT_SCANS_TSCONFIG_MISSING');
 
 const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
 if (configFile.error) {
   throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, '\n'));
 }
-const parsed = ts.parseJsonConfigFileContent(
-  configFile.config,
-  ts.sys,
-  '.',
-  undefined,
-  configPath,
-);
+const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, process.cwd(), undefined, configPath);
 const program = ts.createProgram(parsed.fileNames, parsed.options);
 const checker = program.getTypeChecker();
 const violations: string[] = [];

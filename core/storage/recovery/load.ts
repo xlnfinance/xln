@@ -14,7 +14,6 @@ import {
   computeCanonicalStateHashFromEnv,
 } from '../canonical-hash';
 import type { PersistedStorageReadApi } from '../read/persisted-read';
-import { borrowOpenRuntimeWalDb } from '../runtime-dbs';
 import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
 import { assertStorageSafetyOverridesAllowed } from '../commit/safety';
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/machine/registration-evidence';
@@ -128,62 +127,39 @@ const installRestoredRuntimeFrame = async (
 export const loadPersistedRuntime = async (
   deps: RuntimeStorageApiDeps,
   reads: PersistedStorageReadApi,
-  runtimeId?: string | null,
-  runtimeSeed?: string | null,
+  env: RuntimeReplica,
   targetHeightOverride?: number,
-  options: import('./journal/replay').ReplayOptions = {},
+  options: Pick<import('./journal/replay').ReplayOptions, 'prunedTargetReturnsNull'> = {},
 ): Promise<LoadedRuntimeStorage | null> => {
-  const env = reads.createPersistedStorageEnv(runtimeId, runtimeSeed);
-  if (options.borrowRuntimeWalFrom) {
-    await borrowOpenRuntimeWalDb(options.borrowRuntimeWalFrom, env, deps);
-  }
   assertStorageSafetyOverridesAllowed();
-  let returningEnv = false;
-  try {
-    const source = await resolvePersistedRestoreSource(
-      deps,
-      reads,
-      env,
-      targetHeightOverride,
-      options,
-    );
-    if (!source) return null;
-    if (source.payloads.runtimeMachine) {
-      // Install the durable Runtime-machine envelope once, before rebuilding
-      // the Entity graph that references its path-keyed witness stores.
-      // Reapplying it afterward is redundant and risks erasing state produced
-      // by graph restoration if the two phases ever gain overlapping fields.
-      restoreDurableRuntimeSnapshot(env, source.payloads.runtimeMachine);
-    }
-    await restorePersistedEntityGraph(
-      deps,
-      reads,
-      env,
-      source.restoredStates,
-      source.targetHeight,
-      source.latestHeight,
-      source.selectedSnapshotHeight,
-      source.usesLiveMaterializedCheckpoint,
-    );
-    restoreAndAssertLocalEntityCryptoKeys(env);
-    await installRestoredRuntimeFrame(
-      reads,
-      env,
-      source,
-    );
-    returningEnv = true;
-    return {
-      env,
-      latestHeight: source.latestHeight,
-      checkpointHeight: source.targetHeight,
-      selectedSnapshotHeight: source.selectedSnapshotHeight,
-    };
-  } finally {
-    // An empty/invalid probe must release LevelDB locks before the real
-    // Runtime opens the same namespace for frame one.
-    if (!returningEnv) {
-      await deps.closeRuntimeDb(env);
-      await deps.closeInfraDb(env);
-    }
+  // The caller owns this replica's handles, including failure cleanup. Closing
+  // a borrowed handle here and again in the caller erases its borrowed marker
+  // and makes the second close attempt to release the live writer's lease.
+  const source = await resolvePersistedRestoreSource(deps, reads, env, targetHeightOverride, options);
+  if (!source) return null;
+  if (source.payloads.runtimeMachine) {
+    // Install the durable Runtime-machine envelope once, before rebuilding
+    // the Entity graph that references its path-keyed witness stores.
+    // Reapplying it afterward is redundant and risks erasing state produced
+    // by graph restoration if the two phases ever gain overlapping fields.
+    restoreDurableRuntimeSnapshot(env, source.payloads.runtimeMachine);
   }
+  await restorePersistedEntityGraph(
+    deps,
+    reads,
+    env,
+    source.restoredStates,
+    source.targetHeight,
+    source.latestHeight,
+    source.selectedSnapshotHeight,
+    source.usesLiveMaterializedCheckpoint,
+  );
+  restoreAndAssertLocalEntityCryptoKeys(env);
+  await installRestoredRuntimeFrame(reads, env, source);
+  return {
+    env,
+    latestHeight: source.latestHeight,
+    checkpointHeight: source.targetHeight,
+    selectedSnapshotHeight: source.selectedSnapshotHeight,
+  };
 };

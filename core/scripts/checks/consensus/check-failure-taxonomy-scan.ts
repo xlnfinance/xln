@@ -957,7 +957,13 @@ for (const [path, markers] of [
   ['core/__tests__/architecture/state/validation-utils.test.ts', ['validateAccountDeltas fails loud', 'ACCOUNT_DELTAS_MISSING']],
   [
     'core/__tests__/network/relay/relay-router.test.ts',
-    ['relay router verbose diagnostics use structured logging and the relay carries no financial path', 'relay.router'],
+    [
+      'relay diagnostics use structured logging without decrypting envelopes or forwarding peer errors',
+      'authenticated relay forwards sealed user envelopes only to the bound live recipient',
+      'rejects every routable message before authenticated hello',
+      'relay_never_forwards_error_frames',
+      'relay.router',
+    ],
   ],
   [
     'core/__tests__/runtime/transport/runtime-ws-recovery.test.ts',

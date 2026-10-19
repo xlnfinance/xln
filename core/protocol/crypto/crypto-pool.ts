@@ -48,7 +48,7 @@ type NativeSecp256k1 = {
 
 const loadNative = (): NativeSecp256k1 | null => {
   try {
-    return typeof require !== 'undefined' ? (require('secp256k1') as NativeSecp256k1) : null;
+    return typeof require !== 'undefined' ? (require('secp256k1/bindings') as NativeSecp256k1) : null;
   } catch {
     return null;
   }

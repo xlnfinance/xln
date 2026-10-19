@@ -41,7 +41,7 @@ const reply = (
   const fields: RscoreWireValue[] = [
     DOMAIN,
     abiVersion,
-    1,
+    2,
     1,
     RSCORE_PROTOCOL_FINGERPRINT,
     GENERATION,
@@ -53,11 +53,7 @@ const reply = (
     body.length,
     digest(opTag, messageKind, body),
   ];
-  const envelope = Buffer.concat([
-    Buffer.from([0x03, 0x9e]),
-    ...fields.map(packWireValue),
-    body,
-  ]);
+  const envelope = Buffer.concat([Buffer.from([0x03, 0x9e]), ...fields.map(packWireValue), body]);
   const length = Buffer.alloc(4);
   length.writeUInt32BE(envelope.length);
   return Buffer.concat([length, envelope]);

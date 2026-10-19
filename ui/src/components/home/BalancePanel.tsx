@@ -5,7 +5,7 @@ import { TokenIcon } from '../TokenPicker';
 import { useApp } from '../../runtime/store';
 import { formatAmount, formatUsd } from '../../runtime/format';
 import { getTokenMeta } from '../../runtime/token-meta';
-import { useLendingBalance } from '../../runtime/financial/lending-balance';
+import { walletLendingBalance } from '../../runtime/financial/lending-balance';
 import { usdOf } from '../../runtime/financial/prices';
 import type { TokenTotals, WalletView } from '../../runtime/views';
 
@@ -38,16 +38,17 @@ export function BalancePanel({
   const navigate = useNavigate();
   const commandReady = useApp(s => s.commandReady);
   const places = useApp(s => s.places);
-  const lending = useLendingBalance(wallet);
-  const lendingUsd = [...lending.byToken].reduce((sum, [id, amount]) => sum + usdOf(id, amount), 0);
-  const lendingUnavailable = places.accounts && (lending.loading || Boolean(lending.error));
-  const visibleUsd = (places.onchain ? wallet.usd.onchain : 0) + (places.reserve ? wallet.usd.reserve : 0)
-    + (places.accounts ? wallet.usd.receivable - wallet.usd.owed + lendingUsd : 0);
+  const lending = walletLendingBalance(wallet);
+  const lendingUsd = [...lending].reduce((sum, [id, amount]) => sum + usdOf(id, amount), 0);
+  const visibleUsd =
+    (places.onchain ? wallet.usd.onchain : 0) +
+    (places.reserve ? wallet.usd.reserve : 0) +
+    (places.accounts ? wallet.usd.receivable - wallet.usd.owed + lendingUsd : 0);
   const meta = token ? getTokenMeta(token.tokenId) : null;
   const visibleNet = token
     ? (places.onchain ? token.onchain : 0n) +
       (places.reserve ? token.reserve : 0n) +
-      (places.accounts ? token.receivable + token.owed + (lending.byToken.get(token.tokenId) ?? 0n) : 0n)
+      (places.accounts ? token.receivable + token.owed + (lending.get(token.tokenId) ?? 0n) : 0n)
     : 0n;
   const money = (amount: bigint): string =>
     meta ? `${formatAmount(amount, meta.decimals, meta.decimals)} ${meta.symbol}` : '0';
@@ -70,20 +71,21 @@ export function BalancePanel({
           {meta?.symbol ?? 'Balance'}
           <span className="faint">· {all ? 'Balance' : 'Selected balances'}</span>
         </div>
-        {wallet.frame && !lendingUnavailable ? (
+        {wallet.frame && !wallet.error ? (
           <div className="panel-amount">
             <HeroAmount text={meta ? formatAmount(visibleNet, meta.decimals, meta.decimals) : formatUsd(visibleUsd)} />
             {meta ? <span className="sym">{meta.symbol}</span> : null}
           </div>
         ) : (
           <p className="hero-label" role="status">
-            {wallet.error || lending.error ? 'Balance unavailable' : 'Loading balance…'}
+            {wallet.error ? 'Balance unavailable' : 'Loading balance…'}
           </p>
         )}
-        {places.accounts && (lendingUsd !== 0 || lendingUnavailable) && (
+        {places.accounts && lendingUsd !== 0 && (
           <p className="note" data-testid="home-lending-balance">
-            {lendingUnavailable ? 'Lending positions are being reconciled with your wallet.'
-              : `Lending deposits minus loans: ${token ? money(lending.byToken.get(token.tokenId) ?? 0n) : formatUsd(lendingUsd)} · reported by your hub`}
+            Signed lending claims: {token ? money(lending.get(token.tokenId) ?? 0n) : formatUsd(lendingUsd)} · at the
+            confirmed Account frames. Early savings cancellation may waive earned interest. Only collateral secures
+            recovery.
           </p>
         )}
         {wallet.frame && places.accounts && (

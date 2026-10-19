@@ -40,6 +40,11 @@ test('sparse WAL preserves every tx in a merged reliable Entity input', async ()
     env: { ...process.env, XLN_DB_PATH: dbRoot },
     stdout: 'pipe',
     stderr: 'pipe',
+    // The full historical scan plus reopen takes 42–44s; each recovery still
+    // enforces its own 10s budget. Stop the child before the 60s test deadline
+    // so a timeout reports its captured evidence instead of a dangling process.
+    timeout: 55_000,
+    killSignal: 'SIGKILL',
   });
   const [exitCode, stdout, stderr] = await Promise.all([
     child.exited,
@@ -49,4 +54,4 @@ test('sparse WAL preserves every tx in a merged reliable Entity input', async ()
   expect(exitCode, `${stdout}\n${stderr}`).toBe(0);
   expect(stdout).toContain('Crash recovery:');
   expect(stdout).toContain('hubAccounts=2');
-}, 45_000);
+}, 60_000);

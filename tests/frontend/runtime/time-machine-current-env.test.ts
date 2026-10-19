@@ -24,7 +24,9 @@ const repoRoot = process.cwd();
 const read = (path: string) => readFileSync(join(repoRoot, path), 'utf8');
 const readStore = <T>(store: { subscribe: (run: (value: T) => void) => () => void }): T => {
   let current!: T;
-  const unsubscribe = store.subscribe((value) => { current = value; });
+  const unsubscribe = store.subscribe(value => {
+    current = value;
+  });
   unsubscribe();
   return current;
 };
@@ -113,7 +115,9 @@ describe('frontend time-machine current env contract', () => {
     runtimeQueryClient.readHead = async () => ({ latestHeight: 12 }) as never;
     runtimeQueryClient.readViewFrame = async (query = {}) => {
       if (query.atHeight === 7) {
-        return new Promise((_, reject) => { rejectHistorical = reject; });
+        return new Promise((_, reject) => {
+          rejectHistorical = reject;
+        });
       }
       return { height: 12 } as never;
     };
@@ -157,7 +161,9 @@ describe('frontend time-machine current env contract', () => {
     let resolveLive!: (value: string) => void;
     const staleLive = publishIfCurrent(
       liveSelection,
-      new Promise<string>((resolve) => { resolveLive = resolve; }),
+      new Promise<string>(resolve => {
+        resolveLive = resolve;
+      }),
     );
     await setRuntimeViewAtHeight(7);
     resolveLive('LIVE');
@@ -167,7 +173,9 @@ describe('frontend time-machine current env contract', () => {
     let resolveHeightSeven!: (value: string) => void;
     const staleHeightSeven = publishIfCurrent(
       heightSevenSelection,
-      new Promise<string>((resolve) => { resolveHeightSeven = resolve; }),
+      new Promise<string>(resolve => {
+        resolveHeightSeven = resolve;
+      }),
     );
     await setRuntimeViewAtHeight(8);
     resolveHeightSeven('h7');
@@ -189,31 +197,32 @@ describe('frontend time-machine current env contract', () => {
       height: 12,
       authLevel: 'read',
     });
-    const frameAt = (height: number, accountsPageCount: number) => ({
-      height,
-      entities: [],
-      activeEntityId: '0xentity-a',
-      activeEntity: {
-        summary: { entityId: '0xentity-a' },
-        core: { entityId: '0xentity-a', timestamp: height },
-        accounts: {
-          items: [],
-          totalItems: accountsPageCount,
-          pageIndex: 0,
-          pageCount: accountsPageCount,
-          prevCursor: null,
-          nextCursor: accountsPageCount > 1 ? `accounts-${height}` : null,
+    const frameAt = (height: number, accountsPageCount: number) =>
+      ({
+        height,
+        entities: [],
+        activeEntityId: '0xentity-a',
+        activeEntity: {
+          summary: { entityId: '0xentity-a' },
+          core: { entityId: '0xentity-a', timestamp: height },
+          accounts: {
+            items: [],
+            totalItems: accountsPageCount,
+            pageIndex: 0,
+            pageCount: accountsPageCount,
+            prevCursor: null,
+            nextCursor: accountsPageCount > 1 ? `accounts-${height}` : null,
+          },
+          books: {
+            items: [],
+            totalItems: 0,
+            pageIndex: 0,
+            pageCount: 1,
+            prevCursor: null,
+            nextCursor: null,
+          },
         },
-        books: {
-          items: [],
-          totalItems: 0,
-          pageIndex: 0,
-          pageCount: 1,
-          prevCursor: null,
-          nextCursor: null,
-        },
-      },
-    }) as never;
+      }) as never;
     runtimeQueryClient.readHead = async () => ({ latestHeight: 12 }) as never;
     runtimeQueryClient.readViewFrame = async () => frameAt(12, 10);
     resetRuntimeView();
@@ -221,9 +230,10 @@ describe('frontend time-machine current env contract', () => {
     expect(readStore(runtimeViewPageInfo)?.accountsPageCount).toBe(10);
 
     const deferred = new Map<number, (frame: never) => void>();
-    runtimeQueryClient.readViewFrame = async (query = {}) => new Promise<never>((resolve) => {
-      deferred.set(Number(query.atHeight), resolve);
-    });
+    runtimeQueryClient.readViewFrame = async (query = {}) =>
+      new Promise<never>(resolve => {
+        deferred.set(Number(query.atHeight), resolve);
+      });
     const heightSeven = setRuntimeViewAtHeight(7);
     expect(readStore(runtimeViewPageInfo)).toBeNull();
     const heightEight = setRuntimeViewAtHeight(8);
@@ -256,7 +266,10 @@ describe('frontend time-machine current env contract', () => {
       authLevel: 'read',
     });
     runtimeQueryClient.readHead = async () => ({ latestHeight: 12 }) as never;
-    runtimeQueryClient.readViewFrame = async () => new Promise<never>((resolve) => { resolveFrame = resolve; });
+    runtimeQueryClient.readViewFrame = async () =>
+      new Promise<never>(resolve => {
+        resolveFrame = resolve;
+      });
     resetRuntimeView();
 
     const stalePage = refreshSelectedRuntimeView();
@@ -285,17 +298,15 @@ describe('frontend time-machine current env contract', () => {
     expect(chrome).not.toContain('history-warning');
   });
 
-  test('merged graph scope does not replace wallet time travel controls', () => {
+  test('merged graph scope retains observer time travel controls', () => {
     const source = read('frontend/src/lib/view/core/TimeMachine.svelte');
     const dock = read('frontend/src/lib/view/DockRoot.svelte');
-    const wallet = read('frontend/src/lib/view/UserModePanel.svelte');
 
     // The NetworkMachine scrubber belongs to the dock. Keying it off the global app mode
     // left the embedded workspace (dock rendered while mode is 'user') on the retired
     // scrubber, which reads permanently empty in-memory history.
     expect(source).toContain("{#if dockMode && $runtimeGraphScope === 'merged'}");
     expect(dock).toContain('dockMode');
-    expect(wallet).not.toContain('dockMode\n');
     expect(source).toContain('data-testid="time-machine-remote-scan"');
     expect(source).toContain('data-testid="network-machine-mode-toggle"');
   });
@@ -359,7 +370,9 @@ describe('frontend time-machine current env contract', () => {
     const source = read('frontend/src/lib/view/View.svelte');
 
     expect(source).toContain('setLocalHistoryPreservingCursor');
-    expect(source).toContain("import { getEnv, getXLN, history as runtimeHistory, xlnEnvironment, xlnInstance } from '#lib/stores/xlnStore.ts';");
+    expect(source).toContain(
+      "import { getEnv, getXLN, history as runtimeHistory, xlnEnvironment, xlnInstance } from '#lib/stores/xlnStore.ts';",
+    );
     expect(source).not.toContain("import { runtimeViewFrameToEnv } from '$lib/utils/runtimeViewEnv';");
     expect(source).toContain('unsubRuntimeEnv = xlnEnvironment.subscribe');
     expect(source).not.toContain('unsubActiveRuntimeView = runtimeView.subscribe');
@@ -373,7 +386,9 @@ describe('frontend time-machine current env contract', () => {
     expect(source).not.toContain("import { activeEnv } from '$lib/stores/runtimeStore';");
     expect(source).not.toContain('$xlnEnvironment');
     expect(source).not.toContain('unsubActiveRuntimeEnv');
-    expect(source).not.toContain('localIsLive.set(true);\n        localTimeIndex.set(-1);\n        registerEnvChanges(nextEnv);');
+    expect(source).not.toContain(
+      'localIsLive.set(true);\n        localTimeIndex.set(-1);\n        registerEnvChanges(nextEnv);',
+    );
   });
 
   test('demo actions block historical frames and retired graph actions stay absent', () => {
@@ -382,7 +397,9 @@ describe('frontend time-machine current env contract', () => {
     const dock = read('frontend/src/lib/view/DockRoot.svelte');
 
     expect(architect).toContain('function publishCurrentEnv');
-    expect(architect).toContain('$: isLiveActionFrame = Boolean($runtimeFrameIsLive) && $runtimeFrameTimeIndex === -1;');
+    expect(architect).toContain(
+      '$: isLiveActionFrame = Boolean($runtimeFrameIsLive) && $runtimeFrameTimeIndex === -1;',
+    );
     expect(architect).toContain('function requireLiveMode');
     expect(architect).toContain('Switch to the current runtime state before acting.');
     expect(architect).toContain('await ingressRuntimeInput');
@@ -406,9 +423,9 @@ describe('frontend time-machine current env contract', () => {
 
     expect(architect).toContain('function clearDemoRuntimeState');
     expect(architect).toContain('$runtimeFrameEnv.state.eReplicas.clear()');
-    expect(architect).toContain("publishCurrentEnv([])");
-    expect(architect).toContain("Demo reset complete - ready for new topology");
-    expect(architect).not.toContain("Existing economy cleared before topology rebuild");
+    expect(architect).toContain('publishCurrentEnv([])');
+    expect(architect).toContain('Demo reset complete - ready for new topology');
+    expect(architect).not.toContain('Existing economy cleared before topology rebuild');
     expect(architect).not.toContain('Reset not implemented');
     expect(architect).not.toContain('reload page to reset');
     expect(architect).not.toContain('reload page for now');

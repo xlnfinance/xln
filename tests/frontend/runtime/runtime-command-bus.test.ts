@@ -71,7 +71,9 @@ test('browser E2E mutations use the live runtime command bus instead of a detach
   expect(storeSource).toContain('ACTIVE_RUNTIME_HALTED:${xln.safeStringify(fatalPayload())}');
   expect(embeddedSource).toContain("registerDebugSurface('jurisdictionConnectivity'");
   expect(embeddedSource).toContain('hasConnectedJurisdictionAdapter(localRuntimeEnv, name)');
-  expect(enqueueSource).toContain('runtimeIngress.submit(input)');
+  expect(enqueueSource).toContain('getEnv: () => env');
+  expect(enqueueSource).toContain('validateRuntimeInputAdmission: xln.validateRuntimeInputAdmission');
+  expect(enqueueSource).toContain('await owner.send(input)');
   expect(enqueueSource).not.toContain('isolatedEnv');
   expect(enqueueSource).not.toContain('await import(');
 });
@@ -718,23 +720,20 @@ test('payment panel submits RuntimeInput through shared command path', () => {
   expect(accountWorkspaceSource).toContain('{submitRuntimeInput}');
 });
 
-test('lending mutations use the signer runtime command path instead of unauthenticated server POSTs', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/payments/LendingPanel.svelte', 'utf8');
-
-  expect(source).toContain('export let submitRuntimeInput');
-  expect(source).toContain('await submitRuntimeInput({');
-  expect(source).toContain("type: 'lendingOffer'");
-  expect(source).toContain("type: 'lendingBorrow'");
-  expect(source).toContain("type: 'lendingRepay'");
-  expect(source).toContain('if (!isLive || !selectedHubEntityId || !normalizedEntityId)');
-  expect(source).toContain('$: lendingStateKey = isLive && selectedHubEntityId');
-  expect(source).toContain('disabled={!isLive || loading}');
-  expect(source).toContain('runtimeHttpOriginFromWsUrl');
-  expect(source).toContain('isRuntimeControllerConfigCurrent(operation.config)');
-  expect(source).toContain("loan.status === 'active'");
-  expect(source).toContain('loan.borrowerEntityId');
-  expect(source).not.toContain("postLending('/api/lending/");
-  expect(source).not.toContain('recordRuntimeIngressReceipt');
+test('lending has one React signer command path and no retired observer mutation panel', () => {
+  expect(existsSync('frontend/src/lib/components/Entity/payments/LendingPanel.svelte')).toBe(false);
+  const screen = readFileSync('ui/src/screens/Lending.tsx', 'utf8');
+  const repay = readFileSync('ui/src/components/LendingRepay.tsx', 'utf8');
+  const commands = readFileSync('ui/src/runtime/financial/lending.ts', 'utf8');
+  expect(screen).toContain('await sendEntityTxs(wallet.entityId, wallet.signerId, [tx])');
+  expect(repay).toContain('await sendEntityTxs(wallet.entityId, wallet.signerId, [buildLendingRepayTx(');
+  for (const kind of ['lendingOffer', 'lendingBorrow', 'lendingRepay']) {
+    expect(commands).toContain(`type: '${kind}'`);
+  }
+  expect(screen).not.toContain("postLending('/api/lending/");
+  const guide = readFileSync('frontend/src/lib/tutorial/WalletGuide.svelte', 'utf8');
+  expect(guide).toContain("selected.route === '/ui/lend'");
+  expect(guide).toContain('window.location.assign(selected.route)');
 });
 
 // f85f450e5 deleted the faucet ingress-receipt plumbing end to end: the server

@@ -90,7 +90,7 @@ describe('cold committed Runtime outbox', () => {
       hub.route.setReady(true);
       p2p.setReady(true);
       await p2p.admitSharedProfiles([hub.profile]);
-      p2p.prepareDirectEntityRoutes([hub.profile.entityId]);
+      p2p.prepareEntityRoutes([hub.profile.entityId]);
       await waitFor(() => p2p.canDeliver(hub.runtimeId));
       expect(hub.announcements).toEqual([]);
       const local = await bootstrapHub(env, { name: 'Late owner', seed, signerId: '2' });

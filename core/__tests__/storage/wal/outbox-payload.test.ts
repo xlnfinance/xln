@@ -40,13 +40,8 @@ const output = (tag: string): RoutedEntityInput => ({
 const memoryReader = (rows: ReadonlyArray<Readonly<{ key: Buffer; value: Buffer }>>) => {
   const values = new Map(rows.map(row => [row.key.toString('hex'), row.value]));
   return {
-    get: async (key: Buffer): Promise<Buffer> => {
+    get: async (key: Buffer): Promise<Buffer | undefined> => {
       const value = values.get(key.toString('hex'));
-      if (!value) {
-        const error = new Error('LEVEL_NOT_FOUND') as Error & { code: string };
-        error.code = 'LEVEL_NOT_FOUND';
-        throw error;
-      }
       return value;
     },
     keys: async function* (options?: { gte?: Buffer; lt?: Buffer; reverse?: boolean }) {

@@ -66,19 +66,20 @@ let managedAnvil: ManagedAnvil | null = null;
 let adapter: JAdapter | null = null;
 let rpcProxy: RpcGateProxy | null = null;
 
-const reservePort = async (): Promise<number> => await new Promise((resolve, reject) => {
-  const server = createServer();
-  server.once('error', reject);
-  server.listen(0, '127.0.0.1', () => {
-    const address = server.address();
-    if (!address || typeof address === 'string') {
-      server.close();
-      reject(new Error('J_WATCHER_BACKLOG_PORT_RESERVATION_FAILED'));
-      return;
-    }
-    server.close((error) => error ? reject(error) : resolve(address.port));
+const reservePort = async (): Promise<number> =>
+  await new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close();
+        reject(new Error('J_WATCHER_BACKLOG_PORT_RESERVATION_FAILED'));
+        return;
+      }
+      server.close(error => (error ? reject(error) : resolve(address.port)));
+    });
   });
-});
 
 const waitForRpc = async (managed: ManagedAnvil): Promise<void> => {
   const provider = createXlnJsonRpcProvider(managed.rpcUrl);
@@ -103,15 +104,25 @@ const waitForRpc = async (managed: ManagedAnvil): Promise<void> => {
 const startAnvil = async (): Promise<ManagedAnvil> => {
   const port = await reservePort();
   const tmpRoot = await mkdtemp(join(tmpdir(), 'xln-j-watcher-backlog-'));
-  const child = spawn('anvil', [
-    '--host', '127.0.0.1',
-    '--port', String(port),
-    '--chain-id', String(CHAIN_ID),
-    '--block-gas-limit', '60000000',
-    '--prune-history', '1024',
-    '--silent',
-    '--state', join(tmpRoot, 'state.json'),
-  ], { env: { ...process.env, TMPDIR: tmpRoot } });
+  const child = spawn(
+    'anvil',
+    [
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(port),
+      '--chain-id',
+      String(CHAIN_ID),
+      '--block-gas-limit',
+      '60000000',
+      '--prune-history',
+      '1024',
+      '--silent',
+      '--state',
+      join(tmpRoot, 'state.json'),
+    ],
+    { env: { ...process.env, TMPDIR: tmpRoot } },
+  );
   const managed: ManagedAnvil = {
     child,
     rpcUrl: `http://127.0.0.1:${port}`,
@@ -120,7 +131,9 @@ const startAnvil = async (): Promise<ManagedAnvil> => {
   };
   // Anvil emits RPC/mining logs even with --silent. An unread stdout pipe
   // fills during the long backlog and blocks the actual mining RPC forever.
-  const captureOutput = (chunk: Buffer): void => { managed.output += chunk.toString(); };
+  const captureOutput = (chunk: Buffer): void => {
+    managed.output += chunk.toString();
+  };
   child.stderr.on('data', captureOutput);
   child.stdout.on('data', captureOutput);
   await waitForRpc(managed);
@@ -136,8 +149,12 @@ const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
   const armGate = (target: 'block-number' | 'headers', status?: 429 | 'missing-header'): RpcGateControl => {
     if (armedGate || releasePromise) throw new Error('J_WATCHER_RPC_GATE_ALREADY_ARMED');
     armedGate = { target, ...(status === undefined ? {} : { status }) };
-    const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
-    releasePromise = new Promise<void>((resolve) => { releaseResolve = resolve; });
+    const entered = new Promise<void>(resolve => {
+      enteredResolve = resolve;
+    });
+    releasePromise = new Promise<void>(resolve => {
+      releaseResolve = resolve;
+    });
     return {
       entered,
       release() {
@@ -158,9 +175,9 @@ const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
       const body = await request.text();
       type RpcCall = { id: number; method?: string; params?: unknown[] };
       const payload = JSON.parse(body) as RpcCall | RpcCall[];
-      const methods = Array.isArray(payload) ? payload.map((entry) => entry.method) : [payload.method];
-      const headerBatch = Array.isArray(payload) && payload.length > 1 &&
-        payload.every((entry) => entry.method === 'eth_getBlockByNumber');
+      const methods = Array.isArray(payload) ? payload.map(entry => entry.method) : [payload.method];
+      const headerBatch =
+        Array.isArray(payload) && payload.length > 1 && payload.every(entry => entry.method === 'eth_getBlockByNumber');
       if (headerBatch) {
         for (const entry of payload) {
           const height = entry.params?.[0];
@@ -178,10 +195,13 @@ const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
         await releasePromise;
         if (gate.status === 429) return new Response('Too Many Requests', { status: 429 });
         if (gate.status === 'missing-header' && Array.isArray(payload)) {
-          return Response.json(payload.map(entry => ({
-            jsonrpc: '2.0', id: entry.id,
-            error: { code: -32000, message: `block not found with number ${entry.params?.[0]}` },
-          })));
+          return Response.json(
+            payload.map(entry => ({
+              jsonrpc: '2.0',
+              id: entry.id,
+              error: { code: -32000, message: `block not found with number ${entry.params?.[0]}` },
+            })),
+          );
         }
       }
       return await fetch(upstreamUrl, {
@@ -194,7 +214,7 @@ const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
   return {
     rpcUrl: `http://127.0.0.1:${server.port}`,
     armBlockNumberGate: () => armGate('block-number'),
-    armHeaderBatchGate: (status) => armGate('headers', status),
+    armHeaderBatchGate: status => armGate('headers', status),
     takeHeaderBlocks: () => headerBlocks.splice(0),
     async close(): Promise<void> {
       await server.stop(true);
@@ -204,12 +224,9 @@ const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
 
 const stopAnvil = async (managed: ManagedAnvil): Promise<void> => {
   if (managed.child.exitCode === null && managed.child.signalCode === null) {
-    const exited = new Promise<void>((resolve) => managed.child.once('exit', () => resolve()));
+    const exited = new Promise<void>(resolve => managed.child.once('exit', () => resolve()));
     managed.child.kill('SIGTERM');
-    const graceful = await Promise.race([
-      exited.then(() => true),
-      Bun.sleep(3_000).then(() => false),
-    ]);
+    const graceful = await Promise.race([exited.then(() => true), Bun.sleep(3_000).then(() => false)]);
     if (!graceful && managed.child.exitCode === null && managed.child.signalCode === null) {
       managed.child.kill('SIGKILL');
       await exited;
@@ -273,9 +290,9 @@ describe('RPC J-watcher backlog drain', () => {
     const registeredEncodedBoard = singleSignerEncodedBoard(signerPrivateKey);
     const registeredBoardHash = hashBoard(registeredEncodedBoard);
     const nextEntityNumber = await adapter.entityProvider.nextNumber();
-    const registerReceipt = await (await adapter.entityProvider.registerNumberedEntitiesBatch([
-      registeredEncodedBoard,
-    ])).wait();
+    const registerReceipt = await (
+      await adapter.entityProvider.registerNumberedEntitiesBatch([registeredEncodedBoard])
+    ).wait();
     if (!registerReceipt || registerReceipt.status !== 1) {
       throw new Error('J_WATCHER_BACKLOG_ENTITY_REGISTRATION_FAILED');
     }
@@ -283,27 +300,29 @@ describe('RPC J-watcher backlog drain', () => {
     const signerAddress = new ethers.Wallet(ethers.hexlify(signerPrivateKey)).address;
     const entityId = generateLazyEntityId([signerAddress], 1n).toLowerCase();
     await commitRuntimeInput(env, {
-      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
-        entityId,
-        signerId: SIGNER_ID,
-        data: {
-          isProposer: true,
-          config: {
-            mode: 'proposer-based',
-            threshold: 1n,
-            validators: [SIGNER_ID],
-            shares: { [SIGNER_ID]: 1n },
-            jurisdiction,
+      runtimeTxs: [
+        createTestEntityImportRuntimeTx(env, {
+          entityId,
+          signerId: SIGNER_ID,
+          data: {
+            isProposer: true,
+            config: {
+              mode: 'proposer-based',
+              threshold: 1n,
+              validators: [SIGNER_ID],
+              shares: { [SIGNER_ID]: 1n },
+              jurisdiction,
+            },
           },
-        },
-      })],
+        }),
+      ],
       entityInputs: [],
     });
 
     const provider = adapter.provider as ethers.JsonRpcProvider;
     await provider.send('anvil_mine', [ethers.toQuantity(BACKLOG_BLOCKS)]);
     const receiptEvents = await adapter.debugFundReserves(entityId, TOKEN_ID, RESERVE_AMOUNT);
-    const reserveEvent = receiptEvents.find((event) => event.name === 'ReserveUpdated');
+    const reserveEvent = receiptEvents.find(event => event.name === 'ReserveUpdated');
     expect(Number(reserveEvent?.blockNumber ?? 0)).toBeGreaterThan(2 * 2048);
 
     const pollWatcher = adapter.pollNow?.bind(adapter);
@@ -317,30 +336,38 @@ describe('RPC J-watcher backlog drain', () => {
         timer = setTimeout(() => resolve({ status: 'timed-out' }), 5_000);
       });
       const result = await Promise.race([
-        gate.entered.then(() => ({ status: 'entered' } as const)),
-        ...(poll ? [poll.then(
-          () => ({ status: 'resolved' } as const),
-          (error: unknown) => ({ status: 'rejected', error } as const),
-        )] : []),
+        gate.entered.then(() => ({ status: 'entered' }) as const),
+        ...(poll
+          ? [
+              poll.then(
+                () => ({ status: 'resolved' }) as const,
+                (error: unknown) => ({ status: 'rejected', error }) as const,
+              ),
+            ]
+          : []),
         deadline,
       ]).finally(() => clearTimeout(timer));
       if (result.status === 'entered') return;
       gate.release();
-      throw new Error(`J_WATCHER_BACKLOG_GATE_NOT_REACHED:${stage}:${safeStringify({
-        poll: result.status,
-        scan: readScanProgress(),
-        isWatching: isWatching(),
-        headerBlocks: takeHeaderBlocks(),
-      })}`, result.status === 'rejected' ? { cause: result.error } : undefined);
+      throw new Error(
+        `J_WATCHER_BACKLOG_GATE_NOT_REACHED:${stage}:${safeStringify({
+          poll: result.status,
+          scan: readScanProgress(),
+          isWatching: isWatching(),
+          headerBlocks: takeHeaderBlocks(),
+        })}`,
+        result.status === 'rejected' ? { cause: result.error } : undefined,
+      );
     };
     const fromBlock = getWatcherStartBlock(env, adapter.addresses.depository, CHAIN_ID);
-    const failureState = () => structuredClone({
-      scan: readScanProgress(),
-      jurisdictionHeight: env.state.jReplicas.get(jurisdictionName)?.blockNumber,
-      finalizedHeight: env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.lastFinalizedJHeight,
-      reserve: env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.reserves.get(TOKEN_ID),
-      mempool: env.runtimeMempool,
-    });
+    const failureState = () =>
+      structuredClone({
+        scan: readScanProgress(),
+        jurisdictionHeight: env.state.jReplicas.get(jurisdictionName)?.blockNumber,
+        finalizedHeight: env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.lastFinalizedJHeight,
+        reserve: env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.reserves.get(TOKEN_ID),
+        mempool: env.runtimeMempool,
+      });
     const beforeFailures = failureState();
     rpcProxy.takeHeaderBlocks();
     const missingHeaderGate = rpcProxy.armHeaderBatchGate('missing-header');
@@ -368,18 +395,18 @@ describe('RPC J-watcher backlog drain', () => {
     }
     expect(failureState()).toEqual(beforeFailures);
     expect(adapter.isWatching()).toBe(true);
-    expect(rpcProxy.takeHeaderBlocks()).toHaveLength(128);
+    // The retry still begins at block 1, which has no preceding anchor.
+    expect(rpcProxy.takeHeaderBlocks()).toHaveLength(127);
 
-    // Both transient failures must shrink the actual poll: 256 -> 128 -> 64.
+    // Both transient failures must shrink the actual poll: 255 -> 127 -> 63.
     // Every successful response is forwarded from Anvil, including the fence.
     await pollWatcher();
     const readHeights = [...new Set(rpcProxy.takeHeaderBlocks())].sort((left, right) => left - right);
     const anchorHeight = Math.max(1, fromBlock - 1);
-    expect(readHeights).toEqual(Array.from(
-      { length: fromBlock + 64 - anchorHeight },
-      (_, index) => anchorHeight + index,
-    ));
-    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 63);
+    expect(readHeights).toEqual(
+      Array.from({ length: fromBlock + 63 - anchorHeight }, (_, index) => anchorHeight + index),
+    );
+    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 62);
 
     const successfulRetryAt = performance.now();
     // Commit the first real observed range so the next poll can advance.
@@ -394,20 +421,21 @@ describe('RPC J-watcher backlog drain', () => {
       retainedPressureGate.release();
     }
     await retainedPressurePoll;
-    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 127);
+    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 125);
 
     // A pressure-limited page below the liveness interval stays ephemeral,
     // but the next authenticated read must advance beyond it, not loop forever.
     rpcProxy.takeHeaderBlocks();
     await pollWatcher();
-    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 191);
+    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 188);
 
     await processJEvents(env);
 
     const replica = env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`);
     expect(replica?.state.reserves.get(TOKEN_ID)).toBe(RESERVE_AMOUNT);
-    expect(Number(env.state.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n))
-      .toBeGreaterThanOrEqual(Number(reserveEvent?.blockNumber ?? 0));
+    expect(Number(env.state.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBeGreaterThanOrEqual(
+      Number(reserveEvent?.blockNumber ?? 0),
+    );
     expect(replica?.state.lastFinalizedJHeight).toBeGreaterThanOrEqual(Number(reserveEvent?.blockNumber ?? 0));
 
     const beforeEmptyTail = await provider.send('evm_snapshot', []);
@@ -472,8 +500,9 @@ describe('RPC J-watcher backlog drain', () => {
     restoreDurableRuntimeSnapshot(restored, buildDurableRuntimeMachineSnapshot(env));
 
     expect(Number(restored.state.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(durableSemanticHeight);
-    expect(restored.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.jHistory?.scannedThroughHeight)
-      .toBe(durableSemanticHeight);
+    expect(restored.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.jHistory?.scannedThroughHeight).toBe(
+      durableSemanticHeight,
+    );
 
     // Only committed history survives recovery. Re-authenticate every missing
     // carried header from the certified anchor; never restore an ephemeral tip.
@@ -498,20 +527,22 @@ describe('RPC J-watcher backlog drain', () => {
     const lateSignerAddress = new ethers.Wallet(ethers.hexlify(lateSignerPrivateKey)).address;
     const lateEntityId = generateLazyEntityId([lateSignerAddress], 1n).toLowerCase();
     await commitRuntimeInput(env, {
-      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
-        entityId: lateEntityId,
-        signerId: LATE_SIGNER_ID,
-        data: {
-          isProposer: true,
-          config: {
-            mode: 'proposer-based',
-            threshold: 1n,
-            validators: [LATE_SIGNER_ID],
-            shares: { [LATE_SIGNER_ID]: 1n },
-            jurisdiction,
+      runtimeTxs: [
+        createTestEntityImportRuntimeTx(env, {
+          entityId: lateEntityId,
+          signerId: LATE_SIGNER_ID,
+          data: {
+            isProposer: true,
+            config: {
+              mode: 'proposer-based',
+              threshold: 1n,
+              validators: [LATE_SIGNER_ID],
+              shares: { [LATE_SIGNER_ID]: 1n },
+              jurisdiction,
+            },
           },
-        },
-      })],
+        }),
+      ],
       entityInputs: [],
     });
 
@@ -521,13 +552,10 @@ describe('RPC J-watcher backlog drain', () => {
     expect(lateReplica?.jHistory?.scannedThroughHeight).toBe(irrelevantLogHeight);
     expect(lateReplica?.state.lastFinalizedJHeight).toBeLessThan(irrelevantLogHeight);
     if (!lateReplica) throw new Error('J_WATCHER_BACKLOG_LATE_REPLICA_MISSING');
-    expect(resolveObserverCertifiedBoardHash(
-      lateReplica.state,
-      getCertifiedBoardNodeStore(env),
-      registeredEntityId,
-    )).toBe(registeredBoardHash.toLowerCase());
-    expect(env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.reserves.get(TOKEN_ID))
-      .toBe(RESERVE_AMOUNT);
+    expect(
+      resolveObserverCertifiedBoardHash(lateReplica.state, getCertifiedBoardNodeStore(env), registeredEntityId),
+    ).toBe(registeredBoardHash.toLowerCase());
+    expect(env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.reserves.get(TOKEN_ID)).toBe(RESERVE_AMOUNT);
 
     await provider.send('anvil_mine', ['0x1']);
     const shutdownGate = rpcProxy.armBlockNumberGate();
@@ -535,7 +563,9 @@ describe('RPC J-watcher backlog drain', () => {
     if (!inFlightPoll) throw new Error('J_WATCHER_BACKLOG_POLL_API_MISSING');
     await waitForGate('shutdown', shutdownGate, inFlightPoll);
     let shutdownComplete = false;
-    const shutdown = adapter.stopWatchingAndWait().then(() => { shutdownComplete = true; });
+    const shutdown = adapter.stopWatchingAndWait().then(() => {
+      shutdownComplete = true;
+    });
     await Bun.sleep(25);
     expect(shutdownComplete).toBe(false);
     shutdownGate.release();
@@ -565,7 +595,9 @@ describe('RPC J-watcher backlog drain', () => {
 
     const cancelledGate = rpcProxy.armBlockNumberGate();
     let requestedWhileCooling = false;
-    void cancelledGate.entered.then(() => { requestedWhileCooling = true; });
+    void cancelledGate.entered.then(() => {
+      requestedWhileCooling = true;
+    });
     const coolingPoll = pollWatcher();
     const joinedCoolingPoll = pollWatcher();
     await Bun.sleep(25);

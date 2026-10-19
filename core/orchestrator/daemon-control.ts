@@ -545,7 +545,7 @@ export class DaemonControlClient {
     decodeP2PControlResponse(await this.post('/api/control/p2p', config));
   }
 
-  async prepareDirectEntityRoutes(entityIds: string[]): Promise<boolean> {
+  async prepareEntityRoutes(entityIds: string[]): Promise<boolean> {
     const open = decodeP2PControlResponse(await this.post('/api/control/p2p', {
       directEntityIds: entityIds,
     }));
@@ -556,7 +556,7 @@ export class DaemonControlClient {
   async waitForDirectEntityRoutes(entityIds: readonly string[], timeoutMs = 15_000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      if (await this.prepareDirectEntityRoutes([...entityIds])) return;
+      if (await this.prepareEntityRoutes([...entityIds])) return;
       await sleep(250);
     }
     throw new Error(`CONTROL_P2P_DIRECT_ROUTES_NOT_OPEN:entities=${entityIds.join(',')}`);

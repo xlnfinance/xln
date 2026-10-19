@@ -52,7 +52,6 @@
 
   type EntityPanelSeed = { entityId: string; entityName: string; signerId: string; action?: EntityOpenAction };
   type DockviewInitParams = { api: { id: string; close?: () => void } };
-  type ActivePanelRef = { id?: string; api?: { id?: string } } | undefined;
   type MountedComponent = ReturnType<typeof mount> | null;
 
   const graphInitSignal = writable<boolean>(embedMode);
@@ -145,12 +144,6 @@
 
   function logDockRootDiagnostic(message: string, details?: unknown): void {
     errorLog.log(message, 'DockRoot', details);
-  }
-
-  function entityOpenMode(): 'replace' | 'new-tab' {
-    return typeof localStorage !== 'undefined' && localStorage.getItem('xln-dock-entity-open-mode') === 'new-tab'
-      ? 'new-tab'
-      : 'replace';
   }
 
   function seedFromViewFrame(
@@ -478,8 +471,8 @@
       }, 100);
     }
 
-    activePanelDisposable = dockview.onDidActivePanelChange((panel: ActivePanelRef) => {
-      const panelId = panel?.id || panel?.api?.id;
+    activePanelDisposable = dockview.onDidActivePanelChange(({ panel }) => {
+      const panelId = panel?.id;
       if (panelId === 'graph3d') graphInitSignal.set(true);
     });
 
@@ -504,16 +497,6 @@
     });
 
     unsubOpenEntity = panelBridge.on('openEntityOperations', ({ entityId, entityName, signerId, action }) => {
-      if (entityOpenMode() === 'replace') {
-        panelBridge.emit('dock:selectEntity', {
-          entityId,
-          entityName,
-          ...(signerId ? { signerId } : {}),
-          ...(action ? { action } : {}),
-        });
-        dockview.getPanel('graph3d')?.api.setActive();
-        return;
-      }
       const panelId = `entity-${entityId}`;
       const existingPanel = dockview.panels.find((p) => p.id === panelId);
 

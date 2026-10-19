@@ -18,26 +18,18 @@ describe('e2e demo user helper', () => {
       'applyJEventsToEnv(',
       'registerSignerKey(env',
       'registerRuntimeFrameCommitCallback(env',
-      'waitForRuntimeProcessingIdle(env',
     ];
 
     for (const pattern of forbidden) expect(source).not.toContain(pattern);
-    expect(source).toContain('__xln?.jurisdictionConnectivity');
-    expect(source).toContain('__xln?.runtimeIngress?.waitForProcessingIdle');
+    expect(source).toContain('const env = debug?.env()');
+    expect(source).toContain('CURRENT_WALLET_RUNTIME_MISSING');
+    expect(source).toContain('api.waitForRuntimeProcessingIdle(env, 1_000)');
   });
 
   test('AHB browser flow reads transport status through the narrow connectivity boundary', () => {
-    const paths = [
-      'tests/e2e/payments/e2e-ahb-payment.spec.ts',
-      'tests/e2e-custody.spec.ts',
-    ];
+    const paths = ['tests/e2e/payments/e2e-ahb-payment.spec.ts', 'tests/e2e-custody.spec.ts'];
     const source = paths.map(path => readFileSync(join(repoRoot, path), 'utf8')).join('\n');
-    const forbidden = [
-      'infrastructure?.p2p',
-      'infrastructure.p2p',
-      'p2p.clients',
-      'p2p.relayUrls',
-    ];
+    const forbidden = ['infrastructure?.p2p', 'infrastructure.p2p', 'p2p.clients', 'p2p.relayUrls'];
 
     for (const pattern of forbidden) expect(source).not.toContain(pattern);
     expect(source).toContain('__xln?.runtimeConnectivity');
@@ -59,20 +51,25 @@ describe('e2e demo user helper', () => {
 
     for (const path of paths) {
       const source = readFileSync(join(repoRoot, path), 'utf8');
+      if (path === 'tests/utils/e2e-connect.ts') {
+        expect(source).toContain('__xln?.env()');
+        expect(source).not.toContain('isolatedEnv');
+        continue;
+      }
       expect(source, `${path} must use a narrow live status or command surface`).not.toContain('.infrastructure');
     }
   });
 
   test('runtime persistence E2E configures the live Runtime through a narrow control', () => {
     const source = readFileSync(join(repoRoot, 'tests/e2e/runtime/e2e-runtime-persistence.spec.ts'), 'utf8');
-    const persistenceStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/bootstrap/embeddedRuntimeStore.ts'), 'utf8');
+    const persistenceStore = readFileSync(join(repoRoot, 'tests/utils/runtime/e2e-persistence-proof.ts'), 'utf8');
     const commandStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
     expect(source).not.toContain('env.runtimeConfig');
-    expect(source).toContain('__xln?.runtimePersistence');
-    expect(source).toContain('setSnapshotPeriodFrames(frames)');
-    expect(source).toContain('await ingress.waitForDrained(5_000)');
+    expect(source).toContain('setCheckpointPeriod(page, 5)');
+    expect(persistenceStore).toContain('await xln.waitForRuntimeWorkDrained(env, 5_000)');
     expect(commandStore).toContain('xln.waitForRuntimeWorkDrained(runtimeEnv, timeoutMs)');
-    expect(persistenceStore).toContain('Number.isSafeInteger(frames)');
+    expect(persistenceStore).toContain('Number.isSafeInteger(period) || period < 1');
+    expect(persistenceStore).toContain('snapshotPeriodFrames: period');
     expect(persistenceStore).not.toContain('snapshotIntervalFrames: frames');
     expect(persistenceStore).not.toContain('readPersistedAccountFrameHistory');
     expect(persistenceStore).not.toContain('readAccountRebalanceFees');
@@ -105,7 +102,7 @@ describe('e2e demo user helper', () => {
     expect(createRuntime).toContain('onboardingLabel: label');
   });
 
-  test('installs runtime page bindings in both future and already-loaded documents', () => {
+  test('navigates through the canonical app redirect to the React wallet', () => {
     const helper = readFileSync(join(repoRoot, 'tests/utils/e2e-demo-users.ts'), 'utf8');
     const gotoStart = helper.indexOf('export async function gotoApp');
     const gotoEnd = helper.indexOf('export async function createRuntime');
@@ -113,11 +110,10 @@ describe('e2e demo user helper', () => {
     expect(gotoEnd).toBeGreaterThan(gotoStart);
 
     const body = helper.slice(gotoStart, gotoEnd);
-    expect(body).toContain('await page.addInitScript(installPageBindings, apiBaseUrl)');
-    expect(body).toContain('await page.evaluate(installPageBindings, apiBaseUrl)');
-    expect(body.indexOf('await page.evaluate(installPageBindings, apiBaseUrl)')).toBeLessThan(
-      body.indexOf('const waitForAppReady'),
-    );
+    expect(body).toContain("current.origin !== origin || !current.pathname.startsWith('/ui/')");
+    expect(body).toContain('await page.goto(`${origin}/app`');
+    expect(body).toContain('await expect(page).toHaveURL');
+    expect(body).not.toContain('installPageBindings');
   });
 
   test('never bypasses visible profile onboarding through browser storage', () => {
@@ -150,38 +146,20 @@ describe('e2e demo user helper', () => {
     expect(waitForProfileEnd).toBeGreaterThan(waitForProfileStart);
 
     const body = helper.slice(waitForProfileStart, waitForProfileEnd);
-    expect(body).toContain('lastHubProfileState');
-    expect(body).toContain('connectedBefore');
-    expect(body).toContain('connectivity.connect()');
-    expect(body).toContain('connectivity.reconnect()');
-    expect(body).toContain('const ensureResult = await connectivity.ensureProfiles?.([target])');
-    expect(body.indexOf('connectivity.connect()')).toBeLessThan(body.indexOf('connectivity.ensureProfiles'));
+    expect(body).toContain('env.gossip.getProfile(hubId.toLowerCase())?.runtimeId');
+    expect(body).toContain('CURRENT_WALLET_RUNTIME_MISSING');
+    expect(helper).toContain('await waitForHubRuntimeProfile(page, hubId, timeoutMs)');
+    expect(helper).toContain('await xln.ensureGossipProfiles(env, targets)');
+    expect(helper).toContain('env.gossip.getProfiles()');
     expect(body).not.toContain('isolatedEnv.infrastructure');
   });
 
-  test('uses public readiness checks for prod UI-only hub connect', () => {
-    const helper = readFileSync(join(repoRoot, 'tests/utils/e2e-connect.ts'), 'utf8');
-    const connectStart = helper.indexOf('async function connectHubThroughUi');
-    const connectEnd = helper.indexOf('async function waitForRenderedCommittedAccountCard');
-    expect(connectStart).toBeGreaterThanOrEqual(0);
-    expect(connectEnd).toBeGreaterThan(connectStart);
-
-    const connectBody = helper.slice(connectStart, connectEnd);
-    expect(connectBody.indexOf('if (await hasRenderedCommittedAccountCard(page, hubId)) return;')).toBeLessThan(
-      connectBody.indexOf('if (await hasExportedRuntimeP2P(page))'),
-    );
-    expect(connectBody).toContain('if (await hasExportedRuntimeP2P(page))');
-    expect(connectBody).toContain('waitForHubRuntimeTransportReady(page, hubId)');
-    expect(connectBody).toContain('waitForPublicHubRuntimeProfile(page, hubId)');
-    expect(connectBody.indexOf('waitForPublicHubRuntimeProfile(page, hubId)')).toBeLessThan(
-      connectBody.indexOf('hub-connect-button'),
-    );
-
-    const full = helper;
-    expect(full).toContain("new URL('/api/gossip/profile', origin)");
-    expect(full).toContain('async function hasExportedRuntimeP2P');
-    expect(full).toContain('export async function waitForReceiveReadyGossipProfiles');
-    expect(full).toContain('ensureProfiles?.(targets)');
-    expect(full).toContain('isolatedEnv?.gossip?.getProfiles');
+  test('production Account opening is verified through public wallet controls', () => {
+    const source = readFileSync(join(repoRoot, 'ui/tests/e2e-production-wallet.spec.ts'), 'utf8');
+    expect(source).toContain("from './wallet-ui'");
+    expect(source).toContain("'__xln' in window");
+    expect(source).toContain("getByTestId('open-account-submit')");
+    expect(source).toContain("getByTestId('account-frame-row')");
+    expect(source).not.toContain('__xln.env');
   });
 });

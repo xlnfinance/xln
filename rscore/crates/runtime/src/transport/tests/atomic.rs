@@ -45,7 +45,7 @@ fn adjacent_frame_close_legs_match_ts_atomic_group() {
     assert_eq!(prepared.envelopes[1].source_height, 99);
     assert_eq!(prepared.envelopes[1].source_timestamp, 1791403934999);
     assert_eq!(prepared.envelopes.len(), 2);
-    let expected = [2_usize, 1].map(|index| {
+    let expected = [1_usize, 2].map(|index| {
         let mut value = values[index].clone();
         value.as_object_mut().unwrap().remove("sourceRuntimeFrame");
         value
@@ -69,7 +69,6 @@ fn adjacent_frame_close_legs_match_ts_atomic_group() {
             .unwrap();
         let expected = order
             .iter()
-            .rev()
             .filter(|index| **index != 0)
             .map(|index| {
                 let mut value = values[*index].clone();
@@ -283,7 +282,7 @@ fn route_bound_atomic_wal_rows_roundtrip_into_positional_runtime_inputs() {
         .iter()
         .find(|envelope| envelope.value.get("atomicCrossJurisdictionPair").is_some())
         .expect("one atomic envelope");
-    let expected = [2, 1].map(|index| crate::decode_storage_payload(&rows[index]).unwrap());
+    let expected = [1, 2].map(|index| crate::decode_storage_payload(&rows[index]).unwrap());
     let decoded = decode_envelope(
         &encode_transport(&envelope.value).unwrap(),
         source,
@@ -596,14 +595,15 @@ fn r7_h44_cross_pull_lock_wal_infers_the_exact_ts_atomic_envelope() {
         envelope.value["atomicCrossJurisdictionPair"],
         capsule["expectedAtomicPair"]
     );
-    assert_eq!(
-        envelope.value["entityInputs"][0]["entityId"],
-        "0x0dc3485c83264b018428dde101e179be75eacfe63be6fa67c0cbc0f0f1808181"
-    );
-    assert_eq!(
-        envelope.value["entityInputs"][1]["entityId"],
-        "0x840a5830e1c4d436277d9a797d646476516f66cf3f83893989fe05fd64c4587e"
-    );
+    let expected = original
+        .iter()
+        .map(|row| {
+            let mut input = row.clone();
+            input.as_object_mut().unwrap().remove("sourceRuntimeFrame");
+            input
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(envelope.value["entityInputs"], json!(expected));
     assert!(
         prepare_envelopes(
             capsule["sourceRuntimeId"].as_str().unwrap(),

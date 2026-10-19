@@ -1,6 +1,6 @@
 /**
  * Deploy full XLN contract stack
- * Usage: bunx --bun hardhat run scripts/deploy-stack.cjs --network localhost
+ * Usage: bunx hardhat run scripts/deploy-stack.cjs --network localhost
  */
 
 const { mkdirSync, writeFileSync } = require('node:fs');

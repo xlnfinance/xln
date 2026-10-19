@@ -58,7 +58,9 @@ describe('release gate ordering', () => {
         'e2e-payment.spec.ts,e2e-lending-availability.spec.ts,e2e-reserve-funding.spec.ts',
         'e2e-dispute-finality.spec.ts',
         'e2e-dispute-protection.spec.ts',
-        'e2e-tower-restore.spec.ts,e2e-file-restore.spec.ts,e2e-sovereignty.spec.ts',
+        'e2e-file-restore.spec.ts',
+        'e2e-tower-restore.spec.ts,e2e-sovereignty.spec.ts',
+        'e2e-lending.spec.ts,lending/e2e-bank-policy.spec.ts,lending/e2e-demand.spec.ts,lending/e2e-principal.spec.ts,lending/e2e-unfunded.spec.ts',
         'e2e-demo-sync.spec.ts,e2e-tutorial-company.spec.ts',
       ]);
       for (const command of browserCommands) {
@@ -99,7 +101,7 @@ describe('release gate ordering', () => {
   });
 
   for (const profile of ['quick', 'ci', 'release']) {
-    test(`${profile} gates deferred admission and preserves dispute/recovery coverage`, () => {
+    test(`${profile} gates current lending admission and preserves dispute/recovery coverage`, () => {
       const result = Bun.spawnSync({
         cmd: ['bun', 'core/scripts/release/run-release-gate.ts', `--profile=${profile}`, '--plan'],
         cwd: process.cwd(),
@@ -116,13 +118,19 @@ describe('release gate ordering', () => {
       // Bun treats explicit paths as filters and silently ignores a deleted
       // test when another filter matches. A green partial run is not coverage.
       expect(paths.filter(path => !existsSync(path))).toEqual([]);
-      // Rust's frozen shared vectors use the previous proof ABI. They remain
-      // separately runnable, but cannot certify or block the TS launch engine.
+      // This runtime-core family executes TS. Required Rust production and
+      // semantic gates have their own owner and must be evidenced separately.
       expect(paths.some(path => path.startsWith('core/__tests__/rscore/'))).toBe(false);
       expect(paths).toContain('core/__tests__/security/dispute/proof-builder.test.ts');
-      expect(paths.some(path => path.includes('/lending'))).toBe(false);
       for (const required of [
         'core/__tests__/proofs/fx-admission.test.ts',
+        'core/__tests__/runtime/ingress/recovery/lending-production-admission.test.ts',
+        'core/__tests__/finance/lending/rejected-draw.test.ts',
+        'core/__tests__/finance/lending/stale-repayment.test.ts',
+        'core/__tests__/finance/lending/loan-covenant.test.ts',
+        'core/__tests__/finance/state/lending.test.ts',
+        'core/__tests__/finance/state/lending-funding.test.ts',
+        'core/__tests__/storage/durability/lending-real-crash-recovery.test.ts',
         'core/__tests__/security/dispute/proof-builder.test.ts',
         'core/__tests__/storage/recovery/portable/local-commit-outbox-replay.test.ts',
       ])

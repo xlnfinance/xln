@@ -2,6 +2,115 @@
 
 CURRENT — owner mainnet-readiness goal, 2026-10-17.
 
+- CURRENT reflection (2026-10-18 23:44 UTC): main c14cabfba; all inherited
+  dirty source retained. Snapshot27 preserved206paths with exact SHA256 hashes.
+  RPC-close resume L1 passed4/4,12assertions,2.586s. Actual direct-credit React
+  E2E passed1/1,zero skips,117.219s; all206source hashes still matched. It retains
+  exact50USDC credit,20USDC payment,zero fee,both signed balances,empty queues
+  and reload. Previous snapshot26 full check passed38source+3top, then release
+  passed16/34steps(47.1%) and failed swap oracle frame48 after1558.607s:
+  eventBarrier versus submitted/txHash in lastResultFingerprint. This is NOT
+  resolved. Two isolated swap diagnostics each reproduced76identical frames
+  across2runs(25.623s and25.241s). A predecessor-sequence run hit60s(exit124)
+  during its second swap; no success claim, owned processes gone and stand free.
+  Method change: stop repeating isolated greens; preserve complete both-side
+  state/trace dumps and actual submit failure metadata at the first divergence,
+  then run the required whole check/release with the existing2h budget.
+  Financial fingerprint/root/output comparisons remain exact. No protocol or
+  receipt classification change is justified by the isolated greens.
+  Next single command: focused diagnostics/type guards, then unchanged-candidate
+  bun run check && bun run gate:release under one stand. Implementation time
+  UNKNOWN; measured checks above. Mainnet readiness UNKNOWN. Remaining native/
+  public four-flow/current-deployment, Rust financial, reader counterexamples,
+  uninterrupted1hsoak, dedicated-wallet estimates and verified publication bind.
+  No mainnet writes, paid calls, Goal reset or scheduler claim. Next00:14UTC.
+
+- Previous reflection (2026-10-18 03:36 UTC): main/origin c14cabfba; source remains
+  uncommitted. Dependency manifest installs6/6 and global JS CLI upgrades3/3; native
+  TS7 plus JS Compiler API6 remains an explicit upstream constraint. Lending admission
+  TS28/28(129 assertions), Rust12/12, strict money decoder14/14(37 assertions), and
+  selected real SIGKILL loan/current-WAL lifecycle1/1(21 assertions) passed. Current
+  React full3 completed387.533s:11/80 passed,1failed,68notrun. Corrected crypto test
+  observes the real wallet runtime asset instead of assuming /ui: exact window/Worker
+  signatures pass13.6s; compile-only custom tooling also passes. First current browser
+  failure: direct-credit waits20s for a non-hub peer profile before requesting that peer.
+  Inspect canonical profile discovery and prove the pasted-ID UI boundary next; preserve
+  exact50USDC credit,20USDC transfer,zero fee and recovery assertions. Fullcheck remains
+  timeout124 at60s(62.265s with cleanup); same contract suite at4threads also times out
+ 60.158s, so concurrency hypothesis is not supported and gate settings stay unchanged.
+  Full2 exposed MM_REPLICA_NOT_READY atheight1, then no-progress failure133.163s;
+  full3 bootstrap passed with diagnostic-only instrumentation, not a claimed fix.
+  Implementation duration UNKNOWN. Method correction: use one full direct-credit flow
+  on the actual isolated stand, rather than repeating11 already-green tests before its
+  next boundary. No skip, assertion reduction, compatibility reader or new budget.
+  Next single command: targeted real direct-credit E2E with pasted-ID/profile evidence.
+  Remaining: fullcheck, complete root/React/special-stand financial coverage, native
+  EVM/TRON lending/exits/public-chain proofs,1hsoak, verified clean-SHA commit/push.
+  Overall readiness UNKNOWN. Heartbeat remains genuinely paused/tool-blocked; report
+  in this active thread again04:06UTC. Four-block method review due next reflection.
+
+- Previous reflection (2026-10-18 03:06 UTC): main/origin c14cabfba, owned dependency
+  and lending candidate uncommitted. Manifest sets6/6 installed, used global JS CLIs3/3;
+  native TS7.0.2 plus required JS Compiler API6.0.3 is an explicit upstream constraint.
+  Real missing-addon regressions exposed elliptic signing in both direct and worker
+  server loaders; both now require the native binding. Crypto8/8,1432assertions6.820s.
+  Runtime/Account-worker build0.691s. Current fullcheck twice timed out60s without a new
+  assertion failure; isolated contract suite also timed out60.180s. Exact groups exited.
+  Same gas test passes with identical79479883gas in default/tier/GUI contexts; changing
+  launch context did not explain the slowdown, so stop that hypothesis. No limits weakened.
+  Current browser gateway readiness timed out37.022s; old9/9 is pre-final-lock evidence.
+  Actual lending crash scenario first failed8.906s at ENTITY_TX_KIND_OUT_OF_PROFILE:
+  lendingSetTerms. Retired TS/Rust lending gates and React unavailability; exact same
+  SIGKILL/queued-withdrawal/outbox scenario now1/1,21assertions53.015s. Focused admission
+  is26/28: preserve signed-command atomicity/nonce while checking current invalid requests.
+  A missing hub Account was an untyped exception; it now has the canonical typed reject.
+  Implementation duration UNKNOWN. Method: use actual production failure and smallest
+  regression; this closed admission, while launcher-context experimentation did not help.
+  Next single command: finish current admission regression, then focused Rust admission.
+  Remaining: unchanged-candidate fullcheck; current browser/native/public-chain four-flow
+  financial evidence, full root/UI E2E, strict money/fee/hold/reject proofs,1hsoak, verified
+  commits/push. Mainnet readiness UNKNOWN. Heartbeat remains paused; next in-thread report
+  and reflection03:36UTC. No new external-model calls or budget reservations.
+
+- Previous reflection (2026-10-18 02:36 UTC): main/origin remain c14cabfba; owned dependency
+  candidate is uncommitted. Six changed manifest sets installed (6/6), three used global JS
+  CLIs verified (3/3) without daemon/auth changes. Native compiler is7.0.2; required JS API
+  remains6.0.3 because TS7 omits it and current SvelteKit/typescript-eslint require6.
+  Noble3 raw-digest vectors4/4 passed; Level10 absence semantics now use undefined, with
+  referenced-row corruption loud and obsolete not-found error readers removed. Storage48/48,
+  216assertions1.629s; real cold reopen0.312s; four compiler-API gates4/4 3.661s. Full check
+  passed38source+3top gates26.558s, Solidity invariant tests16/16. Foundry build31.280s.
+  Actual dev gateway8/8 passed with exact new runtime/Account-worker hashes and relay; the
+  appended raw-digest worker test timed out60.061s. After propagating async worker errors,
+  its first exact error was an undeclared Buffer in Runtime activity storage (22.449s).
+  Added the existing platform Buffer import; focused browser rerun is active, not yet green.
+  Implementation duration UNKNOWN. Method change: isolate compilation before fullcheck to
+  avoid repeated sibling cancellation; report worker rejection immediately before another
+  attempt. This produced the fullcheck closure and a concrete browser cause, so retain it.
+  Opus corrected sampled overview completed50.801s; list estimateUSD0.565804, USD1.50 hold
+  and originalUSD2/historical unknown holds retained. Suggestions remain calibrated hypotheses.
+  Next single command: poll current browser crypto handle27966; then real SIGKILL/WAL recovery.
+  Remaining release: current financial four-flow/native/public-chain and full owning browser
+  suites, lending admission/strict money, exact reject/fee/hold proofs, required1hsoak and
+  checked commits/push. No overall readiness percentage. Heartbeat remains paused/tool-blocked;
+  active-thread measured reports continue. Next reflection/report03:06UTC.
+
+- Previous reflection (2026-10-18 02:06 UTC): immutable production c14cabfba and the
+  owned onboarding test diff are preserved. Fresh native TVM/EVM graph, deposit/withdraw,
+  Runtime import, cross-swap/recovery and cross-withdraw/recovery passed 7/7 phases in
+  238.011s under one stand. Public Nile remains red at the obsolete EntityProvider's
+  shareDepository() selector; local current graph succeeds. Both current onboarding cases
+  pass individually (24.049s/23.077s), strict diagnostics 34→0; combined formatted gate
+  remains. Owner expanded launch to four flows on EVM/TRON, full E2E/release up to2h and
+  uninterrupted1hsoak within90min; MacBook sync to c14 is proved and control-only now.
+  Next required slice: preserve dependency/dirty-source bytes, resolve official stable
+  versions, adapt canonical APIs, then re-run all financial/browser evidence. Implementation
+  duration UNKNOWN; measured native phases14.940–81.905s. Method change: replace stale
+  duration/scope blockers with the actual newly authorized production command; the first
+  native artifact now exists without relaxing its financial assertions. Next single command:
+  combined current onboarding browser under the stand, then the first dependency install.
+  Next reflection02:36UTC. Historical entries below describe their original candidates.
+
 - Current artifact (01:33 UTC): f43fb38ee is clean/pushed; midpoint clean browser51.690s and verifier30.149s. The actual gate:mainnet dry-run identifies9 stages. Bounded exact-candidate checks close5/9: source check; money61/61,20769assertions0.716s; local audit pack0.608s; watchtower smoke3.401s; unchanged100k/10k storage gate8.946s (994.34MiB/2GiB RSS,14.209ms read p99 with4samples, cold open14.753ms). Flow coverage contract0.045s passes. These are not an aggregate preflight/mainnet/TPS claim. Public5580becab topology is healthy and production-equivalent, but not relabeled as candidateHEAD. Evidence: docs/evidence/mainnet-bounded-preflight-20261018/. Remaining actual boundaries: aggregate release/fullbrowser durations, exact final-candidate topology, uninterrupted1hsoak, public signed-RPC403/funding and MacBook connectivity. Next single command: fullcheck/clean verifier for this durable operator evidence, then finalize exact candidate topology using the existing preservation/recovery deployment procedure; no new production change is justified. Reflection01:57UTC; MacBook probe02:02UTC.
 
 - 30-minute reflection (01:27 UTC): published5580becab fixes the public discovery race (actual delayed API unlock30.904s, gateway8/8 29.800s); published89c9f965b proves real relay admission/recovery. Current midpoint limit browser passed40.326s, then39.033s after deleting29 unreachable Svelte helpers; related reload38.060s, L1 5/5/25assertions0.199s, types34→0 in8.856s. Exact12.5USDC hold survives reload and fully releases on cancellation without a worse fill. Root swap suite retains18 tests/17 unchanged original bodies,285lines. Implementation duration UNKNOWN. Method result: replace an obsolete UI expectation with the existing signed-price invariant, then delete only proven unreachable helpers; this produced a real money/recovery artifact and eliminated34 type errors without another production path. Keep this method. First remaining failure: aggregate release previously timed out60.038s during real-clock tower tests; separate component passes are not aggregate success. Next single command: final bun run check, clean committed midpoint browser/verifier/publication, then the current executable mainnet-preflight dry-run on that immutable candidate to select the first still-unproved independent boundary. No duration exception assumed, no shortened soak. Next reflection01:57UTC; MacBook read-only retry02:02UTC.

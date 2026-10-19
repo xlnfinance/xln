@@ -7,7 +7,7 @@ results with metrics.
 Mission: fintech-grade deterministic xln. J/E/A correctness before features. Pure
 transitions, one canonical production path, no silent fallback.
 
-## RELEASE SCOPE (owner decision 2026-10-11)
+## RELEASE SCOPE (owner decision 2026-10-18)
 
 This scope prevails over older plans in `docs/` and over the history in `todo.md`.
 
@@ -17,21 +17,19 @@ This scope prevails over older plans in `docs/` and over the history in `todo.md
 - Owner 2026-10-12 park of unfinished Rust is withdrawn. Commit the tree; do not stash it.
 - Wallet: React `ui/` is the only wallet. Svelte `frontend/` is frozen: no new wallet
   features; only landing/static copy and build health change there.
-- First jurisdiction: Ethereum same-J (Sepolia, then a mainnet canary).
+- Required launch flows: Pay, same-J Swap, Cross-swap and Lending on EVM and native
+  TRON. Demonstrate fast browserless financial scenarios and all owning browser E2E;
+  two EVM simulators do not establish TVM support. Testnet evidence is not real-funds
+  activation authority.
 - Owner update 2026-10-11: the agent may create a dedicated Sepolia signer, obtain test
   ETH and deploy the current contracts without another signing question. Mainnet is
   open to all participants using their own funds; do not add invite gates or arbitrary
   protocol monetary caps. Financial correctness and recovery gates remain mandatory.
-- Lending is deferred from the production admission profile. Restore typed
-  admission rejection and the corresponding wallet availability; do not extend
-  or repair the lending implementation. Existing signed claims remain evidence
-  for contract exit; only collateral secures recovery.
-- Owner 2026-10-15 reopens companies/shares/control for an experimental local
-  Arrakis demo using the existing EntityProvider, Paybook and swapbook. This is
-  not approval to admit companies/IPO in the mainnet release. Spice is a test
-  asset, not a renamed stablecoin or a claim of dollar backing.
-- Deferred for mainnet: TRON, XLNC, Base, cross-J as a headline, companies/IPO,
-  iOS/Electron/extension and custody.
+- Reopen the existing signed bank/facility/term-loan/savings product through canonical
+  production admission and React. Preserve exact money, authority, deadlines and current
+  recovery. Do not invent oracle liquidation, insurance or cross-J fungible collateral.
+- Arrakis remains cancelled. Companies/IPO, XLNC, Base, iOS/Electron/extension and custody
+  remain outside this launch unless the owner explicitly changes their scope.
 - MML counts only obligations between unaffiliated Entities. A payment routed through a hub
   counts once, on the commercial edge; hub hops and affiliated transfers never count.
 - Metrics: XLN-1000 ([docs/xln1000.md](docs/xln1000.md), `bun run xln1000`) steers task selection
@@ -140,6 +138,10 @@ Do not duplicate or weaken it.
 
 ## ONE CANONICAL PRODUCTION PATH
 
+- Owner 2026-10-18: authenticated relay is the canonical user-to-user financial
+  transport when users have no direct hub endpoint. It is not a fallback. Keep
+  sender/destination signatures, session authentication, replay protection and
+  committed WAL/outbox ordering; do not reinstate a blanket financial relay ban.
 - No legacy behavior, compatibility aliases, fallback readers/writers, duplicate financial
   formulas, `v2`/`v3` branches or parallel implementations.
 - Replace the canonical path atomically and delete the retired one. Obsolete persisted data needs
@@ -193,6 +195,26 @@ Do not duplicate or weaken it.
 - Never push without the relevant L1/L2 evidence and `bun run check`.
 - Auditors may use a read-only checkout pinned to an immutable SHA.
 
+## STUDIO EXECUTION AND DEPENDENCIES (owner decision 2026-10-18)
+
+- All implementation, builds, tests and agents run on Mac Studio. MacBook is control,
+  transfer and exact-SHA proof retrieval only; do not run project verification there.
+- The sole integrator owns active npm/workspace manifests, lockfiles and used JS CLI
+  updates to current official stable releases, including necessary major API changes.
+  Preserve exact pre-update source/locks; reconcile patches and overrides with upstream.
+  Regenerate ABI/bytecode/TypeChain when required and record explicit before/after hashes.
+  Unsupported TVM/compiler combinations are named constraints, never hidden old pins.
+  Re-run financial/recovery scenarios and complete browser gates on the new candidate;
+  pre-update evidence cannot certify it. Frozen-core rules still apply.
+- The coordinator owns OpenCode maintenance; do not run a competing update or replace
+  credentials/settings. Preserve existing native CLI provenance and authentication routes.
+- Owner-authorized reviewers use bounded `claude -p --model claude-opus-5-5` on Studio,
+  disjoint immutable Pay, same-J Swap, native Cross-J and Lending packets, read-only with
+  no source tools. Start after a stable diff; do not block the first financial artifact.
+  Record actual model, result and cost/unknown cost. The sole integrator is the single
+  existing Quorum reservation owner: retain historical unresolved holds, reserve before
+  dispatch under the shared USD 10 rolling hour, and never substitute models or accounts.
+
 ## ONE MACHINE, ONE HEAVY STAND
 
 - Check `bun run stand:status` before every HLT, benchmark, recorder, replay or heavy E2E.
@@ -213,7 +235,9 @@ Use the smallest failing boundary first:
 - Default process wall budget is 30 seconds; the owner permits up to 60 seconds for ordinary
   verification while reducing the feedback cycle (2026-09-05). Preserve semantic assertions. The
   owner-approved exception is 180 seconds for the canonical HLT recorder, exact replay and live
-  economic stand under the machine lock.
+  economic stand and Solidity generation under the machine lock. Owner 2026-10-18
+  permits complete E2E/release runs up to 2 hours each and an uninterrupted 1-hour soak
+  within a 90-minute process budget. These exceptions do not extend ordinary checks.
 - A live process must be polled by its existing handle; do not restart merely because observation
   timed out. Report progress while it runs.
 - Show command output/counts. A build, codec/catalog equality or smoke is not semantic parity.
@@ -225,7 +249,8 @@ Use the smallest failing boundary first:
   TS W4 and compare every R/E/A root and ordered event/effect/outbox digest per frame.
 - Fix only the first divergent frame, add its named regression vector, and repeat until exact.
 - Transaction-kind completeness is a final audit named per concrete `AccountTx`/`EntityTx`,
-  never meaningless A/B/C groups. Rust W1/W4 replay, live Rust J and Rust builds are frozen.
+  never meaningless A/B/C groups. Rust is editable under the current release scope;
+  compilation or replay alone never establishes live financial parity.
 
 ## TPS AND PERFORMANCE
 
@@ -270,7 +295,7 @@ surface or fuse stages 2 and 3.
 
 ## DEBUGGING AND COMMUNICATION
 
-- Respond in the owner's language (Russian); source code, comments and docs stay English. MAX ADHD
+- Respond in Russian and use masculine self-reference; source code, comments and docs stay English. MAX ADHD
   readability: lead with the result (reasoning only when asked why/how or for discussion); compact
   ASCII sections, 3–5 bullets maximum per section, concrete numbers first, end with
   `NEXT: A) B) C)`. Remove filler, repeated context and invented certainty.
@@ -286,6 +311,14 @@ surface or fuse stages 2 and 3.
   Unresolved calls retain their full reserved maximum; old overnight grants and unresolved costs
   remain in the historical ledger. A new hour, agent or restart never independently renews the
   same allocation.
+- Owner update 2026-10-18: every 30 minutes during active sustained work, post a concise
+  owner-visible Russian report with masculine self-reference, task names, measured
+  completed/total/percent for each named stage, actual closures, exact main SHA and check
+  result, first remaining failure, next single command, and a concrete method reflection.
+  Report even when stalled; overall mainnet readiness remains unmeasured until all required
+  gates pass. Scheduling runs only on Studio via a verified native heartbeat; never claim an
+  unavailable/paused scheduler is active or replace it with handwritten automation files/cron.
+  The active native Goal continues reporting in-thread while heartbeat setup is blocked.
 - During authorized sustained work, review the plan and working method every 30 minutes.
   Repeated failure without new evidence requires a changed hypothesis or approach.
 - For consensus, dump and diff both sides at the first divergent frame. Use

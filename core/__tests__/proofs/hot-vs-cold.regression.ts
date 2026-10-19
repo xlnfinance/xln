@@ -31,7 +31,14 @@ export type HarnessTxSpec =
   /** Cross-j pull lock → `pulls.put` (route+binding built by production builders). */
   | { kind: 'cross_pull_lock'; orderId: number; tokenId: number; amount: bigint }
   /** Fee-policy publication → `rebalanceFeePolicies.put` (per side, per token). */
-  | { kind: 'rebalance_policy'; tokenId: number; policyVersion: number; baseFee: bigint; liquidityFeeBps: bigint; gasFee: bigint }
+  | {
+      kind: 'rebalance_policy';
+      tokenId: number;
+      policyVersion: number;
+      baseFee: bigint;
+      liquidityFeeBps: bigint;
+      gasFee: bigint;
+    }
   /** Collateral request → `requestedRebalance.put` + `requestedRebalanceFeeState.put`. */
   | { kind: 'request_collateral'; tokenId: number; amount: bigint; feeAmount: bigint }
   /** REMOVE op: full bilateral refund → `requestedRebalance.del` +
@@ -61,10 +68,14 @@ export const REGRESSION_SEQUENCES: readonly RegressionSequence[] = [
   {
     name: 'r1-happy-round-trip-both-directions',
     ops: [
-      { kind: 'admit', side: 'alpha', txs: [
-        { kind: 'payment', tokenId: 1, amount: 100n },
-        { kind: 'credit', tokenId: 2, amount: 500n },
-      ] },
+      {
+        kind: 'admit',
+        side: 'alpha',
+        txs: [
+          { kind: 'payment', tokenId: 1, amount: 100n },
+          { kind: 'credit', tokenId: 2, amount: 500n },
+        ],
+      },
       { kind: 'propose', side: 'alpha' },
       { kind: 'deliver', side: 'alpha' },
       { kind: 'ack', side: 'beta' },
@@ -130,13 +141,13 @@ export const REGRESSION_SEQUENCES: readonly RegressionSequence[] = [
     name: 'r5-htlc-lock-then-resolve-secret-and-error-delete-path',
     ops: [
       // lock 1 (alpha is payer) and lock 2 (beta is payer), both delivery modes.
-      { kind: 'admit', side: 'alpha', txs: [
-        { kind: 'htlc_lock', lockId: 1, tokenId: 1, amount: 300n, mode: 'instant' },
-      ] },
+      {
+        kind: 'admit',
+        side: 'alpha',
+        txs: [{ kind: 'htlc_lock', lockId: 1, tokenId: 1, amount: 300n, mode: 'instant' }],
+      },
       ...roundTrip('alpha'),
-      { kind: 'admit', side: 'beta', txs: [
-        { kind: 'htlc_lock', lockId: 2, tokenId: 2, amount: 400n, mode: 'async' },
-      ] },
+      { kind: 'admit', side: 'beta', txs: [{ kind: 'htlc_lock', lockId: 2, tokenId: 2, amount: 400n, mode: 'async' }] },
       ...roundTrip('beta'),
       // secret resolve: payer (alpha) reveals; lock 1 leaves `locks`.
       { kind: 'admit', side: 'alpha', txs: [{ kind: 'htlc_resolve', lockId: 1, outcome: 'secret' }] },
@@ -151,15 +162,21 @@ export const REGRESSION_SEQUENCES: readonly RegressionSequence[] = [
   {
     name: 'r6-swap-offer-then-counterparty-cancel-delete-path',
     ops: [
-      { kind: 'admit', side: 'alpha', txs: [
-        { kind: 'swap_offer', offerId: 1, giveTokenId: 1, wantTokenId: 2, amount: 100n },
-      ] },
+      {
+        kind: 'admit',
+        side: 'alpha',
+        txs: [{ kind: 'swap_offer', offerId: 1, giveTokenId: 1, wantTokenId: 2, amount: 100n }],
+      },
       ...roundTrip('alpha'),
       // second offer by beta on a different market, plus a payment in parallel.
-      { kind: 'admit', side: 'beta', txs: [
-        { kind: 'swap_offer', offerId: 2, giveTokenId: 3, wantTokenId: 4, amount: 200n },
-        { kind: 'payment', tokenId: 1, amount: 3n },
-      ] },
+      {
+        kind: 'admit',
+        side: 'beta',
+        txs: [
+          { kind: 'swap_offer', offerId: 2, giveTokenId: 3, wantTokenId: 4, amount: 200n },
+          { kind: 'payment', tokenId: 1, amount: 3n },
+        ],
+      },
       ...roundTrip('beta'),
       // cancel offer 1: only alpha's counterparty (beta) may resolve.
       { kind: 'admit', side: 'beta', txs: [{ kind: 'swap_cancel', offerId: 1 }] },
@@ -172,26 +189,38 @@ export const REGRESSION_SEQUENCES: readonly RegressionSequence[] = [
     name: 'r7-rebalance-policy-request-refund-and-finality-clear',
     ops: [
       // both sides publish fee policies for token 1
-      { kind: 'admit', side: 'alpha', txs: [
-        { kind: 'rebalance_policy', tokenId: 1, policyVersion: 1, baseFee: 2n, liquidityFeeBps: 10n, gasFee: 1n },
-      ] },
+      {
+        kind: 'admit',
+        side: 'alpha',
+        txs: [
+          { kind: 'rebalance_policy', tokenId: 1, policyVersion: 1, baseFee: 2n, liquidityFeeBps: 10n, gasFee: 1n },
+        ],
+      },
       ...roundTrip('alpha'),
-      { kind: 'admit', side: 'beta', txs: [
-        { kind: 'rebalance_policy', tokenId: 1, policyVersion: 1, baseFee: 3n, liquidityFeeBps: 20n, gasFee: 2n },
-      ] },
+      {
+        kind: 'admit',
+        side: 'beta',
+        txs: [
+          { kind: 'rebalance_policy', tokenId: 1, policyVersion: 1, baseFee: 3n, liquidityFeeBps: 20n, gasFee: 2n },
+        ],
+      },
       ...roundTrip('beta'),
       // alpha requests collateral → requestedRebalance/requestedRebalanceFeeState
       // put. Net request is 4 so the height-5 finalize increase (5) fully covers
       // it and the j-finality DEL branch (requestedRebalance/requestedRebalance-
       // FeeState/shadowSubmitted .del) fires.
-      { kind: 'admit', side: 'alpha', txs: [
-        { kind: 'request_collateral', tokenId: 1, amount: 6n, feeAmount: 2n },
-      ] },
+      { kind: 'admit', side: 'alpha', txs: [{ kind: 'request_collateral', tokenId: 1, amount: 9n, feeAmount: 5n }] },
+      ...roundTrip('alpha'),
+      // Alpha publishes the token-2 fee before beta's request; the refund
+      // still exercises deletion of a committed, nonempty request.
+      {
+        kind: 'admit',
+        side: 'alpha',
+        txs: [{ kind: 'rebalance_policy', tokenId: 2, policyVersion: 1, baseFee: 2n, liquidityFeeBps: 0n, gasFee: 0n }],
+      },
       ...roundTrip('alpha'),
       // beta requests on token 2, then alpha fully refunds it → del path
-      { kind: 'admit', side: 'beta', txs: [
-        { kind: 'request_collateral', tokenId: 2, amount: 400n, feeAmount: 2n },
-      ] },
+      { kind: 'admit', side: 'beta', txs: [{ kind: 'request_collateral', tokenId: 2, amount: 400n, feeAmount: 2n }] },
       ...roundTrip('beta'),
       { kind: 'admit', side: 'alpha', txs: [{ kind: 'rebalance_refund', tokenId: 2 }] },
       ...roundTrip('alpha'),
@@ -207,14 +236,16 @@ export const REGRESSION_SEQUENCES: readonly RegressionSequence[] = [
   {
     name: 'r8-cross-j-pull-lock-nonempty-pulls',
     ops: [
-      { kind: 'admit', side: 'alpha', txs: [
-        { kind: 'cross_pull_lock', orderId: 1, tokenId: 1, amount: 700n },
-      ] },
+      { kind: 'admit', side: 'alpha', txs: [{ kind: 'cross_pull_lock', orderId: 1, tokenId: 1, amount: 700n }] },
       ...roundTrip('alpha'),
-      { kind: 'admit', side: 'beta', txs: [
-        { kind: 'cross_pull_lock', orderId: 2, tokenId: 3, amount: 900n },
-        { kind: 'payment', tokenId: 1, amount: 4n },
-      ] },
+      {
+        kind: 'admit',
+        side: 'beta',
+        txs: [
+          { kind: 'cross_pull_lock', orderId: 2, tokenId: 3, amount: 900n },
+          { kind: 'payment', tokenId: 1, amount: 4n },
+        ],
+      },
       ...roundTrip('beta'),
       { kind: 'propose', side: 'alpha' },
       { kind: 'deliver', side: 'alpha' },

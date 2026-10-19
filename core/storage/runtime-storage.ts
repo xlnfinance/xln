@@ -7,6 +7,7 @@ import { createPersistedStorageReadApi } from './read/persisted-read';
 import { loadPersistedRuntime } from './recovery/load';
 import { createRuntimeReplayLoader } from './recovery/journal/replay';
 import { createRuntimeChainVerifier } from './recovery/verify';
+import { borrowOpenRuntimeWalDb } from './runtime-dbs';
 
 export type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 
@@ -66,30 +67,32 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     listPersistedEntityIdsAtHeight,
   } = persistedReadApi;
 
-  const loadEnvFromStorage = (
+  const loadEnvFromStorage = async (
     runtimeId?: string | null,
     runtimeSeed?: string | null,
     targetHeightOverride?: number,
     options: import('./recovery/journal/replay').ReplayOptions = {},
-  ) =>
-    loadPersistedRuntime(
-      deps,
-      persistedReadApi,
-      runtimeId,
-      runtimeSeed,
-      targetHeightOverride,
-      options,
-    );
+  ) => {
+    const env = persistedReadApi.createPersistedStorageEnv(runtimeId, runtimeSeed);
+    let returningEnv = false;
+    try {
+      if (options.borrowRuntimeWalFrom) {
+        await borrowOpenRuntimeWalDb(options.borrowRuntimeWalFrom, env, deps);
+      }
+      const restored = await loadPersistedRuntime(deps, persistedReadApi, env, targetHeightOverride, options);
+      returningEnv = restored !== null;
+      return restored;
+    } finally {
+      if (!returningEnv) {
+        await deps.closeRuntimeDb(env);
+        await deps.closeInfraDb(env);
+      }
+    }
+  };
 
-  const verifyRuntimeChain = createRuntimeChainVerifier(
-    deps,
-    persistedReadApi,
-    loadEnvFromStorage,
-  );
-  const loadEnvFromStorageByReplay = createRuntimeReplayLoader(
-    deps,
-    persistedReadApi,
-    loadEnvFromStorage,
+  const verifyRuntimeChain = createRuntimeChainVerifier(deps, persistedReadApi, loadEnvFromStorage);
+  const loadEnvFromStorageByReplay = createRuntimeReplayLoader(deps, persistedReadApi, (env, height) =>
+    loadPersistedRuntime(deps, persistedReadApi, env, height),
   );
 
   return {

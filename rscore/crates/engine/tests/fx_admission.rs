@@ -521,26 +521,22 @@ fn out_of_range_policy_version_reaching_the_hash_is_an_admission_bug() {
     );
 }
 
-/// Launch profile: local admission rejects every lending kind before the
-/// mempool. Historical frames stay hashable — same verdict as TypeScript
-/// `enqueue rejects %s without mutation`.
+/// Current lending is admitted to the canonical queue without committing money.
 #[test]
-fn rejects_every_lending_kind_before_the_mempool() {
+fn admits_every_lending_kind_to_the_mempool() {
     for (kind, tx) in extended_transactions() {
         let (mut left, _right) = parties();
-        let error = left
-            .account
+        let before = left.account.entity_account_leaf().expect("before leaf");
+        left.account
             .admit_txs(vec![tx.clone()], "test")
-            .expect_err(&format!("{kind} must reject"));
-        assert!(
-            error.to_string().contains("ACCOUNT_TX_KIND_OUT_OF_PROFILE"),
-            "{kind} must be refused by the launch profile: {error}",
+            .expect(kind);
+        assert_eq!(left.account.mempool(), &[tx.clone()], "{kind}");
+        assert_eq!(
+            left.account.entity_account_leaf().expect("after leaf"),
+            before,
+            "{kind}"
         );
-        assert!(left.account.mempool().is_empty(), "{kind}");
-        assert!(
-            xln_rscore_engine::is_frame_hashable(&tx),
-            "{kind} frame verification must remain available",
-        );
+        assert!(xln_rscore_engine::is_frame_hashable(&tx), "{kind}");
     }
 }
 
@@ -574,8 +570,8 @@ fn an_incoming_lending_frame_is_judged_by_lending_semantics_not_the_profile() {
             Err(error) => error.to_string(),
         };
         assert!(
-            reason.contains("ACCOUNT_TX_KIND_OUT_OF_PROFILE"),
-            "{kind} must be refused by the launch profile: {reason}",
+            reason.contains("LENDING_"),
+            "{kind} must be judged by its lending semantics: {reason}",
         );
         assert_eq!(right.account.current_height(), 0);
         assert!(right.account.mempool().is_empty(), "{kind}");

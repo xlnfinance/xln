@@ -4,7 +4,7 @@ import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-l
 import { unpackRadixMerklePath } from '../../protocol/state/radix-merkle';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
 import { readBoundedEncodedValue } from '../codec/bounded-value';
-import { iterateKeys } from '../database/level';
+import { readRequiredRaw, iterateKeys } from '../database/level';
 import {
   KEY_HEAD,
   KEY_RUNTIME_MACHINE_LEAF,
@@ -163,7 +163,7 @@ const readStateRows = async (
     const owner = key.subarray(1, 33).toString('hex');
     if (!expectedOwners.has(owner)) throw new Error(`CHECKPOINT_STATE_OWNER_UNDECLARED:0x${owner}`);
     owners.add(owner);
-    const value = DEDICATED_FIELD_TAGS.has(tag) ? await db.get(key) : await requiredBounded(db, key);
+    const value = DEDICATED_FIELD_TAGS.has(tag) ? await readRequiredRaw(db, key) : await requiredBounded(db, key);
     const id = key.toString('hex');
     const previous = rows.get(id);
     if (previous && !previous.equals(value)) {

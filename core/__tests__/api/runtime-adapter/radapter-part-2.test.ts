@@ -367,12 +367,7 @@ const makeMemoryDb = (entries: Array<[Buffer, Buffer]>): RuntimeDbLike => {
   return {
     get: async (key: Buffer) => {
       const item = store.get(key.toString('hex'));
-      if (!item) {
-        const error = new Error('NotFound') as Error & { code?: string; notFound?: boolean };
-        error.code = 'LEVEL_NOT_FOUND';
-        error.notFound = true;
-        throw error;
-      }
+      if (item === undefined) return undefined;
       return Buffer.from(item.value);
     },
     batch: () => {

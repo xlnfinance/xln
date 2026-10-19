@@ -65,6 +65,11 @@ test(
       const [alice, bob] = await Promise.all([enterStack(a), enterStack(b)]);
       expect(alice.entityId).not.toBe(bob.entityId);
 
+      // Bob opens a direct bilateral Account with Alice and extends a 50 USDC credit line.
+      await b.getByRole('button', { name: 'Connect another account', exact: true }).click();
+      await b.getByTestId('open-account-target').fill(alice.entityId);
+      await b.getByTestId('open-account-credit').fill('50');
+      await expect(b.getByTestId('open-account-submit')).toBeEnabled(WAIT);
       // Wait until Bob's runtime discovers Alice's gossiped non-hub profile so role evidence is verified.
       await expect
         .poll(
@@ -82,11 +87,6 @@ test(
         )
         .toBe(true);
 
-      // Bob opens a direct bilateral Account with Alice and extends a 50 USDC credit line.
-      await b.getByTestId('home-open-account').click();
-      await b.getByTestId('open-account-target').fill(alice.entityId);
-      await b.getByTestId('open-account-credit').fill('50');
-      await expect(b.getByTestId('open-account-submit')).toBeEnabled(WAIT);
       await b.getByTestId('open-account-submit').click();
 
       // Both sides converge on the direct bilateral Account with 50 USDC credit from Bob to Alice.
@@ -94,8 +94,8 @@ test(
         .poll(() => directAccountBalance(b, bob.entityId, alice.entityId), WAIT)
         .toEqual({
           signed: '0',
-          ownCreditLimit: '50000000',
-          peerCreditLimit: '0',
+          ownCreditLimit: '0',
+          peerCreditLimit: '50000000',
           inCapacity: '50000000',
           outCapacity: '0',
           pending: false,
@@ -105,8 +105,8 @@ test(
         .poll(() => directAccountBalance(a, alice.entityId, bob.entityId), WAIT)
         .toEqual({
           signed: '0',
-          ownCreditLimit: '0',
-          peerCreditLimit: '50000000',
+          ownCreditLimit: '50000000',
+          peerCreditLimit: '0',
           inCapacity: '0',
           outCapacity: '50000000',
           pending: false,
@@ -131,8 +131,8 @@ test(
         .poll(() => directAccountBalance(a, alice.entityId, bob.entityId), WAIT)
         .toEqual({
           signed: '-20000000',
-          ownCreditLimit: '0',
-          peerCreditLimit: '50000000',
+          ownCreditLimit: '50000000',
+          peerCreditLimit: '0',
           inCapacity: '20000000',
           outCapacity: '30000000',
           pending: false,
@@ -142,8 +142,8 @@ test(
         .poll(() => directAccountBalance(b, bob.entityId, alice.entityId), WAIT)
         .toEqual({
           signed: '20000000',
-          ownCreditLimit: '50000000',
-          peerCreditLimit: '0',
+          ownCreditLimit: '0',
+          peerCreditLimit: '50000000',
           inCapacity: '30000000',
           outCapacity: '20000000',
           pending: false,
@@ -151,7 +151,9 @@ test(
         });
 
       // Check Desk MML exposure ($10.00 = 0.5 * $20 unsecured commercial obligation).
-      await b.goto('/desk');
+      await b.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
+      await b.getByTestId('palette-input').fill('desk');
+      await b.getByRole('option', { name: 'Desk dense console', exact: true }).click();
       await expect(b.getByTestId('desk-revenue')).toContainText('$10.00', WAIT);
 
       // Reload both wallets and confirm the direct commercial obligation persists.

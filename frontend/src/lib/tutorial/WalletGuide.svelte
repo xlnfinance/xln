@@ -38,7 +38,12 @@
   function select(next: number) {
     index = next;
     localStorage.setItem(key, String(index));
-    onNavigate(WALLET_LESSONS[index]!.route, WALLET_LESSONS[index]!.id);
+    const selected = WALLET_LESSONS[index]!;
+    if (selected.route === '/ui/lend') {
+      window.location.assign(selected.route);
+      return;
+    }
+    onNavigate(selected.route, selected.id);
   }
 </script>
 

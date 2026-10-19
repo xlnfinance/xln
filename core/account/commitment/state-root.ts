@@ -32,12 +32,6 @@ export { encodeAccountStateValue, encodeAccountStateValueOracle } from './accoun
 
 export const EMPTY_ACCOUNT_STATE_ROOT = `0x${'00'.repeat(32)}`;
 
-export type AccountStateRootDebugRecord = {
-  accountId: string;
-  root: string;
-  entries: ReadonlyArray<readonly [path: string, value: unknown]>;
-};
-
 type AccountStateSectionHashes = Readonly<Record<string, string>>;
 
 type AccountCommitmentSectionDetail = Readonly<{
@@ -64,18 +58,6 @@ type AccountMapCommitmentTiming = {
   mode: 'persistent' | 'cold-oracle';
   entries: number;
   dirtyKeys: 0;
-};
-
-let accountStateRootDebugRecorder: ((record: AccountStateRootDebugRecord) => void) | null = null;
-
-export const setAccountStateRootDebugRecorder = (
-  recorder: ((record: AccountStateRootDebugRecord) => void) | null,
-): (() => void) => {
-  const previous = accountStateRootDebugRecorder;
-  accountStateRootDebugRecorder = recorder;
-  return () => {
-    accountStateRootDebugRecorder = previous;
-  };
 };
 
 export const accountStateDomainFromJurisdiction = (
@@ -434,7 +416,7 @@ export const computeAccountStateRoot = (
   timing?: AccountStateRootTiming,
   source = 'unspecified',
 ): string => {
-  if (timing === undefined && accountStateRootDebugRecorder === null) {
+  if (timing === undefined) {
     const collections = accountRootCollectionIdentities(account);
     const memo = readAccountStateRootMemo(account);
     if (memo && sameCollections(memo.collections, collections) && sameScalarIdentities(memo.scalars, account)) {
@@ -493,13 +475,6 @@ const computeAccountStateRootUncached = (
         ...profileRecord,
       });
     }
-  }
-  if (accountStateRootDebugRecorder) {
-    accountStateRootDebugRecorder({
-      accountId: `${account.leftEntity.toLowerCase()}:${account.rightEntity.toLowerCase()}`,
-      root,
-      entries: structuredClone(entries),
-    });
   }
   return root;
 };

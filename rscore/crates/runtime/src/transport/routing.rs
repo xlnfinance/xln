@@ -332,8 +332,7 @@ pub(super) fn prepare_envelopes_from_values(
         cross_frame_groups.push((key.clone(), unit));
     }
     let mut envelopes = Vec::new();
-    for ((target, height, timestamp, atomic_pair), mut values) in cross_frame_groups {
-        let inferred = atomic_pair.is_none();
+    for ((target, height, timestamp, atomic_pair), values) in cross_frame_groups {
         let atomic_pair = atomic_pair.or_else(|| infer_atomic_pair(&values));
         // TS dispatch fails producer invariants rather than sending or parking
         // a lone signed financial leg. Reject the entire prepared batch before
@@ -344,12 +343,8 @@ pub(super) fn prepare_envelopes_from_values(
             )));
         }
         if let Some(pair) = atomic_pair {
-            if inferred {
-                // groupAtomicCrossJAdmissionOutputs emits targetInputIndex then
-                // sourceInputIndex for inferred proposals. Explicit ACK cohorts
-                // retain their admitted order; neither convention rewrites WAL.
-                values.reverse();
-            }
+            // Atomic cohorts retain the positional order of the committed
+            // outbox, including when the pair is inferred across frames.
             if values.len() != 2 || max_rows < 2 {
                 return Err(RuntimeTransportError::Outbox(format!(
                     "atomic-pair-size:{}:{max_rows}",

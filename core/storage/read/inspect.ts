@@ -27,7 +27,7 @@ import {
   KEY_SNAPSHOT_REPLICA_META,
   KEY_SNAPSHOT_GRAPH,
 } from '../keys';
-import { iterateKeys, measurePrefixBytes } from '../database/level';
+import { readRequiredRaw, iterateKeys, measurePrefixBytes } from '../database/level';
 import { listSnapshotHeights } from '../database/lifecycle';
 import { readStorageHead } from './read';
 import type { RuntimeDbLike, StorageDebugStats } from '../types';
@@ -36,7 +36,7 @@ import { requireStorageDbOpen } from '../commit/availability';
 const measureBoundedValueChunks = async (db: RuntimeDbLike) => {
   const total = { count: 0, bytes: 0, maxValueBytes: 0 };
   for await (const key of iterateKeys(db, { prefix: Buffer.from([KEY_BOUNDED_VALUE_CHUNK]) })) {
-    const value = await db.get(key);
+    const value = await readRequiredRaw(db, key);
     total.count += 1;
     total.bytes += key.byteLength + value.byteLength;
     total.maxValueBytes = Math.max(total.maxValueBytes, value.byteLength);

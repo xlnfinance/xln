@@ -18,7 +18,12 @@ const recoverHelloAddress = (digestHex: string, signatureHex: string): string =>
   const recovery = Number.parseInt(sig.slice(128, 130), 16);
   const messageBytes = Buffer.from(digestHex.replace('0x', ''), 'hex');
   const signatureBytes = Buffer.from(compact, 'hex');
-  const publicKey = secp256k1.recoverPublicKey(messageBytes, signatureBytes, recovery, false);
+  // Hello already commits to its canonical digest; do not prehash it again.
+  const publicKey = secp256k1.Point.fromBytes(
+    secp256k1.recoverPublicKey(Buffer.concat([Buffer.from([recovery]), signatureBytes]), messageBytes, {
+      prehash: false,
+    }),
+  ).toBytes(false);
   const hash = keccak256(publicKey.slice(1));
   return `0x${hash.slice(-40)}`.toLowerCase();
 };

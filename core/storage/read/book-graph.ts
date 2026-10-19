@@ -15,7 +15,7 @@ import {
   keySnapshotGraphPrefix,
   parseSnapshotGraphKey,
 } from '../keys';
-import { iterateKeys, readValidatedOrNull } from '../database/level';
+import { readRequiredRaw, iterateKeys, readValidatedOrNull } from '../database/level';
 import type { RuntimeDbLike } from '../types';
 import type { BookPricePage, BookPricePageTree } from '../../swapbook/pages/page';
 import type { BookPricePageKey } from '../../swapbook/pages/key';
@@ -30,27 +30,27 @@ const readSide = async (
   snapshotHeight?: number,
 ): Promise<BookPricePageTree> => {
   const prefixes = bookTreePrefixes(entityId, pairId, side);
-  const branchPrefix = snapshotHeight === undefined
-    ? prefixes.branches
-    : keySnapshotGraphPrefix(snapshotHeight, prefixes.branches);
-  const leafPrefix = snapshotHeight === undefined
-    ? prefixes.leaves
-    : keySnapshotGraphPrefix(snapshotHeight, prefixes.leaves);
-  const liveKey = (key: Buffer): Buffer => snapshotHeight === undefined
-    ? key
-    : parseSnapshotGraphKey(key).liveKey;
+  const branchPrefix =
+    snapshotHeight === undefined ? prefixes.branches : keySnapshotGraphPrefix(snapshotHeight, prefixes.branches);
+  const leafPrefix =
+    snapshotHeight === undefined ? prefixes.leaves : keySnapshotGraphPrefix(snapshotHeight, prefixes.leaves);
+  const liveKey = (key: Buffer): Buffer => (snapshotHeight === undefined ? key : parseSnapshotGraphKey(key).liveKey);
   const records: PageNodeRecord[] = [];
   for await (const key of iterateKeys(db, { prefix: branchPrefix })) {
-    records.push(branchRecordFromStorage(
-      liveKey(key),
-      decodeValidatedBuffer(await db.get(key), value => value),
-    ));
+    records.push(
+      branchRecordFromStorage(
+        liveKey(key),
+        decodeValidatedBuffer(await readRequiredRaw(db, key), value => value),
+      ),
+    );
   }
   for await (const key of iterateKeys(db, { prefix: leafPrefix })) {
-    records.push(leafRecordFromStorage(
-      liveKey(key),
-      decodeValidatedBuffer(await db.get(key), value => value),
-    ));
+    records.push(
+      leafRecordFromStorage(
+        liveKey(key),
+        decodeValidatedBuffer(await readRequiredRaw(db, key), value => value),
+      ),
+    );
   }
   return hydrateBookPricePageTree(records);
 };

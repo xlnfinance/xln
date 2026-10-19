@@ -24,7 +24,7 @@ jobs:
           test "$RELEASE_TAG" = "v$(tr -d '\n' < VERSION)"
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with: { bun-version: 1.4.0 }
+        with: { bun-version: 1.4.3 }
       - name: Install source-check tooling
         run: sudo apt-get update && sudo apt-get install --yes ripgrep
       - run: bun install --frozen-lockfile
@@ -46,7 +46,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with: { bun-version: 1.4.0 }
+        with: { bun-version: 1.4.3 }
       - run: bun install --frozen-lockfile
       - run: bun install --frozen-lockfile
         working-directory: frontend
@@ -97,7 +97,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with: { bun-version: 1.4.0 }
+        with: { bun-version: 1.4.3 }
       - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         with:
           distribution: temurin
@@ -145,7 +145,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with: { bun-version: 1.4.0 }
+        with: { bun-version: 1.4.3 }
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: distribution-*

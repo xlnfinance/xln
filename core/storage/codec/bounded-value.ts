@@ -1,16 +1,11 @@
+import { readRawOrNull } from '../database/level';
 /** Bounded physical rows for large authoritative WAL and checkpoint values. */
 
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { exactKeys, record } from '../../support/boundary-guards';
 import type { RuntimeDbLike } from '../types';
 import { keyBoundedValueChunk } from '../keys';
-import {
-  decodeBuffer,
-  decodeValidatedBuffer,
-  encodeBuffer,
-  notFound,
-  writeBatch,
-} from './codec';
+import { decodeBuffer, decodeValidatedBuffer, encodeBuffer, writeBatch } from './codec';
 
 export const MAX_PHYSICAL_STORAGE_VALUE_BYTES = 10_000;
 export const BOUNDED_STORAGE_DELETE_BATCH_SIZE = 256;
@@ -28,11 +23,7 @@ export type BoundedStorageRow = Readonly<{ key: Buffer; value: Buffer }>;
 
 const validateManifest = (value: unknown): BoundedValueManifest => {
   const manifest = record(value, 'STORAGE_BOUNDED_MANIFEST_REQUIRED');
-  exactKeys(
-    manifest,
-    ['kind', 'version', 'byteLength', 'chunkCount', 'digest'],
-    'STORAGE_BOUNDED_MANIFEST',
-  );
+  exactKeys(manifest, ['kind', 'version', 'byteLength', 'chunkCount', 'digest'], 'STORAGE_BOUNDED_MANIFEST');
   if (manifest['kind'] !== 'boundedValue' || manifest['version'] !== 1) {
     throw new Error('STORAGE_BOUNDED_MANIFEST_VERSION_INVALID');
   }
@@ -61,8 +52,7 @@ const maybeManifest = (value: unknown): BoundedValueManifest | null => {
 const assertPhysicalBudget = (value: Buffer, label: string): void => {
   if (value.byteLength >= MAX_PHYSICAL_STORAGE_VALUE_BYTES) {
     throw new Error(
-      `STORAGE_PHYSICAL_VALUE_TOO_LARGE:${label}:${value.byteLength}:` +
-      `${MAX_PHYSICAL_STORAGE_VALUE_BYTES}`,
+      `STORAGE_PHYSICAL_VALUE_TOO_LARGE:${label}:${value.byteLength}:` + `${MAX_PHYSICAL_STORAGE_VALUE_BYTES}`,
     );
   }
 };
@@ -72,10 +62,7 @@ const assertPhysicalBudget = (value: Buffer, label: string): void => {
  * become one small manifest plus static owner+index continuation rows. This is
  * one canonical size-based layout.
  */
-export const prepareBoundedStorageValueRows = (
-  ownerKey: Buffer,
-  encodedValue: Buffer,
-): BoundedStorageRow[] => {
+export const prepareBoundedStorageValueRows = (ownerKey: Buffer, encodedValue: Buffer): BoundedStorageRow[] => {
   if (encodedValue.byteLength < MAX_PHYSICAL_STORAGE_VALUE_BYTES) {
     return [{ key: ownerKey, value: encodedValue }];
   }
@@ -104,15 +91,6 @@ export const prepareBoundedStorageValueRows = (
 
 export const boundedStorageRowsBytes = (rows: readonly BoundedStorageRow[]): number =>
   rows.reduce((total, row) => total + row.key.byteLength + row.value.byteLength, 0);
-
-const readRawOrNull = async (db: Pick<RuntimeDbLike, 'get'>, key: Buffer): Promise<Buffer | null> => {
-  try {
-    return await db.get(key);
-  } catch (error) {
-    if (notFound(error)) return null;
-    throw error;
-  }
-};
 
 const readManifestValue = async (
   db: Pick<RuntimeDbLike, 'get'>,

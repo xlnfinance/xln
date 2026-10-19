@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy';
 import { buildLendingRepayTx, isLendingLoanRepayable, type LendingLoan } from '../runtime/financial/lending';
 import type { WalletView } from '../runtime/views';
 import { parseAmount } from '../runtime/format';
@@ -21,7 +20,7 @@ export function LendingRepay({
   const toast = useApp(s => s.toast);
   if (!isLendingLoanRepayable(loan)) return null;
   const meta = getTokenMeta(loan.tokenId);
-  const disabled = busy || !wallet.signerId || !isAccountTxKindAvailable('lending_repay');
+  const disabled = busy || !wallet.signerId;
   const repay = async () => {
     if (disabled) return;
     setBusy(true);

@@ -74,46 +74,68 @@ export type RuntimeAdapterServerDeps = {
   readFrame?: (env: RuntimeReplica, height: number) => Promise<RuntimeFrame | null>;
   listCheckpoints?: (env: RuntimeReplica) => Promise<number[]>;
   loadEntityState?: (env: RuntimeReplica, entityId: string, height: number) => Promise<EntityState | null>;
-  loadEntityAccountDoc?: (env: RuntimeReplica, entityId: string, counterpartyId: string, height: number) => Promise<StorageAccountDoc | null>;
-  loadEntityViewPage?: (env: RuntimeReplica, entityId: string, height: number, query?: RuntimeAdapterReadQuery) => Promise<StorageEntityViewPage | null>;
+  loadEntityAccountDoc?: (
+    env: RuntimeReplica,
+    entityId: string,
+    counterpartyId: string,
+    height: number,
+  ) => Promise<StorageAccountDoc | null>;
+  loadEntityViewPage?: (
+    env: RuntimeReplica,
+    entityId: string,
+    height: number,
+    query?: RuntimeAdapterReadQuery,
+  ) => Promise<StorageEntityViewPage | null>;
+  loadEntityViewPages?: (
+    env: RuntimeReplica,
+    entityIds: readonly string[],
+    height: number,
+    query?: RuntimeAdapterReadQuery,
+  ) => Promise<Map<string, StorageEntityViewPage> | null>;
   listEntityIdsAtHeight?: (env: RuntimeReplica, height: number) => Promise<string[]>;
-	  readActivityPage?: (
+  readActivityPage?: (
     env: RuntimeReplica,
     opts: RuntimeActivityFilters & {
       beforeHeight?: number | undefined;
       limit?: number | undefined;
       scanLimit?: number | undefined;
     },
-	  ) => Promise<RuntimeAdapterActivityPage>;
-	  readAccountSwapHistoryPage?: (
+  ) => Promise<RuntimeAdapterActivityPage>;
+  readAccountSwapHistoryPage?: (
     env: RuntimeReplica,
     entityId: string,
     counterpartyId: string,
     options: Readonly<{ limit?: number; cursor?: Readonly<{ height: number; offerId: string }> }>,
   ) => Promise<RuntimeAdapterSwapHistoryPage>;
-	  readAccountFrameHistory?: (
+  readAccountFrameHistory?: (
     env: RuntimeReplica,
     entityId: string,
     counterpartyId: string,
     limit: number,
   ) => Promise<AccountFrame[]>;
-	  enqueueRuntimeInput: (env: RuntimeReplica, input: RuntimeInput) => void;
-	  submitCrossJurisdictionIntent?: (env: RuntimeReplica, route: CrossJurisdictionSwapRoute) => Promise<unknown>;
-	  controlRuntime?: (env: RuntimeReplica, action: RuntimeAdapterControlAction) => Promise<unknown>;
-	  validateRuntimeInputAdmission?: (env: RuntimeReplica, input: RuntimeInput) => void;
-	  readFrameReceipts?: (env: RuntimeReplica, query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterFrameReceiptResponse>;
-	  findPaymentRoutes?: (env: RuntimeReplica, query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterPaymentRoutesResponse>;
-	  isMutatingIngressReady?: () => boolean;
-	  deriveBrainVault?: (
-	    env: RuntimeReplica,
-	    input: RuntimeAdapterBrainVaultInput,
-	    options: Readonly<{
-	      signal: AbortSignal;
-	      onProgress: (progress: RuntimeAdapterBrainVaultProgress) => void;
-	    }>,
-	  ) => Promise<RuntimeAdapterBrainVaultResult>;
-	  revealBrainVaultMnemonic?: () => Promise<RuntimeAdapterBrainVaultRecovery>;
-	};
+  enqueueRuntimeInput: (env: RuntimeReplica, input: RuntimeInput) => void;
+  submitCrossJurisdictionIntent?: (env: RuntimeReplica, route: CrossJurisdictionSwapRoute) => Promise<unknown>;
+  controlRuntime?: (env: RuntimeReplica, action: RuntimeAdapterControlAction) => Promise<unknown>;
+  validateRuntimeInputAdmission?: (env: RuntimeReplica, input: RuntimeInput) => void;
+  readFrameReceipts?: (
+    env: RuntimeReplica,
+    query?: RuntimeAdapterReadQuery,
+  ) => Promise<RuntimeAdapterFrameReceiptResponse>;
+  findPaymentRoutes?: (
+    env: RuntimeReplica,
+    query?: RuntimeAdapterReadQuery,
+  ) => Promise<RuntimeAdapterPaymentRoutesResponse>;
+  isMutatingIngressReady?: () => boolean;
+  deriveBrainVault?: (
+    env: RuntimeReplica,
+    input: RuntimeAdapterBrainVaultInput,
+    options: Readonly<{
+      signal: AbortSignal;
+      onProgress: (progress: RuntimeAdapterBrainVaultProgress) => void;
+    }>,
+  ) => Promise<RuntimeAdapterBrainVaultResult>;
+  revealBrainVaultMnemonic?: () => Promise<RuntimeAdapterBrainVaultRecovery>;
+};
 
 export type RuntimeAdapterRequestByOp<Op extends RuntimeAdapterRequest['op']> =
   Extract<RuntimeAdapterRequest, { op: Op }>;

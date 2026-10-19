@@ -203,8 +203,8 @@ export async function waitForCounterpartyRuntimeRoutes(
   }
   if (!targets.every((entityId) => hasCounterpartyRuntimeRoute(env, entityId))) return false;
   const p2p = env.infrastructure?.p2p;
-  if (!p2p?.bootstrapDirectEntityRoutes) return true;
-  if (!(await p2p.bootstrapDirectEntityRoutes(targets, Math.max(1, deadline - Date.now())))) return false;
+  if (!p2p?.bootstrapEntityRoutes) return true;
+  if (!(await p2p.bootstrapEntityRoutes(targets, Math.max(1, deadline - Date.now())))) return false;
   if (!p2p.canDeliver) throw new Error('P2P_DELIVERY_READINESS_UNAVAILABLE');
   const canDeliver = p2p.canDeliver.bind(p2p);
   // An authenticated socket may precede the peer's delivery-ready message.

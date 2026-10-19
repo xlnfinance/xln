@@ -139,7 +139,7 @@ for (const stale of [
 const gptContextPath = 'scripts/debug/gpt.cjs';
 const gptContext = readText(gptContextPath);
 for (const marker of [
-  'src/lib/components/Entity/payments/LendingPanel.svelte',
+  'ui/src/screens/Lending.tsx',
   'core/__tests__/finance/state/lending.test.ts',
   'tests/e2e/product/e2e-lending.spec.ts',
   'Multihop execution is intentionally deferred',

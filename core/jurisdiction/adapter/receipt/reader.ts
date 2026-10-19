@@ -1,3 +1,5 @@
+import { sendBatchInChunks, type RpcBatchCall, type RpcBatchSend } from '../rpc-utils';
+export type { RpcBatchCall, RpcBatchSend } from '../rpc-utils';
 import { ethers } from 'ethers';
 import {
   assertCanonicalReceiptsRoot,
@@ -24,13 +26,6 @@ type CanonicalRpcBlock = {
 
 type RpcSend = (method: string, params: unknown[]) => Promise<unknown>;
 
-export type RpcBatchCall = {
-  method: string;
-  params: unknown[];
-};
-
-export type RpcBatchSend = (calls: readonly RpcBatchCall[]) => Promise<unknown[]>;
-
 export type ReceiptReadProfile = {
   commitment?: 'ethereum-trie' | 'tron-complete-receipts';
   nativeRpc?: { chainId: number; rpcUrl: string; solidifiedThroughHeight: number };
@@ -47,9 +42,7 @@ export type AuthenticatedReceiptRange = {
   logs: AuthenticatedRpcLog[];
 };
 
-export type ReceiptAvailabilityFailureCode =
-  | 'J_RECEIPT_BLOCK_MISSING'
-  | 'J_RECEIPT_TRANSACTION_RECEIPT_MISSING';
+export type ReceiptAvailabilityFailureCode = 'J_RECEIPT_BLOCK_MISSING' | 'J_RECEIPT_TRANSACTION_RECEIPT_MISSING';
 
 /**
  * The RPC endpoint has not exposed data that may legitimately appear on a
@@ -98,33 +91,10 @@ const parseCanonicalBlock = (raw: unknown, height: number): CanonicalRpcBlock =>
   normalizeReceiptHash(block.parentHash, 'PARENT_HASH');
   normalizeReceiptHash(block.receiptsRoot, 'ROOT');
   parseReceiptHex(block.logsBloom, 'BLOOM', 256);
-  if (!Array.isArray(block.transactions) || block.transactions.some((hash) => typeof hash !== 'string')) {
+  if (!Array.isArray(block.transactions) || block.transactions.some(hash => typeof hash !== 'string')) {
     throw new Error(`J_RECEIPT_BLOCK_TRANSACTIONS_INVALID:${height}`);
   }
   return block as CanonicalRpcBlock;
-};
-
-/**
- * A JSON-RPC proxy caps how many calls one batch may carry
- * (`MAX_RPC_PROXY_BATCH_CALLS`, core/api/server/rpc/proxy-safety.ts) and
- * answers 413 above it, which the watcher treats as fatal. A poll reads its
- * whole block range at once, so send it as several batches instead of letting
- * the range dictate the batch size. Kept as a local constant because the
- * adapter must not import the server surface; it only has to stay at or below
- * it.
- */
-const MAX_RPC_BATCH_CALLS = 128;
-
-const sendBatchInChunks = async (
-  sendBatch: RpcBatchSend,
-  calls: readonly RpcBatchCall[],
-): Promise<unknown[]> => {
-  if (calls.length <= MAX_RPC_BATCH_CALLS) return sendBatch(calls);
-  const results: unknown[] = [];
-  for (let offset = 0; offset < calls.length; offset += MAX_RPC_BATCH_CALLS) {
-    results.push(...await sendBatch(calls.slice(offset, offset + MAX_RPC_BATCH_CALLS)));
-  }
-  return results;
 };
 
 const readCanonicalBlocks = async (
@@ -138,7 +108,7 @@ const readCanonicalBlocks = async (
   }));
   const rawBlocks = sendBatch
     ? await sendBatchInChunks(sendBatch, calls)
-    : await mapConcurrent(calls, 16, (call) => send(call.method, call.params));
+    : await mapConcurrent(calls, 16, call => send(call.method, call.params));
   if (rawBlocks.length !== heights.length) {
     throw new Error(`J_RECEIPT_BATCH_LENGTH_MISMATCH:expected=${heights.length}:actual=${rawBlocks.length}`);
   }
@@ -161,7 +131,7 @@ const assertContiguousBlocks = (
     if (child.jHeight !== parent.jHeight + 1 || child.parentHash !== parent.jBlockHash) {
       throw new Error(
         `J_RECEIPT_RANGE_PARENT_MISMATCH:height=${child.jHeight}:` +
-        `expected=${parent.jBlockHash}:actual=${child.parentHash}`,
+          `expected=${parent.jBlockHash}:actual=${child.parentHash}`,
       );
     }
   }
@@ -169,19 +139,12 @@ const assertContiguousBlocks = (
   const anchor = canonicalHeader(blocks[0]!);
   const expectedHash = normalizeReceiptHash(expectedParent.hash, 'EXPECTED_PARENT_HASH');
   if (anchor.jHeight !== expectedParent.height || anchor.jBlockHash !== expectedHash) {
-    const code = expectedParent.finalized
-      ? 'J_RECEIPT_FINALIZED_PARENT_REORG'
-      : 'J_RECEIPT_RANGE_REORG';
-    throw new Error(
-      `${code}:height=${expectedParent.height}:expected=${expectedHash}:actual=${anchor.jBlockHash}`,
-    );
+    const code = expectedParent.finalized ? 'J_RECEIPT_FINALIZED_PARENT_REORG' : 'J_RECEIPT_RANGE_REORG';
+    throw new Error(`${code}:height=${expectedParent.height}:expected=${expectedHash}:actual=${anchor.jBlockHash}`);
   }
 };
 
-const assertRangeFenceUnchanged = (
-  before: readonly CanonicalRpcBlock[],
-  after: readonly CanonicalRpcBlock[],
-): void => {
+const assertRangeFenceUnchanged = (before: readonly CanonicalRpcBlock[], after: readonly CanonicalRpcBlock[]): void => {
   if (before.length !== after.length) throw new Error('J_RECEIPT_RANGE_REORG:LENGTH');
   for (let index = 0; index < before.length; index += 1) {
     const expected = canonicalHeader(before[index]!);
@@ -193,8 +156,8 @@ const assertRangeFenceUnchanged = (
     ) {
       throw new Error(
         `J_RECEIPT_RANGE_REORG:height=${expected.jHeight}:` +
-        `expected=${expected.jBlockHash}:${expected.parentHash}:` +
-        `actual=${actual.jBlockHash}:${actual.parentHash}`,
+          `expected=${expected.jBlockHash}:${expected.parentHash}:` +
+          `actual=${actual.jBlockHash}:${actual.parentHash}`,
       );
     }
   }
@@ -209,53 +172,54 @@ const validateReceiptSet = async (
       `J_RECEIPT_COUNT_MISMATCH:expected=${block.transactions.length}:actual=${unorderedReceipts.length}`,
     );
   }
-  const receipts = [...unorderedReceipts].sort((left, right) =>
-    Number(parseReceiptQuantity(left.transactionIndex, 'TRANSACTION_INDEX')) -
-    Number(parseReceiptQuantity(right.transactionIndex, 'TRANSACTION_INDEX')));
+  const receipts = [...unorderedReceipts].sort(
+    (left, right) =>
+      Number(parseReceiptQuantity(left.transactionIndex, 'TRANSACTION_INDEX')) -
+      Number(parseReceiptQuantity(right.transactionIndex, 'TRANSACTION_INDEX')),
+  );
   const blockHash = normalizeReceiptHash(block.hash, 'BLOCK_HASH');
   const blockNumber = parseReceiptQuantity(block.number, 'BLOCK_NUMBER');
-  await Promise.all(receipts.map(async (receipt, index) => {
-    const transactionHash = normalizeReceiptHash(block.transactions[index], `TRANSACTION_${index}_HASH`);
-    if (parseReceiptQuantity(receipt.transactionIndex, 'TRANSACTION_INDEX') !== BigInt(index)) {
-      throw new Error(`J_RECEIPT_TRANSACTION_INDEX_MISMATCH:${transactionHash}`);
-    }
-    if (normalizeReceiptHash(receipt.transactionHash, 'RECEIPT_TRANSACTION_HASH') !== transactionHash) {
-      throw new Error(`J_RECEIPT_TRANSACTION_HASH_MISMATCH:${transactionHash}`);
-    }
-    if (normalizeReceiptHash(receipt.blockHash, 'RECEIPT_BLOCK_HASH') !== blockHash) {
-      throw new Error(`J_RECEIPT_BLOCK_HASH_MISMATCH:${transactionHash}`);
-    }
-    if (parseReceiptQuantity(receipt.blockNumber, 'RECEIPT_BLOCK_NUMBER') !== blockNumber) {
-      throw new Error(`J_RECEIPT_BLOCK_NUMBER_MISMATCH:${transactionHash}`);
-    }
-    if (!Array.isArray(receipt.logs)) throw new Error(`J_RECEIPT_LOGS_INVALID:${transactionHash}`);
-    for (let logIndex = 0; logIndex < receipt.logs.length; logIndex += 1) {
-      const log = receipt.logs[logIndex]!;
-      if (normalizeReceiptHash(log.blockHash, 'LOG_BLOCK_HASH') !== blockHash) {
-        throw new Error(`J_RECEIPT_LOG_BLOCK_HASH_MISMATCH:${transactionHash}:${logIndex}`);
+  await Promise.all(
+    receipts.map(async (receipt, index) => {
+      const transactionHash = normalizeReceiptHash(block.transactions[index], `TRANSACTION_${index}_HASH`);
+      if (parseReceiptQuantity(receipt.transactionIndex, 'TRANSACTION_INDEX') !== BigInt(index)) {
+        throw new Error(`J_RECEIPT_TRANSACTION_INDEX_MISMATCH:${transactionHash}`);
       }
-      if (parseReceiptQuantity(log.blockNumber, 'LOG_BLOCK_NUMBER') !== blockNumber) {
-        throw new Error(`J_RECEIPT_LOG_BLOCK_NUMBER_MISMATCH:${transactionHash}:${logIndex}`);
+      if (normalizeReceiptHash(receipt.transactionHash, 'RECEIPT_TRANSACTION_HASH') !== transactionHash) {
+        throw new Error(`J_RECEIPT_TRANSACTION_HASH_MISMATCH:${transactionHash}`);
       }
-      if (normalizeReceiptHash(log.transactionHash, 'LOG_TRANSACTION_HASH') !== transactionHash) {
-        throw new Error(`J_RECEIPT_LOG_TRANSACTION_HASH_MISMATCH:${transactionHash}:${logIndex}`);
+      if (normalizeReceiptHash(receipt.blockHash, 'RECEIPT_BLOCK_HASH') !== blockHash) {
+        throw new Error(`J_RECEIPT_BLOCK_HASH_MISMATCH:${transactionHash}`);
       }
-      if (parseReceiptQuantity(log.transactionIndex, 'LOG_TRANSACTION_INDEX') !== BigInt(index)) {
-        throw new Error(`J_RECEIPT_LOG_TRANSACTION_INDEX_MISMATCH:${transactionHash}:${logIndex}`);
+      if (parseReceiptQuantity(receipt.blockNumber, 'RECEIPT_BLOCK_NUMBER') !== blockNumber) {
+        throw new Error(`J_RECEIPT_BLOCK_NUMBER_MISMATCH:${transactionHash}`);
       }
-    }
-    await encodeCanonicalRpcReceipt(receipt);
-  }));
+      if (!Array.isArray(receipt.logs)) throw new Error(`J_RECEIPT_LOGS_INVALID:${transactionHash}`);
+      for (let logIndex = 0; logIndex < receipt.logs.length; logIndex += 1) {
+        const log = receipt.logs[logIndex]!;
+        if (normalizeReceiptHash(log.blockHash, 'LOG_BLOCK_HASH') !== blockHash) {
+          throw new Error(`J_RECEIPT_LOG_BLOCK_HASH_MISMATCH:${transactionHash}:${logIndex}`);
+        }
+        if (parseReceiptQuantity(log.blockNumber, 'LOG_BLOCK_NUMBER') !== blockNumber) {
+          throw new Error(`J_RECEIPT_LOG_BLOCK_NUMBER_MISMATCH:${transactionHash}:${logIndex}`);
+        }
+        if (normalizeReceiptHash(log.transactionHash, 'LOG_TRANSACTION_HASH') !== transactionHash) {
+          throw new Error(`J_RECEIPT_LOG_TRANSACTION_HASH_MISMATCH:${transactionHash}:${logIndex}`);
+        }
+        if (parseReceiptQuantity(log.transactionIndex, 'LOG_TRANSACTION_INDEX') !== BigInt(index)) {
+          throw new Error(`J_RECEIPT_LOG_TRANSACTION_INDEX_MISMATCH:${transactionHash}:${logIndex}`);
+        }
+      }
+      await encodeCanonicalRpcReceipt(receipt);
+    }),
+  );
   return receipts;
 };
 
 // Public RPCs rate-limit the per-transaction fan-out of busy blocks. Fetch the
 // complete set once; the block hash, transaction order and receiptsRoot still
 // authenticate every receipt before advancing the cursor.
-const readBlockReceipts = async (
-  send: RpcSend,
-  block: CanonicalRpcBlock,
-): Promise<CanonicalRpcReceipt[]> => {
+const readBlockReceipts = async (send: RpcSend, block: CanonicalRpcBlock): Promise<CanonicalRpcReceipt[]> => {
   const raw = await send('eth_getBlockReceipts', [
     ethers.toQuantity(parseReceiptQuantity(block.number, 'BLOCK_NUMBER')),
   ]);
@@ -264,10 +228,7 @@ const readBlockReceipts = async (
   return validateReceiptSet(block, raw as CanonicalRpcReceipt[]);
 };
 
-const readTronReceipts = async (
-  send: RpcSend,
-  block: CanonicalRpcBlock,
-): Promise<CanonicalRpcReceipt[]> => {
+const readTronReceipts = async (send: RpcSend, block: CanonicalRpcBlock): Promise<CanonicalRpcReceipt[]> => {
   const receipts = await readBlockReceipts(send, block);
   const root = normalizeReceiptHash(block.receiptsRoot, 'ROOT');
   if (root !== ZERO_HASH) await assertCanonicalReceiptsRoot(receipts, root);
@@ -276,8 +237,7 @@ const readTronReceipts = async (
 
 const canonicalLogKey = (log: CanonicalRpcLog): string => {
   if (!Array.isArray(log.topics)) throw new Error('J_RECEIPT_LOG_TOPICS_INVALID');
-  const topics = log.topics.map((topic, index) =>
-    normalizeReceiptHash(topic, `CROSSCHECK_TOPIC_${index}`)).join(',');
+  const topics = log.topics.map((topic, index) => normalizeReceiptHash(topic, `CROSSCHECK_TOPIC_${index}`)).join(',');
   return [
     ethers.getAddress(log.address).toLowerCase(),
     topics,
@@ -300,27 +260,31 @@ const crossCheckTronLogs = async (
   addresses: ReadonlySet<string>,
   expected: readonly AuthenticatedRpcLog[],
 ): Promise<void> => {
-  const raw = await send('eth_getLogs', [{
-    fromBlock: ethers.toQuantity(fromBlock),
-    toBlock: ethers.toQuantity(toBlock),
-    address: [...addresses],
-  }]);
+  const raw = await send('eth_getLogs', [
+    {
+      fromBlock: ethers.toQuantity(fromBlock),
+      toBlock: ethers.toQuantity(toBlock),
+      address: [...addresses],
+    },
+  ]);
   if (!Array.isArray(raw)) throw new Error('J_RECEIPT_TRON_LOGS_INVALID');
-  const actual = raw.map((value, index) => {
-    if (!value || typeof value !== 'object') throw new Error(`J_RECEIPT_TRON_LOG_INVALID:${index}`);
-    const log = value as CanonicalRpcLog & { removed?: boolean };
-    if (log.removed === true) throw new Error(`J_RECEIPT_TRON_REMOVED_LOG:${index}`);
-    if (!addresses.has(ethers.getAddress(log.address).toLowerCase())) {
-      throw new Error(`J_RECEIPT_TRON_UNWATCHED_LOG:${index}`);
-    }
-    return canonicalLogKey(log);
-  }).sort();
+  const actual = raw
+    .map((value, index) => {
+      if (!value || typeof value !== 'object') throw new Error(`J_RECEIPT_TRON_LOG_INVALID:${index}`);
+      const log = value as CanonicalRpcLog & { removed?: boolean };
+      if (log.removed === true) throw new Error(`J_RECEIPT_TRON_REMOVED_LOG:${index}`);
+      if (!addresses.has(ethers.getAddress(log.address).toLowerCase())) {
+        throw new Error(`J_RECEIPT_TRON_UNWATCHED_LOG:${index}`);
+      }
+      return canonicalLogKey(log);
+    })
+    .sort();
   const authenticated = expected.map(canonicalLogKey).sort();
   if (actual.length !== authenticated.length || actual.some((key, index) => key !== authenticated[index])) {
     throw new Error(
       `J_RECEIPT_TRON_LOG_CROSSCHECK_MISMATCH:` +
-      `expected=${authenticated.length}:${logSetDigest(authenticated)}:` +
-      `actual=${actual.length}:${logSetDigest(actual)}`,
+        `expected=${authenticated.length}:${logSetDigest(authenticated)}:` +
+        `actual=${actual.length}:${logSetDigest(actual)}`,
     );
   }
 };
@@ -358,21 +322,25 @@ const collectWatchedLogs = (
         transactionIndex,
         logIndex: canonicalLogIndex,
         index: canonicalLogIndex,
-        ...(receiptProof ? {
-          receiptProof: {
-            ...receiptProof,
-            receiptLogIndex,
-          },
-        } : {}),
-        ...(nativeRpc ? {
-          nativeRpcAttestation: {
-            chainId: nativeRpc.chainId,
-            rpcEndpointHash: ethers.keccak256(ethers.toUtf8Bytes(new URL(nativeRpc.rpcUrl).toString())),
-            finality: 'tron-solidified' as const,
-            transactionIndex,
-            receiptLogIndex,
-          },
-        } : {}),
+        ...(receiptProof
+          ? {
+              receiptProof: {
+                ...receiptProof,
+                receiptLogIndex,
+              },
+            }
+          : {}),
+        ...(nativeRpc
+          ? {
+              nativeRpcAttestation: {
+                chainId: nativeRpc.chainId,
+                rpcEndpointHash: ethers.keccak256(ethers.toUtf8Bytes(new URL(nativeRpc.rpcUrl).toString())),
+                finality: 'tron-solidified' as const,
+                transactionIndex,
+                receiptLogIndex,
+              },
+            }
+          : {}),
       });
     }
   }
@@ -397,13 +365,18 @@ export const readAuthenticatedReceiptRange = async (
   if (!Number.isSafeInteger(fromBlock) || !Number.isSafeInteger(toBlock) || fromBlock < 1 || toBlock < fromBlock) {
     throw new Error(`J_RECEIPT_RANGE_INVALID:${fromBlock}:${toBlock}`);
   }
-  const addresses = new Set(watchedAddresses.map((address) => ethers.getAddress(address).toLowerCase()));
+  const addresses = new Set(watchedAddresses.map(address => ethers.getAddress(address).toLowerCase()));
   if (addresses.size === 0) throw new Error('J_RECEIPT_WATCH_ADDRESS_EMPTY');
   if (addresses.size !== watchedAddresses.length) throw new Error('J_RECEIPT_WATCH_ADDRESS_DUPLICATE');
   const commitment = profile.commitment ?? 'ethereum-trie';
-  if (profile.nativeRpc && (commitment !== 'tron-complete-receipts' ||
-    !Number.isSafeInteger(profile.nativeRpc.chainId) || profile.nativeRpc.chainId < 1 ||
-    !Number.isSafeInteger(profile.nativeRpc.solidifiedThroughHeight) || toBlock > profile.nativeRpc.solidifiedThroughHeight)) {
+  if (
+    profile.nativeRpc &&
+    (commitment !== 'tron-complete-receipts' ||
+      !Number.isSafeInteger(profile.nativeRpc.chainId) ||
+      profile.nativeRpc.chainId < 1 ||
+      !Number.isSafeInteger(profile.nativeRpc.solidifiedThroughHeight) ||
+      toBlock > profile.nativeRpc.solidifiedThroughHeight)
+  ) {
     throw new Error('J_RECEIPT_NATIVE_SOLIDIFIED_RANGE_INVALID');
   }
   const anchorHeight = fromBlock > 1 ? fromBlock - 1 : fromBlock;
@@ -412,9 +385,8 @@ export const readAuthenticatedReceiptRange = async (
   assertContiguousBlocks(rangeBlocks, profile.expectedParent);
   const blocks = rangeBlocks.filter(block => Number(parseReceiptQuantity(block.number, 'BLOCK_NUMBER')) >= fromBlock);
   const matchesWatchedBloom = createLogBloomMatcher([...addresses]);
-  const logsByBlock = await mapConcurrent(blocks, 4, async (block) => {
-    if (commitment === 'ethereum-trie' &&
-      !matchesWatchedBloom(block.logsBloom)) return [];
+  const logsByBlock = await mapConcurrent(blocks, 4, async block => {
+    if (commitment === 'ethereum-trie' && !matchesWatchedBloom(block.logsBloom)) return [];
     if (commitment === 'tron-complete-receipts') {
       return collectWatchedLogs(block, await readTronReceipts(send, block), addresses, undefined, profile.nativeRpc);
     }
@@ -422,8 +394,9 @@ export const readAuthenticatedReceiptRange = async (
     const proofs = await createCanonicalReceiptProofs(receipts, block.receiptsRoot);
     return collectWatchedLogs(block, receipts, addresses, proofs);
   });
-  const logs = logsByBlock.flat().sort((left, right) =>
-    left.blockNumber - right.blockNumber || left.index - right.index);
+  const logs = logsByBlock
+    .flat()
+    .sort((left, right) => left.blockNumber - right.blockNumber || left.index - right.index);
   if (commitment === 'tron-complete-receipts') {
     await crossCheckTronLogs(send, fromBlock, toBlock, addresses, logs);
   }
@@ -444,6 +417,5 @@ export const readAuthenticatedLogsForRange = async (
   watchedAddresses: readonly string[],
   profile: ReceiptReadProfile = {},
   sendBatch?: RpcBatchSend,
-): Promise<AuthenticatedRpcLog[]> => (
-  await readAuthenticatedReceiptRange(send, fromBlock, toBlock, watchedAddresses, profile, sendBatch)
-).logs;
+): Promise<AuthenticatedRpcLog[]> =>
+  (await readAuthenticatedReceiptRange(send, fromBlock, toBlock, watchedAddresses, profile, sendBatch)).logs;

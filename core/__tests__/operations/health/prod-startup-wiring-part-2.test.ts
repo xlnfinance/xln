@@ -6,7 +6,11 @@ import { discoverHubIds } from '../../../orchestrator/bootstrap/custody-bootstra
 import { createOrchestratorProxyHandlers } from '../../../orchestrator/proxy';
 import { MAX_WALLET_SNAPSHOT_BODY_BYTES } from '../../../api/public/external-wallet/http';
 import { safeStringify } from '../../../protocol/serialization';
-import { E2E_FATAL_LOG_TAIL_LINES, findFirstRuntimeFatalLogHit, tailLog } from '../../../scripts/e2e/harness/e2e-fatal-log-monitor';
+import {
+  E2E_FATAL_LOG_TAIL_LINES,
+  findFirstRuntimeFatalLogHit,
+  tailLog,
+} from '../../../scripts/e2e/harness/e2e-fatal-log-monitor';
 import { expandPlaywrightTargets } from '../../../scripts/e2e/runners/run-e2e-parallel-isolated';
 import {
   buildHubChildProcessEnv,
@@ -20,8 +24,7 @@ import {
 } from '../../../runtime/config/frame-cadence';
 
 const repoRoot = process.cwd();
-const readPlatformDeploy = (): string =>
-  readFileSync(join(repoRoot, 'scripts/deployment/deploy-platform.sh'), 'utf8');
+const readPlatformDeploy = (): string => readFileSync(join(repoRoot, 'scripts/deployment/deploy-platform.sh'), 'utf8');
 
 const readMarketMakerNodeModule = (file: string): string =>
   readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8');
@@ -32,7 +35,9 @@ const readMarketMakerNodeSource = (): string =>
     'market-maker/node/mm-node-core.ts',
     'market-maker/node/mm-node-health.ts',
     'market-maker/node/mm-node-run.ts',
-  ].map(readMarketMakerNodeModule).join('\n');
+  ]
+    .map(readMarketMakerNodeModule)
+    .join('\n');
 
 // hub-node.ts goes last so declaration-order slices keep ending inside it.
 const readHubNodeSource = (): string =>
@@ -43,7 +48,9 @@ const readHubNodeSource = (): string =>
     'hub/node/hub-reserves.ts',
     'hub/node/hub-http.ts',
     'hub-node.ts',
-  ].map(file => readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8')).join('\n');
+  ]
+    .map(file => readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8'))
+    .join('\n');
 
 const readOrchestratorSource = (): string =>
   [
@@ -94,39 +101,44 @@ describe('production startup wiring', () => {
 
   test('Hub child uses one Runtime frame delay from genesis through steady load', () => {
     const orchestrator = readOrchestratorSource();
-    const replayRecord = readFileSync(join(
-      repoRoot,
-      'core/scripts/operations/hlt/replay/commands/run-authority-evidence-record.ts',
-    ), 'utf8');
+    const replayRecord = readFileSync(
+      join(repoRoot, 'core/scripts/operations/hlt/replay/commands/run-authority-evidence-record.ts'),
+      'utf8',
+    );
     expect(resolveHubRuntimeFrameDelayMs({ XLN_RUNTIME_MIN_FRAME_DELAY_MS: '20' })).toBe(20);
     expect(resolveHubRuntimeFrameDelayMs({ XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0' })).toBe(0);
     expect(PRODUCTION_RUNTIME_MIN_FRAME_DELAY_MS).toBe(100);
     expect(resolveRuntimeMinFrameDelayMs(undefined, false)).toBe(0);
     expect(resolveHubRuntimeFrameDelayMs({})).toBe(PRODUCTION_RUNTIME_MIN_FRAME_DELAY_MS);
-    expect(() => resolveHubRuntimeFrameDelayMs({ XLN_RUNTIME_MIN_FRAME_DELAY_MS: '-1' }))
-      .toThrow('RUNTIME_MIN_FRAME_DELAY_MS_INVALID:-1');
+    expect(() => resolveHubRuntimeFrameDelayMs({ XLN_RUNTIME_MIN_FRAME_DELAY_MS: '-1' })).toThrow(
+      'RUNTIME_MIN_FRAME_DELAY_MS_INVALID:-1',
+    );
     expect(orchestrator).not.toContain('XLN_HUB_MIN_FRAME_DELAY_MS');
     expect(replayRecord).not.toContain('XLN_HUB_MIN_FRAME_DELAY_MS');
     expect(orchestrator).toMatch(/env: sanitizeChildProcessEnv\(\s*buildHubChildProcessEnv\(\{/);
-    expect(buildHubEngineArgs('h1', {
-      XLN_HUB_ENGINE_ARGS_H1: ' --cpu-prof   --smol ',
-    })).toEqual(['--cpu-prof', '--smol']);
-    expect(buildHubChildProcessEnv({
-      hubName: 'h1',
-      dbPath: '/db/h1',
-      brainvaultOwnerPath: '/db/h1/brainvault-owner.json',
-      jurisdictionsPath: '/db/jurisdictions.json',
-      rpcEnv: { ANVIL_RPC: 'http://rpc' },
-      orchestratorPid: 42,
-      orchestratorOwnerId: 'owner',
-      startupTimeoutMs: 5_000,
-      sourceEnv: {
-        XLN_RUNTIME_MIN_FRAME_DELAY_MS: '25',
-        XLN_RUNTIME_APPLY_PROFILE: '1',
-        XLN_HLT_ENGINE: 'ts',
-        XLN_MESH_PRIMARY_JURISDICTION_ONLY: '1',
-      },
-    })).toMatchObject({
+    expect(
+      buildHubEngineArgs('h1', {
+        XLN_HUB_ENGINE_ARGS_H1: ' --cpu-prof   --smol ',
+      }),
+    ).toEqual(['--cpu-prof', '--smol']);
+    expect(
+      buildHubChildProcessEnv({
+        hubName: 'h1',
+        dbPath: '/db/h1',
+        brainvaultOwnerPath: '/db/h1/brainvault-owner.json',
+        jurisdictionsPath: '/db/jurisdictions.json',
+        rpcEnv: { ANVIL_RPC: 'http://rpc' },
+        orchestratorPid: 42,
+        orchestratorOwnerId: 'owner',
+        startupTimeoutMs: 5_000,
+        sourceEnv: {
+          XLN_RUNTIME_MIN_FRAME_DELAY_MS: '25',
+          XLN_RUNTIME_APPLY_PROFILE: '1',
+          XLN_HLT_ENGINE: 'ts',
+          XLN_MESH_PRIMARY_JURISDICTION_ONLY: '1',
+        },
+      }),
+    ).toMatchObject({
       XLN_DB_PATH: '/db/h1',
       ANVIL_RPC: 'http://rpc',
       XLN_RUNTIME_APPLY_PROFILE: '1',
@@ -220,7 +232,7 @@ describe('production startup wiring', () => {
     expect(smoke).not.toContain('green h1-live-authority');
     expect(smoke).not.toContain("inheritedProcessEnv['XLN_HUB_RSCORE_AUTHORITY_H1'] = '1';");
     expect(smoke).not.toContain('XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES:');
-    expect(smoke).toContain("readH1AuthorityFrame(before.height)");
+    expect(smoke).toContain('readH1AuthorityFrame(before.height)');
     expect(smoke).toContain('restored.canonicalStateHash !== before.canonicalStateHash');
     expect(smoke).toContain('LOCAL_PROD_SMOKE_AUTHORITY_CHECKPOINT_DIVERGED');
     expect(smoke).toContain('HLT_RSCORE_RESTART_CHECKPOINT_OK');
@@ -272,10 +284,7 @@ describe('production startup wiring', () => {
     const runtimeLoop = readFileSync(join(repoRoot, 'core/runtime/loop/loop.ts'), 'utf8');
     const runtimeWatchers = readFileSync(join(repoRoot, 'core/runtime/loop/loop-watchers.ts'), 'utf8');
     const nodeQuiesce = readFileSync(join(repoRoot, 'core/orchestrator/process/node-runtime-quiesce.ts'), 'utf8');
-    const sources = [
-      readHubNodeSource(),
-      readMarketMakerNodeSource(),
-    ];
+    const sources = [readHubNodeSource(), readMarketMakerNodeSource()];
 
     expect(runtimeMain).toContain('stopJurisdictionWatchersAndWait,');
     expect(runtimeWatchers).toContain(
@@ -291,7 +300,11 @@ describe('production startup wiring', () => {
     expect(nodeQuiesce.indexOf('runtimeIdle = await stopRuntimeLoopAndWait(')).toBeLessThan(
       nodeQuiesce.indexOf('await stopP2PAndWait('),
     );
-    const checkpoint = extractSourceBlock(nodeQuiesce, 'export const checkpointNodeRuntime = async (', 'wasPersistencePaused,\n  };');
+    const checkpoint = extractSourceBlock(
+      nodeQuiesce,
+      'export const checkpointNodeRuntime = async (',
+      'wasPersistencePaused,\n  };',
+    );
     expect(checkpoint.indexOf('const quiesceResult = await quiesceForCheckpoint(')).toBeGreaterThan(0);
     expect(checkpoint.indexOf('const quiesceResult = await quiesceForCheckpoint(')).toBeLessThan(
       checkpoint.indexOf('state.persistencePaused = true;'),
@@ -303,11 +316,7 @@ describe('production startup wiring', () => {
       expect(source).toContain('node-runtime-quiesce');
       expect(source).toContain('quiesceNodeRuntime');
       const quiesceBlock = source.includes('const createHubControlRequestHandler = (')
-        ? extractSourceBlock(
-            source,
-            'const createHubControlRequestHandler = (',
-            'const currentRuntimeHeight = (',
-          )
+        ? extractSourceBlock(source, 'const createHubControlRequestHandler = (', 'const currentRuntimeHeight = (')
         : extractSourceBlock(source, 'const quiesceMarketMakerRuntime = async (', 'const createMarketMakerHttpHandler');
       expect(quiesceBlock).toContain('quiesceNodeRuntime(');
       expect(quiesceBlock).toContain('status: 503');
@@ -386,10 +395,7 @@ describe('production startup wiring', () => {
       'state.tokenIdsByContext = await initializeMarketMakerContexts({',
       mmServicesStart,
     );
-    const mmResume = mmSource.indexOf(
-      'await ensurePendingNumberedRegistrationsResumed(env);',
-      mmInitializationCall,
-    );
+    const mmResume = mmSource.indexOf('await ensurePendingNumberedRegistrationsResumed(env);', mmInitializationCall);
     const mmCatchup = mmSource.indexOf('const watcherDrain = await drainJWatcherBacklog(');
     const mmIngressReady = mmSource.indexOf('state.externalIngressReady = true;');
     const mmDeliveryReady = mmSource.indexOf('setRuntimeDeliveryReady(env, true);');
@@ -426,10 +432,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('const MARKET_MAKER_RESTART_FENCING_GRACE_MS = STORAGE_WRITER_LOCK_TTL_MS + 1_000;');
     expect(orchestrator).toContain('marketMakerRestartFencingGraceMs: MARKET_MAKER_RESTART_FENCING_GRACE_MS,');
     const restartLog = orchestrator.indexOf('[MESH] restarting MM during readiness');
-    const restartGrace = orchestrator.indexOf(
-      'await scheduler.wait(marketMakerRestartFencingGraceMs);',
-      restartLog,
-    );
+    const restartGrace = orchestrator.indexOf('await scheduler.wait(marketMakerRestartFencingGraceMs);', restartLog);
     const restartSpawn = orchestrator.indexOf('await spawnMarketMaker();', restartGrace);
     expect(restartGrace).toBeGreaterThan(restartLog);
     expect(restartSpawn).toBeGreaterThan(restartGrace);
@@ -493,7 +496,9 @@ describe('production startup wiring', () => {
     );
     expect(startAnvil).not.toContain('--max-memory-restart');
     expect(deploy).toContain('ensure_production_anvil_memory_restart_disabled anvil scripts/operations/start-anvil.sh');
-    expect(deploy).toContain('ensure_production_anvil_memory_restart_disabled anvil2 scripts/operations/start-anvil2.sh');
+    expect(deploy).toContain(
+      'ensure_production_anvil_memory_restart_disabled anvil2 scripts/operations/start-anvil2.sh',
+    );
     expect(deploy).toContain(
       'run_or_fail_deploy "unsafe Anvil PM2 supervision" bun scripts/operations/check-anvil-supervision.ts',
     );
@@ -510,7 +515,10 @@ describe('production startup wiring', () => {
     expect(startServer).toContain('MESH_RESET_CLAIMED');
     expect(startServer).toContain('MESH_RESET_RETRY');
     expect(startServer).toContain('MESH_RESET_FINALIZED');
-    expect(deploy.match(/git clean -fd/g)).toHaveLength(2);
+    expect(deploy).not.toContain('git clean -fd');
+    expect(deploy).not.toContain('git reset --hard');
+    expect(deploy).not.toContain('git checkout -B');
+    expect(deploy).toContain('prepare-remote-main.sh');
     expect(deploy).not.toContain('pm2 restart xln-server');
     expect(packageJson.scripts['deploy:prod']).toContain('--reset-mesh');
     expect(packageJson.scripts['deploy:prod']).not.toContain('--code-only');
@@ -522,15 +530,30 @@ describe('production startup wiring', () => {
 
   test('prod remote runtime import e2e cannot reset the shared prod mesh implicitly', () => {
     const baseline = readFileSync(join(repoRoot, 'tests/utils/e2e-baseline.ts'), 'utf8');
-    const radapterRemote = ['tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts', 'tests/e2e/runtime/e2e-radapter-remote-part-2.spec.ts']
+    const radapterRemote = [
+      'tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts',
+      'tests/e2e/runtime/e2e-radapter-remote-part-2.spec.ts',
+    ]
       .map(file => readFileSync(join(repoRoot, file), 'utf8'))
       .join('\n');
     const appLayout = readFileSync(join(repoRoot, 'frontend/src/routes/app/+layout.svelte'), 'utf8');
-    const importFlow = readFileSync(join(repoRoot, 'frontend/src/lib/utils/onboarding/remoteRuntimeImportFlow.ts'), 'utf8');
+    const importFlow = readFileSync(
+      join(repoRoot, 'frontend/src/lib/utils/onboarding/remoteRuntimeImportFlow.ts'),
+      'utf8',
+    );
     const orchestrator = readOrchestratorSource();
-    const runtimeImportHttp = readFileSync(join(repoRoot, 'core/orchestrator/replica-import/runtime-import-http.ts'), 'utf8');
-    const bootstrapTimeline = readFileSync(join(repoRoot, 'core/orchestrator/bootstrap/bootstrap-timeline-stages.ts'), 'utf8');
-    const isolatedRunner = readFileSync(join(repoRoot, 'core/scripts/e2e/runners/run-e2e-parallel-isolated.ts'), 'utf8');
+    const runtimeImportHttp = readFileSync(
+      join(repoRoot, 'core/orchestrator/replica-import/runtime-import-http.ts'),
+      'utf8',
+    );
+    const bootstrapTimeline = readFileSync(
+      join(repoRoot, 'core/orchestrator/bootstrap/bootstrap-timeline-stages.ts'),
+      'utf8',
+    );
+    const isolatedRunner = readFileSync(
+      join(repoRoot, 'core/scripts/e2e/runners/run-e2e-parallel-isolated.ts'),
+      'utf8',
+    );
 
     expect(baseline).toContain('allowAutoReset?: boolean;');
     expect(baseline).toContain('if (!resolved.allowAutoReset) {');
@@ -569,7 +592,12 @@ describe('production startup wiring', () => {
     expect(appLayout).toContain('async function importRemoteRuntimesIntoApp');
     expect(appLayout).toContain('fetchRemoteRuntimeImportSource(source)');
     expect(appLayout).toContain('const result = await importRemoteRuntimeEntries(entries)');
-    expect(importFlow).toContain('await Promise.allSettled(workers)');
+    const validation = readFileSync(
+      join(repoRoot, 'frontend/src/lib/utils/onboarding/remoteRuntimeImportValidation.ts'),
+      'utf8',
+    );
+    expect(importFlow).toContain('await validateRemoteRuntimeImportEntries(');
+    expect(validation).toContain('await Promise.allSettled(workers)');
     expect(importFlow).toContain('writeRemoteRuntimeImportSummary(results, entries.length, importedAt)');
     expect(isolatedRunner).toContain("'--wallet-url',\n        `${webUrl}/app`,\n        '--allow-reset'");
     expect(isolatedRunner).not.toContain(
@@ -596,16 +624,11 @@ describe('production startup wiring', () => {
   });
 
   test('node orchestrators validate J adapters without mutating committed replicas', () => {
-    const sources = [
-      readHubNodeSource(),
-      readMarketMakerNodeModule('market-maker/node/mm-node-core.ts'),
-    ];
+    const sources = [readHubNodeSource(), readMarketMakerNodeModule('market-maker/node/mm-node-core.ts')];
     for (const source of sources) {
       expect(source).toContain('assertJStackAddressMatch(');
       expect(source).toContain('attachLiveJAdapter(env, activeName, jadapter);');
-      expect(source).not.toMatch(
-        /\breplica\.(?:depositoryAddress|entityProviderAddress|contracts|rpcs|chainId)\s*=/,
-      );
+      expect(source).not.toMatch(/\breplica\.(?:depositoryAddress|entityProviderAddress|contracts|rpcs|chainId)\s*=/);
     }
   });
 
@@ -625,7 +648,10 @@ describe('production startup wiring', () => {
 
   test('market maker health route serves cached bootstrap readiness without scanning state', () => {
     const mmNode = readMarketMakerNodeSource();
-    const mmProgress = readFileSync(join(repoRoot, 'core/orchestrator/market-maker/node/mm-bootstrap-progress.ts'), 'utf8');
+    const mmProgress = readFileSync(
+      join(repoRoot, 'core/orchestrator/market-maker/node/mm-bootstrap-progress.ts'),
+      'utf8',
+    );
     const healthRouteStart = mmNode.indexOf("if (pathname === '/api/health')");
     const controlRouteStart = mmNode.indexOf("if (pathname === '/api/control/p2p/stop'");
     expect(healthRouteStart).toBeGreaterThan(0);
@@ -681,9 +707,13 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('completionHealth = deps.health.buildSnapshot({ includeCross: true });');
     expect(mmNode).toContain('deps.health.setCurrentHealth(completionHealth);');
     expect(mmNode).toContain('deps.health.rebuildHealthResponse();');
-    expect(readMarketMakerNodeModule('market-maker/node/mm-node-health.ts')).toContain('computeCanonicalEntityHashesFromEnv');
+    expect(readMarketMakerNodeModule('market-maker/node/mm-node-health.ts')).toContain(
+      'computeCanonicalEntityHashesFromEnv',
+    );
     expect(readMarketMakerNodeModule('market-maker/node/mm-node-run.ts')).toContain('computeCanonicalStateHashFromEnv');
-    expect(mmNode).toContain('export const buildMarketMakerBootstrapEntityStateHash = (env: RuntimeReplica): string =>');
+    expect(mmNode).toContain(
+      'export const buildMarketMakerBootstrapEntityStateHash = (env: RuntimeReplica): string =>',
+    );
     expect(mmProgress).toContain("schema: 'market-maker-bootstrap-entity-state-v1'");
     expect(mmNode).toContain('const fingerprint = buildMarketMakerBootstrapFingerprint(');
     expect(mmNode).toContain('const runtimeStateHash = computeCanonicalStateHashFromEnv(deps.env);');
@@ -767,7 +797,10 @@ describe('production startup wiring', () => {
     const orchestrator = readOrchestratorSource();
     const mmNode = readMarketMakerNodeSource();
     const benchmark = readFileSync(join(repoRoot, 'core/scripts/operations/bootstrap/bootstrap-benchmark.ts'), 'utf8');
-    const soundcheck = readFileSync(join(repoRoot, 'core/scripts/operations/bootstrap/bootstrap-soundcheck.ts'), 'utf8');
+    const soundcheck = readFileSync(
+      join(repoRoot, 'core/scripts/operations/bootstrap/bootstrap-soundcheck.ts'),
+      'utf8',
+    );
 
     expect(packageJson).toContain(
       '"prod:bootstrap:bench": "bun core/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-bench -- bun core/scripts/operations/bootstrap/bootstrap-benchmark.ts"',
@@ -875,9 +908,7 @@ describe('production startup wiring', () => {
       bootstrapCrossBranch.indexOf('const sourceHubSpecs = buildMarketMakerCrossOfferSpecs('),
     );
     expect(bootstrapCrossBranch).toContain('coverageGaps = countCrossPairCoverageGaps(env, sourceHubSpecs)');
-    expect(bootstrapCrossBranch).toContain(
-      'progress = countCrossSpecBootstrapProgress(env, sourceHubSpecs)',
-    );
+    expect(bootstrapCrossBranch).toContain('progress = countCrossSpecBootstrapProgress(env, sourceHubSpecs)');
     expect(mmNode).not.toContain('deferredBootstrapCrossInputs');
     expect(mmNode).not.toContain("direction: 'bootstrap-batch'");
     expect(mmNode).not.toContain('deferredBootstrapCrossLastIndex');
@@ -1041,7 +1072,10 @@ describe('production startup wiring', () => {
     const systemRunner = readFileSync(join(repoRoot, 'core/scripts/e2e/runners/run-system-tests-parallel.ts'), 'utf8');
     const soakRunner = readFileSync(join(repoRoot, 'core/scripts/release/run-soak-gate.ts'), 'utf8');
     const cleanupHelper = readFileSync(join(repoRoot, 'core/scripts/e2e/harness/test-artifact-cleanup.ts'), 'utf8');
-    const bootstrapSoundcheck = readFileSync(join(repoRoot, 'core/scripts/operations/bootstrap/bootstrap-soundcheck.ts'), 'utf8');
+    const bootstrapSoundcheck = readFileSync(
+      join(repoRoot, 'core/scripts/operations/bootstrap/bootstrap-soundcheck.ts'),
+      'utf8',
+    );
     const packageJson = readFileSync(join(repoRoot, 'package.json'), 'utf8');
     expect(fatalHelper).toContain('/MISSING_SIGNER_KEY/');
     expect(fatalHelper).toContain('/JADAPTER_MISSING/');
@@ -1133,7 +1167,9 @@ describe('production startup wiring', () => {
     expect(releaseGate.indexOf("'frontend generated aliases'")).toBeLessThan(
       releaseGate.indexOf("'runtime core unit tests'"),
     );
-    expect(releaseGate.indexOf("'bootstrap soundcheck'")).toBeLessThan(releaseGate.indexOf("'React payment and admission E2E'"));
+    expect(releaseGate.indexOf("'bootstrap soundcheck'")).toBeLessThan(
+      releaseGate.indexOf("'React payment and admission E2E'"),
+    );
     expect(releaseGate).toContain('e2e-payment.spec.ts,e2e-lending-availability.spec.ts');
     expect(releaseGate).toContain('e2e-dispute-finality.spec.ts');
     expect(releaseGate).toContain('e2e-dispute-protection.spec.ts');
@@ -1230,8 +1266,14 @@ describe('production startup wiring', () => {
     expect(p2pNode).not.toContain('createLocalDeliveryHandler(');
     expect(p2pNode).not.toContain('env.networkInbox.push(routedInput)');
     const hubTransport = readFileSync(join(repoRoot, 'core/orchestrator/hub/hub-runtime-transport.ts'), 'utf8');
-    const directInput = extractSourceBlock(hubTransport, 'const admitDirectEntityInputs =', 'const wireDirectRuntimeInfrastructure =');
-    expect(hubTransport).toContain('admitDirectEntityInputs(env, isIngressReady, debug, from, envelope, ingressTimestamp, sessionAuthenticated === true)');
+    const directInput = extractSourceBlock(
+      hubTransport,
+      'const admitDirectEntityInputs =',
+      'const wireDirectRuntimeInfrastructure =',
+    );
+    expect(hubTransport).toContain(
+      'admitDirectEntityInputs(env, isIngressReady, debug, from, envelope, ingressTimestamp, sessionAuthenticated === true)',
+    );
     const sourceVerified = directInput.indexOf(
       'assertRuntimeEntityInputsEnvelopeSource(env, from, envelope, sessionAuthenticated);',
     );
@@ -1295,10 +1337,7 @@ describe('production startup wiring', () => {
   });
 
   test('bootstrap timeline stages expose typed failure metadata', () => {
-    const bootstrapTimeline = [
-      'bootstrap/bootstrap-timeline.ts',
-      'bootstrap/bootstrap-timeline-stages.ts',
-    ]
+    const bootstrapTimeline = ['bootstrap/bootstrap-timeline.ts', 'bootstrap/bootstrap-timeline-stages.ts']
       .map(file => readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8'))
       .join('\n');
     const types = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator-types.ts'), 'utf8');
@@ -1422,7 +1461,9 @@ describe('production startup wiring', () => {
     expect(ensureConnectivity).not.toContain('remoteCreditInputs');
     expect(ensureConnectivity).not.toContain('sendEntityInput');
     expect(mmNode).not.toContain('RoutedEntityInput');
-    expect(orchestrator).toMatch(/'--support-peer-identities-json',\s*safeStringify\(deps.getMarketMakerIdentities\(\)\)/);
+    expect(orchestrator).toMatch(
+      /'--support-peer-identities-json',\s*safeStringify\(deps.getMarketMakerIdentities\(\)\)/,
+    );
     expect(orchestrator).not.toContain('--mesh-hub-identities-json');
     // The MM quotes only on configured hub Entities, never on self-declared isHub profiles.
     expect(orchestrator).toContain("'--hub-identities-json', safeStringify(deps.getHubIdentities()),");
@@ -1479,9 +1520,7 @@ describe('production startup wiring', () => {
     expect(supportPeerReserveEnd).toBeGreaterThan(reserveStart);
     const reserveBootstrap = hubNode.slice(reserveStart, supportPeerReserveEnd);
     expect(reserveBootstrap).toContain('tokenCatalogForHubJurisdiction(tokenCatalog, {');
-    expect(reserveBootstrap).toContain(
-      'const bootstrapTokens = tokenCatalogForHubJurisdiction(tokenCatalog, {',
-    );
+    expect(reserveBootstrap).toContain('const bootstrapTokens = tokenCatalogForHubJurisdiction(tokenCatalog, {');
     expect(reserveBootstrap).not.toContain('tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
     expect(reserveBootstrap).not.toContain('catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
   });
@@ -1513,7 +1552,10 @@ describe('production startup wiring', () => {
   test('every hub auto-finalizes its disputes unless the E2E dispute stand opts one out', () => {
     const hubNode = readHubNodeSource();
     const hubSpawn = readFileSync(join(repoRoot, 'core/orchestrator/process/spawn/hub.ts'), 'utf8');
-    const isolatedRunner = readFileSync(join(repoRoot, 'core/scripts/e2e/runners/run-e2e-parallel-isolated.ts'), 'utf8');
+    const isolatedRunner = readFileSync(
+      join(repoRoot, 'core/scripts/e2e/runners/run-e2e-parallel-isolated.ts'),
+      'utf8',
+    );
     expect(hubNode).not.toContain("resolvedArgs.name.toLowerCase() === 'h2'");
     expect(hubNode).toContain("disputeAutoFinalizeMode: resolvedArgs.manualDisputeFinalize ? 'ignore' : 'auto',");
     expect(hubSpawn).toContain("...(child.name === deps.args.manualDisputeHub ? ['--manual-dispute-finalize'] : []),");
@@ -1562,7 +1604,9 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain(
       "const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] !== '0';",
     );
-    expect(hubNode).toContain('if (!AUTO_PROVISION_EXTERNAL_FAUCET || !canDeployHubDefaultTokens(jurisdiction.chainId)) return;');
+    expect(hubNode).toContain(
+      'if (!AUTO_PROVISION_EXTERNAL_FAUCET || !canDeployHubDefaultTokens(jurisdiction.chainId)) return;',
+    );
     expect(driveMeshBootstrap).toContain('await input.ensureFaucetReady();');
     expect(hubNode).not.toContain(
       'if (resolvedArgs.deployTokens) {\n    void externalWalletApi.provisionFaucetWallet()',
@@ -1610,7 +1654,10 @@ describe('production startup wiring', () => {
   test('hub mesh, market maker, and custody bootstrap behind one parallel readiness barrier', () => {
     const orchestrator = readOrchestratorSource();
     const resetStartupSource = readFileSync(join(repoRoot, 'core/orchestrator/process/reset-startup.ts'), 'utf8');
-    const custodyBootstrapSource = readFileSync(join(repoRoot, 'core/orchestrator/bootstrap/custody-bootstrap.ts'), 'utf8');
+    const custodyBootstrapSource = readFileSync(
+      join(repoRoot, 'core/orchestrator/bootstrap/custody-bootstrap.ts'),
+      'utf8',
+    );
     const resetStart = orchestrator.indexOf('const runReset = async (');
     const resetEnd = orchestrator.indexOf('const resetCoordinator =', resetStart);
     const reset = orchestrator.slice(resetStart, resetEnd);
@@ -1670,12 +1717,7 @@ describe('production startup wiring', () => {
 
   test('custody hub discovery filters hubs by jurisdiction stack identity', async () => {
     const originalFetch = globalThis.fetch;
-    const debugHub = (
-      entityId: string,
-      jurisdictionName: string,
-      chainId: number,
-      depositoryAddress: string,
-    ) => ({
+    const debugHub = (entityId: string, jurisdictionName: string, chainId: number, depositoryAddress: string) => ({
       entityId,
       name: `hub-${entityId.slice(-2)}`,
       isHub: true,
@@ -1721,7 +1763,10 @@ describe('production startup wiring', () => {
 
   test('orchestrator exposes the gossip profile bundle endpoint used by payments', () => {
     const debugApi = readFileSync(join(repoRoot, 'core/orchestrator/debug-api.ts'), 'utf8');
-    const paymentPanel = readFileSync(join(repoRoot, 'frontend/src/lib/components/Entity/payments/PaymentPanel.svelte'), 'utf8');
+    const paymentPanel = readFileSync(
+      join(repoRoot, 'frontend/src/lib/components/Entity/payments/PaymentPanel.svelte'),
+      'utf8',
+    );
     const xlnStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
 
     expect(paymentPanel).not.toContain('/api/gossip/profile?entityId=');
@@ -2007,7 +2052,10 @@ describe('production startup wiring', () => {
 
   test('RPC watcher pauses during persistence quiesce instead of entering j-event ingress', () => {
     const poll = readFileSync(join(repoRoot, 'core/jurisdiction/adapter/rpc/watcher/rpc-watcher-poll.ts'), 'utf8');
-    const ingress = readFileSync(join(repoRoot, 'core/jurisdiction/adapter/rpc/watcher/rpc-watcher-ingress.ts'), 'utf8');
+    const ingress = readFileSync(
+      join(repoRoot, 'core/jurisdiction/adapter/rpc/watcher/rpc-watcher-ingress.ts'),
+      'utf8',
+    );
     const pauseHelper = poll.indexOf('const isIngressPaused = (env: RuntimeReplica): boolean =>');
     const earlyPause = poll.indexOf("pauseForQuiesce(request, { step: 'before-block-number' });");
     const batchPause = ingress.indexOf("step: 'before-process-event-batch'");

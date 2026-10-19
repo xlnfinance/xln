@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import retryVector from '../../fixtures/storage/cross-j-proposal-retry.json';
+import { decodeBuffer } from '../../../storage/codec/codec';
+import { resolveRuntimeWorkReason } from '../../../runtime/loop/loop-work';
+import { runtimeInputHasQueuedWork } from '../../../runtime/frame/transaction';
 
 import { createEmptyEnv } from '../../../runtime';
 import { deriveSignerAddressSync } from '../../../account/crypto';
@@ -159,4 +163,53 @@ describe('committed Runtime outbox recipient readiness', () => {
     expect(transport.failures).toEqual([]);
     expect(transport.inbound).toEqual([]);
   });
+});
+
+test('ready authenticated socket wakes only after the retained cross-J cohort is complete', async () => {
+  const env = createEmptyEnv(SERVER_SEED, 1);
+  env.state.height = 79;
+  env.state.timestamp = 1792308503576;
+  const transport = createTransport();
+  const peer = await transport.connect('runtime-outbox-cross-j-ready-peer');
+  transport.route.setReady(true);
+  peer.client.setReady(true);
+  await waitFor(() => transport.route.canDeliver(peer.runtimeId));
+  const infrastructure = ensureRuntimeInfrastructure(env);
+  infrastructure.directEntityInputsDispatch = transport.route.sendEntityInputsDelivery;
+  infrastructure.canDeliverEntityInputs = transport.route.canDeliver;
+  const [completeFrame, retryFrame] = retryVector.rows;
+  if (!completeFrame || !retryFrame) throw new Error('CROSS_J_RETRY_VECTOR_MISSING');
+  const decode = (row: string) => ({
+    ...validateDeliverableEntityInput(decodeBuffer(Buffer.from(row, 'base64'))),
+    runtimeId: peer.runtimeId,
+  });
+  const retry = retryFrame.rowsBase64.map(decode)[0];
+  if (!retry) throw new Error('CROSS_J_RETRY_ROW_MISSING');
+  const sibling = completeFrame.rowsBase64.map(decode).find(row => row.entityId !== retry.entityId);
+  if (!sibling) throw new Error('CROSS_J_RETRY_SIBLING_MISSING');
+  env.pendingNetworkOutputs = [retry];
+  // Socket readiness cannot complete a financial cohort. Busy-looping this
+  // exact packet emitted17814 warnings in the production rotation stand.
+  expect(resolveRuntimeWorkReason(env, { runtimeInputHasQueuedWork })).toBeNull();
+  expect(peer.envelopes).toEqual([]);
+  env.pendingNetworkOutputs.push(sibling);
+  expect(resolveRuntimeWorkReason(env, { runtimeInputHasQueuedWork })).toBe('committed-network-outbox');
+  const deps = createRuntimeRoutingApi({ notifyEnvChange: notifyRuntimeStateChanged }).getRuntimeOutputRoutingDeps();
+  await dispatchCommittedEntityOutputs(
+    env,
+    new Set(),
+    {
+      remoteOutputs: env.pendingNetworkOutputs.map(output => ({ output, targetRuntimeId: peer.runtimeId })),
+      preparedOutputGraph: createPreparedOutputGraph(),
+    },
+    deps,
+  );
+  await waitFor(() => peer.envelopes.length === 1);
+  const received = peer.envelopes[0];
+  if (!received) throw new Error('CROSS_J_RETRY_DELIVERY_MISSING');
+  expect(received.entityInputs.map(row => row.entityTxs)).toEqual([retry.entityTxs, sibling.entityTxs]);
+  expect(env.pendingNetworkOutputs).toEqual([]);
+  expect(resolveRuntimeWorkReason(env, { runtimeInputHasQueuedWork })).toBeNull();
+  expect(peer.errors).toEqual([]);
+  expect(transport.failures).toEqual([]);
 });

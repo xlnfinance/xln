@@ -11,25 +11,34 @@ test('verified recovery outbox republishes behind the backup barrier without a n
 
   const targetEntityId = `0x${'ab'.repeat(32)}`;
   const targetSignerId = `0x${'01'.repeat(20)}`;
-  env.pendingNetworkOutputs = [{
-    runtimeId: '0x2222222222222222222222222222222222222222',
-    entityId: targetEntityId,
-    signerId: targetSignerId,
-    sourceRuntimeFrame: { height: env.state.height, timestamp: env.state.timestamp },
-  }];
+  env.pendingNetworkOutputs = [
+    {
+      runtimeId: '0x2222222222222222222222222222222222222222',
+      entityId: targetEntityId,
+      signerId: targetSignerId,
+      entityTxs: [],
+      sourceRuntimeFrame: { height: env.state.height, timestamp: env.state.timestamp },
+    },
+  ];
   env.infrastructure = {
     ...(env.infrastructure || {}),
     loopActive: false,
     wakeRequested: false,
-    entityRuntimeHints: new Map([[targetEntityId, { runtimeId: '0x2222222222222222222222222222222222222222', seenAt: env.state.timestamp }]]),
+    entityRuntimeHints: new Map([
+      [targetEntityId, { runtimeId: '0x2222222222222222222222222222222222222222', seenAt: env.state.timestamp }],
+    ]),
     directEntityInputsDispatch: () => {
+      expect(barrierCompleted).toBe(true);
       dispatchCount += 1;
       return deliveryAccepted('ROUTE_DIRECT_DELIVERED');
     },
   };
 
   let dispatchCount = 0;
-  registerRecoveryBackupBarrier(env, async () => {});
+  let barrierCompleted = false;
+  registerRecoveryBackupBarrier(env, async () => {
+    barrierCompleted = true;
+  });
 
   const height = env.state.height;
   await processRuntime(env);
@@ -49,7 +58,9 @@ test('direct remote sends fail closed while recovery backup barrier is active', 
   let dispatchCount = 0;
   env.infrastructure = {
     ...(env.infrastructure || {}),
-    entityRuntimeHints: new Map([[targetEntityId, { runtimeId: '0x2222222222222222222222222222222222222222', seenAt: env.state.timestamp }]]),
+    entityRuntimeHints: new Map([
+      [targetEntityId, { runtimeId: '0x2222222222222222222222222222222222222222', seenAt: env.state.timestamp }],
+    ]),
     directEntityInputsDispatch: () => {
       dispatchCount += 1;
       return deliveryAccepted('ROUTE_DIRECT_DELIVERED');

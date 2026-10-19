@@ -69,7 +69,11 @@ import {
   textBytes,
 } from '../../../storage/keys';
 
-import { projectAccountDoc, projectEntityCoreDoc, projectEntityReplicaCoreView } from '../../../storage/read/projections';
+import {
+  projectAccountDoc,
+  projectEntityCoreDoc,
+  projectEntityReplicaCoreView,
+} from '../../../storage/read/projections';
 
 import {
   loadEntityAccountDocFromStorage,
@@ -77,14 +81,16 @@ import {
   loadEntityViewPageFromStorage,
 } from '../../../storage/read/read';
 
-import type {
-  RuntimeDbLike,
-  RuntimeFrame,
-  StorageHead,
-  StorageSnapshotManifest,
-} from '../../../storage/types';
+import type { RuntimeDbLike, RuntimeFrame, StorageHead, StorageSnapshotManifest } from '../../../storage/types';
 
-import type { AccountTx, CrossJurisdictionSwapRoute, Delta, EntityReplica, RuntimeReplica, RuntimeInput } from '../../../runtime/types';
+import type {
+  AccountTx,
+  CrossJurisdictionSwapRoute,
+  Delta,
+  EntityReplica,
+  RuntimeReplica,
+  RuntimeInput,
+} from '../../../runtime/types';
 
 import type { BookState } from '../../../swapbook';
 
@@ -546,10 +552,12 @@ test('runtime adapter rejects an unknown entity sub-path before loading entity s
       return null;
     },
   };
-  await expect(resolveRuntimeAdapterRead(ctx, `entity/${entityId}/unknown`, { atHeight: 3 }))
-    .rejects.toMatchObject({ code: 'E_BAD_PATH' });
-  await expect(resolveRuntimeAdapterRead(ctx, `entity/0x${'cc'.repeat(32)}/unknown`))
-    .rejects.toMatchObject({ code: 'E_BAD_PATH' });
+  await expect(resolveRuntimeAdapterRead(ctx, `entity/${entityId}/unknown`, { atHeight: 3 })).rejects.toMatchObject({
+    code: 'E_BAD_PATH',
+  });
+  await expect(resolveRuntimeAdapterRead(ctx, `entity/0x${'cc'.repeat(32)}/unknown`)).rejects.toMatchObject({
+    code: 'E_BAD_PATH',
+  });
   expect(loads).toBe(0);
 });
 
@@ -577,10 +585,7 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
   };
   account.state.settlementWorkspace = { ops: [], lastModifiedByLeft: true, notes: 'w'.repeat(100_000) };
   account.state.swapOffers = new Map(
-    Array.from({ length: 101 }, (_, index) => [
-      `offer-${index}`,
-      { offerId: `offer-${index}` },
-    ]),
+    Array.from({ length: 101 }, (_, index) => [`offer-${index}`, { offerId: `offer-${index}` }]),
   );
   replica.state.nonces = new Map(
     Array.from({ length: 500 }, (_, index) => [`0x${index.toString(16).padStart(64, '0')}`, index]),
@@ -713,7 +718,16 @@ test('current stored view frame overlays local identity without mixing a later l
   const env = makeEnv();
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   replica.state.prevFrameHash = 'frame-h7';
-  replica.state.paybook.entries = new Map([['0x1717171717171717171717171717171717171717171717171717171717171717', { hashlock: '0x1717171717171717171717171717171717171717171717171717171717171717', amount: 7n, createdTimestamp: 700 }]]);
+  replica.state.paybook.entries = new Map([
+    [
+      '0x1717171717171717171717171717171717171717171717171717171717171717',
+      {
+        hashlock: '0x1717171717171717171717171717171717171717171717171717171717171717',
+        amount: 7n,
+        createdTimestamp: 700,
+      },
+    ],
+  ]);
   const storedCore = structuredClone(projectEntityCoreDoc(replica.state));
   const frame = await resolveRuntimeAdapterRead<{
     height: number;
@@ -756,7 +770,16 @@ test('current stored view frame overlays local identity without mixing a later l
         replica.state.profile = { ...replica.state.profile, name: 'Later live frame' };
         replica.state.reserves = new Map([[1, 800n]]);
         replica.entityEncPubKey = 'pub-h8';
-        replica.state.paybook.entries = new Map([['0x1818181818181818181818181818181818181818181818181818181818181818', { hashlock: '0x1818181818181818181818181818181818181818181818181818181818181818', amount: 8n, createdTimestamp: 800 }]]);
+        replica.state.paybook.entries = new Map([
+          [
+            '0x1818181818181818181818181818181818181818181818181818181818181818',
+            {
+              hashlock: '0x1818181818181818181818181818181818181818181818181818181818181818',
+              amount: 8n,
+              createdTimestamp: 800,
+            },
+          ],
+        ]);
         return {
           core: storedCore,
           accounts: { items: [], nextCursor: null },
@@ -777,7 +800,18 @@ test('current stored view frame overlays local identity without mixing a later l
   expect(frame.activeEntity?.core.isProposer).toBe(true);
   expect(frame.activeEntity?.core.entityEncryptionPublicKey).toBe(`0x${'44'.repeat(32)}`);
   expect('entityEncPrivKey' in (frame.activeEntity?.core ?? {})).toBe(false);
-  expect(frame.activeEntity?.core.paybook.entries).toEqual(new Map([['0x1717171717171717171717171717171717171717171717171717171717171717', { hashlock: '0x1717171717171717171717171717171717171717171717171717171717171717', amount: 7n, createdTimestamp: 700 }]]));
+  expect(frame.activeEntity?.core.paybook.entries).toEqual(
+    new Map([
+      [
+        '0x1717171717171717171717171717171717171717171717171717171717171717',
+        {
+          hashlock: '0x1717171717171717171717171717171717171717171717171717171717171717',
+          amount: 7n,
+          createdTimestamp: 700,
+        },
+      ],
+    ]),
+  );
 });
 
 test('runtime adapter view-frame includes live gossip summaries for visible account peers', async () => {
@@ -857,12 +891,14 @@ test('runtime adapter graph-frame keeps gossip peers and complete local account 
   expect(local?.accounts.items[0]).toMatchObject({ leftEntity: entityId, rightEntity: counterpartyId });
   expect(local?.accounts.items[0]?.deltas.get(1)?.ondelta).toBe(25n);
   expect(local?.accounts.items[0]?.deltas).toBeInstanceOf(Map);
-  expect(() => encodeRuntimeAdapterMessage({
-    v: XLN_PROTOCOL_VERSION,
-    inReplyTo: 'graph-frame',
-    ok: true,
-    payload: frame,
-  })).not.toThrow();
+  expect(() =>
+    encodeRuntimeAdapterMessage({
+      v: XLN_PROTOCOL_VERSION,
+      inReplyTo: 'graph-frame',
+      ok: true,
+      payload: frame,
+    }),
+  ).not.toThrow();
   expect(local?.accounts.items[0]?.currentFrame.accountStateRoot).toBe(`0x${'01'.repeat(32)}`);
   expect(local?.accounts.items[0]?.mempoolCount).toBe(3);
   expect(local?.accounts.items[0]?.mempool.map(activity => activity.amount)).toEqual([20n, 30n]);
@@ -954,6 +990,12 @@ test('runtime adapter explicit graph-frame height uses exact RDB state even at t
       profile: { ...livePage.core.profile, name: 'Persisted H7' },
     },
   };
+  const secondId = `0x${'f'.repeat(64)}`;
+  const secondPage = {
+    ...storedPage,
+    core: { ...storedPage.core, entityId: secondId },
+    accounts: { ...storedPage.accounts, items: [], totalItems: 0 },
+  };
   let storagePageReads = 0;
   const head = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -972,10 +1014,19 @@ test('runtime adapter explicit graph-frame height uses exact RDB state even at t
     {
       env,
       readHead: async () => head,
-      listEntityIdsAtHeight: async () => [entityId],
+      listEntityIdsAtHeight: async () => [entityId, secondId],
       loadEntityViewPage: async () => {
+        throw new Error('PER_ENTITY_REPLAY_FORBIDDEN_FOR_GRAPH');
+      },
+      loadEntityViewPages: async (ids, height, query) => {
         storagePageReads += 1;
-        return storedPage;
+        expect(ids).toEqual([entityId, secondId]);
+        expect(height).toBe(env.state.height);
+        expect(query?.accountsLimit).toBe(10);
+        return new Map([
+          [entityId, storedPage],
+          [secondId, secondPage],
+        ]);
       },
     },
     'graph-frame',
@@ -983,9 +1034,11 @@ test('runtime adapter explicit graph-frame height uses exact RDB state even at t
   );
 
   const storedEntity = frame.entities.find(entry => entry.summary.entityId === entityId);
-  expect(storagePageReads).toBeGreaterThan(0);
+  expect(storagePageReads).toBe(1);
+  expect(frame.entities.some(entry => entry.core?.entityId === secondId)).toBe(true);
   expect(storedEntity?.summary.label).toBe('Persisted H7');
   expect(storedEntity?.core?.timestamp).toBe(601);
+  expect(storedEntity?.accounts.items.length).toBe(storedPage.accounts.items.length);
 
   await expect(
     resolveRuntimeAdapterRead(
@@ -993,7 +1046,7 @@ test('runtime adapter explicit graph-frame height uses exact RDB state even at t
         env,
         readHead: async () => head,
         listEntityIdsAtHeight: async () => [entityId],
-        loadEntityViewPage: async () => {
+        loadEntityViewPages: async () => {
           throw new Error(`STORAGE_DIFF_MISSING: height=${env.state.height} scope=entity:${entityId}`);
         },
       },
@@ -1138,17 +1191,19 @@ test('runtime adapter graph-frame budget measures the tagged JSON the server sen
     height: 1,
     timestamp: 1,
     stateHash: `0x${'11'.repeat(32)}`,
-    entities: [{
-      summary: { entityId, label: 'budget', height: 1 },
-      core: {
-        entityId,
-        height: 1,
-        timestamp: 1,
-        reserves: new Map(Array.from({ length: 64 }, (_, tokenId) => [tokenId + 1, BigInt(tokenId + 1)])),
-        profile: { name: 'budget', isHub: false },
+    entities: [
+      {
+        summary: { entityId, label: 'budget', height: 1 },
+        core: {
+          entityId,
+          height: 1,
+          timestamp: 1,
+          reserves: new Map(Array.from({ length: 64 }, (_, tokenId) => [tokenId + 1, BigInt(tokenId + 1)])),
+          profile: { name: 'budget', isHub: false },
+        },
+        accounts: { items: [], nextCursor: null, totalItems: 0, limit: 1 },
       },
-      accounts: { items: [], nextCursor: null, totalItems: 0, limit: 1 },
-    }],
+    ],
   };
   const message = { v: XLN_PROTOCOL_VERSION, inReplyTo: 'graph-frame-budget', ok: true as const, payload: frame };
   const msgpackBytes = encodeRuntimeAdapterMessage(message).byteLength;
@@ -1212,7 +1267,14 @@ test('runtime adapter historical graph-frame derives its timestamp from the sele
       readHead: async () => ({ latestHeight: env.state.height }) as StorageHead,
       readFrame: async () => null,
       listEntityIdsAtHeight: async () => [entityId],
-      loadEntityViewPage,
+      loadEntityViewPages: async (ids, height, query) => {
+        const pages = new Map<string, NonNullable<Awaited<ReturnType<typeof loadEntityViewPage>>>>();
+        for (const id of ids) {
+          const page = await loadEntityViewPage(id, height, query);
+          if (page) pages.set(id, page);
+        }
+        return pages;
+      },
     },
     'graph-frame',
     { atHeight: historicalHeight, limit: 10, accountsLimit: 10 },
@@ -1258,10 +1320,7 @@ test('runtime adapter keeps the committed user role when gossip advertises the e
   env.gossip = createGossipLayer();
   env.gossip.announce(makeHubProfile(entityId, 'Spoofed Hub'));
 
-  const entities = await resolveRuntimeAdapterRead<Array<{ entityId: string; isHub?: boolean }>>(
-    { env },
-    'entities',
-  );
+  const entities = await resolveRuntimeAdapterRead<Array<{ entityId: string; isHub?: boolean }>>({ env }, 'entities');
 
   expect(entities.find(entry => entry.entityId === entityId)?.isHub).toBe(false);
 });
@@ -1624,11 +1683,27 @@ test('runtime adapter timeline-index reports an empty timeline before the first 
   expect(page.nextBeforeHeight).toBeNull();
 
   // An explicit out-of-range cursor is still a client error.
-  await expect(resolveRuntimeAdapterRead(
-    { env, readHead: async () => ({ schemaVersion: STORAGE_SCHEMA_VERSION, latestHeight: 0, latestSnapshotHeight: 0, snapshotPeriodFrames: 2, retainSnapshots: 3, epochMaxBytes: 1_000, accountMerkleRadix: 16, epochReplayBytes: 0, retainedWalBytes: 0 }), readFrame: async () => null },
-    'timeline-index',
-    { beforeHeight: 1 },
-  )).rejects.toThrow('beforeHeight must be an integer greater than 1');
+  await expect(
+    resolveRuntimeAdapterRead(
+      {
+        env,
+        readHead: async () => ({
+          schemaVersion: STORAGE_SCHEMA_VERSION,
+          latestHeight: 0,
+          latestSnapshotHeight: 0,
+          snapshotPeriodFrames: 2,
+          retainSnapshots: 3,
+          epochMaxBytes: 1_000,
+          accountMerkleRadix: 16,
+          epochReplayBytes: 0,
+          retainedWalBytes: 0,
+        }),
+        readFrame: async () => null,
+      },
+      'timeline-index',
+      { beforeHeight: 1 },
+    ),
+  ).rejects.toThrow('beforeHeight must be an integer greater than 1');
 });
 
 test('runtime adapter recovery bundle read is gated by seed-derived lookup key', async () => {
@@ -1638,8 +1713,9 @@ test('runtime adapter recovery bundle read is gated by seed-derived lookup key',
   env.state.timestamp = 100;
   try {
     const lookupKey = deriveRuntimeRecoveryLookupKey(env.runtimeId, env.runtimeSeed);
-    await expect(resolveRuntimeAdapterRead({ env }, `recovery/bundles/${lookupKey}`))
-      .rejects.toThrow('RECOVERY_BUNDLE_CHECKPOINT_FRAME_MISSING');
+    await expect(resolveRuntimeAdapterRead({ env }, `recovery/bundles/${lookupKey}`)).rejects.toThrow(
+      'RECOVERY_BUNDLE_CHECKPOINT_FRAME_MISSING',
+    );
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
 
     const response = await resolveRuntimeAdapterRead<{
@@ -1964,7 +2040,9 @@ test('runtime adapter history-frame-batch returns bounded historical view frames
   expect(batch.requestedHeights).toEqual([8, 9, 10]);
   expect(batch.frames.map(frame => frame.height)).toEqual([8, 9]);
   expect(batch.frames.every(frame => frame.activeEntity?.accounts.items.length === 1)).toBe(true);
-  expect(batch.frames.every(frame => frame.activeEntity?.accounts.items[0]?.state.rightEntity === counterpartyId)).toBe(true);
+  expect(batch.frames.every(frame => frame.activeEntity?.accounts.items[0]?.state.rightEntity === counterpartyId)).toBe(
+    true,
+  );
   expect(batch.unavailable).toHaveLength(1);
   expect(batch.unavailable[0]?.height).toBe(10);
   expect(batch.unavailable[0]?.code).toBe('E_NOT_FOUND');
@@ -1975,7 +2053,9 @@ test('runtime adapter history-frame-batch marks an unretained height unavailable
   const env = makeEnv();
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
-  const ctx = (loadEntityViewPage: NonNullable<RuntimeAdapterResolveContext['loadEntityViewPage']>): RuntimeAdapterResolveContext => ({
+  const ctx = (
+    loadEntityViewPage: NonNullable<RuntimeAdapterResolveContext['loadEntityViewPage']>,
+  ): RuntimeAdapterResolveContext => ({
     env,
     readHead: async () => ({
       schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -2003,19 +2083,31 @@ test('runtime adapter history-frame-batch marks an unretained height unavailable
   const batch = await resolveRuntimeAdapterRead<{
     frames: Array<{ height: number }>;
     unavailable: Array<{ height: number; code: string; message: string }>;
-  }>(ctx(async (_entityId, height) => (height === 8 ? null : page)), 'history-frame-batch', query);
+  }>(
+    ctx(async (_entityId, height) => (height === 8 ? null : page)),
+    'history-frame-batch',
+    query,
+  );
   expect(batch.frames.map(frame => frame.height)).toEqual([9]);
-  expect(batch.unavailable).toEqual([{
-    height: 8,
-    code: 'E_NOT_FOUND',
-    message: `entity summary not found at height 8: ${entityId}`,
-  }]);
+  expect(batch.unavailable).toEqual([
+    {
+      height: 8,
+      code: 'E_NOT_FOUND',
+      message: `entity summary not found at height 8: ${entityId}`,
+    },
+  ]);
 
   // Any other storage failure is real and propagates, whatever its text says.
-  await expect(resolveRuntimeAdapterRead(ctx(async (_entityId, height) => {
-    if (height === 8) throw new Error(`STORAGE_DIFF_MISSING: height unavailable at ${height}`);
-    return page;
-  }), 'history-frame-batch', query)).rejects.toThrow('STORAGE_DIFF_MISSING');
+  await expect(
+    resolveRuntimeAdapterRead(
+      ctx(async (_entityId, height) => {
+        if (height === 8) throw new Error(`STORAGE_DIFF_MISSING: height unavailable at ${height}`);
+        return page;
+      }),
+      'history-frame-batch',
+      query,
+    ),
+  ).rejects.toThrow('STORAGE_DIFF_MISSING');
 });
 
 test('runtime adapter history-frame-batch fails fast on malformed queries', async () => {
@@ -2554,7 +2646,12 @@ test('runtime adapter historical 1M account view-frame stays aggregate-first and
     { entityId, atHeight: 1, accountsLimit: 10, booksLimit: 10 },
   );
   const elapsedMs = Date.now() - startedAt;
-  const encoded = encodeRuntimeAdapterMessage({ v: XLN_PROTOCOL_VERSION, inReplyTo: 'budget', ok: true, payload: frame });
+  const encoded = encodeRuntimeAdapterMessage({
+    v: XLN_PROTOCOL_VERSION,
+    inReplyTo: 'budget',
+    ok: true,
+    payload: frame,
+  });
 
   expect(loaderCalls).toBe(2);
   expect(elapsedMs).toBeLessThan(100);
@@ -2623,7 +2720,12 @@ test('runtime adapter view-frame excludes unbounded core internals from remote s
       };
     } | null;
   }>({ env }, 'view-frame', { entityId, accountsLimit: 1, booksLimit: 1 });
-  const encoded = encodeRuntimeAdapterMessage({ v: XLN_PROTOCOL_VERSION, inReplyTo: 'core-budget', ok: true, payload: frame });
+  const encoded = encodeRuntimeAdapterMessage({
+    v: XLN_PROTOCOL_VERSION,
+    inReplyTo: 'core-budget',
+    ok: true,
+    payload: frame,
+  });
   const core = frame.activeEntity?.core;
 
   expect(encoded.byteLength).toBeLessThan(1_048_576);

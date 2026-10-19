@@ -1,5 +1,4 @@
 import { useNavigate } from 'react-router-dom';
-import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy';
 import { Icon, type IconName } from '../components/Icons';
 import { PageHead } from '../components/PageHead';
 import { PendingBatch } from '../components/PendingBatch';
@@ -28,7 +27,7 @@ export function Manage() {
 		{ to: '/sovereignty', icon: 'shield', title: 'Security and recovery', hint: 'Keys, proofs, what is at risk', testId: 'manage-sovereignty' },
 		{ to: '/move', icon: 'arrow', title: 'Move', hint: 'Wallet ↔ reserve ↔ accounts', testId: 'manage-move' },
 		{ to: '/assets', icon: 'wallet', title: 'Assets', hint: 'On-chain wallet, faucets, debts', testId: 'manage-assets' },
-		{ to: '/lend', icon: 'bank', title: 'Lending', hint: isAccountTxKindAvailable('lending_fund') && isAccountTxKindAvailable('lending_borrow_request') ? 'Lend to a hub pool or borrow' : 'Unavailable in this release · view existing positions', testId: 'manage-lend' },
+		{ to: '/lend', icon: 'bank', title: 'Lending', hint: 'Lend to a hub pool or borrow', testId: 'manage-lend' },
 		{ to: '/ownership', icon: 'accounts', title: 'Ownership', hint: 'Board, shares, takeovers', testId: 'manage-ownership' },
 		{ to: '/manage/custom-contracts', icon: 'bolt', title: 'Custom contracts', hint: 'Experimental Solidity rules · experts only', testId: 'manage-custom-contracts' },
 	];

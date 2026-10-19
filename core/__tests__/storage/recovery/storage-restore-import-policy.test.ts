@@ -23,12 +23,11 @@ import { verifyStorageTailIntegrity } from '../../../storage/read/verify';
 import { buildStorageRuntimeMachineSnapshot } from '../../../storage/wal/snapshot';
 import { MemoryRuntimeDb } from '../../fixtures/storage/memory-runtime-db';
 import { createCheckpointBarrierRuntimeTx } from '../../../runtime/checkpoint/barrier';
-import { readRuntimeActivityViewStatus, resetRuntimeActivityViewAtFloor } from '../../../storage/history/runtime-activity-view';
 import {
-  deriveSignerAddressSync,
-  deriveSignerKeySync,
-  clearSignerKeys,
-} from '../../../account/crypto';
+  readRuntimeActivityViewStatus,
+  resetRuntimeActivityViewAtFloor,
+} from '../../../storage/history/runtime-activity-view';
+import { deriveSignerAddressSync, deriveSignerKeySync, clearSignerKeys } from '../../../account/crypto';
 import { generateLazyEntityId } from '../../../entity/factory';
 import { readStorageFrameRecord, readStorageHead } from '../../../storage';
 import { resolveDbPath } from '../../../storage/runtime-dbs';
@@ -96,34 +95,40 @@ const createRecoveryEnv = async (
     },
   } as JReplica);
   enqueueRuntimeInput(env, {
-    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
-      entityId,
-      signerId,
-      data: {
-        isProposer: true,
-        config: {
-          mode: 'proposer-based',
-          threshold: 1n,
-          validators: [signerId],
-          shares: { [signerId]: 1n },
-          jurisdiction,
+    runtimeTxs: [
+      createTestEntityImportRuntimeTx(env, {
+        entityId,
+        signerId,
+        data: {
+          isProposer: true,
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [signerId],
+            shares: { [signerId]: 1n },
+            jurisdiction,
+          },
         },
-      },
-    })],
+      }),
+    ],
     entityInputs: [],
   });
   await processRuntime(env, []);
   if (committedProfileName) {
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
-      entityInputs: [{
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'profile-update',
-          data: { profile: { entityId, name: committedProfileName } },
-        }],
-      }],
+      entityInputs: [
+        {
+          entityId,
+          signerId,
+          entityTxs: [
+            {
+              type: 'profile-update',
+              data: { profile: { entityId, name: committedProfileName } },
+            },
+          ],
+        },
+      ],
     });
     await processRuntime(env, []);
   }
@@ -199,32 +204,44 @@ describe('restored checkpoint conflict policy', () => {
     const materialized = await loadEnvFromDB(source.signerId, seed);
     expect(computeCanonicalStateHashFromEnv(materialized!)).toBe(checkpointHash);
     await closeRecoveryEnv(materialized!);
-    await expect(importRuntimeRecoveryRecording(recording, seed)).rejects.toThrow('RECOVERY_IMPORT_DESTINATION_NOT_EMPTY');
+    await expect(importRuntimeRecoveryRecording(recording, seed)).rejects.toThrow(
+      'RECOVERY_IMPORT_DESTINATION_NOT_EMPTY',
+    );
     // This case imports, replays and reopens real stores three times. A 5s
     // timeout on CI ran afterEach while the still-live replay was using them.
   }, 15_000);
 
-  test.each(['before-publish', 'after-publish'] as const)('recording interruption at %s exposes no partial tip', async boundary => {
-    const seed = `restore publication ${boundary} ${process.pid}`;
-    const source = await createRecoveryEnv(seed, true, 'complete-archive', 'source');
-    const target = createEmptyEnv(seed);
-    cleanupPaths.push(resolveDbPath(source.env, 'core'), resolveDbPath(target, 'core'));
-    const recording = await buildPersistedRuntimeRecording(source.env, {
-      signers: [{ index: 0, address: source.signerId, name: 'Signer' }],
-    });
-    const expectedHash = computeCanonicalStateHashFromEnv(source.env);
-    await expect(importRuntimeRecoveryRecording(recording, seed, {
-      onPublicationBoundary: point => { if (point === boundary) throw new Error(`INTERRUPTED:${point}`); },
-    })).rejects.toThrow(`INTERRUPTED:${boundary}`);
-    await closeRecoveryEnv(source.env);
-    const reopened = await loadEnvFromDB(source.signerId, seed);
-    if (boundary === 'before-publish') expect(reopened).toBeNull();
-    else {
-      expect(reopened!.state.height).toBe(recording.targetHeight);
-      expect(computeCanonicalStateHashFromEnv(reopened!)).toBe(expectedHash);
-      await closeRecoveryEnv(reopened!);
-    }
-  });
+  test.each(['before-publish', 'after-publish'] as const)(
+    'recording interruption at %s exposes no partial tip',
+    async boundary => {
+      const seed = `restore publication ${boundary} ${process.pid}`;
+      const source = await createRecoveryEnv(seed, true, 'complete-archive', 'source');
+      const target = createEmptyEnv(seed);
+      cleanupPaths.push(resolveDbPath(source.env, 'core'), resolveDbPath(target, 'core'));
+      const recording = await buildPersistedRuntimeRecording(source.env, {
+        signers: [{ index: 0, address: source.signerId, name: 'Signer' }],
+      });
+      const expectedHash = computeCanonicalStateHashFromEnv(source.env);
+      await expect(
+        importRuntimeRecoveryRecording(recording, seed, {
+          onPublicationBoundary: point => {
+            if (point === boundary) throw new Error(`INTERRUPTED:${point}`);
+          },
+        }),
+      ).rejects.toThrow(`INTERRUPTED:${boundary}`);
+      await closeRecoveryEnv(source.env);
+      const reopened = await loadEnvFromDB(source.signerId, seed);
+      if (boundary === 'before-publish') expect(reopened).toBeNull();
+      else {
+        expect(reopened!.state.height).toBe(recording.targetHeight);
+        expect(computeCanonicalStateHashFromEnv(reopened!)).toBe(expectedHash);
+        await closeRecoveryEnv(reopened!);
+      }
+      // Match the adjacent real import/replay/reopen case; cleanup must not
+      // race a still-live store when the full unit process is under load.
+    },
+    15_000,
+  );
 
   test('recording import rejects leftover activity on an otherwise empty destination', async () => {
     const seed = `restore stale activity ${process.pid}`;
@@ -267,14 +284,18 @@ describe('restored checkpoint conflict policy', () => {
     registerSignerKey(restored, base.signerId, deriveSignerKeySync(seed, '1'));
     enqueueRuntimeInput(restored, {
       runtimeTxs: [],
-      entityInputs: [{
-        entityId: base.entityId,
-        signerId: base.signerId,
-        entityTxs: [{
-          type: 'profile-update',
-          data: { profile: { entityId: base.entityId, name: 'advanced-base' } },
-        }],
-      }],
+      entityInputs: [
+        {
+          entityId: base.entityId,
+          signerId: base.signerId,
+          entityTxs: [
+            {
+              type: 'profile-update',
+              data: { profile: { entityId: base.entityId, name: 'advanced-base' } },
+            },
+          ],
+        },
+      ],
     });
     await processRuntime(restored, []);
     const advancedReplica = Array.from(restored.state.eReplicas.values())[0];
@@ -319,8 +340,7 @@ describe('restored checkpoint conflict policy', () => {
     const conflicting = await createRecoveryEnv(seed, false, 'candidate-B');
     conflicting.env.state.timestamp = 2_000;
     conflicting.replica.lastConsensusProgressAt = 2_222;
-    await expect(persistRestoredEnvToDB(conflicting.env))
-      .rejects.toThrow('RECOVERY_IMPORT_SAME_HEIGHT_CONFLICT');
+    await expect(persistRestoredEnvToDB(conflicting.env)).rejects.toThrow('RECOVERY_IMPORT_SAME_HEIGHT_CONFLICT');
     await closeRecoveryEnv(conflicting.env);
     await assertFreshState(seed, { height: 2, progress: 2_222, profileName: 'candidate-A' });
   });
@@ -340,8 +360,7 @@ describe('restored checkpoint conflict policy', () => {
     const conflicting = { ...fork.replica };
     conflicting.signerId = deriveSignerAddressSync(seed, '2').toLowerCase();
     base.env.state.eReplicas.set(`${base.entityId}:${conflicting.signerId}`, conflicting);
-    await expect(persistRestoredEnvToDB(base.env))
-      .rejects.toThrow('STORAGE_ENTITY_REPLICA_STATE_DIVERGENCE');
+    await expect(persistRestoredEnvToDB(base.env)).rejects.toThrow('STORAGE_ENTITY_REPLICA_STATE_DIVERGENCE');
     await closeRecoveryEnv(base.env);
     await closeRecoveryEnv(fork.env);
     await assertFreshState(seed, { height: 2, progress: 1_111, profileName: 'canonical-base' });
@@ -368,14 +387,20 @@ describe('restored checkpoint conflict policy', () => {
     cleanupPaths.push(resolveDbPath(current.env, 'core'));
     enqueueRuntimeInput(current.env, {
       runtimeTxs: [],
-      entityInputs: [{
-        entityId: current.entityId,
-        signerId: current.signerId,
-        entityTxs: [{
-          type: 'profile-update',
-          data: { profile: { entityId: current.entityId, entityKind: 'company', sectors: ['commerce', 'finance'] } },
-        }],
-      }],
+      entityInputs: [
+        {
+          entityId: current.entityId,
+          signerId: current.signerId,
+          entityTxs: [
+            {
+              type: 'profile-update',
+              data: {
+                profile: { entityId: current.entityId, entityKind: 'company', sectors: ['commerce', 'finance'] },
+              },
+            },
+          ],
+        },
+      ],
     });
     await processRuntime(current.env, []);
     enqueueRuntimeInput(current.env, { runtimeTxs: [createCheckpointBarrierRuntimeTx()], entityInputs: [] });
@@ -384,8 +409,10 @@ describe('restored checkpoint conflict policy', () => {
     const restored = await loadEnvFromDB(current.signerId, seed);
     if (!restored) throw new Error('restore profile kind lost authoritative state');
     try {
-      expect(Array.from(restored.state.eReplicas.values())[0]?.state.profile)
-        .toMatchObject({ entityKind: 'company', sectors: ['commerce', 'finance'] });
+      expect(Array.from(restored.state.eReplicas.values())[0]?.state.profile).toMatchObject({
+        entityKind: 'company',
+        sectors: ['commerce', 'finance'],
+      });
     } finally {
       await closeRecoveryEnv(restored);
     }
@@ -397,18 +424,30 @@ describe('restored checkpoint conflict policy', () => {
     const db = new MemoryRuntimeDb();
     const seed = `restore verify before swap ${process.pid} deterministic seed`;
     const base = (height: number, canonicalStateHash: string) => ({
-      currentDb: new MemoryRuntimeDb(), walDb: db, height, timestamp: height * 1_000,
-      docs: [], replicaMetas: [], canonicalEntityHashes: [], canonicalStateHash,
+      currentDb: new MemoryRuntimeDb(),
+      walDb: db,
+      height,
+      timestamp: height * 1_000,
+      docs: [],
+      replicaMetas: [],
+      canonicalEntityHashes: [],
+      canonicalStateHash,
       headConfig: {
-        schemaVersion: STORAGE_SCHEMA_VERSION, snapshotPeriodFrames: 100, retainSnapshots: 1,
-        epochMaxBytes: Number.MAX_SAFE_INTEGER, accountMerkleRadix: 16 as const,
+        schemaVersion: STORAGE_SCHEMA_VERSION,
+        snapshotPeriodFrames: 100,
+        retainSnapshots: 1,
+        epochMaxBytes: Number.MAX_SAFE_INTEGER,
+        accountMerkleRadix: 16 as const,
       },
       runtimeMachine: buildStorageRuntimeMachineSnapshot(createEmptyEnv(seed)),
-      runtimeOutputs: [], certifiedBoardNodes: [], accountJClaimNodes: [],
+      runtimeOutputs: [],
+      certifiedBoardNodes: [],
+      accountJClaimNodes: [],
     });
     await replaceRestoredStorageBase(base(1, computeCanonicalRuntimeStateHash(1, 1_000, [])));
-    await expect(replaceRestoredStorageBase(base(2, `0x${'99'.repeat(32)}`)))
-      .rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_CANONICAL_HASH_MISMATCH');
+    await expect(replaceRestoredStorageBase(base(2, `0x${'99'.repeat(32)}`))).rejects.toThrow(
+      'STORAGE_VERIFY_SNAPSHOT_CANONICAL_HASH_MISMATCH',
+    );
     expect(await readStorageHead(db)).toMatchObject({ latestHeight: 1, latestSnapshotHeight: 1 });
     expect(await verifyStorageTailIntegrity(db)).toMatchObject({ latestHeight: 1 });
   });

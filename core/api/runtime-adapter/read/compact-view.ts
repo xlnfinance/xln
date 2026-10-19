@@ -7,6 +7,7 @@ import type { StorageAccountDoc, StorageEntityCoreDoc } from '../../../storage/t
 import { compareAscii } from '../../../support/collections/sorted-map-index';
 import { copyAccountStateDomain } from '../../../protocol/state/account-input-clone';
 import { accountLendingRisk, type LendingRisk } from '../../../account/validation/lending-risk';
+import { accountLendingBalances } from './lending-balances';
 import {
   emptyPageMeta,
   withDefinedProp,
@@ -69,6 +70,8 @@ type RuntimeAdapterAccountDoc = Omit<StorageAccountDoc, 'state' | 'pendingWithdr
   state: RuntimeAdapterAccountStateDoc;
   /** Exact current exposure, including every signed claim and settlement hold. */
   lendingRisk: LendingRisk;
+  /** Signed lending claim value by token, from the left party's perspective. */
+  lendingBalances: ReadonlyMap<number, bigint>;
   /** Bodies stay redacted; zero here means the live Account queue is actually empty. */
   mempoolCount: number;
   activeDispute?: RuntimeAdapterActiveDispute;
@@ -162,6 +165,7 @@ export const compactAccountDocForView = (
   const compact: RuntimeAdapterAccountDoc = {
     // Compute against every claim before matching the visible token page.
     lendingRisk: compactMapHead(accountLendingRisk(doc), 100) ?? new Map(),
+    lendingBalances: compactMapHead(accountLendingBalances(doc), 100) ?? new Map(),
     state: {
       ...boundedState,
       domain: copyAccountStateDomain(doc.state.domain),

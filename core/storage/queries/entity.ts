@@ -1,12 +1,5 @@
-import {
-  inspectStorage,
-  readStorageHead,
-  type StorageHead,
-} from '..';
-import {
-  resolveRuntimeWalDbPath,
-  resolveStorageDbPath,
-} from '../runtime-dbs';
+import { inspectStorage, readStorageHead, type StorageHead } from '..';
+import { resolveRuntimeWalDbPath, resolveStorageDbPath } from '../runtime-dbs';
 import { verifyStorageTailIntegrity } from '../read/verify';
 import { assertCertifiedJHistoryIntegrity } from '../../jurisdiction/machine/local-history';
 import { projectAccountDoc } from '../read/projections';
@@ -14,6 +7,7 @@ import { normalizeEntityId } from '../keys';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { PersistenceQueryDeps } from './deps';
+import type { StorageEntityViewPage } from '../read/read';
 import { requireStorageDbOpen } from '../commit/availability';
 import {
   findReplicaForEntityId,
@@ -23,14 +17,11 @@ import {
 
 export type { StorageEntityViewQuery } from './entity-view-page';
 
-const inspectRuntimeStorage = async (
-  deps: PersistenceQueryDeps,
-  env: RuntimeReplica,
-) => {
+const inspectRuntimeStorage = async (deps: PersistenceQueryDeps, env: RuntimeReplica) => {
   const current = await inspectStorage({
     env,
-    tryOpenDb: (targetEnv) => deps.tryOpenStorageDb(targetEnv, 'current'),
-    getRuntimeDb: (targetEnv) => deps.getStorageDb(targetEnv, 'current'),
+    tryOpenDb: targetEnv => deps.tryOpenStorageDb(targetEnv, 'current'),
+    getRuntimeDb: targetEnv => deps.getStorageDb(targetEnv, 'current'),
   });
   const wal = await inspectStorage({
     env,
@@ -71,8 +62,7 @@ const inspectRuntimeStorage = async (
   return {
     head: wal?.head ?? current?.head ?? null,
     frameCount: wal?.frameCount ?? 0,
-    snapshotHeights: Array.from(new Set(wal?.snapshotHeights ?? []))
-      .sort((left, right) => left - right),
+    snapshotHeights: Array.from(new Set(wal?.snapshotHeights ?? [])).sort((left, right) => left - right),
     liveEntityCount: current?.liveEntityCount ?? 0,
     liveAccountCount: current?.liveAccountCount ?? 0,
     liveAccountFieldCount: current?.liveAccountFieldCount ?? 0,
@@ -84,22 +74,16 @@ const inspectRuntimeStorage = async (
     snapshotBytes: wal?.snapshotBytes ?? 0,
     liveBytes: current?.liveBytes ?? 0,
     walBytes: wal?.walBytes ?? 0,
-    totalBytes:
-      (current?.liveBytes ?? 0) +
-      (wal?.walBytes ?? 0),
+    totalBytes: (current?.liveBytes ?? 0) + (wal?.walBytes ?? 0),
     maxFrameBytes: wal?.maxFrameBytes ?? 0,
-    maxPhysicalValueBytes: Math.max(
-      current?.maxPhysicalValueBytes ?? 0,
-      wal?.maxPhysicalValueBytes ?? 0,
-    ),
+    maxPhysicalValueBytes: Math.max(current?.maxPhysicalValueBytes ?? 0, wal?.maxPhysicalValueBytes ?? 0),
     maxSnapshotBytes: wal?.maxSnapshotBytes ?? 0,
     epochDbs,
   };
 };
 
 export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
-  const getPersistedLatestHeight = (env: RuntimeReplica): Promise<number> =>
-    deps.resolvePersistedLatestHeight(env);
+  const getPersistedLatestHeight = (env: RuntimeReplica): Promise<number> => deps.resolvePersistedLatestHeight(env);
 
   const withReplayedEnv = async <T>(
     env: RuntimeReplica,
@@ -111,16 +95,11 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
       // caller supplies an exact historical height. Historical inspection has
       // exactly one path: replay the authoritative Runtime input journal.
       const latestHeight = await deps.resolvePersistedLatestHeight(env);
-      const restored = await deps.loadEnvFromStorageByReplay(
-        env.runtimeId,
-        env.runtimeSeed,
-        height ?? latestHeight,
-        {
-          prunedTargetReturnsNull: true,
-          borrowRuntimeWalFrom: env,
-          readOnly: true,
-        },
-      );
+      const restored = await deps.loadEnvFromStorageByReplay(env.runtimeId, env.runtimeSeed, height ?? latestHeight, {
+        prunedTargetReturnsNull: true,
+        borrowRuntimeWalFrom: env,
+        readOnly: true,
+      });
       if (!restored) return null;
       try {
         return await read(restored.env);
@@ -134,49 +113,67 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     env: RuntimeReplica,
     entityId: string,
     height?: number,
-  ): Promise<EntityState | null> => withReplayedEnv(env, height, async restored => {
-    const replica = findReplicaForEntityId(restored.state.eReplicas.values(), entityId);
-    if (!replica) return null;
-    assertCertifiedJHistoryIntegrity(replica.state);
-    return replica.state;
-  });
+  ): Promise<EntityState | null> =>
+    withReplayedEnv(env, height, async restored => {
+      const replica = findReplicaForEntityId(restored.state.eReplicas.values(), entityId);
+      if (!replica) return null;
+      assertCertifiedJHistoryIntegrity(replica.state);
+      return replica.state;
+    });
 
   const loadEntityAccountDocFromStorageDb = (
     env: RuntimeReplica,
     entityId: string,
     counterpartyId: string,
     height?: number,
-  ) => withReplayedEnv(env, height, async restored => {
-    const replica = findReplicaForEntityId(restored.state.eReplicas.values(), entityId);
-    if (!replica) return null;
-    const account = replica.state.accounts.get(normalizeEntityId(counterpartyId));
-    return account ? projectAccountDoc(account) : null;
-  });
+  ) =>
+    withReplayedEnv(env, height, async restored => {
+      const replica = findReplicaForEntityId(restored.state.eReplicas.values(), entityId);
+      if (!replica) return null;
+      const account = replica.state.accounts.get(normalizeEntityId(counterpartyId));
+      return account ? projectAccountDoc(account) : null;
+    });
 
-  const loadEntityViewPageFromStorageDb = (
+  const loadEntityViewPagesFromStorageDb = (
+    env: RuntimeReplica,
+    entityIds: readonly string[],
+    height: number,
+    query?: StorageEntityViewQuery,
+  ) =>
+    withReplayedEnv(env, height, async restored => {
+      // All pages borrow one exact checkpoint/WAL reconstruction. Only the
+      // projected DTOs escape; withReplayedEnv still closes the replay on error.
+      const pages = new Map<string, StorageEntityViewPage>();
+      for (const entityId of entityIds) {
+        const replica = findReplicaForEntityId(restored.state.eReplicas.values(), entityId);
+        if (!replica) continue;
+        assertCertifiedJHistoryIntegrity(replica.state);
+        pages.set(normalizeEntityId(entityId), projectEntityViewPageFromReplica(replica, query));
+      }
+      return pages;
+    });
+
+  const loadEntityViewPageFromStorageDb = async (
     env: RuntimeReplica,
     entityId: string,
     height: number,
     query?: StorageEntityViewQuery,
-  ) => withReplayedEnv(env, height, async restored => {
-    const replica = findReplicaForEntityId(restored.state.eReplicas.values(), entityId);
-    if (!replica) return null;
-    assertCertifiedJHistoryIntegrity(replica.state);
-    return projectEntityViewPageFromReplica(replica, query);
-  });
+  ): Promise<StorageEntityViewPage | null> => {
+    const pages = await loadEntityViewPagesFromStorageDb(env, [entityId], height, query);
+    return pages?.get(normalizeEntityId(entityId)) ?? null;
+  };
 
   const listPersistedCheckpointHeights = (env: RuntimeReplica): Promise<number[]> =>
     deps.resolvePersistedCheckpointHeights(env);
 
   const readPersistedStorageHead = async (env: RuntimeReplica): Promise<StorageHead | null> => {
-    await requireStorageDbOpen(
-      () => deps.tryOpenRuntimeWalDb(env),
-      'runtime-wal:head',
-    );
+    await requireStorageDbOpen(() => deps.tryOpenRuntimeWalDb(env), 'runtime-wal:head');
     return readStorageHead(deps.getRuntimeWalDb(env));
   };
 
-  const verifyLiveRuntimeStorage = async (env: RuntimeReplica): Promise<{
+  const verifyLiveRuntimeStorage = async (
+    env: RuntimeReplica,
+  ): Promise<{
     ok: true;
     runtimeId: string;
     latestHeight: number;
@@ -194,6 +191,7 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     loadEntityStateFromStorageDb,
     loadEntityAccountDocFromStorageDb,
     loadEntityViewPageFromStorageDb,
+    loadEntityViewPagesFromStorageDb,
     inspectStorageDb: (env: RuntimeReplica) => inspectRuntimeStorage(deps, env),
     listPersistedCheckpointHeights,
     readPersistedStorageHead,

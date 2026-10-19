@@ -893,6 +893,7 @@ const createEmbeddedRuntimeAdapter = async (
       loadEntityState: (entityId, height) => xln.loadEntityStateFromStorageDb(env, entityId, height),
       loadEntityAccountDoc: (entityId, counterpartyId, height) => xln.loadEntityAccountDocFromStorageDb(env, entityId, counterpartyId, height),
       loadEntityViewPage: (entityId, height, query) => xln.loadEntityViewPageFromStorageDb(env, entityId, height, query),
+      loadEntityViewPages: (entityIds, height, query) => xln.loadEntityViewPagesFromStorageDb(env, entityIds, height, query),
       listEntityIdsAtHeight: (height) => xln.listPersistedEntityIdsAtHeight(env, height),
       readActivityPage: (opts) => xln.readPersistedRuntimeActivityPage(env, opts),
       readFrameReceipts: query =>

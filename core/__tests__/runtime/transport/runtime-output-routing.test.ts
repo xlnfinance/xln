@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { keccak256, toUtf8Bytes } from 'ethers';
+import cancelAckVector from '../../../../rscore/fixtures/native-cross-cancel-ack-v1.json';
+import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
+import { validateDeliverableEntityInput } from '../../../runtime/delivery/topology/routing-validation';
 
 import { routeInboundP2PEntityInput, resolveRuntimeIdForEntity } from '../../../runtime/delivery/topology/entity-routing';
 import {
@@ -188,6 +191,22 @@ const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): DeliverableEnt
 };
 
 describe('runtime output routing', () => {
+  test('captured ACK and complete cross-J pair dispatch in committed unit order', () => {
+    const captured = cancelAckVector.rowsBase64.map(row =>
+      validateDeliverableEntityInput(decodeBuffer(Buffer.from(row, 'base64'))),
+    );
+    for (const order of [
+      [0, 1, 2],
+      [1, 2, 0],
+    ]) {
+      const outputs = order.map(index => captured[index]!);
+      const before = outputs.map(output => encodeBuffer(output));
+      const expected = outputs.map(({ sourceRuntimeFrame: _frame, ...input }) => input);
+      expect(dispatchFrameOutputs(outputs)).toEqual(expected);
+      expect(outputs.map(output => encodeBuffer(output))).toEqual(before);
+    }
+  });
+
   test('retained same-lane outputs keep their distinct committed Runtime frame envelopes', () => {
     const outputs = [14, 15].map((height): DeliverableEntityInput => ({
       runtimeId: runtimeId('81'),

@@ -92,7 +92,7 @@ describe('RuntimeP2P direct transport policy', () => {
     }]);
   });
 
-  test('relay_inbound_entity_inputs_rejected', async () => {
+  test('relay session authentication cannot bypass the envelope source signature', async () => {
     const errors: string[] = [];
     const env = {
       runtimeId: runtimeIdFor('relay-victim'),
@@ -132,11 +132,10 @@ describe('RuntimeP2P direct transport policy', () => {
       ): Promise<void>;
     }).acceptInboundEntityInputs.bind(p2p);
 
-    // Financial bytes never travel over a relay; even a "session authenticated"
-    // claim cannot admit them. The reject happens before source verification,
-    // profile prefetch or Runtime intake, and never touches the Runtime state.
+    // A relay's authenticated session is not end-to-end sender authority.
+    // Even a sessionAuthenticated claim cannot bypass the envelope signature.
     await expect(accept('relay', runtimeIdFor('relay-attacker'), envelope, 1, true))
-      .rejects.toThrow('P2P_RELAY_ENTITY_INPUTS_FORBIDDEN');
+      .rejects.toThrow('INBOUND_ENTITY_INPUTS_SOURCE_SIGNATURE_INVALID');
     expect(admitted).toBe(0);
     expect(sourceChecks).toBe(0);
     expect(env.infrastructure?.operatorStatus).toBeUndefined();

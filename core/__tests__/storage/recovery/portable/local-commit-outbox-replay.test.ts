@@ -8,6 +8,7 @@ import { applyEntityInput } from '../../../../entity/consensus';
 import type { EntityInput } from '../../../../entity/types';
 import { safeStringify } from '../../../../protocol/serialization';
 import { prepareLocallyAuthoredEntityTxs } from '../../../../entity/command';
+import { resetPerfPhases, snapshotPerfPhases } from '../../../../support/performance/profile';
 
 test('already-certified local Entity commits drain after WAL reopen without appending a frame', async () => {
   const seed = `local-commit-outbox-${process.pid}-${Date.now()}`;
@@ -73,9 +74,21 @@ test('already-certified local Entity commits drain after WAL reopen without appe
     await boot.jadapter.close();
     await closeRuntimeDb(env);
     await closeInfraDb(env);
-    const restored = await loadEnvFromDB(runtimeId, seed);
+    const previousProfile = process.env['XLN_RUNTIME_PROCESS_PROFILE'];
+    process.env['XLN_RUNTIME_PROCESS_PROFILE'] = '1';
+    resetPerfPhases();
+    let restored: Awaited<ReturnType<typeof loadEnvFromDB>>;
+    try {
+      restored = await loadEnvFromDB(runtimeId, seed);
+    } finally {
+      if (previousProfile === undefined) delete process.env['XLN_RUNTIME_PROCESS_PROFILE'];
+      else process.env['XLN_RUNTIME_PROCESS_PROFILE'] = previousProfile;
+    }
     if (!restored) throw new Error('TEST_WAL_RESTORE_MISSING');
     env = restored;
+    // Selecting the checkpoint and replaying its tail share one verified WAL
+    // handle. Reopening it repeats the same integrity decode before any work.
+    expect(snapshotPerfPhases().phases['storage.open.verifyWalTail']?.count).toBe(1);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
     for (let round = 0; round < 4; round++) await processRuntime(env);

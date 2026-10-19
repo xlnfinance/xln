@@ -19,24 +19,38 @@ import { decodeBuffer } from '../../../storage/codec/codec';
 import { groupAtomicCrossJAdmissionOutputs } from '../../../runtime/delivery/pending';
 import { validateDeliverableEntityInput } from '../../../runtime/delivery/topology/routing-validation';
 
-test('native H85 interleaved close WAL has the exact TS target-first atomic envelope oracle', async () => {
-  const capsule = await Bun.file(new URL('../../../../rscore/fixtures/native-cross-close-interleaved-v1.json', import.meta.url)).json();
+test('native H85 interleaved close WAL has the exact TS input-order atomic envelope oracle', async () => {
+  const capsule = await Bun.file(
+    new URL('../../../../rscore/fixtures/native-cross-close-interleaved-v1.json', import.meta.url),
+  ).json();
   const inputs = (capsule.rowsBase64 as string[]).map(row =>
-    validateDeliverableEntityInput(decodeBuffer(Buffer.from(row, 'base64'))));
+    validateDeliverableEntityInput(decodeBuffer(Buffer.from(row, 'base64'))),
+  );
   const byTarget = new Map<string, typeof inputs>();
   for (const input of inputs) {
     const group = byTarget.get(input.runtimeId) ?? [];
     group.push(input);
     byTarget.set(input.runtimeId, group);
   }
-  const groups = [...byTarget].flatMap(([target, rows]) => groupAtomicCrossJAdmissionOutputs(rows).map(unit => ({
-    target, atomic: unit.atomic, complete: unit.complete, indices: unit.outputs.map(input => inputs.indexOf(input)),
-  })));
+  const groups = [...byTarget].flatMap(([target, rows]) =>
+    groupAtomicCrossJAdmissionOutputs(rows).map(unit => ({
+      target,
+      atomic: unit.atomic,
+      complete: unit.complete,
+      indices: unit.outputs.map(input => inputs.indexOf(input)),
+    })),
+  );
   expect(groups).toEqual(capsule.expectedGroups);
-  expect(groups.map(group => group.indices)).toEqual([[3, 0], [2, 1]]);
-  expect(inputs.map(input => input.sourceRuntimeFrame)).toEqual(Array.from({ length: 4 }, () => ({
-    height: capsule.height, timestamp: capsule.timestamp,
-  })));
+  expect(groups.map(group => group.indices)).toEqual([
+    [0, 3],
+    [1, 2],
+  ]);
+  expect(inputs.map(input => input.sourceRuntimeFrame)).toEqual(
+    Array.from({ length: 4 }, () => ({
+      height: capsule.height,
+      timestamp: capsule.timestamp,
+    })),
+  );
 });
 
 const entity = (byte: string): string => `0x${byte.repeat(64)}`;
@@ -99,9 +113,15 @@ describe('production cross-j swap load boundaries', () => {
       { label: 'H1', engine: 'ts' as const, token: 'hub-capability', wsUrl: 'wss://h1.xln.finance/rpc' },
     ];
     for (const portBase of [20_000, 30_000]) {
-      for (const [label, offset] of [['Custody', 8], ['H1', 10]] as const) {
+      for (const [label, offset] of [
+        ['Custody', 8],
+        ['H1', 10],
+      ] as const) {
         const bound = bindCrossRuntimeEntry(entries, label, portBase);
-        expect(bound).toEqual({ ...entries.find(entry => entry.label === label)!, wsUrl: `ws://127.0.0.1:${portBase + offset}/rpc` });
+        expect(bound).toEqual({
+          ...entries.find(entry => entry.label === label)!,
+          wsUrl: `ws://127.0.0.1:${portBase + offset}/rpc`,
+        });
         expect(new URL(bound.wsUrl).hostname).toBe('127.0.0.1');
       }
     }

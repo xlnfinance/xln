@@ -1,4 +1,7 @@
-import { getHubOpeningCredit, readSavedCollateralPolicy } from '@xln/frontend/lib/utils/onboarding/onboardingPreferences';
+import {
+  getHubOpeningCredit,
+  readSavedCollateralPolicy,
+} from '@xln/frontend/lib/utils/onboarding/onboardingPreferences';
 import { sameJurisdictionIdentity } from '@xln/core/jurisdiction/machine/jurisdiction-runtime';
 import { useState } from 'react';
 import { Sheet } from '../Sheet';
@@ -8,11 +11,18 @@ import { accountDisputeConfig, gossipProfile } from '../../runtime/financial/rol
 import { parseAmount, shortId, plainAmount } from '../../runtime/format';
 import { getTokenMeta } from '../../runtime/token-meta';
 import type { WalletView } from '../../runtime/views';
+import type { RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
+import { useAdapterRead } from '../../runtime/hooks';
 
 export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onClose: () => void }) {
   const toast = useApp(s => s.toast);
   const selectedTokenId = useApp(s => s.selectedTokenId);
   const [targetId, setTargetId] = useState('');
+  const peerRead = useAdapterRead<RuntimeAdapterEntitySummary[]>(
+    /^0x[0-9a-f]{64}$/.test(targetId) ? 'entities' : null,
+    { entityId: targetId },
+  );
+  const summaries = peerRead.data ?? wallet.summaries;
   const [creditText, setCreditText] = useState('');
   const [policy] = useState(readSavedCollateralPolicy);
   const [autoCollateral, setAutoCollateral] = useState(policy.mode === 'autopilot');
@@ -23,7 +33,7 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
   const meta = getTokenMeta(selectedTokenId);
   const existing = new Set(wallet.accounts.map(account => account.counterpartyId));
   const jurisdiction = wallet.frame?.activeEntity?.core.config.jurisdiction;
-  const targetJurisdiction = wallet.summaries.find(summary => summary.entityId.toLowerCase() === targetId)?.jurisdiction;
+  const targetJurisdiction = summaries.find(summary => summary.entityId.toLowerCase() === targetId)?.jurisdiction;
   const compatibleTarget = sameJurisdictionIdentity(jurisdiction, targetJurisdiction);
   const candidates = wallet.summaries
     .filter(summary => sameJurisdictionIdentity(jurisdiction, summary.jurisdiction))
@@ -57,7 +67,7 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
       const disputeConfig = accountDisputeConfig({
         entityId: wallet.entityId,
         counterpartyId: targetId,
-        summaries: wallet.summaries,
+        summaries,
       });
       await sendEntityTxs(wallet.entityId, wallet.signerId, [
         {
@@ -102,7 +112,10 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
             type="button"
             className={`picker-option${targetId === id ? ' active' : ''}`}
             style={{ padding: '10px 10px' }}
-            onClick={() => { setTargetId(id); setCreditText(wallet.hubs.has(id) ? plainAmount(getHubOpeningCredit(meta.decimals), meta.decimals) : '0'); }}
+            onClick={() => {
+              setTargetId(id);
+              setCreditText(wallet.hubs.has(id) ? plainAmount(getHubOpeningCredit(meta.decimals), meta.decimals) : '0');
+            }}
           >
             <span className="t">
               {wallet.names.get(id) || 'Entity'}
@@ -118,12 +131,30 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
           className="input mono"
           placeholder="or paste an entity id, 0x…"
           value={targetId}
-          onChange={event => { const id = event.target.value.trim().toLowerCase(); setTargetId(id); setCreditText(wallet.hubs.has(id) ? plainAmount(getHubOpeningCredit(meta.decimals), meta.decimals) : '0'); }}
+          onChange={event => {
+            const id = event.target.value.trim().toLowerCase();
+            setTargetId(id);
+            setCreditText(wallet.hubs.has(id) ? plainAmount(getHubOpeningCredit(meta.decimals), meta.decimals) : '0');
+          }}
           spellCheck={false}
           data-testid="open-account-target"
         />
       </div>
-      {targetId && !compatibleTarget ? <p className="note" role="alert">Choose a counterparty in the same jurisdiction and contract stack. Unknown networks cannot be verified.</p> : null}
+      {peerRead.loading ? (
+        <p className="note" role="status">
+          Verifying counterparty profile…
+        </p>
+      ) : null}
+      {peerRead.error ? (
+        <p className="note" role="alert">
+          {peerRead.error}
+        </p>
+      ) : null}
+      {targetId && !compatibleTarget && !peerRead.loading ? (
+        <p className="note" role="alert">
+          Choose a counterparty in the same jurisdiction and contract stack. Unknown networks cannot be verified.
+        </p>
+      ) : null}
       <div className="field">
         <span className="field-label">Credit line you extend · optional</span>
         <div className="field-row">

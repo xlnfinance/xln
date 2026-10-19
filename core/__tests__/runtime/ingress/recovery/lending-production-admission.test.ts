@@ -12,8 +12,8 @@ import type { EntityTx } from '../../../../types/entity-tx';
 import { createTestJReplica } from '../../../helpers/j-replica';
 
 const jurisdiction = {
-  name: 'DeferredAdmission',
-  address: 'browservm://deferred-admission',
+  name: 'LendingAdmission',
+  address: 'browservm://lending-admission',
   chainId: 31337,
   depositoryAddress: `0x${'41'.repeat(20)}`,
   entityProviderAddress: `0x${'42'.repeat(20)}`,
@@ -72,9 +72,9 @@ const commands: EntityTx[] = [
 ];
 
 test.each(['0', '1'])(
-  'deferred Entity commands preserve the same signer queue (fail-fast=%s)',
+  'current lending admission preserves committed terms across a rejected signed request (fail-fast=%s)',
   async policy => {
-    const seed = `deferred-entity-admission-runtime-${policy}`;
+    const seed = `lending-entity-admission-runtime-${policy}`;
     const env = createEmptyEnv(seed);
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
     registerSignerKey(seed, signerId, deriveSignerKeySync(seed, '1'));
@@ -106,8 +106,13 @@ test.each(['0', '1'])(
     });
     const current = () => {
       const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
-      if (!replica) throw new Error('DEFERRED_ADMISSION_REPLICA_MISSING');
+      if (!replica) throw new Error('LENDING_ADMISSION_REPLICA_MISSING');
       return replica;
+    };
+    const readTerms = () => {
+      const terms = current().state.lending?.terms;
+      if (!terms) throw new Error('LENDING_ADMISSION_TERMS_MISSING');
+      return [...terms.values()];
     };
     try {
       await commitRuntimeInput(env, {
@@ -133,54 +138,54 @@ test.each(['0', '1'])(
       await processRuntime(env, [{ entityId, signerId, entityTxs: [{ type: 'setHubConfig', data: {} }] }]);
       await converge(env, 10);
 
+      const terms = commands[0];
+      const offer = commands[2];
+      if (!terms || !offer) throw new Error('LENDING_ADMISSION_COMMAND_MISSING');
       const state = current().state;
       const before = safeStringify(state);
-      for (const tx of commands) {
-        const result = await applyEntityTx(env, state, tx, { mutableFrameState: true });
-        expect(result.skippedError).toBe(`ENTITY_TX_KIND_OUT_OF_PROFILE:${tx.type}`);
-        expect(result.newState).toBe(state);
-        expect(result.outputs).toEqual([]);
-        expect(result.storageChanges).toEqual([]);
-        expect(result.candidateEffects).toEqual([]);
-        expect(result.accountTxs).toBeUndefined();
-        expect(safeStringify(state)).toBe(before);
-      }
+      const invalid = await applyEntityTx(env, state, offer, { mutableFrameState: true });
+      expect(invalid.skippedError).toBe(`LENDING_HUB_ACCOUNT_MISSING:${peer}`);
+      expect(invalid.newState).toBe(state);
+      expect(invalid.outputs).toEqual([]);
+      expect(invalid.storageChanges).toEqual([]);
+      expect(invalid.candidateEffects).toEqual([]);
+      expect(invalid.accountTxs).toBeUndefined();
+      expect(safeStringify(state)).toBe(before);
 
-      // Raw inputs from the same signer are merged and signed during admission.
-      // A deferred command must be rejected before that merge; it must neither
-      // mutate the Lendbook nor erase the legitimate commands around it.
-      const queue: EntityTx[] = [
-        { type: 'profile-update', data: { profile: { entityId, name: 'Preserved before rejection' } } },
-        ...commands,
-        { type: 'setHubConfig', data: { baseFee: 99n } },
-      ];
-      const applied = processRuntime(
-        env,
-        queue.map(tx => ({ entityId, signerId, entityTxs: [tx] })),
-      );
-      if (policy === '1') await expect(applied).rejects.toThrow('REMOTE_INPUT_REJECTED');
-      else await applied;
+      // Adjacent local actions are one signed atomic command. Commit the valid
+      // governance command first; a later invalid command must not erase it or
+      // consume the nonce needed by the next independent valid command.
+      await processRuntime(env, [
+        {
+          entityId,
+          signerId,
+          entityTxs: [
+            { type: 'profile-update', data: { profile: { entityId, name: 'Preserved before rejection' } } },
+            terms,
+            { type: 'setHubConfig', data: { baseFee: 99n } },
+          ],
+        },
+      ]);
       await converge(env, 20);
-      expect(env.infrastructure?.halted).not.toBe(true);
-      expect(current().mempool).toHaveLength(0);
-      expect(current().state.accounts.size).toBe(0);
-      expect(current().state.lending).toBeUndefined();
-      expect(current().state.profile.name).toBe('Preserved before rejection');
-      expect(current().state.hubRebalanceConfig?.baseFee).toBe(99n);
-    const rejected = logs.filter(event => event.message === 'entity_input.rejected');
-      expect(rejected.map(event => event['rejectionCode'])).toEqual(
-        commands.map(tx => `ENTITY_TX_KIND_OUT_OF_PROFILE:${tx.type}`),
-      );
-      const signed = prepareLocallyAuthoredEntityTxs(env, current().state, signerId, [commands[2]!])[0];
-      if (!signed) throw new Error('DEFERRED_ADMISSION_SIGNED_COMMAND_MISSING');
+      expect(readTerms()).toEqual([terms.data]);
+      const committed = safeStringify(current().state);
+      const signed = prepareLocallyAuthoredEntityTxs(env, current().state, signerId, [offer])[0];
+      if (!signed) throw new Error('LENDING_ADMISSION_SIGNED_COMMAND_MISSING');
       const signedBytes = safeStringify(signed);
       await processRuntime(env, [{ entityId, signerId, entityTxs: [signed] }]);
       await converge(env, 10);
       expect(safeStringify(signed)).toBe(signedBytes);
-      expect(current().state.lending).toBeUndefined();
+      expect(safeStringify(current().state)).toBe(committed);
+      expect(env.infrastructure?.halted).not.toBe(true);
+      expect(current().mempool).toHaveLength(0);
+      expect(current().state.accounts.size).toBe(0);
+      expect(current().state.profile.name).toBe('Preserved before rejection');
+      expect(current().state.hubRebalanceConfig?.baseFee).toBe(99n);
+      expect(logs.filter(event => event.message === 'entity_input.rejected')).toEqual([]);
+      expect(readTerms()).toEqual([terms.data]);
       expect(
         logs.filter(event => event.message === 'entity_input.batch_tx_evicted').map(event => event['rejection']),
-      ).toEqual(['ENTITY_TX_KIND_OUT_OF_PROFILE:lendingOffer']);
+      ).toEqual([`LENDING_HUB_ACCOUNT_MISSING:${peer}`]);
       const height = env.state.height;
       await processRuntime(env, [
         { entityId, signerId, entityTxs: [{ type: 'setHubConfig', data: { baseFee: 100n } }] },

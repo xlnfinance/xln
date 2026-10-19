@@ -17,6 +17,7 @@ hash_contract_inputs() {
   (
     cd "$ROOT_DIR"
     find \
+      scripts/sync-contract-artifacts.sh \
       jurisdictions/contracts \
       jurisdictions/scripts/generate-typechain.cjs \
       jurisdictions/hardhat.config.ts \
@@ -83,54 +84,19 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 export XLN_TYPECHAIN_OUT_DIR="$TYPECHAIN_BUILD_DIR"
 
-# Hardhat needs a Node runtime, not the Bun one that runs the rest of the repo.
-# Pin the majors Hardhat states support for, but do not refuse a newer runtime:
-# the machine's default Node moves ahead of that list long before Hardhat breaks
-# on it, and a stale ceiling turns `bun run dev` into a hard stop for no reason.
-MIN_NODE_MAJOR=20
-KNOWN_GOOD_NODE_MAJORS="20 22 24"
+# Hardhat uses the current configured Node. Do not silently select an older
+# Homebrew installation or a harness-private runtime ahead of the user's PATH.
+NODE_BIN="${XLN_NODE_BIN:-$(command -v node || true)}"
+if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
+  echo "[contracts-sync] ERROR: Node is required; set XLN_NODE_BIN or install it on PATH" >&2
+  exit 1
+fi
+NODE_VERSION="$("$NODE_BIN" --version)"
+echo "[contracts-sync] node=$NODE_BIN version=$NODE_VERSION"
 
-node_major_of() {
-  "$1" -p "process.versions.node.split('.')[0]" 2>/dev/null || true
-}
-
-choose_supported_node() {
-  local candidates=()
-  if [[ -n "${XLN_NODE_BIN:-}" ]]; then
-    candidates+=("$XLN_NODE_BIN")
-  fi
-  candidates+=(
-    "$ROOT_DIR/.node/bin/node"
-    "$HOME/.cache/codex-runtimes/codex-primary-core/dependencies/node/bin/node"
-    "/opt/homebrew/opt/node@24/bin/node"
-    "/opt/homebrew/opt/node@22/bin/node"
-    "/opt/homebrew/opt/node@20/bin/node"
-    "$(command -v node || true)"
-  )
-
-  local candidate major
-  for candidate in "${candidates[@]}"; do
-    if [[ -z "$candidate" || ! -x "$candidate" ]]; then
-      continue
-    fi
-    major="$(node_major_of "$candidate")"
-    if [[ ! "$major" =~ ^[0-9]+$ ]] || (( major < MIN_NODE_MAJOR )); then
-      continue
-    fi
-    if [[ " $KNOWN_GOOD_NODE_MAJORS " == *" $major "* ]]; then
-      echo "$candidate"
-      return 0
-    fi
-  done
-
-  echo "[contracts-sync] ERROR: Hardhat needs Node $MIN_NODE_MAJOR or newer. Current node: $(node -v 2>/dev/null || echo missing). Set XLN_NODE_BIN to a supported node binary." >&2
-  return 1
-}
-
-NODE_BIN="$(choose_supported_node)"
 export PATH="$(dirname "$NODE_BIN"):$ROOT_DIR/node_modules/.bin:$HOME/.bun/bin:$PATH"
 
-contract_input_hash="$(hash_contract_inputs)"
+contract_input_hash="$( { hash_contract_inputs; printf '%s\n' "$NODE_VERSION"; } | shasum -a 256 | awk '{print $1}')"
 contract_output_hash="$(hash_contract_outputs)"
 cached_input_hash="$(cat "$CONTRACT_INPUT_CACHE" 2>/dev/null || true)"
 cached_output_hash="$(cat "$CONTRACT_OUTPUT_CACHE" 2>/dev/null || true)"

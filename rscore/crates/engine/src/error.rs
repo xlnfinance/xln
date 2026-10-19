@@ -73,8 +73,6 @@ pub enum StateError {
     BoardAuthorityCounterpartyMismatch { expected: String, resolved: String },
     #[error("ACCOUNT_FRAME_TX_UNSUPPORTED:{0}")]
     UnsupportedFrameTx(&'static str),
-    #[error("ACCOUNT_TX_KIND_OUT_OF_PROFILE:{0} (profile: pay/HTLC/same-J swap/j-event/rebalance)")]
-    AccountTxKindOutOfProfile(&'static str),
     /// FX-1 (proofs/fixes.md D2): `RebalancePolicy.policyVersion` outside the
     /// protocol range `0..=MAX_POLICY_VERSION`. Distinct from
     /// `UnsupportedFrameTx`, which names an unmodelled kind, not a field range.

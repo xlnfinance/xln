@@ -7,10 +7,14 @@ test('hub opening excludes foreign stacks and rejects their pasted IDs', { tag: 
   test.setTimeout(60_000);
   await enterStack(page);
   const foreignId = await page.evaluate(async () => {
-    const debug = (window as Window & { __xln?: {
-      adapter(): RuntimeAdapter | null;
-      store: { getState(): { activeEntityId: string | null } };
-    } }).__xln;
+    const debug = (
+      window as Window & {
+        __xln?: {
+          adapter(): RuntimeAdapter | null;
+          store: { getState(): { activeEntityId: string | null } };
+        };
+      }
+    ).__xln;
     if (!debug) throw new Error('Wallet diagnostics unavailable');
     const adapter = debug.adapter();
     const entityId = debug.store.getState().activeEntityId;
@@ -21,6 +25,9 @@ test('hub opening excludes foreign stacks and rejects their pasted IDs', { tag: 
     if (!foreign) throw new Error('Foreign-chain hub fixture missing');
     return foreign.entityId;
   });
+  await page.getByTestId('wallet-tutorial').click();
+  await page.getByTestId('tour-chapter').selectOption('hubs');
+  await expect(page.getByTestId('tour')).toHaveAttribute('data-target', 'home-open-account');
   await page.getByTestId('home-open-account').click();
   const sheet = page.getByRole('dialog', { name: 'Open account' });
   await expect(sheet.locator('.picker-option').filter({ hasText: 'on Tron' })).toHaveCount(0);

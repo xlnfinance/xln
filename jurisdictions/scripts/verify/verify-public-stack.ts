@@ -52,9 +52,9 @@ const targets = [
 ] as const;
 
 const buildInfos = readdirSync(buildInfoDirectory)
-  .filter((name) => name.endsWith('.json'))
-  .map((name) => JSON.parse(readFileSync(resolve(buildInfoDirectory, name), 'utf8')) as BuildInfo)
-  .filter((info) => info.solcLongVersion.startsWith('0.8.36+commit.'));
+  .filter(name => name.endsWith('.json'))
+  .map(name => JSON.parse(readFileSync(resolve(buildInfoDirectory, name), 'utf8')) as BuildInfo)
+  .filter(info => info.solcLongVersion.startsWith('0.8.37+commit.'));
 if (buildInfos.length === 0) throw new Error('VERIFY_SOLC_0836_BUILD_INFO_MISSING');
 
 const buildInfoFor = (identifier: string): BuildInfo => {

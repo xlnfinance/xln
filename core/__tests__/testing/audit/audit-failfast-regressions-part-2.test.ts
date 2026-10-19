@@ -183,6 +183,11 @@ import {
 
 import {
   createEmptyEnv,
+  closeRuntimeDb,
+  closeInfraDb,
+  readPersistedFrameJournal,
+  replayRecoveryFrameJournals,
+  restoreEnvFromCheckpointSnapshot,
   processRuntime,
   registerEntityRuntimeHint,
   sendEntityInput,
@@ -213,6 +218,8 @@ import { validateStorageAccountDocValue } from '../../../storage/schema/authorit
 
 import { decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/codec';
 
+import { decodeAccountInput } from '../../../account/validation/input-validation';
+import { buildRuntimeRecoveryCheckpointSnapshot } from '../../../storage/wal/snapshot';
 import { createDefaultDelta } from '../../../account/state/delta';
 
 
@@ -754,6 +761,188 @@ describe('audit fail-fast regressions', () => {
       wrapped[0],
     );
     expect(Array.from(transformerArguments.secrets)).toEqual([secret]);
+  });
+
+  test('bundled financial ACK preserves committed payment effects before disputing its signed successor', async () => {
+    const seed = `bundled-financial-ack-invalid-successor-${crypto.randomUUID()}`;
+    const env = createEmptyEnv(seed);
+    env.state.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+    const right = left === first ? second : first;
+    attachSigningReplica(env, left.entityId, left.signerId);
+    attachSigningReplica(env, right.entityId, right.signerId);
+    const secret = `0x${'94'.repeat(32)}`;
+    const hashlock = hashHtlcSecret(secret);
+    const resolve: AccountTx = {
+      type: 'htlc_resolve',
+      data: { lockId: hashlock, outcome: 'secret', secret },
+    };
+    const proposer = makePersistentAccount(left.entityId, right.entityId);
+    proposer.mempool = [resolve];
+    proposer.state.deltas = proposer.state.deltas.updated(1, {
+      ...createDefaultDelta(1),
+      rightHold: 7n,
+      rightCreditLimit: 100n,
+    });
+    proposer.state.locks = proposer.state.locks.updated(hashlock, {
+      lockId: hashlock,
+      hashlock,
+      timelock: 100_000n,
+      revealBeforeHeight: 100,
+      amount: 7n,
+      tokenId: 1,
+      senderIsLeft: false,
+      createdHeight: 0,
+      createdTimestamp: 0,
+    });
+    const peer = forkAccountReplicaShell(proposer);
+    peer.mempool = [];
+    peer.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
+    const context = createAccountConsensusContext(env);
+    const proposed = await proposeAccountFrame(context, proposer, env.state.timestamp, 0);
+    if (!isProposedAccountFrame(proposed)) throw new Error(proposeAccountFrameMessage(proposed));
+    const proposal = await attachAccountDraftHankosAsEntity(env, left.entityId, left.signerId, proposed);
+    const accepted = await applyAccountInput(context, peer, proposal, {
+      entityTimestamp: env.state.timestamp,
+      finalizedJHeight: 0,
+    });
+    if (!accepted.ok || !accepted.response || !accepted.hashesToSign)
+      throw new Error('FINANCIAL_PREFIX_PEER_ACK_REQUIRED');
+    const ack = await attachAccountDraftHankosAsEntity(env, right.entityId, right.signerId, {
+      accountInput: accepted.response,
+      hashesToSign: accepted.hashesToSign,
+    });
+    if (ack.kind !== 'ack') throw new Error('FINANCIAL_PREFIX_PURE_ACK_REQUIRED');
+    const invalidFrame: AccountFrame = {
+      height: peer.currentHeight + 1,
+      timestamp: env.state.timestamp,
+      jHeight: 0,
+      prevFrameHash: peer.currentFrame.stateHash,
+      accountStateRoot: computeAccountStateRoot(peer.state),
+      stateHash: '',
+      accountTxs: [{ type: 'set_credit_limit', data: { tokenId: 1, amount: -1n } }],
+    };
+    invalidFrame.stateHash = computeFrameHash(invalidFrame);
+    const [frameHanko] = await signEntityHashes(env, right.entityId, right.signerId, [invalidFrame.stateHash]);
+    if (!frameHanko) throw new Error('SIGNED_SUCCESSOR_HANKO_REQUIRED');
+    const input = decodeAccountInput(
+      { ...ack, kind: 'ack_frame', proposal: { frame: invalidFrame, frameHanko } },
+      'SIGNED_FINANCIAL_ACK_SUCCESSOR',
+    );
+    const state = provisionEntityState(env, makeEntityState(left.entityId));
+    state.config = makeSingleSignerConfigFor(left.signerId);
+    state.timestamp = env.state.timestamp;
+    state.lastFinalizedJHeight = 0;
+    state.accounts.set(right.entityId, proposer);
+    state.paybook.entries.set(hashlock, {
+      hashlock,
+      tokenId: 1,
+      amount: 7n,
+      inboundEntity: right.entityId,
+      createdTimestamp: env.state.timestamp,
+    });
+    const localReplica = env.state.eReplicas.get(`${left.entityId}:${left.signerId}`);
+    if (!localReplica) throw new Error('LOCAL_REPLICA_REQUIRED');
+    localReplica.state = state;
+    env.runtimeConfig = {
+      ...env.runtimeConfig,
+      storage: {
+        enabled: true,
+        snapshotPeriodFrames: 256,
+        retainSnapshots: 3,
+        epochMaxBytes: 1_000_000,
+        materializePeriodFrames: 1,
+        accountMerkleRadix: 16,
+      },
+    };
+    const checkpoint = buildRuntimeRecoveryCheckpointSnapshot(env);
+    const program = createBookIntentProgram();
+    const applied = await applyEntityTx(
+      env,
+      state,
+      { type: 'accountInput', data: input },
+      {
+        bookIntentSlot: program.openSlot(),
+      },
+    );
+    applyBookIntentProgram(applied.newState, program);
+    const committed = applied.newState.accounts.get(right.entityId);
+    if (!committed) throw new Error('COMMITTED_ACCOUNT_REQUIRED');
+    expect(committed.currentHeight).toBe(1);
+    expect(committed.state.deltas.get(1)?.offdelta).toBe(7n);
+    expect(committed.state.deltas.get(1)?.rightHold).toBe(0n);
+    expect(committed.state.locks.has(hashlock)).toBe(false);
+    expect(committed.status).toBe('disputed');
+    expect(applied.newState.jBatchState?.batch.disputeStarts).toHaveLength(1);
+    expect(committed.shadow.rejectedFrameEvidence?.frame).toEqual(invalidFrame);
+    // The same certified ACK cannot move money but leave its payment pending,
+    // omit history publication, or lose the owner's receive notification.
+    expect(applied.newState.paybook.entries.has(hashlock)).toBe(false);
+    expect(applied.candidateEffects).toEqual([
+      expect.objectContaining({ kind: 'accountFrameCommitted', entityId: left.entityId }),
+      expect.objectContaining({
+        kind: 'runtimeEvent',
+        eventName: 'HtlcReceived',
+        data: expect.objectContaining({ hashlock, amount: '7' }),
+      }),
+    ]);
+    const committedBeforeRepeat = safeStringify(committed);
+    const repeatedProgram = createBookIntentProgram();
+    const repeated = await applyEntityTx(
+      env,
+      applied.newState,
+      { type: 'accountInput', data: input },
+      {
+        bookIntentSlot: repeatedProgram.openSlot(),
+      },
+    );
+    applyBookIntentProgram(repeated.newState, repeatedProgram);
+    expect(safeStringify(repeated.newState.accounts.get(right.entityId))).toBe(committedBeforeRepeat);
+    expect(repeated.newState.paybook.entries.has(hashlock)).toBe(false);
+    expect(repeated.newState.jBatchState?.batch.disputeStarts).toHaveLength(1);
+    expect(repeated.candidateEffects).toEqual([]);
+    expect(repeated.outputs).toEqual([]);
+
+    const live = await restoreEnvFromCheckpointSnapshot(checkpoint, { runtimeSeed: seed, readOnly: true });
+    const replay = await restoreEnvFromCheckpointSnapshot(checkpoint, { runtimeSeed: seed, readOnly: true });
+    try {
+      live.scenarioMode = true;
+      live.quietRuntimeLogs = true;
+      await processRuntime(live, [
+        {
+          entityId: left.entityId,
+          signerId: left.signerId,
+          entityTxs: [{ type: 'accountInput', data: input }],
+        },
+      ]);
+      expect(live.state.height).toBe(1);
+      const journal = await readPersistedFrameJournal(live, live.state.height);
+      if (!journal) throw new Error('FINANCIAL_ACK_WAL_FRAME_REQUIRED');
+      await closeRuntimeDb(live);
+      await closeInfraDb(live);
+      let verifiedFrames = 0;
+      await replayRecoveryFrameJournals(replay, [journal], {
+        verify: true,
+        onVerifiedFrame: async () => {
+          verifiedFrames += 1;
+        },
+      });
+      expect(verifiedFrames).toBe(1);
+      const restored = replay.state.eReplicas.get(`${left.entityId}:${left.signerId}`);
+      if (!restored) throw new Error('RESTORED_FINANCIAL_ACK_ENTITY_REQUIRED');
+      expect(restored.state.accounts.get(right.entityId)?.state.deltas.get(1)?.offdelta).toBe(7n);
+      expect(restored.state.accounts.get(right.entityId)?.state.locks.has(hashlock)).toBe(false);
+      expect(restored.state.paybook.entries.has(hashlock)).toBe(false);
+      expect(replay.pendingNetworkOutputs).toEqual(live.pendingNetworkOutputs);
+    } finally {
+      await closeRuntimeDb(live);
+      await closeInfraDb(live);
+      await closeRuntimeDb(replay);
+      await closeInfraDb(replay);
+    }
   });
 
   test('signed deterministic replay failure freezes only the account and retains evidence', async () => {

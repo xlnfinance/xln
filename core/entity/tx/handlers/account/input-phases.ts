@@ -30,7 +30,7 @@ import { safeStringify } from '../../../../protocol/serialization';
 import { countOp } from '../../../../support/performance/op-counters';
 import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
 import {
-  applySuccessfulAccountInput,
+  applyCommittedAccountInput,
   type CommittedAccountEffects,
 } from './committed-input';
 import { handleUnsafeAccountFrame } from './dispute-input';
@@ -93,13 +93,20 @@ const rejectEmptyAccountInput = (context: AccountInputPhaseContext): never => {
   throw new AccountFrameRejectionError(error);
 };
 
-const finishAppliedAccountInput = async (
+const finishCommittedAccountInput = async (
   context: AccountInputPhaseContext,
-  result: Extract<Awaited<ReturnType<typeof applyAccountInput>>, { ok: true }>,
+  result: Omit<Extract<Awaited<ReturnType<typeof applyAccountInput>>, { ok: true }>, 'ok'>,
 ): Promise<AccountConsensusOutcome> => {
   const { env, state, input, account, counterpartyId, createdAccount, effects, options } = context;
-  const flushWork = await applySuccessfulAccountInput({
-    env, state, input, account, counterpartyId, createdAccount, result, effects,
+  const flushWork = await applyCommittedAccountInput({
+    env,
+    state,
+    input,
+    account,
+    counterpartyId,
+    createdAccount,
+    result,
+    effects,
     ...(options ? { options } : {}),
     checkpointProfile: context.checkpointProfile,
   });
@@ -107,9 +114,7 @@ const finishAppliedAccountInput = async (
   return {
     ...(flushWork === undefined ? {} : { forceAccountFlush: flushWork.force }),
     ...(flushWork?.response === undefined ? {} : { forcedAccountInput: flushWork.response }),
-    ...(result.accountJClaimNodeChanges
-      ? { accountJClaimNodeChanges: result.accountJClaimNodeChanges }
-      : {}),
+    ...(result.accountJClaimNodeChanges ? { accountJClaimNodeChanges: result.accountJClaimNodeChanges } : {}),
   };
 };
 
@@ -118,9 +123,17 @@ const finishDisputedAccountInput = async (
   result: Extract<Awaited<ReturnType<typeof applyAccountInput>>, { disposition: 'dispute' }>,
 ): Promise<AccountConsensusOutcome> => {
   const { env, state, input, account, counterpartyId, createdAccount, effects } = context;
+  // Publish the certified ACK prefix through the same financial followup path
+  // before freezing its invalid successor. Never reapply its Account transactions.
+  if (result.committedFrames?.length) await finishCommittedAccountInput(context, result);
   const bookIntentSlot = context.options?.bookIntentSlot;
   const unsafe = await handleUnsafeAccountFrame({
-    env, state, input, account, counterpartyId, createdAccount,
+    env,
+    state,
+    input,
+    account,
+    counterpartyId,
+    createdAccount,
     dispute: result.disputeRequired,
     effects,
     ...(bookIntentSlot ? { bookIntentSlot } : {}),
@@ -130,7 +143,7 @@ const finishDisputedAccountInput = async (
       unsafe.newState,
       { ...effects, outputs: unsafe.outputs },
       undefined,
-      undefined,
+      result.accountJClaimNodeChanges,
       undefined,
     ),
   };
@@ -187,7 +200,7 @@ export const finishAccountConsensusInput = async (
   context: AccountInputPhaseContext,
   result: Awaited<ReturnType<typeof applyAccountInput>>,
 ): Promise<AccountConsensusOutcome> => {
-  if (result.ok) return finishAppliedAccountInput(context, result);
+  if (result.ok) return finishCommittedAccountInput(context, result);
   if (isAccountInputDispute(result)) return finishDisputedAccountInput(context, result);
   if (result.disposition === 'rejected') return finishRejectedAccountInput(context, result);
   return assertNeverAccountResult(result);

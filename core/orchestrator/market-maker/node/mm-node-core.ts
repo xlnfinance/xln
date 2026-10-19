@@ -61,6 +61,7 @@ import { compareStableText, safeStringify } from '../../../protocol/serializatio
 import { registerRuntimeAdapterAuthSeed } from '../../../api/runtime-adapter/security/auth';
 import { type RuntimeAdapterSocket } from '../../../api/runtime-adapter/session/context';
 import { enqueueRuntimeInput, getP2P } from '../../../runtime';
+import { withRuntimeCommittedRead } from '../../../runtime/frame/lifecycle/writer-lock';
 import type { AccountReplica, SwapOffer } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityInput } from '../../../entity/types';
@@ -622,7 +623,7 @@ export const createMarketMakerEntityContext = async (
   const entityJurisdiction = toEntityJurisdictionConfig(jurisdiction);
   const consensusConfig = buildMarketMakerConsensusConfig(signerId, entityJurisdiction);
   const entityId = deriveMarketMakerEntityId(signerId, entityJurisdiction);
-  if (!getEntityReplicaById(env, entityId)) {
+  if (!(await withRuntimeCommittedRead(env, () => Boolean(getEntityReplicaById(env, entityId))))) {
     enqueueRuntimeInput(env, {
       runtimeTxs: [
         importEntity({
@@ -642,13 +643,11 @@ export const createMarketMakerEntityContext = async (
     await settleRuntimeFor(env, 35);
     await waitForReplicaReady(env, entityId);
   }
-  const committedReplica = getEntityReplicaById(env, entityId);
-  if (!committedReplica) throw new Error(`MM_ROLE_COMMITTED_REPLICA_MISSING:${entityId}`);
-  const roleEvidence: AccountRoleEvidence = {
-    entityId,
-    isHub: committedReplica.state.profile.isHub === true,
-    source: 'committed-profile',
-  };
+  const roleEvidence = await withRuntimeCommittedRead(env, (): AccountRoleEvidence => {
+    const committedReplica = getEntityReplicaById(env, entityId);
+    if (!committedReplica) throw new Error(`MM_ROLE_COMMITTED_REPLICA_MISSING:${entityId}`);
+    return { entityId, isHub: committedReplica.state.profile.isHub === true, source: 'committed-profile' };
+  });
   return {
     entityId,
     signerId,
@@ -713,10 +712,30 @@ export const waitForJurisdictionAdapter = async (
   );
 };
 
-const waitForReplicaReady = async (env: RuntimeReplica, entityId: string, rounds = 200): Promise<void> => {
-  const ready = await waitUntil(() => Boolean(getEntityReplicaById(env, entityId)), rounds, BOOTSTRAP_POLL_MS);
+export const waitForReplicaReady = async (env: RuntimeReplica, entityId: string, rounds = 200): Promise<void> => {
+  // Import mutates the live state before WAL commit. Do not admit subsequent
+  // bootstrap work or derive role authority from that unfinished frame.
+  const ready = await waitUntil(
+    () => withRuntimeCommittedRead(env, () => Boolean(getEntityReplicaById(env, entityId))),
+    rounds,
+    BOOTSTRAP_POLL_MS,
+  );
   if (!ready) {
-    throw new Error(`MM_REPLICA_NOT_READY entityId=${entityId}`);
+    throw new Error(
+      `MM_REPLICA_NOT_READY entityId=${entityId} evidence=${safeStringify({
+        height: env.state.height,
+        processStep: env.activeProcessProgressStep,
+        framePhase: env.infrastructure?.runtimeFramePhase,
+        backlog: getMarketMakerRuntimeBacklogSnapshot(env),
+        queuedRuntimeTxs: env.runtimeMempool.runtimeTxs.map(tx => tx.type),
+        entityIds: Array.from(env.state.eReplicas.values(), replica => replica.state.entityId),
+        lifecyclePhase: env.infrastructure?.lifecyclePhase,
+        wakeRequested: env.infrastructure?.wakeRequested,
+        waitingForWake: Boolean(env.infrastructure?.wakeLoop),
+        persistencePaused: env.infrastructure?.persistencePaused,
+        entityInputsReady: env.infrastructure?.entityInputsReady,
+      })}`,
+    );
   }
 };
 
@@ -814,7 +833,7 @@ export const readVisibleHubProfiles = (env: RuntimeReplica): HubProfile[] => {
 };
 
 export const marketMakerHubDirectRoutesOpen = (env: RuntimeReplica, hubEntityIds: readonly string[]): boolean =>
-  getP2P(env)?.prepareDirectEntityRoutes(hubEntityIds) ?? false;
+  getP2P(env)?.prepareEntityRoutes(hubEntityIds) ?? false;
 
 /** Hubs with an open direct route; asking also dials the ones still offline. */
 export const selectMarketMakerRoutedHubEntityIds = (env: RuntimeReplica, hubEntityIds: readonly string[]): string[] =>

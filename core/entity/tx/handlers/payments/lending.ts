@@ -1,3 +1,4 @@
+import { rejectFailure } from '../../../../protocol/errors/failure-taxonomy';
 import type { AccountTx } from '../../../../types/account';
 import type { EntityInput, EntityState } from '../../../types';
 import type { EntityTx } from '../../../../types/entity-tx';
@@ -17,13 +18,14 @@ type LendingResult = {
 
 const INTENT_ID_RE = /^(?:lend|borrow|loan)-[0-9a-f]{16}$/;
 
-const normalized = (value: unknown): string => String(value || '').trim().toLowerCase();
+const normalized = (value: unknown): string =>
+  String(value || '')
+    .trim()
+    .toLowerCase();
 
 const processingTrigger = (state: EntityState): EntityInput[] => {
   const firstValidator = state.config.validators[0];
-  return firstValidator
-    ? [{ entityId: state.entityId, signerId: firstValidator, entityTxs: [] }]
-    : [];
+  return firstValidator ? [{ entityId: state.entityId, signerId: firstValidator, entityTxs: [] }] : [];
 };
 
 const requireIntentId = (value: string, prefix: 'lend' | 'borrow' | 'loan'): void => {
@@ -41,7 +43,7 @@ const requireHubAccount = (state: EntityState, hubEntityId: string) => {
   const hub = normalized(hubEntityId);
   const account = state.accounts.get(hub);
   if (!hub || !account) {
-    throw new Error(`LENDING_HUB_ACCOUNT_MISSING:${hub || 'missing'}`);
+    throw rejectFailure('LENDING_HUB_ACCOUNT_MISSING', `LENDING_HUB_ACCOUNT_MISSING:${hub || 'missing'}`);
   }
   return { hubEntityId: hub, account };
 };
@@ -123,7 +125,13 @@ export const handleLendingRepayEntityTx = (
   const { hubEntityId, account } = requireHubAccount(entityState, entityTx.data.hubEntityId);
   requireIntentId(entityTx.data.loanId, 'loan');
   requirePositiveAmount(entityTx.data.amount, 'LENDING_REPAY');
-  const claim = account.state.subcontracts?.get(normalized(entityTx.data.loanId));
+  const loanId = normalized(entityTx.data.loanId);
+  // Full repayment removes the claim. A later signed request is stale user
+  // input, while a malformed claim that still exists remains an invariant error.
+  if (!account.state.subcontracts?.has(loanId)) {
+    throw rejectFailure('LENDING_LOAN_NOT_FOUND', `LENDING_LOAN_NOT_FOUND:${loanId}`);
+  }
+  const claim = account.state.subcontracts.get(loanId);
   assertLendingCovenant(claim);
   return queueAccountTx(entityState, hubEntityId, {
     type: 'lending_repay',

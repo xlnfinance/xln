@@ -106,7 +106,16 @@ describe('aggregate holds remain exactly representable', () => {
             kind: 'upsert',
             revision: 1,
             executorIsLeft: senderIsLeft,
-            ops: [{ type: 'rawDiff', tokenId: 1, leftDiff: -1n, rightDiff: -1n, collateralDiff: 2n, ondeltaDiff: 1n }],
+            ops: [
+              {
+                type: 'rawDiff',
+                tokenId: 1,
+                leftDiff: senderIsLeft ? 1n : 0n,
+                rightDiff: senderIsLeft ? 0n : 1n,
+                collateralDiff: -1n,
+                ondeltaDiff: senderIsLeft ? -1n : 0n,
+              },
+            ],
           },
         },
         senderIsLeft,

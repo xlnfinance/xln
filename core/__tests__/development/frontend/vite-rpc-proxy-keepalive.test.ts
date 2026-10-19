@@ -40,10 +40,7 @@ describe('Vite RPC proxy connection lifecycle', () => {
 
     expect(lifecycle).toEqual(['quiesce', 'reload', 'quiesce', 'reload']);
 
-    const switchSource = readFileSync(
-      join(process.cwd(), 'tests', 'utils', 'e2e-demo-users.ts'),
-      'utf8',
-    );
+    const switchSource = readFileSync(join(process.cwd(), 'tests', 'utils', 'e2e-demo-users.ts'), 'utf8');
     const switchStart = switchSource.indexOf('export async function switchToRuntimeId');
     const switchBody = switchSource.slice(switchStart);
     const quiesceIndex = switchBody.indexOf('await quiesceRuntimePage(page)');
@@ -54,14 +51,11 @@ describe('Vite RPC proxy connection lifecycle', () => {
     expect(resetIndex).toBeGreaterThan(reloadIndex);
   });
 
-  test.each(['vite.config.ts', 'vite.config.http.ts'])(
-    '%s keeps the bounded upstream pool fully reusable',
-    (file) => {
-      const config = source(file);
-      expect(config).toContain('keepAlive: true, maxSockets: 64, maxFreeSockets: 64');
-      expect(config.match(/agent: API_PROXY_AGENT/g)?.length).toBeGreaterThanOrEqual(4);
-    },
-  );
+  test.each(['vite.config.ts', 'vite.config.http.ts'])('%s keeps the bounded upstream pool fully reusable', file => {
+    const config = source(file);
+    expect(config).toContain('keepAlive: true, maxSockets: 64, maxFreeSockets: 64');
+    expect(config.match(/agent: API_PROXY_AGENT/g)?.length).toBeGreaterThanOrEqual(4);
+  });
 
   test('preview RPC middleware uses the same persistent upstream agent', () => {
     const config = source('vite.config.ts');
@@ -70,16 +64,22 @@ describe('Vite RPC proxy connection lifecycle', () => {
 
   test.each(['vite.config.ts', 'vite.config.http.ts'])(
     '%s tears down both WebSocket proxy directions when the browser closes first',
-    (file) => {
+    file => {
       const config = source(file);
       expect(config).toContain("from './vite-ws-proxy-lifecycle.ts'");
-      expect(config.match(/configure: configureWsProxyLifecycle/g)?.length).toBe(3);
+      for (const route of ['/ui', '/rpc', '/rpc2', '/relay']) {
+        const start = config.indexOf(`'${route}': {`);
+        expect(start).toBeGreaterThan(-1);
+        const proxy = config.slice(start, config.indexOf('\n      },', start));
+        expect(proxy).toContain('ws: true');
+        expect(proxy).toContain('configure: configureWsProxyLifecycle');
+      }
     },
   );
 
   test.each(['end', 'close', 'error'] as const)(
     'downstream %s preserves half-close replies and cleans up terminated sockets',
-    (event) => {
+    event => {
       let proxyReqWs: ((request: EventEmitter, incoming: object, downstream: PassThrough) => void) | undefined;
       const proxy = {
         on(name: string, listener: typeof proxyReqWs): void {
@@ -94,7 +94,7 @@ describe('Vite RPC proxy connection lifecycle', () => {
       const upstream = new PassThrough();
       const downstream = new PassThrough();
       let observedError: Error | undefined;
-      downstream.on('error', (error) => {
+      downstream.on('error', error => {
         observedError = error;
       });
       upstream.pipe(downstream);

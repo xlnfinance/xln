@@ -20,16 +20,18 @@ test('JMachine import builds a RuntimeInput importJ command', () => {
   const input = buildJMachineImportRuntimeInput(draft);
 
   expect(input.entityInputs).toEqual([]);
-  expect(input.runtimeTxs).toEqual([{
-    type: 'importJ',
-    data: {
-      name: 'local-sim-visual',
-      chainId: 31337,
-      ticker: 'SIM',
-      rpcs: [],
-      blockTimeMs: 1_000,
+  expect(input.runtimeTxs).toEqual([
+    {
+      type: 'importJ',
+      data: {
+        name: 'local-sim-visual',
+        chainId: 31337,
+        ticker: 'SIM',
+        rpcs: [],
+        blockTimeMs: 1_000,
+      },
     },
-  }]);
+  ]);
 });
 
 test('JMachine persisted metadata is deterministic and preserves existing createdAt', () => {
@@ -53,32 +55,33 @@ test('JMachine config normalization does not depend on a wall-clock substitute',
     blockTimeMs: 2_000,
   });
 
-  expect(config?.createdAt).toBe(deriveJMachineCreatedAt({
-    name: 'remote-hub',
-    mode: 'rpc',
-    chainId: 84532,
-    ticker: 'eth',
-    rpcs: ['https://base-sepolia.example'],
-    blockTimeMs: 2_000,
-  }));
+  expect(config?.createdAt).toBe(
+    deriveJMachineCreatedAt({
+      name: 'remote-hub',
+      mode: 'rpc',
+      chainId: 84532,
+      ticker: 'eth',
+      rpcs: ['https://base-sepolia.example'],
+      blockTimeMs: 2_000,
+    }),
+  );
 });
 
-test('Settings/UserMode JMachine import uses the shared runtime helper', () => {
-  const settings = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntitySettingsProjectionPanel.svelte', 'utf8');
+test('Settings JMachine import uses the shared runtime helper', () => {
+  const settings = readFileSync(
+    'frontend/src/lib/components/Entity/workspace/shell/EntitySettingsProjectionPanel.svelte',
+    'utf8',
+  );
   const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
-  const userMode = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
   const addJMachine = readFileSync('frontend/src/lib/components/Jurisdiction/AddJMachine.svelte', 'utf8');
   const store = readFileSync('frontend/src/lib/stores/network/jmachineStore.ts', 'utf8');
   const helper = readFileSync('frontend/src/lib/components/Jurisdiction/import-jmachine-runtime.ts', 'utf8');
 
   expect(settings).toContain('onImportJMachine(event.detail)');
   expect(tabs).toContain('await importJMachineViaRuntime(env, detail)');
-  expect(userMode).toContain('await importJMachineViaRuntime(env, event.detail)');
-  expect(userMode).toContain('data-testid="user-mode-jmachine-error"');
   expect(helper).toContain('J_MACHINE_IMPORT_COMMIT_WAIT_MS = 3_000');
   expect(helper).toContain('while (!nextEnv.state.jReplicas?.get?.(normalized.name)');
   expect(helper).toContain('await sleep(J_MACHINE_IMPORT_COMMIT_POLL_MS)');
-  expect(userMode).not.toContain('[ensureSelfEntities] No J-machines');
   expect(addJMachine).not.toContain('Date.now()');
   expect(store).not.toContain('Date.now()');
 });

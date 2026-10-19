@@ -15,7 +15,7 @@ const diagnosticFiles = [
   {
     path: 'frontend/src/lib/components/Entity/account/ui/CreditForm.svelte',
     importLine: "import { errorLog } from '../../../../stores/errorLogStore';",
-    logLine: "errorLog.log('Credit action failed', 'Credit Form'",
+    logLine: "errorLog.log(`${label} failed`, 'Credit Form'",
   },
   {
     path: 'frontend/src/lib/components/Entity/workspace/shell/EntitySettingsProjectionPanel.svelte',

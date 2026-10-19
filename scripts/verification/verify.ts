@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { repository, sourceProblem, sourceState, type SourceState } from './git';
 import { runBoundedCommand, type CommandResult } from './process';
 
-const CHECK_TIMEOUT_MS = 60_000;
+// The aggregate release check includes the full repository lint and parallel gates;
+// its measured 186-second run exceeds the ordinary single-check 60-second budget.
+const CHECK_TIMEOUT_MS = 300_000;
 
 const toolVersion = (command: string, args: string[]) => {
   try {
@@ -61,7 +63,7 @@ export const verify = async (cwd: string) => {
     after = sourceState(root);
     problem ??= sourceProblem(after);
     if (after.head !== before.head || after.tree !== before.tree) problem = 'VERIFY_COMMIT_CHANGED_DURING_CHECK';
-    if (command?.timedOut) problem = 'VERIFY_CHECK_TIMEOUT:budgetMs=60000';
+    if (command?.timedOut) problem = `VERIFY_CHECK_TIMEOUT:budgetMs=${CHECK_TIMEOUT_MS}`;
     else if (command?.interrupted) problem = `VERIFY_INTERRUPTED:${command.interrupted}`;
     else if (command && command.exitCode !== 0) problem = `VERIFY_CHECK_FAILED:exitCode=${command.exitCode}`;
     if (command?.error) problem = `VERIFY_CHECK_PROCESS_ERROR:${command.error}`;

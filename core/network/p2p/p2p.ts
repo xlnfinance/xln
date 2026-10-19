@@ -79,9 +79,8 @@ const p2pLog = createStructuredLogger('p2p');
 const MIN_GOSSIP_POLL_MS = 250;
 const SLOW_BROWSER_TIMER_MS = 32;
 /**
- * A relay carries directory/control traffic only (never financial bytes), so
- * its socket failing cannot strand a committed output. Reject policy applies:
- * tests/dev halt, production logs and retires that relay client.
+ * Relay transport failures follow the same owner reject policy as direct
+ * transport; Account consensus and current WAL retain financial recovery.
  */
 export const reportRelayClientError = (
   env: RuntimeReplica,
@@ -545,6 +544,9 @@ export class RuntimeP2P {
           if (this.closing || this.closed || !this.clients.includes(client)) return;
           this.requestSeedGossip('full');
           this.announceLocalProfiles();
+          for (const route of this.verifiedProfileRoutes.values()) {
+            for (const listener of this.readinessListeners) listener(route.runtimeId, this.canDeliver(route.runtimeId));
+          }
         },
         signEnvelope: (to, envelope) => signRuntimeEntityInputsEnvelope(this.env, to, envelope),
         onEntityInputs: async (from, envelope, timestamp, sessionAuthenticated) => {
@@ -713,6 +715,8 @@ export class RuntimeP2P {
     });
     if (!this.env.infrastructure) this.env.infrastructure = {};
     this.env.infrastructure.verifiedProfileRoutes = this.verifiedProfileRoutes;
+    const runtimeId = normalizeRuntimeId(profile.runtimeId);
+    for (const listener of this.readinessListeners) listener(runtimeId, this.canDeliver(runtimeId));
   }
 
   getReconnectState(): { attempt: number; nextAt: number } | null {
@@ -834,20 +838,19 @@ export class RuntimeP2P {
       directEndpoint: this.getDirectPeerEndpoint(normalizedTargetRuntimeId),
     });
     const transport = primary.transport;
-    // A relay authenticates our directory/control socket, not the recipient.
-    // Financial output waits for the exact direct peer (or the Hub's inbound
-    // sovereign session); a missing profile must not select a relay send.
-    if (transport !== 'direct' || !primary.client?.canDeliver()) {
+    // Hub endpoints select direct transport. Endpointless users select the
+    // authenticated relay and the target key from its verified signed profile.
+    if (!this.canDeliver(normalizedTargetRuntimeId)) {
       return p2pDeliveryResult(deliveryDeferred({
         outcome: 'deferred',
-        code: 'P2P_DIRECT_RECIPIENT_NOT_READY',
+        code: transport === 'direct' ? 'P2P_DIRECT_RECIPIENT_NOT_READY' : 'P2P_RELAY_RECIPIENT_NOT_READY',
       }), transport);
     }
     let delivery: EntityInputDeliveryResult | null = null;
     const client = primary.client?.isOpen() ? primary.client : null;
     if (client) {
       try {
-        if (!this.prepareDirectSourceProfiles(normalizedTargetRuntimeId, client, envelope)) {
+        if (transport === 'direct' && !this.prepareDirectSourceProfiles(normalizedTargetRuntimeId, client, envelope)) {
           return p2pDeliveryResult(deliveryDeferred({
             outcome: 'deferred', code: 'P2P_DIRECT_SOURCE_PROFILE_NOT_READY',
           }), transport);
@@ -993,7 +996,9 @@ export class RuntimeP2P {
   canDeliver(runtimeId: string): boolean {
     const target = normalizeRuntimeId(runtimeId);
     if (!target || this.closing || this.closed) return false;
-    return this.hasDirectPeerEndpoint(target) && (this.directClients.get(target)?.canDeliver() ?? false);
+    return this.hasDirectPeerEndpoint(target)
+      ? this.directClients.get(target)?.canDeliver() === true
+      : this.getActiveClient() !== null && this.resolveTargetEncryptionKey(target) !== null;
   }
 
   onDeliveryReadyChange(listener: (runtimeId: string, ready: boolean) => void): () => void {
@@ -1001,7 +1006,7 @@ export class RuntimeP2P {
     return () => { this.readinessListeners.delete(listener); };
   }
 
-  prepareDirectEntityRoutes(entityIds: readonly string[]): boolean {
+  prepareEntityRoutes(entityIds: readonly string[]): boolean {
     const normalizedEntityIds = uniqueTransportValues(entityIds.map(normalizeId));
     const resolvedRuntimeIds = normalizedEntityIds.map(entityId =>
       normalizeRuntimeId(this.verifiedProfileRoutes.get(entityId)?.runtimeId),
@@ -1009,7 +1014,7 @@ export class RuntimeP2P {
     if (resolvedRuntimeIds.some(runtimeId => runtimeId.length === 0)) return false;
     const runtimeIds = uniqueTransportValues(resolvedRuntimeIds);
     this.prepareDirectRoutes(runtimeIds);
-    return runtimeIds.every(runtimeId => this.getActiveDirectClient(runtimeId) !== null);
+    return runtimeIds.every(runtimeId => this.canDeliver(runtimeId));
   }
 
   private hasDirectPeerEndpoint(runtimeId: string): boolean {
@@ -1139,16 +1144,6 @@ export class RuntimeP2P {
     timestamp: number | undefined,
     sessionAuthenticated = false,
   ): Promise<void> {
-    // Financial bytes travel only over an authenticated direct session (see
-    // enqueueEntityInputsDelivery). A relay never forwards entity_inputs, so
-    // anything arriving here through a relay client is a forged or misrouted
-    // envelope and is rejected before any admission work.
-    if (transport !== 'direct') {
-      throw new Error(
-        `P2P_RELAY_ENTITY_INPUTS_FORBIDDEN:source=${from}:target=${this.runtimeId}:` +
-        `entityInputs=${envelope.entityInputs.length}`,
-      );
-    }
     if (this.closing || this.closed) {
       throw new Error('P2P_INBOUND_RUNTIME_CLOSING:before-admission');
     }
@@ -1158,7 +1153,8 @@ export class RuntimeP2P {
     if (HEAVY_LOGS) {
       console.debug(`[P2P-INBOUND] entity_inputs from=${from.slice(-8)} inputs=${envelope.entityInputs.length}`);
     }
-    assertRuntimeEntityInputsEnvelopeSource(this.env, from, envelope, sessionAuthenticated);
+    // Relay authentication never replaces the end-to-end source signature.
+    assertRuntimeEntityInputsEnvelopeSource(this.env, from, envelope, transport === 'direct' && sessionAuthenticated);
     const requiredProfileIds = uniqueTransportValues(
       envelope.entityInputs.flatMap(input => this.collectProfileEntityIdsForInput(input)),
     ).filter(entityId => entityId && !this.hasProfileForEntity(entityId));
@@ -1263,17 +1259,17 @@ export class RuntimeP2P {
     return required.every(entityId => this.hasProfileForEntity(entityId));
   }
 
-  /** Seed profile + one direct handshake; all waiting after bootstrap is local. */
-  async bootstrapDirectEntityRoutes(entityIds: readonly string[], timeoutMs: number): Promise<boolean> {
+  /** Signed profile plus its canonical direct or relay route; no alternate transport retry. */
+  async bootstrapEntityRoutes(entityIds: readonly string[], timeoutMs: number): Promise<boolean> {
     const normalized = uniqueTransportValues(entityIds.map(normalizeId)).filter(Boolean);
     const deadline = Date.now() + timeoutMs;
     if (!(await this.waitForSeedProfiles(normalized, Math.max(1, deadline - Date.now())))) return false;
-    this.prepareDirectEntityRoutes(normalized);
+    this.prepareEntityRoutes(normalized);
     while (Date.now() < deadline) {
-      if (this.prepareDirectEntityRoutes(normalized)) return true;
+      if (this.prepareEntityRoutes(normalized)) return true;
       if (!(await this.waitForActiveDelay(Math.min(20, Math.max(1, deadline - Date.now()))))) return false;
     }
-    return this.prepareDirectEntityRoutes(normalized);
+    return this.prepareEntityRoutes(normalized);
   }
 
   /**

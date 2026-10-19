@@ -1,10 +1,6 @@
 import type { AccountTx } from '../../../types/account';
 import { normalizeEntityId } from '../../../storage/keys';
-import type {
-  StorageAccountDoc,
-  StorageEntityCoreDoc,
-  StorageHead,
-} from '../../../storage/types';
+import type { StorageAccountDoc, StorageEntityCoreDoc, StorageHead } from '../../../storage/types';
 import { compareAscii } from '../../../support/collections/sorted-map-index';
 import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
 import { RuntimeAdapterError } from '../errors';
@@ -21,7 +17,6 @@ import {
   findReplica,
   listEntitySummaries,
   listLiveEntitySummaries,
-  loadViewPageForHeight,
   projectLiveEntityViewPage,
   readAtHeight,
   readBestHead,
@@ -30,6 +25,7 @@ import {
   type NativeMapView,
   type RuntimeAdapterAccountPage,
   type RuntimeAdapterEntityCoreDoc,
+  type RuntimeAdapterEntityViewPage,
   type RuntimeAdapterResolveContext,
 } from './context';
 
@@ -136,15 +132,10 @@ const projectGraphAccountActivity = (tx: AccountTx): RuntimeAdapterGraphAccountA
   };
 };
 
-const projectGraphAccountActivities = (
-  txs: readonly AccountTx[],
-): RuntimeAdapterGraphAccountActivity[] => txs
-  .slice(-GRAPH_ACCOUNT_ACTIVITY_SAMPLE_LIMIT)
-  .map(projectGraphAccountActivity);
+const projectGraphAccountActivities = (txs: readonly AccountTx[]): RuntimeAdapterGraphAccountActivity[] =>
+  txs.slice(-GRAPH_ACCOUNT_ACTIVITY_SAMPLE_LIMIT).map(projectGraphAccountActivity);
 
-const projectGraphAccountFrame = (
-  frame: StorageAccountDoc['currentFrame'],
-): RuntimeAdapterGraphAccountFrame => ({
+const projectGraphAccountFrame = (frame: StorageAccountDoc['currentFrame']): RuntimeAdapterGraphAccountFrame => ({
   height: frame.height,
   timestamp: frame.timestamp,
   jHeight: frame.jHeight,
@@ -167,13 +158,15 @@ const projectGraphAccount = (doc: StorageAccountDoc): RuntimeAdapterGraphAccount
   ...(doc.pendingFrame ? { pendingFrame: projectGraphAccountFrame(doc.pendingFrame) } : {}),
   rollbackCount: doc.rollbackCount,
   ...withDefinedProp('lastRollbackFrameHash', doc.lastRollbackFrameHash),
-  ...(doc.activeDispute ? {
-    activeDispute: {
-      startedByLeft: doc.activeDispute.startedByLeft,
-      disputeTimeout: doc.activeDispute.disputeTimeout,
-      initialNonce: doc.activeDispute.initialNonce,
-    },
-  } : {}),
+  ...(doc.activeDispute
+    ? {
+        activeDispute: {
+          startedByLeft: doc.activeDispute.startedByLeft,
+          disputeTimeout: doc.activeDispute.disputeTimeout,
+          initialNonce: doc.activeDispute.initialNonce,
+        },
+      }
+    : {}),
 });
 
 /**
@@ -182,12 +175,14 @@ const projectGraphAccount = (doc: StorageAccountDoc): RuntimeAdapterGraphAccount
  * here and then fail as a generic E_INTERNAL "response too large".
  */
 export const assertRuntimeAdapterGraphFrameWireBudget = (frame: RuntimeAdapterGraphFrame): number => {
-  const encodedBytes = runtimeAdapterMessageByteLength(encodeRuntimeAdapterMessageForBrowser({
-    v: XLN_PROTOCOL_VERSION,
-    inReplyTo: 'graph-frame-budget',
-    ok: true,
-    payload: frame,
-  }));
+  const encodedBytes = runtimeAdapterMessageByteLength(
+    encodeRuntimeAdapterMessageForBrowser({
+      v: XLN_PROTOCOL_VERSION,
+      inReplyTo: 'graph-frame-budget',
+      ok: true,
+      payload: frame,
+    }),
+  );
   const maxBytes = runtimeAdapterMaxMessageBytes();
   if (encodedBytes > maxBytes) {
     throw new RuntimeAdapterError(
@@ -217,8 +212,7 @@ const captureLiveGraph = (
     );
   }
   const localEntityIds = new Set(
-    Array.from(ctx.env.state.eReplicas?.values?.() ?? [])
-      .map(replica => normalizeEntityId(replica.entityId)),
+    Array.from(ctx.env.state.eReplicas?.values?.() ?? []).map(replica => normalizeEntityId(replica.entityId)),
   );
   const entities: RuntimeAdapterGraphEntityFrame[] = [];
   let accountObservationCount = 0;
@@ -234,10 +228,7 @@ const captureLiveGraph = (
     }
     const replica = findReplica(ctx.env, entityId);
     if (!replica) {
-      throw new RuntimeAdapterError(
-        'E_INTERNAL',
-        `live graph replica disappeared: ${entityId}`,
-      );
+      throw new RuntimeAdapterError('E_INTERNAL', `live graph replica disappeared: ${entityId}`);
     }
     const totalAccounts = replica.state.accounts.size;
     if (totalAccounts > accountsLimit) {
@@ -279,9 +270,7 @@ const appendGraphAccountEndpoints = (
   runtimeId: string,
   height: number,
 ): void => {
-  const knownEntityIds = new Set(
-    entities.map(entity => normalizeEntityId(entity.summary.entityId)),
-  );
+  const knownEntityIds = new Set(entities.map(entity => normalizeEntityId(entity.summary.entityId)));
   for (const entity of [...entities]) {
     for (const account of entity.accounts.items) {
       for (const endpoint of [account.leftEntity, account.rightEntity]) {
@@ -307,9 +296,7 @@ const appendGraphAccountEndpoints = (
       }
     }
   }
-  entities.sort((left, right) =>
-    compareAscii(left.summary.entityId, right.summary.entityId),
-  );
+  entities.sort((left, right) => compareAscii(left.summary.entityId, right.summary.entityId));
 };
 
 export const projectGraphFrame = async (
@@ -329,9 +316,7 @@ export const projectGraphFrame = async (
   // historical storage query. Capture every graph DTO before the first await:
   // snapshot publication may legitimately prune the old diff chain while this
   // request is in flight, and the live RuntimeReplica is replaced at each committed frame.
-  const capturedLive = isLiveQuery
-    ? captureLiveGraph(ctx, query, entityLimit, accountsLimit)
-    : null;
+  const capturedLive = isLiveQuery ? captureLiveGraph(ctx, query, entityLimit, accountsLimit) : null;
 
   if (!isLiveQuery && !ctx.readHead) {
     throw new RuntimeAdapterError('E_INTERNAL', 'storage head reader is required for historical graph reads');
@@ -342,12 +327,54 @@ export const projectGraphFrame = async (
   }
   if (!isLiveQuery) assertRequestedHeightAvailable(requestedHeight!, persistedHead!, 'graph-frame');
 
-  const head = persistedHead ?? await readBestHead(ctx);
+  const head = persistedHead ?? (await readBestHead(ctx));
   const heightQuery = requestedHeight !== null && height > 0 ? { ...query, atHeight: height } : query;
-  const summaries = capturedLive?.summaries ?? await listEntitySummaries(ctx, heightQuery, {
-    allowPartial: false,
-    forceStorageAtHeight: true,
-  });
+  // All Entity pages share one exact committed Runtime replay, and each page
+  // supplies both its summary and accounts. Never replay the same WAL once
+  // per Entity while holding the runtime read lease.
+  let historicalPages = new Map<string, RuntimeAdapterEntityViewPage>();
+  let historicalIds: string[] = [];
+  if (!capturedLive) {
+    if (!ctx.listEntityIdsAtHeight || !ctx.loadEntityViewPages) {
+      throw new RuntimeAdapterError('E_INTERNAL', 'storage entity batch reader is required for historical graph reads');
+    }
+    historicalIds = await ctx.listEntityIdsAtHeight(height);
+    if (historicalIds.length > entityLimit) {
+      throw new RuntimeAdapterError(
+        'E_BAD_QUERY',
+        `graph-frame has ${historicalIds.length} entities; limit is ${entityLimit}. Select a core/filter before rendering`,
+      );
+    }
+    const pages = await ctx.loadEntityViewPages(historicalIds, height, {
+      ...heightQuery,
+      accountsLimit,
+      booksLimit: 1,
+    });
+    if (!pages) throw new RuntimeAdapterError('E_NOT_FOUND', `entity views not found at height ${height}`);
+    historicalPages = pages;
+  }
+  const summaries =
+    capturedLive?.summaries ??
+    (await listEntitySummaries(
+      {
+        ...ctx,
+        listEntityIdsAtHeight: async () => historicalIds,
+        loadEntityViewPage: async (entityId, targetHeight) => {
+          const page = historicalPages.get(normalizeEntityId(entityId));
+          if (!page)
+            throw new RuntimeAdapterError(
+              'E_NOT_FOUND',
+              `entity view not found at height ${targetHeight}: ${normalizeEntityId(entityId)}`,
+            );
+          return page;
+        },
+      },
+      heightQuery,
+      {
+        allowPartial: false,
+        forceStorageAtHeight: true,
+      },
+    ));
   if (summaries.length > entityLimit) {
     throw new RuntimeAdapterError(
       'E_BAD_QUERY',
@@ -359,11 +386,9 @@ export const projectGraphFrame = async (
   let accountObservationCount = 0;
   if (!capturedLive) {
     for (const summary of summaries) {
-      const stored = await loadViewPageForHeight(ctx, summary.entityId, height, false, {
-        ...heightQuery,
-        accountsLimit,
-        booksLimit: 1,
-      });
+      const stored = historicalPages.get(summary.entityId);
+      if (!stored) throw new RuntimeAdapterError('E_INTERNAL', `historical graph page missing: ${summary.entityId}`);
+      historicalPages.delete(summary.entityId);
       const totalAccounts = Math.max(stored.accounts.items.length, Number(stored.accounts.totalItems ?? 0));
       if (stored.accounts.nextCursor || totalAccounts > stored.accounts.items.length) {
         throw new RuntimeAdapterError(
@@ -388,23 +413,14 @@ export const projectGraphFrame = async (
     }
   }
 
-  appendGraphAccountEndpoints(
-    entities,
-    entityLimit,
-    accountsLimit,
-    capturedRuntimeId,
-    height,
-  );
+  appendGraphAccountEndpoints(entities, entityLimit, accountsLimit, capturedRuntimeId, height);
 
   const record = ctx.readFrame ? await ctx.readFrame(height) : null;
   const projectedTimestamp = entities.reduce(
     (latest, entity) => Math.max(latest, Number(entity.core?.timestamp || 0)),
     isLiveQuery ? capturedTimestamp : 0,
   );
-  const timestamp = Math.max(
-    0,
-    Math.floor(Number(record?.timestamp ?? projectedTimestamp)),
-  );
+  const timestamp = Math.max(0, Math.floor(Number(record?.timestamp ?? projectedTimestamp)));
   const frame: RuntimeAdapterGraphFrame = {
     head,
     runtimeId: capturedRuntimeId,

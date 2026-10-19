@@ -334,7 +334,6 @@ describe('entity panel model helpers', () => {
     const accountDropdown = readFileSync('frontend/src/lib/components/Entity/account/ui/AccountDropdown.svelte', 'utf8');
     const creditForm = readFileSync('frontend/src/lib/components/Entity/account/ui/CreditForm.svelte', 'utf8');
     const collateralForm = readFileSync('frontend/src/lib/components/Entity/account/ui/CollateralForm.svelte', 'utf8');
-    const lendingPanel = readFileSync('frontend/src/lib/components/Entity/payments/LendingPanel.svelte', 'utf8');
     const configurePanel = readFileSync('frontend/src/lib/components/Entity/account/ui/AccountConfigurePanel.svelte', 'utf8');
     const accountWorkspace = readFileSync('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte', 'utf8');
 
@@ -360,8 +359,6 @@ describe('entity panel model helpers', () => {
     expect(collateralForm).not.toContain('export let env: RuntimeReplica');
     expect(collateralForm).not.toContain('import { submitEntityInputs');
     expect(collateralForm).toContain('<EntitySelect bind:value={selectedCounterparty} options={accountIds} {entityNames}');
-    expect(lendingPanel).toContain('export let entityNames: Map<string, string>');
-    expect(lendingPanel).toContain('<EntitySelect bind:value={selectedHubEntityId} options={normalizedAccounts} {entityNames}');
     expect(configurePanel).toContain('export let entityNames: Map<string, string>');
     expect(configurePanel).toContain('actionRuntimeEnv={liveRuntimeEnv}');
     expect(configurePanel).toContain('remoteAdminReady');

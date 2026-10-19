@@ -1,5 +1,4 @@
 import { useNavigate } from 'react-router-dom';
-import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy';
 import { CopyId } from '../CopyId';
 import { Icon, type IconName } from '../Icons';
 import { AccountRow } from './Balances';
@@ -21,7 +20,6 @@ export function HomeAside({
   const meta = token ? getTokenMeta(token.tokenId) : null;
   const money = (amount: bigint): string =>
     meta ? `${formatAmount(amount, meta.decimals, meta.decimals)} ${meta.symbol}` : '—';
-  const lending = isAccountTxKindAvailable('lending_fund') && isAccountTxKindAvailable('lending_borrow_request');
   const resources: Array<{ to: string; icon: IconName; title: string; hint: string }> = [
     { to: '/sovereignty', icon: 'shield', title: 'Security and recovery', hint: 'Keys, proofs, watchtowers' },
     { to: '/assets', icon: 'wallet', title: 'Assets and deposits', hint: 'On-chain wallet, reserve, faucets' },
@@ -29,7 +27,7 @@ export function HomeAside({
       to: '/lend',
       icon: 'bank',
       title: 'Lending',
-      hint: lending ? 'Lend to a hub pool or borrow' : 'View existing positions',
+      hint: 'Lend to a hub pool or borrow',
     },
     { to: '/ownership', icon: 'accounts', title: 'Ownership', hint: 'Board, shares, takeovers' },
   ];
@@ -71,7 +69,7 @@ export function HomeAside({
               onClick={() => navigate(`/accounts/${account.counterpartyId}`)}
             />
           ))}
-          <button type="button" className="btn quiet sm" onClick={onConnect}>
+          <button type="button" className="btn quiet sm" onClick={onConnect} data-testid="home-open-account">
             Connect another account
           </button>
         </div>

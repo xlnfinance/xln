@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LENDING_TERM_MS, lendingLoanMaximumAmount } from '@xln/core/lendbook/state';
 import { MANAGE, PageHead } from '../components/PageHead';
-import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy';
 import { TokenIcon } from '../components/TokenPicker';
 import { LendingClose } from '../components/LendingClose';
 import { LendingRepay } from '../components/LendingRepay';
@@ -27,7 +26,6 @@ import {
 } from '../runtime/financial/lending';
 
 const rate = (bps: number): string => `${(bps / 100).toFixed(2)}%`;
-const UNAVAILABLE = 'Lending is unavailable in this release';
 
 export function Lending() {
 	const entityId = useApp(s => s.activeEntityId);
@@ -51,10 +49,6 @@ export function Lending() {
 	const requestId = submittedRequest?.owner === wallet.entityId && submittedRequest.hub === hubId && submittedRequest.token === tokenId ? submittedRequest.id : undefined;
 	const meta = getTokenMeta(tokenId);
 	const hub = hubs.find(account => account.counterpartyId === hubId) ?? null;
-	const offerAvailable = isAccountTxKindAvailable('lending_fund');
-	const borrowAvailable = isAccountTxKindAvailable('lending_borrow_request');
-	const repayAvailable = isAccountTxKindAvailable('lending_repay');
-	const submitAvailable = side === 'lend' ? offerAvailable : borrowAvailable;
 	const bankTerms = hub ? state?.terms.find(value => value.tokenId === tokenId && value.termId === termId
 		&& value.chainId === hub.doc.state.domain.chainId && value.depositoryAddress === hub.doc.state.domain.depositoryAddress
 		&& value.expiresAt > Date.now()) : undefined;
@@ -106,7 +100,6 @@ export function Lending() {
 	}, [refresh, height]);
 
 	const submit = async (): Promise<void> => {
-		if (!submitAvailable) { toast(UNAVAILABLE, 'danger'); return; }
 		if (!bankTerms || bankOfferUnavailable || needsRiskConsent || needsReceiveCapacity || quoteError) return;
 		if (!wallet.signerId || !hubId) return;
 		setBusy(true);
@@ -139,9 +132,6 @@ export function Lending() {
 				title="Lending"
 				parent={MANAGE}
 			/>
-			{!offerAvailable || !borrowAvailable || !repayAvailable ? (
-				<p className="note" role="status" data-testid="lending-unavailable">{UNAVAILABLE}. Existing positions remain visible below.</p>
-			) : null}
 			<details className="disclosure"><summary>How lending works — with an example</summary><p className="note">{walletHelp.lendingBalance}</p></details>
 			{wallet.frame?.activeEntity?.core.profile?.isHub === true && <BankLendingPolicy wallet={wallet} />}
 			<div className="two-col">
@@ -216,14 +206,14 @@ export function Lending() {
 							{hub && borrowPreview?.ok && <ReceiveCapacity
 								account={hub.doc.state} ownerEntityId={wallet.entityId} signerId={wallet.signerId}
 								counterpartyEntityId={hubId} accountLabel={hub.label} jurisdiction={wallet.jurisdiction}
-								tokenId={tokenId} requiredAmount={borrowPreview.principal} disabled={busy || hub.disputed || !borrowAvailable}
+								tokenId={tokenId} requiredAmount={borrowPreview.principal} disabled={busy || hub.disputed}
 							/>}
 							{needsRiskConsent && savingsRisk?.ok && <LendingRiskConsent
 								entityId={wallet.entityId} signerId={wallet.signerId} hubId={hubId} tokenId={tokenId}
 								currentLimit={savingsRisk.currentLimit} requiredLimit={savingsRisk.requiredLimit}
-								disabled={!submitAvailable || busy || !wallet.signerId || Boolean(hub?.disputed)}
+								disabled={busy || !wallet.signerId || Boolean(hub?.disputed)}
 							/>}
-							<button type="button" className="btn primary" disabled={!submitAvailable || bankOfferUnavailable || busy || !amountText.trim() || !hubId || quoteError || needsRiskConsent || needsReceiveCapacity} onClick={() => void submit()} data-testid="lend-submit">
+							<button type="button" className="btn primary" disabled={bankOfferUnavailable || busy || !amountText.trim() || !hubId || quoteError || needsRiskConsent || needsReceiveCapacity} onClick={() => void submit()} data-testid="lend-submit">
 								{busy ? 'Sending…' : side === 'lend' ? 'Save with this bank' : 'Request the loan'}
 							</button>
 							{requestId && <p role="status" data-testid="lending-request-status">

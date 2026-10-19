@@ -115,6 +115,7 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
       : new Response('not found', { status: 404 }),
   });
   let publicFaucetEnabled = true;
+  let walletStatus = 200;
   const serveWebRelay = (secure = false) => {
     const server = Bun.serve<{ challenge: string; audience: string }>({
     hostname: '127.0.0.1',
@@ -127,6 +128,7 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
     } : {}),
     async fetch(request, server) {
       const pathname = new URL(request.url).pathname;
+      if (pathname === '/ui/') return new Response('<main>wallet</main>', { status: walletStatus });
       if (pathname === '/relay') {
         const audience = `${secure ? 'wss' : 'ws'}://127.0.0.1:${server.port}/relay`;
         return server.upgrade(request, { data: { challenge: 'dev-ready-test', audience } })
@@ -202,6 +204,9 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
       runtimeBundle,
       startedAtMs,
     };
+    walletStatus = 502;
+    expect(await probeDevReady(input)).toEqual({ ready: false, reason: 'wallet-http-502', fatal: false });
+    walletStatus = 200;
     expect(await probeDevReady(input)).toEqual({ ready: true });
     publicFaucetEnabled = false;
     expect(await probeDevReady(input)).toEqual({

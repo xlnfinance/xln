@@ -123,9 +123,9 @@ test('each payment operation retains one explicit canonical transaction path', (
   expect(source('core/entity/tx/handlers/account/lifecycle/admin.ts'))
     .toContain("type: 'set_credit_limit'");
 
-  const lendingPanel = source('frontend/src/lib/components/Entity/payments/LendingPanel.svelte');
+  const lendingCommands = source('ui/src/runtime/financial/lending.ts');
   for (const type of ['lendingOffer', 'lendingBorrow', 'lendingRepay']) {
-    expect(lendingPanel).toContain(`type: '${type}'`);
+    expect(lendingCommands).toContain(`type: '${type}'`);
   }
   const lendingHandler = source('core/entity/tx/handlers/payments/lending.ts');
   for (const type of ['lending_fund', 'lending_borrow_request', 'lending_repay', 'lending_close_request']) {

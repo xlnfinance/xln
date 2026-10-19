@@ -25,13 +25,14 @@ const config = defineConfig({
   // directory so Hardhat's solc test-scanning leaves the Foundry suite alone.
   paths: {
     tests: {
-      mocha: "test",
-      solidity: "test-solidity-unused",
+      mocha: 'test',
+      solidity: 'test-solidity-unused',
     },
   },
   solidity: {
-    version: "0.8.36",
+    version: '0.8.37',
     settings: {
+      evmVersion: 'osaka',
       optimizer: {
         enabled: true,
         runs: 1,
@@ -41,7 +42,7 @@ const config = defineConfig({
       // on every platform (CI Linux vs local macOS produced different ipfs
       // metadata hashes for identical sources).
       metadata: {
-        bytecodeHash: "none",
+        bytecodeHash: 'none',
         appendCBOR: false,
       },
     },
@@ -59,68 +60,66 @@ const config = defineConfig({
       }
     : {}),
   networks: {
-    "stack-manager": {
-      type: "http",
-      url: requiredRpcPlaceholder("XLN_STACK_MANAGER_RPC_URL"),
-      ...(Number.isSafeInteger(stackManagerChainId) && stackManagerChainId > 0
-        ? { chainId: stackManagerChainId }
-        : {}),
+    'stack-manager': {
+      type: 'http',
+      url: requiredRpcPlaceholder('XLN_STACK_MANAGER_RPC_URL'),
+      ...(Number.isSafeInteger(stackManagerChainId) && stackManagerChainId > 0 ? { chainId: stackManagerChainId } : {}),
       accounts: deployerAccounts(),
     },
     localhost: {
-      type: "http",
-      url: "http://127.0.0.1:8545",
+      type: 'http',
+      url: 'http://127.0.0.1:8545',
       allowUnlimitedContractSize: true,
     },
     hardhat: {
-      type: "edr-simulated",
-      chainType: "l1",
+      type: 'edr-simulated',
+      chainType: 'l1',
       chainId: 31337,
       allowUnlimitedContractSize: true,
       blockGasLimit: 300_000_000,
     },
     // Base Networks (Coinbase L2)
-    "base-sepolia": {
-      type: "http",
-      url: process.env.BASE_SEPOLIA_RPC || "https://sepolia.base.org",
+    'base-sepolia': {
+      type: 'http',
+      url: process.env.BASE_SEPOLIA_RPC || 'https://sepolia.base.org',
       chainId: 84532,
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
     },
-    "base-mainnet": {
-      type: "http",
-      url: process.env.BASE_MAINNET_RPC || "https://mainnet.base.org",
+    'base-mainnet': {
+      type: 'http',
+      url: process.env.BASE_MAINNET_RPC || 'https://mainnet.base.org',
       chainId: 8453,
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
     },
     // Ethereum Networks
-    "ethereum-sepolia": {
-      type: "http",
-      url: requiredRpcPlaceholder("ETH_SEPOLIA_RPC"),
+    'ethereum-sepolia': {
+      type: 'http',
+      url: requiredRpcPlaceholder('ETH_SEPOLIA_RPC'),
       chainId: 11155111,
       accounts: deployerAccounts(),
     },
-    "ethereum-mainnet": {
-      type: "http",
-      url: requiredRpcPlaceholder("ETH_MAINNET_RPC"),
+    'ethereum-mainnet': {
+      type: 'http',
+      url: requiredRpcPlaceholder('ETH_MAINNET_RPC'),
       chainId: 1,
       accounts: deployerAccounts(),
     },
     // Local test networks
     ethereum: {
-      type: "http",
-      url: "http://127.0.0.1:8545",
+      type: 'http',
+      url: 'http://127.0.0.1:8545',
       chainId: 31337,
       allowUnlimitedContractSize: true,
     },
     polygon: {
-      type: "http",
-      url: "http://0.0.0.0:8546",
+      type: 'http',
+      url: 'http://0.0.0.0:8546',
       chainId: 31337,
       allowUnlimitedContractSize: true,
     },
     arbitrum: {
-      type: "http",
-      url: "http://0.0.0.0:8547",
+      type: 'http',
+      url: 'http://0.0.0.0:8547',
       chainId: 31337,
       allowUnlimitedContractSize: true,
     },

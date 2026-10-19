@@ -2046,6 +2046,22 @@ fn cross_j_r6_h69_scheduled_rebalance_broadcasts_in_the_same_entity_frame() {
     } else {
         xln_rscore_engine::Side::Left
     };
+    // The opposite, hub-owned side commits the fee before the peer requests collateral.
+    let policy = SequentialAccountEngine::apply_with_context(
+        &base,
+        requester_side.opposite(),
+        &AccountTx::RebalancePolicy {
+            token_id: 1,
+            policy_version: 1,
+            base_fee: 100_000.into(),
+            liquidity_fee_bps: 0.into(),
+            gas_fee: 0.into(),
+        },
+        &AccountExecutionContext::with_market(1_000, TIMESTAMP, 100, 0, 100, support::market()),
+    )
+    .expect("hub fee policy transition");
+    assert_eq!(policy.verdict(), &AccountVerdict::Applied);
+    let base = policy.committed().expect("committed hub fee policy");
     let requested = SequentialAccountEngine::apply_with_context(
         &base,
         requester_side,

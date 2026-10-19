@@ -1,5 +1,6 @@
 import { Level } from 'level';
 import { createStructuredLogger } from '../support/logger';
+import { timePerfPhase } from '../support/performance/profile';
 import { nodeProcess } from '../support/process/runtime-process';
 import {
   requireBoundaryInteger,
@@ -1110,7 +1111,9 @@ export async function tryOpenRuntimeWalDb(
       try {
         await db.open();
         const previousVerifiedHeight = Number(state.storageVerifiedWalHeight ?? -1);
-        const verified = await verifyStorageTailIntegrity(db, { tailFrames: 128 });
+        const verified = await timePerfPhase('storage.open.verifyWalTail', () =>
+          verifyStorageTailIntegrity(db, { tailFrames: 128 }),
+        );
         if (verified.latestHeight > previousVerifiedHeight) {
           state.storageVerifiedWalHeight = verified.latestHeight;
         }

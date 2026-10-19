@@ -51,6 +51,7 @@ test(
     await expect(guide).toHaveAttribute('data-target', 'receipt-done');
     await page.getByTestId('receipt-done').click();
     await page.getByTestId('nav-home').locator('visible=true').first().click();
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.getByTestId('home-swap').click();
     const book = page.getByTestId('orderbook').locator('visible=true').first();
     await expect(book).toHaveAttribute('data-status', 'live', { timeout: 15_000 });
@@ -62,6 +63,9 @@ test(
     await expect(page.getByTestId('swap-submit')).toBeEnabled();
     await page.getByTestId('swap-submit').click();
     await expect(guide).toHaveAttribute('data-step', 'history', { timeout: 15_000 });
+    await expect(guide).toHaveAttribute('data-target', 'back');
+    await page.getByTestId('back').click();
+    await expect(guide).toHaveAttribute('data-target', 'nav-activity');
     await page.getByTestId('nav-activity').locator('visible=true').first().click();
     await expect(guide).toHaveAttribute('data-step', 'history');
     await expect(page).toHaveURL(/\/activity$/);
@@ -96,15 +100,19 @@ test(
     await page.getByTestId('home-pay').scrollIntoViewIfNeeded();
     await expect(page.getByTestId('home-pay')).toBeInViewport();
     await page.screenshot({ path: 'tests/test-results/guide-mobile.png', fullPage: true });
+    await page.getByTestId('home-receive').click();
+    await expect(page.getByTestId('tour')).toHaveAttribute('data-target', 'back');
+    await page.getByTestId('back').click();
+    await expect(page.getByTestId('tour')).toHaveAttribute('data-target', 'home-pay');
   },
 );
 
-
 test('starting the guided demo from Settings opens Home and its faucet', { tag: '@functional' }, async ({ page }) => {
   test.setTimeout(60_000);
-  await page.goto('/settings');
-  await expect(page.getByTestId('gate-stack')).toHaveAttribute('data-state', 'online', { timeout: 20_000 });
-  await page.getByRole('button', { name: 'Try with test money', exact: true }).click();
+  await enterStack(page);
+  await page.getByTestId('nav-settings').locator('visible=true').first().click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await page.getByTestId('tour-replay').click();
   await expect(page.getByTestId('home-faucet')).toBeEnabled({ timeout: 40_000 });
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByTestId('tour')).toHaveAttribute('data-target', 'home-faucet');

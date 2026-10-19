@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { stopProcessGroup } from '../../../../scripts/e2e/runners/process-group';
+import { terminateGateProcessGroup } from '../../../../scripts/release/gate-child-process';
 import { acquireStandLock, registerStandGroup, releaseStandLock } from '../../../../../tools/stand-lock';
 
 const root = mkdtempSync(join(tmpdir(), 'xln-process-group-native-'));
@@ -82,5 +83,37 @@ test('native group that remains unreaped preserves the signal error and keeps it
     await group.reap();
     expectGroupAbsent(group.pid);
     releaseStandLock(grant);
+  }
+});
+
+test('release timeout reaps the exact real child group after TERM-resistant descendants', async () => {
+  const child = spawn('sh', ['-c', 'trap "" TERM; sleep 30 & echo ready; wait'], {
+    detached: true,
+    stdio: 'pipe',
+  });
+  const exited = new Promise<void>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', () => resolve());
+  });
+  const lines = createInterface({ input: child.stdout });
+  await new Promise<void>((resolve, reject) => {
+    lines.once('line', () => resolve());
+    child.once('error', reject);
+  });
+  lines.close();
+  if (!child.pid) throw new Error('RELEASE_GROUP_PID_MISSING');
+  try {
+    await terminateGateProcessGroup(child, 1_000);
+    await exited;
+    expectGroupAbsent(child.pid);
+    expect(child.signalCode).toBe('SIGKILL');
+  } finally {
+    await stopProcessGroup({
+      pid: child.pid,
+      termTimeoutMs: 1_000,
+      killTimeoutMs: 1_000,
+      timeoutError: 'RELEASE_GROUP_CLEANUP_FAILED',
+    });
+    await exited;
   }
 });

@@ -22,5 +22,5 @@ test('drain times out while a real signed Entity proposal is waiting for quorum'
 
 test('an idle runtime without consensus work still drains', async () => {
   const env = createEmptyEnv(null);
-  expect(await waitForRuntimeWorkDrained(env, 40, 1)).toBe(true);
+  expect(await waitForRuntimeWorkDrained(env)).toBe(true);
 });

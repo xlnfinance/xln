@@ -109,29 +109,30 @@ const requireHexPrivateKey = () => {
   return raw.replace(/^0x/, '');
 };
 
-const rpcUrlFor = (chain) => {
+const rpcUrlFor = chain => {
   const configured = String(process.env[chain.rpcEnv] || '').trim();
   if (configured) return configured;
   if (chain.defaultRpc) return chain.defaultRpc;
   throw new Error(`${chain.rpcEnv} is required for ${chain.id}`);
 };
 
-const tronFullHostFor = (chain) => {
+const tronFullHostFor = chain => {
   const explicit = String(process.env[chain.fullHostEnv] || '').trim();
   if (explicit) return explicit.replace(/\/jsonrpc\/?$/i, '').replace(/\/$/, '');
-  return String(chain.defaultFullHost || rpcUrlFor(chain)).replace(/\/jsonrpc\/?$/i, '').replace(/\/$/, '');
+  return String(chain.defaultFullHost || rpcUrlFor(chain))
+    .replace(/\/jsonrpc\/?$/i, '')
+    .replace(/\/$/, '');
 };
 
-const jsonRpcUrlFor = (chain) => {
+const jsonRpcUrlFor = chain => {
   const rpc = rpcUrlFor(chain).replace(/\/$/, '');
   return rpc.endsWith('/jsonrpc') ? rpc : `${rpc}/jsonrpc`;
 };
 
-const tronGridHeaders = () => process.env.TRONGRID_API_KEY
-  ? { 'TRON-PRO-API-KEY': process.env.TRONGRID_API_KEY }
-  : {};
+const tronGridHeaders = () =>
+  process.env.TRONGRID_API_KEY ? { 'TRON-PRO-API-KEY': process.env.TRONGRID_API_KEY } : {};
 
-const tronWebConnection = (chain) => ({
+const tronWebConnection = chain => ({
   fullHost: tronFullHostFor(chain),
   ...(chain.defaultSolidityHost ? { solidityNode: chain.defaultSolidityHost } : {}),
   headers: tronGridHeaders(),
@@ -169,10 +170,13 @@ const preflightEvmStablecoin = async (chain, url, stablecoin, rpcCall = rpc) => 
   if (typeof code !== 'string' || !/^0x[0-9a-fA-F]+$/.test(code) || code === '0x') {
     throw new Error(`EVM_STABLECOIN_CODE_MISSING:${chain.id}:${stablecoin.address}`);
   }
-  const encodedDecimals = await rpcCall(url, 'eth_call', [{
-    to: stablecoin.address,
-    data: '0x313ce567',
-  }, 'latest']);
+  const encodedDecimals = await rpcCall(url, 'eth_call', [
+    {
+      to: stablecoin.address,
+      data: '0x313ce567',
+    },
+    'latest',
+  ]);
   if (typeof encodedDecimals !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(encodedDecimals)) {
     throw new Error(`EVM_STABLECOIN_DECIMALS_RESPONSE_INVALID:${chain.id}:${stablecoin.address}`);
   }
@@ -182,7 +186,7 @@ const preflightEvmStablecoin = async (chain, url, stablecoin, rpcCall = rpc) => 
   }
 };
 
-const preflightChain = async (chain) => {
+const preflightChain = async chain => {
   const url = chain.kind === 'tron' ? jsonRpcUrlFor(chain) : rpcUrlFor(chain);
   const chainIdHex = await rpc(url, 'eth_chainId', [], chain.kind === 'tron' ? tronGridHeaders() : {});
   const chainId = Number(BigInt(chainIdHex));
@@ -216,10 +220,10 @@ const deployEvm = async (chain, options) => {
 
   requireHexPrivateKey();
   if (!process.env[chain.rpcEnv]) throw new Error(`${chain.rpcEnv} is required for ${chain.id}`);
-  run('bunx', ['--bun', 'hardhat', 'compile']);
+  run('bunx', ['hardhat', 'compile']);
   mkdirSync(deploymentsDir, { recursive: true });
   const outputPath = path.join(deploymentsDir, `${chain.id}.json`);
-  run('bunx', ['--bun', 'hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', chain.hardhatNetwork], {
+  run('bunx', ['hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', chain.hardhatNetwork], {
     env: {
       XLN_DEPLOY_OUTPUT: outputPath,
       XLN_STABLECOIN_ADDRESS: stablecoin.address,
@@ -230,9 +234,9 @@ const deployEvm = async (chain, options) => {
   return { chain, preflight, ...deployed };
 };
 
-const artifactPath = (contractName) => path.join(repoRoot, 'build-tron', 'contracts', `${contractName}.json`);
+const artifactPath = contractName => path.join(repoRoot, 'build-tron', 'contracts', `${contractName}.json`);
 
-const loadTronArtifact = (contractName) => {
+const loadTronArtifact = contractName => {
   const file = artifactPath(contractName);
   if (!existsSync(file)) {
     throw new Error(`Missing TRON artifact ${file}. Run: bun scripts/compile-tron.cjs --all`);
@@ -240,20 +244,18 @@ const loadTronArtifact = (contractName) => {
   return JSON.parse(readFileSync(file, 'utf8'));
 };
 
-const libraryMarker = (libraryName) => {
+const libraryMarker = libraryName => {
   let marker = `__${libraryName}`;
   while (marker.length < 40) marker += '_';
   return marker;
 };
 
-const stripHexPrefix = (value) => String(value).replace(/^0x/i, '');
+const stripHexPrefix = value => String(value).replace(/^0x/i, '');
 
 const tronAddressInfo = (tronWeb, address) => {
   const raw = String(address || '').trim();
   if (!raw) throw new Error('TRON deployment returned empty address');
-  const hex41 = raw.startsWith('T')
-    ? tronWeb.address.toHex(raw)
-    : stripHexPrefix(raw);
+  const hex41 = raw.startsWith('T') ? tronWeb.address.toHex(raw) : stripHexPrefix(raw);
   const normalizedHex41 = hex41.startsWith('41') ? hex41 : `41${hex41}`;
   return {
     base58: tronWeb.address.fromHex(normalizedHex41),
@@ -263,15 +265,10 @@ const tronAddressInfo = (tronWeb, address) => {
 };
 
 const preflightTronStablecoin = async (chain, tronWeb, stablecoin, reader = {}) => {
-  const getContract = reader.getContract || ((address) => tronWeb.trx.getContract(address));
-  const readDecimals = reader.readDecimals || ((address) =>
-    tronWeb.transactionBuilder.triggerConstantContract(
-      address,
-      'decimals()',
-      {},
-      [],
-      address,
-    ));
+  const getContract = reader.getContract || (address => tronWeb.trx.getContract(address));
+  const readDecimals =
+    reader.readDecimals ||
+    (address => tronWeb.transactionBuilder.triggerConstantContract(address, 'decimals()', {}, [], address));
   const contract = await getContract(stablecoin.base58);
   let contractAddress;
   try {
@@ -282,12 +279,10 @@ const preflightTronStablecoin = async (chain, tronWeb, stablecoin, reader = {}) 
   if (contractAddress.hex41.toLowerCase() !== stablecoin.hex41.toLowerCase()) {
     throw new Error(
       `TRON_STABLECOIN_CONTRACT_IDENTITY_MISMATCH:${chain.id}:` +
-      `expected=${stablecoin.hex41}:actual=${contractAddress.hex41}`,
+        `expected=${stablecoin.hex41}:actual=${contractAddress.hex41}`,
     );
   }
-  const bytecode = typeof contract?.bytecode === 'string'
-    ? stripHexPrefix(contract.bytecode)
-    : '';
+  const bytecode = typeof contract?.bytecode === 'string' ? stripHexPrefix(contract.bytecode) : '';
   if (!/^[0-9a-fA-F]+$/.test(bytecode)) {
     throw new Error(`TRON_STABLECOIN_CODE_MISSING:${chain.id}:${stablecoin.base58}`);
   }
@@ -353,13 +348,17 @@ const deployTronContract = async (tronWeb, contractName, parameters = [], librar
     { ...options, ...(previous ? { blockHeader: previous.raw_data } : {}) },
     tronWeb.defaultAddress.base58,
   );
-  if (preparedTransaction && (transaction.txID !== preparedTransaction || transaction.raw_data_hex !== previous.raw_data_hex)) {
+  if (
+    preparedTransaction &&
+    (transaction.txID !== preparedTransaction || transaction.raw_data_hex !== previous.raw_data_hex)
+  ) {
     throw new Error(`TRON_PREPARED_DEPLOYMENT_MISMATCH:${contractName}:${preparedTransaction}`);
   }
   const signed = await tronWeb.trx.sign(transaction, tronWeb.defaultPrivateKey);
   if (!preparedTransaction) {
     const broadcast = await broadcastTronTransaction(tronWeb, signed);
-    if (!broadcast?.result) throw new Error(`TRON_DEPLOY_BROADCAST_FAILED:${contractName}:${JSON.stringify(broadcast)}`);
+    if (!broadcast?.result)
+      throw new Error(`TRON_DEPLOY_BROADCAST_FAILED:${contractName}:${JSON.stringify(broadcast)}`);
     console.log(`[tron-deploy] broadcast contract=${contractName} tx=${signed.txID}`);
   }
   const receiptDeadline = Date.now() + 300_000;
@@ -369,13 +368,15 @@ const deployTronContract = async (tronWeb, contractName, parameters = [], librar
       if (receipt.receipt?.result !== 'SUCCESS') {
         throw new Error(
           `TRON_DEPLOY_EXECUTION_FAILED:${contractName}:${signed.txID}:` +
-          `${receipt.receipt?.result || 'UNKNOWN'}:${receipt.resMessage || ''}`,
+            `${receipt.receipt?.result || 'UNKNOWN'}:${receipt.resMessage || ''}`,
         );
       }
       if (!Number.isSafeInteger(receipt.blockNumber) || receipt.blockNumber < 1) {
         throw new Error(`TRON_DEPLOY_BLOCK_MISSING:${contractName}:${signed.txID}`);
       }
-      console.log(`[tron-deploy] solid contract=${contractName} block=${receipt.blockNumber} energy=${receipt.receipt.energy_usage_total}`);
+      console.log(
+        `[tron-deploy] solid contract=${contractName} block=${receipt.blockNumber} energy=${receipt.receipt.energy_usage_total}`,
+      );
       const deployedCode = await tronWeb.trx.getContract(signed.contract_address);
       if (!deployedCode.bytecode) throw new Error(`TRON_DEPLOY_CODE_MISSING:${contractName}`);
       return {
@@ -385,7 +386,7 @@ const deployTronContract = async (tronWeb, contractName, parameters = [], librar
         runtimeCodeHash: require('ethers').keccak256(`0x${stripHexPrefix(deployedCode.bytecode)}`),
       };
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise(resolve => setTimeout(resolve, 250));
   }
   throw new Error(`TRON_DEPLOY_RECEIPT_TIMEOUT:${contractName}:${signed.txID}`);
 };
@@ -421,37 +422,32 @@ const deployTron = async (chain, options) => {
     ...tronWebConnection(chain),
     privateKey,
   });
-  const deploy = (name, parameters = [], libraries = {}) => deployTronContract(
-    tronWeb, name, parameters, libraries, options.preparedTransactions?.[name],
-  );
+  const deploy = (name, parameters = [], libraries = {}) =>
+    deployTronContract(tronWeb, name, parameters, libraries, options.preparedTransactions?.[name]);
 
   // Native TRON has no sender nonce. These distinct bytecodes have no graph
   // dependencies; wait for every solidified receipt before linking consumers.
   const [account, depositoryBounds, hashLadderRegistry, nftCustody, deltaTransformer, hankoVerifier] =
-    await Promise.all(['Account', 'DepositoryBounds', 'HashLadderRegistry', 'NftCustody', 'DeltaTransformer', 'HankoVerifier']
-      .map((name) => deploy(name)));
+    await Promise.all(
+      ['Account', 'DepositoryBounds', 'HashLadderRegistry', 'NftCustody', 'DeltaTransformer', 'HankoVerifier'].map(
+        name => deploy(name),
+      ),
+    );
   const foundationRecipient = tronWeb.defaultAddress.base58;
-  const entityProvider = await deploy(
-    'EntityProvider',
-    [foundationRecipient],
-    { HankoVerifier: hankoVerifier },
-  );
-  const depository = await deploy(
-    'Depository',
-    [entityProvider.base58, deltaTransformer.base58],
-    {
-      Account: account,
-      DepositoryBounds: depositoryBounds,
-      HashLadderRegistry: hashLadderRegistry,
-      NftCustody: nftCustody,
-    },
-  );
+  const entityProvider = await deploy('EntityProvider', [foundationRecipient], { HankoVerifier: hankoVerifier });
+  const depository = await deploy('Depository', [entityProvider.base58, deltaTransformer.base58], {
+    Account: account,
+    DepositoryBounds: depositoryBounds,
+    HashLadderRegistry: hashLadderRegistry,
+    NftCustody: nftCustody,
+  });
   const entityProviderArtifact = loadTronArtifact('EntityProvider');
   const entityProviderContract = await tronWeb.contract(entityProviderArtifact.abi, entityProvider.base58);
   const boundDepository = tronAddressInfo(tronWeb, await entityProviderContract.shareDepository().call());
   if (/^0x0{40}$/i.test(boundDepository.evm)) {
     await entityProviderContract.bindShareDepository(depository.base58).send({
-      feeLimit: Number(process.env.TRON_FEE_LIMIT || '15000000000'), shouldPollResponse: true,
+      feeLimit: Number(process.env.TRON_FEE_LIMIT || '15000000000'),
+      shouldPollResponse: true,
     });
   } else if (boundDepository.evm.toLowerCase() !== depository.evm.toLowerCase()) {
     throw new Error(`TRON_PREPARED_DEPOSITORY_BINDING_MISMATCH:${boundDepository.evm}`);
@@ -478,17 +474,19 @@ const deployTron = async (chain, options) => {
     externalTokenId: 0,
     privateKey,
   });
-  await entityProviderContract.foundationRegisterExternalToken(
-    depository.base58,
-    0,
-    usdt.base58,
-    0,
-    usdtListing.hankoData,
-    usdtListing.actionNonce.toString(),
-  ).send({
-    feeLimit: Number(process.env.TRON_FEE_LIMIT || '15000000000'),
-    shouldPollResponse: true,
-  });
+  await entityProviderContract
+    .foundationRegisterExternalToken(
+      depository.base58,
+      0,
+      usdt.base58,
+      0,
+      usdtListing.hankoData,
+      usdtListing.actionNonce.toString(),
+    )
+    .send({
+      feeLimit: Number(process.env.TRON_FEE_LIMIT || '15000000000'),
+      shouldPollResponse: true,
+    });
   const tokenCount = BigInt((await depositoryContract.getTokensLength().call()).toString());
   const token = await depositoryContract._tokens(1).call();
   const registeredAddress = tronAddressInfo(tronWeb, token.contractAddress ?? token[0]);
@@ -537,13 +535,15 @@ const tokenConfig = (chain, registeredTokens) => {
         decimals: token.decimals,
         tokenId: token.tokenId,
         address: token.evm || token.address,
-        ...(token.base58 && token.hex41 && token.evm ? {
-        tron: {
-          base58: token.base58,
-          hex41: token.hex41,
-          evm: token.evm,
-        },
-        } : {}),
+        ...(token.base58 && token.hex41 && token.evm
+          ? {
+              tron: {
+                base58: token.base58,
+                hex41: token.hex41,
+                evm: token.evm,
+              },
+            }
+          : {}),
       },
     };
   }
@@ -593,7 +593,7 @@ const writeDeploymentOutputs = (profileName, results, writeJurisdictions) => {
     deployedAt: new Date().toISOString(),
     jurisdictions: {
       ...existingDeployments,
-      ...Object.fromEntries(results.map((result) => [result.chain.id, jurisdictionEntry(result)])),
+      ...Object.fromEntries(results.map(result => [result.chain.id, jurisdictionEntry(result)])),
     },
   };
   writeFileSync(deploymentPath, JSON.stringify(deployPayload, null, 2));
@@ -619,21 +619,17 @@ const selectChains = (profile, chainSelector) => {
   throw new Error(`Unknown --chain=${chainSelector}`);
 };
 
-const readJsonIfPresent = (file) => existsSync(file)
-  ? JSON.parse(readFileSync(file, 'utf8'))
-  : undefined;
+const readJsonIfPresent = file => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : undefined);
 
 const assertFreshDeploymentTargets = (profileName, chains, options) => {
   if (options.dryRun || options.replace) return;
   const configured = readJsonIfPresent(jurisdictionsPath)?.jurisdictions || {};
   const recorded = readJsonIfPresent(path.join(deploymentsDir, `${profileName}.json`))?.jurisdictions || {};
-  const existing = chains
-    .map((chain) => chain.id)
-    .filter((id) => configured[id] || recorded[id]);
+  const existing = chains.map(chain => chain.id).filter(id => configured[id] || recorded[id]);
   if (existing.length > 0) {
     throw new Error(
       `DEPLOYMENT_ALREADY_EXISTS:${existing.join(',')}:` +
-      'refusing to broadcast replacement transactions without explicit --replace',
+        'refusing to broadcast replacement transactions without explicit --replace',
     );
   }
 };
@@ -651,9 +647,7 @@ const main = async () => {
   const results = [];
   for (const chain of selected) {
     console.log(`[deploy-chains] preflight ${chain.id}`);
-    const result = chain.kind === 'tron'
-      ? await deployTron(chain, options)
-      : await deployEvm(chain, options);
+    const result = chain.kind === 'tron' ? await deployTron(chain, options) : await deployEvm(chain, options);
     results.push(result);
     console.log(`[deploy-chains] ${chain.id} ${options.dryRun ? 'dry-run ok' : 'deployed'}`);
     if (!options.dryRun) {
@@ -667,15 +661,21 @@ const main = async () => {
   }
 
   if (options.dryRun) {
-    console.log(JSON.stringify({
-      profile: options.profile,
-      dryRun: true,
-      chains: results.map((result) => ({
-        id: result.chain.id,
-        chainId: result.preflight.chainId,
-        rpc: result.preflight.url,
-      })),
-    }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          profile: options.profile,
+          dryRun: true,
+          chains: results.map(result => ({
+            id: result.chain.id,
+            chainId: result.preflight.chainId,
+            rpc: result.preflight.url,
+          })),
+        },
+        null,
+        2,
+      ),
+    );
     return;
   }
 
@@ -683,7 +683,7 @@ const main = async () => {
 };
 
 if (require.main === module) {
-  main().catch((error) => {
+  main().catch(error => {
     console.error(error?.stack || error?.message || error);
     process.exit(1);
   });

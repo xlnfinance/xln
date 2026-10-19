@@ -55,12 +55,15 @@ describe('hold underflow guards', () => {
     deltaA.leftHold = 5n;
     const deltaB = createDefaultDelta(2);
     deltaB.rightHold = 1n;
-    accountMachine.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [[1, deltaA], [2, deltaB]]);
+    accountMachine.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [
+      [1, deltaA],
+      [2, deltaB],
+    ]);
     accountMachine.state.settlementWorkspace = {
       workspaceHash: '',
       ops: [
-        { type: 'rawDiff', tokenId: 1, leftDiff: -2n, rightDiff: 2n, collateralDiff: 0n, ondeltaDiff: 0n },
-        { type: 'rawDiff', tokenId: 2, leftDiff: 2n, rightDiff: -2n, collateralDiff: 0n, ondeltaDiff: 0n },
+        { type: 'rawDiff', tokenId: 1, leftDiff: 2n, rightDiff: 0n, collateralDiff: -2n, ondeltaDiff: -2n },
+        { type: 'rawDiff', tokenId: 2, leftDiff: 0n, rightDiff: 2n, collateralDiff: -2n, ondeltaDiff: 0n },
       ],
       lastModifiedByLeft: true,
       status: 'awaiting_counterparty',
@@ -75,14 +78,19 @@ describe('hold underflow guards', () => {
     );
 
     const draft = beginAccountStateDraft(accountMachine).draft;
-    const result = await handleSettleTransition(draft, {
-      type: 'settle_transition',
-      data: {
-        kind: 'clear',
-        revision: 1,
-        workspaceHash: accountMachine.state.settlementWorkspace.workspaceHash,
+    const result = await handleSettleTransition(
+      draft,
+      {
+        type: 'settle_transition',
+        data: {
+          kind: 'clear',
+          revision: 1,
+          workspaceHash: accountMachine.state.settlementWorkspace.workspaceHash,
+        },
       },
-    }, true, 2);
+      true,
+      2,
+    );
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('expected settlement hold underflow');
@@ -101,7 +109,8 @@ describe('hold underflow guards', () => {
 
     const accountMachine = makeAccount(entity('11'), entity('22'));
     accountMachine.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [[7, delta]]);
-    accountMachine.state.locks = PersistentAccountStateMap.fromEntries('locks', [[
+    accountMachine.state.locks = PersistentAccountStateMap.fromEntries('locks', [
+      [
         lockId,
         {
           lockId,
@@ -114,7 +123,8 @@ describe('hold underflow guards', () => {
           createdHeight: 0,
           createdTimestamp: 0,
         },
-      ]]);
+      ],
+    ]);
     const draft = beginAccountStateDraft(accountMachine).draft;
 
     const result = await handleHtlcResolve(
@@ -143,7 +153,8 @@ describe('hold underflow guards', () => {
 
     const accountMachine = makeAccount(entity('11'), entity('22'));
     accountMachine.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [[9, delta]]);
-    accountMachine.state.locks = PersistentAccountStateMap.fromEntries('locks', [[
+    accountMachine.state.locks = PersistentAccountStateMap.fromEntries('locks', [
+      [
         lockId,
         {
           lockId,
@@ -156,7 +167,8 @@ describe('hold underflow guards', () => {
           createdHeight: 0,
           createdTimestamp: 0,
         },
-      ]]);
+      ],
+    ]);
     const draft = beginAccountStateDraft(accountMachine).draft;
 
     const result = await handleHtlcResolve(

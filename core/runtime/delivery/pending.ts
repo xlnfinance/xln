@@ -153,7 +153,9 @@ export const groupAtomicCrossJAdmissionOutputs = <T extends RoutedEntityInput>(
     indexes.forEach(index => claimed.add(index));
     indexed.push({
       firstIndex: Math.min(...indexes),
-      outputs: [outputs[pair.targetInputIndex]!, outputs[pair.sourceInputIndex]!],
+      // The structural selector returns the two original input positions.
+      // Pairing establishes atomicity; it must not reverse committed outputs.
+      outputs: [outputs[pair.sourceInputIndex]!, outputs[pair.targetInputIndex]!],
       atomic: true,
       complete: true,
     });
@@ -276,7 +278,7 @@ type RuntimeP2PDispatch = {
     envelope: RuntimeEntityInputsEnvelope,
     ingressTimestamp?: number,
   ): DeliveryResult;
-  bootstrapDirectEntityRoutes?(entityIds: readonly string[], timeoutMs: number): Promise<boolean>;
+  bootstrapEntityRoutes?(entityIds: readonly string[], timeoutMs: number): Promise<boolean>;
   getVerifiedRuntimeRoute?(entityId: string): { runtimeId: string; lastUpdated: number } | null;
 };
 

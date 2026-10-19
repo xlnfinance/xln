@@ -97,7 +97,7 @@ export const handleP2PControl = async (
     });
     const directRoutesOpen = directEntityIds === undefined
       ? null
-      : p2p?.prepareDirectEntityRoutes(directEntityIds) ?? false;
+      : p2p?.prepareEntityRoutes(directEntityIds) ?? false;
 
     return new Response(
       serializeTaggedJson({

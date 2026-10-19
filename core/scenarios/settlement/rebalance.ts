@@ -23,7 +23,6 @@ import {
   converge,
   findReplica,
   processJEvents,
-  setScenarioStorageEnabled,
   enableStrictScenario,
 } from '../harness/helpers';
 import { formatRuntime } from '../../qa/runtime-ascii';
@@ -101,10 +100,9 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
 
   env.state.timestamp = 1000000;
   env.scenarioMode = true;
-  setScenarioStorageEnabled(env, false);
   const restoreStrict = enableStrictScenario(env, 'rebalance');
 
-  ensureSignerKeysFromSeed(env, ['2','3','4','5','6'], 'rebalance');
+  ensureSignerKeysFromSeed(env, ['2', '3', '4', '5', '6'], 'rebalance');
 
   // Create JAdapter + deploy contracts via shared boot path
   const jadapter = await ensureJAdapter(env, jMode, { deployStack: true });
@@ -181,10 +179,16 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
     await process(env);
   };
 
-  const waitForHubCollateral = async (counterpartyId: string, expected: bigint, label: string, maxRounds = 20): Promise<void> => {
+  const waitForHubCollateral = async (
+    counterpartyId: string,
+    expected: bigint,
+    label: string,
+    maxRounds = 20,
+  ): Promise<void> => {
     for (let i = 0; i < maxRounds; i++) {
       const current =
-        findReplica(env, hub.id)[1].state.accounts.get(counterpartyId)?.state.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+        findReplica(env, hub.id)[1].state.accounts.get(counterpartyId)?.state.deltas.get(USDC_TOKEN_ID)?.collateral ||
+        0n;
       if (current === expected) return;
       await syncChain();
       await convergeScenario(env);
@@ -213,26 +217,30 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   console.log('\n🔗 Opening bilateral accounts...');
 
   for (const user of users) {
-    await process(env, [{
-      entityId: user.id,
-      signerId: user.signer,
-      entityTxs: [{
-        type: 'openAccount',
-        data: {
-          targetEntityId: hub.id,
-          disputeConfig: defaultAccountDisputeConfigForParties(user.id, false, hub.id, true),
-          tokenId: USDC_TOKEN_ID,
-          creditAmount: 0n,
-          // Disable automatic R→C during setup. Bob and Dave explicitly opt in
-          // after the payments create their unsecured exposure below.
-          rebalancePolicy: {
-            r2cRequestSoftLimit: usd(20_000),
-            hardLimit: usd(20_000),
-            maxAcceptableFee: usd(100),
+    await process(env, [
+      {
+        entityId: user.id,
+        signerId: user.signer,
+        entityTxs: [
+          {
+            type: 'openAccount',
+            data: {
+              targetEntityId: hub.id,
+              disputeConfig: defaultAccountDisputeConfigForParties(user.id, false, hub.id, true),
+              tokenId: USDC_TOKEN_ID,
+              creditAmount: 0n,
+              // Disable automatic R→C during setup. Bob and Dave explicitly opt in
+              // after the payments create their unsecured exposure below.
+              rebalancePolicy: {
+                r2cRequestSoftLimit: usd(20_000),
+                hardLimit: usd(20_000),
+                maxAcceptableFee: usd(100),
+              },
+            },
           },
-        }
-      }]
-    }]);
+        ],
+      },
+    ]);
     await process(env); // Hub receives and creates account
   }
   await convergeScenario(env);
@@ -245,21 +253,25 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   console.log('✅ All bilateral accounts created');
 
   // Set hub policy before payment flow so user-side auto-rebalance can price requests from hub config.
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{
-      type: 'setHubConfig',
-      data: {
-        matchingStrategy: 'amount',
-        routingFeePPM: 1,
-        baseFee: 0n,
-        minCollateralThreshold: 0n,
-        rebalanceLiquidityFeeBps: 1n,
-        rebalanceTimeoutMs: 10 * 60 * 1000,
-      },
-    }],
-  }]);
+  await process(env, [
+    {
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [
+        {
+          type: 'setHubConfig',
+          data: {
+            matchingStrategy: 'amount',
+            routingFeePPM: 1,
+            baseFee: 0n,
+            minCollateralThreshold: 0n,
+            rebalanceLiquidityFeeBps: 1n,
+            rebalanceTimeoutMs: 10 * 60 * 1000,
+          },
+        },
+      ],
+    },
+  ]);
   await convergeScenario(env);
 
   // ══════════════════════════════════════════════════════════════
@@ -268,18 +280,22 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   console.log('\n💳 Hub extending credit to all users...');
 
   for (const user of users) {
-    await process(env, [{
-      entityId: hub.id,
-      signerId: hub.signer,
-      entityTxs: [{
-        type: 'extendCredit',
-        data: {
-          counterpartyEntityId: user.id,
-          tokenId: USDC_TOKEN_ID,
-          amount: usd(50_000),
-        }
-      }]
-    }]);
+    await process(env, [
+      {
+        entityId: hub.id,
+        signerId: hub.signer,
+        entityTxs: [
+          {
+            type: 'extendCredit',
+            data: {
+              counterpartyEntityId: user.id,
+              tokenId: USDC_TOKEN_ID,
+              amount: usd(50_000),
+            },
+          },
+        ],
+      },
+    ]);
     await process(env); // Counterparty receives + ACKs
     await process(env); // Hub commits frame
     await process(env); // Extra tick for delivery
@@ -289,18 +305,22 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   // Users extend credit back to Hub (so Hub can route payments through them)
   console.log('\n💳 Users extending credit to Hub...');
   for (const user of users) {
-    await process(env, [{
-      entityId: user.id,
-      signerId: user.signer,
-      entityTxs: [{
-        type: 'extendCredit',
-        data: {
-          counterpartyEntityId: hub.id,
-          tokenId: USDC_TOKEN_ID,
-          amount: usd(50_000),
-        }
-      }]
-    }]);
+    await process(env, [
+      {
+        entityId: user.id,
+        signerId: user.signer,
+        entityTxs: [
+          {
+            type: 'extendCredit',
+            data: {
+              counterpartyEntityId: hub.id,
+              tokenId: USDC_TOKEN_ID,
+              amount: usd(50_000),
+            },
+          },
+        ],
+      },
+    ]);
     await process(env);
     await process(env);
     await process(env);
@@ -318,27 +338,31 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
       counterpartyId: user.id,
       tokenId: USDC_TOKEN_ID,
       amount: INITIAL_COLLATERAL,
-    }
+    },
   }));
 
   // Step 1: r2c for all 4 accounts
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: r2cTxs,
-  }]);
+  await process(env, [
+    {
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: r2cTxs,
+    },
+  ]);
 
   // Step 2: broadcast (separate tick)
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{ type: 'j_broadcast' as const, data: {} }],
-  }]);
+  await process(env, [
+    {
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{ type: 'j_broadcast' as const, data: {} }],
+    },
+  ]);
 
   // Step 3: J-processor → on-chain tx → poll events
   env.state.timestamp += 150;
   await process(env); // J-processor fires batch
-  await syncChain();  // Poll events + process
+  await syncChain(); // Poll events + process
   await convergeScenario(env);
 
   // Wait for the finalized AccountSettled J-events to land in bilateral state before asserting.
@@ -357,42 +381,66 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   console.log('\n💸 Creating payment imbalances...');
 
   // Alice → Bob $8K atomically through Hub
-  await process(env, [{
-    entityId: alice.id,
-    signerId: alice.signer,
-    entityTxs: [withDeterministicHtlcTestSecret({
-      type: 'htlcPayment',
-      data: {
-        targetEntityId: bob.id,
-        tokenId: USDC_TOKEN_ID,
-        amount: usd(8_000),
-        maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id, bob.id], USDC_TOKEN_ID, usd(8_000)).senderLockAmount,
-        route: [alice.id, hub.id, bob.id],
-        deliveryMode: 'instant',
-        description: 'Alice→Hub→Bob $8K',
-      }
-    }, `0x${'82'.repeat(32)}`)]
-  }]);
+  await process(env, [
+    {
+      entityId: alice.id,
+      signerId: alice.signer,
+      entityTxs: [
+        withDeterministicHtlcTestSecret(
+          {
+            type: 'htlcPayment',
+            data: {
+              targetEntityId: bob.id,
+              tokenId: USDC_TOKEN_ID,
+              amount: usd(8_000),
+              maxSenderDebit: quoteHtlcPaymentRoute(
+                env.gossip.getProfiles(),
+                [alice.id, hub.id, bob.id],
+                USDC_TOKEN_ID,
+                usd(8_000),
+              ).senderLockAmount,
+              route: [alice.id, hub.id, bob.id],
+              deliveryMode: 'instant',
+              description: 'Alice→Hub→Bob $8K',
+            },
+          },
+          `0x${'82'.repeat(32)}`,
+        ),
+      ],
+    },
+  ]);
   for (let i = 0; i < 6; i++) await process(env);
   await convergeScenario(env);
 
   // Charlie → Dave $12K atomically through Hub
-  await process(env, [{
-    entityId: charlie.id,
-    signerId: charlie.signer,
-    entityTxs: [withDeterministicHtlcTestSecret({
-      type: 'htlcPayment',
-      data: {
-        targetEntityId: dave.id,
-        tokenId: USDC_TOKEN_ID,
-        amount: usd(12_000),
-        maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [charlie.id, hub.id, dave.id], USDC_TOKEN_ID, usd(12_000)).senderLockAmount,
-        route: [charlie.id, hub.id, dave.id],
-        deliveryMode: 'instant',
-        description: 'Charlie→Hub→Dave $12K',
-      }
-    }, `0x${'83'.repeat(32)}`)]
-  }]);
+  await process(env, [
+    {
+      entityId: charlie.id,
+      signerId: charlie.signer,
+      entityTxs: [
+        withDeterministicHtlcTestSecret(
+          {
+            type: 'htlcPayment',
+            data: {
+              targetEntityId: dave.id,
+              tokenId: USDC_TOKEN_ID,
+              amount: usd(12_000),
+              maxSenderDebit: quoteHtlcPaymentRoute(
+                env.gossip.getProfiles(),
+                [charlie.id, hub.id, dave.id],
+                USDC_TOKEN_ID,
+                usd(12_000),
+              ).senderLockAmount,
+              route: [charlie.id, hub.id, dave.id],
+              deliveryMode: 'instant',
+              description: 'Charlie→Hub→Dave $12K',
+            },
+          },
+          `0x${'83'.repeat(32)}`,
+        ),
+      ],
+    },
+  ]);
   for (let i = 0; i < 6; i++) await process(env);
   await convergeScenario(env);
 
@@ -441,20 +489,24 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   // ══════════════════════════════════════════════════════════════
   console.log('\n📋 Users setting rebalance policies...');
   for (const user of [bob, dave]) {
-    await process(env, [{
-      entityId: user.id,
-      signerId: user.signer,
-      entityTxs: [{
-        type: 'setRebalancePolicy',
-        data: {
-          counterpartyEntityId: hub.id,
-          tokenId: USDC_TOKEN_ID,
-          r2cRequestSoftLimit: usd(1_000),       // Trigger when unsecured credit reaches $1K
-          hardLimit: usd(20_000),      // Max threshold
-          maxAcceptableFee: usd(100),  // Auto-accept fees up to $100
-        }
-      }]
-    }]);
+    await process(env, [
+      {
+        entityId: user.id,
+        signerId: user.signer,
+        entityTxs: [
+          {
+            type: 'setRebalancePolicy',
+            data: {
+              counterpartyEntityId: hub.id,
+              tokenId: USDC_TOKEN_ID,
+              r2cRequestSoftLimit: usd(1_000), // Trigger when unsecured credit reaches $1K
+              hardLimit: usd(20_000), // Max threshold
+              maxAcceptableFee: usd(100), // Auto-accept fees up to $100
+            },
+          },
+        ],
+      },
+    ]);
     await process(env); // Hub receives frame
     await process(env); // ACK
     await process(env); // Extra round
@@ -480,11 +532,13 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   // ── Cycle 1: Trigger hub crontab and process bilateral frames ──
   advanceTime(3100);
   console.log('\n  [Cycle 1] Hub crontab + bilateral processing...');
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [] // Ping to trigger crontab
-  }]);
+  await process(env, [
+    {
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [], // Ping to trigger crontab
+    },
+  ]);
 
   // Process bilateral frames (request_collateral delivery + ACK/commit)
   for (let i = 0; i < 30; i++) {
@@ -511,11 +565,13 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   // ── Cycle 2: Hub crontab deposits R→C and broadcasts immediately ──
   advanceTime(3100);
   console.log('\n  [Cycle 2] Hub crontab: deposit + broadcast...');
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [] // Ping to trigger crontab
-  }]);
+  await process(env, [
+    {
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [], // Ping to trigger crontab
+    },
+  ]);
 
   // Process bilateral frames + local queues
   for (let i = 0; i < 30; i++) {
@@ -568,12 +624,18 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   for (const user of [bob, dave]) {
     const receipts = traceLogs.filter(log => {
       const data = (log.data ?? {}) as Record<string, unknown>;
-      return log.message === 'request_collateral_committed' &&
+      return (
+        log.message === 'request_collateral_committed' &&
         String(data['entityId'] ?? '').toLowerCase() === user.id.toLowerCase() &&
         String(data['accountId'] ?? '').toLowerCase() === hub.id.toLowerCase() &&
-        Number(data['tokenId']) === USDC_TOKEN_ID;
+        Number(data['tokenId']) === USDC_TOKEN_ID
+      );
     });
-    assert(receipts.length === 1, `${user.name} must commit exactly one collateral request (got ${receipts.length})`, env);
+    assert(
+      receipts.length === 1,
+      `${user.name} must commit exactly one collateral request (got ${receipts.length})`,
+      env,
+    );
     const requestedAmount = BigInt(String(receipts[0]!.data?.['requestedAmount'] ?? '0'));
     assert(requestedAmount > 0n, `${user.name} committed request amount must be positive`, env);
     requestedByUser.set(user.id, requestedAmount);
@@ -725,7 +787,11 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
       );
     }
   }
-  assert(accountsWithTopUp > 0, `Expected at least one account to receive collateral top-up, got ${accountsWithTopUp}`, env);
+  assert(
+    accountsWithTopUp > 0,
+    `Expected at least one account to receive collateral top-up, got ${accountsWithTopUp}`,
+    env,
+  );
 
   // Counterparty side: workspace cleared, requestedRebalance converges.
   for (const user of users) {
@@ -756,7 +822,12 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   }
 
   const trackedRequestUserIds = new Set(Array.from(requestedByUser.keys()));
-  const getPendingRequests = (): Array<{ userId: string; userName: string; hubPending: bigint; userPending: bigint }> => {
+  const getPendingRequests = (): Array<{
+    userId: string;
+    userName: string;
+    hubPending: bigint;
+    userPending: bigint;
+  }> => {
     const pending: Array<{ userId: string; userName: string; hubPending: bigint; userPending: bigint }> = [];
     const latestHub = findReplica(env, hub.id)[1].state;
     for (const user of users) {
@@ -820,14 +891,22 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   assert(pendingAfterBroadcast.length === 0, 'No requestedRebalance may remain after the completed cycle', env);
 
   hubFinal = findReplica(env, hub.id)[1].state;
-  const finalTraceLogs = rebalanceTrace.snapshots.slice(rebalanceTrace.startIndex).flatMap(snapshot => snapshot.logs ?? []);
+  const finalTraceLogs = rebalanceTrace.snapshots
+    .slice(rebalanceTrace.startIndex)
+    .flatMap(snapshot => snapshot.logs ?? []);
   const allRequestReceipts = finalTraceLogs.filter(log => {
     const data = (log.data ?? {}) as Record<string, unknown>;
-    return log.message === 'request_collateral_committed' &&
+    return (
+      log.message === 'request_collateral_committed' &&
       String(data['accountId'] ?? '').toLowerCase() === hub.id.toLowerCase() &&
-      Number(data['tokenId']) === USDC_TOKEN_ID;
+      Number(data['tokenId']) === USDC_TOKEN_ID
+    );
   });
-  assert(allRequestReceipts.length === 2, `Expected only Bob + Dave collateral requests (got ${allRequestReceipts.length})`, env);
+  assert(
+    allRequestReceipts.length === 2,
+    `Expected only Bob + Dave collateral requests (got ${allRequestReceipts.length})`,
+    env,
+  );
 
   const sentBatches = new Map<string, SentJBatch>();
   for (const snapshot of rebalanceTrace.snapshots.slice(rebalanceTrace.startIndex)) {
@@ -846,8 +925,8 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
 
   const matchedBatches = new Map<string, SentJBatch>();
   for (const [userId, requestedAmount] of requestedByUser) {
-    const matches = r2cPairs.filter(({ pair }) =>
-      pair.entity.toLowerCase() === userId.toLowerCase() && pair.amount === requestedAmount,
+    const matches = r2cPairs.filter(
+      ({ pair }) => pair.entity.toLowerCase() === userId.toLowerCase() && pair.amount === requestedAmount,
     );
     assert(matches.length === 1, `Expected one exact R→C leg for ${userId.slice(-4)} (got ${matches.length})`, env);
     const sent = matches[0]!.sent;
@@ -866,7 +945,8 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
     const userProgress = snapshotAccountJProgress(userAccount?.state);
     assert(
       hubProgress.lastFinalizedJHeight === userProgress.lastFinalizedJHeight &&
-        hubProgress.pendingClaimCount === 0n && userProgress.pendingClaimCount === 0n,
+        hubProgress.pendingClaimCount === 0n &&
+        userProgress.pendingClaimCount === 0n,
       `Final bilateral J state diverged for ${userId.slice(-4)}`,
       env,
     );

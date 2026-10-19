@@ -15,9 +15,9 @@ describe('full check orchestration', () => {
   test('runs short gates before parallel TypeScript, frontend, and React wallet gates', () => {
     expect(packageJson.scripts['check']).toBe('bun run check:short && bun run check:long');
     expect(parallelGateNames('check:long')).toEqual(['check:src', 'check:frontend', 'check:ui-types']);
-    expect(packageJson.scripts['check:ui-types']).toBe(
-      'cd ui && bun node_modules/typescript/bin/tsc --noEmit -p tsconfig.json',
-    );
+    expect(packageJson.scripts['check:ui-types']).toBe('cd ui && bun run check');
+    const uiPackage = JSON.parse(readFileSync(join(repoRoot, 'ui/package.json'), 'utf8'));
+    expect(uiPackage.scripts.check).toBe('tsc --noEmit -p tsconfig.json --checkers 4');
     expect(srcGateNames()[0]).toBe('soundcheck:fast');
     expect(srcGateNames().filter(name => name.startsWith('rscore:'))).toEqual([]);
     expect(packageJson.scripts['check:src:parallel']).toBeUndefined();

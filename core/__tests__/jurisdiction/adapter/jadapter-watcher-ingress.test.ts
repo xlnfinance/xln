@@ -35,20 +35,25 @@ import {
   stageSeenLogs,
   updateWatcherJurisdictionCursor,
 } from '../../../jurisdiction/adapter/watcher';
-import { collectWatcherCanonicalAudit, collectTargetedWatcherRewinds } from '../../../jurisdiction/adapter/watcher/observe/watcher-reconciliation';
-import { nextWatcherPollWindow } from '../../../jurisdiction/adapter/watcher/observe/watcher-poll-policy';
 import {
-  enqueueRuntimeInput,
-  isRuntimeMempoolCapacityError,
-} from '../../../runtime/mempool/input-queue';
+  collectWatcherCanonicalAudit,
+  collectTargetedWatcherRewinds,
+} from '../../../jurisdiction/adapter/watcher/observe/watcher-reconciliation';
+import { nextWatcherPollWindow } from '../../../jurisdiction/adapter/watcher/observe/watcher-poll-policy';
+import { enqueueRuntimeInput, isRuntimeMempoolCapacityError } from '../../../runtime/mempool/input-queue';
 import { findReserveUpdatedEvidence } from '../../../jurisdiction/machine/events/event-evidence';
 import { decodeAuthenticatedWatcherEvents } from '../../../jurisdiction/adapter/rpc-watcher-events';
 import { decodeServedWatcherEvents } from '../../../jurisdiction/adapter/rpc/watcher/rpc-watcher-ingress';
 import { Depository__factory } from '../../../../jurisdictions/typechain-types';
 import { encodeInt512 } from '../../../protocol/crypto/abi-money';
 import { safeStringify } from '../../../protocol/serialization';
+import { RpcTransportUnavailableError } from '../../../jurisdiction/adapter/kernel/failure';
+import { isRpcWatcherTransientError } from '../../../jurisdiction/adapter/rpc/rpc-adapter';
 import { createWatchedErc20TokenReader } from '../../../jurisdiction/adapter/rpc-watcher-inputs';
-import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../../../jurisdiction/machine/event-observation';
+import {
+  canonicalJurisdictionEventsHash,
+  getJEventJurisdictionRef,
+} from '../../../jurisdiction/machine/event-observation';
 import {
   buildLocalJPrefixAttestation,
   mergeJPrefixAttestations,
@@ -95,7 +100,7 @@ const makeJurisdiction = (name: string, chainId: number, depositoryAddress: stri
 const makeCursorEnv = (seed: string, replicas: JReplica[], activeJurisdiction?: string): RuntimeReplica => {
   const env = createEmptyEnv(seed);
   env.activeJurisdiction = activeJurisdiction;
-  env.state.jReplicas = new Map(replicas.map((replica) => [replica.name, replica]));
+  env.state.jReplicas = new Map(replicas.map(replica => [replica.name, replica]));
   return env;
 };
 
@@ -144,26 +149,37 @@ describe('JAdapter watcher ingress', () => {
     const transactionHash = `0x${'ab'.repeat(32)}`;
     const otherTransaction = `0x${'ac'.repeat(32)}`;
     env.state.eReplicas.set(`${hub}:1`, makeReplica(hub, '1', true));
-    const event = (name: string, args: Record<string, unknown>, logIndex: number, tx = transactionHash) =>
-      ({ name, args, logIndex, blockNumber: 20, blockHash, transactionHash: tx });
+    const event = (name: string, args: Record<string, unknown>, logIndex: number, tx = transactionHash) => ({
+      name,
+      args,
+      logIndex,
+      blockNumber: 20,
+      blockHash,
+      transactionHash: tx,
+    });
     const reserve = event('ReserveUpdated', { entity: hub, tokenId: 1n, newBalance: 900n }, 0);
     const batch = event('HankoBatchProcessed', { entityId: hub, batchHash: `0x${'bb'.repeat(32)}`, nonce: 3n }, 2);
-    const run = (events: Parameters<typeof processEventBatch>[0]) => processEventBatch(
-      events, env, 20, blockHash, { value: 0 }, 'external-reserve-receipt',
-      undefined, true,
-    );
+    const run = (events: Parameters<typeof processEventBatch>[0]) =>
+      processEventBatch(events, env, 20, blockHash, { value: 0 }, 'external-reserve-receipt', undefined, true);
     const expectedInput = run([reserve, batch]);
     const input = run([
       reserve,
       event('ReserveUpdated', { entity: recipient, tokenId: 1n, newBalance: 100n }, 1),
       batch,
       event('ReserveUpdated', { entity: unrelated, tokenId: 1n, newBalance: 999n }, 3, otherTransaction),
-      event('HankoBatchProcessed', { entityId: unrelated, batchHash: `0x${'bc'.repeat(32)}`, nonce: 1n }, 4, otherTransaction),
+      event(
+        'HankoBatchProcessed',
+        { entityId: unrelated, batchHash: `0x${'bc'.repeat(32)}`, nonce: 1n },
+        4,
+        otherTransaction,
+      ),
     ]);
     expect(input).toEqual(expectedInput);
     expect(env.state.eReplicas.size).toBe(1);
     expect(findReserveUpdatedEvidence(env, recipient, 1, 100n)).toMatchObject({
-      transactionHash, blockHash, blockNumber: 20,
+      transactionHash,
+      blockHash,
+      blockNumber: 20,
       args: { entity: recipient, tokenId: '1', newBalance: '100' },
     });
     expect(findReserveUpdatedEvidence(env, recipient, 1, 101n)).toBeNull();
@@ -182,41 +198,135 @@ describe('JAdapter watcher ingress', () => {
     const replica = makeReplica(entityId, signerId, true);
     replica.state.config.jurisdiction = jurisdiction;
     env.state.eReplicas.set(replicaKey, replica);
-    const events = [{ type: 'ReserveUpdated' as const, data: { entity: entityId, tokenId: 1, newBalance: '42' },
-      blockNumber: 2, blockHash: blockHash(2), transactionHash: `0x${'72'.repeat(32)}`, logIndex: 0 }];
-    const observation = { type: 'observeJRange' as const, data: { entityId, signerId, jurisdictionRef,
-      scannedThroughHeight: 2, tipBlockHash: blockHash(2), blocks: [{ jurisdictionRef, jHeight: 2,
-        jBlockHash: blockHash(2), eventsHash: canonicalJurisdictionEventsHash(events), events }] } };
-    const range = enqueueJHistoryRange(env, [{ timestamp: 2, runtimeTxs: [observation], entityInputs: [] }],
-      2, blockHash(2), undefined, [1, 2].map(jHeight => ({ jHeight, jBlockHash: blockHash(jHeight) })));
+    const events = [
+      {
+        type: 'ReserveUpdated' as const,
+        data: { entity: entityId, tokenId: 1, newBalance: '42' },
+        blockNumber: 2,
+        blockHash: blockHash(2),
+        transactionHash: `0x${'72'.repeat(32)}`,
+        logIndex: 0,
+      },
+    ];
+    const observation = {
+      type: 'observeJRange' as const,
+      data: {
+        entityId,
+        signerId,
+        jurisdictionRef,
+        scannedThroughHeight: 2,
+        tipBlockHash: blockHash(2),
+        blocks: [
+          {
+            jurisdictionRef,
+            jHeight: 2,
+            jBlockHash: blockHash(2),
+            eventsHash: canonicalJurisdictionEventsHash(events),
+            events,
+          },
+        ],
+      },
+    };
+    const range = enqueueJHistoryRange(
+      env,
+      [{ timestamp: 2, runtimeTxs: [observation], entityInputs: [] }],
+      2,
+      blockHash(2),
+      undefined,
+      [1, 2].map(jHeight => ({ jHeight, jBlockHash: blockHash(jHeight) })),
+    );
     expect(range.scannedReplicaKeys).toEqual([replicaKey]);
     expect(range.finalityReplicaKeys).toEqual([]);
     expect(env.runtimeMempool?.runtimeTxs).toContainEqual(observation);
     expect(env.runtimeMempool?.entityInputs).toEqual([]);
   });
 
-  test('receipt watcher excludes non-ERC20 registry entries sharing one contract', async () => {
+  test('receipt watcher refreshes the complete registry in bounded ordered batches', async () => {
     const erc20 = `0x${'41'.repeat(20)}`;
     const entityProvider = `0x${'42'.repeat(20)}`;
-    const entries = [
+    const iface = Depository__factory.createInterface();
+    const entries: Array<readonly [string, bigint, bigint]> = [
       [`0x${'00'.repeat(20)}`, 0n, 0n],
       [erc20, 0n, 0n],
       [entityProvider, 7n, 2n],
       [entityProvider, 8n, 2n],
-    ] as const;
+    ];
+    const batches: number[][] = [];
+    let lengthReads = 0;
+    let failedToken = -1;
+    let truncate = false;
+    let transportFailure: Error | undefined;
+    const failures: Record<string, unknown>[] = [];
     const readWatchedTokens = createWatchedErc20TokenReader(
       {
-        getTokensLength: async () => BigInt(entries.length),
-        _tokens: async tokenId => {
+        getTokensLength: async () => {
+          lengthReads += 1;
+          return BigInt(entries.length);
+        },
+        getAddress: async () => entityProvider,
+        interface: iface,
+      },
+      async calls => {
+        if (transportFailure) throw transportFailure;
+        const ids = calls.map(call => {
+          expect(call.method).toBe('eth_call');
+          const [transaction, block] = call.params;
+          expect(block).toBe('latest');
+          if (
+            !transaction ||
+            typeof transaction !== 'object' ||
+            !('data' in transaction) ||
+            typeof transaction.data !== 'string'
+          )
+            throw new Error('TEST_TOKEN_CALL_INVALID');
+          return Number(iface.decodeFunctionData('_tokens', transaction.data)[0]);
+        });
+        batches.push(ids);
+        const results = ids.map(tokenId => {
+          if (tokenId === failedToken) throw new Error(`TEST_TOKEN_READ_FAILED:${tokenId}`);
           const entry = entries[tokenId];
           if (!entry) throw new Error(`TEST_TOKEN_MISSING:${tokenId}`);
-          return entry;
-        },
+          return iface.encodeFunctionResult('_tokens', entry);
+        });
+        return truncate ? results.slice(1) : results;
       },
-      () => undefined,
+      payload => failures.push(payload),
     );
-
     expect(await readWatchedTokens()).toEqual([{ tokenId: 1, address: erc20 }]);
+    expect(batches.splice(0)).toEqual([[1, 2, 3]]);
+    // A token registered after the first poll must be included on the next.
+    for (let id = 4; id <= 130; id += 1) entries.push([`0x${id.toString(16).padStart(40, '0')}`, 0n, 0n]);
+    const refreshed = await readWatchedTokens();
+    expect(lengthReads).toBe(2);
+    expect(refreshed.map(token => token.tokenId)).toEqual([1, ...Array.from({ length: 127 }, (_, i) => i + 4)]);
+    expect(batches.map(batch => batch.length)).toEqual([128, 2]);
+    expect(batches.flat()).toEqual(Array.from({ length: 130 }, (_, i) => i + 1));
+    failedToken = 129;
+    await expect(readWatchedTokens()).rejects.toThrow('J_WATCH_ERC20_REGISTRY_READ_FAILED:TEST_TOKEN_READ_FAILED:129');
+    failedToken = -1;
+    truncate = true;
+    await expect(readWatchedTokens()).rejects.toThrow('J_TOKEN_REGISTRY_BATCH_LENGTH_MISMATCH');
+    truncate = false;
+    expect(await readWatchedTokens()).toEqual(refreshed);
+    expect(lengthReads).toBe(5);
+    expect(failures).toHaveLength(2);
+    // The watcher must retain locally typed outages through the registry
+    // context wrapper; permanent registry failures must still halt the poll.
+    for (const failure of [
+      new RpcTransportUnavailableError('RPC_BATCH_UNREACHABLE'),
+      new Error('RPC_BATCH_INVALID_RESPONSE'),
+    ]) {
+      transportFailure = failure;
+      const error = await readWatchedTokens().then(
+        () => undefined,
+        error => error,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect(error.cause).toBe(failure);
+      expect(isRpcWatcherTransientError(error)).toBe(failure instanceof RpcTransportUnavailableError);
+    }
+    transportFailure = undefined;
+    expect(await readWatchedTokens()).toEqual(refreshed);
   });
 
   test('custom token events do not wedge wallet log projection', async () => {
@@ -224,14 +334,8 @@ describe('JAdapter watcher ingress', () => {
     const tokenAddress = `0x${'61'.repeat(20)}`;
     const recipient = `0x${'72'.repeat(20)}`;
     const entityId = `0x${'51'.repeat(32)}`;
-    const erc20 = new Interface([
-      'event Transfer(address indexed from, address indexed to, uint256 value)',
-    ]);
-    const transfer = erc20.encodeEventLog(erc20.getEvent('Transfer')!, [
-      `0x${'71'.repeat(20)}`,
-      recipient,
-      25n,
-    ]);
+    const erc20 = new Interface(['event Transfer(address indexed from, address indexed to, uint256 value)']);
+    const transfer = erc20.encodeEventLog(erc20.getEvent('Transfer')!, [`0x${'71'.repeat(20)}`, recipient, 25n]);
     const baseLog = {
       address: tokenAddress,
       blockNumber: 10,
@@ -244,12 +348,19 @@ describe('JAdapter watcher ingress', () => {
       depositoryAddress: `0x${'62'.repeat(20)}`,
       entityProviderAddress: `0x${'63'.repeat(20)}`,
       tokenByAddress: new Map([[tokenAddress, { tokenId: 3, address: tokenAddress }]]),
-      trackedOwners: new Map([[recipient, [{
-        entityId,
-        watchAfterBlock: 0,
-        balanceAfterBlockByToken: new Map([[tokenAddress, 0]]),
-        allowanceAfterBlockByKey: new Map(),
-      }]]]),
+      trackedOwners: new Map([
+        [
+          recipient,
+          [
+            {
+              entityId,
+              watchAfterBlock: 0,
+              balanceAfterBlockByToken: new Map([[tokenAddress, 0]]),
+              allowanceAfterBlockByKey: new Map(),
+            },
+          ],
+        ],
+      ]),
       observedThroughHeight: 10,
       observedTipBlockHash: baseLog.blockHash,
       observedHeadHeight: 10,
@@ -271,17 +382,16 @@ describe('JAdapter watcher ingress', () => {
       }),
     ]);
 
-    await expect(decodeAuthenticatedWatcherEvents({
-      ...input,
-      logs: [{ ...baseLog, topics: transfer.topics, data: '0x01', index: 2 }],
-    })).rejects.toThrow();
+    await expect(
+      decodeAuthenticatedWatcherEvents({
+        ...input,
+        logs: [{ ...baseLog, topics: transfer.topics, data: '0x01', index: 2 }],
+      }),
+    ).rejects.toThrow();
   });
 
   test('J-event observation diagnostics use structured logging only', () => {
-    const source = readFileSync(
-      join(process.cwd(), 'core/jurisdiction/adapter/events/event-observation.ts'),
-      'utf8',
-    );
+    const source = readFileSync(join(process.cwd(), 'core/jurisdiction/adapter/events/event-observation.ts'), 'utf8');
 
     expect(source).toContain("createStructuredLogger('jadapter.event-observation')");
     expect(source).toContain("log.info('j_event.deliver_settled'");
@@ -307,12 +417,15 @@ describe('JAdapter watcher ingress', () => {
   test('RPC wallet snapshot reads fail fast on partial RPC errors', () => {
     expect(readRequiredRpcBatchBigInt(new Map([[1, { id: 1, result: '0x2a' }]]), 1, 'balance')).toBe(42n);
     expect(() => readRequiredRpcBatchBigInt(new Map(), 1, 'balance')).toThrow(/EXTERNAL_WALLET_SNAPSHOT_RPC_MISSING/);
-    expect(() => readRequiredRpcBatchBigInt(new Map([[1, { id: 1, error: { message: 'boom' } }]]), 1, 'balance'))
-      .toThrow(/EXTERNAL_WALLET_SNAPSHOT_RPC_ERROR/);
-    expect(() => readRequiredRpcBatchBigInt(new Map([[1, { id: 1, result: null }]]), 1, 'balance'))
-      .toThrow(/EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_RESULT/);
-    expect(() => readRequiredRpcBatchBigInt(new Map([[1, { id: 1, result: 'not-a-number' }]]), 1, 'balance'))
-      .toThrow(/EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_BIGINT/);
+    expect(() =>
+      readRequiredRpcBatchBigInt(new Map([[1, { id: 1, error: { message: 'boom' } }]]), 1, 'balance'),
+    ).toThrow(/EXTERNAL_WALLET_SNAPSHOT_RPC_ERROR/);
+    expect(() => readRequiredRpcBatchBigInt(new Map([[1, { id: 1, result: null }]]), 1, 'balance')).toThrow(
+      /EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_RESULT/,
+    );
+    expect(() => readRequiredRpcBatchBigInt(new Map([[1, { id: 1, result: 'not-a-number' }]]), 1, 'balance')).toThrow(
+      /EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_BIGINT/,
+    );
     expect(readOptionalRpcBatchBigInt(new Map([[1, { id: 1, result: '0x' }]]), 1, 'balance')).toMatchObject({
       ok: false,
       error: expect.stringContaining('EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_BIGINT'),
@@ -353,26 +466,23 @@ describe('JAdapter watcher ingress', () => {
     };
 
     expect(isTransientRpcUnavailableError(error)).toBe(true);
-    expect(isTransientRpcUnavailableError(Object.assign(
-      new Error('server response 500 Internal Server Error (code=SERVER_ERROR)'),
-      {
-        code: 'SERVER_ERROR',
-        info: {
-          requestUrl: 'https://localhost:20364/rpc2',
-          responseStatus: '500 Internal Server Error',
-          responseBody: 'Internal Server Error',
-        },
-      },
-    ))).toBe(true);
+    expect(
+      isTransientRpcUnavailableError(
+        Object.assign(new Error('server response 500 Internal Server Error (code=SERVER_ERROR)'), {
+          code: 'SERVER_ERROR',
+          info: {
+            requestUrl: 'https://localhost:20364/rpc2',
+            responseStatus: '500 Internal Server Error',
+            responseBody: 'Internal Server Error',
+          },
+        }),
+      ),
+    ).toBe(true);
     expect(isTransientRpcUnavailableError(new Error('RPC_BATCH_HTTP_500'))).toBe(true);
     expect(isTransientRpcUnavailableError(new Error('RPC_BATCH_TIMEOUT:5000'))).toBe(true);
     expect(isTransientRpcUnavailableError(new SyntaxError('Unexpected end of JSON input'))).toBe(true);
-    expect(isTransientRpcUnavailableError(
-      new Error('J_HISTORY_HEADER_MISSING:height=34 error=none'),
-    )).toBe(true);
-    expect(isTransientRpcUnavailableError(
-      new Error('J_HISTORY_FINALIZED_REORG:34'),
-    )).toBe(false);
+    expect(isTransientRpcUnavailableError(new Error('J_HISTORY_HEADER_MISSING:height=34 error=none'))).toBe(true);
+    expect(isTransientRpcUnavailableError(new Error('J_HISTORY_FINALIZED_REORG:34'))).toBe(false);
     expect(isTransientRpcUnavailableError(new Error('EXTERNAL_WALLET_BASELINE_MISSING'))).toBe(false);
     expect(isTransientRpcUnavailableError(new Error('execution reverted: INSUFFICIENT_RESERVE'))).toBe(false);
   });
@@ -382,7 +492,8 @@ describe('JAdapter watcher ingress', () => {
     for (const message of [
       'J_HISTORY_HEADER_MISSING:height=11904945 error=block not found with number 0xb5a7b1',
       'J_RECEIPT_BATCH_CALL_FAILED:1:eth_getBlockByNumber:block not found with number 0x1',
-    ]) expect(isTransientRpcUnavailableError(new Error(message))).toBe(true);
+    ])
+      expect(isTransientRpcUnavailableError(new Error(message))).toBe(true);
     for (const message of [
       'J_HISTORY_HEADER_MISSING:height=11904945 error=invalid params',
       'J_HISTORY_HEADER_MISSING:height=11904945 error=block not found with number 0xwrong',
@@ -391,13 +502,14 @@ describe('JAdapter watcher ingress', () => {
       'J_HISTORY_FINALIZED_REORG:11904945',
       'J_RECEIPT_BATCH_CALL_FAILED:1:eth_call:block not found with number 0x1',
       'block not found with number 0xb5a7b1',
-    ]) expect(isTransientRpcUnavailableError(new Error(message))).toBe(false);
+    ])
+      expect(isTransientRpcUnavailableError(new Error(message))).toBe(false);
   });
 
   test('RPC watcher bounds historical catch-up without skipping the safe tip', () => {
     expect(resolveWatcherPollToBlock(1, 10_000, 256)).toBe(256);
-    expect(resolveWatcherPollToBlock(1, 190_000)).toBe(256);
-    expect(resolveWatcherPollToBlock(257, 190_000)).toBe(512);
+    expect(resolveWatcherPollToBlock(1, 190_000)).toBe(255);
+    expect(resolveWatcherPollToBlock(257, 190_000)).toBe(511);
     expect(resolveWatcherPollToBlock(189_900, 190_000)).toBe(190_000);
     expect(resolveWatcherPollToBlock(257, 10_000, 256)).toBe(512);
     expect(resolveWatcherPollToBlock(9_900, 10_000, 256)).toBe(10_000);
@@ -423,73 +535,82 @@ describe('JAdapter watcher ingress', () => {
     expect(isRuntimeMempoolCapacityError(new Error('J_WATCHER_POLL', { cause: capacity }))).toBe(true);
     expect(nextWatcherPollWindow(256, false)).toBe(128);
     expect(nextWatcherPollWindow(1, false)).toBe(1);
-    expect(nextWatcherPollWindow(128, true)).toBe(256);
-    expect(nextWatcherPollWindow(256, true)).toBe(256);
+    expect(nextWatcherPollWindow(128, true)).toBe(255);
+    expect(nextWatcherPollWindow(256, true)).toBe(255);
   });
 
   test('j-event ingress rejects during persistence quiesce before cursor or dedup mutation', () => {
     const env = createEmptyEnv('jadapter-quiesce-ingress');
-    const source = makeJReplica(
-      'quiesce-source',
-      0n,
-      `0x${'41'.repeat(20)}`,
-      31_337,
-      `0x${'42'.repeat(20)}`,
-    );
+    const source = makeJReplica('quiesce-source', 0n, `0x${'41'.repeat(20)}`, 31_337, `0x${'42'.repeat(20)}`);
     env.state.jReplicas.set(source.name, source);
     env.infrastructure = { persistenceQuiescing: true } as RuntimeReplica['infrastructure'];
     const entityId = `0x${'44'.repeat(32)}`;
     const owner = `0x${'55'.repeat(20)}`;
     const txCounter = { value: 0 } as { value: number; _seenLogs?: unknown };
 
-    expect(() => enqueueJHistoryRange(
-      env,
-      [],
-      7,
-      `0x${'66'.repeat(32)}`,
-      source.depositoryAddress,
-      [{ jHeight: 7, jBlockHash: `0x${'66'.repeat(32)}` }],
-      source.chainId,
-    )).toThrow(/J_EVENT_INGRESS_QUIESCING:history-range/);
+    expect(() =>
+      enqueueJHistoryRange(
+        env,
+        [],
+        7,
+        `0x${'66'.repeat(32)}`,
+        source.depositoryAddress,
+        [{ jHeight: 7, jBlockHash: `0x${'66'.repeat(32)}` }],
+        source.chainId,
+      ),
+    ).toThrow(/J_EVENT_INGRESS_QUIESCING:history-range/);
 
-    expect(() => processEventBatch(
-      [{
-        name: 'ExternalWalletSnapshot',
-        args: {
-          entityId,
-          owner,
-          nativeBalance: '1',
-          tokenBalances: [],
-          allowances: [],
-        },
-        blockNumber: 7,
-        blockHash: `0x${'66'.repeat(32)}`,
-        transactionHash: `0x${'77'.repeat(32)}`,
-      }],
-      env,
-      7,
-      `0x${'66'.repeat(32)}`,
-      txCounter,
-      'test-quiesce',
-    )).toThrow(/J_EVENT_INGRESS_QUIESCING:test-quiesce/);
+    expect(() =>
+      processEventBatch(
+        [
+          {
+            name: 'ExternalWalletSnapshot',
+            args: {
+              entityId,
+              owner,
+              nativeBalance: '1',
+              tokenBalances: [],
+              allowances: [],
+            },
+            blockNumber: 7,
+            blockHash: `0x${'66'.repeat(32)}`,
+            transactionHash: `0x${'77'.repeat(32)}`,
+          },
+        ],
+        env,
+        7,
+        `0x${'66'.repeat(32)}`,
+        txCounter,
+        'test-quiesce',
+      ),
+    ).toThrow(/J_EVENT_INGRESS_QUIESCING:test-quiesce/);
 
     expect(txCounter._seenLogs).toBeUndefined();
     expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
     expect(env.infrastructure?.externalWalletWatchOwners).toBeUndefined();
 
-    expect(() => applyJEventsToEnv(env, [{
-      name: 'ExternalWalletSnapshot',
-      args: {
-        entityId,
-        owner,
-        nativeBalance: '1',
-        tokenBalances: [],
-        allowances: [],
-      },
-      blockNumber: 8,
-      blockHash: `0x${'68'.repeat(32)}`,
-      transactionHash: 'external-wallet-snapshot:8',
-    }], 'manual-snapshot', source)).toThrow(/J_EVENT_INGRESS_QUIESCING:manual-snapshot/);
+    expect(() =>
+      applyJEventsToEnv(
+        env,
+        [
+          {
+            name: 'ExternalWalletSnapshot',
+            args: {
+              entityId,
+              owner,
+              nativeBalance: '1',
+              tokenBalances: [],
+              allowances: [],
+            },
+            blockNumber: 8,
+            blockHash: `0x${'68'.repeat(32)}`,
+            transactionHash: 'external-wallet-snapshot:8',
+          },
+        ],
+        'manual-snapshot',
+        source,
+      ),
+    ).toThrow(/J_EVENT_INGRESS_QUIESCING:manual-snapshot/);
 
     expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
     expect(env.infrastructure?.externalWalletWatchOwners).toBeUndefined();
@@ -501,39 +622,51 @@ describe('JAdapter watcher ingress', () => {
     const tokenAddress = `0x${'61'.repeat(20)}`;
     const spender = `0x${'71'.repeat(20)}`;
 
-    expect(() => rawEventToJEvents({
-      name: 'ExternalWalletSnapshot',
-      args: {
+    expect(() =>
+      rawEventToJEvents(
+        {
+          name: 'ExternalWalletSnapshot',
+          args: {
+            entityId,
+            owner,
+            tokenBalances: [{ tokenAddress }],
+          },
+        } as any,
         entityId,
-        owner,
-        tokenBalances: [{ tokenAddress }],
-      },
-    } as any, entityId)).toThrow(/EXTERNAL_WALLET_SNAPSHOT_BALANCE_MISSING/);
+      ),
+    ).toThrow(/EXTERNAL_WALLET_SNAPSHOT_BALANCE_MISSING/);
 
-    expect(() => rawEventToJEvents({
-      name: 'ExternalWalletSnapshot',
-      args: {
+    expect(() =>
+      rawEventToJEvents(
+        {
+          name: 'ExternalWalletSnapshot',
+          args: {
+            entityId,
+            owner,
+            allowances: [{ tokenAddress, spender }],
+          },
+        } as any,
         entityId,
-        owner,
-        allowances: [{ tokenAddress, spender }],
-      },
-    } as any, entityId)).toThrow(/EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_MISSING/);
+      ),
+    ).toThrow(/EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_MISSING/);
   });
 
   test('uses matching jReplica blockNumber as watcher cursor source', () => {
-    const env = makeCursorEnv('jadapter-cursor-match', [
-      makeJReplica('Arrakis', 17n, '0xaaa'),
-      makeJReplica('Wakanda', 44n, '0xbbb'),
-    ], 'Arrakis');
+    const env = makeCursorEnv(
+      'jadapter-cursor-match',
+      [makeJReplica('Arrakis', 17n, '0xaaa'), makeJReplica('Wakanda', 44n, '0xbbb')],
+      'Arrakis',
+    );
 
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(18);
   });
 
   test('falls back to active jurisdiction block when no depository address is provided', () => {
-    const env = makeCursorEnv('jadapter-cursor-active', [
-      makeJReplica('Arrakis', 22n, '0xaaa'),
-      makeJReplica('Wakanda', 19n, '0xbbb'),
-    ], 'Wakanda');
+    const env = makeCursorEnv(
+      'jadapter-cursor-active',
+      [makeJReplica('Arrakis', 22n, '0xaaa'), makeJReplica('Wakanda', 19n, '0xbbb')],
+      'Wakanda',
+    );
 
     expect(getWatcherStartBlock(env)).toBe(20);
   });
@@ -545,14 +678,12 @@ describe('JAdapter watcher ingress', () => {
   });
 
   test('watcher cursor advances only when its authenticated RuntimeTx is applied', async () => {
-    const env = makeCursorEnv('jadapter-cursor-update', [
-      makeJReplica('Arrakis', 100n, '0xaaa'),
-    ], 'Arrakis');
+    const env = makeCursorEnv('jadapter-cursor-update', [makeJReplica('Arrakis', 100n, '0xaaa')], 'Arrakis');
 
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(101);
     updateWatcherJurisdictionCursor(env, 120, '0xaaa');
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(101);
-    const cursorTx = env.runtimeMempool?.runtimeTxs.find((tx) => tx.type === 'advanceJWatcherCursor');
+    const cursorTx = env.runtimeMempool?.runtimeTxs.find(tx => tx.type === 'advanceJWatcherCursor');
     if (!cursorTx) throw new Error('J_WATCHER_CURSOR_RUNTIME_TX_MISSING');
     await applyRuntimeTx(env, cursorTx);
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(121);
@@ -567,22 +698,22 @@ describe('JAdapter watcher ingress', () => {
     const env = makeCursorEnv('jadapter-cursor-runtime-tx-scope', [arrakis, wakanda], 'Arrakis');
 
     updateWatcherJurisdictionCursor(env, 120, sharedDepository, 31337);
-    const cursorTx = env.runtimeMempool?.runtimeTxs.find((tx) => tx.type === 'advanceJWatcherCursor');
+    const cursorTx = env.runtimeMempool?.runtimeTxs.find(tx => tx.type === 'advanceJWatcherCursor');
     if (!cursorTx) throw new Error('J_WATCHER_CURSOR_RUNTIME_TX_MISSING');
     await applyRuntimeTx(env, cursorTx);
 
     expect(arrakis.blockNumber).toBe(120n);
     expect(wakanda.blockNumber).toBe(200n);
-    await expect(applyRuntimeTx(env, {
-      type: 'advanceJWatcherCursor',
-      data: { depositoryAddress: sharedDepository, chainId: 31337, blockNumber: 121 },
-    })).rejects.toThrow(/J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED:advanceJWatcherCursor/);
+    await expect(
+      applyRuntimeTx(env, {
+        type: 'advanceJWatcherCursor',
+        data: { depositoryAddress: sharedDepository, chainId: 31337, blockNumber: 121 },
+      }),
+    ).rejects.toThrow(/J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED:advanceJWatcherCursor/);
   });
 
   test('watcher start block is capped by committed signer j-blocks when present', () => {
-    const env = makeCursorEnv('jadapter-cursor-signer-jblock', [
-      makeJReplica('Arrakis', 120n, '0xaaa'),
-    ], 'Arrakis');
+    const env = makeCursorEnv('jadapter-cursor-signer-jblock', [makeJReplica('Arrakis', 120n, '0xaaa')], 'Arrakis');
     const entityId = `0x${'64'.repeat(32)}`;
     const left = makeReplica(entityId, '1', true);
     const right = makeReplica(entityId, '2', false);
@@ -645,14 +776,16 @@ describe('JAdapter watcher ingress', () => {
     const healthyReplicaKey = `${healthyEntityId}:2`;
     env.state.eReplicas.set(healthyReplicaKey, healthy);
 
-    expect(enqueueJHistoryRewindForReplicaKeys(
-      env,
-      10,
-      `0x${'20'.repeat(32)}`,
-      [replicaKey],
-      jurisdiction.depositoryAddress,
-      jurisdiction.chainId,
-    )).toEqual([replicaKey]);
+    expect(
+      enqueueJHistoryRewindForReplicaKeys(
+        env,
+        10,
+        `0x${'20'.repeat(32)}`,
+        [replicaKey],
+        jurisdiction.depositoryAddress,
+        jurisdiction.chainId,
+      ),
+    ).toEqual([replicaKey]);
     expect(env.runtimeMempool?.runtimeTxs).toHaveLength(1);
     expect(env.runtimeMempool?.runtimeTxs[0]?.type).toBe('rewindJHistory');
     await applyRuntimeTx(env, env.runtimeMempool!.runtimeTxs[0]!);
@@ -664,10 +797,14 @@ describe('JAdapter watcher ingress', () => {
   test('watcher start block ignores signer j-blocks from unrelated jurisdictions', () => {
     const arrakis = makeJurisdiction('Arrakis', 31337, `0x${'aa'.repeat(20)}`);
     const wakanda = makeJurisdiction('Wakanda', 31338, `0x${'bb'.repeat(20)}`);
-    const env = makeCursorEnv('jadapter-cursor-jurisdiction-scope', [
-      makeJReplica(arrakis.name, 120n, arrakis.depositoryAddress, arrakis.chainId, arrakis.entityProviderAddress),
-      makeJReplica(wakanda.name, 80n, wakanda.depositoryAddress, wakanda.chainId, wakanda.entityProviderAddress),
-    ], arrakis.name);
+    const env = makeCursorEnv(
+      'jadapter-cursor-jurisdiction-scope',
+      [
+        makeJReplica(arrakis.name, 120n, arrakis.depositoryAddress, arrakis.chainId, arrakis.entityProviderAddress),
+        makeJReplica(wakanda.name, 80n, wakanda.depositoryAddress, wakanda.chainId, wakanda.entityProviderAddress),
+      ],
+      arrakis.name,
+    );
     const arrakisEntity = `0x${'66'.repeat(32)}`;
     const wakandaEntity = `0x${'67'.repeat(32)}`;
     const arrakisLeft = makeReplica(arrakisEntity, '1', true);
@@ -721,28 +858,30 @@ describe('JAdapter watcher ingress', () => {
       eventBlocks: new Map(),
       blockHashes: new Map([
         [44, headerHash(44)],
-        ...(
-        Array.from({ length: 6 }, (_, index) => {
+        ...Array.from({ length: 6 }, (_, index) => {
           const height = 431 + index;
           return [height, headerHash(height)] as const;
-        })
-        ),
+        }),
       ]),
     };
     env.state.eReplicas.set(`${replica.entityId}:1`, replica);
 
     expect(getMinimumScannedSignerJHeight(env, watcher)).toBe(44);
 
-    replica.jHistory = recordValidatorJHistory(replica.jHistory, {
-      jurisdictionRef,
-      scannedThroughHeight: 108,
-      tipBlockHash: headerHash(108),
-      headers: Array.from({ length: 64 }, (_, index) => ({
-        jHeight: 45 + index,
-        jBlockHash: headerHash(45 + index),
-      })),
-      blocks: [],
-    }, replica.state);
+    replica.jHistory = recordValidatorJHistory(
+      replica.jHistory,
+      {
+        jurisdictionRef,
+        scannedThroughHeight: 108,
+        tipBlockHash: headerHash(108),
+        headers: Array.from({ length: 64 }, (_, index) => ({
+          jHeight: 45 + index,
+          jBlockHash: headerHash(45 + index),
+        })),
+        blocks: [],
+      },
+      replica.state,
+    );
     expect(getMinimumScannedSignerJHeight(env, watcher)).toBe(108);
   });
 
@@ -750,20 +889,8 @@ describe('JAdapter watcher ingress', () => {
     const sharedDepository = `0x${'aa'.repeat(20)}`;
     const arrakis = makeJurisdiction('Arrakis', 31337, sharedDepository);
     const wakanda = makeJurisdiction('Wakanda', 31338, sharedDepository);
-    const arrakisJ = makeJReplica(
-      arrakis.name,
-      120n,
-      sharedDepository,
-      arrakis.chainId,
-      arrakis.entityProviderAddress,
-    );
-    const wakandaJ = makeJReplica(
-      wakanda.name,
-      80n,
-      sharedDepository,
-      wakanda.chainId,
-      wakanda.entityProviderAddress,
-    );
+    const arrakisJ = makeJReplica(arrakis.name, 120n, sharedDepository, arrakis.chainId, arrakis.entityProviderAddress);
+    const wakandaJ = makeJReplica(wakanda.name, 80n, sharedDepository, wakanda.chainId, wakanda.entityProviderAddress);
     const env = makeCursorEnv('jadapter-cursor-shared-address', [arrakisJ, wakandaJ], arrakis.name);
     const arrakisEntity = makeReplica(`0x${'68'.repeat(32)}`, '1', true);
     const wakandaEntity = makeReplica(`0x${'69'.repeat(32)}`, '2', true);
@@ -784,15 +911,17 @@ describe('JAdapter watcher ingress', () => {
     expect(() => getWatcherStartBlock(env, sharedDepository, 31339)).toThrow(
       /J_WATCHER_JURISDICTION_NOT_FOUND:start-block/,
     );
-    expect(() => enqueueJHistoryRange(
-      env,
-      [],
-      121,
-      `0x${'12'.repeat(32)}`,
-      sharedDepository,
-      [{ jHeight: 121, jBlockHash: `0x${'12'.repeat(32)}` }],
-      31339,
-    )).toThrow(/J_WATCHER_JURISDICTION_NOT_FOUND:history-range/);
+    expect(() =>
+      enqueueJHistoryRange(
+        env,
+        [],
+        121,
+        `0x${'12'.repeat(32)}`,
+        sharedDepository,
+        [{ jHeight: 121, jBlockHash: `0x${'12'.repeat(32)}` }],
+        31339,
+      ),
+    ).toThrow(/J_WATCHER_JURISDICTION_NOT_FOUND:history-range/);
     expect(arrakisEntity.jHistory).toBeUndefined();
     expect(wakandaEntity.jHistory).toBeUndefined();
   });
@@ -853,18 +982,20 @@ describe('JAdapter watcher ingress', () => {
     env.state.eReplicas.set(`${entityId}:${proposerSignerId}`, proposer);
     env.state.eReplicas.set(`${entityId}:${validatorSignerId}`, validator);
 
-    const rawEvents = [{
-      name: 'ReserveUpdated',
-      args: {
-        entity: entityId,
-        tokenId: 2,
-        newBalance: 123n,
+    const rawEvents = [
+      {
+        name: 'ReserveUpdated',
+        args: {
+          entity: entityId,
+          tokenId: 2,
+          newBalance: 123n,
+        },
+        blockNumber: 10,
+        blockHash: `0x${'66'.repeat(32)}`,
+        transactionHash: `0x${'77'.repeat(32)}`,
+        logIndex: 0,
       },
-      blockNumber: 10,
-      blockHash: `0x${'66'.repeat(32)}`,
-      transactionHash: `0x${'77'.repeat(32)}`,
-      logIndex: 0,
-    }];
+    ];
     const replicaKeys = collectRelevantJEventReplicaKeys(env, rawEvents);
     const pending = new Map<number, Set<string>>();
 
@@ -887,33 +1018,41 @@ describe('JAdapter watcher ingress', () => {
     const owner = `0x${'67'.repeat(32)}`;
     const counterparty = `0x${'68'.repeat(32)}`;
     const unrelated = `0x${'69'.repeat(32)}`;
-    for (const [entityId, signerId] of [[owner, '1'], [counterparty, '2'], [unrelated, '3']] as const) {
+    for (const [entityId, signerId] of [
+      [owner, '1'],
+      [counterparty, '2'],
+      [unrelated, '3'],
+    ] as const) {
       env.state.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, signerId, true));
     }
     const fullHash = `0x${'73'.repeat(32)}`;
     const partialRoot = `0x${'74'.repeat(32)}`;
     const ladderHash = keccak256(solidityPacked(['bytes32', 'bytes32'], [fullHash, partialRoot]));
-    env.state.eReplicas.get(`${counterparty}:2`)!.state.crossJurisdictionSwaps = new Map([[
-      'route-a',
+    env.state.eReplicas.get(`${counterparty}:2`)!.state.crossJurisdictionSwaps = new Map([
+      [
+        'route-a',
+        {
+          source: { entityId: counterparty, counterpartyEntityId: owner },
+          sourcePull: { fullHash, partialRoot },
+        } as never,
+      ],
+    ]);
+    const keys = collectRelevantJEventReplicaKeys(env, [
       {
-        source: { entityId: counterparty, counterpartyEntityId: owner },
-        sourcePull: { fullHash, partialRoot },
-      } as never,
-    ]]);
-    const keys = collectRelevantJEventReplicaKeys(env, [{
-      name: 'HashLadderRevealRegistered',
-      args: {
-        entity: owner,
-        counterpartyEntity: counterparty,
-        ladderHash,
-        fillRatio: 1,
-        targetRole: false,
+        name: 'HashLadderRevealRegistered',
+        args: {
+          entity: owner,
+          counterpartyEntity: counterparty,
+          ladderHash,
+          fillRatio: 1,
+          targetRole: false,
+        },
+        blockNumber: 10,
+        blockHash: `0x${'71'.repeat(32)}`,
+        transactionHash: `0x${'72'.repeat(32)}`,
+        logIndex: 0,
       },
-      blockNumber: 10,
-      blockHash: `0x${'71'.repeat(32)}`,
-      transactionHash: `0x${'72'.repeat(32)}`,
-      logIndex: 0,
-    }]);
+    ]);
 
     expect(keys).toEqual([`${owner}:1`, `${counterparty}:2`]);
   });
@@ -929,32 +1068,33 @@ describe('JAdapter watcher ingress', () => {
     const blockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
     const replica = makeReplica(entityId, signerId, true);
     replica.state.config.jurisdiction = jurisdiction;
-    replica.jHistory = recordValidatorJHistory(undefined, {
-      jurisdictionRef,
-      scannedThroughHeight: 1,
-      tipBlockHash: blockHash(1),
-      headers: [{ jHeight: 1, jBlockHash: blockHash(1) }],
-      blocks: [],
-    }, replica.state);
+    replica.jHistory = recordValidatorJHistory(
+      undefined,
+      {
+        jurisdictionRef,
+        scannedThroughHeight: 1,
+        tipBlockHash: blockHash(1),
+        headers: [{ jHeight: 1, jBlockHash: blockHash(1) }],
+        blocks: [],
+      },
+      replica.state,
+    );
     env.state.eReplicas.set(replicaKey, replica);
 
     const signedHead = buildLocalJPrefixAttestation(env, replica);
     if (!signedHead) throw new Error('TEST_CURRENT_J_PREFIX_ATTESTATION_MISSING');
-    replica.jPrefixRound = mergeJPrefixAttestations(
-      env,
-      replica.state,
-      undefined,
-      new Map([[signerId, signedHead]]),
-    );
+    replica.jPrefixRound = mergeJPrefixAttestations(env, replica.state, undefined, new Map([[signerId, signedHead]]));
 
-    const jurisdictionEvents = [{
-      type: 'ReserveUpdated' as const,
-      data: { entity: entityId, tokenId: 1, newBalance: '42' },
-      blockNumber: 2,
-      blockHash: blockHash(2),
-      transactionHash: `0x${'78'.repeat(32)}`,
-      logIndex: 0,
-    }];
+    const jurisdictionEvents = [
+      {
+        type: 'ReserveUpdated' as const,
+        data: { entity: entityId, tokenId: 1, newBalance: '42' },
+        blockNumber: 2,
+        blockHash: blockHash(2),
+        transactionHash: `0x${'78'.repeat(32)}`,
+        logIndex: 0,
+      },
+    ];
     const observedEvent = {
       type: 'observeJRange' as const,
       data: {
@@ -963,13 +1103,15 @@ describe('JAdapter watcher ingress', () => {
         jurisdictionRef,
         scannedThroughHeight: 2,
         tipBlockHash: blockHash(2),
-        blocks: [{
-          jurisdictionRef,
-          jHeight: 2,
-          jBlockHash: blockHash(2),
-          eventsHash: canonicalJurisdictionEventsHash(jurisdictionEvents),
-          events: jurisdictionEvents,
-        }],
+        blocks: [
+          {
+            jurisdictionRef,
+            jHeight: 2,
+            jBlockHash: blockHash(2),
+            eventsHash: canonicalJurisdictionEventsHash(jurisdictionEvents),
+            events: jurisdictionEvents,
+          },
+        ],
       },
     };
     const range = enqueueJHistoryRange(
@@ -1084,8 +1226,14 @@ describe('JAdapter watcher ingress', () => {
       tipBlockHash: blockHash(1_000),
       blockHashes: new Map([[1_000, blockHash(1_000)]]),
     };
-    const catchup = enqueueJHistoryRange(env, [], 256, blockHash(256), undefined,
-      Array.from({ length: 256 }, (_, i) => ({ jHeight: i + 1, jBlockHash: blockHash(i + 1) })));
+    const catchup = enqueueJHistoryRange(
+      env,
+      [],
+      256,
+      blockHash(256),
+      undefined,
+      Array.from({ length: 256 }, (_, i) => ({ jHeight: i + 1, jBlockHash: blockHash(i + 1) })),
+    );
     expect(catchup.scannedReplicaKeys).toEqual([`${entityId}:${signerId}`]);
   });
 
@@ -1108,8 +1256,14 @@ describe('JAdapter watcher ingress', () => {
         for (const tx of input.runtimeTxs) await applyRuntimeTx(env, tx);
         env.runtimeMempool!.runtimeTxs = [];
       };
-      enqueueJHistoryRange(env, [], 10, hash(10), undefined,
-        [1, 10].map(jHeight => ({ jHeight, jBlockHash: hash(jHeight) })));
+      enqueueJHistoryRange(
+        env,
+        [],
+        10,
+        hash(10),
+        undefined,
+        [1, 10].map(jHeight => ({ jHeight, jBlockHash: hash(jHeight) })),
+      );
       await commit();
       return { env, key, commit };
     };
@@ -1117,8 +1271,7 @@ describe('JAdapter watcher ingress', () => {
     test('committed header retry never enqueues another Runtime frame', async () => {
       const { env, key } = await setup();
       const history = env.state.eReplicas.get(key)!.jHistory;
-      const result = enqueueJHistoryRange(env, [], 10, hash(10), undefined,
-        [{ jHeight: 10, jBlockHash: hash(10) }]);
+      const result = enqueueJHistoryRange(env, [], 10, hash(10), undefined, [{ jHeight: 10, jBlockHash: hash(10) }]);
       expect(result).toEqual({ scannedReplicaKeys: [], finalityReplicaKeys: [] });
       expect(env.runtimeMempool!.runtimeTxs).toEqual([]);
       expect(env.runtimeMempool!.entityInputs).toEqual([]);
@@ -1136,8 +1289,9 @@ describe('JAdapter watcher ingress', () => {
       expect(history.blockHashes.get(5)).toBe(hash(5));
       expect(enqueueJHistoryRange(env, [], 5, hash(5)).scannedReplicaKeys).toEqual([]);
       expect(env.runtimeMempool!.runtimeTxs).toEqual([]);
-      expect(enqueueJHistoryRange(env, [], 5, hash(5), undefined,
-        [{ jHeight: 3, jBlockHash: hash(3) }]).scannedReplicaKeys).toEqual([]);
+      expect(
+        enqueueJHistoryRange(env, [], 5, hash(5), undefined, [{ jHeight: 3, jBlockHash: hash(3) }]).scannedReplicaKeys,
+      ).toEqual([]);
       expect(env.infrastructure?.carriedJScanTips?.has(key)).toBe(true);
       await commit();
       expect(env.state.eReplicas.get(key)!.jHistory!.blockHashes.get(3)).toBe(hash(3));
@@ -1145,10 +1299,12 @@ describe('JAdapter watcher ingress', () => {
 
     test('known scan retries still reject conflicting and malformed headers', async () => {
       const { env } = await setup();
-      expect(() => enqueueJHistoryRange(env, [], 10, hash(10), undefined,
-        [{ jHeight: 10, jBlockHash: hash(11) }])).toThrow('J_HISTORY_LOCAL_REORG_AT_BLOCK:10');
-      expect(() => enqueueJHistoryRange(env, [], 10, hash(10), undefined,
-        [{ jHeight: Number.NaN, jBlockHash: hash(10) }])).toThrow('J_HISTORY_LOCAL_HEADER_HEIGHT_INVALID');
+      expect(() =>
+        enqueueJHistoryRange(env, [], 10, hash(10), undefined, [{ jHeight: 10, jBlockHash: hash(11) }]),
+      ).toThrow('J_HISTORY_LOCAL_REORG_AT_BLOCK:10');
+      expect(() =>
+        enqueueJHistoryRange(env, [], 10, hash(10), undefined, [{ jHeight: Number.NaN, jBlockHash: hash(10) }]),
+      ).toThrow('J_HISTORY_LOCAL_HEADER_HEIGHT_INVALID');
       expect(env.runtimeMempool!.runtimeTxs).toEqual([]);
     });
   });
@@ -1197,8 +1353,14 @@ describe('JAdapter watcher ingress', () => {
     replica.state.config.jurisdiction = makeJurisdiction('Carried page', 31337, `0x${'7e'.repeat(20)}`);
     env.state.eReplicas.set(replicaKey, replica);
     const carryThrough = (height: number): void => {
-      enqueueJHistoryRange(env, [], height, blockHash(height), undefined,
-        Array.from({ length: height }, (_, i) => ({ jHeight: i + 1, jBlockHash: blockHash(i + 1) })));
+      enqueueJHistoryRange(
+        env,
+        [],
+        height,
+        blockHash(height),
+        undefined,
+        Array.from({ length: height }, (_, i) => ({ jHeight: i + 1, jBlockHash: blockHash(i + 1) })),
+      );
     };
     carryThrough(90);
 
@@ -1210,7 +1372,10 @@ describe('JAdapter watcher ingress', () => {
     expect(barrier.runtimeTxs.map(tx => tx.type)).toEqual(['checkpointBarrier']);
 
     // A sibling's frame does not advance this replica's local scan.
-    const sibling: RuntimeInput = { runtimeTxs: [], entityInputs: [{ entityId: `0x${'7f'.repeat(32)}`, signerId, entityTxs: [] }] };
+    const sibling: RuntimeInput = {
+      runtimeTxs: [],
+      entityInputs: [{ entityId: `0x${'7f'.repeat(32)}`, signerId, entityTxs: [] }],
+    };
     attachCarriedJScanTips(env, sibling);
     expect(sibling.runtimeTxs).toEqual([]);
 
@@ -1241,12 +1406,18 @@ describe('JAdapter watcher ingress', () => {
     replica.state.config.jurisdiction = makeJurisdiction('Pressure pages', 31337, `0x${'7e'.repeat(20)}`);
     env.state.eReplicas.set(replicaKey, replica);
     const blockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
-    const readPage = (from: number, through: number) => enqueueJHistoryRange(
-      env, [], through, blockHash(through), undefined,
-      Array.from({ length: through - from + 1 }, (_, i) => ({
-        jHeight: from + i, jBlockHash: blockHash(from + i),
-      })),
-    );
+    const readPage = (from: number, through: number) =>
+      enqueueJHistoryRange(
+        env,
+        [],
+        through,
+        blockHash(through),
+        undefined,
+        Array.from({ length: through - from + 1 }, (_, i) => ({
+          jHeight: from + i,
+          jBlockHash: blockHash(from + i),
+        })),
+      );
     expect(readPage(1, 64).scannedReplicaKeys).toEqual([]);
     expect(replica.jHistory).toBeUndefined();
     expect(env.runtimeMempool?.runtimeTxs ?? []).toEqual([]);
@@ -1268,7 +1439,13 @@ describe('JAdapter watcher ingress', () => {
     const replica = makeReplica(entityId, signerId, true);
     const jurisdiction = makeJurisdiction('Carried reorg', 31337, `0x${'7e'.repeat(20)}`);
     replica.state.config.jurisdiction = jurisdiction;
-    const watcher = makeJReplica(jurisdiction.name, 0n, jurisdiction.depositoryAddress!, jurisdiction.chainId, jurisdiction.entityProviderAddress);
+    const watcher = makeJReplica(
+      jurisdiction.name,
+      0n,
+      jurisdiction.depositoryAddress!,
+      jurisdiction.chainId,
+      jurisdiction.entityProviderAddress,
+    );
     env.state.jReplicas.set(jurisdiction.name, watcher);
     env.state.eReplicas.set(key, replica);
     const blockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
@@ -1279,13 +1456,16 @@ describe('JAdapter watcher ingress', () => {
     expect(replica.jHistory).toBeUndefined();
     const audit = collectWatcherCanonicalAudit(env, watcher, 64);
     expect(audit.auditHeights).toEqual([64]);
-    expect(audit.localFrontiers.map(frontier => [frontier.replicaKey, frontier.height, frontier.hash]))
-      .toEqual([[key, 64, blockHash(64)]]);
+    expect(audit.localFrontiers.map(frontier => [frontier.replicaKey, frontier.height, frontier.hash])).toEqual([
+      [key, 64, blockHash(64)],
+    ]);
     const replacement = `0x${'fe'.repeat(32)}`;
     const rewinds = collectTargetedWatcherRewinds(audit, new Map([[64, replacement]]), 31337);
     expect(rewinds.size).toBe(1);
     for (const rewind of rewinds.values()) {
-      expect(enqueueJHistoryRewindForReplicaKeys(env, rewind.height, rewind.canonicalHash, rewind.replicaKeys)).toEqual([]);
+      expect(enqueueJHistoryRewindForReplicaKeys(env, rewind.height, rewind.canonicalHash, rewind.replicaKeys)).toEqual(
+        [],
+      );
     }
     expect(env.infrastructure?.carriedJScanTips?.size).toBe(0);
     expect(env.runtimeMempool?.runtimeTxs ?? []).toEqual([]);
@@ -1326,12 +1506,12 @@ describe('JAdapter watcher ingress', () => {
     replica.jHistory.blockHashes.set(10, `0x${'10'.repeat(32)}`);
     expect(isWatcherJHistoryRangeDurable(env, pending)).toBe(true);
 
-    expect(() => isWatcherJHistoryRangeDurable(env, {
-      ...pending,
-      tipBlockHash: `0x${'11'.repeat(32)}`,
-    })).toThrow(
-      /J_WATCHER_PENDING_SCAN_TIP_CONFLICT:10/,
-    );
+    expect(() =>
+      isWatcherJHistoryRangeDurable(env, {
+        ...pending,
+        tipBlockHash: `0x${'11'.repeat(32)}`,
+      }),
+    ).toThrow(/J_WATCHER_PENDING_SCAN_TIP_CONFLICT:10/);
   });
 
   test('watcher releases a pending page superseded by a higher Entity-certified anchor', () => {
@@ -1364,12 +1544,14 @@ describe('JAdapter watcher ingress', () => {
     };
     env.state.eReplicas.set(replicaKey, replica);
 
-    expect(isWatcherJHistoryRangeDurable(env, {
-      fromBlock: 1,
-      toBlock: 10,
-      tipBlockHash: `0x${'10'.repeat(32)}`,
-      replicaKeys: new Set([replicaKey]),
-    })).toBe(true);
+    expect(
+      isWatcherJHistoryRangeDurable(env, {
+        fromBlock: 1,
+        toBlock: 10,
+        tipBlockHash: `0x${'10'.repeat(32)}`,
+        replicaKeys: new Set([replicaKey]),
+      }),
+    ).toBe(true);
   });
 
   test('a watcher window that never reaches the mempool redelivers its events on retry', () => {
@@ -1383,14 +1565,26 @@ describe('JAdapter watcher ingress', () => {
     env.state.eReplicas.set(`${entityId}:1`, makeReplica(entityId, '1', true));
     const counter: Parameters<typeof processEventBatch>[4] = { value: 0 };
     const blockHash = `0x${'66'.repeat(32)}`;
-    const ingest = () => processEventBatch([{
-      name: 'ReserveUpdated',
-      args: { entity: entityId, tokenId: 2, newBalance: 123n },
-      blockNumber: 7,
-      blockHash,
-      transactionHash: `0x${'77'.repeat(32)}`,
-      logIndex: 0,
-    }], env, 7, blockHash, counter, 'test', undefined, true);
+    const ingest = () =>
+      processEventBatch(
+        [
+          {
+            name: 'ReserveUpdated',
+            args: { entity: entityId, tokenId: 2, newBalance: 123n },
+            blockNumber: 7,
+            blockHash,
+            transactionHash: `0x${'77'.repeat(32)}`,
+            logIndex: 0,
+          },
+        ],
+        env,
+        7,
+        blockHash,
+        counter,
+        'test',
+        undefined,
+        true,
+      );
 
     stageSeenLogs(counter);
     expect(ingest()).not.toBeNull();
@@ -1427,18 +1621,20 @@ describe('JAdapter watcher ingress', () => {
     env.state.eReplicas.set(`${entityId}:${validatorSignerId}`, validator);
 
     processEventBatch(
-      [{
-        name: 'ReserveUpdated',
-        args: {
-          entity: entityId,
-          tokenId: 2,
-          newBalance: 123n,
+      [
+        {
+          name: 'ReserveUpdated',
+          args: {
+            entity: entityId,
+            tokenId: 2,
+            newBalance: 123n,
+          },
+          blockNumber: 7,
+          blockHash: `0x${'66'.repeat(32)}`,
+          transactionHash: `0x${'77'.repeat(32)}`,
+          logIndex: 0,
         },
-        blockNumber: 7,
-        blockHash: `0x${'66'.repeat(32)}`,
-        transactionHash: `0x${'77'.repeat(32)}`,
-        logIndex: 0,
-      }],
+      ],
       env,
       7,
       `0x${'66'.repeat(32)}`,
@@ -1446,12 +1642,12 @@ describe('JAdapter watcher ingress', () => {
       'test',
     );
 
-    const observations = env.runtimeMempool?.runtimeTxs.filter((tx) => tx.type === 'observeJRange') ?? [];
+    const observations = env.runtimeMempool?.runtimeTxs.filter(tx => tx.type === 'observeJRange') ?? [];
     expect(observations).toHaveLength(2);
-    expect(observations.map((tx) => tx.data.entityId)).toEqual([entityId, entityId]);
-    expect(observations.map((tx) => tx.data.signerId)).toEqual([proposerSignerId, validatorSignerId]);
-    expect(observations.map((tx) => tx.data.scannedThroughHeight)).toEqual([7, 7]);
-    expect(observations.map((tx) => tx.data.blocks[0]?.events[0]?.logIndex)).toEqual([0, 0]);
+    expect(observations.map(tx => tx.data.entityId)).toEqual([entityId, entityId]);
+    expect(observations.map(tx => tx.data.signerId)).toEqual([proposerSignerId, validatorSignerId]);
+    expect(observations.map(tx => tx.data.scannedThroughHeight)).toEqual([7, 7]);
+    expect(observations.map(tx => tx.data.blocks[0]?.events[0]?.logIndex)).toEqual([0, 0]);
     // H7 without authenticated H1..H6 is durable local evidence, but it is
     // not a signable exact prefix. Validators must not invent the gap.
     expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
@@ -1465,18 +1661,19 @@ describe('JAdapter watcher ingress', () => {
     const entityId = `0x${'48'.repeat(32)}`;
     const signerId = '1';
     env.state.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, signerId, true));
-    const blockHash = (height: number): string =>
-      `0x${height.toString(16).padStart(64, '0')}`;
+    const blockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
 
     const observedInput = processEventBatch(
-      [{
-        name: 'ReserveUpdated',
-        args: { entity: entityId, tokenId: 2, newBalance: 123n },
-        blockNumber: 7,
-        blockHash: blockHash(7),
-        transactionHash: `0x${'79'.repeat(32)}`,
-        logIndex: 0,
-      }],
+      [
+        {
+          name: 'ReserveUpdated',
+          args: { entity: entityId, tokenId: 2, newBalance: 123n },
+          blockNumber: 7,
+          blockHash: blockHash(7),
+          transactionHash: `0x${'79'.repeat(32)}`,
+          logIndex: 0,
+        },
+      ],
       env,
       7,
       blockHash(7),
@@ -1503,13 +1700,13 @@ describe('JAdapter watcher ingress', () => {
       })),
     );
 
-    const observations = env.runtimeMempool?.runtimeTxs.filter((tx) => tx.type === 'observeJRange') ?? [];
+    const observations = env.runtimeMempool?.runtimeTxs.filter(tx => tx.type === 'observeJRange') ?? [];
     expect(observations).toHaveLength(2);
     expect(observations[0]?.data.blocks[0]?.jHeight).toBe(7);
-    expect(observations[1]?.data.headers?.map((header) => header.jHeight)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(observations[1]?.data.headers?.map(header => header.jHeight)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     const attestation = env.runtimeMempool?.entityInputs[0]?.jPrefixAttestations?.get(signerId);
     expect(attestation?.scannedThroughHeight).toBe(7);
-    expect(attestation?.headers.map((header) => header.jHeight)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(attestation?.headers.map(header => header.jHeight)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     expect(env.infrastructure?.wakeRequested).toBe(true);
 
     for (const tx of env.runtimeMempool?.runtimeTxs ?? []) await applyRuntimeTx(env, tx);
@@ -1525,18 +1722,19 @@ describe('JAdapter watcher ingress', () => {
     const entityId = `0x${'58'.repeat(32)}`;
     const signerId = '1';
     env.state.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, signerId, true));
-    const blockHash = (height: number): string =>
-      `0x${height.toString(16).padStart(64, '0')}`;
+    const blockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
 
     const observedInput = processEventBatch(
-      [{
-        name: 'ReserveUpdated',
-        args: { entity: entityId, tokenId: 2, newBalance: 123n },
-        blockNumber: 7,
-        blockHash: blockHash(7),
-        transactionHash: `0x${'89'.repeat(32)}`,
-        logIndex: 0,
-      }],
+      [
+        {
+          name: 'ReserveUpdated',
+          args: { entity: entityId, tokenId: 2, newBalance: 123n },
+          blockNumber: 7,
+          blockHash: blockHash(7),
+          transactionHash: `0x${'89'.repeat(32)}`,
+          logIndex: 0,
+        },
+      ],
       env,
       7,
       blockHash(7),
@@ -1586,23 +1784,27 @@ describe('JAdapter watcher ingress', () => {
     const entityId = `0x${'49'.repeat(32)}`;
     env.state.eReplicas.set(`${entityId}:1`, makeReplica(entityId, '1', true));
 
-    expect(() => processEventBatch(
-      [{
-        name: 'ReserveUpdated',
-        args: { entity: entityId, tokenId: 2, newBalance: 123n },
-        blockNumber: 7,
-        blockHash: `0x${'66'.repeat(32)}`,
-        transactionHash: `0x${'77'.repeat(32)}`,
-      }],
-      env,
-      7,
-      `0x${'66'.repeat(32)}`,
-      { value: 0 },
-      'rpc-test',
-      undefined,
-      false,
-      'chain',
-    )).toThrow('J_EVENT_CHAIN_LOG_INDEX_MISSING:rpc-test:ReserveUpdated');
+    expect(() =>
+      processEventBatch(
+        [
+          {
+            name: 'ReserveUpdated',
+            args: { entity: entityId, tokenId: 2, newBalance: 123n },
+            blockNumber: 7,
+            blockHash: `0x${'66'.repeat(32)}`,
+            transactionHash: `0x${'77'.repeat(32)}`,
+          },
+        ],
+        env,
+        7,
+        `0x${'66'.repeat(32)}`,
+        { value: 0 },
+        'rpc-test',
+        undefined,
+        false,
+        'chain',
+      ),
+    ).toThrow('J_EVENT_CHAIN_LOG_INDEX_MISSING:rpc-test:ReserveUpdated');
   });
 
   test('J-event ingress transform replaces external block identity before durable observation', () => {
@@ -1610,11 +1812,11 @@ describe('JAdapter watcher ingress', () => {
     const entityId = `0x${'46'.repeat(32)}`;
     env.state.eReplicas.set(`${entityId}:1`, makeReplica(entityId, '1', true));
     const recordedBlockHash = `0x${'88'.repeat(32)}`;
-    const restore = setJEventIngressTransform((batch) => ({
+    const restore = setJEventIngressTransform(batch => ({
       ...batch,
       blockNumber: 70,
       blockHash: recordedBlockHash,
-      events: batch.events.map((event) => ({
+      events: batch.events.map(event => ({
         ...event,
         blockNumber: 70,
         blockHash: recordedBlockHash,
@@ -1623,14 +1825,16 @@ describe('JAdapter watcher ingress', () => {
 
     try {
       processEventBatch(
-        [{
-          name: 'ReserveUpdated',
-          args: { entity: entityId, tokenId: 2, newBalance: 123n },
-          blockNumber: 7,
-          blockHash: `0x${'66'.repeat(32)}`,
-          transactionHash: `0x${'77'.repeat(32)}`,
-          logIndex: 0,
-        }],
+        [
+          {
+            name: 'ReserveUpdated',
+            args: { entity: entityId, tokenId: 2, newBalance: 123n },
+            blockNumber: 7,
+            blockHash: `0x${'66'.repeat(32)}`,
+            transactionHash: `0x${'77'.repeat(32)}`,
+            logIndex: 0,
+          },
+        ],
         env,
         7,
         `0x${'66'.repeat(32)}`,
@@ -1641,7 +1845,7 @@ describe('JAdapter watcher ingress', () => {
       restore();
     }
 
-    const observation = env.runtimeMempool?.runtimeTxs?.find((tx) => tx.type === 'observeJRange');
+    const observation = env.runtimeMempool?.runtimeTxs?.find(tx => tx.type === 'observeJRange');
     expect(observation?.type).toBe('observeJRange');
     if (observation?.type !== 'observeJRange') throw new Error('transformed J observation missing');
     expect(observation.data.blocks[0]?.jHeight).toBe(70);
@@ -1668,7 +1872,7 @@ describe('JAdapter watcher ingress', () => {
       restore();
     }
 
-    const observation = env.runtimeMempool?.runtimeTxs?.find((tx) => tx.type === 'observeJRange');
+    const observation = env.runtimeMempool?.runtimeTxs?.find(tx => tx.type === 'observeJRange');
     expect(observation?.type).toBe('observeJRange');
     if (observation?.type !== 'observeJRange') throw new Error('transformed J range observation missing');
     expect(observation.data.scannedThroughHeight).toBe(180);
@@ -1727,13 +1931,13 @@ describe('JAdapter watcher ingress', () => {
 
     expect(input?.timestamp).toBe(8);
     expect(rebuiltInput?.timestamp).toBe(8);
-    const observations = input?.runtimeTxs.filter((tx) => tx.type === 'observeJRange') ?? [];
-    const rebuiltObservations = rebuiltInput?.runtimeTxs.filter((tx) => tx.type === 'observeJRange') ?? [];
+    const observations = input?.runtimeTxs.filter(tx => tx.type === 'observeJRange') ?? [];
+    const rebuiltObservations = rebuiltInput?.runtimeTxs.filter(tx => tx.type === 'observeJRange') ?? [];
     expect(observations).toHaveLength(2);
-    expect(observations.map((tx) => tx.data.entityId)).toEqual([entityId, entityId]);
-    expect(observations.map((tx) => tx.data.signerId)).toEqual([proposerSignerId, validatorSignerId]);
-    expect(observations.map((tx) => tx.data.blocks[0]?.jHeight)).toEqual([8, 8]);
-    expect(rebuiltObservations.map((tx) => tx.data.blocks[0]?.jHeight)).toEqual([8, 8]);
+    expect(observations.map(tx => tx.data.entityId)).toEqual([entityId, entityId]);
+    expect(observations.map(tx => tx.data.signerId)).toEqual([proposerSignerId, validatorSignerId]);
+    expect(observations.map(tx => tx.data.blocks[0]?.jHeight)).toEqual([8, 8]);
+    expect(rebuiltObservations.map(tx => tx.data.blocks[0]?.jHeight)).toEqual([8, 8]);
     expect(input?.entityInputs).toEqual([]);
     expect(rebuiltInput?.entityInputs).toEqual([]);
     expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
@@ -1751,13 +1955,7 @@ describe('JAdapter watcher ingress', () => {
       testnet.chainId,
       testnet.entityProviderAddress,
     );
-    const tronSource = makeJReplica(
-      tron.name,
-      120n,
-      sharedDepository,
-      tron.chainId,
-      tron.entityProviderAddress,
-    );
+    const tronSource = makeJReplica(tron.name, 120n, sharedDepository, tron.chainId, tron.entityProviderAddress);
     const env = makeCursorEnv('jadapter-receipt-jurisdiction-scope', [testnetSource, tronSource]);
     const testnetEntityId = `0x${'73'.repeat(32)}`;
     const tronEntityId = `0x${'74'.repeat(32)}`;
@@ -1768,19 +1966,26 @@ describe('JAdapter watcher ingress', () => {
     env.state.eReplicas.set(`${testnetEntityId}:1`, testnetReplica);
     env.state.eReplicas.set(`${tronEntityId}:2`, tronReplica);
 
-    const input = buildJEventsRuntimeInput(env, [{
-      name: 'ReserveUpdated',
-      args: { entity: testnetEntityId, tokenId: 1, newBalance: 10n },
-      blockNumber: 120,
-      blockHash: `0x${'37'.repeat(32)}`,
-      transactionHash: `0x${'75'.repeat(32)}`,
-      logIndex: 0,
-    }], 'testnet-receipt', testnetSource);
+    const input = buildJEventsRuntimeInput(
+      env,
+      [
+        {
+          name: 'ReserveUpdated',
+          args: { entity: testnetEntityId, tokenId: 1, newBalance: 10n },
+          blockNumber: 120,
+          blockHash: `0x${'37'.repeat(32)}`,
+          transactionHash: `0x${'75'.repeat(32)}`,
+          logIndex: 0,
+        },
+      ],
+      'testnet-receipt',
+      testnetSource,
+    );
 
-    const observed = input?.runtimeTxs.filter((tx) => tx.type === 'observeJRange') ?? [];
-    expect(observed.map((tx) => tx.data.entityId)).toEqual([testnetEntityId]);
+    const observed = input?.runtimeTxs.filter(tx => tx.type === 'observeJRange') ?? [];
+    expect(observed.map(tx => tx.data.entityId)).toEqual([testnetEntityId]);
     expect(input?.entityInputs).toEqual([]);
-    expect(observed.some((tx) => tx.data.entityId === tronEntityId)).toBe(false);
+    expect(observed.some(tx => tx.data.entityId === tronEntityId)).toBe(false);
   });
 
   test('watcher reserve evidence survives unrelated two-jurisdiction traffic', () => {
@@ -1796,18 +2001,20 @@ describe('JAdapter watcher ingress', () => {
     env.state.eReplicas.set(`${entityB}:${signerB}`, makeReplica(entityB, signerB, true));
 
     processEventBatch(
-      [{
-        name: 'ReserveUpdated',
-        args: {
-          entity: entityA,
-          tokenId: 2,
-          newBalance: 500n,
+      [
+        {
+          name: 'ReserveUpdated',
+          args: {
+            entity: entityA,
+            tokenId: 2,
+            newBalance: 500n,
+          },
+          blockNumber: 20,
+          blockHash: `0x${'aa'.repeat(32)}`,
+          transactionHash: `0x${'ab'.repeat(32)}`,
+          logIndex: 0,
         },
-        blockNumber: 20,
-        blockHash: `0x${'aa'.repeat(32)}`,
-        transactionHash: `0x${'ab'.repeat(32)}`,
-        logIndex: 0,
-      }],
+      ],
       env,
       20,
       `0x${'aa'.repeat(32)}`,
@@ -1915,10 +2122,10 @@ describe('JAdapter watcher ingress', () => {
       'test',
     );
 
-    const observations = env.runtimeMempool?.runtimeTxs.filter((tx) => tx.type === 'observeJRange') ?? [];
+    const observations = env.runtimeMempool?.runtimeTxs.filter(tx => tx.type === 'observeJRange') ?? [];
     expect(observations).toHaveLength(2);
-    expect(observations.map((tx) => tx.data.entityId).sort()).toEqual([leftEntityId, rightEntityId].sort());
-    expect(observations.map((tx) => tx.data.blocks[0]?.events[0]?.logIndex)).toEqual([4, 4]);
+    expect(observations.map(tx => tx.data.entityId).sort()).toEqual([leftEntityId, rightEntityId].sort());
+    expect(observations.map(tx => tx.data.blocks[0]?.events[0]?.logIndex)).toEqual([4, 4]);
     expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
   });
 
@@ -1934,27 +2141,52 @@ describe('JAdapter watcher ingress', () => {
     replica.state.config = { ...replica.state.config, jurisdiction };
     env.state.eReplicas.set(`${local}:1`, replica);
     const body = {
-      watchSeed: `0x${'44'.repeat(32)}`, leftResponseSeconds: 10, rightResponseSeconds: 10,
-      offdeltas: [encodeInt512(5n)], tokenIds: [1n], transformers: [],
+      watchSeed: `0x${'44'.repeat(32)}`,
+      leftResponseSeconds: 10,
+      rightResponseSeconds: 10,
+      offdeltas: [encodeInt512(5n)],
+      tokenIds: [1n],
+      transformers: [],
     };
     const depositoryEvents = Depository__factory.createInterface();
     const blockHash = `0x${'81'.repeat(32)}`;
     const disputeLog = (sender: string, counterentity: string, index: number) => ({
       ...depositoryEvents.encodeEventLog('DisputeStarted', [
-        sender, counterentity, 7n, true, `0x${'77'.repeat(32)}`, body.watchSeed, '0x', '0x',
-        `0x${'00'.repeat(32)}`, 120n, 100n, 10n, 10n,
+        sender,
+        counterentity,
+        7n,
+        true,
+        `0x${'77'.repeat(32)}`,
+        body.watchSeed,
+        '0x',
+        '0x',
+        `0x${'00'.repeat(32)}`,
+        120n,
+        100n,
+        10n,
+        10n,
       ]),
-      address: depository, blockNumber: 9, blockHash, authenticatedBlockHash: blockHash,
-      transactionHash: `0x${(90 + index).toString(16).repeat(32)}`, index,
+      address: depository,
+      blockNumber: 9,
+      blockHash,
+      authenticatedBlockHash: blockHash,
+      transactionHash: `0x${(90 + index).toString(16).repeat(32)}`,
+      index,
     });
     const foreign = disputeLog(`0x${'b2'.repeat(32)}`, `0x${'c3'.repeat(32)}`, 0);
     const served = disputeLog(`0x${'b2'.repeat(32)}`, local, 1);
     const reads: string[] = [];
     const input = {
-      env, watcherReplica, depositoryAddress: depository,
+      env,
+      watcherReplica,
+      depositoryAddress: depository,
       entityProviderAddress: jurisdiction.entityProviderAddress!.toLowerCase(),
-      tokenByAddress: new Map(), trackedOwners: new Map(),
-      observedThroughHeight: 9, observedTipBlockHash: blockHash, observedHeadHeight: 9, confirmationDepth: 0,
+      tokenByAddress: new Map(),
+      trackedOwners: new Map(),
+      observedThroughHeight: 9,
+      observedTipBlockHash: blockHash,
+      observedHeadHeight: 9,
+      confirmationDepth: 0,
       findDisputeFinalizationEvidence: async () => undefined,
       findDisputeProofBody: async (txHash: string) => {
         reads.push(txHash);
@@ -1966,17 +2198,30 @@ describe('JAdapter watcher ingress', () => {
     expect(reads).toEqual([served.transactionHash]);
     expect(decoded.undeliveredDisputes.map(event => event.transactionHash)).toEqual([foreign.transactionHash]);
     expect(decoded.events.map(event => event.transactionHash)).toEqual([served.transactionHash]);
-    await expect(decodeAuthenticatedWatcherEvents({ ...input, logs: [foreign, served] }))
-      .rejects.toThrow('J_EVENT_LOG_DECODE_FAILED');
+    await expect(decodeAuthenticatedWatcherEvents({ ...input, logs: [foreign, served] })).rejects.toThrow(
+      'J_EVENT_LOG_DECODE_FAILED',
+    );
 
     // The pre-gate decode of the same range, given a body for every log, must
     // commit the identical observation: the gate only drops undelivered events.
     const everyBody = await decodeAuthenticatedWatcherEvents({
-      ...input, logs: [foreign, served], findDisputeProofBody: async () => body,
+      ...input,
+      logs: [foreign, served],
+      findDisputeProofBody: async () => body,
     });
     const observe = (events: typeof decoded.events) =>
-      processEventBatch(events, env, 9, blockHash, { value: 0 }, 'rpc', depository, true, 'chain', 31_337)
-        ?.runtimeTxs.filter(tx => tx.type === 'observeJRange');
+      processEventBatch(
+        events,
+        env,
+        9,
+        blockHash,
+        { value: 0 },
+        'rpc',
+        depository,
+        true,
+        'chain',
+        31_337,
+      )?.runtimeTxs.filter(tx => tx.type === 'observeJRange');
     const gated = observe(decoded.events);
     expect(gated).toHaveLength(1);
     expect(gated?.[0]?.data.blocks[0]?.events).toHaveLength(1);

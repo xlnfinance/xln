@@ -830,7 +830,7 @@ const getEntityJurisdiction = (env: RuntimeReplica, entityId: string | null): un
 };
 
 const directHubPeersReady = (env: RuntimeReplica, peers: HubMeshPeer<VisibleHubProfile>[]): boolean =>
-  getP2P(env)?.prepareDirectEntityRoutes(peers.map(peer => peer.identity.entityId)) ?? false;
+  getP2P(env)?.prepareEntityRoutes(peers.map(peer => peer.identity.entityId)) ?? false;
 
 const buildLocalHealth = (
   env: RuntimeReplica,

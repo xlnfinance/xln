@@ -1,4 +1,5 @@
-import type { Provider } from 'ethers';
+import type { Interface, Provider } from 'ethers';
+import { MAX_RPC_BATCH_CALLS, type RpcBatchSend } from './rpc-utils';
 import { ethers } from 'ethers';
 import { compareStableText } from '../../protocol/serialization';
 import type { RuntimeReplica } from '../../runtime/types';
@@ -25,9 +26,8 @@ export type WatchedErc20Token = {
 
 type WatchedTokenRegistry = {
   getTokensLength(): Promise<bigint>;
-  _tokens(tokenId: number): Promise<
-    readonly [contractAddress: string, externalTokenId: bigint, tokenType: bigint]
-  >;
+  getAddress(): Promise<string>;
+  interface: Interface;
 };
 
 export type AuthenticatedTxLocation = Readonly<{
@@ -35,11 +35,7 @@ export type AuthenticatedTxLocation = Readonly<{
   blockNumber: number;
 }>;
 
-const readSignedEvmCalldata = async (
-  provider: Provider,
-  txHash: string,
-  normalizedHash: string,
-): Promise<string> => {
+const readSignedEvmCalldata = async (provider: Provider, txHash: string, normalizedHash: string): Promise<string> => {
   const tx = await provider.getTransaction(txHash);
   if (!tx) throw new Error(`J_DISPUTE_TX_MISSING:${normalizedHash}`);
   const claimedHash = String(tx.hash || '').toLowerCase();
@@ -123,9 +119,7 @@ export const normalizeEvmAddress = (value: unknown): string => {
   return /^0x[0-9a-f]{40}$/.test(candidate) ? candidate : '';
 };
 
-export const buildTrackedExternalOwners = (
-  env: RuntimeReplica,
-): Map<string, ExternalWalletTrackedOwnerCursor[]> => {
+export const buildTrackedExternalOwners = (env: RuntimeReplica): Map<string, ExternalWalletTrackedOwnerCursor[]> => {
   const owners = new Map<string, Map<string, ExternalWalletTrackedOwnerCursor>>();
   const readBlock = (value: unknown): number => {
     const numeric = Number(value || 0);
@@ -271,17 +265,36 @@ export const createTxDisputeProofBodyReader = (
 
 export const createWatchedErc20TokenReader = (
   depository: WatchedTokenRegistry,
+  sendBatch: RpcBatchSend,
   emitDebug: (payload: Record<string, unknown>) => void,
 ): (() => Promise<WatchedErc20Token[]>) => {
   return async (): Promise<WatchedErc20Token[]> => {
     const tokens: WatchedErc20Token[] = [];
     try {
       const length = Number(await depository.getTokensLength());
-      for (let tokenId = 1; tokenId < length; tokenId += 1) {
-        const [contractAddress, , tokenType] = await depository._tokens(tokenId);
-        if (tokenType !== 0n) continue;
-        const address = normalizeEvmAddress(contractAddress);
-        if (address && address !== ethers.ZeroAddress) tokens.push({ tokenId, address });
+      if (!Number.isSafeInteger(length) || length < 1) throw new Error('J_TOKEN_REGISTRY_LENGTH_INVALID');
+      const address = await depository.getAddress();
+      // Refresh the complete registry on every poll. Batch transport only:
+      // a failed entry must reject this range before its cursor can advance.
+      for (let start = 1; start < length; start += MAX_RPC_BATCH_CALLS) {
+        const calls = Array.from({ length: Math.min(MAX_RPC_BATCH_CALLS, length - start) }, (_, index) => ({
+          method: 'eth_call',
+          params: [
+            { to: address, data: depository.interface.encodeFunctionData('_tokens', [start + index]) },
+            'latest',
+          ],
+        }));
+        const entries = await sendBatch(calls);
+        if (entries.length !== calls.length) throw new Error('J_TOKEN_REGISTRY_BATCH_LENGTH_MISMATCH');
+        for (let index = 0; index < entries.length; index += 1) {
+          const tokenId = start + index;
+          const raw = entries[index];
+          if (typeof raw !== 'string') throw new Error(`J_TOKEN_REGISTRY_ENTRY_INVALID:${tokenId}`);
+          const [contractAddress, , tokenType] = depository.interface.decodeFunctionResult('_tokens', raw);
+          if (tokenType !== 0n) continue;
+          const address = normalizeEvmAddress(contractAddress);
+          if (address && address !== ethers.ZeroAddress) tokens.push({ tokenId, address });
+        }
       }
     } catch (error) {
       emitDebug({
@@ -291,9 +304,9 @@ export const createWatchedErc20TokenReader = (
       // The registry defines the complete set of log addresses for this poll.
       // Advancing the cursor with a stale or empty set could permanently omit
       // a newly registered token, so the same block range must be retried.
-      throw new Error(
-        `J_WATCH_ERC20_REGISTRY_READ_FAILED:${error instanceof Error ? error.message : String(error)}`,
-      );
+      throw new Error(`J_WATCH_ERC20_REGISTRY_READ_FAILED:${error instanceof Error ? error.message : String(error)}`, {
+        cause: error,
+      });
     }
     return tokens;
   };

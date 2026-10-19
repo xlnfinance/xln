@@ -9,7 +9,7 @@ import type { CompiledClause } from './types';
 import { validateClauseAst } from './constraints';
 
 const WIDE_MATH = readFileSync(new URL('../../../jurisdictions/contracts/math/WideMath.sol', import.meta.url), 'utf8');
-const CUSTOM_COMPILER_VERSION = '0.8.36+commit.8a079791.Emscripten.clang';
+const CUSTOM_COMPILER_VERSION = '0.8.37+commit.f401782d.Emscripten.clang';
 const CUSTOM_MAX_CODE_BYTES = 12_288;
 
 const compileSource = (source: string, emitBytecode: boolean): Record<string, unknown> => {

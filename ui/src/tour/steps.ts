@@ -21,7 +21,8 @@ export type TourStep = {
   done?(ctx: TourContext): boolean;
   enter?(ctx: TourContext): void;
 };
-const home = (ctx: TourContext, target: string) => (ctx.pathname === '/' ? target : 'nav-home');
+const home = (ctx: TourContext, target: string) =>
+  ctx.pathname === '/' ? target : ctx.dom.has('nav-home') ? 'nav-home' : 'back';
 const weth = (ctx: TourContext) => ctx.wallet.totals.find(token => token.tokenId === 2)?.net ?? 0n;
 
 /** Each step watches the result of a real action. No acknowledgement pages or automatic financial actions. */
@@ -92,27 +93,39 @@ const steps: TourStep[] = [
     instruction: ctx =>
       ctx.pathname === '/activity'
         ? 'Select your payment or filled swap to read its receipt. Compare the amount and status, then choose Next chapter.'
-        : 'Open Activity. Select a record to see its amount, status and hashes.',
-    target: ctx => (ctx.pathname === '/activity' ? 'activity-row' : 'nav-activity'),
+        : ctx.dom.has('nav-activity')
+          ? 'Open Activity. Select a record to see its amount, status and hashes.'
+          : 'Return Home, then open Activity. Select your payment or filled swap to read its receipt.',
+    target: ctx =>
+      ctx.pathname === '/activity' ? 'activity-row' : ctx.dom.has('nav-activity') ? 'nav-activity' : 'back',
     // Reading a receipt is user-paced; entering Activity must not immediately navigate away.
   },
-  ...FEATURE_CHAPTERS,
+  ...FEATURE_CHAPTERS.filter(step => step.id !== 'dispute'),
   {
-    id: 'balance', title: 'Credit and collateral',
-    instruction: () => 'Review how your balance is held. Unsecured credit depends on repayment; collateral backs an enforceable claim.',
-    target: () => 'home-balance-breakdown', route: () => '/',
+    id: 'balance',
+    title: 'Credit and collateral',
+    instruction: () =>
+      'Review how your balance is held. Unsecured credit depends on repayment; collateral backs an enforceable claim.',
+    target: () => 'home-balance-breakdown',
+    route: () => '/',
   },
   {
-    id: 'cover', title: 'Request collateral',
-    instruction: () => 'Open Cover it on your hub account. Review the amount and on-chain fee before asking the hub to lock collateral.',
+    id: 'cover',
+    title: 'Request collateral',
+    instruction: () =>
+      'Open Cover it on your hub account. Review the amount and on-chain fee before asking the hub to lock collateral.',
     target: () => 'account-cover',
-    route: ctx => ctx.wallet.accounts[0] ? `/accounts/${ctx.wallet.accounts[0].counterpartyId}` : '/',
+    route: ctx => (ctx.wallet.accounts[0] ? `/accounts/${ctx.wallet.accounts[0].counterpartyId}` : '/'),
   },
   {
-    id: 'evidence', title: 'Keep your signed proofs',
-    instruction: () => 'Export your evidence bundle from Security and recovery. Keep the co-signed frames needed to enforce your collateral-backed claim.',
-    target: () => 'evidence-export', route: () => '/sovereignty',
+    id: 'evidence',
+    title: 'Keep your signed proofs',
+    instruction: () =>
+      'Export your evidence bundle from Security and recovery. Keep the co-signed frames needed to enforce your collateral-backed claim.',
+    target: () => 'evidence-export',
+    route: () => '/sovereignty',
   },
+  ...FEATURE_CHAPTERS.filter(step => step.id === 'dispute'),
   {
     id: 'finish',
     title: 'Keep practising',

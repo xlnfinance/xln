@@ -1,537 +1,211 @@
-/**
- * E2E user journey for onboarding, funding, account growth, and collateral progress.
- *
- * Flow and goals:
- * 1. Create a fresh browser user in the live wallet.
- * 2. Connect the user to a hub and bootstrap usable capacity.
- * 3. Verify the account machine progresses through visible states as usage grows.
- * 4. Confirm the UI shows the expected collateral/requested-collateral progression.
- *
- * This test exists to keep the first-user experience honest: a brand-new user should be able
- * to create an entity, connect, receive capacity, and see account progress without hidden setup.
- */
 import { test, expect, type Page } from '../../global-setup.mts';
 import { Wallet } from 'ethers';
-import { API_BASE_URL, APP_BASE_URL } from '../../utils/e2e-baseline';
-import {
-  gotoApp as gotoSharedApp,
-  createRuntime as createSharedRuntime,
-} from '../../utils/e2e-demo-users';
-import { connectHub as connectActiveRuntimeToHub } from '../../utils/e2e-connect';
-import { getRenderedPrimaryOutbound, waitForRenderedPrimaryOutboundDelta } from '../../utils/runtime/e2e-account-ui';
+import { API_BASE_URL, APP_BASE_URL, getHealth } from '../../utils/e2e-baseline';
+import { gotoApp as gotoSharedApp } from '../../utils/e2e-demo-users';
 import { getPersistedReceiptCursor } from '../../utils/e2e-runtime-receipts';
-import { openAccountWorkspaceTab } from '../../utils/e2e-account-workspace';
-
-const INIT_TIMEOUT = 30_000;
-const LONG_E2E = process.env.E2E_LONG === '1';
-const USER_JOURNEY_TIMEOUT = Math.max(
-  Number(process.env.PW_TEST_TIMEOUT || 0) || 0,
-  LONG_E2E ? 240_000 : 180_000,
-);
-
-type AccountProgress = {
-  entityId: string;
-  signerId: string;
-  counterpartyId: string;
-  frameHeight: number;
-};
-
-type EntityIdleSnapshot = {
-  quiescent: boolean;
-  runtimeIdle: boolean;
-  runtimeHeight: number;
-  entityHeight: number;
-  projectedJHeight: number;
-  watcherScannedJHeight: number;
-  finalizedJHeight: number;
-  pendingWorkCount: number;
-  pendingSemanticJEventCount: number;
-  recentInputs: Array<{
-    runtimeHeight: number;
-    txTypes: string[];
-    jPrefixAttestations: number;
-    proposalHeight: number;
-    precommits: number;
-  }>;
-};
+import { createWalletIdentity } from '../../../ui/tests/wallet-ui';
+import { readAccount, expectDeliveryDrained } from '../../../ui/tests/swap-evidence';
+import { safeStringify } from '../../../core/protocol/serialization';
+import type { RuntimeReplica } from '../../../core/runtime/types';
 
 function randomMnemonic(): string {
-  return Wallet.createRandom().mnemonic!.phrase;
+  const phrase = Wallet.createRandom().mnemonic?.phrase;
+  if (!phrase) throw new Error('JOURNEY_MNEMONIC_UNAVAILABLE');
+  return phrase;
 }
 
 async function gotoApp(page: Page): Promise<void> {
-  await gotoSharedApp(page, {
-    appBaseUrl: APP_BASE_URL,
-    initTimeoutMs: INIT_TIMEOUT,
-    settleMs: 500,
-  });
+  await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 30_000, settleMs: 0 });
 }
 
-async function dismissOnboardingIfVisible(page: Page): Promise<void> {
-  const checkbox = page.locator('text=I understand and accept the risks of using this software').first();
-  if (await checkbox.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await checkbox.click();
-    const continueBtn = page.locator('button:has-text("Continue")').first();
-    if (await continueBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await continueBtn.click();
-      await page.waitForTimeout(300);
-    }
-  }
-}
-
-async function createDemoRuntime(
-  page: Page,
-  label: string,
-  mnemonic: string,
-  options: { requiresOnboarding?: boolean } = {},
-): Promise<void> {
-  await createSharedRuntime(page, label, mnemonic, options);
-}
-
-async function readHubAccountSummary(page: Page): Promise<{
-  ready: boolean;
-  committed: number;
-  pending: number;
-  pendingNetworkOutputs: number;
-  entitiesWithCommitted: number;
-  entityCount: number;
-  accounts: Array<{ entityId: string; counterpartyId: string; height: number; pending: boolean }>;
-}> {
-  return page.evaluate(() => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        eReplicas?: Map<string, {
-          entityId?: string;
-          state?: {
-            entityId?: string;
-            accounts?: Map<string, {
-              currentHeight?: number;
-              pendingFrame?: unknown;
-            }>;
-          };
-        }>;
-        runtimeMempool?: {
-          runtimeTxs?: unknown[];
-          entityInputs?: Array<{
-            entityId?: string;
-            entityTxs?: Array<{ type?: string }>;
-            jPrefixAttestations?: Map<string, unknown>;
-            proposedFrame?: { height?: number };
-            hashPrecommits?: Map<string, unknown>;
-          }>;
-          jInputs?: unknown[];
-        };
-        pendingOutputs?: unknown[];
-        networkInbox?: unknown[];
-        pendingNetworkOutputs?: unknown[];
-        infrastructure?: {
-          processingPromise?: Promise<void> | null;
-          inFlightEntityInputs?: number;
-          pendingCommittedJOutbox?: unknown[];
-        };
-        history?: Array<{
-          height?: number;
-          runtimeInput?: {
-            entityInputs?: Array<{
-              entityId?: string;
-              entityTxs?: Array<{ type?: string }>;
-              jPrefixAttestations?: Map<string, unknown>;
-              proposedFrame?: { height?: number };
-              hashPrecommits?: Map<string, unknown>;
-            }>;
-          };
-        }>;
-      };
-    }).isolatedEnv;
-    const accounts: Array<{ entityId: string; counterpartyId: string; height: number; pending: boolean }> = [];
-    const entityIds = new Set<string>();
-    const committedEntityIds = new Set<string>();
-    for (const [key, rep] of env?.state?.eReplicas?.entries?.() ?? []) {
-      const entityId = String(rep?.entityId || rep?.state?.entityId || String(key).split(':')[0] || '').toLowerCase();
-      if (entityId) entityIds.add(entityId);
-      for (const [counterpartyId, account] of rep.state?.accounts?.entries?.() ?? []) {
-        const height = Number(account?.currentHeight || 0);
-        const pending = Boolean(account?.pendingFrame);
-        if (entityId && height > 0) committedEntityIds.add(entityId);
-        accounts.push({
-          entityId,
-          counterpartyId: String(counterpartyId || ''),
-          height,
-          pending,
-        });
-      }
-    }
-    const pending = accounts.filter((account) => account.pending).length;
-    return {
-      ready: entityIds.size >= 2 && committedEntityIds.size === entityIds.size,
-      committed: accounts.filter((account) => account.height > 0).length,
-      pending,
-      pendingNetworkOutputs: env?.pendingNetworkOutputs?.length ?? 0,
-      entitiesWithCommitted: committedEntityIds.size,
-      entityCount: entityIds.size,
-      accounts,
-    };
-  });
-}
-
-async function readPrimaryAccountProgress(page: Page): Promise<AccountProgress | null> {
-  return page.evaluate(() => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        eReplicas?: Map<string, {
-          state?: {
-            accounts?: Map<string, {
-              currentHeight?: number;
-              deltas?: Map<number | string, unknown>;
-            }>;
-          };
-        }>;
-      };
-    }).isolatedEnv;
-    if (!env?.state?.eReplicas) return null;
-
-    for (const [key, replica] of env.state.eReplicas.entries()) {
-      const [entityId, signerId] = String(key).split(':');
-      if (!entityId || !signerId) continue;
-
-      const accounts = replica?.state?.accounts;
-      if (!accounts || accounts.size === 0) continue;
-
-      for (const [counterpartyId, account] of accounts.entries()) {
-        const delta = account?.state?.deltas?.get?.(1) ?? account?.state?.deltas?.get?.('1');
-        if (!delta) continue;
-        return {
-          entityId,
-          signerId,
-          counterpartyId: String(counterpartyId),
-          frameHeight: Number(account?.currentHeight || 0),
-        };
-      }
-    }
-    return null;
-  });
-}
-
-async function readEntityIdleSnapshot(
-  page: Page,
-  entityId: string,
-  signerId: string,
-): Promise<EntityIdleSnapshot> {
-  const runtimeIdle = await page.evaluate(async () => {
-    const waitForDrained = (window as typeof window & {
-      __xln?: { runtimeIngress?: { waitForDrained?: (timeoutMs?: number) => Promise<boolean> } };
-    }).__xln?.runtimeIngress?.waitForDrained;
-    if (typeof waitForDrained !== 'function') throw new Error('E2E_DRAIN_RUNTIME_INGRESS_MISSING');
-    return await waitForDrained(1_000);
-  });
-
-  return await page.evaluate(({ targetEntityId, targetSignerId, runtimeIdle }) => {
-    const view = window as typeof window & {
-      __xln?: {
-        jurisdictionConnectivity?: {
-          jurisdictions?: Array<{
-            chainId?: number;
-            depositoryAddress?: string;
-            scannedThroughHeight?: number;
-          }>;
-        };
-      };
-      isolatedEnv?: {
-        height?: number;
-        jReplicas?: Map<string, {
-          chainId?: number;
-          depositoryAddress?: string;
-          contracts?: { depository?: string };
-          jadapter?: {
-            chainId?: number;
-            addresses?: { depository?: string };
-            getWatcherScanProgress?: () => { scannedThroughHeight?: number };
-          };
-        }>;
-        eReplicas?: Map<string, {
-          signerId?: string;
-          entityId?: string;
-          mempool?: unknown[];
-          proposal?: unknown;
-          lockedFrame?: unknown;
-          jHistory?: {
-            scannedThroughHeight?: number;
-            eventBlocks?: Map<number, unknown>;
-          };
-          state?: {
-            entityId?: string;
-            height?: number;
-            lastFinalizedJHeight?: number;
-            config?: {
-              jurisdiction?: { chainId?: number; depositoryAddress?: string };
-            };
-            accounts?: Map<string, { mempool?: unknown[]; pendingFrame?: unknown }>;
-          };
-        }>;
-      };
-    };
-    const env = view.isolatedEnv;
-    if (!env?.state?.eReplicas) throw new Error('E2E_IDLE_RUNTIME_MISSING');
-    const entity = targetEntityId.toLowerCase();
-    const signer = targetSignerId.toLowerCase();
-    const replica = Array.from(env.state.eReplicas.values()).find((candidate) =>
-      String(candidate.entityId || candidate.state?.entityId || '').toLowerCase() === entity &&
-      String(candidate.signerId || '').toLowerCase() === signer,
-    );
-    if (!replica?.state) throw new Error(`E2E_IDLE_REPLICA_MISSING:${entity}:${signer}`);
-    const jurisdiction = replica.state.config?.jurisdiction;
-    const jurisdictionChainId = Number(jurisdiction?.chainId ?? 0);
-    const jurisdictionDepository = String(jurisdiction?.depositoryAddress ?? '').toLowerCase();
-    const watcherMatches = (view.__xln?.jurisdictionConnectivity?.jurisdictions ?? []).filter((candidate) => {
-      const chainId = Number(candidate.chainId ?? 0);
-      const depository = String(candidate.depositoryAddress ?? '').toLowerCase();
-      return chainId === jurisdictionChainId && depository === jurisdictionDepository;
-    });
-    if (watcherMatches.length !== 1) {
-      throw new Error(
-        `E2E_IDLE_WATCHER_RESOLUTION_FAILED:${jurisdictionChainId}:${jurisdictionDepository}:` +
-        `matches=${watcherMatches.length}`,
+/** Observe current live machinery; no synthetic drain or mutation of committed state. */
+async function readEntityIdleSnapshot(page: Page, entityId: string, signerId: string) {
+  return page.evaluate(
+    ({ entityId, signerId }) => {
+      const debug = (window as Window & { __xln?: { env(): RuntimeReplica | null } }).__xln;
+      const env = debug?.env();
+      if (!env) throw new Error('JOURNEY_RUNTIME_UNAVAILABLE');
+      const replicas = [...env.state.eReplicas.values()].filter(
+        replica => replica.entityId === entityId && replica.signerId === signerId,
       );
-    }
-    const watcherScannedJHeight = Number(
-      watcherMatches[0].scannedThroughHeight ?? 0,
-    );
-    const accounts = Array.from(replica.state.accounts?.values() ?? []);
-    const runtimeMempool = env.runtimeMempool;
-    const finalizedJHeight = Number(replica.state.lastFinalizedJHeight ?? 0);
-    const projectedJHeight = Number(replica.jHistory?.scannedThroughHeight ?? 0);
-    const pendingSemanticJEventCount = Array.from(replica.jHistory?.eventBlocks?.keys?.() ?? [])
-      .filter(height => Number(height) > finalizedJHeight && Number(height) <= projectedJHeight)
-      .length;
-    const pendingWorkCount =
-      (runtimeMempool?.runtimeTxs?.length ?? 0) +
-      (runtimeMempool?.entityInputs?.length ?? 0) +
-      (runtimeMempool?.jInputs?.length ?? 0) +
-      (env.pendingOutputs?.length ?? 0) +
-      (env.networkInbox?.length ?? 0) +
-      (env.pendingNetworkOutputs?.length ?? 0);
-    const recentInputs = (env.history ?? []).slice(-24).flatMap(frame =>
-      (frame.runtimeInput?.entityInputs ?? [])
-        .filter(input => String(input.entityId ?? '').toLowerCase() === entity)
-        .map(input => ({
-          runtimeHeight: Number(frame.height ?? 0),
-          txTypes: (input.entityTxs ?? []).map(tx => String(tx.type ?? 'unknown')),
-          jPrefixAttestations: input.jPrefixAttestations?.size ?? 0,
-          proposalHeight: Number(input.proposedFrame?.height ?? 0),
-          precommits: input.hashPrecommits?.size ?? 0,
-        })),
-    );
-    return {
-      quiescent:
-        runtimeIdle &&
-        pendingWorkCount === 0 &&
-        pendingSemanticJEventCount === 0 &&
-        (replica.mempool?.length ?? 0) === 0 &&
-        !replica.proposal &&
-        !replica.lockedFrame &&
-        accounts.every((account) => (account.mempool?.length ?? 0) === 0 && !account.pendingFrame),
-      runtimeHeight: Number(env.state.height ?? 0),
-      runtimeIdle,
-      entityHeight: Number(replica.state.height ?? 0),
-      projectedJHeight,
-      watcherScannedJHeight,
-      finalizedJHeight,
-      pendingWorkCount,
-      pendingSemanticJEventCount,
-      recentInputs,
-    };
-  }, { targetEntityId: entityId, targetSignerId: signerId, runtimeIdle });
+      const [replica] = replicas;
+      if (replicas.length !== 1 || !replica) throw new Error('JOURNEY_REPLICA_NOT_UNIQUE');
+      const jurisdiction = replica.state.config.jurisdiction;
+      if (!jurisdiction || !replica.jHistory) throw new Error('JOURNEY_JURISDICTION_UNAVAILABLE');
+      const adapters = [...(env.infrastructure?.liveJAdapters?.values() ?? [])].filter(
+        adapter =>
+          adapter.chainId === jurisdiction.chainId &&
+          adapter.addresses.depository.toLowerCase() === jurisdiction.depositoryAddress.toLowerCase(),
+      );
+      const [adapter] = adapters;
+      if (adapters.length !== 1 || !adapter?.getWatcherScanProgress) throw new Error('JOURNEY_WATCHER_NOT_UNIQUE');
+      const watcherScannedJHeight = adapter.getWatcherScanProgress().scannedThroughHeight;
+      const finalizedJHeight = replica.state.lastFinalizedJHeight;
+      const projectedJHeight = replica.jHistory.scannedThroughHeight;
+      const pendingSemanticJEventCount = [...replica.jHistory.eventBlocks.keys()].filter(
+        height => height > finalizedJHeight && height <= projectedJHeight,
+      ).length;
+      const pendingWorkCount =
+        env.runtimeMempool.runtimeTxs.length +
+        env.runtimeMempool.entityInputs.length +
+        (env.runtimeMempool.jInputs?.length ?? 0) +
+        (env.pendingOutputs?.length ?? 0) +
+        (env.networkInbox?.length ?? 0) +
+        (env.pendingNetworkOutputs?.length ?? 0) +
+        (env.infrastructure?.pendingCommittedJOutbox?.length ?? 0);
+      const runtimeIdle = !env.infrastructure?.processingPromise && !env.infrastructure?.inFlightEntityInputs;
+      const accounts = [...replica.state.accounts.values()];
+      return {
+        runtimeHeight: env.state.height,
+        entityHeight: replica.state.height,
+        watcherScannedJHeight,
+        projectedJHeight,
+        finalizedJHeight,
+        pendingSemanticJEventCount,
+        pendingWorkCount,
+        runtimeIdle,
+        quiescent:
+          runtimeIdle &&
+          pendingWorkCount === 0 &&
+          pendingSemanticJEventCount === 0 &&
+          replica.mempool.length === 0 &&
+          !replica.proposal &&
+          !replica.lockedFrame &&
+          accounts.every(
+            account => account.mempool.length === 0 && !account.pendingFrame && !account.pendingAccountInput,
+          ),
+      };
+    },
+    { entityId, signerId },
+  );
 }
 
 async function mineEmptyJurisdictionBlock(page: Page): Promise<void> {
   const response = await page.request.post(`${API_BASE_URL}/rpc`, {
     data: { jsonrpc: '2.0', id: 1, method: 'evm_mine', params: [] },
   });
-  const body = await response.json().catch(async () => ({ error: (await response.text()).slice(0, 500) }));
-  if (!response.ok() || body?.error) {
-    throw new Error(`E2E_EMPTY_BLOCK_MINE_FAILED:${response.status()}:${JSON.stringify(body?.error ?? body)}`);
-  }
-}
-
-async function expectSwapBuilderLabels(page: Page): Promise<void> {
-  await openAccountWorkspaceTab(page, 'swap');
-  await expect(page.getByTestId('swap-ticket-from-token').locator('option:checked')).toHaveText(/^(USDC|USDT|WETH)$/);
-  await expect(page.getByTestId('swap-ticket-to-token').locator('option:checked')).toHaveText(/^(USDC|USDT|WETH)$/);
-  await expect(page.getByTestId('swap-ticket-from-network').locator('option:checked')).toContainText('Testnet');
-  // The default destination is the selected bilateral account. Jurisdiction
-  // labels belong only to explicit cross-jurisdiction routes in this selector.
-  await expect(page.getByTestId('swap-ticket-to-network').locator('option:checked')).toHaveText('Same account');
-
-  const routeLabels = await page.getByTestId('swap-ticket-to-network').locator('option').evaluateAll((options) =>
-    options.map((option) => String((option as HTMLOptionElement).label || option.textContent || '').trim()),
-  );
-  expect(routeLabels.filter((label) => label === 'Same account')).toHaveLength(1);
-  expect(new Set(routeLabels).size, `route options should not duplicate recipient lanes: ${routeLabels.join(' | ')}`)
-    .toBe(routeLabels.length);
-  expect(routeLabels.join(' | '), 'recipient dropdown must not expose internal hub names').not.toMatch(/\bH\d\b/);
-}
-
-async function ensureAnyHubAccountOpen(page: Page): Promise<void> {
-  const state = await page.evaluate(() => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        eReplicas?: Map<string, {
-          state?: {
-            accounts?: Map<string, {
-              deltas?: Map<number | string, unknown>;
-              pendingFrame?: unknown;
-              currentHeight?: number;
-            }>;
-          };
-        }>;
-        gossip?: {
-          getProfiles?: () => Array<{
-            entityId?: string;
-            metadata?: { isHub?: boolean };
-          }>;
-        };
-      };
-    }).isolatedEnv;
-    if (!env?.state?.eReplicas) return { ready: false, hubId: '' };
-
-    let ready = false;
-    let hubId = '';
-
-    for (const [key, rep] of env.state.eReplicas.entries()) {
-      const [entityId] = String(key).split(':');
-      if (!entityId) continue;
-      if (rep?.state?.accounts instanceof Map) {
-        for (const [counterpartyId, account] of rep.state.accounts.entries()) {
-          if (!hubId) hubId = String(counterpartyId || '');
-          const hasDelta = !!(account?.state?.deltas?.get?.(1) || account?.state?.deltas?.get?.('1'));
-          if (hasDelta && !account?.pendingFrame && Number(account?.currentHeight || 0) > 0) {
-            ready = true;
-            hubId = String(counterpartyId || '');
-            break;
-          }
-        }
-      }
-      if (ready) break;
-    }
-
-    return { ready, hubId };
-  });
-
-  if (state.ready) return;
-  if (!state.hubId) {
-    await page.getByTestId('tab-accounts').click({ timeout: 10_000 }).catch(() => null);
-    await expect(page.locator('.hub-card[data-hub-entity-id]').first()).toBeVisible({ timeout: 30_000 });
-  }
-  const visibleHubId = state.hubId
-    ? ''
-    : await page.locator('.hub-card[data-hub-entity-id]').first().getAttribute('data-hub-entity-id').catch(() => null);
-  const hubId = String(state.hubId || visibleHubId || '').trim();
-  expect(hubId, 'same-jurisdiction hub must be visible before opening account').toMatch(/^0x[0-9a-f]{64}$/i);
-  await connectActiveRuntimeToHub(page, hubId);
+  expect(response.ok()).toBe(true);
+  const body = await response.json();
+  expect(body.error).toBeUndefined();
 }
 
 test.describe('E2E User Journey', () => {
-  test('profile onboarding auto-joins three hubs without stale pending frames', { tag: '@functional' }, async ({ page }) => {
-    test.setTimeout(USER_JOURNEY_TIMEOUT);
-
-    await page.addInitScript(() => {
-      localStorage.setItem('xln-hub-join-preference', '3');
-    });
-    await gotoApp(page);
-    await dismissOnboardingIfVisible(page);
-    await createDemoRuntime(page, 'journey-auto3', randomMnemonic(), { requiresOnboarding: true });
-
-    await expect
-      .poll(async () => await readHubAccountSummary(page), {
-        timeout: USER_JOURNEY_TIMEOUT,
-        intervals: [500, 1000, 1500],
-        message: 'auto-join should commit at least one hub account per runtime entity lane and leave no pending frames',
-      })
-      .toMatchObject({ ready: true, pending: 0, pendingNetworkOutputs: 0 });
-
-    await expectSwapBuilderLabels(page);
-  });
-
-  test('demo runtime -> open hub account -> offchain faucet pipeline', { tag: '@functional' }, async ({ page }) => {
-    test.setTimeout(USER_JOURNEY_TIMEOUT);
-
-    await gotoApp(page);
-    await dismissOnboardingIfVisible(page);
-    await createDemoRuntime(page, 'journey-rt1', randomMnemonic());
-    await ensureAnyHubAccountOpen(page);
-
-    const initial = await readPrimaryAccountProgress(page);
-    expect(initial, 'expected at least one opened hub account').not.toBeNull();
-    if (!initial) return;
-    const renderedBefore = await getRenderedPrimaryOutbound(page);
-    const persistedBefore = await getPersistedReceiptCursor(page);
-
-    // User flow action: request one offchain faucet payment through the opened account.
-    const faucetResult = await page.evaluate(async ({ entityId, signerId, counterpartyId }) => {
-      const env = (window as typeof window & { isolatedEnv?: { runtimeId?: string } }).isolatedEnv;
-      if (!env) return;
-      const runtimeId = String(env.runtimeId || '').toLowerCase();
-      const requestApiBase = window.location.origin;
-      const res = await fetch(`${requestApiBase}/api/faucet/offchain`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userEntityId: entityId,
-          userRuntimeId: runtimeId,
-          tokenId: 1,
-          amount: '100',
-          hubEntityId: counterpartyId,
-        }),
+  test(
+    'onboarding and explicit hub joins commit three accounts without stale pending frames',
+    { tag: '@functional' },
+    async ({ page }, info) => {
+      await gotoApp(page);
+      const wallet = await createWalletIdentity(page, 'journey-three-hubs', randomMnemonic());
+      const health = await getHealth(page);
+      const hubs = ['H1', 'H2', 'H3'].map(name => {
+        const id = health?.hubs?.find(hub => hub.name === name && hub.online)?.entityId;
+        if (!id || !/^0x[0-9a-f]{64}$/.test(id)) throw new Error(`ONBOARDING_HUB_UNAVAILABLE:${name}`);
+        return { name, id };
       });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || !body?.success) {
-        throw new Error(body?.error || `offchain faucet failed (${res.status})`);
+      // Current React opens one discovered account. Additional counterparties require
+      // explicit user intent; the retired Svelte auto-join preference is not restored.
+      await expect(page.getByTestId('account-row')).toHaveCount(1);
+      for (const [index, hub] of hubs.slice(1).entries()) {
+        await page.getByRole('button', { name: 'Connect another account', exact: true }).click();
+        const sheet = page.getByRole('dialog', { name: 'Open account', exact: true });
+        await sheet.getByTestId('open-account-target').fill(hub.id);
+        await sheet.getByTestId('open-account-credit').fill('0');
+        await sheet.getByRole('button', { name: 'Propose account', exact: true }).click();
+        await expect(page.getByTestId('account-row')).toHaveCount(index + 2);
       }
-      return {
-        status: String(body?.status || ''),
-        requestId: String(body?.requestId || ''),
-        accountReady: Boolean(body?.accountReady),
-      };
-    }, {
-      entityId: initial.entityId,
-      signerId: initial.signerId,
-      counterpartyId: initial.counterpartyId,
-    });
-    expect(faucetResult, 'offchain faucet should queue a runtime input from the browser path').toMatchObject({
-      status: 'queued',
-      accountReady: true,
-    });
-    expect(faucetResult?.requestId, 'queued faucet must expose a receipt id').toMatch(/^offchain_/);
+      await expectDeliveryDrained(page, expect);
+      const accounts = await Promise.all(hubs.map(async hub => ({ hub, account: await readAccount(page, hub.id) })));
+      for (const { account } of accounts) {
+        expect(account.height).toBeGreaterThan(0);
+        expect(account.root).toMatch(/^0x[0-9a-f]{64}$/);
+        expect(account.pending).toBe(false);
+        expect(account.mempool).toBe(0);
+        expect(account.usdc).toBe('0');
+        expect(account.weth).toBe('0');
+        expect(account.offers).toBe(0);
+        for (const hold of account.holds) expect(hold).toMatchObject({ outgoing: '0', incoming: '0' });
+      }
+      await page.getByTestId('home-swap').click();
+      await expect(page.getByRole('button', { name: 'Same network', exact: true })).toHaveClass('active');
+      await expect(page.getByTestId('swap-cross-mode')).toHaveAttribute('aria-pressed', 'false');
+      await expect(page.getByTestId('swap-give')).toBeVisible();
+      await expect(page.getByTestId('swap-want')).toBeVisible();
+      await expect(page.getByTestId('swap-submit')).toBeDisabled();
+      await info.attach('current-three-hub-onboarding', {
+        body: safeStringify({ wallet, accounts }),
+        contentType: 'application/json',
+      });
+    },
+  );
 
-    await expect.poll(
-      async () => (await getPersistedReceiptCursor(page)).nextHeight,
-      { timeout: 20_000, intervals: [100, 250, 500] },
-    ).toBeGreaterThan(persistedBefore.nextHeight);
-
-    await waitForRenderedPrimaryOutboundDelta(page, renderedBefore, 100, { timeoutMs: 20_000, tolerance: 0.001 });
-
-    const finalState = (await readPrimaryAccountProgress(page))!;
-    expect(finalState.frameHeight, 'account frame must stay live after offchain faucet').toBeGreaterThanOrEqual(initial.frameHeight);
-
-    await expect.poll(
-      async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).quiescent,
-      { timeout: 20_000, intervals: [100, 250, 500], message: 'Entity must become idle after faucet ACK' },
-    ).toBe(true);
-    const beforeInitialJCatchup = await readEntityIdleSnapshot(page, initial.entityId, initial.signerId);
-    await mineEmptyJurisdictionBlock(page);
-    await expect.poll(
-      async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).watcherScannedJHeight,
-      {
-        timeout: 10_000,
-        intervals: [100, 250, 500, 1000],
-        message: 'the jurisdiction watcher must scan the new empty block before the idle check',
-      },
-    ).toBeGreaterThan(beforeInitialJCatchup.watcherScannedJHeight);
-    expect((await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).finalizedJHeight)
-      .toBeGreaterThanOrEqual(beforeInitialJCatchup.finalizedJHeight);
-    await expect.poll(
-      async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).quiescent,
-      { timeout: 10_000, intervals: [100, 250, 500], message: 'Entity must settle after initial J catch-up' },
-    ).toBe(true);
-  });
+  test(
+    'new wallet -> hub account -> offchain faucet commits funds and stays idle after an empty block',
+    { tag: '@functional' },
+    async ({ page }, info) => {
+      await gotoApp(page);
+      const wallet = await createWalletIdentity(page, 'journey-faucet', randomMnemonic());
+      await expect(page.getByTestId('account-row')).toHaveCount(1);
+      await page.getByTestId('account-row').click();
+      const hubId = new URL(page.url()).pathname.split('/accounts/')[1];
+      if (!hubId || !/^0x[0-9a-f]{64}$/.test(hubId)) throw new Error('JOURNEY_HUB_ACCOUNT_UNAVAILABLE');
+      await expectDeliveryDrained(page, expect);
+      const before = await readAccount(page, hubId);
+      const persistedBefore = await getPersistedReceiptCursor(page);
+      await page.getByTestId('back').click();
+      const responsePromise = page.waitForResponse(
+        response =>
+          response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/faucet/offchain',
+      );
+      await page.getByTestId('home-faucet').click();
+      const response = await responsePromise;
+      expect(response.ok()).toBe(true);
+      const receipt = await response.json();
+      expect(receipt).toMatchObject({ success: true, status: 'queued', accountReady: true });
+      expect(receipt.requestId).toMatch(/^offchain_/);
+      await expect(page.getByTestId('test-money-status')).toHaveText('100 USDC received');
+      await expect(page.getByTestId('home-total')).toHaveText('$100.00');
+      await expectDeliveryDrained(page, expect);
+      const funded = await readAccount(page, hubId);
+      expect(BigInt(funded.usdc) - BigInt(before.usdc)).toBe(100_000_000n);
+      expect(BigInt(funded.usdcSpendable) - BigInt(before.usdcSpendable)).toBe(100_000_000n);
+      expect(funded.height).toBeGreaterThan(before.height);
+      expect(funded.root).not.toBe(before.root);
+      const persistedAfter = await getPersistedReceiptCursor(page);
+      expect(persistedAfter.nextHeight).toBeGreaterThan(persistedBefore.nextHeight);
+      await expect
+        .poll(async () => (await readEntityIdleSnapshot(page, wallet.entityId, wallet.signerId)).quiescent)
+        .toBe(true);
+      const idleBefore = await readEntityIdleSnapshot(page, wallet.entityId, wallet.signerId);
+      await mineEmptyJurisdictionBlock(page);
+      await expect
+        .poll(
+          async () => (await readEntityIdleSnapshot(page, wallet.entityId, wallet.signerId)).watcherScannedJHeight,
+          { timeout: 20_000, message: 'The real watcher must scan the new empty block' },
+        )
+        .toBeGreaterThan(idleBefore.watcherScannedJHeight);
+      await expect
+        .poll(async () => (await readEntityIdleSnapshot(page, wallet.entityId, wallet.signerId)).quiescent, {
+          timeout: 20_000,
+          message: 'Empty-block catch-up must leave no financial work pending',
+        })
+        .toBe(true);
+      const idleAfter = await readEntityIdleSnapshot(page, wallet.entityId, wallet.signerId);
+      expect(idleAfter.finalizedJHeight).toBe(idleBefore.finalizedJHeight);
+      expect(await readAccount(page, hubId)).toEqual(funded);
+      await info.attach('current-faucet-and-empty-block', {
+        body: safeStringify({
+          wallet,
+          hubId,
+          before,
+          funded,
+          receipt,
+          persistedBefore,
+          persistedAfter,
+          idleBefore,
+          idleAfter,
+        }),
+        contentType: 'application/json',
+      });
+    },
+  );
 });

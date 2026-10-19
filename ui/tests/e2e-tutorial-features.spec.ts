@@ -2,11 +2,21 @@ import { expect, test } from '@playwright/test';
 import { enterStack } from './stack';
 
 const chapters = [
-  ['jurisdiction', '/'], ['cross', '/swap'], ['receive', '/receive'],
-  ['hubs', '/'], ['limits', '/accounts/'], ['move', '/move'], ['withdraw', '/move'],
-  ['lending', '/lend'], ['borrow', '/lend'], ['repay', '/lend'],
-  ['protection', '/sovereignty'], ['recovery', '/sovereignty'],
-  ['company', '/ownership'], ['shares', '/ownership'], ['governance', '/ownership'],
+  ['jurisdiction', '/'],
+  ['cross', '/swap'],
+  ['receive', '/receive'],
+  ['hubs', '/'],
+  ['limits', '/accounts/'],
+  ['move', '/move'],
+  ['withdraw', '/move'],
+  ['lending', '/lend'],
+  ['borrow', '/lend'],
+  ['repay', '/lend'],
+  ['protection', '/sovereignty'],
+  ['recovery', '/sovereignty'],
+  ['company', '/ownership'],
+  ['shares', '/ownership'],
+  ['governance', '/ownership'],
   ['dispute', '/accounts/'],
 ];
 
@@ -21,15 +31,30 @@ test(
     await page.getByTestId('jurisdiction-stack').locator('summary').click();
     await expect(page.getByTestId('jurisdiction-stack').locator('code')).toHaveCount(2);
     await page.getByTestId('wallet-tutorial').click();
+    await expect(page.getByTestId('tour-chapter').locator('option')).toHaveCount(24);
     for (const [id, path] of chapters) {
       await page.getByTestId('tour-chapter').selectOption(id!);
       await expect(page.getByTestId('tour')).toHaveAttribute('data-step', id!);
+      await page.getByText('How this works', { exact: true }).click();
       await expect.poll(() => new URL(page.url()).pathname).toContain(path!);
       await expect(page.getByTestId('tour-hint')).not.toBeEmpty();
       await expect(page.getByTestId('tour-prerequisite')).toBeVisible();
       await expect(page.getByTestId('tour-value')).not.toBeEmpty();
       await expect(page.getByTestId('tour-result')).toBeVisible();
       await expect(page.getByTestId('tour-result')).not.toBeEmpty();
+      if (id === 'shares') {
+        await expect(page.getByTestId('shares')).toHaveCount(0);
+        await expect(page.getByTestId('tour')).toHaveAttribute('data-target', 'entity-formation');
+        await expect(page.getByTestId('tour-hint')).toContainText('no share treasury');
+        const formation = page.getByTestId('entity-formation');
+        await formation.locator('summary').click();
+        await expect(page.getByTestId('formation-name')).toBeEditable();
+      }
+    }
+    await page.getByTestId('tour-chapter').selectOption('balance');
+    for (const id of ['cover', 'evidence', 'dispute', 'finish']) {
+      await page.getByTestId('tour-advance').click();
+      await expect(page.getByTestId('tour')).toHaveAttribute('data-step', id);
     }
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByTestId('tour-chapter').selectOption('receive');

@@ -32,12 +32,11 @@
 		"allowUnreachableCode": false,
 		"allowUnusedLabels": false,
 
-		"baseUrl": ".",
 		"paths": {
 			"@xln/core/*": ["../core/*"],
 			"@xln/frontend/*": ["../frontend/src/*"],
 			"$lib/*": ["../frontend/src/lib/*"],
-			"@/*": ["src/*"]
+			"@/*": ["./src/*"]
 		}
 	},
 	"include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]

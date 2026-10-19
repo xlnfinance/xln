@@ -5,9 +5,8 @@ import { enqueueEntityTxs } from './runtime/e2e-runtime-input';
 
 const DEFAULT_TOKEN_IDS = [1] as const;
 const diagnosticOpenTimeoutMs = Number(process.env.E2E_DIAGNOSTIC_OPEN_TIMEOUT_MS || 75_000);
-const DEFAULT_OPEN_TIMEOUT_MS = Number.isSafeInteger(diagnosticOpenTimeoutMs) && diagnosticOpenTimeoutMs >= 1_000
-  ? diagnosticOpenTimeoutMs
-  : 75_000;
+const DEFAULT_OPEN_TIMEOUT_MS =
+  Number.isSafeInteger(diagnosticOpenTimeoutMs) && diagnosticOpenTimeoutMs >= 1_000 ? diagnosticOpenTimeoutMs : 75_000;
 const DEFAULT_CREDIT_AMOUNT_DISPLAY = '10000';
 
 type ConnectRuntimeOptions = {
@@ -19,7 +18,7 @@ type ConnectRuntimeOptions = {
 };
 
 const stringifyDebug = (value: unknown): string =>
-  JSON.stringify(value, (_key, item) => typeof item === 'bigint' ? item.toString() : item, 2);
+  JSON.stringify(value, (_key, item) => (typeof item === 'bigint' ? item.toString() : item), 2);
 
 async function readSelectedUiRuntimeIdentity(page: Page): Promise<{ entityId: string; signerId: string }> {
   const trigger = page.getByTestId('context-current').first();
@@ -160,11 +159,7 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
   }, hubId);
 }
 
-async function waitForRenderedCommittedAccountCard(
-  page: Page,
-  hubId: string,
-  context: string,
-): Promise<void> {
+async function waitForRenderedCommittedAccountCard(page: Page, hubId: string, context: string): Promise<void> {
   await openAccountsWorkspace(page);
   await expect
     .poll(async () => await hasRenderedCommittedAccountCard(page, hubId), {
@@ -225,19 +220,21 @@ async function enqueueOpenAccount(
   disputeConfig?: ConnectRuntimeOptions['disputeConfig'],
 ): Promise<void> {
   await waitForHubRuntimeTransportReady(page, hubId);
-  await enqueueEntityTxs(page, entityId, signerId, [{
-    type: 'openAccount',
-    data: {
-      targetEntityId: hubId,
-      disputeConfig: disputeConfig ?? (
-        entityId.toLowerCase() < hubId.toLowerCase()
-          ? { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 }
-          : { leftResponseSeconds: 3_600, rightResponseSeconds: 86_400 }
-      ),
-      creditAmount: 10_000n * 10n ** BigInt(getTokenInfo(1).decimals),
-      tokenId: 1,
+  await enqueueEntityTxs(page, entityId, signerId, [
+    {
+      type: 'openAccount',
+      data: {
+        targetEntityId: hubId,
+        disputeConfig:
+          disputeConfig ??
+          (entityId.toLowerCase() < hubId.toLowerCase()
+            ? { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 }
+            : { leftResponseSeconds: 3_600, rightResponseSeconds: 86_400 }),
+        creditAmount: 10_000n * 10n ** BigInt(getTokenInfo(1).decimals),
+        tokenId: 1,
+      },
     },
-  }]);
+  ]);
 }
 
 async function extendCreditToken(
@@ -255,50 +252,54 @@ async function extendCreditToken(
   }
   const before = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
   const amount = BigInt(amountDisplay) * 10n ** BigInt(getTokenInfo(tokenId).decimals);
-  await enqueueEntityTxs(page, identity.entityId, identity.signerId, [{
-    type: 'extendCredit',
-    data: {
-      counterpartyEntityId: hubId,
-      tokenId,
-      amount,
+  await enqueueEntityTxs(page, identity.entityId, identity.signerId, [
+    {
+      type: 'extendCredit',
+      data: {
+        counterpartyEntityId: hubId,
+        tokenId,
+        amount,
+      },
     },
-  }]);
+  ]);
 
   try {
-    await expect.poll(
-      async () => {
-        const status = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
-        if (status.currentHeight <= before.currentHeight || status.pendingHeight) return false;
-        return await isAccountReady(page, identity.entityId, identity.signerId, hubId, [tokenId], 0);
-      },
-      {
-        timeout: DEFAULT_OPEN_TIMEOUT_MS,
-        intervals: [250, 500, 750],
-        message: `extendCredit should activate token ${tokenId} for ${hubId.slice(0, 10)}`,
-      },
-    ).toBe(true);
+    await expect
+      .poll(
+        async () => {
+          const status = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
+          if (status.currentHeight <= before.currentHeight || status.pendingHeight) return false;
+          return await isAccountReady(page, identity.entityId, identity.signerId, hubId, [tokenId], 0);
+        },
+        {
+          timeout: DEFAULT_OPEN_TIMEOUT_MS,
+          intervals: [250, 500, 750],
+          message: `extendCredit should activate token ${tokenId} for ${hubId.slice(0, 10)}`,
+        },
+      )
+      .toBe(true);
     await waitForHubAccountReady(page, identity.entityId, hubId, [tokenId]);
   } catch (error) {
     const [localStatus, hubStatus, debugState, relayDebug] = await Promise.all([
-      getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId).catch((statusError) => ({
+      getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId).catch(statusError => ({
         error: statusError instanceof Error ? statusError.message : String(statusError),
       })),
-      readHubAccountStatus(page, identity.entityId, hubId, [tokenId]).catch((statusError) => ({
+      readHubAccountStatus(page, identity.entityId, hubId, [tokenId]).catch(statusError => ({
         error: statusError instanceof Error ? statusError.message : String(statusError),
       })),
-      readLocalConnectRuntimeDiagnostic(page, hubId).catch((debugError) => ({
+      readLocalConnectRuntimeDiagnostic(page, hubId).catch(debugError => ({
         error: debugError instanceof Error ? debugError.message : String(debugError),
       })),
-      readRelayDebugEvents(page, 20).catch((debugError) => ({
+      readRelayDebugEvents(page, 20).catch(debugError => ({
         error: debugError instanceof Error ? debugError.message : String(debugError),
       })),
     ]);
     throw new Error(
       `${error instanceof Error ? error.message : String(error)}\n` +
-      `localStatus=${stringifyDebug(localStatus)}\n` +
-      `hubStatus=${stringifyDebug(hubStatus)}\n` +
-      `connectDebug=${stringifyDebug(debugState)}\n` +
-      `relayDebug=${stringifyDebug(relayDebug)}`,
+        `localStatus=${stringifyDebug(localStatus)}\n` +
+        `hubStatus=${stringifyDebug(hubStatus)}\n` +
+        `connectDebug=${stringifyDebug(debugState)}\n` +
+        `relayDebug=${stringifyDebug(relayDebug)}`,
     );
   }
 }
@@ -365,11 +366,10 @@ async function assertNoLocalHubDivergence(
   if (hubStatus.runtime?.halted) {
     throw new Error(
       `${context}: HUB_RUNTIME_HALTED before sending account tx\n` +
-      `localStatus=${stringifyDebug(localStatus)}\n` +
-      `hubStatus=${stringifyDebug(hubStatus)}`,
+        `localStatus=${stringifyDebug(localStatus)}\n` +
+        `hubStatus=${stringifyDebug(hubStatus)}`,
     );
   }
-
 }
 
 async function waitForHubBaseAccountReady(
@@ -397,11 +397,11 @@ async function waitForHubBaseAccountReady(
     ]);
     throw new Error(
       `${context}: hub-side base account did not commit before next account tx\n` +
-      `${error instanceof Error ? error.message : String(error)}\n` +
-      `localStatus=${stringifyDebug(localStatus)}\n` +
-      `hubStatus=${stringifyDebug(hubStatus)}\n` +
-      `connectDebug=${stringifyDebug(debugState)}\n` +
-      `relayDebug=${stringifyDebug(relayDebug)}`,
+        `${error instanceof Error ? error.message : String(error)}\n` +
+        `localStatus=${stringifyDebug(localStatus)}\n` +
+        `hubStatus=${stringifyDebug(hubStatus)}\n` +
+        `connectDebug=${stringifyDebug(debugState)}\n` +
+        `relayDebug=${stringifyDebug(relayDebug)}`,
     );
   }
 }
@@ -459,7 +459,7 @@ async function readHubAccountStatus(
     url.searchParams.set('tokenIds', tokenIds.join(','));
   }
   const response = await page.request.get(url.toString());
-  const body = await response.json().catch(() => ({} as HubAccountStatus));
+  const body = await response.json().catch(() => ({}) as HubAccountStatus);
   return {
     ...body,
     success: response.ok() && body.success !== false,
@@ -474,47 +474,38 @@ async function waitForHubAccountReady(
 ): Promise<void> {
   let lastStatus: HubAccountStatus = { error: 'not-run' };
   let lastEvidence = '';
-  await expect.poll(
-    async () => {
-      lastStatus = await readHubAccountStatus(page, userEntityId, hubId, tokenIds);
-      const tokens = Array.isArray(lastStatus.tokens) ? lastStatus.tokens : [];
-      const evidence = stringifyDebug({
-        hubId,
-        userEntityId,
-        success: lastStatus.success,
-        hasAccount: lastStatus.hasAccount,
-        ready: lastStatus.ready,
-        tokens,
-      });
-      if (evidence !== lastEvidence) {
-        console.log(`[HUB_ACCOUNT_READINESS] ${evidence}`);
-        lastEvidence = evidence;
-      }
-      const tokenReady = tokenIds.every(tokenId => {
-        const token = tokens.find(entry => Number(entry.tokenId) === Number(tokenId));
-        return Boolean(token?.hasDelta) && BigInt(String(token?.hubOutCapacity || '0')) > 0n;
-      });
-      return Boolean(lastStatus.success && lastStatus.hasAccount && lastStatus.ready && tokenReady);
-    },
-    {
-      timeout: DEFAULT_OPEN_TIMEOUT_MS,
-      intervals: [250, 500, 750],
-      message: `hub-side account ${hubId.slice(0, 10)} must be ready for ${userEntityId.slice(0, 10)}`,
-    },
-  ).toBe(true);
+  await expect
+    .poll(
+      async () => {
+        lastStatus = await readHubAccountStatus(page, userEntityId, hubId, tokenIds);
+        const tokens = Array.isArray(lastStatus.tokens) ? lastStatus.tokens : [];
+        const evidence = stringifyDebug({
+          hubId,
+          userEntityId,
+          success: lastStatus.success,
+          hasAccount: lastStatus.hasAccount,
+          ready: lastStatus.ready,
+          tokens,
+        });
+        if (evidence !== lastEvidence) {
+          console.log(`[HUB_ACCOUNT_READINESS] ${evidence}`);
+          lastEvidence = evidence;
+        }
+        const tokenReady = tokenIds.every(tokenId => {
+          const token = tokens.find(entry => Number(entry.tokenId) === Number(tokenId));
+          return Boolean(token?.hasDelta) && BigInt(String(token?.hubOutCapacity || '0')) > 0n;
+        });
+        return Boolean(lastStatus.success && lastStatus.hasAccount && lastStatus.ready && tokenReady);
+      },
+      {
+        timeout: DEFAULT_OPEN_TIMEOUT_MS,
+        intervals: [250, 500, 750],
+        message: `hub-side account ${hubId.slice(0, 10)} must be ready for ${userEntityId.slice(0, 10)}`,
+      },
+    )
+    .toBe(true);
 
-  expect(
-    lastStatus.ready,
-    `hub-side account not ready: ${stringifyDebug(lastStatus)}`,
-  ).toBe(true);
-}
-
-async function hasExportedRuntimeEnv(page: Page): Promise<boolean> {
-  return page.evaluate(() => Boolean((window as CurrentRuntimeWindow).__xln?.env()?.runtimeId));
-}
-
-async function hasExportedRuntimeP2P(page: Page): Promise<boolean> {
-  return page.evaluate(() => Boolean((window as CurrentRuntimeWindow).__xln?.env()?.infrastructure?.p2p));
+  expect(lastStatus.ready, `hub-side account not ready: ${stringifyDebug(lastStatus)}`).toBe(true);
 }
 
 async function hasRenderedCommittedAccountCard(page: Page, hubId: string): Promise<boolean> {
@@ -539,14 +530,7 @@ export async function connectRuntimeToHub(
   hubId: string,
   options: ConnectRuntimeOptions = {},
 ): Promise<void> {
-  await connectRuntimeToHubWithCredit(
-    page,
-    identity,
-    hubId,
-    DEFAULT_CREDIT_AMOUNT_DISPLAY,
-    DEFAULT_TOKEN_IDS,
-    options,
-  );
+  await connectRuntimeToHubWithCredit(page, identity, hubId, DEFAULT_CREDIT_AMOUNT_DISPLAY, DEFAULT_TOKEN_IDS, options);
 }
 
 export async function connectRuntimeToHubWithCredit(
@@ -563,27 +547,9 @@ export async function connectRuntimeToHubWithCredit(
     await nudgeRuntimeOnline(page);
   }
   const canUseDefaultUiConnect =
-    creditAmountDisplay === DEFAULT_CREDIT_AMOUNT_DISPLAY
-    && tokenIds.includes(1)
-    && options.disputeConfig === undefined;
-  const hasRuntimeEnv = await hasExportedRuntimeEnv(page);
-  const hasRuntimeP2P = hasRuntimeEnv ? await hasExportedRuntimeP2P(page) : false;
-  if (!hasRuntimeEnv || !hasRuntimeP2P) {
-    if (!canUseDefaultUiConnect) {
-      throw new Error(`prod/runtime-global-free connect only supports default hub connect for ${hubId.slice(0, 10)}`);
-    }
-    if (await hasRenderedCommittedAccountCard(page, hubId)) return;
-    await connectHubThroughUi(page, hubId);
-    await expect.poll(
-      async () => await hasRenderedCommittedAccountCard(page, hubId),
-      {
-        timeout: DEFAULT_OPEN_TIMEOUT_MS,
-        intervals: [250, 500, 750],
-        message: `rendered account ${hubId.slice(0, 10)} must commit after hub connect`,
-      },
-    ).toBe(true);
-    return;
-  }
+    creditAmountDisplay === DEFAULT_CREDIT_AMOUNT_DISPLAY &&
+    tokenIds.includes(1) &&
+    options.disputeConfig === undefined;
   const initiallyLocalReady = await isAccountReady(page, identity.entityId, identity.signerId, hubId, tokenIds);
   if (initiallyLocalReady) {
     const hubStatus = await readHubAccountStatus(page, identity.entityId, hubId, tokenIds);
@@ -622,41 +588,38 @@ export async function connectRuntimeToHubWithCredit(
   let reopenAttempted = false;
   let lastStatus: AccountOpenStatus | null = null;
   try {
-    await expect.poll(
-      async () => {
-        await nudgeRuntimeOnline(page);
-        const status = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
-        lastStatus = status;
-        if (
-          status.exists
-          && status.currentHeight === 0
-          && !status.pendingHeight
-          && !reopenAttempted
-        ) {
-          reopenAttempted = true;
-          if (canUseDefaultUiConnect) {
-            await connectHubThroughUi(page, hubId);
-          } else {
-            await enqueueOpenAccount(page, identity.entityId, identity.signerId, hubId, options.disputeConfig);
+    await expect
+      .poll(
+        async () => {
+          await nudgeRuntimeOnline(page);
+          const status = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
+          lastStatus = status;
+          if (status.exists && status.currentHeight === 0 && !status.pendingHeight && !reopenAttempted) {
+            reopenAttempted = true;
+            if (canUseDefaultUiConnect) {
+              await connectHubThroughUi(page, hubId);
+            } else {
+              await enqueueOpenAccount(page, identity.entityId, identity.signerId, hubId, options.disputeConfig);
+            }
+            return false;
           }
-          return false;
-        }
-        return status.exists && status.currentHeight > 0 && !status.pendingHeight;
-      },
-      {
-        timeout: DEFAULT_OPEN_TIMEOUT_MS,
-        intervals: [250, 500, 750],
-        message: `account ${hubId.slice(0, 10)} must be committed after hub connect`,
-      },
-    ).toBe(true);
+          return status.exists && status.currentHeight > 0 && !status.pendingHeight;
+        },
+        {
+          timeout: DEFAULT_OPEN_TIMEOUT_MS,
+          intervals: [250, 500, 750],
+          message: `account ${hubId.slice(0, 10)} must be committed after hub connect`,
+        },
+      )
+      .toBe(true);
   } catch (error) {
     const debugState = await readLocalConnectRuntimeDiagnostic(page, hubId).catch(debugError => ({
       debugError: debugError instanceof Error ? debugError.message : String(debugError),
     }));
     throw new Error(
       `${error instanceof Error ? error.message : String(error)}\n` +
-      `lastStatus=${stringifyDebug(lastStatus)}\n` +
-      `connectDebug=${stringifyDebug(debugState)}`,
+        `lastStatus=${stringifyDebug(lastStatus)}\n` +
+        `connectDebug=${stringifyDebug(debugState)}`,
     );
   }
 
@@ -664,7 +627,14 @@ export async function connectRuntimeToHubWithCredit(
     await extendCreditToken(page, identity, hubId, tokenId, creditAmountDisplay);
   }
 
-  const opened = await isAccountReady(page, identity.entityId, identity.signerId, hubId, tokenIds, DEFAULT_OPEN_TIMEOUT_MS);
+  const opened = await isAccountReady(
+    page,
+    identity.entityId,
+    identity.signerId,
+    hubId,
+    tokenIds,
+    DEFAULT_OPEN_TIMEOUT_MS,
+  );
   const finalStatus = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
 
   expect(
@@ -694,41 +664,45 @@ export async function waitForReceiveReadyGossipProfiles(
   try {
     await expect
       .poll(
-        async () => page.evaluate(async ({ targets, hub }) => {
-          const debug = (
-            window as Window & {
-              __xln?: { env(): RuntimeReplica | null; xln(): Promise<XLNModule> };
-            }
-          ).__xln;
-          const env = debug?.env();
-          if (!debug || !env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
-          const xln = await debug.xln();
-          await xln.ensureGossipProfiles(env, targets);
-          const profiles = env.gossip.getProfiles();
-          const byId = new Map<string, (typeof profiles)[number]>();
-          for (const profile of profiles) {
-            const id = String(profile?.entityId || '').toLowerCase();
-            if (id) byId.set(id, profile);
-          }
-          const missing: string[] = [];
-          for (const id of targets) {
-            const profile = byId.get(id);
-            if (!profile) {
-              missing.push(`${id.slice(0, 10)}:absent`);
-              continue;
-            }
-            if (id === hub) continue;
-            const accounts = Array.isArray(profile.accounts) ? profile.accounts : [];
-            const hasHub = accounts.some(account =>
-              String(account?.counterpartyId || '').toLowerCase() === hub,
-            );
-            if (!hasHub) missing.push(`${id.slice(0, 10)}:no-hub-account`);
-          }
-          return missing.length === 0 ? 'ready' : missing.join(',');
-        }, { targets, hub }).then((state) => {
-          lastMissing = String(state);
-          return state;
-        }),
+        async () =>
+          page
+            .evaluate(
+              async ({ targets, hub }) => {
+                const debug = (
+                  window as Window & {
+                    __xln?: { env(): RuntimeReplica | null; xln(): Promise<XLNModule> };
+                  }
+                ).__xln;
+                const env = debug?.env();
+                if (!debug || !env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+                const xln = await debug.xln();
+                await xln.ensureGossipProfiles(env, targets);
+                const profiles = env.gossip.getProfiles();
+                const byId = new Map<string, (typeof profiles)[number]>();
+                for (const profile of profiles) {
+                  const id = String(profile?.entityId || '').toLowerCase();
+                  if (id) byId.set(id, profile);
+                }
+                const missing: string[] = [];
+                for (const id of targets) {
+                  const profile = byId.get(id);
+                  if (!profile) {
+                    missing.push(`${id.slice(0, 10)}:absent`);
+                    continue;
+                  }
+                  if (id === hub) continue;
+                  const accounts = Array.isArray(profile.accounts) ? profile.accounts : [];
+                  const hasHub = accounts.some(account => String(account?.counterpartyId || '').toLowerCase() === hub);
+                  if (!hasHub) missing.push(`${id.slice(0, 10)}:no-hub-account`);
+                }
+                return missing.length === 0 ? 'ready' : missing.join(',');
+              },
+              { targets, hub },
+            )
+            .then(state => {
+              lastMissing = String(state);
+              return state;
+            }),
         {
           timeout: timeoutMs,
           intervals: [200, 400, 800],
@@ -738,17 +712,12 @@ export async function waitForReceiveReadyGossipProfiles(
       .toBe('ready');
   } catch (error) {
     throw new Error(
-      `${error instanceof Error ? error.message : String(error)}\n` +
-      `missingReceiveReady=${lastMissing}`,
+      `${error instanceof Error ? error.message : String(error)}\n` + `missingReceiveReady=${lastMissing}`,
     );
   }
 }
 
-export async function connectHub(
-  page: Page,
-  hubId: string,
-  options: ConnectRuntimeOptions = {},
-): Promise<void> {
+export async function connectHub(page: Page, hubId: string, options: ConnectRuntimeOptions = {}): Promise<void> {
   await ensureRuntimeOnline(page, 'connect-hub');
   const identity = await readSelectedUiRuntimeIdentity(page);
   await connectRuntimeToHub(page, identity, hubId, options);

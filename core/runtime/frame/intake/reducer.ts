@@ -1,7 +1,6 @@
 import { hasVerifiedEntityCommitPrecertificate } from '../../../entity/consensus/commit/precheck';
 import { mergeEntityInputs } from '../../../entity/consensus';
 import { retireAppliedLocalOutputs } from '../../delivery/local-outbox';
-import { admitEntityTxProfiles } from '../../admit/entity-tx-profile';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
 import { installTsAccountWorkerAuthority } from '../../workers/account/provider';
 import { createStructuredLogger } from '../../../support/logger';
@@ -32,19 +31,14 @@ import { nodeProcess } from '../../../support/process/runtime-process';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
 
 const runtimeLog = createStructuredLogger('runtime');
-const APPLY_PROFILE_ENABLED =
-  nodeProcess?.env?.['XLN_RUNTIME_APPLY_PROFILE'] === '1';
-const APPLY_SLOW_MS = Math.max(
-  0,
-  Number(nodeProcess?.env?.['XLN_RUNTIME_APPLY_SLOW_MS'] || '500'),
-);
+const APPLY_PROFILE_ENABLED = nodeProcess?.env?.['XLN_RUNTIME_APPLY_PROFILE'] === '1';
+const APPLY_SLOW_MS = Math.max(0, Number(nodeProcess?.env?.['XLN_RUNTIME_APPLY_SLOW_MS'] || '500'));
 
-export type RuntimeInputReducerDeps =
-  RuntimeInputAdmissionDeps & {
-    assertApplyAllowed(env: RuntimeReplica): void;
-    isReplay(env: RuntimeReplica): boolean;
-    getRoutingDeps(): RuntimeEntityRoutingDeps;
-  };
+export type RuntimeInputReducerDeps = RuntimeInputAdmissionDeps & {
+  assertApplyAllowed(env: RuntimeReplica): void;
+  isReplay(env: RuntimeReplica): boolean;
+  getRoutingDeps(): RuntimeEntityRoutingDeps;
+};
 
 type AppliedRuntimeInput = {
   entityContexts: Map<string, EntityInfraContext>;
@@ -114,7 +108,7 @@ const applyRuntimeTransactions = async (
   const jOutbox: JInput[] = [];
   for (const runtimeTx of runtimeTxs) {
     markRuntimeApplyPhase(env, `apply.runtime-tx:${runtimeTx.type}`);
-    jOutbox.push(...await applyRuntimeTx(env, runtimeTx, { isReplay }));
+    jOutbox.push(...(await applyRuntimeTx(env, runtimeTx, { isReplay })));
   }
   return jOutbox;
 };
@@ -155,30 +149,20 @@ const applyRuntimeEntityBatch = async (
   profile: ApplyProfiler,
 ): Promise<{ prepared: PreparedAtomicCrossJ; batch: AppliedEntityBatch }> => {
   markRuntimeApplyPhase(env, 'apply.runtime-txs');
-  const runtimeJOutbox = await applyRuntimeTransactions(
-    env,
-    ingress.runtimeTxs,
-    isReplay,
-  );
+  const runtimeJOutbox = await applyRuntimeTransactions(env, ingress.runtimeTxs, isReplay);
   profile.mark('runtimeTxs');
 
   const initialJOutbox = [...ingress.jOutbox, ...runtimeJOutbox];
   const routingDeps = deps.getRoutingDeps();
   markRuntimeApplyPhase(env, 'apply.atomic-admission');
-  const prepared = admitAtomicCrossJAccountInputs(
-    env,
-    mergedInputs,
-    isReplay,
-  );
+  const prepared = admitAtomicCrossJAccountInputs(env, mergedInputs, isReplay);
   profile.mark('atomicCrossJAdmission');
   markRuntimeApplyPhase(env, 'apply.entity-inputs');
   const batch = await applyMergedEntityInputs(env, prepared.inputs, initialJOutbox, {
     isReplay,
     routingDeps,
   });
-  const rejectedIndexes = new Set(
-    batch.rejectedAtomicPairs.flatMap(rejection => rejection.inputIndexes),
-  );
+  const rejectedIndexes = new Set(batch.rejectedAtomicPairs.flatMap(rejection => rejection.inputIndexes));
   type AtomicRejection = (typeof batch.rejectedAtomicPairs)[number];
   const rejectionGroups = new Map<AtomicRejection['code'], AtomicRejection[]>();
   for (const rejection of batch.rejectedAtomicPairs) {
@@ -199,17 +183,13 @@ const applyRuntimeEntityBatch = async (
       rejectedEntityIds: rejections.slice(0, 8).map(rejection => rejection.entityIds),
       detail: rejections[0]?.detail ?? code,
     });
-    recordRejectedAtomicCrossJInputs(
-      env,
-      code,
-      rejections[0]?.detail ?? code,
-    );
+    recordRejectedAtomicCrossJInputs(env, code, rejections[0]?.detail ?? code);
   }
   const accepted = {
     ...prepared,
-    pairs: prepared.pairs.filter(pair =>
-      !rejectedIndexes.has(pair.sourceInputIndex) &&
-      !rejectedIndexes.has(pair.targetInputIndex)),
+    pairs: prepared.pairs.filter(
+      pair => !rejectedIndexes.has(pair.sourceInputIndex) && !rejectedIndexes.has(pair.targetInputIndex),
+    ),
   };
   logAtomicCrossJCommit(accepted, batch);
   profile.mark('entityApply');
@@ -264,29 +244,13 @@ const applyRuntimeInputPhases = async (
   // Install the TS executor before any frame input is applied.
   installTsAccountWorkerAuthority(env);
   markRuntimeApplyPhase(env, 'apply.merge');
-  const admitted = admitEntityTxProfiles(ingress.entityInputs);
-  const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(admitted.inputs);
+  const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(ingress.entityInputs);
   const mergedInputs = mergeEntityInputs(cohortIsolatedInputs, input =>
-    hasVerifiedEntityCommitPrecertificate(env, input));
+    hasVerifiedEntityCommitPrecertificate(env, input),
+  );
   profile.mark('validateMerge');
-  const { prepared, batch } = await applyRuntimeEntityBatch(
-    env,
-    ingress,
-    mergedInputs,
-    isReplay,
-    deps,
-    profile,
-  );
-  batch.rejectedIngress = [...admitted.rejected, ...batch.rejectedIngress];
-  const result = finalizeRuntimeInputApply(
-    env,
-    runtimeInput,
-    ingress,
-    prepared,
-    batch,
-    profile,
-    isReplay,
-  );
+  const { prepared, batch } = await applyRuntimeEntityBatch(env, ingress, mergedInputs, isReplay, deps, profile);
+  const result = finalizeRuntimeInputApply(env, runtimeInput, ingress, prepared, batch, profile, isReplay);
   return { result, profiledRuntimeTxs: ingress.runtimeTxs };
 };
 

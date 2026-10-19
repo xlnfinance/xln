@@ -42,13 +42,12 @@ force layout, frame cache, account bar geometry, gesture state. It has no Svelte
 
 ## Persisted state
 
-| Key | Owner | Contents |
-| --- | --- | --- |
-| `xln-workspace-layout` | DockRoot | Dockview grid |
-| `xln-view-settings` | SettingsPanel | Grid/camera/entity/perf settings, replayed to Graph3D on mount |
-| `xln-bird-view-settings` | Graph3DPanel | Camera pose, bars mode, selected token |
-| `xln-graph-position-overrides-v1` | graphPositionOverrides | Manually dragged entity positions |
-| `xln-dock-entity-open-mode` | SettingsPanel | `replace` vs `new-tab` for entity panels |
+| Key                               | Owner                  | Contents                                                       |
+| --------------------------------- | ---------------------- | -------------------------------------------------------------- |
+| `xln-workspace-layout`            | DockRoot               | Dockview grid                                                  |
+| `xln-view-settings`               | SettingsPanel          | Grid/camera/entity/perf settings, replayed to Graph3D on mount |
+| `xln-bird-view-settings`          | Graph3DPanel           | Camera pose, bars mode, selected token                         |
+| `xln-graph-position-overrides-v1` | graphPositionOverrides | Manually dragged entity positions                              |
 
 ## Testing
 

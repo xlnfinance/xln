@@ -46,7 +46,7 @@ export type CommittedEntityOutputPlan = {
   preparedOutputGraph: PreparedOutputGraph;
 };
 
-const DIRECT_OUTPUT_CONNECT_TIMEOUT_MS = 10_000;
+const OUTPUT_CONNECT_TIMEOUT_MS = 10_000;
 
 export const dispatchCommittedEntityOutputs = async (
   env: RuntimeReplica,
@@ -74,8 +74,8 @@ export const dispatchCommittedEntityOutputs = async (
     });
   }
   // Sovereign clients open only the routes used by this committed frame. A
-  // Profile supplies the endpoint; the actual socket is established lazily at
-  // the send boundary. Hub servers already own inbound user sessions and must
+  // Signed profiles select direct hub endpoints or authenticated user relay.
+  // Hub servers already own inbound user sessions and must
   // not dial every user back.
   if (p2p && !env.infrastructure?.directEntityInputsDispatch && plan.remoteOutputs.length > 0) {
     const targetEntityIds = Array.from(new Set(
@@ -83,9 +83,9 @@ export const dispatchCommittedEntityOutputs = async (
     ));
     let transportReady: boolean;
     try {
-      transportReady = await p2p.bootstrapDirectEntityRoutes(targetEntityIds, DIRECT_OUTPUT_CONNECT_TIMEOUT_MS);
+      transportReady = await p2p.bootstrapEntityRoutes(targetEntityIds, OUTPUT_CONNECT_TIMEOUT_MS);
     } catch (error) {
-      env.error('network', 'DIRECT_OUTPUT_CONNECT_FAILED', {
+      env.error('network', 'OUTPUT_CONNECT_FAILED', {
         targetEntityIds,
         error: error instanceof Error ? error.message : String(error),
       });

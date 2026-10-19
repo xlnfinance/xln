@@ -27,7 +27,7 @@ import {
   swapMarketPolicyWire,
 } from '../../../../../rscore/shadow-wire';
 import { decodeBuffer } from '../../../../../storage/codec/codec';
-import { iterateKeys } from '../../../../../storage/database/level';
+import { readRequiredRaw, iterateKeys } from '../../../../../storage/database/level';
 import {
   keyLiveAccountPrefix,
   keyLiveReplicaMeta,
@@ -75,7 +75,7 @@ const accountRows = async (db: RuntimeDbLike, owner: string): Promise<Map<string
 const ownerSigner = async (db: RuntimeDbLike, owner: string): Promise<string> => {
   const rows: string[] = [];
   for await (const key of iterateKeys(db, { prefix: keyLiveReplicaMetaPrefix(owner) })) {
-    const meta = validateStorageReplicaMeta(decodeBuffer(await db.get(key)), 'HLT_OFFLINE_IMPORT_REPLICA');
+    const meta = validateStorageReplicaMeta(decodeBuffer(await readRequiredRaw(db, key)), 'HLT_OFFLINE_IMPORT_REPLICA');
     if (meta.entityId !== owner || !key.equals(keyLiveReplicaMeta(owner, meta.signerId))) {
       throw new Error(`HLT_OFFLINE_IMPORT_REPLICA_OWNER:${owner}`);
     }

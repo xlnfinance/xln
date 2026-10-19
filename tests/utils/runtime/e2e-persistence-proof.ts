@@ -13,7 +13,7 @@ export const setCheckpointPeriod = (page: Page, frames: number) =>
     if (!debug || !env) throw new Error('PERSISTENCE_RUNTIME_UNAVAILABLE');
     if (!Number.isSafeInteger(period) || period < 1) throw new Error('PERSISTENCE_PERIOD_INVALID');
     const xln = await debug.xln();
-    if (!(await xln.waitForRuntimeProcessingIdle(env, 5_000))) throw new Error('PERSISTENCE_DRAIN_TIMEOUT');
+    if (!(await xln.waitForRuntimeWorkDrained(env, 5_000))) throw new Error('PERSISTENCE_DRAIN_TIMEOUT');
     const storage = { ...env.runtimeConfig.storage, snapshotPeriodFrames: period };
     env.runtimeConfig = { ...env.runtimeConfig, storage };
     return storage.snapshotPeriodFrames;

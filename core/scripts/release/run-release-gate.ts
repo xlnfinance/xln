@@ -44,8 +44,8 @@ const collectCrossJRuntimeCoreTests = (directory: string): string[] =>
     .sort((left, right) => left.name.localeCompare(right.name))
     .flatMap(entry => {
       const path = `${directory}/${entry.name}`;
-      // The launch engine is TS. Frozen Rust parity vectors retain their
-      // historical ABI and run separately from current production TS tests.
+      // This family executes the TS engine. Required Rust production and
+      // semantic checks run through their own owning gates.
       if (entry.isDirectory()) return entry.name === 'rscore' ? [] : collectCrossJRuntimeCoreTests(path);
       return entry.isFile() && isCrossJRuntimeCoreTest(entry.name) ? [path] : [];
     });
@@ -63,10 +63,16 @@ const RUNTIME_CORE_TESTS = [
   'core/__tests__/testing/audit/audit-failfast-regressions-part-4.test.ts',
   'core/__tests__/testing/audit/audit-failfast-regressions-part-5.test.ts',
   'core/__tests__/testing/audit/audit-failfast-regressions-part-6.test.ts',
-  // Lending origination is deferred by the owner. Its release contract is
-  // rejection before mutation, not execution of an unavailable product.
+  // Current lending admission must preserve signed-command authority and exact
+  // rejection behavior while admitting the existing production product.
   'core/__tests__/proofs/fx-admission.test.ts',
-  'core/__tests__/runtime/ingress/recovery/deferred-entity-admission.test.ts',
+  'core/__tests__/runtime/ingress/recovery/lending-production-admission.test.ts',
+  'core/__tests__/finance/lending/rejected-draw.test.ts',
+  'core/__tests__/finance/lending/stale-repayment.test.ts',
+  'core/__tests__/finance/lending/loan-covenant.test.ts',
+  'core/__tests__/finance/state/lending.test.ts',
+  'core/__tests__/finance/state/lending-funding.test.ts',
+  'core/__tests__/storage/durability/lending-real-crash-recovery.test.ts',
   'core/__tests__/storage/runtime/storage-canonical-hash.test.ts',
   'core/__tests__/storage/recovery/storage-crash-recovery.test.ts',
   'core/__tests__/storage/recovery/portable/local-commit-outbox-replay.test.ts',
@@ -166,7 +172,15 @@ const walletE2eSteps: GateStep[] = (
     ],
     ['React dispute E2E', 'e2e-dispute-finality.spec.ts', 'dispute'],
     ['React offline protection E2E', 'e2e-dispute-protection.spec.ts', 'protection'],
-    ['React recovery E2E', 'e2e-tower-restore.spec.ts,e2e-file-restore.spec.ts,e2e-sovereignty.spec.ts', 'recovery'],
+    // Separate real fresh-device restores keep each stand inside its existing
+    // budget; the combined four-test group measured 242.5s against 240s.
+    ['React file recovery E2E', 'e2e-file-restore.spec.ts', 'file-recovery'],
+    ['React tower recovery E2E', 'e2e-tower-restore.spec.ts,e2e-sovereignty.spec.ts', 'recovery'],
+    [
+      'React lending E2E',
+      'e2e-lending.spec.ts,lending/e2e-bank-policy.spec.ts,lending/e2e-demand.spec.ts,lending/e2e-principal.spec.ts,lending/e2e-unfunded.spec.ts',
+      'lending',
+    ],
     ['React onboarding and ownership E2E', 'e2e-demo-sync.spec.ts,e2e-tutorial-company.spec.ts', 'ownership'],
   ] as const
 )

@@ -168,7 +168,7 @@ run_ui() {
     XLN_UI_RUNTIME_BUNDLE_DIR="$REPO_ROOT/frontend/static" \
     XLN_UI_BASE=/ui/ \
     XLN_UI_STACK_ORIGIN="http://127.0.0.1:${API_PORT}" \
-    "$REPO_ROOT/ui/node_modules/.bin/vite" --port "$UI_PORT" --strictPort --logLevel warn
+    "$REPO_ROOT/ui/node_modules/.bin/vite" --host 127.0.0.1 --port "$UI_PORT" --strictPort --logLevel warn
 }
 
 wait_for_dev_chains() {

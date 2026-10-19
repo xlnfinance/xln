@@ -277,6 +277,7 @@ export const {
   loadEntityStateFromStorageDb,
   loadEntityAccountDocFromStorageDb,
   loadEntityViewPageFromStorageDb,
+  loadEntityViewPagesFromStorageDb,
   inspectStorageDb,
   listPersistedCheckpointHeights,
   readPersistedStorageHead,

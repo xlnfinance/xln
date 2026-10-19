@@ -21,10 +21,7 @@ import { createAccountJClaimSession } from '../../j-claims/j-claim-session';
 import { prepareAccountJClaimTx } from '../../j-claims/j-claim-transition';
 import type { AccountJClaimNodeStore } from '../../../types/finance/account-j-claims';
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
-import type {
-  AccountFailedHtlcLock,
-  ProposalDroppedTransaction,
-} from '../types';
+import type { AccountFailedHtlcLock, AccountFailedLendingDisbursement, ProposalDroppedTransaction } from '../types';
 import {
   ACCOUNT_TX_FAILURE_DISPOSITIONS,
   type AccountTxFailureDisposition,
@@ -40,6 +37,7 @@ const accountLog = createStructuredLogger('account');
 export type ProposalTransactionEffects = {
   events: string[];
   failedHtlcLocks: AccountFailedHtlcLock[];
+  failedLendingDisbursements: AccountFailedLendingDisbursement[];
   /** Commit-time effects of the validated txs, kept for the prepared ACK commit. */
   candidateEffects: AccountOutput[];
   timedOutHashlocks: string[];
@@ -73,6 +71,7 @@ type AppliedProposalTx = {
 const createTransactionEffects = (): ProposalTransactionEffects => ({
   events: [],
   failedHtlcLocks: [],
+  failedLendingDisbursements: [],
   candidateEffects: [],
   timedOutHashlocks: [],
 });
@@ -85,6 +84,10 @@ const createTransactionEffects = (): ProposalTransactionEffects => ({
  * A failed tx still discards the whole overlay and retries per-tx.
  */
 const OPTIMISTIC_ACCOUNT_TX_TYPES = new Set<AccountTx['type']>([
+  // Delta insertion has only draft-local effects. Replaying the same row is
+  // idempotent; a rejected row still discards this draft and uses per-tx rejects.
+  // A full valid window must not clone its entire mempool once per insertion.
+  'add_delta',
   'swap_resolve',
   'cross_pull_lock',
   'swap_offer',
@@ -245,6 +248,7 @@ const classifyFailedTransaction = (
     txType: tx.type,
     rejection: result.rejection,
   });
+  if (tx.type === 'lending_disburse') effects.failedLendingDisbursements.push(tx.data);
   if (tx.type === 'htlc_lock') {
     effects.failedHtlcLocks.push({
       hashlock: tx.data.hashlock,

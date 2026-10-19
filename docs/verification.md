@@ -1,7 +1,9 @@
 # Host-independent verification
 
 Run `bun run verify` on a clean, committed `main`. It runs the existing
-`bun run check` with a 60-second process budget. It uses the Bun executable
+`bun run check` with a 300-second aggregate release-check budget. A measured
+full check took 186 seconds; ordinary focused checks retain their 60-second
+budget. It uses the Bun executable
 running the verifier and needs the same installed dependencies and tools as
 `check`. It does not call GitHub, require a network connection to a Git host,
 or substitute a different test suite.
@@ -19,10 +21,14 @@ wrappers can run, then escalates to KILL and verifies exit. It never matches
 process names or signals unrelated groups. Cleanup failure rejects the run
 and retains the failure evidence.
 
-Both tracked changes and nonignored untracked files reject verification;
-the verifier reports their counts and records their exact paths. It never
-deletes, stashes, stages or commits files. Commit or preserve unrelated work
-outside the active tree before verification. The commit and cleanliness are
+Both tracked changes and nonignored untracked files reject verification,
+except the independent `brainvault/` product excluded by the canonical XLN
+release scope. The result retains all raw changed paths, including BrainVault;
+rejection counts cover the paths requiring cleanliness. Renames report both
+sides, so moving XLN source into BrainVault still rejects. Unknown paths and
+Git hooks remain checked. The verifier never deletes, stashes, stages or
+commits files; independent BrainVault edits and index entries remain untouched.
+The commit and XLN source cleanliness are
 checked again afterward, so concurrent writes invalidate that run. Stop
 all source writers for release verification. Ignored dependencies, current
 testnet stores and build products are not source-cleanliness evidence.

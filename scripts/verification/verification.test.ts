@@ -46,6 +46,7 @@ const copyGate = (root: string): void => {
   for (const path of [
     ...['git', 'install', 'pre-push', 'process', 'verify'].map(name => `scripts/verification/${name}.ts`),
     'core/scripts/e2e/runners/process-group.ts',
+    'tools/release-snapshot/scope.ts',
     '.githooks/pre-push',
   ]) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -65,6 +66,7 @@ describe('host-independent verification', () => {
     expect(result.before.head).toBe(git(root, ['rev-parse', 'HEAD']).trim());
     expect(result.before.tree).toBe(git(root, ['rev-parse', 'HEAD^{tree}']).trim());
     expect(result.command.argv).toEqual([process.execPath, 'run', 'check']);
+    expect(result.command.budgetMs).toBe(300_000);
     expect(result.tools.bun.executable).toBe(process.execPath);
     expect(readFileSync(result.logPath, 'utf8')).toContain('fixture-check-output');
     expect(JSON.parse(readFileSync(result.resultPath, 'utf8')).passed).toBe(true);

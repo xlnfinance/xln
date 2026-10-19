@@ -2,6 +2,36 @@ import { ethers } from 'ethers';
 import { firstUsableContractAddress } from '../machine/contract-address';
 import { RpcTransportUnavailableError, TRANSIENT_RPC_HTTP_STATUSES } from './kernel/failure';
 
+export type RpcBatchCall = {
+  method: string;
+  params: unknown[];
+};
+
+export type RpcBatchSend = (calls: readonly RpcBatchCall[]) => Promise<unknown[]>;
+
+/**
+ * A JSON-RPC proxy caps how many calls one batch may carry
+ * (`MAX_RPC_PROXY_BATCH_CALLS`, core/api/server/rpc/proxy-safety.ts) and
+ * answers 413 above it, which the watcher treats as fatal. A poll reads its
+ * whole block range at once, so send it as several batches instead of letting
+ * the range dictate the batch size. Kept as a local constant because the
+ * adapter must not import the server surface; it only has to stay at or below
+ * it.
+ */
+export const MAX_RPC_BATCH_CALLS = 128;
+
+export const sendBatchInChunks = async (
+  sendBatch: RpcBatchSend,
+  calls: readonly RpcBatchCall[],
+): Promise<unknown[]> => {
+  if (calls.length <= MAX_RPC_BATCH_CALLS) return sendBatch(calls);
+  const results: unknown[] = [];
+  for (let offset = 0; offset < calls.length; offset += MAX_RPC_BATCH_CALLS) {
+    results.push(...(await sendBatch(calls.slice(offset, offset + MAX_RPC_BATCH_CALLS))));
+  }
+  return results;
+};
+
 export type DebugEventEmitter = {
   sendDebugEvent(payload: Record<string, unknown>): void;
 };
@@ -32,12 +62,9 @@ const decodeRpcBatchResponse = (value: unknown): RpcBatchResponse => {
   if (error !== undefined && (!error || typeof error !== 'object' || Array.isArray(error))) {
     throw new Error('RPC_BATCH_ITEM_ERROR_INVALID');
   }
-  const errorRecord = error && typeof error === 'object' && !Array.isArray(error)
-    ? error as Record<string, unknown>
-    : undefined;
-  const errorMessage = typeof errorRecord?.['message'] === 'string'
-    ? errorRecord['message']
-    : undefined;
+  const errorRecord =
+    error && typeof error === 'object' && !Array.isArray(error) ? (error as Record<string, unknown>) : undefined;
+  const errorMessage = typeof errorRecord?.['message'] === 'string' ? errorRecord['message'] : undefined;
   return {
     ...(id === undefined ? {} : { id: Number(id) }),
     ...(Object.hasOwn(item, 'result') ? { result: item['result'] } : {}),
@@ -53,8 +80,7 @@ export const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter 
   'sendDebugEvent' in value &&
   typeof value.sendDebugEvent === 'function';
 
-export const firstAddress = (...values: Array<unknown>): string =>
-  firstUsableContractAddress(...values) ?? '';
+export const firstAddress = (...values: Array<unknown>): string => firstUsableContractAddress(...values) ?? '';
 
 export const sendRpcBatch = async (
   rpcUrl: string,
@@ -63,9 +89,7 @@ export const sendRpcBatch = async (
 ): Promise<Map<number, RpcBatchResponse>> => {
   if (batch.length === 0) return new Map();
   const controller = new AbortController();
-  const timeoutHandle = timeoutMs > 0
-    ? setTimeout(() => controller.abort(), timeoutMs)
-    : null;
+  const timeoutHandle = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
   const transportFailure = (error: unknown): RpcTransportUnavailableError =>
     new RpcTransportUnavailableError(
       (error as Error)?.name === 'AbortError' ? `RPC_BATCH_TIMEOUT:${timeoutMs}` : 'RPC_BATCH_UNREACHABLE',
@@ -113,10 +137,7 @@ export const sendRpcBatch = async (
   return byId;
 };
 
-export const linkArtifactBytecode = (
-  bytecode: string,
-  libraries: Record<string, string>,
-): string => {
+export const linkArtifactBytecode = (bytecode: string, libraries: Record<string, string>): string => {
   let linked = bytecode.startsWith('0x') ? bytecode.slice(2) : bytecode;
 
   for (const [libraryName, address] of Object.entries(libraries)) {

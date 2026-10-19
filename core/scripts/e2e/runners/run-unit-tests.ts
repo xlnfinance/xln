@@ -5,18 +5,10 @@ import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import {
-  cleanupTestArtifactsBeforeRun,
-  TEST_ARTIFACT_CLEANUP_DONE_ENV,
-} from '../harness/test-artifact-cleanup';
+import { cleanupTestArtifactsBeforeRun, TEST_ARTIFACT_CLEANUP_DONE_ENV } from '../harness/test-artifact-cleanup';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
 
-const DEFAULT_UNIT_TEST_TARGETS = [
-  'core/__tests__',
-  'tests/unit',
-  'tests/frontend',
-  'native/__tests__',
-];
+const DEFAULT_UNIT_TEST_TARGETS = ['core/__tests__', 'tests/unit', 'tests/frontend', 'native/__tests__'];
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const REQUIRED_CONTRACT_ARTIFACTS = [
@@ -38,17 +30,19 @@ const SUBPROCESS_STDIO_TEST_FILES = [
   'print-dev-links.test.ts',
 ];
 
-const STRESS_TEST_FILES = [
-  'storage-hub-10k-checkpoint-rollover.test.ts',
-];
+const STRESS_TEST_FILES = ['storage-hub-10k-checkpoint-rollover.test.ts'];
+
+// These pools deliberately live until process exit. As in the owning Rust
+// parity runner, isolate them so later financial/recovery tests retain their
+// normal timeout budgets instead of competing with resident test workers.
+const WORKER_TEST_DIRECTORY = 'core/__tests__/rscore/ts-worker';
 
 const CLEANUP_ONLY_FLAGS = new Set(['--keep-test-artifacts', '--no-cleanup']);
 
 const rawArgs = process.argv.slice(2);
 const passthrough = rawArgs.filter(arg => !CLEANUP_ONLY_FLAGS.has(arg));
-const looksLikeExplicitTarget = (arg: string): boolean => (
-  !arg.startsWith('-') && (existsSync(arg) || arg.includes('*') || /\.(test|spec)\.[cm]?[tj]sx?$/.test(arg))
-);
+const looksLikeExplicitTarget = (arg: string): boolean =>
+  !arg.startsWith('-') && (existsSync(arg) || arg.includes('*') || /\.(test|spec)\.[cm]?[tj]sx?$/.test(arg));
 const explicitTargets = passthrough.some(looksLikeExplicitTarget);
 if (!explicitTargets) {
   for (const file of SUBPROCESS_STDIO_TEST_FILES) {
@@ -66,6 +60,7 @@ const rootTestArgs = [
         ...passthrough,
         ...SUBPROCESS_STDIO_TEST_FILES.map(file => `--path-ignore-patterns=**/${file}`),
         ...STRESS_TEST_FILES.map(file => `--path-ignore-patterns=**/${file}`),
+        `--path-ignore-patterns=**/rscore/ts-worker/**`,
       ]),
 ];
 
@@ -84,7 +79,7 @@ const runCommand = async (command: string, args: string[], cwd: string): Promise
     }),
     stdio: 'inherit',
   });
-  return await new Promise<number>((resolveExit) => {
+  return await new Promise<number>(resolveExit => {
     child.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
       resolveExit(typeof code === 'number' ? code : signal ? 1 : 0);
     });
@@ -92,22 +87,35 @@ const runCommand = async (command: string, args: string[], cwd: string): Promise
 };
 
 const ensureContractArtifacts = async (): Promise<void> => {
-  const missing = REQUIRED_CONTRACT_ARTIFACTS.filter((path) => !existsSync(resolve(ROOT, path)));
+  const missing = REQUIRED_CONTRACT_ARTIFACTS.filter(path => !existsSync(resolve(ROOT, path)));
   if (missing.length === 0) return;
   console.log(`[unit-tests] compiling missing contract artifacts: ${missing.join(', ')}`);
   const exitCode = await runCommand('bash', ['scripts/sync-contract-artifacts.sh'], ROOT);
   if (exitCode !== 0) throw new Error(`UNIT_CONTRACT_ARTIFACT_COMPILE_FAILED:${exitCode}`);
-  const stillMissing = REQUIRED_CONTRACT_ARTIFACTS.filter((path) => !existsSync(resolve(ROOT, path)));
+  const stillMissing = REQUIRED_CONTRACT_ARTIFACTS.filter(path => !existsSync(resolve(ROOT, path)));
   if (stillMissing.length > 0) {
     throw new Error(`UNIT_CONTRACT_ARTIFACT_MISSING_AFTER_COMPILE:${stillMissing.join(',')}`);
   }
 };
 
-const runTests = async (args: string[], cwd: string): Promise<number> => (
-  await runCommand('bun', args, cwd)
-);
+const runTests = async (args: string[], cwd: string): Promise<number> => await runCommand('bun', args, cwd);
 
 await ensureContractArtifacts();
+
+if (!explicitTargets) {
+  // The full unit roots include native IPC and offline-import contracts. Build
+  // their actual binary from this candidate instead of skipping an absent one
+  // or accidentally testing a binary left by a different source revision.
+  const rustExitCode = await runCommand(
+    'cargo',
+    ['build', '--release', '--manifest-path', 'rscore/Cargo.toml', '--workspace'],
+    ROOT,
+  );
+  if (rustExitCode !== 0) process.exit(rustExitCode);
+  process.env['XLN_RSCORE_REQUIRE_BINARY'] = '1';
+  const workerExitCode = await runTests(['test', WORKER_TEST_DIRECTORY, ...passthrough], ROOT);
+  if (workerExitCode !== 0) process.exit(workerExitCode);
+}
 
 const rootExitCode = await runTests(rootTestArgs, ROOT);
 if (rootExitCode !== 0 || explicitTargets) process.exit(rootExitCode);

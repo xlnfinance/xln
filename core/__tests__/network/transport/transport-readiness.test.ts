@@ -170,7 +170,7 @@ describe('authenticated direct delivery readiness', () => {
       expect(env.gossip.getProfile(owner.entityId)).toBeUndefined();
       h.route.setReady(true);
       p2p.setReady(true);
-      expect(await p2p.bootstrapDirectEntityRoutes([hub.entityId], 2000)).toBe(true);
+      expect(await p2p.bootstrapEntityRoutes([hub.entityId], 2000)).toBe(true);
       await waitFor(() => env.gossip.getProfile(owner.entityId) !== undefined);
       const accepted = env.gossip.getProfile(owner.entityId)!;
       expect(accepted.name).toBe(owner.name);

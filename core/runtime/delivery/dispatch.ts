@@ -30,7 +30,6 @@ import {
 } from './pending';
 import { planEntityOutputs } from './plan';
 import { canDeliverCommittedOutput } from './readiness';
-import { recordRuntimeSecurityIncident } from '../observability/security-incidents';
 import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-output';
 import { MAX_P2P_ENTITY_INPUTS } from '../../network/p2p/auth/entity-input-envelope';
 import { traceAccountDeliveryHop } from '../../support/performance/account-delivery-trace';
@@ -253,44 +252,64 @@ const buildOutputEnvelopeGroups = (
   return [...byTarget.values()]
     .flatMap(group => {
       const units = groupAtomicCrossJAdmissionOutputs(group.outputs);
-      const atomicUnits = units.filter(unit => unit.atomic).map(unit => ({ ...unit, sources: unit.outputs }));
-      const ordinary = units.filter(unit => !unit.atomic).flatMap(unit => unit.outputs);
-      const ordinaryUnits = batchOrdinaryOutputsBySourceFrame(ordinary, graph)
-        .map(batch => ({ ...batch, atomic: false, complete: true }));
-      return [...atomicUnits, ...ordinaryUnits]
+      const runs: typeof units = [];
+      for (const unit of units) {
+        const previous = runs.at(-1);
+        // Batch only adjacent ordinary units. Moving a pair ahead of an earlier
+        // ACK changes committed delivery order; an incomplete pair must also
+        // keep blocking later outputs for this recipient.
+        if (!unit.atomic && previous && !previous.atomic) previous.outputs.push(...unit.outputs);
+        else runs.push(unit);
+      }
+      return runs
+        .flatMap(unit =>
+          unit.atomic
+            ? [{ ...unit, sources: unit.outputs }]
+            : batchOrdinaryOutputsBySourceFrame(unit.outputs, graph).map(batch => ({
+                ...batch,
+                atomic: false,
+                complete: true,
+              })),
+        )
         .map(unit => ({ targetRuntimeId: group.targetRuntimeId, ...unit }));
     });
 };
 
-/**
- * An unpaired cross-j Account leg must never be sent alone. It is a producer
- * invariant violation, not a transient transport condition: halt before any
- * member of the financial unit can escape.
+/** Reuse dispatch's exact cohort and destination order for the loop wake.
+ * A ready socket cannot make a missing sibling dispatchable. New committed
+ * inputs or a recipient readiness edge will wake the writer when work changes.
  */
-const failIncompleteCrossJCohort = (
-  env: RuntimeReplica,
-  group: OutputEnvelopeGroup,
-  plannedOutputs: PlannedRemoteOutput[],
-): never => {
-  const detail = {
+export const hasDeliverableCommittedOutputs = (env: RuntimeReplica): boolean => {
+  const state = env.infrastructure;
+  if (!state) return false;
+  const outputs = (env.pendingNetworkOutputs ?? []).map(output => {
+    if (!output.runtimeId) throw new Error('RUNTIME_NETWORK_OUTBOX_TARGET_MISSING');
+    return { output: validateDeliverableEntityInput(output), targetRuntimeId: output.runtimeId };
+  });
+  const blockedTargets = new Set<string>();
+  for (const group of buildOutputEnvelopeGroups(outputs, createPreparedOutputGraph())) {
+    if (blockedTargets.has(group.targetRuntimeId)) continue;
+    if (!group.complete) {
+      blockedTargets.add(group.targetRuntimeId);
+      continue;
+    }
+    if (canDeliverCommittedOutput(state, group.targetRuntimeId)) return true;
+  }
+  return false;
+};
+
+/** A peer-ready recovery marker can re-emit one already-signed Account leg
+ * after its original pair was sent. Sibling Entity work may also commit on
+ * adjacent Runtime frames. Keep exact bytes in the existing outbox until the
+ * pair is complete (or committed Account progress retires the retry). Sending
+ * one leg is forbidden; an incomplete retry is not a consensus contradiction.
+ */
+const reportIncompleteCrossJCohort = (group: OutputEnvelopeGroup): void => {
+  routeLog.warn('crossj.cohort_retained', {
     targetRuntimeId: group.targetRuntimeId,
     outputs: summarizeAccountEnvelopeOutputs(group.outputs),
     atomicPairs: group.outputs.map(output => output.atomicCrossJurisdictionPair ?? null),
-    plannedOutputs: plannedOutputs.map(({ output, targetRuntimeId }) => ({
-      targetRuntimeId,
-      ...summarizeAccountEnvelopeOutputs([output])[0],
-    })),
-  };
-  recordRuntimeSecurityIncident(env, {
-    domain: 'cross-j',
-    code: 'CROSS_J_INCOMPLETE_COHORT_DROPPED',
-    source: 'local-consensus',
-    severity: 'critical',
-    summary: 'Incomplete cross-j Account cohort reached transport dispatch',
-    entityId: '',
   });
-  env.error?.('network', 'CROSS_J_INCOMPLETE_COHORT_DROPPED', detail);
-  throw new Error(`CROSS_J_INCOMPLETE_COHORT_DROPPED:${group.targetRuntimeId}`);
 };
 
 const dispatchDirectOutputEnvelope = (
@@ -457,7 +476,9 @@ export const dispatchEntityOutputs = (
   try {
     for (const group of groups) {
       if (!group.complete) {
-        failIncompleteCrossJCohort(env, group, outputs);
+        reportIncompleteCrossJCohort(group);
+        retainedTargets.add(group.targetRuntimeId);
+        continue;
       }
       if (retainedTargets.has(group.targetRuntimeId)) continue;
       const sendable = group.outputs;

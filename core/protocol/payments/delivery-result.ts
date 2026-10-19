@@ -70,6 +70,7 @@ export const isDeliveryRecipientNotReady = (delivery: DeliveryResult): boolean =
   (delivery.code === 'ROUTE_DIRECT_SESSION_NOT_READY' ||
     delivery.code === 'ROUTE_DIRECT_RECIPIENT_NOT_READY' ||
     delivery.code === 'P2P_DIRECT_RECIPIENT_NOT_READY' ||
+    delivery.code === 'P2P_RELAY_RECIPIENT_NOT_READY' ||
     delivery.code === 'P2P_DIRECT_SOURCE_PROFILE_NOT_READY');
 
 /**

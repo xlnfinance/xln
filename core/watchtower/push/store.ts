@@ -173,13 +173,7 @@ const getStoredValue = async (
   context: PushStoreContext,
   key: string,
 ): Promise<string | null> => {
-  try {
-    return await context.db.get(key);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/LEVEL_NOT_FOUND|NotFound/i.test(message)) return null;
-    throw error;
-  }
+  return (await context.db.get(key)) ?? null;
 };
 
 const readRegistrationCounts = async (context: PushStoreContext): Promise<RegistrationCounts> => {

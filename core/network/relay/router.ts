@@ -36,6 +36,7 @@ import {
 } from '../../jurisdiction/gossip/announcement';
 import { decodeGossipProfileBatchRequest } from '../p2p/gossip/profile-batch';
 import { countOp } from '../../support/performance/op-counters';
+import { classifyWebSocketSendResult } from '../websocket-send-result';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');
@@ -186,12 +187,10 @@ const consumeGossipBudget = (ws: RelaySocketLike, profileCount: number, now = Da
 // ---------------------------------------------------------------------------
 
 /**
- * A relay is a directory/control plane: hello, gossip, live recovery reads and
- * their correlated relay-originated errors. Financial `entity_inputs` travel
- * only over an authenticated direct session (core/network/p2p/p2p.ts
- * enqueueEntityInputsDelivery); a relay never forwards them and never
- * forwards a peer `error` frame, so a relay registration alone can never
- * inject a negative delivery signal into another Runtime.
+ * The relay forwards sealed user-to-user envelopes between authenticated
+ * Runtime sessions. The recipient verifies the source signature and target
+ * binding; the relay cannot decrypt or commit financial work. Peer control
+ * and error frames are never forwarded as relay-authored responses.
  */
 export type RelayRouterConfig = {
   store: RelayStore;
@@ -614,9 +613,7 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
     });
     return true;
   }
-  const code = type === 'entity_inputs'
-    ? 'RELAY_ENTITY_INPUTS_FORBIDDEN'
-    : PEER_ONLY_MESSAGE_TYPES.has(type) ? 'RELAY_PEER_FRAME_NOT_ROUTABLE' : null;
+  const code = PEER_ONLY_MESSAGE_TYPES.has(type) ? 'RELAY_PEER_FRAME_NOT_ROUTABLE' : null;
   if (code) {
     pushDebugEvent(config.store, {
       event: 'error',
@@ -636,6 +633,34 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
     return true;
   }
   return false;
+};
+
+const forwardEntityInputs = (context: RelayRouteContext): boolean => {
+  if (context.type !== 'entity_inputs') return false;
+  const { config, ws, msg, toKey, from, to, id } = context;
+  const target = config.store.clients.get(toKey);
+  const error = typeof to !== 'string' || !isCanonicalRuntimeId(to) || !msg.encrypted || !(msg.payload instanceof Uint8Array)
+    ? 'RELAY_ENTITY_INPUTS_INVALID'
+    : !target || target.ws.readyState !== 1 || getRememberedSocketRuntimeId(target.ws) !== toKey
+      ? 'RELAY_RECIPIENT_UNAVAILABLE'
+      : null;
+  if (error) {
+    config.send(ws, serializeWsMessage({ type: 'error', error, ...(id ? { inReplyTo: id } : {}), ...(to ? { to } : {}) }));
+    return true;
+  }
+  if (!target) throw new Error('RELAY_AUTHENTICATED_TARGET_MISSING');
+  // Preserve the exact authenticated ciphertext. A queued Bun write (-1) is
+  // accepted once; it must not trigger retransmission through another route.
+  const outcome = classifyWebSocketSendResult(config.send(target.ws, resolveRelayWireBytes(context)));
+  pushDebugEvent(config.store, {
+    event: 'delivery', from, to, msgType: 'entity_inputs',
+    status: outcome === 'dropped' ? 'send-failed' : 'delivered',
+  });
+  if (outcome === 'dropped') {
+    config.send(ws, serializeWsMessage({ type: 'error', error: 'RELAY_RECIPIENT_SEND_FAILED',
+      ...(id ? { inReplyTo: id } : {}), ...(to ? { to } : {}) }));
+  }
+  return true;
 };
 
 const prepareRelaySession = (context: RelayRouteContext): boolean => {
@@ -776,6 +801,8 @@ export const relayRoute = async (
   if (handleHello(context)) return;
 
   if (await handleGossipAnnounce(context)) return;
+
+  if (forwardEntityInputs(context)) return;
 
   if (handleSimpleRelayMessage(context)) return;
 

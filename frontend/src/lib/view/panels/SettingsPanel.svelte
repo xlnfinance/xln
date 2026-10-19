@@ -121,7 +121,6 @@
   let layoutError = '';
   let layoutSuccess = '';
   let settingsStorageError = '';
-  let entityOpenMode: 'replace' | 'new-tab' = 'replace';
   let networkMachineJson = '';
   let networkMachineStatus = '';
   let networkMachineError = '';
@@ -140,7 +139,6 @@
         settings = { ...DEFAULT_SETTINGS, ...storedSettings };
       }
       settingsStorageError = '';
-      entityOpenMode = localStorage.getItem('xln-dock-entity-open-mode') === 'new-tab' ? 'new-tab' : 'replace';
 
       // WebGL is the deterministic default renderer. `navigator.gpu`
       // only proves that the API exists; the browser may still have no usable
@@ -325,11 +323,6 @@
     } catch (err) {
       layoutError = `Load failed: ${err}`;
     }
-  }
-
-  function updateEntityOpenMode(mode: 'replace' | 'new-tab'): void {
-    entityOpenMode = mode;
-    localStorage.setItem('xln-dock-entity-open-mode', mode);
   }
 
   function focusDockPanel(panelId: string): void {
@@ -894,20 +887,6 @@
     {:else if activeCategory === 'layout'}
       <h4>📐 Workspace Layout Manager</h4>
 
-      <div class="setting-group">
-        <label>
-          Graph entity opening
-          <select
-            value={entityOpenMode}
-            data-testid="dock-entity-open-mode"
-            on:change={(event) => updateEntityOpenMode(event.currentTarget.value as 'replace' | 'new-tab')}
-          >
-            <option value="replace">Replace pinned Main Wallet</option>
-            <option value="new-tab">Open a new entity tab</option>
-          </select>
-        </label>
-        <small>Main Wallet stays pinned and is the reference entity for Dock tools.</small>
-      </div>
       <p style="font-size: 12px; color: #888; margin-bottom: 16px;">
         Export/import complete workspace configuration: panel sizes, tab order, camera position, and all settings.
       </p>

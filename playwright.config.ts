@@ -1,9 +1,4 @@
-import {
-  defineConfig,
-  devices,
-  type ScreenshotMode,
-  type TraceMode,
-} from '@playwright/test';
+import { defineConfig, devices, type ScreenshotMode, type TraceMode } from '@playwright/test';
 import { existsSync } from 'node:fs';
 
 delete process.env['NO_COLOR'];
@@ -15,10 +10,10 @@ const devHttpsCertificatePairs = [
 ] as const;
 const defaultPwBaseUrl = devHttpsCertificatePairs.some(
   ([keyPath, certPath]) => existsSync(keyPath) && existsSync(certPath),
-) ? 'https://localhost:8080' : 'http://localhost:8080';
-const PW_BASE_URL = process.env['PW_BASE_URL'] || (
-  defaultPwBaseUrl
-);
+)
+  ? 'https://localhost:8080'
+  : 'http://localhost:8080';
+const PW_BASE_URL = process.env['PW_BASE_URL'] || defaultPwBaseUrl;
 const PW_WORKERS_RAW = Number(process.env['PW_WORKERS'] || '1');
 const PW_WORKERS = Number.isFinite(PW_WORKERS_RAW) && PW_WORKERS_RAW > 0 ? Math.floor(PW_WORKERS_RAW) : 1;
 const PW_SKIP_WEBSERVER = process.env['PW_SKIP_WEBSERVER'] === '1';
@@ -28,21 +23,21 @@ const PW_SIMPLE_REPORTER = process.env['PW_SIMPLE_REPORTER'] === '1';
 const PW_OUTPUT_DIR = process.env['PW_OUTPUT_DIR'] || './tests/test-results';
 const PW_FAST = process.env['PW_FAST'] === '1';
 const TRACE_MODES: readonly TraceMode[] = [
-  'off', 'on', 'retain-on-failure', 'on-first-retry', 'on-all-retries',
-  'retain-on-first-failure', 'retain-on-failure-and-retries',
+  'off',
+  'on',
+  'retain-on-failure',
+  'on-first-retry',
+  'on-all-retries',
+  'retain-on-first-failure',
+  'retain-on-failure-and-retries',
 ];
-const SCREENSHOT_MODES: readonly ScreenshotMode[] = [
-  'off', 'on', 'only-on-failure', 'on-first-failure',
-];
+const SCREENSHOT_MODES: readonly ScreenshotMode[] = ['off', 'on', 'only-on-failure', 'on-first-failure'];
 const VIDEO_MODES = ['off', 'on', 'retain-on-failure', 'on-first-retry'] as const;
-type VideoMode = typeof VIDEO_MODES[number];
+type VideoMode = (typeof VIDEO_MODES)[number];
 
-const isTraceMode = (value: string): value is TraceMode =>
-  TRACE_MODES.some(mode => mode === value);
-const isScreenshotMode = (value: string): value is ScreenshotMode =>
-  SCREENSHOT_MODES.some(mode => mode === value);
-const isVideoMode = (value: string): value is VideoMode =>
-  VIDEO_MODES.some(mode => mode === value);
+const isTraceMode = (value: string): value is TraceMode => TRACE_MODES.some(mode => mode === value);
+const isScreenshotMode = (value: string): value is ScreenshotMode => SCREENSHOT_MODES.some(mode => mode === value);
+const isVideoMode = (value: string): value is VideoMode => VIDEO_MODES.some(mode => mode === value);
 
 const traceMode = process.env['PW_TRACE'] ?? (PW_FAST ? 'off' : 'on-first-retry');
 if (!isTraceMode(traceMode)) throw new Error(`PLAYWRIGHT_MODE_INVALID:PW_TRACE:${traceMode}`);
@@ -58,9 +53,8 @@ const PW_SCREENSHOT = screenshotMode;
 const PW_VIDEO = videoMode;
 const PW_REPORTER = process.env['PW_REPORTER'];
 const PW_TEST_TIMEOUT_RAW = Number(process.env['PW_TEST_TIMEOUT'] || '60000');
-const PW_TEST_TIMEOUT = Number.isFinite(PW_TEST_TIMEOUT_RAW) && PW_TEST_TIMEOUT_RAW > 0
-  ? Math.floor(PW_TEST_TIMEOUT_RAW)
-  : 60000;
+const PW_TEST_TIMEOUT =
+  Number.isFinite(PW_TEST_TIMEOUT_RAW) && PW_TEST_TIMEOUT_RAW > 0 ? Math.floor(PW_TEST_TIMEOUT_RAW) : 60000;
 const PW_VIEWPORT_WIDTH = Number(process.env['PW_VIEWPORT_WIDTH'] || '1280');
 const PW_VIEWPORT_HEIGHT = Number(process.env['PW_VIEWPORT_HEIGHT'] || '720');
 const PW_VIEWPORT = {
@@ -88,17 +82,18 @@ const brainvaultProject = {
   use: { ...devices['Desktop Chrome'], viewport: PW_VIEWPORT, deviceScaleFactor: 1 },
 };
 
-const projects = PW_PROFILE === 'webkit-mobile'
-  ? [webkitMobileProject]
-  : PW_PROFILE === 'cross-mobile'
-    ? [desktopChromiumProject, webkitMobileProject]
-    : PW_PROFILE === 'brainvault'
-      ? [brainvaultProject]
-      : PW_PROFILE === 'cross-desktop'
-        ? [desktopChromiumProject, brainvaultProject]
-    : PW_ONLY_CHROMIUM
-      ? [desktopChromiumProject]
-      : [desktopChromiumProject];
+const projects =
+  PW_PROFILE === 'webkit-mobile'
+    ? [webkitMobileProject]
+    : PW_PROFILE === 'cross-mobile'
+      ? [desktopChromiumProject, webkitMobileProject]
+      : PW_PROFILE === 'brainvault'
+        ? [brainvaultProject]
+        : PW_PROFILE === 'cross-desktop'
+          ? [desktopChromiumProject, brainvaultProject]
+          : PW_ONLY_CHROMIUM
+            ? [desktopChromiumProject]
+            : [desktopChromiumProject];
 
 export default defineConfig({
   // testDir is relative to this config file's directory
@@ -107,12 +102,7 @@ export default defineConfig({
     ? [[PW_REPORTER]]
     : PW_SIMPLE_REPORTER
       ? [['line']]
-      : [
-          ['list'],
-          ['github'],
-          ['html', { open: 'never' }],
-          ['json'],
-        ],
+      : [['list'], ['github'], ['html', { open: 'never' }], ['json']],
   testDir: './tests',
   testIgnore: ['**/ux-flow-verification.spec.js'],
   timeout: PW_TEST_TIMEOUT,
@@ -127,28 +117,25 @@ export default defineConfig({
     screenshot: PW_SCREENSHOT,
     viewport: PW_VIEWPORT,
     deviceScaleFactor: 1,
-    video: PW_VIDEO === 'off'
-      ? 'off'
-      : { mode: PW_VIDEO, size: PW_VIEWPORT },
+    video: PW_VIDEO === 'off' ? 'off' : { mode: PW_VIDEO, size: PW_VIEWPORT },
     launchOptions: {
-      args: [
-        '--disable-gpu',
-        '--use-gl=swiftshader',
-        '--disable-dev-shm-usage',
-      ],
+      args: ['--disable-gpu', '--use-gl=swiftshader', '--disable-dev-shm-usage'],
     },
   },
   projects,
 
   // Run dev server before tests
-  ...(PW_SKIP_WEBSERVER ? {} : {
-    webServer: {
-      // Prebuild runtime once (fresh artifact), then run dev pipeline with runtime --watch.
-      command: './scripts/build-runtime.sh && XLN_MESH_DEFER_INITIAL_RESET=1 SKIP_TYPECHECK=1 bun run dev',
-      url: PW_BASE_URL,
-      ignoreHTTPSErrors: true,  // Self-signed cert
-      reuseExistingServer: true,
-      timeout: 120 * 1000,
-    },
-  }),
+  ...(PW_SKIP_WEBSERVER
+    ? {}
+    : {
+        webServer: {
+          // Prebuild runtime once (fresh artifact), then run dev pipeline with runtime --watch.
+          command: './scripts/build-runtime.sh && SKIP_TYPECHECK=1 exec bun scripts/dev/run-dev.ts',
+          url: PW_BASE_URL,
+          ignoreHTTPSErrors: true, // Self-signed cert
+          reuseExistingServer: true,
+          gracefulShutdown: { signal: 'SIGTERM', timeout: 90_000 },
+          timeout: 120 * 1000,
+        },
+      }),
 });

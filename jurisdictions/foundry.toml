@@ -4,13 +4,13 @@ out = "forge-out"
 libs = ["lib"]
 test = "test/foundry"
 cache_path = "forge-cache"
-solc_version = "0.8.36"
+solc_version = "0.8.37"
 optimizer = true
 optimizer_runs = 1
 via_ir = true
 # Keep invariant-test gas headroom independent of public-network block limits.
 # Production bytecode size is checked separately against EIP-170.
-# Match hardhat.config.ts's solc 0.8.36 production target and metadata policy;
+# Match hardhat.config.ts's solc 0.8.37 production target and metadata policy;
 # exit-gas evidence must execute the same bytecode, not another compiler profile.
 evm_version = "osaka"
 bytecode_hash = "none"

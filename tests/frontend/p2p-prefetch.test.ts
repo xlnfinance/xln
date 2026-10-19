@@ -120,7 +120,7 @@ test('waitForCounterpartyRuntimeRoutes waits for the direct handshake before adm
     infrastructure: {
       p2p: {
         ensureProfiles: async () => true,
-        bootstrapDirectEntityRoutes: async (entityIds: string[]) => {
+        bootstrapEntityRoutes: async (entityIds: string[]) => {
           directCalls += 1;
           expect(entityIds).toEqual(['0xabc']);
           return true;
@@ -142,7 +142,7 @@ test('waitForCounterpartyRuntimeRoutes rejects a profile whose direct handshake 
     infrastructure: {
       p2p: {
         ensureProfiles: async () => true,
-        bootstrapDirectEntityRoutes: async () => false,
+        bootstrapEntityRoutes: async () => false,
       },
     },
   };
@@ -225,7 +225,7 @@ test('openAccount waits for delivery readiness after the direct handshake', asyn
     gossip: { getProfiles: () => [{ entityId: COUNTERPARTY, runtimeId: 'peer', metadata: { jurisdiction: TRON_JURISDICTION } }] },
     infrastructure: { p2p: {
       ensureProfiles: async () => true,
-      bootstrapDirectEntityRoutes: async () => true,
+      bootstrapEntityRoutes: async () => true,
       canDeliver: () => ready,
     } },
   });

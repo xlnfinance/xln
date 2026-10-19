@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { isXlnReleasePath } from '../../tools/release-snapshot/scope';
 
 export const git = (cwd: string, args: readonly string[]): string => {
   const child = Bun.spawnSync(['git', ...args], { cwd, timeout: 5_000, stdout: 'pipe', stderr: 'pipe' });
@@ -19,8 +20,8 @@ export const sourceState = (root: string) => ({
   branch: git(root, ['rev-parse', '--abbrev-ref', 'HEAD']).trim(),
   tracked: [
     ...new Set([
-      ...paths(git(root, ['diff', '--name-only', '-z', '--ignore-submodules=none'])),
-      ...paths(git(root, ['diff', '--cached', '--name-only', '-z', '--ignore-submodules=none'])),
+      ...paths(git(root, ['diff', '--no-renames', '--name-only', '-z', '--ignore-submodules=none'])),
+      ...paths(git(root, ['diff', '--cached', '--no-renames', '--name-only', '-z', '--ignore-submodules=none'])),
     ]),
   ].sort(),
   untracked: paths(git(root, ['ls-files', '--others', '--exclude-standard', '-z'])).sort(),
@@ -32,11 +33,17 @@ export const sourceState = (root: string) => ({
 
 export type SourceState = ReturnType<typeof sourceState>;
 
+// Only the explicitly independent BrainVault tree is outside this gate. Unknown
+// paths still reject; --no-renames preserves both sides of moves across the boundary.
+const requiresCleanSource = (path: string): boolean => !path.startsWith('brainvault/') || isXlnReleasePath(path);
+
 export const sourceProblem = (state: SourceState): string | null => {
   if (state.branch !== 'main') return `VERIFY_REQUIRES_MAIN:branch=${state.branch}`;
   if (state.hiddenTracked.length) return `VERIFY_HIDDEN_INDEX_PATHS:count=${state.hiddenTracked.length}`;
-  if (state.tracked.length || state.untracked.length) {
-    return `VERIFY_DIRTY_SOURCE:tracked=${state.tracked.length}:untracked=${state.untracked.length}`;
+  const tracked = state.tracked.filter(requiresCleanSource);
+  const untracked = state.untracked.filter(requiresCleanSource);
+  if (tracked.length || untracked.length) {
+    return `VERIFY_DIRTY_SOURCE:tracked=${tracked.length}:untracked=${untracked.length}`;
   }
   return null;
 };

@@ -926,7 +926,7 @@ const run = async () => {
   logProfile(`${role} sees hub`, hubProfile);
   console.log('P2P_HUB_PROFILE_READY');
 
-  if (!(await p2p.bootstrapDirectEntityRoutes([hubProfile.entityId], 10_000))) {
+  if (!(await p2p.bootstrapEntityRoutes([hubProfile.entityId], 10_000))) {
     throw new Error(`P2P_HUB_DIRECT_ROUTE_NOT_READY:${hubProfile.entityId}`);
   }
 

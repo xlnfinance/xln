@@ -844,9 +844,9 @@ export class RuntimeWsClient {
     }
     if (msg.type === 'error' && typeof msg.inReplyTo === 'string') {
       const reason = typeof msg.error === 'string' ? msg.error : String(msg.error ?? 'unknown');
-      if (!this.isDirectPeerSession()) {
-        // A relay carries directory/control traffic only; its correlated
-        // errors concern gossip or recovery requests, never a committed output.
+      if (!this.isDirectPeerSession() && !this.outstandingEntityInputIds.has(msg.inReplyTo)) {
+        // Only this relay's own correlated rejection of an output we sent is
+        // a financial transport error. Peer error frames are not forwarded.
         wsLog.warn('relay.error_frame', { url: this.options.url, inReplyTo: msg.inReplyTo, reason });
         return true;
       }
@@ -865,7 +865,7 @@ export class RuntimeWsClient {
       // still owns completion. The owner applies the reject policy once.
       this.sendDebugEvent({
         level: 'error',
-        code: 'P2P_DIRECT_SEND_REJECTED',
+        code: this.isDirectPeerSession() ? 'P2P_DIRECT_SEND_REJECTED' : 'P2P_RELAY_SEND_REJECTED',
         message: reason,
         inReplyTo: msg.inReplyTo,
       });

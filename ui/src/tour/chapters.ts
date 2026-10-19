@@ -29,10 +29,13 @@ export const FEATURE_CHAPTERS: TourStep[] = WALLET_LESSONS.slice(4).map(lesson =
     id: lesson.id,
     title: lesson.title,
     example: lesson.example,
-    instruction: () => lesson.id === 'cross'
-      ? `Choose Across networks. ${lesson.exercise} Use Clear to complete delivery, or Cancel rest for an unmatched remainder.`
-      : lesson.exercise,
-    target: () => destination.target,
+    instruction: ctx =>
+      lesson.id === 'shares' && !ctx.dom.has('shares')
+        ? 'This wallet has no share treasury. Select a registered company you control, or open Create an entity below and review registration. Share issuance is available after registration.'
+        : lesson.id === 'cross'
+          ? `Choose Across networks. ${lesson.exercise} Use Clear to complete delivery, or Cancel rest for an unmatched remainder.`
+          : lesson.exercise,
+    target: ctx => (lesson.id === 'shares' && !ctx.dom.has('shares') ? 'entity-formation' : destination.target),
     route: ctx => (typeof destination.path === 'function' ? destination.path(ctx) : destination.path),
   };
 });

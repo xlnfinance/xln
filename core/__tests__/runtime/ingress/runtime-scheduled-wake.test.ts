@@ -1,11 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readEntityFrameEventMessages } from '../../../entity/frame-events';
 
-import {
-  HUB_REBALANCE_INTERVAL_MS,
-  initCrontab,
-  scheduleHook,
-} from '../../../entity/scheduler';
+import { HUB_REBALANCE_INTERVAL_MS, initCrontab, scheduleHook } from '../../../entity/scheduler';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
 import { buildSignedEntityCommand } from '../../../entity/command';
 import { signedEntityCommandTx } from '../../../entity/command/command-codec';
@@ -35,15 +31,10 @@ import {
   type ScheduledWakeTx,
 } from '../../../entity/scheduler/wake/scheduled-wake-validation';
 import { safeStringify } from '../../../protocol/serialization';
-import {
-  computeCanonicalEntityHash,
-} from '../../../storage/canonical-hash';
+import { computeCanonicalEntityHash } from '../../../storage/canonical-hash';
 import type { EntityReplica, EntityState } from '../../../entity/types';
 import type { RuntimeInput } from '../../../runtime/types';
-import {
-  buildCanonicalRuntimeStateSnapshot,
-  restoreDurableRuntimeSnapshot,
-} from '../../../storage/wal/snapshot';
+import { buildCanonicalRuntimeStateSnapshot, restoreDurableRuntimeSnapshot } from '../../../storage/wal/snapshot';
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
 import { computeProfileHash } from '../../../entity/profile/profile-signing';
 import { makeAccount } from '../../helpers/cross-j';
@@ -65,7 +56,8 @@ const commandJurisdiction = {
 const makeState = (id: string, proposer: string, timestamp: number): EntityState => ({
   entityId: id,
   entityEncryptionPublicKey: deriveEntityEncryptionPublicKey(
-    `0x${Buffer.from(deriveSignerKeySync(id, 'entity-encryption')).toString('hex')}`, id,
+    `0x${Buffer.from(deriveSignerKeySync(id, 'entity-encryption')).toString('hex')}`,
+    id,
   ),
   height: 0,
   timestamp,
@@ -102,10 +94,7 @@ const makeReplica = (state: EntityState, signer: string, isProposer: boolean): E
   isProposer,
 });
 
-const attachLocalEntityKeys = (
-  env: ReturnType<typeof createEmptyEnv>,
-  replica: EntityReplica,
-): EntityReplica => {
+const attachLocalEntityKeys = (env: ReturnType<typeof createEmptyEnv>, replica: EntityReplica): EntityReplica => {
   const keys = provisionTestEntityEncryptionKey(env, replica.entityId);
   replica.state.entityEncryptionPublicKey = keys.publicKey;
   return replica;
@@ -188,7 +177,12 @@ describe('runtime scheduled wake', () => {
     env.infrastructure!.persistenceQuiescing = true;
 
     expect(hasRuntimeWork(env)).toBe(false);
-    expect(await waitForRuntimeWorkDrained(env, 20, 1)).toBe(true);
+    const before = computeCanonicalEntityHash(env.state.eReplicas.get(`${id}:${proposer}`)!).hash;
+    const height = env.state.height;
+    // Use the production quiet period; a 20ms scheduler budget is not a quiescence invariant.
+    expect(await waitForRuntimeWorkDrained(env)).toBe(true);
+    expect(env.state.height).toBe(height);
+    expect(computeCanonicalEntityHash(env.state.eReplicas.get(`${id}:${proposer}`)!).hash).toBe(before);
     expect(state.crontabState?.hooks.has('due-after-runtime-stopped')).toBe(true);
   });
 
@@ -230,10 +224,16 @@ describe('runtime scheduled wake', () => {
       data: {},
     });
     const replica = attachLocalEntityKeys(env, makeReplica(state, proposer, true));
-    replica.mempool.push(signedEntityCommandTx(buildSignedEntityCommand(env, state, proposer, [{
-      type: 'chat',
-      data: { from: proposer, message: 'already waiting' },
-    }])));
+    replica.mempool.push(
+      signedEntityCommandTx(
+        buildSignedEntityCommand(env, state, proposer, [
+          {
+            type: 'chat',
+            data: { from: proposer, message: 'already waiting' },
+          },
+        ]),
+      ),
+    );
     const wake: ScheduledWakeTx = {
       type: 'scheduledWake',
       data: {
@@ -267,21 +267,27 @@ describe('runtime scheduled wake', () => {
     const replica = attachLocalEntityKeys(env, makeReplica(makeState(id, proposer, 1), proposer, true));
     env.state.eReplicas.set(`${id}:${proposer}`, replica);
     const profileHash = computeProfileHash(buildLocalEntityProfile(env, replica.state, 1));
-    replica.hankoWitness = new Map([[profileHash, {
-      hanko: '0x01',
-      type: 'profile',
-      entityHeight: 0,
-      createdAt: 1,
-    }]]);
-    replica.mempool.push(signedEntityCommandTx(buildSignedEntityCommand(
-      env,
-      replica.state,
-      proposer,
-      [{
-        type: 'chat',
-        data: { from: proposer, message: 'left after prior commit' },
-      }],
-    )));
+    replica.hankoWitness = new Map([
+      [
+        profileHash,
+        {
+          hanko: '0x01',
+          type: 'profile',
+          entityHeight: 0,
+          createdAt: 1,
+        },
+      ],
+    ]);
+    replica.mempool.push(
+      signedEntityCommandTx(
+        buildSignedEntityCommand(env, replica.state, proposer, [
+          {
+            type: 'chat',
+            data: { from: proposer, message: 'left after prior commit' },
+          },
+        ]),
+      ),
+    );
     const committedInputs: Array<{ height: number; entityInputs: RuntimeInput['entityInputs'] }> = [];
     registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
       committedInputs.push({ height, entityInputs: structuredClone(runtimeInput.entityInputs) });
@@ -291,17 +297,22 @@ describe('runtime scheduled wake', () => {
     expect(env.state.height).toBe(1);
     expect(env.state.eReplicas.get(`${id}:${proposer}`)?.state.height).toBe(1);
     const committedReplica = env.state.eReplicas.get(`${id}:${proposer}`);
-    expect(committedReplica && readEntityFrameEventMessages(committedReplica.state))
-      .toContain(`${proposer}: left after prior commit`);
+    expect(committedReplica && readEntityFrameEventMessages(committedReplica.state)).toContain(
+      `${proposer}: left after prior commit`,
+    );
     expect(env.state.eReplicas.get(`${id}:${proposer}`)?.mempool).toHaveLength(0);
-    expect(committedInputs).toEqual([{
-      height: 1,
-      entityInputs: [{
-        entityId: id,
-        signerId: proposer,
-        entityTxs: [],
-      }],
-    }]);
+    expect(committedInputs).toEqual([
+      {
+        height: 1,
+        entityInputs: [
+          {
+            entityId: id,
+            signerId: proposer,
+            entityTxs: [],
+          },
+        ],
+      },
+    ]);
   });
 
   test('creates a wake only for the explicit proposer replica', () => {
@@ -331,9 +342,7 @@ describe('runtime scheduled wake', () => {
 
     expect(inputs).toHaveLength(1);
     expect(inputs[0]).toMatchObject({ entityId: id, signerId: proposer });
-    expect(inputs[0]?.entityTxs[0]?.data.jobs).toEqual([
-      { kind: 'hook', id: 'watchdog:due', dueAt: 9_000 },
-    ]);
+    expect(inputs[0]?.entityTxs[0]?.data.jobs).toEqual([{ kind: 'hook', id: 'watchdog:due', dueAt: 9_000 }]);
   });
 
   test('rejects a scheduled wake forged through external ingress', () => {
@@ -346,9 +355,7 @@ describe('runtime scheduled wake', () => {
         jobs: [{ kind: 'hook', id: 'forged', dueAt: 1 }],
       },
     };
-    expect(() => assertScheduledWakeTxAuthorized(tx, false)).toThrow(
-      /SCHEDULED_WAKE_EXTERNAL_INGRESS_REJECTED/,
-    );
+    expect(() => assertScheduledWakeTxAuthorized(tx, false)).toThrow(/SCHEDULED_WAKE_EXTERNAL_INGRESS_REJECTED/);
   });
 
   test('replays the same crontab mutation on proposer and validator state', async () => {
@@ -374,12 +381,20 @@ describe('runtime scheduled wake', () => {
       },
     };
 
-    const proposerResult = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [tx], env.state.timestamp);
-    const validatorResult = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [tx], env.state.timestamp);
-
-    expect(safeStringify(validatorResult.newState)).toBe(
-      safeStringify(proposerResult.newState),
+    const proposerResult = await applyEntityFrameWithMaterializedTestInfraContext(
+      env,
+      state,
+      [tx],
+      env.state.timestamp,
     );
+    const validatorResult = await applyEntityFrameWithMaterializedTestInfraContext(
+      env,
+      state,
+      [tx],
+      env.state.timestamp,
+    );
+
+    expect(safeStringify(validatorResult.newState)).toBe(safeStringify(proposerResult.newState));
     expect(proposerResult.newState.crontabState?.hooks.has('watchdog:deterministic')).toBe(false);
   });
 
@@ -487,13 +502,17 @@ describe('runtime scheduled wake', () => {
       },
     };
 
-    await expect(applyEntityFrameWithMaterializedTestInfraContext(env, state, [
-      { type: 'chatMessage', data: { message: 'before wake', timestamp: 9_000 } },
-      wake,
-    ], env.state.timestamp)).rejects.toThrow('SCHEDULED_WAKE_FRAME_ORDER_INVALID');
-    await expect(applyEntityFrameWithMaterializedTestInfraContext(env, state, [wake, wake], env.state.timestamp)).rejects.toThrow(
-      'SCHEDULED_WAKE_FRAME_ORDER_INVALID',
-    );
+    await expect(
+      applyEntityFrameWithMaterializedTestInfraContext(
+        env,
+        state,
+        [{ type: 'chatMessage', data: { message: 'before wake', timestamp: 9_000 } }, wake],
+        env.state.timestamp,
+      ),
+    ).rejects.toThrow('SCHEDULED_WAKE_FRAME_ORDER_INVALID');
+    await expect(
+      applyEntityFrameWithMaterializedTestInfraContext(env, state, [wake, wake], env.state.timestamp),
+    ).rejects.toThrow('SCHEDULED_WAKE_FRAME_ORDER_INVALID');
   });
 
   test('indexes imported replicas and invalidates detached replicas without rebuilding the loop', () => {
@@ -549,9 +568,7 @@ describe('runtime scheduled wake', () => {
 
     const inputs = createDueScheduledWakeInputs(env, env.state.timestamp);
     expect(inputs).toHaveLength(1);
-    expect(inputs[0]?.entityTxs[0]?.data.jobs).toEqual([
-      { kind: 'hook', id: 'replacement:due', dueAt: 9_000 },
-    ]);
+    expect(inputs[0]?.entityTxs[0]?.data.jobs).toEqual([{ kind: 'hook', id: 'replacement:due', dueAt: 9_000 }]);
   });
 
   test('bounds advisory jobs while draining every due hook from canonical state', async () => {
@@ -574,7 +591,12 @@ describe('runtime scheduled wake', () => {
     const [input] = createDueScheduledWakeInputs(env, env.state.timestamp);
     expect(input?.entityTxs[0]?.data.jobs).toHaveLength(MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS);
 
-    const result = await applyEntityFrameWithMaterializedTestInfraContext(env, state, input!.entityTxs, env.state.timestamp);
+    const result = await applyEntityFrameWithMaterializedTestInfraContext(
+      env,
+      state,
+      input!.entityTxs,
+      env.state.timestamp,
+    );
     expect(result.newState.crontabState?.hooks.size).toBe(0);
   });
 
@@ -596,10 +618,12 @@ describe('runtime scheduled wake', () => {
     if (!wakeInput) throw new Error('scheduled wake fixture missing');
     env.runtimeMempool = {
       runtimeTxs: [],
-      entityInputs: [{
-        ...wakeInput,
-        entityTxs: [...wakeInput.entityTxs, { type: 'chatMessage', data: { message: 'keep', timestamp: 9_000 } }],
-      }],
+      entityInputs: [
+        {
+          ...wakeInput,
+          entityTxs: [...wakeInput.entityTxs, { type: 'chatMessage', data: { message: 'keep', timestamp: 9_000 } }],
+        },
+      ],
     };
 
     // The checkpoint carries committed Entity state (including crontab); it

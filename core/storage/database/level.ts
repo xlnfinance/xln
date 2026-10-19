@@ -1,5 +1,5 @@
 import { countOp, countOpWithSite } from '../../support/performance/op-counters';
-import { decodeValidatedBuffer, notFound, writeBatch } from '../codec/codec';
+import { decodeValidatedBuffer, writeBatch } from '../codec/codec';
 import { prefixUpperBound } from '../keys';
 import type { NamespaceBytes, RuntimeDbLike } from '../types';
 
@@ -38,23 +38,20 @@ export const readValidatedOrNull = async <T>(
 ): Promise<T | null> => {
   // Sampled synchronously so the call site survives the async read below.
   countOpWithSite('storage.readValidated', 0, 1);
-  try {
-    const raw = await db.get(key);
-    countOp('storage.readValidated.bytes', raw.byteLength);
-    return decodeValidatedBuffer(raw, validator);
-  } catch (error) {
-    if (notFound(error)) return null;
-    throw error;
-  }
+  const raw = await db.get(key);
+  if (raw === undefined) return null;
+  countOp('storage.readValidated.bytes', raw.byteLength);
+  return decodeValidatedBuffer(raw, validator);
 };
 
-export const readRawOrNull = async (db: RuntimeDbLike, key: Buffer): Promise<Buffer | null> => {
-  try {
-    return await db.get(key);
-  } catch (error) {
-    if (notFound(error)) return null;
-    throw error;
-  }
+export const readRawOrNull = async (db: Pick<RuntimeDbLike, 'get'>, key: Buffer): Promise<Buffer | null> =>
+  (await db.get(key)) ?? null;
+
+/** A referenced/iterated row must exist; absence is corruption, not an empty value. */
+export const readRequiredRaw = async (db: Pick<RuntimeDbLike, 'get'>, key: Buffer): Promise<Buffer> => {
+  const raw = await db.get(key);
+  if (raw === undefined) throw new Error(`STORAGE_REFERENCED_ROW_MISSING:${key.toString('hex')}`);
+  return raw;
 };
 
 export async function* iterateKeys(db: RuntimeDbLike, range: KeyRangeOptions): AsyncGenerator<Buffer> {
@@ -75,7 +72,7 @@ export const measurePrefixBytes = async (db: RuntimeDbLike, prefix: Buffer): Pro
   let maxValueBytes = 0;
   let count = 0;
   for await (const key of iterateKeys(db, { prefix })) {
-    const value = await db.get(key);
+    const value = await readRequiredRaw(db, key);
     bytes += key.byteLength + value.byteLength;
     if (value.byteLength > maxValueBytes) maxValueBytes = value.byteLength;
     count += 1;
@@ -87,7 +84,7 @@ export const copyKeyRange = (
   sourceDb: RuntimeDbLike,
   targetDb: RuntimeDbLike,
   range: KeyRangeOptions,
-  mapKey: (key: Buffer) => Buffer | null = (key) => key,
+  mapKey: (key: Buffer) => Buffer | null = key => key,
   onBatchCommitted?: () => void | Promise<void>,
 ): Promise<{ bytes: number; count: number }> =>
   copyKeys(sourceDb, targetDb, iterateKeys(sourceDb, range), mapKey, onBatchCommitted);
@@ -97,7 +94,7 @@ export const copyKeys = async (
   sourceDb: RuntimeDbLike,
   targetDb: RuntimeDbLike,
   keys: AsyncIterable<Buffer>,
-  mapKey: (key: Buffer) => Buffer | null = (key) => key,
+  mapKey: (key: Buffer) => Buffer | null = key => key,
   onBatchCommitted?: () => void | Promise<void>,
 ): Promise<{ bytes: number; count: number }> => {
   let bytes = 0;
@@ -116,7 +113,7 @@ export const copyKeys = async (
   for await (const key of keys) {
     const targetKey = mapKey(key);
     if (!targetKey) continue;
-    const value = await sourceDb.get(key);
+    const value = await readRequiredRaw(sourceDb, key);
     batch.put(targetKey, value);
     bytes += targetKey.byteLength + value.byteLength;
     count += 1;

@@ -1,8 +1,4 @@
-/**
- * Production TS admission: bounded policy versions and deferred lending.
- * Local and peer inputs reject before mutation; historical frames stay hashable.
- * Frozen Rust fixtures are not evidence for this launch profile.
- */
+/** Current lending admission preserves canonical range and peer authority checks. */
 import { describe, expect, test } from 'bun:test';
 
 import { applyAccountInput } from '../../account/consensus';
@@ -269,26 +265,16 @@ describe('FX-3 exact lifecycle retry identity', () => {
   });
 });
 
-describe('FX-2 lending kinds are outside the production profile', () => {
-  test.each(LENDING_TXS)('enqueue rejects %s without mutation', async (kind, tx) => {
+describe('current lending kinds enter the canonical Account queue', () => {
+  test.each(LENDING_TXS)('enqueue admits %s without committing financial state', async (_kind, tx) => {
     const account = makeAccount('0xsender', '0xrecipient');
-    const before = safeStringify(account);
-    await expect(enqueue(account, [structuredClone(tx)])).rejects.toMatchObject({
-      code: 'ACCOUNT_TX_KIND_OUT_OF_PROFILE',
-      txType: kind,
-    });
-    expect(safeStringify(account)).toBe(before);
-  });
-
-  // `isAccountTxKindAvailable` is deliberately not imported here: the wallet
-  // (ui/src/screens/Lending.tsx) is its only consumer, and check:unused-surface
-  // pins that external-consumer proof.
-  test('every deferred kind remains hashable for signed historical evidence', () => {
-    for (const [kind, tx] of LENDING_TXS) {
-      expect(accountTxAdmissionError(tx)).toMatchObject({ code: 'ACCOUNT_TX_KIND_OUT_OF_PROFILE', txType: kind });
-      const account = makeAccount('0xsender', '0xrecipient');
-      expect(() => computeFrameHash({ ...account.currentFrame, accountTxs: [tx] })).not.toThrow();
-    }
+    const before = safeStringify(account.state);
+    const result = await enqueue(account, [structuredClone(tx)]);
+    expect(result).toMatchObject({ ok: true, admittedAccountTxCount: 1 });
+    expect(account.mempool).toEqual([tx]);
+    expect(safeStringify(account.state)).toBe(before);
+    expect(accountTxAdmissionError(tx)).toBeUndefined();
+    expect(() => computeFrameHash({ ...account.currentFrame, accountTxs: [tx] })).not.toThrow();
   });
 });
 
@@ -322,22 +308,22 @@ describe('incoming counterparty frames reject before replay', () => {
   };
 
   test.each(LENDING_TXS)(
-    'incoming %s is a typed profile rejection before signature work or mutation',
-    async (kind, tx) => {
-      const account = makeAccount('0xsender', '0xrecipient');
+    'incoming %s still requires an authenticated peer frame before mutation',
+    async (_kind, tx) => {
+      const account = makeAccount(`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`);
       const input = buildFrameInput(account, tx, '');
       input.proposal.frame.stateHash = computeFrameHash(input.proposal.frame);
       const context = createAccountConsensusContext(createEmptyEnv('fx-admission-incoming'));
       const before = safeStringify(account);
       const outcome = await applyAccountInput(context, account, input);
-      expect(accountInputPeerRejectionCode(outcome)).toBe('ACCOUNT_INPUT_FRAME_TX_OUT_OF_PROFILE');
-      expect(accountInputFailureMessage(outcome)).toContain(`ACCOUNT_TX_KIND_OUT_OF_PROFILE:${kind}`);
+      expect(accountInputPeerRejectionCode(outcome)).toBe('ACCOUNT_INPUT_FRAME_HANKO_INVALID');
+      expect(accountInputFailureMessage(outcome)).toContain('Invalid hanko signature');
       expect(safeStringify(account)).toBe(before);
     },
   );
 
   test('an out-of-range policyVersion frame is a typed range rejection without mutation', async () => {
-    const account = makeAccount('0xsender', '0xrecipient');
+    const account = makeAccount(`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`);
     // computeFrameHash refuses this tx by design (FX-1 tripwire), so the peer
     // frame carries an unverifiable stateHash; the preflight rejection fires
     // before any signature or hash work either way.

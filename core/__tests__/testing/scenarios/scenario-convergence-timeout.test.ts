@@ -1,11 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createEmptyEnv } from '../../../runtime';
-import {
-  converge,
-  convergeWithOffline,
-  processWithOffline,
-} from '../../../scenarios/harness/helpers';
+import { converge, convergeWithOffline, processWithOffline } from '../../../scenarios/harness/helpers';
 import { deliveryDeferred } from '../../../protocol/payments/delivery-result';
 import { ensureRuntimeInfrastructure } from '../../../runtime/envelope/replica-envelope';
 import type { DeliverableEntityInput, RuntimeReplica } from '../../../runtime/types';
@@ -18,16 +14,19 @@ const runtimeId = `0x${'22'.repeat(20)}`;
 const envWithBacklog = (label: string) => {
   const env = createEmptyEnv(`scenario-convergence-timeout:${label}`);
   env.scenarioMode = true;
-  env.runtimeMempool.entityInputs = [{
-    entityId,
-    signerId: '1',
-  }];
+  env.runtimeMempool.entityInputs = [
+    {
+      entityId,
+      signerId: '1',
+    },
+  ];
   return env;
 };
 
 const networkOutput = (signerId: string): DeliverableEntityInput => ({
   entityId,
   signerId,
+  entityTxs: [],
   runtimeId,
   sourceRuntimeFrame: { height: 1, timestamp: 100 },
 });
@@ -67,12 +66,9 @@ describe('scenario convergence timeout diagnostics', () => {
   });
 
   test('offline convergence reports its reason and exact queued work', async () => {
-    const rejection = convergeWithOffline(
-      envWithBacklog('offline'),
-      new Set(['4']),
-      0,
-      'validator-failover',
-    ).catch((error: unknown) => error);
+    const rejection = convergeWithOffline(envWithBacklog('offline'), new Set(['4']), 0, 'validator-failover').catch(
+      (error: unknown) => error,
+    );
     const error = await rejection;
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toContain('convergeWithOffline:validator-failover: not converged after 0 cycles;');
@@ -127,20 +123,22 @@ describe('scenario convergence timeout diagnostics', () => {
   test('network diagnostics expose only bounded lane and target metadata', async () => {
     const env = createEmptyEnv('scenario-convergence-timeout:lane-metadata');
     env.scenarioMode = true;
-    env.pendingNetworkOutputs = [{
-      ...networkOutput('3'),
-      leaderTimeoutVote: {
-        entityId,
-        targetHeight: 9,
-        previousFrameHash: 'genesis',
-        fromView: 0,
-        toView: 1,
-        previousLeaderId: '1',
-        nextLeaderId: '2',
-        voterId: '3',
-        signature: 'secret-signature-must-not-leak',
+    env.pendingNetworkOutputs = [
+      {
+        ...networkOutput('3'),
+        leaderTimeoutVote: {
+          entityId,
+          targetHeight: 9,
+          previousFrameHash: 'genesis',
+          fromView: 0,
+          toView: 1,
+          previousLeaderId: '1',
+          nextLeaderId: '2',
+          voterId: '3',
+          signature: 'secret-signature-must-not-leak',
+        },
       },
-    }];
+    ];
 
     const rejection = converge(env, 0).catch((error: unknown) => error);
     const error = await rejection;
@@ -150,5 +148,4 @@ describe('scenario convergence timeout diagnostics', () => {
     );
     expect((error as Error).message).not.toContain('secret-signature-must-not-leak');
   });
-
 });

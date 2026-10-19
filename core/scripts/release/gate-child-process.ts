@@ -1,4 +1,5 @@
 import type { ChildProcess } from 'node:child_process';
+import { stopProcessGroup } from '../e2e/runners/process-group';
 
 /**
  * Gate commands run through a shell and may spawn browsers, RPC nodes and test
@@ -8,39 +9,12 @@ import type { ChildProcess } from 'node:child_process';
  */
 export const GATE_CHILD_PROCESS_DETACHED = process.platform !== 'win32';
 
-const signalGateProcessGroup = (
-  child: ChildProcess,
-  signal: NodeJS.Signals,
-): void => {
-  if (child.pid && GATE_CHILD_PROCESS_DETACHED) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
-      throw error;
-    }
-  }
-  child.kill(signal);
-};
-
-const gateProcessGroupAlive = (child: ChildProcess): boolean => {
-  if (!child.pid || !GATE_CHILD_PROCESS_DETACHED) return child.exitCode === null;
-  try {
-    process.kill(-child.pid, 0);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-    throw error;
-  }
-};
-
-const waitForGateProcessGroupExit = async (
+const waitForChildExit = async (
   child: ChildProcess,
   timeoutMs: number,
 ): Promise<boolean> => {
   const deadline = Date.now() + timeoutMs;
-  while (gateProcessGroupAlive(child)) {
+  while (child.exitCode === null && child.signalCode === null) {
     if (Date.now() >= deadline) return false;
     await new Promise<void>(resolve => setTimeout(resolve, 50));
   }
@@ -52,10 +26,18 @@ export const terminateGateProcessGroup = async (
   child: ChildProcess,
   graceMs = 5_000,
 ): Promise<void> => {
-  signalGateProcessGroup(child, 'SIGTERM');
-  if (await waitForGateProcessGroupExit(child, graceMs)) return;
-  signalGateProcessGroup(child, 'SIGKILL');
-  if (!await waitForGateProcessGroupExit(child, graceMs)) {
+  if (child.pid && GATE_CHILD_PROCESS_DETACHED) {
+    return stopProcessGroup({
+      pid: child.pid,
+      termTimeoutMs: graceMs,
+      killTimeoutMs: graceMs,
+      timeoutError: `GATE_PROCESS_GROUP_TERMINATION_FAILED:${child.pid}`,
+    });
+  }
+  child.kill('SIGTERM');
+  if (await waitForChildExit(child, graceMs)) return;
+  child.kill('SIGKILL');
+  if (!await waitForChildExit(child, graceMs)) {
     throw new Error(`GATE_PROCESS_GROUP_TERMINATION_FAILED:${String(child.pid)}`);
   }
 };

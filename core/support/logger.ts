@@ -74,7 +74,7 @@ function shouldLog(category: keyof LogConfig): boolean {
 }
 
 // Log levels for structured logging
-export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
+type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
 export type StructuredLogFields = Record<string, unknown>;
 

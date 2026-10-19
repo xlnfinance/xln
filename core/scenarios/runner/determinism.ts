@@ -1,668 +1,194 @@
-/**
- * Scenario determinism oracle.
- *
- * Runs each deterministic scenario multiple times with the same runtime seed and
- * compares the explicitly captured Runtime-frame hash sequence plus final state hash.
- */
-
-import type { EnvSnapshot, RuntimeReplica } from '../../runtime/types';
+/** Record each live scenario once, then replay its immutable checkpoint/WAL through TS W1 and W4. */
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import type { RuntimeReplica } from '../../runtime/types';
 import { getLiveJAdapterEntries } from '../../runtime/j-submit/live-jadapters';
-import { createHash } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { dbRootPath } from '../../runtime/replica/platform';
-import { formatRuntime } from '../../qa/runtime-ascii';
-import { safeStringify } from '../../protocol/serialization';
 import { clearSignerKeys } from '../../account/crypto';
 import { createGossipLayer } from '../../network/p2p/gossip';
+import { formatRuntime } from '../../qa/runtime-ascii';
+import { safeStringify } from '../../protocol/serialization';
+import { registerStructuredLogSink } from '../../support/logger';
+import { computeCanonicalStateHashFromEnv } from '../../storage/canonical-hash';
+import { buildRuntimeRecoveryCheckpointSnapshot } from '../../storage/wal/snapshot';
+import type { RuntimeRecording } from '../../storage/recovery/bundle/types';
 import { scenarioRegistry, type ScenarioEntry } from '..';
-import { assertRuntimeIdle } from '../harness/helpers';
-import { setEntityFrameHashDebugRecorder, type EntityFrameHashDebugRecord } from '../../entity/consensus/frame';
+import { assertRuntimeIdle, commitRuntimeInput } from '../harness/helpers';
+import { createCheckpointBarrierRuntimeTx } from '../../runtime/checkpoint/barrier';
 import { stopManagedScenarioAnvil } from '../harness/boot';
-import { buildCanonicalJReplicaSnapshot } from '../../storage/wal/snapshot';
-import { startRuntimeTraceForTesting } from '../../runtime/observability/runtime-trace';
-import {
-  setAccountStateRootDebugRecorder,
-  type AccountStateRootDebugRecord,
-} from '../../account/commitment/state-root';
-import {
-  setJBlockHeadersIngressTransform,
-  setJEventIngressTransform,
-  setJHistoryRangeIngressTransform,
-  type JBlockHeadersIngress,
-  type JEventIngressBatch,
-  type JHistoryRangeIngress,
-  type JEventIngress,
-} from '../../jurisdiction/adapter/watcher';
+import { assertRecordedReplaysMatch, recordedEvidenceHash, replayRecordedScenario } from './recorded-replay';
 
-const RUNS = 2;
 const SEED = 'determinism-test-seed-42';
-const INITIAL_TIMESTAMP = 1;
-const DEFAULT_RPC_BASE_PORT = 29_000 + (process.pid % 1_000) * 20;
-const RPC_BASE_PORT = Math.floor(Number(process.env['XLN_DETERMINISM_RPC_BASE_PORT'] ?? DEFAULT_RPC_BASE_PORT));
+const RPC_BASE_PORT = Math.floor(
+  Number(process.env['XLN_DETERMINISM_RPC_BASE_PORT'] ?? 29_000 + (process.pid % 1_000) * 20),
+);
 const EXCLUDED_SCENARIOS = new Set([
   'ahb', // triangle demo does not drain under the RPC determinism harness
   'grid', // visual scalability demo; not a consensus correctness oracle
   'rapid-fire', // explicitly stress-only in the registry
 ]);
-
-const requestedScenarioKeys = (): Set<string> => {
-  const raw = process.env['XLN_DETERMINISM_SCENARIOS'] ?? '';
-  return new Set(raw.split(',').map((key) => key.trim()).filter(Boolean));
-};
-
-type ScenarioOracle = {
-  frameCount: number;
-  frameHashes: string[];
-  frameValues: unknown[];
-  frameHashTrace: unknown[];
-  accountStateRootTrace: unknown[];
-  finalValue: unknown;
-  finalHash: string;
-  combinedHash: string;
-};
-
-type ScenarioResult = {
-  key: string;
-  name: string;
-  success: boolean;
-  runs: ScenarioOracle[];
-  error?: string;
-};
-
-type JEventTraceMode = 'record' | 'replay';
-
-type JEventTrace = {
-  batches: JEventIngressBatch[];
-  cursor: number;
-  headerReads: JBlockHeadersIngress[];
-  headerCursor: number;
-  ranges: JHistoryRangeIngress[];
-  rangeCursor: number;
-};
-
-const cloneJEventTraceValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(cloneJEventTraceValue);
-  if (value instanceof Uint8Array) return value.slice();
-  if (value instanceof Map) {
-    return new Map(Array.from(value.entries()).map(([key, entry]) => [
-      cloneJEventTraceValue(key),
-      cloneJEventTraceValue(entry),
-    ]));
-  }
-  if (value instanceof Set) return new Set(Array.from(value.values()).map(cloneJEventTraceValue));
-  if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
-    key,
-    cloneJEventTraceValue(entry),
-  ]));
-};
-
-const cloneJEventIngressBatch = (batch: JEventIngressBatch): JEventIngressBatch =>
-  cloneJEventTraceValue(batch) as JEventIngressBatch;
-
-const cloneJHistoryRangeIngress = (
-  range: JHistoryRangeIngress,
-): JHistoryRangeIngress => cloneJEventTraceValue(range) as JHistoryRangeIngress;
-
-const cloneJBlockHeadersIngress = (
-  headers: JBlockHeadersIngress,
-): JBlockHeadersIngress => cloneJEventTraceValue(headers) as JBlockHeadersIngress;
-
-const jEventSemanticProjection = (events: JEventIngress[]): unknown => toDebugTraceValue(
-  events.map((event) => ({
-    name: event.name,
-    args: event.args,
-    ...(event.disputeFinalizationEvidence
-      ? { disputeFinalizationEvidence: event.disputeFinalizationEvidence }
-      : {}),
-  })),
-);
-
-const createJEventTraceTransform = (
-  mode: JEventTraceMode,
-  trace: JEventTrace,
-): ((batch: JEventIngressBatch) => JEventIngressBatch) => (batch) => {
-  if (mode === 'record') {
-    trace.batches.push(cloneJEventIngressBatch(batch));
-    return batch;
-  }
-
-  const expected = trace.batches[trace.cursor];
-  if (!expected) {
-    throw new Error(`J_EVENT_TRACE_UNEXPECTED_BATCH:index=${trace.cursor}`);
-  }
-  const expectedSemantics = jEventSemanticProjection(expected.events);
-  const actualSemantics = jEventSemanticProjection(batch.events);
-  const semanticDiff = findFirstDiff(expectedSemantics, actualSemantics);
-  if (semanticDiff) {
-    throw new Error(
-      `J_EVENT_TRACE_SEMANTIC_MISMATCH:index=${trace.cursor} path=${semanticDiff.path} ` +
-      `expected=${previewValue(semanticDiff.left)} actual=${previewValue(semanticDiff.right)}`,
-    );
-  }
-  trace.cursor += 1;
-  return cloneJEventIngressBatch(expected);
-};
-
-const createJHistoryRangeTraceTransform = (
-  mode: JEventTraceMode,
-  trace: JEventTrace,
-): ((range: JHistoryRangeIngress) => JHistoryRangeIngress) => (range) => {
-  if (mode === 'record') {
-    trace.ranges.push(cloneJHistoryRangeIngress(range));
-    return range;
-  }
-
-  const expected = trace.ranges[trace.rangeCursor];
-  if (!expected) {
-    throw new Error(`J_RANGE_TRACE_UNEXPECTED:index=${trace.rangeCursor}`);
-  }
-  if (range.scannedThroughHeight !== expected.scannedThroughHeight) {
-    throw new Error(
-      `J_RANGE_TRACE_HEIGHT_MISMATCH:index=${trace.rangeCursor} ` +
-      `expected=${expected.scannedThroughHeight} actual=${range.scannedThroughHeight}`,
-    );
-  }
-  trace.rangeCursor += 1;
-  return cloneJHistoryRangeIngress(expected);
-};
-
-const createJBlockHeadersTraceTransform = (
-  mode: JEventTraceMode,
-  trace: JEventTrace,
-): ((headers: JBlockHeadersIngress) => JBlockHeadersIngress) => (headers) => {
-  if (mode === 'record') {
-    trace.headerReads.push(cloneJBlockHeadersIngress(headers));
-    return headers;
-  }
-  const expected = trace.headerReads[trace.headerCursor];
-  if (!expected) throw new Error(`J_HEADER_TRACE_UNEXPECTED:index=${trace.headerCursor}`);
-  const expectedHeights = expected.map(({ jHeight }) => jHeight);
-  const actualHeights = headers.map(({ jHeight }) => jHeight);
-  const heightDiff = findFirstDiff(expectedHeights, actualHeights);
-  if (heightDiff) {
-    throw new Error(
-      `J_HEADER_TRACE_HEIGHT_MISMATCH:index=${trace.headerCursor} path=${heightDiff.path} ` +
-      `expected=${previewValue(heightDiff.left)} actual=${previewValue(heightDiff.right)}`,
-    );
-  }
-  trace.headerCursor += 1;
-  return cloneJBlockHeadersIngress(expected);
-};
-
-const normalizeOracleValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(normalizeOracleValue);
-  if (typeof value === 'string') {
-    return value.replace(/https?:\/\/(?:127\.0\.0\.1|localhost):\d+/g, 'http://<local-rpc>');
-  }
-  if (value === null || typeof value !== 'object') return value;
-
-  const source = value as Record<string, unknown>;
-  const normalized: Record<string, unknown> = {};
-  for (const key of Object.keys(source)) normalized[key] = normalizeOracleValue(source[key]);
-  return normalized;
-};
-
-const toOracleValue = (value: unknown): unknown => {
-  const tagged = JSON.parse(safeStringify(value));
-  return normalizeOracleValue(tagged);
-};
-
-const normalizeDebugTraceValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(normalizeDebugTraceValue);
-  if (typeof value === 'string') {
-    return value.replace(/https?:\/\/(?:127\.0\.0\.1|localhost):\d+/g, 'http://<local-rpc>');
-  }
-  if (value === null || typeof value !== 'object') return value;
-
-  const source = value as Record<string, unknown>;
-  const normalized: Record<string, unknown> = {};
-  for (const key of Object.keys(source)) {
-    normalized[key] = normalizeDebugTraceValue(source[key]);
-  }
-  return normalized;
-};
-
-const toDebugTraceValue = (value: unknown): unknown =>
-  normalizeDebugTraceValue(JSON.parse(safeStringify(value)));
-
-const hashOracleValue = (value: unknown, length = 32): string =>
-  createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, length);
-
-type ConsoleFns = {
-  log: typeof console.log;
-  info: typeof console.info;
-  warn: typeof console.warn;
-  debug: typeof console.debug;
-  error: typeof console.error;
-};
-
-const captureConsole = (): ConsoleFns => ({
-  log: console.log,
-  info: console.info,
-  warn: console.warn,
-  debug: console.debug,
-  error: console.error,
-});
-
-const restoreConsole = (original: ConsoleFns): void => {
-  console.log = original.log;
-  console.info = original.info;
-  console.warn = original.warn;
-  console.debug = original.debug;
-  console.error = original.error;
-};
-
-const projectJReplicas = (jReplicas: RuntimeReplica['state']['jReplicas'] | undefined): Map<string, unknown> => {
-  const projected = new Map<string, unknown>();
-  for (const [key, replica] of jReplicas ?? new Map()) {
-    projected.set(key, buildCanonicalJReplicaSnapshot(replica));
-  }
-  return projected;
-};
-
-const snapshotEnvProjection = (env: RuntimeReplica): Record<string, unknown> => ({
-  height: env.state.height,
-  timestamp: env.state.timestamp,
-  runtimeId: env.runtimeId,
-  eReplicas: env.state.eReplicas,
-  jReplicas: projectJReplicas(env.state.jReplicas),
-  runtimeInput: env.runtimeMempool,
-  pendingOutputs: env.pendingOutputs ?? [],
-  pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
-  networkInbox: env.networkInbox ?? [],
-});
-
-const snapshotProjection = (snapshot: EnvSnapshot): Record<string, unknown> => ({
-  height: snapshot.state.height,
-  timestamp: snapshot.state.timestamp,
-  runtimeId: snapshot.runtimeId,
-  eReplicas: snapshot.state.eReplicas,
-  jReplicas: projectJReplicas(snapshot.state.jReplicas),
-  runtimeInput: snapshot.runtimeInput,
-  runtimeOutputs: snapshot.runtimeOutputs,
-  description: snapshot.description,
-  meta: snapshot.meta,
-  logs: snapshot.logs ?? [],
-});
-
-const buildFrameHashTrace = (records: EntityFrameHashDebugRecord[]): unknown[] =>
-  records.map((record) => toDebugTraceValue({
-    entityId: record.entityId,
-    height: record.height,
-    payload: record.payload,
-  }));
-
-const buildOracle = (
-  env: RuntimeReplica,
-  snapshots: readonly EnvSnapshot[],
-  frameHashRecords: EntityFrameHashDebugRecord[],
-  accountStateRootRecords: AccountStateRootDebugRecord[],
-): ScenarioOracle => {
-  const frameValues = snapshots.map((snapshot) => toOracleValue(snapshotProjection(snapshot)));
-  const frameHashes = frameValues.map((snapshot) => hashOracleValue(snapshot, 24));
-  const frameHashTrace = buildFrameHashTrace(frameHashRecords);
-  const accountStateRootTrace = accountStateRootRecords.map((record) => toDebugTraceValue(record));
-  const finalValue = toOracleValue(snapshotEnvProjection(env));
-  const finalHash = hashOracleValue(finalValue, 32);
-  const frameCount = frameHashes.length;
-  const combinedHash = hashOracleValue(toOracleValue({ frameCount, frameHashes, finalHash }), 32);
-  return { frameCount, frameHashes, frameValues, frameHashTrace, accountStateRootTrace, finalValue, finalHash, combinedHash };
-};
-
-type DiffResult = {
-  path: string;
-  left: unknown;
-  right: unknown;
-};
-
-const findFirstDiff = (left: unknown, right: unknown, path = '$'): DiffResult | null => {
-  if (JSON.stringify(left) === JSON.stringify(right)) return null;
-  if (
-    left === null ||
-    right === null ||
-    typeof left !== 'object' ||
-    typeof right !== 'object' ||
-    Array.isArray(left) !== Array.isArray(right)
-  ) {
-    return { path, left, right };
-  }
-
-  if (Array.isArray(left) && Array.isArray(right)) {
-    const max = Math.max(left.length, right.length);
-    for (let index = 0; index < max; index += 1) {
-      const diff = findFirstDiff(left[index], right[index], `${path}[${index}]`);
-      if (diff) return diff;
-    }
-    return { path, left, right };
-  }
-
-  const leftRecord = left as Record<string, unknown>;
-  const rightRecord = right as Record<string, unknown>;
-  const keys = [...new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)])].sort();
-  for (const key of keys) {
-    const escaped = /^[a-zA-Z_$][\w$]*$/.test(key) ? `.${key}` : `[${JSON.stringify(key)}]`;
-    const diff = findFirstDiff(leftRecord[key], rightRecord[key], `${path}${escaped}`);
-    if (diff) return diff;
-  }
-  return { path, left, right };
-};
-
-const previewValue = (value: unknown): string => {
-  const encoded = safeStringify(value);
-  return encoded.length > 700 ? `${encoded.slice(0, 700)}...` : encoded;
-};
-
-const DERIVED_DEBUG_FIELDS = new Set([
-  'accountStateRoot',
-  'counterpartyDisputeHanko',
-  'counterpartyFrameHanko',
-  'disputeHash',
-  'hanko',
-  'hankoWitness',
-  'leftHanko',
-  'prevFrameHash',
-  'proofbodyHash',
-  'rightHanko',
-  'signature',
-  'stateHash',
-]);
-
-const stripDerivedEvidenceForDebug = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(stripDerivedEvidenceForDebug);
-  if (value === null || typeof value !== 'object') return value;
-  const source = value as Record<string, unknown>;
-  return Object.fromEntries(Object.entries(source).map(([key, entry]) => [
-    key,
-    DERIVED_DEBUG_FIELDS.has(key) || key.toLowerCase().endsWith('hanko')
-      ? '<derived-evidence>'
-      : stripDerivedEvidenceForDebug(entry),
-  ]));
-};
-
-const findFirstMismatch = (left: string[], right: string[]): number => {
-  const max = Math.max(left.length, right.length);
-  for (let index = 0; index < max; index += 1) {
-    if (left[index] !== right[index]) return index;
-  }
-  return -1;
-};
-
-const assertMatchingOracles = (scenario: ScenarioEntry, runs: ScenarioOracle[]): void => {
-  const [expected, ...rest] = runs;
-  if (!expected) throw new Error(`${scenario.key}: determinism oracle has no completed runs`);
-  for (let index = 0; index < rest.length; index += 1) {
-    const actual = rest[index];
-    if (!actual) throw new Error(`${scenario.key}: determinism oracle missing run ${index + 2}`);
-    if (actual.combinedHash === expected.combinedHash) continue;
-
-    const mismatchIndex = findFirstMismatch(expected.frameHashes, actual.frameHashes);
-    const mismatch =
-      mismatchIndex === -1
-        ? `final ${expected.finalHash} != ${actual.finalHash}`
-        : `frame ${mismatchIndex + 1} ${expected.frameHashes[mismatchIndex] ?? 'missing'} != ${actual.frameHashes[mismatchIndex] ?? 'missing'}`;
-    const diff = mismatchIndex === -1
-      ? findFirstDiff(expected.finalValue, actual.finalValue)
-      : findFirstDiff(expected.frameValues[mismatchIndex], actual.frameValues[mismatchIndex]);
-    const diffText = diff
-      ? ` diff=${diff.path} left=${previewValue(diff.left)} right=${previewValue(diff.right)}`
-      : '';
-    const traceDiff = findFirstDiff(expected.frameHashTrace, actual.frameHashTrace);
-    const traceText = traceDiff
-      ? ` frameHashInputDiff=${traceDiff.path} left=${previewValue(traceDiff.left)} right=${previewValue(traceDiff.right)}`
-      : '';
-    const accountRootTraceDiff = findFirstDiff(expected.accountStateRootTrace, actual.accountStateRootTrace);
-    const accountRootTraceText = accountRootTraceDiff
-      ? ` accountRootInputDiff=${accountRootTraceDiff.path} left=${previewValue(accountRootTraceDiff.left)} right=${previewValue(accountRootTraceDiff.right)}`
-      : '';
-    const finalDiff = findFirstDiff(expected.finalValue, actual.finalValue);
-    const finalDiffText = finalDiff
-      ? ` finalDiff=${finalDiff.path} left=${previewValue(finalDiff.left)} right=${previewValue(finalDiff.right)}`
-      : '';
-    const finalStateDiff = findFirstDiff(
-      stripDerivedEvidenceForDebug(expected.finalValue),
-      stripDerivedEvidenceForDebug(actual.finalValue),
-    );
-    const finalStateDiffText = finalStateDiff
-      ? ` finalStateDiff=${finalStateDiff.path} left=${previewValue(finalStateDiff.left)} right=${previewValue(finalStateDiff.right)}`
-      : '';
-    throw new Error(
-      `${scenario.key}: non-deterministic replay between run 1 and run ${index + 2}: ${mismatch}${diffText}${traceText}${accountRootTraceText}${finalDiffText}${finalStateDiffText}`,
-    );
-  }
-};
+const requestedScenarioKeys = (): Set<string> =>
+  new Set(
+    (process.env['XLN_DETERMINISM_SCENARIOS'] ?? '')
+      .split(',')
+      .map(key => key.trim())
+      .filter(Boolean),
+  );
 
 const cleanupScenarioEnv = async (env: RuntimeReplica): Promise<void> => {
   const { closeRuntimeDb, closeInfraDb, stopRuntimeLoopAndWait } = await import('../../runtime');
   await stopRuntimeLoopAndWait(env, 5_000);
-
-  const adapters = new Set<unknown>(
-    getLiveJAdapterEntries(env).map(({ adapter }) => adapter),
-  );
-
-  for (const adapter of adapters) {
-    const close = (adapter as { close?: () => Promise<void> | void }).close;
-    if (typeof close === 'function') {
-      await close.call(adapter);
-    }
-  }
-
+  for (const { adapter } of getLiveJAdapterEntries(env)) await adapter.close();
   await closeRuntimeDb(env);
   await closeInfraDb(env);
 };
 
-const rpcUrlForScenarioRun = (scenarioIndex: number, runIndex: number): string =>
-  `http://127.0.0.1:${RPC_BASE_PORT + scenarioIndex * RUNS + runIndex - 1}`;
-
-const runScenarioOnce = async (
+const recordScenario = async (
   scenario: ScenarioEntry,
-  runIndex: number,
   scenarioIndex: number,
-  jEventTraceMode: JEventTraceMode,
-  jEventTrace: JEventTrace,
-): Promise<ScenarioOracle> => {
-  const { createEmptyEnv } = await import('../../runtime');
-  const originalConsole = captureConsole();
-  const previousJAdapterMode = process.env['JADAPTER_MODE'];
-  const previousAnvilRpc = process.env['ANVIL_RPC'];
-  const previousForceFreshAnvil = process.env['XLN_FORCE_FRESH_ANVIL'];
-  let env: RuntimeReplica | null = null;
-  let activeEnv: RuntimeReplica | null = null;
-  let stopRuntimeTrace: (() => void) | null = null;
-  let capturedSnapshots: readonly EnvSnapshot[] = [];
-  const frameHashRecords: EntityFrameHashDebugRecord[] = [];
-  const accountStateRootRecords: AccountStateRootDebugRecord[] = [];
-  const restoreFrameHashRecorder = setEntityFrameHashDebugRecorder((record) => {
-    frameHashRecords.push(record);
+  evidenceDirectory: string,
+): Promise<{ recording: RuntimeRecording; finalHash: string; runtimeSeed: string }> => {
+  const {
+    createEmptyEnv,
+    buildPersistedRuntimeRecording,
+    readPersistedCheckpointSnapshot,
+    readPersistedFrameJournals,
+    readPersistedFrameJournal,
+    waitForRuntimeWorkDrained,
+  } = await import('../../runtime');
+  const originalConsole = {
+    log: console.log,
+    info: console.info,
+    warn: console.warn,
+    debug: console.debug,
+    error: console.error,
+  };
+  const previous = {
+    JADAPTER_MODE: process.env['JADAPTER_MODE'],
+    ANVIL_RPC: process.env['ANVIL_RPC'],
+    XLN_FORCE_FRESH_ANVIL: process.env['XLN_FORCE_FRESH_ANVIL'],
+  };
+  Object.assign(process.env, {
+    JADAPTER_MODE: 'rpc',
+    ANVIL_RPC: `http://127.0.0.1:${RPC_BASE_PORT + scenarioIndex}`,
+    XLN_FORCE_FRESH_ANVIL: '1',
   });
-  const restoreAccountStateRootRecorder = setAccountStateRootDebugRecorder((record) => {
-    accountStateRootRecords.push(record);
+  clearSignerKeys(SEED);
+  const env = createEmptyEnv(SEED);
+  let activeEnv = env;
+  env.gossip = createGossipLayer();
+  env.scenarioMode = true;
+  env.quietRuntimeLogs = process.env['XLN_DETERMINISM_VERBOSE'] !== '1';
+  env.scenarioLogLevel = env.quietRuntimeLogs ? 'error' : 'debug';
+  env.state.timestamp = 1;
+  env.runtimeConfig = { ...env.runtimeConfig, storage: { ...env.runtimeConfig?.storage, enabled: true } };
+  if (env.infrastructure) env.infrastructure.persistencePaused = false;
+  const submitObservations: unknown[] = [];
+  const stopObservations = registerStructuredLogSink(event => {
+    if (event.scope === 'runtime.jsubmit') submitObservations.push(event);
   });
-  const restoreJEventIngressTransform = setJEventIngressTransform(
-    createJEventTraceTransform(jEventTraceMode, jEventTrace),
-  );
-  const restoreJHistoryRangeIngressTransform = setJHistoryRangeIngressTransform(
-    createJHistoryRangeTraceTransform(jEventTraceMode, jEventTrace),
-  );
-  const restoreJBlockHeadersIngressTransform = setJBlockHeadersIngressTransform(
-    createJBlockHeadersTraceTransform(jEventTraceMode, jEventTrace),
-  );
   try {
-    const rpcUrl = rpcUrlForScenarioRun(scenarioIndex, runIndex);
-    process.env['JADAPTER_MODE'] = 'rpc';
-    process.env['ANVIL_RPC'] = rpcUrl;
-    process.env['XLN_FORCE_FRESH_ANVIL'] = '1';
-
-    clearSignerKeys(SEED);
-    env = createEmptyEnv(SEED);
-    activeEnv = env;
-    const runtimeTrace = startRuntimeTraceForTesting(env);
-    stopRuntimeTrace = runtimeTrace.stop;
-    capturedSnapshots = runtimeTrace.snapshots;
-    env.gossip = createGossipLayer();
-    env.scenarioMode = true;
-    const verboseScenarioLogs = process.env['XLN_DETERMINISM_VERBOSE'] === '1';
-    env.quietRuntimeLogs = !verboseScenarioLogs;
-    env.scenarioLogLevel = verboseScenarioLogs ? 'debug' : 'error';
-    env.state.timestamp = INITIAL_TIMESTAMP;
-    env.runtimeConfig = {
-      ...env.runtimeConfig,
-      storage: {
-        ...env.runtimeConfig?.storage,
-        enabled: false,
-      },
-    };
-    if (env.infrastructure) env.infrastructure.persistencePaused = true;
-
-    const run = await scenario.load() as (targetEnv: RuntimeReplica) => Promise<RuntimeReplica | void>;
-    const returnedEnv = await run(env);
-    if (returnedEnv) activeEnv = returnedEnv;
+    const run = (await scenario.load()) as (target: RuntimeReplica) => Promise<RuntimeReplica | void>;
+    activeEnv = (await run(env)) ?? env;
+    if (!(await waitForRuntimeWorkDrained(activeEnv, 5_000))) throw new Error('DETERMINISM_RECORDING_DRAIN_TIMEOUT');
     assertRuntimeIdle(activeEnv, scenario.name);
-    if (jEventTraceMode === 'replay' && jEventTrace.cursor !== jEventTrace.batches.length) {
-      throw new Error(
-        `J_EVENT_TRACE_INCOMPLETE:consumed=${jEventTrace.cursor} total=${jEventTrace.batches.length}`,
-      );
+    // Idle scenario polls can advance the controlled clock without a commit.
+    // Seal only that outstanding input. Already durable scenarios need no new
+    // frame (which could legitimately wake an unrelated scheduled deadline).
+    const tip = await readPersistedFrameJournal(activeEnv, activeEnv.state.height);
+    if (!tip) throw new Error('DETERMINISM_LIVE_TIP_MISSING');
+    if (tip.timestamp !== activeEnv.state.timestamp) {
+      await commitRuntimeInput(activeEnv, { runtimeTxs: [createCheckpointBarrierRuntimeTx()], entityInputs: [] });
+      assertRuntimeIdle(activeEnv, `${scenario.name} recording barrier`);
     }
-    if (
-      jEventTraceMode === 'replay' &&
-      jEventTrace.rangeCursor !== jEventTrace.ranges.length
-    ) {
-      throw new Error(
-        `J_RANGE_TRACE_INCOMPLETE:consumed=${jEventTrace.rangeCursor} ` +
-        `total=${jEventTrace.ranges.length}`,
-      );
-    }
-    if (
-      jEventTraceMode === 'replay' &&
-      jEventTrace.headerCursor !== jEventTrace.headerReads.length
-    ) {
-      throw new Error(
-        `J_HEADER_TRACE_INCOMPLETE:consumed=${jEventTrace.headerCursor} ` +
-        `total=${jEventTrace.headerReads.length}`,
-      );
-    }
-    return buildOracle(activeEnv, capturedSnapshots, frameHashRecords, accountStateRootRecords);
+    writeFileSync(
+      join(evidenceDirectory, 'live-final.json'),
+      safeStringify(buildRuntimeRecoveryCheckpointSnapshot(activeEnv)),
+      { mode: 0o600 },
+    );
+    if (!activeEnv.runtimeId || !activeEnv.runtimeSeed) throw new Error('DETERMINISM_RUNTIME_IDENTITY_MISSING');
+    // Preserve the actual accepted inputs before export performs its own verified
+    // replay. An export failure must leave enough evidence to reproduce its first frame.
+    const checkpoint = await readPersistedCheckpointSnapshot(activeEnv, 1);
+    if (!checkpoint) throw new Error('DETERMINISM_INITIAL_CHECKPOINT_MISSING');
+    const frames = await readPersistedFrameJournals(activeEnv, {
+      fromHeight: 2,
+      toHeight: activeEnv.state.height,
+      limit: activeEnv.state.height,
+    });
+    if (frames.length !== activeEnv.state.height - 1) throw new Error('DETERMINISM_INITIAL_WAL_INCOMPLETE');
+    writeFileSync(join(evidenceDirectory, 'accepted-wal.json'), safeStringify({ checkpoint, frames }), { mode: 0o600 });
+    const recording = await buildPersistedRuntimeRecording(activeEnv, {
+      signers: [{ index: 0, address: activeEnv.runtimeId, name: scenario.key }],
+    });
+    if (recording.baseHeight !== 1) throw new Error(`DETERMINISM_INITIAL_PREFIX_MISSING:${recording.baseHeight}`);
+    writeFileSync(join(evidenceDirectory, 'recording.json'), safeStringify(recording), { mode: 0o600 });
+    return { recording, finalHash: computeCanonicalStateHashFromEnv(activeEnv), runtimeSeed: activeEnv.runtimeSeed };
   } catch (error) {
-    restoreConsole(originalConsole);
-    if (activeEnv) {
-      const evidencePath = join(dbRootPath, 'failure-state.json');
-      writeFileSync(evidencePath, safeStringify({
-        scenario: scenario.key, runIndex, state: snapshotEnvProjection(activeEnv),
-        frames: capturedSnapshots.map(snapshotProjection),
-        accounts: Array.from(activeEnv.state.eReplicas, ([id, replica]) => ({
-          id, paybook: Array.from(replica.state.paybook.entries),
-          accounts: Array.from(replica.state.accounts, ([peer, account]) => ({
-            peer, height: account.currentHeight, pending: account.pendingFrame,
-            locks: Array.from(account.state.locks), mempool: account.mempool,
-          })),
-        })),
-      }));
-      writeFileSync(join(dbRootPath, 'failure-state.txt'), formatRuntime(activeEnv));
-      console.error(`Determinism failure evidence: ${evidencePath}`);
-    }
+    writeFileSync(
+      join(evidenceDirectory, 'recording-failure.json'),
+      safeStringify({
+        scenario: scenario.key,
+        pendingInput: activeEnv.runtimeMempool,
+        actual: buildRuntimeRecoveryCheckpointSnapshot(activeEnv),
+        error: error instanceof Error ? error.message : String(error),
+      }),
+      { mode: 0o600 },
+    );
+    writeFileSync(join(evidenceDirectory, 'recording-failure.txt'), formatRuntime(activeEnv), { mode: 0o600 });
     throw error;
   } finally {
-    stopRuntimeTrace?.();
-    restoreFrameHashRecorder();
-    restoreAccountStateRootRecorder();
-    restoreJEventIngressTransform();
-    restoreJHistoryRangeIngressTransform();
-    restoreJBlockHeadersIngressTransform();
-    restoreConsole(originalConsole);
-    if (previousJAdapterMode === undefined) delete process.env['JADAPTER_MODE'];
-    else process.env['JADAPTER_MODE'] = previousJAdapterMode;
-    if (previousAnvilRpc === undefined) delete process.env['ANVIL_RPC'];
-    else process.env['ANVIL_RPC'] = previousAnvilRpc;
-    if (previousForceFreshAnvil === undefined) delete process.env['XLN_FORCE_FRESH_ANVIL'];
-    else process.env['XLN_FORCE_FRESH_ANVIL'] = previousForceFreshAnvil;
-    const cleanupTargets = new Set<RuntimeReplica>();
-    if (env) cleanupTargets.add(env);
-    if (activeEnv) cleanupTargets.add(activeEnv);
-    for (const targetEnv of cleanupTargets) {
-      await cleanupScenarioEnv(targetEnv);
+    stopObservations();
+    Object.assign(console, originalConsole);
+    writeFileSync(join(evidenceDirectory, 'submit-observations.json'), safeStringify(submitObservations), {
+      mode: 0o600,
+    });
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
     }
+    for (const target of new Set([env, activeEnv])) await cleanupScenarioEnv(target);
     await stopManagedScenarioAnvil();
-    restoreConsole(originalConsole);
   }
 };
 
-async function verifyScenarioDeterminism(
-  scenario: ScenarioEntry,
-  scenarioIndex: number,
-  resetStorage: () => void,
-): Promise<ScenarioResult> {
-  const runs: ScenarioOracle[] = [];
-  const jEventTrace: JEventTrace = {
-    batches: [],
-    cursor: 0,
-    headerReads: [],
-    headerCursor: 0,
-    ranges: [],
-    rangeCursor: 0,
-  };
-  try {
-    for (let runIndex = 0; runIndex < RUNS; runIndex += 1) {
-      resetStorage();
-      jEventTrace.cursor = 0;
-      jEventTrace.headerCursor = 0;
-      jEventTrace.rangeCursor = 0;
-      const oracle = await runScenarioOnce(
-        scenario,
-        runIndex + 1,
-        scenarioIndex,
-        runIndex === 0 ? 'record' : 'replay',
-        jEventTrace,
-      );
-      runs.push(oracle);
-      console.log(
-        `  ${scenario.key} run ${runIndex + 1}/${RUNS}: frames=${oracle.frameCount} hash=${oracle.combinedHash.slice(0, 12)}`,
-      );
-    }
-    assertMatchingOracles(scenario, runs);
-    return { key: scenario.key, name: scenario.name, success: true, runs };
-  } catch (error) {
-    return {
-      key: scenario.key,
-      name: scenario.name,
-      success: false,
-      runs,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-const scenariosToRun = (): ScenarioEntry[] =>
-  scenarioRegistry.filter((scenario) => {
-    if (scenario.requiresStress || EXCLUDED_SCENARIOS.has(scenario.key)) return false;
-    const requested = requestedScenarioKeys();
-    return requested.size === 0 || requested.has(scenario.key);
-  });
-
 export async function runDeterminismTests(resetStorage: () => void): Promise<void> {
-  console.log('== Scenario determinism oracle ==');
-  console.log(`seed=${SEED} runs=${RUNS}`);
-  console.log(`rpcBasePort=${RPC_BASE_PORT} freshAnvil=1`);
   const requested = requestedScenarioKeys();
-  if (requested.size > 0) console.log(`filter=${Array.from(requested).join(',')}`);
-
-  const results: ScenarioResult[] = [];
-  const scenarios = scenariosToRun();
-  for (let scenarioIndex = 0; scenarioIndex < scenarios.length; scenarioIndex += 1) {
-    const scenario = scenarios[scenarioIndex];
-    if (!scenario) throw new Error(`Scenario registry lookup failed at index ${scenarioIndex}`);
-    console.log(`\n[${scenario.key}] ${scenario.name}`);
-    const result = await verifyScenarioDeterminism(scenario, scenarioIndex, resetStorage);
-    results.push(result);
-    if (!result.success) {
-      throw new Error(`Determinism oracle failed for ${scenario.key}: ${result.error}`);
+  const scenarios = scenarioRegistry.filter(
+    scenario =>
+      !scenario.requiresStress &&
+      !EXCLUDED_SCENARIOS.has(scenario.key) &&
+      (requested.size === 0 || requested.has(scenario.key)),
+  );
+  if (scenarios.length === 0) throw new Error('DETERMINISM_SCENARIO_SELECTION_EMPTY');
+  const root = resolve(process.env['XLN_DETERMINISM_ARTIFACT_DIR'] ?? `.logs/determinism/${Date.now()}-${process.pid}`);
+  console.log(`== Immutable scenario WAL replay: seed=${SEED} workers=1,4 artifacts=${root} ==`);
+  const results = [];
+  for (const [index, scenario] of scenarios.entries()) {
+    const directory = join(root, scenario.key);
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    resetStorage();
+    console.log(`[${scenario.key}] recording live RPC scenario`);
+    const { recording, finalHash, runtimeSeed } = await recordScenario(scenario, index, directory);
+    const w1 = await replayRecordedScenario(recording, runtimeSeed, 1, directory);
+    const w4 = await replayRecordedScenario(recording, runtimeSeed, 4, directory);
+    assertRecordedReplaysMatch(w1, w4, directory);
+    if (w1.at(-1)?.stateHash !== finalHash || w4.at(-1)?.stateHash !== finalHash) {
+      throw new Error(`DETERMINISM_LIVE_FINAL_HASH_MISMATCH:${scenario.key}`);
     }
+    const result = {
+      scenario: scenario.key,
+      baseHeight: recording.baseHeight,
+      targetHeight: recording.targetHeight,
+      frames: w1.length,
+      workers: [1, 4],
+      finalHash,
+      evidenceHash: recordedEvidenceHash(w1),
+      recordingManifestHash: recording.manifestHash,
+    };
+    writeFileSync(join(directory, 'result.json'), safeStringify(result, 2));
+    results.push(result);
+    console.log(`PASS ${scenario.key}: frames=${w1.length} workers=1,4 hash=${finalHash}`);
   }
-
-  console.log('\n== Summary ==');
-  for (const result of results) {
-    const frameCount = result.runs[0]?.frameCount ?? 0;
-    const hash = result.runs[0]?.combinedHash.slice(0, 12) ?? 'no-hash';
-    console.log(`PASS ${result.key}: frames=${frameCount} hash=${hash}`);
-  }
+  writeFileSync(join(root, 'results.json'), safeStringify(results, 2));
+  console.log(`Immutable WAL replay passed ${results.length}/${scenarios.length} scenarios`);
 }

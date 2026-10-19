@@ -9,8 +9,14 @@ const amountFields: ClauseField[] = [
   { name: 'payerIsLeft', type: 'bool', label: 'Left Entity pays' },
 ];
 
-const buildTemplate = (name: string, params: ClauseField[], left: ClauseField[], right: ClauseField[], body: string): string => `// SPDX-License-Identifier: MIT
-pragma solidity 0.8.36;
+const buildTemplate = (
+  name: string,
+  params: ClauseField[],
+  left: ClauseField[],
+  right: ClauseField[],
+  body: string,
+): string => `// SPDX-License-Identifier: MIT
+pragma solidity 0.8.37;
 import "WideMath.sol";
 contract ${name} {
   ${schemaFunction('paramsSchema', params)}

@@ -119,6 +119,7 @@ function readGitCommit(projectRoot) {
 // CORE FILES ONLY - Everything an LLM needs to understand XLN
 // READ ORDER: Solidity contracts FIRST (source of truth), then TypeScript runtime
 const CORE_FILES = {
+  root: ['ui/src/screens/Lending.tsx', 'ui/src/runtime/financial/lending.ts'],
   contracts: [
     // * READ THESE FIRST - On-chain source of truth for all invariants
     'Types.sol',           // Shared types: Diff, BatchArgs, InsuranceReg
@@ -246,7 +247,6 @@ const CORE_FILES = {
     'src/lib/components/Entity/swap/SwapPanel.svelte', // Direct same-chain/cross-j swap form and manual route recommendations
     'src/lib/components/Trading/OrderbookPanel.svelte', // Orderbook stream/render/click behavior
     'src/lib/components/Entity/routed-swap-planner.ts', // Manual route candidate planner and hop quote estimates
-    'src/lib/components/Entity/payments/LendingPanel.svelte', // Hub lending UI: offer, borrow, repay
   ],
   tests: [
     // Behavior contracts: if code and prose disagree, these tests show intended user flow
@@ -283,7 +283,7 @@ const COMPLETE_CORE_FILES = {
   ...CORE_FILES,
   contracts: PRODUCTION_CONTRACT_FILES,
   runtime: PRODUCTION_RUNTIME_FILES,
-  root: ['AGENTS.md'],
+  root: ['AGENTS.md', ...CORE_FILES.root],
   docs: uniqueFiles([
     ...CORE_FILES.docs,
     'audit-protocol.md',
@@ -1297,7 +1297,7 @@ Read these together:
 - \`core/types/finance/lending.ts\`
 - \`core/entity/tx/handlers/payments/lending.ts\`
 - \`core/api/server/entities/lending.ts\`
-- \`frontend/src/lib/components/Entity/payments/LendingPanel.svelte\`
+- \`ui/src/screens/Lending.tsx\`
 - \`core/__tests__/finance/state/lending.test.ts\`
 - \`tests/e2e/product/e2e-lending.spec.ts\`
 
@@ -1439,7 +1439,7 @@ xln/
     src/lib/components/Entity/swap/SwapPanel.svelte ${fileSizes['frontend/src/lib/components/Entity/swap/SwapPanel.svelte'] || '?'} lines - Swap UI/state machine
     src/lib/components/Trading/OrderbookPanel.svelte ${fileSizes['frontend/src/lib/components/Trading/OrderbookPanel.svelte'] || '?'} lines - Orderbook stream/render/clicks
     src/lib/components/Entity/routed-swap-planner.ts ${fileSizes['frontend/src/lib/components/Entity/routed-swap-planner.ts'] || '?'} lines - Manual route recommendation planner
-    src/lib/components/Entity/payments/LendingPanel.svelte ${fileSizes['frontend/src/lib/components/Entity/payments/LendingPanel.svelte'] || '?'} lines - Lending offer/borrow/repay UI
+    ui/src/screens/Lending.tsx ${fileSizes['ui/src/screens/Lending.tsx'] || '?'} lines - Canonical React lending UI
 
   behavior tests/
     tests/e2e/swap/e2e-swap.spec.ts              ${fileSizes['tests/e2e/swap/e2e-swap.spec.ts'] || '?'} lines - Same-chain swap UX contract

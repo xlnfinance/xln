@@ -128,6 +128,24 @@ const claimSlot = (root: string, slot: number, holder: StandLockHolder): boolean
 
 export type StandLockGrant = Readonly<{ root: string; slot: number; token: string }>;
 
+/** Nested commands share the live parent's lease; a token alone is not a lease. */
+export const inheritedStandLock = (
+  root = standLockRoot(),
+  env: NodeJS.ProcessEnv = process.env,
+): StandLockGrant | undefined => {
+  const token = env[STAND_LOCK_TOKEN_ENV];
+  if (!token) return undefined;
+  return withStandMetadata(root, () => {
+    for (let slot = 0; slot < standLockCapacity(env); slot += 1) {
+      const holder = readStandLockHolder(root, slot);
+      if (holder?.token !== token) continue;
+      if (!pidAlive(holder.pid) || !holder.childGroup || !pidAlive(-holder.childGroup)) break;
+      return { root, slot, token };
+    }
+    throw new Error('STAND_LOCK_INHERITED_OWNER_INVALID');
+  });
+};
+
 export const registerStandGroup = (grant: StandLockGrant, pid: number): void => {
   if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('STAND_LOCK_CHILD_PID_INVALID');
   withStandMetadata(grant.root, () => {
@@ -228,12 +246,15 @@ if (import.meta.main) {
     const separator = process.argv.indexOf('--');
     const child = separator >= 0 ? process.argv.slice(separator + 1) : [];
     if (child.length === 0) throw new Error('STAND_LOCK_RUN_COMMAND_REQUIRED');
-    const grant = await acquireStandLock({
+    const inherited = inheritedStandLock();
+    const grant = inherited ?? await acquireStandLock({
       reason: flag('reason') || child.join(' ').slice(0, 60),
       waitMs: Number(flag('wait-ms') || '1800000'),
     });
     const { runStandChild } = await import('./stand/run');
-    process.exit(await runStandChild(grant, child, Number(flag('timeout-ms') || '30000')));
+    process.exit(await runStandChild(
+      grant, child, Number(flag('timeout-ms') || '30000'), inherited ? 'inherited' : 'owned',
+    ));
   } else if (command === 'release') {
     const slot = Number(flag('slot'));
     if (!Number.isSafeInteger(slot) || slot < 0) throw new Error('STAND_LOCK_RELEASE_SLOT_REQUIRED');

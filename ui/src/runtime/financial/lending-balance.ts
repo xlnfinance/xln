@@ -1,15 +1,15 @@
-import { useEffect, useState } from 'react';
-import { emptyLendingBalance, watchLendingBalance, type LendingBalanceAccount } from '@xln/frontend/lib/utils/ui/lendingBalance';
-import type { WalletView } from '../views';
-import { resolveApiBase } from '../http';
+import type { AccountView } from '../views';
 
-export function useLendingBalance(wallet: WalletView) {
-  const accounts: LendingBalanceAccount[] = wallet.accounts.map(account => ({
-    hubEntityId: account.counterpartyId,
-    intents: Array.from(account.doc.state.lendingIntents ?? []),
-  }));
-  const key = JSON.stringify({ apiBase: resolveApiBase(), userEntityId: wallet.entityId, accounts });
-  const [result, setResult] = useState({ key: '', value: emptyLendingBalance() });
-  useEffect(() => watchLendingBalance(JSON.parse(key), value => setResult({ key, value })), [key]);
-  return result.key === key ? result.value : { ...emptyLendingBalance(), loading: accounts.some(account => account.intents.length > 0) };
+/** The current signed Account view owns both assets and liabilities. */
+export function walletLendingBalance(wallet: {
+  accounts: ReadonlyArray<Pick<AccountView, 'doc' | 'isLeft'>>;
+}): Map<number, bigint> {
+  const totals = new Map<number, bigint>();
+  for (const account of wallet.accounts) {
+    for (const [token, leftAmount] of account.doc.lendingBalances) {
+      const amount = account.isLeft ? leftAmount : -leftAmount;
+      totals.set(token, (totals.get(token) ?? 0n) + amount);
+    }
+  }
+  return totals;
 }

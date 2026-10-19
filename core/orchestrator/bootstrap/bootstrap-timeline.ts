@@ -85,7 +85,7 @@ export const createBootstrapTimelineTools = (deps: BootstrapTimelineDeps) => {
   };
 };
 
-export type CurrentBootstrapTimelineInput = {
+type CurrentBootstrapTimelineInput = {
   storageOk: boolean;
   resetOk: boolean;
   hubs: AggregatedHealth['hubs'];

@@ -3,18 +3,10 @@
 import { stat } from 'node:fs/promises';
 import { deriveSignerAddressSync, signDigest } from '../../core/account/crypto';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../../core/protocol/crypto/p2p-crypto';
-import {
-  deserializeWsMessage,
-  hashHelloMessage,
-  serializeWsMessage,
-} from '../../core/network/p2p/ws-protocol';
+import { deserializeWsMessage, hashHelloMessage, serializeWsMessage } from '../../core/network/p2p/ws-protocol';
 import { fetchLoopback, isLoopbackHttps } from '../../core/orchestrator/server/loopback-fetch';
 import { relayAudienceFromWebUrl } from '../../core/orchestrator/mesh/relay-audience';
-import {
-  initialDevStartupProgressState,
-  reduceDevStartupProgress,
-  type DevStartupProgress,
-} from './startup-events';
+import { initialDevStartupProgressState, reduceDevStartupProgress, type DevStartupProgress } from './startup-events';
 
 export type DevReadyProbe = {
   apiUrl: string;
@@ -25,24 +17,19 @@ export type DevReadyProbe = {
   startedAtMs: number;
 };
 
-export type DevBackendReadyProbe = Pick<
-  DevReadyProbe,
-  'apiUrl' | 'watchtowerUrl' | 'runtimeBundle' | 'startedAtMs'
->;
+export type DevBackendReadyProbe = Pick<DevReadyProbe, 'apiUrl' | 'watchtowerUrl' | 'runtimeBundle' | 'startedAtMs'>;
 
-export type DevReadyResult =
-  | { ready: true }
-  | { ready: false; reason: string; fatal: boolean };
+export type DevReadyResult = { ready: true } | { ready: false; reason: string; fatal: boolean };
 
 export type DevReadyWaitOutcome =
   | { ready: true; totalElapsedMs: number; probeElapsedMs: number }
   | {
-    ready: false;
-    reason: string;
-    fatal: boolean;
-    totalElapsedMs: number;
-    probeElapsedMs: number;
-  };
+      ready: false;
+      reason: string;
+      fatal: boolean;
+      totalElapsedMs: number;
+      probeElapsedMs: number;
+    };
 
 const notReady = (reason: string, fatal = false): DevReadyResult => ({
   ready: false,
@@ -50,93 +37,94 @@ const notReady = (reason: string, fatal = false): DevReadyResult => ({
   fatal,
 });
 
-const fetchWithin = (url: string, init: RequestInit = {}): Promise<Response> =>
-  fetchLoopback(url, { ...init, signal: AbortSignal.timeout(2_000) });
+const fetchWithin = async (url: string, init: RequestInit = {}): Promise<Response> => {
+  try {
+    return await fetchLoopback(url, { ...init, signal: AbortSignal.timeout(2_000) });
+  } catch (error) {
+    throw new Error(`DEV_READY_FETCH_FAILED:${url}:${String(error)}`, { cause: error });
+  }
+};
 
 const readObject = async (response: Response): Promise<Record<string, unknown>> => {
   const value: unknown = await response.json();
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 };
 
-const probeRelayChallenge = (webUrl: string): Promise<DevReadyResult> => new Promise(resolve => {
-  const expectedAudience = relayAudienceFromWebUrl(webUrl);
-  const origin = new URL(webUrl).origin;
-  const probeSeed = `xln/dev-ready/relay-auth/v1:${expectedAudience}`;
-  const signerLabel = '1';
-  const runtimeId = deriveSignerAddressSync(probeSeed, signerLabel).toLowerCase();
-  const encryptionPubKey = pubKeyToHex(deriveEncryptionKeyPair(probeSeed).publicKey);
-  const socket = new WebSocket(expectedAudience, {
-    headers: { Origin: origin },
-    // DEV uses a self-signed localhost certificate. Disable verification only
-    // for this loopback readiness client; browser and non-loopback TLS policy
-    // remain unchanged.
-    ...(isLoopbackHttps(webUrl) ? { tls: { rejectUnauthorized: false } } : {}),
-  });
-  socket.binaryType = 'arraybuffer';
-  let settled = false;
-  const finish = (result: DevReadyResult): void => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timer);
-    if (result.ready && socket.readyState === WebSocket.OPEN) {
-      const closeDeadline = setTimeout(() => resolve(result), 500);
-      socket.onclose = () => {
-        clearTimeout(closeDeadline);
-        resolve(result);
-      };
-      socket.close(1000, 'dev-ready-complete');
-      return;
-    }
-    socket.close();
-    resolve(result);
-  };
-  const timer = setTimeout(
-    () => finish(notReady('wallet-relay-challenge-timeout')),
-    2_000,
-  );
-  socket.onmessage = event => {
-    try {
-      const message = deserializeWsMessage(event.data as ArrayBuffer);
-      if (message.type === 'hello_ack') {
-        if (message.to !== runtimeId) {
-          finish(notReady('wallet-relay-auth-runtime-mismatch'));
+const probeRelayChallenge = (webUrl: string): Promise<DevReadyResult> =>
+  new Promise(resolve => {
+    const expectedAudience = relayAudienceFromWebUrl(webUrl);
+    const origin = new URL(webUrl).origin;
+    const probeSeed = `xln/dev-ready/relay-auth/v1:${expectedAudience}`;
+    const signerLabel = '1';
+    const runtimeId = deriveSignerAddressSync(probeSeed, signerLabel).toLowerCase();
+    const encryptionPubKey = pubKeyToHex(deriveEncryptionKeyPair(probeSeed).publicKey);
+    const socket = new WebSocket(expectedAudience, {
+      headers: { Origin: origin },
+      // DEV uses a self-signed localhost certificate. Disable verification only
+      // for this loopback readiness client; browser and non-loopback TLS policy
+      // remain unchanged.
+      ...(isLoopbackHttps(webUrl) ? { tls: { rejectUnauthorized: false } } : {}),
+    });
+    socket.binaryType = 'arraybuffer';
+    let settled = false;
+    const finish = (result: DevReadyResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (result.ready && socket.readyState === WebSocket.OPEN) {
+        const closeDeadline = setTimeout(() => resolve(result), 500);
+        socket.onclose = () => {
+          clearTimeout(closeDeadline);
+          resolve(result);
+        };
+        socket.close(1000, 'dev-ready-complete');
+        return;
+      }
+      socket.close();
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish(notReady('wallet-relay-challenge-timeout')), 2_000);
+    socket.onmessage = event => {
+      try {
+        const message = deserializeWsMessage(event.data as ArrayBuffer);
+        if (message.type === 'hello_ack') {
+          if (message.to !== runtimeId) {
+            finish(notReady('wallet-relay-auth-runtime-mismatch'));
+            return;
+          }
+          finish({ ready: true });
           return;
         }
-        finish({ ready: true });
-        return;
+        if (message.type !== 'hello_challenge') return;
+        if (message.audience !== expectedAudience) {
+          finish(notReady(`wallet-relay-audience-mismatch:${String(message.audience || 'missing')}`));
+          return;
+        }
+        const timestamp = Date.now();
+        socket.send(
+          serializeWsMessage({
+            type: 'hello',
+            from: runtimeId,
+            fromEncryptionPubKey: encryptionPubKey,
+            timestamp,
+            audience: expectedAudience,
+            auth: {
+              nonce: message.challenge!,
+              timestamp,
+              signature: signDigest(
+                probeSeed,
+                signerLabel,
+                hashHelloMessage(runtimeId, encryptionPubKey, timestamp, message.challenge!, expectedAudience),
+              ),
+            },
+          }),
+        );
+      } catch (error) {
+        finish(notReady(error instanceof Error ? error.message : String(error)));
       }
-      if (message.type !== 'hello_challenge') return;
-      if (message.audience !== expectedAudience) {
-        finish(notReady(
-          `wallet-relay-audience-mismatch:${String(message.audience || 'missing')}`,
-        ));
-        return;
-      }
-      const timestamp = Date.now();
-      socket.send(serializeWsMessage({
-        type: 'hello',
-        from: runtimeId,
-        fromEncryptionPubKey: encryptionPubKey,
-        timestamp,
-        audience: expectedAudience,
-        auth: {
-          nonce: message.challenge!,
-          timestamp,
-          signature: signDigest(
-            probeSeed,
-            signerLabel,
-            hashHelloMessage(runtimeId, encryptionPubKey, timestamp, message.challenge!, expectedAudience),
-          ),
-        },
-      }));
-    } catch (error) {
-      finish(notReady(error instanceof Error ? error.message : String(error)));
-    }
-  };
-  socket.onerror = () => finish(notReady('wallet-relay-websocket-error'));
-});
+    };
+    socket.onerror = () => finish(notReady('wallet-relay-websocket-error'));
+  });
 
 const probeOffchainFaucetPipe = async (webUrl: string): Promise<DevReadyResult> => {
   const hubsResponse = await fetchWithin(`${webUrl}/api/hubs`);
@@ -166,9 +154,7 @@ const probeOffchainFaucetPipe = async (webUrl: string): Promise<DevReadyResult> 
   const body = await readObject(response);
   return response.status === 400 && body['code'] === 'FAUCET_INVALID_USER_ENTITY_ID'
     ? { ready: true }
-    : notReady(
-        `wallet-faucet-pipe-${response.status}:${String(body['code'] || 'missing-code')}`,
-      );
+    : notReady(`wallet-faucet-pipe-${response.status}:${String(body['code'] || 'missing-code')}`);
 };
 
 export const probeDevBackendReady = async (input: DevBackendReadyProbe): Promise<DevReadyResult> => {
@@ -203,14 +189,17 @@ export const probeDevReady = async (input: DevReadyProbe): Promise<DevReadyResul
     const backend = await probeDevBackendReady(input);
     if (!backend.ready) return backend;
 
-    const [appResponse, runtimeResponse] = await Promise.all([
+    const [appResponse, walletResponse, runtimeResponse] = await Promise.all([
       fetchWithin(`${input.webUrl}/app`),
+      fetchWithin(`${input.webUrl}/ui/`),
       fetchWithin(`${input.webUrl}/runtime.js`),
     ]);
     await appResponse.body?.cancel();
-    if (!appResponse.ok) return notReady(`wallet-http-${appResponse.status}`);
+    await walletResponse.body?.cancel();
     const runtimeType = runtimeResponse.headers.get('content-type') || '';
     await runtimeResponse.body?.cancel();
+    if (!appResponse.ok) return notReady(`observer-http-${appResponse.status}`);
+    if (!walletResponse.ok) return notReady(`wallet-http-${walletResponse.status}`);
     if (!runtimeResponse.ok || !runtimeType.includes('javascript')) {
       return notReady(`runtime-http-${runtimeResponse.status}`);
     }
@@ -326,10 +315,11 @@ const numberFlag = (name: string): number => {
   return value;
 };
 
-const waitForShutdown = (): Promise<void> => new Promise(resolve => {
-  process.once('SIGINT', resolve);
-  process.once('SIGTERM', resolve);
-});
+const waitForShutdown = (): Promise<void> =>
+  new Promise(resolve => {
+    process.once('SIGINT', resolve);
+    process.once('SIGTERM', resolve);
+  });
 
 if (import.meta.main) {
   const input: DevReadyProbe = {
@@ -350,14 +340,14 @@ if (import.meta.main) {
   if (!outcome.ready) {
     console.error(
       `DEV_NOT_READY totalElapsedMs=${outcome.totalElapsedMs} ` +
-      `probeElapsedMs=${outcome.probeElapsedMs} fatal=${String(outcome.fatal)} ` +
-      `reason=${outcome.reason}`,
+        `probeElapsedMs=${outcome.probeElapsedMs} fatal=${String(outcome.fatal)} ` +
+        `reason=${outcome.reason}`,
     );
     process.exit(1);
   }
   console.log(
     `DEV_READY totalElapsedMs=${outcome.totalElapsedMs} ` +
-    `probeElapsedMs=${outcome.probeElapsedMs} wallet=${input.webUrl}/ui/ api=${input.apiUrl}`,
+      `probeElapsedMs=${outcome.probeElapsedMs} wallet=${input.webUrl}/ui/ api=${input.apiUrl}`,
   );
   await waitForShutdown();
 }

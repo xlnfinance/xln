@@ -1,0 +1,194 @@
+{
+  "baselineSHA": "c14cabfba5c9396e8614b996ff5a60c2bdea36f8",
+  "publication": "uncommitted candidate; public frontend not yet verified against this candidate",
+  "verifiedAt": "2026-10-19T07:13:56.527213+00:00",
+  "rust": {
+    "artifact": "rscore-test-04.log",
+    "exit": 0,
+    "executables": 41,
+    "passed": 1145,
+    "failed": 0,
+    "existingIgnored": 1,
+    "ignoreReason": "Rust lending covenant bodies TypeScript-only; seven kinds unavailable in Rust launch profile"
+  },
+  "abi": {
+    "reference": "independent ethers AbiCoder using current TS BATCH_ABI and PROOF_BODY_ABI; old six vectors reproduced before correcting Rust encoder",
+    "currentVectors": {
+      "deltas": {
+        "proofBodyHash": "0x4e46dfc2e9edae19d473497dd3059d858c0da39b8c2cc431f591d8705da60c35",
+        "disputeHash": "0xbec497f771431e90152c3f494760c280a19ed2644f5e52484a9e0f32f52fd37a",
+        "atomBytes": []
+      },
+      "payments": {
+        "proofBodyHash": "0x699027750b98322ad37921c8840f6397540647c76515f73de0b521b6f8d4c1df",
+        "disputeHash": "0xe1af0beafea45ed0e148b2e002b1989cb984beef69ea8b0c0de5ceea39a3b2c7",
+        "atomBytes": [1242]
+      },
+      "swaps": {
+        "proofBodyHash": "0xd2161b32b598c9e77e7b13fddf28c525a74ba6d4c60cba3ebd1f97eac7e3f910",
+        "disputeHash": "0x3ea37cc1ad66e689274e2825f7d0f6b03efd072cc47b13077c5e3238fa288b82",
+        "atomBytes": [922, 922]
+      },
+      "pulls": {
+        "proofBodyHash": "0x5622977e5355dc7161072b4f0545e1932bcfff0986779585f109e14accbd4839",
+        "disputeHash": "0xdab5590b19b38ef41ee9fb21b26515c5eebf8f353a8b15d505df5b89938e1c46",
+        "atomBytes": [1050]
+      }
+    },
+    "chunkProofHashes": {
+      "paymentsSwaps": "0x7331b0e30fbe6940ecbc6d33c9fb4e1a56820b0429a0c14e1ecf750cf1231b4f",
+      "withPulls": "0x0af26e0daa5e35620695a67d9b7cb4cad0b643b11cbd30a1fc68fe1d75bacfcf"
+    },
+    "chunkAtomBytes": [9882, 1562, 9882, 2202, 9562, 1498],
+    "l1Passed": 7,
+    "unchangedTsLifecyclePassed": 1,
+    "rustLifecyclePassed": 1
+  },
+  "dispatch": {
+    "red": "captured ACK was dispatched after a later complete atomic pair",
+    "greenTests": 47,
+    "assertions": 182,
+    "rustAtomicTests": 10,
+    "immutableWalRows": 3,
+    "review": {
+      "paths": [
+        {
+          "path": "core/runtime/delivery/dispatch.ts",
+          "sha256": "11c81642276452098ff27e7fb426b8c0c2951de30a821f95cac7cf0f336d66af"
+        },
+        {
+          "path": "core/__tests__/runtime/transport/runtime-output-routing.test.ts",
+          "sha256": "58d3544a4fae9970c7f3b9b0d29236e8471800ba3b0fec4ba637e9de15584c64"
+        },
+        {
+          "path": "rscore/crates/engine/src/dispute.rs",
+          "sha256": "02d8e0525bfe8438d49812de36178d655ecebdf4f3d9a0e7bbd11a20992b626d"
+        },
+        {
+          "path": "rscore/crates/engine/tests/dispute_proof.rs",
+          "sha256": "85e4503aa4ece3985e75290e3c8d00a5c81603657d133291cec98e4495971949"
+        },
+        {
+          "path": "rscore/crates/runtime/src/transport/tests/atomic.rs",
+          "sha256": "4fce3346a211dc85cab7ce73ea98538943a7f4e4839cd7ed3cdf5a72662fe5ae"
+        },
+        {
+          "path": "rscore/fixtures/native-cross-cancel-ack-v1.json",
+          "sha256": "a4cd16a20962a5f952a86bfe2e811718ea15e1f18648a76296287ccb152b9154"
+        }
+      ],
+      "patchSHA256": "efcc9f67637bb4a02a1990b5605c3808ae86bab732d3d9a9995b2c22d9cdd677"
+    }
+  },
+  "public": {
+    "primaryBootMs": 58381,
+    "tutorialFoundationActions": "9/9 including faucet,Pay25USDC,Swap25USDC,Activity",
+    "returningWalletMs": 10805,
+    "advancedActions": "5passed/1failed missingHubs target",
+    "fullTutorialVerified": false
+  },
+  "candidateBrowser": {
+    "observer": {
+      "passed": 1,
+      "total": 1,
+      "skipped": 0,
+      "testSeconds": 174.437,
+      "scope": "historical graph, mobile reload, actual wallet return through gateway"
+    },
+    "freshBootMs": 48285,
+    "tutorialTargets": "23/23 desktop and23/23 mobile across retained candidate runs; not one final unchanged candidate public pass"
+  },
+  "remaining": [
+    "unchanged check and coherent main commit/push",
+    "frontend deploy, served artifact hash and all public tutorial clicks",
+    "full release and mainnet acceptance; native TRON and Ethereum USDT proofs"
+  ],
+  "logSHA256": {
+    "rscore-test-04.log": "94e8d430a6e8c3af3ef768367be3bebab21dc872db014c416523985695dad51c",
+    "rust-dispute-l1.log": "c9b0829baf966b399eaa70f174b8c0aeec0a1f00b564874938c5bf47229e76ff",
+    "rust-dispute-chunks-l1.log": "5d445f6f76d182bca142e1f1fb649b426baf9a73aa8e4a90de069570e5db75d2",
+    "ts-cross-lifecycle-unchanged.log": "a4ec39343d7a5b1aa20f0db5af6cb82735a3cfd8f707494a3f8bb2e6f539b9d5",
+    "rust-cross-lifecycle-current-abi.log": "4b8a61a2eef6a6a81beae65af55e1edc775eb9e421c2de561519393d04524e00",
+    "mixed-output-order-red.log": "e798e56b0498c6f7bd2a273c9c0d31b01e32868b99d1750a40df872e9b0c7ab2",
+    "mixed-output-order-l1.log": "0f08fea86114f9b0006910e23af883360382d5cfc96ebdbf928033f8fe4ace8b",
+    "rust-atomic-current-l1.log": "a69501535858543b0a7ec371feb90f73aea5493628fa1abb320c97c85ebe9584",
+    "observer-dev-results-07.json": "b571944329f154f165eba476be1072ef26d5328aeb6eae762b99fa7d7802ab5b",
+    "exact-test-unit-08.log": "56bca517d7139bd82093c752ae5793b311f199351cb1d58e119f16cc9e6e272d",
+    "exact-test-unit-08-result.json": "f9539c37a0a375cec48a58c6a68f6da634b176856455d6d10385757fbdca5064",
+    "exact-test-02.log": "c72a08ee8a4e4e8cbaa30ce2e9d2fbfea14e8d71da7145056dca4d51b120108a",
+    "exact-test-02-result.json": "3349c0059eaf362494c25bc7de901d8b6e37c5d4b0086b748e2eeb91161a3abc",
+    "sparse-wal-diagnostic-01.log": "e33302145c9a41df0751c84af0da6ca4d5e427251117a076f1e87c3d0963fdd1",
+    "sparse-wal-l1.log": "da2f375401e39d9b3d7a64927fa43bbce7e12a626b0c2c7a59c72ae580202f72",
+    "public-landing-01/result.json": "2c5e8dfe30dd4c770928fb983e2202f122d7ab5661b7babbda8f9b82b6c8f667",
+    "unused-surface-l1.log": "155ad70b1a735f8b282636701e7c8463a16263b3c29746d92eb796ea92789985",
+    "unused-surface-gate.log": "f3b0edab1fddbd4059be454a077ff8e49cf8952342b0956a6d699f03c67c1eeb",
+    "verification-scope-red.log": "0b0410eb232d353bf7a9cbcc9f2e927aa56bee8ba49348b2d2cfbe7119ccb286",
+    "verification-scope-green.log": "9b95ec966f6d69afe837c572176cba9531044d3df1902c5d898e8ecc1df86c4e",
+    "product-final-l2-05.log": "0c89ff29f8cefe07483fa80a441544b15d7fce7d31082acac17318d8ab5d69cc"
+  },
+  "currentFinancialTutorialBrowser": {
+    "exitCode": 0,
+    "stats": {
+      "startTime": "2026-10-19T07:09:46.134Z",
+      "duration": 190162.602,
+      "expected": 9,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "browserErrors": 0,
+    "logSHA256": "0c89ff29f8cefe07483fa80a441544b15d7fce7d31082acac17318d8ab5d69cc",
+    "reportSHA256": "05ac04131c384f8e323c360569399277e1b1bd697cd7a93cd838fd249310f928",
+    "scope": "Current candidate after dead-debug/export deletion and verification gate correction;local real browser on two EVM chains,not nativeTRON"
+  },
+  "exactUnit": {
+    "command": "bun run test:unit",
+    "exitCode": 0,
+    "passed": 5487,
+    "failed": 0,
+    "skipped": 1,
+    "assertions": 675634,
+    "processSeconds": 1395.78,
+    "groups": {
+      "workers": 53,
+      "root": 5412,
+      "subprocess": 22
+    },
+    "skip": "Existing RSCORE_REQUIRE_SEMANTIC_COMPLETENESS conditional; full Rust transaction semantic coverage is not certified.",
+    "sparseWal": "All original financial checks retained; child55s bounded before test60s; existing inner recovery budgets10s. Passed43.152s inside full suite."
+  },
+  "exactTest": {
+    "command": "bun run test",
+    "exitCode": 0,
+    "scenariosPassed": 5,
+    "scenarios": ["processbatch", "rebalance", "dispute-lifecycle", "dispute-transformer", "multi-sig"],
+    "browser": {
+      "expected": 1,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0,
+      "errors": 0,
+      "title": "faucet -> request_collateral -> secured bar"
+    },
+    "processSeconds": 164.713
+  },
+  "publicLandingEntry": {
+    "origin": "https://xln.finance",
+    "passed": 2,
+    "total": 2,
+    "desktopMs": 2193.756917,
+    "mobileMs": 1974.7845,
+    "clickedLabel": "Try the test wallet",
+    "observed": "/ui/ online stack and visible Open a test wallet button",
+    "servedSHA": null,
+    "documentSha256": "47eae7f31ecc132a02606fcd59c537d90e655a4a298be2f4a272ecd201496663",
+    "scope": "Landing entry only, does not establish primary creation or tutorial completion. Source-only route hypothesis was disproved; no edit made."
+  },
+  "postExactCommandChanges": {
+    "runtime": "Removed unconsumed account-root debug callback and four unused type reexports;production formulas unchanged",
+    "l1": "21/21,77assertions",
+    "l2": "Current product-final-l2-05 real financial/tutorial browser9/9",
+    "publicationGate": "Narrow independent BrainVault dirtiness exception,rename source preservation,300-second aggregatecheck;real Git20/20,100assertions",
+    "limits": "Exact test:unit/test successes predate these changes;focused L1/L2 rerun covers changes;final check still pending"
+  }
+}

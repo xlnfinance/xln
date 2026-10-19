@@ -39,6 +39,7 @@ import {
   loadEntityAccountDocFromStorageDb,
   loadEntityStateFromStorageDb,
   loadEntityViewPageFromStorageDb,
+  loadEntityViewPagesFromStorageDb,
   main,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
@@ -453,7 +454,7 @@ const handleHostReadiness = async (
       const p2p = env.infrastructure?.p2p ?? null;
       if (!p2p) return false;
       if (!env.gossip.profiles.has(hubEntityId)) await p2p.admitSharedProfiles([hubProfile]);
-      const directReady = p2p.prepareDirectEntityRoutes([hubEntityId]);
+      const directReady = p2p.prepareEntityRoutes([hubEntityId]);
       const profile = env.gossip.profiles.get(hubEntityId);
       const ready = directReady && profile?.runtimeId?.toLowerCase() === hubRuntimeId &&
         /^0x[0-9a-f]{64}$/.test(String(profile.runtimeEncPubKey || ''));
@@ -1070,8 +1071,13 @@ const adapterDeps = {
     loadEntityStateFromStorageDb(env, entityId, height),
   loadEntityAccountDoc: (env: RuntimeReplica, entityId: string, counterpartyId: string, height: number) =>
     loadEntityAccountDocFromStorageDb(env, entityId, counterpartyId, height),
-  loadEntityViewPage: (env: RuntimeReplica, entityId: string, height: number, query?: Parameters<typeof loadEntityViewPageFromStorageDb>[3]) =>
-    loadEntityViewPageFromStorageDb(env, entityId, height, query),
+  loadEntityViewPages: loadEntityViewPagesFromStorageDb,
+  loadEntityViewPage: (
+    env: RuntimeReplica,
+    entityId: string,
+    height: number,
+    query?: Parameters<typeof loadEntityViewPageFromStorageDb>[3],
+  ) => loadEntityViewPageFromStorageDb(env, entityId, height, query),
   listEntityIdsAtHeight: (env: RuntimeReplica, height: number) => listPersistedEntityIdsAtHeight(env, height),
 };
 

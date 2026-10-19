@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountInput, AccountOutput } from '../../types/account';
+import type { AccountFrame, AccountInput, AccountOutput, AccountTx } from '../../types/account';
 import type { HankoString } from '../../types/hanko';
 import type { AccountJClaimNodeChanges } from '../../types/finance/account-j-claims';
 import type { AccountTxRejection } from '../tx/apply-types';
@@ -31,6 +31,8 @@ export type AccountCommittedFrame = {
   proposerIsLeft: boolean;
   committedViaNewFrame: boolean;
 };
+
+export type AccountFailedLendingDisbursement = Readonly<Extract<AccountTx, { type: 'lending_disburse' }>['data']>;
 
 export type AccountFailedHtlcLock = {
   hashlock: string;
@@ -91,12 +93,17 @@ export type HandleAccountInputRejected = Readonly<{
   events: string[];
 }>;
 
-export type HandleAccountInputDispute = Readonly<{
-  ok: false;
-  disposition: 'dispute';
-  disputeRequired: AccountInputDisputeRequired;
-  events: string[];
-}>;
+export type HandleAccountInputDispute = Readonly<
+  Pick<
+    HandleAccountInputApplied,
+    'committedFrames' | 'candidateEffects' | 'accountJClaimNodeChanges' | 'timedOutHashlocks'
+  > & {
+    ok: false;
+    disposition: 'dispute';
+    disputeRequired: AccountInputDisputeRequired;
+    events: string[];
+  }
+>;
 
 export type HandleAccountInputResult =
   | HandleAccountInputApplied
@@ -116,22 +123,29 @@ type ProposalTrace = Readonly<{
   proposalDroppedTransactions: readonly ProposalDroppedTransaction[];
 }>;
 
-export type ProposeAccountFrameProposed = Readonly<AccountConsensusOkEffects & ProposalTrace & {
-  ok: true;
-  outcome: 'proposed';
-  accountChanged: true;
-  accountInput: AccountInput;
-  failedHtlcLocks?: AccountFailedHtlcLock[];
-}>;
+export type ProposeAccountFrameProposed = Readonly<
+  AccountConsensusOkEffects &
+    ProposalTrace & {
+      ok: true;
+      outcome: 'proposed';
+      accountChanged: true;
+      accountInput: AccountInput;
+      failedHtlcLocks?: AccountFailedHtlcLock[];
+      failedLendingDisbursements?: AccountFailedLendingDisbursement[];
+    }
+>;
 
-export type ProposeAccountFrameIdle = Readonly<ProposalTrace & {
-  ok: true;
-  outcome: 'idle';
-  message: string;
-  events: string[];
-  accountChanged?: true;
-  failedHtlcLocks?: AccountFailedHtlcLock[];
-}>;
+export type ProposeAccountFrameIdle = Readonly<
+  ProposalTrace & {
+    ok: true;
+    outcome: 'idle';
+    message: string;
+    events: string[];
+    accountChanged?: true;
+    failedHtlcLocks?: AccountFailedHtlcLock[];
+    failedLendingDisbursements?: AccountFailedLendingDisbursement[];
+  }
+>;
 
 export type ProposeAccountFrameRejected = Readonly<ProposalTrace & {
   ok: false;

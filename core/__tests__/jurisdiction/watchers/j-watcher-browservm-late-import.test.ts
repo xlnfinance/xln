@@ -10,6 +10,7 @@ import {
 import { bootScenario, fundEntities, registerEntities } from '../../../scenarios/harness/boot';
 import { ensureSignerKeysFromSeed } from '../../../scenarios/harness/helpers';
 import { createEmptyEnv } from '../../../runtime';
+import { getJScanHistory } from '../../../runtime/mempool/j-scan-carry';
 
 const canonicalSigner = (env: ReturnType<typeof createEmptyEnv>, signerIndex: string): string =>
   computeAddress(hexlify(getSignerPrivateKey(env, signerIndex))).toLowerCase();
@@ -25,8 +26,9 @@ describe('BrowserVM J-watcher historical catch-up', () => {
     const conflicting = createEmptyEnv(null);
     conflicting.runtimeSeed = seed;
     conflicting.runtimeId = `0x${'11'.repeat(20)}`;
-    expect(() => ensureSignerKeysFromSeed(conflicting, ['2'], 'scenario witness'))
-      .toThrow('scenario witness: runtimeId does not match runtimeSeed');
+    expect(() => ensureSignerKeysFromSeed(conflicting, ['2'], 'scenario witness')).toThrow(
+      'scenario witness: runtimeId does not match runtimeSeed',
+    );
   });
 
   test('isolates the same signer slot as a canonical EOA in each RuntimeReplica key store', async () => {
@@ -44,11 +46,18 @@ describe('BrowserVM J-watcher historical catch-up', () => {
     env.quietRuntimeLogs = true;
     try {
       const secondAddress = canonicalSigner(env, '1');
-      const [registered] = await registerEntities(env, jadapter, [{
-        name: 'Seed B Entity',
-        signer: secondAddress,
-        position: { x: 0, y: 0, z: 0 },
-      }], jurisdiction);
+      const [registered] = await registerEntities(
+        env,
+        jadapter,
+        [
+          {
+            name: 'Seed B Entity',
+            signer: secondAddress,
+            position: { x: 0, y: 0, z: 0 },
+          },
+        ],
+        jurisdiction,
+      );
       if (!registered) throw new Error('NUMERIC_SIGNER_ISOLATION_REGISTRATION_MISSING');
       const replica = env.state.eReplicas.get(`${registered.id}:${registered.signer}`);
       if (!replica) throw new Error('NUMERIC_SIGNER_ISOLATION_REPLICA_MISSING');
@@ -57,11 +66,8 @@ describe('BrowserVM J-watcher historical catch-up', () => {
       expect(secondAddress).not.toBe(firstAddress);
       expect(registered.signer).toBe(secondAddress);
       expect(replica.state.config.validators).toEqual([secondAddress]);
-      expect(onchain.currentBoardHash.toLowerCase()).toBe(
-        await getEntityConfigBoardHash(env, replica.state.config),
-      );
-      expect(jadapter.getBrowserVM()?.getEntityWallet(registered.id).address.toLowerCase())
-        .toBe(secondAddress);
+      expect(onchain.currentBoardHash.toLowerCase()).toBe(await getEntityConfigBoardHash(env, replica.state.config));
+      expect(jadapter.getBrowserVM()?.getEntityWallet(registered.id).address.toLowerCase()).toBe(secondAddress);
     } finally {
       await jadapter.close();
     }
@@ -79,11 +85,18 @@ describe('BrowserVM J-watcher historical catch-up', () => {
 
     try {
       const signer = canonicalSigner(env, '1');
-      const [registered] = await registerEntities(env, jadapter, [{
-        name: 'Late Numbered Entity',
-        signer,
-        position: { x: 0, y: 0, z: 0 },
-      }], jurisdiction);
+      const [registered] = await registerEntities(
+        env,
+        jadapter,
+        [
+          {
+            name: 'Late Numbered Entity',
+            signer,
+            position: { x: 0, y: 0, z: 0 },
+          },
+        ],
+        jurisdiction,
+      );
       if (!registered) throw new Error('BROWSERVM_LATE_IMPORT_REGISTRATION_MISSING');
 
       const onchain = await jadapter.entityProvider.getEntityInfo(registered.id);
@@ -93,11 +106,9 @@ describe('BrowserVM J-watcher historical catch-up', () => {
 
       expect(replica.jHistory?.scannedThroughHeight).toBeGreaterThanOrEqual(Number(onchain.registrationBlock));
       expect(replica.state.lastFinalizedJHeight).toBeGreaterThanOrEqual(Number(onchain.registrationBlock));
-      expect(resolveObserverCertifiedBoardHash(
-        replica.state,
-        getCertifiedBoardNodeStore(env),
-        registered.id,
-      )).toBe(onchain.currentBoardHash.toLowerCase());
+      expect(resolveObserverCertifiedBoardHash(replica.state, getCertifiedBoardNodeStore(env), registered.id)).toBe(
+        onchain.currentBoardHash.toLowerCase(),
+      );
     } finally {
       await jadapter.close();
     }
@@ -116,10 +127,15 @@ describe('BrowserVM J-watcher historical catch-up', () => {
     try {
       const senderSigner = canonicalSigner(env, '1');
       const observerSigner = canonicalSigner(env, '2');
-      const [sender, observer] = await registerEntities(env, jadapter, [
-        { name: 'Sender', signer: senderSigner, position: { x: -1, y: 0, z: 0 } },
-        { name: 'Observer', signer: observerSigner, position: { x: 1, y: 0, z: 0 } },
-      ], jurisdiction);
+      const [sender, observer] = await registerEntities(
+        env,
+        jadapter,
+        [
+          { name: 'Sender', signer: senderSigner, position: { x: -1, y: 0, z: 0 } },
+          { name: 'Observer', signer: observerSigner, position: { x: 1, y: 0, z: 0 } },
+        ],
+        jurisdiction,
+      );
       if (!sender || !observer) throw new Error('BROWSERVM_MULTI_ENTITY_REGISTRATION_MISSING');
 
       const observerBeforeFund = env.state.eReplicas.get(`${observer.id}:${observer.signer}`);
@@ -139,8 +155,10 @@ describe('BrowserVM J-watcher historical catch-up', () => {
       // fundEntities drains the COMPLETE watcher, which supplies the exact chain/depository.
       // Its authenticated empty suffix updates only local evidence for same-J siblings.
       // Receipt-only cross-J exclusion is tested independently in jadapter-watcher-ingress.
-      expect(observerReplica.jHistory?.scannedThroughHeight).toBe(targetBlock);
-      expect(observerReplica.jHistory?.scannedThroughHeight).toBeGreaterThan(Number(observerScanBeforeFund));
+      const observerHistory = getJScanHistory(env, `${observer.id}:${observer.signer}`, observerReplica);
+      expect(observerHistory?.scannedThroughHeight).toBe(targetBlock);
+      expect(observerHistory?.scannedThroughHeight).toBeGreaterThan(Number(observerScanBeforeFund));
+      expect(observerReplica.jHistory?.scannedThroughHeight).toBe(observerScanBeforeFund);
       expect(observerReplica.state.height).toBe(observerHeightBeforeFund);
       expect(observerReplica.state.reserves.get(1)).toBe(observerReserveBeforeFund);
     } finally {

@@ -29,10 +29,8 @@ describe('entity panel routing helpers', () => {
       activeTab: 'accounts',
       accountWorkspaceTab: 'move',
     });
-    expect(resolveEntityPanelDeepLink({ hashRoute: 'accounts/lending' })).toEqual({
-      activeTab: 'accounts',
-      accountWorkspaceTab: 'lending',
-    });
+    expect(canonicalizeEntityPanelRoute('accounts/lending')).toBeNull();
+    expect(resolveEntityPanelDeepLink({ hashRoute: 'accounts/lending' })).toEqual({});
   });
 
   test('preserves a canonical invoice payload while selecting the send workspace', () => {

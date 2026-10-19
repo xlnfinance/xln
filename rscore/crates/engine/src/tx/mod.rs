@@ -38,27 +38,6 @@ pub const ACCOUNT_TX_TYPES: [&str; 23] = [
     "j_event_claim",
 ];
 
-/// Canonical live Account admission profile shared with TypeScript
-/// (`core/account/tx/admission-policy.ts`).
-///
-/// Launch profile: lending is deferred. Decode and hash every variant so
-/// historical signed claims remain evidence for contract exit; refuse new
-/// local and peer admission before mutation. Collateral alone secures recovery.
-pub(crate) fn account_tx_admission_error(tx: &AccountTx) -> Option<StateError> {
-    const OUT_OF_PROFILE_TX_KINDS: [&str; 7] = [
-        "lending_fund",
-        "lending_rate",
-        "lending_borrow_request",
-        "lending_repay",
-        "lending_disburse",
-        "lending_close_request",
-        "lending_close_payout",
-    ];
-    OUT_OF_PROFILE_TX_KINDS
-        .contains(&tx.wire_name())
-        .then(|| StateError::AccountTxKindOutOfProfile(tx.wire_name()))
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeliveryMode {
     Direct,

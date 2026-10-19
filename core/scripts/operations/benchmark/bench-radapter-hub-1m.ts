@@ -35,20 +35,16 @@ import {
 import { inspectStorage } from '../../../storage/read/inspect';
 import { createSnapshot, seedFreshStorageEpoch } from '../../../storage/database/lifecycle';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../../../storage/read/projections';
-import { deriveRuntimeIdFromSeed } from '../../../storage/runtime-dbs';
+import { createEmptyEnv } from '../../../runtime';
 import {
   listStorageLiveEntityIds,
   loadEntityAccountDocFromStorage,
   loadEntityViewPageFromStorage,
   readStorageHead,
 } from '../../../storage/read/read';
-import type {
-  RuntimeDbLike,
-  StorageDoc,
-  StorageHead,
-} from '../../../storage/types';
+import type { RuntimeDbLike, StorageDoc, StorageHead } from '../../../storage/types';
 import type { AccountReplica } from '../../../types/account';
-import type { EntityReplica, EntityState } from '../../../entity/types';
+import type { EntityState } from '../../../entity/types';
 import type { RuntimeReplica, RuntimeInput } from '../../../runtime/types';
 
 type Cli = {
@@ -80,14 +76,11 @@ type Cli = {
   maxRotationProbeMs: number;
 };
 
-const putResidentAccount = (
-  state: EntityState,
-  counterpartyId: string,
-  account: AccountReplica,
-): void => {
-  state.accounts = state.accounts instanceof PersistentEntityAccountMap
-    ? state.accounts.updated(counterpartyId, account)
-    : state.accounts.set(counterpartyId, account);
+const putResidentAccount = (state: EntityState, counterpartyId: string, account: AccountReplica): void => {
+  state.accounts =
+    state.accounts instanceof PersistentEntityAccountMap
+      ? state.accounts.updated(counterpartyId, account)
+      : state.accounts.set(counterpartyId, account);
 };
 
 type TimedEvent = {
@@ -102,13 +95,14 @@ type TimedEvent = {
 const argv = process.argv.slice(2);
 
 const readArg = (name: string, defaultValue: string): string => {
-  const eq = argv.find((arg) => arg.startsWith(`${name}=`));
+  const eq = argv.find(arg => arg.startsWith(`${name}=`));
   if (eq) return eq.slice(name.length + 1);
   const idx = argv.indexOf(name);
-  return idx >= 0 ? argv[idx + 1] ?? defaultValue : defaultValue;
+  return idx >= 0 ? (argv[idx + 1] ?? defaultValue) : defaultValue;
 };
 
-const hasFlag = (name: string): boolean => argv.includes(name) || argv.includes(`${name}=1`) || argv.includes(`${name}=true`);
+const hasFlag = (name: string): boolean =>
+  argv.includes(name) || argv.includes(`${name}=1`) || argv.includes(`${name}=true`);
 
 const readInt = (name: string, defaultValue: number): number => {
   const parsed = Number.parseInt(readArg(name, String(defaultValue)), 10);
@@ -187,7 +181,7 @@ class Trace {
 const readCli = (): Cli => {
   const accounts = readInt('--accounts', 1_000_000);
   const hotPercent = readFloat('--hot-percent', 1);
-  const hotAccounts = readInt('--hot-accounts', Math.max(1, Math.floor(accounts * hotPercent / 100)));
+  const hotAccounts = readInt('--hot-accounts', Math.max(1, Math.floor((accounts * hotPercent) / 100)));
   const rssCapMb = readFloat('--rss-cap-mb', 0);
   const defaultRssCapBytes = rssCapMb > 0 ? Math.floor(rssCapMb * 1024 * 1024) : 0;
   const memory = readArg('--memory', 'hot') as Cli['memory'];
@@ -227,8 +221,7 @@ const readCli = (): Cli => {
 const randomEntityId = (seed: string, index: number): string =>
   `0x${createHash('sha256').update(seed).update(':account:').update(String(index)).digest('hex')}`;
 
-const hubEntityId = (seed: string): string =>
-  `0x${createHash('sha256').update(seed).update(':hub').digest('hex')}`;
+const hubEntityId = (seed: string): string => `0x${createHash('sha256').update(seed).update(':hub').digest('hex')}`;
 
 const makeAccount = async (
   firstEntity: string,
@@ -237,9 +230,8 @@ const makeAccount = async (
   timestamp: number,
 ): Promise<AccountReplica> => {
   if (firstEntity === secondEntity) throw new Error(`BENCH_SELF_ACCOUNT_FORBIDDEN:${firstEntity}`);
-  const [leftEntity, rightEntity] = firstEntity < secondEntity
-    ? [firstEntity, secondEntity]
-    : [secondEntity, firstEntity];
+  const [leftEntity, rightEntity] =
+    firstEntity < secondEntity ? [firstEntity, secondEntity] : [secondEntity, firstEntity];
   const account: AccountReplica = {
     state: {
       leftEntity,
@@ -272,10 +264,12 @@ const makeAccount = async (
     rollbackCount: 0,
     proofHeader: { fromEntity: firstEntity, toEntity: secondEntity, nextProofNonce: height },
     pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
-    shadow: { rebalance: {
-      policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
-      submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
-    } },
+    shadow: {
+      rebalance: {
+        policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+        submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+      },
+    },
   };
   // Storage admission validates the same canonical frame commitment used by
   // live Account consensus. Bench fixtures must never invent placeholder or
@@ -314,15 +308,18 @@ const seedBooks = (state: EntityState, count: number): void => {
     supportedPairs,
   });
   for (const pairId of supportedPairs) {
-    ext.books.set(pairId, createBook({
-      bucketWidthTicks: 1n,
-      maxOrders: 1000,
-      stpPolicy: 0,
-    }));
+    ext.books.set(
+      pairId,
+      createBook({
+        bucketWidthTicks: 1n,
+        maxOrders: 1000,
+        stpPolicy: 0,
+      }),
+    );
   }
   state.orderbookExt = ext;
-  state.swapTradingPairs = supportedPairs.map((pairId) => {
-    const [baseTokenId, quoteTokenId] = pairId.split('/').map((value) => Number(value));
+  state.swapTradingPairs = supportedPairs.map(pairId => {
+    const [baseTokenId, quoteTokenId] = pairId.split('/').map(value => Number(value));
     return {
       pairId,
       baseTokenId: baseTokenId || 1,
@@ -332,31 +329,20 @@ const seedBooks = (state: EntityState, count: number): void => {
 };
 
 const makeEnv = (seed: string, entityId: string, state: EntityState): RuntimeReplica => {
-  const runtimeId = deriveRuntimeIdFromSeed(seed);
-  if (!runtimeId) throw new Error('BENCH_RUNTIME_ID_DERIVATION_FAILED');
-  const env = {
-    state: {
-      height: state.height,
-      timestamp: state.timestamp,
-      eReplicas: new Map<string, EntityReplica>([
-        [`${entityId}:bench-signer`, {
-          entityId,
-          signerId: 'bench-signer',
-          mempool: [],
-          isProposer: true,
-          state,
-        } as EntityReplica],
-      ]),
-      jReplicas: new Map(),
-    },
-    runtimeSeed: seed,
-    runtimeId,
-    infrastructure: {},
-  } as RuntimeReplica;
-  // This benchmark owns its command consumer below; the synthetic Runtime is
-  // fully booted once that consumer exists. Keep the production readiness
-  // fence intact instead of teaching the adapter to accept commands in booting.
-  transitionRuntimeLifecycle(env.infrastructure!, 'running');
+  const env = createEmptyEnv(seed, 1);
+  env.state.height = state.height;
+  env.state.timestamp = state.timestamp;
+  env.state.eReplicas.set(`${entityId}:bench-signer`, {
+    entityId,
+    signerId: 'bench-signer',
+    mempool: [],
+    isProposer: true,
+    state,
+  });
+  // The benchmark owns its command consumer; initialization uses the same
+  // Runtime envelope as production rather than an incomplete asserted replica.
+  if (!env.infrastructure) throw new Error('BENCH_RUNTIME_INFRASTRUCTURE_MISSING');
+  transitionRuntimeLifecycle(env.infrastructure, 'running');
   return env;
 };
 
@@ -381,22 +367,21 @@ const projectBookDocs = (state: EntityState): StorageDoc[] =>
     value,
   }));
 
-const writeDocs = async (
-  db: RuntimeDbLike,
-  docs: StorageDoc[],
-  headHeight: number,
-): Promise<void> => {
+const writeDocs = async (db: RuntimeDbLike, docs: StorageDoc[], headHeight: number): Promise<void> => {
   const entityStates = docs
     .filter((doc): doc is Extract<StorageDoc, { family: 'entity' }> => doc.family === 'entity')
-    .map(entity => hydrateEntityStateFromStorage({
-      core: entity.value,
-      accounts: new Map(docs.flatMap(doc => doc.family === 'account' && doc.entityId === entity.entityId
-        ? [[doc.counterpartyId, doc.value] as const]
-        : [])),
-      books: new Map(docs.flatMap(doc => doc.family === 'book' && doc.entityId === entity.entityId
-        ? [[doc.pairId, doc.value] as const]
-        : [])),
-    }));
+    .map(entity => {
+      // Assemble this storage chunk once, without allocating flatMap entry
+      // arrays or copying any resident Account/Book machine collection.
+      const accounts = new Map<string, Extract<StorageDoc, { family: 'account' }>['value']>();
+      const books = new Map<string, Extract<StorageDoc, { family: 'book' }>['value']>();
+      for (const doc of docs) {
+        if (doc.entityId !== entity.entityId) continue;
+        if (doc.family === 'account') accounts.set(doc.counterpartyId, doc.value);
+        if (doc.family === 'book') books.set(doc.pairId, doc.value);
+      }
+      return hydrateEntityStateFromStorage({ core: entity.value, accounts, books });
+    });
   const prepared = await prepareLiveStateGraph({
     db,
     puts: docs.filter(doc => doc.family !== 'entity'),
@@ -406,12 +391,14 @@ const writeDocs = async (
   const bookWrites = await Promise.all(
     docs
       .filter((doc): doc is Extract<StorageDoc, { family: 'book' }> => doc.family === 'book')
-      .map((doc) => prepareStorageBookGraphWrite({
-        db,
-        entityId: doc.entityId,
-        pairId: doc.pairId,
-        next: doc.value,
-      })),
+      .map(doc =>
+        prepareStorageBookGraphWrite({
+          db,
+          entityId: doc.entityId,
+          pairId: doc.pairId,
+          next: doc.value,
+        }),
+      ),
   );
   const batch = db.batch();
   for (const key of prepared.dels) batch.del?.(key);
@@ -770,6 +757,7 @@ async function main() {
   let rotationProbeResult: RotationProbeResult | null = null;
   try {
     trace.mark('start');
+    await db.open();
     if (cli.seedMode === 'bulk') await seedHubBulk(cli, trace, db, entityId, state);
     else await seedHub(cli, trace, db, entityId, state);
     env.state.height = state.height;

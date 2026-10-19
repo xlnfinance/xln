@@ -169,6 +169,18 @@ const importClosure = (
   return closure;
 };
 
+const reverseImportGraph = (graph: ImportGraph): ImportGraph => {
+  const reverse = new Map<string, string[]>();
+  for (const [source, targets] of graph) {
+    for (const target of targets) {
+      const importers = reverse.get(target) ?? [];
+      importers.push(source);
+      reverse.set(target, importers);
+    }
+  }
+  return reverse;
+};
+
 const canonicalModuleBoundary = (module: AuditModule, registry: AuditRegistry): string => JSON.stringify({
   id: module.id,
   criticality: module.criticality,
@@ -222,10 +234,10 @@ export const listModuleFingerprintFiles = (
   const scopedTests = trackedFiles.filter(path => registry.scope.testGlobs.some(
     pattern => matchesAuditGlob(path, pattern),
   ));
-  const reverseTests = scopedTests.filter(path => {
-    const imported = importClosure([path], graph);
-    return [...sourceClosure].some(sourcePath => imported.has(sourcePath));
-  });
+  // A test reaches any source iff it is reachable from that source on reversed
+  // edges. Walk once per module, preserving the exact scoped-test selection.
+  const importers = importClosure([...sourceClosure], reverseImportGraph(graph));
+  const reverseTests = scopedTests.filter(path => importers.has(path));
   const explicit = closureModules.flatMap(candidate => moduleOwnFiles(candidate, registry, trackedFiles));
   return [...importClosure([...explicit, ...sourceClosure, ...reverseTests], graph)].sort();
 };

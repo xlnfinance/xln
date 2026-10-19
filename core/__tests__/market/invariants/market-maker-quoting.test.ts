@@ -69,7 +69,7 @@ const buildQuotingEnv = (hubs: readonly HubFixture[]): RuntimeReplica => {
 /** Direct routes are open for exactly these Hubs; every other Hub is offline. */
 const openDirectRoutes = (env: RuntimeReplica, openHubEntityIds: readonly string[]): void => {
   ensureRuntimeInfrastructure(env).p2p = {
-    prepareDirectEntityRoutes: (entityIds: readonly string[]) =>
+    prepareEntityRoutes: (entityIds: readonly string[]) =>
       entityIds.every(entityId => openHubEntityIds.includes(entityId)),
   } as unknown as RuntimeP2P;
 };

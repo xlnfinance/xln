@@ -8,6 +8,44 @@ import type { JAdapter, JAdapterConfig } from '../types';
 
 const DEFAULT_RPC_POLLING_INTERVAL_MS = 1_000;
 
+/** External RPC lifetime only; no observation becomes committed J state here. */
+class XlnJsonRpcProvider extends ethers.JsonRpcProvider {
+  private readonly pendingReads = new Set<Promise<unknown>>();
+  private closing: Promise<void> | undefined;
+
+  override async _perform(request: ethers.PerformActionRequest): Promise<unknown> {
+    const pending = super._perform(request);
+    this.pendingReads.add(pending);
+    try {
+      return await pending;
+    } finally {
+      this.pendingReads.delete(pending);
+    }
+  }
+
+  override destroy(): Promise<void> {
+    this.closing ??= this.closeAfterReads();
+    return this.closing;
+  }
+
+  private async closeAfterReads(): Promise<void> {
+    // A mined receipt can wake multiple Ethers polls. tx.wait() resolves on the
+    // first, while another still reads confirmations. Cancelling that read in
+    // destroy() rejects an unowned Ethers listener and can kill the Runtime.
+    await this.removeAllListeners();
+    try {
+      const failures: unknown[] = [];
+      while (this.pendingReads.size > 0) {
+        const results = await Promise.allSettled(this.pendingReads);
+        for (const result of results) if (result.status === 'rejected') failures.push(result.reason);
+      }
+      if (failures.length > 0) throw new AggregateError(failures, 'RPC_CLOSE_READ_FAILED');
+    } finally {
+      super.destroy();
+    }
+  }
+}
+
 /** Publicly known Hardhat account #0 key, allowed only on local dev chains. */
 export const DEFAULT_PRIVATE_KEY =
   '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
@@ -34,7 +72,7 @@ const xlnJsonRpcProviderOptions = (network?: ethers.Networkish): ethers.JsonRpcA
 });
 
 export const createXlnJsonRpcProvider = (rpcUrl: string, network?: ethers.Networkish): ethers.JsonRpcProvider =>
-  new ethers.JsonRpcProvider(rpcUrl, network, xlnJsonRpcProviderOptions(network));
+  new XlnJsonRpcProvider(rpcUrl, network, xlnJsonRpcProviderOptions(network));
 
 const configureRpcPolling = (provider: ethers.JsonRpcProvider): void => {
   const configuredInterval =

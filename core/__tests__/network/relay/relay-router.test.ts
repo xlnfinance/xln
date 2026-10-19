@@ -226,7 +226,7 @@ describe('relay-router gossip fanout', () => {
     expect(store.clients.has(RUNTIME_A)).toBeFalse();
   });
 
-  test('relay router verbose diagnostics use structured logging and the relay carries no financial path', () => {
+  test('relay diagnostics use structured logging without decrypting envelopes or forwarding peer errors', () => {
     const routerSource = readFileSync(join(process.cwd(), 'core/network/relay/router.ts'), 'utf8');
 
     expect(routerSource).toContain("const relayRouterLog = createStructuredLogger('relay.router');");
@@ -235,8 +235,8 @@ describe('relay-router gossip fanout', () => {
     expect(routerSource).not.toContain('catch { size = 0; }');
     expect(routerSource).toContain('relayMessageByteLength');
     expect(routerSource).not.toContain('safeStringify(msg)');
-    // entity_inputs and peer error frames are not relay-routable; there is no
-    // local delivery hook a relay could decrypt financial bytes into.
+    // Sealed financial frames route without a local decryption hook.
+    // Peer control/error frames cannot masquerade as relay responses.
     expect(routerSource).not.toContain('localDeliver');
     expect(routerSource).not.toContain("type === 'entity_inputs' ||");
     expect(routerSource).not.toContain("type === 'error' ||");
@@ -714,7 +714,7 @@ describe('relay-router gossip fanout', () => {
     expect(dropped[1]?.details).toMatchObject({ inReplyTo: null });
   });
 
-  test('relay_inbound_entity_inputs_rejected', async () => {
+  test('authenticated relay forwards sealed user envelopes only to the bound live recipient', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
@@ -731,8 +731,8 @@ describe('relay-router gossip fanout', () => {
     await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
     await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
 
-    // Both a remote target and the relay's own runtime id: neither is forwarded
-    // nor decrypted locally. Financial bytes only travel over direct sessions.
+    // A registered user receives the exact ciphertext. The relay itself has
+    // no local financial ingress and must reject an unregistered destination.
     for (const [index, to] of [RUNTIME_B, SERVER_RUNTIME_ID].entries()) {
       await relayRoute(config, wsA, {
         type: 'entity_inputs',
@@ -745,17 +745,21 @@ describe('relay-router gossip fanout', () => {
         entityId: ENTITY_B,
         txs: 1,
       });
-      expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
-        type: 'error',
-        error: 'RELAY_ENTITY_INPUTS_FORBIDDEN',
-        inReplyTo: `relayed-account-input-${index}`,
-        to,
-      });
+      if (to === RUNTIME_B) {
+        expect(sentBySocket.get(wsB)?.at(-1)).toMatchObject({
+          type: 'entity_inputs', from: RUNTIME_A, to: RUNTIME_B, encrypted: true,
+          payload: new TextEncoder().encode('encrypted-account-input'),
+        });
+      } else {
+        expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
+          type: 'error', error: 'RELAY_RECIPIENT_UNAVAILABLE',
+          inReplyTo: `relayed-account-input-${index}`, to,
+        });
+      }
     }
 
-    expect(sentBySocket.get(wsB)).toEqual([{ type: 'hello_ack', to: RUNTIME_B.toLowerCase() }]);
-    expect(store.debugEvents.filter(event => event.reason === 'RELAY_ENTITY_INPUTS_FORBIDDEN')).toHaveLength(2);
-    expect(store.debugEvents.some(event => event.event === 'delivery' && event.msgType === 'entity_inputs')).toBe(false);
+    expect(sentBySocket.get(wsB)).toHaveLength(2);
+    expect(store.debugEvents.filter(event => event.event === 'delivery' && event.msgType === 'entity_inputs')).toHaveLength(1);
     expect(store.clients.has(RUNTIME_A)).toBe(true);
     expect(store.clients.has(RUNTIME_B)).toBe(true);
   });

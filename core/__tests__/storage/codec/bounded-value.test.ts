@@ -19,10 +19,7 @@ const makeMemoryDb = (rows: ReadonlyArray<Readonly<{ key: Buffer; value: Buffer 
     get: async (key: Buffer) => {
       const value = store.get(key.toString('hex'));
       if (value) return Buffer.from(value);
-      const error = new Error('NotFound') as Error & { code?: string; notFound?: boolean };
-      error.code = 'LEVEL_NOT_FOUND';
-      error.notFound = true;
-      throw error;
+      return undefined;
     },
     batch: () => {
       const ops: Array<Readonly<{ type: 'put'; key: Buffer; value: Buffer } | Readonly<{

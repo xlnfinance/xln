@@ -140,9 +140,10 @@ export const finalizeAccountProposal = (
     events,
     proposalDroppedTransactions,
     hashesToSign,
-    ...(effects.failedHtlcLocks.length > 0
-      ? { failedHtlcLocks: effects.failedHtlcLocks }
+    ...(effects.failedLendingDisbursements.length > 0
+      ? { failedLendingDisbursements: effects.failedLendingDisbursements }
       : {}),
+    ...(effects.failedHtlcLocks.length > 0 ? { failedHtlcLocks: effects.failedHtlcLocks } : {}),
   });
   return result;
 };

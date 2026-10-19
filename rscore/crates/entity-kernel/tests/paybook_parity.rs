@@ -176,6 +176,16 @@ fn canonical_account_outputs_fuse_direct_and_htlc_forward_work() {
 #[test]
 fn account_runtime_output_precedes_htlc_forward_followup_in_mixed_frame() {
     let base = account(MAKER, &[1]);
+    // HUB is the left side; its committed policy must authorize the maker's fee.
+    let policy = AccountTx::RebalancePolicy {
+        token_id: 1,
+        policy_version: 1,
+        base_fee: BigInt::from(1),
+        liquidity_fee_bps: BigInt::from(0),
+        gas_fee: BigInt::from(0),
+    };
+    let (base, policy_outputs) = apply_account(&base, Side::Left, &policy, 0, 1);
+    assert!(policy_outputs.is_empty());
     let envelope = OpaqueHtlcCiphertext::from_packed(vec![0x52; 48]).expect("outer envelope");
     let inner = OpaqueHtlcCiphertext::from_packed(vec![0x62; 48]).expect("inner envelope");
     let hashlock = format!("0x{}", "bc".repeat(32));

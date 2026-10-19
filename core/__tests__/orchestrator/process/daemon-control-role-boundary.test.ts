@@ -71,7 +71,7 @@ describe('daemon control committed role boundary', () => {
         gossipPollMs: null,
       },
     }), { status: 200, headers: { 'content-type': 'application/json' } });
-    await expect(new DaemonControlClient({ baseUrl: 'http://control.test' }).prepareDirectEntityRoutes([ENTITY]))
+    await expect(new DaemonControlClient({ baseUrl: 'http://control.test' }).prepareEntityRoutes([ENTITY]))
       .resolves.toBe(true);
 
     globalThis.fetch = async () => new Response(safeStringify({

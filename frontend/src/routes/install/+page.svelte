@@ -2,7 +2,7 @@
 	import {
 		ArrowUpRight,
 		Check,
-		Chrome,
+		Puzzle,
 		Copy,
 		Globe2,
 		Laptop,
@@ -64,7 +64,7 @@
 							{#if channel.id === 'web'}<Globe2 size={21} />{/if}
 							{#if channel.id === 'desktop'}<Laptop size={21} />{/if}
 							{#if channel.id === 'mobile'}<Smartphone size={21} />{/if}
-							{#if channel.id === 'extension'}<Chrome size={21} />{/if}
+							{#if channel.id === 'extension'}<Puzzle size={21} />{/if}
 						</div>
 						<span>{channel.label}</span>
 					</div>

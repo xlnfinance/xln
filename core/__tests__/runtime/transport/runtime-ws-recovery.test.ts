@@ -4,7 +4,11 @@ import { join } from 'node:path';
 import { deriveSignerAddressSync } from '../../../account/crypto';
 import { deriveEncryptionKeyPair } from '../../../protocol/crypto/p2p-crypto';
 import { RuntimeWsClient } from '../../../network/p2p/ws-client';
-import { canonicalizeRuntimeWsAudience, deserializeWsMessage, serializeWsMessage } from '../../../network/p2p/ws-protocol';
+import {
+  canonicalizeRuntimeWsAudience,
+  deserializeWsMessage,
+  serializeWsMessage,
+} from '../../../network/p2p/ws-protocol';
 import { startStandaloneRelayServer, type StandaloneRelayServer } from '../../../network/relay/standalone-server';
 import { createEmptyEnv } from '../../../runtime';
 import { signRuntimeEntityInputsEnvelope } from '../../../runtime/admit/entity-input-envelope-auth.ts';
@@ -195,7 +199,7 @@ describe('runtime websocket recovery requests', () => {
       lifecycleGeneration: number;
     };
     const originalSendRaw = clientState.sendRaw.bind(client);
-    clientState.sendRaw = (msg) => {
+    clientState.sendRaw = msg => {
       if (msg.type === 'hello') return false;
       return originalSendRaw(msg);
     };
@@ -239,7 +243,10 @@ describe('runtime websocket recovery requests', () => {
 
     await requester.connect();
     await responder.connect();
-    await waitUntil(() => relay.store.clients.has(RUNTIME_A) && relay.store.clients.has(RUNTIME_B), 'relay clients');
+    // Server registration precedes delivery of hello_ack to each client.
+    // The request must reach the relay before its request-id rejection is tested.
+    await waitUntil(() => requester.isOpen() && responder.isOpen(), 'authenticated relay clients');
+    expect(relay.store.clients.has(RUNTIME_A) && relay.store.clients.has(RUNTIME_B)).toBe(true);
 
     await expect(requester.requestRecoveryBundles(RUNTIME_B, 'lookup/key', 1_000)).rejects.toThrow(
       'RELAY_PEER_FRAME_NOT_ROUTABLE',

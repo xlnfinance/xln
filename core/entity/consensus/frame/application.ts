@@ -81,7 +81,7 @@ import {
 import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
 import { normalizeEntityProposalBoard } from '../../tx/processing/proposals';
 import { accountHasProposableMempool } from '../account/mempool-eligibility';
-import { failedProposalHtlcFollowup } from '../account/failed-proposal-followups';
+import { applyRejectedLendingDraws, failedProposalHtlcFollowup } from '../account/failed-proposal-followups';
 import { traceAccountFlushHop } from '../../../support/performance/account-delivery-trace';
 import {
   getProposableAccountIds,
@@ -580,6 +580,9 @@ const proposeAccountFrameCandidate = async (
     state.lastFinalizedJHeight,
     crossJOpeningProposalTxs,
   );
+  if ('failedLendingDisbursements' in proposal && proposal.failedLendingDisbursements) {
+    applyRejectedLendingDraws(state, account, proposal.failedLendingDisbursements);
+  }
   if ('accountChanged' in proposal && proposal.accountChanged) {
     recordFrameAccountChange(storageChanges, state.entityId, accountKey);
   }

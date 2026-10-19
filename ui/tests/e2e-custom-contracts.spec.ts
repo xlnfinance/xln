@@ -11,7 +11,7 @@ test('custom Solidity tooling compiles a draft while unavailable admission canno
   await expect(page.getByTestId('custom-unavailable')).toContainText('New custom-contract admission is unavailable');
   await expect(page.getByTestId('custom-source')).not.toHaveValue('');
   await page.getByTestId('custom-compile').click();
-  await expect(page.getByTestId('custom-compiled')).toContainText('0.8.36');
+  await expect(page.getByTestId('custom-compiled')).toContainText('0.8.37');
   await expect(page.getByRole('button', { name: 'Propose to counterparty' })).toHaveCount(0);
   expect(errors).toEqual([]);
 });

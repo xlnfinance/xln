@@ -1,6 +1,6 @@
 export type ViewTab = 'assets' | 'accounts' | 'ownership' | 'settings';
 export type SettingsSubview = 'wallet' | 'consensus' | 'recovery' | 'display' | 'stack-manager' | 'network' | 'data' | 'log' | 'entity';
-export type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'move' | 'lending' | 'history' | 'configure' | 'appearance';
+export type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'move' | 'history' | 'configure' | 'appearance';
 export type AssetWorkspaceTab = 'move' | 'history';
 export type ConfigureWorkspaceTab =
   | 'extend-credit'
@@ -84,8 +84,6 @@ export function canonicalizeEntityPanelRoute(routeRaw: string | null): string | 
       return 'accounts/swap';
     case 'accounts/move':
       return 'accounts/move';
-    case 'accounts/lending':
-      return 'accounts/lending';
     case 'accounts/history':
       return 'accounts/history';
     case 'accounts/configure':
@@ -160,10 +158,6 @@ export function resolveEntityPanelDeepLink(input: EntityPanelDeepLinkRequest): E
     case 'accounts/move':
       update.activeTab = 'accounts';
       update.accountWorkspaceTab = 'move';
-      break;
-    case 'accounts/lending':
-      update.activeTab = 'accounts';
-      update.accountWorkspaceTab = 'lending';
       break;
     case 'accounts/history':
       update.activeTab = 'accounts';

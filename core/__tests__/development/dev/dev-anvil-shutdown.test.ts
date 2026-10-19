@@ -84,9 +84,29 @@ test('launcher shutdown preserves Anvil code and the exact mined block across re
         // A pre-existing dev server can be healthy while our launcher fails its
         // singleton lease. Never mutate that unrelated chain as test evidence.
         if (!(await Bun.file(join(data, 'launcher.log')).text()).includes('DEV_BOOTING ')) return false;
-        const response = await fetch('http://127.0.0.1:8082/api/health?full=1', { signal: AbortSignal.timeout(1000) });
-        const health: unknown = await response.json();
-        return Boolean(health && typeof health === 'object' && 'systemOk' in health && health.systemOk === true);
+        // Use the launcher's canonical admission barrier: it requires healthy
+        // hubs, MM/cross routes, custody and reserves. A full diagnostic snapshot
+        // has a separate 60s server budget and cannot be polled with a 1s deadline.
+        const url = 'http://127.0.0.1:8082/api/runtime-import?access=admin';
+        const startedAt = performance.now();
+        try {
+          const response = await fetch(url, { signal: AbortSignal.timeout(1000) });
+          const readiness = (await response.json()) as Record<string, unknown>;
+          if (response.ok && readiness.ready === true) return true;
+          throw new Error(
+            safeStringify({
+              status: response.status,
+              ready: readiness.ready,
+              reason: readiness.reason,
+              code: readiness.code,
+            }),
+          );
+        } catch (error) {
+          throw new Error(
+            `SHUTDOWN_HEALTH_NOT_READY:${url}:ms=${Math.round(performance.now() - startedAt)}:${String(error)}`,
+            { cause: error },
+          );
+        }
       },
       'three-hub-stand',
       90_000,

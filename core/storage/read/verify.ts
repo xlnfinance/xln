@@ -15,20 +15,13 @@ import {
   keySnapshotReplicaMetaPrefix,
   keyLiveReplicaMetaPrefix,
 } from '../keys';
-import { countKeys, iterateKeys, readValidatedOrNull } from '../database/level';
+import { readRequiredRaw, countKeys, iterateKeys, readValidatedOrNull } from '../database/level';
 import { validateStorageSnapshotManifestValue } from '../schema/authoritative-schema';
 import { inspectSnapshotGraphRows } from './integrity/snapshot-graph';
-import {
-  readStorageFramePayloads,
-  readStorageFrameRecord,
-  readStorageHead,
-} from './read';
+import { readStorageFramePayloads, readStorageFrameRecord, readStorageHead } from './read';
 import type { RuntimeDbLike, RuntimeFrame, StorageHead } from '../types';
 
-const countSnapshotDocs = async (
-  db: RuntimeDbLike,
-  frame: RuntimeFrame,
-): Promise<number> => {
+const countSnapshotDocs = async (db: RuntimeDbLike, frame: RuntimeFrame): Promise<number> => {
   const height = frame.height;
   const [entities, accounts, books, graphRows, replicaMetas] = await Promise.all([
     countKeys(db, { prefix: keySnapshotEntityPrefix(height) }),
@@ -40,10 +33,7 @@ const countSnapshotDocs = async (
   return entities + accounts + books + graphRows + replicaMetas;
 };
 
-const computeSnapshotReplicaMetaDigest = async (
-  db: RuntimeDbLike,
-  height: number,
-): Promise<string> => {
+const computeSnapshotReplicaMetaDigest = async (db: RuntimeDbLike, height: number): Promise<string> => {
   const entries: Array<{ key: Buffer; value: Buffer }> = [];
   for await (const snapshotKey of iterateKeys(db, { prefix: keySnapshotReplicaMetaPrefix(height) })) {
     if (snapshotKey.length !== 73) {
@@ -53,7 +43,7 @@ const computeSnapshotReplicaMetaDigest = async (
     }
     entries.push({
       key: Buffer.concat([Buffer.from([KEY_LIVE_REPLICA_META]), snapshotKey.subarray(9)]),
-      value: await db.get(snapshotKey),
+      value: await readRequiredRaw(db, snapshotKey),
     });
   }
   return computeStorageReplicaMetaDigest(entries);
@@ -84,7 +74,9 @@ export const verifyStorageSnapshotAtHeight = async (
   );
   if (!manifest) throw new Error(`STORAGE_VERIFY_SNAPSHOT_MANIFEST_MISSING: height=${snapshotHeight}`);
   if (Math.floor(Number(manifest.height ?? 0)) !== snapshotHeight) {
-    throw new Error(`STORAGE_VERIFY_SNAPSHOT_MANIFEST_HEIGHT_MISMATCH: key=${snapshotHeight} manifest=${manifest.height}`);
+    throw new Error(
+      `STORAGE_VERIFY_SNAPSHOT_MANIFEST_HEIGHT_MISMATCH: key=${snapshotHeight} manifest=${manifest.height}`,
+    );
   }
 
   const snapshotFrame = await readStorageFrameRecord(db, snapshotHeight);
@@ -132,10 +124,7 @@ export const verifyStorageSnapshotAtHeight = async (
   }
 };
 
-const verifyCurrentMaterializedMachine = async (
-  db: RuntimeDbLike,
-  head: StorageHead,
-): Promise<void> => {
+const verifyCurrentMaterializedMachine = async (db: RuntimeDbLike, head: StorageHead): Promise<void> => {
   const height = Math.max(0, Math.floor(Number(head.latestMaterializedHeight ?? 0)));
   if (height <= 0) return;
   if (height > head.latestHeight) {
@@ -149,10 +138,7 @@ const verifyCurrentMaterializedMachine = async (
   await readStorageFramePayloads(db, frame, { includeRuntimeMachine: true });
 };
 
-export const verifyStorageSnapshotIntegrity = async (
-  db: RuntimeDbLike,
-  head: StorageHead,
-): Promise<void> => {
+export const verifyStorageSnapshotIntegrity = async (db: RuntimeDbLike, head: StorageHead): Promise<void> => {
   // Published snapshots retain the exact Runtime/Entity/Account checkpoint;
   // the current materialized graph remains a separately verified live copy.
   await verifyStorageSnapshotAtHeight(db, head, head.latestSnapshotHeight);
@@ -201,10 +187,13 @@ export const verifyStorageTailIntegrity = async (
   for (let height = startHeight; height <= latestHeight; height += 1) {
     const record = await readStorageFrameRecord(db, height);
     if (!record) throw new Error(`STORAGE_VERIFY_FRAME_MISSING: height=${height}`);
-    if (record.height !== height) throw new Error(`STORAGE_VERIFY_FRAME_HEIGHT_MISMATCH: key=${height} record=${record.height}`);
+    if (record.height !== height)
+      throw new Error(`STORAGE_VERIFY_FRAME_HEIGHT_MISMATCH: key=${height} record=${record.height}`);
     const skipPrevHashCheck = anchoredAtSnapshot && height === startHeight && previousHash === null;
     if (!skipPrevHashCheck && record.prevFrameHash !== previousHash) {
-      throw new Error(`STORAGE_VERIFY_FRAME_CHAIN_BROKEN: height=${height} expectedPrev=${previousHash} actualPrev=${record.prevFrameHash ?? 'none'}`);
+      throw new Error(
+        `STORAGE_VERIFY_FRAME_CHAIN_BROKEN: height=${height} expectedPrev=${previousHash} actualPrev=${record.prevFrameHash ?? 'none'}`,
+      );
     }
     if (record.canonicalStateHash || Array.isArray(record.canonicalEntityHashes)) {
       if (!Array.isArray(record.canonicalEntityHashes) || !record.canonicalStateHash) {
@@ -217,12 +206,16 @@ export const verifyStorageTailIntegrity = async (
         record.canonicalEntityHashes,
       );
       if (record.canonicalStateHash !== expectedCanonicalHash) {
-        throw new Error(`STORAGE_VERIFY_CANONICAL_HASH_MISMATCH: height=${height} expected=${expectedCanonicalHash} actual=${record.canonicalStateHash}`);
+        throw new Error(
+          `STORAGE_VERIFY_CANONICAL_HASH_MISMATCH: height=${height} expected=${expectedCanonicalHash} actual=${record.canonicalStateHash}`,
+        );
       }
     }
     const actualFrameHash = computeStorageFrameHash(record);
     if (record.frameHash !== actualFrameHash) {
-      throw new Error(`STORAGE_VERIFY_FRAME_HASH_MISMATCH: height=${height} expected=${actualFrameHash} actual=${record.frameHash ?? 'none'}`);
+      throw new Error(
+        `STORAGE_VERIFY_FRAME_HASH_MISMATCH: height=${height} expected=${actualFrameHash} actual=${record.frameHash ?? 'none'}`,
+      );
     }
     previousHash = actualFrameHash;
     latestRecord = record;
@@ -232,7 +225,7 @@ export const verifyStorageTailIntegrity = async (
   if (latestRecord) {
     const replicaMetas: Array<{ key: Buffer; value: Buffer }> = [];
     for await (const key of iterateKeys(db, { prefix: keyLiveReplicaMetaPrefix() })) {
-      replicaMetas.push({ key, value: await db.get(key) });
+      replicaMetas.push({ key, value: await readRequiredRaw(db, key) });
     }
     const actualReplicaMetaDigest = computeStorageReplicaMetaDigest(replicaMetas);
     const replicaCheckpointHeight = Math.max(1, Math.floor(Number(head.latestMaterializedHeight)));
@@ -243,7 +236,7 @@ export const verifyStorageTailIntegrity = async (
     if (replicaCheckpointRecord.replicaMetaDigest !== actualReplicaMetaDigest) {
       throw new Error(
         `STORAGE_VERIFY_REPLICA_META_DIGEST_MISMATCH: height=${replicaCheckpointHeight} ` +
-        `expected=${replicaCheckpointRecord.replicaMetaDigest || 'missing'} actual=${actualReplicaMetaDigest}`,
+          `expected=${replicaCheckpointRecord.replicaMetaDigest || 'missing'} actual=${actualReplicaMetaDigest}`,
       );
     }
   }

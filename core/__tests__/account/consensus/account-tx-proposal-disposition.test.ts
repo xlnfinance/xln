@@ -8,6 +8,8 @@ import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { TOKENS } from '../../../config/constants';
 import type { AccountTx } from '../../../types/account';
 import { entity, makeAccount } from '../../helpers/cross-j';
+import { createEmptyEnv } from '../../../runtime';
+import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 
 const LEFT = entity('11');
 const RIGHT = entity('22');
@@ -97,6 +99,52 @@ describe('Account tx proposal disposition', () => {
       frameJHeight: 0,
       jClaimNodeStore: new Map(),
     })).rejects.toThrow('SWAP_RESOLVE_PROPOSAL_FAILED');
+  });
+
+  test('add_delta and payment share one proposal draft without mutating the live Account', async () => {
+    const account = makeAccount(LEFT, RIGHT);
+    const opening: AccountTx = { type: 'add_delta', data: { tokenId: 3 } };
+    const paid = payment();
+    const validation = await validateProposalTransactions({
+      consensusContext: createAccountConsensusContext(createEmptyEnv('delta-payment-batch')),
+      account,
+      proposalWindow: [opening, paid],
+      frameTimestamp: 1_000,
+      frameJHeight: 0,
+      jClaimNodeStore: new Map(),
+    });
+    expect(validation.optimisticBatch).toBe(true);
+    expect(validation.validTxs).toEqual([opening, paid]);
+    expect(validation.droppedTransactions).toEqual([]);
+    expect(validation.clonedMachine.state.deltas.has(3)).toBe(true);
+    expect(validation.clonedMachine.state.deltas.get(1)?.offdelta).toBe(-7n);
+    expect(account.state.deltas.has(3)).toBe(false);
+    expect(account.state.deltas.get(1)?.offdelta).toBe(0n);
+  });
+
+  test('add_delta batch rejection preserves valid input order and applies payment exactly once', async () => {
+    const account = makeAccount(LEFT, RIGHT);
+    const opening: AccountTx = { type: 'add_delta', data: { tokenId: 3 } };
+    const invalid: AccountTx = { type: 'add_delta', data: { tokenId: TOKENS.MAX_TOKEN_ID + 1 } };
+    const paid = payment();
+    const validation = await validateProposalTransactions({
+      consensusContext: createAccountConsensusContext(createEmptyEnv('delta-payment-batch-rejection')),
+      account,
+      proposalWindow: [opening, invalid, paid],
+      frameTimestamp: 1_000,
+      frameJHeight: 0,
+      jClaimNodeStore: new Map(),
+    });
+    expect(validation.validTxs).toEqual([opening, paid]);
+    expect(validation.validMempoolTxs).toEqual([opening, paid]);
+    expect(validation.txsToRemove).toEqual([invalid]);
+    expect(validation.droppedTransactions).toMatchObject([
+      { index: 1, code: ACCOUNT_TX_REJECTION_CODES.deltaTokenInvalid, disposition: 'removed' },
+    ]);
+    expect(validation.clonedMachine.state.deltas.has(3)).toBe(true);
+    expect(validation.clonedMachine.state.deltas.get(1)?.offdelta).toBe(-7n);
+    expect(account.state.deltas.has(3)).toBe(false);
+    expect(account.state.deltas.get(1)?.offdelta).toBe(0n);
   });
 
   test('payment then HTLC lock/secret resolve on one Account replica', async () => {

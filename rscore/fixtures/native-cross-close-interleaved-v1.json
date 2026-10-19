@@ -13,19 +13,13 @@
       "target": "0x9236d93e00343fff02931b038ce9064bc6903f03",
       "atomic": true,
       "complete": true,
-      "indices": [
-        3,
-        0
-      ]
+      "indices": [0, 3]
     },
     {
       "target": "0x7a52bc4d0609e17f2aac295350a3c8c372784720",
       "atomic": true,
       "complete": true,
-      "indices": [
-        2,
-        1
-      ]
+      "indices": [1, 2]
     }
   ]
 }

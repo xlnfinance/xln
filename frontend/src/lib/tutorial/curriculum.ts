@@ -136,7 +136,7 @@ export const WALLET_LESSONS = [
     outcome:
       'A 5 USDC deposit appears as a lending position; spendable funds fall by 5. Check when and how you can withdraw.',
     title: 'Lend and withdraw',
-    route: 'accounts/lending',
+    route: '/ui/lend',
     example:
       'Lending 5 USDC exchanges spendable money for a claim. It is still an asset, but it may not be immediately withdrawable. Borrowing adds both available funds and a debt.',
     exercise:
@@ -148,7 +148,7 @@ export const WALLET_LESSONS = [
     value: 'Borrow with the cost and repayment obligation visible before you commit.',
     outcome: 'An approved loan adds spendable funds AND a debt. A pending request has not paid you.',
     title: 'Borrow with a known cost',
-    route: 'accounts/lending',
+    route: '/ui/lend',
     example: 'At a maximum 1% per term, borrowing 2 USDC costs at most 0.02 USDC: maximum repayment 2.02. The matched rate may be lower. This is a rate for the selected term, not an annual rate.',
     exercise: 'Choose Borrow, enter 2 USDC, select a term and maximum rate. Read the maximum repayment and eligibility before submitting. Find the approved loan below, or inspect and cancel an unmatched request.',
   },
@@ -158,7 +158,7 @@ export const WALLET_LESSONS = [
     value: 'Close your obligation and understand the difference between principal and interest.',
     outcome: 'The loan closes, its debt disappears and the payment includes principal plus interest exactly once.',
     title: 'Repay a loan',
-    route: 'accounts/lending',
+    route: '/ui/lend',
     example: 'Repaying a 2 USDC loan at 1% uses 2.02 USDC. Borrowing never increased your net wealth: it created an equal obligation plus the financing cost.',
     exercise: 'Find your loan, check its amount due and choose Repay. Wait for the confirmed state, then verify the loan closed and balances changed. Revisit your lending position and withdraw any available funds.',
   },

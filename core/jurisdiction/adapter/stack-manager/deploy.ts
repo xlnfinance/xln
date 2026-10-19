@@ -139,25 +139,22 @@ export const deployJurisdictionStack = async (
     const outputPath = join(temporaryDirectory, 'manifest.json');
     provider = new JsonRpcProvider(request.rpcUrl);
     options.onPhase?.('deploying');
-    // Deployment shares the canonical TypeScript Hanko encoder. The runner
-    // must use Bun rather than the host Node version's optional TS support.
-    const child = Bun.spawn(
-      ['bunx', '--bun', 'hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', 'stack-manager'],
-      {
-        cwd: new URL('../../../../jurisdictions', import.meta.url).pathname,
-        env: buildStackManagerChildEnv({
-          rpcUrl: request.rpcUrl,
-          chainId: request.expectedChainId,
-          signerPrivateKeyHex,
-          foundationRecipient: request.foundationRecipient,
-          stablecoinAddress: request.stablecoin.kind === 'existing' ? request.stablecoin.address : '',
-          deployTestStablecoin: request.stablecoin.kind === 'test',
-          outputPath,
-        }),
-        stdout: 'pipe',
-        stderr: 'pipe',
-      },
-    );
+    // Hardhat owns its Node/tsx loader, including the canonical TypeScript
+    // Hanko encoder. Forcing Bun breaks Hardhat's required Undici interceptors.
+    const child = Bun.spawn(['bunx', 'hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', 'stack-manager'], {
+      cwd: new URL('../../../../jurisdictions', import.meta.url).pathname,
+      env: buildStackManagerChildEnv({
+        rpcUrl: request.rpcUrl,
+        chainId: request.expectedChainId,
+        signerPrivateKeyHex,
+        foundationRecipient: request.foundationRecipient,
+        stablecoinAddress: request.stablecoin.kind === 'existing' ? request.stablecoin.address : '',
+        deployTestStablecoin: request.stablecoin.kind === 'test',
+        outputPath,
+      }),
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     const [exitCode, stdoutTail, stderrTail] = await Promise.all([
       child.exited,
       readBoundedTail(child.stdout),

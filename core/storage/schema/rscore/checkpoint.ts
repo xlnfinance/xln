@@ -331,11 +331,7 @@ const preparedCheckpointView = (
 ): RuntimeDbLike => ({
   get: async key => {
     const id = key.toString('hex');
-    if (dels.has(id)) {
-      const error = new Error(`STORAGE_RSCORE_OVERLAY_NOT_FOUND:${id}`);
-      error.name = 'NotFoundError';
-      throw error;
-    }
+    if (dels.has(id)) return undefined;
     const put = puts.get(id);
     return put ? Buffer.from(put.value) : db.get(key);
   },

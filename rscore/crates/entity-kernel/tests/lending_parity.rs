@@ -61,11 +61,16 @@ fn all_four_typescript_entity_lending_shapes_decode_exactly() {
                 ("tokenId", number(1)),
                 ("amount", CanonicalValue::BigInt(BigInt::from(2_500))),
                 ("termId", CanonicalValue::String("1d".into())),
+                ("maxInterestBps", number(150)),
+                ("maxLateMs", number(86_400_000)),
+                ("expiresAt", number(5_000)),
             ]),
         ),
         LocalEntityFinancialTx::LendingBorrow(tx)
             if tx.request_id == "borrow-2222222222222222"
-                && tx.max_interest_bps == 10_000
+                && tx.max_interest_bps == 150
+                && tx.max_late_ms == 86_400_000
+                && tx.expires_at == 5_000
     ));
     assert!(matches!(
         decode(

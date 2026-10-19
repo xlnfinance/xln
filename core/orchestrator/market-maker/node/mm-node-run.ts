@@ -24,6 +24,7 @@ import {
   loadEntityAccountDocFromStorageDb,
   loadEntityStateFromStorageDb,
   loadEntityViewPageFromStorageDb,
+  loadEntityViewPagesFromStorageDb,
   main,
   processRuntime,
   readPersistedRuntimeActivityPage,
@@ -858,6 +859,7 @@ const createMarketMakerRuntimeAdapterHandler =
         loadEntityState: (env, entityId, height) => loadEntityStateFromStorageDb(env, entityId, height),
         loadEntityAccountDoc: (env, entityId, counterpartyId, height) =>
           loadEntityAccountDocFromStorageDb(env, entityId, counterpartyId, height),
+        loadEntityViewPages: loadEntityViewPagesFromStorageDb,
         loadEntityViewPage: (env, entityId, height, query) =>
           loadEntityViewPageFromStorageDb(env, entityId, height, query),
         listEntityIdsAtHeight: (env, height) => listPersistedEntityIdsAtHeight(env, height),

@@ -17,7 +17,7 @@ import type {
 } from '../../protocol/state/persistent-radix-value-map';
 import { radixMerklePathSlots } from '../../protocol/state/radix-merkle';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
-import { iterateKeys } from '../database/level';
+import { readRequiredRaw, iterateKeys } from '../database/level';
 import {
   KEY_LIVE_ACCOUNT_BRANCH,
   KEY_LIVE_ACCOUNT_LEAF,
@@ -29,15 +29,15 @@ import {
 } from '../keys';
 import type { RuntimeDbLike } from '../types';
 
-export const ACCOUNT_TREE_NAMESPACE_TAG = Object.freeze(Object.fromEntries(
-  ACCOUNT_STATE_MAP_NAMESPACES.map((namespace, index) => [namespace, index + 1]),
-) as Record<AccountStateMapNamespace, number>);
+export const ACCOUNT_TREE_NAMESPACE_TAG = Object.freeze(
+  Object.fromEntries(ACCOUNT_STATE_MAP_NAMESPACES.map((namespace, index) => [namespace, index + 1])) as Record<
+    AccountStateMapNamespace,
+    number
+  >,
+);
 
 const ACCOUNT_TREE_NAMESPACE_BY_TAG = new Map<number, AccountStateMapNamespace>(
-  Object.entries(ACCOUNT_TREE_NAMESPACE_TAG).map(([namespace, tag]) => [
-    tag,
-    namespace as AccountStateMapNamespace,
-  ]),
+  Object.entries(ACCOUNT_TREE_NAMESPACE_TAG).map(([namespace, tag]) => [tag, namespace as AccountStateMapNamespace]),
 );
 
 export type StorageAccountTreeDescriptor = Readonly<{
@@ -62,27 +62,42 @@ const accountTreeFromReplica = (
   namespace: AccountStateMapNamespace,
 ): AccountTree | undefined => {
   switch (namespace) {
-    case 'deltas': return accountTree(account.state.deltas, namespace);
-    case 'locks': return accountTree(account.state.locks, namespace);
-    case 'pulls': return account.state.pulls === undefined ? undefined : accountTree(account.state.pulls, namespace);
-    case 'swapOffers': return accountTree(account.state.swapOffers, namespace);
-    case 'subcontracts': return account.state.subcontracts === undefined ? undefined : accountTree(account.state.subcontracts, namespace);
-    case 'lendingIntents': return account.state.lendingIntents === undefined ? undefined : accountTree(account.state.lendingIntents, namespace);
-    case 'requestedRebalance': return accountTree(account.state.requestedRebalance, namespace);
-    case 'requestedRebalanceFeeState': return accountTree(account.state.requestedRebalanceFeeState, namespace);
-    case 'rebalanceFeePolicies': return account.state.rebalanceFeePolicies === undefined ? undefined : accountTree(account.state.rebalanceFeePolicies, namespace);
-    case 'pendingWithdrawals': return accountTree(account.pendingWithdrawals, namespace);
-    case 'rebalanceShadowPolicy': return accountTree(account.shadow.rebalance.policy, namespace);
-    case 'rebalanceShadowSubmitted': return accountTree(account.shadow.rebalance.submittedAtByToken, namespace);
+    case 'deltas':
+      return accountTree(account.state.deltas, namespace);
+    case 'locks':
+      return accountTree(account.state.locks, namespace);
+    case 'pulls':
+      return account.state.pulls === undefined ? undefined : accountTree(account.state.pulls, namespace);
+    case 'swapOffers':
+      return accountTree(account.state.swapOffers, namespace);
+    case 'subcontracts':
+      return account.state.subcontracts === undefined ? undefined : accountTree(account.state.subcontracts, namespace);
+    case 'lendingIntents':
+      return account.state.lendingIntents === undefined
+        ? undefined
+        : accountTree(account.state.lendingIntents, namespace);
+    case 'requestedRebalance':
+      return accountTree(account.state.requestedRebalance, namespace);
+    case 'requestedRebalanceFeeState':
+      return accountTree(account.state.requestedRebalanceFeeState, namespace);
+    case 'rebalanceFeePolicies':
+      return account.state.rebalanceFeePolicies === undefined
+        ? undefined
+        : accountTree(account.state.rebalanceFeePolicies, namespace);
+    case 'pendingWithdrawals':
+      return accountTree(account.pendingWithdrawals, namespace);
+    case 'rebalanceShadowPolicy':
+      return accountTree(account.shadow.rebalance.policy, namespace);
+    case 'rebalanceShadowSubmitted':
+      return accountTree(account.shadow.rebalance.submittedAtByToken, namespace);
   }
 };
 
-export const projectAccountTreeDescriptors = (
-  account: AccountReplica,
-): StorageAccountTreeDescriptor[] => ACCOUNT_STATE_MAP_NAMESPACES.flatMap(namespace => {
-  const tree = accountTreeFromReplica(account, namespace);
-  return tree ? [{ namespace, rootHash: tree.rootHash(), leafCount: tree.size }] : [];
-});
+export const projectAccountTreeDescriptors = (account: AccountReplica): StorageAccountTreeDescriptor[] =>
+  ACCOUNT_STATE_MAP_NAMESPACES.flatMap(namespace => {
+    const tree = accountTreeFromReplica(account, namespace);
+    return tree ? [{ namespace, rootHash: tree.rootHash(), leafCount: tree.size }] : [];
+  });
 
 const boundedRow = (key: Buffer, value: unknown): AccountTreeRow => {
   const encoded = encodeBuffer(value);
@@ -103,10 +118,10 @@ const rowForRecord = (
   const tag = ACCOUNT_TREE_NAMESPACE_TAG[namespace];
   return record.kind === 'branch'
     ? boundedRow(keyLiveAccountBranch(entityId, counterpartyId, tag, record.path), branchValue(record))
-    : boundedRow(
-        keyLiveAccountLeaf(entityId, counterpartyId, tag, record.keyBytes),
-        { key: record.key, value: record.value },
-      );
+    : boundedRow(keyLiveAccountLeaf(entityId, counterpartyId, tag, record.keyBytes), {
+        key: record.key,
+        value: record.value,
+      });
 };
 
 const keyForRef = (
@@ -114,14 +129,18 @@ const keyForRef = (
   counterpartyId: string,
   namespace: AccountStateMapNamespace,
   record: Readonly<{ kind: 'branch' | 'leaf'; path: readonly number[]; keyBytes?: Uint8Array }>,
-): Buffer => record.kind === 'branch'
-  ? keyLiveAccountBranch(entityId, counterpartyId, ACCOUNT_TREE_NAMESPACE_TAG[namespace], record.path)
-  : keyLiveAccountLeaf(
-      entityId,
-      counterpartyId,
-      ACCOUNT_TREE_NAMESPACE_TAG[namespace],
-      record.keyBytes ?? (() => { throw new Error('STORAGE_ACCOUNT_TREE_LEAF_KEY_MISSING'); })(),
-    );
+): Buffer =>
+  record.kind === 'branch'
+    ? keyLiveAccountBranch(entityId, counterpartyId, ACCOUNT_TREE_NAMESPACE_TAG[namespace], record.path)
+    : keyLiveAccountLeaf(
+        entityId,
+        counterpartyId,
+        ACCOUNT_TREE_NAMESPACE_TAG[namespace],
+        record.keyBytes ??
+          (() => {
+            throw new Error('STORAGE_ACCOUNT_TREE_LEAF_KEY_MISSING');
+          })(),
+      );
 
 export const projectAccountTreeChanges = (
   entityId: string,
@@ -139,11 +158,13 @@ export const projectAccountTreeChanges = (
       puts.push(...changes.puts.map(record => rowForRecord(entityId, counterpartyId, namespace, record)));
       dels.push(...changes.dels.map(record => keyForRef(entityId, counterpartyId, namespace, record)));
     } else if (nextTree) {
-      puts.push(...[...nextTree.nodeRecords()].map(record =>
-        rowForRecord(entityId, counterpartyId, namespace, record)));
+      puts.push(
+        ...[...nextTree.nodeRecords()].map(record => rowForRecord(entityId, counterpartyId, namespace, record)),
+      );
     } else if (previousTree) {
-      dels.push(...[...previousTree.nodeRecords()].map(record =>
-        keyForRef(entityId, counterpartyId, namespace, record)));
+      dels.push(
+        ...[...previousTree.nodeRecords()].map(record => keyForRef(entityId, counterpartyId, namespace, record)),
+      );
     }
   }
   return { puts, dels };
@@ -175,9 +196,10 @@ const decodeBranch = (value: unknown, path: readonly number[]): PersistentRadixB
       throw new Error(`STORAGE_ACCOUNT_BRANCH_CHILD_KIND:${index}`);
     }
     const decodedKind: 'branch' | 'leaf' = kind === 'branch' ? 'branch' : 'leaf';
-    if (!Array.isArray(childPath) || childPath.some(
-      pathSlot => !Number.isSafeInteger(pathSlot) || Number(pathSlot) < 0 || Number(pathSlot) >= 16,
-    )) {
+    if (
+      !Array.isArray(childPath) ||
+      childPath.some(pathSlot => !Number.isSafeInteger(pathSlot) || Number(pathSlot) < 0 || Number(pathSlot) >= 16)
+    ) {
       throw new Error(`STORAGE_ACCOUNT_BRANCH_CHILD_PATH:${index}`);
     }
     if (typeof edgeHash !== 'string' || !/^0x[0-9a-f]{64}$/.test(edgeHash)) {
@@ -193,10 +215,7 @@ const decodeBranch = (value: unknown, path: readonly number[]): PersistentRadixB
   return { kind: 'branch', path: [...path], children };
 };
 
-const decodeLeaf = (
-  value: unknown,
-  keyBytes: Uint8Array,
-): AccountTreeRecord => {
+const decodeLeaf = (value: unknown, keyBytes: Uint8Array): AccountTreeRecord => {
   const leaf = record(value, 'STORAGE_ACCOUNT_LEAF_INVALID');
   if (Object.keys(leaf).sort().join(',') !== 'key,value') throw new Error('STORAGE_ACCOUNT_LEAF_FIELDS');
   const key = leaf['key'];
@@ -221,14 +240,16 @@ const readTreeRecords = async (
   const branchPrefix = keyLiveAccountTreePrefix(KEY_LIVE_ACCOUNT_BRANCH, entityId, counterpartyId, tag);
   for await (const key of iterateKeys(db, { prefix: branchPrefix })) {
     const parsed = parseLiveAccountBranchKey(key);
-    if (ACCOUNT_TREE_NAMESPACE_BY_TAG.get(parsed.namespaceTag) !== namespace) throw new Error('STORAGE_ACCOUNT_BRANCH_NAMESPACE');
-    records.push(decodeBranch(decodeBuffer(await db.get(key)), parsed.path));
+    if (ACCOUNT_TREE_NAMESPACE_BY_TAG.get(parsed.namespaceTag) !== namespace)
+      throw new Error('STORAGE_ACCOUNT_BRANCH_NAMESPACE');
+    records.push(decodeBranch(decodeBuffer(await readRequiredRaw(db, key)), parsed.path));
   }
   const leafPrefix = keyLiveAccountTreePrefix(KEY_LIVE_ACCOUNT_LEAF, entityId, counterpartyId, tag);
   for await (const key of iterateKeys(db, { prefix: leafPrefix })) {
     const parsed = parseLiveAccountLeafKey(key);
-    if (ACCOUNT_TREE_NAMESPACE_BY_TAG.get(parsed.namespaceTag) !== namespace) throw new Error('STORAGE_ACCOUNT_LEAF_NAMESPACE');
-    records.push(decodeLeaf(decodeBuffer(await db.get(key)), parsed.payload));
+    if (ACCOUNT_TREE_NAMESPACE_BY_TAG.get(parsed.namespaceTag) !== namespace)
+      throw new Error('STORAGE_ACCOUNT_LEAF_NAMESPACE');
+    records.push(decodeLeaf(decodeBuffer(await readRequiredRaw(db, key)), parsed.payload));
   }
   return records;
 };

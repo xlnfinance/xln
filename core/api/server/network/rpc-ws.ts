@@ -8,6 +8,7 @@ import {
   loadEntityAccountDocFromStorageDb,
   loadEntityStateFromStorageDb,
   loadEntityViewPageFromStorageDb,
+  loadEntityViewPagesFromStorageDb,
   readPersistedRuntimeActivityPage,
   readPersistedRuntimeActivityJournals,
   readPersistedAccountFrameHistory,
@@ -59,6 +60,7 @@ export const createServerRpcMessageHandler =
       loadEntityState: (targetEnv, entityId, height) => loadEntityStateFromStorageDb(targetEnv, entityId, height),
       loadEntityAccountDoc: (targetEnv, entityId, counterpartyId, height) =>
         loadEntityAccountDocFromStorageDb(targetEnv, entityId, counterpartyId, height),
+      loadEntityViewPages: loadEntityViewPagesFromStorageDb,
       loadEntityViewPage: (targetEnv, entityId, height, query) =>
         loadEntityViewPageFromStorageDb(targetEnv, entityId, height, query),
       listEntityIdsAtHeight: (targetEnv, height) => listPersistedEntityIdsAtHeight(targetEnv, height),

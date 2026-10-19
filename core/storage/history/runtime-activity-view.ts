@@ -1,3 +1,4 @@
+import { Buffer } from '../../support/platform-crypto';
 import { Level } from 'level';
 
 import {
@@ -8,7 +9,7 @@ import {
 import type { RuntimeReplica } from '../../runtime/types';
 import type { FrameLogEntry } from '../../types/logging';
 import { createStructuredLogger } from '../../support/logger';
-import { decodeBuffer, encodeBuffer, notFound } from '../codec/codec';
+import { decodeBuffer, encodeBuffer } from '../codec/codec';
 import { MAX_STORAGE_RECORD_BYTES } from '../schema/book-graph-codec';
 import { resolveDbPath } from '../runtime-db-path';
 import type { RuntimeFrame } from '../types';
@@ -102,12 +103,8 @@ const withRuntimeActivityViewLock = async <T>(
 };
 
 const readOptional = async (db: Level<Buffer, Buffer>, key: Buffer): Promise<unknown | null> => {
-  try {
-    return decodeBuffer(await db.get(key));
-  } catch (error) {
-    if (notFound(error)) return null;
-    throw error;
-  }
+  const raw = await db.get(key);
+  return raw === undefined ? null : decodeBuffer(raw);
 };
 
 const validateHead = (value: unknown): RuntimeActivityViewHead => {

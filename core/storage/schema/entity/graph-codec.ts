@@ -10,7 +10,7 @@ import type {
 } from '../../../protocol/state/persistent-radix-value-map';
 import { radixMerklePathSlots } from '../../../protocol/state/radix-merkle';
 import { decodeBuffer, encodeBuffer } from '../../codec/codec';
-import { iterateKeys } from '../../database/level';
+import { readRequiredRaw, iterateKeys } from '../../database/level';
 import {
   KEY_LIVE_ENTITY_BRANCH,
   KEY_LIVE_ENTITY_LEAF,
@@ -69,24 +69,21 @@ const entityTree = (value: unknown, namespace: EntityCollectionNamespace): Entit
   return value;
 };
 
-const entityTreeFromState = (
-  state: EntityState,
-  namespace: EntityCollectionNamespace,
-): EntityTree | undefined => {
-  const value = namespace === 'crontabHooks'
-    ? state.crontabState?.hooks
-    : namespace === 'paybookEntries'
-      ? state.paybook.entries
-      : state[namespace];
+const entityTreeFromState = (state: EntityState, namespace: EntityCollectionNamespace): EntityTree | undefined => {
+  const value =
+    namespace === 'crontabHooks'
+      ? state.crontabState?.hooks
+      : namespace === 'paybookEntries'
+        ? state.paybook.entries
+        : state[namespace];
   return value === undefined ? undefined : entityTree(value, namespace);
 };
 
-export const projectEntityTreeDescriptors = (
-  state: EntityState,
-): StorageEntityTreeDescriptor[] => ENTITY_COLLECTION_NAMESPACES.flatMap(namespace => {
-  const tree = entityTreeFromState(state, namespace);
-  return tree ? [{ namespace, rootHash: tree.rootHash(), leafCount: tree.size }] : [];
-});
+export const projectEntityTreeDescriptors = (state: EntityState): StorageEntityTreeDescriptor[] =>
+  ENTITY_COLLECTION_NAMESPACES.flatMap(namespace => {
+    const tree = entityTreeFromState(state, namespace);
+    return tree ? [{ namespace, rootHash: tree.rootHash(), leafCount: tree.size }] : [];
+  });
 
 const boundedRow = (key: Buffer, value: unknown): EntityTreeRow => {
   const encoded = encodeBuffer(value);
@@ -104,10 +101,7 @@ const rowForRecord = (
   const tag = ENTITY_COLLECTION_NAMESPACE_TAG[namespace];
   return record.kind === 'branch'
     ? boundedRow(keyLiveEntityBranch(entityId, tag, record.path), { children: record.children })
-    : boundedRow(
-        keyLiveEntityLeaf(entityId, tag, record.keyBytes),
-        { key: record.key, value: record.value },
-      );
+    : boundedRow(keyLiveEntityLeaf(entityId, tag, record.keyBytes), { key: record.key, value: record.value });
 };
 
 const keyForRef = (
@@ -118,13 +112,17 @@ const keyForRef = (
     path: readonly number[];
     keyBytes?: Uint8Array;
   }>,
-): Buffer => record.kind === 'branch'
-  ? keyLiveEntityBranch(entityId, ENTITY_COLLECTION_NAMESPACE_TAG[namespace], record.path)
-  : keyLiveEntityLeaf(
-      entityId,
-      ENTITY_COLLECTION_NAMESPACE_TAG[namespace],
-      record.keyBytes ?? (() => { throw new Error('STORAGE_ENTITY_TREE_LEAF_KEY_MISSING'); })(),
-    );
+): Buffer =>
+  record.kind === 'branch'
+    ? keyLiveEntityBranch(entityId, ENTITY_COLLECTION_NAMESPACE_TAG[namespace], record.path)
+    : keyLiveEntityLeaf(
+        entityId,
+        ENTITY_COLLECTION_NAMESPACE_TAG[namespace],
+        record.keyBytes ??
+          (() => {
+            throw new Error('STORAGE_ENTITY_TREE_LEAF_KEY_MISSING');
+          })(),
+      );
 
 export const projectEntityTreeChanges = (
   entityId: string,
@@ -172,9 +170,11 @@ const decodeBranch = (value: unknown, path: readonly number[]): PersistentRadixB
       throw new Error(`STORAGE_ENTITY_BRANCH_CHILD_SLOT:${index}`);
     }
     if (kind !== 'branch' && kind !== 'leaf') throw new Error(`STORAGE_ENTITY_BRANCH_CHILD_KIND:${index}`);
-    if (!Array.isArray(childPath) || childPath.some(
-      pathSlot => !Number.isSafeInteger(pathSlot) || Number(pathSlot) < 0 || Number(pathSlot) >= 16,
-    )) throw new Error(`STORAGE_ENTITY_BRANCH_CHILD_PATH:${index}`);
+    if (
+      !Array.isArray(childPath) ||
+      childPath.some(pathSlot => !Number.isSafeInteger(pathSlot) || Number(pathSlot) < 0 || Number(pathSlot) >= 16)
+    )
+      throw new Error(`STORAGE_ENTITY_BRANCH_CHILD_PATH:${index}`);
     if (typeof edgeHash !== 'string' || !/^0x[0-9a-f]{64}$/.test(edgeHash)) {
       throw new Error(`STORAGE_ENTITY_BRANCH_CHILD_HASH:${index}`);
     }
@@ -212,13 +212,13 @@ const readTreeRecords = async (
   for await (const key of iterateKeys(db, { prefix: branchPrefix })) {
     const parsed = parseLiveEntityBranchKey(key);
     if (NAMESPACE_BY_TAG.get(parsed.namespaceTag) !== namespace) throw new Error('STORAGE_ENTITY_BRANCH_NAMESPACE');
-    records.push(decodeBranch(decodeBuffer(await db.get(key)), parsed.path));
+    records.push(decodeBranch(decodeBuffer(await readRequiredRaw(db, key)), parsed.path));
   }
   const leafPrefix = keyLiveEntityTreePrefix(KEY_LIVE_ENTITY_LEAF, entityId, tag);
   for await (const key of iterateKeys(db, { prefix: leafPrefix })) {
     const parsed = parseLiveEntityLeafKey(key);
     if (NAMESPACE_BY_TAG.get(parsed.namespaceTag) !== namespace) throw new Error('STORAGE_ENTITY_LEAF_NAMESPACE');
-    records.push(decodeLeaf(decodeBuffer(await db.get(key)), parsed.payload));
+    records.push(decodeLeaf(decodeBuffer(await readRequiredRaw(db, key)), parsed.payload));
   }
   return records;
 };

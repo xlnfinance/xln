@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { HDNodeWallet } from 'ethers';
-import { importStackPhraseUi, LOCAL_PASSWORD } from './stack';
+import { importStackPhraseUi, LOCAL_PASSWORD } from './wallet-ui';
 
 const WAIT = { timeout: 15_000 };
 const production = process.env['NODE_ENV'] === 'production';
@@ -12,7 +12,10 @@ const assets = async (page: Page) => {
 const entityIdentity = async (page: Page): Promise<string> => {
   await home(page);
   await page.getByTestId('home-receive').click();
-  const identity = page.locator('.card').filter({ has: page.getByRole('heading', { name: 'Entity ID', exact: true }) }).locator('button.hash');
+  const identity = page
+    .locator('.card')
+    .filter({ has: page.getByRole('heading', { name: 'Entity ID', exact: true }) })
+    .locator('button.hash');
   await expect(identity).toBeVisible(WAIT);
   const title = await identity.getAttribute('title');
   if (!title || !/^0x[0-9a-f]{64} · tap to copy$/i.test(title)) throw new Error('PUBLIC_WALLET_ENTITY_ID_MISSING');
@@ -109,6 +112,42 @@ test(
     await expect(page.getByTestId('faucet-account-balance')).toHaveText(expectedBalance, WAIT);
     await expect(page.getByTestId('faucet-reserve-balance')).toHaveText('0.00 USDC', WAIT);
 
+    await home(page);
+    await page.getByTestId('home-open-account').click();
+    const sheet = page.getByRole('dialog', { name: 'Open account', exact: true });
+    await sheet
+      .locator('.picker-option')
+      .filter({ has: page.locator('.chip.hub') })
+      .first()
+      .click();
+    const secondHub = await sheet.getByTestId('open-account-target').inputValue();
+    expect(secondHub).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(secondHub).not.toBe(hub);
+    await sheet.getByTestId('open-account-credit').fill('50');
+    await expect(sheet.getByTestId('open-account-submit')).toBeEnabled(WAIT);
+    await sheet.getByTestId('open-account-submit').click();
+    await expect(sheet).toBeHidden(WAIT);
+    const openSecondAccount = async () => {
+      await home(page);
+      await page.locator(`[data-testid="account-row"][data-counterparty-id="${secondHub}"]`).click();
+      await expect(page.getByTestId('account-status')).toHaveText('Open', WAIT);
+      await expect(
+        page
+          .getByTestId('account-lane-USDC')
+          .locator('.kv')
+          .filter({ hasText: 'Your credit line to them' })
+          .locator('.v'),
+      ).toHaveText('50.00', WAIT);
+      await expect(page.locator('.page-sub')).toContainText(/\b[1-9]\d* frames signed/, WAIT);
+    };
+    await openSecondAccount();
+    await page.getByTestId('account-tab-frames').click();
+    await expect(page.getByTestId('account-frame-row').first()).toBeVisible(WAIT);
+    await expect(page.getByTestId('account-frame-row').first().locator('button.hash').first()).toHaveAttribute(
+      'title',
+      /^0x[0-9a-f]{64} · tap to copy$/i,
+    );
+
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
@@ -117,6 +156,7 @@ test(
     await assets(page);
     await expect(page.getByTestId('faucet-account-balance')).toHaveText(expectedBalance, WAIT);
     await expect(page.getByTestId('faucet-reserve-balance')).toHaveText('0.00 USDC', WAIT);
+    await openSecondAccount();
     expect(faucets).toEqual(['/api/faucet/gas', '/api/faucet/reserve']);
     expect(errors).toEqual([]);
     await info.attach('public-wallet-evidence', {

@@ -43,9 +43,7 @@ const memoryDb = (entries: Array<[Buffer, unknown]> = []): RuntimeDbLike => {
     get: async (key: Buffer) => {
       const value = values.get(key.toString('hex'));
       if (value) return Buffer.from(value);
-      const error = new Error('NotFound') as Error & { code?: string };
-      error.code = 'LEVEL_NOT_FOUND';
-      throw error;
+      return undefined;
     },
     batch: () => ({
       put: (key: Buffer, value: Buffer) => values.set(key.toString('hex'), Buffer.from(value)),

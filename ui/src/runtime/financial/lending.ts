@@ -91,75 +91,122 @@ export type LendingState = {
 	totals: { savingsPrincipal: bigint; loanPrincipal: bigint; activePrincipal: bigint };
 };
 
-const big = (value: unknown): bigint => {
-	try {
-		return BigInt(String(value ?? '0'));
-	} catch {
-		return 0n;
-	}
+const money = (value: unknown, field: string): bigint => {
+  if (typeof value !== 'string' || !/^(0|[1-9]\d*)$/.test(value)) {
+    throw new Error(`LENDING_MONEY_INVALID:${field}`);
+  }
+  return BigInt(value);
+};
+
+const record = (value: unknown, field: string): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`LENDING_RECORD_INVALID:${field}`);
+  return value as Record<string, unknown>;
 };
 
 const clock = (value: unknown, minimum: number): number => {
-	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum) throw new Error('Invalid loan clock');
-	return value;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum)
+    throw new Error('Invalid loan clock');
+  return value;
 };
 
 const term = normalizeLendingTerm;
 
-export async function fetchLendingState(input: { hubEntityId: string; userEntityId: string; tokenId: number; requestId?: string }): Promise<LendingState> {
-	const { getJson } = await import('../http');
-	const result = await getJson('/api/lending/state', { hubEntityId: input.hubEntityId, userEntityId: input.userEntityId, tokenId: String(input.tokenId), ...(input.requestId ? { requestId: input.requestId } : {}) });
-	if (!Array.isArray(result['savings']) || !Array.isArray(result['loans'])) throw new Error('Bank lending book schema mismatch');
-	const savings = result['savings'] as Array<Record<string, unknown>>;
-	const loans = result['loans'] as Array<Record<string, unknown>>;
-	const totals = (result['totals'] ?? {}) as Record<string, unknown>;
-	if (!Array.isArray(result['terms']) || !Array.isArray(result['facilities'])) throw new Error('Bank lending policy unavailable');
-	const requestStatus = result['requestStatus'];
-	const requestId = input.requestId ?? null;
-	if (result['requestId'] !== requestId) throw new Error('Borrower request response mismatch');
-	if (requestStatus !== null && requestStatus !== 'unseen' && requestStatus !== 'not-funded' && requestStatus !== 'opening' && requestStatus !== 'active' && requestStatus !== 'closing' && requestStatus !== 'repaid' && requestStatus !== 'defaulted' && requestStatus !== 'disputed') throw new Error('Invalid borrower request status');
-	return {
-		requestId,
-		requestStatus,
-		hubEntityId: String(result['hubEntityId'] || input.hubEntityId),
-		terms: result['terms'].map(decodeLendingBankTerms),
-		facilities: result['facilities'].map((value: unknown) => {
-			if (!value || typeof value !== 'object' || !('maxPrincipal' in value) || typeof value.maxPrincipal !== 'string' || !/^\d+$/.test(value.maxPrincipal)) throw new Error('Invalid bank facility');
-			return decodeLendingFacility({ ...value, maxPrincipal: BigInt(value.maxPrincipal) });
-		}),
-		savings: savings.map(pool => ({
-			positionId: String(pool['positionId'] || ''),
-			hubEntityId: String(pool['hubEntityId'] || ''),
-			lenderEntityId: String(pool['lenderEntityId'] || ''),
-			tokenId: Number(pool['tokenId'] || 0),
-			principalAmount: big(pool['principalAmount']),
-			closeAmount: BigInt(String(pool['closeAmount'])),
-			matured: pool['matured'] === true,
-			rateExpiresAt: pool['termId'] === 'demand' && (pool['status'] === 'open' || pool['status'] === 'queued') ? clock(pool['rateExpiresAt'], 1) : null,
-			interestBps: Number(pool['interestBps'] || 0),
-			termId: term(pool['termId']),
-			status: String(pool['status'] || ''),
-			updatedAt: Number(pool['updatedAt'] || 0),
-		})),
-		loans: loans.map(loan => ({
-			loanId: String(loan['loanId'] || ''),
-			hubEntityId: String(loan['hubEntityId'] || ''),
-			borrowerEntityId: String(loan['borrowerEntityId'] || ''),
-			tokenId: Number(loan['tokenId'] || 0),
-			principalAmount: big(loan['principalAmount']),
-			accruedAt: clock(loan['accruedAt'], 0),
-			accruedInterest: BigInt(String(loan['accruedInterest'])),
-			interestRemainder: BigInt(String(loan['interestRemainder'])),
-			repaymentAmount: big(loan['repaymentAmount']),
-			repaidAmount: big(loan['repaidAmount']),
-			interestBps: Number(loan['interestBps'] || 0),
-			termId: term(loan['termId']),
-			dueAt: clock(loan['dueAt'], 0),
-			openedAt: clock(loan['openedAt'], 0), termMs: clock(loan['termMs'], 1), lateMs: clock(loan['lateMs'], 0),
-			status: String(loan['status'] || ''),
-		})),
-		totals: { savingsPrincipal: big(totals['savingsPrincipalAmount']), loanPrincipal: big(totals['loanPrincipalAmount']), activePrincipal: big(totals['activePrincipalAmount']) },
-	};
+export async function fetchLendingState(input: {
+  hubEntityId: string;
+  userEntityId: string;
+  tokenId: number;
+  requestId?: string;
+}): Promise<LendingState> {
+  const { getJson } = await import('../http');
+  const result = await getJson('/api/lending/state', {
+    hubEntityId: input.hubEntityId,
+    userEntityId: input.userEntityId,
+    tokenId: String(input.tokenId),
+    ...(input.requestId ? { requestId: input.requestId } : {}),
+  });
+  return decodeLendingState(result, input);
+}
+
+export function decodeLendingState(
+  result: Record<string, unknown>,
+  input: { hubEntityId: string; requestId?: string },
+): LendingState {
+  if (!Array.isArray(result['savings']) || !Array.isArray(result['loans']))
+    throw new Error('Bank lending book schema mismatch');
+  const savings = result['savings'].map(value => record(value, 'savings'));
+  const loans = result['loans'].map(value => record(value, 'loans'));
+  const totals = record(result['totals'], 'totals');
+  if (!Array.isArray(result['terms']) || !Array.isArray(result['facilities']))
+    throw new Error('Bank lending policy unavailable');
+  const requestStatus = result['requestStatus'];
+  const requestId = input.requestId ?? null;
+  if (result['requestId'] !== requestId) throw new Error('Borrower request response mismatch');
+  if (
+    requestStatus !== null &&
+    requestStatus !== 'unseen' &&
+    requestStatus !== 'not-funded' &&
+    requestStatus !== 'opening' &&
+    requestStatus !== 'active' &&
+    requestStatus !== 'closing' &&
+    requestStatus !== 'repaid' &&
+    requestStatus !== 'defaulted' &&
+    requestStatus !== 'disputed'
+  )
+    throw new Error('Invalid borrower request status');
+  return {
+    requestId,
+    requestStatus,
+    hubEntityId: String(result['hubEntityId'] || input.hubEntityId),
+    terms: result['terms'].map(decodeLendingBankTerms),
+    facilities: result['facilities'].map((value: unknown) => {
+      const facility = record(value, 'facility');
+      return decodeLendingFacility({
+        ...facility,
+        maxPrincipal: money(facility['maxPrincipal'], 'facility.maxPrincipal'),
+      });
+    }),
+    savings: savings.map(pool => ({
+      positionId: String(pool['positionId'] || ''),
+      hubEntityId: String(pool['hubEntityId'] || ''),
+      lenderEntityId: String(pool['lenderEntityId'] || ''),
+      tokenId: Number(pool['tokenId'] || 0),
+      principalAmount: money(pool['principalAmount'], 'pool.principalAmount'),
+      closeAmount: money(pool['closeAmount'], 'pool.closeAmount'),
+      matured: pool['matured'] === true,
+      rateExpiresAt:
+        pool['termId'] === 'demand' && (pool['status'] === 'open' || pool['status'] === 'queued')
+          ? clock(pool['rateExpiresAt'], 1)
+          : null,
+      interestBps: Number(pool['interestBps'] || 0),
+      termId: term(pool['termId']),
+      status: String(pool['status'] || ''),
+      updatedAt: Number(pool['updatedAt'] || 0),
+    })),
+    loans: loans.map(loan => ({
+      loanId: String(loan['loanId'] || ''),
+      hubEntityId: String(loan['hubEntityId'] || ''),
+      borrowerEntityId: String(loan['borrowerEntityId'] || ''),
+      tokenId: Number(loan['tokenId'] || 0),
+      principalAmount: money(loan['principalAmount'], 'loan.principalAmount'),
+      accruedAt: clock(loan['accruedAt'], 0),
+      accruedInterest: money(loan['accruedInterest'], 'loan.accruedInterest'),
+      interestRemainder: money(loan['interestRemainder'], 'loan.interestRemainder'),
+      repaymentAmount: money(loan['repaymentAmount'], 'loan.repaymentAmount'),
+      repaidAmount: money(loan['repaidAmount'], 'loan.repaidAmount'),
+      interestBps: Number(loan['interestBps'] || 0),
+      termId: term(loan['termId']),
+      dueAt: clock(loan['dueAt'], 0),
+      openedAt: clock(loan['openedAt'], 0),
+      termMs: clock(loan['termMs'], 1),
+      lateMs: clock(loan['lateMs'], 0),
+      status: String(loan['status'] || ''),
+    })),
+    totals: {
+      savingsPrincipal: money(totals['savingsPrincipalAmount'], 'totals.savingsPrincipalAmount'),
+      loanPrincipal: money(totals['loanPrincipalAmount'], 'totals.loanPrincipalAmount'),
+      activePrincipal: money(totals['activePrincipalAmount'], 'totals.activePrincipalAmount'),
+    },
+  };
 }
 
 /** 'lend-<16 hex>' / 'borrow-<16 hex>', the frontend's intent id shape. */

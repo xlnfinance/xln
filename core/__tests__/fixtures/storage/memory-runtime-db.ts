@@ -10,24 +10,21 @@ export class MemoryRuntimeDb implements RuntimeDbLike {
   delCount = 0;
   lastBatchOperations: Array<{ kind: 'put' | 'del'; key: string }> = [];
 
-  async get(key: Buffer): Promise<Buffer> {
+  async get(key: Buffer): Promise<Buffer | undefined> {
     const value = this.rows.get(key.toString('hex'));
-    if (!value) {
-      const error = new Error('NotFound') as Error & { code?: string };
-      error.code = 'LEVEL_NOT_FOUND';
-      throw error;
-    }
+    if (value === undefined) return undefined;
     return Buffer.from(value);
   }
 
   batch() {
     const operations: MemoryOperation[] = [];
     return {
-      put: (key: Buffer, value: Buffer) => operations.push({
-        kind: 'put',
-        key: Buffer.from(key),
-        value: Buffer.from(value),
-      }),
+      put: (key: Buffer, value: Buffer) =>
+        operations.push({
+          kind: 'put',
+          key: Buffer.from(key),
+          value: Buffer.from(value),
+        }),
       del: (key: Buffer) => operations.push({ kind: 'del', key: Buffer.from(key) }),
       write: async () => {
         this.lastBatchOperations = operations.map(operation => ({
@@ -48,11 +45,7 @@ export class MemoryRuntimeDb implements RuntimeDbLike {
     };
   }
 
-  async *keys(options?: {
-    gte?: Buffer;
-    lt?: Buffer;
-    reverse?: boolean;
-  }): AsyncIterable<Buffer> {
+  async *keys(options?: { gte?: Buffer; lt?: Buffer; reverse?: boolean }): AsyncIterable<Buffer> {
     const keys = Array.from(this.rows.keys(), key => Buffer.from(key, 'hex'))
       .filter(key => !options?.gte || Buffer.compare(key, options.gte) >= 0)
       .filter(key => !options?.lt || Buffer.compare(key, options.lt) < 0)
@@ -68,29 +61,25 @@ export class TornBatchRuntimeDb implements RuntimeDbLike {
   constructor(readonly durable: MemoryRuntimeDb) {}
 
   arm(appliedOperationsBeforeFailure: number): void {
-    if (
-      !Number.isSafeInteger(appliedOperationsBeforeFailure) ||
-      appliedOperationsBeforeFailure < 0
-    ) {
-      throw new Error(
-        `TORN_BATCH_OPERATION_COUNT_INVALID:${appliedOperationsBeforeFailure}`,
-      );
+    if (!Number.isSafeInteger(appliedOperationsBeforeFailure) || appliedOperationsBeforeFailure < 0) {
+      throw new Error(`TORN_BATCH_OPERATION_COUNT_INVALID:${appliedOperationsBeforeFailure}`);
     }
     this.appliedOperationsBeforeFailure = appliedOperationsBeforeFailure;
   }
 
-  get(key: Buffer): Promise<Buffer> {
+  get(key: Buffer): Promise<Buffer | undefined> {
     return this.durable.get(key);
   }
 
   batch() {
     const operations: MemoryOperation[] = [];
     return {
-      put: (key: Buffer, value: Buffer) => operations.push({
-        kind: 'put',
-        key: Buffer.from(key),
-        value: Buffer.from(value),
-      }),
+      put: (key: Buffer, value: Buffer) =>
+        operations.push({
+          kind: 'put',
+          key: Buffer.from(key),
+          value: Buffer.from(value),
+        }),
       del: (key: Buffer) => operations.push({ kind: 'del', key: Buffer.from(key) }),
       write: async () => {
         const limit = this.appliedOperationsBeforeFailure;
@@ -103,19 +92,14 @@ export class TornBatchRuntimeDb implements RuntimeDbLike {
         await durableBatch.write();
         if (limit !== null) {
           throw new Error(
-            `SIM_STORAGE_TORN_BATCH:applied=${Math.min(limit, operations.length)}:` +
-            `planned=${operations.length}`,
+            `SIM_STORAGE_TORN_BATCH:applied=${Math.min(limit, operations.length)}:` + `planned=${operations.length}`,
           );
         }
       },
     };
   }
 
-  keys(options?: {
-    gte?: Buffer;
-    lt?: Buffer;
-    reverse?: boolean;
-  }): AsyncIterable<Buffer> {
+  keys(options?: { gte?: Buffer; lt?: Buffer; reverse?: boolean }): AsyncIterable<Buffer> {
     return this.durable.keys(options);
   }
 }

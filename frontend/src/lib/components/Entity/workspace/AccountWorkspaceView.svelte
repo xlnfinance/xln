@@ -3,7 +3,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
 
   import type { RuntimeReplica, EnvSnapshot, Profile as GossipProfile, RuntimeInput } from '@xln/core/api/public/runtime-module';
   import type { ComponentType } from 'svelte';
-  import { ArrowDownLeft, ArrowUpRight, Activity, Banknote, Landmark, PlusCircle, Repeat, Settings as SettingsIcon, SlidersHorizontal } from 'lucide-svelte';
+  import { ArrowDownLeft, ArrowUpRight, Activity, Landmark, PlusCircle, Repeat, Settings as SettingsIcon, SlidersHorizontal } from 'lucide-svelte';
   import type { Tab } from '#lib/types/ui.ts';
   import AccountAppearancePanel from '../account/ui/AccountAppearancePanel.svelte';
   import AccountConfigurePanel from '../account/ui/AccountConfigurePanel.svelte';
@@ -12,8 +12,6 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
   import AccountOpenPanel from '../account/ui/AccountOpenPanel.svelte';
   import AccountWorkspaceRail from './AccountWorkspaceRail.svelte';
   import EntityActivityPanel from '../activity/EntityActivityPanel.svelte';
-  import LendingPanel from '../payments/LendingPanel.svelte';
-  import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy';
   import LiveRequiredState from './shell/LiveRequiredState.svelte';
   import MoveWorkspace from '../MoveWorkspace.svelte';
   import { getMovePrimaryActionLabel as routeMovePrimaryActionLabel } from '../move-routes';
@@ -193,17 +191,12 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
   export let onMoveVisualRoot: (node: HTMLDivElement | null) => void;
   export let handleMoveWorkspaceError: (error: unknown) => void;
 
-  // The live admission profile owns which actions a client may offer: lending is
-  // outside the production profile (core/account/tx/admission-policy.ts), so the
-  // tab exists only when the profile admits lending_fund.
-  const lendingAvailable = isAccountTxKindAvailable('lending_fund');
   const accountWorkspaceTabs: IconTabConfig<AccountWorkspaceTab>[] = [
     { id: 'open', icon: PlusCircle, label: 'Open Account' },
     { id: 'send', icon: ArrowUpRight, label: 'Pay' },
     { id: 'receive', icon: ArrowDownLeft, label: 'Receive' },
     { id: 'swap', icon: Repeat, label: 'Swap' },
     { id: 'move', icon: Landmark, label: 'Move' },
-    ...(lendingAvailable ? [{ id: 'lending' as const, icon: Banknote, label: 'Lending' }] : []),
     { id: 'history', icon: Activity, label: 'History' },
     { id: 'configure', icon: SettingsIcon, label: 'Manage' },
     { id: 'activity', icon: Activity, label: 'Activity' },
@@ -371,16 +364,6 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
       movePrimaryActionLabel={routeMovePrimaryActionLabel(moveFromEndpoint, moveToEndpoint)}
       {onMoveVisualRoot}
       toastMoveError={handleMoveWorkspaceError}
-    />
-
-  {:else if accountWorkspaceTab === 'lending'}
-    <LendingPanel
-      entityId={replica?.state?.entityId || tab.entityId}
-      {replica}
-      accountIds={workspaceAccountIds}
-      {entityNames}
-      isLive={activeIsLive}
-      {submitRuntimeInput}
     />
 
   {:else if accountWorkspaceTab === 'history'}

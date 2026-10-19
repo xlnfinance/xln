@@ -132,9 +132,30 @@ describe('e2e baseline readiness', () => {
     });
   });
 
-  test('playwright owns the first reset so its exact baseline options win', () => {
-    const config = readFileSync('playwright.config.ts', 'utf8');
-    expect(config).toContain('XLN_MESH_DEFER_INITIAL_RESET=1 SKIP_TYPECHECK=1 bun run dev');
+  test('an active reset cannot reuse the preceding dev network readiness', async () => {
+    const { isBaselineReady } = await loadBaselineHelpers();
+
+    // The web server activates dev before a test can request its own baseline.
+    // Stale healthy counters do not certify that requested reset while it runs.
+    expect(
+      isBaselineReady(
+        {
+          ...readyHealth,
+          reset: { inProgress: true },
+        },
+        readyOptions,
+      ),
+    ).toBe(false);
+    expect(
+      isBaselineReady(
+        {
+          ...readyHealth,
+          marketMaker: { ...readyHealth.marketMaker, enabled: false },
+        },
+        readyOptions,
+      ),
+    ).toBe(false);
+    expect(isBaselineReady(readyHealth, readyOptions)).toBe(true);
   });
 
   test('orchestrator health exposes pending reset capabilities while imports require successful activation', () => {

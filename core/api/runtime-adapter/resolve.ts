@@ -48,7 +48,8 @@ import { projectHistoryFrameBatch, projectViewFrame } from './read/view-frame';
 import { projectGraphFrame } from './read/graph-frame';
 
 import { calculateSolvency } from '../../runtime/swap-cmd/solvency';
-import { acquireRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
+import { acquireRuntimeCommittedRead, withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
+import { ensureGossipProfiles } from '../../runtime/composition';
 
 export type RuntimeAdapterFrameSummary = {
   height: number;
@@ -589,6 +590,18 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
   query?: RuntimeAdapterReadQuery,
 ): Promise<T> => {
   const parts = normalizePath(path);
+  if (parts.length === 1 && parts[0] === 'entities' && query?.entityId !== undefined && readAtHeight(query) === null) {
+    const entityId = query.entityId.trim().toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(entityId)) {
+      throw new RuntimeAdapterError('E_BAD_QUERY', 'entity profile lookup requires a 32-byte entity id');
+    }
+    // Pull-only discovery verifies the peer's signed profile before projecting
+    // its jurisdiction and role. Network waits must never hold the frame writer.
+    const local = await withRuntimeCommittedRead(ctx.env, () => Boolean(findReplica(ctx.env, entityId)));
+    if (!local && !ctx.env.gossip.getProfile(entityId) && !(await ensureGossipProfiles(ctx.env, [entityId]))) {
+      throw new RuntimeAdapterError('E_NOT_FOUND', 'entity profile is unavailable', true);
+    }
+  }
   if (parts.length === 1 && parts[0] === 'payment-routes') {
     // Route search refreshes gossip over the network (up to about 1 s) and
     // takes the committed-read lease itself, only around the graph search.

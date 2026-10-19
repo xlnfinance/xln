@@ -32,7 +32,7 @@ assertNotIncludes(entityTypes, "type: 'cancelSwap';", entityTypesPath);
 assertNotIncludes(entityTypes, "type: 'cancelSwapOffer';", entityTypesPath);
 
 const applyPath = 'core/entity/tx/apply.ts';
-const apply = readText(applyPath);
+const apply = readText(applyPath).replace(/\s+/g, ' ');
 assertIncludes(apply, 'placeSwapOffer: (_env, state, tx, options) => handlePlaceSwapOfferRequest', applyPath);
 assertIncludes(apply, 'proposeCancelSwap: (_env, state, tx, options) => handleCancelSwapRequest', applyPath);
 assertNotIncludes(apply, `${retiredResolve}:`, applyPath);

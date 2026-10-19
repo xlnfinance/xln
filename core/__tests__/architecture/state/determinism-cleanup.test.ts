@@ -76,29 +76,26 @@ describe('determinism cleanup lifecycle', () => {
     expect(source).toContain('process.exit(1);');
   });
 
-  test('determinism oracle replays external J inputs without masking consensus evidence', () => {
+  test('determinism oracle records accepted WAL inputs instead of repeating external submissions', () => {
     const source = readSource('core/scenarios/runner/determinism.ts');
-    expect(source).toContain('createJEventTraceTransform(jEventTraceMode, jEventTrace)');
-    expect(source).toContain('createJBlockHeadersTraceTransform(jEventTraceMode, jEventTrace)');
-    expect(source).toContain('createJHistoryRangeTraceTransform(jEventTraceMode, jEventTrace)');
-    expect(source).toContain('return cloneJHistoryRangeIngress(expected);');
-    expect(source).not.toContain("'<external-block-hash>'");
-    expect(source).not.toContain("'<external-j-event-signature>'");
-    expect(source).toContain('logs: snapshot.logs ?? [],');
+    const replay = readSource('core/scenarios/runner/recorded-replay.ts');
+    expect(source).toContain('buildPersistedRuntimeRecording(activeEnv');
+    expect(source).toContain('replayRecordedScenario(recording, runtimeSeed, 1, directory)');
+    expect(source).toContain('replayRecordedScenario(recording, runtimeSeed, 4, directory)');
+    expect(source).not.toContain('setJEventIngressTransform');
+    expect(replay).toContain('replayRecoveryFrameJournals(env, [frame], { verify: true })');
+    expect(replay).toContain('finishRuntimeParityEvidence(env)');
+    expect(replay).not.toContain('submitPreparedJBatch');
+    expect(replay).not.toContain("'<external-block-hash>'");
+    expect(replay).not.toContain("'<external-j-event-signature>'");
   });
 
-  test('determinism oracle uses canonical J replica snapshots', () => {
-    const source = readSource('core/scenarios/runner/determinism.ts');
-    const projectStart = source.indexOf('const projectJReplicas =');
-    const projectEnd = source.indexOf('const snapshotEnvProjection =', projectStart);
-    expect(projectStart).toBeGreaterThan(0);
-    expect(projectEnd).toBeGreaterThan(projectStart);
-    const projectSource = source.slice(projectStart, projectEnd);
-
-    expect(source).toContain("import { buildCanonicalJReplicaSnapshot } from '../../storage/wal/snapshot';");
-    expect(projectSource).toContain('buildCanonicalJReplicaSnapshot(replica)');
-    expect(projectSource).not.toContain('blockNumber: replica.blockNumber');
-    expect(projectSource).not.toContain('lastBlockTimestamp: replica.lastBlockTimestamp');
+  test('determinism replay preserves complete canonical checkpoint and first divergent frame evidence', () => {
+    const source = readSource('core/scenarios/runner/recorded-replay.ts');
+    expect(source).toContain('validateRuntimeRecording(recording)');
+    expect(source).toContain('actual: buildRuntimeRecoveryCheckpointSnapshot(env)');
+    expect(source).toContain('expected: frame');
+    expect(source).toContain('computeCanonicalStateHashFromEnv(env)');
   });
 
   test('RPC scenarios use explicit polling and a wall-clock-independent chain', () => {

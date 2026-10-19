@@ -19,7 +19,6 @@ import {
 } from './handlers/account';
 import { applyJEvent } from './j-events';
 import { FailureDispositionError } from '../../protocol/errors/failure-taxonomy';
-import { entityTxAdmissionError } from './processing/admission-policy';
 import { createStructuredLogger } from '../../support/logger';
 import { handleR2E } from './handlers/j-batch/r2e';
 import { handleHtlcPayment } from './handlers/htlc/payment';
@@ -27,10 +26,7 @@ import { handleR2C } from './handlers/j-batch/r2c';
 import { handleE2R } from './handlers/j-batch/e2r';
 import { handleR2R } from './handlers/j-batch/r2r';
 import { handleCrossPullCloseEntityTx } from './handlers/payments/pull';
-import {
-  handleCancelSwapRequest,
-  handlePlaceSwapOfferRequest,
-} from './handlers/payments/swap-requests';
+import { handleCancelSwapRequest, handlePlaceSwapOfferRequest } from './handlers/payments/swap-requests';
 import { handleJBroadcast } from './handlers/j-batch/j-broadcast';
 import { handleJRebroadcast } from './handlers/j-batch/j-rebroadcast';
 import { handleJAbortSentBatch } from './handlers/j-batch/j-abort-sent-batch';
@@ -53,10 +49,7 @@ import {
   handleVoteEntityTx,
 } from './handlers/system/basic';
 import { handleOpenAccountEntityTx } from './handlers/account/lifecycle/open-account';
-import {
-  handleProcessHtlcTimeoutsEntityTx,
-  handleResolveHtlcLockEntityTx,
-} from './handlers/htlc/direct';
+import { handleProcessHtlcTimeoutsEntityTx, handleResolveHtlcLockEntityTx } from './handlers/htlc/direct';
 import { handleDirectPaymentEntityTx } from './handlers/payments/direct-payment';
 import {
   handleExtendCreditEntityTx,
@@ -166,17 +159,9 @@ type EntityTxDispatcher = (
   options: EntityTxExecutionOptions,
 ) => Promise<EntityTxReducerResult> | EntityTxReducerResult;
 
-type ReducibleEntityTx = Exclude<
-  EntityTx,
-  { type: 'entityCommand' | 'runtimeOutput' }
->;
+type ReducibleEntityTx = Exclude<EntityTx, { type: 'entityCommand' | 'runtimeOutput' }>;
 
-const handleJEventEntityTx: EntityTxDispatcher = async (
-  env,
-  entityState,
-  entityTx,
-  options,
-) => {
+const handleJEventEntityTx: EntityTxDispatcher = async (env, entityState, entityTx, options) => {
   if (entityTx.type !== 'j_event') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
   const jEventData = entityTx.data as {
     blocks?: Array<{
@@ -244,306 +229,299 @@ const accountHandlerResultToEntityTxResult = (
   result: Awaited<ReturnType<typeof applyAccountInputToEntity>>,
   counterpartyId: string,
 ): EntityTxReducerResult => ({
-    newState: result.newState,
-    outputs: result.outputs,
-    accountTxs: result.accountTxs,
-    // Rejected unknown-peer genesis never created an Account. Marking it dirty
-    // made Hanko attachment look up a missing leaf and halt the next honest frame.
-    accountChanges: result.newState.accounts.has(counterpartyId)
-      ? [counterpartyId]
-      : [],
-    candidateEffects: result.candidateEffects,
-    swapOffersCreated: result.swapOffersCreated,
-    swapCancelRequests: result.swapCancelRequests,
-    swapOffersCancelled: result.swapOffersCancelled,
-    ...(result.forceAccountFlush === undefined
-      ? {}
-      : {
-          accountInputWorks: [{
+  newState: result.newState,
+  outputs: result.outputs,
+  accountTxs: result.accountTxs,
+  // Rejected unknown-peer genesis never created an Account. Marking it dirty
+  // made Hanko attachment look up a missing leaf and halt the next honest frame.
+  accountChanges: result.newState.accounts.has(counterpartyId) ? [counterpartyId] : [],
+  candidateEffects: result.candidateEffects,
+  swapOffersCreated: result.swapOffersCreated,
+  swapCancelRequests: result.swapCancelRequests,
+  swapOffersCancelled: result.swapOffersCancelled,
+  ...(result.forceAccountFlush === undefined
+    ? {}
+    : {
+        accountInputWorks: [
+          {
             accountId: counterpartyId,
             force: result.forceAccountFlush,
-            ...(result.forcedAccountInput === undefined
-              ? {}
-              : { response: result.forcedAccountInput }),
-          }],
-        }),
-    ...(result.accountJClaimNodeChanges ? { accountJClaimNodeChanges: result.accountJClaimNodeChanges } : {}),
-    ...(result.hashesToSign && result.hashesToSign.length > 0 && { hashesToSign: result.hashesToSign }),
-  });
+            ...(result.forcedAccountInput === undefined ? {} : { response: result.forcedAccountInput }),
+          },
+        ],
+      }),
+  ...(result.accountJClaimNodeChanges ? { accountJClaimNodeChanges: result.accountJClaimNodeChanges } : {}),
+  ...(result.hashesToSign && result.hashesToSign.length > 0 && { hashesToSign: result.hashesToSign }),
+});
 
-const handleSettleApproveEntityTx: EntityTxDispatcher = async (
-  env,
-  entityState,
-  entityTx,
-  options,
-) => {
+const handleSettleApproveEntityTx: EntityTxDispatcher = async (env, entityState, entityTx, options) => {
   if (entityTx.type !== 'settle_approve') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
-  const result = await handleSettleApprove(
-    entityState,
-    entityTx,
-    env,
-    options?.mutableFrameState,
-  );
+  const result = await handleSettleApprove(entityState, entityTx, env, options?.mutableFrameState);
   return {
     ...result,
     ...(result.hashesToSign && result.hashesToSign.length > 0 && { hashesToSign: result.hashesToSign }),
   };
 };
 
-const handleJBroadcastEntityTx: EntityTxDispatcher = async (
-  env,
-  entityState,
-  entityTx,
-  options,
-) => {
+const handleJBroadcastEntityTx: EntityTxDispatcher = async (env, entityState, entityTx, options) => {
   if (entityTx.type !== 'j_broadcast') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
   const batch = entityState.jBatchState?.batch;
-  entityTxLog.debug('j_broadcast.apply', batch
-    ? {
-        entity: entityState.entityId.slice(-4),
-        r2r: batch.reserveToReserve.length,
-        r2c: batch.reserveToCollateral.length,
-        c2r: batch.collateralToReserve.length,
-        settlements: batch.settlements.length,
-        starts: batch.disputeStarts.length,
-        finals: batch.disputeFinalizations.length,
-      }
-    : { entity: entityState.entityId.slice(-4), batch: 'missing' });
-  return handleJBroadcast(
-    entityState,
-    entityTx,
-    env,
-    options?.mutableFrameState,
+  entityTxLog.debug(
+    'j_broadcast.apply',
+    batch
+      ? {
+          entity: entityState.entityId.slice(-4),
+          r2r: batch.reserveToReserve.length,
+          r2c: batch.reserveToCollateral.length,
+          c2r: batch.collateralToReserve.length,
+          settlements: batch.settlements.length,
+          starts: batch.disputeStarts.length,
+          finals: batch.disputeFinalizations.length,
+        }
+      : { entity: entityState.entityId.slice(-4), batch: 'missing' },
   );
+  return handleJBroadcast(entityState, entityTx, env, options?.mutableFrameState);
 };
 
 // This table is intentionally boring: adding a new EntityTx should mean adding
 // one row here and keeping domain behavior inside core/entity/tx/handlers.
 const entityTxDispatchers = {
-  scheduledWake: (env, state, tx, options) => handleScheduledWakeEntityTx(
-    env,
-    state,
-    tx as Extract<EntityTx, { type: 'scheduledWake' }>,
-    options?.manualBroadcastInInput === true,
-    options?.bookIntentSlot,
-  ),
-  proposeAccountsNow: (_env, state, tx) => handleProposeAccountsNowEntityTx(
-    state,
-    tx as Extract<EntityTx, { type: 'proposeAccountsNow' }>,
-  ),
-  chat: (_env, state, tx, options) => handleChatEntityTx(
-    state,
-    tx as Extract<EntityTx, { type: 'chat' }>,
-    options?.mutableFrameState,
-  ),
-  chatMessage: (_env, state, tx, options) => handleChatMessageEntityTx(
-    state,
-    tx as Extract<EntityTx, { type: 'chatMessage' }>,
-    options?.mutableFrameState,
-  ),
-  propose: (env, state, tx, options) => handleProposeEntityTx(
-    env,
-    state,
-    tx as Extract<EntityTx, { type: 'propose' }>,
-    options?.mutableFrameState,
-  ),
-  vote: (env, state, tx, options) => handleVoteEntityTx(
-    env,
-    state,
-    tx as Extract<EntityTx, { type: 'vote' }>,
-    options?.mutableFrameState,
-  ),
-  'profile-update': (env, state, tx, options) => handleProfileUpdateEntityTx(
-    env,
-    state,
-    tx as Extract<EntityTx, { type: 'profile-update' }>,
-    options?.mutableFrameState,
-  ),
-  initOrderbookExt: (_env, state, tx, options) => handleInitOrderbookExtEntityTx(
-    state,
-    tx as Extract<EntityTx, { type: 'initOrderbookExt' }>,
-    options?.mutableFrameState,
-  ),
+  scheduledWake: (env, state, tx, options) =>
+    handleScheduledWakeEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'scheduledWake' }>,
+      options?.manualBroadcastInInput === true,
+      options?.bookIntentSlot,
+    ),
+  proposeAccountsNow: (_env, state, tx) =>
+    handleProposeAccountsNowEntityTx(state, tx as Extract<EntityTx, { type: 'proposeAccountsNow' }>),
+  chat: (_env, state, tx, options) =>
+    handleChatEntityTx(state, tx as Extract<EntityTx, { type: 'chat' }>, options?.mutableFrameState),
+  chatMessage: (_env, state, tx, options) =>
+    handleChatMessageEntityTx(state, tx as Extract<EntityTx, { type: 'chatMessage' }>, options?.mutableFrameState),
+  propose: (env, state, tx, options) =>
+    handleProposeEntityTx(env, state, tx as Extract<EntityTx, { type: 'propose' }>, options?.mutableFrameState),
+  vote: (env, state, tx, options) =>
+    handleVoteEntityTx(env, state, tx as Extract<EntityTx, { type: 'vote' }>, options?.mutableFrameState),
+  'profile-update': (env, state, tx, options) =>
+    handleProfileUpdateEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'profile-update' }>,
+      options?.mutableFrameState,
+    ),
+  initOrderbookExt: (_env, state, tx, options) =>
+    handleInitOrderbookExtEntityTx(
+      state,
+      tx as Extract<EntityTx, { type: 'initOrderbookExt' }>,
+      options?.mutableFrameState,
+    ),
   j_event: handleJEventEntityTx,
-  boardHandover: (env, state, tx, options) => handleBoardHandoverEntityTx(
-    state,
-    tx as Extract<EntityTx, { type: 'boardHandover' }>,
-    env,
-    options?.mutableFrameState,
-    options.authorizedBoardHandoverConfig,
-  ),
+  boardHandover: (env, state, tx, options) =>
+    handleBoardHandoverEntityTx(
+      state,
+      tx as Extract<EntityTx, { type: 'boardHandover' }>,
+      env,
+      options?.mutableFrameState,
+      options.authorizedBoardHandoverConfig,
+    ),
   accountInput: handleAccountInputEntityTx,
-  openAccount: (_env, state, tx, options) => handleOpenAccountEntityTx(
-    state,
-    tx as Extract<EntityTx, { type: 'openAccount' }>,
-    options.accountConsensusContext,
-    options?.candidateEffects ?? [],
-    options?.mutableFrameState,
-  ),
-  htlcPayment: (env, state, tx, options) => handleHtlcPayment(
-    state,
-    tx as Extract<EntityTx, { type: 'htlcPayment' }>,
-    env,
-    options?.candidateEffects ?? [],
-    options?.mutableFrameState,
-    options?.infraContext,
-    options?.bookIntentSlot,
-  ),
-  resolveHtlcLock: (_env, state, tx, options) => handleResolveHtlcLockEntityTx(
-    state,
-    tx as Extract<EntityTx, { type: 'resolveHtlcLock' }>,
-    options?.mutableFrameState,
-    options?.bookIntentSlot,
-  ),
-  processHtlcTimeouts: (_env, state, tx, options) => handleProcessHtlcTimeoutsEntityTx(state, tx as Extract<EntityTx, { type: 'processHtlcTimeouts' }>, options?.mutableFrameState),
-  directPayment: (env, state, tx, options) => handleDirectPaymentEntityTx(
-    env,
-    state,
-    tx as Extract<EntityTx, { type: 'directPayment' }>,
-    options?.candidateEffects ?? [],
-    options?.mutableFrameState,
-  ),
-  r2c: (env, state, tx, options) => handleR2C(
-    env,
-    state,
-    tx as Extract<EntityTx, { type: 'r2c' }>,
-    options?.mutableFrameState,
-  ),
-  e2r: (_env, state, tx, options) => handleE2R(
-    state,
-    tx as Extract<EntityTx, { type: 'e2r' }>,
-    options?.mutableFrameState,
-  ),
-  r2r: (_env, state, tx, options) => handleR2R(
-    state,
-    tx as Extract<EntityTx, { type: 'r2r' }>,
-    options?.mutableFrameState,
-  ),
+  openAccount: (_env, state, tx, options) =>
+    handleOpenAccountEntityTx(
+      state,
+      tx as Extract<EntityTx, { type: 'openAccount' }>,
+      options.accountConsensusContext,
+      options?.candidateEffects ?? [],
+      options?.mutableFrameState,
+    ),
+  htlcPayment: (env, state, tx, options) =>
+    handleHtlcPayment(
+      state,
+      tx as Extract<EntityTx, { type: 'htlcPayment' }>,
+      env,
+      options?.candidateEffects ?? [],
+      options?.mutableFrameState,
+      options?.infraContext,
+      options?.bookIntentSlot,
+    ),
+  resolveHtlcLock: (_env, state, tx, options) =>
+    handleResolveHtlcLockEntityTx(
+      state,
+      tx as Extract<EntityTx, { type: 'resolveHtlcLock' }>,
+      options?.mutableFrameState,
+      options?.bookIntentSlot,
+    ),
+  processHtlcTimeouts: (_env, state, tx, options) =>
+    handleProcessHtlcTimeoutsEntityTx(
+      state,
+      tx as Extract<EntityTx, { type: 'processHtlcTimeouts' }>,
+      options?.mutableFrameState,
+    ),
+  directPayment: (env, state, tx, options) =>
+    handleDirectPaymentEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'directPayment' }>,
+      options?.candidateEffects ?? [],
+      options?.mutableFrameState,
+    ),
+  r2c: (env, state, tx, options) =>
+    handleR2C(env, state, tx as Extract<EntityTx, { type: 'r2c' }>, options?.mutableFrameState),
+  e2r: (_env, state, tx, options) =>
+    handleE2R(state, tx as Extract<EntityTx, { type: 'e2r' }>, options?.mutableFrameState),
+  r2r: (_env, state, tx, options) =>
+    handleR2R(state, tx as Extract<EntityTx, { type: 'r2r' }>, options?.mutableFrameState),
   j_broadcast: handleJBroadcastEntityTx,
-  entityProviderTransfer: (env, state, tx, options) => handleEntityProviderTransfer(
-    state,
-    tx as Extract<EntityTx, { type: 'entityProviderTransfer' }>,
-    env,
-    options?.mutableFrameState,
-  ),
-  entityProviderReleaseControlShares: (env, state, tx, options) => handleEntityProviderReleaseControlShares(
-    state,
-    tx as Extract<EntityTx, { type: 'entityProviderReleaseControlShares' }>,
-    env,
-    options?.mutableFrameState,
-  ),
-  entityProviderCancelAction: (env, state, tx, options) => handleEntityProviderCancelAction(
-    state,
-    tx as Extract<EntityTx, { type: 'entityProviderCancelAction' }>,
-    env,
-    options?.mutableFrameState,
-  ),
-  entityProviderProposeControlBoard: (env, state, tx, options) => handleEntityProviderProposeControlBoard(
-    state,
-    tx as Extract<EntityTx, { type: 'entityProviderProposeControlBoard' }>,
-    env,
-    options?.mutableFrameState,
-  ),
-  entityProviderActivateBoard: (env, state, tx, options) => handleEntityProviderActivateBoard(
-    state,
-    tx as Extract<EntityTx, { type: 'entityProviderActivateBoard' }>,
-    env,
-    options.mutableFrameState,
-  ),
-  j_rebroadcast: (env, state, tx, options) => handleJRebroadcast(
-    state,
-    tx as Extract<EntityTx, { type: 'j_rebroadcast' }>,
-    env,
-    options?.mutableFrameState,
-  ),
-  j_abort_sent_batch: (env, state, tx, options) => handleJAbortSentBatch(
-    state,
-    tx as Extract<EntityTx, { type: 'j_abort_sent_batch' }>,
-    env,
-    options?.mutableFrameState,
-  ),
-  j_clear_batch: (env, state, tx, options) => handleJClearBatch(
-    state,
-    tx as Extract<EntityTx, { type: 'j_clear_batch' }>,
-    env,
-    options?.mutableFrameState,
-  ),
-  mintReserves: (env, state, tx, options) => handleMintReserves(
-    state,
-    tx as Extract<EntityTx, { type: 'mintReserves' }>,
-    env,
-    options?.mutableFrameState,
-  ),
-  settle_propose: (env, state, tx, options) => handleSettlePropose(
-    state,
-    tx as Extract<EntityTx, { type: 'settle_propose' }>,
-    env,
-    options?.mutableFrameState,
-  ),
-  settle_update: (env, state, tx, options) => handleSettleUpdate(
-    state,
-    tx as Extract<EntityTx, { type: 'settle_update' }>,
-    env,
-    options?.mutableFrameState,
-  ),
+  entityProviderTransfer: (env, state, tx, options) =>
+    handleEntityProviderTransfer(
+      state,
+      tx as Extract<EntityTx, { type: 'entityProviderTransfer' }>,
+      env,
+      options?.mutableFrameState,
+    ),
+  entityProviderReleaseControlShares: (env, state, tx, options) =>
+    handleEntityProviderReleaseControlShares(
+      state,
+      tx as Extract<EntityTx, { type: 'entityProviderReleaseControlShares' }>,
+      env,
+      options?.mutableFrameState,
+    ),
+  entityProviderCancelAction: (env, state, tx, options) =>
+    handleEntityProviderCancelAction(
+      state,
+      tx as Extract<EntityTx, { type: 'entityProviderCancelAction' }>,
+      env,
+      options?.mutableFrameState,
+    ),
+  entityProviderProposeControlBoard: (env, state, tx, options) =>
+    handleEntityProviderProposeControlBoard(
+      state,
+      tx as Extract<EntityTx, { type: 'entityProviderProposeControlBoard' }>,
+      env,
+      options?.mutableFrameState,
+    ),
+  entityProviderActivateBoard: (env, state, tx, options) =>
+    handleEntityProviderActivateBoard(
+      state,
+      tx as Extract<EntityTx, { type: 'entityProviderActivateBoard' }>,
+      env,
+      options.mutableFrameState,
+    ),
+  j_rebroadcast: (env, state, tx, options) =>
+    handleJRebroadcast(state, tx as Extract<EntityTx, { type: 'j_rebroadcast' }>, env, options?.mutableFrameState),
+  j_abort_sent_batch: (env, state, tx, options) =>
+    handleJAbortSentBatch(
+      state,
+      tx as Extract<EntityTx, { type: 'j_abort_sent_batch' }>,
+      env,
+      options?.mutableFrameState,
+    ),
+  j_clear_batch: (env, state, tx, options) =>
+    handleJClearBatch(state, tx as Extract<EntityTx, { type: 'j_clear_batch' }>, env, options?.mutableFrameState),
+  mintReserves: (env, state, tx, options) =>
+    handleMintReserves(state, tx as Extract<EntityTx, { type: 'mintReserves' }>, env, options?.mutableFrameState),
+  settle_propose: (env, state, tx, options) =>
+    handleSettlePropose(state, tx as Extract<EntityTx, { type: 'settle_propose' }>, env, options?.mutableFrameState),
+  settle_update: (env, state, tx, options) =>
+    handleSettleUpdate(state, tx as Extract<EntityTx, { type: 'settle_update' }>, env, options?.mutableFrameState),
   settle_approve: handleSettleApproveEntityTx,
-  settle_execute: (env, state, tx, options) => handleSettleExecute(
-    state,
-    tx as Extract<EntityTx, { type: 'settle_execute' }>,
-    env,
-    options?.mutableFrameState,
-  ),
-  settle_reject: (env, state, tx, options) => handleSettleReject(
-    state,
-    tx as Extract<EntityTx, { type: 'settle_reject' }>,
-    env,
-    options?.mutableFrameState,
-  ),
-  extendCredit: (_env, state, tx, options) => handleExtendCreditEntityTx(
-    state,
-    tx as Extract<EntityTx, { type: 'extendCredit' }>,
-    options?.mutableFrameState,
-  ),
-  requestCredit: (_env, state, tx, options) => handleRequestCreditEntityTx(
-    state,
-    tx as Extract<EntityTx, { type: 'requestCredit' }>,
-    options?.mutableFrameState,
-  ),
-  lendingOffer: (_env, state, tx, options) => handleLendingOfferEntityTx(state, tx as Extract<EntityTx, { type: 'lendingOffer' }>, options?.mutableFrameState),
-  lendingSetTerms: (_env, state, tx, options) => handleLendingPolicy(state, tx as Extract<EntityTx, { type: 'lendingSetTerms' }>, options?.mutableFrameState),
-  lendingApprove: (_env, state, tx, options) => handleLendingPolicy(state, tx as Extract<EntityTx, { type: 'lendingApprove' }>, options?.mutableFrameState),
-  lendingBorrow: (_env, state, tx, options) => handleLendingBorrowEntityTx(state, tx as Extract<EntityTx, { type: 'lendingBorrow' }>, options?.mutableFrameState),
-  lendingRepay: (_env, state, tx, options) => handleLendingRepayEntityTx(state, tx as Extract<EntityTx, { type: 'lendingRepay' }>, options?.mutableFrameState),
-  lendingClosePosition: (_env, state, tx, options) => handleLendingClosePositionEntityTx(state, tx as Extract<EntityTx, { type: 'lendingClosePosition' }>, options?.mutableFrameState),
-  setHubConfig: (env, state, tx, options) => handleSetHubConfigEntityTx(
-    env,
-    state,
-    tx as Extract<EntityTx, { type: 'setHubConfig' }>,
-    options?.mutableFrameState,
-  ),
-  setRebalancePolicy: (env, state, tx, options) => handleSetRebalancePolicyEntityTx(
-    env,
-    state,
-    tx as Extract<EntityTx, { type: 'setRebalancePolicy' }>,
-    options?.mutableFrameState,
-  ),
-  requestCollateral: (_env, state, tx, options) => handleRequestCollateralEntityTx(
-    state,
-    tx as Extract<EntityTx, { type: 'requestCollateral' }>,
-    options?.mutableFrameState,
-  ),
-  crossPullClose: (env, state, tx, options) => handleCrossPullCloseEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossPullClose' }>, options),
-  prepareCrossJurisdictionSwap: (env, state, tx, options) => handlePrepareCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'prepareCrossJurisdictionSwap' }>, options),
-  materializeCrossJurisdictionSwap: (env, state, tx, options) => handleMaterializeCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'materializeCrossJurisdictionSwap' }>, options),
-  registerCrossJurisdictionSwap: (env, state, tx, options) => handleRegisterCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'registerCrossJurisdictionSwap' }>, options),
-  crossJurisdictionFillNotice: (env, state, tx, options) => handleCrossJurisdictionFillNoticeEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>, options?.storageChanges, options?.mutableFrameState),
-  materializeCrossJurisdictionClear: (env, state, tx, options) => handleMaterializeCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'materializeCrossJurisdictionClear' }>, options?.mutableFrameState),
-  requestCrossJurisdictionClear: (env, state, tx, options) => handleRequestCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>, options?.storageChanges, options?.mutableFrameState),
-  crossJurisdictionSalvage: (_env, state, tx, options) => handleCrossJurisdictionSalvageEntityTx(
-    state,
-    tx as Extract<EntityTx, { type: 'crossJurisdictionSalvage' }>,
-    options?.mutableFrameState,
-  ),
+  settle_execute: (env, state, tx, options) =>
+    handleSettleExecute(state, tx as Extract<EntityTx, { type: 'settle_execute' }>, env, options?.mutableFrameState),
+  settle_reject: (env, state, tx, options) =>
+    handleSettleReject(state, tx as Extract<EntityTx, { type: 'settle_reject' }>, env, options?.mutableFrameState),
+  extendCredit: (_env, state, tx, options) =>
+    handleExtendCreditEntityTx(state, tx as Extract<EntityTx, { type: 'extendCredit' }>, options?.mutableFrameState),
+  requestCredit: (_env, state, tx, options) =>
+    handleRequestCreditEntityTx(state, tx as Extract<EntityTx, { type: 'requestCredit' }>, options?.mutableFrameState),
+  lendingOffer: (_env, state, tx, options) =>
+    handleLendingOfferEntityTx(state, tx as Extract<EntityTx, { type: 'lendingOffer' }>, options?.mutableFrameState),
+  lendingSetTerms: (_env, state, tx, options) =>
+    handleLendingPolicy(state, tx as Extract<EntityTx, { type: 'lendingSetTerms' }>, options?.mutableFrameState),
+  lendingApprove: (_env, state, tx, options) =>
+    handleLendingPolicy(state, tx as Extract<EntityTx, { type: 'lendingApprove' }>, options?.mutableFrameState),
+  lendingBorrow: (_env, state, tx, options) =>
+    handleLendingBorrowEntityTx(state, tx as Extract<EntityTx, { type: 'lendingBorrow' }>, options?.mutableFrameState),
+  lendingRepay: (_env, state, tx, options) =>
+    handleLendingRepayEntityTx(state, tx as Extract<EntityTx, { type: 'lendingRepay' }>, options?.mutableFrameState),
+  lendingClosePosition: (_env, state, tx, options) =>
+    handleLendingClosePositionEntityTx(
+      state,
+      tx as Extract<EntityTx, { type: 'lendingClosePosition' }>,
+      options?.mutableFrameState,
+    ),
+  setHubConfig: (env, state, tx, options) =>
+    handleSetHubConfigEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'setHubConfig' }>,
+      options?.mutableFrameState,
+    ),
+  setRebalancePolicy: (env, state, tx, options) =>
+    handleSetRebalancePolicyEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'setRebalancePolicy' }>,
+      options?.mutableFrameState,
+    ),
+  requestCollateral: (_env, state, tx, options) =>
+    handleRequestCollateralEntityTx(
+      state,
+      tx as Extract<EntityTx, { type: 'requestCollateral' }>,
+      options?.mutableFrameState,
+    ),
+  crossPullClose: (env, state, tx, options) =>
+    handleCrossPullCloseEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossPullClose' }>, options),
+  prepareCrossJurisdictionSwap: (env, state, tx, options) =>
+    handlePrepareCrossJurisdictionSwapEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'prepareCrossJurisdictionSwap' }>,
+      options,
+    ),
+  materializeCrossJurisdictionSwap: (env, state, tx, options) =>
+    handleMaterializeCrossJurisdictionSwapEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'materializeCrossJurisdictionSwap' }>,
+      options,
+    ),
+  registerCrossJurisdictionSwap: (env, state, tx, options) =>
+    handleRegisterCrossJurisdictionSwapEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'registerCrossJurisdictionSwap' }>,
+      options,
+    ),
+  crossJurisdictionFillNotice: (env, state, tx, options) =>
+    handleCrossJurisdictionFillNoticeEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>,
+      options?.storageChanges,
+      options?.mutableFrameState,
+    ),
+  materializeCrossJurisdictionClear: (env, state, tx, options) =>
+    handleMaterializeCrossJurisdictionClearEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'materializeCrossJurisdictionClear' }>,
+      options?.mutableFrameState,
+    ),
+  requestCrossJurisdictionClear: (env, state, tx, options) =>
+    handleRequestCrossJurisdictionClearEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>,
+      options?.storageChanges,
+      options?.mutableFrameState,
+    ),
+  crossJurisdictionSalvage: (_env, state, tx, options) =>
+    handleCrossJurisdictionSalvageEntityTx(
+      state,
+      tx as Extract<EntityTx, { type: 'crossJurisdictionSalvage' }>,
+      options?.mutableFrameState,
+    ),
   crossJurisdictionForceSiblingDispute: (env, state, tx, options) =>
     handleCrossJurisdictionForceSiblingDisputeEntityTx(
       env,
@@ -552,20 +530,59 @@ const entityTxDispatchers = {
       options?.storageChanges,
       options?.mutableFrameState,
     ),
-  orderbookSweepCrossJurisdiction: (env, state, tx, options) => handleOrderbookSweepCrossJurisdictionEntityTx(env, state, tx as Extract<EntityTx, { type: 'orderbookSweepCrossJurisdiction' }>, options?.storageChanges, options?.mutableFrameState),
-  admitCrossJurisdictionBookOrder: (env, state, tx, options) => handleAdmitCrossJurisdictionBookOrderEntityTx(env, state, tx as Extract<EntityTx, { type: 'admitCrossJurisdictionBookOrder' }>, options),
-  removeCrossJurisdictionBookOrder: (env, state, tx, options) => handleRemoveCrossJurisdictionBookOrderEntityTx(env, state, tx as Extract<EntityTx, { type: 'removeCrossJurisdictionBookOrder' }>, options),
-  crossJurisdictionBookOrderRemoved: (env, state, tx, options) => handleCrossJurisdictionBookOrderRemovedEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossJurisdictionBookOrderRemoved' }>, options),
-  placeSwapOffer: (_env, state, tx, options) => handlePlaceSwapOfferRequest(state, tx as Extract<EntityTx, { type: 'placeSwapOffer' }>, options),
-  proposeCancelSwap: (_env, state, tx, options) => handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'proposeCancelSwap' }>, options),
-  r2e: (_env, state, tx, options) => handleR2E(
-    state,
-    tx as Extract<EntityTx, { type: 'r2e' }>,
-    options?.mutableFrameState,
-  ),
-  prepareDispute: (env, state, tx, options) => handlePrepareDispute(state, tx as Extract<EntityTx, { type: 'prepareDispute' }>, env, options?.storageChanges, options?.mutableFrameState),
-  disputeStart: (env, state, tx, options) => handleDisputeStart(state, tx as Extract<EntityTx, { type: 'disputeStart' }>, env, options?.storageChanges, options?.mutableFrameState),
-  disputeFinalize: (env, state, tx, options) => handleDisputeFinalize(state, tx as Extract<EntityTx, { type: 'disputeFinalize' }>, env, options?.mutableFrameState),
+  orderbookSweepCrossJurisdiction: (env, state, tx, options) =>
+    handleOrderbookSweepCrossJurisdictionEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'orderbookSweepCrossJurisdiction' }>,
+      options?.storageChanges,
+      options?.mutableFrameState,
+    ),
+  admitCrossJurisdictionBookOrder: (env, state, tx, options) =>
+    handleAdmitCrossJurisdictionBookOrderEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'admitCrossJurisdictionBookOrder' }>,
+      options,
+    ),
+  removeCrossJurisdictionBookOrder: (env, state, tx, options) =>
+    handleRemoveCrossJurisdictionBookOrderEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'removeCrossJurisdictionBookOrder' }>,
+      options,
+    ),
+  crossJurisdictionBookOrderRemoved: (env, state, tx, options) =>
+    handleCrossJurisdictionBookOrderRemovedEntityTx(
+      env,
+      state,
+      tx as Extract<EntityTx, { type: 'crossJurisdictionBookOrderRemoved' }>,
+      options,
+    ),
+  placeSwapOffer: (_env, state, tx, options) =>
+    handlePlaceSwapOfferRequest(state, tx as Extract<EntityTx, { type: 'placeSwapOffer' }>, options),
+  proposeCancelSwap: (_env, state, tx, options) =>
+    handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'proposeCancelSwap' }>, options),
+  r2e: (_env, state, tx, options) =>
+    handleR2E(state, tx as Extract<EntityTx, { type: 'r2e' }>, options?.mutableFrameState),
+  prepareDispute: (env, state, tx, options) =>
+    handlePrepareDispute(
+      state,
+      tx as Extract<EntityTx, { type: 'prepareDispute' }>,
+      env,
+      options?.storageChanges,
+      options?.mutableFrameState,
+    ),
+  disputeStart: (env, state, tx, options) =>
+    handleDisputeStart(
+      state,
+      tx as Extract<EntityTx, { type: 'disputeStart' }>,
+      env,
+      options?.storageChanges,
+      options?.mutableFrameState,
+    ),
+  disputeFinalize: (env, state, tx, options) =>
+    handleDisputeFinalize(state, tx as Extract<EntityTx, { type: 'disputeFinalize' }>, env, options?.mutableFrameState),
 } satisfies Record<ReducibleEntityTx['type'], EntityTxDispatcher>;
 
 export const applyEntityTx = async (
@@ -577,18 +594,11 @@ export const applyEntityTx = async (
   if (!entityTx) {
     throw new TypeError('ENTITY_TX_UNDEFINED');
   }
-  if (
-    entityTx.type === 'entityCommand' ||
-    entityTx.type === 'runtimeOutput'
-  ) {
+  if (entityTx.type === 'entityCommand' || entityTx.type === 'runtimeOutput') {
     throw new TypeError(`ENTITY_TX_WRAPPER_REACHED_REDUCER:${entityTx.type}`);
   }
 
   try {
-    // Check the static launch profile before any handler can mutate its book
-    // or enqueue unavailable Account work. Signed command bytes stay intact.
-    const admissionError = entityTxAdmissionError(entityTx);
-    if (admissionError) throw admissionError;
     // Every reducible type has a dispatcher (`satisfies Record<…>` above);
     // unknown type strings are rejected at both wire boundaries before here.
     const dispatcher: EntityTxDispatcher = entityTxDispatchers[entityTx.type];
@@ -596,7 +606,8 @@ export const applyEntityTx = async (
     const reducerCandidateEffects: EntityCandidateEffect[] = [];
     const { accountChanges = [], ...result } = await dispatcher(env, entityState, entityTx, {
       ...options,
-      accountConsensusContext: options?.accountConsensusContext ?? createAccountConsensusContext(env, undefined, entityState),
+      accountConsensusContext:
+        options?.accountConsensusContext ?? createAccountConsensusContext(env, undefined, entityState),
       storageChanges: reducerStorageChanges,
       candidateEffects: reducerCandidateEffects,
     });

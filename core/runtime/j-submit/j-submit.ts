@@ -635,6 +635,9 @@ const recordFailedSubmit = async (
         entityId: shortId(jTx.entityId),
         jurisdictionName,
         authenticatedJInputs,
+        error: result.error,
+        failure: result.failure,
+        txHash: result.txHash,
       });
       return;
     }

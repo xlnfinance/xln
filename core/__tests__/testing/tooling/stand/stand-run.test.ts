@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -57,6 +58,60 @@ test('independent competing processes never overlap slot ownership', async () =>
   } finally {
     for (const child of children) if (child.exitCode === null) child.kill();
     await Promise.all(children.map(child => child.exited));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test('nested stand CLI preserves the parent lease through child exit and timeout', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'xln-nested-stand-test-'));
+  const cli = new URL('../../../../../tools/stand-lock.ts', import.meta.url).pathname;
+  const resultFile = join(root, 'result.json');
+  try {
+    // An isolated Git fixture gives the actual CLI its own canonical lock root.
+    // Neither this test nor its children touch the live machine's stand metadata.
+    const initialized = spawnSync('git', ['init', '-q', root]);
+    expect(initialized.status).toBe(0);
+    const source = `import {readStandLockHolder,standLockRoot,STAND_LOCK_TOKEN_ENV} from ${safeStringify(cli)};
+      import {writeFileSync} from 'node:fs';
+      const root=standLockRoot();
+      const before=readStandLockHolder(root,0);
+      const outcomes=[];
+      for (const [body,timeout,token] of [
+        ['process.exit(0)',1000,process.env[STAND_LOCK_TOKEN_ENV]],
+        ['process.exit(7)',1000,process.env[STAND_LOCK_TOKEN_ENV]],
+        ['setInterval(()=>{},1000)',100,process.env[STAND_LOCK_TOKEN_ENV]],
+        ['process.exit(0)',1000,'foreign-token']
+      ]) {
+        const child=Bun.spawn([process.execPath,${safeStringify(cli)},'run','--reason','nested','--wait-ms','0','--timeout-ms',String(timeout),'--',process.execPath,'-e',body],
+          {env:{...process.env,[STAND_LOCK_TOKEN_ENV]:token},stdout:'ignore',stderr:'inherit'});
+        outcomes.push({code:await child.exited,holder:readStandLockHolder(root,0)});
+      }
+      writeFileSync(${safeStringify(resultFile)},JSON.stringify({before,outcomes}));`;
+    const outer = Bun.spawn(
+      [
+        process.execPath,
+        cli,
+        'run',
+        '--reason',
+        'outer',
+        '--wait-ms',
+        '0',
+        '--timeout-ms',
+        '5000',
+        '--',
+        process.execPath,
+        '-e',
+        source,
+      ],
+      { cwd: root, env: { ...process.env, XLN_STAND_LOCK_TOKEN: '' }, stdout: 'ignore', stderr: 'inherit' },
+    );
+    expect(await outer.exited).toBe(0);
+    const result = JSON.parse(readFileSync(resultFile, 'utf8'));
+    expect(result.outcomes.map((entry: { code: number }) => entry.code)).toEqual([0, 7, 124, 1]);
+    for (const outcome of result.outcomes) expect(outcome.holder).toEqual(result.before);
+    expect(readStandLockHolder(join(root, '.xln-stand-lock'), 0)).toBeNull();
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

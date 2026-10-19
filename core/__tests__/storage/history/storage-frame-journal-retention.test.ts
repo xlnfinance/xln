@@ -18,6 +18,7 @@ import {
   listPersistedCheckpointHeights,
   loadEntityStateFromStorageDb,
   loadEntityViewPageFromStorageDb,
+  loadEntityViewPagesFromStorageDb,
   loadEnvFromDB,
   processRuntime,
   readPersistedAccountFrameHistory,
@@ -129,29 +130,44 @@ describe('storage frame journal retention', () => {
       };
       installTestJurisdiction(env, jurisdiction);
       await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
+      const entityIds: string[] = [];
       for (const signerIndex of [2, 3]) {
         const signer = deriveSignerAddressSync(seed, String(signerIndex)).toLowerCase();
         registerSignerKey(env, signer, deriveSignerKeySync(seed, String(signerIndex)));
         const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
+        entityIds.push(entityId);
         enqueueRuntimeInput(env, {
-          runtimeTxs: [createTestEntityImportRuntimeTx(env, {
-            entityId,
-            signerId: signer,
-            data: {
-              isProposer: true,
-              config: {
-                mode: 'proposer-based',
-                threshold: 1n,
-                validators: [signer],
-                shares: { [signer]: 1n },
-                jurisdiction,
+          runtimeTxs: [
+            createTestEntityImportRuntimeTx(env, {
+              entityId,
+              signerId: signer,
+              data: {
+                isProposer: true,
+                config: {
+                  mode: 'proposer-based',
+                  threshold: 1n,
+                  validators: [signer],
+                  shares: { [signer]: 1n },
+                  jurisdiction,
+                },
               },
-            },
-          })],
+            }),
+          ],
           entityInputs: [],
         });
         await processRuntime(env, []);
       }
+      const pagesAtThree = await loadEntityViewPagesFromStorageDb(env, entityIds, 3, {
+        accountsLimit: 10,
+        booksLimit: 1,
+      });
+      expect(pagesAtThree?.size).toBe(2);
+      for (const id of entityIds) {
+        const point = await loadEntityViewPageFromStorageDb(env, id, 3, { accountsLimit: 10, booksLimit: 1 });
+        expect(pagesAtThree?.get(id)).toEqual(point);
+      }
+      const pagesAtTwo = await loadEntityViewPagesFromStorageDb(env, entityIds, 2);
+      expect(Array.from(pagesAtTwo?.keys() ?? [])).toEqual([entityIds[0]!]);
       await closeRuntimeDb(env);
       await closeInfraDb(env);
       envClosed = true;
@@ -182,8 +198,13 @@ describe('storage frame journal retention', () => {
         await historyDb.close();
       }
 
-      await expect(verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: 1 }))
-        .rejects.toThrow('RECOVERY_JOURNAL_POST_STATE_HASH_MISMATCH:height=2');
+      await expect(verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: 1 })).rejects.toThrow(
+        'RECOVERY_JOURNAL_POST_STATE_HASH_MISMATCH:height=2',
+      );
+      envClosed = false;
+      await expect(loadEntityViewPagesFromStorageDb(env, entityIds, 3)).rejects.toThrow(
+        'RECOVERY_JOURNAL_POST_STATE_HASH_MISMATCH:height=2',
+      );
     } finally {
       if (!envClosed) {
         await closeRuntimeDb(env);

@@ -3,11 +3,7 @@ import type { RuntimeReplica } from '../../../../runtime/types';
 import { isRuntimeMempoolCapacityError } from '../../../../runtime/mempool/input-queue';
 import { nextWatcherPollWindow, nextWatcherRpcBackoffMs } from '../../watcher/observe/watcher-poll-policy';
 import { isDebugEventEmitter } from '../../rpc-utils';
-import {
-  haltProcessForFatalWatcherError,
-  watcherErrorDetails,
-  watcherErrorMessage,
-} from '../rpc-boundary';
+import { haltProcessForFatalWatcherError, watcherErrorDetails, watcherErrorMessage } from '../rpc-boundary';
 import { rpcLog } from '../../rpc-public';
 import { getMinimumScannedSignerJHeight, getWatcherStartBlock } from '../../watcher';
 import { requireWatcherJurisdictionReplica } from '../../watcher/observe/watcher-replica';
@@ -21,10 +17,7 @@ import type {
   RpcWatcherTrace,
 } from './rpc-watcher-types';
 
-const emitWatcherDebug = (
-  session: RpcWatcherSession,
-  payload: Record<string, unknown>,
-): void => {
+const emitWatcherDebug = (session: RpcWatcherSession, payload: Record<string, unknown>): void => {
   const p2p = session.env.infrastructure?.p2p;
   if (!isDebugEventEmitter(p2p)) return;
   p2p.sendDebugEvent({
@@ -47,11 +40,7 @@ const createWatcherSession = (
   generation: number,
   services: RpcWatcherServices,
 ): RpcWatcherSession => {
-  const startBlock = getWatcherStartBlock(
-    env,
-    services.depositoryAddress,
-    services.chainId,
-  );
+  const startBlock = getWatcherStartBlock(env, services.depositoryAddress, services.chainId);
   const localScan = getMinimumScannedSignerJHeight(
     env,
     requireWatcherJurisdictionReplica(env, services.depositoryAddress, services.chainId, 'session-start'),
@@ -59,6 +48,7 @@ const createWatcherSession = (
   let session: RpcWatcherSession;
   const readWatchedErc20Tokens = createWatchedErc20TokenReader(
     services.getDepository(),
+    calls => services.sendAuthenticatedBatch(calls),
     payload => emitWatcherDebug(session, payload),
   );
   session = {
@@ -116,10 +106,7 @@ const handleTransientFailure = (
 ): void => {
   session.transientFailures += 1;
   const now = Date.now();
-  if (
-    session.transientFailures !== 1 &&
-    now - session.lastTransientLogAtMs < 10_000
-  ) return;
+  if (session.transientFailures !== 1 && now - session.lastTransientLogAtMs < 10_000) return;
   session.lastTransientLogAtMs = now;
   emitWatcherDebug(session, {
     event: 'j_watch_transient_rpc_unavailable',
@@ -136,7 +123,7 @@ const handleTransientFailure = (
   if (session.transientFailures >= 3) {
     console.warn(
       `[JAdapter:rpc] transient watcher RPC unavailable ` +
-      `(chain=${services.chainId}, failures=${session.transientFailures}): ${message}`,
+        `(chain=${services.chainId}, failures=${session.transientFailures}): ${message}`,
     );
   }
 };
@@ -262,9 +249,7 @@ const scheduleNextPoll = (
  * target; single-flight and generation fences prevent a stopped poll from
  * writing after shutdown or into a later watcher session.
  */
-export const createRpcWatcherController = (
-  services: RpcWatcherServices,
-): RpcWatcherMethods => {
+export const createRpcWatcherController = (services: RpcWatcherServices): RpcWatcherMethods => {
   const state: RpcWatcherControllerState = {
     session: null,
     inFlight: null,

@@ -225,7 +225,12 @@ export const handleLendingAccountTx = (
     if (tx.data.requestId !== normalized(tx.data.requestId) || !Number.isSafeInteger(tx.data.expiresAt) || timestamp >= tx.data.expiresAt) {
       return accountTxValidationRejected('LENDING_BORROW_AUTHORIZATION_EXPIRED_OR_INVALID', []);
     }
-    consumeIntent(account, `borrow:${normalized(tx.data.requestId)}`, 'borrow');
+    const intentKey = `borrow:${normalized(tx.data.requestId)}`;
+    // A separately signed reuse of a consumed request is sender-caused. Reject
+    // exactly this transaction before recording another authorization or draw.
+    if (account.state.lendingIntents.has(intentKey))
+      return accountTxValidationRejected(`LENDING_INTENT_REPLAY:${intentKey}`, []);
+    consumeIntent(account, intentKey, 'borrow');
     consumeIntent(account, borrowAuthorizationKey(account, tx.data), 'borrow');
     return accountTxApplied([`Lending borrow request ${tx.data.requestId} committed`]);
   }

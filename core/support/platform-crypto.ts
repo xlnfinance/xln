@@ -10,7 +10,6 @@ declare global {
     Buffer: typeof Buffer;
   }
 
-  // eslint-disable-next-line no-var
   var global: typeof globalThis;
 
   interface Uint8Array {

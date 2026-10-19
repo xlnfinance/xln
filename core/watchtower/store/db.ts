@@ -145,18 +145,12 @@ const readLookupUsage = async (
 
 const emptyMetaStats = (): StoredTowerMetaStats => ({ actionReceiptCount: 0 });
 
-const isMissingLevelKey = (error: unknown): boolean =>
-  /LEVEL_NOT_FOUND|NotFound/i.test(error instanceof Error ? error.message : String(error));
-
 export const readMetaStats = async (context: WatchtowerStoreContext): Promise<StoredTowerMetaStats> => {
   await ensureWatchtowerStoreOpen(context);
-  try {
-    const raw = await context.db.get(META_STATS_KEY);
-    return decodeWatchtowerStoredValue('meta-stats', META_STATS_KEY, raw, decodeStoredMetaStats);
-  } catch (error) {
-    if (isMissingLevelKey(error)) return emptyMetaStats();
-    throw error;
-  }
+  const raw = await context.db.get(META_STATS_KEY);
+  return raw === undefined
+    ? emptyMetaStats()
+    : decodeWatchtowerStoredValue('meta-stats', META_STATS_KEY, raw, decodeStoredMetaStats);
 };
 
 export const readLookup = async (
@@ -164,19 +158,12 @@ export const readLookup = async (
   lookupKey: string,
 ): Promise<StoredLookupDoc | null> => {
   await ensureWatchtowerStoreOpen(context);
-  try {
-    const storageKey = lookupKeyFor(lookupKey);
-    const raw = await context.db.get(storageKey);
-    return decodeWatchtowerStoredValue(
-      'lookup',
-      storageKey,
-      raw,
-      value => decodeStoredLookupDoc(value, normalizeLookupKey(lookupKey)),
-    );
-  } catch (error) {
-    if (isMissingLevelKey(error)) return null;
-    throw error;
-  }
+  const storageKey = lookupKeyFor(lookupKey);
+  const raw = await context.db.get(storageKey);
+  if (raw === undefined) return null;
+  return decodeWatchtowerStoredValue('lookup', storageKey, raw, value =>
+    decodeStoredLookupDoc(value, normalizeLookupKey(lookupKey)),
+  );
 };
 
 export const writeLookup = async (context: WatchtowerStoreContext, doc: StoredLookupDoc): Promise<void> => {

@@ -67,6 +67,28 @@ const restore = (account: AccountReplica) => {
   return hydrateAccountDocFromStorage(decodeValidatedBuffer(encodeBuffer(projectPortableAccountDoc(account)), validateStorageAccountDocValue));
 };
 
+test.each([true, false])(
+  'reusing a signed borrow request is a typed reject with unchanged money and roots, bankLeft=%s',
+  async bankIsLeft => {
+    const account = await funded(bankIsLeft);
+    const { loanId, interestBps, lateMs, ...data } = draw(bankIsLeft).data;
+    expect([loanId, interestBps, lateMs]).toEqual([ID, 100, 0]);
+    const before = computeAccountStateRoot(account.state);
+    const rejected = await applyAccountTxToMutableReplica(
+      account,
+      { type: 'lending_borrow_request', data },
+      !bankIsLeft,
+      1_001,
+    );
+    expect(rejected).toMatchObject({
+      ok: false,
+      rejection: { code: 'ACCOUNT_TX_VALIDATION', message: `LENDING_INTENT_REPLAY:borrow:${data.requestId}` },
+    });
+    expect(computeAccountStateRoot(account.state)).toBe(before);
+    expect(account.state.subcontracts?.size).toBe(1);
+  },
+);
+
 test('a bank cannot create coupon debt without the borrower requesting that loan', async () => {
   const account = makeAccount(LEFT, RIGHT);
   putTestAccountDelta(account, { ...account.state.deltas.get(1)!, collateral: 20_000n, ondelta: 10_000n });

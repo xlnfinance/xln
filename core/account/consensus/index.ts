@@ -904,10 +904,14 @@ const finishAccountInput = (
   session: AccountInputSession,
   result: HandleAccountInputResult,
 ): HandleAccountInputResult => {
-  if (!result.ok) return result;
+  if (!result.ok && result.disposition !== 'dispute') return result;
   const accountJClaimNodeChanges = session.committedJClaims.changes();
   return {
     ...result,
+    // A certified ACK commits before its bundled successor is replayed. A
+    // disputable successor cannot erase that prefix's history or money effects.
+    ...(session.committedFrames.length > 0 ? { committedFrames: session.committedFrames } : {}),
+    ...(session.timedOutHashlocks.length > 0 ? { timedOutHashlocks: session.timedOutHashlocks } : {}),
     ...(session.candidateEffects.length > 0 ? { candidateEffects: session.candidateEffects } : {}),
     ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
   };

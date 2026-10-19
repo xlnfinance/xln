@@ -24,13 +24,20 @@ type EventMap = {
   'settings:reset': {};
   'camera:focus': { target: { x: number; y: number; z: number } };
   'auto-demo:start': {}; // Auto-start demo in VR mode
-  'openEntityOperations': { entityId: string; entityName: string; signerId?: string; action?: EntityOpenAction }; // Open entity panel with optional action
-  'dock:selectEntity': { entityId: string; entityName: string; signerId?: string; action?: EntityOpenAction };
-  'openJurisdiction': { jurisdictionName: string }; // Open jurisdiction panel (J-Machine click)
-  'focusPanel': { panelId: string }; // Focus any panel by ID
+  openEntityOperations: { entityId: string; entityName: string; signerId?: string; action?: EntityOpenAction }; // Open entity panel with optional action
+  openJurisdiction: { jurisdictionName: string }; // Open jurisdiction panel (J-Machine click)
+  focusPanel: { panelId: string }; // Focus any panel by ID
   'scenario:loaded': { name: string; frames: number }; // Scenario loaded successfully
-  'camera:update': { position: { x: number; y: number; z: number }; target: { x: number; y: number; z: number }; distance?: number }; // Camera position changed
-  'camera:restore': { position: { x: number; y: number; z: number }; target: { x: number; y: number; z: number }; distance?: number }; // Apply a saved camera preset
+  'camera:update': {
+    position: { x: number; y: number; z: number };
+    target: { x: number; y: number; z: number };
+    distance?: number;
+  }; // Camera position changed
+  'camera:restore': {
+    position: { x: number; y: number; z: number };
+    target: { x: number; y: number; z: number };
+    distance?: number;
+  }; // Apply a saved camera preset
 };
 
 class PanelBridge {
@@ -60,9 +67,7 @@ class PanelBridge {
         }
       });
       if (errors.length > 0) {
-        const details = errors.map((error) =>
-          error instanceof Error ? error.message : String(error)
-        ).join('; ');
+        const details = errors.map(error => (error instanceof Error ? error.message : String(error))).join('; ');
         throw new Error(`PANEL_BRIDGE_HANDLER_FAILED:${String(event)}:${details}`);
       }
     }
@@ -79,7 +84,7 @@ class PanelBridge {
       return this.listeners.get(event)?.size || 0;
     }
     let total = 0;
-    this.listeners.forEach(set => total += set.size);
+    this.listeners.forEach(set => (total += set.size));
     return total;
   }
 }

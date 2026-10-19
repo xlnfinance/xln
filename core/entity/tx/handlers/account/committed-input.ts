@@ -79,14 +79,14 @@ export type AccountInputFlushWork = Readonly<{
   response?: AccountInput;
 }>;
 
-type SuccessfulAccountInputContext = {
+type CommittedAccountInputContext = {
   env: EntityRuntimeContext;
   state: EntityState;
   input: AccountInput;
   account: AccountReplica;
   counterpartyId: string;
   createdAccount: boolean;
-  result: HandleAccountInputApplied;
+  result: Omit<HandleAccountInputApplied, 'ok'>;
   effects: CommittedAccountEffects;
   options?: ApplyEntityTxOptions;
   checkpointProfile(label: string): void;
@@ -184,7 +184,7 @@ const scheduleCommittedAccountWork = (
 };
 
 const recordCommittedFrames = (
-  context: SuccessfulAccountInputContext,
+  context: CommittedAccountInputContext,
 ): void => {
   const { account, input, result, effects } = context;
   if ((result.committedFrames?.length ?? 0) > 0) {
@@ -219,7 +219,7 @@ const takeSameJurisdictionSwapOutput = (
 };
 
 const applySameJurisdictionSwapOutput = (
-  context: SuccessfulAccountInputContext,
+  context: CommittedAccountInputContext,
   output: SameJurisdictionSwapOutput,
 ): void => {
   const { counterpartyId, effects } = context;
@@ -235,7 +235,7 @@ const applySameJurisdictionSwapOutput = (
 };
 
 const consumeSameJurisdictionSwapOutput = (
-  context: SuccessfulAccountInputContext,
+  context: CommittedAccountInputContext,
   accountTx: AccountTx,
   cursor: SameJurisdictionSwapCursor,
   sameJurisdictionCancel: boolean | undefined,
@@ -302,7 +302,7 @@ export const classifyCommittedSwapCancels = (
 };
 
 const applyCommittedCrossJurisdictionSwapFollowup = (
-  context: SuccessfulAccountInputContext,
+  context: CommittedAccountInputContext,
   accountTx: AccountTx,
 ): void => {
   const { account, counterpartyId, effects } = context;
@@ -318,7 +318,7 @@ const applyCommittedCrossJurisdictionSwapFollowup = (
 };
 
 const applyCommittedFrameTransactions = async (
-  context: SuccessfulAccountInputContext,
+  context: CommittedAccountInputContext,
   swapCursor: SameJurisdictionSwapCursor,
 ): Promise<void> => {
   const { env, state, input, account, counterpartyId, result, effects, options } = context;
@@ -422,7 +422,7 @@ export const buildInitialHubPolicyTargets = (
 };
 
 const queueInitialHubPolicies = (
-  context: SuccessfulAccountInputContext,
+  context: CommittedAccountInputContext,
   committedInboundGenesis: AccountFrame | undefined,
 ): void => {
   const { state, counterpartyId, createdAccount, effects } = context;
@@ -435,7 +435,7 @@ const queueInitialHubPolicies = (
 };
 
 const applyCommittedHtlcFollowups = (
-  context: SuccessfulAccountInputContext,
+  context: CommittedAccountInputContext,
   directPaymentForwards: readonly DirectPaymentForward[],
 ): void => {
   const { env, state, input, account, result, effects } = context;
@@ -501,8 +501,8 @@ const logCommittedSwapEffects = (effects: CommittedAccountEffects): void => {
   }
 };
 
-export const applySuccessfulAccountInput = async (
-  context: SuccessfulAccountInputContext,
+export const applyCommittedAccountInput = async (
+  context: CommittedAccountInputContext,
 ): Promise<AccountInputFlushWork | undefined> => {
   const { env, state, input, account, counterpartyId, createdAccount, result, effects } = context;
   const accountOutputs = collectCommittedAccountOutputs(

@@ -17,7 +17,7 @@ import type {
 } from '../protocol/hashes';
 
 export type RuntimeDbLike = {
-  get: (key: Buffer) => Promise<Buffer>;
+  get: (key: Buffer) => Promise<Buffer | undefined>;
   put?: (key: Buffer, value: Buffer, options?: { sync?: boolean }) => Promise<void>;
   batch: () => {
     put: (key: Buffer, value: Buffer) => unknown;

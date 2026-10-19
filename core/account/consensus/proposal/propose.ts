@@ -51,14 +51,16 @@ const finishEmptyProposal = (
     account.mempool = removeCommittedTxsFromMempool(account.mempool, validation.txsToRemove);
   }
   const result: ProposeAccountFrameResult = proposeAccountFrameIdle({
-    message: validation.deferredTxCount > 0
-      ? `Transactions deferred until signed settlement finalizes: ${validation.deferredTxCount}`
-      : 'All transactions failed validation',
+    message:
+      validation.deferredTxCount > 0
+        ? `Transactions deferred until signed settlement finalizes: ${validation.deferredTxCount}`
+        : 'All transactions failed validation',
     events: validation.events,
     proposalDroppedTransactions: validation.droppedTransactions,
-    ...(validation.failedHtlcLocks.length > 0
-      ? { failedHtlcLocks: validation.failedHtlcLocks }
+    ...(validation.failedLendingDisbursements.length > 0
+      ? { failedLendingDisbursements: validation.failedLendingDisbursements }
       : {}),
+    ...(validation.failedHtlcLocks.length > 0 ? { failedHtlcLocks: validation.failedHtlcLocks } : {}),
     ...(accountChanged ? { accountChanged: true as const } : {}),
   });
   return result;

@@ -6,19 +6,13 @@ import { armPaymentSecretAckTimeout } from '../../../paybook/lifecycle';
 import { HTLC_ENFORCEMENT_RESERVE_MS } from '../../../account/consensus/dispute/deadline-policy';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { installCommittedAccountFrameHead } from '../../../account/consensus/frame/committed-envelope';
-import {
-  buildHtlcFinalizedEventPayload,
-  buildHtlcReceivedEventPayload,
-} from '../../../protocol/htlc/events';
+import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '../../../protocol/htlc/events';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { applyCommittedAccountFrameFollowups } from '../../../entity/tx/handlers/account/index';
 import { applyHtlcSecretFollowups } from '../../../entity/tx/handlers/account/committed-htlc-followups';
 import { handleResolveHtlcLockEntityTx } from '../../../entity/tx/handlers/htlc/direct';
 import { applyBookIntentProgram, createBookIntentProgram } from '../../../entity/books/book-intents';
-import {
-  publishEntityCandidateEffects,
-  readRuntimeFrameEvents,
-} from '../../../runtime/observability/env-events';
+import { publishEntityCandidateEffects, readRuntimeFrameEvents } from '../../../runtime/observability/env-events';
 import { createEmptyEnv } from '../../../runtime';
 import type { AccountFrame, AccountReplica } from '../../../types/account';
 import type { EntityCandidateEffect, EntityReplica } from '../../../entity/types';
@@ -34,22 +28,24 @@ import {
   requirePersistentAccountStateMap,
 } from '../../../account/state/persistent-state-map';
 
-const resolveWithBooks = (
-  state: EntityReplica['state'],
-  tx: Parameters<typeof handleResolveHtlcLockEntityTx>[1],
-) => {
+const resolveWithBooks = (state: EntityReplica['state'], tx: Parameters<typeof handleResolveHtlcLockEntityTx>[1]) => {
   const program = createBookIntentProgram();
   const result = handleResolveHtlcLockEntityTx(state, tx, false, program.openSlot());
   applyBookIntentProgram(result.newState, program);
   return result;
 };
 
-const commitFollowups = (
-  ...args: Parameters<typeof applyCommittedAccountFrameFollowups>
-): void => {
+const commitFollowups = (...args: Parameters<typeof applyCommittedAccountFrameFollowups>): void => {
   const program = createBookIntentProgram();
   applyCommittedAccountFrameFollowups(
-    args[0], args[1], args[2], args[3], args[4], args[5], args[6], program.openSlot(),
+    args[0],
+    args[1],
+    args[2],
+    args[3],
+    args[4],
+    args[5],
+    args[6],
+    program.openSlot(),
   );
   applyBookIntentProgram(args[0], program);
 };
@@ -101,43 +97,45 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
     rollbackCount: 0,
     proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
     pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
-    shadow: { rebalance: {
-      policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
-      submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
-    } },
+    shadow: {
+      rebalance: {
+        policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+        submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+      },
+    },
   };
 
   const state: EntityReplica['state'] = {
+    entityId,
+    entityEncryptionPublicKey: `0x${'55'.repeat(32)}`,
+    height: 0,
+    timestamp: 50_000,
+    nonces: new Map(),
+    proposals: new Map(),
+    config: {
+      mode: 'proposer-based',
+      threshold: 1n,
+      validators: ['1'],
+      shares: { '1': 1n },
+    },
+    reserves: new Map(),
+    accounts: PersistentEntityAccountMap.fromMap(
+      new Map([[counterpartyId, account]]),
       entityId,
-      entityEncryptionPublicKey: `0x${'55'.repeat(32)}`,
-      height: 0,
-      timestamp: 50_000,
-      nonces: new Map(),
-      proposals: new Map(),
-      config: {
-        mode: 'proposer-based',
-        threshold: 1n,
-        validators: ['1'],
-        shares: { '1': 1n },
-      },
-      reserves: new Map(),
-      accounts: PersistentEntityAccountMap.fromMap(
-        new Map([[counterpartyId, account]]),
-        entityId,
-        computeEntityAccountValueHash,
-      ),
-      deferredAccountProposals: new Map(),
-      lastFinalizedJHeight: 0,
-      profile: {
-        name: 'Replica',
-        isHub: false,
-        avatar: '',
-        bio: '',
-        website: '',
-      },
-      paybook: { entries: new Map(), feesEarned: 0n },
-      swapTradingPairs: [],
-      crontabState: initCrontab(),
+      computeEntityAccountValueHash,
+    ),
+    deferredAccountProposals: new Map(),
+    lastFinalizedJHeight: 0,
+    profile: {
+      name: 'Replica',
+      isHub: false,
+      avatar: '',
+      bio: '',
+      website: '',
+    },
+    paybook: { entries: new Map(), feesEarned: 0n },
+    swapTradingPairs: [],
+    crontabState: initCrontab(),
   };
   return {
     entityId,
@@ -193,9 +191,10 @@ describe('htlc event contract and dispute tail', () => {
     });
     account.status = 'dispute_preparing';
     expect(collectDerivedDeadlines(replica.state, expectedWake)).toEqual([]);
-    expect(earliestDerivedDeadline(replica.state)).toBe(170_000);
+    expect(earliestDerivedDeadline(replica.state)).toBeNull();
+    expect(account.state.locks.has(hashlock)).toBe(true);
+    expect(replica.state.paybook.entries.get(hashlock)?.secret).toBe(secret);
   });
-
 
   test('persists a verified out-of-band preimage before the counterparty ACKs', () => {
     const entityId = `0x${'22'.repeat(32)}`;
@@ -224,10 +223,12 @@ describe('htlc event contract and dispute tail', () => {
       data: { counterpartyEntityId: counterpartyId, lockId, secret },
     });
 
-    expect(result.accountTxs).toEqual([{
-      accountId: counterpartyId,
-      tx: { type: 'htlc_resolve', data: { lockId, outcome: 'secret', secret } },
-    }]);
+    expect(result.accountTxs).toEqual([
+      {
+        accountId: counterpartyId,
+        tx: { type: 'htlc_resolve', data: { lockId, outcome: 'secret', secret } },
+      },
+    ]);
     expect(result.newState.paybook.entries.get(hashlock)).toMatchObject({
       hashlock,
       tokenId: 1,
@@ -237,16 +238,20 @@ describe('htlc event contract and dispute tail', () => {
     });
     expect(replica.state.paybook.entries.has(hashlock)).toBe(false);
 
-    expect(() => resolveWithBooks(replica.state, {
-      type: 'resolveHtlcLock',
-      data: { counterpartyEntityId: counterpartyId, lockId, secret: `0x${'55'.repeat(32)}` },
-    })).toThrow(`HTLC_RESOLVE_HASHLOCK_MISMATCH:${lockId}`);
+    expect(() =>
+      resolveWithBooks(replica.state, {
+        type: 'resolveHtlcLock',
+        data: { counterpartyEntityId: counterpartyId, lockId, secret: `0x${'55'.repeat(32)}` },
+      }),
+    ).toThrow(`HTLC_RESOLVE_HASHLOCK_MISMATCH:${lockId}`);
     expect(replica.state.paybook.entries.has(hashlock)).toBe(false);
 
-    expect(() => resolveWithBooks(replica.state, {
-      type: 'resolveHtlcLock',
-      data: { counterpartyEntityId: counterpartyId, lockId: `0x${'77'.repeat(32)}`, secret },
-    })).toThrow('HTLC_RESOLVE_LOCK_MISSING');
+    expect(() =>
+      resolveWithBooks(replica.state, {
+        type: 'resolveHtlcLock',
+        data: { counterpartyEntityId: counterpartyId, lockId: `0x${'77'.repeat(32)}`, secret },
+      }),
+    ).toThrow('HTLC_RESOLVE_LOCK_MISSING');
 
     const conflicted = createEntityFrameCandidateState(replica.state);
     conflicted.paybook.entries.set(hashlock, {
@@ -256,10 +261,12 @@ describe('htlc event contract and dispute tail', () => {
       inboundEntity: `0x${'66'.repeat(32)}`,
       createdTimestamp: conflicted.timestamp,
     });
-    expect(() => resolveWithBooks(conflicted, {
-      type: 'resolveHtlcLock',
-      data: { counterpartyEntityId: counterpartyId, lockId, secret },
-    })).toThrow('PAYBOOK_ENTITY_CONFLICT');
+    expect(() =>
+      resolveWithBooks(conflicted, {
+        type: 'resolveHtlcLock',
+        data: { counterpartyEntityId: counterpartyId, lockId, secret },
+      }),
+    ).toThrow('PAYBOOK_ENTITY_CONFLICT');
   });
 
   test('builds explicit HtlcReceived and HtlcFinalized payloads', () => {
@@ -339,29 +346,38 @@ describe('htlc event contract and dispute tail', () => {
       createdTimestamp: replica.state.timestamp - 500,
     });
 
-
     const candidateEffects: EntityCandidateEffect[] = [];
-    commitFollowups(replica.state, counterpartyId, {
-      height: 1,
-      timestamp: replica.state.timestamp,
-      jHeight: 0,
-      accountTxs: [{
-        type: 'htlc_resolve',
-        data: {
-          lockId,
-          outcome: 'secret',
-          secret,
-        },
-      }],
-      prevFrameHash: '',
-      accountStateRoot: '',
-      stateHash: `0x${'66'.repeat(32)}`,
-    }, true, [], env, candidateEffects);
+    commitFollowups(
+      replica.state,
+      counterpartyId,
+      {
+        height: 1,
+        timestamp: replica.state.timestamp,
+        jHeight: 0,
+        accountTxs: [
+          {
+            type: 'htlc_resolve',
+            data: {
+              lockId,
+              outcome: 'secret',
+              secret,
+            },
+          },
+        ],
+        prevFrameHash: '',
+        accountStateRoot: '',
+        stateHash: `0x${'66'.repeat(32)}`,
+      },
+      true,
+      [],
+      env,
+      candidateEffects,
+    );
 
-  expect(readRuntimeFrameEvents(env).filter((entry) => entry.message === 'HtlcReceived')).toHaveLength(0);
+    expect(readRuntimeFrameEvents(env).filter(entry => entry.message === 'HtlcReceived')).toHaveLength(0);
     publishEntityCandidateEffects(env, replica, candidateEffects);
-  expect(readRuntimeFrameEvents(env).filter((entry) => entry.message === 'HtlcReceived')).toHaveLength(1);
-  expect(readRuntimeFrameEvents(env).find((entry) => entry.message === 'HtlcReceived')?.data).toMatchObject({
+    expect(readRuntimeFrameEvents(env).filter(entry => entry.message === 'HtlcReceived')).toHaveLength(1);
+    expect(readRuntimeFrameEvents(env).find(entry => entry.message === 'HtlcReceived')?.data).toMatchObject({
       entityId,
       fromEntity: counterpartyId,
       toEntity: entityId,
@@ -383,25 +399,41 @@ describe('htlc event contract and dispute tail', () => {
     const siblingReplica = makeReplica(recipientEntityId, counterpartyId);
     siblingReplica.signerId = '2';
     for (const [target, description] of [
-      [recipientReplica, 'uid:recipient-7'], [siblingReplica, 'uid:sibling-incorrect'],
+      [recipientReplica, 'uid:recipient-7'],
+      [siblingReplica, 'uid:sibling-incorrect'],
     ] as const) {
       target.state.paybook.entries.set(hashlock, {
-        hashlock, inboundEntity: counterpartyId, description, createdTimestamp: target.state.timestamp,
+        hashlock,
+        inboundEntity: counterpartyId,
+        description,
+        createdTimestamp: target.state.timestamp,
       });
     }
     env.state.eReplicas.set(`${recipientEntityId}:${recipientReplica.signerId}`, recipientReplica);
     env.state.eReplicas.set(`${recipientEntityId}:${siblingReplica.signerId}`, siblingReplica);
 
     const effects: EntityCandidateEffect[] = [];
-    commitFollowups(recipientReplica.state, counterpartyId, {
-      height: 1, timestamp: recipientReplica.state.timestamp, jHeight: 0,
-      accountTxs: [{ type: 'htlc_resolve', data: { lockId: hashlock, outcome: 'secret', secret } }],
-      prevFrameHash: '', accountStateRoot: '', stateHash: '',
-    }, true, [], env, effects);
+    commitFollowups(
+      recipientReplica.state,
+      counterpartyId,
+      {
+        height: 1,
+        timestamp: recipientReplica.state.timestamp,
+        jHeight: 0,
+        accountTxs: [{ type: 'htlc_resolve', data: { lockId: hashlock, outcome: 'secret', secret } }],
+        prevFrameHash: '',
+        accountStateRoot: '',
+        stateHash: '',
+      },
+      true,
+      [],
+      env,
+      effects,
+    );
     expect(siblingReplica.state.paybook.entries.get(hashlock)?.description).toBe('uid:sibling-incorrect');
 
     publishEntityCandidateEffects(env, recipientReplica, effects);
-  expect(readRuntimeFrameEvents(env).find((entry) => entry.message === 'HtlcReceived')?.data).toMatchObject({
+    expect(readRuntimeFrameEvents(env).find(entry => entry.message === 'HtlcReceived')?.data).toMatchObject({
       entityId: recipientEntityId,
       hashlock,
       description: 'uid:recipient-7',
@@ -484,25 +516,37 @@ describe('htlc event contract and dispute tail', () => {
       secretAckDeadlineAt: replica.state.timestamp + 30_000,
     });
 
-    commitFollowups(replica.state, counterpartyId, {
-      height: 1,
-      timestamp: replica.state.timestamp,
-      jHeight: 0,
-      accountTxs: [{
-        type: 'htlc_resolve',
-        data: {
-          lockId: inboundLockId,
-          outcome: 'secret',
-          secret,
-        },
-      }],
-      prevFrameHash: '',
-      accountStateRoot: '',
-      stateHash: '',
-    }, true, [], undefined, []);
+    commitFollowups(
+      replica.state,
+      counterpartyId,
+      {
+        height: 1,
+        timestamp: replica.state.timestamp,
+        jHeight: 0,
+        accountTxs: [
+          {
+            type: 'htlc_resolve',
+            data: {
+              lockId: inboundLockId,
+              outcome: 'secret',
+              secret,
+            },
+          },
+        ],
+        prevFrameHash: '',
+        accountStateRoot: '',
+        stateHash: '',
+      },
+      true,
+      [],
+      undefined,
+      [],
+    );
 
     expect(replica.state.paybook.entries.has(hashlock)).toBe(false);
-    expect(collectDerivedDeadlines(replica.state).some((deadline) => deadline.id === `htlc-secret-ack:${hashlock}`)).toBe(false);
+    expect(collectDerivedDeadlines(replica.state).some(deadline => deadline.id === `htlc-secret-ack:${hashlock}`)).toBe(
+      false,
+    );
   });
 
   test('keeps a forwarded route until the revealed secret is queued upstream', () => {
@@ -514,6 +558,20 @@ describe('htlc event contract and dispute tail', () => {
     const inboundLockId = hashlock;
     const outboundLockId = hashlock;
     const replica = makeReplica(entityId, outboundEntityId);
+    const inboundAccount = getEntityAccountForWrite(
+      makeReplica(entityId, inboundEntityId).state.accounts,
+      inboundEntityId,
+    )!;
+    inboundAccount.state.locks = inboundAccount.state.locks.updated(inboundLockId, {
+      lockId: inboundLockId,
+      hashlock,
+      tokenId: 1,
+      amount: 10n,
+      timelock: 100_000n,
+      revealBeforeHeight: 100,
+      senderIsLeft: false,
+    });
+    replica.state.accounts.set(inboundEntityId, inboundAccount);
     replica.state.paybook.entries.set(hashlock, {
       hashlock,
       tokenId: 1,
@@ -523,18 +581,28 @@ describe('htlc event contract and dispute tail', () => {
       createdTimestamp: replica.state.timestamp - 1_000,
     });
 
-    commitFollowups(replica.state, outboundEntityId, {
-      height: 1,
-      timestamp: replica.state.timestamp,
-      jHeight: 0,
-      accountTxs: [{
-        type: 'htlc_resolve',
-        data: { lockId: outboundLockId, outcome: 'secret', secret },
-      }],
-      prevFrameHash: '',
-      accountStateRoot: '',
-      stateHash: '',
-    }, true, [], undefined, []);
+    commitFollowups(
+      replica.state,
+      outboundEntityId,
+      {
+        height: 1,
+        timestamp: replica.state.timestamp,
+        jHeight: 0,
+        accountTxs: [
+          {
+            type: 'htlc_resolve',
+            data: { lockId: outboundLockId, outcome: 'secret', secret },
+          },
+        ],
+        prevFrameHash: '',
+        accountStateRoot: '',
+        stateHash: '',
+      },
+      true,
+      [],
+      undefined,
+      [],
+    );
 
     expect(replica.state.paybook.entries.has(hashlock)).toBe(true);
 
@@ -542,27 +610,34 @@ describe('htlc event contract and dispute tail', () => {
       accountId: string;
       tx: { type: 'htlc_resolve'; data: { lockId: string; outcome: 'secret'; secret: string } };
     }> = [];
-    secretFollowups({
-      env: createEmptyEnv('htlc-forwarded-secret-seed'),
-      state: replica.state,
-      newState: replica.state,
-      outputs: [],
-      accountTxs,
-      candidateEffects: [],
-    }, [{ hashlock, secret }]);
-
-    expect(accountTxs).toEqual([{
-      accountId: inboundEntityId,
-      tx: {
-        type: 'htlc_resolve',
-        data: { lockId: inboundLockId, outcome: 'secret', secret },
+    secretFollowups(
+      {
+        env: createEmptyEnv('htlc-forwarded-secret-seed'),
+        state: replica.state,
+        newState: replica.state,
+        outputs: [],
+        accountTxs,
+        candidateEffects: [],
       },
-    }]);
+      [{ hashlock, secret }],
+    );
+
+    expect(accountTxs).toEqual([
+      {
+        accountId: inboundEntityId,
+        tx: {
+          type: 'htlc_resolve',
+          data: { lockId: inboundLockId, outcome: 'secret', secret },
+        },
+      },
+    ]);
     expect(replica.state.paybook.entries.get(hashlock)).toMatchObject({
       secret,
       secretAckPending: true,
     });
-    expect(collectDerivedDeadlines(replica.state).some((deadline) => deadline.id === `htlc-secret-ack:${hashlock}`)).toBe(true);
+    expect(collectDerivedDeadlines(replica.state).some(deadline => deadline.id === `htlc-secret-ack:${hashlock}`)).toBe(
+      true,
+    );
   });
 
   test('queues only the inbound self-cycle resolution until the secret propagates back', () => {
@@ -581,14 +656,17 @@ describe('htlc event contract and dispute tail', () => {
     });
     const accountTxs: Parameters<typeof applyHtlcSecretFollowups>[0]['accountTxs'] = [];
 
-    secretFollowups({
-      env: createEmptyEnv('htlc-self-cycle-secret-seed'),
-      state: replica.state,
-      newState: replica.state,
-      outputs: [],
-      accountTxs,
-      candidateEffects: [],
-    }, [{ hashlock, secret }]);
+    secretFollowups(
+      {
+        env: createEmptyEnv('htlc-self-cycle-secret-seed'),
+        state: replica.state,
+        newState: replica.state,
+        outputs: [],
+        accountTxs,
+        candidateEffects: [],
+      },
+      [{ hashlock, secret }],
+    );
 
     expect(accountTxs).toEqual([
       {
@@ -637,34 +715,28 @@ describe('htlc event contract and dispute tail', () => {
       height: 1,
       timestamp: replica.state.timestamp,
       jHeight: 0,
-      accountTxs: [{
-        type: 'htlc_resolve',
-        data: {
-          lockId: outboundLockId,
-          outcome: 'secret',
-          secret,
+      accountTxs: [
+        {
+          type: 'htlc_resolve',
+          data: {
+            lockId: outboundLockId,
+            outcome: 'secret',
+            secret,
+          },
         },
-      }],
+      ],
       prevFrameHash: '',
       accountStateRoot: '',
       stateHash: '',
     };
     installCommittedAccountFrameHead(account, committedFrame);
-    commitFollowups(
-      replica.state,
-      counterpartyId,
-      committedFrame,
-      true,
-      [],
-      env,
-      candidateEffects,
-    );
+    commitFollowups(replica.state, counterpartyId, committedFrame, true, [], env, candidateEffects);
 
     expect(replica.state.paybook.entries.has(hashlock)).toBe(false);
     expect(account.mempool).toEqual([]);
-  expect(readRuntimeFrameEvents(env).filter((entry) => entry.message === 'HtlcFinalized')).toHaveLength(0);
+    expect(readRuntimeFrameEvents(env).filter(entry => entry.message === 'HtlcFinalized')).toHaveLength(0);
     publishEntityCandidateEffects(env, replica, candidateEffects);
-  const finalizedEvents = readRuntimeFrameEvents(env).filter((entry) => entry.message === 'HtlcFinalized');
+    const finalizedEvents = readRuntimeFrameEvents(env).filter(entry => entry.message === 'HtlcFinalized');
     expect(finalizedEvents).toHaveLength(1);
     expect(finalizedEvents[0]?.data).toMatchObject({
       entityId,
@@ -717,41 +789,51 @@ describe('htlc event contract and dispute tail', () => {
       replica.state.paybook.feesEarned = 13n;
       const candidateEffects: EntityCandidateEffect[] = [];
       const commit = (counterpartyId: string, lockId: string, secret: string) =>
-        commitFollowups(replica.state, counterpartyId, {
-          height: 1,
-          timestamp: replica.state.timestamp,
-          jHeight: 0,
-          accountTxs: [{
-            type: 'htlc_resolve',
-              data: { lockId, outcome: 'secret', secret },
-          }],
-          prevFrameHash: '',
-          accountStateRoot: '',
-          stateHash: `0x${'44'.repeat(32)}`,
-        }, true, [], env, candidateEffects);
-      const commits = order === 'inbound-first'
-        ? [
-            () => commit(inboundEntity, inboundLockId, secret),
-            () => commit(outboundEntity, outboundLockId, secret),
-          ]
-        : [
-            () => commit(outboundEntity, outboundLockId, secret),
-            () => commit(inboundEntity, inboundLockId, secret),
-          ];
+        commitFollowups(
+          replica.state,
+          counterpartyId,
+          {
+            height: 1,
+            timestamp: replica.state.timestamp,
+            jHeight: 0,
+            accountTxs: [
+              {
+                type: 'htlc_resolve',
+                data: { lockId, outcome: 'secret', secret },
+              },
+            ],
+            prevFrameHash: '',
+            accountStateRoot: '',
+            stateHash: `0x${'44'.repeat(32)}`,
+          },
+          true,
+          [],
+          env,
+          candidateEffects,
+        );
+      const commits =
+        order === 'inbound-first'
+          ? [() => commit(inboundEntity, inboundLockId, secret), () => commit(outboundEntity, outboundLockId, secret)]
+          : [() => commit(outboundEntity, outboundLockId, secret), () => commit(inboundEntity, inboundLockId, secret)];
 
       commits[0]!();
       expect(replica.state.paybook.entries.has(hashlock), `${order}: first leg must retain route`).toBe(true);
       const retained = replica.state.paybook.entries.get(hashlock)!;
       expect(retained.inboundSettled).toBe(order === 'inbound-first' ? true : undefined);
       expect(retained.outboundSettled).toBe(order === 'outbound-first' ? true : undefined);
-      expect(candidateEffects.filter(effect => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcFinalized'))
-        .toHaveLength(order === 'outbound-first' ? 1 : 0);
+      expect(
+        candidateEffects.filter(effect => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcFinalized'),
+      ).toHaveLength(order === 'outbound-first' ? 1 : 0);
       expect(replica.state.paybook.feesEarned).toBe(13n);
       commits[1]!();
       expect(replica.state.paybook.feesEarned).toBe(13n);
       expect(replica.state.paybook.entries.has(hashlock), `${order}: both legs terminate route`).toBe(false);
-      expect(candidateEffects.filter(effect => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcReceived')).toHaveLength(1);
-      expect(candidateEffects.filter(effect => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcFinalized')).toHaveLength(1);
+      expect(
+        candidateEffects.filter(effect => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcReceived'),
+      ).toHaveLength(1);
+      expect(
+        candidateEffects.filter(effect => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcFinalized'),
+      ).toHaveLength(1);
     }
   });
 
@@ -764,22 +846,34 @@ describe('htlc event contract and dispute tail', () => {
       const replica = makeReplica(entityId, counterpartyId);
       const account = getEntityAccountForWrite(replica.state.accounts, counterpartyId)!;
       const lock = {
-        lockId: hashlock, hashlock, tokenId: 1, amount: 10n,
-        timelock: 100000n, revealBeforeHeight: 10,
+        lockId: hashlock,
+        hashlock,
+        tokenId: 1,
+        amount: 10n,
+        timelock: 100000n,
+        revealBeforeHeight: 10,
       };
       const tx = { type: 'htlc_lock' as const, data: lock };
       if (evidence === 'queued') account.mempool.push(tx);
       else account.currentFrame = { ...account.currentFrame, accountTxs: [tx] };
       replica.state.paybook.entries.set(hashlock, {
-        hashlock, tokenId: 1, amount: 10n, outboundEntity: counterpartyId,
+        hashlock,
+        tokenId: 1,
+        amount: 10n,
+        outboundEntity: counterpartyId,
         createdTimestamp: replica.state.timestamp - 1000,
       });
       const beforeEntries = [...replica.state.paybook.entries];
       const beforeMempool = [...account.mempool];
       const beforeFrame = account.currentFrame;
-      const resolve = { type: 'resolveHtlcLock' as const, data: {
-        counterpartyEntityId: counterpartyId, lockId: hashlock, secret,
-      } };
+      const resolve = {
+        type: 'resolveHtlcLock' as const,
+        data: {
+          counterpartyEntityId: counterpartyId,
+          lockId: hashlock,
+          secret,
+        },
+      };
       expect(() => resolveWithBooks(replica.state, resolve)).toThrow(
         `HTLC_RESOLVE_LOCK_MISSING:${counterpartyId}:${hashlock}`,
       );
@@ -789,13 +883,18 @@ describe('htlc event contract and dispute tail', () => {
       expect(account.state.locks.size).toBe(0);
 
       account.state.locks = requirePersistentAccountStateMap(account.state.locks, 'locks').updated(hashlock, {
-        ...lock, senderIsLeft: true, createdHeight: 1, createdTimestamp: replica.state.timestamp,
+        ...lock,
+        senderIsLeft: true,
+        createdHeight: 1,
+        createdTimestamp: replica.state.timestamp,
       });
       const result = resolveWithBooks(replica.state, resolve);
-      expect(result.accountTxs).toEqual([{
-        accountId: counterpartyId,
-        tx: { type: 'htlc_resolve', data: { lockId: hashlock, outcome: 'secret', secret } },
-      }]);
+      expect(result.accountTxs).toEqual([
+        {
+          accountId: counterpartyId,
+          tx: { type: 'htlc_resolve', data: { lockId: hashlock, outcome: 'secret', secret } },
+        },
+      ]);
       expect(result.newState.paybook.entries.get(hashlock)?.secret).toBe(secret);
       expect([...replica.state.paybook.entries]).toEqual(beforeEntries);
       expect(account.mempool).toEqual(beforeMempool);

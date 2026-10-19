@@ -126,7 +126,7 @@ async function readState(page: Page, ownerId: string, expect: Expect) {
   return snapshot;
 }
 
-export async function verifyDeferredLending(
+export async function verifyLendingEntryAndPayment(
   page: Page,
   info: TestInfo,
   expect: Expect,
@@ -166,24 +166,24 @@ export async function verifyDeferredLending(
   expect(before.financial.accounts).not.toHaveLength(0);
   expect(before.financial.batch).toEqual({ draftOperations: 0, sent: false });
 
-  // The wallet reads the same admission profile as local and peer Account input.
+  // Current lending is visible; invalid zero amounts must never enqueue financial work.
   await page.getByTestId('nav-manage').locator('visible=true').first().click();
-  await expect(page.getByTestId('manage-lend')).toContainText('Unavailable in this release');
+  await expect(page.getByTestId('manage-lend')).toContainText('Lend to a hub pool or borrow');
   await page.getByTestId('manage-lend').click();
-  await expect(page.getByTestId('lending-unavailable')).toContainText('Lending is unavailable in this release');
+  await expect(page.getByTestId('lending-unavailable')).toHaveCount(0);
   await expect(page.getByTestId('lending-state')).toBeVisible();
   for (const side of ['lend', 'borrow']) {
     await expect(page.getByTestId(`lend-side-${side}`)).toHaveCount(1);
     await page.getByTestId(`lend-side-${side}`).click();
-    await page.getByTestId('lend-amount').fill('25');
+    await page.getByTestId('lend-amount').fill('0');
     if (side === 'borrow') await page.getByTestId('lend-rate').fill('100');
     await expect(page.getByTestId('lend-submit')).toBeDisabled();
   }
-  // Browsing deferred products must neither submit nor mutate financial state.
+  // Browsing and invalid amount entry must neither submit nor mutate financial state.
   const offered = await readState(page, wallet.entityId, expect);
   expect(offered.financial).toEqual(before.financial);
   expect(offered.queues).toEqual(before.queues);
-  await info.attach('lending-deferred-controls', {
+  await info.attach('lending-current-controls', {
     body: await page.screenshot({ fullPage: true }),
     contentType: 'image/png',
   });

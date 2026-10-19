@@ -39,9 +39,7 @@ const makeMemoryDb = () => {
     get: async key => {
       const row = rows.get(key.toString('hex'));
       if (row) return Buffer.from(row.value);
-      const error = new Error('NotFound') as Error & { code?: string };
-      error.code = 'LEVEL_NOT_FOUND';
-      throw error;
+      return undefined;
     },
     batch: () => {
       const ops: Array<

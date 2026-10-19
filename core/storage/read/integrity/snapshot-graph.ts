@@ -45,7 +45,7 @@ import {
 } from '../../database/snapshot-graph-view';
 import { readBoundedChunkCount } from '../../codec/bounded-value';
 import { decodeValidatedBuffer } from '../../codec/codec';
-import { iterateKeys } from '../../database/level';
+import { readRequiredRaw, iterateKeys } from '../../database/level';
 import { ACCOUNT_TREE_NAMESPACE_TAG } from '../../schema/account-graph-codec';
 import { decodeAccountGraphManifest } from '../../schema/account-layout';
 import { decodeStorageBookHeader } from '../../schema/book-graph-codec';
@@ -76,30 +76,26 @@ const collectSnapshotOwners = async (
   for await (const key of iterateKeys(db, { prefix: keySnapshotEntityPrefix(height) })) {
     const parsed = parseSnapshotEntityKey(key);
     if (parsed.height !== height) throw new Error('STORAGE_SNAPSHOT_ENTITY_HEIGHT_MISMATCH');
-    const manifest = decodeEntityGraphManifest(await db.get(key));
+    const manifest = decodeEntityGraphManifest(await readRequiredRaw(db, key));
     owners.set(ownerKey(key), {
       kind: 'entity',
-      namespaceTags: new Set(
-        manifest.trees.map(tree => ENTITY_COLLECTION_NAMESPACE_TAG[tree.namespace]),
-      ),
+      namespaceTags: new Set(manifest.trees.map(tree => ENTITY_COLLECTION_NAMESPACE_TAG[tree.namespace])),
       fieldTags: new Set(manifest.fields.map(field => field.tag)),
     });
   }
   for await (const key of iterateKeys(db, { prefix: keySnapshotAccountPrefix(height) })) {
     const parsed = parseSnapshotAccountKey(key);
     if (parsed.height !== height) throw new Error('STORAGE_SNAPSHOT_ACCOUNT_HEIGHT_MISMATCH');
-    const manifest = decodeAccountGraphManifest(await db.get(key));
+    const manifest = decodeAccountGraphManifest(await readRequiredRaw(db, key));
     owners.set(ownerKey(key), {
       kind: 'account',
-      namespaceTags: new Set(
-        manifest.trees.map(tree => ACCOUNT_TREE_NAMESPACE_TAG[tree.namespace]),
-      ),
+      namespaceTags: new Set(manifest.trees.map(tree => ACCOUNT_TREE_NAMESPACE_TAG[tree.namespace])),
       fieldTags: new Set(manifest.fields.map(field => field.tag)),
     });
   }
   for await (const key of iterateKeys(db, { prefix: keySnapshotBookPrefix(height) })) {
     parseLiveBookKey(key, 9);
-    decodeValidatedBuffer(await db.get(key), decodeStorageBookHeader);
+    decodeValidatedBuffer(await readRequiredRaw(db, key), decodeStorageBookHeader);
     owners.set(ownerKey(key), { kind: 'book' });
   }
   return owners;
@@ -199,7 +195,7 @@ const assertSnapshotMachineChunkOwned = async (
 ): Promise<void> => {
   const { ownerKey, chunkIndex } = parseBoundedValueChunkKey(liveKey);
   const owner = ownerKey.toString('hex');
-  const chunkCount = chunkCounts.get(owner) ?? await readBoundedChunkCount(machineView, ownerKey);
+  const chunkCount = chunkCounts.get(owner) ?? (await readBoundedChunkCount(machineView, ownerKey));
   chunkCounts.set(owner, chunkCount);
   if (chunkIndex >= chunkCount) {
     throw new Error(`STORAGE_SNAPSHOT_GRAPH_CHUNK_ORPHAN:${liveKey.toString('hex')}`);
@@ -231,7 +227,7 @@ export const inspectSnapshotGraphRows = async (
       continue;
     }
     const ownership = graphOwner(height, parsed.liveKey);
-    validateAuxiliaryRow(parsed.liveKey[0], await db.get(key));
+    validateAuxiliaryRow(parsed.liveKey[0], await readRequiredRaw(db, key));
     const owner = owners.get(ownerKey(ownership.key));
     if (!owner) {
       throw new Error(`STORAGE_SNAPSHOT_GRAPH_OWNER_MISSING:${ownership.key.toString('hex')}`);
@@ -240,7 +236,7 @@ export const inspectSnapshotGraphRows = async (
       if (owner.kind === 'book' || !owner.fieldTags.has(ownership.fieldTag)) {
         throw new Error(
           `STORAGE_SNAPSHOT_GRAPH_ACCOUNT_FIELD_UNDECLARED:` +
-          `owner=${ownership.key.toString('hex')}:field=${ownership.fieldTag}`,
+            `owner=${ownership.key.toString('hex')}:field=${ownership.fieldTag}`,
         );
       }
     } else if (ownership.namespaceTag !== undefined) {
@@ -250,7 +246,7 @@ export const inspectSnapshotGraphRows = async (
       if (!owner.namespaceTags.has(ownership.namespaceTag)) {
         throw new Error(
           `STORAGE_SNAPSHOT_GRAPH_ACCOUNT_NAMESPACE_UNDECLARED:` +
-          `owner=${ownership.key.toString('hex')}:namespace=${ownership.namespaceTag}`,
+            `owner=${ownership.key.toString('hex')}:namespace=${ownership.namespaceTag}`,
         );
       }
     } else if (ownership.auxiliaryOwnerKind !== undefined) {

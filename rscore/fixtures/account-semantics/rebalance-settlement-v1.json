@@ -5,7 +5,7 @@
       "name": "rebalance-request-refund",
       "steps": [
         {
-          "accountStateRoot": "0xda5830ed845b73cc0cf6580095fcb4403e62c40a1edfd1a6a5cd3d61e0acfc17",
+          "accountStateRoot": "0x75b979d6f7a4539c802bde982c4c23f569777d3e93d80a57123515aa783adc24",
           "byLeft": true,
           "deltasRoot": "0xaa89ad372052d5f7d151e580f66c82c116dd45c3504bef17c101e674fca10c46",
           "events": [
@@ -38,7 +38,7 @@
           "txType": "request_collateral"
         },
         {
-          "accountStateRoot": "0x9548c593abe81e5ed0ead5acc8add7043c28ec65184a3c7c82cab825eda6af33",
+          "accountStateRoot": "0xbbbec53439f1b7c5ec1a1f377afb4566b97171be239a47023dadf87df0f5887f",
           "byLeft": false,
           "deltasRoot": "0xde91f9e7c9f2d801ad32a07ca71ddcb103cfa2a178484c01a9b1476fa7996cd1",
           "events": [
@@ -58,7 +58,7 @@
           "txType": "rebalance_refund"
         },
         {
-          "accountStateRoot": "0x4d509a7089e77511ecf3774147645bcf8a0b39c31781582b23194c957c6b914b",
+          "accountStateRoot": "0x07b0dcefe401fce0a4832d17d3dc9cf60b03365e404d749401aab62685206983",
           "byLeft": false,
           "deltasRoot": "0xd1ca61a51028e896e9cd42f7ac7ea727addbddd836189661dd527c57762919d7",
           "events": [
@@ -83,15 +83,15 @@
       "name": "settlement-upsert",
       "steps": [
         {
-          "accountStateRoot": "0x20d2c335350e6d054a88ad706df107f1ed3266d2f1ed1e9a1efe70842c5bfcb0",
+          "accountStateRoot": "0xc4f75e476574e2f5df7fe2df5a3684a15fc3b28ce3c38eb644a1e32db25a23e7",
           "byLeft": true,
-          "deltasRoot": "0x172aafa33fac4ce11f08acc319cb27dd9ff8a150651433686c4e873bbffa3618",
+          "deltasRoot": "0xd1ca61a51028e896e9cd42f7ac7ea727addbddd836189661dd527c57762919d7",
           "events": [
             "Settlement workspace v1 committed"
           ],
           "feeStateCount": 0,
           "input": "settlementUpsert",
-          "leftHold": "20",
+          "leftHold": "0",
           "offdelta": "0",
           "outputs": [],
           "requestedAmount": "0",

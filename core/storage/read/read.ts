@@ -45,7 +45,7 @@ import {
   createSnapshotEntityGraphView,
   createSnapshotRuntimeMachineGraphView,
 } from '../database/snapshot-graph-view';
-import { iterateKeys, readValidatedOrNull } from '../database/level';
+import { readRequiredRaw, iterateKeys, readValidatedOrNull } from '../database/level';
 import { listSnapshotHeights } from '../database/lifecycle';
 import { compareAscii } from '../../support/collections/sorted-map-index';
 import { hydrateEntityStateFromStorage } from './projections';
@@ -114,8 +114,7 @@ const assertEntityDocKeyBinding = (
 };
 
 type StoredBinaryPatriciaNode =
-  | Readonly<{ type: 'leaf'; key: string }>
-  | Readonly<{ type: 'branch'; bit: number; left: string; right: string }>;
+  Readonly<{ type: 'leaf'; key: string }> | Readonly<{ type: 'branch'; bit: number; left: string; right: string }>;
 
 type PathNodeGroup<TNode extends StoredBinaryPatriciaNode> = Readonly<{
   scope: Buffer;
@@ -132,14 +131,13 @@ const readPathNodeGroups = async <TNode extends StoredBinaryPatriciaNode>(option
   hashNode: (node: TNode) => string;
   code: string;
 }): Promise<PathNodeGroup<TNode>[]> => {
-  const physicalPrefix = options.snapshotHeight === undefined
-    ? options.livePrefix
-    : keySnapshotGraphPrefix(options.snapshotHeight, options.livePrefix);
+  const physicalPrefix =
+    options.snapshotHeight === undefined
+      ? options.livePrefix
+      : keySnapshotGraphPrefix(options.snapshotHeight, options.livePrefix);
   const groups = new Map<string, { scope: Buffer; nodes: Map<string, TNode>; keys: Map<string, Buffer> }>();
   for await (const physicalKey of iterateKeys(options.db, { prefix: physicalPrefix })) {
-    const liveKey = options.snapshotHeight === undefined
-      ? physicalKey
-      : parseSnapshotGraphKey(physicalKey).liveKey;
+    const liveKey = options.snapshotHeight === undefined ? physicalKey : parseSnapshotGraphKey(physicalKey).liveKey;
     if (liveKey.byteLength <= options.scopeBytes || liveKey[0] !== options.livePrefix[0]) {
       throw new Error(`${options.code}_KEY_INVALID:${liveKey.toString('hex')}`);
     }
@@ -150,7 +148,7 @@ const readPathNodeGroups = async <TNode extends StoredBinaryPatriciaNode>(option
       nodes: new Map<string, TNode>(),
       keys: new Map<string, Buffer>(),
     };
-    const row = decodeValidatedBuffer(await options.db.get(physicalKey), options.validate);
+    const row = decodeValidatedBuffer(await readRequiredRaw(options.db, physicalKey), options.validate);
     const actual = options.hashNode(row.node);
     if (actual !== row.hash) throw new Error(`${options.code}_CORRUPT:${row.hash}:${actual}`);
     const previous = group.nodes.get(row.hash);
@@ -166,9 +164,10 @@ const hydratePathNodeRoot = <TNode extends StoredBinaryPatriciaNode>(options: {
   groups: readonly PathNodeGroup<TNode>[];
   root: string;
   target: Map<string, TNode>;
-  keyForPath: (scope: Buffer, path: Readonly<
-    { kind: 'leaf'; key: string } | { kind: 'branch'; bit: number; representativeKey: string }
-  >) => Buffer;
+  keyForPath: (
+    scope: Buffer,
+    path: Readonly<{ kind: 'leaf'; key: string } | { kind: 'branch'; bit: number; representativeKey: string }>,
+  ) => Buffer;
   hashNode: (node: TNode) => string;
   code: string;
 }): void => {
@@ -186,30 +185,31 @@ const hydratePathNodeRoot = <TNode extends StoredBinaryPatriciaNode>(options: {
     stack.add(hash);
     try {
       let representativeKey: string;
-      const path = node.type === 'leaf'
-        ? { kind: 'leaf' as const, key: node.key }
-        : (() => {
-            if (!Number.isSafeInteger(node.bit) || node.bit <= previousBit || node.bit > 255) {
-              throw new Error(`${options.code}_BRANCH_ORDER_INVALID:${previousBit}:${String(node.bit)}`);
-            }
-            representativeKey = visit(node.left, node.bit);
-            const rightKey = visit(node.right, node.bit);
-            const bitAt = (key: string): number => {
-              const offset = 2 + Math.floor(node.bit / 8) * 2;
-              const byte = Number.parseInt(key.slice(offset, offset + 2), 16);
-              return (byte >> (7 - (node.bit % 8))) & 1;
-            };
-            if (bitAt(representativeKey) !== 0 || bitAt(rightKey) !== 1) {
-              throw new Error(`${options.code}_BRANCH_DIRECTION_INVALID:${node.bit}`);
-            }
-            return { kind: 'branch' as const, bit: node.bit, representativeKey };
-          })();
+      const path =
+        node.type === 'leaf'
+          ? { kind: 'leaf' as const, key: node.key }
+          : (() => {
+              if (!Number.isSafeInteger(node.bit) || node.bit <= previousBit || node.bit > 255) {
+                throw new Error(`${options.code}_BRANCH_ORDER_INVALID:${previousBit}:${String(node.bit)}`);
+              }
+              representativeKey = visit(node.left, node.bit);
+              const rightKey = visit(node.right, node.bit);
+              const bitAt = (key: string): number => {
+                const offset = 2 + Math.floor(node.bit / 8) * 2;
+                const byte = Number.parseInt(key.slice(offset, offset + 2), 16);
+                return (byte >> (7 - (node.bit % 8))) & 1;
+              };
+              if (bitAt(representativeKey) !== 0 || bitAt(rightKey) !== 1) {
+                throw new Error(`${options.code}_BRANCH_DIRECTION_INVALID:${node.bit}`);
+              }
+              return { kind: 'branch' as const, bit: node.bit, representativeKey };
+            })();
       const storedKey = group.keys.get(hash);
       const expectedKey = options.keyForPath(group.scope, path);
       if (!storedKey?.equals(expectedKey)) {
         throw new Error(
           `${options.code}_PATH_MISMATCH:${hash}:` +
-          `stored=${storedKey?.toString('hex') ?? 'missing'}:expected=${expectedKey.toString('hex')}`,
+            `stored=${storedKey?.toString('hex') ?? 'missing'}:expected=${expectedKey.toString('hex')}`,
         );
       }
       options.target.set(hash, node);
@@ -303,7 +303,7 @@ const hydrateEntityWithCertifiedBoardNodes = async (
   await hydrateAccountJClaimRootNodesFromStorage(
     env,
     db,
-    Array.from(state.accounts.values()).flatMap((account) => [
+    Array.from(state.accounts.values()).flatMap(account => [
       account.state.leftPendingJClaims,
       account.state.rightPendingJClaims,
     ]),
@@ -318,23 +318,14 @@ export type StoragePageQuery = {
   sortDir?: 'asc' | 'desc';
 };
 
-export const readStorageHead = async (
-  db: RuntimeDbLike,
-): Promise<StorageHead | null> => {
+export const readStorageHead = async (db: RuntimeDbLike): Promise<StorageHead | null> => {
   return readValidatedOrNull(db, KEY_HEAD, validateStorageHeadValue);
 };
 
-export const readStorageFrameRecord = async (
-  db: RuntimeDbLike,
-  height: number,
-): Promise<RuntimeFrame | null> => {
+export const readStorageFrameRecord = async (db: RuntimeDbLike, height: number): Promise<RuntimeFrame | null> => {
   const targetHeight = Number.isFinite(height) ? Math.max(1, Math.floor(height)) : 0;
   if (targetHeight <= 0) return null;
-  const frame = await readBoundedValidatedValue(
-    db,
-    keyFrame(targetHeight),
-    validateStorageFrameRecordValue,
-  );
+  const frame = await readBoundedValidatedValue(db, keyFrame(targetHeight), validateStorageFrameRecordValue);
   if (frame && frame.height !== targetHeight) {
     throw new Error(`STORAGE_FRAME_KEY_HEIGHT_MISMATCH:key=${targetHeight}:value=${frame.height}`);
   }
@@ -353,11 +344,7 @@ export const readStorageFramePayloads = async (
     digest: frame.runtimeOutputsDigest,
   });
   const entityContexts = frame.entityContextRefs?.size
-    ? await readEntityContextPayloads(
-      db,
-      targetHeight,
-      frame.entityContextRefs,
-    )
+    ? await readEntityContextPayloads(db, targetHeight, frame.entityContextRefs)
     : new Map();
   let runtimeMachine: Record<string, unknown> | undefined;
   if (options?.includeRuntimeMachine !== false && frame.runtimeMachineRoot) {
@@ -382,8 +369,7 @@ export const readStorageFramePayloads = async (
         );
       } else if (options?.includeRuntimeMachine === true) {
         throw new Error(
-          `STORAGE_RUNTIME_MACHINE_NOT_CURRENT:` +
-          `requested=${targetHeight}:current=${currentMaterializedHeight}`,
+          `STORAGE_RUNTIME_MACHINE_NOT_CURRENT:` + `requested=${targetHeight}:current=${currentMaterializedHeight}`,
         );
       }
     }
@@ -407,7 +393,7 @@ const listReplicaMetas = async (
   const seenSigners = new Set<string>();
   const expectedEntityId = normalizeEntityId(entityId);
   for await (const key of iterateKeys(db, { prefix })) {
-    const decoded = decodeBuffer(await db.get(key));
+    const decoded = decodeBuffer(await readRequiredRaw(db, key));
     if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
       throw new Error(`STORAGE_REPLICA_META_RECORD_REQUIRED:0x${key.toString('hex')}`);
     }
@@ -417,10 +403,7 @@ const listReplicaMetas = async (
     if (!sharedState) {
       throw new Error(`STORAGE_REPLICA_META_SHARED_STATE_REQUIRED:0x${key.toString('hex')}`);
     }
-    const meta = validateStorageReplicaMeta(
-      decoded,
-      `StorageReplicaMeta[0x${key.toString('hex')}]`,
-    );
+    const meta = validateStorageReplicaMeta(decoded, `StorageReplicaMeta[0x${key.toString('hex')}]`);
     const metaEntityId = normalizeEntityId(String(meta.entityId || ''));
     const signerId = normalizeEntityId(String(meta.signerId || ''));
     if (!metaEntityId || metaEntityId !== expectedEntityId) {
@@ -429,12 +412,14 @@ const listReplicaMetas = async (
       );
     }
     if (!signerId || !key.equals(expectedKey(metaEntityId, signerId))) {
-      throw new Error(`STORAGE_REPLICA_META_KEY_BINDING_MISMATCH:entity=${metaEntityId}:signer=${signerId || 'missing'}`);
+      throw new Error(
+        `STORAGE_REPLICA_META_KEY_BINDING_MISMATCH:entity=${metaEntityId}:signer=${signerId || 'missing'}`,
+      );
     }
     if (normalizeEntityId(String(sharedState.entityId || '')) !== metaEntityId) {
       throw new Error(
         `STORAGE_REPLICA_META_STATE_ENTITY_MISMATCH:meta=${metaEntityId}:` +
-        `state=${normalizeEntityId(String(sharedState.entityId || '')) || 'missing'}`,
+          `state=${normalizeEntityId(String(sharedState.entityId || '')) || 'missing'}`,
       );
     }
     if (seenSigners.has(signerId)) {

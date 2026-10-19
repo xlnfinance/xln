@@ -15,16 +15,15 @@ type EslintFile = {
 };
 
 const DEBT_RULES = new Set(['import/no-duplicates', 'no-restricted-properties']);
-// Removed the retired HTTP credit-request test serializer; credit requests now use Account admission.
-const DEBT_COUNT = 323;
-const DEBT_SHA256 = '48191296c1e79303cf785c87dd454b32bef647bc7d44a31c52e841fdbb232a58';
+// Removed four raw JSON serializers with the retired fresh-run comparison oracle.
+const DEBT_COUNT = 319;
+const DEBT_SHA256 = 'a881244793a74a37e3c2278f64e45e476ada2a87dd46bdf41f39d79c6802c96e';
 const outputPath = `${tmpdir()}/xln-eslint-${String(process.pid)}.json`;
 
-const result = spawnSync(
-  'bunx',
-  ['eslint', 'core', '--ext', '.ts', '--format', 'json', '--output-file', outputPath],
-  { cwd: process.cwd(), encoding: 'utf8' },
-);
+const result = spawnSync('bunx', ['eslint', 'core', '--ext', '.ts', '--format', 'json', '--output-file', outputPath], {
+  cwd: process.cwd(),
+  encoding: 'utf8',
+});
 
 try {
   if (result.error) throw result.error;
@@ -55,7 +54,7 @@ try {
   if (debtRows.length !== DEBT_COUNT || debtHash !== DEBT_SHA256) {
     throw new Error(
       `ESLINT_DEBT_CHANGED expected=${DEBT_COUNT}/${DEBT_SHA256} ` +
-      `actual=${debtRows.length}/${debtHash}. Remove fixed debt from the exact baseline; never add debt.`,
+        `actual=${debtRows.length}/${debtHash}. Remove fixed debt from the exact baseline; never add debt.`,
     );
   }
 

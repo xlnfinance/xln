@@ -1,22 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { applyAccountInput, proposeAccountFrame } from '../../../account/consensus';
+import { replaceLocalDisputeDraft } from '../../../account/consensus/dispute/hanko';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
 import { computeAccountStateRoot } from '../../../account/commitment/state-root';
 import { createDefaultDelta } from '../../../account/state/delta';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { attachHankoWitnessesToState } from '../../../entity/consensus/input/hanko-witness';
-import {
-  getEntityAccountForWrite,
-  PersistentEntityAccountMap,
-} from '../../../entity/state/persistent-account-map';
+import { getEntityAccountForWrite, PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { encodeCanonicalConsensusBytes } from '../../../protocol/serialization/binary-codec';
 import { computeIntegrityDigest } from '../../../support/bytes/integrity-checksum';
-import {
-  makeAccount,
-  makeJurisdiction,
-  makeState,
-  openWritableEntityAccounts,
-} from '../../helpers/cross-j';
+import { makeAccount, makeJurisdiction, makeState, openWritableEntityAccounts } from '../../helpers/cross-j';
 import type { AccountInput, AccountReplica, AccountTx } from '../../../types/account';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { TsAccountWorkerAuthority, TsAccountWorkerCoordinator } from '../../../runtime/workers/account';
@@ -55,15 +48,17 @@ const PARITY_JURISDICTION: JReplica = {
   lastBlockTimestamp: 0,
   position: { x: 0, y: 0, z: 0 },
   chainId: 31_337,
-  tokenRegistry: [{
-    symbol: 'TST',
-    name: 'Test Token',
-    address: `0x${'77'.repeat(20)}`,
-    decimals: 18,
-    tokenId: 1,
-    tokenType: 0,
-    externalTokenId: 1n,
-  }],
+  tokenRegistry: [
+    {
+      symbol: 'TST',
+      name: 'Test Token',
+      address: `0x${'77'.repeat(20)}`,
+      decimals: 18,
+      tokenId: 1,
+      tokenType: 0,
+      externalTokenId: 1n,
+    },
+  ],
   contracts: {
     depository: `0x${'dd'.repeat(20)}`,
     entityProvider: `0x${'ee'.repeat(20)}`,
@@ -95,12 +90,14 @@ const peerAccountId = (index: number): string => {
   const signerLabel = `parity-peer-${String(index)}`;
   const address = deriveSignerAddressSync(RUNTIME_SEED, signerLabel).toLowerCase();
   registerSignerKey(signingEnv, address, deriveSignerKeySync(RUNTIME_SEED, signerLabel));
-  const boardHash = hashBoard(encodeBoard({
-    mode: 'proposer-based',
-    threshold: 1n,
-    validators: [address],
-    shares: { [address]: 1n },
-  })).toLowerCase();
+  const boardHash = hashBoard(
+    encodeBoard({
+      mode: 'proposer-based',
+      threshold: 1n,
+      validators: [address],
+      shares: { [address]: 1n },
+    }),
+  ).toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(boardHash)) {
     throw new Error(`PARITY_COUNTERPARTY_BOARD_HASH_INVALID:${boardHash}`);
   }
@@ -121,7 +118,13 @@ const parityAccount = (accountId: string, disputePeer = false): AccountReplica =
     // Dispute-lane preconditions, mirroring the canonical monotonicity fixture:
     // fresh proof nonce 5 strictly above jNonce 4, with a live proof body.
     account.state.jNonce = 4;
-    account.currentDisputeProofBodyHash = DISPUTE_BODY;
+    replaceLocalDisputeDraft(account, {
+      hash: createDisputeProofHashWithNonce(account.state, DISPUTE_BODY, account.state.domain, 5, false),
+      proofBodyHash: DISPUTE_BODY,
+      nonce: 5,
+      proposerIsLeft: false,
+    });
+    account.proofHeader.nextProofNonce = 6;
   }
   account.currentFrame.accountStateRoot = computeAccountStateRoot(account.state);
   return account;
@@ -172,13 +175,7 @@ const swapOfferTx = (offerId: string): AccountTx => ({
 /** Real inbound peer dispute input: canonical hash + really signed Hanko. */
 const inboundDisputeInput = async (accountId: string, index: number): Promise<AccountInput> => {
   const account = parityAccount(accountId, true);
-  const hash = createDisputeProofHashWithNonce(
-    account.state,
-    DISPUTE_BODY,
-    account.state.domain,
-    5,
-    true,
-  );
+  const hash = createDisputeProofHashWithNonce(account.state, DISPUTE_BODY, account.state.domain, 5, true);
   const signerId = deriveSignerAddressSync(RUNTIME_SEED, `parity-peer-${String(index)}`).toLowerCase();
   const hankos = await signEntityHashes(signingEnv, accountId, signerId, [hash]);
   const hanko = hankos[0];
@@ -278,10 +275,7 @@ const runCoordinator = async (
   workers: number,
 ) => {
   const isInbound = new Set(inboundInputs.map(input => input.fromEntityId));
-  const accounts = new Map(ids.map(accountId => [
-    accountId,
-    parityAccount(accountId, isInbound.has(accountId)),
-  ]));
+  const accounts = new Map(ids.map(accountId => [accountId, parityAccount(accountId, isInbound.has(accountId))]));
   const coordinator = await TsAccountWorkerCoordinator.create({
     ownerEntityId: OWNER,
     workerCount: workers,
@@ -298,9 +292,7 @@ const runCoordinator = async (
     inputs: inboundInputs.map(input => ({ accountId: input.fromEntityId, input })),
   });
   if (inbound.postAccounts?.length !== inboundInputs.length) {
-    throw new Error(
-      `PARITY_INBOUND_POST_ACCOUNT_ARITY:${inbound.postAccounts?.length ?? -1}:${inboundInputs.length}`,
-    );
+    throw new Error(`PARITY_INBOUND_POST_ACCOUNT_ARITY:${inbound.postAccounts?.length ?? -1}:${inboundInputs.length}`);
   }
   if (inbound.accountsRoot !== undefined || inbound.changedSubroots.length !== 0) {
     throw new Error('PARITY_INBOUND_ROOT_WAS_NOT_REQUESTED');
@@ -323,10 +315,7 @@ const digest = (effects: readonly unknown[]): string =>
   computeIntegrityDigest(encodeCanonicalConsensusBytes(effects as unknown[]));
 
 describe('TS Account worker engine parity with canonical sequential transitions', () => {
-  const ids = [
-    ...syntheticAccountIds(COUNT - INBOUND_COUNT),
-    ...inboundAccountIds,
-  ];
+  const ids = [...syntheticAccountIds(COUNT - INBOUND_COUNT), ...inboundAccountIds];
   const txsByAccount: AccountTx[][] = ids.map((accountId, index) => {
     if (index % 3 === 0) return [paymentTx(accountId, BigInt(index + 1)), htlcLockTx(index)];
     if (index % 3 === 1) {
@@ -363,26 +352,30 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       owningEntityIsHub: false,
       inputs: [],
     });
-    await expect(coordinator.proposeAccountFrames({
-      frameId: 'fail-stop-frame',
-      timestamp: 1_000,
-      jHeight: 0,
-      envelopeUpdates: [],
-      txs: [
-        { accountId: validId, txs: [paymentTx(validId, 1n)] },
-        { accountId: missingId, txs: [paymentTx(missingId, 1n)] },
-      ],
-      proposals: [{ accountId: validId }],
-    })).rejects.toThrow('TS_ACCOUNT_WORKER_COORDINATOR_FATAL');
+    await expect(
+      coordinator.proposeAccountFrames({
+        frameId: 'fail-stop-frame',
+        timestamp: 1_000,
+        jHeight: 0,
+        envelopeUpdates: [],
+        txs: [
+          { accountId: validId, txs: [paymentTx(validId, 1n)] },
+          { accountId: missingId, txs: [paymentTx(missingId, 1n)] },
+        ],
+        proposals: [{ accountId: validId }],
+      }),
+    ).rejects.toThrow('TS_ACCOUNT_WORKER_COORDINATOR_FATAL');
     expect(coordinator.accountsRoot).toBe(initialRoot);
-    await expect(coordinator.applyAccountInputs({
-      frameId: 'after-fatal',
-      expectedAccountsRoot: coordinator.accountsRoot,
-      entityTimestamp: 2_000,
-      finalizedJHeight: 0,
-      owningEntityIsHub: false,
-      inputs: [],
-    })).rejects.toThrow('TS_ACCOUNT_WORKER_COORDINATOR_FATAL');
+    await expect(
+      coordinator.applyAccountInputs({
+        frameId: 'after-fatal',
+        expectedAccountsRoot: coordinator.accountsRoot,
+        entityTimestamp: 2_000,
+        finalizedJHeight: 0,
+        owningEntityIsHub: false,
+        inputs: [],
+      }),
+    ).rejects.toThrow('TS_ACCOUNT_WORKER_COORDINATOR_FATAL');
   });
 
   test('fixture mixes inbound peers, payments, HTLC locks, and same-J swap offers', async () => {
@@ -460,53 +453,50 @@ describe('TS Account worker engine parity with canonical sequential transitions'
   });
 
   for (const workers of WORKER_COUNTS) {
-    test(`worker=${workers} matches the sequential baseline byte-for-byte (inbound + outbound)`, async () => {
-      const inputs = await fixtureInboundInputs();
-      const baseline = await runSequential(ids, txsByAccount, inboundAccountIds, inputs);
-      const { inbound, outbound } = await runCoordinator(ids, txsByAccount, inputs, workers);
-      expect(inbound.effects).toHaveLength(INBOUND_COUNT);
-      expect(outbound.effects).toHaveLength(COUNT * 2);
-      for (const effect of [...inbound.effects, ...outbound.effects]) {
-        if (!effect.result.ok) throw new Error(`PARITY_WORKER_REJECTED:${effect.phase}:${effect.accountId}`);
-      }
-      // Effects restored by original input ordinal: dense, positional, no
-      // rejected placeholders and no cross-worker sorting artifacts.
-      expect(outbound.effects.map(effect => effect.order))
-        .toEqual(Array.from({ length: COUNT * 2 }, (_, order) => order));
-      expect(inbound.effects.map(effect => effect.order))
-        .toEqual(Array.from({ length: INBOUND_COUNT }, (_, order) => order));
-      expect(digest(inbound.effects)).toBe(digest(baseline.inboundEffects));
-      expect(digest(outbound.effects)).toBe(digest(baseline.outboundEffects));
-      expect(outbound.accountsRoot).toBe(baseline.accountsRoot);
-    }, workers === 8 ? 30_000 : 5_000);
+    test(
+      `worker=${workers} matches the sequential baseline byte-for-byte (inbound + outbound)`,
+      async () => {
+        const inputs = await fixtureInboundInputs();
+        const baseline = await runSequential(ids, txsByAccount, inboundAccountIds, inputs);
+        const { inbound, outbound } = await runCoordinator(ids, txsByAccount, inputs, workers);
+        expect(inbound.effects).toHaveLength(INBOUND_COUNT);
+        expect(outbound.effects).toHaveLength(COUNT * 2);
+        for (const effect of [...inbound.effects, ...outbound.effects]) {
+          if (!effect.result.ok) throw new Error(`PARITY_WORKER_REJECTED:${effect.phase}:${effect.accountId}`);
+        }
+        // Effects restored by original input ordinal: dense, positional, no
+        // rejected placeholders and no cross-worker sorting artifacts.
+        expect(outbound.effects.map(effect => effect.order)).toEqual(
+          Array.from({ length: COUNT * 2 }, (_, order) => order),
+        );
+        expect(inbound.effects.map(effect => effect.order)).toEqual(
+          Array.from({ length: INBOUND_COUNT }, (_, order) => order),
+        );
+        expect(digest(inbound.effects)).toBe(digest(baseline.inboundEffects));
+        expect(digest(outbound.effects)).toBe(digest(baseline.outboundEffects));
+        expect(outbound.accountsRoot).toBe(baseline.accountsRoot);
+      },
+      workers === 8 ? 30_000 : 5_000,
+    );
   }
 
   test('multiple Accounts in one shard retain dense input order', async () => {
-    const sameShardIds = [
-      `0xabc${'f'.repeat(61)}`,
-      `0xabc${'0'.repeat(61)}`,
-      `0xabc${'8'.repeat(61)}`,
-    ];
+    const sameShardIds = [`0xabc${'f'.repeat(61)}`, `0xabc${'0'.repeat(61)}`, `0xabc${'8'.repeat(61)}`];
     expect(new Set(sameShardIds.map(tsAccountLogicalShard))).toEqual(new Set([0xabc]));
-    const sameShardTxs = sameShardIds.map((accountId, index) => [
-      paymentTx(accountId, BigInt(index + 1)),
-    ]);
+    const sameShardTxs = sameShardIds.map((accountId, index) => [paymentTx(accountId, BigInt(index + 1))]);
     const baseline = await runSequential(sameShardIds, sameShardTxs, [], []);
     const { inbound, outbound } = await runCoordinator(sameShardIds, sameShardTxs, [], 2);
     expect(inbound.effects).toEqual([]);
-    expect(outbound.effects.map(effect => effect.accountId)).toEqual([
-      ...sameShardIds,
-      ...sameShardIds,
-    ]);
+    expect(outbound.effects.map(effect => effect.accountId)).toEqual([...sameShardIds, ...sameShardIds]);
     expect(digest(outbound.effects)).toBe(digest(baseline.outboundEffects));
     expect(outbound.accountsRoot).toBe(baseline.accountsRoot);
   });
 
   test('one hot shard plus many cold shards matches w1 and w8', async () => {
-    const hotIds = Array.from({ length: 32 }, (_, index) =>
-      `0x777${index.toString(16).padStart(61, '0')}`);
-    const coldIds = syntheticAccountIds(64).map((accountId, index) =>
-      `0x${((index * 61) % 4096).toString(16).padStart(3, '0')}${accountId.slice(5)}`);
+    const hotIds = Array.from({ length: 32 }, (_, index) => `0x777${index.toString(16).padStart(61, '0')}`);
+    const coldIds = syntheticAccountIds(64).map(
+      (accountId, index) => `0x${((index * 61) % 4096).toString(16).padStart(3, '0')}${accountId.slice(5)}`,
+    );
     const mixedIds = [...hotIds, ...coldIds];
     expect(mixedIds.filter(accountId => tsAccountLogicalShard(accountId) === 0x777)).toHaveLength(32);
     const mixedTxs = mixedIds.map(accountId => [paymentTx(accountId, 1n)]);
@@ -526,11 +516,17 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
     });
     await coordinator.applyAccountInputs({
-      frameId: 'hanko-frame', expectedAccountsRoot: coordinator.accountsRoot,
-      entityTimestamp: 1_000, finalizedJHeight: 0, owningEntityIsHub: false, inputs: [],
+      frameId: 'hanko-frame',
+      expectedAccountsRoot: coordinator.accountsRoot,
+      entityTimestamp: 1_000,
+      finalizedJHeight: 0,
+      owningEntityIsHub: false,
+      inputs: [],
     });
     const outbound = await coordinator.proposeAccountFrames({
-      frameId: 'hanko-frame', timestamp: 1_000, jHeight: 0,
+      frameId: 'hanko-frame',
+      timestamp: 1_000,
+      jHeight: 0,
       envelopeUpdates: [],
       txs: [{ accountId, txs: [paymentTx(accountId, 1n)] }],
       proposals: [{ accountId }],
@@ -544,16 +540,20 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     const beforeRoot = coordinator.accountsRoot;
     const installed = await coordinator.installCommittedAccountHankos({
       entityHeight: 1,
-      rows: [{
-        accountId,
-        hankos: hashes.map((entry, index) => ({
-          hash: entry.hash,
-          hanko: `0x${String(index + 1).padStart(2, '0').repeat(65)}`,
-          type: entry.type,
-          entityHeight: 1,
-          createdAt: 1_000,
-        })),
-      }],
+      rows: [
+        {
+          accountId,
+          hankos: hashes.map((entry, index) => ({
+            hash: entry.hash,
+            hanko: `0x${String(index + 1)
+              .padStart(2, '0')
+              .repeat(65)}`,
+            type: entry.type,
+            entityHeight: 1,
+            createdAt: 1_000,
+          })),
+        },
+      ],
     });
     expect(installed).toHaveLength(1);
     expect(installed[0]?.accounts).toBe(1);
@@ -565,12 +565,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     const accountId = `0xabc${'2'.repeat(61)}`;
     const signerA = `0x${'41'.repeat(20)}`;
     const signerB = `0x${'42'.repeat(20)}`;
-    const jurisdiction = makeJurisdiction(
-      PARITY_JURISDICTION.name,
-      PARITY_JURISDICTION.chainId,
-      'dd',
-      'ee',
-    );
+    const jurisdiction = makeJurisdiction(PARITY_JURISDICTION.name, PARITY_JURISDICTION.chainId, 'dd', 'ee');
     const env = createEmptyEnv('ts-worker-replica-hanko-isolation');
     env.state.jReplicas.set(PARITY_JURISDICTION.name, PARITY_JURISDICTION);
     const authority = new TsAccountWorkerAuthority(env, 1);
@@ -605,19 +600,23 @@ describe('TS Account worker engine parity with canonical sequential transitions'
         entityState: state,
         entityHeight: 1,
         accountForWrite: candidateId => getEntityAccountForWrite(state.accounts, candidateId),
-        admissions: [{
-          account,
-          input: { kind: 'enqueue', txs: [paymentTx(accountId, 1n)] },
-          entityTimestamp: state.timestamp,
-          finalizedJHeight: state.lastFinalizedJHeight,
-        }],
-        proposals: [{
-          account,
-          timestamp: state.timestamp,
-          jHeight: state.lastFinalizedJHeight,
-          entityTimestamp: state.timestamp,
-          finalizedJHeight: state.lastFinalizedJHeight,
-        }],
+        admissions: [
+          {
+            account,
+            input: { kind: 'enqueue', txs: [paymentTx(accountId, 1n)] },
+            entityTimestamp: state.timestamp,
+            finalizedJHeight: state.lastFinalizedJHeight,
+          },
+        ],
+        proposals: [
+          {
+            account,
+            timestamp: state.timestamp,
+            jHeight: state.lastFinalizedJHeight,
+            entityTimestamp: state.timestamp,
+            finalizedJHeight: state.lastFinalizedJHeight,
+          },
+        ],
         envelopeUpdates: [],
         materializeAccountIds: [],
       });
@@ -632,18 +631,22 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       const hashesA = await prepare(stateA, signerA, 0);
       const hashesB = await prepare(stateB, signerB, 1);
       expect(hashesB).toEqual(hashesA);
-      const install = async (
-        state: typeof stateA,
-        ownerSignerId: string,
-        marker: string,
-      ) => {
-        const hankos = new Map(hashesA.map(entry => [entry.hash, {
-          hash: entry.hash,
-          hanko: `0x${marker.repeat(65)}`,
-          type: entry.type,
-          entityHeight: 1,
-          createdAt: state.timestamp,
-        }] as const));
+      const install = async (state: typeof stateA, ownerSignerId: string, marker: string) => {
+        const hankos = new Map(
+          hashesA.map(
+            entry =>
+              [
+                entry.hash,
+                {
+                  hash: entry.hash,
+                  hanko: `0x${marker.repeat(65)}`,
+                  type: entry.type,
+                  entityHeight: 1,
+                  createdAt: state.timestamp,
+                },
+              ] as const,
+          ),
+        );
         const root = state.accounts.rootHash();
         attachHankoWitnessesToState(state, hankos, 1, [accountId]);
         expect(state.accounts.rootHash()).toBe(root);
@@ -677,27 +680,37 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
     });
     const first = await coordinator.applyAccountInputs({
-      frameId: 'duplicate-frame-1', expectedAccountsRoot: coordinator.accountsRoot,
-      entityTimestamp: 1_000, finalizedJHeight: 0,
+      frameId: 'duplicate-frame-1',
+      expectedAccountsRoot: coordinator.accountsRoot,
+      entityTimestamp: 1_000,
+      finalizedJHeight: 0,
       owningEntityIsHub: false,
       inputs: [{ accountId, input }],
     });
     await coordinator.proposeAccountFrames({
-      frameId: 'duplicate-frame-1', timestamp: 1_000, jHeight: 0,
+      frameId: 'duplicate-frame-1',
+      timestamp: 1_000,
+      jHeight: 0,
       envelopeUpdates: [],
-      txs: [], proposals: [],
+      txs: [],
+      proposals: [],
     });
     const firstRoot = coordinator.accountsRoot;
     const second = await coordinator.applyAccountInputs({
-      frameId: 'duplicate-frame-2', expectedAccountsRoot: coordinator.accountsRoot,
-      entityTimestamp: 2_000, finalizedJHeight: 0,
+      frameId: 'duplicate-frame-2',
+      expectedAccountsRoot: coordinator.accountsRoot,
+      entityTimestamp: 2_000,
+      finalizedJHeight: 0,
       owningEntityIsHub: false,
       inputs: [{ accountId, input }],
     });
     await coordinator.proposeAccountFrames({
-      frameId: 'duplicate-frame-2', timestamp: 2_000, jHeight: 0,
+      frameId: 'duplicate-frame-2',
+      timestamp: 2_000,
+      jHeight: 0,
       envelopeUpdates: [],
-      txs: [], proposals: [],
+      txs: [],
+      proposals: [],
     });
     expect(first.effects).toHaveLength(1);
     expect(second.effects).toHaveLength(1);
@@ -715,23 +728,25 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
     });
     const parentRoot = coordinator.accountsRoot;
-    const apply = () => coordinator.applyAccountInputs({
-      frameId: 'discarded-fitting-attempt',
-      expectedAccountsRoot: parentRoot,
-      entityTimestamp: 1_000,
-      finalizedJHeight: 0,
-      owningEntityIsHub: false,
-      inputs: [{ accountId, input }],
-    });
+    const apply = () =>
+      coordinator.applyAccountInputs({
+        frameId: 'discarded-fitting-attempt',
+        expectedAccountsRoot: parentRoot,
+        entityTimestamp: 1_000,
+        finalizedJHeight: 0,
+        owningEntityIsHub: false,
+        inputs: [{ accountId, input }],
+      });
     const rejectedAttempt = await apply();
-    const prepare = () => coordinator.prepareAccountFrames({
-      frameId: 'discarded-fitting-attempt',
-      timestamp: 1_000,
-      jHeight: 0,
-      envelopeUpdates: [],
-      txs: [],
-      proposals: [],
-    });
+    const prepare = () =>
+      coordinator.prepareAccountFrames({
+        frameId: 'discarded-fitting-attempt',
+        timestamp: 1_000,
+        jHeight: 0,
+        envelopeUpdates: [],
+        txs: [],
+        proposals: [],
+      });
     const rejectedOutbound = await prepare();
     expect(rejectedOutbound.accountsRoot).not.toBe(parentRoot);
     await coordinator.discardAccountFrame('discarded-fitting-attempt');
@@ -763,37 +778,58 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
     });
     const inbound = await coordinator.applyAccountInputs({
-      frameId: 'genesis-frame', expectedAccountsRoot: coordinator.accountsRoot,
-      entityTimestamp: 1_000, finalizedJHeight: 0,
+      frameId: 'genesis-frame',
+      expectedAccountsRoot: coordinator.accountsRoot,
+      entityTimestamp: 1_000,
+      finalizedJHeight: 0,
       owningEntityIsHub: false,
-      inputs: [{
-        accountId,
-        input,
-        initialAccount: projectPortableAccountDoc(initialAccount),
-      }],
+      inputs: [
+        {
+          accountId,
+          input,
+          initialAccount: projectPortableAccountDoc(initialAccount),
+        },
+      ],
     });
     const outbound = await coordinator.proposeAccountFrames({
-      frameId: 'genesis-frame', timestamp: 1_000, jHeight: 0,
+      frameId: 'genesis-frame',
+      timestamp: 1_000,
+      jHeight: 0,
       envelopeUpdates: [],
-      txs: [], proposals: [],
+      txs: [],
+      proposals: [],
     });
     const sequential = parityAccount(accountId, true);
     const workerStub = {
       jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
-      jClaimNodes: new Map(), settlementBoardAuthorities: new Map(),
+      jClaimNodes: new Map(),
+      settlementBoardAuthorities: new Map(),
     } as unknown as TsAccountWorkerState;
     const context = createWorkerConsensusContext(workerStub, 1_000, 0, workerStub.jClaimNodes);
     const expected = await applyAccountInput(context, sequential, input, {
-      entityTimestamp: 1_000, finalizedJHeight: 0,
-      owningEntityIsHub: false, verifyHanko: context.verifyHanko,
+      entityTimestamp: 1_000,
+      finalizedJHeight: 0,
+      owningEntityIsHub: false,
+      verifyHanko: context.verifyHanko,
     });
-    expect(digest(inbound.effects)).toBe(digest([{
-      phase: 'inbound', order: 0, accountId, result: expected,
-    }]));
+    expect(digest(inbound.effects)).toBe(
+      digest([
+        {
+          phase: 'inbound',
+          order: 0,
+          accountId,
+          result: expected,
+        },
+      ]),
+    );
     expect(inbound.postAccounts?.map(row => row.accountId)).toEqual([accountId]);
-    expect(outbound.accountsRoot).toBe(PersistentEntityAccountMap.fromEntries(
-      [[accountId, sequential]], OWNER, computeEntityAccountValueHash,
-    ).rootHash());
+    expect(outbound.accountsRoot).toBe(
+      PersistentEntityAccountMap.fromEntries(
+        [[accountId, sequential]],
+        OWNER,
+        computeEntityAccountValueHash,
+      ).rootHash(),
+    );
     expect(outbound.postAccounts?.map(row => row.accountId)).toEqual([accountId]);
   });
 
@@ -808,11 +844,17 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     const parentRoot = coordinator.accountsRoot;
     await coordinator.applyAccountInputs({
-      frameId: 'retry-attempt-1', expectedAccountsRoot: parentRoot,
-      entityTimestamp: 1_000, finalizedJHeight: 0, owningEntityIsHub: false, inputs: [],
+      frameId: 'retry-attempt-1',
+      expectedAccountsRoot: parentRoot,
+      entityTimestamp: 1_000,
+      finalizedJHeight: 0,
+      owningEntityIsHub: false,
+      inputs: [],
     });
     const abandoned = await coordinator.proposeAccountFrames({
-      frameId: 'retry-attempt-1', timestamp: 1_000, jHeight: 0,
+      frameId: 'retry-attempt-1',
+      timestamp: 1_000,
+      jHeight: 0,
       envelopeUpdates: [],
       txs: [{ accountId, txs: [paymentTx(accountId, 1n)] }],
       proposals: [{ accountId }],
@@ -820,21 +862,22 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     expect(abandoned.accountsRoot).not.toBe(parentRoot);
 
     await coordinator.applyAccountInputs({
-      frameId: 'retry-attempt-2', expectedAccountsRoot: parentRoot,
-      entityTimestamp: 1_000, finalizedJHeight: 0, owningEntityIsHub: false, inputs: [],
+      frameId: 'retry-attempt-2',
+      expectedAccountsRoot: parentRoot,
+      entityTimestamp: 1_000,
+      finalizedJHeight: 0,
+      owningEntityIsHub: false,
+      inputs: [],
     });
     const retry = await coordinator.proposeAccountFrames({
-      frameId: 'retry-attempt-2', timestamp: 1_000, jHeight: 0,
+      frameId: 'retry-attempt-2',
+      timestamp: 1_000,
+      jHeight: 0,
       envelopeUpdates: [],
       txs: [{ accountId, txs: [paymentTx(accountId, 2n)] }],
       proposals: [{ accountId }],
     });
-    const baseline = await runCoordinator(
-      [accountId],
-      [[paymentTx(accountId, 2n)]],
-      [],
-      1,
-    );
+    const baseline = await runCoordinator([accountId], [[paymentTx(accountId, 2n)]], [], 1);
     expect(retry.accountsRoot).toBe(baseline.outbound.accountsRoot);
     expect(digest(retry.effects)).toBe(digest(baseline.outbound.effects));
   });
@@ -846,7 +889,8 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     const sequential = parityAccount(accountId);
     const workerStub = {
       jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
-      jClaimNodes: new Map(), settlementBoardAuthorities: new Map(),
+      jClaimNodes: new Map(),
+      settlementBoardAuthorities: new Map(),
     } as unknown as TsAccountWorkerState;
     const context = createWorkerConsensusContext(workerStub, 1_000, 0, workerStub.jClaimNodes);
     const admission = await applyAccountInput(context, sequential, { kind: 'enqueue', txs });
@@ -859,22 +903,34 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
     });
     await coordinator.applyAccountInputs({
-      frameId: 'local-genesis', expectedAccountsRoot: coordinator.accountsRoot,
-      entityTimestamp: 1_000, finalizedJHeight: 0, owningEntityIsHub: false, inputs: [],
+      frameId: 'local-genesis',
+      expectedAccountsRoot: coordinator.accountsRoot,
+      entityTimestamp: 1_000,
+      finalizedJHeight: 0,
+      owningEntityIsHub: false,
+      inputs: [],
     });
     const outbound = await coordinator.proposeAccountFrames({
-      frameId: 'local-genesis', timestamp: 1_000, jHeight: 0,
+      frameId: 'local-genesis',
+      timestamp: 1_000,
+      jHeight: 0,
       envelopeUpdates: [],
       txs: [{ accountId, txs, initialAccount: projectPortableAccountDoc(shell) }],
       proposals: [{ accountId }],
     });
-    expect(digest(outbound.effects)).toBe(digest([
-      { phase: 'outbound-enqueue', order: 0, accountId, result: admission },
-      { phase: 'outbound-proposal', order: 1, accountId, result: proposal },
-    ]));
-    expect(outbound.accountsRoot).toBe(PersistentEntityAccountMap.fromEntries(
-      [[accountId, sequential]], OWNER, computeEntityAccountValueHash,
-    ).rootHash());
+    expect(digest(outbound.effects)).toBe(
+      digest([
+        { phase: 'outbound-enqueue', order: 0, accountId, result: admission },
+        { phase: 'outbound-proposal', order: 1, accountId, result: proposal },
+      ]),
+    );
+    expect(outbound.accountsRoot).toBe(
+      PersistentEntityAccountMap.fromEntries(
+        [[accountId, sequential]],
+        OWNER,
+        computeEntityAccountValueHash,
+      ).rootHash(),
+    );
   });
 
   test('next-frame retry restores the accepted post-genesis Account parent', async () => {
@@ -886,17 +942,25 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
     });
     await coordinator.applyAccountInputs({
-      frameId: 'post-genesis-parent', expectedAccountsRoot: coordinator.accountsRoot,
-      entityTimestamp: 1_000, finalizedJHeight: 0, owningEntityIsHub: false, inputs: [],
+      frameId: 'post-genesis-parent',
+      expectedAccountsRoot: coordinator.accountsRoot,
+      entityTimestamp: 1_000,
+      finalizedJHeight: 0,
+      owningEntityIsHub: false,
+      inputs: [],
     });
     const genesis = await coordinator.proposeAccountFrames({
-      frameId: 'post-genesis-parent', timestamp: 1_000, jHeight: 0,
+      frameId: 'post-genesis-parent',
+      timestamp: 1_000,
+      jHeight: 0,
       envelopeUpdates: [],
-      txs: [{
-        accountId,
-        txs: [paymentTx(accountId, 1n)],
-        initialAccount: projectPortableAccountDoc(parityAccount(accountId)),
-      }],
+      txs: [
+        {
+          accountId,
+          txs: [paymentTx(accountId, 1n)],
+          initialAccount: projectPortableAccountDoc(parityAccount(accountId)),
+        },
+      ],
       proposals: [],
     });
     const acceptedParentRoot = genesis.accountsRoot;
@@ -904,15 +968,23 @@ describe('TS Account worker engine parity with canonical sequential transitions'
 
     const runNextAttempt = async (frameId: string) => {
       await coordinator.applyAccountInputs({
-        frameId, expectedAccountsRoot: acceptedParentRoot,
-        entityTimestamp: 2_000, finalizedJHeight: 0, owningEntityIsHub: false, inputs: [],
+        frameId,
+        expectedAccountsRoot: acceptedParentRoot,
+        entityTimestamp: 2_000,
+        finalizedJHeight: 0,
+        owningEntityIsHub: false,
+        inputs: [],
       });
       return coordinator.proposeAccountFrames({
-        frameId, timestamp: 2_000, jHeight: 0,
-        envelopeUpdates: [{
-          accountId,
-          update: { type: 'setRebalanceSubmittedAt', tokenId: 1, submittedAt: 2_000 },
-        }],
+        frameId,
+        timestamp: 2_000,
+        jHeight: 0,
+        envelopeUpdates: [
+          {
+            accountId,
+            update: { type: 'setRebalanceSubmittedAt', tokenId: 1, submittedAt: 2_000 },
+          },
+        ],
         txs: [],
         proposals: [],
       });
@@ -926,10 +998,9 @@ describe('TS Account worker engine parity with canonical sequential transitions'
   });
 
   test('outbound returns only touched post-Accounts without a duplicate checkpoint channel', async () => {
-    const accounts = new Map(ids.map(accountId => [
-      accountId,
-      parityAccount(accountId, inboundAccountIds.includes(accountId)),
-    ]));
+    const accounts = new Map(
+      ids.map(accountId => [accountId, parityAccount(accountId, inboundAccountIds.includes(accountId))]),
+    );
     const coordinator = await TsAccountWorkerCoordinator.create({
       ownerEntityId: OWNER,
       workerCount: 2,

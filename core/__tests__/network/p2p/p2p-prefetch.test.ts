@@ -1,9 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import type {
-  RoutedEntityInput,
-  RuntimeEntityInputsEnvelope,
-} from '../../../runtime/types';
+import type { RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../../../runtime/types';
 import { RuntimeP2P } from '../../../network/p2p/p2p';
 import { createEmptyEnv } from '../../../runtime';
 import { signRuntimeEntityInputsEnvelope } from '../../../runtime/admit/entity-input-envelope-auth.ts';
@@ -24,19 +21,22 @@ test('direct route preparation resolves verified Entity routes before any send',
   p2p.prepareDirectRoutes = (runtimeIds: string[]) => {
     preparedRuntimeIds = runtimeIds;
   };
-  p2p.getActiveDirectClient = () => open ? {} : null;
+  p2p.getDirectPeerEndpoint = () => 'wss://hub.example/direct';
+  p2p.directClients = new Map([[TARGET_RUNTIME_ID, { canDeliver: () => open }]]);
 
-  expect(p2p.prepareDirectEntityRoutes(['0xmissing'])).toBe(false);
-  expect(p2p.prepareDirectEntityRoutes([SOURCE_ENTITY_ID, TARGET_ENTITY_ID])).toBe(false);
+  expect(p2p.prepareEntityRoutes(['0xmissing'])).toBe(false);
+  expect(p2p.prepareEntityRoutes([SOURCE_ENTITY_ID, TARGET_ENTITY_ID])).toBe(false);
   expect(preparedRuntimeIds).toEqual([TARGET_RUNTIME_ID]);
   open = true;
-  expect(p2p.prepareDirectEntityRoutes([SOURCE_ENTITY_ID, TARGET_ENTITY_ID])).toBe(true);
+  expect(p2p.prepareEntityRoutes([SOURCE_ENTITY_ID, TARGET_ENTITY_ID])).toBe(true);
 });
 
 test('concurrent exact profile misses share one relay fetch cohort', async () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   let resolveFetch!: () => void;
-  const fetchGate = new Promise<void>(resolve => { resolveFetch = resolve; });
+  const fetchGate = new Promise<void>(resolve => {
+    resolveFetch = resolve;
+  });
   let fetches = 0;
   let available = false;
   p2p.profileFetches = new Map();
@@ -85,20 +85,19 @@ test('inbound forged envelope is rejected before profile prefetch', async () => 
     sourceRuntimeId: source.runtimeId!,
     sourceRuntimeHeight: 1,
     sourceRuntimeTimestamp: 1,
-    entityInputs: [{
-      entityId: SOURCE_ENTITY_ID,
-      signerId: source.runtimeId!,
-      runtimeId: target.runtimeId!,
-      entityTxs: [],
-    }],
+    entityInputs: [
+      {
+        entityId: SOURCE_ENTITY_ID,
+        signerId: source.runtimeId!,
+        runtimeId: target.runtimeId!,
+        entityTxs: [],
+      },
+    ],
   });
 
-  await expect((p2p as any).acceptInboundEntityInputs(
-    'direct',
-    source.runtimeId,
-    { ...envelope, sourceRuntimeTimestamp: 2 },
-    2,
-  )).rejects.toThrow('INBOUND_ENTITY_INPUTS_SOURCE_SIGNATURE_INVALID');
+  await expect(
+    (p2p as any).acceptInboundEntityInputs('direct', source.runtimeId, { ...envelope, sourceRuntimeTimestamp: 2 }, 2),
+  ).rejects.toThrow('INBOUND_ENTITY_INPUTS_SOURCE_SIGNATURE_INVALID');
   expect(profileFetches).toBe(0);
   expect(admitted).toBe(0);
 });
@@ -157,9 +156,7 @@ test('one Runtime tick of 1000 profile misses emits one bulk gossip fetch', asyn
   };
 
   for (let index = 0; index < 1_000; index += 1) {
-    (p2p as any).scheduleProfilePrefetch([
-      `0x${index.toString(16).padStart(64, '0')}`,
-    ]);
+    (p2p as any).scheduleProfilePrefetch([`0x${index.toString(16).padStart(64, '0')}`]);
   }
   await Bun.sleep(25);
 
@@ -191,16 +188,22 @@ test('enqueueEntityInputsDelivery starts profile prefetch before transport resol
   const input: RoutedEntityInput = {
     entityId: SOURCE_ENTITY_ID,
     signerId: '0x2222222222222222222222222222222222222222',
-    entityTxs: [{
-      type: 'openAccount',
-      data: {
-        targetEntityId: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    entityTxs: [
+      {
+        type: 'openAccount',
+        data: {
+          targetEntityId: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        },
       },
-    }],
+    ],
   };
 
   expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toMatchObject({
-    outcome: 'deferred', code: 'P2P_DIRECT_RECIPIENT_NOT_READY', retryable: true, fatal: false, terminal: false,
+    outcome: 'deferred',
+    code: 'P2P_RELAY_RECIPIENT_NOT_READY',
+    retryable: true,
+    fatal: false,
+    terminal: false,
   });
 
   expect(prefetched).toBe(true);
@@ -232,7 +235,12 @@ test('enqueueEntityInputsDelivery reports typed delivery result when no transpor
   };
 
   expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toEqual({
-    outcome: 'deferred', code: 'P2P_DIRECT_RECIPIENT_NOT_READY', retryable: true, fatal: false, terminal: false, transport: 'relay',
+    outcome: 'deferred',
+    code: 'P2P_RELAY_RECIPIENT_NOT_READY',
+    retryable: true,
+    fatal: false,
+    terminal: false,
+    transport: 'relay',
   });
   expect(debugEvents).toEqual([]);
 });
@@ -259,8 +267,9 @@ test('enqueueEntityInputsDelivery reports typed delivery result when transport s
   p2p.prefetchProfilesForInput = () => undefined;
   p2p.resolveTransportClient = () => ({ client: directClient, transport: 'direct' });
   p2p.clients = [directClient];
-  p2p.directClients = new Map();
-  p2p.directClientUrls = new Map();
+  p2p.getDirectPeerEndpoint = () => 'wss://hub.example/direct';
+  p2p.directClients = new Map([[TARGET_RUNTIME_ID, directClient]]);
+  p2p.directClientUrls = new Map([[TARGET_RUNTIME_ID, 'wss://hub.example/direct']]);
   p2p.directClientErrors = new Map();
 
   const input: RoutedEntityInput = {
@@ -269,7 +278,9 @@ test('enqueueEntityInputsDelivery reports typed delivery result when transport s
     entityTxs: [],
   };
 
-  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toThrow(/P2P_ENTITY_INPUTS_NOT_DELIVERED/);
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toThrow(
+    /P2P_ENTITY_INPUTS_NOT_DELIVERED/,
+  );
   expect(warnings[0]?.[2]).toMatchObject({
     delivery: {
       outcome: 'failed',
@@ -317,8 +328,9 @@ test('enqueueEntityInputsDelivery refreshes gossip from typed no-pubkey delivery
   p2p.prefetchProfilesForInput = () => undefined;
   p2p.resolveTransportClient = () => ({ client: directClient, transport: 'direct' });
   p2p.clients = [directClient];
-  p2p.directClients = new Map();
-  p2p.directClientUrls = new Map();
+  p2p.getDirectPeerEndpoint = () => 'wss://hub.example/direct';
+  p2p.directClients = new Map([[TARGET_RUNTIME_ID, directClient]]);
+  p2p.directClientUrls = new Map([[TARGET_RUNTIME_ID, 'wss://hub.example/direct']]);
   p2p.directClientErrors = new Map();
 
   const input: RoutedEntityInput = {
@@ -327,7 +339,9 @@ test('enqueueEntityInputsDelivery refreshes gossip from typed no-pubkey delivery
     entityTxs: [],
   };
 
-  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toThrow(/P2P_ENTITY_INPUTS_SEND_THROW/);
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toThrow(
+    /P2P_ENTITY_INPUTS_SEND_THROW/,
+  );
   expect(refreshes).toBe(1);
   expect(debugEvents.at(-1)).toMatchObject({
     level: 'error',
@@ -360,6 +374,7 @@ test('enqueueEntityInputsDelivery defers while an advertised direct endpoint is 
   };
   const directClient = {
     isOpen: () => false,
+    canDeliver: () => false,
     isConnecting: () => true,
   };
 
@@ -381,16 +396,23 @@ test('enqueueEntityInputsDelivery defers while an advertised direct endpoint is 
   const input: RoutedEntityInput = {
     entityId: SOURCE_ENTITY_ID,
     signerId: '0x2222222222222222222222222222222222222222',
-    entityTxs: [{
-      type: 'openAccount',
-      data: {
-        targetEntityId: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    entityTxs: [
+      {
+        type: 'openAccount',
+        data: {
+          targetEntityId: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        },
       },
-    }],
+    ],
   };
 
   expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input), 1234)).toEqual({
-    outcome: 'deferred', code: 'P2P_DIRECT_RECIPIENT_NOT_READY', retryable: true, fatal: false, terminal: false, transport: 'direct',
+    outcome: 'deferred',
+    code: 'P2P_DIRECT_RECIPIENT_NOT_READY',
+    retryable: true,
+    fatal: false,
+    terminal: false,
+    transport: 'direct',
   });
   expect(sent).toHaveLength(0);
   expect(debugEvents).toEqual([]);
@@ -415,8 +437,9 @@ test('enqueueEntityInputsDelivery returns typed success with transport', () => {
   p2p.prefetchProfilesForInput = () => undefined;
   p2p.resolveTransportClient = () => ({ client: directClient, transport: 'direct' });
   p2p.clients = [directClient];
-  p2p.directClients = new Map();
-  p2p.directClientUrls = new Map();
+  p2p.getDirectPeerEndpoint = () => 'wss://hub.example/direct';
+  p2p.directClients = new Map([[TARGET_RUNTIME_ID, directClient]]);
+  p2p.directClientUrls = new Map([[TARGET_RUNTIME_ID, 'wss://hub.example/direct']]);
   p2p.directClientErrors = new Map();
 
   const input: RoutedEntityInput = {
@@ -464,8 +487,7 @@ test('enqueueEntityInputsDelivery rejects an empty envelope before transport', (
     entityInputs: [],
   } as unknown as RuntimeEntityInputsEnvelope;
 
-  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelope))
-    .toThrow('entity_inputs envelope is empty');
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelope)).toThrow('entity_inputs envelope is empty');
   expect(sent).toEqual([]);
 });
 
@@ -546,8 +568,9 @@ test('enqueueEntityInputsDelivery never reroutes after direct accepts zero bytes
   p2p.prefetchProfilesForInput = () => undefined;
   p2p.resolveTransportClient = () => ({ client: directClient, transport: 'direct' });
   p2p.clients = [relayClient];
-  p2p.directClients = new Map();
-  p2p.directClientUrls = new Map();
+  p2p.getDirectPeerEndpoint = () => 'wss://hub.example/direct';
+  p2p.directClients = new Map([[TARGET_RUNTIME_ID, directClient]]);
+  p2p.directClientUrls = new Map([[TARGET_RUNTIME_ID, 'wss://hub.example/direct']]);
   p2p.directClientErrors = new Map();
 
   const input: RoutedEntityInput = {
@@ -555,8 +578,9 @@ test('enqueueEntityInputsDelivery never reroutes after direct accepts zero bytes
     signerId: '0x2222222222222222222222222222222222222222',
     entityTxs: [],
   };
-  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input)))
-    .toThrow(/P2P_ENTITY_INPUTS_NOT_DELIVERED/);
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toThrow(
+    /P2P_ENTITY_INPUTS_NOT_DELIVERED/,
+  );
   expect({ directAttempts, relayAttempts }).toEqual({ directAttempts: 1, relayAttempts: 0 });
 });
 
@@ -584,8 +608,9 @@ test('enqueueEntityInputsDelivery never reroutes after a direct pre-send encrypt
   p2p.prefetchProfilesForInput = () => undefined;
   p2p.resolveTransportClient = () => ({ client: directClient, transport: 'direct' });
   p2p.clients = [relayClient];
-  p2p.directClients = new Map();
-  p2p.directClientUrls = new Map();
+  p2p.getDirectPeerEndpoint = () => 'wss://hub.example/direct';
+  p2p.directClients = new Map([[TARGET_RUNTIME_ID, directClient]]);
+  p2p.directClientUrls = new Map([[TARGET_RUNTIME_ID, 'wss://hub.example/direct']]);
   p2p.directClientErrors = new Map();
 
   const input: RoutedEntityInput = {
@@ -593,8 +618,9 @@ test('enqueueEntityInputsDelivery never reroutes after a direct pre-send encrypt
     signerId: '0x2222222222222222222222222222222222222222',
     entityTxs: [],
   };
-  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input)))
-    .toThrow(/P2P_ENTITY_INPUTS_SEND_THROW/);
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toThrow(
+    /P2P_ENTITY_INPUTS_SEND_THROW/,
+  );
   expect(relayAttempts).toBe(0);
 });
 
@@ -613,6 +639,7 @@ test('enqueueEntityInputsDelivery never substitutes relay while the known direct
   };
   const directClient = {
     isOpen: () => false,
+    canDeliver: () => false,
     isConnecting: () => true,
     sendEntityInputsRaw: () => {
       directSent.push(true);
@@ -635,17 +662,24 @@ test('enqueueEntityInputsDelivery never substitutes relay while the known direct
   const input: RoutedEntityInput = {
     entityId: SOURCE_ENTITY_ID,
     signerId: '0x2222222222222222222222222222222222222222',
-    entityTxs: [{
-      type: 'accountInput',
-      data: {
-        fromEntityId: SOURCE_ENTITY_ID,
-        toEntityId: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    entityTxs: [
+      {
+        type: 'accountInput',
+        data: {
+          fromEntityId: SOURCE_ENTITY_ID,
+          toEntityId: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        },
       },
-    }],
+    ],
   };
 
   expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input), 6789)).toEqual({
-    outcome: 'deferred', code: 'P2P_DIRECT_RECIPIENT_NOT_READY', retryable: true, fatal: false, terminal: false, transport: 'direct',
+    outcome: 'deferred',
+    code: 'P2P_DIRECT_RECIPIENT_NOT_READY',
+    retryable: true,
+    fatal: false,
+    terminal: false,
+    transport: 'direct',
   });
   expect(relaySent).toHaveLength(0);
   expect(directSent).toHaveLength(0);
@@ -655,13 +689,15 @@ test('getQueueState reports the runtime-owned durable outbox', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   p2p.env = {
     state: { timestamp: 1_500 },
-    pendingNetworkOutputs: [{
-      runtimeId: TARGET_RUNTIME_ID,
-      entityId: SOURCE_ENTITY_ID,
-      signerId: '0x2222222222222222222222222222222222222222',
-      entityTxs: [],
-      sourceRuntimeFrame: { height: 7, timestamp: 1_000 },
-    }],
+    pendingNetworkOutputs: [
+      {
+        runtimeId: TARGET_RUNTIME_ID,
+        entityId: SOURCE_ENTITY_ID,
+        signerId: '0x2222222222222222222222222222222222222222',
+        entityTxs: [],
+        sourceRuntimeFrame: { height: 7, timestamp: 1_000 },
+      },
+    ],
   };
 
   expect(p2p.getQueueState()).toEqual({
@@ -675,6 +711,7 @@ test('getQueueState reports the runtime-owned durable outbox', () => {
 test('verified profile routes advance monotonically and never replay backward', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   p2p.env = { infrastructure: {} };
+  p2p.readinessListeners = new Set();
   p2p.verifiedProfileRoutes = new Map();
   const profile = (runtimeId: string, lastUpdated: number) => ({
     entityId: SOURCE_ENTITY_ID,
@@ -683,8 +720,8 @@ test('verified profile routes advance monotonically and never replay backward', 
     lastUpdated,
   });
 
-  p2p.rememberVerifiedProfileRoute(profile(TARGET_RUNTIME_ID, 20));
-  p2p.rememberVerifiedProfileRoute(profile('0x3333333333333333333333333333333333333333', 10));
+  p2p.rememberVerifiedProfileRoute(profile(TARGET_RUNTIME_ID, 20), TARGET_RUNTIME_ID);
+  p2p.rememberVerifiedProfileRoute(profile(SOURCE_RUNTIME_ID, 10), SOURCE_RUNTIME_ID);
 
   expect(p2p.getVerifiedRuntimeRoute(SOURCE_ENTITY_ID)).toEqual({
     runtimeId: TARGET_RUNTIME_ID,

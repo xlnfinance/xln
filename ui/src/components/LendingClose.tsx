@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy';
 import type { LendingSavings } from '../runtime/financial/lending';
 import type { WalletView } from '../runtime/views';
 import { sendEntityTxs } from '../runtime/tx';
@@ -21,7 +20,6 @@ export function LendingClose({
 }) {
   const [busy, setBusy] = useState(false);
   const toast = useApp(s => s.toast);
-  const closeAvailable = isAccountTxKindAvailable('lending_close_request');
   const account = wallet.accounts.find(entry => entry.counterpartyId === pool.hubEntityId.toLowerCase());
   if (
     (pool.status !== 'open' && pool.status !== 'queued') ||
@@ -34,10 +32,6 @@ export function LendingClose({
   const meta = getTokenMeta(pool.tokenId);
   const tariff = counterpartyFeePolicy(account.doc, account.isLeft, pool.tokenId);
   const close = async () => {
-    if (!closeAvailable) {
-      toast('Lending is unavailable in this release', 'danger');
-      return;
-    }
     if (queued || busy || account.disputed || !wallet.signerId) return;
     setBusy(true);
     try {
@@ -60,9 +54,6 @@ export function LendingClose({
           {pool.termId === 'demand' && ' Interest continues under the last signed rate until payment or its coverage end.'}
         </p>
       ) : null}
-      {!closeAvailable ? (
-        <p className="note">Lending is unavailable in this release. This position remains unchanged.</p>
-      ) : null}
       {pool.closeAmount > 0n ? (
         <ReceiveCapacity
           account={account.doc.state}
@@ -73,7 +64,7 @@ export function LendingClose({
           jurisdiction={wallet.jurisdiction}
           tokenId={pool.tokenId}
           requiredAmount={pool.closeAmount}
-          disabled={!closeAvailable || busy || account.disputed}
+          disabled={busy || account.disputed}
         />
       ) : null}
       <p
@@ -94,7 +85,7 @@ export function LendingClose({
         <button
           type="button"
           className="btn ghost"
-          disabled={!closeAvailable || busy || account.disputed || !wallet.signerId}
+          disabled={busy || account.disputed || !wallet.signerId}
           onClick={() => void close()}
           data-testid="lending-close"
         >

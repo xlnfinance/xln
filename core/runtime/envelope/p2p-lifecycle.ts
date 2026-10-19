@@ -74,7 +74,7 @@ const prepareCommittedPeerRoutes = (env: RuntimeReplica): void => {
   for (const replica of env.state.eReplicas.values()) {
     for (const counterpartyId of replica.state.accounts.keys()) targets.add(counterpartyId);
   }
-  for (const entityId of targets) p2p.prepareDirectEntityRoutes([entityId]);
+  for (const entityId of targets) p2p.prepareEntityRoutes([entityId]);
 };
 
 /** The startup owner opens this fence after its local J-catchup barrier. */

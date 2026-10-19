@@ -43,23 +43,34 @@ export type RuntimeAdapterEntityCoreDoc = StorageEntityCoreDoc & {
   metrics?: RuntimeEntityMetricStats;
 };
 
+export type RuntimeAdapterEntityViewPage = {
+  core: RuntimeAdapterEntityCoreDoc;
+  accounts: RuntimeAdapterAccountPage;
+  books: RuntimeAdapterBookPage;
+};
+
 export type RuntimeAdapterResolveContext = {
   env: RuntimeReplica;
   readHead?: () => Promise<StorageHead | null>;
   readFrame?: (height: number) => Promise<RuntimeFrame | null>;
   listCheckpoints?: () => Promise<number[]>;
   loadEntityState?: (entityId: string, height: number) => Promise<EntityState | null>;
-  loadEntityAccountDoc?: (entityId: string, counterpartyId: string, height: number) => Promise<StorageAccountDoc | null>;
+  loadEntityAccountDoc?: (
+    entityId: string,
+    counterpartyId: string,
+    height: number,
+  ) => Promise<StorageAccountDoc | null>;
   loadEntityViewPage?: (
     entityId: string,
     height: number,
     query?: RuntimeAdapterReadQuery,
-  ) => Promise<{
-    core: RuntimeAdapterEntityCoreDoc;
-    accounts: RuntimeAdapterAccountPage;
-    books: RuntimeAdapterBookPage;
-  } | null>;
+  ) => Promise<RuntimeAdapterEntityViewPage | null>;
   listEntityIdsAtHeight?: (height: number) => Promise<string[]>;
+  loadEntityViewPages?: (
+    entityIds: readonly string[],
+    height: number,
+    query?: RuntimeAdapterReadQuery,
+  ) => Promise<Map<string, RuntimeAdapterEntityViewPage> | null>;
   readActivityPage?: (
     opts: RuntimeActivityFilters & {
       beforeHeight?: number | undefined;
@@ -76,11 +87,7 @@ export type RuntimeAdapterResolveContext = {
     }>,
   ) => Promise<RuntimeAdapterSwapHistoryPage>;
   /** Certified Account frames, newest last. Point read: aggregate views omit them. */
-  readAccountFrameHistory?: (
-    entityId: string,
-    counterpartyId: string,
-    limit: number,
-  ) => Promise<AccountFrame[]>;
+  readAccountFrameHistory?: (entityId: string, counterpartyId: string, limit: number) => Promise<AccountFrame[]>;
   readFrameReceipts?: (query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterFrameReceiptResponse>;
   findPaymentRoutes?: (query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterPaymentRoutesResponse>;
 };

@@ -82,7 +82,7 @@ fn account() -> AccountReplica {
         0.into(),
     )
     .expect("fixture delta");
-    AccountReplica::new(
+    let replica = AccountReplica::new(
         left,
         AccountState::new(
             identity,
@@ -91,7 +91,26 @@ fn account() -> AccountReplica {
         )
         .expect("fixture state"),
     )
-    .expect("fixture replica")
+    .expect("fixture replica");
+    let policy = AccountTx::RebalancePolicy {
+        token_id: 1,
+        policy_version: 3,
+        base_fee: 10.into(),
+        liquidity_fee_bps: 0.into(),
+        gas_fee: 0.into(),
+    };
+    let context = AccountExecutionContext::with_market(
+        500,
+        500,
+        4,
+        4,
+        4,
+        Arc::new(SwapMarketPolicy::default()),
+    );
+    SequentialAccountEngine::apply_with_context(&replica, Side::Right, &policy, &context)
+        .expect("fixture published fee policy")
+        .committed()
+        .expect("fixture policy candidate")
 }
 
 fn bigint(value: &Value, field: &str) -> BigInt {

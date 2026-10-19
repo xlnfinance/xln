@@ -32,6 +32,14 @@ const makeAccount = (): AccountReplica => {
       disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       requestedRebalance: PersistentAccountStateMap.empty('requestedRebalance'),
       requestedRebalanceFeeState: PersistentAccountStateMap.empty('requestedRebalanceFeeState'),
+      rebalanceFeePolicies: PersistentAccountStateMap.fromEntries('rebalanceFeePolicies', [
+        [
+          1,
+          {
+            right: { policyVersion: 3, baseFee: 10n, liquidityFeeBps: 0n, gasFee: 0n, updatedAt: 500 },
+          },
+        ],
+      ]),
       locks: PersistentAccountStateMap.empty('locks'),
       pulls: PersistentAccountStateMap.empty('pulls'),
       swapOffers: PersistentAccountStateMap.empty('swapOffers'),
@@ -45,15 +53,22 @@ const makeAccount = (): AccountReplica => {
     currentHeight: 4,
     rollbackCount: 0,
     currentFrame: {
-      height: 4, timestamp: 0, jHeight: 0, accountTxs: [], prevFrameHash: '',
-      stateHash: '', accountStateRoot: ZERO_ROOT,
+      height: 4,
+      timestamp: 0,
+      jHeight: 0,
+      accountTxs: [],
+      prevFrameHash: '',
+      stateHash: '',
+      accountStateRoot: ZERO_ROOT,
     },
     proofHeader: { fromEntity: LEFT, toEntity: RIGHT, nextProofNonce: 0 },
     pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
-    shadow: { rebalance: {
-      policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
-      submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
-    } },
+    shadow: {
+      rebalance: {
+        policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+        submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+      },
+    },
   };
 };
 
@@ -123,14 +138,18 @@ export const executeRebalanceSettlementAccountSemanticVector = async () => {
     canonicalSource: 'TypeScript applyAccountTxToMutableReplica',
     inputs: txs,
     cases: [
-      { name: 'rebalance-request-refund', steps: [
-        await applyStep(rebalance, 'request', txs.request, true, 1_000),
-        await applyStep(rebalance, 'partialRefund', txs.partialRefund, false, 2_000),
-        await applyStep(rebalance, 'finalRefund', txs.finalRefund, false, 3_000),
-      ] },
-      { name: 'settlement-upsert', steps: [
-        await applyStep(settlement, 'settlementUpsert', txs.settlementUpsert, true, 4_000),
-      ] },
+      {
+        name: 'rebalance-request-refund',
+        steps: [
+          await applyStep(rebalance, 'request', txs.request, true, 1_000),
+          await applyStep(rebalance, 'partialRefund', txs.partialRefund, false, 2_000),
+          await applyStep(rebalance, 'finalRefund', txs.finalRefund, false, 3_000),
+        ],
+      },
+      {
+        name: 'settlement-upsert',
+        steps: [await applyStep(settlement, 'settlementUpsert', txs.settlementUpsert, true, 4_000)],
+      },
     ],
   };
 };

@@ -17,7 +17,9 @@ test('entity workspace shell consumes a projected workspace view instead of trav
   expect(source).toContain('workspaceProjectionFrame = frame');
   expect(source).toContain("const entityId = handle.mode === 'remote'");
   expect(source).toContain('? (tabEntityId || runtimeActiveEntityId)');
-  expect(source).not.toContain('tabEntityId && tabEntityId === runtimeActiveEntityId ? tabEntityId : runtimeActiveEntityId');
+  expect(source).not.toContain(
+    'tabEntityId && tabEntityId === runtimeActiveEntityId ? tabEntityId : runtimeActiveEntityId',
+  );
   expect(source).toContain(': tabEntityId;');
   expect(source).toContain('${selectedRuntimeId}|${entityId}|h:${minimumLiveHeight}');
   expect(source).not.toContain('${selectedRuntimeId}|${handle.status}|${entityId}');
@@ -64,8 +66,14 @@ test('entity workspace has no separate audit ops or liquidity projection lenses 
 
 test('entity settings workspace is a projection command surface, not the retired RuntimeReplica panel', () => {
   const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
-  const settings = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntitySettingsProjectionPanel.svelte', 'utf8');
-  const consensusSettings = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityConsensusSettingsPanel.svelte', 'utf8');
+  const settings = readFileSync(
+    'frontend/src/lib/components/Entity/workspace/shell/EntitySettingsProjectionPanel.svelte',
+    'utf8',
+  );
+  const consensusSettings = readFileSync(
+    'frontend/src/lib/components/Entity/workspace/shell/EntityConsensusSettingsPanel.svelte',
+    'utf8',
+  );
 
   expect(tabs).toContain('EntitySettingsProjectionPanel.svelte');
   expect(tabs).toContain('<EntitySettingsProjectionPanel');
@@ -73,7 +81,7 @@ test('entity settings workspace is a projection command surface, not the retired
   expect(tabs).toMatch(/type: ["']profile-update["'] as const/);
   expect(tabs).toContain('importJMachineViaRuntime');
   expect(tabs).toContain('importSettingsJMachine');
-  expect(tabs).not.toContain("Settings/EntitySettingsPanel");
+  expect(tabs).not.toContain('Settings/EntitySettingsPanel');
   expect(tabs).not.toContain('<EntitySettingsPanel');
   expect(settings).toContain('runtimeControllerHandle');
   expect(settings).toContain('onSaveProfile');
@@ -129,69 +137,17 @@ test('entity workspace runtime boundary helper stays projection-only', () => {
 });
 
 test('entity workspace is the only mounted entity shell', () => {
-  const userMode = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
   const dockWrapper = readFileSync('frontend/src/lib/view/panels/wrappers/EntityPanelWrapper.svelte', 'utf8');
   const runtimeCreation = readFileSync('frontend/src/lib/components/Views/RuntimeCreation.svelte', 'utf8');
 
-  expect(userMode).toContain('EntityWorkspace');
   expect(dockWrapper).toContain('EntityWorkspace');
-  expect(userMode).not.toContain('<EntityPanelTabs');
   expect(dockWrapper).not.toContain('<EntityPanelTabs');
   expect(runtimeCreation).not.toContain('Entity = Wallet');
 });
 
-test('user mode remote workspace mounts from RuntimeView instead of RuntimeReplica replica selection', () => {
-  const userMode = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
+test('Dock remote workspace mounts from RuntimeView instead of RuntimeReplica replica selection', () => {
   const dockWrapper = readFileSync('frontend/src/lib/view/panels/wrappers/EntityPanelWrapper.svelte', 'utf8');
   const workspace = readFileSync('frontend/src/lib/components/Entity/workspace/EntityWorkspace.svelte', 'utf8');
-
-  expect(userMode).toContain('runtimeView,');
-  expect(userMode).toContain('runtimeViewActiveEntityId,');
-  expect(userMode).toContain('setRuntimeViewActiveEntityId,');
-  expect(userMode).toContain("from '#lib/stores/runtimeViewStore.ts'");
-  expect(userMode).toContain('setRuntimeViewActiveEntityId');
-  expect(userMode).toContain("import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts'");
-  expect(userMode).toContain('$runtimeView.frame');
-  expect(userMode).toContain('$runtimeView.activeEntityId');
-  expect(userMode).toContain('runtimeProjectionMatchesRuntime($runtimeView.runtimeId, $activeRuntimeId)');
-  expect(userMode).toContain('get(runtimeControllerHandle).mode');
-  expect(userMode).toContain('$runtimeControllerHandle.mode');
-  expect(userMode).toContain('liveEnvResolver?: () => RuntimeReplica | null;');
-  expect(userMode).toContain('const currentLiveRuntimeEnv = $derived.by(() =>');
-  expect(userMode).toContain('if (isRemoteRuntime) return null;');
-  expect(userMode).toContain('const live = liveEnvResolver?.() ?? null;');
-  expect(userMode).toContain('const frame = !isRemoteRuntime && liveRuntimeEnv ? createRuntimeViewEnv(liveRuntimeEnv) : env;');
-  expect(userMode).toContain('const workspaceEnv = $derived.by<RuntimeFrame | null>(() =>');
-  expect(userMode).toContain('isRemoteRuntime ? null : currentFrame');
-  expect(userMode).toContain('const workspaceLiveEnv = $derived.by<RuntimeReplica | null>(() =>');
-  expect(userMode).toContain('isRemoteRuntime ? null : (currentLiveRuntimeEnv ?? $runtimeFrameEnv)');
-  expect(userMode).toContain('function resolveWorkspaceLiveEnv(): RuntimeReplica | null');
-  expect(userMode).toContain('const workspaceRuntimeFrameContext = $derived.by<EntityWorkspaceRuntimeFrameContext>(() =>');
-  expect(userMode).toContain('const workspaceEmbeddedRuntimeContext = $derived.by<EntityWorkspaceEmbeddedRuntimeContext>(() =>');
-  expect(userMode).toContain('runtimeFrameContext={workspaceRuntimeFrameContext}');
-  expect(userMode).toContain('embeddedRuntimeContext={workspaceEmbeddedRuntimeContext}');
-  expect(userMode).not.toContain('env={workspaceEnv}');
-  expect(userMode).not.toContain('liveEnv={workspaceLiveEnv}');
-  expect(userMode).not.toContain('liveEnvResolver={resolveWorkspaceLiveEnv}');
-  expect(userMode).not.toContain('liveEnv={currentLiveRuntimeEnv ?? $runtimeFrameEnv}');
-  expect(userMode).not.toContain('liveEnvResolver={() => currentLiveRuntimeEnv ?? $runtimeFrameEnv}');
-  expect(userMode).toContain('remoteWorkspaceAvailable');
-  expect(userMode).toContain('mountedRemoteRuntimeId = $runtimeControllerHandle.runtimeId');
-  expect(userMode).toContain('runtimeProjectionMatchesRuntime($runtimeView.runtimeId, $runtimeControllerHandle.runtimeId)');
-  expect(userMode).toContain('mountedRemoteRuntimeId === $runtimeControllerHandle.runtimeId');
-  expect(userMode).not.toContain("isRemoteRuntime && $runtimeControllerHandle.status === 'connected'");
-  expect(userMode).toContain("viewMode === 'entity' && (currentFrame || remoteWorkspaceAvailable)");
-  expect(userMode).not.toContain('appRuntimeAdapterMode');
-  expect(userMode).not.toContain('appRuntimeAdapterActiveEntityId');
-
-  const remoteEffectStart = userMode.indexOf('if (!isRemoteRuntime) return;');
-  const remoteEffectEnd = userMode.indexOf('$effect(() => {\n    if (isRemoteRuntime || !currentFrame?.state.eReplicas)', remoteEffectStart);
-  expect(remoteEffectStart).toBeGreaterThan(0);
-  expect(remoteEffectEnd).toBeGreaterThan(remoteEffectStart);
-  const remoteEffect = userMode.slice(remoteEffectStart, remoteEffectEnd);
-  expect(remoteEffect).not.toContain('currentFrame?.state.eReplicas');
-  expect(remoteEffect).not.toContain('findReplicaByEntityInFrame');
-  expect(remoteEffect).not.toContain('firstReplicaWithRelationshipsInFrame');
 
   expect(workspace).toContain('export let runtimeFrameContext: EntityWorkspaceRuntimeFrameContext');
   expect(workspace).toContain('export let embeddedRuntimeContext: EntityWorkspaceEmbeddedRuntimeContext');
@@ -215,15 +171,21 @@ test('user mode remote workspace mounts from RuntimeView instead of RuntimeRepli
   expect(workspace).toContain('entity-workspace-action-unavailable');
 
   expect(dockWrapper).toContain("import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';");
-  expect(dockWrapper).toContain("const isRemoteRuntime = $derived.by<boolean>(() => $runtimeControllerHandle.mode === 'remote');");
+  expect(dockWrapper).toContain(
+    "const isRemoteRuntime = $derived.by<boolean>(() => $runtimeControllerHandle.mode === 'remote');",
+  );
   expect(dockWrapper).toContain('if (isRemoteRuntime) return null;');
-  expect(dockWrapper).toContain("if ($runtimeControllerHandle.status === 'connected' && $runtimeControllerHandle.runtimeId)");
+  expect(dockWrapper).toContain(
+    "if ($runtimeControllerHandle.status === 'connected' && $runtimeControllerHandle.runtimeId)",
+  );
   expect(dockWrapper).toContain('mountedRemoteRuntimeId === $runtimeControllerHandle.runtimeId');
   expect(dockWrapper).toContain('function resolveLiveEnv(): RuntimeReplica | null');
   expect(dockWrapper).toContain('return isRemoteRuntime ? null : activeEnv;');
   expect(dockWrapper).toContain('{#if canMountWorkspace}');
   expect(dockWrapper).toContain('const runtimeFrameContext = $derived.by<EntityWorkspaceRuntimeFrameContext>(() =>');
-  expect(dockWrapper).toContain('const embeddedRuntimeContext = $derived.by<EntityWorkspaceEmbeddedRuntimeContext>(() =>');
+  expect(dockWrapper).toContain(
+    'const embeddedRuntimeContext = $derived.by<EntityWorkspaceEmbeddedRuntimeContext>(() =>',
+  );
   expect(dockWrapper).toContain('{runtimeFrameContext}');
   expect(dockWrapper).toContain('{embeddedRuntimeContext}');
   expect(dockWrapper).not.toContain('liveEnvResolver={resolveLiveEnv}');
@@ -254,7 +216,10 @@ test('runtime frame context separates projection metadata from embedded RuntimeR
 
 test('remote projection entity panel does not hide account surface behind RuntimeReplica availability', () => {
   const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
-  const accountWorkspace = readFileSync('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte', 'utf8');
+  const accountWorkspace = readFileSync(
+    'frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte',
+    'utf8',
+  );
   const assets = readFileSync('frontend/src/lib/components/Entity/assets/EntityAssetsTab.svelte', 'utf8');
   const debt = readFileSync('frontend/src/lib/components/Entity/assets/DebtPanel.svelte', 'utf8');
 
@@ -270,7 +235,9 @@ test('remote projection entity panel does not hide account surface behind Runtim
   expect(assets).not.toContain('EnvSnapshot');
   expect(assets).toContain('export let entityNames: Map<string, string>');
   expect(assets).not.toContain('export let activeLiveEnv');
-  expect(debt).toContain("type DebtState = Pick<EntityState, 'entityId' | 'outDebtsByToken' | 'inDebtsByToken' | 'reserves'>");
+  expect(debt).toContain(
+    "type DebtState = Pick<EntityState, 'entityId' | 'outDebtsByToken' | 'inDebtsByToken' | 'reserves'>",
+  );
   expect(debt).toContain('export let entityStateOverride: DebtState | null = null');
   expect(debt).toContain('export let entityNames: Map<string, string>');
   expect(debt).not.toContain('export let sourceEnv');

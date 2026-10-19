@@ -14,7 +14,7 @@ import { prepareLiveStateGraph } from '../commit/live-state-graph';
 import { prepareStorageBookGraphWrite } from '../commit/book-graph';
 import { hydrateEntityStateFromStorage } from '../read/projections';
 import { computeStorageReplicaMetaDigest } from '../replica/replica-meta-digest';
-import { deleteKeyRange, iterateKeys } from './level';
+import { readRequiredRaw, deleteKeyRange, iterateKeys } from './level';
 import { createPreparedRowsView } from './prepared-rows-view';
 import {
   KEY_HEAD,
@@ -41,15 +41,12 @@ import {
   keySnapshotGraph,
 } from '../keys';
 import { readStorageFrameRecord, readStorageHead } from '../read/read';
-import { verifyStorageSnapshotIntegrity , verifyStorageTailIntegrity } from '../read/verify';
+import { verifyStorageSnapshotIntegrity, verifyStorageTailIntegrity } from '../read/verify';
 import { projectReplayVerifiableRuntimePostStateView } from '../wal/snapshot';
 import { prepareRuntimeMachineGraphRows } from '../wal/runtime-machine-graph';
 import { prepareRuntimeOutputRows } from '../wal/outbox-payload';
 import { prepareBoundedStorageValueRows } from '../codec/bounded-value';
-import {
-  preparePathKeyedAuxiliaryRows,
-  type AuxiliaryTreeOwner,
-} from '../schema/nodes/path-keyed-auxiliary-nodes';
+import { preparePathKeyedAuxiliaryRows, type AuxiliaryTreeOwner } from '../schema/nodes/path-keyed-auxiliary-nodes';
 import type {
   RuntimeDbLike,
   StorageDoc,
@@ -63,8 +60,7 @@ import type {
 type ReplicaMetaEntry = { key: Buffer; value: Buffer };
 type EncodedNode = { key: Buffer; value: Buffer };
 
-type ExistingWalDecision =
-  { kind: 'replace' } | { kind: 'idempotent'; head: StorageHead; frame: RuntimeFrame };
+type ExistingWalDecision = { kind: 'replace' } | { kind: 'idempotent'; head: StorageHead; frame: RuntimeFrame };
 
 export type RestoredStorageBaseOptions = {
   currentDb: RuntimeDbLike;
@@ -119,10 +115,14 @@ const snapshotKeyForLiveRow = (height: number, key: Buffer): Buffer => {
   if (
     key[0] === KEY_LIVE_ACCOUNT_FIELD ||
     key[0] === KEY_LIVE_ENTITY_FIELD ||
-    key[0] === KEY_LIVE_ENTITY_BRANCH || key[0] === KEY_LIVE_ENTITY_LEAF ||
-    key[0] === KEY_LIVE_ACCOUNT_BRANCH || key[0] === KEY_LIVE_ACCOUNT_LEAF ||
-    key[0] === KEY_LIVE_BOOK_BRANCH || key[0] === KEY_LIVE_BOOK_LEAF
-  ) return keySnapshotGraph(height, key);
+    key[0] === KEY_LIVE_ENTITY_BRANCH ||
+    key[0] === KEY_LIVE_ENTITY_LEAF ||
+    key[0] === KEY_LIVE_ACCOUNT_BRANCH ||
+    key[0] === KEY_LIVE_ACCOUNT_LEAF ||
+    key[0] === KEY_LIVE_BOOK_BRANCH ||
+    key[0] === KEY_LIVE_BOOK_LEAF
+  )
+    return keySnapshotGraph(height, key);
   throw new Error(`RECOVERY_IMPORT_LIVE_ROW_TAG_INVALID:${String(key[0])}`);
 };
 
@@ -156,10 +156,7 @@ const queueCurrentBody = (
   for (const item of accountJClaimNodes) batch.put(item.key, item.value);
 };
 
-const buildSnapshotEntries = (
-  height: number,
-  rows: readonly PhysicalRow[],
-): Array<{ key: Buffer; value: Buffer }> =>
+const buildSnapshotEntries = (height: number, rows: readonly PhysicalRow[]): Array<{ key: Buffer; value: Buffer }> =>
   rows.map(row => ({
     key: snapshotKeyForLiveRow(height, row.key),
     value: row.value,
@@ -194,7 +191,7 @@ const assertUniqueReplicaMetas = (entries: readonly ReplicaMetaEntry[]): void =>
 const readAuthoritativeReplicaMetas = async (db: RuntimeDbLike): Promise<ReplicaMetaEntry[]> => {
   const entries: ReplicaMetaEntry[] = [];
   for await (const key of iterateKeys(db, { prefix: keyLiveReplicaMetaPrefix() })) {
-    entries.push({ key, value: await db.get(key) });
+    entries.push({ key, value: await readRequiredRaw(db, key) });
   }
   return entries;
 };

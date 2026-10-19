@@ -45,6 +45,40 @@ describe('canonical audit registry', () => {
     expect(jurisdictionIngress.exclusions.some(({ glob }) => matchesAuditGlob(browserVmPath, glob))).toBe(true);
   });
 
+  test('fingerprint ownership follows reverse imports through cycles without admitting unrelated tests', () => {
+    const owner = REGISTRY.modules[0];
+    if (!owner) throw new Error('AUDIT_TEST_OWNER_MISSING');
+    const registry: AuditRegistry = {
+      ...REGISTRY,
+      scope: { sourceGlobs: ['src/**'], testGlobs: ['tests/**'], exclusions: [] },
+      modules: [
+        { ...owner, sourceGlobs: ['src/owned.ts'], testGlobs: ['tests/explicit.ts'], dependencies: [], exclusions: [] },
+      ],
+    };
+    const graph = new Map<string, readonly string[]>([
+      ['src/owned.ts', ['src/shared.ts']],
+      ['src/shared.ts', ['src/cycle.ts']],
+      ['src/cycle.ts', ['src/shared.ts']],
+      ['tests/direct.ts', ['src/owned.ts']],
+      ['tests/transitive.ts', ['tests/helper.ts']],
+      ['tests/helper.ts', ['src/cycle.ts']],
+      ['tests/explicit.ts', ['src/explicit-helper.ts']],
+      ['tests/unrelated.ts', ['src/unrelated.ts']],
+      ['scripts/unscoped.ts', ['src/owned.ts']],
+    ]);
+    const tracked = [...new Set([...graph.keys(), ...[...graph.values()].flat()])];
+    expect(listModuleFingerprintFiles(ROOT, owner.id, registry, tracked, graph)).toEqual([
+      'src/cycle.ts',
+      'src/explicit-helper.ts',
+      'src/owned.ts',
+      'src/shared.ts',
+      'tests/direct.ts',
+      'tests/explicit.ts',
+      'tests/helper.ts',
+      'tests/transitive.ts',
+    ]);
+  });
+
   test('fingerprints are deterministic and dependency-aware', () => {
     const first = computeModuleFingerprints(ROOT, REGISTRY);
     const second = computeModuleFingerprints(ROOT, REGISTRY);

@@ -7,13 +7,6 @@ import {
 } from '../../protocol/serialization/binary-codec';
 import { countOp, countOpWithSite } from '../../support/performance/op-counters';
 
-export const notFound = (error: unknown): boolean => {
-  if (!error || typeof error !== 'object') return false;
-  const code = String((error as { code?: unknown }).code ?? '');
-  const name = String((error as { name?: unknown }).name ?? '');
-  return code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError';
-};
-
 export const encodeBuffer = (
   value: unknown,
   options: { omitSymbolKeys?: boolean } = {},

@@ -23,7 +23,7 @@ import type { EntityInput, EntityReplica } from '../../entity/types.ts';
 import type { RoutedEntityInput, RuntimeReplica, RuntimeInput, RuntimeTx } from '../types.ts';
 import type { JInput } from '../../jurisdiction/machine/input';
 import { atomicCrossJInputCohortKey } from '../delivery/topology/entity-routing.ts';
-import { canDeliverCommittedOutput } from '../delivery/readiness.ts';
+import { hasDeliverableCommittedOutputs } from '../delivery/dispatch.ts';
 
 import { createStructuredLogger } from '../../support/logger.ts';
 
@@ -150,11 +150,7 @@ export const resolveRuntimeWorkReason = (
     return 'future-queued-input';
   }
   if (env.pendingOutputs?.length) return 'pending-output';
-  if (env.pendingNetworkOutputs?.some(output => {
-    const runtimeId = output.runtimeId;
-    if (!runtimeId) throw new Error('RUNTIME_NETWORK_OUTBOX_TARGET_MISSING');
-    return canDeliverCommittedOutput(ensureRuntimeInfrastructure(env), runtimeId);
-  })) return 'committed-network-outbox';
+  if (hasDeliverableCommittedOutputs(env)) return 'committed-network-outbox';
   if (env.networkInbox?.length) return 'network-inbox';
   const replicaWakes = collectReplicaMempoolWakeInputs(env);
   if (replicaWakes.entityInputs.length > 0) return 'entity-mempool';

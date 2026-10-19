@@ -27,10 +27,7 @@ export const createPreparedRowsView = (rows: readonly PreparedRow[]): RuntimeDbL
   return {
     get: async key => {
       const row = values.get(key.toString('hex'));
-      if (row) return Buffer.from(row.value);
-      const error = new Error(`STORAGE_PREPARED_ROW_NOT_FOUND:${key.toString('hex')}`);
-      error.name = 'NotFoundError';
-      throw error;
+      return row === undefined ? undefined : Buffer.from(row.value);
     },
     batch: () => {
       throw new Error('STORAGE_PREPARED_ROWS_READ_ONLY');
