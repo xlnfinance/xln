@@ -1,6 +1,7 @@
 import { isAddress, ZeroAddress } from 'ethers';
 import type { JAdapter } from '@xln/core/api/public/runtime-module';
 import { safeParse } from '@xln/core/protocol/serialization';
+import { WalletSnapshotSourceAdvancedError } from '@xln/core/jurisdiction/adapter/rpc/wallet/snapshot-source';
 import { isUnknownRecord } from '#lib/utils/boundary/index.ts';
 import type { EntityReplica } from '#lib/types/ui.ts';
 import { readJsonResponse } from './account/account-faucet';
@@ -349,6 +350,9 @@ export async function requestExternalWalletSnapshot(
   const rawData = await readJsonResponse(response);
   const data = rawData === null ? null : decodeExternalWalletSnapshotResponse(rawData);
   if (!response.ok || !data?.success) {
+    if (response.status === 409 && data?.sourceAdvance) {
+      throw new WalletSnapshotSourceAdvancedError(data.sourceAdvance.previousHeight, data.sourceAdvance.currentHeight);
+    }
     throw new Error(data?.error || `External wallet snapshot failed (${response.status})`);
   }
   // A point-in-time RPC read is display data, not proof that an event prefix is complete.

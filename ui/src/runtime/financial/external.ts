@@ -12,6 +12,10 @@ import { useApp } from '../store';
 import type { TokenCatalogEntry } from '../token-meta';
 import { hostedJAdapter } from './move';
 import { requireAdapter } from '../adapter';
+import {
+  walletSnapshotSourceAdvance,
+  type WalletSnapshotSourceAdvance,
+} from '@xln/core/jurisdiction/adapter/rpc/wallet/snapshot-source';
 import type { RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
 import {
 	fetchExternalTokenCatalog,
@@ -196,7 +200,11 @@ export function requestExternalWalletRefresh(): void {
 
 export function useExternalWalletSync(entityId: string, signerId: string) {
   const setExternalWallet = useApp(s => s.setExternalWallet);
-  const [snapshot, setSnapshot] = useState({ entityId: '', error: '' });
+  const [snapshot, setSnapshot] = useState<{
+    entityId: string;
+    error: string;
+    sourceAdvance: WalletSnapshotSourceAdvance | null;
+  }>({ entityId: '', error: '', sourceAdvance: null });
   useEffect(() => {
     if (!entityId || !signerId) return;
     let cancelled = false;
@@ -215,12 +223,16 @@ export function useExternalWalletSync(entityId: string, signerId: string) {
         const wallet = await readExternalWallet(entityId, signerId);
         if (!cancelled) {
           setExternalWallet(wallet);
-          setSnapshot({ entityId, error: '' });
+          setSnapshot({ entityId, error: '', sourceAdvance: null });
         }
       } catch (error) {
         if (!cancelled) {
           setExternalWallet(null);
-          setSnapshot({ entityId: '', error: error instanceof Error ? error.message : String(error) });
+          setSnapshot({
+            entityId: '',
+            error: error instanceof Error ? error.message : String(error),
+            sourceAdvance: walletSnapshotSourceAdvance(error),
+          });
         }
       } finally {
         reading = false;
@@ -243,6 +255,7 @@ export function useExternalWalletSync(entityId: string, signerId: string) {
   return {
     ready: Boolean(entityId) && snapshot.entityId === entityId,
     error: snapshot.error,
+    sourceAdvance: snapshot.sourceAdvance,
     retry: requestExternalWalletRefresh,
   };
 }

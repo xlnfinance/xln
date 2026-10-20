@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   assertExternalSnapshotCount,
+  decodeExternalWalletSnapshotResponse,
   normalizeOptionalTokenId,
   readExternalWalletSnapshotSource,
   requireExternalSnapshotBigInt,
@@ -21,6 +22,19 @@ const adapterFixture = (input: { head?: unknown; finalityDepth?: unknown; blockH
 });
 
 describe('external wallet snapshot helpers', () => {
+  test('source advancement is a rejected read, never a successful balance response', () => {
+    const sourceAdvance = { code: 'TRON_SNAPSHOT_SOURCE_ADVANCED', previousHeight: 53, currentHeight: 54 };
+    const rejected = { error: 'TRON_SNAPSHOT_SOURCE_CHANGED:previous=53:current=54', sourceAdvance };
+    expect(decodeExternalWalletSnapshotResponse(rejected)).toEqual(rejected);
+    for (const value of [
+      { ...rejected, success: true, nativeBalance: '1' },
+      { ...rejected, sourceAdvance: { ...sourceAdvance, currentHeight: 53 } },
+      { ...rejected, sourceAdvance: { ...sourceAdvance, currentHeight: '54' } },
+      { ...rejected, sourceAdvance: { ...sourceAdvance, balance: '1' } },
+    ])
+      expect(() => decodeExternalWalletSnapshotResponse(value)).toThrow('EXTERNAL_WALLET_SNAPSHOT_RESPONSE_INVALID');
+  });
+
   test('requires bigint snapshot fields and exact array counts', () => {
     expect(requireExternalSnapshotBigInt(7n, 'nativeBalance')).toBe(7n);
     expect(() => requireExternalSnapshotBigInt(null, 'nativeBalance')).toThrow(

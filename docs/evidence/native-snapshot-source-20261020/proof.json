@@ -1,0 +1,328 @@
+{
+  "baseSHA": "c086b3ea596e2fc10dda978850007c866aace0a8",
+  "patchSHA256": "2130c2b7867e2b1618e2564359c657c69ec84133caee7932c4b8f60cac6f1cd1",
+  "scope": "Private JavaTVM source-bound wallet reads and actual React reserve exit. Not public Nile, mainnet, hub/faucet readiness, or a full release certificate.",
+  "firstFailure": {
+    "artifact": "native-browser-move-c086b-01",
+    "passed": 3,
+    "expected": 11,
+    "error": "TRON_SNAPSHOT_SOURCE_CHANGED",
+    "diagnostic": "709 accepted canonical reads then source53->54 during one read; entire snapshot rejected"
+  },
+  "invariants": [
+    "Every changed snapshot still rejects all returned balances",
+    "Equal-height hash/time changes and source regressions remain errors",
+    "Explicit source advancement cannot be decoded as success",
+    "UI clears the rejected snapshot and hides financial screens until a complete read succeeds",
+    "Existing nonoverlapping refresh scheduling is unchanged; no new retry loop or deadline"
+  ],
+  "checks": {
+    "l1": {
+      "artifact": "native-snapshot-surface-l1-01.result.json",
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/jurisdiction/adapter/tron/tron-wallet-snapshot.test.ts",
+        "tests/frontend/assets/external-wallet-snapshot.test.ts"
+      ],
+      "count": "14/14 tests;80assertions",
+      "seconds": 2.966108125,
+      "logSHA256": "8eaabde2249ee8219d30e6232647b5bbbb59354837fa530d63faa98c39697926",
+      "sourceUnchanged": true
+    },
+    "types": {
+      "artifact": "native-snapshot-surface-checks-01.result.json",
+      "command": [
+        "bun",
+        "tools/run-parallel-checks.ts",
+        "check:runtime-types",
+        "check:ui-types",
+        "check:unsafe-types",
+        "check:folder-width",
+        "check:unused-surface"
+      ],
+      "count": "5/5 runtime/UI/unsafe/folder-width/unused-surface",
+      "seconds": 20.064797291,
+      "logSHA256": "08c3b074c4c5bb63840c397ec8ac54d073cea4938b2d7cedb81280255b4543aa",
+      "sourceUnchanged": true
+    },
+    "build": {
+      "artifact": "native-snapshot-surface-build-01.result.json",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "native-snapshot-shared-decoder-browser-build",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "run",
+        "--cwd",
+        "/Users/zigota/xln/ui",
+        "build:hosted"
+      ],
+      "count": "React hosted build",
+      "seconds": 3.037115208,
+      "logSHA256": "7460c4762ddacfc9176c7d297012126c7909a4882fd24016bb46ceb8aa68faf4",
+      "sourceUnchanged": true
+    },
+    "nativeL2": {
+      "artifact": "native-snapshot-l2-02.result.json",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "native-wallet-module-boundary-recovery",
+        "--timeout-ms",
+        "180000",
+        "--",
+        "python3",
+        "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/native-snapshot-l2-02/run.py"
+      ],
+      "count": "3/3 source-bound read/advance rejection/recovery",
+      "seconds": 43.573033,
+      "logSHA256": "8fe97f60db77fb7b67a7c860d4ee03391a0f23b9e382d979fc2ac0f7c892d0ed",
+      "sourceUnchanged": true,
+      "candidateScope": "Stable02 producer; current followup makes its unchanged nested predicate private and reuses the existing envelope decoder. Current build/browser exercised separately."
+    },
+    "browserL2": {
+      "artifact": "native-browser-source-advance-04.result.json",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "native-react-shared-source-decoder-and-real-exit",
+        "--timeout-ms",
+        "300000",
+        "--",
+        "python3",
+        "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/native-browser-source-advance-04/run.py"
+      ],
+      "count": "13/13 realbrowserchecks;0errors",
+      "seconds": 81.3857625,
+      "logSHA256": "9046a5b5a320eb03cc2947a0b654840a3e2c53517da0fc9d6342490fcbc1f826",
+      "sourceUnchanged": true
+    },
+    "focusedLint": {
+      "artifact": "native-snapshot-lint-target-01.result.json",
+      "command": [
+        "bunx",
+        "eslint",
+        "core/__tests__/jurisdiction/adapter/tron/tron-wallet-snapshot.test.ts",
+        "core/api/public/external-wallet/snapshot-handler.ts",
+        "core/jurisdiction/adapter/rpc/wallet/tron-wallet-snapshot.ts",
+        "core/jurisdiction/adapter/rpc/wallet/snapshot-source.ts"
+      ],
+      "count": "4/4 owned core files;zero errors",
+      "seconds": 2.1840312920000002,
+      "logSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sourceUnchanged": true
+    }
+  },
+  "browser": {
+    "origin": "http://localhost:8080",
+    "passed": 13,
+    "expected": 13,
+    "errors": [],
+    "bootDurationMs": 9216.685707999999,
+    "checks": [
+      {
+        "name": "canonical-native-catalog",
+        "pass": true,
+        "evidence": {
+          "mode": "tron",
+          "chainId": 2414086651,
+          "contracts": {
+            "account": "0x7070bbaede33433491330801b7152dfe614055f7",
+            "deltaTransformer": "0xde809ced5f6e0a6ceadec250d6923c6cd3b0ff22",
+            "depository": "0x781ade3209b06eb073dad3333b0aa2277e530cdb",
+            "entityProvider": "0xfacd5d8fe0758467b36c865168f9c6ad3aa5553b"
+          },
+          "entityProviderDeploymentBlock": 10,
+          "solidHead": {
+            "number": 53,
+            "blockID": "000000000000003542a59c4472dfbdea925c3ba34c570902ac387c47243b5826",
+            "timestamp": 1792448286000
+          }
+        }
+      },
+      {
+        "name": "actual-native-solid-head",
+        "pass": true,
+        "evidence": {
+          "number": 53,
+          "blockID": "000000000000003542a59c4472dfbdea925c3ba34c570902ac387c47243b5826",
+          "timestamp": 1792448286000
+        }
+      },
+      {
+        "name": "actual-wallet-creation-submit",
+        "pass": true,
+        "evidence": {
+          "clickLabels": ["Create a wallet Use a name and passphrase", "Test 1 shard", "Derive vault"],
+          "preset": {
+            "tier": "Test",
+            "shards": 1
+          },
+          "credentialValuesRecorded": false
+        }
+      },
+      {
+        "name": "usable-selected-native-home",
+        "pass": true,
+        "evidence": {
+          "durationMs": 9216.685707999999,
+          "deadlineMs": 60000,
+          "operationLimitMs": 1000,
+          "selectedChain": "Chain 2414086651",
+          "doesNotClaimHubFundingOrFinancialReadiness": true
+        }
+      },
+      {
+        "name": "actual-source-advance-keeps-assets-unavailable",
+        "pass": true,
+        "evidence": {
+          "previousHeight": 56,
+          "currentHeight": 57,
+          "refreshClicks": 37,
+          "durationMs": 2502.685792,
+          "observationDeadlineMs": 30000,
+          "financialScreenUnavailable": true,
+          "errorReasonVisible": true
+        }
+      },
+      {
+        "name": "actual-source-advance-recovers-complete-assets",
+        "pass": true,
+        "evidence": {
+          "durationMs": 193.56487500000003,
+          "deadlineMs": 10000,
+          "manualRetryClicked": false,
+          "newProductionRetryLoop": false
+        }
+      },
+      {
+        "name": "fresh-native-wallet-chain-state",
+        "pass": true,
+        "evidence": {
+          "reserve": "0",
+          "nonce": "0",
+          "external": "0",
+          "tokenId": 1,
+          "decimals": 6
+        }
+      },
+      {
+        "name": "real-native-reserve-funding",
+        "pass": true,
+        "evidence": {
+          "txHash": "0x8a6f9c77d5f1037386087518a970c22f9265f1fe7defacd98c8edf256446257a",
+          "block": 60,
+          "atomicReserve": "1000000"
+        }
+      },
+      {
+        "name": "react-reserve-observation",
+        "pass": true,
+        "evidence": {
+          "visible": "1 XLNUSD"
+        }
+      },
+      {
+        "name": "actual-react-native-submit-click",
+        "pass": true,
+        "evidence": {
+          "from": "reserve",
+          "to": "external",
+          "atomicAmount": "1000000",
+          "recipient": "0x342f31e92bdf148044373ea5352295740821c476"
+        }
+      },
+      {
+        "name": "solidified-native-exit-conservation",
+        "pass": true,
+        "evidence": {
+          "txHash": "42c92baedffd1c7c474271facd0fd18b512243cc2cc86c36bfcb7d4aa3e8e7b6",
+          "block": 63,
+          "reserve": "0",
+          "external": "1000000",
+          "nonce": "1"
+        }
+      },
+      {
+        "name": "react-terminal-native-balances",
+        "pass": true,
+        "evidence": {
+          "reserve": "0 XLNUSD",
+          "external": "1 XLNUSD",
+          "pending": 0
+        }
+      },
+      {
+        "name": "native-react-reload-no-resubmission",
+        "pass": true,
+        "evidence": {
+          "samePublicIdentity": true,
+          "reserve": "0",
+          "external": "1000000",
+          "nonce": "1",
+          "userBroadcasts": 1
+        }
+      }
+    ],
+    "clickCounts": {
+      "Assets": 3,
+      "Continue": 1,
+      "Create a wallet Use a name and passphrase": 1,
+      "Derive vault": 1,
+      "From Reserve": 1,
+      "Home": 31,
+      "Manage": 3,
+      "Move": 1,
+      "Refresh": 37,
+      "Sign & send": 1,
+      "Test 1 shard": 1,
+      "To On-chain wallet": 1,
+      "Unlock": 1
+    }
+  },
+  "sourceRecovery": {
+    "acceptedSnapshots": 709,
+    "expectedInvalidations": 1,
+    "expiredSourceRejected": true,
+    "exactSnapshotFingerprint": "56edcdffad447f0574f014b3562be1f3f71bd88731a3b514d8d101b922951c63"
+  },
+  "review": {
+    "artifact": "native-snapshot-stable-review.json",
+    "scope": "Bounded read-only Studio native review of9/9immutablefiles",
+    "result": "No scoped blocker; observed height advance is not ancestry proof",
+    "layoutFollowup": "Reviewed helper bytes unchanged; relocated into existing rpc/wallet directory and imports updated. L1/L2/browser repeated; folder-width passed without rule changes."
+  },
+  "remaining": "Fresh final immutable-SHA financial coverage, exact unit/test/check,157browser+retainedhistoricalfailure,34steprelease,60minsoak, checkedpush/deploy/publicversion/clickproof,publicfunding/signing/nativeacceptance remain distinct.",
+  "screenshots": {
+    "source-advanced.png": "aee9160211bdcbef0a4fc4b73fa89b66dab380addaf3780310238a9bae2d584b",
+    "native-exit-reloaded.png": "a546ab2f19710e5dc40bc1b12e433af2fe2133038f1a08e362e99bb28fd124e6"
+  },
+  "retainedFailures": [
+    {
+      "artifact": "native-snapshot-check-01.result.json",
+      "error": "FOLDER_TOO_WIDE core/jurisdiction/adapter:11 >10",
+      "fix": "Moved byte-identical helper into existing rpc/wallet directory; no threshold changes"
+    },
+    {
+      "artifact": "native-snapshot-check-02.result.json",
+      "error": "ESLINT_DEBT_CHANGED expected319 actual320",
+      "fix": "New test uses canonical safeStringify; no ESLint rule or baseline changed"
+    },
+    {
+      "artifact": "native-snapshot-check-03.result.json",
+      "error": "UNUSED_RUNTIME_SURFACE isWalletSnapshotSourceAdvance",
+      "fix": "Nested predicate private; consumer reuses existing envelope decoder; no allowlist/rule change"
+    }
+  ],
+  "surfaceFollowup": "Nested predicate is private; HTTP response uses the existing envelope decoder with identical strict nested validation. No unused-surface allowance or rule changed."
+}

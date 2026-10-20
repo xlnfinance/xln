@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import type { ExternalWalletApiContext } from './context';
+import { walletSnapshotSourceAdvance } from '../../../jurisdiction/adapter/rpc/wallet/snapshot-source';
 import {
   assertSnapshotArrayLength,
   createJsonResponse,
@@ -79,7 +80,10 @@ export const handleWalletSnapshot = async (context: ExternalWalletApiContext, re
     const tokenCatalog = await context.getTokenCatalog(body.entityId);
     const tokenAddresses = body.tokenAddresses?.length
       ? body.tokenAddresses
-      : normalizeWalletSnapshotTokenAddresses(tokenCatalog.map(token => token.address), 'tokenCatalog');
+      : normalizeWalletSnapshotTokenAddresses(
+          tokenCatalog.map(token => token.address),
+          'tokenCatalog',
+        );
     const allowanceRequests = body.allowances ?? [];
     const owner = ethers.getAddress(body.owner).toLowerCase();
     const source = await readExternalWalletSnapshotSource(adapter);
@@ -114,8 +118,11 @@ export const handleWalletSnapshot = async (context: ExternalWalletApiContext, re
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const sourceAdvance = walletSnapshotSourceAdvance(error);
     if (error instanceof RequestBodyError) {
       externalWalletLog.warn('snapshot.rejected', { code: error.code, error: message });
+    } else if (sourceAdvance) {
+      externalWalletLog.warn('snapshot.source_advanced', { ...sourceAdvance, error: message });
     } else {
       externalWalletLog.error('snapshot.failed', { error: message });
     }
@@ -123,9 +130,10 @@ export const handleWalletSnapshot = async (context: ExternalWalletApiContext, re
       context.jsonHeaders,
       {
         error: message,
+        ...(sourceAdvance ? { sourceAdvance } : {}),
         ...(error instanceof RequestBodyError ? { code: error.code } : {}),
       },
-      error instanceof RequestBodyError ? error.status : 500,
+      error instanceof RequestBodyError ? error.status : sourceAdvance ? 409 : 500,
     );
   }
 };

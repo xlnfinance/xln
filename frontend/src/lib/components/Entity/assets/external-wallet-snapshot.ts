@@ -1,6 +1,10 @@
 import type { RuntimeReplica, JAdapter } from '@xln/core/api/public/runtime-module';
 import { hasOnlyAllowedKeys as hasOnlyKeys, isUnknownRecord as isRecord } from '#lib/utils/boundary/index.ts';
 import type { ExternalWalletSnapshotSource } from './../asset-ledger';
+import {
+  walletSnapshotSourceAdvance,
+  type WalletSnapshotSourceAdvance,
+} from '@xln/core/jurisdiction/adapter/rpc/wallet/snapshot-source';
 
 export type { ExternalWalletSnapshotSource } from './../asset-ledger';
 
@@ -35,6 +39,7 @@ export type ExternalWalletSnapshotResponse = {
   tokenErrors?: Array<{ tokenAddress?: string; error?: string }>;
   allowanceErrors?: Array<{ tokenAddress?: string; spender?: string; error?: string }>;
   error?: string;
+  sourceAdvance?: WalletSnapshotSourceAdvance;
 };
 
 export type ResolvedExternalWalletSnapshotSource = ExternalWalletSnapshotSource & {
@@ -43,27 +48,101 @@ export type ResolvedExternalWalletSnapshotSource = ExternalWalletSnapshotSource 
   headBlockNumber: number;
 };
 
-export type ExternalWalletSnapshotIngressDecision =
-  | 'apply'
-  | 'cancel-runtime-changed'
-  | 'cancel-runtime-quiescing';
+export type ExternalWalletSnapshotIngressDecision = 'apply' | 'cancel-runtime-changed' | 'cancel-runtime-quiescing';
 
 const isOptionalString = (value: unknown): boolean => value === undefined || typeof value === 'string';
-const isOptionalFiniteNumber = (value: unknown): boolean => value === undefined || (typeof value === 'number' && Number.isFinite(value));
+const isOptionalFiniteNumber = (value: unknown): boolean =>
+  value === undefined || (typeof value === 'number' && Number.isFinite(value));
 
 export const isExternalWalletSnapshotResponse = (value: unknown): value is ExternalWalletSnapshotResponse => {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['success', 'entityId', 'owner', 'blockNumber', 'blockHash', 'sourceHeight', 'sourceHash', 'finalityDepth', 'headBlockNumber', 'transactionHash', 'nativeBalance', 'tokenBalances', 'allowances', 'tokenErrors', 'allowanceErrors', 'error'])) return false;
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, [
+      'success',
+      'entityId',
+      'owner',
+      'blockNumber',
+      'blockHash',
+      'sourceHeight',
+      'sourceHash',
+      'finalityDepth',
+      'headBlockNumber',
+      'transactionHash',
+      'nativeBalance',
+      'tokenBalances',
+      'allowances',
+      'tokenErrors',
+      'allowanceErrors',
+      'error',
+      'sourceAdvance',
+    ])
+  )
+    return false;
+  if (
+    value['sourceAdvance'] !== undefined &&
+    (walletSnapshotSourceAdvance(value) === null || value['success'] === true)
+  )
+    return false;
   if (value['success'] !== undefined && typeof value['success'] !== 'boolean') return false;
-  for (const field of ['entityId', 'owner', 'blockHash', 'sourceHash', 'transactionHash', 'nativeBalance', 'error'] as const) if (!isOptionalString(value[field])) return false;
-  for (const field of ['blockNumber', 'sourceHeight', 'finalityDepth', 'headBlockNumber'] as const) if (!isOptionalFiniteNumber(value[field])) return false;
+  for (const field of [
+    'entityId',
+    'owner',
+    'blockHash',
+    'sourceHash',
+    'transactionHash',
+    'nativeBalance',
+    'error',
+  ] as const)
+    if (!isOptionalString(value[field])) return false;
+  for (const field of ['blockNumber', 'sourceHeight', 'finalityDepth', 'headBlockNumber'] as const)
+    if (!isOptionalFiniteNumber(value[field])) return false;
   const tokenBalances = value['tokenBalances'];
   const allowances = value['allowances'];
   const tokenErrors = value['tokenErrors'];
   const allowanceErrors = value['allowanceErrors'];
-  return (tokenBalances === undefined || (Array.isArray(tokenBalances) && tokenBalances.every((entry) => isRecord(entry) && hasOnlyKeys(entry, ['tokenAddress', 'tokenId', 'balance', 'error']) && isOptionalString(entry['tokenAddress']) && isOptionalFiniteNumber(entry['tokenId']) && isOptionalString(entry['balance']) && isOptionalString(entry['error'])))) &&
-    (allowances === undefined || (Array.isArray(allowances) && allowances.every((entry) => isRecord(entry) && hasOnlyKeys(entry, ['tokenAddress', 'spender', 'allowance', 'error']) && isOptionalString(entry['tokenAddress']) && isOptionalString(entry['spender']) && isOptionalString(entry['allowance']) && isOptionalString(entry['error'])))) &&
-    (tokenErrors === undefined || (Array.isArray(tokenErrors) && tokenErrors.every((entry) => isRecord(entry) && hasOnlyKeys(entry, ['tokenAddress', 'error']) && isOptionalString(entry['tokenAddress']) && isOptionalString(entry['error'])))) &&
-    (allowanceErrors === undefined || (Array.isArray(allowanceErrors) && allowanceErrors.every((entry) => isRecord(entry) && hasOnlyKeys(entry, ['tokenAddress', 'spender', 'error']) && isOptionalString(entry['tokenAddress']) && isOptionalString(entry['spender']) && isOptionalString(entry['error']))));
+  return (
+    (tokenBalances === undefined ||
+      (Array.isArray(tokenBalances) &&
+        tokenBalances.every(
+          entry =>
+            isRecord(entry) &&
+            hasOnlyKeys(entry, ['tokenAddress', 'tokenId', 'balance', 'error']) &&
+            isOptionalString(entry['tokenAddress']) &&
+            isOptionalFiniteNumber(entry['tokenId']) &&
+            isOptionalString(entry['balance']) &&
+            isOptionalString(entry['error']),
+        ))) &&
+    (allowances === undefined ||
+      (Array.isArray(allowances) &&
+        allowances.every(
+          entry =>
+            isRecord(entry) &&
+            hasOnlyKeys(entry, ['tokenAddress', 'spender', 'allowance', 'error']) &&
+            isOptionalString(entry['tokenAddress']) &&
+            isOptionalString(entry['spender']) &&
+            isOptionalString(entry['allowance']) &&
+            isOptionalString(entry['error']),
+        ))) &&
+    (tokenErrors === undefined ||
+      (Array.isArray(tokenErrors) &&
+        tokenErrors.every(
+          entry =>
+            isRecord(entry) &&
+            hasOnlyKeys(entry, ['tokenAddress', 'error']) &&
+            isOptionalString(entry['tokenAddress']) &&
+            isOptionalString(entry['error']),
+        ))) &&
+    (allowanceErrors === undefined ||
+      (Array.isArray(allowanceErrors) &&
+        allowanceErrors.every(
+          entry =>
+            isRecord(entry) &&
+            hasOnlyKeys(entry, ['tokenAddress', 'spender', 'error']) &&
+            isOptionalString(entry['tokenAddress']) &&
+            isOptionalString(entry['spender']) &&
+            isOptionalString(entry['error']),
+        )))
+  );
 };
 
 export const decodeExternalWalletSnapshotResponse = (value: unknown): ExternalWalletSnapshotResponse => {
@@ -77,7 +156,11 @@ export function resolveExternalWalletSnapshotIngress(
 ): ExternalWalletSnapshotIngressDecision {
   const expected = expectedRuntimeId.trim().toLowerCase();
   if (!expected) throw new Error('EXTERNAL_WALLET_SNAPSHOT_RUNTIME_ID_MISSING');
-  if (String(currentEnv?.runtimeId || '').trim().toLowerCase() !== expected) {
+  if (
+    String(currentEnv?.runtimeId || '')
+      .trim()
+      .toLowerCase() !== expected
+  ) {
     return 'cancel-runtime-changed';
   }
   if (
@@ -98,7 +181,9 @@ export function requireExternalSnapshotBigInt(value: bigint | null | undefined, 
 
 export function assertExternalSnapshotCount(values: unknown[], expected: number, label: string): void {
   if (values.length !== expected) {
-    throw new Error(`EXTERNAL_WALLET_SNAPSHOT_FIELD_COUNT_MISMATCH:${label}:expected=${expected}:actual=${values.length}`);
+    throw new Error(
+      `EXTERNAL_WALLET_SNAPSHOT_FIELD_COUNT_MISMATCH:${label}:expected=${expected}:actual=${values.length}`,
+    );
   }
 }
 

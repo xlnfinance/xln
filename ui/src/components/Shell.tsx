@@ -114,8 +114,18 @@ export function Shell({ children }: { children: ReactNode }) {
         {assets.ready ? (
           <>{children}</>
         ) : (
-          <section className="stack" role={assets.error ? 'alert' : 'status'}>
-            <p>{assets.error ? 'Could not load your assets.' : 'Loading your assets…'}</p>
+          <section
+            className="stack"
+            role={assets.error && !assets.sourceAdvance ? 'alert' : 'status'}
+            data-testid="asset-snapshot-status"
+          >
+            <p>
+              {assets.sourceAdvance
+                ? 'The chain advanced during the balance read. Waiting for a consistent snapshot…'
+                : assets.error
+                  ? 'Could not load your assets.'
+                  : 'Loading your assets…'}
+            </p>
             {assets.error && (
               <>
                 <p className="note">{assets.error}</p>
