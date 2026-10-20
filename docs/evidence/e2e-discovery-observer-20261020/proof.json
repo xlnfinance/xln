@@ -1,0 +1,92 @@
+{
+  "recordedAt": "2026-10-20T01:58:14.928283+00:00",
+  "baseSHA": "02829e13967452e87335eb213991f81a528b0344",
+  "scope": "QA discovery and production Observer test only; no financial runtime or wallet change",
+  "sourceSHA256": {
+    "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts": "27c66b198287a7df2c151047dd60512eecd1f4b4c7549316834d80d9f5ac5256",
+    "core/__tests__/testing/qa/playwright-target-discovery.test.ts": "e8df664b445705abf901e4b94a588df3973593bfcbc58f8f22e41314a6573d0f",
+    "tests/e2e/product/e2e-ui-screenshots.spec.ts": "fbff26a2b66ef30d437ea838cc8a65ca6f0331e6aa5cdb76e35afdf97f61d6f9"
+  },
+  "l1": [
+    {
+      "artifact": "playwright-target-discovery-l1-final.log",
+      "passed": 2,
+      "assertions": 6,
+      "logSHA256": "3290ecd67ca7d40d00145fade2166c16f4d7d8bf7d28cf3b7cabc710117adc75"
+    },
+    {
+      "artifact": "playwright-target-discovery-existing-l1.log",
+      "passed": 1,
+      "assertions": 3,
+      "logSHA256": "958fc4a28afce10c043174fc747682224d607209a1e7577fb09d8a1424d0ae58"
+    },
+    {
+      "artifact": "operator-admin-canonical-l1-01.result.json",
+      "passed": 1,
+      "assertions": 7,
+      "seconds": 1.13863875,
+      "logSHA256": "f8d6e9d0da52972cf1f59591e34abda083216de51a288cddc5b4aee0273a0082"
+    }
+  ],
+  "l2": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "operator-admin-exact-04",
+      "--timeout-ms",
+      "7200000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/product/e2e-ui-screenshots.spec.ts::ui screenshot smoke captures operator admin surfaces",
+      "--pw-project=chromium",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--prewait-health=reset",
+      "--strict-browser-health",
+      "--preserve-artifacts"
+    ],
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "strictBrowserHealth": true,
+    "unresolvedSelectiveTargets": 0,
+    "seconds": 137.495782584,
+    "sourceUnchanged": true,
+    "logSHA256": "ca62f62da8d6671b719cf28b3820385a6203aa42ffc7e20ebc0bb4b01c2f7a34",
+    "archive": {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/operator-admin-exact-04-private.tar",
+      "bytes": 12247040,
+      "sha256": "805cf49b6e3b6995f9d2ed124828a698e080655f0f221069c95e319c61a93301",
+      "originalRetained": true
+    }
+  },
+  "originalFullFailure": {
+    "command": "bun run test:e2e:full",
+    "planned": 158,
+    "passed": 4,
+    "failed": 1,
+    "notRun": 153,
+    "seconds": 490.371060166,
+    "error": "Graph projection readiness assertion used 5s while canonical authenticated frame reads allow16s; captured failure DOM had all5 runtimes. Exact all5 assertion now waits within30s startup budget.",
+    "archiveSHA256": "c1e1c74acf691d364084f7c4510c5cdca67a1069e464a7648fba38b38aba57cb"
+  },
+  "preservedBoundaries": [
+    "Actual Playwright evaluated names and source locations own discovery; no cases dropped.",
+    "Exact5 imported runtimes, real H1 selection before/after reload, canonical readHead latestHeight via Diagnostics and exact historical scan.",
+    "Production QA API remains absent per2b2c1081c; explicit404 assertion replaces obsolete cockpit screenshot.",
+    "Strict browser health, source identity, authenticated transport and financial assertions unchanged."
+  ],
+  "remaining": [
+    "Complete unchanged-candidate158 E2E,34steprelease and1hsoak.",
+    "Current aggregatecheck and committed-SHA verification required before push.",
+    "Stale Health-to-QA link and polling QA shell remain unsupported; no cockpit functionality claim.",
+    "Public/nativeTRON/Ethereum andmainnet acceptance remain separate."
+  ]
+}

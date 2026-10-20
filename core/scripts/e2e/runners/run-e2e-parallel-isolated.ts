@@ -631,11 +631,6 @@ type PlaywrightTarget = {
   testCategory?: QaTestCategory;
 };
 
-const extractTopLevelTestTitle = (source: string): string | undefined => {
-  const match = source.match(/^\s*test(?:\.(?:only|fail))?\(\s*(['"`])((?:\\.|[\s\S])*?)\1/);
-  return match?.[2]?.replace(/\\(['"`])/g, '$1').trim() || undefined;
-};
-
 const buildGrepMatcher = (grep: string): ((entry: PlaywrightTarget) => boolean) => {
   try {
     const pattern = new RegExp(grep);
@@ -648,76 +643,10 @@ const buildGrepMatcher = (grep: string): ((entry: PlaywrightTarget) => boolean) 
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const collectSpecsFromSuite = (suite: unknown, out: Array<{ title: string; file?: string; line?: number }>): void => {
-  const suiteRecord = recordOrEmpty(suite);
-  for (const spec of recordArrayOf(suiteRecord, 'specs')) {
-    const title = String(spec['title'] || '').trim();
-    if (!title) continue;
-    const entry: { title: string; file?: string; line?: number } = { title };
-    if (typeof spec['file'] === 'string') entry.file = spec['file'];
-    if (Number.isFinite(Number(spec['line']))) entry.line = Number(spec['line']);
-    out.push(entry);
-  }
-  for (const child of arrayOf(suiteRecord, 'suites')) collectSpecsFromSuite(child, out);
-};
-
-const listDynamicPlaywrightTargets = (
-  file: string,
-  requiresMarketMaker: (file: string, title?: string) => boolean,
-  requiresCustody: (file: string, title?: string) => boolean,
+export const expandPlaywrightTargets = (
+  pwFiles: string[],
+  args: Pick<CliArgs, 'pwProject'> = {},
 ): PlaywrightTarget[] => {
-  const env = {
-    ...process.env,
-    PW_SKIP_WEBSERVER: '1',
-    PW_BASE_URL: process.env['PW_BASE_URL'] || 'https://localhost:1',
-    E2E_BASE_URL: process.env['E2E_BASE_URL'] || 'https://localhost:1',
-    E2E_API_BASE_URL: process.env['E2E_API_BASE_URL'] || 'http://127.0.0.1:1',
-    E2E_ANVIL_RPC: process.env['E2E_ANVIL_RPC'] || 'http://127.0.0.1:1',
-    E2E_RESET_BASE_URL: process.env['E2E_RESET_BASE_URL'] || 'http://127.0.0.1:1',
-  };
-  const res = spawnSync(
-    'bunx',
-    ['playwright', 'test', '--config', 'playwright.config.ts', '--list', '--reporter=json', file],
-    {
-      cwd: REACT_UI ? resolve(process.cwd(), 'ui') : process.cwd(),
-      env,
-      stdio: 'pipe',
-      encoding: 'utf8',
-    },
-  );
-  const stdout = String(res.stdout || '').trim();
-  let parsed: unknown = null;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    const stderr = String(res.stderr || '').trim();
-    throw new Error(`Failed to list tests for ${file}: ${stderr || stdout || `exit=${String(res.status)}`}`);
-  }
-  const specs: Array<{ title: string; file?: string; line?: number }> = [];
-  for (const suite of arrayOf(recordOrEmpty(parsed), 'suites')) collectSpecsFromSuite(suite, specs);
-  if (specs.length === 0) {
-    throw new Error(`No isolated tests discovered for ${file}`);
-  }
-  return specs.map(spec => ({
-    target: file,
-    requireMarketMaker: requiresMarketMaker(file, spec.title),
-    requireCustody: requiresCustody(file, spec.title),
-    scenario: null,
-    title: spec.title,
-    grep: escapeRegExp(spec.title),
-  }));
-};
-
-export const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
-  const out: PlaywrightTarget[] = [];
-  const sourcePathForTarget = (file: string): string =>
-    file.match(/^(.+\.spec\.ts)(?:::.*|:\d+(?::\d+)?)?$/)?.[1] || file;
-  const sourceNeedsMarketMakerByDefault = (file: string): boolean => {
-    const sourcePath = sourcePathForTarget(file);
-    if (/e2e-swap\.spec\.ts$/.test(sourcePath)) return true;
-    return false;
-  };
-  const unsplittableSpecs = new Set<string>();
   const updateBraceDepth = (line: string, depth: number): number => {
     let next = depth;
     let inSingle = false;
@@ -757,7 +686,11 @@ export const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] =
 
     return next;
   };
-  const collectTestBlock = (lines: string[], startIndex: number, initialDepth: number): { text: string; endIndex: number; depthAfter: number } => {
+  const collectTestBlock = (
+    lines: string[],
+    startIndex: number,
+    initialDepth: number,
+  ): { text: string; endIndex: number; depthAfter: number } => {
     const block: string[] = [];
     let depth = initialDepth;
     let endIndex = startIndex;
@@ -776,99 +709,69 @@ export const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] =
     }
     return { text: block.join('\n'), endIndex, depthAfter: depth };
   };
-  const findStaticTestBlock = (sourcePath: string, title: string): string | null => {
-    const absolute = resolve(process.cwd(), sourcePath);
-    const text = readFileSync(absolute, 'utf8');
-    const lines = text.split('\n');
-    let braceDepth = 0;
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i] || '';
-      const matchesTopLevelTest = braceDepth <= 1 && /^\s*test(?:\.(?:only|fail))?\(/.test(line);
-      if (matchesTopLevelTest) {
-        const block = collectTestBlock(lines, i, braceDepth);
-        if (extractTopLevelTestTitle(block.text) === title) return block.text;
-      }
-      braceDepth = updateBraceDepth(line, braceDepth);
+  const selectors = pwFiles.map(target => {
+    const lineTarget = target.match(/^(.+\.spec\.ts):\d+(?::\d+)?$/);
+    if (lineTarget) {
+      throw new Error(
+        `Line-pinned Playwright target is not supported: ${target}. Use ${lineTarget[1]}::exact test title.`,
+      );
     }
-    return null;
-  };
-  const requiresMarketMaker = (file: string, title?: string, testBlock?: string): boolean => {
-    const sourcePath = sourcePathForTarget(file);
-    if (sourceNeedsMarketMakerByDefault(sourcePath)) return true;
-    const block = testBlock ?? (title ? findStaticTestBlock(sourcePath, title) : null);
-    if (block !== null) return /requireMarketMaker\s*:\s*true/.test(block);
-    return false;
-  };
-  const requiresCustody = (file: string, title?: string, testBlock?: string): boolean => {
-    const block = testBlock ?? (title ? findStaticTestBlock(sourcePathForTarget(file), title) : null);
-    return block !== null && /requireCustody\s*:\s*true/.test(block);
-  };
-
-  for (const file of pwFiles) {
-    const explicitTitleTarget = file.match(/^(.+\.spec\.ts)::(.+)$/);
-    if (explicitTitleTarget) {
-      const sourceFile = explicitTitleTarget[1]!;
-      const title = explicitTitleTarget[2]!;
-      out.push({
-        target: sourceFile,
-        requireMarketMaker: requiresMarketMaker(sourceFile, title),
-        requireCustody: requiresCustody(sourceFile, title),
-        scenario: null,
-        title,
-        grep: escapeRegExp(title),
-      });
-      continue;
-    }
-
-    const explicitLineTarget = file.match(/^(.+\.spec\.ts):\d+(?::\d+)?$/);
-    if (explicitLineTarget) {
-      const sourceFile = explicitLineTarget[1]!;
-      throw new Error(`Line-pinned Playwright target is not supported: ${file}. Use ${sourceFile}::exact test title.`);
-    }
-
-    if (unsplittableSpecs.has(file)) {
-      out.push({
-        target: file,
-        requireMarketMaker: requiresMarketMaker(file),
-        requireCustody: requiresCustody(file),
-        scenario: null,
-        title: file,
-      });
-      continue;
-    }
-
-    const absolute = resolve(process.cwd(), file);
-    const text = readFileSync(absolute, 'utf8');
-    const lines = text.split('\n');
-    let added = 0;
-    let braceDepth = 0;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i] || '';
-      const matchesTopLevelTest = braceDepth <= 1 && /^\s*test(?:\.(?:only|fail))?\(/.test(line);
-      if (matchesTopLevelTest) {
-        const block = collectTestBlock(lines, i, braceDepth);
-        const title = extractTopLevelTestTitle(block.text);
-        if (!title) continue;
-        out.push({
-          target: file,
-          requireMarketMaker: requiresMarketMaker(file, title, block.text),
-          requireCustody: requiresCustody(file, title, block.text),
-          scenario: null,
-          title,
-          grep: escapeRegExp(title),
-        });
-        added += 1;
-        braceDepth = block.depthAfter;
-        i = block.endIndex;
-        continue;
-      }
-      braceDepth = updateBraceDepth(line, braceDepth);
-    }
-    if (added === 0) {
-      out.push(...listDynamicPlaywrightTargets(file, requiresMarketMaker, requiresCustody));
-    }
+    const explicit = target.match(/^(.+\.spec\.ts)::(.+)$/);
+    return explicit ? { file: explicit[1]!, title: explicit[2]! } : { file: target, title: null };
+  });
+  const sourceFiles = [...new Set(selectors.map(selector => selector.file))];
+  // Playwright owns evaluated titles and declaration locations. Source-text
+  // titles collapse parameterized cases into a literal `${symbol}` and can
+  // silently omit nested cases. Read source only for the located test's needs.
+  const tests = [false, true].flatMap(react =>
+    listPlaywrightTestMetadata(
+      sourceFiles.filter(file => file.startsWith('ui/') === react),
+      {
+        ...(react ? { cwd: 'ui' } : {}),
+        ...(args.pwProject ? { project: args.pwProject } : {}),
+        ...(args.pwProject === 'brainvault' || args.pwProject === 'webkit-mobile' ? { profile: args.pwProject } : {}),
+      },
+    ),
+  );
+  const violations = tests.flatMap(test => {
+    const violation = inspectQaTestCategory(test);
+    return violation ? [violation] : [];
+  });
+  if (violations.length > 0) {
+    throw new Error(
+      `QA_E2E_CATEGORY_GATE_FAILED:${violations.length}/${tests.length}\n${formatQaTestCategoryViolations(violations)}`,
+    );
   }
-  return out;
+  const sources = new Map(
+    sourceFiles.map(file => [file, readFileSync(resolve(process.cwd(), file), 'utf8').split('\n')]),
+  );
+  return selectors.flatMap(selector => {
+    const matches = tests.filter(
+      test => test.file === selector.file && (selector.title === null || test.title === selector.title),
+    );
+    if (matches.length === 0)
+      throw new Error(`PLAYWRIGHT_TEST_TARGET_MISSING:${selector.file}:${selector.title ?? ''}`);
+    if (selector.title !== null && matches.length !== 1)
+      throw new Error(`PLAYWRIGHT_TEST_TARGET_AMBIGUOUS:${selector.file}:${selector.title}`);
+    return matches.map(metadata => {
+      const lines = sources.get(metadata.file);
+      if (!lines || metadata.line === null || metadata.line > lines.length)
+        throw new Error(`PLAYWRIGHT_TEST_LOCATION_MISSING:${metadata.file}:${metadata.line}`);
+      const block = collectTestBlock(lines, metadata.line - 1, 0).text;
+      const testCategory = qaTestCategoryFromTags(metadata.tags);
+      if (!testCategory) throw new Error(`QA_TEST_CATEGORY_MISSING:${metadata.file}:${metadata.line}`);
+      return {
+        target: metadata.file,
+        requireMarketMaker: /e2e-swap\.spec\.ts$/.test(metadata.file) || /requireMarketMaker\s*:\s*true/.test(block),
+        requireCustody: /requireCustody\s*:\s*true/.test(block),
+        scenario: null,
+        title: metadata.title,
+        grep: escapeRegExp(metadata.title),
+        tags: metadata.tags,
+        testCategory,
+      };
+    });
+  });
 };
 
 export const listPlaywrightSpecFiles = (includeAllSpecs: boolean): string[] => {
@@ -891,50 +794,6 @@ export const listPlaywrightSpecFiles = (includeAllSpecs: boolean): string[] => {
     .filter(line => line.endsWith('.spec.ts'))
     .filter(line => includeAllSpecs || !excludedDefaultSpecs.has(line))
     .sort();
-};
-
-const playwrightSourcePath = (target: string): string =>
-  target.match(/^(.+\.spec\.ts)(?:::.*|:\d+(?::\d+)?)?$/)?.[1] || target;
-
-const attachPlaywrightMetadata = (
-  targets: readonly PlaywrightTarget[],
-  sourceTargets: readonly string[],
-  args: Pick<CliArgs, 'pwProject'>,
-): PlaywrightTarget[] => {
-  const sourceFiles = Array.from(new Set(sourceTargets.map(playwrightSourcePath))).sort();
-  const tests = listPlaywrightTestMetadata(sourceFiles, {
-    ...(REACT_UI ? { cwd: 'ui' } : {}),
-    ...(args.pwProject ? { project: args.pwProject } : {}),
-    ...(args.pwProject === 'brainvault' || args.pwProject === 'webkit-mobile' ? { profile: args.pwProject } : {}),
-  });
-  const violations = tests.flatMap((test) => {
-    const violation = inspectQaTestCategory(test);
-    return violation ? [violation] : [];
-  });
-  if (violations.length > 0) {
-    throw new Error(`QA_E2E_CATEGORY_GATE_FAILED:${violations.length}/${tests.length}\n${formatQaTestCategoryViolations(violations)}`);
-  }
-  return targets.map((target) => {
-    const source = playwrightSourcePath(target.target);
-    const sameFile = tests.filter((test) => test.file === source);
-    const exact = sameFile.filter((test) => test.title === target.title);
-    const compatible = exact.length > 0
-      ? exact
-      : sameFile.filter((test) => test.title.includes(target.title ?? '') || (target.title ?? '').includes(test.title));
-    if (compatible.length !== 1) {
-      throw new Error(`PLAYWRIGHT_TEST_METADATA_MATCH_FAILED:${source}:${target.title ?? ''}:matches=${compatible.length}`);
-    }
-    const metadata = compatible[0]!;
-    const testCategory = qaTestCategoryFromTags(metadata.tags);
-    if (!testCategory) throw new Error(`QA_TEST_CATEGORY_MISSING:${source}:${metadata.line ?? 0}`);
-    return {
-      ...target,
-      title: metadata.title,
-      grep: escapeRegExp(metadata.title),
-      tags: metadata.tags,
-      testCategory,
-    };
-  });
 };
 
 const assertShardRuntimePortsReleased = (apiPort: number): void => {
@@ -2558,7 +2417,7 @@ async function main(): Promise<void> {
 
     const startedAt = Date.now();
     const sourceFiles = args.pwFiles.length > 0 ? args.pwFiles : listPlaywrightSpecFiles(args.includeAllSpecs);
-    let expandedTargets = attachPlaywrightMetadata(expandPlaywrightTargets(sourceFiles), sourceFiles, args);
+    let expandedTargets = expandPlaywrightTargets(sourceFiles, args);
     if (args.pwGrep) {
       const matchesGrep = buildGrepMatcher(args.pwGrep);
       expandedTargets = expandedTargets.filter(matchesGrep);
