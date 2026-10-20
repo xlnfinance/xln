@@ -882,56 +882,82 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     expect(digest(retry.effects)).toBe(digest(baseline.outbound.effects));
   });
 
-  test('local openAccount H=0 shell becomes resident before outbound admissions', async () => {
-    const accountId = `0x456${'b'.repeat(61)}`;
-    const shell = parityAccount(accountId);
-    const txs = [paymentTx(accountId, 3n)];
-    const sequential = parityAccount(accountId);
-    const workerStub = {
-      jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
-      jClaimNodes: new Map(),
-      settlementBoardAuthorities: new Map(),
-    } as unknown as TsAccountWorkerState;
-    const context = createWorkerConsensusContext(workerStub, 1_000, 0, workerStub.jClaimNodes);
-    const admission = await applyAccountInput(context, sequential, { kind: 'enqueue', txs });
-    const proposal = await proposeAccountFrame(context, sequential, 1_000, 0);
+  test.each([1, 4, 8])(
+    'local openAccount H=0 shell becomes resident after empty frames with W%i',
+    async workerCount => {
+      const accountId = `0x456${'b'.repeat(61)}`;
+      const shell = parityAccount(accountId);
+      const txs = [paymentTx(accountId, 3n)];
+      const sequential = parityAccount(accountId);
+      const workerStub = {
+        jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
+        jClaimNodes: new Map(),
+        settlementBoardAuthorities: new Map(),
+      } as unknown as TsAccountWorkerState;
+      const context = createWorkerConsensusContext(workerStub, 1_000, 0, workerStub.jClaimNodes);
+      const admission = await applyAccountInput(context, sequential, { kind: 'enqueue', txs });
+      const proposal = await proposeAccountFrame(context, sequential, 1_000, 0);
 
-    const coordinator = await TsAccountWorkerCoordinator.create({
-      ownerEntityId: OWNER,
-      workerCount: 2,
-      accounts: new Map(),
-      jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
-    });
-    await coordinator.applyAccountInputs({
-      frameId: 'local-genesis',
-      expectedAccountsRoot: coordinator.accountsRoot,
-      entityTimestamp: 1_000,
-      finalizedJHeight: 0,
-      owningEntityIsHub: false,
-      inputs: [],
-    });
-    const outbound = await coordinator.proposeAccountFrames({
-      frameId: 'local-genesis',
-      timestamp: 1_000,
-      jHeight: 0,
-      envelopeUpdates: [],
-      txs: [{ accountId, txs, initialAccount: projectPortableAccountDoc(shell) }],
-      proposals: [{ accountId }],
-    });
-    expect(digest(outbound.effects)).toBe(
-      digest([
-        { phase: 'outbound-enqueue', order: 0, accountId, result: admission },
-        { phase: 'outbound-proposal', order: 1, accountId, result: proposal },
-      ]),
-    );
-    expect(outbound.accountsRoot).toBe(
-      PersistentEntityAccountMap.fromEntries(
-        [[accountId, sequential]],
-        OWNER,
-        computeEntityAccountValueHash,
-      ).rootHash(),
-    );
-  });
+      const coordinator = await TsAccountWorkerCoordinator.create({
+        ownerEntityId: OWNER,
+        workerCount,
+        accounts: new Map(),
+        jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
+      });
+      // A configuration-only Entity frame has no Account work. It must retain
+      // the same frame/root lifecycle without starting empty shard workers.
+      expect(coordinator.initialization.requestBytes).toBe(0);
+      const emptyRoot = coordinator.accountsRoot;
+      await coordinator.applyAccountInputs({
+        frameId: 'empty-config',
+        expectedAccountsRoot: emptyRoot,
+        entityTimestamp: 999,
+        finalizedJHeight: 0,
+        owningEntityIsHub: false,
+        inputs: [],
+      });
+      const empty = await coordinator.proposeAccountFrames({
+        frameId: 'empty-config',
+        timestamp: 999,
+        jHeight: 0,
+        envelopeUpdates: [],
+        txs: [],
+        proposals: [],
+      });
+      expect(empty.accountsRoot).toBe(emptyRoot);
+      expect(empty.effects).toEqual([]);
+      expect(empty.workers).toEqual([]);
+      await coordinator.applyAccountInputs({
+        frameId: 'local-genesis',
+        expectedAccountsRoot: coordinator.accountsRoot,
+        entityTimestamp: 1_000,
+        finalizedJHeight: 0,
+        owningEntityIsHub: false,
+        inputs: [],
+      });
+      const outbound = await coordinator.proposeAccountFrames({
+        frameId: 'local-genesis',
+        timestamp: 1_000,
+        jHeight: 0,
+        envelopeUpdates: [],
+        txs: [{ accountId, txs, initialAccount: projectPortableAccountDoc(shell) }],
+        proposals: [{ accountId }],
+      });
+      expect(digest(outbound.effects)).toBe(
+        digest([
+          { phase: 'outbound-enqueue', order: 0, accountId, result: admission },
+          { phase: 'outbound-proposal', order: 1, accountId, result: proposal },
+        ]),
+      );
+      expect(outbound.accountsRoot).toBe(
+        PersistentEntityAccountMap.fromEntries(
+          [[accountId, sequential]],
+          OWNER,
+          computeEntityAccountValueHash,
+        ).rootHash(),
+      );
+    },
+  );
 
   test('next-frame retry restores the accepted post-genesis Account parent', async () => {
     const accountId = `0x457${'c'.repeat(61)}`;

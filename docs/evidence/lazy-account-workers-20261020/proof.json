@@ -1,0 +1,305 @@
+{
+  "createdAt": "2026-10-20T16:13:31.580548+00:00",
+  "baseSHA": "30295d732ff7870435fd2822e59550d59b4e9dae",
+  "scope": "Canonical TS Account worker allocation; existing global10sbootstrap drain and authenticated J ingestion unchanged",
+  "sourceHashes": {
+    "core/runtime/workers/account/coordinator-client.ts": "2a390dbd9045016771fd6b0925143869f1562d0b92d1817887fd83ea42791fd4",
+    "core/runtime/workers/account/coordinator.ts": "6d8d7865610311d492be94bdd4e3acd59a4a58690f2cf0b7731ebd9b205d34d0",
+    "core/__tests__/rscore/ts-worker/ts-worker-parity.test.ts": "1c3da71343497f82daa7d1f538ed603b002f9bad146fb7adaf2aafa4b384b331",
+    "core/__tests__/rscore/ts-worker/ts-worker-j-claim-positional.test.ts": "51640858854cba584794376de08c19b036b88ea575775f1a96009ec54914e1c9",
+    "core/__tests__/market/startup/ts-worker-multi-entity-start.test.ts": "aac7447e90a6c14955ed0df0fe634ab246b55a120eb777e7586d1b74afda7eb9"
+  },
+  "regressionBefore": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/bootstrap-empty-worker-l1-red-01.result.json",
+    "exitCode": 1,
+    "seconds": 4.03377875,
+    "sourceUnchanged": true,
+    "logSHA256": "e7077ad43818c092a5f6d9d9f5854d8cda407de5dffe4b42294473ecbe92e1a1"
+  },
+  "regressionAfter": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/bootstrap-formatted-genesis-l1-01.result.json",
+    "exitCode": 0,
+    "seconds": 5.257216499999999,
+    "sourceUnchanged": true,
+    "logSHA256": "4927e476d4cb3684828d062c0b79d8275a5f9f2fcf394fcd2e674632e34c939c"
+  },
+  "parity": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/bootstrap-lazy-worker-parity-03.result.json",
+    "exitCode": 0,
+    "seconds": 22.841297125,
+    "sourceUnchanged": true,
+    "logSHA256": "b70cf67b60b8716c6a317a94ae1feca114b3ba0c02d79068c758c2a4c13f27d2",
+    "passed": 33,
+    "failed": 0,
+    "assertions": 183
+  },
+  "types": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/bootstrap-lazy-worker-types-03.result.json",
+    "exitCode": 0,
+    "seconds": 4.9210487910000005,
+    "sourceUnchanged": true,
+    "logSHA256": "eaf59804683f8a96652ce423b46728aacb2e15b5404cdd21dfda48ee78bdea6d"
+  },
+  "cohortBefore": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/bootstrap-seven-profile-30295-02.result.json",
+    "exitCode": 1,
+    "seconds": 99.671297375,
+    "sourceUnchanged": true,
+    "logSHA256": "425662909c599f3f47c7221214a8884ee96cf4f2215048e0aad1172ebc0b9cee"
+  },
+  "cohortAfter": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/bootstrap-seven-lazy-02.result.json",
+    "exitCode": 0,
+    "seconds": 295.331865084,
+    "sourceUnchanged": true,
+    "logSHA256": "6d3b7ff118a719e8fd0efbafce80ddbd8d88cdc99896ec132b2bdb2f2b4413d2",
+    "runDirectory": "/Users/zigota/xln/.logs/e2e-parallel/20261020-162321-625",
+    "manifestSHA256": "438809f3aea3e87c96e9f913e0eb76b361865ea0a0aa8969eaaec0705378624e",
+    "passed": 7,
+    "failed": 0,
+    "cancelled": 0,
+    "browserIssues": 0,
+    "tests": [
+      {
+        "title": "completion modal dismissal fails loud when the overlay remains visible",
+        "status": "passed"
+      },
+      {
+        "title": "cross USDT/USDT orderbook resolves terminal no-market when the selected route relay has no snapshots",
+        "status": "passed"
+      },
+      {
+        "title": "Tron sibling inherits rebalance policy and auto-collateralizes USDC after faucet",
+        "status": "passed"
+      },
+      {
+        "title": "cross swap one-click prepares missing target account and inbound credit",
+        "status": "passed"
+      },
+      {
+        "title": "cross WETH/USDC ignores non-takeable orderbook side before filling the takeable side",
+        "status": "passed"
+      },
+      {
+        "title": "cross WETH/USDT displays prices as stable quote per WETH for Tron source",
+        "status": "passed"
+      },
+      {
+        "title": "two users can place full, partial, and disputed cross-j swaps through the shared swap builder",
+        "status": "passed"
+      }
+    ]
+  },
+  "timing": {
+    "failedCohortHubConfigFrames": [
+      {
+        "hub": "H1",
+        "configMs": 9359,
+        "emptyInboundProviderUs": 6483308
+      },
+      {
+        "hub": "H2",
+        "configMs": 9541,
+        "emptyInboundProviderUs": 6333335
+      },
+      {
+        "hub": "H3",
+        "configMs": 9403,
+        "emptyInboundProviderUs": 6874246
+      }
+    ],
+    "passingCohortHubConfigFrames": [
+      {
+        "shard": "shard-0",
+        "hub": "H1",
+        "configMs": 5066,
+        "emptyInboundProviderUs": 139062
+      },
+      {
+        "shard": "shard-0",
+        "hub": "H3",
+        "configMs": 5382,
+        "emptyInboundProviderUs": 308349
+      },
+      {
+        "shard": "shard-0",
+        "hub": "H2",
+        "configMs": 4901,
+        "emptyInboundProviderUs": 592569
+      },
+      {
+        "shard": "shard-1",
+        "hub": "H1",
+        "configMs": 6429,
+        "emptyInboundProviderUs": 232745
+      },
+      {
+        "shard": "shard-1",
+        "hub": "H2",
+        "configMs": 6513,
+        "emptyInboundProviderUs": 184986
+      },
+      {
+        "shard": "shard-1",
+        "hub": "H3",
+        "configMs": 6504,
+        "emptyInboundProviderUs": 314352
+      },
+      {
+        "shard": "shard-2",
+        "hub": "H3",
+        "configMs": 2498,
+        "emptyInboundProviderUs": 87198
+      },
+      {
+        "shard": "shard-2",
+        "hub": "H1",
+        "configMs": 2690,
+        "emptyInboundProviderUs": 134139
+      },
+      {
+        "shard": "shard-2",
+        "hub": "H2",
+        "configMs": 2705,
+        "emptyInboundProviderUs": 135518
+      },
+      {
+        "shard": "shard-3",
+        "hub": "H1",
+        "configMs": 2910,
+        "emptyInboundProviderUs": 133874
+      },
+      {
+        "shard": "shard-3",
+        "hub": "H2",
+        "configMs": 3020,
+        "emptyInboundProviderUs": 71826
+      },
+      {
+        "shard": "shard-3",
+        "hub": "H3",
+        "configMs": 2695,
+        "emptyInboundProviderUs": 55369
+      },
+      {
+        "shard": "shard-4",
+        "hub": "H2",
+        "configMs": 2077,
+        "emptyInboundProviderUs": 123582
+      },
+      {
+        "shard": "shard-4",
+        "hub": "H3",
+        "configMs": 2444,
+        "emptyInboundProviderUs": 57277
+      },
+      {
+        "shard": "shard-4",
+        "hub": "H1",
+        "configMs": 2459,
+        "emptyInboundProviderUs": 77982
+      },
+      {
+        "shard": "shard-5",
+        "hub": "H1",
+        "configMs": 4003,
+        "emptyInboundProviderUs": 193201
+      },
+      {
+        "shard": "shard-5",
+        "hub": "H2",
+        "configMs": 4048,
+        "emptyInboundProviderUs": 271188
+      },
+      {
+        "shard": "shard-5",
+        "hub": "H3",
+        "configMs": 3896,
+        "emptyInboundProviderUs": 237303
+      },
+      {
+        "shard": "shard-6",
+        "hub": "H1",
+        "configMs": 3926,
+        "emptyInboundProviderUs": 252846
+      },
+      {
+        "shard": "shard-6",
+        "hub": "H2",
+        "configMs": 4052,
+        "emptyInboundProviderUs": 226667
+      },
+      {
+        "shard": "shard-6",
+        "hub": "H3",
+        "configMs": 4459,
+        "emptyInboundProviderUs": 230727
+      }
+    ],
+    "sampleSize": "One failing original cohort and two passing candidate cohorts. Per-hub timing rows are from the first candidate cohort; queue order and OS load differ. Stage attribution and semantic outcomes, not a throughput claim."
+  },
+  "unchangedGuards": {
+    "hubBootstrapDrainTimeoutMs": 10000,
+    "resetConcurrency": 1,
+    "lanes": 7,
+    "financialAssertions": "unchanged",
+    "frozenCoreRoot": "0x4eccf4492e5d085b24162f86d327e003c36b7e2a90ad527db1653fde391946a7"
+  },
+  "remaining": "Fresh immutable-SHA full financial/exact commands/browser158/release34/soak60min and publicdeploy;publicNile binding/funding and mainnet authority remain separate.",
+  "previousParity": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/bootstrap-lazy-worker-parity-02.result.json",
+    "exitCode": 0,
+    "seconds": 21.699821208000003,
+    "sourceUnchanged": true,
+    "logSHA256": "a08a81ac84acca2e44a00edc9245cf1e3f22daf34efa275947f75d5012cf426e",
+    "passed": 33,
+    "failed": 0,
+    "assertions": 183,
+    "formattingAfter": "Only scoped Prettier changes; Bun transpilation byteidentical for all5files. FormattedgenesisL1 and runtime types rerun."
+  },
+  "previousCohortAfter": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/bootstrap-seven-lazy-01.result.json",
+    "exitCode": 0,
+    "seconds": 333.730662542,
+    "sourceUnchanged": true,
+    "logSHA256": "ef9261757b1e11b5debd9c83b2e27a687220487ad7b1f45fd78ca5ae87e4c3d4",
+    "runDirectory": "/Users/zigota/xln/.logs/e2e-parallel/20261020-160610-271",
+    "manifestSHA256": "293ad76f237d022b65d0e15301636bee068a65431b864e66412cc30cf42ea44f",
+    "passed": 7,
+    "failed": 0,
+    "cancelled": 0,
+    "browserIssues": 0,
+    "tests": [
+      {
+        "title": "completion modal dismissal fails loud when the overlay remains visible",
+        "status": "passed"
+      },
+      {
+        "title": "cross USDT/USDT orderbook resolves terminal no-market when the selected route relay has no snapshots",
+        "status": "passed"
+      },
+      {
+        "title": "Tron sibling inherits rebalance policy and auto-collateralizes USDC after faucet",
+        "status": "passed"
+      },
+      {
+        "title": "cross swap one-click prepares missing target account and inbound credit",
+        "status": "passed"
+      },
+      {
+        "title": "cross WETH/USDC ignores non-takeable orderbook side before filling the takeable side",
+        "status": "passed"
+      },
+      {
+        "title": "cross WETH/USDT displays prices as stable quote per WETH for Tron source",
+        "status": "passed"
+      },
+      {
+        "title": "two users can place full, partial, and disputed cross-j swaps through the shared swap builder",
+        "status": "passed"
+      }
+    ]
+  },
+  "initializationOwnership": "Client.initialize selects eager or deferred initialization; coordinator creation retains root validation. Exact size gate passes over100=0/0 after extraction; deadlines and policy limits unchanged.",
+  "updatedAt": "2026-10-20T16:29:03.562672+00:00"
+}

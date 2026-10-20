@@ -26,6 +26,7 @@ import type { AccountJClaimNode } from '../../../types/finance/account-j-claims'
 import type { AccountInput, AccountTx } from '../../../types/account';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { createEmptyEnv } from '../../../runtime';
+import { projectPortableAccountDoc } from '../../../storage/read/projections';
 import { installJurisdictions, makeAccount, makeJurisdiction } from '../../helpers/cross-j';
 
 const ZERO = `0x${'00'.repeat(32)}`;
@@ -42,6 +43,44 @@ const claimNode = (index: number): AccountJClaimNode => {
   } as const;
   return { version: 1, type: 'leaf', key: getAccountJClaimKey(record), record };
 };
+
+test('delayed empty worker rejects its original corrupt initialization before Account admission', async () => {
+  const owner = accountId(100);
+  const peer = accountId(101);
+  const claims = new Map([[ZERO, claimNode(1)]]);
+  const coordinator = await TsAccountWorkerCoordinator.create({
+    ownerEntityId: owner,
+    workerCount: 1,
+    accounts: new Map(),
+    jClaimNodes: claims,
+  });
+  const root = coordinator.accountsRoot;
+  expect(coordinator.initialization.requestBytes).toBe(0);
+  // Mutating the caller's map cannot replace the bytes already captured for
+  // this worker, nor let a later valid Account command bypass a corrupt parent.
+  claims.clear();
+  const inbound = {
+    frameId: 'delayed-corrupt-parent',
+    expectedAccountsRoot: root,
+    entityTimestamp: 1_000,
+    finalizedJHeight: 0,
+    owningEntityIsHub: false,
+    inputs: [],
+  };
+  await coordinator.applyAccountInputs(inbound);
+  await expect(
+    coordinator.proposeAccountFrames({
+      frameId: inbound.frameId,
+      timestamp: 1_000,
+      jHeight: 0,
+      envelopeUpdates: [],
+      txs: [{ accountId: peer, txs: [], initialAccount: projectPortableAccountDoc(makeAccount(owner, peer)) }],
+      proposals: [],
+    }),
+  ).rejects.toThrow('TS_ACCOUNT_WORKER_INIT_JCLAIM_CORRUPT');
+  expect(coordinator.accountsRoot).toBe(root);
+  await expect(coordinator.applyAccountInputs(inbound)).rejects.toThrow('TS_ACCOUNT_WORKER_COORDINATOR_FATAL');
+});
 
 const effect = (order: number, owner: string, index: number): TsAccountWorkerEffect => {
   const node = claimNode(index);

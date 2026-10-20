@@ -3,11 +3,11 @@ import { TsAccountWorkerCoordinator } from '../../../runtime/workers/account';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 
-test('Account workers initialize all thirteen MM Entity owners while earlier owners remain live', async () => {
+test('thirteen empty MM Entity owners retain roots without starting unused Account workers', async () => {
   const coordinators: TsAccountWorkerCoordinator[] = [];
   try {
-    // The real MM bootstrap stalled on the thirteenth owner with eight workers
-    // per owner. Keep the earlier owners alive, as the Runtime provider does.
+    // Bootstrap used to start 104 idle workers for these thirteen owners.
+    // Retain every coordinator, as the Runtime provider does, without fake roots.
     for (let index = 0; index < 13; index += 1) {
       const started = performance.now();
       console.log(`WORKER_OWNER_START index=${index}`);
@@ -20,6 +20,7 @@ test('Account workers initialize all thirteen MM Entity owners while earlier own
       });
       coordinators.push(coordinator);
       expect(coordinator.initialization.accounts).toBe(0);
+      expect(coordinator.initialization.requestBytes).toBe(0);
       expect(coordinator.accountsRoot).toBe(accounts.rootHash());
       console.log(`WORKER_OWNER_READY index=${index} ms=${Math.round(performance.now() - started)}`);
     }

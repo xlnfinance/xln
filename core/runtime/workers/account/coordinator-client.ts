@@ -2,6 +2,7 @@ import { TsAccountWorkerTransferDecoder, TsAccountWorkerTransferEncoder } from '
 import { getPerfMs } from '../../../support/time';
 import type {
   TsAccountWorkerInitResult,
+  TsAccountWorkerInitPayload,
   TsAccountWorkerPhaseResult,
   TsAccountWorkerRequestEnvelope,
   TsAccountWorkerResponseEnvelope,
@@ -30,16 +31,55 @@ export const asWorkerError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
 export class TsAccountWorkerClient {
-  readonly #worker: Worker;
+  #worker: Worker | null = null;
   readonly #workerIndex: number;
   readonly #pending = new Map<number, PendingRequest>();
   #nextRequestId = 1;
   #closed = false;
   readonly #requestEncoder = new TsAccountWorkerTransferEncoder();
   readonly #responseDecoder = new TsAccountWorkerTransferDecoder();
+  #initialization:
+    | { kind: 'ready' }
+    | { kind: 'deferred'; payload: ArrayBuffer; encodeMs: number }
+    | { kind: 'starting'; pending: Promise<void> } = { kind: 'ready' };
+  #initializationTransfer = { requestBytes: 0, responseBytes: 0 };
 
   constructor(workerIndex: number) {
     this.#workerIndex = workerIndex;
+  }
+
+  get initializationTransfer(): Readonly<{ requestBytes: number; responseBytes: number }> {
+    return this.#initializationTransfer;
+  }
+
+  initialize(input: TsAccountWorkerInitPayload): Promise<WorkerRequestResult | undefined> {
+    if (input.accounts.length > 0) return this.request('init', input);
+    // An empty shard contributes the canonical empty root. Keep its client
+    // and frame lifecycle, but allocate the isolate only for actual work;
+    // the unchanged init must succeed before its first financial request.
+    this.#deferEmptyInitialization(input);
+    return Promise.resolve(undefined);
+  }
+
+  #deferEmptyInitialization(input: TsAccountWorkerInitPayload): void {
+    if (
+      input.accounts.length !== 0 ||
+      this.#worker ||
+      this.#nextRequestId !== 1 ||
+      this.#initialization.kind !== 'ready' ||
+      this.#closed
+    ) {
+      throw new Error(`TS_ACCOUNT_WORKER_DEFER_INVALID:${this.#workerIndex}`);
+    }
+    // Freeze the original initialization bytes now. Later Entity/J mutations
+    // must not change the parent loaded before this shard's first real work.
+    const startedAt = getPerfMs();
+    const payload = this.#requestEncoder.encode(input);
+    this.#initialization = { kind: 'deferred', payload, encodeMs: getPerfMs() - startedAt };
+  }
+
+  #startWorker(): Worker {
+    if (this.#worker) return this.#worker;
     // Bun resolves the source module beside this file. A production browser
     // loads the separately bundled worker from the same public origin; using
     // the source-relative URL there incorrectly requested `/worker.ts`.
@@ -52,12 +92,16 @@ export class TsAccountWorkerClient {
     // initialization; module workers accept it and Bun supports the same mode.
     this.#worker = new Worker(workerUrl, { type: 'module' });
     this.#worker.onmessage = event => this.#handleResponse(event.data as TsAccountWorkerResponseEnvelope);
-    this.#worker.onerror = event => this.#retire(new Error(
-      `TS_ACCOUNT_WORKER_ERROR:${workerIndex}:${event.message}:${event.filename}:${event.lineno}:${event.colno}`,
-    ));
+    this.#worker.onerror = event =>
+      this.#retire(
+        new Error(
+          `TS_ACCOUNT_WORKER_ERROR:${this.#workerIndex}:${event.message}:${event.filename}:${event.lineno}:${event.colno}`,
+        ),
+      );
     this.#worker.addEventListener('close', () => {
-      if (!this.#closed) this.#retire(new Error(`TS_ACCOUNT_WORKER_CLOSED:${workerIndex}`));
+      if (!this.#closed) this.#retire(new Error(`TS_ACCOUNT_WORKER_CLOSED:${this.#workerIndex}`));
     });
+    return this.#worker;
   }
 
   #handleResponse(response: TsAccountWorkerResponseEnvelope): void {
@@ -108,25 +152,55 @@ export class TsAccountWorkerClient {
     for (const request of pending) request.reject(error);
   }
 
-  request(kind: TsAccountWorkerRequestEnvelope['kind'], value: unknown): Promise<WorkerRequestResult> {
+  async request(kind: TsAccountWorkerRequestEnvelope['kind'], value: unknown): Promise<WorkerRequestResult> {
+    if (this.#closed) throw new Error(`TS_ACCOUNT_WORKER_CLIENT_CLOSED:${this.#workerIndex}`);
+    // Freeze this request before awaiting cold initialization, just as a warm
+    // client does before posting; caller mutations cannot change accepted work.
+    const encodeStart = getPerfMs();
+    const payload = this.#requestEncoder.encode(value);
+    const encodeMs = getPerfMs() - encodeStart;
+    if (this.#initialization.kind === 'deferred') {
+      const { payload, encodeMs } = this.#initialization;
+      const pending = this.#send('init', payload, encodeMs).then(response => {
+        const result = parseWorkerInitResult(response.value, this.#workerIndex);
+        if (result.accountCount !== 0 || result.subroots.length !== 0) {
+          throw new Error(`TS_ACCOUNT_WORKER_DEFER_ROOT_NOT_EMPTY:${this.#workerIndex}`);
+        }
+        this.#initialization = { kind: 'ready' };
+      });
+      this.#initialization = { kind: 'starting', pending };
+    }
+    if (this.#initialization.kind === 'starting') await this.#initialization.pending;
+    return this.#send(kind, payload, encodeMs);
+  }
+
+  #send(
+    kind: TsAccountWorkerRequestEnvelope['kind'],
+    payload: ArrayBuffer,
+    encodeMs: number,
+  ): Promise<WorkerRequestResult> {
     if (this.#closed) {
       return Promise.reject(new Error(`TS_ACCOUNT_WORKER_CLIENT_CLOSED:${this.#workerIndex}`));
     }
     const requestId = this.#nextRequestId;
     this.#nextRequestId += 1;
-    const encodeStart = getPerfMs();
-    const payload = this.#requestEncoder.encode(value);
-    const encodeMs = getPerfMs() - encodeStart;
     const request: TsAccountWorkerRequestEnvelope = { requestId, kind, payload };
     const sentAt = getPerfMs();
-    return new Promise((resolve, reject) => {
+    return new Promise<WorkerRequestResult>((resolve, reject) => {
       this.#pending.set(requestId, { resolve, reject, requestBytes: payload.byteLength, encodeMs, sentAt });
       try {
-        this.#worker.postMessage(request, [payload]);
+        this.#startWorker().postMessage(request, [payload]);
       } catch (error) {
         this.#pending.delete(requestId);
         reject(asWorkerError(error));
       }
+    }).then(result => {
+      if (kind === 'init')
+        this.#initializationTransfer = {
+          requestBytes: result.requestBytes,
+          responseBytes: result.responseBytes,
+        };
+      return result;
     });
   }
 
@@ -138,7 +212,7 @@ export class TsAccountWorkerClient {
       this.#pending.clear();
       for (const request of pending) request.reject(error);
     }
-    this.#worker.terminate();
+    this.#worker?.terminate();
   }
 
   /**
@@ -148,7 +222,7 @@ export class TsAccountWorkerClient {
    */
   poison(error: Error): void {
     this.#retire(error);
-    this.#worker.terminate();
+    this.#worker?.terminate();
   }
 }
 

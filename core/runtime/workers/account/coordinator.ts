@@ -104,7 +104,7 @@ export class TsAccountWorkerCoordinator {
     owningEntityIsHub: boolean;
     localBoardAuthority?: NonNullable<TsApplyAccountInputsRequest['localBoardAuthority']>;
   }> | null = null;
-  readonly initialization: TsAccountWorkerInitialization;
+  readonly #initialization: TsAccountWorkerInitialization;
 
   private constructor(
     clients: TsAccountWorkerClient[],
@@ -116,7 +116,15 @@ export class TsAccountWorkerCoordinator {
     this.#workerCount = clients.length;
     this.#logicalShardToWorker = logicalShardToWorker;
     this.#rootTree = rootTree;
-    this.initialization = initialization;
+    this.#initialization = initialization;
+  }
+
+  get initialization(): TsAccountWorkerInitialization {
+    return {
+      ...this.#initialization,
+      requestBytes: this.#clients.reduce((sum, client) => sum + client.initializationTransfer.requestBytes, 0),
+      responseBytes: this.#clients.reduce((sum, client) => sum + client.initializationTransfer.responseBytes, 0),
+    };
   }
 
   static async create(options: TsAccountWorkerOptions): Promise<TsAccountWorkerCoordinator> {
@@ -161,25 +169,28 @@ export class TsAccountWorkerCoordinator {
       settlementBoardAuthorities: [...(options.settlementBoardAuthorities ?? new Map())],
     } as const;
     try {
-      const responses = await Promise.all(clients.map((client, workerIndex) => {
-        const ownedShardIds = ownedShardBuckets[workerIndex];
-        const accounts = accountBuckets[workerIndex];
-        if (ownedShardIds === undefined || accounts === undefined) {
-          throw new Error(`TS_ACCOUNT_WORKER_INIT_BUCKET_MISSING:${workerIndex}`);
-        }
-        const payload: TsAccountWorkerInitPayload = {
-          ...common,
-          workerIndex,
-          ownedShardIds,
-          accounts,
-        };
-        return client.request('init', payload);
-      }));
+      const responses = await Promise.all(
+        clients.map((client, workerIndex) => {
+          const ownedShardIds = ownedShardBuckets[workerIndex];
+          const accounts = accountBuckets[workerIndex];
+          if (ownedShardIds === undefined || accounts === undefined) {
+            throw new Error(`TS_ACCOUNT_WORKER_INIT_BUCKET_MISSING:${workerIndex}`);
+          }
+          const payload: TsAccountWorkerInitPayload = {
+            ...common,
+            workerIndex,
+            ownedShardIds,
+            accounts,
+          };
+          return client.initialize(payload);
+        }),
+      );
       const rootTree = new TsAccountCanonicalRoot();
       const shardIds = new Set<number>();
       const subroots = [] as import('./protocol').TsAccountWorkerSubroot[];
       let accounts = 0;
       for (const [workerIndex, response] of responses.entries()) {
+        if (response === undefined) continue;
         const result = parseWorkerInitResult(response.value, workerIndex);
         accounts += result.accountCount;
         for (const subroot of result.subroots) {
@@ -202,8 +213,8 @@ export class TsAccountWorkerCoordinator {
         logicalShards: TS_ACCOUNT_LOGICAL_SHARDS,
         workers: workerCount,
         accountsRoot: rootTree.root,
-        requestBytes: responses.reduce((sum, response) => sum + response.requestBytes, 0),
-        responseBytes: responses.reduce((sum, response) => sum + response.responseBytes, 0),
+        requestBytes: responses.reduce((sum, response) => sum + (response?.requestBytes ?? 0), 0),
+        responseBytes: responses.reduce((sum, response) => sum + (response?.responseBytes ?? 0), 0),
       };
       return new TsAccountWorkerCoordinator(
         clients,
