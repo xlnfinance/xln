@@ -10,6 +10,7 @@ import { fundFromHubUi } from '../../../ui/tests/fund-from-hub';
 import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL } from '../../utils/e2e-baseline';
 import { gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
 import { connectRuntimeToHub } from '../../utils/e2e-connect';
+import { timedStep } from '../../utils/e2e-timing.mts';
 
 for (const symbol of ['USDC', 'WETH', 'USDT']) {
   test(`asset faucet exposes correct modes and funds ${symbol}`, { tag: '@functional' }, async ({ page }, testInfo) => {
@@ -184,14 +185,28 @@ for (const group of ['reserve-and-own-account', 'remote-and-external', 'round-tr
           gotoApp(page, { appBaseUrl: APP_BASE_URL }),
           gotoApp(bobPage, { appBaseUrl: APP_BASE_URL }),
         ]);
-        const [alice, bob] = await Promise.all([
-          createWalletIdentity(page, 'alice', selectDemoMnemonic('alice')),
-          createWalletIdentity(bobPage, 'bob', selectDemoMnemonic('bob')),
-        ]);
-        await Promise.all([connectRuntimeToHub(page, alice, h1), connectRuntimeToHub(bobPage, bob, h2)]);
-        await assertFreshAllowances(page);
-        await seedMoveWallet(page);
-        const readPair = async () => ({ alice: await readMoney(page, h1), bob: await readMoney(bobPage, h2) });
+        const [alice, bob] = await timedStep('move.create_wallets', () =>
+          Promise.all([
+            createWalletIdentity(page, 'alice', selectDemoMnemonic('alice')),
+            createWalletIdentity(bobPage, 'bob', selectDemoMnemonic('bob')),
+          ]),
+        );
+        await timedStep('move.connect_hubs', () =>
+          Promise.all([connectRuntimeToHub(page, alice, h1), connectRuntimeToHub(bobPage, bob, h2)]),
+        );
+        await timedStep('move.fresh_allowances', () => assertFreshAllowances(page));
+        await timedStep('move.seed_wallet', () => seedMoveWallet(page));
+        const readPair = async () => {
+          // Independent owners can be observed together; each owner's reads
+          // retain their order, and both must finish before teardown on error.
+          const [alice, bob] = await Promise.allSettled([readMoney(page, h1), readMoney(bobPage, h2)]);
+          if (alice.status !== 'fulfilled' || bob.status !== 'fulfilled')
+            throw new AggregateError(
+              [alice, bob].flatMap(result => (result.status === 'rejected' ? [result.reason] : [])),
+              'MOVE_WALLET_OBSERVATION_FAILED',
+            );
+          return { alice: alice.value, bob: bob.value };
+        };
         const amounts = (state: Awaited<ReturnType<typeof readPair>>) => ({
           alice: { external: state.alice.external, reserve: state.alice.reserve, account: state.alice.account.owned },
           bob: { external: state.bob.external, reserve: state.bob.reserve, account: state.bob.account.owned },
@@ -230,94 +245,96 @@ for (const group of ['reserve-and-own-account', 'remote-and-external', 'round-tr
           amount: string,
           remote = false,
           targetFirst = false,
-        ) => {
-          console.log(`MOVE_ROUTE_START ${name}`);
-          const before = await readPair();
-          const fromBlock = await provider.getBlockNumber();
-          expect(idle(before)).toBe(true);
-          const units = parseUnits(amount, 6);
-          const recipient = remote ? bob : alice;
-          const recipientHub = remote ? h2 : h1;
-          await page.getByTestId('nav-home').locator('visible=true').first().click();
-          await page.getByTestId('home-move').click();
-          const order = targetFirst
-            ? [
-                ['to', to],
-                ['from', from],
-              ]
-            : [
-                ['from', from],
-                ['to', to],
-              ];
-          for (const [side, place] of order) await page.getByTestId(`move-${side}-${place}`).click();
-          await page.getByTestId('move-amount').fill(amount);
-          if (from === 'account') await page.getByTestId('move-source-account').selectOption(h1);
-          if (to === 'account') {
-            if (remote) {
-              await page.getByPlaceholder('0x… entity id', { exact: true }).fill(recipient.entityId);
-              await expect(page.getByTestId('move-target-hub')).toHaveValue('');
-              await expect(page.getByTestId('move-draft')).toBeDisabled();
+        ) =>
+          timedStep(`move.${name}`, async () => {
+            console.log(`MOVE_ROUTE_START ${name}`);
+            const before = await readPair();
+            const fromBlock = await provider.getBlockNumber();
+            expect(idle(before)).toBe(true);
+            const units = parseUnits(amount, 6);
+            const recipient = remote ? bob : alice;
+            const recipientHub = remote ? h2 : h1;
+            await page.getByTestId('nav-home').locator('visible=true').first().click();
+            await page.getByTestId('home-move').click();
+            const order = targetFirst
+              ? [
+                  ['to', to],
+                  ['from', from],
+                ]
+              : [
+                  ['from', from],
+                  ['to', to],
+                ];
+            for (const [side, place] of order) await page.getByTestId(`move-${side}-${place}`).click();
+            await page.getByTestId('move-amount').fill(amount);
+            if (from === 'account') await page.getByTestId('move-source-account').selectOption(h1);
+            if (to === 'account') {
+              if (remote) {
+                await page.getByPlaceholder('0x… entity id', { exact: true }).fill(recipient.entityId);
+                await expect(page.getByTestId('move-target-hub')).toHaveValue('');
+                await expect(page.getByTestId('move-draft')).toBeDisabled();
+              }
+              const choices = await page
+                .getByTestId('move-target-hub')
+                .locator('option')
+                .evaluateAll(rows => rows.map(row => row.getAttribute('value')));
+              expect(choices, `recipient Account ${recipientHub} must be selectable`).toContain(recipientHub);
+              await page.getByTestId('move-target-hub').selectOption(recipientHub);
             }
-            const choices = await page
-              .getByTestId('move-target-hub')
-              .locator('option')
-              .evaluateAll(rows => rows.map(row => row.getAttribute('value')));
-            expect(choices, `recipient Account ${recipientHub} must be selectable`).toContain(recipientHub);
-            await page.getByTestId('move-target-hub').selectOption(recipientHub);
-          }
-          if (to === 'reserve' && remote)
-            await page.getByPlaceholder('0x… entity id', { exact: true }).fill(recipient.entityId);
-          if (to === 'external') await page.getByTestId('move-external-recipient').fill(recipient.signerId);
-          if (from === 'external' && to !== 'external') {
-            expect(before.alice.allowance).toBe('0');
-            await expect(page.getByTestId('move-approve')).toBeEnabled();
-            await page.getByTestId('move-approve').click();
-            await expect(page.getByTestId('move-approve')).toHaveCount(0, WAIT);
-            expect((await readRoutes(page)).allowance).toBe(units.toString());
-          }
-          if (from === 'external' && to === 'external') await page.getByTestId('move-send-external').click();
-          else {
-            await expect(page.getByTestId('move-draft')).toBeEnabled();
-            await page.getByTestId('move-draft').click();
-            await expect(page.getByTestId('batch-broadcast')).toBeVisible(WAIT);
-            const drafted = await readPair();
-            expect(amounts(drafted)).toEqual(amounts(before));
-            expect(drafted.alice.batch.draftOperations).toBeGreaterThan(0);
-            expect(drafted.alice.batch.sent).toBe(false);
-            await page.screenshot({ path: testInfo.outputPath(`${name}-draft.png`) });
-            await page.getByTestId('batch-broadcast').click();
-          }
-          const expected = amounts(before);
-          expected.alice[from] = (BigInt(expected.alice[from]) - units).toString();
-          const receiver = remote ? expected.bob : expected.alice;
-          receiver[to] = (BigInt(receiver[to]) + units).toString();
-          await expect
-            .poll(async () => {
-              const state = await readPair();
-              return { amounts: amounts(state), idle: idle(state) };
-            }, WAIT)
-            .toEqual({ amounts: expected, idle: true });
-          const after = await readPair();
-          if (from === 'account')
-            expect(BigInt(after.alice.account.capacity)).toBe(BigInt(before.alice.account.capacity) - units);
-          if (to === 'account') {
-            const owner = remote ? 'bob' : 'alice';
-            expect(BigInt(after[owner].account.capacity)).toBe(BigInt(before[owner].account.capacity) + units);
-          }
-          expect(after.alice.allowance).toBe('0');
-          const total = Object.values(amounts(after))
-            .flatMap(Object.values)
-            .reduce((sum, value) => sum + BigInt(value), 0n);
-          expect(total).toBe(320_000_000n);
-          const receipts =
-            from === 'external' && to === 'external'
-              ? []
-              : await confirmedBatches(provider, alice.entityId, before.alice, after.alice, fromBlock);
-          if (from === 'external' && to === 'external') expect(after.alice.entityNonce).toBe(before.alice.entityNonce);
-          evidence.push({ name, from, to, amount, remote, before, after, receipts });
-          console.log(`MOVE_ROUTE_CONFIRMED ${name}`);
-          return { before, after };
-        };
+            if (to === 'reserve' && remote)
+              await page.getByPlaceholder('0x… entity id', { exact: true }).fill(recipient.entityId);
+            if (to === 'external') await page.getByTestId('move-external-recipient').fill(recipient.signerId);
+            if (from === 'external' && to !== 'external') {
+              expect(before.alice.allowance).toBe('0');
+              await expect(page.getByTestId('move-approve')).toBeEnabled();
+              await page.getByTestId('move-approve').click();
+              await expect(page.getByTestId('move-approve')).toHaveCount(0, WAIT);
+              expect((await readRoutes(page)).allowance).toBe(units.toString());
+            }
+            if (from === 'external' && to === 'external') await page.getByTestId('move-send-external').click();
+            else {
+              await expect(page.getByTestId('move-draft')).toBeEnabled();
+              await page.getByTestId('move-draft').click();
+              await expect(page.getByTestId('batch-broadcast')).toBeVisible(WAIT);
+              const drafted = await readPair();
+              expect(amounts(drafted)).toEqual(amounts(before));
+              expect(drafted.alice.batch.draftOperations).toBeGreaterThan(0);
+              expect(drafted.alice.batch.sent).toBe(false);
+              await page.screenshot({ path: testInfo.outputPath(`${name}-draft.png`) });
+              await page.getByTestId('batch-broadcast').click();
+            }
+            const expected = amounts(before);
+            expected.alice[from] = (BigInt(expected.alice[from]) - units).toString();
+            const receiver = remote ? expected.bob : expected.alice;
+            receiver[to] = (BigInt(receiver[to]) + units).toString();
+            await expect
+              .poll(async () => {
+                const state = await readPair();
+                return { amounts: amounts(state), idle: idle(state) };
+              }, WAIT)
+              .toEqual({ amounts: expected, idle: true });
+            const after = await readPair();
+            if (from === 'account')
+              expect(BigInt(after.alice.account.capacity)).toBe(BigInt(before.alice.account.capacity) - units);
+            if (to === 'account') {
+              const owner = remote ? 'bob' : 'alice';
+              expect(BigInt(after[owner].account.capacity)).toBe(BigInt(before[owner].account.capacity) + units);
+            }
+            expect(after.alice.allowance).toBe('0');
+            const total = Object.values(amounts(after))
+              .flatMap(Object.values)
+              .reduce((sum, value) => sum + BigInt(value), 0n);
+            expect(total).toBe(320_000_000n);
+            const receipts =
+              from === 'external' && to === 'external'
+                ? []
+                : await confirmedBatches(provider, alice.entityId, before.alice, after.alice, fromBlock);
+            if (from === 'external' && to === 'external')
+              expect(after.alice.entityNonce).toBe(before.alice.entityNonce);
+            evidence.push({ name, from, to, amount, remote, before, after, receipts });
+            console.log(`MOVE_ROUTE_CONFIRMED ${name}`);
+            return { before, after };
+          });
         if (group === 'reserve-and-own-account') {
           await move('e2r', 'external', 'reserve', '20');
           await move('r2a-self', 'reserve', 'account', '8');
@@ -350,7 +367,7 @@ for (const group of ['reserve-and-own-account', 'remote-and-external', 'round-tr
           body: safeStringify(evidence),
           contentType: 'application/json',
         });
-        await context.close();
+        await timedStep('move.close_recipient', () => context.close());
       }
     },
   );
