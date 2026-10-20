@@ -1017,7 +1017,7 @@ export class RuntimeP2P {
     return runtimeIds.every(runtimeId => this.canDeliver(runtimeId));
   }
 
-  private hasDirectPeerEndpoint(runtimeId: string): boolean {
+  hasDirectPeerEndpoint(runtimeId: string): boolean {
     return !!this.getDirectPeerEndpoint(runtimeId);
   }
 

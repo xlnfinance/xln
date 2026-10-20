@@ -197,9 +197,12 @@ const admitDirectEntityInputs = async (
  */
 const wireDirectRuntimeInfrastructure = (env: RuntimeReplica, route: DirectRuntimeRoute): void => {
   env.infrastructure = env.infrastructure ?? {};
-  env.infrastructure.canDeliverEntityInputs = targetRuntimeId => route.hasOpenSession(targetRuntimeId)
-    ? route.canDeliver(targetRuntimeId)
-    : (env.infrastructure?.p2p?.canDeliver(targetRuntimeId) ?? false);
+  env.infrastructure.canDeliverEntityInputs = targetRuntimeId => {
+    const p2p = env.infrastructure?.p2p;
+    return !route.hasOpenSession(targetRuntimeId) && p2p?.hasDirectPeerEndpoint(targetRuntimeId)
+      ? p2p.canDeliver(targetRuntimeId)
+      : route.canDeliver(targetRuntimeId);
+  };
   env.infrastructure.observeDirectOnlineEntityIds = entityIds => {
     const online = new Set<string>();
     for (const rawEntityId of entityIds) {
@@ -210,11 +213,13 @@ const wireDirectRuntimeInfrastructure = (env: RuntimeReplica, route: DirectRunti
     return online;
   };
   env.infrastructure.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) => {
-    if (route.hasOpenSession(targetRuntimeId)) {
-      return route.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp);
-    }
     const p2p = env.infrastructure?.p2p;
-    if (p2p) return p2p.enqueueEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp);
+    if (!route.hasOpenSession(targetRuntimeId) && p2p?.hasDirectPeerEndpoint(targetRuntimeId)) {
+      return p2p.enqueueEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp);
+    }
+    // A browser reload closes its inbound session, not ownership of its route.
+    // Keep the exact committed output until authenticated direct readiness returns;
+    // relay acceptance could retire it before an asynchronous offline rejection.
     return route.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp);
   };
 };

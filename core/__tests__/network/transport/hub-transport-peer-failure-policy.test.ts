@@ -3,7 +3,7 @@ import type { ServerWebSocket } from 'bun';
 
 import { createEmptyEnv, startP2P } from '../../../runtime';
 import { deriveSignerAddressSync } from '../../../account/crypto';
-import { deriveEncryptionKeyPair } from '../../../protocol/crypto/p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../../../protocol/crypto/p2p-crypto';
 import { decodeRuntimeEntityInputsEnvelope } from '../../../network/p2p/auth/entity-input-envelope';
 import type { DirectWebSocket } from '../../../network/p2p/direct-runtime-bun';
 import { RuntimeWsClient } from '../../../network/p2p/ws-client';
@@ -15,6 +15,14 @@ import {
 import { ensureRuntimeInfrastructure } from '../../../runtime/envelope/replica-envelope';
 import { getRuntimeCommandReadiness, transitionRuntimeLifecycle } from '../../../runtime/replica/lifecycle';
 import { rejectFailFast } from '../../../support/process/runtime-process';
+
+import { startStandaloneRelayServer } from '../../../network/relay/standalone-server';
+import {
+  buildCryptographicProfileFixture,
+  certifySingleSignerProfileFixture,
+  deriveSingleSignerFixtureEntityId,
+} from '../../helpers/cryptographic-profile';
+import type { RuntimeEntityInputsEnvelope } from '../../../runtime/types';
 
 const HUB_SEED = 'hub-peer-failure-policy-server';
 const PEER_SEED = 'hub-peer-failure-policy-peer';
@@ -42,12 +50,13 @@ const waitFor = async (predicate: () => boolean): Promise<void> => {
   expect(predicate()).toBe(true);
 };
 
-const hubOutput = () => decodeRuntimeEntityInputsEnvelope({
-  sourceRuntimeId: HUB_ID,
-  sourceRuntimeHeight: 9,
-  sourceRuntimeTimestamp: 900,
-  entityInputs: [{ entityId: `0x${'51'.repeat(32)}`, runtimeId: PEER_ID, signerId: PEER_ID, entityTxs: [] }],
-});
+const hubOutput = () =>
+  decodeRuntimeEntityInputsEnvelope({
+    sourceRuntimeId: HUB_ID,
+    sourceRuntimeHeight: 9,
+    sourceRuntimeTimestamp: 900,
+    entityInputs: [{ entityId: `0x${'51'.repeat(32)}`, runtimeId: PEER_ID, signerId: PEER_ID, entityTxs: [] }],
+  });
 
 type ClientInternals = { sendRaw(msg: RuntimeWsMessage): boolean };
 
@@ -56,16 +65,20 @@ type ClientInternals = { sendRaw(msg: RuntimeWsMessage): boolean };
  * forced `getBufferedAmount` so a peer close can carry "undelivered bytes"
  * deterministically; every send/auth/close path is production code.
  */
-const connectHub = async (options: { rejectInbound?: boolean } = {}) => {
+const connectHub = async (options: { rejectInbound?: boolean; relayUrls?: string[] } = {}) => {
   const env = createEmptyEnv(HUB_SEED, 1);
   transitionRuntimeLifecycle(ensureRuntimeInfrastructure(env), 'running');
-  const p2p = startP2P(env, { relayUrls: [] });
+  const p2p = startP2P(env, { relayUrls: options.relayUrls ?? [] });
   if (!p2p) throw new Error('TEST_REAL_P2P_NOT_STARTED');
   transports.push(p2p);
   const hubErrors: string[] = [];
   const hubWarnings: string[] = [];
-  env.error = (_category, message) => { hubErrors.push(message); };
-  env.warn = (_category, message) => { hubWarnings.push(message); };
+  env.error = (_category, message) => {
+    hubErrors.push(message);
+  };
+  env.warn = (_category, message) => {
+    hubWarnings.push(message);
+  };
   const debug: DirectInputDebugState = { lastSeen: null, lastError: null };
   const route = createHubDirectRuntimeRoute(env, HUB_SEED, () => getRuntimeCommandReadiness(env).ready, debug);
   const sockets = new Map<NativeSocket, DirectWebSocket>();
@@ -76,7 +89,8 @@ const connectHub = async (options: { rejectInbound?: boolean } = {}) => {
     return socket;
   };
   const server = Bun.serve<{ type: 'direct-runtime' }>({
-    hostname: '127.0.0.1', port: 0,
+    hostname: '127.0.0.1',
+    port: 0,
     fetch(request, bunServer) {
       const decision = route.maybeUpgrade(request, bunServer);
       return decision.handled ? decision.response : new Response('websocket only', { status: 400 });
@@ -84,15 +98,21 @@ const connectHub = async (options: { rejectInbound?: boolean } = {}) => {
     websocket: {
       open(ws) {
         sockets.set(ws, {
-          get readyState() { return ws.readyState; },
+          get readyState() {
+            return ws.readyState;
+          },
           send: raw => ws.send(raw),
           close: (code, reason) => ws.close(code, reason),
           getBufferedAmount: () => forced.bufferedAmount ?? ws.getBufferedAmount(),
         });
         route.websocket.open(observed(ws));
       },
-      message(ws, raw) { return route.websocket.message(observed(ws), raw); },
-      drain(ws) { route.websocket.drain(observed(ws)); },
+      message(ws, raw) {
+        return route.websocket.message(observed(ws), raw);
+      },
+      drain(ws) {
+        route.websocket.drain(observed(ws));
+      },
       close(ws, code, reason) {
         route.websocket.close(observed(ws), code, reason);
         sockets.delete(ws);
@@ -100,27 +120,47 @@ const connectHub = async (options: { rejectInbound?: boolean } = {}) => {
     },
   });
   stopServers.push(() => server.stop(true));
+  const received: RuntimeEntityInputsEnvelope[] = [];
   const peerErrors: string[] = [];
   const peerRejectedSessions: string[] = [];
   const client = new RuntimeWsClient({
     url: `ws://127.0.0.1:${server.port}${route.path}`,
     runtimeId: PEER_ID,
     helloAudience: directRuntimeWsAudience(HUB_ID),
-    signerId: '1', seed: PEER_SEED,
+    signerId: '1',
+    seed: PEER_SEED,
     encryptionKeyPair: deriveEncryptionKeyPair(PEER_SEED),
     getTargetEncryptionKey: () => deriveEncryptionKeyPair(HUB_SEED).publicKey,
-    onEntityInputs: () => {
+    onEntityInputs: (_from, envelope) => {
+      received.push(envelope);
       if (options.rejectInbound) throw new Error('PEER_REFUSES_HUB_OUTPUT:test');
     },
-    onError: error => { peerErrors.push(error.message); },
-    onPeerSessionRejected: error => { peerRejectedSessions.push(error.message); },
+    onError: error => {
+      peerErrors.push(error.message);
+    },
+    onPeerSessionRejected: error => {
+      peerRejectedSessions.push(error.message);
+    },
   });
   clients.push(client);
   client.setReady(true);
   await client.connect();
   await waitFor(() => client.canDeliver() && route.canDeliver(PEER_ID));
   const halted = () => env.infrastructure?.operatorStatus === 'HALTED_REQUIRES_OPERATOR';
-  return { env, route, debug, client, hubErrors, hubWarnings, peerErrors, peerRejectedSessions, forced, halted };
+  return {
+    env,
+    route,
+    debug,
+    client,
+    p2p,
+    received,
+    hubErrors,
+    hubWarnings,
+    peerErrors,
+    peerRejectedSessions,
+    forced,
+    halted,
+  };
 };
 
 describe('hub transport reject policy', () => {
@@ -131,22 +171,26 @@ describe('hub transport reject policy', () => {
   test('peer_error_frame_uncorrelated_is_rejected_not_halt', async () => {
     const h = await connectHub();
     // Authenticated peer, valid session MAC, forged correlation id.
-    expect((h.client as unknown as ClientInternals).sendRaw({
-      type: 'error',
-      id: makeMessageId(),
-      from: PEER_ID,
-      to: HUB_ID,
-      timestamp: Date.now(),
-      inReplyTo: 'hub-output-that-never-existed',
-      error: 'P2P_INBOUND_ENTITY_INPUT_REJECTED:forged',
-    })).toBe(true);
+    expect(
+      (h.client as unknown as ClientInternals).sendRaw({
+        type: 'error',
+        id: makeMessageId(),
+        from: PEER_ID,
+        to: HUB_ID,
+        timestamp: Date.now(),
+        inReplyTo: 'hub-output-that-never-existed',
+        error: 'P2P_INBOUND_ENTITY_INPUT_REJECTED:forged',
+      }),
+    ).toBe(true);
     await waitFor(() => !h.route.hasOpenSession(PEER_ID));
     expect(h.halted()).toBe(false);
     expect(getRuntimeCommandReadiness(h.env).ready).toBe(true);
     expect(h.debug.lastError).toBeNull();
     expect(h.hubErrors).toEqual([]);
     // The peer sees its own session closed by the Hub with the misbehaviour code.
-    await waitFor(() => h.peerErrors.some(error => error.includes('code=4004') && error.includes('uncorrelated-peer-error')));
+    await waitFor(() =>
+      h.peerErrors.some(error => error.includes('code=4004') && error.includes('uncorrelated-peer-error')),
+    );
     expect(h.peerRejectedSessions).toEqual([]);
   });
 
@@ -171,13 +215,16 @@ describe('hub transport reject policy', () => {
     expect(getRuntimeCommandReadiness(h.env).ready).toBe(true);
     expect(h.hubErrors).toEqual(['DIRECT_OUTPUT_REJECTED_BY_PEER']);
     expect(h.debug.lastError?.error).toContain('PEER_REFUSES_HUB_OUTPUT:test');
-    await waitFor(() => h.peerErrors.some(error => error.includes('code=4005') && error.includes('peer-rejected-output')));
+    await waitFor(() =>
+      h.peerErrors.some(error => error.includes('code=4005') && error.includes('peer-rejected-output')),
+    );
     // A fresh dial from the same peer is admitted again: the close was per-session.
     const again = new RuntimeWsClient({
       url: h.client.getUrl(),
       runtimeId: PEER_ID,
       helloAudience: directRuntimeWsAudience(HUB_ID),
-      signerId: '1', seed: PEER_SEED,
+      signerId: '1',
+      seed: PEER_SEED,
       encryptionKeyPair: deriveEncryptionKeyPair(PEER_SEED),
       getTargetEncryptionKey: () => deriveEncryptionKeyPair(HUB_SEED).publicKey,
       onError: () => undefined,
@@ -211,4 +258,75 @@ describe('hub transport reject policy', () => {
     expect(h.hubErrors).toEqual([]);
     expect(h.halted()).toBe(false);
   });
+});
+
+test('hub retains its direct user route across reload even while an authenticated relay is available', async () => {
+  const relay = startStandaloneRelayServer({ host: '127.0.0.1', port: 0, serverId: 'hub-user-reload' });
+  stopServers.push(() => relay.close());
+  const h = await connectHub({ relayUrls: [`ws://127.0.0.1:${relay.server.port}`] });
+  h.p2p.connect();
+  await waitFor(() => h.p2p.isConnected());
+  await h.p2p.admitSharedProfiles([
+    certifySingleSignerProfileFixture(
+      buildCryptographicProfileFixture({
+        entityId: deriveSingleSignerFixtureEntityId(PEER_SEED),
+        signingSeed: PEER_SEED,
+        name: 'reload user',
+        isHub: false,
+        runtimeId: PEER_ID,
+        runtimeEncPubKey: pubKeyToHex(deriveEncryptionKeyPair(PEER_SEED).publicKey),
+      }),
+      PEER_SEED,
+    ),
+  ]);
+  const infrastructure = ensureRuntimeInfrastructure(h.env);
+  const dispatch = infrastructure.directEntityInputsDispatch;
+  const canDeliver = infrastructure.canDeliverEntityInputs;
+  if (!dispatch || !canDeliver) throw new Error('HUB_DIRECT_DISPATCH_MISSING');
+  const envelope = hubOutput();
+  expect(dispatch(PEER_ID, envelope, 900).outcome).toBe('delivered');
+  await waitFor(() => h.received.length === 1);
+  expect(h.received[0]).toEqual(envelope);
+  await h.client.closeAndWait();
+  await waitFor(() => !h.route.hasOpenSession(PEER_ID));
+  // Generic endpointless user-to-user relay remains enabled. The Hub owns a
+  // different route: its disconnected inbound user socket cannot become relay.
+  expect(h.p2p.canDeliver(PEER_ID)).toBe(true);
+  expect(canDeliver(PEER_ID)).toBe(false);
+  expect(dispatch(PEER_ID, envelope, 900)).toMatchObject({
+    outcome: 'deferred',
+    code: 'ROUTE_DIRECT_SESSION_NOT_READY',
+  });
+  expect(relay.store.debugEvents.some(event => event.msgType === 'entity_inputs')).toBe(false);
+  expect(h.halted()).toBe(false);
+  const readiness: boolean[] = [];
+  const unsubscribe = h.route.onDeliveryReadyChange((peer, ready) => {
+    if (peer === PEER_ID) readiness.push(ready);
+  });
+  const again = new RuntimeWsClient({
+    url: h.client.getUrl(),
+    runtimeId: PEER_ID,
+    helloAudience: directRuntimeWsAudience(HUB_ID),
+    signerId: '1',
+    seed: PEER_SEED,
+    encryptionKeyPair: deriveEncryptionKeyPair(PEER_SEED),
+    getTargetEncryptionKey: () => deriveEncryptionKeyPair(HUB_SEED).publicKey,
+    onEntityInputs: (_from, input) => {
+      h.received.push(input);
+    },
+    onError: error => {
+      h.peerErrors.push(error.message);
+    },
+  });
+  clients.push(again);
+  again.setReady(true);
+  await again.connect();
+  await waitFor(() => canDeliver(PEER_ID));
+  expect(readiness).toContain(true);
+  expect(dispatch(PEER_ID, envelope, 900).outcome).toBe('delivered');
+  await waitFor(() => h.received.length === 2);
+  expect(h.received[1]).toEqual(envelope);
+  expect(h.hubErrors).toEqual([]);
+  expect(h.peerErrors).toEqual([]);
+  unsubscribe();
 });

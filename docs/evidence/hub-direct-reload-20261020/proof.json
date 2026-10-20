@@ -1,0 +1,100 @@
+{
+  "baseSHA": "ad648a26baacb01c608599cb7e6f757ec2e039d9",
+  "sourceSHA256": {
+    "core/network/p2p/p2p.ts": "113a8235421fee863b88219ced19e15ddefa1315b2c36be6bdffc792792eecb5",
+    "core/orchestrator/hub/hub-runtime-transport.ts": "12fd07732125d2c5ac0b95f3ee5eb0eb37c40121ebdc1590e2cea211495e2d86",
+    "core/__tests__/network/transport/hub-transport-peer-failure-policy.test.ts": "b6300f129c1d00f7cfd7ad34cc4f53e56335f850b112a49cf9b6086543d47e0c",
+    "tests/e2e-payment.spec.ts": "36025f3823092d7e0cdce70ecbcfac5c660874113ec4c35d1c9039729132ce7d"
+  },
+  "firstFailure": "H1 R31: reload closes inbound user socket; Hub chooses endpointless relay, retires accepted output, then RELAY_RECIPIENT_UNAVAILABLE reaches fail-fast transport policy.",
+  "fix": "Hub readiness and dispatch use inbound direct for endpointless users even while disconnected. Only existing signed Hub endpoint predicate selects outbound P2P direct. Existing outbox retention/readiness wake owns delivery; no retry/state/error policy added. Generic user-to-user relay unchanged.",
+  "evidence": {
+    "browserRed": {
+      "record": "payment-react-owning-01.result.json",
+      "exitCode": 1,
+      "seconds": 141.422487791,
+      "sourceUnchanged": true,
+      "logSHA256": "d6cfc7a9e06db514cc0fb1d0cb021653779d6376aa467afaf46834156d966a06"
+    },
+    "unitRed": {
+      "record": "hub-direct-reload-l1-red-01.result.json",
+      "exitCode": 1,
+      "seconds": 2.7048063339999997,
+      "sourceUnchanged": true,
+      "logSHA256": "2b22e07d310b94e529f857a02d37197c00b2f4d43ef993c287bc9e5eec7428d4"
+    },
+    "unitGreen": {
+      "record": "hub-direct-reload-l1-green-02.result.json",
+      "exitCode": 0,
+      "seconds": 3.9278340419999997,
+      "sourceUnchanged": true,
+      "logSHA256": "32bedd0796b26998c7b2d27839a004771d0da4cca2b0060f972cd418d2bdce85"
+    },
+    "browserGreen": {
+      "record": "payment-react-owning-02.result.json",
+      "exitCode": 0,
+      "seconds": 132.102247292,
+      "sourceUnchanged": true,
+      "logSHA256": "586aeac5adf2f7f968aedfade314502388b2b6c0d3de9eebb16f46022c3c92af"
+    }
+  },
+  "l1": {
+    "passed": 30,
+    "failed": 0,
+    "assertions": 164,
+    "scope": "real relay/direct disconnect/reconnect, runtime outbox readiness, generic user relay, P2P route selection"
+  },
+  "l2": {
+    "passed": 1,
+    "failed": 0,
+    "browserIssues": 0,
+    "playwrightSeconds": 33.0,
+    "importMs": 5787,
+    "firstReloadMs": 5228,
+    "lastReloadMs": 6021,
+    "finalizeMs": 1554,
+    "amountBaseUnits": "25000000",
+    "renderedOutboundBefore": 100,
+    "renderedOutboundAfter": 75,
+    "persistedHeightAfterReloadAtLeast": 20,
+    "chainId": 31337,
+    "isPublicMainnet": false
+  },
+  "formatting": [
+    {
+      "path": "core/network/p2p/p2p.ts",
+      "before": "113a8235421fee863b88219ced19e15ddefa1315b2c36be6bdffc792792eecb5",
+      "after": "113a8235421fee863b88219ced19e15ddefa1315b2c36be6bdffc792792eecb5",
+      "minifiedExecutableEqual": true
+    },
+    {
+      "path": "core/orchestrator/hub/hub-runtime-transport.ts",
+      "before": "12fd07732125d2c5ac0b95f3ee5eb0eb37c40121ebdc1590e2cea211495e2d86",
+      "after": "12fd07732125d2c5ac0b95f3ee5eb0eb37c40121ebdc1590e2cea211495e2d86",
+      "minifiedExecutableEqual": true
+    },
+    {
+      "path": "core/__tests__/network/transport/hub-transport-peer-failure-policy.test.ts",
+      "before": "bda6c2671658d194147ccc8beb17422c6b03e2bedee1be575ff9dc165c967efb",
+      "after": "b6300f129c1d00f7cfd7ad34cc4f53e56335f850b112a49cf9b6086543d47e0c",
+      "minifiedExecutableEqual": true
+    }
+  ],
+  "screenshots": [
+    {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/hub-direct-reload-e2e-payment-terminal.png",
+      "sha256": "980024abfa80eba61bc84644963b495b4c6d096a7e857774884f38454164e977",
+      "scope": "private EVM browser, public metadata only; no wallet secrets"
+    },
+    {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/hub-direct-reload-e2e-htlc-payment-final.png",
+      "sha256": "24b1c2c315224b1b67ec64efbc247c7474af143ccc23dc79351e6a6b1e7917b3",
+      "scope": "private EVM browser, public metadata only; no wallet secrets"
+    }
+  ],
+  "limitations": [
+    "Focused private EVM browser is not final full158 or nativeTVM/public-mainnet acceptance.",
+    "Whole candidate check, final immutable SHA financial8/8, exact unit/test, release34 and60-minute soak remain required.",
+    "Production has not been deployed with this candidate."
+  ]
+}
