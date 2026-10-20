@@ -2,7 +2,14 @@ import { expect, test } from 'bun:test';
 import { quoteAtBestLevel, swapMinimumError, swapPriceBandError } from './orderbook-quote';
 import type { BookView } from './orderbook';
 
-const level = { size: 2n * 10n ** 18n, priceTicks: 25_000_000n, total: 2n * 10n ** 18n, orders: 1, own: false };
+const level = {
+  size: 2n * 10n ** 18n,
+  priceTicks: 25_000_000n,
+  total: 2n * 10n ** 18n,
+  orders: 1,
+  ownerIds: [],
+  own: false,
+};
 const book: BookView = {
   baseTokenId: 2,
   quoteTokenId: 1,

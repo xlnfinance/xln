@@ -130,16 +130,15 @@ export type CrossRuntimeWindow = Window & {
   };
 };
 
-export type CrossResolveSnapshot = {
-  offerId: string;
+export type CrossCloseSnapshot = {
+  orderId: string;
   height: number;
+  stateHash: string;
+  pullId: string;
   fillRatio: number;
-  fillNumerator: string;
-  fillDenominator: string;
-  cancelRemainder: boolean;
-  executionGiveAmount: string;
-  executionWantAmount: string;
-  comment: string;
+  closeMode: 'full' | 'partial_cancel_remainder' | 'pure_cancel';
+  cumulativeSourceAmount: string;
+  cumulativeTargetAmount: string;
 };
 
 export function getPrimaryHubId(health: E2EHealthResponse): string {
@@ -1266,9 +1265,13 @@ export async function configureTokens(page: Page, fromTokenId: number, toTokenId
   const fromSymbol = TOKEN_SYMBOL_BY_ID[fromTokenId];
   if (!fromSymbol) throw new Error(`TOKEN_SYMBOL_MISSING:${fromTokenId}`);
   const receiveField = page.getByTestId('swap-want').locator('..');
+  await expect(receiveField.getByRole('button')).toBeEnabled();
   // The same-network picker excludes the opposite token. Reverse through the
   // actual UI before selecting a token that currently occupies the receive side.
-  if (await receiveField.getByRole('button', { name: new RegExp(`^${escapeRegex(fromSymbol)}\\b`) }).isVisible()) {
+  if (
+    (await page.getByTestId('swap-cross-mode').getAttribute('aria-pressed')) !== 'true' &&
+    (await receiveField.getByRole('button', { name: new RegExp(`^${escapeRegex(fromSymbol)}\\b`) }).isVisible())
+  ) {
     await page.getByTestId('swap-flip').click();
   }
   for (const [inputId, tokenId] of [
@@ -1287,21 +1290,6 @@ export async function configureTokens(page: Page, fromTokenId: number, toTokenId
     await option.click();
     await expect(trigger).toHaveAccessibleName(pattern);
   }
-}
-
-export async function selectOrderbookPairByLabel(page: Page, labelPattern: RegExp): Promise<string> {
-  const pairSelect = page.getByTestId('swap-orderbook-pair-select').first();
-  await expect(pairSelect, 'orderbook pair selector must be mounted').toHaveCount(1, { timeout: 10_000 });
-  const options = await pairSelect.evaluate(node =>
-    Array.from((node as HTMLSelectElement).options).map(option => ({
-      value: option.value,
-      label: option.textContent?.replace(/\s+/g, ' ').trim() || '',
-    })),
-  );
-  const match = options.find(option => labelPattern.test(option.label));
-  expect(match, `orderbook pair selector missing ${labelPattern}: ${JSON.stringify(options)}`).toBeTruthy();
-  await pairSelect.selectOption(match!.value);
-  return match!.label;
 }
 
 export async function readOrderbookRowCounts(page: Page): Promise<{ asks: number; bids: number }> {

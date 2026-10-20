@@ -10,8 +10,9 @@ import {
 } from '../../../../frontend/src/lib/components/Entity/account/load-testing-scheduler';
 import type { PaymentPanelView } from '../../../../frontend/src/lib/components/Entity/payments/payment-panel-view';
 import type { DeriveDeltaFn } from '../../../../frontend/src/lib/components/Entity/payment-routing';
-import { applyCommand, createBook } from '../../../swapbook';
+import { applyCommand, createBook, getBookSideLevels } from '../../../swapbook';
 import type { Delta, DerivedDelta } from '../../../types/account';
+import { readAccountCapacity } from '../../../account/capacity-plan';
 
 const delta = (capacity: bigint): Delta => ({
   tokenId: 1,
@@ -50,95 +51,134 @@ const deriveDelta: DeriveDeltaFn = (value): DerivedDelta => ({
 });
 
 describe('Account load testing controller', () => {
-  test('submits an available USDC payment through the shared canonical builder', async () => {
-    const profile = {
-      entityId: 'bob',
-      entityEncryptionPublicKey: `0x${'11'.repeat(32)}`,
-      name: 'Bob',
-      avatar: '',
-      bio: '',
-      website: '',
-      lastUpdated: 1,
-      runtimeId: 'bob-runtime',
-      runtimeEncPubKey: '',
-      runtimeSignature: 'runtime-signature',
-      publicAccounts: ['alice'],
-      wsUrl: null,
-      relays: [],
-      metadata: {
-        isHub: false,
-        routingFeePPM: 0,
-        baseFee: 0n,
-        profileHanko: 'profile-hanko',
-      },
-      accounts: [],
-    };
-    const paymentView: PaymentPanelView = {
-      replicaMap: new Map([['alice:signer', {
-        state: {
-          accounts: new Map([['bob', {
-            leftEntity: 'alice',
-            rightEntity: 'bob',
-            deltas: new Map([[1, delta(10_000_000n)]]),
-          }]]),
-          lockBook: new Map(),
+  test.each([false, true])(
+    'canonical payment admission respects Stop during route read (stopped=%s)',
+    async stopped => {
+      const abort = new AbortController();
+      const profile = {
+        entityId: 'bob',
+        entityEncryptionPublicKey: `0x${'11'.repeat(32)}`,
+        name: 'Bob',
+        avatar: '',
+        bio: '',
+        website: '',
+        lastUpdated: 1,
+        runtimeId: 'bob-runtime',
+        runtimeEncPubKey: '',
+        runtimeSignature: 'runtime-signature',
+        publicAccounts: ['alice'],
+        wsUrl: null,
+        relays: [],
+        metadata: {
+          isHub: false,
+          routingFeePPM: 0,
+          baseFee: 0n,
+          profileHanko: 'profile-hanko',
         },
-      }]]),
-      profiles: [profile],
-      knownRecipientEntities: ['bob'],
-      blockedCounterpartyIds: new Set(),
-      networkGraph: {
-        findPaths: async () => [{
-          path: ['alice', 'bob'],
-          hops: [],
-          totalFee: 0n,
-          totalAmount: 1_000_000n,
-          probability: 1,
-        }],
-      },
-    };
-    const submitted: unknown[] = [];
-    const controller = createLoadTestingController({
-      sourceEntityId: () => 'alice',
-      selectedHubEntityId: () => 'hub',
-      paymentView: () => paymentView,
-      swapView: () => null,
-      sourceReplica: () => null,
-      runtimeFunctions: () => ({
-        deriveDelta,
-        deriveSwapNetAuthorization: () => ({ maxFee: 0n, minNetReceive: 1n }),
-        getDefaultSwapTradingPairs: () => [],
-        getSwapPairOrientation: () => ({ baseTokenId: 1, quoteTokenId: 2, pairId: '1/2' }),
-        getTokenInfo: () => ({ symbol: 'USDC', decimals: 6 }),
-        planSwapCommand: () => { throw new Error('unused'); },
-        requantizeRemainingSwapAtPrice: () => null,
-      }),
-      resolveSignerId: entityId => `${entityId}-signer`,
-      submitRuntimeInput: input => submitted.push(input),
-      random: () => 0,
-    });
-
-    expect(await controller.attempt('pay')).toEqual({ status: 'submitted', reason: 'USDC payment submitted' });
-    expect(submitted).toEqual([{
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId: 'alice',
-        signerId: 'alice-signer',
-        entityTxs: [{
-          type: 'htlcPayment',
-          data: {
-            targetEntityId: 'bob',
-            tokenId: 1,
-            amount: 1_000_000n,
-            maxSenderDebit: 1_000_000n,
-            route: ['alice', 'bob'],
-            deliveryMode: 'instant',
-            description: 'Load testing',
+        accounts: [],
+      };
+      const paymentView: PaymentPanelView = {
+        replicaMap: new Map([
+          [
+            'alice:signer',
+            {
+              state: {
+                accounts: new Map([
+                  [
+                    'bob',
+                    {
+                      leftEntity: 'alice',
+                      rightEntity: 'bob',
+                      deltas: new Map([[1, delta(10_000_000n)]]),
+                    },
+                  ],
+                ]),
+                lockBook: new Map(),
+              },
+            },
+          ],
+        ]),
+        profiles: [profile],
+        knownRecipientEntities: ['bob'],
+        blockedCounterpartyIds: new Set(),
+        networkGraph: {
+          findPaths: async () => {
+            if (stopped) abort.abort();
+            return [
+              {
+                path: ['alice', 'bob'],
+                hops: [],
+                totalFee: 0n,
+                totalAmount: 1_000_000n,
+                probability: 1,
+              },
+            ];
           },
-        }],
-      }],
-      jInputs: [],
-    }]);
+        },
+      };
+      const submitted: unknown[] = [];
+      const controller = createLoadTestingController({
+        sourceEntityId: () => 'alice',
+        selectedHubEntityId: () => 'hub',
+        paymentView: () => paymentView,
+        swapView: () => null,
+        sourceReplica: () => null,
+        runtimeFunctions: () => ({
+          deriveDelta,
+          readAccountCapacity,
+          deriveSwapNetAuthorization: () => ({ maxFee: 0n, minNetReceive: 1n }),
+          getDefaultSwapTradingPairs: () => [],
+          getSwapPairOrientation: () => ({ baseTokenId: 1, quoteTokenId: 2, pairId: '1/2' }),
+          getTokenInfo: () => ({ symbol: 'USDC', decimals: 6 }),
+          planSwapCommand: () => {
+            throw new Error('unused');
+          },
+          requantizeRemainingSwapAtPrice: () => null,
+        }),
+        resolveSignerId: entityId => `${entityId}-signer`,
+        submitRuntimeInput: input => submitted.push(input),
+        random: () => 0,
+        bestSwapLevel: () => null,
+      });
+
+      const result = await controller.attempt('pay', abort.signal);
+      if (stopped) {
+        expect(result).toEqual({ status: 'skipped', reason: 'Stopped before command admission' });
+        expect(submitted).toEqual([]);
+        return;
+      }
+      expect(result).toEqual({ status: 'submitted', reason: 'USDC payment submitted' });
+      expect(submitted).toEqual([
+        {
+          runtimeTxs: [],
+          entityInputs: [
+            {
+              entityId: 'alice',
+              signerId: 'alice-signer',
+              entityTxs: [
+                {
+                  type: 'htlcPayment',
+                  data: {
+                    targetEntityId: 'bob',
+                    tokenId: 1,
+                    amount: 1_000_000n,
+                    maxSenderDebit: 1_000_000n,
+                    route: ['alice', 'bob'],
+                    deliveryMode: 'instant',
+                    description: 'Load testing',
+                  },
+                },
+              ],
+            },
+          ],
+          jInputs: [],
+        },
+      ]);
+    },
+  );
+
+  test('never treats an unknown maker as external liquidity', () => {
+    expect(selectExternalSwapLevel({ priceTicks: 10_000n, ownerIds: [] }, 'alice')).toBeNull();
   });
 
   test('filters a self-owned top level and exposes STP prevention', () => {
@@ -153,25 +193,22 @@ describe('Account load testing controller', () => {
       priceTicks: 10_000n,
       qtyLots: 10n,
     }).state;
-    expect(selectExternalSwapLevel(book, 0, 'alice')).toEqual({
+    expect(selectExternalSwapLevel(getBookSideLevels(book, 0, 1)[0] ?? null, 'alice')).toEqual({
       priceTicks: 10_000n,
       stpPrevented: true,
     });
 
-    const externalBook = applyCommand(
-      createBook({ bucketWidthTicks: 1n, maxOrders: 8, stpPolicy: 1 }),
-      {
-        kind: 0,
-        ownerId: 'bob',
-        orderId: 'external-bid',
-        side: 0,
-        tif: 0,
-        postOnly: false,
-        priceTicks: 9_900n,
-        qtyLots: 10n,
-      },
-    ).state;
-    expect(selectExternalSwapLevel(externalBook, 0, 'alice')).toEqual({
+    const externalBook = applyCommand(createBook({ bucketWidthTicks: 1n, maxOrders: 8, stpPolicy: 1 }), {
+      kind: 0,
+      ownerId: 'bob',
+      orderId: 'external-bid',
+      side: 0,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 9_900n,
+      qtyLots: 10n,
+    }).state;
+    expect(selectExternalSwapLevel(getBookSideLevels(externalBook, 0, 1)[0] ?? null, 'alice')).toEqual({
       priceTicks: 9_900n,
       stpPrevented: false,
     });
@@ -190,10 +227,11 @@ describe('Account load testing controller', () => {
         return 1 as ReturnType<typeof setTimeout>;
       },
       clearTimer: () => {},
-      attempt: () => new Promise(resolve => {
-        finishAttempt = () => resolve({ status: 'submitted' });
-      }),
-      onSnapshot: snapshot => latest = snapshot,
+      attempt: () =>
+        new Promise(resolve => {
+          finishAttempt = () => resolve({ status: 'submitted' });
+        }),
+      onSnapshot: snapshot => (latest = snapshot),
     });
     scheduler.start({
       durationMinutes: 1,

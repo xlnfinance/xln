@@ -1,9 +1,6 @@
 import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
-import type { BookState, Profile, RuntimeInput, XLNModule } from '@xln/core/api/public/runtime-module';
-import {
-  getBookSideLevels,
-  getJurisdictionStackId,
-} from '@xln/core/api/public/runtime-module';
+import type { Profile, RuntimeInput, XLNModule } from '@xln/core/api/public/runtime-module';
+import { getJurisdictionStackId } from '@xln/core/api/public/runtime-module';
 import { hasCertifiedEntityEncryptionKey, normalizeEntityId } from '../payment-routing';
 import { buildPaymentRuntimeInput } from '@xln/core/api/payments/command';
 import { quotePaymentCandidateRoutes } from '../payments/runtime/payment-route-quote';
@@ -12,13 +9,15 @@ import { planSameJSwapCommand, resolveSameJSwapPartyRoles } from '../swap/comman
 import type { SwapPanelRuntimeView } from '../swap/swap-panel-helpers';
 import type { LoadTestAttemptResult, LoadTestLane } from './load-testing-scheduler';
 
-type LoadTestRuntimeFunctions = Pick<XLNModule,
+type LoadTestRuntimeFunctions = Pick<
+  XLNModule,
   | 'deriveDelta'
   | 'deriveSwapNetAuthorization'
   | 'getDefaultSwapTradingPairs'
   | 'getSwapPairOrientation'
   | 'getTokenInfo'
   | 'planSwapCommand'
+  | 'readAccountCapacity'
   | 'requantizeRemainingSwapAtPrice'
 >;
 
@@ -32,6 +31,11 @@ export type LoadTestingControllerDeps = Readonly<{
   resolveSignerId: (entityId: string) => string;
   submitRuntimeInput: (input: RuntimeInput) => Promise<unknown> | unknown;
   random: () => number;
+  bestSwapLevel: (
+    hubId: string,
+    pairId: string,
+    makerSide: 0 | 1,
+  ) => Readonly<{ priceTicks: bigint; ownerIds: readonly string[] }> | null;
 }>;
 
 type ExternalSwapLevel = Readonly<{
@@ -52,7 +56,11 @@ const rawStableAmount = (
   maxUsd: number,
 ): bigint => {
   const token = runtime.getTokenInfo(1);
-  if (String(token.symbol || '').trim().toUpperCase() !== 'USDC') {
+  if (
+    String(token.symbol || '')
+      .trim()
+      .toUpperCase() !== 'USDC'
+  ) {
     throw new Error('LOAD_TEST_USDC_TOKEN_UNAVAILABLE');
   }
   const decimals = Number(token.decimals);
@@ -68,35 +76,30 @@ const skip = (reason: string, stpPrevented = false): LoadTestAttemptResult => ({
   ...(stpPrevented ? { stpPrevented: true } : {}),
 });
 
-const isAvailablePaymentPath = (
-  path: readonly string[],
-  sourceEntityId: string,
-  view: PaymentPanelView,
-): boolean => path.length >= 2 && path.every((entityId, index) => {
-  const normalized = normalizeEntityId(entityId);
-  if (!normalized || (index === 0 && normalized !== sourceEntityId)) return false;
-  if (index > 0 && view.blockedCounterpartyIds.has(normalized)) return false;
-  if (index > 0 && !hasCertifiedEntityEncryptionKey(view.replicaMap, view.profiles, normalized)) return false;
-  if (index > 0 && index < path.length - 1) {
-    return view.profiles.some(profile =>
-      normalizeEntityId(profile.entityId) === normalized && profile.metadata.isHub === true);
-  }
-  return true;
-});
+const isAvailablePaymentPath = (path: readonly string[], sourceEntityId: string, view: PaymentPanelView): boolean =>
+  path.length >= 2 &&
+  path.every((entityId, index) => {
+    const normalized = normalizeEntityId(entityId);
+    if (!normalized || (index === 0 && normalized !== sourceEntityId)) return false;
+    if (index > 0 && view.blockedCounterpartyIds.has(normalized)) return false;
+    if (index > 0 && !hasCertifiedEntityEncryptionKey(view.replicaMap, view.profiles, normalized)) return false;
+    if (index > 0 && index < path.length - 1) {
+      return view.profiles.some(
+        profile => normalizeEntityId(profile.entityId) === normalized && profile.metadata.isHub === true,
+      );
+    }
+    return true;
+  });
 
 export const selectExternalSwapLevel = (
-  book: BookState,
-  makerSide: 0 | 1,
+  level: Readonly<{ priceTicks: bigint; ownerIds: readonly string[] }> | null,
   sourceEntityId: string,
 ): ExternalSwapLevel | null => {
-  const level = getBookSideLevels(book, makerSide, 1)[0];
   if (!level) return null;
   const source = normalizeEntityId(sourceEntityId);
   const owners = level.ownerIds.map(normalizeEntityId);
   if (owners.includes(source)) return { priceTicks: level.priceTicks, stpPrevented: true };
-  return owners.some(owner => owner && owner !== source)
-    ? { priceTicks: level.priceTicks, stpPrevented: false }
-    : null;
+  return owners.some(owner => owner && owner !== source) ? { priceTicks: level.priceTicks, stpPrevented: false } : null;
 };
 
 const sourceJurisdiction = (replica: EntityReadView): string => {
@@ -104,26 +107,25 @@ const sourceJurisdiction = (replica: EntityReadView): string => {
   return getJurisdictionStackId(state.config?.jurisdiction) || '';
 };
 
-const hubProfile = (view: SwapPanelRuntimeView, hubEntityId: string): Profile | null =>
-  view.getHubProfile(hubEntityId);
+const hubProfile = (view: SwapPanelRuntimeView, hubEntityId: string): Profile | null => view.getHubProfile(hubEntityId);
 
-export const createLoadTestingController = (deps: LoadTestingControllerDeps): Readonly<{
-  attempt: (lane: LoadTestLane) => Promise<LoadTestAttemptResult>;
+export const createLoadTestingController = (
+  deps: LoadTestingControllerDeps,
+): Readonly<{
+  attempt: (lane: LoadTestLane, signal: AbortSignal) => Promise<LoadTestAttemptResult>;
 }> => {
   let swapSequence = 0;
 
-  const attemptPayment = async (): Promise<LoadTestAttemptResult> => {
+  const attemptPayment = async (signal: AbortSignal): Promise<LoadTestAttemptResult> => {
     const runtime = deps.runtimeFunctions();
     const view = deps.paymentView();
     const source = normalizeEntityId(deps.sourceEntityId());
     if (!runtime || !source || !view.networkGraph) return skip('Payment projection is not ready');
-    const targets = view.knownRecipientEntities
-      .map(normalizeEntityId)
-      .filter(target => target && target !== source);
+    const targets = view.knownRecipientEntities.map(normalizeEntityId).filter(target => target && target !== source);
     if (targets.length === 0) return skip('No payment recipient is currently available');
     const target = targets[randomIndex(deps.random, targets.length)]!;
     const amount = rawStableAmount(runtime, deps.random, 1, 5);
-    const paths = (await view.networkGraph.findPaths?.(source, target, amount, 1) ?? [])
+    const paths = ((await view.networkGraph.findPaths?.(source, target, amount, 1)) ?? [])
       .map(route => route.path)
       .filter(path => isAvailablePaymentPath(path, source, view));
     if (paths.length === 0) return skip('No currently available encrypted payment route');
@@ -136,48 +138,61 @@ export const createLoadTestingController = (deps: LoadTestingControllerDeps): Re
       tokenId: 1,
       recipientAmount: amount,
       defaultUnknownHopFeePPM: 1,
-    }).sort((left, right) => left.totalFee === right.totalFee
-      ? left.path.length - right.path.length
-      : left.totalFee < right.totalFee ? -1 : 1);
+    }).sort((left, right) =>
+      left.totalFee === right.totalFee ? left.path.length - right.path.length : left.totalFee < right.totalFee ? -1 : 1,
+    );
     const route = routes[0];
     if (!route) return skip('No payment route has current capacity');
-    await deps.submitRuntimeInput(buildPaymentRuntimeInput({
-      entityId: source,
-      signerId: deps.resolveSignerId(source),
-      targetEntityId: target,
-      tokenId: 1,
-      deliveryMode: 'instant',
-      description: 'Load testing',
-      route,
-    }));
+    // Stop may occur while pathfinding awaits. Never admit a new command after cancellation.
+    if (signal.aborted) return skip('Stopped before command admission');
+    await deps.submitRuntimeInput(
+      buildPaymentRuntimeInput({
+        entityId: source,
+        signerId: deps.resolveSignerId(source),
+        targetEntityId: target,
+        tokenId: 1,
+        deliveryMode: 'instant',
+        description: 'Load testing',
+        route,
+      }),
+    );
     return { status: 'submitted', reason: 'USDC payment submitted' };
   };
 
-  const attemptSwap = async (): Promise<LoadTestAttemptResult> => {
+  const attemptSwap = async (signal: AbortSignal): Promise<LoadTestAttemptResult> => {
     const runtime = deps.runtimeFunctions();
     const view = deps.swapView();
     const replica = deps.sourceReplica();
     const source = normalizeEntityId(deps.sourceEntityId());
     const hub = normalizeEntityId(deps.selectedHubEntityId());
     if (!runtime || !view || !replica || !source || !hub) return skip('Swap projection is not ready');
-    if (!replica.state.accounts.has(hub)) return skip('Selected hub Account is not committed');
+    const account = replica.state.accounts.get(hub);
+    if (!account) return skip('Selected hub Account is not committed');
     const jurisdiction = sourceJurisdiction(replica);
     const profile = hubProfile(view, hub);
     if (!jurisdiction || !profile) return skip('Selected hub jurisdiction profile is unavailable');
     const amount = rawStableAmount(runtime, deps.random, 10, 15);
-    const pairs = runtime.getDefaultSwapTradingPairs()
+    const pairs = runtime
+      .getDefaultSwapTradingPairs()
       .filter(pair => pair.baseTokenId === 1 || pair.quoteTokenId === 1);
     for (const pair of pairs) {
       const orientation = runtime.getSwapPairOrientation(pair.baseTokenId, pair.quoteTokenId);
       const wantTokenId = orientation.baseTokenId === 1 ? orientation.quoteTokenId : orientation.baseTokenId;
       const makerSide: 0 | 1 = orientation.baseTokenId === 1 ? 0 : 1;
-      const book = view.getPairBook(hub, orientation.pairId);
-      if (!book) continue;
-      const level = selectExternalSwapLevel(book, makerSide, source);
+      const level = selectExternalSwapLevel(deps.bestSwapLevel(hub, orientation.pairId, makerSide), source);
       if (!level) continue;
       if (level.stpPrevented) return skip('Self order blocks external liquidity', true);
       const prepared = runtime.requantizeRemainingSwapAtPrice(1, wantTokenId, amount, level.priceTicks);
       if (!prepared) continue;
+      const capacity = runtime.readAccountCapacity({
+        account: account.state,
+        ownerEntityId: source,
+        counterpartyEntityId: hub,
+        tokenId: 1,
+      });
+      if (!capacity.tokenActive || capacity.outCapacity < prepared.effectiveGive) {
+        return skip('Swap source Account has insufficient current capacity');
+      }
       const roles = resolveSameJSwapPartyRoles({
         sourceEntityId: source,
         hubEntityId: hub,
@@ -216,6 +231,7 @@ export const createLoadTestingController = (deps: LoadTestingControllerDeps): Re
         },
         runtimeFunctions: runtime,
       });
+      if (signal.aborted) return skip('Stopped before command admission');
       await deps.submitRuntimeInput(plan.runtimeInput);
       return { status: 'submitted', reason: 'Same-j USDC swap submitted' };
     }
@@ -223,6 +239,11 @@ export const createLoadTestingController = (deps: LoadTestingControllerDeps): Re
   };
 
   return {
-    attempt: lane => lane === 'pay' ? attemptPayment() : attemptSwap(),
+    attempt: async (lane, signal) =>
+      signal.aborted
+        ? skip('Stopped before command admission')
+        : lane === 'pay'
+          ? attemptPayment(signal)
+          : attemptSwap(signal),
   };
 };

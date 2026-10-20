@@ -18,6 +18,7 @@ export type LoadTestMetrics = Record<LoadTestLane, LoadTestLaneMetrics>;
 
 export type LoadTestSchedulerSnapshot = Readonly<{
   running: boolean;
+  draining: boolean;
   elapsedSeconds: number;
   metrics: LoadTestMetrics;
   lastResult: Readonly<Record<LoadTestLane, string>>;
@@ -34,7 +35,7 @@ type SchedulerDeps = Readonly<{
   random: () => number;
   setTimer: (run: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
   clearTimer: (timer: ReturnType<typeof setTimeout>) => void;
-  attempt: (lane: LoadTestLane) => Promise<LoadTestAttemptResult>;
+  attempt: (lane: LoadTestLane, signal: AbortSignal) => Promise<LoadTestAttemptResult>;
   onSnapshot: (snapshot: LoadTestSchedulerSnapshot) => void;
 }>;
 
@@ -68,6 +69,7 @@ export class LoadTestScheduler {
   #stopsAt = 0;
   #timer: ReturnType<typeof setTimeout> | null = null;
   #running = false;
+  #abort = new AbortController();
   #nextAt: Record<LoadTestLane, number> = { pay: 0, swap: 0 };
   #inFlight: Record<LoadTestLane, boolean> = { pay: false, swap: false };
   #metrics: LoadTestMetrics = { pay: emptyLaneMetrics(), swap: emptyLaneMetrics() };
@@ -79,12 +81,14 @@ export class LoadTestScheduler {
 
   start(config: LoadTestSchedulerConfig): void {
     if (this.#running) return;
+    if (this.#inFlight.pay || this.#inFlight.swap) throw new Error('LOAD_TEST_DRAIN_PENDING');
     if (!Number.isInteger(config.durationMinutes) || config.durationMinutes < 1 || config.durationMinutes > 100) {
       throw new Error(`LOAD_TEST_DURATION_INVALID:${config.durationMinutes}`);
     }
     if (!config.pay.enabled && !config.swap.enabled) throw new Error('LOAD_TEST_NO_LANE_ENABLED');
     if (config.pay.enabled) requireRate(config.pay.rate, 'pay');
     if (config.swap.enabled) requireRate(config.swap.rate, 'swap');
+    this.#abort = new AbortController();
     this.#config = config;
     this.#running = true;
     this.#startedAt = this.#deps.now();
@@ -92,7 +96,6 @@ export class LoadTestScheduler {
     this.#metrics = { pay: emptyLaneMetrics(), swap: emptyLaneMetrics() };
     this.#lastResult = { pay: '', swap: '' };
     for (const lane of ['pay', 'swap'] as const) {
-      this.#inFlight[lane] = false;
       this.#nextAt[lane] = config[lane].enabled
         ? this.#startedAt + this.#deps.random() * Math.min(500, laneIntervalMs(config, lane))
         : Number.POSITIVE_INFINITY;
@@ -104,6 +107,8 @@ export class LoadTestScheduler {
   stop(): void {
     if (!this.#running) return;
     this.#running = false;
+    this.#stopsAt = Math.min(this.#stopsAt, this.#deps.now());
+    this.#abort.abort();
     if (this.#timer) this.#deps.clearTimer(this.#timer);
     this.#timer = null;
     this.#emit();
@@ -132,12 +137,15 @@ export class LoadTestScheduler {
         continue;
       }
       this.#inFlight[lane] = true;
-      void this.#deps.attempt(lane)
+      void this.#deps
+        .attempt(lane, this.#abort.signal)
         .then(result => this.#record(lane, result))
-        .catch(error => this.#record(lane, {
-          status: 'failed',
-          reason: error instanceof Error ? error.message : String(error),
-        }))
+        .catch(error =>
+          this.#record(lane, {
+            status: 'failed',
+            reason: error instanceof Error ? error.message : String(error),
+          }),
+        )
         .finally(() => {
           this.#inFlight[lane] = false;
           this.#emit();
@@ -158,11 +166,18 @@ export class LoadTestScheduler {
   }
 
   #emit(): void {
-    const elapsedSeconds = this.#startedAt > 0
-      ? Math.max(0, Math.floor((Math.min(this.#deps.now(), this.#stopsAt || Number.POSITIVE_INFINITY) - this.#startedAt) / 1_000))
-      : 0;
+    const elapsedSeconds =
+      this.#startedAt > 0
+        ? Math.max(
+            0,
+            Math.floor(
+              (Math.min(this.#deps.now(), this.#stopsAt || Number.POSITIVE_INFINITY) - this.#startedAt) / 1_000,
+            ),
+          )
+        : 0;
     this.#deps.onSnapshot({
       running: this.#running,
+      draining: !this.#running && (this.#inFlight.pay || this.#inFlight.swap),
       elapsedSeconds,
       metrics: {
         pay: { ...this.#metrics.pay },

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useApp } from '../runtime/store';
 import type { ReactNode } from 'react';
@@ -56,6 +56,10 @@ export function Shell({ children }: { children: ReactNode }) {
   const wallet = useWallet(entityId);
   useRecoverySync();
   const assets = useExternalWalletSync(wallet.entityId, wallet.signerId);
+  const [contentMounted, setContentMounted] = useState(false);
+  useEffect(() => {
+    if (assets.ready) setContentMounted(true);
+  }, [assets.ready]);
   const batches = wallet.frame?.activeEntity?.core?.jBatchState;
   useEffect(() => {
     observeFundingBatches(wallet.entityId, [
@@ -111,9 +115,12 @@ export function Shell({ children }: { children: ReactNode }) {
         <JurisdictionBanner wallet={wallet} />
         {/* Asset refresh must not remount the guide and replay its chapter navigation. */}
         <Tour />
-        {assets.ready ? (
-          <>{children}</>
-        ) : (
+        {/* Preserve a flow's draft during refresh/entity changes without showing
+            stale balances or allowing commands before the new snapshot is ready. */}
+        <div hidden={!assets.ready} inert={!assets.ready} style={{ display: assets.ready ? 'contents' : 'none' }}>
+          {contentMounted || assets.ready ? children : null}
+        </div>
+        {!assets.ready ? (
           <section
             className="stack"
             role={assets.error && !assets.sourceAdvance ? 'alert' : 'status'}
@@ -135,7 +142,7 @@ export function Shell({ children }: { children: ReactNode }) {
               </>
             )}
           </section>
-        )}
+        ) : null}
       </main>
 
       <nav className={`tabbar${FLOW_ROUTES.has(pathname) ? ' flow' : ''}`} aria-label="Primary">

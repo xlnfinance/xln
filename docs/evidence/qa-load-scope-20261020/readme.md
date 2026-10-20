@@ -1,5 +1,13 @@
 # Browser scope and declaration requirements
 
+Update: the React Load Testing control and original browser contract have now
+been restored. The catalog contains 158 active cases; focused current evidence
+is in [wallet Cross and Load Testing](../wallet-cross-load-20261020/readme.md).
+The account below records the earlier retirement and original failure, not the
+current acceptance status. The original evidence remains unchanged.
+
+## Historical retirement before React restoration
+
 The full browser run on `7c88796501ed1b5a139302c512309fc619704686` stopped
 at **6 PASS, 1 FAIL, 151 not run, 0 skips**. Its failing Accounts Manage load
 case expected the old Svelte wallet context switcher after `/app` had entered

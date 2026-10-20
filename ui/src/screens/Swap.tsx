@@ -4,6 +4,7 @@ import { explainWalletError } from '@xln/frontend/lib/utils/ui/walletError';
 import { HOME, PageHead } from '../components/PageHead';
 import type { AccountState, RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
 import { getJurisdictionStackId } from '@xln/core/api/public/runtime-module';
+import { prepareSwapOrderForDimensions } from '@xln/core/swapbook/types';
 import { DeltaBar, DeltaCaption } from '../components/Bars';
 import { Orderbook, type BookSide } from '../components/Orderbook';
 import {
@@ -15,6 +16,7 @@ import {
   type BookLevel,
 } from '../runtime/financial/orderbook';
 import { crossBookMarket } from '../runtime/financial/cross-book';
+import { useSwapTokenCatalog } from '../runtime/financial/swap-assets/catalog';
 import { gossipProfile } from '../runtime/financial/roles';
 import { Icon } from '../components/Icons';
 import { TokenPicker } from '../components/TokenPicker';
@@ -123,10 +125,22 @@ export function Swap() {
     };
   }, [mode, targetEntity, targetHub, wallet.frameHeight]);
 
-  const giveMeta = getTokenMeta(giveTokenId);
-  const wantMeta = getTokenMeta(wantTokenId);
   const sourceStack = jurisdictionRef(wallet.frame);
   const targetStack = targetEntity?.jurisdiction ? getJurisdictionStackId(targetEntity.jurisdiction) : '';
+  const sourceTokens = useSwapTokenCatalog(wallet.entityId, wallet.signerId, sourceStack);
+  const targetTokens = useSwapTokenCatalog(
+    mode === 'cross' ? (targetEntity?.entityId ?? '') : '',
+    mode === 'cross' ? (targetEntity?.signerId ?? '') : '',
+    targetStack,
+  );
+  const receiveTokens = mode === 'cross' ? targetTokens : sourceTokens;
+  const giveMeta = getTokenMeta(giveTokenId, sourceTokens.catalog);
+  const wantMeta = getTokenMeta(wantTokenId, receiveTokens.catalog);
+  const assetsReady =
+    sourceTokens.ready &&
+    receiveTokens.ready &&
+    sourceTokens.catalog.some(token => token.tokenId === giveTokenId) &&
+    receiveTokens.catalog.some(token => token.tokenId === wantTokenId);
   const crossMarket = useMemo(() => {
     if (mode !== 'cross' || !hub || !targetHub || !sourceStack || !targetStack) return null;
     return crossBookMarket(
@@ -134,6 +148,16 @@ export function Swap() {
       { jurisdiction: targetStack, tokenId: wantTokenId, hubId: targetHub.entityId },
     );
   }, [mode, hub, targetHub, sourceStack, targetStack, giveTokenId, wantTokenId]);
+  const bookBaseId =
+    crossMarket?.baseTokenId ??
+    xln?.getSwapPairOrientation?.(giveTokenId, wantTokenId).baseTokenId ??
+    Math.max(giveTokenId, wantTokenId);
+  const bookMetadata = crossMarket
+    ? { base: crossMarket.sourceIsBase ? giveMeta : wantMeta, quote: crossMarket.sourceIsBase ? wantMeta : giveMeta }
+    : {
+        base: getTokenMeta(bookBaseId, sourceTokens.catalog),
+        quote: getTokenMeta(bookBaseId === giveTokenId ? wantTokenId : giveTokenId, sourceTokens.catalog),
+      };
   const bookHubId = crossMarket?.hubId ?? hub?.counterpartyId ?? '';
   const bookRelayUrl = gossipProfile(bookHubId)?.relays[0] ?? '';
   const bookHubLabel = wallet.names.get(bookHubId) || bookHubId.slice(0, 10);
@@ -147,18 +171,13 @@ export function Swap() {
     tokenA: giveTokenId,
     tokenB: wantTokenId,
     ownEntityId: wallet.entityId,
-    baseDecimals: getTokenMeta(
-      crossMarket?.baseTokenId ??
-        xln?.getSwapPairOrientation?.(giveTokenId, wantTokenId).baseTokenId ??
-        Math.max(giveTokenId, wantTokenId),
-    ).decimals,
+    baseDecimals: bookMetadata.base.decimals,
     relayUrl: bookRelayUrl,
     ...(crossMarket ? { crossMarket } : {}),
   });
   const pickLevel = (side: BookSide, level: Pick<BookLevel, 'priceTicks' | 'size'>): void => {
-    if (mode === 'cross' && !crossMarket) return;
-    const base = getTokenMeta(book.baseTokenId);
-    const quote = getTokenMeta(book.quoteTokenId);
+    if (!assetsReady || (mode === 'cross' && !crossMarket)) return;
+    const { base, quote } = bookMetadata;
     const selectedGive = side === 'ask' ? book.quoteTokenId : book.baseTokenId;
     // The target hub can own the book; spendable capacity still belongs to our source Account.
     const picked = pickBookLevel({
@@ -183,7 +202,7 @@ export function Swap() {
   // once, so it can never fight what the person types afterwards.
   const deskPick = useRef(false);
   useEffect(() => {
-    if (deskPick.current || !hub) return;
+    if (deskPick.current || !hub || !assetsReady) return;
     const side = params.get('side');
     const price = params.get('price');
     const size = params.get('size');
@@ -203,22 +222,23 @@ export function Swap() {
     }
     pickLevel(side, { priceTicks: BigInt(price), size: BigInt(size) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hub, params]);
+  }, [hub, params, assetsReady]);
 
   const giveToken = hub?.tokens.find(token => token.tokenId === giveTokenId) ?? null;
   const giveSpendable = giveToken?.derived.outCapacity ?? 0n;
 
   const parsedGive = useMemo(() => {
+    if (!assetsReady) return null;
     try {
       const value = parseAmount(giveText || '0', giveMeta.decimals);
       return value > 0n ? value : null;
     } catch {
       return null;
     }
-  }, [giveText, giveMeta.decimals]);
+  }, [giveText, giveMeta.decimals, assetsReady]);
   // Cross amounts require an explicit minimum or an explicit pick from their own venue.
   const impliedWantText = useMemo(() => {
-    if (mode === 'cross' || !book || wantText.trim() || !giveText.trim()) return '';
+    if (!assetsReady || mode === 'cross' || !book || wantText.trim() || !giveText.trim()) return '';
     let give: bigint;
     try {
       give = parseAmount(giveText, giveMeta.decimals);
@@ -226,30 +246,45 @@ export function Swap() {
       return '';
     }
     if (give <= 0n) return '';
-    const base = getTokenMeta(book.baseTokenId);
-    const quote = getTokenMeta(book.quoteTokenId);
+    const base = getTokenMeta(book.baseTokenId, sourceTokens.catalog);
+    const quote = getTokenMeta(book.quoteTokenId, sourceTokens.catalog);
     const quoteAtLevel = quoteAtBestLevel(book, giveTokenId, wantTokenId, give, base.decimals, quote.decimals);
     return quoteAtLevel ? plainAmount(quoteAtLevel.want, wantMeta.decimals) : '';
-  }, [mode, book, wantText, giveText, giveTokenId, wantTokenId, giveMeta.decimals, wantMeta.decimals]);
+  }, [
+    mode,
+    book,
+    wantText,
+    giveText,
+    giveTokenId,
+    wantTokenId,
+    giveMeta.decimals,
+    wantMeta.decimals,
+    assetsReady,
+    sourceTokens.catalog,
+  ]);
   const parsedWant = useMemo(() => {
+    if (!assetsReady) return null;
     try {
       const value = parseAmount(wantText || impliedWantText || '0', wantMeta.decimals);
       return value > 0n ? value : null;
     } catch {
       return null;
     }
-  }, [wantText, impliedWantText, wantMeta.decimals]);
+  }, [wantText, impliedWantText, wantMeta.decimals, assetsReady]);
 
   // Equal token ids on distinct jurisdictions identify different balances.
   const sameToken = mode === 'same' && giveTokenId === wantTokenId;
   const prepared = useMemo(() => {
     if (!xln || !parsedGive || !parsedWant || sameToken) return null;
     try {
-      return xln.prepareSwapOrder(giveTokenId, wantTokenId, parsedGive, parsedWant);
+      return prepareSwapOrderForDimensions(giveTokenId, wantTokenId, parsedGive, parsedWant, {
+        giveTokenDecimals: giveMeta.decimals,
+        wantTokenDecimals: wantMeta.decimals,
+      });
     } catch {
       return null;
     }
-  }, [xln, sameToken, giveTokenId, wantTokenId, parsedGive, parsedWant]);
+  }, [xln, sameToken, giveTokenId, wantTokenId, parsedGive, parsedWant, giveMeta.decimals, wantMeta.decimals]);
 
   const feeBps = useMemo(() => {
     if (!hub || mode !== 'same') return null;
@@ -292,6 +327,16 @@ export function Swap() {
 
   // Asset pickers invalidate an explicit pair-specific limit; Flip intentionally preserves both swapped amounts.
   const flip = (): void => {
+    if (!assetsReady) return;
+    if (mode === 'cross') {
+      if (!targetEntity || !targetHub || !hub) return;
+      // A cross asset is (Depository, token id). Reverse both owners and hub
+      // accounts, including when the two legs have the same local token id.
+      setTargetEntityId(wallet.entityId);
+      setTargetHubId(hub.counterpartyId);
+      setHubId(normalizeId(targetHub.entityId));
+      switchActiveEntity(targetEntity.entityId);
+    }
     setGiveTokenId(wantTokenId);
     setWantTokenId(giveTokenId);
     setGiveText(wantText);
@@ -419,6 +464,13 @@ export function Swap() {
       ? (swapMinimumError(book, giveTokenId, prepared) ?? swapPriceBandError(book, prepared.priceTicks))
       : null;
   const disabledReason =
+    (sourceTokens.error ||
+      receiveTokens.error ||
+      (!sourceTokens.ready || !receiveTokens.ready
+        ? 'Loading network token catalogs'
+        : !assetsReady
+          ? 'Choose an available token on each network'
+          : null)) ??
     (mode === 'cross'
       ? targetAccountError ||
         (!targetEntity || !targetHub ? 'Choose an available destination on the same hub runtime' : null)
@@ -499,6 +551,7 @@ export function Swap() {
               />
               <TokenPicker
                 tokenId={giveTokenId}
+                catalog={sourceTokens.catalog}
                 onChange={tokenId => {
                   if (tokenId !== giveTokenId) setWantText('');
                   setGiveTokenId(tokenId);
@@ -509,7 +562,13 @@ export function Swap() {
             </div>
           </div>
           <div className="flip">
-            <button type="button" onClick={flip} aria-label="Flip" data-testid="swap-flip">
+            <button
+              type="button"
+              onClick={flip}
+              aria-label="Flip"
+              data-testid="swap-flip"
+              disabled={!assetsReady || (mode === 'cross' && !crossMarket)}
+            >
               <Icon name="swap" size={16} />
             </button>
           </div>
@@ -543,6 +602,7 @@ export function Swap() {
               />
               <TokenPicker
                 tokenId={wantTokenId}
+                catalog={receiveTokens.catalog}
                 onChange={tokenId => {
                   if (tokenId !== wantTokenId) setWantText('');
                   setWantTokenId(tokenId);
@@ -628,8 +688,8 @@ export function Swap() {
               <div className="kv">
                 <span className="k">Limit price</span>
                 <span className="v num" data-testid="swap-limit-price">
-                  {formatMoney(prepared.priceTicks, 4, 4)} {getTokenMeta(prepared.quoteTokenId).symbol} per{' '}
-                  {getTokenMeta(prepared.baseTokenId).symbol}
+                  {formatMoney(prepared.priceTicks, 4, 4)} {prepared.side === 1 ? wantMeta.symbol : giveMeta.symbol} per{' '}
+                  {prepared.side === 1 ? giveMeta.symbol : wantMeta.symbol}
                 </span>
               </div>
               {mode === 'same' && (
@@ -809,6 +869,7 @@ export function Swap() {
               {showBook ? (
                 <Orderbook
                   book={book}
+                  metadata={bookMetadata}
                   hubLabel={bookHubLabel}
                   hubId={bookHubId}
                   relayUrl={bookRelayUrl}
@@ -948,6 +1009,7 @@ export function Swap() {
               {showBook ? (
                 <Orderbook
                   book={book}
+                  metadata={bookMetadata}
                   hubLabel={bookHubLabel}
                   hubId={bookHubId}
                   relayUrl={bookRelayUrl}

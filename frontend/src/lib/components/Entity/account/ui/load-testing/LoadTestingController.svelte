@@ -4,6 +4,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
   import { onDestroy } from 'svelte';
   import type { RuntimeInput, RuntimeReplica } from '@xln/core/api/public/runtime-module';
   import { get } from 'svelte/store';
+  import { getBookSideLevels } from '@xln/core/api/public/runtime-module';
   import { xlnFunctions } from '#lib/stores/xlnStore.ts';
   import type { PaymentPanelView } from '../../../payments/payment-panel-view';
   import type { SwapPanelRuntimeView } from '../../../swap/swap-panel-helpers';
@@ -31,6 +32,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
   let durationMinutes = 10;
   let snapshot: LoadTestSchedulerSnapshot = {
     running: false,
+    draining: false,
     elapsedSeconds: 0,
     metrics: {
       pay: { attempted: 0, submitted: 0, skipped: 0, failed: 0, stpPrevented: 0 },
@@ -70,6 +72,10 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
       return submitRuntimeInput(input);
     },
     random: Math.random,
+    bestSwapLevel: (hub, pair, side) => {
+      const book = swapRuntimeView?.getPairBook(hub, pair);
+      return book ? getBookSideLevels(book, side, 1)[0] ?? null : null;
+    },
   });
 
   const scheduler = new LoadTestScheduler({
@@ -77,7 +83,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
     random: Math.random,
     setTimer: (run, delayMs) => setTimeout(run, delayMs),
     clearTimer: timer => clearTimeout(timer),
-    attempt: lane => controller.attempt(lane),
+    attempt: (lane, signal) => controller.attempt(lane, signal),
     onSnapshot: next => snapshot = next,
   });
 
@@ -113,7 +119,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
         : 0,
     },
   } satisfies LoadTestingControllerState;
-  $: disabled = !activeIsLive || !liveRuntimeEnv || !submitRuntimeInput || !workspaceAccountId;
+  $: disabled = snapshot.draining || !activeIsLive || !liveRuntimeEnv || !submitRuntimeInput || !workspaceAccountId;
 
   onDestroy(() => scheduler.stop());
 </script>

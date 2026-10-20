@@ -5,7 +5,7 @@ import {
   API_BASE_URL,
   CROSS_J_SOURCE_COMMITTED_OR_ADVANCED_STATUSES,
   CrossDeltaSnapshot,
-  CrossResolveSnapshot,
+  CrossCloseSnapshot,
   CrossRuntimeWindow,
   RuntimeIdentity,
   TOKEN_SYMBOL_BY_ID,
@@ -802,253 +802,91 @@ export async function waitForCrossPullFlow(
   }
 }
 
-export async function readCrossResolveSnapshots(
+export async function readCrossCloseSnapshots(
   page: Page,
   entityId: string,
   counterpartyId: string,
-): Promise<CrossResolveSnapshot[]> {
+  orderId: string,
+): Promise<CrossCloseSnapshot[]> {
   return await page.evaluate(
-    ({ entityId, counterpartyId }) => {
-      const env = (window as CrossRuntimeWindow).__xln?.env();
-      const recordOf = (value: unknown): Record<string, unknown> =>
-        value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
-      const owner = String(entityId || '').toLowerCase();
-      const cp = String(counterpartyId || '').toLowerCase();
-      const out: CrossResolveSnapshot[] = [];
-      const seen = new Set<string>();
-
-      const accountMatches = (accountKey: string, rawAccount: unknown): boolean => {
-        const account = recordOf(rawAccount);
-        const left = typeof account.state?.leftEntity === 'string' ? account.state.leftEntity.toLowerCase() : '';
-        const right = typeof account.state?.rightEntity === 'string' ? account.state.rightEntity.toLowerCase() : '';
-        const canonicalCp =
-          typeof account.counterpartyEntityId === 'string' ? account.counterpartyEntityId.toLowerCase() : '';
-        return (
-          accountKey.toLowerCase() === cp ||
-          canonicalCp === cp ||
-          Boolean(left && right && ((left === owner && right === cp) || (right === owner && left === cp)))
-        );
-      };
-      const collectResolveSnapshots = (history: unknown, replicaKey: string, accountKey: string) => {
-        if (!(history instanceof Map)) return;
-        for (const [offerId, rawLifecycle] of history.entries()) {
-          const resolves = recordOf(rawLifecycle).resolves;
-          if (!Array.isArray(resolves)) continue;
-          for (const rawResolve of resolves) {
-            const resolve = recordOf(rawResolve);
-            const snapshotOfferId = String(offerId || '');
-            const height = Number(resolve.height ?? recordOf(rawLifecycle).lastUpdatedHeight ?? 0);
-            const fillRatio = Number(resolve.fillRatio || 0);
-            const key = [
-              String(replicaKey || ''),
-              String(accountKey || ''),
-              snapshotOfferId,
-              String(height),
-              String(fillRatio),
-              String(resolve.fillNumerator ?? '0'),
-              String(resolve.fillDenominator ?? '0'),
-              String(resolve.executionGiveAmount ?? '0'),
-              String(resolve.executionWantAmount ?? '0'),
-            ].join(':');
-            if (seen.has(key)) continue;
-            seen.add(key);
-            out.push({
-              offerId: snapshotOfferId,
-              height,
-              fillRatio: Number(resolve.fillRatio || 0),
-              fillNumerator: String(resolve.fillNumerator ?? '0'),
-              fillDenominator: String(resolve.fillDenominator ?? '0'),
-              cancelRemainder: Boolean(resolve.cancelRemainder),
-              executionGiveAmount: String(resolve.executionGiveAmount ?? '0'),
-              executionWantAmount: String(resolve.executionWantAmount ?? '0'),
-              comment: String(resolve.comment || ''),
-            });
+    async ({ entityId, counterpartyId, orderId }) => {
+      const runtime = (window as CrossRuntimeWindow).__xln;
+      const env = runtime?.env();
+      if (!runtime || !env) throw new Error('CROSS_CLOSE_RUNTIME_MISSING');
+      const api = await runtime.xln();
+      const owner = entityId.toLowerCase();
+      const cp = counterpartyId.toLowerCase();
+      const accounts = Array.from(env.state.eReplicas.values())
+        .filter(replica => replica.state.entityId.toLowerCase() === owner)
+        .flatMap(replica => {
+          const account = replica.state.accounts.get(cp);
+          return account ? [account] : [];
+        });
+      if (accounts.length === 0) throw new Error(`CROSS_CLOSE_ACCOUNT_MISSING:${owner}:${cp}`);
+      const height = Math.max(...accounts.map(account => account.currentHeight));
+      // This reader admits only persisted proposals with the other party's ACK.
+      // Match the order's signed lock before its close: an earlier USDT close or
+      // a live route status cannot establish this order's financial outcome.
+      const frames = await api.readPersistedAccountFrameHistory(env, owner, cp, height, {
+        maxAccountHeight: height,
+      });
+      const pullIds = new Set(
+        frames.flatMap(frame =>
+          frame.accountTxs.flatMap(tx =>
+            tx.type === 'cross_pull_lock' && tx.data.crossJurisdictionRoute.orderId === orderId ? [tx.data.pullId] : [],
+          ),
+        ),
+      );
+      return frames.flatMap(frame =>
+        frame.accountTxs.flatMap(tx => {
+          if (tx.type !== 'cross_pull_close' || !pullIds.has(tx.data.pullId)) return [];
+          const proof = tx.data.proof;
+          if (proof.orderId !== orderId || ![proof.sourcePullId, proof.targetPullId].includes(tx.data.pullId)) {
+            throw new Error(`CROSS_CLOSE_PROOF_IDENTITY_MISMATCH:${orderId}:${tx.data.pullId}`);
           }
-        }
-      };
-      const collectLiveRouteSnapshots = (state: Record<string, unknown>, replicaKey: string) => {
-        const routes = state.crossJurisdictionSwaps;
-        if (!(routes instanceof Map)) return;
-        for (const rawRoute of routes.values()) {
-          const route = recordOf(rawRoute);
-          const source = recordOf(route.source);
-          const target = recordOf(route.target);
-          const sourceUser = String(source.entityId || '').toLowerCase();
-          const sourceHub = String(source.counterpartyEntityId || '').toLowerCase();
-          const targetHub = String(target.entityId || '').toLowerCase();
-          const targetUser = String(target.counterpartyEntityId || '').toLowerCase();
-          const matchesAccount =
-            (sourceUser === owner && sourceHub === cp) || (targetUser === owner && targetHub === cp);
-          if (!matchesAccount) continue;
-          const fillRatio = Number(route.cumulativeFillRatio || 0);
-          const filledSource = BigInt(String(route.filledSourceAmount ?? '0'));
-          const filledTarget = BigInt(String(route.filledTargetAmount ?? '0'));
-          const executionGiveAmount = String(filledSource);
-          const executionWantAmount = String(filledTarget);
-          if (fillRatio <= 0 && executionGiveAmount === '0' && executionWantAmount === '0') continue;
-          const offerId = String(route.orderId || '');
-          const height = Number(route.updatedAt || route.createdAt || 0);
-          const key = [
-            String(replicaKey || ''),
-            cp,
-            offerId,
-            String(height),
-            String(fillRatio),
-            String(route.fillNumerator ?? '0'),
-            String(route.fillDenominator ?? '0'),
-            executionGiveAmount,
-            executionWantAmount,
-          ].join(':');
-          if (seen.has(key)) continue;
-          seen.add(key);
-          out.push({
-            offerId,
-            height,
-            fillRatio,
-            fillNumerator: String(route.fillNumerator ?? '0'),
-            fillDenominator: String(route.fillDenominator ?? '0'),
-            cancelRemainder: String(route.clearingPolicy || '') === 'cancel_and_clear',
-            executionGiveAmount,
-            executionWantAmount,
-            comment: '',
-          });
-        }
-      };
-
-      for (const [replicaKey, replica] of env?.state.eReplicas?.entries?.() || []) {
-        if (!String(replicaKey).toLowerCase().startsWith(`${owner}:`)) continue;
-        const state = recordOf(recordOf(replica).state);
-        const accounts = state.accounts;
-        if (!(accounts instanceof Map)) continue;
-        for (const [accountKey, rawAccount] of accounts.entries()) {
-          if (!accountMatches(String(accountKey || ''), rawAccount)) continue;
-          // Multiple replicas can expose the same bilateral account while one is
-          // one frame behind. Do not stop at the first match: the assertion needs
-          // the latest committed account snapshot, not whichever Map entry appears
-          // first in the browser runtime.
-          collectResolveSnapshots(
-            recordOf(rawAccount).swapOrderHistory,
-            String(replicaKey || ''),
-            String(accountKey || ''),
-          );
-          collectResolveSnapshots(
-            recordOf(rawAccount).swapClosedOrders,
-            String(replicaKey || ''),
-            String(accountKey || ''),
-          );
-        }
-        collectLiveRouteSnapshots(state, String(replicaKey || ''));
-      }
-      return out.sort(
-        (a, b) =>
-          a.height - b.height ||
-          a.offerId.localeCompare(b.offerId) ||
-          a.executionGiveAmount.localeCompare(b.executionGiveAmount) ||
-          a.executionWantAmount.localeCompare(b.executionWantAmount),
+          return [
+            {
+              orderId: proof.orderId,
+              height: frame.height,
+              stateHash: frame.stateHash,
+              pullId: tx.data.pullId,
+              fillRatio: proof.fillRatio,
+              closeMode: proof.closeMode,
+              cumulativeSourceAmount: proof.cumulativeSourceAmount.toString(),
+              cumulativeTargetAmount: proof.cumulativeTargetAmount.toString(),
+            },
+          ];
+        }),
       );
     },
-    { entityId, counterpartyId },
+    { entityId, counterpartyId, orderId },
   );
 }
 
-export async function waitForLatestCrossResolveSnapshot(
+export async function waitForCrossCloseSnapshot(
   page: Page,
   entityId: string,
   counterpartyId: string,
-  minimumCount: number,
-): Promise<CrossResolveSnapshot> {
-  try {
-    await expect
-      .poll(async () => (await readCrossResolveSnapshots(page, entityId, counterpartyId)).length, {
+  orderId: string,
+): Promise<CrossCloseSnapshot> {
+  let snapshots: CrossCloseSnapshot[] = [];
+  await expect
+    .poll(
+      async () => {
+        snapshots = await readCrossCloseSnapshots(page, entityId, counterpartyId, orderId);
+        return snapshots.length;
+      },
+      {
         timeout: 45_000,
         intervals: [250, 500, 1000],
-        message: `cross resolve snapshots must reach ${minimumCount}`,
-      })
-      .toBeGreaterThanOrEqual(minimumCount);
-  } catch (error) {
-    const debug = await page.evaluate(
-      ({ entityId, counterpartyId }) => {
-        const env = (window as CrossRuntimeWindow).__xln?.env();
-        const owner = String(entityId || '').toLowerCase();
-        const cp = String(counterpartyId || '').toLowerCase();
-        const out: any[] = [];
-        for (const [replicaKey, replica] of env?.state.eReplicas?.entries?.() || []) {
-          if (!String(replicaKey).toLowerCase().startsWith(`${owner}:`)) continue;
-          const state = replica?.state;
-          out.push({
-            replicaKey: String(replicaKey),
-            entityId: String(state?.entityId || ''),
-            profileName: String(state?.profile?.name || ''),
-            messages: Array.from(state?.messages || [])
-              .slice(-16)
-              .map(String),
-            accounts: Array.from(state?.accounts?.entries?.() || []).map(([accountKey, account]: [string, any]) => ({
-              accountKey,
-              matchesCounterparty:
-                String(accountKey || '').toLowerCase() === cp ||
-                String(account?.counterpartyEntityId || '').toLowerCase() === cp ||
-                [
-                  String(account?.state?.leftEntity || '').toLowerCase(),
-                  String(account?.state?.rightEntity || '').toLowerCase(),
-                ].includes(cp),
-              currentHeight: Number(account?.currentHeight || 0),
-              pendingTxs: Array.from(account?.pendingFrame?.accountTxs || []).map((tx: any) => String(tx?.type || '')),
-              mempoolTxs: Array.from(account?.mempool || []).map(
-                (tx: any) => `${String(tx?.type || '')}:${String(tx?.data?.offerId || '').slice(-8)}`,
-              ),
-              openOffers: Array.from(account?.state?.swapOffers?.entries?.() || []).map(
-                ([offerId, offer]: [string, any]) => ({
-                  offerId,
-                  cross: Boolean(offer?.crossJurisdiction),
-                  status: String(offer?.crossJurisdiction?.status || ''),
-                  fillSeq: Number(offer?.crossJurisdiction?.fillSeq || 0),
-                  ratio: Number(offer?.crossJurisdiction?.cumulativeFillRatio || 0),
-                }),
-              ),
-              history: Array.from(account?.swapOrderHistory?.entries?.() || []).map(
-                ([offerId, entry]: [string, any]) => ({
-                  offerId,
-                  resolves: Array.from(entry?.resolves || []).map((resolve: any) => ({
-                    height: Number(resolve?.height || 0),
-                    fillRatio: Number(resolve?.fillRatio || 0),
-                    executionGiveAmount: String(resolve?.executionGiveAmount ?? '0'),
-                    executionWantAmount: String(resolve?.executionWantAmount ?? '0'),
-                  })),
-                }),
-              ),
-              closed: Array.from(account?.swapClosedOrders?.entries?.() || []).map(
-                ([offerId, entry]: [string, any]) => ({
-                  offerId,
-                  resolves: Array.from(entry?.resolves || []).map((resolve: any) => ({
-                    height: Number(resolve?.height || 0),
-                    fillRatio: Number(resolve?.fillRatio || 0),
-                    executionGiveAmount: String(resolve?.executionGiveAmount ?? '0'),
-                    executionWantAmount: String(resolve?.executionWantAmount ?? '0'),
-                  })),
-                }),
-              ),
-            })),
-            routes: Array.from(state?.crossJurisdictionSwaps?.values?.() || []).map((route: any) => ({
-              orderId: String(route?.orderId || ''),
-              status: String(route?.status || ''),
-              fillRatio: Number(route?.cumulativeFillRatio || 0),
-              filledSourceAmount: String(route?.filledSourceAmount ?? '0'),
-              filledTargetAmount: String(route?.filledTargetAmount ?? '0'),
-              clearingPolicy: String(route?.clearingPolicy || ''),
-              updatedAt: Number(route?.updatedAt || 0),
-            })),
-          });
-        }
-        return out;
+        message: `signed cross close must exist exactly once for ${orderId}`,
       },
-      { entityId, counterpartyId },
-    );
-    console.log('[E2E cross resolve debug]', JSON.stringify({ entityId, counterpartyId, debug }, null, 2));
-    throw error;
-  }
-  const latest = (await readCrossResolveSnapshots(page, entityId, counterpartyId)).at(-1);
-  expect(latest, 'latest cross resolve snapshot must exist').toBeTruthy();
-  return latest!;
+    )
+    .toBe(1);
+  const snapshot = snapshots[0];
+  if (!snapshot) throw new Error(`CROSS_CLOSE_PROOF_MISSING:${orderId}`);
+  console.log('[E2E cross close proof]', JSON.stringify({ entityId, counterpartyId, ...snapshot }));
+  return snapshot;
 }
 
 export async function waitForCrossOffersCleared(

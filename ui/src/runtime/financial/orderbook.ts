@@ -24,6 +24,8 @@ export type BookLevel = {
   orders: number;
   /** True when one of this wallet's own offers rests here. */
   own: boolean;
+  /** Proven maker identities; absent ownership never establishes external liquidity. */
+  ownerIds: readonly string[];
 };
 
 export type BookView = {
@@ -79,7 +81,7 @@ type HostedAccountDoc = { state?: AccountState };
 type HostedAccountsPage = { items?: HostedAccountDoc[] };
 
 function foldLevels(
-  entries: Array<{ priceTicks: bigint; size: bigint; own: boolean }>,
+  entries: Array<{ priceTicks: bigint; size: bigint; own: boolean; ownerId: string }>,
   bestFirst: (a: bigint, b: bigint) => number,
   depth: number,
 ): BookLevel[] {
@@ -91,10 +93,12 @@ function foldLevels(
       total: 0n,
       orders: 0,
       own: false,
+      ownerIds: [],
     };
     level.size += entry.size;
     level.orders += 1;
     level.own = level.own || entry.own;
+    if (!level.ownerIds.includes(entry.ownerId)) level.ownerIds = [...level.ownerIds, entry.ownerId];
     byPrice.set(entry.priceTicks, level);
   }
   const levels = [...byPrice.values()].sort((a, b) => bestFirst(a.priceTicks, b.priceTicks)).slice(0, depth);
@@ -114,8 +118,8 @@ export function bookFromHostedAccounts(
   depth: number,
 ): Pick<BookView, 'bids' | 'asks'> {
   const own = normalizeId(ownEntityId);
-  const bids: Array<{ priceTicks: bigint; size: bigint; own: boolean }> = [];
-  const asks: Array<{ priceTicks: bigint; size: bigint; own: boolean }> = [];
+  const bids: Array<{ priceTicks: bigint; size: bigint; own: boolean; ownerId: string }> = [];
+  const asks: Array<{ priceTicks: bigint; size: bigint; own: boolean; ownerId: string }> = [];
   for (const doc of docs) {
     const state = doc.state;
     if (!state?.swapOffers) continue;
@@ -127,10 +131,10 @@ export function bookFromHostedAccounts(
       const isOwn = maker === own;
       if (offer.giveTokenId === pair.baseTokenId && offer.wantTokenId === pair.quoteTokenId) {
         // Maker sells base for quote: an ask, sized by what is still offered.
-        asks.push({ priceTicks: offer.priceTicks, size: offer.giveAmount, own: isOwn });
+        asks.push({ priceTicks: offer.priceTicks, size: offer.giveAmount, own: isOwn, ownerId: maker });
       } else if (offer.giveTokenId === pair.quoteTokenId && offer.wantTokenId === pair.baseTokenId) {
         // Maker buys base with quote: a bid, sized by the base still wanted.
-        bids.push({ priceTicks: offer.priceTicks, size: offer.wantAmount, own: isOwn });
+        bids.push({ priceTicks: offer.priceTicks, size: offer.wantAmount, own: isOwn, ownerId: maker });
       }
     }
   }
@@ -149,6 +153,7 @@ function relayLevels(levels: MarketSideLevel[], ownEntityId: string, lotScale: b
     size: BigInt(level.size) * lotScale,
     total: BigInt(level.total) * lotScale,
     orders: Number(level.orderCount ?? 1),
+    ownerIds: level.ownerIds ?? [],
     own: (level.ownerIds ?? []).some(id => normalizeId(id) === own),
   }));
 }

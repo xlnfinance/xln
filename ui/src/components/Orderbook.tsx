@@ -1,5 +1,5 @@
 import { formatMoney } from '../runtime/format';
-import { getTokenMeta } from '../runtime/token-meta';
+import { getTokenMeta, type TokenMeta } from '../runtime/token-meta';
 import { PRICE_SCALE, type BookLevel, type BookView } from '../runtime/financial/orderbook';
 
 export type BookSide = 'bid' | 'ask';
@@ -12,17 +12,16 @@ export function formatPrice(priceTicks: bigint): string {
 function Row({
   level,
   side,
-  base,
+  baseMeta,
   deepest,
   onPick,
 }: {
   level: BookLevel;
   side: BookSide;
-  base: number;
+  baseMeta: TokenMeta;
   deepest: bigint;
   onPick?: ((side: BookSide, level: BookLevel) => void) | undefined;
 }) {
-  const baseMeta = getTokenMeta(base);
   const Tag = onPick ? 'button' : 'div';
   return (
     <Tag
@@ -56,6 +55,7 @@ export function Orderbook({
   hubId,
   relayUrl,
   marketLabel,
+  metadata,
   onPick,
 }: {
   book: BookView;
@@ -63,10 +63,11 @@ export function Orderbook({
   hubId?: string;
   relayUrl?: string;
   marketLabel?: string;
+  metadata?: { base: TokenMeta; quote: TokenMeta };
   onPick?: ((side: BookSide, level: BookLevel) => void) | undefined;
 }) {
-  const baseMeta = getTokenMeta(book.baseTokenId);
-  const quoteMeta = getTokenMeta(book.quoteTokenId);
+  const baseMeta = metadata ? metadata.base : getTokenMeta(book.baseTokenId);
+  const quoteMeta = metadata ? metadata.quote : getTokenMeta(book.quoteTokenId);
   const empty = book.bids.length === 0 && book.asks.length === 0;
   const deepest = [...book.asks, ...book.bids].reduce((max, level) => (level.size > max ? level.size : max), 0n);
   const spreadPct =
@@ -125,7 +126,7 @@ export function Orderbook({
                 key={`a${level.priceTicks}`}
                 level={level}
                 side="ask"
-                base={book.baseTokenId}
+                baseMeta={baseMeta}
                 deepest={deepest}
                 onPick={onPick}
               />
@@ -152,7 +153,7 @@ export function Orderbook({
                 key={`b${level.priceTicks}`}
                 level={level}
                 side="bid"
-                base={book.baseTokenId}
+                baseMeta={baseMeta}
                 deepest={deepest}
                 onPick={onPick}
               />

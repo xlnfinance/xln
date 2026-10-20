@@ -37,7 +37,6 @@ import {
   readOpenDebugIncidents,
   selectCounterpartyInSwap,
   selectCrossRoute,
-  selectOrderbookPairByLabel,
   selectSourceChainInSwap,
   tokenAmount,
   waitForAccountReady,
@@ -62,7 +61,7 @@ import {
   waitForCrossPullFlow,
   waitForCrossRouteMaterialized,
   waitForCrossRouteStatus,
-  waitForLatestCrossResolveSnapshot,
+  waitForCrossCloseSnapshot,
 } from './e2e-cross-j-swap-helpers-b';
 import { allowDebugIncident, expect, test, type BrowserContext } from './global-setup.mts';
 import { ensureE2EBaseline } from './utils/e2e-baseline';
@@ -1174,84 +1173,69 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         }),
       );
       await timedStep('cross_j_stable_quote.open_swap', async () => {
-        await openSwapWorkspace(page);
-        await selectSourceChainInSwap(page, tronEntity.entityId);
-        await selectCounterpartyInSwap(page, tronHub.entityId);
-        await configureTokens(page, WETH, USDT);
-        await selectCrossRoute(page, testnetEntity.entityId);
+        await timedStep('cross_j_stable_quote.workspace', () => openSwapWorkspace(page));
+        await timedStep('cross_j_stable_quote.source', () => selectSourceChainInSwap(page, tronEntity.entityId));
+        await timedStep('cross_j_stable_quote.hub', () => selectCounterpartyInSwap(page, tronHub.entityId));
+        await timedStep('cross_j_stable_quote.tokens', () => configureTokens(page, WETH, USDT));
+        await timedStep('cross_j_stable_quote.route', () => selectCrossRoute(page, testnetEntity.entityId));
       });
 
       await expectCrossOrderbookReady(page, {
         titlePattern: /WETH\s*\(Tron\)\s*-\s*USDT\s*\(Testnet\)/,
         pairIdPattern: /^cross:stack:31338:[^/]+:2\/stack:31337:[^/]+:3$/,
       });
-      const tokenOptions = await page.evaluate(() => {
-        const optionTexts = (selector: string) =>
-          Array.from(document.querySelectorAll(`${selector} option`))
-            .map(option => String((option as HTMLOptionElement).textContent || '').trim())
-            .filter(Boolean);
-        return {
-          from: optionTexts('[data-testid="swap-ticket-from-token"]'),
-          to: optionTexts('[data-testid="swap-ticket-to-token"]'),
-        };
-      });
-      expect(tokenOptions.from, 'Tron source token list must expose Tron-only assets').toEqual(
-        expect.arrayContaining(['TRX', 'SUN']),
+      const expectCatalogs = async (tronInput: 'swap-give' | 'swap-want'): Promise<void> => {
+        for (const inputId of ['swap-give', 'swap-want'] as const) {
+          const trigger = page.getByTestId(inputId).locator('..').getByRole('button');
+          await trigger.click();
+          const options = page.getByRole('listbox');
+          await expect(options).toBeVisible();
+          for (const symbol of ['TRX', 'SUN']) {
+            await expect(
+              options.getByRole('option', { name: new RegExp(`^${symbol}\\b`) }),
+              `${inputId} must use its own jurisdiction's token catalog`,
+            ).toHaveCount(inputId === tronInput ? 1 : 0);
+          }
+          await trigger.click();
+          await expect(options).toHaveCount(0);
+        }
+      };
+      await expectCatalogs('swap-give');
+      await expectSwapAssetRoute(page, WETH, 'Tron', USDT, 'Testnet');
+      await expect(page.getByTestId('swap-give').locator('..').getByRole('button')).toHaveAccessibleName('WETH Tron');
+      await expect(page.getByTestId('swap-want').locator('..').getByRole('button')).toHaveAccessibleName(
+        'USDT Testnet',
       );
-      expect(
-        tokenOptions.to.some(label => label === 'TRX' || label === 'SUN'),
-        'Testnet target token list must not leak Tron-only assets',
-      ).toBe(false);
-      await expect(page.getByTestId('swap-ticket-from-network').locator('option:checked')).toContainText('Tron');
-      await expect(page.getByTestId('swap-ticket-to-network').locator('option:checked')).toContainText('Testnet');
       await expect(
-        page.getByTestId('orderbook-bid-row').first().locator('.price'),
+        visibleOrderbookRow(page, 'bid').locator('.bk-price'),
         'cross WETH/USDT price must be displayed as USDT per WETH, not inverted WETH per USDT',
-      ).toHaveText('2500.0000', { timeout: 10_000 });
+      ).toHaveText('2,500.0000', { timeout: 10_000 });
       await expectSwapTokens(page, WETH, USDT);
 
-      const dropdownPairLabel = await selectOrderbookPairByLabel(page, /USDT\s*\(Testnet\)\s*-\s*USDT\s*\(Tron\)/i);
-      expect(dropdownPairLabel).toMatch(/USDT\s*\(Testnet\)\s*-\s*USDT\s*\(Tron\)/i);
-      const marketSection = page.getByTestId('swap-market-section').first();
-      await expect
-        .poll(
-          async () => ({
-            mode: String((await marketSection.getAttribute('data-last-orderbook-pair-select-mode')) || ''),
-            commit: String((await marketSection.getAttribute('data-last-orderbook-pair-select-commit')) || ''),
-            route: String((await marketSection.getAttribute('data-last-orderbook-pair-select-route')) || ''),
-            value: String((await marketSection.getAttribute('data-last-orderbook-pair-select-value')) || ''),
-          }),
-          {
-            timeout: 5_000,
-            intervals: [50, 100, 200],
-            message: 'cross orderbook dropdown must commit the selected cross pair',
-          },
-        )
-        .toMatchObject({ mode: 'cross', commit: 'cross-committed' });
+      await timedStep('cross_j_stable_quote.select_stable_assets', () => configureTokens(page, USDT, USDT));
       await expectSwapTokens(page, USDT, USDT);
-      const panel = page.getByTestId('swap-orderbook').first().locator('.orderbook-panel').first();
-      await expect
-        .poll(async () => String((await panel.getAttribute('data-pair-id')) || ''), {
-          timeout: 10_000,
-          intervals: [100, 250, 500],
-          message: 'cross orderbook dropdown must switch the subscribed venue id',
-        })
-        .toMatch(/^cross:stack:31337:[^/]+:3\/stack:31338:[^/]+:3$/);
+      await expectCrossOrderbookReady(page, {
+        titlePattern: /USDT\s*\(Testnet\)\s*-\s*USDT\s*\(Tron\)/i,
+        pairIdPattern: /^cross:stack:31337:[^/]+:3\/stack:31338:[^/]+:3$/,
+      });
       await expectSwapAssetRoute(page, USDT, 'Tron', USDT, 'Testnet');
 
       await timedStep('cross_j_stable_quote.reverse_same_symbol_asset_identity', async () => {
-        await page.getByTestId('swap-ticket-flip').first().click();
+        await page.getByTestId('swap-flip').click();
       });
       await expectSwapAssetRoute(page, USDT, 'Testnet', USDT, 'Tron');
+      await expectCatalogs('swap-want');
       await expectCrossOrderbookReady(page, {
         titlePattern: /USDT\s*\(Testnet\)\s*-\s*USDT\s*\(Tron\)/,
         pairIdPattern: /^cross:stack:31337:[^/]+:3\/stack:31338:[^/]+:3$/,
       });
 
       await timedStep('cross_j_stable_quote.restore_original_cross_direction', async () => {
-        await page.getByTestId('swap-ticket-flip').first().click();
+        await page.getByTestId('swap-flip').click();
       });
       await expectSwapAssetRoute(page, USDT, 'Tron', USDT, 'Testnet');
+
+      await expectCatalogs('swap-give');
 
       await timedStep('cross_j_stable_quote.configure_reverse_stable_source', async () => {
         await configureTokens(page, USDT, WETH);
@@ -1262,9 +1246,9 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         pairIdPattern: /^cross:stack:31337:[^/]+:2\/stack:31338:[^/]+:3$/,
       });
       await expect(
-        page.getByTestId('orderbook-bid-row').first().locator('.price'),
+        visibleOrderbookRow(page, 'bid').locator('.bk-price'),
         'cross USDT/WETH must still display stable quote per WETH, not inverted WETH per USDT',
-      ).toHaveText('2500.0000', { timeout: 10_000 });
+      ).toHaveText('2,500.0000', { timeout: 10_000 });
       await expectSwapTokens(page, USDT, WETH);
     },
   );
@@ -1453,16 +1437,17 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob full', { orderId: bobFullOrderId }),
         ]);
         const bobFullResolve = await timedStep('cross_j_swap.full.bob_price_improvement', () =>
-          waitForLatestCrossResolveSnapshot(bobPage, bobRpc2.entityId, targetHubId, 1),
+          waitForCrossCloseSnapshot(bobPage, bobRpc2.entityId, targetHubId, bobFullOrderId),
         );
         expect(bobFullResolve.fillRatio, 'Bob close consumes the full signed target ratio').toBe(65_535);
-        expect(bobFullResolve.cancelRemainder, 'full fill closes the order without an explicit remainder cancel').toBe(
-          false,
+        expect(bobFullResolve.orderId, 'signed close belongs to Bob’s exact full order').toBe(bobFullOrderId);
+        expect(bobFullResolve.closeMode, 'full fill closes the order without an explicit remainder cancel').toBe(
+          'full',
         );
-        expect(bobFullResolve.executionGiveAmount, 'The route retains the signed 78 USDC dispute ceiling').toBe(
+        expect(bobFullResolve.cumulativeSourceAmount, 'The route retains the signed 78 USDC dispute ceiling').toBe(
           tokenAmount(USDC, 78n).toString(),
         );
-        expect(bobFullResolve.executionWantAmount, 'Bob receives exactly the committed 0.03 WETH target').toBe(
+        expect(bobFullResolve.cumulativeTargetAmount, 'Bob receives exactly the committed 0.03 WETH target').toBe(
           (tokenAmount(WETH, 3n) / 100n).toString(),
         );
         const bobFullAfter = await readCrossState(bobPage, bobRpc2, targetHubId);
@@ -1615,9 +1600,11 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         await timedStep('cross_j_swap.partial.alice_cancel_clear_button', async () => {
           const beforeClear = await readCrossState(alicePage, alice, hubId);
           expect(beforeClear.pulls, 'Alice partial source pull must be locked before Clear + Close').toBeGreaterThan(0);
-          const clearButton = alicePage.getByTestId('cross-swap-clear').first();
+          const clearButton = alicePage
+            .locator(`[data-testid="cross-order-row"][data-order-id="${alicePartialOrderId}"]`)
+            .getByTestId('cross-order-cancel-clear');
           await expect(clearButton).toBeVisible({ timeout: 20_000 });
-          await clearButton.click({ force: true });
+          await clearButton.click();
           await flushRuntime(alicePage, 5);
         });
 
