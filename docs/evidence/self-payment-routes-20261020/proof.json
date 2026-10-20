@@ -1,0 +1,78 @@
+{
+  "baseSHA": "1174460cd74044a1da7ca585d3c391b8ff37a608",
+  "sourceSHA256": {
+    "core/pathfinding/pathfinding.ts": "76e2dc2fc7aafc0099a0c04b47045a5461e149ecdfff99d915685d2dbd4e8072",
+    "core/__tests__/pathfinding/three-hub-capacity.test.ts": "e2a19c25c0a2d07d511cbc8af54faa6903b9a1be8588de6bdfc462853a965968",
+    "tests/e2e/payments/e2e-ahb-payment.spec.ts": "ee8676fcf892252f5cab19099c57e4e6b9d1c696d3c5d2dd46f755ab6bab8f9c"
+  },
+  "firstProductionFailure": "Full AHB browser reached valid A->H1->H2->A setup but Pay had no quote: PathFinder rejected every source===target query. HTLC envelope already permits cycles with at least two unique intermediates.",
+  "change": "Allow only the terminal return to source after two or more unique intermediates; keep Account fee/capacity checks, funding-first-hop restriction and bounded search. Current React fixture retains all financial/reload assertions and removes the FAST early return.",
+  "evidence": {
+    "l1Red": {
+      "record": "self-route-l1-red-01.result.json",
+      "exitCode": 1,
+      "seconds": 1.5896189580000002,
+      "sourceUnchanged": true,
+      "logSHA256": "d659f4bab05c93f5c2248eefdde9cf4cd2a8e572ebeb0b215d716f55096a2737"
+    },
+    "l1Green": {
+      "record": "self-route-l1-formatted-01.result.json",
+      "exitCode": 0,
+      "seconds": 1.491678208,
+      "sourceUnchanged": true,
+      "logSHA256": "e2cb885da6140d2199e90a19ee0747265757124e8ac0cf4fce01edd36b0e84ca"
+    },
+    "originalOwningStrictFailure": {
+      "record": "self-route-ahb-owning-01.result.json",
+      "exitCode": 1,
+      "seconds": 161.464648208,
+      "sourceUnchanged": true,
+      "logSHA256": "793099ca3cad66aa2a20153b4e7cb785afa91b080361e12e55246bed307dea38"
+    },
+    "owningGreen": {
+      "record": "self-route-ahb-owning-02.result.json",
+      "exitCode": 0,
+      "seconds": 112.113956917,
+      "sourceUnchanged": true,
+      "logSHA256": "f04d3e0ca67be447c848e060a1e4394b550216990bbb711fb46528592843a13a"
+    }
+  },
+  "l1": {
+    "passed": 20,
+    "total": 20,
+    "assertions": 63,
+    "scope": "Captured live-profile self-route capacity boundaries and canonical fees, routing metadata, quote index"
+  },
+  "owningBrowser": {
+    "passed": 1,
+    "failed": 0,
+    "strictHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 1792522513782,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    },
+    "run": "20261020-185404-876",
+    "buildInputSHA256": "070454a6c2650499d1a5acbfacea25433d4fecff25e66e3e05b2d04d74a01cac",
+    "recipientBaseUnits": ["10000000", "5000000", "3000000"],
+    "selfRoute": "A->H1->H2->A; real HtlcReceived/Finalized, zero unresolved locks",
+    "recovery": "Both independent wallets reloaded and unlocked; same runtime identities and exact balances",
+    "negativeCase": "Overspend has no quote, disabled submit and unchanged balance. Exact source/target/token/retry warning is required and retained as expected; no blanket warning allowance."
+  },
+  "limitations": [
+    "Private EVM browser evidence, not public Ethereum/native TRON or mainnet.",
+    "Final immutable-SHA financial flows, exact unit/test/check, full158 browser, release34, soak60 and public deployment remain required.",
+    "Original failures retained; 117446 financial evidence cannot certify this changed financial source."
+  ]
+}

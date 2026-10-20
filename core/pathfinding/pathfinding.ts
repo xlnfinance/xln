@@ -45,7 +45,7 @@ export class PathFinder {
     maxRoutes: number = 100,
     fundingAccountId?: string,
   ): PaymentRoute[] {
-    if (source === target) return [];
+    const isSelfRoute = source === target;
     if (!this.graph.nodes.has(source) || !this.graph.nodes.has(target)) return [];
 
     const routes: PaymentRoute[] = [];
@@ -77,7 +77,7 @@ export class PathFinder {
       const current = queue.shift()!;
 
       // Found target - build route
-      if (current.node === target) {
+      if (current.node === target && current.path.length > 1) {
         const route = this.buildRoute(current.path, amount, tokenId);
         if (route && this.capacityFits(route, tokenId, Boolean(fundingAccountId))) {
           routes.push(route);
@@ -94,8 +94,11 @@ export class PathFinder {
         // Skip if wrong token or disabled
         if (edge.tokenId !== tokenId || edge.disabled) continue;
 
-        // Skip if already in path (no loops)
-        if (current.path.includes(edge.to)) continue;
+        // The HTLC envelope permits self-pay only with two or more unique
+        // intermediates. Close that cycle once; never repeat an intermediate
+        // or advertise a zero-hop / same-Account round trip as a payment.
+        const closesSelfRoute = isSelfRoute && edge.to === target && current.path.length >= 3;
+        if (current.path.includes(edge.to) && !closesSelfRoute) continue;
 
         // Recipient principal is a lower bound for every edge. Exact fees are
         // checked on the completed route, on the Account that actually locks them.
@@ -151,11 +154,22 @@ export class PathFinder {
       amounts[i - 1] = calculateRequiredInboundForDesiredForward(amounts[i]!, edge.feePPM, edge.baseFee);
     }
     const hops = edges.map((edge, i) => ({
-      from: edge.from, to: edge.to, fee: i === 0 ? 0n : amounts[i - 1]! - amounts[i]!, feePPM: edge.feePPM,
+      from: edge.from,
+      to: edge.to,
+      fee: i === 0 ? 0n : amounts[i - 1]! - amounts[i]!,
+      feePPM: edge.feePPM,
     }));
-    const probability = edges.reduce((value, edge, i) => edge.capacity > 0n
-      ? value * Math.exp(-2 * Number(amounts[i]!) / Number(edge.capacity)) : value, 1);
-    return { path, hops, totalFee: amounts[0]! - amount, totalAmount: amounts[0]!,
-      probability: Math.max(0.01, Math.min(1, probability)) };
+    const probability = edges.reduce(
+      (value, edge, i) =>
+        edge.capacity > 0n ? value * Math.exp((-2 * Number(amounts[i]!)) / Number(edge.capacity)) : value,
+      1,
+    );
+    return {
+      path,
+      hops,
+      totalFee: amounts[0]! - amount,
+      totalAmount: amounts[0]!,
+      probability: Math.max(0.01, Math.min(1, probability)),
+    };
   }
 }
