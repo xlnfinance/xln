@@ -1,0 +1,367 @@
+{
+  "at": "2026-10-20T04:53:55.231955+00:00",
+  "baseSHA": "2f1ac7efcaa2f8395d9c8b2f4da5b3b2d3a6fb36",
+  "candidateStatus": "owned changes; full check/commit/release outstanding",
+  "implementationHashes": {
+    "jurisdictions/scripts/deploy-chain-matrix.cjs": "d701bbbea6ee49abc1611cbf19114df62f48a09cccd107c534b8fc93eae7a00d",
+    "core/__tests__/operations/release/tron-unsigned-deployment.test.ts": "7c0930258e501face64b7ec56fcb4914b9e75e48e75ec752765310279b8b7526"
+  },
+  "commands": {
+    "native-cross-recovery-2f1ac-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "native-cross-recovery-2f1ac-01",
+        "--timeout-ms",
+        "180000",
+        "--",
+        "bun",
+        "scripts/tron/native-stand.ts",
+        "--cross-swap-restore"
+      ],
+      "exitCode": 0,
+      "seconds": 37.69717625,
+      "sourceUnchanged": true,
+      "logSHA256": "af9e8ea05809d7c9cea6a58cd88aa8cbbf43041570ab5575fa690fe00d50d9bc",
+      "resultSha256": "67f496d1dfcb7cd8c2f4a4962afab5dcc4abfb4631c2dbb9250b32db61b67147"
+    },
+    "native-cross-exit-2f1ac-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "native-cross-exit-2f1ac-01",
+        "--timeout-ms",
+        "180000",
+        "--",
+        "bun",
+        "scripts/tron/native-stand.ts",
+        "--cross-withdraw"
+      ],
+      "exitCode": 0,
+      "seconds": 74.594174958,
+      "sourceUnchanged": true,
+      "logSHA256": "9c1ded22bed57b8cf6b89189bad812fce297e7078e643618a707ea9b2ea0c248",
+      "resultSha256": "7d154c7b91f6c886196ee1e9da722778098522f46fb13bf8a888e531fd00c92d"
+    },
+    "native-cross-exit-restore-2f1ac-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "native-cross-exit-restore-2f1ac-01",
+        "--timeout-ms",
+        "180000",
+        "--",
+        "bun",
+        "scripts/tron/native-stand.ts",
+        "--cross-withdraw-restore"
+      ],
+      "exitCode": 0,
+      "seconds": 38.672994417000005,
+      "sourceUnchanged": true,
+      "logSHA256": "26e0ee9b24cf40f206669e2ad32844a1d7d0761a3895bf6ceaf61e1eb1e29236",
+      "resultSha256": "0bf93460735189bcd5d41240aaec3f5f8d33225b4ff2d55aa697881f28c40485"
+    },
+    "tron-unsigned-l1-02": {
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/operations/release/tron-unsigned-deployment.test.ts",
+        "core/__tests__/operations/release/mainnet-chain-deploy-wiring.test.ts",
+        "core/__tests__/operations/release/tron-runtime-code.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 1.739400042,
+      "sourceUnchanged": true,
+      "logSHA256": "c41f8696493d3d98f94529d892d7d24193d59fd3ab27ab0cfaf218808f315240",
+      "resultSha256": "665b64c8327a59241fa454f163bb977b7e03f69f34337a6d06367acebc654e5d"
+    },
+    "tron-unsigned-native-vector-03": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "tron-unsigned-native-vector-03",
+        "--timeout-ms",
+        "180000",
+        "--",
+        "bun",
+        "scripts/tron/native-stand.ts",
+        "--",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/tron-unsigned-native-vector-02.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 23.123957709,
+      "sourceUnchanged": true,
+      "logSHA256": "d96ad636362448c3ad02c9808dbc7990d04008274ef689f92cd8a0dce946374d",
+      "resultSha256": "02e6d7abb37353b16c67bee28b8ee48cc92ce504b113ab5f38694d20fc4aebc9"
+    },
+    "nile-unsigned-stack-01": {
+      "command": [
+        "env",
+        "-u",
+        "TRON_NILE_PRIVATE_KEY",
+        "-u",
+        "DEPLOYER_PRIVATE_KEY",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/nile-unsigned-stack-01.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 4.361755666,
+      "sourceUnchanged": true,
+      "logSHA256": "d5398835fd61ad4d8b44744b443a8baafc39fe272501e7f060b964f9034652f1",
+      "resultSha256": "4edc1267caa06604e28151275fd9df490a3da5b42a2c8bf2d212e6fed69807e1"
+    },
+    "nile-binding-current-2f1ac-01": {
+      "command": [
+        "env",
+        "-u",
+        "TRON_NILE_PRIVATE_KEY",
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "nile-binding-current-2f1ac-01",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "run",
+        "test:tron:nile"
+      ],
+      "exitCode": 1,
+      "seconds": 3.062438875,
+      "sourceUnchanged": true,
+      "logSHA256": "02dda4c74f96550629eaa4dc56565ffc9a95816fec2a9c2acfe36e4dc5288f2c",
+      "resultSha256": "761e01b49502fe0abe6a6adcea6ebc41c48c6ad18f8717d40e09e96257f725c3"
+    },
+    "nile-faucet-browser-02": {
+      "command": ["bun", "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/nile-faucet-browser-02.ts"],
+      "exitCode": 0,
+      "seconds": 26.314032875,
+      "sourceUnchanged": true,
+      "logSHA256": "2803bc8262f5f60ad7d41e6872799951dec6959455f2b1ef0419001a24c9f056",
+      "resultSha256": "8bb2abf8d4baf8e1e474c4215f40fc80b411330aa2d614acd3fcbbeb3d9d77c6"
+    }
+  },
+  "nativeExit": {
+    "passed": 2,
+    "expected": 2,
+    "amountAtomic": "10000000",
+    "onchain": {
+      "collateral": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "foundationTokens": {
+        "__xlnType": "BigInt",
+        "value": "999990000000"
+      },
+      "hubReserve": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "hubTokens": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "userReserve": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "userTokens": {
+        "__xlnType": "BigInt",
+        "value": "10000000"
+      }
+    },
+    "anchors": [
+      {
+        "frameHash": "0x8f5f3e494a0a4fcded04939b63b42f285c17e36c4899f9f3a3d8f0992a7a43b4",
+        "height": 87,
+        "postStateHash": "0x10a979c0cbb1725ad11f1143298eb9ddd7c1f750bf6eee25b4af9485bd4f0093",
+        "runtimeId": "0xbc5795505911836788913ed909cf20a8558997dc"
+      },
+      {
+        "frameHash": "0xbff65eef8110c55539bdafa91dc7344c60df7ac4b3370ef2af863e27ec87a826",
+        "height": 48,
+        "postStateHash": "0xfad983d9383b901d35bc8ecb1b41d8fc5d69fceebecd5bd2853ff57a4f8d6fee",
+        "runtimeId": "0x04d31cf1ca238bdaba7e619670b5d11c988d92fd"
+      }
+    ],
+    "accountPairs": 4,
+    "restoreSubmissions": 0,
+    "originalExitFilesUnchanged": 528,
+    "scope": "Private native TVM with actual tokens, signed deposit/collateral/automatic withdrawal and cold WAL recovery. Not public issuer USDT or Ethereum/TRON mainnet."
+  },
+  "unsignedNativeVector": {
+    "passed": 8,
+    "total": 8,
+    "signatures": 0,
+    "broadcasts": 0,
+    "scope": "Current canonical unsigned builder exactly reproduces8historical actual nativeTVM creation transactions; not new deployments or public mainnet",
+    "rows": [
+      {
+        "name": "Account",
+        "transactionId": "82bb17d0f9d11b96700bbd490cce5ceef6e0451708eb9ccba3ebadc5519d2eb0",
+        "predictedAddress": "417070bbaede33433491330801b7152dfe614055f7",
+        "rawDataSha256": "8a7398c93428b91f27970fb5c1a8ef1707ca22557c199fa82c6a1f57190d2191",
+        "energyUsed": 4574954,
+        "blockNumber": 7
+      },
+      {
+        "name": "DepositoryBounds",
+        "transactionId": "f6fb4ddc40f1fff189982c79b10ee79f9895aef0a3049dc223b9d034cc4989e5",
+        "predictedAddress": "41e2c6a17cd95e74343f5dfc64f8443cf1f11614a5",
+        "rawDataSha256": "8b8703d9d7f42d7d968468ee3f67e7eab868cdcc4a3bafe013a1954e2e5d02e6",
+        "energyUsed": 933580,
+        "blockNumber": 7
+      },
+      {
+        "name": "HashLadderRegistry",
+        "transactionId": "89a4f8baf0c1586d5c7e5212298759585ac7fdfd783de3773a90f2e6c6a9fb6c",
+        "predictedAddress": "4173d214f95904302e8c209b4f983a1cfb10a56487",
+        "rawDataSha256": "d16f3d5897342bef50514982deda44f6ec14cdc297e0dc98a1d6bae488c62332",
+        "energyUsed": 328982,
+        "blockNumber": 7
+      },
+      {
+        "name": "NftCustody",
+        "transactionId": "1d78799163f6521afc4129a7390c78e1b38e90b7f14c1e2c7253c7cf9d0d606a",
+        "predictedAddress": "410af8921fd92276bd825a08b5af2a35b161c28d7f",
+        "rawDataSha256": "007754c25a2d9e52fb8ef7cd1486353544cf0327776b508eecdb4310b12073e9",
+        "energyUsed": 422269,
+        "blockNumber": 7
+      },
+      {
+        "name": "HankoVerifier",
+        "transactionId": "c502c069f4f199d825b4057e7e7f7c5d3da9d288fdd3c2b75d9d0555270db226",
+        "predictedAddress": "4163d28e2c63a660e259b99fae97c7974757666969",
+        "rawDataSha256": "dc4821367afe43a974fa8c6850d822f9f47cd8527bde1ba6c7bcc83791471045",
+        "energyUsed": 1062113,
+        "blockNumber": 7
+      },
+      {
+        "name": "EntityProvider",
+        "transactionId": "d4ed0761b8056585640f7ebbbe473245640f8d7500bd65e4d9cc809aedb41c31",
+        "predictedAddress": "41facd5d8fe0758467b36c865168f9c6ad3aa5553b",
+        "rawDataSha256": "dc13fcc472296a817fd11a7933b554d8c1657482082ccf34df0ee21a3c56e84b",
+        "energyUsed": 4096545,
+        "blockNumber": 10
+      },
+      {
+        "name": "Depository",
+        "transactionId": "efc680dc69cc23c331612bb7ca9d7f6fbf45746d7edf1b39bcb4764a17b04e63",
+        "predictedAddress": "41781ade3209b06eb073dad3333b0aa2277e530cdb",
+        "rawDataSha256": "58b48afe8d950ff078cf77eba8b4dcad1d341cc1a06d0d13472f0391587d1023",
+        "energyUsed": 4508932,
+        "blockNumber": 13
+      },
+      {
+        "name": "DeltaTransformer",
+        "transactionId": "fc21b832e24055a1ad8fcd45143c9b039d68eba8b5d4354f00508ae5f7961e00",
+        "predictedAddress": "41de809ced5f6e0a6ceadec250d6923c6cd3b0ff22",
+        "rawDataSha256": "53b33f5cf4ad2e185e2eb28ee141268ecd09414f832917b740de541b05946f22",
+        "energyUsed": 1677762,
+        "blockNumber": 7
+      }
+    ]
+  },
+  "nileCreationEstimates": {
+    "chainId": 3448148188,
+    "endpoint": "https://nile.trongrid.io",
+    "publicOwner": "TSbKEPV1778MRVRuJdRfgW79H6ABB2KVbC",
+    "energyFeeSun": 100,
+    "bandwidthFeeSunPerByte": 1000,
+    "passed": 8,
+    "total": 8,
+    "totalCreationEnergy": 17664767,
+    "totalCreationEnergyBurnSun": "1766476700",
+    "totalTransactionCostSun": "UNKNOWN: bandwidth, binding/listing and resource state not fully simulated",
+    "signatures": 0,
+    "broadcasts": 0,
+    "scope": "Unsigned Nile creation planning packet. TAPOS expires; rebuilding it changes linked addresses. Creation estimates do not prove linked runtime execution or public financial readiness."
+  },
+  "nileCreationRows": [
+    {
+      "name": "Account",
+      "artifactHash": "766929c24ee9ca8806ffa5c80c48c1f93baf7a65680e2c736d29031def3e8da9",
+      "energyRequired": 4583890,
+      "energyBurnSun": "458389000",
+      "rawDataBytes": 25112
+    },
+    {
+      "name": "DepositoryBounds",
+      "artifactHash": "53aeccef4c9b0502c8bed9588ea9154b770c29965ca3a2cfca6c9ec82158f1ce",
+      "energyRequired": 940874,
+      "energyBurnSun": "94087400",
+      "rawDataBytes": 4894
+    },
+    {
+      "name": "HashLadderRegistry",
+      "artifactHash": "63a7393b52529fbbec3175d194e038c9389b60a698dd69b2fedcb6cb2a36a660",
+      "energyRequired": 334123,
+      "energyBurnSun": "33412300",
+      "rawDataBytes": 2126
+    },
+    {
+      "name": "NftCustody",
+      "artifactHash": "4a4416b4a6548b05bab2be0f1b1e9971e65cf52172115c64cae59e30dc82cc73",
+      "energyRequired": 428867,
+      "energyBurnSun": "42886700",
+      "rawDataBytes": 2307
+    },
+    {
+      "name": "DeltaTransformer",
+      "artifactHash": "b3683a5362c70f685e2b9ac5defe4672f283c1b3075b70fc9933b5de19fb9147",
+      "energyRequired": 1684316,
+      "energyBurnSun": "168431600",
+      "rawDataBytes": 9575
+    },
+    {
+      "name": "HankoVerifier",
+      "artifactHash": "d2ab389d20a77c8a11dddad8f2c59957fe13202313277d2500489e275dbac486",
+      "energyRequired": 1070411,
+      "energyBurnSun": "107041100",
+      "rawDataBytes": 6026
+    },
+    {
+      "name": "EntityProvider",
+      "artifactHash": "3b33e2dc2b4d8bbe81d11ef1e6796b1a94ec497c069f4736984eb0dac9c5b2db",
+      "energyRequired": 4104547,
+      "energyBurnSun": "410454700",
+      "rawDataBytes": 32062
+    },
+    {
+      "name": "Depository",
+      "artifactHash": "000109159730212fdffdb0a9bf07559cb4fa7e0127d897482525208a7087f7fe",
+      "energyRequired": 4517739,
+      "energyBurnSun": "451773900",
+      "rawDataBytes": 27874
+    }
+  ],
+  "qualification": {
+    "nativeFixture": "Private JavaTRON TVM plus Anvil; not public issuer USDT/mainnet. Native exit preceded unsigned deployer extraction; core/runtime unchanged.",
+    "unsignedPacket": "8 linked unsigned creation transactions saved outside repo. TAPOS expired; any rebuild changes txIDs and dependent addresses. Not an executable approval.",
+    "rejectedAttempts": [
+      "vector01 booted only because Bun consumed separator; no L2 credit",
+      "vector02 compared first creation then failed HTTP405 at misconfigured SolidityNode; no full L2 credit",
+      "energy01 failed local provider import before network; corrected in02"
+    ],
+    "faucet": "Official Nile faucet did not load in real Studio Chromium: navigation15s timeout, no DOM, no screenshot,0clicks,0submissions. Collector exit0 is not faucet success.",
+    "publicBlockers": [
+      "Configured Nile EntityProvider shareDepository() reverts",
+      "Dedicated Nile and Sepolia test signers unfunded at external preflight",
+      "Designated mainnet signer unknown; no testnet key reuse",
+      "Binding/token registration/financial public flows and finality/recovery unverified",
+      "Exact unit/test/check, full browser/release/soak pending"
+    ]
+  }
+}

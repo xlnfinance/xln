@@ -341,7 +341,10 @@ const linkBytecode = (artifact, libraries) => {
   return linked;
 };
 
-const deployTronContract = async (tronWeb, contractName, parameters = [], libraries = {}, preparedTransaction) => {
+// Build the exact deployment bytes without accessing a key or broadcasting.
+// A supplied TAPOS header also makes preparation offline and reproducible;
+// changing it changes the transaction id and every downstream linked address.
+const prepareTronContract = async (tronWeb, contractName, parameters = [], libraries = {}, blockHeader) => {
   const artifact = loadTronArtifact(contractName);
   const bytecode = linkBytecode(artifact, libraries);
   const options = {
@@ -353,11 +356,15 @@ const deployTronContract = async (tronWeb, contractName, parameters = [], librar
     originEnergyLimit: Number(process.env.TRON_ORIGIN_ENERGY_LIMIT || '10000000'),
     parameters,
   };
-  const previous = preparedTransaction ? await tronWeb.trx.getTransaction(preparedTransaction) : undefined;
-  const transaction = await tronWeb.transactionBuilder.createSmartContract(
-    { ...options, ...(previous ? { blockHeader: previous.raw_data } : {}) },
+  return tronWeb.transactionBuilder.createSmartContract(
+    { ...options, ...(blockHeader ? { blockHeader } : {}) },
     tronWeb.defaultAddress.base58,
   );
+};
+
+const deployTronContract = async (tronWeb, contractName, parameters = [], libraries = {}, preparedTransaction) => {
+  const previous = preparedTransaction ? await tronWeb.trx.getTransaction(preparedTransaction) : undefined;
+  const transaction = await prepareTronContract(tronWeb, contractName, parameters, libraries, previous?.raw_data);
   if (
     preparedTransaction &&
     (transaction.txID !== preparedTransaction || transaction.raw_data_hex !== previous.raw_data_hex)
@@ -701,6 +708,7 @@ if (require.main === module) {
 module.exports = {
   jurisdictionEntry,
   deployTron,
+  prepareTronContract,
   deployTronContract,
   tronRuntimeCodeHash,
   evmStablecoinFor,
