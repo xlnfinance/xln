@@ -1,0 +1,507 @@
+{
+  "baseSHA": "4ac74baec4c582173037bf7854d8fb6281bbefc1",
+  "scope": "Two-path QA patch; no production wallet/runtime changes. Exact local production-build browser gate, not new public proof.",
+  "source": {
+    "tests/e2e/product/e2e-ui-screenshots.spec.ts": "fab6924d01b52af1dd589de01ffe71e3eb3b7cc676e3b20ebf4dd927a63e015b",
+    "tests/utils/browser/visual/wallet-screenshots.ts": "e3197af484988a290a3083a3c32afff26e258e53567e94879a95e9df443742e5"
+  },
+  "firstFailure": {
+    "result": "e2e-full-4ac74-01.result.json",
+    "passed": 5,
+    "failed": 1,
+    "notRun": 152,
+    "error": "Retired Svelte context-current selector on actual React onboarding",
+    "logSHA256": "3e8ba7a1243330cf51ca6788f4a6dce4bf026c61b3105bbe6f61504e6bff9fe1"
+  },
+  "exact": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "react-visual-exact-03",
+      "--timeout-ms",
+      "7200000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/product/e2e-ui-screenshots.spec.ts::ui screenshot smoke captures main tabs across viewports",
+      "--pw-project=chromium",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--prewait-health=reset",
+      "--strict-browser-health",
+      "--preserve-artifacts"
+    ],
+    "exitCode": 0,
+    "seconds": 289.56314254200004,
+    "sourceUnchanged": true,
+    "logSHA256": "09dcd167f3f059f75853ba1cc70a240c3c2f6cf55794476dac3e62029e51df0b",
+    "candidate": {
+      "candidateId": "cd773d08bf36c66f7a18e47efb80a3a182b3d2f980d086e3262506914e6e8775",
+      "gitHead": "4ac74baec4c582173037bf7854d8fb6281bbefc1",
+      "codeHash": "9b74f8a7fd995312b761c3a8aff4b38f9f98a948f66e72d18cefca196871f85f",
+      "gateConfigHash": "7e001184dbf9ff8fbb3aab87600635b75db0e445f044fa7debab34a385117226"
+    },
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "flaky": 0,
+    "viewports": 4,
+    "screenshots": 56,
+    "browserHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 0,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    }
+  },
+  "archive": {
+    "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/react-visual-exact-03-private.tar",
+    "bytes": 41553920,
+    "sha256": "bccedbc5387b3a9cc3a5bf0b96491acd2df2417715b472a75918a439e78735d8",
+    "originalRetained": true
+  },
+  "images": [
+    {
+      "name": "desktop-accounts-dispute-controls.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "4e0f05408a358ee3c1ac5ec5f4072bf29e78256906d683f31205d4c82a038c06"
+    },
+    {
+      "name": "desktop-accounts-expanded.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "bb2872b0c7d156a1cee99f2d2186e4540535537375b7682ab7f0dbe7be6a8971"
+    },
+    {
+      "name": "desktop-accounts-frames.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "36a103d9168e9c2953fc742a6c1ea6fb65053408f00f18c9b776435bc905ba10"
+    },
+    {
+      "name": "desktop-accounts-history.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "3d742a163e6d5bb6c92512a911d649da2c3402d7cc351a7ffb7116c264d6addc"
+    },
+    {
+      "name": "desktop-accounts-move.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "3e10367dcb8c59cd5596b6e7b51babec1c67b75ba084b564e4b11da29b2bfc03"
+    },
+    {
+      "name": "desktop-accounts-pay.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "21429fed4d3d7f1d44b6fe61af0b4a660a6431fe624ed70f4b7a8bb5de04a771"
+    },
+    {
+      "name": "desktop-accounts-receive.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "5573c6a5d9ac8b1ff602d1001dea75e21a59d13c34481814d270c2b2c04f1460"
+    },
+    {
+      "name": "desktop-accounts.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "e8d70249734a08ef0c9688c845577db1b64fc2a7d21b8ee9f9ed1fba7ab7b785"
+    },
+    {
+      "name": "desktop-assets.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "146a60882f2c783a7b6cc4b12f7949f21fd6c380dd859a495f036a2fd65519e3"
+    },
+    {
+      "name": "desktop-settings.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "571dd324f0ca4b497f931cb0809720f50060092c3b3ca8e369b24948bab84097"
+    },
+    {
+      "name": "desktop-swap-base.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "51f589ce4cc765c3324b64836dcac1ba234d8cc114fdcff403bfc7720db8e83f"
+    },
+    {
+      "name": "desktop-swap-hub-selected.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "1172d8cceaa8d24ae4a0cc7ff4a6fef2c17eb3f12e9b6952218a5f870f19e635"
+    },
+    {
+      "name": "desktop-swap-route-selected.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "a81bc7cdb297ef54dd2484d8f9d26e9bce692dccdd351b3881d514def8d9b764"
+    },
+    {
+      "name": "desktop-swap-token-selected.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "eaf3b85b798de63afc47ce5f22e931d0397ddeedbb417731004fe1df8880b031"
+    },
+    {
+      "name": "laptop-accounts-dispute-controls.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "d98a8b9be5dfe1fb5de2afd1417ed8cbdd9bf47be5eb82cce9d739698282b307"
+    },
+    {
+      "name": "laptop-accounts-expanded.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "18c6ee7f26033e777b7b4e2c1c3015984b3e8c82341a4544b016ba82716f06a3"
+    },
+    {
+      "name": "laptop-accounts-frames.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "8e3ec6506476c400f7fbbb50408050833a81cc62aad61b5e7028def5aec88351"
+    },
+    {
+      "name": "laptop-accounts-history.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "d15517b23acc851f3e81d7a9e1cbc1c2e3dbe5524587c2a624cca34ae2883d5a"
+    },
+    {
+      "name": "laptop-accounts-move.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "bd0dba7f420e281794d02ac50b4d538fa6b9ed08fcf67feaa6ff312ad8b1ba90"
+    },
+    {
+      "name": "laptop-accounts-pay.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "72db6a7052841a24bd8d1290589264d7bce2c84554399f7335729aed83b6b835"
+    },
+    {
+      "name": "laptop-accounts-receive.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "1411bbf3b9e3ab3b34f765c225358d0c5b825c62fb3ec62f6b06cb59ff52110f"
+    },
+    {
+      "name": "laptop-accounts.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "7ccae5f6a1f172fc14617f1a50e12d45edb36b3d3603a2ebb7a81616cce460c9"
+    },
+    {
+      "name": "laptop-assets.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "2be2c00a80da35cac8814d2bb4a61d0b294cf94e258a0657b3d908df67645f85"
+    },
+    {
+      "name": "laptop-settings.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "c8a0cae22b89f88a7c35de70ba3ff90303dc258102020989bc8115884e11375e"
+    },
+    {
+      "name": "laptop-swap-base.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "9475ac5b06f94fad71f87d6a6b9df320381d65949d2a844b240afb4596c32a25"
+    },
+    {
+      "name": "laptop-swap-hub-selected.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "38857d6b96ac842f89f3d86309296ef79f249ff50828b94906af1975197bb4a6"
+    },
+    {
+      "name": "laptop-swap-route-selected.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "e43213210fbed1dffb1706ca7d8328ef67b0d3c57488f1440ecf290eeec32a96"
+    },
+    {
+      "name": "laptop-swap-token-selected.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "cc68263fac71b507b4e3e9dd04e86146bff5bd650272e30331f0a4bcbc006899"
+    },
+    {
+      "name": "wide-accounts-dispute-controls.png",
+      "width": 2560,
+      "height": 1440,
+      "sha256": "f9a79cfdd333f29d6c76dd1bf011a9ed4ca8e903902745e5054f3412aa8171e6"
+    },
+    {
+      "name": "wide-accounts-expanded.png",
+      "width": 2560,
+      "height": 1440,
+      "sha256": "82355d6b39c23cb86b8688edcc89bc7aa732610291fc71e3ae96b5f5f6218777"
+    },
+    {
+      "name": "wide-accounts-frames.png",
+      "width": 2560,
+      "height": 1440,
+      "sha256": "46bb086fb7e1ccd191d6efe9d747b7a5b9150a7b070d6de3fadbd862601968f8"
+    },
+    {
+      "name": "wide-accounts-history.png",
+      "width": 2560,
+      "height": 1440,
+      "sha256": "618070a8d6c96c3d4d2e6ff7e28b09ab8d36fe7b1cb2d75f0933048a99673378"
+    },
+    {
+      "name": "wide-accounts-move.png",
+      "width": 2560,
+      "height": 1440,
+      "sha256": "b82aac5946888840fbc55a9edf342e7eb230108a9b8204db47e4f52dfa9e509c"
+    },
+    {
+      "name": "wide-accounts-pay.png",
+      "width": 2560,
+      "height": 1440,
+      "sha256": "90b1aad94129170a92f1fbf7afcacdd6090299b90f809079dcbe75adca65a6e1"
+    },
+    {
+      "name": "wide-accounts-receive.png",
+      "width": 2560,
+      "height": 1440,
+      "sha256": "a85003551de26423a9eea050ad6d0c1f168d1587171079812beeec60f4556c63"
+    },
+    {
+      "name": "wide-accounts.png",
+      "width": 2560,
+      "height": 1440,
+      "sha256": "dd6fd6751d2ea884336137b96b5606dc53086baf9a10cf562384331b5d964f42"
+    },
+    {
+      "name": "wide-assets.png",
+      "width": 2560,
+      "height": 1440,
+      "sha256": "a6a98d1cc0c49b9f0768d91a7335a585ca1022ef08d1e93d3780b9dc2f0eeb63"
+    },
+    {
+      "name": "wide-settings.png",
+      "width": 2560,
+      "height": 1440,
+      "sha256": "5dfff8a95856d70e845792b5935fb33f1aeae6a3623935bbfbeacd4517179192"
+    },
+    {
+      "name": "wide-swap-base.png",
+      "width": 2560,
+      "height": 1440,
+      "sha256": "10888776ce86e9e29c280c3988f7867c2d699dd7955a25f2518bd2b1fe411331"
+    },
+    {
+      "name": "wide-swap-hub-selected.png",
+      "width": 2560,
+      "height": 1440,
+      "sha256": "602657c2f1a65b63a097685737f97c89855f2e69418997dfabc1efb5ae1ff175"
+    },
+    {
+      "name": "wide-swap-route-selected.png",
+      "width": 2560,
+      "height": 1440,
+      "sha256": "4274bea2fd615fd18ae1820ff3c8f2ac4866ebb96c897879c7fb425091760620"
+    },
+    {
+      "name": "wide-swap-token-selected.png",
+      "width": 2560,
+      "height": 1440,
+      "sha256": "1e29a54dfe409e610f6b0421ab80f5547a39c067a0060670f4f2e9768e5c2fcb"
+    },
+    {
+      "name": "mobile-iphone15pro-accounts-dispute-controls.png",
+      "width": 393,
+      "height": 659,
+      "sha256": "82ece0ddfc52b3e63d26286366b66e03042079767e3388fdefc5c4afa4ba04e1"
+    },
+    {
+      "name": "mobile-iphone15pro-accounts-expanded.png",
+      "width": 393,
+      "height": 659,
+      "sha256": "b426ac6eb19b7ef17c1f234d84df4cdfb3b18a37ccd2a6ad89b2bca73b558192"
+    },
+    {
+      "name": "mobile-iphone15pro-accounts-frames.png",
+      "width": 393,
+      "height": 659,
+      "sha256": "2e69ffecd043a75cc3d4ac19f00e23d578793be6f7879bf39ab48f7f749e0da2"
+    },
+    {
+      "name": "mobile-iphone15pro-accounts-history.png",
+      "width": 393,
+      "height": 659,
+      "sha256": "649005e5c3752ed59ea5a0bbc308241ecef8955354c5e040a8d895f1472debe3"
+    },
+    {
+      "name": "mobile-iphone15pro-accounts-move.png",
+      "width": 393,
+      "height": 659,
+      "sha256": "66090acc376e5e44ef317271f520c7321cb75f609a74caff792196f4d09fda36"
+    },
+    {
+      "name": "mobile-iphone15pro-accounts-pay.png",
+      "width": 393,
+      "height": 659,
+      "sha256": "8fea2fb38b8135e2bc1c8d7b83c8d6674f676656a89d43f8259453304f44ca32"
+    },
+    {
+      "name": "mobile-iphone15pro-accounts-receive.png",
+      "width": 393,
+      "height": 659,
+      "sha256": "b3a076acfd5afbfd9ae7d663aa1964b198191c3d22b01371edd3ad97c9d6ebb7"
+    },
+    {
+      "name": "mobile-iphone15pro-accounts.png",
+      "width": 393,
+      "height": 659,
+      "sha256": "3e9ed91d1b7ea33baf76e037ad2e1abc0b22990b6cb54c92221c6ffffd8b769b"
+    },
+    {
+      "name": "mobile-iphone15pro-assets.png",
+      "width": 393,
+      "height": 659,
+      "sha256": "b7508def62c4283ddd47e92590ba4498d3d0cf296cfcb8b7dbcf0d4c8b71c2a7"
+    },
+    {
+      "name": "mobile-iphone15pro-settings.png",
+      "width": 393,
+      "height": 659,
+      "sha256": "b53a7caa4ff98f25b00f38c21fd8edc641b53d32fb1476757f553ed17e53f294"
+    },
+    {
+      "name": "mobile-iphone15pro-swap-base.png",
+      "width": 393,
+      "height": 659,
+      "sha256": "4f308ea150a9a2836dedfaafe04e7915d3c1d0cfca8fc828b2e0b9ebdc807159"
+    },
+    {
+      "name": "mobile-iphone15pro-swap-hub-selected.png",
+      "width": 393,
+      "height": 659,
+      "sha256": "135593c9105d1036065fdf51e1f7a45e819feed28bc6543d936a26878d887571"
+    },
+    {
+      "name": "mobile-iphone15pro-swap-route-selected.png",
+      "width": 393,
+      "height": 659,
+      "sha256": "df74d59b34bc73eac9a55ef7164a7bcfa5db75aa766d2fb1b33e694760344037"
+    },
+    {
+      "name": "mobile-iphone15pro-swap-token-selected.png",
+      "width": 393,
+      "height": 659,
+      "sha256": "db677e44703cfea6b45123f4c51dbd0889ed5402f7d925078b3d845a9972890d"
+    }
+  ],
+  "limitations": [
+    "All four contexts use actual disposable test wallets and100USDC offchain funding, three hub Accounts. Additional hub credit is10000USDC; no claim of old three-token credit fixture.",
+    "Screenshots cover current rendered controls and actual funding/signed history. No Pay/Swap/Cross/Move/dispute execution is claimed by this visual scenario.",
+    "Full158browser suite/release/soak and public nativeTRON/mainnet remain open. Original failed runs retained; ledger cleared only by successful canonical exact rerun.",
+    "Private raw browser/runtime artifacts are excluded from public manifest. Image visibility review is separate from automated assertions."
+  ],
+  "beforeRelocation": {
+    "source": {
+      "tests/e2e/product/e2e-ui-screenshots.spec.ts": "a9d0636c627da3ffdb8e9e319b9f9c7cd4c830e5e5dbb6e0f939cd16a3ee649a",
+      "tests/utils/react-wallet-screenshots.ts": "df138c4bffd78e60b8e232de9bda8e7d68e2d4d3f63a65a7ed5d47f8af9e39e4"
+    },
+    "exact": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "react-visual-exact-02",
+        "--timeout-ms",
+        "7200000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/product/e2e-ui-screenshots.spec.ts::ui screenshot smoke captures main tabs across viewports",
+        "--pw-project=chromium",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--prewait-health=reset",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "exitCode": 0,
+      "seconds": 238.668052333,
+      "sourceUnchanged": true,
+      "logSHA256": "3a1f63668d606e25bb1c5f77dd416699c45dcca4c0aae51f07c53c6c21e7f35b",
+      "candidate": {
+        "candidateId": "de86c261d0e9c127fc7961fc43ceef76819bb170013b9ee07a5b09eabdb08ea9",
+        "gitHead": "4ac74baec4c582173037bf7854d8fb6281bbefc1",
+        "codeHash": "0dd775b907fc60507479bcdd130d6780c9467c16c3390b5731cdaf37c07a90e6",
+        "gateConfigHash": "7e001184dbf9ff8fbb3aab87600635b75db0e445f044fa7debab34a385117226"
+      },
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "viewports": 4,
+      "screenshots": 56,
+      "browserHealth": {
+        "issueCount": 0,
+        "errorCount": 0,
+        "warningCount": 0,
+        "networkFailureCount": 0,
+        "httpErrorCount": 0,
+        "severity": "OK",
+        "reason": "Browser event stream is clean",
+        "since": 0,
+        "owner": "browser",
+        "evidence": [
+          {
+            "label": "issues",
+            "value": 0
+          }
+        ]
+      }
+    },
+    "archive": {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/react-visual-exact-02-private.tar",
+      "bytes": 43653120,
+      "sha256": "5fed87f563e6a239e5c6e30e96b46bc96c318065e8c7b0a294610a63e0c05272",
+      "originalRetained": true
+    }
+  },
+  "relocation": "Initialcheck rejectedtests/utils11>10. Moved unchanged helper into browser/visual, adjusted two imports. FocusedfolderwidthPASS; owningbrowser rerun03PASS. No limit bypass.",
+  "visualReview": {
+    "run": "react-visual-exact-02",
+    "reviewed": 56,
+    "total": 56,
+    "reportSHA256": "4ebfc06c2561f57cc8f10fccb6cf0085e8bc4eed2d1039f3e579683d756f84d5",
+    "limitations": [
+      "No blank/fullscreenloading/grosslayout failure/readablesecrets. QRpayload notdecoded.",
+      "Wide Home recentactivity stillloading inonecapture; mobilecaptures do not include everyoffscreencontrol. Actualclickassertions separate.",
+      "Can send/receive dashes are intentional Allassets mode with no selectedtoken; HomeAside formats dash when tokenundefined. Not a financialfault.",
+      "Final03 automated56captureproof is separate; prior02 visualinspection not relabelled as03inspection."
+    ]
+  }
+}
