@@ -6,18 +6,11 @@
  * Idempotent: safe to run multiple times.
  */
 
-import {
-  enqueueRuntimeInput,
-  main,
-  waitForRuntimeWorkDrained,
-} from '../core/runtime.ts';
-import {
-  deriveSignerKeySync,
-  deriveSignerAddressSync,
-  registerSignerKey,
-} from '../core/account/crypto';
+import { enqueueRuntimeInput, main, waitForRuntimeWorkDrained } from '../core/runtime.ts';
+import { deriveSignerKeySync, deriveSignerAddressSync, registerSignerKey } from '../core/account/crypto';
 import { encodeBoard, hashBoard } from '../core/entity/factory';
 import { createStructuredLogger } from '../core/support/logger';
+import { getPerfMs } from '../core/support/time';
 import { requireJurisdictionBlockTimeMs } from '../core/orchestrator/mesh/mesh-jurisdictions';
 import type { ConsensusConfig } from '../core/entity/types';
 import type { RuntimeReplica } from '../core/runtime/types';
@@ -88,25 +81,54 @@ const deriveHubSigner = (seed: string, signerLabel: string): { signerAddress: st
 const HUB_BOOTSTRAP_DRAIN_TIMEOUT_MS = 10_000;
 
 const drainBootstrapInput = async (env: RuntimeReplica, stage: string): Promise<void> => {
-  const drained = await waitForRuntimeWorkDrained(
-    env,
-    HUB_BOOTSTRAP_DRAIN_TIMEOUT_MS,
-    0,
-  );
-  if (!drained) throw new Error(`HUB_BOOTSTRAP_DRAIN_TIMEOUT:${stage}`);
+  const startedAt = getPerfMs();
+  const initialHeight = env.state.height;
+  const drained = await waitForRuntimeWorkDrained(env, HUB_BOOTSTRAP_DRAIN_TIMEOUT_MS, 0);
+  if (drained) return;
+  const state = env.infrastructure;
+  bootstrapLog.error('hub.drain_timeout', {
+    stage,
+    elapsedMs: getPerfMs() - startedAt,
+    initialHeight,
+    height: env.state.height,
+    framePhase: state?.runtimeFramePhase ?? null,
+    processing: Boolean(state?.processingPromise),
+    loop: Boolean(state?.loopPromise),
+    wakeRequested: state?.wakeRequested ?? false,
+    stateMutationInFlight: state?.stateMutationInFlight ?? false,
+    inFlightEntityInputs: state?.inFlightEntityInputs ?? 0,
+    runtimeTxs: env.runtimeMempool.runtimeTxs.map(tx => tx.type),
+    entityInputs: env.runtimeMempool.entityInputs.length,
+    jInputs: env.runtimeMempool.jInputs?.length ?? 0,
+    pendingOutputs: env.pendingOutputs?.length ?? 0,
+    pendingNetworkOutputs: env.pendingNetworkOutputs?.length ?? 0,
+    networkInbox: env.networkInbox?.length ?? 0,
+    entities: [...env.state.eReplicas.values()].map(replica => ({
+      entityId: replica.entityId,
+      height: replica.state.height,
+      hubConfigCommitted: Boolean(replica.state.hubRebalanceConfig),
+      mempool: replica.mempool.map(tx => tx.type),
+      proposal: Boolean(replica.proposal),
+      lockedFrame: Boolean(replica.lockedFrame),
+      accounts: replica.state.accounts.size,
+    })),
+  });
+  throw new Error(`HUB_BOOTSTRAP_DRAIN_TIMEOUT:${stage}`);
 };
 
 const findHubReplica = (env: RuntimeReplica, entityId: string) =>
-  Array.from(env.state.eReplicas.entries())
-    .find(([key]) => key.startsWith(`${entityId}:`))?.[1];
+  Array.from(env.state.eReplicas.entries()).find(([key]) => key.startsWith(`${entityId}:`))?.[1];
 
 const resolveJurisdiction = (env: RuntimeReplica, requestedName?: string) => {
-  const normalizedRequested = String(requestedName || '').trim().toLowerCase();
-  const name = (normalizedRequested && env.state.jReplicas
-      ? Array.from(env.state.jReplicas.keys()).find((key) => key.toLowerCase() === normalizedRequested)
-      : undefined)
-    || env.activeJurisdiction
-    || (env.state.jReplicas ? Array.from(env.state.jReplicas.keys())[0] : undefined);
+  const normalizedRequested = String(requestedName || '')
+    .trim()
+    .toLowerCase();
+  const name =
+    (normalizedRequested && env.state.jReplicas
+      ? Array.from(env.state.jReplicas.keys()).find(key => key.toLowerCase() === normalizedRequested)
+      : undefined) ||
+    env.activeJurisdiction ||
+    (env.state.jReplicas ? Array.from(env.state.jReplicas.keys())[0] : undefined);
   if (!name || !env.state.jReplicas) return null;
   const jr = env.state.jReplicas.get(name);
   if (!jr) return null;
@@ -121,7 +143,10 @@ const resolveJurisdiction = (env: RuntimeReplica, requestedName?: string) => {
   };
 };
 
-export async function bootstrapHub(env?: RuntimeReplica, config?: Partial<HubConfig>): Promise<{ entityId: string; signerId: string } | null> {
+export async function bootstrapHub(
+  env?: RuntimeReplica,
+  config?: Partial<HubConfig>,
+): Promise<{ entityId: string; signerId: string } | null> {
   const hubConfig: HubConfig = { ...DEFAULT_CONFIG, ...(config || {}) };
   const { signerAddress } = deriveHubSigner(hubConfig.seed, hubConfig.signerId);
   bootstrapLog.info('hub.start', {
@@ -152,17 +177,19 @@ export async function bootstrapHub(env?: RuntimeReplica, config?: Partial<HubCon
 
   if (!replicaExists) {
     enqueueRuntimeInput(env, {
-      runtimeTxs: [importEntity({
-        entityId,
-        signerId: signerAddress,
-        data: {
-          config: consensusConfig,
-          isProposer: true,
-          profileName: hubConfig.name,
-          position: hubConfig.position || { x: 0, y: 0, z: 0 },
-        },
-        entitySeed: hubConfig.seed,
-      })],
+      runtimeTxs: [
+        importEntity({
+          entityId,
+          signerId: signerAddress,
+          data: {
+            config: consensusConfig,
+            isProposer: true,
+            profileName: hubConfig.name,
+            position: hubConfig.position || { x: 0, y: 0, z: 0 },
+          },
+          entitySeed: hubConfig.seed,
+        }),
+      ],
       entityInputs: [],
     });
     await drainBootstrapInput(env, 'entity-import');
@@ -204,10 +231,14 @@ export async function bootstrapHub(env?: RuntimeReplica, config?: Partial<HubCon
       baseFee: hubConfig.baseFee ?? 0n,
       swapTakerFeeBps: hubConfig.swapTakerFeeBps ?? 1,
       disputeAutoFinalizeMode: hubConfig.disputeAutoFinalizeMode ?? 'auto',
-      ...(hubConfig.minCollateralThreshold !== undefined ? { minCollateralThreshold: hubConfig.minCollateralThreshold } : {}),
+      ...(hubConfig.minCollateralThreshold !== undefined
+        ? { minCollateralThreshold: hubConfig.minCollateralThreshold }
+        : {}),
       ...(hubConfig.c2rWithdrawSoftLimit !== undefined ? { c2rWithdrawSoftLimit: hubConfig.c2rWithdrawSoftLimit } : {}),
       ...(hubConfig.rebalanceBaseFee !== undefined ? { rebalanceBaseFee: hubConfig.rebalanceBaseFee } : {}),
-      ...(hubConfig.rebalanceLiquidityFeeBps !== undefined ? { rebalanceLiquidityFeeBps: hubConfig.rebalanceLiquidityFeeBps } : {}),
+      ...(hubConfig.rebalanceLiquidityFeeBps !== undefined
+        ? { rebalanceLiquidityFeeBps: hubConfig.rebalanceLiquidityFeeBps }
+        : {}),
       ...(hubConfig.rebalanceGasFee !== undefined ? { rebalanceGasFee: hubConfig.rebalanceGasFee } : {}),
       ...(hubConfig.rebalanceTimeoutMs !== undefined ? { rebalanceTimeoutMs: hubConfig.rebalanceTimeoutMs } : {}),
     },
@@ -216,10 +247,10 @@ export async function bootstrapHub(env?: RuntimeReplica, config?: Partial<HubCon
   // Restart reuses the committed policy. Re-admitting an identical config
   // signs fresh Account policy proposals while peer sessions are still down.
   // Canonical normalization also keeps real changes on the normal transaction path.
-  if (!previousConfig || !canonicalConsensusValuesEqual(
-    previousConfig,
-    buildHubConfig(previousConfig, configInput.data).config,
-  )) {
+  if (
+    !previousConfig ||
+    !canonicalConsensusValuesEqual(previousConfig, buildHubConfig(previousConfig, configInput.data).config)
+  ) {
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
       entityInputs: [{ entityId, signerId: signerAddress, entityTxs: [configInput] }],

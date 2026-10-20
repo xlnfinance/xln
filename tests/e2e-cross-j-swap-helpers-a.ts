@@ -780,7 +780,6 @@ export async function waitForDefaultJurisdictionReplicas(page: Page, label: stri
     .toMatchObject({ entityJurisdictionCount: 2 });
 }
 
-
 export async function faucetOffchain(
   page: Page,
   apiBaseUrl: string,
@@ -1296,14 +1295,29 @@ export async function configurePair(page: Page, side: 'buy' | 'sell'): Promise<v
 }
 
 export async function configureTokens(page: Page, fromTokenId: number, toTokenId: number): Promise<void> {
+  const fromSymbol = TOKEN_SYMBOL_BY_ID[fromTokenId];
+  if (!fromSymbol) throw new Error(`TOKEN_SYMBOL_MISSING:${fromTokenId}`);
+  const receiveField = page.getByTestId('swap-want').locator('..');
+  // The same-network picker excludes the opposite token. Reverse through the
+  // actual UI before selecting a token that currently occupies the receive side.
+  if (await receiveField.getByRole('button', { name: new RegExp(`^${escapeRegex(fromSymbol)}\\b`) }).isVisible()) {
+    await page.getByTestId('swap-flip').click();
+  }
   for (const [inputId, tokenId] of [
     ['swap-give', fromTokenId],
     ['swap-want', toTokenId],
   ] as const) {
     const symbol = TOKEN_SYMBOL_BY_ID[tokenId];
     if (!symbol) throw new Error(`TOKEN_SYMBOL_MISSING:${tokenId}`);
-    await page.getByTestId(inputId).locator('..').getByRole('button').click();
-    await page.getByRole('option', { name: new RegExp(`^${escapeRegex(symbol)}\\b`) }).click();
+    const pattern = new RegExp(`^${escapeRegex(symbol)}\\b`);
+    const field = page.getByTestId(inputId).locator('..');
+    const trigger = field.getByRole('button');
+    if (await field.getByRole('button', { name: pattern }).isVisible()) continue;
+    await trigger.click();
+    const option = page.getByRole('option', { name: pattern });
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await option.click();
+    await expect(trigger).toHaveAccessibleName(pattern);
   }
 }
 

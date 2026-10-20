@@ -19,6 +19,7 @@ const readTimingOrigin = (): number => {
 
 export async function timedStep<T>(label: string, fn: () => Promise<T>): Promise<T> {
   const startedAt = Date.now();
+  if (E2E_TIMINGS_ENABLED) console.log(`[E2E-START] ${label}`);
   try {
     return await fn();
   } finally {

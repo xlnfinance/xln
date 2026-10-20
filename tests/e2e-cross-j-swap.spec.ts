@@ -475,15 +475,24 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         price: formatUnits(BigInt(wethUsdcBook.bids[0]!.price), 4),
       });
       const partial = { routeId: partialOrderId };
-      await expect.poll(async () => {
-        const book = await readHubPairSnapshot(page, sourceHubProfile, wethUsdcCrossPair!.pairId);
-        const ownAsk = book.asks.find(level => level.orderIds?.some(id => id.endsWith(`:${partialOrderId}`)));
-        return {
-          makerBidConsumed: book.bids.every(level => level.price !== wethUsdcBook.bids[0]?.price),
-          remaining: BigInt(ownAsk?.size ?? 0) > 0n &&
-            BigInt(ownAsk?.size ?? 0) < crossJurisdictionBookQtyLots(WETH, tokenAmount(WETH, 25n)),
-        };
-      }, { timeout: 30_000, intervals: [250, 500, 1000], message: 'Hub must commit a partial match and leave the user remainder in the book' })
+      await expect
+        .poll(
+          async () => {
+            const book = await readHubPairSnapshot(page, sourceHubProfile, wethUsdcCrossPair!.pairId);
+            const ownAsk = book.asks.find(level => level.orderIds?.some(id => id.endsWith(`:${partialOrderId}`)));
+            return {
+              makerBidConsumed: book.bids.every(level => level.price !== wethUsdcBook.bids[0]?.price),
+              remaining:
+                BigInt(ownAsk?.size ?? 0) > 0n &&
+                BigInt(ownAsk?.size ?? 0) < crossJurisdictionBookQtyLots(WETH, tokenAmount(WETH, 25n)),
+            };
+          },
+          {
+            timeout: 30_000,
+            intervals: [250, 500, 1000],
+            message: 'Hub must commit a partial match and leave the user remainder in the book',
+          },
+        )
         .toEqual({ makerBidConsumed: true, remaining: true });
       await waitForCrossRouteMaterialized(
         page,
@@ -597,29 +606,37 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         'partial source Account',
       );
       // Independent fee oracle: signed committed request payloads, never the balance delta under test.
-      const signedFees = await page.evaluate(async ({ entityId, hubId, fromHeight, throughHeight, tokenId }) => {
-        const runtime = window as CrossRuntimeWindow;
-        const env = runtime.__xln?.env();
-        const api = await runtime.__xln?.xln();
-        if (!env || !api) {
-          throw new Error('COMMITTED_ACCOUNT_HISTORY_UNAVAILABLE');
-        }
-        const frames: AccountFrame[] = await api.readPersistedAccountFrameHistory(
-          env,
-          entityId,
-          hubId,
-          throughHeight - fromHeight,
-          { maxAccountHeight: throughHeight },
-        );
-        const txs = frames.filter(frame => frame.height > fromHeight).flatMap(frame => frame.accountTxs);
-        if (txs.some(tx => tx.type === 'rebalance_refund')) throw new Error('UNEXPECTED_REBALANCE_REFUND');
-        return txs.flatMap(tx => tx.type === 'request_collateral' &&
-          (tx.data.feeTokenId ?? tx.data.tokenId) === tokenId ? [tx.data.feeAmount.toString()] : []);
-      }, {
-        entityId: target.entityId, hubId: targetHub.entityId,
-        fromHeight: partialTargetBefore.currentHeight, throughHeight: partialTargetAfter.currentHeight,
-        tokenId: USDC,
-      });
+      const signedFees = await page.evaluate(
+        async ({ entityId, hubId, fromHeight, throughHeight, tokenId }) => {
+          const runtime = window as CrossRuntimeWindow;
+          const env = runtime.__xln?.env();
+          const api = await runtime.__xln?.xln();
+          if (!env || !api) {
+            throw new Error('COMMITTED_ACCOUNT_HISTORY_UNAVAILABLE');
+          }
+          const frames: AccountFrame[] = await api.readPersistedAccountFrameHistory(
+            env,
+            entityId,
+            hubId,
+            throughHeight - fromHeight,
+            { maxAccountHeight: throughHeight },
+          );
+          const txs = frames.filter(frame => frame.height > fromHeight).flatMap(frame => frame.accountTxs);
+          if (txs.some(tx => tx.type === 'rebalance_refund')) throw new Error('UNEXPECTED_REBALANCE_REFUND');
+          return txs.flatMap(tx =>
+            tx.type === 'request_collateral' && (tx.data.feeTokenId ?? tx.data.tokenId) === tokenId
+              ? [tx.data.feeAmount.toString()]
+              : [],
+          );
+        },
+        {
+          entityId: target.entityId,
+          hubId: targetHub.entityId,
+          fromHeight: partialTargetBefore.currentHeight,
+          throughHeight: partialTargetAfter.currentHeight,
+          tokenId: USDC,
+        },
+      );
       expect(signedFees, 'exactly one committed rebalance fee request in this partial-fill interval').toHaveLength(1);
       const partialTargetRebalanceFee = BigInt(signedFees[0]!);
       expect(partialTargetRebalanceFee, 'partial target signed rebalance fee').toBeGreaterThan(0n);
@@ -910,7 +927,6 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           side: 'sell',
           amount: '0.01',
           price: '2490.0000',
-
         }),
       );
       const { profile } = (await cdp.send('Profiler.stop')) as {
@@ -1028,7 +1044,8 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
   test(
     'cross WETH/USDC ignores non-takeable orderbook side before filling the takeable side',
     { tag: '@resilience' },
-    async ({ page }) => {
+    async ({ page }, testInfo) => {
+      console.log(`[E2E-BUDGET] cross_j_wrong_side timeoutMs=${testInfo.timeout}`);
       const baseline = await timedStep('cross_j_wrong_side.ensure_baseline', () =>
         ensureE2EBaseline(page, {
           apiBaseUrl: API_BASE_URL,
@@ -1081,13 +1098,11 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           ],
         }),
       );
-      await timedStep('cross_j_wrong_side.open_swap', async () => {
-        await openSwapWorkspace(page);
-        await selectSourceChainInSwap(page, source.entityId);
-        await selectCounterpartyInSwap(page, hubId);
-        await configurePair(page, 'sell');
-        await selectCrossRoute(page, target.entityId);
-      });
+      await timedStep('cross_j_wrong_side.open_swap', () => openSwapWorkspace(page));
+      await timedStep('cross_j_wrong_side.select_source', () => selectSourceChainInSwap(page, source.entityId));
+      await timedStep('cross_j_wrong_side.select_counterparty', () => selectCounterpartyInSwap(page, hubId));
+      await timedStep('cross_j_wrong_side.configure_pair', () => configurePair(page, 'sell'));
+      await timedStep('cross_j_wrong_side.select_cross_route', () => selectCrossRoute(page, target.entityId));
 
       await expectCrossOrderbookReady(page);
       await expectSwapTokens(page, WETH, USDC);
@@ -1439,18 +1454,23 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           waitForLatestCrossResolveSnapshot(bobPage, bobRpc2.entityId, targetHubId, 1),
         );
         expect(bobFullResolve.fillRatio, 'Bob close consumes the full signed target ratio').toBe(65_535);
-        expect(bobFullResolve.cancelRemainder, 'full fill closes the order without an explicit remainder cancel').toBe(false);
-        expect(
-          bobFullResolve.executionGiveAmount,
-          'The route retains the signed 78 USDC dispute ceiling',
-        ).toBe(tokenAmount(USDC, 78n).toString());
+        expect(bobFullResolve.cancelRemainder, 'full fill closes the order without an explicit remainder cancel').toBe(
+          false,
+        );
+        expect(bobFullResolve.executionGiveAmount, 'The route retains the signed 78 USDC dispute ceiling').toBe(
+          tokenAmount(USDC, 78n).toString(),
+        );
         expect(bobFullResolve.executionWantAmount, 'Bob receives exactly the committed 0.03 WETH target').toBe(
           (tokenAmount(WETH, 3n) / 100n).toString(),
         );
         const bobFullAfter = await readCrossState(bobPage, bobRpc2, targetHubId);
         expectCrossTransfer(
-          bobFullBefore.deltas[String(USDC)], bobFullAfter.deltas[String(USDC)],
-          tokenAmount(USDC, 75n), bobFullBefore.ownerIsLeft, 'spend', 'Bob cooperative cross-j source',
+          bobFullBefore.deltas[String(USDC)],
+          bobFullAfter.deltas[String(USDC)],
+          tokenAmount(USDC, 75n),
+          bobFullBefore.ownerIsLeft,
+          'spend',
+          'Bob cooperative cross-j source',
         );
 
         await Promise.all([
@@ -1515,12 +1535,16 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           }),
         );
         await waitForCrossRouteMaterialized(alicePage, alice, hubId, alicePartialOrderId, 'Alice partial');
-        const alicePartialRoute = (await readCrossState(alicePage, alice, hubId)).routeSummaries
-          .find(route => route.orderId === alicePartialOrderId);
+        const alicePartialRoute = (await readCrossState(alicePage, alice, hubId)).routeSummaries.find(
+          route => route.orderId === alicePartialOrderId,
+        );
         if (!alicePartialRoute?.venueId) throw new Error(`CROSS_J_PARTIAL_VENUE_MISSING:${alicePartialOrderId}`);
-        await expect.poll(() => sourceAskSize(alicePartialOrderId, alicePartialRoute.venueId), {
-          timeout: 45_000, message: 'Alice ask must reach the Hub book before Bob matches',
-        }).toBeGreaterThan(0n);
+        await expect
+          .poll(() => sourceAskSize(alicePartialOrderId, alicePartialRoute.venueId), {
+            timeout: 45_000,
+            message: 'Alice ask must reach the Hub book before Bob matches',
+          })
+          .toBeGreaterThan(0n);
         const aliceInitialAskSize = await sourceAskSize(alicePartialOrderId, alicePartialRoute.venueId);
         const bobPartialFirstOrderId = await timedStep('cross_j_swap.partial.bob_offer', () =>
           placeCrossOrder(bobPage, {
@@ -1534,12 +1558,22 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           }),
         );
         await waitForCrossRouteMaterialized(bobPage, bobRpc2, targetHubId, bobPartialFirstOrderId, 'Bob partial');
-        await expect.poll(() => sourceAskSize(alicePartialOrderId, alicePartialRoute.venueId), {
-          timeout: 45_000, message: 'Bob first fill must reduce Alice ask on the Hub book',
-        }).toBeLessThan(aliceInitialAskSize);
+        await expect
+          .poll(() => sourceAskSize(alicePartialOrderId, alicePartialRoute.venueId), {
+            timeout: 45_000,
+            message: 'Bob first fill must reduce Alice ask on the Hub book',
+          })
+          .toBeLessThan(aliceInitialAskSize);
         const aliceFirstAskSize = await sourceAskSize(alicePartialOrderId, alicePartialRoute.venueId);
         expect(aliceFirstAskSize).toBeGreaterThan(0n);
-        await waitForCrossRouteStatus(bobPage, bobRpc2, targetHubId, bobPartialFirstOrderId, ['settled'], 'Bob first partial');
+        await waitForCrossRouteStatus(
+          bobPage,
+          bobRpc2,
+          targetHubId,
+          bobPartialFirstOrderId,
+          ['settled'],
+          'Bob first partial',
+        );
 
         await timedStep('cross_j_swap.partial.dismiss_bob_fill_modal', () => dismissSwapCompletionModal(bobPage));
         const bobPartialSecondOrderId = await timedStep('cross_j_swap.partial.bob_second_offer', () =>
@@ -1554,9 +1588,12 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           }),
         );
 
-        await expect.poll(() => sourceAskSize(alicePartialOrderId, alicePartialRoute.venueId), {
-          timeout: 45_000, message: 'Bob second fill must further reduce Alice ask on the Hub book',
-        }).toBeLessThan(aliceFirstAskSize);
+        await expect
+          .poll(() => sourceAskSize(alicePartialOrderId, alicePartialRoute.venueId), {
+            timeout: 45_000,
+            message: 'Bob second fill must further reduce Alice ask on the Hub book',
+          })
+          .toBeLessThan(aliceFirstAskSize);
         expect(await sourceAskSize(alicePartialOrderId, alicePartialRoute.venueId)).toBeGreaterThan(0n);
 
         await timedStep('cross_j_swap.partial.bob_second_cleared', () =>
@@ -1565,7 +1602,12 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           }),
         );
         await waitForCrossRouteStatus(
-          bobPage, bobRpc2, targetHubId, bobPartialSecondOrderId, ['settled'], 'Bob second taker full close',
+          bobPage,
+          bobRpc2,
+          targetHubId,
+          bobPartialSecondOrderId,
+          ['settled'],
+          'Bob second taker full close',
         );
 
         await timedStep('cross_j_swap.partial.alice_cancel_clear_button', async () => {
@@ -1579,14 +1621,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
 
         await Promise.all([
           timedStep('cross_j_swap.partial.alice_source_settled', () =>
-            waitForCrossRouteStatus(
-              alicePage,
-              alice,
-              hubId,
-              alicePartialOrderId,
-              ['settled'],
-              'Alice source clear',
-            ),
+            waitForCrossRouteStatus(alicePage, alice, hubId, alicePartialOrderId, ['settled'], 'Alice source clear'),
           ),
           timedStep('cross_j_swap.partial.alice_target_settled', () =>
             waitForCrossRouteStatus(
@@ -1660,12 +1695,16 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           }),
         );
         await waitForCrossRouteMaterialized(alicePage, alice, hubId, aliceDisputeOrderId, 'Alice dispute');
-        const aliceDisputeRoute = (await readCrossState(alicePage, alice, hubId)).routeSummaries
-          .find(route => route.orderId === aliceDisputeOrderId);
+        const aliceDisputeRoute = (await readCrossState(alicePage, alice, hubId)).routeSummaries.find(
+          route => route.orderId === aliceDisputeOrderId,
+        );
         if (!aliceDisputeRoute?.venueId) throw new Error(`CROSS_J_DISPUTE_VENUE_MISSING:${aliceDisputeOrderId}`);
-        await expect.poll(() => sourceAskSize(aliceDisputeOrderId, aliceDisputeRoute.venueId), {
-          timeout: 45_000, message: 'Alice dispute ask must reach the Hub book before Bob matches',
-        }).toBeGreaterThan(0n);
+        await expect
+          .poll(() => sourceAskSize(aliceDisputeOrderId, aliceDisputeRoute.venueId), {
+            timeout: 45_000,
+            message: 'Alice dispute ask must reach the Hub book before Bob matches',
+          })
+          .toBeGreaterThan(0n);
         const disputeInitialAskSize = await sourceAskSize(aliceDisputeOrderId, aliceDisputeRoute.venueId);
         const bobDisputeOrderId = await timedStep('cross_j_swap.dispute.bob_offer', () =>
           placeCrossOrder(bobPage, {
@@ -1678,9 +1717,12 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
             price: '2500',
           }),
         );
-        await expect.poll(() => sourceAskSize(aliceDisputeOrderId, aliceDisputeRoute.venueId), {
-          timeout: 45_000, message: 'Bob dispute fill must reduce Alice ask on the Hub book',
-        }).toBeLessThan(disputeInitialAskSize);
+        await expect
+          .poll(() => sourceAskSize(aliceDisputeOrderId, aliceDisputeRoute.venueId), {
+            timeout: 45_000,
+            message: 'Bob dispute fill must reduce Alice ask on the Hub book',
+          })
+          .toBeLessThan(disputeInitialAskSize);
         expect(await sourceAskSize(aliceDisputeOrderId, aliceDisputeRoute.venueId)).toBeGreaterThan(0n);
         await waitForCrossRouteStatus(bobPage, bobRpc2, targetHubId, bobDisputeOrderId, ['settled'], 'Bob dispute');
 
