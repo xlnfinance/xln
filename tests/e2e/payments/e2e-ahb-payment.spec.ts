@@ -31,7 +31,18 @@ import { timedStep } from '../../utils/e2e-timing.mts';
 const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
 
-type CurrentRuntimeWindow = Window & { __xln?: { env(): RuntimeReplica | null } };
+type CurrentRuntimeWindow = Window & {
+  __xln?: {
+    env(): RuntimeReplica | null;
+    readonly runtimeConnectivity: Readonly<{
+      runtimeId: string;
+      matchesIdentity: boolean;
+      connected: boolean;
+      relayClientCount: number;
+      relayUrls: readonly string[];
+    }> | null;
+  };
+};
 
 const DEFAULT_FEE_PPM = 10n;
 const FEE_DENOM = 1_000_000n;
@@ -135,7 +146,7 @@ function relayToApiBase(relayUrl: string | null | undefined): string | null {
 async function getActiveApiBase(page: Page): Promise<string> {
   if (process.env.E2E_API_BASE_URL) return API_BASE_URL;
   const runtimeApi = await page.evaluate(() => {
-    const relay = (window as CurrentRuntimeWindow).__xln?.env()?.infrastructure?.lastP2PConfig?.relayUrls?.[0] ?? null;
+    const relay = (window as CurrentRuntimeWindow).__xln?.runtimeConnectivity?.relayUrls[0] ?? null;
     return typeof relay === 'string' ? relay : null;
   });
   return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
@@ -171,11 +182,7 @@ async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
     .poll(
       () =>
         page.evaluate(() => {
-          const env = (window as CurrentRuntimeWindow).__xln?.env();
-          if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
-          const p2p = env.infrastructure?.p2p;
-          if (!p2p) throw new Error('CURRENT_WALLET_P2P_MISSING');
-          return p2p.isConnected();
+          return (window as CurrentRuntimeWindow).__xln?.runtimeConnectivity?.connected === true;
         }),
       { timeout: 45_000, message: `[${tag}] runtime P2P must connect within 45s` },
     )
@@ -184,17 +191,20 @@ async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
   const snapshot = await page.evaluate(() => {
     const env = (window as CurrentRuntimeWindow).__xln?.env();
     if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
-    const p2p = env.infrastructure?.p2p;
-    if (!p2p) throw new Error('CURRENT_WALLET_P2P_MISSING');
-    const config = env.infrastructure.lastP2PConfig;
-    if (!config) throw new Error('CURRENT_WALLET_P2P_CONFIG_MISSING');
+    const connectivity = (window as CurrentRuntimeWindow).__xln?.runtimeConnectivity;
+    if (!connectivity) throw new Error('CURRENT_WALLET_CONNECTIVITY_MISSING');
     return {
-      matchesIdentity: p2p.matchesIdentity(env.runtimeId, config.signerId),
-      isConnected: p2p.isConnected(),
-      relayClientCount: p2p.getRelayClientCount(),
-      relayCount: config.relayUrls.length,
+      runtimeId: env.runtimeId,
+      connectivityRuntimeId: connectivity.runtimeId,
+      matchesIdentity: connectivity.matchesIdentity,
+      isConnected: connectivity.connected,
+      relayClientCount: connectivity.relayClientCount,
+      relayCount: connectivity.relayUrls.length,
     };
   });
+  expect(snapshot.connectivityRuntimeId, `[${tag}] connectivity must belong to active runtime`).toBe(
+    snapshot.runtimeId,
+  );
   expect(snapshot.matchesIdentity, `[${tag}] P2P must belong to the active runtime`).toBe(true);
   expect(snapshot.isConnected, `[${tag}] runtime P2P must have open WS`).toBe(true);
   expect(snapshot.relayClientCount, `[${tag}] runtime must have exactly one relay client`).toBe(1);
@@ -263,7 +273,7 @@ async function waitForEntityAdvertised(page: Page, entityId: string) {
 async function dumpState(page: Page, label: string) {
   const info = await page.evaluate(label => {
     const env = (window as CurrentRuntimeWindow).__xln?.env();
-    if (!env) return { label, error: 'no isolatedEnv' };
+    if (!env) return { label, error: 'CURRENT_WALLET_RUNTIME_MISSING' };
 
     const entities: any[] = [];
     if (env.state?.eReplicas) {
@@ -298,15 +308,15 @@ async function dumpState(page: Page, label: string) {
       }
     }
 
-    const p2p = env.infrastructure?.p2p;
-    const relayUrls = env.infrastructure?.lastP2PConfig?.relayUrls ?? [];
+    const connectivity = (window as CurrentRuntimeWindow).__xln?.runtimeConnectivity;
+    if (!connectivity) throw new Error('CURRENT_WALLET_CONNECTIVITY_MISSING');
     const gossipProfiles = env.gossip.getProfiles().length;
 
     return {
       label,
       runtimeId: env.runtimeId?.slice(0, 12) || 'none',
-      p2pConnected: p2p?.isConnected() === true,
-      relayCount: relayUrls.length,
+      p2pConnected: connectivity.connected,
+      relayCount: connectivity.relayUrls.length,
       gossipProfiles,
       entityCount: env.state?.eReplicas?.size || 0,
       eReplicaKeys: env.state?.eReplicas ? [...env.state.eReplicas.keys()] : [],

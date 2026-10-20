@@ -1,15 +1,23 @@
 import { adoptActiveTabLock, initializeActiveTabLock } from '../../../frontend/src/lib/utils/control/activeTabLock';
 import { closeRuntimeSession } from '../../../frontend/src/lib/security/runtimeSession';
 import type {
-	RuntimeAdapter,
-	RuntimeAdapterConfig,
-	RuntimeAdapterReadQuery,
+  RuntimeAdapter,
+  RuntimeAdapterConfig,
+  RuntimeAdapterReadQuery,
 } from '@xln/core/api/runtime-adapter/types';
 import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
 import { getXLN } from './xln-loader';
 import { useApp } from './store';
 import { restoreFreshRuntime, type RuntimeRecoveryCandidate } from './restore';
 import { runtimeIdForSeed } from './keys';
+import {
+  listUnresolvedRemoteRuntimeCommandIntents,
+  markRemoteRuntimeCommandIntentAccepted,
+  resolveRemoteRuntimeCommandId,
+  settleRemoteRuntimeCommandIntent,
+  withRemoteRuntimeCommandReplayLease,
+} from '@xln/frontend/lib/stores/commands/runtimeCommandIntent';
+import { installRuntimeCommandJournalKeys } from '@xln/frontend/lib/stores/commands/runtimeCommandJournalKeyring';
 
 /**
  * Liveness is a host-observed fact the runtime asks its transport for. Every
@@ -19,13 +27,13 @@ import { runtimeIdForSeed } from './keys';
  * relay presence with this direct set; without one, hosted peers are all it knows.
  */
 function installHostedLivenessObserver(env: RuntimeReplica): void {
-	const infrastructure = env.infrastructure ?? (env.infrastructure = {});
-	const hosted = (entityIds: readonly string[]): ReadonlySet<string> => {
-		const local = new Set(Array.from(env.state.eReplicas.values(), replica => replica.entityId.toLowerCase()));
-		return new Set(entityIds.map(entityId => entityId.toLowerCase()).filter(entityId => local.has(entityId)));
-	};
-	infrastructure.observeDirectOnlineEntityIds = hosted;
-	if (!infrastructure.observeOnlineEntityIds) infrastructure.observeOnlineEntityIds = hosted;
+  const infrastructure = env.infrastructure ?? (env.infrastructure = {});
+  const hosted = (entityIds: readonly string[]): ReadonlySet<string> => {
+    const local = new Set(Array.from(env.state.eReplicas.values(), replica => replica.entityId.toLowerCase()));
+    return new Set(entityIds.map(entityId => entityId.toLowerCase()).filter(entityId => local.has(entityId)));
+  };
+  infrastructure.observeDirectOnlineEntityIds = hosted;
+  if (!infrastructure.observeOnlineEntityIds) infrastructure.observeOnlineEntityIds = hosted;
 }
 
 let currentAdapter: RuntimeAdapter | null = null;
@@ -35,49 +43,50 @@ let closing: Promise<void> | null = null;
 let releaseOwnership: (() => void) | null = null;
 
 export function getAdapter(): RuntimeAdapter | null {
-	return currentAdapter;
+  return currentAdapter;
 }
 
 /** Live env of the embedded runtime; null in remote mode. */
 export function getEmbeddedEnv(): RuntimeReplica | null {
-	return currentEnv;
+  return currentEnv;
 }
 
 function attach(adapter: RuntimeAdapter): void {
-	const push = (): void => {
-		useApp.getState().setAdapterState({
-			status: adapter.status,
-			height: adapter.currentHeight,
-			commandReady: adapter.commandReady,
-		});
-	};
-	const offChange = adapter.onChange(() => push());
-	const offStatus = adapter.onStatus(() => push());
-	detach = () => {
-		offChange();
-		offStatus();
-	};
-	push();
+  const push = (): void => {
+    useApp.getState().setAdapterState({
+      status: adapter.status,
+      height: adapter.currentHeight,
+      commandReady: adapter.commandReady,
+    });
+  };
+  const offChange = adapter.onChange(() => push());
+  const offStatus = adapter.onStatus(() => push());
+  detach = () => {
+    offChange();
+    offStatus();
+  };
+  push();
 }
 
 export function disconnectAdapter(): void {
-	detach?.();
-	detach = null;
-	currentAdapter?.disconnect();
-	currentAdapter = null;
-	currentEnv = null;
-	// Entity selection belongs to this connection; a new adapter must not inherit its authority context.
-	useApp.getState().setActiveEntityId(null);
-	useApp.getState().setAdapterState({ status: 'disconnected', height: 0, commandReady: false });
+  detach?.();
+  detach = null;
+  currentAdapter?.disconnect();
+  currentAdapter = null;
+  currentEnv = null;
+  // Entity selection belongs to this connection; a new adapter must not inherit its authority context.
+  useApp.getState().setActiveEntityId(null);
+  useApp.getState().setAdapterState({ status: 'disconnected', height: 0, commandReady: false });
 }
 
 /** Stop accepted work before revoking the in-memory signing authority. */
 export function lockEmbeddedRuntime(): Promise<void> {
   // Keep a failed close rejected until reload; adopting this lease again must
   // never bypass a Runtime that failed to quiesce.
-  if (!closing) closing = closeAndLockRuntime().then(() => {
-    closing = null;
-  });
+  if (!closing)
+    closing = closeAndLockRuntime().then(() => {
+      closing = null;
+    });
   return closing;
 }
 
@@ -102,13 +111,13 @@ async function closeAndLockRuntime(): Promise<void> {
 }
 
 export async function connectEmbedded(seed: string, recovery?: RuntimeRecoveryCandidate): Promise<RuntimeAdapter> {
-	await closing;
-	const xln = await getXLN();
-	if (recovery && currentEnv) throw new Error('Close this wallet and reload before restoring on a clean device.');
-	disconnectAdapter();
+  await closing;
+  const xln = await getXLN();
+  if (recovery && currentEnv) throw new Error('Close this wallet and reload before restoring on a clean device.');
+  disconnectAdapter();
 
-	let env: RuntimeReplica | null = null;
-	const adapter = new xln.EmbeddedRuntimeAdapter({
+  let env: RuntimeReplica | null = null;
+  const adapter = new xln.EmbeddedRuntimeAdapter({
     getEnv: () => env,
     main: async (runtimeSeed?: string | null) => {
       // Serialize local bootstrap/import across tabs before either opens storage.
@@ -183,26 +192,26 @@ export async function connectEmbedded(seed: string, recovery?: RuntimeRecoveryCa
   } finally {
     bootstrapFinished.resolve();
   }
-	currentAdapter = adapter;
-	attach(adapter);
-	return adapter;
+  currentAdapter = adapter;
+  attach(adapter);
+  return adapter;
 }
 
 export async function connectRemote(wsUrl: string, authKey?: string): Promise<RuntimeAdapter> {
-	await closing;
-	const xln = await getXLN();
-	disconnectAdapter();
+  await closing;
+  const xln = await getXLN();
+  disconnectAdapter();
 
-	const adapter = new xln.RemoteRuntimeAdapter();
-	const config: RuntimeAdapterConfig = {
-		mode: 'remote',
-		wsUrl,
-		...(authKey ? { authKey } : {}),
-	};
-	await adapter.connect(config);
-	currentAdapter = adapter;
-	attach(adapter);
-	return adapter;
+  const adapter = new xln.RemoteRuntimeAdapter();
+  const config: RuntimeAdapterConfig = {
+    mode: 'remote',
+    wsUrl,
+    ...(authKey ? { authKey } : {}),
+  };
+  await adapter.connect(config);
+  currentAdapter = adapter;
+  attach(adapter);
+  return adapter;
 }
 
 export type RuntimeAdapterInspection = Pick<
@@ -241,15 +250,45 @@ function inspectAdapter(): RuntimeAdapterInspection | null {
 /** Dev-only: lets the browser console and E2E debugging inspect committed data. */
 declare const __XLN_UI_DIAGNOSTICS__: boolean;
 if (import.meta.env.DEV || __XLN_UI_DIAGNOSTICS__) {
-	(window as typeof window & { __xln?: Record<string, unknown> }).__xln = {
-		adapter: inspectAdapter,
-		env: () => currentEnv,
-		xln: () => getXLN(),
-		store: useApp,
-	};
+  (window as typeof window & { __xln?: Record<string, unknown> }).__xln = {
+    adapter: inspectAdapter,
+    env: () => currentEnv,
+    xln: () => getXLN(),
+    store: useApp,
+    get runtimeConnectivity() {
+      const env = currentEnv;
+      const p2p = env?.infrastructure?.p2p;
+      const config = env?.infrastructure?.lastP2PConfig;
+      if (!env || !p2p || !config) return null;
+      if (typeof env.runtimeId !== 'string' || !env.runtimeId) throw new Error('RUNTIME_CONNECTIVITY_IDENTITY_MISSING');
+      if (!Array.isArray(config.relayUrls)) throw new Error('RUNTIME_CONNECTIVITY_RELAY_CONFIG_MISSING');
+      // Return observations, never transport clients or mutating controls.
+      return Object.freeze({
+        runtimeId: env.runtimeId,
+        matchesIdentity: p2p.matchesIdentity(env.runtimeId, config.signerId),
+        connected: p2p.isConnected(),
+        relayClientCount: p2p.getRelayClientCount(),
+        relayUrls: Object.freeze([...config.relayUrls]),
+      });
+    },
+    // The shipped local QA bundle exercises the same encrypted journal as
+    // remote commands. Never expose its key installation on a public host.
+    ...(['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+      ? {
+          commandJournal: {
+            installKeys: installRuntimeCommandJournalKeys,
+            list: listUnresolvedRemoteRuntimeCommandIntents,
+            resolveId: resolveRemoteRuntimeCommandId,
+            markAccepted: markRemoteRuntimeCommandIntentAccepted,
+            settle: settleRemoteRuntimeCommandIntent,
+            withReplayLease: withRemoteRuntimeCommandReplayLease,
+          },
+        }
+      : {}),
+  };
 }
 
 export function requireAdapter(): RuntimeAdapter {
-	if (!currentAdapter) throw new Error('Runtime is not connected');
-	return currentAdapter;
+  if (!currentAdapter) throw new Error('Runtime is not connected');
+  return currentAdapter;
 }

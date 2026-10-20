@@ -1,0 +1,117 @@
+{
+  "parentSHA": "0dbd35da921dd9814e5a5a62fe12ee32a5e8f3d1",
+  "scope": "Current React diagnostics and AHB reader; no financial transition, storage, crypto or deadline changes.",
+  "sourceSHA256": {
+    "ui/src/runtime/adapter.ts": "6195a4d9b860ff96607c019fcf8a938bee5f667806cc36bc901557735fe72c20",
+    "tests/e2e/payments/e2e-ahb-payment.spec.ts": "43a71952e167ba59c388075312bfc25913d56dafc1b0ef2fda628200b4e8c368"
+  },
+  "guardUnchanged": "core/__tests__/testing/browser/e2e-demo-users-helper.test.ts",
+  "evidence": {
+    "runtime-diagnostics-l1-red-01": {
+      "command": ["bun", "test", "core/__tests__/testing/browser/e2e-demo-users-helper.test.ts"],
+      "exitCode": 1,
+      "seconds": 1.39141625,
+      "sourceUnchanged": true,
+      "logSHA256": "e098f342884d8f7b7bc6bdc3d52b46d7043493cf73694de7f8a9b64af0c992d9",
+      "result": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/runtime-diagnostics-l1-red-01.result.json"
+    },
+    "runtime-diagnostics-l1-green-01": {
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/testing/browser/e2e-demo-users-helper.test.ts",
+        "core/__tests__/storage/runtime/runtime-command-journal-crypto.test.ts"
+      ],
+      "exitCode": 1,
+      "seconds": 1.75042025,
+      "sourceUnchanged": true,
+      "logSHA256": "3e1bdbccf68986cc0845642a28baa42f3d3cd9714d3b71fe217033a926c9c465",
+      "result": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/runtime-diagnostics-l1-green-01.result.json"
+    },
+    "runtime-diagnostics-l1-green-03": {
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/testing/browser/e2e-demo-users-helper.test.ts",
+        "core/__tests__/storage/runtime/runtime-command-journal-crypto.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 2.352162416,
+      "sourceUnchanged": true,
+      "logSHA256": "7ece06ebb8de07d7180b71d4605c766871997faeb174dece31e685008a0c98e7",
+      "result": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/runtime-diagnostics-l1-green-03.result.json"
+    },
+    "runtime-diagnostics-ui-types-red-01": {
+      "command": ["bun", "run", "check:ui-types"],
+      "exitCode": 1,
+      "seconds": 3.890151792,
+      "sourceUnchanged": true,
+      "logSHA256": "77164900ef0055559cd9599723c23db17be9a977112576ae5edcbaad9a3b95cd",
+      "result": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/runtime-diagnostics-ui-types-red-01.result.json"
+    },
+    "runtime-diagnostics-ui-types-green-01": {
+      "command": ["bun", "run", "check:ui-types"],
+      "exitCode": 0,
+      "seconds": 3.908555583,
+      "sourceUnchanged": true,
+      "logSHA256": "405204dfd87e6d535d1e34e622e40bc5a74fb6cc91ebbff274ff524e77bab000",
+      "result": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/runtime-diagnostics-ui-types-green-01.result.json"
+    },
+    "runtime-diagnostics-browser-02": {
+      "command": [
+        "env",
+        "XLN_KEEP_TEST_ARTIFACTS=1",
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "runtime-diagnostics-browser",
+        "--timeout-ms",
+        "7200000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=5",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--stack-timeout-ms=300000",
+        "--test-timeout-ms=660000",
+        "--strict-browser-health",
+        "--preserve-artifacts",
+        "--video=retain-on-failure",
+        "--trace=off",
+        "--pw-files=tests/e2e/payments/e2e-ahb-payment.spec.ts,tests/e2e/commands/runtime-command-journal.spec.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 210.591051834,
+      "sourceUnchanged": true,
+      "logSHA256": "0d9d7eea8da18a677916fe1bcb7f7584a1f14e6252a829937e1ab148d5a32346",
+      "result": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/runtime-diagnostics-browser-02.result.json"
+    }
+  },
+  "l1": {
+    "passed": 17,
+    "failed": 0,
+    "assertions": 116
+  },
+  "browser": {
+    "passed": 5,
+    "failed": 0,
+    "skipped": 0,
+    "strictHealth": true,
+    "runDir": ".logs/e2e-parallel/20261020-192952-551",
+    "buildInputHash": "0c831c339e5585000fc66ba685e2ae67e340bc74ba56d7e8cd46b2896736a7e5",
+    "cases": [
+      "AHB payments, self-route, overspend rejection and both wallet reloads",
+      "Encrypted journal payload and intent ID after reload",
+      "Mutation and oversized metadata rejection",
+      "One replay lease owner across tabs",
+      "Terminal settlement against stale accepted write"
+    ]
+  },
+  "limitations": [
+    "Private production-equivalent browser evidence only.",
+    "Exact unit full run on parent retained5514PASS/1FAIL/1conditionalSKIP; this fix passed the owning guard but the full final-SHA rerun remains mandatory.",
+    "Same-SHA financial families, all158 browsers,34-steprelease,soak and public deployment remain required."
+  ]
+}
