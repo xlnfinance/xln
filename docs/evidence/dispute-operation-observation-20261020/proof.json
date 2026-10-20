@@ -1,0 +1,52 @@
+{
+  "baseSHA": "c8ef68e7ec671088ff05bd8bb3dfd32aae1b9674",
+  "sourceSHA256": {
+    "tests/e2e-dispute.spec.ts": "cd000226772a1743d0fb200f12b9234288c1343e762ef2b89b4a3e16553020ea"
+  },
+  "firstFailure": "After clicking Sign & send, the start was recorded (H2 R41/J40); pending-batch rendered a sent Dispute finalize successor. Generic container emptiness timed out at original5s.",
+  "change": "Observe only pending-batch containing Dispute start. Keep original5s assertion, real click, history/finality, exact reserve claim, permanent closed Account, reload and exact receipt IDs. Production source unchanged.",
+  "evidence": {
+    "red": {
+      "record": "ordinary-unverified-c8ef68e7ec67-01.result.json",
+      "exitCode": 1,
+      "seconds": 322.868855791,
+      "sourceUnchanged": true,
+      "logSHA256": "2e524e8781e3c150ec1f1499af14702b521c08e7a5af2c910246e30b47fa0da0"
+    },
+    "lifecycle": {
+      "record": "dispute-operation-exact-01.result.json",
+      "exitCode": 0,
+      "seconds": 92.03123112499999,
+      "sourceUnchanged": true,
+      "logSHA256": "51d7e174bbd2bae8f29f917ff914c72618cd686f34536f986cccf7df12694215"
+    },
+    "broadcast": {
+      "record": "dispute-operation-broadcast-01.result.json",
+      "exitCode": 0,
+      "seconds": 70.529678292,
+      "sourceUnchanged": true,
+      "logSHA256": "ece2b40871afabe64e1d3549bfe88e3cff031bad0d54f91675ba975d8bba8ada"
+    }
+  },
+  "owningBrowser": {
+    "passed": 2,
+    "failed": 0,
+    "browserIssues": 0,
+    "claimBaseUnits": "100000000",
+    "reserveBefore": "0",
+    "reserveAfter": "100000000",
+    "confirmedBatchCount": 2,
+    "reloadMs": 5437,
+    "privateChainId": 31337
+  },
+  "screenshot": {
+    "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/dispute-finalized-recovery-20261020.png",
+    "sha256": "f80f79eb4c4c624d79eec3c4ab824f0bb66c86def91abafef815d21059b62027",
+    "scope": "Inspected public wallet UI; no seed/password/storage"
+  },
+  "limitations": [
+    "Focused private EVM evidence only; not public/mainnet acceptance.",
+    "Full158,exactunit/test/check,financial8/8,release34,soak60 and deployment gates remain.",
+    "Original failed run and guard rejection remain retained."
+  ]
+}

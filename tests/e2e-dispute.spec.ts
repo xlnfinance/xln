@@ -434,7 +434,9 @@ async function broadcastPendingBatchViaUi(page: Page, entityId: string): Promise
   await page.getByTestId('nav-home').locator('visible=true').first().click();
   await expect(page.getByTestId('pending-batch')).toContainText('Dispute start');
   await page.getByTestId('batch-broadcast').click();
-  await expect(page.getByTestId('pending-batch')).toHaveCount(0);
+  // Finality can replace the start batch with the scheduler's finalize batch.
+  // Observe the submitted operation; later assertions require both exact receipts.
+  await expect(page.getByTestId('pending-batch').filter({ hasText: 'Dispute start' })).toHaveCount(0);
 }
 
 async function ensureNoSentBatchLatch(page: Page, entityId: string, signerId: string): Promise<void> {
