@@ -3,8 +3,8 @@ import { expandPlaywrightTargets } from '../../../scripts/e2e/runners/run-e2e-pa
 
 const moveSpec = 'tests/e2e/payments/e2e-move.spec.ts';
 
-test('isolated discovery includes every evaluated faucet and routed Move case exactly once', () => {
-  const targets = expandPlaywrightTargets([moveSpec]);
+test('isolated discovery includes every evaluated faucet and routed Move case exactly once', async () => {
+  const targets = await expandPlaywrightTargets([moveSpec]);
   expect(targets.map(target => target.title).sort()).toEqual([
     'asset faucet exposes correct modes and funds USDC',
     'asset faucet exposes correct modes and funds USDT',
@@ -17,18 +17,18 @@ test('isolated discovery includes every evaluated faucet and routed Move case ex
   expect(targets.every(target => !target.requireMarketMaker && !target.requireCustody)).toBe(true);
 }, 30_000);
 
-test('an exact parameterized target retains its evaluated title and rejects an unknown case', () => {
+test('an exact parameterized target retains its evaluated title and rejects an unknown case', async () => {
   const title = 'asset faucet exposes correct modes and funds WETH';
-  const targets = expandPlaywrightTargets([`${moveSpec}::${title}`]);
+  const targets = await expandPlaywrightTargets([`${moveSpec}::${title}`]);
   expect(targets).toHaveLength(1);
   expect(targets[0]?.title).toBe(title);
-  expect(() => expandPlaywrightTargets([`${moveSpec}::asset faucet exposes correct modes and funds MISSING`])).toThrow(
-    'PLAYWRIGHT_TEST_TARGET_MISSING',
-  );
+  await expect(
+    expandPlaywrightTargets([`${moveSpec}::asset faucet exposes correct modes and funds MISSING`]),
+  ).rejects.toThrow('PLAYWRIGHT_TEST_TARGET_MISSING');
 }, 30_000);
 
-test('multiline tagged declarations retain their own requirements after the options object', () => {
-  const targets = expandPlaywrightTargets(['tests/e2e/product/e2e-ui-screenshots.spec.ts']);
+test('multiline tagged declarations retain their own requirements after the options object', async () => {
+  const targets = await expandPlaywrightTargets(['tests/e2e/product/e2e-ui-screenshots.spec.ts']);
   expect(
     targets.map(({ title, requireMarketMaker, requireCustody }) => ({ title, requireMarketMaker, requireCustody })),
   ).toEqual([

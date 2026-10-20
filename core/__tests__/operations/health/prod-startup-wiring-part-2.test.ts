@@ -192,17 +192,26 @@ describe('production startup wiring', () => {
     expect(runner).not.toContain('await stopProcess(api,');
   });
 
-  test('isolated e2e discovers requirements inside multiline Playwright declarations', () => {
-    const title = 'market maker prepublishes same-chain and ETH/TRON cross-chain books before user swaps';
-    const target = expandPlaywrightTargets(['tests/e2e-cross-j-swap.spec.ts']).find(entry => entry.title === title);
-
-    expect(target).toBeDefined();
-    expect(target?.requireMarketMaker).toBe(true);
-
-    const tutorial = expandPlaywrightTargets(['ui/tests/e2e-tour.spec.ts']).find(
-      entry => entry.title === 'guide follows real funding, payment, swap and history without acknowledgement clicks',
-    );
-    expect(tutorial?.requireMarketMaker).toBe(true);
+  test('isolated e2e discovers requirements inside multiline Playwright declarations', async () => {
+    const priorCache = process.env['PWTEST_CACHE_DIR'];
+    const cache = mkdtempSync(join(tmpdir(), 'xln-pw-discovery-'));
+    process.env['PWTEST_CACHE_DIR'] = cache;
+    try {
+      // Cold package discovery must fit the original deadline without warmed transforms.
+      const targets = await expandPlaywrightTargets(['tests/e2e-cross-j-swap.spec.ts', 'ui/tests/e2e-tour.spec.ts']);
+      const title = 'market maker prepublishes same-chain and ETH/TRON cross-chain books before user swaps';
+      const target = targets.find(entry => entry.title === title);
+      expect(target).toBeDefined();
+      expect(target?.requireMarketMaker).toBe(true);
+      const tutorial = targets.find(
+        entry => entry.title === 'guide follows real funding, payment, swap and history without acknowledgement clicks',
+      );
+      expect(tutorial?.requireMarketMaker).toBe(true);
+    } finally {
+      if (priorCache === undefined) delete process.env['PWTEST_CACHE_DIR'];
+      else process.env['PWTEST_CACHE_DIR'] = priorCache;
+      rmSync(cache, { recursive: true, force: true });
+    }
   });
 
   test('non-production Anvil harnesses keep bounded history in memory', () => {

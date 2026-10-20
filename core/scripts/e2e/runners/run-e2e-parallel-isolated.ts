@@ -628,10 +628,10 @@ const buildGrepMatcher = (grep: string): ((entry: PlaywrightTarget) => boolean) 
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-export const expandPlaywrightTargets = (
+export const expandPlaywrightTargets = async (
   pwFiles: string[],
   args: Pick<CliArgs, 'pwProject'> = {},
-): PlaywrightTarget[] => {
+): Promise<PlaywrightTarget[]> => {
   const collectTestBlock = (source: ts.SourceFile, line: number): string => {
     const matches: ts.CallExpression[] = [];
     const visit = (node: ts.Node): void => {
@@ -665,16 +665,23 @@ export const expandPlaywrightTargets = (
   // Playwright owns evaluated titles and declaration locations. Source-text
   // titles collapse parameterized cases into a literal `${symbol}` and can
   // silently omit nested cases. Read source only for the located test's needs.
-  const tests = [false, true].flatMap(react =>
-    listPlaywrightTestMetadata(
-      sourceFiles.filter(file => file.startsWith('ui/') === react),
-      {
-        ...(react ? { cwd: 'ui' } : {}),
-        ...(args.pwProject ? { project: args.pwProject } : {}),
-        ...(args.pwProject === 'brainvault' || args.pwProject === 'webkit-mobile' ? { profile: args.pwProject } : {}),
-      },
+  // A failed package must not release the stand while its sibling CLI still runs.
+  const groups = await Promise.allSettled(
+    [false, true].map(react =>
+      listPlaywrightTestMetadata(
+        sourceFiles.filter(file => file.startsWith('ui/') === react),
+        {
+          ...(react ? { cwd: 'ui' } : {}),
+          ...(args.pwProject ? { project: args.pwProject } : {}),
+          ...(args.pwProject === 'brainvault' || args.pwProject === 'webkit-mobile' ? { profile: args.pwProject } : {}),
+        },
+      ),
     ),
   );
+  const tests = groups.flatMap(group => {
+    if (group.status === 'rejected') throw group.reason;
+    return group.value;
+  });
   const violations = tests.flatMap(test => {
     const violation = inspectQaTestCategory(test);
     return violation ? [violation] : [];
@@ -2331,7 +2338,7 @@ async function main(): Promise<void> {
 
     const startedAt = Date.now();
     const sourceFiles = args.pwFiles.length > 0 ? args.pwFiles : listPlaywrightSpecFiles(args.includeAllSpecs);
-    let expandedTargets = expandPlaywrightTargets(sourceFiles, args);
+    let expandedTargets = await expandPlaywrightTargets(sourceFiles, args);
     if (args.pwGrep) {
       const matchesGrep = buildGrepMatcher(args.pwGrep);
       expandedTargets = expandedTargets.filter(matchesGrep);

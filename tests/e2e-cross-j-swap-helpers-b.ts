@@ -1,6 +1,5 @@
 import { formatUnits, parseUnits } from 'ethers';
 import { getTokenInfo } from '../core/account/utils';
-import { requantizeRemainingSwapAtPriceForDimensions } from '../core/swapbook';
 import { deriveTransferOffdeltaChange } from '../core/protocol/transform/delta-movement';
 import {
   API_BASE_URL,
@@ -239,6 +238,9 @@ export async function placeCrossOrder(
   const giveDecimals = getTokenInfo(fromTokenId).decimals;
   const wantDecimals = getTokenInfo(toTokenId).decimals;
   const give = parseUnits(params.amount, giveDecimals);
+  const {
+    requantizeRemainingSwapAtPriceForDimensions,
+  }: typeof import('../core/swapbook/types') = require('../core/swapbook/types');
   const take = requantizeRemainingSwapAtPriceForDimensions(fromTokenId, toTokenId, give, parseUnits(params.price, 4), {
     giveTokenDecimals: giveDecimals,
     wantTokenDecimals: wantDecimals,

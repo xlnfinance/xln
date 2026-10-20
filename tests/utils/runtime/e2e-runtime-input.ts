@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { expect, type Page } from '@playwright/test';
 import type { RuntimeReplica, XLNModule } from '../../../core/api/public/runtime-module';
 import type { RuntimeAdapterInspection } from '../../../ui/src/runtime/adapter';
-import { decodeLocalRuntimeInput } from '../../../core/runtime/decode';
 
 type RuntimeTxEnqueueInput = {
   runtimeTxs: unknown[];
@@ -15,6 +14,11 @@ type RuntimeWindow = Window & {
 
 /** Submit once through current owner admission, then observe the real Runtime drain. */
 export async function enqueueRuntimeInput(page: Page, input: RuntimeTxEnqueueInput): Promise<void> {
+  // Discovery lists declarations without admitting input. Load the full decoder
+  // only for submission, and still validate before any browser-side effect.
+  const {
+    decodeLocalRuntimeInput,
+  }: typeof import('../../../core/runtime/decode') = require('../../../core/runtime/decode');
   const validated = decodeLocalRuntimeInput(input, 'E2E_RUNTIME_INPUT');
   const storageKey = `xln:e2e:enqueue:${randomUUID()}`;
   await page.evaluate(

@@ -1,7 +1,6 @@
 import { createWalletIdentity } from '../ui/tests/wallet-ui';
 import type { AccountFrame } from '../core/types/account';
 import { Wallet, formatUnits } from 'ethers';
-import { crossJurisdictionBookQtyLots } from '../core/swapbook';
 import {
   API_BASE_URL,
   APP_BASE_URL,
@@ -275,6 +274,9 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     'real MM full fill auto-closes and partial fill closes manually on both legs',
     { tag: '@functional' },
     async ({ page }, testInfo) => {
+      const {
+        crossJurisdictionBookQtyLots,
+      }: typeof import('../core/swapbook/cross-j/quantity') = require('../core/swapbook/cross-j/quantity');
       const baseline = await timedStep('cross_j_mm_fill.ensure_baseline', () =>
         ensureE2EBaseline(page, {
           apiBaseUrl: API_BASE_URL,

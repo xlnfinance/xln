@@ -1,0 +1,227 @@
+{
+  "baseSHA": "67084e904c17b68fb8b761824e3f11e2b7a96537",
+  "sourceFiles": {
+    "core/__tests__/operations/health/prod-startup-wiring-part-2.test.ts": "6bed53fff7304032b1f09be147a740183311da341cf90a587ae1b89faeb82a27",
+    "core/__tests__/testing/qa/playwright-target-discovery.test.ts": "335dac0a340ed8f742bb29ab4b63ca0a8cdd01d72a309a6f0e054e4bd193bffa",
+    "core/__tests__/testing/qa/qa-test-categories.test.ts": "786011a272f0019a3447887e4e8b53821f5887c6487b933aa7835f8379036ed0",
+    "core/scripts/checks/policy/check-e2e-test-categories.ts": "1be9728c205ffd785412cb4462f30fb058aa5a6a3337f8b37c442ba61e34b78f",
+    "core/scripts/e2e/harness/playwright-test-metadata.ts": "da4a595b67b090a41d5ce5ad517decddffe25c16e61fea309b8465fc02b18c87",
+    "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts": "3de22de39cc322741007bcb0c3ce657fd1e8d96fa98f62f51bdfcb12b808db93",
+    "tests/e2e-cross-j-swap-helpers-b.ts": "f7b46a1a56508fba7b9d9c73c63a19d4802a968bc12c9cabaea7d9691970ca8a",
+    "tests/e2e-cross-j-swap.spec.ts": "54d7020759c3b12bb9da46504953687a97e61f04d816492932cf3af8dca0935c",
+    "tests/utils/runtime/e2e-runtime-input.ts": "24048ea2614a8e77ba2cf94d56b579954db4c05ecf147c64747253fd491a8b2f"
+  },
+  "patchSHA256": "bd5a2e577a59b79e0fae3ea368111fd054d6c315b2f70abb44fe426525b3579e",
+  "firstFailure": "Exact committed-SHA unit command:66pass,1fail,0skip; coldCrossCLI SIGTERM at5s. An empty transform cache reproduced the boundary. Why the original shared cache was cold was not established.",
+  "fix": "Load execution-only test modules through the existing CommonJS Playwright transform when used; list independent packages concurrently and wait for both children before returning success or error. Preserve root/UI order, parsed tags/titles/locations and original deadlines.",
+  "l1": {
+    "passed": 67,
+    "failed": 0,
+    "assertions": 1052,
+    "coldCaseMs": 3734.95,
+    "coldCaseDeadlineMs": 5000
+  },
+  "l2": {
+    "passed": 1,
+    "failed": 0,
+    "browserSeconds": 32.5,
+    "case": "real MM full fill auto-closes and partial fill closes manually on both legs",
+    "strictBrowserHealth": true,
+    "directory": "/Users/zigota/xln/.logs/e2e-parallel/20261020-090713-261"
+  },
+  "childLifecycle": {
+    "beforeUnfinishedAtReject": 1,
+    "afterUnfinishedAtReject": 0,
+    "afterChildrenCompleted": 2,
+    "observer": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/metadata-settled-after.json"
+  },
+  "retainedFailures": [
+    "Lazy ESM candidate failed at createStructuredLogger export; corrected to typed CommonJS require and exact browser case passed.",
+    "A grep-based rerun was rejected before browser execution by the existing exact-target ledger; the subsequent file::title run passed.",
+    "Retired historical load-testing failure remains recorded and is not passed."
+  ],
+  "limits": [
+    "No production financial-runtime or protocol edits.",
+    "Exact complete unit/test/check, full browser/release/soak and one final committed-SHA financial acceptance remain separate requirements.",
+    "No public Ethereum/TRON USDT or mainnet readiness claim."
+  ],
+  "results": {
+    "exact-test-unit-67084-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "exact-test-unit-67084",
+        "--timeout-ms",
+        "7200000",
+        "--",
+        "bun",
+        "run",
+        "test:unit"
+      ],
+      "exitCode": 1,
+      "seconds": 38.298579208,
+      "sourceUnchanged": true,
+      "logSHA256": "94a10f51ba5030362294b3f80312cf51a35920113cfb49581de6535d92344d3f",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/exact-test-unit-67084-01.result.json"
+    },
+    "metadata-cold-boundary-67084-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "metadata-cold-boundary",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/operations/health/prod-startup-wiring-part-2.test.ts",
+        "--test-name-pattern",
+        "isolated e2e discovers requirements inside multiline Playwright declarations"
+      ],
+      "exitCode": 1,
+      "seconds": 7.250899417,
+      "sourceUnchanged": true,
+      "logSHA256": "a3a61a40798726532ec0348d5bf448084db4aff22861bd94b4a535b85ebaae7d",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/metadata-cold-boundary-67084-01.result.json"
+    },
+    "metadata-cold-cohort-candidate-02": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "metadata-cold-cohort-candidate",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/operations/health/prod-startup-wiring-part-2.test.ts",
+        "core/__tests__/testing/qa/playwright-target-discovery.test.ts",
+        "core/__tests__/testing/qa/qa-test-categories.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 17.335741042000002,
+      "sourceUnchanged": true,
+      "logSHA256": "8514c6157709e05952e7ee63740c7bcab3a8b4194ba70656378043f5fb20d01f",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/metadata-cold-cohort-candidate-02.result.json"
+    },
+    "metadata-cold-mm-fill-l2-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "metadata-cold-mm-fill-l2",
+        "--timeout-ms",
+        "900000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e-cross-j-swap.spec.ts",
+        "--pw-grep=real MM full fill auto-closes and partial fill closes manually on both legs",
+        "--strict-browser-health"
+      ],
+      "exitCode": 1,
+      "seconds": 150.66406874999998,
+      "sourceUnchanged": true,
+      "logSHA256": "208ee30171d001fc1bdcd33292118fa6dbdf33378d310d1b12ab2d998bd3f759",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/metadata-cold-mm-fill-l2-01.result.json"
+    },
+    "metadata-cold-mm-fill-l2-02": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "metadata-cold-mm-fill-l2",
+        "--timeout-ms",
+        "900000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e-cross-j-swap.spec.ts",
+        "--pw-grep=real MM full fill auto-closes and partial fill closes manually on both legs",
+        "--strict-browser-health"
+      ],
+      "exitCode": 1,
+      "seconds": 1.1287884590000001,
+      "sourceUnchanged": true,
+      "logSHA256": "1ad11ea86c800f5c31ff30f63816a12d22fe34a9e79d51392adf5b2972f27260",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/metadata-cold-mm-fill-l2-02.result.json"
+    },
+    "metadata-cold-mm-fill-l2-03": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "metadata-cold-mm-fill-exact",
+        "--timeout-ms",
+        "900000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e-cross-j-swap.spec.ts::real MM full fill auto-closes and partial fill closes manually on both legs",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "exitCode": 0,
+      "seconds": 131.969949459,
+      "sourceUnchanged": true,
+      "logSHA256": "a89b1eaee95e8814c868b11ea8a7d1f9cbd3e3c8943b083eaf68df7804b2b715",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/metadata-cold-mm-fill-l2-03.result.json"
+    },
+    "metadata-sibling-lifecycle-before": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "metadata-sibling-lifecycle",
+        "--timeout-ms",
+        "30000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/metadata-settled-boundary.ts",
+        "before"
+      ],
+      "exitCode": 0,
+      "seconds": 2.99653675,
+      "sourceUnchanged": true,
+      "logSHA256": "3159736879552da30d6247e900a190ed917b897ba2a2e4de42d5069bb9935370",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/metadata-sibling-lifecycle-before.result.json"
+    },
+    "metadata-sibling-lifecycle-after": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "metadata-sibling-lifecycle",
+        "--timeout-ms",
+        "30000",
+        "--",
+        "bun",
+        "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/metadata-settled-boundary.ts",
+        "after"
+      ],
+      "exitCode": 0,
+      "seconds": 2.759791834,
+      "sourceUnchanged": true,
+      "logSHA256": "ab696cea892256ff725b1dbeaa8b97fd6d33c00bc176cf6a6dd8562fbf5facd7",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/metadata-sibling-lifecycle-after.result.json"
+    }
+  }
+}

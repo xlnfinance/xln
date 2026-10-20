@@ -6,24 +6,24 @@ import {
   parsePlaywrightTestMetadata,
 } from '../../../scripts/e2e/harness/playwright-test-metadata';
 
-test('Playwright loads custody Runtime wire decoders without importing server configuration', () => {
-  const tests = listPlaywrightTestMetadata(['tests/e2e-custody.spec.ts']);
+test('Playwright loads custody Runtime wire decoders without importing server configuration', async () => {
+  const tests = await listPlaywrightTestMetadata(['tests/e2e-custody.spec.ts']);
   expect(tests.length).toBeGreaterThan(0);
   expect(tests.every(entry => entry.file === 'tests/e2e-custody.spec.ts')).toBe(true);
 }, 30_000);
 
-test('Playwright discovery reports an actual failed CLI instead of an empty catalog', () => {
-  expect(() =>
+test('Playwright discovery reports an actual failed CLI instead of an empty catalog', async () => {
+  await expect(
     listPlaywrightTestMetadata(['tests/e2e-custody.spec.ts'], {
       project: 'xln-missing-discovery-project',
     }),
-  ).toThrow('PLAYWRIGHT_LIST_PROCESS_FAILED:exit=1:signal=none');
+  ).rejects.toThrow('PLAYWRIGHT_LIST_PROCESS_FAILED:exit=1:signal=none');
 });
 
-test('Playwright discovery preserves JSON reporter errors with the failed process status', () => {
+test('Playwright discovery preserves JSON reporter errors with the failed process status', async () => {
   let failure: unknown;
   try {
-    listPlaywrightTestMetadata(['tests/xln-missing-discovery-spec.spec.ts']);
+    await listPlaywrightTestMetadata(['tests/xln-missing-discovery-spec.spec.ts']);
   } catch (error) {
     failure = error;
   }

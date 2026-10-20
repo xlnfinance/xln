@@ -22,12 +22,12 @@ const listSpecs = (root: string): string[] => {
   return specs.sort();
 };
 
-const mainTests = listPlaywrightTestMetadata(listSpecs('tests'));
-const frontendTests = listPlaywrightTestMetadata(listSpecs('frontend/tests'), {
+const mainTests = await listPlaywrightTestMetadata(listSpecs('tests'));
+const frontendTests = await listPlaywrightTestMetadata(listSpecs('frontend/tests'), {
   profile: 'brainvault',
   project: 'brainvault',
 });
-const walletTests = listPlaywrightTestMetadata(listSpecs('ui/tests'), {
+const walletTests = await listPlaywrightTestMetadata(listSpecs('ui/tests'), {
   cwd: 'ui',
   project: 'chromium',
 });

@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import { relative, resolve } from 'node:path';
 
 import type { QaTaggedTest } from '../../../qa/test-categories';
@@ -62,17 +61,17 @@ export type PlaywrightMetadataOptions = {
   cwd?: string | undefined;
 };
 
-export const listPlaywrightTestMetadata = (
+export const listPlaywrightTestMetadata = async (
   files: readonly string[],
   options: PlaywrightMetadataOptions = {},
-): QaTaggedTest[] => {
+): Promise<QaTaggedTest[]> => {
   if (files.length === 0) return [];
   const cwd = resolve(process.cwd(), options.cwd ?? '.');
   const args = ['playwright', 'test', '--config', 'playwright.config.ts', '--list', '--reporter=json'];
   if (options.project) args.push(`--project=${options.project}`);
   args.push(...files.map(file => normalizePath(relative(cwd, resolve(process.cwd(), file)))));
   const started = performance.now();
-  const result = spawnSync('bunx', args, {
+  const child = Bun.spawn(['bunx', ...args], {
     cwd,
     env: {
       ...process.env,
@@ -84,15 +83,20 @@ export const listPlaywrightTestMetadata = (
       E2E_RESET_BASE_URL: process.env['E2E_RESET_BASE_URL'] || 'http://127.0.0.1:1',
       ...(options.profile ? { PW_PROFILE: options.profile } : {}),
     },
-    encoding: 'utf8',
-    stdio: 'pipe',
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
-  const stdout = String(result.stdout ?? '').trim();
-  if (result.error) throw result.error;
-  const stderr = String(result.stderr ?? '').trim();
+  const [output, errorOutput, status] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  const stdout = output.trim();
+  const stderr = errorOutput.trim();
   const processFailure =
-    result.status !== 0 || result.signal
-      ? `PLAYWRIGHT_LIST_PROCESS_FAILED:exit=${result.status}:signal=${result.signal ?? 'none'}` +
+    status !== 0 || child.signalCode
+      ? `PLAYWRIGHT_LIST_PROCESS_FAILED:exit=${status}:signal=${child.signalCode ?? 'none'}` +
         `:elapsedMs=${Math.round(performance.now() - started)}`
       : '';
   if (!stdout) throw new Error([processFailure || 'PLAYWRIGHT_LIST_EMPTY_OUTPUT', stderr].filter(Boolean).join('\n'));
