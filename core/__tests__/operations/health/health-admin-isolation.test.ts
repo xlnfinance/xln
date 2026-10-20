@@ -2,10 +2,9 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const readSource = (relativePath: string): string =>
-  readFileSync(resolve(process.cwd(), relativePath), 'utf8');
+const readSource = (relativePath: string): string => readFileSync(resolve(process.cwd(), relativePath), 'utf8');
 
-test('health admin route reads only health/debug surfaces and links to QA', () => {
+test('health admin route reads only health/debug surfaces and links to recorded evidence', () => {
   const route = readSource('frontend/src/routes/health/+page.svelte');
   const qaLinkPanel = readSource('frontend/src/lib/components/Health/HealthQaLinkPanel.svelte');
 
@@ -24,7 +23,9 @@ test('health admin route reads only health/debug surfaces and links to QA', () =
   expect(route).toContain('runtimeQueryClient.readActivity({ limit: 1000, scanLimit: 1000 })');
   expect(route).toContain('runtimeQueryClient.readEntities({ limit: 1000 })');
   expect(route).toContain('HealthQaLinkPanel');
-  expect(qaLinkPanel).toContain('href="/qa"');
+  expect(qaLinkPanel).toContain('href="https://github.com/xlnfinance/xln/tree/main/docs/evidence"');
+  expect(qaLinkPanel).toContain('href="/qa/quorum"');
+  expect(qaLinkPanel).not.toContain('href="/qa"');
   expect(qaLinkPanel).not.toContain('fetch(');
   expect(qaLinkPanel).not.toContain('<iframe');
 });

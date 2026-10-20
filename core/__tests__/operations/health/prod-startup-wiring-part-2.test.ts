@@ -610,10 +610,8 @@ describe('production startup wiring', () => {
     expect(importFlow).toContain('await validateRemoteRuntimeImportEntries(');
     expect(validation).toContain('await Promise.allSettled(workers)');
     expect(importFlow).toContain('writeRemoteRuntimeImportSummary(results, entries.length, importedAt)');
-    expect(isolatedRunner).toContain("'--wallet-url',\n        `${webUrl}/app`,\n        '--allow-reset'");
-    expect(isolatedRunner).not.toContain(
-      "'--custody-db-root',\n          join(dbPath, 'custody'),\n          '--wallet-url'",
-    );
+    expect(isolatedRunner).toMatch(/'--wallet-url',\s*`\$\{webUrl\}\/app`,\s*'--allow-reset'/);
+    expect(isolatedRunner).not.toMatch(/'--custody-db-root',\s*join\(dbPath,\s*'custody'\),\s*'--wallet-url'/);
   });
 
   test('prod diagnose accepts the market maker terminal startup phase', () => {
@@ -1440,7 +1438,7 @@ describe('production startup wiring', () => {
     expect(runner).not.toContain('FAILURE_RECEIPT_DUMP_TIMEOUT_MS');
     expect(runner).not.toContain('receiptDump');
     expect(runner).toContain("path: '/api/debug/activity?limit=500'");
-    expect(runner).toContain('Promise.all(forensicEndpoints.map(async endpoint =>');
+    expect(runner).toMatch(/Promise\.all\(\s*forensicEndpoints\.map\(async endpoint =>/);
     expect(runner).toContain('`${endpoint.name}.error.txt`');
     expect(forensics).toContain('await captureE2EHttpForensics({ apiUrl: options.apiUrl, outputDir });');
   });
@@ -1570,7 +1568,7 @@ describe('production startup wiring', () => {
     expect(hubNode).not.toContain("resolvedArgs.name.toLowerCase() === 'h2'");
     expect(hubNode).toContain("disputeAutoFinalizeMode: resolvedArgs.manualDisputeFinalize ? 'ignore' : 'auto',");
     expect(hubSpawn).toContain("...(child.name === deps.args.manualDisputeHub ? ['--manual-dispute-finalize'] : []),");
-    expect(isolatedRunner).toContain("'--manual-dispute-hub',\n        'H2',");
+    expect(isolatedRunner).toMatch(/'--manual-dispute-hub',\s*'H2',/);
     for (const productionLauncher of ['scripts/operations/start-server.sh', 'scripts/dev/run-dev-child.sh']) {
       expect(readFileSync(join(repoRoot, productionLauncher), 'utf8')).not.toContain('--manual-dispute-hub');
     }

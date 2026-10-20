@@ -1,0 +1,72 @@
+{
+  "baseSHA": "498e5eb4fcf30c6318e99b10e0bc532861587b9c",
+  "scope": "Precommit test-contract repair. Runtime, financial assertions, deadlines and frozen core unchanged. Not final-SHA release certification.",
+  "firstFailure": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "exact-unit-final-498e",
+      "--timeout-ms",
+      "7200000",
+      "--",
+      "bun",
+      "run",
+      "test:unit"
+    ],
+    "exitCode": 1,
+    "seconds": 1444.381019042,
+    "passed": 5498,
+    "failed": 4,
+    "skipped": 0,
+    "sourceUnchanged": true,
+    "logSHA256": "a74cdfc1cce0c057b37467d50f3021c8b86e3530b691e958f655d95411cd9af6",
+    "notReached": "Six subprocess stdio test files after the failed root suite"
+  },
+  "causes": [
+    "Health route isolation expected the retired /qa destination instead of recorded evidence and review history.",
+    "Three runner source checks required exact pre-format whitespace around unchanged reset/dispute/parallel-forensics tokens."
+  ],
+  "repair": {
+    "runtimeChanged": false,
+    "removedTests": 0,
+    "addedSkips": 0,
+    "semantics": "Health remains free of QA fetch/iframe; explicit reset permission, manual H2 dispute opt-out and parallel HTTP forensics remain required. The custody sequence negative assertion now also tolerates whitespace.",
+    "files": {
+      "core/__tests__/operations/health/health-admin-isolation.test.ts": {
+        "beforeSHA256": "1b189946651ff4a10042c41d1c48f2d0ffb4e4e93b83b9254e8d1a87fbe1213b",
+        "afterSHA256": "5a8e31fb8df2f28783aa791166fbc06082abea77eedd6bebc683ba27b7cbc581"
+      },
+      "core/__tests__/operations/health/prod-startup-wiring-part-2.test.ts": {
+        "beforeSHA256": "4edebbf463df882bd456921589581c47999d1df4fdcda52bacdf52a367b39c5e",
+        "afterSHA256": "38e0b6b72dc3d94bb6a806e134560f5536c334f35eaf5d837c53fa851612623e"
+      }
+    }
+  },
+  "focused": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "unit-wiring-focused",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "test",
+      "core/__tests__/operations/health/health-admin-isolation.test.ts",
+      "core/__tests__/operations/health/prod-startup-wiring-part-2.test.ts"
+    ],
+    "exitCode": 0,
+    "seconds": 6.054593291,
+    "passed": 58,
+    "failed": 0,
+    "skipped": 0,
+    "assertions": 1042,
+    "sourceUnchanged": true,
+    "logSHA256": "408934202ff9ca0eee71297f2fbadd0315964b30e9431644b56eef8d3b1dc2ad"
+  },
+  "remaining": "Exact full unit, financial proofs, browser catalog, release, soak and final check must certify the eventual immutable SHA; previous 498e results remain historical."
+}
