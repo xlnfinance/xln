@@ -1,0 +1,68 @@
+{
+  "createdAt": "2026-10-20T17:15:00.718825+00:00",
+  "baseSHA": "4f3b981fdc606ee1bf59ce835da6112339d0651e",
+  "scope": "Existing real-RPC test observer only; canonical watcher, cooldown policy, financial assertions and deadlines unchanged",
+  "sourceSHA256": "72d4ce2c17bbbb5d29d2367485ee9a9fa31c9b4bad79b6facaff91e7646b0c9d",
+  "exactUnitBefore": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/exact-test-unit-4f3b981fdc60-01.result.json",
+    "exitCode": 1,
+    "seconds": 1164.4967323750002,
+    "sourceUnchanged": true,
+    "logSHA256": "91831c25218eb035bbf80435cdfa33e41259953a1e4ed06821165dacec70b3fe",
+    "passed": 5511,
+    "failed": 1,
+    "skipped": 1,
+    "assertions": 677290,
+    "notRun": "Final six subprocess-contract files after main roots failed"
+  },
+  "focusedBefore": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/watcher-pressure-profile-4f3b981fdc60-01.result.json",
+    "exitCode": 1,
+    "seconds": 32.135027625,
+    "sourceUnchanged": true,
+    "logSHA256": "1e4b1f3ede725a2eea841385098cc006aa9e06db36da70298445216fd8928241"
+  },
+  "causalTiming": {
+    "deliberateFailures": 4,
+    "backoffAfterFailuresMs": 8000,
+    "postSuccessCooldownMs": 6000,
+    "measuredProcessRuntimeMs": 762,
+    "remainingCooldownApproxMs": 5238,
+    "rpcGateDeadlineMs": 5000
+  },
+  "focusedAfter": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/watcher-pressure-observation-green-01.result.json",
+    "exitCode": 0,
+    "seconds": 55.882204542000004,
+    "sourceUnchanged": true,
+    "logSHA256": "3fb77ea415a7852a92e625ce37892b058b723e673e25f7d760fa668487e8b3cb",
+    "passed": 1,
+    "failed": 0,
+    "assertions": 56
+  },
+  "backlogAfter": {
+    "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/watcher-backlog-observation-green-01.result.json",
+    "exitCode": 0,
+    "seconds": 36.750850250000006,
+    "sourceUnchanged": true,
+    "logSHA256": "b3bb253b2907783fb98d033ec6e05d92157580a11db0de1b49caf8b4007ef991",
+    "passed": 1,
+    "failed": 0,
+    "assertions": 38
+  },
+  "reviewedPatchSHA256": "a6ace8f685e30cd110001bade90eb2d46a2de1e26c2d28fb7aaea4636dd5fe47",
+  "preserved": {
+    "gateDeadlineMs": 5000,
+    "testTimeoutMs": 60000,
+    "minimumRetainedPressureMs": 1400,
+    "pressureScanHeights": [
+      63,
+      126,
+      189
+    ],
+    "realRpcBatchDeadline": true,
+    "authenticatedDenseHistory": true,
+    "reorgAndRecoveryAssertions": true
+  },
+  "remaining": "Full exact unit/test/check, browser158, release34,60minsoak and fresh same-final-SHA financial acceptance; no publication/mainnet claim."
+}

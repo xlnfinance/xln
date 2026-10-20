@@ -435,10 +435,15 @@ describe('RPC J-watcher backlog drain', () => {
         // One success must not restore the larger burst while pressure remains.
         await processRuntime(env);
         const retainedPressureGate = rpcProxy.armBlockNumberGate();
+        const retainedPressureEnteredAt = retainedPressureGate.entered.then(() => performance.now());
         const retainedPressurePoll = pollWatcher();
+        // Observe the required minimum cooldown before starting the unchanged
+        // RPC gate deadline. Capture actual entry time so an early poll still
+        // fails even while this observer is waiting for the minimum interval.
+        await Bun.sleep(Math.max(0, 1_400 - (performance.now() - successfulRetryAt)));
         await waitForGate('retained-pressure', retainedPressureGate, retainedPressurePoll);
         try {
-          expect(performance.now() - successfulRetryAt).toBeGreaterThanOrEqual(1_400);
+          expect((await retainedPressureEnteredAt) - successfulRetryAt).toBeGreaterThanOrEqual(1_400);
         } finally {
           retainedPressureGate.release();
         }
