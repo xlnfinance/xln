@@ -705,8 +705,8 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         await configureTokens(page, USDT, USDT);
       });
 
-      const orderbook = page.getByTestId('swap-orderbook').first();
-      const panel = orderbook.locator('.orderbook-panel').first();
+      const orderbook = page.getByTestId('orderbook').locator('visible=true').first();
+      const panel = orderbook;
       await expect(
         orderbook,
         'cross route must keep the right-side orderbook mounted when stream is silent',
@@ -729,7 +729,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         })
         .toBe(true);
       await expect
-        .poll(async () => String((await panel.getAttribute('data-source-status')) || ''), {
+        .poll(async () => String((await panel.getAttribute('data-status')) || ''), {
           timeout: 12_000,
           intervals: [250, 500, 1000],
           message: 'silent cross relay must resolve to no-market instead of hanging in syncing',
@@ -755,8 +755,8 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       await expect
         .poll(
           async () => ({
-            asks: await orderbook.getByTestId('orderbook-ask-row').count(),
-            bids: await orderbook.getByTestId('orderbook-bid-row').count(),
+            asks: await orderbook.getByTestId('book-row-ask').count(),
+            bids: await orderbook.getByTestId('book-row-bid').count(),
           }),
           {
             timeout: 5_000,

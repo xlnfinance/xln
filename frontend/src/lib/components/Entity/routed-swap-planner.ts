@@ -81,7 +81,10 @@ type CrossMarketView = {
   sourceIsBase: boolean;
 };
 
-const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
+const normalizeEntityId = (value: unknown): string =>
+  String(value || '')
+    .trim()
+    .toLowerCase();
 
 const tokenNetworkLabel = (
   tokenId: number,
@@ -94,7 +97,7 @@ const tokenNetworkLabel = (
 
 const routePathLabel = (hops: RoutedSwapHop[]): string => {
   if (hops.length === 0) return '';
-  return [hops[0]!.fromLabel, ...hops.map((hop) => hop.toLabel)].join(' -> ');
+  return [hops[0]!.fromLabel, ...hops.map(hop => hop.toLabel)].join(' -> ');
 };
 
 function stableIdHash(input: string): string {
@@ -140,10 +143,11 @@ export function orderbookSnapshotCacheKey(hubEntityId: string, pairIdValue: stri
 }
 
 export function orderbookSnapshotSignature(snapshot: OrderbookSnapshot): string {
-  const levelsSignature = (levels: SnapshotLevel[]) => (levels || [])
-    .slice(0, 10)
-    .map((level) => `${level.price.toString()}:${level.size}:${level.total}`)
-    .join(',');
+  const levelsSignature = (levels: SnapshotLevel[]) =>
+    (levels || [])
+      .slice(0, 10)
+      .map(level => `${level.price.toString()}:${level.size}:${level.total}`)
+      .join(',');
   return [
     snapshot.sourceStatus,
     snapshot.sourceCount,
@@ -169,7 +173,9 @@ export function buildSameJurisdictionHop(input: {
   resolvePairOrientation: (tokenA: number, tokenB: number) => PairOrientation;
   tokenSymbol: (tokenId: number) => string;
 }): RoutedSwapHop | null {
-  const hubId = String(input.hubId || '').trim().toLowerCase();
+  const hubId = String(input.hubId || '')
+    .trim()
+    .toLowerCase();
   if (!hubId || input.fromToken === input.toToken || input.fromToken <= 0 || input.toToken <= 0) return null;
   const pair = input.resolvePairOrientation(input.fromToken, input.toToken);
   return {
@@ -204,9 +210,19 @@ export function buildCrossJurisdictionHop(input: {
   tokenId: number;
   tokenSymbol: (tokenId: number) => string;
 }): RoutedSwapHop | null {
-  const sourceHubId = String(input.sourceHubId || '').trim().toLowerCase();
-  const targetHubId = String(input.targetHubId || '').trim().toLowerCase();
-  if (!input.sourceJurisdictionRef || !input.targetJurisdictionRef || !sourceHubId || !targetHubId || input.tokenId <= 0) {
+  const sourceHubId = String(input.sourceHubId || '')
+    .trim()
+    .toLowerCase();
+  const targetHubId = String(input.targetHubId || '')
+    .trim()
+    .toLowerCase();
+  if (
+    !input.sourceJurisdictionRef ||
+    !input.targetJurisdictionRef ||
+    !sourceHubId ||
+    !targetHubId ||
+    input.tokenId <= 0
+  ) {
     return null;
   }
   const market = deriveCanonicalCrossJurisdictionMarketForLegs(
@@ -256,7 +272,13 @@ export function estimateRoutedHopOutput(input: {
 }): RouteQuote {
   const { hop, inputAmount } = input;
   if (inputAmount <= 0n) {
-    return { inputAmount, outputAmount: 0n, priceTicks: null, hasLiquidity: false, reason: 'Enter amount to quote this hop.' };
+    return {
+      inputAmount,
+      outputAmount: 0n,
+      priceTicks: null,
+      hasLiquidity: false,
+      reason: 'Enter amount to quote this hop.',
+    };
   }
   const side: BookSide = hop.sourceIsBase ? 'bid' : 'ask';
   const snapshot = input.readCachedOrderbookSnapshot(hop.bookHubId, hop.pairId);
@@ -272,11 +294,11 @@ export function estimateRoutedHopOutput(input: {
   }
   const priceTicks = snapshot
     ? readSnapshotBestPrice(snapshot, side)
-    : (side === 'bid' ? input.getBestBid(book!) : input.getBestAsk(book!));
+    : side === 'bid'
+      ? input.getBestBid(book!)
+      : input.getBestAsk(book!);
   if (!priceTicks || priceTicks <= 0n) {
-    const marketReason = snapshot?.sourceStatus === 'no-market'
-      ? 'No market is published'
-      : 'No live liquidity';
+    const marketReason = snapshot?.sourceStatus === 'no-market' ? 'No market is published' : 'No live liquidity';
     return {
       inputAmount,
       outputAmount: 0n,
@@ -286,8 +308,18 @@ export function estimateRoutedHopOutput(input: {
     };
   }
   const outputAmount = hop.sourceIsBase
-    ? input.quoteFromBase(inputAmount, priceTicks, input.getTokenDecimals(hop.baseTokenId), input.getTokenDecimals(hop.quoteTokenId))
-    : input.baseFromQuote(inputAmount, priceTicks, input.getTokenDecimals(hop.baseTokenId), input.getTokenDecimals(hop.quoteTokenId));
+    ? input.quoteFromBase(
+        inputAmount,
+        priceTicks,
+        input.getTokenDecimals(hop.baseTokenId),
+        input.getTokenDecimals(hop.quoteTokenId),
+      )
+    : input.baseFromQuote(
+        inputAmount,
+        priceTicks,
+        input.getTokenDecimals(hop.baseTokenId),
+        input.getTokenDecimals(hop.quoteTokenId),
+      );
   if (outputAmount <= 0n) {
     return {
       inputAmount,
@@ -309,8 +341,8 @@ function hubHasTradingPair(
 ): boolean {
   if (!hubId || tokenA <= 0 || tokenB <= 0 || tokenA === tokenB) return false;
   const oriented = resolvePairOrientation(tokenA, tokenB);
-  return tradingPairsForHub(hubId).some((pair) =>
-    pair.baseTokenId === oriented.baseTokenId && pair.quoteTokenId === oriented.quoteTokenId,
+  return tradingPairsForHub(hubId).some(
+    pair => pair.baseTokenId === oriented.baseTokenId && pair.quoteTokenId === oriented.quoteTokenId,
   );
 }
 
@@ -338,22 +370,26 @@ function candidateBridgeTokens(input: {
   }
 
   return Array.from(tokens)
-    .filter((tokenId) => Number.isFinite(tokenId) && tokenId > 0)
-    .filter((tokenId) => {
-      const sourceReachable = tokenId === input.sourceToken || hubHasTradingPair(
-        input.sourceHubId,
-        input.sourceToken,
-        tokenId,
-        input.resolvePairOrientation,
-        input.tradingPairsForHub,
-      );
-      const targetReachable = tokenId === input.targetToken || hubHasTradingPair(
-        input.targetHubId,
-        tokenId,
-        input.targetToken,
-        input.resolvePairOrientation,
-        input.tradingPairsForHub,
-      );
+    .filter(tokenId => Number.isFinite(tokenId) && tokenId > 0)
+    .filter(tokenId => {
+      const sourceReachable =
+        tokenId === input.sourceToken ||
+        hubHasTradingPair(
+          input.sourceHubId,
+          input.sourceToken,
+          tokenId,
+          input.resolvePairOrientation,
+          input.tradingPairsForHub,
+        );
+      const targetReachable =
+        tokenId === input.targetToken ||
+        hubHasTradingPair(
+          input.targetHubId,
+          tokenId,
+          input.targetToken,
+          input.resolvePairOrientation,
+          input.tradingPairsForHub,
+        );
       return sourceReachable && targetReachable;
     })
     .sort((a, b) => {
@@ -398,12 +434,15 @@ export function evaluateRoutedCandidate(input: {
   const estimatedOutAmount = fullyQuoted ? amount : null;
   const estimatedOutLabel = estimatedOutAmount
     ? `${input.formatAmount(estimatedOutAmount, input.targetToken)} ${targetDisplayLabel}`
-    : (input.inputAmount > 0n ? 'Needs live quotes' : 'Enter amount');
+    : input.inputAmount > 0n
+      ? 'Needs live quotes'
+      : 'Enter amount';
   const liquidityLabel = fullyQuoted ? '' : `Needs quotes ${liveHopCount}/${input.hops.length}`;
-  const score = (liveHopCount * 10_000)
-    - (input.hops.length * 250)
-    + (estimatedOutAmount ? 100 : 0)
-    + (input.bridgeTokenId && input.isLiquidToken(input.bridgeTokenId) ? 25 : 0);
+  const score =
+    liveHopCount * 10_000 -
+    input.hops.length * 250 +
+    (estimatedOutAmount ? 100 : 0) +
+    (input.bridgeTokenId && input.isLiquidToken(input.bridgeTokenId) ? 25 : 0);
   return {
     id: input.id,
     label: input.label,
@@ -430,13 +469,14 @@ export function compareRouteCandidates(
   if (a.estimatedOutAmount !== null && b.estimatedOutAmount !== null && a.estimatedOutAmount !== b.estimatedOutAmount) {
     return a.estimatedOutAmount > b.estimatedOutAmount ? -1 : 1;
   }
-  if ((a.estimatedOutAmount !== null) !== (b.estimatedOutAmount !== null)) return a.estimatedOutAmount !== null ? -1 : 1;
+  if ((a.estimatedOutAmount !== null) !== (b.estimatedOutAmount !== null))
+    return a.estimatedOutAmount !== null ? -1 : 1;
   if (a.score !== b.score) return b.score - a.score;
   if (a.hops.length !== b.hops.length) return a.hops.length - b.hops.length;
   return compareStableText(a.label, b.label);
 }
 
-export function buildRoutedRouteCandidates(input: {
+type RoutedRouteInput = {
   mode: 'same' | 'cross';
   target: CrossTargetLike | null;
   sourceHubId: string;
@@ -444,45 +484,51 @@ export function buildRoutedRouteCandidates(input: {
   sourceJurisdiction: string;
   sourceToken: number;
   targetToken: number;
-  quoteInputAmount: bigint;
   allowedSwapTokenIds: Iterable<number>;
   resolvePairOrientation: (tokenA: number, tokenB: number) => PairOrientation;
   tradingPairsForHub: (hubId: string) => PairOrientation[];
   isLiquidToken: (tokenId: number) => boolean;
   tokenSymbol: (tokenId: number) => string;
   compareStableText: (left: string, right: string) => number;
-  formatAmount: (amount: bigint, tokenId: number) => string;
-  estimateHopOutput: (hop: RoutedSwapHop, inputAmount: bigint) => RouteQuote;
-}): RoutedSwapRouteCandidate[] {
+};
+
+export type RoutedRoutePath = Pick<RoutedSwapRouteCandidate, 'id' | 'label' | 'summary' | 'bridgeTokenId' | 'hops'>;
+
+/** Candidate topology is not a liquidity quote or an executable multi-hop order. */
+export function buildRoutedRoutePaths(input: RoutedRouteInput): RoutedRoutePath[] {
   if (input.mode !== 'cross' || !input.target) return [];
   const target = input.target;
-  const sourceHubId = String(input.sourceHubId || '').trim().toLowerCase();
-  const targetHubId = String(target.targetHubEntityId || '').trim().toLowerCase();
+  const sourceHubId = String(input.sourceHubId || '')
+    .trim()
+    .toLowerCase();
+  const targetHubId = String(target.targetHubEntityId || '')
+    .trim()
+    .toLowerCase();
   if (!sourceHubId || !targetHubId || !input.sourceJurisdictionRef || !target.targetJurisdictionRef) return [];
-  if (!Number.isFinite(input.sourceToken) || !Number.isFinite(input.targetToken) || input.sourceToken <= 0 || input.targetToken <= 0) {
+  if (
+    !Number.isFinite(input.sourceToken) ||
+    !Number.isFinite(input.targetToken) ||
+    input.sourceToken <= 0 ||
+    input.targetToken <= 0
+  ) {
     return [];
   }
-  const candidates: RoutedSwapRouteCandidate[] = [];
+  const candidates: RoutedRoutePath[] = [];
   const seen = new Set<string>();
   const addCandidate = (bridgeTokenId: number | null, hops: RoutedSwapHop[], label: string, summary: string) => {
     if (hops.length === 0) return;
-    const key = hops.map((hop) => `${hop.kind}:${hop.pairId}:${hop.bookHubId}:${hop.fromTokenId}:${hop.toTokenId}`).join('|');
+    const key = hops
+      .map(hop => `${hop.kind}:${hop.pairId}:${hop.bookHubId}:${hop.fromTokenId}:${hop.toTokenId}`)
+      .join('|');
     if (seen.has(key)) return;
     seen.add(key);
-    candidates.push(evaluateRoutedCandidate({
+    candidates.push({
       id: bridgeTokenId === null ? 'direct-cross' : `bridge-${bridgeTokenId}`,
       label,
       summary,
       bridgeTokenId,
       hops,
-      targetToken: input.targetToken,
-      targetLabel: tokenNetworkLabel(input.targetToken, target.targetJurisdiction, input.tokenSymbol),
-      inputAmount: input.quoteInputAmount,
-      estimateHopOutput: input.estimateHopOutput,
-      formatAmount: input.formatAmount,
-      tokenSymbol: input.tokenSymbol,
-      isLiquidToken: input.isLiquidToken,
-    }));
+    });
   };
 
   if (input.sourceToken === input.targetToken) {
@@ -499,7 +545,12 @@ export function buildRoutedRouteCandidates(input: {
       tokenSymbol: input.tokenSymbol,
     });
     if (directHop) {
-      addCandidate(null, [directHop], routePathLabel([directHop]), `${input.sourceJurisdiction} -> ${target.targetJurisdiction}`);
+      addCandidate(
+        null,
+        [directHop],
+        routePathLabel([directHop]),
+        `${input.sourceJurisdiction} -> ${target.targetJurisdiction}`,
+      );
     }
   }
 
@@ -568,7 +619,33 @@ export function buildRoutedRouteCandidates(input: {
     );
   }
 
-  return candidates
+  return candidates;
+}
+
+export function buildRoutedRouteCandidates(
+  input: RoutedRouteInput & {
+    quoteInputAmount: bigint;
+    formatAmount: (amount: bigint, tokenId: number) => string;
+    estimateHopOutput: (hop: RoutedSwapHop, inputAmount: bigint) => RouteQuote;
+  },
+): RoutedSwapRouteCandidate[] {
+  if (!input.target) return [];
+  const paths = buildRoutedRoutePaths(input);
+  if (paths.length === 0) return [];
+  const targetLabel = tokenNetworkLabel(input.targetToken, input.target.targetJurisdiction, input.tokenSymbol);
+  return paths
+    .map(path =>
+      evaluateRoutedCandidate({
+        ...path,
+        targetToken: input.targetToken,
+        targetLabel,
+        inputAmount: input.quoteInputAmount,
+        estimateHopOutput: input.estimateHopOutput,
+        formatAmount: input.formatAmount,
+        tokenSymbol: input.tokenSymbol,
+        isLiquidToken: input.isLiquidToken,
+      }),
+    )
     .sort((a, b) => compareRouteCandidates(a, b, input.compareStableText))
     .slice(0, 4);
 }

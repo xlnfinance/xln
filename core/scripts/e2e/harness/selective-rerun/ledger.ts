@@ -100,15 +100,11 @@ const decodeLedger = (value: unknown): SelectiveRerunLedger => {
   return { version: LEDGER_VERSION, unresolved };
 };
 
-export const readSelectiveRerunLedger = (
-  path = DEFAULT_LEDGER_PATH,
-): SelectiveRerunLedger => {
+export const readSelectiveRerunLedger = (path = DEFAULT_LEDGER_PATH): SelectiveRerunLedger => {
   try {
     return decodeLedger(JSON.parse(readFileSync(path, 'utf8')) as unknown);
   } catch (error) {
-    const code = error instanceof Error && 'code' in error
-      ? String((error as NodeJS.ErrnoException).code ?? '')
-      : '';
+    const code = error instanceof Error && 'code' in error ? String((error as NodeJS.ErrnoException).code ?? '') : '';
     if (code === 'ENOENT') return { version: LEDGER_VERSION, unresolved: [] };
     throw new Error(`SELECTIVE_RERUN_LEDGER_INVALID:${path}`, { cause: error });
   }
@@ -134,9 +130,7 @@ const processIsAlive = (pid: number): boolean => {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    const code = error instanceof Error && 'code' in error
-      ? String((error as NodeJS.ErrnoException).code ?? '')
-      : '';
+    const code = error instanceof Error && 'code' in error ? String((error as NodeJS.ErrnoException).code ?? '') : '';
     if (code === 'ESRCH') return false;
     if (code === 'EPERM') return true;
     throw error;
@@ -157,9 +151,7 @@ const removeStaleLedgerLock = (lockPath: string): boolean => {
     unlinkSync(lockPath);
     return true;
   } catch (error) {
-    const code = error instanceof Error && 'code' in error
-      ? String((error as NodeJS.ErrnoException).code ?? '')
-      : '';
+    const code = error instanceof Error && 'code' in error ? String((error as NodeJS.ErrnoException).code ?? '') : '';
     if (code === 'ENOENT') return true;
     throw error;
   }
@@ -179,9 +171,7 @@ const withLedgerLock = <T>(path: string, action: () => T): T => {
         unlinkSync(lockPath);
       }
     } catch (error) {
-      const code = error instanceof Error && 'code' in error
-        ? String((error as NodeJS.ErrnoException).code ?? '')
-        : '';
+      const code = error instanceof Error && 'code' in error ? String((error as NodeJS.ErrnoException).code ?? '') : '';
       if (code !== 'EEXIST') throw error;
       if (removeStaleLedgerLock(lockPath)) continue;
       waitForLedgerLock();
@@ -190,23 +180,26 @@ const withLedgerLock = <T>(path: string, action: () => T): T => {
   throw new Error(`SELECTIVE_RERUN_LEDGER_LOCK_TIMEOUT:${lockPath}`);
 };
 
-export const recordSelectiveRerunFailure = (
-  entry: SelectiveRerunEntry,
-  path = DEFAULT_LEDGER_PATH,
-): void => {
+export const recordSelectiveRerunFailure = (entry: SelectiveRerunEntry, path = DEFAULT_LEDGER_PATH): void => {
   withLedgerLock(path, () => {
-    const reason = entry.reason.replace(/[\r\n]+/g, ' ').trim().slice(0, 500) || 'unknown-failure';
-    const canonicalEntry = decodeEntry({
-      ...entry,
-      reason,
-    }, 0);
+    const reason =
+      entry.reason
+        .replace(/[\r\n]+/g, ' ')
+        .trim()
+        .slice(0, 500) || 'unknown-failure';
+    const canonicalEntry = decodeEntry(
+      {
+        ...entry,
+        reason,
+      },
+      0,
+    );
     const ledger = readSelectiveRerunLedger(path);
     const unresolved = ledger.unresolved.filter(
       current => current.kind !== canonicalEntry.kind || current.target !== canonicalEntry.target,
     );
     unresolved.push(canonicalEntry);
-    unresolved.sort((left, right) =>
-      left.kind.localeCompare(right.kind) || left.target.localeCompare(right.target));
+    unresolved.sort((left, right) => left.kind.localeCompare(right.kind) || left.target.localeCompare(right.target));
     writeLedger({ version: LEDGER_VERSION, unresolved }, path);
   });
 };
@@ -218,9 +211,7 @@ export const recordSelectiveRerunPass = (
 ): void => {
   withLedgerLock(path, () => {
     const ledger = readSelectiveRerunLedger(path);
-    const unresolved = ledger.unresolved.filter(
-      current => current.kind !== kind || current.target !== target,
-    );
+    const unresolved = ledger.unresolved.filter(current => current.kind !== kind || current.target !== target);
     if (unresolved.length === ledger.unresolved.length) return;
     writeLedger({ version: LEDGER_VERSION, unresolved }, path);
   });
@@ -235,15 +226,16 @@ const assertNoUnresolvedReruns = (unresolved: readonly SelectiveRerunEntry[]): v
   if (unresolved.length === 0) return;
   const table = unresolved
     .map(entry => {
-      const rerun = entry.kind === 'scenario'
-        ? `bun core/scenarios/run.ts ${entry.target} --mode=rpc --single`
-        : `bun core/scripts/e2e/runners/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=${entry.target} --strict-browser-health --preserve-artifacts`;
+      const rerun =
+        entry.kind === 'scenario'
+          ? `bun core/scenarios/run.ts ${entry.target} --mode=rpc --single`
+          : `bun core/scripts/e2e/runners/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=${entry.target} --strict-browser-health --preserve-artifacts`;
       return `${entry.kind}\t${entry.target}\t${entry.failedCodeHash.slice(0, 12)}\t${entry.reason}\n  ${rerun}`;
     })
     .join('\n');
   throw new Error(
     `BROAD_RUN_BLOCKED_EXACT_RERUN_REQUIRED count=${unresolved.length}\n` +
-    `kind\ttarget\tfailed-code\treason\n${table}`,
+      `kind\ttarget\tfailed-code\treason\n${table}`,
   );
 };
 
@@ -288,5 +280,15 @@ export const assertBroadE2ERunHasNoUnresolvedReruns = (
   assertNoUnresolvedReruns(failures.filter(entry => !removed.includes(entry)));
 };
 
-export const selectiveE2ETarget = (file: string, title: string): string =>
-  `${file}::${title}`;
+export const selectiveE2ETarget = (file: string, title: string): string => `${file}::${title}`;
+
+/** A named failure cohort is selective even when its stacks start together.
+ * Admission never clears evidence; only each target's actual PASS can do that. */
+export const assertE2ESelectionMayStart = (
+  targets: readonly string[],
+  path = DEFAULT_LEDGER_PATH,
+  sourceRoot = process.cwd(),
+): void => {
+  if (targets.length > 0 && targets.every(target => /^.+\.spec\.ts::.+$/.test(target))) return;
+  assertBroadE2ERunHasNoUnresolvedReruns(path, sourceRoot);
+};

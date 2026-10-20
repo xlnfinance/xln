@@ -52,3 +52,12 @@ test('single-hub selection does not accept a mixed or unidentified source book',
     ),
   ).toBeNull();
 });
+
+test('Cross cannot reuse a numeric same-network snapshot or another stack venue', () => {
+  const venue =
+    'cross:stack:31338:0x1111111111111111111111111111111111111111:2/stack:31337:0x2222222222222222222222222222222222222222:1';
+  expect(selectRelaySnapshot(book, source.hubEntityId, venue)).toBeNull();
+  const cross = { ...book, pairId: venue };
+  expect(selectRelaySnapshot(cross, source.hubEntityId, venue)).toBe(cross);
+  expect(selectRelaySnapshot(cross, source.hubEntityId, venue.replace('31338', '31339'))).toBeNull();
+});

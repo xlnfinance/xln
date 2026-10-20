@@ -348,6 +348,20 @@ type HubAccountStatus = {
   error?: string;
 };
 
+export function isHubAccountReady(
+  status: HubAccountStatus,
+  tokenIds: readonly number[],
+  stage: 'committed' | 'funded',
+): boolean {
+  if (!status.success || !status.hasAccount || !status.ready) return false;
+  return tokenIds.every(tokenId => {
+    const token = status.tokens?.find(entry => Number(entry.tokenId) === tokenId);
+    if (!token?.hasDelta) return false;
+    // Base commitment precedes extendCredit; only its completion requires capacity.
+    return stage === 'committed' || BigInt(token.hubOutCapacity || '0') > 0n;
+  });
+}
+
 async function assertNoLocalHubDivergence(
   page: Page,
   identity: { entityId: string; signerId: string },
@@ -379,7 +393,7 @@ async function waitForHubBaseAccountReady(
   context: string,
 ): Promise<void> {
   try {
-    await waitForHubAccountReady(page, identity.entityId, hubId, [1]);
+    await waitForHubAccountReady(page, identity.entityId, hubId, [1], 'committed');
   } catch (error) {
     const [localStatus, hubStatus, debugState, relayDebug] = await Promise.all([
       getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId).catch(statusError => ({
@@ -471,6 +485,7 @@ async function waitForHubAccountReady(
   userEntityId: string,
   hubId: string,
   tokenIds: readonly number[],
+  stage: 'committed' | 'funded' = 'funded',
 ): Promise<void> {
   let lastStatus: HubAccountStatus = { error: 'not-run' };
   let lastEvidence = '';
@@ -485,17 +500,14 @@ async function waitForHubAccountReady(
           success: lastStatus.success,
           hasAccount: lastStatus.hasAccount,
           ready: lastStatus.ready,
+          stage,
           tokens,
         });
         if (evidence !== lastEvidence) {
           console.log(`[HUB_ACCOUNT_READINESS] ${evidence}`);
           lastEvidence = evidence;
         }
-        const tokenReady = tokenIds.every(tokenId => {
-          const token = tokens.find(entry => Number(entry.tokenId) === Number(tokenId));
-          return Boolean(token?.hasDelta) && BigInt(String(token?.hubOutCapacity || '0')) > 0n;
-        });
-        return Boolean(lastStatus.success && lastStatus.hasAccount && lastStatus.ready && tokenReady);
+        return isHubAccountReady(lastStatus, tokenIds, stage);
       },
       {
         timeout: DEFAULT_OPEN_TIMEOUT_MS,
@@ -553,16 +565,7 @@ export async function connectRuntimeToHubWithCredit(
   const initiallyLocalReady = await isAccountReady(page, identity.entityId, identity.signerId, hubId, tokenIds);
   if (initiallyLocalReady) {
     const hubStatus = await readHubAccountStatus(page, identity.entityId, hubId, tokenIds);
-    const hubTokens = Array.isArray(hubStatus.tokens) ? hubStatus.tokens : [];
-    const hubReady = Boolean(
-      hubStatus.success &&
-      hubStatus.hasAccount &&
-      hubStatus.ready &&
-      tokenIds.every(tokenId => {
-        const token = hubTokens.find(entry => Number(entry.tokenId) === Number(tokenId));
-        return Boolean(token?.hasDelta) && BigInt(String(token?.hubOutCapacity || '0')) > 0n;
-      }),
-    );
+    const hubReady = isHubAccountReady(hubStatus, tokenIds, 'funded');
     if (hubReady) {
       await waitForRenderedCommittedAccountCard(page, hubId, 'connectRuntimeToHub already-ready path');
       return;

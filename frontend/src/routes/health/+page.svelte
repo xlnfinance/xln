@@ -985,7 +985,7 @@
           <h2>Top Testnet Gates</h2>
           <p class="sub">Capped-testnet acceptance surface</p>
         </div>
-        <a class="panel-link" href="/qa">QA cockpit</a>
+        <a class="panel-link" href="https://github.com/xlnfinance/xln/tree/main/docs/evidence">Recorded checks</a>
       </div>
       <div class="gate-grid">
         {#each testnetGates as gate}

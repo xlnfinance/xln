@@ -5,54 +5,71 @@ import { decodeMarketWireResponse, encodeMarketWireMessage } from '@xln/core/net
 import type { RelayMarketSnapshotPayload } from '@xln/core/network/relay/market/aggregate';
 import type { MarketSideLevel } from '@xln/core/network/relay/market/snapshot';
 import { selectRelaySnapshot } from './relay-book-snapshot';
-import { resolveOrderbookRelayWsUrl, type BrowserLocationLike } from '@xln/frontend/lib/components/Trading/orderbook-relay-url';
+import {
+  resolveOrderbookRelayWsUrl,
+  type BrowserLocationLike,
+} from '@xln/frontend/lib/components/Trading/orderbook-relay-url';
 import { getAdapter } from '../adapter';
 import { useAdapterRead } from '../hooks';
 import { useApp } from '../store';
 import { peekXLN } from '../xln-loader';
+import type { CrossBookMarket } from './cross-book';
 
 export type BookLevel = {
-	priceTicks: bigint;
-	/** Base amount at this price, raw base units. */
-	size: bigint;
-	/** Cumulative base amount from the best price down to this level. */
-	total: bigint;
-	orders: number;
-	/** True when one of this wallet's own offers rests here. */
-	own: boolean;
+  priceTicks: bigint;
+  /** Base amount at this price, raw base units. */
+  size: bigint;
+  /** Cumulative base amount from the best price down to this level. */
+  total: bigint;
+  orders: number;
+  /** True when one of this wallet's own offers rests here. */
+  own: boolean;
 };
 
 export type BookView = {
-	pairId: string;
-	baseTokenId: number;
-	quoteTokenId: number;
-	minTradeSize: bigint | null;
-	/** Best price first on both sides. */
-	bids: BookLevel[];
-	asks: BookLevel[];
-	spreadTicks: bigint | null;
-	lastTradeTicks: bigint | null;
-	status: 'live' | 'syncing' | 'no-market' | 'unavailable';
-	source: 'hosted' | 'relay';
-	updatedAt: number;
-	error: string | null;
+  pairId: string;
+  baseTokenId: number;
+  quoteTokenId: number;
+  minTradeSize: bigint | null;
+  /** Best price first on both sides. */
+  bids: BookLevel[];
+  asks: BookLevel[];
+  spreadTicks: bigint | null;
+  lastTradeTicks: bigint | null;
+  status: 'live' | 'syncing' | 'no-market' | 'unavailable';
+  source: 'hosted' | 'relay';
+  updatedAt: number;
+  error: string | null;
 };
 
-const normalizeId = (value: unknown): string => String(value || '').trim().toLowerCase();
+const normalizeId = (value: unknown): string =>
+  String(value || '')
+    .trim()
+    .toLowerCase();
 
-export function orientPair(tokenA: number, tokenB: number): { baseTokenId: number; quoteTokenId: number; pairId: string } {
-	const xln = peekXLN();
-	if (xln?.getSwapPairOrientation) return xln.getSwapPairOrientation(tokenA, tokenB);
-	const left = Math.min(tokenA, tokenB);
-	const right = Math.max(tokenA, tokenB);
-	const liquid = (id: number): boolean => id === 1 || id === 3;
-	const pairId = `${left}/${right}`;
-	if (liquid(tokenA) && !liquid(tokenB)) return { baseTokenId: tokenB, quoteTokenId: tokenA, pairId };
-	if (!liquid(tokenA) && liquid(tokenB)) return { baseTokenId: tokenA, quoteTokenId: tokenB, pairId };
-	return { baseTokenId: left, quoteTokenId: right, pairId };
+export function orientPair(
+  tokenA: number,
+  tokenB: number,
+): { baseTokenId: number; quoteTokenId: number; pairId: string } {
+  const xln = peekXLN();
+  if (xln?.getSwapPairOrientation) return xln.getSwapPairOrientation(tokenA, tokenB);
+  const left = Math.min(tokenA, tokenB);
+  const right = Math.max(tokenA, tokenB);
+  const liquid = (id: number): boolean => id === 1 || id === 3;
+  const pairId = `${left}/${right}`;
+  if (liquid(tokenA) && !liquid(tokenB)) return { baseTokenId: tokenB, quoteTokenId: tokenA, pairId };
+  if (!liquid(tokenA) && liquid(tokenB)) return { baseTokenId: tokenA, quoteTokenId: tokenB, pairId };
+  return { baseTokenId: left, quoteTokenId: right, pairId };
 }
 
-export { quoteForBase, quoteAtBestLevel, swapMinimumError, swapPriceBandError, PRICE_SCALE } from './orderbook-quote';
+export {
+  quoteForBase,
+  quoteAtBestLevel,
+  pickBookLevel,
+  swapMinimumError,
+  swapPriceBandError,
+  PRICE_SCALE,
+} from './orderbook-quote';
 
 // ---------------------------------------------------------------------------
 // Hosted hub: the book is the union of resting offers on the hub's accounts.
@@ -61,179 +78,210 @@ export { quoteForBase, quoteAtBestLevel, swapMinimumError, swapPriceBandError, P
 type HostedAccountDoc = { state?: AccountState };
 type HostedAccountsPage = { items?: HostedAccountDoc[] };
 
-function foldLevels(entries: Array<{ priceTicks: bigint; size: bigint; own: boolean }>, bestFirst: (a: bigint, b: bigint) => number, depth: number): BookLevel[] {
-	const byPrice = new Map<bigint, BookLevel>();
-	for (const entry of entries) {
-		const level = byPrice.get(entry.priceTicks) ?? { priceTicks: entry.priceTicks, size: 0n, total: 0n, orders: 0, own: false };
-		level.size += entry.size;
-		level.orders += 1;
-		level.own = level.own || entry.own;
-		byPrice.set(entry.priceTicks, level);
-	}
-	const levels = [...byPrice.values()].sort((a, b) => bestFirst(a.priceTicks, b.priceTicks)).slice(0, depth);
-	let running = 0n;
-	for (const level of levels) {
-		running += level.size;
-		level.total = running;
-	}
-	return levels;
+function foldLevels(
+  entries: Array<{ priceTicks: bigint; size: bigint; own: boolean }>,
+  bestFirst: (a: bigint, b: bigint) => number,
+  depth: number,
+): BookLevel[] {
+  const byPrice = new Map<bigint, BookLevel>();
+  for (const entry of entries) {
+    const level = byPrice.get(entry.priceTicks) ?? {
+      priceTicks: entry.priceTicks,
+      size: 0n,
+      total: 0n,
+      orders: 0,
+      own: false,
+    };
+    level.size += entry.size;
+    level.orders += 1;
+    level.own = level.own || entry.own;
+    byPrice.set(entry.priceTicks, level);
+  }
+  const levels = [...byPrice.values()].sort((a, b) => bestFirst(a.priceTicks, b.priceTicks)).slice(0, depth);
+  let running = 0n;
+  for (const level of levels) {
+    running += level.size;
+    level.total = running;
+  }
+  return levels;
 }
 
 /** Build the hub's book for one pair from the offers resting on its accounts. */
 export function bookFromHostedAccounts(
-	docs: readonly HostedAccountDoc[],
-	pair: { baseTokenId: number; quoteTokenId: number; pairId: string },
-	ownEntityId: string,
-	depth: number,
+  docs: readonly HostedAccountDoc[],
+  pair: { baseTokenId: number; quoteTokenId: number; pairId: string },
+  ownEntityId: string,
+  depth: number,
 ): Pick<BookView, 'bids' | 'asks'> {
-	const own = normalizeId(ownEntityId);
-	const bids: Array<{ priceTicks: bigint; size: bigint; own: boolean }> = [];
-	const asks: Array<{ priceTicks: bigint; size: bigint; own: boolean }> = [];
-	for (const doc of docs) {
-		const state = doc.state;
-		if (!state?.swapOffers) continue;
-		const left = normalizeId(state.leftEntity);
-		const right = normalizeId(state.rightEntity);
-		for (const offer of state.swapOffers.values()) {
-			if (offer.crossJurisdiction) continue;
-			const maker = offer.makerIsLeft ? left : right;
-			const isOwn = maker === own;
-			if (offer.giveTokenId === pair.baseTokenId && offer.wantTokenId === pair.quoteTokenId) {
-				// Maker sells base for quote: an ask, sized by what is still offered.
-				asks.push({ priceTicks: offer.priceTicks, size: offer.giveAmount, own: isOwn });
-			} else if (offer.giveTokenId === pair.quoteTokenId && offer.wantTokenId === pair.baseTokenId) {
-				// Maker buys base with quote: a bid, sized by the base still wanted.
-				bids.push({ priceTicks: offer.priceTicks, size: offer.wantAmount, own: isOwn });
-			}
-		}
-	}
-	return {
-		bids: foldLevels(bids, (a, b) => (a > b ? -1 : a < b ? 1 : 0), depth),
-		asks: foldLevels(asks, (a, b) => (a < b ? -1 : a > b ? 1 : 0), depth),
-	};
+  const own = normalizeId(ownEntityId);
+  const bids: Array<{ priceTicks: bigint; size: bigint; own: boolean }> = [];
+  const asks: Array<{ priceTicks: bigint; size: bigint; own: boolean }> = [];
+  for (const doc of docs) {
+    const state = doc.state;
+    if (!state?.swapOffers) continue;
+    const left = normalizeId(state.leftEntity);
+    const right = normalizeId(state.rightEntity);
+    for (const offer of state.swapOffers.values()) {
+      if (offer.crossJurisdiction) continue;
+      const maker = offer.makerIsLeft ? left : right;
+      const isOwn = maker === own;
+      if (offer.giveTokenId === pair.baseTokenId && offer.wantTokenId === pair.quoteTokenId) {
+        // Maker sells base for quote: an ask, sized by what is still offered.
+        asks.push({ priceTicks: offer.priceTicks, size: offer.giveAmount, own: isOwn });
+      } else if (offer.giveTokenId === pair.quoteTokenId && offer.wantTokenId === pair.baseTokenId) {
+        // Maker buys base with quote: a bid, sized by the base still wanted.
+        bids.push({ priceTicks: offer.priceTicks, size: offer.wantAmount, own: isOwn });
+      }
+    }
+  }
+  return {
+    bids: foldLevels(bids, (a, b) => (a > b ? -1 : a < b ? 1 : 0), depth),
+    asks: foldLevels(asks, (a, b) => (a < b ? -1 : a > b ? 1 : 0), depth),
+  };
 }
 
 // Relay market stream for hubs this runtime does not host.
 
 function relayLevels(levels: MarketSideLevel[], ownEntityId: string, lotScale: bigint): BookLevel[] {
-	const own = normalizeId(ownEntityId);
-	return levels.map(level => ({
-		priceTicks: BigInt(level.price),
-		size: BigInt(level.size) * lotScale,
-		total: BigInt(level.total) * lotScale,
-		orders: Number(level.orderCount ?? 1),
-		own: (level.ownerIds ?? []).some(id => normalizeId(id) === own),
-	}));
+  const own = normalizeId(ownEntityId);
+  return levels.map(level => ({
+    priceTicks: BigInt(level.price),
+    size: BigInt(level.size) * lotScale,
+    total: BigInt(level.total) * lotScale,
+    orders: Number(level.orderCount ?? 1),
+    own: (level.ownerIds ?? []).some(id => normalizeId(id) === own),
+  }));
 }
 
 const RELAY_STALE_MS = 15_000;
 
 /** One current relay subscription for the selected hub and pair. */
-function useRelayBook(input: { enabled: boolean; hubId: string; relayUrl: string; pairId: string; depth: number; ownEntityId: string; lotScale: bigint; pageLocation?: BrowserLocationLike }) {
-	const [latestSnapshot, setSnapshot] = useState<RelayMarketSnapshotPayload | null>(null);
-	const [status, setStatus] = useState<BookView['status']>('syncing');
-	const [error, setError] = useState<string | null>(null);
+function useRelayBook(input: {
+  enabled: boolean;
+  hubId: string;
+  relayUrl: string;
+  pairId: string;
+  depth: number;
+  ownEntityId: string;
+  lotScale: bigint;
+  pageLocation?: BrowserLocationLike;
+}) {
+  const [latestSnapshot, setSnapshot] = useState<RelayMarketSnapshotPayload | null>(null);
+  const [status, setStatus] = useState<BookView['status']>('syncing');
+  const [error, setError] = useState<string | null>(null);
 
-	useEffect(() => {
-		if (!input.enabled || !input.hubId || !input.pairId) return;
-		setSnapshot(null);
-		const resolution = resolveOrderbookRelayWsUrl(input.relayUrl, input.pageLocation ?? (typeof window === 'undefined' ? null : window.location));
-		if (!resolution.url) {
-			setStatus('unavailable');
-			setError(resolution.unavailableReason || 'RELAY_URL_UNAVAILABLE');
-			return;
-		}
-		let cancelled = false;
-		let seq = 0;
-		let deadline: ReturnType<typeof setTimeout> | undefined;
-		const unavailable = (reason: string) => {
-			if (cancelled) return;
-			clearTimeout(deadline);
-			setSnapshot(null);
-			setStatus('unavailable');
-			setError(reason);
-		};
-		// Expiry must render even when the relay sends nothing and no other state changes.
-		const awaitResponse = (remainingMs: number) => {
-			clearTimeout(deadline);
-			deadline = setTimeout(() => unavailable('The market feed is not responding. Waiting for fresh prices.'), remainingMs);
-		};
-		setStatus('syncing');
-		setError(null);
-		const socket = new WebSocket(resolution.url);
-		awaitResponse(RELAY_STALE_MS);
-		socket.onopen = () => {
-			socket.send(
-				encodeMarketWireMessage({
-					type: 'market_subscribe',
-					id: `market_sub_${Date.now()}_${++seq}`,
-					replace: true,
-					hubEntityIds: [input.hubId],
-					pairs: [input.pairId],
-					depth: input.depth,
-				}),
-			);
-		};
-		socket.onmessage = event => {
-			if (cancelled) return;
-			// The market wire is tagged JSON text; the decoder parses it itself. Binary frames are not market messages.
-			if (typeof event.data !== 'string') return;
-			let message: ReturnType<typeof decodeMarketWireResponse>;
-			try {
-				message = decodeMarketWireResponse(event.data);
-			} catch (decodeError) {
-				unavailable(decodeError instanceof Error ? decodeError.message : String(decodeError));
-				return;
-			}
-			if (message.type === 'market_snapshot') {
-				const payload = selectRelaySnapshot(message.payload, input.hubId, input.pairId);
-				if (!payload) return;
-				const remainingMs = Math.min(RELAY_STALE_MS, RELAY_STALE_MS - (Date.now() - payload.updatedAt));
-				if (remainingMs <= 0) {
-					unavailable('The market prices are out of date. Waiting for fresh prices.');
-					return;
-				}
-				awaitResponse(remainingMs);
-				setSnapshot(payload);
-				setError(null);
-				setStatus('live');
-			} else if (message.type === 'market_status') {
-				clearTimeout(deadline);
-				setSnapshot(null);
-				setError(null);
-				setStatus('no-market');
-			} else if (message.type === 'error') {
-				unavailable(message.error);
-			}
-		};
-		socket.onerror = () => unavailable('The market connection failed. Reopen Swap to reconnect.');
-		socket.onclose = () => unavailable('The market connection closed. Reopen Swap to reconnect.');
-		return () => {
-			cancelled = true;
-			clearTimeout(deadline);
-			if (socket.readyState === WebSocket.OPEN) {
-				socket.send(encodeMarketWireMessage({ type: 'market_unsubscribe', id: `market_unsub_${Date.now()}`, pairs: [input.pairId] }));
-			}
-			socket.close();
-		};
-	}, [input.enabled, input.hubId, input.relayUrl, input.pageLocation, input.pairId, input.depth]);
+  useEffect(() => {
+    if (!input.enabled || !input.hubId || !input.pairId) return;
+    setSnapshot(null);
+    const resolution = resolveOrderbookRelayWsUrl(
+      input.relayUrl,
+      input.pageLocation ?? (typeof window === 'undefined' ? null : window.location),
+    );
+    if (!resolution.url) {
+      setStatus('unavailable');
+      setError(resolution.unavailableReason || 'RELAY_URL_UNAVAILABLE');
+      return;
+    }
+    let cancelled = false;
+    let seq = 0;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const unavailable = (reason: string) => {
+      if (cancelled) return;
+      clearTimeout(deadline);
+      setSnapshot(null);
+      setStatus('unavailable');
+      setError(reason);
+    };
+    // Expiry must render even when the relay sends nothing and no other state changes.
+    const awaitResponse = (remainingMs: number) => {
+      clearTimeout(deadline);
+      deadline = setTimeout(
+        () => unavailable('The market feed is not responding. Waiting for fresh prices.'),
+        remainingMs,
+      );
+    };
+    setStatus('syncing');
+    setError(null);
+    const socket = new WebSocket(resolution.url);
+    awaitResponse(RELAY_STALE_MS);
+    socket.onopen = () => {
+      socket.send(
+        encodeMarketWireMessage({
+          type: 'market_subscribe',
+          id: `market_sub_${Date.now()}_${++seq}`,
+          replace: true,
+          hubEntityIds: [input.hubId],
+          pairs: [input.pairId],
+          depth: input.depth,
+        }),
+      );
+    };
+    socket.onmessage = event => {
+      if (cancelled) return;
+      // The market wire is tagged JSON text; the decoder parses it itself. Binary frames are not market messages.
+      if (typeof event.data !== 'string') return;
+      let message: ReturnType<typeof decodeMarketWireResponse>;
+      try {
+        message = decodeMarketWireResponse(event.data);
+      } catch (decodeError) {
+        unavailable(decodeError instanceof Error ? decodeError.message : String(decodeError));
+        return;
+      }
+      if (message.type === 'market_snapshot') {
+        const payload = selectRelaySnapshot(message.payload, input.hubId, input.pairId);
+        if (!payload) return;
+        const remainingMs = Math.min(RELAY_STALE_MS, RELAY_STALE_MS - (Date.now() - payload.updatedAt));
+        if (remainingMs <= 0) {
+          unavailable('The market prices are out of date. Waiting for fresh prices.');
+          return;
+        }
+        awaitResponse(remainingMs);
+        setSnapshot(payload);
+        setError(null);
+        setStatus('live');
+      } else if (message.type === 'market_status') {
+        clearTimeout(deadline);
+        setSnapshot(null);
+        setError(null);
+        setStatus('no-market');
+      } else if (message.type === 'error') {
+        unavailable(message.error);
+      }
+    };
+    socket.onerror = () => unavailable('The market connection failed. Reopen Swap to reconnect.');
+    socket.onclose = () => unavailable('The market connection closed. Reopen Swap to reconnect.');
+    return () => {
+      cancelled = true;
+      clearTimeout(deadline);
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(
+          encodeMarketWireMessage({
+            type: 'market_unsubscribe',
+            id: `market_unsub_${Date.now()}`,
+            pairs: [input.pairId],
+          }),
+        );
+      }
+      socket.close();
+    };
+  }, [input.enabled, input.hubId, input.relayUrl, input.pageLocation, input.pairId, input.depth]);
 
-	return useMemo(() => {
-		if (!input.enabled) return null;
-		// A retained response belongs to its published market, never the next render's labels or units.
-		const snapshot = selectRelaySnapshot(latestSnapshot, input.hubId, input.pairId);
-		const minimum = snapshot?.sources.find(source => source.hubEntityId === input.hubId)?.minTradeSize;
-		return {
-			minTradeSize: minimum == null ? null : BigInt(minimum),
-			bids: snapshot ? relayLevels(snapshot.bids, input.ownEntityId, input.lotScale) : [],
-			asks: snapshot ? relayLevels(snapshot.asks, input.ownEntityId, input.lotScale) : [],
-			spreadTicks: snapshot?.spread ? BigInt(snapshot.spread) : null,
-			lastTradeTicks: snapshot?.lastTradePrice ? BigInt(snapshot.lastTradePrice) : null,
-			status: !snapshot && status === 'live' ? ('syncing' as const) : status,
-			updatedAt: snapshot?.updatedAt ?? 0,
-			error,
-		};
-	}, [input.enabled, input.hubId, input.pairId, input.ownEntityId, input.lotScale, latestSnapshot, status, error]);
+  return useMemo(() => {
+    if (!input.enabled) return null;
+    // A retained response belongs to its published market, never the next render's labels or units.
+    const snapshot = selectRelaySnapshot(latestSnapshot, input.hubId, input.pairId);
+    const minimum = snapshot?.sources.find(source => source.hubEntityId === input.hubId)?.minTradeSize;
+    return {
+      minTradeSize: minimum == null ? null : BigInt(minimum),
+      bids: snapshot ? relayLevels(snapshot.bids, input.ownEntityId, input.lotScale) : [],
+      asks: snapshot ? relayLevels(snapshot.asks, input.ownEntityId, input.lotScale) : [],
+      spreadTicks: snapshot?.spread ? BigInt(snapshot.spread) : null,
+      lastTradeTicks: snapshot?.lastTradePrice ? BigInt(snapshot.lastTradePrice) : null,
+      status: !snapshot && status === 'live' ? ('syncing' as const) : status,
+      updatedAt: snapshot?.updatedAt ?? 0,
+      error,
+    };
+  }, [input.enabled, input.hubId, input.pairId, input.ownEntityId, input.lotScale, latestSnapshot, status, error]);
 }
 
 /**
@@ -242,58 +290,89 @@ function useRelayBook(input: { enabled: boolean; hubId: string; relayUrl: string
  * comes through the current relay market stream.
  */
 export function useOrderbook(input: {
-	hubId: string;
-	tokenA: number;
-	tokenB: number;
-	depth?: number;
-	ownEntityId: string;
-	relayUrl?: string;
-	/** Packaged native hosts resolve trust against their compiled network origin. */
-	relayPageLocation?: BrowserLocationLike;
-	baseDecimals: number;
+  hubId: string;
+  tokenA: number;
+  tokenB: number;
+  depth?: number;
+  ownEntityId: string;
+  relayUrl?: string;
+  /** Packaged native hosts resolve trust against their compiled network origin. */
+  relayPageLocation?: BrowserLocationLike;
+  baseDecimals: number;
+  /** A Cross venue is read from its canonical owner's committed relay book. */
+  crossMarket?: CrossBookMarket;
 }): BookView {
-	const depth = input.depth ?? 12;
-	const pair = useMemo(() => orientPair(input.tokenA, input.tokenB), [input.tokenA, input.tokenB]);
-	const hubId = normalizeId(input.hubId);
-	const query = useMemo(() => ({ accountsLimit: 200 }), []);
-	const hosted = useAdapterRead<HostedAccountsPage>(hubId ? `entity/${encodeURIComponent(hubId)}/accounts` : null, query);
-	const policy = useAdapterRead<StorageEntityCoreDoc>(hosted.data && hubId ? `entity/${encodeURIComponent(hubId)}` : null);
-	const height = useApp(s => s.height);
-	const hostedMissing = Boolean(hosted.error && /E_NOT_FOUND|entity not found/i.test(hosted.error));
-	// Relay lots are base units scaled to six decimals; a base token with fewer decimals uses its own scale.
-	const lotScale = 10n ** BigInt(Math.max(0, input.baseDecimals - Math.min(input.baseDecimals, 6)));
-	const relay = useRelayBook({
-		enabled: hostedMissing || (getAdapter()?.mode === 'remote' && !hosted.data && !hosted.loading),
-		hubId,
-		relayUrl: input.relayUrl ?? '',
-		...(input.relayPageLocation ? { pageLocation: input.relayPageLocation } : {}),
-		pairId: pair.pairId,
-		depth,
-		ownEntityId: input.ownEntityId,
-		lotScale,
-	});
+  const depth = input.depth ?? 12;
+  const pair = useMemo(
+    () => input.crossMarket ?? orientPair(input.tokenA, input.tokenB),
+    [input.crossMarket, input.tokenA, input.tokenB],
+  );
+  const hubId = normalizeId(input.crossMarket?.hubId ?? input.hubId);
+  const query = useMemo(() => ({ accountsLimit: 200 }), []);
+  const hosted = useAdapterRead<HostedAccountsPage>(
+    hubId && !input.crossMarket ? `entity/${encodeURIComponent(hubId)}/accounts` : null,
+    query,
+  );
+  const policy = useAdapterRead<StorageEntityCoreDoc>(
+    hosted.data && hubId ? `entity/${encodeURIComponent(hubId)}` : null,
+  );
+  const height = useApp(s => s.height);
+  const hostedMissing = Boolean(hosted.error && /E_NOT_FOUND|entity not found/i.test(hosted.error));
+  // Relay lots are base units scaled to six decimals; a base token with fewer decimals uses its own scale.
+  const lotScale = 10n ** BigInt(Math.max(0, input.baseDecimals - Math.min(input.baseDecimals, 6)));
+  const relay = useRelayBook({
+    enabled:
+      Boolean(input.crossMarket) ||
+      hostedMissing ||
+      (getAdapter()?.mode === 'remote' && !hosted.data && !hosted.loading),
+    hubId,
+    relayUrl: input.relayUrl ?? '',
+    ...(input.relayPageLocation ? { pageLocation: input.relayPageLocation } : {}),
+    pairId: pair.pairId,
+    depth,
+    ownEntityId: input.ownEntityId,
+    lotScale,
+  });
 
-	return useMemo<BookView>(() => {
-		if (relay && (hostedMissing || !hosted.data)) {
-			return { pairId: pair.pairId, baseTokenId: pair.baseTokenId, quoteTokenId: pair.quoteTokenId, source: 'relay', ...relay };
-		}
-		const docs = hosted.data?.items ?? [];
-		const { bids, asks } = bookFromHostedAccounts(docs, pair, input.ownEntityId, depth);
-		const bestBid = bids[0]?.priceTicks ?? null;
-		const bestAsk = asks[0]?.priceTicks ?? null;
-		return {
-			pairId: pair.pairId,
-			baseTokenId: pair.baseTokenId,
-			quoteTokenId: pair.quoteTokenId,
-			minTradeSize: policy.data?.orderbookHubProfile?.minTradeSize ?? null,
-			bids,
-			asks,
-			spreadTicks: bestBid !== null && bestAsk !== null ? bestAsk - bestBid : null,
-			lastTradeTicks: null,
-			status: hosted.loading && !hosted.data ? 'syncing' : hosted.error ? 'unavailable' : 'live',
-			source: 'hosted',
-			updatedAt: height,
-			error: hosted.error,
-		};
-	}, [relay, hostedMissing, hosted.data, hosted.loading, hosted.error, policy.data, pair, input.ownEntityId, depth, height]);
+  return useMemo<BookView>(() => {
+    if (relay && (input.crossMarket || hostedMissing || !hosted.data)) {
+      return {
+        pairId: pair.pairId,
+        baseTokenId: pair.baseTokenId,
+        quoteTokenId: pair.quoteTokenId,
+        source: 'relay',
+        ...relay,
+      };
+    }
+    const docs = hosted.data?.items ?? [];
+    const { bids, asks } = bookFromHostedAccounts(docs, pair, input.ownEntityId, depth);
+    const bestBid = bids[0]?.priceTicks ?? null;
+    const bestAsk = asks[0]?.priceTicks ?? null;
+    return {
+      pairId: pair.pairId,
+      baseTokenId: pair.baseTokenId,
+      quoteTokenId: pair.quoteTokenId,
+      minTradeSize: policy.data?.orderbookHubProfile?.minTradeSize ?? null,
+      bids,
+      asks,
+      spreadTicks: bestBid !== null && bestAsk !== null ? bestAsk - bestBid : null,
+      lastTradeTicks: null,
+      status: hosted.loading && !hosted.data ? 'syncing' : hosted.error ? 'unavailable' : 'live',
+      source: 'hosted',
+      updatedAt: height,
+      error: hosted.error,
+    };
+  }, [
+    relay,
+    hostedMissing,
+    hosted.data,
+    hosted.loading,
+    hosted.error,
+    policy.data,
+    pair,
+    input.crossMarket,
+    input.ownEntityId,
+    depth,
+    height,
+  ]);
 }

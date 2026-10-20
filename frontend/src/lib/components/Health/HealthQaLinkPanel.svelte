@@ -2,25 +2,24 @@
   <div class="panel-head">
     <div>
       <h2>QA Evidence</h2>
-      <p class="sub">Linked out from health so test evidence stays owned by QA cockpit.</p>
+      <p class="sub">Recorded development evidence. Production does not host QA controls.</p>
     </div>
     <div class="panel-actions">
-      <a class="panel-link" href="/qa">Open QA cockpit</a>
-      <a class="panel-link" href="/qa/hlt">HLT dashboard</a>
-      <a class="panel-link" href="/qa">UX gallery</a>
+      <a class="panel-link" href="https://github.com/xlnfinance/xln/tree/main/docs/evidence">Recorded checks</a>
+      <a class="panel-link" href="/qa/quorum">Review history</a>
     </div>
   </div>
 
   <div class="link-grid">
     <article>
-      <span>Runs</span>
-      <strong>QA cockpit</strong>
-      <small>Unit, contract, e2e, benchmark, transcript, video, artifacts.</small>
+      <span>Checks</span>
+      <strong>Revision-specific evidence</strong>
+      <small>Each report names its tested revision and limits; historical passes do not certify this deployment.</small>
     </article>
     <article>
-      <span>Screenshots</span>
-      <strong>UX gallery</strong>
-      <small>Curated mobile and desktop evidence lives in the QA surface.</small>
+      <span>Reviews</span>
+      <strong>Recorded findings</strong>
+      <small>Review history is separate from current runtime health and release acceptance.</small>
     </article>
   </div>
 </section>

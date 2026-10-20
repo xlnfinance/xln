@@ -36,22 +36,14 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import { finished } from 'node:stream/promises';
 import { scheduler } from 'node:timers/promises';
 import ts from 'typescript';
-import {
-  deriveQaTestDescription,
-  deriveQaTestHandle,
-  formatQaRunIdUtc,
-} from '../../../qa/report';
+import { deriveQaTestDescription, deriveQaTestHandle, formatQaRunIdUtc } from '../../../qa/report';
 import {
   QA_TEST_CATEGORY_TAGS,
   formatQaTestCategoryViolations,
   inspectQaTestCategory,
   qaTestCategoryFromTags,
 } from '../../../qa/test-categories';
-import type {
-  QaFailureCapsule,
-  QaScenarioMetadata,
-  QaTestCategory,
-} from '../../../qa/types';
+import type { QaFailureCapsule, QaScenarioMetadata, QaTestCategory } from '../../../qa/types';
 import { assertMinDiskFree } from '../../../support/storage-monitor';
 import { compareStableText } from '../../../protocol/serialization';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
@@ -61,15 +53,8 @@ import {
   findRuntimeFatalLogLines,
   tailLog,
 } from '../harness/e2e-fatal-log-monitor';
-import {
-  stopProcessDependencyChain,
-  type ManagedChildProcess,
-} from '../harness/e2e-managed-process';
-import {
-  isE2ERunnerProcessAlive,
-  readE2ERunnerLock,
-  type E2ERunnerLock,
-} from '../harness/e2e-runner-lock';
+import { stopProcessDependencyChain, type ManagedChildProcess } from '../harness/e2e-managed-process';
+import { isE2ERunnerProcessAlive, readE2ERunnerLock, type E2ERunnerLock } from '../harness/e2e-runner-lock';
 import {
   acquireLocalTestPortLease,
   assertLocalTestPortsFree,
@@ -84,7 +69,7 @@ import {
 } from '../harness/e2e-failure-capsule';
 import { cleanupTestArtifactsBeforeRun } from '../harness/test-artifact-cleanup';
 import {
-  assertBroadE2ERunHasNoUnresolvedReruns,
+  assertE2ESelectionMayStart,
   recordSelectiveRerunFailure,
   recordSelectiveRerunPass,
   selectiveE2ETarget,
@@ -204,11 +189,13 @@ export const acquireAvailableE2EWorkerPortLeases = async (
   try {
     for (let index = 0; index < requested; index += 1) {
       try {
-        leases.push(await acquireLocalTestPortLease({
-          timeoutMs: 0,
-          ...(options.slotBases ? { slotBases: options.slotBases } : {}),
-          ...(options.signal ? { signal: options.signal } : {}),
-        }));
+        leases.push(
+          await acquireLocalTestPortLease({
+            timeoutMs: 0,
+            ...(options.slotBases ? { slotBases: options.slotBases } : {}),
+            ...(options.signal ? { signal: options.signal } : {}),
+          }),
+        );
       } catch (error) {
         if (String((error as Error)?.message || error).startsWith('LOCAL_TEST_PORT_SLOTS_EXHAUSTED:')) {
           if (leases.length > 0) break;
@@ -240,13 +227,7 @@ export const awaitE2EWorkersBeforeLeaseRelease = async (
 };
 
 export type E2EShardRunStatus = 'passed' | 'failed' | 'cancelled';
-export type E2EShardRunClass =
-  | 'passed'
-  | 'playwright'
-  | 'runtime-fatal'
-  | 'startup'
-  | 'runner'
-  | 'cancelled';
+export type E2EShardRunClass = 'passed' | 'playwright' | 'runtime-fatal' | 'startup' | 'runner' | 'cancelled';
 
 export type E2EPrimaryFailureIdentity = Readonly<{
   shard: number;
@@ -283,9 +264,7 @@ export const advanceE2ERunFailureState = (
   if (outcome.status !== 'failed') {
     const expectedClass = outcome.status;
     if (outcome.resultClass !== expectedClass) {
-      throw new Error(
-        `E2E_RUN_OUTCOME_CLASS_INVALID:status=${outcome.status}:class=${outcome.resultClass}`,
-      );
+      throw new Error(`E2E_RUN_OUTCOME_CLASS_INVALID:status=${outcome.status}:class=${outcome.resultClass}`);
     }
     return { state, shouldAbort: false };
   }
@@ -323,8 +302,7 @@ export const isE2EGlobalFailFastAbortSignal = (signal?: AbortSignal): boolean =>
   const reason: unknown = signal?.reason;
   if (!reason || typeof reason !== 'object') return false;
   const candidate = reason as Partial<E2EGlobalFailFastAbortReason>;
-  return candidate.kind === 'e2e-global-fail-fast' &&
-    typeof candidate.primaryFailure?.shard === 'number';
+  return candidate.kind === 'e2e-global-fail-fast' && typeof candidate.primaryFailure?.shard === 'number';
 };
 
 export type RunResult = {
@@ -387,29 +365,33 @@ const RESET_CONFIRMATION = 'RESET_MESH_STATE';
 const E2E_ANVIL_HISTORY_STATES = 8192;
 const DEFAULT_E2E_TEST_TIMEOUT_MS = 660_000;
 
-const isRecord = (value: unknown): value is JsonRecord =>
-  typeof value === 'object' && value !== null;
+const isRecord = (value: unknown): value is JsonRecord => typeof value === 'object' && value !== null;
 
 const recordOrEmpty = (value: unknown): JsonRecord => (isRecord(value) ? value : {});
 
-const arrayOf = (record: JsonRecord, key: string): unknown[] =>
-  Array.isArray(record[key]) ? record[key] : [];
+const arrayOf = (record: JsonRecord, key: string): unknown[] => (Array.isArray(record[key]) ? record[key] : []);
 
-const recordArrayOf = (record: JsonRecord, key: string): JsonRecord[] =>
-  arrayOf(record, key).filter(isRecord);
+const recordArrayOf = (record: JsonRecord, key: string): JsonRecord[] => arrayOf(record, key).filter(isRecord);
 
 export const parsePlaywrightFilesFlag = (raw: string): string[] => {
   const trimmed = raw.trim();
   if (trimmed.startsWith('[')) {
     try {
       const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) return parsed.map(String).map(s => s.trim()).filter(Boolean);
+      if (Array.isArray(parsed))
+        return parsed
+          .map(String)
+          .map(s => s.trim())
+          .filter(Boolean);
     } catch (error) {
       throw new Error(`--pw-files JSON parse failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   if (trimmed.includes('::')) return [trimmed];
-  return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+  return trimmed
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
 };
 
 const parseArgs = (): CliArgs => {
@@ -442,7 +424,10 @@ const parseArgs = (): CliArgs => {
   const phaseWarnRaw = Number(getFlag('phase-warn-ms') || '30000');
   const maxFailuresRaw = Number(getFlag('max-failures') || '1');
   const maxMmConcurrencyRaw = Number(getFlag('max-mm-concurrency') || '1');
-  const maxResetConcurrencyRaw = Number(getFlag('max-reset-concurrency') || String(Math.min(4, shardsRaw || defaultShards)));
+  // Cold resets each start three worker-backed hubs. The measured four-reset
+  // cohort exceeded the unchanged hub drain deadline; serialize preparation,
+  // then let healthy stacks run their browser work concurrently.
+  const maxResetConcurrencyRaw = Number(getFlag('max-reset-concurrency') || '1');
   const workersPerShardRaw = Number(getFlag('workers-per-shard') || '1');
   const startAtRaw = Number(getFlag('start-at') || '0');
   const videoRaw = String(getFlag('video') || 'on').toLowerCase();
@@ -465,7 +450,9 @@ const parseArgs = (): CliArgs => {
   if (qaCategoryRaw && qaCategoryRaw !== 'functional' && qaCategoryRaw !== 'resilience') {
     throw new Error(`INVALID_QA_TEST_CATEGORY:${qaCategoryRaw}`);
   }
-  const prewaitHealthRaw = String(getFlag('prewait-health') || 'reset').trim().toLowerCase();
+  const prewaitHealthRaw = String(getFlag('prewait-health') || 'reset')
+    .trim()
+    .toLowerCase();
 
   return {
     shards: Number.isFinite(shardsRaw) && shardsRaw > 0 ? Math.floor(shardsRaw) : 2,
@@ -482,7 +469,7 @@ const parseArgs = (): CliArgs => {
     maxMmConcurrency:
       Number.isFinite(maxMmConcurrencyRaw) && maxMmConcurrencyRaw > 0 ? Math.floor(maxMmConcurrencyRaw) : 2,
     maxResetConcurrency:
-      Number.isFinite(maxResetConcurrencyRaw) && maxResetConcurrencyRaw > 0 ? Math.floor(maxResetConcurrencyRaw) : 4,
+      Number.isFinite(maxResetConcurrencyRaw) && maxResetConcurrencyRaw > 0 ? Math.floor(maxResetConcurrencyRaw) : 1,
     workersPerShard: Number.isFinite(workersPerShardRaw) && workersPerShardRaw > 0 ? Math.floor(workersPerShardRaw) : 1,
     videoMode: coerceVideo(videoRaw),
     traceMode: coerceTrace(traceRaw),
@@ -580,10 +567,7 @@ const tsTag = (): string => {
   return formatQaRunIdUtc(Date.now());
 };
 
-const startFailFastLogMonitor = (
-  logPath: string,
-  onFatal: (message: string) => void,
-): (() => void) => {
+const startFailFastLogMonitor = (logPath: string, onFatal: (message: string) => void): (() => void) => {
   let stopped = false;
   const fatalScanner = createIncrementalRuntimeFatalLogScanner(logPath);
   const scan = (): void => {
@@ -593,8 +577,8 @@ const startFailFastLogMonitor = (
       stopped = true;
       onFatal(
         `E2E_FATAL_RUNTIME_LOG marker=${hit.pattern} file=${logPath} line=${hit.lineNumber}\n` +
-        `${hit.lineNumber}: ${hit.line}\n` +
-        `--- last 80 lines (${logPath}) ---\n${tailLog(logPath, 80)}`,
+          `${hit.lineNumber}: ${hit.line}\n` +
+          `--- last 80 lines (${logPath}) ---\n${tailLog(logPath, 80)}`,
       );
       return;
     }
@@ -763,9 +747,7 @@ const assertShardRuntimePortsReleased = (apiPort: number): void => {
 
 const fetchWithTimeout = async (url: string, init: RequestInit = {}, timeoutMs = 2_000): Promise<Response> => {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  const signal = init.signal
-    ? AbortSignal.any([init.signal, timeoutSignal])
-    : timeoutSignal;
+  const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal;
   return fetch(url, { ...init, signal });
 };
 
@@ -789,16 +771,15 @@ const formatErrorForLog = (error: unknown): string => {
   if (!(error instanceof Error)) return String(error);
   const code = (error as Error & { code?: unknown }).code;
   const cause = (error as Error & { cause?: unknown }).cause;
-  const causeText = cause instanceof Error
-    ? `${cause.name}: ${cause.message}`
-    : cause === undefined
-      ? ''
-      : String(cause);
+  const causeText =
+    cause instanceof Error ? `${cause.name}: ${cause.message}` : cause === undefined ? '' : String(cause);
   return [
     `${error.name}: ${error.message}`,
     code === undefined ? '' : `code=${String(code)}`,
     causeText ? `cause=${causeText}` : '',
-  ].filter(Boolean).join(' ');
+  ]
+    .filter(Boolean)
+    .join(' ');
 };
 
 const recordE2EShardSecondaryFailure = (
@@ -841,21 +822,16 @@ export const reconcileE2EShardCleanupFailures = (
   if (cleanupFailures.length === 0) {
     return { result, secondaryFailures: [], unhandledError: null };
   }
-  const aggregate = new AggregateError(
-    cleanupFailures,
-    `E2E_SHARD_CLEANUP_FAILED:shard=${String(shard)}`,
-  );
+  const aggregate = new AggregateError(cleanupFailures, `E2E_SHARD_CLEANUP_FAILED:shard=${String(shard)}`);
   if (!result) {
     return { result: null, secondaryFailures: [], unhandledError: aggregate };
   }
-  const secondaryFailures = cleanupFailures.map(cause =>
-    recordE2EShardSecondaryFailure('', 'cleanup', cause).secondary,
+  const secondaryFailures = cleanupFailures.map(
+    cause => recordE2EShardSecondaryFailure('', 'cleanup', cause).secondary,
   );
   const reconciled: E2EShardCleanupResult = {
     ...result,
-    ...(result.status === 'passed'
-      ? { status: 'failed' as const, resultClass: 'runner' as const }
-      : {}),
+    ...(result.status === 'passed' ? { status: 'failed' as const, resultClass: 'runner' as const } : {}),
     error: [result.error, ...secondaryFailures].filter(Boolean).join('\n'),
     diagnostics: [...(result.diagnostics ?? []), ...secondaryFailures],
   };
@@ -935,7 +911,9 @@ const waitForRpcReady = async (
     }
     await e2eRetryDelay(200, signal);
   }
-  throw new Error(`RPC_NOT_READY rpc=${rpcUrl} expectedChainId=${expectedChainId} timeoutMs=${timeoutMs} last=${lastError || 'none'}`);
+  throw new Error(
+    `RPC_NOT_READY rpc=${rpcUrl} expectedChainId=${expectedChainId} timeoutMs=${timeoutMs} last=${lastError || 'none'}`,
+  );
 };
 
 const waitForHttpReady = async (url: string, timeoutMs: number, signal?: AbortSignal): Promise<void> => {
@@ -984,11 +962,11 @@ export const waitForE2EServerHealthy = async (
         const mmEnabled = marketMaker['enabled'] === true;
         const mmReady = requireMarketMaker
           ? mmEnabled && marketMaker['ok'] === true
-          : (mmEnabled ? marketMaker['ok'] === true : true);
+          : mmEnabled
+            ? marketMaker['ok'] === true
+            : true;
         const reservesReady = bootstrapReserves['ok'] === true;
-        const custodyReady = requireCustody
-          ? custody['enabled'] === true && custody['ok'] === true
-          : true;
+        const custodyReady = requireCustody ? custody['enabled'] === true && custody['ok'] === true : true;
         const hasTs = typeof body['timestamp'] === 'number';
         if (hasTs && resetDone && meshReady && mmReady && reservesReady && custodyReady) return body;
       } else {
@@ -1013,12 +991,11 @@ export const waitForE2EServerHealthy = async (
           marketMaker: lastHealth['marketMaker'] || null,
           custody: lastHealth['custody'] || null,
           bootstrapReserves: lastHealth['bootstrapReserves'] || null,
-          hubs: recordArrayOf(lastHealth, 'hubs')
-            .map((h) => ({
-                entityId: h['entityId'],
-                name: h['name'],
-                online: h['online'],
-              }))
+          hubs: recordArrayOf(lastHealth, 'hubs').map(h => ({
+            entityId: h['entityId'],
+            name: h['name'],
+            online: h['online'],
+          })),
         },
         null,
         2,
@@ -1051,9 +1028,7 @@ const hardResetShardBaseline = async (
         requireMarketMaker,
         enableMarketMaker: requireMarketMaker,
       }),
-      signal: signal
-        ? AbortSignal.any([controller.signal, signal])
-        : controller.signal,
+      signal: signal ? AbortSignal.any([controller.signal, signal]) : controller.signal,
     });
     if (!response.ok) {
       let body = '';
@@ -1065,13 +1040,7 @@ const hardResetShardBaseline = async (
       throw new Error(`SHARD_BASELINE_RESET_FAILED status=${response.status} body=${body.slice(0, 800)}`);
     }
     const remainingMs = Math.max(1_000, timeoutMs - (Date.now() - startedAt));
-    return await waitForE2EServerHealthy(
-      apiUrl,
-      remainingMs,
-      requireMarketMaker,
-      requireCustody,
-      signal,
-    );
+    return await waitForE2EServerHealthy(apiUrl, remainingMs, requireMarketMaker, requireCustody, signal);
   } catch (error) {
     assertE2EShardNotAborted(signal);
     if (error instanceof Error && error.name === 'AbortError') {
@@ -1091,11 +1060,7 @@ const waitForWebReady = async (url: string, timeoutMs: number, signal?: AbortSig
   while (Date.now() < deadline) {
     assertE2EShardNotAborted(signal);
     const ok = await new Promise<boolean>(resolve => {
-      const p = spawn('curl', [
-        ...(url.startsWith('https:') ? ['-k'] : []),
-        '-sSf',
-        url,
-      ], { stdio: 'ignore' });
+      const p = spawn('curl', [...(url.startsWith('https:') ? ['-k'] : []), '-sSf', url], { stdio: 'ignore' });
       const abort = (): void => {
         if (p.exitCode === null) p.kill('SIGTERM');
       };
@@ -1121,8 +1086,7 @@ export type E2ECommandResult = {
   signal: NodeJS.Signals | null;
 };
 
-const e2eCommandSucceeded = (result: E2ECommandResult): boolean =>
-  result.kind === 'exit' && result.code === 0;
+const e2eCommandSucceeded = (result: E2ECommandResult): boolean => result.kind === 'exit' && result.code === 0;
 
 const formatE2ECommandResult = (result: E2ECommandResult): string =>
   `${result.kind}:code=${String(result.code)}:signal=${String(result.signal)}`;
@@ -1231,9 +1195,9 @@ const prepareShardSvelteKitOutDir = (
   materializeSvelteKitShardOutDir(sourceOutDir, shardOutDir);
 
   const outDirForFrontend = relative(frontendRoot, shardOutDir);
-  const linkedEntries = readdirSync(shardOutDir, { withFileTypes: true })
-    .filter(entry => lstatSync(join(shardOutDir, entry.name)).isSymbolicLink())
-    .length;
+  const linkedEntries = readdirSync(shardOutDir, { withFileTypes: true }).filter(entry =>
+    lstatSync(join(shardOutDir, entry.name)).isSymbolicLink(),
+  ).length;
   log.write(`[runner] shard-local SvelteKit output: ${outDirForFrontend} (${linkedEntries} linked entries)\n`);
   return outDirForFrontend;
 };
@@ -1241,9 +1205,7 @@ const prepareShardSvelteKitOutDir = (
 const E2E_BUILD_CACHE_ROOT = resolve(process.cwd(), '.logs', 'e2e-build-cache');
 const E2E_BUILD_CACHE_MANIFEST_VERSION = 1;
 
-export const deriveE2EBuildArtifacts = (
-  cacheRoot = E2E_BUILD_CACHE_ROOT,
-): E2EBuildArtifacts => ({
+export const deriveE2EBuildArtifacts = (cacheRoot = E2E_BUILD_CACHE_ROOT): E2EBuildArtifacts => ({
   cacheRoot,
   publicDir: join(cacheRoot, 'public'),
   runtimeBundlePath: join(cacheRoot, 'public', 'runtime.js'),
@@ -1278,8 +1240,7 @@ const assertRequiredE2EBuildArtifacts = (artifacts: E2EBuildArtifacts): void => 
 export const computeE2EBuildArtifactHash = (artifacts: E2EBuildArtifacts): string => {
   const hash = createHash('sha256');
   const hashDirectory = (label: string, directory: string, prefix = ''): void => {
-    const entries = readdirSync(directory, { withFileTypes: true })
-      .sort((a, b) => compareStableText(a.name, b.name));
+    const entries = readdirSync(directory, { withFileTypes: true }).sort((a, b) => compareStableText(a.name, b.name));
     for (const entry of entries) {
       const path = join(directory, entry.name);
       const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
@@ -1310,37 +1271,31 @@ const readE2EBuildCacheManifest = (manifestPath: string): E2EBuildCacheManifest 
       typeof manifest.buildInputHash !== 'string' ||
       typeof manifest.artifactHash !== 'string' ||
       typeof manifest.createdAt !== 'string'
-    ) throw new Error('MANIFEST_SHAPE_INVALID');
+    )
+      throw new Error('MANIFEST_SHAPE_INVALID');
     return manifest as E2EBuildCacheManifest;
   } catch (error) {
     throw new Error(`E2E_BUILD_CACHE_MANIFEST_INVALID:${manifestPath}`, { cause: error });
   }
 };
 
-export const assertE2EBuildArtifactsComplete = (
-  artifacts: E2EBuildArtifacts,
-  expectedBuildInputHash: string,
-): void => {
+export const assertE2EBuildArtifactsComplete = (artifacts: E2EBuildArtifacts, expectedBuildInputHash: string): void => {
   const manifestPath = join(artifacts.cacheRoot, 'manifest.json');
   const manifest = readE2EBuildCacheManifest(manifestPath);
   if (manifest.buildInputHash !== expectedBuildInputHash) {
     throw new Error(
       `E2E_BUILD_CACHE_STALE:expected=${expectedBuildInputHash}:` +
-      `actual=${String(manifest.buildInputHash || 'missing')}`,
+        `actual=${String(manifest.buildInputHash || 'missing')}`,
     );
   }
   assertRequiredE2EBuildArtifacts(artifacts);
   const actualArtifactHash = computeE2EBuildArtifactHash(artifacts);
   if (manifest.artifactHash !== actualArtifactHash) {
-    throw new Error(
-      `E2E_BUILD_CACHE_CORRUPT:expected=${manifest.artifactHash}:actual=${actualArtifactHash}`,
-    );
+    throw new Error(`E2E_BUILD_CACHE_CORRUPT:expected=${manifest.artifactHash}:actual=${actualArtifactHash}`);
   }
 };
 
-export type E2EBuildCacheDecision =
-  | { action: 'reuse' }
-  | { action: 'rebuild'; reason: string };
+export type E2EBuildCacheDecision = { action: 'reuse' } | { action: 'rebuild'; reason: string };
 
 export const decideE2EBuildCache = (
   artifacts: E2EBuildArtifacts,
@@ -1479,11 +1434,7 @@ const readFailureIncidentSummary = (
   logsDir: string,
   shard: number,
 ): Array<{ code: string; count: number; runtimeId: string; fingerprint: string }> => {
-  const path = join(
-    deriveE2EShardPaths(logsDir, shard).resultsDir,
-    'failure-debug',
-    'incidents.json',
-  );
+  const path = join(deriveE2EShardPaths(logsDir, shard).resultsDir, 'failure-debug', 'incidents.json');
   if (!existsSync(path)) return [];
   const payload = parseJsonStrict(readFileSync(path, 'utf8'), path) as {
     incidents?: Array<Record<string, unknown>>;
@@ -1498,9 +1449,7 @@ const readFailureIncidentSummary = (
 
 const timeoutForensicError = (error: unknown, timeoutMs: number): unknown => {
   const description = formatErrorForLog(error);
-  return /abort|timeout/i.test(description)
-    ? new Error(`Timeout after ${timeoutMs}ms`, { cause: error })
-    : error;
+  return /abort|timeout/i.test(description) ? new Error(`Timeout after ${timeoutMs}ms`, { cause: error }) : error;
 };
 
 export const captureE2EHttpForensics = async (options: {
@@ -1510,29 +1459,30 @@ export const captureE2EHttpForensics = async (options: {
 }): Promise<void> => {
   const timeoutMs = options.timeoutMs ?? 2_000;
   mkdirSync(options.outputDir, { recursive: true });
-  const failures = await Promise.all(forensicEndpoints.map(async endpoint => {
-    const url = `${options.apiUrl}${endpoint.path}`;
-    try {
-      const response = await fetchWithTimeout(url, {}, timeoutMs);
-      const body = await response.text();
-      if (!response.ok) {
-        throw new Error(`HTTP_${response.status}:body=${body.slice(0, 500)}`);
+  const failures = await Promise.all(
+    forensicEndpoints.map(async endpoint => {
+      const url = `${options.apiUrl}${endpoint.path}`;
+      try {
+        const response = await fetchWithTimeout(url, {}, timeoutMs);
+        const body = await response.text();
+        if (!response.ok) {
+          throw new Error(`HTTP_${response.status}:body=${body.slice(0, 500)}`);
+        }
+        const payload = parseJsonStrict(body, url);
+        writeFileSync(
+          join(options.outputDir, `${endpoint.name}.json`),
+          `${JSON.stringify(payload, null, 2)}\n`,
+        );
+        return null;
+      } catch (error) {
+        const normalized = timeoutForensicError(error, timeoutMs);
+        const message =
+          `E2E_FORENSIC_ENDPOINT_FAILED:name=${endpoint.name}:url=${url}:` + formatErrorForLog(normalized);
+        writeFileSync(join(options.outputDir, `${endpoint.name}.error.txt`), `${message}\n`);
+        return message;
       }
-      const payload = parseJsonStrict(body, url);
-      writeFileSync(
-        join(options.outputDir, `${endpoint.name}.json`),
-        `${JSON.stringify(payload, null, 2)}\n`,
-      );
-      return null;
-    } catch (error) {
-      const normalized = timeoutForensicError(error, timeoutMs);
-      const message =
-        `E2E_FORENSIC_ENDPOINT_FAILED:name=${endpoint.name}:url=${url}:` +
-        formatErrorForLog(normalized);
-      writeFileSync(join(options.outputDir, `${endpoint.name}.error.txt`), `${message}\n`);
-      return message;
-    }
-  }));
+    }),
+  );
   const errors = failures.filter((failure): failure is string => failure !== null);
   if (errors.length > 0) {
     throw new Error(`E2E_FAILURE_FORENSICS_INCOMPLETE:${errors.join(' | ')}`);
@@ -1710,593 +1660,598 @@ const runShard = async (
 
   let cleanupUnhandledError: AggregateError | null = null;
   const result = await (async (): Promise<RunResult> => {
-  try {
-    stopFatalMonitor = startFailFastLogMonitor(logPath, (message) => {
-      if (!teardownReason) teardownReason = message;
-      log.write(`[runner] fail-fast monitor hit -> aborting shard\n${message}\n`);
-      shardAbortController.abort();
-      for (const [label, child] of [
-        ['api', api],
-        ['vite', vite],
-        ['anvil', anvil],
-        ['anvil2', anvil2],
-      ] as const) {
-        teardownReason = signalE2EFatalMonitorChild(
-          teardownReason ?? '',
-          label,
-          child,
-          secondary => { log.write(`[runner:error] ${secondary}\n`); },
-        );
-      }
-    });
-    log.write(`shard=${shard}/${totalShards}\nrpc=${rpcUrl}\nrpc2=${rpc2Url}\napi=${apiUrl}\nweb=${webUrl}\ndb=${dbPath}\n\n`);
-    throwIfAborted();
+    try {
+      stopFatalMonitor = startFailFastLogMonitor(logPath, message => {
+        if (!teardownReason) teardownReason = message;
+        log.write(`[runner] fail-fast monitor hit -> aborting shard\n${message}\n`);
+        shardAbortController.abort();
+        for (const [label, child] of [
+          ['api', api],
+          ['vite', vite],
+          ['anvil', anvil],
+          ['anvil2', anvil2],
+        ] as const) {
+          teardownReason = signalE2EFatalMonitorChild(teardownReason ?? '', label, child, secondary => {
+            log.write(`[runner:error] ${secondary}\n`);
+          });
+        }
+      });
+      log.write(
+        `shard=${shard}/${totalShards}\nrpc=${rpcUrl}\nrpc2=${rpc2Url}\napi=${apiUrl}\nweb=${webUrl}\ndb=${dbPath}\n\n`,
+      );
+      throwIfAborted();
 
-    // A leased slot must be empty. Never signal a listener owned by another
-    // checkout or test run; a busy port is evidence of a lifecycle defect.
-    // Layout:
-    // - rpc: anvil
-    // - rpc2: secondary anvil for cross-j local simulation
-    // - api: production core/api/server/index.ts on an isolated shard port
-    // - web: vite preview
-    // - extra reserved ports kept for any local child APIs the server may spawn
-    const preflightStart = Date.now();
-    assertLocalTestPortsFree([
-      rpcPort,
-      rpc2Port,
-      apiPort,
-      webPort,
-      watchtowerPort,
-      apiPort + 10,
-      apiPort + 11,
-      apiPort + 12,
-      apiPort + 13,
-    ]);
-    markPhase('preflight', preflightStart);
-    throwIfAborted();
+      // A leased slot must be empty. Never signal a listener owned by another
+      // checkout or test run; a busy port is evidence of a lifecycle defect.
+      // Layout:
+      // - rpc: anvil
+      // - rpc2: secondary anvil for cross-j local simulation
+      // - api: production core/api/server/index.ts on an isolated shard port
+      // - web: vite preview
+      // - extra reserved ports kept for any local child APIs the server may spawn
+      const preflightStart = Date.now();
+      assertLocalTestPortsFree([
+        rpcPort,
+        rpc2Port,
+        apiPort,
+        webPort,
+        watchtowerPort,
+        apiPort + 10,
+        apiPort + 11,
+        apiPort + 12,
+        apiPort + 13,
+      ]);
+      markPhase('preflight', preflightStart);
+      throwIfAborted();
 
-    const anvilStart = Date.now();
-    anvil = spawn(
-      args.anvilBin,
-      [
-        '--host',
-        '127.0.0.1',
-        '--port',
-        String(rpcPort),
-        '--chain-id',
-        '31337',
-        '--block-gas-limit',
-        '60000000',
-        '--code-size-limit',
-        '65536',
-        '--prune-history',
-        String(E2E_ANVIL_HISTORY_STATES),
-        '--state',
-        anvilStatePath,
-        '--silent',
-      ],
-      {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: sanitizeChildProcessEnv({ ...process.env, TMPDIR: anvilTmpDir }),
-      },
-    );
-    anvil.stdout.on('data', c => log.write(`[anvil] ${c.toString()}`));
-    anvil.stderr.on('data', c => log.write(`[anvil:err] ${c.toString()}`));
-    anvil2 = spawn(
-      args.anvilBin,
-      [
-        '--host',
-        '127.0.0.1',
-        '--port',
-        String(rpc2Port),
-        '--chain-id',
-        '31338',
-        '--block-gas-limit',
-        '60000000',
-        '--code-size-limit',
-        '65536',
-        '--prune-history',
-        String(E2E_ANVIL_HISTORY_STATES),
-        '--state',
-        anvil2StatePath,
-        '--silent',
-      ],
-      {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: sanitizeChildProcessEnv({ ...process.env, TMPDIR: anvil2TmpDir }),
-      },
-    );
-    anvil2.stdout.on('data', c => log.write(`[anvil2] ${c.toString()}`));
-    anvil2.stderr.on('data', c => log.write(`[anvil2:err] ${c.toString()}`));
-    await Promise.all([
-      waitForRpcReady(rpcUrl, args.stackTimeoutMs, 31337, shardAbortController.signal),
-      waitForRpcReady(rpc2Url, args.stackTimeoutMs, 31338, shardAbortController.signal),
-    ]);
-    markPhase('anvilBoot', anvilStart);
-    throwIfAborted();
+      const anvilStart = Date.now();
+      anvil = spawn(
+        args.anvilBin,
+        [
+          '--host',
+          '127.0.0.1',
+          '--port',
+          String(rpcPort),
+          '--chain-id',
+          '31337',
+          '--block-gas-limit',
+          '60000000',
+          '--code-size-limit',
+          '65536',
+          '--prune-history',
+          String(E2E_ANVIL_HISTORY_STATES),
+          '--state',
+          anvilStatePath,
+          '--silent',
+        ],
+        {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: sanitizeChildProcessEnv({ ...process.env, TMPDIR: anvilTmpDir }),
+        },
+      );
+      anvil.stdout.on('data', c => log.write(`[anvil] ${c.toString()}`));
+      anvil.stderr.on('data', c => log.write(`[anvil:err] ${c.toString()}`));
+      anvil2 = spawn(
+        args.anvilBin,
+        [
+          '--host',
+          '127.0.0.1',
+          '--port',
+          String(rpc2Port),
+          '--chain-id',
+          '31338',
+          '--block-gas-limit',
+          '60000000',
+          '--code-size-limit',
+          '65536',
+          '--prune-history',
+          String(E2E_ANVIL_HISTORY_STATES),
+          '--state',
+          anvil2StatePath,
+          '--silent',
+        ],
+        {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: sanitizeChildProcessEnv({ ...process.env, TMPDIR: anvil2TmpDir }),
+        },
+      );
+      anvil2.stdout.on('data', c => log.write(`[anvil2] ${c.toString()}`));
+      anvil2.stderr.on('data', c => log.write(`[anvil2:err] ${c.toString()}`));
+      await Promise.all([
+        waitForRpcReady(rpcUrl, args.stackTimeoutMs, 31337, shardAbortController.signal),
+        waitForRpcReady(rpc2Url, args.stackTimeoutMs, 31338, shardAbortController.signal),
+      ]);
+      markPhase('anvilBoot', anvilStart);
+      throwIfAborted();
 
-    const apiStart = Date.now();
-    api = spawn(
-      'bun',
-      [
-        'core/orchestrator/orchestrator.ts',
-        '--host',
-        '127.0.0.1',
-        '--port',
-        String(apiPort),
-        // The browser reaches the relay through the preview server, so that
-        // origin has to be one of the operator-configured relay audiences or
-        // its hello is signed for an endpoint the relay does not recognise.
-        // `--relay-url` stays explicit because it otherwise defaults to this
-        // base URL, which would send the mesh through the preview proxy too.
-        '--public-ws-base-url',
-        `ws://localhost:${webPort}`,
-        '--relay-url',
-        `ws://127.0.0.1:${apiPort}/relay`,
-        '--rpc-url',
-        rpcUrl,
-        '--rpc2-url',
-        rpc2Url,
-        '--db-root',
-        dbPath,
-        '--wallet-url',
-        `${webUrl}/app`,
-        '--allow-reset',
-        // tests/e2e-dispute.spec.ts observes an active dispute against H2
-        // before its timeout; a hub that auto-finalizes would close it first.
-        '--manual-dispute-hub',
-        'H2',
-        ...(args.prewaitHealth === 'reset' ? ['--defer-initial-reset'] : []),
-        ...(task.requireMarketMaker ? ['--mm'] : []),
-        ...(task.requireCustody ? [
-          '--custody',
-          '--custody-port',
-          String(custodyPort),
-          '--custody-daemon-port',
-          String(custodyDaemonPort),
-          '--custody-db-root',
-          join(dbPath, 'custody'),
-        ] : []),
-      ],
-      {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: sanitizeChildProcessEnv({
-          ...process.env,
-          USE_ANVIL: 'true',
-          ANVIL_RPC: rpcUrl,
-          ANVIL_RPC2: rpc2Url,
-          XLN_RDB_ROOT: shardPaths.rdbRoot,
-          XLN_UI_BUILD_DIR: buildArtifacts.walletBuildDir,
-          XLN_JDB_ROOT: shardPaths.jdbRoot,
-          XLN_STORAGE_HISTORY_PATH: join(shardPaths.rdbRoot, 'storage-health-history.json'),
-          XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
-          XLN_EPHEMERAL_TESTNET: '1',
-          XLN_WATCHTOWER_PROXY_PORTS: String(watchtowerPort),
-          // Same default the deployed stack ships with (scripts/operations/start-server.sh).
-          // Tests reach the faucet through the preview proxy, so they arrive as
-          // ordinary callers rather than the local operator. The deployed cap
-          // rations a public faucet against strangers; this stack is ephemeral
-          // and loopback-only, and its scenarios fund positions far above it.
-          XLN_PUBLIC_FAUCET: process.env['XLN_PUBLIC_FAUCET'] ?? '1',
-          XLN_FAUCET_MAX_AMOUNT: '1000000000000000000000',
-          XLN_FAUCET_MAX_GAS_AMOUNT: '1000',
-          XLN_MESH_ROOT_SEED: `xln-e2e-mesh-root:${dbPath}`,
-          XLN_MESH_RUNTIME_SEEDS_JSON: JSON.stringify({
-            H1: 'xln-e2e-h1',
-            H2: 'xln-e2e-h2',
-            H3: 'xln-e2e-h3',
-            MM: 'xln-mesh-mm',
-            CUSTODY: 'xln-mesh-custody-seed',
+      const apiStart = Date.now();
+      api = spawn(
+        'bun',
+        [
+          'core/orchestrator/orchestrator.ts',
+          '--host',
+          '127.0.0.1',
+          '--port',
+          String(apiPort),
+          // The browser reaches the relay through the preview server, so that
+          // origin has to be one of the operator-configured relay audiences or
+          // its hello is signed for an endpoint the relay does not recognise.
+          // `--relay-url` stays explicit because it otherwise defaults to this
+          // base URL, which would send the mesh through the preview proxy too.
+          '--public-ws-base-url',
+          `ws://localhost:${webPort}`,
+          '--relay-url',
+          `ws://127.0.0.1:${apiPort}/relay`,
+          '--rpc-url',
+          rpcUrl,
+          '--rpc2-url',
+          rpc2Url,
+          '--db-root',
+          dbPath,
+          '--wallet-url',
+          `${webUrl}/app`,
+          '--allow-reset',
+          // tests/e2e-dispute.spec.ts observes an active dispute against H2
+          // before its timeout; a hub that auto-finalizes would close it first.
+          '--manual-dispute-hub',
+          'H2',
+          ...(args.prewaitHealth === 'reset' ? ['--defer-initial-reset'] : []),
+          ...(task.requireMarketMaker ? ['--mm'] : []),
+          ...(task.requireCustody
+            ? [
+                '--custody',
+                '--custody-port',
+                String(custodyPort),
+                '--custody-daemon-port',
+                String(custodyDaemonPort),
+                '--custody-db-root',
+                join(dbPath, 'custody'),
+              ]
+            : []),
+        ],
+        {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: sanitizeChildProcessEnv({
+            ...process.env,
+            USE_ANVIL: 'true',
+            ANVIL_RPC: rpcUrl,
+            ANVIL_RPC2: rpc2Url,
+            XLN_RDB_ROOT: shardPaths.rdbRoot,
+            XLN_UI_BUILD_DIR: buildArtifacts.walletBuildDir,
+            XLN_JDB_ROOT: shardPaths.jdbRoot,
+            XLN_STORAGE_HISTORY_PATH: join(shardPaths.rdbRoot, 'storage-health-history.json'),
+            XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
+            XLN_EPHEMERAL_TESTNET: '1',
+            XLN_WATCHTOWER_PROXY_PORTS: String(watchtowerPort),
+            // Same default the deployed stack ships with (scripts/operations/start-server.sh).
+            // Tests reach the faucet through the preview proxy, so they arrive as
+            // ordinary callers rather than the local operator. The deployed cap
+            // rations a public faucet against strangers; this stack is ephemeral
+            // and loopback-only, and its scenarios fund positions far above it.
+            XLN_PUBLIC_FAUCET: process.env['XLN_PUBLIC_FAUCET'] ?? '1',
+            XLN_FAUCET_MAX_AMOUNT: '1000000000000000000000',
+            XLN_FAUCET_MAX_GAS_AMOUNT: '1000',
+            XLN_MESH_ROOT_SEED: `xln-e2e-mesh-root:${dbPath}`,
+            XLN_MESH_RUNTIME_SEEDS_JSON: JSON.stringify({
+              H1: 'xln-e2e-h1',
+              H2: 'xln-e2e-h2',
+              H3: 'xln-e2e-h3',
+              MM: 'xln-mesh-mm',
+              CUSTODY: 'xln-mesh-custody-seed',
+            }),
+            XLN_SKIP_STALE_REAP: '1',
+            XLN_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
+            XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(args.stackTimeoutMs),
+            MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS: process.env['MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] ?? '15000',
+            XLN_AUTO_PROVISION_EXTERNAL_FAUCET: process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] ?? '1',
+            ...(process.env['XLN_MIN_DISK_FREE_BYTES']
+              ? { XLN_MIN_DISK_FREE_BYTES: process.env['XLN_MIN_DISK_FREE_BYTES'] }
+              : {}),
           }),
-          XLN_SKIP_STALE_REAP: '1',
-          XLN_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
-          XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(args.stackTimeoutMs),
-          MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS:
-            process.env['MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] ?? '15000',
-          XLN_AUTO_PROVISION_EXTERNAL_FAUCET: process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] ?? '1',
-          ...(process.env['XLN_MIN_DISK_FREE_BYTES']
-            ? { XLN_MIN_DISK_FREE_BYTES: process.env['XLN_MIN_DISK_FREE_BYTES'] }
-            : {}),
-        }),
-      },
-    );
-    api.stdout.on('data', c => log.write(`[api] ${c.toString()}`));
-    api.stderr.on('data', c => log.write(`[api:err] ${c.toString()}`));
-    // Only control-listener readiness precedes the deferred reset. `/api` is
-    // a static-app route and may be 503 when the isolated build lives in cache.
-    // Full topology readiness is still required after hardResetShardBaseline.
-    await waitForHttpReady(`${apiUrl}/api/health`, args.stackTimeoutMs, shardAbortController.signal);
-    markPhase('apiBoot', apiStart);
-    throwIfAborted();
-    if (args.prewaitHealth === 'reset') {
-      const resetQueuedAt = Date.now();
-      await resetLimiter.run(async () => {
-        const resetStartedAt = Date.now();
-        const queueMs = resetStartedAt - resetQueuedAt;
-        if (queueMs > 0) log.write(`[timing] resetQueue=${queueMs}ms\n`);
+        },
+      );
+      api.stdout.on('data', c => log.write(`[api] ${c.toString()}`));
+      api.stderr.on('data', c => log.write(`[api:err] ${c.toString()}`));
+      // Only control-listener readiness precedes the deferred reset. `/api` is
+      // a static-app route and may be 503 when the isolated build lives in cache.
+      // Full topology readiness is still required after hardResetShardBaseline.
+      await waitForHttpReady(`${apiUrl}/api/health`, args.stackTimeoutMs, shardAbortController.signal);
+      markPhase('apiBoot', apiStart);
+      throwIfAborted();
+      if (args.prewaitHealth === 'reset') {
+        const resetQueuedAt = Date.now();
+        await resetLimiter.run(async () => {
+          const resetStartedAt = Date.now();
+          const queueMs = resetStartedAt - resetQueuedAt;
+          if (queueMs > 0) log.write(`[timing] resetQueue=${queueMs}ms\n`);
+          throwIfAborted();
+          baselineHealth = await hardResetShardBaseline(
+            apiUrl,
+            args.stackTimeoutMs,
+            task.requireMarketMaker,
+            task.requireCustody,
+            shardAbortController.signal,
+          );
+        });
+        const remainingHealthMs = Math.max(1_000, args.stackTimeoutMs - (Date.now() - resetQueuedAt));
+        baselineHealth = await waitForE2EServerHealthy(
+          apiUrl,
+          remainingHealthMs,
+          task.requireMarketMaker,
+          task.requireCustody,
+          shardAbortController.signal,
+        );
+        markPhase('apiHealthy', resetQueuedAt);
         throwIfAborted();
-        baselineHealth = await hardResetShardBaseline(
+      } else if (args.prewaitHealth === 'full') {
+        const healthStart = Date.now();
+        baselineHealth = await waitForE2EServerHealthy(
           apiUrl,
           args.stackTimeoutMs,
           task.requireMarketMaker,
           task.requireCustody,
           shardAbortController.signal,
         );
-      });
-      const remainingHealthMs = Math.max(1_000, args.stackTimeoutMs - (Date.now() - resetQueuedAt));
-      baselineHealth = await waitForE2EServerHealthy(
-        apiUrl,
-        remainingHealthMs,
-        task.requireMarketMaker,
-        task.requireCustody,
-        shardAbortController.signal,
-      );
-      markPhase('apiHealthy', resetQueuedAt);
-      throwIfAborted();
-    } else if (args.prewaitHealth === 'full') {
-      const healthStart = Date.now();
-      baselineHealth = await waitForE2EServerHealthy(
-        apiUrl,
-        args.stackTimeoutMs,
-        task.requireMarketMaker,
-        task.requireCustody,
-        shardAbortController.signal,
-      );
-      markPhase('apiHealthy', healthStart);
-      throwIfAborted();
-    } else {
-      log.write('[timing] apiHealthy=0ms (prewait-health=http; baseline waits inside tests that need it)\n');
-    }
+        markPhase('apiHealthy', healthStart);
+        throwIfAborted();
+      } else {
+        log.write('[timing] apiHealthy=0ms (prewait-health=http; baseline waits inside tests that need it)\n');
+      }
 
-    const shardViteCacheDir = join(shardPaths.root, 'vite-cache');
-    const shardSvelteKitOutDir = REACT_UI ? '' : prepareShardSvelteKitOutDir(buildArtifacts.svelteKitOutDir, logsDir, shard, log);
-    const reactBuildDir = join(shardPaths.root, 'react-ui');
-    if (REACT_UI) {
-      const built = await runE2ECommand('node', [resolve(process.cwd(), 'ui/node_modules/vite/bin/vite.js'), 'build'], {
-        cwd: resolve(process.cwd(), 'ui'), log, timeoutMs: 60_000, signal: shardAbortController.signal,
-        env: { ...process.env, XLN_UI_STACK_ORIGIN: '', XLN_UI_BUILD_DIR: reactBuildDir, XLN_UI_DIAGNOSTICS: '1' },
-      });
-      if (!e2eCommandSucceeded(built)) throw new Error(`REACT_UI_BUILD_FAILED:${formatE2ECommandResult(built)}`);
-    }
-    const viteStart = Date.now();
-    // Spawn Vite directly. `bun run preview` starts an extra child node
-    // process, so killing the Bun wrapper can leave `node .../vite preview`
-    // alive until the next global preflight cleanup.
-    vite = spawn(
-      'node',
-      [
-        resolve(process.cwd(), REACT_UI ? 'ui' : 'frontend', 'node_modules', 'vite', 'bin', 'vite.js'),
-        'preview',
-        '--mode',
-        `xln-e2e-${basename(logsDir)}-${shard}`,
-        '--host',
-        '0.0.0.0',
-        '--port',
-        String(webPort),
-        '--strictPort',
-      ],
-      {
-        cwd: REACT_UI ? resolve(process.cwd(), 'ui') : frontendRoot,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: sanitizeChildProcessEnv({
+      const shardViteCacheDir = join(shardPaths.root, 'vite-cache');
+      const shardSvelteKitOutDir = REACT_UI
+        ? ''
+        : prepareShardSvelteKitOutDir(buildArtifacts.svelteKitOutDir, logsDir, shard, log);
+      const reactBuildDir = join(shardPaths.root, 'react-ui');
+      if (REACT_UI) {
+        const built = await runE2ECommand(
+          'node',
+          [resolve(process.cwd(), 'ui/node_modules/vite/bin/vite.js'), 'build'],
+          {
+            cwd: resolve(process.cwd(), 'ui'),
+            log,
+            timeoutMs: 60_000,
+            signal: shardAbortController.signal,
+            env: { ...process.env, XLN_UI_STACK_ORIGIN: '', XLN_UI_BUILD_DIR: reactBuildDir, XLN_UI_DIAGNOSTICS: '1' },
+          },
+        );
+        if (!e2eCommandSucceeded(built)) throw new Error(`REACT_UI_BUILD_FAILED:${formatE2ECommandResult(built)}`);
+      }
+      const viteStart = Date.now();
+      // Spawn Vite directly. `bun run preview` starts an extra child node
+      // process, so killing the Bun wrapper can leave `node .../vite preview`
+      // alive until the next global preflight cleanup.
+      vite = spawn(
+        'node',
+        [
+          resolve(process.cwd(), REACT_UI ? 'ui' : 'frontend', 'node_modules', 'vite', 'bin', 'vite.js'),
+          'preview',
+          '--mode',
+          `xln-e2e-${basename(logsDir)}-${shard}`,
+          '--host',
+          '0.0.0.0',
+          '--port',
+          String(webPort),
+          '--strictPort',
+        ],
+        {
+          cwd: REACT_UI ? resolve(process.cwd(), 'ui') : frontendRoot,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: sanitizeChildProcessEnv({
+            ...process.env,
+            ANVIL_RPC: rpcUrl,
+            ANVIL_RPC2: rpc2Url,
+            RPC_ETHEREUM: rpcUrl,
+            RPC_TRON: rpc2Url,
+            VITE_DEV_PORT: String(webPort),
+            VITE_API_PROXY_TARGET: apiUrl,
+            VITE_UI_PROXY_TARGET: apiUrl,
+            ...(REACT_UI
+              ? {
+                  XLN_UI_STACK_ORIGIN: apiUrl,
+                  XLN_UI_RUNTIME_BUNDLE_DIR: dirname(buildArtifacts.runtimeBundlePath),
+                  XLN_UI_BUILD_DIR: reactBuildDir,
+                }
+              : {}),
+            XLN_VITE_FORCE_HTTP: '1',
+            VITE_CACHE_DIR: shardViteCacheDir,
+            XLN_SVELTE_KIT_OUT_DIR: shardSvelteKitOutDir,
+            XLN_SVELTE_BUILD_DIR: relative(frontendRoot, buildArtifacts.frontendBuildDir),
+            XLN_RUNTIME_BUNDLE_PATH: buildArtifacts.runtimeBundlePath,
+            VITE_PUBLIC_DIR: relative(frontendRoot, buildArtifacts.publicDir),
+          }),
+        },
+      );
+      vite.stdout.on('data', c => log.write(`[vite] ${c.toString()}`));
+      vite.stderr.on('data', c => log.write(`[vite:err] ${c.toString()}`));
+      await waitForWebReady(webUrl, Math.min(args.stackTimeoutMs, 30_000), shardAbortController.signal);
+      markPhase('viteBoot', viteStart);
+      throwIfAborted();
+
+      const playwrightReportPath = join(shardPaths.resultsDir, 'playwright-report.json');
+      const plannedFailureCapsulePath = join(shardPaths.resultsDir, 'failure-capsule.json');
+      const failureCapsuleErrorPath = join(shardPaths.resultsDir, 'failure-capsule.error.txt');
+      const shardArg = `${shard + 1}/${totalShards}`;
+      const playwrightArgs = ['playwright', 'test', '--config', 'playwright.config.ts'];
+      if (task.usePlaywrightShard) {
+        playwrightArgs.push('--shard', shardArg);
+      }
+      const titleGrep = task.grep || args.pwGrep;
+      const categoryGrep = escapeRegExp(QA_TEST_CATEGORY_TAGS[task.testCategory]);
+      const grep = titleGrep ? `(?=.*(?:${titleGrep}))(?=.*(?:${categoryGrep}))` : categoryGrep;
+      if (grep) {
+        playwrightArgs.push('--grep', grep);
+      }
+      if (args.pwProject) {
+        playwrightArgs.push(`--project=${args.pwProject}`);
+      }
+      playwrightArgs.push(`--workers=${args.workersPerShard}`);
+      playwrightArgs.push(`--reporter=${args.reporter},json`);
+      if (args.maxFailures > 0) playwrightArgs.push(`--max-failures=${args.maxFailures}`);
+      for (const target of task.pwTargets)
+        playwrightArgs.push(REACT_UI ? relative(resolve(process.cwd(), 'ui'), resolve(target)) : target);
+      log.write(`[runner] playwright args: ${JSON.stringify(playwrightArgs)}\n`);
+
+      const playwrightStart = Date.now();
+      const playwrightResult = await runE2ECommand('bunx', playwrightArgs, {
+        ...(REACT_UI ? { cwd: resolve(process.cwd(), 'ui') } : {}),
+        env: {
           ...process.env,
-          ANVIL_RPC: rpcUrl,
-          ANVIL_RPC2: rpc2Url,
-          RPC_ETHEREUM: rpcUrl,
-          RPC_TRON: rpc2Url,
-          VITE_DEV_PORT: String(webPort),
-          VITE_API_PROXY_TARGET: apiUrl,
-          VITE_UI_PROXY_TARGET: apiUrl,
-          ...(REACT_UI ? { XLN_UI_STACK_ORIGIN: apiUrl, XLN_UI_RUNTIME_BUNDLE_DIR: dirname(buildArtifacts.runtimeBundlePath), XLN_UI_BUILD_DIR: reactBuildDir } : {}),
-          XLN_VITE_FORCE_HTTP: '1',
-          VITE_CACHE_DIR: shardViteCacheDir,
-          XLN_SVELTE_KIT_OUT_DIR: shardSvelteKitOutDir,
-          XLN_SVELTE_BUILD_DIR: relative(frontendRoot, buildArtifacts.frontendBuildDir),
-          XLN_RUNTIME_BUNDLE_PATH: buildArtifacts.runtimeBundlePath,
-          VITE_PUBLIC_DIR: relative(frontendRoot, buildArtifacts.publicDir),
-        }),
-      },
-    );
-    vite.stdout.on('data', c => log.write(`[vite] ${c.toString()}`));
-    vite.stderr.on('data', c => log.write(`[vite:err] ${c.toString()}`));
-    await waitForWebReady(webUrl, Math.min(args.stackTimeoutMs, 30_000), shardAbortController.signal);
-    markPhase('viteBoot', viteStart);
-    throwIfAborted();
-
-    const playwrightReportPath = join(shardPaths.resultsDir, 'playwright-report.json');
-    const plannedFailureCapsulePath = join(shardPaths.resultsDir, 'failure-capsule.json');
-    const failureCapsuleErrorPath = join(shardPaths.resultsDir, 'failure-capsule.error.txt');
-    const shardArg = `${shard + 1}/${totalShards}`;
-    const playwrightArgs = ['playwright', 'test', '--config', 'playwright.config.ts'];
-    if (task.usePlaywrightShard) {
-      playwrightArgs.push('--shard', shardArg);
-    }
-    const titleGrep = task.grep || args.pwGrep;
-    const categoryGrep = escapeRegExp(QA_TEST_CATEGORY_TAGS[task.testCategory]);
-    const grep = titleGrep
-      ? `(?=.*(?:${titleGrep}))(?=.*(?:${categoryGrep}))`
-      : categoryGrep;
-    if (grep) {
-      playwrightArgs.push('--grep', grep);
-    }
-    if (args.pwProject) {
-      playwrightArgs.push(`--project=${args.pwProject}`);
-    }
-    playwrightArgs.push(`--workers=${args.workersPerShard}`);
-    playwrightArgs.push(`--reporter=${args.reporter},json`);
-    if (args.maxFailures > 0) playwrightArgs.push(`--max-failures=${args.maxFailures}`);
-    for (const target of task.pwTargets) playwrightArgs.push(REACT_UI ? relative(resolve(process.cwd(), 'ui'), resolve(target)) : target);
-    log.write(`[runner] playwright args: ${JSON.stringify(playwrightArgs)}\n`);
-
-    const playwrightStart = Date.now();
-    const playwrightResult = await runE2ECommand('bunx', playwrightArgs, {
-      ...(REACT_UI ? { cwd: resolve(process.cwd(), 'ui') } : {}),
-      env: {
-        ...process.env,
-        // Keep isolated CI-style runs headless even if the parent shell has
-        // debugging/browser-opening variables set.
-        CI: process.env['CI'] || '1',
-        HEADED: 'false',
-        PWDEBUG: '0',
-        PLAYWRIGHT_HTML_OPEN: 'never',
-        PW_BASE_URL: webUrl,
-        PW_SKIP_WEBSERVER: '1',
-        PW_PROFILE: args.pwProject === 'brainvault' || args.pwProject === 'webkit-mobile' ? args.pwProject : '',
-        PW_WORKERS: String(args.workersPerShard),
-        PW_TEST_TIMEOUT: String(args.testTimeoutMs),
-        PW_VIDEO: args.videoMode,
-        PW_TRACE: args.traceMode,
-        PW_SCREENSHOT: args.screenshotMode,
-        PW_SIMPLE_REPORTER: '1',
-        PW_REPORTER: args.reporter,
-        PLAYWRIGHT_JSON_OUTPUT_FILE: playwrightReportPath,
-        PW_OUTPUT_DIR: shardPaths.resultsDir,
-        E2E_BASE_URL: webUrl,
-        E2E_API_BASE_URL: apiUrl,
-        E2E_WATCHTOWER_PORT: String(watchtowerPort),
-        E2E_RUNTIME_BUNDLE_PATH: buildArtifacts.runtimeBundlePath,
-        E2E_ANVIL_RPC: rpcUrl,
-        E2E_ANVIL_RPC2: rpc2Url,
-        XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
-        E2E_RESET_BASE_URL: apiUrl,
-        E2E_BASELINE_HEALTH_JSON: baselineHealth ? JSON.stringify(baselineHealth) : '',
-        E2E_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
-        E2E_BROWSER_EVENTS_PATH: shardBrowserEventsPath(logsDir, shard),
-        E2E_PLAYWRIGHT_STARTED_AT_MS: String(playwrightStart),
-        E2E_FAST: process.env['E2E_FAST'] ?? '1',
-        E2E_ISOLATED_STACK: '1',
-        E2E_ISOLATED_BASELINE_READY: args.prewaitHealth === 'http' ? '0' : '1',
-        XLN_TEST_ARTIFACT_CLEANUP_DONE: '1',
-        XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',
-        XLN_INCLUDE_CUSTODY: task.requireCustody ? '1' : '0',
-      },
-      log,
-      timeoutMs: args.testTimeoutMs,
-      signal: shardAbortController.signal,
-      onSpawn: (pid) => {
-        playwrightPid = pid;
-      },
-      onExit: () => {
-        playwrightPid = undefined;
-      },
-    });
-    markPhase('playwright', playwrightStart);
-    if (
-      playwrightResult.kind === 'aborted' &&
-      isE2EGlobalFailFastAbortSignal(signal) &&
-      !String(teardownReason || '').startsWith('E2E_FATAL_RUNTIME_LOG')
-    ) {
-      return finishCancelled();
-    }
-    const playwrightFailed = !e2eCommandSucceeded(playwrightResult);
-    if (playwrightFailed && !teardownReason) {
-      teardownReason = `playwright_${formatE2ECommandResult(playwrightResult)}`;
-    }
-
-    let playwrightReportError: Error | null = null;
-    try {
-      failureCapsule = writePlaywrightFailureCapsule({
-        reportPath: playwrightReportPath,
-        capsulePath: plannedFailureCapsulePath,
-        logsDir,
-        args,
+          // Keep isolated CI-style runs headless even if the parent shell has
+          // debugging/browser-opening variables set.
+          CI: process.env['CI'] || '1',
+          HEADED: 'false',
+          PWDEBUG: '0',
+          PLAYWRIGHT_HTML_OPEN: 'never',
+          PW_BASE_URL: webUrl,
+          PW_SKIP_WEBSERVER: '1',
+          PW_PROFILE: args.pwProject === 'brainvault' || args.pwProject === 'webkit-mobile' ? args.pwProject : '',
+          PW_WORKERS: String(args.workersPerShard),
+          PW_TEST_TIMEOUT: String(args.testTimeoutMs),
+          PW_VIDEO: args.videoMode,
+          PW_TRACE: args.traceMode,
+          PW_SCREENSHOT: args.screenshotMode,
+          PW_SIMPLE_REPORTER: '1',
+          PW_REPORTER: args.reporter,
+          PLAYWRIGHT_JSON_OUTPUT_FILE: playwrightReportPath,
+          PW_OUTPUT_DIR: shardPaths.resultsDir,
+          E2E_BASE_URL: webUrl,
+          E2E_API_BASE_URL: apiUrl,
+          E2E_WATCHTOWER_PORT: String(watchtowerPort),
+          E2E_RUNTIME_BUNDLE_PATH: buildArtifacts.runtimeBundlePath,
+          E2E_ANVIL_RPC: rpcUrl,
+          E2E_ANVIL_RPC2: rpc2Url,
+          XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
+          E2E_RESET_BASE_URL: apiUrl,
+          E2E_BASELINE_HEALTH_JSON: baselineHealth ? JSON.stringify(baselineHealth) : '',
+          E2E_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
+          E2E_BROWSER_EVENTS_PATH: shardBrowserEventsPath(logsDir, shard),
+          E2E_PLAYWRIGHT_STARTED_AT_MS: String(playwrightStart),
+          E2E_FAST: process.env['E2E_FAST'] ?? '1',
+          E2E_ISOLATED_STACK: '1',
+          E2E_ISOLATED_BASELINE_READY: args.prewaitHealth === 'http' ? '0' : '1',
+          XLN_TEST_ARTIFACT_CLEANUP_DONE: '1',
+          XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',
+          XLN_INCLUDE_CUSTODY: task.requireCustody ? '1' : '0',
+        },
+        log,
+        timeoutMs: args.testTimeoutMs,
+        signal: shardAbortController.signal,
+        onSpawn: pid => {
+          playwrightPid = pid;
+        },
+        onExit: () => {
+          playwrightPid = undefined;
+        },
       });
-      if (playwrightFailed && !failureCapsule) {
-        throw new Error(`E2E_PLAYWRIGHT_FAILURE_MISSING:path=${playwrightReportPath}`);
+      markPhase('playwright', playwrightStart);
+      if (
+        playwrightResult.kind === 'aborted' &&
+        isE2EGlobalFailFastAbortSignal(signal) &&
+        !String(teardownReason || '').startsWith('E2E_FATAL_RUNTIME_LOG')
+      ) {
+        return finishCancelled();
       }
-      if (!playwrightFailed && failureCapsule) {
-        throw new Error(`E2E_PLAYWRIGHT_REPORT_EXIT_MISMATCH:path=${playwrightReportPath}:exit=0`);
+      const playwrightFailed = !e2eCommandSucceeded(playwrightResult);
+      if (playwrightFailed && !teardownReason) {
+        teardownReason = `playwright_${formatE2ECommandResult(playwrightResult)}`;
       }
-      failureCapsulePath = failureCapsule ? plannedFailureCapsulePath : null;
-    } catch (error) {
-      playwrightReportError = error instanceof Error ? error : new Error(String(error));
-      mkdirSync(shardPaths.resultsDir, { recursive: true });
+
+      let playwrightReportError: Error | null = null;
       try {
-        writeFileSync(failureCapsuleErrorPath, `${formatErrorForLog(playwrightReportError)}\n`);
-      } catch (writeError) {
-        const recorded = recordE2EShardSecondaryFailure(
-          formatErrorForLog(playwrightReportError),
-          'playwright-report-error-write',
-          writeError,
-        );
-        reportSecondary(recorded.secondary);
-        playwrightReportError = new Error(recorded.error);
+        failureCapsule = writePlaywrightFailureCapsule({
+          reportPath: playwrightReportPath,
+          capsulePath: plannedFailureCapsulePath,
+          logsDir,
+          args,
+        });
+        if (playwrightFailed && !failureCapsule) {
+          throw new Error(`E2E_PLAYWRIGHT_FAILURE_MISSING:path=${playwrightReportPath}`);
+        }
+        if (!playwrightFailed && failureCapsule) {
+          throw new Error(`E2E_PLAYWRIGHT_REPORT_EXIT_MISMATCH:path=${playwrightReportPath}:exit=0`);
+        }
+        failureCapsulePath = failureCapsule ? plannedFailureCapsulePath : null;
+      } catch (error) {
+        playwrightReportError = error instanceof Error ? error : new Error(String(error));
+        mkdirSync(shardPaths.resultsDir, { recursive: true });
+        try {
+          writeFileSync(failureCapsuleErrorPath, `${formatErrorForLog(playwrightReportError)}\n`);
+        } catch (writeError) {
+          const recorded = recordE2EShardSecondaryFailure(
+            formatErrorForLog(playwrightReportError),
+            'playwright-report-error-write',
+            writeError,
+          );
+          reportSecondary(recorded.secondary);
+          playwrightReportError = new Error(recorded.error);
+        }
+        if (!playwrightFailed) throw playwrightReportError;
       }
-      if (!playwrightFailed) throw playwrightReportError;
-    }
 
-    if (playwrightFailed) {
-      if (!teardownReason) throw new Error('E2E_PLAYWRIGHT_PRIMARY_FAILURE_MISSING');
-      if (playwrightReportError) {
-        const recorded = recordE2EShardSecondaryFailure(
-          teardownReason,
-          'playwright-report',
-          playwrightReportError,
-        );
-        teardownReason = recorded.error;
-        reportSecondary(recorded.secondary);
+      if (playwrightFailed) {
+        if (!teardownReason) throw new Error('E2E_PLAYWRIGHT_PRIMARY_FAILURE_MISSING');
+        if (playwrightReportError) {
+          const recorded = recordE2EShardSecondaryFailure(teardownReason, 'playwright-report', playwrightReportError);
+          teardownReason = recorded.error;
+          reportSecondary(recorded.secondary);
+        }
+        teardownReason = await captureFailureDiagnostics(teardownReason);
+        return finishResult({
+          shard,
+          status: 'failed',
+          resultClass: 'playwright',
+          durationMs: Date.now() - startedAt,
+          logPath,
+          target: task.pwTargets[0] || `shard-${task.shard}`,
+          title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
+          requireMarketMaker: task.requireMarketMaker,
+          requireCustody: task.requireCustody,
+          scenario: task.scenario,
+          phaseMs,
+          error: teardownReason,
+        });
       }
-      teardownReason = await captureFailureDiagnostics(teardownReason);
-      return finishResult({
-        shard,
-        status: 'failed',
-        resultClass: 'playwright',
-        durationMs: Date.now() - startedAt,
-        logPath,
-        target: task.pwTargets[0] || `shard-${task.shard}`,
-        title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
-        requireMarketMaker: task.requireMarketMaker,
-        requireCustody: task.requireCustody,
-        scenario: task.scenario,
-        phaseMs,
-        error: teardownReason,
-      });
-    }
 
-    await scheduler.wait(250);
-    await flushLog(log, '[runner] playwright passed; scanning runtime fatal markers\n');
-    const runtimeFatalLines = findRuntimeFatalLogLines(logPath);
-    if (runtimeFatalLines.length > 0) {
-      teardownReason = `E2E_FATAL_RUNTIME_LOG:\n${runtimeFatalLines.join('\n')}`;
-      teardownReason = await captureFailureDiagnostics(teardownReason);
-      return finishResult({
-        shard,
-        status: 'failed',
-        resultClass: 'runtime-fatal',
-        durationMs: Date.now() - startedAt,
-        logPath,
-        target: task.pwTargets[0] || `shard-${task.shard}`,
-        title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
-        requireMarketMaker: task.requireMarketMaker,
-        requireCustody: task.requireCustody,
-        scenario: task.scenario,
-        phaseMs,
-        error: teardownReason,
-      });
-    }
-
-    // Vite owns the browser-facing WebSocket proxy. Closing its upstream first
-    // turns a normal Playwright socket close into noisy proxy socket failures.
-    await flushLog(log, '[runner] playwright passed; closing vite ingress before api quiesce\n');
-    await stopProcessDependencyChain([
-      { label: 'vite', proc: vite },
-      { label: 'api', proc: api, termTimeoutMs: 35_000 },
-    ]);
-    assertShardRuntimePortsReleased(apiPort);
-    await scheduler.wait(250);
-    await flushLog(log, '[runner] api stopped; scanning runtime fatal markers\n');
-    const postTeardownFatalLines = findRuntimeFatalLogLines(logPath);
-    const monitorFatalReason = String(teardownReason || '').startsWith('E2E_FATAL_RUNTIME_LOG')
-      ? String(teardownReason)
-      : null;
-    if (monitorFatalReason || postTeardownFatalLines.length > 0) {
-      teardownReason = monitorFatalReason ?? `E2E_FATAL_RUNTIME_LOG:\n${postTeardownFatalLines.join('\n')}`;
-      teardownReason = await captureFailureDiagnostics(teardownReason);
-      return finishResult({
-        shard,
-        status: 'failed',
-        resultClass: 'runtime-fatal',
-        durationMs: Date.now() - startedAt,
-        logPath,
-        target: task.pwTargets[0] || `shard-${task.shard}`,
-        title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
-        requireMarketMaker: task.requireMarketMaker,
-        requireCustody: task.requireCustody,
-        scenario: task.scenario,
-        phaseMs,
-        error: teardownReason,
-      });
-    }
-
-    return finishResult({
-      shard,
-      status: 'passed',
-      resultClass: 'passed',
-      durationMs: Date.now() - startedAt,
-      logPath,
-      target: task.pwTargets[0] || `shard-${task.shard}`,
-      title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
-      requireMarketMaker: task.requireMarketMaker,
-      requireCustody: task.requireCustody,
-      scenario: task.scenario,
-      phaseMs,
-    });
-  } catch (error) {
-    if (isE2EGlobalFailFastAbortSignal(signal) &&
-      !String(teardownReason || '').startsWith('E2E_FATAL_RUNTIME_LOG')) {
-      return finishCancelled();
-    }
-    teardownReason = teardownReason || formatErrorForLog(error);
-    teardownReason = await captureFailureDiagnostics(teardownReason);
-    return finishResult({
-      shard,
-      status: 'failed',
-      resultClass: phaseMs.playwright === 0 ? 'startup' : 'runner',
-      durationMs: Date.now() - startedAt,
-      logPath,
-      target: task.pwTargets[0] || `shard-${task.shard}`,
-      title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
-      requireMarketMaker: task.requireMarketMaker,
-      requireCustody: task.requireCustody,
-      scenario: task.scenario,
-      phaseMs,
-      error: teardownReason,
-    });
-  } finally {
-    if (!perfStopped) {
-      perfMonitor.stop();
-      perfStopped = true;
-    }
-    stopFatalMonitor?.();
-    signal?.removeEventListener('abort', forwardOuterAbort);
-    if (teardownReason && api && api.exitCode === null) {
-      const teardownLabel = phaseMs.apiHealthy > 0 ? 'shard teardown' : 'startup failure';
-      const normalizedReason = teardownReason.replace(/\n/g, '\n[runner]   ');
-      log.write(`[runner] ${teardownLabel} -> SIGTERM api pid=${api.pid} reason=${normalizedReason}\n`);
-    }
-    if (!teardownReason && api && api.exitCode === null) {
-      log.write('[runner] playwright passed; closing vite ingress before api quiesce\n');
-    }
-    const cleanupFailures: Error[] = [];
-    const attemptCleanup = async (label: string, action: () => Promise<void>): Promise<void> => {
-      try {
-        await action();
-      } catch (cause) {
-        cleanupFailures.push(new Error(`E2E_SHARD_CLEANUP_FAILED:${label}`, { cause }));
+      await scheduler.wait(250);
+      await flushLog(log, '[runner] playwright passed; scanning runtime fatal markers\n');
+      const runtimeFatalLines = findRuntimeFatalLogLines(logPath);
+      if (runtimeFatalLines.length > 0) {
+        teardownReason = `E2E_FATAL_RUNTIME_LOG:\n${runtimeFatalLines.join('\n')}`;
+        teardownReason = await captureFailureDiagnostics(teardownReason);
+        return finishResult({
+          shard,
+          status: 'failed',
+          resultClass: 'runtime-fatal',
+          durationMs: Date.now() - startedAt,
+          logPath,
+          target: task.pwTargets[0] || `shard-${task.shard}`,
+          title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
+          requireMarketMaker: task.requireMarketMaker,
+          requireCustody: task.requireCustody,
+          scenario: task.scenario,
+          phaseMs,
+          error: teardownReason,
+        });
       }
-    };
-    await attemptCleanup('processes', async () => {
+
+      // Vite owns the browser-facing WebSocket proxy. Closing its upstream first
+      // turns a normal Playwright socket close into noisy proxy socket failures.
+      await flushLog(log, '[runner] playwright passed; closing vite ingress before api quiesce\n');
       await stopProcessDependencyChain([
         { label: 'vite', proc: vite },
         { label: 'api', proc: api, termTimeoutMs: 35_000 },
-        { label: 'anvil', proc: anvil },
-        { label: 'anvil2', proc: anvil2 },
       ]);
-    });
-    await attemptCleanup('api-ports', async () => assertShardRuntimePortsReleased(apiPort));
-    try {
-      rmSync(anvilTmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-      rmSync(anvil2TmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-    } catch (cause) {
-      cleanupFailures.push(new Error('E2E_SHARD_CLEANUP_FAILED:anvil-temp', { cause }));
+      assertShardRuntimePortsReleased(apiPort);
+      await scheduler.wait(250);
+      await flushLog(log, '[runner] api stopped; scanning runtime fatal markers\n');
+      const postTeardownFatalLines = findRuntimeFatalLogLines(logPath);
+      const monitorFatalReason = String(teardownReason || '').startsWith('E2E_FATAL_RUNTIME_LOG')
+        ? String(teardownReason)
+        : null;
+      if (monitorFatalReason || postTeardownFatalLines.length > 0) {
+        teardownReason = monitorFatalReason ?? `E2E_FATAL_RUNTIME_LOG:\n${postTeardownFatalLines.join('\n')}`;
+        teardownReason = await captureFailureDiagnostics(teardownReason);
+        return finishResult({
+          shard,
+          status: 'failed',
+          resultClass: 'runtime-fatal',
+          durationMs: Date.now() - startedAt,
+          logPath,
+          target: task.pwTargets[0] || `shard-${task.shard}`,
+          title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
+          requireMarketMaker: task.requireMarketMaker,
+          requireCustody: task.requireCustody,
+          scenario: task.scenario,
+          phaseMs,
+          error: teardownReason,
+        });
+      }
+
+      return finishResult({
+        shard,
+        status: 'passed',
+        resultClass: 'passed',
+        durationMs: Date.now() - startedAt,
+        logPath,
+        target: task.pwTargets[0] || `shard-${task.shard}`,
+        title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
+        requireMarketMaker: task.requireMarketMaker,
+        requireCustody: task.requireCustody,
+        scenario: task.scenario,
+        phaseMs,
+      });
+    } catch (error) {
+      if (isE2EGlobalFailFastAbortSignal(signal) && !String(teardownReason || '').startsWith('E2E_FATAL_RUNTIME_LOG')) {
+        return finishCancelled();
+      }
+      teardownReason = teardownReason || formatErrorForLog(error);
+      teardownReason = await captureFailureDiagnostics(teardownReason);
+      return finishResult({
+        shard,
+        status: 'failed',
+        resultClass: phaseMs.playwright === 0 ? 'startup' : 'runner',
+        durationMs: Date.now() - startedAt,
+        logPath,
+        target: task.pwTargets[0] || `shard-${task.shard}`,
+        title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
+        requireMarketMaker: task.requireMarketMaker,
+        requireCustody: task.requireCustody,
+        scenario: task.scenario,
+        phaseMs,
+        error: teardownReason,
+      });
+    } finally {
+      if (!perfStopped) {
+        perfMonitor.stop();
+        perfStopped = true;
+      }
+      stopFatalMonitor?.();
+      signal?.removeEventListener('abort', forwardOuterAbort);
+      if (teardownReason && api && api.exitCode === null) {
+        const teardownLabel = phaseMs.apiHealthy > 0 ? 'shard teardown' : 'startup failure';
+        const normalizedReason = teardownReason.replace(/\n/g, '\n[runner]   ');
+        log.write(`[runner] ${teardownLabel} -> SIGTERM api pid=${api.pid} reason=${normalizedReason}\n`);
+      }
+      if (!teardownReason && api && api.exitCode === null) {
+        log.write('[runner] playwright passed; closing vite ingress before api quiesce\n');
+      }
+      const cleanupFailures: Error[] = [];
+      const attemptCleanup = async (label: string, action: () => Promise<void>): Promise<void> => {
+        try {
+          await action();
+        } catch (cause) {
+          cleanupFailures.push(new Error(`E2E_SHARD_CLEANUP_FAILED:${label}`, { cause }));
+        }
+      };
+      await attemptCleanup('processes', async () => {
+        await stopProcessDependencyChain([
+          { label: 'vite', proc: vite },
+          { label: 'api', proc: api, termTimeoutMs: 35_000 },
+          { label: 'anvil', proc: anvil },
+          { label: 'anvil2', proc: anvil2 },
+        ]);
+      });
+      await attemptCleanup('api-ports', async () => assertShardRuntimePortsReleased(apiPort));
+      try {
+        rmSync(anvilTmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        rmSync(anvil2TmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      } catch (cause) {
+        cleanupFailures.push(new Error('E2E_SHARD_CLEANUP_FAILED:anvil-temp', { cause }));
+      }
+      log.end();
+      await attemptCleanup('log-finish', async () => {
+        await finished(log);
+      });
+      const cleanupResolution = reconcileE2EShardCleanupFailures(completedResult, cleanupFailures, shard);
+      for (const secondary of cleanupResolution.secondaryFailures) {
+        console.error(`[e2e:cleanup] shard=${String(shard)} ${secondary}`);
+      }
+      if (cleanupResolution.result && completedResult) {
+        Object.assign(completedResult, cleanupResolution.result);
+      }
+      cleanupUnhandledError = cleanupResolution.unhandledError;
     }
-    log.end();
-    await attemptCleanup('log-finish', async () => {
-      await finished(log);
-    });
-    const cleanupResolution = reconcileE2EShardCleanupFailures(
-      completedResult,
-      cleanupFailures,
-      shard,
-    );
-    for (const secondary of cleanupResolution.secondaryFailures) {
-      console.error(`[e2e:cleanup] shard=${String(shard)} ${secondary}`);
-    }
-    if (cleanupResolution.result && completedResult) {
-      Object.assign(completedResult, cleanupResolution.result);
-    }
-    cleanupUnhandledError = cleanupResolution.unhandledError;
-  }
   })();
   if (cleanupUnhandledError) throw cleanupUnhandledError;
   return result;
@@ -2310,7 +2265,7 @@ async function main(): Promise<void> {
   canonicalHubEngine('H1');
   const args = parseArgs();
   const exactRequestedTarget = args.pwFiles.length === 1 && /^.+\.spec\.ts::.+$/.test(args.pwFiles[0] ?? '');
-  if (!exactRequestedTarget) assertBroadE2ERunHasNoUnresolvedReruns();
+  assertE2ESelectionMayStart(args.pwFiles);
   // Artifact retention changes only deletion policy. Every top-level run must
   // still acquire a fresh lease so Playwright children can prove that their
   // parent owns the shared evidence workspace.
@@ -2356,18 +2311,16 @@ async function main(): Promise<void> {
   console.log(`Start target : ${args.startAt}`);
   console.log(`Keep prior logs: ${args.preserveArtifacts ? 'yes' : 'no'}`);
   console.log(`Artifacts    : video=${args.videoMode}, trace=${args.traceMode}, screenshot=${args.screenshotMode}`);
-  console.log(`Git HEAD     : ${codeFingerprint.gitHead?.slice(0, 12) ?? 'unknown'}${codeFingerprint.dirty ? ' dirty' : ''}`);
+  console.log(
+    `Git HEAD     : ${codeFingerprint.gitHead?.slice(0, 12) ?? 'unknown'}${codeFingerprint.dirty ? ' dirty' : ''}`,
+  );
   console.log(`Code hash    : ${codeFingerprint.codeHash.slice(0, 16)}`);
   console.log(`Build inputs : ${codeFingerprint.buildInputHash.slice(0, 16)}`);
   console.log(`Logs     : ${logsDir}`);
   console.log('='.repeat(72) + '\n');
 
   try {
-    const buildArtifacts = await prepareIsolatedE2EBuild(
-      logsDir,
-      codeFingerprint.buildInputHash,
-      args.skipBuild,
-    );
+    const buildArtifacts = await prepareIsolatedE2EBuild(logsDir, codeFingerprint.buildInputHash, args.skipBuild);
 
     try {
       await assertRunnerPreflight();
@@ -2399,7 +2352,7 @@ async function main(): Promise<void> {
       }
     }
     if (args.qaCategory) {
-      expandedTargets = expandedTargets.filter((entry) => entry.testCategory === args.qaCategory);
+      expandedTargets = expandedTargets.filter(entry => entry.testCategory === args.qaCategory);
       if (expandedTargets.length === 0) {
         throw new Error(`No isolated test targets matched --qa-category=${args.qaCategory}`);
       }
@@ -2420,7 +2373,11 @@ async function main(): Promise<void> {
       title: entry.title,
       grep: entry.grep,
       tags: entry.tags ?? [],
-      testCategory: entry.testCategory ?? (() => { throw new Error(`QA_TEST_CATEGORY_MISSING:${entry.target}:${entry.title ?? ''}`); })(),
+      testCategory:
+        entry.testCategory ??
+        (() => {
+          throw new Error(`QA_TEST_CATEGORY_MISSING:${entry.target}:${entry.title ?? ''}`);
+        })(),
     }));
     writeFileSync(
       join(logsDir, 'targets.json'),
@@ -2444,7 +2401,7 @@ async function main(): Promise<void> {
     );
     console.log(
       `Targets  : ${tasks.length}/${totalTargetCount} isolated test stack${tasks.length === 1 ? '' : 's'} ` +
-      `(starting at ${args.startAt})`,
+        `(starting at ${args.startAt})`,
     );
 
     const requestedConcurrency = Math.max(1, Math.min(args.shards, tasks.length, LOCAL_TEST_STACK_BASES.length));
@@ -2464,9 +2421,7 @@ async function main(): Promise<void> {
       if (abortController.signal.aborted) return null;
       while (claimedCount < tasks.length) {
         if (abortController.signal.aborted) return null;
-        const pendingMarketMakerIndex = tasks.findIndex(
-          (task, index) => !claimed[index] && task.requireMarketMaker,
-        );
+        const pendingMarketMakerIndex = tasks.findIndex((task, index) => !claimed[index] && task.requireMarketMaker);
         // A market-maker stack runs six Runtime processes and two jurisdictions.
         // Mixing it with ordinary full stacks caused deterministic bootstrap work
         // to be starved until the outer timeout. Drain the bounded MM lane first;
@@ -2527,11 +2482,11 @@ async function main(): Promise<void> {
           if (failureAdvance.shouldAbort && !abortController.signal.aborted) {
             const primaryFailure = failureState.primaryFailure;
             if (!primaryFailure) throw new Error('E2E_PRIMARY_FAILURE_IDENTITY_MISSING');
-              console.error(
-                `❌ max failures reached (${failureState.failedCount}/${args.maxFailures}); ` +
+            console.error(
+              `❌ max failures reached (${failureState.failedCount}/${args.maxFailures}); ` +
                 `primary shard=${primaryFailure.shard}; aborting active E2E stacks immediately`,
-              );
-              abortController.abort(createE2EGlobalFailFastAbortReason(primaryFailure));
+            );
+            abortController.abort(createE2EGlobalFailFastAbortReason(primaryFailure));
           }
         } finally {
           if (claim.task.requireMarketMaker) {
@@ -2591,9 +2546,7 @@ async function main(): Promise<void> {
       }
       if (shardManifest?.failureCapsule) {
         const capsule = shardManifest.failureCapsule;
-        console.log(
-          `      first-failure: ${capsule.file}:${capsule.line}:${capsule.column} ${capsule.title}`,
-        );
+        console.log(`      first-failure: ${capsule.file}:${capsule.line}:${capsule.column} ${capsule.title}`);
         console.log(`      rerun: ${capsule.rerunCommand}`);
         if (shardManifest.failureCapsuleRelativePath) {
           console.log(`      capsule: ${resolve(logsDir, shardManifest.failureCapsuleRelativePath)}`);
@@ -2606,7 +2559,7 @@ async function main(): Promise<void> {
         for (const incident of readFailureIncidentSummary(logsDir, r.shard)) {
           console.log(
             `      incident: ${incident.code} count=${incident.count} ` +
-            `runtime=${incident.runtimeId} fingerprint=${incident.fingerprint}`,
+              `runtime=${incident.runtimeId} fingerprint=${incident.fingerprint}`,
           );
         }
       }
@@ -2628,7 +2581,7 @@ async function main(): Promise<void> {
     if (failureState.primaryFailure) {
       console.log(
         `Primary failure: shard=${failureState.primaryFailure.shard} ` +
-        `class=${failureState.primaryFailure.resultClass}`,
+          `class=${failureState.primaryFailure.resultClass}`,
       );
     }
     printBenchmarkComparison(manifest.benchmark);
@@ -2640,7 +2593,9 @@ async function main(): Promise<void> {
           target: selectiveE2ETarget(f.target, f.title),
           failedCodeHash: codeFingerprint.codeHash,
           failedAt: new Date().toISOString(),
-          reason: `${f.resultClass}:${String(f.error || 'failed').replace(/[\r\n]+/g, ' ').slice(0, 450)}`,
+          reason: `${f.resultClass}:${String(f.error || 'failed')
+            .replace(/[\r\n]+/g, ' ')
+            .slice(0, 450)}`,
         });
         console.log(`\n--- shard ${f.shard} (tail: ${f.logPath}) ---`);
         console.log(tailLog(f.logPath, 80));
@@ -2656,7 +2611,10 @@ async function main(): Promise<void> {
         if (!task) continue;
         recordSelectiveRerunFailure({
           kind: 'e2e',
-          target: selectiveE2ETarget(task.pwTargets[0] ?? `shard-${task.shard}`, task.title ?? task.pwTargets[0] ?? `shard-${task.shard}`),
+          target: selectiveE2ETarget(
+            task.pwTargets[0] ?? `shard-${task.shard}`,
+            task.title ?? task.pwTargets[0] ?? `shard-${task.shard}`,
+          ),
           failedCodeHash: codeFingerprint.codeHash,
           failedAt: new Date().toISOString(),
           reason: 'browser-health',

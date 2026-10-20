@@ -66,7 +66,7 @@
 <main class="quorum-shell" data-testid="quorum-dashboard">
   <header class="hero">
     <div>
-      <a class="back" href="/qa/hlt">← QA / HLT</a>
+      <a class="back" href="/health">← Runtime health</a>
       <p class="eyebrow">QA · QUORUM INTELLIGENCE</p>
       <h1>Who actually finds the bottleneck?</h1>
       <p class="lede">Every point is scored by the primary auditor after code, test, or live-profile verification. Self-reported confidence is ignored.</p>

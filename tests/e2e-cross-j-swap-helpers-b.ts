@@ -28,91 +28,45 @@ export async function expectCrossOrderbookReady(
   page: Page,
   options: { titlePattern?: RegExp; pairIdPattern?: RegExp } = {},
 ): Promise<void> {
-  const orderbook = page.getByTestId('swap-orderbook').first();
-  await expect(orderbook, 'cross route must keep the right-side orderbook visible').toBeVisible({ timeout: 20_000 });
-  const panel = orderbook.locator('.orderbook-panel').first();
-  await expect(panel, 'cross route must render an orderbook panel').toBeVisible({ timeout: 20_000 });
-  await expect
-    .poll(async () => String((await panel.getAttribute('data-pair-id')) || ''), {
-      timeout: 20_000,
-      intervals: [100, 250, 500],
-      message: 'cross route orderbook must subscribe to the cross venue id, not a numeric same-chain pair',
-    })
-    .toMatch(options.pairIdPattern ?? /^cross:/);
+  const orderbook = page.getByTestId('orderbook').locator('visible=true').first();
+  await expect(orderbook, 'cross route must keep its orderbook visible').toBeVisible({ timeout: 20_000 });
   await expect(
-    page.locator('[data-testid="swap-market-section"] .book-toolbar strong').first(),
-    'cross orderbook title must disambiguate token jurisdictions',
-  ).toContainText(options.titlePattern ?? /\((Testnet|Tron)\)\s*-\s*.*\((Testnet|Tron)\)/, { timeout: 10_000 });
-  const pairSelect = page.getByTestId('swap-orderbook-pair-select').first();
-  await expect(pairSelect, 'cross orderbook pair selector must be present').toHaveCount(1, { timeout: 10_000 });
-  await expect
-    .poll(
-      async () =>
-        pairSelect.evaluate(node => {
-          const select = node as HTMLSelectElement;
-          return select.selectedOptions[0]?.textContent?.replace(/\s+/g, ' ').trim() || '';
-        }),
-      {
-        timeout: 10_000,
-        intervals: [100, 250, 500],
-        message: 'cross orderbook selector must show Asset (Jurisdiction) - Asset (Jurisdiction)',
-      },
-    )
-    .toMatch(options.titlePattern ?? /\((Testnet|Tron)\)\s*-\s*.*\((Testnet|Tron)\)/);
-  await expect
-    .poll(async () => String((await panel.getAttribute('data-source-status')) || ''), {
-      timeout: 20_000,
-      intervals: [250, 500, 1000],
-      message: 'cross route orderbook must resolve to ready or an empty book instead of hanging in syncing',
-    })
-    .toMatch(/^(ready|empty)$/);
-  const relayCheck = await page.evaluate(() => {
+    orderbook,
+    'cross route must subscribe to its canonical venue, never a numeric same-chain pair',
+  ).toHaveAttribute('data-pair-id', options.pairIdPattern ?? /^cross:/, { timeout: 20_000 });
+  await expect(orderbook.locator('.bk-head .caps'), 'cross title must disambiguate token jurisdictions').toContainText(
+    options.titlePattern ?? /\((Testnet|Tron)\)\s*-\s*.*\((Testnet|Tron)\)/,
+    { timeout: 10_000 },
+  );
+  // The current wallet selects each asset with its real token picker, not a second pair selector.
+  await expect(page.getByTestId('swap-give').locator('..').getByRole('button', { name: /./ })).toBeVisible();
+  await expect(page.getByTestId('swap-want').locator('..').getByRole('button', { name: /./ })).toBeVisible();
+  await expect(orderbook, 'cross orderbook must resolve to a current (possibly empty) snapshot').toHaveAttribute(
+    'data-status',
+    'live',
+    { timeout: 20_000 },
+  );
+  const relayCheck = await orderbook.evaluate(node => {
     const normalizeWs = (value: string): string => {
-      const raw = String(value || '').trim();
-      if (!raw) return '';
-      const parsed = raw.startsWith('/') ? new URL(raw, window.location.origin) : new URL(raw);
+      if (!value) return '';
+      const parsed = new URL(value, window.location.origin);
       if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
       if (parsed.protocol === 'https:') parsed.protocol = 'wss:';
       parsed.searchParams.set('protocol', 'market');
       return parsed.toString();
     };
-    const panelEl = document.querySelector('[data-testid="swap-orderbook"] .orderbook-panel') as HTMLElement | null;
-    const hubId =
-      String(panelEl?.getAttribute('data-hub-ids') || '')
-        .split(',')[0]
-        ?.trim()
-        .toLowerCase() || '';
-    const relayUrl = normalizeWs(String(panelEl?.getAttribute('data-relay-url') || ''));
-    const env = (window as CrossRuntimeWindow).__xln?.env() as any;
-    const rawProfiles =
-      typeof env?.gossip?.getProfiles === 'function' ? env.gossip.getProfiles() : env?.gossip?.profiles;
-    const profiles =
-      rawProfiles instanceof Map ? Array.from(rawProfiles.values()) : Array.isArray(rawProfiles) ? rawProfiles : [];
-    const profile = profiles.find(
-      (candidate: any) =>
-        String(candidate?.entityId || '')
-          .trim()
-          .toLowerCase() === hubId && candidate?.metadata?.isHub === true,
-    ) as any;
-    const expectedRelayUrl = normalizeWs(
-      String((Array.isArray(profile?.relays) ? profile.relays : []).find(Boolean) || ''),
-    );
-    return { hubId, relayUrl, expectedRelayUrl };
+    const hubId = String(node.getAttribute('data-hub-id') || '');
+    const relayUrl = normalizeWs(String(node.getAttribute('data-relay-url') || ''));
+    const profile = (window as CrossRuntimeWindow).__xln?.env()?.gossip?.getProfile(hubId);
+    return { hubId, relayUrl, expectedRelayUrl: normalizeWs(profile?.relays[0] ?? '') };
   });
-  expect(relayCheck.hubId, 'cross orderbook must expose the selected book hub id').toMatch(/^0x[a-f0-9]{64}$/);
+  expect(relayCheck.hubId, 'cross orderbook must expose the canonical book owner').toMatch(/^0x[a-f0-9]{64}$/);
   const connectedRelay = new URL(relayCheck.relayUrl);
-  expect(connectedRelay.pathname, 'cross orderbook must connect through the relay endpoint').toBe('/relay');
-  expect(connectedRelay.searchParams.get('protocol'), 'cross orderbook must request the market relay protocol').toBe(
-    'market',
-  );
-  if (relayCheck.expectedRelayUrl) {
-    expect(relayCheck.relayUrl, 'cross orderbook relay must follow the selected book hub gossip relay').toBe(
-      relayCheck.expectedRelayUrl,
-    );
-  }
-  await expect(orderbook.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing/i, {
-    timeout: 5_000,
-  });
+  expect(connectedRelay.pathname).toBe('/relay');
+  expect(connectedRelay.searchParams.get('protocol')).toBe('market');
+  expect(relayCheck.expectedRelayUrl, 'the selected book owner must advertise its relay').not.toBe('');
+  expect(relayCheck.relayUrl).toBe(relayCheck.expectedRelayUrl);
+  await expect(orderbook.getByTestId('orderbook-source-status')).not.toContainText(/syncing/i);
 }
 
 export async function expectDirectCrossOrderbookReady(page: Page): Promise<void> {
@@ -124,12 +78,10 @@ export async function expectSwapTokens(page: Page, fromTokenId: number, toTokenI
   const toSymbol = TOKEN_SYMBOL_BY_ID[toTokenId];
   expect(fromSymbol, `missing token symbol for ${fromTokenId}`).toBeTruthy();
   expect(toSymbol, `missing token symbol for ${toTokenId}`).toBeTruthy();
-  const fromToken = page.getByTestId('swap-ticket-from-token').first();
-  const toToken = page.getByTestId('swap-ticket-to-token').first();
-  await expect(fromToken).toHaveValue(String(fromTokenId), { timeout: 10_000 });
-  await expect(toToken).toHaveValue(String(toTokenId), { timeout: 10_000 });
-  await expect(fromToken.locator('option:checked')).toHaveText(fromSymbol!);
-  await expect(toToken.locator('option:checked')).toHaveText(toSymbol!);
+  const fromToken = page.getByTestId('swap-give').locator('..').getByRole('button');
+  const toToken = page.getByTestId('swap-want').locator('..').getByRole('button');
+  await expect(fromToken).toHaveAccessibleName(new RegExp(`^${fromSymbol}(?:\\s|$)`), { timeout: 10_000 });
+  await expect(toToken).toHaveAccessibleName(new RegExp(`^${toSymbol}(?:\\s|$)`), { timeout: 10_000 });
 }
 
 export async function expectSwapAssetRoute(
@@ -140,7 +92,7 @@ export async function expectSwapAssetRoute(
   targetJurisdiction: string,
 ): Promise<void> {
   await expectSwapTokens(page, fromTokenId, toTokenId);
-  const routeFlow = page.getByTestId('swap-route-flow').first();
+  const routeFlow = page.getByTestId('swap-screen');
   await expect
     .poll(
       async () => ({
@@ -163,10 +115,20 @@ export async function expectSwapAssetRoute(
 
 export function visibleOrderbookRow(page: Page, side: 'ask' | 'bid') {
   return page
-    .getByTestId('swap-orderbook')
+    .getByTestId('orderbook')
+    .locator('visible=true')
     .first()
-    .getByTestId(side === 'ask' ? 'orderbook-ask-row' : 'orderbook-bid-row')
+    .getByTestId(side === 'ask' ? 'book-row-ask' : 'book-row-bid')
     .first();
+}
+
+async function readSwapLimitPrice(page: Page): Promise<string> {
+  const price = page.getByTestId('swap-limit-price');
+  if ((await price.count()) === 0) return '';
+  return String(await price.textContent())
+    .trim()
+    .split(/\s+/)[0]!
+    .replace(/,/g, '');
 }
 
 export async function clickCrossOrderbookLevel(
@@ -177,7 +139,7 @@ export async function clickCrossOrderbookLevel(
 ): Promise<void> {
   const row = visibleOrderbookRow(page, side);
   await expect(row, `cross ${side} row must be visible before clicking the orderbook`).toBeVisible({ timeout: 30_000 });
-  const clickedDisplayedPrice = String((await row.locator('.price').textContent()) || '').trim();
+  const clickedDisplayedPrice = String((await row.locator('.bk-price').textContent()) || '').trim();
   // A fill completed while this wallet was configuring the next order can
   // legitimately surface its confirmation dialog now. A real user closes it
   // before interacting with the book; the E2E must do the same, never click
@@ -186,14 +148,14 @@ export async function clickCrossOrderbookLevel(
   await row.click({ timeout: 10_000 });
   await expectSwapTokens(page, expectedFromTokenId, expectedToTokenId);
   await expect
-    .poll(async () => String(await page.getByTestId('swap-ticket-amount').first().inputValue()).trim(), {
+    .poll(async () => String(await page.getByTestId('swap-give').inputValue()).trim(), {
       timeout: 10_000,
       intervals: [50, 100, 200],
     })
     .not.toBe('');
   if (clickedDisplayedPrice) {
     await expect
-      .poll(async () => String(await page.getByTestId('swap-ticket-rate').first().inputValue()).trim(), {
+      .poll(async () => String(await readSwapLimitPrice(page)).trim(), {
         timeout: 10_000,
         intervals: [50, 100, 200],
       })
@@ -207,21 +169,23 @@ export async function expectCrossNonTakeableClickNoop(
   expectedFromTokenId: number,
   expectedToTokenId: number,
 ): Promise<void> {
-  const panel = page.getByTestId('swap-orderbook').locator('.orderbook-panel').first();
+  const panel = page.getByTestId('orderbook').locator('visible=true').first();
   const row = visibleOrderbookRow(page, side);
   await expect(row, `cross ${side} row must be visible to prove wrong-side click behavior`).toBeVisible({
     timeout: 20_000,
   });
   const before = {
     pairId: String((await panel.getAttribute('data-pair-id')) || ''),
-    hubIds: String((await panel.getAttribute('data-hub-ids')) || ''),
-    amount: String(await page.getByTestId('swap-ticket-amount').first().inputValue()).trim(),
-    price: String(await page.getByTestId('swap-ticket-rate').first().inputValue()).trim(),
+    hubIds: String((await panel.getAttribute('data-hub-id')) || ''),
+    amount: String(await page.getByTestId('swap-give').inputValue()).trim(),
+    price: String(await readSwapLimitPrice(page)).trim(),
+    minimum: await page.getByTestId('swap-want').inputValue(),
   };
   expect(before.pairId, 'cross wrong-side click guard needs an active cross venue').toMatch(/^cross:/);
 
   await row.click({ timeout: 10_000 });
   await expectSwapTokens(page, expectedFromTokenId, expectedToTokenId);
+  await expect(page.getByTestId('swap-want')).toHaveValue(before.minimum);
   await expect
     .poll(async () => String((await panel.getAttribute('data-pair-id')) || ''), {
       timeout: 5_000,
@@ -230,21 +194,21 @@ export async function expectCrossNonTakeableClickNoop(
     })
     .toBe(before.pairId);
   await expect
-    .poll(async () => String((await panel.getAttribute('data-hub-ids')) || ''), {
+    .poll(async () => String((await panel.getAttribute('data-hub-id')) || ''), {
       timeout: 5_000,
       intervals: [50, 100, 200],
       message: 'cross wrong-side click must not switch the visible book hub',
     })
     .toBe(before.hubIds);
   await expect
-    .poll(async () => String(await page.getByTestId('swap-ticket-amount').first().inputValue()).trim(), {
+    .poll(async () => String(await page.getByTestId('swap-give').inputValue()).trim(), {
       timeout: 5_000,
       intervals: [50, 100, 200],
       message: 'cross wrong-side click must not pin an amount from a non-takeable level',
     })
     .toBe(before.amount);
   await expect
-    .poll(async () => String(await page.getByTestId('swap-ticket-rate').first().inputValue()).trim(), {
+    .poll(async () => String(await readSwapLimitPrice(page)).trim(), {
       timeout: 5_000,
       intervals: [50, 100, 200],
       message: 'cross wrong-side click must not pin a stale price from another route',

@@ -1,0 +1,197 @@
+{
+  "baseSHA": "adcfed460acba490e363a86f193fa6397b85b6dd",
+  "sourceFiles": {
+    "core/api/server/rpc/tron-proxy.ts": "ad7eb274cf99c1ee854370f711f6df745bc32de9f9c4cb9f482de3677a582205",
+    "core/__tests__/operations/health/native-server-jurisdiction.test.ts": "0d17467ec0d08bac50485bbab75ad1f05a2df193a46f1602de7af04c3e461720"
+  },
+  "scope": "Private native Java TVM real React reserve exit and same-browser reload; not public Nile/TRON/Ethereum mainnet or Pay/Swap/Cross/Lending proof",
+  "l1": {
+    "passed": 15,
+    "failed": 0,
+    "assertions": 103,
+    "seconds": 1.702029916,
+    "logSHA256": "0feec3526c5900e685fc85538c31fecb4665699de2e926553ac98e928a96248f"
+  },
+  "l2": {
+    "passed": 11,
+    "expected": 11,
+    "seconds": 73.174524292,
+    "bootMs": 5892.518416999999,
+    "browserErrors": 0,
+    "logSHA256": "835bff2e3304c31d9431e1a841141fa1c6b4fdbfcb997b40c18ad826a94bb3d5",
+    "checks": [
+      {
+        "name": "canonical-native-catalog",
+        "pass": true,
+        "evidence": {
+          "mode": "tron",
+          "chainId": 2414086651,
+          "contracts": {
+            "account": "0x7070bbaede33433491330801b7152dfe614055f7",
+            "deltaTransformer": "0xde809ced5f6e0a6ceadec250d6923c6cd3b0ff22",
+            "depository": "0x781ade3209b06eb073dad3333b0aa2277e530cdb",
+            "entityProvider": "0xfacd5d8fe0758467b36c865168f9c6ad3aa5553b"
+          },
+          "entityProviderDeploymentBlock": 10,
+          "solidHead": {
+            "number": 53,
+            "blockID": "000000000000003542a59c4472dfbdea925c3ba34c570902ac387c47243b5826",
+            "timestamp": 1792448286000
+          }
+        }
+      },
+      {
+        "name": "actual-native-solid-head",
+        "pass": true,
+        "evidence": {
+          "number": 53,
+          "blockID": "000000000000003542a59c4472dfbdea925c3ba34c570902ac387c47243b5826",
+          "timestamp": 1792448286000
+        }
+      },
+      {
+        "name": "actual-wallet-creation-submit",
+        "pass": true,
+        "evidence": {
+          "clickLabels": ["Create a wallet Use a name and passphrase", "Test 1 shard", "Derive vault"],
+          "preset": {
+            "tier": "Test",
+            "shards": 1
+          },
+          "credentialValuesRecorded": false
+        }
+      },
+      {
+        "name": "usable-selected-native-home",
+        "pass": true,
+        "evidence": {
+          "durationMs": 5892.518416999999,
+          "deadlineMs": 60000,
+          "operationLimitMs": 1000,
+          "selectedChain": "Chain 2414086651",
+          "doesNotClaimHubFundingOrFinancialReadiness": true
+        }
+      },
+      {
+        "name": "fresh-native-wallet-chain-state",
+        "pass": true,
+        "evidence": {
+          "reserve": "0",
+          "nonce": "0",
+          "external": "0",
+          "tokenId": 1,
+          "decimals": 6
+        }
+      },
+      {
+        "name": "real-native-reserve-funding",
+        "pass": true,
+        "evidence": {
+          "txHash": "0x8835ffe1b453b093e2689ad84cbb7f43e14ae14a5ab131982b18e82694ed4051",
+          "block": 58,
+          "atomicReserve": "1000000"
+        }
+      },
+      {
+        "name": "react-reserve-observation",
+        "pass": true,
+        "evidence": {
+          "visible": "1 XLNUSD"
+        }
+      },
+      {
+        "name": "actual-react-native-submit-click",
+        "pass": true,
+        "evidence": {
+          "from": "reserve",
+          "to": "external",
+          "atomicAmount": "1000000",
+          "recipient": "0x2cf711ae0062a828a33eb7be955c9fb20f8d68cf"
+        }
+      },
+      {
+        "name": "solidified-native-exit-conservation",
+        "pass": true,
+        "evidence": {
+          "txHash": "fae32c62113eac6bba0a07a10466ba45541d0d7c4b7a907667e69baf02a6e18a",
+          "block": 61,
+          "reserve": "0",
+          "external": "1000000",
+          "nonce": "1"
+        }
+      },
+      {
+        "name": "react-terminal-native-balances",
+        "pass": true,
+        "evidence": {
+          "reserve": "0 XLNUSD",
+          "external": "1 XLNUSD",
+          "pending": 0
+        }
+      },
+      {
+        "name": "native-react-reload-no-resubmission",
+        "pass": true,
+        "evidence": {
+          "samePublicIdentity": true,
+          "reserve": "0",
+          "external": "1000000",
+          "nonce": "1",
+          "userBroadcasts": 1
+        }
+      }
+    ],
+    "clickLabels": [
+      "Create a wallet Use a name and passphrase",
+      "Test 1 shard",
+      "Derive vault",
+      "Home",
+      "Home",
+      "Home",
+      "Home",
+      "Home",
+      "Manage",
+      "Assets",
+      "Home",
+      "Move",
+      "From Reserve",
+      "To On-chain wallet",
+      "Sign & send",
+      "Home",
+      "Continue",
+      "Unlock",
+      "Manage",
+      "Assets",
+      "Home"
+    ]
+  },
+  "preservation": {
+    "originalAllBytesUnchanged": true,
+    "copiedHistoricalWalUnchanged": {
+      "runtime": true,
+      "cross-runtime": true,
+      "same-j-runtime": true
+    },
+    "sourceStatusUnchanged": true,
+    "protectedForwardOwnersUnchanged": true,
+    "finalBindingError": null
+  },
+  "artifacts": {
+    "native-browser-move-preparation-04/run-01/browser-result.json": "e52516782caa3112eba878576e6e84084c3173066a3f5dffb577bcfd6abb4d47",
+    "native-browser-move-preparation-04/run-01/financial-result.json": "f37c419acf7f29ee588c669c9d5a5a5e1bb3a8c04e7cb6c21d820866d94bc426",
+    "native-browser-move-preparation-04/run-01/preservation.json": "8b27045d8fe3ae827cca0691ebd5f4cc1658ca885b50c5a1ee73dd715ba0eb65",
+    "native-browser-move-preparation-04/manifest.json": "de903adc85b33c88fb87e25c23cbba7c609351d9aa63e5353e5c0a36be0f52c8"
+  },
+  "reviewedSanitizedScreenshots": {
+    "native-browser-move-preparation-04/run-01/funded.png": "d7684710cb26f9dcac48c37282339c0fad50de8f759dd19b2dd30a1702051d68",
+    "native-browser-move-preparation-04/run-01/move-ready.png": "9c62df41cff61bad2d504961bec69bb17270104e4c329e4cb854986afd611cdb",
+    "native-browser-move-preparation-04/run-01/settled.png": "29a2aa4b666116f6b94056d62bdb216acf152d7f8525087e385be726e0cc6651",
+    "native-browser-move-preparation-04/run-01/final.png": "4c5b966b0b316dcda4cc95a4db4275a929e90ef125d9346f656af69720ba9f0e"
+  },
+  "priorFailuresRetained": {
+    "01": "4/11 driver BigInt proof serialization, zero financial attempts",
+    "02": "8/11 actual proxy400 on empty-body solid head; no user broadcast",
+    "03": "10/11 native exitSUCCESS; driver incorrectly expected derive form on reload"
+  },
+  "remaining": "Public deployment/funding/native four flows; exact unit/test/check/release/soak and all required browser cases remain separate gates."
+}

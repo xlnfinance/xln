@@ -1069,40 +1069,8 @@ export async function readRebalanceSnapshot(
         if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return value.trim();
         return '0';
       };
-      const resolveCounterpartyAccount = (
-        accounts: Map<
-          string,
-          {
-            currentHeight?: number;
-            shadow?: { rebalance?: { policy?: Map<number, unknown> } };
-            state: {
-              lastFinalizedJHeight?: number;
-              requestedRebalance?: Map<number, unknown>;
-              deltas: Map<number, unknown>;
-              leftEntity: string;
-              rightEntity: string;
-            };
-          }
-        >,
-        ownerEntityId: string,
-        counterpartyEntityId: string,
-      ) => {
-        const owner = normalizeEntityId(ownerEntityId);
-        const target = normalizeEntityId(counterpartyEntityId);
-        const direct = accounts.get(target) ?? accounts.get(String(counterpartyEntityId || ''));
-        if (direct) return direct;
-        for (const [accountKey, account] of accounts.entries()) {
-          if (normalizeEntityId(accountKey) === target) return account;
-          const left = normalizeEntityId(account.state.leftEntity);
-          const right = normalizeEntityId(account.state.rightEntity);
-          if ((left === owner && right === target) || (right === owner && left === target)) return account;
-        }
-        return null;
-      };
       const replica = env?.state.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
-      const accounts = replica?.state?.accounts;
-      if (!(accounts instanceof Map)) return null;
-      const account = resolveCounterpartyAccount(accounts, identity.entityId, hubId);
+      const account = replica?.state.accounts.get(normalizeEntityId(hubId));
       if (!account) return null;
       const delta = account.state.deltas.get(tokenId);
       if (!delta || typeof delta !== 'object') return null;

@@ -1,11 +1,19 @@
 # qa cockpit
 
-The QA cockpit is a read-only dashboard for browsing e2e test evidence: run history, per-run artifacts (screenshots, videos, traces, logs), curated UI screenshots, performance/benchmark stats, and failure triage. Heavy artifacts (videos) are generated on a dev machine and published to prod — **the server never runs e2e itself**.
+QA tooling browses development evidence: run history, per-run artifacts, screenshots,
+performance measurements and failure triage. All execution belongs to the development
+stand. The financial production servers do not mount `/api/qa/*`.
+
+Health links to revision-specific repository evidence and the statically generated
+`/qa/quorum` review history. The retained `/qa`, `/qa/hlt` and `/runs` interfaces still
+require the separate QA API; direct visits on the public financial host currently fail.
+Their fixture-backed browser tests establish UI behavior, not public API availability.
+Uploading files with `deploy:qa` does not install an API or make those interfaces live.
 
 ## Where
 
-- Cockpit UI: `https://xln.finance/qa` (route `frontend/src/routes/qa/+page.svelte`)
-- Run drill-down: `https://xln.finance/runs` (route `frontend/src/routes/runs/+page.svelte`)
+- Cockpit route: `frontend/src/routes/qa/+page.svelte` (QA API required)
+- Run drill-down: `frontend/src/routes/runs/+page.svelte` (QA API required)
 - API client: `frontend/src/lib/qa/apiClient.ts`
 - Backend: `core/qa/api.ts` (HTTP routes) + `core/qa/report.ts` (data model, history DB, scanners)
 
@@ -19,9 +27,12 @@ Defined in `core/qa/report.ts`. Roots derive from `QA_EVIDENCE_ROOT` (default `.
 
 ## API surface (`/api/qa/*`)
 
-`runs` (history list) · `run` + `run/perf` (one run detail + perf) · `artifact?runId=&path=` (serves a file from a run dir; videos/traces/logs) · `stories` + `story-image?source=&path=` (gallery: `e2e-screenshots` from the tracked root, `qa-run` from run dirs) · `catalog` · `history` (+ `history/backfill`) · `retention` · `restart` / `restart/abort` / `restart-audit` (admin). The API reads files at request time, so an uploaded DB/run appears with **no server restart**.
+`runs` (history list) · `run` + `run/perf` (one run detail + perf) · `artifact?runId=&path=` (serves a file from a run dir; videos/traces/logs) · `stories` + `story-image?source=&path=` (gallery: `e2e-screenshots` from the tracked root, `qa-run` from run dirs) · `catalog` · `history` (+ `history/backfill`) · `retention` · `restart` / `restart/abort` / `restart-audit` (admin). These describe the standalone tooling handler, not endpoints on the financial host.
 
-All read-only QA routes are public. Only mutating maintenance actions require `XLN_QA_ADMIN_TOKEN`; supplying an invalid token fails instead of silently downgrading access.
+When a dedicated QA handler is hosted, read-only routes and authenticated maintenance
+follow `core/qa/api.ts`. It is intentionally absent from financial production startup.
+Only mutating maintenance actions require `XLN_QA_ADMIN_TOKEN`; supplying an invalid
+token fails instead of silently downgrading access.
 
 ## UI sections
 
