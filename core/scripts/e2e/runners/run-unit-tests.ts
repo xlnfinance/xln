@@ -30,6 +30,15 @@ const SUBPROCESS_STDIO_TEST_FILES = [
   'print-dev-links.test.ts',
 ];
 
+// These contracts execute the real Playwright CLI. Keep their original test
+// deadlines, but do not inherit resources retained by the financial unit suite.
+// Discovery resolves package paths from cwd, so this process must run at ROOT.
+const ROOT_SUBPROCESS_TEST_FILES = [
+  'operations/health/prod-startup-wiring-part-2.test.ts',
+  'testing/qa/playwright-target-discovery.test.ts',
+  'testing/qa/qa-test-categories.test.ts',
+];
+
 const STRESS_TEST_FILES = ['storage-hub-10k-checkpoint-rollover.test.ts'];
 
 // These pools deliberately live until process exit. As in the owning Rust
@@ -45,7 +54,7 @@ const looksLikeExplicitTarget = (arg: string): boolean =>
   !arg.startsWith('-') && (existsSync(arg) || arg.includes('*') || /\.(test|spec)\.[cm]?[tj]sx?$/.test(arg));
 const explicitTargets = passthrough.some(looksLikeExplicitTarget);
 if (!explicitTargets) {
-  for (const file of SUBPROCESS_STDIO_TEST_FILES) {
+  for (const file of [...SUBPROCESS_STDIO_TEST_FILES, ...ROOT_SUBPROCESS_TEST_FILES]) {
     if (!existsSync(resolve(ROOT, 'core/__tests__', file))) {
       throw new Error(`UNIT_SUBPROCESS_TEST_MISSING:${file}`);
     }
@@ -59,6 +68,7 @@ const rootTestArgs = [
         ...DEFAULT_UNIT_TEST_TARGETS,
         ...passthrough,
         ...SUBPROCESS_STDIO_TEST_FILES.map(file => `--path-ignore-patterns=**/${file}`),
+        ...ROOT_SUBPROCESS_TEST_FILES.map(file => `--path-ignore-patterns=**/${file}`),
         ...STRESS_TEST_FILES.map(file => `--path-ignore-patterns=**/${file}`),
         `--path-ignore-patterns=**/rscore/ts-worker/**`,
       ]),
@@ -113,6 +123,11 @@ if (!explicitTargets) {
   );
   if (rustExitCode !== 0) process.exit(rustExitCode);
   process.env['XLN_RSCORE_REQUIRE_BINARY'] = '1';
+  const discoveryExitCode = await runTests(
+    ['test', ...ROOT_SUBPROCESS_TEST_FILES.map(file => `core/__tests__/${file}`), ...passthrough],
+    ROOT,
+  );
+  if (discoveryExitCode !== 0) process.exit(discoveryExitCode);
   const workerExitCode = await runTests(['test', WORKER_TEST_DIRECTORY, ...passthrough], ROOT);
   if (workerExitCode !== 0) process.exit(workerExitCode);
 }

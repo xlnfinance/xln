@@ -1,0 +1,51 @@
+{
+  "scope": "Playwright CLI discovery process isolation and failure diagnostics; no financial runtime changes",
+  "baseSHA": "ad140edb008db4e806ab3548f59da7e9d799deb5",
+  "patchSHA256": "727919f6fbd7d17655d618ec311a3eed70a20c44085a9e8727bc2c05e5814c73",
+  "files": {
+    "core/scripts/e2e/runners/run-unit-tests.ts": "4c7d44aaa1865acb755b5540b3c13b7191bde3d7f0d47cf01a30a52b904b6c42",
+    "core/scripts/e2e/harness/playwright-test-metadata.ts": "9f307c69c897efbc7536627dbfc819289b460b1afff14bfa09399df61cf6b301",
+    "core/__tests__/testing/qa/qa-test-categories.test.ts": "482cc2da97c803716f68c4beaaabc47877059a5be53999bdbf185015feb70c8d"
+  },
+  "firstFailure": {
+    "command": "bun run test:unit",
+    "artifact": "exact-test-unit-ad140-01.result.json",
+    "pass": 5501,
+    "fail": 1,
+    "skip": 0,
+    "error": "PLAYWRIGHT_LIST_EMPTY_OUTPUT; Bun reports test timed out after 5000ms; first root listing killed",
+    "logSHA256": "123310cac9c8c4eef2327cb99a68267e522749fa89e1a5fef8c0e7c5c84ad412"
+  },
+  "focused": {
+    "artifact": "unit-metadata-boundary-02.result.json",
+    "pass": 67,
+    "fail": 0,
+    "skip": 0,
+    "assertions": 1052,
+    "seconds": 18.673435458,
+    "logSHA256": "df7d6cac11f1602d5a80d6814df883197ca495c6148287548b75928dc569eca3"
+  },
+  "exactUnit": {
+    "command": "bun run test:unit",
+    "artifact": "exact-test-unit-metadata-02.result.json",
+    "pass": 5526,
+    "fail": 0,
+    "skip": 0,
+    "groups": {
+      "rootCli": 67,
+      "worker": 53,
+      "bulk": 5384,
+      "coreSubprocess": 22
+    },
+    "seconds": 1458.591132083,
+    "sourceUnchanged": true,
+    "logSHA256": "6944f2b7962eff412d3cdc1f21f7a2ed9ca99fcd2b2fcd5cef41e5e97ff4f15f"
+  },
+  "review": "Studio native read-only review verified inclusion, ROOT cwd, unchanged deadlines and explicit-target behavior; stdout JSON error-loss finding fixed and covered by a real CLI regression.",
+  "limits": [
+    "The initial full-run child delay has no proved specific allocator/worker cause. Fresh-process discovery passed in 3901ms; the full fixed command passed its unchanged 5000ms case in 3783ms.",
+    "No timeout, assertion, test selection or financial rejection was weakened. All previously selected tests remain scheduled exactly once; two real CLI failure tests were added.",
+    "This is working-candidate evidence, not final committed-SHA acceptance, public deployment or native public-chain/mainnet proof."
+  ],
+  "artifactRoot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019"
+}

@@ -6,10 +6,9 @@ import type { QaTaggedTest } from '../../../qa/test-categories';
 type JsonRecord = Record<string, unknown>;
 
 const record = (value: unknown): JsonRecord =>
-  value !== null && typeof value === 'object' ? value as JsonRecord : {};
+  value !== null && typeof value === 'object' ? (value as JsonRecord) : {};
 
-const records = (value: unknown): JsonRecord[] =>
-  Array.isArray(value) ? value.map(record) : [];
+const records = (value: unknown): JsonRecord[] => (Array.isArray(value) ? value.map(record) : []);
 
 const normalizePath = (value: string): string => value.replace(/\\/g, '/');
 const normalizeTag = (value: unknown): string => {
@@ -39,15 +38,16 @@ export const parsePlaywrightTestMetadata = (payload: unknown): QaTaggedTest[] =>
   const rootDir = String(config['rootDir'] ?? '').trim();
   if (!rootDir) throw new Error('PLAYWRIGHT_LIST_ROOT_DIR_MISSING');
   const errors = records(report['errors'])
-    .map((error) => String(error['message'] ?? '').trim())
+    .map(error => String(error['message'] ?? '').trim())
     .filter(Boolean);
   if (errors.length > 0) throw new Error(`PLAYWRIGHT_LIST_FAILED\n${errors.join('\n')}`);
   const tests: QaTaggedTest[] = [];
   for (const suite of records(report['suites'])) collectSuiteTests(suite, rootDir, tests);
   const unique = new Map<string, QaTaggedTest>();
   for (const test of tests) unique.set(`${test.file}:${test.line ?? 0}:${test.title}`, test);
-  return [...unique.values()].sort((a, b) =>
-    a.file.localeCompare(b.file) || (a.line ?? 0) - (b.line ?? 0) || a.title.localeCompare(b.title));
+  return [...unique.values()].sort(
+    (a, b) => a.file.localeCompare(b.file) || (a.line ?? 0) - (b.line ?? 0) || a.title.localeCompare(b.title),
+  );
 };
 
 export type PlaywrightMetadataOptions = {
@@ -70,7 +70,8 @@ export const listPlaywrightTestMetadata = (
   const cwd = resolve(process.cwd(), options.cwd ?? '.');
   const args = ['playwright', 'test', '--config', 'playwright.config.ts', '--list', '--reporter=json'];
   if (options.project) args.push(`--project=${options.project}`);
-  args.push(...files.map((file) => normalizePath(relative(cwd, resolve(process.cwd(), file)))));
+  args.push(...files.map(file => normalizePath(relative(cwd, resolve(process.cwd(), file)))));
+  const started = performance.now();
   const result = spawnSync('bunx', args, {
     cwd,
     env: {
@@ -88,12 +89,20 @@ export const listPlaywrightTestMetadata = (
   });
   const stdout = String(result.stdout ?? '').trim();
   if (result.error) throw result.error;
-  if (!stdout) throw new Error(`PLAYWRIGHT_LIST_EMPTY_OUTPUT:${String(result.stderr ?? '').trim()}`);
+  const stderr = String(result.stderr ?? '').trim();
+  const processFailure =
+    result.status !== 0 || result.signal
+      ? `PLAYWRIGHT_LIST_PROCESS_FAILED:exit=${result.status}:signal=${result.signal ?? 'none'}` +
+        `:elapsedMs=${Math.round(performance.now() - started)}`
+      : '';
+  if (!stdout) throw new Error([processFailure || 'PLAYWRIGHT_LIST_EMPTY_OUTPUT', stderr].filter(Boolean).join('\n'));
+  let tests: QaTaggedTest[];
   try {
-    return parsePlaywrightTestMetadata(JSON.parse(stdout));
+    tests = parsePlaywrightTestMetadata(JSON.parse(stdout));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const stderr = String(result.stderr ?? '').trim();
-    throw new Error(stderr ? `${message}\n${stderr}` : message);
+    throw new Error([processFailure, message, stderr].filter(Boolean).join('\n'));
   }
+  if (processFailure) throw new Error([processFailure, stderr].filter(Boolean).join('\n'));
+  return tests;
 };

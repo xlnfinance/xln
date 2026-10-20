@@ -12,6 +12,26 @@ test('Playwright loads custody Runtime wire decoders without importing server co
   expect(tests.every(entry => entry.file === 'tests/e2e-custody.spec.ts')).toBe(true);
 }, 30_000);
 
+test('Playwright discovery reports an actual failed CLI instead of an empty catalog', () => {
+  expect(() =>
+    listPlaywrightTestMetadata(['tests/e2e-custody.spec.ts'], {
+      project: 'xln-missing-discovery-project',
+    }),
+  ).toThrow('PLAYWRIGHT_LIST_PROCESS_FAILED:exit=1:signal=none');
+});
+
+test('Playwright discovery preserves JSON reporter errors with the failed process status', () => {
+  let failure: unknown;
+  try {
+    listPlaywrightTestMetadata(['tests/xln-missing-discovery-spec.spec.ts']);
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as Error).message).toContain('PLAYWRIGHT_LIST_PROCESS_FAILED:exit=1:signal=none');
+  expect((failure as Error).message).toContain('No tests found');
+});
+
 test('classifies exactly one native Playwright QA category tag', () => {
   expect(qaTestCategoryFromTags(['@functional'])).toBe('functional');
   expect(qaTestCategoryFromTags(['@resilience', '@slow'])).toBe('resilience');
