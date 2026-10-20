@@ -1,0 +1,227 @@
+{
+  "baseSHA": "7c88796501ed1b5a139302c512309fc619704686",
+  "scope": "QA-only; no wallet, financial runtime, contracts, production config or ledger data edited",
+  "sourceFiles": {
+    "core/__tests__/testing/qa/playwright-target-discovery.test.ts": "a98beea257b129c1b88beb09fc49c80a5e99389eb86e222d39c7ae4ccf1f2a1b",
+    "core/__tests__/testing/workflow/selective-rerun-ledger.test.ts": "6591ed049da903b3f2419a365d77b9f4dae2e881d602e4ce7315334df6799dee",
+    "core/scripts/e2e/harness/selective-rerun/ledger.ts": "7d49009446f53c28a42e7bfdfb4d631cc976bc265a6437d2a2d2127f805ed670",
+    "core/scripts/e2e/runners/run-all-tests-fast.ts": "789748afd63e63fc99198352b35c3883989fbf2a5c9a8a2dc6b1f4c9accf7c8c",
+    "core/scripts/e2e/runners/run-e2e-fast.ts": "6cd980d5ca68ea1a98468b71e652e552782d27d9a078e4d9b7a9797208c3cc05",
+    "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts": "76ff3c35f13a026e35ce52699f6688f0654759a13a21e676a46d1489491b8a45",
+    "tests/e2e/product/e2e-ui-screenshots.spec.ts": "876b5802e236b845f90652c647a791a70dc2720f1533c4a2d7e9ebdbf2423486"
+  },
+  "removedSource": {
+    "path": "tests/e2e/product/load-testing/e2e-load-testing.spec.ts",
+    "originalSHA256": "8010a2e0bb7a7cd1c7255228bac6f74284df3dabb06afe146ec911625f864cf2",
+    "disposition": "retired unavailable UI contract; NOT PASS",
+    "originalFailure": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "e2e-full-7c887-01",
+        "--timeout-ms",
+        "7200000",
+        "--",
+        "bun",
+        "run",
+        "test:e2e:full"
+      ],
+      "exitCode": 1,
+      "seconds": 848.432026083,
+      "sourceUnchanged": true,
+      "logSHA256": "27595047e4eb8b123bb344cc0d6e530cf008aa501b6d5209aa2b73addebf14ec"
+    },
+    "originalArchive": {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/e2e-full-7c887-01-private.tar",
+      "bytes": 108052480,
+      "sha256": "f52ffc2c2557afe9c0094904074416782d4d7339be72ce854eddcc62d906edcc",
+      "originalRetained": true
+    },
+    "routeExperiment": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "load-operator-exact-01",
+        "--timeout-ms",
+        "7200000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/product/load-testing/e2e-load-testing.spec.ts::Accounts Manage load testing is controlled, observable, best-effort, and responsive",
+        "--pw-project=chromium",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--prewait-health=reset",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "exitCode": 1,
+      "seconds": 50.126817124999995,
+      "sourceUnchanged": true,
+      "logSHA256": "d45bbaadcdbb5d448899e0916c2c12b26e6ae31a4697a7db9c817797868cc56f"
+    },
+    "routeExperimentLimitation": "Failed before navigation because multiline test declaration lost MM requirement. Observer identity unavailability established by source ownership inspection, not this browser experiment."
+  },
+  "regression": {
+    "initialRed": {
+      "command": ["bun", "test", "core/__tests__/testing/qa/playwright-target-discovery.test.ts"],
+      "exitCode": 1,
+      "seconds": 9.693688166,
+      "sourceUnchanged": true,
+      "logSHA256": "a895af6e28045831a9356409b3489edb3b95d927fea360a02277e18c882801a5"
+    },
+    "final": {
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/testing/qa/playwright-target-discovery.test.ts",
+        "core/__tests__/testing/workflow/selective-rerun-ledger.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 9.836099875,
+      "sourceUnchanged": true,
+      "logSHA256": "cf4a0f5202742cf58b63737c5bcb8ec99f70a2b973533b918b554eeb72063f00"
+    },
+    "passed": 12,
+    "failed": 0,
+    "assertions": 33
+  },
+  "retainedLoadCoverage": {
+    "result": {
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/development/frontend/load-testing-controller.test.ts",
+        "core/__tests__/operations/hlt/hlt.test.ts",
+        "core/__tests__/operations/hlt/hlt-payments.test.ts",
+        "core/__tests__/payments/orderbook/orderbook-matching-part-1.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 3.6960050419999995,
+      "sourceUnchanged": true,
+      "logSHA256": "1cb11a8a84070165310ad31a0bf33dc5c64929ce8e71d50b180dd5b6921bec40"
+    },
+    "passed": 94,
+    "failed": 0,
+    "assertions": 1554,
+    "limit": "Unit coverage only; not real live load, stop/drain, capacity exhaustion, financial browser or TPS proof"
+  },
+  "catalog": {
+    "previous": 158,
+    "current": 157,
+    "removed": [
+      "tests/e2e/product/load-testing/e2e-load-testing.spec.ts::Accounts Manage load testing is controlled, observable, best-effort, and responsive"
+    ],
+    "added": [],
+    "requirementChanges": [],
+    "scope": "root full browser catalog; other-package existing failures still block in the ledger"
+  },
+  "operatorL2": {
+    "result": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "qa-scope-operator-l2-01",
+        "--timeout-ms",
+        "7200000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-failures=1",
+        "--pw-files=tests/e2e/product/e2e-ui-screenshots.spec.ts::ui screenshot smoke captures operator admin surfaces",
+        "--pw-project=chromium",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--prewait-health=reset",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "exitCode": 0,
+      "seconds": 137.469968125,
+      "sourceUnchanged": true,
+      "logSHA256": "a4a7ba33c1c701ca75e4aed56b34b19f76a306e239f9f29f1ddba6e9a58fa4bf"
+    },
+    "candidate": {
+      "candidateId": "ac4cb84ede9be4895cc3a2f99ba60782ff9e2a28218a64c1194737229a53d855",
+      "gitHead": "7c88796501ed1b5a139302c512309fc619704686",
+      "codeHash": "13a4ca4f2b3548a2524c89ab681aed06bdae9e63e473df0504f9178d8d376212",
+      "gateConfigHash": "0b33e09a340d2fd8789649c152c4687c995d550d5300dcc2f4406250c8f08c1d"
+    },
+    "browserStats": {
+      "startTime": "2026-10-20T03:23:42.040Z",
+      "duration": 38182.42,
+      "expected": 1,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "browserHealth": {
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "networkFailureCount": 0,
+      "httpErrorCount": 0,
+      "severity": "OK",
+      "reason": "Browser event stream is clean",
+      "since": 0,
+      "owner": "browser",
+      "evidence": [
+        {
+          "label": "issues",
+          "value": 0
+        }
+      ]
+    },
+    "manifestSHA256": "550bd3cc3c3442a59f60bd10c2d1af2905b2e0740209d7a60170e00fd40e6052",
+    "archive": {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/qa-scope-operator-l2-01-private.tar",
+      "bytes": 11673600,
+      "sha256": "7cdb21d1c9dc419259a9d1c5fba4c69f262a8cd052586fd2936d3e7a670cf541",
+      "private": true,
+      "symlinkTargetsIncluded": false
+    }
+  },
+  "retainedLedger": {
+    "sha256": "210302373b389ab4f31c3fa2889d1529841194a4cc38c6e131112ba29da06846",
+    "unresolved": [
+      {
+        "failedAt": "2026-10-20T03:13:39.853Z",
+        "failedCodeHash": "7baaa189d0e058094c9a75e50681bdbf3140090245e3dd5463777ffc3b9d482a",
+        "kind": "e2e",
+        "reason": "playwright:playwright_exit:code=1:signal=null",
+        "target": "tests/e2e/product/load-testing/e2e-load-testing.spec.ts::Accounts Manage load testing is controlled, observable, best-effort, and responsive"
+      }
+    ],
+    "note": "Original full failure is archived separately. Exact experiment updated the same failure row before retirement. Retirement does not clear, rewrite or record PASS for that row."
+  },
+  "nativeReview": {
+    "patchSHA256": "ad36d015adeb43ca95d0e63c5e14786eee70ea149a32788a8d942f317a2ab2c4",
+    "reviewer": "/root/startup_trace",
+    "finding": "Two ledger reads could omit a concurrently added failure",
+    "resolution": "Classification and assertion consume the same decoded snapshot; reviewer verified closure",
+    "scope": "Read-only stable patch review; no complete release approval"
+  },
+  "remaining": [
+    "Full157 active browser cases plus one explicit historical unresolved retired target; no158/158 claim",
+    "Current check and committed publication proof",
+    "Exact unit/test final candidate, complete release and soak",
+    "Public native EVM/TRON/USDT and all mainnet acceptance gates"
+  ],
+  "protectedBrainVault": {
+    "brainvault/bun.lock": "ecc6fc4066dac617aed085e633dd3c2807085c1f573e631ed9362e1358a1f16f",
+    "brainvault/package.json": "770e60e66e40ff33b6f3ac99df3ddb27167dcffd6ca3dcdfe67f9957d52db8aa"
+  }
+}

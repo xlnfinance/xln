@@ -231,16 +231,7 @@ export type BroadRunLedgerFilter = Readonly<{
   targets?: readonly string[];
 }>;
 
-export const assertBroadRunHasNoUnresolvedReruns = (
-  path = DEFAULT_LEDGER_PATH,
-  filter?: BroadRunLedgerFilter,
-): void => {
-  const targetSet = filter?.targets === undefined ? undefined : new Set(filter.targets);
-  const unresolved = readSelectiveRerunLedger(path).unresolved.filter(entry => {
-    if (filter?.kind !== undefined && entry.kind !== filter.kind) return false;
-    if (targetSet !== undefined && !targetSet.has(entry.target)) return false;
-    return true;
-  });
+const assertNoUnresolvedReruns = (unresolved: readonly SelectiveRerunEntry[]): void => {
   if (unresolved.length === 0) return;
   const table = unresolved
     .map(entry => {
@@ -254,6 +245,47 @@ export const assertBroadRunHasNoUnresolvedReruns = (
     `BROAD_RUN_BLOCKED_EXACT_RERUN_REQUIRED count=${unresolved.length}\n` +
     `kind\ttarget\tfailed-code\treason\n${table}`,
   );
+};
+
+export const assertBroadRunHasNoUnresolvedReruns = (
+  path = DEFAULT_LEDGER_PATH,
+  filter?: BroadRunLedgerFilter,
+): void => {
+  const targetSet = filter?.targets === undefined ? undefined : new Set(filter.targets);
+  const unresolved = readSelectiveRerunLedger(path).unresolved.filter(entry => {
+    if (filter?.kind !== undefined && entry.kind !== filter.kind) return false;
+    if (targetSet !== undefined && !targetSet.has(entry.target)) return false;
+    return true;
+  });
+  assertNoUnresolvedReruns(unresolved);
+};
+
+/** Removed UI contracts remain failed history, never an exact-rerun PASS.
+ * Any extant source (including other packages or renamed cases) still blocks.
+ * Only source deletion reviewed with the candidate changes the active scope.
+ */
+export const assertBroadE2ERunHasNoUnresolvedReruns = (
+  path = DEFAULT_LEDGER_PATH,
+  sourceRoot = process.cwd(),
+): void => {
+  const failures = readSelectiveRerunLedger(path).unresolved.filter(entry => entry.kind === 'e2e');
+  const removed = failures.filter(entry => {
+    const match = entry.target.match(/^((?:tests|ui\/tests|frontend\/tests)\/[^:]+\.spec\.ts)::.+$/);
+    if (!match || match[1]!.split('/').includes('..')) return false;
+    try {
+      statSync(resolve(sourceRoot, match[1]!));
+      return false;
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return true;
+      throw error;
+    }
+  });
+  if (removed.length > 0)
+    console.warn(
+      `E2E_REMOVED_SOURCE_FAILURE_RETAINED count=${removed.length}; not passed or rerun\n` +
+        removed.map(entry => `${entry.target}\tfailed-code=${entry.failedCodeHash}`).join('\n'),
+    );
+  assertNoUnresolvedReruns(failures.filter(entry => !removed.includes(entry)));
 };
 
 export const selectiveE2ETarget = (file: string, title: string): string =>

@@ -26,3 +26,22 @@ test('an exact parameterized target retains its evaluated title and rejects an u
     'PLAYWRIGHT_TEST_TARGET_MISSING',
   );
 }, 30_000);
+
+test('multiline tagged declarations retain their own requirements after the options object', () => {
+  const targets = expandPlaywrightTargets(['tests/e2e/product/e2e-ui-screenshots.spec.ts']);
+  expect(
+    targets.map(({ title, requireMarketMaker, requireCustody }) => ({ title, requireMarketMaker, requireCustody })),
+  ).toEqual([
+    {
+      title: 'ui screenshot smoke captures onboarding and testnet tools across viewports',
+      requireMarketMaker: false,
+      requireCustody: false,
+    },
+    { title: 'ui screenshot smoke captures operator admin surfaces', requireMarketMaker: true, requireCustody: true },
+    {
+      title: 'ui screenshot smoke captures main tabs across viewports',
+      requireMarketMaker: true,
+      requireCustody: false,
+    },
+  ]);
+}, 30_000);

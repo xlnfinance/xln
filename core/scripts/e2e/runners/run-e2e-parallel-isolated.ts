@@ -35,6 +35,7 @@ import { availableParallelism } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { finished } from 'node:stream/promises';
 import { scheduler } from 'node:timers/promises';
+import ts from 'typescript';
 import {
   deriveQaTestDescription,
   deriveQaTestHandle,
@@ -83,7 +84,7 @@ import {
 } from '../harness/e2e-failure-capsule';
 import { cleanupTestArtifactsBeforeRun } from '../harness/test-artifact-cleanup';
 import {
-  assertBroadRunHasNoUnresolvedReruns,
+  assertBroadE2ERunHasNoUnresolvedReruns,
   recordSelectiveRerunFailure,
   recordSelectiveRerunPass,
   selectiveE2ETarget,
@@ -647,67 +648,24 @@ export const expandPlaywrightTargets = (
   pwFiles: string[],
   args: Pick<CliArgs, 'pwProject'> = {},
 ): PlaywrightTarget[] => {
-  const updateBraceDepth = (line: string, depth: number): number => {
-    let next = depth;
-    let inSingle = false;
-    let inDouble = false;
-    let inTemplate = false;
-    let escaped = false;
-
-    for (let i = 0; i < line.length; i += 1) {
-      const ch = line[i] || '';
-      const nxt = line[i + 1] || '';
-
-      if (!inSingle && !inDouble && !inTemplate && ch === '/' && nxt === '/') break;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === '\\') {
-        escaped = true;
-        continue;
-      }
-      if (!inDouble && !inTemplate && ch === "'") {
-        inSingle = !inSingle;
-        continue;
-      }
-      if (!inSingle && !inTemplate && ch === '"') {
-        inDouble = !inDouble;
-        continue;
-      }
-      if (!inSingle && !inDouble && ch === '`') {
-        inTemplate = !inTemplate;
-        continue;
-      }
-      if (inSingle || inDouble || inTemplate) continue;
-      if (ch === '{') next += 1;
-      else if (ch === '}') next = Math.max(0, next - 1);
+  const collectTestBlock = (source: ts.SourceFile, line: number): string => {
+    const matches: ts.CallExpression[] = [];
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        /^test(?:\.(?:only|skip|fixme|fail))?$/.test(node.expression.getText(source)) &&
+        source.getLineAndCharacterOfPosition(node.getStart(source)).line === line - 1
+      )
+        matches.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    if (matches.length !== 1) {
+      throw new Error(`PLAYWRIGHT_TEST_DECLARATION_INVALID:${source.fileName}:${line}:${matches.length}`);
     }
-
-    return next;
-  };
-  const collectTestBlock = (
-    lines: string[],
-    startIndex: number,
-    initialDepth: number,
-  ): { text: string; endIndex: number; depthAfter: number } => {
-    const block: string[] = [];
-    let depth = initialDepth;
-    let endIndex = startIndex;
-    let enteredTestBody = false;
-    for (let i = startIndex; i < lines.length; i += 1) {
-      const line = lines[i] || '';
-      block.push(line);
-      depth = updateBraceDepth(line, depth);
-      if (depth > initialDepth) enteredTestBody = true;
-      endIndex = i;
-      // A multiline `test(` declaration can spend several lines on its title
-      // and options before the async callback opens `{`. Stopping merely
-      // because brace depth is still unchanged truncates the block and silently
-      // loses per-test requirements such as `requireMarketMaker: true`.
-      if (enteredTestBody && depth <= initialDepth) break;
-    }
-    return { text: block.join('\n'), endIndex, depthAfter: depth };
+    // An options object can close before the callback begins. The TypeScript
+    // call boundary retains the complete body, regardless of formatting.
+    return matches[0]!.getText(source);
   };
   const selectors = pwFiles.map(target => {
     const lineTarget = target.match(/^(.+\.spec\.ts):\d+(?::\d+)?$/);
@@ -743,7 +701,10 @@ export const expandPlaywrightTargets = (
     );
   }
   const sources = new Map(
-    sourceFiles.map(file => [file, readFileSync(resolve(process.cwd(), file), 'utf8').split('\n')]),
+    sourceFiles.map(file => [
+      file,
+      ts.createSourceFile(file, readFileSync(resolve(process.cwd(), file), 'utf8'), ts.ScriptTarget.Latest, true),
+    ]),
   );
   return selectors.flatMap(selector => {
     const matches = tests.filter(
@@ -754,10 +715,10 @@ export const expandPlaywrightTargets = (
     if (selector.title !== null && matches.length !== 1)
       throw new Error(`PLAYWRIGHT_TEST_TARGET_AMBIGUOUS:${selector.file}:${selector.title}`);
     return matches.map(metadata => {
-      const lines = sources.get(metadata.file);
-      if (!lines || metadata.line === null || metadata.line > lines.length)
+      const source = sources.get(metadata.file);
+      if (!source || metadata.line === null)
         throw new Error(`PLAYWRIGHT_TEST_LOCATION_MISSING:${metadata.file}:${metadata.line}`);
-      const block = collectTestBlock(lines, metadata.line - 1, 0).text;
+      const block = collectTestBlock(source, metadata.line);
       const testCategory = qaTestCategoryFromTags(metadata.tags);
       if (!testCategory) throw new Error(`QA_TEST_CATEGORY_MISSING:${metadata.file}:${metadata.line}`);
       return {
@@ -2349,7 +2310,7 @@ async function main(): Promise<void> {
   canonicalHubEngine('H1');
   const args = parseArgs();
   const exactRequestedTarget = args.pwFiles.length === 1 && /^.+\.spec\.ts::.+$/.test(args.pwFiles[0] ?? '');
-  if (!exactRequestedTarget) assertBroadRunHasNoUnresolvedReruns(undefined, { kind: 'e2e' });
+  if (!exactRequestedTarget) assertBroadE2ERunHasNoUnresolvedReruns();
   // Artifact retention changes only deletion policy. Every top-level run must
   // still acquire a fresh lease so Playwright children can prove that their
   // parent owns the shared evidence workspace.

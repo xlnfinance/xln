@@ -18,7 +18,7 @@ import {
   withoutTestArtifactCleanupDoneEnv,
 } from '../harness/test-artifact-cleanup';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
-import { assertBroadRunHasNoUnresolvedReruns } from '../harness/selective-rerun/ledger';
+import { assertBroadE2ERunHasNoUnresolvedReruns } from '../harness/selective-rerun/ledger';
 
 type CliArgs = {
   scenarioWorkers: number;
@@ -88,7 +88,7 @@ async function main(): Promise<void> {
     return;
   }
   const args = parseArgs();
-  assertBroadRunHasNoUnresolvedReruns(undefined, { kind: 'e2e' });
+  assertBroadE2ERunHasNoUnresolvedReruns();
   console.log('\n' + '='.repeat(72));
   console.log('Fast Full Suite (parallel + isolated)');
   console.log('='.repeat(72));

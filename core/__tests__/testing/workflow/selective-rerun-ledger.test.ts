@@ -8,6 +8,7 @@ import { safeStringify } from '../../../protocol/serialization';
 
 import {
   assertBroadRunHasNoUnresolvedReruns,
+  assertBroadE2ERunHasNoUnresolvedReruns,
   readSelectiveRerunLedger,
   recordSelectiveRerunFailure,
   recordSelectiveRerunPass,
@@ -73,6 +74,72 @@ describe('selective rerun ledger', () => {
       targets: ['company-ipo'],
     })).toThrow('BROAD_RUN_BLOCKED_EXACT_RERUN_REQUIRED');
   }));
+
+  test('removed UI source remains failed history and blocks again if restored', () =>
+    withLedger(path => {
+      const sourceRoot = join(path, '..');
+      const file = 'tests/e2e/retired.spec.ts';
+      const target = selectiveE2ETarget(file, 'retired UI contract');
+      recordSelectiveRerunFailure(
+        {
+          kind: 'e2e',
+          target,
+          failedCodeHash: CODE_HASH,
+          failedAt: '2026-10-20T00:00:00.000Z',
+          reason: 'missing retired UI',
+        },
+        path,
+      );
+      const before = readFileSync(path, 'utf8');
+      expect(() => assertBroadE2ERunHasNoUnresolvedReruns(path, sourceRoot)).not.toThrow();
+      expect(readFileSync(path, 'utf8')).toBe(before);
+      mkdirSync(join(sourceRoot, 'tests/e2e'), { recursive: true });
+      writeFileSync(join(sourceRoot, file), '// restored source with a renamed test');
+      expect(() => assertBroadE2ERunHasNoUnresolvedReruns(path, sourceRoot)).toThrow(
+        'BROAD_RUN_BLOCKED_EXACT_RERUN_REQUIRED',
+      );
+      expect(readFileSync(path, 'utf8')).toBe(before);
+    }));
+
+  test('existing failures in every browser package and malformed targets remain blocking', () => {
+    for (const file of ['tests/e2e/present.spec.ts', 'ui/tests/present.spec.ts', 'frontend/tests/present.spec.ts']) {
+      withLedger(path => {
+        const sourceRoot = join(path, '..');
+        mkdirSync(join(sourceRoot, file, '..'), { recursive: true });
+        writeFileSync(join(sourceRoot, file), '// current source');
+        recordSelectiveRerunFailure(
+          {
+            kind: 'e2e',
+            target: selectiveE2ETarget(file, 'previous title'),
+            failedCodeHash: CODE_HASH,
+            failedAt: '2026-10-20T00:00:00.000Z',
+            reason: 'failed in owning package',
+          },
+          path,
+        );
+        expect(() => assertBroadE2ERunHasNoUnresolvedReruns(path, sourceRoot)).toThrow(
+          'BROAD_RUN_BLOCKED_EXACT_RERUN_REQUIRED',
+        );
+      });
+    }
+    for (const target of ['unknown-target', 'tests/../missing.spec.ts::untrusted path']) {
+      withLedger(path => {
+        recordSelectiveRerunFailure(
+          {
+            kind: 'e2e',
+            target,
+            failedCodeHash: CODE_HASH,
+            failedAt: '2026-10-20T00:00:00.000Z',
+            reason: 'unrecognized source',
+          },
+          path,
+        );
+        expect(() => assertBroadE2ERunHasNoUnresolvedReruns(path, join(path, '..'))).toThrow(
+          'BROAD_RUN_BLOCKED_EXACT_RERUN_REQUIRED',
+        );
+      });
+    }
+  });
 
   test('replaces one target failure without dropping other unresolved rows', () => withLedger(path => {
     const first = selectiveE2ETarget('tests/e2e/a.spec.ts', 'A');

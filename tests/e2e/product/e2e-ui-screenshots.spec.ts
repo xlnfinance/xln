@@ -174,147 +174,153 @@ test('ui screenshot smoke captures onboarding and testnet tools across viewports
   }
 });
 
-test('ui screenshot smoke captures operator admin surfaces', { tag: '@functional' }, async ({ page }, testInfo) => {
-  test.setTimeout(120_000);
+test(
+  'ui screenshot smoke captures operator admin surfaces',
+  {
+    tag: '@functional',
+  },
+  async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
 
-  // QA tooling is deliberately absent from production servers (2b2c1081c).
-  // Its direct handler tests own the cockpit; this stand owns Health and Observer.
-  const qaResponse = await page.request.get(`${APP_BASE_URL}/api/qa/catalog`);
-  expect(qaResponse.status(), 'Production must not expose the offline QA API').toBe(404);
+    // QA tooling is deliberately absent from production servers (2b2c1081c).
+    // Its direct handler tests own the cockpit; this stand owns Health and Observer.
+    const qaResponse = await page.request.get(`${APP_BASE_URL}/api/qa/catalog`);
+    expect(qaResponse.status(), 'Production must not expose the offline QA API').toBe(404);
 
-  await waitForRpcProxyReachable(page);
-  await page.goto(`${APP_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: /xln health admin/i })).toBeVisible({ timeout: 30_000 });
-  await captureUxPage(page, testInfo, 'desktop-health-admin.png', {
-    title: 'desktop health admin',
-    group: 'Health',
-    description: uxDescription('Health admin summary for runtime, relay, hubs, custody, and QA links.'),
-    platform: 'desktop',
-    tags: ['health', 'admin'],
-  });
+    await waitForRpcProxyReachable(page);
+    await page.goto(`${APP_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: /xln health admin/i })).toBeVisible({ timeout: 30_000 });
+    await captureUxPage(page, testInfo, 'desktop-health-admin.png', {
+      title: 'desktop health admin',
+      group: 'Health',
+      description: uxDescription('Health admin summary for runtime, relay, hubs, custody, and QA links.'),
+      platform: 'desktop',
+      tags: ['health', 'admin'],
+    });
 
-  await ensureE2EBaseline(page, {
-    timeoutMs: 120_000,
-    requireHubMesh: true,
-    requireMarketMaker: true,
-    requireCustody: true,
-    minHubCount: 3,
-  });
+    await ensureE2EBaseline(page, {
+      timeoutMs: 120_000,
+      requireHubMesh: true,
+      requireMarketMaker: true,
+      requireCustody: true,
+      minHubCount: 3,
+    });
 
-  const importUrl = await resolveRuntimeImportAppUrl(page, {
-    appBaseUrl: APP_BASE_URL,
-    apiBaseUrl: API_BASE_URL,
-    access: 'admin',
-  });
-  expect(importUrl).toContain('/app#runtime-import');
-  expect(importUrl).not.toContain('/radapter/manage');
-  // Operator selectors and Time Machine belong to Observer; /app alone opens the React wallet.
-  const observerUrl = new URL(importUrl);
-  observerUrl.searchParams.set('observer', '1');
-  await page.goto(observerUrl.toString(), { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => sessionStorage.getItem('xln-remote-runtime-import-last-result') !== null, null, {
-    timeout: 30_000,
-  });
-  const importSummary = await page.evaluate(
-    () =>
-      JSON.parse(sessionStorage.getItem('xln-remote-runtime-import-last-result')!) as {
-        ok: boolean;
-        count: number;
-        failedCount: number;
-        entries: Array<{ label: string }>;
-        failed: unknown[];
-      },
-  );
-  const nativeH1 = process.env['XLN_HLT_ENGINE'] === 'rust';
-  const expectedLabels = ['Custody', 'H1', 'H2', 'H3', 'MM'];
-  expect(importSummary, 'Every supported admin adapter must import without failures').toMatchObject({
-    ok: true,
-    count: expectedLabels.length,
-    failedCount: 0,
-    failed: [],
-  });
-  expect(importSummary.entries.map(entry => entry.label).sort()).toEqual(expectedLabels);
-  if (nativeH1) {
-    const healthResponse = await page.request.get(`${API_BASE_URL}/api/health`);
-    expect(healthResponse.ok()).toBe(true);
-    const aggregate = await healthResponse.json();
-    const h1 = aggregate.hubs.find((hub: { name: string }) => hub.name === 'H1');
-    expect(h1).toMatchObject({ name: 'H1', online: true });
-    const infoResponse = await page.request.get(`${h1.apiUrl}/api/info`);
-    const nativeHealthResponse = await page.request.get(`${h1.apiUrl}/api/health`);
-    expect(infoResponse.ok()).toBe(true);
-    expect(nativeHealthResponse.ok()).toBe(true);
-    const info = await infoResponse.json();
-    const health = await nativeHealthResponse.json();
-    expect(info).toMatchObject({ name: 'H1', runtimeId: h1.runtimeId, entityId: h1.entityId, deliveryReady: true });
-    expect(info.height).toBeGreaterThan(0);
-    expect(info.workers).toBeGreaterThan(0);
-    expect(info.runtimeFrameHash).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(info.accountsRoot).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(health).toMatchObject({
+    const importUrl = await resolveRuntimeImportAppUrl(page, {
+      appBaseUrl: APP_BASE_URL,
+      apiBaseUrl: API_BASE_URL,
+      access: 'admin',
+    });
+    expect(importUrl).toContain('/app#runtime-import');
+    expect(importUrl).not.toContain('/radapter/manage');
+    // Operator selectors and Time Machine belong to Observer; /app alone opens the React wallet.
+    const observerUrl = new URL(importUrl);
+    observerUrl.searchParams.set('observer', '1');
+    await page.goto(observerUrl.toString(), { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => sessionStorage.getItem('xln-remote-runtime-import-last-result') !== null, null, {
+      timeout: 30_000,
+    });
+    const importSummary = await page.evaluate(
+      () =>
+        JSON.parse(sessionStorage.getItem('xln-remote-runtime-import-last-result')!) as {
+          ok: boolean;
+          count: number;
+          failedCount: number;
+          entries: Array<{ label: string }>;
+          failed: unknown[];
+        },
+    );
+    const nativeH1 = process.env['XLN_HLT_ENGINE'] === 'rust';
+    const expectedLabels = ['Custody', 'H1', 'H2', 'H3', 'MM'];
+    expect(importSummary, 'Every supported admin adapter must import without failures').toMatchObject({
       ok: true,
-      runtimeId: h1.runtimeId,
-      entityId: h1.entityId,
-      runtime: { halted: false, lifecyclePhase: 'ready' },
+      count: expectedLabels.length,
+      failedCount: 0,
+      failed: [],
     });
-    await testInfo.attach('native-h1-operator.json', {
-      body: JSON.stringify({ info, health }),
-      contentType: 'application/json',
+    expect(importSummary.entries.map(entry => entry.label).sort()).toEqual(expectedLabels);
+    if (nativeH1) {
+      const healthResponse = await page.request.get(`${API_BASE_URL}/api/health`);
+      expect(healthResponse.ok()).toBe(true);
+      const aggregate = await healthResponse.json();
+      const h1 = aggregate.hubs.find((hub: { name: string }) => hub.name === 'H1');
+      expect(h1).toMatchObject({ name: 'H1', online: true });
+      const infoResponse = await page.request.get(`${h1.apiUrl}/api/info`);
+      const nativeHealthResponse = await page.request.get(`${h1.apiUrl}/api/health`);
+      expect(infoResponse.ok()).toBe(true);
+      expect(nativeHealthResponse.ok()).toBe(true);
+      const info = await infoResponse.json();
+      const health = await nativeHealthResponse.json();
+      expect(info).toMatchObject({ name: 'H1', runtimeId: h1.runtimeId, entityId: h1.entityId, deliveryReady: true });
+      expect(info.height).toBeGreaterThan(0);
+      expect(info.workers).toBeGreaterThan(0);
+      expect(info.runtimeFrameHash).toMatch(/^0x[0-9a-f]{64}$/);
+      expect(info.accountsRoot).toMatch(/^0x[0-9a-f]{64}$/);
+      expect(health).toMatchObject({
+        ok: true,
+        runtimeId: h1.runtimeId,
+        entityId: h1.entityId,
+        runtime: { halted: false, lifecyclePhase: 'ready' },
+      });
+      await testInfo.attach('native-h1-operator.json', {
+        body: JSON.stringify({ info, health }),
+        contentType: 'application/json',
+      });
+    }
+    const runtimeSelect = page.getByRole('combobox', { name: 'Graph runtime view', exact: true });
+    await expect(runtimeSelect).toBeVisible({ timeout: 30_000 });
+    // Import registers adapters before their authenticated graph projections finish loading.
+    await expect(runtimeSelect.locator('option')).toHaveText(
+      ['Merged (5)', ...expectedLabels.map(label => `${label} · remote`)],
+      { timeout: 30_000 },
+    );
+    await runtimeSelect.selectOption({ label: 'H1 · remote' });
+    await expect(runtimeSelect.locator('option:checked')).toHaveText('H1 · remote');
+    const h1RuntimeId = await runtimeSelect.inputValue();
+    await expect(page.getByTestId('time-machine-remote-runtime')).toHaveValue(h1RuntimeId);
+    await captureUxPage(page, testInfo, 'desktop-remote-runtime-import.png', {
+      title: 'desktop remote runtime import',
+      group: 'Remote Runtime Import',
+      description: uxDescription(
+        'Observer after importing every supported remote admin adapter; native H1 uses its verified operator HTTP surface.',
+      ),
+      platform: 'desktop',
+      tags: ['remote-runtime', 'wallet', 'bulk-import'],
     });
-  }
-  const runtimeSelect = page.getByRole('combobox', { name: 'Graph runtime view', exact: true });
-  await expect(runtimeSelect).toBeVisible({ timeout: 30_000 });
-  // Import registers adapters before their authenticated graph projections finish loading.
-  await expect(runtimeSelect.locator('option')).toHaveText(
-    ['Merged (5)', ...expectedLabels.map(label => `${label} · remote`)],
-    { timeout: 30_000 },
-  );
-  await runtimeSelect.selectOption({ label: 'H1 · remote' });
-  await expect(runtimeSelect.locator('option:checked')).toHaveText('H1 · remote');
-  const h1RuntimeId = await runtimeSelect.inputValue();
-  await expect(page.getByTestId('time-machine-remote-runtime')).toHaveValue(h1RuntimeId);
-  await captureUxPage(page, testInfo, 'desktop-remote-runtime-import.png', {
-    title: 'desktop remote runtime import',
-    group: 'Remote Runtime Import',
-    description: uxDescription(
-      'Observer after importing every supported remote admin adapter; native H1 uses its verified operator HTTP surface.',
-    ),
-    platform: 'desktop',
-    tags: ['remote-runtime', 'wallet', 'bulk-import'],
-  });
-  await page.goto(`${APP_BASE_URL}/app?observer=1`, { waitUntil: 'domcontentloaded' });
-  await runtimeSelect.selectOption({ label: 'H1 · remote' });
-  await expect(runtimeSelect).toHaveValue(h1RuntimeId);
-  await expect(page.getByTestId('time-machine-remote-runtime')).toHaveValue(h1RuntimeId);
-  await expect(page.locator('.time-machine')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('time-machine-remote-scan')).toBeVisible({ timeout: 30_000 });
-  await page.getByRole('tab', { name: '🩺 Diagnostics', exact: true }).click();
-  const diagnostics = page.getByTestId('runtime-diagnostics-panel');
-  await expect(diagnostics).toBeVisible();
-  const persisted = diagnostics
-    .locator('article')
-    .filter({
-      has: page.getByText('Persisted', { exact: true }),
-    })
-    .locator('strong');
-  await expect(persisted).toHaveText(/^[1-9]\d*$/);
-  const persistedHeight = Number(await persisted.textContent());
-  expect(persistedHeight).toBeGreaterThan(0);
-  const heightInput = page.getByTestId('time-machine-remote-height');
-  await heightInput.fill(String(persistedHeight));
-  await page.getByTestId('time-machine-remote-scan-button').click();
-  await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(`h${persistedHeight}`, {
-    timeout: 30_000,
-  });
-  await expect(page.getByTestId('time-machine-remote-scan-status')).not.toContainText(/failed|not found/i);
-  await captureUxPage(page, testInfo, 'desktop-time-machine.png', {
-    title: 'desktop time machine',
-    group: 'Time Machine',
-    description: uxDescription('Workspace time machine enabled for historical frame scrubbing and replay.'),
-    platform: 'desktop',
-    tags: ['time-machine', 'debug', 'history'],
-  });
-});
+    await page.goto(`${APP_BASE_URL}/app?observer=1`, { waitUntil: 'domcontentloaded' });
+    await runtimeSelect.selectOption({ label: 'H1 · remote' });
+    await expect(runtimeSelect).toHaveValue(h1RuntimeId);
+    await expect(page.getByTestId('time-machine-remote-runtime')).toHaveValue(h1RuntimeId);
+    await expect(page.locator('.time-machine')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('time-machine-remote-scan')).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('tab', { name: '🩺 Diagnostics', exact: true }).click();
+    const diagnostics = page.getByTestId('runtime-diagnostics-panel');
+    await expect(diagnostics).toBeVisible();
+    const persisted = diagnostics
+      .locator('article')
+      .filter({
+        has: page.getByText('Persisted', { exact: true }),
+      })
+      .locator('strong');
+    await expect(persisted).toHaveText(/^[1-9]\d*$/);
+    const persistedHeight = Number(await persisted.textContent());
+    expect(persistedHeight).toBeGreaterThan(0);
+    const heightInput = page.getByTestId('time-machine-remote-height');
+    await heightInput.fill(String(persistedHeight));
+    await page.getByTestId('time-machine-remote-scan-button').click();
+    await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(`h${persistedHeight}`, {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId('time-machine-remote-scan-status')).not.toContainText(/failed|not found/i);
+    await captureUxPage(page, testInfo, 'desktop-time-machine.png', {
+      title: 'desktop time machine',
+      group: 'Time Machine',
+      description: uxDescription('Workspace time machine enabled for historical frame scrubbing and replay.'),
+      platform: 'desktop',
+      tags: ['time-machine', 'debug', 'history'],
+    });
+  },
+);
 
 test('ui screenshot smoke captures main tabs across viewports', { tag: '@functional' }, async ({ browser, page }, testInfo) => {
   test.setTimeout(600_000);
