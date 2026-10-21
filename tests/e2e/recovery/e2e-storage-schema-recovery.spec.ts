@@ -1,4 +1,4 @@
-import { createWalletIdentity, LOCAL_PASSWORD } from '../../../ui/tests/wallet-ui';
+import { createWalletIdentity, LOCAL_PASSWORD, waitForWalletBoot } from '../../../ui/tests/wallet-ui';
 import { gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
 import { decodeBinaryPayload, encodeBinaryPayload } from '../../../core/protocol/serialization/binary-codec';
 import { STORAGE_SCHEMA_VERSION } from '../../../core/storage/keys';
@@ -275,6 +275,9 @@ test.describe('Canonical storage schema rejection', () => {
       await timedStep('storage_schema.regenerated_unlock', async () => {
         await resetPage.getByRole('button', { name: 'Unlock', exact: true }).click();
         try {
+          // Use the same boot boundary as wallet import, still bounded by this 55s test.
+          // Asset loading then has the unchanged 5s Home identity assertion deadline.
+          await waitForWalletBoot(resetPage);
           await expect(resetPage.getByTestId('home-entity-id')).toHaveText(entityId);
         } finally {
           const state = await resetPage.evaluate(async () => {

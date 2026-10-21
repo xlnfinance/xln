@@ -12,7 +12,7 @@ import { connectRuntimeToHub } from '../../utils/e2e-connect';
 import { createWalletIdentity } from '../../../ui/tests/wallet-ui';
 import { timedStep } from '../../utils/e2e-timing.mts';
 import { requireIsolatedBaseUrl } from '../../utils/runtime/e2e-isolated-env';
-import { quiesceRuntimePage } from '../../utils/runtime/e2e-runtime-shutdown.mts';
+import { closeRuntimePage } from '../../utils/runtime/e2e-runtime-shutdown.mts';
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../../../core/account/crypto';
 import { createXlnJsonRpcProvider } from '../../../core/jurisdiction/adapter';
 import { mineRpcToBlockExact } from '../../../core/scenarios/harness/rpc-block-mining';
@@ -755,7 +755,9 @@ test(
       await page.waitForTimeout(2_500);
       expect(capture.notifications).toHaveLength(1);
     } finally {
-      await quiesceRuntimePage(page);
+      // React recovery polling belongs to the open page, including after push revocation.
+      // Close that client before stopping its tower so teardown cannot create a late 503.
+      await timedStep('push_wake.close_client', () => closeRuntimePage(page));
       if (tower?.proc.exitCode === null) tower.proc.kill('SIGTERM');
       await capture.close();
     }

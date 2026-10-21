@@ -17,6 +17,11 @@ export async function importStackPhraseUi(page: Page, phrase: string): Promise<v
   await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
   await page.getByLabel('Confirm password', { exact: true }).fill(LOCAL_PASSWORD);
   await page.getByRole('button', { name: 'Save and open', exact: true }).click();
+  await waitForWalletBoot(page);
+}
+
+/** The caller's scenario deadline also bounds bootstrap after import or unlock. */
+export async function waitForWalletBoot(page: Page): Promise<void> {
   // Surface the first recovery invariant immediately instead of timing out on Home.
   await page
     .locator('[data-testid="nav-home"]:visible, [role="alert"]')

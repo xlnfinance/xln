@@ -1,0 +1,81 @@
+{
+  "parentSHA": "adb28806ab4cabbd2b63b4d05ababf5834229e18",
+  "scope": "Test synchronization and cleanup only. Private two-lane browser evidence; not final same-SHA acceptance or public/mainnet certification.",
+  "sourceSHA256": {
+    "tests/e2e/recovery/e2e-storage-schema-recovery.spec.ts": "8df7943f25c92d8e6d76d31b65b1154c418a00e084f9917b179f602f8b661aba",
+    "tests/e2e/recovery/e2e-push-wake-registration.spec.ts": "ed83bcb7b411518e563eec9f4d678cb2d4561540cbc7293323b182b498c19536",
+    "ui/tests/wallet-ui.ts": "baad86e9359aa79089e0f890cc18108db3de7ac0bb30eb747fb282067fc4f00e"
+  },
+  "firstFailures": {
+    "originalCohort": {
+      "selected": 62,
+      "runnerPassed": 3,
+      "cleanPassed": 2,
+      "failed": 1,
+      "cancelled": 1,
+      "unstarted": 57
+    },
+    "storageTraceSHA256": "ce4cf92fa33d1764b786529882f67afcdb15eccf48a0ae61db8229a6300aa9b0",
+    "storageUnlockToIdentityAssertionMs": 5.714,
+    "storageAssetsLoadingAtMs": 4712,
+    "wakeLateHttpStatus": 503,
+    "wakeBrowserErrors": 2,
+    "wakeReportedBodyEnd": "2026-10-21T20:15:58.003Z",
+    "wakeFirst503": "2026-10-21T20:15:59.889Z",
+    "wakeLimitation": "Original passing-case trace/503 response body and exact SIGTERM timestamp unavailable; teardown order was verified from source.",
+    "firstTwoLaneAttempt": {
+      "exitCode": 1,
+      "logSHA256": "03dc2871896d5db1ebf83bb9903f26cf319eda105576459284fc08364bbdc85c",
+      "traceSHA256": "d4e256cfbdd14e9c856fa7d83d9f7d08f271caa276ea638e12f0981068da1bdc",
+      "cause": "New5s Shell barrier also began before full bootstrap completed; replaced with existing wallet import boot boundary. No passes counted."
+    }
+  },
+  "changes": [
+    "Reuse unchanged wallet import boot check before exact Home identity; 55s total scenario and5s identity unchanged. Same typed schema rejection, explicit reset and credential/unrelated-store invariants.",
+    "Close React page through existing closeRuntimePage before stopping test-owned tower. Previously captured errors remain in strict browser health. All signed registration/revocation/dispute notification assertions retained."
+  ],
+  "l1": {
+    "passed": 45,
+    "failed": 0,
+    "assertions": 98,
+    "seconds": 3.258965208,
+    "logSHA256": "3aed4a7a4ac56eb4357c9814e1c00ad03e6d7542e46c2e1b745c15f0a391281c"
+  },
+  "l2": {
+    "runnerPassed": 2,
+    "runnerFailed": 0,
+    "runnerCancelled": 0,
+    "browserErrors": 0,
+    "lanes": 2,
+    "playwright": [
+      {
+        "shard": "shard-0",
+        "startTime": "2026-10-21T20:32:37.516Z",
+        "duration": 37124.569,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      {
+        "shard": "shard-1",
+        "startTime": "2026-10-21T20:32:23.650Z",
+        "duration": 42372.19,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    ],
+    "seconds": 150.36331637499998,
+    "sourceUnchanged": true,
+    "logSHA256": "fb9c6d3732dde67b5703a085a00c64fbf4be051a54473dc7192b2d326dfb85ff",
+    "candidate": {
+      "candidateId": "c563a1b11fbafd737dd0e83e59f7968402fe91d1b5c9254c99df394de83ea735",
+      "gitHead": "adb28806ab4cabbd2b63b4d05ababf5834229e18",
+      "codeHash": "691cab2903bb7f8f9ffc00a47d6714a71f1f229967cbf12cf802fbbda8ac5e17",
+      "gateConfigHash": "a65a1b217805a20f0e377fae395a66b20afc479c88e9b80b6d8a179d05108b69"
+    }
+  },
+  "remaining": "58 required debug identities; all158 plus finance/unit/test/check/release34/60minsoak must be fresh on final immutableSHA before qualified release."
+}
