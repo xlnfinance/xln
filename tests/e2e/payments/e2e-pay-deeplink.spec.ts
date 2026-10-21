@@ -77,6 +77,9 @@ test.describe('Canonical /app#pay deep link', () => {
       await payPage.getByRole('button', { name: 'Continue', exact: true }).click();
       await payPage.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
       await payPage.getByRole('button', { name: 'Unlock', exact: true }).click();
+      // Unlock starts checkpoint/WAL restore and authenticated chain sync. The
+      // navigation shell appears only after both finish; preserve the invoice route.
+      await payPage.getByTestId('nav-home').locator('visible=true').waitFor({ state: 'visible', timeout: 30_000 });
       await expect(payPage.getByTestId('pay-to')).toHaveValue(bob.entityId);
       await expect(payPage.getByTestId('pay-amount')).toHaveValue('5');
       await expect(payPage.getByTestId('pay-note')).toHaveValue('E2E direct pay deep link');

@@ -1,0 +1,130 @@
+{
+  "recordedAt": "2026-10-21T18:15:18.095553+00:00",
+  "parentSHA": "bac2770e5753ee8d216113994b157c0fcf26eaf2",
+  "scope": "Test observation order only. Production wallet, authenticated scan, current-format recovery and financial execution unchanged. Not a final release or mainnet certificate.",
+  "source": {
+    "tests/e2e/payments/e2e-pay-deeplink.spec.ts": "b91e313a84d2c40b5e28464a174047b4a2f118b47d3a1d7e51f59dc66c3807af"
+  },
+  "originalFailure": {
+    "receipt": "remaining96-bac2770e5753-02.result.json",
+    "traceSHA256": "496f2ce4515e5df74a18a098ba227b77c1cc79e80d4a4a2df6b40f7f6455c614",
+    "error": "pay-to absent during original5000ms assertion after Unlock",
+    "rendered": "Imported vault; Unlock wallet; Syncing with the chain 0%",
+    "clockMs": {
+      "unlockClickStart": 39307.887,
+      "unlockClickEnd": 39524.284,
+      "fieldExpectStart": 39562.877,
+      "runtimeRestored": 43766.908,
+      "firstChainScan": 44060.281,
+      "fieldExpectFailed": 44578.811
+    },
+    "cohort": {
+      "passed": 0,
+      "failed": 1,
+      "cancelled": 1,
+      "unstarted": 94
+    }
+  },
+  "repair": "Observe the existing visible nav-home without clicking it. App exposes Shell only after runtime connected, booting=false and active Entity chosen. Then run unchanged invoice/runtime/money assertions.",
+  "limits": {
+    "readinessMs": 30000,
+    "fieldAssertionMs": 5000,
+    "scenarioMs": 210000,
+    "financialReceiptMs": 15000
+  },
+  "l1": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "pay-deeplink-ready-l1-02",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "test",
+      "core/__tests__/development/frontend/frontend-xln-invoice.test.ts",
+      "ui/src/native/payment-request.test.ts"
+    ],
+    "passed": 9,
+    "failed": 0,
+    "assertions": 55,
+    "seconds": 1.455267333,
+    "sourceUnchanged": true,
+    "logSHA256": "1daf1b433d4904ae2e4832d65954bb5aba339634f2d18f5be3974727350dabe1"
+  },
+  "l2": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "pay-deeplink-ready-l2-02",
+      "--timeout-ms",
+      "7200000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-reset-concurrency=1",
+      "--pw-files=tests/e2e/payments/e2e-pay-deeplink.spec.ts::restores runtime and opens the pay screen from hash params",
+      "--strict-browser-health",
+      "--trace=retain-on-failure",
+      "--video=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--max-failures=1"
+    ],
+    "seconds": 103.46522529100001,
+    "sourceUnchanged": true,
+    "logSHA256": "015b66d163f6ca68caed2352596458d3fdf56c45a61078d83705c3c7a3d9396d",
+    "candidate": {
+      "candidateId": "02e63eddfc3945f17e825b042ea71c8a07730e8995034da5f24e9d198d10a699",
+      "gitHead": "bac2770e5753ee8d216113994b157c0fcf26eaf2",
+      "codeHash": "35d3e493752bd5088edacaa9a025dd5fc18a34d95726154d2046936882537bba",
+      "gateConfigHash": "007bfa4285c8dd0e202fc704705ebb8fbb6332b46cea024e36f0de634383dc2c"
+    },
+    "runner": {
+      "passedShards": 1,
+      "failedShards": 0,
+      "cancelledShards": 0
+    },
+    "browser": {
+      "startTime": "2026-10-21T18:13:02.260Z",
+      "duration": 54239.32,
+      "expected": 1,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "results": [
+      {
+        "title": "restores runtime and opens the pay screen from hash params",
+        "status": "passed",
+        "durationMs": 50773,
+        "retry": 0
+      }
+    ],
+    "financialAssertions": {
+      "token": "USDC",
+      "amountMinorUnits": "5000000",
+      "senderEvent": "HtlcFinalized",
+      "recipientEvent": "HtlcReceived",
+      "senderToEntity": "selected H1",
+      "recipientFromEntity": "same H1",
+      "restoredRuntime": "exact original Alice Runtime ID",
+      "invoiceFields": ["recipient", "amount5", "description"]
+    },
+    "limitation": "Actual canonical browser transfer and persisted event assertions passed. This evidence does not replace the separate complete final-SHA cryptographic/recovery bundle."
+  },
+  "retainedInvocationErrors": [
+    {
+      "receipt": "pay-deeplink-ready-l2-01.result.json",
+      "error": "BROAD_RUN_BLOCKED_EXACT_RERUN_REQUIRED",
+      "browsersStarted": 0,
+      "correction": "Use canonical file::evaluated-title as one argument; no ledger bypass."
+    }
+  ],
+  "privateArchive": "pay-deeplink-ready-l2-02-private/index.json"
+}
