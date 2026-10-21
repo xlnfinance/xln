@@ -1,9 +1,26 @@
 import { execFileSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
-import { expect, type Page, type TestInfo } from '../../../global-setup.mts';
-import { API_BASE_URL } from '../../e2e-baseline';
+import { test as base, expect, type Page, type TestInfo } from '../../../global-setup.mts';
+import { API_BASE_URL, APP_BASE_URL } from '../../e2e-baseline';
+import { startMarketTransport, type MarketTransport } from './market-transport';
 import { readAccount, readOrders, expectDeliveryDrained } from '../../../../ui/tests/swap-evidence';
 import { safeStringify } from '../../../../core/protocol/serialization';
+
+export const test = base.extend<{ marketTransportEnabled: boolean; marketTransport: MarketTransport | null }>({
+  marketTransportEnabled: false,
+  marketTransport: async ({ marketTransportEnabled }, use) => {
+    if (!marketTransportEnabled) return use(null);
+    const transport = await startMarketTransport([API_BASE_URL, APP_BASE_URL]);
+    try {
+      await use(transport);
+    } finally {
+      await transport.close();
+    }
+  },
+  proxy: async ({ marketTransport }, use) => {
+    await use(marketTransport ? { server: marketTransport.server, bypass: '<-loopback>' } : undefined);
+  },
+});
 
 function processOwner(value: unknown): { pid: number; ownerId: string } {
   if (!value || typeof value !== 'object' || !('process' in value)) throw new Error('RELAY_HEALTH_PROCESS_MISSING');
@@ -45,12 +62,14 @@ export async function requireOwnedRelay(page: Page) {
   return actual;
 }
 
-/** A real owned-process stall, not a fabricated WebSocket or snapshot. */
+/** Silence only the real market connection; the shared RPC and financial relay must stay healthy. */
 export async function verifyRelaySilence(
   page: Page,
   info: TestInfo,
+  transport: MarketTransport | null,
   phase: 'initial' | 'live' = 'initial',
 ): Promise<void> {
+  if (!transport) throw new Error('MARKET_TRANSPORT_FIXTURE_MISSING');
   await page.getByTestId('home-faucet').click();
   await expect(page.getByTestId('test-money-status')).toHaveText('100 USDC received');
   await page.getByTestId('account-row').first().click();
@@ -72,11 +91,9 @@ export async function verifyRelaySilence(
     await expect(book.getByTestId('book-row-ask')).toHaveCount(10);
     await expect(book.getByTestId('book-row-bid')).toHaveCount(10);
   }
-  let frozen = false;
   const started = Date.now();
   try {
-    process.kill(owner.pid, 'SIGSTOP');
-    frozen = true;
+    transport.pause();
     if (phase === 'initial') {
       await page.getByTestId('home-swap').click();
       await expect(book).toBeVisible();
@@ -87,13 +104,34 @@ export async function verifyRelaySilence(
     await expect(book.getByTestId('book-row-bid')).toHaveCount(0);
     await expect(book).not.toHaveAttribute('data-status', 'no-market');
     await expect(book).toContainText('The market feed is not responding. Waiting for fresh prices.');
+    expect(transport.evidence().paused).toBe(true);
+    expect(transport.evidence().activeMarketConnections).toBeGreaterThan(0);
+    expect(transport.evidence().errors).toEqual([]);
+    const rpc = await page.evaluate(async () => {
+      const response = await fetch('/rpc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+      });
+      return { status: response.status, body: await response.json() };
+    });
+    expect(rpc).toEqual({ status: 200, body: { jsonrpc: '2.0', id: 1, result: '0x7a69' } });
+    expect(await requireOwnedRelay(page)).toEqual(owner);
     await page.screenshot({ path: info.outputPath('relay-unavailable.png') });
     await info.attach('real-relay-silence', {
-      body: safeStringify({ phase, owner, elapsedMs: Date.now() - started, before, orders }),
+      body: safeStringify({
+        phase,
+        owner,
+        elapsedMs: Date.now() - started,
+        before,
+        orders,
+        transport: transport.evidence(),
+        rpc,
+      }),
       contentType: 'application/json',
     });
   } finally {
-    if (frozen) process.kill(owner.pid, 'SIGCONT');
+    transport.resume();
   }
   expect(await requireOwnedRelay(page)).toEqual(owner);
   await expect(book).toHaveAttribute('data-status', 'live');
@@ -101,6 +139,7 @@ export async function verifyRelaySilence(
   await expect(book.getByTestId('book-row-bid')).toHaveCount(10);
   expect(await readAccount(page, hubId)).toEqual(before);
   expect(await readOrders(page, hubId)).toEqual(orders);
+  expect(transport.evidence().errors).toEqual([]);
   await page.screenshot({ path: info.outputPath('relay-recovered.png') });
   await info.attach('real-relay-recovered', {
     body: safeStringify({

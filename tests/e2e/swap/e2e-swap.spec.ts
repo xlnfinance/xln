@@ -1,6 +1,6 @@
 import { resolveOrderbookPriceReference } from '../../../core/swapbook/price-band';
 import { verifyRelayRejection } from '../../utils/browser/market/relay-rejection';
-import { verifyRelaySilence } from '../../utils/browser/market/relay-silence';
+import { test, verifyRelaySilence } from '../../utils/browser/market/relay-silence';
 import { verifyAllBooks } from '../../utils/browser/swap-all-books';
 import { verifySwapTokenSelection } from '../../utils/browser/swap-token-selection';
 import { verifyBookSwitching } from '../../utils/browser/swap-book-switch';
@@ -17,7 +17,7 @@ import { verifyRestingSwapCancellation } from '../../../ui/tests/swap-cancellati
  * These tests verify that swap offers can auto-prepare missing token capacity, place and cancel
  * cleanly through the UI, and that the scenario runners still produce partial fills after reload-safe setup.
  */
-import { test, expect, type Page } from '../../global-setup.mts';
+import { expect, type Page } from '../../global-setup.mts';
 import { Wallet } from 'ethers';
 import { timedStep } from '../../utils/e2e-timing.mts';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, getHealth } from '../../utils/e2e-baseline';
@@ -85,25 +85,28 @@ test.describe('E2E Swap Flow', () => {
     },
   );
 
-  test(
-    'swap orderbook becomes unavailable when the real relay cannot answer',
-    { tag: '@resilience' },
-    async ({ page }, info) => {
-      await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
-      await createWalletIdentity(page, 'relay-silence', randomMnemonic());
-      await verifyRelaySilence(page, info);
-    },
-  );
+  test.describe(() => {
+    test.use({ marketTransportEnabled: true });
+    test(
+      'swap orderbook becomes unavailable when the real relay cannot answer',
+      { tag: '@resilience' },
+      async ({ page, marketTransport }, info) => {
+        await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+        await createWalletIdentity(page, 'relay-silence', randomMnemonic());
+        await verifyRelaySilence(page, info, marketTransport);
+      },
+    );
 
-  test(
-    'swap clears a live book when the real relay stops publishing',
-    { tag: '@resilience' },
-    async ({ page }, info) => {
-      await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
-      await createWalletIdentity(page, 'relay-live-silence', randomMnemonic());
-      await verifyRelaySilence(page, info, 'live');
-    },
-  );
+    test(
+      'swap clears a live book when the real relay stops publishing',
+      { tag: '@resilience' },
+      async ({ page, marketTransport }, info) => {
+        await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 0 });
+        await createWalletIdentity(page, 'relay-live-silence', randomMnemonic());
+        await verifyRelaySilence(page, info, marketTransport, 'live');
+      },
+    );
+  });
 
   test(
     'swap orderbook shows terminal error state when relay rejects the market subscription',

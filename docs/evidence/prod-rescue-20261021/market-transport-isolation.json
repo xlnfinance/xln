@@ -1,0 +1,83 @@
+{
+  "baseSHA": "53ca51677351f969662e50044a325b90536bb512",
+  "firstFailure": {
+    "fullBrowser": {
+      "passed": 11,
+      "failed": 1,
+      "unstarted": 146,
+      "total": 158
+    },
+    "case": "swap clears a live book when the real relay stops publishing",
+    "error": "Strict browser guard: POST /rpc HTTP502 after SIGSTOP of the entire owned orchestrator. Book/account/order assertions completed.",
+    "originalResponseBodyCaptured": false
+  },
+  "controlledReproduction": {
+    "realRead": "eth_chainId",
+    "error": "RPC_PROXY_UPSTREAM_FAILED / PROXY_UPSTREAM_TIMEOUT:5000",
+    "method": "Briefly pause owned Anvil to place a real RPC in flight; resume Anvil while the shared orchestrator stays under the existing market-silence pause. Original UI/account/order assertions completed; strict guard failed. Temporary diagnostic patch restored before implementation."
+  },
+  "rootCause": "Market-only resilience test stopped the process that also owns canonical RPC. An in-flight RPC can expire while its process is frozen. The controlled response proves this mechanism; the original full-run response body was unavailable.",
+  "change": "Use a test-only transparent browser proxy to pause the readable side of the real owned /relay?protocol=market socket. Preserve native browser WebSocket, original server bytes, financial P2P, HTTP/RPC, and all other connections. No fabricated market message, deadline change, expected-error waiver, runtime change, or financial assertion removal.",
+  "verification": {
+    "marketBrowserCases": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "browserIssues": 0,
+      "initialPauseMs": 15780,
+      "livePauseMs": 15486,
+      "rpcDuringEachPause": {
+        "status": 200,
+        "chainId": "0x7a69"
+      },
+      "recovery": "Same owner; live book10asks/10bids; Account and orders identical before/after."
+    },
+    "retainedCrossUIBoundary": {
+      "passed": 1,
+      "failed": 0,
+      "case": "cross WETH/USDC ignores non-takeable orderbook side before filling the takeable side",
+      "scope": "UI takeability test, not a new native TVM financial transaction."
+    },
+    "localTypecheck": "Strict standalone market-transport.ts typecheck PASS; check:unsafe-types1149files PASS; Playwright declaration listing18/18 retained.",
+    "receipts": {
+      "full158-53ca51677351-01": {
+        "exitCode": 1,
+        "seconds": 1066.5857577499999,
+        "sourceUnchanged": true,
+        "logSHA256": "7f27f23ff04654e1906a3eb143d99f4f8a64946ee5360ca27dbc188bb2fcdff8"
+      },
+      "relay-pause-controlled-53ca5167-02": {
+        "exitCode": 1,
+        "seconds": 127.99835887500001,
+        "sourceUnchanged": true,
+        "logSHA256": "83515a07df5d0090d4e3d6c98d54dd177ec6f9dadea60c3fb029864daaf94f2c"
+      },
+      "relay-transport-live-04": {
+        "exitCode": 0,
+        "seconds": 124.847092916,
+        "sourceUnchanged": true,
+        "logSHA256": "aafe6466316cddb01aa062081bdcf958323308eef18044f6e00954ea5d4b1cfe"
+      },
+      "relay-transport-initial-01": {
+        "exitCode": 0,
+        "seconds": 125.465836292,
+        "sourceUnchanged": true,
+        "logSHA256": "702da12eccf26faae599c5e584c8985d4c46efbe0b7399d84022146bd9e6d50e"
+      },
+      "cross-wrong-side-current-01": {
+        "exitCode": 0,
+        "seconds": 75.14117175,
+        "sourceUnchanged": true,
+        "logSHA256": "de5263ad6cba0cfdc1f5fd7f6dfa7ff6c746dc610c16ed83f03439dbf3564f05"
+      }
+    }
+  },
+  "sourceHashes": {
+    "tests/utils/browser/market/market-transport.ts": "360285e603e0b10effd0d9e9f4f37c353a4d550700bbd773521708e98f0f0e87",
+    "tests/utils/browser/market/relay-silence.ts": "6ab7ee1509900b9987f2f7c86330c048832c93e4c626e126f1c089d40fe94a56",
+    "tests/e2e/swap/e2e-swap.spec.ts": "c7e0fc090e6440800afad00ec4f08798b1dd354d6a9958e0f2615b1e80fedacb"
+  },
+  "remaining": "Full immutable-SHA financial/unit/test/browser/release/soak/check, checked publication and actual public served-version/click verification remain required. No mainnet readiness claim.",
+  "evidenceRoot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019",
+  "safeScreenshots": "market-transport-safe-proof-01/manifest.json"
+}
