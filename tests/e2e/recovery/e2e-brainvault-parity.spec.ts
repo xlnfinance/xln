@@ -1,4 +1,4 @@
-import type { RuntimeReplica } from '../../../core/api/public/runtime-module';
+import type { RuntimeAdapterStatus, RuntimeReplica } from '../../../core/api/public/runtime-module';
 import type { VaultMeta } from '../../../ui/src/runtime/store';
 import { createWalletIdentity } from '../../../ui/tests/wallet-ui';
 import { allowBrowserIssue, expect, test, type Page } from '../../global-setup.mts';
@@ -9,7 +9,15 @@ import { deriveBrainvaultOracle } from '../../utils/runtime/e2e-brainvault';
 type TestWindow = Window & {
   __xln?: {
     env: () => RuntimeReplica | null;
-    store: { getState: () => { activeEntityId: string | null; activeVaultId: string | null; vaults: VaultMeta[] } };
+    store: {
+      getState: () => {
+        activeEntityId: string | null;
+        activeVaultId: string | null;
+        vaults: VaultMeta[];
+        booting: boolean;
+        adapterStatus: RuntimeAdapterStatus;
+      };
+    };
   };
 };
 
@@ -155,6 +163,16 @@ async function waitForCanonicalProfile(page: Page, profileName: string) {
   await expect
     .poll(
       async () => {
+        // Unlock returns before hosted recovery and authenticated chain catch-up.
+        // Keep the existing profile deadline; inspect committed state only once ready.
+        const ready = await page.evaluate(() => {
+          const debug = (window as TestWindow).__xln;
+          const state = debug?.store.getState();
+          return Boolean(
+            debug?.env() && state && !state.booting && state.adapterStatus === 'connected' && state.activeEntityId,
+          );
+        });
+        if (!ready) return null;
         const entity = await readCanonicalEntity(page);
         return {
           profileName: entity.profileName,
@@ -225,8 +243,8 @@ test.describe('brainvault parity', () => {
       await page.getByRole('button', { name: 'Continue', exact: true }).click();
       await page.getByLabel('Password', { exact: true }).fill('ced-export-42');
       await page.getByRole('button', { name: 'Unlock', exact: true }).click();
-      await expect(page.locator('[data-testid="nav-home"]:visible')).toBeVisible();
       const restored = await waitForCanonicalProfile(page, 'standalone live profile');
+      await expect(page.locator('[data-testid="nav-home"]:visible')).toBeVisible();
       expect(restored).toEqual({ ...canonical, height: restored.height });
       expect(restored.height).toBeGreaterThanOrEqual(canonical.height);
       expect(restored.pendingAccountIds).toEqual([]);

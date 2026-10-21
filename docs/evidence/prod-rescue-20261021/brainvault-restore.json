@@ -1,0 +1,47 @@
+{
+  "parentSHA": "c3d06e198c2c6e458296cbd1b786e6c683f5b83c",
+  "scope": "Test-only current-format BrainVault restore synchronization; private browser fixture. Not final same-SHA suite, public deployment or mainnet certification.",
+  "sourceSHA256": {
+    "tests/e2e/recovery/e2e-brainvault-parity.spec.ts": "144601f20518cc466b7f761f8fe842d7eece0ebdf336a37efa4202f7703cc259"
+  },
+  "firstFailure": {
+    "selected": 93,
+    "runnerPassed": 30,
+    "runnerFailed": 1,
+    "runnerCancelled": 0,
+    "unstarted": 62,
+    "traceSHA256": "1dbb51da60011193b91d7e955ab1c946f8c966d9cee95eab01f19f3fa9faae26",
+    "unlockToHomeAssertionMs": 1.294,
+    "unlockToRuntimeRestoredMs": 4611.343,
+    "observedScreen": "Unlock wallet with disabled chain-sync progress",
+    "assertionTimeoutMs": 5000
+  },
+  "change": "Keep the existing15s canonical-profile poll, require hosted readiness inside it, then check Home with unchanged5s assertion. Exact identity/profile/three Account/height/storage assertions retained.",
+  "l1": {
+    "passed": 16,
+    "failed": 0,
+    "assertions": 35,
+    "seconds": 2.151201875,
+    "logSHA256": "e533ca905bc687d05fbbfab146c4cea65bd6e845ec64f5f8b52dbf93b04eca8a"
+  },
+  "l2": {
+    "runnerPassed": 1,
+    "runnerFailed": 0,
+    "runnerCancelled": 0,
+    "expected": 1,
+    "unexpected": 0,
+    "skipped": 0,
+    "flaky": 0,
+    "playwrightMs": 32262.247,
+    "seconds": 83.621639667,
+    "logSHA256": "3cd10242a7d4d36a8236c0b2f0b0c05d37bb48e3775ae02decc163b56ba3700c",
+    "sourceUnchanged": true,
+    "candidate": {
+      "candidateId": "43d4f4b70c3db4a76f072018c5489847967c2942287125048c27f731b43bc746",
+      "gitHead": "c3d06e198c2c6e458296cbd1b786e6c683f5b83c",
+      "codeHash": "e4028ab76109f7b29d5d515cc7cfe858e577a032c4e428056535e6b292f3d2e1",
+      "gateConfigHash": "cd33cecfa2c7fa119f671d7cda01fa1c2f2d33aef806ac652aa7e7f195ac10da"
+    }
+  },
+  "remaining": "62 unverified identities; final immutable-SHA financial/unit/test/check/full158/release34/soak and deployed public verification remain."
+}
