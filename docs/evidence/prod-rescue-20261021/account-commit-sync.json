@@ -1,0 +1,294 @@
+{
+  "sourceSHA": "a37db7275a8802e53f7b3d293d900ac134b5d996",
+  "failedCase": "swap orderbook highest bid click fills immediately at displayed book price",
+  "originalRun": {
+    "passed": 17,
+    "failed": 1,
+    "unstarted": 140,
+    "total": 158
+  },
+  "rootCause": "STALE_TEST_SNAPSHOT_CONFIRMED",
+  "acceptedFrames": [
+    {
+      "accountHeight": 9,
+      "runtimeHeight": 80,
+      "source": "counterpartyCommit",
+      "stateHash": "0x5e08ff476409aacd085d625e8cda2ed6798abe5662ffa5b230ec61fc09b848c3",
+      "accountStateRoot": "0x4593bede54c1b6ff389bc19ebc1566b22f03be7ee0709322ef936c73f03b01c3",
+      "prevFrameHash": "0xecd7e478bc087b6fb297c1e7ee6189fd43a05361df7d2fb508b851c29edac951",
+      "acceptedTransactions": [
+        {
+          "data": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "2599250050"
+            },
+            "feeAmount": {
+              "__xlnType": "BigInt",
+              "value": "359925"
+            },
+            "feeTokenId": 1,
+            "policyVersion": 1,
+            "tokenId": 1
+          },
+          "type": "request_collateral"
+        }
+      ]
+    },
+    {
+      "accountHeight": 10,
+      "runtimeHeight": 85,
+      "source": "counterpartyCommit",
+      "stateHash": "0x029f891e7f1fa316d9a097465f126beea8391234ab6fc8345469048d70f3a8f6",
+      "accountStateRoot": "0xdeba214165ed7b69ff584dc6f3353254570cdc9e3c06e7e06cf418911a12123a",
+      "prevFrameHash": "0x5e08ff476409aacd085d625e8cda2ed6798abe5662ffa5b230ec61fc09b848c3",
+      "acceptedTransactions": [
+        {
+          "data": {
+            "events": [
+              {
+                "blockHash": "0xf8eb8c4fd9d255b95370c27ebf7d41bba5cebf3c030188b76460af8bff9409e8",
+                "blockNumber": 40,
+                "data": {
+                  "collateral": "2598890125",
+                  "leftEntity": "0x5e554b9bc1472f5e19d39db1c8a8bfa79710bb2d969be4b8cab47a4c0b7b60cd",
+                  "leftReserve": "0",
+                  "nonce": 0,
+                  "ondelta": "0",
+                  "rightEntity": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+                  "rightReserve": "1997401109875",
+                  "tokenId": 1
+                },
+                "logIndex": 1,
+                "transactionHash": "0x6eccd29137caa908279facbee14ba0ddbb3faaef2c1ed18a15d7bb4788832a73",
+                "type": "AccountSettled"
+              }
+            ],
+            "jBlockHash": "0xf8eb8c4fd9d255b95370c27ebf7d41bba5cebf3c030188b76460af8bff9409e8",
+            "jHeight": 40,
+            "leftProof": {
+              "nodes": [],
+              "version": 1
+            },
+            "rightProof": {
+              "nodes": [],
+              "version": 1
+            }
+          },
+          "type": "j_event_claim"
+        }
+      ]
+    },
+    {
+      "accountHeight": 11,
+      "runtimeHeight": 88,
+      "source": "ackCommit",
+      "stateHash": "0x9d07069d0b016629e1813fca97b6f8fbb0b34c462a7121aa0c6697ffca39e59b",
+      "accountStateRoot": "0x89feb72b0ed2bb9432034d91d6628a9ea66e286d7157581924f2b33c20083a92",
+      "prevFrameHash": "0x029f891e7f1fa316d9a097465f126beea8391234ab6fc8345469048d70f3a8f6",
+      "acceptedTransactions": [
+        {
+          "data": {
+            "events": [
+              {
+                "blockHash": "0xf8eb8c4fd9d255b95370c27ebf7d41bba5cebf3c030188b76460af8bff9409e8",
+                "blockNumber": 40,
+                "data": {
+                  "collateral": "2598890125",
+                  "leftEntity": "0x5e554b9bc1472f5e19d39db1c8a8bfa79710bb2d969be4b8cab47a4c0b7b60cd",
+                  "leftReserve": "0",
+                  "nonce": 0,
+                  "ondelta": "0",
+                  "rightEntity": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+                  "rightReserve": "1997401109875",
+                  "tokenId": 1
+                },
+                "logIndex": 1,
+                "transactionHash": "0x6eccd29137caa908279facbee14ba0ddbb3faaef2c1ed18a15d7bb4788832a73",
+                "type": "AccountSettled"
+              }
+            ],
+            "jBlockHash": "0xf8eb8c4fd9d255b95370c27ebf7d41bba5cebf3c030188b76460af8bff9409e8",
+            "jHeight": 40,
+            "leftProof": {
+              "nodes": [
+                {
+                  "key": "0x45e3c39a84a2efd22034694895453efbe87c3720a0659fb70521dc222ddb5a17",
+                  "record": {
+                    "accountKey": "0xbcbfa9e551d79f17deb85f3793a7483f1107f28e832e4cd9fa1f94284f3ea1a5",
+                    "eventsHash": "0xe94124650268ef4cbc7dc65fe4e1be9b5daf5b57bb57a739671178590c7a3c05",
+                    "jBlockHash": "0xf8eb8c4fd9d255b95370c27ebf7d41bba5cebf3c030188b76460af8bff9409e8",
+                    "jHeight": 40,
+                    "side": "left",
+                    "version": 1
+                  },
+                  "type": "leaf",
+                  "version": 1
+                }
+              ],
+              "version": 1
+            },
+            "rightProof": {
+              "nodes": [],
+              "version": 1
+            }
+          },
+          "type": "j_event_claim"
+        }
+      ]
+    }
+  ],
+  "frameSignatures": {
+    "passed": 8,
+    "total": 8,
+    "acceptedUniqueProposalAckPairs": 3,
+    "note": "Includes one unacknowledged competing height10 proposal and one repeated height9 ACK; neither creates an extra accepted frame."
+  },
+  "disputeSignatures": {
+    "passed": 6,
+    "total": 6
+  },
+  "deltas": [
+    {
+      "tokenId": 1,
+      "atCapturedUserFrame9": {
+        "collateral": "0",
+        "ondelta": "0",
+        "offdelta": "2598890125",
+        "leftCreditLimit": "0",
+        "rightCreditLimit": "2599500000",
+        "leftHold": "0",
+        "rightHold": "0"
+      },
+      "atCommittedHubFrame11": {
+        "collateral": "2598890125",
+        "leftCreditLimit": "0",
+        "leftHold": "0",
+        "offdelta": "2598890125",
+        "ondelta": "0",
+        "rightCreditLimit": "2599500000",
+        "rightHold": "0"
+      }
+    },
+    {
+      "tokenId": 2,
+      "atCapturedUserFrame9": {
+        "collateral": "0",
+        "ondelta": "0",
+        "offdelta": "0",
+        "leftCreditLimit": "0",
+        "rightCreditLimit": "1100000000000000000",
+        "leftHold": "0",
+        "rightHold": "0"
+      },
+      "atCommittedHubFrame11": {
+        "collateral": "0",
+        "leftCreditLimit": "0",
+        "leftHold": "0",
+        "offdelta": "0",
+        "ondelta": "0",
+        "rightCreditLimit": "1100000000000000000",
+        "rightHold": "0"
+      }
+    }
+  ],
+  "tracePollSamples": 21,
+  "tracePollHeights": [10, 10, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11],
+  "privateEvidenceHashes": {
+    "frames.json": "d075f4bc0e975da5ff4e35ce58504bd1f8739b23d6827b5a00b709ae008ead5a",
+    "signed-evidence.json": "2c37f1853871f0a7131708673d23e73b39f56d609df9adf74fbe150f4738a8e4",
+    "signatures.ts": "3ac36f0ca01fac636484f8d5d4edcba549f32ab4f16398ae42b716574a54d96e"
+  },
+  "archiveProvenance": {
+    "sourceSHA": "a37db7275a8802e53f7b3d293d900ac134b5d996",
+    "at": "2026-10-21T16:28:41.120132+00:00",
+    "archiveIndexSHA256": "bb3f3a75d42d1534bb55e3976f3b9337b5968801256696db2b6a9f102b9b1568",
+    "verifiedOriginalH1Files": 21,
+    "totalOriginalH1Files": 21,
+    "originalStoreOpened": false,
+    "inspection": "Existing isolated copy; canonical history/WAL output reader and Hanko checks. Original archived bytes remain exact."
+  },
+  "repair": "Recapture one owned Account snapshot per assertion attempt. Compare exact committed height, accountStateRoot and every original delta field after delivery drain. Preserve signed fill, debit, credit, fee, hold and history assertions.",
+  "scope": "Read projection and browser assertion only; no financial state-machine change. Exact owning regression passed through A9 to A11. Historical full158 remains failed; no final-release or mainnet claim.",
+  "owningRegression": {
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "flaky": 0,
+    "seconds": 177.267234917,
+    "candidate": {
+      "candidateId": "6bf42efbfc13308573acf6a2f7b1a604eb315bffbc58c277bc16541f8a3b6497",
+      "gitHead": "a37db7275a8802e53f7b3d293d900ac134b5d996",
+      "codeHash": "60c32cc750dc5fb14ae686f8d1a0b42c95b52000e773c010b3506ac9d455ea9a",
+      "gateConfigHash": "ce4487c04bddb287d726411b84821e3689dab417ac2d30a0698f52ec814f6bf0"
+    },
+    "sourceUnchanged": true,
+    "logSHA256": "41b760c488c87b4e4b3ca8a76fb25a1a6520d730fc9dbd8c94d04d32b8506e6c",
+    "privateArchiveIndexSHA256": "685bf2ca729c8f062b37f5ffa596b604760ff4082fb51258bdac23f6a87019bb",
+    "signedFillObservedAtHeight": 9,
+    "synchronizedAccount": {
+      "accountStateRoot": "0x8ca9dbfe9e5de2cdf7a3638f72d8d2c59138195c60ebc821be4c92ab94858a67",
+      "currentHeight": 11,
+      "mempool": 0,
+      "pendingFrameHeight": null,
+      "tokens": [
+        {
+          "delta": {
+            "collateral": "2598890125",
+            "leftCreditLimit": "2599500000",
+            "leftHold": "0",
+            "offdelta": "-2598890125",
+            "ondelta": "2598890125",
+            "rightCreditLimit": "0",
+            "rightHold": "0"
+          },
+          "hasDelta": true,
+          "tokenId": 1
+        },
+        {
+          "delta": {
+            "collateral": "0",
+            "leftCreditLimit": "1100000000000000000",
+            "leftHold": "0",
+            "offdelta": "0",
+            "ondelta": "0",
+            "rightCreditLimit": "0",
+            "rightHold": "0"
+          },
+          "hasDelta": true,
+          "tokenId": 2
+        }
+      ]
+    },
+    "collateralFees": [
+      {
+        "amount": {
+          "__xlnType": "BigInt",
+          "value": "2599250050"
+        },
+        "fee": {
+          "__xlnType": "BigInt",
+          "value": "359925"
+        },
+        "feeTokenId": 1,
+        "height": 9,
+        "policyVersion": 1,
+        "root": "0x49392613029d9116617a3df75aa413caa9108cfd7b7bca9d854973f60c244544",
+        "stateHash": "0xb865b02506aea554906936de445d66759da7c4507b7e682b5165e9c3a7578606",
+        "tokenId": 1
+      }
+    ],
+    "fillClosedMs": 719,
+    "sourceFilesSHA256": {
+      "core/orchestrator/hub/node/hub-http.ts": "926f3f73900dac241be4c072ec4ad6bfd3e26d3fea101996e9a08f43e510e2a1",
+      "tests/utils/browser/swap-account-evidence.ts": "63810905b4e87efba21b327163157f0389626818e6db7b3b5b1a6cc55c8919fc",
+      "tests/utils/browser/swap-book-fill.ts": "8c0b9b3dc97c00a7526a57947eb46091c92faaefce2a8ed15be600d4e0a411d7"
+    }
+  },
+  "l1": {
+    "passed": 47,
+    "failed": 0,
+    "assertions": 375,
+    "receiptSHA256": "4ea53a074e2749583f195fa83457bd0438abff46e35a6d208185e9f2e6c44bac"
+  }
+}

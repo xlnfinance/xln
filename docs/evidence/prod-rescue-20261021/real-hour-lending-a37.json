@@ -1,0 +1,187 @@
+{
+  "sourceSHA": "a37db7275a8802e53f7b3d293d900ac134b5d996",
+  "at": "2026-10-21T16:33:15.491888+00:00",
+  "passed": 6,
+  "total": 6,
+  "sameSourceThroughout": true,
+  "realWallClock": true,
+  "rows": [
+    {
+      "chain": "native",
+      "phases": [
+        {
+          "phase": "originate",
+          "passed": true,
+          "seconds": 50.983418,
+          "receipt": "native-lending-deadline-a37db7275a88-originate-01.result.json",
+          "receiptSHA256": "0bfb3467ad7671d382ab9cf2897664e15b321612ee3910d69de65e2037e9cbdd",
+          "logSHA256": "5687698f2bae2daf2a291c1a578404b021d16ca1dd28fbf1fdc6e5e112f09d74",
+          "proofSHA256": "130d2ebea4071f0b1c52edd797e9d4eb45cd7f048883d573f09c5a770c7cd248",
+          "accepted": {
+            "directPayment": 2,
+            "lendingSetTerms": 1,
+            "lendingApprove": 1,
+            "lendingRepay": 2,
+            "lendingClosePosition": 1,
+            "lendingOffer": 1,
+            "lendingBorrow": 2
+          },
+          "phaseLendingCommands": 6,
+          "restoreSubmissions": 0,
+          "sameWal": true,
+          "signatureChecks": 8,
+          "pendingHtlcAck": 0,
+          "money": null
+        },
+        {
+          "phase": "complete",
+          "passed": true,
+          "seconds": 38.005322833,
+          "receipt": "native-lending-deadline-a37db7275a88-complete-01.result.json",
+          "receiptSHA256": "2f9fc258b40060402f1c306cc041aa91786c339e24034e2ccc48888f6c8ab3b5",
+          "logSHA256": "7aad12da760b7528f465f359528c50dfaccffb8e20e36f5e9c2ccb6a668e9a23",
+          "proofSHA256": "31c879d131888139c58a4d2926221fafb5526c1caec3f0a0ff17cd16df984df8",
+          "accepted": {
+            "directPayment": 2,
+            "lendingSetTerms": 1,
+            "lendingApprove": 1,
+            "lendingRepay": 3,
+            "lendingClosePosition": 1,
+            "lendingOffer": 1,
+            "lendingBorrow": 2
+          },
+          "phaseLendingCommands": 1,
+          "restoreSubmissions": 0,
+          "sameWal": true,
+          "signatureChecks": 8,
+          "pendingHtlcAck": 0,
+          "money": {
+            "paid": "1020227",
+            "repaymentMaximum": "1020334",
+            "realDefaultObserved": true,
+            "savingsUnchanged": true
+          }
+        },
+        {
+          "phase": "restore",
+          "passed": true,
+          "seconds": 35.626647834,
+          "receipt": "native-lending-deadline-a37db7275a88-restore-01.result.json",
+          "receiptSHA256": "6f8f154c91c0b5aac34baafeb15dde01230639d003f06c19260f1735f02f587d",
+          "logSHA256": "1acac46bcacfbc856f61a13b8e48fa46dd854755f6b1f78f5c6baa6ad968ffd1",
+          "proofSHA256": "a75ab1eadf25421ce165c759e7c81c57123d71e00c766476040b828d7ecb5c3e",
+          "accepted": {
+            "directPayment": 2,
+            "lendingSetTerms": 1,
+            "lendingApprove": 1,
+            "lendingRepay": 3,
+            "lendingClosePosition": 1,
+            "lendingOffer": 1,
+            "lendingBorrow": 2
+          },
+          "phaseLendingCommands": 0,
+          "restoreSubmissions": 0,
+          "sameWal": true,
+          "signatureChecks": 8,
+          "pendingHtlcAck": 0,
+          "money": {
+            "paid": "1020227",
+            "repaymentMaximum": "1020334",
+            "realDefaultObserved": true,
+            "savingsUnchanged": true
+          }
+        }
+      ],
+      "scope": "Private JavaTVM one-hour signed loan: actual facility and creditor rejection, real wall-time default, late repayment and exact recovery. Savings remain open and unchanged. No public token, demand savings, browser or mainnet proof."
+    },
+    {
+      "chain": "evm",
+      "phases": [
+        {
+          "phase": "originate",
+          "passed": true,
+          "seconds": 48.608220875,
+          "receipt": "evm-lending-deadline-a37db7275a88-originate-01.result.json",
+          "receiptSHA256": "83b3cbdd1402ba9f117f9c654fea66be3eb6ac54129b580d23348332ccd68fdf",
+          "logSHA256": "1fa5b4683c9f8eba2417ad46f65aa09c14d9d3ebeb439811bcdab7e9c9bcfc17",
+          "proofSHA256": "167808f7b5fb8a29edef5fcaec63bfa111459503e684b3c93fccdaad47f953fd",
+          "accepted": {
+            "directPayment": 2,
+            "lendingSetTerms": 1,
+            "lendingApprove": 1,
+            "lendingRepay": 2,
+            "lendingClosePosition": 1,
+            "lendingOffer": 1,
+            "lendingBorrow": 2
+          },
+          "phaseLendingCommands": 6,
+          "restoreSubmissions": 0,
+          "sameWal": true,
+          "signatureChecks": 8,
+          "pendingHtlcAck": 0,
+          "money": null
+        },
+        {
+          "phase": "complete",
+          "passed": true,
+          "seconds": 38.252433458000006,
+          "receipt": "evm-lending-deadline-a37db7275a88-complete-01.result.json",
+          "receiptSHA256": "6216eb53408a5ed59e0c64db2fe8b8d41c8093e1a392e64c49b9b2a7ee3df497",
+          "logSHA256": "efde0a948e8ac3494ec609b19552b19e2c8155e603af470561f2f9df6fd02fde",
+          "proofSHA256": "d3ce198e02f307c620308a6e96b8e07da11ac157265c1c85528aa6eb0ed7465c",
+          "accepted": {
+            "directPayment": 2,
+            "lendingSetTerms": 1,
+            "lendingApprove": 1,
+            "lendingRepay": 3,
+            "lendingClosePosition": 1,
+            "lendingOffer": 1,
+            "lendingBorrow": 2
+          },
+          "phaseLendingCommands": 1,
+          "restoreSubmissions": 0,
+          "sameWal": true,
+          "signatureChecks": 8,
+          "pendingHtlcAck": 0,
+          "money": {
+            "paid": "1020241",
+            "repaymentMaximum": "1020334",
+            "realDefaultObserved": true,
+            "savingsUnchanged": true
+          }
+        },
+        {
+          "phase": "restore",
+          "passed": true,
+          "seconds": 36.031597958,
+          "receipt": "evm-lending-deadline-a37db7275a88-restore-01.result.json",
+          "receiptSHA256": "7fc905e3a42cd27c9eeac0ae92ffe03f49c7766027f46f1807ef629828bce057",
+          "logSHA256": "ce8c47ecd966ce8db891cf62add49154e8b56cfd395fbae3269f0d00e068ac20",
+          "proofSHA256": "fc0bf98e89121f1eb17bda03d06fb1e3afe95260b2fa5b30bab0a9bf7ef54338",
+          "accepted": {
+            "directPayment": 2,
+            "lendingSetTerms": 1,
+            "lendingApprove": 1,
+            "lendingRepay": 3,
+            "lendingClosePosition": 1,
+            "lendingOffer": 1,
+            "lendingBorrow": 2
+          },
+          "phaseLendingCommands": 0,
+          "restoreSubmissions": 0,
+          "sameWal": true,
+          "signatureChecks": 8,
+          "pendingHtlcAck": 0,
+          "money": {
+            "paid": "1020241",
+            "repaymentMaximum": "1020334",
+            "realDefaultObserved": true,
+            "savingsUnchanged": true
+          }
+        }
+      ],
+      "scope": "Private Ethereum RPC chain31337 token1 USDC6 one-hour signed loan: actual facility and creditor rejection, real wall-time default, late repayment and exact recovery. Savings remain open and unchanged. No public token, demand savings, browser or mainnet proof."
+    }
+  ],
+  "limitations": "Private EVM and JavaTVM only. These receipts do not certify any later SHA or public mainnet."
+}

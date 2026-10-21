@@ -1,11 +1,11 @@
-import { readDeltas, readCollateralPolicy, readCollateralFees } from './swap-account-evidence';
+import { readAccountCommit, readCollateralPolicy, readCollateralFees } from './swap-account-evidence';
 import { rebalanceFeeFor } from '../../../core/account/tx/handlers/rebalance/request-collateral';
 import { fundFromHubUi } from '../../../ui/tests/fund-from-hub';
 import { expect, type Page, type TestInfo, type Request } from '../../global-setup.mts';
 import { parseUnits } from 'ethers';
 import { safeStringify } from '../../../core/protocol/serialization';
 import { deriveSwapFillPolicyFee } from '../../../core/account/swap/swap-net-authorization';
-import { readAccount, readOrders, type DebugWindow } from '../../../ui/tests/swap-evidence';
+import { readAccount, readOrders, expectDeliveryDrained, type DebugWindow } from '../../../ui/tests/swap-evidence';
 import { API_BASE_URL } from '../e2e-baseline';
 
 /** One actual book click must bind the ticket, signed fill, balances and both Account owners. */
@@ -157,8 +157,15 @@ export async function executeBookFill(
     );
     expect(after.height).toBeGreaterThan(before.height);
     expect(after.holds.every(hold => hold.incoming === '0' && hold.outgoing === '0')).toBe(true);
-    const tokens = await readDeltas(page, entityId, hubId);
+    await expectDeliveryDrained(page, expect);
+    const synchronized: { account?: Awaited<ReturnType<typeof readAccountCommit>> } = {};
     await expect(async () => {
+      // The signed fill may be followed by bilateral J-event claims for its
+      // collateral request. Compare both owners at one current Account height;
+      // a frozen post-fill height would reject a legitimate later settlement.
+      const account = await readAccountCommit(page, entityId, hubId);
+      expect(account.pendingFrameHeight).toBeNull();
+      expect(account.mempool).toBe(0);
       const response = await page.request.get(`${API_BASE_URL}/api/hub/account-status`, {
         params: { hubEntityId: hubId, counterpartyEntityId: entityId, tokenIds: '1,2' },
       });
@@ -169,12 +176,16 @@ export async function executeBookFill(
         hubEntityId: hubId,
         counterpartyEntityId: entityId,
         ready: true,
-        currentHeight: after.height,
+        currentHeight: account.currentHeight,
+        accountStateRoot: account.accountStateRoot,
         mempool: 0,
         pendingFrameHeight: null,
-        tokens,
+        tokens: account.tokens,
       });
+      synchronized.account = account;
     }).toPass({ timeout: 10_000, intervals: [100, 250, 500] });
+    if (!synchronized.account) throw new Error('SWAP_ACCOUNT_COMMIT_NOT_SYNCHRONIZED');
+    const tokens = synchronized.account.tokens;
     await expect(page.getByTestId('swap-offer-cancel')).toHaveCount(0);
     await page.getByTestId('back').click();
     await page.getByTestId('nav-activity').locator('visible=true').first().click();
@@ -213,6 +224,7 @@ export async function executeBookFill(
         before,
         after,
         orders,
+        synchronizedAccount: synchronized.account,
         tokens,
         placedMs,
         closedMs,

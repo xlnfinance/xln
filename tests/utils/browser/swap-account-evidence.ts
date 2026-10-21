@@ -3,13 +3,13 @@ import type { RuntimeReplica, XLNModule, RuntimeAdapterViewFrame } from '../../.
 import type { DebugWindow } from '../../../ui/tests/swap-evidence';
 
 type Account = NonNullable<RuntimeAdapterViewFrame['activeEntity']>['accounts']['items'][number];
-export const readDeltas = (page: Page, entityId: string, hubId: string) =>
+export const readAccountCommit = (page: Page, entityId: string, hubId: string) =>
   page.evaluate(
     async ids => {
       const adapter = (window as DebugWindow).__xln?.adapter();
       if (!adapter) throw new Error('SWAP_ADAPTER_MISSING');
       const account = await adapter.read<Account>(`entity/${ids.entityId}/account/${ids.hubId}`);
-      return [1, 2].map(tokenId => {
+      const tokens = [1, 2].map(tokenId => {
         const delta = account.state.deltas.get(tokenId);
         if (!delta) throw new Error(`SWAP_DELTA_MISSING:${tokenId}`);
         return {
@@ -26,6 +26,13 @@ export const readDeltas = (page: Page, entityId: string, hubId: string) =>
           },
         };
       });
+      return {
+        currentHeight: account.currentHeight,
+        accountStateRoot: account.currentFrame.accountStateRoot,
+        pendingFrameHeight: account.pendingFrame?.height ?? null,
+        mempool: account.mempoolCount,
+        tokens,
+      };
     },
     { entityId, hubId },
   );

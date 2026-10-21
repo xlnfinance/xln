@@ -114,6 +114,7 @@ const handleAccountStatusRequest = (
           Number(account.mempool?.length ?? 0) === 0,
       ),
       currentHeight: Number(account?.currentHeight ?? 0),
+      accountStateRoot: account?.currentFrame?.accountStateRoot ?? null,
       pendingFrameHeight: account?.pendingFrame
         ? Number(account.pendingFrame.height ?? 0)
         : null,
