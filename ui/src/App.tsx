@@ -1,3 +1,4 @@
+import { RuntimeCommandGate } from './components/RuntimeCommandGate';
 import { useEffect, useState } from 'react';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Shell } from './components/Shell';
@@ -24,73 +25,82 @@ import { Desk } from './screens/Desk';
 
 /** `/#pay/<invoice>` is the canonical wallet link; it opens Pay with the invoice applied. */
 function useInvoiceDeepLink(): void {
-	const navigate = useNavigate();
-	const { hash } = useLocation();
-	useEffect(() => {
-		const raw = hash.startsWith('#') ? hash.slice(1) : hash;
-		if (!raw.toLowerCase().startsWith('pay/')) return;
-		// Build the link from the hash this render saw, not the live address: a repeated effect
-		// (StrictMode, or a remount behind the Gate) runs after the first one already moved to /pay.
-		navigate('/pay', { replace: true, state: { invoice: new URL(`#${raw}`, window.location.href).href } });
-	}, [hash, navigate]);
+  const navigate = useNavigate();
+  const { hash } = useLocation();
+  useEffect(() => {
+    const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+    if (!raw.toLowerCase().startsWith('pay/')) return;
+    // Build the link from the hash this render saw, not the live address: a repeated effect
+    // (StrictMode, or a remount behind the Gate) runs after the first one already moved to /pay.
+    navigate('/pay', { replace: true, state: { invoice: new URL(`#${raw}`, window.location.href).href } });
+  }, [hash, navigate]);
 }
 
 /** Desk replaces Home on wide viewports when the user chose the dense layout. */
 function HomeOrDesk() {
-	const density = useApp(s => s.density);
-	const [wide, setWide] = useState(() => window.innerWidth >= 1024);
-	useEffect(() => {
-		const onResize = (): void => setWide(window.innerWidth >= 1024);
-		window.addEventListener('resize', onResize);
-		return () => window.removeEventListener('resize', onResize);
-	}, []);
-	return density === 'desk' && wide ? <Desk /> : <Home />;
+  const density = useApp(s => s.density);
+  const [wide, setWide] = useState(() => window.innerWidth >= 1024);
+  useEffect(() => {
+    const onResize = (): void => setWide(window.innerWidth >= 1024);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return density === 'desk' && wide ? <Desk /> : <Home />;
 }
 
 export default function App() {
-	const status = useApp(s => s.adapterStatus);
-	const booting = useApp(s => s.booting);
-	const activeEntityId = useApp(s => s.activeEntityId);
-	// The wallet needs a connected runtime and a chosen entity; anything less stays on the gate.
-	const connected = status === 'connected' && !booting && Boolean(activeEntityId);
+  return (
+    <>
+      <RuntimeCommandGate />
+      <WalletApp />
+    </>
+  );
+}
 
-	useInvoiceDeepLink();
+function WalletApp() {
+  const status = useApp(s => s.adapterStatus);
+  const booting = useApp(s => s.booting);
+  const activeEntityId = useApp(s => s.activeEntityId);
+  // The wallet needs a connected runtime and a chosen entity; anything less stays on the gate.
+  const connected = status === 'connected' && !booting && Boolean(activeEntityId);
 
-	useEffect(() => {
-		if (!connected) return;
-		return startPaymentTerminal();
-	}, [connected]);
+  useInvoiceDeepLink();
 
-	if (!connected) {
-		return (
-			<>
-				<Gate />
-				<Toasts />
-			</>
-		);
-	}
+  useEffect(() => {
+    if (!connected) return;
+    return startPaymentTerminal();
+  }, [connected]);
 
-	return (
-		<Shell>
-			<Routes>
-				<Route path="/" element={<HomeOrDesk />} />
+  if (!connected) {
+    return (
+      <>
+        <Gate />
+        <Toasts />
+      </>
+    );
+  }
+
+  return (
+    <Shell>
+      <Routes>
+        <Route path="/" element={<HomeOrDesk />} />
         <Route path="/manage/custom-contracts" element={<CustomContracts />} />
-				<Route path="/accounts/:counterpartyId" element={<AccountDetail />} />
-				<Route path="/pay" element={<Pay />} />
-				<Route path="/swap" element={<Swap />} />
-				<Route path="/receive" element={<Receive />} />
-				<Route path="/move" element={<Move />} />
-				<Route path="/sovereignty" element={<Sovereignty />} />
-				<Route path="/desk" element={<Desk />} />
-				<Route path="/manage" element={<Manage />} />
-				<Route path="/assets" element={<Assets />} />
-				<Route path="/lend" element={<Lending />} />
-				<Route path="/ownership" element={<Ownership />} />
-				<Route path="/activity" element={<ActivityScreen />} />
-				<Route path="/settings" element={<SettingsScreen />} />
-				<Route path="*" element={<Home />} />
-			</Routes>
-			<PaymentReceiptSheet />
-		</Shell>
-	);
+        <Route path="/accounts/:counterpartyId" element={<AccountDetail />} />
+        <Route path="/pay" element={<Pay />} />
+        <Route path="/swap" element={<Swap />} />
+        <Route path="/receive" element={<Receive />} />
+        <Route path="/move" element={<Move />} />
+        <Route path="/sovereignty" element={<Sovereignty />} />
+        <Route path="/desk" element={<Desk />} />
+        <Route path="/manage" element={<Manage />} />
+        <Route path="/assets" element={<Assets />} />
+        <Route path="/lend" element={<Lending />} />
+        <Route path="/ownership" element={<Ownership />} />
+        <Route path="/activity" element={<ActivityScreen />} />
+        <Route path="/settings" element={<SettingsScreen />} />
+        <Route path="*" element={<Home />} />
+      </Routes>
+      <PaymentReceiptSheet />
+    </Shell>
+  );
 }

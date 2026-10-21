@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useHref, useLocation } from 'react-router-dom';
 import {
   clampMascotPoint,
   moveMascotDock,
@@ -40,6 +40,7 @@ function readViewport() {
 
 export function Guide() {
   const { pathname } = useLocation();
+  const publicPathname = useHref(pathname);
   const visible = useApp(s => s.showXlnMascot);
   const dock = useApp(s => s.xlnMascotDock);
   const setDock = useApp(s => s.setXlnMascotDock);
@@ -186,7 +187,7 @@ export function Guide() {
           style={{ left: panel.x, top: panel.y, width: panel.width, height: panel.height }}
         >
           <GuideChat
-            pathname={pathname}
+            pathname={publicPathname}
             messages={messages}
             setMessages={setMessages}
             onClose={close}

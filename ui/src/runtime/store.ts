@@ -195,10 +195,18 @@ type AppState = {
   adapterStatus: RuntimeAdapterStatus;
   height: number;
   commandReady: boolean;
+  commandReadyReason: string | null;
+  operatorRuntimeId: string;
   /** True while an embedded runtime is booting or seeding: keep the gate up. */
   booting: boolean;
   setBooting: (booting: boolean) => void;
-  setAdapterState: (state: { status?: RuntimeAdapterStatus; height?: number; commandReady?: boolean }) => void;
+  setAdapterState: (state: {
+    status?: RuntimeAdapterStatus;
+    height?: number;
+    commandReady?: boolean;
+    commandReadyReason?: string | null;
+    operatorRuntimeId?: string;
+  }) => void;
 
   activeEntityId: string | null;
   setActiveEntityId: (entityId: string | null) => void;
@@ -345,6 +353,8 @@ export const useApp = create<AppState>((set, get) => ({
   adapterStatus: 'disconnected',
   height: 0,
   commandReady: false,
+  commandReadyReason: null,
+  operatorRuntimeId: '',
   booting: false,
   setBooting: booting => set({ booting }),
   setAdapterState: state =>
@@ -352,6 +362,8 @@ export const useApp = create<AppState>((set, get) => ({
       ...(state.status !== undefined ? { adapterStatus: state.status } : {}),
       ...(state.height !== undefined ? { height: state.height } : {}),
       ...(state.commandReady !== undefined ? { commandReady: state.commandReady } : {}),
+      ...(state.commandReadyReason !== undefined ? { commandReadyReason: state.commandReadyReason } : {}),
+      ...(state.operatorRuntimeId !== undefined ? { operatorRuntimeId: state.operatorRuntimeId } : {}),
     }),
 
   activeEntityId: null,

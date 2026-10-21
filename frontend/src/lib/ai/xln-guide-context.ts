@@ -11,9 +11,40 @@ type DocsEntry = Readonly<{
 type DocsManifest = Readonly<{ items?: readonly DocsEntry[] }>;
 
 const STOP_WORDS = new Set([
-  'about', 'after', 'again', 'also', 'and', 'are', 'can', 'does', 'for', 'from', 'how', 'into',
-  'the', 'this', 'what', 'when', 'where', 'why', 'with', 'как', 'что', 'это', 'для', 'или', 'про',
-  'при', 'где', 'когда', 'зачем', 'почему', 'работает', 'работать', 'расскажи', 'объясни',
+  'about',
+  'after',
+  'again',
+  'also',
+  'and',
+  'are',
+  'can',
+  'does',
+  'for',
+  'from',
+  'how',
+  'into',
+  'the',
+  'this',
+  'what',
+  'when',
+  'where',
+  'why',
+  'with',
+  'как',
+  'что',
+  'это',
+  'для',
+  'или',
+  'про',
+  'при',
+  'где',
+  'когда',
+  'зачем',
+  'почему',
+  'работает',
+  'работать',
+  'расскажи',
+  'объясни',
 ]);
 
 const ROUTE_HINTS: Record<string, readonly string[]> = {
@@ -22,16 +53,31 @@ const ROUTE_HINTS: Record<string, readonly string[]> = {
 };
 
 const ARCHITECTURE_QUERY_TOKENS = new Set([
-  'architecture', 'bilateral', 'broadcast', 'competitor', 'data', 'availability',
-  'rollup', 'scaling', 'sharding', 'topology', 'архитектура', 'масштабирование',
+  'architecture',
+  'bilateral',
+  'broadcast',
+  'competitor',
+  'data',
+  'availability',
+  'rollup',
+  'scaling',
+  'sharding',
+  'topology',
+  'архитектура',
+  'масштабирование',
 ]);
 const LAUNCH_ONLY_DOC_IDS = new Set([
-  'status', 'mainnet', 'mainnet-acceptance-gate', 'testnet-flow-coverage', 'roadmap',
+  'status',
+  'mainnet',
+  'mainnet-acceptance-gate',
+  'testnet-flow-coverage',
+  'roadmap',
 ]);
 
 function tokens(value: string): string[] {
-  return (value.toLocaleLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])
-    .filter(token => token.length > 2 && !STOP_WORDS.has(token));
+  return (value.toLocaleLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? []).filter(
+    token => token.length > 2 && !STOP_WORDS.has(token),
+  );
 }
 
 export function rankXlnGuideDocs(
@@ -49,8 +95,11 @@ export function rankXlnGuideDocs(
       const title = entry.title.toLocaleLowerCase();
       const summary = entry.summary.toLocaleLowerCase();
       const path = entry.path.toLocaleLowerCase();
-      const tokenScore = queryTokens.reduce((score, token) =>
-        score + (title.includes(token) ? 5 : 0) + (summary.includes(token) ? 2 : 0) + (path.includes(token) ? 3 : 0), 0);
+      const tokenScore = queryTokens.reduce(
+        (score, token) =>
+          score + (title.includes(token) ? 5 : 0) + (summary.includes(token) ? 2 : 0) + (path.includes(token) ? 3 : 0),
+        0,
+      );
       const hintIndex = hints.findIndex(hint => entry.id.toLocaleLowerCase().includes(hint));
       return { entry, score: tokenScore + (hintIndex >= 0 ? 4 - Math.min(hintIndex, 3) : 0) };
     })
@@ -59,7 +108,13 @@ export function rankXlnGuideDocs(
     .map(item => item.entry);
 }
 
-function routeDescription(pathname: string): string {
+export function describeXlnGuideRoute(pathname: string): string {
+  if (pathname === '/ui' || pathname === '/ui/') {
+    return "CURRENT SCREEN: React wallet Home. It shows Balance, Payment capacity, Connected accounts, and the Pay, Receive, Swap, Add money and Move actions. Explain this wallet screen and its controls; the reference documents below are background, not the screen. You cannot see the user's balances, selected network, or transaction state.";
+  }
+  if (pathname.startsWith('/ui/')) {
+    return `CURRENT SCREEN: React wallet at ${pathname}. This is an interactive wallet, not a documentation page. You cannot see balances, the selected network, or transaction state; do not invent them.`;
+  }
   if (pathname.startsWith('/app')) {
     return 'The user is inside the xln wallet workspace with entities, bilateral account machines, reserves, collateral, credit and Jurisdiction machines.';
   }
@@ -81,43 +136,51 @@ export async function loadXlnGuideGrounding(query: string, pathname: string, sig
   if (!manifestResponse.ok) {
     throw new Error(`XLN docs manifest is unavailable (${manifestResponse.status}).`);
   }
-  const manifest = await manifestResponse.json() as DocsManifest;
+  const manifest = (await manifestResponse.json()) as DocsManifest;
   const ranked = rankXlnGuideDocs(query, pathname, manifest.items ?? []);
   if (ranked.length === 0) throw new Error('XLN docs catalog has no live guide sources.');
-  const documents = await Promise.all(ranked.map(async entry => {
-    const response = await fetch(docsUrl(entry.path), {
-      cache: 'force-cache',
-      ...(signal ? { signal } : {}),
-    });
-    if (!response.ok) throw new Error(`XLN guide source is unavailable (${response.status}): ${entry.title}`);
-    const text = (await response.text()).slice(0, 2_800);
-    return `SOURCE: ${entry.title}\nDOC: /docs?doc=${encodeURIComponent(entry.id)}\n${text}`;
-  }));
+  const documents = await Promise.all(
+    ranked.map(async entry => {
+      const response = await fetch(docsUrl(entry.path), {
+        cache: 'force-cache',
+        ...(signal ? { signal } : {}),
+      });
+      if (!response.ok) throw new Error(`XLN guide source is unavailable (${response.status}): ${entry.title}`);
+      const text = (await response.text()).slice(0, 2_800);
+      return `SOURCE: ${entry.title}\nDOC: /docs?doc=${encodeURIComponent(entry.id)}\n${text}`;
+    }),
+  );
   const grounding = documents.filter(Boolean).join('\n\n---\n\n').slice(0, 6_200);
   if (!grounding) throw new Error('XLN guide sources are empty.');
   return grounding;
 }
 
-export async function buildXlnGuideMessages(input: Readonly<{
-  query: string;
-  pathname: string;
-  history: readonly XlnAssistantMessage[];
-  signal?: AbortSignal;
-}>): Promise<XlnAssistantMessage[]> {
+export async function buildXlnGuideMessages(
+  input: Readonly<{
+    query: string;
+    pathname: string;
+    history: readonly XlnAssistantMessage[];
+    signal?: AbortSignal;
+  }>,
+): Promise<XlnAssistantMessage[]> {
   const grounding = await loadXlnGuideGrounding(input.query, input.pathname, input.signal);
   const system = [
     'You are the compact xln guide embedded in the xln application.',
-    'Reply in the user\'s language. Be direct and normally stay under 180 words.',
+    "Reply in the user's language. Be direct and normally stay under 180 words.",
     'Explain; never claim that you executed a payment, dispute, signature or state change.',
+    'Roadmap and adoption goals, including 51% of GDP by 2050, are targets, never demonstrated usage or readiness.',
     'Use only the supplied xln documentation for protocol-specific claims. If it is insufficient, say so and point to Docs.',
     'Never request or expose seeds, private keys, signatures, auth tokens or full runtime state.',
-    routeDescription(input.pathname),
+    describeXlnGuideRoute(input.pathname),
     grounding ? `\nTRUSTED XLN DOCUMENTATION\n${grounding}` : '',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
   return [{ role: 'system', content: system }, ...input.history.slice(-10), { role: 'user', content: input.query }];
 }
 
 export function suggestedXlnGuideQuestions(pathname: string): string[] {
-  if (pathname.startsWith('/rcpan')) return ['Why is RCPAN safer?', 'Walk me through a dispute', 'What does collateral protect?'];
+  if (pathname.startsWith('/rcpan'))
+    return ['Why is RCPAN safer?', 'Walk me through a dispute', 'What does collateral protect?'];
   return ['What am I looking at?', 'How do account machines work?', 'Explain reserves vs collateral'];
 }

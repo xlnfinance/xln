@@ -932,6 +932,8 @@ function executeXlnTool(name: string, args: Record<string, any>): { result: any;
 // ============================================================================
 
 serve({
+  // The public API owns authentication and model admission; this upstream is local only.
+  hostname: "127.0.0.1",
   port: PORT,
   async fetch(req) {
     const url = new URL(req.url);

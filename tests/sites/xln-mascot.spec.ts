@@ -1,10 +1,8 @@
 import { devices, expect, test, type Browser, type Page, type TestInfo } from '../global-setup.mts';
 import { Wallet } from 'ethers';
 import { APP_BASE_URL } from '../utils/e2e-baseline';
-import {
-  createRuntime as createSharedRuntime,
-  gotoApp as gotoSharedApp,
-} from '../utils/e2e-demo-users';
+import { gotoApp as gotoSharedApp } from '../utils/e2e-demo-users';
+import { importStackPhraseUi, LOCAL_PASSWORD } from '../../ui/tests/wallet-ui';
 
 type BrowserIssue = Readonly<{ type: string; text: string }>;
 const REAL_AI = process.env['XLN_REAL_AI_E2E'] === '1';
@@ -29,34 +27,57 @@ function trackIssues(page: Page): BrowserIssue[] {
 }
 
 async function seedMascotSettings(page: Page, theme: 'dark' | 'light', show: boolean): Promise<void> {
-  await page.addInitScript(({ selectedTheme, visible }) => {
-    localStorage.setItem('xln-auth-scheme', selectedTheme);
-    if (!localStorage.getItem('xln-settings')) {
-      localStorage.setItem('xln-settings', JSON.stringify({
-        theme: selectedTheme,
-        showXlnMascot: visible,
-        xlnMascotDock: { version: 1, side: 'right', offsetRatio: 0.72 },
-      }));
-    }
-  }, { selectedTheme: theme, visible: show });
+  await page.addInitScript(
+    ({ selectedTheme, visible }) => {
+      if (localStorage.getItem('xln-ui-theme') === null) localStorage.setItem('xln-ui-theme', selectedTheme);
+      if (localStorage.getItem('xln-ui-guide-visible') === null)
+        localStorage.setItem('xln-ui-guide-visible', String(visible));
+      if (localStorage.getItem('xln-ui-guide-dock') === null) {
+        localStorage.setItem('xln-ui-guide-dock', JSON.stringify({ version: 1, side: 'right', offsetRatio: 0.72 }));
+      }
+    },
+    { selectedTheme: theme, visible: show },
+  );
+}
+
+async function reloadWallet(page: Page): Promise<void> {
+  const entityId = await page.getByTestId('home-entity-id').textContent();
+  if (!entityId) throw new Error('WALLET_ENTITY_ID_MISSING');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
+  await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+  await page.getByTestId('nav-home').locator('visible=true').first().click();
+  await expect(page.getByTestId('home-entity-id')).toHaveText(entityId);
 }
 
 async function loadMascot(page: Page, theme: 'dark' | 'light', show = true): Promise<BrowserIssue[]> {
   const issues = trackIssues(page);
   await seedMascotSettings(page, theme, show);
-  await page.goto('/app?locktest=1&scenarioPreview=1', { waitUntil: 'domcontentloaded' });
-  await page.evaluate(selectedTheme => document.documentElement.setAttribute('data-theme', selectedTheme), theme);
-  const authRoot = page.locator('.brainvault-wrapper');
-  if (theme === 'light') await expect(authRoot).toHaveClass(/scheme-light/);
-  else await expect(authRoot).not.toHaveClass(/scheme-light/);
+  await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 30_000, settleMs: 0 });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+  const phrase = Wallet.createRandom().mnemonic?.phrase;
+  if (!phrase) throw new Error('TEST_WALLET_MNEMONIC_MISSING');
+  await importStackPhraseUi(page, phrase);
+  await expect(page.getByTestId('home-total')).toBeVisible();
   if (show) {
     const root = page.getByTestId('xln-mascot-root');
     await expect(root).toBeVisible({ timeout: 15_000 });
-    await expect.poll(async () => root.evaluate(element => {
-      const rect = element.getBoundingClientRect();
-      return rect.width >= 44 && rect.height >= 44 && rect.left >= 0 && rect.top >= 0 &&
-        rect.right <= innerWidth && rect.bottom <= innerHeight;
-    })).toBe(true);
+    await expect
+      .poll(async () =>
+        root.evaluate(element => {
+          const rect = element.getBoundingClientRect();
+          return (
+            rect.width >= 44 &&
+            rect.height >= 44 &&
+            rect.left >= 0 &&
+            rect.top >= 0 &&
+            rect.right <= innerWidth &&
+            rect.bottom <= innerHeight
+          );
+        }),
+      )
+      .toBe(true);
   }
   return issues;
 }
@@ -74,7 +95,14 @@ async function capture(
 async function assertInsideViewport(page: Page, selector: string): Promise<void> {
   const geometry = await page.locator(selector).evaluate(element => {
     const rect = element.getBoundingClientRect();
-    return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: innerWidth, height: innerHeight };
+    return {
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: innerWidth,
+      height: innerHeight,
+    };
   });
   expect(geometry.left).toBeGreaterThanOrEqual(0);
   expect(geometry.top).toBeGreaterThanOrEqual(0);
@@ -83,197 +111,233 @@ async function assertInsideViewport(page: Page, selector: string): Promise<void>
 }
 
 async function newPage(browser: Browser, width: number, height: number, theme: 'dark' | 'light') {
-  const context = await browser.newContext({ viewport: { width, height }, ignoreHTTPSErrors: true, colorScheme: theme });
+  const context = await browser.newContext({
+    viewport: { width, height },
+    ignoreHTTPSErrors: true,
+    colorScheme: theme,
+  });
   return { page: await context.newPage(), close: () => context.close() };
 }
 
 test.describe('xln mascot assistant', () => {
-  test('drags, docks, persists, and exposes an honest assistant state', { tag: '@functional' }, async ({ browser }, testInfo) => {
-    const wide = await newPage(browser, 1920, 1080, 'light');
-    const issues = await loadMascot(wide.page, 'light');
-    const root = wide.page.getByTestId('xln-mascot-root');
-    await expect(root).toHaveAttribute('data-dock-side', 'right');
-    await capture(wide.page, testInfo, 'wide-light-mascot-idle-right');
+  test(
+    'drags, docks, persists, and exposes an honest assistant state',
+    { tag: '@functional' },
+    async ({ browser }, testInfo) => {
+      const wide = await newPage(browser, 1920, 1080, 'light');
+      const issues = await loadMascot(wide.page, 'light');
+      const root = wide.page.getByTestId('xln-mascot-root');
+      await expect(root).toHaveAttribute('data-dock-side', 'right');
+      await capture(wide.page, testInfo, 'wide-light-mascot-idle-right');
 
-    const box = await wide.page.getByTestId('xln-mascot-toggle').boundingBox();
-    expect(box).not.toBeNull();
-    await wide.page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
-    await wide.page.mouse.down();
-    await wide.page.mouse.move(24, 420, { steps: 12 });
-    await wide.page.mouse.up();
-    await expect(root).toHaveAttribute('data-dock-side', 'left');
-    await wide.page.evaluate(() => new Promise<void>(resolve => {
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-    }));
-    // Holding a pointer during Chromium capture can omit compositor tiles. Capture
-    // the deterministic drop result at viewport size after the next painted frame.
-    await capture(wide.page, testInfo, 'wide-light-mascot-dragging', false, 'allow');
-    await expect(wide.page.getByTestId('xln-mascot-chat')).toHaveCount(0);
+      const box = await wide.page.getByTestId('xln-mascot-toggle').boundingBox();
+      expect(box).not.toBeNull();
+      await wide.page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await wide.page.mouse.down();
+      await wide.page.mouse.move(24, 420, { steps: 12 });
+      await wide.page.mouse.up();
+      await expect(root).toHaveAttribute('data-dock-side', 'left');
+      await wide.page.evaluate(
+        () =>
+          new Promise<void>(resolve => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          }),
+      );
+      // Holding a pointer during Chromium capture can omit compositor tiles. Capture
+      // the deterministic drop result at viewport size after the next painted frame.
+      await capture(wide.page, testInfo, 'wide-light-mascot-dragging', false, 'allow');
+      await expect(wide.page.getByTestId('xln-mascot-chat')).toHaveCount(0);
 
-    const stored = await wide.page.evaluate(() => JSON.parse(localStorage.getItem('xln-settings') || '{}'));
-    expect(stored.xlnMascotDock.side).toBe('left');
-    await wide.page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(root).toHaveAttribute('data-dock-side', 'left');
+      const stored = await wide.page.evaluate(() => JSON.parse(localStorage.getItem('xln-ui-guide-dock') || '{}'));
+      expect(stored.side).toBe('left');
+      await reloadWallet(wide.page);
+      await expect(root).toHaveAttribute('data-dock-side', 'left');
 
-    await wide.page.getByTestId('xln-mascot-toggle').click();
-    const chat = wide.page.getByTestId('xln-mascot-chat');
-    await expect(chat).toBeVisible();
-    await expect(chat).toContainText(/Local AI · public docs|Local AI offline/, { timeout: 10_000 });
-    await expect(wide.page.getByTestId('xln-mascot-input')).toBeFocused();
-    await assertInsideViewport(wide.page, '[data-testid="xln-mascot-chat"]');
-    const positions = await wide.page.evaluate(() => {
-      const mascot = document.querySelector('[data-testid="xln-mascot-root"]')!.getBoundingClientRect();
-      const panel = document.querySelector('[data-testid="xln-mascot-chat"]')!.getBoundingClientRect();
-      return { mascotRight: mascot.right, panelLeft: panel.left };
-    });
-    expect(positions.panelLeft).toBeGreaterThan(positions.mascotRight);
-    const assistantReady = await chat.getByText('Local AI · public docs').isVisible();
-    await capture(wide.page, testInfo, `wide-light-mascot-chat-left-${assistantReady ? 'ready' : 'offline'}`, false);
+      await wide.page.getByTestId('xln-mascot-toggle').click();
+      const chat = wide.page.getByTestId('xln-mascot-chat');
+      await expect(chat).toBeVisible();
+      await expect(chat).toContainText(/Local AI · public docs|Local AI offline/, { timeout: 10_000 });
+      await expect(wide.page.getByTestId('xln-mascot-input')).toBeFocused();
+      await assertInsideViewport(wide.page, '[data-testid="xln-mascot-chat"]');
+      const positions = await wide.page.evaluate(() => {
+        const mascot = document.querySelector('[data-testid="xln-mascot-root"]')!.getBoundingClientRect();
+        const panel = document.querySelector('[data-testid="xln-mascot-chat"]')!.getBoundingClientRect();
+        return { mascotRight: mascot.right, panelLeft: panel.left };
+      });
+      expect(positions.panelLeft).toBeGreaterThan(positions.mascotRight);
+      const assistantReady = await chat.getByText('Local AI · public docs').isVisible();
+      await capture(wide.page, testInfo, `wide-light-mascot-chat-left-${assistantReady ? 'ready' : 'offline'}`, false);
 
-    await wide.page.getByTestId('xln-mascot-input').press('Escape');
-    await expect(chat).toHaveCount(0);
-    await expect(wide.page.getByTestId('xln-mascot-toggle')).toBeFocused();
-    expect(issues).toEqual([]);
-    await wide.close();
-  });
+      await wide.page.getByTestId('xln-mascot-input').press('Escape');
+      await expect(chat).toHaveCount(0);
+      await expect(wide.page.getByTestId('xln-mascot-toggle')).toBeFocused();
+      expect(issues).toEqual([]);
+      await wide.close();
+    },
+  );
 
-  test('supports keyboard docking, hidden persistence, and reduced motion', { tag: '@functional' }, async ({ browser }, testInfo) => {
-    const reducedContext = await browser.newContext({
-      viewport: { width: 1440, height: 900 },
-      ignoreHTTPSErrors: true,
-      reducedMotion: 'reduce',
-    });
-    const page = await reducedContext.newPage();
-    const issues = await loadMascot(page, 'dark');
-    const toggle = page.getByTestId('xln-mascot-toggle');
-    await toggle.focus();
-    await toggle.press('Alt+ArrowUp');
-    await expect(page.getByTestId('xln-mascot-root')).toHaveAttribute('data-dock-side', 'top');
-    await toggle.press('ArrowRight');
-    await expect(page.getByTestId('xln-mascot-root')).toHaveAttribute('data-offset', '0.7700');
-    const animation = await page.locator('.logo-stage').evaluate(element => getComputedStyle(element).animationName);
-    expect(animation).toBe('none');
-    await page.getByTestId('xln-mascot-toggle').click();
-    await expect(page.getByTestId('xln-mascot-chat')).toBeVisible();
-    await capture(page, testInfo, 'laptop-dark-reduced-motion-chat');
-    await page.getByTestId('xln-mascot-close').click();
+  test(
+    'supports keyboard docking, hidden persistence, and reduced motion',
+    { tag: '@functional' },
+    async ({ browser }, testInfo) => {
+      const reducedContext = await browser.newContext({
+        viewport: { width: 1440, height: 900 },
+        ignoreHTTPSErrors: true,
+        reducedMotion: 'reduce',
+      });
+      const page = await reducedContext.newPage();
+      const issues = await loadMascot(page, 'dark');
+      const toggle = page.getByTestId('xln-mascot-toggle');
+      await toggle.focus();
+      await toggle.press('Alt+ArrowUp');
+      await expect(page.getByTestId('xln-mascot-root')).toHaveAttribute('data-dock-side', 'top');
+      await toggle.press('ArrowRight');
+      await expect(page.getByTestId('xln-mascot-root')).toHaveAttribute('data-offset', '0.7700');
+      const animation = await page.locator('.logo-stage').evaluate(element => getComputedStyle(element).animationName);
+      expect(animation).toBe('none');
+      await page.getByTestId('xln-mascot-toggle').click();
+      await expect(page.getByTestId('xln-mascot-chat')).toBeVisible();
+      await capture(page, testInfo, 'laptop-dark-reduced-motion-chat');
+      await page.getByTestId('xln-mascot-close').click();
 
-    await page.evaluate(() => {
-      const settings = JSON.parse(localStorage.getItem('xln-settings') || '{}');
-      settings.showXlnMascot = false;
-      localStorage.setItem('xln-settings', JSON.stringify(settings));
-    });
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('xln-mascot-root')).toHaveCount(0);
-    await page.evaluate(() => {
-      const settings = JSON.parse(localStorage.getItem('xln-settings') || '{}');
-      settings.showXlnMascot = true;
-      localStorage.setItem('xln-settings', JSON.stringify(settings));
-    });
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('xln-mascot-root')).toBeVisible();
-    expect(issues).toEqual([]);
-    await reducedContext.close();
-  });
+      await page.getByTestId('nav-settings').locator('visible=true').first().click();
+      await page.getByRole('checkbox', { name: 'Show xln guide', exact: true }).uncheck();
+      await page.getByTestId('nav-home').locator('visible=true').first().click();
+      await reloadWallet(page);
+      await expect(page.getByTestId('xln-mascot-root')).toHaveCount(0);
+      await page.getByTestId('nav-settings').locator('visible=true').first().click();
+      await page.getByRole('checkbox', { name: 'Show xln guide', exact: true }).check();
+      await page.getByTestId('nav-home').locator('visible=true').first().click();
+      await reloadWallet(page);
+      await expect(page.getByTestId('xln-mascot-root')).toBeVisible();
+      expect(issues).toEqual([]);
+      await reducedContext.close();
+    },
+  );
 
-  test('fits the logo and open chat on iPhone in dark and light themes', { tag: '@functional' }, async ({ browser }, testInfo) => {
-    const context = await browser.newContext({ ...devices['iPhone 15 Pro'], ignoreHTTPSErrors: true, colorScheme: 'dark' });
-    const page = await context.newPage();
-    const issues = trackIssues(page);
-    await seedMascotSettings(page, 'dark', true);
-    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 30_000, settleMs: 500 });
-    await createSharedRuntime(page, `mascot-mobile-${Date.now()}`, Wallet.createRandom().mnemonic!.phrase);
-    await expect(page.locator('.brainvault-wrapper')).toHaveCount(0);
-    await expect(page.getByTestId('xln-mascot-root')).toBeVisible();
-    await assertInsideViewport(page, '[data-testid="xln-mascot-root"]');
+  test(
+    'fits the logo and open chat on iPhone in dark and light themes',
+    { tag: '@functional' },
+    async ({ browser }, testInfo) => {
+      const context = await browser.newContext({
+        ...devices['iPhone 15 Pro'],
+        ignoreHTTPSErrors: true,
+        colorScheme: 'dark',
+      });
+      const page = await context.newPage();
+      const issues = await loadMascot(page, 'dark');
+      await expect(page.getByTestId('nav-home').locator('visible=true').first()).toBeVisible();
+      await expect(page.getByTestId('xln-mascot-root')).toBeVisible();
+      await assertInsideViewport(page, '[data-testid="xln-mascot-root"]');
 
-    const toggle = page.getByTestId('xln-mascot-toggle');
-    const target = await toggle.boundingBox();
-    expect(target!.width).toBeGreaterThanOrEqual(44);
-    expect(target!.height).toBeGreaterThanOrEqual(44);
-    await capture(page, testInfo, 'iphone-dark-mascot-right');
-    await toggle.click();
-    await expect(page.getByTestId('xln-mascot-chat')).toBeVisible();
-    await assertInsideViewport(page, '[data-testid="xln-mascot-chat"]');
-    await capture(page, testInfo, 'iphone-dark-mascot-chat-open');
-    await page.getByTestId('xln-mascot-close').click();
+      const toggle = page.getByTestId('xln-mascot-toggle');
+      const target = await toggle.boundingBox();
+      expect(target!.width).toBeGreaterThanOrEqual(44);
+      expect(target!.height).toBeGreaterThanOrEqual(44);
+      await capture(page, testInfo, 'iphone-dark-mascot-right');
+      await toggle.click();
+      await expect(page.getByTestId('xln-mascot-chat')).toBeVisible();
+      await assertInsideViewport(page, '[data-testid="xln-mascot-chat"]');
+      await capture(page, testInfo, 'iphone-dark-mascot-chat-open');
+      await page.getByTestId('xln-mascot-close').click();
 
-    await page.evaluate(() => {
-      const settings = JSON.parse(localStorage.getItem('xln-settings') || '{}');
-      settings.theme = 'light';
-      localStorage.setItem('xln-settings', JSON.stringify(settings));
-    });
-    await page.emulateMedia({ colorScheme: 'light' });
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
-    await expect(page.locator('.loading-screen')).toHaveCount(0, { timeout: 30_000 });
-    await expect(page.getByTestId('xln-mascot-root')).toBeVisible({ timeout: 30_000 });
-    const lightToggle = page.getByTestId('xln-mascot-toggle');
-    await expect(lightToggle).toBeVisible();
-    await lightToggle.focus();
-    await lightToggle.press('Alt+ArrowUp');
-    await expect(page.getByTestId('xln-mascot-root')).toHaveAttribute('data-dock-side', 'top');
-    await assertInsideViewport(page, '[data-testid="xln-mascot-root"]');
-    await capture(page, testInfo, 'iphone-light-mascot-top');
-    expect(issues).toEqual([]);
-    await context.close();
-  });
+      await page.getByTestId('nav-settings').locator('visible=true').first().click();
+      await page.getByRole('button', { name: 'Light', exact: true }).click();
+      await page.getByTestId('nav-home').locator('visible=true').first().click();
+      await page.emulateMedia({ colorScheme: 'light' });
+      await reloadWallet(page);
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+      await expect(page.getByTestId('xln-mascot-root')).toBeVisible({ timeout: 30_000 });
+      const lightToggle = page.getByTestId('xln-mascot-toggle');
+      await expect(lightToggle).toBeVisible();
+      await lightToggle.focus();
+      await lightToggle.press('Alt+ArrowUp');
+      await expect(page.getByTestId('xln-mascot-root')).toHaveAttribute('data-dock-side', 'top');
+      await assertInsideViewport(page, '[data-testid="xln-mascot-root"]');
+      await capture(page, testInfo, 'iphone-light-mascot-top');
+      expect(issues).toEqual([]);
+      await context.close();
+    },
+  );
 
-  test('renders model Markdown without executable or malformed links', { tag: '@resilience' }, async ({ page }, testInfo) => {
-    await page.route('**/api/assistant/models', route => route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        provider: 'local',
-        available: true,
-        defaultModel: 'qwen3-coder:latest',
-        models: [{ id: 'qwen3-coder:latest', name: 'Qwen' }],
-      }),
-    }));
-    await page.route('**/api/assistant/chat', route => route.fulfill({
-      status: 200,
-      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
-      body: [
-        'data: {"content":"**Safe answer.** [broken](http://[) [blocked](javascript:window.__xlnMascotXss=1) <img src=x onerror=window.__xlnMascotXss=2>"}',
-        'data: [DONE]',
-        '',
-      ].join('\n\n'),
-    }));
+  test(
+    'renders model Markdown without executable or malformed links',
+    { tag: '@resilience' },
+    async ({ page }, testInfo) => {
+      await page.route('**/api/assistant/models', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            provider: 'local',
+            available: true,
+            defaultModel: 'qwen3-coder:latest',
+            models: [{ id: 'qwen3-coder:latest', name: 'Qwen' }],
+          }),
+        }),
+      );
+      await page.route('**/api/assistant/chat', route =>
+        route.fulfill({
+          status: 200,
+          headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+          body: [
+            'data: {"content":"**Safe answer.** [broken](http://[) [blocked](javascript:window.__xlnMascotXss=1) <img src=x onerror=window.__xlnMascotXss=2>"}',
+            'data: [DONE]',
+            '',
+          ].join('\n\n'),
+        }),
+      );
 
-    const issues = await loadMascot(page, 'dark');
-    await page.getByTestId('xln-mascot-toggle').click();
-    await page.getByTestId('xln-mascot-input').fill('Explain safely');
-    await page.getByTestId('xln-mascot-submit').click();
-    const answer = page.getByTestId('xln-mascot-chat').locator('article.assistant .message-markdown');
-    await expect(answer.locator('strong')).toHaveText('Safe answer.');
-    await expect(answer.locator('img, script, iframe, svg')).toHaveCount(0);
-    await expect(answer.locator('a[href]')).toHaveCount(0);
-    expect(await page.evaluate(() => (window as typeof window & { __xlnMascotXss?: number }).__xlnMascotXss)).toBeUndefined();
-    await capture(page, testInfo, 'laptop-dark-sanitized-markdown');
-    expect(issues).toEqual([]);
-  });
+      const issues = await loadMascot(page, 'dark');
+      await page.getByTestId('xln-mascot-toggle').click();
+      await page.getByTestId('xln-mascot-input').fill('Explain safely');
+      await page.getByTestId('xln-mascot-submit').click();
+      const answer = page.getByTestId('xln-mascot-chat').locator('article.assistant .guide-markdown');
+      await expect(answer.locator('strong')).toHaveText('Safe answer.');
+      await expect(answer.locator('img, script, iframe, svg')).toHaveCount(0);
+      await expect(answer.locator('a[href]')).toHaveCount(0);
+      expect(
+        await page.evaluate(() => (window as typeof window & { __xlnMascotXss?: number }).__xlnMascotXss),
+      ).toBeUndefined();
+      await capture(page, testInfo, 'laptop-dark-sanitized-markdown');
+      expect(issues).toEqual([]);
+    },
+  );
 
-  test('streams a real docs-grounded answer through the production proxy', { tag: '@functional' }, async ({ page }, testInfo) => {
-    // XLN_ALLOW_SKIP: requires the explicitly enabled external local AI service.
-    test.skip(!REAL_AI, 'Set XLN_REAL_AI_E2E=1 with the local xln AI service running.');
-    const issues = await loadMascot(page, 'dark');
-    await page.getByTestId('xln-mascot-toggle').click();
-    await expect(page.getByText('Local AI · public docs')).toBeVisible({ timeout: 10_000 });
-    const chatResponse = page.waitForResponse(response =>
-      new URL(response.url()).pathname === '/api/assistant/chat' && response.request().method() === 'POST');
-    await page.getByRole('button', { name: 'What am I looking at?' }).click();
-    await expect(page.getByTestId('xln-mascot-root')).toHaveAttribute('data-presence-state', 'thinking');
-    await capture(page, testInfo, 'laptop-dark-real-ai-thinking');
-    // First visible tokens precede completion. The client cancels its SSE reader
-    // on [DONE], so assert application completion rather than socket closure.
-    const response = await chatResponse;
-    expect(response.ok()).toBe(true);
-    const answer = page.getByTestId('xln-mascot-chat').locator('article.assistant .message-markdown');
-    await expect(answer).not.toHaveText('Thinking…', { timeout: 120_000 });
-    await expect(answer).not.toBeEmpty();
-    await expect(page.getByTestId('xln-mascot-root')).toHaveAttribute('data-presence-state', 'ready', { timeout: 30_000 });
-    await expect(page.locator('.assistant-error')).toHaveCount(0);
-    await capture(page, testInfo, 'laptop-dark-real-ai-answer');
-    expect(issues).toEqual([]);
-  });
+  test(
+    'streams a real docs-grounded answer through the production proxy',
+    { tag: '@functional' },
+    async ({ page }, testInfo) => {
+      // XLN_ALLOW_SKIP: requires the explicitly enabled external local AI service.
+      test.skip(!REAL_AI, 'Set XLN_REAL_AI_E2E=1 with the local xln AI service running.');
+      const issues = await loadMascot(page, 'dark');
+      await page.getByTestId('xln-mascot-toggle').click();
+      await expect(page.getByText('Local AI · public docs')).toBeVisible({ timeout: 10_000 });
+      const chatResponse = page.waitForResponse(
+        response =>
+          new URL(response.url()).pathname === '/api/assistant/chat' && response.request().method() === 'POST',
+      );
+      await page.getByRole('button', { name: 'What am I looking at?' }).click();
+      await expect(page.getByTestId('xln-mascot-root')).toHaveAttribute('data-presence-state', 'thinking');
+      await capture(page, testInfo, 'laptop-dark-real-ai-thinking');
+      // First visible tokens precede completion. The client cancels its SSE reader
+      // on [DONE], so assert application completion rather than socket closure.
+      const response = await chatResponse;
+      expect(response.ok()).toBe(true);
+      const request = response.request().postDataJSON();
+      expect(request.messages[0].content).toContain('CURRENT SCREEN: React wallet Home');
+      const answer = page.getByTestId('xln-mascot-chat').locator('article.assistant .guide-markdown');
+      await expect(answer).not.toHaveText('Thinking…', { timeout: 120_000 });
+      await expect(answer).not.toBeEmpty();
+      await expect(page.getByTestId('xln-mascot-root')).toHaveAttribute('data-presence-state', 'ready', {
+        timeout: 30_000,
+      });
+      await expect(page.locator('.guide-error')).toHaveCount(0);
+      await expect(answer).toContainText(/wallet/i);
+      await expect(answer).toContainText(/pay|payment/i);
+      await expect(answer).not.toContainText(/not a user interface/i);
+      await capture(page, testInfo, 'laptop-dark-real-ai-answer');
+      expect(issues).toEqual([]);
+    },
+  );
 });

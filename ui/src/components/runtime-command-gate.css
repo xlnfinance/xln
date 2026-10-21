@@ -1,0 +1,23 @@
+.runtime-command-gate {
+  position: fixed;
+  z-index: 120;
+  top: max(12px, env(safe-area-inset-top));
+  left: 16px;
+  right: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 12px 16px;
+  border: 1px solid #ffb020;
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.runtime-command-gate span,
+.runtime-command-gate code {
+  font-size: 12px;
+}
+.runtime-command-gate a {
+  color: var(--accent);
+}

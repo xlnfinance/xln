@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { retainOperatorDiagnosticsAuthority } from '../../../frontend/src/lib/debug/operator-diagnostics';
+import { retainOperatorDiagnosticsAuthority } from '../../../frontend/src/lib/debug/operator-target';
 
 test('only confirmed remote admin selection can query diagnostics across reconnect', () => {
   const target = { runtimeId: 'h2', endpoint: 'ws://localhost:8093/rpc' };
@@ -9,6 +9,14 @@ test('only confirmed remote admin selection can query diagnostics across reconne
   expect(confirmed).toBe('h2|ws://localhost:8093/rpc');
   expect(retainOperatorDiagnosticsAuthority({ ...target, mode: 'remote', authLevel: null }, confirmed)).toBe(confirmed);
   expect(retainOperatorDiagnosticsAuthority({ ...target, mode: 'remote', authLevel: 'inspect' }, confirmed)).toBe('');
-  expect(retainOperatorDiagnosticsAuthority({ ...target, runtimeId: 'h3', mode: 'remote', authLevel: null }, confirmed)).toBe('');
+  expect(
+    retainOperatorDiagnosticsAuthority({ ...target, runtimeId: 'h3', mode: 'remote', authLevel: null }, confirmed),
+  ).toBe('');
   expect(retainOperatorDiagnosticsAuthority({ ...target, mode: 'embedded', authLevel: 'admin' }, confirmed)).toBe('');
+  expect(
+    retainOperatorDiagnosticsAuthority(
+      { ...target, endpoint: 'ws://localhost:8094/rpc', mode: 'remote', authLevel: null },
+      confirmed,
+    ),
+  ).toBe('');
 });

@@ -1,3 +1,4 @@
+import { retainOperatorDiagnosticsAuthority } from '@xln/frontend/lib/debug/operator-target';
 import { adoptActiveTabLock, initializeActiveTabLock } from '../../../frontend/src/lib/utils/control/activeTabLock';
 import { closeRuntimeSession } from '../../../frontend/src/lib/security/runtimeSession';
 import type {
@@ -59,12 +60,19 @@ export function getEmbeddedEnv(): RuntimeReplica | null {
   return currentEnv;
 }
 
-function attach(adapter: RuntimeAdapter): void {
+function attach(adapter: RuntimeAdapter, endpoint = 'embedded'): void {
+  let confirmedTarget = '';
   const push = (): void => {
+    confirmedTarget = retainOperatorDiagnosticsAuthority(
+      { mode: adapter.mode, authLevel: adapter.authLevel, runtimeId: adapter.runtimeId, endpoint },
+      confirmedTarget,
+    );
     useApp.getState().setAdapterState({
       status: adapter.status,
       height: adapter.currentHeight,
       commandReady: adapter.commandReady,
+      commandReadyReason: adapter.commandReadyReason,
+      operatorRuntimeId: confirmedTarget ? adapter.runtimeId : '',
     });
   };
   const offChange = adapter.onChange(() => push());
@@ -85,7 +93,13 @@ export function disconnectAdapter(): void {
   remoteAdmin = null;
   // Entity selection belongs to this connection; a new adapter must not inherit its authority context.
   useApp.getState().setActiveEntityId(null);
-  useApp.getState().setAdapterState({ status: 'disconnected', height: 0, commandReady: false });
+  useApp.getState().setAdapterState({
+    status: 'disconnected',
+    height: 0,
+    commandReady: false,
+    commandReadyReason: null,
+    operatorRuntimeId: '',
+  });
 }
 
 /** Stop accepted work before revoking the in-memory signing authority. */
@@ -222,7 +236,7 @@ export async function connectRemote(wsUrl: string, authKey?: string): Promise<Ru
   if (authKey && adapter.authLevel === 'admin') {
     remoteAdmin = { runtimeId: adapter.runtimeId, apiOrigin: runtimeHttpOriginFromWsUrl(wsUrl), capability: authKey };
   }
-  attach(adapter);
+  attach(adapter, wsUrl);
   return adapter;
 }
 

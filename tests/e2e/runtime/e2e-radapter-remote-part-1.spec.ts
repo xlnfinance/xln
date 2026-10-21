@@ -1234,22 +1234,22 @@ test(
     page.on('pageerror', error => consoleProblems.push(`pageerror: ${error.message}`));
 
     const directAddressUrl = remoteRuntimeUrl('/address', h1Endpoint.wsUrl, adminKey);
+    const wire = observeRemoteProjection(page, h1Endpoint.wsUrl);
     await page.goto(directAddressUrl, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('.empty.error')).toContainText('REMOTE_RUNTIME_CONSENT_REQUIRED', {
       timeout: REMOTE_E2E_WAIT_MS,
     });
     const addressBeforeConsent = await page.evaluate(() => ({
-      adapterConnected: (window as any).__xln?.adapter?.status?.().connected === true,
       remoteMode: localStorage.getItem('xln-runtime-adapter-mode'),
       sessionKey: sessionStorage.getItem('xln-runtime-adapter-key'),
       acceptedKeys: Object.keys(sessionStorage).filter(key => key.startsWith('xln-remote-runtime-accepted:')),
     }));
     expect(addressBeforeConsent).toEqual({
-      adapterConnected: false,
       remoteMode: null,
       sessionKey: null,
       acceptedKeys: [],
     });
+    expect(wire.responses.has('auth')).toBe(false);
 
     await page.goto(remoteRuntimeUrl('/health', h1Endpoint.wsUrl, adminKey), {
       waitUntil: 'domcontentloaded',
@@ -1258,38 +1258,39 @@ test(
       timeout: REMOTE_E2E_WAIT_MS,
     });
     expect(await page.evaluate(() => sessionStorage.getItem('xln-runtime-adapter-key'))).toBeNull();
+    expect(wire.responses.has('auth')).toBe(false);
 
-    await page.goto(remoteRuntimeUrl('/app', h1Endpoint.wsUrl, adminKey), {
+    await page.goto(remoteRuntimeUrl('/app?observer=1', h1Endpoint.wsUrl, adminKey), {
       waitUntil: 'domcontentloaded',
     });
     await acceptRemoteRuntimeConsent(page);
+    await expect
+      .poll(() => wire.responses.get('auth'), { timeout: REMOTE_E2E_WAIT_MS })
+      .toMatchObject({
+        authLevel: 'admin',
+        runtimeId: h1Endpoint.runtimeId,
+      });
+    wire.responses.clear();
+    wire.reads.length = 0;
     await page.goto(`${APP_BASE_URL}/address`, { waitUntil: 'domcontentloaded' });
 
-    await page.waitForFunction(
-      () => {
-        const view = window as typeof window & {
-          __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null; height?: number } };
-        };
-        const status = (view as any).__xln?.adapter?.status();
-        return status?.connected === true && status.authLevel === 'admin' && Number(status.height || 0) > 0;
-      },
-      null,
-      { timeout: REMOTE_E2E_WAIT_MS },
-    );
+    await expect
+      .poll(() => wire.responses.get('auth'), { timeout: REMOTE_E2E_WAIT_MS })
+      .toMatchObject({
+        authLevel: 'admin',
+        runtimeId: h1Endpoint.runtimeId,
+      });
+    expect((wire.responses.get('auth') as { currentHeight: number }).currentHeight).toBeGreaterThan(0);
     await page.waitForSelector('.row .address', { timeout: REMOTE_E2E_WAIT_MS });
     await page.waitForFunction(() => !location.href.includes('xlnra1.') && !location.search.includes('token='), null, {
       timeout: 10_000,
     });
 
     const directory = await page.evaluate(() => {
-      const view = window as typeof window & {
-        __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null; height?: number } };
-      };
       return {
         href: location.href,
         rows: document.querySelectorAll('.row').length,
         firstAddress: document.querySelector('.row .address')?.textContent?.trim() || '',
-        adapter: (view as any).__xln?.adapter?.status() || null,
         storageMode: localStorage.getItem('xln-runtime-adapter-mode') || '',
         storageWs: localStorage.getItem('xln-runtime-adapter-ws') || '',
         sessionKeyPresent: Boolean(sessionStorage.getItem('xln-runtime-adapter-key')),
@@ -1300,8 +1301,8 @@ test(
     expect(directory.href).toBe(`${APP_BASE_URL}/address`);
     expect(directory.rows).toBeGreaterThan(0);
     expect(directory.firstAddress).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(directory.adapter?.connected).toBe(true);
-    expect(directory.adapter?.authLevel).toBe('admin');
+    const entities = wire.responses.get('entities') as RuntimeAdapterEntitySummary[];
+    expect(entities.some(entity => entity.entityId === directory.firstAddress)).toBe(true);
     expect(directory.storageMode).toBe('remote');
     expect(directory.storageWs).toBe(h1Endpoint.wsUrl);
     expect(directory.sessionKeyPresent).toBe(true);
@@ -1320,6 +1321,7 @@ test(
     expect(detail.address).toBe(directory.firstAddress);
     expect(detail.historyTab).toBe('History');
     expect(detail.errorText).toBe('');
+    expect(wire.errors).toEqual([]);
     expect(
       consoleProblems.filter(message =>
         /projection read failed|Runtime adapter is not connected|Cannot call replaceState|Insufficient resources|TypeError|pageerror/i.test(
@@ -1336,6 +1338,8 @@ test(
   async ({ page }) => {
     const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
     const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+    const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
+    const h1 = String(hubs.h1).toLowerCase();
     const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
     const consoleProblems: string[] = [];
     page.on('console', message => {
@@ -1343,33 +1347,18 @@ test(
     });
     page.on('pageerror', error => consoleProblems.push(`pageerror:${error.message}`));
 
-    await page.goto(remoteRuntimeUrl('/app', h1Endpoint.wsUrl, adminKey), { waitUntil: 'domcontentloaded' });
-    await acceptRemoteRuntimeConsent(page);
-
-    await page.waitForFunction(
-      () => {
-        const view = window as typeof window & {
-          __xlnRuntimeView?: { height?: number };
-          __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null } };
-        };
-        const status = (view as any).__xln?.adapter?.status();
-        return (
-          status?.connected === true &&
-          status.authLevel === 'admin' &&
-          Number((view as any).__xln?.view?.height || 0) > 0
-        );
-      },
-      null,
-      { timeout: REMOTE_E2E_WAIT_MS },
-    );
-
-    await page.getByTestId('tab-settings').click();
-    await page.waitForSelector('[data-testid="entity-settings-projection-panel"]', { timeout: REMOTE_E2E_WAIT_MS });
+    const wire = await openReactRemoteWorkspace(page, h1Endpoint, adminKey, h1);
+    await page.locator('[data-testid="nav-settings"]:visible').click();
+    const profileName = page.getByTestId('profile-name');
+    await expect(profileName).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+    const publishedName = 'H1 settings projection';
+    await profileName.fill(publishedName);
+    await expect(page.getByTestId('profile-publish')).toBeEnabled();
 
     const result = await page.evaluate(() => {
       const text = document.body.textContent || '';
-      const panel = document.querySelector('[data-testid="entity-settings-projection-panel"]');
-      const saveButton = panel?.querySelector('button[type="submit"]');
+      const panel = document.querySelector('[data-testid="profile-name"]');
+      const saveButton = document.querySelector('[data-testid="profile-publish"]');
       return {
         projectionPanel: Boolean(panel),
         saveDisabled: saveButton?.hasAttribute('disabled') ?? true,
@@ -1387,6 +1376,16 @@ test(
     expect(result.saveDisabled).toBe(false);
     expect(result.localSettingsMounted).toBe(false);
     expect(result.fullAccessWarning).toBe(false);
+    await expect(page.getByRole('button', { name: 'Reveal recovery phrase', exact: true })).toHaveCount(0);
+    await page.getByTestId('profile-publish').click();
+    await expect
+      .poll(
+        () =>
+          (wire.responses.get('view-frame') as RuntimeAdapterViewFrame | undefined)?.activeEntity?.core.profile?.name,
+        { timeout: REMOTE_E2E_WAIT_MS },
+      )
+      .toBe(publishedName);
+    expect(wire.errors).toEqual([]);
     expect(
       consoleProblems.filter(message =>
         /TypeError|unsupported adapter path|admin runtime access|pageerror/i.test(message),
@@ -1402,6 +1401,10 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
   const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
   const qaApiRequests: string[] = [];
   const debugProjectionRequests: string[] = [];
+  let healthRequests = 0;
+  page.on('request', request => {
+    if (new URL(request.url()).pathname === '/api/health') healthRequests += 1;
+  });
   const consoleProblems: string[] = [];
   page.on('console', message => {
     if (message.type() === 'error') consoleProblems.push(message.text());
@@ -1450,8 +1453,11 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
   const cockpitPanel = page.locator('#qa-cockpit');
   await expect(cockpitPanel).toBeVisible();
   await expect(cockpitPanel).toContainText('QA Evidence');
-  await expect(cockpitPanel.getByRole('link', { name: 'Open QA cockpit' })).toHaveAttribute('href', '/qa');
-  await expect(cockpitPanel.getByRole('link', { name: 'UX gallery' })).toHaveAttribute('href', '/qa');
+  await expect(cockpitPanel.getByRole('link', { name: 'Recorded checks' })).toHaveAttribute(
+    'href',
+    'https://github.com/xlnfinance/xln/tree/main/docs/evidence',
+  );
+  await expect(cockpitPanel.getByRole('link', { name: 'Review history' })).toHaveAttribute('href', '/qa/quorum');
   await expect(page.locator('#qa-runs')).toHaveCount(0);
   await expect(page.locator('iframe[title="QA Cockpit"]')).toHaveCount(0);
   expect(qaApiRequests, '/health must not read /api/qa; QA cockpit owns that surface').toEqual([]);
@@ -1464,6 +1470,19 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
       /Failed to fetch health|Runtime adapter is not connected|pageerror/i.test(message),
     ),
   ).toEqual([]);
+  await expect(page.getByRole('checkbox', { name: 'Auto (4s)' })).toBeChecked();
+  expect(healthRequests).toBeGreaterThan(0);
+  await cockpitPanel.getByRole('link', { name: 'Review history' }).click();
+  await expect(page.getByTestId('quorum-dashboard')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page).toHaveURL(`${APP_BASE_URL}/qa/quorum`);
+  const healthRequestsAfterLeaving = healthRequests;
+  // Observe beyond Health's real 4s polling period; navigation must dispose its timer.
+  await page.waitForTimeout(4_500);
+  expect(healthRequests).toBe(healthRequestsAfterLeaving);
+  expect(qaApiRequests).toEqual([]);
+  expect(debugProjectionRequests).toEqual([]);
+  await page.getByRole('link', { name: 'Runtime health' }).click();
+  await expect(page).toHaveURL(`${APP_BASE_URL}/health`);
   await expect(page.locator('#runtime-adapter')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Open app' })).toHaveAttribute('href', '/ui/');
 
@@ -1595,19 +1614,19 @@ test(
     const h2Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H2');
     const adminKey = (await resolveRuntimeImportCapability(page, h2Endpoint, 'admin')).token;
 
-    await page.goto(remoteRuntimeUrl('/app', h2Endpoint.wsUrl, adminKey), { waitUntil: 'domcontentloaded' });
-    await acceptRemoteRuntimeConsent(page);
-    await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+    await openReactRemoteWorkspace(page, h2Endpoint, adminKey, String(hubs.h2).toLowerCase());
     await expect
       .poll(
         async () =>
           await page.evaluate(() => {
-            const status = (window as any).__xln?.adapter?.status?.();
+            const status = (
+              window as Window & { __xln?: { adapter: () => RuntimeAdapterInspection | null } }
+            ).__xln?.adapter();
             return {
-              connected: status?.connected === true,
+              connected: status?.status === 'connected',
               authLevel: String(status?.authLevel || ''),
               commandReady: status?.commandReady === true,
-              runtimeId: String((window as any).__xln?.view?.runtimeId || '').toLowerCase(),
+              runtimeId: String(status?.runtimeId || '').toLowerCase(),
             };
           }),
         {
@@ -1622,25 +1641,35 @@ test(
         runtimeId: h2Endpoint.runtimeId,
       });
 
-    await openAccountWorkspaceTab(page, 'open');
-    const recipient = page.locator('input[placeholder="Select or paste entity ID"]:visible').first();
+    await page.getByTestId('home-open-account').click();
+    const recipient = page.getByTestId('open-account-target');
     await expect(recipient).toBeVisible();
     await recipient.fill(h1);
     const submit = page.getByTestId('open-account-submit');
     await expect(submit).toBeEnabled();
 
     const beforeStatus = await page.evaluate(() => {
-      const status = (window as any).__xln?.adapter?.status?.();
+      const status = (
+        window as Window & { __xln?: { adapter: () => RuntimeAdapterInspection | null } }
+      ).__xln?.adapter();
       return {
-        height: Number(status?.height || 0),
-        runtimeId: String((window as any).__xln?.view?.runtimeId || '').toLowerCase(),
+        height: Number(status?.currentHeight || 0),
+        runtimeId: String(status?.runtimeId || '').toLowerCase(),
       };
     });
     const beforePersisted = await page.evaluate(async () => {
-      const adapter = (window as any).__xln?.adapter;
-      const head = await adapter.query.head();
+      const adapter = (
+        window as Window & { __xln?: { adapter: () => RuntimeAdapterInspection | null } }
+      ).__xln?.adapter();
+      if (!adapter) throw new Error('H2_RUNTIME_INSPECTION_MISSING');
+      const head = await adapter.read<{ latestHeight: number }>('head');
       const latestHeight = Number(head?.latestHeight || 0);
-      const frame = await adapter.query.frame(latestHeight);
+      const frame = await adapter.read<{
+        frameHash?: string;
+        postStateHash?: string;
+        stateHash?: string;
+        canonicalStateHash?: string;
+      }>(`frame/${latestHeight}`);
       return {
         latestHeight,
         frameHash: String(frame?.frameHash || ''),
@@ -1664,7 +1693,7 @@ test(
 
     await page.evaluate(() => {
       const global = window as typeof window & {
-        __xln?: { adapter?: { status?: () => Record<string, unknown> } };
+        __xln?: { adapter: () => RuntimeAdapterInspection | null };
         __xlnH2TransitionProbe?: {
           samples: Array<Record<string, unknown>>;
           timer: ReturnType<typeof setInterval>;
@@ -1672,10 +1701,10 @@ test(
       };
       const samples: Array<Record<string, unknown>> = [];
       const sample = (): void => {
-        const status = global.__xln?.adapter?.status?.();
+        const status = global.__xln?.adapter();
         const next = {
           at: performance.now(),
-          connected: status?.['connected'] === true,
+          connected: status?.status === 'connected',
           authLevel: String(status?.['authLevel'] || ''),
           commandReady: status?.['commandReady'] === true,
           reason: String(status?.['commandReadyReason'] || ''),
@@ -1729,6 +1758,25 @@ test(
     await expect(page.getByTestId('runtime-command-gate-incident')).toHaveText(/^h2_unexpected_exit-/, {
       timeout: 15_000,
     });
+    const contrast = await gate.evaluate(element => {
+      const luminance = (color: string): number => {
+        const rgb = color
+          .match(/[\d.]+/g)
+          ?.slice(0, 3)
+          .map(Number);
+        if (!rgb || rgb.length !== 3) throw new Error(`UNSUPPORTED_COLOR:${color}`);
+        const linear = rgb.map(value =>
+          value / 255 <= 0.04045 ? value / 255 / 12.92 : ((value / 255 + 0.055) / 1.055) ** 2.4,
+        );
+        return linear[0]! * 0.2126 + linear[1]! * 0.7152 + linear[2]! * 0.0722;
+      };
+      const background = luminance(getComputedStyle(element).backgroundColor);
+      return [element, element.querySelector('a')!].map(node => {
+        const foreground = luminance(getComputedStyle(node).color);
+        return (Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05);
+      });
+    });
+    for (const ratio of contrast) expect(ratio).toBeGreaterThanOrEqual(4.5);
     await captureLocatorScreenshot(gate, testInfo, 'runtime-command-gate-real-h2-replacement.png', {
       ux: {
         title: 'Real H2 replacement command gate',
@@ -1771,12 +1819,14 @@ test(
       .poll(
         async () =>
           await page.evaluate(() => {
-            const status = (window as any).__xln?.adapter?.status?.();
+            const status = (
+              window as Window & { __xln?: { adapter: () => RuntimeAdapterInspection | null } }
+            ).__xln?.adapter();
             return {
-              connected: status?.connected === true,
+              connected: status?.status === 'connected',
               authLevel: String(status?.authLevel || ''),
               commandReady: status?.commandReady === true,
-              runtimeId: String((window as any).__xln?.view?.runtimeId || '').toLowerCase(),
+              runtimeId: String(status?.runtimeId || '').toLowerCase(),
             };
           }),
         {
@@ -1792,15 +1842,29 @@ test(
         runtimeId: beforeStatus.runtimeId,
       });
     await expect(gate).toBeHidden();
+    await page.getByTestId('home-open-account').click();
     await expect(recipient).toBeVisible();
     await recipient.fill(h1);
     await expect(submit).toBeEnabled();
-    const restoredHeight = await page.evaluate(() => Number((window as any).__xln?.adapter?.status?.().height || 0));
+    const restoredHeight = await page.evaluate(() =>
+      Number(
+        (window as Window & { __xln?: { adapter: () => RuntimeAdapterInspection | null } }).__xln?.adapter()
+          ?.currentHeight || 0,
+      ),
+    );
     expect(restoredHeight).toBeGreaterThanOrEqual(beforeStatus.height);
     const restoredPersisted = await page.evaluate(async committedHeight => {
-      const adapter = (window as any).__xln?.adapter;
-      const head = await adapter.query.head();
-      const frame = await adapter.query.frame(committedHeight);
+      const adapter = (
+        window as Window & { __xln?: { adapter: () => RuntimeAdapterInspection | null } }
+      ).__xln?.adapter();
+      if (!adapter) throw new Error('H2_RUNTIME_INSPECTION_MISSING');
+      const head = await adapter.read<{ latestHeight: number }>('head');
+      const frame = await adapter.read<{
+        frameHash?: string;
+        postStateHash?: string;
+        stateHash?: string;
+        canonicalStateHash?: string;
+      }>(`frame/${committedHeight}`);
       return {
         latestHeight: Number(head?.latestHeight || 0),
         frameHash: String(frame?.frameHash || ''),

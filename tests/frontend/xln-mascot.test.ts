@@ -9,15 +9,9 @@ import {
   resolveMascotViewport,
   snapMascotToEdge,
 } from '../../frontend/src/lib/components/XlnMascot/mascot-geometry';
-import {
-  parseAssistantSseLine,
-  streamXlnAssistantReply,
-} from '../../frontend/src/lib/ai/xln-assistant-client';
-import { rankXlnGuideDocs } from '../../frontend/src/lib/ai/xln-guide-context';
-import {
-  parseAssistantChatRequest,
-  sanitizeAssistantCatalog,
-} from '../../core/api/server/assistant/input';
+import { parseAssistantSseLine, streamXlnAssistantReply } from '../../frontend/src/lib/ai/xln-assistant-client';
+import { describeXlnGuideRoute, rankXlnGuideDocs } from '../../frontend/src/lib/ai/xln-guide-context';
+import { parseAssistantChatRequest, sanitizeAssistantCatalog } from '../../core/api/server/assistant/input';
 import { normalizeImportedUiSettings } from '../../frontend/src/lib/utils/ui-style';
 
 const desktop = { width: 1440, height: 900 };
@@ -77,7 +71,11 @@ describe('xln mascot geometry', () => {
       offsetLeft: 0,
     });
     const placement = { version: 1 as const, side: 'bottom' as const, offsetRatio: 0.8 };
-    const compact = resolveMascotPanelRect(placement, resolveMascotPoint(placement, keyboardViewport), keyboardViewport);
+    const compact = resolveMascotPanelRect(
+      placement,
+      resolveMascotPoint(placement, keyboardViewport),
+      keyboardViewport,
+    );
     expect(compact.y + compact.height).toBeLessThanOrEqual(318 - 12);
   });
 
@@ -109,15 +107,16 @@ describe('xln assistant boundaries', () => {
       },
     });
     const chunks: string[] = [];
-    globalThis.fetch = (async () => new Response(body, {
-      status: 200,
-      headers: { 'content-type': 'text/event-stream' },
-    })) as typeof fetch;
+    globalThis.fetch = (async () =>
+      new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })) as typeof fetch;
     try {
       const answer = await streamXlnAssistantReply({
         model: 'qwen3-coder:latest',
         messages: [{ role: 'user', content: 'hello' }],
-        onContent: (content) => chunks.push(content),
+        onContent: content => chunks.push(content),
       });
       expect(answer).toBe('hello xln');
       expect(chunks).toEqual(['hello xln']);
@@ -128,41 +127,77 @@ describe('xln assistant boundaries', () => {
   });
 
   test('validates chat roles, sizes and model ids', async () => {
-    const request = (body: unknown) => new Request('http://xln.test/api/assistant/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const request = (body: unknown) =>
+      new Request('http://xln.test/api/assistant/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
     const allowed = new Set(['qwen3-coder:latest']);
-    expect((await parseAssistantChatRequest(request({
-      model: 'qwen3-coder:latest',
-      messages: [{ role: 'user', content: 'Explain RCPAN' }],
-    }), allowed)).messages).toHaveLength(1);
-    await expect(parseAssistantChatRequest(request({ model: '../bad model', messages: [] }), allowed)).rejects.toThrow();
-    await expect(parseAssistantChatRequest(request({
-      model: 'qwen3-coder:latest',
-      messages: [{ role: 'tool', content: 'execute payment' }],
-    }), allowed)).rejects.toThrow();
+    expect(
+      (
+        await parseAssistantChatRequest(
+          request({
+            model: 'qwen3-coder:latest',
+            messages: [{ role: 'user', content: 'Explain RCPAN' }],
+          }),
+          allowed,
+        )
+      ).messages,
+    ).toHaveLength(1);
+    await expect(
+      parseAssistantChatRequest(request({ model: '../bad model', messages: [] }), allowed),
+    ).rejects.toThrow();
+    await expect(
+      parseAssistantChatRequest(
+        request({
+          model: 'qwen3-coder:latest',
+          messages: [{ role: 'tool', content: 'execute payment' }],
+        }),
+        allowed,
+      ),
+    ).rejects.toThrow();
   });
 
   test('publishes only available, well-formed local models', () => {
-    expect(sanitizeAssistantCatalog({
-      default_model: 'qwen3-coder:latest',
-      models: [
-        { id: 'qwen3-coder:latest', name: 'Qwen', available: true },
-        { id: 'missing', available: false },
-        { id: '../invalid model', available: true },
-      ],
-    }, ['qwen3-coder:latest'])).toEqual([{ id: 'qwen3-coder:latest', name: 'Qwen' }]);
+    expect(
+      sanitizeAssistantCatalog(
+        {
+          default_model: 'qwen3-coder:latest',
+          models: [
+            { id: 'qwen3-coder:latest', name: 'Qwen', available: true },
+            { id: 'missing', available: false },
+            { id: '../invalid model', available: true },
+          ],
+        },
+        ['qwen3-coder:latest'],
+      ),
+    ).toEqual([{ id: 'qwen3-coder:latest', name: 'Qwen' }]);
   });
 
   test('ranks public xln docs against the question and route', () => {
     const entries = [
       { id: 'intro', path: 'intro.md', title: 'xln in 5 minutes', summary: 'bilateral network', kind: 'live' },
-      { id: 'core/12_invariant', path: 'core/12_invariant.md', title: 'RCPAN invariant', summary: 'collateral and credit', kind: 'live' },
+      {
+        id: 'core/12_invariant',
+        path: 'core/12_invariant.md',
+        title: 'RCPAN invariant',
+        summary: 'collateral and credit',
+        kind: 'live',
+      },
       { id: 'archive', path: 'archive.md', title: 'Collateral', summary: 'old', kind: 'archive' },
     ];
     expect(rankXlnGuideDocs('Why does collateral protect credit?', '/app', entries)[0]?.id).toBe('core/12_invariant');
     expect(rankXlnGuideDocs('network overview', '/app', entries).some(entry => entry.kind === 'archive')).toBe(false);
+  });
+
+  test('grounds the public React route in wallet controls without inventing private state', () => {
+    const home = describeXlnGuideRoute('/ui/');
+    expect(home).toContain('React wallet Home');
+    expect(home).toContain('Pay, Receive, Swap');
+    expect(home).toContain('cannot see');
+    expect(describeXlnGuideRoute('/ui/swap')).toContain('interactive wallet');
+    expect(describeXlnGuideRoute('/rcpan')).toContain('dispute microscope');
+    expect(describeXlnGuideRoute('/docs')).not.toContain('React wallet');
   });
 });

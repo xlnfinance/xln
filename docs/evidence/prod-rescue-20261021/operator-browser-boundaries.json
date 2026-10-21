@@ -1,0 +1,266 @@
+{
+  "at": "2026-10-21T08:31:46.812261+00:00",
+  "baseSHA": "184c0785032fd5fab8baf402432f372f696674ca",
+  "scope": "Focused engineering evidence, not final unchanged-SHA financial/release certification. Final full check, immutable-SHA financial and all browser gates remain required.",
+  "changes": [
+    "React displays canonical command readiness and bounded operator incident evidence during owned Runtime replacement; commands remain governed by existing admission.",
+    "Graph canvas exposes only detached rendered identifiers/positions for observation; no mutable debug authority enabled.",
+    "Current React/observer/Health/mascot drivers retain original behavioral assertions and current-format reload/unlock; obsolete Svelte wallet selectors retired.",
+    "React guide uses basename-aware public route context. Real local model answer now checked for wallet/payment meaning, not only successful streaming. Canonical AI upstream binds loopback."
+  ],
+  "records": [
+    {
+      "attempt": "h2-readiness-l1-01",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "h2-readiness-l1",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "tests/frontend/debug/operator-diagnostics.test.ts",
+        "tests/frontend/debug/runtime-incident.test.ts",
+        "core/__tests__/api/runtime-adapter/radapter-remote-reconnect.test.ts"
+      ],
+      "baseSHA": "184c0785032fd5fab8baf402432f372f696674ca",
+      "seconds": 3.858799791,
+      "sourceUnchangedDuringRun": true,
+      "exitCode": 0,
+      "logSHA256": "7d5871f5dfe06519927e3ab305b4cb6daae722af7cbf831bd2ef18e4d3f05d7a",
+      "recordSHA256": "09f3099cfe76023792666c77092bffc8445b445688930d46784db767be8028b2"
+    },
+    {
+      "attempt": "h2-react-replacement-exact-03",
+      "command": [
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts::real H2 replacement gates browser money commands until verified restore",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "baseSHA": "184c0785032fd5fab8baf402432f372f696674ca",
+      "seconds": 122.724226167,
+      "sourceUnchangedDuringRun": true,
+      "exitCode": 0,
+      "logSHA256": "b595c24ee7911b64c5cf042c596a20f21b2dbff170526c99e0d120df0360cc84",
+      "recordSHA256": "b2c2128d794dcbe55863d825334afefd3e2c7b6e3b87a12a1f23485319cb3146"
+    },
+    {
+      "attempt": "address-observer-consent-exact-01",
+      "command": [
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts::address explorer bootstraps remote runtime projection outside app shell",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "baseSHA": "184c0785032fd5fab8baf402432f372f696674ca",
+      "seconds": 59.621786709,
+      "sourceUnchangedDuringRun": true,
+      "exitCode": 0,
+      "logSHA256": "8eebef217bd7c523a26235dc83553a02657b2b7be4791afa7bd55a61104bd9b7",
+      "recordSHA256": "6ea5336801c6c0f157d5f717ca334a609b3f348326db913bdffdce31757cf45e"
+    },
+    {
+      "attempt": "remote-settings-projection-exact-01",
+      "command": [
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts::admin remote runtime opens settings projection without retired RuntimeReplica settings",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "baseSHA": "184c0785032fd5fab8baf402432f372f696674ca",
+      "seconds": 59.521869917000004,
+      "sourceUnchangedDuringRun": true,
+      "exitCode": 0,
+      "logSHA256": "2267c78dbe372aaa64ab471274ca8a8182c340ed80ebf57f5d5053cdbc9cb970",
+      "recordSHA256": "6d20fe3619c49295688c6a7ba14e84122c515da6ada1b842848968154480a924"
+    },
+    {
+      "attempt": "health-qa-current-exact-02",
+      "command": [
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts::health admin keeps QA evidence link-only and runtime adapter local",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "baseSHA": "184c0785032fd5fab8baf402432f372f696674ca",
+      "seconds": 72.032203333,
+      "sourceUnchangedDuringRun": true,
+      "exitCode": 0,
+      "logSHA256": "aa0f8f2164889be746f4f958a9d804efebc32c30b1f2850d86c65712e6999907",
+      "recordSHA256": "5fd4f1d4f52a2c46c6ab5efd22315a68da043918c813f1bb0d51efc0d7bb0ff1"
+    },
+    {
+      "attempt": "graph-render-snapshot-types-01",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "graph-render-snapshot-types",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "/bin/sh",
+        "-c",
+        "cd frontend && exec bun run check:svelte"
+      ],
+      "baseSHA": "184c0785032fd5fab8baf402432f372f696674ca",
+      "seconds": 57.613633375,
+      "sourceUnchangedDuringRun": true,
+      "exitCode": 0,
+      "logSHA256": "3ad1436c75f37d01ea74bd83dcf015bc89c39f44e9464b24d292f62863b6853e",
+      "recordSHA256": "a6e6d488fc8d6f151301c1f5a2c17cc46b45c570d7a8162603af9df4d8014430"
+    },
+    {
+      "attempt": "dock-render-observation-exact-01",
+      "command": [
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/sites/dockview.spec.ts::Dock workspace, NetworkMachine H1-H3 merge, tools, graph gestures and user return path",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "baseSHA": "184c0785032fd5fab8baf402432f372f696674ca",
+      "seconds": 149.461279875,
+      "sourceUnchangedDuringRun": true,
+      "exitCode": 0,
+      "logSHA256": "98cdb1ddc443fa8a07cff0e0a4da773b3b47d2f31179092daf50417c31aa215c",
+      "recordSHA256": "0e12e922ed944423fff24a528cb6a9b9863bf45bce63785c0cdcbe6bc2077d23"
+    },
+    {
+      "attempt": "mascot-react-drag-exact-01",
+      "command": [
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/sites/xln-mascot.spec.ts::drags, docks, persists, and exposes an honest assistant state",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "baseSHA": "184c0785032fd5fab8baf402432f372f696674ca",
+      "seconds": 71.165468625,
+      "sourceUnchangedDuringRun": true,
+      "exitCode": 0,
+      "logSHA256": "65fed35abdb4ff417b15c64737a5877c8d83b09de237d0df35e93b679394996b",
+      "recordSHA256": "e5a8a7dc28e6d6c9ceb23907aeb86e41da6b4c75f402400366ce4ba58f1d6393"
+    },
+    {
+      "attempt": "mascot-react-three-01",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "mascot-react-three-01",
+        "--timeout-ms",
+        "7200000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=2",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--stack-timeout-ms=300000",
+        "--strict-browser-health",
+        "--video=retain-on-failure",
+        "--trace=off",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--preserve-artifacts",
+        "--pw-files=[\"tests/sites/xln-mascot.spec.ts::supports keyboard docking, hidden persistence, and reduced motion\", \"tests/sites/xln-mascot.spec.ts::fits the logo and open chat on iPhone in dark and light themes\", \"tests/sites/xln-mascot.spec.ts::renders model Markdown without executable or malformed links\"]",
+        "--max-reset-concurrency=1"
+      ],
+      "baseSHA": "184c0785032fd5fab8baf402432f372f696674ca",
+      "seconds": 117.453080709,
+      "sourceUnchangedDuringRun": true,
+      "exitCode": 0,
+      "logSHA256": "9d4c3c06d8c1ef2e368bd7d083e51cbee2e9f25504d8674e97f2bcd44adcdf8a",
+      "recordSHA256": "90708592c16c6d3059ef4af027076a32efdb0c09e3b3d525632405b9c81e63c3"
+    },
+    {
+      "attempt": "mascot-route-context-l1-01",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "mascot-route-context-l1",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "tests/frontend/xln-mascot.test.ts",
+        "tests/frontend/security/docs-catalog-grounding.test.ts"
+      ],
+      "baseSHA": "184c0785032fd5fab8baf402432f372f696674ca",
+      "seconds": 1.290550333,
+      "sourceUnchangedDuringRun": true,
+      "exitCode": 0,
+      "logSHA256": "4c5ecbac33f5d00519e0b82f14b89b904860d2eee13e81d551483c0f8d9b68c0",
+      "recordSHA256": "cdd8febec5202c57c842bdac51efdb080a21094f2cc3caa8d0780635044efaa4"
+    },
+    {
+      "attempt": "mascot-real-ai-exact-02",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "mascot-real-ai-exact-02",
+        "--timeout-ms",
+        "7200000",
+        "--",
+        "python3",
+        "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/mascot-real-ai-owned-services.py"
+      ],
+      "baseSHA": "184c0785032fd5fab8baf402432f372f696674ca",
+      "seconds": 139.208836875,
+      "sourceUnchangedDuringRun": true,
+      "exitCode": 0,
+      "logSHA256": "3ffe103bc05989c8501abf89ddaf0b729f132a03bb4c1a3a50a13a0e1e76b1b3",
+      "recordSHA256": "d3dc9b0802e2e5b58e18a3854ea6666d2639af238a36b6bb659ed2248c56e56e"
+    }
+  ],
+  "broaderFocusedEvidence": [
+    "full158-unverified-21-01:6PASS,1FAIL,1CANCEL,13notstarted",
+    "full158-unverified-14-01:4PASS,1FAIL,1CANCEL,8notstarted",
+    "full158-unverified-sites-8-01:4PASS,1FAIL,1CANCEL,2notstarted"
+  ],
+  "retainedFailures": [
+    "Original full158 and retired load failure remain mandatory final gates.",
+    "Original gateway5000ms first-account-row failure not root-caused; isolated1/1 and controlledpair2/2 passed; final full unchanged-SHA run mandatory.",
+    "Original realAI mechanicalPASS did not ensure correct screen description; manual screenshot found wrong / context, corrected and strengthened exact02 passed."
+  ],
+  "knownLimits": [
+    "Tests use local production-equivalent stack, not public-chain/mainnet proof.",
+    "Mascot driver now verifies React wallet after unlock; retired Svelte authscreen intentionally excluded. Existing helper import includes180s bootstrap bound; original scenario/mascot/AI assertions not extended.",
+    "The realAI test proves this one prompt/model result, not universal factual correctness."
+  ],
+  "artifactRoot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019"
+}

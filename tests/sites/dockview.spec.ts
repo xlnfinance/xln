@@ -18,13 +18,15 @@ type GraphSnapshot = {
   timeline: { runtimeId: string; height: number; timestamp: number } | null;
 };
 
+type GraphCanvas = HTMLCanvasElement & { readonly xlnGraphSnapshot?: GraphSnapshot };
+
 type RuntimeImport = { label: string; runtimeId: string };
 
 const graphSnapshot = (page: import('@playwright/test').Page): Promise<GraphSnapshot> =>
-  page.evaluate(() => {
-    const graph = (window as any).__xln?.graph;
-    if (!graph?.snapshot) throw new Error('GRAPH_DEBUG_SURFACE_MISSING');
-    return graph.snapshot();
+  page.locator('.graph3d-wrapper canvas').evaluate(canvas => {
+    const snapshot = (canvas as GraphCanvas).xlnGraphSnapshot;
+    if (!snapshot) throw new Error('GRAPH_RENDER_SNAPSHOT_MISSING');
+    return snapshot;
   });
 
 const visibleGraphEntityPoint = async (page: Page, entityId: string): Promise<{ x: number; y: number }> => {
@@ -197,7 +199,7 @@ test.describe('dockview', () => {
       await selectLastNetworkFrame(page);
       await page.waitForFunction(
         expectedRuntimeIds => {
-          const snapshot = (window as any).__xln?.graph?.snapshot?.();
+          const snapshot = document.querySelector<GraphCanvas>('.graph3d-wrapper canvas')?.xlnGraphSnapshot;
           return (
             snapshot?.sources?.length === 3 && expectedRuntimeIds.every((id: string) => snapshot.sources.includes(id))
           );
@@ -208,6 +210,23 @@ test.describe('dockview', () => {
       const merged = await graphSnapshot(page);
       expect(merged.scope).toBe('merged');
       expect(merged.sources).toHaveLength(3);
+      const detached = await page.locator('.graph3d-wrapper canvas').evaluate(canvas => {
+        const surface = canvas as GraphCanvas;
+        const first = surface.xlnGraphSnapshot;
+        if (!first || !first.nodes[0]) throw new Error('GRAPH_RENDER_SNAPSHOT_EMPTY');
+        const counts = [first.sources.length, first.nodes[0].provenance.length];
+        first.sources.length = 0;
+        first.nodes[0].provenance.length = 0;
+        const fresh = surface.xlnGraphSnapshot;
+        if (!fresh || !fresh.nodes[0]) throw new Error('GRAPH_RENDER_SNAPSHOT_LOST');
+        return {
+          counts,
+          fresh: [fresh.sources.length, fresh.nodes[0].provenance.length],
+          writable: Boolean(Object.getOwnPropertyDescriptor(canvas, 'xlnGraphSnapshot')?.set),
+        };
+      });
+      expect(detached.fresh).toEqual(detached.counts);
+      expect(detached.writable).toBe(false);
       for (const hubId of hubIds)
         expect(
           merged.nodes.some(node => node.entityId === hubId),

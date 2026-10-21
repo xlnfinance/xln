@@ -661,6 +661,9 @@ async function initThreeJS() {
   renderer.xr.enabled = !(typeof navigator !== "undefined" && navigator.webdriver); // Keep XR off in automation
   renderer.setSize(containerWidth, containerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.maxPixelRatio));
+  // Canvas pixels have no DOM nodes. Expose only detached rendered IDs, selection
+  // and projected positions for observation; never Env, keys, commands or scene objects.
+  Object.defineProperty(renderer.domElement, "xlnGraphSnapshot", { get: graphRenderSnapshot });
   container.appendChild(renderer.domElement);
   if (typeof window !== "undefined") {
     window.__debugScene = scene;
@@ -2247,7 +2250,7 @@ function handleGraphGestureOutcome(outcome: GraphGestureOutcome, entity: GraphEn
   if (outcome === "open") requestGraphEntityWallet(entity);
   else if (outcome === "select" || outcome === "drag-end") selectGraphEntity(entity);
 }
-function graphDebugSnapshot() {
+function graphRenderSnapshot() {
   const rect = renderer?.domElement?.getBoundingClientRect?.();
   return {
     scope: $runtimeGraphScope,
@@ -2259,7 +2262,7 @@ function graphDebugSnapshot() {
       return {
         entityId: entity.id,
         label: mergedRuntimeGraph.nodes.find((node) => node.entityId === entity.id)?.selected.label ?? entity.id,
-        provenance: mergedRuntimeGraph.nodes.find((node) => node.entityId === entity.id)?.provenance ?? [],
+        provenance: [...(mergedRuntimeGraph.nodes.find((node) => node.entityId === entity.id)?.provenance ?? [])],
         selected: entity.id === selectedGraphEntityId,
         screen: rect
           ? {
@@ -2269,7 +2272,7 @@ function graphDebugSnapshot() {
           : null,
       };
     }),
-    accounts: mergedRuntimeGraph.accounts.map((account) => ({ accountId: account.accountId, provenance: account.provenance })),
+    accounts: mergedRuntimeGraph.accounts.map((account) => ({ accountId: account.accountId, provenance: [...account.provenance] })),
     timeline: $networkMachineRuntime.selectedStep
       ? {
           runtimeId: $networkMachineRuntime.selectedStep.activeRuntimeId,
@@ -2279,7 +2282,7 @@ function graphDebugSnapshot() {
       : null,
   };
 }
-registerDebugSurface("graph", () => ({ snapshot: graphDebugSnapshot }));
+registerDebugSurface("graph", () => ({ snapshot: graphRenderSnapshot }));
 function getEntityName(entityId: string): string {
   return getGraphEntityNameFromGossip(env?.gossip, entityId);
 }

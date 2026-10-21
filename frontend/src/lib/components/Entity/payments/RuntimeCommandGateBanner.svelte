@@ -1,34 +1,12 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { operatorDiagnosticsAllowed } from '#lib/debug/operator-diagnostics.ts';
-  import { readJsonUnknown, rejectExtraKeys, requireString, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
+  import { loadRuntimeIncident } from '#lib/debug/runtime-incident.ts';
 
   export let ready = false;
   export let reason: string | null = null;
   export let runtimeId = '';
   export let apiBase = '';
-
-  type Incident = {
-    fingerprint?: string;
-    code?: string;
-  };
-
-  function decodeIncidentPayload(value: unknown): Incident[] {
-    const record = requireUnknownRecord(value, 'DEBUG_INCIDENT_RESPONSE_INVALID');
-    rejectExtraKeys(record, ['ok', 'total', 'returned', 'highestEventId', 'incidents'], 'DEBUG_INCIDENT_RESPONSE_EXTRA_FIELD');
-    if (record['ok'] !== true || !Array.isArray(record['incidents'])) throw new Error('DEBUG_INCIDENT_RESPONSE_INVALID');
-    return record['incidents'].map((entry) => {
-      const incident = requireUnknownRecord(entry, 'DEBUG_INCIDENT_INVALID');
-      rejectExtraKeys(incident, [
-        'fingerprint', 'state', 'source', 'code', 'message', 'runtimeId',
-        'firstSeen', 'lastSeen', 'count', 'firstEventId', 'lastEventId',
-      ], 'DEBUG_INCIDENT_EXTRA_FIELD');
-      return {
-        fingerprint: requireString(incident['fingerprint'], 'DEBUG_INCIDENT_FINGERPRINT_INVALID'),
-        code: requireString(incident['code'], 'DEBUG_INCIDENT_CODE_INVALID'),
-      };
-    });
-  }
 
   let mounted = false;
   let requestGeneration = 0;
@@ -38,46 +16,41 @@
   let lookupStatus: 'idle' | 'loading' | 'not-found' | 'error' = 'idle';
   let lookupError = '';
 
-  const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
-
+  let controller: AbortController | null = null;
   const loadIncident = async (signature: string): Promise<void> => {
+    controller?.abort();
+    const request = new AbortController();
+    controller = request;
     const generation = ++requestGeneration;
     incidentFingerprint = '';
     incidentCode = '';
     lookupStatus = 'loading';
     lookupError = '';
-    let lastError = '';
-    for (const delayMs of [0, 250, 750]) {
-      if (delayMs > 0) await wait(delayMs);
+    try {
+      const result = await loadRuntimeIncident(apiBase || window.location.origin, runtimeId, request.signal);
       if (!mounted || generation !== requestGeneration) return;
-      try {
-        const url = new URL('/api/debug/incidents', apiBase || window.location.origin);
-        url.searchParams.set('state', 'open');
-        url.searchParams.set('runtimeId', runtimeId);
-        url.searchParams.set('limit', '1');
-        const response = await fetch(url, { cache: 'no-store' });
-        if (!response.ok) throw new Error(`HTTP_${response.status}`);
-        const incident = decodeIncidentPayload(await readJsonUnknown(response))[0];
-        if (incident?.fingerprint) {
-          incidentFingerprint = String(incident.fingerprint);
-          incidentCode = String(incident.code || '');
-          lookupStatus = 'idle';
-          return;
-        }
-        lastError = '';
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
-      }
-    }
-    if (generation === requestGeneration) {
       loadedSignature = signature;
-      lookupError = lastError;
-      lookupStatus = lastError ? 'error' : 'not-found';
+      if (result.status === 'found') {
+        incidentFingerprint = result.fingerprint;
+        incidentCode = result.code;
+        lookupStatus = 'idle';
+      } else {
+        lookupStatus = result.status;
+        lookupError = result.status === 'error' ? result.error : '';
+      }
+    } catch (error) {
+      if (!request.signal.aborted) throw error;
     }
   };
 
   $: operatorDiagnostics = $operatorDiagnosticsAllowed;
   $: signature = ready || !operatorDiagnostics ? '' : `${runtimeId}|${reason || 'unknown'}|${apiBase}`;
+  $: if (!signature) {
+    controller?.abort();
+    loadedSignature = '';
+    incidentFingerprint = '';
+    incidentCode = '';
+  }
   $: if (mounted && signature && signature !== loadedSignature) {
     loadedSignature = signature;
     void loadIncident(signature);
@@ -93,6 +66,7 @@
 
   onDestroy(() => {
     mounted = false;
+    controller?.abort();
     requestGeneration += 1;
   });
 </script>

@@ -15,6 +15,7 @@ import type { RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-m
 import { useAdapterRead } from '../../runtime/hooks';
 
 export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onClose: () => void }) {
+  const commandReady = useApp(s => s.commandReady);
   const toast = useApp(s => s.toast);
   const selectedTokenId = useApp(s => s.selectedTokenId);
   const [targetId, setTargetId] = useState('');
@@ -217,7 +218,7 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
       <button
         type="button"
         className="btn"
-        disabled={!/^0x[0-9a-f]{64}$/.test(targetId) || !compatibleTarget || submitting}
+        disabled={!commandReady || !/^0x[0-9a-f]{64}$/.test(targetId) || !compatibleTarget || submitting}
         onClick={() => void openAccount()}
         data-testid="open-account-submit"
       >

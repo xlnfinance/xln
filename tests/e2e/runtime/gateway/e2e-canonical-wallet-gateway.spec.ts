@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { HDNodeWallet } from 'ethers';
+import type { RuntimeReplica, XLNModule } from '../../../../core/api/public/runtime-module';
+import { timedStep } from '../../../utils/e2e-timing.mts';
 import { expect, test } from '../../../global-setup.mts';
 import { gotoApp } from '../../../utils/e2e-demo-users';
 import { createWalletIdentity, LOCAL_PASSWORD } from '../../../../ui/tests/wallet-ui';
@@ -50,8 +52,56 @@ test(
     await expect(page.getByRole('heading', { name: 'Set a local password' })).toBeVisible();
     await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
     await page.getByLabel('Confirm password', { exact: true }).fill(LOCAL_PASSWORD);
-    await page.getByRole('button', { name: 'Save and open', exact: true }).click();
-    await expect(page.getByTestId('account-row').first()).toBeVisible();
+    await page.evaluate(() => {
+      const started = performance.now();
+      const stages: Array<{ elapsedMs: number; stage: string }> = [];
+      const capture = () => {
+        const stage =
+          document.querySelector('button[type=submit]')?.textContent ??
+          (document.querySelector('[data-testid=nav-home]') ? 'Home' : 'Opening');
+        if (stages.at(-1)?.stage !== stage) stages.push({ elapsedMs: Math.round(performance.now() - started), stage });
+      };
+      new MutationObserver(capture).observe(document.body, { childList: true, subtree: true, characterData: true });
+      (window as Window & { __gatewayBootStages?: typeof stages }).__gatewayBootStages = stages;
+      capture();
+    });
+    await timedStep('gateway.save_and_open', async () => {
+      await page.getByRole('button', { name: 'Save and open', exact: true }).click();
+      try {
+        await expect(page.getByTestId('account-row').first()).toBeVisible();
+      } finally {
+        const state = await page.evaluate(async () => {
+          const debug = (window as Window & { __xln: { env(): RuntimeReplica | null; xln(): Promise<XLNModule> } })
+            .__xln;
+          const env = debug.env();
+          const xln = await debug.xln();
+          return {
+            stages: (window as Window & { __gatewayBootStages?: Array<{ elapsedMs: number; stage: string }> })
+              .__gatewayBootStages,
+            runtimeHeight: env?.state.height,
+            halted: env?.infrastructure?.halted ?? false,
+            relayConnected: env?.infrastructure?.p2p?.isConnected() ?? false,
+            queuedRuntimeTxs: env?.runtimeMempool.runtimeTxs.map(tx => tx.type),
+            queuedEntityInputs: env?.runtimeMempool.entityInputs.map(input => input.entityTxs?.map(tx => tx.type)),
+            entities: env
+              ? [...env.state.eReplicas.values()].map(replica => ({
+                  entityId: replica.entityId,
+                  height: replica.state.height,
+                  pending: replica.mempool.map(tx => tx.type),
+                  proposalHeight: replica.proposal?.height ?? null,
+                  scan: xln.getEntityJAdapter(env, replica.entityId, replica.signerId)?.getWatcherScanProgress?.(),
+                  accounts: [...replica.state.accounts.values()].map(account => ({
+                    height: account.currentHeight,
+                    pendingHeight: account.pendingFrame?.height ?? null,
+                  })),
+                }))
+              : [],
+          };
+        });
+        await info.attach('gateway-open-boundary', { body: JSON.stringify(state), contentType: 'application/json' });
+        console.log('[E2E] gateway open boundary', JSON.stringify(state));
+      }
+    });
     await gotoApp(page, { appBaseUrl: new URL(page.url()).origin, settleMs: 0 });
     expect(workers).toContain('/account-worker.js');
     expect(relayFrames).toBeGreaterThan(1);
