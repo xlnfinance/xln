@@ -1,0 +1,64 @@
+{
+  "parentSHA": "823c855ba4bc14e0fa9c1762d7e5852f6639dceb",
+  "scope": "Test-only reuse of canonical walletboot barrier; original55s total and5sHomeassertion unchanged. No Runtime/storage/financialformulachange.",
+  "sourceSHA256": {
+    "tests/e2e/runtime/e2e-runtime-persistence.spec.ts": "92a19305566c262eadd2b2120e8052e659df7e694533ccbc317331dddf6a43d6"
+  },
+  "firstFailure": {
+    "traceSHA256": "0214e11aa85bd93a77c6dbf6557d6559e5455d1ebbae41ae3d3e0fc1a18eb306",
+    "unlockToHomeAssertionMs": 2.498,
+    "unlockToRuntimeRestoreMs": 4730.932,
+    "screen": "Unlock wallet, Syncing withchain0%",
+    "afterReloadFinancialAssertionsReached": false
+  },
+  "l1": {
+    "passed": 7,
+    "failed": 0,
+    "assertions": 23,
+    "seconds": 18.981309541,
+    "logSHA256": "de7ff0cfdca744ad567a2c6f466ab35469d3b48779a23710f1ca99df20e13051"
+  },
+  "l2": {
+    "passed": 1,
+    "failed": 0,
+    "cancelled": 0,
+    "browserErrors": 0,
+    "stats": {
+      "startTime": "2026-10-21T21:01:32.475Z",
+      "duration": 36968.020000000004,
+      "expected": 1,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "seconds": 78.889721833,
+    "sourceUnchanged": true,
+    "logSHA256": "7796afb9cbc6f90ab17a0e9b0b136f42757d3433453c224e95ec85952d5caada",
+    "candidate": {
+      "candidateId": "d97dabebe56d13132e5e1c6c791eee7a47f04ed5b423abbd3b85aefae1629f22",
+      "gitHead": "823c855ba4bc14e0fa9c1762d7e5852f6639dceb",
+      "codeHash": "23772bb2b02c7444f4fbf28c1c94290b39ae0734a85a84ef65ded9a6e3b979db",
+      "gateConfigHash": "8f6bb9cc6d77e91539a8550e6e5eafbd5a5f5a306b17fb1bbc0407493eac3dea"
+    },
+    "financialAndWalProof": {
+      "outBefore": "200000000",
+      "outAfter": "200000000",
+      "exactAccountAndIdentityStateEqual": true,
+      "accountRoot": "0xf21ec70663dac4b8193b263ba3e4fb8726af5478dcd2fa0aeb5e55a2184ecc41",
+      "checkpoint": 19,
+      "latestBefore": 24,
+      "latestAfter": 24,
+      "walFrameCount": 5,
+      "exactWalCommitmentsEqual": true,
+      "replay": {
+        "checkpointHeight": 19,
+        "label": "checkpoint:19",
+        "latestHeight": 24,
+        "replayedFrames": 5
+      },
+      "bobFundedOut": "200000000",
+      "scope": "Test verifies bothwallets unchanged, exact Account state/root and immutable WALtail aftercurrentformatreload; not finalwholefinancialbundle."
+    }
+  },
+  "remaining": "25debugidentities; finaloneSHAfinancial/unit/test/check/full158/release34/soak andpublicdeployment/mainnetgates remain."
+}

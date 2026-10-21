@@ -1,6 +1,6 @@
 import { safeStringify } from '../../../core/protocol/serialization';
 import { test, expect, type Page } from '../../global-setup.mts';
-import { createWalletIdentity, LOCAL_PASSWORD } from '../../../ui/tests/wallet-ui';
+import { createWalletIdentity, LOCAL_PASSWORD, waitForWalletBoot } from '../../../ui/tests/wallet-ui';
 import { gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
 import { connectRuntimeToHubWithCredit } from '../../utils/e2e-connect';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from '../../utils/e2e-baseline';
@@ -103,6 +103,7 @@ test(
       await page.getByRole('button', { name: 'Continue', exact: true }).click();
       await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
       await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+      await waitForWalletBoot(page);
       await expect(page.getByTestId('nav-home').locator('visible=true').first()).toBeVisible();
       await idle(page, alice, hubId);
       const after = await readFinancialState(page, alice.entityId, hubId);
