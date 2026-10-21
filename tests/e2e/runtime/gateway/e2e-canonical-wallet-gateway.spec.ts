@@ -6,7 +6,7 @@ import type { RuntimeReplica, XLNModule } from '../../../../core/api/public/runt
 import { timedStep } from '../../../utils/e2e-timing.mts';
 import { expect, test } from '../../../global-setup.mts';
 import { gotoApp } from '../../../utils/e2e-demo-users';
-import { createWalletIdentity, LOCAL_PASSWORD } from '../../../../ui/tests/wallet-ui';
+import { createWalletIdentity, LOCAL_PASSWORD, waitForWalletBoot } from '../../../../ui/tests/wallet-ui';
 import { readAccount, expectDeliveryDrained, type DebugWindow } from '../../../../ui/tests/swap-evidence';
 
 test(
@@ -68,6 +68,7 @@ test(
     await timedStep('gateway.save_and_open', async () => {
       await page.getByRole('button', { name: 'Save and open', exact: true }).click();
       try {
+        await waitForWalletBoot(page);
         await expect(page.getByTestId('account-row').first()).toBeVisible();
       } finally {
         const state = await page.evaluate(async () => {

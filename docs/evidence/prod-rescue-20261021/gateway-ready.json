@@ -1,0 +1,87 @@
+{
+  "parentSHA": "a4d50101f1a6a68e47600f124c0f1235b8fd97bb",
+  "scope": "Canonical React gateway browser readiness regression, not a final release or mainnet certificate.",
+  "firstFailure": {
+    "parentSHA": "a4d50101f1a6a68e47600f124c0f1235b8fd97bb",
+    "traceSHA256": "0f4015b92c347adbb67345d17eb8d3cfe53ec24cc90a2a5a3c487743f38292f3",
+    "saveAndOpenEndMs": 7448.054,
+    "accountAssertionStartMs": 7449.603,
+    "accountAssertionFailedMs": 12484.558,
+    "bootStagesMs": {
+      "sync": 3504,
+      "sync100": 3592,
+      "openingH1": 4359,
+      "home": 5204
+    },
+    "observed": "Account-row5s assertion starts1.549ms after click, while startup still creating H1 account. Failure screen Opening an account with H1; runtime alive, relay connected, browserHealth0.",
+    "originalEffectiveTestTimeoutMs": 660000,
+    "unchangedAccountAssertionMs": 5000,
+    "change": "Reuse existing wallet boot predicate before exact Account-row assertion; no asset/worker/relay/navigation assertions removed, no deadline changed.",
+    "status": "exact and two-lane owning L2 passed"
+  },
+  "change": "Wait for the existing wallet boot predicate after Save and open, before the unchanged5s Account-row assertion. Current asset byte hashes, actual Account worker, relay traffic and manage-route reload assertions remain. No production runtime or financial transition changes.",
+  "l1": {
+    "passed": 7,
+    "assertions": 27
+  },
+  "exactL2": {
+    "passed": 1,
+    "browserErrors": 0
+  },
+  "owningTwoLaneL2": {
+    "passed": 2,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "flaky": 0,
+    "requestedLanes": 2,
+    "browserErrors": 0,
+    "cases": [
+      {
+        "target": "tests/e2e/runtime/gateway/e2e-canonical-wallet-gateway.spec.ts::canonical gateway initializes React wallet and Account worker from exact current assets",
+        "expected": 1,
+        "unexpected": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "browserErrors": 0,
+        "durationMs": 20880.456
+      },
+      {
+        "target": "tests/e2e/runtime/gateway/e2e-canonical-wallet-gateway.spec.ts::wallet unlock uses the network discovered after Continue",
+        "expected": 1,
+        "unexpected": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "browserErrors": 0,
+        "durationMs": 30732.335
+      }
+    ]
+  },
+  "receipts": {
+    "gateway-ready-l1-01": {
+      "seconds": 1.4779885000000001,
+      "exitCode": 0,
+      "sourceUnchanged": true,
+      "logSHA256": "211c9ea5f26018c2546960163803bac6cb2fd38b177e075da694a1abd2e55667"
+    },
+    "gateway-ready-l2-01": {
+      "seconds": 66.003406833,
+      "exitCode": 0,
+      "sourceUnchanged": true,
+      "logSHA256": "5093c79e2ef2a6646e4cdcc3693df549dad5d547e24e2cc55d64983aadfbda37"
+    },
+    "gateway-ready-owning-two-lane-l2-01": {
+      "seconds": 84.319414541,
+      "exitCode": 0,
+      "sourceUnchanged": true,
+      "logSHA256": "a7eea486f9c3584b2f435f8eb4da12aff2db03f684dceedb805ea39bd4e8306c"
+    }
+  },
+  "unchangedAssertions": [
+    "Exact served runtime.js and account-worker.js SHA256 match built assets.",
+    "Actual Account worker instantiated and relay receives more than one frame.",
+    "Reload preserves /ui/manage and visible Manage navigation.",
+    "Network-discovery case delays actual API responses by2000ms, funds100USDC, and preserves exact identity, Runtime ID and Account state after unlock."
+  ],
+  "remaining": "Full158, financial/unit/test/release/soak on one final SHA and public deployment verification remain mandatory."
+}
