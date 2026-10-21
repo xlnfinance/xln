@@ -159,10 +159,25 @@ try {
     console.log('NATIVE_TOKEN_DEPLOYED',JSON.stringify(token));
     if (standArguments.includes('--deploy-graph') || standArguments.includes('--verify-graph') || standArguments.includes('--economic')) {
       process.env.DEPLOYER_PRIVATE_KEY = key;
-      const chain = {id:'xln-native-local',name:'XLN Native Private TVM',kind:'tron',chainId:Number(BigInt(report.chainId)),
-        currency:'TRX',defaultRpc:'http://127.0.0.1:18545/jsonrpc',defaultFullHost:'http://127.0.0.1:19090',
-        defaultSolidityHost:'http://127.0.0.1:19091',usdtAddress:token.base58};
-      const verify = standArguments.includes('--verify-graph') || standArguments.includes('--economic');
+      const verify =
+        standArguments.includes("--verify-graph") ||
+        standArguments.includes("--economic");
+      const { nativeWrappedRoundtrip } = await import("./withdrawal/wrapped");
+      const wrapped = verify
+        ? (await Bun.file(`${data}/wrapped.json`).json()).wrapped
+        : await nativeWrappedRoundtrip(tronWeb, data);
+      const chain = {
+        id: "xln-native-local",
+        name: "XLN Native Private TVM",
+        kind: "tron",
+        chainId: Number(BigInt(report.chainId)),
+        currency: "TRX",
+        defaultRpc: "http://127.0.0.1:18545/jsonrpc",
+        defaultFullHost: "http://127.0.0.1:19090",
+        defaultSolidityHost: "http://127.0.0.1:19091",
+        usdtAddress: token.base58,
+        wrappedNativeAddress: wrapped.base58,
+      };
       if (!verify && await Bun.file(`${data}/graph.json`).exists()) throw new Error('NATIVE_GRAPH_ALREADY_DEPLOYED');
       const graph = verify ? await Bun.file(`${data}/graph.json`).json() : await deployTron(chain,{skipCompile:true,dryRun:false});
       if (graph.chainId !== chain.chainId) throw new Error('NATIVE_GRAPH_CHAIN_MISMATCH');
@@ -173,8 +188,16 @@ try {
         fromReplica:{contracts:graph.contracts,entityProviderDeploymentBlock:graph.entityProviderDeploymentBlock}});
       try {
         const registry = await adapter.getTokenRegistry();
-        if (registry.length !== 1 || registry[0].address.toLowerCase() !== token.evm.toLowerCase())
-          throw new Error('NATIVE_ADAPTER_TOKEN_REGISTRY_MISMATCH');
+        if (
+          registry.length !== 2 ||
+          registry[0].address.toLowerCase() !== token.evm.toLowerCase() ||
+          registry[0].tokenId !== 1 ||
+          registry[0].decimals !== 6 ||
+          registry[1].address.toLowerCase() !== wrapped.evm.toLowerCase() ||
+          registry[1].tokenId !== 2 ||
+          registry[1].decimals !== 6
+        )
+          throw new Error("NATIVE_ADAPTER_TOKEN_REGISTRY_MISMATCH");
         const result = {mode:adapter.mode,chainId:adapter.chainId,registry,solidifiedBlock:await adapter.getCurrentBlockNumber()};
         await Bun.write(`${data}/adapter.json`,safeStringify(result,2));
         console.log('NATIVE_ADAPTER_VERIFIED',safeStringify(result));

@@ -39,6 +39,39 @@ const deploymentEvidence = async (contract, address, label) => {
   };
 };
 
+const registerFoundationToken = async (ethers, entityProvider, depository, token, privateKey, fees) => {
+  const listing = buildFoundationTokenListing(ethers, {
+    chainId: (await entityProvider.runner.provider.getNetwork()).chainId,
+    entityProviderAddress: await entityProvider.getAddress(),
+    foundationNonce: await entityProvider.entityActionNonces(foundationEntityId(ethers)),
+    depository,
+    tokenType: 0,
+    contractAddress: token,
+    externalTokenId: 0,
+    privateKey,
+  });
+  const actionHash = await entityProvider.computeFoundationActionHash(
+    await entityProvider.FOUNDATION_REGISTER_TOKEN(),
+    listing.argumentsHash,
+    listing.actionNonce,
+  );
+  if (actionHash.toLowerCase() !== listing.actionHash.toLowerCase()) {
+    throw new Error(`FOUNDATION_ACTION_HASH_MISMATCH:${actionHash}:${listing.actionHash}`);
+  }
+  const registration = await entityProvider.foundationRegisterExternalToken(
+    depository,
+    0,
+    token,
+    0,
+    listing.hankoData,
+    listing.actionNonce,
+    fees,
+  );
+  const receipt = await registration.wait();
+  if (!receipt || receipt.status !== 1) throw new Error('FOUNDATION_TOKEN_REGISTRATION_RECEIPT_INVALID');
+  return { transactionHash: registration.hash, blockNumber: receipt.blockNumber };
+};
+
 async function main() {
   const { network: networkManager } = await import('hardhat');
   const connection = await networkManager.create();
@@ -187,42 +220,59 @@ async function main() {
     );
   }
   const foundationSignerKey = resolveFoundationSignerKey(ethers, deployer.address);
-  const listing = buildFoundationTokenListing(ethers, {
-    chainId: network.chainId,
-    entityProviderAddress: entityProviderAddr,
-    foundationNonce: await entityProvider.entityActionNonces(foundationEntityId(ethers)),
-    depository: depositoryAddr,
-    tokenType: 0,
-    contractAddress: stablecoinAddress,
-    externalTokenId: 0,
-    privateKey: foundationSignerKey,
-  });
-  const onchainActionHash = await entityProvider.computeFoundationActionHash(
-    await entityProvider.FOUNDATION_REGISTER_TOKEN(),
-    listing.argumentsHash,
-    listing.actionNonce,
-  );
-  if (onchainActionHash.toLowerCase() !== listing.actionHash.toLowerCase()) {
-    throw new Error(`FOUNDATION_ACTION_HASH_MISMATCH:${onchainActionHash}:${listing.actionHash}`);
-  }
-  const registration = await entityProvider.foundationRegisterExternalToken(
+  const foundationNonce = await entityProvider.entityActionNonces(foundationEntityId(ethers));
+  const stablecoinRegistration = await registerFoundationToken(
+    ethers,
+    entityProvider,
     depositoryAddr,
-    0,
     stablecoinAddress,
-    0,
-    listing.hankoData,
-    listing.actionNonce,
+    foundationSignerKey,
     await transactionFees(),
   );
-  const registrationReceipt = await registration.wait();
-  if (!registrationReceipt || registrationReceipt.status !== 1) {
-    throw new Error('STABLECOIN_REGISTRATION_RECEIPT_INVALID');
-  }
   const stablecoinTokenId = (await depository.getTokensLength()) - 1n;
   if (stablecoinTokenId !== 1n) {
     throw new Error(`STABLECOIN_TOKEN_ID_MISMATCH:expected=1:actual=${stablecoinTokenId}`);
   }
   console.log(`   USDT: ${stablecoinAddress} (tokenId 1)`);
+  const registeredTokens = {
+    USDT: { address: stablecoinAddress, tokenId: Number(stablecoinTokenId), decimals: stablecoinDecimals },
+  };
+  let wrappedNativeRegistration;
+  const wrappedNative = String(process.env.XLN_WRAPPED_NATIVE_ADDRESS || '').trim();
+  if (wrappedNative) {
+    const address = ethers.getAddress(wrappedNative);
+    if (address.toLowerCase() === stablecoinAddress.toLowerCase()) throw new Error('WRAPPED_NATIVE_DUPLICATES_USDT');
+    const token = new ethers.Contract(address, ['function decimals() view returns (uint8)'], deployer);
+    const decimals = Number(await token.decimals());
+    if (decimals !== 18) throw new Error(`WRAPPED_NATIVE_DECIMALS_MISMATCH:expected=18:actual=${decimals}`);
+    // The second listing uses the committed Foundation nonce after USDT. Its
+    // Hanko cannot be replayed for a different asset, Depository or chain.
+    wrappedNativeRegistration = await registerFoundationToken(
+      ethers,
+      entityProvider,
+      depositoryAddr,
+      address,
+      foundationSignerKey,
+      await transactionFees(),
+    );
+    const tokenId = (await depository.getTokensLength()) - 1n;
+    if (tokenId !== 2n) throw new Error(`WRAPPED_NATIVE_TOKEN_ID_MISMATCH:expected=2:actual=${tokenId}`);
+    registeredTokens.WETH = { address, tokenId: Number(tokenId), decimals };
+  }
+  const expectedNonce = foundationNonce + BigInt(Object.keys(registeredTokens).length);
+  if ((await entityProvider.entityActionNonces(foundationEntityId(ethers))) !== expectedNonce) {
+    throw new Error('FOUNDATION_LISTING_NONCE_MISMATCH');
+  }
+  for (const token of Object.values(registeredTokens)) {
+    const actual = await depository._tokens(token.tokenId);
+    if (
+      actual.contractAddress.toLowerCase() !== token.address.toLowerCase() ||
+      actual.tokenType !== 0n ||
+      actual.externalTokenId !== 0n
+    ) {
+      throw new Error(`DEPLOYED_TOKEN_REGISTRY_MISMATCH:${token.tokenId}`);
+    }
+  }
 
   const result = {
     stackVersion: 'V1',
@@ -251,18 +301,10 @@ async function main() {
       depository: depositoryDeployment,
       deltaTransformer: deltaTransformerDeployment,
       ...(stablecoinDeployment ? { stablecoin: stablecoinDeployment } : {}),
-      stablecoinRegistration: {
-        transactionHash: registration.hash,
-        blockNumber: registrationReceipt.blockNumber,
-      },
+      stablecoinRegistration,
+      ...(wrappedNativeRegistration ? { wrappedNativeRegistration } : {}),
     },
-    registeredTokens: {
-      USDT: {
-        address: stablecoinAddress,
-        tokenId: Number(stablecoinTokenId),
-        decimals: stablecoinDecimals,
-      },
-    },
+    registeredTokens,
   };
 
   if (process.env.XLN_DEPLOY_OUTPUT) {

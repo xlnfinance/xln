@@ -112,6 +112,16 @@ const FORBIDDEN = [
 
 const ALLOWLIST: readonly Allowance[] = [
   {
+    file: 'jurisdictions/external/weth9.json',
+    match: '"type": "fallback"',
+    reason: 'Solidity ABI entry for the pinned external WETH9 payable deposit entry point; immutable upstream bytes.',
+  },
+  {
+    file: 'jurisdictions/external/wtrx.json',
+    match: '"type": "fallback"',
+    reason: 'Solidity ABI entry for the verified external WTRX payable deposit entry point; immutable upstream bytes.',
+  },
+  {
     file: 'frontend/svelte.config.js',
     match: "fallback: 'index.html'",
     reason: 'Exact Svelte adapter-static option name for the SPA shell output.',

@@ -1,0 +1,67 @@
+{
+  "sourceSHA": "479b14c8959534449c813f7359b9894f1df92d95",
+  "receipt": "fullmesh-after-smoke-l2-02.result.json",
+  "command": [
+    "bun",
+    "run",
+    "stand:run",
+    "--reason",
+    "fullmesh-after-smoke-l2-02",
+    "--timeout-ms",
+    "7200000",
+    "--",
+    "bun",
+    "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+    "--shards=1",
+    "--workers-per-shard=1",
+    "--max-failures=1",
+    "--pw-files=tests/e2e/payments/e2e-multiroute-load.spec.ts::full mesh routing with diverse payment patterns",
+    "--pw-project=chromium",
+    "--video=retain-on-failure",
+    "--trace=retain-on-failure",
+    "--screenshot=only-on-failure",
+    "--prewait-health=reset",
+    "--strict-browser-health",
+    "--preserve-artifacts"
+  ],
+  "seconds": 510.900612583,
+  "sourceUnchanged": true,
+  "logSHA256": "63b38f541dd8d9afc2187fe6280bc1415d4fb33b243ef750b420d5755c09b814",
+  "candidate": {
+    "candidateId": "dbdd85141224f78e0e5376ab357bb9c8865134ff79cbff1c3496a282a2a55245",
+    "gitHead": "479b14c8959534449c813f7359b9894f1df92d95",
+    "codeHash": "df53c719c88412be6b9e2f1097c5bd5d41e258447301fb67645da2202fb61690",
+    "gateConfigHash": "e5e4baed5f239740d297afcda513f06068c6acfa965f084ebfff7be4e6453ce2"
+  },
+  "runner": {
+    "passedShards": 1,
+    "failedShards": 0,
+    "cancelledShards": 0
+  },
+  "browser": {
+    "startTime": "2026-10-21T18:44:49.357Z",
+    "duration": 407794.2,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "results": [
+    {
+      "title": "full mesh routing with diverse payment patterns",
+      "status": "passed",
+      "retry": 0,
+      "durationMs": 402431
+    }
+  ],
+  "financialSubcases": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
+  "restoredWallets": 6,
+  "identitiesAndBalances": "Exact original owner identities and pre-reload balances asserted for all6. All18 financial groups retain original exact debits/credits/fees/overspend/lock assertions.",
+  "scope": "Private EVM single-lane owning debug evidence; not final158/two-lane/current-final-SHA/mainnet certification.",
+  "priorInvocationError": {
+    "receipt": "fullmesh-after-smoke-l2-01.result.json",
+    "error": "E2E_BUILD_CACHE_STALE",
+    "browsersStarted": 0
+  },
+  "privateArchive": "fullmesh-after-smoke-l2-02-private/index.json"
+}

@@ -1,0 +1,365 @@
+{
+  "recordedAt": "2026-10-21T19:29:24.911629+00:00",
+  "parentSHA": "479b14c8959534449c813f7359b9894f1df92d95",
+  "scope": "Owned deployment/test milestone. Private Anvil and native JavaTVM; public read-only token preflight. Not final same-SHA acceptance, public deployment or mainnet activation.",
+  "source": {
+    "core/__tests__/operations/release/mainnet-chain-deploy-wiring.test.ts": "2fe7b99a2aea03dcf6a573953f4d22d7c9044800a06b5c2548f4c5caec9a1dba",
+    "core/__tests__/network/jurisdiction/wrapped-native-listing.test.ts": "33085161488ed98f4dfd44e7a8b14d60454c770335fe6b1d11d7d013b63df9c8",
+    "jurisdictions/scripts/deploy-stack.cjs": "5059e9cbb3969a9eef17e09cc6cc1f2907fb65d5e47964e801cbb67e7ce8bba7",
+    "jurisdictions/scripts/deploy-chain-matrix.cjs": "53860e23364b1a8e2e618a3ce0dc5a5b0232fd659eee48e957c00b53698356fb",
+    "jurisdictions/external/weth9.json": "75567539ac40a1bd213d50b473fb232136ec3c6387cd21e4a00b26bbe4bc0ae2",
+    "jurisdictions/external/wtrx.json": "302cbcc931569a83ffa613f2bd78195f094f0fec80c99f82b705ab871ca9ed3d",
+    "scripts/tron/native-stand.ts": "22c66b797fd86bbd7213945a092f64b325f099ccc64e5b1dc5c9c1e8c8580a5f",
+    "scripts/tron/withdrawal/wrapped.ts": "90ed34f3ece35c876bca1f957661176b7ee60be32a2422f7c2110917a6db3fd4",
+    "scripts/tron/native-rust-financial.ts": "52faa394c04f91b66e97889a027fbd87a7d3fdbc640c899355149110a858dcef",
+    "core/scripts/checks/policy/check-no-legacy.ts": "be49b26c26bab11c14cd641f222c13e3bdfd32ffbc8553a527827c7abcb32066"
+  },
+  "repair": "Public chain matrix preflights wrapped assets before signing. Foundation lists USDT1 then WETH/WTRX2 with committed sequential action nonces, exact action-hash and full registry readback. Generated pending configuration retains both actual listings; missing registry is rejected.",
+  "l1": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "wrapped-native-matrix-l1-02",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "test",
+      "core/__tests__/operations/release/foundation-hanko-deploy.test.ts",
+      "core/__tests__/operations/release/mainnet-chain-deploy-wiring.test.ts"
+    ],
+    "seconds": 1.73148175,
+    "sourceUnchanged": true,
+    "logSHA256": "eb82128467ea6a09131ac5e0b43ea7bbb392ad450afe449575437b573bf3cad7",
+    "startedAt": "2026-10-21T19:08:56.559822+00:00",
+    "finishedAt": "2026-10-21T19:08:58.291284+00:00",
+    "passed": 14,
+    "failed": 0,
+    "assertions": 105
+  },
+  "folderWidthRegression": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "wrapped-native-folder-l1-01",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "run",
+      "check:folder-width"
+    ],
+    "seconds": 1.050008709,
+    "sourceUnchanged": true,
+    "logSHA256": "82bc96009182ac84ee69c0c690efa675401afe2a67b8f1d6a0c6f732e8987650",
+    "startedAt": "2026-10-21T19:21:54.158871+00:00",
+    "finishedAt": "2026-10-21T19:21:55.208864+00:00"
+  },
+  "abiVocabularyRegression": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "wrapped-native-abi-vocabulary-l1-01",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "run",
+      "check:no-legacy"
+    ],
+    "seconds": 2.503630917,
+    "sourceUnchanged": true,
+    "logSHA256": "c6cc966abd9015713cf4ad7ac7b4549f9e5f5e5cea7a3bc8f659ac1d80b53db7",
+    "startedAt": "2026-10-21T19:29:08.867098+00:00",
+    "finishedAt": "2026-10-21T19:29:11.370678+00:00"
+  },
+  "evm": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "wrapped-native-evm-listing-l2-02",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "test",
+      "core/__tests__/network/jurisdiction/wrapped-native-listing.test.ts"
+    ],
+    "seconds": 28.341520000000003,
+    "sourceUnchanged": true,
+    "logSHA256": "2ce651463fee94db8e4e8811ee5c36002c4b609558941a37987a23c81715aafc",
+    "startedAt": "2026-10-21T19:05:08.861512+00:00",
+    "finishedAt": "2026-10-21T19:05:37.203131+00:00",
+    "passed": 1,
+    "failed": 0,
+    "assertions": 24,
+    "proof": {
+      "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+      "deposited": "0xc5b67e258445ea0e7e8d719555d912e2cd022beab7d382e8982522fc44e31d08",
+      "evidence": {
+        "account": {
+          "address": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
+          "deploymentBlock": 15,
+          "transactionHash": "0x4a349c3a8fb6e9b4dd26aadb8931be30bafb77364ec14e23ec319efbbcc39c34"
+        },
+        "deltaTransformer": {
+          "address": "0x0165878A594ca255338adfa4d48449f69242Eb8F",
+          "deploymentBlock": 18,
+          "transactionHash": "0xcdbf0ebf730269161075ffd3906eb7dbd30076cd08c7d9d291c18d8cb4f42989"
+        },
+        "depository": {
+          "address": "0x610178dA211FEF7D417bC0e6FeD39F05609AD788",
+          "deploymentBlock": 22,
+          "transactionHash": "0xf0bca2eba2fdb47b1fc359257dcc2016e80482ab57ba5ed7eb5479d37140265e"
+        },
+        "depositoryBounds": {
+          "address": "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
+          "deploymentBlock": 19,
+          "transactionHash": "0xbc06556995c66ebb8d555befd82d860c9202147d79b3ead0bcfb2814a4ff00c0"
+        },
+        "entityProvider": {
+          "address": "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
+          "deploymentBlock": 17,
+          "transactionHash": "0xb3e5ae1b1af7c78f00f39ef907492ea17d923aa904b98b27881abf16ac5007bf"
+        },
+        "hankoVerifier": {
+          "address": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
+          "deploymentBlock": 16,
+          "transactionHash": "0x497e46c79858a75906f746ccb136025c17ab4b289b4e14694397e78f9152a650"
+        },
+        "hashLadderRegistry": {
+          "address": "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
+          "deploymentBlock": 20,
+          "transactionHash": "0xe3e6213800b76419e7cb3cb92a0782d784ae7ec145cfa64694004496ba88ebd2"
+        },
+        "nftCustody": {
+          "address": "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318",
+          "deploymentBlock": 21,
+          "transactionHash": "0x618e508e2a022a8d32093c79aa9325d9bd07d839eb0932cc38e418c2d3682665"
+        },
+        "stablecoin": {
+          "address": "0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0",
+          "deploymentBlock": 24,
+          "transactionHash": "0x11007ecb2c3f4c2cf00b117a344205e3e44aecad1ca0145253b1e051814cdb1f"
+        },
+        "stablecoinRegistration": {
+          "blockNumber": 25,
+          "transactionHash": "0xd3045c9fa0ddaaf1189867bfee20ee85f056f66068f6b45568fc540c62c7745f"
+        },
+        "wrappedNativeRegistration": {
+          "blockNumber": 26,
+          "transactionHash": "0xfdac9e8fbaeba15c8f81158dff66bcec4c67167c73a45ec282ca74c3783bb51f"
+        }
+      },
+      "foundationNonce": 2,
+      "registeredTokens": {
+        "USDT": {
+          "address": "0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0",
+          "decimals": 6,
+          "tokenId": 1
+        },
+        "WETH": {
+          "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+          "decimals": 18,
+          "tokenId": 2
+        }
+      },
+      "retainedSupply": {
+        "__xlnType": "BigInt",
+        "value": "1000000000000000000"
+      },
+      "withdrawn": "0x3a3b460ae5693bed0edc0ca1b38c84d13d544d5c7b63523b070d3bdc14c8d976"
+    }
+  },
+  "native": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "wrapped-native-tvm-listing-l2-03",
+      "--timeout-ms",
+      "180000",
+      "--",
+      "bun",
+      "scripts/tron/native-stand.ts",
+      "--deploy-graph"
+    ],
+    "seconds": 127.98070783399999,
+    "sourceUnchanged": true,
+    "logSHA256": "9e00d1bc90ca13727e145a32e973d9e7a782357f66a160c75e998f2b833ad89d",
+    "startedAt": "2026-10-21T19:22:09.617081+00:00",
+    "finishedAt": "2026-10-21T19:24:17.598479+00:00",
+    "passed": 1,
+    "failed": 0,
+    "registry": {
+      "chainId": 2414086651,
+      "mode": "tron",
+      "registry": [
+        {
+          "address": "0xac16212Ca9cAf32f5De6D0563aEe12A08068B689",
+          "decimals": 6,
+          "externalTokenId": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "name": "XLN Local Test USD",
+          "symbol": "XLNUSD",
+          "tokenId": 1,
+          "tokenType": 0
+        },
+        {
+          "address": "0x2c93cabb862C6E878E4C740Dd9e3E2263116BB91",
+          "decimals": 6,
+          "externalTokenId": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "name": "Wrapped TRX",
+          "symbol": "WTRX",
+          "tokenId": 2,
+          "tokenType": 0
+        }
+      ],
+      "solidifiedBlock": 31
+    },
+    "wrapped": {
+      "base58": "TE2unGB5YmtQv2a6VZH4bq6G6ExG5Attbh",
+      "deploymentBlock": 7,
+      "evm": "0x2c93cabb862c6e878e4c740dd9e3e2263116bb91",
+      "hex41": "0x412c93cabb862c6e878e4c740dd9e3e2263116bb91",
+      "runtimeCodeHash": "0xa025d56a9930e947ce79b8183c99dd08c22fd4e3dacb9890f8183954b1c90412",
+      "transactionHash": "04a0d39998c83a479f717487272dbd59c3f24cad3291a4d2c5167aca67ed8abb"
+    },
+    "balances": {
+      "before": "89999999880241750",
+      "afterDeposit": "89999999876060150",
+      "afterWithdrawal": "89999999875659510",
+      "depositedAmount": "2000000",
+      "withdrawnAmount": "1000000",
+      "retained": "1000000"
+    },
+    "receipts": {
+      "deposit": {
+        "transactionHash": "51ce850174be26f2175bcca5b1b5835e622acb0a01c67c12a512f772551a7877",
+        "blockNumber": 10,
+        "feeSUN": 2181600,
+        "status": "SUCCESS"
+      },
+      "withdrawal": {
+        "transactionHash": "5b4343a03043ccd5ed03e6255bb6872eadb73df146fec92e9ec29d5182cee241",
+        "blockNumber": 13,
+        "feeSUN": 1400640,
+        "status": "SUCCESS"
+      }
+    }
+  },
+  "originalFinancialScenarios": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "wrapped-native-original-financial-l2-01",
+      "--timeout-ms",
+      "180000",
+      "--",
+      "bun",
+      "test",
+      "core/__tests__/network/jurisdiction/public-proof-smoke.test.ts"
+    ],
+    "seconds": 148.036831042,
+    "sourceUnchanged": true,
+    "logSHA256": "029f8c2a966fb94a2321fcf551d0fcb80a55d61868ff68304a743961147e7ce7",
+    "startedAt": "2026-10-21T19:12:05.105345+00:00",
+    "finishedAt": "2026-10-21T19:14:33.142907+00:00",
+    "passed": 3,
+    "failed": 0,
+    "assertions": 74,
+    "perScenarioDeadlineMs": 60000,
+    "testFileByteIdenticalToParent": true
+  },
+  "publicPreflight": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "wrapped-native-public-preflight-01",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "python3",
+      "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/wrapped-public-preflight-01.py"
+    ],
+    "seconds": 6.281333625,
+    "sourceUnchanged": true,
+    "logSHA256": "8cb07c1868aa41325f322b44a104a905e1024fdf23483e1a310635e0c40cf9b2",
+    "startedAt": "2026-10-21T19:14:48.764001+00:00",
+    "finishedAt": "2026-10-21T19:14:55.045340+00:00",
+    "passed": 2,
+    "failed": 0,
+    "scope": "Sepolia/Nile chain/token code+decimals only; dry-run returns before deployment or cost estimation; signing keys removed from child environment."
+  },
+  "artifactReview": {
+    "weth9": {
+      "url": "https://github.com/gnosis/canonical-weth/tree/0dd1ea3e295eef916d0c6223ec63141137d22d67",
+      "upstreamArtifactSHA256": "5642606d80289ee10476fca39e306785f14942f7cecaf86a66cde6236b825b06",
+      "usage": "Genuine wrapped ETH fixture; pinned upstream artifact, not recompiled by XLN.",
+      "compiler": {
+        "name": "solc",
+        "version": "0.5.0+commit.1d4f565a.Emscripten.clang"
+      }
+    },
+    "wtrx": {
+      "url": "https://nile.tronscan.org/#/contract/TYsbWxNnyTgsZaTFaue9hqpxkU3Fkco94a/code",
+      "verifiedSourceEndpoint": "https://nileapi.tronscan.org/api/solidity/contract/info",
+      "contractAddress": "TYsbWxNnyTgsZaTFaue9hqpxkU3Fkco94a",
+      "verificationStatus": 2,
+      "licenseExplorerCode": "5",
+      "verifiedResponseSHA256": "9c87ff46a021ea05c015dbe2601589e116c4af012cbd42a05277b46b351c03b5",
+      "creationSHA256": "6a58554481b744fab3c734fd5d2af8379537002bfcff45fa97f5a27b479cb6b4",
+      "runtimeSHA256": "a16ef4948ce7eb6b6463837c79a498bee50a134f0d90c83d55921c41aa754820",
+      "usage": "Genuine wrapped TRX fixture; exact verified public creation/runtime bytes. Historical compiler is provenance, not an XLN compiler dependency.",
+      "compiler": {
+        "name": "tron-solidity",
+        "version": "tron-0.5.10_Odyssey_v3.6.6",
+        "optimizer": 0,
+        "optimizerRuns": 0,
+        "evmVersion": "default"
+      }
+    }
+  },
+  "retainedFailures": [
+    {
+      "receipt": "wrapped-native-current-check-02.result.json",
+      "error": "ABI type fallback false-positive; two exact artifact path+language ABI entry exceptions, no bytes removed and no catalog exclusion."
+    },
+    {
+      "receipt": "wrapped-native-current-check-01.result.json",
+      "error": "New helper exceeded scripts/tron file limit11>10; moved to existingwithdrawal folder, unchangedlimit exactgatePASS."
+    },
+    {
+      "receipt": "wrapped-native-evm-first-boundary-01.result.json",
+      "error": "Successful real wrapper/stack deployment omitted registeredTokens.WETH"
+    },
+    {
+      "receipt": "wrapped-native-evm-owning-l2-01.result.json",
+      "error": "Combined new wrapper plus original financialproof exceeded unchanged60s; no PASS. New narrow listing test separated; all original3financialcases byte-for-byte retained."
+    }
+  ],
+  "limitations": [
+    "No public chain deployment/signing/broadcast in these observations.",
+    "Nile obsolete binding/funding and dedicated mainnet cold-control remain unresolved.",
+    "Native Rust fixture registry expectation updated to exact two assets; no new Rust financial certificate claimed.",
+    "93 browser identities and final immutable-SHA financial/unit/test/check/full158/release34/60minsoak/public deployment gates remain."
+  ]
+}

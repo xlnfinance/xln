@@ -22,10 +22,11 @@ const chainMatrix = require('../../../../jurisdictions/scripts/deploy-chain-matr
     stablecoin: { address: string; deployTestStablecoin: boolean },
     rpcCall: (url: string, method: string, params: unknown[]) => Promise<unknown>,
   ): Promise<void>;
-  preflightTronStablecoin(
+  preflightTronToken(
     chain: Record<string, unknown>,
     tronWeb: { address: { toHex(value: string): string; fromHex(value: string): string } },
     stablecoin: { base58: string; hex41: string; evm: string },
+    symbol: string,
     reader: {
       getContract(address: string): Promise<Record<string, unknown>>;
       readDecimals(address: string): Promise<Record<string, unknown>>;
@@ -96,6 +97,31 @@ describe('mainnet chain deployment wiring', () => {
     });
   });
 
+  test('deployment configuration preserves both confirmed token listings and rejects absent registry evidence', () => {
+    const deployment = JSON.parse(
+      readFileSync(join(repoRoot, 'jurisdictions/deployments/ethereum-sepolia.json'), 'utf8'),
+    );
+    const chain = chainMatrix.profiles.mainnet.ethereum;
+    const wrapped = { address: chain.wrappedNativeAddress, tokenId: 2, decimals: 18 };
+    const registeredTokens = { ...deployment.registeredTokens, WETH: wrapped };
+    const result = { ...deployment, chain, preflight: { url: 'https://rpc.invalid' }, registeredTokens };
+    const entry = chainMatrix.jurisdictionEntry(result);
+    expect(entry.tokens).toEqual(
+      Object.fromEntries(
+        Object.entries(registeredTokens).map(([symbol, token]) => [
+          symbol,
+          { symbol, ...(token as Record<string, unknown>) },
+        ]),
+      ),
+    );
+    expect(entry.status).toBe('pending');
+    expect(() => chainMatrix.jurisdictionEntry({ ...result, registeredTokens: undefined })).toThrow(
+      'DEPLOYED_TOKEN_REGISTRY_MISSING',
+    );
+    expect(chain.wrappedNativeAddress).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
+    expect(chainMatrix.profiles.mainnet.tron.wrappedNativeAddress).toBe('TNUC9Qb1rRpS5CbWLmNMxXBjyFoydXjWFR');
+  });
+
   test('root scripts expose one-click testnet and mainnet chain deploy commands', () => {
     const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
@@ -164,7 +190,7 @@ describe('mainnet chain deployment wiring', () => {
     expect(stack).toContain('evmContracts:');
     expect(stack).toContain('transactionHash: transaction.hash');
     expect(stack).toContain('STABLECOIN_TOKEN_ID_MISMATCH');
-    expect(stack).toContain('registeredTokens:');
+    expect(stack).toMatch(/\bregisteredTokens\s*[:,]/);
     expect(matrix).toContain('result.evmContracts ? { evmContracts: result.evmContracts }');
     expect(matrix).toContain("XLN_DEPLOY_TEST_STABLECOIN: stablecoin.deployTestStablecoin ? '1' : '0'");
     expect(matrix).toContain('...existingDeployments');
@@ -218,7 +244,7 @@ describe('mainnet chain deployment wiring', () => {
     expect(script).not.toMatch(/depositoryContract\s*\.registerExternalToken\(/);
     expect(script).toMatch(/entityProviderContract\s*\.foundationRegisterExternalToken\(/);
     expect(script).toContain("require('./foundation-hanko.cjs')");
-    expect(script).toContain('TRON_USDT_REGISTRATION_MISMATCH');
+    expect(script).toContain('TRON_TOKEN_REGISTRATION_MISMATCH');
     expect(script).toContain('Mainnet deployment requires --yes');
     expect(script).toContain('DEPLOYMENT_ALREADY_EXISTS');
     expect(script).toContain('without explicit --replace');
@@ -252,49 +278,49 @@ describe('mainnet chain deployment wiring', () => {
       },
     };
 
-    await chainMatrix.preflightTronStablecoin(chain, tronWeb, stablecoin, reader);
+    await chainMatrix.preflightTronToken(chain, tronWeb, stablecoin, 'USDT', reader);
     expect(calls).toEqual([`contract:${stablecoin.base58}`, `decimals:${stablecoin.base58}`]);
     await expect(
-      chainMatrix.preflightTronStablecoin(chain, tronWeb, stablecoin, {
+      chainMatrix.preflightTronToken(chain, tronWeb, stablecoin, 'USDT', {
         ...reader,
         getContract: async () => ({ contract_address: stablecoin.hex41.slice(2), bytecode: '' }),
       }),
-    ).rejects.toThrow(`TRON_STABLECOIN_CODE_MISSING:${chain.id}:${stablecoin.base58}`);
+    ).rejects.toThrow(`TRON_USDT_CODE_MISSING:${chain.id}:${stablecoin.base58}`);
     await expect(
-      chainMatrix.preflightTronStablecoin(chain, tronWeb, stablecoin, {
+      chainMatrix.preflightTronToken(chain, tronWeb, stablecoin, 'USDT', {
         ...reader,
         getContract: async () => ({ contract_address: `41${'00'.repeat(20)}`, bytecode: '6000' }),
       }),
-    ).rejects.toThrow(`TRON_STABLECOIN_CONTRACT_IDENTITY_MISMATCH:${chain.id}`);
+    ).rejects.toThrow(`TRON_USDT_CONTRACT_IDENTITY_MISMATCH:${chain.id}`);
     await expect(
-      chainMatrix.preflightTronStablecoin(chain, tronWeb, stablecoin, {
+      chainMatrix.preflightTronToken(chain, tronWeb, stablecoin, 'USDT', {
         ...reader,
         readDecimals: async () => ({
           result: { result: true },
           constant_result: ['12'.padStart(64, '0')],
         }),
       }),
-    ).rejects.toThrow(`TRON_STABLECOIN_DECIMALS_MISMATCH:${chain.id}:expected=6:actual=18`);
+    ).rejects.toThrow(`TRON_USDT_DECIMALS_MISMATCH:${chain.id}:expected=6:actual=18`);
     await expect(
-      chainMatrix.preflightTronStablecoin(chain, tronWeb, stablecoin, {
+      chainMatrix.preflightTronToken(chain, tronWeb, stablecoin, 'USDT', {
         ...reader,
         readDecimals: async () => ({
           result: { result: false },
           constant_result: [],
         }),
       }),
-    ).rejects.toThrow(`TRON_STABLECOIN_DECIMALS_CALL_FAILED:${chain.id}:${stablecoin.base58}`);
+    ).rejects.toThrow(`TRON_USDT_DECIMALS_CALL_FAILED:${chain.id}:${stablecoin.base58}`);
     await expect(
-      chainMatrix.preflightTronStablecoin(chain, tronWeb, stablecoin, {
+      chainMatrix.preflightTronToken(chain, tronWeb, stablecoin, 'USDT', {
         ...reader,
         readDecimals: async () => ({
           result: { result: true },
           constant_result: ['06'],
         }),
       }),
-    ).rejects.toThrow(`TRON_STABLECOIN_DECIMALS_RESPONSE_INVALID:${chain.id}:${stablecoin.base58}`);
+    ).rejects.toThrow(`TRON_USDT_DECIMALS_RESPONSE_INVALID:${chain.id}:${stablecoin.base58}`);
 
-    const preflightIndex = script.indexOf('await preflightTronStablecoin(chain, readOnlyTronWeb, usdt);');
+    const preflightIndex = script.indexOf("await preflightTronToken(chain, readOnlyTronWeb, usdt, 'USDT');");
     expect(preflightIndex).toBeGreaterThan(-1);
     expect(preflightIndex).toBeLessThan(script.indexOf('if (options.dryRun)', preflightIndex));
     expect(preflightIndex).toBeLessThan(script.indexOf('const privateKey = requireHexPrivateKey()', preflightIndex));

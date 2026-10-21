@@ -35,6 +35,7 @@ const profiles = {
       currency: 'ETH',
       explorer: 'https://sepolia.etherscan.io',
       usdtEnv: 'ETH_SEPOLIA_USDT',
+      wrappedNativeAddress: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14',
     },
     tron: {
       id: 'tron-nile',
@@ -48,6 +49,7 @@ const profiles = {
       currency: 'TRX',
       explorer: 'https://nile.tronscan.org',
       usdtAddress: TRON_NILE_USDT,
+      wrappedNativeAddress: 'TYsbWxNnyTgsZaTFaue9hqpxkU3Fkco94a',
     },
   },
   mainnet: {
@@ -61,6 +63,7 @@ const profiles = {
       currency: 'ETH',
       explorer: 'https://etherscan.io',
       usdtAddress: ETH_MAINNET_USDT,
+      wrappedNativeAddress: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
     },
     tron: {
       id: 'tron-mainnet',
@@ -74,6 +77,7 @@ const profiles = {
       currency: 'TRX',
       explorer: 'https://tronscan.org',
       usdtAddress: TRON_MAINNET_USDT,
+      wrappedNativeAddress: 'TNUC9Qb1rRpS5CbWLmNMxXBjyFoydXjWFR',
     },
   },
 };
@@ -164,26 +168,29 @@ const evmStablecoinFor = (chain, env = process.env) => {
   return { address, deployTestStablecoin: false };
 };
 
-const preflightEvmStablecoin = async (chain, url, stablecoin, rpcCall = rpc) => {
-  if (stablecoin.deployTestStablecoin) return;
-  const code = await rpcCall(url, 'eth_getCode', [stablecoin.address, 'latest']);
+const preflightEvmToken = async (chain, url, token, symbol, expectedDecimals, rpcCall = rpc) => {
+  const code = await rpcCall(url, 'eth_getCode', [token.address, 'latest']);
   if (typeof code !== 'string' || !/^0x[0-9a-fA-F]+$/.test(code) || code === '0x') {
-    throw new Error(`EVM_STABLECOIN_CODE_MISSING:${chain.id}:${stablecoin.address}`);
+    throw new Error(`EVM_${symbol}_CODE_MISSING:${chain.id}:${token.address}`);
   }
   const encodedDecimals = await rpcCall(url, 'eth_call', [
     {
-      to: stablecoin.address,
+      to: token.address,
       data: '0x313ce567',
     },
     'latest',
   ]);
   if (typeof encodedDecimals !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(encodedDecimals)) {
-    throw new Error(`EVM_STABLECOIN_DECIMALS_RESPONSE_INVALID:${chain.id}:${stablecoin.address}`);
+    throw new Error(`EVM_${symbol}_DECIMALS_RESPONSE_INVALID:${chain.id}:${token.address}`);
   }
   const decimals = Number(BigInt(encodedDecimals));
-  if (decimals !== 6) {
-    throw new Error(`EVM_STABLECOIN_DECIMALS_MISMATCH:${chain.id}:expected=6:actual=${decimals}`);
+  if (decimals !== expectedDecimals) {
+    throw new Error(`EVM_${symbol}_DECIMALS_MISMATCH:${chain.id}:expected=${expectedDecimals}:actual=${decimals}`);
   }
+};
+
+const preflightEvmStablecoin = async (chain, url, stablecoin, rpcCall = rpc) => {
+  if (!stablecoin.deployTestStablecoin) await preflightEvmToken(chain, url, stablecoin, 'STABLECOIN', 6, rpcCall);
 };
 
 const preflightChain = async chain => {
@@ -214,6 +221,9 @@ const deployEvm = async (chain, options) => {
   const stablecoin = evmStablecoinFor(chain);
   const preflight = await preflightChain(chain);
   await preflightEvmStablecoin(chain, preflight.url, stablecoin);
+  const wrapped = require('ethers').getAddress(chain.wrappedNativeAddress);
+  if (wrapped.toLowerCase() === stablecoin.address.toLowerCase()) throw new Error('WRAPPED_NATIVE_DUPLICATES_USDT');
+  await preflightEvmToken(chain, preflight.url, { address: wrapped }, 'WETH', 18);
   if (options.dryRun) {
     return { chain, preflight, dryRun: true };
   }
@@ -227,6 +237,7 @@ const deployEvm = async (chain, options) => {
     env: {
       XLN_DEPLOY_OUTPUT: outputPath,
       XLN_STABLECOIN_ADDRESS: stablecoin.address,
+      XLN_WRAPPED_NATIVE_ADDRESS: wrapped,
       XLN_DEPLOY_TEST_STABLECOIN: stablecoin.deployTestStablecoin ? '1' : '0',
     },
   });
@@ -234,7 +245,10 @@ const deployEvm = async (chain, options) => {
   return { chain, preflight, ...deployed };
 };
 
-const artifactPath = contractName => path.join(repoRoot, 'build-tron', 'contracts', `${contractName}.json`);
+const artifactPath = contractName =>
+  contractName === 'WTRX'
+    ? path.join(repoRoot, 'external', 'wtrx.json')
+    : path.join(repoRoot, 'build-tron', 'contracts', `${contractName}.json`);
 
 const loadTronArtifact = contractName => {
   const file = artifactPath(contractName);
@@ -274,39 +288,39 @@ const tronAddressInfo = (tronWeb, address) => {
   };
 };
 
-const preflightTronStablecoin = async (chain, tronWeb, stablecoin, reader = {}) => {
+const preflightTronToken = async (chain, tronWeb, token, symbol, reader = {}) => {
   const getContract = reader.getContract || (address => tronWeb.trx.getContract(address));
   const readDecimals =
     reader.readDecimals ||
     (address => tronWeb.transactionBuilder.triggerConstantContract(address, 'decimals()', {}, [], address));
-  const contract = await getContract(stablecoin.base58);
+  const contract = await getContract(token.base58);
   let contractAddress;
   try {
     contractAddress = tronAddressInfo(tronWeb, contract?.contract_address);
   } catch {
-    throw new Error(`TRON_STABLECOIN_CONTRACT_IDENTITY_INVALID:${chain.id}:${stablecoin.base58}`);
+    throw new Error(`TRON_${symbol}_CONTRACT_IDENTITY_INVALID:${chain.id}:${token.base58}`);
   }
-  if (contractAddress.hex41.toLowerCase() !== stablecoin.hex41.toLowerCase()) {
+  if (contractAddress.hex41.toLowerCase() !== token.hex41.toLowerCase()) {
     throw new Error(
-      `TRON_STABLECOIN_CONTRACT_IDENTITY_MISMATCH:${chain.id}:` +
-        `expected=${stablecoin.hex41}:actual=${contractAddress.hex41}`,
+      `TRON_${symbol}_CONTRACT_IDENTITY_MISMATCH:${chain.id}:` +
+        `expected=${token.hex41}:actual=${contractAddress.hex41}`,
     );
   }
   const bytecode = typeof contract?.bytecode === 'string' ? stripHexPrefix(contract.bytecode) : '';
   if (!/^[0-9a-fA-F]+$/.test(bytecode)) {
-    throw new Error(`TRON_STABLECOIN_CODE_MISSING:${chain.id}:${stablecoin.base58}`);
+    throw new Error(`TRON_${symbol}_CODE_MISSING:${chain.id}:${token.base58}`);
   }
-  const response = await readDecimals(stablecoin.base58);
+  const response = await readDecimals(token.base58);
   if (response?.result?.result !== true) {
-    throw new Error(`TRON_STABLECOIN_DECIMALS_CALL_FAILED:${chain.id}:${stablecoin.base58}`);
+    throw new Error(`TRON_${symbol}_DECIMALS_CALL_FAILED:${chain.id}:${token.base58}`);
   }
   const encodedDecimals = stripHexPrefix(response.constant_result?.[0] || '');
   if (response.constant_result?.length !== 1 || !/^[0-9a-fA-F]{64}$/.test(encodedDecimals)) {
-    throw new Error(`TRON_STABLECOIN_DECIMALS_RESPONSE_INVALID:${chain.id}:${stablecoin.base58}`);
+    throw new Error(`TRON_${symbol}_DECIMALS_RESPONSE_INVALID:${chain.id}:${token.base58}`);
   }
   const decimals = Number(BigInt(`0x${encodedDecimals}`));
   if (decimals !== 6) {
-    throw new Error(`TRON_STABLECOIN_DECIMALS_MISMATCH:${chain.id}:expected=6:actual=${decimals}`);
+    throw new Error(`TRON_${symbol}_DECIMALS_MISMATCH:${chain.id}:expected=6:actual=${decimals}`);
   }
 };
 
@@ -427,7 +441,10 @@ const deployTron = async (chain, options) => {
       }
     }
   }
-  await preflightTronStablecoin(chain, readOnlyTronWeb, usdt);
+  await preflightTronToken(chain, readOnlyTronWeb, usdt, 'USDT');
+  const wrapped = tronAddressInfo(readOnlyTronWeb, chain.wrappedNativeAddress);
+  if (wrapped.evm.toLowerCase() === usdt.evm.toLowerCase()) throw new Error('WRAPPED_NATIVE_DUPLICATES_USDT');
+  await preflightTronToken(chain, readOnlyTronWeb, wrapped, 'WTRX');
   if (options.dryRun) {
     return { chain, preflight, dryRun: true };
   }
@@ -480,36 +497,72 @@ const deployTron = async (chain, options) => {
   const foundationNonce = BigInt(
     (await entityProviderContract.entityActionNonces(foundationEntityId(tronEthers)).call()).toString(),
   );
-  const usdtListing = buildFoundationTokenListing(tronEthers, {
-    chainId: chain.chainId,
-    entityProviderAddress: entityProvider.evm,
-    foundationNonce,
-    depository: depository.evm,
-    tokenType: 0,
-    contractAddress: usdt.evm,
-    externalTokenId: 0,
-    privateKey,
-  });
-  await entityProviderContract
-    .foundationRegisterExternalToken(
-      depository.base58,
-      0,
-      usdt.base58,
-      0,
-      usdtListing.hankoData,
-      usdtListing.actionNonce.toString(),
-    )
-    .send({
-      feeLimit: Number(process.env.TRON_FEE_LIMIT || '15000000000'),
-      shouldPollResponse: true,
-    });
-  const tokenCount = BigInt((await depositoryContract.getTokensLength().call()).toString());
-  const token = await depositoryContract._tokens(1).call();
-  const registeredAddress = tronAddressInfo(tronWeb, token.contractAddress ?? token[0]);
-  if (tokenCount !== 2n || registeredAddress.evm.toLowerCase() !== usdt.evm.toLowerCase()) {
-    throw new Error(
-      `TRON_USDT_REGISTRATION_MISMATCH:count=${tokenCount}:expected=${usdt.evm}:actual=${registeredAddress.evm}`,
+  const registeredTokens = {};
+  for (const [index, [symbol, address]] of [
+    ['USDT', usdt],
+    ['WTRX', wrapped],
+  ].entries()) {
+    const committedNonce = BigInt(
+      (await entityProviderContract.entityActionNonces(foundationEntityId(tronEthers)).call()).toString(),
     );
+    if (committedNonce !== foundationNonce + BigInt(index)) throw new Error('TRON_FOUNDATION_LISTING_NONCE_MISMATCH');
+    const listing = buildFoundationTokenListing(tronEthers, {
+      chainId: chain.chainId,
+      entityProviderAddress: entityProvider.evm,
+      foundationNonce: committedNonce,
+      depository: depository.evm,
+      tokenType: 0,
+      contractAddress: address.evm,
+      externalTokenId: 0,
+      privateKey,
+    });
+    const actionHash = await entityProviderContract
+      .computeFoundationActionHash(
+        await entityProviderContract.FOUNDATION_REGISTER_TOKEN().call(),
+        listing.argumentsHash,
+        listing.actionNonce.toString(),
+      )
+      .call();
+    if (actionHash.toLowerCase() !== listing.actionHash.toLowerCase())
+      throw new Error('TRON_FOUNDATION_ACTION_HASH_MISMATCH');
+    const receipt = await entityProviderContract
+      .foundationRegisterExternalToken(
+        depository.base58,
+        0,
+        address.base58,
+        0,
+        listing.hankoData,
+        listing.actionNonce.toString(),
+      )
+      .send({
+        feeLimit: Number(process.env.TRON_FEE_LIMIT || '15000000000'),
+        shouldPollResponse: true,
+        rawResponse: true,
+      });
+    if (receipt.receipt?.result !== 'SUCCESS') throw new Error(`TRON_TOKEN_REGISTRATION_FAILED:${symbol}`);
+    const tokenId = index + 1;
+    const tokenCount = BigInt((await depositoryContract.getTokensLength().call()).toString());
+    const token = await depositoryContract._tokens(tokenId).call();
+    const registeredAddress = tronAddressInfo(tronWeb, token.contractAddress);
+    if (
+      tokenCount !== BigInt(tokenId + 1) ||
+      registeredAddress.evm.toLowerCase() !== address.evm.toLowerCase() ||
+      BigInt(token.tokenType.toString()) !== 0n ||
+      BigInt(token.externalTokenId.toString()) !== 0n
+    ) {
+      throw new Error(`TRON_TOKEN_REGISTRATION_MISMATCH:${symbol}:${tokenCount}:${registeredAddress.evm}`);
+    }
+    const afterNonce = BigInt(
+      (await entityProviderContract.entityActionNonces(foundationEntityId(tronEthers)).call()).toString(),
+    );
+    if (afterNonce !== listing.actionNonce) throw new Error('TRON_FOUNDATION_LISTING_NONCE_MISMATCH');
+    registeredTokens[symbol] = { ...address, tokenId, decimals: 6 };
+  }
+  if (
+    tronAddressInfo(tronWeb, await entityProviderContract.shareDepository().call()).evm.toLowerCase() !==
+    depository.evm.toLowerCase()
+  ) {
+    throw new Error('TRON_SHARE_DEPOSITORY_BINDING_MISMATCH');
   }
 
   return {
@@ -538,41 +591,24 @@ const deployTron = async (chain, options) => {
       depository,
       deltaTransformer,
     },
-    registeredTokens: { USDT: { ...usdt, tokenId: 1, decimals: 6 } },
+    registeredTokens,
   };
 };
 
 const tokenConfig = (chain, registeredTokens) => {
-  if (registeredTokens?.USDT) {
-    const token = registeredTokens.USDT;
-    return {
-      USDT: {
-        symbol: 'USDT',
+  if (!registeredTokens?.USDT) throw new Error(`DEPLOYED_TOKEN_REGISTRY_MISSING:${chain.id}`);
+  return Object.fromEntries(
+    Object.entries(registeredTokens).map(([symbol, token]) => [
+      symbol,
+      {
+        symbol,
         decimals: token.decimals,
         tokenId: token.tokenId,
-        address: token.evm || token.address,
-        ...(token.base58 && token.hex41 && token.evm
-          ? {
-              tron: {
-                base58: token.base58,
-                hex41: token.hex41,
-                evm: token.evm,
-              },
-            }
-          : {}),
+        address: chain.kind === 'tron' ? token.evm : token.address,
+        ...(chain.kind === 'tron' ? { tron: { base58: token.base58, hex41: token.hex41, evm: token.evm } } : {}),
       },
-    };
-  }
-  const raw = chain.usdtAddress || (chain.usdtEnv ? process.env[chain.usdtEnv] : undefined);
-  if (!raw) return {};
-  return {
-    USDT: {
-      symbol: 'USDT',
-      decimals: 6,
-      address: typeof raw === 'string' ? raw : raw.evm,
-      ...(typeof raw === 'object' ? { tron: raw } : {}),
-    },
-  };
+    ]),
+  );
 };
 
 const jurisdictionEntry = result => ({
@@ -713,6 +749,6 @@ module.exports = {
   tronRuntimeCodeHash,
   evmStablecoinFor,
   preflightEvmStablecoin,
-  preflightTronStablecoin,
+  preflightTronToken,
   profiles,
 };

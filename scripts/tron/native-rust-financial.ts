@@ -35,8 +35,12 @@ const adapter = await createJAdapter({ mode: 'tron', chainId: graph.chainId, rpc
   tronFullHost: graph.chain.defaultFullHost, tronSolidityHost: graph.chain.defaultSolidityHost,
   privateKey: foundationKey, fromReplica: { contracts: graph.contracts, entityProviderDeploymentBlock: graph.entityProviderDeploymentBlock } });
 const tokens = await adapter.getTokenRegistry();
-assert.equal(tokens.length, 1);
+const wrapped = (await Bun.file(`${stand}/wrapped.json`).json()).wrapped;
+assert.equal(tokens.length, 2);
+assert.equal(tokens[0]?.tokenId, 1);
 assert.equal(tokens[0]?.address.toLowerCase(), token.evm.toLowerCase());
+assert.equal(tokens[1]?.tokenId, 2);
+assert.equal(tokens[1]?.address.toLowerCase(), wrapped.evm.toLowerCase());
 registry.jurisdictions.native.tokenRegistry = tokens.map(row => ({ ...row, externalTokenId: String(row.externalTokenId) }));
 const expiry = process.env['XLN_TRON_RUST_EXPIRE'] === '1'
   ? createNativeRustExpiry({ data, fullHost: graph.chain.defaultFullHost, solidHost: graph.chain.defaultSolidityHost,
