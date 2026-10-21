@@ -1,0 +1,250 @@
+{
+  "at": "2026-10-21T07:04:30.579693+00:00",
+  "baseSHA": "275cb61fc27b317ee6508e4de2e76549c912265b",
+  "scope": "Focused engineering evidence before final immutable-SHA acceptance; not release or mainnet certification. Formatting followed individual runs; current aggregate check remains required.",
+  "changes": [
+    "Select hosted orderbook only for an actual signed replica owned by the adapter runtime; remote hubs use authenticated relay without E_NOT_FOUND fallback.",
+    "Wait for the canonical token registry before a browser driver makes a direction decision; retain exact financial prices, execution, holds, history, and original deadlines.",
+    "Retain real wallet restore, operator telemetry, and remote projection authority boundaries."
+  ],
+  "financial": "Six actual maker/taker cases passed, including self-trade zero movement, full and partial fills, cancellation, two takers, repeated cycles and roundtrip. Separate exact relay publish/cancel passed.",
+  "records": [
+    {
+      "attempt": "orderbook-source-l1-02",
+      "command": [
+        "bun",
+        "test",
+        "ui/src/runtime/financial/relay-book-snapshot.test.ts",
+        "ui/src/runtime/financial/orderbook-quote.test.ts"
+      ],
+      "baseSHA": "275cb61fc27b317ee6508e4de2e76549c912265b",
+      "exitCode": 0,
+      "seconds": 1.534557708,
+      "sourceUnchangedDuringRun": true,
+      "logSHA256": "cbe5a2db73a86728576b80a7db7284d891ba340da19496b1aacd89d08efa840f",
+      "recordSHA256": "1016cb4413a95e8af022a1a2bf90fccff3145b9bb4260cc683db7125dc372e9f"
+    },
+    {
+      "attempt": "orderbook-source-types-02",
+      "command": ["bun", "run", "--cwd", "ui", "check"],
+      "baseSHA": "275cb61fc27b317ee6508e4de2e76549c912265b",
+      "exitCode": 0,
+      "seconds": 3.7491481249999996,
+      "sourceUnchangedDuringRun": true,
+      "logSHA256": "7f54e777987aa3b840f8a9668d55c63fa7667a7d998fd65fee904ddd805dada7",
+      "recordSHA256": "ce182efd2fea9a369f50193736f1054b52769baa9cd86ac1582c3db93dafc85d"
+    },
+    {
+      "attempt": "remote-swap-source-exact-01",
+      "command": [
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts::admin remote runtime opens swap workspace from RuntimeView projection",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "baseSHA": "275cb61fc27b317ee6508e4de2e76549c912265b",
+      "exitCode": 0,
+      "seconds": 109.30185166700001,
+      "sourceUnchangedDuringRun": true,
+      "logSHA256": "358b68a437ea1dd0a1c552c5cd160b1c936ed7c27b55b8de5100467fb01ba3b0",
+      "recordSHA256": "9e812bca51c759c09de6ea9cf1f9070c34b095365a5d304704ee246253c959ff"
+    },
+    {
+      "attempt": "relay-book-publish-exact-01",
+      "command": [
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e/swap/e2e-swap-isolated.spec.ts::relay orderbook publishes new resting ask and bid to both subscribed users",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "baseSHA": "275cb61fc27b317ee6508e4de2e76549c912265b",
+      "exitCode": 0,
+      "seconds": 88.865310875,
+      "sourceUnchangedDuringRun": true,
+      "logSHA256": "a6eae3a40e6dfb7be1c683dd05a8f6b06f74cdd833d295285f295be02564a854",
+      "recordSHA256": "84d6ef98b0d1fd4ba2129d5991949ae51797c5c0ee65133fd928a151c9ff3af9"
+    },
+    {
+      "attempt": "orderbook-maker-taker-six-01",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "orderbook-maker-taker-six-01",
+        "--timeout-ms",
+        "7200000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=2",
+        "--workers-per-shard=1",
+        "--max-mm-concurrency=1",
+        "--stack-timeout-ms=300000",
+        "--strict-browser-health",
+        "--video=retain-on-failure",
+        "--trace=off",
+        "--screenshot=only-on-failure",
+        "--max-failures=1",
+        "--preserve-artifacts",
+        "--pw-files=[\"tests/e2e/swap/e2e-swap-isolated.spec.ts::self-trade protection cancels a user taker before matching their own resting order\", \"tests/e2e/swap/e2e-swap-isolated.spec.ts::two isolated users trade against each other through one hub orderbook without market maker liquidity\", \"tests/e2e/swap/e2e-swap-isolated.spec.ts::resting maker order can fill partially, stay open, then cancel remainder\", \"tests/e2e/swap/e2e-swap-isolated.spec.ts::one resting maker order can be matched by two isolated takers until fully closed\", \"tests/e2e/swap/e2e-swap-isolated.spec.ts::repeated maker and taker cycles accumulate closed swap rows\", \"tests/e2e/swap/e2e-swap-isolated.spec.ts::swap round-trip both directions clears holds and updates closed history on both peers\"]",
+        "--max-reset-concurrency=1"
+      ],
+      "baseSHA": "275cb61fc27b317ee6508e4de2e76549c912265b",
+      "exitCode": 0,
+      "seconds": 269.871232041,
+      "sourceUnchangedDuringRun": true,
+      "logSHA256": "dc16ad5989a11f65d35d33d3973f6332123d15e6ad76454ec07213dbd33723fc",
+      "recordSHA256": "87c8788ad4c6bdec65959fdadb2796b82e2e02ccbf2d831d58fd0a360d076dc5"
+    },
+    {
+      "attempt": "storage-schema-unlock-exact-05",
+      "command": [
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e/recovery/e2e-storage-schema-recovery.spec.ts::rejects obsolete storage and regenerates current data only after explicit testnet reset",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "baseSHA": "275cb61fc27b317ee6508e4de2e76549c912265b",
+      "exitCode": 0,
+      "seconds": 125.742101625,
+      "sourceUnchangedDuringRun": true,
+      "logSHA256": "2ccaf8db3f4d4ac3ce11d9d3032ae47ce70c77fd2a7562297cd18006331f3df6",
+      "recordSHA256": "6e9f2dee4dca08e9007873258d9dfb990eca8191808159bdfc6ac0f72755a0c4"
+    },
+    {
+      "attempt": "debug-telemetry-authority-l1-01",
+      "command": [
+        "bun",
+        "test",
+        "tests/frontend/debug/operator-diagnostics.test.ts",
+        "tests/unit/e2e-browser-guard.test.ts"
+      ],
+      "baseSHA": "275cb61fc27b317ee6508e4de2e76549c912265b",
+      "exitCode": 0,
+      "seconds": 1.851794,
+      "sourceUnchangedDuringRun": true,
+      "logSHA256": "344da8523c6d83369ccebdcc069fe8d68e006fe4e27a94cc051149b440cd4f10",
+      "recordSHA256": "1e837abfd2fb47c24e74765b1243d406b2dad22eacbcb51c5f86a04bbcfe7ade"
+    },
+    {
+      "attempt": "debug-incidents-react-exact-03",
+      "command": [
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e/runtime/e2e-debug-incidents.spec.ts::browser console errors enter the shared unread incident service",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "baseSHA": "275cb61fc27b317ee6508e4de2e76549c912265b",
+      "exitCode": 0,
+      "seconds": 104.236465375,
+      "sourceUnchangedDuringRun": true,
+      "logSHA256": "bc8a5a50a961f8dbe80d3431f78266bdc5b5db2a3c68254a3add9b80c9aacdf3",
+      "recordSHA256": "8c1803d1795d901f565c1481a940f56991854f8c5c16e46d39ed98cdb5d81462"
+    },
+    {
+      "attempt": "ahb-isolated-reload-exact-01",
+      "command": [
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e/runtime/e2e-ahb-isolated.spec.ts::bidirectional payments survive across two isolated browser contexts",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "baseSHA": "275cb61fc27b317ee6508e4de2e76549c912265b",
+      "exitCode": 0,
+      "seconds": 108.715869791,
+      "sourceUnchangedDuringRun": true,
+      "logSHA256": "3064cfd95e8f2af2b39394f8154cc8950562fc83eda4c8475530f17f5b30a678",
+      "recordSHA256": "2ea8c00edb0c07841c691937c064b6103ee21cfbe61960f4e5cd6ed82750cbe6"
+    },
+    {
+      "attempt": "observer-projection-exact-02",
+      "command": [
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=[\"tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts::dev DockRoot entity panel resolves seed through remote RuntimeView projection\",\"tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts::dev DockRoot Solvency panel reads remote radapter solvency-summary\"]",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "baseSHA": "275cb61fc27b317ee6508e4de2e76549c912265b",
+      "exitCode": 0,
+      "seconds": 94.153634958,
+      "sourceUnchangedDuringRun": true,
+      "logSHA256": "d79121887603177f48f90fadff27ae369f010b4b2632cc40995ba2ef718963d6",
+      "recordSHA256": "93e751620b56ee6f5ce932617a4762ff4106bfddaa225f32457f91614ba9592c"
+    },
+    {
+      "attempt": "pasted-capability-react-exact-01",
+      "command": [
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts::remote /app pasted capability connects without reloading the page",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "baseSHA": "275cb61fc27b317ee6508e4de2e76549c912265b",
+      "exitCode": 0,
+      "seconds": 58.569790790999996,
+      "sourceUnchangedDuringRun": true,
+      "logSHA256": "6d562d8a3279e6afc393456b81b2f7660f3b8059fbf5e3e643e90be19d062c29",
+      "recordSHA256": "f55e02292d2ded3cbc030e3b4ba157a7ff9789dfe5ffaa47346c5ed8b9c25239"
+    },
+    {
+      "attempt": "remote-to-local-react-exact-01",
+      "command": [
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts::local runtime creation while remote is active switches controller to embedded",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ],
+      "baseSHA": "275cb61fc27b317ee6508e4de2e76549c912265b",
+      "exitCode": 0,
+      "seconds": 65.164492667,
+      "sourceUnchangedDuringRun": true,
+      "logSHA256": "a79566fa7418fa08227735f78135257b77888ee115967a4397c828c4c5c8d7df",
+      "recordSHA256": "8c77f8e0b2970f93f6b1c3f77f40677c6753bc8df12bf80d3b7ec21a7934486a"
+    }
+  ],
+  "retainedFailures": [
+    "orderbook-source-financial-01: original240s timeout, missing WETH option after premature label read",
+    "remote-workspaces-react-cohort-01: actual E_NOT_FOUND for remote hub Account read",
+    "full158 broad and retired failure remain mandatory final gates"
+  ],
+  "requiredFinal": [
+    "Fresh private EVM and native TVM financial flows/rejects/recovery on one final committed SHA",
+    "Exact unit/test/check, full158,34-step release,60-minute soak",
+    "Checked push/deploy and independent public frontend/backend SHA plus clicks",
+    "Public Nile/Ethereum financial deployment/funding/finality/exits; mainnet signer authority unresolved"
+  ],
+  "artifactRoot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019"
+}

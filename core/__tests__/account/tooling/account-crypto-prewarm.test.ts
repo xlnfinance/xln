@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { HDNodeWallet, getBytes, getIndexedAccountPath } from 'ethers';
 import {
   clearSignerKeys,
   deriveSignerAddressSync,
@@ -16,6 +17,23 @@ const SIGNER_INDEX_VECTORS = `${import.meta.dir}/signer-index-vectors.txt`;
 const SIGNER_INDEX_VECTOR_SEED = 'signer-index-boundary-seed';
 
 describe('signer cache prewarm', () => {
+  test('batch prewarm preserves every canonical HD path across a partially warm vault', () => {
+    const seed = 'test test test test test test test test test test test junk';
+    clearSignerKeys(seed);
+    try {
+      const first = prewarmRuntimeSignerCache(seed, 3);
+      const retained = first.map(id => getCachedSignerPrivateKey(seed, id));
+      const all = prewarmRuntimeSignerCache(seed, 20);
+      for (let index = 0; index < all.length; index++) {
+        const expected = HDNodeWallet.fromPhrase(seed, undefined, getIndexedAccountPath(index));
+        expect(all[index]).toBe(expected.address.toLowerCase());
+        expect(getCachedSignerPrivateKey(seed, all[index]!)).toEqual(getBytes(expected.privateKey));
+        if (index < retained.length) expect(getCachedSignerPrivateKey(seed, all[index]!)).toBe(retained[index]);
+      }
+    } finally {
+      clearSignerKeys(seed);
+    }
+  });
   test('repeated recovery prewarm reuses only the owning vault cache and clear revokes it', () => {
     const seed = 'recovery-prewarm-owner';
     const other = 'recovery-prewarm-other';
@@ -44,7 +62,7 @@ describe('signer cache prewarm', () => {
   test('matches the shared strict signer-index boundary vectors', async () => {
     const rows = (await Bun.file(SIGNER_INDEX_VECTORS).text())
       .split('\n')
-      .filter((line) => line && !line.startsWith('#'));
+      .filter(line => line && !line.startsWith('#'));
     for (const row of rows) {
       const [signerId, expected] = row.split('|');
       if (!signerId || !expected) throw new Error(`SIGNER_INDEX_VECTOR_INVALID:${row}`);
@@ -110,8 +128,9 @@ describe('signer cache prewarm', () => {
     clearSignerKeys(firstSeed);
     clearSignerKeys(secondSeed);
     try {
-      expect(() => registerSignerKey(firstSeed, signerId, deriveSignerKeySync(firstSeed, signerId)))
-        .toThrow('NUMERIC_SIGNER_REGISTRATION_FORBIDDEN');
+      expect(() => registerSignerKey(firstSeed, signerId, deriveSignerKeySync(firstSeed, signerId))).toThrow(
+        'NUMERIC_SIGNER_REGISTRATION_FORBIDDEN',
+      );
       expect(() => getCachedSignerPrivateKey(firstSeed, signerId)).toThrow('NUMERIC_SIGNER_CACHE_LOOKUP_FORBIDDEN');
       const secondPrivateKey = getSignerPrivateKey({ runtimeSeed: secondSeed }, signerId);
       expect(Buffer.from(secondPrivateKey).toString('hex')).toBe(
@@ -144,18 +163,14 @@ describe('signer cache prewarm', () => {
 
   test('typed signer lookup distinguishes a missing EOA from corrupted identity', () => {
     const runtimeSeed = 'typed-signer-lookup';
-    expect(getSignerPrivateKeyIfAvailable(
-      { runtimeSeed },
-      '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-    )).toBeNull();
-    expect(() => getSignerPrivateKeyIfAvailable({ runtimeSeed }, 'malformed-signer'))
-      .toThrow('UNSUPPORTED_SIGNER_ID');
-    expect(() => getSignerPrivateKeyIfAvailable({}, '1'))
-      .toThrow('CRYPTO_DETERMINISM_VIOLATION');
+    expect(getSignerPrivateKeyIfAvailable({ runtimeSeed }, '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')).toBeNull();
+    expect(() => getSignerPrivateKeyIfAvailable({ runtimeSeed }, 'malformed-signer')).toThrow('UNSUPPORTED_SIGNER_ID');
+    expect(() => getSignerPrivateKeyIfAvailable({}, '1')).toThrow('CRYPTO_DETERMINISM_VIOLATION');
   });
 
   test('fails loud when runtime signer-cache prewarm cannot complete', () => {
-    expect(() => prewarmRuntimeSignerCache('prewarm-fail-fast-seed', 0))
-      .toThrow('SIGNER_CACHE_PREWARM_COUNT_INVALID:0');
+    expect(() => prewarmRuntimeSignerCache('prewarm-fail-fast-seed', 0)).toThrow(
+      'SIGNER_CACHE_PREWARM_COUNT_INVALID:0',
+    );
   });
 });

@@ -171,6 +171,7 @@ export function Swap() {
     tokenA: giveTokenId,
     tokenB: wantTokenId,
     ownEntityId: wallet.entityId,
+    summaries: wallet.summaries,
     baseDecimals: bookMetadata.base.decimals,
     relayUrl: bookRelayUrl,
     ...(crossMarket ? { crossMarket } : {}),

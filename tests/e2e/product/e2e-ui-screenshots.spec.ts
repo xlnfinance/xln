@@ -1,6 +1,5 @@
 import { devices, expect, test, type BrowserContext, type Page } from '../../global-setup.mts';
 import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL, waitForNamedHubs } from '../../utils/e2e-baseline';
-import { gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
 import { resolveRuntimeImportAppUrl } from '../../utils/runtime/e2e-runtime-import';
 import { capturePageScreenshot } from '../../utils/e2e-screenshots';
 import { captureReactWalletScreens } from '../../utils/browser/visual/wallet-screenshots';
@@ -40,30 +39,35 @@ async function captureUxPage(
 
 async function waitForRpcProxyReachable(page: Page, timeoutMs = 30_000): Promise<void> {
   let lastError = '';
-  await expect.poll(async () => {
-    try {
-      const response = await page.request.post(`${APP_BASE_URL}/rpc`, {
-        data: {
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'eth_chainId',
-          params: [],
-        },
-        headers: { 'Cache-Control': 'no-store' },
-        timeout: 5_000,
-      });
-      const body = await response.text();
-      if (response.ok() && /^\s*\{.*"result"\s*:\s*"0x[0-9a-f]+".*\}\s*$/i.test(body)) return true;
-      lastError = `status=${response.status()} body=${body}`;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-    }
-    return false;
-  }, {
-    timeout: timeoutMs,
-    intervals: [100, 250, 500, 1_000],
-    message: `/rpc did not become reachable before health screenshot: ${lastError}`,
-  }).toBe(true);
+  await expect
+    .poll(
+      async () => {
+        try {
+          const response = await page.request.post(`${APP_BASE_URL}/rpc`, {
+            data: {
+              jsonrpc: '2.0',
+              id: 1,
+              method: 'eth_chainId',
+              params: [],
+            },
+            headers: { 'Cache-Control': 'no-store' },
+            timeout: 5_000,
+          });
+          const body = await response.text();
+          if (response.ok() && /^\s*\{.*"result"\s*:\s*"0x[0-9a-f]+".*\}\s*$/i.test(body)) return true;
+          lastError = `status=${response.status()} body=${body}`;
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : String(error);
+        }
+        return false;
+      },
+      {
+        timeout: timeoutMs,
+        intervals: [100, 250, 500, 1_000],
+        message: `/rpc did not become reachable before health screenshot: ${lastError}`,
+      },
+    )
+    .toBe(true);
 }
 
 async function captureTestnetTools(
@@ -91,88 +95,96 @@ async function captureOnboardingScreens(
   prefix: string,
 ): Promise<void> {
   const platform = platformFromPrefix(prefix);
-  await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
-  await expect(page.getByRole('heading', { name: /Create XLN wallet/i }).first()).toBeVisible({ timeout: 30_000 });
-  await captureUxPage(page, output, `${prefix}-onboarding-seed.png`, {
-    title: `${prefix} onboarding seed`,
+  await page.goto(`${APP_BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('[data-testid="gate-stack"][data-state="online"]')).toBeVisible({ timeout: 30_000 });
+  const openTestWallet = page.getByRole('button', { name: 'Open a test wallet', exact: true });
+  await expect(openTestWallet).toBeVisible({ timeout: 30_000 });
+  await captureUxPage(page, output, `${prefix}-onboarding-start.png`, {
+    title: `${prefix} wallet onboarding`,
     group: 'Onboarding',
-    description: uxDescription('New operator creates a browser runtime wallet.'),
+    description: 'Canonical React wallet entry, with explicit test wallet, creation and restore choices.',
     platform,
     tags: ['onboarding', 'wallet'],
     fullPage: true,
   });
 
-  const demoIdentity = prefix.startsWith('mobile')
-    ? 'bob'
-    : prefix === 'wide'
-      ? 'carol'
-      : prefix === 'laptop'
-        ? 'alice'
-        : 'dave';
-  const seed = selectDemoMnemonic(demoIdentity);
-  await page.evaluate(async ({ label, mnemonic }) => {
-    const operations = (window as any).__xln?.vault as {
-      createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<unknown>;
-    } | undefined;
-    if (typeof operations?.createRuntime !== 'function') {
-      throw new Error('__xln.vault.createRuntime unavailable for onboarding screenshot');
-    }
-    await operations.createRuntime(label, mnemonic, {
-      loginType: 'manual',
-      requiresOnboarding: true,
-    });
-  }, { label: 'visual-onboarding', mnemonic: seed });
-
-  await expect(page.getByRole('heading', { name: /Configure account/i }).first()).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByRole('heading', { name: /Default limits/i }).first()).toBeVisible({ timeout: 20_000 });
+  // The current wallet opens one discovered account. Additional credit and
+  // collateral policy require explicit user intent in the real Account sheet.
+  await openTestWallet.click();
+  await expect(page.getByTestId('home-total')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('account-row')).toHaveCount(1, { timeout: 20_000 });
+  await page.getByTestId('home-open-account').click();
+  const sheet = page.getByRole('dialog', { name: 'Open account', exact: true });
+  await expect(sheet).toBeVisible({ timeout: 20_000 });
+  await sheet.locator('button.picker-option').first().click();
+  await expect(sheet.getByText('Credit line you extend · optional', { exact: true })).toBeVisible();
+  await expect(sheet.getByTestId('open-account-credit')).toHaveValue('10000');
+  await expect(sheet.getByTestId('open-auto-collateral')).toBeChecked();
+  const soft = sheet.getByPlaceholder('Soft limit', { exact: true });
+  const hard = sheet.getByPlaceholder('Hard limit', { exact: true });
+  const fee = sheet.getByPlaceholder('Max fee', { exact: true });
+  await expect(soft).toBeVisible();
+  await expect(hard).toBeVisible();
+  await expect(fee).toBeVisible();
+  expect(Number(await soft.inputValue())).toBeGreaterThan(0);
+  expect(Number(await hard.inputValue())).toBeGreaterThanOrEqual(Number(await soft.inputValue()));
+  expect(Number(await fee.inputValue())).toBeGreaterThanOrEqual(0);
   await captureUxPage(page, output, `${prefix}-onboarding-account-config.png`, {
     title: `${prefix} account configuration`,
     group: 'Onboarding',
-    description: uxDescription('Minimal public identity and default account limits before entering the wallet.'),
+    description:
+      'Current counterparty selection, default credit line and automatic collateral limits before proposing an account.',
     platform,
     tags: ['onboarding', 'account limits'],
     fullPage: true,
   });
+  await sheet.getByTestId('open-account-submit').click();
+  await expect(sheet).toBeHidden({ timeout: 20_000 });
+  await expect(page.getByTestId('account-row')).toHaveCount(2, { timeout: 20_000 });
 }
 
-test('ui screenshot smoke captures onboarding and testnet tools across viewports', { tag: '@functional' }, async ({ browser, page }, testInfo) => {
-  test.setTimeout(360_000);
-  await captureTestnetTools(page, testInfo, 'desktop');
-  await captureOnboardingScreens(page, testInfo, 'desktop');
+test(
+  'ui screenshot smoke captures onboarding and testnet tools across viewports',
+  { tag: '@functional' },
+  async ({ browser, page }, testInfo) => {
+    test.setTimeout(360_000);
+    await captureTestnetTools(page, testInfo, 'desktop');
+    await captureOnboardingScreens(page, testInfo, 'desktop');
 
-  let laptopContext: BrowserContext | null = null;
-  let wideContext: BrowserContext | null = null;
-  let mobileContext: BrowserContext | null = null;
-  try {
-    laptopContext = await browser.newContext({
-      viewport: LAPTOP_VIEWPORT,
-      ignoreHTTPSErrors: true,
-    });
-    const laptopPage = await laptopContext.newPage();
-    await captureTestnetTools(laptopPage, testInfo, 'laptop');
-    await captureOnboardingScreens(laptopPage, testInfo, 'laptop');
+    let laptopContext: BrowserContext | null = null;
+    let wideContext: BrowserContext | null = null;
+    let mobileContext: BrowserContext | null = null;
+    try {
+      laptopContext = await browser.newContext({
+        viewport: LAPTOP_VIEWPORT,
+        ignoreHTTPSErrors: true,
+      });
+      const laptopPage = await laptopContext.newPage();
+      await captureTestnetTools(laptopPage, testInfo, 'laptop');
+      await captureOnboardingScreens(laptopPage, testInfo, 'laptop');
 
-    wideContext = await browser.newContext({
-      viewport: WIDE_VIEWPORT,
-      ignoreHTTPSErrors: true,
-    });
-    const widePage = await wideContext.newPage();
-    await captureTestnetTools(widePage, testInfo, 'wide');
-    await captureOnboardingScreens(widePage, testInfo, 'wide');
+      wideContext = await browser.newContext({
+        viewport: WIDE_VIEWPORT,
+        ignoreHTTPSErrors: true,
+      });
+      const widePage = await wideContext.newPage();
+      await captureTestnetTools(widePage, testInfo, 'wide');
+      await captureOnboardingScreens(widePage, testInfo, 'wide');
 
-    mobileContext = await browser.newContext({
-      ...devices['iPhone 15 Pro'],
-      ignoreHTTPSErrors: true,
-    });
-    const mobilePage = await mobileContext.newPage();
-    await captureTestnetTools(mobilePage, testInfo, 'mobile-iphone15pro');
-    await captureOnboardingScreens(mobilePage, testInfo, 'mobile-iphone15pro');
-  } finally {
-    await mobileContext?.close();
-    await wideContext?.close();
-    await laptopContext?.close();
-  }
-});
+      mobileContext = await browser.newContext({
+        ...devices['iPhone 15 Pro'],
+        ignoreHTTPSErrors: true,
+      });
+      const mobilePage = await mobileContext.newPage();
+      await captureTestnetTools(mobilePage, testInfo, 'mobile-iphone15pro');
+      await captureOnboardingScreens(mobilePage, testInfo, 'mobile-iphone15pro');
+    } finally {
+      await mobileContext?.close();
+      await wideContext?.close();
+      await laptopContext?.close();
+    }
+  },
+);
 
 test(
   'ui screenshot smoke captures operator admin surfaces',
@@ -322,48 +334,52 @@ test(
   },
 );
 
-test('ui screenshot smoke captures main tabs across viewports', { tag: '@functional' }, async ({ browser, page }, testInfo) => {
-  test.setTimeout(600_000);
+test(
+  'ui screenshot smoke captures main tabs across viewports',
+  { tag: '@functional' },
+  async ({ browser, page }, testInfo) => {
+    test.setTimeout(600_000);
 
-  await ensureE2EBaseline(page, {
-    timeoutMs: 120_000,
-    requireHubMesh: true,
-    requireMarketMaker: true,
-    minHubCount: 3,
-  });
-
-  const hubs = await waitForNamedHubs(page, ['H1', 'H2', 'H3'], { timeoutMs: 60_000 });
-  const hubIds = [hubs.h1, hubs.h2, hubs.h3];
-
-  await captureReactWalletScreens(page, APP_BASE_URL, hubIds, 'desktop', testInfo);
-
-  let laptopContext: BrowserContext | null = null;
-  let wideContext: BrowserContext | null = null;
-  let mobileContext: BrowserContext | null = null;
-  try {
-    laptopContext = await browser.newContext({
-      viewport: LAPTOP_VIEWPORT,
-      ignoreHTTPSErrors: true,
+    await ensureE2EBaseline(page, {
+      timeoutMs: 120_000,
+      requireHubMesh: true,
+      requireMarketMaker: true,
+      minHubCount: 3,
     });
-    const laptopPage = await laptopContext.newPage();
-    await captureReactWalletScreens(laptopPage, APP_BASE_URL, hubIds, 'laptop', testInfo);
 
-    wideContext = await browser.newContext({
-      viewport: WIDE_VIEWPORT,
-      ignoreHTTPSErrors: true,
-    });
-    const widePage = await wideContext.newPage();
-    await captureReactWalletScreens(widePage, APP_BASE_URL, hubIds, 'wide', testInfo);
+    const hubs = await waitForNamedHubs(page, ['H1', 'H2', 'H3'], { timeoutMs: 60_000 });
+    const hubIds = [hubs.h1, hubs.h2, hubs.h3];
 
-    mobileContext = await browser.newContext({
-      ...devices['iPhone 15 Pro'],
-      ignoreHTTPSErrors: true,
-    });
-    const mobilePage = await mobileContext.newPage();
-    await captureReactWalletScreens(mobilePage, APP_BASE_URL, hubIds, 'mobile-iphone15pro', testInfo);
-  } finally {
-    await mobileContext?.close();
-    await wideContext?.close();
-    await laptopContext?.close();
-  }
-});
+    await captureReactWalletScreens(page, APP_BASE_URL, hubIds, 'desktop', testInfo);
+
+    let laptopContext: BrowserContext | null = null;
+    let wideContext: BrowserContext | null = null;
+    let mobileContext: BrowserContext | null = null;
+    try {
+      laptopContext = await browser.newContext({
+        viewport: LAPTOP_VIEWPORT,
+        ignoreHTTPSErrors: true,
+      });
+      const laptopPage = await laptopContext.newPage();
+      await captureReactWalletScreens(laptopPage, APP_BASE_URL, hubIds, 'laptop', testInfo);
+
+      wideContext = await browser.newContext({
+        viewport: WIDE_VIEWPORT,
+        ignoreHTTPSErrors: true,
+      });
+      const widePage = await wideContext.newPage();
+      await captureReactWalletScreens(widePage, APP_BASE_URL, hubIds, 'wide', testInfo);
+
+      mobileContext = await browser.newContext({
+        ...devices['iPhone 15 Pro'],
+        ignoreHTTPSErrors: true,
+      });
+      const mobilePage = await mobileContext.newPage();
+      await captureReactWalletScreens(mobilePage, APP_BASE_URL, hubIds, 'mobile-iphone15pro', testInfo);
+    } finally {
+      await mobileContext?.close();
+      await wideContext?.close();
+      await laptopContext?.close();
+    }
+  },
+);

@@ -3,6 +3,8 @@ import { gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
 import { decodeBinaryPayload, encodeBinaryPayload } from '../../../core/protocol/serialization/binary-codec';
 import { STORAGE_SCHEMA_VERSION } from '../../../core/storage/keys';
 import { allowBrowserIssue, expect, test, type Page } from '../../global-setup.mts';
+import type { RuntimeReplica, XLNModule } from '../../../core/api/public/runtime-module';
+import { timedStep } from '../../utils/e2e-timing.mts';
 
 type BrowserIssue = {
   type: 'console' | 'pageerror' | 'requestfailed' | 'http';
@@ -254,8 +256,66 @@ test.describe('Canonical storage schema rejection', () => {
       await expect(resetPage.getByRole('alert')).toContainText('Incorrect password');
       await expect(resetPage.getByTestId('nav-home')).toHaveCount(0);
       await resetPage.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
-      await resetPage.getByRole('button', { name: 'Unlock', exact: true }).click();
-      await expect(resetPage.getByTestId('home-entity-id')).toHaveText(entityId);
+      await resetPage.evaluate(() => {
+        const started = performance.now();
+        const stages: Array<{ elapsedMs: number; stage: string }> = [];
+        const capture = () => {
+          const stage =
+            document.querySelector('button[type=submit]')?.textContent ??
+            document.querySelector('main [role=status]')?.textContent ??
+            (document.querySelector('[data-testid=home-entity-id]') ? 'Home' : 'Opening');
+          if (stages.at(-1)?.stage !== stage)
+            stages.push({ elapsedMs: Math.round(performance.now() - started), stage });
+        };
+        const observer = new MutationObserver(capture);
+        observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+        (window as Window & { __storageUnlockStages?: typeof stages }).__storageUnlockStages = stages;
+        capture();
+      });
+      await timedStep('storage_schema.regenerated_unlock', async () => {
+        await resetPage.getByRole('button', { name: 'Unlock', exact: true }).click();
+        try {
+          await expect(resetPage.getByTestId('home-entity-id')).toHaveText(entityId);
+        } finally {
+          const state = await resetPage.evaluate(async () => {
+            const debug = (window as Window & { __xln: { env(): RuntimeReplica | null; xln(): Promise<XLNModule> } })
+              .__xln;
+            const env = debug.env();
+            if (!env) return { runtimePresent: false };
+            const xln = await debug.xln();
+            return {
+              stages: (window as Window & { __storageUnlockStages?: Array<{ elapsedMs: number; stage: string }> })
+                .__storageUnlockStages,
+              relayConnected: env.infrastructure?.p2p?.isConnected() ?? false,
+              runtimeHeight: env.state.height,
+              halted: env.infrastructure?.halted ?? false,
+              runtimeInputs: env.runtimeMempool.entityInputs.map(input => ({
+                entityId: input.entityId,
+                txs: input.entityTxs?.map(tx => tx.type),
+              })),
+              entities: [...env.state.eReplicas.values()].map(replica => {
+                const adapter = xln.getEntityJAdapter(env, replica.entityId, replica.signerId);
+                return {
+                  entityId: replica.entityId,
+                  height: replica.state.height,
+                  pending: replica.mempool.map(tx => tx.type),
+                  proposalHeight: replica.proposal?.height ?? null,
+                  scan: adapter?.getWatcherScanProgress?.(),
+                  accounts: [...replica.state.accounts.values()].map(account => ({
+                    height: account.currentHeight,
+                    pendingHeight: account.pendingFrame?.height ?? null,
+                  })),
+                };
+              }),
+            };
+          });
+          await testInfo.attach('regenerated-unlock-boundary', {
+            body: JSON.stringify(state),
+            contentType: 'application/json',
+          });
+          console.info('[storage_schema.regenerated_unlock]', JSON.stringify(state));
+        }
+      });
       await expect.poll(() => readPersistedStorageSchema(resetPage, runtimeId)).toBe(STORAGE_SCHEMA_VERSION);
 
       expect(issues.filter(issue => issue.message.includes('STORAGE_SCHEMA_MISMATCH'))).toHaveLength(2);

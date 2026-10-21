@@ -129,6 +129,7 @@ function RuntimeProjection() {
     tokenA: 1,
     tokenB: 2,
     ownEntityId: view.entityId,
+    summaries: view.summaries,
     baseDecimals: 18,
     relayPageLocation: networkLocation,
     relayUrl: new URL('/relay', __XLN_STACK_ORIGIN__).href.replace(/^http/, 'ws'),
@@ -136,8 +137,7 @@ function RuntimeProjection() {
   wallet = view;
   book = market;
   useEffect(() => {
-    if (sessionOpen && view.frame && !booting && hub)
-      publish(nativeMarket(market, hub.counterpartyId, hub.label));
+    if (sessionOpen && view.frame && !booting && hub) publish(nativeMarket(market, hub.counterpartyId, hub.label));
   }, [market, hub, view.frame, booting]);
   useEffect(() => {
     if (!sessionOpen || !view.frame || booting) return;

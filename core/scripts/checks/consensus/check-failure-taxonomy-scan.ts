@@ -156,11 +156,26 @@ const fatalIncidentRoutes = [
     steps: [
       [
         'frontend/src/hooks.client.ts',
-        ['installBrowserErrorTelemetry();', "captureBrowserError('svelte_error', error);"],
+        [
+          'installBrowserErrorTelemetry(() => get(operatorDiagnosticsAllowed));',
+          "captureBrowserError('svelte_error', error);",
+        ],
+      ],
+      [
+        'ui/src/main.tsx',
+        [
+          'installBrowserErrorTelemetry(() => {',
+          'const adapter = getAdapter();',
+          "return adapter?.mode === 'remote' && adapter.authLevel === 'admin';",
+        ],
       ],
       [
         'frontend/src/lib/debug/browser-telemetry.ts',
         [
+          'let canSendTelemetry = (): boolean => false;',
+          'installBrowserErrorTelemetry = (canSend: () => boolean)',
+          'canSendTelemetry = canSend;',
+          'if (queue.length === 0 || !canSendTelemetry()) return;',
           "captureBrowserError('console_error'",
           "captureBrowserError('window_error'",
           "captureBrowserError('unhandled_rejection'",
@@ -536,10 +551,7 @@ for (const [path, markers] of [
     'core/api/public/external-wallet-api.ts',
     ["createStructuredLogger('server.external_wallet')", 'faucet.erc20.failed', 'snapshot.failed', 'faucet.gas.failed'],
   ],
-  [
-    'core/entity/tx/processing/invariant-errors.ts',
-    ['FailureDispositionError', 'entityInputFailureDisposition'],
-  ],
+  ['core/entity/tx/processing/invariant-errors.ts', ['FailureDispositionError', 'entityInputFailureDisposition']],
   [
     'core/entity/tx/handlers/payments/direct-payment.ts',
     ["createStructuredLogger('entity.payment')", 'DIRECT_PAYMENT_${code}:${detail}', "'NEXT_HOP_ACCOUNT_MISSING'"],
@@ -557,7 +569,10 @@ for (const [path, markers] of [
     'core/runtime/mempool/entity-inputs.ts',
     ["createStructuredLogger('runtime.entity_inputs')", 'inputs.profile', 'replay.merged_input'],
   ],
-  ['core/runtime/mempool/input-queue.ts', ["createStructuredLogger('runtime.input_queue')", 'interesting_entity_inputs']],
+  [
+    'core/runtime/mempool/input-queue.ts',
+    ["createStructuredLogger('runtime.input_queue')", 'interesting_entity_inputs'],
+  ],
   ['core/runtime/envelope/p2p-lifecycle.ts', ["createStructuredLogger('p2p.lifecycle')", 'gossip.accepted']],
   ['core/network/relay/standalone-server.ts', ["createStructuredLogger('relay.standalone')", 'service.listen']],
   ['core/entity/consensus/input/merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict']],
@@ -638,8 +653,13 @@ for (const [path, markers] of [
   ],
   [
     'core/jurisdiction/adapter/kernel/jurisdiction-loader.ts',
-    ["createStructuredLogger('runtime.jurisdiction_loader')", 'JURISDICTIONS_CONFIG_MISSING', 'decodeJurisdictionsData',
-      'JURISDICTIONS_BROWSER_FETCH_FAILED', 'JURISDICTIONS_BROWSER_CONFIG_INVALID'],
+    [
+      "createStructuredLogger('runtime.jurisdiction_loader')",
+      'JURISDICTIONS_CONFIG_MISSING',
+      'decodeJurisdictionsData',
+      'JURISDICTIONS_BROWSER_FETCH_FAILED',
+      'JURISDICTIONS_BROWSER_CONFIG_INVALID',
+    ],
   ],
   ['core/api/runtime-adapter/session/context.ts', ["createStructuredLogger('runtime.radapter')", 'response_too_large']],
   ['core/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
@@ -647,8 +667,14 @@ for (const [path, markers] of [
     'core/runtime/j-submit/j-submit.ts',
     ["createStructuredLogger('runtime.jsubmit')", 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed'],
   ],
-  ['core/runtime/j-submit/j-submit-result.ts', ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL']],
-  ['core/orchestrator/market-maker/health/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
+  [
+    'core/runtime/j-submit/j-submit-result.ts',
+    ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL'],
+  ],
+  [
+    'core/orchestrator/market-maker/health/market-maker-aggregated-health.ts',
+    ['classifyRuntimeMarketMakerFailure', 'failure,'],
+  ],
   [
     'core/protocol/payments/delivery-result.ts',
     ['export type DeliveryResult', 'failure?: RuntimeFailureSignal', 'deliveryFailure'],
@@ -743,10 +769,7 @@ const runtimeP2PLifecyclePath = 'core/runtime/envelope/p2p-lifecycle.ts';
 const runtimeP2PLifecycle = readText(runtimeP2PLifecyclePath);
 assertNotIncludes(runtimeP2PLifecycle, 'console.', runtimeP2PLifecyclePath);
 
-for (const relayLoggingPath of [
-  'core/network/relay/router.ts',
-  'core/network/relay/standalone-server.ts',
-]) {
+for (const relayLoggingPath of ['core/network/relay/router.ts', 'core/network/relay/standalone-server.ts']) {
   assertNotIncludes(readText(relayLoggingPath), 'console.', relayLoggingPath);
 }
 assertNotIncludes(
@@ -915,7 +938,10 @@ for (const [path, markers] of [
       "expect(localBug.failureKind).toBe('local-bug')",
     ],
   ],
-  ['core/__tests__/runtime/lifecycle/runtime-import-readiness.test.ts', ['runtime import readiness gate', 'fatal: true']],
+  [
+    'core/__tests__/runtime/lifecycle/runtime-import-readiness.test.ts',
+    ['runtime import readiness gate', 'fatal: true'],
+  ],
   [
     'core/__tests__/operations/health/health-redaction.test.ts',
     ['public aggregated health strips child process ids', 'Latest /api/health child refresh window'],
@@ -937,7 +963,10 @@ for (const [path, markers] of [
     'core/__tests__/entity/boundaries/entity-input-merge.test.ts',
     ['uses structured logging without direct console output', 'entity.input.merge'],
   ],
-  ['core/__tests__/payments/settlement/settlement-ops.test.ts', ['SETTLEMENT_UNKNOWN_OP_TYPE', 'without console substitution']],
+  [
+    'core/__tests__/payments/settlement/settlement-ops.test.ts',
+    ['SETTLEMENT_UNKNOWN_OP_TYPE', 'without console substitution'],
+  ],
   [
     'core/__tests__/account/transactions/account-followup-logging.test.ts',
     ['account committed followups use structured logging only', 'account.followup'],
@@ -954,7 +983,10 @@ for (const [path, markers] of [
     'core/__tests__/finance/state/debt-ledger.test.ts',
     ['debt ledger divergence without direct console warning', 'DEBT_LEDGER_DIVERGENCE'],
   ],
-  ['core/__tests__/architecture/state/validation-utils.test.ts', ['validateAccountDeltas fails loud', 'ACCOUNT_DELTAS_MISSING']],
+  [
+    'core/__tests__/architecture/state/validation-utils.test.ts',
+    ['validateAccountDeltas fails loud', 'ACCOUNT_DELTAS_MISSING'],
+  ],
   [
     'core/__tests__/network/relay/relay-router.test.ts',
     [

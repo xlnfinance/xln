@@ -1,0 +1,123 @@
+.consensus-settings {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.consensus-summary,
+.consensus-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.consensus-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.consensus-summary article,
+.consensus-card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+}
+.consensus-summary article {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+}
+.consensus-summary strong {
+  font: 700 18px var(--font-mono);
+}
+.consensus-settings h3 {
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+.consensus-settings small,
+.consensus-settings dt,
+.consensus-summary span {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.consensus-settings dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.consensus-settings dd {
+  margin: 3px 0 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.consensus-settings code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.consensus-settings p {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.consensus-rows {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.consensus-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.consensus-row b {
+  color: var(--accent);
+  font-weight: 500;
+}
+.consensus-proposal {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.consensus-payment {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+}
+.consensus-payment dl {
+  margin-top: 10px;
+  grid-template-columns: minmax(0, 1fr);
+}
+.consensus-table {
+  overflow-x: auto;
+}
+.consensus-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.consensus-table th,
+.consensus-table td {
+  border-top: 1px solid var(--line);
+  padding: 10px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+.consensus-table th {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+@media (max-width: 900px) {
+  .consensus-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 560px) {
+  .consensus-columns,
+  .consensus-settings dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .consensus-summary small {
+    overflow-wrap: anywhere;
+  }
+}

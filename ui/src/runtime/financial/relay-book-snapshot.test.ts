@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { RelayMarketSnapshotPayload } from '@xln/core/network/relay/market/aggregate';
-import { selectRelaySnapshot } from './relay-book-snapshot';
+import { selectRelaySnapshot, selectOrderbookSource } from './relay-book-snapshot';
 
 const source = {
   hubEntityId: `0x${'11'.repeat(32)}`,
@@ -60,4 +60,18 @@ test('Cross cannot reuse a numeric same-network snapshot or another stack venue'
   const cross = { ...book, pairId: venue };
   expect(selectRelaySnapshot(cross, source.hubEntityId, venue)).toBe(cross);
   expect(selectRelaySnapshot(cross, source.hubEntityId, venue.replace('31338', '31339'))).toBeNull();
+});
+
+test('book source uses served replica identity before reading Accounts, never an E_NOT_FOUND probe', () => {
+  const hubId = source.hubEntityId;
+  const runtimeId = `0x${'33'.repeat(20)}`;
+  const replica = { entityId: hubId, runtimeId, signerId: `0x${'44'.repeat(20)}`, label: 'H1', height: 7, isHub: true };
+  const { signerId: _signerId, ...gossip } = replica;
+  const input = { hubId, runtimeId, summaries: [replica], crossMarket: false };
+  expect(selectOrderbookSource(input)).toBe('hosted');
+  expect(selectOrderbookSource({ ...input, summaries: [gossip] })).toBe('relay');
+  expect(selectOrderbookSource({ ...input, runtimeId: `0x${'55'.repeat(20)}` })).toBe('relay');
+  expect(selectOrderbookSource({ ...input, hubId: `0x${'66'.repeat(32)}` })).toBe('relay');
+  expect(selectOrderbookSource({ ...input, summaries: [] })).toBe('relay');
+  expect(selectOrderbookSource({ ...input, crossMarket: true })).toBe('relay');
 });

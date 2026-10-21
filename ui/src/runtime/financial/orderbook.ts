@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { StorageEntityCoreDoc } from '@xln/core/storage/types';
-import type { AccountState } from '@xln/core/api/public/runtime-module';
+import type { AccountState, RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
 import { decodeMarketWireResponse, encodeMarketWireMessage } from '@xln/core/network/relay/market/wire';
 import type { RelayMarketSnapshotPayload } from '@xln/core/network/relay/market/aggregate';
 import type { MarketSideLevel } from '@xln/core/network/relay/market/snapshot';
-import { selectRelaySnapshot } from './relay-book-snapshot';
+import { selectRelaySnapshot, selectOrderbookSource } from './relay-book-snapshot';
 import {
   resolveOrderbookRelayWsUrl,
   type BrowserLocationLike,
@@ -300,6 +300,7 @@ export function useOrderbook(input: {
   tokenB: number;
   depth?: number;
   ownEntityId: string;
+  summaries: readonly RuntimeAdapterEntitySummary[];
   relayUrl?: string;
   /** Packaged native hosts resolve trust against their compiled network origin. */
   relayPageLocation?: BrowserLocationLike;
@@ -313,23 +314,25 @@ export function useOrderbook(input: {
     [input.crossMarket, input.tokenA, input.tokenB],
   );
   const hubId = normalizeId(input.crossMarket?.hubId ?? input.hubId);
+  const source = selectOrderbookSource({
+    hubId,
+    runtimeId: getAdapter()?.runtimeId ?? '',
+    summaries: input.summaries,
+    crossMarket: Boolean(input.crossMarket),
+  });
   const query = useMemo(() => ({ accountsLimit: 200 }), []);
   const hosted = useAdapterRead<HostedAccountsPage>(
-    hubId && !input.crossMarket ? `entity/${encodeURIComponent(hubId)}/accounts` : null,
+    hubId && source === 'hosted' ? `entity/${encodeURIComponent(hubId)}/accounts` : null,
     query,
   );
   const policy = useAdapterRead<StorageEntityCoreDoc>(
     hosted.data && hubId ? `entity/${encodeURIComponent(hubId)}` : null,
   );
   const height = useApp(s => s.height);
-  const hostedMissing = Boolean(hosted.error && /E_NOT_FOUND|entity not found/i.test(hosted.error));
   // Relay lots are base units scaled to six decimals; a base token with fewer decimals uses its own scale.
   const lotScale = 10n ** BigInt(Math.max(0, input.baseDecimals - Math.min(input.baseDecimals, 6)));
   const relay = useRelayBook({
-    enabled:
-      Boolean(input.crossMarket) ||
-      hostedMissing ||
-      (getAdapter()?.mode === 'remote' && !hosted.data && !hosted.loading),
+    enabled: Boolean(hubId) && source === 'relay',
     hubId,
     relayUrl: input.relayUrl ?? '',
     ...(input.relayPageLocation ? { pageLocation: input.relayPageLocation } : {}),
@@ -340,7 +343,7 @@ export function useOrderbook(input: {
   });
 
   return useMemo<BookView>(() => {
-    if (relay && (input.crossMarket || hostedMissing || !hosted.data)) {
+    if (source === 'relay' && relay) {
       return {
         pairId: pair.pairId,
         baseTokenId: pair.baseTokenId,
@@ -369,7 +372,7 @@ export function useOrderbook(input: {
     };
   }, [
     relay,
-    hostedMissing,
+    source,
     hosted.data,
     hosted.loading,
     hosted.error,

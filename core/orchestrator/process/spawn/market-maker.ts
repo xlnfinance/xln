@@ -45,11 +45,7 @@ type MarketMakerSpawnerDeps = {
   handleUnexpectedMarketMakerFailure(observation: ChildFailureObservation): void;
 };
 
-const attachMarketMakerProcess = (
-  proc: ChildProcess,
-  spec: ManagedRuntimeSpec,
-  deps: MarketMakerSpawnerDeps,
-): void => {
+const attachMarketMakerProcess = (proc: ChildProcess, spec: ManagedRuntimeSpec, deps: MarketMakerSpawnerDeps): void => {
   const child = deps.marketMakerChild;
   const stdoutPrefixState: PrefixLogState = { pending: '' };
   const stderrPrefixState: PrefixLogState = { pending: '' };
@@ -59,21 +55,14 @@ const attachMarketMakerProcess = (
   });
   proc.stderr?.on('data', chunk => {
     pushChildLogLines(child.recentStderr, chunk);
-    writePrefixedLogChunk(
-      process.stderr,
-      '[MM:err]',
-      stderrPrefixState,
-      chunk,
-      line => deps.captureManagedChildErrorLine(child, line),
+    writePrefixedLogChunk(process.stderr, '[MM:err]', stderrPrefixState, chunk, line =>
+      deps.captureManagedChildErrorLine(child, line),
     );
   });
   proc.once('exit', (code, signal) => {
     flushPrefixedLogChunk(process.stdout, '[MM]', stdoutPrefixState);
-    flushPrefixedLogChunk(
-      process.stderr,
-      '[MM:err]',
-      stderrPrefixState,
-      line => deps.captureManagedChildErrorLine(child, line),
+    flushPrefixedLogChunk(process.stderr, '[MM:err]', stderrPrefixState, line =>
+      deps.captureManagedChildErrorLine(child, line),
     );
     const pid = proc.pid ?? null;
     const controlledStop = deps.consumeControlledStop(pid);
@@ -84,11 +73,7 @@ const attachMarketMakerProcess = (
       child.exitCode = code ?? null;
       child.exitSignal = signal ?? null;
     }
-    if (shouldCaptureUnexpectedChildExit(
-      controlledStop,
-      deps.isOrchestratorShutdownStarted(),
-      isCurrentProc,
-    )) {
+    if (shouldCaptureUnexpectedChildExit(controlledStop, deps.isOrchestratorShutdownStarted(), isCurrentProc)) {
       deps.handleUnexpectedMarketMakerFailure({
         role: 'market-maker',
         name: child.name,
@@ -98,15 +83,14 @@ const attachMarketMakerProcess = (
           child.recentStderr,
           child.recentStdout,
           `MM_UNEXPECTED_EXIT code=${String(code)} signal=${String(signal)} phase=${String(child.lastStartupPhase)}`,
+          signal ?? null,
         ),
       });
     }
   });
 };
 
-export const createMarketMakerSpawner = (
-  deps: MarketMakerSpawnerDeps,
-) => async (): Promise<void> => {
+export const createMarketMakerSpawner = (deps: MarketMakerSpawnerDeps) => async (): Promise<void> => {
   const child = deps.marketMakerChild;
   await deps.reapStaleMarketMakerProcess();
   mkdirSync(child.dbPath, { recursive: true });
@@ -115,16 +99,25 @@ export const createMarketMakerSpawner = (
   const spec = deps.managedSpecForMarketMaker();
   const command = [
     'core/orchestrator/mm-node.ts',
-    '--name', child.name,
-    '--signer-label', child.signerLabel,
-    '--relay-url', deps.relayUrl,
-    '--api-host', deps.args.host,
-    '--api-port', String(child.apiPort),
-    '--direct-ws-url', buildPublicDirectWsUrl(deps.args.publicWsBaseUrl, child.publicPort),
-    '--rpc-url', deps.args.rpcUrl,
+    '--name',
+    child.name,
+    '--signer-label',
+    child.signerLabel,
+    '--relay-url',
+    deps.relayUrl,
+    '--api-host',
+    deps.args.host,
+    '--api-port',
+    String(child.apiPort),
+    '--direct-ws-url',
+    buildPublicDirectWsUrl(deps.args.publicWsBaseUrl, child.publicPort),
+    '--rpc-url',
+    deps.args.rpcUrl,
     ...deps.buildSecondaryRpcArgs(),
-    '--hub-identities-json', safeStringify(deps.getHubIdentities()),
-    '--db-path', child.dbPath,
+    '--hub-identities-json',
+    safeStringify(deps.getHubIdentities()),
+    '--db-path',
+    child.dbPath,
   ];
   deps.resetSupervisedChildForSpawn(child);
   child.lastStartupPhase = null;
@@ -152,10 +145,7 @@ export const createMarketMakerSpawner = (
   });
   child.proc = proc;
   if (!proc.pid) throw new Error('MM_SPAWN_FAILED_NO_PID');
-  attachManagedChildFatalIpc(
-    proc,
-    report => deps.persistManagedChildFatalReport(child, report),
-  );
+  attachManagedChildFatalIpc(proc, report => deps.persistManagedChildFatalReport(child, report));
   await deps.managedRuntimeLeases.writeLease(spec, proc.pid, child.startedAt ?? Date.now());
   attachMarketMakerProcess(proc, spec, deps);
   await writeInheritedChildSecrets(proc, {

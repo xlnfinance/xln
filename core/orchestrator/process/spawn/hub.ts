@@ -67,15 +67,18 @@ export const buildRustHubPeerRoutes = (
   ownName: string,
   peers: readonly Pick<HubChild, 'name' | 'seed' | 'signerLabel' | 'publicPort'>[],
   publicWsBaseUrl: string,
-) => peers.filter(peer => peer.name !== ownName).map(peer => {
-  const identity = deriveManagedEntityIdentity(peer);
-  return {
-    targetEntityId: identity.entityId,
-    targetRuntimeId: deriveSignerAddressSync(peer.seed, '1').toLowerCase(),
-    targetSignerId: identity.signerId,
-    websocketUrl: buildPublicDirectWsUrl(publicWsBaseUrl, peer.publicPort),
-  };
-});
+) =>
+  peers
+    .filter(peer => peer.name !== ownName)
+    .map(peer => {
+      const identity = deriveManagedEntityIdentity(peer);
+      return {
+        targetEntityId: identity.entityId,
+        targetRuntimeId: deriveSignerAddressSync(peer.seed, '1').toLowerCase(),
+        targetSignerId: identity.signerId,
+        websocketUrl: buildPublicDirectWsUrl(publicWsBaseUrl, peer.publicPort),
+      };
+    });
 
 const buildRustHubInvocation = (child: HubChild, deps: HubSpawnerDeps, rustIdentity: RustIdentity): HubInvocation => {
   const runtimeSeedFile = join(child.dbPath, 'runtime.seed');
@@ -237,7 +240,8 @@ const attachHubProcess = (
   proc.stdout?.on('data', chunk => {
     pushChildLogLines(child.recentStdout, chunk);
     if (rustIdentity) {
-      for (const line of takeCompleteLines(rustStatusState, chunk)) projectRustHubStatus(child, rustIdentity, line, deps);
+      for (const line of takeCompleteLines(rustStatusState, chunk))
+        projectRustHubStatus(child, rustIdentity, line, deps);
     }
     writePrefixedLogChunk(process.stdout, `[${child.name}]`, stdoutPrefixState, chunk);
   });
@@ -271,6 +275,7 @@ const attachHubProcess = (
           child.recentStderr,
           child.recentStdout,
           `${child.name}_UNEXPECTED_EXIT code=${String(code)} signal=${String(signal)}`,
+          signal ?? null,
         ),
       });
     }

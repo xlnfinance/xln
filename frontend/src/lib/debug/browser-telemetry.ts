@@ -1,11 +1,4 @@
-import { get } from 'svelte/store';
-import { operatorDiagnosticsAllowed } from './operator-diagnostics';
-
-type BrowserErrorKind =
-  | 'console_error'
-  | 'window_error'
-  | 'unhandled_rejection'
-  | 'svelte_error';
+type BrowserErrorKind = 'console_error' | 'window_error' | 'unhandled_rejection' | 'svelte_error';
 
 type BrowserErrorEvent = {
   kind: BrowserErrorKind;
@@ -43,6 +36,7 @@ const queue: BrowserErrorEvent[] = [];
 const sessionId = globalThis.crypto?.randomUUID?.() ?? `page-${Date.now().toString(36)}`;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let installed = false;
+let canSendTelemetry = (): boolean => false;
 
 const telemetryState = (): TelemetryState => {
   const target = window as DebugWindow;
@@ -50,9 +44,10 @@ const telemetryState = (): TelemetryState => {
   return target.__xlnBrowserTelemetry;
 };
 
-const redactText = (value: string): string => value
-  .replace(/xlnra1\.[A-Za-z0-9._~-]+/g, '[REDACTED_CAPABILITY]')
-  .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [REDACTED]');
+const redactText = (value: string): string =>
+  value
+    .replace(/xlnra1\.[A-Za-z0-9._~-]+/g, '[REDACTED_CAPABILITY]')
+    .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [REDACTED]');
 
 const serializeValue = (value: unknown, depth = 0): string => {
   if (value instanceof Error) return redactText(value.stack || value.message || value.name);
@@ -62,7 +57,11 @@ const serializeValue = (value: unknown, depth = 0): string => {
     return String(value);
   }
   if (depth >= 2) return `[${Array.isArray(value) ? 'Array' : typeof value}]`;
-  if (Array.isArray(value)) return `[${value.slice(0, 20).map(item => serializeValue(item, depth + 1)).join(', ')}]`;
+  if (Array.isArray(value))
+    return `[${value
+      .slice(0, 20)
+      .map(item => serializeValue(item, depth + 1))
+      .join(', ')}]`;
   if (typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>)
       .slice(0, 30)
@@ -84,7 +83,7 @@ const currentIdentity = (): Pick<BrowserErrorEvent, 'runtimeId' | 'entityId'> =>
 
 const flush = async (): Promise<void> => {
   flushTimer = null;
-  if (queue.length === 0 || !get(operatorDiagnosticsAllowed)) return;
+  if (queue.length === 0 || !canSendTelemetry()) return;
   const events = queue.splice(0, BATCH_SIZE);
   const state = telemetryState();
   state.queued = queue.length;
@@ -111,18 +110,15 @@ const scheduleFlush = (): void => {
   flushTimer = setTimeout(() => void flush(), FLUSH_DELAY_MS);
 };
 
-export const captureBrowserError = (
-  kind: BrowserErrorKind,
-  error: unknown,
-  context: unknown[] = [],
-): void => {
+export const captureBrowserError = (kind: BrowserErrorKind, error: unknown, context: unknown[] = []): void => {
   if (typeof window === 'undefined') return;
   const serialized = [error, ...context].map(value => serializeValue(value)).filter(Boolean);
   const message = redactText(serialized.join(' ')).slice(0, 4000) || 'UNKNOWN_BROWSER_ERROR';
   const stack = error instanceof Error ? redactText(error.stack || '').slice(0, 8000) : undefined;
-  const code = error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
-    ? String((error as { code: string }).code).slice(0, 200)
-    : undefined;
+  const code =
+    error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+      ? String((error as { code: string }).code).slice(0, 200)
+      : undefined;
   const build = String(import.meta.env['VITE_COMMIT_SHA'] || '').slice(0, 200) || undefined;
   if (queue.length >= MAX_QUEUE) queue.shift();
   queue.push({
@@ -140,18 +136,19 @@ export const captureBrowserError = (
   scheduleFlush();
 };
 
-export const installBrowserErrorTelemetry = (): void => {
+export const installBrowserErrorTelemetry = (canSend: () => boolean): void => {
   if (typeof window === 'undefined' || installed) return;
+  canSendTelemetry = canSend;
   installed = true;
   const originalError = console.error.bind(console);
   console.error = (...args: unknown[]): void => {
     originalError(...args);
     captureBrowserError('console_error', args[0], args.slice(1));
   };
-  window.addEventListener('error', (event) => {
+  window.addEventListener('error', event => {
     captureBrowserError('window_error', event.error ?? event.message);
   });
-  window.addEventListener('unhandledrejection', (event) => {
+  window.addEventListener('unhandledrejection', event => {
     captureBrowserError('unhandled_rejection', event.reason);
   });
 };

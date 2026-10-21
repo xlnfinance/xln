@@ -18,6 +18,7 @@ import { canonicalEntitySeed, importEntity } from '../runtime/registration/entit
 import { parseProfile, type DecodedProfile, type Profile } from '../entity/profile';
 import { computeProfileRouteHash, type ProfileVerifyResult } from '../entity/profile/profile-signing';
 import { encodeBinaryPayload } from '../protocol/serialization/binary-codec';
+import { ProfileAuthorityUnavailableError } from '../network/relay/profile-authority-error';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const WAIT_POLL_MS = 100;
@@ -72,11 +73,15 @@ export type ControlDirectRuntimeSession = Readonly<{
 
 const decodeDirectRuntimeSession = (value: unknown): ControlDirectRuntimeSession => {
   const session = requireBoundaryRecord(value, 'CONTROL_DIRECT_SESSION_INVALID');
-  requireExactBoundaryKeys(session, [
-    'runtimeId', 'open', 'ready', 'lastSeen', 'consecutiveBackpressuredSends',
-    'backpressureAgeMs', 'bufferedAmount',
-  ], [], 'CONTROL_DIRECT_SESSION_FIELDS_INVALID');
-  const runtimeId = String(session['runtimeId'] || '').trim().toLowerCase();
+  requireExactBoundaryKeys(
+    session,
+    ['runtimeId', 'open', 'ready', 'lastSeen', 'consecutiveBackpressuredSends', 'backpressureAgeMs', 'bufferedAmount'],
+    [],
+    'CONTROL_DIRECT_SESSION_FIELDS_INVALID',
+  );
+  const runtimeId = String(session['runtimeId'] || '')
+    .trim()
+    .toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(runtimeId)) throw new Error('CONTROL_DIRECT_SESSION_RUNTIME_ID_INVALID');
   if (typeof session['open'] !== 'boolean') throw new Error('CONTROL_DIRECT_SESSION_OPEN_INVALID');
   if (typeof session['ready'] !== 'boolean') throw new Error('CONTROL_DIRECT_SESSION_READY_INVALID');
@@ -106,8 +111,15 @@ const decodeControlEntitySummary = (value: unknown): ControlEntitySummary => {
   requireExactBoundaryKeys(
     summary,
     [
-      'entityId', 'signerId', 'name', 'isRoutingEnabled', 'isHub', 'runtimeId',
-      'accountCount', 'publicAccountCount', 'accountEntityIds',
+      'entityId',
+      'signerId',
+      'name',
+      'isRoutingEnabled',
+      'isHub',
+      'runtimeId',
+      'accountCount',
+      'publicAccountCount',
+      'accountEntityIds',
     ],
     [],
     'CONTROL_ENTITY_SUMMARY_FIELDS_INVALID',
@@ -138,7 +150,10 @@ const decodeControlEntitySummary = (value: unknown): ControlEntitySummary => {
     isHub: summary['isHub'],
     runtimeId: runtimeId === null ? null : runtimeId.trim().toLowerCase(),
     accountCount: requireBoundaryInteger(summary['accountCount'], 'CONTROL_ENTITY_SUMMARY_ACCOUNT_COUNT_INVALID'),
-    publicAccountCount: requireBoundaryInteger(summary['publicAccountCount'], 'CONTROL_ENTITY_SUMMARY_PUBLIC_ACCOUNT_COUNT_INVALID'),
+    publicAccountCount: requireBoundaryInteger(
+      summary['publicAccountCount'],
+      'CONTROL_ENTITY_SUMMARY_PUBLIC_ACCOUNT_COUNT_INVALID',
+    ),
     accountEntityIds: accountEntityIds.map(value => value.trim().toLowerCase()),
   };
 };
@@ -153,9 +168,7 @@ type GossipProfileResponse = {
 const responseErrorMessage = (raw: string, defaultMessage: string): string => {
   try {
     const response = requireBoundaryRecord(deserializeTaggedJson(raw), 'CONTROL_RESPONSE_INVALID');
-    return typeof response['error'] === 'string' && response['error'].trim()
-      ? response['error']
-      : defaultMessage;
+    return typeof response['error'] === 'string' && response['error'].trim() ? response['error'] : defaultMessage;
   } catch {
     return defaultMessage;
   }
@@ -193,18 +206,18 @@ const decodeP2PControlResponse = (value: unknown): boolean | null => {
 
 const decodeControlQueueResponse = (value: unknown): ControlQueueResponse => {
   const response = requireBoundaryRecord(value, 'CONTROL_RUNTIME_INPUT_RESPONSE_INVALID');
-  requireExactBoundaryKeys(
-    response,
-    ['ok'],
-    ['accepted', 'error'],
-    'CONTROL_RUNTIME_INPUT_RESPONSE_FIELDS_INVALID',
-  );
+  requireExactBoundaryKeys(response, ['ok'], ['accepted', 'error'], 'CONTROL_RUNTIME_INPUT_RESPONSE_FIELDS_INVALID');
   if (typeof response['ok'] !== 'boolean') throw new Error('CONTROL_RUNTIME_INPUT_RESPONSE_OK_INVALID');
   const acceptedRaw = response['accepted'];
   let accepted: ControlQueueResponse['accepted'];
   if (acceptedRaw !== undefined) {
     const raw = requireBoundaryRecord(acceptedRaw, 'CONTROL_RUNTIME_INPUT_ACCEPTED_INVALID');
-    requireExactBoundaryKeys(raw, ['runtimeTxs', 'entityInputs', 'jInputs'], [], 'CONTROL_RUNTIME_INPUT_ACCEPTED_FIELDS_INVALID');
+    requireExactBoundaryKeys(
+      raw,
+      ['runtimeTxs', 'entityInputs', 'jInputs'],
+      [],
+      'CONTROL_RUNTIME_INPUT_ACCEPTED_FIELDS_INVALID',
+    );
     accepted = {
       runtimeTxs: requireBoundaryInteger(raw['runtimeTxs'], 'CONTROL_RUNTIME_INPUT_ACCEPTED_RUNTIME_TXS_INVALID'),
       entityInputs: requireBoundaryInteger(raw['entityInputs'], 'CONTROL_RUNTIME_INPUT_ACCEPTED_ENTITY_INPUTS_INVALID'),
@@ -407,7 +420,14 @@ export class DaemonControlClient {
       },
       this.timeoutMs,
       'POST /api/control/gossip/verify-profile',
-    );
+    ).catch(error => {
+      // Only an actual refused connection is an authority outage. HTTP auth,
+      // registry/schema corruption and route-hash failures below remain errors.
+      if (error instanceof Error && 'code' in error && error.code === 'ECONNREFUSED') {
+        throw new ProfileAuthorityUnavailableError(this.baseUrl, error);
+      }
+      throw error;
+    });
     const value = requireBoundaryRecord(await readControlResponse(response), 'CONTROL_PROFILE_VERIFICATION_INVALID');
     requireExactBoundaryKeys(
       value,
@@ -431,12 +451,7 @@ export class DaemonControlClient {
   async listEntities(): Promise<ControlEntitySummary[]> {
     const raw = await this.get('/api/control/entities');
     const response = requireBoundaryRecord(raw, 'CONTROL_ENTITIES_RESPONSE_INVALID');
-    requireExactBoundaryKeys(
-      response,
-      ['ok', 'runtimeId', 'entities'],
-      [],
-      'CONTROL_ENTITIES_RESPONSE_FIELDS_INVALID',
-    );
+    requireExactBoundaryKeys(response, ['ok', 'runtimeId', 'entities'], [], 'CONTROL_ENTITIES_RESPONSE_FIELDS_INVALID');
     if (response['ok'] !== true || !Array.isArray(response['entities'])) {
       throw new Error('CONTROL_ENTITIES_RESPONSE_INVALID');
     }
@@ -456,10 +471,7 @@ export class DaemonControlClient {
   }
 
   async registerSigner(signerId: string, privateKeyHex: string): Promise<void> {
-    const raw = await this.post(
-      '/api/control/signers/register',
-      { signerId, privateKeyHex },
-    );
+    const raw = await this.post('/api/control/signers/register', { signerId, privateKeyHex });
     const response = requireBoundaryRecord(raw, 'CONTROL_SIGNER_REGISTER_RESPONSE_INVALID');
     requireExactBoundaryKeys(response, ['ok', 'signerId'], [], 'CONTROL_SIGNER_REGISTER_RESPONSE_FIELDS_INVALID');
     if (response['ok'] !== true || typeof response['signerId'] !== 'string' || !response['signerId']) {
@@ -475,18 +487,18 @@ export class DaemonControlClient {
   }
 
   async hasGossipProfile(entityId: string): Promise<boolean> {
-    const response = decodeGossipProfileResponse(await this.get(
-      `/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`,
-    ));
+    const response = decodeGossipProfileResponse(
+      await this.get(`/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`),
+    );
     return response.ok === true && response.found === true;
   }
 
   async gossipProfile(entityId: string): Promise<DecodedProfile | null> {
-    const response = decodeGossipProfileResponse(await this.get(
-      `/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`,
-    ));
+    const response = decodeGossipProfileResponse(
+      await this.get(`/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`),
+    );
     if (response.ok !== true) throw new Error(`CONTROL_GOSSIP_PROFILE_REJECTED:${entityId}`);
-    return response.found ? response.profile ?? null : null;
+    return response.found ? (response.profile ?? null) : null;
   }
 
   /**
@@ -496,13 +508,17 @@ export class DaemonControlClient {
    * send-ready, and neither is one whose key never propagated.
    */
   async hubProfileSendReady(entityId: string, hubRuntimeId: string): Promise<boolean> {
-    const response = decodeGossipProfileResponse(await this.get(
-      `/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`,
-    ));
+    const response = decodeGossipProfileResponse(
+      await this.get(`/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`),
+    );
     if (response.ok !== true || response.found !== true || !response.profile) return false;
     const profile = response.profile as { runtimeId?: unknown; runtimeEncPubKey?: unknown };
-    return String(profile.runtimeId ?? '').trim().toLowerCase() === hubRuntimeId.trim().toLowerCase()
-      && /^0x[0-9a-f]{64}$/.test(String(profile.runtimeEncPubKey ?? ''));
+    return (
+      String(profile.runtimeId ?? '')
+        .trim()
+        .toLowerCase() === hubRuntimeId.trim().toLowerCase() &&
+      /^0x[0-9a-f]{64}$/.test(String(profile.runtimeEncPubKey ?? ''))
+    );
   }
 
   async gossipProfilesSendReady(
@@ -550,10 +566,7 @@ export class DaemonControlClient {
       'CONTROL_GOSSIP_COUNTERPARTIES_RESPONSE_FIELDS_INVALID',
     );
     if (response['ok'] !== true) throw new Error('CONTROL_GOSSIP_COUNTERPARTIES_RESPONSE_NOT_OK');
-    const raw = requireBoundaryRecord(
-      response['counterparties'],
-      'CONTROL_GOSSIP_COUNTERPARTIES_MAP_INVALID',
-    );
+    const raw = requireBoundaryRecord(response['counterparties'], 'CONTROL_GOSSIP_COUNTERPARTIES_MAP_INVALID');
     const counterparties = new Map<string, string[] | null>();
     for (const entityId of entityIds) {
       const key = entityId.toLowerCase();
@@ -565,7 +578,10 @@ export class DaemonControlClient {
       if (!Array.isArray(value) || value.some(counterparty => typeof counterparty !== 'string')) {
         throw new Error(`CONTROL_GOSSIP_COUNTERPARTIES_ENTRY_INVALID:entityId=${key}`);
       }
-      counterparties.set(key, value.map(counterparty => counterparty.toLowerCase()));
+      counterparties.set(
+        key,
+        value.map(counterparty => counterparty.toLowerCase()),
+      );
     }
     return counterparties;
   }
@@ -579,9 +595,11 @@ export class DaemonControlClient {
   }
 
   async prepareEntityRoutes(entityIds: string[]): Promise<boolean> {
-    const open = decodeP2PControlResponse(await this.post('/api/control/p2p', {
-      directEntityIds: entityIds,
-    }));
+    const open = decodeP2PControlResponse(
+      await this.post('/api/control/p2p', {
+        directEntityIds: entityIds,
+      }),
+    );
     if (open === null) throw new Error('CONTROL_P2P_DIRECT_ROUTES_RESULT_MISSING');
     return open;
   }
@@ -606,7 +624,9 @@ export class DaemonControlClient {
       [],
       'CONTROL_DIRECT_SESSIONS_RESPONSE_FIELDS_INVALID',
     );
-    const runtimeId = String(response['runtimeId'] || '').trim().toLowerCase();
+    const runtimeId = String(response['runtimeId'] || '')
+      .trim()
+      .toLowerCase();
     if (response['ok'] !== true || !/^0x[0-9a-f]{40}$/.test(runtimeId)) {
       throw new Error('CONTROL_DIRECT_SESSIONS_RESPONSE_IDENTITY_INVALID');
     }
@@ -618,10 +638,7 @@ export class DaemonControlClient {
     return sessions;
   }
 
-  async waitForDirectRuntimeSessions(
-    expectedRuntimeIds: readonly string[],
-    timeoutMs = 30_000,
-  ): Promise<void> {
+  async waitForDirectRuntimeSessions(expectedRuntimeIds: readonly string[], timeoutMs = 30_000): Promise<void> {
     const expected = expectedRuntimeIds.map(runtimeId => runtimeId.trim().toLowerCase());
     if (expected.some(runtimeId => !/^0x[0-9a-f]{40}$/.test(runtimeId))) {
       throw new Error('CONTROL_DIRECT_SESSIONS_EXPECTED_RUNTIME_ID_INVALID');
@@ -642,7 +659,7 @@ export class DaemonControlClient {
     const closed = expected.filter(runtimeId => byRuntime.get(runtimeId)?.open === false);
     throw new Error(
       `CONTROL_DIRECT_SESSIONS_NOT_OPEN:expected=${expected.length}:present=${lastSessions.length}:` +
-      `missing=${missing.join(',')}:closed=${closed.join(',')}`,
+        `missing=${missing.join(',')}:closed=${closed.join(',')}`,
     );
   }
 
@@ -723,17 +740,19 @@ const buildEnableRoutingEntityInput = (
     },
     ...(config.initOrderbook === false
       ? []
-      : [{
-          type: 'initOrderbookExt' as const,
-          data: {
-            name: config.name,
-            spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
-            referenceTokenId: 1,
-            usdQuoteAuthorityEntityId: config.usdQuoteAuthorityEntityId,
-            minTradeSize: DEFAULT_ORDERBOOK_MIN_TRADE_SIZE,
-            supportedPairs: [...DEFAULT_ORDERBOOK_SUPPORTED_PAIRS],
+      : [
+          {
+            type: 'initOrderbookExt' as const,
+            data: {
+              name: config.name,
+              spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
+              referenceTokenId: 1,
+              usdQuoteAuthorityEntityId: config.usdQuoteAuthorityEntityId,
+              minTradeSize: DEFAULT_ORDERBOOK_MIN_TRADE_SIZE,
+              supportedPairs: [...DEFAULT_ORDERBOOK_SUPPORTED_PAIRS],
+            },
           },
-        }]),
+        ]),
   ],
 });
 
@@ -745,9 +764,10 @@ const buildCustodyConnectivityInput = (
 ): RuntimeInput | null => {
   const hubEntityIds = (config.hubEntityIds || []).map(id => id.trim().toLowerCase()).filter(Boolean);
   if (hubEntityIds.length === 0) return null;
-  const creditTokenIds = (config.creditTokenIds && config.creditTokenIds.length > 0
-    ? config.creditTokenIds
-    : [...DEFAULT_CUSTODY_CREDIT_TOKEN_IDS]
+  const creditTokenIds = (
+    config.creditTokenIds && config.creditTokenIds.length > 0
+      ? config.creditTokenIds
+      : [...DEFAULT_CUSTODY_CREDIT_TOKEN_IDS]
   )
     .map(value => Number(value))
     .filter(value => Number.isFinite(value) && value > 0);
@@ -767,10 +787,8 @@ const buildCustodyConnectivityInput = (
   }
   for (const hubEntityId of hubEntityIds) {
     for (const tokenId of creditTokenIds) {
-      const creditAmount = config.creditAmount ?? scaleWholeTokenAmount(
-        DEFAULT_CUSTODY_CREDIT_WHOLE,
-        getTokenInfo(tokenId).decimals,
-      );
+      const creditAmount =
+        config.creditAmount ?? scaleWholeTokenAmount(DEFAULT_CUSTODY_CREDIT_WHOLE, getTokenInfo(tokenId).decimals);
       entityTxs.push({
         type: 'extendCredit',
         data: {
@@ -822,7 +840,6 @@ export const enableRouting = async (
   return identity;
 };
 
-
 const configureManagedEntityP2P = async (
   client: DaemonControlClient,
   identity: ManagedEntityIdentity,
@@ -868,9 +885,7 @@ export const setupCustody = async (
     const entities = await client.listEntities();
     const custodySummary = entities.find(entity => entity.entityId.toLowerCase() === identity.entityId.toLowerCase());
     if (!custodySummary) throw new Error(`CUSTODY_COMMITTED_ENTITY_MISSING:${identity.entityId}`);
-    const committedRoles = new Map(
-      entities.map(entity => [entity.entityId.toLowerCase(), entity.isHub] as const),
-    );
+    const committedRoles = new Map(entities.map(entity => [entity.entityId.toLowerCase(), entity.isHub] as const));
     const existingAccountEntityIds = new Set(
       Array.isArray(custodySummary?.accountEntityIds)
         ? custodySummary.accountEntityIds.map(value => String(value).toLowerCase())
@@ -880,12 +895,7 @@ export const setupCustody = async (
     // Operator policy says custody is a User, but an already-imported Entity is
     // authoritative. Refuse a role conflict instead of silently signing 24h
     // clocks for a committed Hub identity.
-    const connectivityInput = buildCustodyConnectivityInput(
-      identity,
-      config,
-      missingHubEntityIds,
-      committedRoles,
-    );
+    const connectivityInput = buildCustodyConnectivityInput(identity, config, missingHubEntityIds, committedRoles);
     if (connectivityInput) {
       await client.queueRuntimeInput(connectivityInput);
       if (missingHubEntityIds.length > 0) {
@@ -893,7 +903,9 @@ export const setupCustody = async (
         const deadline = Date.now() + 15_000;
         while (Date.now() < deadline) {
           const refreshedEntities = await client.listEntities();
-          const refreshedSummary = refreshedEntities.find(entity => entity.entityId.toLowerCase() === identity.entityId.toLowerCase());
+          const refreshedSummary = refreshedEntities.find(
+            entity => entity.entityId.toLowerCase() === identity.entityId.toLowerCase(),
+          );
           const refreshedAccountEntityIds = new Set(
             Array.isArray(refreshedSummary?.accountEntityIds)
               ? refreshedSummary.accountEntityIds.map(value => String(value).toLowerCase())
@@ -909,23 +921,27 @@ export const setupCustody = async (
         if (stillMissingHubIds.length > 0) {
           throw new Error(
             `CUSTODY_CONNECTIVITY_ACCOUNTS_NOT_OPEN: entity=${identity.entityId} ` +
-            `missing=${stillMissingHubIds.join(',')} accounts=${Array.from(latestAccountEntityIds).join(',')}`,
+              `missing=${stillMissingHubIds.join(',')} accounts=${Array.from(latestAccountEntityIds).join(',')}`,
           );
         }
       }
     }
   }
   if (config.routingEnabled) {
-    const usdQuoteAuthorityEntityId = String(config.usdQuoteAuthorityEntityId || '').trim().toLowerCase();
+    const usdQuoteAuthorityEntityId = String(config.usdQuoteAuthorityEntityId || '')
+      .trim()
+      .toLowerCase();
     if (!/^0x[0-9a-f]{64}$/.test(usdQuoteAuthorityEntityId)) {
       throw new Error('CUSTODY_USD_QUOTE_AUTHORITY_ENTITY_ID_REQUIRED');
     }
     await client.queueRuntimeInput({
       runtimeTxs: [],
-      entityInputs: [buildEnableRoutingEntityInput(identity, {
-        ...config,
-        usdQuoteAuthorityEntityId,
-      })],
+      entityInputs: [
+        buildEnableRoutingEntityInput(identity, {
+          ...config,
+          usdQuoteAuthorityEntityId,
+        }),
+      ],
     });
     await client.waitForEntity(identity.entityId);
   }

@@ -2,11 +2,15 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { persistChildFailureReceipt, type ChildFailureReceipt } from '../../../orchestrator/process/child-failure-diagnostics';
+import {
+  persistChildFailureReceipt,
+  type ChildFailureReceipt,
+} from '../../../orchestrator/process/child-failure-diagnostics';
 import {
   decideChildFailure,
   selectChildFailureReason,
   shouldCaptureUnexpectedChildExit,
+  type ChildFailureHistory,
 } from '../../../orchestrator/process/child-recovery-policy';
 
 const crash = (reason: string) => ({
@@ -25,15 +29,18 @@ describe('managed child recovery policy', () => {
   });
 
   test('immediately recovers Runtime-loop fatals but fail-stops an identical crash loop', () => {
-    const first = decideChildFailure({}, crash(
-      '[ERROR][runtime] loop.error {"message":"CROSS_J_LOCAL_EVENT_REJECTED:order=42"}',
-    ));
-    const second = decideChildFailure(first.counts, crash(
-      '[ERROR][runtime] loop.error {"message":"CROSS_J_LOCAL_EVENT_REJECTED:order=42"}',
-    ));
-    const third = decideChildFailure(second.counts, crash(
-      '[ERROR][runtime] loop.error {"message":"CROSS_J_LOCAL_EVENT_REJECTED:order=42"}',
-    ));
+    const first = decideChildFailure(
+      {},
+      crash('[ERROR][runtime] loop.error {"message":"CROSS_J_LOCAL_EVENT_REJECTED:order=42"}'),
+    );
+    const second = decideChildFailure(
+      first.counts,
+      crash('[ERROR][runtime] loop.error {"message":"CROSS_J_LOCAL_EVENT_REJECTED:order=42"}'),
+    );
+    const third = decideChildFailure(
+      second.counts,
+      crash('[ERROR][runtime] loop.error {"message":"CROSS_J_LOCAL_EVENT_REJECTED:order=42"}'),
+    );
 
     expect(first).toMatchObject({
       action: 'recover',
@@ -106,12 +113,10 @@ describe('managed child recovery policy', () => {
 
   test('selects a stable fatal code instead of a trailing stack frame', () => {
     const reason = selectChildFailureReason(
-      [
-        'Error: J_WATCHER_DRAIN_STALLED:idleMs=120000',
-        '    at processTicksAndRejections (native:7:39)',
-      ],
+      ['Error: J_WATCHER_DRAIN_STALLED:idleMs=120000', '    at processTicksAndRejections (native:7:39)'],
       [],
       'MM_UNEXPECTED_EXIT',
+      null,
     );
     expect(reason).toBe('Error: J_WATCHER_DRAIN_STALLED:idleMs=120000');
     expect(decideChildFailure({}, crash(reason)).reasonCode).toBe('J_WATCHER_DRAIN_STALLED');
@@ -119,20 +124,22 @@ describe('managed child recovery policy', () => {
 
   test('ignores bootstrap WARN tails so SIGKILL keeps H2_UNEXPECTED_EXIT', () => {
     const reason = selectChildFailureReason(
-      [
-        '[WARN][mesh.hub] mesh.direct_peers.grace_expired {"graceMs":15000,"hub":"H2","peers":2}',
-      ],
+      ['[WARN][mesh.hub] mesh.direct_peers.grace_expired {"graceMs":15000,"hub":"H2","peers":2}'],
       [],
       'H2_UNEXPECTED_EXIT code=null signal=SIGKILL',
+      'SIGKILL',
     );
     expect(reason).toBe('H2_UNEXPECTED_EXIT code=null signal=SIGKILL');
     expect(decideChildFailure({}, crash(reason)).reasonCode).toBe('H2_UNEXPECTED_EXIT');
   });
 
   test('ordinary stdout before SIGKILL cannot replace the process exit cause', () => {
-    const reason = selectChildFailureReason([], [
-      '📤 [JAdapter:rpc] submitTx type=batch entity=e1da',
-    ], 'H1_UNEXPECTED_EXIT code=null signal=SIGKILL');
+    const reason = selectChildFailureReason(
+      [],
+      ['📤 [JAdapter:rpc] submitTx type=batch entity=e1da'],
+      'H1_UNEXPECTED_EXIT code=null signal=SIGKILL',
+      'SIGKILL',
+    );
     expect(reason).toBe('H1_UNEXPECTED_EXIT code=null signal=SIGKILL');
     expect(decideChildFailure({}, crash(reason)).reasonCode).toBe('H1_UNEXPECTED_EXIT');
   });
@@ -147,6 +154,7 @@ describe('managed child recovery policy', () => {
       ],
       [],
       'H3_UNEXPECTED_EXIT',
+      null,
     );
     expect(reason).toBe('message: "Unexpected end of JSON input",');
     expect(decideChildFailure({}, crash(reason)).reasonCode).toBe('RPC_RESPONSE_JSON_TRUNCATED');
@@ -185,10 +193,7 @@ describe('managed child recovery policy', () => {
     try {
       const paths = persistChildFailureReceipt(root, receipt, 'unit');
       expect(readFileSync(paths.receiptPath, 'utf8')).toBe(readFileSync(paths.latestPath, 'utf8'));
-      expect(readdirSync(root).sort()).toEqual([
-        '20260718T120000000Z-H2-unit.json',
-        'last-fatal.json',
-      ]);
+      expect(readdirSync(root).sort()).toEqual(['20260718T120000000Z-H2-unit.json', 'last-fatal.json']);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -222,18 +227,22 @@ describe('managed child recovery policy', () => {
     try {
       const fatal = persistChildFailureReceipt(root, base, 'fatal');
       const fatalPayload = readFileSync(fatal.latestPath, 'utf8');
-      persistChildFailureReceipt(root, {
-        ...base,
-        recordedAt: '2026-07-18T12:00:01.000Z',
-        role: 'hub',
-        name: 'H1',
-        signal: 'SIGINT',
-        reason: 'H1_TRANSIENT_EXIT',
-        reasonCode: 'H1_TRANSIENT_EXIT',
-        fingerprint: 'recover',
-        action: 'recover',
-        backoffMs: 2_000,
-      }, 'recover');
+      persistChildFailureReceipt(
+        root,
+        {
+          ...base,
+          recordedAt: '2026-07-18T12:00:01.000Z',
+          role: 'hub',
+          name: 'H1',
+          signal: 'SIGINT',
+          reason: 'H1_TRANSIENT_EXIT',
+          reasonCode: 'H1_TRANSIENT_EXIT',
+          fingerprint: 'recover',
+          action: 'recover',
+          backoffMs: 2_000,
+        },
+        'recover',
+      );
 
       expect(readFileSync(fatal.latestPath, 'utf8')).toBe(fatalPayload);
       expect(readdirSync(root).sort()).toEqual([
@@ -247,7 +256,6 @@ describe('managed child recovery policy', () => {
   });
 });
 
-
 test('native J lifecycle progress cannot replace the actual SIGKILL cause or hide a fatal', () => {
   // Captured from the native rebalance SIGKILL run; only the producer's level changed.
   const batch = '0xc718bfd43c58eb7d21ecf82598ca9354ed61b2a79a8a7578d1e5dd94b9280e0f';
@@ -256,8 +264,28 @@ test('native J lifecycle progress cannot replace the actual SIGKILL cause or hid
     `[INFO][runtime.jsubmit] RSCORE_J_RETRY_ADMITTED:batch=${batch}:nonce=1:generation=1:attempt=1`,
     `[INFO][runtime.jsubmit] RSCORE_J_RETRY_SKIPPED:pending-attempt:batch=${batch}`,
   ];
-  expect(selectChildFailureReason([], progress, 'H1_UNEXPECTED_EXIT:SIGKILL')).toBe('H1_UNEXPECTED_EXIT:SIGKILL');
+  expect(selectChildFailureReason([], progress, 'H1_UNEXPECTED_EXIT:SIGKILL', 'SIGKILL')).toBe(
+    'H1_UNEXPECTED_EXIT:SIGKILL',
+  );
   const fatal = 'RRS_RUNTIME_FATAL:J_SUBMIT_RECEIPT_MISMATCH';
-  expect(selectChildFailureReason([fatal], progress, 'H1_UNEXPECTED_EXIT')).toBe(fatal);
-  expect(selectChildFailureReason([], [...progress, fatal], 'H1_UNEXPECTED_EXIT')).toBe(fatal);
+  expect(selectChildFailureReason([fatal], progress, 'H1_UNEXPECTED_EXIT', null)).toBe(fatal);
+  expect(selectChildFailureReason([], [...progress, fatal], 'H1_UNEXPECTED_EXIT', null)).toBe(fatal);
+});
+
+test('SIGKILL keeps one bounded recovery history despite changing stderr tails', () => {
+  let history: ChildFailureHistory = {};
+  const tails = ['GOSSIP_PROFILE_FETCH_NO_CLIENT', 'GOSSIP_PROFILE_MISS', 'SOME_PREVIOUS_ERROR'];
+  for (const [index, code] of tails.entries()) {
+    const reason = selectChildFailureReason(
+      [`[network] ${code} {`],
+      [],
+      'H1_UNEXPECTED_EXIT code=null signal=SIGKILL',
+      'SIGKILL',
+    );
+    expect(reason).toBe('H1_UNEXPECTED_EXIT code=null signal=SIGKILL');
+    const decision = decideChildFailure(history, { ...crash(reason), code: null, signal: 'SIGKILL' });
+    expect(decision.count).toBe(index + 1);
+    expect(decision.action).toBe(index === 2 ? 'fail-stop' : 'recover');
+    history = decision.counts;
+  }
 });

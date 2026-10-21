@@ -8,12 +8,12 @@ import {
 import { safeStringify } from '../../protocol/serialization';
 import { decodeRuntimeAdapterRequest } from '../../api/runtime-adapter/codec';
 import { resolveRuntimeAdapterRead } from '../../api/runtime-adapter/resolve';
-import {
-  closeInvalidRuntimeAdapterMessage,
-  handleRuntimeAdapterMessage,
-} from '../../api/runtime-adapter/server';
+import { closeInvalidRuntimeAdapterMessage, handleRuntimeAdapterMessage } from '../../api/runtime-adapter/server';
 import type { RuntimeAdapterSocket } from '../../api/runtime-adapter/session/context';
-import { assertRuntimeEntityInputsEnvelopeSource, signRuntimeEntityInputsEnvelope } from '../../runtime/admit/entity-input-envelope-auth.ts';
+import {
+  assertRuntimeEntityInputsEnvelopeSource,
+  signRuntimeEntityInputsEnvelope,
+} from '../../runtime/admit/entity-input-envelope-auth.ts';
 import {
   enqueueRuntimeInput,
   handleInboundP2PEntityInputs,
@@ -42,8 +42,7 @@ import {
 import type { BrainVaultOwnerController } from '../../api/server/ownership/brainvault';
 import { resolveRuntimeAdminControl } from '../../api/server/control/runtime-admin';
 
-export type HubServerSocket = DirectWebSocket &
-  RuntimeAdapterSocket & { data?: { type?: string } };
+export type HubServerSocket = DirectWebSocket & RuntimeAdapterSocket & { data?: { type?: string } };
 
 export type DirectEntityInputDebug = {
   at: number;
@@ -62,15 +61,17 @@ export type DirectInputDebugState = {
   lastError: DirectEntityInputDebug | null;
 };
 
-const collectCrossJProfileIds = (
-  envelope: import('../../runtime/types').RuntimeEntityInputsEnvelope,
-): string[] => [...new Set(envelope.entityInputs.flatMap(input =>
-  getEffectiveEntityInputTxs(input).flatMap(tx => {
-    if (tx.type !== 'prepareCrossJurisdictionSwap') return [];
-    const route = extractCrossJurisdictionRouteFromTx(tx);
-    return route ? crossJurisdictionRouteProfileEntityIds(route) : [];
-  }),
-))];
+const collectCrossJProfileIds = (envelope: import('../../runtime/types').RuntimeEntityInputsEnvelope): string[] => [
+  ...new Set(
+    envelope.entityInputs.flatMap(input =>
+      getEffectiveEntityInputTxs(input).flatMap(tx => {
+        if (tx.type !== 'prepareCrossJurisdictionSwap') return [];
+        const route = extractCrossJurisdictionRouteFromTx(tx);
+        return route ? crossJurisdictionRouteProfileEntityIds(route) : [];
+      }),
+    ),
+  ),
+];
 
 const warmCrossJProfileRoutes = async (
   env: RuntimeReplica,
@@ -80,15 +81,15 @@ const warmCrossJProfileRoutes = async (
   if (required.length === 0) return;
   // Entities this Runtime itself signs for never arrive through gossip; their
   // route is local. Only remote parties need a verified profile route.
-  const missing = required.filter(entityId =>
-    !env.infrastructure?.verifiedProfileRoutes?.has(entityId)
-    && getEntityReplicaById(env, entityId) === null);
+  const missing = required.filter(
+    entityId =>
+      !env.infrastructure?.verifiedProfileRoutes?.has(entityId) && getEntityReplicaById(env, entityId) === null,
+  );
   if (missing.length === 0) return;
   const p2p = env.infrastructure?.p2p;
   if (!p2p) throw new Error(`CROSS_J_PROFILE_WARMUP_UNAVAILABLE:${missing.join(',')}`);
   await p2p.ensureProfiles(missing, 1);
-  const unresolved = missing.filter(entityId =>
-    !env.infrastructure?.verifiedProfileRoutes?.has(entityId));
+  const unresolved = missing.filter(entityId => !env.infrastructure?.verifiedProfileRoutes?.has(entityId));
   if (unresolved.length > 0) {
     throw new Error(`CROSS_J_PROFILE_WARMUP_FAILED:${unresolved.join(',')}`);
   }
@@ -118,9 +119,8 @@ export const handleDirectDeliveryFailure = (
     fromRuntimeId: failure.peerRuntimeId,
     entityIds: failure.envelope?.entityInputs.map(input => String(input.entityId || '')) ?? [],
     signerIds: failure.envelope?.entityInputs.map(input => String(input.signerId || '')) ?? [],
-    txTypes: failure.envelope?.entityInputs.flatMap(input =>
-      (input.entityTxs || []).map(tx => String(tx?.type || ''))
-    ) ?? [],
+    txTypes:
+      failure.envelope?.entityInputs.flatMap(input => (input.entityTxs || []).map(tx => String(tx?.type || ''))) ?? [],
     error: `${code}:${safeStringify(failure)}`,
   };
   // An inbound failure is a rejected Account input: the session already got the
@@ -250,7 +250,15 @@ export const createHubDirectRuntimeRoute = (
     onDeliveryFailure: failure => handleDirectDeliveryFailure(env, debug, () => route, failure),
     onSessionClose: failure => handleDirectSessionClose(env, failure),
     onEntityInputs: async (from, envelope, ingressTimestamp, sessionAuthenticated) =>
-      admitDirectEntityInputs(env, isIngressReady, debug, from, envelope, ingressTimestamp, sessionAuthenticated === true),
+      admitDirectEntityInputs(
+        env,
+        isIngressReady,
+        debug,
+        from,
+        envelope,
+        ingressTimestamp,
+        sessionAuthenticated === true,
+      ),
   });
   route.setReady(isIngressReady());
   // Offline -> online edge only (see core/runtime/mempool/propose-accounts-now.ts).
@@ -262,15 +270,14 @@ export const createHubDirectRuntimeRoute = (
   return route;
 };
 
-export const createHubRadapterMessageHandler = (
-  env: RuntimeReplica,
-  isIngressReady: () => boolean,
-  brainVaultOwner: BrainVaultOwnerController,
-  isBrainVaultReady: () => boolean,
-): ((
-  ws: HubServerSocket,
-  raw: string | Buffer | ArrayBuffer,
-) => void) =>
+export const createHubRadapterMessageHandler =
+  (
+    env: RuntimeReplica,
+    isIngressReady: () => boolean,
+    brainVaultOwner: BrainVaultOwnerController,
+    isBrainVaultReady: () => boolean,
+    publishOwnerProfile: (entityId: string) => Promise<void>,
+  ): ((ws: HubServerSocket, raw: string | Buffer | ArrayBuffer) => void) =>
   (ws, raw) => {
     let message: import('../../api/runtime-adapter/types').RuntimeAdapterRequest;
     try {
@@ -290,7 +297,9 @@ export const createHubRadapterMessageHandler = (
         isMutatingIngressReady: isIngressReady,
         deriveBrainVault: async (targetEnv, input, options) => {
           if (!isBrainVaultReady()) throw new Error('BRAINVAULT_OWNER_STARTUP_PENDING');
-          return brainVaultOwner.deriveAndInstall(targetEnv, input, options);
+          const owner = await brainVaultOwner.deriveAndInstall(targetEnv, input, options);
+          await publishOwnerProfile(owner.entityId);
+          return owner;
         },
         // Intentional recovery boundary: a trusted node owner may explicitly
         // reveal its own mnemonic over an authenticated admin capability.

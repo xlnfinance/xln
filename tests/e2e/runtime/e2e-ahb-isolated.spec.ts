@@ -50,11 +50,9 @@ type TestWindow = Window & {
   };
 };
 
-const calcFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint =>
-  (amount * feePPM / FEE_DENOM) + baseFee;
+const calcFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint => (amount * feePPM) / FEE_DENOM + baseFee;
 
-const afterFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint =>
-  amount - calcFee(amount, feePPM, baseFee);
+const afterFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint => amount - calcFee(amount, feePPM, baseFee);
 
 function assertHtlcReceivedPayload(
   event: { data?: Record<string, unknown> },
@@ -63,12 +61,21 @@ function assertHtlcReceivedPayload(
   expectedAmount: bigint,
 ): void {
   expect(String(event.data?.amount || ''), 'receive event should include amount').toBe(expectedAmount.toString());
-  expect(String(event.data?.entityId || '').toLowerCase(), 'receive event should include entityId').toBe(recipientEntityId.toLowerCase());
-  expect(String(event.data?.toEntity || '').toLowerCase(), 'receive event should include toEntity').toBe(recipientEntityId.toLowerCase());
-  expect(String(event.data?.fromEntity || '').toLowerCase(), 'receive event should include fromEntity').toBe(expectedFromEntity.toLowerCase());
+  expect(String(event.data?.entityId || '').toLowerCase(), 'receive event should include entityId').toBe(
+    recipientEntityId.toLowerCase(),
+  );
+  expect(String(event.data?.toEntity || '').toLowerCase(), 'receive event should include toEntity').toBe(
+    recipientEntityId.toLowerCase(),
+  );
+  expect(String(event.data?.fromEntity || '').toLowerCase(), 'receive event should include fromEntity').toBe(
+    expectedFromEntity.toLowerCase(),
+  );
   expect(String(event.data?.hashlock || ''), 'receive event should include hashlock').toMatch(/^0x[0-9a-f]{64}$/i);
   expect(String(event.data?.lockId || '').length, 'receive event should include lockId').toBeGreaterThan(0);
-  expect(String(event.data?.jurisdictionId || '').length, 'receive event should include jurisdictionId').toBeGreaterThan(0);
+  expect(
+    String(event.data?.jurisdictionId || '').length,
+    'receive event should include jurisdictionId',
+  ).toBeGreaterThan(0);
   expect(Number(event.data?.startedAtMs || 0), 'receive event should include startedAtMs').toBeGreaterThan(0);
   expect(Number(event.data?.receivedAtMs || 0), 'receive event should include receivedAtMs').toBeGreaterThan(0);
   expect(Number(event.data?.elapsedMs || 0), 'receive event should include elapsedMs').toBeGreaterThan(0);
@@ -81,12 +88,21 @@ function assertHtlcFinalizedPayload(
   expectedAmount: bigint,
 ): void {
   expect(String(event.data?.amount || ''), 'finalized event should include amount').toBe(expectedAmount.toString());
-  expect(String(event.data?.entityId || '').toLowerCase(), 'finalized event should include entityId').toBe(senderEntityId.toLowerCase());
-  expect(String(event.data?.fromEntity || '').toLowerCase(), 'finalized event should include fromEntity').toBe(senderEntityId.toLowerCase());
-  expect(String(event.data?.toEntity || '').toLowerCase(), 'finalized event should include toEntity').toBe(expectedToEntity.toLowerCase());
+  expect(String(event.data?.entityId || '').toLowerCase(), 'finalized event should include entityId').toBe(
+    senderEntityId.toLowerCase(),
+  );
+  expect(String(event.data?.fromEntity || '').toLowerCase(), 'finalized event should include fromEntity').toBe(
+    senderEntityId.toLowerCase(),
+  );
+  expect(String(event.data?.toEntity || '').toLowerCase(), 'finalized event should include toEntity').toBe(
+    expectedToEntity.toLowerCase(),
+  );
   expect(String(event.data?.hashlock || ''), 'finalized event should include hashlock').toMatch(/^0x[0-9a-f]{64}$/i);
   expect(String(event.data?.lockId || '').length, 'finalized event should include lockId').toBeGreaterThan(0);
-  expect(String(event.data?.jurisdictionId || '').length, 'finalized event should include jurisdictionId').toBeGreaterThan(0);
+  expect(
+    String(event.data?.jurisdictionId || '').length,
+    'finalized event should include jurisdictionId',
+  ).toBeGreaterThan(0);
   expect(Number(event.data?.startedAtMs || 0), 'finalized event should include startedAtMs').toBeGreaterThan(0);
   expect(Number(event.data?.finalizedAtMs || 0), 'finalized event should include finalizedAtMs').toBeGreaterThan(0);
   expect(Number(event.data?.elapsedMs || 0), 'finalized event should include elapsedMs').toBeGreaterThan(0);
@@ -112,7 +128,7 @@ function requiredInbound(desiredForward: bigint, feePPM: bigint, baseFee: bigint
 }
 
 function mirrorConsole(page: Page, tag: string): void {
-  page.on('console', (msg) => {
+  page.on('console', msg => {
     const text = msg.text();
     if (
       msg.type() === 'error' ||
@@ -182,11 +198,11 @@ async function discoverHubs(page: Page): Promise<string[]> {
 }
 
 async function getHubFeeConfig(page: Page, hubId: string): Promise<HubFeeConfig> {
-  const fee = await page.evaluate((targetHubId) => {
+  const fee = await page.evaluate(targetHubId => {
     const view = window as TestWindow;
     const profiles = view.__xln?.env()?.gossip?.getProfiles?.() ?? [];
-    const profile = profiles.find((entry) =>
-      String(entry.entityId || '').toLowerCase() === String(targetHubId || '').toLowerCase(),
+    const profile = profiles.find(
+      entry => String(entry.entityId || '').toLowerCase() === String(targetHubId || '').toLowerCase(),
     );
     const rawPPM = Number(profile?.metadata?.routingFeePPM ?? 0);
     const feePPM = Number.isFinite(rawPPM) && rawPPM >= 0 ? Math.floor(rawPPM) : 0;
@@ -245,7 +261,7 @@ async function waitForSenderSpendRaw(
   }
   throw new Error(
     `Timed out waiting raw sender spend on ${entityId.slice(0, 10)}↔${cpId.slice(0, 10)} ` +
-    `(baseline=${baseline} latest=${latest} spent=${spent} minSpend=${minSpend})`,
+      `(baseline=${baseline} latest=${latest} spent=${spent} minSpend=${minSpend})`,
   );
 }
 
@@ -259,24 +275,27 @@ async function waitForAccountIdle(
   let last = { hasAccount: false, height: 0, pendingHeight: null as number | null, mempoolLen: 0 };
 
   while (Date.now() - startedAt < timeoutMs) {
-    last = await page.evaluate(({ counterpartyId, entityId }) => {
-      const view = window as TestWindow;
-      if (!view.__xln?.env()?.state?.eReplicas) {
+    last = await page.evaluate(
+      ({ counterpartyId, entityId }) => {
+        const view = window as TestWindow;
+        if (!view.__xln?.env()?.state?.eReplicas) {
+          return { hasAccount: false, height: 0, pendingHeight: null, mempoolLen: 0 };
+        }
+        for (const [replicaKey, replica] of view.__xln?.env().state.eReplicas.entries()) {
+          if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
+          const account = replica.state?.accounts?.get(counterpartyId);
+          if (!account) return { hasAccount: false, height: 0, pendingHeight: null, mempoolLen: 0 };
+          return {
+            hasAccount: true,
+            height: Number(account.currentHeight),
+            pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
+            mempoolLen: Number(account.mempool?.length || 0),
+          };
+        }
         return { hasAccount: false, height: 0, pendingHeight: null, mempoolLen: 0 };
-      }
-      for (const [replicaKey, replica] of view.__xln?.env().state.eReplicas.entries()) {
-        if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
-        const account = replica.state?.accounts?.get(counterpartyId);
-        if (!account) return { hasAccount: false, height: 0, pendingHeight: null, mempoolLen: 0 };
-        return {
-          hasAccount: true,
-          height: Number(account.currentHeight),
-          pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
-          mempoolLen: Number(account.mempool?.length || 0),
-        };
-      }
-      return { hasAccount: false, height: 0, pendingHeight: null, mempoolLen: 0 };
-    }, { counterpartyId, entityId });
+      },
+      { counterpartyId, entityId },
+    );
 
     if (last.hasAccount && last.pendingHeight === null) return;
     await page.waitForTimeout(250);
@@ -284,7 +303,7 @@ async function waitForAccountIdle(
 
   throw new Error(
     `Account not idle for ${entityId.slice(0, 10)}↔${counterpartyId.slice(0, 10)} ` +
-    `(hasAccount=${last.hasAccount} height=${last.height} pending=${last.pendingHeight} mempool=${last.mempoolLen})`,
+      `(hasAccount=${last.hasAccount} height=${last.height} pending=${last.pendingHeight} mempool=${last.mempoolLen})`,
   );
 }
 
@@ -316,7 +335,7 @@ async function faucet(page: Page, entityId: string, hubEntityId: string): Promis
           hubEntityId,
         },
       });
-      const body = await response.json().catch(() => ({} as Record<string, unknown>));
+      const body = await response.json().catch(() => ({}) as Record<string, unknown>);
       result = { ok: response.status() === 200, status: response.status(), data: body };
     } catch (error) {
       result = {
@@ -360,11 +379,7 @@ function expectRenderedDeltaClose(actualDelta: number, expectedDelta: number, la
   ).toBeLessThanOrEqual(0.000000001);
 }
 
-async function reloadAppForProject(
-  page: Page,
-  appBaseUrl: string,
-  projectName: string,
-): Promise<void> {
+async function reloadAppForProject(page: Page, appBaseUrl: string, projectName: string): Promise<void> {
   if (projectName === 'webkit-mobile') {
     await page.goto(`${appBaseUrl}/app`, { waitUntil: 'domcontentloaded' });
   } else {
@@ -372,8 +387,57 @@ async function reloadAppForProject(
   }
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
+  await page.evaluate(() => {
+    const started = performance.now();
+    const stages: Array<{ elapsedMs: number; stage: string }> = [];
+    const capture = () => {
+      const stage =
+        document.querySelector('button[type=submit]')?.textContent ??
+        document.querySelector('main [role=status]')?.textContent ??
+        (document.querySelector('[data-testid=nav-home]') ? 'Home' : 'Opening');
+      if (stages.at(-1)?.stage !== stage) stages.push({ elapsedMs: Math.round(performance.now() - started), stage });
+    };
+    new MutationObserver(capture).observe(document.body, { childList: true, subtree: true, characterData: true });
+    (window as Window & { __reloadStages?: typeof stages }).__reloadStages = stages;
+    capture();
+  });
   await page.getByRole('button', { name: 'Unlock', exact: true }).click();
-  await expect(page.getByTestId('nav-home').locator('visible=true').first()).toBeVisible();
+  try {
+    await expect(page.getByTestId('nav-home').locator('visible=true').first()).toBeVisible();
+  } finally {
+    const state = await page.evaluate(async () => {
+      const debug = (window as TestWindow).__xln;
+      const env = debug?.env();
+      const xln = await debug?.xln();
+      return {
+        stages: (window as Window & { __reloadStages?: Array<{ elapsedMs: number; stage: string }> }).__reloadStages,
+        runtimeId: env?.runtimeId,
+        height: env?.state.height,
+        halted: env?.infrastructure?.halted ?? false,
+        relayConnected: env?.infrastructure?.p2p?.isConnected() ?? false,
+        queuedRuntimeTxs: env?.runtimeMempool.runtimeTxs.map(tx => tx.type),
+        queuedEntityInputs: env?.runtimeMempool.entityInputs.map(input => input.entityTxs?.map(tx => tx.type)),
+        entities:
+          env && xln
+            ? [...env.state.eReplicas.values()].map(replica => ({
+                entityId: replica.entityId,
+                height: replica.state.height,
+                pending: replica.mempool.map(tx => tx.type),
+                proposalHeight: replica.proposal?.height ?? null,
+                scan: xln.getEntityJAdapter(env, replica.entityId, replica.signerId)?.getWatcherScanProgress?.(),
+                accounts: [...replica.state.accounts.values()].map(account => ({
+                  height: account.currentHeight,
+                  pendingHeight: account.pendingFrame?.height ?? null,
+                })),
+              }))
+            : [],
+      };
+    });
+    await test
+      .info()
+      .attach('isolated-reload-boundary', { body: JSON.stringify(state), contentType: 'application/json' });
+    console.log('[E2E] isolated reload boundary', JSON.stringify(state));
+  }
 }
 
 async function pay(
@@ -433,303 +497,173 @@ async function runtimeDbMeta(page: Page): Promise<{
 }
 
 async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<void> {
-  await page.waitForFunction(({ targetRuntimeId }) => {
-    const view = window as TestWindow;
-    return (
-      String(view.__xln?.env()?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase() &&
-      Number(view.__xln?.env()?.state?.eReplicas?.size || 0) > 0
-    );
-  }, { targetRuntimeId: runtimeId }, { timeout: INIT_TIMEOUT });
+  await page.waitForFunction(
+    ({ targetRuntimeId }) => {
+      const view = window as TestWindow;
+      return (
+        String(view.__xln?.env()?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase() &&
+        Number(view.__xln?.env()?.state?.eReplicas?.size || 0) > 0
+      );
+    },
+    { targetRuntimeId: runtimeId },
+    { timeout: INIT_TIMEOUT },
+  );
 }
 
 async function waitForDurableRuntimeState(page: Page, label: string): Promise<void> {
   await expect
-    .poll(async () => {
-      const meta = await runtimeDbMeta(page);
-      return meta.hasLatestFrame && meta.latestHeight >= meta.runtimeHeight;
-    }, {
-      timeout: 30_000,
-      message: `${label} durable persisted height must catch up to runtime height`,
-    })
+    .poll(
+      async () => {
+        const meta = await runtimeDbMeta(page);
+        return meta.hasLatestFrame && meta.latestHeight >= meta.runtimeHeight;
+      },
+      {
+        timeout: 30_000,
+        message: `${label} durable persisted height must catch up to runtime height`,
+      },
+    )
     .toBe(true);
 }
 
 async function waitForRuntimeInputDrain(page: Page, label: string, timeoutMs = 15_000): Promise<void> {
   await expect
-    .poll(async () => {
-      return await page.evaluate(() => {
-        const env = (window as TestWindow).__xln?.env();
-        if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
-        const mempool = env.runtimeMempool;
-        return (
-          mempool.runtimeTxs.length === 0 &&
-          mempool.entityInputs.length === 0 &&
-          (mempool.jInputs?.length ?? 0) === 0 &&
-          (env.pendingOutputs?.length ?? 0) === 0 &&
-          (env.pendingNetworkOutputs?.length ?? 0) === 0 &&
-          (env.networkInbox?.length ?? 0) === 0
-        );
-      });
-    }, {
-      timeout: timeoutMs,
-      message: `${label} runtime input queues must be empty before reload`,
-    })
+    .poll(
+      async () => {
+        return await page.evaluate(() => {
+          const env = (window as TestWindow).__xln?.env();
+          if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+          const mempool = env.runtimeMempool;
+          return (
+            mempool.runtimeTxs.length === 0 &&
+            mempool.entityInputs.length === 0 &&
+            (mempool.jInputs?.length ?? 0) === 0 &&
+            (env.pendingOutputs?.length ?? 0) === 0 &&
+            (env.pendingNetworkOutputs?.length ?? 0) === 0 &&
+            (env.networkInbox?.length ?? 0) === 0
+          );
+        });
+      },
+      {
+        timeout: timeoutMs,
+        message: `${label} runtime input queues must be empty before reload`,
+      },
+    )
     .toBe(true);
 }
 
 test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
   test.setTimeout(LONG_E2E ? 300_000 : 210_000);
 
-test('bidirectional payments survive across two isolated browser contexts', { tag: '@functional' }, async ({ browser, page }, testInfo) => {
-    if (testInfo.project.name === 'webkit-mobile') {
-      testInfo.setTimeout(LONG_E2E ? 300_000 : 210_000);
-    }
-    let aliceContext: BrowserContext | null = null;
-    let bobContext: BrowserContext | null = null;
+  test(
+    'bidirectional payments survive across two isolated browser contexts',
+    { tag: '@functional' },
+    async ({ browser, page }, testInfo) => {
+      if (testInfo.project.name === 'webkit-mobile') {
+        testInfo.setTimeout(LONG_E2E ? 300_000 : 210_000);
+      }
+      let aliceContext: BrowserContext | null = null;
+      let bobContext: BrowserContext | null = null;
 
-    try {
-      await ensureE2EBaseline(page, {
-        requireHubMesh: true,
-        requireMarketMaker: false,
-        minHubCount: 3,
-      });
+      try {
+        await ensureE2EBaseline(page, {
+          requireHubMesh: true,
+          requireMarketMaker: false,
+          minHubCount: 3,
+        });
 
-      aliceContext = await browser.newContext({ ignoreHTTPSErrors: true });
-      bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
-      const alicePage = await aliceContext.newPage();
-      const bobPage = await bobContext.newPage();
-      mirrorConsole(alicePage, 'ALICE');
-      mirrorConsole(bobPage, 'BOB');
+        aliceContext = await browser.newContext({ ignoreHTTPSErrors: true });
+        bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
+        const alicePage = await aliceContext.newPage();
+        const bobPage = await bobContext.newPage();
+        mirrorConsole(alicePage, 'ALICE');
+        mirrorConsole(bobPage, 'BOB');
 
-      await Promise.all([
-        gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1500 }),
-        gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1500 }),
-      ]);
+        await Promise.all([
+          gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1500 }),
+          gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1500 }),
+        ]);
 
-      console.log('[E2E] create isolated runtimes');
-      const alice = await createWalletIdentity(alicePage, 'alice', selectDemoMnemonic('alice'));
-      const bob = await createWalletIdentity(bobPage, 'bob', selectDemoMnemonic('bob'));
-      expect(alice.entityId).not.toBe(bob.entityId);
+        console.log('[E2E] create isolated runtimes');
+        const alice = await createWalletIdentity(alicePage, 'alice', selectDemoMnemonic('alice'));
+        const bob = await createWalletIdentity(bobPage, 'bob', selectDemoMnemonic('bob'));
+        expect(alice.entityId).not.toBe(bob.entityId);
 
-      await Promise.all([
-        waitForEntityAdvertised(alicePage, alice.entityId),
-        waitForEntityAdvertised(alicePage, bob.entityId),
-        waitForEntityAdvertised(bobPage, alice.entityId),
-        waitForEntityAdvertised(bobPage, bob.entityId),
-      ]);
+        await Promise.all([
+          waitForEntityAdvertised(alicePage, alice.entityId),
+          waitForEntityAdvertised(alicePage, bob.entityId),
+          waitForEntityAdvertised(bobPage, alice.entityId),
+          waitForEntityAdvertised(bobPage, bob.entityId),
+        ]);
 
-      console.log(`[E2E] Alice entity=${alice.entityId.slice(0, 16)} runtime=${alice.runtimeId.slice(0, 12)}`);
-      console.log(`[E2E] Bob entity=${bob.entityId.slice(0, 16)} runtime=${bob.runtimeId.slice(0, 12)}`);
+        console.log(`[E2E] Alice entity=${alice.entityId.slice(0, 16)} runtime=${alice.runtimeId.slice(0, 12)}`);
+        console.log(`[E2E] Bob entity=${bob.entityId.slice(0, 16)} runtime=${bob.runtimeId.slice(0, 12)}`);
 
-      const aliceHubs = await discoverHubs(alicePage);
-      const bobHubs = await discoverHubs(bobPage);
-      expect(aliceHubs.length, 'alice must discover at least one hub').toBeGreaterThan(0);
-      const hubId = aliceHubs[0]!;
-      expect(bobHubs.includes(hubId), 'bob must discover the same primary hub').toBe(true);
+        const aliceHubs = await discoverHubs(alicePage);
+        const bobHubs = await discoverHubs(bobPage);
+        expect(aliceHubs.length, 'alice must discover at least one hub').toBeGreaterThan(0);
+        const hubId = aliceHubs[0]!;
+        expect(bobHubs.includes(hubId), 'bob must discover the same primary hub').toBe(true);
 
-      console.log(`[E2E] connect both runtimes to hub ${hubId.slice(0, 16)}`);
-      await connectRuntimeToHub(alicePage, alice, hubId);
-      await connectRuntimeToHub(bobPage, bob, hubId);
+        console.log(`[E2E] connect both runtimes to hub ${hubId.slice(0, 16)}`);
+        await connectRuntimeToHub(alicePage, alice, hubId);
+        await connectRuntimeToHub(bobPage, bob, hubId);
 
-      console.log('[E2E] fund Alice through the selected hub');
-      const aliceBeforeFaucet = await getRenderedOutboundForAccount(alicePage, hubId);
-      await faucet(alicePage, alice.entityId, hubId);
-      const aliceAfterFaucet = await waitForRenderedOutboundForAccountDelta(alicePage, hubId, aliceBeforeFaucet, 100);
-      expect(aliceAfterFaucet).toBeGreaterThan(aliceBeforeFaucet);
+        console.log('[E2E] fund Alice through the selected hub');
+        const aliceBeforeFaucet = await getRenderedOutboundForAccount(alicePage, hubId);
+        await faucet(alicePage, alice.entityId, hubId);
+        const aliceAfterFaucet = await waitForRenderedOutboundForAccountDelta(alicePage, hubId, aliceBeforeFaucet, 100);
+        expect(aliceAfterFaucet).toBeGreaterThan(aliceBeforeFaucet);
 
-      const hubFee = await getHubFeeConfig(alicePage, hubId);
+        const hubFee = await getHubFeeConfig(alicePage, hubId);
 
-      console.log('[E2E] forward HTLC Alice -> Hub -> Bob');
-      const forwardAmount = toUsdcUnits(10);
-      const expectedForwardSpend = requiredInbound(forwardAmount, hubFee.feePPM, hubFee.baseFee);
-      const aliceBeforeForwardRaw = await outCapRaw(alicePage, alice.entityId, hubId);
-      const bobBeforeForward = await getRenderedOutboundForAccount(bobPage, hubId);
-      const bobForwardCursor = await getPersistedReceiptCursor(bobPage);
-      const aliceForwardFinalizeCursor = await getPersistedReceiptCursor(alicePage);
-      const readiness = await Promise.all(
-        [alicePage, bobPage].map(walletPage =>
-          walletPage.evaluate(
-            ({ recipient, hub }) => {
-              const env = (window as TestWindow).__xln?.env();
-              if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
-              return {
-                runtimeId: env.runtimeId,
-                recipientProfile: env.gossip.getProfiles().find(profile => profile.entityId === recipient),
-                localAccounts: [...env.state.eReplicas.values()].map(replica => ({
-                  entityId: replica.entityId,
-                  height: replica.state.height,
-                  accounts: [...replica.state.accounts].map(([id, account]) => ({
-                    id,
-                    height: account.currentHeight,
-                    pending: account.pendingFrame?.height,
+        console.log('[E2E] forward HTLC Alice -> Hub -> Bob');
+        const forwardAmount = toUsdcUnits(10);
+        const expectedForwardSpend = requiredInbound(forwardAmount, hubFee.feePPM, hubFee.baseFee);
+        const aliceBeforeForwardRaw = await outCapRaw(alicePage, alice.entityId, hubId);
+        const bobBeforeForward = await getRenderedOutboundForAccount(bobPage, hubId);
+        const bobForwardCursor = await getPersistedReceiptCursor(bobPage);
+        const aliceForwardFinalizeCursor = await getPersistedReceiptCursor(alicePage);
+        const readiness = await Promise.all(
+          [alicePage, bobPage].map(walletPage =>
+            walletPage.evaluate(
+              ({ recipient, hub }) => {
+                const env = (window as TestWindow).__xln?.env();
+                if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+                return {
+                  runtimeId: env.runtimeId,
+                  recipientProfile: env.gossip.getProfiles().find(profile => profile.entityId === recipient),
+                  localAccounts: [...env.state.eReplicas.values()].map(replica => ({
+                    entityId: replica.entityId,
+                    height: replica.state.height,
+                    accounts: [...replica.state.accounts].map(([id, account]) => ({
+                      id,
+                      height: account.currentHeight,
+                      pending: account.pendingFrame?.height,
+                    })),
                   })),
-                })),
-                hub,
-              };
-            },
-            { recipient: bob.entityId, hub: hubId },
+                  hub,
+                };
+              },
+              { recipient: bob.entityId, hub: hubId },
+            ),
           ),
-        ),
-      );
-      expect(
-        readiness[0]?.recipientProfile?.accounts.some(account => account.counterpartyId === hubId),
-        'sender starts with the genuinely stale recipient profile',
-      ).toBe(false);
-      expect(
-        readiness[1]?.recipientProfile?.accounts.some(account => account.counterpartyId === hubId),
-        'recipient has already published its committed Hub account',
-      ).toBe(true);
-      console.log(
-        '[E2E] stale-profile regression',
-        readiness.map(entry => ({
-          runtimeId: entry.runtimeId,
-          accounts: entry.recipientProfile?.accounts.map(account => account.counterpartyId),
-          updatedAt: entry.recipientProfile?.lastUpdated,
-        })),
-      );
-
-      await pay(
-        alicePage,
-        alice.entityId,
-        alice.signerId,
-        bob.entityId,
-        [alice.entityId, hubId, bob.entityId],
-        forwardAmount,
-      );
-
-      const forwardSpend = await waitForSenderSpendRaw(
-        alicePage,
-        alice.entityId,
-        hubId,
-        aliceBeforeForwardRaw,
-        expectedForwardSpend,
-      );
-      const aliceForwardFinalizeEvent = await waitForPersistedFrameEventMatch(alicePage, {
-        eventName: 'HtlcFinalized',
-        entityId: alice.entityId,
-        cursor: aliceForwardFinalizeCursor,
-        timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
-        predicate: event => String(event.data?.amount || '') === forwardAmount.toString(),
-      });
-      assertHtlcFinalizedPayload(aliceForwardFinalizeEvent, alice.entityId, hubId, forwardAmount);
-      const bobForwardReceiveEvent = await waitForPersistedFrameEventMatch(bobPage, {
-        eventName: 'HtlcReceived',
-        entityId: bob.entityId,
-        cursor: bobForwardCursor,
-        timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
-        predicate: event => String(event.data?.amount || '') === forwardAmount.toString(),
-      });
-      assertHtlcReceivedPayload(bobForwardReceiveEvent, bob.entityId, hubId, forwardAmount);
-      const bobAfterForward = await waitForRenderedOutboundForAccountDelta(
-        bobPage,
-        hubId,
-        bobBeforeForward,
-        toDisplayed(forwardAmount),
-      );
-      expect(forwardSpend.spent).toBeGreaterThanOrEqual(expectedForwardSpend);
-      expectRenderedDeltaClose(bobAfterForward - bobBeforeForward, toDisplayed(forwardAmount), 'bob forward receive');
-
-      console.log('[E2E] reverse HTLC Bob -> Hub -> Alice');
-      await waitForAccountIdle(bobPage, bob.entityId, hubId);
-      await waitForAccountIdle(alicePage, alice.entityId, hubId);
-      const reverseAmount = toUsdcUnits(5);
-      const expectedReverseSpend = requiredInbound(reverseAmount, hubFee.feePPM, hubFee.baseFee);
-      const bobBeforeReverseRaw = await outCapRaw(bobPage, bob.entityId, hubId);
-      const aliceBeforeReverse = await getRenderedOutboundForAccount(alicePage, hubId);
-      const aliceReverseCursor = await getPersistedReceiptCursor(alicePage);
-      const bobReverseFinalizeCursor = await getPersistedReceiptCursor(bobPage);
-      await pay(
-        bobPage,
-        bob.entityId,
-        bob.signerId,
-        alice.entityId,
-        [bob.entityId, hubId, alice.entityId],
-        reverseAmount,
-      );
-
-      const reverseSpend = await waitForSenderSpendRaw(
-        bobPage,
-        bob.entityId,
-        hubId,
-        bobBeforeReverseRaw,
-        expectedReverseSpend,
-      );
-      const bobReverseFinalizeEvent = await waitForPersistedFrameEventMatch(bobPage, {
-        eventName: 'HtlcFinalized',
-        entityId: bob.entityId,
-        cursor: bobReverseFinalizeCursor,
-        timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
-        predicate: event => String(event.data?.amount || '') === reverseAmount.toString(),
-      });
-      assertHtlcFinalizedPayload(bobReverseFinalizeEvent, bob.entityId, hubId, reverseAmount);
-      const aliceReverseReceiveEvent = await waitForPersistedFrameEventMatch(alicePage, {
-        eventName: 'HtlcReceived',
-        entityId: alice.entityId,
-        cursor: aliceReverseCursor,
-        timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
-        predicate: event => String(event.data?.amount || '') === reverseAmount.toString(),
-      });
-      assertHtlcReceivedPayload(aliceReverseReceiveEvent, alice.entityId, hubId, reverseAmount);
-      const aliceAfterReverse = await waitForRenderedOutboundForAccountDelta(
-        alicePage,
-        hubId,
-        aliceBeforeReverse,
-        toDisplayed(reverseAmount),
-      );
-      const bobAfterReverse = await getRenderedOutboundForAccount(bobPage, hubId);
-      expect(reverseSpend.spent).toBeGreaterThanOrEqual(expectedReverseSpend);
-      expectRenderedDeltaClose(
-        aliceAfterReverse - aliceBeforeReverse,
-        toDisplayed(reverseAmount),
-        'alice reverse receive',
-      );
-      // Rendered capacities deliberately round to two decimals; fee/debit authority uses exact base units above.
-      expect(bobAfterReverse).toBe(Number(formatMoney(reverseSpend.latest, USDC_DECIMALS).replaceAll(',', '')));
-      console.log('[E2E] exact debits', {
-        forward: forwardSpend.spent.toString(),
-        reverse: reverseSpend.spent.toString(),
-      });
-      await waitForAccountIdle(alicePage, alice.entityId, hubId);
-      await waitForAccountIdle(bobPage, bob.entityId, hubId);
-      await waitForRuntimeInputDrain(alicePage, 'alice');
-      await waitForRuntimeInputDrain(bobPage, 'bob');
-      await waitForDurableRuntimeState(alicePage, 'alice');
-      await waitForDurableRuntimeState(bobPage, 'bob');
-
-      let expectedAliceAfterReload = aliceAfterReverse;
-      let expectedBobAfterReload = bobAfterReverse;
-
-      if (LONG_E2E) {
-        console.log('[E2E] restore both isolated pages before extended payment checks');
-        if (testInfo.project.name === 'webkit-mobile') {
-          await reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name);
-          await reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name);
-        } else {
-          await Promise.all([
-            reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name),
-            reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name),
-          ]);
-        }
-        await Promise.all([
-          gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1000 }),
-          gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1000 }),
-        ]);
-        await Promise.all([
-          waitForRestoredRuntime(alicePage, alice.runtimeId),
-          waitForRestoredRuntime(bobPage, bob.runtimeId),
-        ]);
-        await waitForAccountIdle(alicePage, alice.entityId, hubId);
-        await waitForAccountIdle(bobPage, bob.entityId, hubId);
-
-        console.log('[E2E] second forward HTLC Alice -> Hub -> Bob');
-
-        const secondForwardAmount = toUsdcUnits(3);
-        const expectedSecondForwardSpend = requiredInbound(secondForwardAmount, hubFee.feePPM, hubFee.baseFee);
-        const aliceBeforeSecondForward = await getRenderedOutboundForAccount(alicePage, hubId);
-        const aliceBeforeSecondForwardRaw = await outCapRaw(alicePage, alice.entityId, hubId);
-        const bobBeforeSecondForward = await getRenderedOutboundForAccount(bobPage, hubId);
-        const bobSecondForwardCursor = await getPersistedReceiptCursor(bobPage);
-        const aliceSecondForwardFinalizeCursor = await getPersistedReceiptCursor(alicePage);
+        );
+        expect(
+          readiness[0]?.recipientProfile?.accounts.some(account => account.counterpartyId === hubId),
+          'sender starts with the genuinely stale recipient profile',
+        ).toBe(false);
+        expect(
+          readiness[1]?.recipientProfile?.accounts.some(account => account.counterpartyId === hubId),
+          'recipient has already published its committed Hub account',
+        ).toBe(true);
+        console.log(
+          '[E2E] stale-profile regression',
+          readiness.map(entry => ({
+            runtimeId: entry.runtimeId,
+            accounts: entry.recipientProfile?.accounts.map(account => account.counterpartyId),
+            updatedAt: entry.recipientProfile?.lastUpdated,
+          })),
+        );
 
         await pay(
           alicePage,
@@ -737,48 +671,235 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
           alice.signerId,
           bob.entityId,
           [alice.entityId, hubId, bob.entityId],
-          secondForwardAmount,
+          forwardAmount,
         );
 
-        const secondForwardSpend = await waitForSenderSpendRaw(
+        const forwardSpend = await waitForSenderSpendRaw(
           alicePage,
           alice.entityId,
           hubId,
-          aliceBeforeSecondForwardRaw,
-          expectedSecondForwardSpend,
+          aliceBeforeForwardRaw,
+          expectedForwardSpend,
         );
-        const aliceSecondFinalizeEvent = await waitForPersistedFrameEventMatch(alicePage, {
+        const aliceForwardFinalizeEvent = await waitForPersistedFrameEventMatch(alicePage, {
           eventName: 'HtlcFinalized',
           entityId: alice.entityId,
-          cursor: aliceSecondForwardFinalizeCursor,
+          cursor: aliceForwardFinalizeCursor,
           timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
-          predicate: event => String(event.data?.amount || '') === secondForwardAmount.toString(),
+          predicate: event => String(event.data?.amount || '') === forwardAmount.toString(),
         });
-        assertHtlcFinalizedPayload(aliceSecondFinalizeEvent, alice.entityId, hubId, secondForwardAmount);
-        const bobSecondReceiveEvent = await waitForPersistedFrameEventMatch(bobPage, {
+        assertHtlcFinalizedPayload(aliceForwardFinalizeEvent, alice.entityId, hubId, forwardAmount);
+        const bobForwardReceiveEvent = await waitForPersistedFrameEventMatch(bobPage, {
           eventName: 'HtlcReceived',
           entityId: bob.entityId,
-          cursor: bobSecondForwardCursor,
+          cursor: bobForwardCursor,
           timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
-          predicate: event => String(event.data?.amount || '') === secondForwardAmount.toString(),
+          predicate: event => String(event.data?.amount || '') === forwardAmount.toString(),
         });
-        assertHtlcReceivedPayload(bobSecondReceiveEvent, bob.entityId, hubId, secondForwardAmount);
-
-        const bobAfterSecondForward = await waitForRenderedOutboundForAccountDelta(
+        assertHtlcReceivedPayload(bobForwardReceiveEvent, bob.entityId, hubId, forwardAmount);
+        const bobAfterForward = await waitForRenderedOutboundForAccountDelta(
           bobPage,
           hubId,
-          bobBeforeSecondForward,
-          toDisplayed(secondForwardAmount),
+          bobBeforeForward,
+          toDisplayed(forwardAmount),
         );
-        const aliceAfterSecondForward = await getRenderedOutboundForAccount(alicePage, hubId);
-        expect(secondForwardSpend.spent).toBeGreaterThanOrEqual(expectedSecondForwardSpend);
-        expectRenderedDeltaClose(
-          bobAfterSecondForward - bobBeforeSecondForward,
-          toDisplayed(secondForwardAmount),
-          'bob second forward receive',
+        expect(forwardSpend.spent).toBeGreaterThanOrEqual(expectedForwardSpend);
+        expectRenderedDeltaClose(bobAfterForward - bobBeforeForward, toDisplayed(forwardAmount), 'bob forward receive');
+
+        console.log('[E2E] reverse HTLC Bob -> Hub -> Alice');
+        await waitForAccountIdle(bobPage, bob.entityId, hubId);
+        await waitForAccountIdle(alicePage, alice.entityId, hubId);
+        const reverseAmount = toUsdcUnits(5);
+        const expectedReverseSpend = requiredInbound(reverseAmount, hubFee.feePPM, hubFee.baseFee);
+        const bobBeforeReverseRaw = await outCapRaw(bobPage, bob.entityId, hubId);
+        const aliceBeforeReverse = await getRenderedOutboundForAccount(alicePage, hubId);
+        const aliceReverseCursor = await getPersistedReceiptCursor(alicePage);
+        const bobReverseFinalizeCursor = await getPersistedReceiptCursor(bobPage);
+        await pay(
+          bobPage,
+          bob.entityId,
+          bob.signerId,
+          alice.entityId,
+          [bob.entityId, hubId, alice.entityId],
+          reverseAmount,
         );
 
-        console.log('[E2E] overspend rejection');
+        const reverseSpend = await waitForSenderSpendRaw(
+          bobPage,
+          bob.entityId,
+          hubId,
+          bobBeforeReverseRaw,
+          expectedReverseSpend,
+        );
+        const bobReverseFinalizeEvent = await waitForPersistedFrameEventMatch(bobPage, {
+          eventName: 'HtlcFinalized',
+          entityId: bob.entityId,
+          cursor: bobReverseFinalizeCursor,
+          timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
+          predicate: event => String(event.data?.amount || '') === reverseAmount.toString(),
+        });
+        assertHtlcFinalizedPayload(bobReverseFinalizeEvent, bob.entityId, hubId, reverseAmount);
+        const aliceReverseReceiveEvent = await waitForPersistedFrameEventMatch(alicePage, {
+          eventName: 'HtlcReceived',
+          entityId: alice.entityId,
+          cursor: aliceReverseCursor,
+          timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
+          predicate: event => String(event.data?.amount || '') === reverseAmount.toString(),
+        });
+        assertHtlcReceivedPayload(aliceReverseReceiveEvent, alice.entityId, hubId, reverseAmount);
+        const aliceAfterReverse = await waitForRenderedOutboundForAccountDelta(
+          alicePage,
+          hubId,
+          aliceBeforeReverse,
+          toDisplayed(reverseAmount),
+        );
+        const bobAfterReverse = await getRenderedOutboundForAccount(bobPage, hubId);
+        expect(reverseSpend.spent).toBeGreaterThanOrEqual(expectedReverseSpend);
+        expectRenderedDeltaClose(
+          aliceAfterReverse - aliceBeforeReverse,
+          toDisplayed(reverseAmount),
+          'alice reverse receive',
+        );
+        // Rendered capacities deliberately round to two decimals; fee/debit authority uses exact base units above.
+        expect(bobAfterReverse).toBe(Number(formatMoney(reverseSpend.latest, USDC_DECIMALS).replaceAll(',', '')));
+        console.log('[E2E] exact debits', {
+          forward: forwardSpend.spent.toString(),
+          reverse: reverseSpend.spent.toString(),
+        });
+        await waitForAccountIdle(alicePage, alice.entityId, hubId);
+        await waitForAccountIdle(bobPage, bob.entityId, hubId);
+        await waitForRuntimeInputDrain(alicePage, 'alice');
+        await waitForRuntimeInputDrain(bobPage, 'bob');
+        await waitForDurableRuntimeState(alicePage, 'alice');
+        await waitForDurableRuntimeState(bobPage, 'bob');
+
+        let expectedAliceAfterReload = aliceAfterReverse;
+        let expectedBobAfterReload = bobAfterReverse;
+
+        if (LONG_E2E) {
+          console.log('[E2E] restore both isolated pages before extended payment checks');
+          if (testInfo.project.name === 'webkit-mobile') {
+            await reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name);
+            await reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name);
+          } else {
+            await Promise.all([
+              reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name),
+              reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name),
+            ]);
+          }
+          await Promise.all([
+            gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1000 }),
+            gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1000 }),
+          ]);
+          await Promise.all([
+            waitForRestoredRuntime(alicePage, alice.runtimeId),
+            waitForRestoredRuntime(bobPage, bob.runtimeId),
+          ]);
+          await waitForAccountIdle(alicePage, alice.entityId, hubId);
+          await waitForAccountIdle(bobPage, bob.entityId, hubId);
+
+          console.log('[E2E] second forward HTLC Alice -> Hub -> Bob');
+
+          const secondForwardAmount = toUsdcUnits(3);
+          const expectedSecondForwardSpend = requiredInbound(secondForwardAmount, hubFee.feePPM, hubFee.baseFee);
+          const aliceBeforeSecondForward = await getRenderedOutboundForAccount(alicePage, hubId);
+          const aliceBeforeSecondForwardRaw = await outCapRaw(alicePage, alice.entityId, hubId);
+          const bobBeforeSecondForward = await getRenderedOutboundForAccount(bobPage, hubId);
+          const bobSecondForwardCursor = await getPersistedReceiptCursor(bobPage);
+          const aliceSecondForwardFinalizeCursor = await getPersistedReceiptCursor(alicePage);
+
+          await pay(
+            alicePage,
+            alice.entityId,
+            alice.signerId,
+            bob.entityId,
+            [alice.entityId, hubId, bob.entityId],
+            secondForwardAmount,
+          );
+
+          const secondForwardSpend = await waitForSenderSpendRaw(
+            alicePage,
+            alice.entityId,
+            hubId,
+            aliceBeforeSecondForwardRaw,
+            expectedSecondForwardSpend,
+          );
+          const aliceSecondFinalizeEvent = await waitForPersistedFrameEventMatch(alicePage, {
+            eventName: 'HtlcFinalized',
+            entityId: alice.entityId,
+            cursor: aliceSecondForwardFinalizeCursor,
+            timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
+            predicate: event => String(event.data?.amount || '') === secondForwardAmount.toString(),
+          });
+          assertHtlcFinalizedPayload(aliceSecondFinalizeEvent, alice.entityId, hubId, secondForwardAmount);
+          const bobSecondReceiveEvent = await waitForPersistedFrameEventMatch(bobPage, {
+            eventName: 'HtlcReceived',
+            entityId: bob.entityId,
+            cursor: bobSecondForwardCursor,
+            timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
+            predicate: event => String(event.data?.amount || '') === secondForwardAmount.toString(),
+          });
+          assertHtlcReceivedPayload(bobSecondReceiveEvent, bob.entityId, hubId, secondForwardAmount);
+
+          const bobAfterSecondForward = await waitForRenderedOutboundForAccountDelta(
+            bobPage,
+            hubId,
+            bobBeforeSecondForward,
+            toDisplayed(secondForwardAmount),
+          );
+          const aliceAfterSecondForward = await getRenderedOutboundForAccount(alicePage, hubId);
+          expect(secondForwardSpend.spent).toBeGreaterThanOrEqual(expectedSecondForwardSpend);
+          expectRenderedDeltaClose(
+            bobAfterSecondForward - bobBeforeSecondForward,
+            toDisplayed(secondForwardAmount),
+            'bob second forward receive',
+          );
+
+          console.log('[E2E] overspend rejection');
+          if (testInfo.project.name === 'webkit-mobile') {
+            await reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name);
+            await reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name);
+          } else {
+            await Promise.all([
+              reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name),
+              reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name),
+            ]);
+          }
+          await Promise.all([
+            gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1000 }),
+            gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1000 }),
+          ]);
+          await Promise.all([
+            waitForRestoredRuntime(alicePage, alice.runtimeId),
+            waitForRestoredRuntime(bobPage, bob.runtimeId),
+          ]);
+          await waitForAccountIdle(alicePage, alice.entityId, hubId);
+          await waitForAccountIdle(bobPage, bob.entityId, hubId);
+          const aliceBeforeOverspend = aliceAfterSecondForward;
+          const overspendUnits = Math.max(1, Math.ceil(aliceBeforeOverspend) + 1);
+          await attemptOverspend(alicePage, alice.entityId, bob.entityId, toUsdcUnits(overspendUnits));
+          const aliceAfterOverspend = await getRenderedOutboundForAccount(alicePage, hubId);
+          expect(aliceAfterOverspend, 'overspend should not change alice balance').toBe(aliceBeforeOverspend);
+
+          expectedAliceAfterReload = aliceAfterSecondForward;
+          expectedBobAfterReload = bobAfterSecondForward;
+
+          await waitForRuntimeInputDrain(alicePage, 'alice-post-overspend');
+          await waitForRuntimeInputDrain(bobPage, 'bob-post-overspend');
+          await waitForDurableRuntimeState(alicePage, 'alice-post-overspend');
+          await waitForDurableRuntimeState(bobPage, 'bob-post-overspend');
+        }
+
+        console.log('[E2E] capture persistence state before reload');
+        const aliceRawBeforeReload = await outCapRaw(alicePage, alice.entityId, hubId);
+        const bobRawBeforeReload = await outCapRaw(bobPage, bob.entityId, hubId);
+        const aliceDbBefore = await runtimeDbMeta(alicePage);
+        const bobDbBefore = await runtimeDbMeta(bobPage);
+        expect(aliceDbBefore.latestHeight, 'alice WAL height must advance').toBeGreaterThan(0);
+        expect(bobDbBefore.latestHeight, 'bob WAL height must advance').toBeGreaterThan(0);
+        expect(aliceDbBefore.hasLatestFrame, 'alice latest WAL frame must exist').toBe(true);
+        expect(bobDbBefore.hasLatestFrame, 'bob latest WAL frame must exist').toBe(true);
+
         if (testInfo.project.name === 'webkit-mobile') {
           await reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name);
           await reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name);
@@ -796,75 +917,32 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
           waitForRestoredRuntime(alicePage, alice.runtimeId),
           waitForRestoredRuntime(bobPage, bob.runtimeId),
         ]);
-        await waitForAccountIdle(alicePage, alice.entityId, hubId);
-        await waitForAccountIdle(bobPage, bob.entityId, hubId);
-        const aliceBeforeOverspend = aliceAfterSecondForward;
-        const overspendUnits = Math.max(1, Math.ceil(aliceBeforeOverspend) + 1);
-        await attemptOverspend(alicePage, alice.entityId, bob.entityId, toUsdcUnits(overspendUnits));
-        const aliceAfterOverspend = await getRenderedOutboundForAccount(alicePage, hubId);
-        expect(aliceAfterOverspend, 'overspend should not change alice balance').toBe(aliceBeforeOverspend);
 
-        expectedAliceAfterReload = aliceAfterSecondForward;
-        expectedBobAfterReload = bobAfterSecondForward;
+        const aliceAfterReload = await getRenderedOutboundForAccount(alicePage, hubId);
+        const bobAfterReload = await getRenderedOutboundForAccount(bobPage, hubId);
+        const aliceDbAfter = await runtimeDbMeta(alicePage);
+        const bobDbAfter = await runtimeDbMeta(bobPage);
 
-        await waitForRuntimeInputDrain(alicePage, 'alice-post-overspend');
-        await waitForRuntimeInputDrain(bobPage, 'bob-post-overspend');
-        await waitForDurableRuntimeState(alicePage, 'alice-post-overspend');
-        await waitForDurableRuntimeState(bobPage, 'bob-post-overspend');
-      }
-
-      console.log('[E2E] capture persistence state before reload');
-      const aliceRawBeforeReload = await outCapRaw(alicePage, alice.entityId, hubId);
-      const bobRawBeforeReload = await outCapRaw(bobPage, bob.entityId, hubId);
-      const aliceDbBefore = await runtimeDbMeta(alicePage);
-      const bobDbBefore = await runtimeDbMeta(bobPage);
-      expect(aliceDbBefore.latestHeight, 'alice WAL height must advance').toBeGreaterThan(0);
-      expect(bobDbBefore.latestHeight, 'bob WAL height must advance').toBeGreaterThan(0);
-      expect(aliceDbBefore.hasLatestFrame, 'alice latest WAL frame must exist').toBe(true);
-      expect(bobDbBefore.hasLatestFrame, 'bob latest WAL frame must exist').toBe(true);
-
-      if (testInfo.project.name === 'webkit-mobile') {
-        await reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name);
-        await reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name);
-      } else {
+        expect(await outCapRaw(alicePage, alice.entityId, hubId), 'alice exact base units survive reload').toBe(
+          aliceRawBeforeReload,
+        );
+        expect(await outCapRaw(bobPage, bob.entityId, hubId), 'bob exact base units survive reload').toBe(
+          bobRawBeforeReload,
+        );
+        expect(aliceAfterReload, 'alice balance must survive reload').toBe(expectedAliceAfterReload);
+        expect(bobAfterReload, 'bob balance must survive reload').toBe(expectedBobAfterReload);
+        expect(aliceDbAfter.latestHeight, 'alice replay height must survive reload').toBeGreaterThanOrEqual(
+          aliceDbBefore.latestHeight,
+        );
+        expect(bobDbAfter.latestHeight, 'bob replay height must survive reload').toBeGreaterThanOrEqual(
+          bobDbBefore.latestHeight,
+        );
+      } finally {
         await Promise.all([
-          reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name),
-          reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name),
+          aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),
+          bobContext ? bobContext.close().catch(() => {}) : Promise.resolve(),
         ]);
       }
-      await Promise.all([
-        gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1000 }),
-        gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1000 }),
-      ]);
-      await Promise.all([
-        waitForRestoredRuntime(alicePage, alice.runtimeId),
-        waitForRestoredRuntime(bobPage, bob.runtimeId),
-      ]);
-
-      const aliceAfterReload = await getRenderedOutboundForAccount(alicePage, hubId);
-      const bobAfterReload = await getRenderedOutboundForAccount(bobPage, hubId);
-      const aliceDbAfter = await runtimeDbMeta(alicePage);
-      const bobDbAfter = await runtimeDbMeta(bobPage);
-
-      expect(await outCapRaw(alicePage, alice.entityId, hubId), 'alice exact base units survive reload').toBe(
-        aliceRawBeforeReload,
-      );
-      expect(await outCapRaw(bobPage, bob.entityId, hubId), 'bob exact base units survive reload').toBe(
-        bobRawBeforeReload,
-      );
-      expect(aliceAfterReload, 'alice balance must survive reload').toBe(expectedAliceAfterReload);
-      expect(bobAfterReload, 'bob balance must survive reload').toBe(expectedBobAfterReload);
-      expect(aliceDbAfter.latestHeight, 'alice replay height must survive reload').toBeGreaterThanOrEqual(
-        aliceDbBefore.latestHeight,
-      );
-      expect(bobDbAfter.latestHeight, 'bob replay height must survive reload').toBeGreaterThanOrEqual(
-        bobDbBefore.latestHeight,
-      );
-    } finally {
-      await Promise.all([
-        aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),
-        bobContext ? bobContext.close().catch(() => {}) : Promise.resolve(),
-      ]);
-    }
-  });
+    },
+  );
 });

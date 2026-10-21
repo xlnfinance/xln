@@ -283,13 +283,25 @@ async function configurePair(page: Page, pairLabel: string, side: 'buy' | 'sell'
   const give = side === 'buy' ? quote : base;
   const want = side === 'buy' ? base : quote;
   const pill = (input: string) => page.getByTestId(input).locator('..').locator('button.pill');
-  if ((await pill('swap-want').innerText()).includes(give)) await page.getByTestId('swap-flip').click();
+  await timedStep(`swap_pair.${side}.catalog_ready`, () => expect(page.getByTestId('swap-flip')).toBeEnabled());
+  // The registry owns these labels; reading before it loads sees "?" and can miss a required Flip.
+  if ((await pill('swap-want').innerText()).includes(give)) {
+    await timedStep(`swap_pair.${side}.flip`, async () => {
+      await page.getByTestId('swap-flip').click();
+      await expect(pill('swap-give')).toContainText(give);
+    });
+  }
   for (const [input, symbol] of [
     ['swap-give', give],
     ['swap-want', want],
   ] as const) {
-    await pill(input).click();
-    await page.getByRole('option', { name: new RegExp(`^${symbol}\\b`) }).click();
+    await timedStep(`swap_pair.${side}.${input}.${symbol}`, async () => {
+      await pill(input).click();
+      const option = page.getByRole('option', { name: new RegExp(`^${symbol}\\b`) });
+      await expect(option).toBeVisible();
+      await option.click();
+      await expect(pill(input)).toContainText(symbol);
+    });
   }
 }
 

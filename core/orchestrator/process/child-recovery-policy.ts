@@ -41,8 +41,7 @@ const isTerminalBootstrapFailureReasonCode = (reasonCode: string): boolean =>
   /(?:BOOTSTRAP_STALLED|WATCHER_DRAIN_STALLED)$/.test(reasonCode);
 
 const isRuntimeLoopFatalReason = (reason: string): boolean =>
-  /\[ERROR\]\[runtime\]\s+loop\.error\b/.test(reason) ||
-  /\bRUNTIME_LOOP_(?:ERROR|HALTED)\b/.test(reason);
+  /\[ERROR\]\[runtime\]\s+loop\.error\b/.test(reason) || /\bRUNTIME_LOOP_(?:ERROR|HALTED)\b/.test(reason);
 
 export const shouldCaptureUnexpectedChildExit = (
   controlledStop: boolean,
@@ -54,7 +53,12 @@ export const selectChildFailureReason = (
   recentStderr: readonly string[],
   recentStdout: readonly string[],
   defaultValue: string,
+  signal: NodeJS.Signals | null,
 ): string => {
+  // SIGKILL cannot be handled by the child. A preceding warning/error does
+  // not establish why it was killed. Keep those tails in the durable receipt;
+  // separately reported fatal IPC incidents retain their original root.
+  if (signal === 'SIGKILL') return defaultValue;
   const hasStableCode = (line: string): boolean => /\b(?:[A-Z][A-Z0-9]*_)+[A-Z0-9]+\b/.test(line);
   const hasCriticalMessage = (line: string): boolean =>
     /fatal watcher error|Unexpected end of JSON input|SyntaxError|ECONNRESET|ETIMEDOUT/i.test(line);
@@ -62,22 +66,28 @@ export const selectChildFailureReason = (
   // crash evidence. Preferring them after SIGKILL misclassifies the incident as
   // `_WARN__MESH_HUB_` instead of `${name}_UNEXPECTED_EXIT`.
   const isNoise = (line: string): boolean => /^\[(?:WARN|INFO|DEBUG)\]/i.test(line.trim());
-  const isMeaningful = (line: string): boolean =>
-    !isNoise(line) && (hasStableCode(line) || hasCriticalMessage(line));
+  const isMeaningful = (line: string): boolean => !isNoise(line) && (hasStableCode(line) || hasCriticalMessage(line));
   const lastNonNoise = (lines: readonly string[]): string | undefined =>
     [...lines].reverse().find(line => line.trim().length > 0 && !isNoise(line));
   // Ordinary stdout describes progress, not why a process exited. Keep its
   // explicit failure evidence above, but otherwise report the actual exit.
-  return [...recentStderr].reverse().find(isMeaningful)
-    ?? [...recentStdout].reverse().find(isMeaningful)
-    ?? lastNonNoise(recentStderr)
-    ?? defaultValue;
+  return (
+    [...recentStderr].reverse().find(isMeaningful) ??
+    [...recentStdout].reverse().find(isMeaningful) ??
+    lastNonNoise(recentStderr) ??
+    defaultValue
+  );
 };
 
 const recentFailureHistory = (history: ChildFailureHistory, nowMs: number): Record<string, number[]> =>
-  Object.fromEntries(Object.entries(history)
-    .map(([fingerprint, times]) => [fingerprint, times.filter(at => nowMs - at < IDENTICAL_CHILD_FAILURE_WINDOW_MS)] as const)
-    .filter(([, times]) => times.length > 0));
+  Object.fromEntries(
+    Object.entries(history)
+      .map(
+        ([fingerprint, times]) =>
+          [fingerprint, times.filter(at => nowMs - at < IDENTICAL_CHILD_FAILURE_WINDOW_MS)] as const,
+      )
+      .filter(([, times]) => times.length > 0),
+  );
 
 export const decideChildFailure = (
   counts: ChildFailureHistory,
@@ -103,9 +113,7 @@ export const decideChildFailure = (
     // not evidence that the durable checkpoint is poisoned. Recover it
     // immediately; only an identical crash loop inside the window exhausts
     // the bounded budget.
-    action: terminalBootstrapFailure || count >= MAX_IDENTICAL_CHILD_FAILURES
-      ? 'fail-stop'
-      : 'recover',
+    action: terminalBootstrapFailure || count >= MAX_IDENTICAL_CHILD_FAILURES ? 'fail-stop' : 'recover',
     backoffMs: terminalBootstrapFailure || runtimeLoopFatal ? 0 : Math.min(10_000, count * 2_000),
     count,
     fingerprint,

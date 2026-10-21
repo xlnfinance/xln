@@ -120,6 +120,7 @@ export function ManageSheet({
           key={`${wallet.entityId}:${counterpartyId}`}
           entityId={wallet.entityId}
           signerId={wallet.signerId}
+          summaries={wallet.summaries}
           hubId={counterpartyId}
         />
       ) : null}

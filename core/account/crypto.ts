@@ -206,10 +206,13 @@ const resolveMnemonic = (seed: Uint8Array | string): string => {
   return mnemonic;
 };
 
-const deriveBip39Key = (seed: Uint8Array | string, index: number): Uint8Array => {
-  const mnemonic = resolveMnemonic(seed);
+const deriveBip39Key = (
+  seed: Uint8Array | string,
+  index: number,
+  root = HDNodeWallet.fromPhrase(resolveMnemonic(seed), undefined, 'm'),
+): Uint8Array => {
   const path = getIndexedAccountPath(index);
-  const wallet = HDNodeWallet.fromPhrase(mnemonic, undefined, path);
+  const wallet = root.derivePath(path);
   return getBytes(wallet.privateKey);
 };
 
@@ -239,10 +242,18 @@ export function prewarmSignerKeyCache(seed: Uint8Array | string, count = 20): st
     throw new Error(`SIGNER_CACHE_PREWARM_COUNT_INVALID:${String(count)}`);
   }
   const warmed: string[] = [];
+  // BIP-39's password derivation is identical for these numeric keys. Share
+  // its root only within this owning vault's call; never retain it across lock.
+  let root: HDNodeWallet | undefined;
   for (let i = 1; i <= count; i++) {
     // Recovery creates several Runtime envelopes for the same vault. Reuse
     // its existing numeric key cache; another vault has a different store.
-    warmed.push(getOrDeriveNumericSigner(seed, String(i)).address);
+    warmed.push(
+      getOrDeriveNumericSigner(seed, String(i), () => {
+        root ??= HDNodeWallet.fromPhrase(resolveMnemonic(seed), undefined, 'm');
+        return deriveBip39Key(seed, i - 1, root);
+      }).address,
+    );
   }
   return warmed;
 }
@@ -279,12 +290,16 @@ const assertSignerKeyMatchesId = (signerId: string, privateKey: Uint8Array, cont
   }
 };
 
-const getOrDeriveNumericSigner = (seed: Uint8Array | string, signerId: string): NumericSignerKey => {
+const getOrDeriveNumericSigner = (
+  seed: Uint8Array | string,
+  signerId: string,
+  derivePrivateKey = () => deriveSignerKeySync(seed, signerId),
+): NumericSignerKey => {
   const key = signerId.toLowerCase();
   const store = getSignerKeyStore(seed, true)!;
   const cached = store.numericKeys.get(key);
   if (cached) return cached;
-  const privateKey = deriveSignerKeySync(seed, signerId);
+  const privateKey = derivePrivateKey();
   const address = privateKeyToAddress(privateKey);
   const publicKey = secp256k1.getPublicKey(privateKey);
   const derived = { privateKey, publicKey, address };
@@ -696,7 +711,7 @@ export function verifyAccountSignature(
   env: SignerKeyEnv,
   signerId: string,
   frameHash: string,
-  signature: string
+  signature: string,
 ): boolean {
   const key = signerId.toLowerCase();
   const quiet = env?.quietRuntimeLogs === true;
@@ -707,11 +722,7 @@ export function verifyAccountSignature(
     // Canonical address-authority path for replay/recovery: recover from the signature.
     // This removes runtime dependence on gossip key registration for account frame verification.
     if (/^0x[a-f0-9]{40}$/i.test(key)) {
-      const recovered = recoverAddressFromDigestSignature(
-        parsed.digest,
-        parsed.compact,
-        parsed.recovery,
-      );
+      const recovered = recoverAddressFromDigestSignature(parsed.digest, parsed.compact, parsed.recovery);
       if (recovered === key) {
         return true;
       }
@@ -720,7 +731,10 @@ export function verifyAccountSignature(
     if (!quiet) console.warn(`⚠️ Cannot verify - no public key for signerId=${key.slice(-4)}`);
     if (!quiet) {
       const store = getSignerKeyStore(env);
-      console.warn(`⚠️ Available keys:`, Array.from(store?.publicKeys.keys() ?? []).map(k => k.slice(-4)));
+      console.warn(
+        `⚠️ Available keys:`,
+        Array.from(store?.publicKeys.keys() ?? []).map(k => k.slice(-4)),
+      );
     }
     return false;
   }
@@ -730,11 +744,7 @@ export function verifyAccountSignature(
     // the stored key would ignore v and accept either 0/1. Address equality
     // then binds the recovered signer to the registered public key — one EC
     // recover, not recover-plus-verify.
-    const recovered = recoverAddressFromDigestSignature(
-      parsed.digest,
-      parsed.compact,
-      parsed.recovery,
-    );
+    const recovered = recoverAddressFromDigestSignature(parsed.digest, parsed.compact, parsed.recovery);
     const expectedAddress = addressFromPublicKey(publicKey);
     if (!recovered || !expectedAddress || recovered !== expectedAddress) return false;
     if (/^0x[a-f0-9]{40}$/i.test(key) && expectedAddress !== key) return false;

@@ -3,13 +3,18 @@ import { requestNativePaymentWakeNotifications } from '#lib/native/capacitor.ts'
 import type { PushWakeDeviceToken } from './pushWakeTypes';
 import { normalizeDeviceToken, normalizePlatform } from './pushWakeBoundary';
 import { requestWebPushToken } from './pushWakeWeb';
-type PushWakeDesktopBridge = { getPushWakeToken?: () => Promise<{ value?: unknown; token?: unknown; platform?: unknown } | string> };
+type PushWakeDesktopBridge = {
+  getPushWakeToken?: () => Promise<{ value?: unknown; token?: unknown; platform?: unknown } | string>;
+};
 const DEFAULT_PUSH_TOKEN_TIMEOUT_MS = 15_000;
 const getDesktopBridge = (): PushWakeDesktopBridge | null => {
   if (typeof window === 'undefined') return null;
   const candidate = (window as Window & { xlnDesktop?: PushWakeDesktopBridge }).xlnDesktop;
   return candidate && typeof candidate.getPushWakeToken === 'function' ? candidate : null;
 };
+
+export const canRequestPushWakeDeviceToken = (webPublicKey: string): boolean =>
+  getDesktopBridge() !== null || Capacitor.isNativePlatform() || webPublicKey.trim().length > 0;
 
 const normalizeBridgeToken = (
   value: { value?: unknown; token?: unknown; platform?: unknown } | string,
@@ -31,10 +36,13 @@ const waitForNativePushToken = (timeoutMs: number): Promise<PushWakeDeviceToken>
       reject(new Error('PUSH_NATIVE_WINDOW_UNAVAILABLE'));
       return;
     }
-    const timer = window.setTimeout(() => {
-      window.removeEventListener('xln-native-push-token', onToken as EventListener);
-      reject(new Error('PUSH_NATIVE_TOKEN_TIMEOUT'));
-    }, Math.max(1_000, timeoutMs));
+    const timer = window.setTimeout(
+      () => {
+        window.removeEventListener('xln-native-push-token', onToken as EventListener);
+        reject(new Error('PUSH_NATIVE_TOKEN_TIMEOUT'));
+      },
+      Math.max(1_000, timeoutMs),
+    );
 
     const onToken = (event: Event): void => {
       window.clearTimeout(timer);
@@ -52,14 +60,19 @@ const waitForNativePushToken = (timeoutMs: number): Promise<PushWakeDeviceToken>
     };
 
     window.addEventListener('xln-native-push-token', onToken as EventListener, { once: true });
-    void requestNativePaymentWakeNotifications().catch((error) => {
+    void requestNativePaymentWakeNotifications().catch(error => {
       window.clearTimeout(timer);
       window.removeEventListener('xln-native-push-token', onToken as EventListener);
       reject(error);
     });
   });
 
-export const requestPushWakeDeviceToken = async (options: { timeoutMs?: number } = {}): Promise<PushWakeDeviceToken> => {
+export const requestPushWakeDeviceToken = async (
+  options: {
+    timeoutMs?: number;
+    web?: { publicKey: string; workerUrl: string };
+  } = {},
+): Promise<PushWakeDeviceToken> => {
   const desktopBridge = getDesktopBridge();
   if (desktopBridge) {
     const token = await desktopBridge.getPushWakeToken!();
@@ -70,7 +83,11 @@ export const requestPushWakeDeviceToken = async (options: { timeoutMs?: number }
     return waitForNativePushToken(options.timeoutMs ?? DEFAULT_PUSH_TOKEN_TIMEOUT_MS);
   }
 
-  const webToken = await requestWebPushToken(String(import.meta.env?.['VITE_XLN_WEB_PUSH_PUBLIC_KEY'] || '').trim(), '/push-wake-sw.js');
+  const web = options.web ?? {
+    publicKey: String(import.meta.env?.['VITE_XLN_WEB_PUSH_PUBLIC_KEY'] || '').trim(),
+    workerUrl: '/push-wake-sw.js',
+  };
+  const webToken = await requestWebPushToken(web.publicKey, web.workerUrl);
   if (webToken) return webToken;
 
   throw new Error('PUSH_TOKEN_PROVIDER_UNAVAILABLE');

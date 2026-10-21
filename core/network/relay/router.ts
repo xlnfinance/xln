@@ -37,6 +37,7 @@ import {
 import { decodeGossipProfileBatchRequest } from '../p2p/gossip/profile-batch';
 import { countOp } from '../../support/performance/op-counters';
 import { classifyWebSocketSendResult } from '../websocket-send-result';
+import { ProfileAuthorityUnavailableError } from './profile-authority-error';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');
@@ -55,15 +56,12 @@ const GOSSIP_PROFILES_PER_WINDOW = 10_000;
 // Peer-to-peer frames the relay never forwards: receivers treat relay-session
 // frames as relay-authored, so forwarding them let any client forge a gossip
 // response or recovery error to another Runtime and kill its relay session.
-const PEER_ONLY_MESSAGE_TYPES = new Set([
-  'gossip_response',
-  'recovery_bundle_request',
-  'recovery_bundle_response',
-]);
+const PEER_ONLY_MESSAGE_TYPES = new Set(['gossip_response', 'recovery_bundle_request', 'recovery_bundle_response']);
 const relayRouterLog = createStructuredLogger('relay.router');
-const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'
-  ? (message: string): void => relayRouterLog.debug('verbose', { line: message })
-  : (_message: string): void => {};
+const relayLog =
+  process.env['RELAY_VERBOSE_LOGS'] === '1'
+    ? (message: string): void => relayRouterLog.debug('verbose', { line: message })
+    : (_message: string): void => {};
 
 type RelayMeterCategory = 'gossip' | 'recovery' | 'debug' | 'control' | 'error';
 
@@ -75,11 +73,7 @@ const relayMeterCategory = (type: string): RelayMeterCategory => {
   return 'control';
 };
 
-const countRelaySocket = (
-  direction: 'in' | 'out',
-  type: string,
-  bytes: number,
-): void => {
+const countRelaySocket = (direction: 'in' | 'out', type: string, bytes: number): void => {
   countOp(`socket.relayRouter.${direction}`, bytes);
   countOp(`socket.relayRouter.${direction}.${relayMeterCategory(type)}`, bytes);
 };
@@ -119,8 +113,7 @@ const getSocketAuthBinding = (ws: unknown): AuthenticatedRelaySocket[typeof SOCK
     : undefined;
 
 /** A relay socket is authenticated once its verified hello bound a Runtime id to it. */
-export const isRelaySocketAuthenticated = (ws: unknown): boolean =>
-  getRememberedSocketRuntimeId(ws) !== '';
+export const isRelaySocketAuthenticated = (ws: unknown): boolean => getRememberedSocketRuntimeId(ws) !== '';
 
 export const forgetRelaySocketRuntimeId = (ws: unknown): void => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
@@ -140,7 +133,8 @@ const markDuplicateClosingSocket = (ws: unknown): void => {
 };
 
 const isDuplicateClosingSocket = (ws: unknown): boolean =>
-  !!ws && (typeof ws === 'object' || typeof ws === 'function') &&
+  !!ws &&
+  (typeof ws === 'object' || typeof ws === 'function') &&
   (ws as DuplicateClosingRelaySocket)[SOCKET_DUPLICATE_CLOSING] === true;
 
 const closeDuplicateRuntimeSocket = (ws: RelaySocketLike): void => {
@@ -173,9 +167,10 @@ const closeInvalidRelaySession = (
 const consumeGossipBudget = (ws: RelaySocketLike, profileCount: number, now = Date.now()): boolean => {
   const socket = ws as GossipBudgetRelaySocket;
   const previous = socket[SOCKET_GOSSIP_BUDGET];
-  const budget = !previous || now - previous.windowStartedAt >= GOSSIP_BUDGET_WINDOW_MS
-    ? { windowStartedAt: now, profileCount: 0 }
-    : previous;
+  const budget =
+    !previous || now - previous.windowStartedAt >= GOSSIP_BUDGET_WINDOW_MS
+      ? { windowStartedAt: now, profileCount: 0 }
+      : previous;
   if (budget.profileCount + profileCount > GOSSIP_PROFILES_PER_WINDOW) return false;
   budget.profileCount += profileCount;
   socket[SOCKET_GOSSIP_BUDGET] = budget;
@@ -228,13 +223,12 @@ const createRelayRouteContext = (
     id: msg.id,
     fromKey,
     toKey,
-    traceId: typeof msg.id === 'string' && msg.id.length > 0
-      ? msg.id
-      : `relay-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    traceId:
+      typeof msg.id === 'string' && msg.id.length > 0
+        ? msg.id
+        : `relay-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     rememberedRuntimeId: getRememberedSocketRuntimeId(ws),
-    fromEncryptionPubKey: typeof msg.fromEncryptionPubKey === 'string'
-      ? msg.fromEncryptionPubKey
-      : null,
+    fromEncryptionPubKey: typeof msg.fromEncryptionPubKey === 'string' ? msg.fromEncryptionPubKey : null,
   };
 };
 
@@ -242,7 +236,7 @@ type RelayRouteContext = ReturnType<typeof createRelayRouteContext>;
 
 const resolveRelayWireBytes = (context: RelayRouteContext): Uint8Array => {
   if (context.rawBytes) return context.rawBytes;
-  return context.encodedBytes ??= serializeWsMessage(context.msg);
+  return (context.encodedBytes ??= serializeWsMessage(context.msg));
 };
 
 const relayMessageByteLength = (context: RelayRouteContext): number => {
@@ -270,10 +264,11 @@ const handleHello = (context: RelayRouteContext): boolean => {
     send(ws, serializeWsMessage({ type: 'error', error: 'Invalid runtimeId in hello' }));
     return true;
   }
-  const binding = config.consumeHelloChallenge?.(
-    ws as object,
-    { challenge: context.msg.auth?.nonce, audience: context.msg.audience },
-  ) ?? null;
+  const binding =
+    config.consumeHelloChallenge?.(ws as object, {
+      challenge: context.msg.auth?.nonce,
+      audience: context.msg.audience,
+    }) ?? null;
   const authError = binding
     ? verifyHelloAuth(
         fromKey,
@@ -286,8 +281,13 @@ const handleHello = (context: RelayRouteContext): boolean => {
     : 'Hello challenge missing, expired, or already consumed';
   if (authError) {
     pushDebugEvent(store, {
-      event: 'hello', runtimeId: from, from, msgType: type, status: 'rejected',
-      reason: 'HELLO_AUTH_INVALID', details: { traceId, authError },
+      event: 'hello',
+      runtimeId: from,
+      from,
+      msgType: type,
+      status: 'rejected',
+      reason: 'HELLO_AUTH_INVALID',
+      details: { traceId, authError },
     });
     send(ws, serializeWsMessage({ type: 'error', error: authError }));
     return true;
@@ -333,6 +333,7 @@ type StoredGossipProfiles = {
   droppedMalformed: number;
   droppedInvalidSignature: number;
   droppedRuntimeBinding: number;
+  droppedAuthorityUnavailable: number;
   profiles: Profile[];
 };
 
@@ -347,6 +348,7 @@ const storeAnnouncedProfiles = async (
     droppedMalformed: 0,
     droppedInvalidSignature: 0,
     droppedRuntimeBinding: 0,
+    droppedAuthorityUnavailable: 0,
     profiles: [],
   };
   const verifyProfile = config.verifyProfile ?? verifyProfileSignature;
@@ -392,17 +394,20 @@ const storeAnnouncedProfiles = async (
       }
       config.onGossipStore?.(normalized);
     } catch (error) {
-      result.droppedMalformed += 1;
+      const authorityUnavailable = error instanceof ProfileAuthorityUnavailableError;
+      if (authorityUnavailable) result.droppedAuthorityUnavailable += 1;
+      else result.droppedMalformed += 1;
       pushDebugEvent(config.store, {
         event: 'error',
         from,
         msgType: type,
         status: 'rejected',
-        reason: 'GOSSIP_PROFILE_DROPPED_MALFORMED',
+        reason: authorityUnavailable ? 'GOSSIP_PROFILE_AUTHORITY_UNAVAILABLE' : 'GOSSIP_PROFILE_DROPPED_MALFORMED',
         details: {
-          entityId: value && typeof value === 'object' && 'entityId' in value
-            ? String((value as { entityId?: unknown }).entityId ?? '')
-            : null,
+          entityId:
+            value && typeof value === 'object' && 'entityId' in value
+              ? String((value as { entityId?: unknown }).entityId ?? '')
+              : null,
           message: error instanceof Error ? error.message : String(error),
           traceId,
         },
@@ -424,15 +429,18 @@ const broadcastGossipJurisdictions = (
   let targets = 0;
   for (const [runtimeId, client] of config.store.clients.entries()) {
     if (!client?.ws || (fromKey && runtimeId === fromKey)) continue;
-    config.send(client.ws, serializeWsMessage({
-      type: 'gossip_update',
-      id: `gossip_update_${Date.now()}`,
-      from: config.store.serverId,
-      to: runtimeId,
-      timestamp: Date.now(),
-      payload: { profiles: [], jurisdictions: storedJurisdictions },
-      ...(id ? { inReplyTo: id } : {}),
-    }));
+    config.send(
+      client.ws,
+      serializeWsMessage({
+        type: 'gossip_update',
+        id: `gossip_update_${Date.now()}`,
+        from: config.store.serverId,
+        to: runtimeId,
+        timestamp: Date.now(),
+        payload: { profiles: [], jurisdictions: storedJurisdictions },
+        ...(id ? { inReplyTo: id } : {}),
+      }),
+    );
     targets += 1;
   }
   return targets;
@@ -450,10 +458,13 @@ const handleGossipAnnounce = async (context: RelayRouteContext): Promise<boolean
       reason: 'GOSSIP_ANNOUNCE_UNREGISTERED_RUNTIME',
       details: { traceId },
     });
-    config.send(ws, serializeWsMessage({
-      type: 'error',
-      error: 'Gossip announce requires registered relay hello',
-    }));
+    config.send(
+      ws,
+      serializeWsMessage({
+        type: 'error',
+        error: 'Gossip announce requires registered relay hello',
+      }),
+    );
     return true;
   }
   const value = requireBoundaryRecord(payload, 'RELAY_GOSSIP_ANNOUNCE_INVALID');
@@ -469,7 +480,10 @@ const handleGossipAnnounce = async (context: RelayRouteContext): Promise<boolean
     !consumeGossipBudget(ws, announced.length + jurisdictionValues.length)
   ) {
     pushDebugEvent(config.store, {
-      event: 'error', from, msgType: type, status: 'rejected',
+      event: 'error',
+      from,
+      msgType: type,
+      status: 'rejected',
       reason: 'GOSSIP_ANNOUNCE_RATE_LIMITED',
       details: {
         announced: announced.length,
@@ -511,6 +525,7 @@ const handleGossipAnnounce = async (context: RelayRouteContext): Promise<boolean
       droppedMalformed: stored.droppedMalformed,
       droppedInvalidSignature: stored.droppedInvalidSignature,
       droppedRuntimeBinding: stored.droppedRuntimeBinding,
+      droppedAuthorityUnavailable: stored.droppedAuthorityUnavailable,
       jurisdictionsStored: storedJurisdictions.length,
       broadcastTargets,
       traceId,
@@ -523,9 +538,7 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
   const { config, ws, payload, type, from, to, id, traceId } = context;
   if (type === 'gossip_request') {
     const request = decodeGossipProfileBatchRequest(payload);
-    const requestCost = request.routeTo
-      ? 200
-      : Math.max(1, request.ids?.length ?? 1);
+    const requestCost = request.routeTo ? 200 : Math.max(1, request.ids?.length ?? 1);
     if (!consumeGossipBudget(ws, requestCost)) {
       pushDebugEvent(config.store, {
         event: 'error',
@@ -535,18 +548,19 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
         reason: 'GOSSIP_REQUEST_RATE_LIMITED',
         details: { requestCost, traceId },
       });
-      config.send(ws, serializeWsMessage({
-        type: 'error',
-        error: 'GOSSIP_REQUEST_RATE_LIMITED',
-        ...(id ? { inReplyTo: id } : {}),
-      }));
+      config.send(
+        ws,
+        serializeWsMessage({
+          type: 'error',
+          error: 'GOSSIP_REQUEST_RATE_LIMITED',
+          ...(id ? { inReplyTo: id } : {}),
+        }),
+      );
       return true;
     }
     const page = getProfileBatchPage(config.store, request);
     const { profiles } = page;
-    const jurisdictions = request.includeJurisdictions === true
-      ? getAllGossipJurisdictions(config.store)
-      : [];
+    const jurisdictions = request.includeJurisdictions === true ? getAllGossipJurisdictions(config.store) : [];
     pushDebugEvent(config.store, {
       event: 'gossip_request',
       from,
@@ -562,22 +576,27 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
         traceId,
       },
     });
-    config.send(ws, serializeWsMessage({
-      type: 'gossip_response',
-      id: `gossip_${Date.now()}`,
-      from: config.store.serverId,
-      ...(from ? { to: from } : {}),
-      timestamp: Date.now(),
-      payload: {
-        profiles,
-        jurisdictions,
-        ...(page.cursor === undefined ? {} : {
-          cursor: page.cursor,
-          hasMore: page.hasMore ?? false,
-        }),
-      },
-      ...(id ? { inReplyTo: id } : {}),
-    }));
+    config.send(
+      ws,
+      serializeWsMessage({
+        type: 'gossip_response',
+        id: `gossip_${Date.now()}`,
+        from: config.store.serverId,
+        ...(from ? { to: from } : {}),
+        timestamp: Date.now(),
+        payload: {
+          profiles,
+          jurisdictions,
+          ...(page.cursor === undefined
+            ? {}
+            : {
+                cursor: page.cursor,
+                hasMore: page.hasMore ?? false,
+              }),
+        },
+        ...(id ? { inReplyTo: id } : {}),
+      }),
+    );
     return true;
   }
   if (type === 'debug_event') {
@@ -624,12 +643,15 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
       reason: code,
       details: { traceId },
     });
-    config.send(ws, serializeWsMessage({
-      type: 'error',
-      error: code,
-      ...(id ? { inReplyTo: id } : {}),
-      ...(to ? { to } : {}),
-    }));
+    config.send(
+      ws,
+      serializeWsMessage({
+        type: 'error',
+        error: code,
+        ...(id ? { inReplyTo: id } : {}),
+        ...(to ? { to } : {}),
+      }),
+    );
     return true;
   }
   return false;
@@ -639,13 +661,17 @@ const forwardEntityInputs = (context: RelayRouteContext): boolean => {
   if (context.type !== 'entity_inputs') return false;
   const { config, ws, msg, toKey, from, to, id } = context;
   const target = config.store.clients.get(toKey);
-  const error = typeof to !== 'string' || !isCanonicalRuntimeId(to) || !msg.encrypted || !(msg.payload instanceof Uint8Array)
-    ? 'RELAY_ENTITY_INPUTS_INVALID'
-    : !target || target.ws.readyState !== 1 || getRememberedSocketRuntimeId(target.ws) !== toKey
-      ? 'RELAY_RECIPIENT_UNAVAILABLE'
-      : null;
+  const error =
+    typeof to !== 'string' || !isCanonicalRuntimeId(to) || !msg.encrypted || !(msg.payload instanceof Uint8Array)
+      ? 'RELAY_ENTITY_INPUTS_INVALID'
+      : !target || target.ws.readyState !== 1 || getRememberedSocketRuntimeId(target.ws) !== toKey
+        ? 'RELAY_RECIPIENT_UNAVAILABLE'
+        : null;
   if (error) {
-    config.send(ws, serializeWsMessage({ type: 'error', error, ...(id ? { inReplyTo: id } : {}), ...(to ? { to } : {}) }));
+    config.send(
+      ws,
+      serializeWsMessage({ type: 'error', error, ...(id ? { inReplyTo: id } : {}), ...(to ? { to } : {}) }),
+    );
     return true;
   }
   if (!target) throw new Error('RELAY_AUTHENTICATED_TARGET_MISSING');
@@ -653,30 +679,28 @@ const forwardEntityInputs = (context: RelayRouteContext): boolean => {
   // accepted once; it must not trigger retransmission through another route.
   const outcome = classifyWebSocketSendResult(config.send(target.ws, resolveRelayWireBytes(context)));
   pushDebugEvent(config.store, {
-    event: 'delivery', from, to, msgType: 'entity_inputs',
+    event: 'delivery',
+    from,
+    to,
+    msgType: 'entity_inputs',
     status: outcome === 'dropped' ? 'send-failed' : 'delivered',
   });
   if (outcome === 'dropped') {
-    config.send(ws, serializeWsMessage({ type: 'error', error: 'RELAY_RECIPIENT_SEND_FAILED',
-      ...(id ? { inReplyTo: id } : {}), ...(to ? { to } : {}) }));
+    config.send(
+      ws,
+      serializeWsMessage({
+        type: 'error',
+        error: 'RELAY_RECIPIENT_SEND_FAILED',
+        ...(id ? { inReplyTo: id } : {}),
+        ...(to ? { to } : {}),
+      }),
+    );
   }
   return true;
 };
 
 const prepareRelaySession = (context: RelayRouteContext): boolean => {
-  const {
-    config,
-    ws,
-    msg,
-    type,
-    to,
-    from,
-    id,
-    fromKey,
-    traceId,
-    rememberedRuntimeId,
-    fromEncryptionPubKey,
-  } = context;
+  const { config, ws, msg, type, to, from, id, fromKey, traceId, rememberedRuntimeId, fromEncryptionPubKey } = context;
   const { store, send } = config;
   const authBinding = getSocketAuthBinding(ws);
   if (rememberedRuntimeId && fromKey && rememberedRuntimeId !== fromKey) {
@@ -696,22 +720,28 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
   if (type !== 'hello') {
     // The hello key is immutable for this socket. Re-caching a later advertised
     // key would redirect the next encrypted envelope to an injected key.
-    const verifiedError = !rememberedRuntimeId || !fromKey || !authBinding
-      ? 'Relay session authentication missing'
-      : fromEncryptionPubKey?.toLowerCase() !== authBinding.encryptionPubKey.toLowerCase()
-        ? 'Relay session encryption key mismatch'
-        : verifyRuntimeWsFrameAuth(
-            rememberedRuntimeId,
-            msg,
-            msg.auth,
-            authBinding.audience,
-            authBinding.challenge,
-            authBinding.lastAuthTimestamp,
-          );
+    const verifiedError =
+      !rememberedRuntimeId || !fromKey || !authBinding
+        ? 'Relay session authentication missing'
+        : fromEncryptionPubKey?.toLowerCase() !== authBinding.encryptionPubKey.toLowerCase()
+          ? 'Relay session encryption key mismatch'
+          : verifyRuntimeWsFrameAuth(
+              rememberedRuntimeId,
+              msg,
+              msg.auth,
+              authBinding.audience,
+              authBinding.challenge,
+              authBinding.lastAuthTimestamp,
+            );
     if (verifiedError) {
       pushDebugEvent(store, {
-        event: 'error', from, to, msgType: type, status: 'rejected',
-        reason: 'RELAY_SESSION_AUTH_INVALID', details: { traceId, authError: verifiedError },
+        event: 'error',
+        from,
+        to,
+        msgType: type,
+        status: 'rejected',
+        reason: 'RELAY_SESSION_AUTH_INVALID',
+        details: { traceId, authError: verifiedError },
       });
       send(ws, serializeWsMessage({ type: 'error', error: verifiedError }));
       closeInvalidRelaySession(store, ws);
@@ -778,8 +808,16 @@ export const relayRoute = async (
 
   // Validate message shape
   try {
-    failfastAssert(!!rawMsg && typeof rawMsg === 'object', 'RELAY_MSG_OBJECT_INVALID', 'Relay payload must be an object');
-    failfastAssert(typeof (rawMsg as { type?: unknown }).type === 'string' && (rawMsg as { type: string }).type.length > 0, 'RELAY_MSG_TYPE_INVALID', 'Relay message type is required');
+    failfastAssert(
+      !!rawMsg && typeof rawMsg === 'object',
+      'RELAY_MSG_OBJECT_INVALID',
+      'Relay payload must be an object',
+    );
+    failfastAssert(
+      typeof (rawMsg as { type?: unknown }).type === 'string' && (rawMsg as { type: string }).type.length > 0,
+      'RELAY_MSG_TYPE_INVALID',
+      'Relay message type is required',
+    );
   } catch (error) {
     const ff = asFailFastPayload(error);
     pushDebugEvent(store, {

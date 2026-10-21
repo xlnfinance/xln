@@ -1,0 +1,261 @@
+.guide-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+}
+.guide-root {
+  position: fixed;
+  display: flex;
+  width: 64px;
+  height: 64px;
+  pointer-events: none;
+}
+.guide-toggle {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 18px;
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--shadow-lift);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  pointer-events: auto;
+}
+.guide-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.guide-toggle[aria-expanded='true'] {
+  border-color: var(--accent);
+}
+.guide-toggle[data-presence='dragging'] {
+  cursor: grabbing;
+}
+.guide-toggle .logo-stage {
+  display: grid;
+  animation: guide-float 5s ease-in-out infinite;
+}
+.guide-presence {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+.guide-toggle[data-presence='ready'] .guide-presence {
+  background: var(--coll);
+}
+.guide-toggle[data-presence='offline'] .guide-presence {
+  background: var(--debt);
+}
+.guide-toggle[data-presence='thinking'] .guide-presence {
+  background: var(--accent);
+}
+.guide-toggle[data-presence='thinking'] .logo-stage {
+  animation-duration: 1s;
+}
+.guide-chat-position {
+  position: fixed;
+  display: flex;
+  pointer-events: auto;
+}
+.guide-chat {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-lift);
+}
+.guide-chat header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.guide-chat header > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+.guide-chat small {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.guide-header-actions {
+  display: flex;
+  gap: 4px;
+}
+.guide-model {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+.guide-model select {
+  min-width: 0;
+  flex: 1;
+}
+.guide-transcript {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+  flex: 1;
+}
+.guide-intro strong {
+  font-size: 20px;
+}
+.guide-intro p {
+  margin: 10px 0 18px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.guide-suggestions {
+  display: grid;
+  gap: 8px;
+}
+.guide-suggestions button {
+  text-align: left;
+  min-height: 44px;
+  padding: 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+}
+.guide-suggestions button:disabled {
+  opacity: 0.6;
+}
+.guide-transcript article {
+  max-width: 92%;
+  margin-bottom: 14px;
+}
+.guide-transcript article.user {
+  margin-left: auto;
+}
+.guide-transcript article > span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.guide-markdown {
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.guide-transcript article.user .guide-markdown {
+  background: var(--accent-dim);
+}
+.guide-markdown :where(p, ul, ol, pre, blockquote) {
+  margin: 0 0 8px;
+}
+.guide-markdown :last-child {
+  margin-bottom: 0;
+}
+.guide-markdown :where(pre, table) {
+  max-width: 100%;
+  overflow-x: auto;
+  display: block;
+}
+.guide-markdown :where(ul, ol) {
+  padding-left: 18px;
+}
+.guide-markdown a {
+  color: var(--accent);
+}
+.guide-error {
+  padding: 8px 12px;
+  color: var(--debt);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.guide-error a {
+  display: block;
+  color: inherit;
+}
+.guide-chat form {
+  border-top: 1px solid var(--line);
+  padding: 12px;
+  flex-shrink: 0;
+}
+.guide-chat form > label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.guide-composer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.guide-composer textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  max-height: 84px;
+  resize: vertical;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+}
+@keyframes guide-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .guide-toggle .logo-stage {
+    animation: none;
+  }
+}
+@media (max-width: 520px) {
+  .guide-root {
+    align-items: center;
+    justify-content: center;
+  }
+  .guide-root[data-dock-side='left'] {
+    justify-content: flex-start;
+  }
+  .guide-root[data-dock-side='right'] {
+    justify-content: flex-end;
+  }
+  .guide-root[data-dock-side='top'] {
+    align-items: flex-start;
+  }
+  .guide-root[data-dock-side='bottom'] {
+    align-items: flex-end;
+  }
+  .guide-toggle {
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+  }
+}

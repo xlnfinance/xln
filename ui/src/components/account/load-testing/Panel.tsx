@@ -1,3 +1,4 @@
+import type { RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   LoadTestScheduler,
@@ -19,7 +20,17 @@ const initial = (): LoadTestSchedulerSnapshot => ({
   lastResult: { pay: '', swap: '' },
 });
 
-export function LoadTestingPanel({ entityId, signerId, hubId }: { entityId: string; signerId: string; hubId: string }) {
+export function LoadTestingPanel({
+  entityId,
+  signerId,
+  hubId,
+  summaries,
+}: {
+  entityId: string;
+  signerId: string;
+  hubId: string;
+  summaries: readonly RuntimeAdapterEntitySummary[];
+}) {
   const [payRate, setPayRate] = useState(1);
   const [swapRate, setSwapRate] = useState(1);
   const [duration, setDuration] = useState(10);
@@ -123,6 +134,7 @@ export function LoadTestingPanel({ entityId, signerId, hubId }: { entityId: stri
           key={`${vaultId}:${entityId}:${hubId}:${pair.baseTokenId}/${pair.quoteTokenId}`}
           hubId={hubId}
           entityId={entityId}
+          summaries={summaries}
           {...pair}
           onBook={onBook}
         />

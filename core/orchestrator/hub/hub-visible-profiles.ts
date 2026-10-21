@@ -1,3 +1,4 @@
+import type { RuntimeP2P } from '../../network/p2p/p2p';
 import { verifiedGossipAccountRoleEvidence } from '../../account/config/role-evidence';
 import { getJurisdictionIdentityRef } from '../../jurisdiction/machine/jurisdiction-runtime';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
@@ -16,41 +17,53 @@ export type VisibleHubProfile = {
   roleEvidence: ReturnType<typeof verifiedGossipAccountRoleEvidence>;
 };
 
-export const normalizeJurisdictionDisplayName = (value: unknown): string =>
-  String(value || '').trim();
+export const normalizeJurisdictionDisplayName = (value: unknown): string => String(value || '').trim();
 
 /** Project only authenticated Hub gossip; a loaded committed User vetoes it. */
-export const readVisibleHubProfiles = (
-  env: RuntimeReplica,
-  jurisdiction: unknown,
-): VisibleHubProfile[] => (env.gossip?.getProfiles?.() || [])
-  .filter(profile => profile.metadata?.isHub === true)
-  .filter(profile => {
-    const targetRef = getJurisdictionIdentityRef(jurisdiction);
-    return !targetRef || getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef;
-  })
-  .map(profile => {
-    const chainId = Number(profile.metadata?.jurisdiction?.chainId || 0);
-    const depositoryAddress = String(profile.metadata?.jurisdiction?.depositoryAddress || '').trim();
-    const entityId = String(profile.entityId || '').toLowerCase();
-    const committed = getEntityReplicaById(env, entityId);
-    return {
-      name: String(profile.name || '').trim(),
-      hubName: typeof profile.metadata?.hubName === 'string' ? profile.metadata.hubName.trim() : '',
-      entityId,
-      runtimeId: normalizeRuntimeId(profile.runtimeId || ''),
-      jurisdictionName: normalizeJurisdictionDisplayName(profile.metadata?.jurisdiction?.name),
-      ...(Number.isFinite(chainId) && chainId > 0 ? { chainId: Math.floor(chainId) } : {}),
-      ...(depositoryAddress ? { depositoryAddress } : {}),
-      jurisdictionRef: getJurisdictionIdentityRef(profile.metadata?.jurisdiction),
-      roleEvidence: verifiedGossipAccountRoleEvidence(
+export const readVisibleHubProfiles = (env: RuntimeReplica, jurisdiction: unknown): VisibleHubProfile[] =>
+  (env.gossip?.getProfiles?.() || [])
+    .filter(profile => profile.metadata?.isHub === true)
+    .filter(profile => {
+      const targetRef = getJurisdictionIdentityRef(jurisdiction);
+      return !targetRef || getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef;
+    })
+    .map(profile => {
+      const chainId = Number(profile.metadata?.jurisdiction?.chainId || 0);
+      const depositoryAddress = String(profile.metadata?.jurisdiction?.depositoryAddress || '').trim();
+      const entityId = String(profile.entityId || '').toLowerCase();
+      const committed = getEntityReplicaById(env, entityId);
+      return {
+        name: String(profile.name || '').trim(),
+        hubName: typeof profile.metadata?.hubName === 'string' ? profile.metadata.hubName.trim() : '',
         entityId,
-        true,
-        committed ? committed.state.profile.isHub === true : undefined,
+        runtimeId: normalizeRuntimeId(profile.runtimeId || ''),
+        jurisdictionName: normalizeJurisdictionDisplayName(profile.metadata?.jurisdiction?.name),
+        ...(Number.isFinite(chainId) && chainId > 0 ? { chainId: Math.floor(chainId) } : {}),
+        ...(depositoryAddress ? { depositoryAddress } : {}),
+        jurisdictionRef: getJurisdictionIdentityRef(profile.metadata?.jurisdiction),
+        roleEvidence: verifiedGossipAccountRoleEvidence(
+          entityId,
+          true,
+          committed ? committed.state.profile.isHub === true : undefined,
+        ),
+      };
+    })
+    .filter(profile =>
+      Boolean(
+        profile.name && profile.entityId && profile.runtimeId && profile.jurisdictionName && profile.jurisdictionRef,
       ),
-    };
-  })
-  .filter(profile => Boolean(
-    profile.name && profile.entityId && profile.runtimeId
-    && profile.jurisdictionName && profile.jurisdictionRef,
-  ));
+    );
+
+/** The admin-installed, committed custody owner joins only this Hub's public identities. */
+export const publishHubOwnerProfile = async (
+  p2p: RuntimeP2P | null,
+  hubEntityIds: readonly string[],
+  ownerEntityId: string,
+): Promise<void> => {
+  if (!p2p) throw new Error('HUB_OWNER_PROFILE_P2P_UNAVAILABLE');
+  // Keep the explicit publication policy: unrelated local signers are not
+  // admitted. The existing publisher still requires the current board's Hanko
+  // and a valid Runtime route signature before any profile leaves the process.
+  p2p.updateConfig({ advertiseEntityIds: [...new Set([...hubEntityIds, ownerEntityId])] });
+  await p2p.announceProfilesForEntitiesNow([ownerEntityId], 'hub-owner-installed', false);
+};

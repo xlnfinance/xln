@@ -1,10 +1,9 @@
 import type { HandleClientError } from '@sveltejs/kit/hooks';
-import {
-  captureBrowserError,
-  installBrowserErrorTelemetry,
-} from '#lib/debug/browser-telemetry.ts';
+import { get } from 'svelte/store';
+import { operatorDiagnosticsAllowed } from '#lib/debug/operator-diagnostics.ts';
+import { captureBrowserError, installBrowserErrorTelemetry } from '#lib/debug/browser-telemetry.ts';
 
-installBrowserErrorTelemetry();
+installBrowserErrorTelemetry(() => get(operatorDiagnosticsAllowed));
 
 export const handleError: HandleClientError = ({ error, kind }) => {
   // Kit 3 also calls this hook for expected app/framework errors.

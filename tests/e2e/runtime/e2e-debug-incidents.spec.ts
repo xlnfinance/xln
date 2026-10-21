@@ -1,19 +1,31 @@
 import { allowBrowserIssue, expect, test } from '../../global-setup.mts';
 import { resolveRuntimeImportAppUrl } from '../../utils/runtime/e2e-runtime-import';
 import { API_BASE_URL, APP_BASE_URL } from '../../utils/e2e-baseline';
+import type { RuntimeAdapterInspection } from '../../../ui/src/runtime/adapter';
 
 test('browser console errors enter the shared unread incident service', { tag: '@functional' }, async ({ page }) => {
   const importUrl = await resolveRuntimeImportAppUrl(page, {
-    appBaseUrl: APP_BASE_URL, apiBaseUrl: API_BASE_URL, access: 'admin',
+    appBaseUrl: APP_BASE_URL,
+    apiBaseUrl: API_BASE_URL,
+    access: 'admin',
   });
   await page.goto(importUrl, { waitUntil: 'load' });
-  await page.waitForFunction(() => {
-    const view = window as typeof window & {
-      __xln?: { adapter?: { status(): { connected: boolean; authLevel?: string | null } } };
-    };
-    const status = view.__xln?.adapter?.status();
-    return status?.connected === true && status.authLevel === 'admin';
-  }, null, { timeout: 10_000 });
+  await page.getByRole('button', { name: 'Load runtime list', exact: true }).click();
+  await page.getByRole('button', { name: 'Validate & attach', exact: true }).click();
+  const h1 = page.getByTestId('validated-runtime').filter({ has: page.getByText('H1', { exact: true }) });
+  await h1.click();
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.waitForFunction(
+    () => {
+      const view = window as typeof window & {
+        __xln?: { adapter(): RuntimeAdapterInspection | null };
+      };
+      const adapter = view.__xln?.adapter();
+      return adapter?.status === 'connected' && adapter.authLevel === 'admin';
+    },
+    null,
+    { timeout: 10_000 },
+  );
   allowBrowserIssue({
     type: 'console',
     severity: 'error',

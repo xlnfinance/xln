@@ -1,12 +1,21 @@
 import { RuntimeP2P } from '../../../network/p2p/p2p';
-import { createEmptyEnv } from '../../../runtime';
-import { buildCryptographicProfileFixture, certifySingleSignerProfileFixture, deriveSingleSignerFixtureEntityId } from '../../helpers/cryptographic-profile';
+import { closeRuntimeDb, createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../../../runtime';
+import {
+  buildCryptographicProfileFixture,
+  certifySingleSignerProfileFixture,
+  deriveSingleSignerFixtureEntityId,
+} from '../../helpers/cryptographic-profile';
 import { verifyProfileSignature } from '../../../entity/profile/profile-signing';
 import { parseProfile } from '../../../entity/profile';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ServerWebSocket } from 'bun';
 
-import { deriveSignerAddressSync } from '../../../account/crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
+import { createTestJReplica } from '../../helpers/j-replica';
+import { publishHubOwnerProfile } from '../../../orchestrator/hub/hub-visible-profiles';
+import { DaemonControlClient } from '../../../orchestrator/daemon-control';
+import { ProfileAuthorityUnavailableError } from '../../../network/relay/profile-authority-error';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../../../protocol/crypto/p2p-crypto';
 import { decodeRuntimeEntityInputsEnvelope } from '../../../network/p2p/auth/entity-input-envelope';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../../../network/p2p/direct-runtime-bun';
@@ -46,18 +55,22 @@ const envelopeFrom = (sourceRuntimeId: string, targetRuntimeId: string): Runtime
     sourceRuntimeId,
     sourceRuntimeHeight: 7,
     sourceRuntimeTimestamp: 123,
-    entityInputs: [{
-      entityId: `0x${'21'.repeat(32)}`,
-      runtimeId: targetRuntimeId,
-      signerId: targetRuntimeId,
-      entityTxs: [],
-    }],
+    entityInputs: [
+      {
+        entityId: `0x${'21'.repeat(32)}`,
+        runtimeId: targetRuntimeId,
+        signerId: targetRuntimeId,
+        entityTxs: [],
+      },
+    ],
   });
 
 // This recorder forwards every operation to a real Bun socket. It never
 // substitutes a send result, authentication result, or application receipt.
 const recordSocket = (ws: NativeSocket, frames: CapturedFrame[]): DirectWebSocket => ({
-  get readyState() { return ws.readyState; },
+  get readyState() {
+    return ws.readyState;
+  },
   send(raw) {
     frames.push({ message: deserializeWsMessage(raw), raw: typeof raw === 'string' ? raw : raw.slice() });
     return ws.send(raw);
@@ -78,10 +91,16 @@ const createHarness = (getLocalProfiles?: () => Promise<readonly unknown[]>) => 
     runtimeId: SERVER_ID,
     runtimeSeed: SERVER_SEED,
     ...(getLocalProfiles ? { getLocalProfiles } : {}),
-    onEntityInputs: (_from, envelope) => { received.push(envelope); },
-    onGossipAnnounce: (from, payload) => { gossip.push({ from, payload }); },
+    onEntityInputs: (_from, envelope) => {
+      received.push(envelope);
+    },
+    onGossipAnnounce: (from, payload) => {
+      gossip.push({ from, payload });
+    },
     onRecoveryBundleRequest: (from, lookupKey) => ({ from, lookupKey }),
-    onDeliveryFailure: failure => { failures.push(failure.error); },
+    onDeliveryFailure: failure => {
+      failures.push(failure.error);
+    },
   });
   route.onDeliveryReadyChange((runtimeId, ready) => changes.push({ runtimeId, ready }));
   const observed = (ws: NativeSocket): DirectWebSocket => {
@@ -90,7 +109,8 @@ const createHarness = (getLocalProfiles?: () => Promise<readonly unknown[]>) => 
     return socket;
   };
   const server = Bun.serve<{ type: 'direct-runtime' }>({
-    hostname: '127.0.0.1', port: 0,
+    hostname: '127.0.0.1',
+    port: 0,
     fetch(request, bunServer) {
       const decision = route.maybeUpgrade(request, bunServer);
       return decision.handled ? decision.response : new Response('websocket only', { status: 400 });
@@ -105,7 +125,9 @@ const createHarness = (getLocalProfiles?: () => Promise<readonly unknown[]>) => 
         clientFrames.push(deserializeWsMessage(raw));
         route.websocket.message(observed(ws), raw);
       },
-      drain(ws) { route.websocket.drain(observed(ws)); },
+      drain(ws) {
+        route.websocket.drain(observed(ws));
+      },
       close(ws, code, reason) {
         route.websocket.close(observed(ws), code, reason);
         sockets.delete(ws);
@@ -122,13 +144,22 @@ const createHarness = (getLocalProfiles?: () => Promise<readonly unknown[]>) => 
       url: `ws://127.0.0.1:${server.port}${route.path}`,
       runtimeId: CLIENT_ID,
       helloAudience: directRuntimeWsAudience(SERVER_ID),
-      signerId: '1', seed: CLIENT_SEED,
+      signerId: '1',
+      seed: CLIENT_SEED,
       encryptionKeyPair: deriveEncryptionKeyPair(CLIENT_SEED),
       getTargetEncryptionKey: () => deriveEncryptionKeyPair(SERVER_SEED).publicKey,
-      onEntityInputs: (_from, envelope) => { envelopes.push(envelope); },
-      onError: error => { errors.push(error.message); },
-      onDeliveryReadyChange: ready => { readyChanges.push(ready); },
-      onGossipAnnounce: (_from, payload) => { announcements.push(payload); },
+      onEntityInputs: (_from, envelope) => {
+        envelopes.push(envelope);
+      },
+      onError: error => {
+        errors.push(error.message);
+      },
+      onDeliveryReadyChange: ready => {
+        readyChanges.push(ready);
+      },
+      onGossipAnnounce: (_from, payload) => {
+        announcements.push(payload);
+      },
     });
     clients.push(client);
     await client.connect();
@@ -140,30 +171,175 @@ const createHarness = (getLocalProfiles?: () => Promise<readonly unknown[]>) => 
     if (!native || sockets.size !== 1) throw new Error('TEST_EXPECTS_ONE_REAL_SOCKET');
     expect(native.send(raw)).not.toBe(0);
   };
-  return { url: `ws://127.0.0.1:${server.port}${route.path}`, route, connect, received, gossip, failures, changes, clientFrames, serverFrames, replayToClient };
+  return {
+    url: `ws://127.0.0.1:${server.port}${route.path}`,
+    route,
+    connect,
+    received,
+    gossip,
+    failures,
+    changes,
+    clientFrames,
+    serverFrames,
+    replayToClient,
+  };
 };
 
 describe('authenticated direct delivery readiness', () => {
+  test('a refused real profile authority remains a typed failure with its original cause', async () => {
+    const h = createHarness();
+    const authority = new URL(h.url).origin.replace('ws:', 'http:');
+    stopServers.pop()!();
+    const profile = certifySingleSignerProfileFixture(
+      buildCryptographicProfileFixture({
+        entityId: deriveSingleSignerFixtureEntityId(SERVER_SEED),
+        signingSeed: SERVER_SEED,
+        name: 'signed owner',
+      }),
+      SERVER_SEED,
+    );
+    let failure: unknown;
+    try {
+      await new DaemonControlClient({ baseUrl: authority }).verifyProfile(profile);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(ProfileAuthorityUnavailableError);
+    expect((failure as Error).message).toBe(`PROFILE_AUTHORITY_UNAVAILABLE:ECONNREFUSED:${authority}`);
+    expect((failure as Error).cause).toMatchObject({ code: 'ECONNREFUSED' });
+    expect(h.received).toEqual([]);
+  });
+
+  test('committed custody owner joins the Hub publication policy without exposing unrelated signers', async () => {
+    const env = createEmptyEnv(SERVER_SEED, 1);
+    env.dbNamespace = `custody-profile-${process.pid}-${Date.now()}`;
+    env.runtimeId = SERVER_ID;
+    env.quietRuntimeLogs = true;
+    const jurisdiction = {
+      name: 'custody-profile',
+      address: 'rpc://custody-profile',
+      chainId: 31337,
+      entityProviderAddress: `0x${'e1'.repeat(20)}`,
+      depositoryAddress: `0x${'d1'.repeat(20)}`,
+    };
+    env.activeJurisdiction = jurisdiction.name;
+    env.state.jReplicas.set(
+      jurisdiction.name,
+      createTestJReplica({
+        name: jurisdiction.name,
+        chainId: jurisdiction.chainId,
+        rpcs: [jurisdiction.address],
+        contracts: {
+          entityProvider: jurisdiction.entityProviderAddress,
+          depository: jurisdiction.depositoryAddress,
+          account: `0x${'a1'.repeat(20)}`,
+          deltaTransformer: `0x${'f1'.repeat(20)}`,
+        },
+      }),
+    );
+    const identities = ['1', '2', '3'].map(label => {
+      const signerId = deriveSignerAddressSync(SERVER_SEED, label).toLowerCase();
+      registerSignerKey(env, signerId, deriveSignerKeySync(SERVER_SEED, label));
+      return { entityId: deriveSingleSignerFixtureEntityId(SERVER_SEED, label), signerId };
+    });
+    enqueueRuntimeInput(env, {
+      runtimeTxs: identities.map(({ entityId, signerId }) =>
+        createTestEntityImportRuntimeTx(env, {
+          entityId,
+          signerId,
+          data: {
+            config: {
+              mode: 'proposer-based',
+              threshold: 1n,
+              validators: [signerId],
+              shares: { [signerId]: 1n },
+              jurisdiction,
+            },
+            isProposer: true,
+            profileName: entityId,
+          },
+        }),
+      ),
+      entityInputs: [],
+    });
+    await processRuntime(env);
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: identities.map(({ entityId, signerId }) => ({
+        entityId,
+        signerId,
+        entityTxs: [{ type: 'chat', data: { from: signerId, message: 'certify genesis' } }],
+      })),
+    });
+    await processRuntime(env);
+    const [hub, owner, excluded] = identities;
+    const sender = new RuntimeP2P({
+      env,
+      runtimeId: SERVER_ID,
+      relayUrls: [],
+      advertiseEntityIds: [hub!.entityId],
+      onEntityInputs: () => {},
+      onGossipProfiles: () => {},
+    });
+    const h = createHarness(() => sender.getLocalProfilesForEntities());
+    try {
+      expect(await sender.getLocalProfilesForEntities([owner!.entityId])).toEqual([]);
+      await publishHubOwnerProfile(sender, [hub!.entityId], owner!.entityId);
+      const profiles = await sender.getLocalProfilesForEntities();
+      expect(profiles.map(profile => profile.entityId).sort()).toEqual([hub!.entityId, owner!.entityId].sort());
+      expect(await sender.getLocalProfilesForEntities([excluded!.entityId])).toEqual([]);
+      const peer = await h.connect();
+      await waitFor(() => peer.announcements.length === 1);
+      const payload = peer.announcements[0] as { profiles: unknown[] };
+      const received = payload.profiles.map(parseProfile);
+      expect(received.map(profile => profile.entityId).sort()).toEqual([hub!.entityId, owner!.entityId].sort());
+      for (const profile of received) expect((await verifyProfileSignature(profile)).valid).toBe(true);
+      expect(h.received).toEqual([]);
+      expect([...peer.errors, ...h.failures]).toEqual([]);
+    } finally {
+      await sender.closeAndWait();
+      await closeRuntimeDb(env);
+    }
+  });
+
   test('outgoing RuntimeP2P direct client admits newly adopted signed owner into actual gossip state', async () => {
     let outgoingProfiles: ReturnType<typeof buildCryptographicProfileFixture>[] = [];
     const h = createHarness(async () => outgoingProfiles);
-    const hub = certifySingleSignerProfileFixture({
-      ...buildCryptographicProfileFixture({
-        entityId: deriveSingleSignerFixtureEntityId(SERVER_SEED), signingSeed: SERVER_SEED,
-        name: 'direct bootstrap hub', isHub: true, runtimeId: SERVER_ID,
-        runtimeEncPubKey: pubKeyToHex(deriveEncryptionKeyPair(SERVER_SEED).publicKey),
-      }), wsUrl: h.url,
-    }, SERVER_SEED);
-    const owner = certifySingleSignerProfileFixture(buildCryptographicProfileFixture({
-      entityId: deriveSingleSignerFixtureEntityId(SERVER_SEED, '2'),
-      signingSeed: SERVER_SEED, signerId: '2', name: 'newly adopted owner',
-      runtimeId: SERVER_ID, runtimeEncPubKey: hub.runtimeEncPubKey,
-    }), SERVER_SEED, '2');
+    const hub = certifySingleSignerProfileFixture(
+      {
+        ...buildCryptographicProfileFixture({
+          entityId: deriveSingleSignerFixtureEntityId(SERVER_SEED),
+          signingSeed: SERVER_SEED,
+          name: 'direct bootstrap hub',
+          isHub: true,
+          runtimeId: SERVER_ID,
+          runtimeEncPubKey: pubKeyToHex(deriveEncryptionKeyPair(SERVER_SEED).publicKey),
+        }),
+        wsUrl: h.url,
+      },
+      SERVER_SEED,
+    );
+    const owner = certifySingleSignerProfileFixture(
+      buildCryptographicProfileFixture({
+        entityId: deriveSingleSignerFixtureEntityId(SERVER_SEED, '2'),
+        signingSeed: SERVER_SEED,
+        signerId: '2',
+        name: 'newly adopted owner',
+        runtimeId: SERVER_ID,
+        runtimeEncPubKey: hub.runtimeEncPubKey,
+      }),
+      SERVER_SEED,
+      '2',
+    );
     outgoingProfiles = [hub, owner];
     const env = createEmptyEnv(CLIENT_SEED, 1);
     env.runtimeId = CLIENT_ID;
-    const p2p = new RuntimeP2P({ env, runtimeId: CLIENT_ID, relayUrls: [],
-      onEntityInputs: () => {}, onGossipProfiles: () => {},
+    const p2p = new RuntimeP2P({
+      env,
+      runtimeId: CLIENT_ID,
+      relayUrls: [],
+      onEntityInputs: () => {},
+      onGossipProfiles: () => {},
     });
     try {
       await p2p.admitSharedProfiles([hub]);
@@ -185,10 +361,16 @@ describe('authenticated direct delivery readiness', () => {
   });
 
   test('a fresh and reconnected idle peer receives signed local profiles without a financial envelope', async () => {
-    const profile = certifySingleSignerProfileFixture(buildCryptographicProfileFixture({
-      entityId: deriveSingleSignerFixtureEntityId(SERVER_SEED), signingSeed: SERVER_SEED,
-      name: 'idle signed peer', isHub: true, lastUpdated: 1,
-    }), SERVER_SEED);
+    const profile = certifySingleSignerProfileFixture(
+      buildCryptographicProfileFixture({
+        entityId: deriveSingleSignerFixtureEntityId(SERVER_SEED),
+        signingSeed: SERVER_SEED,
+        name: 'idle signed peer',
+        isHub: true,
+        lastUpdated: 1,
+      }),
+      SERVER_SEED,
+    );
     const h = createHarness(async () => [profile]);
     const first = await h.connect();
     await waitFor(() => first.announcements.length === 1);
@@ -219,11 +401,15 @@ describe('authenticated direct delivery readiness', () => {
     expect(h.route.canDeliver(CLIENT_ID)).toBe(false);
     expect(c.client.sendEntityInputsRaw(SERVER_ID, inbound)).toBe(false);
     expect(h.route.sendEntityInputsDelivery(CLIENT_ID, outbound)).toMatchObject({
-      outcome: 'deferred', code: 'ROUTE_DIRECT_RECIPIENT_NOT_READY', fatal: false, terminal: false,
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_RECIPIENT_NOT_READY',
+      fatal: false,
+      terminal: false,
     });
     expect(c.client.sendGossipAnnounce(SERVER_ID, { profiles: [] })).toBe(true);
     expect(await c.client.requestRecoveryBundles(SERVER_ID, 'early-control')).toEqual({
-      from: CLIENT_ID, lookupKey: 'early-control',
+      from: CLIENT_ID,
+      lookupKey: 'early-control',
     });
     expect(h.gossip).toEqual([{ from: CLIENT_ID, payload: { profiles: [] } }]);
     expect(h.clientFrames.filter(frame => frame.type === 'entity_inputs')).toHaveLength(0);
@@ -239,7 +425,9 @@ describe('authenticated direct delivery readiness', () => {
     expect(h.changes).toContainEqual({ runtimeId: CLIENT_ID, ready: true });
     const controls = [
       ...h.clientFrames.filter(frame => frame.type === 'delivery_ready' && frame.payload === true),
-      ...h.serverFrames.map(frame => frame.message).filter(frame => frame.type === 'delivery_ready' && frame.payload === true),
+      ...h.serverFrames
+        .map(frame => frame.message)
+        .filter(frame => frame.type === 'delivery_ready' && frame.payload === true),
     ];
     expect(controls).toHaveLength(2);
     for (const control of controls) {
@@ -275,7 +463,9 @@ describe('authenticated direct delivery readiness', () => {
     first.client.setReady(true);
     h.route.setReady(true);
     await waitFor(() => first.client.canDeliver() && h.route.canDeliver(CLIENT_ID));
-    const captured = h.serverFrames.find(frame => frame.message.type === 'delivery_ready' && frame.message.payload === true);
+    const captured = h.serverFrames.find(
+      frame => frame.message.type === 'delivery_ready' && frame.message.payload === true,
+    );
     if (!captured) throw new Error('TEST_AUTHENTICATED_READINESS_NOT_CAPTURED');
     expect(captured.message.auth?.mac).toBeTruthy();
     await first.client.closeAndWait();

@@ -3,6 +3,9 @@ import { Sheet } from '../Sheet';
 import { Icon } from '../Icons';
 import { useApp } from '../../runtime/store';
 import { lockEmbeddedRuntime } from '../../runtime/adapter';
+import { hasPasswordVault } from '../../../../frontend/src/lib/security/passwordVault';
+import { PasswordEntry } from '../PasswordEntry';
+import { NodeVault } from './NodeVault';
 
 export function Vault() {
   const vaults = useApp(s => s.vaults);
@@ -13,6 +16,7 @@ export function Vault() {
   const [forgetting, setForgetting] = useState(false);
   const [revealing, setRevealing] = useState(false);
   const [revealConfirmed, setRevealConfirmed] = useState(false);
+  const [enrolling, setEnrolling] = useState(false);
 
   const activeVault = vaults.find(v => v.id === activeVaultId) ?? null;
   const seed = activeVaultId ? sessionSeeds[activeVaultId] : undefined;
@@ -22,6 +26,21 @@ export function Vault() {
       toast(`Wallet stopped with an error: ${error instanceof Error ? error.message : String(error)}`),
     );
   };
+
+  if (enrolling && activeVault && seed)
+    return (
+      <PasswordEntry
+        id={activeVault.id}
+        name={activeVault.name}
+        seed={seed}
+        onBack={() => setEnrolling(false)}
+        onOpen={async () => {
+          await useApp.getState().finishPasswordEnrollment(activeVault.id);
+          setEnrolling(false);
+          toast('Local password saved.');
+        }}
+      />
+    );
 
   return (
     <>
@@ -35,6 +54,12 @@ export function Vault() {
         </div>
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
+        <NodeVault />
+        {seed && activeVault && activeVault.kind !== 'sandbox' && !hasPasswordVault(activeVault.id) && (
+          <button type="button" className="btn ghost sm" onClick={() => setEnrolling(true)}>
+            <Icon name="lock" size={14} /> Set a local password
+          </button>
+        )}
         {seed && (
           <button type="button" className="btn ghost sm" onClick={() => setRevealing(true)}>
             <Icon name="eye" size={14} /> Reveal recovery phrase

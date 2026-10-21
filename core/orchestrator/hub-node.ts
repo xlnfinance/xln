@@ -5,11 +5,7 @@ import {
   attachValidatedJurisdictionAdapter,
   hasLiveJAdapterForJurisdiction,
 } from './hub/node/hub-jurisdiction-binding';
-import {
-  buildPairHealth,
-  planMeshBootstrapInputs,
-  supportPeerProvisioningReady,
-} from './hub/node/hub-mesh-plan';
+import { buildPairHealth, planMeshBootstrapInputs, supportPeerProvisioningReady } from './hub/node/hub-mesh-plan';
 import {
   buildHubBootstrapReserveHealth,
   ensureHubBootstrapReserves,
@@ -17,11 +13,7 @@ import {
   normalizeEntityId,
   type HubReserveDeps,
 } from './hub/node/hub-reserves';
-import {
-  createHubControlRequestHandler,
-  handleHubHttpRequest,
-  type HubHttpContext,
-} from './hub/node/hub-http';
+import { createHubControlRequestHandler, handleHubHttpRequest, type HubHttpContext } from './hub/node/hub-http';
 import { configureCryptoPoolEntry } from '../protocol/crypto/crypto-pool';
 import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -64,6 +56,7 @@ import {
   type BootstrapProgressHealth,
 } from './bootstrap/bootstrap-progress-watchdog';
 import { restoredRuntimeRouteRelocated } from './mesh/restored-gossip-route';
+import { publishHubOwnerProfile } from './hub/hub-visible-profiles';
 import { readInheritedChildSecrets, resolveChildSecret } from '../support/process/child-secrets';
 import { findMissingRpcContractCode } from './bootstrap/contract-readiness';
 import { parseShardJurisdictions } from './j-select/jurisdictions';
@@ -74,14 +67,9 @@ import {
   resolveRuntimeAdapterAuthAudience,
   resolveRuntimeAdapterAuthSeed,
 } from '../api/runtime-adapter/security/auth';
-import {
-  getJurisdictionIdentityRef,
-} from '../jurisdiction/machine/jurisdiction-runtime';
+import { getJurisdictionIdentityRef } from '../jurisdiction/machine/jurisdiction-runtime';
 import { requireJurisdictionChainId } from '../jurisdiction/machine/jurisdiction-stack';
-import {
-  attachRuntimeAdapterTicker,
-  forgetRuntimeAdapterClient,
-} from '../api/runtime-adapter/server';
+import { attachRuntimeAdapterTicker, forgetRuntimeAdapterClient } from '../api/runtime-adapter/server';
 import { redactTokenBearingUrlForLog } from './replica-import/runtime-import-log';
 import { readRuntimeSecurityIncidentTelemetry } from '../runtime/observability/security-incidents';
 import { createStackManagerController } from '../api/server/control/stack-manager';
@@ -136,14 +124,8 @@ import {
   type DirectInputDebugState,
   type HubServerSocket,
 } from './hub/hub-runtime-transport';
-import {
-  dumpOpCounters,
-  installGlobalOpCounters,
-} from '../support/performance/op-counters';
-import {
-  dumpRuntimeSamplingProfile,
-  startRuntimeSamplingProfiler,
-} from '../support/performance/sampling-profiler';
+import { dumpOpCounters, installGlobalOpCounters } from '../support/performance/op-counters';
+import { dumpRuntimeSamplingProfile, startRuntimeSamplingProfiler } from '../support/performance/sampling-profiler';
 import type {
   HubBootstrapEntry,
   HubNodeArgs,
@@ -154,17 +136,11 @@ import type {
   LocalHealthResponse,
   TimingMap,
 } from './hub/node/hub-node-types';
-import {
-  bindHubMesh,
-  hubMeshReady,
-  parseConfiguredPeerIdentities,
-  type HubMeshPeer,
-} from './mesh/hub-mesh-peers';
+import { bindHubMesh, hubMeshReady, parseConfiguredPeerIdentities, type HubMeshPeer } from './mesh/hub-mesh-peers';
 
 const argsRaw = process.argv.slice(2);
 
-const getArg = (name: string, defaultValue = ''): string =>
-  readCliOption(argsRaw, name, defaultValue);
+const getArg = (name: string, defaultValue = ''): string => readCliOption(argsRaw, name, defaultValue);
 
 const hasFlag = (name: string): boolean => hasCliFlag(argsRaw, name);
 
@@ -173,10 +149,11 @@ const readRpcUrls = (): Record<number, string> => {
   for (let index = 1; index <= 8; index += 1) {
     const flag = index === 1 ? '--rpc-url' : `--rpc${index}-url`;
     const envName = index === 1 ? 'ANVIL_RPC' : `ANVIL_RPC${index}`;
-    const defaultRpcUrl = index === 1
-      ? process.env['ANVIL_RPC'] || ''
-      : process.env[envName] || '';
-    urls[index] = getArg(flag, index === 2 ? (process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || defaultRpcUrl) : defaultRpcUrl);
+    const defaultRpcUrl = index === 1 ? process.env['ANVIL_RPC'] || '' : process.env[envName] || '';
+    urls[index] = getArg(
+      flag,
+      index === 2 ? process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || defaultRpcUrl : defaultRpcUrl,
+    );
   }
   return urls;
 };
@@ -198,11 +175,7 @@ const parseArgs = (): HubNodeArgs => {
     registerRuntimeAdapterAuthSeed(radapterAuthSeed);
     delete process.env['XLN_RADAPTER_AUTH_SEED'];
   }
-  const seed = resolveChildSecret(
-    childSecrets,
-    'runtimeSeed',
-    getArg('--seed', process.env['XLN_RUNTIME_SEED'] || ''),
-  );
+  const seed = resolveChildSecret(childSecrets, 'runtimeSeed', getArg('--seed', process.env['XLN_RUNTIME_SEED'] || ''));
   if (!seed) throw new Error('Hub seed is required via inherited secret FD, --seed, or XLN_RUNTIME_SEED');
   return {
     name: getArg('--name', 'H1'),
@@ -234,7 +207,11 @@ const FAUCET_TOKEN_TARGET_UNITS = 1_000_000n;
  * stand runs more than three shards and two of them sign as the same address.
  */
 const resolveHubSignerIndex = (name: string): number => {
-  const match = /^H(\d+)$/.exec(String(name || '').trim().toUpperCase());
+  const match = /^H(\d+)$/.exec(
+    String(name || '')
+      .trim()
+      .toUpperCase(),
+  );
   const ordinal = match ? Number(match[1]) : 1;
   return Number.isSafeInteger(ordinal) && ordinal >= 1 ? ordinal - 1 : 0;
 };
@@ -246,7 +223,10 @@ const deriveAnvilDevPrivateKey = (index: number): string => {
 };
 
 const resolvedArgs = parseArgs();
-const supportPeerIdentities = parseConfiguredPeerIdentities(resolvedArgs.supportPeerIdentitiesJson, 'SUPPORT_PEER_IDENTITIES');
+const supportPeerIdentities = parseConfiguredPeerIdentities(
+  resolvedArgs.supportPeerIdentitiesJson,
+  'SUPPORT_PEER_IDENTITIES',
+);
 const meshHubIdentities = parseConfiguredPeerIdentities(resolvedArgs.hubIdentitiesJson, 'HUB_IDENTITIES');
 if (meshHubIdentities.length === 0) throw new Error('HUB_IDENTITIES_MISSING');
 const apiUrl = `http://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}`;
@@ -276,23 +256,29 @@ const MESH_PRODUCER_PAUSE_TIMEOUT_MS = Math.max(
 );
 const nodeLog = createStructuredLogger('mesh.hub', { hub: resolvedArgs.name });
 
-const createHubBrainVaultOwner = (): BrainVaultOwnerController => createBrainVaultOwnerController({
-  path: String(process.env['XLN_BRAINVAULT_OWNER_PATH'] || ''),
-  ...(process.env['XLN_BRAINVAULT_WORKER_PATH']
-    ? { workerPath: process.env['XLN_BRAINVAULT_WORKER_PATH'] }
-    : {}),
-  profileName: String(process.env['XLN_LOCAL_OWNER_PROFILE_NAME'] || 'xln finance').trim() || 'xln finance',
-  enqueue: enqueueRuntimeInput,
-  onFrameCommit: (targetEnv, callback) =>
-    registerRuntimeFrameCommitCallback(targetEnv, ({ height }) => callback(height)),
-  timeoutMs: 60_000,
-});
+const createHubBrainVaultOwner = (): BrainVaultOwnerController =>
+  createBrainVaultOwnerController({
+    path: String(process.env['XLN_BRAINVAULT_OWNER_PATH'] || ''),
+    ...(process.env['XLN_BRAINVAULT_WORKER_PATH'] ? { workerPath: process.env['XLN_BRAINVAULT_WORKER_PATH'] } : {}),
+    profileName: String(process.env['XLN_LOCAL_OWNER_PROFILE_NAME'] || 'xln finance').trim() || 'xln finance',
+    enqueue: enqueueRuntimeInput,
+    onFrameCommit: (targetEnv, callback) =>
+      registerRuntimeFrameCommitCallback(targetEnv, ({ height }) => callback(height)),
+    timeoutMs: 60_000,
+  });
 
 const restoreHubBrainVaultOwner = async (
   live: HubNodeLiveContext,
   brainVaultOwner: BrainVaultOwnerController,
 ): Promise<void> => {
   const restored = await brainVaultOwner.restore(live.env);
+  if (restored) {
+    await publishHubOwnerProfile(
+      live.p2p,
+      live.hubBootstraps.map(entry => entry.entityId),
+      restored.entityId,
+    );
+  }
   live.brainVaultReady = true;
   if (!restored) return;
   nodeLog.info('brainvault_owner.ready', {
@@ -326,9 +312,10 @@ const configureHubRuntimeLogging = (env: RuntimeReplica): void => {
 
 const resolveOperatorAppUrl = (): string => {
   const explicit = String(process.env['XLN_OPERATOR_APP_URL'] || process.env['XLN_APP_URL'] || '').trim();
-  if (explicit) return explicit.replace(/\/+$/, '').endsWith('/app')
-    ? explicit.replace(/\/+$/, '')
-    : `${explicit.replace(/\/+$/, '')}/app`;
+  if (explicit)
+    return explicit.replace(/\/+$/, '').endsWith('/app')
+      ? explicit.replace(/\/+$/, '')
+      : `${explicit.replace(/\/+$/, '')}/app`;
   const parsed = new URL(directWsUrl);
   if (parsed.hostname === 'xln.finance' || parsed.hostname.endsWith('.xln.finance')) {
     return `https://${parsed.hostname}/app`;
@@ -477,9 +464,7 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
   for (const filePath of resolveJurisdictionPaths()) {
     const parent = dirname(filePath);
     mkdirSync(parent, { recursive: true });
-    const current: JurisdictionsFile = existsSync(filePath)
-      ? JSON.parse(readFileSync(filePath, 'utf8'))
-      : {};
+    const current: JurisdictionsFile = existsSync(filePath) ? JSON.parse(readFileSync(filePath, 'utf8')) : {};
     const jurisdictions = current.jurisdictions ?? {};
     const targetKey = selectWritableJurisdictionKey(jurisdictions, undefined, [rpcUrl, publicRpcUrl]);
     const previous = jurisdictions[targetKey] ?? {};
@@ -539,10 +524,8 @@ const buildRuntimeJurisdictionsPayload = (env: RuntimeReplica): string | null =>
   if (!replica) return null;
 
   const account = String(replica.contracts?.account || '').trim();
-  const depository =
-    String(replica.contracts?.depository || '').trim();
-  const entityProvider =
-    String(replica.contracts?.entityProvider || '').trim();
+  const depository = String(replica.contracts?.depository || '').trim();
+  const entityProvider = String(replica.contracts?.entityProvider || '').trim();
   const deltaTransformer = String(replica.contracts?.deltaTransformer || '').trim();
   if (!account || !depository || !entityProvider || !deltaTransformer) return null;
 
@@ -637,7 +620,7 @@ const ensureOrderbook = async (env: RuntimeReplica, entityId: string, signerId: 
   });
   // A rejected init (for example a bad quote authority) must stop the boot,
   // not leave a hub serving without an orderbook until the next restart.
-  if (!await waitForRuntimeWorkDrained(env, ORDERBOOK_INIT_DRAIN_TIMEOUT_MS, 0)) {
+  if (!(await waitForRuntimeWorkDrained(env, ORDERBOOK_INIT_DRAIN_TIMEOUT_MS, 0))) {
     throw new Error(`ORDERBOOK_INIT_DRAIN_TIMEOUT:${entityId}`);
   }
   if (!getEntityReplicaById(env, entityId)?.state.orderbookExt) {
@@ -658,25 +641,19 @@ const getImportedJurisdictionContracts = (
   configuredContracts?: JurisdictionConfig['contracts'],
 ): ImportedJurisdictionContracts => {
   const replica = env.state.jReplicas?.get(jurisdictionName);
-  const depositoryAddress = String(
-    replica?.contracts?.depository || configuredContracts?.depository || '',
-  ).trim();
+  const depositoryAddress = String(replica?.contracts?.depository || configuredContracts?.depository || '').trim();
   const entityProviderAddress = String(
     replica?.contracts?.entityProvider || configuredContracts?.entityProvider || '',
   ).trim();
   const chainId = Number(replica?.chainId);
   return {
-    ...(Number.isFinite(chainId) && chainId > 0
-      ? { chainId: Math.floor(chainId) }
-      : {}),
+    ...(Number.isFinite(chainId) && chainId > 0 ? { chainId: Math.floor(chainId) } : {}),
     ...(depositoryAddress ? { depositoryAddress } : {}),
     ...(entityProviderAddress ? { entityProviderAddress } : {}),
   };
 };
 
-type HubBootstrapPosition = NonNullable<
-  NonNullable<Parameters<typeof bootstrapHub>[1]>['position']
->;
+type HubBootstrapPosition = NonNullable<NonNullable<Parameters<typeof bootstrapHub>[1]>['position']>;
 
 const bootstrapHubEntity = async (
   env: RuntimeReplica,
@@ -703,9 +680,7 @@ const bootstrapHubEntity = async (
     rpcUrl: input.rpcUrl,
     httpUrl: apiUrl,
     port: resolvedArgs.apiPort,
-    ...(input.jurisdictionName
-      ? { jurisdictionName: input.jurisdictionName }
-      : {}),
+    ...(input.jurisdictionName ? { jurisdictionName: input.jurisdictionName } : {}),
     ...(input.position ? { position: input.position } : {}),
   });
   if (!result?.entityId) throw new Error(input.failureCode);
@@ -724,37 +699,25 @@ const bootstrapHubJurisdictions = async (
     rpcUrl: primary.rpc,
     failureCode: 'HUB_BOOTSTRAP_FAILED',
   });
-  const primaryContracts = getImportedJurisdictionContracts(
-    env,
-    primary.name,
-    primary.contracts,
-  );
-  const entries: HubBootstrapEntry[] = [{
-    entityId: primaryBootstrap.entityId,
-    signerId: primaryBootstrap.signerId,
-    name: resolvedArgs.name,
-    jurisdictionName: primary.name,
-    chainId: primaryContracts.chainId ?? primary.chainId,
-    ...(primaryContracts.depositoryAddress
-      ? { depositoryAddress: primaryContracts.depositoryAddress }
-      : {}),
-    ...(primaryContracts.entityProviderAddress
-      ? { entityProviderAddress: primaryContracts.entityProviderAddress }
-      : {}),
-    primary: true,
-  }];
-  await ensureOrderbook(
-    env,
-    primaryBootstrap.entityId,
-    primaryBootstrap.signerId,
-  );
+  const primaryContracts = getImportedJurisdictionContracts(env, primary.name, primary.contracts);
+  const entries: HubBootstrapEntry[] = [
+    {
+      entityId: primaryBootstrap.entityId,
+      signerId: primaryBootstrap.signerId,
+      name: resolvedArgs.name,
+      jurisdictionName: primary.name,
+      chainId: primaryContracts.chainId ?? primary.chainId,
+      ...(primaryContracts.depositoryAddress ? { depositoryAddress: primaryContracts.depositoryAddress } : {}),
+      ...(primaryContracts.entityProviderAddress
+        ? { entityProviderAddress: primaryContracts.entityProviderAddress }
+        : {}),
+      primary: true,
+    },
+  ];
+  await ensureOrderbook(env, primaryBootstrap.entityId, primaryBootstrap.signerId);
 
-  for (const [index, configured] of resolveSecondaryJurisdictions(
-    primary.rpc,
-  ).entries()) {
-    const name = String(
-      configured.name || `Secondary ${index + 1}`,
-    ).trim();
+  for (const [index, configured] of resolveSecondaryJurisdictions(primary.rpc).entries()) {
+    const name = String(configured.name || `Secondary ${index + 1}`).trim();
     if (!name) continue;
     const jurisdiction = {
       ...configured,
@@ -785,23 +748,15 @@ const bootstrapHubJurisdictions = async (
       },
     });
     env.activeJurisdiction = previous || primary.name;
-    const contracts = getImportedJurisdictionContracts(
-      env,
-      name,
-      jurisdiction.contracts,
-    );
+    const contracts = getImportedJurisdictionContracts(env, name, jurisdiction.contracts);
     entries.push({
       entityId: sibling.entityId,
       signerId: sibling.signerId,
       name: resolvedArgs.name,
       jurisdictionName: name,
       chainId: contracts.chainId ?? jurisdiction.chainId,
-      ...(contracts.depositoryAddress
-        ? { depositoryAddress: contracts.depositoryAddress }
-        : {}),
-      ...(contracts.entityProviderAddress
-        ? { entityProviderAddress: contracts.entityProviderAddress }
-        : {}),
+      ...(contracts.depositoryAddress ? { depositoryAddress: contracts.depositoryAddress } : {}),
+      ...(contracts.entityProviderAddress ? { entityProviderAddress: contracts.entityProviderAddress } : {}),
       primary: false,
     });
     await ensureOrderbook(env, sibling.entityId, sibling.signerId);
@@ -844,7 +799,12 @@ const buildLocalHealth = (
   const runtimeHalted = env.infrastructure?.halted === true;
   const selfJurisdictionName = getEntityJurisdictionName(env, entityId);
   const selfJurisdiction = getEntityJurisdiction(env, entityId) || selfJurisdictionName;
-  const mesh = bindHubMesh(meshHubIdentities, selfJurisdiction, entityId ?? '', readVisibleHubProfiles(env, selfJurisdiction));
+  const mesh = bindHubMesh(
+    meshHubIdentities,
+    selfJurisdiction,
+    entityId ?? '',
+    readVisibleHubProfiles(env, selfJurisdiction),
+  );
   const pairs = entityId ? buildPairHealth(env, entityId, mesh.configuredPeers) : [];
   const meshReady = Boolean(entityId) && hubMeshReady(mesh, pairs);
 
@@ -890,10 +850,7 @@ const buildLocalHealth = (
   };
 };
 
-const handleHubJurisdictionsRequest = (
-  env: RuntimeReplica,
-  url: URL,
-): Response | null => {
+const handleHubJurisdictionsRequest = (env: RuntimeReplica, url: URL): Response | null => {
   if (url.pathname !== '/api/jurisdictions') return null;
   const payload = buildRuntimeJurisdictionsPayload(env);
   return payload
@@ -903,10 +860,10 @@ const handleHubJurisdictionsRequest = (
           'Cache-Control': 'no-store, no-cache, must-revalidate',
         },
       })
-    : new Response(
-        safeStringify({ error: 'JURISDICTION_PAYLOAD_UNAVAILABLE' }),
-        { status: 503, headers: JSON_HEADERS },
-      );
+    : new Response(safeStringify({ error: 'JURISDICTION_PAYLOAD_UNAVAILABLE' }), {
+        status: 503,
+        headers: JSON_HEADERS,
+      });
 };
 
 type MeshBootstrapMilestones = {
@@ -928,22 +885,15 @@ type HubMeshBootstrapInput = {
   ensureFaucetReady: () => Promise<void>;
 };
 
-const ensureHubMeshReserves = async (
-  input: HubMeshBootstrapInput,
-): Promise<boolean> => {
+const ensureHubMeshReserves = async (input: HubMeshBootstrapInput): Promise<boolean> => {
   input.markProgress('local-reserve-funding');
-  const health = await ensureHubBootstrapReserves(
-    hubReserveDeps,
-    input.env,
-    input.hubBootstraps,
-    step => input.markProgress(`local-reserve:${step}`),
+  const health = await ensureHubBootstrapReserves(hubReserveDeps, input.env, input.hubBootstraps, step =>
+    input.markProgress(`local-reserve:${step}`),
   );
   return health.ok === true && (!canDeployHubDefaultTokens(input.jurisdiction.chainId) || health.targetMet === true);
 };
 
-const advanceHubMeshBootstrap = async (
-  input: HubMeshBootstrapInput,
-): Promise<boolean> => {
+const advanceHubMeshBootstrap = async (input: HubMeshBootstrapInput): Promise<boolean> => {
   const jurisdiction =
     getEntityJurisdiction(input.env, input.bootstrap.entityId) ||
     getEntityJurisdictionName(input.env, input.bootstrap.entityId) ||
@@ -956,10 +906,7 @@ const advanceHubMeshBootstrap = async (
   );
   if (mesh.ownerIndex < 0) throw new Error(`HUB_MESH_OWNER_UNCONFIGURED:${input.bootstrap.entityId}`);
   if (!input.milestones.gossipReady && mesh.gossipReady) {
-    finishTiming(
-      'gossip_ready',
-      startedAtFor('gossip_ready') ?? startTiming('gossip_ready'),
-    );
+    finishTiming('gossip_ready', startedAtFor('gossip_ready') ?? startTiming('gossip_ready'));
     input.milestones.gossipReady = true;
   } else if (!input.milestones.gossipReady) {
     startTiming('gossip_ready');
@@ -990,23 +937,15 @@ const advanceHubMeshBootstrap = async (
     });
     await settleRuntimeFor(input.env, 35);
   }
-  const accountReady = peers.every(({ identity: peer }) =>
-    hasAccount(input.env, input.bootstrap.entityId, peer.entityId) &&
-    DEFAULT_ACCOUNT_TOKEN_IDS.every(tokenId =>
-      Boolean(
-        getAccountReplica(
-          input.env,
-          input.bootstrap.entityId,
-          peer.entityId,
-        )?.state.deltas.get(tokenId),
+  const accountReady = peers.every(
+    ({ identity: peer }) =>
+      hasAccount(input.env, input.bootstrap.entityId, peer.entityId) &&
+      DEFAULT_ACCOUNT_TOKEN_IDS.every(tokenId =>
+        Boolean(getAccountReplica(input.env, input.bootstrap.entityId, peer.entityId)?.state.deltas.get(tokenId)),
       ),
-    ),
   );
   if (accountReady && !input.milestones.accountsReady) {
-    finishTiming(
-      'mesh_accounts',
-      startedAtFor('mesh_accounts') ?? startTiming('mesh_accounts'),
-    );
+    finishTiming('mesh_accounts', startedAtFor('mesh_accounts') ?? startTiming('mesh_accounts'));
     input.milestones.accountsReady = true;
   }
   if (creditInputs.length > 0) {
@@ -1029,10 +968,7 @@ const advanceHubMeshBootstrap = async (
   );
   if (!creditReady) return false;
   if (!input.milestones.creditReady) {
-    finishTiming(
-      'mesh_credit',
-      startedAtFor('mesh_credit') ?? startTiming('mesh_credit'),
-    );
+    finishTiming('mesh_credit', startedAtFor('mesh_credit') ?? startTiming('mesh_credit'));
     input.milestones.creditReady = true;
   }
   if (!input.milestones.reserveReady) {
@@ -1047,15 +983,9 @@ const advanceHubMeshBootstrap = async (
     await input.ensureFaucetReady();
     finishTiming('mesh_ready_total', input.totalStartedAt);
   }
-  const supportReady = supportPeerProvisioningReady(
-    input.env,
-    input.hubBootstraps,
-    supportPeerIdentities,
-  );
+  const supportReady = supportPeerProvisioningReady(input.env, input.hubBootstraps, supportPeerIdentities);
   if (!supportReady) return false;
-  return input.milestones.gossipReady &&
-    input.milestones.accountsReady &&
-    input.milestones.creditReady;
+  return input.milestones.gossipReady && input.milestones.accountsReady && input.milestones.creditReady;
 };
 
 const requireHubTokenCatalog = async (live: HubNodeLiveContext): Promise<JTokenInfo[]> => {
@@ -1068,9 +998,12 @@ const requireHubTokenCatalog = async (live: HubNodeLiveContext): Promise<JTokenI
 
 const createHubExternalWalletApi = (live: HubNodeLiveContext) =>
   createExternalWalletApi({
-    getJAdapter: (entityId, jurisdiction) => jurisdiction
-      ? getLiveJAdapter(live.env, jurisdiction) ?? null
-      : entityId ? getEntityJAdapter(live.env, entityId) : live.activeJAdapter,
+    getJAdapter: (entityId, jurisdiction) =>
+      jurisdiction
+        ? (getLiveJAdapter(live.env, jurisdiction) ?? null)
+        : entityId
+          ? getEntityJAdapter(live.env, entityId)
+          : live.activeJAdapter,
     getRuntimeId: () => String(live.env.runtimeId || ''),
     getTokenCatalog: async (entityId, jurisdiction) => {
       if (jurisdiction) {
@@ -1100,10 +1033,11 @@ const createHubExternalWalletApi = (live: HubNodeLiveContext) =>
     fundBrowserVmWallet: async () => false,
   });
 
-const createHubStatusHandler = (
-  live: HubNodeLiveContext,
-  bootstrapClockMs: () => number,
-): ((url: URL, operatorAuthorized: boolean) => Response | null) =>
+const createHubStatusHandler =
+  (
+    live: HubNodeLiveContext,
+    bootstrapClockMs: () => number,
+  ): ((url: URL, operatorAuthorized: boolean) => Response | null) =>
   (url, operatorAuthorized) => {
     if (url.pathname === '/api/info') {
       return new Response(
@@ -1136,10 +1070,9 @@ const createHubStatusHandler = (
         MESH_BOOTSTRAP_STALL_TIMEOUT_MS,
       ),
     );
-    return new Response(
-      safeStringify(operatorAuthorized ? health : publicLocalHubHealth(health)),
-      { headers: JSON_HEADERS },
-    );
+    return new Response(safeStringify(operatorAuthorized ? health : publicLocalHubHealth(health)), {
+      headers: JSON_HEADERS,
+    });
   };
 
 type HubHttpSurface = {
@@ -1170,6 +1103,12 @@ const startHubHttpSurface = (
     () => live.externalIngressReady,
     brainVaultOwner,
     () => live.brainVaultReady,
+    ownerEntityId =>
+      publishHubOwnerProfile(
+        live.p2p,
+        live.hubBootstraps.map(entry => entry.entityId),
+        ownerEntityId,
+      ),
   );
   const httpDrain = createHttpDrainTracker();
   const handleControl = createHubControlRequestHandler({
@@ -1208,10 +1147,9 @@ const startHubHttpSurface = (
       const releaseHttp = httpDrain.begin();
       try {
         const url = new URL(request.url);
-        const operatorAuthorized = isLocalOperatorRequest(
-          request,
-          resolveSocketPeerAddress(serverRef, request),
-        ) || hasDaemonControlAuth(request, live.env);
+        const operatorAuthorized =
+          isLocalOperatorRequest(request, resolveSocketPeerAddress(serverRef, request)) ||
+          hasDaemonControlAuth(request, live.env);
         if (request.headers.get('upgrade') === 'websocket' && url.pathname === '/rpc') {
           return serverRef.upgrade(request, { data: { type: 'rpc' } })
             ? undefined
@@ -1414,12 +1352,15 @@ const installHubShutdownHandlers = (
       }
     };
     await runCleanup('mesh_producer', meshController.pauseAndWait);
-    await runCleanup('quiesce', () => quiesceNodeRuntime(live.env, {
-      workTimeoutMs: 10_000,
-      loopTimeoutMs: 10_000,
-    }));
+    await runCleanup('quiesce', () =>
+      quiesceNodeRuntime(live.env, {
+        workTimeoutMs: 10_000,
+        loopTimeoutMs: 10_000,
+      }),
+    );
     await runCleanup('server', () =>
-      stopServerGracefully(httpSurface.server, httpSurface.httpDrain, resolvedArgs.name, 5_000));
+      stopServerGracefully(httpSurface.server, httpSurface.httpDrain, resolvedArgs.name, 5_000),
+    );
     await runCleanup('runtime_db', () => closeRuntimeDb(live.env));
     await runCleanup('infra_db', () => closeInfraDb(live.env));
     if (failures.length > 0) {
@@ -1458,18 +1399,17 @@ const run = async (): Promise<void> => {
   await brainVaultOwner.prewarm(resolvedArgs.seed);
   const env = await main(resolvedArgs.seed, {
     localSigners: localSignerLabels.map(label => ({ label })),
-    trustedJurisdictionRpcBindings: resolveMeshJurisdictionRpcBindings(
-      resolvedArgs.rpcUrl,
-      resolveLocalApiUrl,
-    ),
+    trustedJurisdictionRpcBindings: resolveMeshJurisdictionRpcBindings(resolvedArgs.rpcUrl, resolveLocalApiUrl),
   });
   setRuntimeDeliveryReady(env, false);
   nodeLog.info('signer_keys.ready', { name: resolvedArgs.name, count: localSignerLabels.length });
-  if (restoredRuntimeRouteRelocated(env.gossip.getProfiles(), {
-    runtimeId: String(env.runtimeId || ''),
-    wsUrl: directWsUrl,
-    relayUrls: [resolvedArgs.relayUrl],
-  })) {
+  if (
+    restoredRuntimeRouteRelocated(env.gossip.getProfiles(), {
+      runtimeId: String(env.runtimeId || ''),
+      wsUrl: directWsUrl,
+      relayUrls: [resolvedArgs.relayUrl],
+    })
+  ) {
     await clearGossip(env, { runtimeId: String(env.runtimeId || '') });
     nodeLog.info('gossip.relocated_route_cache_cleared', { wsUrl: directWsUrl });
   }

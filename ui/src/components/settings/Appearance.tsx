@@ -7,6 +7,8 @@ import { TOUR_STEPS } from '../../tour/steps';
 
 export function Appearance() {
   const navigate = useNavigate();
+  const showGuide = useApp(s => s.showXlnMascot);
+  const setShowGuide = useApp(s => s.setShowXlnMascot);
   const theme = useApp(s => s.theme);
   const density = useApp(s => s.density);
   const setDensity = useApp(s => s.setDensity);
@@ -57,6 +59,22 @@ export function Appearance() {
           </button>
         </span>
       </div>
+
+      <label className="setting">
+        <span>
+          <span className="t">xln guide</span>
+          <span className="s" style={{ display: 'block' }}>
+            A movable assistant for public documentation. Hidden until you enable it.
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          data-testid="settings-xln-mascot-toggle"
+          checked={showGuide}
+          onChange={event => setShowGuide(event.target.checked)}
+          aria-label="Show xln guide"
+        />
+      </label>
 
       <div className="sect">
         <h3 className="caps">Design</h3>
@@ -201,7 +219,14 @@ export function Appearance() {
               Resume
             </button>
           ) : null}
-          <button type="button" onClick={() => { setTour({ active: true, index: 0, completed: false }); navigate('/'); }} data-testid="tour-replay">
+          <button
+            type="button"
+            onClick={() => {
+              setTour({ active: true, index: 0, completed: false });
+              navigate('/');
+            }}
+            data-testid="tour-replay"
+          >
             {tour.completed || tour.index > 0 ? 'Replay' : 'Start'}
           </button>
         </span>

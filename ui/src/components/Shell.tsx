@@ -8,6 +8,7 @@ import { Palette } from './Palette';
 import { JurisdictionBanner } from './JurisdictionBanner';
 import { getJurisdictionBadgeInfo } from '@xln/frontend/lib/utils/identity/jurisdictionBadge';
 import { Tour } from './Tour';
+import { Guide } from './guide/Guide';
 import { useExternalWalletSync } from '../runtime/financial/external';
 import { useWallet } from '../runtime/views';
 import { Logo } from './Logo';
@@ -159,6 +160,7 @@ export function Shell({ children }: { children: ReactNode }) {
         ))}
       </nav>
 
+      <Guide />
       <Toasts />
     </div>
   );
