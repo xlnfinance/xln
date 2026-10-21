@@ -1,0 +1,73 @@
+{
+  "baseSHA": "76ca8bcdadea4a553536869f96db5bb1e8e74668",
+  "firstFailure": {
+    "command": "RSCORE_REQUIRE_SEMANTIC_COMPLETENESS=1 bun run test:unit",
+    "passes": 5524,
+    "failures": 1,
+    "assertions": 677487,
+    "completedProcesses": 3,
+    "totalProcesses": 4,
+    "error": "HLT_ECONOMIC_GATE_STARTED_PID_INVALID"
+  },
+  "rootCause": "started was visible as an empty file between open and write; ready already used atomic rename. Controller reads PID at first visibility.",
+  "observedBefore": {
+    "firstStartedVisibleBytes": 0,
+    "expectedPidBytes": 6,
+    "subsequentReadComplete": true,
+    "attempt": 0
+  },
+  "change": "Publish started through a same-directory private temporary file and rename, preserving strict PID validation, unchanged workload identity and all existing deadlines.",
+  "verification": {
+    "regressionBefore": "FAIL: first visible inode size0 instead of6",
+    "regressionAndRelatedAfter": {
+      "passed": 39,
+      "failed": 0,
+      "assertions": 464
+    },
+    "sameReproducerAfter": {
+      "gates": 128,
+      "markers": 256,
+      "allFirstVisiblePidsComplete": true
+    },
+    "receipts": {
+      "exact-unit-strict-76ca8bcdadea-01": {
+        "exitCode": 1,
+        "seconds": 1129.34367075,
+        "sourceUnchanged": true,
+        "logSHA256": "fca76c4bb291ca4ca90923f2c156a6ed165c8efd5a1ef0903f096ea37d844123"
+      },
+      "hlt-pid-exact-before-01": {
+        "exitCode": 0,
+        "seconds": 2.417496709,
+        "sourceUnchanged": true,
+        "logSHA256": "789b5d136dc4ed476098adeae10271f70dcc789cf4512fde552fca2f34f556d1"
+      },
+      "hlt-pid-publication-before-01": {
+        "exitCode": 1,
+        "seconds": 1.102256958,
+        "sourceUnchanged": true,
+        "logSHA256": "731a2e88755502dfcf7ff319d4c12653d6e210a9538aeecf13ae1c1ea07e1c74"
+      },
+      "hlt-pid-regression-before-01": {
+        "exitCode": 1,
+        "seconds": 1.9367388749999999,
+        "sourceUnchanged": true,
+        "logSHA256": "f695c1d7d84c665a06ebccea7a1adf9dbe2692c0c8631f44833a1ae95b01069b"
+      },
+      "hlt-pid-regression-after-01": {
+        "exitCode": 0,
+        "seconds": 3.902692042,
+        "sourceUnchanged": true,
+        "logSHA256": "ed75058e0af6888581bf9ad721e75dba6b7588d10f6d35ac495ab456610ecda7"
+      },
+      "hlt-pid-publication-after-01": {
+        "exitCode": 0,
+        "seconds": 4.124932542,
+        "sourceUnchanged": true,
+        "logSHA256": "81e4629345c8f0f1c18b84cddc1a3693b5add699dfece06a34a7a2d9468395ce"
+      }
+    }
+  },
+  "scope": "Operational HLT process coordination only; no RJEA, financial, storage or signing transition changed. No HLT throughput claimed. Full exact unit/release and final immutable-SHA acceptance remain required.",
+  "evidenceRoot": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019"
+}

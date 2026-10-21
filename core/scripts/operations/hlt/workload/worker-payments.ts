@@ -278,7 +278,11 @@ export const waitForHltEconomicStartGate = async (): Promise<void> => {
   }
   // The controller compares this with `ready`; a PID change would mean the
   // measured window ran on a restarted workload instead of the prepared one.
-  writeFileSync(startedPath, `${process.pid}\n`, { mode: 0o600 });
+  // Publish only the complete PID, as with `ready`; open-before-write is visible
+  // to the controller even when the writer uses synchronous filesystem calls.
+  const startedTemporary = `${startedPath}.tmp-${process.pid}`;
+  writeFileSync(startedTemporary, `${process.pid}\n`, { mode: 0o600 });
+  renameSync(startedTemporary, startedPath);
 };
 
 /**
