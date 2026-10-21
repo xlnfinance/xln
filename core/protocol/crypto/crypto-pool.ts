@@ -12,10 +12,7 @@
  * touch node built-ins at load time.
  */
 import { keccak256Bytes } from './fast/fast-keccak';
-import {
-  decryptOpaqueHtlcBytes,
-  type OpaqueHtlcCiphertext,
-} from '../htlc/multi-recipient';
+import { decryptOpaqueHtlcBytes, type OpaqueHtlcCiphertext } from '../htlc/multi-recipient';
 
 type BunGlobal = { isMainThread?: boolean };
 const bunRuntime = (): BunGlobal | undefined => (globalThis as { Bun?: BunGlobal }).Bun;
@@ -30,7 +27,9 @@ const workerScope = (): WorkerScope | undefined => {
   const postMessage: unknown = Reflect.get(target, 'postMessage');
   if (typeof postMessage !== 'function') return undefined;
   return {
-    setOnMessage: listener => { Reflect.set(target, 'onmessage', listener); },
+    setOnMessage: listener => {
+      Reflect.set(target, 'onmessage', listener);
+    },
     postMessage: (value, transfer) => {
       Reflect.apply(postMessage, target, transfer ? [value, transfer] : [value]);
     },
@@ -96,13 +95,14 @@ export type OnionJobItem = Readonly<{
 /** Plaintext, or null when the synchronous path would reject the layer. */
 type OnionJobResult = Uint8Array | null;
 
-const onionBatchSync = (items: readonly OnionJobItem[]): OnionJobResult[] => items.map(item => {
-  try {
-    return decryptOpaqueHtlcBytes(item.ciphertext, item.publicKey, item.privateKey, item.contextHash);
-  } catch {
-    return null;
-  }
-});
+const onionBatchSync = (items: readonly OnionJobItem[]): OnionJobResult[] =>
+  items.map(item => {
+    try {
+      return decryptOpaqueHtlcBytes(item.ciphertext, item.publicKey, item.privateKey, item.contextHash);
+    } catch {
+      return null;
+    }
+  });
 
 type Job =
   | { id: number; kind: 'recover'; records: Uint8Array }
@@ -179,19 +179,27 @@ class WorkerLane {
     for (const resolve of failed) resolve(new Uint8Array(0));
   }
 
-  workers(): Worker[] | null {
-    if (this.#workers !== undefined) return this.#workers;
-    const size = this.#size();
-    if (size === 0 || bunRuntime()?.isMainThread !== true || typeof Worker === 'undefined') {
-      this.#workers = null;
-      return null;
-    }
+  enabled(): boolean {
+    return (
+      this.#workers !== null &&
+      this.#size() > 0 &&
+      workerEntry !== null &&
+      bunRuntime()?.isMainThread === true &&
+      typeof Worker !== 'undefined'
+    );
+  }
+
+  workers(jobs: number): Worker[] | null {
     const entry = workerEntry;
-    if (!entry) {
+    if (!this.enabled() || !entry) {
       this.#workers = null;
       return null;
     }
-    this.#workers = Array.from({ length: size }, () => {
+    // Availability checks and empty batches must not boot idle worker VMs.
+    // Grow only for actual concurrent jobs; preserve both lanes and their cap.
+    const size = Math.min(this.#size(), this.#pending.size + jobs);
+    this.#workers ??= [];
+    while (this.#workers.length < size) {
       const worker = new Worker(entry, {
         env: { ...process.env, XLN_CRYPTO_POOL_WORKER: '1' },
       } as WorkerOptions);
@@ -205,15 +213,15 @@ class WorkerLane {
       };
       worker.onerror = () => this.#retire();
       worker.addEventListener('close', () => this.#retire());
-      const unref = Reflect.get(worker, 'unref');
-      if (typeof unref === 'function') Reflect.apply(unref, worker, []);
-      return worker;
-    });
+      this.#workers.push(worker);
+    }
+    // Growing an already-busy lane must keep its new workers alive too.
+    this.#setReferenced(this.#pending.size > 0);
     return this.#workers;
   }
 
   submit(job: Job, transfer?: Transferable[]): Promise<JobResult['result']> {
-    const workers = this.workers();
+    const workers = this.workers(1);
     if (!workers) return Promise.resolve(new Uint8Array(0));
     return new Promise((resolve, reject) => {
       const worker = workers[this.#nextSlot % workers.length];
@@ -234,14 +242,10 @@ class WorkerLane {
   }
 }
 
-const bulkLane = new WorkerLane(() =>
-  configuredSize('XLN_CRYPTO_POOL_WORKERS', Math.max(0, Math.min(8, cores() - 2))));
-const signLane = new WorkerLane(() =>
-  configuredSize('XLN_CRYPTO_SIGN_WORKERS', Math.max(0, Math.min(4, cores() - 2))));
+const bulkLane = new WorkerLane(() => configuredSize('XLN_CRYPTO_POOL_WORKERS', Math.max(0, Math.min(8, cores() - 2))));
+const signLane = new WorkerLane(() => configuredSize('XLN_CRYPTO_SIGN_WORKERS', Math.max(0, Math.min(4, cores() - 2))));
 
-const getPool = (): Worker[] | null => bulkLane.workers();
-
-export const cryptoPoolEnabled = (): boolean => getPool() !== null;
+export const cryptoPoolEnabled = (): boolean => bulkLane.enabled();
 
 /**
  * Whether batched signing has workers of its own.
@@ -251,7 +255,7 @@ export const cryptoPoolEnabled = (): boolean => getPool() !== null;
  * `XLN_CRYPTO_POOL_WORKERS=0` and `XLN_CRYPTO_SIGN_WORKERS=4` every signature
  * silently fell back to the main thread.
  */
-export const cryptoSignPoolEnabled = (): boolean => signLane.workers() !== null;
+export const cryptoSignPoolEnabled = (): boolean => signLane.enabled();
 
 const isBytes = (value: JobResult['result']): value is Uint8Array => value instanceof Uint8Array;
 
@@ -260,19 +264,23 @@ const isBytes = (value: JobResult['result']): value is Uint8Array => value insta
  * input order, or null when no pool is available (caller falls back to sync).
  */
 export const recoverAddressesBatch = async (records: Uint8Array): Promise<Uint8Array | null> => {
-  const workers = getPool();
-  if (!workers) return null;
+  if (!bulkLane.enabled()) return null;
   const count = Math.floor(records.length / ECDSA_RECOVER_RECORD_BYTES);
   if (count === 0) return new Uint8Array(0);
+  const workers = bulkLane.workers(count);
+  if (!workers) return null;
   const perWorker = Math.ceil(count / workers.length);
   const parts: Promise<{ offset: number; result: JobResult['result'] }>[] = [];
   for (let start = 0; start < count; start += perWorker) {
     const end = Math.min(count, start + perWorker);
     // Own buffer per job so the transfer list detaches only this slice.
     const slice = records.slice(start * ECDSA_RECOVER_RECORD_BYTES, end * ECDSA_RECOVER_RECORD_BYTES);
-    const id = nextJobId += 1;
-    parts.push(bulkLane.submit({ id, kind: 'recover', records: slice }, [slice.buffer as ArrayBuffer])
-      .then(result => ({ offset: start, result })));
+    const id = (nextJobId += 1);
+    parts.push(
+      bulkLane
+        .submit({ id, kind: 'recover', records: slice }, [slice.buffer as ArrayBuffer])
+        .then(result => ({ offset: start, result })),
+    );
   }
   const out = new Uint8Array(count * ECDSA_RECOVER_RESULT_BYTES);
   for (const { offset, result } of await Promise.all(parts)) {
@@ -283,19 +291,26 @@ export const recoverAddressesBatch = async (records: Uint8Array): Promise<Uint8A
 };
 
 /** Sign N digests with one key; 65-byte recoverable signatures in input order, or null. */
-export const signDigestsBatchOnPool = async (privateKey: Uint8Array, digests: Uint8Array): Promise<Uint8Array | null> => {
-  const workers = signLane.workers();
-  if (!workers) return null;
+export const signDigestsBatchOnPool = async (
+  privateKey: Uint8Array,
+  digests: Uint8Array,
+): Promise<Uint8Array | null> => {
+  if (!signLane.enabled()) return null;
   const count = Math.floor(digests.length / 32);
   if (count === 0) return new Uint8Array(0);
+  const workers = signLane.workers(count);
+  if (!workers) return null;
   const perWorker = Math.ceil(count / workers.length);
   const parts: Promise<{ offset: number; result: JobResult['result'] }>[] = [];
   for (let start = 0; start < count; start += perWorker) {
     const end = Math.min(count, start + perWorker);
     const slice = digests.slice(start * 32, end * 32);
-    const id = nextJobId += 1;
-    parts.push(signLane.submit({ id, kind: 'sign', privateKey: privateKey.slice(), digests: slice }, [slice.buffer as ArrayBuffer])
-      .then(result => ({ offset: start, result })));
+    const id = (nextJobId += 1);
+    parts.push(
+      signLane
+        .submit({ id, kind: 'sign', privateKey: privateKey.slice(), digests: slice }, [slice.buffer as ArrayBuffer])
+        .then(result => ({ offset: start, result })),
+    );
   }
   const out = new Uint8Array(count * ECDSA_SIGNATURE_BYTES);
   for (const { offset, result } of await Promise.all(parts)) {
@@ -307,14 +322,19 @@ export const signDigestsBatchOnPool = async (privateKey: Uint8Array, digests: Ui
 
 /** Decrypt onion layers across the pool; results in input order, or null. */
 export const decryptOnionLayersBatch = async (items: readonly OnionJobItem[]): Promise<OnionJobResult[] | null> => {
-  const workers = getPool();
-  if (!workers || items.length === 0) return workers ? [] : null;
+  if (!bulkLane.enabled()) return null;
+  if (items.length === 0) return [];
+  const workers = bulkLane.workers(items.length);
+  if (!workers) return null;
   const perWorker = Math.ceil(items.length / workers.length);
   const parts: Promise<{ offset: number; result: JobResult['result'] }>[] = [];
   for (let start = 0; start < items.length; start += perWorker) {
-    const id = nextJobId += 1;
-    parts.push(bulkLane.submit({ id, kind: 'onion', items: items.slice(start, start + perWorker) })
-      .then(result => ({ offset: start, result })));
+    const id = (nextJobId += 1);
+    parts.push(
+      bulkLane
+        .submit({ id, kind: 'onion', items: items.slice(start, start + perWorker) })
+        .then(result => ({ offset: start, result })),
+    );
   }
   const out: OnionJobResult[] = new Array(items.length);
   for (const { offset, result } of await Promise.all(parts)) {

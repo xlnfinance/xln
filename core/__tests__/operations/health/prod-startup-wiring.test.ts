@@ -469,7 +469,7 @@ describe('production startup wiring', () => {
 
   test('hub drains relocated gossip before starting any network route', () => {
     const hubNode = readHubNodeSource();
-    const relocationStart = hubNode.indexOf('if (restoredRuntimeRouteRelocated(');
+    const relocationStart = hubNode.search(/if\s*\(\s*restoredRuntimeRouteRelocated\(/);
     const awaitedClear = hubNode.indexOf(
       "await clearGossip(env, { runtimeId: String(env.runtimeId || '') });",
       relocationStart,
@@ -899,8 +899,8 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(hubNode).toContain('const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);');
     expect(hubNode).toContain('configuredSupportPeers');
-    expect(hubNode).toContain(
-      "parseConfiguredPeerIdentities(resolvedArgs.supportPeerIdentitiesJson, 'SUPPORT_PEER_IDENTITIES')",
+    expect(hubNode).toMatch(
+      /parseConfiguredPeerIdentities\(\s*resolvedArgs\.supportPeerIdentitiesJson,\s*'SUPPORT_PEER_IDENTITIES',?\s*\)/,
     );
     expect(hubNode).toContain("parseConfiguredPeerIdentities(resolvedArgs.hubIdentitiesJson, 'HUB_IDENTITIES')");
     expect(hubNode).not.toContain('} catch {\n    return [];\n  }\n};\n\nconst resolvedArgs');
@@ -917,7 +917,9 @@ describe('production startup wiring', () => {
     for (const nodeSource of [hubNode, mmNode]) {
       expect(nodeSource).toContain('trustedJurisdictionRpcBindings: resolveMeshJurisdictionRpcBindings(');
       expect(nodeSource).toContain('resolvedArgs.rpcUrl,');
-      expect(nodeSource).toContain('resolveLocalApiUrl,');
+      expect(nodeSource).toMatch(
+        /trustedJurisdictionRpcBindings: resolveMeshJurisdictionRpcBindings\(\s*resolvedArgs\.rpcUrl,\s*resolveLocalApiUrl,?\s*\)/,
+      );
     }
     expect(serverJurisdictions).toContain('const normalizeJurisdictionDisplayName = (value: unknown): string =>');
     expect(serverJurisdictions).not.toContain("normalized === 'arrakis'");

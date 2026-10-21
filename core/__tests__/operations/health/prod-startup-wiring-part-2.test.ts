@@ -1289,8 +1289,8 @@ describe('production startup wiring', () => {
       'const admitDirectEntityInputs =',
       'const wireDirectRuntimeInfrastructure =',
     );
-    expect(hubTransport).toContain(
-      'admitDirectEntityInputs(env, isIngressReady, debug, from, envelope, ingressTimestamp, sessionAuthenticated === true)',
+    expect(hubTransport).toMatch(
+      /admitDirectEntityInputs\(\s*env,\s*isIngressReady,\s*debug,\s*from,\s*envelope,\s*ingressTimestamp,\s*sessionAuthenticated === true,?\s*\)/,
     );
     const sourceVerified = directInput.indexOf(
       'assertRuntimeEntityInputsEnvelopeSource(env, from, envelope, sessionAuthenticated);',
@@ -1484,7 +1484,7 @@ describe('production startup wiring', () => {
     );
     expect(orchestrator).not.toContain('--mesh-hub-identities-json');
     // The MM quotes only on configured hub Entities, never on self-declared isHub profiles.
-    expect(orchestrator).toContain("'--hub-identities-json', safeStringify(deps.getHubIdentities()),");
+    expect(orchestrator).toMatch(/'--hub-identities-json',\s*safeStringify\(deps\.getHubIdentities\(\)\),/);
     expect(orchestrator).not.toContain('--mesh-hub-names');
     expect(mmNode).toContain('const identity = configured.get(String(profile.entityId).toLowerCase());');
   });
@@ -1596,8 +1596,8 @@ describe('production startup wiring', () => {
     expect(driveMeshBootstrap).toContain('const mesh = bindHubMesh(');
     expect(driveMeshBootstrap).toContain('if (!mesh.gossipReady) return false;');
     expect(hubNode).not.toContain('meshHubNames');
-    expect(hubNode).toContain(
-      "const mesh = bindHubMesh(meshHubIdentities, selfJurisdiction, entityId ?? '', readVisibleHubProfiles(env, selfJurisdiction));",
+    expect(hubNode).toMatch(
+      /const mesh = bindHubMesh\(\s*meshHubIdentities,\s*selfJurisdiction,\s*entityId \?\? '',\s*readVisibleHubProfiles\(env, selfJurisdiction\),?\s*\);/,
     );
     expect(hubNode).toContain('const meshReady = Boolean(entityId) && hubMeshReady(mesh, pairs);');
     expect(hubNode).not.toContain('profile.hubName || profile.name');
@@ -1614,7 +1614,7 @@ describe('production startup wiring', () => {
     expect(driveMeshBootstrap).not.toContain('assertBootstrapNotStalled');
     expect(driveMeshBootstrap).not.toContain('meshLoopProgress = beginBootstrapProgress(Date.now())');
     expect(driveMeshBootstrap).not.toContain("markMeshBootstrapProgress('idle')");
-    expect(hubNode).toContain('step => input.markProgress(`local-reserve:${step}`)');
+    expect(hubNode).toMatch(/step =>\s*input\.markProgress\(`local-reserve:\$\{step\}`\)/);
     expect(hubNode).toContain('const bootstrapClockMs = (): number => getPerfMs();');
     expect(hubNode).toContain('beginBootstrapProgress(bootstrapClockMs())');
     expect(hubNode).toContain('advanceBootstrapProgress(live.meshLoopProgress, step, bootstrapClockMs())');

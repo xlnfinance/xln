@@ -2,21 +2,73 @@ import { expect, test } from 'bun:test';
 import { safeStringify } from '../../../protocol/serialization';
 
 const moduleUrl = new URL('../../../protocol/crypto/crypto-pool.ts', import.meta.url).href;
-const runChild = (body: string) => Bun.spawnSync({
-  cmd: [process.execPath, '--eval', `
-    import { configureCryptoPoolEntry, signDigestsBatchOnPool, recoverAddressesBatch } from ${safeStringify(moduleUrl)};
+const runChild = (body: string, workers = '1') =>
+  Bun.spawnSync({
+    cmd: [
+      process.execPath,
+      '--eval',
+      `
+    import { configureCryptoPoolEntry, cryptoPoolEnabled, cryptoSignPoolEnabled, signDigestsBatchOnPool, recoverAddressesBatch, decryptOnionLayersBatch } from ${safeStringify(moduleUrl)};
     import { computeAddress, hexlify, recoverAddress } from 'ethers';
     configureCryptoPoolEntry(new URL(${safeStringify(moduleUrl)}));
     async function run() { ${body} }
     // Match a daemon entry before its HTTP server owns a live event-loop handle.
     // Awaiting run at module scope would conceal premature worker unref.
     run().catch(error => { console.error(error); process.exitCode = 1; });
-  `],
-  cwd: process.cwd(),
-  env: { ...process.env, XLN_CRYPTO_SIGN_WORKERS: '1', XLN_CRYPTO_POOL_WORKERS: '1' },
-  stdout: 'pipe',
-  stderr: 'pipe',
-  timeout: 5_000,
+  `,
+    ],
+    cwd: process.cwd(),
+    env: { ...process.env, XLN_CRYPTO_SIGN_WORKERS: workers, XLN_CRYPTO_POOL_WORKERS: workers },
+    stdout: 'pipe',
+    stderr: 'pipe',
+    timeout: 5_000,
+  });
+
+test('crypto lanes allocate real workers only for nonempty demand and retain growing in-flight lanes', () => {
+  const child = runChild(
+    `
+    let allocations = 0;
+    // Count construction while delegating every job to the real Bun Worker.
+    globalThis.Worker = new Proxy(Worker, {
+      construct(target, args) { allocations++; return Reflect.construct(target, args); },
+    });
+    const check = (condition, code) => { if (!condition) throw Error(code); };
+    check(cryptoPoolEnabled() && cryptoSignPoolEnabled(), 'CRYPTO_LANES_UNAVAILABLE');
+    check(allocations === 0, 'AVAILABILITY_ALLOCATED_IDLE_WORKERS');
+    const key = new Uint8Array(32).fill(1);
+    const empty = new Uint8Array(0);
+    check((await signDigestsBatchOnPool(key, empty)).length === 0, 'EMPTY_SIGN');
+    check((await recoverAddressesBatch(empty)).length === 0, 'EMPTY_RECOVER');
+    check((await decryptOnionLayersBatch([])).length === 0, 'EMPTY_ONION');
+    check(allocations === 0, 'EMPTY_BATCH_ALLOCATED_IDLE_WORKERS');
+    const native = require('secp256k1/bindings');
+    const digest = new Uint8Array(32).fill(2);
+    const first = signDigestsBatchOnPool(key, digest);
+    check(allocations === 1, 'SINGLE_SIGN_ALLOCATED_IDLE_WORKERS');
+    const many = new Uint8Array(32 * 17);
+    for (let index = 0; index < 17; index++) many.fill(index + 3, index * 32, (index + 1) * 32);
+    const batch = signDigestsBatchOnPool(key, many);
+    check(allocations === 4, 'SIGN_LANE_DID_NOT_GROW_TO_DEMAND');
+    const results = await Promise.all([first, batch]);
+    for (const [input, result] of [[digest, results[0]], [many, results[1]]]) {
+      check(result && result.length === input.length / 32 * 65, 'SIGN_JOB_INCOMPLETE');
+      for (let index = 0; index < input.length / 32; index++) {
+        const expected = native.ecdsaSign(input.subarray(index * 32, (index + 1) * 32), key);
+        check(hexlify(result.subarray(index * 65, index * 65 + 64)) === hexlify(expected.signature), 'SIGNATURE_BYTES_OR_ORDER_CHANGED');
+        check(result[index * 65 + 64] === expected.recid, 'SIGNATURE_RECOVERY_CHANGED');
+      }
+    }
+    const record = new Uint8Array(97); record.set(digest); record.set(results[0], 32);
+    const recovered = recoverAddressesBatch(record);
+    check(allocations === 5, 'SINGLE_RECOVERY_ALLOCATED_IDLE_WORKERS');
+    check(hexlify(await recovered) === computeAddress(hexlify(key)).toLowerCase(), 'RECOVERED_SIGNER_MISMATCH');
+    console.log('CRYPTO_DEMAND_COMPLETE signatures=18 recovered=1 workers=5');
+  `,
+    '4',
+  );
+  expect(child.exitCode, child.stderr.toString()).toBe(0);
+  expect(child.stdout.toString()).toContain('CRYPTO_DEMAND_COMPLETE signatures=18 recovered=1 workers=5');
+  expect(child.stderr.toString()).toBe('');
 });
 
 test('crypto jobs keep startup alive until every signature and recovered address completes, then release idle workers', () => {

@@ -1,0 +1,311 @@
+{
+  "baseSHA": "207d6defb592b04720372d8b28576a92019d5de7",
+  "recordedAt": "2026-10-21T09:54:14.896490+00:00",
+  "scope": "Cold Hub bootstrap under four concurrent resets; exact Cross browser cohort. No public deployment or mainnet certification.",
+  "rootCause": "Availability predicates eagerly constructed full 8-worker bulk and 4-worker signing lanes even for a config frame with no bulk jobs. First config signatures waited 4.852-7.198 seconds in the measured run.",
+  "change": "Nonallocating availability checks; allocate workers up to actual concurrent job demand within existing lane caps. Keep busy workers referenced during growth. No changes to signature algorithms, output order, financial admission, WAL, authentication or drain deadlines.",
+  "sourceFiles": {
+    "core/protocol/crypto/crypto-pool.ts": "d188f6a26c396b6e62a2641dab463c3a069925fcc8bb18c1f65203347d78db1f",
+    "core/__tests__/protocol/crypto/crypto-pool-liveness.test.ts": "f7e065cb311eaae65f755d56104cd0a51d42fa6376f2dbf065e92ac007b41d61",
+    "core/__tests__/operations/health/prod-startup-wiring.test.ts": "257305b9fb3111fa29c9cc9f2ca3081e7b71866dab2dc051a2a2288a48c2638a",
+    "core/__tests__/operations/health/prod-startup-wiring-part-2.test.ts": "e574eb0e6610e02f743fb72a1b79371361e7a52a71dfb20ff9197663f1d42ac0"
+  },
+  "regression": {
+    "realWorkers": true,
+    "before": "AVAILABILITY_ALLOCATED_IDLE_WORKERS",
+    "after": "4/4PASS; 18 exact signature/recovery-byte/order checks; demand growth, idle release and worker failure liveness",
+    "related": "17/17PASS,1508assertions",
+    "originalCohortBefore": "reset4 1/4PASS3startupFAIL; controlled identical-source reset1 4/4PASS",
+    "originalCohortAfter": "reset4 4/4strictPASS twice, normal and profile runs; unchanged inner10s timeout",
+    "startupFormat": "90/90PASS1782assertions; preserve exact call arguments and ordering while tolerating formatter whitespace"
+  },
+  "profile": {
+    "sampleSizeEach": 12,
+    "scope": "First setHubConfig R3->4, four concurrent reset stacks, three Hubs each. Whole-suite elapsed times are not comparable performance claims when failed runs omit browser work.",
+    "rows": {
+      "before": [
+        {
+          "shard": "shard-0",
+          "hub": "H2",
+          "applyMs": 8683.960416999998,
+          "signPoolMs": 6553.111,
+          "cpuMs": 6177.271000000001,
+          "logSHA256": "ff142254d588c1e7885a3eacfa5386be01f909c418466224cbaa240020f5cdb5"
+        },
+        {
+          "shard": "shard-0",
+          "hub": "H1",
+          "applyMs": 7546.448000000002,
+          "signPoolMs": 5668.27,
+          "cpuMs": 6327.746,
+          "logSHA256": "ff142254d588c1e7885a3eacfa5386be01f909c418466224cbaa240020f5cdb5"
+        },
+        {
+          "shard": "shard-0",
+          "hub": "H3",
+          "applyMs": 7047.278541,
+          "signPoolMs": 5482.635,
+          "cpuMs": 6340.055,
+          "logSHA256": "ff142254d588c1e7885a3eacfa5386be01f909c418466224cbaa240020f5cdb5"
+        },
+        {
+          "shard": "shard-1",
+          "hub": "H3",
+          "applyMs": 8564.092042,
+          "signPoolMs": 6912.261,
+          "cpuMs": 6307.356,
+          "logSHA256": "d3a9f280a1d67777af5efdab165d6d9f5058ef4d05baf97942e634817ffa2ae2"
+        },
+        {
+          "shard": "shard-1",
+          "hub": "H2",
+          "applyMs": 8209.822166,
+          "signPoolMs": 6405.666,
+          "cpuMs": 6220.87,
+          "logSHA256": "d3a9f280a1d67777af5efdab165d6d9f5058ef4d05baf97942e634817ffa2ae2"
+        },
+        {
+          "shard": "shard-1",
+          "hub": "H1",
+          "applyMs": 8234.782583,
+          "signPoolMs": 5730.063,
+          "cpuMs": 6104.043,
+          "logSHA256": "d3a9f280a1d67777af5efdab165d6d9f5058ef4d05baf97942e634817ffa2ae2"
+        },
+        {
+          "shard": "shard-2",
+          "hub": "H3",
+          "applyMs": 8273.797666999999,
+          "signPoolMs": 6658.701,
+          "cpuMs": 6300.56,
+          "logSHA256": "a9d7c684a1aa79b6d68709fe5e8c25f8ff3b17bde358c6b5d3bd4efc32cfa815"
+        },
+        {
+          "shard": "shard-2",
+          "hub": "H1",
+          "applyMs": 8660.662541999998,
+          "signPoolMs": 6633.065,
+          "cpuMs": 6290.544,
+          "logSHA256": "a9d7c684a1aa79b6d68709fe5e8c25f8ff3b17bde358c6b5d3bd4efc32cfa815"
+        },
+        {
+          "shard": "shard-2",
+          "hub": "H2",
+          "applyMs": 8562.174125,
+          "signPoolMs": 6139.133,
+          "cpuMs": 6180.1539999999995,
+          "logSHA256": "a9d7c684a1aa79b6d68709fe5e8c25f8ff3b17bde358c6b5d3bd4efc32cfa815"
+        },
+        {
+          "shard": "shard-3",
+          "hub": "H2",
+          "applyMs": 5579.7245,
+          "signPoolMs": 4852.154,
+          "cpuMs": 5645.235,
+          "logSHA256": "50a9e4f6437b163f0bada1bdcf1e65fdeb73af5b06a172d0573502b9ccf736b4"
+        },
+        {
+          "shard": "shard-3",
+          "hub": "H3",
+          "applyMs": 7224.203291000001,
+          "signPoolMs": 6529.725,
+          "cpuMs": 5862.4220000000005,
+          "logSHA256": "50a9e4f6437b163f0bada1bdcf1e65fdeb73af5b06a172d0573502b9ccf736b4"
+        },
+        {
+          "shard": "shard-3",
+          "hub": "H1",
+          "applyMs": 8008.597375,
+          "signPoolMs": 7198.406,
+          "cpuMs": 6377.613,
+          "logSHA256": "50a9e4f6437b163f0bada1bdcf1e65fdeb73af5b06a172d0573502b9ccf736b4"
+        }
+      ],
+      "after": [
+        {
+          "shard": "shard-0",
+          "hub": "H2",
+          "applyMs": 1542.114708,
+          "signPoolMs": 1142.922,
+          "cpuMs": 1072.955,
+          "logSHA256": "5dec96dd324e54df65cba50d5084e85b59cdf152220b79daae74fe8c40fa3bc2"
+        },
+        {
+          "shard": "shard-0",
+          "hub": "H1",
+          "applyMs": 1639.8590830000003,
+          "signPoolMs": 1289.226,
+          "cpuMs": 1060.749,
+          "logSHA256": "5dec96dd324e54df65cba50d5084e85b59cdf152220b79daae74fe8c40fa3bc2"
+        },
+        {
+          "shard": "shard-0",
+          "hub": "H3",
+          "applyMs": 1576.1061660000005,
+          "signPoolMs": 1103.883,
+          "cpuMs": 1017.96,
+          "logSHA256": "5dec96dd324e54df65cba50d5084e85b59cdf152220b79daae74fe8c40fa3bc2"
+        },
+        {
+          "shard": "shard-1",
+          "hub": "H1",
+          "applyMs": 1222.2094579999994,
+          "signPoolMs": 955.956,
+          "cpuMs": 997.804,
+          "logSHA256": "ed1828d7e80dfd85a1d5311c1adc14723307958c30e71ffb65afcad4f9385dae"
+        },
+        {
+          "shard": "shard-1",
+          "hub": "H2",
+          "applyMs": 1525.4557919999997,
+          "signPoolMs": 1154.041,
+          "cpuMs": 1046.364,
+          "logSHA256": "ed1828d7e80dfd85a1d5311c1adc14723307958c30e71ffb65afcad4f9385dae"
+        },
+        {
+          "shard": "shard-1",
+          "hub": "H3",
+          "applyMs": 1588.305874999999,
+          "signPoolMs": 1199.513,
+          "cpuMs": 1042.681,
+          "logSHA256": "ed1828d7e80dfd85a1d5311c1adc14723307958c30e71ffb65afcad4f9385dae"
+        },
+        {
+          "shard": "shard-2",
+          "hub": "H1",
+          "applyMs": 1123.570041,
+          "signPoolMs": 877.758,
+          "cpuMs": 984.584,
+          "logSHA256": "d6d2ce9489cc57df0c61293cc47d94da0fc4f680b0914fd00dd172ebea46aa96"
+        },
+        {
+          "shard": "shard-2",
+          "hub": "H2",
+          "applyMs": 1180.2887919999994,
+          "signPoolMs": 915.658,
+          "cpuMs": 987.9720000000001,
+          "logSHA256": "d6d2ce9489cc57df0c61293cc47d94da0fc4f680b0914fd00dd172ebea46aa96"
+        },
+        {
+          "shard": "shard-2",
+          "hub": "H3",
+          "applyMs": 1752.3929999999991,
+          "signPoolMs": 1355.53,
+          "cpuMs": 1064.994,
+          "logSHA256": "d6d2ce9489cc57df0c61293cc47d94da0fc4f680b0914fd00dd172ebea46aa96"
+        },
+        {
+          "shard": "shard-3",
+          "hub": "H2",
+          "applyMs": 1332.5522920000003,
+          "signPoolMs": 1015.993,
+          "cpuMs": 994.365,
+          "logSHA256": "d568b2a2dfc7637f8b6e43bfca92f41ce524800faef1ec33be7faa8fc321449f"
+        },
+        {
+          "shard": "shard-3",
+          "hub": "H1",
+          "applyMs": 1516.6904589999995,
+          "signPoolMs": 1103.401,
+          "cpuMs": 1016.728,
+          "logSHA256": "d568b2a2dfc7637f8b6e43bfca92f41ce524800faef1ec33be7faa8fc321449f"
+        },
+        {
+          "shard": "shard-3",
+          "hub": "H3",
+          "applyMs": 1450.3003330000001,
+          "signPoolMs": 1110.271,
+          "cpuMs": 1023.42,
+          "logSHA256": "d568b2a2dfc7637f8b6e43bfca92f41ce524800faef1ec33be7faa8fc321449f"
+        }
+      ]
+    }
+  },
+  "records": {
+    "crypto-demand-l1-before-01": {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/crypto-demand-l1-before-01.result.json",
+      "sha256": "fc742780bc081b0ccfa030fc5c7ce6dbb0068b0245c04bbcd2ca8284270cf0d7",
+      "exitCode": 1,
+      "seconds": 1.4210147919999998,
+      "sourceUnchanged": true,
+      "logSHA256": "4b1af26455e91c5dbdc933ca6e4daa6ae8af53d7534009b94c1baf583bb26cef"
+    },
+    "crypto-demand-l1-after-01": {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/crypto-demand-l1-after-01.result.json",
+      "sha256": "90cb3319a7cd616c3408f6c317b0de8b029e888602381479707e35c016636792",
+      "exitCode": 0,
+      "seconds": 4.076357959,
+      "sourceUnchanged": true,
+      "logSHA256": "18d71a5b1d787b9ef36d7efbe04faf20efd4942fcf2b5df32472fe35bff22a3f"
+    },
+    "crypto-demand-related-l1-01": {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/crypto-demand-related-l1-01.result.json",
+      "sha256": "055139411afbd9a895427313f4c0f17cb9731e8d7e83f0807aecc5e54b5d6323",
+      "exitCode": 0,
+      "seconds": 7.666964374999999,
+      "sourceUnchanged": true,
+      "logSHA256": "5848a6c8b0d8248edbfb5f8a545c6e805619575b17cdd25aede15d21164f574f"
+    },
+    "bootstrap-pressure-207d6def-04-01": {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/bootstrap-pressure-207d6def-04-01.result.json",
+      "sha256": "77131a6c15d5bcfe6260dbbbd729415cb12930d535990ea5f56b838268afc302",
+      "exitCode": 1,
+      "seconds": 82.761139625,
+      "sourceUnchanged": true,
+      "logSHA256": "6b20ef908f3a21413c75845f6dea40df41fb8d77c74609100ce8ebc758150e99"
+    },
+    "bootstrap-pressure-207d6def-01-01": {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/bootstrap-pressure-207d6def-01-01.result.json",
+      "sha256": "6d8d381c9b60410c833ce7486717e43f454cb7d2e3e28a899ae6594a7db78a17",
+      "exitCode": 0,
+      "seconds": 138.498196208,
+      "sourceUnchanged": true,
+      "logSHA256": "f604cde91968df30f2516d7f67efce062491dcea95a3fa1046e3203ed486e9a4"
+    },
+    "bootstrap-pressure-profile-207d6def-04-01": {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/bootstrap-pressure-profile-207d6def-04-01.result.json",
+      "sha256": "3da2d492ea6d453498f46684ba67ace0e4a5b6d2f987a9d223ab76696b442894",
+      "exitCode": 1,
+      "seconds": 118.56520225,
+      "sourceUnchanged": true,
+      "logSHA256": "dab60b00f83cbff9347a0656af46f765c301c114b56d180ae22d122773ba26c4"
+    },
+    "bootstrap-crypto-demand-reset4-01": {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/bootstrap-crypto-demand-reset4-01.result.json",
+      "sha256": "25769ef8dd66c47921049f4bf9df17bd3e033ae5874955f31bc07cfa3cadd1ec",
+      "exitCode": 0,
+      "seconds": 197.332840334,
+      "sourceUnchanged": true,
+      "logSHA256": "4260ea651528e8eaf98d03427b4a736240fd3a0ba2d19a86310f53638ff73b60"
+    },
+    "bootstrap-crypto-demand-reset4-profile-01": {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/bootstrap-crypto-demand-reset4-profile-01.result.json",
+      "sha256": "f26aa24f49e57e2b3a26f720435a62dcc7b6b02bd9ffb3f39c01b614284bb8bd",
+      "exitCode": 0,
+      "seconds": 145.34048825,
+      "sourceUnchanged": true,
+      "logSHA256": "f789eb6250c37504fdd632e9780050fea3c6f59bdb40d04ce28af1fd892b5a06"
+    },
+    "startup-wiring-both-l1-02": {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/startup-wiring-both-l1-02.result.json",
+      "sha256": "e88cba6ae58db2aca5f921964a1c6e639f9a355e9648316b5bf6eadf0e0619bb",
+      "exitCode": 0,
+      "seconds": 6.203197625,
+      "sourceUnchanged": true,
+      "logSHA256": "371c36d1b5f0ba2a6074e9acece2e4705d4eac0f6c15d9cd70b2afec9e6c3b67"
+    },
+    "exact-unit-strict-207d6def-02": {
+      "artifact": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/exact-unit-strict-207d6def-02.result.json",
+      "sha256": "8a2c8c346b6ebbb4c7f14d690bf511195171be705df79e9b391f737a013271b3",
+      "exitCode": 1,
+      "seconds": 1129.025610958,
+      "sourceUnchanged": true,
+      "logSHA256": "96aeb5fba631f776d55422e5b66395e67ed56fd86dca548c072e730d1a3e5dfe"
+    }
+  },
+  "limitations": [
+    "Full exact unit/test, full158,34-step release,60-minute soak and fresh financial acceptance must certify one final committed SHA.",
+    "Public Nile canonical binding/funding and dedicated mainnet signing identity remain unresolved.",
+    "Protected independent BrainVault changes were preserved."
+  ]
+}
