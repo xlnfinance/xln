@@ -18,6 +18,12 @@ import {
   withRemoteRuntimeCommandReplayLease,
 } from '@xln/frontend/lib/stores/commands/runtimeCommandIntent';
 import { installRuntimeCommandJournalKeys } from '@xln/frontend/lib/stores/commands/runtimeCommandJournalKeyring';
+import { runtimeHttpOriginFromWsUrl } from '@xln/frontend/lib/utils/runtime/wsUrl';
+import {
+  deployStack,
+  fetchStackManagerStatus,
+  type StackManagerDeployRequest,
+} from '@xln/frontend/lib/components/Settings/stack-manager-client';
 
 /**
  * Liveness is a host-observed fact the runtime asks its transport for. Every
@@ -41,6 +47,8 @@ let currentEnv: RuntimeReplica | null = null;
 let detach: (() => void) | null = null;
 let closing: Promise<void> | null = null;
 let releaseOwnership: (() => void) | null = null;
+// A capability belongs only to this authenticated connection, never persisted or exposed by inspection.
+let remoteAdmin: { runtimeId: string; apiOrigin: string; capability: string } | null = null;
 
 export function getAdapter(): RuntimeAdapter | null {
   return currentAdapter;
@@ -74,6 +82,7 @@ export function disconnectAdapter(): void {
   currentAdapter?.disconnect();
   currentAdapter = null;
   currentEnv = null;
+  remoteAdmin = null;
   // Entity selection belongs to this connection; a new adapter must not inherit its authority context.
   useApp.getState().setActiveEntityId(null);
   useApp.getState().setAdapterState({ status: 'disconnected', height: 0, commandReady: false });
@@ -210,8 +219,34 @@ export async function connectRemote(wsUrl: string, authKey?: string): Promise<Ru
   };
   await adapter.connect(config);
   currentAdapter = adapter;
+  if (authKey && adapter.authLevel === 'admin') {
+    remoteAdmin = { runtimeId: adapter.runtimeId, apiOrigin: runtimeHttpOriginFromWsUrl(wsUrl), capability: authKey };
+  }
   attach(adapter);
   return adapter;
+}
+
+function requireRemoteAdmin() {
+  if (
+    !remoteAdmin ||
+    currentAdapter?.mode !== 'remote' ||
+    currentAdapter.status !== 'connected' ||
+    currentAdapter.authLevel !== 'admin' ||
+    currentAdapter.runtimeId !== remoteAdmin.runtimeId
+  ) {
+    throw new Error('Connect the hosting runtime with administrator access to deploy a stack.');
+  }
+  return remoteAdmin;
+}
+
+export function readRemoteStackManager(rpcUrl = '', signerId = '') {
+  const session = requireRemoteAdmin();
+  return fetchStackManagerStatus(session.apiOrigin, rpcUrl, signerId, session.capability);
+}
+
+export function deployRemoteStack(request: StackManagerDeployRequest) {
+  const session = requireRemoteAdmin();
+  return deployStack(session.apiOrigin, request, session.capability);
 }
 
 export type RuntimeAdapterInspection = Pick<

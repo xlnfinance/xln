@@ -35,7 +35,13 @@ import {
   listConnectedMarketHubEntityIds,
 } from './hub/market-client';
 import { handleMarketCapRequest } from './hub/market-cap-http';
-import { assertMinDiskFree, buildDiskSummary, getStorageHealth, getStorageHealthSnapshotSync } from '../support/storage-monitor';
+import { verifyManagedHubProfile } from './hub/node/profile-verifier';
+import {
+  assertMinDiskFree,
+  buildDiskSummary,
+  getStorageHealth,
+  getStorageHealthSnapshotSync,
+} from '../support/storage-monitor';
 import { serveStaticApp } from '../api/server/static-assets';
 import { enforceFaucetPolicy } from '../api/server/faucet/policy';
 import { handleCustomContractsApi } from '../api/server/custom-contracts';
@@ -235,6 +241,11 @@ const routerConfig: RelayRouterConfig = {
   localRuntimeId: 'mesh-relay',
   send: (ws, data) => ws.send(data),
   consumeHelloChallenge: (ws, challenge) => relayHelloChallenges.consume(ws, challenge),
+  verifyProfile: profile => {
+    const h1 = hubChildren[0];
+    if (!h1) throw new Error('RELAY_PROFILE_AUTHORITY_H1_MISSING');
+    return verifyManagedHubProfile(h1, args.host, profile);
+  },
 };
 
 const timings: TimingMap = {

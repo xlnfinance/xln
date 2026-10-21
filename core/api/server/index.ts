@@ -138,6 +138,7 @@ import { createGossipProfileLookupBatcher } from './network/gossip-lookup';
 import { createBrainVaultOwnerController } from './ownership/brainvault';
 import { dbRootPath } from '../../runtime/replica/platform';
 import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
+import { verifyProfileSignature } from '../../entity/profile/profile-signing';
 import type { Server } from 'bun';
 
 // Global J-adapter instance (set during startup)
@@ -1469,6 +1470,7 @@ const configureServerRelayRouter = (
     localRuntimeId: String(env.runtimeId),
     send: (ws, data) => ws.send(data),
     consumeHelloChallenge: (ws, challenge) => bound.session.relayHelloChallenges.consume(ws, challenge),
+    verifyProfile: profile => withRuntimeCommittedRead(env, () => verifyProfileSignature(profile, env)),
     onGossipStore: profile => {
       try {
         env.gossip?.announce?.(profile);

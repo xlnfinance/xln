@@ -15,7 +15,9 @@ import {
   requireExactBoundaryKeys,
 } from '../protocol/boundary-validation';
 import { canonicalEntitySeed, importEntity } from '../runtime/registration/entity-creation';
-import { parseProfile, type DecodedProfile } from '../entity/profile';
+import { parseProfile, type DecodedProfile, type Profile } from '../entity/profile';
+import { computeProfileRouteHash, type ProfileVerifyResult } from '../entity/profile/profile-signing';
+import { encodeBinaryPayload } from '../protocol/serialization/binary-codec';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const WAIT_POLL_MS = 100;
@@ -393,6 +395,37 @@ export class DaemonControlClient {
       `POST ${path}`,
     );
     return await readControlResponse(response);
+  }
+
+  async verifyProfile(profile: Profile): Promise<ProfileVerifyResult> {
+    const response = await fetchWithTimeout(
+      `${this.baseUrl}/api/control/gossip/verify-profile`,
+      {
+        method: 'POST',
+        headers: { ...this.buildHeaders(), 'content-type': 'application/octet-stream' },
+        body: new Uint8Array(encodeBinaryPayload(profile)),
+      },
+      this.timeoutMs,
+      'POST /api/control/gossip/verify-profile',
+    );
+    const value = requireBoundaryRecord(await readControlResponse(response), 'CONTROL_PROFILE_VERIFICATION_INVALID');
+    requireExactBoundaryKeys(
+      value,
+      ['valid'],
+      ['reason', 'hash', 'signerId'],
+      'CONTROL_PROFILE_VERIFICATION_FIELDS_INVALID',
+    );
+    if (typeof value['valid'] !== 'boolean') throw new Error('CONTROL_PROFILE_VERIFICATION_VALID_INVALID');
+    const result: ProfileVerifyResult = { valid: value['valid'] };
+    for (const key of ['reason', 'hash', 'signerId'] as const) {
+      if (value[key] === undefined) continue;
+      if (typeof value[key] !== 'string') throw new Error(`CONTROL_PROFILE_VERIFICATION_FIELD_INVALID:${key}`);
+      result[key] = value[key];
+    }
+    if (result.valid && result.hash !== computeProfileRouteHash(profile)) {
+      throw new Error('CONTROL_PROFILE_VERIFICATION_ROUTE_MISMATCH');
+    }
+    return result;
   }
 
   async listEntities(): Promise<ControlEntitySummary[]> {

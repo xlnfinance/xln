@@ -1,350 +1,144 @@
 import { test, expect, type Page } from '../../global-setup.mts';
-import { deriveDelta } from '../../../core/account/utils';
+import type { RuntimeAdapterViewFrame, XLNModule } from '../../../core/api/public/runtime-module';
+import type { RuntimeAdapterInspection } from '../../../ui/src/runtime/adapter';
+import { createWalletIdentity } from '../../../ui/tests/wallet-ui';
 import { getHealth } from '../../utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from '../../utils/e2e-connect';
-import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
+import { gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
+import { outCap } from '../../utils/runtime/e2e-derived-capacity';
+import { getRenderedOutboundForAccount } from '../../utils/runtime/e2e-account-ui';
 import { requireIsolatedBaseUrl } from '../../utils/runtime/e2e-isolated-env';
 
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const API_BASE_URL = requireIsolatedBaseUrl('E2E_API_BASE_URL');
-const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
+const AMOUNT = 100_000_000n;
 
-async function getApiTokenId(page: Page, symbol: string): Promise<number> {
-  const response = await page.request.get(`${API_BASE_URL}/api/tokens`);
-  expect(response.ok(), 'tokens endpoint must be available').toBe(true);
-  const body = await response.json().catch(() => ({} as { tokens?: Array<{ symbol?: string; tokenId?: number }> }));
-  const tokens = Array.isArray(body.tokens) ? body.tokens : [];
-  const match = tokens.find((token) => String(token.symbol || '').toUpperCase() === symbol.toUpperCase());
-  expect(typeof match?.tokenId === 'number', `Missing ${symbol} tokenId`).toBe(true);
-  return Number(match!.tokenId);
-}
+type FaucetRenderProbe = { stateChangedMs: number; domVisibleMs: number; stateToDomMs: number };
 
-type DeltaSnapshot = {
-  ondelta: string;
-  offdelta: string;
-  collateral: string;
-  leftCreditLimit: string;
-  rightCreditLimit: string;
-  leftAllowance: string;
-  rightAllowance: string;
-  leftHold: string;
-  rightHold: string;
+const renderedBalance = async (page: Page): Promise<number> => {
+  const text = (await page.getByTestId('faucet-account-balance').innerText()).replace(/,/g, '').trim();
+  const match = text.match(/^(-?\d+(?:\.\d+)?) USDC$/);
+  if (!match) throw new Error(`FAUCET_RENDERED_BALANCE_INVALID:${text}`);
+  return Number(match[1]);
 };
 
-type FaucetAccountSnapshot = {
-  currentHeight: number;
-  pendingHeight: number | null;
-  outCapacity: string;
-};
-
-type FaucetRenderProbe = {
-  stateChangedMs: number;
-  domVisibleMs: number;
-  stateToDomMs: number;
-};
-
-async function getPrimaryHubId(page: Page): Promise<string> {
-  const health = await getHealth(page, API_BASE_URL);
-  let hubId = health?.hubMesh?.hubIds?.[0];
-  if (!hubId) {
-    const response = await page.request.get(`${API_BASE_URL}/api/debug/entities?online=true&limit=100`);
-    const body = await response.json().catch(() => ({} as {
-      entities?: Array<{ entityId?: string; isHub?: boolean; metadata?: { isHub?: boolean } }>;
-    }));
-    hubId = (Array.isArray(body.entities) ? body.entities : []).find((entity) =>
-      (entity.isHub === true || entity.metadata?.isHub === true) &&
-      /^0x[a-fA-F0-9]{64}$/.test(String(entity.entityId || '')),
-    )?.entityId;
-  }
-  expect(typeof hubId === 'string' && hubId.length === 66, 'baseline must expose a primary hub id').toBe(true);
-  return hubId!;
-}
-
-async function readFaucetAccountSnapshot(
+/** Observe the committed view and real DOM; never mutate the Runtime or fabricate a missing delta. */
+const measureAccountStateToDomLatency = (
   page: Page,
   entityId: string,
-  signerId: string | null,
   hubId: string,
-  tokenId: number,
-): Promise<FaucetAccountSnapshot | null> {
-  const raw = await page.evaluate(
-    ({ entityId, signerId, hubId, tokenId }) => {
-      const env = (window as typeof window & {
-        isolatedEnv?: {
-          eReplicas?: Map<string, {
-            state?: {
-              accounts?: Map<string, {
-                currentHeight?: number;
-                pendingFrame?: { height?: number } | null;
-                deltas?: Map<number | string, unknown>;
-              }>;
-            };
-          }>;
-        };
-      }).isolatedEnv;
-      if (!env?.state?.eReplicas) return null;
-
-      for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
-        const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
-        if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
-        if (signerId && String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
-        const account = replica.state?.accounts?.get(hubId);
-        if (!account) return null;
-        const delta = account.state.deltas?.get?.(tokenId) ?? account.state.deltas?.get?.(String(tokenId));
-        if (!delta || typeof delta !== 'object') return null;
-        const data = delta as Record<string, unknown>;
-        const readBig = (value: unknown): string => {
-          if (typeof value === 'bigint') return value.toString();
-          if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return String(value);
-          if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return value.trim();
-          return '0';
-        };
-        return {
-          currentHeight: Number(account.currentHeight || 0),
-          pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
-          delta: {
-            ondelta: readBig(data.ondelta),
-            offdelta: readBig(data.offdelta),
-            collateral: readBig(data.collateral),
-            leftCreditLimit: readBig(data.leftCreditLimit),
-            rightCreditLimit: readBig(data.rightCreditLimit),
-            leftAllowance: readBig(data.leftAllowance),
-            rightAllowance: readBig(data.rightAllowance),
-            leftHold: readBig(data.leftHold),
-            rightHold: readBig(data.rightHold),
-          },
-        };
-      }
-
-      return null;
-    },
-    { entityId, signerId, hubId, tokenId },
-  ) as { currentHeight: number; pendingHeight: number | null; delta: DeltaSnapshot } | null;
-
-  if (!raw) return null;
-  const isLeft = entityId.toLowerCase() < hubId.toLowerCase();
-  const derived = deriveDelta({
-    tokenId,
-    ondelta: BigInt(raw.delta.ondelta),
-    offdelta: BigInt(raw.delta.offdelta),
-    collateral: BigInt(raw.delta.collateral),
-    leftCreditLimit: BigInt(raw.delta.leftCreditLimit),
-    rightCreditLimit: BigInt(raw.delta.rightCreditLimit),
-    leftAllowance: BigInt(raw.delta.leftAllowance),
-    rightAllowance: BigInt(raw.delta.rightAllowance),
-    leftHold: BigInt(raw.delta.leftHold),
-    rightHold: BigInt(raw.delta.rightHold),
-  }, isLeft);
-
-  return {
-    currentHeight: raw.currentHeight,
-    pendingHeight: raw.pendingHeight,
-    outCapacity: derived.outCapacity.toString(),
-  };
-}
-
-
-async function readRenderedAccountTokenOut(page: Page, hubId: string, symbol: string): Promise<number> {
-  return page.evaluate(({ hubId, symbol }) => {
-    const preview = document.querySelector(`.account-preview[data-counterparty-id="${hubId}"]`);
-    if (!preview) return NaN;
-    const rows = Array.from(preview.querySelectorAll('.delta-row, .delta-row-stack, .delta-summary'));
-    for (const row of rows) {
-      const symbolEl = row.querySelector('.token-symbol');
-      if (String(symbolEl?.textContent || '').trim().toUpperCase() !== String(symbol || '').trim().toUpperCase()) {
-        continue;
-      }
-      const valueEl = row.querySelector('.compact-out-value');
-      if (!valueEl) return NaN;
-      const amountEl = Array.from(valueEl.children).find((child) =>
-        !(child instanceof HTMLElement) || !child.classList.contains('usd-hint'),
-      );
-      const text = String((amountEl?.textContent || valueEl.textContent || '')).replace(/,/g, '').trim();
-      const numeric = Number(text.replace(/[^0-9.-]/g, ''));
-      return Number.isFinite(numeric) ? numeric : NaN;
-    }
-    return NaN;
-  }, { hubId, symbol });
-}
-
-async function measureAccountStateToDomLatency(
-  page: Page,
-  entityId: string,
-  signerId: string | null,
-  hubId: string,
-  tokenId: number,
-  symbol: string,
-  baselineHeight: number,
-  baselineOut: number,
-): Promise<FaucetRenderProbe> {
-  return await page.evaluate(
-    ({ entityId, signerId, hubId, tokenId, symbol, baselineHeight, baselineOut }) => {
+  baselineOut: bigint,
+  baselineBalance: number,
+): Promise<FaucetRenderProbe> =>
+  page.evaluate(
+    async input => {
+      const debug = (
+        window as Window & {
+          __xln?: { adapter(): RuntimeAdapterInspection | null; xln(): Promise<XLNModule> };
+        }
+      ).__xln;
+      const adapter = debug?.adapter();
+      if (!debug || !adapter) throw new Error('FAUCET_CURRENT_RUNTIME_MISSING');
+      const xln = await debug.xln();
       const startedAt = performance.now();
-      const readSnapshot = () => {
-        const env = (window as typeof window & {
-          isolatedEnv?: {
-            eReplicas?: Map<string, {
-              state?: {
-                accounts?: Map<string, {
-                  currentHeight?: number;
-                  deltas?: Map<number | string, unknown>;
-                }>;
-              };
-            }>;
-          };
-        }).isolatedEnv;
-        if (!env?.state?.eReplicas) return null;
-        for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
-          const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
-          if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
-          if (signerId && String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
-          const account = replica.state?.accounts?.get?.(hubId);
-          if (!account) return null;
-          const delta = account.state.deltas?.get?.(tokenId) ?? account.state.deltas?.get?.(String(tokenId));
-          return {
-            currentHeight: Number(account.currentHeight || 0),
-            deltaJson: JSON.stringify(delta, (_, value) => typeof value === 'bigint' ? value.toString() : value),
-          };
+      const deadline = startedAt + 15_000;
+      let stateChangedAt: number | null = null;
+      while (performance.now() < deadline) {
+        const frame = await adapter.read<RuntimeAdapterViewFrame>('view-frame', { entityId: input.entityId });
+        const account = frame.activeEntity?.accounts.items.find(
+          row => row.state.leftEntity === input.hubId || row.state.rightEntity === input.hubId,
+        );
+        const delta = account?.state.deltas.get(1);
+        if (!account || !delta) throw new Error('FAUCET_COMMITTED_ACCOUNT_MISSING');
+        const capacity = xln.deriveDelta(delta, account.state.leftEntity === input.entityId).outCapacity;
+        if (capacity === BigInt(input.baselineOut) + 100_000_000n && stateChangedAt === null) {
+          stateChangedAt = performance.now();
         }
-        return null;
-      };
-
-      const readRenderedOut = (): number => {
-        const preview = document.querySelector(`.account-preview[data-counterparty-id="${hubId}"]`);
-        if (!preview) return Number.NaN;
-        const rows = Array.from(preview.querySelectorAll('.delta-row, .delta-row-stack, .delta-summary'));
-        for (const row of rows) {
-          const symbolEl = row.querySelector('.token-symbol');
-          if (String(symbolEl?.textContent || '').trim().toUpperCase() !== String(symbol || '').trim().toUpperCase()) {
-            continue;
-          }
-          const valueEl = row.querySelector('.compact-out-value');
-          if (!valueEl) return Number.NaN;
-          const amountEl = Array.from(valueEl.children).find((child) =>
-            !(child instanceof HTMLElement) || !child.classList.contains('usd-hint'),
-          );
-          const text = String((amountEl?.textContent || valueEl.textContent || '')).replace(/,/g, '').trim();
-          const numeric = Number(text.replace(/[^0-9.-]/g, ''));
-          return Number.isFinite(numeric) ? numeric : Number.NaN;
-        }
-        return Number.NaN;
-      };
-
-      const baseline = readSnapshot();
-      const baselineDeltaJson = baseline?.deltaJson || '';
-
-      return new Promise<FaucetRenderProbe>((resolve, reject) => {
-        const deadline = performance.now() + 15_000;
-        let stateChangedAt: number | null = null;
-        const loop = () => {
+        const text = document
+          .querySelector('[data-testid="faucet-account-balance"]')
+          ?.textContent?.replace(/,/g, '')
+          .trim();
+        const match = text?.match(/^(-?\d+(?:\.\d+)?) USDC$/);
+        if (!match) throw new Error('FAUCET_RENDERED_BALANCE_MISSING');
+        if (stateChangedAt !== null && Number(match[1]) === input.baselineBalance + 100) {
           const now = performance.now();
-          if (now > deadline) {
-            reject(new Error('Timed out waiting for account state/render transition'));
-            return;
-          }
-
-          const snapshot = readSnapshot();
-          if (!stateChangedAt && snapshot) {
-            const heightAdvanced = snapshot.currentHeight > baselineHeight;
-            const deltaChanged = snapshot.deltaJson !== baselineDeltaJson;
-            if (heightAdvanced || deltaChanged) {
-              stateChangedAt = now;
-            }
-          }
-
-          const renderedOut = readRenderedOut();
-          if (Number.isFinite(renderedOut) && renderedOut > baselineOut) {
-            if (stateChangedAt === null) stateChangedAt = now;
-            resolve({
-              stateChangedMs: Math.round(stateChangedAt - startedAt),
-              domVisibleMs: Math.round(now - startedAt),
-              stateToDomMs: Math.round(now - stateChangedAt),
-            });
-            return;
-          }
-
-          requestAnimationFrame(loop);
-        };
-
-        requestAnimationFrame(loop);
-      });
+          return {
+            stateChangedMs: Math.round(stateChangedAt - startedAt),
+            domVisibleMs: Math.round(now - startedAt),
+            stateToDomMs: Math.round(now - stateChangedAt),
+          };
+        }
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      }
+      throw new Error('Timed out waiting for committed account state/render transition');
     },
-    { entityId, signerId, hubId, tokenId, symbol, baselineHeight, baselineOut },
+    { entityId, hubId, baselineOut: baselineOut.toString(), baselineBalance },
   );
-}
 
 test.describe('E2E Faucet Latency', () => {
-  test('demo account single-hub UI USDC faucet finalizes as fast as possible', { tag: '@functional' }, async ({ page }) => {
-    test.setTimeout(LONG_E2E ? 240_000 : 180_000);
-    const appHost = new URL(APP_BASE_URL).hostname;
-    const requireOnline = appHost === 'localhost' || appHost === '127.0.0.1' || appHost === '::1';
+  test(
+    'demo account single-hub UI USDC faucet finalizes as fast as possible',
+    { tag: '@functional' },
+    async ({ page }) => {
+      test.setTimeout(LONG_E2E ? 240_000 : 180_000);
+      await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 30_000, settleMs: 0 });
+      const alice = await createWalletIdentity(page, 'alice', selectDemoMnemonic('alice'));
+      const health = await getHealth(page, API_BASE_URL);
+      const hubId = health?.hubMesh?.hubIds?.[0];
+      if (!hubId || !/^0x[0-9a-f]{64}$/i.test(hubId)) throw new Error('FAUCET_PRIMARY_HUB_MISSING');
+      await connectRuntimeToHubWithCredit(page, alice, hubId, '10000', [1]);
+      const baselineOut = await outCap(page, alice.entityId, hubId);
+      const baselineRenderedOut = await getRenderedOutboundForAccount(page, hubId);
 
-    await gotoApp(page, {
-      appBaseUrl: APP_BASE_URL,
-      initTimeoutMs: INIT_TIMEOUT,
-      settleMs: 0,
-    });
-
-    const alice = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'), { requireOnline });
-    const hubId = await getPrimaryHubId(page);
-    const usdcTokenId = await getApiTokenId(page, 'USDC');
-    await connectRuntimeToHubWithCredit(page, alice, hubId, '10000', [usdcTokenId], { requireOnline });
-    await page.getByTestId('tab-accounts').first().click();
-    const preview = page.locator(`.account-preview[data-counterparty-id="${hubId}"]`).first();
-    await expect(preview).toBeVisible({ timeout: 20_000 });
-    const usdcRow = preview.locator('.delta-row-stack, .delta-summary', { hasText: 'USDC' }).first();
-    await expect(usdcRow).toBeVisible({ timeout: 20_000 });
-    const faucetButton = usdcRow.getByRole('button', { name: /^Faucet$/ });
-    await expect(faucetButton).toBeEnabled({ timeout: 20_000 });
-
-    const baselineOut = await readRenderedAccountTokenOut(page, hubId, 'USDC');
-    expect(Number.isFinite(baselineOut), 'rendered USDC out capacity must be readable').toBe(true);
-    const baselineAccount = await readFaucetAccountSnapshot(page, alice.entityId, alice.signerId, hubId, usdcTokenId);
-    const renderProbePromise = measureAccountStateToDomLatency(
-      page,
-      alice.entityId,
-      alice.signerId,
-      hubId,
-      usdcTokenId,
-      'USDC',
-      baselineAccount?.currentHeight ?? 0,
-      baselineOut,
-    );
-    const startedAt = Date.now();
-    await faucetButton.click();
-    await expect
-      .poll(
-        async () => {
-          const pendingText = await usdcRow.getByRole('button').first().textContent().catch(() => '');
-          const rendered = await readRenderedAccountTokenOut(page, hubId, 'USDC');
-          return /Funding/i.test(String(pendingText || '')) || rendered > baselineOut;
-        },
-        {
-          timeout: 1_000,
-          intervals: [25, 50, 100],
-          message: 'faucet click must produce immediate visible feedback',
-        },
-      )
-      .toBe(true);
-
-    await expect
-      .poll(
-        async () => await readRenderedAccountTokenOut(page, hubId, 'USDC'),
-        {
-          timeout: 15_000,
-          intervals: [10, 20, 25, 50, 100],
-          message: 'UI USDC faucet must become visible to the user on Accounts page',
-        },
-      )
-      .toBeGreaterThan(baselineOut);
-
-    const elapsedMs = Date.now() - startedAt;
-    const renderProbe = await renderProbePromise;
-    console.log(`[E2E-TIMING] faucet.ui_usdc_single_hub.finalized ${elapsedMs}ms`);
-    console.log(
-      `[E2E-TIMING] faucet.ui_usdc_single_hub.state_to_dom state=${renderProbe.stateChangedMs}ms dom=${renderProbe.domVisibleMs}ms delta=${renderProbe.stateToDomMs}ms`,
-    );
-    expect(elapsedMs, 'single-hub offchain faucet should stay comfortably below timeout').toBeLessThan(5_000);
-  });
+      await page.getByTestId('nav-manage').locator('visible=true').first().click();
+      await page.getByTestId('manage-assets').click();
+      const faucet = page.getByTestId('faucets');
+      await faucet.getByRole('button', { name: 'USDC', exact: true }).click();
+      await page.getByTestId('faucet-amount').fill('100');
+      const button = page.getByTestId('faucet-offchain');
+      await expect(button).toBeEnabled({ timeout: 20_000 });
+      const baselineBalance = await renderedBalance(page);
+      const startedAt = Date.now();
+      const [renderProbe] = await Promise.all([
+        measureAccountStateToDomLatency(page, alice.entityId, hubId, baselineOut, baselineBalance),
+        (async () => {
+          await button.click();
+          await expect
+            .poll(
+              async () => {
+                const pending = await button.textContent();
+                const status = page.getByTestId('faucet-status');
+                return (
+                  pending === 'Asking…' ||
+                  ((await status.isVisible()) && (await status.getAttribute('role')) === 'status') ||
+                  (await renderedBalance(page)) > baselineBalance
+                );
+              },
+              {
+                timeout: 1_000,
+                intervals: [25, 50, 100],
+                message: 'faucet click must produce immediate visible feedback',
+              },
+            )
+            .toBe(true);
+          await expect
+            .poll(() => renderedBalance(page), {
+              timeout: 15_000,
+              intervals: [10, 20, 25, 50, 100],
+              message: 'UI USDC faucet must become visible on the funding screen',
+            })
+            .toBe(baselineBalance + 100);
+        })(),
+      ]);
+      const elapsedMs = Date.now() - startedAt;
+      console.log(`[E2E-TIMING] faucet.ui_usdc_single_hub.finalized ${elapsedMs}ms`);
+      console.log(
+        `[E2E-TIMING] faucet.ui_usdc_single_hub.state_to_dom state=${renderProbe.stateChangedMs}ms dom=${renderProbe.domVisibleMs}ms delta=${renderProbe.stateToDomMs}ms`,
+      );
+      expect(elapsedMs, 'single-hub offchain faucet should stay comfortably below timeout').toBeLessThan(5_000);
+      expect(await outCap(page, alice.entityId, hubId)).toBe(baselineOut + AMOUNT);
+      expect(await getRenderedOutboundForAccount(page, hubId)).toBe(baselineRenderedOut + 100);
+    },
+  );
 });

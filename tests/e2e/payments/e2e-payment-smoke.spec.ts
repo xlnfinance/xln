@@ -13,6 +13,7 @@ import { connectRuntimeToHub, waitForReceiveReadyGossipProfiles } from '../../ut
 import { APP_BASE_URL, gotoApp } from '../../utils/e2e-demo-users';
 import { submitUiPayment } from '../../utils/runtime/e2e-pay-ui';
 import { getPersistedReceiptCursor, waitForPersistedFrameEventMatch } from '../../utils/e2e-runtime-receipts';
+import { timedStep } from '../../utils/e2e-timing.mts';
 
 const API_BASE_URL = requireApiBaseUrl();
 const TEST_TIMEOUT_MS = process.env.E2E_LONG === '1' ? 300_000 : 240_000;
@@ -82,6 +83,7 @@ function logPage(page: Page, tag: string): string[] {
       text.includes('HTLC') ||
       text.includes('Payment') ||
       text.includes('[E2E]') ||
+      text.includes('[hosted] chain scan') ||
       (watcherDebug && /jadapter|J_WATCH|j_watch/i.test(text))
     ) {
       process.stdout.write(`[${tag}] ${text.slice(0, 300)}\n`);
@@ -475,13 +477,40 @@ test.describe('Payment Smoke', () => {
           senderPage.reload({ waitUntil: 'domcontentloaded' }),
           recipientPage.reload({ waitUntil: 'domcontentloaded' }),
         ]);
-        const unlockAfterReload = async (reloadedPage: Page): Promise<void> => {
-          await reloadedPage.getByRole('button', { name: 'Continue', exact: true }).click();
-          await reloadedPage.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
-          await reloadedPage.getByRole('button', { name: 'Unlock', exact: true }).click();
-          await expect(reloadedPage.getByTestId('nav-home').locator('visible=true').first()).toBeVisible();
+        const unlockAfterReload = async (reloadedPage: Page, identity: typeof sender, label: string): Promise<void> => {
+          try {
+            await timedStep(`payment_smoke.restore_${label}`, async () => {
+              await reloadedPage.getByRole('button', { name: 'Continue', exact: true }).click();
+              await reloadedPage.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
+              await reloadedPage.getByRole('button', { name: 'Unlock', exact: true }).click();
+              await expect(reloadedPage.getByTestId('nav-home').locator('visible=true').first()).toBeVisible();
+            });
+          } catch (error) {
+            // Observe only after the original assertion fails; diagnostics never extend its deadline.
+            const scan = await reloadedPage
+              .evaluate(async owner => {
+                const debug = (window as CurrentWalletWindow).__xln;
+                const env = debug?.env();
+                if (!debug || !env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+                const xln = await debug.xln();
+                const adapter = xln.getEntityJAdapter(env, owner.entityId, owner.signerId);
+                if (!adapter?.getCurrentBlockNumber || !adapter.getFinalityDepth)
+                  throw new Error('J_WATCHER_DRAIN_API_MISSING');
+                const head = Number(await adapter.getCurrentBlockNumber());
+                return xln.getJWatcherDrainStatus(env, {
+                  adapter,
+                  targetBlock: Math.max(0, head - Number(adapter.getFinalityDepth())),
+                });
+              }, identity)
+              .catch(diagnosticError => ({ diagnosticError: String(diagnosticError) }));
+            console.log('[PAY-SMOKE][RESTORE-FAILED]', { label, scan });
+            throw error;
+          }
         };
-        await Promise.all([unlockAfterReload(senderPage), unlockAfterReload(recipientPage)]);
+        await Promise.all([
+          unlockAfterReload(senderPage, sender, 'sender'),
+          unlockAfterReload(recipientPage, recipient, 'recipient'),
+        ]);
         await Promise.all([
           gotoApp(senderPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
           gotoApp(recipientPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),

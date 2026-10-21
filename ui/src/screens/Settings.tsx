@@ -5,6 +5,7 @@ import { Appearance } from '../components/settings/Appearance';
 import { BalanceSettings, ScalePreview } from '../components/settings/BalanceSettings';
 import { Profile } from '../components/settings/Profile';
 import { Vault } from '../components/settings/Vault';
+import { StackManager } from '../components/settings/StackManager';
 import { useState } from 'react';
 import { peekXLN } from '../runtime/xln-loader';
 import { getAdapter, getEmbeddedEnv } from '../runtime/adapter';
@@ -44,6 +45,7 @@ export function SettingsScreen() {
             <h3 className="caps">Runtime</h3>
           </div>
           <Networks />
+          <StackManager />
           <div className="setting first">
             <div className="t">Mode</div>
             <span className="muted">{adapter?.mode ?? '—'}</span>

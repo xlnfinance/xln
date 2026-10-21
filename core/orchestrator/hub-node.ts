@@ -28,6 +28,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createExternalWalletApi } from '../api/public/external-wallet-api';
 import { createBrainVaultOwnerController, type BrainVaultOwnerController } from '../api/server/ownership/brainvault';
+import { PROFILE_CONTROL_BODY_MAX_BYTES } from '../api/server/control/gossip/profile-verification';
 import { hasCliFlag, readCliOption } from '../config/cli';
 import { readBooleanEnv, readNonNegativeIntegerEnv, readPositiveIntegerEnv } from '../config/environment';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
@@ -1202,7 +1203,7 @@ const startHubHttpSurface = (
     hostname: resolvedArgs.apiHost,
     port: resolvedArgs.apiPort,
     idleTimeout: 120,
-    maxRequestBodySize: 1024 * 1024,
+    maxRequestBodySize: PROFILE_CONTROL_BODY_MAX_BYTES,
     async fetch(request, serverRef) {
       const releaseHttp = httpDrain.begin();
       try {

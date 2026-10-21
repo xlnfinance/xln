@@ -1,9 +1,9 @@
 /**
- * E2E: Multi-Route High-Load Payment Test — 6 Users, 3 Hubs, 19 Test Cases
+ * E2E: Multi-Route High-Load Payment Test — 6 Users, 3 Hubs, 18 Test Cases
  *
  * AAA+ Test: Verifies sender balance, receiver balance, per-hop fees,
  *            overspend rejection, reverse netting, self-pay loop,
- *            HTLC timeout/cancellation, and persistence.
+ *            HTLC cleanup and persistence.
  *
  * Topology after setup:
  *
@@ -37,7 +37,7 @@
  * Prereqs: localhost:8080, xln.finance with 3 hubs (H1/H2/H3)
  */
 
-import { test, expect, type BrowserContext, type Page } from '../../global-setup.mts';
+import { test, expect, allowBrowserIssue, type BrowserContext, type Page } from '../../global-setup.mts';
 import { resetProdServer as resetSharedProdServer } from '../../utils/e2e-baseline';
 import { APP_BASE_URL, API_BASE_URL } from '../../utils/e2e-baseline';
 import { timedStep } from '../../utils/e2e-timing.mts';
@@ -46,28 +46,28 @@ import {
   waitForRenderedOutboundForAccountDelta,
 } from '../../utils/runtime/e2e-account-ui';
 import { outCap, waitForOutCapDelta } from '../../utils/runtime/e2e-derived-capacity';
-import {
-  createRuntimeIdentity,
-  gotoApp,
-  selectDemoMnemonic,
-} from '../../utils/e2e-demo-users';
+import { gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from '../../utils/e2e-connect';
 import { enqueueEntityTxs } from '../../utils/runtime/e2e-runtime-input';
 import { expectUiPaymentNoRoute } from '../../utils/runtime/e2e-pay-ui';
 import { getTokenInfo } from '../../../core/account/utils';
 import { closeRuntimeContext } from '../../utils/runtime/e2e-runtime-shutdown.mts';
 
+import { createWalletIdentity, readWalletIdentity, LOCAL_PASSWORD } from '../../../ui/tests/wallet-ui';
+import type { RuntimeReplica, XLNModule } from '../../../core/api/public/runtime-module';
+
+type CurrentRuntimeWindow = Window & {
+  __xln?: { env(): RuntimeReplica | null; xln(): Promise<XLNModule> };
+};
+
 const INIT_TIMEOUT = 30_000;
 
 // ─── Fee Calculation Utilities ──────────────────────────────────
-const DEFAULT_FEE_PPM = 100n; // 0.01% — server default for all hubs
 const FEE_DENOM = 1_000_000n;
 
-const calcFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint =>
-  (amount * feePPM / FEE_DENOM) + baseFee;
+const calcFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint => (amount * feePPM) / FEE_DENOM + baseFee;
 
-const afterFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint =>
-  amount - calcFee(amount, feePPM, baseFee);
+const afterFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint => amount - calcFee(amount, feePPM, baseFee);
 
 /** Binary search for sender amount that yields desiredForward after fees */
 const requiredInbound = (desiredForward: bigint, feePPM: bigint, baseFee: bigint): bigint => {
@@ -86,20 +86,25 @@ const requiredInbound = (desiredForward: bigint, feePPM: bigint, baseFee: bigint
 function calcSenderSpend(
   recipientAmount: bigint,
   routeHubs: string[],
-  hubFees: Map<string, { feePPM: bigint; baseFee: bigint }>
+  hubFees: Map<string, { feePPM: bigint; baseFee: bigint }>,
 ): bigint {
   let amount = recipientAmount;
   // Work backwards: last hub first (closest to receiver)
   for (let i = routeHubs.length - 1; i >= 0; i--) {
-    const fee = hubFees.get(routeHubs[i]!) ?? { feePPM: DEFAULT_FEE_PPM, baseFee: 0n };
+    const fee = hubFees.get(routeHubs[i]!);
+    if (!fee) throw new Error(`HUB_FEE_PROFILE_MISSING:${routeHubs[i]}`);
     amount = requiredInbound(amount, fee.feePPM, fee.baseFee);
   }
   return amount;
 }
 
 const USDC_SCALE = 10n ** BigInt(getTokenInfo(1).decimals);
-function toWei(n: number): bigint { return BigInt(Math.round(n * 100)) * USDC_SCALE / 100n; }
-function formatUsd(amount: bigint): string { return `$${Number(amount * 100n / USDC_SCALE) / 100}`; }
+function toWei(n: number): bigint {
+  return (BigInt(Math.round(n * 100)) * USDC_SCALE) / 100n;
+}
+function formatUsd(amount: bigint): string {
+  return `$${Number((amount * 100n) / USDC_SCALE) / 100}`;
+}
 const MULTIROUTE_MNEMONICS: Record<UserName, string> = {
   alice: selectDemoMnemonic('alice'),
   bob: selectDemoMnemonic('bob'),
@@ -114,7 +119,9 @@ function relayToApiBase(relayUrl: string | null | undefined): string | null {
   try {
     const u = new URL(relayUrl);
     return `${u.protocol === 'wss:' ? 'https:' : 'http:'}//${u.host}`;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 async function getActiveApiBase(page: Page): Promise<string> {
@@ -127,79 +134,40 @@ async function getActiveApiBase(page: Page): Promise<string> {
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
-type Entity = { entityId: string; signerId: string; label: string; mnemonic: string };
+type Entity = { entityId: string; signerId: string; runtimeId: string; label: string };
 type UserName = 'alice' | 'bob' | 'carol' | 'dave' | 'eve' | 'frank';
 
 async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs = 25_000) {
-  const apiBase = await getActiveApiBase(page);
-  const ok = await page.evaluate(async ({ entityId, timeoutMs, apiBase }) => {
-    const start = Date.now();
-    const target = entityId.toLowerCase();
-    while (Date.now() - start < timeoutMs) {
-      try {
-        const res = await fetch(`${apiBase}/api/debug/entities?limit=5000&q=${encodeURIComponent(entityId)}`);
-        if (res.ok) {
-          const body = await res.json();
-          const entities = Array.isArray(body?.entities) ? body.entities : [];
-          const hit = entities.find((e: any) => String(e?.entityId || '').toLowerCase() === target);
-          if (hit && hit.runtimeId) return true;
-        }
-      } catch {
-        // fall back to the local gossip cache below
-      }
-      const connectivity = (window as any).__xln?.runtimeConnectivity;
-      const profiles = connectivity?.profiles ?? [];
-      if (profiles.some((p: any) => String(p?.entityId || '').toLowerCase() === target)) return true;
-      if (typeof connectivity?.refreshGossip === 'function') await connectivity.refreshGossip();
-      await new Promise(r => setTimeout(r, 400));
-    }
-    return false;
-  }, { entityId, timeoutMs, apiBase });
-  expect(ok, `Entity ${entityId.slice(0, 10)} not advertised in relay debug registry or local gossip`).toBe(true);
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(async target => {
+          const debug = (window as CurrentRuntimeWindow).__xln;
+          const env = debug?.env();
+          if (!debug || !env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+          await (await debug.xln()).ensureGossipProfiles(env, [target]);
+          return Boolean(env.gossip.getProfile(target)?.runtimeId);
+        }, entityId),
+      { timeout: timeoutMs, intervals: [400] },
+    )
+    .toBe(true);
 }
 
-async function discoverHubs(page: Page): Promise<string[]> {
-  return page.evaluate(async () => {
-    const view = window as any;
-    const start = Date.now();
-    while (Date.now() - start < 20_000) {
-      const connectivity = view.__xln?.runtimeConnectivity;
-      const profiles = connectivity?.profiles ?? [];
-      const hubs = profiles
-        .filter((p: any) => p?.metadata?.isHub === true)
-        .map((p: any) => String(p.entityId));
-      if (hubs.length >= 3) return hubs;
-      if (typeof connectivity?.refreshGossip === 'function') await connectivity.refreshGossip();
-      await new Promise(r => setTimeout(r, 800));
-    }
-    const profiles = view.__xln?.runtimeConnectivity?.profiles ?? [];
-    return profiles.filter((p: any) => p?.metadata?.isHub).map((p: any) => String(p.entityId));
-  });
-}
-
-/** Read hub fee config from gossip profile */
+/** Profiles have already passed the canonical gossip decoder; absent metadata is not a zero fee. */
 async function getHubFeeConfig(page: Page, hubId: string): Promise<{ feePPM: bigint; baseFee: bigint }> {
-  const fee = await page.evaluate((targetHubId) => {
-    const env = (window as any).isolatedEnv;
-    const profiles = env?.gossip?.getProfiles?.() || [];
-    const profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === String(targetHubId || '').toLowerCase());
-    const rawPPM = Number(profile?.metadata?.routingFeePPM ?? 0);
-    const safePPM = Number.isFinite(rawPPM) && rawPPM >= 0 ? Math.floor(rawPPM) : 0;
-    const rawBase = profile?.metadata?.baseFee;
-    const base = typeof rawBase === 'string'
-      ? rawBase
-      : (typeof rawBase === 'number' && Number.isFinite(rawBase) ? String(Math.max(0, Math.floor(rawBase))) : '0');
-    return { feePPM: String(safePPM), baseFee: base };
+  return page.evaluate(async target => {
+    const debug = (window as CurrentRuntimeWindow).__xln;
+    const env = debug?.env();
+    if (!debug || !env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+    await (await debug.xln()).ensureGossipProfiles(env, [target]);
+    const profile = env.gossip.getProfile(target);
+    if (!profile) throw new Error(`HUB_FEE_PROFILE_MISSING:${target}`);
+    const { routingFeePPM, baseFee } = profile.metadata;
+    if (!Number.isSafeInteger(routingFeePPM) || routingFeePPM < 0 || typeof baseFee !== 'bigint' || baseFee < 0n) {
+      throw new Error(`HUB_FEE_PROFILE_INVALID:${target}`);
+    }
+    return { feePPM: BigInt(routingFeePPM), baseFee };
   }, hubId);
-
-  const baseFeeRaw = String(fee.baseFee || '0').trim();
-  const baseFeeNorm = baseFeeRaw.startsWith('BigInt(') && baseFeeRaw.endsWith(')')
-    ? baseFeeRaw.slice(7, -1) : baseFeeRaw;
-
-  return {
-    feePPM: BigInt(fee.feePPM || String(DEFAULT_FEE_PPM)),
-    baseFee: BigInt(baseFeeNorm || '0'),
-  };
 }
 
 async function connectHub(page: Page, entityId: string, signerId: string, hubId: string) {
@@ -222,19 +190,30 @@ async function connectHub(page: Page, entityId: string, signerId: string, hubId:
 async function faucet(page: Page, entityId: string, hubEntityId: string) {
   const apiBase = await getActiveApiBase(page);
   for (let attempt = 1; attempt <= 6; attempt++) {
-    const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
-    if (!runtimeId) { await page.waitForTimeout(2000); continue; }
+    const runtimeId = await page.evaluate(() => {
+      const env = (window as CurrentRuntimeWindow).__xln?.env();
+      if (!env?.runtimeId) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+      return env.runtimeId;
+    });
     try {
       const data = { userEntityId: entityId, userRuntimeId: runtimeId, tokenId: 1, amount: '100', hubEntityId };
       const resp = await page.request.post(`${apiBase}/api/faucet/offchain`, { data });
       const body = await resp.json().catch(() => ({}));
       if (resp.ok()) {
-        console.log(`[E2E] Faucet OK for ${entityId.slice(0, 10)} via ${hubEntityId.slice(0, 10)} (attempt ${attempt})`);
+        console.log(
+          `[E2E] Faucet OK for ${entityId.slice(0, 10)} via ${hubEntityId.slice(0, 10)} (attempt ${attempt})`,
+        );
         await page.waitForTimeout(3000);
         return;
       }
       const msg = String(body?.error || body?.code || '');
-      if (resp.status() === 202 || resp.status() === 409 || msg.includes('AWAITING') || msg.includes('pending') || msg.includes('FAUCET_ACCOUNT_MISSING')) {
+      if (
+        resp.status() === 202 ||
+        resp.status() === 409 ||
+        msg.includes('AWAITING') ||
+        msg.includes('pending') ||
+        msg.includes('FAUCET_ACCOUNT_MISSING')
+      ) {
         console.log(`[E2E] Faucet transient (attempt ${attempt}): ${msg}`);
         await page.waitForTimeout(3000);
         continue;
@@ -251,64 +230,93 @@ async function faucet(page: Page, entityId: string, hubEntityId: string) {
 
 async function waitForRouteProfiles(page: Page, route: string[]): Promise<void> {
   const ids = route.map(id => id.toLowerCase());
-  await expect.poll(async () => page.evaluate(async (targets) => {
-    const view = window as any;
-    const connectivity = view.__xln?.runtimeConnectivity;
-    await connectivity?.ensureProfiles?.(targets).catch(() => false);
-    const profiles = view.isolatedEnv?.gossip?.getProfiles?.() ?? connectivity?.profiles ?? [];
-    const matches = (id: string) => profiles.filter((profile: any) =>
-      String(profile?.entityId || '').toLowerCase() === id);
-    for (const id of targets) {
-      if (matches(id).length !== 1) return `${id}:profiles=${matches(id).length}`;
-    }
-    for (let i = 0; i < targets.length - 1; i++) {
-      const from = targets[i]!;
-      const to = targets[i + 1]!;
-      const linked = matches(from)[0].accounts?.some((account: any) =>
-        String(account?.counterpartyId || '').toLowerCase() === to)
-        || matches(to)[0].accounts?.some((account: any) =>
-          String(account?.counterpartyId || '').toLowerCase() === from);
-      if (!linked) return `${from}->${to}:account-missing`;
-    }
-    return 'ready';
-  }, ids), { timeout: 30_000, intervals: [200, 400, 800] }).toBe('ready');
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(async targets => {
+          const debug = (window as CurrentRuntimeWindow).__xln;
+          const env = debug?.env();
+          if (!debug || !env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+          await (await debug.xln()).ensureGossipProfiles(env, targets);
+          const profiles = env.gossip.getProfiles();
+          const matches = (id: string) =>
+            profiles.filter((profile: any) => String(profile?.entityId || '').toLowerCase() === id);
+          for (const id of targets) {
+            if (matches(id).length !== 1) return `${id}:profiles=${matches(id).length}`;
+          }
+          for (let i = 0; i < targets.length - 1; i++) {
+            const from = targets[i]!;
+            const to = targets[i + 1]!;
+            const linked =
+              matches(from)[0].accounts?.some(
+                (account: any) => String(account?.counterpartyId || '').toLowerCase() === to,
+              ) ||
+              matches(to)[0].accounts?.some(
+                (account: any) => String(account?.counterpartyId || '').toLowerCase() === from,
+              );
+            if (!linked) return `${from}->${to}:account-missing`;
+          }
+          return 'ready';
+        }, ids),
+      { timeout: 30_000, intervals: [200, 400, 800] },
+    )
+    .toBe('ready');
 }
 
 async function pay(page: Page, from: string, signerId: string, to: string, route: string[], amount: bigint) {
   await waitForRouteProfiles(page, route);
-  await enqueueEntityTxs(page, from, signerId, [{
-    type: 'htlcPayment',
-    data: {
-      targetEntityId: to,
-      tokenId: 1,
-      amount,
-      maxSenderDebit: amount * 2n,
-      route,
-      deliveryMode: 'instant',
+  await enqueueEntityTxs(page, from, signerId, [
+    {
+      type: 'htlcPayment',
+      data: {
+        targetEntityId: to,
+        tokenId: 1,
+        amount,
+        maxSenderDebit: amount * 2n,
+        route,
+        deliveryMode: 'instant',
+      },
     },
-  }]);
+  ]);
 }
 
-async function getLockCount(page: Page, entityId: string): Promise<number> {
-  return page.evaluate(({ entityId }) => {
-    const env = (window as any).isolatedEnv;
-    for (const [k, rep] of (env?.state?.eReplicas ?? new Map()).entries()) {
-      if (String(k).startsWith(entityId + ':')) return (rep as any).state?.lockBook?.size || 0;
-    }
-    return -1;
-  }, { entityId });
+async function getLockCounts(page: Page, identity: Entity, expectedHubs: string[]) {
+  return page.evaluate(
+    ({ entityId, signerId, expectedHubs }) => {
+      const env = (window as CurrentRuntimeWindow).__xln?.env();
+      if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+      const replica = env.state.eReplicas.get(`${entityId}:${signerId}`.toLowerCase());
+      if (!replica) throw new Error(`CURRENT_WALLET_ENTITY_MISSING:${entityId}`);
+      for (const hub of expectedHubs) {
+        if (!replica.state.accounts.has(hub)) throw new Error(`CURRENT_WALLET_ACCOUNT_MISSING:${hub}`);
+      }
+      return {
+        paybookOpen: replica.state.paybook.entries.size,
+        accountLocks: [...replica.state.accounts.values()].reduce(
+          (count, account) => count + account.state.locks.size,
+          0,
+        ),
+      };
+    },
+    { entityId: identity.entityId, signerId: identity.signerId, expectedHubs },
+  );
 }
 
 async function assertHubMeshReady(page: Page, retries = 5): Promise<string[]> {
   const apiBase = await getActiveApiBase(page);
   let lastHealth: any = null;
   for (let i = 0; i < retries; i++) {
-    lastHealth = await page.evaluate(async ({ apiBase }) => {
-      try {
-        const r = await fetch(`${apiBase}/api/health`);
-        return r.json();
-      } catch (e: any) { return { error: e.message }; }
-    }, { apiBase });
+    lastHealth = await page.evaluate(
+      async ({ apiBase }) => {
+        try {
+          const r = await fetch(`${apiBase}/api/health`);
+          return r.json();
+        } catch (e: any) {
+          return { error: e.message };
+        }
+      },
+      { apiBase },
+    );
     if (lastHealth?.hubMesh?.ok === true && lastHealth?.hubMesh?.hubIds?.length === 3) {
       console.log('[E2E] Hub mesh verified: 3 hubs, all pairs $1M mutual credit');
       return lastHealth.hubMesh.hubIds as string[];
@@ -316,7 +324,11 @@ async function assertHubMeshReady(page: Page, retries = 5): Promise<string[]> {
     console.log(`[E2E] Hub mesh not ready (attempt ${i + 1}/${retries}), waiting...`);
     await page.waitForTimeout(3000);
   }
-  const pairs = lastHealth?.hubMesh?.pairs?.map((p: any) => ({ l: p.left?.slice(0, 8), r: p.right?.slice(0, 8), ok: p.ok }));
+  const pairs = lastHealth?.hubMesh?.pairs?.map((p: any) => ({
+    l: p.left?.slice(0, 8),
+    r: p.right?.slice(0, 8),
+    ok: p.ok,
+  }));
   throw new Error(`Hub mesh not ready after ${retries} retries: ${JSON.stringify(pairs)}`);
 }
 
@@ -346,8 +358,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
 
     page.on('console', msg => {
       const t = msg.text();
-      if (t.includes('[E2E]') || t.includes('HTLC') || msg.type() === 'error')
-        console.log(`[CTRL] ${t.slice(0, 250)}`);
+      if (t.includes('[E2E]') || t.includes('HTLC') || msg.type() === 'error') console.log(`[CTRL] ${t.slice(0, 250)}`);
     });
 
     // ═══════════════════════════════════════════════════════════════
@@ -359,7 +370,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 2000 }); // reload after server restart
 
     const [h1, h2, h3] = await assertHubMeshReady(page);
-    console.log(`[E2E] H1=${h1!.slice(0,10)}  H2=${h2!.slice(0,10)}  H3=${h3!.slice(0,10)}`);
+    console.log(`[E2E] H1=${h1!.slice(0, 10)}  H2=${h2!.slice(0, 10)}  H3=${h3!.slice(0, 10)}`);
 
     for (const name of userNames) {
       const context = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -372,41 +383,40 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
           console.log(`[${name.toUpperCase()}] ${t.slice(0, 250)}`);
       });
     }
-    await Promise.all(userNames.map(name =>
-      gotoApp(pageFor(name), { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1500 })
-    ));
-
-    // Fetch hub fee configs
-    const hubFees = new Map<string, { feePPM: bigint; baseFee: bigint }>();
-    for (const hubId of [h1!, h2!, h3!]) {
-      const fee = await getHubFeeConfig(page, hubId);
-      hubFees.set(hubId, fee);
-      const hl = hubId === h1 ? 'H1' : hubId === h2 ? 'H2' : 'H3';
-      console.log(`[E2E] ${hl} fee: ${fee.feePPM} PPM, base=${fee.baseFee}`);
-    }
+    await Promise.all(
+      userNames.map(name =>
+        gotoApp(pageFor(name), { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1500 }),
+      ),
+    );
 
     // Create 6 users
     const users: Record<UserName, Entity> = {} as Record<UserName, Entity>;
     for (const name of userNames) {
       const mnemonic = MULTIROUTE_MNEMONICS[name];
-      const entity = await createRuntimeIdentity(pageFor(name), name, mnemonic, { fresh: true });
+      const entity = await timedStep(`multiroute.create_${name}`, () =>
+        createWalletIdentity(pageFor(name), name, mnemonic),
+      );
       await waitForEntityAdvertised(pageFor(name), entity.entityId);
-      users[name] = { entityId: entity.entityId, signerId: entity.signerId, label: name, mnemonic };
+      users[name] = { ...entity, label: name };
       console.log(`[E2E] ${name}: ${entity.entityId.slice(0, 14)}`);
     }
-    for (const viewer of userNames) {
-      for (const entity of Object.values(users)) {
-        await waitForEntityAdvertised(pageFor(viewer), entity.entityId);
-      }
+
+    // Fetch hub fee configs
+    const hubFees = new Map<string, { feePPM: bigint; baseFee: bigint }>();
+    for (const hubId of [h1!, h2!, h3!]) {
+      const fee = await getHubFeeConfig(pageFor('alice'), hubId);
+      hubFees.set(hubId, fee);
+      const hl = hubId === h1 ? 'H1' : hubId === h2 ? 'H2' : 'H3';
+      console.log(`[E2E] ${hl} fee: ${fee.feePPM} PPM, base=${fee.baseFee}`);
     }
 
     // Connect to hubs per topology
     const hubMap: Record<string, string[]> = {
       alice: [h1!],
-      bob:   [h2!],
+      bob: [h2!],
       carol: [h3!],
-      dave:  [h1!, h2!],
-      eve:   [h2!, h3!],
+      dave: [h1!, h2!],
+      eve: [h2!, h3!],
       frank: [h1!, h3!],
     };
 
@@ -415,7 +425,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
       for (const hub of hubs) {
         await connectHub(userPage, users[name as UserName]!.entityId, users[name as UserName]!.signerId, hub);
       }
-      const hubNames = hubs.map(h => h === h1 ? 'H1' : h === h2 ? 'H2' : 'H3');
+      const hubNames = hubs.map(h => (h === h1 ? 'H1' : h === h2 ? 'H2' : 'H3'));
       console.log(`[E2E] ${name} -> ${hubNames.join('+')}`);
     }
 
@@ -432,9 +442,18 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     }
     console.log('[E2E] All 6 users funded on all hubs');
 
+    // Discover other users only after their receive-ready topology is published.
+    // Pull-only ensureProfiles retains existing profiles, so pre-opening discovery
+    // would freeze an empty peer account list in this direct-admission fixture.
+    for (const viewer of userNames) {
+      for (const entity of Object.values(users)) {
+        await waitForEntityAdvertised(pageFor(viewer), entity.entityId);
+      }
+    }
+
     // Short label helpers
     const label = (eid: string) => Object.entries(users).find(([, e]) => e.entityId === eid)?.[0] ?? eid.slice(0, 8);
-    const hubLabel = (hid: string) => hid === h1 ? 'H1' : hid === h2 ? 'H2' : 'H3';
+    const hubLabel = (hid: string) => (hid === h1 ? 'H1' : hid === h2 ? 'H2' : 'H3');
 
     // ─── Hardened testPayment ────────────────────────────────────
     // Verifies: receiver gets exact amount, sender pays >= expected (with fees)
@@ -446,7 +465,11 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     };
 
     const testPayment = async (
-      senderName: UserName, receiverName: UserName, route: string[], amount: number, tcName: string
+      senderName: UserName,
+      receiverName: UserName,
+      route: string[],
+      amount: number,
+      tcName: string,
     ): Promise<PayResult> => {
       const sender = users[senderName]!;
       const receiver = users[receiverName]!;
@@ -488,11 +511,15 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
       const senderPaid = senderBefore - senderAfter;
 
       // 6. HARD ASSERT: sender paid >= expected (includes fees)
-      expect(senderPaid, `${tcName}: ${senderName} must pay >= ${formatUsd(expectedSenderSpend)} (paid ${formatUsd(senderPaid)})`
+      expect(
+        senderPaid,
+        `${tcName}: ${senderName} must pay >= ${formatUsd(expectedSenderSpend)} (paid ${formatUsd(senderPaid)})`,
       ).toBeGreaterThanOrEqual(expectedSenderSpend);
 
       const totalFee = senderPaid - receiverGot;
-      console.log(`[E2E] ${tcName}: ${routeLabels} ${formatUsd(wei)} (${hubs.length}-hop) | recv=${formatUsd(receiverGot)} sent=${formatUsd(senderPaid)} fee=${formatUsd(totalFee)}`);
+      console.log(
+        `[E2E] ${tcName}: ${routeLabels} ${formatUsd(wei)} (${hubs.length}-hop) | recv=${formatUsd(receiverGot)} sent=${formatUsd(senderPaid)} fee=${formatUsd(totalFee)}`,
+      );
 
       return { senderPaid, receiverGot, expectedSenderSpend, totalFee };
     };
@@ -537,7 +564,13 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     console.log('[E2E] TC6 PASS');
 
     // TC7: Carol->H3->H1->Alice ($20) — completes triangle
-    const tc7 = await testPayment('carol', 'alice', [users.carol!.entityId, h3!, h1!, users.alice!.entityId], 20, 'TC7');
+    const tc7 = await testPayment(
+      'carol',
+      'alice',
+      [users.carol!.entityId, h3!, h1!, users.alice!.entityId],
+      20,
+      'TC7',
+    );
     console.log('[E2E] TC7 PASS');
 
     // TC8: Dave->H1->H3->Carol ($8)
@@ -554,19 +587,34 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     console.log('\n[E2E] === PHASE D: 3-HOP PAYMENTS ===');
 
     // TC10: Alice->H1->H2->H3->Carol ($1, minimum through full mesh)
-    const tc10 = await testPayment('alice', 'carol',
-      [users.alice!.entityId, h1!, h2!, h3!, users.carol!.entityId], 1, 'TC10');
-    expect(tc10.totalFee, 'TC10: 3-hop fee > 2-hop fee').toBeGreaterThan(tc5.totalFee * toWei(1) / toWei(15)); // proportional check
+    const tc10 = await testPayment(
+      'alice',
+      'carol',
+      [users.alice!.entityId, h1!, h2!, h3!, users.carol!.entityId],
+      1,
+      'TC10',
+    );
+    expect(tc10.totalFee, 'TC10: 3-hop fee > 2-hop fee').toBeGreaterThan((tc5.totalFee * toWei(1)) / toWei(15)); // proportional check
     console.log('[E2E] TC10 PASS');
 
     // TC11: Bob->H2->H3->H1->Alice ($50, max payment, full mesh)
-    const tc11 = await testPayment('bob', 'alice',
-      [users.bob!.entityId, h2!, h3!, h1!, users.alice!.entityId], 50, 'TC11');
+    const tc11 = await testPayment(
+      'bob',
+      'alice',
+      [users.bob!.entityId, h2!, h3!, h1!, users.alice!.entityId],
+      50,
+      'TC11',
+    );
     console.log('[E2E] TC11 PASS');
 
     // TC12: Carol->H3->H1->H2->Bob ($25, third direction)
-    const tc12 = await testPayment('carol', 'bob',
-      [users.carol!.entityId, h3!, h1!, h2!, users.bob!.entityId], 25, 'TC12');
+    const tc12 = await testPayment(
+      'carol',
+      'bob',
+      [users.carol!.entityId, h3!, h1!, h2!, users.bob!.entityId],
+      25,
+      'TC12',
+    );
     console.log('[E2E] TC12 PASS');
 
     // ═══════════════════════════════════════════════════════════════
@@ -585,12 +633,30 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     const frankConBefore = await outCap(pageFor('frank'), users.frank!.entityId, h3!);
 
     // Fire all 3 payments
-    await pay(pageFor('alice'), users.alice!.entityId, users.alice!.signerId, users.dave!.entityId,
-      [users.alice!.entityId, h1!, users.dave!.entityId], toWei(4));
-    await pay(pageFor('bob'), users.bob!.entityId, users.bob!.signerId, users.eve!.entityId,
-      [users.bob!.entityId, h2!, users.eve!.entityId], toWei(6));
-    await pay(pageFor('carol'), users.carol!.entityId, users.carol!.signerId, users.frank!.entityId,
-      [users.carol!.entityId, h3!, users.frank!.entityId], toWei(9));
+    await pay(
+      pageFor('alice'),
+      users.alice!.entityId,
+      users.alice!.signerId,
+      users.dave!.entityId,
+      [users.alice!.entityId, h1!, users.dave!.entityId],
+      toWei(4),
+    );
+    await pay(
+      pageFor('bob'),
+      users.bob!.entityId,
+      users.bob!.signerId,
+      users.eve!.entityId,
+      [users.bob!.entityId, h2!, users.eve!.entityId],
+      toWei(6),
+    );
+    await pay(
+      pageFor('carol'),
+      users.carol!.entityId,
+      users.carol!.signerId,
+      users.frank!.entityId,
+      [users.carol!.entityId, h3!, users.frank!.entityId],
+      toWei(9),
+    );
 
     // Verify all 3 receivers
     const daveConAfter = await waitForOutCapDelta(pageFor('dave'), users.dave!.entityId, h1!, daveConBefore, toWei(4));
@@ -599,7 +665,13 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     const eveConAfter = await waitForOutCapDelta(pageFor('eve'), users.eve!.entityId, h2!, eveConBefore, toWei(6));
     expect(eveConAfter - eveConBefore, 'TC13b: Eve receives $6').toBe(toWei(6));
 
-    const frankConAfter = await waitForOutCapDelta(pageFor('frank'), users.frank!.entityId, h3!, frankConBefore, toWei(9));
+    const frankConAfter = await waitForOutCapDelta(
+      pageFor('frank'),
+      users.frank!.entityId,
+      h3!,
+      frankConBefore,
+      toWei(9),
+    );
     expect(frankConAfter - frankConBefore, 'TC13c: Frank receives $9').toBe(toWei(9));
 
     // Verify all 3 senders paid
@@ -637,15 +709,28 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     const rapidStart = Date.now();
 
     for (let i = 0; i < rapidCount; i++) {
-      await pay(pageFor('alice'), users.alice!.entityId, users.alice!.signerId, users.dave!.entityId,
-        [users.alice!.entityId, h1!, users.dave!.entityId], rapidAmount);
+      await pay(
+        pageFor('alice'),
+        users.alice!.entityId,
+        users.alice!.signerId,
+        users.dave!.entityId,
+        [users.alice!.entityId, h1!, users.dave!.entityId],
+        rapidAmount,
+      );
       await pageFor('alice').waitForTimeout(250);
     }
     const rapidMs = Date.now() - rapidStart;
 
     // Verify Dave received all
     const expectedRapidTotal = rapidAmount * BigInt(rapidCount);
-    const daveRapidAfter = await waitForOutCapDelta(pageFor('dave'), users.dave!.entityId, h1!, daveRapidBefore, expectedRapidTotal, 60_000);
+    const daveRapidAfter = await waitForOutCapDelta(
+      pageFor('dave'),
+      users.dave!.entityId,
+      h1!,
+      daveRapidBefore,
+      expectedRapidTotal,
+      60_000,
+    );
     const daveRapidReceived = daveRapidAfter - daveRapidBefore;
     expect(daveRapidReceived, `TC14: Dave should receive ${rapidCount}x $2`).toBe(expectedRapidTotal);
 
@@ -654,11 +739,15 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     const aliceRapidAfter = await outCap(pageFor('alice'), users.alice!.entityId, h1!);
     const aliceRapidPaid = aliceRapidBefore - aliceRapidAfter;
     const expectedRapidSenderTotal = calcSenderSpend(rapidAmount, [h1!], hubFees) * BigInt(rapidCount);
-    expect(aliceRapidPaid, 'TC14: Alice total spend >= expected with fees').toBeGreaterThanOrEqual(expectedRapidSenderTotal);
+    expect(aliceRapidPaid, 'TC14: Alice total spend >= expected with fees').toBeGreaterThanOrEqual(
+      expectedRapidSenderTotal,
+    );
 
     const rapidFee = aliceRapidPaid - daveRapidReceived;
-    const tps = rapidCount / (rapidMs / 1000);
-    console.log(`[E2E] TC14 PASS: ${rapidCount}x $2 in ${rapidMs}ms = ${tps.toFixed(1)} tx/s | total fee=${formatUsd(rapidFee)}`);
+    const submissionsPerSecond = rapidCount / (rapidMs / 1000);
+    console.log(
+      `[E2E] TC14 PASS: ${rapidCount}x $2 in ${rapidMs}ms = ${submissionsPerSecond.toFixed(1)} submissions/s (not live TPS) | total fee=${formatUsd(rapidFee)}`,
+    );
 
     // ═══════════════════════════════════════════════════════════════
     // PHASE G: CHAIN PAYMENT (A->D->B->E->C, each forwards)
@@ -672,40 +761,90 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     console.log('[E2E] TC15.1: Alice->Dave');
     const aliceChainBefore = await outCap(pageFor('alice'), users.alice!.entityId, h1!);
     const daveChainBefore = await outCap(pageFor('dave'), users.dave!.entityId, h1!);
-    await pay(pageFor('alice'), users.alice!.entityId, users.alice!.signerId, users.dave!.entityId,
-      [users.alice!.entityId, h1!, users.dave!.entityId], chainAmount);
-    const daveChainAfter = await waitForOutCapDelta(pageFor('dave'), users.dave!.entityId, h1!, daveChainBefore, chainAmount);
+    await pay(
+      pageFor('alice'),
+      users.alice!.entityId,
+      users.alice!.signerId,
+      users.dave!.entityId,
+      [users.alice!.entityId, h1!, users.dave!.entityId],
+      chainAmount,
+    );
+    const daveChainAfter = await waitForOutCapDelta(
+      pageFor('dave'),
+      users.dave!.entityId,
+      h1!,
+      daveChainBefore,
+      chainAmount,
+    );
     expect(daveChainAfter - daveChainBefore, 'TC15.1: Dave receives $5').toBe(chainAmount);
 
     // Step 2: Dave->Bob via H2
     console.log('[E2E] TC15.2: Dave->Bob');
     const bobChainBefore = await outCap(pageFor('bob'), users.bob!.entityId, h2!);
-    await pay(pageFor('dave'), users.dave!.entityId, users.dave!.signerId, users.bob!.entityId,
-      [users.dave!.entityId, h2!, users.bob!.entityId], chainAmount);
-    const bobChainAfter = await waitForOutCapDelta(pageFor('bob'), users.bob!.entityId, h2!, bobChainBefore, chainAmount);
+    await pay(
+      pageFor('dave'),
+      users.dave!.entityId,
+      users.dave!.signerId,
+      users.bob!.entityId,
+      [users.dave!.entityId, h2!, users.bob!.entityId],
+      chainAmount,
+    );
+    const bobChainAfter = await waitForOutCapDelta(
+      pageFor('bob'),
+      users.bob!.entityId,
+      h2!,
+      bobChainBefore,
+      chainAmount,
+    );
     expect(bobChainAfter - bobChainBefore, 'TC15.2: Bob receives $5').toBe(chainAmount);
 
     // Step 3: Bob->Eve via H2
     console.log('[E2E] TC15.3: Bob->Eve');
     const eveChainBefore = await outCap(pageFor('eve'), users.eve!.entityId, h2!);
-    await pay(pageFor('bob'), users.bob!.entityId, users.bob!.signerId, users.eve!.entityId,
-      [users.bob!.entityId, h2!, users.eve!.entityId], chainAmount);
-    const eveChainAfter = await waitForOutCapDelta(pageFor('eve'), users.eve!.entityId, h2!, eveChainBefore, chainAmount);
+    await pay(
+      pageFor('bob'),
+      users.bob!.entityId,
+      users.bob!.signerId,
+      users.eve!.entityId,
+      [users.bob!.entityId, h2!, users.eve!.entityId],
+      chainAmount,
+    );
+    const eveChainAfter = await waitForOutCapDelta(
+      pageFor('eve'),
+      users.eve!.entityId,
+      h2!,
+      eveChainBefore,
+      chainAmount,
+    );
     expect(eveChainAfter - eveChainBefore, 'TC15.3: Eve receives $5').toBe(chainAmount);
 
     // Step 4: Eve->Carol via H3
     console.log('[E2E] TC15.4: Eve->Carol');
     const carolChainBefore = await outCap(pageFor('carol'), users.carol!.entityId, h3!);
-    await pay(pageFor('eve'), users.eve!.entityId, users.eve!.signerId, users.carol!.entityId,
-      [users.eve!.entityId, h3!, users.carol!.entityId], chainAmount);
-    const carolChainAfter = await waitForOutCapDelta(pageFor('carol'), users.carol!.entityId, h3!, carolChainBefore, chainAmount);
+    await pay(
+      pageFor('eve'),
+      users.eve!.entityId,
+      users.eve!.signerId,
+      users.carol!.entityId,
+      [users.eve!.entityId, h3!, users.carol!.entityId],
+      chainAmount,
+    );
+    const carolChainAfter = await waitForOutCapDelta(
+      pageFor('carol'),
+      users.carol!.entityId,
+      h3!,
+      carolChainBefore,
+      chainAmount,
+    );
     expect(carolChainAfter - carolChainBefore, 'TC15.4: Carol receives $5').toBe(chainAmount);
 
     // Verify Alice paid for step 1
     const aliceChainAfter = await outCap(pageFor('alice'), users.alice!.entityId, h1!);
     const aliceChainPaid = aliceChainBefore - aliceChainAfter;
     expect(aliceChainPaid, 'TC15: Alice paid >= $5 + fee').toBeGreaterThanOrEqual(chainAmount);
-    console.log(`[E2E] TC15 PASS: Chain A->D->B->E->C ($5/step) | Alice fee=${formatUsd(aliceChainPaid - chainAmount)}`);
+    console.log(
+      `[E2E] TC15 PASS: Chain A->D->B->E->C ($5/step) | Alice fee=${formatUsd(aliceChainPaid - chainAmount)}`,
+    );
 
     // ═══════════════════════════════════════════════════════════════
     // PHASE H: VERIFY LOCKS (all users must have 0 lingering locks)
@@ -715,8 +854,11 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     await page.waitForTimeout(5000);
 
     for (const name of userNames) {
-      const locks = await getLockCount(pageFor(name), users[name]!.entityId);
-      expect(locks, `${name} should have 0 lingering locks`).toBe(0);
+      const locks = await getLockCounts(pageFor(name), users[name], hubMap[name]!);
+      expect(locks, `${name} should have no unfinished payments or Account locks`).toEqual({
+        paybookOpen: 0,
+        accountLocks: 0,
+      });
     }
     console.log('[E2E] All 6 users: 0 lingering locks');
 
@@ -730,11 +872,31 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     const aliceCapBefore = await outCap(pageFor('alice'), users.alice!.entityId, h1!);
     const overAmount = aliceCapBefore + toWei(1); // more than Alice has
 
-    await expectUiPaymentNoRoute(pageFor('alice'), {
-      recipientEntityId: users.dave!.entityId,
-      tokenId: 1,
-      amount: overAmount,
-      routeEntityIds: [],
+    // This expected warning proves the negative path; unrelated browser issues remain fatal.
+    const expectedMiss = `[network] GOSSIP_ROUTE_MISS {source: ${users.alice.entityId}, target: ${users.dave.entityId}, tokenId: 1, retries: 3}`;
+    allowBrowserIssue({
+      type: 'console',
+      severity: 'warning',
+      message: new RegExp(`^${expectedMiss.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
+    });
+    const routeMiss = pageFor('alice').waitForEvent('console', {
+      predicate: message => message.type() === 'warning' && message.text() === expectedMiss,
+      timeout: 15_000,
+    });
+    await timedStep('TC16.overspend_preflight', async () => {
+      await Promise.all([
+        routeMiss,
+        expectUiPaymentNoRoute(
+          pageFor('alice'),
+          {
+            recipientEntityId: users.dave.entityId,
+            tokenId: 1,
+            amount: overAmount,
+            routeEntityIds: [],
+          },
+          `no payment route from ${users.alice.entityId} to ${users.dave.entityId}`,
+        ),
+      ]);
     });
     const aliceCapAfter = await outCap(pageFor('alice'), users.alice!.entityId, h1!);
     console.log('[E2E] Overspend rejected before enqueue; verifying balance stayed unchanged');
@@ -771,7 +933,14 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     const selfPayAmount = toWei(2);
     const selfRoute = [users.frank!.entityId, h1!, h3!, users.frank!.entityId];
 
-    await pay(pageFor('frank'), users.frank!.entityId, users.frank!.signerId, users.frank!.entityId, selfRoute, selfPayAmount);
+    await pay(
+      pageFor('frank'),
+      users.frank!.entityId,
+      users.frank!.signerId,
+      users.frank!.entityId,
+      selfRoute,
+      selfPayAmount,
+    );
 
     // Wait for self-pay to resolve
     await pageFor('frank').waitForTimeout(8000);
@@ -783,8 +952,12 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     const frankH1Change = frankH1Before - frankH1After; // should be positive (sent)
     const frankH3Change = frankH3After - frankH3Before; // should be positive (received)
 
-    console.log(`[E2E] Self-pay: H1 OUT ${formatUsd(frankH1Before)} -> ${formatUsd(frankH1After)} (paid ${formatUsd(frankH1Change)})`);
-    console.log(`[E2E] Self-pay: H3 OUT ${formatUsd(frankH3Before)} -> ${formatUsd(frankH3After)} (got ${formatUsd(frankH3Change)})`);
+    console.log(
+      `[E2E] Self-pay: H1 OUT ${formatUsd(frankH1Before)} -> ${formatUsd(frankH1After)} (paid ${formatUsd(frankH1Change)})`,
+    );
+    console.log(
+      `[E2E] Self-pay: H3 OUT ${formatUsd(frankH3Before)} -> ${formatUsd(frankH3After)} (got ${formatUsd(frankH3Change)})`,
+    );
 
     // Frank should receive exact amount on H3
     expect(frankH3Change, 'TC18: Frank receives exactly $2 on H3').toBe(selfPayAmount);
@@ -795,8 +968,11 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     expect(selfPayFee, 'TC18: Self-pay fee > 0').toBeGreaterThan(0n);
 
     // No lingering locks
-    const frankLocks = await getLockCount(pageFor('frank'), users.frank!.entityId);
-    expect(frankLocks, 'TC18: Frank should have 0 locks after self-pay').toBe(0);
+    const frankLocks = await getLockCounts(pageFor('frank'), users.frank, hubMap.frank!);
+    expect(frankLocks, 'TC18: Frank should have no unfinished self-pay legs or Account locks').toEqual({
+      paybookOpen: 0,
+      accountLocks: 0,
+    });
     console.log(`[E2E] TC18 PASS: Self-pay loop, fee=${formatUsd(selfPayFee)}, 0 locks`);
 
     // ═══════════════════════════════════════════════════════════════
@@ -816,20 +992,36 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     console.log('[E2E] Reloading user pages...');
     for (const name of userNames) {
       const userPage = pageFor(name);
-      await userPage.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
-      const runtimeStillLoaded = await userPage.waitForFunction(() => {
-        const env = (window as typeof window & {
-          isolatedEnv?: { runtimeId?: string; eReplicas?: Map<string, unknown> };
-        }).isolatedEnv;
-        return Boolean(env?.runtimeId && Number(env?.state?.eReplicas?.size || 0) > 0);
-      }, { timeout: 5_000 }).then(() => true).catch(() => false);
-      if (!runtimeStillLoaded) {
-        const reopened = await createRuntimeIdentity(userPage, name, users[name]!.mnemonic);
-        expect(reopened.entityId, `${name}: mnemonic reload must restore entity id`).toBe(users[name]!.entityId);
-        expect(reopened.signerId, `${name}: mnemonic reload must restore signer id`).toBe(users[name]!.signerId);
-      }
-      await userPage.waitForTimeout(2000);
       const primaryHub = hubMap[name]![0]!;
+      await timedStep(`multiroute.restore_${name}`, async () => {
+        const deadline = Date.now() + INIT_TIMEOUT;
+        const remaining = () => Math.max(1, deadline - Date.now());
+        await userPage.reload({ waitUntil: 'domcontentloaded', timeout: remaining() });
+        await userPage.getByRole('button', { name: 'Continue', exact: true }).click({ timeout: remaining() });
+        await userPage.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD, { timeout: remaining() });
+        await userPage.getByRole('button', { name: 'Unlock', exact: true }).click({ timeout: remaining() });
+        // One existing initialization budget covers real UI readiness, not just the shell.
+        await userPage
+          .locator('[data-testid="nav-home"]:visible, [role="alert"]')
+          .first()
+          .waitFor({ state: 'visible', timeout: remaining() });
+        const bootErrors = await userPage.getByRole('alert').allTextContents();
+        if (bootErrors.length > 0) throw new Error(`WALLET_RESTORE_FAILED:${bootErrors.join('\n')}`);
+        await userPage.getByTestId('nav-home').locator('visible=true').first().click({ timeout: remaining() });
+        await userPage
+          .locator(`[data-testid="account-row"][data-counterparty-id="${primaryHub}"], [role="alert"]`)
+          .first()
+          .waitFor({ state: 'visible', timeout: remaining() });
+        const viewErrors = await userPage.getByRole('alert').allTextContents();
+        if (viewErrors.length > 0) throw new Error(`WALLET_RESTORE_FAILED:${viewErrors.join('\n')}`);
+      });
+      const restored = await readWalletIdentity(userPage);
+      expect(restored, `${name}: unlock restores the original identity without reimport`).toEqual({
+        runtimeId: users[name].runtimeId,
+        entityId: users[name].entityId,
+        signerId: users[name].signerId,
+      });
+      await userPage.waitForTimeout(2000);
       const balanceAfter = await outCap(userPage, users[name]!.entityId, primaryHub);
       console.log(`[E2E] ${name} after reload: ${formatUsd(balanceAfter)}`);
       expect(
@@ -853,12 +1045,16 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     console.log('[E2E]  2-HOP (5):  TC5-TC9  — cross-hub, fee scaling verified');
     console.log('[E2E]  3-HOP (3):  TC10-TC12 — full mesh traversal');
     console.log('[E2E]  CONCURRENT: TC13     — 3 payments, all senders/receivers');
-    console.log(`[E2E]  RAPID-FIRE: TC14     — ${rapidCount}x $2, ${tps.toFixed(1)} tx/s`);
+    console.log(
+      `[E2E]  RAPID-FIRE: TC14     — ${rapidCount}x $2, ${submissionsPerSecond.toFixed(1)} submissions/s (not live TPS)`,
+    );
     console.log('[E2E]  CHAIN:      TC15     — A->D->B->E->C ($5/step)');
     console.log('[E2E]  OVERSPEND:  TC16     — rejected, balance unchanged');
     console.log('[E2E]  REVERSE:    TC17     — Eve->Bob $5, netting verified');
     console.log(`[E2E]  SELF-PAY:   TC18     — Frank loop, fee=${formatUsd(selfPayFee)}`);
-    console.log(`[E2E]  PERSIST:    ${persistenceFailures === 0 ? 'All 6 survive reload' : `${persistenceFailures}/6 FAILED`}`);
+    console.log(
+      `[E2E]  PERSIST:    ${persistenceFailures === 0 ? 'All 6 survive reload' : `${persistenceFailures}/6 FAILED`}`,
+    );
     console.log('[E2E]');
     console.log('[E2E]  TOTAL: 18 test cases + persistence');
     console.log('[E2E]  Every payment: sender balance verified, receiver exact, fees > 0');

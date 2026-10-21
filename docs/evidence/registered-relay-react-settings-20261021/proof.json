@@ -1,0 +1,388 @@
+{
+  "status": "FOCUSED_MILESTONE_NOT_FINAL_RELEASE",
+  "observedHead": "bfd9ade307558c3a67c98890f987f14692b0ff2d",
+  "sourceFiles": {
+    "core/__tests__/registration/invariants/registered-board-authority.test.ts": "ea88630683c83bd492de3dc84de25726a01222320f33f17614cfbf9a34800617",
+    "core/api/server/control/auth.ts": "7159b47a4778301180cdf639b03d158e4e113689a43372da638b8571f7132827",
+    "core/api/server/index.ts": "ef8e1e8b949e3d10ca43092ef3072b7325c107a7b9dc6b4b3c7cccb3bb61f119",
+    "core/orchestrator/daemon-control.ts": "78941a040c596f75a4a84156625c88d33af872e999af4a724cc6398cf330ccb6",
+    "core/orchestrator/hub-node.ts": "8516d54c8b8f53d7e829ad1c095d84a8996d2432b5a27c5410b8be7b7fe893a5",
+    "core/orchestrator/hub/node/hub-http.ts": "cd8169016260f31a4bfbbfcac52f1fc99f91a4c6e37f2632b35aa14aabfc7bf1",
+    "core/orchestrator/orchestrator.ts": "89878f17c2ec5844b44dc8aac31d1dd107b40ebbd09b691510932d080561d6ac",
+    "tests/e2e/payments/e2e-multiroute-load.spec.ts": "e4c1836467830a2a8d7e05b4349baaca0fe8482f4d25280929bd934046e3c147",
+    "tests/e2e/payments/e2e-payment-smoke.spec.ts": "c1a5edeba03da7bca1411f20044ac988aa3e9d5cc567c5da409f607eeb7b4262",
+    "tests/e2e/product/e2e-entity-formation.spec.ts": "dc9ddd7b1b4fdf370b0e1439c8fa5c66f8f1527a5d8cdf9148822259a939b46e",
+    "tests/e2e/product/e2e-entity-ownership.spec.ts": "8b9cf65aedb1bac00831fb011c8b54ae2becc65770c05c68544428f3c2ca2a18",
+    "tests/e2e/product/e2e-faucet-latency.spec.ts": "2d736e351a9ac58bc8d9cf47b7e484cff26cd261bbfcf62cccb12a98b38699b4",
+    "tests/e2e/product/e2e-jurisdiction-settings.spec.ts": "5f1dfcce3ec515513b1305cba94ae800e70c03ab6ac4daab2961848fbbb6fc2c",
+    "tests/e2e/product/e2e-stack-manager.spec.ts": "6fb65ac817ed82f0e15d42f557f8d311a43f4801a2ad2c85965daa37d5bcbb30",
+    "tests/e2e/product/e2e-theme-settings.spec.ts": "77fdceff4267364c1f9dffb218dc6f8f44d723388a0d55221090d6408768a8b4",
+    "tests/utils/runtime/e2e-derived-capacity.ts": "88b406d4b8d36f284052c107062502caa8cf7a057ddc993e306ab2f966efacb2",
+    "ui/src/runtime/adapter.ts": "c8346a5befca86182918129f6a91925c6581ae129fedbaee5b499e1feb35dc6c",
+    "ui/src/screens/Settings.tsx": "5901f2563283432b0d15e0574fed9c7dbfe5fe717a1fc125ba0ef4f1c9dc5ed3",
+    "ui/src/styles/app.css": "d4e056c32ca1b11b08f8d7531829a11c9588cff806e462f549e4305c1a47efd7",
+    "ui/tests/wallet-ui.ts": "e1c4f0635e9b7afe9de3f149c71a4eea79a02534b700b124df4e59f6068441e9",
+    "core/api/server/control/gossip/profile-verification.ts": "f0d436e138e92d2841f880a10c465ac776e7a52562b405042a81b2cf0ef8c7b6",
+    "core/orchestrator/hub/node/profile-verifier.ts": "d7dde2d69c3d1f8d963713b346da7b4d540de262553bb33d5dc0c0d0ec794a17",
+    "ui/src/components/settings/StackManager.tsx": "4ac322bb4d8f65df750fe6f2c9338e700c8bb69e7c0e5ef1f40583cbd8949f5e"
+  },
+  "checks": [
+    {
+      "name": "registered-settings-formatted-l1-01",
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/registration/invariants/registered-board-authority.test.ts",
+        "core/__tests__/network/relay/relay-router.test.ts",
+        "core/__tests__/api/server/gossip-profiles.test.ts",
+        "core/__tests__/api/server/server-control-body.test.ts",
+        "core/__tests__/entity/profile/profile-canonical-boundary.test.ts",
+        "core/__tests__/orchestrator/process/daemon-control-gossip-ready.test.ts",
+        "core/__tests__/orchestrator/process/daemon-control-role-boundary.test.ts",
+        "tests/frontend/settings/stack-manager-client.test.ts",
+        "core/__tests__/orchestrator/stack-manager-validation.test.ts"
+      ],
+      "counts": {
+        "passed": 93,
+        "failed": 0,
+        "assertions": 634
+      },
+      "seconds": 7.997033333,
+      "sourceUnchanged": true,
+      "logSHA256": "9c405c409e42cd34de0582c97a454d6c6e01682c5b2ea6bcb94de45e41957eec",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/registered-settings-formatted-l1-01.result.json"
+    },
+    {
+      "name": "registered-settings-formatted-l2-01",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "registered-settings-formatted-l2-01",
+        "--timeout-ms",
+        "900000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=2",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=[\"tests/e2e/product/e2e-entity-ownership.spec.ts::Entity ownership keeps share issuance optional and separate from hub listing\", \"tests/e2e/product/e2e-stack-manager.spec.ts::Stack Manager deploys and verifies V1 on the isolated Anvil\"]",
+        "--strict-browser-health",
+        "--stack-timeout-ms=300000",
+        "--preserve-artifacts",
+        "--video=on",
+        "--trace=off"
+      ],
+      "counts": {
+        "passed": 2,
+        "failed": 0
+      },
+      "seconds": 88.620550291,
+      "sourceUnchanged": true,
+      "logSHA256": "992eba2c9e18b56a93ff11c452164700ede87ca174ae8040a91c863c4ad9bf1e",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/registered-settings-formatted-l2-01.result.json"
+    },
+    {
+      "name": "theme-current-exact-02",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "theme-current-exact-02",
+        "--timeout-ms",
+        "900000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e/product/e2e-theme-settings.spec.ts::settings theme select updates document theme and persists selected option",
+        "--strict-browser-health",
+        "--stack-timeout-ms=300000",
+        "--preserve-artifacts",
+        "--video=on",
+        "--trace=off"
+      ],
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "themesReloaded": 2
+      },
+      "seconds": 124.92845625,
+      "sourceUnchanged": true,
+      "logSHA256": "9b0ed49a8949da003cc5c3f93fa2728f8c8592ef1edaeb82a0b229c7712cefa2",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/theme-current-exact-02.result.json"
+    },
+    {
+      "name": "registered-settings-layout-l1-01",
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/registration/invariants/registered-board-authority.test.ts",
+        "core/__tests__/network/relay/relay-router.test.ts",
+        "core/__tests__/api/server/gossip-profiles.test.ts",
+        "core/__tests__/api/server/server-control-body.test.ts",
+        "core/__tests__/entity/profile/profile-canonical-boundary.test.ts",
+        "core/__tests__/orchestrator/process/daemon-control-gossip-ready.test.ts",
+        "core/__tests__/orchestrator/process/daemon-control-role-boundary.test.ts",
+        "tests/frontend/settings/stack-manager-client.test.ts",
+        "core/__tests__/orchestrator/stack-manager-validation.test.ts"
+      ],
+      "counts": {
+        "passed": 93,
+        "failed": 0,
+        "assertions": 634
+      },
+      "seconds": 7.9492086660000005,
+      "sourceUnchanged": true,
+      "logSHA256": "22157ea30f5355bd277fb886c1213177b500eed2ad336cb031ff278410087848",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/registered-settings-layout-l1-01.result.json"
+    },
+    {
+      "name": "registered-relay-layout-exact-01",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "registered-relay-layout-exact-01",
+        "--timeout-ms",
+        "900000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--pw-files=tests/e2e/product/e2e-entity-ownership.spec.ts::Entity ownership keeps share issuance optional and separate from hub listing",
+        "--strict-browser-health",
+        "--stack-timeout-ms=300000",
+        "--preserve-artifacts",
+        "--video=on",
+        "--trace=off"
+      ],
+      "counts": {
+        "passed": 1,
+        "failed": 0
+      },
+      "seconds": 127.52960029100001,
+      "sourceUnchanged": true,
+      "logSHA256": "c4edcade7ff5f4866a9ec867b22749ea725888133d72002d3c27ae4ed38b5806",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/registered-relay-layout-exact-01.result.json"
+    },
+    {
+      "name": "registered-relay-body-types-01",
+      "command": [
+        "bun",
+        "run",
+        "check:runtime-contract-types"
+      ],
+      "counts": {
+        "status": "PASS"
+      },
+      "seconds": 6.079033167,
+      "sourceUnchanged": true,
+      "logSHA256": "899966b3bc8b389abc66021da3e3ad3292f61c5d9c282edf30fbd9802ae9b385",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/registered-relay-body-types-01.result.json"
+    },
+    {
+      "name": "registered-settings-body-l1-01",
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/registration/invariants/registered-board-authority.test.ts",
+        "core/__tests__/network/relay/relay-router.test.ts",
+        "core/__tests__/api/server/gossip-profiles.test.ts",
+        "core/__tests__/api/server/server-control-body.test.ts",
+        "core/__tests__/entity/profile/profile-canonical-boundary.test.ts",
+        "core/__tests__/orchestrator/process/daemon-control-gossip-ready.test.ts",
+        "core/__tests__/orchestrator/process/daemon-control-role-boundary.test.ts",
+        "tests/frontend/settings/stack-manager-client.test.ts",
+        "core/__tests__/orchestrator/stack-manager-validation.test.ts"
+      ],
+      "counts": {
+        "passed": 93,
+        "failed": 0,
+        "assertions": 634
+      },
+      "seconds": 8.029121833,
+      "sourceUnchanged": true,
+      "logSHA256": "7ad306803a083c104fbe09593418d9f472960b15c9489c6974fe51f7c1ae716f",
+      "record": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/registered-settings-body-l1-01.result.json"
+    }
+  ],
+  "formatting": {
+    "paths": [
+      {
+        "path": "core/__tests__/registration/invariants/registered-board-authority.test.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 6,
+        "removedUnrelatedHunks": 69
+      },
+      {
+        "path": "core/api/server/control/auth.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 0,
+        "removedUnrelatedHunks": 5
+      },
+      {
+        "path": "core/api/server/index.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 0,
+        "removedUnrelatedHunks": 28
+      },
+      {
+        "path": "core/orchestrator/daemon-control.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 2,
+        "removedUnrelatedHunks": 30
+      },
+      {
+        "path": "core/orchestrator/hub-node.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 0,
+        "removedUnrelatedHunks": 45
+      },
+      {
+        "path": "core/orchestrator/hub/node/hub-http.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 0,
+        "removedUnrelatedHunks": 36
+      },
+      {
+        "path": "core/orchestrator/orchestrator.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 1,
+        "removedUnrelatedHunks": 91
+      },
+      {
+        "path": "tests/e2e/payments/e2e-multiroute-load.spec.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 0,
+        "removedUnrelatedHunks": 0
+      },
+      {
+        "path": "tests/e2e/payments/e2e-payment-smoke.spec.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 0,
+        "removedUnrelatedHunks": 0
+      },
+      {
+        "path": "tests/e2e/product/e2e-entity-formation.spec.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 1,
+        "removedUnrelatedHunks": 1
+      },
+      {
+        "path": "tests/e2e/product/e2e-entity-ownership.spec.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 0,
+        "removedUnrelatedHunks": 0
+      },
+      {
+        "path": "tests/e2e/product/e2e-faucet-latency.spec.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 3,
+        "removedUnrelatedHunks": 0
+      },
+      {
+        "path": "tests/e2e/product/e2e-jurisdiction-settings.spec.ts",
+        "scope": "Full owned file formatting retained: syntactically coupled edits cannot be separated.",
+        "keptOwnedHunks": 9,
+        "removedUnrelatedHunks": 0
+      },
+      {
+        "path": "tests/e2e/product/e2e-stack-manager.spec.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 3,
+        "removedUnrelatedHunks": 4
+      },
+      {
+        "path": "tests/e2e/product/e2e-theme-settings.spec.ts",
+        "scope": "Full owned file formatting retained: syntactically coupled edits cannot be separated.",
+        "keptOwnedHunks": 3,
+        "removedUnrelatedHunks": 0
+      },
+      {
+        "path": "tests/utils/runtime/e2e-derived-capacity.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 0,
+        "removedUnrelatedHunks": 0
+      },
+      {
+        "path": "ui/src/runtime/adapter.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 1,
+        "removedUnrelatedHunks": 0
+      },
+      {
+        "path": "ui/src/screens/Settings.tsx",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 0,
+        "removedUnrelatedHunks": 2
+      },
+      {
+        "path": "ui/src/styles/app.css",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 2,
+        "removedUnrelatedHunks": 340
+      },
+      {
+        "path": "ui/tests/wallet-ui.ts",
+        "scope": "Only formatting intersecting owned changes retained; exact full canonical formatting equality verified.",
+        "keptOwnedHunks": 0,
+        "removedUnrelatedHunks": 0
+      },
+      {
+        "path": "core/api/server/control/gossip-profile-verification.ts",
+        "scope": "new file fully formatted"
+      },
+      {
+        "path": "core/orchestrator/hub/profile-verifier.ts",
+        "scope": "new file fully formatted"
+      },
+      {
+        "path": "ui/src/components/settings/StackManager.tsx",
+        "scope": "new file fully formatted"
+      }
+    ]
+  },
+  "retainedFailures": [
+    "registered-relay-large-red-01: legitimate canonical profile exceeded256KiB JSONcontrolcap; fixed with existing boundedbinarycodec",
+    "stack-manager-current-exact-01/02: mobile tutorial CSS selector collision; original failures retained",
+    "theme-current-exact-01: CANCELLED143 after proving new test used wrong saved-wallet selector; next exact02 PASS",
+    "exact-full158-bfd9ade30755-01:62PASS/1FAIL, later focused multiroutePASS does not erase full failure",
+    "Original intermittent payment restore and nativeTVM processBatch CPU failures retained; exact root causes remain unproved",
+    "registered-settings-check-01: new control/hub modules made two directories11>10. Only new files moved into gossip/node subdirectories; existing limit unchanged; folder-width and focused L1/L2 now PASS. Full check repeat still required.",
+    "registered-settings-check-02: TS2322 for generic Uint8Array fetch body. Request now owns an ArrayBuffer-backed copy of the same canonical bytes. Runtime contract types and93/93 L1 tests pass; no type cast or codec change."
+  ],
+  "limits": [
+    "Private isolated EVM deployment is not nativeTVM or public mainnet proof.",
+    "Standalone native scenario relay does not exercise orchestrator H1 HTTP profile verification; separate owning L1 and registration browser do.",
+    "Full158, exactunit/test/check on finalSHA, all fresh privatefinancial families,34-step release,60-minute soak and public deployment verification remain required.",
+    "React mascot gap remains open and is distinct from the23-chapter tutorial."
+  ],
+  "nextRequiredCheck": "bun run check; exact record registered-settings-check-03.result.json under job; then registered-relay-body-exact-01 browser on same unchanged source. No future result claimed here.",
+  "screenshots": {
+    "entity-ownership-iphone.png": {
+      "sha256": "2a21013c4fadcf610d97ce096af9a31a8b9ee80493134f3bbb7b3b89569ec99b",
+      "viewport": {
+        "width": 393,
+        "height": 852
+      },
+      "review": "Viewed; public test Entity/contract addresses only; no wallet secrets/capability/storage copied."
+    },
+    "stack-manager-iphone.png": {
+      "sha256": "aecec56667b58c5f394b052eb1e6709f9ddfbf979bc825b446c026406b94cfc8",
+      "viewport": {
+        "width": 393,
+        "height": 852
+      },
+      "review": "Viewed; public test Entity/contract addresses only; no wallet secrets/capability/storage copied."
+    }
+  }
+}

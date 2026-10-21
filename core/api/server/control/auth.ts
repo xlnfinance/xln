@@ -68,12 +68,12 @@ const parseContentLength = (req: Request): number | null => {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
 };
 
-const readCappedControlBody = async (req: Request, maxBytes: number): Promise<string> => {
+export const readCappedControlBytes = async (req: Request, maxBytes: number): Promise<Uint8Array> => {
   const contentLength = parseContentLength(req);
   if (contentLength !== null && contentLength > maxBytes) {
     throw new ControlBodyTooLargeError(contentLength, maxBytes);
   }
-  if (!req.body) return '';
+  if (!req.body) return new Uint8Array();
 
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -95,7 +95,7 @@ const readCappedControlBody = async (req: Request, maxBytes: number): Promise<st
     buffer.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return new TextDecoder().decode(buffer);
+  return buffer;
 };
 
 export const getControlBodyErrorStatus = (error: unknown, defaultStatus: number): number => {
@@ -108,7 +108,7 @@ export const parseTaggedControlBody = async (
   req: Request,
   maxBytes = DEFAULT_CONTROL_BODY_MAX_BYTES,
 ): Promise<unknown> => {
-  const raw = await readCappedControlBody(req, maxBytes);
+  const raw = new TextDecoder().decode(await readCappedControlBytes(req, maxBytes));
   if (!raw.trim()) return {};
   return deserializeTaggedJson(raw);
 };

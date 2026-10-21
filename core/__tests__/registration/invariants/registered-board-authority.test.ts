@@ -66,6 +66,18 @@ import { provisionTestEntityEncryptionKey as provisionCanonicalTestEntityEncrypt
 import { buildJEventRangeData } from '../../helpers/j-history';
 import { FailureDispositionError } from '../../../protocol/errors/failure-taxonomy';
 import { resolveObserverCertifiedAccountCounterpartyProposer } from '../../../entity/account/account-counterparty-route';
+import {
+  handleGossipProfileVerification,
+  PROFILE_CONTROL_BODY_MAX_BYTES,
+} from '../../../api/server/control/gossip/profile-verification';
+import {
+  deriveRuntimeAdapterCapabilityToken,
+  resolveRuntimeAdapterAuthSeed,
+} from '../../../api/runtime-adapter/security/auth';
+import { DaemonControlClient } from '../../../orchestrator/daemon-control';
+import { LIMITS } from '../../../config/constants';
+import { encodeBinaryPayload, encodeCanonicalConsensusBytes } from '../../../protocol/serialization/binary-codec';
+import { serializeTaggedJson } from '../../../protocol/serialization';
 
 const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
 const entityProviderAddress = addr('e1');
@@ -228,7 +240,9 @@ const signDigest = (privateKey: Uint8Array, digest: string): string => {
   return `${hex(signed.signature)}${signed.recovery.toString(16).padStart(2, '0')}`;
 };
 
-const buildRegisteredProfile = async (): Promise<{
+const buildRegisteredProfile = async (
+  accountCount = 0,
+): Promise<{
   profile: Profile;
   localEnv: RuntimeReplica;
   boardHash: string;
@@ -284,7 +298,16 @@ const buildRegisteredProfile = async (): Promise<{
         entityProviderAddress,
       },
     },
-    accounts: [],
+    accounts: Array.from({ length: accountCount }, (_, index) => ({
+      counterpartyId: generateNumberedEntityId(index + 3).toLowerCase(),
+      domain: { chainId: jurisdiction.chainId, depositoryAddress },
+      tokenCapacities: Object.fromEntries(
+        Array.from({ length: 16 }, (_, tokenIndex) => {
+          const capacity = 340282366920938463463374607431768211455000n - BigInt(tokenIndex);
+          return [String(tokenIndex + 1), { inCapacity: capacity, outCapacity: capacity - 1n }];
+        }),
+      ),
+    })),
   };
   const profileHash = computeProfileHash(profile);
   profile.metadata.profileHanko = await buildQuorumHanko(
@@ -1175,6 +1198,80 @@ describe('registered Entity certified board authority', () => {
     expect((await verifyProfileSignature(profile, localEnv)).valid).toBe(true);
     expect((await verifyProfileSignature(profile, remoteObserverEnv(boardHash))).valid).toBe(true);
   });
+
+  test.each([0, 100])(
+    'managed relay verifies numbered profiles through authenticated committed registry reads (%i accounts)',
+    async accountCount => {
+      const { profile, boardHash } = await buildRegisteredProfile(accountCount);
+      const env = remoteObserverEnv(boardHash);
+      if (accountCount > 0) {
+        expect(Buffer.byteLength(serializeTaggedJson(profile))).toBeGreaterThan(256 * 1024);
+        expect(encodeCanonicalConsensusBytes(profile).byteLength).toBeLessThanOrEqual(LIMITS.MAX_PROFILE_BYTES);
+        expect(encodeBinaryPayload(profile).subarray(1)).toEqual(encodeCanonicalConsensusBytes(profile));
+        expect((await verifyProfileSignature(profile, env)).valid).toBe(true);
+      }
+      const previousSeed = process.env['XLN_RADAPTER_AUTH_SEED'];
+      const seed = resolveRuntimeAdapterAuthSeed() ?? 'registered-profile-control-regression-seed';
+      process.env['XLN_RADAPTER_AUTH_SEED'] = seed;
+      const server = Bun.serve({
+        hostname: '127.0.0.1',
+        port: 0,
+        maxRequestBodySize: PROFILE_CONTROL_BODY_MAX_BYTES,
+        fetch: request => handleGossipProfileVerification(request, env, { 'content-type': 'application/json' }),
+      });
+      try {
+        const baseUrl = `http://127.0.0.1:${server.port}`;
+        const authKey = deriveRuntimeAdapterCapabilityToken(seed, 'full', Date.now() + 60_000, {
+          audience: env.runtimeId,
+        });
+        const client = new DaemonControlClient({ baseUrl, authKey });
+        if (accountCount === 0) {
+          const headers = { authorization: `Bearer ${authKey}` };
+          await expect(
+            handleGossipProfileVerification(
+              new Request(baseUrl, {
+                method: 'POST',
+                headers,
+                body: serializeTaggedJson(profile),
+              }),
+              env,
+              {},
+            ),
+          ).rejects.toThrow('XLN_BINARY_CODEC_MAGIC_MISSING');
+          await expect(
+            handleGossipProfileVerification(
+              new Request(baseUrl, {
+                method: 'POST',
+                headers,
+                body: new Uint8Array(PROFILE_CONTROL_BODY_MAX_BYTES + 1),
+              }),
+              env,
+              {},
+            ),
+          ).rejects.toThrow('CONTROL_BODY_TOO_LARGE');
+        }
+        // The old stateless relay rejected this exact valid numbered profile.
+        expect((await verifyProfileSignature(profile)).valid).toBe(false);
+        await expect(new DaemonControlClient({ baseUrl }).verifyProfile(profile)).rejects.toThrow('Unauthorized');
+        expect((await client.verifyProfile(profile)).valid).toBe(true);
+        expect((await client.verifyProfile({ ...profile, name: 'Forged descriptor' })).valid).toBe(false);
+        const observer = [...env.state.eReplicas.values()][0]!.state;
+        installEvents(env, observer, [
+          event('BoardActivated', blockHash('66'), {
+            height: 3,
+            previousBoardHash: boardHash,
+            previousBoardValidUntil: 1_700_604_800,
+          }),
+        ]);
+        // Profile discovery must not accept the previous board's grace period.
+        expect((await client.verifyProfile(profile)).valid).toBe(false);
+      } finally {
+        await server.stop(true);
+        if (previousSeed === undefined) delete process.env['XLN_RADAPTER_AUTH_SEED'];
+        else process.env['XLN_RADAPTER_AUTH_SEED'] = previousSeed;
+      }
+    },
+  );
 
   test('consensus profile verification uses the exact observer root, not another replica latest root', async () => {
     const { profile, boardHash } = await buildRegisteredProfile();

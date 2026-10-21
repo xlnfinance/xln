@@ -1,77 +1,28 @@
-import { type Page } from '@playwright/test';
-import { deriveDelta } from '../../../core/account/utils';
+import type { Page } from '@playwright/test';
+import type { RuntimeAdapterViewFrame, XLNModule } from '../../../core/api/public/runtime-module';
+import type { RuntimeAdapterInspection } from '../../../ui/src/runtime/adapter';
 
-type DeltaSnapshot = {
-  ondelta: string;
-  offdelta: string;
-  collateral: string;
-  leftCreditLimit: string;
-  rightCreditLimit: string;
-  leftAllowance: string;
-  rightAllowance: string;
-  leftHold: string;
-  rightHold: string;
-};
-
+/** Read the committed Account through the same view and capacity derivation as React. */
 export async function outCap(page: Page, entityId: string, cpId: string): Promise<bigint> {
-  const delta = await page.evaluate(({ entityId, cpId }) => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        eReplicas: Map<string, {
-          state?: {
-            accounts?: Map<string, {
-              deltas?: Map<number, Record<string, unknown>>;
-            }>;
-          };
-        }>;
-      };
-    }).isolatedEnv;
-    if (!env?.state?.eReplicas) return null;
-
-    for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
-      if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
-      const account = replica?.state?.accounts?.get?.(cpId);
-      const rawDelta = account?.state?.deltas?.get?.(1);
-      if (!rawDelta || typeof rawDelta !== 'object') return null;
-
-      const raw = rawDelta as Record<string, unknown>;
-      const readBig = (value: unknown): string => {
-        if (typeof value === 'bigint') return value.toString();
-        if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return String(value);
-        if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return value.trim();
-        return '0';
-      };
-
-      return {
-        ondelta: readBig(raw.ondelta),
-        offdelta: readBig(raw.offdelta),
-        collateral: readBig(raw.collateral),
-        leftCreditLimit: readBig(raw.leftCreditLimit),
-        rightCreditLimit: readBig(raw.rightCreditLimit),
-        leftAllowance: readBig(raw.leftAllowance),
-        rightAllowance: readBig(raw.rightAllowance),
-        leftHold: readBig(raw.leftHold),
-        rightHold: readBig(raw.rightHold),
-      } satisfies DeltaSnapshot;
-    }
-
-    return null;
-  }, { entityId, cpId });
-
-  if (!delta) return 0n;
-
-  return deriveDelta({
-    tokenId: 1,
-    ondelta: BigInt(delta.ondelta),
-    offdelta: BigInt(delta.offdelta),
-    collateral: BigInt(delta.collateral),
-    leftCreditLimit: BigInt(delta.leftCreditLimit),
-    rightCreditLimit: BigInt(delta.rightCreditLimit),
-    leftAllowance: BigInt(delta.leftAllowance),
-    rightAllowance: BigInt(delta.rightAllowance),
-    leftHold: BigInt(delta.leftHold),
-    rightHold: BigInt(delta.rightHold),
-  }, String(entityId).toLowerCase() < String(cpId).toLowerCase()).outCapacity;
+  return page.evaluate(
+    async ({ entityId, cpId }) => {
+      const debug = (
+        window as Window & {
+          __xln?: { adapter(): RuntimeAdapterInspection | null; xln(): Promise<XLNModule> };
+        }
+      ).__xln;
+      const adapter = debug?.adapter();
+      if (!debug || !adapter) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+      const frame = await adapter.read<RuntimeAdapterViewFrame>('view-frame', { entityId });
+      const account = frame.activeEntity?.accounts.items.find(
+        row => row.state.leftEntity === cpId || row.state.rightEntity === cpId,
+      );
+      const delta = account?.state.deltas.get(1);
+      if (!account || !delta) throw new Error(`CURRENT_WALLET_ACCOUNT_DELTA_MISSING:${entityId}:${cpId}:1`);
+      return (await debug.xln()).deriveDelta(delta, account.state.leftEntity === entityId).outCapacity;
+    },
+    { entityId, cpId },
+  );
 }
 
 export async function waitForOutCapDelta(

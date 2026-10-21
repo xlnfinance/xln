@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path';
 import type { createExternalWalletApi } from '../../../api/public/external-wallet-api';
 import { handleGossipProfilesSendReady } from '../../../api/server/control/gossip-send-ready';
+import { handleGossipProfileVerification } from '../../../api/server/control/gossip/profile-verification';
 import { requiresLocalNodeOperator } from '../../../api/server/control/node-http-access';
 import type { StackManagerController } from '../../../api/server/control/stack-manager';
 import { handleLendingStateRequest } from '../../../api/server/entities/lending';
@@ -307,6 +308,9 @@ export const createHubControlRequestHandler = (dependencies: {
       return new Response(safeStringify({ counters: snapshotOpCounters() }), { headers: JSON_HEADERS });
     }
     if (request.method !== 'POST') return null;
+    if (url.pathname === '/api/control/gossip/verify-profile') {
+      return handleGossipProfileVerification(request, dependencies.state, JSON_HEADERS);
+    }
     if (url.pathname === '/api/control/performance/background-io/stop') {
       if (process.env['XLN_HLT_DIRECT_ONLY'] !== '1') {
         return new Response(safeStringify({ ok: false, error: 'HLT_ONLY' }), {

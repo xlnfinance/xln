@@ -44,7 +44,18 @@ export async function createWalletIdentity(
     undefined,
     { timeout: 150_000 },
   );
-  const identity = await page.evaluate(() => {
+  const identity = await readWalletIdentity(page);
+  if (!/^0x[a-fA-F0-9]{40}$/.test(identity.runtimeId)) {
+    throw new Error(`WALLET_RUNTIME_ID_INVALID:${label}:${identity.runtimeId}`);
+  }
+  return identity;
+}
+
+/** Observe the active owner using the same authority checks before and after reload. */
+export async function readWalletIdentity(
+  page: Page,
+): Promise<{ entityId: string; signerId: string; runtimeId: string }> {
+  return page.evaluate(() => {
     const debug = (
       window as Window & {
         __xln?: { env: () => RuntimeReplica | null; store: { getState: () => { activeEntityId: string | null } } };
@@ -59,8 +70,4 @@ export async function createWalletIdentity(
     if (replicas.length !== 1 || !replica) throw new Error(`WALLET_SIGNER_NOT_UNIQUE:${entityId}:${replicas.length}`);
     return { entityId, signerId: replica.signerId, runtimeId: env.runtimeId };
   });
-  if (!/^0x[a-fA-F0-9]{40}$/.test(identity.runtimeId)) {
-    throw new Error(`WALLET_RUNTIME_ID_INVALID:${label}:${identity.runtimeId}`);
-  }
-  return identity;
 }
