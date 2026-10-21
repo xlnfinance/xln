@@ -1,0 +1,191 @@
+{
+  "scope": "Custody browser test synchronization; no runtime or financial formula changes; not a full release or mainnet certificate",
+  "baseSHA": "7367cdc474dba4b21981c341961e8e75e6dfe47c",
+  "sourceFiles": {
+    "tests/e2e-custody.spec.ts": "978cda6017dc6250c577ce58e3599ce6e37e2ea127d410c7ce75e06cf1671bad"
+  },
+  "failure": {
+    "receipt": "unstarted140-7367cdc474db-01.result.json",
+    "traceSHA256": "14b25090d4f8cd4c8c73d2bee14615cb2f4f83d78c39d4c679d162db8d91c948",
+    "cohort": {
+      "passed": 16,
+      "failed": 1,
+      "cancelled": 1,
+      "unstarted": 122,
+      "total": 140
+    },
+    "boundary": {
+      "traceCall": "1-trace.trace lrpc@597",
+      "monotonicMs": 64004.843,
+      "browserPostCount": 0,
+      "beforeSnapshotMs": 63919.975,
+      "beforeDisplayedUSDC": "0",
+      "afterSnapshotMs": 64157.689,
+      "afterDisplayedUSDC": "3",
+      "afterDisplayedUSDT": "10",
+      "inlineError": "Insufficient custody balance",
+      "cause": "API polling observed credited deposits before independent dashboard state refreshed; funded click correctly rejected against displayed zero balance. Test failed to await the visible balance required by browser preflight."
+    },
+    "expectedPreDepositReject": {
+      "status": 400,
+      "error": "Insufficient custody balance",
+      "at": "2026-10-21T17:04:36.754Z"
+    }
+  },
+  "change": "Wait within the original30s for exact API credit and matching displayed token amount before browser preflight. Require exactly one browser POST per withdrawal. Original finalized/debit/fee assertions remain.",
+  "l1": {
+    "command": [
+      "bun",
+      "test",
+      "core/__tests__/custody/custody-withdrawal-preflight.test.ts",
+      "core/__tests__/custody/custody-withdraw-submit-authority.test.ts"
+    ],
+    "passed": 4,
+    "failed": 0,
+    "assertions": 14,
+    "seconds": 1.258227917,
+    "sourceUnchanged": true,
+    "logSHA256": "e0d335aac77698f9be6c51f65bc1b352e501ea971cdf1c5f69a2fb7426c39669"
+  },
+  "remaining": "Current check/publication; remaining96 diagnostic identities, then fresh final immutable-SHA financial/unit/test/check/full158/release34/60minsoak/deploy/public/native-chain gates.",
+  "l2BeforeFormatting": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "custody-visible-balance-l2-01",
+      "--timeout-ms",
+      "7200000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-reset-concurrency=1",
+      "--max-failures=1",
+      "--pw-files=tests/e2e-custody.spec.ts::separate custody daemon credits deposits and withdraws only from credited offchain balance",
+      "--pw-project=chromium",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--prewait-health=reset",
+      "--strict-browser-health",
+      "--preserve-artifacts"
+    ],
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "flaky": 0,
+    "seconds": 129.257576333,
+    "sourceUnchanged": true,
+    "logSHA256": "261cb4cd7fdadaf3d5a24a9c6c5efa7937bf13206d62839bdcfb4c05d84462d3",
+    "financialResults": [
+      {
+        "kind": "deposit",
+        "tokenId": 1,
+        "amountMinor": "3000000",
+        "creditedBalanceMinor": "3000000"
+      },
+      {
+        "kind": "deposit",
+        "tokenId": 3,
+        "amountMinor": "10000000",
+        "creditedBalanceMinor": "10000000"
+      },
+      {
+        "kind": "withdrawal",
+        "tokenId": 1,
+        "requestedAmountMinor": "2000000",
+        "senderSpentMinor": "2000002",
+        "feeMinor": "2",
+        "creditedBalanceMinor": "999998"
+      },
+      {
+        "kind": "withdrawal",
+        "tokenId": 3,
+        "requestedAmountMinor": "4000000",
+        "senderSpentMinor": "4000004",
+        "feeMinor": "4",
+        "creditedBalanceMinor": "5999996"
+      }
+    ]
+  },
+  "l2": {
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "flaky": 0,
+    "retry": 0,
+    "sourceUnchanged": true,
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "move-exclusive-owning-l2-04",
+      "--timeout-ms",
+      "7200000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--shards=2",
+      "--workers-per-shard=1",
+      "--max-reset-concurrency=1",
+      "--max-mm-concurrency=1",
+      "--max-failures=1",
+      "--pw-files=[\"tests/e2e/payments/e2e-move.spec.ts::move routed paths on isolated runtimes: remote-and-external\",\"tests/e2e/payments/e2e-move.spec.ts::move routed paths on isolated runtimes: reserve-and-own-account\",\"tests/e2e/payments/e2e-move.spec.ts::move routed paths on isolated runtimes: round-trips\",\"tests/e2e-custody.spec.ts::separate custody daemon credits deposits and withdraws only from credited offchain balance\"]",
+      "--pw-project=chromium",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--prewait-health=reset",
+      "--strict-browser-health",
+      "--preserve-artifacts"
+    ],
+    "logSHA256": "99037d5126bc03c5bdedd963924f864577c8ac563ee46359b0d6afcfa4147619",
+    "case": {
+      "identity": "tests/e2e-custody.spec.ts::separate custody daemon credits deposits and withdraws only from credited offchain balance",
+      "shard": 3,
+      "passed": true,
+      "browserBodyMs": 87616,
+      "browserStart": "2026-10-21T17:49:15.212Z",
+      "browserTotalMs": 92175.218,
+      "stackFirstSampleMs": 1792604937964,
+      "stackLastSampleMs": 1792605049439,
+      "stackDurationMs": 111477,
+      "portBase": 20000
+    },
+    "financialResults": [
+      {
+        "kind": "deposit",
+        "tokenId": 1,
+        "amountMinor": "3000000",
+        "creditedBalanceMinor": "3000000"
+      },
+      {
+        "kind": "deposit",
+        "tokenId": 3,
+        "amountMinor": "10000000",
+        "creditedBalanceMinor": "10000000"
+      },
+      {
+        "kind": "withdrawal",
+        "tokenId": 1,
+        "requestedAmountMinor": "2000000",
+        "senderSpentMinor": "2000002",
+        "feeMinor": "2",
+        "creditedBalanceMinor": "999998"
+      },
+      {
+        "kind": "withdrawal",
+        "tokenId": 3,
+        "requestedAmountMinor": "4000000",
+        "senderSpentMinor": "4000004",
+        "feeMinor": "4",
+        "creditedBalanceMinor": "5999996"
+      }
+    ],
+    "financialResultsSource": "Current owning L2 attachment custody-financial-proof"
+  }
+}

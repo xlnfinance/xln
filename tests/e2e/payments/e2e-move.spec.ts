@@ -169,7 +169,8 @@ async function seedMoveWallet(page: Page) {
 for (const group of ['reserve-and-own-account', 'remote-and-external', 'round-trips'])
   test(
     `move routed paths on isolated runtimes: ${group}`,
-    { tag: '@functional' },
+    // Two sovereign wallets plus a full hub stack need the machine's browser budget for these five-route proofs.
+    { tag: ['@functional', '@exclusive-stack'] },
     async ({ page, browser }, testInfo) => {
       test.setTimeout(55_000);
       const health = await ensureE2EBaseline(page, { requireHubMesh: true, requireMarketMaker: false, minHubCount: 3 });
@@ -307,13 +308,18 @@ for (const group of ['reserve-and-own-account', 'remote-and-external', 'round-tr
             expected.alice[from] = (BigInt(expected.alice[from]) - units).toString();
             const receiver = remote ? expected.bob : expected.alice;
             receiver[to] = (BigInt(receiver[to]) + units).toString();
+            const observed: { state?: Awaited<ReturnType<typeof readPair>> } = {};
             await expect
               .poll(async () => {
                 const state = await readPair();
+                observed.state = state;
                 return { amounts: amounts(state), idle: idle(state) };
               }, WAIT)
               .toEqual({ amounts: expected, idle: true });
-            const after = await readPair();
+            // All post-commit assertions use the exact drained observation that passed the poll.
+            // A second RPC read can cross the test deadline and compare a different state.
+            const after = observed.state;
+            if (!after) throw new Error('MOVE_COMMITTED_OBSERVATION_MISSING');
             if (from === 'account')
               expect(BigInt(after.alice.account.capacity)).toBe(BigInt(before.alice.account.capacity) - units);
             if (to === 'account') {

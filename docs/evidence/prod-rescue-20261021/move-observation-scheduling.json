@@ -1,0 +1,688 @@
+{
+  "scope": "Test observation and isolated runner resource admission only; no production financial transition or deadline changes; not release/mainnet certification",
+  "baseSHA": "7367cdc474dba4b21981c341961e8e75e6dfe47c",
+  "sourceFiles": {
+    "tests/e2e/payments/e2e-move.spec.ts": "be633348ceda22ca31bc319011ba56fecfe107436dbf2404cbe7025d4370a949",
+    "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts": "83dcba6586c204b672074ddf8e39c03b1413a90474505aa2e6773b9578d49b0d",
+    "core/__tests__/testing/runner/e2e-exclusive-stack.test.ts": "a91a086de1feda1402e6426a05f44b49b6e8c64076bed9168d395e3e043b894c"
+  },
+  "firstBoundary": {
+    "sourceSHA": "7367cdc474dba4b21981c341961e8e75e6dfe47c",
+    "traceSHA256": "7dfcabfe4ae17bb6b260f1e59b2ac380a13ae1f215ce15331dbcbe41d67355f0",
+    "testTimeoutMs": 55000,
+    "e2eOriginAfterBeforeEach": true,
+    "afterHooksStart": 58977.066,
+    "manualCloseStartsAfterTimeout": true,
+    "duplicateReadPhases": [
+      {
+        "pollEnd": 31640.86,
+        "duplicateFirstReadStart": 31642.199,
+        "duplicateFirstReadEnd": 31816.275,
+        "minimumDuplicateWallMs": 174.07600000000093
+      },
+      {
+        "pollEnd": 39236.972,
+        "duplicateFirstReadStart": 39238.604,
+        "duplicateFirstReadEnd": 39827.036,
+        "minimumDuplicateWallMs": 588.4320000000007
+      },
+      {
+        "pollEnd": 47401.129,
+        "duplicateFirstReadStart": 47403.063,
+        "duplicateFirstReadEnd": 47730.392,
+        "minimumDuplicateWallMs": 327.3289999999979
+      },
+      {
+        "pollEnd": 54550.168,
+        "duplicateFirstReadStart": 54551.569,
+        "duplicateFirstReadEnd": 55186.938,
+        "minimumDuplicateWallMs": 635.3689999999988
+      },
+      {
+        "pollEnd": 58636.915,
+        "duplicateFirstReadStart": 58639.755,
+        "duplicateFirstReadEnd": 59411.237,
+        "minimumDuplicateWallMs": 771.4820000000036
+      }
+    ],
+    "minimumDuplicateWallMs": 2496.688000000002,
+    "change": "Use exact last successful amounts+idle poll observation for all existing capacity/allowance/conservation/nonce/receipt assertions. No deadline or teardown change.",
+    "oldFailureRetained": true
+  },
+  "singleCaseRepair": {
+    "passed": 1,
+    "failed": 0,
+    "retry": 0,
+    "skipped": 0,
+    "browserSeconds": 43.412,
+    "testTimeoutMs": 55000,
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "move-committed-observation-l2-01",
+      "--timeout-ms",
+      "7200000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-reset-concurrency=1",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/payments/e2e-move.spec.ts::move routed paths on isolated runtimes: remote-and-external",
+      "--pw-project=chromium",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--prewait-health=reset",
+      "--strict-browser-health",
+      "--preserve-artifacts"
+    ],
+    "logSHA256": "8f3f3275a0397bf99f8e3c24fa2264844d82f7c6736866c820adbefe947d1a9d",
+    "financialObservations": [
+      {
+        "name": "prepare-collateral",
+        "from": "reserve",
+        "to": "account",
+        "amount": "8",
+        "remote": false,
+        "confirmedBatchReceipts": [
+          {
+            "batchHash": "0xadb99dd51dd92883ee4f610e65b12ec53373e1ffce356815fdaa0ddcb1adb894",
+            "blockHash": "0xbc3be26612c01fc850c5db411ddfeb3dfa3141f69dff6f0e64c7aa4b6679d18e",
+            "nonce": 1,
+            "transactionHash": "0x4894aaefb13ef7d61b0b486f66820052eab7a142a415cb5c8cec1b2d301fe7ff"
+          }
+        ],
+        "before": {
+          "alice": {
+            "external": "120000000",
+            "reserve": "100000000",
+            "allowance": "0",
+            "entityNonce": 0,
+            "account": {
+              "capacity": "100000000",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "100000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          },
+          "bob": {
+            "external": "0",
+            "reserve": "0",
+            "allowance": "0",
+            "entityNonce": 0,
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          }
+        },
+        "after": {
+          "alice": {
+            "external": "120000000",
+            "reserve": "92000000",
+            "allowance": "0",
+            "entityNonce": 1,
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          },
+          "bob": {
+            "external": "0",
+            "reserve": "0",
+            "allowance": "0",
+            "entityNonce": 0,
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          }
+        }
+      },
+      {
+        "name": "e2a-remote",
+        "from": "external",
+        "to": "account",
+        "amount": "5",
+        "remote": true,
+        "confirmedBatchReceipts": [
+          {
+            "batchHash": "0x7f45c17fb0d38d89f6aa3cf25ddee457c2c59daa7e45f5a3d8024a58c5c01a28",
+            "blockHash": "0x2b9783352390b9f994b062d2fe1302c29260cd07853a5382e1b89fb6e1bb30d6",
+            "nonce": 2,
+            "transactionHash": "0xda1d33bf278bd6781577561995a90358c13d36b74efcbb515559759a6774a1b0"
+          }
+        ],
+        "before": {
+          "alice": {
+            "external": "120000000",
+            "reserve": "92000000",
+            "allowance": "0",
+            "entityNonce": 1,
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          },
+          "bob": {
+            "external": "0",
+            "reserve": "0",
+            "allowance": "0",
+            "entityNonce": 0,
+            "account": {
+              "capacity": "0",
+              "collateral": "0",
+              "mempool": 0,
+              "owned": "0",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          }
+        },
+        "after": {
+          "alice": {
+            "external": "115000000",
+            "reserve": "92000000",
+            "allowance": "0",
+            "entityNonce": 2,
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          },
+          "bob": {
+            "external": "0",
+            "reserve": "0",
+            "allowance": "0",
+            "entityNonce": 0,
+            "account": {
+              "capacity": "5000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "5000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          }
+        }
+      },
+      {
+        "name": "a2e",
+        "from": "account",
+        "to": "external",
+        "amount": "1",
+        "remote": false,
+        "confirmedBatchReceipts": [
+          {
+            "batchHash": "0xcaabe2b22296dca3f57ab218923828a7dfd055dc75feb45b00c0e0d03470a144",
+            "blockHash": "0x969b0eaea2736297729d3578fa7ebfdd9334e2db972e6b2fabc2a3128b471c19",
+            "nonce": 3,
+            "transactionHash": "0xd4777d1f666ff344870352fa599b3db09472294f8db6f0d98409c603ac6137ab"
+          }
+        ],
+        "before": {
+          "alice": {
+            "external": "115000000",
+            "reserve": "92000000",
+            "allowance": "0",
+            "entityNonce": 2,
+            "account": {
+              "capacity": "108000000",
+              "collateral": "8000000",
+              "mempool": 0,
+              "owned": "108000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          },
+          "bob": {
+            "external": "0",
+            "reserve": "0",
+            "allowance": "0",
+            "entityNonce": 0,
+            "account": {
+              "capacity": "5000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "5000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          }
+        },
+        "after": {
+          "alice": {
+            "external": "116000000",
+            "reserve": "92000000",
+            "allowance": "0",
+            "entityNonce": 3,
+            "account": {
+              "capacity": "107000000",
+              "collateral": "7000000",
+              "mempool": 0,
+              "owned": "107000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          },
+          "bob": {
+            "external": "0",
+            "reserve": "0",
+            "allowance": "0",
+            "entityNonce": 0,
+            "account": {
+              "capacity": "5000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "5000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          }
+        }
+      },
+      {
+        "name": "a2a-remote",
+        "from": "account",
+        "to": "account",
+        "amount": "2",
+        "remote": true,
+        "confirmedBatchReceipts": [
+          {
+            "batchHash": "0xd0dbeedde3208856f4ebccaefd8d444509dd560175535ec3751c468110c13ead",
+            "blockHash": "0x2852add6f38e682a4e2b1ad134dda3739ea19f9c8bb1d26ba12e1a36eae20ba4",
+            "nonce": 4,
+            "transactionHash": "0xa50b906723623b041db81493499c1e48a4cd7b03c58f7c5dcb182b430f1c80a7"
+          }
+        ],
+        "before": {
+          "alice": {
+            "external": "116000000",
+            "reserve": "92000000",
+            "allowance": "0",
+            "entityNonce": 3,
+            "account": {
+              "capacity": "107000000",
+              "collateral": "7000000",
+              "mempool": 0,
+              "owned": "107000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          },
+          "bob": {
+            "external": "0",
+            "reserve": "0",
+            "allowance": "0",
+            "entityNonce": 0,
+            "account": {
+              "capacity": "5000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "5000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          }
+        },
+        "after": {
+          "alice": {
+            "external": "116000000",
+            "reserve": "92000000",
+            "allowance": "0",
+            "entityNonce": 4,
+            "account": {
+              "capacity": "105000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "105000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          },
+          "bob": {
+            "external": "0",
+            "reserve": "0",
+            "allowance": "0",
+            "entityNonce": 0,
+            "account": {
+              "capacity": "7000000",
+              "collateral": "7000000",
+              "mempool": 0,
+              "owned": "7000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          }
+        }
+      },
+      {
+        "name": "e2e",
+        "from": "external",
+        "to": "external",
+        "amount": "7",
+        "remote": true,
+        "confirmedBatchReceipts": [],
+        "before": {
+          "alice": {
+            "external": "116000000",
+            "reserve": "92000000",
+            "allowance": "0",
+            "entityNonce": 4,
+            "account": {
+              "capacity": "105000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "105000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          },
+          "bob": {
+            "external": "0",
+            "reserve": "0",
+            "allowance": "0",
+            "entityNonce": 0,
+            "account": {
+              "capacity": "7000000",
+              "collateral": "7000000",
+              "mempool": 0,
+              "owned": "7000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          }
+        },
+        "after": {
+          "alice": {
+            "external": "109000000",
+            "reserve": "92000000",
+            "allowance": "0",
+            "entityNonce": 4,
+            "account": {
+              "capacity": "105000000",
+              "collateral": "5000000",
+              "mempool": 0,
+              "owned": "105000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          },
+          "bob": {
+            "external": "7000000",
+            "reserve": "0",
+            "allowance": "0",
+            "entityNonce": 0,
+            "account": {
+              "capacity": "7000000",
+              "collateral": "7000000",
+              "mempool": 0,
+              "owned": "7000000",
+              "pending": false
+            },
+            "batch": {
+              "draftOperations": 0,
+              "sent": false
+            }
+          }
+        }
+      }
+    ]
+  },
+  "controlledScheduling": {
+    "identicalSourceFiles": 265,
+    "allFilesEqual": true,
+    "twoLanes": {
+      "passed": 0,
+      "failed": 2,
+      "unstarted": 1,
+      "seconds": 150.214567958,
+      "logSHA256": "0f6759f29c48c35973f71ab146bbd63baae8b4eac21a134b761933d21d7210b7",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "move-custody-owning-l2-02",
+        "--timeout-ms",
+        "7200000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=2",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--max-mm-concurrency=1",
+        "--max-failures=1",
+        "--pw-files=[\"tests/e2e/payments/e2e-move.spec.ts::move routed paths on isolated runtimes: reserve-and-own-account\",\"tests/e2e/payments/e2e-move.spec.ts::move routed paths on isolated runtimes: round-trips\",\"tests/e2e-custody.spec.ts::separate custody daemon credits deposits and withdraws only from credited offchain balance\"]",
+        "--pw-project=chromium",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--prewait-health=reset",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ]
+    },
+    "oneLane": {
+      "passed": 3,
+      "failed": 0,
+      "seconds": 266.94111787500003,
+      "logSHA256": "a4c671d19628ede9a9ebabbbdc5d6b304f7c9c9b2cc33319ca36470fd49b410e",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "move-custody-owning-l2-03",
+        "--timeout-ms",
+        "7200000",
+        "--",
+        "bun",
+        "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+        "--shards=1",
+        "--workers-per-shard=1",
+        "--max-reset-concurrency=1",
+        "--max-mm-concurrency=1",
+        "--max-failures=1",
+        "--pw-files=[\"tests/e2e/payments/e2e-move.spec.ts::move routed paths on isolated runtimes: reserve-and-own-account\",\"tests/e2e/payments/e2e-move.spec.ts::move routed paths on isolated runtimes: round-trips\",\"tests/e2e-custody.spec.ts::separate custody daemon credits deposits and withdraws only from credited offchain balance\"]",
+        "--pw-project=chromium",
+        "--video=retain-on-failure",
+        "--trace=retain-on-failure",
+        "--screenshot=only-on-failure",
+        "--prewait-health=reset",
+        "--strict-browser-health",
+        "--preserve-artifacts"
+      ]
+    },
+    "change": "Three five-route dual-wallet Move tests use existing task tags to reserve an exclusive stack until cleanup. Ordinary and market-maker scheduling remain unchanged."
+  },
+  "l1": {
+    "passed": 70,
+    "failed": 0,
+    "assertions": 1066,
+    "command": [
+      "bun",
+      "test",
+      "core/__tests__/testing/runner/e2e-exclusive-stack.test.ts",
+      "core/__tests__/testing/runner/e2e-reset-limiter.test.ts",
+      "core/__tests__/operations/health/prod-startup-wiring-part-2.test.ts",
+      "core/__tests__/testing/qa/playwright-target-discovery.test.ts",
+      "core/__tests__/custody/custody-withdrawal-preflight.test.ts",
+      "core/__tests__/custody/custody-withdraw-submit-authority.test.ts"
+    ],
+    "logSHA256": "85b74ab90d4c8e95f550fd083796eb75fe42ccd91395c7cb3e813eb1cf203157",
+    "seconds": 12.200285708
+  },
+  "currentOwningL2": {
+    "passed": 4,
+    "failed": 0,
+    "skipped": 0,
+    "flaky": 0,
+    "retry": 0,
+    "sourceUnchanged": true,
+    "seconds": 336.420937167,
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "move-exclusive-owning-l2-04",
+      "--timeout-ms",
+      "7200000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--shards=2",
+      "--workers-per-shard=1",
+      "--max-reset-concurrency=1",
+      "--max-mm-concurrency=1",
+      "--max-failures=1",
+      "--pw-files=[\"tests/e2e/payments/e2e-move.spec.ts::move routed paths on isolated runtimes: remote-and-external\",\"tests/e2e/payments/e2e-move.spec.ts::move routed paths on isolated runtimes: reserve-and-own-account\",\"tests/e2e/payments/e2e-move.spec.ts::move routed paths on isolated runtimes: round-trips\",\"tests/e2e-custody.spec.ts::separate custody daemon credits deposits and withdraws only from credited offchain balance\"]",
+      "--pw-project=chromium",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--prewait-health=reset",
+      "--strict-browser-health",
+      "--preserve-artifacts"
+    ],
+    "logSHA256": "99037d5126bc03c5bdedd963924f864577c8ac563ee46359b0d6afcfa4147619",
+    "candidateId": "0f59332f6261a6756b351d1cb1b9431fc8f349fd0b62dd2aa5df17a226f6d15d",
+    "cases": [
+      {
+        "identity": "tests/e2e/payments/e2e-move.spec.ts::move routed paths on isolated runtimes: remote-and-external",
+        "shard": 0,
+        "passed": true,
+        "browserBodyMs": 43979,
+        "browserStart": "2026-10-21T17:45:57.522Z",
+        "browserTotalMs": 47855.336,
+        "stackFirstSampleMs": 1792604740658,
+        "stackLastSampleMs": 1792604807432,
+        "stackDurationMs": 66778,
+        "portBase": 20000
+      },
+      {
+        "identity": "tests/e2e/payments/e2e-move.spec.ts::move routed paths on isolated runtimes: reserve-and-own-account",
+        "shard": 1,
+        "passed": true,
+        "browserBodyMs": 42564,
+        "browserStart": "2026-10-21T17:47:04.336Z",
+        "browserTotalMs": 45982.252,
+        "stackFirstSampleMs": 1792604808099,
+        "stackLastSampleMs": 1792604872264,
+        "stackDurationMs": 64167,
+        "portBase": 20000
+      },
+      {
+        "identity": "tests/e2e/payments/e2e-move.spec.ts::move routed paths on isolated runtimes: round-trips",
+        "shard": 2,
+        "passed": true,
+        "browserBodyMs": 42674,
+        "browserStart": "2026-10-21T17:48:09.152Z",
+        "browserTotalMs": 46109.909,
+        "stackFirstSampleMs": 1792604872921,
+        "stackLastSampleMs": 1792604937307,
+        "stackDurationMs": 64388,
+        "portBase": 20000
+      },
+      {
+        "identity": "tests/e2e-custody.spec.ts::separate custody daemon credits deposits and withdraws only from credited offchain balance",
+        "shard": 3,
+        "passed": true,
+        "browserBodyMs": 87616,
+        "browserStart": "2026-10-21T17:49:15.212Z",
+        "browserTotalMs": 92175.218,
+        "stackFirstSampleMs": 1792604937964,
+        "stackLastSampleMs": 1792605049439,
+        "stackDurationMs": 111477,
+        "portBase": 20000
+      }
+    ],
+    "isolationEvidence": "Requested2lanes; existing perf sample intervals do not overlap. Same worker port base reused; canonical runner asserts all owned ports free after runShard cleanup before releasing reservation. No deadline change."
+  },
+  "remaining": "Current check and publication; remaining identities; fresh final committed-SHA finance/unit/test/check/full158/release34/60minsoak/deployment/public and public-chain authority/funding/cold-recovery."
+}

@@ -393,14 +393,29 @@ async function waitForCustodyTokenBalance(
   await expect.poll(
     async () => {
       const dashboard = await readCustodyDashboard(page, custodyBaseUrl);
-      return readCustodyTokenMinor(dashboard, tokenId).toString();
+      const token = dashboard.tokens?.find(row => row.tokenId === tokenId);
+      if (!token?.symbol || typeof token.amountDisplay !== 'string') {
+        throw new Error(`custody token ${tokenId} display metadata missing`);
+      }
+      // The browser preflight reads its displayed state, not this independent API read.
+      const displayed = await page
+        .locator('.token-card')
+        .filter({
+          has: page.locator('.token-name', { hasText: new RegExp(`^${token.symbol}$`) }),
+        })
+        .locator('.token-balance')
+        .allTextContents();
+      return {
+        amountMinor: readCustodyTokenMinor(dashboard, tokenId).toString(),
+        rendered: displayed.length === 1 && displayed[0]?.trim() === token.amountDisplay,
+      };
     },
     {
       timeout: 30_000,
       intervals: [500, 750, 1000],
       message: `custody token ${tokenId} balance must converge to ${expectedMinor.toString()}`,
     },
-  ).toBe(expectedMinor.toString());
+  ).toEqual({ amountMinor: expectedMinor.toString(), rendered: true });
 
   return await readCustodyDashboard(page, custodyBaseUrl);
 }
@@ -754,6 +769,7 @@ test.describe('E2E Custody Flow', () => {
             20_000,
           );
         });
+        expect(browserWithdrawalRequests, 'each funded withdrawal submits exactly once').toBe(cycleIndex + 1);
         const finalizedWithdrawal = await timedStep(
           `custody.withdraw_cycle_${cycleIndex + 1}.wait_finalized`,
           () => waitForActivityStatus(custodyPage, custodyBaseUrl, withdrawalActivity.id, 'finalized', 90_000),

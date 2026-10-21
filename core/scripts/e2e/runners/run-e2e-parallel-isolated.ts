@@ -346,6 +346,19 @@ export type RunTask = {
   testCategory: QaTestCategory;
 };
 
+/** A full-stack exclusive test waits for all shared stacks and holds the machine until cleanup. */
+export const selectExclusiveE2ETask = (
+  tasks: readonly Pick<RunTask, 'tags'>[],
+  claimed: readonly boolean[],
+  activeExclusiveTasks: number,
+  activeSharedTasks: number,
+): number | null => {
+  if (activeExclusiveTasks > 0) return null;
+  const index = tasks.findIndex((task, index) => !claimed[index] && task.tags.includes('@exclusive-stack'));
+  if (index < 0) return -1;
+  return activeSharedTasks === 0 ? index : null;
+};
+
 type JsonRecord = Record<string, unknown>;
 type HealthPayload = JsonRecord;
 export type E2EBrowserHealthCounters = {
@@ -2421,6 +2434,7 @@ async function main(): Promise<void> {
     const claimed = new Array<boolean>(tasks.length).fill(false);
     const abortController = new AbortController();
     let claimedCount = 0;
+    let activeExclusiveTasks = 0;
     let activeMarketMakerTasks = 0;
     let activePlainTasks = 0;
     let failureState = initialE2ERunFailureState();
@@ -2428,6 +2442,24 @@ async function main(): Promise<void> {
       if (abortController.signal.aborted) return null;
       while (claimedCount < tasks.length) {
         if (abortController.signal.aborted) return null;
+        const exclusiveIndex = selectExclusiveE2ETask(
+          tasks,
+          claimed,
+          activeExclusiveTasks,
+          activePlainTasks + activeMarketMakerTasks,
+        );
+        if (exclusiveIndex === null) {
+          await scheduler.wait(250);
+          continue;
+        }
+        if (exclusiveIndex >= 0) {
+          const task = tasks[exclusiveIndex];
+          if (!task) throw new Error(`E2E_TASK_MISSING: index=${exclusiveIndex}`);
+          claimed[exclusiveIndex] = true;
+          claimedCount += 1;
+          activeExclusiveTasks += 1;
+          return { taskIndex: exclusiveIndex, task };
+        }
         const pendingMarketMakerIndex = tasks.findIndex((task, index) => !claimed[index] && task.requireMarketMaker);
         // A market-maker stack runs six Runtime processes and two jurisdictions.
         // Mixing it with ordinary full stacks caused deterministic bootstrap work
@@ -2496,7 +2528,9 @@ async function main(): Promise<void> {
             abortController.abort(createE2EGlobalFailFastAbortReason(primaryFailure));
           }
         } finally {
-          if (claim.task.requireMarketMaker) {
+          if (claim.task.tags.includes('@exclusive-stack')) {
+            activeExclusiveTasks -= 1;
+          } else if (claim.task.requireMarketMaker) {
             activeMarketMakerTasks = Math.max(0, activeMarketMakerTasks - 1);
           } else {
             activePlainTasks = Math.max(0, activePlainTasks - 1);
