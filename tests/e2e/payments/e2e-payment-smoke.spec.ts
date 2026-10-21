@@ -40,7 +40,12 @@ type ActivityApiEvent = {
 };
 
 type CurrentWalletWindow = Window & {
-  __xln?: { env(): RuntimeReplica | null; xln(): Promise<XLNModule>; adapter(): RuntimeAdapter | null };
+  __xln?: {
+    env(): RuntimeReplica | null;
+    xln(): Promise<XLNModule>;
+    adapter(): RuntimeAdapter | null;
+    store: { getState(): { booting: boolean; adapterStatus: string; activeEntityId: string | null } };
+  };
 };
 
 function isExpectedUiPaymentActivity(event: ActivityApiEvent): boolean {
@@ -242,11 +247,21 @@ async function waitForSenderSpend(
     .then(async () => getRenderedOutboundForAccount(page, counterpartyId));
 }
 
-async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<void> {
+async function waitForRestoredRuntime(page: Page, owner: { runtimeId: string; entityId: string }): Promise<void> {
   await page.waitForFunction(
-    targetRuntimeId => {
-      const env = (window as CurrentWalletWindow).__xln?.env();
-      if (!env || env.runtimeId.toLowerCase() !== targetRuntimeId.toLowerCase() || env.state.eReplicas.size === 0)
+    target => {
+      const debug = (window as CurrentWalletWindow).__xln;
+      const env = debug?.env();
+      if (
+        !debug ||
+        !env ||
+        env.runtimeId.toLowerCase() !== target.runtimeId.toLowerCase() ||
+        env.state.eReplicas.size === 0
+      )
+        return false;
+      const wallet = debug.store.getState();
+      // Hosted boot clears this gate only after authenticated chain catch-up.
+      if (wallet.booting || wallet.adapterStatus !== 'connected' || wallet.activeEntityId !== target.entityId)
         return false;
       const accounts = [...env.state.eReplicas.values()].flatMap(entity => [...entity.state.accounts.values()]);
       // Recovery must restore usable online money and drain acknowledged delivery.
@@ -259,7 +274,7 @@ async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<vo
         accounts.every(account => !account.pendingFrame && !account.pendingAccountInput && account.mempool.length === 0)
       );
     },
-    runtimeId,
+    owner,
     { timeout: CONSENSUS_TIMEOUT_MS },
   );
 }
@@ -483,6 +498,9 @@ test.describe('Payment Smoke', () => {
               await reloadedPage.getByRole('button', { name: 'Continue', exact: true }).click();
               await reloadedPage.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
               await reloadedPage.getByRole('button', { name: 'Unlock', exact: true }).click();
+              // Unlock returns before recovery. Use its existing drain budget before
+              // the unchanged five-second assertion that the ready wallet renders.
+              await waitForRestoredRuntime(reloadedPage, identity);
               await expect(reloadedPage.getByTestId('nav-home').locator('visible=true').first()).toBeVisible();
             });
           } catch (error) {
@@ -515,11 +533,6 @@ test.describe('Payment Smoke', () => {
           gotoApp(senderPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
           gotoApp(recipientPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
         ]);
-        await Promise.all([
-          waitForRestoredRuntime(senderPage, sender.runtimeId),
-          waitForRestoredRuntime(recipientPage, recipient.runtimeId),
-        ]);
-
         await expect
           .poll(() => getRenderedOutboundForAccount(senderPage, hubId), {
             timeout: CONSENSUS_TIMEOUT_MS,

@@ -1,0 +1,128 @@
+{
+  "recordedAt": "2026-10-21T18:33:27.718057+00:00",
+  "parentSHA": "b85bf152d570927fdaa100c7f9eb828d784c6593",
+  "scope": "Test observation order only; no production financial/recovery/scan change. Not a final release or mainnet certificate.",
+  "source": {
+    "tests/e2e/payments/e2e-payment-smoke.spec.ts": "a57702ac4686e1d825293086a7fe2b16af409a3037bded8b544ba6c9753bb74e"
+  },
+  "originalFailure": {
+    "receipt": "remaining95-b85bf152d570-01.result.json",
+    "traceSHA256": "3263086ebc8f51b05137f549854be0fd0f578f22de14336b80e36d0fd5df6183",
+    "error": "Home visibility asserted for5000ms before existing recovery/drain observation; restored wallet still behind boot gate.",
+    "senderAtFailure": {
+      "committedCursor": 39,
+      "authenticatedThrough": 0
+    },
+    "laterAuthenticatedThrough": 39,
+    "rendered": "Imported vault; Unlock wallet; Starting your runtime",
+    "cohort": {
+      "passed": 0,
+      "failed": 1,
+      "cancelled": 1,
+      "unstarted": 93
+    }
+  },
+  "repair": "Move existing60s recovery/drain observation before unchanged5s Home assertion. Require original Runtime and selected Entity, connected adapter and completed hosted boot, online transport and all existing pending work drained. Delete later duplicate observation.",
+  "unchangedLimitsMs": {
+    "recovery": 60000,
+    "HomeAssertion": 5000,
+    "scenario": 240000,
+    "longScenario": 300000
+  },
+  "l1": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "payment-smoke-restore-l1-01",
+      "--timeout-ms",
+      "60000",
+      "--",
+      "bun",
+      "test",
+      "core/__tests__/jurisdiction/watchers/j-watcher-drain-planning.test.ts",
+      "ui/src/runtime/recovery-failure.test.ts"
+    ],
+    "seconds": 1.4979161669999999,
+    "sourceUnchanged": true,
+    "logSHA256": "d0c10b12fc606b6fba407ac856cc0d22d3a1304a7d228a524b21efb1a5dd55f5",
+    "passed": 16,
+    "failed": 0,
+    "assertions": 35
+  },
+  "l2": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "payment-smoke-restore-l2-01",
+      "--timeout-ms",
+      "7200000",
+      "--",
+      "bun",
+      "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts",
+      "--shards=1",
+      "--workers-per-shard=1",
+      "--max-failures=1",
+      "--pw-files=tests/e2e/payments/e2e-payment-smoke.spec.ts::fresh runtimes can open accounts, faucet, pay, and reload persisted state",
+      "--pw-project=chromium",
+      "--video=retain-on-failure",
+      "--trace=retain-on-failure",
+      "--screenshot=only-on-failure",
+      "--prewait-health=reset",
+      "--strict-browser-health",
+      "--preserve-artifacts",
+      "--skip-build"
+    ],
+    "seconds": 109.055250625,
+    "sourceUnchanged": true,
+    "logSHA256": "bb711c275b3e25e65ca1f96e8ac188cd7cecbc8688e069a9e0f4890838a4a1cb",
+    "candidate": {
+      "candidateId": "016c298c95b073da56bb8ee69330b2a15eada512214e03726ec8f79e92eef7fd",
+      "gitHead": "b85bf152d570927fdaa100c7f9eb828d784c6593",
+      "codeHash": "3607508898b3c600ed261527df5459fa2f4fc492d101fa00d00759848d123312",
+      "gateConfigHash": "18a37d2b390da1a6f3faa0bf52e5d5a1ebf53cb272d5af745609b6105a908844"
+    },
+    "runner": {
+      "passedShards": 1,
+      "failedShards": 0,
+      "cancelledShards": 0
+    },
+    "browser": {
+      "startTime": "2026-10-21T18:31:25.624Z",
+      "duration": 62570.424,
+      "expected": 1,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "results": [
+      {
+        "title": "fresh runtimes can open accounts, faucet, pay, and reload persisted state",
+        "status": "passed",
+        "durationMs": 59128,
+        "retry": 0
+      }
+    ],
+    "financialAssertions": {
+      "amountMinorUnits": "7000000",
+      "token": "USDC",
+      "senderEvent": "HtlcFinalized",
+      "recipientEvent": "HtlcReceived",
+      "bothEventCounterparties": "same selected hub",
+      "senderAfterReload": "93 USDC",
+      "recipientAfterReload": "7 USDC",
+      "balances": "exact pre-reload values preserved",
+      "pendingAccountAck": "zero after restore",
+      "walletOwners": "original Runtime and Entity required"
+    },
+    "restoreMs": {
+      "sender": 5082,
+      "recipient": 5188
+    },
+    "limitation": "Real browser and persisted event assertions; not a standalone cryptographic final-SHA bundle."
+  },
+  "privateArchive": "payment-smoke-restore-l2-01-private/index.json"
+}
