@@ -5,7 +5,7 @@
  * Key checks: typed graph ownership, branch roots, leaves, and static references.
  * Human-audit importance: 100/100 — corrupt recovery bytes must fail closed.
  */
-import { iterateKeys, readRawOrNull } from '../../database/level';
+import { iterateKeys } from '../../database/level';
 import {
   KEY_LIVE_ACCOUNT_BRANCH,
   KEY_LIVE_ACCOUNT_FIELD,
@@ -121,14 +121,16 @@ export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<voi
     bookOwners.add(bookOwnerKey(parsed.entityId, parsed.pairId));
   }
 
+  // Verification owns a stable projection. The owner maps above contain only
+  // roots that were read and validated in this pass; child rows need membership
+  // and declaration checks, not another DB read of that same root per child.
   for (const tag of [KEY_LIVE_ACCOUNT_BRANCH, KEY_LIVE_ACCOUNT_LEAF] as const) {
     for await (const key of iterateKeys(db, { prefix: Buffer.from([tag]) })) {
       const parsed = tag === KEY_LIVE_ACCOUNT_BRANCH
         ? parseLiveAccountBranchKey(key)
         : parseLiveAccountLeafKey(key);
       const owner = accountOwnerKey(parsed.entityId, parsed.counterpartyId);
-      if (!accountOwners.get(owner)?.namespaceTags.has(parsed.namespaceTag) ||
-          !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
+      if (!accountOwners.get(owner)?.namespaceTags.has(parsed.namespaceTag)) {
         throw new Error(`STORAGE_ACCOUNT_GRAPH_OWNER_MISSING:${owner}`);
       }
     }
@@ -140,8 +142,7 @@ export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<voi
         ? parseLiveEntityBranchKey(key)
         : parseLiveEntityLeafKey(key);
       const owner = keyLiveEntity(parsed.entityId).toString('hex');
-      if (!entityOwners.get(owner)?.namespaceTags.has(parsed.namespaceTag) ||
-          !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
+      if (!entityOwners.get(owner)?.namespaceTags.has(parsed.namespaceTag)) {
         throw new Error(`STORAGE_ENTITY_GRAPH_OWNER_MISSING:${owner}`);
       }
     }
@@ -157,8 +158,7 @@ export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<voi
       'STORAGE_LIVE_ENTITY_FIELD_KEY_MISMATCH',
     );
     const owner = keyLiveEntity(parsed.entityId).toString('hex');
-    if (!entityOwners.get(owner)?.fieldTags.has(parsed.fieldTag) ||
-        !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
+    if (!entityOwners.get(owner)?.fieldTags.has(parsed.fieldTag)) {
       throw new Error(`STORAGE_ENTITY_FIELD_OWNER_MISSING:${owner}`);
     }
   }
@@ -178,8 +178,7 @@ export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<voi
       'STORAGE_LIVE_ACCOUNT_FIELD_KEY_MISMATCH',
     );
     const owner = accountOwnerKey(parsed.entityId, parsed.counterpartyId);
-    if (!accountOwners.get(owner)?.fieldTags.has(parsed.fieldTag) ||
-        !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
+    if (!accountOwners.get(owner)?.fieldTags.has(parsed.fieldTag)) {
       throw new Error(`STORAGE_ACCOUNT_FIELD_OWNER_MISSING:${owner}`);
     }
   }
@@ -190,7 +189,7 @@ export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<voi
         ? parseLiveBookBranchKey(key)
         : parseLiveBookLeafKey(key);
       const owner = bookOwnerKey(parsed.entityId, parsed.pairId);
-      if (!bookOwners.has(owner) || !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
+      if (!bookOwners.has(owner)) {
         throw new Error(`STORAGE_BOOK_GRAPH_OWNER_MISSING:${owner}`);
       }
     }

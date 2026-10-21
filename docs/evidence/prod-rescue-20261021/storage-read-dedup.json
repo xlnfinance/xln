@@ -1,0 +1,203 @@
+{
+  "baseSHA": "695f3d736104d19451d2dcb14c5432f3f9937739",
+  "candidateSourceSHA256": {
+    "core/storage/index.ts": "c4010546b83821935bbc9db28f502877a22de64c95862ff61dd9dcdc46ef3926",
+    "core/storage/read/integrity/live.ts": "d08441b9a49897e7c8a3df50aef6e958d8c4c10890ad8a9c457bdba965dbffe0",
+    "core/storage/read/integrity/snapshot-graph.ts": "9b5220e2deeb8835d4c163eac539dfd15f297f6cc8613fe2d8d533286c18716e",
+    "core/__tests__/storage/history/runtime-activity-view.test.ts": "e43b688d5fb0ea3570f1b9f5f2fd6a7c9c7d613845971eae34ce9c24c40973e9"
+  },
+  "problem": "Forced epoch rotation exceeded the canonical 30000ms same-chain market-maker startup budget. Profiling identified repeated storage integrity reads.",
+  "change": [
+    "Verify an intact, unchanged current projection once per recovery call; verify every repaired projection again after HEAD publication.",
+    "Reuse owner membership established by full live graph verification instead of rereading each owner for every child.",
+    "Read auxiliary snapshot node values for their hash checks; retain every row ownership/declaration/chunk/count check without fetching unused nonauxiliary values."
+  ],
+  "preserved": [
+    "Authoritative WAL verification",
+    "Full current and snapshot roots and typed graph verification",
+    "Orphan rows, undeclared fields/namespaces, corrupt chunks and auxiliary nodes rejected",
+    "Current repair followed by HEAD publication and full revalidation",
+    "Original startup deadlines and epoch/crash assertions"
+  ],
+  "measurements": {
+    "scope": "One preserved real failed MM R37 LevelDB copy, isolated stand, one before/after observation; not TPS or general benchmark",
+    "liveIntegrityMs": {
+      "before": 807.040792,
+      "after": 634.554833
+    },
+    "liveAccountRootReads": {
+      "before": 2604,
+      "after": 39
+    },
+    "snapshotGraphAuditMs": {
+      "before": 327.607125,
+      "after": 179.030416
+    },
+    "snapshotGraphReads": {
+      "before": 3021,
+      "after": 222
+    },
+    "fullSnapshotVerificationMs": {
+      "before": 934.009292,
+      "after": 768.302541
+    },
+    "matchingCurrentRecoveryMs": {
+      "before": 3194.659458,
+      "afterFirstDedupOnly": 2622.7725
+    }
+  },
+  "checks": [
+    {
+      "attempt": "snapshot-integrity-l1-01",
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/storage/schema/storage-account-snapshot-graph.test.ts",
+        "core/__tests__/storage/schema/storage-entity-snapshot-graph.test.ts",
+        "core/__tests__/storage/wal/bounded-large-rows.test.ts",
+        "core/__tests__/storage/history/runtime-activity-view.test.ts",
+        "core/__tests__/storage/recovery/storage-crash-recovery.test.ts"
+      ],
+      "counts": {
+        "passed": 28,
+        "failed": 0,
+        "assertions": 150
+      },
+      "seconds": 6.298415749999999,
+      "logSHA256": "47e80b9e035188cf8c654f5712d8de20c9dbf19cae17856be6ef7c66e1a23a8a"
+    },
+    {
+      "attempt": "snapshot-recovery-rotation-l2-02",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "snapshot-recovery-rotation-l2-02",
+        "--timeout-ms",
+        "1200000",
+        "--",
+        "bun",
+        "run",
+        "prod:bootstrap:rotation"
+      ],
+      "counts": {
+        "passed": 1,
+        "failed": 0
+      },
+      "seconds": 93.88974499999999,
+      "logSHA256": "20da4f84a0abd8f643be615a2e1c4077e4e684c941f821e2abcda40b8961e72c"
+    },
+    {
+      "attempt": "snapshot-recovery-real-crash-file-01",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "snapshot-recovery-real-crash-file-01",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/storage/durability/storage-real-crash-recovery.test.ts"
+      ],
+      "counts": {
+        "passed": 17,
+        "failed": 0,
+        "assertions": 502
+      },
+      "seconds": 50.057166959,
+      "logSHA256": "60a35529bd61180cfe51553c50ad5c54b2f394e23ae4b020d8e1ca45214203fc"
+    },
+    {
+      "attempt": "snapshot-recovery-import-crash-file-01",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "snapshot-recovery-import-crash-file-01",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/storage/durability/storage-restore-import-crash.test.ts"
+      ],
+      "counts": {
+        "passed": 6,
+        "failed": 0,
+        "assertions": 60
+      },
+      "seconds": 15.38094025,
+      "logSHA256": "449c3fd8556cbf4c71e2f837a2346204c9ef11ec39bca39f79b2e402d4607ad1"
+    },
+    {
+      "attempt": "snapshot-recovery-determinism-01",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "snapshot-recovery-determinism-01",
+        "--timeout-ms",
+        "720000",
+        "--",
+        "bun",
+        "run",
+        "check:determinism"
+      ],
+      "counts": {
+        "passed": 14,
+        "failed": 0,
+        "framesPerWorker": 1214,
+        "workers": [1, 4]
+      },
+      "seconds": 464.10955575,
+      "logSHA256": "78cf81e42a995e42e0e9591c0b98060fc19720c97f7766f3a0ccbd74ed32bf97"
+    }
+  ],
+  "retainedFailures": [
+    {
+      "attempt": "release-695f3d736104-01",
+      "result": "15 pass, epoch rotation failed, 18 not run"
+    },
+    {
+      "attempt": "snapshot-recovery-rotation-l2-01",
+      "result": "First duplicate-only removal insufficient: same-chain 30223/30000ms"
+    },
+    {
+      "attempt": "snapshot-recovery-real-crash-01",
+      "result": "Combined two-file command stopped at original 60s budget after 21 individual passes; not a suite pass. Both complete files subsequently passed separately."
+    },
+    {
+      "attempt": "snapshot-read-current-check-01",
+      "result": "Function-size gate rejected152lines after invariantcomment addition; parallelchecks were cancelled. Movedcomment beforefunction, identical TypeScript printedprogram; originalsizegate passed."
+    }
+  ],
+  "limits": [
+    "Epoch-rotation same-chain phase passed with narrow margin (about29.823s); final full release must pass unchanged.",
+    "Full158 browser, exact final unit/test/check, full34 release, 60-minute soak and fresh financial certification on final committed SHA remain required.",
+    "This evidence does not establish public Nile, Ethereum USDT or mainnet readiness."
+  ],
+  "review": {
+    "scope": "Bounded Studio native read-only stable diff review",
+    "result": "No concrete blocker identified; writer ownership/stable DB assumption retained.",
+    "patchSHA256": "f708c9fd4bcaed5f875fe03663898497f501bdfdfff8c2d56fcd4a330290f4d1"
+  },
+  "validatedSourceSHA256": {
+    "core/storage/index.ts": "827723fdeb41052e11553d81cafbb23d767f04642429524b84c6927869ec5a6f",
+    "core/storage/read/integrity/live.ts": "d08441b9a49897e7c8a3df50aef6e958d8c4c10890ad8a9c457bdba965dbffe0",
+    "core/storage/read/integrity/snapshot-graph.ts": "9b5220e2deeb8835d4c163eac539dfd15f297f6cc8613fe2d8d533286c18716e",
+    "core/__tests__/storage/history/runtime-activity-view.test.ts": "e43b688d5fb0ea3570f1b9f5f2fd6a7c9c7d613845971eae34ce9c24c40973e9"
+  },
+  "commentOnlyChangeAfterRuntimeValidation": {
+    "path": "core/storage/index.ts",
+    "beforeSHA256": "827723fdeb41052e11553d81cafbb23d767f04642429524b84c6927869ec5a6f",
+    "afterSHA256": "c4010546b83821935bbc9db28f502877a22de64c95862ff61dd9dcdc46ef3926",
+    "typescriptPrintedProgramUnchanged": true,
+    "reason": "Writer-lock invariant comment moved before function; original function-size limit unchanged"
+  }
+}

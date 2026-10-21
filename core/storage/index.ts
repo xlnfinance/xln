@@ -362,6 +362,10 @@ const EMPTY_STORAGE_RECOVERY: { recovered: boolean; diagnostics: StorageRecovery
   diagnostics: { headsMatch: true, headChanged: false, verifiedCurrent: false, stages: {} },
 };
 
+// The production caller owns the storage writer lock. A matching, verified
+// current projection needs one check per call; no rows change on that path.
+// Missing, lagging or corrupt projections must be checked again after their
+// replacement and HEAD publication, never blessed by the WAL alone.
 export const recoverStorageDbFromWal = async (options: {
   db: RuntimeDbLike;
   walDb: RuntimeDbLike;
@@ -495,7 +499,7 @@ export const recoverStorageDbFromWal = async (options: {
     markRecoveryStage('publishHead');
     recovered = true;
   }
-  const reverified = shouldVerifyCurrent || resetFromWal || headChanged;
+  const reverified = resetFromWal || headChanged;
   if (reverified) {
     await assertCurrentProjectionIntegrity(
       options.db,

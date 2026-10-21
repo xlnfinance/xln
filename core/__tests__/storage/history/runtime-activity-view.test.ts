@@ -110,12 +110,15 @@ describe('disposable Runtime activity view', () => {
       const intact = await recoverStorageDbFromWal(recoveryOptions);
       expect(intact.diagnostics.verifiedCurrent).toBe(true);
       expect(intact.recovered).toBe(false);
+      expect(intact.diagnostics.stages.verifyCurrent).toBeDefined();
+      expect(intact.diagnostics.stages.reverifyCurrent).toBeUndefined();
 
       // A verified authoritative WAL must never bless a damaged current copy.
       await db.put(Buffer.from([KEY_LIVE_ENTITY]), Buffer.from([0]));
       const repaired = await recoverStorageDbFromWal(recoveryOptions);
       expect(repaired.recovered).toBe(true);
       expect(repaired.diagnostics.headChanged).toBe(true);
+      expect(repaired.diagnostics.stages.reverifyCurrent).toBeDefined();
       await commitRuntimeTick(env);
       const frame = await readStorageFrameRecord(walDb, 3);
       if (!frame) throw new Error('Recovery regression frame missing');

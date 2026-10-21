@@ -227,7 +227,12 @@ export const inspectSnapshotGraphRows = async (
       continue;
     }
     const ownership = graphOwner(height, parsed.liveKey);
-    validateAuxiliaryRow(parsed.liveKey[0], await readRequiredRaw(db, key));
+    // Only auxiliary nodes have a value check here. Account/Entity/Book values
+    // are checked by their root traversal; this pass checks every row's owner,
+    // including unreachable rows, without reading unused values a second time.
+    if (parsed.liveKey[0] === KEY_CERTIFIED_BOARD_NODE || parsed.liveKey[0] === KEY_ACCOUNT_J_CLAIM_NODE) {
+      validateAuxiliaryRow(parsed.liveKey[0], await readRequiredRaw(db, key));
+    }
     const owner = owners.get(ownerKey(ownership.key));
     if (!owner) {
       throw new Error(`STORAGE_SNAPSHOT_GRAPH_OWNER_MISSING:${ownership.key.toString('hex')}`);
