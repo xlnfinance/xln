@@ -396,6 +396,12 @@ export function materializeCommittedRemainder(
   return mutable;
 }
 
+const quantizeRestingLotsAtPrice = (quantity: bigint, priceTicks: bigint, options: ApplyCommandOptions): bigint => {
+  const multiple = options.executionQtyMultipleAtPrice?.(priceTicks) ?? 1n;
+  if (multiple <= 0n) throw new Error('BOOK_EXECUTION_QTY_MULTIPLE_INVALID');
+  return (quantity / multiple) * multiple;
+};
+
 export function applyCommand(
   state: BookState,
   cmd: OrderCmd,
@@ -434,9 +440,7 @@ export function applyCommand(
   }
   if (matched.remaining > 0n && matched.blockingOrderId === undefined && tif === 0) {
     if (mutable.orders.size >= mutable.params.maxOrders) throw new OrderbookCapacityError();
-    const multiple = options.executionQtyMultipleAtPrice?.(priceTicks) ?? 1n;
-    if (multiple <= 0n) throw new Error('BOOK_EXECUTION_QTY_MULTIPLE_INVALID');
-    const resting = (matched.remaining / multiple) * multiple;
+    const resting = quantizeRestingLotsAtPrice(matched.remaining, priceTicks, options);
     if (resting > 0n) {
       addOrder(mutable, { orderId, ownerId, side, priceTicks, qtyLots: resting, seq: mutable.nextSeq });
       mutable.nextSeq += 1;
@@ -464,7 +468,13 @@ export function resumeCrossedBook(state: BookState, options: ApplyCommandOptions
     removeOrder(mutable, taker.orderId);
     bumpHash(mutable, 5, taker.priceTicks, 0);
   } else if (matched.remaining === 0n) removeOrder(mutable, taker.orderId);
-  else if (matched.remaining < taker.qtyLots) reduceOrder(mutable, taker, matched.remaining);
+  else if (matched.remaining < taker.qtyLots) {
+    // Account settlement releases residual dust at the taker's limit price.
+    // Resumed matching must retain the same exact-quote lots as new admission.
+    const resting = quantizeRestingLotsAtPrice(matched.remaining, taker.priceTicks, options);
+    if (resting === 0n) removeOrder(mutable, taker.orderId);
+    else reduceOrder(mutable, taker, resting);
+  }
   if (events.length === 0) return null;
   return { state: mutable, events, takerOrderId: taker.orderId };
 }

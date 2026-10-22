@@ -11,7 +11,7 @@ const CLOCK = { timestamp: 1_000, jHeight: 7 };
 const AMOUNT = 2n * SWAP_LOT_SCALE;
 const HALF = SWAP_LOT_SCALE;
 
-const accountWithOffer = async (timeInForce: 0 | 1 | 2): Promise<AccountReplica> => {
+const accountWithOffer = async (timeInForce: 0 | 1 | 2, amount = AMOUNT): Promise<AccountReplica> => {
   const account = makeAccount('alice', 'hub');
   const wantDelta = createDefaultDelta(2);
   wantDelta.leftCreditLimit = wantDelta.rightCreditLimit = 10n ** 30n;
@@ -24,11 +24,11 @@ const accountWithOffer = async (timeInForce: 0 | 1 | 2): Promise<AccountReplica>
         offerId: `tif-${timeInForce}`,
         giveTokenId: 1,
         ...getStaticSwapTokenDimensions(1, 2),
-        giveAmount: AMOUNT,
+        giveAmount: amount,
         wantTokenId: 2,
-        wantAmount: AMOUNT,
+        wantAmount: amount,
         maxFee: 0n,
-        minNetReceive: AMOUNT,
+        minNetReceive: amount,
         timeInForce,
       },
     },
@@ -137,6 +137,25 @@ describe('swap_resolve time-in-force', () => {
     const partial = await resolve(account, 'tif-0', { ...halfFill, cancelRemainder: false });
     expect(partial.ok).toBe(true);
     expect(account.state.swapOffers.get('tif-0')?.giveAmount).toBe(HALF);
+  });
+
+  test('swap_resolve.gtc_maximum_wire_ratio_preserves_a_tradable_partial_remainder', async () => {
+    const amount = 100_000n * SWAP_LOT_SCALE;
+    const filled = amount - SWAP_LOT_SCALE;
+    const fillRatio = exactFillRatioToUint16({ numerator: filled, denominator: amount });
+    expect(fillRatio).toBe(MAX_SWAP_FILL_RATIO);
+    const account = await accountWithOffer(0, amount);
+    const partial = await resolve(account, 'tif-0', {
+      fillRatio,
+      executionGiveAmount: filled,
+      executionWantAmount: filled,
+      cancelRemainder: false,
+    });
+    expect(partial.ok).toBe(true);
+    const remaining = account.state.swapOffers.get('tif-0');
+    expect(remaining?.giveAmount).toBe(SWAP_LOT_SCALE);
+    expect(remaining?.wantAmount).toBe(SWAP_LOT_SCALE);
+    expect(account.state.deltas.get(1)?.leftHold).toBe(SWAP_LOT_SCALE);
   });
 
   test('swap_resolve.rejects_resting_token_ids_that_mismatch_the_live_offer', async () => {

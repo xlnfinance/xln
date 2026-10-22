@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
-import { applyCommand, computeBookHash, createBook, getBookOrder, getBookOrders } from '../../../swapbook/core';
+import { applyCommand, computeBookHash, createBook, getBookOrder, getBookOrders, resumeCrossedBook } from '../../../swapbook/core';
 import { commitBookOverlay } from '../../../swapbook/book-overlay';
+import { getSwapExactQuoteLotMultipleAtPriceForDimensions } from '../../../swapbook/types';
 
 const activeOrderIds = (book: ReturnType<typeof createBook>): string[] =>
   getBookOrders(book).map((order) => order.orderId).sort();
@@ -149,4 +150,52 @@ describe('orderbook lifecycle cleanup', () => {
     expect(getBookOrder(book, 'ask-stale')?.qtyLots).toBe(5n);
     expect(activeOrderIds(book)).toEqual(['ask-stale']);
   });
+  for (const quantity of [20_000n, 10_000n]) {
+    test(`resumed crossed bid ${quantity} retains only exact-quote resting lots`, () => {
+      const options = {
+        executionQtyMultipleAtPrice: (price: bigint) => getSwapExactQuoteLotMultipleAtPriceForDimensions(6, 6, price),
+      };
+      let book = createBook({ bucketWidthTicks: 100n, maxOrders: 16, stpPolicy: 0 });
+      book = applyCommand(
+        book,
+        {
+          kind: 0,
+          ownerId: 'maker',
+          orderId: 'ask',
+          side: 1,
+          tif: 0,
+          postOnly: false,
+          priceTicks: 2_500n,
+          qtyLots: 4n,
+        },
+        options,
+      ).state;
+      book = applyCommand(
+        book,
+        {
+          kind: 0,
+          ownerId: 'taker',
+          orderId: 'bid',
+          side: 0,
+          tif: 0,
+          postOnly: false,
+          priceTicks: 2_501n,
+          qtyLots: quantity,
+        },
+        { ...options, suspendedOrderIds: new Set(['ask']) },
+      ).state;
+      const originalSequence = getBookOrder(book, 'bid')?.seq;
+      const resumed = resumeCrossedBook(book, options);
+      expect(resumed).not.toBeNull();
+      if (!resumed) throw new Error('Expected a crossed-book execution');
+      const trade = resumed.events.find(event => event.type === 'TRADE');
+      expect(trade?.qty).toBe(4n);
+      const expectedResting = ((quantity - 4n) / 10_000n) * 10_000n;
+      expect(getBookOrder(resumed.state, 'bid')?.qtyLots ?? 0n).toBe(expectedResting);
+      expect(getBookOrder(resumed.state, 'ask')).toBeNull();
+      expect(getBookOrder(book, 'bid')?.qtyLots).toBe(quantity);
+      if (expectedResting > 0n) expect(getBookOrder(resumed.state, 'bid')?.seq).toBe(originalSequence);
+    });
+  }
+
 });

@@ -1,0 +1,58 @@
+{
+  "startedAt": "2026-10-22T02:53:22.268416+00:00",
+  "finishedAt": "2026-10-22T02:53:22.824383+00:00",
+  "seconds": 0.5548701250000001,
+  "sourceSHA": "94c49162876eaa46c8c9ec774becdb213b832cab",
+  "sourceUnchanged": true,
+  "exitCode": 1,
+  "scope": "Ordinary GTC amount conservation diagnostic; no source mutation",
+  "script": "/Users/zigota/agent-jobs/xln-process-recovery-20261022/swap-gtc-quantization-l1-94c49162876e-01.ts",
+  "log": "/Users/zigota/agent-jobs/xln-process-recovery-20261022/swap-gtc-quantization-l1-94c49162876e-01.log",
+  "result": {
+    "scope": "Account transition only; not signed end-to-end proof",
+    "results": [
+      {
+        "name": "half",
+        "created": true,
+        "accepted": true,
+        "fillRatio": 32768,
+        "originalGive": "100000000000000000",
+        "filledGive": "50000000000000000",
+        "expectedRemaining": "50000000000000000",
+        "actualRemaining": "50000000000000000",
+        "offerPresent": true,
+        "hold": "50000000000000000",
+        "pass": true,
+        "rejection": null
+      },
+      {
+        "name": "near-full-with-one-tradable-lot",
+        "created": true,
+        "accepted": true,
+        "fillRatio": 65535,
+        "originalGive": "100000000000000000",
+        "filledGive": "99999000000000000",
+        "expectedRemaining": "1000000000000",
+        "actualRemaining": "0",
+        "offerPresent": false,
+        "hold": "0",
+        "pass": false,
+        "rejection": null
+      },
+      {
+        "name": "exact-full",
+        "created": true,
+        "accepted": true,
+        "fillRatio": 65535,
+        "originalGive": "100000000000000000",
+        "filledGive": "100000000000000000",
+        "expectedRemaining": "0",
+        "actualRemaining": "0",
+        "offerPresent": false,
+        "hold": "0",
+        "pass": true,
+        "rejection": null
+      }
+    ]
+  }
+}

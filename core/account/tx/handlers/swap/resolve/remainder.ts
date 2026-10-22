@@ -1,5 +1,4 @@
 import type { AccountDraftState } from '../../../../state/account-state-draft';
-import { MAX_SWAP_FILL_RATIO } from '../../../../../swapbook/swap-execution';
 import {
   deriveSide,
   requantizeRemainingSwapBaseAtPriceForDimensions,
@@ -66,27 +65,16 @@ export const applySwapResolveRemainder = (
   resolve: AppliedSwapResolve,
   events: string[],
 ): SwapResolveRemainderResult => {
-  if (
-    resolve.effectiveCancelRemainder ||
-    resolve.canonicalFillRatio === MAX_SWAP_FILL_RATIO
-  ) {
-    const releaseFailure = releaseGiveHold(
-      resolve,
-      resolve.canonicalQuantizedGive - resolve.filledGive,
-      events,
-    );
+  const remainingGive = resolve.canonicalQuantizedGive - resolve.filledGive;
+  // The wire ratio can round a partial execution to 65535. Only exact amounts
+  // authorize a full close; a GTC maker retains every tradable residual lot.
+  const fullyFilled = remainingGive === 0n;
+  if (resolve.effectiveCancelRemainder || fullyFilled) {
+    const releaseFailure = releaseGiveHold(resolve, remainingGive, events);
     if (releaseFailure) return releaseFailure;
-    return closeSwapOffer(
-      account,
-      resolve,
-      events,
-      resolve.canonicalFillRatio === MAX_SWAP_FILL_RATIO
-        ? 'fully filled'
-        : 'cancelled',
-    );
+    return closeSwapOffer(account, resolve, events, fullyFilled ? 'fully filled' : 'cancelled');
   }
 
-  const remainingGive = resolve.canonicalQuantizedGive - resolve.filledGive;
   const side = deriveSide(resolve.offer.giveTokenId, resolve.offer.wantTokenId);
   const canonicalBaseAmount = side === 1
     ? resolve.canonicalQuantizedGive

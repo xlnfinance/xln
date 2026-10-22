@@ -1,0 +1,46 @@
+{
+  "baseSHA": "94c49162876eaa46c8c9ec774becdb213b832cab",
+  "scope": "Ordinary same-j Swap residual correctness; private EVM production scenario, not public-chain or mainnet certification",
+  "workingFilesSHA256": {
+    "core/account/tx/handlers/swap/resolve/remainder.ts": "bca8c5923163493e1f0dea93ed368540d35baf85fc9aad52164df032433d758c",
+    "core/swapbook/core.ts": "df07a8bb39e98c1c8907925f24508977c3744d2ec3ea48cdbf27af79eafe22e3",
+    "core/__tests__/payments/swap/swap-time-in-force.test.ts": "c1cc336f79e853e12a2a47469441b5ebf22974e60d6a47e33e8ae53ad4627744",
+    "core/__tests__/payments/orderbook/orderbook-lifecycle.test.ts": "0b3632dd429712b5eb86aceed3728539571daae3339c15e23b0726d7baa84de6"
+  },
+  "l1": {
+    "tests": 75,
+    "failures": 0,
+    "assertions": 331,
+    "receipt": "/Users/zigota/agent-jobs/xln-process-recovery-20261022/swap-residual-related-l1-green-01.result.json"
+  },
+  "l2": {
+    "command": [
+      "bun",
+      "run",
+      "stand:run",
+      "--reason",
+      "swap-residual-focused-production-02",
+      "--timeout-ms",
+      "180000",
+      "--",
+      "bun",
+      "run",
+      "check:determinism"
+    ],
+    "environment": {
+      "XLN_DETERMINISM_SCENARIOS": "swap",
+      "XLN_DETERMINISM_ARTIFACT_DIR": "/Users/zigota/agent-jobs/xln-process-recovery-20261022/swap-residual-focused-production-02.artifacts"
+    },
+    "exitCode": 0,
+    "seconds": 33.727051667,
+    "sourceUnchanged": true,
+    "frames": 76,
+    "replayWorkers": [
+      1,
+      4
+    ],
+    "finalRoot": "0xde22fdf053775c624bad15111b89a0a6a4377a20f0a88669c688edd643cde5a5",
+    "receipt": "/Users/zigota/agent-jobs/xln-process-recovery-20261022/swap-residual-focused-production-02.result.json"
+  },
+  "releaseStatus": "Final unit/test/check/full158/release34/soak and public-chain release evidence remain required; this packet certifies only the named focused checks."
+}
