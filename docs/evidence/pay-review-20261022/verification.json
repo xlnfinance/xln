@@ -1,0 +1,243 @@
+{
+  "scope": "Diagnostic evidence on base 8eabe plus explicit working changes; not final-SHA release certification",
+  "receipts": [
+    {
+      "name": "pay-f1-l1-red-01",
+      "baseSHA": "8eabe6419102a236edb169f1bebe89a498c82bc6",
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/payments/htlc/context/htlc-inbound-reject-attribution.test.ts"
+      ],
+      "exitCode": 1,
+      "seconds": 1.444095875,
+      "sourceUnchangedDuringRun": true,
+      "sourceFiles": {
+        "core/paybook/materialize-context.ts": "2a1edc70dc769912cf572527db20e85eea4f657a2198cdc984400125633c4775",
+        "core/paybook/prepared-context-validation.ts": "6384d8011d3900b6ca05cb269b6ee982788890ac2f5ebdaf098f29884e436951",
+        "core/__tests__/payments/htlc/context/htlc-inbound-reject-attribution.test.ts": "ddbdab0358cfed5313ccf25d418e43ed2158374799c2909a0394ea2361b98193",
+        "brainvault/package.json": "770e60e66e40ff33b6f3ac99df3ddb27167dcffd6ca3dcdfe67f9957d52db8aa",
+        "brainvault/bun.lock": "ecc6fc4066dac617aed085e633dd3c2807085c1f573e631ed9362e1358a1f16f"
+      },
+      "logSHA256": "1ad09877ce16ba905b2b392cd9e18e4dbe17c55f525b7f3ca3046f914cdddf76",
+      "privateReceiptSHA256": "2310b218dd32a875f6218deb08ac5096e61f684f6fba2433868cf5e558178f0d"
+    },
+    {
+      "name": "pay-f1-l1-green-01",
+      "baseSHA": "8eabe6419102a236edb169f1bebe89a498c82bc6",
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/payments/htlc/context/htlc-inbound-reject-attribution.test.ts",
+        "core/__tests__/payments/htlc/context/htlc-offline-forward-context.test.ts",
+        "core/__tests__/payments/htlc/context/htlc-prepared-context-boundary.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 1.386300375,
+      "sourceUnchangedDuringRun": true,
+      "sourceFiles": {
+        "core/paybook/materialize-context.ts": "8961128d2fc7a558d003aba4a1641cfe8bab059f9cf0c6e3bc2f0ee249f017db",
+        "core/paybook/prepared-context-validation.ts": "9275755941ea8270486280be51012e3fb6bac4e2cd4fea51763869e21f2d52fc",
+        "core/__tests__/payments/htlc/context/htlc-inbound-reject-attribution.test.ts": "ddbdab0358cfed5313ccf25d418e43ed2158374799c2909a0394ea2361b98193",
+        "brainvault/package.json": "770e60e66e40ff33b6f3ac99df3ddb27167dcffd6ca3dcdfe67f9957d52db8aa",
+        "brainvault/bun.lock": "ecc6fc4066dac617aed085e633dd3c2807085c1f573e631ed9362e1358a1f16f"
+      },
+      "logSHA256": "9a85ba6fd53d308166987a5817f2b5353670d0fd623357c6f8bdc85202039d2d",
+      "privateReceiptSHA256": "97c10bc66b63c277db16a2c0395323fe32a3060f88d5c68ba9b2976c0a4d3f4a"
+    },
+    {
+      "name": "pay-f1-consensus-recovery-03",
+      "baseSHA": "8eabe6419102a236edb169f1bebe89a498c82bc6",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "pay-f1-consensus-recovery-03",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/payments/htlc/context/htlc-inbound-reject-attribution.test.ts",
+        "core/__tests__/payments/htlc/context/htlc-origin-catchup.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 23.432763125,
+      "sourceUnchangedDuringRun": true,
+      "sourceFiles": {
+        "core/paybook/materialize-context.ts": "8961128d2fc7a558d003aba4a1641cfe8bab059f9cf0c6e3bc2f0ee249f017db",
+        "core/paybook/prepared-context-validation.ts": "9275755941ea8270486280be51012e3fb6bac4e2cd4fea51763869e21f2d52fc",
+        "core/__tests__/payments/htlc/context/htlc-inbound-reject-attribution.test.ts": "2f49c02c0567d84dc728a415ec32ec4f165bf6273f6e757496a90ed7e8ae414c",
+        "brainvault/package.json": "770e60e66e40ff33b6f3ac99df3ddb27167dcffd6ca3dcdfe67f9957d52db8aa",
+        "brainvault/bun.lock": "ecc6fc4066dac617aed085e633dd3c2807085c1f573e631ed9362e1358a1f16f"
+      },
+      "logSHA256": "fc1aa29d9ae5dc2420b9c987aabb85d1161dd3744d1cfd80bb7caca1eb055c15",
+      "privateReceiptSHA256": "5c191450cdb0160e427551e0ec6a45cd4975c8d6f0d1efa9538a08d56059d017"
+    },
+    {
+      "name": "pay-f3-l1-red-01",
+      "baseSHA": "8eabe6419102a236edb169f1bebe89a498c82bc6",
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/payments/htlc/context/htlc-origin-catchup.test.ts",
+        "--test-name-pattern",
+        "uses preceding certified"
+      ],
+      "exitCode": 1,
+      "seconds": 1.876491209,
+      "sourceUnchangedDuringRun": true,
+      "sourceFiles": {
+        "core/paybook/materialize-context.ts": "617ad42ac14f02e2acec91644bfaa72200a4f0390db8214613d90b026c096824",
+        "core/paybook/prepared-context-validation.ts": "a6d205afff1e897035c6c95e79ad2ee672d0ee2fa4769532d3ad59afc2f9deeb",
+        "core/__tests__/payments/htlc/context/htlc-inbound-reject-attribution.test.ts": "eab05094c2b69fa118635baf86841c55eb5799da8dffd904ffe4ce78e7199fc8",
+        "core/paybook/payment-admission.ts": "d55ba5c478dd7e00ee9e93797cdef71b35a101cf82cae3533b93b2adb6ca3747",
+        "core/__tests__/payments/htlc/context/htlc-origin-catchup.test.ts": "e69f11b75753e58531164a9d1e2cc306c2bbcbb9e9c8bb4c2a0838af1675e7e9",
+        "brainvault/package.json": "770e60e66e40ff33b6f3ac99df3ddb27167dcffd6ca3dcdfe67f9957d52db8aa",
+        "brainvault/bun.lock": "ecc6fc4066dac617aed085e633dd3c2807085c1f573e631ed9362e1358a1f16f"
+      },
+      "logSHA256": "bcd2b131db278045ce9c34437c6660e25b2488ce58bc1ba2efc74c125bfe7df9",
+      "privateReceiptSHA256": "a490f35cfb07beb942b081e049344d892f2e082aa68d2967fed3eb4aa4322635"
+    },
+    {
+      "name": "pay-f3-l1-green-01",
+      "baseSHA": "8eabe6419102a236edb169f1bebe89a498c82bc6",
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/payments/htlc/context/htlc-origin-catchup.test.ts",
+        "--test-name-pattern",
+        "uses preceding certified"
+      ],
+      "exitCode": 0,
+      "seconds": 1.8628674170000001,
+      "sourceUnchangedDuringRun": true,
+      "sourceFiles": {
+        "core/paybook/materialize-context.ts": "617ad42ac14f02e2acec91644bfaa72200a4f0390db8214613d90b026c096824",
+        "core/paybook/prepared-context-validation.ts": "a6d205afff1e897035c6c95e79ad2ee672d0ee2fa4769532d3ad59afc2f9deeb",
+        "core/__tests__/payments/htlc/context/htlc-inbound-reject-attribution.test.ts": "eab05094c2b69fa118635baf86841c55eb5799da8dffd904ffe4ce78e7199fc8",
+        "core/paybook/payment-admission.ts": "35e9fc1a5b51f4c5e0d33122e8dd3badd345a5af4f73bb00d9f9e4f56dbe4f05",
+        "core/__tests__/payments/htlc/context/htlc-origin-catchup.test.ts": "1ef844c97ee3ff3ac8bc9da8f6c6f795ba8578f3dd06883855b9827139d01ba6",
+        "brainvault/package.json": "770e60e66e40ff33b6f3ac99df3ddb27167dcffd6ca3dcdfe67f9957d52db8aa",
+        "brainvault/bun.lock": "ecc6fc4066dac617aed085e633dd3c2807085c1f573e631ed9362e1358a1f16f"
+      },
+      "logSHA256": "8673fd7e1e9a723aac20266c9dd4459738b734765792e76c8aa93fdb6b0d47c1",
+      "privateReceiptSHA256": "4ee9e4a40a40500254d8c64955f99037727bec3a87154c97f9bfd68c9e1104fa"
+    },
+    {
+      "name": "pay-f3-signed-recovery-01",
+      "baseSHA": "8eabe6419102a236edb169f1bebe89a498c82bc6",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "pay-f3-signed-recovery-01",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/payments/htlc/context/htlc-origin-catchup.test.ts",
+        "--test-name-pattern",
+        "rejected duplicate"
+      ],
+      "exitCode": 0,
+      "seconds": 11.926170292,
+      "sourceUnchangedDuringRun": true,
+      "sourceFiles": {
+        "core/paybook/materialize-context.ts": "617ad42ac14f02e2acec91644bfaa72200a4f0390db8214613d90b026c096824",
+        "core/paybook/prepared-context-validation.ts": "a6d205afff1e897035c6c95e79ad2ee672d0ee2fa4769532d3ad59afc2f9deeb",
+        "core/__tests__/payments/htlc/context/htlc-inbound-reject-attribution.test.ts": "eab05094c2b69fa118635baf86841c55eb5799da8dffd904ffe4ce78e7199fc8",
+        "core/paybook/payment-admission.ts": "35e9fc1a5b51f4c5e0d33122e8dd3badd345a5af4f73bb00d9f9e4f56dbe4f05",
+        "core/__tests__/payments/htlc/context/htlc-origin-catchup.test.ts": "1ef844c97ee3ff3ac8bc9da8f6c6f795ba8578f3dd06883855b9827139d01ba6",
+        "brainvault/package.json": "770e60e66e40ff33b6f3ac99df3ddb27167dcffd6ca3dcdfe67f9957d52db8aa",
+        "brainvault/bun.lock": "ecc6fc4066dac617aed085e633dd3c2807085c1f573e631ed9362e1358a1f16f"
+      },
+      "logSHA256": "e19d91bf99500a3cb916532bcda9811fde03819b22af4e2044d30e73bc27c0a0",
+      "privateReceiptSHA256": "8a772e71fd62fea141d37472173b393604e1d3fae44cee2ddc9431b73f351e91"
+    },
+    {
+      "name": "pay-f2-independent-01",
+      "baseSHA": "8eabe6419102a236edb169f1bebe89a498c82bc6",
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/payments/htlc/htlc-envelope-types.test.ts",
+        "--test-name-pattern",
+        "uppercase"
+      ],
+      "exitCode": 0,
+      "seconds": 1.218910584,
+      "sourceUnchangedDuringRun": true,
+      "sourceFiles": {
+        "core/paybook/materialize-context.ts": "617ad42ac14f02e2acec91644bfaa72200a4f0390db8214613d90b026c096824",
+        "core/paybook/prepared-context-validation.ts": "a6d205afff1e897035c6c95e79ad2ee672d0ee2fa4769532d3ad59afc2f9deeb",
+        "core/__tests__/payments/htlc/context/htlc-inbound-reject-attribution.test.ts": "eab05094c2b69fa118635baf86841c55eb5799da8dffd904ffe4ce78e7199fc8",
+        "core/paybook/payment-admission.ts": "35e9fc1a5b51f4c5e0d33122e8dd3badd345a5af4f73bb00d9f9e4f56dbe4f05",
+        "core/__tests__/payments/htlc/context/htlc-origin-catchup.test.ts": "1ef844c97ee3ff3ac8bc9da8f6c6f795ba8578f3dd06883855b9827139d01ba6",
+        "brainvault/package.json": "770e60e66e40ff33b6f3ac99df3ddb27167dcffd6ca3dcdfe67f9957d52db8aa",
+        "brainvault/bun.lock": "ecc6fc4066dac617aed085e633dd3c2807085c1f573e631ed9362e1358a1f16f"
+      },
+      "logSHA256": "8e34410f82bd70488fc2ac4a4aadc3e26e40f2b1b3f1709ccfebf8ae2720166e",
+      "privateReceiptSHA256": "7b6a75965f1f3bb7379aecdf056c5f5e02ac322c745b0f5da459b49914c136ce"
+    },
+    {
+      "name": "pay-f4-independent-01",
+      "baseSHA": "8eabe6419102a236edb169f1bebe89a498c82bc6",
+      "command": [
+        "bun",
+        "/Users/zigota/agent-jobs/xln-process-recovery-20261022/pay-f4-probe.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 0.845362625,
+      "sourceUnchangedDuringRun": true,
+      "sourceFiles": {
+        "core/paybook/materialize-context.ts": "617ad42ac14f02e2acec91644bfaa72200a4f0390db8214613d90b026c096824",
+        "core/paybook/prepared-context-validation.ts": "a6d205afff1e897035c6c95e79ad2ee672d0ee2fa4769532d3ad59afc2f9deeb",
+        "core/__tests__/payments/htlc/context/htlc-inbound-reject-attribution.test.ts": "eab05094c2b69fa118635baf86841c55eb5799da8dffd904ffe4ce78e7199fc8",
+        "core/paybook/payment-admission.ts": "35e9fc1a5b51f4c5e0d33122e8dd3badd345a5af4f73bb00d9f9e4f56dbe4f05",
+        "core/__tests__/payments/htlc/context/htlc-origin-catchup.test.ts": "1ef844c97ee3ff3ac8bc9da8f6c6f795ba8578f3dd06883855b9827139d01ba6",
+        "brainvault/package.json": "770e60e66e40ff33b6f3ac99df3ddb27167dcffd6ca3dcdfe67f9957d52db8aa",
+        "brainvault/bun.lock": "ecc6fc4066dac617aed085e633dd3c2807085c1f573e631ed9362e1358a1f16f"
+      },
+      "logSHA256": "ec6b5bedb780016220cabf34635c06f4fa98289241eaab1b3f18a2fa239385a8",
+      "privateReceiptSHA256": "bbe359791b730ae966412439d2f311dbb853e7d03c64e65145a795348cdda3dd"
+    },
+    {
+      "name": "pay-audit-fixes-focused-01",
+      "baseSHA": "8eabe6419102a236edb169f1bebe89a498c82bc6",
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "pay-audit-fixes-focused-01",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "bun",
+        "test",
+        "core/__tests__/payments/htlc/context/htlc-inbound-reject-attribution.test.ts",
+        "core/__tests__/payments/htlc/context/htlc-origin-catchup.test.ts",
+        "core/__tests__/payments/htlc/context/htlc-offline-forward-context.test.ts",
+        "core/__tests__/payments/htlc/context/htlc-prepared-context-boundary.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 31.437170125,
+      "sourceUnchangedDuringRun": true,
+      "sourceFiles": {
+        "core/paybook/materialize-context.ts": "617ad42ac14f02e2acec91644bfaa72200a4f0390db8214613d90b026c096824",
+        "core/paybook/prepared-context-validation.ts": "a6d205afff1e897035c6c95e79ad2ee672d0ee2fa4769532d3ad59afc2f9deeb",
+        "core/__tests__/payments/htlc/context/htlc-inbound-reject-attribution.test.ts": "eab05094c2b69fa118635baf86841c55eb5799da8dffd904ffe4ce78e7199fc8",
+        "core/paybook/payment-admission.ts": "35e9fc1a5b51f4c5e0d33122e8dd3badd345a5af4f73bb00d9f9e4f56dbe4f05",
+        "core/__tests__/payments/htlc/context/htlc-origin-catchup.test.ts": "a9492be647eb4575db32e21f65bb26bc3352f94062af9fde2618fd435ea9dfb8",
+        "brainvault/package.json": "770e60e66e40ff33b6f3ac99df3ddb27167dcffd6ca3dcdfe67f9957d52db8aa",
+        "brainvault/bun.lock": "ecc6fc4066dac617aed085e633dd3c2807085c1f573e631ed9362e1358a1f16f"
+      },
+      "logSHA256": "04f0b941db271dde132049b81d1ef5b59070437439a1cdbea6eb1b9bc7b00396",
+      "privateReceiptSHA256": "7052ed74915d762b86d0e4a50ff242332be152f45b0e41e67505f2e683dcf5df"
+    }
+  ]
+}

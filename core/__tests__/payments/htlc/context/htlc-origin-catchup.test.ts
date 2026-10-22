@@ -94,6 +94,21 @@ test('htlcPayment uses preceding certified catch-up height for preparation and v
     return { input, originated };
   };
   const before = await prepare([payment]);
+  const duplicatePayment: EntityTx = { ...payment, data: { ...payment.data } };
+  await expect(
+    materializeOriginatedHtlcPayments({
+      state,
+      proposalTxs: [payment, duplicatePayment],
+      profiles,
+      height: 1,
+      resolveRoute: async () => [source, target],
+    }),
+  ).rejects.toMatchObject({
+    disposition: 'reject',
+    txType: 'htlcPayment',
+    frameTx: duplicatePayment,
+    rejection: `HTLC_PAYMENT_TX_DUPLICATE:${hashRawHtlcPaymentTx(payment)}`,
+  });
   const missingIntermediary = entity('77');
   const unroutablePayment: EntityTx = {
     ...payment,
@@ -123,7 +138,7 @@ test('htlcPayment uses preceding certified catch-up height for preparation and v
   expect(later.originated[0]!.revealBeforeHeight).toBe(before.originated[0]!.revealBeforeHeight);
 });
 
-test.each(['hashlock', 'no-route'] as const)('rejected %s signed HTLC command and future nonce leave runtime live for valid-next payment and exact WAL recovery', async rejection => {
+test.each(['hashlock', 'no-route', 'duplicate'] as const)('rejected %s signed HTLC command and future nonce leave runtime live for valid-next payment and exact WAL recovery', async rejection => {
   const previousJAdapter = process.env.JADAPTER_MODE;
   process.env.JADAPTER_MODE = 'browservm';
   const rejectPolicy = process.env.XLN_REJECT_FAIL_FAST;
@@ -180,9 +195,18 @@ test.each(['hashlock', 'no-route'] as const)('rejected %s signed HTLC command an
     };
     const bad: typeof good = {
       ...good,
-      data: rejection === 'hashlock'
-        ? { ...good.data, description: 'mixed-wal-bad', hashlock: `0x${'ff'.repeat(32)}` }
-        : { ...good.data, description: 'mixed-wal-no-route', route: [], amount: 10n ** 30n, maxSenderDebit: 10n ** 30n },
+      data:
+        rejection === 'hashlock'
+          ? { ...good.data, description: 'mixed-wal-bad', hashlock: `0x${'ff'.repeat(32)}` }
+          : rejection === 'duplicate'
+            ? { ...good.data, description: 'mixed-wal-duplicate' }
+            : {
+                ...good.data,
+                description: 'mixed-wal-no-route',
+                route: [],
+                amount: 10n ** 30n,
+                maxSenderDebit: 10n ** 30n,
+              },
     };
     const profiles = [source, hub, target].map(id => {
       const profile = env.gossip.getProfile(id);
@@ -193,7 +217,8 @@ test.each(['hashlock', 'no-route'] as const)('rejected %s signed HTLC command an
     const targetBefore = getOffdelta(env, hub, target, 1);
     const startHeight = env.state.height;
     const state = findReplica(env, source)[1].state;
-    const badCommand = prepareLocallyAuthoredEntityTxs(env, state, signerId, [bad])[0]!;
+    const badInputs = rejection === 'duplicate' ? [bad, { ...bad, data: { ...bad.data } }] : [bad];
+    const badCommand = prepareLocallyAuthoredEntityTxs(env, state, signerId, badInputs)[0]!;
     if (badCommand.type !== 'entityCommand') throw new Error('SIGNED_BAD_COMMAND_REQUIRED');
     const goodCommand = prepareLocallyAuthoredEntityTxs(
       env,

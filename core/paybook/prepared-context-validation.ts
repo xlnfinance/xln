@@ -1,4 +1,4 @@
-import type { HtlcPreparedInfraContext } from '../types/entity/htlc-infra-context';
+import type { HtlcPreparedInfraContext, PreparedHtlcEntry } from '../types/entity/htlc-infra-context';
 import { assertOpaqueHtlcCiphertext } from '../protocol/htlc/multi-recipient';
 import { cloneIsolatedProtocolValue } from '../protocol/state/isolated-value-clone';
 import { LIMITS, TOKENS } from '../config/constants';
@@ -11,6 +11,49 @@ const bytes32 = (value: unknown, code: string): string => {
   return normalized;
 };
 
+export const validatePreparedHtlcBinding = (binding: PreparedHtlcEntry['binding']): string => {
+  if (
+    Object.keys(binding).sort().join(',') !==
+    [
+      'accountFrameHash',
+      'accountHeight',
+      'amount',
+      'domain',
+      'envelopeHash',
+      'fromEntityId',
+      'hashlock',
+      'revealBeforeHeight',
+      'timelock',
+      'toEntityId',
+      'tokenId',
+    ]
+      .sort()
+      .join(',')
+  )
+    throw new Error('HTLC_PREPARED_BINDING_FIELDS_INVALID');
+  bytes32(binding.fromEntityId, 'HTLC_PREPARED_FROM_ENTITY_INVALID');
+  bytes32(binding.toEntityId, 'HTLC_PREPARED_TO_ENTITY_INVALID');
+  bytes32(binding.accountFrameHash, 'HTLC_PREPARED_ACCOUNT_FRAME_INVALID');
+  bytes32(binding.envelopeHash, 'HTLC_PREPARED_ENVELOPE_HASH_INVALID');
+  bytes32(binding.hashlock, 'HTLC_PREPARED_HASHLOCK_INVALID');
+  if (!Number.isSafeInteger(binding.accountHeight) || binding.accountHeight < 1) {
+    throw new Error('HTLC_PREPARED_ACCOUNT_HEIGHT_INVALID');
+  }
+  if (!Number.isSafeInteger(binding.tokenId) || binding.tokenId < 0 || binding.tokenId > TOKENS.MAX_TOKEN_ID) {
+    throw new Error('HTLC_PREPARED_TOKEN_INVALID');
+  }
+  if (typeof binding.amount !== 'bigint' || binding.amount <= 0n) throw new Error('HTLC_PREPARED_AMOUNT_INVALID');
+  if (typeof binding.timelock !== 'bigint' || binding.timelock <= 0n) throw new Error('HTLC_PREPARED_TIMELOCK_INVALID');
+  if (!Number.isSafeInteger(binding.revealBeforeHeight) || binding.revealBeforeHeight < 1) {
+    throw new Error('HTLC_PREPARED_REVEAL_HEIGHT_INVALID');
+  }
+  const normalizedDomain = normalizeAccountStateDomain(binding.domain, 'HTLC_PREPARED_DOMAIN');
+  if (normalizedDomain.depositoryAddress !== binding.domain.depositoryAddress) {
+    throw new Error('HTLC_PREPARED_DOMAIN_NON_CANONICAL');
+  }
+  return `${binding.accountFrameHash}:${binding.hashlock}`;
+};
+
 const validatePreparedEntries = (context: HtlcPreparedInfraContext): void => {
   let previousKey = '';
   for (const entry of context.entries) {
@@ -19,31 +62,7 @@ const validatePreparedEntries = (context: HtlcPreparedInfraContext): void => {
       throw new Error('HTLC_PREPARED_ENTRY_FIELDS_INVALID');
     }
     const binding = entry.binding;
-    if (Object.keys(binding).sort().join(',') !== [
-      'accountFrameHash', 'accountHeight', 'amount', 'domain', 'envelopeHash', 'fromEntityId',
-      'hashlock', 'revealBeforeHeight', 'timelock', 'toEntityId', 'tokenId',
-    ].sort().join(',')) throw new Error('HTLC_PREPARED_BINDING_FIELDS_INVALID');
-    bytes32(binding.fromEntityId, 'HTLC_PREPARED_FROM_ENTITY_INVALID');
-    bytes32(binding.toEntityId, 'HTLC_PREPARED_TO_ENTITY_INVALID');
-    bytes32(binding.accountFrameHash, 'HTLC_PREPARED_ACCOUNT_FRAME_INVALID');
-    bytes32(binding.envelopeHash, 'HTLC_PREPARED_ENVELOPE_HASH_INVALID');
-    bytes32(binding.hashlock, 'HTLC_PREPARED_HASHLOCK_INVALID');
-    if (!Number.isSafeInteger(binding.accountHeight) || binding.accountHeight < 1) {
-      throw new Error('HTLC_PREPARED_ACCOUNT_HEIGHT_INVALID');
-    }
-    if (!Number.isSafeInteger(binding.tokenId) || binding.tokenId < 0 || binding.tokenId > TOKENS.MAX_TOKEN_ID) {
-      throw new Error('HTLC_PREPARED_TOKEN_INVALID');
-    }
-    if (typeof binding.amount !== 'bigint' || binding.amount <= 0n) throw new Error('HTLC_PREPARED_AMOUNT_INVALID');
-    if (typeof binding.timelock !== 'bigint' || binding.timelock <= 0n) throw new Error('HTLC_PREPARED_TIMELOCK_INVALID');
-    if (!Number.isSafeInteger(binding.revealBeforeHeight) || binding.revealBeforeHeight < 1) {
-      throw new Error('HTLC_PREPARED_REVEAL_HEIGHT_INVALID');
-    }
-    const normalizedDomain = normalizeAccountStateDomain(binding.domain, 'HTLC_PREPARED_DOMAIN');
-    if (normalizedDomain.depositoryAddress !== binding.domain.depositoryAddress) {
-      throw new Error('HTLC_PREPARED_DOMAIN_NON_CANONICAL');
-    }
-    const key = `${binding.accountFrameHash}:${binding.hashlock}`;
+    const key = validatePreparedHtlcBinding(binding);
     if (key <= previousKey) throw new Error(key === previousKey ? 'HTLC_PREPARED_BINDING_DUPLICATE' : 'HTLC_PREPARED_ENTRIES_NOT_SORTED');
     previousKey = key;
     if (entry.outcome.kind === 'forward') {

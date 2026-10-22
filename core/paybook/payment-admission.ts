@@ -175,6 +175,7 @@ export const materializeOriginatedHtlcPayments = async (
 ): Promise<PreparedOriginatedHtlcPayment[]> => {
   const originated: PreparedOriginatedHtlcPayment[] = [];
   const proposalHashlocks = new Set<string>();
+  const proposalTxHashes = new Set<string>();
   const profileIndex = buildRoutingProfileIndex(input.profiles);
   for (const { tx: candidate, jHeight } of originatedPaymentInputs(input.state, input.proposalTxs)) {
     try {
@@ -184,6 +185,10 @@ export const materializeOriginatedHtlcPayments = async (
       const selectedRoute = candidate.data.route.length > 0 ? candidate.data.route : await input.resolveRoute(candidate);
       const route = normalizeRoute(selectedRoute, source, target);
       const txHash = hashRawHtlcPaymentTx(candidate);
+      // Equal raw payments share one prepared entry. Reject the later owner
+      // inside this attribution boundary so an honest sibling can certify.
+      if (proposalTxHashes.has(txHash)) rejectHtlcPayment(`HTLC_PAYMENT_TX_DUPLICATE:${txHash}`);
+      proposalTxHashes.add(txHash);
       const localSecret = getDeterministicHtlcTestSecret(candidate);
       const secret = localSecret ?? generateHtlcPaymentPreimage();
       if (!/^0x[0-9a-f]{64}$/.test(secret)) rejectHtlcPayment('HTLC_PAYMENT_PREIMAGE_INVALID');
@@ -257,9 +262,6 @@ export const materializeOriginatedHtlcPayments = async (
     }
   }
   originated.sort((left, right) => compareStableText(left.txHash, right.txHash));
-  for (let index = 1; index < originated.length; index += 1) {
-    if (originated[index - 1]!.txHash === originated[index]!.txHash) rejectHtlcPayment(`HTLC_PAYMENT_TX_DUPLICATE:${originated[index]!.txHash}`);
-  }
   return originated;
 };
 

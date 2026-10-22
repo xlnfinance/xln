@@ -27,7 +27,7 @@ import type { Profile } from '../entity/profile';
 import { assertOriginatedHtlcPayments, materializeOriginatedHtlcPayments } from './payment-admission';
 import type { EntityInfraContext } from '../types/entity/infra-context';
 import { canonicalConsensusValuesEqual } from '../protocol/serialization/binary-codec';
-import { validateHtlcPreparedInfraContext } from './prepared-context-validation';
+import { validateHtlcPreparedInfraContext, validatePreparedHtlcBinding } from './prepared-context-validation';
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output/envelope';
 import { resolveCanonicalEntityBoardShares } from '../entity/auth/authorization';
 import { normalizeAccountStateDomain } from '../account/commitment/state-root';
@@ -112,18 +112,35 @@ const inboundBindingWithContext = (
 ): InboundBindingMemo => {
   const hit = inboundBindingMemos.get(accountTx);
   if (
-    hit
-    && hit.binding.accountFrameHash === proposal.frame.stateHash.toLowerCase()
-    && hit.binding.fromEntityId === tx.data.fromEntityId.toLowerCase()
+    hit &&
+    hit.binding.accountFrameHash === proposal.frame.stateHash.toLowerCase() &&
+    hit.binding.fromEntityId === tx.data.fromEntityId.toLowerCase()
   ) {
     // Every entry owns its binding (see buildInboundBinding on shared references).
     return { binding: { ...hit.binding, domain: { ...hit.binding.domain } }, contextHash: hit.contextHash };
   }
   const binding = buildInboundBinding(tx, proposal, accountTx);
+  // Peer-controlled terms are prepared before Account signature/semantic checks.
+  // Attribute invalid bindings to their exact input so they cannot poison an
+  // honest sibling transaction; cryptographic and storage failures still halt.
+  try {
+    validatePreparedHtlcBinding(binding);
+  } catch (error) {
+    const rejected = new MalformedEntityFrameInputError(
+      tx.type,
+      error instanceof Error ? error.message : String(error),
+    );
+    rejected.frameTx = tx;
+    throw rejected;
+  }
   const contextHash = computeHtlcEnvelopeContextHash({
-    fromEntityId: binding.fromEntityId, toEntityId: binding.toEntityId,
-    domain: binding.domain, hashlock: binding.hashlock,
-    tokenId: binding.tokenId, amount: binding.amount, timelock: binding.timelock,
+    fromEntityId: binding.fromEntityId,
+    toEntityId: binding.toEntityId,
+    domain: binding.domain,
+    hashlock: binding.hashlock,
+    tokenId: binding.tokenId,
+    amount: binding.amount,
+    timelock: binding.timelock,
     revealBeforeHeight: binding.revealBeforeHeight,
   });
   const entry = { binding, contextHash };
