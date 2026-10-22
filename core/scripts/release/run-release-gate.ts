@@ -170,6 +170,8 @@ const walletE2eSteps: GateStep[] = (
       'e2e-payment.spec.ts,e2e-lending-availability.spec.ts,e2e-reserve-funding.spec.ts',
       'payment',
     ],
+    ['React direct credit E2E', 'e2e-direct-credit.spec.ts', 'direct-credit'],
+    ['React collateral and signed credit request E2E', 'e2e-collateral.spec.ts', 'credit-request'],
     ['React dispute E2E', 'e2e-dispute-finality.spec.ts', 'dispute'],
     ['React offline protection E2E', 'e2e-dispute-protection.spec.ts', 'protection'],
     // Separate real fresh-device restores keep each stand inside its existing

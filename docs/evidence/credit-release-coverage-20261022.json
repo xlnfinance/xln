@@ -1,0 +1,91 @@
+{
+  "baseSHA": "08c06761ee150f35fdddf41e15a66b04d66cbaf4",
+  "scope": "Working-tree verification of release coverage wiring. These receipts do not certify an immutable final SHA or public mainnet.",
+  "problem": "CI and release omitted existing direct-credit and signed credit-request wallet scenarios.",
+  "change": "Preserve all 34 release steps and add two isolated required wallet groups. Require React credit and lending markers in the existing coverage contract.",
+  "releaseSteps": 36,
+  "unit": {
+    "passed": 9,
+    "failed": 0,
+    "assertions": 39
+  },
+  "browser": {
+    "directCredit": {
+      "startTime": "2026-10-22T09:04:33.756Z",
+      "duration": 33180.80100000001,
+      "expected": 1,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "collateralAndCreditRequest": {
+      "startTime": "2026-10-22T09:06:30.509Z",
+      "duration": 43551.363000000005,
+      "expected": 2,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    }
+  },
+  "receipts": {
+    "credit-release-wiring-red-08c06761-01": {
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/operations/release/mainnet-preflight-gate.test.ts",
+        "--test-name-pattern",
+        "executes direct credit"
+      ],
+      "exitCode": 1,
+      "seconds": 1.21170625,
+      "sourceUnchanged": true,
+      "logSHA256": "d1609e40455f5235e220cff255c7b850d5c403359f10ed74f097b59a0e0d3275"
+    },
+    "credit-release-wiring-green-08c06761-01": {
+      "command": ["bun", "test", "core/__tests__/operations/release/mainnet-preflight-gate.test.ts"],
+      "exitCode": 0,
+      "seconds": 1.184471541,
+      "sourceUnchanged": true,
+      "logSHA256": "c92026c14c7c6be9c4d0e788d40105bd7e2b4d3f30169ddd537612fdda6ce66b"
+    },
+    "credit-release-direct-e2e-08c06761-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "credit-release-direct-e2e-08c06761-01",
+        "--timeout-ms",
+        "240000",
+        "--",
+        "bun",
+        "run",
+        "prod:smoke:local"
+      ],
+      "exitCode": 0,
+      "seconds": 95.73372099999999,
+      "sourceUnchanged": true,
+      "logSHA256": "e82c7f6ec6dbcdff4a2cc920f9fbe32461ed83d3ae2dd505af59252d052eb2cc"
+    },
+    "credit-release-collateral-e2e-08c06761-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "credit-release-collateral-e2e-08c06761-01",
+        "--timeout-ms",
+        "240000",
+        "--",
+        "bun",
+        "run",
+        "prod:smoke:local"
+      ],
+      "exitCode": 0,
+      "seconds": 109.31634262499999,
+      "sourceUnchanged": true,
+      "logSHA256": "00a3dceeb3fc38c1ca247328aa98291b443b14512adb1e3bf6ddef832f673106"
+    }
+  },
+  "remaining": "Full exact-SHA financial/unit/test/check/full158/release36/continuous soak and public native-chain release evidence remain required."
+}

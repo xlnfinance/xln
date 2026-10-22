@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 
 type CoverageRequirement = {
-  area: 'pay' | 'swap' | 'cross-j' | 'frontend' | 'recovery';
+  area: 'pay' | 'swap' | 'cross-j' | 'frontend' | 'recovery' | 'credit' | 'lending';
   file: string;
   patterns: string[];
 };
@@ -19,7 +19,9 @@ const readText = (path: string): string => {
     'core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-5.test.ts',
     'core/__tests__/cross-j/swap/lifecycle/cross-jurisdiction-expiry.test.ts',
     'core/__tests__/testing/audit/audit-failfast-regressions-part-6.test.ts',
-  ].map(file => readFileSync(file, 'utf8')).join('\n');
+  ]
+    .map(file => readFileSync(file, 'utf8'))
+    .join('\n');
 };
 
 const includesAll = (text: string, patterns: string[], file: string): string[] => {
@@ -31,6 +33,41 @@ const includesAll = (text: string, patterns: string[], file: string): string[] =
 };
 
 const requirements: CoverageRequirement[] = [
+  {
+    area: 'credit',
+    file: 'ui/tests/e2e-direct-credit.spec.ts',
+    patterns: ["signed: '-20000000'", "signed: '20000000'", 'reopenStack'],
+  },
+  {
+    area: 'credit',
+    file: 'ui/tests/e2e-collateral.spec.ts',
+    patterns: [
+      'Manage credit tab asks the hub for a credit line and the committed line shows on the account',
+      'expect(credited.signed).toBe(before.signed)',
+      'expect(credited.collateral).toBe(before.collateral)',
+      'expect(credited.ourCreditToThem).toBe(before.ourCreditToThem)',
+    ],
+  },
+  {
+    area: 'lending',
+    file: 'ui/tests/lending/e2e-principal.spec.ts',
+    patterns: ['term loan spends principal, repays partially then fully, and keeps saver money independent'],
+  },
+  {
+    area: 'lending',
+    file: 'ui/tests/lending/e2e-demand.spec.ts',
+    patterns: ['demand savings preserve the claim through a rate update, reload and withdrawal'],
+  },
+  {
+    area: 'lending',
+    file: 'ui/tests/lending/e2e-bank-policy.spec.ts',
+    patterns: ['bank officer publishes prices, approves and revokes a real borrower facility'],
+  },
+  {
+    area: 'lending',
+    file: 'ui/tests/lending/e2e-unfunded.spec.ts',
+    patterns: ['an unapproved loan request leaves the bank serving real payments'],
+  },
   {
     area: 'pay',
     file: 'tests/e2e/payments/e2e-payment-smoke.spec.ts',
@@ -68,7 +105,7 @@ const requirements: CoverageRequirement[] = [
       'restores a wiped runtime from standalone tower backup',
       'deriveRuntimeRecoveryLookupKey',
       '/api/tower/receipt/',
-      "expect((await context.storageState()).origins).toEqual([])",
+      'expect((await context.storageState()).origins).toEqual([])',
       "getByTestId('restore-from-tower').check()",
       'expect(backedUpBalance).toBe(100)',
       "expect(after.usdcOffdelta, 'tower restore must preserve the exact funded Account delta').toBe(",
@@ -205,6 +242,22 @@ for (const requirement of requirements) {
   missing.push(...includesAll(readText(requirement.file), requirement.patterns, requirement.file));
 }
 missing.push(...includesAll(coreGate, coreTitles, coreGatePath));
+const releaseGatePath = 'core/scripts/release/run-release-gate.ts';
+missing.push(
+  ...includesAll(
+    readText(releaseGatePath),
+    [
+      'e2e-direct-credit.spec.ts',
+      'e2e-collateral.spec.ts',
+      'e2e-lending.spec.ts',
+      'lending/e2e-principal.spec.ts',
+      'lending/e2e-demand.spec.ts',
+      'lending/e2e-bank-policy.spec.ts',
+      'lending/e2e-unfunded.spec.ts',
+    ],
+    releaseGatePath,
+  ),
+);
 
 if (missing.length > 0) {
   console.error('Flow E2E coverage contract failed:');
