@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, truncateSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createIncrementalRuntimeFatalLogScanner } from '../../../scripts/e2e/harness/e2e-fatal-log-monitor';
+import { scanE2EFatalLogs } from '../../../scripts/e2e/harness/e2e-fail-fast-monitor';
 
 const withLog = (run: (path: string) => void): void => {
   const dir = mkdtempSync(join(tmpdir(), 'xln-incremental-fatal-log-'));
@@ -14,6 +15,16 @@ const withLog = (run: (path: string) => void): void => {
     rmSync(dir, { recursive: true, force: true });
   }
 };
+
+test('standalone monitor detects the first fatal line appended after a clean scan', () => {
+  withLog(path => {
+    const scanners = new Map();
+    appendFileSync(path, 'ready\n');
+    expect(scanE2EFatalLogs(dirname(path), scanners)).toBe(false);
+    appendFileSync(path, 'RUNTIME_LOOP_HALTED\n');
+    expect(scanE2EFatalLogs(dirname(path), scanners)).toBe(true);
+  });
+});
 
 test('incremental fatal scanner carries a marker split across writes', () => {
   withLog(path => {
@@ -90,9 +101,9 @@ test('typed Entity transaction rejection remains observable without aborting the
     const scanner = createIncrementalRuntimeFatalLogScanner(path);
     appendFileSync(
       path,
-      '[INFO][runtime.entity_inputs] entity_input.rejected '
-      + '{"cause":"ENTITY_FRAME_TX_FAILED: type=htlcPayment '
-      + 'error=HTLC_PAYMENT_OUTBOUND_CAPACITY_INSUFFICIENT"}\n',
+      '[INFO][runtime.entity_inputs] entity_input.rejected ' +
+        '{"cause":"ENTITY_FRAME_TX_FAILED: type=htlcPayment ' +
+        'error=HTLC_PAYMENT_OUTBOUND_CAPACITY_INSUFFICIENT"}\n',
     );
     expect(scanner.scan()).toBeNull();
   });
@@ -105,16 +116,16 @@ test('error-level rejected-input audit lines stay observable without aborting th
     const scanner = createIncrementalRuntimeFatalLogScanner(path);
     appendFileSync(
       path,
-      '[ERROR][runtime.entity_inputs] entity_input.rejected '
-      + '{"inputIndex":3,"rejectionCode":"ENTITY_FRAME_TX_FAILED: type=htlcPayment '
-      + 'error=HTLC_PAYMENT_OUTBOUND_CAPACITY_INSUFFICIENT","cause":"ENTITY_FRAME_TX_FAILED: type=htlcPayment '
-      + 'error=HTLC_PAYMENT_OUTBOUND_CAPACITY_INSUFFICIENT"}\n',
+      '[ERROR][runtime.entity_inputs] entity_input.rejected ' +
+        '{"inputIndex":3,"rejectionCode":"ENTITY_FRAME_TX_FAILED: type=htlcPayment ' +
+        'error=HTLC_PAYMENT_OUTBOUND_CAPACITY_INSUFFICIENT","cause":"ENTITY_FRAME_TX_FAILED: type=htlcPayment ' +
+        'error=HTLC_PAYMENT_OUTBOUND_CAPACITY_INSUFFICIENT"}\n',
     );
     expect(scanner.scan()).toBeNull();
     appendFileSync(
       path,
-      '[ERROR][runtime.input_discard] entity_input.discarded '
-      + '{"action":"discarded","discardedInputs":1,"cause":"ENTITY_FRAME_TX_FAILED: type=accountInput error=X"}\n',
+      '[ERROR][runtime.input_discard] entity_input.discarded ' +
+        '{"action":"discarded","discardedInputs":1,"cause":"ENTITY_FRAME_TX_FAILED: type=accountInput error=X"}\n',
     );
     expect(scanner.scan()).toBeNull();
   });
@@ -125,15 +136,15 @@ test('recoverable child exits remain observable without aborting the E2E stack',
     const scanner = createIncrementalRuntimeFatalLogScanner(path);
     appendFileSync(
       path,
-      '[ERROR][mesh.orchestrator] child.unexpected_exit '
-      + '{"child":"H2","action":"recover","reasonCode":"SIGKILL"}\n',
+      '[ERROR][mesh.orchestrator] child.unexpected_exit ' +
+        '{"child":"H2","action":"recover","reasonCode":"SIGKILL"}\n',
     );
     expect(scanner.scan()).toBeNull();
 
     appendFileSync(
       path,
-      '[ERROR][mesh.orchestrator] child.unexpected_exit '
-      + '{"child":"H2","action":"fail-stop","reasonCode":"RUNTIME_LOOP_HALTED"}\n',
+      '[ERROR][mesh.orchestrator] child.unexpected_exit ' +
+        '{"child":"H2","action":"fail-stop","reasonCode":"RUNTIME_LOOP_HALTED"}\n',
     );
     expect(scanner.scan()).toMatchObject({
       pattern: '/child\\.unexpected_exit/',
@@ -145,10 +156,7 @@ test('recoverable child exits remain observable without aborting the E2E stack',
 test('malformed or unclassified child exits fail closed', () => {
   withLog(path => {
     const scanner = createIncrementalRuntimeFatalLogScanner(path);
-    appendFileSync(
-      path,
-      '[ERROR][mesh.orchestrator] child.unexpected_exit {"child":"H2","action":"recover"\n',
-    );
+    appendFileSync(path, '[ERROR][mesh.orchestrator] child.unexpected_exit {"child":"H2","action":"recover"\n');
     expect(scanner.scan()).toMatchObject({
       pattern: '/child\\.unexpected_exit/',
       lineNumber: 1,
@@ -166,10 +174,7 @@ test('malformed or unclassified child exits fail closed', () => {
 });
 
 test('isolated E2E runner polls through the incremental scanner', () => {
-  const runner = readFileSync(
-    join(process.cwd(), 'core/scripts/e2e/runners/run-e2e-parallel-isolated.ts'),
-    'utf8',
-  );
+  const runner = readFileSync(join(process.cwd(), 'core/scripts/e2e/runners/run-e2e-parallel-isolated.ts'), 'utf8');
   expect(runner).toContain('const fatalScanner = createIncrementalRuntimeFatalLogScanner(logPath);');
   expect(runner).toContain('const hit = fatalScanner.scan();');
   expect(runner).not.toContain("scannedLines = readFileSync(logPath, 'utf8')");

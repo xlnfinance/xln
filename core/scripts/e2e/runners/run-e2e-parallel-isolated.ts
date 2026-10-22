@@ -1528,8 +1528,9 @@ const writePlaywrightFailureCapsule = (options: {
   capsulePath: string;
   logsDir: string;
   args: CliArgs;
+  requiredTest: { file: string; title: string };
 }): QaFailureCapsule | null => {
-  const failure = readPlaywrightFailureReport(options.reportPath);
+  const failure = readPlaywrightFailureReport(options.reportPath, options.requiredTest);
   if (!failure) return null;
   const capsule: QaFailureCapsule = {
     version: 1,
@@ -2084,6 +2085,7 @@ const runShard = async (
           capsulePath: plannedFailureCapsulePath,
           logsDir,
           args,
+          requiredTest: { file: task.pwTargets[0] ?? '', title: task.title ?? '' },
         });
         if (playwrightFailed && !failureCapsule) {
           throw new Error(`E2E_PLAYWRIGHT_FAILURE_MISSING:path=${playwrightReportPath}`);

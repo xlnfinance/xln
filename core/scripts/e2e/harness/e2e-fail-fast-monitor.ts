@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { scheduler } from 'node:timers/promises';
 import {
   E2E_FATAL_LOG_TAIL_LINES,
-  findFirstRuntimeFatalLogHit,
+  createIncrementalRuntimeFatalLogScanner,
+  type IncrementalRuntimeFatalLogScanner,
   tailLog,
 } from './e2e-fatal-log-monitor';
 import { isE2ERunnerProcessAlive, readE2ERunnerLock } from './e2e-runner-lock';
@@ -16,7 +17,12 @@ const runnerLockPath = join(e2eRoot, '.runner-lock.json');
 
 const argValue = (name: string): string | null => {
   const prefix = `--${name}=`;
-  return process.argv.slice(2).find(arg => arg.startsWith(prefix))?.slice(prefix.length) ?? null;
+  return (
+    process.argv
+      .slice(2)
+      .find(arg => arg.startsWith(prefix))
+      ?.slice(prefix.length) ?? null
+  );
 };
 
 const hasFlag = (name: string): boolean => process.argv.slice(2).includes(`--${name}`);
@@ -73,19 +79,22 @@ const stopRunner = async (): Promise<void> => {
   }
 };
 
-const scanOnce = (logsDir: string, scannedLinesByPath: Map<string, number>): boolean => {
+export const scanE2EFatalLogs = (
+  logsDir: string,
+  scanners: Map<string, IncrementalRuntimeFatalLogScanner>,
+): boolean => {
   for (const path of shardLogPaths(logsDir)) {
-    const fromLine = scannedLinesByPath.get(path) ?? 0;
-    const hit = findFirstRuntimeFatalLogHit(path, fromLine);
+    const scanner = scanners.get(path) ?? createIncrementalRuntimeFatalLogScanner(path);
+    scanners.set(path, scanner);
+    const hit = scanner.scan();
     if (hit) {
       console.error(
         `E2E_FATAL_RUNTIME_LOG marker=${hit.pattern} file=${path} line=${hit.lineNumber}\n` +
-        `${hit.lineNumber}: ${hit.line}\n` +
-        `--- last ${E2E_FATAL_LOG_TAIL_LINES} lines (${path}) ---\n${tailLog(path, E2E_FATAL_LOG_TAIL_LINES)}`,
+          `${hit.lineNumber}: ${hit.line}\n` +
+          `--- last ${E2E_FATAL_LOG_TAIL_LINES} lines (${path}) ---\n${tailLog(path, E2E_FATAL_LOG_TAIL_LINES)}`,
       );
       return true;
     }
-    scannedLinesByPath.set(path, readFileSync(path, 'utf8').split('\n').length);
   }
   return false;
 };
@@ -96,11 +105,11 @@ const main = async (): Promise<void> => {
   const killRunner = !hasFlag('no-kill');
   const once = hasFlag('once');
   const startedAt = Date.now();
-  const scannedLinesByPath = new Map<string, number>();
+  const scanners = new Map<string, IncrementalRuntimeFatalLogScanner>();
 
   while (timeoutMs === 0 || Date.now() - startedAt < timeoutMs) {
     const logsDir = resolveLogsDir();
-    if (logsDir && scanOnce(logsDir, scannedLinesByPath)) {
+    if (logsDir && scanE2EFatalLogs(logsDir, scanners)) {
       if (killRunner) await stopRunner();
       process.exit(1);
     }
@@ -112,8 +121,9 @@ const main = async (): Promise<void> => {
   console.log(`[e2e-monitor] clean dir=${dir || '(none)'} latest=${dir ? basename(dir) : '(none)'}`);
 };
 
-main().catch(async (error) => {
-  console.error('[e2e-monitor] failed:', error instanceof Error ? error.stack || error.message : String(error));
-  await stopRunner();
-  process.exit(1);
-});
+if (import.meta.main)
+  main().catch(async error => {
+    console.error('[e2e-monitor] failed:', error instanceof Error ? error.stack || error.message : String(error));
+    await stopRunner();
+    process.exit(1);
+  });

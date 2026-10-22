@@ -1121,7 +1121,8 @@ describe('production startup wiring', () => {
     expect(runnerLockHelper).toContain("if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;");
     expect(runner).toContain('const releaseRunnerLock = acquireRunnerLock(logsDir);');
     expect(standaloneMonitor).toContain("const runnerLockPath = join(e2eRoot, '.runner-lock.json');");
-    expect(standaloneMonitor).toContain('findFirstRuntimeFatalLogHit(path, fromLine)');
+    expect(standaloneMonitor).toContain('createIncrementalRuntimeFatalLogScanner(path)');
+    expect(standaloneMonitor).toContain('const hit = scanner.scan();');
     expect(standaloneMonitor).toContain('await stopRunner();');
     expect(standaloneMonitor).toContain("process.kill(lock.pid, 'SIGTERM')");
     expect(standaloneMonitor).toContain("process.kill(lock.pid, 'SIGKILL')");

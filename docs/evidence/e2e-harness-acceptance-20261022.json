@@ -1,0 +1,59 @@
+{
+  "baseSHA": "5853c7561fb646cdbf43470c8c56042357155558",
+  "scope": "Private test-harness regressions on a working-tree patch; not final-SHA or public-chain release certification",
+  "findings": [
+    {
+      "name": "Standalone monitor lost the first appended fatal line",
+      "before": "Actual CLI returned exit 0 and clean after RUNTIME_LOOP_HALTED was appended",
+      "after": "Same append experiment returned exit 1 and identified line 2; existing incremental scanner reused",
+      "unitTestsPassed": 68
+    },
+    {
+      "name": "Isolated E2E runner accepted reports without an executed required test",
+      "before": "Actual Playwright report had expected=0 skipped=1 and exit=0; canonical failure reader returned null",
+      "after": "Required report validation rejects skipped, flaky, zero, extra, wrong-title, wrong-file, non-passed-result and report-error evidence",
+      "focusedTestsPassed": 12,
+      "liveReactDirectCredit": {
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    }
+  ],
+  "receipts": [
+    {
+      "name": "fatal-monitor-regression-green-5853c756-01.result.json",
+      "sha256": "d293ee796be01292fe370296b9f02547e5e02fe89c95e8c57626b3e5193a3542",
+      "exitCode": 0,
+      "seconds": 5.840486667,
+      "sourceUnchanged": true,
+      "logSHA256": "55511641925d13bc15f6122062774950c3baa9df529e70cb9c9a517ffb83d38c"
+    },
+    {
+      "name": "required-pass-red-5853c756-01.result.json",
+      "sha256": "a321a397535ecd4d667926966ac35b574f67a549bfcc76d6297a1257d507af5c",
+      "exitCode": 1,
+      "seconds": 1.2026909159999999,
+      "sourceUnchanged": true,
+      "logSHA256": "6ee0b77a755e283870ef1ee575d40bc51c162bf84a2614b0f44d3de4415a0b4e"
+    },
+    {
+      "name": "required-pass-green-5853c756-01.result.json",
+      "sha256": "ebf74e249f52b890c6b29aca73740eca02d7d22d213fc4687d3b085662af4e6a",
+      "exitCode": 0,
+      "seconds": 1.8606385839999997,
+      "sourceUnchanged": true,
+      "logSHA256": "362d892d10a3f2d46566aabc1599f8fca6e43abd458e73bf7108634302388589"
+    },
+    {
+      "name": "required-pass-direct-credit-l2-5853c756-01.result.json",
+      "sha256": "99b9d87949e1827ff2b3d6f823e4588b27ec4728038b31bac03e78613139c9c7",
+      "exitCode": 0,
+      "seconds": 126.23459970900001,
+      "sourceUnchanged": true,
+      "logSHA256": "fad547d3fe484a3e93612d29e30df4fb3106580f568df72d758ad6caedc3fa81"
+    }
+  ],
+  "remaining": "Final exact-SHA financial, unit/test/check, full E2E, release and soak gates plus public deployment and native-chain receipts remain open"
+}
