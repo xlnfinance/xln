@@ -13,7 +13,7 @@ import {
 const repoRoot = join(import.meta.dir, '..', '..', '..', '..');
 
 for (const profile of ['ci', 'release']) {
-  test(`${profile} executes direct credit and signed credit requests on the owning wallet stand`, () => {
+  test(`${profile} executes required credit and swap journeys on the owning wallet stand`, () => {
     const plan = spawnSync(
       process.execPath,
       ['core/scripts/release/run-release-gate.ts', `--profile=${profile}`, '--plan'],
@@ -24,7 +24,14 @@ for (const profile of ['ci', 'release']) {
       },
     );
     expect(plan.status, plan.stderr).toBe(0);
-    for (const file of ['e2e-direct-credit.spec.ts', 'e2e-collateral.spec.ts']) {
+    for (const file of [
+      'e2e-direct-credit.spec.ts',
+      'e2e-collateral.spec.ts',
+      'e2e-swap.spec.ts',
+      'e2e-swap-cancel.spec.ts',
+      'e2e-cross-swap.spec.ts',
+      'e2e-cross-swap-partial.spec.ts',
+    ]) {
       const command = plan.stdout.split('\n').find(line => line.includes(`XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=${file} `));
       expect(command, `${profile} must execute ${file}`).toBeDefined();
       expect(command).toContain('bun run stand:run');

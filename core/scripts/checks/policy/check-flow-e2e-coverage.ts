@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 
 type CoverageRequirement = {
-  area: 'pay' | 'swap' | 'cross-j' | 'frontend' | 'recovery' | 'credit' | 'lending';
+  area: 'pay' | 'swap' | 'cross-j' | 'recovery' | 'credit' | 'lending';
   file: string;
   patterns: string[];
 };
@@ -33,6 +33,45 @@ const includesAll = (text: string, patterns: string[], file: string): string[] =
 };
 
 const requirements: CoverageRequirement[] = [
+  {
+    area: 'pay',
+    file: 'ui/tests/e2e-payment.spec.ts',
+    patterns: [
+      'invalid amounts and recipients cannot admit a payment or retain a revoked quote',
+      'pays the merchant through the hub and shows the committed receipt',
+      'expect(committed.amount).toBe(recipientText)',
+      'expect(BigInt(committed.senderAmount)).toBe(BigInt(committed.amount) + BigInt(committed.fee))',
+    ],
+  },
+  {
+    area: 'swap',
+    file: 'ui/tests/e2e-swap.spec.ts',
+    patterns: [
+      'same-network swap confirms exact amounts and fee once before reload',
+      'unlock after swap reload preserves exact balances and one terminal history record',
+      'expect(restored).toEqual(evidence.after)',
+      'expect(recoveredOrders).toEqual(evidence.orders)',
+    ],
+  },
+  {
+    area: 'swap',
+    file: 'ui/tests/e2e-swap-cancel.spec.ts',
+    patterns: ['mobile resting swap survives reload and cancellation restores exact spendable funds'],
+  },
+  {
+    area: 'cross-j',
+    file: 'ui/tests/e2e-cross-swap.spec.ts',
+    patterns: [
+      'cross-network swap prepares target incoming capacity before both bilateral legs commit',
+      'cross-network same-asset swap prepares target capacity and commits both legs',
+      'expect(recoveredHistory).toEqual(recoveryBefore)',
+    ],
+  },
+  {
+    area: 'cross-j',
+    file: 'ui/tests/e2e-cross-swap-partial.spec.ts',
+    patterns: ['partly filled cross-network swap closes manually with exact legs on both chains'],
+  },
   {
     area: 'credit',
     file: 'ui/tests/e2e-direct-credit.spec.ts',
@@ -157,49 +196,6 @@ const requirements: CoverageRequirement[] = [
     ],
   },
   {
-    area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte',
-    patterns: ["label: 'Pay'", '<PaymentPanel', '<SwapPanel'],
-  },
-  {
-    area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/swap/SwapPanel.svelte',
-    patterns: [
-      '<SwapTicket',
-      '{placeSwapOffer}',
-      '<SwapOrderList',
-      '{requestCrossClear}',
-      'submitActiveCrossJurisdictionIntent',
-      'submitRuntimeInput(commandPlan.targetSetupInput)',
-      'submitRuntimeInput(commandPlan.runtimeInput)',
-    ],
-  },
-  {
-    area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/swap/SwapTicket.svelte',
-    patterns: [
-      'data-testid="swap-ticket-from-network"',
-      'data-testid="swap-ticket-to-network"',
-      'data-testid="swap-ticket-submit"',
-      'placeSwapOffer',
-    ],
-  },
-  {
-    area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/swap/swap-panel-helpers.ts',
-    patterns: ['buildCrossSwapSetupSteps', "CrossSwapSetupStepId = 'target-account' | 'target-credit'"],
-  },
-  {
-    area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/swap/SwapOrderList.svelte',
-    patterns: ['export let requestCrossClear', 'data-testid="cross-swap-clear"'],
-  },
-  {
-    area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/payments/PaymentPanel.svelte',
-    patterns: ['data-testid="payment-amount-input"', 'await submitRuntimeInput(buildPaymentRuntimeInput({', 'Pay now'],
-  },
-  {
     area: 'pay',
     file: 'core/api/payments/command.ts',
     patterns: [
@@ -249,6 +245,10 @@ missing.push(
     [
       'e2e-direct-credit.spec.ts',
       'e2e-collateral.spec.ts',
+      'e2e-swap.spec.ts',
+      'e2e-swap-cancel.spec.ts',
+      'e2e-cross-swap.spec.ts',
+      'e2e-cross-swap-partial.spec.ts',
       'e2e-lending.spec.ts',
       'lending/e2e-principal.spec.ts',
       'lending/e2e-demand.spec.ts',

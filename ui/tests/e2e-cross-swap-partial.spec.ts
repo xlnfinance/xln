@@ -228,15 +228,19 @@ test(
     await page.getByTestId('home-swap').click();
     if (!opened) await page.locator('.chips').getByRole('button', { name: hubName, exact: true }).click();
     await page.getByRole('button', { name: 'Across networks', exact: true }).click();
-    await page.getByTestId('swap-flip').click();
     const givePicker = page.getByTestId('swap-give').locator('..').getByRole('button').first();
     const wantPicker = page.getByTestId('swap-want').locator('..').getByRole('button').first();
+    // Cross Flip reverses both jurisdictions and owners. This scenario keeps
+    // its funded source leg and changes only the asset being sold.
+    await givePicker.click();
+    await page.getByRole('option', { name: /^WETH/ }).click();
     await expect(givePicker).toContainText('WETH');
     if (!(await wantPicker.innerText()).includes(receive.symbol)) {
       await wantPicker.click();
       await page.getByRole('option', { name: new RegExp(`^${receive.symbol}`) }).click();
     }
     await expect(wantPicker).toContainText(receive.symbol);
+    expect((await readWalletCheckpoint(page)).entityId).toBe(wallet.entityId);
     const targetEntityId = await page
       .locator('.kv')
       .filter({ hasText: 'Your other account' })

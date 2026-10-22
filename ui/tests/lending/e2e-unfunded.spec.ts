@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { enterStack } from '../stack';
 import { setBankPolicy } from './bank-policy';
 import { readAccount } from './financial-evidence';
+import { submitLoanRequest } from './loan-request';
 import type { RuntimeAdapter } from '../../../core/api/runtime-adapter/types';
 import type { RuntimeAdapterViewFrame } from '../../../core/api/public/runtime-module';
 
@@ -23,29 +24,26 @@ test('an unapproved loan request leaves the bank serving real payments', { tag: 
     expect((await page.request.get('/api/lending/state', { params })).status()).toBe(400);
   }
   await setBankPolicy(page, ids, { termId: '1m', savingsInterestBps: 0, loanInterestBps: 0, maxPrincipal: 0n });
-  await page.getByTestId('nav-manage').locator('visible=true').first().click();
-  await page.getByTestId('manage-lend').click();
-  await page.getByTestId('lend-side-borrow').click();
-  await page.getByRole('button', { name: '1 month', exact: true }).click();
-  await page.getByTestId('lend-amount').fill('1');
-  await page.getByTestId('lend-rate').fill('0');
-  const receive = page.getByTestId('receive-spectrum');
-  await receive.getByRole('button', { name: 'Accept it as credit instead', exact: true }).click();
-  await receive.getByRole('checkbox').uncheck();
-  await page.getByTestId('receive-spectrum-confirm').click();
-  await expect(page.getByTestId('lend-submit')).toBeEnabled();
-  await page.getByTestId('lend-submit').click();
-  await expect.poll(() => page.evaluate(async parties => {
-    const debug = (window as Window & { __xln?: { adapter: () => RuntimeAdapter | null } }).__xln;
-    const adapter = debug?.adapter();
-    if (!adapter) throw new Error('LENDING_ADAPTER_MISSING');
-    type Account = NonNullable<RuntimeAdapterViewFrame['activeEntity']>['accounts']['items'][number];
-    const account = await adapter.read<Account>(`entity/${parties.ownerId}/account/${parties.hubId}`);
-    return [...account.state.lendingIntents ?? []].filter(([id, kind]) => id.startsWith('borrow:') && kind === 'borrow').length;
-  }, ids)).toBe(1);
+  await submitLoanRequest(page, '1 month', '0');
+  await expect
+    .poll(() =>
+      page.evaluate(async parties => {
+        const debug = (window as Window & { __xln?: { adapter: () => RuntimeAdapter | null } }).__xln;
+        const adapter = debug?.adapter();
+        if (!adapter) throw new Error('LENDING_ADAPTER_MISSING');
+        type Account = NonNullable<RuntimeAdapterViewFrame['activeEntity']>['accounts']['items'][number];
+        const account = await adapter.read<Account>(`entity/${parties.ownerId}/account/${parties.hubId}`);
+        return [...(account.state.lendingIntents ?? [])].filter(
+          ([id, kind]) => id.startsWith('borrow:') && kind === 'borrow',
+        ).length;
+      }, ids),
+    )
+    .toBe(1);
   await expect(page.getByTestId('lending-request-status')).toContainText('No loan was funded');
   expect((await readAccount(page, ids)).balance).toBe('100000000');
-  const response = await page.request.get('/api/lending/state', { params: { hubEntityId: hubId, userEntityId: wallet.entityId } });
+  const response = await page.request.get('/api/lending/state', {
+    params: { hubEntityId: hubId, userEntityId: wallet.entityId },
+  });
   expect(response.ok()).toBe(true);
   expect(await response.json()).toMatchObject({ loans: [] });
   // A second real faucet payment crosses the same bank after the declined request.

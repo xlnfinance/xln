@@ -1,0 +1,325 @@
+{
+  "baseSHA": "6266e7923950b05a36452c0e6739c3c885c93259",
+  "scope": "Working-tree test and runner verification. This is not final exact-SHA release certification, public-chain evidence, or financial-audit approval.",
+  "changes": [
+    "All previous release steps remain; four mandatory React Swap/Cross groups raise the total to 40.",
+    "React Pay requirements replace frozen Svelte markup requirements in the coverage contract.",
+    "Partial Cross selects the source token without reversing both jurisdictions; source identity and original financial assertions are enforced.",
+    "Direct-credit reload compares exact money, credit limits, capacities and settled state on both peers.",
+    "Demand savings requires the exact payout; the bounded test earns less than one atomic interest unit.",
+    "Bank facility approval and revocation are checked through committed API state and an actual rejected draw. Shared borrower form steps retain the unapproved-loan assertions.",
+    "Explicit unavailable determinism scenarios fail before live recording instead of silently certifying a subset. Catalog order and the default selection remain unchanged."
+  ],
+  "receipts": {
+    "swap-release-wiring-red-6266e792-01": {
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/operations/release/mainnet-preflight-gate.test.ts",
+        "--test-name-pattern",
+        "executes required credit"
+      ],
+      "exitCode": 1,
+      "seconds": 1.191537708,
+      "sourceUnchanged": true,
+      "logSHA256": "1e03fff0001e59c5652f657a2ad679a15a7211a80c6fd3093688418f3d1f7eb5"
+    },
+    "swap-release-wiring-green-6266e792-01": {
+      "command": ["bun", "test", "core/__tests__/operations/release/mainnet-preflight-gate.test.ts"],
+      "exitCode": 0,
+      "seconds": 1.120615959,
+      "sourceUnchanged": true,
+      "logSHA256": "c5c29aacff092aa9bfa8c3673b07642c8cd80b559cc64d769b0d5137ef20991a"
+    },
+    "swap-release-ordinary-e2e-6266e792-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "swap-release-ordinary-e2e-6266e792-01",
+        "--timeout-ms",
+        "240000",
+        "--",
+        "bun",
+        "run",
+        "prod:smoke:local"
+      ],
+      "exitCode": 0,
+      "seconds": 93.622440083,
+      "sourceUnchanged": true,
+      "logSHA256": "e92823808fa1eb05e9fea6ae48483f2b43be3a721cedcfe30c257f252ff23440",
+      "browserStats": {
+        "startTime": "2026-10-22T09:17:00.373Z",
+        "duration": 33351.896,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "swap-release-cancel-e2e-6266e792-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "swap-release-cancel-e2e-6266e792-01",
+        "--timeout-ms",
+        "240000",
+        "--",
+        "bun",
+        "run",
+        "prod:smoke:local"
+      ],
+      "exitCode": 0,
+      "seconds": 95.03642816600001,
+      "sourceUnchanged": true,
+      "logSHA256": "817d7fd4a7feb9c5b3777603816ffa2bf0df84d5bb51de6e05d6b29500d564e0",
+      "browserStats": {
+        "startTime": "2026-10-22T09:19:40.039Z",
+        "duration": 34274.746999999996,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "swap-release-cross-e2e-6266e792-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "swap-release-cross-e2e-6266e792-01",
+        "--timeout-ms",
+        "240000",
+        "--",
+        "bun",
+        "run",
+        "prod:smoke:local"
+      ],
+      "exitCode": 0,
+      "seconds": 143.123109417,
+      "sourceUnchanged": true,
+      "logSHA256": "b36dd053198230ac78b12520ed9218761f2c859fc9b4ccb4d48886468e28ccf4",
+      "browserStats": {
+        "startTime": "2026-10-22T09:22:41.018Z",
+        "duration": 83873.768,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "swap-release-cross-partial-e2e-6266e792-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "swap-release-cross-partial-e2e-6266e792-01",
+        "--timeout-ms",
+        "240000",
+        "--",
+        "bun",
+        "run",
+        "prod:smoke:local"
+      ],
+      "exitCode": 1,
+      "seconds": 84.130288083,
+      "sourceUnchanged": true,
+      "logSHA256": "0d19a3d238dff7ec5ffa6cb006cb23328584cc46bb663785110f1145e2db263c",
+      "browserStats": {
+        "startTime": "2026-10-22T09:28:25.504Z",
+        "duration": 20533.352000000003,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      }
+    },
+    "swap-release-cross-partial-e2e-6266e792-02": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "swap-release-cross-partial-e2e-6266e792-02",
+        "--timeout-ms",
+        "240000",
+        "--",
+        "bun",
+        "run",
+        "prod:smoke:local"
+      ],
+      "exitCode": 0,
+      "seconds": 87.28637062499999,
+      "sourceUnchanged": true,
+      "logSHA256": "0468d1bd7d62c24374a39de482699485554b0f329cfe022d8348a2bfea05804f",
+      "browserStats": {
+        "startTime": "2026-10-22T09:33:13.960Z",
+        "duration": 25898.137,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "direct-credit-reload-assertions-6266e792-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "direct-credit-reload-assertions-6266e792-01",
+        "--timeout-ms",
+        "240000",
+        "--",
+        "bun",
+        "run",
+        "prod:smoke:local"
+      ],
+      "exitCode": 0,
+      "seconds": 92.487001416,
+      "sourceUnchanged": true,
+      "logSHA256": "b601400221f16925a95d39654608d7c0bc010e3105c70177da5d37b02f21aa82",
+      "browserStats": {
+        "startTime": "2026-10-22T09:38:03.503Z",
+        "duration": 31050.621,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "demand-exact-payout-6266e792-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "demand-exact-payout-6266e792-01",
+        "--timeout-ms",
+        "240000",
+        "--",
+        "bun",
+        "run",
+        "prod:smoke:local"
+      ],
+      "exitCode": 0,
+      "seconds": 88.08932399999999,
+      "sourceUnchanged": true,
+      "logSHA256": "a71844ace43bbd99a4809375bca5ea40ca545becb2f58d4f1e011e5a8f7c51b7",
+      "browserStats": {
+        "startTime": "2026-10-22T09:43:14.571Z",
+        "duration": 26574.773,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "lending-revoked-authority-6266e792-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "lending-revoked-authority-6266e792-01",
+        "--timeout-ms",
+        "240000",
+        "--",
+        "bun",
+        "run",
+        "prod:smoke:local"
+      ],
+      "exitCode": 0,
+      "seconds": 106.14676625,
+      "sourceUnchanged": true,
+      "logSHA256": "a269fb1c01a3e7abf8d180b99597e6b0b7d44a8fde2709945e0d291432eb775b",
+      "browserStats": {
+        "startTime": "2026-10-22T09:48:47.663Z",
+        "duration": 45360.894,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "determinism-selection-red-6266e792-01": {
+      "command": ["bun", "test", "core/__tests__/architecture/state/determinism-selection.test.ts"],
+      "exitCode": 1,
+      "seconds": 1.8847687499999999,
+      "sourceUnchanged": true,
+      "logSHA256": "4b5692b04d5bbd8742ee37bdd527c2674c894b2d185bb62ca1245b1703b54113"
+    },
+    "determinism-selection-green-6266e792-01": {
+      "command": ["bun", "test", "core/__tests__/architecture/state/determinism-selection.test.ts"],
+      "exitCode": 0,
+      "seconds": 1.74273075,
+      "sourceUnchanged": true,
+      "logSHA256": "c91bbb5909632d433658525d9cbbf7e499c9e639a42ac6b469b8da6e3d8fb8f4"
+    },
+    "determinism-selection-cli-reject-6266e792-01": {
+      "command": [
+        "bun",
+        "run",
+        "stand:run",
+        "--reason",
+        "determinism-selection-cli-reject-6266e792-01",
+        "--timeout-ms",
+        "60000",
+        "--",
+        "env",
+        "XLN_DETERMINISM_SCENARIOS=processbatch,rebalnce",
+        "XLN_DETERMINISM_ARTIFACT_DIR=/Users/zigota/agent-jobs/xln-prod-rescue-20261019/determinism-selection-cli-reject-6266e792-01",
+        "bun",
+        "core/scripts/checks/architecture/check-determinism.ts"
+      ],
+      "exitCode": 1,
+      "seconds": 1.34503325,
+      "sourceUnchanged": true,
+      "logSHA256": "f274613eae3c3ccffb3313098eb2a8be302dfc9401426d648aa882b39775e965"
+    },
+    "release-review-focused-6266e792-01": {
+      "command": [
+        "bun",
+        "test",
+        "core/__tests__/operations/release/mainnet-preflight-gate.test.ts",
+        "core/__tests__/architecture/state/determinism-selection.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 1.9320121250000002,
+      "sourceUnchanged": true,
+      "logSHA256": "34df932646047754034f08c4ce315a9ed4b559ab56834a4848a3b4d552db5891"
+    }
+  },
+  "negativeCli": {
+    "expectedExitCode": 1,
+    "requiredError": "DETERMINISM_REQUESTED_SCENARIO_UNAVAILABLE:rebalnce:unknown",
+    "recordingDirectoryCreated": false
+  },
+  "independentTestReview": {
+    "model": "claude-opus-5-5",
+    "sourceSHA": "6266e7923950b05a36452c0e6739c3c885c93259",
+    "completedPackets": 9,
+    "filesProvided": 141,
+    "originalTrackedScopeFiles": 216,
+    "remainingFiles": 75,
+    "estimatedUSDNotInvoice": 7.5771896,
+    "settingsChanged": false,
+    "scope": "Read-only test-quality review; all unverified findings remain unverified.",
+    "verifiedItems": [
+      "partial Cross driver independently reproduced and corrected",
+      "credit-lending finding 5: complete direct-credit reload state now checked",
+      "credit-lending finding 1: demand payout lower bound replaced with exact committed result",
+      "credit-lending finding 3: approved then revoked facility rejects a real borrower request",
+      "wallet-scenarios-5 finding 3: requested determinism omissions independently reproduced and rejected"
+    ],
+    "refutedForCanonicalGate": [
+      "swap-cross finding 4: wallet-gate supplies private stand environment and rejects skipped/flaky/unexpected results"
+    ]
+  },
+  "remaining": "Full immutable candidate unit/test/check/full158/release40/continuous60min soak; independent stable financial-source review validation; public Ethereum and native TRON receipts, final SHA identity, public Nile, signer/cost packet, tutorials, mobile/desktop, recovery/load/rollback."
+}

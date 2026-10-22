@@ -172,6 +172,10 @@ const walletE2eSteps: GateStep[] = (
     ],
     ['React direct credit E2E', 'e2e-direct-credit.spec.ts', 'direct-credit'],
     ['React collateral and signed credit request E2E', 'e2e-collateral.spec.ts', 'credit-request'],
+    ['React ordinary swap E2E', 'e2e-swap.spec.ts', 'swap'],
+    ['React swap cancellation E2E', 'e2e-swap-cancel.spec.ts', 'swap-cancel'],
+    ['React cross swap E2E', 'e2e-cross-swap.spec.ts', 'cross-swap'],
+    ['React partial cross swap E2E', 'e2e-cross-swap-partial.spec.ts', 'cross-swap-partial'],
     ['React dispute E2E', 'e2e-dispute-finality.spec.ts', 'dispute'],
     ['React offline protection E2E', 'e2e-dispute-protection.spec.ts', 'protection'],
     // Separate real fresh-device restores keep each stand inside its existing

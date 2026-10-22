@@ -126,29 +126,27 @@ test(
       await expect(a.getByTestId('receipt-kicker')).toHaveText('Paid', WAIT);
       await a.getByTestId('receipt-done').click();
 
-      // Verify committed bilateral commercial obligation (-20 USDC on Alice, +20 USDC on Bob).
-      await expect
-        .poll(() => directAccountBalance(a, alice.entityId, bob.entityId), WAIT)
-        .toEqual({
-          signed: '-20000000',
-          ownCreditLimit: '50000000',
-          peerCreditLimit: '0',
-          inCapacity: '20000000',
-          outCapacity: '30000000',
-          pending: false,
-          mempool: 0,
-        });
-      await expect
-        .poll(() => directAccountBalance(b, bob.entityId, alice.entityId), WAIT)
-        .toEqual({
-          signed: '20000000',
-          ownCreditLimit: '0',
-          peerCreditLimit: '50000000',
-          inCapacity: '30000000',
-          outCapacity: '20000000',
-          pending: false,
-          mempool: 0,
-        });
+      // Both peers must retain the exact money, authority and settled state after reload.
+      const aliceAfterPayment = {
+        signed: '-20000000',
+        ownCreditLimit: '50000000',
+        peerCreditLimit: '0',
+        inCapacity: '20000000',
+        outCapacity: '30000000',
+        pending: false,
+        mempool: 0,
+      };
+      const bobAfterPayment = {
+        signed: '20000000',
+        ownCreditLimit: '0',
+        peerCreditLimit: '50000000',
+        inCapacity: '30000000',
+        outCapacity: '20000000',
+        pending: false,
+        mempool: 0,
+      };
+      await expect.poll(() => directAccountBalance(a, alice.entityId, bob.entityId), WAIT).toEqual(aliceAfterPayment);
+      await expect.poll(() => directAccountBalance(b, bob.entityId, alice.entityId), WAIT).toEqual(bobAfterPayment);
 
       // Check Desk MML exposure ($10.00 = 0.5 * $20 unsecured commercial obligation).
       await b.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
@@ -159,8 +157,8 @@ test(
       // Reload both wallets and confirm the direct commercial obligation persists.
       await Promise.all([a.reload(), b.reload()]);
       await Promise.all([reopenStack(a, alice), reopenStack(b, bob)]);
-      expect((await directAccountBalance(a, alice.entityId, bob.entityId))?.signed).toBe('-20000000');
-      expect((await directAccountBalance(b, bob.entityId, alice.entityId))?.signed).toBe('20000000');
+      await expect.poll(() => directAccountBalance(a, alice.entityId, bob.entityId), WAIT).toEqual(aliceAfterPayment);
+      await expect.poll(() => directAccountBalance(b, bob.entityId, alice.entityId), WAIT).toEqual(bobAfterPayment);
       expect(errors).toEqual([]);
     } finally {
       await Promise.all([aliceContext.close(), bobContext.close()]);

@@ -151,8 +151,17 @@ const recordScenario = async (
   }
 };
 
-export async function runDeterminismTests(resetStorage: () => void): Promise<void> {
-  const requested = requestedScenarioKeys();
+export const selectDeterminismScenarios = (requested: ReadonlySet<string>): ScenarioEntry[] => {
+  const unavailable = [...requested].flatMap(key => {
+    const scenario = scenarioRegistry.find(entry => entry.key === key);
+    if (!scenario) return [`${key}:unknown`];
+    if (EXCLUDED_SCENARIOS.has(key)) return [`${key}:excluded`];
+    if (scenario.requiresStress) return [`${key}:stress-only`];
+    return [];
+  });
+  if (unavailable.length > 0) {
+    throw new Error(`DETERMINISM_REQUESTED_SCENARIO_UNAVAILABLE:${unavailable.join(',')}`);
+  }
   const scenarios = scenarioRegistry.filter(
     scenario =>
       !scenario.requiresStress &&
@@ -160,6 +169,11 @@ export async function runDeterminismTests(resetStorage: () => void): Promise<voi
       (requested.size === 0 || requested.has(scenario.key)),
   );
   if (scenarios.length === 0) throw new Error('DETERMINISM_SCENARIO_SELECTION_EMPTY');
+  return scenarios;
+};
+
+export async function runDeterminismTests(resetStorage: () => void): Promise<void> {
+  const scenarios = selectDeterminismScenarios(requestedScenarioKeys());
   const root = resolve(process.env['XLN_DETERMINISM_ARTIFACT_DIR'] ?? `.logs/determinism/${Date.now()}-${process.pid}`);
   console.log(`== Immutable scenario WAL replay: seed=${SEED} workers=1,4 artifacts=${root} ==`);
   const results = [];
