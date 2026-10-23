@@ -9,7 +9,7 @@ import {
   type Page,
   type TestInfo,
 } from '@playwright/test';
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setE2ETimingOrigin } from './utils/e2e-timing.mts';
@@ -46,6 +46,25 @@ const incidentCursorByTestId = new Map<string, number>();
 let activeTestInfo: TestInfo | null = null;
 const FAILURE_HOOK_TIMEOUT_MS = 5_000;
 const INCIDENT_QUERY_TIMEOUT_MS = 5_000;
+// Local stacks admit loopback operators; a public stack gates incidents behind
+// the operator capability, supplied as a file with prod-health-smoke's rules.
+const incidentOperatorTokenFile = process.env['E2E_OPERATOR_TOKEN_FILE']?.trim() || null;
+const incidentOperatorToken = incidentOperatorTokenFile === null
+  ? null
+  : readFileSync(incidentOperatorTokenFile, 'utf8').trim();
+if (incidentOperatorToken !== null && (incidentOperatorToken.length < 32 || !/^[\x21-\x7e]+$/.test(incidentOperatorToken))) {
+  throw new Error('E2E_OPERATOR_TOKEN_INVALID');
+}
+
+const operatorHeaders = (url: string): Record<string, string> => {
+  if (incidentOperatorToken === null) return {};
+  const target = new URL(url);
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(target.hostname);
+  if (target.username || target.password || (target.protocol !== 'https:' && !(target.protocol === 'http:' && loopback))) {
+    throw new Error('E2E_OPERATOR_TRANSPORT_REQUIRES_TLS_OR_LOOPBACK');
+  }
+  return { authorization: `Bearer ${incidentOperatorToken}` };
+};
 
 const asError = (value: unknown, label: string): Error =>
   value instanceof Error ? value : new Error(`${label}: ${String(value)}`);
@@ -93,10 +112,12 @@ const readIncidentSnapshot = async (
   testInfo: TestInfo,
   afterId = 0,
 ): Promise<{ highestEventId: number; incidents: E2EDebugIncident[] }> => {
-  const response = await api.get(
-    `${debugApiBaseUrl(testInfo)}/api/debug/incidents?state=open&afterId=${afterId}&limit=1000`,
-    { headers: { 'Cache-Control': 'no-store' }, timeout: INCIDENT_QUERY_TIMEOUT_MS },
-  );
+  const url = `${debugApiBaseUrl(testInfo)}/api/debug/incidents?state=open&afterId=${afterId}&limit=1000`;
+  const response = await api.get(url, {
+    headers: { 'Cache-Control': 'no-store', ...operatorHeaders(url) },
+    maxRedirects: 0,
+    timeout: INCIDENT_QUERY_TIMEOUT_MS,
+  });
   if (!response.ok()) {
     throw new Error(`E2E_DEBUG_INCIDENT_QUERY_FAILED:status=${response.status()}`);
   }

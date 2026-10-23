@@ -1303,9 +1303,16 @@ if [ -n "$REMOTE_HOST" ]; then
     git push origin main
   fi
 
+  # Hosts keep the packageManager Bun beside an older system Bun; put it first
+  # so the remote start guards and PM2 children run the pinned release.
+  pinned_bun="$(bun -p 'require(process.argv[1]).packageManager' "$REPO_ROOT/package.json")"
+  if ! [[ "$pinned_bun" =~ ^bun@[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "DEPLOY_PINNED_BUN_INVALID:$pinned_bun" >&2
+    exit 1
+  fi
   # The same preservation guard runs in real-Git regression fixtures. Inline its
   # current bytes because the remote checkout still contains the previous release.
-  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else echo 'REMOTE_DEPLOY_CHECKOUT_MISSING' >&2; exit 1; fi; cd \"\$XLN_DIR\"; PATH=\"\$PATH:\$HOME/.bun/bin\"; EXPECTED_DEPLOY_SHA='$EXPECTED_DEPLOY_SHA';
+  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else echo 'REMOTE_DEPLOY_CHECKOUT_MISSING' >&2; exit 1; fi; cd \"\$XLN_DIR\"; PATH=\"\$PATH:\$HOME/.bun/bin\"; XLN_PINNED_BUN_DIR=\"\$HOME/.local/share/xln/toolchains/bun-${pinned_bun#bun@}\"; if [ -x \"\$XLN_PINNED_BUN_DIR/bun\" ]; then PATH=\"\$XLN_PINNED_BUN_DIR:\$PATH\"; fi; EXPECTED_DEPLOY_SHA='$EXPECTED_DEPLOY_SHA';
 $(cat "$SCRIPT_DIR/prepare-remote-main.sh")
 "
   if [ -n "$remote_frontend_archive" ]; then
