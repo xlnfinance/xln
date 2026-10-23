@@ -105,8 +105,8 @@ test('mesh supervisor dispatches canonical per-hub process kinds', () => {
 test('dev validates the TS-only selector before setup without a native build preflight', () => {
   const launcher = readFileSync(join(import.meta.dir, '../../../../scripts/dev/run-dev.ts'), 'utf8');
   const startup = launcher.slice(launcher.indexOf('const runDev ='));
-  expect(startup.indexOf("canonicalHubEngine('H1')")).toBeGreaterThan(-1);
-  expect(startup.indexOf("canonicalHubEngine('H1')")).toBeLessThan(startup.indexOf('parseInvocation()'));
+  expect(startup.indexOf('assertTypeScriptAccountExecution()')).toBeGreaterThan(-1);
+  expect(startup.indexOf('assertTypeScriptAccountExecution()')).toBeLessThan(startup.indexOf('parseInvocation()'));
   expect(launcher).not.toContain('check-rscore-runtime-freshness.ts');
 });
 

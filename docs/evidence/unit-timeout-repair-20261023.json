@@ -86,5 +86,18 @@
     "No frozen-core approvals or baseline changes",
     "Foreign BrainVault files preserved"
   ],
-  "remaining": "Fresh check, complete strict unit and every original release/public/mainnet gate on one immutable committed SHA"
+  "remaining": "Fresh check, complete strict unit and every original release/public/mainnet gate on one immutable committed SHA",
+  "selectorWiringFollowUp": {
+    "baseSHA": "f5df5ba9fb8563e311ce217a525fbe74602cf80c",
+    "aggregateReceipt": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/chain-f5df5ba9fb85/exact-unit-summary.json",
+    "rootCause": "The launcher now calls canonical assertTypeScriptAccountExecution directly; one source-wiring test still expected canonicalHubEngine. Align only its two call-name expectations, preserving presence, pre-setup ordering and no-native-preflight assertions.",
+    "changedPath": "core/__tests__/orchestrator/process/hub-engine-plan.test.ts",
+    "l1Before": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/unit-selector-first-l1-f5df5ba9-01.result.json",
+    "l1After": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/unit-selector-fixed-l1-f5df5ba9-01.result.json",
+    "l2": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/unit-selector-owning-l2-f5df5ba9-01.result.json",
+    "sourceSHA256": "f9c53b984741ac4a0f8904112f610a82c971c4f347229b0069d46ace92eb7169",
+    "assertionsPreserved": 3,
+    "timeoutsChanged": false,
+    "scope": "Focused patch evidence, not a final same-SHA release certificate."
+  }
 }
