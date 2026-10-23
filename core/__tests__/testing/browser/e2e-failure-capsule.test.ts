@@ -85,7 +85,7 @@ describe('isolated E2E first-failure diagnostics', () => {
     const reportPath = join(temporaryRoot('xln-pw-report-'), 'playwright-report.json');
     writeFileSync(
       reportPath,
-      JSON.stringify({
+      safeStringify({
         config: { rootDir: join(repositoryRoot, 'tests') },
         suites: [
           {

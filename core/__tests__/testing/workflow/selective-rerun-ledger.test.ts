@@ -45,7 +45,8 @@ describe('selective rerun ledger', () => {
       try {
         assertBroadRunHasNoUnresolvedReruns(path);
       } catch (error) {
-        message = (error as Error).message;
+        if (!(error instanceof Error)) throw error;
+        message = error.message;
       }
       const command = message.split('\n').find(line => line.startsWith('  bun '));
       expect(command).toBeDefined();

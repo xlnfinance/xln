@@ -332,3 +332,12 @@ surface or fuse stages 2 and 3.
   immutable SHA, read-only scope, independently verified finding. Never let audit replace execution.
 - Never launch Codex Security scans unless the owner explicitly asks for a Codex Security scan by
   name. Requests to audit, review, inspect security, or check Solidity mean ordinary manual review.
+
+
+## XLN controller memory (owner, 2026-10-23)
+
+- Before sustained XLN work, read `/Users/zigota/.codex/memories/xln-controller-lessons-20261023.md` once; the detailed owner-requested reflection is `docs/ru/xln-process-reflection-20261023.md`.
+- Track delivered product outcomes and one final immutable SHA. Reconcile stale reports immediately; a saved report, PID, review or commit is not owner delivery or release approval.
+- Ordinary check/lint/test failures require a canonical fix and exact rerun. Do not confuse them with hard safety/frozen/usage/budget denials or bypass those denials with a new chat/model.
+- Inspect prior terminal receipts before selecting aggregate budgets. The canonical full unit previously took about 19 minutes; do not kill it at an invented three-minute deadline. Preserve individual test assertions and deadlines.
+- The owner delegated turnkey wallet and deployment preparation. Prepare the concrete secure signer/unsigned/cost packet independently; retain the explicit boundary for unspecified real-funds signing or transfers.

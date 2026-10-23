@@ -15,9 +15,9 @@ type EslintFile = {
 };
 
 const DEBT_RULES = new Set(['import/no-duplicates', 'no-restricted-properties']);
-// Removed four raw JSON serializers with the retired fresh-run comparison oracle.
-const DEBT_COUNT = 319;
-const DEBT_SHA256 = 'a881244793a74a37e3c2278f64e45e476ada2a87dd46bdf41f39d79c6802c96e';
+// Removed one raw test serializer; exact old/new sets: docs/evidence/eslint-debt-removal-20261023.json.
+const DEBT_COUNT = 318;
+const DEBT_SHA256 = '756e02b2f25c675b8d1161655dd15156dca9d4e6f4f8e35d3496e1e28c69ed36';
 const outputPath = `${tmpdir()}/xln-eslint-${String(process.pid)}.json`;
 
 const result = spawnSync('bunx', ['eslint', 'core', '--ext', '.ts', '--format', 'json', '--output-file', outputPath], {
