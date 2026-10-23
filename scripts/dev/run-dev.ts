@@ -13,7 +13,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { stopProcessGroup } from '../../core/scripts/e2e/runners/process-group';
 import { selectDevWebTls } from './launcher/web-tls';
 import { fetchLoopback } from '../../core/orchestrator/server/loopback-fetch';
-import { canonicalHubEngine } from '../../core/orchestrator/process/hub-engine-plan';
+import { assertTypeScriptAccountExecution } from '../../core/runtime/config/account-execution';
 import { acquireStandLock, releaseStandLock, readStandLockHolder, standLockRoot, standLockCapacity, STAND_LOCK_TOKEN_ENV, type StandLockGrant } from '../../tools/stand-lock';
 
 export const DEV_SINGLETON_PORT = 17_999;
@@ -227,7 +227,7 @@ export const runDevCommands = async (
 };
 
 const runDev = async (): Promise<number> => {
-  canonicalHubEngine('H1');
+  assertTypeScriptAccountExecution();
   if (process.env['XLN_PORT_BASE']) throw new Error('DEV_PORT_OVERRIDE_FORBIDDEN:XLN_PORT_BASE');
   const { mode, commands } = parseInvocation();
   let lease: DevSingletonLease;

@@ -79,7 +79,8 @@ const randProofBody = () => {
     tokenIds: Array.from({ length: tokens }, () => randUint(32)),
     transformers: Array.from({ length: randInt(3) }, () => ({
       transformerAddress: randAddress(),
-      encodedBatch: rand() < 0.3 ? randHex(randInt(70)) : CODER.encode([BATCH_PARAM], [randBatch()]),
+      // The nested batch is opaque bytes here; its independent oracle is tested below.
+      encodedBatch: rand() < 0.3 ? randHex(randInt(70)) : encodeAbi(batchSchema, randBatch()),
       allowances: Array.from({ length: randInt(3) }, () => ({
         deltaIndex: BigInt(randInt(10)),
         rightAllowance: randUint(128),

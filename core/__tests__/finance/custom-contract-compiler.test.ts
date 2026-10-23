@@ -9,11 +9,9 @@ import type { CompiledClause } from '../../runtime/custom-contracts/types';
 const coder = AbiCoder.defaultAbiCoder();
 const entity = (byte: string) => `0x${byte.repeat(64)}`;
 let conditional: CompiledClause;
-let secret: CompiledClause;
 beforeAll(async () => {
-  const first = CUSTOM_CONTRACT_TEMPLATES[0]; const second = CUSTOM_CONTRACT_TEMPLATES[1];
+  const first = CUSTOM_CONTRACT_TEMPLATES[0];
   conditional = await compileCustomContract(first.source, first.contractName);
-  secret = await compileCustomContract(second.source, second.contractName);
 });
 const simulate = (artifact: CompiledClause, params: unknown[], args: string, payerIsLeft = true, timestamp = 100) =>
   simulateCustomContract({ artifact, encodedBatch: encodeClauseFields(artifact.schemas.params, params),
@@ -28,6 +26,8 @@ describe('wallet-authored Solidity compilation and Int768 execution', () => {
     expect((await simulate(conditional, [99, 100, false], coder.encode(['bool'], [true]), false)).deltas[1]).toBe(100n);
   });
   test('secret requires matching preimage before the timestamp deadline', async () => {
+    const template = CUSTOM_CONTRACT_TEMPLATES[1];
+    const secret = await compileCustomContract(template.source, template.contractName);
     const preimage = entity('a'); const args = coder.encode(['bytes32'], [preimage]);
     const params = [7, 100, true, keccak256(args), 100];
     expect((await simulate(secret, params, args)).deltas[0]).toBe((1n << 300n) - 100n);
