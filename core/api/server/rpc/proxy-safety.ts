@@ -1,6 +1,9 @@
-// The browser bridge is read-only. An allowlist fails closed for new client
-// methods, including signing variants such as eth_signTypedData_v4 and raw
-// transaction broadcast, instead of relying on an incomplete denylist.
+import { HDNodeWallet, Mnemonic, Transaction } from 'ethers';
+
+// The browser bridge holds no signing authority. An allowlist fails closed for
+// new client methods, including signing variants such as eth_signTypedData_v4,
+// instead of relying on an incomplete denylist. The one write it relays is a
+// transaction the wallet already signed with its own key.
 const ALLOWED_RPC_METHODS = new Set([
   'eth_blockNumber',
   'eth_call',
@@ -60,6 +63,41 @@ export function isLocalProxyRequest(requestUrl: string, clientAddress?: string):
   return LOOPBACK_CLIENTS.has(normalizeClientAddress(clientAddress));
 }
 
+const RAW_TRANSACTION_METHOD = 'eth_sendRawTransaction';
+// Blob (3) and set-code (4) transactions carry sidecars or delegate account code.
+const RELAYED_TRANSACTION_TYPES = new Set([0, 1, 2]);
+// Anvil and Hardhat ship this mnemonic, so its keys are public: a signature by
+// one proves nothing about intent and would let anyone move such an account.
+const PUBLIC_DEV_MNEMONIC = 'test test test test test test test test test test test junk';
+const PUBLIC_DEV_ACCOUNT_COUNT = 20;
+let publicDevAccounts: ReadonlySet<string> | null = null;
+
+const isPublicDevAccount = (address: string): boolean => {
+  if (!publicDevAccounts) {
+    const root = HDNodeWallet.fromMnemonic(Mnemonic.fromPhrase(PUBLIC_DEV_MNEMONIC), "m/44'/60'/0'/0");
+    publicDevAccounts = new Set(
+      Array.from({ length: PUBLIC_DEV_ACCOUNT_COUNT }, (_, index) => root.deriveChild(index).address.toLowerCase()),
+    );
+  }
+  return publicDevAccounts.has(address.toLowerCase());
+};
+
+/** Signature, nonce, fee and chain match stay the node's checks; this admits only their input shape. */
+const rawTransactionRejection = (params: unknown): string | null => {
+  if (!Array.isArray(params) || params.length !== 1 || typeof params[0] !== 'string') return 'RAW_TX_PARAMS_INVALID';
+  let transaction: Transaction;
+  try {
+    transaction = Transaction.from(params[0]);
+  } catch {
+    return 'RAW_TX_INVALID';
+  }
+  if (!RELAYED_TRANSACTION_TYPES.has(transaction.type ?? -1)) return 'RAW_TX_TYPE_UNSUPPORTED';
+  if (!transaction.signature || !transaction.from) return 'RAW_TX_UNSIGNED';
+  if (transaction.chainId === 0n) return 'RAW_TX_CHAIN_ID_REQUIRED';
+  if (isPublicDevAccount(transaction.from)) return 'RAW_TX_PUBLIC_DEV_KEY';
+  return null;
+};
+
 function findForbiddenRpcProxyMethod(bodyText: string): string | null {
   let parsed: unknown;
   try {
@@ -75,6 +113,11 @@ function findForbiddenRpcProxyMethod(bodyText: string): string | null {
     const method = isRecord(call) ? call['method'] : null;
     if (typeof method !== 'string' || !method) {
       return 'invalid-json-rpc';
+    }
+    if (method === RAW_TRANSACTION_METHOD) {
+      const rejection = rawTransactionRejection(isRecord(call) ? call['params'] : undefined);
+      if (rejection) return `${method}:${rejection}`;
+      continue;
     }
     if (!ALLOWED_RPC_METHODS.has(method)) {
       return method;
