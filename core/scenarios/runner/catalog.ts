@@ -22,6 +22,13 @@ export const SCENARIOS: ScenarioMetadata[] = [
     run: async (env) => (await import('../payments/htlc-ack-recovery')).htlcAckRecovery(env),
   },
   {
+    id: 'hub-preserved-reserve-refill', name: 'Preserved Hub Reserve Refill',
+    description: 'Offline peer keeps a signed Account frame retained while the restored Hub refills reserves',
+    tags: ['hub', 'reserve', 'recovery'],
+    browserSafe: false, browserUnsafeReason: 'Closes and reopens the durable Runtime WAL.',
+    run: async (env) => (await import('../payments/hub-preserved-reserve-refill')).hubPreservedReserveRefill(env),
+  },
+  {
     id: 'rebalance', name: 'Reserve Rebalance',
     description: 'Reserve rebalancing through the settlement pipeline', tags: ['settlement', 'rebalance'],
     browserSafe: false, browserUnsafeReason: 'Requires the external RPC settlement adapter.',

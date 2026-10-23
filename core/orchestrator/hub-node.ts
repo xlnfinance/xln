@@ -105,7 +105,7 @@ import {
   HUB_DEFAULT_MIN_TRADE_SIZE,
   HUB_DEFAULT_SUPPORTED_PAIRS,
   hasAccount,
-  hasPendingRuntimeWork,
+  hasLocalRuntimeWork,
   hasPairMutualCredits,
   settleRuntimeFor,
   sleep,
@@ -1280,7 +1280,9 @@ const createHubMeshBootstrapController = (
       if (!live.bootstrap || live.shuttingDown || paused || fatal || live.meshLoopInFlight) return;
       // Inputs are derived only from committed Entity state. Waiting here
       // prevents re-enqueuing an account open while its prior frame is applying.
-      if (hasPendingRuntimeWork(live.env)) return;
+      // A restored outbox retained for an offline user must not block the
+      // preserved H1 reserve refill that the orchestrator waits for.
+      if (hasLocalRuntimeWork(live.env)) return;
       live.meshLoopInFlight = true;
       try {
         const complete = await advanceHubMeshBootstrap({

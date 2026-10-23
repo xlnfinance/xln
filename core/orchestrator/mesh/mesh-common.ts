@@ -76,10 +76,16 @@ export const deriveMarketMakerEntityId = (
   jurisdiction: MarketMakerEntityJurisdictionConfig,
 ): string => hashBoard(encodeBoard(buildMarketMakerConsensusConfig(signerId, jurisdiction))).toLowerCase();
 
-export const hasPendingRuntimeWork = (env: RuntimeReplica): boolean => {
+/**
+ * Work that can still change local committed Entity state. A Runtime-committed
+ * output retained for an offline peer is excluded: the Entity frame that
+ * produced it is already in the local WAL and the output redelivers in order on
+ * reconnect. Any bilateral Account pendingFrame it carries is still not final
+ * until the peer ACKs; callers must keep skipping Accounts with pending work.
+ */
+export const hasLocalRuntimeWork = (env: RuntimeReplica): boolean => {
   if (env.infrastructure?.processingPromise) return true;
   if (env.pendingOutputs?.length) return true;
-  if (env.pendingNetworkOutputs?.length) return true;
   if (env.networkInbox?.length) return true;
   const mempool = env.runtimeMempool;
   if (mempool.entityInputs.length) return true;
@@ -94,6 +100,10 @@ export const hasPendingRuntimeWork = (env: RuntimeReplica): boolean => {
 
   return false;
 };
+
+/** Quiescence also counts the committed outbox that has not been delivered. */
+export const hasPendingRuntimeWork = (env: RuntimeReplica): boolean =>
+  hasLocalRuntimeWork(env) || (env.pendingNetworkOutputs?.length ?? 0) > 0;
 
 export type RuntimeQuiescenceHealth = {
   pendingRuntimeWork: number;

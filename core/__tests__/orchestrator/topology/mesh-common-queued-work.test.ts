@@ -3,9 +3,11 @@ import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAc
 import { describe, expect, test } from 'bun:test';
 import {
   collectQueuedSwapOfferIds,
+  hasLocalRuntimeWork,
   hasPendingRuntimeWork,
   hasQueuedExtendCredit,
   hasQueuedOpenAccount,
+  summarizeRuntimeQuiescence,
 } from '../../../orchestrator/mesh/mesh-common';
 import { buildCollectiveEntityProposalTx } from '../../../entity/auth/authorization';
 import { hashEntityCommand, hashEntityCommandTxs, signedEntityCommandTx } from '../../../entity/command/command-codec';
@@ -27,6 +29,23 @@ describe('mesh queued work detection', () => {
     } as unknown as RuntimeReplica;
 
     expect(hasPendingRuntimeWork(env)).toBe(true);
+    expect(hasLocalRuntimeWork(env)).toBe(true);
+  });
+
+  test('lets preserved bootstrap run behind an outbox retained for an offline peer', () => {
+    // Production a5075ad87: restored H1 republished one committed Account frame
+    // to an offline user. The mesh loop gated on the outbox never reached the
+    // reserve refill, so reset waited for targetMet forever.
+    const env = {
+      pendingNetworkOutputs: [{ entityId: counterpartyId, runtimeId: '0xd56742719dd4d9884ac462fe803d0a5472146de2' }],
+      runtimeMempool: { runtimeTxs: [], entityInputs: [] },
+      state: { eReplicas: new Map(), jReplicas: new Map() },
+    } as unknown as RuntimeReplica;
+
+    expect(hasLocalRuntimeWork(env)).toBe(false);
+    // Quiescence still reports the undelivered committed outbox.
+    expect(hasPendingRuntimeWork(env)).toBe(true);
+    expect(summarizeRuntimeQuiescence(env).pendingRuntimeWork).toBe(1);
   });
 
   test('treats openAccount queued in runtime mempool as pending work', () => {
