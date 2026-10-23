@@ -1,0 +1,27 @@
+{
+  "observedAt": "2026-10-22T11:56:43.197474+00:00",
+  "baseSHA": "c36cee01822cd7a907c3dd743c12459a68273a61",
+  "scope": "Uncommitted focused harness fixes; not release certification",
+  "closedDefects": 3,
+  "selectedDefects": 3,
+  "fixes": [
+    "Attribute Playwright failure to unexpected project only",
+    "Shell-quote exact rerun argv",
+    "Reject duplicate scenario selection and preserve every failed result"
+  ],
+  "validation": {
+    "passed": 27,
+    "failed": 0,
+    "assertions": 71,
+    "seconds": 2.28531525,
+    "sourceUnchanged": true,
+    "logSHA256": "987b9d2ae146e3c9ad58ef5e5e5767a85efff656922d73c39cd84549bb2a89d8"
+  },
+  "negativeCli": {
+    "exitCode": 1,
+    "error": "DUPLICATE_SYSTEM_SCENARIO:processbatch",
+    "seconds": 0.481466041
+  },
+  "full158": "Stopped on owner request; incomplete; not PASS",
+  "releaseComplete": false
+}

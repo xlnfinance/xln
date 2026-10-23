@@ -17,17 +17,14 @@ import { mkdirSync, createWriteStream, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { scheduler } from 'node:timers/promises';
-import {
-  cleanupTestArtifactsBeforeRun,
-  TEST_ARTIFACT_CLEANUP_DONE_ENV,
-} from '../harness/test-artifact-cleanup';
+import { cleanupTestArtifactsBeforeRun, TEST_ARTIFACT_CLEANUP_DONE_ENV } from '../harness/test-artifact-cleanup';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
 import { assertBroadRunHasNoUnresolvedReruns } from '../harness/selective-rerun/ledger';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 type RunStatus = 'passed' | 'failed';
-type RunResult = {
+export type RunResult = {
   scenario: string;
   workerId: number;
   port: number;
@@ -38,12 +35,7 @@ type RunResult = {
   exitCode?: number | null;
 };
 
-const DEFAULT_SCENARIOS = [
-  'processbatch',
-  'rebalance',
-  'settle-rebalance',
-  'lock-ahb',
-];
+const DEFAULT_SCENARIOS = ['processbatch', 'rebalance', 'settle-rebalance', 'lock-ahb'];
 
 type CliArgs = {
   scenarios: string[];
@@ -56,38 +48,39 @@ type CliArgs = {
   failFast: boolean;
 };
 
-function parseArgs(): CliArgs {
-  const args = process.argv.slice(2);
+export function parseArgs(args = process.argv.slice(2)): CliArgs {
   const getFlag = (name: string): string | undefined => {
-    const arg = args.find((a) => a.startsWith(`--${name}=`));
+    const arg = args.find(a => a.startsWith(`--${name}=`));
     return arg?.split('=')[1];
   };
   const hasFlag = (name: string): boolean => args.includes(`--${name}`);
 
   const scenarios = (getFlag('scenarios') || DEFAULT_SCENARIOS.join(','))
     .split(',')
-    .map((s) => s.trim())
+    .map(s => s.trim())
     .filter(Boolean);
 
+  const seen = new Set<string>();
+  for (const scenario of scenarios) {
+    if (seen.has(scenario)) throw new Error(`DUPLICATE_SYSTEM_SCENARIO:${scenario}`);
+    seen.add(scenario);
+  }
+
   const workersRaw = Number(getFlag('workers') || scenarios.length);
-  const workers = Number.isFinite(workersRaw) && workersRaw > 0
-    ? Math.floor(workersRaw)
-    : scenarios.length;
+  const workers = Number.isFinite(workersRaw) && workersRaw > 0 ? Math.floor(workersRaw) : scenarios.length;
 
   const basePortRaw = Number(getFlag('base-port') || '18545');
-  const basePort = Number.isFinite(basePortRaw) && basePortRaw > 0
-    ? Math.floor(basePortRaw)
-    : 18545;
+  const basePort = Number.isFinite(basePortRaw) && basePortRaw > 0 ? Math.floor(basePortRaw) : 18545;
 
   const scenarioTimeoutMsRaw = Number(getFlag('timeout-ms') || '900000'); // 15m
-  const scenarioTimeoutMs = Number.isFinite(scenarioTimeoutMsRaw) && scenarioTimeoutMsRaw > 0
-    ? Math.floor(scenarioTimeoutMsRaw)
-    : 900000;
+  const scenarioTimeoutMs =
+    Number.isFinite(scenarioTimeoutMsRaw) && scenarioTimeoutMsRaw > 0 ? Math.floor(scenarioTimeoutMsRaw) : 900000;
 
   const anvilStartupTimeoutMsRaw = Number(getFlag('anvil-timeout-ms') || '30000');
-  const anvilStartupTimeoutMs = Number.isFinite(anvilStartupTimeoutMsRaw) && anvilStartupTimeoutMsRaw > 0
-    ? Math.floor(anvilStartupTimeoutMsRaw)
-    : 30000;
+  const anvilStartupTimeoutMs =
+    Number.isFinite(anvilStartupTimeoutMsRaw) && anvilStartupTimeoutMsRaw > 0
+      ? Math.floor(anvilStartupTimeoutMsRaw)
+      : 30000;
 
   return {
     scenarios,
@@ -169,25 +162,35 @@ function spawnAnvil(
   stream: boolean,
   prefix: string,
 ): PipedChildProcess {
-  const proc = spawn(anvilBin, [
-    '--host', '127.0.0.1',
-    '--port', String(port),
-    '--chain-id', '31337',
-    '--block-gas-limit', '60000000',
-    '--code-size-limit', '65536',
-    '--prune-history', '256',
-    '--silent',
-  ], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: sanitizeChildProcessEnv(process.env),
-  });
+  const proc = spawn(
+    anvilBin,
+    [
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(port),
+      '--chain-id',
+      '31337',
+      '--block-gas-limit',
+      '60000000',
+      '--code-size-limit',
+      '65536',
+      '--prune-history',
+      '256',
+      '--silent',
+    ],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: sanitizeChildProcessEnv(process.env),
+    },
+  );
 
-  proc.stdout.on('data', (chunk) => {
+  proc.stdout.on('data', chunk => {
     const text = chunk.toString();
     log.write(text);
     if (stream) process.stdout.write(`[${prefix}:anvil] ${text}`);
   });
-  proc.stderr.on('data', (chunk) => {
+  proc.stderr.on('data', chunk => {
     const text = chunk.toString();
     log.write(text);
     if (stream) process.stderr.write(`[${prefix}:anvil] ${text}`);
@@ -221,12 +224,7 @@ async function runScenarioOnWorker(
     anvil = spawnAnvil(args.anvilBin, port, log, args.stream, prefix);
     await waitForRpcReady(rpcUrl, args.anvilStartupTimeoutMs);
 
-    child = spawn(process.execPath, [
-      'core/scenarios/run.ts',
-      scenario,
-      '--mode=rpc',
-      `--rpc=${rpcUrl}`,
-    ], {
+    child = spawn(process.execPath, ['core/scenarios/run.ts', scenario, '--mode=rpc', `--rpc=${rpcUrl}`], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: sanitizeChildProcessEnv({
         ...process.env,
@@ -237,12 +235,12 @@ async function runScenarioOnWorker(
     });
 
     const activeChild = child;
-    activeChild.stdout.on('data', (chunk) => {
+    activeChild.stdout.on('data', chunk => {
       const text = chunk.toString();
       log.write(text);
       if (args.stream) process.stdout.write(`[${prefix}] ${text}`);
     });
-    activeChild.stderr.on('data', (chunk) => {
+    activeChild.stderr.on('data', chunk => {
       const text = chunk.toString();
       log.write(text);
       if (args.stream) process.stderr.write(`[${prefix}] ${text}`);
@@ -254,7 +252,7 @@ async function runScenarioOnWorker(
 
     const exitCode = await new Promise<number | null>((resolveExit, rejectExit) => {
       activeChild.once('error', rejectExit);
-      activeChild.once('exit', (code) => resolveExit(code));
+      activeChild.once('exit', code => resolveExit(code));
     });
     clearTimeout(timeout);
 
@@ -296,6 +294,11 @@ async function runScenarioOnWorker(
     log.end();
   }
 }
+
+export const summarizeSystemScenarioResults = (scenarios: readonly string[], results: readonly RunResult[]) => {
+  const ordered = [...results].sort((a, b) => scenarios.indexOf(a.scenario) - scenarios.indexOf(b.scenario));
+  return { ordered, failed: results.filter(r => r.status === 'failed') };
+};
 
 async function main(): Promise<void> {
   if (process.argv.slice(2).some(argument => argument === '--help' || argument === '-h')) {
@@ -359,16 +362,16 @@ async function main(): Promise<void> {
   await Promise.all(Array.from({ length: workers }, (_, i) => workerLoop(i)));
   const totalMs = Date.now() - startedAt;
 
-  const byScenario = new Map(results.map((r) => [r.scenario, r]));
-  const ordered = scenarios.map((s) => byScenario.get(s)).filter(Boolean) as RunResult[];
-  const failed = ordered.filter((r) => r.status === 'failed');
+  const { ordered, failed } = summarizeSystemScenarioResults(scenarios, results);
 
   console.log('\n' + '='.repeat(72));
   console.log('Summary');
   console.log('='.repeat(72));
   for (const r of ordered) {
     const seconds = (r.durationMs / 1000).toFixed(1);
-    console.log(`${r.status === 'passed' ? 'PASS' : 'FAIL'}  ${r.scenario.padEnd(18)}  ${seconds.padStart(8)}s  worker=${r.workerId} port=${r.port}`);
+    console.log(
+      `${r.status === 'passed' ? 'PASS' : 'FAIL'}  ${r.scenario.padEnd(18)}  ${seconds.padStart(8)}s  worker=${r.workerId} port=${r.port}`,
+    );
   }
   console.log('-'.repeat(72));
   console.log(`Total wall time: ${(totalMs / 1000).toFixed(1)}s`);
@@ -384,7 +387,8 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error('Parallel scenario runner failed:', (err as Error).message);
-  process.exit(1);
-});
+if (import.meta.main)
+  main().catch(err => {
+    console.error('Parallel scenario runner failed:', (err as Error).message);
+    process.exit(1);
+  });

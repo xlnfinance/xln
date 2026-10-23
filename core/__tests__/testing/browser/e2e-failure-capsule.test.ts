@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { safeStringify } from '../../../protocol/serialization';
 
 import {
   buildIsolatedE2ERerunCommand,
@@ -28,38 +29,100 @@ afterEach(() => {
 });
 
 describe('isolated E2E first-failure diagnostics', () => {
+  test('attributes a mixed-project failure to the failed project, not the earlier passing sibling', () => {
+    const reportPath = join(temporaryRoot('xln-pw-mixed-project-'), 'playwright-report.json');
+    writeFileSync(
+      reportPath,
+      safeStringify({
+        config: { rootDir: join(process.cwd(), 'tests') },
+        errors: [],
+        suites: [
+          {
+            specs: [
+              {
+                file: 'wallet.spec.ts',
+                title: 'wallet pays',
+                line: 3,
+                column: 1,
+                ok: false,
+                tests: [
+                  {
+                    projectName: 'chromium',
+                    status: 'expected',
+                    results: [
+                      {
+                        status: 'passed',
+                        startTime: '2026-10-22T00:00:00Z',
+                      },
+                    ],
+                  },
+                  {
+                    projectName: 'webkit',
+                    status: 'unexpected',
+                    results: [
+                      {
+                        status: 'failed',
+                        startTime: '2026-10-22T00:00:05Z',
+                        errors: [{ message: 'webkit payment failed' }],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(readPlaywrightFailureReport(reportPath)).toMatchObject({
+      project: 'webkit',
+      error: 'webkit payment failed',
+    });
+  });
+
   test('extracts exact Playwright failure metadata and builds a shell-safe rerun', () => {
     const repositoryRoot = process.cwd();
     const reportPath = join(temporaryRoot('xln-pw-report-'), 'playwright-report.json');
-    writeFileSync(reportPath, JSON.stringify({
-      config: { rootDir: join(repositoryRoot, 'tests') },
-      suites: [{
-        title: 'e2e-wallet.spec.ts',
-        file: 'e2e-wallet.spec.ts',
-        specs: [{
-          title: "user's wallet pays $5",
-          ok: false,
-          file: 'e2e-wallet.spec.ts',
-          line: 42,
-          column: 7,
-          tests: [{
-            projectName: 'chromium',
-            status: 'unexpected',
-            results: [{
-              status: 'failed',
-              startTime: '2026-07-17T12:00:00.000Z',
-              errors: [{ message: '\u001b[31mExpected payment receipt\u001b[39m' }],
-              error: {
-                message: 'Expected payment receipt',
-                stack: '\u001b[31mError: Expected payment receipt\u001b[39m\n    at test.ts:42:7',
+    writeFileSync(
+      reportPath,
+      JSON.stringify({
+        config: { rootDir: join(repositoryRoot, 'tests') },
+        suites: [
+          {
+            title: 'e2e-wallet.spec.ts',
+            file: 'e2e-wallet.spec.ts',
+            specs: [
+              {
+                title: "user's wallet pays $5",
+                ok: false,
+                file: 'e2e-wallet.spec.ts',
+                line: 42,
+                column: 7,
+                tests: [
+                  {
+                    projectName: 'chromium',
+                    status: 'unexpected',
+                    results: [
+                      {
+                        status: 'failed',
+                        startTime: '2026-07-17T12:00:00.000Z',
+                        errors: [{ message: '\u001b[31mExpected payment receipt\u001b[39m' }],
+                        error: {
+                          message: 'Expected payment receipt',
+                          stack: '\u001b[31mError: Expected payment receipt\u001b[39m\n    at test.ts:42:7',
+                        },
+                        attachments: [{ name: 'screenshot', contentType: 'image/png', path: '/tmp/failure.png' }],
+                      },
+                    ],
+                  },
+                ],
               },
-              attachments: [{ name: 'screenshot', contentType: 'image/png', path: '/tmp/failure.png' }],
-            }],
-          }],
-        }],
-      }],
-      errors: [],
-    }));
+            ],
+          },
+        ],
+        errors: [],
+      }),
+    );
 
     const failure = readPlaywrightFailureReport(reportPath);
     expect(failure).toMatchObject({
@@ -72,13 +135,15 @@ describe('isolated E2E first-failure diagnostics', () => {
       stack: 'Error: Expected payment receipt\n    at test.ts:42:7',
       attachments: [{ name: 'screenshot', contentType: 'image/png', path: '/tmp/failure.png' }],
     });
-    expect(buildIsolatedE2ERerunCommand(failure!, {
-      videoMode: 'retain-on-failure',
-      traceMode: 'on-first-retry',
-      screenshotMode: 'only-on-failure',
-      prewaitHealth: 'reset',
-      strictBrowserHealth: true,
-    })).toBe(
+    expect(
+      buildIsolatedE2ERerunCommand(failure!, {
+        videoMode: 'retain-on-failure',
+        traceMode: 'on-first-retry',
+        screenshotMode: 'only-on-failure',
+        prewaitHealth: 'reset',
+        strictBrowserHealth: true,
+      }),
+    ).toBe(
       "bun core/scripts/e2e/runners/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --max-failures=1 '--pw-files=tests/e2e-wallet.spec.ts::user'\"'\"'s wallet pays $5' --pw-project=chromium --video=retain-on-failure --trace=on-first-retry --screenshot=only-on-failure --prewait-health=reset --strict-browser-health --preserve-artifacts",
     );
   });
@@ -99,9 +164,7 @@ describe('isolated E2E first-failure diagnostics', () => {
     expect(() => parseJsonLinesStrict(readFileSync(eventsPath, 'utf8'), eventsPath)).toThrow(
       `E2E_JSON_INVALID:path=${eventsPath}:line=2:column=1`,
     );
-    expect(() => readShardBrowserIssues(root, 2)).toThrow(
-      `E2E_JSON_INVALID:path=${eventsPath}:line=2:column=1`,
-    );
+    expect(() => readShardBrowserIssues(root, 2)).toThrow(`E2E_JSON_INVALID:path=${eventsPath}:line=2:column=1`);
 
     const statusPath = join(deriveE2EShardPaths(root, 2).resultsDir, '.last-run.json');
     mkdirSync(join(root, 'shard-2', 'artifacts', 'playwright'), { recursive: true });
@@ -127,11 +190,13 @@ describe('isolated E2E first-failure diagnostics', () => {
     });
     try {
       const startedAt = performance.now();
-      await expect(captureE2EHttpForensics({
-        apiUrl: `http://127.0.0.1:${server.port}`,
-        outputDir,
-        timeoutMs: 40,
-      })).rejects.toThrow('E2E_FAILURE_FORENSICS_INCOMPLETE');
+      await expect(
+        captureE2EHttpForensics({
+          apiUrl: `http://127.0.0.1:${server.port}`,
+          outputDir,
+          timeoutMs: 40,
+        }),
+      ).rejects.toThrow('E2E_FAILURE_FORENSICS_INCOMPLETE');
       expect(performance.now() - startedAt).toBeLessThan(150);
       expect(JSON.parse(readFileSync(join(outputDir, 'health.json'), 'utf8'))).toEqual({ ok: true });
       expect(JSON.parse(readFileSync(join(outputDir, 'incidents.json'), 'utf8'))).toEqual({
@@ -167,9 +232,7 @@ describe('isolated E2E first-failure diagnostics', () => {
     guard.assertStable();
     expect(reads).toBe(1);
     now = 1_001;
-    expect(() => guard.assertStable()).toThrow(
-      `E2E_CODE_DRIFT:start=${'a'.repeat(64)}:end=${'b'.repeat(64)}`,
-    );
+    expect(() => guard.assertStable()).toThrow(`E2E_CODE_DRIFT:start=${'a'.repeat(64)}:end=${'b'.repeat(64)}`);
     expect(() => guard.assertStable()).toThrow('E2E_CODE_DRIFT:');
     expect(reads).toBe(2);
   });

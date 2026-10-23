@@ -28,6 +28,37 @@ const withLedger = (run: (path: string) => void): void => {
 };
 
 describe('selective rerun ledger', () => {
+  test('printed exact rerun preserves a title as one shell argument', () =>
+    withLedger(path => {
+      const target = selectiveE2ETarget('tests/e2e/example.spec.ts', "user's wallet pays $5");
+      recordSelectiveRerunFailure(
+        {
+          kind: 'e2e',
+          target,
+          failedCodeHash: CODE_HASH,
+          failedAt: '2026-10-22T00:00:00Z',
+          reason: 'required regression',
+        },
+        path,
+      );
+      let message = '';
+      try {
+        assertBroadRunHasNoUnresolvedReruns(path);
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      const command = message.split('\n').find(line => line.startsWith('  bun '));
+      expect(command).toBeDefined();
+      // Parse only our temporary ledger's printed arguments; never execute its runner.
+      const parsed = spawnSync('/bin/sh', ['-c', `set -- ${command!.trim().slice(4)}; printf '%s\\0' "$@"`], {
+        encoding: 'utf8',
+      });
+      expect(parsed.status).toBe(0);
+      const argv = parsed.stdout.split('\0').filter(Boolean);
+      expect(argv.filter(arg => arg.startsWith('--pw-files='))).toEqual([`--pw-files=${target}`]);
+      expect(argv).toHaveLength(6);
+    }));
+
   test('admits an exact concurrent failure cohort without clearing failures or admitting broad work', () =>
     withLedger(path => {
       const file = 'tests/e2e-cross-j-swap.spec.ts';

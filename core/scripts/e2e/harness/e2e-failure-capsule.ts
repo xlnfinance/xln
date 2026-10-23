@@ -94,7 +94,7 @@ const collectSuiteFailures = (suite: JsonRecord, inheritedFile: string, candidat
     const file = text(spec['file']) || suiteFile;
     const title = text(spec['title']);
     for (const test of records(spec['tests'])) {
-      const unexpected = test['status'] === 'unexpected' || spec['ok'] === false;
+      const unexpected = test['status'] === 'unexpected';
       if (!unexpected) continue;
       const failedResults = records(test['results']).filter(result =>
         ['failed', 'timedOut', 'interrupted'].includes(text(result['status'])),
@@ -193,7 +193,7 @@ export const readPlaywrightFailureReport = (
   return { ...failure, file, reportPath };
 };
 
-const shellQuote = (value: string): string =>
+export const shellQuote = (value: string): string =>
   /^[A-Za-z0-9_./:@=+-]+$/.test(value) ? value : `'${value.replaceAll("'", `'"'"'`)}'`;
 
 export const buildIsolatedE2ERerunCommand = (failure: PlaywrightFailure, options: IsolatedE2ERerunOptions): string =>

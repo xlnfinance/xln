@@ -18,6 +18,7 @@ import {
 import { dirname, resolve } from 'node:path';
 
 import { safeStringify } from '../../../../protocol/serialization';
+import { shellQuote } from '../e2e-failure-capsule';
 
 const LEDGER_VERSION = 1;
 const DEFAULT_LEDGER_PATH = resolve(process.cwd(), '.logs', 'qa', 'selective-reruns.json');
@@ -226,10 +227,19 @@ const assertNoUnresolvedReruns = (unresolved: readonly SelectiveRerunEntry[]): v
   if (unresolved.length === 0) return;
   const table = unresolved
     .map(entry => {
-      const rerun =
+      const command =
         entry.kind === 'scenario'
-          ? `bun core/scenarios/run.ts ${entry.target} --mode=rpc --single`
-          : `bun core/scripts/e2e/runners/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=${entry.target} --strict-browser-health --preserve-artifacts`;
+          ? ['bun', 'core/scenarios/run.ts', entry.target, '--mode=rpc', '--single']
+          : [
+              'bun',
+              'core/scripts/e2e/runners/run-e2e-parallel-isolated.ts',
+              '--shards=1',
+              '--workers-per-shard=1',
+              `--pw-files=${entry.target}`,
+              '--strict-browser-health',
+              '--preserve-artifacts',
+            ];
+      const rerun = command.map(shellQuote).join(' ');
       return `${entry.kind}\t${entry.target}\t${entry.failedCodeHash.slice(0, 12)}\t${entry.reason}\n  ${rerun}`;
     })
     .join('\n');
