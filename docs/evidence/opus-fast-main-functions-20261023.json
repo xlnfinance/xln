@@ -1,0 +1,265 @@
+{
+ "owner": "Opus (claude-opus-5-5), sole Studio implementer",
+ "baseSHA": "17b5f9364d06e3d35735fba419cd57985a72afe7",
+ "fixSHA": "3390a35be2fbf11e7b7ae5a5af069d774a77eae5",
+ "baseToFixChangedPaths": [
+  "core/scripts/operations/hlt/workload/worker-authority-evidence.ts"
+ ],
+ "scope": "Fast main-function checks on the canonical TS/React path. Private EVM 31337/31338 and private native JavaTVM fixtures only; no public TRON/Nile/mainnet, real USDT or real funds. Long full158/full-unit/release pipelines and soak were cancelled by the owner, not passed.",
+ "families": {
+  "nativeTronPay": {
+   "passed": 2,
+   "required": 2,
+   "scope": "Private JavaTVM XLNUSD6 routed Pay 1,000,000 minor, debit=credit, then cold recovery with exact roots/outbox and zero new commands",
+   "receipts": {
+    "native-pay-17b5-01": {
+     "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/native-pay-17b5-01.result.json",
+     "sha256": "3023e5786fb097722c862037e0528a4c98cca92f9b92faf07fcd8e2dbba91e4f",
+     "exitCode": 0,
+     "seconds": 53.727,
+     "sourceUnchanged": true,
+     "logSHA256": "72ec4c6e0fe9e2f415ce738f6cb2b7ee43f49d1f216c712be671247c7cb2cf3f",
+     "head": "17b5f9364d06e3d35735fba419cd57985a72afe7"
+    },
+    "native-pay-recovery-17b5-01": {
+     "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/native-pay-recovery-17b5-01.result.json",
+     "sha256": "10940beced37a884c3eb95cb10da1bff1b5e6a0209b1c4ce18ee62da48c87f81",
+     "exitCode": 0,
+     "seconds": 41.905,
+     "sourceUnchanged": true,
+     "logSHA256": "2ba24067ff2fc823c4d545e864396e2fc6651f6b4ee456d729519bd27191f23b",
+     "head": "17b5f9364d06e3d35735fba419cd57985a72afe7"
+    }
+   }
+  },
+  "nativeTronSwapWTRX": {
+   "passed": 2,
+   "required": 2,
+   "scope": "Private JavaTVM XLNUSD6 (ERC20Mock in USDT slot) / genuine WTRX6 same-J swap, 1 match, 8 Hanko verifications, same-WAL restore",
+   "receipts": {
+    "native-swap-17b5-01": {
+     "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/native-swap-17b5-01.result.json",
+     "sha256": "99381ec63aef49e2fff626291adeb0f57a412fea1684d2eba9cee77924200085",
+     "exitCode": 0,
+     "seconds": 84.736,
+     "sourceUnchanged": true,
+     "logSHA256": "d10660036d5f990dce89f2d871f5c3306b6100924c34db7516f22cbc4d2fc564",
+     "head": "17b5f9364d06e3d35735fba419cd57985a72afe7"
+    }
+   }
+  },
+  "nativeCrossBothDirections": {
+   "passed": 2,
+   "required": 2,
+   "scope": "Private EVM31337 <-> JavaTVM token1 cross; both directions on both hubs settled (full_fill and cancel_and_clear), same-WAL restore",
+   "receipts": {
+    "native-cross-17b5-01": {
+     "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/native-cross-17b5-01.result.json",
+     "sha256": "b8d42ad480e8cb7743afc18fce0c09e869d89c42b93fbd41e9e676d96c1d5abb",
+     "exitCode": 0,
+     "seconds": 78.273,
+     "sourceUnchanged": true,
+     "logSHA256": "1e47f9dc41536098c3c59133977c22c418f6b1c6aad5dd8322be640e8a27c1fd",
+     "head": "17b5f9364d06e3d35735fba419cd57985a72afe7"
+    }
+   }
+  },
+  "nativeTronLending": {
+   "passed": 3,
+   "required": 3,
+   "scope": "Savings early close returns 5,000,000; term loan partial + full repay via canonical maximum amount; active and terminal same-WAL restore",
+   "receipts": {
+    "native-lending-17b5-01": {
+     "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/native-lending-17b5-01.result.json",
+     "sha256": "42b23e786cc3df9299fe119e0009ae791f7635c70cf25b64110ad7f2c8b07e1a",
+     "exitCode": 0,
+     "seconds": 125.969,
+     "sourceUnchanged": true,
+     "logSHA256": "82876624ecdb2fb84b8fee6e06e1e4e87125185f66f8880e608fc1a4d158dc39",
+     "head": "17b5f9364d06e3d35735fba419cd57985a72afe7"
+    }
+   }
+  },
+  "nativeTronExit": {
+   "passed": 2,
+   "required": 2,
+   "scope": "Received cross claim backed by collateral, settled and withdrawn externally; same-WAL restore",
+   "receipts": {
+    "native-exit-17b5-01": {
+     "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/native-exit-17b5-01.result.json",
+     "sha256": "72fc4d898daa639041074450410ded3d677de092278a64deb21a1df941b03996",
+     "exitCode": 0,
+     "seconds": 116.397,
+     "sourceUnchanged": true,
+     "logSHA256": "a79873b33f9e55b94aa5b416a9b1eb46b293011754f06b890ea8cd933b28b9f0",
+     "head": "17b5f9364d06e3d35735fba419cd57985a72afe7"
+    }
+   }
+  },
+  "reactBrowserPaySwapCross": {
+   "passed": 3,
+   "required": 3,
+   "scope": "Isolated runner, React /app: payment smoke with reload, swap lowest-ask fill, cross real-MM full+partial fill",
+   "receipts": {
+    "react-browser-set-17b5-01": {
+     "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/react-browser-set-17b5-01.result.json",
+     "sha256": "6ae03484d1b51f3924dbaa8270d2df043f843def306fa569fcec96ebd7a2f1c2",
+     "exitCode": 0,
+     "seconds": 356.3,
+     "sourceUnchanged": true,
+     "logSHA256": "442dd6de824df00dce294fecf4c156005a55a34215ac088833e414e4ffaa15c8",
+     "head": "17b5f9364d06e3d35735fba419cd57985a72afe7"
+    }
+   },
+   "playwrightSeconds": {
+    "pay": 72.0,
+    "swap": 29.2,
+    "cross": 43.2
+   }
+  },
+  "reactBrowserLending": {
+   "passed": 1,
+   "required": 1,
+   "scope": "ui/tests/lending/e2e-principal.spec.ts through prod:smoke:local wallet gate",
+   "receipts": {
+    "react-lending-17b5-01": {
+     "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/react-lending-17b5-01.result.json",
+     "sha256": "38f09747609e610b43cac10f8c238e07e5647abfac88456a88005568f83531b1",
+     "exitCode": 0,
+     "seconds": 110.651,
+     "sourceUnchanged": true,
+     "logSHA256": "5a447d49c05010a18a857edced4804f513c6067b9758fc980ac2719a2fc813ea",
+     "head": "17b5f9364d06e3d35735fba419cd57985a72afe7"
+    }
+   },
+   "assertionSeconds": 44.82
+  },
+  "evmSwapUSDTWETH": {
+   "passed": 1,
+   "required": 1,
+   "scope": "swap-market BrowserVM scenario, 98 frames, WETH/USDT partial fill with exact remaining 4 WETH",
+   "receipts": {
+    "fast-swap-market-17b5-01": {
+     "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/fast-swap-market-17b5-01.result.json",
+     "sha256": "6a3c1c254850e9994cd443ddede3b495a2fdee3251cae9e3ed5ab29c1a2d139e",
+     "exitCode": 0,
+     "seconds": 34.067,
+     "sourceUnchanged": true,
+     "logSHA256": "2f521ff65d382d1facaacb6172f388593a9b9163a71b39c778880a337b864636",
+     "head": "17b5f9364d06e3d35735fba419cd57985a72afe7"
+    }
+   }
+  },
+  "lendingUnits": {
+   "passed": 78,
+   "required": 78,
+   "scope": "bun run test:lending:fast: default, overdue, savings payout at maturity-1ms and exact maturity",
+   "receipts": {
+    "fast-lending-units-17b5-01": {
+     "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/fast-lending-units-17b5-01.result.json",
+     "sha256": "e0e7b7e129bd86a38980e73b046bd7b5d53460317847ab7a49e5ffb043e3c033",
+     "exitCode": 0,
+     "seconds": 2.538,
+     "sourceUnchanged": true,
+     "logSHA256": "2e4636ae23842f3b09ccbdd43bf82c1c8902c11f1b18ebc6410851d18a65e524",
+     "head": "17b5f9364d06e3d35735fba419cd57985a72afe7"
+    }
+   }
+  },
+  "tsWorkerUnits": {
+   "passed": 56,
+   "required": 56,
+   "scope": "core/__tests__/rscore/ts-worker W1/W4/W8 vectors",
+   "receipts": {
+    "fast-ts-worker-dir-17b5-01": {
+     "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/fast-ts-worker-dir-17b5-01.result.json",
+     "sha256": "91836956932b498b0f6193d74712e7df25ffb4f61e22bf3629261fa17204db8b",
+     "exitCode": 0,
+     "seconds": 33.552,
+     "sourceUnchanged": true,
+     "logSHA256": "fa124e0829ec001633ba1eb39a6c930f9cc606f883fe058b2bfc56e25135f6ce",
+     "head": "17b5f9364d06e3d35735fba419cd57985a72afe7"
+    }
+   }
+  }
+ },
+ "firstFailure": {
+  "receipt": {
+   "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/ts-wal-record-17b5-01.result.json",
+   "sha256": "9d546c11f1de5191241febf8b4546a679b07c2d8991a7a299da9722c4c622e79",
+   "exitCode": 1,
+   "seconds": 101.293,
+   "sourceUnchanged": true,
+   "logSHA256": "1f1c6b6603756fb7ea868e2e20a92bfec4efef7c9686973e187b753b832c088f",
+   "head": "17b5f9364d06e3d35735fba419cd57985a72afe7"
+  },
+  "error": "HLT_AUTHORITY_COLLATERAL_REQUEST_TIMEOUT:{\"currentHeight\":18,\"jNonce\":0}",
+  "laneRejection": "request_collateral: feeAmount 1 below hub policy fee 100000",
+  "cause": "Since 110617284 the Account handler (TS and Rust) requires the hub committed fee policy; the HLT authority-evidence driver still sent a hardcoded 1-unit amount/fee and policyVersion 1."
+ },
+ "fix": "Driver reads the hub committed rebalanceFeePolicies side and prices the request with canonical rebalanceFeeFor, amount above fee like the wallet builder. No protocol or product code changed.",
+ "verification": {
+  "l1": "bun run check:runtime-types green; eslint on the file clean",
+  "l2SameArtifactDirty": {
+   "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/ts-wal-record-17b5-fix-02.result.json",
+   "sha256": "9c73f8ef97966288d449731cc62722d39474ac873e55b5822e3540bdb2d0d7ba",
+   "exitCode": 0,
+   "seconds": 131.651,
+   "sourceUnchanged": true,
+   "logSHA256": "3b09a21dce47bec09b3e3f4f9b29350e58ecdf8d095f66085cb80884be8b3935",
+   "head": "17b5f9364d06e3d35735fba419cd57985a72afe7"
+  },
+  "push": {
+   "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/checked-push-3390a35be-01.result.json",
+   "sha256": "d9498e8ead966d9f1089ff4d244d21f3bcd95bd43cbb5feb96538541986e89ad",
+   "exitCode": 0,
+   "seconds": 205.245,
+   "sourceUnchanged": true,
+   "logSHA256": "d8932bdfc7592e28d549a2f0f9713caa2c8db3632abd4a388d64e463da69c39e",
+   "head": "3390a35be2fbf11e7b7ae5a5af069d774a77eae5"
+  },
+  "cleanRecord": {
+   "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/ts-wal-record-3390a35be-01.result.json",
+   "sha256": "b3b7f751bbaf3e58e2e5cc7e23d14402513d04ea101efd6c7d22a3d476085d04",
+   "exitCode": 0,
+   "seconds": 137.53,
+   "sourceUnchanged": true,
+   "logSHA256": "fb426a8d0c560bd731d5c31595fe4004135fc0f3f646ef7c5b19344415dfe4a2",
+   "head": "3390a35be2fbf11e7b7ae5a5af069d774a77eae5"
+  },
+  "tsReplay": {
+   "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/ts-wal-replay-3390a35be-01.result.json",
+   "sha256": "369519d96217b104324f3cd4ae7c63dbb4b659f43ba80afe65311fa6a54c06b5",
+   "exitCode": 0,
+   "seconds": 133.132,
+   "sourceUnchanged": true,
+   "logSHA256": "f4792fa606dfbc1515b9edb44a0c558424418e7aad129bedad87a1bd8eb12ea5",
+   "head": "3390a35be2fbf11e7b7ae5a5af069d774a77eae5",
+   "frames": 113,
+   "outboxEnvelopes": 1368,
+   "runtimeEntityInputs": 1653,
+   "deliveredPayments": 2605,
+   "matchedEconomicSwaps": 1040,
+   "finalPendingOutbox": 0,
+   "recordingManifestHash": "0x07362f19769a4ef120d15c6458a1383fbcbda6a6dcd6381357c28d14a27a415c",
+   "walTreeHash": "0xefc837bd57eb44b1c574c532c3ad259afa931ffd06f23d115cd97363d0789366",
+   "reportSHA256": {
+    "w1": "318ef7f3b44be590a68f86fcbabedbe4e77f579a95466c93b998e571cd498b44",
+    "w4": "52b3b13c92050a6427a6ffd8abfc5f888a5e69b5095e9c4b152e3e4d1b9afaa4",
+    "w8": "2d71a90ccf769b1391349a093e825b626f8b0d963d7b3139acc8fa7dd62465f6"
+   },
+   "compared": "checkpoint + ordered WAL tail; per-frame canonicalStateHash/postStateHash, ordered output (outbox) digests, entity effects, entity frame events and local continuations: W1 = W4 = W8 and runtimeFrames/effects equal the live source",
+   "wallMs": {
+    "w1": 50817.5,
+    "w4": 40008.3,
+    "w8": 41216.9
+   }
+  }
+ },
+ "notCovered": [
+  "public Nile/mainnet TRON, real USDT, real funds",
+  "Rust W1/W4 replay (xlnrs binary older than rscore source)",
+  "public deployment of current SHA (public frontend/backend still 02829e139)",
+  "owner cold-key control and mainnet activation packets"
+ ]
+}
