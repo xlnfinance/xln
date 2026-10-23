@@ -1,9 +1,11 @@
 import type { RuntimeReplica } from '../types.ts';
+import type { EntityReplica } from '../../entity/types';
 import { inferRuntimeLifecyclePhase } from '../replica/lifecycle.ts';
 import { requestRuntimeLoopWake } from '../mempool/input-queue.ts';
 import { getRemainingRuntimeFrameDelayMs } from './loop-work.ts';
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope.ts';
 import { hasQueuedOrPendingAccountWork } from '../../entity/consensus/account/work-index';
+import { ACCOUNT_WORK_PENDING, ACCOUNT_WORK_QUEUED } from '../../entity/account/account-work-flags';
 import { sleep } from '../../support/boundary-guards';
 
 export type RuntimeDrainDeps = {
@@ -41,13 +43,52 @@ const waitForProcessingCycle = async (env: RuntimeReplica, remaining: number): P
   ]);
 };
 
-const hasRuntimeDrainBlocker = (env: RuntimeReplica): boolean => {
+export type RuntimeDrainOptions = {
+  allowPersistencePaused?: boolean;
+  /**
+   * Durable node shutdown only. An Account whose pendingFrame awaits a peer
+   * that holds no transport is parked, not local work: its committed Account
+   * output is still retained undelivered in the Runtime outbox, so no ACK can
+   * be in flight, and the Entity frame plus that ordered outbox are already
+   * in the Runtime WAL. Recovery rebuilds the same signed frame and redelivers
+   * it on reconnect. A wallet lock never sets this and keeps waiting.
+   */
+  parkUndeliveredPeerFrames?: boolean;
+};
+
+const undeliveredAccountEdges = (env: RuntimeReplica): Set<string> => {
+  const edges = new Set<string>();
+  for (const output of env.pendingNetworkOutputs ?? []) {
+    for (const tx of output.entityTxs ?? []) {
+      if (tx.type === 'accountInput') edges.add(`${tx.data.fromEntityId}:${tx.data.toEntityId}`);
+    }
+  }
+  return edges;
+};
+
+const hasUnparkedAccountWork = (
+  replica: EntityReplica,
+  parked: Set<string>,
+): boolean => {
+  const { accounts, entityId } = replica.state;
+  for (const flag of [ACCOUNT_WORK_QUEUED, ACCOUNT_WORK_PENDING] as const) {
+    for (const counterpartyId of accounts.workKeys(flag)) {
+      const waitsOnPeer = Boolean(accounts.get(counterpartyId)?.pendingFrame) &&
+        parked.has(`${entityId}:${counterpartyId}`);
+      if (!waitsOnPeer) return true;
+    }
+  }
+  return false;
+};
+
+const hasRuntimeDrainBlocker = (env: RuntimeReplica, options: RuntimeDrainOptions): boolean => {
   // A proposal awaiting its peer has no local wake work, but is not drained.
   // Otherwise the quiet window can expire before the ACK arrives and a wallet
   // lock closes the only transport carrying that accepted financial work.
+  const parked = options.parkUndeliveredPeerFrames ? undeliveredAccountEdges(env) : null;
   for (const replica of env.state.eReplicas.values()) {
-    if (replica.mempool.length > 0 || replica.proposal || replica.lockedFrame ||
-      hasQueuedOrPendingAccountWork(replica.state)) return true;
+    if (replica.mempool.length > 0 || replica.proposal || replica.lockedFrame) return true;
+    if (parked ? hasUnparkedAccountWork(replica, parked) : hasQueuedOrPendingAccountWork(replica.state)) return true;
   }
   const state = env.infrastructure;
   return Boolean(
@@ -79,7 +120,7 @@ export const waitForRuntimeWorkDrained = async (
   deps: RuntimeDrainDeps,
   timeoutMs = 10_000,
   quietMs = 250,
-  options: { allowPersistencePaused?: boolean } = {},
+  options: RuntimeDrainOptions = {},
 ): Promise<boolean> => {
   const startedAt = Date.now();
   let idleSince: number | null = null;
@@ -92,7 +133,7 @@ export const waitForRuntimeWorkDrained = async (
     const hasDrainableWork = deps.hasRuntimeWork(env);
     const hasWork =
       hasDrainableWork ||
-      hasRuntimeDrainBlocker(env) ||
+      hasRuntimeDrainBlocker(env, options) ||
       Boolean(env.infrastructure?.processingPromise);
     if (!hasWork) {
       idleSince ??= Date.now();

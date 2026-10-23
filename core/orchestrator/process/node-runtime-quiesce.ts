@@ -70,6 +70,12 @@ export const quiesceNodeRuntime = async (
   const failures: string[] = [];
   let runtimeDrained = false;
   let runtimeIdle = false;
+  // A node stops with a WAL-backed Runtime: an Account frame whose output is
+  // still retained for an unreachable peer is recovered, not drained.
+  const drainOptions = {
+    allowPersistencePaused: options.allowPersistencePausedDrain === true,
+    parkUndeliveredPeerFrames: true,
+  };
 
   // Establish the ingress fence first. The runtime loop remains alive long
   // enough to drain accepted work, but cannot restart a stopped J watcher.
@@ -84,7 +90,7 @@ export const quiesceNodeRuntime = async (
       env,
       options.workTimeoutMs,
       options.quietMs,
-      { allowPersistencePaused: options.allowPersistencePausedDrain === true },
+      drainOptions,
     );
     if (!runtimeDrained) failures.push('work_drain_timeout');
   } catch (error) {
@@ -97,7 +103,7 @@ export const quiesceNodeRuntime = async (
         env,
         options.workTimeoutMs,
         options.quietMs,
-        { allowPersistencePaused: options.allowPersistencePausedDrain === true },
+        drainOptions,
       );
       if (!runtimeDrained) failures.push('barrier_drain_timeout');
     } catch (error) {

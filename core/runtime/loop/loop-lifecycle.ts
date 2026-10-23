@@ -22,6 +22,7 @@ import {
 import {
   waitForPromiseBeforeTimeout,
   waitForRuntimeWorkDrained,
+  type RuntimeDrainOptions,
 } from './loop-drain.ts';
 import { emitRuntimeLoopError, reportFatalLoopError } from './loop-failure.ts';
 import { sleep } from '../../support/boundary-guards';
@@ -282,7 +283,7 @@ export const createRuntimeLifecycleApi = (deps: RuntimeLoopLifecycleDeps) => ({
     env: RuntimeReplica,
     timeoutMs = 10_000,
     quietMs = 250,
-    options: { allowPersistencePaused?: boolean } = {},
+    options: RuntimeDrainOptions = {},
   ) => waitForRuntimeWorkDrained(
     env,
     deps,

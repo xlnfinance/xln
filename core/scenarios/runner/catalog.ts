@@ -51,6 +51,13 @@ export const SCENARIOS: ScenarioMetadata[] = [
     run: async (env) => (await import('../payments/hub-preserved-reserve-refill')).hubPreservedReserveRefill(env),
   },
   {
+    id: 'hub-quiesce-offline-peer', name: 'Hub Quiesce With Offline Peer',
+    description: 'Node shutdown quiesce keeps a signed frame owed to an offline peer and recovers it from the WAL',
+    tags: ['hub', 'quiesce', 'recovery'],
+    browserSafe: false, browserUnsafeReason: 'Closes and reopens the durable Runtime WAL.',
+    run: async (env) => (await import('../payments/hub-quiesce-offline-peer')).hubQuiesceOfflinePeer(env),
+  },
+  {
     id: 'rebalance', name: 'Reserve Rebalance',
     description: 'Reserve rebalancing through the settlement pipeline', tags: ['settlement', 'rebalance'],
     browserSafe: false, browserUnsafeReason: 'Requires the external RPC settlement adapter.',
@@ -175,7 +182,7 @@ const SMOKE_SCENARIOS = [
 const CORE_SCENARIOS = [
   'lending-lifecycle', 'lending-before-deadline', 'lending-after-deadline',
   'ahb', 'lock-ahb', 'htlc-lazy', 'htlc-4hop', 'htlc-ack-recovery',
-  'hub-preserved-reserve-refill', 'swap', 'swap-market', 'multi-sig',
+  'hub-preserved-reserve-refill', 'hub-quiesce-offline-peer', 'swap', 'swap-market', 'multi-sig',
   'settle', 'rebalance', 'settle-rebalance', 'processbatch',
   'dispute-lifecycle', 'dispute-transformer', 'cross-j',
 ] as const;
