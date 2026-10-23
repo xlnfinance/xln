@@ -138,6 +138,7 @@
     "bench:radapter:hub1m": "bun --expose-gc core/scripts/operations/benchmark/bench-radapter-hub-1m.ts --accounts=1000000 --hot-percent=1 --memory=hot --seed-mode=bulk --chunk=10000 --traffic-rounds=10 --touch-per-round=100 --keep-db",
     "bench:radapter:hub1m:allmem": "bun --expose-gc core/scripts/operations/benchmark/bench-radapter-hub-1m.ts --accounts=1000000 --hot-percent=1 --memory=all --seed-mode=bulk --chunk=10000 --traffic-rounds=10 --touch-per-round=100 --keep-db",
     "test:scenarios:parallel:isolated": "bun core/scenarios/run.ts",
+    "test:scenarios:core": "bun tools/stand-lock.ts run --reason core-scenarios --timeout-ms 600000 -- bun core/scenarios/run.ts all --set=core --workers=4",
     "test:unit": "bun core/scripts/e2e/runners/run-unit-tests.ts",
     "test:stress:storage": "bun core/scripts/e2e/runners/run-unit-tests.ts core/__tests__/storage/operations/storage-hub-10k-checkpoint-rollover.test.ts",
     "test:all:fast": "bun core/scripts/e2e/runners/run-all-tests-fast.ts",

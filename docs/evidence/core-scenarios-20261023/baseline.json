@@ -1,0 +1,281 @@
+{
+  "engineBaseSHA": "51a24089c3ce74a809eb13db760f054944cedcae",
+  "scope": "Recorded before the bank-policy admission fix, with new scenario files in the working tree; not a clean-source release receipt.",
+  "seed": "determinism-test-seed-42",
+  "scenarios": 17,
+  "frames": 1379,
+  "records": [
+    {
+      "baseHeight": 1,
+      "evidenceHash": "0da34449d69197ad70e762713f0ead90e7c3c6369fa8d846a7bf107de3047c30",
+      "finalHash": "0x3464fbc291e22d3b229696b7bf233414bfa2c04bd725aee008d4527e6f9a22f7",
+      "frames": 17,
+      "recordingManifestHash": "0xe495b6e2e2fba7b7fa3f10083c887f9c322742b7b15e69d390b7cd9ed5b8e270",
+      "scenario": "htlc-ack-recovery",
+      "targetHeight": 18,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "htlc-ack-recovery.recording.json.gz",
+      "recordingSHA256": "967d80e0725cd341fb8ef9d72d2a5ce0c12a087cd2bb6ea6a0403f8c252d2a45",
+      "archiveSHA256": "4a488c823c90dbb51486eca4767ae15efcd8d208b9fc951b4835c2fbdf7dc310"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "d35f62a6d7724b6ad8e24c2c558b6454ee504bcb2766999e413168211f40957f",
+      "finalHash": "0x1bb3e9eb332a0b5890ce7f3743d7263e6ab235164305b1dc896ab68802074e09",
+      "frames": 10,
+      "recordingManifestHash": "0xb5b31466ccf7f3174c3b5a9aeb63e23ff19b40848dd1264328dc78500311092f",
+      "scenario": "hub-preserved-reserve-refill",
+      "targetHeight": 11,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "hub-preserved-reserve-refill.recording.json.gz",
+      "recordingSHA256": "d0c98c925f077d4d311e0030c8df28e32df08bad9eae74e06bbe5415ff9547df",
+      "archiveSHA256": "a39db4ea381ba75c4e692c6c9f8f4e9f5e08c1e65cb7be524f3a7c0f99d684ad"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "689adaf9dc03ad71835c0937d829983aabc21ef79b9d0cce8764c8304d65fded",
+      "finalHash": "0x6efa041e5b48ef5adb0c870c65149bfdd83a63cf15be312bfcaba42749ddeba6",
+      "frames": 150,
+      "recordingManifestHash": "0x9ae148901413b40333874f6e79a456a78a0a35c7c4dc2089ef2be774a6e788de",
+      "scenario": "lending-after-deadline",
+      "targetHeight": 151,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "lending-after-deadline.recording.json.gz",
+      "recordingSHA256": "7c05f542f6e907563a1347280969b457db8420752c69a48d916a12cabd8b6a61",
+      "archiveSHA256": "d53ed0186c82c4c61dc35f4ff6733e86bd1afc8202701bd643f28215d3416c4e"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "3ad1f3f7b98bbb521d55e42829352827a195ed2db45fcac18f68a91b05cf1564",
+      "finalHash": "0xb8b4a554c0930a23c0cfaf039a046a5d025ff33dad713a2d4affc1f0d4f5b751",
+      "frames": 150,
+      "recordingManifestHash": "0xfdcc3d452f572621bd0566c3fbee4a70f8adacb9f9caa7db86a8842f0ff542c2",
+      "scenario": "lending-before-deadline",
+      "targetHeight": 151,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "lending-before-deadline.recording.json.gz",
+      "recordingSHA256": "f1d6c3c811e6d04c935a8cfe43dd978082528e607b633f7104ec859c7fbb6087",
+      "archiveSHA256": "592c652edac65d0f67f789e25fba6d4d86acb0f1023e9b5ecbece42aa3c30288"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "c8ec365438290b35efb540ceb83245527d71639d724f43da889531cb640b67d9",
+      "finalHash": "0xfa2a9a542ab52cb169b951170cc1f2bf13e1ff6e410294b535deda1aa188268a",
+      "frames": 150,
+      "recordingManifestHash": "0xc1f4f53dbe83b453ae430f8db8c647f24a5b44c6925cd101ac326cd8b6e73354",
+      "scenario": "lending-lifecycle",
+      "targetHeight": 151,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "lending-lifecycle.recording.json.gz",
+      "recordingSHA256": "978996a1394eaec712f587a689c99619cb131a6a422a54974504bd93d4d5f117",
+      "archiveSHA256": "ec6d7855eaa5ed26ee2bf349d21d6c6c13013395ab2ad102b9a8b6598b178e04"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "a4990b24fb095f86b12526b973792d84505f149cb505ca3a1a7c9968d03c7a8e",
+      "finalHash": "0x238893e156283581a0c4d4044a39c391644c461dfced0f3344799a9312b6cf10",
+      "frames": 90,
+      "recordingManifestHash": "0x65ffbd4c4afeeee6b303511f7c9e26d84e762e6b62fc7e62884f2461a90fd29d",
+      "scenario": "lock-ahb",
+      "targetHeight": 91,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "lock-ahb.recording.json.gz",
+      "recordingSHA256": "fd4884027e0c09545eb691ff5cb1efbdc15a9521be6acea260dbf74b964af4b7",
+      "archiveSHA256": "b131cf7dd589c4e0ee59907b4ce46942f74fdc48432e16b86a061ba69489d399"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "5b50d8550302eb7144366978fcbc2ea2625cff6ad9dbe8f6b5a14c8fa178252d",
+      "finalHash": "0x3c9ad0c7c1ea2bc644fce6619357bb94c8616e8c9f71481c39ab2e68fa164bb8",
+      "frames": 75,
+      "recordingManifestHash": "0x66de764b31b52d50602caa8f0cd80e172423120b793cd7df675ce30a6fe12288",
+      "scenario": "rebalance",
+      "targetHeight": 76,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "rebalance.recording.json.gz",
+      "recordingSHA256": "bd20c9d22d7bfd3d8f3704a69b0a10af2f7cfa5b4d31832dbd5605dcca25e7c9",
+      "archiveSHA256": "2034fed64861ec3980a60f8963fe1966e4f820d84ecc2998ba7fd968b214b89b"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "5eb92a7cd520e44dea2c9a6e743c91dcc5a9e7869af71e5a7911cc30249d894a",
+      "finalHash": "0x03ebf04e360d311b9e3be3ee929a518bf6929eeeba74cac6585f7111d8027794",
+      "frames": 27,
+      "recordingManifestHash": "0x958f7f119af47c485943c98c0dbb99e887a7730b5e1d01be466b3831e4567481",
+      "scenario": "dispute-lifecycle",
+      "targetHeight": 28,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "dispute-lifecycle.recording.json.gz",
+      "recordingSHA256": "e5f8c18e5d9175c786cf7f0b05527ee57e2501ce63db6dea152f76102b3c9f3d",
+      "archiveSHA256": "f029cad86b85b82c08266aede8af1908bb96f692aaef553b4218a64e9289e7c6"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "262838b49780f109c9972773b5c8b2285f12c8794b487e019b5ed601d3f0e34d",
+      "finalHash": "0xee4004cbcb915989a5a0c3cbf8d524d0474ccecd34713d4eee0b208f4ac97a65",
+      "frames": 39,
+      "recordingManifestHash": "0xa62f685f5fe0c0672921c8bb4fc3583ab24ff42f6ce5adbbec73b7363bb8851c",
+      "scenario": "dispute-transformer",
+      "targetHeight": 40,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "dispute-transformer.recording.json.gz",
+      "recordingSHA256": "a0682dc0f85245fe1cd37ac7c02caea25f5acb0d81d26d4ba600e3c5f5e211cb",
+      "archiveSHA256": "0b66f743343b5339c834e4387747bec0265c7448e836355a8018d64777369ebd"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "22266126e143c3a2b565290f6cabe03979dd7f7ff31a675433cf8a877cfac08d",
+      "finalHash": "0x1616c2d3a2a39380925beefab626e128e33244c48faa4e6720a533d25bbfc247",
+      "frames": 86,
+      "recordingManifestHash": "0xa2b4421fda0328746479667e3af6f1963ce27724e9e5dadb428235ca712d4341",
+      "scenario": "htlc-4hop",
+      "targetHeight": 87,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "htlc-4hop.recording.json.gz",
+      "recordingSHA256": "3c9b177e482d98a40b322347744af798932ddf18efdad4a5f0a5d58f80879265",
+      "archiveSHA256": "d2c30d7afdbc786c6f975bd2452cc18e6655f34b821c8c4b776e1fa24aab07ee"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "18557dcc044bfed7df522c9f86c60cda09717ccd7b0fa48a5d274d215426961f",
+      "finalHash": "0xf0d5e7c3d4a6e704b93313d0fe2ffdc02143772923eccb973746ba24eb07d5b6",
+      "frames": 22,
+      "recordingManifestHash": "0xe26794a42bc046a494581f3bae9baceb129bd6f45042fd13f7be235bf9f50fac",
+      "scenario": "htlc-lazy",
+      "targetHeight": 23,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "htlc-lazy.recording.json.gz",
+      "recordingSHA256": "93dbe228985d556936bc08dab7ad404807ee5b29783ead14114e2e7e7923ad40",
+      "archiveSHA256": "8a2dc968d2c005fc0d9e48d6f110d77a8d32f268f1e8a54cdd746d6f319db713"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "e9f2dbcbd2e6ac86bd02b75fa1ea78dd323707bdbbca5f8d87ea7685a1eb5ce5",
+      "finalHash": "0x9707f2d847e5ad25a2cb81bfee512863ad74576bbec23b2020b35b3ec439d72d",
+      "frames": 169,
+      "recordingManifestHash": "0x0c4f582e61deccdc1dc2920cff5842305be983f549429f965302ff8198aa62ce",
+      "scenario": "multi-sig",
+      "targetHeight": 170,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "multi-sig.recording.json.gz",
+      "recordingSHA256": "690f96d63d5b2beda9a17f4fa29c8ff2837a0f0856056555d73fde356e1a3f84",
+      "archiveSHA256": "339d09b661bc47f6a3d45f7fc090e10ac3ddf50062acf2830f2d43261afda13d"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "70e1375429e762e6621e81b5c3a6fd2346a979b13a7bbc4ee166c41547161421",
+      "finalHash": "0xca524cd7f9a1c4cc263590f0664d78fd332b3fcfb9962b9bcf5bf64b76113454",
+      "frames": 38,
+      "recordingManifestHash": "0xfc7474d2f9b5d820cb04fc50976b337350f7870630366c2164f78ba33804c515",
+      "scenario": "processbatch",
+      "targetHeight": 39,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "processbatch.recording.json.gz",
+      "recordingSHA256": "a9a74e28892b452eb4382618378c88f687af282a7c3026546ec41b3b91f91f2f",
+      "archiveSHA256": "1d1265fe2862518c1b1b445f14f4a0b4f147ba4b5e9a884109001ecd6d49e4ba"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "03bf6193d3880dd2976d41769223ce7a51425d2983e8f13a807c100bc134b6d1",
+      "finalHash": "0x47ffb7f785461400041696e1353314721f074e9ebb2ac860fa2466ac378a053c",
+      "frames": 75,
+      "recordingManifestHash": "0x246230436bb96a11ceeb784678db2a17db3243cd031d6dee5d7e7697e5cbfe38",
+      "scenario": "settle",
+      "targetHeight": 76,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "settle.recording.json.gz",
+      "recordingSHA256": "ceb02e1e5f143d1e3f42842f0a4ef9a32cbbabf4420d9bf1ab182f8187a6c907",
+      "archiveSHA256": "7ca1a09378d7a1b1b2257ca5b70201447ad931fc6b0e1ff33b614ab858d5e3a9"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "eff648fb8d3c72286d2dd7f8148252c33c398d1af4da8511e908541dc4649df4",
+      "finalHash": "0x7fa8fa691dde56a79724b59943f8c8f4804876a6ce67974b81cd5099e03094f8",
+      "frames": 108,
+      "recordingManifestHash": "0x85bee2964e3d3e4440b3908a219b45e5dc153fa8ae0bd5f33b10d40d9c64ddd8",
+      "scenario": "settle-rebalance",
+      "targetHeight": 109,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "settle-rebalance.recording.json.gz",
+      "recordingSHA256": "9abec6d850f45651b2ebb53836d1f65ebf0adb6b5665623dad90d0987589476c",
+      "archiveSHA256": "77267b29a9bb5d448846f96920e590d7b3eca8dd325799fbcac9bd5253c2c614"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "4bf22e0692b978c88be866cc608cea1fdf168a0fe63c311639a9b99d0bd149da",
+      "finalHash": "0xf7324b9e7782f1065bfd562dcd109397b9b69d7001d7adc454e5348f97623b2e",
+      "frames": 75,
+      "recordingManifestHash": "0x199f894ada06da4b62f4dfc18f7764f205280c4ae4779a2b7eaa59ee5c9ae5be",
+      "scenario": "swap",
+      "targetHeight": 76,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "swap.recording.json.gz",
+      "recordingSHA256": "a6df6a214f1042d002c800458ae4e59521e3ec4da5aa9e1fba3780a4d8ac98a5",
+      "archiveSHA256": "f409cfafe31810ed18d0dd0e812b959e7d135d4f29cb9b5a10e1104c6ef7d03a"
+    },
+    {
+      "baseHeight": 1,
+      "evidenceHash": "d67349ea2cf237668b3c35d95c3a2ef02bc1ac117fe685dc231aaecbe4d9e4ad",
+      "finalHash": "0xa5bb7897240d5cf06860302fce9f242b7cad1249b9214dd6a164d19ebd6db728",
+      "frames": 98,
+      "recordingManifestHash": "0xa57f449349c5e4ed7c9b47eb7f983963b5e0a250a331ca9163b9a86a3a66675f",
+      "scenario": "swap-market",
+      "targetHeight": 99,
+      "workers": [
+        1,
+        4
+      ],
+      "recording": "swap-market.recording.json.gz",
+      "recordingSHA256": "b61561cc1a4ec5803018d769e77758309c70c0c36f8eca0918e92668e585addd",
+      "archiveSHA256": "4aa0a34bcb21df7940fb15b52ef7ca6e20099180b2abc47bba40fee7d53b3676"
+    }
+  ]
+}

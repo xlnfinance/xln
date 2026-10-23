@@ -234,14 +234,10 @@ jobs:
           runtime_stands=(
             core/__tests__/development/dev/dev-anvil-shutdown.test.ts
             core/__tests__/operations/hlt/sovereign-runtime-host.test.ts
+            core/__tests__/storage/durability/lending-real-crash-recovery.test.ts
           )
           ignore=()
           for file in "${runtime_stands[@]}"; do ignore+=("--path-ignore-patterns=**/$file"); done
-          # Owner launch scope: new lending origination is rejected. Preserve
-          # its frozen crash scenarios without claiming the product works;
-          # deferred-entity-admission and historical proof/storage tests run.
-          frozen_profile=(core/__tests__/storage/durability/lending-real-crash-recovery.test.ts)
-          for file in "${frozen_profile[@]}"; do ignore+=("--path-ignore-patterns=**/$file"); done
           failed=()
           run_shard() {
             local label=$1
@@ -258,7 +254,12 @@ jobs:
           for file in "${runtime_stands[@]}"; do
             echo "::group::$file"
             bun run stand:status
-            if ! bun run stand:run --reason ci-unit-runtime --timeout-ms 180000 -- bun test "$file"; then
+            runtime_wall_budget=180000
+            # Five crash cases retain their individual 60-second test deadlines.
+            if [ "$file" = core/__tests__/storage/durability/lending-real-crash-recovery.test.ts ]; then
+              runtime_wall_budget=300000
+            fi
+            if ! bun run stand:run --reason ci-unit-runtime --timeout-ms "$runtime_wall_budget" -- bun test "$file"; then
               failed+=("$file")
             fi
             echo "::endgroup::"
@@ -268,8 +269,8 @@ jobs:
             exit 1
           fi
 
-  scenario-lock-ahb:
-    name: Scenario lock-ahb
+  core-scenarios:
+    name: Core scenarios without a browser
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -305,11 +306,13 @@ jobs:
       - name: Build contracts
         run: bun run env:build
 
-      # HTLC lock/resolve lifecycle through the canonical scenario runner on the
-      # in-process BrowserVM J-adapter. The default rpc mode leases local ports
-      # through lsof and has not been verified for CI yet.
-      - name: Run HTLC lock lifecycle scenario
-        run: XLN_RUNTIME_SEED="$(openssl rand -hex 32)" bun core/scenarios/run.ts lock-ahb --mode=browservm
+      - name: Setup Foundry for isolated RPC scenarios
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
+        with:
+          version: stable
+
+      - name: Run core financial and recovery scenarios
+        run: bun run test:scenarios:core
 
   e2e-tests:
     name: E2E Tests

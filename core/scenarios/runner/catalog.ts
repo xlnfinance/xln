@@ -16,6 +16,28 @@ export type ScenarioMetadata = BrowserAvailability & {
 
 export const SCENARIOS: ScenarioMetadata[] = [
   {
+    id: 'lending-lifecycle', name: 'Signed Lending Lifecycle',
+    description: 'Bank facility, savings, partial repayment, exact default deadline and capped repayment',
+    tags: ['lending', 'core', 'recovery'],
+    browserSafe: false, browserUnsafeReason: 'Requires durable WAL export and verified recovery.',
+    provePersistence: true,
+    run: async (env) => (await import('../lending/lifecycle')).lendingLifecycle(env),
+  },
+  {
+    id: 'lending-before-deadline', name: 'Lending Before Deadline',
+    description: 'Independent signed lifecycle observed one millisecond before default',
+    tags: ['lending', 'core', 'recovery'],
+    browserSafe: false, browserUnsafeReason: 'Requires durable WAL export and verified recovery.', provePersistence: true,
+    run: async (env) => (await import('../lending/lifecycle')).lendingLifecycle(env, -1),
+  },
+  {
+    id: 'lending-after-deadline', name: 'Lending After Deadline',
+    description: 'Independent signed lifecycle observed one millisecond after default',
+    tags: ['lending', 'core', 'recovery'],
+    browserSafe: false, browserUnsafeReason: 'Requires durable WAL export and verified recovery.', provePersistence: true,
+    run: async (env) => (await import('../lending/lifecycle')).lendingLifecycle(env, 1),
+  },
+  {
     id: 'htlc-ack-recovery', name: 'Late HTLC ACK Recovery',
     description: 'Withheld upstream ACK, WAL reopen and real jurisdiction dispute', tags: ['htlc', 'dispute', 'recovery'],
     browserSafe: false, browserUnsafeReason: 'Closes and reopens the durable Runtime WAL.',
@@ -148,8 +170,19 @@ const SMOKE_SCENARIOS = [
   'multi-sig',
 ] as const;
 
+// Active financial/consensus paths. Visual grid, load stands and the parked
+// company product remain available through the explicit full catalog.
+const CORE_SCENARIOS = [
+  'lending-lifecycle', 'lending-before-deadline', 'lending-after-deadline',
+  'ahb', 'lock-ahb', 'htlc-lazy', 'htlc-4hop', 'htlc-ack-recovery',
+  'hub-preserved-reserve-refill', 'swap', 'swap-market', 'multi-sig',
+  'settle', 'rebalance', 'settle-rebalance', 'processbatch',
+  'dispute-lifecycle', 'dispute-transformer', 'cross-j',
+] as const;
+
 export const resolveScenarioSet = (set: string): readonly string[] => {
   if (set === 'smoke') return SMOKE_SCENARIOS;
+  if (set === 'core') return CORE_SCENARIOS;
   if (['all', 'everything', 'full', 'full-catalog'].includes(set)) {
     return SCENARIOS.map(scenario => scenario.id);
   }

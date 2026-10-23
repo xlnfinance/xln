@@ -26,10 +26,6 @@ const EXTERNAL_RUNTIME_CONSUMERS: Readonly<Record<string, readonly ExternalRunti
     consumer: 'ui/src/runtime/financial/lending.ts',
     specifier: '@xln/core/lendbook/state',
   }],
-  'core/lendbook/policy.ts': [{
-    consumer: 'ui/src/runtime/financial/lending.ts',
-    specifier: '@xln/core/lendbook/policy',
-  }],
   'core/api/server/rpc/proxy-safety.ts': [{
     consumer: 'frontend/src/routes/rpc-proxy-safety.ts',
     specifier: '@xln/core/api/server/rpc/proxy-safety',

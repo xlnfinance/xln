@@ -658,6 +658,13 @@ describe('runtime recovery tower', () => {
 
     const recording = buildRuntimeRecording([snapshotBundle, tailBundle], 10_002);
     expect(validateRuntimeRecording(recording).manifestHash).toBe(recording.manifestHash);
+    expect(validateRuntimeRecording(deserializeTaggedJson(serializeTaggedJson(recording))).manifestHash)
+      .toBe(recording.manifestHash);
+    for (const invalid of [null, [], {}, { ...recording, bundles: null },
+      { ...recording, bundleHashes: [1] }, { ...recording, createdAt: Number.NaN },
+      { ...recording, untrustedExtra: true }]) {
+      expect(() => validateRuntimeRecording(invalid)).toThrow();
+    }
     const detached = openDetachedRuntimeRecording(recording, runtimeSeed);
     const baseProjection = await detached.readAtHeight(baseHeight);
     expect(baseProjection.state.height).toBe(baseHeight);
