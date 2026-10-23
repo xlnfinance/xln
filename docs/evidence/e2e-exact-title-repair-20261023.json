@@ -1,0 +1,95 @@
+{
+  "baseSHA": "a4322cc90403600830d0d955d784333969c6496e",
+  "scope": "Focused verification of the owned title-selection patch, not final-release certification. Fresh check/push receipts are indexed by the resulting committed SHA.",
+  "firstFailure": {
+    "run": "20261023-043554-622",
+    "primaryShard": 81,
+    "error": "E2E_PLAYWRIGHT_REQUIRED_PASS_INVALID",
+    "cause": "Leaf substring ahb also selected lock-ahb. Both browser tests passed, but the required exact-one report guard correctly rejected the shard.",
+    "required": 158,
+    "passed": 101,
+    "failed": 1,
+    "cancelled": 1,
+    "notStarted": 55,
+    "receipt": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/chain-a4322cc90403/exact-full158-summary.json"
+  },
+  "fix": "Derive the selector from the full Playwright-discovered title path, including inherited tag positions, and anchor its end. Retain the exact-one execution validator.",
+  "verification": {
+    "l1": "19/19 tests,42 assertions",
+    "realCli": "7/7 existing demo cases selected exactly once by the real Playwright CLI",
+    "sameBrowserArtifact": "1/1 ahb passed with strict browser health",
+    "related": "101/101 tests,620 assertions",
+    "selectionRetention": {
+      "original": 158,
+      "current": 158,
+      "removed": [],
+      "added": [],
+      "proof": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/e2e-title-retention-a432-01.json"
+    }
+  },
+  "receipts": {
+    "l1Before": {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/e2e-title-first-l1-a432-01.result.json",
+      "sha256": "c55deb2799c7cbf1479f8aa6e345d0303a87344bc0c9ae8af758456d83d18414",
+      "exitCode": 1,
+      "seconds": 4.247682417,
+      "sourceUnchanged": true,
+      "logSHA256": "826bd1d0890462ac2cfaacaece1b196ede1b5d2b526d13793fa9bdcf3380bc69"
+    },
+    "l1After": {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/e2e-title-fixed-l1-a432-01.result.json",
+      "sha256": "70137f954737c5650e6233298cdd575a020ddfc4a4bde16330d9b93ba0704f84",
+      "exitCode": 0,
+      "seconds": 13.638932667,
+      "sourceUnchanged": true,
+      "logSHA256": "f8d4c9f8fbf82f6d89ffa4fcb26b4546d1350bfc0e986d9468aa2425da09327d"
+    },
+    "realCli": {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/e2e-title-cli-l2-a432-01.result.json",
+      "sha256": "d47f020e0f012806316ac868d767c24972351201ce6cafd8c588650cc65491a7",
+      "exitCode": 0,
+      "seconds": 10.993117792000001,
+      "sourceUnchanged": true,
+      "logSHA256": "874f168355b5914382fde660f2657f90f2f08f4f75baffa416df54f906801505"
+    },
+    "browserRepeat": {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/e2e-title-browser-l2-a432-01.result.json",
+      "sha256": "24234468f6855defcda1fe7410401eee11dcd56558c5e400778170f1d60e284b",
+      "exitCode": 0,
+      "seconds": 76.663502541,
+      "sourceUnchanged": true,
+      "logSHA256": "e5b8f73d2f1140b6cfda3ed9c21b35782215a4ae55bda7cbfd2afc809f0aff7d"
+    },
+    "targetRetention": {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/e2e-title-retention-a432-01.result.json",
+      "sha256": "e99cc11143e704ce61d12c320d5afa242fb6d78b99ea1df0672c5c7290b825c7",
+      "exitCode": 0,
+      "seconds": 6.353456208,
+      "sourceUnchanged": true,
+      "logSHA256": "14e58ee72ac01bc770b50dde0c1617870cd0c588ccae75a229d2822f69d3fe07"
+    },
+    "related": {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/e2e-title-related-l3-a432-01.result.json",
+      "sha256": "0307c94f56f6399acaadffc33ecfd49fa4a539e63de222008d0245758a3f9341",
+      "exitCode": 0,
+      "seconds": 29.099811334,
+      "sourceUnchanged": true,
+      "logSHA256": "269bb789b602163c686e9a7ed50a5c034640a4d4bd543a747fa8a483886cd771"
+    }
+  },
+  "sourceSHA256": {
+    "core/__tests__/testing/qa/playwright-target-discovery.test.ts": "aba38509d2a095cb82ee375c4fe936cd91c5e41ee0b9b048a7941a69a2221704",
+    "core/scripts/e2e/harness/playwright-test-metadata.ts": "e03fb27ad64c4fee9b265727de31d2916685c023359d906c03e07f7835a880c2",
+    "core/scripts/e2e/runners/run-e2e-parallel-isolated.ts": "fe61f7166d36c78c9a32f78edb6fd4e4b50008c4693dd7ae28e91673941f2e29",
+    "core/__tests__/testing/qa/qa-test-categories.test.ts": "d1b74e87d3a596585e79d62e299cf15f9fea1e28d823a622f6fc019771091183"
+  },
+  "unchanged": [
+    "Required158 target identities",
+    "Financial assertions",
+    "Exact-one report guard",
+    "Per-test and stack deadlines",
+    "Hooks and debt baseline",
+    "Foreign BrainVault files"
+  ],
+  "remaining": "All final release flows require fresh complete evidence on one final immutable SHA; earlier full158 remains failed."
+}

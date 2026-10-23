@@ -61,6 +61,7 @@ test('parses Playwright JSON metadata and restores native tag prefixes', () => {
     errors: [],
     suites: [
       {
+        title: 'open-account.spec.ts',
         specs: [
           {
             title: 'opens an account',
@@ -79,6 +80,7 @@ test('parses Playwright JSON metadata and restores native tag prefixes', () => {
       file: 'tests/open-account.spec.ts',
       line: 7,
       title: 'opens an account',
+      titlePath: ['open-account.spec.ts', 'opens an account'],
       tags: ['@functional'],
     },
   ]);

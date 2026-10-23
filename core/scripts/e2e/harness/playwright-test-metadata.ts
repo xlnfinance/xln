@@ -3,6 +3,7 @@ import { relative, resolve } from 'node:path';
 import type { QaTaggedTest } from '../../../qa/test-categories';
 
 type JsonRecord = Record<string, unknown>;
+type PlaywrightTestMetadata = QaTaggedTest & { titlePath: string[] };
 
 const record = (value: unknown): JsonRecord =>
   value !== null && typeof value === 'object' ? (value as JsonRecord) : {};
@@ -15,7 +16,13 @@ const normalizeTag = (value: unknown): string => {
   return tag && !tag.startsWith('@') ? `@${tag}` : tag;
 };
 
-const collectSuiteTests = (suite: JsonRecord, rootDir: string, out: QaTaggedTest[]): void => {
+const collectSuiteTests = (
+  suite: JsonRecord,
+  rootDir: string,
+  out: PlaywrightTestMetadata[],
+  parentTitles: string[] = [],
+): void => {
+  const titlePath = [...parentTitles, String(suite['title'] ?? '')].filter(Boolean);
   for (const spec of records(suite['specs'])) {
     const title = String(spec['title'] ?? '').trim();
     const file = String(spec['file'] ?? '').trim();
@@ -25,13 +32,14 @@ const collectSuiteTests = (suite: JsonRecord, rootDir: string, out: QaTaggedTest
       file: normalizePath(relative(process.cwd(), resolve(rootDir, file))),
       line: Number.isFinite(line) && line > 0 ? Math.floor(line) : null,
       title,
+      titlePath: [...titlePath, title],
       tags: Array.isArray(spec['tags']) ? spec['tags'].map(normalizeTag).filter(Boolean).sort() : [],
     });
   }
-  for (const child of records(suite['suites'])) collectSuiteTests(child, rootDir, out);
+  for (const child of records(suite['suites'])) collectSuiteTests(child, rootDir, out, titlePath);
 };
 
-export const parsePlaywrightTestMetadata = (payload: unknown): QaTaggedTest[] => {
+export const parsePlaywrightTestMetadata = (payload: unknown): PlaywrightTestMetadata[] => {
   const report = record(payload);
   const config = record(report['config']);
   const rootDir = String(config['rootDir'] ?? '').trim();
@@ -40,9 +48,9 @@ export const parsePlaywrightTestMetadata = (payload: unknown): QaTaggedTest[] =>
     .map(error => String(error['message'] ?? '').trim())
     .filter(Boolean);
   if (errors.length > 0) throw new Error(`PLAYWRIGHT_LIST_FAILED\n${errors.join('\n')}`);
-  const tests: QaTaggedTest[] = [];
+  const tests: PlaywrightTestMetadata[] = [];
   for (const suite of records(report['suites'])) collectSuiteTests(suite, rootDir, tests);
-  const unique = new Map<string, QaTaggedTest>();
+  const unique = new Map<string, PlaywrightTestMetadata>();
   for (const test of tests) unique.set(`${test.file}:${test.line ?? 0}:${test.title}`, test);
   return [...unique.values()].sort(
     (a, b) => a.file.localeCompare(b.file) || (a.line ?? 0) - (b.line ?? 0) || a.title.localeCompare(b.title),
@@ -64,7 +72,7 @@ export type PlaywrightMetadataOptions = {
 export const listPlaywrightTestMetadata = async (
   files: readonly string[],
   options: PlaywrightMetadataOptions = {},
-): Promise<QaTaggedTest[]> => {
+): Promise<PlaywrightTestMetadata[]> => {
   if (files.length === 0) return [];
   const cwd = resolve(process.cwd(), options.cwd ?? '.');
   const args = ['playwright', 'test', '--config', 'playwright.config.ts', '--list', '--reporter=json'];
@@ -100,7 +108,7 @@ export const listPlaywrightTestMetadata = async (
         `:elapsedMs=${Math.round(performance.now() - started)}`
       : '';
   if (!stdout) throw new Error([processFailure || 'PLAYWRIGHT_LIST_EMPTY_OUTPUT', stderr].filter(Boolean).join('\n'));
-  let tests: QaTaggedTest[];
+  let tests: PlaywrightTestMetadata[];
   try {
     tests = parsePlaywrightTestMetadata(JSON.parse(stdout));
   } catch (error) {

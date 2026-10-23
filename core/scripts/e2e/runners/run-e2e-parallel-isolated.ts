@@ -731,7 +731,9 @@ export const expandPlaywrightTargets = async (
         requireCustody: /requireCustody\s*:\s*true/.test(block),
         scenario: null,
         title: metadata.title,
-        grep: escapeRegExp(metadata.title),
+        // Playwright greps the complete title path, with inherited tags between
+        // suites. A leaf substring also selects e.g. lock-ahb for an ahb target.
+        grep: `(?:^| )${metadata.titlePath.map(escapeRegExp).join('(?: @\\S+)* ')}(?: @\\S+)*$`,
         tags: metadata.tags,
         testCategory,
       };

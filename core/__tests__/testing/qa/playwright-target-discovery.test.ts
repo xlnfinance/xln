@@ -3,6 +3,18 @@ import { expandPlaywrightTargets } from '../../../scripts/e2e/runners/run-e2e-pa
 
 const moveSpec = 'tests/e2e/payments/e2e-move.spec.ts';
 
+test('isolated demo selection keeps ahb and lock-ahb as separate exact cases', async () => {
+  const targets = await expandPlaywrightTargets(['tests/e2e/runtime/demo/e2e-embed-demo.spec.ts']);
+  for (const target of targets) {
+    if (!target.grep) throw new Error('TEST_TARGET_GREP_MISSING');
+    const grep = new RegExp(target.grep);
+    const selected = targets.filter(candidate =>
+      grep.test(` chromium e2e/runtime/demo/e2e-embed-demo.spec.ts presenter demo ${candidate.title} @functional`),
+    );
+    expect(selected.map(candidate => candidate.title)).toEqual([target.title]);
+  }
+}, 30_000);
+
 test('isolated discovery includes every evaluated faucet and routed Move case exactly once', async () => {
   const targets = await expandPlaywrightTargets([moveSpec]);
   expect(targets.map(target => target.title).sort()).toEqual([
