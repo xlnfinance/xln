@@ -102,7 +102,9 @@ test('term loan spends principal, repays partially then fully, and keeps saver m
     await lending(page);
     await expect(page.getByTestId('lending-close')).toBeEnabled();
     await page.getByTestId('lending-close').click();
-    await expect.poll(async () => (await readAccount(page, lenderIds)).closeRequests).toEqual([`close:${fundedPool.positionId}`]);
+    await expect
+      .poll(async () => (await readAccount(page, lenderIds)).closeRequests)
+      .toEqual([{ id: `close:${fundedPool.positionId}`, kind: 'close-early' }]);
     await expect.poll(async () => (await readPools(page, lenderIds))[0]?.status).toBe('queued');
     await expect(page.getByTestId('lending-withdrawal-queued')).toBeVisible();
     await home(page);

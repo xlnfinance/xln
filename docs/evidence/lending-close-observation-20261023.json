@@ -1,0 +1,60 @@
+{
+  "baseSHA": "4de71a8e729cfe796fcd062515dab48c30c91cbe",
+  "scope": "Focused verification of a test observation correction. Final immutable-SHA financial and release certification remains pending.",
+  "firstFailure": {
+    "file": "ui/tests/lending/e2e-principal.spec.ts",
+    "line": 105,
+    "expected": "the committed close:<positionId> intent",
+    "actual": [],
+    "cause": "The read-only helper kept only demand close-request and omitted canonical fixed-term close-early/close-mature."
+  },
+  "fix": "Read existing committed close-intent modes and require exact close-early for the pre-maturity saver request. No production logic or durable state changed.",
+  "verification": {
+    "pureAccountL1": {
+      "passed": 11,
+      "failed": 0,
+      "assertions": 175,
+      "scope": "Pure Account handler vectors; not signed production loss evidence."
+    },
+    "owningBrowser": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flow": "Real React saver queued withdrawal, restored capacity, principal payout, independent borrower spend, partial repayment, full repayment.",
+      "assertion": "Exactly one close:<positionId> with kind close-early.",
+      "honestFrameHankoIndependentlyVerifiedByThisPatch": false
+    },
+    "timeouts": "Unchanged existing60s principal case and240s owning release-step stand envelope."
+  },
+  "receipts": {
+    "firstBrowser": {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/react-lending-principal-first-4de71-01.result.json",
+      "sha256": "24619061ea720c33bcfa7445cfb4cb0c55e8c8c4b6e132df89a6b8119a84cb32",
+      "exitCode": 1,
+      "seconds": 106.808342333,
+      "sourceUnchanged": true,
+      "logSHA256": "2797f512979a87dd33069c4e6cf22e7e96ce943282dc4c5492bae0f090c79ec2"
+    },
+    "pureAccountL1": {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/react-lending-close-mode-l1-4de71-01.result.json",
+      "sha256": "8823493a39700f88ef4f86b473e180d2b81ccdb6b9cb7eaa87021ad3e703ec9f",
+      "exitCode": 0,
+      "seconds": 1.716296625,
+      "sourceUnchanged": true,
+      "logSHA256": "042104ad74c4fcfe212f95289382ef632fa3ae2e0c6a38f822565dec6169e21c"
+    },
+    "sameBrowserRepeat": {
+      "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/react-lending-principal-fixed-4de71-01.result.json",
+      "sha256": "c3e6e28d280a972885dbf4ce462bda9434512f27f141886afdc7a63772bb059d",
+      "exitCode": 0,
+      "seconds": 118.269827459,
+      "sourceUnchanged": true,
+      "logSHA256": "089a7ce94225276249d64c8c4b539d4d046acb4ef8fd03239176b5faa6a45f10"
+    }
+  },
+  "sourceSHA256": {
+    "ui/tests/lending/financial-evidence.ts": "679def507b1a1d2525bfb6c07f64cd746a34a6b88c15e00b6352ecc9e740478f",
+    "ui/tests/lending/e2e-principal.spec.ts": "4cf646a72f83a6a401a1726938721d75fad898b600dcc70adc3ac7d518c086a3"
+  },
+  "remaining": "Fresh final-SHA signed adversarial/recovery proof, actual wall-clock maturity, complete unit/test/check, full158 plus required journeys, release40, continuous60min soak and public/mainnet release gates."
+}

@@ -66,7 +66,9 @@ export const readAccount = (page: Page, parties: Parties) =>
       offdelta: delta.offdelta.toString(),
       pending: Boolean(account.pendingFrame),
       mempool: account.mempoolCount,
-      closeRequests: [...account.state.lendingIntents ?? []].filter(([, kind]) => kind === 'close-request').map(([id]) => id),
+      closeRequests: [...(account.state.lendingIntents ?? [])]
+        .filter(([, kind]) => kind === 'close-request' || kind === 'close-early' || kind === 'close-mature')
+        .map(([id, kind]) => ({ id, kind })),
       feePolicy: policy
         ? {
             version: policy.policyVersion,
