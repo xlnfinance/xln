@@ -5,10 +5,10 @@ if (gateNames.length === 0 || gateNames.some(name => !/^[a-z0-9:-]+$/.test(name)
   throw new Error('PARALLEL_CHECK_GATE_NAMES_INVALID');
 }
 
-// The broad source inventory needs a third lane so its one-time 18s compiler
-// gates do not serialize past the repository's 30s hard budget. Smaller nested
-// groups stay at two lanes, keeping compiler/test fan-out bounded.
-const MAX_CONCURRENT_GATES = gateNames.length > 10 ? 3 : 2;
+// The measured broad source inventory exceeds the aggregate verification
+// budget in three lanes. Four bounded lanes keep its long tail independent
+// of the full lint; smaller nested groups retain two lanes.
+const MAX_CONCURRENT_GATES = gateNames.length > 10 ? 4 : 2;
 const active = new Set<ReturnType<typeof Bun.spawn>>();
 let stopped = false;
 
@@ -56,10 +56,7 @@ const runLane = async (): Promise<void> => {
   }
 };
 
-await Promise.all(Array.from(
-  { length: Math.min(MAX_CONCURRENT_GATES, gateNames.length) },
-  runLane,
-));
+await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_GATES, gateNames.length) }, runLane));
 
 const failed = results.find(result => result.exitCode !== 0);
 if (failed) process.exit(failed.exitCode || 1);
