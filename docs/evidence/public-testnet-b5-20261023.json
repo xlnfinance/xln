@@ -1,0 +1,206 @@
+{
+ "owner": "Opus (claude-opus-5-5), sole Studio writer",
+ "deployedSHA": "b5b15146e913c5030ecd1c189f2ce147d9d710fa",
+ "previousPublicSHA": "02829e13967452e87335eb213991f81a528b0344",
+ "followUpMainSHA": "7d395feb941ce7f788221a8b99b8cff38e80416b (scripts/deployment/deploy-platform.sh + tests/global-setup.mts only; public runtime unchanged)",
+ "scope": "Public private-chain TESTNET xln.finance (chains 31337/31338). Not public TRON/Nile, Sepolia financial proof or mainnet.",
+ "rollout": {
+  "preflight": [
+   {
+    "path": "/Users/zigota/agent-jobs/xln-testnet-deploy-b5-20261023/preflight-01.out",
+    "sha256": "f55522c6342a61afb385d2b459e3d93377931431810f010386ef793c43422eb6"
+   },
+   {
+    "path": "/Users/zigota/agent-jobs/xln-testnet-deploy-b5-20261023/preflight-02.out",
+    "sha256": "d11b43a19138aacefc69b7a5c7a87b726ad3ca76c45976cad81cc18cb62a2457"
+   }
+  ],
+  "financialSnapshotBefore": {
+   "path": "/Users/zigota/agent-jobs/xln-testnet-deploy-b5-20261023/before.json",
+   "sha256": "86157549d3e5ab3b272aabfcc8184127557b4cec6d724f8b26f020825900e5ee",
+   "hubs": {
+    "H1": {
+     "height": 376436,
+     "accounts": 81
+    },
+    "H2": {
+     "height": 1541,
+     "accounts": 6
+    },
+    "H3": {
+     "height": 1448,
+     "accounts": 7
+    }
+   }
+  },
+  "localBuildPrecheck": {
+   "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/deploy-b5-local-build-precheck-01.result.json",
+   "sha256": "fff70147d7ab8b20de4666a945798570c8bc756a799ac3decf19e4d2feaead24",
+   "exitCode": 0,
+   "seconds": 66.435,
+   "logSHA256": "2fc74ba92bd6d29b1b69a1468b88d8d675ad96b778808cd3da0dd9ece8ea4596"
+  },
+  "preserve": {
+   "path": "/Users/zigota/agent-jobs/xln-testnet-deploy-b5-20261023/preserve-01.out",
+   "sha256": "21cf9d6d71e11b08f524ba7a8dd25f60315de5fdfbd354b6bc9b39252ef89f8e",
+   "drainFailureMarkers": 0,
+   "rdbFiles": 327,
+   "rdbBytes": 414941310,
+   "servicesStoppedAt": "2026-10-23T08:48:29Z",
+   "remoteBackup": "/root/xln-deployment-evidence/b5b15146e/store-backup"
+  },
+  "canonicalDeploy": {
+   "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/deploy-b5-canonical-01.result.json",
+   "sha256": "96c5e0b57f33fa1703b1d5612f5b6c50651c208995d441af13f0fb1c3f733987",
+   "exitCode": 1,
+   "seconds": 96.853,
+   "logSHA256": "3d68f74c9b93c28ee6eb03f27bcdd63a6302f5947fe4275a693c43d011e58a3b",
+   "completed": "local build, upload, remote ff 02829e139->b5, web install",
+   "failed": "remote runtime step XLN_BUN_VERSION_MISMATCH (system bun 1.3.14 first in PATH)"
+  },
+  "runtimeStep": {
+   "path": "/Users/zigota/agent-jobs/xln-testnet-deploy-b5-20261023/runtime-step-01.out",
+   "sha256": "b29574dbc7a412c342da83fdc72e7c2b4b0d74df271cc1dcf2088dccf0ac6343",
+   "command": "cd /root/xln && export PATH=/root/.local/share/xln/toolchains/bun-1.4.3:/root/.bun/bin:/root/.foundry/bin:$PATH && bun --version && test \"$(git rev-parse HEAD)\" = b5b15146e913c5030ecd1c189f2ce147d9d710fa && test -z \"$(git status --porcelain=v1 --untracked-files=all)\" && bun run stand:status | tail -1 && bun run stand:run --reason deploy-b5-runtime --timeout-ms 900000 -- env XLN_DEPLOY_USE_COMMITTED_CONTRACTS=1 ./scripts/deployment/deploy-platform.sh --runtime-only --production --code-only",
+   "exitCode": 0,
+   "bootstrapReadyMs": 35716,
+   "managedRecoveryMs": 34317,
+   "dataReset": false
+  },
+  "downtime": "08:48:29Z -> ~08:55:38Z",
+  "financialSnapshotAfter": {
+   "path": "/Users/zigota/agent-jobs/xln-testnet-deploy-b5-20261023/after.json",
+   "sha256": "4eb52003fd8328ae634fe5c6c12ce97cd5667427462cdafb36902b592c0f8558",
+   "hubs": {
+    "H1": {
+     "height": 376682,
+     "accounts": 81
+    },
+    "H2": {
+     "height": 1544,
+     "accounts": 6
+    },
+    "H3": {
+     "height": 1451,
+     "accounts": 7
+    }
+   },
+   "historicalFramesIdentical": true,
+   "rootsAndBalancesIdentical": true,
+   "note": "one Account per hub advanced height with unchanged root"
+  },
+  "publicBytes": {
+   "path": "/Users/zigota/agent-jobs/xln-testnet-deploy-b5-20261023/public-bytes-02.json",
+   "sha256": "88ae75c4bbdb8d81ecfdaa424fd6bf96da2580f10c1968ab08ae6ccdc377a3ef",
+   "entriesIdentical": [
+    "/",
+    "/ui/"
+   ],
+   "assetsIdentical": 47,
+   "mismatches": 0
+  }
+ },
+ "findings": {
+  "F1_hubGasSwept": {
+   "fact": "anvil 8545/8546 listen on 0.0.0.0 and ufw allows 8545, 8546:8549, 18545:18549 from anywhere; H1-H3 J operators use well-known anvil dev keys; blocks 10169-10171 at 2026-10-18T20:12:41Z moved ~10000 ETH each to 0xf45bf04e60c27734037204ec09f7ed091c410f6d; hub J batches on 31337 failed since",
+   "evidence": [
+    {
+     "path": "/Users/zigota/agent-jobs/xln-testnet-deploy-b5-20261023/hub-gas-01.txt",
+     "sha256": "8335b160ec5cc5d0d2e29dcff4778a50dc73461aab21eb0169c2a631dde1f4da"
+    },
+    {
+     "path": "/Users/zigota/agent-jobs/xln-testnet-deploy-b5-20261023/sweep-tx-02.json",
+     "sha256": "87f62680867129141c9618dd98b83e170114f3de7440539bb3b344d20a743e7a"
+    },
+    {
+     "path": "/Users/zigota/agent-jobs/xln-testnet-deploy-b5-20261023/rpc-exposure-01.txt",
+     "sha256": "c2d5423df07c1c333af572fc6688b194c1dd5db7bdfcd9d4e60e242b91855eb5"
+    }
+   ],
+   "mitigation": {
+    "path": "/Users/zigota/agent-jobs/xln-testnet-deploy-b5-20261023/hub-gas-refill-01.txt",
+    "sha256": "a6899813a8f4b1e5a7851f65b75cd36fab0a54e24d7e092d035cf4fd3720127f",
+    "action": "anvil_setBalance 10 ETH for the 3 hub operators on private chain 31337 at 2026-10-23T09:25:47Z",
+    "after": "reserve faucet 200 in 1.2s"
+   },
+   "ownerAction": "close direct public anvil ports"
+  },
+  "F2_publicWalletCannotBroadcast": {
+   "fact": "hosted React wallet submits its own J batch through https://xln.finance/rpc eth_sendRawTransaction; core/api/server/rpc/proxy-safety.ts is read-only in production -> 403; reserve->account move cannot complete",
+   "receipt": {
+    "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-prod-wallet-b5-02.result.json",
+    "sha256": "c19b27c0a8f7b0df184d88d544f1aec3ef68997ad566929fe95a084079064a8a",
+    "exitCode": 1,
+    "seconds": 85.639,
+    "logSHA256": "f8cf92a3dfb880de810a6d2ae8eee355776e08a17f870b7e07f0a276b70e6659"
+   },
+   "ownerDecision": "allow bounded raw-tx broadcast on the public bridge, or relay user batches via a hub"
+  },
+  "F3_towerAppointment413": "fresh wallet PUT /api/tower/appointment ~3.9 MB -> 413",
+  "F4_bootProfileRace": "GOSSIP_PROFILE_AUTHORITY_UNAVAILABLE x6 from H2/H3 while H1 API starts; profiles stored afterwards",
+  "F5_e2eDiagnostics": "tests/e2e specs require window.__xln (XLN_UI_DIAGNOSTICS=1); only ui/tests/e2e-production-wallet.spec.ts targets the production build",
+  "healthGate": {
+   "path": "/Users/zigota/agent-jobs/xln-testnet-deploy-b5-20261023/prod-health-03.out",
+   "sha256": "89b8d8384123e34aaa4b1f087df2b4c05033306327d07c035dea03e071803dd8",
+   "result": "OPEN_DEBUG_INCIDENTS_BLOCK_RELEASE (4 pre-existing 09-09..10-19 + 2 F4)"
+  }
+ },
+ "publicBrowser": {
+  "desktopSet01": {
+   "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-browser-desktop-b5-01.result.json",
+   "sha256": "3deeba0c8d0f9e556f482fdcb5ca1632de642dfa2126bf375b6a676636814e57",
+   "exitCode": 1,
+   "seconds": 38.144,
+   "logSHA256": "b010d6aa8402e27eec9c1a63d136435678afdb2020e05532d2a8e9af26bbdaf5",
+   "result": "3 failed: harness incident query 403 (fixed in 7d395feb9)"
+  },
+  "desktopSet02": {
+   "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-browser-desktop-b5-02.result.json",
+   "sha256": "0c9a42030c9e0167592871b98cfbbc47337712bf512ede17940f37888e40aa56",
+   "exitCode": 1,
+   "seconds": 655.005,
+   "logSHA256": "616f3a275f813ebc5e850697657af4d148b103601dddb5772e8e85a7a4d4741a",
+   "result": "3 failed: Pay/Swap need __xln diagnostics; Cross: market maker same-chain books check"
+  },
+  "productionWallet01": {
+   "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-prod-wallet-b5-01.result.json",
+   "sha256": "e9bf6864b4d00f31abee7aa4f227925a789d9ee813c285be0f5d0851cbc99446",
+   "exitCode": 1,
+   "seconds": 84.401,
+   "logSHA256": "59bf8db91c302ba879f69230e7d88ed16d7657301950ef690d4188e54da9e519",
+   "result": "failed at reserve faucet (F1)"
+  },
+  "productionWallet02": {
+   "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/public-prod-wallet-b5-02.result.json",
+   "sha256": "c19b27c0a8f7b0df184d88d544f1aec3ef68997ad566929fe95a084079064a8a",
+   "exitCode": 1,
+   "seconds": 85.639,
+   "logSHA256": "f8cf92a3dfb880de810a6d2ae8eee355776e08a17f870b7e07f0a276b70e6659",
+   "result": "import, boot, gas and reserve faucet passed; reserve->account move failed (F2)"
+  }
+ },
+ "fixesPushed": {
+  "commit": "7d395feb9",
+  "verify": {
+   "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/checked-push-7d395feb9-01.result.json",
+   "sha256": "aa051e3d6c848ef70fc814d3fd249e2ccb47d3cc4526f19f06c0e611f2fe688f",
+   "exitCode": 0,
+   "seconds": 262.628,
+   "logSHA256": "c6bbedf44071ff07282b2b4db142b38ae44c505ae2ca798501bf17cb53e71e80"
+  },
+  "l1": {
+   "path": "/Users/zigota/agent-jobs/xln-prod-rescue-20261019/deploy-path-harness-l1-02.result.json",
+   "sha256": "bb3d832c01117a8877116ed14450498dba9e4f4116ff748d08c9d8666c9bfeb3",
+   "exitCode": 0,
+   "seconds": 6.3,
+   "logSHA256": "25641c40afb3cc4baaff9fd7dae8e3259a299f21b802af954cc9e32b1e23ba07"
+  }
+ },
+ "notProven": [
+  "public Pay/Swap/Cross/Lending end to end",
+  "mobile",
+  "23 tutorial chapters",
+  "public TRON/Nile",
+  "mainnet readiness"
+ ]
+}
