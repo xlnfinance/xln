@@ -11,6 +11,11 @@ import {
   requireBoundaryRecord,
 } from '../../../../protocol/boundary-validation';
 import { safeStringify } from '../../../../protocol/serialization';
+import { isLeftEntity } from '../../../../protocol/identity/entity-id';
+import {
+  rebalanceFeeFor,
+  type RebalanceFeePolicy,
+} from '../../../../account/tx/handlers/rebalance/request-collateral';
 import {
   sendObserved,
   type ConnectedRuntime,
@@ -462,6 +467,39 @@ export const materializeSettlementRevisionEvidence = async (options: Readonly<{
   );
 };
 
+/** The hub's committed rebalance fee terms the lane must prepay; the Account
+ * handler rejects any other version or a lower fee. */
+const readHubRebalanceFeePolicy = async (
+  hub: ConnectedRuntime,
+  hubEntityId: string,
+  counterpartyEntityId: string,
+  tokenId: number,
+): Promise<RebalanceFeePolicy> => {
+  const doc = requireBoundaryRecord(
+    await hub.adapter.read<unknown>(`entity/${hubEntityId}/account/${counterpartyEntityId}`),
+    'HLT_AUTHORITY_COLLATERAL_ACCOUNT_INVALID',
+  );
+  const state = requireBoundaryRecord(doc['state'], 'HLT_AUTHORITY_COLLATERAL_ACCOUNT_STATE_INVALID');
+  const policies = state['rebalanceFeePolicies'];
+  if (!(policies instanceof Map)) throw new Error('HLT_AUTHORITY_COLLATERAL_POLICIES_MISSING');
+  const sides = requireBoundaryRecord(policies.get(tokenId), 'HLT_AUTHORITY_COLLATERAL_POLICY_MISSING');
+  const policy = requireBoundaryRecord(
+    sides[isLeftEntity(hubEntityId, counterpartyEntityId) ? 'left' : 'right'],
+    'HLT_AUTHORITY_COLLATERAL_HUB_POLICY_MISSING',
+  );
+  const fee = (key: string): bigint => {
+    const value = policy[key];
+    if (typeof value !== 'bigint' || value < 0n) throw new Error(`HLT_AUTHORITY_COLLATERAL_POLICY_${key}_INVALID`);
+    return value;
+  };
+  return {
+    policyVersion: requireBoundaryInteger(policy['policyVersion'], 'HLT_AUTHORITY_COLLATERAL_POLICY_VERSION_INVALID', 1),
+    baseFee: fee('baseFee'),
+    gasFee: fee('gasFee'),
+    liquidityFeeBps: fee('liquidityFeeBps'),
+  };
+};
+
 /** The lane asks the hub for collateral (V1 rebalance request): one
  * request_collateral Account frame with the prepaid fee, committed on the
  * production hub Account. */
@@ -475,6 +513,12 @@ export const materializeCollateralRequestEvidence = async (options: Readonly<{
   const hubEntityId = hubIdentity.entityId;
   const counterpartyEntityId = lane.identity.entityId;
   const before = await readHubAccountSettlementView(hub, hubEntityId, counterpartyEntityId);
+  const policy = await readHubRebalanceFeePolicy(hub, hubEntityId, counterpartyEntityId, tokenId);
+  // Like the wallet, request more than the prepaid fee so the committed request
+  // carries a positive net amount; doubling leaves room for the liquidity bps.
+  const amount = 2n * (policy.baseFee + policy.gasFee) + 1n;
+  const feeAmount = rebalanceFeeFor(policy, amount);
+  if (feeAmount >= amount) throw new Error(`HLT_AUTHORITY_COLLATERAL_FEE_EXCEEDS_AMOUNT:${feeAmount}:${amount}`);
   await queueLaneRuntimeInputWave(0, [{
     lane,
     input: {
@@ -484,7 +528,7 @@ export const materializeCollateralRequestEvidence = async (options: Readonly<{
         signerId: lane.identity.signerId,
         entityTxs: [{
           type: 'requestCollateral',
-          data: { counterpartyEntityId: hubEntityId, tokenId, amount: 1n, feeAmount: 1n, policyVersion: 1 },
+          data: { counterpartyEntityId: hubEntityId, tokenId, amount, feeAmount, policyVersion: policy.policyVersion },
         }],
       }],
     },
