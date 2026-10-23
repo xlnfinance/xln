@@ -196,7 +196,7 @@ const lenderLifecycle = async (): Promise<readonly LendingStep[]> => {
     await applyStep(account, {
       type: 'lending_close_request',
       data: { positionId: POSITION_ID, hubEntityId: HUB, lenderEntityId: LENDER },
-    }, false),
+    }, false, 86_401_000),
     await applyStep(account, {
       type: 'lending_close_payout',
       data: {

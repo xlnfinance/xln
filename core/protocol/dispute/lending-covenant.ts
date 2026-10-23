@@ -111,6 +111,16 @@ export const assertAccountLendingCovenants = (state: LendingStateView): void => 
     if (!('kind' in claim)) continue;
     assertLendingCovenant(claim);
     if (typeof id !== 'string' || !/^(lend|loan)-[0-9a-f]{16}$/.test(id)) throw new Error('LENDING_COVENANT_ID');
+    const closeIntent = intents?.get('close:' + id);
+    if (
+      (claim.kind === 'savings' &&
+        closeIntent !== undefined &&
+        closeIntent !== 'close-early' &&
+        closeIntent !== 'close-mature') ||
+      (claim.kind === 'demand' && closeIntent !== undefined && closeIntent !== 'close-request')
+    ) {
+      throw new Error('LENDING_CLOSE_AUTHORIZATION_FORMAT_UNSUPPORTED:' + id);
+    }
     const keys = receiptKeys(id);
     if ((keys.kind === 'loan' ? claim.kind !== 'loan' : claim.kind === 'loan') || !state.deltas.has(claim.tokenId) || intents?.get(keys.open + ':' + id) !== keys.open || intents.has(keys.close + ':' + id) || intents.has('dispute:' + id)) {
       throw new Error('LENDING_COVENANT_BINDING:' + id);

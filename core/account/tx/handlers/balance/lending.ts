@@ -206,6 +206,39 @@ const applySavingsRate = (
   return accountTxApplied(['Demand savings rate renewed']);
 };
 
+const applySavingsCloseRequest = (
+  account: AccountDraftReplica, tx: Extract<LendingAccountTx, { type: 'lending_close_request' }>,
+  byLeft: boolean, timestamp: number,
+): LendingResult => {
+  requireIntentId(tx.data.positionId, 'lend');
+  requireRole(account, byLeft, 'lender', tx.data.lenderEntityId);
+  requireCounterparty(account, normalized(tx.data.lenderEntityId), tx.data.hubEntityId);
+  const covenant = account.state.subcontracts.get(tx.data.positionId);
+  if (!covenant || !('kind' in covenant) || (covenant.kind !== 'savings' && covenant.kind !== 'demand') || covenant.creditorIsLeft !== byLeft) {
+    return accountTxValidationRejected('LENDING_CLOSE_COVENANT_MISMATCH', []);
+  }
+  // The lender's first signed Account clock fixes cancellation versus full
+  // coupon. Commit that choice in the existing intent root: later retries,
+  // ACK delivery or restored payment clocks cannot reprice the authorization.
+  // The separate payout nonce still permits exactly one atomic extinguishment.
+  const intentKey = `close:${normalized(tx.data.positionId)}`;
+  const prior = account.state.lendingIntents.get(intentKey);
+  const validPrior =
+    covenant.kind === 'demand' ? prior === 'close-request' : prior === 'close-early' || prior === 'close-mature';
+  if (prior !== undefined && !validPrior) throw new Error(`LENDING_CLOSE_INTENT_INVALID:${intentKey}`);
+  if (prior === undefined)
+    consumeIntent(
+      account,
+      intentKey,
+      covenant.kind === 'demand'
+        ? 'close-request'
+        : timestamp < covenant.openedAt + covenant.termMs
+          ? 'close-early'
+          : 'close-mature',
+    );
+  return accountTxApplied([`Lending close request ${tx.data.positionId} committed`]);
+};
+
 export const handleLendingAccountTx = (
   account: AccountDraftReplica, tx: LendingAccountTx, byLeft: boolean, timestamp: number,
 ): LendingResult => {
@@ -262,23 +295,7 @@ export const handleLendingAccountTx = (
     return result;
   }
 
-  if (tx.type === 'lending_close_request') {
-    requireIntentId(tx.data.positionId, 'lend');
-    requireRole(account, byLeft, 'lender', tx.data.lenderEntityId);
-    requireCounterparty(account, normalized(tx.data.lenderEntityId), tx.data.hubEntityId);
-    const covenant = account.state.subcontracts.get(tx.data.positionId);
-    if (!covenant || !('kind' in covenant) || (covenant.kind !== 'savings' && covenant.kind !== 'demand') || covenant.creditorIsLeft !== byLeft) {
-      return accountTxValidationRejected('LENDING_CLOSE_COVENANT_MISMATCH', []);
-    }
-    // A saver may retry after a temporary bank liquidity constraint. This receipt
-    // records the request, not payment authority; the payout nonce remains single-use
-    // and its atomic payment removes the covenant, rejecting all later requests.
-    const intentKey = `close:${normalized(tx.data.positionId)}`;
-    const prior = account.state.lendingIntents.get(intentKey);
-    if (prior !== undefined && prior !== 'close-request') throw new Error(`LENDING_CLOSE_INTENT_INVALID:${intentKey}`);
-    if (prior === undefined) consumeIntent(account, intentKey, 'close-request');
-    return accountTxApplied([`Lending close request ${tx.data.positionId} committed`]);
-  }
+  if (tx.type === 'lending_close_request') return applySavingsCloseRequest(account, tx, byLeft, timestamp);
 
   requireIntentId(tx.data.positionId, 'lend');
   requireRole(account, byLeft, 'hub', tx.data.hubEntityId);
@@ -292,7 +309,19 @@ export const handleLendingAccountTx = (
   if (!covenant || !('kind' in covenant) || (covenant.kind !== 'savings' && covenant.kind !== 'demand') || covenant.creditorIsLeft === byLeft || covenant.tokenId !== tx.data.tokenId || tx.data.amount < covenant.principal || tx.data.amount > lendingMaximumAmount(covenant)) {
     return accountTxValidationRejected('LENDING_PAYOUT_COVENANT_MISMATCH', []);
   }
-  const amount = covenant.kind === 'demand' ? lendingExitAmount(covenant, timestamp) : tx.data.amount;
+  const closeIntent = account.state.lendingIntents.get('close:' + tx.data.positionId);
+  if (covenant.kind === 'savings' && closeIntent !== 'close-early' && closeIntent !== 'close-mature') {
+    return accountTxValidationRejected('LENDING_SAVINGS_CLOSE_AUTHORIZATION_REQUIRED', []);
+  }
+  const amount =
+    covenant.kind === 'demand'
+      ? lendingExitAmount(covenant, timestamp)
+      : closeIntent === 'close-early'
+        ? covenant.principal
+        : lendingMaximumAmount(covenant);
+  if (covenant.kind === 'savings' && tx.data.amount !== amount) {
+    return accountTxValidationRejected('LENDING_SAVINGS_PAYOUT_AMOUNT_MISMATCH', []);
+  }
   if (covenant.kind === 'demand' && (tx.data.amount < amount || account.state.lendingIntents.get('close:' + tx.data.positionId) !== 'close-request')) {
     return accountTxValidationRejected('LENDING_DEMAND_PAYOUT_INCOMPLETE', []);
   }

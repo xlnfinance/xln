@@ -136,6 +136,8 @@ export type AccountLendingIntentKind =
   | 'repay'
   | 'disburse'
   | 'close-request'
+  | 'close-early'
+  | 'close-mature'
   | 'close-payout'
   | 'dispute-close'
   | 'credit-request';

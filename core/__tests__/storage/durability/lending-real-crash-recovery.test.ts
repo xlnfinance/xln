@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const cases = [
-  { name: 'demand savings rate, fractional earnings and queued actual-time payout survive three SIGKILL restarts',
+  {
+    name: 'demand savings rate, fractional earnings and queued actual-time payout survive three SIGKILL restarts',
     modes: ['demand-originate', 'demand-rate', 'demand-close', 'demand-recover'],
-    phases: ['active', 'demand-rate', 'demand-queued', 'demand-paid'] },
+    phases: ['active', 'demand-rate', 'demand-queued', 'demand-paid'],
+  },
   {
     name: 'signed loan and queued withdrawal survive SIGKILL, restored liquidity and outbox redelivery',
     modes: ['originate', 'partial', 'mature', 'withdraw', 'repay', 'interleave', 'recover'],
@@ -29,14 +31,18 @@ const cases = [
 ];
 
 for (const scenario of cases)
-  test(
-    scenario.name,
-    async () => {
+  for (const reverse of scenario.name.startsWith('signed ') ? [false, true] : [false])
+    test(`${scenario.name}, reverse=${reverse}`, async () => {
       const dbRoot = mkdtempSync(join(tmpdir(), 'xln-lending-crash-'));
       try {
         for (const mode of scenario.modes) {
           const child = Bun.spawn({
-            cmd: [process.execPath, join(import.meta.dir, '../../fixtures/storage/lending-crash-child.ts'), mode],
+            cmd: [
+              process.execPath,
+              join(import.meta.dir, '../../fixtures/storage/lending-crash-child.ts'),
+              mode,
+              ...(reverse ? ['--reverse-lending-parties'] : []),
+            ],
             env: { ...process.env, XLN_DB_PATH: dbRoot },
             stdout: 'pipe',
             stderr: 'pipe',
@@ -57,6 +63,4 @@ for (const scenario of cases)
       } finally {
         rmSync(dbRoot, { recursive: true, force: true });
       }
-    },
-    60_000,
-  );
+    }, 60_000);

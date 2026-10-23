@@ -14,8 +14,10 @@ export const parties = [1, 2, 3].map(slot => {
   registerSignerKey(seed, signerId, deriveSignerKeySync(seed, String(slot)));
   return { signerId, entityId: generateLazyEntityId([signerId], 1n).toLowerCase() };
 });
-export const bank = parties[0]!;
-export const saver = parties[1]!;
+// Reverse the actual signing identities to exercise both Account orientations.
+const reverseParties = process.argv.includes('--reverse-lending-parties');
+export const bank = parties[reverseParties ? 1 : 0]!;
+export const saver = parties[reverseParties ? 0 : 1]!;
 export const borrower = parties[2]!;
 export const positionId = 'lend-1111111111111111';
 export const requestId = 'borrow-2222222222222222';

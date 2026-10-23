@@ -278,7 +278,7 @@
           ]
         },
         {
-          "accountStateRoot": "0xf119a52ad856e06d509c0b481132d0bf3f8b694630b3912dd6307cbb5cb88e5b",
+          "accountStateRoot": "0x73589a07ed1010a5a780284ca34ae7d58b33a22c965d1e2159b3530a8bc91892",
           "byLeft": false,
           "claimEntries": [
             [
@@ -314,7 +314,7 @@
           "intentEntries": [
             [
               "close:lend-1111111111111111",
-              "close-request"
+              "close-mature"
             ],
             [
               "fund:lend-1111111111111111",
@@ -322,12 +322,12 @@
             ]
           ],
           "leftCreditLimit": "20000",
-          "lendingIntentsRoot": "0x7ff005cebcc6692c318a048c343fbe968fa6d87f3d1dd5e946c328b30d1f6367",
+          "lendingIntentsRoot": "0xe14197038f19b312dbf4f732dba0a39027ad0a957174a7fc86ba23f34b0a948b",
           "offdelta": "10000",
           "outputCount": 0,
           "rightCreditLimit": "20000",
           "subcontractsRoot": "0xf5ba03c9db7ed88d6b05ed5c5130a5ff3a06942ae0f54f3155b96349727767fc",
-          "timestamp": 1000,
+          "timestamp": 86401000,
           "txType": "lending_close_request",
           "txWire": [
             14,
@@ -337,7 +337,7 @@
           ]
         },
         {
-          "accountStateRoot": "0xc4ed05878b1871a6479ad4fee21d4ee24c75774fd2d386ffb117fc40fc47acd2",
+          "accountStateRoot": "0x1c0a2d8d65be97f859757c90365766d34a1d90e0ba061b11d55154b6aab3e847",
           "byLeft": true,
           "claimEntries": [],
           "deltasRoot": "0xdf45402436da9cae870141435bb21945e697daac17e865643f2d51410819c76a",
@@ -347,7 +347,7 @@
           "intentEntries": [
             [
               "close:lend-1111111111111111",
-              "close-request"
+              "close-mature"
             ],
             [
               "fund:lend-1111111111111111",
@@ -359,7 +359,7 @@
             ]
           ],
           "leftCreditLimit": "20000",
-          "lendingIntentsRoot": "0xa5b09d086aacb643ff5e812a9600145cb8544327fa44cde5e1e4c9f3c9108cc8",
+          "lendingIntentsRoot": "0x3c85dec22132b787b79d5c540888c7731b96544ed83d7fb7eece3da74d64c58c",
           "offdelta": "-100",
           "outputCount": 0,
           "rightCreditLimit": "20000",

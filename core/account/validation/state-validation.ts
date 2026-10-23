@@ -32,6 +32,8 @@ const LENDING_INTENTS = new Set([
   'repay',
   'disburse',
   'close-request',
+  'close-early',
+  'close-mature',
   'close-payout',
   'dispute-close',
   'credit-request',

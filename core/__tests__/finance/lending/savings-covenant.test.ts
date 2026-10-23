@@ -51,6 +51,15 @@ for (const saverIsLeft of [true, false]) {
     const invalid = await applyAccountTxToMutableReplica(account, tx(1n), !saverIsLeft, 2_000);
     expect(invalid.ok).toBe(false);
     expect(computeAccountStateRoot(account.state)).toBe(before);
+    const request: AccountTx = {
+      type: 'lending_close_request',
+      data: {
+        positionId: POSITION,
+        hubEntityId: saverIsLeft ? RIGHT : LEFT,
+        lenderEntityId: saverIsLeft ? LEFT : RIGHT,
+      },
+    };
+    expect((await applyAccountTxToMutableReplica(account, request, saverIsLeft, 86_401_000)).ok).toBe(true);
     expect((await applyAccountTxToMutableReplica(account, tx(10_100n), !saverIsLeft, 86_401_000)).ok).toBe(true);
     expect(account.state.subcontracts?.size).toBe(0);
     expect(buildAccountProofBody(account, TRANSFORMER).proofBodyStruct.transformers).toHaveLength(0);
