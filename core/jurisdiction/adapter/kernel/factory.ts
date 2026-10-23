@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 
 import { normalizeLoopbackUrl } from '../../../network/p2p/loopback-url';
 import { createBrowserVMAdapter } from '../browservm/browservm';
-import { DEV_CHAIN_IDS, TRON_CHAIN_IDS } from '../chain-ids';
+import { TRON_CHAIN_IDS, sponsorsWithPublicDevKey } from '../chain-ids';
 import { createRpcAdapter } from '../rpc/rpc-adapter';
 import type { JAdapter, JAdapterConfig } from '../types';
 
@@ -52,7 +52,7 @@ export const DEFAULT_PRIVATE_KEY =
 
 export const resolveJAdapterPrivateKey = (config: JAdapterConfig): string | undefined => {
   if (config.privateKey) return config.privateKey;
-  if (DEV_CHAIN_IDS.has(config.chainId)) {
+  if (sponsorsWithPublicDevKey(config)) {
     return process.env['JADAPTER_DEV_PRIVATE_KEY'] ?? DEFAULT_PRIVATE_KEY;
   }
   if (config.watchOnly) return undefined;

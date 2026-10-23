@@ -7,7 +7,7 @@ import { broadcastPreparedRpcTransaction } from './write/prepared/prepared-broad
 import type { Provider, Signer } from 'ethers';
 import { ethers } from 'ethers';
 import type { BrowserVMProvider, JAdapter, JAdapterConfig } from '../types';
-import { DEV_CHAIN_IDS } from '../chain-ids';
+import { sponsorsWithPublicDevKey } from '../chain-ids';
 import { createRpcChainIo } from './rpc-chain-io';
 import { createRpcContractStack } from './rpc-contract-stack';
 import { createRpcLifecycleMethods } from './rpc-lifecycle';
@@ -157,7 +157,7 @@ export async function createRpcAdapter(
     submitTx: createRpcSubmitTx({
       config,
       signer,
-      watchOnly: Boolean(config.watchOnly && !DEV_CHAIN_IDS.has(config.chainId)),
+      watchOnly: Boolean(config.watchOnly && !sponsorsWithPublicDevKey(config)),
       chainIo,
       stack,
       sequencer,

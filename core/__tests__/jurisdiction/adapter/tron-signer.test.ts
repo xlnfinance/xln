@@ -25,6 +25,17 @@ describe('TRON signer boundary', () => {
     expect(resolveJAdapterPrivateKey({ ...config, watchOnly: true })).toBeUndefined();
   });
 
+  test('the public development key pays only a private loopback node', () => {
+    const devChain = { mode: 'rpc' as const, chainId: 31337 };
+    // Operators that own the node keep their sponsored key.
+    expect(resolveJAdapterPrivateKey({ ...devChain, rpcUrl: 'http://127.0.0.1:8545' })).toBeDefined();
+    expect(resolveJAdapterPrivateKey({ ...devChain, rpcUrl: 'http://localhost:8545', watchOnly: true })).toBeDefined();
+    // A wallet reaching the chain through a shared endpoint signs with its own Entity key.
+    expect(resolveJAdapterPrivateKey({ ...devChain, rpcUrl: 'https://xln.finance/rpc', watchOnly: true })).toBeUndefined();
+    expect(resolveJAdapterPrivateKey({ ...devChain, chainId: 31338, rpcUrl: 'https://xln.finance/rpc2', watchOnly: true }))
+      .toBeUndefined();
+  });
+
   test('derives the same EVM caller from Ethereum and TRON address formats', async () => {
     const provider = createXlnJsonRpcProvider('http://127.0.0.1:1/jsonrpc', 3448148188);
     const signer = await createTronSigner({
