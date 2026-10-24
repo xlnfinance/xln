@@ -1,0 +1,83 @@
+{
+ "owner": "Opus (claude-opus-5-5), sole Studio writer",
+ "deployedSHA": "e4abb8c1485487189d300f215938cfb70a9263b7",
+ "previousPublicSHA": "c85598fec78e9e52dc49df8bc8b8cb1870218516",
+ "scope": "Public private-chain TESTNET xln.finance (chains 31337/31338). Not public TRON/Nile, Sepolia financial proof or mainnet. Does not close wallet import latency.",
+ "change": "Board Hanko refresh keyed by certified boardEpoch; verifyJPrefixCertificate no longer clones every attestation into a discarded certificate.",
+ "oldShapePrecondition": {
+  "claim": "No persisted refresh hook, Account marker or AccountBoardHankoRefresh input of the pre-e4abb shape can exist on the public testnet.",
+  "reason": "Those records are created only by a finalized BoardActivated J event (core/entity/tx/j-events-board.ts); EntityProvider.activateBoard is the only emitter and the only boardEpochs writer.",
+  "observation": "Read-only eth_getLogs over the full EntityProvider range: arrakis 3..58721 and tron 3..58681 returned 0 BoardActivated, 0 EntityRegistered, 0 unknown topics; boardEpochs(H1/H2/H3)=0. Pending Nile/Sepolia are excluded by ui/src/runtime/hosted.ts and core/orchestrator/j-select/jurisdictions.ts.",
+  "path": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/opus-mainnet-closure-sequence-20261024/phase-011/old-shape-scan.json",
+  "sha256": "4791ad89592231e786e541370ea98012fe59b95a0d1086e4190dd6f744fe85f2"
+ },
+ "rollout": {
+  "runner": {
+   "path": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/opus-mainnet-closure-sequence-20261024/phase-011/deploy-e4abb8c1/run.sh",
+   "sha256": "b796f7820b7eb913fe62358ba5ae0607d2b7505c12d09ac3843e4094a3b83247",
+   "failStop": "every stage gates the final status; compare-assert exits 6 on any financial/historical difference, bytes-assert exits 7 on any tree or served mismatch"
+  },
+  "stages": [
+   { "stage": "snapshot-before", "at": "2026-10-24T10:58:44Z", "exit": 0 },
+   { "stage": "preserve", "at": "2026-10-24T11:00:07Z", "exit": 0 },
+   { "stage": "deploy", "at": "2026-10-24T11:02:32Z", "exit": 0 },
+   { "stage": "ready", "at": "2026-10-24T11:02:33Z", "coreOk": true, "systemOk": true, "backendSHA": "e4abb8c1485487189d300f215938cfb70a9263b7", "dirty": false },
+   { "stage": "snapshot-after", "at": "2026-10-24T11:02:46Z", "exit": 0 },
+   { "stage": "compare-assert", "at": "2026-10-24T11:02:50Z", "exit": 0 },
+   { "stage": "bytes-assert", "at": "2026-10-24T11:02:57Z", "exit": 0 },
+   { "stage": "public-six", "at": "2026-10-24T11:05:57Z", "exit": 0 }
+  ],
+  "financialSnapshotBefore": {
+   "path": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/opus-mainnet-closure-sequence-20261024/phase-011/deploy-e4abb8c1/before.json",
+   "sha256": "afaa74dbb0940bdc90ecf664aee2c3d30876e58b97adf9bdab88b63e8b97d902"
+  },
+  "financialSnapshotAfter": {
+   "path": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/opus-mainnet-closure-sequence-20261024/phase-011/deploy-e4abb8c1/after.json",
+   "sha256": "1c8c5e6f5f9ac999c68282a245ad14585c2f16b994eba086c54eb6dcb8c80adb"
+  },
+  "compare": {
+   "path": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/opus-mainnet-closure-sequence-20261024/phase-011/deploy-e4abb8c1/compare.json",
+   "sha256": "f2167e399aeed64fe7528d226b7fceba054979c6c25e969ee202fdaf37b207e7",
+   "hubs": {
+    "H1": { "accounts": 107, "heightBefore": 479491, "heightAfter": 479535, "historicalFrameIdentical": true },
+    "H2": { "accounts": 6, "heightBefore": 1834, "heightAfter": 1837, "historicalFrameIdentical": true },
+    "H3": { "accounts": 18, "heightBefore": 1748, "heightAfter": 1751, "historicalFrameIdentical": true }
+   },
+   "red": [],
+   "accountRootsAndFinancialFieldsIdentical": 131
+  },
+  "frameAdvanceSignatureProof": {
+   "path": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/opus-mainnet-closure-sequence-20261024/phase-011/deploy-e4abb8c1/custody-signature-proof.json",
+   "sha256": "7260444c68aaf92f2e3312f571745c07b26cc6e3a8e045e2a46d3edc4f5750fc",
+   "result": "3 custody Accounts (one per hub, counterparty 0xe2d88972...) advanced h23->h24. Each links the exact previous frame hash and carries 3 set_credit_limit equal to the prior LEFT limits; assertAccountFrameHash recomputed and verifyHankoForHash(allowPreviousBoard:false) verified both participants on all 3 frames. Account roots unchanged."
+  },
+  "bytes": {
+   "path": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/opus-mainnet-closure-sequence-20261024/phase-011/deploy-e4abb8c1/bytes.json",
+   "sha256": "bfdd7cee7abd41956d555d3f828a919bab8398646ec983a6559fefa4a1f3fe97",
+   "trees": { "frontend/build": "1759/1759 identical", "ui/dist": "19/19 identical" },
+   "served": [
+    { "url": "https://xln.finance/", "bytes": 8318, "sha256": "ac67e4cbed809fcd391c8f3057bdec04094adac3b3d0689f6bef9a3642ffc160" },
+    { "url": "https://xln.finance/ui/", "bytes": 2088, "sha256": "7e1343f8a782ff215455c59b38efaccefeb1d88de4da58c3134ab36a8c090541" },
+    { "url": "https://xln.finance/runtime.js", "bytes": 5586250, "sha256": "167099692c3f5d2f5ccbec37b7d9b1ebbf994ec3ba4d0c4588180b868c7b8308" },
+    { "url": "https://xln.finance/account-worker.js", "bytes": 1392117, "sha256": "b60796ba8450649adb7a9901973bd18d05a570af27df6a4068587ae8817f87ce" }
+   ],
+   "servedIdentical": "8/8 including React assets"
+  }
+ },
+ "publicBrowser": {
+  "spec": "ui/tests/e2e-production-wallet.spec.ts (unrouted, public origin, trace on)",
+  "result": "6/6",
+  "seconds": { "import": 32.1, "faucet": 3.9, "reserve": 5.1, "pay": 6.4, "credit": 4.7, "reload": 20.1 },
+  "log": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/opus-mainnet-closure-sequence-20261024/phase-011/deploy-e4abb8c1/wallet.log"
+ },
+ "latencyLedger": {
+  "importSeconds": 32.1,
+  "jPrefixShare": "J-prefix CPU <=2.47 s (<=8%); hashJPrefixAttestation 1.29 s inclusive (~4%), below the >5% phase rule in AGENTS.md",
+  "dominantPhase": "two full authenticated header passes from EntityProvider deployment (core/jurisdiction/adapter/receipt/reader.ts readAuthenticatedReceiptRange: range pass + fence pass), O(J height)"
+ },
+ "notProven": [
+  "Wallet import latency closure (32.1 s) or reload (20.1 s)",
+  "Swap, Cross-J, Lending, native TRON or mainnet flows",
+  "Full E2E or check on any SHA other than e4abb8c1"
+ ]
+}
