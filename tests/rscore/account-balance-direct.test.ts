@@ -459,9 +459,10 @@ describe('rscore exact-byte payment differential', () => {
       response: { bytes: expected.byteLength, sha256: digestHex(expected) },
     };
     if (fixture.request.sha256 === 'pending') console.error(JSON.stringify(observed));
-    expect(observed).toEqual(fixture);
+    // Compare the live engines first so a stale pinned digest cannot hide a real TS/Rust byte divergence.
     const actual = await runRust(request);
     expect(decodeEnvelopeBody(actual)).toEqual(decodeEnvelopeBody(expected));
     expect(actual).toEqual(expected);
+    expect(observed).toEqual(fixture);
   }, 30_000);
 });

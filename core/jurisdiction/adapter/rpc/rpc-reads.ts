@@ -46,6 +46,83 @@ class TokenRegistryReadError extends Error {
   }
 }
 
+const ERC20_METADATA_INTERFACE = new ethers.Interface([
+  'function symbol() view returns (string)',
+  'function name() view returns (string)',
+  'function decimals() view returns (uint8)',
+]);
+
+// Registry entries are independent read-only calls: overlap only their round
+// trips. A cold wallet otherwise paid four sequential RPCs per token per J.
+const TOKEN_REGISTRY_READ_CONCURRENCY = 8;
+
+/**
+ * Runs bounded concurrent reads, then reports them in input order: the
+ * returned values and the first thrown error are exactly those of the
+ * equivalent sequential loop, whichever request completed first.
+ */
+const settleInOrder = async <T>(reads: ReadonlyArray<() => Promise<T>>): Promise<T[]> => {
+  const settled: PromiseSettledResult<T>[] = [];
+  for (let start = 0; start < reads.length; start += TOKEN_REGISTRY_READ_CONCURRENCY) {
+    const chunk = reads.slice(start, start + TOKEN_REGISTRY_READ_CONCURRENCY);
+    settled.push(...await Promise.allSettled(chunk.map(read => read())));
+  }
+  return settled.map(result => {
+    if (result.status === 'rejected') throw result.reason;
+    return result.value;
+  });
+};
+
+const readTokenMetadata = async <T>(tokenId: number, field: string, read: () => Promise<T>): Promise<T> => {
+  try {
+    return await read();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new TokenRegistryReadError(`TOKEN_METADATA_UNAVAILABLE:${tokenId}:${field}:${reason}`, error);
+  }
+};
+
+const readErc20TokenInfo = async (
+  provider: Provider,
+  tokenId: number,
+  contractAddress: string,
+  externalTokenId: bigint,
+): Promise<JTokenInfo> => {
+  const erc20 = new ethers.Contract(contractAddress, ERC20_METADATA_INTERFACE, provider);
+  const [rawSymbol, rawName, rawDecimals] = await settleInOrder<string | bigint>([
+    () => readTokenMetadata(tokenId, 'symbol', erc20.getFunction('symbol') as () => Promise<string>),
+    () => readTokenMetadata(tokenId, 'name', erc20.getFunction('name') as () => Promise<string>),
+    () => readTokenMetadata(tokenId, 'decimals', erc20.getFunction('decimals') as () => Promise<bigint>),
+  ]);
+  const symbol = String(rawSymbol).trim();
+  const name = String(rawName).trim();
+  const decimals = Number(rawDecimals);
+  if (!symbol) throw new TokenRegistryReadError(`TOKEN_METADATA_INVALID:${tokenId}:symbol`);
+  if (!name) throw new TokenRegistryReadError(`TOKEN_METADATA_INVALID:${tokenId}:name`);
+  if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
+    throw new TokenRegistryReadError(`TOKEN_METADATA_INVALID:${tokenId}:decimals:${String(decimals)}`);
+  }
+  return { symbol, name, address: contractAddress, decimals, tokenId, tokenType: 0, externalTokenId };
+};
+
+const readTokenRegistryEntry = async (deps: RpcReadDeps, tokenId: number): Promise<JTokenInfo> => {
+  const [rawContractAddress, externalTokenId, rawTokenType] = await deps.depository._tokens(tokenId);
+  if (rawContractAddress === ethers.ZeroAddress) {
+    throw new TokenRegistryReadError(`TOKEN_REGISTRY_ENTRY_ADDRESS_INVALID:${tokenId}`);
+  }
+  const contractAddress = ethers.getAddress(rawContractAddress);
+  if (Number(rawTokenType) === 0) {
+    return readErc20TokenInfo(deps.provider, tokenId, contractAddress, externalTokenId);
+  }
+  return buildNonFungibleTokenInfo({
+    tokenId,
+    tokenType: rawTokenType,
+    contractAddress,
+    externalTokenId,
+    entityProviderAddress: await deps.entityProvider.getAddress(),
+  });
+};
+
 /** Canonical chain reads. These methods never mutate adapter lifecycle state. */
 export const createRpcReadMethods = (deps: RpcReadDeps): ReadMethods => {
   const { provider, rpcUrl, hasProcessedBatch, readEntityProviderActionReceipt } = deps;
@@ -99,62 +176,8 @@ export const createRpcReadMethods = (deps: RpcReadDeps): ReadMethods => {
         if (!Number.isSafeInteger(length) || length < 1) {
           throw new TokenRegistryReadError(`TOKEN_REGISTRY_LENGTH_INVALID:${String(length)}`);
         }
-        const tokens: JTokenInfo[] = [];
-        const erc20Interface = new ethers.Interface([
-          'function symbol() view returns (string)',
-          'function name() view returns (string)',
-          'function decimals() view returns (uint8)',
-        ]);
-
-        for (let tokenId = 1; tokenId < length; tokenId++) {
-          const [rawContractAddress, externalTokenId, rawTokenType] = await deps.depository._tokens(tokenId);
-          if (rawContractAddress === ethers.ZeroAddress) {
-            throw new TokenRegistryReadError(`TOKEN_REGISTRY_ENTRY_ADDRESS_INVALID:${tokenId}`);
-          }
-          const contractAddress = ethers.getAddress(rawContractAddress);
-          const tokenType = Number(rawTokenType);
-          if (tokenType !== 0) {
-            tokens.push(buildNonFungibleTokenInfo({
-              tokenId,
-              tokenType: rawTokenType,
-              contractAddress,
-              externalTokenId,
-              entityProviderAddress: await deps.entityProvider.getAddress(),
-            }));
-            continue;
-          }
-          const erc20 = new ethers.Contract(contractAddress, erc20Interface, provider);
-          const symbolFn = erc20.getFunction('symbol') as () => Promise<string>;
-          const nameFn = erc20.getFunction('name') as () => Promise<string>;
-          const decimalsFn = erc20.getFunction('decimals') as () => Promise<bigint>;
-          const readMetadata = async <T>(field: string, read: () => Promise<T>): Promise<T> => {
-            try {
-              return await read();
-            } catch (error) {
-              const reason = error instanceof Error ? error.message : String(error);
-              throw new TokenRegistryReadError(`TOKEN_METADATA_UNAVAILABLE:${tokenId}:${field}:${reason}`, error);
-            }
-          };
-          const symbol = String(await readMetadata('symbol', symbolFn)).trim();
-          const name = String(await readMetadata('name', nameFn)).trim();
-          const decimals = Number(await readMetadata('decimals', decimalsFn));
-          if (!symbol) throw new TokenRegistryReadError(`TOKEN_METADATA_INVALID:${tokenId}:symbol`);
-          if (!name) throw new TokenRegistryReadError(`TOKEN_METADATA_INVALID:${tokenId}:name`);
-          if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
-            throw new TokenRegistryReadError(`TOKEN_METADATA_INVALID:${tokenId}:decimals:${String(decimals)}`);
-          }
-          tokens.push({
-            symbol,
-            name,
-            address: contractAddress,
-            decimals,
-            tokenId,
-            tokenType: 0,
-            externalTokenId,
-          });
-        }
-
-        return tokens;
+        const tokenIds = Array.from({ length: length - 1 }, (_, index) => index + 1);
+        return await settleInOrder(tokenIds.map(tokenId => () => readTokenRegistryEntry(deps, tokenId)));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (err instanceof TokenRegistryReadError) throw err;
