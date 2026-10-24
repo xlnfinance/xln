@@ -275,38 +275,39 @@ export async function bootHostedVault(seed: string, options: HostedVaultOptions)
     const j = stack.jurisdiction;
 
     // Every chain the stack runs: the entity lives on the primary, swaps may cross into the others.
-    for (const chain of stack.jurisdictions) {
+    const joinChain = async (chain: (typeof stack.jurisdictions)[number]): Promise<void> => {
       step(`Joining ${chain.name}`);
       const ready = (): boolean => Boolean(env.state.jReplicas?.get?.(chain.name)?.contracts?.depository);
-      if (ready()) continue;
-      await sendRuntimeInput({
-        runtimeTxs: [
-          {
-            type: 'importJ',
-            data: {
-              name: chain.name,
-              chainId: chain.chainId,
-              ticker: 'USDC',
-              rpcs: [chain.rpcUrl],
-              entityProviderDeploymentBlock: chain.entityProviderDeploymentBlock,
-              blockTimeMs: chain.blockTimeMs,
-              contracts: chain.contracts,
+      // Install the history consumer before importing another chain. Otherwise
+      // its watcher can finish empty pages before this Entity exists and must
+      // correctly re-read them when the new signer joins from deployment.
+      if (!ready()) {
+        await sendRuntimeInput({
+          runtimeTxs: [
+            {
+              type: 'importJ',
+              data: {
+                name: chain.name,
+                chainId: chain.chainId,
+                ticker: 'USDC',
+                rpcs: [chain.rpcUrl],
+                entityProviderDeploymentBlock: chain.entityProviderDeploymentBlock,
+                blockTimeMs: chain.blockTimeMs,
+                contracts: chain.contracts,
+              },
             },
-          },
-        ],
-        entityInputs: [],
-      });
-      await waitFor(ready, `importJ ${chain.name}`, 45_000);
-    }
+          ],
+          entityInputs: [],
+        });
+        await waitFor(ready, `importJ ${chain.name}`, 45_000);
+      }
 
-    // Match the canonical vault's stable secondary HD paths. The primary remains index 0
-    // and stays selected; adding/reordering another jurisdiction cannot change its identity.
-    for (const chain of stack.jurisdictions) {
+      // Stable secondary HD paths keep primary identity independent of order.
       const primary = chain.key === j.key;
       const chainSignerId = signerIds.get(chain.key);
       if (!chainSignerId) throw new Error(`STACK_JURISDICTION_SIGNER_MISSING:${chain.key}`);
       const chainEntityId = primary ? entityId : String(xln.generateLazyEntityId([chainSignerId], 1n)).toLowerCase();
-      if (findReplicaState(env, chainEntityId)) continue;
+      if (findReplicaState(env, chainEntityId)) return;
       step(`Creating your ${chain.name} entity`);
       await sendRuntimeInput({
         runtimeTxs: [
@@ -337,7 +338,13 @@ export async function bootHostedVault(seed: string, options: HostedVaultOptions)
         entityInputs: [],
       });
       await waitFor(() => Boolean(findReplicaState(env, chainEntityId)), `importReplica ${chain.name}`, 45_000);
-    }
+    };
+    // Readiness waits only for the primary history. Every watcher authenticates
+    // its full history on this one browser thread; a concurrent secondary scan
+    // halved the primary's header throughput. Secondaries join after it.
+    const primaryChain = stack.jurisdictions.find(chain => chain.key === j.key);
+    if (!primaryChain) throw new Error(`STACK_PRIMARY_JURISDICTION_MISSING:${j.key}`);
+    await joinChain(primaryChain);
 
     step('Connecting to the network');
     if (!xln.getP2P(env)) {
@@ -347,6 +354,7 @@ export async function bootHostedVault(seed: string, options: HostedVaultOptions)
     // operations stay behind the gate and replayed outputs retain their outbox.
     step('Syncing with the chain');
     await waitForChainScan(xln, env, entityId, signerId, options.chainScanTimeoutMs ?? 60_000, options.onStep);
+    for (const chain of stack.jurisdictions) if (chain !== primaryChain) await joinChain(chain);
 
     const connected = (): boolean => Boolean(xln.getP2P(env)?.isConnected?.());
     let online = true;

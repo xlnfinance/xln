@@ -26,21 +26,33 @@ export const sendBatchInChunks = async (
   concurrentChunks: 1 | 2 | 4 | 8,
 ): Promise<unknown[]> => {
   if (calls.length <= MAX_RPC_BATCH_CALLS) return sendBatch(calls);
-  const results: unknown[] = [];
-  // Header chunks within one pass are independent. Settle every chunk promise
-  // in this wave before returning or rejecting; retain request/result order.
-  for (let offset = 0; offset < calls.length; offset += concurrentChunks * MAX_RPC_BATCH_CALLS) {
-    const chunks = Array.from(
-      { length: Math.min(concurrentChunks, Math.ceil((calls.length - offset) / MAX_RPC_BATCH_CALLS)) },
-      (_, index) => calls.slice(offset + index * MAX_RPC_BATCH_CALLS, offset + (index + 1) * MAX_RPC_BATCH_CALLS),
-    );
-    const settled = await Promise.allSettled(chunks.map(async chunk => sendBatch(chunk)));
-    for (const result of settled) {
-      if (result.status === 'rejected') throw result.reason;
-      results.push(...result.value);
+  const count = Math.ceil(calls.length / MAX_RPC_BATCH_CALLS);
+  const results = new Array<PromiseSettledResult<unknown[]>>(count);
+  let next = 0;
+  let failed = false;
+  // Refill a free slot without waiting for unrelated slower chunks. A failed
+  // observation stops dispatch; drain every started request before rejecting
+  // in input order. The next complete observation cannot overlap this one.
+  const worker = async (): Promise<void> => {
+    while (!failed && next < count) {
+      const index = next++;
+      const offset = index * MAX_RPC_BATCH_CALLS;
+      try {
+        results[index] = {
+          status: 'fulfilled',
+          value: await sendBatch(calls.slice(offset, offset + MAX_RPC_BATCH_CALLS)),
+        };
+      } catch (reason) {
+        results[index] = { status: 'rejected', reason };
+        failed = true;
+      }
     }
-  }
-  return results;
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrentChunks, count) }, worker));
+  return results.slice(0, next).flatMap(result => {
+    if (result.status === 'rejected') throw result.reason;
+    return result.value;
+  });
 };
 
 export type DebugEventEmitter = {

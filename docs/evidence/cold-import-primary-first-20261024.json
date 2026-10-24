@@ -1,0 +1,36 @@
+{
+  "scope": "Cold public wallet import. Candidate = phase004 page amortization (constants/reader/rpc-utils, runtime bundle unchanged) plus primary-first chain join in ui/src/runtime/hosted.ts. Local candidate assets routed into https://xln.finance/ui/ with real public RPC, relay and faucet; NOT a public deployment. Latency remains OPEN.",
+  "baseSHA": "a7544107008b88da9e89923b26e5a5b440ec3db6",
+  "candidateRuntimeSHA256": "ee508a4af70bc38d04a9bff7918c457c7b9fdf5dd85d25e87191118702d0a168",
+  "hostedTsSHA256": "ea36dbe87666bbf7fab167cc257b0befa7c98d4e4cd15a5a44899a95fb6d0e4b",
+  "cause": {
+    "artifact": "phase005 cold import 40.68s (same runtime bundle)",
+    "window": "13.6s-35.6s: primary range 8194-57834 header authentication (two full passes)",
+    "observed": [
+      "Primary /rpc 955 and secondary /rpc2 986 batches in the same window; each averaged 4.3 of 8 rolling slots in flight",
+      "Combined ~100 batches/s; TTFB ~65ms; network union busy 18.67s of 22s",
+      "Renderer main thread idle only 13-35% per second; (program) 40-70%",
+      "hosted.ts readiness waits only for the primary chain scan, yet the secondary full-history scan ran concurrently on the same thread"
+    ]
+  },
+  "fix": "Join the primary jurisdiction and its Entity, start P2P, wait for the primary chain scan, then join secondary jurisdictions. All header passes, reorg fences, receipt authentication and history-from-deployment are unchanged.",
+  "l2": {
+    "spec": "ui/tests/e2e-production-wallet.spec.ts (original six assertions, trace on)",
+    "passed": 6,
+    "total": 6,
+    "perFunctionSeconds": [33.0, 5.5, 5.6, 6.6, 5.1, 20.7],
+    "primaryChainScan": "targetBlock 57935, committedCursor 8193, authenticatedThrough 57936",
+    "comparison": {
+      "baselinePublicImportSeconds": [53.9, 55.8],
+      "phase004CandidateImportSeconds": 38.9,
+      "thisCandidateImportSeconds": 33.0,
+      "samples": 1,
+      "note": "Chain height grows per trial; n=1 is not a stable speed certificate."
+    }
+  },
+  "remainingCause": [
+    "Cold import still authenticates every header since EntityProvider deployment twice on the browser main thread (O(chain height)); reducing that is an owner trust/protocol choice.",
+    "J-prefix attestation carries all scanned headers; encode/hash/verify/clone costs ~2.5-4s after the scan.",
+    "Reload 20.7s is unchanged by this fix."
+  ]
+}

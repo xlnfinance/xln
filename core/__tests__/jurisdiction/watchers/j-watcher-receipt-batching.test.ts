@@ -18,6 +18,77 @@ const blockFor = (height: number) => ({
 });
 
 describe('authenticated J watcher RPC batching', () => {
+  test.each([false, true])(
+    'validates the complete fence bloom after per-pass normalization: malformed=%s',
+    async malformed => {
+      let pass = 0;
+      const result = readAuthenticatedReceiptRange(
+        async () => {
+          throw new Error('EMPTY_BLOOMS_REQUIRE_NO_RECEIPTS');
+        },
+        2,
+        3,
+        ['0x000000000000000000000000000000000000dEaD'],
+        {},
+        async calls => {
+          pass += 1;
+          return calls.map(call => {
+            const block = blockFor(Number(BigInt(String(call.params[0]))));
+            // Normalization is local to each observation. Matching parent/hash
+            // bytes never permit a malformed bloom in the second observation.
+            block.hash = `  0x${block.hash.slice(2).toUpperCase()}  `;
+            block.parentHash = `0x${block.parentHash.slice(2).toUpperCase()}`;
+            if (malformed && pass === 2 && block.number === '0x2') block.logsBloom = '0xgg';
+            return block;
+          });
+        },
+      );
+      if (malformed) await expect(result).rejects.toThrow('J_RECEIPT_BLOOM_HEX_INVALID');
+      else
+        expect((await result).headers).toEqual(
+          [2, 3].map(jHeight => ({
+            jHeight,
+            jBlockHash: hashFor(jHeight),
+            parentHash: hashFor(jHeight - 1),
+          })),
+        );
+      expect(pass).toBe(2);
+    },
+  );
+
+  test('rejects an interior change across waves even when both endpoints and parent links agree', async () => {
+    const rangeSize = BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL;
+    const interior = Math.floor(rangeSize / 2);
+    let requested = 0;
+    const sendBatch = async (calls: readonly RpcBatchCall[]): Promise<unknown[]> => {
+      const fence = requested >= rangeSize + 1;
+      requested += calls.length;
+      return calls.map(call => {
+        const height = Number(BigInt(String(call.params[0])));
+        const block = blockFor(height);
+        // An untrusted RPC can claim unchanged endpoints while changing an
+        // interior hash and its child's parent. Both complete observations
+        // must still agree; parent continuity alone cannot authenticate this.
+        if (fence && height === interior) block.hash = hashFor(rangeSize + 100);
+        if (fence && height === interior + 1) block.parentHash = hashFor(rangeSize + 100);
+        return block;
+      });
+    };
+    await expect(
+      readAuthenticatedReceiptRange(
+        async () => {
+          throw new Error('EMPTY_BLOOMS_REQUIRE_NO_RECEIPTS');
+        },
+        2,
+        rangeSize + 1,
+        ['0x000000000000000000000000000000000000dEaD'],
+        {},
+        sendBatch,
+      ),
+    ).rejects.toThrow(`J_RECEIPT_RANGE_REORG:height=${interior}:`);
+    expect(requested).toBe(2 * (rangeSize + 1));
+  });
+
   test.each([2, 4, 8] as const)(
     'overlaps at most %i chunks while preserving requested header order',
     async concurrency => {
@@ -28,6 +99,7 @@ describe('authenticated J watcher RPC batching', () => {
       const first = Promise.withResolvers<void>();
       const second = Promise.withResolvers<void>();
       const entered = Promise.withResolvers<void>();
+      const replenished = Promise.withResolvers<void>();
       let active = 0;
       let peak = 0;
       const starts: number[] = [];
@@ -37,6 +109,7 @@ describe('authenticated J watcher RPC batching', () => {
           starts.push(start);
           peak = Math.max(peak, ++active);
           if (starts.length === concurrency) entered.resolve();
+          if (start === concurrency * 128) replenished.resolve();
           if (start === 0) await first.promise;
           if (start === 128) await second.promise;
           await Promise.resolve();
@@ -48,8 +121,9 @@ describe('authenticated J watcher RPC batching', () => {
       );
       await entered.promise;
       second.resolve();
-      await Promise.resolve();
-      expect(starts).toEqual(Array.from({ length: concurrency }, (_, index) => index * 128));
+      await replenished.promise;
+      // A slow first request must not leave the other bounded slots idle.
+      expect(starts).toEqual(Array.from({ length: concurrency + 1 }, (_, index) => index * 128));
       first.resolve();
       expect(await pending).toEqual(calls.map(call => call.params[0]));
       expect(starts).toEqual(Array.from({ length: concurrency + 1 }, (_, index) => index * 128));
@@ -93,6 +167,34 @@ describe('authenticated J watcher RPC batching', () => {
       expect(starts).toEqual(Array.from({ length: concurrency }, (_, index) => index * 128));
     },
   );
+
+  test('reports the first failed input chunk after draining out-of-order failures', async () => {
+    const first = Promise.withResolvers<unknown[]>();
+    const second = Promise.withResolvers<unknown[]>();
+    const started: number[] = [];
+    const earlier = new Error('EARLIER_INPUT_FAILURE');
+    const later = new Error('LATER_INPUT_FAILURE');
+    const calls = Array.from({ length: 385 }, (_, height) => ({ method: 'eth_getBlockByNumber', params: [height] }));
+    let settled = false;
+    const pending = sendBatchInChunks(
+      chunk => {
+        const height = Number(chunk[0]!.params[0]);
+        started.push(height);
+        return height === 0 ? first.promise : second.promise;
+      },
+      calls,
+      2,
+    ).catch(error => {
+      settled = true;
+      return error;
+    });
+    second.reject(later);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    first.reject(earlier);
+    expect(await pending).toBe(earlier);
+    expect(started).toEqual([0, 128]);
+  });
 
   test.each([
     ['ethereum-trie', 8],
@@ -167,7 +269,7 @@ describe('authenticated J watcher RPC batching', () => {
       // The production window includes its preceding anchor in both passes.
       // A trailing one-header request adds two network round trips per window.
       if (rangeSize === BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL) {
-        expect(batches.map(batch => batch.length)).toEqual(Array<number>(16).fill(128));
+        expect(batches.map(batch => batch.length)).toEqual(Array<number>(2 * ((rangeSize + 1) / 128)).fill(128));
       }
       expect(batches.every(batch => batch.length <= 128)).toBe(true);
       expect(batches.reduce((total, batch) => total + batch.length, 0)).toBe(2 * (rangeSize + 1));

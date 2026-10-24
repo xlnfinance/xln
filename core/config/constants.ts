@@ -232,15 +232,16 @@ export const BLOCKCHAIN = {
   // chain failover and therefore may stay deliberately cold.
   J_WATCHER_POLL_INTERVAL_MS: 5_000,
 
-  /** Admit authenticated catch-up progress before a public RPC range stalls.
-   * A 2048-block receipt window can exceed the 60s drain deadline without
-   * throttling. Smaller windows retain every header and the reorg fence;
-   * Including the preceding anchor, 1023 Ethereum blocks fill eight concurrent
-   * 128-call batches per pass. Both complete header passes remain mandatory.
+  /** Amortize the per-page head/authority/frontier/registry RPC round trips.
+   * Cold public import spent 19.17s in 382 control requests on one chain with
+   * 1023-block pages. A page is not a transport batch: including its anchor,
+   * 8191 blocks use eight waves of eight bounded 128-call batches per pass.
+   * Both complete header observations, receipt authentication and the durable
+   * admission fence remain mandatory; RPC/mempool pressure still halves pages.
    * Native TRON reads every block's receipts and already fans out scalar RPCs;
    * retain its smaller window and sequential header chunks.
    */
-  J_WATCHER_MAX_BLOCKS_PER_POLL: 1023,
+  J_WATCHER_MAX_BLOCKS_PER_POLL: 8191,
   J_WATCHER_TRON_MAX_BLOCKS_PER_POLL: 255,
 
   /** Header-only authenticated scan progress commits its own Runtime frame at

@@ -1,0 +1,317 @@
+{
+  "scope": "Historical phase002 evidence plus latest phase004 checked candidate. Cold latency remains OPEN; not committed or publicly deployed.",
+  "baseSHA": "a7544107008b88da9e89923b26e5a5b440ec3db6",
+  "candidateRuntimeSHA256": "30beecde9d39ed8689023b9afb909765260fe4387837c03ec92d63d229df0706",
+  "experiment": {
+    "baseline": {
+      "result": {
+        "passed": true,
+        "ms": 54755.963791999995
+      },
+      "rpcMethods": {
+        "eth_chainId": 4,
+        "eth_getCode": 16,
+        "eth_getBlockReceipts": 140,
+        "eth_call": 698,
+        "eth_blockNumber": 156,
+        "eth_getBlockByNumber": 244743,
+        "eth_getBalance": 2
+      },
+      "rpcNetworkUnionSeconds": 41.41720200004056,
+      "wireBytes": 41077428,
+      "byChain": {
+        "https://xln.finance/rpc": {
+          "requests": 1460,
+          "controlRequests": 382,
+          "controlWallUnionSeconds": 18.667632999829948
+        },
+        "https://xln.finance/rpc2": {
+          "requests": 1353,
+          "controlRequests": 357,
+          "controlWallUnionSeconds": 18.459290999686345
+        }
+      },
+      "scanConsole": [
+        {
+          "ms": 48590.811125,
+          "text": "[hosted] chain scan {chainId: 31337, depositoryAddress: 0xa513e6e4b8f2a923d98304ec87f64353c4d5c853, targetBlock: 57451, committedCursor: 1025, authenticatedThrough: 57455}"
+        }
+      ]
+    },
+    "candidate": {
+      "result": {
+        "passed": true,
+        "ms": 42548.907999999996
+      },
+      "rpcMethods": {
+        "eth_chainId": 4,
+        "eth_getCode": 16,
+        "eth_getBlockReceipts": 106,
+        "eth_call": 168,
+        "eth_blockNumber": 45,
+        "eth_getBlockByNumber": 229964,
+        "eth_getBalance": 2
+      },
+      "rpcNetworkUnionSeconds": 27.696745000430383,
+      "wireBytes": 38243535,
+      "byChain": {
+        "https://xln.finance/rpc": {
+          "requests": 1085,
+          "controlRequests": 123,
+          "controlWallUnionSeconds": 7.268009000574239
+        },
+        "https://xln.finance/rpc2": {
+          "requests": 1048,
+          "controlRequests": 86,
+          "controlWallUnionSeconds": 4.938554999884218
+        }
+      },
+      "scanConsole": [
+        {
+          "ms": 33948.680291,
+          "text": "[hosted] chain scan {chainId: 31337, depositoryAddress: 0xa513e6e4b8f2a923d98304ec87f64353c4d5c853, targetBlock: 57469, committedCursor: 8193, authenticatedThrough: 57471}"
+        }
+      ]
+    },
+    "samplesPerVariant": 1,
+    "limits": [
+      "Different fresh random wallets, targets 57451 and 57469; not a statistically stable benchmark.",
+      "Candidate runtime asset supplied locally to the public page; all RPC, relay and financial services remain public.",
+      "CPU sampling and retained trace enabled in both variants. Network and CPU durations overlap and must not be added."
+    ]
+  },
+  "cause": "1023-block logical pages repeat serialized head/authority/frontier/complete-registry reads and history admission for each page. Full header authentication requires both observations, but does not require an eight-request logical page.",
+  "change": {
+    "evmLogicalPageBlocks": {
+      "before": 1023,
+      "after": 8191
+    },
+    "rpcBatchCalls": 128,
+    "concurrentHeaderBatches": 8,
+    "completeHeaderPasses": 2,
+    "nativeTronPageBlocks": 255,
+    "pressure": "Existing halving and backoff retained; no timeout changes."
+  },
+  "l1": {
+    "passed": 36,
+    "required": 36,
+    "assertions": 2190,
+    "newVector": "Interior hash and child parent change between full observations, with unchanged endpoints and contiguous parent links; rejects at exact interior height across batch waves.",
+    "finalRunSeconds": 2.57
+  },
+  "l2": {
+    "status": "PASS",
+    "originalSource": "ui/tests/e2e-production-wallet.spec.ts",
+    "timeoutPerFunctionMs": 60000,
+    "passed": 6,
+    "required": 6,
+    "perFunctionSeconds": [
+      42.4,
+      3.9,
+      5.0,
+      7.2,
+      4.7,
+      20.2
+    ],
+    "runnerExitCode": 0,
+    "totalReported": "2.5m",
+    "trace": "on",
+    "limitation": "Runtime served from local candidate build, not deployed publicly. Original source imported without copying/modifying assertions."
+  },
+  "check": {
+    "status": "PASS before whitespace-only formatting of the new regression test",
+    "exitCode": 0,
+    "sourceGates": 38,
+    "topLevelLongGates": 3,
+    "sourceMs": 198123,
+    "freshFinalBytesCheck": "Required next; production constants unchanged by formatter. Final regression suite passed again after formatting."
+  },
+  "publication": "NOT_DEPLOYED",
+  "remainingFirstTask": "Phase004 original six 6/6, cold 38.9s/reload19.8s; separate successful CPU/network cold37.00s. Fresh check source38/top3 PASS. Continue causal reduction; preserve both complete observations and all assertions; checked publication and independent public verification remain.",
+  "privateProofDirectory": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/sol-mainnet-closure-sequence-20261024/phase-002",
+  "artifactSHA256": {
+    "candidate-runtime.js": "30beecde9d39ed8689023b9afb909765260fe4387837c03ec92d63d229df0706",
+    "l1.log": "90262165a403c41a0aec0c9e8f8b65d516b3f0c3263bb03cfb0255c6a1a44de2",
+    "window-timing/trace.zip": "48d5cea2533563f3b711d4c85dbd3858a86678d86bec86b0245b91d0eac0476d",
+    "candidate-timing/trace.zip": "c7392ee1a12d0b35cc36c5bef4d682ead47d5f3d9eeb5bb5885198196657fab9",
+    "candidate-wallet-private/candidate-wallet-productio-0d82d-nds-the-default-hub-Account-chromium/trace.zip": "63c7eb4b8a57f17a50dab157f58321d25b36ff582f862f563f3d31f48aecc772",
+    "candidate-wallet-private/candidate-wallet-productio-3ab46-00-to-the-bilateral-Account-chromium/trace.zip": "0dd85b668afb9e48fa9e6e61918a8f75fe19679b63fc35d7679a0ef2680154df",
+    "candidate-wallet-private/candidate-wallet-productio-5ca5d--balances-and-both-Accounts-chromium/trace.zip": "a74af94d89ce9e57e33addb07c8becb8da4c2c54b05dae6402aa0082802df7d4",
+    "candidate-wallet-private/candidate-wallet-productio-5f390-k-receipt-and-exact-balance-chromium/trace.zip": "972bb68e23168da838cb9b82a9a58102138116bd6c4b808ce707468d5058cd06",
+    "candidate-wallet-private/candidate-wallet-productio-d0942-reserve-100-from-the-faucet-chromium/trace.zip": "ca037bfe2719800933e476eddba33821e9614ddea31b9375057b31c40a71d186",
+    "candidate-wallet-private/candidate-wallet-productio-de3cb-50-and-signed-frame-history-chromium/trace.zip": "e38834656823f357aa2454e04594f7ac69b4765df5644f9fb1b10b2ca8ba1980",
+    "l1-final.log": "30dd0648154003457594e8f4d0051bf9c06a8f932a947b6ccdb11fc9a17a04b4",
+    "check.log": "aa3bab8ba210dedcb5bdc753cbb81c084c37e3658ab0ca1c52719616266fb864"
+  },
+  "payloadObservation": {
+    "scope": "Read-only payload accounting; projection NOT implemented or authorized as a chosen transport. Standard full RPC responses still used.",
+    "sampleBatches": 8,
+    "blocks": 1024,
+    "rawHeaderBytes": 1759337,
+    "consumedFieldBytes": 828888
+  },
+  "phase004": {
+    "baseSHA": "a7544107008b88da9e89923b26e5a5b440ec3db6",
+    "branch": "main",
+    "sourceSHA256": {
+      "core/__tests__/jurisdiction/watchers/j-watcher-receipt-batching.test.ts": "683a96cf273202ae00f10f25ea05ad2c8fb3b2839c9f36720a68866ae1aaba58",
+      "core/config/constants.ts": "ced3944ac26c8166c939f82f04aed77fce69671ea3013277970fb0fbbd2bf257",
+      "core/jurisdiction/adapter/receipt/reader.ts": "b9584f784a15c5c4480516b7373af78a100b21386343225b1114fa041061cc77",
+      "core/jurisdiction/adapter/rpc-utils.ts": "e808e6371bb352967d2d0e040c4c40299f49fefb19987752fad722e64fc0397d",
+      "ui/src/runtime/hosted.ts": "193a536f6c5bf9b3324a6fa9c419e520ea43388a2ef168f6b88df3157e5917ca"
+    },
+    "runtimeSHA256": "ee508a4af70bc38d04a9bff7918c457c7b9fdf5dd85d25e87191118702d0a168",
+    "uiArtifactsSHA256": {
+      "index.html": "8bdff43ac8be217742bb90d2542654a0817bef8561fc2e5ac0a112d4ed369a4d",
+      "runtime.js": "5ca3fde13236042415d8446a8ce54db6781ebdfa2da84a805f17ae8143a76798",
+      "account-worker.js": "fbf5eed8dfcedcad6c82fa513eed3d39e238a72daedefefa421c25f4e818db8f",
+      "assets/push-wake-sw-TrIUAo0y.js": "8f1dec2bd00adb400e2f6789d58e9850cd0e9db8db2bafd3cfd2e843aeb1d179",
+      "assets/web-O-KurwtB.js": "e822f1ea7e38fa11ed3d37c65a750a44d39964c0dfaafd49b750c80f9289cd5a",
+      "assets/web-Dhw68tVF.js": "f27a59f2bf844232a4ad74cc182b81458e6bc761a891f1b972c38b1d9ca3476e",
+      "assets/index-BjCQqBMR.css": "4e55b6dbf16ac32e06b56c31625f83a9cc113e62ec1ea89530ca449f2f8bc101",
+      "assets/web-B3MOSDh4.js": "8dcb1d8f9a1d8e795e19805eab9fe41ba566cabf5dc75c0d82454f32ba5e2f5e",
+      "assets/web-DuPWnIZt.js": "0b1501558f18fe5cb4e007e8211f0ee7e42b3beaf89a21cce6e6d0b2775de361",
+      "assets/index-Sxfg-fno.js": "99313c5696adefb5f00dc8b9269ce4cd700e04bcfa19c5590c88e7d1d762a655",
+      "assets/browser-5E2k-2qx.js": "a40f8854d960f243ca64ae2634921d332f1e98514ff84d750d586dc10e42e8e5",
+      "assets/store-1mES2niH.js": "0b317ba708203e7dda8d40f163569e56b09e3865947fdc0eac021afd7817ef2b",
+      "assets/web-CRdrIeQ2.js": "774f50fb80cd3d40af2f959647e18ff386eee993d1450fa4b03c1c2ddd114b5a",
+      "assets/web-CYnlFX-c.js": "5886b1087ed89a919257595602a250a7ad40ddba1f1111771ee0012a9ee1bdaf",
+      "assets/index-Dpi-i-lq.js": "410b82e130803fbadd906681dc9202a03ed2ae8672fcb81814e35d2dd74c6609",
+      "assets/web-DacRT30q.js": "a09723dc0a499d147472dae89d690e2537aefa3eef6e4a728897a9e322403578",
+      "assets/web-C0Ym3L-8.js": "32d2c87bae172df0c63734535f13c6f2535aa147c9b646425014f2e2ba9a8a38",
+      "assets/web-TZpkxdHC.js": "20af0953de947f44d7dc6309b8e4e108c2ec944a79e3953aa78832a9dec87788",
+      "assets/web-BF_iL8af.js": "110e68737ed38d39fc9faa1cd49c0d7e193fd1cea1dd3102e08e59d7b351ed3e",
+      "assets/index.esm-BD_kl2mU.js": "97ebb57b06882781b8b6f1e3984fbd4c1bb645ab860b570b5c163e7a6df9a2c1",
+      "assets/web-Biczmgkd.js": "6d4c69ee96057e58402757a741ab9277144ec4504c9192d823d23fa0f5cd5989",
+      "assets/web-4L1jFpvE.js": "cb08473650c6109c2ae7a26138b1cab835cc6687de280c1fa00d9229c6471f84",
+      "assets/adapter-D9WwFXIe.js": "794e912a5a9f0f17ab285bcdd148f9fc6dcd592edd08b6389c92cfb87b0349af"
+    },
+    "l1": {
+      "passed": 39,
+      "total": 39,
+      "assertions": 2197,
+      "log": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/astra-mainnet-closure-sequence-20261024/phase-004/l1-final.log"
+    },
+    "l2": {
+      "passed": 6,
+      "total": 6,
+      "exitCode": 0,
+      "perFunctionSeconds": [
+        38.9,
+        3.0,
+        5.2,
+        7.2,
+        4.8,
+        19.8
+      ],
+      "trace": "on",
+      "log": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/astra-mainnet-closure-sequence-20261024/phase-004/onboarding/six.log",
+      "scope": "Local candidate runtime and hosted React assets in public HTTPS browser; real public RPC, relay and faucet. NOT public deployment."
+    },
+    "networkComparison": {
+      "waves": {
+        "trace": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/astra-mainnet-closure-sequence-20261024/phase-004/candidate-wallet-private/candidate-wallet-productio-0d82d-nds-the-default-hub-Account-chromium/trace.zip",
+        "rpcUnionMs": 24741.93899999999,
+        "byChain": {
+          "https://xln.finance/rpc": {
+            "headers": 115432,
+            "headerUnionMs": 13838.404000000039,
+            "controlUnionMs": 6322.38399999998,
+            "meanHeaderWaitMs": 81.39025166297121,
+            "meanHeaderReceiveMs": 17.726441241685137,
+            "headerWireBytes": 18983962,
+            "headerDecodedBytes": 202259378
+          },
+          "https://xln.finance/rpc2": {
+            "headers": 115390,
+            "headerUnionMs": 13992.944999999992,
+            "controlUnionMs": 5838.432000000015,
+            "meanHeaderWaitMs": 79.05294235033244,
+            "meanHeaderReceiveMs": 18.915100886917976,
+            "headerWireBytes": 18967154,
+            "headerDecodedBytes": 202182752
+          }
+        }
+      },
+      "continuous": {
+        "trace": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/astra-mainnet-closure-sequence-20261024/phase-004/continuous/candidate-wallet-private/candidate-wallet-productio-0d82d-nds-the-default-hub-Account-chromium/trace.zip",
+        "rpcUnionMs": 26725.569000000007,
+        "byChain": {
+          "https://xln.finance/rpc": {
+            "headers": 148248,
+            "headerUnionMs": 16897.437000000005,
+            "controlUnionMs": 6912.198999999991,
+            "meanHeaderWaitMs": 75.28693793103456,
+            "meanHeaderReceiveMs": 15.974194827586215,
+            "headerWireBytes": 24388488,
+            "headerDecodedBytes": 259758410
+          },
+          "https://xln.finance/rpc2": {
+            "headers": 131816,
+            "headerUnionMs": 15547.533000000007,
+            "controlUnionMs": 6534.454999999971,
+            "meanHeaderWaitMs": 75.98519805825242,
+            "meanHeaderReceiveMs": 17.434330097087415,
+            "headerWireBytes": 21663920,
+            "headerDecodedBytes": 230963826
+          }
+        }
+      },
+      "onboarding": {
+        "trace": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/astra-mainnet-closure-sequence-20261024/phase-004/onboarding/candidate-wallet-private/candidate-wallet-productio-0d82d-nds-the-default-hub-Account-chromium/trace.zip",
+        "rpcUnionMs": 23866.314000000024,
+        "byChain": {
+          "https://xln.finance/rpc": {
+            "headers": 115534,
+            "headerUnionMs": 12584.26499999999,
+            "controlUnionMs": 8298.091000000033,
+            "meanHeaderWaitMs": 71.06449446902654,
+            "meanHeaderReceiveMs": 15.449934734513292,
+            "headerWireBytes": 19004197,
+            "headerDecodedBytes": 202438950
+          },
+          "https://xln.finance/rpc2": {
+            "headers": 115480,
+            "headerUnionMs": 13208.688999999988,
+            "controlUnionMs": 6351.938999999984,
+            "meanHeaderWaitMs": 72.48521238938042,
+            "meanHeaderReceiveMs": 16.30790376106195,
+            "headerWireBytes": 18983099,
+            "headerDecodedBytes": 202340474
+          }
+        }
+      }
+    },
+    "check": {
+      "command": "bun run check",
+      "exitCode": 0,
+      "sourceGates": 38,
+      "topLevelGates": 3,
+      "sourceDurationMs": 196995,
+      "log": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/astra-mainnet-closure-sequence-20261024/phase-004/check.log",
+      "sha256": "18ba8d0ccdc37569da2cd777865d12b0a11e470831e82746a509c31a23abc499",
+      "sourceFingerprintUnchanged": true
+    },
+    "publication": "NOT_PUBLISHED",
+    "latencyClosure": "OPEN: 38.9 seconds remains unacceptable; n=1 each, different new wallets and slightly advancing chain targets. Network and CPU overlap; do not sum.",
+    "profile": {
+      "result": {
+        "passed": true,
+        "ms": 36998.546167
+      },
+      "exitCode": 0,
+      "standHeld": true,
+      "scope": "Separate fresh cold wallet, CPU and network capture plus trace; not a second six-function run"
+    },
+    "proofSHA256": {
+      "l1-final.log": "5446c615dd70ada447cce30c4a5925d8ad72212d2fa7a958186ed0512f79845e",
+      "onboarding/six.log": "cb04ad8fc38a0b4744353b226f6cab62070de2c2bae184fa7f7cbcab00220691",
+      "onboarding/profile.log": "99285cb2f3c41b499d3008307764f47d1ed76e92c33caedd03117ec81e6ac875",
+      "onboarding/timing/trace.zip": "a4bb074d181e34a8c306fe44f8c231baca9af9efd78aa00d7e7e028aafc7964e",
+      "onboarding/timing/cold-import.cpuprofile": "47048b4ba9964972a6236a9d4bbd5fe58f601110ab04a047d6fab7fcff1c7cba",
+      "onboarding/timing/cold-import-cdp-network.json": "b54310a3062139207deb0338a145c19aec1ee52e3a8d26c4ca2e11de4cfe53e4"
+    },
+    "cause": "A wave barrier leaves free bounded RPC slots idle. Removing it exposed pre-consumer scanning: importing all jurisdictions before their Entities let the primary watcher read 16384 early headers twice extra. Interleave each jurisdiction and its Entity; preserve deployment-history reads and late-signer rebase checks.",
+    "scope": "Intermediate candidate, not a latency closure or public release. Earlier top-level checks refer only to phase002."
+  }
+}

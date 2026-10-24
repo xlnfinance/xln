@@ -16,11 +16,11 @@ import {
 } from '../../machine/receipt-codec';
 
 type CanonicalRpcBlock = {
-  number: string | number;
+  number: number;
   hash: string;
   parentHash: string;
   receiptsRoot: string;
-  logsBloom: string;
+  matchesWatchedBloom: boolean;
   transactions: string[];
 };
 
@@ -79,28 +79,42 @@ const mapConcurrent = async <T, R>(
   return results;
 };
 
-const parseCanonicalBlock = (raw: unknown, height: number): CanonicalRpcBlock => {
+const parseCanonicalBlock = (
+  raw: unknown,
+  height: number,
+  matchesWatchedBloom: (logsBloom: string) => boolean,
+): CanonicalRpcBlock => {
   if (!raw || typeof raw !== 'object') {
     throw new ReceiptAvailabilityError('J_RECEIPT_BLOCK_MISSING', String(height));
   }
-  const block = raw as Partial<CanonicalRpcBlock>;
+  const block = raw as Partial<Omit<CanonicalRpcBlock, 'matchesWatchedBloom'>> & { logsBloom?: string };
   if (parseReceiptQuantity(block.number, 'BLOCK_NUMBER') !== BigInt(height)) {
     throw new Error(`J_RECEIPT_BLOCK_NUMBER_MISMATCH:${height}:${String(block.number)}`);
   }
-  normalizeReceiptHash(block.hash, 'BLOCK_HASH');
-  normalizeReceiptHash(block.parentHash, 'PARENT_HASH');
-  normalizeReceiptHash(block.receiptsRoot, 'ROOT');
-  parseReceiptHex(block.logsBloom, 'BLOOM', 256);
+  const hash = normalizeReceiptHash(block.hash, 'BLOCK_HASH');
+  const parentHash = normalizeReceiptHash(block.parentHash, 'PARENT_HASH');
+  const receiptsRoot = normalizeReceiptHash(block.receiptsRoot, 'ROOT');
+  const watchedBloom = matchesWatchedBloom(String(block.logsBloom ?? ''));
   if (!Array.isArray(block.transactions) || block.transactions.some(hash => typeof hash !== 'string')) {
     throw new Error(`J_RECEIPT_BLOCK_TRANSACTIONS_INVALID:${height}`);
   }
-  return block as CanonicalRpcBlock;
+  // This pass owns validation. Reuse these normalized fields for parent/fence
+  // comparisons; the other complete observation is decoded independently.
+  return {
+    number: height,
+    hash,
+    parentHash,
+    receiptsRoot,
+    matchesWatchedBloom: watchedBloom,
+    transactions: block.transactions,
+  };
 };
 
 const readCanonicalBlocks = async (
   send: RpcSend,
   heights: readonly number[],
   concurrentChunks: 1 | 2 | 4 | 8,
+  matchesWatchedBloom: (logsBloom: string) => boolean,
   sendBatch?: RpcBatchSend,
 ): Promise<CanonicalRpcBlock[]> => {
   const calls = heights.map((height): RpcBatchCall => ({
@@ -113,13 +127,13 @@ const readCanonicalBlocks = async (
   if (rawBlocks.length !== heights.length) {
     throw new Error(`J_RECEIPT_BATCH_LENGTH_MISMATCH:expected=${heights.length}:actual=${rawBlocks.length}`);
   }
-  return rawBlocks.map((raw, index) => parseCanonicalBlock(raw, heights[index]!));
+  return rawBlocks.map((raw, index) => parseCanonicalBlock(raw, heights[index]!, matchesWatchedBloom));
 };
 
 const canonicalHeader = (block: CanonicalRpcBlock) => ({
-  jHeight: Number(parseReceiptQuantity(block.number, 'BLOCK_NUMBER')),
-  jBlockHash: normalizeReceiptHash(block.hash, 'BLOCK_HASH'),
-  parentHash: normalizeReceiptHash(block.parentHash, 'PARENT_HASH'),
+  jHeight: block.number,
+  jBlockHash: block.hash,
+  parentHash: block.parentHash,
 });
 
 const assertContiguousBlocks = (
@@ -385,12 +399,12 @@ export const readAuthenticatedReceiptRange = async (
   // Native TRON already fans each chunk out to 12 scalar workers. Keep its
   // chunks sequential; overlap only Ethereum JSON-RPC batches within a pass.
   const concurrentChunks = commitment === 'ethereum-trie' ? 8 : 1;
-  const rangeBlocks = await readCanonicalBlocks(send, rangeHeights, concurrentChunks, sendBatch);
-  assertContiguousBlocks(rangeBlocks, profile.expectedParent);
-  const blocks = rangeBlocks.filter(block => Number(parseReceiptQuantity(block.number, 'BLOCK_NUMBER')) >= fromBlock);
   const matchesWatchedBloom = createLogBloomMatcher([...addresses]);
+  const rangeBlocks = await readCanonicalBlocks(send, rangeHeights, concurrentChunks, matchesWatchedBloom, sendBatch);
+  assertContiguousBlocks(rangeBlocks, profile.expectedParent);
+  const blocks = rangeBlocks.filter(block => block.number >= fromBlock);
   const logsByBlock = await mapConcurrent(blocks, 4, async block => {
-    if (commitment === 'ethereum-trie' && !matchesWatchedBloom(block.logsBloom)) return [];
+    if (commitment === 'ethereum-trie' && !block.matchesWatchedBloom) return [];
     if (commitment === 'tron-complete-receipts') {
       return collectWatchedLogs(block, await readTronReceipts(send, block), addresses, undefined, profile.nativeRpc);
     }
@@ -404,7 +418,7 @@ export const readAuthenticatedReceiptRange = async (
   if (commitment === 'tron-complete-receipts') {
     await crossCheckTronLogs(send, fromBlock, toBlock, addresses, logs);
   }
-  const fenceBlocks = await readCanonicalBlocks(send, rangeHeights, concurrentChunks, sendBatch);
+  const fenceBlocks = await readCanonicalBlocks(send, rangeHeights, concurrentChunks, matchesWatchedBloom, sendBatch);
   assertContiguousBlocks(fenceBlocks, profile.expectedParent);
   assertRangeFenceUnchanged(rangeBlocks, fenceBlocks);
   return {
