@@ -12,8 +12,7 @@ type BoardHankoRefreshPayload = NonNullable<ReturnType<typeof accountInputBoardH
 
 type ValidatedBoardHankoRefreshMetadata = {
   expectedFrom: string;
-  activationJHeight: number;
-  activationLogIndex: number;
+  boardEpoch: number;
   frameHeight: number;
   currentFrameHash: string;
 };
@@ -24,27 +23,18 @@ const rejectBoardHankoRefresh = (
 ): HandleAccountInputResult =>
   rejectAccountInput('ACCOUNT_INPUT_BOARD_HANKO_REFRESH_INVALID', error, events);
 
-type BoardHankoRefreshActivation = Pick<
-  ValidatedBoardHankoRefreshMetadata,
-  'activationJHeight' | 'activationLogIndex'
->;
+type BoardHankoRefreshActivation = Pick<ValidatedBoardHankoRefreshMetadata, 'boardEpoch'>;
 
 const validateBoardHankoRefreshActivation = (
   boardHankoRefresh: BoardHankoRefreshPayload,
   securityContext: AccountInputSecurityContext,
   events: string[],
 ): HandleAccountInputResult | BoardHankoRefreshActivation => {
-  const activationJHeight = Number(boardHankoRefresh.boardActivationJHeight);
-  const activationLogIndex = Number(boardHankoRefresh.boardActivationLogIndex);
-  if (!Number.isSafeInteger(activationJHeight) || activationJHeight < 1) {
+  const boardEpoch = Number(boardHankoRefresh.boardEpoch);
+  // Registration is epoch 0; only a BoardActivated board can need a refresh.
+  if (!Number.isSafeInteger(boardEpoch) || boardEpoch < 1) {
     return rejectBoardHankoRefresh(
-      `ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_HEIGHT_INVALID:${activationJHeight}`,
-      events,
-    );
-  }
-  if (!Number.isSafeInteger(activationLogIndex) || activationLogIndex < 0) {
-    return rejectBoardHankoRefresh(
-      `ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_LOG_INDEX_INVALID:${activationLogIndex}`,
+      `ACCOUNT_BOARD_HANKO_REFRESH_BOARD_EPOCH_INVALID:${boardEpoch}`,
       events,
     );
   }
@@ -52,18 +42,13 @@ const validateBoardHankoRefreshActivation = (
   if (!certifiedBoard) {
     return rejectBoardHankoRefresh('ACCOUNT_BOARD_HANKO_REFRESH_CERTIFIED_BOARD_MISSING', events);
   }
-  if (
-    activationJHeight !== certifiedBoard.activatedAtJHeight
-    || activationLogIndex !== certifiedBoard.logIndex
-  ) {
+  if (boardEpoch !== certifiedBoard.boardEpoch) {
     return rejectBoardHankoRefresh(
-      `ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_MISMATCH:`
-        + `${activationJHeight}:${activationLogIndex}:`
-        + `${certifiedBoard.activatedAtJHeight}:${certifiedBoard.logIndex}`,
+      `ACCOUNT_BOARD_HANKO_REFRESH_BOARD_EPOCH_MISMATCH:${boardEpoch}:${certifiedBoard.boardEpoch}`,
       events,
     );
   }
-  return { activationJHeight, activationLogIndex };
+  return { boardEpoch };
 };
 
 const validateBoardHankoRefreshFrame = (
@@ -72,24 +57,18 @@ const validateBoardHankoRefreshFrame = (
   activation: BoardHankoRefreshActivation,
   events: string[],
 ): HandleAccountInputResult | Pick<ValidatedBoardHankoRefreshMetadata, 'frameHeight' | 'currentFrameHash'> => {
-  const { activationJHeight, activationLogIndex } = activation;
+  const { boardEpoch } = activation;
   const frameHeight = Number(boardHankoRefresh.height);
   const previous = account.counterpartyBoardHankoRefresh;
-  const notNewer = previous && (
-    activationJHeight < previous.activationJHeight
-    || (activationJHeight === previous.activationJHeight && activationLogIndex <= previous.activationLogIndex)
-  );
+  const notNewer = previous && boardEpoch <= previous.boardEpoch;
   const exactRetry = previous && (
-    activationJHeight === previous.activationJHeight
-    && activationLogIndex === previous.activationLogIndex
+    boardEpoch === previous.boardEpoch
     && frameHeight === previous.frameHeight
     && String(boardHankoRefresh.frameHash).toLowerCase() === previous.frameHash
   );
   if (notNewer && !exactRetry) {
     return rejectBoardHankoRefresh(
-      `ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_ORDER_INVALID:`
-        + `${activationJHeight}:${activationLogIndex}:`
-        + `${previous.activationJHeight}:${previous.activationLogIndex}`,
+      `ACCOUNT_BOARD_HANKO_REFRESH_BOARD_EPOCH_ORDER_INVALID:${boardEpoch}:${previous.boardEpoch}`,
       events,
     );
   }
@@ -238,8 +217,7 @@ export const handleBoardHankoRefresh = async (
     account.counterpartyDisputeProofHanko = witnesses.verifiedDispute.hanko;
   }
   account.counterpartyBoardHankoRefresh = {
-    activationJHeight: metadata.activationJHeight,
-    activationLogIndex: metadata.activationLogIndex,
+    boardEpoch: metadata.boardEpoch,
     frameHeight: metadata.frameHeight,
     frameHash: metadata.currentFrameHash,
   };

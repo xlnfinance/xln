@@ -654,8 +654,7 @@ export async function verifyHankoForHash(
       | 'boardHash'
       | 'previousBoardHash'
       | 'previousBoardValidUntil'
-      | 'activatedAtJHeight'
-      | 'logIndex'
+      | 'boardEpoch'
     >>;
     /** Parent Entity clock paired with `certifiedBoardRecord`. */
     observerTimestamp?: number;

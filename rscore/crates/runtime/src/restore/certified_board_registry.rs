@@ -648,8 +648,7 @@ mod tests {
                     && authority.registered_board_hash == [0x33; 32]
                     && authority.previous_board_hash == [0x44; 32]
                     && authority.previous_board_valid_until == 1_700_604_800
-                    && authority.activated_at_j_height == 9
-                    && authority.activation_log_index == 3
+                    && authority.board_epoch == 7
         ));
         assert_eq!(
             authority

@@ -275,15 +275,14 @@ fn decode_board_authority(
     if matches!(value, AbiValue::Nil) {
         return Ok(xln_rscore_batch::AccountInputBoardAuthority::Lazy);
     }
-    let fields = exact(tuple(value)?, 5, label)?;
+    let fields = exact(tuple(value)?, 4, label)?;
     Ok(xln_rscore_batch::AccountInputBoardAuthority::Certified(
         xln_rscore_engine::CertifiedBoardAuthority {
             entity_id,
             registered_board_hash: fixed_bytes(&fields[0], "registeredBoardHash")?,
             previous_board_hash: fixed_bytes(&fields[1], "previousBoardHash")?,
             previous_board_valid_until: js_number(&fields[2], "previousBoardValidUntil")?,
-            activated_at_j_height: js_number(&fields[3], "activatedAtJHeight")?,
-            activation_log_index: js_number(&fields[4], "activationLogIndex")?,
+            board_epoch: js_number(&fields[3], "boardEpoch")?,
         },
     ))
 }

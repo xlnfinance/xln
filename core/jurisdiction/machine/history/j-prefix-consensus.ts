@@ -664,10 +664,10 @@ export const selectHighestWeightedCommonJPrefix = (
   return null;
 };
 
-export const buildJPrefixCertificate = (
+const jPrefixCertificateEnvelope = (
   state: EntityState,
   attestations: ReadonlyMap<string, JPrefixAttestation>,
-): JPrefixCertificate | null => {
+): Omit<JPrefixCertificate, 'attestations'> | null => {
   const selection = selectHighestWeightedCommonJPrefix(state, attestations);
   if (!selection) return null;
   return {
@@ -678,6 +678,17 @@ export const buildJPrefixCertificate = (
     jurisdictionRef: selection.claim.jurisdictionRef,
     baseHeight: selection.claim.baseHeight,
     selected: structuredClone(selection.claim),
+  };
+};
+
+export const buildJPrefixCertificate = (
+  state: EntityState,
+  attestations: ReadonlyMap<string, JPrefixAttestation>,
+): JPrefixCertificate | null => {
+  const envelope = jPrefixCertificateEnvelope(state, attestations);
+  if (!envelope) return null;
+  return {
+    ...envelope,
     attestations: new Map(
       Array.from(attestations.entries())
         .map(([signerId, attestation]) => [normalizeText(signerId), structuredClone(attestation)] as const)
@@ -701,25 +712,26 @@ export const verifyJPrefixCertificate = (
     if (attestation.validatorId !== signerId) throw new Error(`J_PREFIX_MAP_SIGNER_MISMATCH:${rawSignerId}`);
     verified.set(signerId, attestation);
   }
-  const rebuilt = buildJPrefixCertificate(state, verified);
-  if (!rebuilt) throw new Error('J_PREFIX_CERTIFICATE_QUORUM_MISSING');
-  if (claimKey(rebuilt.selected) !== claimKey(normalizeClaim(state, certificate.selected))) {
+  // The verified attestations are returned as-is; cloning every ~50k-header
+  // attestation only to discard the copy cost ~260 ms per cold-import frame.
+  const expectedEnvelope = jPrefixCertificateEnvelope(state, verified);
+  if (!expectedEnvelope) throw new Error('J_PREFIX_CERTIFICATE_QUORUM_MISSING');
+  if (claimKey(expectedEnvelope.selected) !== claimKey(normalizeClaim(state, certificate.selected))) {
     throw new Error('J_PREFIX_CERTIFICATE_NOT_HIGHEST_COMMON');
   }
-  const { attestations: _rebuiltAttestations, ...expectedEnvelope } = rebuilt;
   const receivedEnvelope = {
     version: certificate.version,
     targetEntityHeight: certificate.targetEntityHeight,
     parentFrameHash: normalizeText(certificate.parentFrameHash),
     jurisdictionRef: normalizeText(certificate.jurisdictionRef),
     baseHeight: certificate.baseHeight,
-    selected: rebuilt.selected,
+    selected: expectedEnvelope.selected,
     entityId: normalizeText(certificate.entityId),
   };
   if (!canonicalConsensusValuesEqual(receivedEnvelope, expectedEnvelope)) {
     throw new Error('J_PREFIX_CERTIFICATE_ROUND_MISMATCH');
   }
-  return { ...rebuilt, attestations: verified };
+  return { ...expectedEnvelope, attestations: verified };
 };
 
 export const mergeJPrefixAttestations = (

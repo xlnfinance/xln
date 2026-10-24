@@ -155,19 +155,7 @@ const releaseRebalanceSubmittedAt: EntityWrite = (state, env) => {
 };
 
 const markBoardHankoRefreshPending: EntityWrite = (state, env) => {
-  markBoardRotationHankoRefreshesPending(env, state, {
-    type: 'BoardActivated',
-    blockNumber: 44,
-    blockHash: `0x${'44'.repeat(32)}`,
-    transactionHash: `0x${'45'.repeat(32)}`,
-    logIndex: 2,
-    data: {
-      entityId: OWNER,
-      previousBoardHash: `0x${'46'.repeat(32)}`,
-      newBoardHash: `0x${'47'.repeat(32)}`,
-      previousBoardValidUntil: '1700604800',
-    },
-  });
+  markBoardRotationHankoRefreshesPending(env, state, { entityId: OWNER.toLowerCase(), boardEpoch: 2 });
 };
 
 const clearBoardHankoRefresh: EntityWrite = (state, env) => {

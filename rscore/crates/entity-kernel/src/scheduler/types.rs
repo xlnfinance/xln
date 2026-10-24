@@ -47,14 +47,12 @@ pub enum ScheduledHookKind {
         counterparty_id: String,
     },
     BoardHankoRefresh {
-        activation_j_height: u64,
-        activation_log_index: u64,
+        board_epoch: u64,
         after_counterparty_id: String,
     },
     CounterpartyBoardHankoRefreshDeadline {
         account_id: String,
-        activation_j_height: u64,
-        activation_log_index: u64,
+        board_epoch: u64,
     },
     CrossJOrderbookSweep {
         reason: String,

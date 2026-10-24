@@ -54,15 +54,13 @@ type HubRebalanceKickHook = ScheduledHookBase<'hub_rebalance_kick', {
 }>;
 
 type BoardHankoRefreshHook = ScheduledHookBase<'board_hanko_refresh', {
-  activationJHeight: number;
-  activationLogIndex: number;
+  boardEpoch: number;
   afterCounterpartyId: string;
 }>;
 
 type CounterpartyBoardHankoRefreshDeadlineHook = ScheduledHookBase<'counterparty_board_hanko_refresh_deadline', {
   accountId: string;
-  activationJHeight: number;
-  activationLogIndex: number;
+  boardEpoch: number;
 }>;
 
 type CrossJurisdictionOrderbookSweepHook = ScheduledHookBase<'cross_j_orderbook_sweep', {

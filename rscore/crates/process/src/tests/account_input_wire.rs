@@ -159,7 +159,6 @@ fn certified_board_authority_is_typed_local_context() {
             AbiValue::Bytes(vec![current; 32]),
             AbiValue::Bytes(vec![previous; 32]),
             AbiValue::Integer(1_700_604_800),
-            AbiValue::Integer(19),
             AbiValue::Integer(2),
         ])
     };
@@ -176,6 +175,7 @@ fn certified_board_authority_is_typed_local_context() {
     };
     assert_eq!(authority.registered_board_hash, [0xa3; 32]);
     assert_eq!(authority.previous_board_hash, [0xa2; 32]);
+    assert_eq!(authority.board_epoch, 2);
     let xln_rscore_batch::AccountInputBoardAuthority::Certified(local) =
         row.local_certified_board_authority
     else {

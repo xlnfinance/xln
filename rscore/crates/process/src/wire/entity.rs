@@ -322,15 +322,13 @@ fn decode_hook_kind(
             reason: text_at(1, "crontabHookReason")?,
             counterparty_id: text_at(2, "crontabHookCounterparty")?,
         }),
-        6 if row.len() == 4 => Ok(ScheduledHookKind::BoardHankoRefresh {
-            activation_j_height: number_at(1, "crontabHookActivationJHeight")?,
-            activation_log_index: number_at(2, "crontabHookActivationLogIndex")?,
-            after_counterparty_id: text_at(3, "crontabHookAfterCounterparty")?,
+        6 if row.len() == 3 => Ok(ScheduledHookKind::BoardHankoRefresh {
+            board_epoch: number_at(1, "crontabHookBoardEpoch")?,
+            after_counterparty_id: text_at(2, "crontabHookAfterCounterparty")?,
         }),
-        7 if row.len() == 4 => Ok(ScheduledHookKind::CounterpartyBoardHankoRefreshDeadline {
+        7 if row.len() == 3 => Ok(ScheduledHookKind::CounterpartyBoardHankoRefreshDeadline {
             account_id: text_at(1, "crontabHookAccountId")?,
-            activation_j_height: number_at(2, "crontabHookActivationJHeight")?,
-            activation_log_index: number_at(3, "crontabHookActivationLogIndex")?,
+            board_epoch: number_at(2, "crontabHookBoardEpoch")?,
         }),
         8 if row.len() == 2 => Ok(ScheduledHookKind::CrossJOrderbookSweep {
             reason: text_at(1, "crontabHookReason")?,

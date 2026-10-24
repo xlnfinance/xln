@@ -114,7 +114,7 @@ const decodeBoardHankoRefresh = (value: unknown, code: string): AccountBoardHank
   const boardHankoRefresh = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(
     boardHankoRefresh,
-    ['height', 'frameHash', 'boardActivationJHeight', 'boardActivationLogIndex'],
+    ['height', 'frameHash', 'boardEpoch'],
     ['frameHanko', 'disputeHanko'],
     `${code}_FIELDS`,
   );
@@ -129,13 +129,9 @@ const decodeBoardHankoRefresh = (value: unknown, code: string): AccountBoardHank
   );
   return {
     ...ack,
-    boardActivationJHeight: requireBoundaryInteger(
-      boardHankoRefresh['boardActivationJHeight'],
-      `${code}_J_HEIGHT`,
-    ),
-    boardActivationLogIndex: requireBoundaryInteger(
-      boardHankoRefresh['boardActivationLogIndex'],
-      `${code}_LOG_INDEX`,
+    boardEpoch: requireBoundaryInteger(
+      boardHankoRefresh['boardEpoch'],
+      `${code}_BOARD_EPOCH`,
     ),
   };
 };

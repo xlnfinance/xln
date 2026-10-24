@@ -13,8 +13,7 @@ export type AccountInputSecurityContext = {
   /** Exact counterparty authority from the consuming Entity's finalized registry. */
   counterpartyCertifiedBoard?: {
     boardHash: string;
-    activatedAtJHeight: number;
-    logIndex: number;
+    boardEpoch: number;
   };
   /** Parent-provided Hanko authority; Account never reads Runtime/Entity state. */
   verifyHanko(

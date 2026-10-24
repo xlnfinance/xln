@@ -201,10 +201,10 @@ const hookKindWire = (hook: ScheduledHook): RscoreWireValue[] => {
     case 'watchdog': return [4];
     case 'hub_rebalance_kick': return [5, hook.data.reason, hook.data.counterpartyId];
     case 'board_hanko_refresh': return [
-      6, hook.data.activationJHeight, hook.data.activationLogIndex, hook.data.afterCounterpartyId,
+      6, hook.data.boardEpoch, hook.data.afterCounterpartyId,
     ];
     case 'counterparty_board_hanko_refresh_deadline': return [
-      7, hook.data.accountId, hook.data.activationJHeight, hook.data.activationLogIndex,
+      7, hook.data.accountId, hook.data.boardEpoch,
     ];
     case 'cross_j_orderbook_sweep': return [8, hook.data.reason];
   }

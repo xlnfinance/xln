@@ -283,8 +283,7 @@ pub fn apply_standalone_dispute(
 
 #[derive(Clone, Copy)]
 struct StoredBoardHankoRefresh {
-    activation_j_height: u64,
-    activation_log_index: u64,
+    board_epoch: u64,
     frame_height: u64,
     frame_hash: [u8; 32],
 }
@@ -337,8 +336,7 @@ fn stored_board_hanko_refresh(
         ));
     };
     Ok(Some(StoredBoardHankoRefresh {
-        activation_j_height: canonical_u64(fields, "activationJHeight")?,
-        activation_log_index: canonical_u64(fields, "activationLogIndex")?,
+        board_epoch: canonical_u64(fields, "boardEpoch")?,
         frame_height: canonical_u64(fields, "frameHeight")?,
         frame_hash: crate::parse_root_hex(frame_hash).ok_or_else(|| {
             StateError::Envelope("COUNTERPARTY_BOARD_HANKO_REFRESH_FRAME_HASH".to_string())
@@ -355,14 +353,7 @@ fn refresh_metadata(
             .map_err(|error| StateError::Envelope(error.to_string()))
     };
     Ok(xln_rscore_protocol::CanonicalValue::Object(vec![
-        (
-            "activationJHeight".to_string(),
-            number(input.board_activation_j_height)?,
-        ),
-        (
-            "activationLogIndex".to_string(),
-            number(input.board_activation_log_index)?,
-        ),
+        ("boardEpoch".to_string(), number(input.board_epoch)?),
         ("frameHeight".to_string(), number(input.height)?),
         (
             "frameHash".to_string(),
@@ -389,45 +380,28 @@ pub fn apply_board_hanko_refresh(
         ));
     };
     authority.assert_entity(&envelope.from_entity_id)?;
-    if input.board_activation_j_height == 0 || input.board_activation_j_height > JS_MAX_SAFE_INTEGER
-    {
+    // Registration is epoch 0; only a BoardActivated board can need a refresh.
+    if input.board_epoch == 0 || input.board_epoch > JS_MAX_SAFE_INTEGER {
         return Ok(standalone_rejected(format!(
-            "ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_HEIGHT_INVALID:{}",
-            input.board_activation_j_height
+            "ACCOUNT_BOARD_HANKO_REFRESH_BOARD_EPOCH_INVALID:{}",
+            input.board_epoch
         )));
     }
-    if input.board_activation_log_index > JS_MAX_SAFE_INTEGER {
+    if input.board_epoch != authority.board_epoch {
         return Ok(standalone_rejected(format!(
-            "ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_LOG_INDEX_INVALID:{}",
-            input.board_activation_log_index
-        )));
-    }
-    if input.board_activation_j_height != authority.activated_at_j_height
-        || input.board_activation_log_index != authority.activation_log_index
-    {
-        return Ok(standalone_rejected(format!(
-            "ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_MISMATCH:{}:{}:{}:{}",
-            input.board_activation_j_height,
-            input.board_activation_log_index,
-            authority.activated_at_j_height,
-            authority.activation_log_index
+            "ACCOUNT_BOARD_HANKO_REFRESH_BOARD_EPOCH_MISMATCH:{}:{}",
+            input.board_epoch, authority.board_epoch
         )));
     }
     if let Some(previous) = stored_board_hanko_refresh(account)? {
-        let not_newer = input.board_activation_j_height < previous.activation_j_height
-            || (input.board_activation_j_height == previous.activation_j_height
-                && input.board_activation_log_index <= previous.activation_log_index);
-        let exact_retry = input.board_activation_j_height == previous.activation_j_height
-            && input.board_activation_log_index == previous.activation_log_index
+        let not_newer = input.board_epoch <= previous.board_epoch;
+        let exact_retry = input.board_epoch == previous.board_epoch
             && input.height == previous.frame_height
             && input.frame_hash == previous.frame_hash;
         if not_newer && !exact_retry {
             return Ok(standalone_rejected(format!(
-                "ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_ORDER_INVALID:{}:{}:{}:{}",
-                input.board_activation_j_height,
-                input.board_activation_log_index,
-                previous.activation_j_height,
-                previous.activation_log_index
+                "ACCOUNT_BOARD_HANKO_REFRESH_BOARD_EPOCH_ORDER_INVALID:{}:{}",
+                input.board_epoch, previous.board_epoch
             )));
         }
     }
@@ -1395,8 +1369,7 @@ mod authority_tests {
             registered_board_hash: board_hash(registered_entity, &current_key),
             previous_board_hash: board_hash(registered_entity, &previous_key),
             previous_board_valid_until: valid_until,
-            activated_at_j_height: 19,
-            activation_log_index: 2,
+            board_epoch: 2,
         };
         let clock = |entity_timestamp| ReceiverClock {
             entity_timestamp,
@@ -1464,8 +1437,7 @@ mod authority_tests {
                 registered_board_hash,
                 previous_board_hash: [0_u8; 32],
                 previous_board_valid_until: 0,
-                activated_at_j_height: 1,
-                activation_log_index: 0,
+                board_epoch: 1,
             }),
         )
         .expect("certified current board");
@@ -1479,8 +1451,7 @@ mod authority_tests {
                     registered_board_hash: [0x55_u8; 32],
                     previous_board_hash: [0_u8; 32],
                     previous_board_valid_until: 0,
-                    activated_at_j_height: 1,
-                    activation_log_index: 0,
+                    board_epoch: 1,
                 }),
             ),
             Err(StateError::BoardAuthorityUnavailable),
@@ -1490,8 +1461,7 @@ mod authority_tests {
             registered_board_hash,
             previous_board_hash: [0_u8; 32],
             previous_board_valid_until: 0,
-            activated_at_j_height: 1,
-            activation_log_index: 0,
+            board_epoch: 1,
         };
         assert!(matches!(
             verify_frame_hanko_with_authority(
@@ -1526,8 +1496,7 @@ mod authority_tests {
             registered_board_hash: board_hash(registered_entity, &current_key),
             previous_board_hash: board_hash(registered_entity, &previous_key),
             previous_board_valid_until: valid_until,
-            activated_at_j_height: 77,
-            activation_log_index: 4,
+            board_epoch: 4,
         };
 
         assert!(matches!(

@@ -248,8 +248,7 @@ export interface AccountReplica {
   /** One bounded, consensus-visible reminder that this Account still needs the active board Hanko. */
   boardHankoRefreshMigration?: AccountBoardHankoRefreshMigration;
   counterpartyBoardHankoRefresh?: {
-    activationJHeight: number;
-    activationLogIndex: number;
+    boardEpoch: number;
     frameHeight: number;
     frameHash: string;
   };
@@ -338,8 +337,8 @@ export interface AccountReplica {
 }
 
 export type AccountBoardHankoRefreshMigration = {
-  activationJHeight: number;
-  activationLogIndex: number;
+  /** EntityProvider.boardEpochs value of the activated local board. */
+  boardEpoch: number;
   /** Latest Account frame for which a durable board Hanko refresh output was issued. */
   issuedFrameHeight?: number;
   issuedFrameHash?: string;
@@ -408,9 +407,8 @@ export type AccountAckFrame = {
  * nonce, so the exact certified hashes travel in a separate control input.
  */
 export type AccountBoardHankoRefresh = AccountAckFrame & {
-  /** Exact ordered EVM log position of the on-chain board activation. */
-  boardActivationJHeight: number;
-  boardActivationLogIndex: number;
+  /** Exact EntityProvider.boardEpochs value of the activated sender board. */
+  boardEpoch: number;
 };
 
 export type AccountFrameProposal = {

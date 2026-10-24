@@ -75,8 +75,7 @@ const buildUnverifiedBoardHankoRefreshTx = (
       height: 1,
       frameHash: digest('0'),
       frameHanko: '0x01',
-      boardActivationJHeight: 1,
-      boardActivationLogIndex: Number(sequence),
+      boardEpoch: Number(sequence),
     },
   },
 });

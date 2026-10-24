@@ -225,18 +225,8 @@ fn encode_account_input(input: &AccountInput) -> Result<Value, EntityOutputEncod
                 ),
                 ("frameHash".into(), Value::String(hex(&refresh.frame_hash))),
                 (
-                    "boardActivationJHeight".into(),
-                    safe_number(
-                        "boardHankoRefresh.boardActivationJHeight",
-                        refresh.board_activation_j_height,
-                    )?,
-                ),
-                (
-                    "boardActivationLogIndex".into(),
-                    safe_number(
-                        "boardHankoRefresh.boardActivationLogIndex",
-                        refresh.board_activation_log_index,
-                    )?,
+                    "boardEpoch".into(),
+                    safe_number("boardHankoRefresh.boardEpoch", refresh.board_epoch)?,
                 ),
             ]);
             if let Some(hanko) = &refresh.frame_hanko {

@@ -137,8 +137,7 @@ const certifiedBoardFor = (
     boardHash: record.boardHash,
     previousBoardHash: record.previousBoardHash,
     previousBoardValidUntil: record.previousBoardValidUntil,
-    activatedAtJHeight: record.activatedAtJHeight,
-    logIndex: record.logIndex,
+    boardEpoch: record.boardEpoch,
   };
 };
 

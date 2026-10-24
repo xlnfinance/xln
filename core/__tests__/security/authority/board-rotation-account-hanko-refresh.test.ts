@@ -58,8 +58,7 @@ const putAccount = (state: EntityState, counterpartyId: string, account: ReturnT
 const certifiedHankoRefreshContext = (
   env: ReturnType<typeof createEmptyEnv>,
   boardHash: string,
-  activatedAtJHeight: number,
-  logIndex: number,
+  boardEpoch: number,
 ): AccountInputSecurityContext => {
   const context = createAccountConsensusContext(env);
   return {
@@ -67,9 +66,15 @@ const certifiedHankoRefreshContext = (
     finalizedJHeight: env.state.jHeight,
     owningEntityIsHub: false,
     verifyHanko: context.verifyHanko,
-    counterpartyCertifiedBoard: { boardHash, activatedAtJHeight, logIndex },
+    counterpartyCertifiedBoard: { boardHash, boardEpoch },
   };
 };
+
+/** Production resolves this epoch from the certified registry after BoardActivated. */
+const epochActivation = (
+  event: Extract<JurisdictionEvent, { type: 'BoardActivated' }>,
+  boardEpoch = 1,
+) => ({ entityId: event.data.entityId.toLowerCase(), boardEpoch });
 
 test('board Hanko refresh replaces only the exact current counterparty Hanko', async () => {
   const env = createEmptyEnv('board-rotation-account-boardHankoRefresh');
@@ -108,8 +113,7 @@ test('board Hanko refresh replaces only the exact current counterparty Hanko', a
       height: 7,
       frameHash,
       frameHanko,
-      boardActivationJHeight: 19,
-      boardActivationLogIndex: 2,
+      boardEpoch: 1,
     },
   } satisfies AccountInput;
   const baseContext = createAccountConsensusContext(env);
@@ -120,7 +124,7 @@ test('board Hanko refresh replaces only the exact current counterparty Hanko', a
       observedAuthorities.push(authority);
       return baseContext.verifyHanko(hanko, hash, expectedEntityId, authority);
     },
-  }, account, input, certifiedHankoRefreshContext(env, sourceEntityId, 19, 2));
+  }, account, input, certifiedHankoRefreshContext(env, sourceEntityId, 1));
 
   expect(applied.ok, accountInputFailureMessage(applied)).toBe(true);
   expect(observedAuthorities[0]).toEqual({
@@ -132,8 +136,7 @@ test('board Hanko refresh replaces only the exact current counterparty Hanko', a
   expect(account.currentHeight).toBe(7);
   expect(account.state.jNonce).toBe(0);
   expect(account.counterpartyBoardHankoRefresh).toEqual({
-    activationJHeight: 19,
-    activationLogIndex: 2,
+    boardEpoch: 1,
     frameHeight: 7,
     frameHash,
   });
@@ -146,34 +149,92 @@ test('board Hanko refresh replaces only the exact current counterparty Hanko', a
     createAccountConsensusContext(env),
     account,
     structuredClone(input),
-    certifiedHankoRefreshContext(env, sourceEntityId, 19, 2),
+    certifiedHankoRefreshContext(env, sourceEntityId, 1),
   )).ok).toBe(true);
   expect(projectAccountDoc(account)).toEqual(beforeExactRetry);
 
-  const sameBlockSuccessor = structuredClone(input);
-  sameBlockSuccessor.boardHankoRefresh.boardActivationLogIndex = 3;
+  const uncertifiedSuccessor = structuredClone(input);
+  uncertifiedSuccessor.boardHankoRefresh.boardEpoch = 2;
   const successorRejected = await applyAccountInput(
     createAccountConsensusContext(env),
     account,
-    sameBlockSuccessor,
-    certifiedHankoRefreshContext(env, sourceEntityId, 19, 2),
+    uncertifiedSuccessor,
+    certifiedHankoRefreshContext(env, sourceEntityId, 1),
   );
   expect(successorRejected.ok).toBe(false);
-  expect(accountInputFailureMessage(successorRejected)).toContain('ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_MISMATCH');
+  expect(accountInputFailureMessage(successorRejected)).toContain('ACCOUNT_BOARD_HANKO_REFRESH_BOARD_EPOCH_MISMATCH:2:1');
 
   const beforeRejected = projectAccountDoc(account);
   const tampered = structuredClone(input);
-  tampered.boardHankoRefresh.boardActivationJHeight = Number.MAX_SAFE_INTEGER;
-  tampered.boardHankoRefresh.boardActivationLogIndex = Number.MAX_SAFE_INTEGER;
+  tampered.boardHankoRefresh.boardEpoch = Number.MAX_SAFE_INTEGER;
   const rejected = await applyAccountInput(
     createAccountConsensusContext(env),
     account,
     tampered,
-    certifiedHankoRefreshContext(env, sourceEntityId, 19, 2),
+    certifiedHankoRefreshContext(env, sourceEntityId, 1),
   );
   expect(rejected.ok).toBe(false);
-  expect(accountInputFailureMessage(rejected)).toContain('ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_MISMATCH');
+  expect(accountInputFailureMessage(rejected)).toContain('ACCOUNT_BOARD_HANKO_REFRESH_BOARD_EPOCH_MISMATCH');
   expect(projectAccountDoc(account)).toEqual(beforeRejected);
+});
+
+test('board Hanko refresh epoch is exact, starts after registration and never moves backwards', async () => {
+  const env = createEmptyEnv('board-rotation-account-refresh-epoch-order');
+  const signerId = deriveSignerAddressSync('board-rotation-account-refresh-epoch-order', '1').toLowerCase();
+  registerSignerKey(env, signerId, deriveSignerKeySync('board-rotation-account-refresh-epoch-order', '1'));
+  const sourceEntityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+  const receiverEntityId = digest('78');
+  const frameHash = digest('a2');
+  const frameHanko = await buildQuorumHanko(env, sourceEntityId, frameHash, [{
+    signerId,
+    signature: await signAccountFrame(env, signerId, frameHash),
+  }], {
+    mode: 'proposer-based' as const,
+    threshold: 1n,
+    validators: [signerId],
+    shares: { [signerId]: 1n },
+  });
+  const account = makeAccount(receiverEntityId, sourceEntityId);
+  account.currentHeight = 3;
+  account.currentFrame = { ...account.currentFrame, height: 3, stateHash: frameHash };
+  account.counterpartyFrameHanko = '0x01';
+  const refresh = (boardEpoch: number) => ({
+    kind: 'board_hanko_refresh',
+    fromEntityId: sourceEntityId,
+    toEntityId: receiverEntityId,
+    domain: { ...account.state.domain },
+    disputeConfig: { ...account.state.disputeConfig },
+    boardHankoRefresh: { height: 3, frameHash, frameHanko, boardEpoch },
+  } satisfies AccountInput);
+  const apply = (boardEpoch: number, certifiedEpoch: number) => applyAccountInput(
+    createAccountConsensusContext(env),
+    account,
+    refresh(boardEpoch),
+    certifiedHankoRefreshContext(env, sourceEntityId, certifiedEpoch),
+  );
+
+  // Epoch 0 is the registration board; no BoardActivated refresh can claim it.
+  const registration = await apply(0, 0);
+  expect(registration.ok).toBe(false);
+  expect(accountInputFailureMessage(registration)).toContain('ACCOUNT_BOARD_HANKO_REFRESH_BOARD_EPOCH_INVALID:0');
+  expect(account.counterpartyBoardHankoRefresh).toBeUndefined();
+
+  // A sender cannot pre-claim an epoch the receiver has not certified.
+  const ahead = await apply(3, 2);
+  expect(ahead.ok).toBe(false);
+  expect(accountInputFailureMessage(ahead)).toContain('ACCOUNT_BOARD_HANKO_REFRESH_BOARD_EPOCH_MISMATCH:3:2');
+  expect(account.counterpartyBoardHankoRefresh).toBeUndefined();
+
+  const current = await apply(2, 2);
+  expect(current.ok, accountInputFailureMessage(current)).toBe(true);
+  expect(account.counterpartyBoardHankoRefresh?.boardEpoch).toBe(2);
+
+  // An observer that still certifies epoch 1 cannot roll the installed epoch back.
+  const beforeStale = projectAccountDoc(account);
+  const stale = await apply(1, 1);
+  expect(stale.ok).toBe(false);
+  expect(accountInputFailureMessage(stale)).toContain('ACCOUNT_BOARD_HANKO_REFRESH_BOARD_EPOCH_ORDER_INVALID:1:2');
+  expect(projectAccountDoc(account)).toEqual(beforeStale);
 });
 
 test('ACK commit retains the counterparty Hanko needed for later board Hanko refresh', async () => {
@@ -269,8 +330,8 @@ test('board Hanko refresh routing is identical with sparse and populated validat
     },
   } satisfies JurisdictionEvent;
 
-  const populatedDraft = buildBoardRotationHankoRefreshDrafts(structuredClone(state), populated, activation);
-  const sparseDraft = buildBoardRotationHankoRefreshDrafts(structuredClone(state), sparse, activation);
+  const populatedDraft = buildBoardRotationHankoRefreshDrafts(structuredClone(state), populated, epochActivation(activation));
+  const sparseDraft = buildBoardRotationHankoRefreshDrafts(structuredClone(state), sparse, epochActivation(activation));
 
   expect(sparse.state.eReplicas.size).toBe(0);
   expect(sparseDraft).toEqual(populatedDraft);
@@ -283,8 +344,7 @@ test('board Hanko refresh routing is identical with sparse and populated validat
   expect(sparseDraft.accountMigrations).toEqual([{
     counterpartyId: targetEntityId,
     marker: {
-      activationJHeight: 24,
-      activationLogIndex: 2,
+      boardEpoch: 1,
       reason: 'issued',
       issuedFrameHeight: 4,
       issuedFrameHash: frameHash,
@@ -317,8 +377,7 @@ test('one uncertified Account cannot block BoardActivated Hanko refreshes for ce
     shares: { [signerId]: 1n },
   });
   certified.boardHankoRefreshMigration = {
-    activationJHeight: 6,
-    activationLogIndex: 9,
+    boardEpoch: 1,
     reason: 'bilateral-frame-uncertified',
   };
   env.state.eReplicas.set(`${certifiedId}:${signerId}`, {
@@ -353,7 +412,7 @@ test('one uncertified Account cannot block BoardActivated Hanko refreshes for ce
     },
   } satisfies JurisdictionEvent;
 
-  const result = buildBoardRotationHankoRefreshDrafts(state, env, activation);
+  const result = buildBoardRotationHankoRefreshDrafts(state, env, epochActivation(activation, 2));
   expect(result.outputs).toHaveLength(1);
   expect(result.outputs[0]?.entityId).toBe(certifiedId);
   expect(result.hashesToSign).toEqual([expect.objectContaining({
@@ -368,16 +427,14 @@ test('one uncertified Account cannot block BoardActivated Hanko refreshes for ce
     {
       counterpartyId: uncertifiedId,
       marker: {
-        activationJHeight: 7,
-        activationLogIndex: 0,
+        boardEpoch: 2,
         reason: 'bilateral-frame-uncertified',
       },
     },
     {
       counterpartyId: certifiedId,
       marker: {
-        activationJHeight: 7,
-        activationLogIndex: 0,
+        boardEpoch: 2,
         reason: 'issued',
         issuedFrameHeight: 2,
         issuedFrameHash: digest('d2'),
@@ -449,14 +506,13 @@ test('partial bilateral dispute evidence never emits a frame-only board Hanko re
     },
   } satisfies JurisdictionEvent;
 
-  const result = buildBoardRotationHankoRefreshDrafts(state, env, activation);
+  const result = buildBoardRotationHankoRefreshDrafts(state, env, epochActivation(activation));
   expect(result.outputs).toEqual([]);
   expect(result.hashesToSign).toEqual([]);
   expect(result.accountMigrations).toEqual([{
     counterpartyId,
     marker: {
-      activationJHeight: 8,
-      activationLogIndex: 1,
+      boardEpoch: 1,
       reason: 'bilateral-dispute-uncertified',
     },
   }]);
@@ -518,7 +574,7 @@ test('one board Hanko refresh pass emits at most 32 deterministic Accounts', asy
     },
   } satisfies JurisdictionEvent;
 
-  const result = buildBoardRotationHankoRefreshDrafts(state, env, activation);
+  const result = buildBoardRotationHankoRefreshDrafts(state, env, epochActivation(activation));
   expect(result.outputs).toHaveLength(32);
   expect(result.hashesToSign).toHaveLength(32);
   expect(result.outputs.map(output => output.entityId)).toEqual([...accounts.keys()].sort().slice(0, 32));
@@ -636,16 +692,16 @@ test('two board rotations in one finalized J range collapse to the latest board 
 
   expect(applied.outputs).toEqual([]);
   expect(applied.hashesToSign).toBeUndefined();
+  // Two activations in one J range certify epochs 1 then 2; only the latest wakes.
   expect(applied.newState.accounts.get(counterpartyId)?.boardHankoRefreshMigration).toEqual({
-    activationJHeight: 3,
-    activationLogIndex: 9,
+    boardEpoch: 2,
     reason: 'pending',
   });
   expect([...(applied.newState.crontabState?.hooks.entries() ?? [])]).toEqual([['board-hanko-refresh', {
     id: 'board-hanko-refresh',
     triggerAt: state.timestamp,
     type: 'board_hanko_refresh',
-    data: { activationJHeight: 3, activationLogIndex: 9, afterCounterpartyId: '' },
+    data: { boardEpoch: 2, afterCounterpartyId: '' },
   }]]);
 });
 
@@ -737,12 +793,12 @@ test('certified counterparty board activation arms an exact 24-hour board Hanko 
     blockHash: rotation.blockHash,
   }, env);
 
-  const hookId = counterpartyBoardHankoRefreshDeadlineHookId(counterpartyId, 3, 7);
+  const hookId = counterpartyBoardHankoRefreshDeadlineHookId(counterpartyId, 1);
   expect(applied.newState.crontabState?.hooks.get(hookId)).toEqual({
     id: hookId,
     triggerAt: state.timestamp + COUNTERPARTY_BOARD_HANKO_REFRESH_DEADLINE_MS,
     type: 'counterparty_board_hanko_refresh_deadline',
-    data: { accountId: counterpartyId, activationJHeight: 3, activationLogIndex: 7 },
+    data: { accountId: counterpartyId, boardEpoch: 1 },
   });
   expect(applied.newState.accounts.get(counterpartyId)?.boardHankoRefreshMigration).toBeUndefined();
 });

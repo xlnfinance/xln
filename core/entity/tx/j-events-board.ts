@@ -11,6 +11,7 @@ import { cancelHook, scheduleHook } from '../scheduler';
 import {
   BOARD_HANKO_REFRESH_HOOK_ID,
   markBoardRotationHankoRefreshesPending,
+  resolveBoardHankoRefreshActivation,
 } from './state-effects/board-rotation-hanko-refresh';
 import type { FinalizedJEventContext } from './j-events';
 
@@ -18,9 +19,8 @@ export const COUNTERPARTY_BOARD_HANKO_REFRESH_DEADLINE_MS = 24 * 60 * 60 * 1_000
 
 export const counterpartyBoardHankoRefreshDeadlineHookId = (
   counterpartyId: string,
-  activationJHeight: number,
-  activationLogIndex: number,
-): string => `counterparty-board-hanko-refresh:${counterpartyId.toLowerCase()}:${activationJHeight}:${activationLogIndex}`;
+  boardEpoch: number,
+): string => `counterparty-board-hanko-refresh:${counterpartyId.toLowerCase()}:${boardEpoch}`;
 
 /**
  * Applies the three events that advance certified board authority. Pending
@@ -75,7 +75,11 @@ export const applyCertifiedBoardJEvent = (
     }
   }
 
-  const boardHankoRefresh = markBoardRotationHankoRefreshesPending(env, newState, event);
+  const boardHankoRefresh = markBoardRotationHankoRefreshesPending(
+    env,
+    newState,
+    resolveBoardHankoRefreshActivation(newState, getCertifiedBoardNodeStore(env), event),
+  );
   for (const accountId of boardHankoRefresh.dirtyAccounts) dirtyAccounts.add(accountId);
   if (!isLocalEntity) {
     const counterpartyId = event.data.entityId.toLowerCase();
@@ -85,15 +89,13 @@ export const applyCertifiedBoardJEvent = (
     scheduleHook(newState.crontabState, {
       id: counterpartyBoardHankoRefreshDeadlineHookId(
         counterpartyId,
-        boardHankoRefresh.activation.jHeight,
-        boardHankoRefresh.activation.logIndex,
+        boardHankoRefresh.activation.boardEpoch,
       ),
       triggerAt: newState.timestamp + COUNTERPARTY_BOARD_HANKO_REFRESH_DEADLINE_MS,
       type: 'counterparty_board_hanko_refresh_deadline',
       data: {
         accountId: counterpartyId,
-        activationJHeight: boardHankoRefresh.activation.jHeight,
-        activationLogIndex: boardHankoRefresh.activation.logIndex,
+        boardEpoch: boardHankoRefresh.activation.boardEpoch,
       },
     });
     addMessage(
@@ -112,8 +114,7 @@ export const applyCertifiedBoardJEvent = (
     triggerAt: newState.timestamp,
     type: 'board_hanko_refresh',
     data: {
-      activationJHeight: boardHankoRefresh.activation.jHeight,
-      activationLogIndex: boardHankoRefresh.activation.logIndex,
+      boardEpoch: boardHankoRefresh.activation.boardEpoch,
       afterCounterpartyId: '',
     },
   });

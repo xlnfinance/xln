@@ -3416,25 +3416,48 @@ fn counterparty_dispute_hankos_are_verified_on_frame_and_ack() {
         registered_board_hash: rotated_board_hash,
         previous_board_hash: [0_u8; 32],
         previous_board_valid_until: 0,
-        activated_at_j_height: 88,
-        activation_log_index: 3,
+        board_epoch: 3,
     };
     let leaf_before_refresh = right
         .account
         .entity_account_leaf()
         .expect("leaf before refresh");
+    // Adversarial: the sender may not choose the epoch. Registration epoch 0
+    // never needs a refresh, and a sender pre-claiming an epoch the receiver
+    // has not certified is rejected without touching the Account.
+    let attempt = |board_epoch| BoardHankoRefreshInput {
+        height: 1,
+        frame_hash: proposed.state_hash,
+        frame_hanko: Some(rotated_hanko.clone()),
+        dispute: None,
+        board_epoch,
+    };
+    for (board_epoch, reason) in [
+        (0, "ACCOUNT_BOARD_HANKO_REFRESH_BOARD_EPOCH_INVALID:0"),
+        (4, "ACCOUNT_BOARD_HANKO_REFRESH_BOARD_EPOCH_MISMATCH:4:3"),
+    ] {
+        let rejected = apply_board_hanko_refresh(
+            &mut right.account,
+            &left_to_right,
+            CLOCK,
+            attempt(board_epoch),
+            Some(&authority),
+        )
+        .expect("board refresh reducer");
+        assert!(matches!(
+            rejected,
+            StandaloneInputOutcome::Rejected { reason: ref actual } if actual == reason
+        ));
+        assert_eq!(
+            leaf_before_refresh,
+            right.account.entity_account_leaf().expect("unchanged leaf")
+        );
+    }
     let refresh = apply_board_hanko_refresh(
         &mut right.account,
         &left_to_right,
         CLOCK,
-        BoardHankoRefreshInput {
-            height: 1,
-            frame_hash: proposed.state_hash,
-            frame_hanko: Some(rotated_hanko),
-            dispute: None,
-            board_activation_j_height: 88,
-            board_activation_log_index: 3,
-        },
+        attempt(3),
         Some(&authority),
     )
     .expect("board refresh reducer");
@@ -3443,6 +3466,33 @@ fn counterparty_dispute_hankos_are_verified_on_frame_and_ack() {
         StandaloneInputOutcome::Applied { ref events }
             if events == &["🔐 Refreshed Account frame 1 Hankos under the current board"]
     ));
+    // Adversarial: a lagging observer whose registry still certifies epoch 2
+    // cannot roll the stored epoch-3 refresh back.
+    let lagging_authority = CertifiedBoardAuthority {
+        board_epoch: 2,
+        ..authority
+    };
+    let leaf_after_refresh = right.account.entity_account_leaf().expect("refreshed leaf");
+    let rollback = apply_board_hanko_refresh(
+        &mut right.account,
+        &left_to_right,
+        CLOCK,
+        attempt(2),
+        Some(&lagging_authority),
+    )
+    .expect("board refresh reducer");
+    assert!(matches!(
+        rollback,
+        StandaloneInputOutcome::Rejected { ref reason }
+            if reason == "ACCOUNT_BOARD_HANKO_REFRESH_BOARD_EPOCH_ORDER_INVALID:2:3"
+    ));
+    assert_eq!(
+        leaf_after_refresh,
+        right
+            .account
+            .entity_account_leaf()
+            .expect("unchanged refreshed leaf")
+    );
     assert_ne!(
         leaf_before_refresh,
         right.account.entity_account_leaf().expect("refreshed leaf")

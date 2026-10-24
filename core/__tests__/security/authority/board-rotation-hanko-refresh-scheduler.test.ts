@@ -92,15 +92,19 @@ const installBoardHankoRefreshHook = (
   event: ReturnType<typeof activation>,
 ): void => {
   openWritableEntityAccounts(state);
-  const pending = markBoardRotationHankoRefreshesPending(env, state, event);
+  // Production resolves the epoch from the certified registry; the fixture's
+  // log index stands in for that strictly increasing EntityProvider epoch.
+  const pending = markBoardRotationHankoRefreshesPending(env, state, {
+    entityId: event.data.entityId.toLowerCase(),
+    boardEpoch: event.logIndex,
+  });
   if (!state.crontabState) throw new Error('TEST_BOARD_HANKO_REFRESH_CRONTAB_MISSING');
   scheduleHook(state.crontabState, {
     id: BOARD_HANKO_REFRESH_HOOK_ID,
     triggerAt: state.timestamp,
     type: 'board_hanko_refresh',
     data: {
-      activationJHeight: pending.activation.jHeight,
-      activationLogIndex: pending.activation.logIndex,
+      boardEpoch: pending.activation.boardEpoch,
       afterCounterpartyId: '',
     },
   });
@@ -214,8 +218,7 @@ test('bad board Hanko refresh account cannot block good output and re-arms only 
   expect(first.accountChanges).toEqual([badId, goodId].sort());
   expect(first.hashesToSign).toEqual([expect.objectContaining({ hash: digest(202), type: 'accountFrame' })]);
   expect(first.newState.accounts.get(goodId)?.boardHankoRefreshMigration).toEqual({
-    activationJHeight: 44,
-    activationLogIndex: 2,
+    boardEpoch: 2,
     reason: 'issued',
     issuedFrameHeight: 1,
     issuedFrameHash: digest(202),
@@ -256,8 +259,7 @@ test('bad board Hanko refresh account cannot block good output and re-arms only 
   expect(second.accountChanges).toEqual([badId]);
   expect(second.hashesToSign?.map(entry => entry.hash).sort()).toEqual([digest(201), digest(211)].sort());
   expect(second.newState.accounts.get(badId)?.boardHankoRefreshMigration).toEqual({
-    activationJHeight: 44,
-    activationLogIndex: 2,
+    boardEpoch: 2,
     reason: 'issued',
     issuedFrameHeight: 1,
     issuedFrameHash: digest(201),
@@ -385,10 +387,7 @@ test('1000 board Hanko refreshes drain in deterministic 32-account frames across
     const nextIds = [...state.accounts.entries()]
       .filter(([counterpartyId, account]) =>
         counterpartyId > hook.data.afterCounterpartyId &&
-        accountNeedsBoardHankoRefreshForActivation(account, {
-          jHeight: hook.data.activationJHeight,
-          logIndex: hook.data.activationLogIndex,
-        }))
+        accountNeedsBoardHankoRefreshForActivation(account, { boardEpoch: hook.data.boardEpoch }))
       .map(([counterpartyId]) => counterpartyId)
       .sort()
       .slice(0, 32);
@@ -423,8 +422,7 @@ test('1000 board Hanko refreshes drain in deterministic 32-account frames across
         result.newState.crontabState?.hooks.get(BOARD_HANKO_REFRESH_HOOK_ID),
       );
       expect([...state.accounts.values()].filter(account => accountNeedsBoardHankoRefreshForActivation(account, {
-        jHeight: 44,
-        logIndex: 5,
+        boardEpoch: 5,
       })).length).toBe(968);
     }
   }
@@ -432,8 +430,7 @@ test('1000 board Hanko refreshes drain in deterministic 32-account frames across
   expect(batches).toBe(32);
   expect(delivered).toEqual([...state.accounts.keys()].sort());
   expect([...state.accounts.values()].some(account => accountNeedsBoardHankoRefreshForActivation(account, {
-    jHeight: 44,
-    logIndex: 5,
+    boardEpoch: 5,
   }))).toBe(false);
 });
 
@@ -450,12 +447,12 @@ test('missing counterparty board Hanko refresh starts canonical dispute preparat
     counterpartyId,
     makeCommittedAccount(sourceEntityId, counterpartyId, digest(30_003)),
   );
-  const hookId = counterpartyBoardHankoRefreshDeadlineHookId(counterpartyId, 44, 3);
+  const hookId = counterpartyBoardHankoRefreshDeadlineHookId(counterpartyId, 3);
   scheduleHook(state.crontabState, {
     id: hookId,
     triggerAt: state.timestamp + COUNTERPARTY_BOARD_HANKO_REFRESH_DEADLINE_MS,
     type: 'counterparty_board_hanko_refresh_deadline',
-    data: { accountId: counterpartyId, activationJHeight: 44, activationLogIndex: 3 },
+    data: { accountId: counterpartyId, boardEpoch: 3 },
   });
   state.timestamp += COUNTERPARTY_BOARD_HANKO_REFRESH_DEADLINE_MS;
 
@@ -487,18 +484,17 @@ test('fresh counterparty board Hanko refresh satisfies every older activation de
   state.crontabState = initCrontab();
   const account = makeCommittedAccount(sourceEntityId, counterpartyId, digest(31_003));
   account.counterpartyBoardHankoRefresh = {
-    activationJHeight: 45,
-    activationLogIndex: 0,
+    boardEpoch: 2,
     frameHeight: 1,
     frameHash: digest(31_003),
   };
   putCommittedAccount(state, counterpartyId, account);
-  const hookId = counterpartyBoardHankoRefreshDeadlineHookId(counterpartyId, 44, 9);
+  const hookId = counterpartyBoardHankoRefreshDeadlineHookId(counterpartyId, 1);
   scheduleHook(state.crontabState, {
     id: hookId,
     triggerAt: state.timestamp,
     type: 'counterparty_board_hanko_refresh_deadline',
-    data: { accountId: counterpartyId, activationJHeight: 44, activationLogIndex: 9 },
+    data: { accountId: counterpartyId, boardEpoch: 1 },
   });
 
   const result = await handleScheduledWakeEntityTx(
@@ -527,13 +523,13 @@ test('board Hanko refresh deadlines beyond the J batch dispute-start cap re-arm,
   for (let index = 0; index < J_BATCH_CONTRACT_LIMITS.maxDisputeStarts + 1; index += 1) {
     const counterpartyId = digest(32_100 + index);
     putCommittedAccount(state, counterpartyId, makeCommittedAccount(sourceEntityId, counterpartyId, digest(32_200 + index)));
-    const hookId = counterpartyBoardHankoRefreshDeadlineHookId(counterpartyId, 44, index);
+    const hookId = counterpartyBoardHankoRefreshDeadlineHookId(counterpartyId, index + 1);
     hookIds.push(hookId);
     scheduleHook(state.crontabState, {
       id: hookId,
       triggerAt: state.timestamp,
       type: 'counterparty_board_hanko_refresh_deadline',
-      data: { accountId: counterpartyId, activationJHeight: 44, activationLogIndex: index },
+      data: { accountId: counterpartyId, boardEpoch: index + 1 },
     });
   }
   const jobs = [...hookIds].sort().map(id => ({ kind: 'hook' as const, id, dueAt: state.timestamp }));

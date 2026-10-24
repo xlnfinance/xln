@@ -258,8 +258,7 @@ export const intraFrameMixedBoardActivationFrame = (): EntityTx[] => {
       boardHankoRefresh: {
         height: 1,
         frameHash: `0x${'5a'.repeat(32)}`,
-        boardActivationJHeight: 3,
-        boardActivationLogIndex: 0,
+        boardEpoch: 1,
       },
     },
   } as unknown as EntityTx;

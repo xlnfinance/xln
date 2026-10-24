@@ -20,7 +20,7 @@ import type { AccountEnvelopeUpdate } from '../../../account/envelope/entity-upd
 export type TsAccountWorkerCertifiedBoard = Readonly<
   Pick<
     CertifiedBoardRecord,
-    'entityId' | 'boardHash' | 'previousBoardHash' | 'previousBoardValidUntil' | 'activatedAtJHeight' | 'logIndex'
+    'entityId' | 'boardHash' | 'previousBoardHash' | 'previousBoardValidUntil' | 'boardEpoch'
   >
 >;
 

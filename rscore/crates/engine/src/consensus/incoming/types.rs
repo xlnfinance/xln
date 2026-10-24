@@ -44,8 +44,8 @@ pub struct BoardHankoRefreshInput {
     pub frame_hash: [u8; 32],
     pub frame_hanko: Option<Vec<u8>>,
     pub dispute: Option<crate::consensus::replica::CounterpartyDispute>,
-    pub board_activation_j_height: u64,
-    pub board_activation_log_index: u64,
+    /// Exact `EntityProvider.boardEpochs` value of the activated sender board.
+    pub board_epoch: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

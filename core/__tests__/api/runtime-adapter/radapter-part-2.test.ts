@@ -427,8 +427,7 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   const account = replica.state.accounts.get(counterpartyId)! as any;
   account.state.watchSeed = `0x${'11'.repeat(32)}`;
   account.boardHankoRefreshMigration = {
-    activationJHeight: 9,
-    activationLogIndex: 2,
+    boardEpoch: 2,
     reason: 'bilateral-frame-uncertified',
   };
   account.currentFrame = {

@@ -129,13 +129,9 @@ const processDueHook = (
       const account = replica.state.accounts.get(hook.data.accountId);
       if (!account || Number(account.currentHeight) < 1) return;
       const boardHankoRefresh = account.counterpartyBoardHankoRefresh;
-      const hasCurrentBoardHankoRefresh = Boolean(boardHankoRefresh && (
-        boardHankoRefresh.activationJHeight > hook.data.activationJHeight ||
-        (
-          boardHankoRefresh.activationJHeight === hook.data.activationJHeight &&
-          boardHankoRefresh.activationLogIndex >= hook.data.activationLogIndex
-        )
-      ));
+      const hasCurrentBoardHankoRefresh = Boolean(
+        boardHankoRefresh && boardHankoRefresh.boardEpoch >= hook.data.boardEpoch,
+      );
       if (hasCurrentBoardHankoRefresh || account.activeDispute || account.disputePrepare) return;
       if (disputeStartsFull(replica, plan, hook.data.accountId)) {
         // One-shot hooks are removed before they fire; re-arm this one.
@@ -153,8 +149,7 @@ const processDueHook = (
       );
       crontabLog.warn('counterparty_board_hanko_refresh_deadline.expired', {
         counterparty: shortId(hook.data.accountId),
-        activationJHeight: hook.data.activationJHeight,
-        activationLogIndex: hook.data.activationLogIndex,
+        boardEpoch: hook.data.boardEpoch,
       });
       return;
     }

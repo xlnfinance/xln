@@ -25,8 +25,8 @@ pub struct CertifiedBoardAuthority {
     /// Exclusive Unix-second boundary, exactly like
     /// `CertifiedBoardRecord.previousBoardValidUntil` in TypeScript.
     pub previous_board_valid_until: u64,
-    pub activated_at_j_height: u64,
-    pub activation_log_index: u64,
+    /// `EntityProvider.boardEpochs`, exactly like `CertifiedBoardRecord.boardEpoch`.
+    pub board_epoch: u64,
 }
 
 impl CertifiedBoardAuthority {

@@ -250,8 +250,7 @@ export const prepareAccountConsensusRun = (
         ? {
             counterpartyCertifiedBoard: {
               boardHash: certifiedBoard.boardHash,
-              activatedAtJHeight: certifiedBoard.activatedAtJHeight,
-              logIndex: certifiedBoard.logIndex,
+              boardEpoch: certifiedBoard.boardEpoch,
             },
           }
         : {}),

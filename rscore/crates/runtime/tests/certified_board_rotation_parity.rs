@@ -239,14 +239,8 @@ fn board_rotation_committed_by_an_earlier_frame_is_resolved_without_restore() {
                         .expect("previousBoardValidUntil"),
                 );
                 assert_eq!(
-                    actual.activated_at_j_height,
-                    expected["activatedAtJHeight"]
-                        .as_u64()
-                        .expect("activatedAtJHeight"),
-                );
-                assert_eq!(
-                    actual.activation_log_index,
-                    expected["logIndex"].as_u64().expect("logIndex"),
+                    actual.board_epoch,
+                    expected["boardEpoch"].as_u64().expect("boardEpoch"),
                 );
                 assert_eq!(
                     committed
@@ -422,8 +416,7 @@ fn board_hanko_refresh_row(owner: &EntityId, peer: &EntityId) -> AccountInputRow
                 frame_hash: [0x5a; 32],
                 frame_hanko: Some(vec![0x01]),
                 dispute: None,
-                board_activation_j_height: 3,
-                board_activation_log_index: 0,
+                board_epoch: 1,
             }),
         },
     }
@@ -622,7 +615,7 @@ fn the_two_frame_orders_resolve_different_counterparty_boards() {
         panic!("the peer is registered, so the row must carry a certified board");
     };
     assert_eq!(
-        resolved.activated_at_j_height, 2,
+        resolved.board_epoch, 0,
         "the retired registration board, not the rotation this frame commits",
     );
 
@@ -639,8 +632,7 @@ fn the_two_frame_orders_resolve_different_counterparty_boards() {
             registered_board_hash: word(&format!("0x{}", "c3".repeat(32))),
             previous_board_hash: word(&format!("0x{}", "b2".repeat(32))),
             previous_board_valid_until: 1_700_604_800,
-            activated_at_j_height: 3,
-            activation_log_index: 0,
+            board_epoch: 1,
         }),
         "the board this frame activated",
     );

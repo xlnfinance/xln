@@ -1,6 +1,7 @@
 import type { AccountBoardHankoRefreshMigration, AccountDisputeHanko, AccountReplica } from '../../../types/account';
 import type { EntityInput, EntityState, HashToSign } from '../../types';
 import type { CertifiedBoardNodeStore } from '../../../types/entity-board-registry';
+import { resolveObserverCertifiedBoardRecord } from '../../../jurisdiction/machine/board-registry';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { resolveObserverCertifiedAccountCounterpartyProposer } from '../../account/account-counterparty-route';
 import { HankoValidationError } from '../../../hanko/codec';
@@ -18,8 +19,8 @@ type BoardActivatedEvent = Extract<JurisdictionEvent, { type: 'BoardActivated' }
 
 export type BoardHankoRefreshActivation = {
   entityId: string;
-  jHeight: number;
-  logIndex: number;
+  /** EntityProvider.boardEpochs value of the certified activated board. */
+  boardEpoch: number;
 };
 
 export type BoardRotationHankoRefreshDrafts = {
@@ -41,8 +42,6 @@ type AccountHankoRefreshDraft = {
   hashesToSign: HashToSign[];
   migration: BoardRotationAccountMigration;
 };
-
-type ActivationPosition = readonly [jHeight: number, logIndex: number];
 
 const MAX_BOARD_HANKO_REFRESHES_PER_FRAME = 32;
 export const BOARD_HANKO_REFRESH_HOOK_ID = 'board-hanko-refresh';
@@ -127,15 +126,13 @@ const accountFrameIssue = (
 
 const migration = (
   counterpartyId: string,
-  activationJHeight: number,
-  activationLogIndex: number,
+  boardEpoch: number,
   reason: AccountBoardHankoRefreshMigration['reason'] | null,
   issued?: { height: number; frameHash: string },
 ): BoardRotationAccountMigration => ({
   counterpartyId,
   marker: reason ? {
-    activationJHeight,
-    activationLogIndex,
+    boardEpoch,
     reason,
     ...(issued ? {
       issuedFrameHeight: issued.height,
@@ -146,14 +143,10 @@ const migration = (
 
 export const accountNeedsBoardHankoRefreshForActivation = (
   account: AccountReplica,
-  activation: Pick<BoardHankoRefreshActivation, 'jHeight' | 'logIndex'>,
+  activation: Pick<BoardHankoRefreshActivation, 'boardEpoch'>,
 ): boolean => {
   const marker = account.boardHankoRefreshMigration;
-  if (
-    !marker ||
-    marker.activationJHeight !== activation.jHeight ||
-    marker.activationLogIndex !== activation.logIndex
-  ) return false;
+  if (!marker || marker.boardEpoch !== activation.boardEpoch) return false;
   if (marker.reason !== 'issued') return true;
   return marker.issuedFrameHeight !== Number(account.currentHeight) ||
     marker.issuedFrameHash?.toLowerCase() !== String(account.currentFrame.stateHash || '').toLowerCase();
@@ -206,33 +199,36 @@ export const accountBoardHankoRefreshEvidenceChanged = (
   return boardHankoRefreshEvidence(current).some((value, index) => value !== previous[index]);
 };
 
-const activationPosition = (event: BoardActivatedEvent): ActivationPosition => {
-  const jHeight = Number(event.blockNumber);
-  if (!Number.isSafeInteger(jHeight) || jHeight < 1) {
-    throw new Error(`BOARD_HANKO_REFRESH_ACTIVATION_HEIGHT_INVALID:${String(event.blockNumber)}`);
+/**
+ * The refresh key is the certified registry epoch, which mirrors
+ * EntityProvider.boardEpochs. Callers apply this BoardActivated event to the
+ * registry first, so the certified record must already be this exact board.
+ */
+export const resolveBoardHankoRefreshActivation = (
+  state: EntityState,
+  store: CertifiedBoardNodeStore,
+  event: BoardActivatedEvent,
+): BoardHankoRefreshActivation => {
+  const entityId = event.data.entityId.toLowerCase();
+  const record = resolveObserverCertifiedBoardRecord(state, store, entityId);
+  if (
+    !record ||
+    record.source !== 'BoardActivated' ||
+    record.boardHash !== event.data.newBoardHash.toLowerCase()
+  ) {
+    throw new Error(`BOARD_HANKO_REFRESH_CERTIFIED_BOARD_MISMATCH:${entityId}:${record?.boardHash ?? 'missing'}`);
   }
-  const logIndex = Number(event.logIndex);
-  if (!Number.isSafeInteger(logIndex) || logIndex < 0) {
-    throw new Error(`BOARD_HANKO_REFRESH_ACTIVATION_LOG_INDEX_INVALID:${String(event.logIndex)}`);
+  if (!Number.isSafeInteger(record.boardEpoch) || record.boardEpoch < 1) {
+    throw new Error(`BOARD_HANKO_REFRESH_BOARD_EPOCH_INVALID:${entityId}:${String(record.boardEpoch)}`);
   }
-  return [jHeight, logIndex];
-};
-
-const boardHankoRefreshActivation = (event: BoardActivatedEvent): BoardHankoRefreshActivation => {
-  const [jHeight, logIndex] = activationPosition(event);
-  return {
-    entityId: event.data.entityId.toLowerCase(),
-    jHeight,
-    logIndex,
-  };
+  return { entityId, boardEpoch: record.boardEpoch };
 };
 
 export const markBoardRotationHankoRefreshesPending = (
   env: EntityRuntimeContext,
   state: EntityState,
-  event: BoardActivatedEvent,
+  activation: BoardHankoRefreshActivation,
 ): { activation: BoardHankoRefreshActivation; dirtyAccounts: string[] } => {
-  const activation = boardHankoRefreshActivation(event);
   if (activation.entityId !== state.entityId.toLowerCase()) return { activation, dirtyAccounts: [] };
   const dirtyAccounts: string[] = [];
   for (const rawCounterpartyId of state.accounts.keys()) {
@@ -251,8 +247,7 @@ export const markBoardRotationHankoRefreshesPending = (
     applyEntityAccountEnvelopeUpdate(env, counterpartyId, account, {
       type: 'replaceBoardHankoRefreshMigration',
       migration: {
-        activationJHeight: activation.jHeight,
-        activationLogIndex: activation.logIndex,
+        boardEpoch: activation.boardEpoch,
         reason: 'pending',
       },
     });
@@ -303,21 +298,19 @@ const buildCertifiedAccountHankoRefreshDraft = (
   activation: BoardHankoRefreshActivation,
   counterpartyId: string,
   account: AccountReplica,
-  position: ActivationPosition,
 ): AccountHankoRefreshDraft => {
   const frameHash = account.currentFrame.stateHash.toLowerCase();
   const dispute = exactBilateralDisputeHanko(account);
   if (dispute.issue) {
     return {
       hashesToSign: [],
-      migration: migration(counterpartyId, ...position, dispute.issue),
+      migration: migration(counterpartyId, activation.boardEpoch, dispute.issue),
     };
   }
   const boardHankoRefresh = {
     height: account.currentHeight,
     frameHash,
-    boardActivationJHeight: position[0],
-    boardActivationLogIndex: position[1],
+    boardEpoch: activation.boardEpoch,
     ...(dispute.hanko ? { disputeHanko: dispute.hanko } : {}),
   };
   const output = buildHankoRefreshOutput(state, store, counterpartyId, account, [{
@@ -332,7 +325,7 @@ const buildCertifiedAccountHankoRefreshDraft = (
     },
   }]);
   const issue = output ? 'issued' : 'output-route-unavailable';
-  const context = `board-hanko-refresh:${activation.jHeight}:${activation.logIndex}:${counterpartyId}`;
+  const context = `board-hanko-refresh:${activation.boardEpoch}:${counterpartyId}`;
   const hashesToSign: HashToSign[] = output
     ? [{ hash: frameHash, type: 'accountFrame', context: `${context}:frame` }]
     : [];
@@ -344,7 +337,7 @@ const buildCertifiedAccountHankoRefreshDraft = (
     hashesToSign,
     migration: migration(
       counterpartyId,
-      ...position,
+      activation.boardEpoch,
       issue,
       output ? { height: account.currentHeight, frameHash } : undefined,
     ),
@@ -357,14 +350,13 @@ const buildAccountHankoRefreshDraft = (
   activation: BoardHankoRefreshActivation,
   counterpartyId: string,
   account: AccountReplica,
-  position: ActivationPosition,
 ): AccountHankoRefreshDraft => {
   if (Number(account.currentHeight) < 1) {
-    return { hashesToSign: [], migration: migration(counterpartyId, ...position, null) };
+    return { hashesToSign: [], migration: migration(counterpartyId, activation.boardEpoch, null) };
   }
   const issue = accountFrameIssue(state, counterpartyId, account);
-  if (issue) return { hashesToSign: [], migration: migration(counterpartyId, ...position, issue) };
-  return buildCertifiedAccountHankoRefreshDraft(state, store, activation, counterpartyId, account, position);
+  if (issue) return { hashesToSign: [], migration: migration(counterpartyId, activation.boardEpoch, issue) };
+  return buildCertifiedAccountHankoRefreshDraft(state, store, activation, counterpartyId, account);
 };
 
 export const applyBoardRotationHankoRefreshMigrations = (
@@ -404,7 +396,6 @@ const buildBoardRotationHankoRefreshDraftsForActivation = (
       nextAfterCounterpartyId: '',
     };
   }
-  const position = [activation.jHeight, activation.logIndex] as const;
   const outputs: EntityInput[] = [];
   const hashesToSign: HashToSign[] = [];
   const accountMigrations: BoardRotationAccountMigration[] = [];
@@ -420,7 +411,7 @@ const buildBoardRotationHankoRefreshDraftsForActivation = (
   const batch = orderedAccounts.slice(0, MAX_BOARD_HANKO_REFRESHES_PER_FRAME);
 
   for (const [counterpartyId, account] of batch) {
-    const draft = buildAccountHankoRefreshDraft(state, store, activation, counterpartyId, account, position);
+    const draft = buildAccountHankoRefreshDraft(state, store, activation, counterpartyId, account);
     if (draft.output) outputs.push(draft.output);
     hashesToSign.push(...draft.hashesToSign);
     accountMigrations.push(draft.migration);
@@ -445,7 +436,7 @@ const buildBoardRotationHankoRefreshDraftsForActivation = (
 export const buildBoardRotationHankoRefreshDrafts = (
   state: EntityState,
   store: CertifiedBoardNodeStore,
-  event: BoardActivatedEvent,
+  activation: BoardHankoRefreshActivation,
   options: {
     afterCounterpartyId?: string;
     pendingOnly?: boolean;
@@ -453,7 +444,7 @@ export const buildBoardRotationHankoRefreshDrafts = (
 ): BoardRotationHankoRefreshDrafts => buildBoardRotationHankoRefreshDraftsForActivation(
   state,
   store,
-  boardHankoRefreshActivation(event),
+  activation,
   options,
 );
 

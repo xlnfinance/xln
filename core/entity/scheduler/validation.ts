@@ -80,25 +80,13 @@ const validateBoardHankoRefreshData = (
 ): Extract<ScheduledHook, { type: 'board_hanko_refresh' }>['data'] => {
   rejectUnexpectedKeys(
     data,
-    ['activationJHeight', 'activationLogIndex', 'afterCounterpartyId'],
+    ['boardEpoch', 'afterCounterpartyId'],
     context,
   );
-  const activationJHeight = validateNumber(
-    data['activationJHeight'],
-    `${context}.activationJHeight`,
-  );
-  const activationLogIndex = validateNumber(
-    data['activationLogIndex'],
-    `${context}.activationLogIndex`,
-  );
-  if (
-    !Number.isSafeInteger(activationJHeight) ||
-    activationJHeight < 1 ||
-    !Number.isSafeInteger(activationLogIndex) ||
-    activationLogIndex < 0
-  ) {
+  const boardEpoch = validateNumber(data['boardEpoch'], `${context}.boardEpoch`);
+  if (!Number.isSafeInteger(boardEpoch) || boardEpoch < 1) {
     throw new FinancialDataCorruptionError(
-      `${context} board activation position is invalid`,
+      `${context} board epoch is invalid`,
     );
   }
   const afterCounterpartyId = data['afterCounterpartyId'];
@@ -108,8 +96,7 @@ const validateBoardHankoRefreshData = (
     );
   }
   return {
-    activationJHeight,
-    activationLogIndex,
+    boardEpoch,
     // Empty means "start before the first canonical Account"; it is a cursor,
     // not an Entity ID, so a non-empty identifier guard would reject genesis.
     afterCounterpartyId,
@@ -122,27 +109,17 @@ const validateCounterpartyBoardHankoRefreshDeadlineData = (
 ): Extract<ScheduledHook, { type: 'counterparty_board_hanko_refresh_deadline' }>['data'] => {
   rejectUnexpectedKeys(
     data,
-    ['accountId', 'activationJHeight', 'activationLogIndex'],
+    ['accountId', 'boardEpoch'],
     context,
   );
   const accountId = validateString(data['accountId'], `${context}.accountId`);
-  const activationJHeight = validateNumber(
-    data['activationJHeight'],
-    `${context}.activationJHeight`,
-  );
-  const activationLogIndex = validateNumber(
-    data['activationLogIndex'],
-    `${context}.activationLogIndex`,
-  );
-  if (
-    !Number.isSafeInteger(activationJHeight) || activationJHeight < 1 ||
-    !Number.isSafeInteger(activationLogIndex) || activationLogIndex < 0
-  ) {
+  const boardEpoch = validateNumber(data['boardEpoch'], `${context}.boardEpoch`);
+  if (!Number.isSafeInteger(boardEpoch) || boardEpoch < 1) {
     throw new FinancialDataCorruptionError(
-      `${context} counterparty board activation position is invalid`,
+      `${context} counterparty board epoch is invalid`,
     );
   }
-  return { accountId, activationJHeight, activationLogIndex };
+  return { accountId, boardEpoch };
 };
 
 const validateHookData = (

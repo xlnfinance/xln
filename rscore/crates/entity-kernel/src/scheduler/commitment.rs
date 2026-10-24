@@ -44,37 +44,21 @@ fn hook_data(hook: &ScheduledHookKind) -> Result<CanonicalValue, EntityKernelErr
             ),
         ],
         ScheduledHookKind::BoardHankoRefresh {
-            activation_j_height,
-            activation_log_index,
+            board_epoch,
             after_counterparty_id,
         } => vec![
-            (
-                "activationJHeight",
-                number("activationJHeight", *activation_j_height)?,
-            ),
-            (
-                "activationLogIndex",
-                number("activationLogIndex", *activation_log_index)?,
-            ),
             (
                 "afterCounterpartyId",
                 CanonicalValue::String(after_counterparty_id.clone()),
             ),
+            ("boardEpoch", number("boardEpoch", *board_epoch)?),
         ],
         ScheduledHookKind::CounterpartyBoardHankoRefreshDeadline {
             account_id,
-            activation_j_height,
-            activation_log_index,
+            board_epoch,
         } => vec![
             ("accountId", CanonicalValue::String(account_id.clone())),
-            (
-                "activationJHeight",
-                number("activationJHeight", *activation_j_height)?,
-            ),
-            (
-                "activationLogIndex",
-                number("activationLogIndex", *activation_log_index)?,
-            ),
+            ("boardEpoch", number("boardEpoch", *board_epoch)?),
         ],
         ScheduledHookKind::CrossJOrderbookSweep { reason } => {
             vec![("reason", CanonicalValue::String(reason.clone()))]

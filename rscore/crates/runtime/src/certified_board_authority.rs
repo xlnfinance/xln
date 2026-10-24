@@ -33,8 +33,7 @@ fn certified_authority(record: &CertifiedBoardRecord) -> CertifiedBoardAuthority
         registered_board_hash: record.board_hash,
         previous_board_hash: record.previous_board_hash,
         previous_board_valid_until: record.previous_board_valid_until,
-        activated_at_j_height: record.activated_at_j_height,
-        activation_log_index: u64::from(record.log_index),
+        board_epoch: record.board_epoch,
     }
 }
 

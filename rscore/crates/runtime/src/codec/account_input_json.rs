@@ -2034,12 +2034,7 @@ fn decode_board_hanko_refresh(
     let refresh = object(value, operation_index, path)?;
     exact_fields(
         refresh,
-        &[
-            "height",
-            "frameHash",
-            "boardActivationJHeight",
-            "boardActivationLogIndex",
-        ],
+        &["height", "frameHash", "boardEpoch"],
         &["frameHanko", "disputeHanko"],
         operation_index,
         path,
@@ -2071,15 +2066,10 @@ fn decode_board_hanko_refresh(
             .get("disputeHanko")
             .map(|value| decode_dispute(value, operation_index, &format!("{path}.disputeHanko")))
             .transpose()?,
-        board_activation_j_height: unsigned(
-            field(refresh, "boardActivationJHeight", operation_index, path)?,
+        board_epoch: unsigned(
+            field(refresh, "boardEpoch", operation_index, path)?,
             operation_index,
-            &format!("{path}.boardActivationJHeight"),
-        )?,
-        board_activation_log_index: unsigned(
-            field(refresh, "boardActivationLogIndex", operation_index, path)?,
-            operation_index,
-            &format!("{path}.boardActivationLogIndex"),
+            &format!("{path}.boardEpoch"),
         )?,
     })
 }
@@ -2617,8 +2607,7 @@ mod tests {
                     "frameHash": id("77"),
                     "frameHanko": "0x0304",
                     "disputeHanko": dispute(),
-                    "boardActivationJHeight": 9,
-                    "boardActivationLogIndex": 2
+                    "boardEpoch": 2
                 }),
             );
         let refresh_row =
@@ -2627,8 +2616,7 @@ mod tests {
             refresh_row.input.kind,
             AccountInputKind::BoardHankoRefresh(BoardHankoRefreshInput {
                 height: 4,
-                board_activation_j_height: 9,
-                board_activation_log_index: 2,
+                board_epoch: 2,
                 ..
             })
         ));

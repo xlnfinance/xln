@@ -394,8 +394,7 @@ test('Entity consensus root excludes all transient Account coordination state', 
   expect(computeCanonicalEntityConsensusStateHash(left)).not.toBe(computeCanonicalEntityConsensusStateHash(right));
 
   const boardHankoRefresh = { ...makeAccountReplica(entityId, counterpartyId), boardHankoRefreshMigration: {
-    activationJHeight: 9,
-    activationLogIndex: 2,
+    boardEpoch: 2,
     reason: 'bilateral-frame-uncertified' as const,
   } };
   right.accounts = persistentAccounts([[counterpartyId, boardHankoRefresh]]);

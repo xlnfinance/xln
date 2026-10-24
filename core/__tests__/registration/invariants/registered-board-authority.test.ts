@@ -992,16 +992,14 @@ describe('registered Entity certified board authority', () => {
     expect(committedAccount.currentDisputeProofBodyHash).toBe(certifiedProofBodyHash);
     expect(committedAccount.currentDisputeProofNonce).toBe(certifiedProofNonce);
     expect(committedAccount.boardHankoRefreshMigration).toEqual({
-      activationJHeight: 3,
-      activationLogIndex: 0,
+      boardEpoch: 1,
       reason: 'pending',
     });
     expect(committed.workingReplica.state.crontabState?.hooks.get('board-hanko-refresh')).toMatchObject({
       id: 'board-hanko-refresh',
       type: 'board_hanko_refresh',
       data: {
-        activationJHeight: 3,
-        activationLogIndex: 0,
+        boardEpoch: 1,
         afterCounterpartyId: '',
       },
     });
@@ -1092,8 +1090,7 @@ describe('registered Entity certified board authority', () => {
     const hankoRefreshedAccount = hankoRefreshCommitted.workingReplica.state.accounts.get(counterpartyEntityId);
     if (!hankoRefreshedAccount) throw new Error('TEST_BOARD_ROTATION_HANKO_REFRESHED_ACCOUNT_MISSING');
     expect(hankoRefreshedAccount.boardHankoRefreshMigration).toEqual({
-      activationJHeight: 3,
-      activationLogIndex: 0,
+      boardEpoch: 1,
       reason: 'issued',
       issuedFrameHeight: 7,
       issuedFrameHash: certifiedFrameHash,
@@ -1105,8 +1102,7 @@ describe('registered Entity certified board authority', () => {
       throw new Error('TEST_BOARD_ROTATION_HANKO_REFRESH_INPUT_MISSING');
     }
     expect(rawBoardHankoRefresh.data.boardHankoRefresh).toEqual(expect.objectContaining({
-      boardActivationJHeight: 3,
-      boardActivationLogIndex: 0,
+      boardEpoch: 1,
       height: 7,
       frameHash: certifiedFrameHash,
       frameHanko: expect.any(String),

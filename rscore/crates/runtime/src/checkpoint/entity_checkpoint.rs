@@ -210,15 +210,13 @@ fn hook_kind(value: &Value, path: &str) -> Result<ScheduledHookKind, EntityCheck
             counterparty_id: text("counterpartyId")?,
         },
         "board_hanko_refresh" => ScheduledHookKind::BoardHankoRefresh {
-            activation_j_height: number("activationJHeight")?,
-            activation_log_index: number("activationLogIndex")?,
+            board_epoch: number("boardEpoch")?,
             after_counterparty_id: text("afterCounterpartyId")?,
         },
         "counterparty_board_hanko_refresh_deadline" => {
             ScheduledHookKind::CounterpartyBoardHankoRefreshDeadline {
                 account_id: text("accountId")?,
-                activation_j_height: number("activationJHeight")?,
-                activation_log_index: number("activationLogIndex")?,
+                board_epoch: number("boardEpoch")?,
             }
         }
         "cross_j_orderbook_sweep" => ScheduledHookKind::CrossJOrderbookSweep {

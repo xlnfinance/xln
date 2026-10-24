@@ -44,8 +44,7 @@ const decodeCertifiedBoard = (
     boardHash: requireBytes32(row['boardHash'], `${code}_BOARD_HASH`),
     previousBoardHash: requireBytes32(row['previousBoardHash'], `${code}_PREVIOUS_BOARD_HASH`),
     previousBoardValidUntil: requireInteger(row['previousBoardValidUntil'], `${code}_PREVIOUS_VALID_UNTIL`),
-    activatedAtJHeight: requireInteger(row['activatedAtJHeight'], `${code}_ACTIVATED_HEIGHT`),
-    logIndex: requireInteger(row['logIndex'], `${code}_LOG_INDEX`),
+    boardEpoch: requireInteger(row['boardEpoch'], `${code}_BOARD_EPOCH`),
   };
 };
 

@@ -28,8 +28,7 @@ export const processBoardHankoRefreshHook = (
   if (!context.hashesToSign) throw new Error('BOARD_HANKO_REFRESH_HASH_COLLECTOR_MISSING');
   const activation = {
     entityId: replica.state.entityId.toLowerCase(),
-    jHeight: hook.data.activationJHeight,
-    logIndex: hook.data.activationLogIndex,
+    boardEpoch: hook.data.boardEpoch,
   };
   const drafts = buildPendingBoardRotationHankoRefreshDrafts(
     replica.state,
@@ -52,8 +51,7 @@ export const processBoardHankoRefreshHook = (
       : replica.state.timestamp + BOARD_HANKO_REFRESH_RETRY_MS,
     type: 'board_hanko_refresh',
     data: {
-      activationJHeight: activation.jHeight,
-      activationLogIndex: activation.logIndex,
+      boardEpoch: activation.boardEpoch,
       afterCounterpartyId: drafts.hasMore ? drafts.nextAfterCounterpartyId : '',
     },
   });
@@ -68,22 +66,15 @@ export const scheduleChangedAccountBoardHankoRefreshes = (
   >,
   changedAccountIds: ReadonlySet<string>,
 ): void => {
-  let activation: { jHeight: number; logIndex: number } | undefined;
+  let activation: { boardEpoch: number } | undefined;
   for (const accountId of changedAccountIds) {
     const account = state.accounts.get(accountId);
     const marker = account?.boardHankoRefreshMigration;
     if (!account || !marker) continue;
     if (!accountBoardHankoRefreshEvidenceChanged(previousEvidence.get(accountId), account)) continue;
-    const candidate = {
-      jHeight: marker.activationJHeight,
-      logIndex: marker.activationLogIndex,
-    };
+    const candidate = { boardEpoch: marker.boardEpoch };
     if (!accountNeedsBoardHankoRefreshForActivation(account, candidate)) continue;
-    if (
-      !activation ||
-      candidate.jHeight > activation.jHeight ||
-      (candidate.jHeight === activation.jHeight && candidate.logIndex > activation.logIndex)
-    ) activation = candidate;
+    if (!activation || candidate.boardEpoch > activation.boardEpoch) activation = candidate;
   }
   if (!activation) return;
   if (!state.crontabState) throw new Error('BOARD_HANKO_REFRESH_CRONTAB_MISSING');
@@ -92,8 +83,7 @@ export const scheduleChangedAccountBoardHankoRefreshes = (
     triggerAt: state.timestamp,
     type: 'board_hanko_refresh',
     data: {
-      activationJHeight: activation.jHeight,
-      activationLogIndex: activation.logIndex,
+      boardEpoch: activation.boardEpoch,
       afterCounterpartyId: '',
     },
   });

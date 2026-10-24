@@ -161,8 +161,7 @@ const applyInbound = async (
         ? {
             counterpartyCertifiedBoard: {
               boardHash: item.counterpartyBoardAuthority.boardHash,
-              activatedAtJHeight: item.counterpartyBoardAuthority.activatedAtJHeight,
-              logIndex: item.counterpartyBoardAuthority.logIndex,
+              boardEpoch: item.counterpartyBoardAuthority.boardEpoch,
             },
           }
         : {}),
