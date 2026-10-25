@@ -147,7 +147,7 @@ const normalizeSignerId = (value: unknown): string => String(value || '').trim()
  * anchor is held to the same canonical frame byte limit as a J range before
  * any of its values are hashed.
  */
-export const assertJAnchorFrameBudget = (data: JHistoryAnchorTxData): void => {
+const assertJAnchorFrameBudget =(data: JHistoryAnchorTxData): void => {
   if (!data?.values || !Array.isArray(data.values.boardRecords) || !(data.values.reserves instanceof Map)) {
     fail('VALUES_INVALID');
   }

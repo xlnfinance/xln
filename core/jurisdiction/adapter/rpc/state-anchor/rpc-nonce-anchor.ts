@@ -25,7 +25,6 @@ export {
   buildNonceAnchorRoot,
   nonceViewFromFold,
   nonceViewFromStorage,
-  type EntityNonceView,
 } from '../../../machine/state-anchor/nonce-root';
 
 type RpcSend = (method: string, params: unknown[]) => Promise<unknown>;
