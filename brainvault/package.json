@@ -86,14 +86,14 @@
   },
   "dependencies": {
     "@noble/hashes": "2.4.0",
-    "@node-rs/argon2": "2.1.0",
+    "@node-rs/argon2": "2.2.2",
     "ethers": "6.17.0",
     "hash-wasm": "4.12.0"
   },
   "engines": {
     "bun": ">=1.2.0"
   },
-  "packageManager": "bun@1.4.0",
+  "packageManager": "bun@1.4.3",
   "publishConfig": {
     "access": "public"
   }
