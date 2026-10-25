@@ -1,0 +1,73 @@
+HISTORICAL NON-EXECUTABLE EVIDENCE - do not apply over current main.
+This draft predates the current canonical implementation; see README.md.
+stash: stash@{0} 399fd47cf11b997bfa41075c3c198a92008bd8a3
+subject: On main: preserve old-main protected files already present on a57f633e9
+date: 2026-10-14T03:22:33+03:00
+base: 4cf06cde8f37fdc7e9cba6de77acdd9ee4a4e575
+sections: tracked worktree diff, then untracked files as new files
+
+diff --git a/core/__tests__/j-watcher-finalization-evidence.test.ts b/core/__tests__/j-watcher-finalization-evidence.test.ts
+index d85a1423f892404a50175e5b6453394588b46d64..5db804e0872f7fba62fc15e3d2619434bd6450fe 100644
+--- a/core/__tests__/j-watcher-finalization-evidence.test.ts
++++ b/core/__tests__/j-watcher-finalization-evidence.test.ts
+@@ -53,7 +53,7 @@ describe('J watcher DisputeFinalized calldata evidence', () => {
+       [bytes32('11'), params, 25n, 3n, '0x0304'],
+     );
+ 
+-    expect(decodeDisputeFinalizationEvidenceCalldata(calldata)).toEqual([expectedEvidence]);
++    expect(decodeDisputeFinalizationEvidenceCalldata(calldata)).toEqual([{ ...expectedEvidence, sig: '0x' }]);
+   });
+ 
+   test('keeps the processBatch finalization path byte-for-byte equivalent', () => {
+diff --git a/core/jurisdiction/adapter/rpc-public.ts b/core/jurisdiction/adapter/rpc-public.ts
+index be82b4af3bd8290af846d4a7a5f3746896cd839e..2a6a5a3a9c46ef2ec2d1f2403efd7afdfd6b3623 100644
+--- a/core/jurisdiction/adapter/rpc-public.ts
++++ b/core/jurisdiction/adapter/rpc-public.ts
+@@ -15,7 +15,8 @@ import { Depository__factory } from '../../../jurisdictions/typechain-types/inde
+ 
+ import { BLOCKCHAIN } from '../../config/constants';
+ import { createStructuredLogger } from '../../support/logger';
+-import { decodeJBatch, type JBatch } from '../machine/batch';
++import { decodeJBatch, materializeAbiValue, type JBatch } from '../machine/batch';
++import { validateProofBody } from '../machine/batch-validation';
+ import { PROOF_BODY_ABI } from '../../protocol/dispute/proof-body';
+ import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-events';
+ import { type AuthenticatedReceiptRange, type ReceiptReadProfile } from './receipt-root';
+@@ -145,7 +146,12 @@ export const decodeDisputeProofBodyEvidenceCalldata = (
+       if (typeof proof !== 'object' || proof === null) {
+         throw new Error('J_DISPUTE_PROOFBODY_WATCHTOWER_PROOF_INVALID');
+       }
+-      const finalProofbody = Reflect.get(proof, 'finalProofbody') as TxDisputeProofBodyEvidence['proofbody'];
++      // ethers Result is a proxy, not cloneable committed state. Use the same
++      // ABI materialization and proof validation as processBatch before ingress.
++      const finalProofbody = validateProofBody(
++        materializeAbiValue(DISPUTE_PROOF_BODY_PARAM, Reflect.get(proof, 'finalProofbody'), 'watchtower.proofbody'),
++        'J_DISPUTE_PROOFBODY_WATCHTOWER',
++      ) as TxDisputeProofBodyEvidence['proofbody'];
+       const evidence = {
+         counterentity: toFinalizationHex(Reflect.get(proof, 'counterentity')),
+         nonce: toFinalizationDecimal(Reflect.get(proof, 'finalNonce')),
+@@ -236,7 +242,10 @@ export const decodeDisputeFinalizationEvidenceCalldata = (data: string): TxFinal
+           leftArguments: startedByLeft ? starterArguments : otherArguments,
+           rightArguments: startedByLeft ? otherArguments : starterArguments,
+           startedByLeft,
+-          sig: toFinalizationHex(Reflect.get(proof, 'sig')),
++          // Depository authorizes the selected counter, then clears this repeated
++          // inner signature before emitting its finalization evidence commitment.
++          // Match the executed parameters; retaining calldata.sig halts every watcher.
++          sig: '0x',
+         },
+       ];
+     }
+@@ -469,8 +478,10 @@ export const decodeStandardSolidityRevertData = (revertData: string, log: Revert
+ // by IP and recovers on its own. Treating it as fatal permanently halted the
+ // jurisdiction watcher, and every later restart short-circuited on the recorded
+ // fatal. It belongs with 503, which already lives in this list.
++// A pending header can be null or reported as block-not-found. Both retry the
++// complete authenticated window; malformed headers and finalized reorgs remain fatal.
+ export const isTransientRpcUnavailableError = (error: unknown): boolean =>
+-  /J_HISTORY_HEADER_MISSING:height=\d+ error=none|J_RECEIPT_RANGE_REORG|J_RECEIPT_RANGE_PARENT_MISMATCH|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|Unexpected end of JSON input|PROXY_UPSTREAM_TIMEOUT|RPC_BATCH_TIMEOUT:\d+|RPC_BATCH_HTTP_429|RPC_BATCH_HTTP_50[0234]|429 Too Many Requests|50[0234] (Bad Gateway|Gateway Timeout|Service Unavailable|Internal Server Error)|server response (429|50[0234])|responseStatus["': ]+(429|50[0234])/i.test(
++  /J_HISTORY_HEADER_MISSING:height=\d+ error=none(?:$|\s)|(?:J_HISTORY_HEADER_MISSING:height=\d+ error=|J_RECEIPT_BATCH_CALL_FAILED:\d+:eth_getBlockByNumber:)block not found with number 0x[0-9a-f]+(?:$|\s)|J_RECEIPT_RANGE_REORG|J_RECEIPT_RANGE_PARENT_MISMATCH|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|Unexpected end of JSON input|PROXY_UPSTREAM_TIMEOUT|RPC_BATCH_TIMEOUT:\d+|RPC_BATCH_HTTP_429|RPC_BATCH_HTTP_50[0234]|429 Too Many Requests|50[0234] (Bad Gateway|Gateway Timeout|Service Unavailable|Internal Server Error)|server response (429|50[0234])|responseStatus["': ]+(429|50[0234])/i.test(
+     rpcErrorText(error),
+   );
+ 

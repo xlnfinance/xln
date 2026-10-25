@@ -1,0 +1,2969 @@
+HISTORICAL NON-EXECUTABLE EVIDENCE - do not apply over current main.
+This draft predates the current canonical implementation; see README.md.
+stash: stash@{7} 27ac56281b4f3c487185c1078b3b50cb108aabdf
+subject: On cursor/ws-direct-handshake-hello-71e9: temp-unrelated
+date: 2026-08-04T21:57:43+03:00
+base: 3783b4f09172278ccbc1a78c39ea3a27708f5d5d
+sections: tracked worktree diff, then untracked files as new files
+
+diff --git a/frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte b/frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte
+index 7d3ae1e1e94371682597567a4df39ef240ad98f9..c0d2c954a2473d5ed400005178d00839060af700 100644
+--- a/frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte
++++ b/frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte
+@@ -1,3 +1,14 @@
++<script context="module" lang="ts">
++  type PendingProfileDraft = {
++    name: string;
++    avatar: string;
++    bio: string;
++    website: string;
++  };
++
++  const pendingProfileDrafts = new Map<string, PendingProfileDraft>();
++</script>
++
+ <script lang="ts">
+   import { Network, PlusCircle, Save, ShieldCheck, SlidersHorizontal } from 'lucide-svelte';
+   import type { RuntimeReplica, HubRebalanceConfig } from '@xln/runtime/api/public/runtime-module';
+@@ -77,6 +88,8 @@
+   let draftBio = '';
+   let draftWebsite = '';
+   let loadedProfileKey = '';
++  let loadedProfileEntityId = '';
++  let profileDraftDirty = false;
+   let savingProfile = false;
+   let profileError = '';
+   let profileSaved = false;
+@@ -134,12 +147,23 @@
+     profile?.bio || '',
+     profile?.website || '',
+   ].join('|');
+-  $: if (profileKey !== loadedProfileKey && !savingProfile) {
++  $: if (
++    !savingProfile &&
++    (
++      normalizedEntityId !== loadedProfileEntityId ||
++      (!profileDraftDirty && profileKey !== loadedProfileKey)
++    )
++  ) {
++    const pendingDraft = normalizedEntityId !== loadedProfileEntityId
++      ? pendingProfileDrafts.get(normalizedEntityId)
++      : undefined;
+     loadedProfileKey = profileKey;
+-    draftName = normalizeText(profile?.name);
+-    draftAvatar = normalizeText(profile?.avatar);
+-    draftBio = normalizeText(profile?.bio);
+-    draftWebsite = normalizeText(profile?.website);
++    loadedProfileEntityId = normalizedEntityId;
++    draftName = pendingDraft?.name ?? normalizeText(profile?.name);
++    draftAvatar = pendingDraft?.avatar ?? normalizeText(profile?.avatar);
++    draftBio = pendingDraft?.bio ?? normalizeText(profile?.bio);
++    draftWebsite = pendingDraft?.website ?? normalizeText(profile?.website);
++    profileDraftDirty = pendingDraft !== undefined;
+     profileError = '';
+     profileSaved = false;
+   }
+@@ -307,6 +331,8 @@
+         bio: draftBio.trim(),
+         website: draftWebsite.trim(),
+       });
++      pendingProfileDrafts.delete(normalizedEntityId);
++      profileDraftDirty = false;
+       profileSaved = true;
+     } catch (error) {
+       errorLog.log('Entity profile update failed', 'Entity Settings', { entityId: normalizedEntityId, error });
+@@ -316,6 +342,20 @@
+     }
+   }
+ 
++  function updateProfileDraft(field: keyof PendingProfileDraft, value: string): void {
++    if (field === 'name') draftName = value;
++    else if (field === 'avatar') draftAvatar = value;
++    else if (field === 'bio') draftBio = value;
++    else draftWebsite = value;
++    profileDraftDirty = true;
++    pendingProfileDrafts.set(normalizedEntityId, {
++      name: draftName,
++      avatar: draftAvatar,
++      bio: draftBio,
++      website: draftWebsite,
++    });
++  }
++
+   async function handleJMachineCreate(event: CustomEvent<JMachineCreateDetail>): Promise<void> {
+     if (!canImportJMachine) {
+       importError = importDisabledReason || 'Jurisdiction import is not available';
+@@ -617,19 +657,19 @@
+     </div>
+     <label>
+       <span>Name</span>
+-      <input bind:value={draftName} autocomplete="off" disabled={!canSaveProfile || savingProfile} />
++      <input value={draftName} on:input={(event) => updateProfileDraft('name', event.currentTarget.value)} autocomplete="off" disabled={!canSaveProfile || savingProfile} />
+     </label>
+     <label>
+       <span>Avatar URL</span>
+-      <input bind:value={draftAvatar} autocomplete="off" disabled={!canSaveProfile || savingProfile} />
++      <input value={draftAvatar} on:input={(event) => updateProfileDraft('avatar', event.currentTarget.value)} autocomplete="off" disabled={!canSaveProfile || savingProfile} />
+     </label>
+     <label>
+       <span>Bio</span>
+-      <textarea bind:value={draftBio} rows="3" disabled={!canSaveProfile || savingProfile}></textarea>
++      <textarea value={draftBio} on:input={(event) => updateProfileDraft('bio', event.currentTarget.value)} rows="3" disabled={!canSaveProfile || savingProfile}></textarea>
+     </label>
+     <label>
+       <span>Website</span>
+-      <input bind:value={draftWebsite} autocomplete="off" disabled={!canSaveProfile || savingProfile} />
++      <input value={draftWebsite} on:input={(event) => updateProfileDraft('website', event.currentTarget.value)} autocomplete="off" disabled={!canSaveProfile || savingProfile} />
+     </label>
+     <button type="submit" class="primary-action" disabled={!canSaveProfile}>
+       <Save size={16} />
+diff --git a/frontend/src/lib/utils/runtimeConnection.ts b/frontend/src/lib/utils/runtimeConnection.ts
+index 667d6ebb60c89ad2af16254adc6f14429c7148d8..1ada14ca2df944e78a81c37d84feeb1243d15fae 100644
+--- a/frontend/src/lib/utils/runtimeConnection.ts
++++ b/frontend/src/lib/utils/runtimeConnection.ts
+@@ -103,7 +103,6 @@ export function readRemoteRuntimeRequestFromUrl(): RemoteRuntimeRequest | null {
+   const keyParam = String(
+     hash.get('token') || hash.get('authKey') || hash.get('key') || hash.get('auth') || '',
+   ).trim();
+-  if (keyParam) stripRemoteRuntimeParamsFromHistory();
+   const wsUrl = normalizeRuntimeWsUrl(wsParam);
+   const authKey = keyParam.startsWith('xlnra1.')
+     ? keyParam
+diff --git a/frontend/src/lib/view/panels/SolvencyPanel.svelte b/frontend/src/lib/view/panels/SolvencyPanel.svelte
+index 5c7560cb8a376c529361dd2566589f4168197e12..fbfe047c6e04420174e8faf32b7d49b81f47c388 100644
+--- a/frontend/src/lib/view/panels/SolvencyPanel.svelte
++++ b/frontend/src/lib/view/panels/SolvencyPanel.svelte
+@@ -21,17 +21,26 @@
+ </script>
+ 
+ <div class="solvency-panel glass-panel" data-testid="solvency-panel">
+-  <div class="hero-status" class:valid={solvencyData?.isValid} data-testid="solvency-status">
+-    <div class="status-icon">{solvencyData?.isValid ? '✓' : '⚠'}</div>
++  <div
++    class="hero-status"
++    class:valid={solvencyData?.isValid === true}
++    class:unchecked={solvencyData?.isValid === null}
++    data-testid="solvency-status"
++  >
++    <div class="status-icon">{solvencyData?.isValid === true ? '✓' : solvencyData?.isValid === false ? '⚠' : '?'}</div>
+     <div class="status-text text-tiny">
+-      {solvencyData?.isValid ? 'ASSET CONSERVATION OK' : 'ASSET IMBALANCE DETECTED'}
++      {solvencyData?.isValid === true
++        ? 'ASSET CONSERVATION OK'
++        : solvencyData?.isValid === false
++          ? 'ASSET IMBALANCE DETECTED'
++          : 'ASSET CONSERVATION NOT VERIFIED'}
+     </div>
+   </div>
+ 
+   {#if solvencyData?.assets.length}
+     <div class="asset-list">
+       {#each solvencyData.assets as asset (`${asset.stackId}:${asset.tokenId}`)}
+-        <section class="glass-card asset-card" class:invalid={!asset.isValid} data-testid="solvency-asset">
++        <section class="glass-card asset-card" class:invalid={asset.isValid === false} data-testid="solvency-asset">
+           <header>
+             <div class="metric-label">CHAIN {asset.chainId} · TOKEN #{asset.tokenId}</div>
+             <div class="text-tiny address">{shortAddress(asset.depositoryAddress)}</div>
+@@ -75,7 +84,10 @@
+   .solvency-panel { padding: var(--space-4); height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-4); }
+   .hero-status { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--glass-highlight); border-radius: var(--radius-md); border: 1px solid rgba(255, 69, 58, 0.4); }
+   .hero-status.valid { border-color: rgba(48, 209, 88, 0.3); }
+-  .status-icon { width: 32px; height: 32px; display: grid; place-items: center; font-size: var(--font-size-xl); color: var(--accent-green); }
++  .hero-status.unchecked { border-color: var(--glass-border); }
++  .status-icon { width: 32px; height: 32px; display: grid; place-items: center; font-size: var(--font-size-xl); color: var(--accent-red); }
++  .hero-status.valid .status-icon { color: var(--accent-green); }
++  .hero-status.unchecked .status-icon { color: var(--text-tertiary, #888); }
+   .status-text, .address, .empty-state { color: var(--text-secondary); }
+   .asset-list { display: grid; gap: var(--space-3); }
+   .asset-card { padding: var(--space-4); border: 1px solid var(--glass-border); }
+diff --git a/frontend/vite.config.ts b/frontend/vite.config.ts
+index 6526d5fda00b15bdd96a846312c7668fc1708604..a45ce65ad8f723898d306ba7a4460f8e37d55161 100644
+--- a/frontend/vite.config.ts
++++ b/frontend/vite.config.ts
+@@ -120,7 +120,7 @@ const proxyConfig = {
+ 		target: API_PROXY_TARGET,
+ 		agent: API_PROXY_AGENT,
+ 		ws: true,
+-		changeOrigin: true,
++		changeOrigin: false,
+ 		configure: configureWsProxyLifecycle,
+ 	},
+ };
+diff --git a/runtime/__tests__/solvency-logging.test.ts b/runtime/__tests__/solvency-logging.test.ts
+index 25d2bd1cd679dd5a26c2a688566c07ec3fe40242..18f011e50f56c963bd792da7f9110a5ea6d3feea 100644
+--- a/runtime/__tests__/solvency-logging.test.ts
++++ b/runtime/__tests__/solvency-logging.test.ts
+@@ -139,6 +139,28 @@ test('an unchecked asset reports no verdict rather than a green one', () => {
+   }
+ });
+ 
++test('partial on-chain totals never produce a green aggregate verdict', () => {
++  const env = makeEnv();
++  const state = env.state.eReplicas.values().next().value!.state;
++  state.reserves = new Map([[1, 3n], [2, 2n]]);
++  state.accounts.get(ENTITY_B)!.state.deltas = new Map([
++    [1, { collateral: 3n }],
++    [2, { collateral: 1n }],
++  ] as never);
++  const tokenOneKey = `31337:${DEPOSITORY}:1`;
++  const tokenTwoKey = `31337:${DEPOSITORY}:2`;
++  const totals = onChain([[tokenOneKey, 6n]]);
++
++  const solvency = calculateSolvency(env, undefined, totals);
++
++  expect(solvency.byAsset.get(tokenOneKey)?.isValid).toBe(true);
++  expect(solvency.byAsset.get(tokenTwoKey)?.isValid).toBeNull();
++  expect(solvency.isValid).toBeNull();
++  expect(() => verifySolvency(env, 'partial', totals)).toThrow(
++    `incomplete on-chain totals; missing ${tokenTwoKey}`,
++  );
++});
++
+ test('a surplus in one token never covers a deficit in another token', () => {
+   const env = makeEnv();
+   const state = env.state.eReplicas.values().next().value!.state;
+diff --git a/runtime/orchestrator/orchestrator-config.ts b/runtime/orchestrator/orchestrator-config.ts
+index fdbbc5851814feb58608e92a09c723389eb43977..3e5457f940d5f05606d5afde6da22bbbbebcfb94 100644
+--- a/runtime/orchestrator/orchestrator-config.ts
++++ b/runtime/orchestrator/orchestrator-config.ts
+@@ -22,6 +22,16 @@ export const HUB_BASELINE_STALL_TIMEOUT_MS = Math.max(
+   readPositiveIntegerEnv('XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS', 60_000),
+ );
+ export const HUB_DIRECT_LINK_BASELINE_GRACE_MS = readPositiveIntegerEnv('XLN_HUB_DIRECT_LINK_BASELINE_GRACE_MS', 5_000);
++/**
++ * The baseline wait has no deadline of its own: the stall detector is the only
++ * exit, and it stays silent while hubs still report causal progress. A reset
++ * that waits minutes therefore looks identical to one that hung. Name the
++ * unmet condition on an interval so silence is never the diagnosis.
++ */
++export const HUB_BASELINE_STATUS_LOG_INTERVAL_MS = Math.max(
++  1_000,
++  readPositiveIntegerEnv('XLN_HUB_BASELINE_STATUS_LOG_INTERVAL_MS', 10_000),
++);
+ export const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
+   10_000,
+   readPositiveIntegerEnv('MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS', 1_500_000),
+diff --git a/runtime/orchestrator/orchestrator.ts b/runtime/orchestrator/orchestrator.ts
+index 82d042dacac50e198567d3bdd765f62f11160451..0ebcb16a70b04545bdd6de84fd2f6ab343481f5e 100644
+--- a/runtime/orchestrator/orchestrator.ts
++++ b/runtime/orchestrator/orchestrator.ts
+@@ -72,6 +72,7 @@ import {
+   HEALTH_RESPONSE_REFRESH_TIMEOUT_MS,
+   HUB_BASELINE_TIMEOUT_MS,
+   HUB_BASELINE_STALL_TIMEOUT_MS,
++  HUB_BASELINE_STATUS_LOG_INTERVAL_MS,
+   HUB_DIRECT_LINK_BASELINE_GRACE_MS,
+   HUB_NAMES,
+   HUB_PROFILES_READY_TIMEOUT_MS,
+@@ -1177,22 +1178,45 @@ const persistManagedChildFatalReport = (
+   return incident.fingerprint;
+ };
+ 
++const MANAGED_CHILD_ERROR_LINE_MAX = 8_192;
++const MANAGED_CHILD_ERROR_MESSAGE_MAX = 2_000;
++
+ const captureManagedChildErrorLine = (child: RecoverableChild, line: string): void => {
+-  const match = line.match(/^\[ERROR\]\[([^\]]+)\]\s+([^\s{]+)/);
++  // One oversized child stderr record must not crash the orchestrator: the
++  // previous path threw DEBUG_EVENT_TOO_LARGE out of the stream handler and
++  // took down the whole mesh mid-E2E.
++  const boundedLine = line.length > MANAGED_CHILD_ERROR_LINE_MAX
++    ? line.slice(0, MANAGED_CHILD_ERROR_LINE_MAX)
++    : line;
++  const match = boundedLine.match(/^\[ERROR\]\[([^\]]+)\]\s+([^\s{]+)/);
+   if (!match) return;
+   const [, scope = 'runtime', phase = 'MANAGED_CHILD_ERROR'] = match;
+-  const jsonStart = line.indexOf('{', match[0].length);
++  const jsonStart = boundedLine.indexOf('{', match[0].length);
+   let structuredError = '';
+   if (jsonStart >= 0) {
+     try {
+-      const parsed = JSON.parse(line.slice(jsonStart)) as { error?: unknown; message?: unknown };
++      const parsed = JSON.parse(boundedLine.slice(jsonStart)) as { error?: unknown; message?: unknown };
+       structuredError = String(parsed.error || parsed.message || '').trim();
+     } catch {
+       structuredError = '';
+     }
+   }
+-  const message = structuredError || phase;
+-  pushManagedChildIncident(child, normalizeRuntimeFailureCode(message), message, { scope, phase });
++  const message = (structuredError || phase).slice(0, MANAGED_CHILD_ERROR_MESSAGE_MAX);
++  try {
++    pushManagedChildIncident(child, normalizeRuntimeFailureCode(message), message, {
++      scope,
++      phase,
++      truncated: line.length > MANAGED_CHILD_ERROR_LINE_MAX,
++    });
++  } catch (error) {
++    const reason = error instanceof Error ? error.message : String(error);
++    meshLog.warn('managed_child.error_line_incident_dropped', {
++      child: child.name,
++      scope,
++      phase,
++      reason: reason.slice(0, 500),
++    });
++  }
+ };
+ 
+ const observeManagedRuntimeHalt = (
+@@ -2072,9 +2096,40 @@ const buildAggregatedHealthResponse = async (
+   return recomputeHealthWithMarketMaker(nextHealth, nextHealth.marketMaker);
+ };
+ 
++const reportBaselineWait = (
++  startedAt: number,
++  lastReportedAt: number,
++  now: number,
++  status: Record<string, unknown>,
++): number => {
++  if (now - lastReportedAt < HUB_BASELINE_STATUS_LOG_INTERVAL_MS) return lastReportedAt;
++  console.warn(
++    `[MESH] baseline still waiting: waitedMs=${now - startedAt} status=${safeStringify(status)}`,
++  );
++  return now;
++};
++
++/**
++ * A direct link is one WebSocket, and only the dialing side registers it: a
++ * peer this runtime never dialed is served over its inbound socket and never
++ * appears in `directPeers`. Mesh bootstrap dials from the left side of each
++ * account pair, so a fully connected mesh of n hubs settles at n*(n-1)/2 open
++ * links, not n*(n-1). Counting directed edges made the requirement unreachable
++ * and, under XLN_REQUIRE_DIRECT_BASELINE=1, made the baseline wait forever.
++ * Count unordered pairs so the gate asks for connectivity, not for both sides
++ * to have happened to dial.
++ */
++const openDirectHubPairCount = (health: AggregatedHealth): number => new Set(
++  health.hubMesh.direct.links.map(link =>
++    [link.fromRuntimeId, link.toRuntimeId].sort(compareStableText).join(':')),
++).size;
++
+ const waitForHubBaseline = async (): Promise<void> => {
+-  const directRequired = HUB_NAMES.length * Math.max(0, HUB_NAMES.length - 1);
++  const hubCount = HUB_NAMES.length;
++  const directRequired = (hubCount * Math.max(0, hubCount - 1)) / 2;
+   const requireDirectLinks = process.env['XLN_REQUIRE_DIRECT_BASELINE'] === '1';
++  const baselineStartedAt = Date.now();
++  let lastReportedAt = baselineStartedAt;
+   let directGraceStartedAt = 0;
+   let lastStatus: Record<string, unknown> | null = null;
+   let warnedDirectGrace = false;
+@@ -2092,17 +2147,19 @@ const waitForHubBaseline = async (): Promise<void> => {
+       health.hubMesh.ok &&
+       health.bootstrapReserves.ok &&
+       health.hubs.every(hub => hub.online);
+-    const directReady = health.hubMesh.direct.openLinkCount >= directRequired;
++    const directOpen = openDirectHubPairCount(health);
++    const directReady = directOpen >= directRequired;
+     lastStatus = {
+       coreReady,
+       directReady,
+-      directOpen: health.hubMesh.direct.openLinkCount,
++      directOpen,
+       directRequired,
+       requireDirectLinks,
+       bootstrapReserves: health.bootstrapReserves.ok,
+       hubsOnline: health.hubs.map(hub => ({ name: hub.name, online: hub.online, selfRelayPresence: hub.selfRelayPresence })),
+       degraded: health.degraded,
+     };
++    lastReportedAt = reportBaselineWait(baselineStartedAt, lastReportedAt, now, lastStatus);
+     if (coreReady) {
+       if (directReady || !requireDirectLinks) {
+         if (!directReady) {
+@@ -2115,7 +2172,7 @@ const waitForHubBaseline = async (): Promise<void> => {
+           if (!warnedDirectGrace) {
+             warnedDirectGrace = true;
+             console.warn(
+-              `[MESH] baseline proceeding after direct-link grace: open=${health.hubMesh.direct.openLinkCount}/${directRequired} graceMs=${HUB_DIRECT_LINK_BASELINE_GRACE_MS}`,
++              `[MESH] baseline proceeding after direct-link grace: open=${directOpen}/${directRequired} graceMs=${HUB_DIRECT_LINK_BASELINE_GRACE_MS}`,
+             );
+           }
+         }
+diff --git a/runtime/runtime/solvency.ts b/runtime/runtime/solvency.ts
+index 229b3d692db6c66eaf03cf31f0da4de4e3c2c8df..e8e3200b08cfe4f28eb05023e775eec5e75057a1 100644
+--- a/runtime/runtime/solvency.ts
++++ b/runtime/runtime/solvency.ts
+@@ -37,7 +37,7 @@ export interface Solvency {
+   byAsset: Map<string, AssetSolvency>;
+   entityCount: number;
+   accountViews: number;
+-  /** null when no authoritative on-chain totals were supplied. */
++  /** null until every asset has an authoritative on-chain total. */
+   isValid: boolean | null;
+ }
+ 
+@@ -167,9 +167,11 @@ export const calculateSolvency = (
+     byAsset,
+     entityCount: states.length,
+     accountViews,
+-    isValid: checked === 0
+-      ? null
+-      : Array.from(byAsset.values()).every(asset => asset.isValid !== false),
++    isValid: Array.from(byAsset.values()).some(asset => asset.isValid === false)
++      ? false
++      : checked > 0 && checked === byAsset.size
++        ? true
++        : null,
+   };
+ };
+ 
+@@ -189,9 +191,15 @@ export const verifySolvency = (
+   onChainTotals?: OnChainTokenTotals,
+ ): boolean => {
+   const solvency = calculateSolvency(env, undefined, onChainTotals);
++  const unchecked = Array.from(solvency.byAsset.entries())
++    .filter(([, asset]) => asset.isValid === null)
++    .map(([key]) => key);
+   if (solvency.isValid === null) {
++    const reason = unchecked.length === solvency.byAsset.size
++      ? `no on-chain totals supplied for ${solvency.byAsset.size} asset(s)`
++      : `incomplete on-chain totals; missing ${unchecked.join(',')}`;
+     throw new Error(
+-      `Solvency check failed: no on-chain totals supplied for ${solvency.byAsset.size} asset(s)`,
++      `Solvency check failed: ${reason}`,
+     );
+   }
+   const invalid = Array.from(solvency.byAsset.values()).filter(asset => asset.isValid === false);
+diff --git a/runtime/scripts/run-e2e-parallel-isolated.ts b/runtime/scripts/run-e2e-parallel-isolated.ts
+index 176d22765373ce151b75301b856cea7bf3d5365c..06fd4b206013d21c8759bba06a2b4a01266d0ab9 100644
+--- a/runtime/scripts/run-e2e-parallel-isolated.ts
++++ b/runtime/scripts/run-e2e-parallel-isolated.ts
+@@ -1925,7 +1925,9 @@ const runShard = async (
+         '--port',
+         String(apiPort),
+         '--public-ws-base-url',
+-        `ws://127.0.0.1:${apiPort}`,
++        `ws://localhost:${webPort}`,
++        '--relay-url',
++        `ws://127.0.0.1:${apiPort}/relay`,
+         '--rpc-url',
+         rpcUrl,
+         '--rpc2-url',
+@@ -1972,6 +1974,7 @@ const runShard = async (
+           XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(args.stackTimeoutMs),
+           MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS:
+             process.env['MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] ?? '15000',
++          XLN_PUBLIC_FAUCET: process.env['XLN_PUBLIC_FAUCET'] ?? '1',
+           XLN_AUTO_PROVISION_EXTERNAL_FAUCET: process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] ?? '1',
+           ...(process.env['XLN_MIN_DISK_FREE_BYTES']
+             ? { XLN_MIN_DISK_FREE_BYTES: process.env['XLN_MIN_DISK_FREE_BYTES'] }
+diff --git a/tests/e2e-custody.spec.ts b/tests/e2e-custody.spec.ts
+index 2307ba2e59440a210d6291a941f8d23d8ed5193f..26f584c4d815c6b8f72377d9e8e0285170c1380a 100644
+--- a/tests/e2e-custody.spec.ts
++++ b/tests/e2e-custody.spec.ts
+@@ -1016,6 +1016,9 @@ test.describe('E2E Custody Flow', () => {
+       expect(browserWithdrawalRequests, 'displayed zero balance must reject before browser POST').toBe(0);
+ 
+       const directWithdrawal = await context.request.post(`${custodyBaseUrl}/api/withdraw`, {
++        headers: {
++          Origin: custodyBaseUrl,
++        },
+         data: {
+           tokenId: usdcToken.tokenId,
+           amount: '1',
+diff --git a/tests/e2e-lending.spec.ts b/tests/e2e-lending.spec.ts
+index 268e68c9ef69b2fc114a252b9bd69a8e0ee27fab..0addcc16ba37dc5a11223a34d826dd24c39cad45 100644
+--- a/tests/e2e-lending.spec.ts
++++ b/tests/e2e-lending.spec.ts
+@@ -218,7 +218,9 @@ test.describe('E2E Lending Flow', () => {
+       [TOKEN_ID],
+       { requireOnline: true },
+     );
+-    await faucetOffchain(page, identity!.entityId, hubId, TOKEN_ID, '2000');
++    for (let request = 0; request < 20; request += 1) {
++      await faucetOffchain(page, identity!.entityId, hubId, TOKEN_ID, '100');
++    }
+     await expect
+       .poll(
+         async () => (await accountOutCapacity(page, identity!.entityId, hubId, TOKEN_ID)) >= BigInt(tokenAmount(1000n)),
+diff --git a/tests/e2e-radapter-remote-part-1.spec.ts b/tests/e2e-radapter-remote-part-1.spec.ts
+index 29f2154e8eaf47e7429d0d08682b2bbab8043c15..6574d2736619a2d0f11930c18a390409d64b356e 100644
+--- a/tests/e2e-radapter-remote-part-1.spec.ts
++++ b/tests/e2e-radapter-remote-part-1.spec.ts
+@@ -988,9 +988,9 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', { tag
+         reserves?: bigint;
+         confirmedCollateral?: bigint;
+         pendingCollateral?: bigint;
+-        delta?: bigint;
++        delta?: bigint | null;
+       }>;
+-      isValid?: boolean;
++      isValid?: boolean | null;
+       eReplicas?: unknown;
+       accounts?: unknown;
+     };
+@@ -1012,9 +1012,9 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', { tag
+         asset =>
+           typeof asset.reserves === 'bigint' &&
+           typeof asset.confirmedCollateral === 'bigint' &&
+-          typeof asset.pendingCollateral === 'bigint' &&
+-          typeof asset.delta === 'bigint',
++          typeof asset.pendingCollateral === 'bigint',
+       ),
++      assetDeltasUnchecked: (summary.assets ?? []).every(asset => asset.delta === null),
+       assetIdentitiesAreScoped: (summary.assets ?? []).every(
+         asset => typeof asset.stackId === 'string' && Number.isSafeInteger(asset.tokenId),
+       ),
+@@ -1030,10 +1030,11 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', { tag
+   expect(probe.hasFullAccounts).toBe(false);
+   expect(probe.assetCount).toBeGreaterThan(0);
+   expect(probe.assetAmountsAreBigInt).toBe(true);
++  expect(probe.assetDeltasUnchecked).toBe(true);
+   expect(probe.assetIdentitiesAreScoped).toBe(true);
+-  expect(probe.isValidType).toBe('boolean');
++  expect(probe.isValidType).toBe('object');
+ 
+-  await expect(page.getByTestId('solvency-status')).toContainText(/ASSET CONSERVATION OK|ASSET IMBALANCE DETECTED/, {
++  await expect(page.getByTestId('solvency-status')).toContainText('ASSET CONSERVATION NOT VERIFIED', {
+     timeout: REMOTE_E2E_WAIT_MS,
+   });
+   await expect(page.getByTestId('solvency-reserves').first()).toContainText(/\d/);
+@@ -1229,7 +1230,7 @@ test('context dropdown groups H1 H2 H3 remote runtimes', { tag: '@functional' },
+   await page.addInitScript(
+     ({ storageKey, entries }) => {
+       const first = entries[0]!;
+-      localStorage.setItem(storageKey, JSON.stringify(entries));
++      sessionStorage.setItem(storageKey, JSON.stringify(entries));
+       localStorage.setItem('xln-runtime-adapter-mode', 'remote');
+       localStorage.setItem('xln-runtime-adapter-ws', first.wsUrl);
+       localStorage.setItem('xln-runtime-adapter-access', 'admin');
+@@ -1907,10 +1908,11 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
+     { timeout: REMOTE_E2E_WAIT_MS },
+   );
+ 
+-  const rejected = await page.goto(`${APP_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=forbidden`, {
++  await page.goto(`${APP_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=forbidden`, {
+     waitUntil: 'domcontentloaded',
+   });
+-  expect(rejected?.status()).toBe(400);
++  await expect(page.getByRole('heading', { name: '400' })).toBeVisible();
++  await expect(page.locator('body')).toContainText('REMOTE_RUNTIME_QUERY_BOOTSTRAP_FORBIDDEN');
+   await page.goto(`${APP_BASE_URL}/radapter`, { waitUntil: 'domcontentloaded' });
+   await expect(page).toHaveURL(/\/app$/);
+   await page.waitForFunction(
+@@ -1932,10 +1934,12 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
+   }));
+   expect(appState.url).not.toContain('runtime=remote');
+   expect(appState.url).not.toContain('ws=');
+-  expect(appState.activeWsUrl).toBe(wsUrl);
+-  expect(appState.storedAccess).toBe('admin');
+-  expect(appState.sessionKey).toBe(adminKey);
+-  await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
++  expect(appState.activeWsUrl).toBe('');
++  expect(appState.storedAccess).toBe('');
++  expect(appState.sessionKey).toBe('');
++  await expect(page.getByRole('heading', { name: 'Create xln wallet' })).toBeVisible({
++    timeout: REMOTE_E2E_WAIT_MS,
++  });
+ 
+   await page.goto(`${APP_BASE_URL}/admin`, { waitUntil: 'domcontentloaded' });
+   await expect(page).toHaveURL(/\/health$/);
+diff --git a/tests/frontend/runtime-store-hot-swap.test.ts b/tests/frontend/runtime-store-hot-swap.test.ts
+index a642ce760056a98cceaa10da1b3cfaa2e7e7f8b1..7adb114064046a8d38e6864d78074505b026dee9 100644
+--- a/tests/frontend/runtime-store-hot-swap.test.ts
++++ b/tests/frontend/runtime-store-hot-swap.test.ts
+@@ -206,6 +206,7 @@ test('direct remote runtime URL reuses saved capability before showing paste pro
+   expect(readSource).not.toContain("params.get('token')");
+   expect(readSource).toContain('resolveStoredRemoteRuntimeAuthKey(wsUrl).trim()');
+   expect(readSource).toContain('const requiresAuthPaste = !authKey');
++  expect(readSource).not.toContain('if (keyParam) stripRemoteRuntimeParamsFromHistory()');
+   expect(readSource.indexOf('resolveStoredRemoteRuntimeAuthKey(wsUrl).trim()'))
+     .toBeLessThan(readSource.indexOf('const requiresAuthPaste = !authKey'));
+ });
+diff --git a/tests/frontend/solvency-panel-view.test.ts b/tests/frontend/solvency-panel-view.test.ts
+index d7bf73d30149457085172b0b41edb2146f614f2a..706cb3c768a5e3336693ad4173f8e783e0335cd8 100644
+--- a/tests/frontend/solvency-panel-view.test.ts
++++ b/tests/frontend/solvency-panel-view.test.ts
+@@ -23,7 +23,9 @@ test('solvency projection derives reserves and collateral from an injected runti
+           config,
+           reserves: new Map([[1, 150n]]),
+           accounts: new Map([[right, {
+-            deltas: new Map([[1, { collateral: 100n }]]),
++            state: {
++              deltas: new Map([[1, { collateral: 100n }]]),
++            },
+             pendingFrame: {
+               deltas: [{ tokenId: 1, collateral: 50n }],
+             },
+@@ -37,7 +39,9 @@ test('solvency projection derives reserves and collateral from an injected runti
+           config,
+           reserves: new Map(),
+           accounts: new Map([[left, {
+-            deltas: new Map([[1, { collateral: 100n }]]),
++            state: {
++              deltas: new Map([[1, { collateral: 100n }]]),
++            },
+             pendingFrame: {
+               deltas: [{ tokenId: 1, collateral: 50n }],
+             },
+@@ -56,10 +60,12 @@ test('solvency projection derives reserves and collateral from an injected runti
+       reserves: 150n,
+       confirmedCollateral: 100n,
+       pendingCollateral: 50n,
+-      delta: 50n,
+-      isValid: false,
++      internalValue: 250n,
++      expectedInternalValue: null,
++      delta: null,
++      isValid: null,
+     }],
+-    isValid: false,
++    isValid: null,
+   });
+ });
+ 
+diff --git a/tests/utils/e2e-connect.ts b/tests/utils/e2e-connect.ts
+index a9af8fd422ef0063dfdb272562bf453235bedda3..cdf34944305dd5f97f151000d30c3705076c038c 100644
+--- a/tests/utils/e2e-connect.ts
++++ b/tests/utils/e2e-connect.ts
+@@ -756,11 +756,21 @@ async function waitForHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 2
+           error instanceof Error ? error.message : String(error),
+         );
+         const refreshedProfile = getProfile();
++        const diagnosticP2P = p2p as typeof p2p & {
++          relayUrls?: string[];
++          clients?: unknown[];
++          isConnecting?: () => boolean;
++          getReconnectState?: () => unknown;
++        };
+         return {
+           ok: Boolean(String(refreshedProfile?.runtimeId || '').trim()),
+           reason: refreshedProfile ? 'profile-without-runtime' : 'missing-profile',
+           connectedBefore,
+           connectedAfter: typeof p2p.isConnected === 'function' ? p2p.isConnected() : null,
++          connecting: diagnosticP2P.isConnecting?.() ?? null,
++          relayUrls: diagnosticP2P.relayUrls ?? [],
++          clientCount: diagnosticP2P.clients?.length ?? null,
++          reconnectState: diagnosticP2P.getReconnectState?.() ?? null,
+           ensureResult,
+           profileCount: env?.gossip?.getProfiles?.().length || 0,
+           targetRuntimeId: String(refreshedProfile?.runtimeId || '').trim(),
+diff --git a/ui/src/App.tsx b/ui/src/App.tsx
+index e02ca6896283e4989151f393eca954d161050136..bdf624ffb424db09328e72f7f96a12fc1f2baebb 100644
+--- a/ui/src/App.tsx
++++ b/ui/src/App.tsx
+@@ -13,8 +13,9 @@ import { SettingsScreen } from './screens/Settings';
+ 
+ export default function App() {
+ 	const status = useApp(s => s.adapterStatus);
++	const booting = useApp(s => s.booting);
+ 
+-	if (status !== 'connected') {
++	if (status !== 'connected' || booting) {
+ 		return (
+ 			<>
+ 				<Gate />
+diff --git a/ui/src/components/CapacityBar.tsx b/ui/src/components/CapacityBar.tsx
+deleted file mode 100644
+index 3ea56e14b9bf9292da745e7b828e28dcec6aba6e..0000000000000000000000000000000000000000
+--- a/ui/src/components/CapacityBar.tsx
++++ /dev/null
+@@ -1,24 +0,0 @@
+-/**
+- * The XLN invariant at a glance: white = collateral, champagne = credit in
+- * use, dim = free capacity. Same visual on account rows and detail views.
+- */
+-export function CapacityBar({
+-	collateral,
+-	creditUsed,
+-	free,
+-	height = 2,
+-}: {
+-	collateral: bigint;
+-	creditUsed: bigint;
+-	free: bigint;
+-	height?: number;
+-}) {
+-	const total = collateral + creditUsed + free;
+-	const pct = (part: bigint): string => (total <= 0n ? '0%' : `${Number((part * 1000n) / total) / 10}%`);
+-	return (
+-		<div className="capbar" style={{ height }} aria-hidden>
+-			<span className="capbar-collateral" style={{ width: pct(collateral) }} />
+-			<span className="capbar-credit" style={{ width: pct(creditUsed) }} />
+-		</div>
+-	);
+-}
+diff --git a/ui/src/components/Icons.tsx b/ui/src/components/Icons.tsx
+index 7ad762160464d8979a0095cc8df568139fdd6f02..0bb577836b34fed58566d43e2e04843168a9372f 100644
+--- a/ui/src/components/Icons.tsx
++++ b/ui/src/components/Icons.tsx
+@@ -5,6 +5,7 @@ import {
+ 	ArrowUp,
+ 	Check,
+ 	ChevronDown,
++	ChevronLeft,
+ 	ChevronRight,
+ 	Copy,
+ 	Home,
+@@ -33,6 +34,7 @@ export const icons = {
+ 	check: Check,
+ 	close: X,
+ 	chevronDown: ChevronDown,
++	chevronLeft: ChevronLeft,
+ 	chevronRight: ChevronRight,
+ 	lock: Lock,
+ 	sun: Sun,
+diff --git a/ui/src/runtime/brainvault.ts b/ui/src/runtime/brainvault.ts
+index 5bf586a2ebf12992cfc50ac4b33766d1f0dd916c..528d54ce324974385ea78e8f08890163449fbd16 100644
+--- a/ui/src/runtime/brainvault.ts
++++ b/ui/src/runtime/brainvault.ts
+@@ -2,10 +2,33 @@ import {
+ 	combineShards,
+ 	deriveKey,
+ 	entropyToMnemonic,
++	factorForShardCount,
+ 	getShardCount,
+ 	validateInputs,
+ } from '../../../brainvault/core.ts';
+ 
++export type BrainvaultWork = {
++	factor: number;
++	shardCount: number;
++	tier: string;
++};
++
++export const FACTOR_PRESETS: readonly BrainvaultWork[] = [
++	{ factor: 1, shardCount: 1, tier: 'Test' },
++	{ factor: 2, shardCount: 10, tier: 'Basic' },
++	{ factor: 3, shardCount: 100, tier: 'Standard' },
++	{ factor: 4, shardCount: 1000, tier: 'Strong' },
++	{ factor: 5, shardCount: 10000, tier: 'Maximum' },
++];
++
++/** Custom shard counts (≥6) map to a factor exactly like the canonical CLI. */
++export function customWork(shardCount: number): BrainvaultWork {
++	if (!Number.isSafeInteger(shardCount) || shardCount < 6) {
++		throw new Error('Custom work needs at least 6 shards');
++	}
++	return { factor: factorForShardCount(shardCount), shardCount, tier: 'Custom' };
++}
++
+ export type BrainvaultProgress = {
+ 	completed: number;
+ 	total: number;
+@@ -49,14 +72,16 @@ function createBrainvaultWorker(): Worker {
+ export async function deriveBrainvaultMnemonic(
+ 	name: string,
+ 	passphrase: string,
+-	factor: number,
++	work: BrainvaultWork,
+ 	onProgress?: (progress: BrainvaultProgress) => void,
+ 	signal?: AbortSignal,
+ ): Promise<BrainvaultResult> {
++	const { factor, shardCount } = work;
+ 	const validation = validateInputs(name, passphrase, factor);
+ 	if (!validation.valid) throw new Error(validation.errors.join('; '));
+-
+-	const shardCount = getShardCount(factor);
++	if (work.tier !== 'Custom' && shardCount !== getShardCount(factor)) {
++		throw new Error(`BRAINVAULT_PRESET_SHARDS_MISMATCH:${factor}:${shardCount}`);
++	}
+ 	const workerCount = Math.max(1, Math.min(navigator.hardwareConcurrency ? navigator.hardwareConcurrency - 1 : 2, shardCount, 4));
+ 	const startedAt = performance.now();
+ 
+diff --git a/ui/src/runtime/sandbox.ts b/ui/src/runtime/sandbox.ts
+index 9a061c1cd67428143ed51150accc4eb4dd44a473..020e945cd50c50000f555936dee75a289f9dd3a8 100644
+--- a/ui/src/runtime/sandbox.ts
++++ b/ui/src/runtime/sandbox.ts
+@@ -29,8 +29,10 @@ export function getDemoTopology(): DemoTopology | null {
+ 	return topology;
+ }
+ 
++let usdcScale = 10n ** 6n;
++
+ function usd(amount: number): bigint {
+-	return BigInt(amount) * 10n ** 18n;
++	return BigInt(amount) * usdcScale;
+ }
+ 
+ function findReplicaState(env: RuntimeReplica, entityId: string) {
+@@ -75,12 +77,35 @@ export type VaultRuntimeOptions = {
+  * lane the rest of the UI uses.
+  */
+ export async function bootEmbeddedDemo(seed: string, options: VaultRuntimeOptions): Promise<DemoTopology> {
++	useApp.getState().setBooting(true);
++	try {
++		return await bootEmbeddedDemoInner(seed, options);
++	} catch (error) {
++		// A halted mid-seed sandbox is not worth preserving: wipe it so the
++		// next attempt starts deterministic instead of replaying a wedged WAL.
++		if (options.kind === 'sandbox') {
++			try {
++				const xln = await getXLN();
++				const env = getEmbeddedEnv();
++				if (env) await xln.clearDB(env);
++			} catch {
++				// Reset is best-effort; surface the original failure.
++			}
++		}
++		throw error;
++	} finally {
++		useApp.getState().setBooting(false);
++	}
++}
++
++async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions): Promise<DemoTopology> {
+ 	const step = (text: string): void => {
+ 		options.onStep?.(text);
+ 	};
+ 
+ 	step('Starting local runtime');
+ 	const xln = await getXLN();
++	usdcScale = 10n ** BigInt(xln.getTokenInfo(USDC).decimals);
+ 	await connectEmbedded(seed);
+ 	const env = getEmbeddedEnv();
+ 	if (!env) throw new Error('EMBEDDED_ENV_MISSING');
+@@ -178,29 +203,10 @@ export async function bootEmbeddedDemo(seed: string, options: VaultRuntimeOption
+ 		]);
+ 	}
+ 
+-	step('Funding reserves');
+-	const reserveTargets: Array<[DemoActor, bigint]> = [
+-		[self, usd(25_000)],
+-		[hub, usd(250_000)],
+-		[merchant, usd(10_000)],
+-	];
+-	for (const [actor, amount] of reserveTargets) {
+-		const replica = findReplicaState(env, actor.entityId);
+-		const current = replica?.state?.reserves?.get?.(USDC) ?? 0n;
+-		if (current >= amount) continue;
+-		await sendEntity(actor.entityId, actor.signerId, [
+-			{ type: 'mintReserves', data: { tokenId: USDC, amount: amount - current } },
+-		]);
+-	}
+-	await waitFor(
+-		() =>
+-			reserveTargets.every(([actor, amount]) => {
+-				const replica = findReplicaState(env, actor.entityId);
+-				return (replica?.state?.reserves?.get?.(USDC) ?? 0n) >= amount;
+-			}),
+-		'demo reserves',
+-		60_000,
+-	);
++	// No mintReserves here: a mint's J event reproducibly halts the live loop
++	// with J_PREFIX_LOCAL_PREFIX_MISMATCH on the receiving entity (runtime
++	// prefix-consensus issue, reported upstream). The demo runs entirely on
++	// bilateral credit lines, which payments do not need reserves for.
+ 
+ 	step('Opening accounts');
+ 	const spokes: Array<[DemoActor, DemoActor]> = [
+@@ -208,20 +214,18 @@ export async function bootEmbeddedDemo(seed: string, options: VaultRuntimeOption
+ 		[merchant, hub],
+ 	];
+ 	for (const [spoke, target] of spokes) {
+-		if (accountReady(env, spoke.entityId, target.entityId)) continue;
++		if (accountReady(env, spoke.entityId, target.entityId) && accountReady(env, target.entityId, spoke.entityId)) {
++			continue;
++		}
+ 		await sendEntity(spoke.entityId, spoke.signerId, [
+ 			{ type: 'openAccount', data: { targetEntityId: target.entityId, creditAmount: 0n, tokenId: USDC } },
+ 		]);
++		await waitFor(
++			() => accountReady(env, spoke.entityId, target.entityId) && accountReady(env, target.entityId, spoke.entityId),
++			`demo account ${spoke.label}↔${target.label}`,
++			45_000,
++		);
+ 	}
+-	await waitFor(
+-		() =>
+-			spokes.every(
+-				([spoke, target]) =>
+-					accountReady(env, spoke.entityId, target.entityId) && accountReady(env, target.entityId, spoke.entityId),
+-			),
+-		'demo accounts',
+-		45_000,
+-	);
+ 
+ 	step('Extending credit lines');
+ 	const creditLine = usd(50_000);
+@@ -231,19 +235,54 @@ export async function bootEmbeddedDemo(seed: string, options: VaultRuntimeOption
+ 		[hub, merchant],
+ 		[merchant, hub],
+ 	];
+-	for (const [creditor, debtor] of creditPairs) {
+-		if (creditApplied(env, creditor.entityId, debtor.entityId, creditLine * 2n)) continue;
++	for (const [index, [creditor, debtor]] of creditPairs.entries()) {
++		// Both directions on one account raise the combined limit; check the
++		// running total so an idempotent re-run does not double-extend.
++		const minTotal = creditLine * BigInt((index % 2) + 1);
++		if (creditApplied(env, creditor.entityId, debtor.entityId, minTotal)) continue;
+ 		await sendEntity(creditor.entityId, creditor.signerId, [
+ 			{ type: 'extendCredit', data: { counterpartyEntityId: debtor.entityId, tokenId: USDC, amount: creditLine } },
+ 		]);
++		await waitFor(
++			() => creditApplied(env, creditor.entityId, debtor.entityId, minTotal),
++			`demo credit ${creditor.label}→${debtor.label}`,
++			45_000,
++		);
++	}
++
++	step('Placing opening balances');
++	// Hub pays the spokes their starting balances over the fresh credit lines —
++	// an off-chain money source that works while on-chain minting is blocked
++	// by the reported J-prefix runtime bug.
++	const openingBalances: Array<[DemoActor, bigint]> = [
++		[self, usd(10_000)],
++		[merchant, usd(5_000)],
++	];
++	for (const [recipient, amount] of openingBalances) {
++		const received = (): bigint => {
++			const replica = findReplicaState(env, recipient.entityId);
++			const delta = replica?.state?.accounts?.get?.(hub.entityId)?.state?.deltas?.get?.(USDC);
++			if (!delta) return 0n;
++			const total = delta.ondelta + delta.offdelta;
++			const isLeft = recipient.entityId.toLowerCase() < hub.entityId.toLowerCase();
++			return isLeft ? total : -total;
++		};
++		if (received() >= amount) continue;
++		await sendEntity(hub.entityId, hub.signerId, [
++			{
++				type: 'directPayment',
++				data: {
++					targetEntityId: recipient.entityId,
++					tokenId: USDC,
++					amount: amount - received(),
++					route: [hub.entityId, recipient.entityId],
++					deliveryMode: 'direct',
++					description: 'Opening balance',
++				},
++			},
++		]);
++		await waitFor(() => received() >= amount, `demo opening balance ${recipient.label}`, 45_000);
+ 	}
+-	await waitFor(
+-		() =>
+-			creditApplied(env, self.entityId, hub.entityId, creditLine * 2n) &&
+-			creditApplied(env, merchant.entityId, hub.entityId, creditLine * 2n),
+-		'demo credit lines',
+-		45_000,
+-	);
+ 
+ 	step('Ready');
+ 	const app = useApp.getState();
+@@ -256,6 +295,30 @@ export async function bootEmbeddedDemo(seed: string, options: VaultRuntimeOption
+ 	return topology;
+ }
+ 
++/**
++ * Off-chain faucet for demo runtimes: Hub One pays the recipient over the
++ * bilateral credit line. Available whenever the local demo topology exists.
++ */
++export async function demoFaucet(recipientEntityId: string, amount: bigint): Promise<void> {
++	const demo = topology;
++	if (!demo) throw new Error('Faucet is available only on a local demo runtime');
++	const recipient = recipientEntityId.trim().toLowerCase();
++	if (recipient === demo.hub.entityId) throw new Error('The hub funds others, not itself');
++	await sendEntity(demo.hub.entityId, demo.hub.signerId, [
++		{
++			type: 'directPayment',
++			data: {
++				targetEntityId: recipient,
++				tokenId: USDC,
++				amount,
++				route: [demo.hub.entityId, recipient],
++				deliveryMode: 'direct',
++				description: 'Faucet top-up',
++			},
++		},
++	]);
++}
++
+ export async function connectSandbox(onStep?: (step: string) => void): Promise<DemoTopology> {
+ 	return bootEmbeddedDemo(SANDBOX_SEED, {
+ 		vaultId: SANDBOX_VAULT_ID,
+diff --git a/ui/src/runtime/store.ts b/ui/src/runtime/store.ts
+index 4e0048a0f54bf51d68955d82a9c3abd2eef2556d..30326842980418c7b66e4101cfa0a26ddef0ae91 100644
+--- a/ui/src/runtime/store.ts
++++ b/ui/src/runtime/store.ts
+@@ -69,6 +69,9 @@ type AppState = {
+ 	adapterStatus: RuntimeAdapterStatus;
+ 	height: number;
+ 	commandReady: boolean;
++	/** True while an embedded runtime is booting/seeding — keep the gate up. */
++	booting: boolean;
++	setBooting: (booting: boolean) => void;
+ 	setAdapterState: (state: { status?: RuntimeAdapterStatus; height?: number; commandReady?: boolean }) => void;
+ 
+ 	activeEntityId: string | null;
+@@ -121,6 +124,8 @@ export const useApp = create<AppState>((set, get) => ({
+ 	adapterStatus: 'disconnected',
+ 	height: 0,
+ 	commandReady: false,
++	booting: false,
++	setBooting: booting => set({ booting }),
+ 	setAdapterState: state =>
+ 		set({
+ 			...(state.status !== undefined ? { adapterStatus: state.status } : {}),
+diff --git a/ui/src/runtime/views.ts b/ui/src/runtime/views.ts
+index 33e212a8be08ec229af499dd5318636c41ac74c9..c8945ee87b1e83cb43f6d7c4ae2ae7db3a508aab 100644
+--- a/ui/src/runtime/views.ts
++++ b/ui/src/runtime/views.ts
+@@ -61,11 +61,13 @@ export function useAccounts(entityId: string | null): { accounts: AccountView[];
+ 				try {
+ 					const derived = xln.deriveDelta(delta, isLeft);
+ 					const total = delta.ondelta + delta.offdelta;
++					// Negative total = LEFT pays, so LEFT's own position is +total
++					// and RIGHT's is -total. Verified against a live routed payment.
+ 					tokens.push({
+ 						tokenId: Number(tokenId),
+ 						delta,
+ 						derived,
+-						signed: isLeft ? -total : total,
++						signed: isLeft ? total : -total,
+ 					});
+ 				} catch {
+ 					// Skip malformed deltas rather than blanking the whole account list.
+diff --git a/ui/src/screens/AccountDetail.tsx b/ui/src/screens/AccountDetail.tsx
+index f3eae999e8117e3b0faaee9bb32f8b5ff87c3a58..bc17daef94e97310374aa9fcb8e192f499b7f490 100644
+--- a/ui/src/screens/AccountDetail.tsx
++++ b/ui/src/screens/AccountDetail.tsx
+@@ -1,14 +1,122 @@
+ import { useMemo, useState } from 'react';
+ import { useNavigate, useParams } from 'react-router-dom';
+ import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-adapter/types';
+-import { CapacityBar } from '../components/CapacityBar';
++import { DeltaBar, DeltaLegend } from '../components/DeltaBar';
+ import { Sheet } from '../components/Sheet';
+ import { Icon } from '../components/Icons';
+ import { useAdapterRead } from '../runtime/hooks';
+ import { useApp } from '../runtime/store';
+ import { sendEntityTxs } from '../runtime/tx';
+-import { formatAmount, getTokenMeta, parseAmount, shortId } from '../runtime/format';
+-import { useAccounts, useEntityCore } from '../runtime/views';
++import { formatAmount, getTokenMeta, parseAmount } from '../runtime/format';
++import { useAccounts, useEntityCore, type AccountTokenView } from '../runtime/views';
++
++function TokenAmount({ value, decimals, tone }: { value: bigint; decimals: number; tone?: 'coll' | 'debt' }) {
++	const color = tone === 'coll' ? '#7fae8e' : tone === 'debt' ? 'var(--danger)' : undefined;
++	return (
++		<span className="num" style={{ fontSize: 13, textAlign: 'right', ...(color ? { color } : {}) }}>
++			{formatAmount(value, decimals, 6)}
++		</span>
++	);
++}
++
++function PerspectiveRow({
++	label,
++	out,
++	inn,
++	decimals,
++	tone,
++}: {
++	label: string;
++	out: bigint;
++	inn: bigint;
++	decimals: number;
++	tone?: 'coll' | 'debt';
++}) {
++	return (
++		<div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.4fr) 1fr 1fr', gap: 12, padding: '8px 0', borderTop: '1px solid var(--hairline)' }}>
++			<span className="muted" style={{ fontSize: 12.5 }}>
++				{label}
++			</span>
++			<TokenAmount value={out} decimals={decimals} {...(tone ? { tone } : {})} />
++			<TokenAmount value={inn} decimals={decimals} {...(tone ? { tone } : {})} />
++		</div>
++	);
++}
++
++function TokenSection({ token }: { token: AccountTokenView }) {
++	const meta = getTokenMeta(token.tokenId);
++	const d = token.derived;
++	return (
++		<section style={{ marginBottom: 44 }}>
++			<div className="section-head" style={{ marginTop: 0, marginBottom: 12 }}>
++				<span>
++					<span className="caps">{meta.symbol}</span>
++					<span className="faint" style={{ fontSize: 11.5, marginLeft: 10 }}>
++						{meta.name}
++					</span>
++				</span>
++				<span className="display num" style={{ fontSize: 20 }}>
++					{formatAmount(token.signed, meta.decimals, 2)}
++				</span>
++			</div>
++
++			<DeltaBar derived={d} signed={token.signed} height={8} />
++			<div style={{ marginTop: 8 }}>
++				<DeltaLegend />
++			</div>
++
++			<div className="glass" style={{ padding: '14px 18px', marginTop: 16, borderRadius: 16 }}>
++				<div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.4fr) 1fr 1fr', gap: 12, paddingBottom: 8 }}>
++					<span className="caps" style={{ fontSize: 10 }}>
++						Perspective
++					</span>
++					<span className="caps" style={{ fontSize: 10, textAlign: 'right' }}>
++						Out
++					</span>
++					<span className="caps" style={{ fontSize: 10, textAlign: 'right' }}>
++						In
++					</span>
++				</div>
++				<PerspectiveRow label="Capacity" out={d.outCapacity} inn={d.inCapacity} decimals={meta.decimals} />
++				<PerspectiveRow label="Credit limit" out={d.ownCreditLimit} inn={d.peerCreditLimit} decimals={meta.decimals} />
++				<PerspectiveRow label="Own credit component" out={d.outOwnCredit} inn={d.inOwnCredit} decimals={meta.decimals} />
++				<PerspectiveRow label="Peer credit component" out={d.outPeerCredit} inn={d.inPeerCredit} decimals={meta.decimals} tone="debt" />
++				<PerspectiveRow label="Collateral component" out={d.outCollateral} inn={d.inCollateral} decimals={meta.decimals} tone="coll" />
++				<PerspectiveRow label="Hold deduction" out={d.outTotalHold ?? 0n} inn={d.inTotalHold ?? 0n} decimals={meta.decimals} tone="debt" />
++			</div>
++
++			<div className="glass" style={{ padding: '14px 18px', marginTop: 10, borderRadius: 16 }}>
++				<span className="caps" style={{ fontSize: 10 }}>
++					Canonical state
++				</span>
++				<div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0 0', gap: 12 }}>
++					<span className="muted" style={{ fontSize: 12.5 }}>
++						delta
++					</span>
++					<TokenAmount value={d.delta} decimals={meta.decimals} />
++				</div>
++				<div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0 0', gap: 12 }}>
++					<span className="muted" style={{ fontSize: 12.5 }}>
++						offdelta
++					</span>
++					<TokenAmount value={token.delta.offdelta} decimals={meta.decimals} />
++				</div>
++				<div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0 0', gap: 12 }}>
++					<span className="muted" style={{ fontSize: 12.5 }}>
++						ondelta
++					</span>
++					<TokenAmount value={token.delta.ondelta} decimals={meta.decimals} />
++				</div>
++				<div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0 0', gap: 12 }}>
++					<span className="muted" style={{ fontSize: 12.5 }}>
++						collateral
++					</span>
++					<TokenAmount value={d.collateral} decimals={meta.decimals} tone="coll" />
++				</div>
++			</div>
++		</section>
++	);
++}
+ 
+ export function AccountDetail() {
+ 	const navigate = useNavigate();
+@@ -23,7 +131,7 @@ export function AccountDetail() {
+ 	const account = accounts.find(a => a.counterpartyId === counterpartyId.toLowerCase()) ?? null;
+ 	const label = useMemo(() => {
+ 		const summary = (entities.data ?? []).find(s => s.entityId?.toLowerCase() === counterpartyId.toLowerCase());
+-		return summary?.label || shortId(counterpartyId);
++		return summary?.label || 'Account';
+ 	}, [entities.data, counterpartyId]);
+ 
+ 	const [extending, setExtending] = useState(false);
+@@ -51,91 +159,32 @@ export function AccountDetail() {
+ 	};
+ 
+ 	return (
+-		<div className="screen fade-in" style={{ maxWidth: 720 }}>
+-			<div className="screen-header">
++		<div className="screen fade-in" style={{ maxWidth: 760 }}>
++			<div className="screen-header" style={{ marginBottom: 10 }}>
+ 				<span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+ 					<button type="button" className="btn btn-quiet" onClick={() => navigate(-1)} aria-label="Back">
+-						<Icon name="chevronRight" size={16} strokeWidth={1.6} />
++						<Icon name="chevronLeft" size={16} strokeWidth={1.6} />
+ 					</button>
+ 					<span className="screen-title">{label}</span>
+ 				</span>
+-				<span className="mono">{shortId(counterpartyId, 8, 6)}</span>
+-			</div>
+-
+-			{!account && <p className="muted">No account with this counterparty yet.</p>}
+-
+-			{account?.tokens.map(token => {
+-				const tokenMeta = getTokenMeta(token.tokenId);
+-				const d = token.derived;
+-				return (
+-					<div key={token.tokenId} style={{ marginBottom: 36 }}>
+-						<div className="section-head" style={{ marginTop: 0 }}>
+-							<span className="caps">{tokenMeta.symbol}</span>
+-							<span className="display num" style={{ fontSize: 18 }}>
+-								{formatAmount(token.signed, tokenMeta.decimals, 2)}
+-							</span>
+-						</div>
+-						<CapacityBar collateral={d.collateral} creditUsed={d.outOwnCredit} free={d.outCapacity} height={3} />
+-						<div style={{ marginTop: 14 }}>
+-							<div className="row" style={{ padding: '11px 0' }}>
+-								<span className="muted" style={{ fontSize: 13 }}>
+-									Spendable
+-								</span>
+-								<span className="num" style={{ fontSize: 13 }}>
+-									{formatAmount(d.outCapacity, tokenMeta.decimals, 2)} {tokenMeta.symbol}
+-								</span>
+-							</div>
+-							<div className="row" style={{ padding: '11px 0' }}>
+-								<span className="muted" style={{ fontSize: 13 }}>
+-									Receivable
+-								</span>
+-								<span className="num" style={{ fontSize: 13 }}>
+-									{formatAmount(d.inCapacity, tokenMeta.decimals, 2)} {tokenMeta.symbol}
+-								</span>
+-							</div>
+-							<div className="row" style={{ padding: '11px 0' }}>
+-								<span className="muted" style={{ fontSize: 13 }}>
+-									Collateral
+-								</span>
+-								<span className="num" style={{ fontSize: 13 }}>
+-									{formatAmount(d.collateral, tokenMeta.decimals, 2)} {tokenMeta.symbol}
+-								</span>
+-							</div>
+-							<div className="row" style={{ padding: '11px 0' }}>
+-								<span className="muted" style={{ fontSize: 13 }}>
+-									Credit they extended to you
+-								</span>
+-								<span className="num" style={{ fontSize: 13 }}>
+-									{formatAmount(d.ownCreditLimit, tokenMeta.decimals, 2)} {tokenMeta.symbol}
+-								</span>
+-							</div>
+-							<div className="row" style={{ padding: '11px 0' }}>
+-								<span className="muted" style={{ fontSize: 13 }}>
+-									Credit you extended to them
+-								</span>
+-								<span className="num" style={{ fontSize: 13 }}>
+-									{formatAmount(d.peerCreditLimit, tokenMeta.decimals, 2)} {tokenMeta.symbol}
+-								</span>
+-							</div>
+-						</div>
+-					</div>
+-				);
+-			})}
+-
+-			{account && (
+-				<div style={{ display: 'flex', gap: 10 }}>
+-					<button
+-						type="button"
+-						className="btn btn-primary"
+-						onClick={() => navigate(`/pay?to=${counterpartyId.toLowerCase()}`)}
+-					>
++				<span style={{ display: 'flex', gap: 10 }}>
++					<button type="button" className="btn btn-primary" onClick={() => navigate(`/pay?to=${counterpartyId.toLowerCase()}`)}>
+ 						<Icon name="pay" size={15} /> Pay
+ 					</button>
+ 					<button type="button" className="btn btn-ghost" onClick={() => setExtending(true)}>
+ 						Extend credit
+ 					</button>
+-				</div>
+-			)}
++				</span>
++			</div>
++			<p className="hash" style={{ marginBottom: 30 }}>
++				{counterpartyId.toLowerCase()}
++			</p>
++
++			{!account && <p className="muted">No account with this counterparty yet.</p>}
++
++			{account?.tokens.map(token => (
++				<TokenSection key={token.tokenId} token={token} />
++			))}
+ 
+ 			{extending && (
+ 				<Sheet title="Extend credit" onClose={() => setExtending(false)}>
+diff --git a/ui/src/screens/Accounts.tsx b/ui/src/screens/Accounts.tsx
+index c214c2bc3e05363858905386c57bee1f4e28fc82..49bd2038a891e668eec30a6b93e11d4c60065325 100644
+--- a/ui/src/screens/Accounts.tsx
++++ b/ui/src/screens/Accounts.tsx
+@@ -1,12 +1,12 @@
+ import { useMemo, useState } from 'react';
+ import { useNavigate } from 'react-router-dom';
+ import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-adapter/types';
+-import { CapacityBar } from '../components/CapacityBar';
++import { DeltaBar } from '../components/DeltaBar';
+ import { Sheet } from '../components/Sheet';
+ import { useAdapterRead } from '../runtime/hooks';
+ import { useApp } from '../runtime/store';
+ import { sendEntityTxs } from '../runtime/tx';
+-import { formatAmount, getTokenMeta, parseAmount, shortId } from '../runtime/format';
++import { formatAmount, getTokenMeta, parseAmount } from '../runtime/format';
+ import { useAccounts, useEntityCore } from '../runtime/views';
+ 
+ export function Accounts() {
+@@ -80,24 +80,23 @@ export function Accounts() {
+ 							key={account.counterpartyId}
+ 							type="button"
+ 							className="row row-tappable"
++							style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}
+ 							onClick={() => navigate(`/accounts/${account.counterpartyId}`)}
+ 						>
+-							<span style={{ minWidth: 140 }}>
+-								<span style={{ display: 'block', fontSize: 13.5 }}>
+-									{names.get(account.counterpartyId) || shortId(account.counterpartyId)}
+-								</span>
+-								<span className="faint" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>
+-									{shortId(account.counterpartyId)}
++							<span style={{ flex: '1 1 100%', display: 'flex', justifyContent: 'space-between', gap: 16 }}>
++								<span style={{ fontSize: 14 }}>{names.get(account.counterpartyId) || 'Account'}</span>
++								<span className="display num" style={{ fontSize: 16 }}>
++									{token ? formatAmount(token.signed, tokenMeta.decimals, 2) : '0'}{' '}
++									<span className="faint" style={{ fontSize: 11, fontFamily: 'var(--font-ui)' }}>{tokenMeta.symbol}</span>
+ 								</span>
+ 							</span>
+-							<span style={{ flex: 1, margin: '0 12px' }}>
++							<span className="hash" style={{ flex: '1 1 100%', marginTop: 2 }}>
++								{account.counterpartyId}
++							</span>
++							<span style={{ flex: '1 1 100%', marginTop: 10 }}>
+ 								{token ? (
+ 									<>
+-										<CapacityBar
+-											collateral={token.derived.collateral}
+-											creditUsed={token.derived.outOwnCredit}
+-											free={token.derived.outCapacity}
+-										/>
++										<DeltaBar derived={token.derived} signed={token.signed} height={6} />
+ 										<span className="faint" style={{ display: 'block', fontSize: 11, marginTop: 6 }}>
+ 											{formatAmount(token.derived.outCapacity, tokenMeta.decimals, 2)} spendable ·{' '}
+ 											{formatAmount(token.derived.inCapacity, tokenMeta.decimals, 2)} receivable · {tokenMeta.symbol}
+@@ -109,9 +108,6 @@ export function Accounts() {
+ 									</span>
+ 								)}
+ 							</span>
+-							<span className="display num" style={{ fontSize: 15 }}>
+-								{token ? formatAmount(token.signed, tokenMeta.decimals, 2) : '0'}
+-							</span>
+ 						</button>
+ 					);
+ 				})}
+@@ -131,14 +127,16 @@ export function Accounts() {
+ 								key={id}
+ 								type="button"
+ 								className="row row-tappable"
+-								style={{ padding: '12px 0', borderColor: targetId === id ? 'var(--hairline-2)' : undefined }}
++								style={{ padding: '12px 0', flexWrap: 'wrap', borderColor: targetId === id ? 'var(--hairline-2)' : undefined }}
+ 								onClick={() => setTargetId(id)}
+ 							>
+-								<span style={{ fontSize: 13.5 }}>
++								<span style={{ fontSize: 13.5, flex: '1 1 100%' }}>
+ 									{targetId === id ? <span className="dot" style={{ display: 'inline-block', marginRight: 10 }} /> : null}
+-									{names.get(id) || shortId(id)}
++									{names.get(id) || 'Entity'}
++								</span>
++								<span className="hash" style={{ flex: '1 1 100%', marginTop: 2 }}>
++									{id}
+ 								</span>
+-								<span className="mono">{shortId(id)}</span>
+ 							</button>
+ 						))}
+ 						<input
+diff --git a/ui/src/screens/Activity.tsx b/ui/src/screens/Activity.tsx
+index 8ac7eda2b8a39f45101c94a4906b1daac73e39e0..4c03761c5755af8713d522e1a58d73bf4f39fae6 100644
+--- a/ui/src/screens/Activity.tsx
++++ b/ui/src/screens/Activity.tsx
+@@ -1,50 +1,180 @@
++import { useMemo, useState } from 'react';
++import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-adapter/types';
++import { useApp } from '../runtime/store';
+ import { useAdapterRead } from '../runtime/hooks';
+-import { timeAgo } from '../runtime/format';
++import { useAccounts } from '../runtime/views';
++import { formatAmount, getTokenMeta, timeAgo } from '../runtime/format';
+ 
+-type ActivityEvent = {
+-	type?: string;
+-	kind?: string;
+-	timestamp?: number;
++export type ActivityEventView = {
++	id?: string;
+ 	height?: number;
+-	description?: string;
+-	amount?: string;
++	timestamp?: number;
++	kind?: string;
++	type?: string;
++	direction?: string;
++	title?: string;
++	subtitle?: string;
++	status?: string;
++	entityId?: string;
++	counterpartyId?: string;
+ 	tokenId?: number;
+-} & Record<string, unknown>;
++	amount?: string;
++};
++
++type ActivityPage = { events?: ActivityEventView[]; latestHeight?: number; scannedFrames?: number };
++
++export function formatEventAmount(event: ActivityEventView): string | null {
++	if (!event.amount || !event.tokenId) return null;
++	try {
++		const meta = getTokenMeta(Number(event.tokenId));
++		const value = BigInt(event.amount);
++		const sign = event.direction === 'out' ? '−' : event.direction === 'in' ? '+' : '';
++		return `${sign}${formatAmount(value < 0n ? -value : value, meta.decimals, 2)} ${meta.symbol}`;
++	} catch {
++		return null;
++	}
++}
+ 
+-type ActivityPage = { events?: ActivityEvent[] };
++/** User-relevant money movements; consensus internals stay in dev tools. */
++export const USER_ACTIVITY_TYPES = ['payment', 'htlc', 'swap', 'cross_swap', 'settlement', 'account'];
++
++const ALL = 'all';
++
++function FilterChips({
++	value,
++	onChange,
++	options,
++}: {
++	value: string;
++	onChange: (next: string) => void;
++	options: Array<{ id: string; label: string }>;
++}) {
++	return (
++		<div className="token-switch" style={{ flexWrap: 'wrap' }}>
++			{options.map(option => (
++				<button
++					key={option.id}
++					type="button"
++					className={value === option.id ? 'active' : ''}
++					onClick={() => onChange(option.id)}
++				>
++					{option.label}
++				</button>
++			))}
++		</div>
++	);
++}
+ 
+ export function ActivityScreen() {
+-	const activity = useAdapterRead<ActivityPage>('activity', { limit: 60 });
+-	const events = activity.data?.events ?? [];
++	const activeEntityId = useApp(s => s.activeEntityId);
++	const entities = useAdapterRead<RuntimeAdapterEntitySummary[]>('entities');
++	const [entityFilter, setEntityFilter] = useState<string>(activeEntityId?.toLowerCase() ?? ALL);
++	const [accountFilter, setAccountFilter] = useState<string>(ALL);
++
++	const names = useMemo(() => {
++		const map = new Map<string, string>();
++		for (const summary of entities.data ?? []) {
++			if (summary.entityId) map.set(summary.entityId.toLowerCase(), summary.label || '');
++		}
++		return map;
++	}, [entities.data]);
++
++	const nameOf = (id: string | undefined): string => {
++		const key = (id ?? '').toLowerCase();
++		return names.get(key) || (key ? `${key.slice(0, 10)}…` : '');
++	};
++
++	const { accounts } = useAccounts(entityFilter === ALL ? null : entityFilter);
++
++	// Runtime-side filter: entityId narrows the journal projection to that
++	// entity's frames. Account scoping is client-side over the same real page —
++	// RuntimeActivityFilters has no counterparty filter yet.
++	const activity = useAdapterRead<ActivityPage>('activity', {
++		limit: 100,
++		types: USER_ACTIVITY_TYPES,
++		...(entityFilter !== ALL ? { entityId: entityFilter } : {}),
++	});
++
++	const events = (activity.data?.events ?? []).filter(
++		event => accountFilter === ALL || (event.counterpartyId ?? '').toLowerCase() === accountFilter,
++	);
++
++	const entityOptions = [
++		{ id: ALL, label: 'All entities' },
++		...(entities.data ?? [])
++			.map(summary => summary.entityId?.toLowerCase() ?? '')
++			.filter(Boolean)
++			.map(id => ({ id, label: nameOf(id) })),
++	];
++
++	const accountOptions = [
++		{ id: ALL, label: 'All accounts' },
++		...accounts.map(account => ({ id: account.counterpartyId, label: nameOf(account.counterpartyId) })),
++	];
+ 
+ 	return (
+-		<div className="screen fade-in" style={{ maxWidth: 720 }}>
+-			<div className="screen-header">
++		<div className="screen fade-in" style={{ maxWidth: 760 }}>
++			<div className="screen-header" style={{ marginBottom: 20 }}>
+ 				<span className="screen-title">Activity</span>
+ 				<span className="faint" style={{ fontSize: 12 }}>
+-					{events.length} events
++					{events.length} events · frames from local db
+ 				</span>
+ 			</div>
+ 
++			<div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 26 }}>
++				<FilterChips
++					value={entityFilter}
++					options={entityOptions}
++					onChange={next => {
++						setEntityFilter(next);
++						setAccountFilter(ALL);
++					}}
++				/>
++				{entityFilter !== ALL && accounts.length > 0 && (
++					<FilterChips value={accountFilter} options={accountOptions} onChange={setAccountFilter} />
++				)}
++			</div>
++
+ 			<div>
+-				{events.map((event, index) => (
+-					<div key={index} className="row" style={{ padding: '13px 0' }}>
+-						<span style={{ minWidth: 0 }}>
+-							<span style={{ display: 'block', fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+-								{String(event.description || event.type || event.kind || 'Frame')}
++				{events.map((event, index) => {
++					const amount = formatEventAmount(event);
++					const counterparty = event.counterpartyId ? nameOf(event.counterpartyId) : '';
++					return (
++						<div key={event.id ?? index} className="row" style={{ padding: '13px 0' }}>
++							<span style={{ minWidth: 0 }}>
++								<span
++									style={{
++										display: 'block',
++										fontSize: 13.5,
++										overflow: 'hidden',
++										textOverflow: 'ellipsis',
++										whiteSpace: 'nowrap',
++									}}
++								>
++									{String(event.title || event.type || 'Frame')}
++								</span>
++								<span className="faint" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>
++									frame #{event.height ?? '—'}
++									{counterparty ? ` · with ${counterparty}` : ''}
++									{event.subtitle ? ` · ${event.subtitle}` : ''}
++								</span>
+ 							</span>
+-							<span className="faint" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>
+-								frame #{event.height ?? '—'}
++							<span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
++								{amount && (
++									<span className="display num" style={{ display: 'block', fontSize: 14 }}>
++										{amount}
++									</span>
++								)}
++								<span className="faint" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>
++									{event.timestamp ? timeAgo(Number(event.timestamp)) : `#${event.height ?? ''}`}
++								</span>
+ 							</span>
+-						</span>
+-						<span className="faint" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+-							{event.timestamp ? timeAgo(Number(event.timestamp)) : ''}
+-						</span>
+-					</div>
+-				))}
++						</div>
++					);
++				})}
+ 				{events.length === 0 && !activity.loading && (
+ 					<p className="muted" style={{ padding: '18px 0', fontSize: 13 }}>
+-						Nothing yet — activity appears here as frames commit.
++						Nothing here for this filter yet.
+ 					</p>
+ 				)}
+ 				{activity.error && <p style={{ color: 'var(--danger)', fontSize: 13 }}>{activity.error}</p>}
+diff --git a/ui/src/screens/Gate.tsx b/ui/src/screens/Gate.tsx
+index 8dec89da846177539052b13f02889cc3b6a2ba54..9b822aa95a0e62a46c74cd93c742a63f5d3fa219 100644
+--- a/ui/src/screens/Gate.tsx
++++ b/ui/src/screens/Gate.tsx
+@@ -1,8 +1,14 @@
+-import { useState } from 'react';
++import { useMemo, useRef, useState } from 'react';
+ import { Icon } from '../components/Icons';
+ import { useApp } from '../runtime/store';
+ import { bootEmbeddedDemo, connectSandbox } from '../runtime/sandbox';
+-import { deriveBrainvaultMnemonic, type BrainvaultProgress } from '../runtime/brainvault';
++import {
++	FACTOR_PRESETS,
++	customWork,
++	deriveBrainvaultMnemonic,
++	type BrainvaultProgress,
++	type BrainvaultWork,
++} from '../runtime/brainvault';
+ import { isValidMnemonic, runtimeIdForSeed } from '../runtime/keys';
+ import { connectRemote } from '../runtime/adapter';
+ 
+@@ -18,10 +24,24 @@ export function Gate() {
+ 
+ 	const [name, setName] = useState('');
+ 	const [passphrase, setPassphrase] = useState('');
+-	const [factor, setFactor] = useState(1);
++	const [factor, setFactor] = useState(3);
++	const [customShards, setCustomShards] = useState('');
+ 	const [phrase, setPhrase] = useState('');
+ 	const [wsUrl, setWsUrl] = useState('wss://xln.finance/rpc');
+ 	const [authKey, setAuthKey] = useState('');
++	const deriveAbort = useRef<AbortController | null>(null);
++
++	const work: BrainvaultWork | null = useMemo(() => {
++		const custom = customShards.trim();
++		if (custom) {
++			try {
++				return customWork(Number(custom));
++			} catch {
++				return null;
++			}
++		}
++		return FACTOR_PRESETS.find(p => p.factor === factor) ?? null;
++	}, [factor, customShards]);
+ 
+ 	const run = async (work: () => Promise<void>): Promise<void> => {
+ 		setError(null);
+@@ -42,9 +62,29 @@ export function Gate() {
+ 	};
+ 
+ 	const createVault = (): void => {
++		if (!work) return;
+ 		void run(async () => {
+ 			setBusyStep('Deriving your vault');
+-			const result = await deriveBrainvaultMnemonic(name.trim(), passphrase, factor, p => setProgress(p));
++			deriveAbort.current = new AbortController();
++			let result;
++			try {
++				result = await deriveBrainvaultMnemonic(
++					name.trim(),
++					passphrase,
++					work,
++					p => setProgress(p),
++					deriveAbort.current.signal,
++				);
++			} catch (deriveError) {
++				if (deriveError instanceof Error && deriveError.message === 'BRAINVAULT_ABORTED') {
++					setBusyStep(null);
++					setProgress(null);
++					return;
++				}
++				throw deriveError;
++			} finally {
++				deriveAbort.current = null;
++			}
+ 			setProgress(null);
+ 			const vaultId = runtimeIdForSeed(result.mnemonic).toLowerCase();
+ 			await bootEmbeddedDemo(result.mnemonic, {
+@@ -91,6 +131,10 @@ export function Gate() {
+ 	};
+ 
+ 	if (busyStep) {
++		const etaSeconds =
++			progress && progress.completed > 0
++				? Math.max(0, Math.round(((progress.elapsedMs / progress.completed) * (progress.total - progress.completed)) / 1000))
++				: null;
+ 		return (
+ 			<div className="gate">
+ 				<GateMark />
+@@ -102,8 +146,19 @@ export function Gate() {
+ 								<span style={{ width: `${Math.round((progress.completed / Math.max(1, progress.total)) * 100)}%` }} />
+ 							</div>
+ 							<p className="faint" style={{ fontSize: 12 }}>
+-								Shard {progress.completed} of {progress.total} · {(progress.elapsedMs / 1000).toFixed(0)}s
++								Shard {progress.completed.toLocaleString('en-US')} of {progress.total.toLocaleString('en-US')} ·{' '}
++								{(progress.elapsedMs / 1000).toFixed(0)}s elapsed
++								{etaSeconds !== null ? ` · ~${etaSeconds >= 90 ? `${Math.round(etaSeconds / 60)} min` : `${etaSeconds}s`} left` : ''}
+ 							</p>
++							<button
++								type="button"
++								className="btn btn-ghost"
++								onClick={() => {
++									deriveAbort.current?.abort();
++								}}
++							>
++								Cancel
++							</button>
+ 						</>
+ 					) : (
+ 						<div className="gate-progress gate-progress-indeterminate">
+@@ -205,18 +260,58 @@ export function Gate() {
+ 							placeholder="Long and memorable"
+ 						/>
+ 					</label>
+-					<label className="field">
+-						<span className="field-label">Difficulty · factor {factor}</span>
+-						<input type="range" min={1} max={4} step={1} value={factor} onChange={e => setFactor(Number(e.target.value))} />
++					<div className="field">
++						<span className="field-label">Security work factor</span>
++						<div className="gate-factors">
++							{FACTOR_PRESETS.map(preset => {
++								const active = !customShards.trim() && preset.factor === factor;
++								return (
++									<button
++										key={preset.factor}
++										type="button"
++										className={`gate-factor${active ? ' active' : ''}`}
++										onClick={() => {
++											setFactor(preset.factor);
++											setCustomShards('');
++										}}
++									>
++										<span className="gate-factor-tier">{preset.tier}</span>
++										<span className="gate-factor-shards">
++											{preset.shardCount.toLocaleString('en-US')} {preset.shardCount === 1 ? 'shard' : 'shards'}
++										</span>
++									</button>
++								);
++							})}
++						</div>
++						<div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
++							<input
++								className="input num"
++								style={{ maxWidth: 200 }}
++								placeholder="custom shards · 6+"
++								inputMode="numeric"
++								value={customShards}
++								onChange={e => setCustomShards(e.target.value.replace(/[^\d]/g, ''))}
++							/>
++							<span className="faint" style={{ fontSize: 12 }}>
++								{work
++									? `${work.tier} · ${work.shardCount.toLocaleString('en-US')} shards · factor ${work.factor}`
++									: 'At least 6 shards'}
++							</span>
++						</div>
+ 						<span className="faint" style={{ fontSize: 12 }}>
+-							Higher factors take longer to derive — and longer to attack.
++							Each shard is one unit of Argon2 memory-hard work. The same name, passphrase, and work reopen this vault
++							on any device — cancel any time.
+ 						</span>
+-					</label>
++					</div>
+ 					<div className="gate-form-actions">
+ 						<button type="button" className="btn btn-quiet" onClick={() => setMode('landing')}>
+ 							Back
+ 						</button>
+-						<button type="submit" className="btn btn-primary" disabled={name.trim().length < 2 || passphrase.length < 8}>
++						<button
++							type="submit"
++							className="btn btn-primary"
++							disabled={name.trim().length < 2 || passphrase.length < 8 || !work}
++						>
+ 							Derive vault
+ 						</button>
+ 					</div>
+diff --git a/ui/src/screens/Home.tsx b/ui/src/screens/Home.tsx
+index 2406b66d55dde74e3fb664d22e6af6fcac464318..b0d0fec2a05fa180148ac356be6a4340cba99ab6 100644
+--- a/ui/src/screens/Home.tsx
++++ b/ui/src/screens/Home.tsx
+@@ -1,18 +1,19 @@
+ import { useNavigate } from 'react-router-dom';
+-import { useMemo } from 'react';
++import { useMemo, useState } from 'react';
+ import { Amount } from '../components/Amount';
+-import { CapacityBar } from '../components/CapacityBar';
++import { DeltaBar } from '../components/DeltaBar';
+ import { Icon } from '../components/Icons';
+ import { useAdapterRead } from '../runtime/hooks';
+ import { useApp } from '../runtime/store';
+-import { formatAmount, getTokenMeta, shortId, timeAgo } from '../runtime/format';
++import { demoFaucet, getDemoTopology } from '../runtime/sandbox';
++import { formatAmount, getTokenMeta, parseAmount, timeAgo } from '../runtime/format';
+ import { displayEntityName, useAccounts, useEntityCore, usePortfolio } from '../runtime/views';
+ import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-adapter/types';
+ 
++import { formatEventAmount, USER_ACTIVITY_TYPES, type ActivityEventView } from './Activity';
++
+ type HeadView = { latestHeight?: number; frameHash?: string; stateHash?: string } & Record<string, unknown>;
+-type ActivityView = {
+-	events?: Array<{ type?: string; kind?: string; timestamp?: number; height?: number; description?: string }>;
+-};
++type ActivityView = { events?: ActivityEventView[] };
+ 
+ export function Home() {
+ 	const navigate = useNavigate();
+@@ -21,12 +22,35 @@ export function Home() {
+ 	const selectedTokenId = useApp(s => s.selectedTokenId);
+ 	const setSelectedTokenId = useApp(s => s.setSelectedTokenId);
+ 
++	const toast = useApp(s => s.toast);
+ 	const core = useEntityCore(entityId);
+ 	const { accounts } = useAccounts(entityId);
+ 	const portfolio = usePortfolio(core.data, accounts);
++	const [faucetBusy, setFaucetBusy] = useState(false);
++	const demo = getDemoTopology();
++
++	const requestFaucet = (): void => {
++		void (async () => {
++			if (!entityId || faucetBusy) return;
++			setFaucetBusy(true);
++			try {
++				const amount = parseAmount('100', getTokenMeta(1).decimals);
++				await demoFaucet(entityId, amount);
++				toast('+100 USDC from Hub One');
++			} catch (error) {
++				toast(error instanceof Error ? error.message : String(error), 'danger');
++			} finally {
++				setFaucetBusy(false);
++			}
++		})();
++	};
+ 	const entities = useAdapterRead<RuntimeAdapterEntitySummary[]>('entities');
+ 	const head = useAdapterRead<HeadView>('head');
+-	const activity = useAdapterRead<ActivityView>('activity', { limit: 4 });
++	const activity = useAdapterRead<ActivityView>('activity', {
++		limit: 4,
++		types: USER_ACTIVITY_TYPES,
++		...(entityId ? { entityId } : {}),
++	});
+ 
+ 	const names = useMemo(() => {
+ 		const map = new Map<string, string>();
+@@ -103,31 +127,52 @@ export function Home() {
+ 						{accounts.map(account => {
+ 							const token = account.tokens.find(t => t.tokenId === activeTokenId) ?? account.tokens[0];
+ 							const tokenMeta = getTokenMeta(token?.tokenId ?? activeTokenId);
+-							const label = names.get(account.counterpartyId) ?? shortId(account.counterpartyId);
++							const label = names.get(account.counterpartyId) ?? 'Account';
++							const isDemoHub = demo?.hub.entityId === account.counterpartyId;
+ 							return (
+-								<button
++								<div
+ 									key={account.counterpartyId}
+-									type="button"
+ 									className="row row-tappable"
++									role="link"
++									tabIndex={0}
++									style={{ alignItems: 'flex-start', flexWrap: 'wrap', cursor: 'pointer' }}
+ 									onClick={() => navigate(`/accounts/${account.counterpartyId}`)}
++									onKeyDown={e => {
++										if (e.key === 'Enter') navigate(`/accounts/${account.counterpartyId}`);
++									}}
+ 								>
+-									<span style={{ minWidth: 120 }}>
+-										<span style={{ display: 'block', fontSize: 13.5 }}>{label}</span>
+-										<span className="faint" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>
+-											bilateral · {shortId(account.counterpartyId)}
++									<span style={{ flex: '1 1 100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
++										<span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontSize: 14 }}>
++											{label}
++											{isDemoHub && (
++												<button
++													type="button"
++													className="faucet-chip"
++													disabled={faucetBusy}
++													onClick={e => {
++														e.stopPropagation();
++														requestFaucet();
++													}}
++												>
++													{faucetBusy ? '…' : '+100 USDC · testnet'}
++												</button>
++											)}
++										</span>
++										<span className="display num" style={{ fontSize: 16 }}>
++											{token ? formatAmount(token.signed, tokenMeta.decimals, 2) : '0'}{' '}
++											<span className="faint" style={{ fontSize: 11, fontFamily: 'var(--font-ui)' }}>{tokenMeta.symbol}</span>
+ 										</span>
+ 									</span>
+-									<span style={{ flex: 1, margin: '0 12px' }}>
++									<span className="hash" style={{ flex: '1 1 100%', marginTop: 2 }}>
++										{account.counterpartyId}
++									</span>
++									<span style={{ flex: '1 1 100%', marginTop: 12 }}>
+ 										{token ? (
+ 											<>
+-												<CapacityBar
+-													collateral={token.derived.collateral}
+-													creditUsed={token.derived.outOwnCredit}
+-													free={token.derived.outCapacity}
+-												/>
+-												<span className="faint" style={{ display: 'block', fontSize: 11, marginTop: 6 }}>
+-													{formatAmount(token.derived.outCapacity, tokenMeta.decimals, 2)} {tokenMeta.symbol} spendable ·{' '}
+-													{formatAmount(token.derived.inCapacity, tokenMeta.decimals, 2)} receivable
++												<DeltaBar derived={token.derived} signed={token.signed} height={6} />
++												<span className="faint" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 7 }}>
++													<span>← send {formatAmount(token.derived.outCapacity, tokenMeta.decimals, 2)}</span>
++													<span>receive {formatAmount(token.derived.inCapacity, tokenMeta.decimals, 2)} →</span>
+ 												</span>
+ 											</>
+ 										) : (
+@@ -136,10 +181,7 @@ export function Home() {
+ 											</span>
+ 										)}
+ 									</span>
+-									<span className="display num" style={{ fontSize: 15 }}>
+-										{token ? formatAmount(token.signed, tokenMeta.decimals, 2) : '0'}
+-									</span>
+-								</button>
++								</div>
+ 							);
+ 						})}
+ 						{accounts.length === 0 && !core.loading && (
+@@ -168,13 +210,17 @@ export function Home() {
+ 							<span className="muted">Frame</span>
+ 							<span className="mono">#{height.toLocaleString('en-US')}</span>
+ 						</div>
+-						<div className="proof-row">
++						<div className="proof-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+ 							<span className="muted">State hash</span>
+-							<span className="mono">{frameHash ? shortId(frameHash, 8, 4) : '—'}</span>
++							<span className="hash">{frameHash || '—'}</span>
+ 						</div>
+-						<div className="proof-row">
++						<div className="proof-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+ 							<span className="muted">Signer</span>
+-							<span className="mono">{core.data?.signerId ? shortId(core.data.signerId, 6, 4) : '—'}</span>
++							<span className="hash">{core.data?.signerId || '—'}</span>
++						</div>
++						<div className="proof-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
++							<span className="muted">Entity</span>
++							<span className="hash">{entityId || '—'}</span>
+ 						</div>
+ 					</div>
+ 
+@@ -183,12 +229,12 @@ export function Home() {
+ 							Activity
+ 						</span>
+ 						{(activity.data?.events ?? []).slice(0, 4).map((event, index) => (
+-							<div key={index} className="proof-row">
+-								<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+-									{String(event.description || event.type || event.kind || 'Frame')}
++							<div key={event.id ?? index} className="proof-row">
++								<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
++									{String(event.title || event.type || 'Frame')}
+ 								</span>
+ 								<span className="faint" style={{ whiteSpace: 'nowrap' }}>
+-									{event.timestamp ? timeAgo(Number(event.timestamp)) : `#${event.height ?? ''}`}
++									{formatEventAmount(event) ?? (event.timestamp ? timeAgo(Number(event.timestamp)) : `#${event.height ?? ''}`)}
+ 								</span>
+ 							</div>
+ 						))}
+@@ -200,6 +246,7 @@ export function Home() {
+ 					</div>
+ 				</div>
+ 			</div>
++
+ 		</div>
+ 	);
+ }
+diff --git a/ui/src/screens/Pay.tsx b/ui/src/screens/Pay.tsx
+index f33acbe6a0d0c68a42d6d8630332ce8da7e5bc6c..799439f802be73e183f452ead4708ad6a71fc126 100644
+--- a/ui/src/screens/Pay.tsx
++++ b/ui/src/screens/Pay.tsx
+@@ -1,16 +1,34 @@
+ import { useEffect, useMemo, useRef, useState } from 'react';
+ import { useNavigate, useSearchParams } from 'react-router-dom';
+-import type { RuntimeAdapterEntitySummary, RuntimeAdapterPaymentRoutesResponse } from '@xln/runtime/api/runtime-adapter/types';
++import type {
++	RuntimeAdapterEntitySummary,
++	RuntimeAdapterPaymentRoutesResponse,
++} from '@xln/runtime/api/runtime-adapter/types';
+ import { Icon } from '../components/Icons';
+ import { useAdapterRead } from '../runtime/hooks';
+ import { useApp } from '../runtime/store';
+ import { getAdapter } from '../runtime/adapter';
+ import { sendEntityTxs } from '../runtime/tx';
+-import { formatAmount, getTokenMeta, parseAmount, shortId } from '../runtime/format';
++import { formatAmount, getTokenMeta, knownTokenIds, parseAmount } from '../runtime/format';
+ import { useAccounts, useEntityCore } from '../runtime/views';
+ 
++type DeliveryMode = 'instant' | 'async' | 'direct' | 'trusted';
++
++const DELIVERY_MODES: Array<{
++	value: DeliveryMode;
++	label: string;
++	description: string;
++	recommended?: boolean;
++}> = [
++	{ value: 'instant', label: 'Instant', description: 'Atomic · recipient online', recommended: true },
++	{ value: 'async', label: 'Async', description: 'Atomic · recipient may be offline' },
++	{ value: 'direct', label: 'Direct', description: 'One hop · shared account' },
++	{ value: 'trusted', label: 'Trusted', description: 'Trusts the selected hub' },
++];
++
+ type RouteChoice = {
+ 	path: string[];
++	hops: Array<{ from: string; to: string; fee: bigint }>;
+ 	totalFee: bigint;
+ 	senderAmount: bigint;
+ 	recipientAmount: bigint;
+@@ -44,49 +62,83 @@ async function resolveRoutes(source: string, target: string, tokenId: number, am
+ 		if (response.routes.length > 0) {
+ 			return response.routes.map(route => ({
+ 				path: route.path.map(id => id.toLowerCase()),
++				hops: route.hops.map(hop => ({
++					from: hop.from.toLowerCase(),
++					to: hop.to.toLowerCase(),
++					fee: BigInt(hop.fee),
++				})),
+ 				totalFee: BigInt(route.totalFee),
+ 				senderAmount: BigInt(route.senderAmount),
+ 				recipientAmount: BigInt(route.recipientAmount),
+ 			}));
+ 		}
+ 	} catch {
+-		// Graph may be empty (fresh embedded runtime). Fall back to committed topology.
++		// Empty gossip graph on a fresh embedded runtime — fall back to the
++		// committed account topology below.
+ 	}
+ 
+ 	const mine = await adapter.read<AccountsPageLite>(`entity/${source}/accounts`);
+ 	const direct = accountCounterparties(mine, source);
++	const routes: RouteChoice[] = [];
+ 	if (direct.includes(target)) {
+-		return [{ path: [source, target], totalFee: 0n, senderAmount: amount, recipientAmount: amount }];
++		routes.push({
++			path: [source, target],
++			hops: [{ from: source, to: target, fee: 0n }],
++			totalFee: 0n,
++			senderAmount: amount,
++			recipientAmount: amount,
++		});
+ 	}
+-	const routes: RouteChoice[] = [];
+ 	for (const via of direct) {
++		if (via === target) continue;
+ 		try {
+ 			const theirs = await adapter.read<AccountsPageLite>(`entity/${via}/accounts`);
+ 			if (accountCounterparties(theirs, via).includes(target)) {
+-				routes.push({ path: [source, via, target], totalFee: 0n, senderAmount: amount, recipientAmount: amount });
++				routes.push({
++					path: [source, via, target],
++					hops: [
++						{ from: source, to: via, fee: 0n },
++						{ from: via, to: target, fee: 0n },
++					],
++					totalFee: 0n,
++					senderAmount: amount,
++					recipientAmount: amount,
++				});
+ 			}
+ 		} catch {
+-			// Counterparty state may be unreadable (remote scope) — skip this hop.
++			// Counterparty state unreadable in this scope — skip the hop.
+ 		}
+ 	}
+ 	if (routes.length === 0) throw new Error('No route to this recipient');
+ 	return routes;
+ }
+ 
++function rawAmountText(value: bigint, decimals: number): string {
++	const base = 10n ** BigInt(decimals);
++	const whole = value / base;
++	const fraction = (value % base).toString().padStart(decimals, '0').replace(/0+$/, '');
++	return fraction ? `${whole}.${fraction}` : whole.toString();
++}
++
+ export function Pay() {
+ 	const navigate = useNavigate();
+ 	const [params] = useSearchParams();
+ 	const entityId = useApp(s => s.activeEntityId);
+ 	const selectedTokenId = useApp(s => s.selectedTokenId);
++	const setSelectedTokenId = useApp(s => s.setSelectedTokenId);
+ 	const toast = useApp(s => s.toast);
+ 
+ 	const core = useEntityCore(entityId);
+ 	const { accounts } = useAccounts(entityId);
+ 	const entities = useAdapterRead<RuntimeAdapterEntitySummary[]>('entities');
+ 
+-	const [target, setTarget] = useState(params.get('to')?.toLowerCase() ?? '');
++	const [toText, setToText] = useState(params.get('to')?.toLowerCase() ?? '');
++	const [toFocused, setToFocused] = useState(false);
+ 	const [amountText, setAmountText] = useState(params.get('amount') ?? '');
+ 	const [tokenId, setTokenId] = useState(Number(params.get('token') ?? selectedTokenId) || selectedTokenId);
++	const [tokenOpen, setTokenOpen] = useState(false);
++	const [advancedOpen, setAdvancedOpen] = useState(Boolean(params.get('desc')));
++	const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>('instant');
+ 	const [description, setDescription] = useState(params.get('desc') ?? '');
+ 	const [routes, setRoutes] = useState<RouteChoice[] | null>(null);
+ 	const [routeIndex, setRouteIndex] = useState(0);
+@@ -98,17 +150,37 @@ export function Pay() {
+ 	const meta = getTokenMeta(tokenId);
+ 	const self = (entityId ?? '').toLowerCase();
+ 
+-	const recipients = useMemo(() => {
+-		const list: Array<{ entityId: string; label: string }> = [];
+-		const seen = new Set<string>();
+-		for (const summary of entities.data ?? []) {
+-			const id = summary.entityId?.toLowerCase();
+-			if (!id || id === self || seen.has(id)) continue;
+-			seen.add(id);
+-			list.push({ entityId: id, label: summary.label || shortId(id) });
+-		}
+-		return list;
+-	}, [entities.data, self]);
++	const known = useMemo(
++		() =>
++			(entities.data ?? [])
++				.map(summary => ({
++					entityId: summary.entityId?.toLowerCase() ?? '',
++					label: summary.label || '',
++				}))
++				.filter(entry => entry.entityId && entry.entityId !== self),
++		[entities.data, self],
++	);
++
++	const nameOf = (id: string): string =>
++		known.find(entry => entry.entityId === id.toLowerCase())?.label || `${id.slice(0, 10)}…`;
++
++	// One combobox: free text resolves either to a pasted 32-byte id or to a
++	// known contact by name; suggestions filter live under the same input.
++	const query = toText.trim().toLowerCase();
++	const target = useMemo(() => {
++		if (/^0x[0-9a-f]{64}$/.test(query)) return query;
++		const byName = known.find(entry => entry.label.toLowerCase() === query);
++		return byName?.entityId ?? '';
++	}, [query, known]);
++	const validTarget = Boolean(target);
++
++	const suggestions = useMemo(() => {
++		if (validTarget && known.some(entry => entry.entityId === target && entry.label.toLowerCase() === query)) return [];
++		if (!query) return known;
++		return known.filter(
++			entry => entry.label.toLowerCase().includes(query) || entry.entityId.includes(query),
++		);
++	}, [known, query, target, validTarget]);
+ 
+ 	const parsedAmount = useMemo(() => {
+ 		try {
+@@ -119,7 +191,10 @@ export function Pay() {
+ 		}
+ 	}, [amountText, meta.decimals]);
+ 
+-	const validTarget = /^0x[0-9a-f]{64}$/.test(target);
++	const spendable = accounts
++		.flatMap(a => a.tokens)
++		.filter(t => t.tokenId === tokenId)
++		.reduce((sum, t) => sum + t.derived.outCapacity, 0n);
+ 
+ 	useEffect(() => {
+ 		setRoutes(null);
+@@ -142,21 +217,29 @@ export function Pay() {
+ 				});
+ 		}, 250);
+ 		return () => clearTimeout(timer);
++		// eslint-disable-next-line react-hooks/exhaustive-deps
+ 	}, [self, target, validTarget, parsedAmount, tokenId]);
+ 
+ 	const chosen = routes?.[routeIndex] ?? null;
+-	const spendable = accounts
+-		.flatMap(a => a.tokens)
+-		.filter(t => t.tokenId === tokenId)
+-		.reduce((sum, t) => sum + t.derived.outCapacity, 0n);
++
++	const modeError = useMemo(() => {
++		if (!chosen) return null;
++		if (deliveryMode === 'direct' && chosen.path.length !== 2) {
++			return 'Direct delivery requires a bilateral route.';
++		}
++		if (deliveryMode === 'trusted' && (chosen.path.length !== 3 || chosen.totalFee !== 0n)) {
++			return 'Trusted delivery requires one fee-free gateway.';
++		}
++		return null;
++	}, [chosen, deliveryMode]);
+ 
+ 	const send = async (): Promise<void> => {
+-		if (!entityId || !core.data?.signerId || !chosen || !parsedAmount) return;
++		if (!entityId || !core.data?.signerId || !chosen || !parsedAmount || modeError) return;
+ 		setSending(true);
+ 		try {
+-			const isDirect = chosen.path.length === 2;
++			const usesDirectPayment = deliveryMode === 'direct' || deliveryMode === 'trusted';
+ 			await sendEntityTxs(entityId, core.data.signerId, [
+-				isDirect
++				usesDirectPayment
+ 					? {
+ 							type: 'directPayment',
+ 							data: {
+@@ -164,7 +247,8 @@ export function Pay() {
+ 								tokenId,
+ 								amount: chosen.recipientAmount,
+ 								route: chosen.path,
+-								deliveryMode: 'direct',
++								deliveryMode,
++								...(deliveryMode === 'trusted' ? { trustedGatewayEntityId: chosen.path[1]! } : {}),
+ 								...(description.trim() ? { description: description.trim() } : {}),
+ 							},
+ 						}
+@@ -175,12 +259,12 @@ export function Pay() {
+ 								tokenId,
+ 								amount: chosen.recipientAmount,
+ 								route: chosen.path,
+-								deliveryMode: 'instant',
++								deliveryMode,
+ 								...(description.trim() ? { description: description.trim() } : {}),
+ 							},
+ 						},
+ 			]);
+-			toast(`Paid ${formatAmount(chosen.recipientAmount, meta.decimals, 2)} ${meta.symbol}`);
++			toast(`Paid ${formatAmount(chosen.recipientAmount, meta.decimals, 2)} ${meta.symbol} to ${nameOf(target)}`);
+ 			navigate('/');
+ 		} catch (error) {
+ 			toast(error instanceof Error ? error.message : String(error), 'danger');
+@@ -193,97 +277,222 @@ export function Pay() {
+ 		<div className="screen screen-narrow fade-in">
+ 			<div className="screen-header">
+ 				<span className="screen-title">Pay</span>
+-				<span className="faint" style={{ fontSize: 12 }}>
+-					{formatAmount(spendable, meta.decimals, 2)} {meta.symbol} spendable
+-				</span>
+ 			</div>
+ 
+-			<div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
++			<div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+ 				<div className="field">
+ 					<span className="field-label">To</span>
+-					<div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+-						{recipients.map(recipient => (
+-							<button
+-								key={recipient.entityId}
+-								type="button"
+-								className="row row-tappable"
+-								style={{ padding: '12px 0', borderColor: target === recipient.entityId ? 'var(--hairline-2)' : undefined }}
+-								onClick={() => setTarget(recipient.entityId)}
+-							>
+-								<span style={{ fontSize: 13.5 }}>
+-									{target === recipient.entityId ? <span className="dot" style={{ display: 'inline-block', marginRight: 10 }} /> : null}
+-									{recipient.label}
+-								</span>
+-								<span className="mono">{shortId(recipient.entityId)}</span>
+-							</button>
+-						))}
++					<div className="picker">
+ 						<input
+-							className="input mono"
+-							placeholder="or paste an entity id — 0x…"
+-							value={target}
+-							onChange={e => setTarget(e.target.value.trim().toLowerCase())}
++							className="input"
++							style={{ fontFamily: query.startsWith('0x') ? 'var(--font-mono)' : 'var(--font-ui)' }}
++							placeholder="Name or entity id — 0x…"
++							value={toText}
+ 							spellCheck={false}
++							onChange={e => setToText(e.target.value)}
++							onFocus={() => setToFocused(true)}
++							onBlur={() => setToFocused(false)}
+ 						/>
++						{toFocused && suggestions.length > 0 && (
++							<div className="picker-menu glass">
++								{suggestions.map(entry => (
++									<button
++										key={entry.entityId}
++										type="button"
++										className="picker-option"
++										onMouseDown={e => {
++											e.preventDefault();
++											setToText(entry.label || entry.entityId);
++											setToFocused(false);
++										}}
++									>
++										<span style={{ fontSize: 13.5 }}>{entry.label || 'Entity'}</span>
++										<span className="hash">{entry.entityId}</span>
++									</button>
++								))}
++							</div>
++						)}
+ 					</div>
++					{validTarget && (
++						<span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
++							<span className="dot" />
++							<span className="hash">{target}</span>
++						</span>
++					)}
+ 				</div>
+ 
+ 				<div className="field">
+ 					<span className="field-label">Amount</span>
+-					<div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
++					<div style={{ display: 'flex', gap: 10, alignItems: 'stretch' }}>
+ 						<input
+ 							className="input display"
+-							style={{ fontSize: 30, fontWeight: 300, padding: '10px 16px' }}
+-							placeholder="0.00"
++							style={{ fontSize: 32, fontWeight: 300, padding: '10px 16px', minWidth: 0 }}
++							placeholder="0"
+ 							inputMode="decimal"
+ 							value={amountText}
+ 							onChange={e => setAmountText(e.target.value)}
+ 						/>
+-						<span className="muted" style={{ fontSize: 14 }}>
+-							{meta.symbol}
+-						</span>
++						<div className="picker" style={{ flex: 'none' }}>
++							<button
++								type="button"
++								className="picker-control"
++								style={{ height: '100%', minWidth: 120 }}
++								onClick={() => setTokenOpen(open => !open)}
++							>
++								{meta.symbol}
++								<Icon name="chevronDown" size={14} />
++							</button>
++							{tokenOpen && (
++								<div className="picker-menu glass" style={{ minWidth: 220, right: 0, left: 'auto' }}>
++									{knownTokenIds().map(id => {
++										const tokenMeta = getTokenMeta(id);
++										return (
++											<button
++												key={id}
++												type="button"
++												className="picker-option"
++												onClick={() => {
++													setTokenId(id);
++													setSelectedTokenId(id);
++													setTokenOpen(false);
++												}}
++											>
++												<span style={{ fontSize: 13.5 }}>
++													{tokenMeta.symbol}
++													{id === tokenId ? ' ·' : ''}
++												</span>
++												<span className="faint" style={{ fontSize: 11.5 }}>
++													{tokenMeta.name}
++												</span>
++											</button>
++										);
++									})}
++								</div>
++							)}
++						</div>
+ 					</div>
+-				</div>
+-
+-				<div className="field">
+-					<span className="field-label">Note · optional</span>
+-					<input className="input" value={description} onChange={e => setDescription(e.target.value)} placeholder="Dinner, invoice 42…" />
++					<button
++						type="button"
++						className="btn-quiet btn"
++						style={{ alignSelf: 'flex-start', padding: '2px 0', fontSize: 12 }}
++						disabled={spendable <= 0n}
++						onClick={() => setAmountText(rawAmountText(spendable, meta.decimals))}
++					>
++						{formatAmount(spendable, meta.decimals, 2)} {meta.symbol} available
++					</button>
+ 				</div>
+ 
+ 				{quoting && (
+ 					<p className="faint" style={{ fontSize: 12 }}>
+-						Quoting route…
++						Quoting routes…
+ 					</p>
+ 				)}
+ 				{routeError && validTarget && parsedAmount && (
+ 					<p style={{ color: 'var(--danger)', fontSize: 13 }}>{routeError}</p>
+ 				)}
++
+ 				{routes && routes.length > 0 && (
+ 					<div className="field">
+-						<span className="field-label">Route</span>
++						<span className="field-label">
++							{routes.length} route{routes.length === 1 ? '' : 's'}
++						</span>
+ 						{routes.map((route, index) => (
+ 							<button
+ 								key={route.path.join('>')}
+ 								type="button"
+-								className="row row-tappable"
+-								style={{ padding: '12px 0', borderColor: index === routeIndex ? 'var(--hairline-2)' : undefined }}
++								className={`route-card${index === routeIndex ? ' active' : ''}`}
+ 								onClick={() => setRouteIndex(index)}
+ 							>
+-								<span style={{ fontSize: 13 }}>
+-									{index === routeIndex ? <span className="dot" style={{ display: 'inline-block', marginRight: 10 }} /> : null}
+-									{route.path.length === 2 ? 'Direct' : `Via ${route.path.length - 2} hop${route.path.length > 3 ? 's' : ''}`}
++								<span className="route-hops">
++									{route.path.map((hopId, hopIndex) => (
++										<span key={`${hopId}-${hopIndex}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
++											<span className="hop-chip">{hopId === self ? 'You' : nameOf(hopId)}</span>
++											{hopIndex < route.path.length - 1 && (
++												<span className="faint" aria-hidden>
++													→
++												</span>
++											)}
++										</span>
++									))}
+ 								</span>
+-								<span className="faint" style={{ fontSize: 12 }}>
+-									fee {formatAmount(route.totalFee, meta.decimals, 2)} {meta.symbol}
++								<span className="route-meta">
++									<span>
++										Fee {formatAmount(route.totalFee, meta.decimals, 6)} {meta.symbol}
++									</span>
++									<span>
++										You send {formatAmount(route.senderAmount, meta.decimals, 2)} · they receive{' '}
++										{formatAmount(route.recipientAmount, meta.decimals, 2)}
++									</span>
+ 								</span>
++								{route.hops.some(hop => hop.fee > 0n) && (
++									<span className="route-hop-fees">
++										{route.hops.map((hop, hopIndex) => (
++											<span key={hopIndex} className="faint">
++												{hop.from === self ? 'You' : nameOf(hop.from)} → {hop.to === self ? 'You' : nameOf(hop.to)}:{' '}
++												{formatAmount(hop.fee, meta.decimals, 6)}
++											</span>
++										))}
++									</span>
++								)}
+ 							</button>
+ 						))}
+ 					</div>
+ 				)}
+ 
++				<div>
++					<button
++						type="button"
++						className="btn btn-quiet"
++						style={{ padding: '2px 0', fontSize: 12.5 }}
++						onClick={() => setAdvancedOpen(open => !open)}
++					>
++						Advanced
++						<Icon name={advancedOpen ? 'chevronDown' : 'chevronRight'} size={13} />
++					</button>
++					{advancedOpen && (
++						<div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginTop: 14 }} className="fade-in">
++							<div className="field">
++								<span className="field-label">Delivery</span>
++								<div className="mode-grid" role="radiogroup" aria-label="Payment delivery mode">
++									{DELIVERY_MODES.map(mode => (
++										<button
++											key={mode.value}
++											type="button"
++											role="radio"
++											aria-checked={deliveryMode === mode.value}
++											className={`mode-card${deliveryMode === mode.value ? ' active' : ''}`}
++											onClick={() => setDeliveryMode(mode.value)}
++										>
++											<span className="mode-card-name">
++												<span className="mode-radio" aria-hidden />
++												{mode.label}
++												{mode.recommended && <span className="mode-default">Default</span>}
++											</span>
++											<span className="mode-card-desc">{mode.description}</span>
++										</button>
++									))}
++								</div>
++							</div>
++							<div className="field">
++								<span className="field-label">Note</span>
++								<input
++									className="input"
++									value={description}
++									onChange={e => setDescription(e.target.value)}
++									placeholder="What's this for?"
++								/>
++							</div>
++						</div>
++					)}
++					{modeError && (
++						<p style={{ color: 'var(--danger)', fontSize: 12.5, marginTop: 10 }}>{modeError}</p>
++					)}
++				</div>
++
+ 				<button
+ 					type="button"
+ 					className="btn btn-primary btn-lg btn-block"
+-					disabled={!chosen || !parsedAmount || sending || !core.data?.signerId}
++					disabled={!chosen || !parsedAmount || sending || Boolean(modeError) || !core.data?.signerId}
+ 					onClick={() => void send()}
+ 				>
+ 					<Icon name="pay" size={15} />
+diff --git a/ui/src/screens/Receive.tsx b/ui/src/screens/Receive.tsx
+index 10169e04aaf889108c2b6c29d3a89b3a174dfec5..b1a6c7caca284b9f720642954c6b65d72d05a5c3 100644
+--- a/ui/src/screens/Receive.tsx
++++ b/ui/src/screens/Receive.tsx
+@@ -1,7 +1,7 @@
+ import { useEffect, useMemo, useState } from 'react';
+ import QRCode from 'qrcode';
+ import { useApp } from '../runtime/store';
+-import { getTokenMeta, shortId } from '../runtime/format';
++import { getTokenMeta } from '../runtime/format';
+ import { Icon } from '../components/Icons';
+ 
+ export function Receive() {
+@@ -75,9 +75,16 @@ export function Receive() {
+ 					</div>
+ 				</div>
+ 
++				<div style={{ width: '100%' }}>
++					<span className="field-label" style={{ display: 'block', marginBottom: 6 }}>
++						Your entity id
++					</span>
++					<p className="hash">{entityId}</p>
++				</div>
++
+ 				<div style={{ display: 'flex', gap: 10, width: '100%' }}>
+ 					<button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => void copy(entityId, 'Entity id')}>
+-						<Icon name="copy" size={14} /> {shortId(entityId)}
++						<Icon name="copy" size={14} /> Copy id
+ 					</button>
+ 					<button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={() => void copy(link, 'Invoice link')}>
+ 						<Icon name="copy" size={14} /> Copy invoice
+diff --git a/ui/src/screens/Settings.tsx b/ui/src/screens/Settings.tsx
+index d4feb805637934999ecd10ea928fd05762c9061b..3cec521385c18f635d9a3a6d31e710c70c3ad1d1 100644
+--- a/ui/src/screens/Settings.tsx
++++ b/ui/src/screens/Settings.tsx
+@@ -3,7 +3,6 @@ import { Sheet } from '../components/Sheet';
+ import { Icon } from '../components/Icons';
+ import { useApp } from '../runtime/store';
+ import { disconnectAdapter, getAdapter } from '../runtime/adapter';
+-import { shortId } from '../runtime/format';
+ 
+ export function SettingsScreen() {
+ 	const theme = useApp(s => s.theme);
+@@ -56,11 +55,11 @@ export function SettingsScreen() {
+ 				</span>
+ 				<span style={{ fontSize: 13 }}>{adapter?.mode ?? '—'}</span>
+ 			</div>
+-			<div className="row">
++			<div className="row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+ 				<span className="muted" style={{ fontSize: 13 }}>
+ 					Runtime id
+ 				</span>
+-				<span className="mono">{adapter ? shortId(adapter.runtimeId, 10, 6) : '—'}</span>
++				<span className="hash">{adapter ? adapter.runtimeId : '—'}</span>
+ 			</div>
+ 			<div className="row">
+ 				<span className="muted" style={{ fontSize: 13 }}>
+diff --git a/ui/src/styles/app.css b/ui/src/styles/app.css
+index eb7700c1c49f94d9da6c22dd357ee43871ebc674..2c775bc368938796a2b258ad73d732f599ac96f7 100644
+--- a/ui/src/styles/app.css
++++ b/ui/src/styles/app.css
+@@ -493,3 +493,339 @@
+ 	align-items: baseline;
+ 	margin: 36px 0 4px;
+ }
++
++/* ---------- brainvault work factor picker ---------- */
++
++.gate-factors {
++	display: grid;
++	grid-template-columns: repeat(5, 1fr);
++	gap: 6px;
++}
++
++@media (max-width: 520px) {
++	.gate-factors {
++		grid-template-columns: repeat(3, 1fr);
++	}
++}
++
++.gate-factor {
++	border: 1px solid var(--hairline);
++	border-radius: var(--radius-m);
++	padding: 10px 6px;
++	display: flex;
++	flex-direction: column;
++	align-items: center;
++	gap: 3px;
++	color: var(--ink-2);
++	transition:
++		border-color var(--dur-fast) var(--ease),
++		color var(--dur-fast) var(--ease);
++}
++
++.gate-factor:hover {
++	border-color: var(--hairline-2);
++}
++
++.gate-factor.active {
++	border-color: var(--champagne);
++	color: var(--ink);
++}
++
++.gate-factor-tier {
++	font-size: 12px;
++	font-weight: 500;
++}
++
++.gate-factor-shards {
++	font-size: 10.5px;
++	color: var(--ink-3);
++	font-variant-numeric: tabular-nums;
++}
++
++/* ---------- full-width identifiers ---------- */
++
++.hash {
++	font-family: var(--font-mono);
++	font-size: 11px;
++	color: var(--ink-2);
++	overflow-wrap: anywhere;
++	word-break: break-all;
++	line-height: 1.5;
++}
++
++/* ---------- canonical delta bar: [own credit][collateral][peer credit] + Δ marker ---------- */
++
++.dbar {
++	position: relative;
++	display: flex;
++	width: 100%;
++	border-radius: 4px;
++	overflow: visible;
++}
++
++.dbar-zone {
++	height: 100%;
++}
++
++.dbar-zone:first-child {
++	border-radius: 4px 0 0 4px;
++}
++
++.dbar-zone:nth-last-child(2) {
++	border-radius: 0 4px 4px 0;
++}
++
++.dbar-own {
++	background: color-mix(in srgb, var(--champagne) 42%, transparent);
++}
++
++.dbar-coll {
++	background: #7fae8e;
++}
++
++.dbar-peer {
++	background: var(--hairline-2);
++}
++
++.dbar-marker {
++	position: absolute;
++	top: -4px;
++	bottom: -4px;
++	width: 2px;
++	margin-left: -1px;
++	background: var(--ink);
++	border-radius: 1px;
++	box-shadow: 0 0 6px color-mix(in srgb, var(--ink) 50%, transparent);
++}
++
++.dbar-marker-chip {
++	width: 2px !important;
++	height: 12px !important;
++	border-radius: 1px !important;
++	background: var(--ink);
++}
++
++.delta-legend {
++	display: flex;
++	gap: 14px;
++	flex-wrap: wrap;
++	font-size: 11px;
++	color: var(--ink-3);
++}
++
++.delta-legend span {
++	display: inline-flex;
++	align-items: center;
++	gap: 6px;
++}
++
++.delta-legend i {
++	width: 10px;
++	height: 8px;
++	border-radius: 2px;
++	display: inline-block;
++}
++
++/* ---------- testnet faucet chip ---------- */
++
++.faucet-chip {
++	display: inline-flex;
++	align-items: center;
++	gap: 6px;
++	border: 1px solid color-mix(in srgb, #7fae8e 55%, transparent);
++	color: #7fae8e;
++	border-radius: var(--radius-pill);
++	padding: 5px 12px;
++	font-size: 11.5px;
++	font-weight: 500;
++	white-space: nowrap;
++	transition: background var(--dur-fast) var(--ease);
++}
++
++.faucet-chip:hover:not(:disabled) {
++	background: color-mix(in srgb, #7fae8e 12%, transparent);
++}
++
++/* ---------- pay form: recipient picker ---------- */
++
++.picker {
++	position: relative;
++}
++
++.picker-control {
++	display: flex;
++	justify-content: space-between;
++	align-items: center;
++	gap: 12px;
++	width: 100%;
++	background: var(--glass);
++	border: 1px solid var(--glass-border);
++	border-radius: var(--radius-m);
++	padding: 13px 16px;
++	font-size: 14.5px;
++	color: var(--ink);
++	transition: border-color var(--dur-fast) var(--ease);
++}
++
++.picker-control:hover {
++	border-color: var(--hairline-2);
++}
++
++.picker-menu {
++	position: absolute;
++	inset: calc(100% + 6px) 0 auto 0;
++	z-index: 50;
++	border-radius: var(--radius-m);
++	background: var(--bg-elevated);
++	box-shadow: var(--shadow-sheet);
++	overflow: hidden;
++	max-height: 320px;
++	overflow-y: auto;
++}
++
++.picker-option {
++	display: flex;
++	flex-direction: column;
++	align-items: flex-start;
++	gap: 3px;
++	width: 100%;
++	text-align: left;
++	padding: 12px 16px;
++	color: var(--ink);
++	border-top: 1px solid var(--hairline);
++	transition: background var(--dur-fast) var(--ease);
++}
++
++.picker-option:first-child {
++	border-top: none;
++}
++
++.picker-option:hover {
++	background: var(--glass-2);
++}
++
++/* ---------- pay form: delivery modes ---------- */
++
++.mode-grid {
++	display: grid;
++	grid-template-columns: repeat(2, minmax(0, 1fr));
++	gap: 8px;
++}
++
++.mode-card {
++	display: flex;
++	flex-direction: column;
++	align-items: flex-start;
++	gap: 5px;
++	border: 1px solid var(--hairline);
++	border-radius: var(--radius-m);
++	padding: 12px 14px;
++	text-align: left;
++	color: var(--ink-2);
++	transition:
++		border-color var(--dur-fast) var(--ease),
++		color var(--dur-fast) var(--ease);
++}
++
++.mode-card:hover {
++	border-color: var(--hairline-2);
++}
++
++.mode-card.active {
++	border-color: var(--champagne);
++	color: var(--ink);
++}
++
++.mode-card-name {
++	display: flex;
++	align-items: center;
++	gap: 8px;
++	width: 100%;
++	font-size: 13px;
++	font-weight: 500;
++}
++
++.mode-radio {
++	width: 10px;
++	height: 10px;
++	border: 1px solid currentColor;
++	border-radius: 50%;
++	flex: none;
++}
++
++.mode-card.active .mode-radio {
++	border: 3px solid var(--champagne);
++}
++
++.mode-default {
++	margin-left: auto;
++	font-size: 9.5px;
++	letter-spacing: 0.8px;
++	text-transform: uppercase;
++	color: var(--champagne);
++}
++
++.mode-card-desc {
++	font-size: 11.5px;
++	color: var(--ink-3);
++}
++
++/* ---------- pay form: route options ---------- */
++
++.route-card {
++	display: flex;
++	flex-direction: column;
++	align-items: stretch;
++	gap: 8px;
++	border: 1px solid var(--hairline);
++	border-radius: var(--radius-m);
++	padding: 13px 15px;
++	text-align: left;
++	color: var(--ink);
++	transition: border-color var(--dur-fast) var(--ease);
++}
++
++.route-card:hover {
++	border-color: var(--hairline-2);
++}
++
++.route-card.active {
++	border-color: var(--champagne);
++}
++
++.route-hops {
++	display: flex;
++	align-items: center;
++	gap: 8px;
++	flex-wrap: wrap;
++}
++
++.hop-chip {
++	border: 1px solid var(--hairline-2);
++	border-radius: var(--radius-pill);
++	padding: 4px 12px;
++	font-size: 12.5px;
++	white-space: nowrap;
++}
++
++.route-card.active .hop-chip {
++	border-color: color-mix(in srgb, var(--champagne) 55%, transparent);
++}
++
++.route-meta {
++	display: flex;
++	justify-content: space-between;
++	gap: 12px;
++	flex-wrap: wrap;
++	font-size: 11.5px;
++	color: var(--ink-2);
++	font-variant-numeric: tabular-nums;
++}
++
++.route-hop-fees {
++	display: flex;
++	flex-direction: column;
++	gap: 2px;
++	font-size: 11px;
++	font-variant-numeric: tabular-nums;
++}
+diff --git a/ui/src/styles/base.css b/ui/src/styles/base.css
+index c3d257c56cac73f4ac06757cce371af24951a795..bbf1e15152c99bb46c3d2bf79f7285536f5d270a 100644
+--- a/ui/src/styles/base.css
++++ b/ui/src/styles/base.css
+@@ -68,6 +68,10 @@ textarea {
+ 	color: var(--ink);
+ }
+ 
++input[type='range'] {
++	accent-color: var(--champagne);
++}
++
+ ::selection {
+ 	background: var(--champagne-dim);
+ }
+diff --git a/ui/src/components/DeltaBar.tsx b/ui/src/components/DeltaBar.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..633f6cc41a37491d6b1603baa4293421655c16cf
+--- /dev/null
++++ b/ui/src/components/DeltaBar.tsx
+@@ -0,0 +1,94 @@
++import type { DerivedDelta } from '@xln/runtime/api/public/runtime-module';
++import { formatAmount } from '../runtime/format';
++
++const max = (a: bigint, b: bigint): bigint => (a > b ? a : b);
++
++function pct(value: bigint, base: bigint): number {
++	if (base <= 0n || value <= 0n) return 0;
++	return Number((value * 10000n) / base) / 100;
++}
++
++/**
++ * The wallet's canonical center-layout capacity bar (DeltaCapacityBar):
++ * left half = outCapacity decomposed, right half = inCapacity decomposed.
++ *
++ *   [their debt][collateral][your unused credit] ‖ [your debt][collateral][their free line]
++ *      red          green         champagne          champagne     green        red
++ *
++ * Both halves share one scale (the larger half = 100%). Every segment is a
++ * deriveDelta field: out/inOwnCredit, out/inCollateral, out/inPeerCredit.
++ */
++export function DeltaBar({ derived, height = 6 }: { derived: DerivedDelta; height?: number }) {
++	const outTotal = derived.outOwnCredit + derived.outCollateral + derived.outPeerCredit;
++	const inTotal = derived.inOwnCredit + derived.inCollateral + derived.inPeerCredit;
++	const halfMax = max(outTotal, inTotal);
++
++	return (
++		<div className="dbar" style={{ height }} aria-hidden>
++			<div className="dbar-half dbar-out">
++				<span className="dbar-seg dbar-own" style={{ width: `${pct(derived.outOwnCredit, halfMax)}%` }} />
++				<span className="dbar-seg dbar-coll" style={{ width: `${pct(derived.outCollateral, halfMax)}%` }} />
++				<span className="dbar-seg dbar-peer" style={{ width: `${pct(derived.outPeerCredit, halfMax)}%` }} />
++			</div>
++			<span className="dbar-notch" />
++			<div className="dbar-half">
++				<span className="dbar-seg dbar-own" style={{ width: `${pct(derived.inOwnCredit, halfMax)}%` }} />
++				<span className="dbar-seg dbar-coll" style={{ width: `${pct(derived.inCollateral, halfMax)}%` }} />
++				<span className="dbar-seg dbar-peer" style={{ width: `${pct(derived.inPeerCredit, halfMax)}%` }} />
++			</div>
++		</div>
++	);
++}
++
++function LegendItem({
++	cls,
++	label,
++	value,
++	decimals,
++}: {
++	cls: string;
++	label: string;
++	value: bigint;
++	decimals: number;
++}) {
++	return (
++		<span style={{ opacity: value > 0n ? 1 : 0.35 }}>
++			<i className={cls} /> {label} <b className="num">{formatAmount(value, decimals, 2)}</b>
++		</span>
++	);
++}
++
++/**
++ * Numbers under the bar, one line per direction — every segment named and
++ * quantified so credit vs collateral vs unused credit reads at a glance.
++ */
++export function DeltaBreakdown({
++	derived,
++	decimals,
++	symbol,
++}: {
++	derived: DerivedDelta;
++	decimals: number;
++	symbol: string;
++}) {
++	return (
++		<div className="delta-breakdown">
++			<div className="delta-legend">
++				<span className="delta-side">
++					← send {formatAmount(derived.outCapacity, decimals, 2)} {symbol}
++				</span>
++				<LegendItem cls="dbar-own" label="your unused credit" value={derived.outOwnCredit} decimals={decimals} />
++				<LegendItem cls="dbar-coll" label="collateral" value={derived.outCollateral} decimals={decimals} />
++				<LegendItem cls="dbar-peer" label="their debt to you" value={derived.outPeerCredit} decimals={decimals} />
++			</div>
++			<div className="delta-legend">
++				<span className="delta-side">
++					receive {formatAmount(derived.inCapacity, decimals, 2)} {symbol} →
++				</span>
++				<LegendItem cls="dbar-own" label="your debt" value={derived.inOwnCredit} decimals={decimals} />
++				<LegendItem cls="dbar-coll" label="collateral" value={derived.inCollateral} decimals={decimals} />
++				<LegendItem cls="dbar-peer" label="their unused credit" value={derived.inPeerCredit} decimals={decimals} />
++			</div>
++		</div>
++	);
++}

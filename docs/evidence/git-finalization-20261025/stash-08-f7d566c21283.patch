@@ -1,0 +1,1900 @@
+HISTORICAL NON-EXECUTABLE EVIDENCE - do not apply over current main.
+This draft predates the current canonical implementation; see README.md.
+stash: stash@{8} f7d566c21283423abcefc409f510bc757171c531
+subject: On main: preserve-claude-graph-before-runtime-merge-20260730
+date: 2026-07-30T21:54:37+03:00
+base: ad70e1c1f0b8d8ccfec2196476c3be782c860407
+sections: tracked worktree diff, then untracked files as new files
+
+diff --git a/frontend/src/lib/network3d/networkTimelineLoader.ts b/frontend/src/lib/network3d/networkTimelineLoader.ts
+index 00fed9ccbf669510f5df4dd7ff38192c9d48cc17..bf5d95fd8b1f52efd517099ec512348207a06170 100644
+--- a/frontend/src/lib/network3d/networkTimelineLoader.ts
++++ b/frontend/src/lib/network3d/networkTimelineLoader.ts
+@@ -1,12 +1,16 @@
+ import type {
+-  EnvSnapshot,
+   RuntimeAdapter,
+   RuntimeAdapterGraphFrame,
+   RuntimeAdapterTimelineIndexPage,
++  RuntimeActivityEvent,
+ } from '@xln/runtime/api/runtime-module';
+ import { RemoteRuntimeAdapter } from '../../../../runtime/radapter/remote';
+ import type { Runtime } from '$lib/stores/runtimeStore';
+-import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
++import { getRuntimeControllerAdapter } from '$lib/stores/runtimeControllerStore';
++import {
++  adapterNetworkTimelineSource,
++  type NetworkTimelineSource,
++} from './networkTimelineSource';
+ import {
+   normalizeRuntimeTimelineIndex,
+   type RuntimeTimelineIndex,
+@@ -18,26 +22,27 @@ const REMOTE_CONNECT_TIMEOUT_MS = 6_000;
+ 
+ const runtimeId = (value: unknown): string => String(value || '').trim().toLowerCase();
+ 
+-const localFrameChangedGraph = (snapshot: EnvSnapshot): boolean => {
+-  const input = snapshot.runtimeInput;
+-  if ((input.runtimeTxs?.length ?? 0) > 0 || (input.jInputs?.length ?? 0) > 0) return true;
+-  return (input.entityInputs ?? []).some((entry) => (entry.entityTxs?.length ?? 0) > 0);
+-};
+-
+-export const timelineIndexFromBrowserRuntime = (runtime: Runtime): RuntimeTimelineIndex => {
+-  if (runtime.type !== 'local') throw new Error(`NETWORK_TIMELINE_BROWSER_RUNTIME_REQUIRED:${runtime.id}`);
+-  const env = unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env;
+-  const id = runtimeId(runtime.id || env?.runtimeId);
++/**
++ * Reader for one runtime, local or remote.
++ *
++ * A local runtime is NOT a special case: its embedded adapter serves the same read paths
++ * (timeline-index / graph-frame / activity) from persisted storage. Reading `env.history`
++ * instead — as this module used to — always yielded zero frames, because the runtime keeps
++ * no in-memory history by design (RECENT_RUNTIME_HISTORY_LIMIT = 0).
++ *
++ * Returns null when no reader exists for a local runtime (it is not the connected one).
++ * That is a genuine "we have no source" state, not a swallowed failure: read errors from an
++ * adapter we do have still propagate.
++ */
++export const networkTimelineSourceFor = async (runtime: Runtime): Promise<NetworkTimelineSource | null> => {
++  const id = runtimeId(runtime.id);
+   if (!id) throw new Error('NETWORK_TIMELINE_RUNTIME_ID_REQUIRED');
+-  const frames = (env?.history ?? []).map((snapshot) => ({
+-    runtimeId: id,
+-    height: Math.max(0, Math.floor(Number(snapshot.height || 0))),
+-    timestamp: Math.max(0, Math.floor(Number(snapshot.timestamp || 0))),
+-    stateHash: String((snapshot as EnvSnapshot & { stateHash?: string }).stateHash || ''),
+-    materialized: true,
+-    graphChanged: localFrameChangedGraph(snapshot),
+-  }));
+-  return normalizeRuntimeTimelineIndex({ runtimeId: id, frames });
++  if (runtime.type !== 'local') {
++    return adapterNetworkTimelineSource(id, await timelineRemoteReaders.adapterFor(runtime));
++  }
++  const adapter = getRuntimeControllerAdapter();
++  if (!adapter || runtimeId(adapter.runtimeId) !== id) return null;
++  return adapterNetworkTimelineSource(id, adapter);
+ };
+ 
+ export const readTimelineIndexPages = async (
+@@ -272,17 +277,6 @@ export const subscribeNetworkRuntimeChanges = async (
+   };
+ };
+ 
+-export const loadNetworkTimelineIndexes = async (runtimeMap: Map<string, Runtime>): Promise<RuntimeTimelineIndex[]> => {
+-  const sorted = Array.from(runtimeMap.values()).sort((left, right) => runtimeId(left.id).localeCompare(runtimeId(right.id)));
+-  pruneNetworkTimelineReaders(runtimeMap);
+-  const indexes: RuntimeTimelineIndex[] = [];
+-  for (const runtime of sorted) {
+-    if (runtime.type === 'local') indexes.push(timelineIndexFromBrowserRuntime(runtime));
+-    else indexes.push(await readTimelineIndexPages(await timelineRemoteReaders.adapterFor(runtime), runtime.id));
+-  }
+-  return indexes;
+-};
+-
+ const readRemoteRuntimeGraphFrameWithPool = async (
+   runtime: Runtime,
+   readers: RemoteRuntimeReaderPool,
+@@ -315,18 +309,4 @@ export const readRemoteRuntimeGraphFrame = async (
+ ): Promise<RuntimeAdapterGraphFrame> =>
+   readRemoteRuntimeGraphFrameWithPool(runtime, graphRemoteReaders, height, subscriptionGeneration);
+ 
+-export const readNetworkRuntimeFrame = async (
+-  runtime: Runtime,
+-  height: number,
+-): Promise<EnvSnapshot | RuntimeAdapterGraphFrame> => {
+-  const targetHeight = Math.max(1, Math.floor(Number(height || 0)));
+-  if (runtime.type === 'local') {
+-    const env = unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env;
+-    const frame = (env?.history ?? []).find((candidate) => Number(candidate.height) === targetHeight);
+-    if (!frame) throw new Error(`NETWORK_TIMELINE_BROWSER_FRAME_MISSING:${runtime.id}:h${targetHeight}`);
+-    return frame;
+-  }
+-  return await readRemoteRuntimeGraphFrameWithPool(runtime, timelineRemoteReaders, targetHeight);
+-};
+-
+ export const disconnectNetworkTimelineReaders = (): void => timelineRemoteReaders.disconnectAll();
+diff --git a/frontend/src/lib/stores/networkMachineRuntimeStore.ts b/frontend/src/lib/stores/networkMachineRuntimeStore.ts
+index d5b91919231800f93d1d11fc6f9ef347afebeb7a..638e0a4d1f5453ce208f22040caffc75d99f3358 100644
+--- a/frontend/src/lib/stores/networkMachineRuntimeStore.ts
++++ b/frontend/src/lib/stores/networkMachineRuntimeStore.ts
+@@ -1,11 +1,18 @@
+ import { get, writable } from 'svelte/store';
+-import type { EnvSnapshot, RuntimeAdapterGraphFrame } from '@xln/runtime/api/runtime-module';
++import type { RuntimeActivityEvent, RuntimeAdapterGraphFrame } from '@xln/runtime/api/runtime-module';
+ import { compileNetworkMachine, type NetworkMachine, type NetworkMachineStep } from '$lib/network3d/networkMachine';
+ import {
+   disconnectNetworkTimelineReaders,
+-  loadNetworkTimelineIndexes,
+-  readNetworkRuntimeFrame,
++  networkTimelineSourceFor,
+ } from '$lib/network3d/networkTimelineLoader';
++import {
++  recordNetworkTrail,
++  scenarioNetworkTimelineSource,
++  trailNetworkTimelineSource,
++  type NetworkTimelineSource,
++  type NetworkTrail,
++} from '$lib/network3d/networkTimelineSource';
++import { getXLN } from './xlnRuntimeLoader';
+ import { networkMachineConfig } from './networkMachineStore';
+ import { runtimes } from './runtimeStore';
+ import type { RuntimeTimelineIndex } from '$lib/network3d/runtimeGraphTimeline';
+@@ -17,8 +24,10 @@ export type NetworkMachineRuntimeState = {
+   machine: NetworkMachine | null;
+   selectedStepIndex: number;
+   selectedStep: NetworkMachineStep | null;
+-  browserFrames: Map<string, EnvSnapshot>;
+-  remoteFrames: Map<string, RuntimeAdapterGraphFrame>;
++  /** Graph frame per runtime at the selected step. Local and remote read the same shape. */
++  frames: Map<string, RuntimeAdapterGraphFrame>;
++  /** Activity events of the selected step, ordered — the caption source. */
++  activity: RuntimeActivityEvent[];
+ };
+ 
+ const emptyState = (): NetworkMachineRuntimeState => ({
+@@ -28,8 +37,8 @@ const emptyState = (): NetworkMachineRuntimeState => ({
+   machine: null,
+   selectedStepIndex: -1,
+   selectedStep: null,
+-  browserFrames: new Map(),
+-  remoteFrames: new Map(),
++  frames: new Map(),
++  activity: [],
+ });
+ 
+ const message = (error: unknown): string => error instanceof Error ? error.message : String(error || 'NetworkMachine failed');
+@@ -50,14 +59,102 @@ const compileCurrent = (indexes: RuntimeTimelineIndex[]): NetworkMachine =>
+ let refreshRequestId = 0;
+ let selectionRequestId = 0;
+ 
++/**
++ * Where the machine reads frames from. A live runtime and a recorded scenario both land
++ * here, which is why the timeline, the graph and the captions need no mode switch.
++ */
++const activeSources = new Map<string, NetworkTimelineSource>();
++
++const setSources = (sources: NetworkTimelineSource[]): void => {
++  activeSources.clear();
++  for (const source of sources) activeSources.set(source.runtimeId, source);
++};
++
++const requireSource = (runtimeId: string): NetworkTimelineSource => {
++  const source = activeSources.get(runtimeId);
++  if (!source) throw new Error(`NETWORK_MACHINE_SOURCE_MISSING:${runtimeId}`);
++  return source;
++};
++
+ export const networkMachineRuntimeOperations = {
+   async refresh(): Promise<NetworkMachine> {
+     const requestId = ++refreshRequestId;
+     networkMachineRuntime.update((state) => ({ ...state, loading: true, error: null }));
+     try {
+-      const indexes = await loadNetworkTimelineIndexes(get(runtimes));
++      const runtimeMap = get(runtimes);
++      const sorted = Array.from(runtimeMap.values())
++        .sort((left, right) => String(left.id).toLowerCase().localeCompare(String(right.id).toLowerCase()));
++      const sources: NetworkTimelineSource[] = [];
++      const indexes: RuntimeTimelineIndex[] = [];
++      for (const runtime of sorted) {
++        const source = await networkTimelineSourceFor(runtime);
++        // No reader for this runtime means no frames to show, not a broken timeline.
++        if (!source) {
++          indexes.push({ runtimeId: String(runtime.id).trim().toLowerCase(), frames: [] });
++          continue;
++        }
++        sources.push(source);
++        indexes.push(await source.readIndex());
++      }
++      const machine = compileCurrent(indexes);
++      if (requestId !== refreshRequestId) return machine;
++      setSources(sources);
++      networkMachineRuntime.set({ ...emptyState(), indexes, machine });
++      return machine;
++    } catch (error) {
++      if (requestId === refreshRequestId) networkMachineRuntime.update((state) => ({ ...state, loading: false, error: message(error) }));
++      throw error;
++    }
++  },
++
++  /** Replay a recorded trail. Portable demos take this path — no runtime, no scenario run. */
++  async loadTrail(trail: NetworkTrail): Promise<NetworkMachine> {
++    const requestId = ++refreshRequestId;
++    networkMachineRuntime.update((state) => ({ ...state, loading: true, error: null }));
++    try {
++      const source = trailNetworkTimelineSource(trail);
++      const indexes = [await source.readIndex()];
+       const machine = compileCurrent(indexes);
+       if (requestId !== refreshRequestId) return machine;
++      setSources([source]);
++      networkMachineRuntime.set({ ...emptyState(), indexes, machine });
++      return machine;
++    } catch (error) {
++      if (requestId === refreshRequestId) networkMachineRuntime.update((state) => ({ ...state, loading: false, error: message(error) }));
++      throw error;
++    }
++  },
++
++  /** Freeze whatever is loaded into a portable trail. Single-source machines only. */
++  async exportTrail(): Promise<NetworkTrail> {
++    const sources = Array.from(activeSources.values());
++    if (sources.length !== 1) {
++      throw new Error(`NETWORK_MACHINE_TRAIL_EXPORT_REQUIRES_SINGLE_SOURCE:${sources.length}`);
++    }
++    return await recordNetworkTrail(sources[0]!);
++  },
++
++  /**
++   * Run a scenario in this browser and show it as a network.
++   *
++   * The recording replaces live sources for the session: a demo is a self-contained world,
++   * and mixing it with whatever runtimes happen to be connected would misrepresent both.
++   */
++  async loadScenario(key: string): Promise<NetworkMachine> {
++    const requestId = ++refreshRequestId;
++    const scenarioKey = String(key || '').trim();
++    if (!scenarioKey) throw new Error('NETWORK_MACHINE_SCENARIO_KEY_REQUIRED');
++    networkMachineRuntime.update((state) => ({ ...state, loading: true, error: null }));
++    try {
++      const xln = await getXLN();
++      const runtimeId = `scenario:${scenarioKey}`.toLowerCase();
++      const recording = await xln.recordScenario(scenarioKey as never, xln.createEmptyEnv());
++      if (recording.frames.length === 0) throw new Error(`NETWORK_MACHINE_SCENARIO_EMPTY:${scenarioKey}`);
++      const source = scenarioNetworkTimelineSource(runtimeId, recording.frames);
++      const indexes = [await source.readIndex()];
++      const machine = compileCurrent(indexes);
++      if (requestId !== refreshRequestId) return machine;
++      setSources([source]);
+       networkMachineRuntime.set({ ...emptyState(), indexes, machine });
+       return machine;
+     } catch (error) {
+@@ -75,16 +172,15 @@ export const networkMachineRuntimeOperations = {
+     if (!step) throw new Error(`NETWORK_MACHINE_STEP_INVALID:${index}`);
+     networkMachineRuntime.update((state) => ({ ...state, loading: true, error: null, machine }));
+     try {
+-      const runtimeMap = get(runtimes);
+-      const browserFrames = new Map<string, EnvSnapshot>();
+-      const remoteFrames = new Map<string, RuntimeAdapterGraphFrame>();
++      const frames = new Map<string, RuntimeAdapterGraphFrame>();
++      const activity: RuntimeActivityEvent[] = [];
+       for (const [id, selected] of step.selection.byRuntime) {
+         if (!selected) continue;
+-        const runtime = runtimeMap.get(id);
+-        if (!runtime) throw new Error(`NETWORK_MACHINE_RUNTIME_MISSING:${id}`);
+-        const frame = await readNetworkRuntimeFrame(runtime, selected.height);
+-        if (runtime.type === 'local') browserFrames.set(id, frame as EnvSnapshot);
+-        else remoteFrames.set(id, frame as RuntimeAdapterGraphFrame);
++        const source = requireSource(id);
++        frames.set(id, await source.readGraphFrame(selected.height));
++        // Captions describe the runtime that moved, not every runtime observing the step.
++        if (id !== step.activeRuntimeId) continue;
++        activity.push(...await source.readActivity(selected.height, selected.height));
+       }
+       if (requestId !== selectionRequestId) return step;
+       networkMachineRuntime.set({
+@@ -94,8 +190,8 @@ export const networkMachineRuntimeOperations = {
+         machine,
+         selectedStepIndex: safeIndex,
+         selectedStep: step,
+-        browserFrames,
+-        remoteFrames,
++        frames,
++        activity,
+       });
+       return step;
+     } catch (error) {
+@@ -110,8 +206,8 @@ export const networkMachineRuntimeOperations = {
+       ...state,
+       selectedStepIndex: -1,
+       selectedStep: null,
+-      browserFrames: new Map(),
+-      remoteFrames: new Map(),
++      frames: new Map(),
++      activity: [],
+       error: null,
+     }));
+   },
+@@ -125,6 +221,7 @@ export const networkMachineRuntimeOperations = {
+ 
+   dispose(): void {
+     refreshRequestId += 1;
++    activeSources.clear();
+     selectionRequestId += 1;
+     disconnectNetworkTimelineReaders();
+     networkMachineRuntime.set(emptyState());
+diff --git a/frontend/src/lib/view/DockRoot.svelte b/frontend/src/lib/view/DockRoot.svelte
+index 67909f3803df927275507bc0b469a5d1fd9268d8..6c785fc8661118ee2fc9101f7f4ed48dadb7eb9e 100644
+--- a/frontend/src/lib/view/DockRoot.svelte
++++ b/frontend/src/lib/view/DockRoot.svelte
+@@ -620,6 +620,7 @@
+         timeIndex={runtimeFrameTimeIndex}
+         isLive={runtimeFrameIsLive}
+         env={runtimeFrameEnv}
++        dockMode
+       />
+       {#if !embedMode}
+         <button class="collapse-btn" on:click={() => collapsed = !collapsed}>
+diff --git a/frontend/src/lib/view/core/NetworkMachineTimeline.svelte b/frontend/src/lib/view/core/NetworkMachineTimeline.svelte
+index 38ea478ea19f620dfdcc86b47e4538f387ce6cc0..272a9365ee56321579c7190809ae27bb1684b2fb 100644
+--- a/frontend/src/lib/view/core/NetworkMachineTimeline.svelte
++++ b/frontend/src/lib/view/core/NetworkMachineTimeline.svelte
+@@ -1,5 +1,7 @@
+ <script lang="ts">
+   import { onDestroy, onMount } from 'svelte';
++  import { get } from 'svelte/store';
++  import { networkMachineDemo } from '$lib/stores/networkMachineDemoStore';
+   import { Pause, Play, RefreshCw, SkipBack, SkipForward } from 'lucide-svelte';
+   import { appState, appStateOperations } from '$lib/stores/appStateStore';
+   import { networkMachineConfig, networkMachineOperations } from '$lib/stores/networkMachineStore';
+@@ -8,6 +10,8 @@
+     networkMachineRuntimeOperations,
+   } from '$lib/stores/networkMachineRuntimeStore';
+   import type { NetworkMachineTimelineMode } from '$lib/network3d/networkMachine';
++  import { captionForStep } from '$lib/network3d/networkCaption';
++  import { xlnFunctions } from '$lib/stores/xlnStore';
+ 
+   let playing = false;
+   let playbackInterval: number | null = null;
+@@ -17,6 +21,31 @@
+   $: steps = $networkMachineRuntime.machine?.steps ?? [];
+   $: selectedIndex = $networkMachineRuntime.selectedStepIndex;
+   $: selected = $networkMachineRuntime.selectedStep;
++  // Entity labels come from the frame we are already showing, so captions say "Alice → Hub"
++  // instead of hex, without a second read.
++  $: labelByEntityId = new Map<string, string>(
++    Array.from($networkMachineRuntime.frames.values())
++      .flatMap((frame) => frame.entities)
++      .flatMap((entity): Array<[string, string]> => {
++        const entityId = String(entity.summary.entityId || '').toLowerCase();
++        const label = String(entity.summary.label || entity.core?.profile?.name || '').trim();
++        return entityId && label ? [[entityId, label]] : [];
++      }),
++  );
++
++  // Global caption for the step: derived from runtime activity, overridden by an authored cue.
++  $: caption = selected
++    ? captionForStep(
++        { runtimeId: selected.activeRuntimeId, height: selected.event.height, cues: selected.cues },
++        $networkMachineRuntime.activity,
++        {
++          labelFor: (entityId: string): string => labelByEntityId.get(entityId.toLowerCase()) ?? '',
++          formatAmount: (tokenId, amountMinor) => $xlnFunctions.isReady
++            ? $xlnFunctions.formatTokenAmount(tokenId, BigInt(amountMinor))
++            : '',
++        },
++      )
++    : null;
+   $: progress = steps.length > 1 && selectedIndex >= 0 ? (selectedIndex / (steps.length - 1)) * 100 : 0;
+ 
+   const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error || 'NetworkMachine failed');
+@@ -87,7 +116,19 @@
+     }
+   }
+ 
+-  onMount(() => { void refresh(); });
++  // An embedded demo asks for playback through the URL. The machine is loaded by the route,
++  // so wait for its steps to exist and then start once, from the first frame.
++  $: if (steps.length > 0 && !playing && networkMachineDemo.consumeAutoplay()) {
++    speed = get(networkMachineDemo).speed;
++    void selectStep(0).then(() => togglePlayback());
++  }
++
++  onMount(() => {
++    // A route that loaded a scenario owns the machine; refreshing would replace it with
++    // whatever runtimes happen to be connected.
++    if (get(networkMachineRuntime).machine) return;
++    void refresh();
++  });
+   onDestroy(() => {
+     stopPlayback();
+     networkMachineRuntimeOperations.dispose();
+@@ -123,10 +164,14 @@
+     </div>
+   {/if}
+ 
+-  {#if selected?.cues.length}
+-    <div class="cue" data-testid="network-machine-cue">
+-      <strong>{selected.cues[0]?.title}</strong>
+-      {#if selected.cues[0]?.subtitle}<span>{selected.cues[0]?.subtitle}</span>{/if}
++  {#if caption}
++    <div class="cue" data-testid="network-machine-cue" data-caption-source={caption.source}>
++      <strong>
++        {caption.title}
++        {#if caption.extraCount > 0}<em>+{caption.extraCount}</em>{/if}
++      </strong>
++      {#if caption.subtitle}<span>{caption.subtitle}</span>{/if}
++      {#if caption.mechanic}<span class="mechanic" title={caption.mechanic}>{caption.mechanic}</span>{/if}
+     </div>
+   {/if}
+ 
+@@ -141,6 +186,6 @@
+ {#if localError || $networkMachineRuntime.error}<div class="network-error" role="alert">{localError || $networkMachineRuntime.error}</div>{/if}
+ 
+ <style>
+-  .network-machine{height:48px;box-sizing:border-box;display:flex;align-items:center;gap:9px;padding:7px 10px;background:#101317;color:#dce7ee;border-top:1px solid rgba(255,255,255,.08);font:11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace}.navigation{display:flex;gap:2px}.navigation button,.refresh,.dock{display:grid;place-items:center;min-width:27px;height:27px;border:1px solid #293b47;border-radius:5px;background:#15212a;color:#cde7f6}.navigation .play{border-color:#236b8c;color:#5ed0ff}.identity{display:grid;gap:2px;min-width:120px}.identity strong{font-size:11px}.identity span{color:#62d88f}input[type=range]{min-width:120px;flex:1;accent-color:#51d889}.event{display:flex;align-items:center;gap:6px;white-space:nowrap}.event strong{color:var(--runtime-color)}.event time{color:#738897}.dot{width:7px;height:7px;border-radius:50%;background:var(--runtime-color);box-shadow:0 0 9px var(--runtime-color)}.cue{display:grid;max-width:250px;overflow:hidden}.cue strong,.cue span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cue span{color:#879aa7}select{height:27px;border:1px solid #293b47;border-radius:5px;background:#101b23;color:#c7d9e4;font:inherit}.dock{padding:0 9px;color:#d2b8ff;border-color:#5c3f7a}.network-error{position:absolute;left:10px;right:10px;bottom:52px;z-index:40;padding:7px 9px;border:1px solid #713140;background:#230e14;color:#ff9aae;font:11px/1.3 ui-monospace,monospace}
++  .network-machine{height:48px;box-sizing:border-box;display:flex;align-items:center;gap:9px;padding:7px 10px;background:#101317;color:#dce7ee;border-top:1px solid rgba(255,255,255,.08);font:11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace}.navigation{display:flex;gap:2px}.navigation button,.refresh,.dock{display:grid;place-items:center;min-width:27px;height:27px;border:1px solid #293b47;border-radius:5px;background:#15212a;color:#cde7f6}.navigation .play{border-color:#236b8c;color:#5ed0ff}.identity{display:grid;gap:2px;min-width:120px}.identity strong{font-size:11px}.identity span{color:#62d88f}input[type=range]{min-width:120px;flex:1;accent-color:#51d889}.event{display:flex;align-items:center;gap:6px;white-space:nowrap}.event strong{color:var(--runtime-color)}.event time{color:#738897}.dot{width:7px;height:7px;border-radius:50%;background:var(--runtime-color);box-shadow:0 0 9px var(--runtime-color)}.cue{display:grid;max-width:340px;overflow:hidden}.cue .mechanic{color:#5f7d95;font-style:italic}.cue strong,.cue span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cue span{color:#879aa7}.cue em{margin-left:5px;font-style:normal;color:#62d88f}select{height:27px;border:1px solid #293b47;border-radius:5px;background:#101b23;color:#c7d9e4;font:inherit}.dock{padding:0 9px;color:#d2b8ff;border-color:#5c3f7a}.network-error{position:absolute;left:10px;right:10px;bottom:52px;z-index:40;padding:7px 9px;border:1px solid #713140;background:#230e14;color:#ff9aae;font:11px/1.3 ui-monospace,monospace}
+   @media(max-width:900px){.cue,.event time,.identity strong{display:none}.identity{min-width:auto}}
+ </style>
+diff --git a/frontend/src/lib/view/core/TimeMachine.svelte b/frontend/src/lib/view/core/TimeMachine.svelte
+index 11ce2e6240ffafb5dd071949bb4fd3263ab87b30..3323a5b3af404c22cf08f020440c72f26cd808e8 100644
+--- a/frontend/src/lib/view/core/TimeMachine.svelte
++++ b/frontend/src/lib/view/core/TimeMachine.svelte
+@@ -37,6 +37,8 @@
+   export let timeIndex: Writable<number> | Readable<number>;
+   export let isLive: Writable<boolean> | Readable<boolean>;
+   export let env: Writable<RuntimeState | null> | Readable<RuntimeState | null>; // For state export
++  /** Rendered inside the dock workspace. The wallet keeps its own single-runtime controls. */
++  export let dockMode = false;
+ 
+   // Type guard to check if store is writable
+   function isWritable<T>(store: Writable<T> | Readable<T>): store is Writable<T> {
+@@ -672,7 +674,13 @@
+   }
+ </script>
+ 
+-{#if $runtimeGraphScope === 'merged' && $appState.mode === 'dev'}
++<!--
++  In the dock, merged scope scrubs through the NetworkMachine: it reads frames from each
++  runtime's adapter, so local and remote work the same way. The wallet keeps its own
++  controls below — `dockMode` (not the global app mode) decides, because the embedded
++  workspace renders the dock while the app mode is still 'user'.
++-->
++{#if dockMode && $runtimeGraphScope === 'merged'}
+   <NetworkMachineTimeline />
+ {:else}
+ <div class="time-machine">
+diff --git a/frontend/src/lib/view/panels/graph3d-runtime-projections.ts b/frontend/src/lib/view/panels/graph3d-runtime-projections.ts
+index 6cd14d5f42a7275ef63f6f3f1ec6b5ec28e2fe00..774080f762d8aba30d24fd0d9bcc24c9b83d352d 100644
+--- a/frontend/src/lib/view/panels/graph3d-runtime-projections.ts
++++ b/frontend/src/lib/view/panels/graph3d-runtime-projections.ts
+@@ -25,24 +25,38 @@ export function buildRuntimeGraphProjections(input: RuntimeGraphProjectionInputs
+     .trim()
+     .toLowerCase();
+   const networkStep = input.scope === 'merged' ? input.networkState.selectedStep : null;
++
++  // Historical: the selected step's frames are the whole truth. Iterating them (rather than
++  // the connected-runtime map) is also what lets a recorded scenario render — it is a
++  // network with no live runtime behind it.
++  if (networkStep) {
++    for (const [runtimeId, frame] of input.networkState.frames) {
++      const runtime = input.runtimeMap.get(runtimeId);
++      projections.push(projectRuntimeGraphFrame(frame, {
++        runtimeId,
++        label: runtime?.label || runtimeId,
++        adapterKind: runtime?.type === 'remote' ? 'remote' : 'browser',
++      }));
++    }
++    return projections;
++  }
++
+   for (const runtime of input.runtimeMap.values()) {
+     const runtimeId = String(runtime.id || '')
+       .trim()
+       .toLowerCase();
++
++    // Live: local runtimes project their in-memory env, remote ones their cached frame.
+     if (runtime.type === 'local') {
+-      const selected = networkStep
+-        ? input.networkState.browserFrames.get(runtimeId)
+-        : runtimeId === activeId && input.currentEnv
+-          ? input.currentEnv
+-          : (unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env);
++      const selected = runtimeId === activeId && input.currentEnv
++        ? input.currentEnv
++        : (unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env);
+       if (selected) {
+         projections.push(projectRuntimeEnv(selected, { runtimeId, label: runtime.label, adapterKind: 'browser' }));
+       }
+       continue;
+     }
+-    const frame = networkStep
+-      ? (input.networkState.remoteFrames.get(runtimeId) ?? null)
+-      : (input.liveRemoteFrames.get(runtimeId) ?? null);
++    const frame = input.liveRemoteFrames.get(runtimeId) ?? null;
+     if (frame) {
+       projections.push(projectRuntimeGraphFrame(frame, { runtimeId, label: runtime.label, adapterKind: 'remote' }));
+     }
+@@ -51,7 +65,6 @@ export function buildRuntimeGraphProjections(input: RuntimeGraphProjectionInputs
+     .trim()
+     .toLowerCase();
+   if (
+-    !networkStep &&
+     input.currentEnv &&
+     !projections.some(projection => projection.source.runtimeId === envRuntimeId)
+   ) {
+diff --git a/frontend/src/routes/embed/+page.svelte b/frontend/src/routes/embed/+page.svelte
+index f76aca4dc918e52613218ac8936b2120edfd612c..ecc7d813310d745f11bdd119aa58eebf3d205904 100644
+--- a/frontend/src/routes/embed/+page.svelte
++++ b/frontend/src/routes/embed/+page.svelte
+@@ -1,27 +1,70 @@
+ <script lang="ts">
+   /**
+-   * Embed Route - Full XLN Workspace (Embeddable)
++   * Embed Route — the full workspace, embeddable.
+    *
+-   * Uses full View.svelte in dev mode for complete functionality
+-   * Scenario loading is manual-only from Dock panels.
++   * `?scenario=<key>` replays a scenario as a network: it runs in this browser, and the
++   * NetworkMachine scrubs its frames with a caption per step. No wallet, no connected
++   * runtime, nothing to set up — which is what makes it embeddable.
++   *
++   *   /embed?scenario=ahb            run and show, paused on the first frame
++   *   /embed?scenario=ahb&autoplay=1 play it
++   *   /embed?scenario=ahb&speed=2    playback speed
++   *   /embed#trail=<encoded>         replay a recorded trail — no runtime, no scenario run
++   *
++   * The hash form is what makes a demo portable: it never reaches a server, and it carries
++   * the frames themselves, so the same URL renders the same network anywhere.
+    */
+ 
+   import { onMount } from 'svelte';
++  import { page } from '$app/stores';
+   import View from '$lib/view/View.svelte';
+   import { settingsOperations } from '$lib/stores/settingsStore';
++  import { networkMachineRuntimeOperations } from '$lib/stores/networkMachineRuntimeStore';
++  import { networkMachineDemo } from '$lib/stores/networkMachineDemoStore';
++  import { decodeNetworkTrailFromHash } from '$lib/network3d/networkTimelineSource';
+ 
+   let embedMode = true;
++  let scenarioError = '';
++
++  $: scenario = $page.url.searchParams.get('scenario')?.trim() ?? '';
++  $: autoplay = $page.url.searchParams.get('autoplay') === '1';
++  $: speed = Number($page.url.searchParams.get('speed') || 1) || 1;
++
++  const trailFromHash = (hash: string): string =>
++    new URLSearchParams(hash.replace(/^#/, '')).get('trail')?.trim() ?? '';
+ 
+   onMount(() => {
+     settingsOperations.initialize();
++    const encodedTrail = trailFromHash($page.url.hash);
++    if (!scenario && !encodedTrail) return;
++
++    // The Time Machine is the narration in a demo, so it must be visible.
++    settingsOperations.setShowTimeMachine(true);
++    networkMachineDemo.set({ autoplay, speed });
++
++    const fail = (error: unknown): void => {
++      scenarioError = error instanceof Error ? error.message : String(error || 'demo failed');
++    };
++
++    // A recorded trail wins: it is exact, and it does not need a runtime to replay.
++    if (encodedTrail) {
++      void decodeNetworkTrailFromHash(encodedTrail)
++        .then((trail) => networkMachineRuntimeOperations.loadTrail(trail))
++        .catch(fail);
++      return;
++    }
++    void networkMachineRuntimeOperations.loadScenario(scenario).catch(fail);
+   });
+ </script>
+ 
+ <svelte:head>
+-  <title>xln - Embedded Workspace</title>
++  <title>xln — {scenario ? `${scenario} scenario` : 'Embedded Workspace'}</title>
+ </svelte:head>
+ 
+-<!-- Full dev mode workspace for embeds -->
++{#if scenarioError}
++  <div class="scenario-error" role="alert" data-testid="embed-scenario-error">{scenarioError}</div>
++{/if}
++
+ <View
+   layout="default"
+   networkMode="simnet"
+@@ -38,4 +81,18 @@
+   :global(.mode-toggle) {
+     display: none !important;
+   }
++
++  .scenario-error {
++    position: fixed;
++    top: 12px;
++    left: 12px;
++    right: 12px;
++    z-index: 90;
++    padding: 9px 11px;
++    border: 1px solid rgba(255, 91, 113, 0.55);
++    border-radius: 7px;
++    background: rgba(40, 8, 14, 0.94);
++    color: #ffb8c2;
++    font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
++  }
+ </style>
+diff --git a/runtime/__tests__/radapter-part-1.test.ts b/runtime/__tests__/radapter-part-1.test.ts
+index 45578b4d2cbc69071a57e30cda9122934cd8db6c..924adf606c8f1c5c88ed6e057f2e63bf2314b168 100644
+--- a/runtime/__tests__/radapter-part-1.test.ts
++++ b/runtime/__tests__/radapter-part-1.test.ts
+@@ -92,7 +92,10 @@ import type {
+   StorageSnapshotManifest,
+ } from '../storage/types';
+ 
+-import type { AccountTx, CrossJurisdictionSwapRoute, Delta, EntityReplica, RuntimeState, RuntimeInput } from '../runtime/types';
++import type { AccountTx, Delta } from '../types/account';
++import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
++import type { EntityReplica } from '../entity/types';
++import type { RuntimeState, RuntimeInput } from '../runtime/types';
+ 
+ import type { BookState } from '../orderbook';
+ 
+@@ -1638,6 +1641,48 @@ test('runtime adapter timeline-index returns a bounded compact timestamp page',
+   expect(page.nextBeforeHeight).toBe(5);
+ });
+ 
++test('runtime adapter timeline-index reports an empty timeline before the first frame is persisted', async () => {
++  // Fresh runtime: nothing committed live, nothing persisted.
++  const env = { ...makeEnv(), height: 0 } as RuntimeState;
++  // A runtime that has not committed a frame yet is an empty timeline, not a bad request.
++  // Rejecting it made every fresh browser runtime surface a broken time machine.
++  const page = await resolveRuntimeAdapterRead<{
++    entries: unknown[];
++    latestHeight: number;
++    scannedHeights: number;
++    nextBeforeHeight: number | null;
++  }>(
++    {
++      env,
++      readHead: async () => ({
++        schemaVersion: STORAGE_SCHEMA_VERSION,
++        latestHeight: 0,
++        latestSnapshotHeight: 0,
++        snapshotPeriodFrames: 2,
++        retainSnapshots: 3,
++        epochMaxBytes: 1_000,
++        accountMerkleRadix: 16,
++        epochReplayBytes: 0,
++        retainedHistoryBytes: 0,
++      }),
++      readFrame: async () => null,
++    },
++    'timeline-index',
++  );
++
++  expect(page.entries).toEqual([]);
++  expect(page.latestHeight).toBe(0);
++  expect(page.scannedHeights).toBe(0);
++  expect(page.nextBeforeHeight).toBeNull();
++
++  // An explicit out-of-range cursor is still a client error.
++  await expect(resolveRuntimeAdapterRead(
++    { env, readHead: async () => ({ schemaVersion: STORAGE_SCHEMA_VERSION, latestHeight: 0, latestSnapshotHeight: 0, snapshotPeriodFrames: 2, retainSnapshots: 3, epochMaxBytes: 1_000, accountMerkleRadix: 16, epochReplayBytes: 0, retainedHistoryBytes: 0 }), readFrame: async () => null },
++    'timeline-index',
++    { beforeHeight: 1 },
++  )).rejects.toThrow('beforeHeight must be an integer greater than 1');
++});
++
+ test('runtime adapter receipt read returns ingress receipt status over websocket protocol', async () => {
+   const env = makeEnv();
+   const receipt = await resolveRuntimeAdapterRead<Record<string, unknown>>(
+diff --git a/tests/frontend/runtime-graph-frame-cache.test.ts b/tests/frontend/runtime-graph-frame-cache.test.ts
+index 66bc37d4455f39bfb0a11c11945dfa39f9c003df..9c25dbabc89aeb258155d2e169309df106c57a98 100644
+--- a/tests/frontend/runtime-graph-frame-cache.test.ts
++++ b/tests/frontend/runtime-graph-frame-cache.test.ts
+@@ -48,7 +48,14 @@ describe('RuntimeGraphFrameCache', () => {
+     expect(source).toContain('const graphRemoteReaders = new RemoteRuntimeReaderPool();');
+     expect(source).toContain('disconnectNetworkTimelineReaders = (): void => timelineRemoteReaders.disconnectAll()');
+     expect(source).not.toContain('disconnectNetworkTimelineReaders = (): void => graphRemoteReaders.disconnectAll()');
+-    expect(source).toContain('readRemoteRuntimeGraphFrameWithPool(runtime, timelineRemoteReaders, targetHeight)');
++    // Historical reads go through networkTimelineSourceFor, which must borrow the timeline
++    // pool. Borrowing the live graph pool would let timeline disposal kill live rendering.
++    const sourceResolver = source.slice(
++      source.indexOf('export const networkTimelineSourceFor'),
++      source.indexOf('export const readTimelineIndexPages'),
++    );
++    expect(sourceResolver).toContain('timelineRemoteReaders.adapterFor(runtime)');
++    expect(sourceResolver).not.toContain('graphRemoteReaders');
+   });
+ 
+   test('a stale failed refresh cannot overwrite or clear the latest applied frame', async () => {
+diff --git a/tests/frontend/runtime-graph-projection.test.ts b/tests/frontend/runtime-graph-projection.test.ts
+index 8585a79fdcf2d5364385bcec3c19e67e5a7aa6b1..85435c641f12dd426442a56983478f24d6624a3c 100644
+--- a/tests/frontend/runtime-graph-projection.test.ts
++++ b/tests/frontend/runtime-graph-projection.test.ts
+@@ -36,10 +36,7 @@ import {
+   parseNetworkMachineConfig,
+   type NetworkMachineConfig,
+ } from '../../frontend/src/lib/network3d/networkMachine';
+-import {
+-  readTimelineIndexPages,
+-  timelineIndexFromBrowserRuntime,
+-} from '../../frontend/src/lib/network3d/networkTimelineLoader';
++import { readTimelineIndexPages } from '../../frontend/src/lib/network3d/networkTimelineLoader';
+ import { assertNetworkMachineIsLive } from '../../frontend/src/lib/stores/networkMachineRuntimeStore';
+ import {
+   beginGraphGesture,
+@@ -451,23 +448,15 @@ describe('NetworkMachine', () => {
+ });
+ 
+ describe('NetworkMachine runtime indexes', () => {
+-  test('browser runtimes expose every materialized R-frame with graph-change metadata', () => {
+-    const index = timelineIndexFromBrowserRuntime({
+-      id: 'Browser-A',
+-      type: 'local',
+-      label: 'A',
+-      permissions: 'write',
+-      status: 'connected',
+-      env: {
+-        runtimeId: 'browser-a',
+-        history: [
+-          { height: 1, timestamp: 100, runtimeInput: { runtimeTxs: [], jInputs: [], entityInputs: [] } },
+-          { height: 2, timestamp: 200, runtimeInput: { runtimeTxs: [{ type: 'noop' }], jInputs: [], entityInputs: [] } },
+-        ],
+-      } as never,
+-    });
+-    expect(index.frames.map((frame) => ({ height: frame.height, graphChanged: frame.graphChanged })))
+-      .toEqual([{ height: 1, graphChanged: false }, { height: 2, graphChanged: true }]);
++  test('browser runtimes read their index through the adapter, not from in-memory history', () => {
++    const loader = readFileSync('frontend/src/lib/network3d/networkTimelineLoader.ts', 'utf8');
++
++    // `env.history` is permanently empty (RECENT_RUNTIME_HISTORY_LIMIT = 0), so deriving a
++    // browser timeline from it produced zero frames and a dead time machine.
++    expect(loader).not.toContain('env?.history');
++    expect(loader).not.toContain('timelineIndexFromBrowserRuntime');
++    expect(loader).toContain('adapterNetworkTimelineSource');
++    expect(loader).toContain('getRuntimeControllerAdapter');
+   });
+ 
+   test('remote compact indexes paginate without dropping or reordering frames', async () => {
+diff --git a/tests/frontend/time-machine-current-env.test.ts b/tests/frontend/time-machine-current-env.test.ts
+index 8b891b140b118a256a9003f4ed2a41137271c2f4..2cbe2dd58f4f0eddc830317b62ec9e6c788271bf 100644
+--- a/tests/frontend/time-machine-current-env.test.ts
++++ b/tests/frontend/time-machine-current-env.test.ts
+@@ -141,8 +141,15 @@ describe('frontend time-machine current env contract', () => {
+ 
+   test('merged graph scope does not replace wallet time travel controls', () => {
+     const source = read('frontend/src/lib/view/core/TimeMachine.svelte');
++    const dock = read('frontend/src/lib/view/DockRoot.svelte');
++    const wallet = read('frontend/src/lib/view/UserModePanel.svelte');
+ 
+-    expect(source).toContain("$runtimeGraphScope === 'merged' && $appState.mode === 'dev'");
++    // The NetworkMachine scrubber belongs to the dock. Keying it off the global app mode
++    // left the embedded workspace (dock rendered while mode is 'user') on the legacy
++    // scrubber, which reads permanently empty in-memory history.
++    expect(source).toContain("{#if dockMode && $runtimeGraphScope === 'merged'}");
++    expect(dock).toContain('dockMode');
++    expect(wallet).not.toContain('dockMode\n');
+     expect(source).toContain('data-testid="time-machine-remote-scan"');
+     expect(source).toContain('data-testid="network-machine-mode-toggle"');
+   });
+diff --git a/frontend/src/lib/network3d/networkCaption.ts b/frontend/src/lib/network3d/networkCaption.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..3f7f21a2b13a0201b3f3e1bab17a31bc2abdfc4a
+--- /dev/null
++++ b/frontend/src/lib/network3d/networkCaption.ts
+@@ -0,0 +1,155 @@
++/**
++ * Global caption for one NetworkMachine step.
++ *
++ * The runtime already produces titled events (`RuntimeActivityEvent.title/subtitle`), so a
++ * caption is derived, not authored: live hub debugging gets readable subtitles for free.
++ * An authored cue on the step wins when a demo wants a curated line.
++ */
++
++import type { RuntimeActivityEvent } from '@xln/runtime/api/runtime-module';
++import type { NetworkMachineCue } from './networkMachine';
++
++export type NetworkCaption = {
++  title: string;
++  subtitle: string;
++  /** One sentence on what this step proves about the protocol. Empty when unknown. */
++  mechanic: string;
++  /** Events in this step beyond the headline one. */
++  extraCount: number;
++  source: 'cue' | 'activity' | 'frame';
++  accent?: string;
++};
++
++/**
++ * What each step teaches. The runtime's own titles are operational ("Payment sent"); a demo
++ * has to say why that is interesting, so the explanation lives here, next to the renderer.
++ */
++const MECHANIC_BY_TYPE: Record<string, string> = {
++  payment: 'Bilateral transfer — settled between two parties, nothing on-chain.',
++  htlc: 'Hash-locked across the route: an intermediary cannot take the money mid-hop.',
++  swap: 'Order matched inside the bilateral account — no shared orderbook to trust.',
++  cross_swap: 'Atomic across jurisdictions: both legs commit, or neither does.',
++  settlement: 'Both sides sign the netted result; only the difference reaches the chain.',
++  account: 'Account capacity changes — credit is granted, not deposited.',
++  j_event: 'Observed on-chain: the jurisdiction confirmed what the account already knew.',
++  j_batch: 'Batched to the jurisdiction — many account changes, one on-chain transaction.',
++  system: 'Runtime bookkeeping — no value moved.',
++  error: 'Failure surfaced instead of being hidden.',
++};
++
++/** Sharper wording where the raw type is too coarse to explain the mechanic. */
++const mechanicFor = (event: RuntimeActivityEvent): string => {
++  // Raw types arrive in mixed conventions (`set_credit_limit`, `reserveToCollateral`),
++  // so compare on letters alone.
++  const rawType = text(event.rawType).toLowerCase().replace(/[^a-z0-9]/g, '');
++  if (rawType.includes('creditlimit')) {
++    return 'Unsecured credit extended — capacity without locking collateral.';
++  }
++  if (rawType.includes('reserve') && rawType.includes('collateral')) {
++    return 'Reserves become collateral: this is the step that costs a J-transaction.';
++  }
++  if (rawType.includes('dispute')) {
++    return 'Unilateral exit — the last signed frame is enough to reclaim funds.';
++  }
++  if (rawType.includes('openaccount')) {
++    return 'A new bilateral account: one counterparty, no network-wide registration.';
++  }
++  return MECHANIC_BY_TYPE[text(event.type)] ?? '';
++};
++
++export type NetworkCaptionStep = {
++  runtimeId: string;
++  height: number;
++  cues: NetworkMachineCue[];
++};
++
++const text = (value: unknown): string => String(value ?? '').trim();
++
++/** Events of one runtime at one height, ordered the way the runtime recorded them. */
++export const activityForStep = (
++  events: readonly RuntimeActivityEvent[],
++  step: NetworkCaptionStep,
++): RuntimeActivityEvent[] => {
++  const runtimeId = text(step.runtimeId).toLowerCase();
++  const height = Math.floor(Number(step.height || 0));
++  return events.filter((event) => {
++    if (Math.floor(Number(event.height || 0)) !== height) return false;
++    const eventRuntimeId = text(event.runtimeId).toLowerCase();
++    return !eventRuntimeId || !runtimeId || eventRuntimeId === runtimeId;
++  });
++};
++
++/** Resolves ids and minor units into words the viewer can read. */
++export type NetworkCaptionContext = {
++  labelFor?: (entityId: string) => string;
++  formatAmount?: (tokenId: number, amountMinor: string) => string;
++};
++
++const describeParticipants = (
++  event: RuntimeActivityEvent,
++  context: NetworkCaptionContext,
++): string => {
++  const label = (value: unknown): string => {
++    const id = text(value);
++    if (!id) return '';
++    return text(context.labelFor?.(id)) || `${id.slice(0, 6)}…${id.slice(-4)}`;
++  };
++  const from = label(event.direction === 'in' ? event.counterpartyId : event.entityId);
++  const to = label(event.direction === 'in' ? event.entityId : event.counterpartyId);
++  if (!from || !to) return from || to;
++  return `${from} → ${to}`;
++};
++
++const describeAmount = (event: RuntimeActivityEvent, context: NetworkCaptionContext): string => {
++  const amount = text(event.amount);
++  const tokenId = Number(event.tokenId ?? 0);
++  if (!amount || !tokenId) return '';
++  return text(context.formatAmount?.(tokenId, amount)) || `${amount} (token ${tokenId})`;
++};
++
++/** Human subtitle: who, how much — falling back to the runtime's own wording. */
++export const describeEvent = (
++  event: RuntimeActivityEvent,
++  context: NetworkCaptionContext = {},
++): string => {
++  const parts = [describeAmount(event, context), describeParticipants(event, context)].filter(Boolean);
++  return parts.length > 0 ? parts.join('  ·  ') : text(event.subtitle);
++};
++
++export const captionForStep = (
++  step: NetworkCaptionStep,
++  events: readonly RuntimeActivityEvent[],
++  context: NetworkCaptionContext = {},
++): NetworkCaption => {
++  const cue = step.cues.find((candidate) => text(candidate.title));
++  if (cue) {
++    return {
++      title: text(cue.title),
++      subtitle: text(cue.subtitle),
++      mechanic: '',
++      extraCount: 0,
++      source: 'cue',
++      ...(text(cue.accent) ? { accent: text(cue.accent) } : {}),
++    };
++  }
++
++  const stepEvents = activityForStep(events, step);
++  const headline = stepEvents.find((event) => text(event.title));
++  if (!headline) {
++    return {
++      title: `Frame ${Math.floor(Number(step.height || 0))}`,
++      subtitle: '',
++      mechanic: '',
++      extraCount: 0,
++      source: 'frame',
++    };
++  }
++
++  return {
++    title: text(headline.title),
++    subtitle: describeEvent(headline, context),
++    mechanic: mechanicFor(headline),
++    extraCount: Math.max(0, stepEvents.length - 1),
++    source: 'activity',
++  };
++};
+diff --git a/frontend/src/lib/network3d/networkTimelineSource.ts b/frontend/src/lib/network3d/networkTimelineSource.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..0c68a4179b0e6e85de0cd176ff3045cfd5892d37
+--- /dev/null
++++ b/frontend/src/lib/network3d/networkTimelineSource.ts
+@@ -0,0 +1,414 @@
++/**
++ * One source of network history, two implementations.
++ *
++ * The graph must not care whether it is watching a live runtime or a recorded demo, so
++ * both go through this interface:
++ *
++ *   - `adapterNetworkTimelineSource` reads a RuntimeAdapter. The embedded (browser) adapter
++ *     and the remote adapter expose the same read paths, so a local runtime is no longer a
++ *     special case — this is what previously read the always-empty `env.history`.
++ *   - `trailNetworkTimelineSource` replays a NetworkTrail captured in the browser. Same
++ *     interface, so a recorded scenario and a live hub render through identical code.
++ *
++ * `recordNetworkTrail` turns the first into the second.
++ */
++
++import type {
++  EnvSnapshot,
++  RuntimeAdapter,
++  RuntimeAdapterActivityPage,
++  RuntimeAdapterGraphFrame,
++  RuntimeAdapterTimelineIndexPage,
++  RuntimeActivityEvent,
++} from '@xln/runtime/api/runtime-module';
++import { buildRuntimeActivityEvents } from '../../../../runtime/api/activity-history';
++import { deserializeTaggedJson, serializeTaggedJson } from '@xln/runtime/protocol/serialization';
++import { normalizeRuntimeTimelineIndex, type RuntimeTimelineIndex } from './runtimeGraphTimeline';
++
++const INDEX_PAGE_SIZE = 250;
++const INDEX_SCAN_LIMIT = 2_000;
++const ACTIVITY_PAGE_SIZE = 250;
++const ACTIVITY_SCAN_LIMIT = 2_000;
++const GRAPH_FRAME_LIMIT = 500;
++
++export type NetworkTimelineSource = {
++  readonly runtimeId: string;
++  readIndex(): Promise<RuntimeTimelineIndex>;
++  readGraphFrame(height: number): Promise<RuntimeAdapterGraphFrame>;
++  /** Activity events inside [fromHeight, toHeight], ascending by height then id. */
++  readActivity(fromHeight: number, toHeight: number): Promise<RuntimeActivityEvent[]>;
++};
++
++/** A frozen network history captured in the browser. Serializable, replayable offline. */
++export type NetworkTrail = {
++  version: 1;
++  runtimeId: string;
++  index: RuntimeTimelineIndex;
++  frames: Record<string, RuntimeAdapterGraphFrame>;
++  activity: RuntimeActivityEvent[];
++};
++
++const normalizeId = (value: unknown): string => String(value || '').trim().toLowerCase();
++
++const requireHeight = (height: number, label: string): number => {
++  const normalized = Math.floor(Number(height));
++  if (!Number.isFinite(normalized) || normalized < 1) throw new Error(`${label}:${String(height)}`);
++  return normalized;
++};
++
++const compareActivity = (left: RuntimeActivityEvent, right: RuntimeActivityEvent): number =>
++  left.height - right.height || String(left.id).localeCompare(String(right.id));
++
++export const adapterNetworkTimelineSource = (
++  runtimeId: string,
++  adapter: Pick<RuntimeAdapter, 'read'>,
++): NetworkTimelineSource => {
++  const expected = normalizeId(runtimeId);
++  if (!expected) throw new Error('NETWORK_TIMELINE_RUNTIME_ID_REQUIRED');
++
++  return {
++    runtimeId: expected,
++
++    async readIndex(): Promise<RuntimeTimelineIndex> {
++      const entries: RuntimeAdapterTimelineIndexPage['entries'] = [];
++      let beforeHeight: number | undefined;
++      while (true) {
++        const page = await adapter.read<RuntimeAdapterTimelineIndexPage>('timeline-index', {
++          limit: INDEX_PAGE_SIZE,
++          scanLimit: INDEX_SCAN_LIMIT,
++          ...(beforeHeight === undefined ? {} : { beforeHeight }),
++        });
++        const actual = normalizeId(page.runtimeId);
++        if (actual !== expected) throw new Error(`NETWORK_TIMELINE_RUNTIME_ID_MISMATCH:${expected}:${actual}`);
++        entries.push(...page.entries);
++        if (page.nextBeforeHeight === null) break;
++        const next = Math.floor(Number(page.nextBeforeHeight));
++        if (!Number.isFinite(next) || next < 2 || (beforeHeight !== undefined && next >= beforeHeight)) {
++          throw new Error(`NETWORK_TIMELINE_CURSOR_INVALID:${expected}:${String(page.nextBeforeHeight)}`);
++        }
++        beforeHeight = next;
++      }
++      return normalizeRuntimeTimelineIndex({ runtimeId: expected, frames: entries });
++    },
++
++    async readGraphFrame(height: number): Promise<RuntimeAdapterGraphFrame> {
++      const target = requireHeight(height, 'NETWORK_TIMELINE_FRAME_HEIGHT_INVALID');
++      const frame = await adapter.read<RuntimeAdapterGraphFrame>('graph-frame', {
++        atHeight: target,
++        limit: GRAPH_FRAME_LIMIT,
++        accountsLimit: GRAPH_FRAME_LIMIT,
++      });
++      const actual = normalizeId(frame.runtimeId);
++      if (actual !== expected) throw new Error(`NETWORK_GRAPH_RUNTIME_ID_MISMATCH:${expected}:${actual}`);
++      if (Math.floor(Number(frame.height || 0)) !== target) {
++        throw new Error(`NETWORK_TIMELINE_FRAME_MISMATCH:${expected}:h${target}:h${String(frame.height)}`);
++      }
++      return frame;
++    },
++
++    async readActivity(fromHeight: number, toHeight: number): Promise<RuntimeActivityEvent[]> {
++      const from = requireHeight(fromHeight, 'NETWORK_ACTIVITY_FROM_HEIGHT_INVALID');
++      const to = requireHeight(toHeight, 'NETWORK_ACTIVITY_TO_HEIGHT_INVALID');
++      if (to < from) throw new Error(`NETWORK_ACTIVITY_RANGE_INVALID:${from}:${to}`);
++      const collected = new Map<string, RuntimeActivityEvent>();
++      // The activity feed pages backwards from a height cursor, so walk down until the
++      // window is covered or the runtime runs out of frames.
++      let beforeHeight: number | undefined = to + 1;
++      while (true) {
++        const page = await adapter.read<RuntimeAdapterActivityPage>('activity', {
++          limit: ACTIVITY_PAGE_SIZE,
++          scanLimit: ACTIVITY_SCAN_LIMIT,
++          ...(beforeHeight === undefined ? {} : { beforeHeight }),
++        });
++        for (const event of page.events ?? []) {
++          const height = Math.floor(Number(event.height || 0));
++          if (height < from || height > to) continue;
++          collected.set(String(event.id), event);
++        }
++        if (page.nextBeforeHeight === null) break;
++        const next = Math.floor(Number(page.nextBeforeHeight));
++        if (!Number.isFinite(next) || next < 2 || (beforeHeight !== undefined && next >= beforeHeight)) break;
++        if (next <= from) break;
++        beforeHeight = next;
++      }
++      return Array.from(collected.values()).sort(compareActivity);
++    },
++  };
++};
++
++export const trailNetworkTimelineSource = (trail: NetworkTrail): NetworkTimelineSource => {
++  if (trail?.version !== 1) throw new Error('NETWORK_TRAIL_VERSION_UNSUPPORTED');
++  const runtimeId = normalizeId(trail.runtimeId);
++  if (!runtimeId) throw new Error('NETWORK_TIMELINE_RUNTIME_ID_REQUIRED');
++  const index = normalizeRuntimeTimelineIndex(trail.index);
++  const activity = [...(trail.activity ?? [])].sort(compareActivity);
++
++  return {
++    runtimeId,
++    readIndex: async () => index,
++    readGraphFrame: async (height: number) => {
++      const target = requireHeight(height, 'NETWORK_TIMELINE_FRAME_HEIGHT_INVALID');
++      const frame = trail.frames[String(target)];
++      if (!frame) throw new Error(`NETWORK_TRAIL_FRAME_MISSING:${runtimeId}:h${target}`);
++      return frame;
++    },
++    readActivity: async (fromHeight: number, toHeight: number) => {
++      const from = requireHeight(fromHeight, 'NETWORK_ACTIVITY_FROM_HEIGHT_INVALID');
++      const to = requireHeight(toHeight, 'NETWORK_ACTIVITY_TO_HEIGHT_INVALID');
++      if (to < from) throw new Error(`NETWORK_ACTIVITY_RANGE_INVALID:${from}:${to}`);
++      return activity.filter((event) => {
++        const height = Math.floor(Number(event.height || 0));
++        return height >= from && height <= to;
++      });
++    },
++  };
++};
++
++/**
++ * Wire-shaped graph frame from an in-memory snapshot.
++ *
++ * Deliberately reimplemented here instead of importing the runtime's adapter resolver: that
++ * module reaches into storage and recovery, which drags Node-only code into the browser
++ * bundle. The projection a scenario needs is small and JSON-safe, which is what lets a
++ * recorded trail serialize.
++ */
++type SnapshotAccount = {
++  leftEntity?: unknown;
++  rightEntity?: unknown;
++  status?: unknown;
++  mempool?: unknown[];
++  currentFrame?: unknown;
++  pendingFrame?: unknown;
++  deltas?: Map<number, unknown>;
++  currentHeight?: unknown;
++  rollbackCount?: unknown;
++  lastRollbackFrameHash?: unknown;
++  activeDispute?: { startedByLeft?: boolean; disputeTimeout?: number; initialNonce?: number };
++};
++
++const integer = (value: unknown): number => {
++  const parsed = Math.floor(Number(value ?? 0));
++  return Number.isFinite(parsed) ? parsed : 0;
++};
++
++/**
++ * Account payload the graph actually renders.
++ *
++ * `deltas` is the whole point: without it `buildGraphAccountVisuals` returns an empty bar
++ * group and a scenario renders as bare spheres and lines — no credit, no collateral. Field
++ * selection mirrors the runtime's `projectGraphAccount` so a recorded frame and a live one
++ * drive the same visuals.
++ */
++const graphAccountFromSnapshot = (
++  observerEntityId: string,
++  counterpartyId: string,
++  account: SnapshotAccount,
++): Record<string, unknown> => {
++  const other = normalizeId(counterpartyId);
++  const [leftEntity, rightEntity] = observerEntityId < other
++    ? [observerEntityId, other]
++    : [other, observerEntityId];
++  const mempool = Array.isArray(account.mempool) ? account.mempool : [];
++  return {
++    leftEntity: normalizeId(account.leftEntity) || leftEntity,
++    rightEntity: normalizeId(account.rightEntity) || rightEntity,
++    status: account.status ?? 'open',
++    mempool,
++    mempoolCount: mempool.length,
++    ...(account.currentFrame ? { currentFrame: account.currentFrame } : {}),
++    ...(account.pendingFrame ? { pendingFrame: account.pendingFrame } : {}),
++    deltas: account.deltas instanceof Map ? new Map(account.deltas) : new Map(),
++    currentHeight: integer(account.currentHeight),
++    rollbackCount: integer(account.rollbackCount),
++    ...(account.lastRollbackFrameHash ? { lastRollbackFrameHash: account.lastRollbackFrameHash } : {}),
++    ...(account.activeDispute ? {
++      activeDispute: {
++        startedByLeft: account.activeDispute.startedByLeft === true,
++        disputeTimeout: integer(account.activeDispute.disputeTimeout),
++        initialDisputeNonce: integer(account.activeDispute.initialNonce),
++      },
++    } : {}),
++  };
++};
++
++export const graphFrameFromSnapshot = (
++  runtimeId: string,
++  snapshot: EnvSnapshot,
++): RuntimeAdapterGraphFrame => {
++  const height = integer(snapshot.height);
++  const timestamp = integer(snapshot.timestamp);
++  const profiles = new Map(
++    (snapshot.gossip?.profiles ?? []).map((profile) => [normalizeId(profile.entityId), profile]),
++  );
++  const entities = Array.from(snapshot.eReplicas?.values?.() ?? []).map((replica) => {
++    const entityId = normalizeId(replica.entityId);
++    const state = replica.state as unknown as {
++      reserves?: Map<number, bigint>;
++      profile?: { name?: string; isHub?: boolean };
++      accounts?: Map<string, SnapshotAccount>;
++      height?: unknown;
++      timestamp?: unknown;
++      prevFrameHash?: unknown;
++    } | undefined;
++    const profile = profiles.get(entityId);
++    const label = String(profile?.name || state?.profile?.name || entityId);
++    const accounts = Array.from(state?.accounts?.entries?.() ?? [])
++      .map(([counterpartyId, account]) => graphAccountFromSnapshot(entityId, counterpartyId, account));
++    return {
++      summary: { entityId, runtimeId, label, height, isHub: state?.profile?.isHub === true },
++      // Reserves drive node size and the balance badge; a null core loses both.
++      core: {
++        entityId,
++        signerId: String(replica.signerId || ''),
++        height: integer(state?.height ?? height),
++        timestamp: integer(state?.timestamp ?? timestamp),
++        ...(state?.prevFrameHash ? { prevFrameHash: state.prevFrameHash } : {}),
++        reserves: state?.reserves instanceof Map ? new Map(state.reserves) : new Map(),
++        profile: { name: label, isHub: state?.profile?.isHub === true },
++      },
++      accounts: { items: accounts, nextCursor: null },
++    };
++  }).sort((left, right) => left.summary.entityId.localeCompare(right.summary.entityId));
++
++  return {
++    runtimeId,
++    height,
++    timestamp,
++    stateHash: String((snapshot as EnvSnapshot & { stateHash?: string }).stateHash || ''),
++    entities,
++  } as unknown as RuntimeAdapterGraphFrame;
++};
++
++/** A frame changed the graph when it actually carried work, not just a heartbeat tick. */
++const snapshotChangedGraph = (snapshot: EnvSnapshot): boolean => {
++  const input = snapshot.runtimeInput;
++  if ((input?.runtimeTxs?.length ?? 0) > 0 || (input?.jInputs?.length ?? 0) > 0) return true;
++  return (input?.entityInputs ?? []).some((entry) => (entry.entityTxs?.length ?? 0) > 0);
++};
++
++/**
++ * A scenario executed in the browser, exposed as a network source.
++ *
++ * Frames are projected by the runtime's own graph projector over each snapshot (a live
++ * projection reads `ctx.env` only, so no storage is involved), and captions come from the
++ * same `buildRuntimeActivityEvents` the live adapter uses. A scenario demo and a production
++ * hub therefore render through identical code — and can be frozen with `recordNetworkTrail`.
++ */
++export const scenarioNetworkTimelineSource = (
++  runtimeId: string,
++  snapshots: readonly EnvSnapshot[],
++): NetworkTimelineSource => {
++  const expected = normalizeId(runtimeId);
++  if (!expected) throw new Error('NETWORK_TIMELINE_RUNTIME_ID_REQUIRED');
++  const byHeight = new Map<number, EnvSnapshot>();
++  for (const snapshot of snapshots) {
++    const height = Math.floor(Number(snapshot.height || 0));
++    if (height >= 1) byHeight.set(height, snapshot);
++  }
++
++  const snapshotAt = (height: number): EnvSnapshot => {
++    const snapshot = byHeight.get(height);
++    if (!snapshot) throw new Error(`NETWORK_SCENARIO_FRAME_MISSING:${expected}:h${height}`);
++    return snapshot;
++  };
++
++  return {
++    runtimeId: expected,
++
++    readIndex: async () => normalizeRuntimeTimelineIndex({
++      runtimeId: expected,
++      frames: Array.from(byHeight.values()).map((snapshot) => ({
++        runtimeId: expected,
++        height: Math.floor(Number(snapshot.height || 0)),
++        timestamp: Math.floor(Number(snapshot.timestamp || 0)),
++        stateHash: String((snapshot as EnvSnapshot & { stateHash?: string }).stateHash || ''),
++        materialized: true,
++        graphChanged: snapshotChangedGraph(snapshot),
++      })),
++    }),
++
++    readGraphFrame: async (height: number) => {
++      const target = requireHeight(height, 'NETWORK_TIMELINE_FRAME_HEIGHT_INVALID');
++      return graphFrameFromSnapshot(expected, snapshotAt(target));
++    },
++
++    readActivity: async (fromHeight: number, toHeight: number) => {
++      const from = requireHeight(fromHeight, 'NETWORK_ACTIVITY_FROM_HEIGHT_INVALID');
++      const to = requireHeight(toHeight, 'NETWORK_ACTIVITY_TO_HEIGHT_INVALID');
++      if (to < from) throw new Error(`NETWORK_ACTIVITY_RANGE_INVALID:${from}:${to}`);
++      const events: RuntimeActivityEvent[] = [];
++      for (const [height, snapshot] of byHeight) {
++        if (height < from || height > to) continue;
++        events.push(...buildRuntimeActivityEvents({
++          height,
++          timestamp: Math.floor(Number(snapshot.timestamp || 0)),
++          ...(snapshot.runtimeInput ? { runtimeInput: snapshot.runtimeInput } : {}),
++        }).map((event) => ({ ...event, runtimeId: expected })));
++      }
++      return events.sort(compareActivity);
++    },
++  };
++};
++
++/**
++ * Trails are portable: a recorded scenario is data, not a running system.
++ *
++ * Graph frames carry bigints and Maps (deltas are the whole point), so plain JSON cannot
++ * hold them. The tagged codec below is the same one the browser wire path uses, which keeps
++ * an exported trail byte-compatible with what a live adapter would have sent.
++ */
++export const serializeNetworkTrail = (trail: NetworkTrail): string => {
++  if (trail?.version !== 1) throw new Error('NETWORK_TRAIL_VERSION_UNSUPPORTED');
++  return serializeTaggedJson(trail);
++};
++
++export const parseNetworkTrail = (text: string): NetworkTrail => {
++  const parsed = deserializeTaggedJson<NetworkTrail>(String(text || ''));
++  if (parsed?.version !== 1) throw new Error('NETWORK_TRAIL_VERSION_UNSUPPORTED');
++  if (!normalizeId(parsed.runtimeId)) throw new Error('NETWORK_TIMELINE_RUNTIME_ID_REQUIRED');
++  return parsed;
++};
++
++const toBase64Url = (bytes: Uint8Array): string => {
++  let binary = '';
++  for (const byte of bytes) binary += String.fromCharCode(byte);
++  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
++};
++
++const fromBase64Url = (value: string): Uint8Array => {
++  const padded = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
++  const binary = atob(padded);
++  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
++};
++
++const gzip = async (text: string): Promise<Uint8Array> => {
++  const stream = new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip')));
++  return new Uint8Array(await stream.arrayBuffer());
++};
++
++const gunzip = async (bytes: Uint8Array): Promise<string> => {
++  const buffer = bytes.slice().buffer as ArrayBuffer;
++  const stream = new Response(new Blob([buffer]).stream().pipeThrough(new DecompressionStream('gzip')));
++  return await stream.text();
++};
++
++/** Compressed, URL-safe trail for `#trail=` — the hash never reaches a server. */
++export const encodeNetworkTrailForHash = async (trail: NetworkTrail): Promise<string> =>
++  toBase64Url(await gzip(serializeNetworkTrail(trail)));
++
++export const decodeNetworkTrailFromHash = async (encoded: string): Promise<NetworkTrail> =>
++  parseNetworkTrail(await gunzip(fromBase64Url(String(encoded || '').trim())));
++
++/** Drain a live source into a replayable trail. This is how a browser demo is captured. */
++export const recordNetworkTrail = async (source: NetworkTimelineSource): Promise<NetworkTrail> => {
++  const index = await source.readIndex();
++  const frames: Record<string, RuntimeAdapterGraphFrame> = {};
++  for (const frame of index.frames) {
++    frames[String(frame.height)] = await source.readGraphFrame(frame.height);
++  }
++  const heights = index.frames.map((frame) => frame.height);
++  const activity = heights.length === 0
++    ? []
++    : await source.readActivity(Math.min(...heights), Math.max(...heights));
++  return { version: 1, runtimeId: source.runtimeId, index, frames, activity };
++};
+diff --git a/frontend/src/lib/stores/networkMachineDemoStore.ts b/frontend/src/lib/stores/networkMachineDemoStore.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..01eef3af6751718eba3003eef25198b7ed772025
+--- /dev/null
++++ b/frontend/src/lib/stores/networkMachineDemoStore.ts
+@@ -0,0 +1,49 @@
++import { writable } from 'svelte/store';
++
++/**
++ * Playback intent for an embedded demo.
++ *
++ * Set by the route from the URL and consumed once by the timeline. Kept apart from
++ * NetworkMachine state because it describes how to present a run, not what the run is.
++ */
++export type NetworkMachineDemo = {
++  autoplay: boolean;
++  /** Steps per second multiplier; 1 means one step per second. */
++  speed: number;
++};
++
++export const NETWORK_MACHINE_DEMO_IDLE: NetworkMachineDemo = { autoplay: false, speed: 1 };
++
++/**
++ * A demo that plays too slowly reads as broken and too fast reads as noise, so an
++ * unusable URL value falls back to 1× rather than being honoured.
++ */
++export const clampDemoSpeed = (value: unknown): number => {
++  const parsed = Number(value);
++  if (!Number.isFinite(parsed) || parsed <= 0) return 1;
++  return Math.min(10, Math.max(0.25, parsed));
++};
++
++export const normalizeDemo = (value: Partial<NetworkMachineDemo>): NetworkMachineDemo => ({
++  autoplay: value.autoplay === true,
++  speed: clampDemoSpeed(value.speed),
++});
++
++const demo = writable<NetworkMachineDemo>(NETWORK_MACHINE_DEMO_IDLE);
++
++export const networkMachineDemo = {
++  subscribe: demo.subscribe,
++  set: (value: Partial<NetworkMachineDemo>): void => {
++    demo.set(normalizeDemo(value));
++  },
++  /** Autoplay is a one-shot intent: consuming it prevents a replay on every recompile. */
++  consumeAutoplay: (): boolean => {
++    let requested = false;
++    demo.update((current) => {
++      requested = current.autoplay;
++      return requested ? { ...current, autoplay: false } : current;
++    });
++    return requested;
++  },
++  reset: (): void => demo.set(NETWORK_MACHINE_DEMO_IDLE),
++};
+diff --git a/tests/frontend/network-machine-demo.test.ts b/tests/frontend/network-machine-demo.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5c4eececd0e0256817843a4dc6076fcdf235988a
+--- /dev/null
++++ b/tests/frontend/network-machine-demo.test.ts
+@@ -0,0 +1,69 @@
++import { describe, expect, test } from 'bun:test';
++import { readFileSync } from 'node:fs';
++import {
++  clampDemoSpeed,
++  normalizeDemo,
++} from '../../frontend/src/lib/stores/networkMachineDemoStore';
++
++describe('network machine demo playback', () => {
++  test('clamps unusable speeds instead of freezing or fast-forwarding the demo', () => {
++    for (const [input, expected] of [[0, 1], [-5, 1], ['abc', 1], [0.1, 0.25], [999, 10], [3, 3]] as const) {
++      expect(clampDemoSpeed(input)).toBe(expected);
++    }
++    expect(clampDemoSpeed(undefined)).toBe(1);
++  });
++
++  test('autoplay is opt-in and speed is always usable', () => {
++    expect(normalizeDemo({ autoplay: true, speed: 2 })).toEqual({ autoplay: true, speed: 2 });
++    expect(normalizeDemo({})).toEqual({ autoplay: false, speed: 1 });
++    expect(normalizeDemo({ autoplay: 'yes' as never, speed: 0 })).toEqual({ autoplay: false, speed: 1 });
++  });
++
++  test('autoplay is consumed once so a recompile does not restart the demo', () => {
++    const store = readFileSync('frontend/src/lib/stores/networkMachineDemoStore.ts', 'utf8');
++    const timeline = readFileSync('frontend/src/lib/view/core/NetworkMachineTimeline.svelte', 'utf8');
++
++    expect(store).toContain('consumeAutoplay');
++    expect(store).toContain('requested ? { ...current, autoplay: false } : current');
++    expect(timeline).toContain('networkMachineDemo.consumeAutoplay()');
++    expect(timeline).toContain('void selectStep(0).then(() => togglePlayback());');
++  });
++
++  test('a recorded scenario is deterministic, self-contained and ephemeral', () => {
++    const source = readFileSync('runtime/runtime/scenarios.ts', 'utf8');
++
++    // Seed: a demo must replay identically and must not require an unlocked vault.
++    expect(source).toContain('xln-demo:');
++    // In-process EVM: never depend on, or flood, an external RPC endpoint.
++    expect(source).toContain("env.scenarioJAdapterMode = 'browservm'");
++    expect(source).toContain('env.scenarioMode = true');
++    // No persistence: frames live in the trace; writing them collides with the runtime
++    // that already owns that storage namespace.
++    expect(source).toContain('storage: { ...env.runtimeConfig?.storage, enabled: false }');
++    // The trace is always released, including when the scenario throws.
++    expect(source).toContain('} finally {');
++    expect(source).toContain('trace.stop();');
++  });
++
++  test('the embed route drives playback from the URL and surfaces scenario failures', () => {
++    const route = readFileSync('frontend/src/routes/embed/+page.svelte', 'utf8');
++
++    expect(route).toContain("$page.url.searchParams.get('scenario')");
++    expect(route).toContain("$page.url.searchParams.get('autoplay') === '1'");
++    expect(route).toContain('networkMachineRuntimeOperations.loadScenario');
++    // A scenario embed narrates through the Time Machine, so it cannot stay hidden.
++    expect(route).toContain('settingsOperations.setShowTimeMachine(true)');
++    expect(route).toContain('data-testid="embed-scenario-error"');
++  });
++
++  test('a loaded scenario is not replaced by whatever runtimes happen to be connected', () => {
++    const timeline = readFileSync('frontend/src/lib/view/core/NetworkMachineTimeline.svelte', 'utf8');
++    const store = readFileSync('frontend/src/lib/stores/networkMachineRuntimeStore.ts', 'utf8');
++
++    expect(timeline).toContain('if (get(networkMachineRuntime).machine) return;');
++    // One registry of sources: live adapters and recorded scenarios read the same way.
++    expect(store).toContain('const activeSources = new Map<string, NetworkTimelineSource>()');
++    expect(store).toContain('source.readGraphFrame(selected.height)');
++    expect(store).toContain('source.readActivity(selected.height, selected.height)');
++  });
++});
+diff --git a/tests/frontend/network-timeline-source.test.ts b/tests/frontend/network-timeline-source.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..48ee98f28189fb231ccdc102a91c074949f3a984
+--- /dev/null
++++ b/tests/frontend/network-timeline-source.test.ts
+@@ -0,0 +1,406 @@
++import { describe, expect, test } from 'bun:test';
++
++import {
++  adapterNetworkTimelineSource,
++  decodeNetworkTrailFromHash,
++  encodeNetworkTrailForHash,
++  parseNetworkTrail,
++  serializeNetworkTrail,
++  recordNetworkTrail,
++  scenarioNetworkTimelineSource,
++  trailNetworkTimelineSource,
++} from '../../frontend/src/lib/network3d/networkTimelineSource';
++import {
++  activityForStep,
++  captionForStep,
++  describeEvent,
++} from '../../frontend/src/lib/network3d/networkCaption';
++
++type ReadCall = { path: string; query?: Record<string, unknown> };
++
++const frame = (height: number) => ({
++  runtimeId: 'h1',
++  height,
++  timestamp: 1_000 + height,
++  entities: [],
++});
++
++const activityEvent = (height: number, id: string, title: string, subtitle = '') => ({
++  id,
++  runtimeId: 'h1',
++  height,
++  timestamp: 1_000 + height,
++  kind: 'offchain',
++  type: 'payment',
++  source: 'entity',
++  direction: 'out',
++  title,
++  subtitle,
++  status: 'settled',
++  rawType: 'directPayment',
++});
++
++/** Adapter that pages like the real one: timeline-index and activity both walk backwards. */
++const fakeAdapter = (options: { heights: number[]; events: ReturnType<typeof activityEvent>[]; pageSize?: number }) => {
++  const calls: ReadCall[] = [];
++  const pageSize = options.pageSize ?? 2;
++  const descending = [...options.heights].sort((left, right) => right - left);
++
++  const read = async <T>(path: string, query?: Record<string, unknown>): Promise<T> => {
++    calls.push({ path, ...(query ? { query } : {}) });
++    if (path === 'timeline-index') {
++      const before = Number(query?.['beforeHeight'] ?? Math.max(...descending) + 1);
++      const window = descending.filter((height) => height < before).slice(0, pageSize);
++      const last = window[window.length - 1];
++      const hasMore = descending.some((height) => last !== undefined && height < last);
++      return {
++        runtimeId: 'h1',
++        entries: window.map((height) => ({
++          runtimeId: 'h1',
++          height,
++          timestamp: 1_000 + height,
++          stateHash: `hash-${height}`,
++          materialized: true,
++          graphChanged: true,
++        })),
++        nextBeforeHeight: hasMore && last !== undefined ? last : null,
++      } as T;
++    }
++    if (path === 'graph-frame') {
++      const height = Number(query?.['atHeight']);
++      if (!descending.includes(height)) throw new Error(`no frame ${height}`);
++      return frame(height) as T;
++    }
++    if (path === 'activity') {
++      const before = Number(query?.['beforeHeight'] ?? Math.max(...descending) + 1);
++      const window = options.events
++        .filter((event) => event.height < before)
++        .sort((left, right) => right.height - left.height)
++        .slice(0, pageSize);
++      const last = window[window.length - 1];
++      const hasMore = options.events.some((event) => last !== undefined && event.height < last.height);
++      return {
++        ok: true,
++        events: window,
++        nextBeforeHeight: hasMore && last !== undefined ? last.height : null,
++      } as T;
++    }
++    throw new Error(`unexpected path ${path}`);
++  };
++
++  return { read: read as never, calls };
++};
++
++describe('network timeline source', () => {
++  test('reads a paged timeline index through the adapter, local or remote alike', async () => {
++    const adapter = fakeAdapter({ heights: [1, 2, 3, 4, 5], events: [] });
++    const source = adapterNetworkTimelineSource('H1', adapter);
++
++    const index = await source.readIndex();
++
++    expect(source.runtimeId).toBe('h1');
++    expect(index.frames.map((entry) => entry.height)).toEqual([1, 2, 3, 4, 5]);
++    // Regression: local runtimes used to read env.history, which is permanently empty
++    // (RECENT_RUNTIME_HISTORY_LIMIT = 0), so the browser timeline had zero frames.
++    expect(adapter.calls.filter((call) => call.path === 'timeline-index').length).toBeGreaterThan(1);
++  });
++
++  test('rejects a frame that does not match the requested runtime or height', async () => {
++    const adapter = {
++      read: async () => ({ runtimeId: 'other', height: 3, entities: [] }),
++    };
++    await expect(adapterNetworkTimelineSource('h1', adapter as never).readGraphFrame(3))
++      .rejects.toThrow('NETWORK_GRAPH_RUNTIME_ID_MISMATCH:h1:other');
++
++    const shifted = { read: async () => ({ runtimeId: 'h1', height: 9, entities: [] }) };
++    await expect(adapterNetworkTimelineSource('h1', shifted as never).readGraphFrame(3))
++      .rejects.toThrow('NETWORK_TIMELINE_FRAME_MISMATCH:h1:h3:h9');
++  });
++
++  test('collects activity inside a height window and drops everything outside', async () => {
++    const events = [
++      activityEvent(1, 'a', 'too old'),
++      activityEvent(2, 'b', 'Alice → Hub'),
++      activityEvent(3, 'c', 'Hub → Bob'),
++      activityEvent(5, 'd', 'too new'),
++    ];
++    const source = adapterNetworkTimelineSource('h1', fakeAdapter({ heights: [1, 2, 3, 5], events }));
++
++    const collected = await source.readActivity(2, 3);
++
++    expect(collected.map((event) => event.id)).toEqual(['b', 'c']);
++  });
++
++  test('rejects an inverted activity window', async () => {
++    const source = adapterNetworkTimelineSource('h1', fakeAdapter({ heights: [1, 2], events: [] }));
++    await expect(source.readActivity(5, 2)).rejects.toThrow('NETWORK_ACTIVITY_RANGE_INVALID:5:2');
++  });
++
++  test('a recorded trail replays identically to the live source it came from', async () => {
++    const events = [activityEvent(2, 'b', 'Alice → Hub'), activityEvent(3, 'c', 'Hub → Bob')];
++    const live = adapterNetworkTimelineSource('h1', fakeAdapter({ heights: [1, 2, 3], events }));
++
++    const trail = await recordNetworkTrail(live);
++    const replay = trailNetworkTimelineSource(trail);
++
++    expect(trail.version).toBe(1);
++    expect(replay.runtimeId).toBe(live.runtimeId);
++    expect((await replay.readIndex()).frames).toEqual((await live.readIndex()).frames);
++    expect(await replay.readGraphFrame(2)).toEqual(await live.readGraphFrame(2));
++    expect(await replay.readActivity(1, 3)).toEqual(await live.readActivity(1, 3));
++  });
++
++  test('a browser scenario run becomes a source: index and captions with no storage', async () => {
++    const snapshot = (height: number, entityTxs: unknown[]) => ({
++      height,
++      timestamp: 1_000 + height,
++      eReplicas: new Map(),
++      jReplicas: new Map(),
++      runtimeOutputs: [],
++      description: `Frame ${height}`,
++      runtimeInput: {
++        runtimeTxs: [],
++        jInputs: [],
++        entityInputs: entityTxs.length > 0 ? [{ entityId: '0xalice', entityTxs }] : [],
++      },
++    });
++    const source = scenarioNetworkTimelineSource('demo-ahb', [
++      snapshot(1, []),
++      snapshot(2, [{ type: 'openAccount', data: { targetEntityId: '0xhub' } }]),
++    ] as never);
++
++    const index = await source.readIndex();
++    expect(source.runtimeId).toBe('demo-ahb');
++    expect(index.frames.map((frame) => ({ height: frame.height, graphChanged: frame.graphChanged })))
++      .toEqual([{ height: 1, graphChanged: false }, { height: 2, graphChanged: true }]);
++
++    // Captions come from the same runtime builder the live adapter uses.
++    const events = await source.readActivity(1, 2);
++    expect(events.length).toBeGreaterThan(0);
++    expect(events.every((event) => event.runtimeId === 'demo-ahb')).toBe(true);
++    expect(events.every((event) => event.height === 2)).toBe(true);
++
++    await expect(source.readGraphFrame(9)).rejects.toThrow('NETWORK_SCENARIO_FRAME_MISSING:demo-ahb:h9');
++  });
++
++  test('a scenario frame is JSON-safe, which is what lets a browser demo be recorded', async () => {
++    const source = scenarioNetworkTimelineSource('demo', [{
++      height: 1,
++      timestamp: 1_000,
++      runtimeInput: { runtimeTxs: [], jInputs: [], entityInputs: [] },
++      gossip: { profiles: [{ entityId: '0xALICE', name: 'Alice' }] },
++      eReplicas: new Map([['0xalice:s', {
++        entityId: '0xALICE',
++        state: { accounts: new Map([['0xhub', { currentHeight: 4 }]]) },
++      }]]),
++    }] as never);
++
++    const frame = await source.readGraphFrame(1);
++
++    expect(frame.runtimeId).toBe('demo');
++    expect(frame.height).toBe(1);
++    expect(frame.entities[0]?.summary.label).toBe('Alice');
++    expect(frame.entities[0]?.accounts.items[0]).toMatchObject({
++      leftEntity: '0xalice',
++      rightEntity: '0xhub',
++      currentHeight: 4,
++    });
++    // Frames carry Maps and bigints, so the trail codec — not plain JSON — is what must
++    // round-trip them.
++    const trail = { version: 1 as const, runtimeId: 'demo', index: { runtimeId: 'demo', frames: [] }, frames: { '1': frame }, activity: [] };
++    expect(parseNetworkTrail(serializeNetworkTrail(trail))).toEqual(trail);
++  });
++
++  test('a trail survives a URL round trip with its bigints and maps intact', async () => {
++    // Deltas are bigints inside a Map — plain JSON drops both, and a demo without deltas
++    // renders as bare spheres with no credit or collateral.
++    const trail = {
++      version: 1 as const,
++      runtimeId: 'demo',
++      index: { runtimeId: 'demo', frames: [{ runtimeId: 'demo', height: 1, timestamp: 10, stateHash: 's', materialized: true, graphChanged: true }] },
++      frames: {
++        '1': {
++          runtimeId: 'demo',
++          height: 1,
++          entities: [{
++            summary: { entityId: '0xalice', label: 'Alice' },
++            core: { reserves: new Map([[1, 5_000n]]) },
++            accounts: { items: [{ leftEntity: '0xalice', rightEntity: '0xhub', deltas: new Map([[1, { collateral: 10n, offdelta: -3n }]]) }] },
++          }],
++        },
++      },
++      activity: [],
++    } as never;
++
++    const encoded = await encodeNetworkTrailForHash(trail);
++    expect(encoded).not.toMatch(/[+/=]/); // URL-safe: survives being pasted into a hash
++
++    const restored = await decodeNetworkTrailFromHash(encoded);
++    const account = restored.frames['1']?.entities[0]?.accounts.items[0] as never as { deltas: Map<number, { collateral: bigint }> };
++    expect(account.deltas.get(1)?.collateral).toBe(10n);
++    expect((restored.frames['1']?.entities[0]?.core as never as { reserves: Map<number, bigint> }).reserves.get(1)).toBe(5_000n);
++    expect(restored).toEqual(trail);
++
++    // Replaying the decoded trail must behave like the original.
++    expect((await trailNetworkTimelineSource(restored).readIndex()).frames).toHaveLength(1);
++  });
++
++  test('rejects a trail that is not a trail instead of rendering garbage', async () => {
++    await expect(decodeNetworkTrailFromHash('not-gzip')).rejects.toThrow();
++    expect(() => parseNetworkTrail('{"version":2}')).toThrow('NETWORK_TRAIL_VERSION_UNSUPPORTED');
++    expect(() => parseNetworkTrail('{"version":1}')).toThrow('NETWORK_TIMELINE_RUNTIME_ID_REQUIRED');
++  });
++
++  test('a scenario frame carries the deltas and reserves the graph renders', async () => {
++    const source = scenarioNetworkTimelineSource('demo', [{
++      height: 1,
++      timestamp: 1_000,
++      runtimeInput: { runtimeTxs: [], jInputs: [], entityInputs: [] },
++      eReplicas: new Map([['0xalice:s', {
++        entityId: '0xALICE',
++        signerId: 's',
++        state: {
++          profile: { name: 'Alice', isHub: false },
++          reserves: new Map([[1, 7n]]),
++          accounts: new Map([['0xhub', {
++            status: 'open',
++            currentHeight: 3,
++            mempool: [{ type: 'directPayment' }],
++            deltas: new Map([[1, { tokenId: 1, collateral: 100n, offdelta: -5n }]]),
++            activeDispute: { startedByLeft: true, disputeTimeout: 42, initialNonce: 7 },
++          }]]),
++        },
++      }]]),
++    }] as never);
++
++    const entity = (await source.readGraphFrame(1)).entities[0]!;
++    const account = entity.accounts.items[0] as never as {
++      deltas: Map<number, { collateral: bigint }>;
++      mempoolCount: number;
++      activeDispute: { initialDisputeNonce: number };
++    };
++
++    // Without these the bars, the mempool boxes and the dispute marker all render empty.
++    expect(account.deltas.get(1)?.collateral).toBe(100n);
++    expect(account.mempoolCount).toBe(1);
++    expect(account.activeDispute.initialDisputeNonce).toBe(7);
++    expect(entity.core?.reserves).toEqual(new Map([[1, 7n]]));
++    expect(entity.summary.label).toBe('Alice');
++  });
++
++  test('a trail reports a missing frame instead of rendering a hole', async () => {
++    const replay = trailNetworkTimelineSource({
++      version: 1,
++      runtimeId: 'h1',
++      index: { runtimeId: 'h1', frames: [] },
++      frames: {},
++      activity: [],
++    });
++    await expect(replay.readGraphFrame(4)).rejects.toThrow('NETWORK_TRAIL_FRAME_MISSING:h1:h4');
++    expect(() => trailNetworkTimelineSource({ version: 2 } as never)).toThrow('NETWORK_TRAIL_VERSION_UNSUPPORTED');
++  });
++});
++
++describe('network caption', () => {
++  const step = (height: number, cues: Array<{ title: string; subtitle?: string; accent?: string }> = []) => ({
++    runtimeId: 'h1',
++    height,
++    cues: cues.map((cue, index) => ({ id: `cue-${index}`, at: { runtimeId: 'h1', height, timestamp: 1 }, ...cue })) as never,
++  });
++
++  test('derives the caption from runtime activity, so live debugging needs no authoring', () => {
++    const events = [activityEvent(2, 'b', 'Alice → Hub', '100 USDC routed')];
++
++    const caption = captionForStep(step(2), events);
++
++    expect(caption).toEqual({
++      title: 'Alice → Hub',
++      subtitle: '100 USDC routed',
++      mechanic: 'Bilateral transfer — settled between two parties, nothing on-chain.',
++      extraCount: 0,
++      source: 'activity',
++    });
++  });
++
++  test('counts the remaining events of a busy frame instead of hiding them', () => {
++    const events = [
++      activityEvent(2, 'b', 'Alice → Hub'),
++      activityEvent(2, 'c', 'Hub → Bob'),
++      activityEvent(2, 'd', 'Bob settles'),
++      activityEvent(3, 'e', 'next frame'),
++    ];
++
++    const caption = captionForStep(step(2), events);
++
++    expect(caption.title).toBe('Alice → Hub');
++    expect(caption.extraCount).toBe(2);
++  });
++
++  test('an authored cue wins over derived activity', () => {
++    const events = [activityEvent(2, 'b', 'Alice → Hub')];
++
++    const caption = captionForStep(step(2, [{ title: 'Bank run begins', subtitle: 'Hub stops cooperating', accent: '#f00' }]), events);
++
++    expect(caption).toEqual({
++      title: 'Bank run begins',
++      subtitle: 'Hub stops cooperating',
++      mechanic: '',
++      extraCount: 0,
++      source: 'cue',
++      accent: '#f00',
++    });
++  });
++
++  test('falls back to the frame number rather than showing an empty caption', () => {
++    expect(captionForStep(step(7), [])).toEqual({
++      title: 'Frame 7',
++      subtitle: '',
++      mechanic: '',
++      extraCount: 0,
++      source: 'frame',
++    });
++  });
++
++  test('explains the mechanic behind each step instead of echoing the tx type', () => {
++    const mechanicOf = (type: string, rawType: string) =>
++      captionForStep(step(2), [{ ...activityEvent(2, 'b', 'x'), type, rawType } as never]).mechanic;
++
++    expect(mechanicOf('payment', 'directPayment')).toContain('nothing on-chain');
++    expect(mechanicOf('htlc', 'htlc_lock')).toContain('cannot take the money mid-hop');
++    expect(mechanicOf('settlement', 'settle_approve')).toContain('only the difference');
++    expect(mechanicOf('j_batch', 'jInput')).toContain('one on-chain transaction');
++    // Raw type is sharper than the coarse category where it matters.
++    expect(mechanicOf('account', 'set_credit_limit')).toContain('without locking collateral');
++    expect(mechanicOf('account', 'reserveToCollateral')).toContain('costs a J-transaction');
++    expect(mechanicOf('account', 'openAccount')).toContain('no network-wide registration');
++    expect(mechanicOf('j_event', 'disputeStarted')).toContain('last signed frame');
++    expect(mechanicOf('unknown-type', 'whatever')).toBe('');
++  });
++
++  test('names participants and formats amounts instead of showing hex and minor units', () => {
++    const event = { ...activityEvent(2, 'b', 'Payment sent'), entityId: '0xalice', counterpartyId: '0xhub', tokenId: 1, amount: '100000000', direction: 'out' } as never;
++    const context = {
++      labelFor: (id: string) => ({ '0xalice': 'Alice', '0xhub': 'Hub' })[id] ?? '',
++      formatAmount: (tokenId: number, minor: string) => `${Number(minor) / 1e6} USDC${tokenId === 1 ? '' : '?'}`,
++    };
++
++    expect(describeEvent(event, context)).toBe('100 USDC  ·  Alice → Hub');
++    expect(captionForStep(step(2), [event], context).subtitle).toBe('100 USDC  ·  Alice → Hub');
++  });
++
++  test('falls back to shortened ids and the runtime subtitle without a context', () => {
++    const known = { ...activityEvent(2, 'b', 'Payment sent'), entityId: '0xaaaabbbbccccdddd', counterpartyId: '0x1111222233334444', tokenId: 1, amount: '5', direction: 'out' } as never;
++    expect(describeEvent(known)).toBe('5 (token 1)  ·  0xaaaa…dddd → 0x1111…4444');
++
++    const bare = { ...activityEvent(2, 'c', 'System', 'runtime bookkeeping') } as never;
++    expect(describeEvent(bare)).toBe('runtime bookkeeping');
++  });
++
++  test('ignores activity belonging to another runtime at the same height', () => {
++    const foreign = { ...activityEvent(2, 'x', 'other network'), runtimeId: 'h2' };
++    const mine = activityEvent(2, 'b', 'Alice → Hub');
++
++    expect(activityForStep([foreign, mine], step(2)).map((event) => event.id)).toEqual(['b']);
++    expect(captionForStep(step(2), [foreign, mine]).title).toBe('Alice → Hub');
++  });
++});

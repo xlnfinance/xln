@@ -1,0 +1,20 @@
+HISTORICAL NON-EXECUTABLE EVIDENCE - do not apply over current main.
+This draft predates the current canonical implementation; see README.md.
+stash: stash@{12} bbb422bb607779b671fc06441c8e3711248211b4
+subject: On main: deploy-timestamp-jurisdictions
+date: 2026-06-19T23:41:08+03:00
+base: ef0df7f00a6f2463877d692c9a97cdbde6c894f9
+sections: tracked worktree diff, then untracked files as new files
+
+diff --git a/jurisdictions/jurisdictions.json b/jurisdictions/jurisdictions.json
+index 55c7efafbb3733ad3569028f5dc79694b9f36ea8..bb23d49cb9e357807ecc3ca74d11c69aaba98d40 100644
+--- a/jurisdictions/jurisdictions.json
++++ b/jurisdictions/jurisdictions.json
+@@ -1,6 +1,6 @@
+ {
+   "version": "3",
+-  "lastUpdated": "2026-06-19T01:43:22.908Z",
++  "lastUpdated": "2026-06-19T20:23:53.590Z",
+   "jurisdictions": {
+     "arrakis": {
+       "name": "Testnet",

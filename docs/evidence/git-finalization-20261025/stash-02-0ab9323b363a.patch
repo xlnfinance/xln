@@ -1,0 +1,292 @@
+HISTORICAL NON-EXECUTABLE EVIDENCE - do not apply over current main.
+This draft predates the current canonical implementation; see README.md.
+stash: stash@{2} 0ab9323b363aab58f4e57c25b2de87047054f75d
+subject: On main: unfinished React file recovery UI pending E2E 20261012
+date: 2026-10-12T03:33:35+03:00
+base: f110fcf36b1abdb4d9730690ba301ee43d10a097
+sections: tracked worktree diff, then untracked files as new files
+
+diff --git a/ui/src/components/RestoreChoice.tsx b/ui/src/components/RestoreChoice.tsx
+index 4109972f927496c0beed9d10a1f620b85ed9afee..d13d10c1de89295e7c03f3a5c88d85be8b7f0ae5 100644
+--- a/ui/src/components/RestoreChoice.tsx
++++ b/ui/src/components/RestoreChoice.tsx
+@@ -1,6 +1,9 @@
+-type Props = { enabled: boolean; address: string; onToggle: (enabled: boolean) => void; onAddress: (address: string) => void };
++type Props = {
++	enabled: boolean; address: string; onToggle: (enabled: boolean) => void; onAddress: (address: string) => void;
++	source: 'tower' | 'file'; onSource: (source: 'tower' | 'file') => void; onFile: (file: File | null) => void;
++};
+ 
+-export function RestoreChoice({ enabled, address, onToggle, onAddress }: Props) {
++export function RestoreChoice({ enabled, address, onToggle, onAddress, source, onSource, onFile }: Props) {
+ 	return (
+ 		<div className="field">
+ 			<label className="field-row">
+@@ -8,10 +11,21 @@ export function RestoreChoice({ enabled, address, onToggle, onAddress }: Props)
+ 				<span>Restore a backup on this device</span>
+ 			</label>
+ 			{enabled && <>
++				<label className="field">
++					<span className="field-label">Backup source</span>
++					<select className="input" value={source} onChange={event => onSource(event.target.value === 'file' ? 'file' : 'tower')} data-testid="restore-source">
++						<option value="tower">Backup tower</option>
++						<option value="file">Saved backup file</option>
++					</select>
++				</label>
++				{source === 'file' ? <label className="field">
++					<span className="field-label">Encrypted backup file</span>
++					<input className="input" type="file" accept=".json,application/json" required onChange={event => onFile(event.target.files?.[0] ?? null)} data-testid="restore-file" />
++				</label> :
+ 				<label className="field">
+ 					<span className="field-label">Your backup tower</span>
+ 					<input className="input" type="url" value={address} onChange={event => onAddress(event.target.value)} placeholder="https://your-tower.example" required data-testid="restore-tower-url" />
+-				</label>
++				</label>}
+ 				<p className="note">Your phrase decrypts the backup here. Restoration checks its signatures and requires a device with no local data for this wallet.</p>
+ 			</>}
+ 		</div>
+diff --git a/ui/src/runtime/financial/sovereignty.ts b/ui/src/runtime/financial/sovereignty.ts
+index ff218c1eef3fe1c4ec911cc3fd0e4366f3b7f6f9..35c2d485d048a33afe2cab52d27244ab7dca941b 100644
+--- a/ui/src/runtime/financial/sovereignty.ts
++++ b/ui/src/runtime/financial/sovereignty.ts
+@@ -2,10 +2,8 @@
+  * What makes this wallet sovereign, as facts the runtime can prove: where the
+  * keys are, which frames both sides signed, what a counterparty could walk
+  * away with, and how long each side has to answer a dispute. Everything here
+- * is read from the account documents; the evidence bundle is the same hankos
+- * a dispute would put on-chain.
++ * is read from the account documents.
+  */
+-import type { RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
+ import type { AccountView } from '../views';
+ import { usdOf } from './prices';
+ 
+@@ -72,51 +70,3 @@ export function formatDuration(seconds: number): string {
+ 	return `${seconds} s`;
+ }
+ 
+-/**
+- * The portable proof of every account: frame hashes and both parties' hankos,
+- * plus the dispute-proof hankos. Enough to start a dispute from any runtime.
+- */
+-export function evidenceBundle(frame: RuntimeAdapterViewFrame | null, accounts: AccountView[], entityId: string): Record<string, unknown> {
+-	const core = frame?.activeEntity?.core;
+-	return {
+-		format: 'xln-wallet-evidence/1',
+-		exportedAt: new Date().toISOString(),
+-		entityId,
+-		runtimeHeight: frame?.height ?? 0,
+-		entityHeight: core?.height ?? 0,
+-		jurisdiction: core?.config?.jurisdiction
+-			? { name: core.config.jurisdiction.name, depositoryAddress: core.config.jurisdiction.depositoryAddress, entityProviderAddress: core.config.jurisdiction.entityProviderAddress }
+-			: null,
+-		accounts: accounts.map(account => {
+-			const doc = account.doc;
+-			const frameDoc = doc.currentFrame;
+-			return {
+-				counterpartyId: account.counterpartyId,
+-				leftEntity: doc.state?.leftEntity,
+-				rightEntity: doc.state?.rightEntity,
+-				height: frameDoc?.height ?? 0,
+-				frameHash: frameDoc?.stateHash ?? null,
+-				accountStateRoot: frameDoc?.accountStateRoot ?? null,
+-				prevFrameHash: frameDoc?.prevFrameHash ?? null,
+-				jHeight: frameDoc?.jHeight ?? null,
+-				ourFrameHanko: doc.currentFrameHanko ?? null,
+-				theirFrameHanko: doc.counterpartyFrameHanko ?? null,
+-				disputeProof: {
+-					ourHanko: doc.currentDisputeProofHanko ?? null,
+-					ourNonce: doc.currentDisputeProofNonce ?? null,
+-					ourBodyHash: doc.currentDisputeProofBodyHash ?? null,
+-					theirHanko: doc.counterpartyDisputeProofHanko ?? null,
+-					theirNonce: doc.counterpartyDisputeProofNonce ?? null,
+-					theirBodyHash: doc.counterpartyDisputeProofBodyHash ?? null,
+-				},
+-				disputeConfig: doc.state?.disputeConfig ?? null,
+-				status: doc.status ?? 'active',
+-			};
+-		}),
+-	};
+-}
+-
+-/** JSON with bigints as strings, ready for a Blob download. */
+-export function serializeEvidence(bundle: Record<string, unknown>): string {
+-	return JSON.stringify(bundle, (_key, value: unknown) => (typeof value === 'bigint' ? value.toString() : value), 2);
+-}
+diff --git a/ui/src/runtime/restore.ts b/ui/src/runtime/restore.ts
+index add6073315f61c151ba4649711085726f2beca49..c328cdba727cf2e720a042b25b7232f38a34613a 100644
+--- a/ui/src/runtime/restore.ts
++++ b/ui/src/runtime/restore.ts
+@@ -8,6 +8,12 @@ import { hasLocalWalletData } from './local-wallet-data';
+ 
+ export type { RuntimeRecoveryCandidate };
+ 
++export async function discoverFileRestore(seed: string, file: File): Promise<RuntimeRecoveryCandidate> {
++	await requireFreshDevice(runtimeIdForSeed(seed).toLowerCase());
++	const xln = await getXLN();
++	return xln.parseRuntimeRecoveryCandidateFile(seed, await file.text(), { sourceLabel: file.name, crypto: xln });
++}
++
+ export async function discoverTowerRestore(seed: string, address: string, signal?: AbortSignal): Promise<RuntimeRecoveryCandidate> {
+ 	signal?.throwIfAborted();
+ 	await requireFreshDevice(runtimeIdForSeed(seed).toLowerCase());
+diff --git a/ui/src/screens/Gate.tsx b/ui/src/screens/Gate.tsx
+index f742f51f1edb9206556fe51c7bca85227754ec1d..ec1b4036a5d98f7e04d70ed7cd0a40884c2b947c 100644
+--- a/ui/src/screens/Gate.tsx
++++ b/ui/src/screens/Gate.tsx
+@@ -8,7 +8,7 @@ import { Icon } from '../components/Icons';
+ import { Logo } from '../components/Logo';
+ import { GateWelcome } from '../components/GateWelcome';
+ import { RestoreChoice } from '../components/RestoreChoice';
+-import { discoverTowerRestore } from '../runtime/restore';
++import { discoverFileRestore, discoverTowerRestore } from '../runtime/restore';
+ import { defaultTowerUrl, normalizeTowerUrl, saveRecovery } from '../runtime/recovery';
+ import { useApp } from '../runtime/store';
+ import { bootHostedVault, detectStack, type Stack } from '../runtime/hosted';
+@@ -52,6 +52,8 @@ export function Gate() {
+ 	const [customShards, setCustomShards] = useState('');
+ 	const [phrase, setPhrase] = useState('');
+ 	const [restore, setRestore] = useState(false);
++	const [restoreSource, setRestoreSource] = useState<'tower' | 'file'>('tower');
++	const [restoreFile, setRestoreFile] = useState<File | null>(null);
+ 	const [towerUrl, setTowerUrl] = useState(defaultTowerUrl);
+ 	const [backupEnabled, setBackupEnabled] = useState(() => Boolean(defaultTowerUrl()));
+ 	const [wsUrl, setWsUrl] = useState('wss://xln.finance/rpc');
+@@ -86,10 +88,14 @@ export function Gate() {
+ 	const recoveryFor = async (seed: string) => {
+ 		if (!restore) return undefined;
+ 		setBusyStep('Finding and verifying your encrypted backup');
++		if (restoreSource === 'file') {
++			if (!restoreFile) throw new Error('Choose your encrypted backup file.');
++			return discoverFileRestore(seed, restoreFile);
++		}
+ 		return discoverTowerRestore(seed, towerUrl);
+ 	};
+ 	const rememberTower = (vaultId: string): void => {
+-		if (restore || backupEnabled) saveRecovery(vaultId, { mode: 'tower', towers: [normalizeTowerUrl(towerUrl)] });
++		if ((restore && restoreSource === 'tower') || backupEnabled) saveRecovery(vaultId, { mode: 'tower', towers: [normalizeTowerUrl(towerUrl)] });
+ 	};
+ 
+ 	const NO_STACK = 'No xln network answers at this address. Open the wallet from a running stack (bun run dev, or xln.finance/ui).';
+@@ -114,7 +120,7 @@ export function Gate() {
+ 	const createVault = (): void => {
+ 		if (!work) return;
+ 		void run(async () => {
+-			if (backupEnabled || restore) normalizeTowerUrl(towerUrl);
++			if (backupEnabled || (restore && restoreSource === 'tower')) normalizeTowerUrl(towerUrl);
+ 			setBusyStep('Deriving your vault');
+ 			deriveAbort.current = new AbortController();
+ 			let result;
+@@ -346,7 +352,7 @@ export function Gate() {
+ 						<p className="note">Dispute protection is offered on the home screen after your first account is signed. Check the tower’s response status; storing a backup does not mean it will answer disputes.</p>
+ 						{!defaultTowerUrl() && <p className="note">This local testnet has no default tower. Add a running local service to enable backups.</p>}
+ 					</details>
+-					<RestoreChoice enabled={restore} address={towerUrl} onToggle={setRestore} onAddress={setTowerUrl} />
++					<RestoreChoice enabled={restore} address={towerUrl} onToggle={setRestore} onAddress={setTowerUrl} source={restoreSource} onSource={setRestoreSource} onFile={setRestoreFile} />
+ 					<div className="gate-form-actions">
+ 						<button type="button" className="btn quiet" onClick={() => setMode('landing')}>
+ 							Back
+@@ -370,7 +376,7 @@ export function Gate() {
+ 						<span className="field-label">Recovery phrase</span>
+ 						<textarea className="input boxed" rows={3} value={phrase} onChange={e => setPhrase(e.target.value)} placeholder="words separated by spaces" autoFocus />
+ 					</label>
+-					<RestoreChoice enabled={restore} address={towerUrl} onToggle={setRestore} onAddress={setTowerUrl} />
++					<RestoreChoice enabled={restore} address={towerUrl} onToggle={setRestore} onAddress={setTowerUrl} source={restoreSource} onSource={setRestoreSource} onFile={setRestoreFile} />
+ 					<div className="gate-form-actions">
+ 						<button type="button" className="btn quiet" onClick={() => setMode('landing')}>
+ 							Back
+diff --git a/ui/src/screens/Sovereignty.tsx b/ui/src/screens/Sovereignty.tsx
+index 316d6e7710a943c906150a7398541bc0e23b5869..054cd044d1a7a4947d0943ed30f67822fadf16e6 100644
+--- a/ui/src/screens/Sovereignty.tsx
++++ b/ui/src/screens/Sovereignty.tsx
+@@ -1,14 +1,16 @@
+-import { useMemo } from 'react';
++import { useMemo, useState } from 'react';
+ import { useNavigate } from 'react-router-dom';
+ import { Bar } from '../components/Bars';
+ import { CopyId } from '../components/CopyId';
+ import { Icon } from '../components/Icons';
+ import { Watchtower } from '../components/Watchtower';
+-import { getAdapter } from '../runtime/adapter';
++import { getAdapter, getEmbeddedEnv } from '../runtime/adapter';
+ import { useApp } from '../runtime/store';
+ import { formatUsd, shortId, timeAgo } from '../runtime/format';
+ import { useWallet } from '../runtime/views';
+-import { accountSafety, evidenceBundle, formatDuration, serializeEvidence } from '../runtime/financial/sovereignty';
++import { accountSafety, formatDuration } from '../runtime/financial/sovereignty';
++import { encryptTip } from '../runtime/recovery';
++import { getXLN } from '../runtime/xln-loader';
+ 
+ /**
+  * The certainty screen. Not balances: who holds the keys, which state is
+@@ -20,6 +22,9 @@ export function Sovereignty() {
+ 	const entityId = useApp(s => s.activeEntityId);
+ 	const vaults = useApp(s => s.vaults);
+ 	const activeVaultId = useApp(s => s.activeVaultId);
++	const sessionSeeds = useApp(s => s.sessionSeeds);
++	const [exporting, setExporting] = useState(false);
++	const [exportError, setExportError] = useState<string | null>(null);
+ 	const toast = useApp(s => s.toast);
+ 	const wallet = useWallet(entityId);
+ 	const vault = vaults.find(entry => entry.id === activeVaultId) ?? null;
+@@ -43,16 +48,25 @@ export function Sovereignty() {
+ 					? `Held by the runtime at ${vault.remote?.wsUrl ?? '—'}. This device only reads and, with an admin key, instructs.`
+ 					: 'A throwaway tour phrase on the live network. Test money only.';
+ 
+-	const exportEvidence = (): void => {
+-		const text = serializeEvidence(evidenceBundle(wallet.frame, wallet.accounts, wallet.entityId));
+-		const blob = new Blob([text], { type: 'application/json' });
+-		const url = URL.createObjectURL(blob);
+-		const anchor = document.createElement('a');
+-		anchor.href = url;
+-		anchor.download = `xln-evidence-${wallet.entityId.slice(2, 10)}-${wallet.frameHeight}.json`;
+-		anchor.click();
+-		setTimeout(() => URL.revokeObjectURL(url), 1_000);
+-		toast('Evidence bundle saved');
++	const seed = activeVaultId ? sessionSeeds[activeVaultId] : undefined;
++	const exportEvidence = async (): Promise<void> => {
++		setExportError(null);
++		setExporting(true);
++		try {
++			const env = getEmbeddedEnv();
++			if (!env || !seed) throw new Error('Unlock this wallet on this device to save a backup.');
++			const bundle = await encryptTip(await getXLN(), env, seed);
++			if (!bundle) throw new Error('There is no committed wallet state to back up yet.');
++			const url = URL.createObjectURL(new Blob([JSON.stringify({ bundle })], { type: 'application/json' }));
++			const anchor = document.createElement('a');
++			anchor.href = url;
++			anchor.download = `xln-recovery-${wallet.entityId.slice(2, 10)}.json`;
++			anchor.click();
++			setTimeout(() => URL.revokeObjectURL(url), 1_000);
++			toast('Encrypted backup saved');
++		} catch (error) {
++			setExportError(error instanceof Error ? error.message : String(error));
++		} finally { setExporting(false); }
+ 	};
+ 
+ 	return (
+@@ -165,19 +179,20 @@ export function Sovereignty() {
+ 							<p className="note" style={{ marginTop: 10 }} data-testid="evidence-preview">
+ 								Inside: {safety.length} {safety.length === 1 ? 'account' : 'accounts'} ·{' '}
+ 								{safety.map(entry => `${entry.label} at frame #${entry.frameHeight}${entry.frameCosigned ? ', co-signed' : ''}`).join(' · ')} · both parties&apos;
+-								signatures and dispute proofs, as JSON. Nothing in it lets anyone spend.
++								signatures and Account states in an encrypted recovery snapshot.
+ 							</p>
+ 						) : null}
+ 						<button type="button" className="btn quiet" style={{ marginTop: 12, marginRight: 8 }} onClick={() => window.print()} data-testid="sovereignty-print" title="This page as a printed report or PDF, for a board or an auditor">
+ 							Print report / PDF
+ 						</button>
+-						<button type="button" className="btn" style={{ marginTop: 12 }} onClick={exportEvidence} disabled={safety.length === 0} data-testid="evidence-export">
++						<button type="button" className="btn" style={{ marginTop: 12 }} onClick={exportEvidence} disabled={exporting || !seed || !getEmbeddedEnv()} data-testid="evidence-export">
+ 							<Icon name="shield" size={15} />
+-							Save evidence bundle
++							{exporting ? 'Saving backup…' : 'Save encrypted backup'}
+ 						</button>
+ 						<p className="note" style={{ marginTop: 8 }}>
+-							Frame hashes and both parties' signatures for every account. Keep it off this device; any runtime can open a dispute from it.
++							Keep a current copy off this device. Restore it with your recovery phrase on a fresh browser profile to recover signed accounts and enforce their claims.
+ 						</p>
++						{exportError && <p role="alert" className="note">{exportError}</p>}
+ 					</div>
+ 				</div>
+ 				<div className="aside">

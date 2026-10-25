@@ -1,0 +1,307 @@
+HISTORICAL NON-EXECUTABLE EVIDENCE - do not apply over current main.
+This draft predates the current canonical implementation; see README.md.
+stash: stash@{6} 6de7e55cfec4bd4d698574f950e29d126c303984
+subject: On perf/1000tps: wip-cancel-failfast
+date: 2026-08-20T02:31:45+03:00
+base: 6f620ed0fab929a3b2eca37a553fb006d654964b
+sections: tracked worktree diff, then untracked files as new files
+
+diff --git a/core/__tests__/helpers/entity-proposal-fixture.ts b/core/__tests__/helpers/entity-proposal-fixture.ts
+index 9691e8849afff1fbdde2cbe5e18327678a635e8c..fc8ec1e4e233782171d61572cdb6619c4839b0a1 100644
+--- a/core/__tests__/helpers/entity-proposal-fixture.ts
++++ b/core/__tests__/helpers/entity-proposal-fixture.ts
+@@ -5,6 +5,8 @@ import {
+   registerSignerKey,
+   signAccountFrame,
+ } from '../../account/crypto';
++import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
++import { computeEntityAccountValueHash } from '../../entity/consensus/state-root';
+ import { applyEntityInput } from '../../entity/consensus';
+ import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
+ import { buildEntityHashesToSign } from '../../entity/consensus/input/hanko-witness';
+@@ -47,7 +49,7 @@ export const createEntityProposalFixture = (
+       shares: Object.fromEntries(validators.map(validator => [validator, 1n])),
+     },
+     reserves: new Map(),
+-    accounts: new Map(),
++    accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
+     lastFinalizedJHeight: 0,
+     profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
+     htlcRoutes: new Map(),
+diff --git a/core/__tests__/security/authority/signed-entity-command.test.ts b/core/__tests__/security/authority/signed-entity-command.test.ts
+index a19a11cbb4df7d5170605e04d4d4c9235e7acdb1..94e2943cae0ffe85c13923e2a0dce8685586abb7 100644
+--- a/core/__tests__/security/authority/signed-entity-command.test.ts
++++ b/core/__tests__/security/authority/signed-entity-command.test.ts
+@@ -1,4 +1,6 @@
+ import { describe, expect, test } from 'bun:test';
++import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
++import { computeEntityAccountValueHash } from '../../entity/consensus/state-root';
+ 
+ import {
+   deriveSignerAddressSync,
+@@ -6,7 +8,7 @@ import {
+   registerSignerKey,
+   signAccountFrame,
+ } from '../../../account/crypto';
+-import {
++import { getEntityCommandDisposition,
+   advanceEntityCommandNonce,
+   assertSignedEntityCommand,
+   buildSignedEntityCommand,
+@@ -94,7 +96,7 @@ const setup = (label: string) => {
+     proposals: new Map(),
+     config,
+     reserves: new Map(),
+-    accounts: new Map(),
++    accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
+     lastFinalizedJHeight: 0,
+     profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
+     htlcRoutes: new Map(),
+@@ -386,26 +388,28 @@ describe('signed Entity command admission', () => {
+     expect(hashEntityCommand({ ...body, boardEpoch: body.boardEpoch + 1 })).not.toBe(hashEntityCommand(body));
+   });
+ 
+-  test('accepts exact committed retry but rejects same-nonce different bytes', () => {
++  test('accepts exact committed retry and cancels same-nonce different bytes', () => {
+     const { env, signerId, state } = setup('replay');
+     const command = buildSignedEntityCommand(env, state, signerId, [chatCommand(signerId)]);
+     const advanced = advanceEntityCommandNonce(state, assertSignedEntityCommand(env, state, command));
+     expect(assertSignedEntityCommand(env, advanced, command)).toEqual(command);
+     expect(advanceEntityCommandNonce(advanced, command)).toBe(advanced);
+ 
++    // Nonces only grow: a rewritten same-slot command is cancelled in favor of
++    // the committed bytes — no error, no state change, nested txs never run.
+     const conflicting = buildSignedEntityCommand(env, state, signerId, [chatCommand(signerId, 'equivocation')]);
+-    expect(() => assertSignedEntityCommand(env, advanced, conflicting))
+-      .toThrow(`ENTITY_COMMAND_NONCE_EQUIVOCATION:${signerId}:1`);
++    expect(getEntityCommandDisposition(advanced, conflicting)).toBe('cancel');
++    expect(advanceEntityCommandNonce(advanced, conflicting)).toBe(advanced);
+   });
+ 
+-  test('rejects an older command after a later nonce is committed', () => {
++  test('cancels an older command after a later nonce is committed', () => {
+     const { env, signerId, state } = setup('stale');
+     const first = buildSignedEntityCommand(env, state, signerId, [chatCommand(signerId, 'first')]);
+     const afterFirst = advanceEntityCommandNonce(state, assertSignedEntityCommand(env, state, first));
+     const second = buildSignedEntityCommand(env, afterFirst, signerId, [chatCommand(signerId, 'second')]);
+     const afterSecond = advanceEntityCommandNonce(afterFirst, assertSignedEntityCommand(env, afterFirst, second));
+-    expect(() => assertSignedEntityCommand(env, afterSecond, first))
+-      .toThrow(`ENTITY_COMMAND_NONCE_STALE:${signerId}:1:2`);
++    expect(getEntityCommandDisposition(afterSecond, first)).toBe('cancel');
++    expect(advanceEntityCommandNonce(afterSecond, first)).toBe(afterSecond);
+   });
+ 
+   test('uses a certified alias-to-EOA binding on an independent validator runtime', () => {
+@@ -730,7 +734,7 @@ describe('signed Entity command admission', () => {
+     const advanced = advanceEntityCommandNonce(state, assertSignedEntityCommand(env, state, command));
+     const restored = hydrateEntityStateFromStorage({
+       core: projectEntityCoreDoc(advanced),
+-      accounts: new Map(),
++      accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
+       books: new Map(),
+     });
+     expect(restored.entityCommandNonces).toEqual(advanced.entityCommandNonces);
+diff --git a/core/entity/command/command-codec.ts b/core/entity/command/command-codec.ts
+index ba820cd7497616ff24c7fe121e4ef4db11105c8b..83f9284c67528f36dbe3763209239af940f3c37a 100644
+--- a/core/entity/command/command-codec.ts
++++ b/core/entity/command/command-codec.ts
+@@ -231,17 +231,10 @@ export const mergeEntityCommandTransactions = (txs: EntityTx[]): EntityTx[] => {
+     const identity = encodeCanonicalConsensusValue(command);
+     const prior = commands.get(slot);
+     if (prior === identity) continue;
+-    if (prior !== undefined) {
+-      // Equivocation evidence: an unexplained same-nonce byte change is the
+-      // root cause of stuck bilateral legs (the receiver evicts, the sender
+-      // waits for an ack forever). Name both canonical bodies so the diff is
+-      // one grep away instead of a re-run race.
+-      throw new Error(
+-        `ENTITY_COMMAND_NONCE_EQUIVOCATION:${command.authorSignerId}:${command.nonce.toString()}` +
+-        `:prior=${prior.slice(0, 512)}` +
+-        `:next=${identity.slice(0, 512)}`,
+-      );
+-    }
++    // Nonces only grow: a rewritten same-slot command is cancelled in favor of
++    // the bytes already in this batch; a loud error here evicted whole legs on
++    // rebuilt retries and stranded the sender's account frames.
++    if (prior !== undefined) continue;
+     commands.set(slot, identity);
+     merged.push({ type: 'entityCommand', data: command });
+   }
+diff --git a/core/entity/command/index.ts b/core/entity/command/index.ts
+index 6a2ca7ba92002f92b4ca78dbe6c392fa10c6285c..d11bc761e2f00f8711fcb75dc38abf6189c7c105 100644
+--- a/core/entity/command/index.ts
++++ b/core/entity/command/index.ts
+@@ -1,5 +1,4 @@
+ import { getSignerAddress, signAccountFrame, verifyAccountSignature } from '../../account/crypto';
+-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+ import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../../protocol/identity/account-watch-seed';
+ import { canonicalAccountDisputeConfig } from '../../account/config/dispute-config';
+ import {
+@@ -224,7 +223,7 @@ export const nextEntityCommandNonce = (
+   ) + 1n;
+ };
+ 
+-export type EntityCommandDisposition = 'next' | 'retry';
++export type EntityCommandDisposition = 'next' | 'retry' | 'cancel';
+ 
+ /** Classify only against the bounded latest slot for this board member. */
+ export const getEntityCommandDisposition = (
+@@ -242,24 +241,17 @@ export const getEntityCommandDisposition = (
+     return 'next';
+   }
+   const commandHash = hashEntityCommand(command);
++  // Entity-command nonces only grow. A nonce that is not strictly the next
++  // expected one is a cancel: the committed slot already stands, and whatever
++  // bytes arrive for an old (or same, rewritten) slot are dropped without
++  // error — the sender's authoritative state is the certified chain, not this
++  // delivery. Only an exact byte retry is acknowledged as idempotent. A gap
++  // above the frontier stays a loud mismatch: it means a signed command went
++  // missing between two committed nonces.
+   if (command.nonce === latest.nonce) {
+-    if (commandHash !== latest.commandHash) {
+-      // Same-slot byte change: name both hashes plus the unsigned canonical
+-      // body so a stuck-leg investigation gets the diff from one log line.
+-      throw new EntityCommandRejectionError(
+-        `ENTITY_COMMAND_NONCE_EQUIVOCATION:${command.authorSignerId}:${command.nonce.toString()}` +
+-        `:priorHash=${latest.commandHash.slice(0, 34)}` +
+-        `:nextHash=${commandHash.slice(0, 34)}` +
+-        `:body=${encodeCanonicalConsensusValue({ ...command, signature: '' }).slice(0, 512)}`,
+-      );
+-    }
+-    return 'retry';
+-  }
+-  if (command.nonce < latest.nonce) {
+-    throw new EntityCommandRejectionError(
+-      `ENTITY_COMMAND_NONCE_STALE:${command.authorSignerId}:${command.nonce.toString()}:${latest.nonce.toString()}`,
+-    );
++    return commandHash === latest.commandHash ? 'retry' : 'cancel';
+   }
++  if (command.nonce < latest.nonce) return 'cancel';
+   const expectedNonce = latest.nonce + 1n;
+   if (command.nonce !== expectedNonce) {
+     throw new EntityCommandRejectionError(
+@@ -320,7 +312,7 @@ export const advanceEntityCommandNonce = (
+   command: SignedEntityCommandV1,
+ ): EntityState => {
+   const disposition = getEntityCommandDisposition(state, command);
+-  if (disposition === 'retry') return state;
++  if (disposition !== 'next') return state;
+   const nonceState = canonicalCommandNonceState(state, command.boardHash, command.boardEpoch);
+   const bySigner = new Map(nonceState.bySigner);
+   bySigner.set(command.authorSignerId, {
+@@ -455,7 +447,7 @@ export const prepareLocallyAuthoredEntityTxs = (
+         }
+         throw error;
+       }
+-      if (getEntityCommandDisposition(cursor, command) === 'retry') continue;
++      if (getEntityCommandDisposition(cursor, command) !== 'next') continue;
+       prepared.push({ type: 'entityCommand', data: command });
+       cursor = advanceEntityCommandNonce(cursor, command);
+       continue;
+diff --git a/core/entity/consensus/frame/application.ts b/core/entity/consensus/frame/application.ts
+index 74b3b2d0d5003a52479d4a6e4654672b97b9cf49..c594ea61755d1fc82547ca4cd5e83e2b17e68771 100644
+--- a/core/entity/consensus/frame/application.ts
++++ b/core/entity/consensus/frame/application.ts
+@@ -235,7 +235,10 @@ const applyNestedEntityTx = async (
+   if (tx.type !== 'entityCommand') return { handled: false, state };
+ 
+   const command = assertSignedEntityCommand(context.env, state, tx.data);
+-  if (getEntityCommandDisposition(state, command) === 'retry') {
++  if (getEntityCommandDisposition(state, command) !== 'next') {
++    // Exact retries and cancelled slots (not-next nonce) both advance nothing;
++    // a cancelled command's nested txs must not execute against the standing
++    // committed slot.
+     return { handled: true, state };
+   }
+   const applied = await applyEntityTxsInOrder({
+diff --git a/core/entity/scheduler/config/timing.ts b/core/entity/scheduler/config/timing.ts
+index fc951803bfed24ff6a3a39bb9bdc9f6ca2795443..7d7cfb32421eed310f45706b537d50561b0cbd6c 100644
+--- a/core/entity/scheduler/config/timing.ts
++++ b/core/entity/scheduler/config/timing.ts
+@@ -3,3 +3,9 @@ export const ACCOUNT_PENDING_STALE_WARNING_MS = 30_000;
+ 
+ export const ACCOUNT_MAINTENANCE_INTERVAL_MS = 10_000;
+ export const ACCOUNT_PENDING_RESEND_AFTER_MS = 8_000;
++
++/** 0 disables. Strict ceiling after which a pending Account frame halts the runtime (HLT/local fail-fast). */
++export const ACCOUNT_PENDING_ACK_STRICT_TIMEOUT_MS = Math.max(
++  0,
++  Math.floor(Number(process.env?.['XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS'] || '0')),
++);
+diff --git a/core/entity/scheduler/index.ts b/core/entity/scheduler/index.ts
+index 4fdae9f2a95e199f4eaa3413455cf20efe36e5b6..26c9523943a39901f23abe833525c310937208a0 100644
+--- a/core/entity/scheduler/index.ts
++++ b/core/entity/scheduler/index.ts
+@@ -59,6 +59,7 @@ import type {
+   ScheduledHook,
+ } from './types';
+ import { TIMING } from '../../config/constants';
++import { haltRuntimeFailure } from '../../protocol/errors/failure-taxonomy';
+ import { createStructuredLogger, shortId } from '../../support/logger';
+ import { accountInputProposal, accountInputReferenceHeight } from '../../account/consensus/flush';
+ import { hubRebalanceHandler } from './rebalance';
+@@ -69,6 +70,7 @@ import {
+ } from '../consensus/account/work-index';
+ import {
+   ACCOUNT_MAINTENANCE_INTERVAL_MS,
++  ACCOUNT_PENDING_ACK_STRICT_TIMEOUT_MS,
+   ACCOUNT_PENDING_RESEND_AFTER_MS,
+   ACCOUNT_PENDING_STALE_WARNING_MS,
+ } from './config/timing';
+@@ -82,6 +84,7 @@ export {
+ } from './hook-state';
+ export {
+   ACCOUNT_MAINTENANCE_INTERVAL_MS,
++  ACCOUNT_PENDING_ACK_STRICT_TIMEOUT_MS,
+   ACCOUNT_PENDING_RESEND_AFTER_MS,
+   ACCOUNT_PENDING_STALE_WARNING_MS,
+ } from './config/timing';
+@@ -258,6 +261,22 @@ async function maintainPendingAccounts(
+       throw new Error(`PENDING_ACCOUNT_INDEX_FRAME_MISSING:${counterpartyId}`);
+     }
+     const frameAge = now - account.pendingFrame.timestamp;
++    // Bilateral frames ack in milliseconds on a healthy mesh. An operator may
++    // set a strict ceiling (HLT/local runs: 3s): exceeding it is not retried
++    // away — the runtime halts with full account identity so the delivery
++    // fault is investigated, not absorbed.
++    const strictAckTimeoutMs = ACCOUNT_PENDING_ACK_STRICT_TIMEOUT_MS;
++    if (strictAckTimeoutMs > 0 && frameAge > strictAckTimeoutMs) {
++      throw haltRuntimeFailure(
++        'ACCOUNT_ACK_TIMEOUT',
++        `ACCOUNT_ACK_TIMEOUT:counterparty=${counterpartyId}` +
++          `:height=${account.pendingFrame.height}` +
++          `:ageMs=${frameAge}` +
++          `:resendCachedHeight=${account.pendingAccountInput
++            ? accountInputProposedFrameHeight(account.pendingAccountInput)
++            : 0}`,
++      );
++    }
+     const cachedInputHeight = account.pendingAccountInput
+       ? accountInputProposedFrameHeight(account.pendingAccountInput)
+       : 0;
+diff --git a/core/orchestrator/orchestrator.ts b/core/orchestrator/orchestrator.ts
+index 56de5baf2e31392337d3af7ce980a5aab8842589..5483c87c5b232c76299122a66cd5d0014b0ac6a3 100644
+--- a/core/orchestrator/orchestrator.ts
++++ b/core/orchestrator/orchestrator.ts
+@@ -1584,6 +1584,9 @@ const spawnHub = async (child: HubChild): Promise<void> => {
+       ...(process.env['XLN_ENTITY_PROPOSAL_TRACE']
+         ? { XLN_ENTITY_PROPOSAL_TRACE: process.env['XLN_ENTITY_PROPOSAL_TRACE'] }
+         : {}),
++      ...(process.env['XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS']
++        ? { XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS: process.env['XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS'] }
++        : {}),
+       ...(process.env['XLN_LOG_FORMAT']
+         ? { XLN_LOG_FORMAT: process.env['XLN_LOG_FORMAT'] }
+         : {}),
+diff --git a/core/scripts/operations/production/local-prod-smoke.ts b/core/scripts/operations/production/local-prod-smoke.ts
+index 141dd0d17c5a06976bf953937a6cf9e37e14d9ea..16d243107427f9302c0aea7a47b9eed6a8b38dab 100644
+--- a/core/scripts/operations/production/local-prod-smoke.ts
++++ b/core/scripts/operations/production/local-prod-smoke.ts
+@@ -158,6 +158,7 @@ const PROFILING_ENV_KEYS = [
+   'XLN_STORAGE_VERBOSE', 'XLN_RUNTIME_OP_COUNTERS',
+   'XLN_LOG_LEVEL', 'XLN_LOG_SCOPES',
+   'XLN_HUB_LOG_LEVEL', 'XLN_LOAD_LANE_LOG_LEVEL', 'XLN_ENTITY_PROPOSAL_TRACE',
++  'XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS',
+ ] as const;
+ if (process.env['XLN_LOCAL_PROD_SMOKE_PORT_BASE'] !== undefined) {
+   throw new Error('LOCAL_PROD_SMOKE_PORT_OVERRIDE_FORBIDDEN');

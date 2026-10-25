@@ -1,0 +1,1410 @@
+HISTORICAL NON-EXECUTABLE EVIDENCE - do not apply over current main.
+This draft predates the current canonical implementation; see README.md.
+stash: stash@{4} 438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90
+subject: On main: park: owner-frozen Rust and lending parity changes 2026-10-12
+date: 2026-10-12T01:08:53+03:00
+base: 399eeb94756629573484fbe599b63bd31cb0d539
+sections: tracked worktree diff, then untracked files as new files
+
+diff --git a/core/__tests__/rscore/parity/account-lending-semantic-parity.test.ts b/core/__tests__/rscore/parity/account-lending-semantic-parity.test.ts
+index ae47ff7190f2f9fedfd832f3e6fb9e179c076cc4..6e65358f6528f1c19670ab3cedc6cdd30e3b0c81 100644
+--- a/core/__tests__/rscore/parity/account-lending-semantic-parity.test.ts
++++ b/core/__tests__/rscore/parity/account-lending-semantic-parity.test.ts
+@@ -16,6 +16,7 @@ test('all six lending AccountTx variants match the shared TypeScript semantic ve
+     'lending_borrow_request',
+     'lending_disburse',
+     'lending_repay',
++    'lending_repay',
+     'lending_fund',
+     'lending_close_request',
+     'lending_close_payout',
+diff --git a/rscore/crates/batch/src/checkpoint_wire/account_tx.rs b/rscore/crates/batch/src/checkpoint_wire/account_tx.rs
+index 4a61786da88961e55cf65a0ed7ad83567e150225..f2f2d4d17a6afb313f16ca86275bb2c4d446938c 100644
+--- a/rscore/crates/batch/src/checkpoint_wire/account_tx.rs
++++ b/rscore/crates/batch/src/checkpoint_wire/account_tx.rs
+@@ -206,6 +206,8 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
+             amount,
+             term_id,
+             max_interest_bps,
++            expires_at,
++            max_late_ms,
+         } => vec![
+             integer(11),
+             AbiValue::Text(request_id.clone()),
+@@ -215,6 +217,8 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
+             encode_bigint(amount),
+             integer(lending_term(*term_id)),
+             integer(*max_interest_bps),
++            integer(*expires_at),
++            integer(*max_late_ms),
+         ],
+         AccountTx::LendingRepay {
+             loan_id,
+diff --git a/rscore/crates/engine/src/consensus/frame/hash.rs b/rscore/crates/engine/src/consensus/frame/hash.rs
+index 98557b96f2d079db11a5bf5e511c7747a30ec73b..8f3237f770a6fd910b7d408de8ee495b037d0644 100644
+--- a/rscore/crates/engine/src/consensus/frame/hash.rs
++++ b/rscore/crates/engine/src/consensus/frame/hash.rs
+@@ -342,6 +342,8 @@ fn projected_tx_value(
+             amount,
+             term_id,
+             max_interest_bps,
++            expires_at,
++            max_late_ms,
+         } => (
+             "lending_borrow_request",
+             vec![
+@@ -352,6 +354,8 @@ fn projected_tx_value(
+                 ("amount".to_string(), big(amount)),
+                 ("termId".to_string(), text(term_id.wire_name())),
+                 ("maxInterestBps".to_string(), number_i64(*max_interest_bps)?),
++                ("expiresAt".to_string(), number(*expires_at)?),
++                ("maxLateMs".to_string(), number(*max_late_ms)?),
+             ],
+         ),
+         AccountTx::LendingRepay {
+diff --git a/rscore/crates/engine/src/tx/apply.rs b/rscore/crates/engine/src/tx/apply.rs
+index 0e0a80df6c25328f2d510322d2ec4dbe8bec88f3..34c18305f81cff6fff875545072d726448bac29d 100644
+--- a/rscore/crates/engine/src/tx/apply.rs
++++ b/rscore/crates/engine/src/tx/apply.rs
+@@ -333,7 +333,7 @@ pub(crate) fn apply_to_candidate(
+         | AccountTx::LendingDisburse { .. }
+         | AccountTx::LendingCloseRequest { .. }
+         | AccountTx::LendingClosePayout { .. } => {
+-            crate::tx::handlers::lending::apply(candidate, tx, proposer)
++            crate::tx::handlers::lending::apply(candidate, tx, proposer, context)
+         }
+         AccountTx::RequestCollateral {
+             token_id,
+diff --git a/rscore/crates/engine/src/tx/handlers/j_events/claim.rs b/rscore/crates/engine/src/tx/handlers/j_events/claim.rs
+index 79fac1c8c97b022c03fb64bade2c31bd00fbe648..854ddb383b4eb02e63d2bed9cc0f4d6109f238e4 100644
+--- a/rscore/crates/engine/src/tx/handlers/j_events/claim.rs
++++ b/rscore/crates/engine/src/tx/handlers/j_events/claim.rs
+@@ -38,23 +38,30 @@ pub(crate) fn apply_j_event_claim(
+         .set_j_claim_accumulators(transition.left, transition.right);
+     let (message, outputs, consensus_effects) = match transition.status {
+         JClaimStatus::Pending => (
+-            "📥 J-event claim authenticated and retained",
++            "📥 J-event claim authenticated and retained".to_string(),
+             Vec::new(),
+             Vec::new(),
+         ),
+-        JClaimStatus::Idempotent => ("ℹ️ j_event_claim idempotent", Vec::new(), Vec::new()),
+-        JClaimStatus::Stale => ("ℹ️ j_event_claim stale", Vec::new(), Vec::new()),
++        JClaimStatus::Idempotent => ("ℹ️ j_event_claim idempotent".into(), Vec::new(), Vec::new()),
++        JClaimStatus::Stale => ("ℹ️ j_event_claim stale".into(), Vec::new(), Vec::new()),
+         JClaimStatus::Finalized => {
+             let finalized = apply_finalized_events(replica, &transition.events, tx.j_height)?;
+             (
+-                "✅ J-event claim finalized bilaterally",
++                if finalized.unadmitted == 0 {
++                    "✅ J-event claim finalized bilaterally".into()
++                } else {
++                    format!(
++                        "✅ J-event claim finalized bilaterally; unadmitted asset rows excluded: {}",
++                        finalized.unadmitted
++                    )
++                },
+                 vec![finalized.output],
+                 finalized.consensus_effects,
+             )
+         }
+     };
+     Ok(MutationDecision::with_outputs_and_effects(
+-        vec![message.into()],
++        vec![message],
+         outputs,
+         consensus_effects,
+     ))
+diff --git a/rscore/crates/engine/src/tx/handlers/j_events/finality.rs b/rscore/crates/engine/src/tx/handlers/j_events/finality.rs
+index 8a23ad45aafdc5b5692b2f72e44e09899befb1e3..f2d3600587b8fbd0c841a1750d1d3d6bc00146ef 100644
+--- a/rscore/crates/engine/src/tx/handlers/j_events/finality.rs
++++ b/rscore/crates/engine/src/tx/handlers/j_events/finality.rs
+@@ -6,6 +6,7 @@ use crate::{AccountOutput, AccountReplica, AccountSettledEvent, JurisdictionEven
+ pub(crate) struct FinalizedAccountEvents {
+     pub output: AccountOutput,
+     pub consensus_effects: Vec<AccountConsensusEffect>,
++    pub unadmitted: usize,
+ }
+ 
+ pub(crate) fn apply_finalized_events(
+@@ -15,12 +16,19 @@ pub(crate) fn apply_finalized_events(
+ ) -> Result<FinalizedAccountEvents, StateError> {
+     let mut previous_nonce = replica.state().j_nonce();
+     let mut first_token = None;
++    let mut unadmitted = 0;
+     for event in events {
+         let JurisdictionEvent::AccountSettled(settled) = event else {
+             continue;
+         };
+         validate_settled(replica, settled, previous_nonce)?;
+-        apply_settled(replica, settled)?;
++        // A receipt proves custody, not consent to enlarge the signed asset
++        // list. Unsolicited donations must not consume the peer's exit budget.
++        if replica.state().delta(settled.token_id).is_some() {
++            apply_settled(replica, settled)?;
++        } else {
++            unadmitted += 1;
++        }
+         previous_nonce = previous_nonce.max(settled.nonce);
+         first_token.get_or_insert(settled.token_id);
+     }
+@@ -35,18 +43,25 @@ pub(crate) fn apply_finalized_events(
+     .map_err(StateError::JClaim)?
+     .into_iter()
+     .collect();
+-    let delta = replica
+-        .state()
+-        .delta(token_id)
+-        .ok_or_else(|| StateError::JClaim("ACCOUNT_SETTLED_DELTA_MISSING".into()))?;
++    let observed = events
++        .iter()
++        .rev()
++        .find_map(|event| match event {
++            JurisdictionEvent::AccountSettled(settled) if settled.token_id == token_id => {
++                Some(settled)
++            }
++            _ => None,
++        })
++        .ok_or_else(|| StateError::JClaim("ACCOUNT_J_CLAIM_ACCOUNT_SETTLED_REQUIRED".into()))?;
+     Ok(FinalizedAccountEvents {
+         output: AccountOutput::AccountSettledFinalized {
+             token_id,
+             j_height,
+-            collateral: delta.collateral().clone(),
+-            ondelta: delta.ondelta().clone(),
++            collateral: observed.collateral.clone(),
++            ondelta: observed.ondelta.clone(),
+         },
+         consensus_effects,
++        unadmitted,
+     })
+ }
+ 
+@@ -169,6 +184,35 @@ mod tests {
+         })
+     }
+ 
++    #[test]
++    fn unsolicited_custody_preserves_the_agreed_asset_set_and_first_funding() {
++        for include_admitted in [true, false] {
++            let mut account = replica();
++            let token = TokenId::new(1).unwrap();
++            let mut empty = account.state().delta(token).unwrap().clone();
++            empty.apply_j_settlement(&0.into(), &0.into()).unwrap();
++            account.state_mut().put_delta(empty).unwrap();
++            let mut events = Vec::new();
++            for id in if include_admitted { 1 } else { 2 }..=128 {
++                let JurisdictionEvent::AccountSettled(mut event) = settled(125, 0) else {
++                    unreachable!()
++                };
++                event.token_id = TokenId::new(id).unwrap();
++                events.push(JurisdictionEvent::AccountSettled(event));
++            }
++            let applied = apply_finalized_events(&mut account, &events, 44).unwrap();
++            assert_eq!(applied.unadmitted, 127);
++            assert_eq!(account.state().delta_count(), 1);
++            assert_eq!(
++                account.state().delta(token).unwrap().collateral(),
++                &BigInt::from(if include_admitted { 125 } else { 0 })
++            );
++            assert_eq!(account.state().j_nonce(), 0);
++            assert_eq!(account.state().last_finalized_j_height(), 44);
++            assert!(applied.consensus_effects.is_empty());
++        }
++    }
++
+     #[test]
+     fn account_settled_reduces_native_rebalance_and_allows_dispute_shell() {
+         let mut account = replica();
+diff --git a/rscore/crates/engine/src/tx/handlers/lending/mod.rs b/rscore/crates/engine/src/tx/handlers/lending/mod.rs
+index c56b00ba482511ed9c3eee21b0612024678a28d4..dbb2c1c47d2132bba5b8a1c18e931905419e265f 100644
+--- a/rscore/crates/engine/src/tx/handlers/lending/mod.rs
++++ b/rscore/crates/engine/src/tx/handlers/lending/mod.rs
+@@ -1,3 +1,4 @@
++mod authorization;
+ mod payment;
+ mod validation;
+ 
+@@ -18,6 +19,7 @@ pub(crate) fn apply(
+     replica: &mut AccountReplica,
+     tx: &AccountTx,
+     proposer: Side,
++    context: Option<&crate::AccountExecutionContext>,
+ ) -> Result<MutationDecision, TransitionError> {
+     match tx {
+         AccountTx::LendingFund {
+@@ -40,21 +42,9 @@ pub(crate) fn apply(
+                 interest_bps: *interest_bps,
+             },
+         ),
+-        AccountTx::LendingBorrowRequest {
+-            request_id,
+-            hub_entity_id,
+-            borrower_entity_id,
+-            amount,
+-            max_interest_bps,
+-            ..
+-        } => borrow_request(
+-            replica,
+-            proposer,
+-            request_id,
+-            hub_entity_id,
+-            borrower_entity_id,
+-            amount,
+-            *max_interest_bps,
++        AccountTx::LendingBorrowRequest { .. } => authorization::borrow_request(
++            replica, tx, proposer,
++            context.ok_or(TransitionError::ExecutionContextRequired("lending_borrow_request"))?.committed_timestamp,
+         ),
+         AccountTx::LendingRepay {
+             loan_id,
+@@ -164,30 +154,6 @@ fn fund(
+     consume_if_applied(replica, result, key, LendingIntentKind::Fund)
+ }
+ 
+-fn borrow_request(
+-    replica: &mut AccountReplica,
+-    proposer: Side,
+-    request_id: &str,
+-    hub: &str,
+-    borrower: &str,
+-    amount: &BigInt,
+-    interest_bps: i64,
+-) -> Result<MutationDecision, TransitionError> {
+-    require_intent_id(request_id, "borrow")?;
+-    require_role(replica, proposer, "BORROWER", borrower)?;
+-    require_counterparty(replica, borrower, hub)?;
+-    positive_amount(amount, "LENDING_BORROW")?;
+-    validate_interest_bps(interest_bps)?;
+-    consume_intent(
+-        replica,
+-        format!("borrow:{}", normalize(request_id)),
+-        LendingIntentKind::Borrow,
+-    )?;
+-    Ok(MutationDecision::applied(vec![format!(
+-        "Lending borrow request {request_id} committed"
+-    )]))
+-}
+-
+ #[allow(clippy::too_many_arguments)]
+ fn repay(
+     replica: &mut AccountReplica,
+diff --git a/rscore/crates/engine/src/tx/handlers/settlement.rs b/rscore/crates/engine/src/tx/handlers/settlement.rs
+index 9051eed498ad91c21f3993711f156b3015dba5c5..663c9e4f7c153de1e20bc75d33ea9ff3245735ec 100644
+--- a/rscore/crates/engine/src/tx/handlers/settlement.rs
++++ b/rscore/crates/engine/src/tx/handlers/settlement.rs
+@@ -229,6 +229,25 @@ fn apply_upsert(
+     if let Some(previous) = current.as_ref() {
+         plan_hold_release(account, &workspace_view(previous)?, &mut planned)?;
+     }
++    // Commit the token footprint before a Hanko can escape. A later older
++    // dispute may clear the workspace while its higher-nonce signature remains
++    // executable; canonical zero rows keep that future exit budget reserved.
++    for token in compiled
++        .diffs
++        .iter()
++        .map(|diff| diff.token_id)
++        .chain(compiled.forgive.iter().copied())
++    {
++        if account.state().delta(token).is_none() {
++            planned.insert(
++                token,
++                account
++                    .state()
++                    .delta_or_zero(token)
++                    .map_err(|error| error.to_string())?,
++            );
++        }
++    }
+     plan_hold_add(account, &compiled.diffs, &mut planned)?;
+     publish_deltas(account, planned)?;
+     account.state_mut().set_settlement_workspace(workspace);
+diff --git a/rscore/crates/engine/src/tx/mod.rs b/rscore/crates/engine/src/tx/mod.rs
+index 45603b4b469e9da5ea79ea05bcc7694631c40650..3939ef71b80c46e1813ae4fc94135c962d6fd7ee 100644
+--- a/rscore/crates/engine/src/tx/mod.rs
++++ b/rscore/crates/engine/src/tx/mod.rs
+@@ -186,6 +186,8 @@ pub enum AccountTx {
+         amount: BigInt,
+         term_id: LendingTermId,
+         max_interest_bps: i64,
++        expires_at: u64,
++        max_late_ms: u64,
+     },
+     LendingRepay {
+         loan_id: String,
+diff --git a/rscore/crates/engine/tests/fx_admission.rs b/rscore/crates/engine/tests/fx_admission.rs
+index cd46f5d539db46b3b119abedc8404d5d9cc8a18f..5cddb5d9d2c5a77efccfb998f9309b204cd6dbfd 100644
+--- a/rscore/crates/engine/tests/fx_admission.rs
++++ b/rscore/crates/engine/tests/fx_admission.rs
+@@ -175,6 +175,8 @@ fn extended_transactions() -> Vec<(&'static str, AccountTx)> {
+                 amount: BigInt::from(10),
+                 term_id: xln_rscore_engine::LendingTermId::OneDay,
+                 max_interest_bps: 100,
++                expires_at: 5_000,
++                max_late_ms: 86_400_000,
+             },
+         ),
+         (
+diff --git a/rscore/crates/engine/tests/j_event_claim_parity.rs b/rscore/crates/engine/tests/j_event_claim_parity.rs
+index 0108ca4c06154289de286f70ab33b7658caff714..a29229857fbe3db2677bbdc6e7e39392354549ca 100644
+--- a/rscore/crates/engine/tests/j_event_claim_parity.rs
++++ b/rscore/crates/engine/tests/j_event_claim_parity.rs
+@@ -92,7 +92,18 @@ fn event_hash_and_frame_value_match_typescript_goldens() {
+ 
+ #[test]
+ fn account_settled_is_pending_then_finalized_once() {
+-    let base = replica();
++    // Custody observation updates a previously agreed asset; it cannot admit
++    // an asset into the Account proof on behalf of the two signers.
++    let base = SequentialAccountEngine::apply(
++        &replica(),
++        Side::Left,
++        &AccountTx::AddDelta {
++            token_id: TokenId::new(1).expect("token"),
++        },
++    )
++    .expect("agreed asset")
++    .committed()
++    .expect("asset candidate");
+     let raw = raw_claim(7, settled_event());
+     let left = SequentialAccountEngine::apply(
+         &base,
+diff --git a/rscore/crates/engine/tests/lending_parity.rs b/rscore/crates/engine/tests/lending_parity.rs
+index 08fffd2439c3475f0496c56b28d828de26cf7001..d14b04ec4761d86b4b1374a9a95cc0aca8ff4cc4 100644
+--- a/rscore/crates/engine/tests/lending_parity.rs
++++ b/rscore/crates/engine/tests/lending_parity.rs
+@@ -3,7 +3,7 @@ mod common;
+ use num_bigint::BigInt;
+ use serde::Deserialize;
+ use xln_rscore_engine::{
+-    AccountTx, AccountVerdict, LendingIntentKind, LendingTermId, SequentialAccountEngine, Side,
++    AccountExecutionContext, AccountTx, AccountVerdict, LendingIntentKind, LendingTermId, SequentialAccountEngine, Side,
+     TransitionError,
+ };
+ 
+@@ -31,6 +31,7 @@ struct LendingCase {
+ #[serde(rename_all = "camelCase")]
+ struct LendingExpectedStep {
+     tx_type: String,
++    timestamp: u64,
+     by_left: bool,
+     account_state_root: String,
+     deltas_root: String,
+@@ -67,7 +68,9 @@ fn assert_shared_step(
+ ) {
+     assert_eq!(tx.wire_name(), expected.tx_type);
+     assert_eq!(matches!(side, Side::Left), expected.by_left);
+-    let transition = SequentialAccountEngine::apply(account, side, &tx).expect("shared transition");
++    let context = AccountExecutionContext::new(expected.timestamp, expected.timestamp, 0, 1, 0);
++    let transition = SequentialAccountEngine::apply_with_context(account, side, &tx, &context)
++        .expect("shared transition");
+     assert_eq!(transition.verdict(), &AccountVerdict::Applied);
+     assert_eq!(transition.events(), expected.events);
+     assert_eq!(transition.outputs().len(), expected.output_count);
+@@ -249,6 +252,8 @@ fn all_six_lending_variants_apply_with_exact_roles_and_orientation() {
+                 amount: 2_500.into(),
+                 term_id: LendingTermId::OneDay,
+                 max_interest_bps: 150,
++                expires_at: 5_000,
++                max_late_ms: 86_400_000,
+             },
+         ),
+         (
+@@ -323,6 +328,29 @@ fn principal_disbursement_preserves_credit_and_cannot_pay_twice() {
+     );
+ }
+ 
++#[test]
++fn borrow_authorization_matches_the_shared_typescript_commitment() {
++    let fixture: LendingFixture = serde_json::from_str(include_str!(
++        "../../../fixtures/account-semantics/lending-v1.json"
++    ))
++    .expect("shared TypeScript lending fixture");
++    let expected = fixture.cases.iter()
++        .find(|case| case.name == "borrower-lifecycle")
++        .expect("borrower lifecycle").steps.first().expect("borrow request");
++    let mut account = replica(entity(0x10), entity(0x10), entity(0x30),
++        vec![delta(token(1), 20_000, 10_000, 0, 20_000, 20_000)]);
++    let request = AccountTx::LendingBorrowRequest {
++        request_id: BORROW.into(), hub_entity_id: entity_text(0x10), borrower_entity_id: entity_text(0x30),
++        token_id: 1, amount: 2_500.into(), term_id: LendingTermId::OneDay,
++        max_interest_bps: 150, expires_at: 5_000, max_late_ms: 86_400_000,
++    };
++    let expired = SequentialAccountEngine::apply_with_context(&account, Side::Right, &request,
++        &AccountExecutionContext::new(5_000, 5_000, 0, 1, 0)).expect("expiry disposition");
++    assert!(matches!(expired.verdict(), AccountVerdict::Rejected(_)));
++    assert!(expired.candidate().is_none());
++    assert_shared_step(&mut account, Side::Right, request, expected);
++}
++
+ #[test]
+ fn all_lending_variants_match_the_shared_typescript_semantic_vector() {
+     let fixture: LendingFixture = serde_json::from_str(include_str!(
+@@ -340,7 +368,8 @@ fn all_lending_variants_match_the_shared_typescript_semantic_vector() {
+         .iter()
+         .find(|test_case| test_case.name == "borrower-lifecycle")
+         .expect("borrower vector");
+-    let mut borrower_account = borrower_account();
++    let mut borrower_account = replica(entity(0x10), entity(0x10), entity(0x30),
++        vec![delta(token(1), 20_000, 10_000, 0, 20_000, 20_000)]);
+     let borrower_txs = [
+         (
+             Side::Right,
+@@ -352,6 +381,8 @@ fn all_lending_variants_match_the_shared_typescript_semantic_vector() {
+                 amount: 2_500.into(),
+                 term_id: LendingTermId::OneDay,
+                 max_interest_bps: 150,
++                expires_at: 5_000,
++                max_late_ms: 86_400_000,
+             },
+         ),
+         (
+@@ -375,17 +406,18 @@ fn all_lending_variants_match_the_shared_typescript_semantic_vector() {
+             },
+         ),
+     ];
+-    assert_eq!(borrower.steps.len(), borrower_txs.len());
+-    for ((side, tx), expected) in borrower_txs.into_iter().zip(&borrower.steps) {
++    for ((side, tx), expected) in borrower_txs.iter().cloned().zip(&borrower.steps) {
+         assert_shared_step(&mut borrower_account, side, tx, expected);
+     }
++    assert_eq!(borrower.steps.len(), borrower_txs.len());
+ 
+     let lender = fixture
+         .cases
+         .iter()
+         .find(|test_case| test_case.name == "lender-lifecycle")
+         .expect("lender vector");
+-    let mut lender_account = lender_account();
++    let mut lender_account = replica(entity(0x10), entity(0x10), entity(0x20),
++        vec![delta(token(1), 20_000, 10_000, 0, 20_000, 20_000)]);
+     let lender_txs = [
+         (Side::Right, fund()),
+         (
+diff --git a/rscore/crates/engine/tests/monetary/dispute_gas_budget.rs b/rscore/crates/engine/tests/monetary/dispute_gas_budget.rs
+index cdb3e3e66c3d1aac7075ed30395b38d1bbe81ca6..32896909c25ff9df8f1576cf1959aab3185e738e 100644
+--- a/rscore/crates/engine/tests/monetary/dispute_gas_budget.rs
++++ b/rscore/crates/engine/tests/monetary/dispute_gas_budget.rs
+@@ -125,3 +125,118 @@ fn htlc_clause_split_rejects_without_reserving_funds() {
+         &29.into()
+     );
+ }
++
++#[test]
++fn settlement_reserves_zero_diff_and_forgiveness_rows_before_signing() {
++    use xln_rscore_engine::AccountExecutionContext;
++    use xln_rscore_protocol::{CanonicalNumber, CanonicalValue as V};
++    for kind in ["rawDiff", "forgive"] {
++        let mut op = vec![
++            ("type".into(), V::String(kind.into())),
++            ("tokenId".into(), V::Number(CanonicalNumber::from_u16(11))),
++        ];
++        if kind == "rawDiff" {
++            for field in ["leftDiff", "rightDiff", "collateralDiff", "ondeltaDiff"] {
++                op.push((field.into(), V::BigInt(0.into())));
++            }
++        }
++        let tx = AccountTx::SettleTransition {
++            data: V::Object(vec![
++                ("kind".into(), V::String("upsert".into())),
++                ("revision".into(), V::Number(CanonicalNumber::from_u16(1))),
++                ("executorIsLeft".into(), V::Bool(true)),
++                ("ops".into(), V::Array(vec![V::Object(op)])),
++            ]),
++        };
++        let account = replica(
++            entity(0x11),
++            entity(0x11),
++            entity(0x22),
++            (1..=10)
++                .map(|id| delta(token(id), 0, 0, 0, 1000, 1000))
++                .collect(),
++        );
++        let before = account.state().deltas_root();
++        let result = SequentialAccountEngine::apply_with_context(
++            &account,
++            Side::Left,
++            &tx,
++            &AccountExecutionContext::new(1000, 1000, 0, 0, 0),
++        )
++        .unwrap();
++        let AccountVerdict::Rejected(reason) = result.verdict() else {
++            panic!("projected proof admitted");
++        };
++        assert_eq!(
++            reason.message(),
++            "ACCOUNT_DISPUTE_GAS_BUDGET_EXCEEDED:5200000/5000000"
++        );
++        assert!(result.candidate().is_none());
++        assert!(result.outputs().is_empty());
++        assert!(account.state().settlement_workspace().is_none());
++        assert_eq!(account.state().deltas_root(), before);
++    }
++}
++
++#[test]
++fn pending_settlement_cannot_spend_the_same_exit_budget_twice() {
++    use xln_rscore_engine::{AccountExecutionContext, HtlcHashlock, HtlcLockTx};
++    use xln_rscore_protocol::{CanonicalNumber, CanonicalValue as V};
++    let context = AccountExecutionContext::new(1000, 1000, 0, 0, 0);
++    let account = replica(
++        entity(0x11),
++        entity(0x11),
++        entity(0x22),
++        (1..=9)
++            .map(|id| delta(token(id), 0, 0, 0, 1000, 1000))
++            .collect(),
++    );
++    let raw = V::Object(vec![
++        ("type".into(), V::String("rawDiff".into())),
++        ("tokenId".into(), V::Number(CanonicalNumber::from_u16(10))),
++        ("leftDiff".into(), V::BigInt(0.into())),
++        ("rightDiff".into(), V::BigInt(0.into())),
++        ("collateralDiff".into(), V::BigInt(0.into())),
++        ("ondeltaDiff".into(), V::BigInt(0.into())),
++    ]);
++    let forgive = V::Object(vec![
++        ("type".into(), V::String("forgive".into())),
++        ("tokenId".into(), V::Number(CanonicalNumber::from_u16(10))),
++    ]);
++    let upsert = AccountTx::SettleTransition {
++        data: V::Object(vec![
++            ("kind".into(), V::String("upsert".into())),
++            ("revision".into(), V::Number(CanonicalNumber::from_u16(1))),
++            ("executorIsLeft".into(), V::Bool(true)),
++            ("ops".into(), V::Array(vec![raw, forgive])),
++        ]),
++    };
++    let account =
++        SequentialAccountEngine::apply_with_context(&account, Side::Left, &upsert, &context)
++            .unwrap()
++            .committed()
++            .expect("one reserved token, not two");
++    assert!(account.state().delta(token(10)).is_some());
++    let hash = format!("0x{:064x}", 44);
++    let lock = AccountTx::HtlcLock(HtlcLockTx {
++        lock_id: hash.clone(),
++        hashlock: HtlcHashlock::parse(&hash).unwrap(),
++        timelock: 60000.into(),
++        reveal_before_height: 10,
++        amount: 1.into(),
++        token_id: token(1),
++        delivery_mode: None,
++        envelope: None,
++    });
++    let result =
++        SequentialAccountEngine::apply_with_context(&account, Side::Left, &lock, &context).unwrap();
++    let AccountVerdict::Rejected(reason) = result.verdict() else {
++        panic!("reservation spent twice");
++    };
++    assert_eq!(
++        reason.message(),
++        "ACCOUNT_DISPUTE_GAS_BUDGET_EXCEEDED:5100000/5000000"
++    );
++    assert!(result.candidate().is_none());
++    assert_eq!(account.state().htlc_count(), 0);
++}
+diff --git a/rscore/crates/entity-kernel/src/lendbook/mod.rs b/rscore/crates/entity-kernel/src/lendbook/mod.rs
+index 062a093ef3b100e70c1103575fc0f48fe6da8ed7..64da9ef06ff194f5308d41b6ff3a0be11f241fd1 100644
+--- a/rscore/crates/entity-kernel/src/lendbook/mod.rs
++++ b/rscore/crates/entity-kernel/src/lendbook/mod.rs
+@@ -265,6 +265,8 @@ mod tests {
+                     amount: BigInt::from(2_500),
+                     term_id: LendingTermId::OneDay,
+                     max_interest_bps: 150,
++                    expires_at: 5_000,
++                    max_late_ms: 86_400_000,
+                 },
+             ),
+             Some(&view),
+@@ -415,6 +417,8 @@ mod tests {
+                     amount: BigInt::from(2_500),
+                     term_id: LendingTermId::OneDay,
+                     max_interest_bps: 150,
++                    expires_at: 5_000,
++                    max_late_ms: 86_400_000,
+                 },
+             ),
+             Some(&view),
+diff --git a/rscore/crates/entity-kernel/src/local_financial/decode.rs b/rscore/crates/entity-kernel/src/local_financial/decode.rs
+index d24608a4770aa014315fc79d9a36c9fbd8a48d13..02aa0b0c1dd8a868a5cca16ff88ae5f23300f6fc 100644
+--- a/rscore/crates/entity-kernel/src/local_financial/decode.rs
++++ b/rscore/crates/entity-kernel/src/local_financial/decode.rs
+@@ -753,8 +753,8 @@ fn lending_borrow(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, Enti
+     let data = object(frame_data(tx, KIND)?, KIND)?;
+     exact_fields(
+         data,
+-        &["requestId", "hubEntityId", "tokenId", "amount", "termId"],
+-        &["maxInterestBps"],
++        &["requestId", "hubEntityId", "tokenId", "amount", "termId", "maxInterestBps", "expiresAt", "maxLateMs"],
++        &[],
+         KIND,
+     )?;
+     let max_interest_bps = optional_field(data, "maxInterestBps")
+@@ -771,6 +771,8 @@ fn lending_borrow(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, Enti
+             amount: bigint(field(data, "amount", KIND)?, KIND, "AMOUNT")?,
+             term_id: lending_term(field(data, "termId", KIND)?, KIND)?,
+             max_interest_bps,
++            expires_at: u64_number(field(data, "expiresAt", KIND)?, KIND, "EXPIRES_AT")?,
++            max_late_ms: u64_number(field(data, "maxLateMs", KIND)?, KIND, "MAX_LATE_MS")?,
+         },
+     ))
+ }
+diff --git a/rscore/crates/entity-kernel/src/local_financial/dispute.rs b/rscore/crates/entity-kernel/src/local_financial/dispute.rs
+index d4ff00d70ee51e4eeca69d9b77db52545734b161..3343a8269742fa778dcb8cc750f7bbd5cae60096 100644
+--- a/rscore/crates/entity-kernel/src/local_financial/dispute.rs
++++ b/rscore/crates/entity-kernel/src/local_financial/dispute.rs
+@@ -552,34 +552,12 @@ fn start(
+     } else {
+         right_arguments
+     };
+-    let (starter_counter_arguments, starter_counter_proof_commitment) = dispute
+-        .local_dispute
+-        .as_ref()
+-        .filter(|candidate| {
+-            candidate.nonce > counter.nonce
+-                || (candidate.nonce == counter.nonce
+-                    && candidate.proposer_is_left
+-                    && !counter.proposer_is_left)
+-        })
+-        .map(|candidate| {
+-            let (left, right) = build_arguments(
+-                state,
+-                paybook,
+-                dispute,
+-                counterparty,
+-                Some(dispute.owner_is_left),
+-            )?;
+-            Ok::<_, EntityKernelError>((
+-                if dispute.owner_is_left { left } else { right },
+-                counter_commitment(
+-                    candidate.nonce,
+-                    candidate.proposer_is_left,
+-                    candidate.proof_body_hash,
+-                ),
+-            ))
+-        })
+-        .transpose()?
+-        .unwrap_or_else(|| (Vec::new(), ZERO_WORD));
++    // Start with the peer's stored signed proof, as TS buildStarterArguments
++    // does. A newer local draft nonce is not evidence of a separately admitted
++    // counter branch and cannot authorize arguments reconstructed from current
++    // state. Binding it changed the Account envelope and J batch at WAL h474.
++    let starter_counter_arguments = Vec::new();
++    let starter_counter_proof_commitment = ZERO_WORD;
+     if cross_jurisdiction_route_id.is_some()
+         && state
+             .j_batch_state
+@@ -1686,6 +1664,62 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn prepare_dispute_h474_does_not_bind_a_local_draft_as_counter_evidence() {
++        let mut state = state(1_000);
++        let mut counter = counterparty_proof();
++        counter.nonce = 97;
++        let mut views = account_view("active", None, None, Some(counter.clone()));
++        views
++            .get_mut(PEER)
++            .unwrap()
++            .dispute
++            .as_mut()
++            .unwrap()
++            .local_dispute = Some(xln_rscore_engine::DisputeDraft {
++            hanko: None,
++            hash: [0x55; 32],
++            proof_body_hash: counter.proof_body_hash,
++            nonce: 99,
++            proposer_is_left: false,
++        });
++        let mut mutations = Vec::new();
++        apply_prepare(
++            &mut state,
++            &PaybookChanges::default(),
++            PrepareDisputeEntityTx {
++                counterparty_entity_id: PEER.into(),
++                description: Some("hlt-authority-production-dispute".into()),
++                min_cooldown_ms: 0,
++                cross_jurisdiction_route_id: None,
++                starter_initial_arguments: None,
++            },
++            &views,
++            None,
++            &mut mutations,
++            &mut Vec::new(),
++            &mut Vec::new(),
++            &mut Vec::new(),
++        )
++        .expect("prepare dispute from the peer's stored proof");
++        let proof = &state.j_batch_state.as_ref().unwrap().batch.dispute_starts[0];
++        assert_eq!(proof.nonce, U256::from(97));
++        assert_eq!(proof.starter_counter_proof_commitment, ZERO_WORD);
++        assert!(proof.starter_counter_arguments.is_empty());
++        let AccountEnvelopeMutation::ReplaceDisputeLifecycle {
++            active_dispute: Some(active),
++            ..
++        } = &mutations.last().unwrap().1
++        else {
++            panic!("missing active dispute")
++        };
++        let active = object(active, "test", "active").unwrap();
++        assert_eq!(
++            text_field(active, "starterCounterProofCommitment"),
++            Some(hex(&ZERO_WORD).as_str())
++        );
++    }
++
+     #[test]
+     fn cooldown_prepare_only_freezes_and_does_not_queue_jbatch() {
+         let mut state = state(1_000);
+diff --git a/rscore/crates/entity-kernel/src/local_financial/lending.rs b/rscore/crates/entity-kernel/src/local_financial/lending.rs
+index 1b425140ae2794a6826cbba3a6397c7146d9f225..66716b1f51f64076a4ec8e4bb40710aa8c1ce759 100644
+--- a/rscore/crates/entity-kernel/src/local_financial/lending.rs
++++ b/rscore/crates/entity-kernel/src/local_financial/lending.rs
+@@ -110,6 +110,8 @@ pub(super) fn apply_borrow(
+             amount: tx.amount.clone(),
+             term_id: tx.term_id,
+             max_interest_bps: i64::from(tx.max_interest_bps),
++            expires_at: tx.expires_at,
++            max_late_ms: tx.max_late_ms,
+         },
+         format!("Loan requested: {} token={}", tx.amount, tx.token_id),
+         account_txs,
+diff --git a/rscore/crates/entity-kernel/src/local_financial/semantic_parity/same_j_semantic_parity.rs b/rscore/crates/entity-kernel/src/local_financial/semantic_parity/same_j_semantic_parity.rs
+index 661483a026d700eb9f567350316a32177253575e..0e6f6897aff968e7c69928009170aa3f17088681 100644
+--- a/rscore/crates/entity-kernel/src/local_financial/semantic_parity/same_j_semantic_parity.rs
++++ b/rscore/crates/entity-kernel/src/local_financial/semantic_parity/same_j_semantic_parity.rs
+@@ -103,6 +103,8 @@ fn transaction(name: &str) -> LocalEntityFinancialTx {
+             amount: BigInt::from(2_500),
+             term_id: LendingTermId::OneDay,
+             max_interest_bps: 150,
++            expires_at: 5_000,
++            max_late_ms: 86_400_000,
+         }),
+         "lendingRepay" => LocalEntityFinancialTx::LendingRepay(LendingRepayEntityTx {
+             hub_entity_id: PEER.into(),
+diff --git a/rscore/crates/entity-kernel/src/local_financial/types.rs b/rscore/crates/entity-kernel/src/local_financial/types.rs
+index 67b6a80e94fb4af5f0f5225878139c33f4add2cb..2fe85fd72e17dc12d0b6fcda0b64803c34ae90b7 100644
+--- a/rscore/crates/entity-kernel/src/local_financial/types.rs
++++ b/rscore/crates/entity-kernel/src/local_financial/types.rs
+@@ -237,6 +237,8 @@ pub struct LendingBorrowEntityTx {
+     pub amount: BigInt,
+     pub term_id: LendingTermId,
+     pub max_interest_bps: u16,
++    pub expires_at: u64,
++    pub max_late_ms: u64,
+ }
+ 
+ #[derive(Clone, Debug, PartialEq, Eq)]
+diff --git a/rscore/crates/process/src/wire/decode.rs b/rscore/crates/process/src/wire/decode.rs
+index 0d4bfb772762185096ee351da0fde5eb22520b61..1f8f789b0025f593ce72d6bbb5cb8cf75325fcad 100644
+--- a/rscore/crates/process/src/wire/decode.rs
++++ b/rscore/crates/process/src/wire/decode.rs
+@@ -961,8 +961,10 @@ fn decode_lending_fund(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+ }
+ 
+ fn decode_lending_borrow_request(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+-    let fields = exact(fields, 8, "lendingBorrowRequest")?;
++    let fields = exact(fields, 10, "lendingBorrowRequest")?;
+     Ok(AccountTx::LendingBorrowRequest {
++        expires_at: unsigned(&fields[8], "expiresAt")?,
++        max_late_ms: unsigned(&fields[9], "maxLateMs")?,
+         request_id: text(&fields[1])?.into(),
+         hub_entity_id: text(&fields[2])?.into(),
+         borrower_entity_id: text(&fields[3])?.into(),
+diff --git a/rscore/crates/runtime/src/codec/account_input_json.rs b/rscore/crates/runtime/src/codec/account_input_json.rs
+index 3514db470371f937cbaf47770da2d848675d851c..9b7bbde9c896842064a21d3f7689d54f599277ae 100644
+--- a/rscore/crates/runtime/src/codec/account_input_json.rs
++++ b/rscore/crates/runtime/src/codec/account_input_json.rs
+@@ -814,12 +814,16 @@ fn decode_lending_borrow_request(
+             "amount",
+             "termId",
+             "maxInterestBps",
++            "expiresAt",
++            "maxLateMs",
+         ],
+         &[],
+         operation_index,
+         path,
+     )?;
+     Ok(AccountTx::LendingBorrowRequest {
++        expires_at: unsigned(field(value, "expiresAt", operation_index, path)?, operation_index, &format!("{path}.expiresAt"))?,
++        max_late_ms: unsigned(field(value, "maxLateMs", operation_index, path)?, operation_index, &format!("{path}.maxLateMs"))?,
+         request_id: text(
+             field(value, "requestId", operation_index, path)?,
+             operation_index,
+diff --git a/rscore/crates/runtime/src/restore/account/account_tx.rs b/rscore/crates/runtime/src/restore/account/account_tx.rs
+index 5786154ecda39b5a8d016906848e7559aba2ae2d..d8946d332e45dd46598354aeb2d5712ded149da4 100644
+--- a/rscore/crates/runtime/src/restore/account/account_tx.rs
++++ b/rscore/crates/runtime/src/restore/account/account_tx.rs
+@@ -249,8 +249,10 @@ fn lending_fund(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreErro
+ }
+ 
+ fn lending_borrow_request(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
+-    let fields = exact(fields, 8, "lendingBorrowRequest")?;
++    let fields = exact(fields, 10, "lendingBorrowRequest")?;
+     Ok(AccountTx::LendingBorrowRequest {
++        expires_at: unsigned(&fields[8], "expiresAt")?,
++        max_late_ms: unsigned(&fields[9], "maxLateMs")?,
+         request_id: text(&fields[1])?.to_owned(),
+         hub_entity_id: text(&fields[2])?.to_owned(),
+         borrower_entity_id: text(&fields[3])?.to_owned(),
+diff --git a/rscore/fixtures/account-semantics/lending-v1.json b/rscore/fixtures/account-semantics/lending-v1.json
+index 09f313814ab397f516486d16407e84349653c503..258e05599f1179d46de4f1501b1e808f22003bd9 100644
+--- a/rscore/fixtures/account-semantics/lending-v1.json
++++ b/rscore/fixtures/account-semantics/lending-v1.json
+@@ -5,29 +5,75 @@
+       "name": "borrower-lifecycle",
+       "steps": [
+         {
+-          "accountStateRoot": "0xd52967ca99552afa84fb37ba95e4bd895e749bcff66c0f890175205d9ad574b7",
++          "accountStateRoot": "0xb4703e6ec942fbe49c6d82a3bbc1a9a92d018c944baaed21071135929d39c287",
+           "byLeft": false,
+-          "deltasRoot": "0xd0f6c4d2d2ecf5393b499adcbca31364f13ee59e1892455d3998e669f74eff39",
++          "claimEntries": [],
++          "deltasRoot": "0xf66377c7a0319b17aea4ce46035d2057ea03d1863e44f75e5ddbf4f92ef6bf8e",
+           "events": [
+             "Lending borrow request borrow-2222222222222222 committed"
+           ],
+           "intentEntries": [
++            [
++              "authorize:0xf45e7baa687b1eb87b882f023e762cf7d70a8020b056d24b6d6f1d571ea20a61",
++              "borrow"
++            ],
+             [
+               "borrow:borrow-2222222222222222",
+               "borrow"
+             ]
+           ],
+           "leftCreditLimit": "20000",
+-          "lendingIntentsRoot": "0x22a0a937381062092ae37831b2e620b5771b154279048cf8b73adc515ab15538",
++          "lendingIntentsRoot": "0x7c17e0f971db1437b1aee5e9f58d53f4dd8008f6c247ab55c72c73f1fc264298",
+           "offdelta": "0",
+           "outputCount": 0,
+           "rightCreditLimit": "20000",
+-          "txType": "lending_borrow_request"
++          "subcontractsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
++          "timestamp": 1000,
++          "txType": "lending_borrow_request",
++          "txWire": [
++            11,
++            "borrow-2222222222222222",
++            "0x1010101010101010101010101010101010101010101010101010101010101010",
++            "0x3030303030303030303030303030303030303030303030303030303030303030",
++            1,
++            "2500",
++            1,
++            150,
++            5000,
++            86400000
++          ]
+         },
+         {
+-          "accountStateRoot": "0x203b78d5de9c96a1cf256bc423f7de3719f1f4d29556c2e37ba213b16c80491f",
++          "accountStateRoot": "0x72bc432ce788842f2364174ee3b045a15ba116cf3bc59d34cc7ae2ed7b2a03d2",
+           "byLeft": true,
+-          "deltasRoot": "0x976d4aa614528a04f130a48894313e5602bd0fba30eb27ae0cc9de5affa0dcf1",
++          "claimEntries": [
++            [
++              "loan-0327fd9035d42518",
++              {
++                "accruedAt": 1000,
++                "accruedInterest": {
++                  "__xlnType": "BigInt",
++                  "value": "0"
++                },
++                "creditorIsLeft": true,
++                "interestBps": 100,
++                "interestRemainder": {
++                  "__xlnType": "BigInt",
++                  "value": "0"
++                },
++                "kind": "loan",
++                "lateMs": 86400000,
++                "openedAt": 1000,
++                "principal": {
++                  "__xlnType": "BigInt",
++                  "value": "2500"
++                },
++                "termMs": 86400000,
++                "tokenId": 1
++              }
++            ]
++          ],
++          "deltasRoot": "0xb38a75d29b75212348ce5e07f8f35ded30938e6dec3017d381aabb89fad90a68",
+           "events": [
+             "💸 Sent 2500 token 1 to Entity 3030 (xln:lending_disburse)"
+           ],
+@@ -46,14 +92,94 @@
+           "offdelta": "-2500",
+           "outputCount": 0,
+           "rightCreditLimit": "20000",
+-          "txType": "lending_disburse"
++          "subcontractsRoot": "0x55e4edac8409ec307314c6936ca177d2e4382e37383face92ab1591d0eba0d29",
++          "timestamp": 1000,
++          "txType": "lending_disburse",
++          "txWire": [
++            24,
++            "loan-0327fd9035d42518",
++            "0x1010101010101010101010101010101010101010101010101010101010101010",
++            "0x3030303030303030303030303030303030303030303030303030303030303030",
++            1,
++            "2500",
++            1,
++            100,
++            "borrow-2222222222222222",
++            150,
++            5000,
++            86400000,
++            86400000
++          ]
++        },
++        {
++          "accountStateRoot": "0x72e7020d010fa475af6587a64bdfd1d225ade2d93a091ff0ccefdaa0455ced0e",
++          "byLeft": false,
++          "claimEntries": [
++            [
++              "loan-0327fd9035d42518",
++              {
++                "accruedAt": 43201000,
++                "accruedInterest": {
++                  "__xlnType": "BigInt",
++                  "value": "0"
++                },
++                "creditorIsLeft": true,
++                "interestBps": 100,
++                "interestRemainder": {
++                  "__xlnType": "BigInt",
++                  "value": "432000000000"
++                },
++                "kind": "loan",
++                "lateMs": 86400000,
++                "openedAt": 1000,
++                "principal": {
++                  "__xlnType": "BigInt",
++                  "value": "1500"
++                },
++                "termMs": 86400000,
++                "tokenId": 1
++              }
++            ]
++          ],
++          "deltasRoot": "0x7f88565bc56dd77b41f9ac5bc3fa98393adc9a56eed67857b59122e5d6f4d358",
++          "events": [
++            "💰 Received 1012 token 1 from Entity 3030 (xln:lending_repay)"
++          ],
++          "intentEntries": [
++            [
++              "borrow:borrow-2222222222222222",
++              "borrow"
++            ],
++            [
++              "disburse:loan-0327fd9035d42518",
++              "disburse"
++            ]
++          ],
++          "leftCreditLimit": "20000",
++          "lendingIntentsRoot": "0x9ff075b49662492faa43131b77e795451e686578eb57384f3d00d9c08ead4d6b",
++          "offdelta": "-1488",
++          "outputCount": 0,
++          "rightCreditLimit": "20000",
++          "subcontractsRoot": "0xbda3e39ed3c5973394ad8371e036118bfc479b5088fc58f804332782a88a7cad",
++          "timestamp": 43201000,
++          "txType": "lending_repay",
++          "txWire": [
++            12,
++            "loan-0327fd9035d42518",
++            "0x1010101010101010101010101010101010101010101010101010101010101010",
++            "0x3030303030303030303030303030303030303030303030303030303030303030",
++            1,
++            "1012",
++            "0xbb90f6a8798ec5519fcd2c8b45c92a2780980f35a3ded297efef54f6ebbee7c6"
++          ]
+         },
+         {
+-          "accountStateRoot": "0x2773fb65ee004ae4e16f5bb53db5b5de55711a71a655b7c41fd448eb208d12fc",
++          "accountStateRoot": "0xf12d586462ef576b94ddf3729c995f792c83fc0d1fedca94f5bac8d5bc3a12fb",
+           "byLeft": false,
+-          "deltasRoot": "0xb8e1b93e520293113e8a6ea2e63ec701146ea7f56688f63f1aefe338a2133450",
++          "claimEntries": [],
++          "deltasRoot": "0xf00d68bf7096582dadfb852c6a93b1e40b72efc3410140eee78302ebd2180b2c",
+           "events": [
+-            "💰 Received 2525 token 1 from Entity 3030 (xln:lending_repay)"
++            "💰 Received 1508 token 1 from Entity 3030 (xln:lending_repay)"
+           ],
+           "intentEntries": [
+             [
+@@ -71,10 +197,21 @@
+           ],
+           "leftCreditLimit": "20000",
+           "lendingIntentsRoot": "0xd5b8648bb91bb4062f493cfabdd92bad89d25e4ccf1fcf334c75973af3d78c28",
+-          "offdelta": "25",
++          "offdelta": "20",
+           "outputCount": 0,
+           "rightCreditLimit": "20000",
+-          "txType": "lending_repay"
++          "subcontractsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
++          "timestamp": 86401000,
++          "txType": "lending_repay",
++          "txWire": [
++            12,
++            "loan-0327fd9035d42518",
++            "0x1010101010101010101010101010101010101010101010101010101010101010",
++            "0x3030303030303030303030303030303030303030303030303030303030303030",
++            1,
++            "5000",
++            "0xe03bc417430df8f9c850df50a5f922e695927aa7d50418a283e5369bf4873f48"
++          ]
+         }
+       ]
+     },
+@@ -82,9 +219,36 @@
+       "name": "lender-lifecycle",
+       "steps": [
+         {
+-          "accountStateRoot": "0xc1594768bc3eb20861c501bdff01c2edf7382d7a1385763fee05404f3679de65",
++          "accountStateRoot": "0x991e81b9c7c46970adb87e1321a1f2e738c06f723413acaffedccda68b86803b",
+           "byLeft": false,
+-          "deltasRoot": "0x8b2f57f5a7ff67570d909be30dc18ab49bfe3b2d1751bdedb143ae090718ee43",
++          "claimEntries": [
++            [
++              "lend-1111111111111111",
++              {
++                "accruedAt": 1000,
++                "accruedInterest": {
++                  "__xlnType": "BigInt",
++                  "value": "0"
++                },
++                "creditorIsLeft": false,
++                "interestBps": 100,
++                "interestRemainder": {
++                  "__xlnType": "BigInt",
++                  "value": "0"
++                },
++                "kind": "savings",
++                "lateMs": 0,
++                "openedAt": 1000,
++                "principal": {
++                  "__xlnType": "BigInt",
++                  "value": "10000"
++                },
++                "termMs": 86400000,
++                "tokenId": 1
++              }
++            ]
++          ],
++          "deltasRoot": "0x347f7429a6f7a6950db85a270ce4c178aa81dbb2ad1f3f7164a8113a58e508a3",
+           "events": [
+             "💰 Received 10000 token 1 from Entity 2020 (xln:lending_fund)"
+           ],
+@@ -99,12 +263,51 @@
+           "offdelta": "10000",
+           "outputCount": 0,
+           "rightCreditLimit": "20000",
+-          "txType": "lending_fund"
++          "subcontractsRoot": "0xf5ba03c9db7ed88d6b05ed5c5130a5ff3a06942ae0f54f3155b96349727767fc",
++          "timestamp": 1000,
++          "txType": "lending_fund",
++          "txWire": [
++            10,
++            "lend-1111111111111111",
++            "0x1010101010101010101010101010101010101010101010101010101010101010",
++            "0x2020202020202020202020202020202020202020202020202020202020202020",
++            1,
++            "10000",
++            1,
++            100
++          ]
+         },
+         {
+-          "accountStateRoot": "0x4291f1c50778ec7966a286d4a7890aaa20350086bc18754289d6145d3e9b9afc",
++          "accountStateRoot": "0xf119a52ad856e06d509c0b481132d0bf3f8b694630b3912dd6307cbb5cb88e5b",
+           "byLeft": false,
+-          "deltasRoot": "0x8b2f57f5a7ff67570d909be30dc18ab49bfe3b2d1751bdedb143ae090718ee43",
++          "claimEntries": [
++            [
++              "lend-1111111111111111",
++              {
++                "accruedAt": 1000,
++                "accruedInterest": {
++                  "__xlnType": "BigInt",
++                  "value": "0"
++                },
++                "creditorIsLeft": false,
++                "interestBps": 100,
++                "interestRemainder": {
++                  "__xlnType": "BigInt",
++                  "value": "0"
++                },
++                "kind": "savings",
++                "lateMs": 0,
++                "openedAt": 1000,
++                "principal": {
++                  "__xlnType": "BigInt",
++                  "value": "10000"
++                },
++                "termMs": 86400000,
++                "tokenId": 1
++              }
++            ]
++          ],
++          "deltasRoot": "0x347f7429a6f7a6950db85a270ce4c178aa81dbb2ad1f3f7164a8113a58e508a3",
+           "events": [
+             "Lending close request lend-1111111111111111 committed"
+           ],
+@@ -123,14 +326,23 @@
+           "offdelta": "10000",
+           "outputCount": 0,
+           "rightCreditLimit": "20000",
+-          "txType": "lending_close_request"
++          "subcontractsRoot": "0xf5ba03c9db7ed88d6b05ed5c5130a5ff3a06942ae0f54f3155b96349727767fc",
++          "timestamp": 1000,
++          "txType": "lending_close_request",
++          "txWire": [
++            14,
++            "lend-1111111111111111",
++            "0x1010101010101010101010101010101010101010101010101010101010101010",
++            "0x2020202020202020202020202020202020202020202020202020202020202020"
++          ]
+         },
+         {
+-          "accountStateRoot": "0x95b704b09fe5ebe387393e04e55cd88b1efcbb8beeab6b9ddc034e0c88dac9e7",
++          "accountStateRoot": "0xc4ed05878b1871a6479ad4fee21d4ee24c75774fd2d386ffb117fc40fc47acd2",
+           "byLeft": true,
+-          "deltasRoot": "0x24bf3769ff86d5ec381efd79a77152942e63d3b702ef56d7832d27c5ef21325b",
++          "claimEntries": [],
++          "deltasRoot": "0xdf45402436da9cae870141435bb21945e697daac17e865643f2d51410819c76a",
+           "events": [
+-            "💸 Sent 10025 token 1 to Entity 2020 (xln:lending_close_payout)"
++            "💸 Sent 10100 token 1 to Entity 2020 (xln:lending_close_payout)"
+           ],
+           "intentEntries": [
+             [
+@@ -148,10 +360,20 @@
+           ],
+           "leftCreditLimit": "20000",
+           "lendingIntentsRoot": "0xa5b09d086aacb643ff5e812a9600145cb8544327fa44cde5e1e4c9f3c9108cc8",
+-          "offdelta": "-25",
++          "offdelta": "-100",
+           "outputCount": 0,
+           "rightCreditLimit": "20000",
+-          "txType": "lending_close_payout"
++          "subcontractsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
++          "timestamp": 86401000,
++          "txType": "lending_close_payout",
++          "txWire": [
++            15,
++            "lend-1111111111111111",
++            "0x1010101010101010101010101010101010101010101010101010101010101010",
++            "0x2020202020202020202020202020202020202020202020202020202020202020",
++            1,
++            "10100"
++          ]
+         }
+       ]
+     }
+diff --git a/rscore/fixtures/account-semantics/lending.ts b/rscore/fixtures/account-semantics/lending.ts
+index 312aad2f197ade05ff9d6db091475a3abb3b86e0..6c0c814ffffa9c303ab1c98d3250855592989899 100644
+--- a/rscore/fixtures/account-semantics/lending.ts
++++ b/rscore/fixtures/account-semantics/lending.ts
+@@ -4,6 +4,8 @@ import { createEmptyAccountJClaimAccumulator } from '../../../core/account/j-cla
+ import { createDefaultDelta } from '../../../core/account/state/delta';
+ import { PersistentAccountStateMap } from '../../../core/account/state/persistent-state-map';
+ import type { AccountReplica, AccountTx } from '../../../core/types/account';
++import { assertLendingCovenant, lendingCovenantHash } from '../../../core/protocol/dispute/lending-covenant';
++import { accountTxWire, type RscoreWireValue } from '../../../core/rscore/shadow-wire';
+ 
+ const entity = (byte: string): string => `0x${byte.repeat(32)}`;
+ const HUB = entity('10');
+@@ -17,10 +19,14 @@ const LOAN_ID = 'loan-0327fd9035d42518';
+ 
+ type LendingStep = Readonly<{
+   txType: AccountTx['type'];
++  txWire: readonly RscoreWireValue[];
++  timestamp: number;
+   byLeft: boolean;
+   accountStateRoot: string;
+   deltasRoot: string;
+   lendingIntentsRoot: string;
++  subcontractsRoot: string;
++  claimEntries: readonly [string, unknown][];
+   intentEntries: readonly [string, string][];
+   offdelta: string;
+   leftCreditLimit: string;
+@@ -32,6 +38,8 @@ type LendingStep = Readonly<{
+ const makeAccount = (counterparty: string): AccountReplica => {
+   const delta = createDefaultDelta(1);
+   delta.collateral = 20_000n;
++  // Each party owns 10,000: savings must spend assets, not unused bank credit.
++  delta.ondelta = 10_000n;
+   delta.leftCreditLimit = 20_000n;
+   delta.rightCreditLimit = 20_000n;
+   return {
+@@ -82,18 +90,23 @@ const applyStep = async (
+   account: AccountReplica,
+   tx: AccountTx,
+   byLeft: boolean,
++  timestamp = 1_000,
+ ): Promise<LendingStep> => {
+-  const result = await applyAccountTxToMutableReplica(account, tx, byLeft, 1_000);
++  const result = await applyAccountTxToMutableReplica(account, tx, byLeft, timestamp);
+   if (!result.ok) throw new Error(`LENDING_VECTOR_REJECTED:${tx.type}:${result.rejection.message}`);
+   const delta = account.state.deltas.get(1);
+   if (!delta) throw new Error('LENDING_VECTOR_DELTA_MISSING');
+   const intents = account.state.lendingIntents;
+   return {
+     txType: tx.type,
++    txWire: accountTxWire(tx),
++    timestamp,
+     byLeft,
+     accountStateRoot: computeAccountStateRootCold(account.state),
+     deltasRoot: account.state.deltas.coldRootHash(),
+     lendingIntentsRoot: intents?.coldRootHash() ?? ZERO_ROOT,
++    subcontractsRoot: account.state.subcontracts?.coldRootHash() ?? ZERO_ROOT,
++    claimEntries: [...account.state.subcontracts?.entries() ?? []],
+     intentEntries: [...(intents?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
+     offdelta: delta.offdelta.toString(),
+     leftCreditLimit: delta.leftCreditLimit.toString(),
+@@ -105,7 +118,7 @@ const applyStep = async (
+ 
+ const borrowerLifecycle = async (): Promise<readonly LendingStep[]> => {
+   const account = makeAccount(BORROWER);
+-  return [
++  const steps = [
+     await applyStep(account, {
+       type: 'lending_borrow_request',
+       data: {
+@@ -116,6 +129,8 @@ const borrowerLifecycle = async (): Promise<readonly LendingStep[]> => {
+         amount: 2_500n,
+         termId: '1d',
+         maxInterestBps: 150,
++        maxLateMs: 86_400_000,
++        expiresAt: 5_000,
+       },
+     }, false),
+     await applyStep(account, {
+@@ -126,19 +141,41 @@ const borrowerLifecycle = async (): Promise<readonly LendingStep[]> => {
+         borrowerEntityId: BORROWER,
+         tokenId: 1,
+         amount: 2_500n,
++        termId: '1d', interestBps: 100, requestId: BORROW_REQUEST_ID,
++        maxInterestBps: 150, expiresAt: 5_000, maxLateMs: 86_400_000, lateMs: 86_400_000,
+       },
+     }, true),
+-    await applyStep(account, {
++  ];
++  const claim = account.state.subcontracts?.get(LOAN_ID);
++  assertLendingCovenant(claim);
++  const partial: Extract<AccountTx, { type: 'lending_repay' }> = {
+       type: 'lending_repay',
+       data: {
+         loanId: LOAN_ID,
+         hubEntityId: HUB,
+         borrowerEntityId: BORROWER,
+         tokenId: 1,
+-        amount: 2_525n,
++        amount: 1_012n,
++        claimHash: lendingCovenantHash(claim),
+       },
+-    }, false),
+-  ];
++  };
++  steps.push(await applyStep(account, partial, false, 43_201_000));
++  const beforeRetry = computeAccountStateRootCold(account.state);
++  const retry = await applyAccountTxToMutableReplica(account, partial, false, 43_201_000);
++  if (retry.ok || retry.rejection.message !== 'LENDING_REPAY_COVENANT_CHANGED' ||
++      computeAccountStateRootCold(account.state) !== beforeRetry) throw new Error('LENDING_STALE_PARTIAL_NOT_ATOMIC');
++  const remainder = account.state.subcontracts?.get(LOAN_ID);
++  assertLendingCovenant(remainder);
++  if (remainder.principal !== 1_500n || remainder.accruedInterest !== 0n || remainder.interestRemainder !== 432_000_000_000n) {
++    throw new Error('LENDING_PARTIAL_CLOCK_INCORRECT');
++  }
++  steps.push(await applyStep(account, { ...partial, data: {
++    ...partial.data, amount: 5_000n, claimHash: lendingCovenantHash(remainder),
++  } }, false, 86_401_000));
++  if (account.state.deltas.get(1)?.offdelta !== 20n || account.state.subcontracts?.size !== 0) {
++    throw new Error('LENDING_FINAL_PAYMENT_NOT_CAPPED_AT_EARNED_DEBT');
++  }
++  return steps;
+ };
+ 
+ const lenderLifecycle = async (): Promise<readonly LendingStep[]> => {
+@@ -167,9 +204,9 @@ const lenderLifecycle = async (): Promise<readonly LendingStep[]> => {
+         hubEntityId: HUB,
+         lenderEntityId: LENDER,
+         tokenId: 1,
+-        amount: 10_025n,
++        amount: 10_100n,
+       },
+-    }, true),
++    }, true, 86_401_000),
+   ];
+ };
+ 
+diff --git a/rscore/crates/engine/src/tx/handlers/lending/authorization.rs b/rscore/crates/engine/src/tx/handlers/lending/authorization.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..f18388e534e41e0af8ee2c6ceb94c71fb8538bf3
+--- /dev/null
++++ b/rscore/crates/engine/src/tx/handlers/lending/authorization.rs
+@@ -0,0 +1,60 @@
++use serde_json::json;
++use sha3::{Digest, Keccak256};
++
++use crate::tx::apply_types::MutationDecision;
++use crate::{AccountRejection, AccountReplica, AccountTx, LendingIntentKind, LendingTermId, Side,
++    TransitionError, ValidationRejection};
++use super::validation::{consume_intent, normalize, positive_amount, require_counterparty,
++    require_intent_id, require_role, validate_interest_bps};
++
++const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
++
++pub(super) fn term_ms(term: LendingTermId) -> u64 {
++    match term {
++        LendingTermId::OneHour => 3_600_000,
++        LendingTermId::OneDay => 86_400_000,
++        LendingTermId::OneMonth => 2_592_000_000,
++    }
++}
++
++fn reject(message: &str) -> MutationDecision {
++    MutationDecision::rejected(AccountRejection::Validation(ValidationRejection::AccountTx {
++        message: message.into(),
++    }))
++}
++
++pub(super) fn borrow_request(
++    replica: &mut AccountReplica,
++    tx: &AccountTx,
++    proposer: Side,
++    timestamp: u64,
++) -> Result<MutationDecision, TransitionError> {
++    let AccountTx::LendingBorrowRequest { request_id, hub_entity_id, borrower_entity_id,
++        token_id, amount, term_id, max_interest_bps, expires_at, max_late_ms } = tx else {
++        return Err(TransitionError::LendingRouteMismatch);
++    };
++    require_intent_id(request_id, "borrow")?;
++    require_role(replica, proposer, "BORROWER", borrower_entity_id)?;
++    require_counterparty(replica, borrower_entity_id, hub_entity_id)?;
++    positive_amount(amount, "LENDING_BORROW")?;
++    validate_interest_bps(*max_interest_bps)?;
++    if expires_at.checked_add(term_ms(*term_id)).and_then(|end| end.checked_add(*max_late_ms))
++        .is_none_or(|end| end > MAX_SAFE_INTEGER) {
++        return Ok(reject("LENDING_BORROW_CLOCK_OVERFLOW"));
++    }
++    if request_id != &normalize(request_id) || timestamp >= *expires_at {
++        return Ok(reject("LENDING_BORROW_AUTHORIZATION_EXPIRED_OR_INVALID"));
++    }
++    let domain = replica.state().identity().domain();
++    // The borrower's certified frame authorizes exactly these terms in this
++    // Account domain and J epoch. A different amount, late window or deployment
++    // must never reuse its permission. The disbursement consumes this key.
++    let preimage = json!(["xln:borrow", domain.chain_id(), domain.depository_address().as_hex(),
++        replica.state().j_nonce(), request_id, hub_entity_id, borrower_entity_id, token_id,
++        {"__xlnType":"BigInt", "value":amount.to_string()}, term_id.wire_name(),
++        max_interest_bps, max_late_ms, expires_at]).to_string();
++    let authorization = format!("authorize:0x{}", hex::encode(Keccak256::digest(preimage.as_bytes())));
++    consume_intent(replica, format!("borrow:{}", normalize(request_id)), LendingIntentKind::Borrow)?;
++    consume_intent(replica, authorization, LendingIntentKind::Borrow)?;
++    Ok(MutationDecision::applied(vec![format!("Lending borrow request {request_id} committed")]))
++}

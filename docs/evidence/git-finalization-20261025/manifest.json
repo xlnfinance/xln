@@ -1,0 +1,290 @@
+{
+ "scope": "Git finalization 2026-10-25: historical stash and retired worktree drafts, non-executable",
+ "privateArchive": {
+  "bundle": "/Users/zigota/agent-jobs/xln-claude-e2e-20261023/opus-mainnet-closure-sequence-20261024/phase-105/stash-preserve/all-stashes.bundle",
+  "bundleSha256": "89f34532f43cfc6bdc397d77e6259523eb37679427870411dee58b4b8745c4a4",
+  "refs": "refs/preserved/stash-00..13"
+ },
+ "stashes": [
+  {
+   "stash": "stash@{0}",
+   "commit": "399fd47cf11b997bfa41075c3c198a92008bd8a3",
+   "parents": [
+    "4cf06cde8f37fdc7e9cba6de77acdd9ee4a4e575",
+    "33d8a16ecf2089a5097feeb84ba215b2fbdc7215"
+   ],
+   "date": "2026-10-14T03:22:33+03:00",
+   "subject": "On main: preserve old-main protected files already present on a57f633e9",
+   "baseInMain": true,
+   "indexDiffers": false,
+   "untrackedCommit": null,
+   "excludedPrivate": {},
+   "file": "stash-00-399fd47cf11b.patch",
+   "sha256": "3366c9f4d5c9e72d8bc74df93d665bbd884e017ae404522161eba45937b6b823"
+  },
+  {
+   "stash": "stash@{1}",
+   "commit": "724e33c3c5434323b9830768e3b46443e52ec58e",
+   "parents": [
+    "f110fcf36b1abdb4d9730690ba301ee43d10a097",
+    "3e0642138956ef185d84695260e6e100ab26b8b2",
+    "e5c0e0f8b13f58802fcb94414916f6d075ace8c2"
+   ],
+   "date": "2026-10-12T03:33:44+03:00",
+   "subject": "On main: pending P6 preserved during modal regression fix 20261012",
+   "baseInMain": true,
+   "indexDiffers": false,
+   "untrackedCommit": "e5c0e0f8b13f58802fcb94414916f6d075ace8c2",
+   "excludedPrivate": {},
+   "file": "stash-01-724e33c3c543.patch",
+   "sha256": "da33c21c88439dde33176b497dc2a3007f16da81d164850bbbffc9fa4c6c1d02"
+  },
+  {
+   "stash": "stash@{2}",
+   "commit": "0ab9323b363aab58f4e57c25b2de87047054f75d",
+   "parents": [
+    "f110fcf36b1abdb4d9730690ba301ee43d10a097",
+    "40321d9f25d8ed6718f0797b36da0afd6e206099"
+   ],
+   "date": "2026-10-12T03:33:35+03:00",
+   "subject": "On main: unfinished React file recovery UI pending E2E 20261012",
+   "baseInMain": true,
+   "indexDiffers": false,
+   "untrackedCommit": null,
+   "excludedPrivate": {},
+   "file": "stash-02-0ab9323b363a.patch",
+   "sha256": "a2b9f96f0bca9062f3e7077ce366becf9263ac573c2d2db60cf745c87f41ee03"
+  },
+  {
+   "stash": "stash@{3}",
+   "commit": "2f29e3383e6904702f71c684fc3d4f4362831137",
+   "parents": [
+    "e6e7cb847b6275e14fb119c04eff8b3e23fea830",
+    "d434b14cedefc4994fa6d64f4ff24d67cc652776",
+    "e4ddb63eb4c04c923d313abe8f9c1aacfcfa7932"
+   ],
+   "date": "2026-10-12T03:11:33+03:00",
+   "subject": "On main: pending P6 watchtower decoder OS protection approval 20261012",
+   "baseInMain": true,
+   "indexDiffers": false,
+   "untrackedCommit": "e4ddb63eb4c04c923d313abe8f9c1aacfcfa7932",
+   "excludedPrivate": {},
+   "file": "stash-03-2f29e3383e69.patch",
+   "sha256": "77fc5ef40185c6d2b8cd1afbcb2f5f5bb033f3e25b8c9e7b8e5c7a306e3d8789"
+  },
+  {
+   "stash": "stash@{4}",
+   "commit": "438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90",
+   "parents": [
+    "399eeb94756629573484fbe599b63bd31cb0d539",
+    "9855b1b7fc0bf9ed7ab8eeefdd91cb942dc0c53b",
+    "9c7a5f21e581275983eaceac6237b189bea49758"
+   ],
+   "date": "2026-10-12T01:08:53+03:00",
+   "subject": "On main: park: owner-frozen Rust and lending parity changes 2026-10-12",
+   "baseInMain": true,
+   "indexDiffers": false,
+   "untrackedCommit": "9c7a5f21e581275983eaceac6237b189bea49758",
+   "excludedPrivate": {},
+   "file": "stash-04-438bf1a6ddd8.patch",
+   "sha256": "95cf026c71dfe8ba4d986e5aed6f201ee35c57b2847c75eeafae84d550a491e3"
+  },
+  {
+   "stash": "stash@{5}",
+   "commit": "014283aade428d5fb397eb488b67b0a083779865",
+   "parents": [
+    "1f2ac885521a49f32ff094b96b8e1e1c1fccdcb8",
+    "c0b9547ec00d9232951ef3127bc27c4d9aacd347"
+   ],
+   "date": "2026-10-08T13:00:09+03:00",
+   "subject": "On main: xln owner-requested origin-main integration 2026-10-08",
+   "baseInMain": true,
+   "indexDiffers": false,
+   "untrackedCommit": null,
+   "excludedPrivate": {
+    "frontend/static/account-worker.js": {
+     "reason": "generated account worker bundle",
+     "blob": "1305ecdc5067dd7688f586a631b35ee903440910",
+     "sha256": "632f461bc7283f3ff654eaff8886000baf3aa77ab3ad8dc917a253aa8da123aa",
+     "bytes": 2041526
+    }
+   },
+   "file": "stash-05-014283aade42.patch",
+   "sha256": "e4559ffbc006f7a3a0a2ff912c95d81959059f5d790c224e3f71b113ee6f1ec8"
+  },
+  {
+   "stash": "stash@{6}",
+   "commit": "6de7e55cfec4bd4d698574f950e29d126c303984",
+   "parents": [
+    "6f620ed0fab929a3b2eca37a553fb006d654964b",
+    "18c186f3fba5ceb4bd2a864ead3bf1e2ce649d34",
+    "8f7a7a59a178e5a73b542ac89792b1d713bc04ff"
+   ],
+   "date": "2026-08-20T02:31:45+03:00",
+   "subject": "On perf/1000tps: wip-cancel-failfast",
+   "baseInMain": false,
+   "indexDiffers": false,
+   "untrackedCommit": "8f7a7a59a178e5a73b542ac89792b1d713bc04ff",
+   "excludedPrivate": {},
+   "file": "stash-06-6de7e55cfec4.patch",
+   "sha256": "7dd966b8c1c9b5e306fef63c8841d712594626cb4fca58f7eee94ed302bddb41"
+  },
+  {
+   "stash": "stash@{7}",
+   "commit": "27ac56281b4f3c487185c1078b3b50cb108aabdf",
+   "parents": [
+    "3783b4f09172278ccbc1a78c39ea3a27708f5d5d",
+    "36928a839fd7a05626f5fa9c1714e9eb149732c5",
+    "aaf7664f393425cb516da589781a2406c3977066"
+   ],
+   "date": "2026-08-04T21:57:43+03:00",
+   "subject": "On cursor/ws-direct-handshake-hello-71e9: temp-unrelated",
+   "baseInMain": true,
+   "indexDiffers": false,
+   "untrackedCommit": "aaf7664f393425cb516da589781a2406c3977066",
+   "excludedPrivate": {
+    "ui/public/runtime.js": {
+     "reason": "generated browser runtime bundle",
+     "blob": "6853756c27396b2c50cd7d0921443357961cbc18",
+     "sha256": "3306e1585102056ef443a17b11ea3c0e9312bfff656bac2dacf01f4748aa2b16",
+     "bytes": 5384174
+    }
+   },
+   "file": "stash-07-27ac56281b4f.patch",
+   "sha256": "0b1f01d5ad06e70c70160eca3199d2abac3cc40a983425e5f817e7a34010b8ca"
+  },
+  {
+   "stash": "stash@{8}",
+   "commit": "f7d566c21283423abcefc409f510bc757171c531",
+   "parents": [
+    "ad70e1c1f0b8d8ccfec2196476c3be782c860407",
+    "4f58be5094937d2307eadb93627fdeb729a37861",
+    "40f19ed6ceaf5722c8e4cea018c8c0bcf1a318ae"
+   ],
+   "date": "2026-07-30T21:54:37+03:00",
+   "subject": "On main: preserve-claude-graph-before-runtime-merge-20260730",
+   "baseInMain": true,
+   "indexDiffers": false,
+   "untrackedCommit": "40f19ed6ceaf5722c8e4cea018c8c0bcf1a318ae",
+   "excludedPrivate": {
+    "frontend/static/contracts/Depository.json": {
+     "reason": "generated contract artifact",
+     "blob": "9ed809d8bc0ae2ef688bf46e9948b98c1a6b993f",
+     "sha256": "e7ae74a92c4b93d150f678a75b3963f86b5e0f682d6d03a6a398aca5e609e552",
+     "bytes": 126370
+    }
+   },
+   "file": "stash-08-f7d566c21283.patch",
+   "sha256": "d98619109985da03903908c7a07f5e0b07d47bea78fd39ad622821b2189667be"
+  },
+  {
+   "stash": "stash@{9}",
+   "commit": "d971ee852f800194fcc8e6a0f9ac5bdbf2690530",
+   "parents": [
+    "6783928924ab0146f17b3d3b86b691937ec349f5",
+    "cfb6a583830cb803911802f4d0c452fc293f1914"
+   ],
+   "date": "2026-07-25T23:41:26+03:00",
+   "subject": "On main: user deploy-contracts confirmations before v0.1.28 fast-forward",
+   "baseInMain": true,
+   "indexDiffers": false,
+   "untrackedCommit": null,
+   "excludedPrivate": {},
+   "file": "stash-09-d971ee852f80.patch",
+   "sha256": "a3a3a62f45fdb73f09c42624100d6f5dafedaf3c71f93e92e661b63b2dc09bec"
+  },
+  {
+   "stash": "stash@{10}",
+   "commit": "ff1354747127435b1135e10e754abaf3d0e1ab97",
+   "parents": [
+    "577f37b54a0bbb00eaa8ae3fce70854d314b379b",
+    "57cb9efc22cc4b0b5aa826a250a9e24d287d7d82"
+   ],
+   "date": "2026-07-19T20:28:15+03:00",
+   "subject": "On main: pre-merge dependency updates included in xln 0.1.10",
+   "baseInMain": true,
+   "indexDiffers": false,
+   "untrackedCommit": null,
+   "excludedPrivate": {},
+   "file": "stash-10-ff1354747127.patch",
+   "sha256": "269032302fb1ea5bc540fe706ad1f13dbeae84e35d54d3f217463f36c7301773"
+  },
+  {
+   "stash": "stash@{11}",
+   "commit": "932d28fffa3161c480a1a59fc7f5f851c3979e28",
+   "parents": [
+    "ef0df7f00a6f2463877d692c9a97cdbde6c894f9",
+    "343fdb6a9af05947e429d3e2b07f2fd71882e02e",
+    "74b7fc9a0fa78299b7c79df3bd94cb83e5037b55"
+   ],
+   "date": "2026-06-19T23:41:21+03:00",
+   "subject": "On main: deploy-untracked-ai-cookbook",
+   "baseInMain": true,
+   "indexDiffers": false,
+   "untrackedCommit": "74b7fc9a0fa78299b7c79df3bd94cb83e5037b55",
+   "excludedPrivate": {},
+   "file": null,
+   "note": "empty stash: no tracked, index or untracked changes"
+  },
+  {
+   "stash": "stash@{12}",
+   "commit": "bbb422bb607779b671fc06441c8e3711248211b4",
+   "parents": [
+    "ef0df7f00a6f2463877d692c9a97cdbde6c894f9",
+    "8ca40ed42cd7b5d734279424bec08a802fdd123b"
+   ],
+   "date": "2026-06-19T23:41:08+03:00",
+   "subject": "On main: deploy-timestamp-jurisdictions",
+   "baseInMain": true,
+   "indexDiffers": false,
+   "untrackedCommit": null,
+   "excludedPrivate": {},
+   "file": "stash-12-bbb422bb6077.patch",
+   "sha256": "e2df10bd027cb04c532226c87d88884df3d649bf779b1ee9ee2dc77fcb3265fb"
+  },
+  {
+   "stash": "stash@{13}",
+   "commit": "a1adb3fba623d86fe25a3303f353efaebbe2ab5a",
+   "parents": [
+    "35d4a4432ef057076d2cca138af0e8e20b4a659b",
+    "0a66b44b198d44a6056dae7d8deb1cc644331aa1"
+   ],
+   "date": "2025-12-10T05:44:17+03:00",
+   "subject": "WIP on main: 710dcc1 debug(graph3d): add comprehensive entity click logging",
+   "baseInMain": true,
+   "indexDiffers": false,
+   "untrackedCommit": null,
+   "excludedPrivate": {
+    ".obsidian/workspace.json": {
+     "reason": "local editor workspace state, not project source",
+     "blob": "a7e5c094e18739a5cc974b2a145f2721af4c3c04",
+     "sha256": "82f3eea7cf366a04e28a0bb4c69a1add6cc5ebe5c9ad849c29ba464a89acb6ce",
+     "bytes": 7657
+    }
+   },
+   "file": "stash-13-a1adb3fba623.patch",
+   "sha256": "63282f9d79fe97ed4d955cc4365ab6af341c432097d5543d6d4b458872f4df67"
+  }
+ ],
+ "retiredPerfBranch": {
+  "file": "retired-perf-1000tps-commits.patch",
+  "sha256": "68f27710670eb903fa6c90ca1b329a3efbe111ad1354b60021f5317bd9b2d40d",
+  "commits": [
+   "bdfb60695ea0fdd1a8fb411a6198a232a9ff18a6",
+   "d8208bdb0ef518237723e1ccd64f904fe25917e9",
+   "c0b86523a2bbde91aa4a55e8bf701028f79a066d",
+   "4d1a33809748353db90d20918f86345e75d5a1df",
+   "f9315dcb1967fadc4fb9a8b7009bbd6297f8e7f6",
+   "be68c746510b63c92ffe566eb737447dd177ca67",
+   "91e41b970cbf267f2c0e4dfe0bac0afba504f730",
+   "6f620ed0fab929a3b2eca37a553fb006d654964b"
+  ]
+ },
+ "retiredSplitWorktree": {
+  "file": "retired-phase064-split-worktree.patch",
+  "sha256": "5a25f10f5929da00861933e8b43e4e56ee8ad8b73deb82132990de93b86e3906",
+  "trackedPatchSha256": "9f9349828b00941386a6340c734d14fe72982f19ebf275b5dda50427c590532a",
+  "untrackedTestSha256": "ab480f47adcaf979389b2d3e6294069b6b0997e396e900ec6a842d44cba8c811",
+  "untrackedTestPath": "core/__tests__/jurisdiction/watchers/j-watcher-authority-evidence.test.ts"
+ }
+}

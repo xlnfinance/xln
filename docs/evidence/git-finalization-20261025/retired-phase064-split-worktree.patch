@@ -1,0 +1,618 @@
+HISTORICAL NON-EXECUTABLE EVIDENCE - do not apply over current main.
+This draft predates the current canonical implementation; see README.md.
+retired worktree phase-064/split-wt, detached at 4e1c9a60648b52827b61a61a2285c0783c40127e
+ABI-independent split experiment: measured no gain (35.8s vs 36.3s, n=1); not integrated by design
+sections: tracked diff vs 4e1c9a60, then the untracked test as a new file
+
+diff --git a/core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts b/core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts
+index 8cab9b5b3..c354b54d6 100644
+--- a/core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts
++++ b/core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts
+@@ -282,10 +282,16 @@ describe('JAdapter watcher ingress', () => {
+             typeof transaction.data !== 'string'
+           )
+             throw new Error('TEST_TOKEN_CALL_INVALID');
++          // -1 marks the registry length read inside an entry batch.
++          if (transaction.data === iface.encodeFunctionData('getTokensLength')) return -1;
+           return Number(iface.decodeFunctionData('_tokens', transaction.data)[0]);
+         });
+         batches.push(ids);
+         const results = ids.map(tokenId => {
++          if (tokenId === -1) {
++            lengthReads += 1;
++            return iface.encodeFunctionResult('getTokensLength', [entries.length]);
++          }
+           if (tokenId === failedToken) throw new Error(`TEST_TOKEN_READ_FAILED:${tokenId}`);
+           const entry = entries[tokenId];
+           if (!entry) throw new Error(`TEST_TOKEN_MISSING:${tokenId}`);
+@@ -297,11 +303,27 @@ describe('JAdapter watcher ingress', () => {
+     );
+     expect(await readWatchedTokens()).toEqual([{ tokenId: 1, address: erc20 }]);
+     expect(batches.splice(0)).toEqual([[1, 2, 3]]);
+-    // A token registered after the first poll must be included on the next.
++    expect(lengthReads).toBe(1);
++    // An unchanged registry costs one batch: its length rides with the entries.
++    expect(await readWatchedTokens()).toEqual([{ tokenId: 1, address: erc20 }]);
++    expect(batches.splice(0)).toEqual([[-1, 1, 2, 3]]);
++    expect(lengthReads).toBe(2);
++    // A reorged-out entry fails the one-batch read; the exact read returns the
++    // shorter registry instead of halting, and the next poll re-reads exactly.
++    const reorgedOut = entries.pop();
++    expect(await readWatchedTokens()).toEqual([{ tokenId: 1, address: erc20 }]);
++    expect(batches.splice(0)).toEqual([[-1, 1, 2, 3], [1, 2]]);
++    if (reorgedOut) entries.push(reorgedOut);
++    expect(await readWatchedTokens()).toEqual([{ tokenId: 1, address: erc20 }]);
++    expect(batches.splice(0)).toEqual([[-1, 1, 2], [1, 2, 3]]);
++    expect(lengthReads).toBe(6);
++    // A token registered after the first poll must be included on the next:
++    // the changed length rejects the one-batch read and the exact read runs.
+     for (let id = 4; id <= 130; id += 1) entries.push([`0x${id.toString(16).padStart(40, '0')}`, 0n, 0n]);
+     const refreshed = await readWatchedTokens();
+-    expect(lengthReads).toBe(2);
++    expect(lengthReads).toBe(8);
+     expect(refreshed.map(token => token.tokenId)).toEqual([1, ...Array.from({ length: 127 }, (_, i) => i + 4)]);
++    expect(batches.shift()).toEqual([-1, 1, 2, 3]);
+     expect(batches.map(batch => batch.length)).toEqual([128, 2]);
+     expect(batches.flat()).toEqual(Array.from({ length: 130 }, (_, i) => i + 1));
+     failedToken = 129;
+@@ -311,7 +333,7 @@ describe('JAdapter watcher ingress', () => {
+     await expect(readWatchedTokens()).rejects.toThrow('J_TOKEN_REGISTRY_BATCH_LENGTH_MISMATCH');
+     truncate = false;
+     expect(await readWatchedTokens()).toEqual(refreshed);
+-    expect(lengthReads).toBe(5);
++    expect(lengthReads).toBe(11);
+     expect(failures).toHaveLength(2);
+     // The watcher must retain locally typed outages through the registry
+     // context wrapper; permanent registry failures must still halt the poll.
+@@ -511,8 +533,8 @@ describe('JAdapter watcher ingress', () => {
+ 
+   test('RPC watcher bounds historical catch-up without skipping the safe tip', () => {
+     expect(resolveWatcherPollToBlock(1, 10_000, 256)).toBe(256);
+-    expect(resolveWatcherPollToBlock(1, 190_000)).toBe(1023);
+-    expect(resolveWatcherPollToBlock(257, 190_000)).toBe(1279);
++    expect(resolveWatcherPollToBlock(1, 190_000)).toBe(8191);
++    expect(resolveWatcherPollToBlock(257, 190_000)).toBe(8447);
+     expect(resolveWatcherPollToBlock(189_900, 190_000)).toBe(190_000);
+     expect(resolveWatcherPollToBlock(257, 10_000, 256)).toBe(512);
+     expect(resolveWatcherPollToBlock(9_900, 10_000, 256)).toBe(10_000);
+@@ -540,8 +562,9 @@ describe('JAdapter watcher ingress', () => {
+     expect(nextWatcherPollWindow(1, false)).toBe(1);
+     expect(nextWatcherPollWindow(128, true)).toBe(256);
+     expect(nextWatcherPollWindow(256, true)).toBe(512);
+-    expect(nextWatcherPollWindow(512, true)).toBe(1023);
+-    expect(watcherPollWindowLimit('rpc')).toBe(1023);
++    expect(nextWatcherPollWindow(512, true)).toBe(1024);
++    expect(nextWatcherPollWindow(4096, true)).toBe(8191);
++    expect(watcherPollWindowLimit('rpc')).toBe(8191);
+     expect(watcherPollWindowLimit('tron')).toBe(255);
+     expect(nextWatcherPollWindow(128, true, watcherPollWindowLimit('tron'))).toBe(255);
+     expect(resolveWatcherPollToBlock(2, 1000, watcherPollWindowLimit('tron'))).toBe(256);
+diff --git a/core/__tests__/protocol/serialization/binary-codec-bytes-form.test.ts b/core/__tests__/protocol/serialization/binary-codec-bytes-form.test.ts
+index 90d86a5bb..cdd830359 100644
+--- a/core/__tests__/protocol/serialization/binary-codec-bytes-form.test.ts
++++ b/core/__tests__/protocol/serialization/binary-codec-bytes-form.test.ts
+@@ -6,6 +6,7 @@ import {
+   encodeBinaryPayload,
+   encodeCanonicalConsensusBytes,
+   packPreorderedBinaryPayload,
++  withSharedBinaryProjection,
+ } from '../../../protocol/serialization/binary-codec';
+ 
+ const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
+@@ -64,4 +65,31 @@ describe('binary codec byte form', () => {
+     // Re-encoding the decoded frame reproduces the bytes a peer MACs.
+     expect(hex(encodeBinaryPayload({ payload: decoded.payload, encSeq: decoded.encSeq, type: 'entity_inputs' }))).toBe(hex(encoded));
+   });
++
++  // The storage frame hash and its WAL row pack one canonical input log.
++  test('shared projection keeps every frame-hash and row byte and projects the shared log once', () => {
++    const headers = Array.from({ length: 64 }, (_, index) => ({
++      jHeight: index + 1,
++      jBlockHash: `0x${(index + 1).toString(16).padStart(64, '0')}`,
++    }));
++    const log = canonicalizeBinaryPayload({ headers, label: 'observeJRange', amount: 7n }, { omitSymbolKeys: true });
++    const frameHash = `0x${'ab'.repeat(32)}`;
++    const hashDomain = (): Uint8Array => encodeBinaryPayload({ kind: 'frame', log }, { omitSymbolKeys: true });
++    const row = (): Uint8Array => packPreorderedBinaryPayload({ log, frameHash });
++    const separate = [hashDomain(), row()].map(hex);
++    expect(withSharedBinaryProjection(() => [hashDomain(), row()].map(hex))).toEqual(separate);
++
++    // Discriminating: inside one block the second pack reuses the first
++    // projection, so a (forbidden) mid-block edit is not re-read; outside
++    // the block nothing is cached.
++    const edited = `0x${'cd'.repeat(32)}`;
++    const shared = withSharedBinaryProjection(() => {
++      const first = hex(row());
++      (log.headers[0] as { jBlockHash: string }).jBlockHash = edited;
++      return [first, hex(row())];
++    });
++    expect(shared[1]).toBe(shared[0]);
++    expect(shared[0]).not.toContain('cd'.repeat(32));
++    expect(hex(row())).toContain('cd'.repeat(32));
++  });
+ });
+diff --git a/core/jurisdiction/adapter/rpc-watcher-inputs.ts b/core/jurisdiction/adapter/rpc-watcher-inputs.ts
+index 5e1c0a8d9..f4680f981 100644
+--- a/core/jurisdiction/adapter/rpc-watcher-inputs.ts
++++ b/core/jurisdiction/adapter/rpc-watcher-inputs.ts
+@@ -268,24 +268,24 @@ export const createWatchedErc20TokenReader = (
+   sendBatch: RpcBatchSend,
+   emitDebug: (payload: Record<string, unknown>) => void,
+ ): (() => Promise<WatchedErc20Token[]>) => {
++  // Registry length confirmed by the previous refresh. While it fits one
++  // batch, the next refresh reads the length inside the entry batch.
++  let knownLength: number | null = null;
++  const decodeLength = (raw: unknown): number | null => {
++    if (typeof raw !== 'string') return null;
++    try {
++      return Number(depository.interface.decodeFunctionResult('getTokensLength', raw)[0]);
++    } catch {
++      return null;
++    }
++  };
+   return async (): Promise<WatchedErc20Token[]> => {
+     const tokens: WatchedErc20Token[] = [];
+     try {
+-      const length = Number(await depository.getTokensLength());
+-      if (!Number.isSafeInteger(length) || length < 1) throw new Error('J_TOKEN_REGISTRY_LENGTH_INVALID');
+       const address = await depository.getAddress();
+-      // Refresh the complete registry on every poll. Batch transport only:
+-      // a failed entry must reject this range before its cursor can advance.
+-      for (let start = 1; start < length; start += MAX_RPC_BATCH_CALLS) {
+-        const calls = Array.from({ length: Math.min(MAX_RPC_BATCH_CALLS, length - start) }, (_, index) => ({
+-          method: 'eth_call',
+-          params: [
+-            { to: address, data: depository.interface.encodeFunctionData('_tokens', [start + index]) },
+-            'latest',
+-          ],
+-        }));
+-        const entries = await sendBatch(calls);
+-        if (entries.length !== calls.length) throw new Error('J_TOKEN_REGISTRY_BATCH_LENGTH_MISMATCH');
++      const call = (data: string) => ({ method: 'eth_call', params: [{ to: address, data }, 'latest'] });
++      const entryCall = (tokenId: number) => call(depository.interface.encodeFunctionData('_tokens', [tokenId]));
++      const collect = (start: number, entries: readonly unknown[]): void => {
+         for (let index = 0; index < entries.length; index += 1) {
+           const tokenId = start + index;
+           const raw = entries[index];
+@@ -295,7 +295,36 @@ export const createWatchedErc20TokenReader = (
+           const address = normalizeEvmAddress(contractAddress);
+           if (address && address !== ethers.ZeroAddress) tokens.push({ tokenId, address });
+         }
++      };
++      // Refresh the complete registry on every poll. Batch transport only:
++      // a failed entry must reject this range before its cursor can advance.
++      const cached = knownLength;
++      knownLength = null;
++      if (cached !== null && cached <= MAX_RPC_BATCH_CALLS) {
++        const calls = [
++          call(depository.interface.encodeFunctionData('getTokensLength')),
++          ...Array.from({ length: cached - 1 }, (_, index) => entryCall(index + 1)),
++        ];
++        // Any failure here (a reorged-out entry reverts, a transport outage)
++        // falls through to the exact read below, which owns every error.
++        const entries = await sendBatch(calls).catch(() => null);
++        // Only an unchanged length proves these entries are the complete set.
++        if (entries?.length === calls.length && decodeLength(entries[0]) === cached) {
++          collect(1, entries.slice(1));
++          knownLength = cached;
++          return tokens;
++        }
++      }
++      const length = Number(await depository.getTokensLength());
++      if (!Number.isSafeInteger(length) || length < 1) throw new Error('J_TOKEN_REGISTRY_LENGTH_INVALID');
++      for (let start = 1; start < length; start += MAX_RPC_BATCH_CALLS) {
++        const calls = Array.from({ length: Math.min(MAX_RPC_BATCH_CALLS, length - start) }, (_, index) =>
++          entryCall(start + index));
++        const entries = await sendBatch(calls);
++        if (entries.length !== calls.length) throw new Error('J_TOKEN_REGISTRY_BATCH_LENGTH_MISMATCH');
++        collect(start, entries);
+       }
++      knownLength = length;
+     } catch (error) {
+       emitDebug({
+         event: 'j_watch_erc20_registry_read_failed',
+diff --git a/core/jurisdiction/adapter/rpc/watcher/rpc-watcher-canonical.ts b/core/jurisdiction/adapter/rpc/watcher/rpc-watcher-canonical.ts
+index 4f9d532bc..c8c249fa2 100644
+--- a/core/jurisdiction/adapter/rpc/watcher/rpc-watcher-canonical.ts
++++ b/core/jurisdiction/adapter/rpc/watcher/rpc-watcher-canonical.ts
+@@ -6,6 +6,7 @@ import {
+   getValidatorJExpectedBlockHash,
+ } from '../../../machine/local-history';
+ import type { RuntimeReplica } from '../../../../runtime/types';
++import type { CertifiedRegistrationEvidence } from '../../../../types/jurisdiction-runtime';
+ import {
+   enqueueJHistoryRewindForReplicaKeys,
+   findWatcherJurisdictionReplica,
+@@ -14,6 +15,7 @@ import {
+   assertFinalizedWatcherAnchors,
+   collectTargetedWatcherRewinds,
+   collectWatcherCanonicalAudit,
++  type WatcherCanonicalAudit,
+ } from '../../watcher/observe/watcher-reconciliation';
+ import type {
+   RpcWatcherServices,
+@@ -111,30 +113,56 @@ const enqueueTipRewind = (
+   });
+ };
+ 
++type CanonicalTipPlan =
++  | { kind: 'none' }
++  | { kind: 'rewind-pending' }
++  | { kind: 'audit'; audit: WatcherCanonicalAudit }
++  | { kind: 'failed'; error: unknown };
++
++// Read-only except for clearing an already-applied rewind; a local planning
++// failure is held so it still surfaces after the authority check.
++const planWatcherCanonicalTip = (
++  session: RpcWatcherSession,
++  activeEnv: RuntimeReplica,
++  services: RpcWatcherServices,
++): CanonicalTipPlan => {
++  try {
++    if (clearPendingRewindIfApplied(session, activeEnv)) return { kind: 'rewind-pending' };
++    if (session.lastSyncedBlock <= 0) return { kind: 'none' };
++    const watcherReplica = findWatcherJurisdictionReplica(
++      activeEnv,
++      services.depositoryAddress,
++      services.chainId,
++    );
++    if (!watcherReplica) return { kind: 'none' };
++    const audit = collectWatcherCanonicalAudit(activeEnv, watcherReplica, session.lastSyncedBlock);
++    if (audit.relevantReplicas.length === 0) return { kind: 'none' };
++    return { kind: 'audit', audit };
++  } catch (error) {
++    return { kind: 'failed', error };
++  }
++};
++
++const pickHeaders = (
++  headers: ReadonlyMap<number, string>,
++  heights: readonly number[],
++): Map<number, string> => new Map(heights.flatMap(height => {
++  const hash = headers.get(height);
++  return hash === undefined ? [] : [[height, hash] as const];
++}));
++
+ /**
+  * Reconciles only authenticated local history. A detected reorg is converted
+  * into deterministic Runtime ingress; this adapter never edits Entity state.
+  */
+-export const reconcileWatcherCanonicalTip = async (
++const reconcileAuditedCanonicalTip = async (
+   session: RpcWatcherSession,
+   activeEnv: RuntimeReplica,
+   services: RpcWatcherServices,
++  audit: WatcherCanonicalAudit,
++  canonicalHeaders: ReadonlyMap<number, string>,
+   emitWatcherDebug: EmitWatcherDebug,
+ ): Promise<boolean> => {
+-  if (clearPendingRewindIfApplied(session, activeEnv)) return true;
+-  if (session.lastSyncedBlock <= 0) return false;
+-  const watcherReplica = findWatcherJurisdictionReplica(
+-    activeEnv,
+-    services.depositoryAddress,
+-    services.chainId,
+-  );
+-  if (!watcherReplica) return false;
+-  const audit = collectWatcherCanonicalAudit(activeEnv, watcherReplica, session.lastSyncedBlock);
+-  if (audit.relevantReplicas.length === 0) return false;
+-  const canonicalHeaders = new Map(
+-    (await services.readBlockHeaders(audit.auditHeights))
+-      .map(header => [header.jHeight, header.jBlockHash]),
+-  );
+   assertFinalizedWatcherAnchors(audit, canonicalHeaders, services.chainId);
+   const targetedRewinds = collectTargetedWatcherRewinds(
+     audit,
+@@ -185,36 +213,34 @@ export const reconcileWatcherCanonicalTip = async (
+   return true;
+ };
+ 
+-export const assertAuthorityEvidenceCanonical = async (
+-  session: RpcWatcherSession,
++const collectAuthorityEvidence = (
+   activeEnv: RuntimeReplica,
+-  currentHead: number,
+   services: RpcWatcherServices,
+-): Promise<void> => {
++): CertifiedRegistrationEvidence[] => {
+   const stackKey = getCertifiedBoardStackKey({
+     chainId: services.chainId,
+     depositoryAddress: services.depositoryAddress,
+     entityProviderAddress: services.entityProviderAddress,
+   });
+-  const evidence = Array.from(
++  return Array.from(
+     activeEnv.infrastructure?.certifiedRegistrationEvidence?.values() ?? [],
+   ).filter(candidate => candidate.stackKey === stackKey);
+-  const currentHeader = (await services.readBlockHeaders([currentHead]))[0];
+-  if (!currentHeader) throw new Error(`J_AUTHORITY_HEAD_HEADER_MISSING:${currentHead}`);
+-  const auditKey = `${currentHead}:${currentHeader.jBlockHash}:${evidence.length}`;
++};
++
++const assertAuthorityEvidenceHeaders = (
++  session: RpcWatcherSession,
++  evidence: readonly CertifiedRegistrationEvidence[],
++  currentHead: number,
++  canonicalHeaders: ReadonlyMap<number, string>,
++): void => {
++  const currentHash = canonicalHeaders.get(currentHead);
++  if (!currentHash) throw new Error(`J_AUTHORITY_HEAD_HEADER_MISSING:${currentHead}`);
++  const auditKey = `${currentHead}:${currentHash}:${evidence.length}`;
+   if (session.lastAuthorityAuditKey === auditKey) return;
+   if (evidence.length === 0) {
+     session.lastAuthorityAuditKey = auditKey;
+     return;
+   }
+-  const heights = evidence.flatMap(candidate => [
+-    candidate.activationHeight,
+-    candidate.observedThroughHeight,
+-  ]);
+-  const canonicalHeaders = new Map(
+-    (await services.readBlockHeaders(heights))
+-      .map(header => [header.jHeight, header.jBlockHash]),
+-  );
+   for (const candidate of evidence) {
+     const activationHash = canonicalHeaders.get(candidate.activationHeight);
+     if (activationHash !== candidate.blockHash) {
+@@ -235,3 +261,41 @@ export const assertAuthorityEvidenceCanonical = async (
+   }
+   session.lastAuthorityAuditKey = auditKey;
+ };
++
++/**
++ * One poll's canonical audit: the authority evidence check, then local tip
++ * reconciliation. The head, every evidence height and every local audit
++ * height share one header batch, so each check sees exactly the headers it
++ * read before, in the same order, for one round trip instead of two.
++ */
++export const auditWatcherCanonicalState = async (
++  session: RpcWatcherSession,
++  activeEnv: RuntimeReplica,
++  currentHead: number,
++  services: RpcWatcherServices,
++  emitWatcherDebug: EmitWatcherDebug,
++): Promise<boolean> => {
++  const evidence = collectAuthorityEvidence(activeEnv, services);
++  const authorityHeights = [
++    currentHead,
++    ...evidence.flatMap(candidate => [candidate.activationHeight, candidate.observedThroughHeight]),
++  ];
++  const plan = planWatcherCanonicalTip(session, activeEnv, services);
++  const auditHeights = plan.kind === 'audit' ? plan.audit.auditHeights : [];
++  const headers = new Map(
++    (await services.readBlockHeaders([...authorityHeights, ...auditHeights]))
++      .map(header => [header.jHeight, header.jBlockHash]),
++  );
++  assertAuthorityEvidenceHeaders(session, evidence, currentHead, pickHeaders(headers, authorityHeights));
++  if (plan.kind === 'failed') throw plan.error;
++  if (plan.kind === 'rewind-pending') return true;
++  if (plan.kind === 'none') return false;
++  return reconcileAuditedCanonicalTip(
++    session,
++    activeEnv,
++    services,
++    plan.audit,
++    pickHeaders(headers, auditHeights),
++    emitWatcherDebug,
++  );
++};
+diff --git a/core/jurisdiction/adapter/rpc/watcher/rpc-watcher-poll.ts b/core/jurisdiction/adapter/rpc/watcher/rpc-watcher-poll.ts
+index ae9460794..42c932dfb 100644
+--- a/core/jurisdiction/adapter/rpc/watcher/rpc-watcher-poll.ts
++++ b/core/jurisdiction/adapter/rpc/watcher/rpc-watcher-poll.ts
+@@ -18,7 +18,7 @@ import {
+   watcherPollWindowLimit,
+   shouldAuditCanonicalWatcherState,
+ } from '../../watcher/observe/watcher-poll-policy';
+-import { assertAuthorityEvidenceCanonical, reconcileWatcherCanonicalTip } from './rpc-watcher-canonical';
++import { auditWatcherCanonicalState } from './rpc-watcher-canonical';
+ import { applyAuthenticatedWatcherRange } from './rpc-watcher-ingress';
+ import type { RpcWatcherServices, RpcWatcherSession, RpcWatcherTrace } from './rpc-watcher-types';
+ 
+@@ -120,10 +120,14 @@ const auditCanonicalStateWhenDue = async (
+   });
+   session.lastObservedHead = currentBlock;
+   if (!auditDue) return false;
+-  request.trace.step = `verifyAuthorityEvidence:${currentBlock}`;
+-  await assertAuthorityEvidenceCanonical(session, session.env, currentBlock, request.services);
+-  request.trace.step = `verifyCanonicalTip:${session.lastSyncedBlock}`;
+-  const rewound = await reconcileWatcherCanonicalTip(session, session.env, request.services, request.emitDebug);
++  request.trace.step = `verifyCanonicalState:${currentBlock}:${session.lastSyncedBlock}`;
++  const rewound = await auditWatcherCanonicalState(
++    session,
++    session.env,
++    currentBlock,
++    request.services,
++    request.emitDebug,
++  );
+   session.lastCanonicalAuditAtMs = nowMs;
+   if (!rewound) return false;
+   session.pendingHistoryRange = null;
+diff --git a/core/protocol/serialization/binary-codec.ts b/core/protocol/serialization/binary-codec.ts
+index 04482f9c4..fce24782d 100644
+--- a/core/protocol/serialization/binary-codec.ts
++++ b/core/protocol/serialization/binary-codec.ts
+@@ -159,9 +159,22 @@ addExtension({
+ const projectBinaryScalar = (value: unknown): unknown =>
+   typeof value === 'string' && isCanonicalHexBytes(value) ? new CanonicalHexBytes(value) : value;
+ 
++// Set only inside withSharedBinaryProjection: a canonical subtree projected by
++// one pack is reused by the next pack of the same synchronous block.
++let sharedProjections: WeakMap<object, unknown> | null = null;
++
+ const projectBinaryValue = (value: unknown): unknown => {
+   const scalar = projectBinaryScalar(value);
+   if (scalar !== value || value === null || typeof value !== 'object' || ArrayBuffer.isView(value)) return scalar;
++  if (sharedProjections === null || !isAlreadyCanonical(value)) return projectBinaryObject(value);
++  const cached = sharedProjections.get(value);
++  if (cached !== undefined) return cached;
++  const projected = projectBinaryObject(value);
++  sharedProjections.set(value, projected);
++  return projected;
++};
++
++const projectBinaryObject = (value: object): unknown => {
+   if (Array.isArray(value)) return value.map(projectBinaryValue);
+   if (value instanceof Map) {
+     return new Map(Array.from(value, ([key, entry]) => [projectBinaryValue(key), projectBinaryValue(entry)]));
+@@ -385,6 +398,21 @@ export const createSequentialTransportValueCodec = (): Readonly<{
+   };
+ };
+ 
++/**
++ * Runs synchronous encodes that share canonical subtrees (a frame hash and its
++ * stored row) so each shared subtree is hex-projected and cloned once. Every
++ * byte equals a separate encode; a canonical subtree must not change in `run`.
++ */
++export const withSharedBinaryProjection = <T>(run: () => T): T => {
++  const previous = sharedProjections;
++  sharedProjections = previous ?? new WeakMap();
++  try {
++    return run();
++  } finally {
++    sharedProjections = previous;
++  }
++};
++
+ /** Canonical (sorted, marked) copy of a value; later encodes of it skip the walk. */
+ export const canonicalizeBinaryPayload = <T>(value: T, options: { omitSymbolKeys?: boolean } = {}): T =>
+   canonicalize(value, '$', new Set(), true, options.omitSymbolKeys === true, false) as T;
+diff --git a/core/storage/index.ts b/core/storage/index.ts
+index 2439e1126..6e8f8eb13 100644
+--- a/core/storage/index.ts
++++ b/core/storage/index.ts
+@@ -6,7 +6,7 @@
+ import { getPerfMs } from '../support/time';
+ import { auditEntityStateRootAtCheckpoint } from '../entity/consensus/state-root';
+ import { decodeValidatedBuffer, encodeBuffer, encodeBufferAsIs, encodeBufferPrepared, writeBatch } from './codec/codec';
+-import { canonicalizeBinaryPayload } from '../protocol/serialization/binary-codec';
++import { canonicalizeBinaryPayload, withSharedBinaryProjection } from '../protocol/serialization/binary-codec';
+ import {
+   boundedStorageRowsBytes,
+   prepareBoundedStorageValueRows,
+@@ -1352,15 +1352,18 @@ const buildStorageFrameRecordPlan = (
+     runtimeMachineGraph?.root,
+   ), { omitSymbolKeys: true });
+   mark('frameEncode.frameBase');
+-  const frameRecord = {
+-    ...frameBase,
+-    frameHash: computeStorageFrameHash(frameBase),
+-  } satisfies RuntimeFrame;
+-  mark('frameEncode.frameHash');
++  // The hash and the row pack the same canonical input log; project it once.
++  const { frameRecord, frameBuffer } = withSharedBinaryProjection(() => {
++    const record = {
++      ...frameBase,
++      frameHash: computeStorageFrameHash(frameBase),
++    } satisfies RuntimeFrame;
++    mark('frameEncode.frameHash');
++    // frameBase is already a canonical (marked) tree; the row is decoded back
++    // into a record and its hash is computed above, never over these bytes.
++    return { frameRecord: record, frameBuffer: encodeBufferAsIs(record) };
++  });
+   const frameKey = keyFrame(options.env.state.height);
+-  // frameBase is already a canonical (marked) tree; the row is decoded back
+-  // into a record and its hash is computed above, never over these bytes.
+-  const frameBuffer = encodeBufferAsIs(frameRecord);
+   const frameRows = prepareBoundedStorageValueRows(frameKey, frameBuffer);
+   mark('frameEncode.frameBuffer');
+   const authoritativeBaseBytes =
+diff --git a/core/__tests__/jurisdiction/watchers/j-watcher-authority-evidence.test.ts b/core/__tests__/jurisdiction/watchers/j-watcher-authority-evidence.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..458e88e5b30a04f20791a4f2d1fad08d9e4418b6
+--- /dev/null
++++ b/core/__tests__/jurisdiction/watchers/j-watcher-authority-evidence.test.ts
+@@ -0,0 +1,93 @@
++import { describe, expect, test } from 'bun:test';
++
++import { getCertifiedBoardStackKey } from '../../../jurisdiction/machine/board-registry';
++import { auditWatcherCanonicalState } from '../../../jurisdiction/adapter/rpc/watcher/rpc-watcher-canonical';
++import type { RpcWatcherServices, RpcWatcherSession } from '../../../jurisdiction/adapter/rpc/watcher/rpc-watcher-types';
++import type { RuntimeReplica } from '../../../runtime/types';
++import type { CertifiedRegistrationEvidence } from '../../../types/jurisdiction-runtime';
++
++const STACK = {
++  chainId: 31_337,
++  depositoryAddress: `0x${'11'.repeat(20)}`,
++  entityProviderAddress: `0x${'22'.repeat(20)}`,
++};
++const hashAt = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
++
++const audit = (session: RpcWatcherSession, env: RuntimeReplica, head: number, services: RpcWatcherServices) =>
++  auditWatcherCanonicalState(session, env, head, services, () => {});
++
++const setup = (evidenceCount: number) => {
++  const calls: number[][] = [];
++  const served = new Map<number, string>();
++  const services = {
++    ...STACK,
++    readBlockHeaders: async (heights: number[]) => {
++      calls.push([...heights]);
++      return [...new Set(heights)].sort((a, b) => a - b).map(jHeight => ({ jHeight, jBlockHash: served.get(jHeight) ?? hashAt(jHeight) }));
++    },
++  } as unknown as RpcWatcherServices;
++  const evidence = new Map<string, CertifiedRegistrationEvidence>();
++  for (let index = 0; index < evidenceCount; index += 1) {
++    const activationHeight = 3 + index;
++    const observedThroughHeight = 20 + index;
++    evidence.set(`e${index}`, {
++      stackKey: getCertifiedBoardStackKey(STACK),
++      entityId: `0x${(index + 1).toString(16).padStart(64, '0')}`,
++      activationHeight,
++      blockHash: hashAt(activationHeight),
++      observedThroughHeight,
++      observedTipBlockHash: hashAt(observedThroughHeight),
++    } as unknown as CertifiedRegistrationEvidence);
++  }
++  const env = {
++    infrastructure: { certifiedRegistrationEvidence: evidence },
++    state: { eReplicas: new Map(), jReplicas: new Map() },
++  } as unknown as RuntimeReplica;
++  const session = {
++    lastAuthorityAuditKey: '',
++    lastSyncedBlock: 0,
++    pendingRewindReplicaKeys: [] as string[],
++  } as unknown as RpcWatcherSession;
++  return { calls, served, services, env, session };
++};
++
++describe('watcher authority evidence audit', () => {
++  test('an applied rewind is cleared before the one header batch, after which no tip audit runs', async () => {
++    const { calls, services, env, session } = setup(1);
++    session.lastSyncedBlock = 64;
++    session.pendingRewindReplicaKeys = ['gone'];
++    expect(await audit(session, env, 100, services)).toBe(false);
++    expect(session.pendingRewindReplicaKeys).toEqual([]);
++    expect(calls).toEqual([[100, 3, 20]]);
++  });
++
++  test('reads the head and every evidence header in one batch per poll', async () => {
++    const { calls, services, env, session } = setup(2);
++    await audit(session, env, 100, services);
++    expect(calls).toEqual([[100, 3, 20, 4, 21]]);
++    expect(session.lastAuthorityAuditKey).toBe(`100:${hashAt(100)}:2`);
++    // The same head is not re-audited, and still costs one round trip.
++    await audit(session, env, 100, services);
++    expect(calls).toHaveLength(2);
++  });
++
++  test('an empty evidence set reads only the head', async () => {
++    const { calls, services, env, session } = setup(0);
++    await audit(session, env, 50, services);
++    expect(calls).toEqual([[50]]);
++    expect(session.lastAuthorityAuditKey).toBe(`50:${hashAt(50)}:0`);
++  });
++
++  test('a reorged activation or finality tip halts the audit', async () => {
++    const activation = setup(1);
++    activation.served.set(3, hashAt(999));
++    await expect(audit(activation.session, activation.env, 100, activation.services))
++      .rejects.toThrow(`J_AUTHORITY_FINALIZED_REORG:entity=${hashAt(1)}:height=3:expected=${hashAt(3)}:canonical=${hashAt(999)}`);
++    expect(activation.session.lastAuthorityAuditKey).toBe('');
++    const tip = setup(1);
++    tip.served.set(20, hashAt(998));
++    await expect(audit(tip.session, tip.env, 100, tip.services))
++      .rejects.toThrow(`J_AUTHORITY_FINALITY_TIP_REORG:entity=${hashAt(1)}:height=20:expected=${hashAt(20)}:canonical=${hashAt(998)}`);
++    expect(tip.session.lastAuthorityAuditKey).toBe('');
++  });
++});

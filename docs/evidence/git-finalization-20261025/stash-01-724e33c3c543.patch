@@ -1,0 +1,449 @@
+HISTORICAL NON-EXECUTABLE EVIDENCE - do not apply over current main.
+This draft predates the current canonical implementation; see README.md.
+stash: stash@{1} 724e33c3c5434323b9830768e3b46443e52ec58e
+subject: On main: pending P6 preserved during modal regression fix 20261012
+date: 2026-10-12T03:33:44+03:00
+base: f110fcf36b1abdb4d9730690ba301ee43d10a097
+sections: tracked worktree diff, then untracked files as new files
+
+diff --git a/core/__tests__/operations/health/prod-startup-wiring-part-2.test.ts b/core/__tests__/operations/health/prod-startup-wiring-part-2.test.ts
+index bc4ba3bae114eed93e3ad629a53af43d4728fb17..d5b4db804f1598e32f370daaffc586a077383335 100644
+--- a/core/__tests__/operations/health/prod-startup-wiring-part-2.test.ts
++++ b/core/__tests__/operations/health/prod-startup-wiring-part-2.test.ts
+@@ -1146,6 +1146,7 @@ describe('production startup wiring', () => {
+     expect(releaseGate.indexOf("'bootstrap soundcheck'")).toBeLessThan(releaseGate.indexOf("'React payment and admission E2E'"));
+     expect(releaseGate).toContain('e2e-payment.spec.ts,e2e-lending-availability.spec.ts');
+     expect(releaseGate).toContain('e2e-dispute-finality.spec.ts');
++    expect(releaseGate).toContain('e2e-dispute-protection.spec.ts');
+     expect(releaseGate).toContain('e2e-tower-restore.spec.ts');
+     expect(releaseGate).not.toContain("command: 'bun run test:e2e:fast'");
+     expect(releaseGate).not.toContain("command: 'bun run test:e2e:full'");
+diff --git a/core/scripts/operations/production/browser/wallet-gate.ts b/core/scripts/operations/production/browser/wallet-gate.ts
+index 9e675cbb7c599e13bfb61d3a7e0326a8866fa071..e545c1e03186763e007ff23a0b89a07f40397a07 100644
+--- a/core/scripts/operations/production/browser/wallet-gate.ts
++++ b/core/scripts/operations/production/browser/wallet-gate.ts
+@@ -2,6 +2,7 @@ import { decodeRuntimeManifestEntries } from '../../hlt/boundary/worker-boundary
+ import type { ChildProcess } from 'node:child_process';
+ import { readFileSync } from 'node:fs';
+ import { join } from 'node:path';
++import { JsonRpcProvider, Wallet, parseEther } from 'ethers';
+ import { requireBoundaryInteger, requireBoundaryRecord } from '../../../../protocol/boundary-validation';
+ 
+ type WalletGate = {
+@@ -92,11 +93,25 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> =>
+   const report = join(input.workDir, 'wallet-results.json');
+   const towerPort = input.rpcPort + 3;
+   const towerOrigin = `http://127.0.0.1:${towerPort}`;
++  const rpcUrl = `http://127.0.0.1:${input.rpcPort}`;
++  const provider = new JsonRpcProvider(rpcUrl);
++  const towerSigner = Wallet.createRandom();
++  try {
++    if ((await provider.getNetwork()).chainId !== 31337n) throw new Error('WALLET_TOWER_PRIVATE_CHAIN_REQUIRED');
++    const funder = await provider.getSigner(0);
++    await (await funder.sendTransaction({ to: towerSigner.address, value: parseEther('1') })).wait();
++  } finally {
++    provider.destroy();
++  }
+   const tower = input.start('wallet-tower', process.execPath, [
+     join(input.repoRoot, 'core/watchtower/standalone-server.ts'),
+     '--host', '127.0.0.1', '--port', String(towerPort),
+     '--db', join(input.workDir, 'watchtower'), '--quota-bytes', '4194304', '--max-bundles', '3',
+-  ], {});
++    '--enable-last-resort-agent', '--sweep-interval-ms', '1000',
++  ], {
++    XLN_WATCHTOWER_PRIVATE_KEY: towerSigner.privateKey,
++    XLN_WATCHTOWER_ALLOWED_RPC_URLS: [rpcUrl, `${origin}/rpc`, `http://127.0.0.1:${input.apiPort}/rpc`].join(','),
++  });
+   await waitForService(tower, `${towerOrigin}/api/tower/healthz`);
+   const env = {
+     NODE_ENV: 'development',
+diff --git a/core/scripts/release/run-release-gate.ts b/core/scripts/release/run-release-gate.ts
+index 87277cd4b468ba809c88b8b79e0a302827c69da4..19d2344eae036d48cc2787c72f1a534e507fa88f 100644
+--- a/core/scripts/release/run-release-gate.ts
++++ b/core/scripts/release/run-release-gate.ts
+@@ -161,6 +161,7 @@ const walletE2eSteps: GateStep[] = (
+   [
+     ['React payment and admission E2E', 'e2e-payment.spec.ts,e2e-lending-availability.spec.ts', 'payment'],
+     ['React dispute E2E', 'e2e-dispute-finality.spec.ts', 'dispute'],
++    ['React offline protection E2E', 'e2e-dispute-protection.spec.ts', 'protection'],
+     ['React recovery E2E', 'e2e-tower-restore.spec.ts', 'recovery'],
+   ] as const
+ ).map(([name, tests, directory]) => ({
+diff --git a/docs/night-work-plan.md b/docs/night-work-plan.md
+index a924963763fff55b650bf7b7e8a29b492c42045b..9e5028cb802e37ce0952a9a03c7aac08ad5f0dd4 100644
+--- a/docs/night-work-plan.md
++++ b/docs/night-work-plan.md
+@@ -8,7 +8,22 @@ Keep the empty frozen-core mechanism for later use; its current protected-file
+ count is zero, not security coverage. This correction supersedes earlier scope
+ statements below; earlier deployment results remain historical evidence.
+ 
+-- Current verified source SHA: `40be495da3d41079596e5e32135d65e051c6cee4`.
++- Current local HEAD: `f110fcf36` (evidence commit above verified source
++  `466cdcbf3a020397ab97af4c715e7c7c4bb5c8e9`). These two commits are not pushed
++  yet: CI `38187198039` is still running on pushed `a4da1f59e`; let it finish
++  before publishing the next candidate so its unit-fix result is retained.
++  Clean `466cdcbf3` passed all eight formerly quarantined lifecycle files:
++  70 tests, 382 assertions, 26.70 seconds under the stand lock, and full
++  `bun run check` (38 source gates, source phase 25.731 seconds). CI now runs
++  those eight files, with two real-runtime fixtures separately under the lock.
++  Temporary TLS credentials replace developer keys; the process test reuses
++  the bounded listener scanner. The launcher test uses production NODE_ENV
++  and leaves the tracked worker bundle unchanged. Rust/lending remain frozen.
++- Previous CI unit fixes are pushed: `10acbf85806b832d86f2f6e2291147393fd48a02`.
++  Clean-source protocol/recovery suites passed 136 tests and 5,150 assertions;
++  `bun run check` passed. Fixes: observe worker close before waiting for siblings,
++  and give the real three-store recovery regression 15 seconds instead of 5.
++- Latest verified React source: `40be495da3d41079596e5e32135d65e051c6cee4`.
+   React now pins its browser EventEmitter dependency and resolves it explicitly;
+   the CI-only blank page came from an undeclared local package. The P5 browser
+   path checks a 250-USDC claim, 200 paid, 50 preserved as debt, external withdrawal
+@@ -18,18 +33,39 @@ statements below; earlier deployment results remain historical evidence.
+   lock. On that same clean SHA, production UI build and `bun run check` passed
+   (38 source gates, 29.856 seconds). This is private-Anvil evidence with a
+   controlled dispute clock, not fresh public Sepolia receipts.
+-- First red: completed main CI `38183661319` on `bd6877606` passed 6/7 jobs.
+-  Only E2E failed: abstract-level received an undefined EventEmitter before
+-  React mounted. The current candidate fixes the missing package/alias;
+-  CI must still confirm it. No consecutive green CI run is claimed.
++- First red (uncommitted P6): the funded standalone tower counters a real stale
++  React Account proof and finalizes exactly 100 USDC with the owner offline.
++  Both the hub and returning wallet then halt with
++  `J_DISPUTE_FINALIZATION_EVIDENCE_NOT_FOUND`. Depository clears the repeated
++  inner signature before its event commitment; `rpc-public.ts` hashes the
++  nonempty calldata signature. The focused regression reproduces this (0/1).
++  `rpc-public.ts` and `j-watcher-finalization-evidence.test.ts` have macOS `uchg`
++  flags. No flag was removed; the owner was asked to allow the two-file fix and
++  restore protection afterward. `frozen-core:check` passes and still lists zero
++  files. Reviewable patch: `docs/evidence/rc-20261012/watchtower-finalization-fix.patch`.
++  CI run `38185673486` on `e6e7cb847` finished with 6/7 jobs green, including
++  all seven React cases (4 payment/admission, 2 P4/P5, 1 recovery; zero skips).
++  Its unit job exposed the two harness failures fixed above. The replacement
++  run is still active, last observed 5/7 green. No whole-workflow green streak
++  is claimed; both CI sources predate P6.
+ - Artifact: `docs/evidence/rc-20261012/react-p5-40be495da.json` records case
+   outcomes, actual dispute amounts, commands and log hashes. Earlier
+   `ts-react-exit-e3b624173.json` retains clean-source lock-ahb and production
+   compiler-template gas evidence; jurisdictions is unchanged since that SHA.
+   The public alpha remains on `7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621`.
+-- Next command: `git push origin main`; inspect the resulting build-and-test
+-  run before promoting the candidate. Continue with React P6 after the first
+-  CI failure is resolved; no broad refactor is on the critical path.
++- Additional artifacts: `docs/evidence/rc-20261012/unit-ci-10acbf858.json` and
++  `docs/evidence/rc-20261012/ts-quarantine-466cdcbf3.json`. Pending P6 edits
++  remain in the working tree and in stash `2f29e3383e6904702f71c684fc3d4f4362831137`;
++  the separate Rust stash above is untouched.
++- Next command: `gh run view 38187198039 --json status,conclusion,jobs`.
++  If terminal, publish the already checked local candidate; investigate any
++  new first CI failure. After the pending file-unlock decision, apply the prepared
++  decoder/test patch, then run
++  `bun test core/__tests__/j-watcher-watchtower-finalization.test.ts core/__tests__/j-watcher-finalization-evidence.test.ts`.
++  Next rerun `e2e-dispute-protection.spec.ts` on the private production stand;
++  do not count the chain-only result as successful wallet recovery. P6 is wired
++  into the release gate in the working tree. Wiring/manifest subset: 5 tests,
++  27 assertions; the deliberate red regression is not committed or pushed.
+ - Remaining final gates: ten consecutive green main CI runs and branch protection;
+   remove production Rust/QA imports; complete React P6 and proof import; refresh
+   Sepolia P4/P5/P6 receipts; owner-reviewed release package. P5 React is covered.
+diff --git a/core/__tests__/j-watcher-watchtower-finalization.test.ts b/core/__tests__/j-watcher-watchtower-finalization.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..05c984a092ab4c31ce0004c36f7d5f6b66507072
+--- /dev/null
++++ b/core/__tests__/j-watcher-watchtower-finalization.test.ts
+@@ -0,0 +1,29 @@
++import { expect, test } from 'bun:test';
++import { AbiCoder, ZeroHash, keccak256 } from 'ethers';
++import { Depository__factory } from '../../jurisdictions/typechain-types';
++import { decodeDisputeFinalizationEvidenceCalldata, resolveDisputeFinalizationEvidence } from '../jurisdiction/adapter/rpc-public';
++import { encodeInt512 } from '../protocol/crypto/abi-money';
++
++test('delegated finalization authenticates the effective empty signature and rejects the repeated calldata signature', () => {
++  const sender = `0x${'11'.repeat(32)}`;
++  const proof = {
++    counterentity: `0x${'22'.repeat(32)}`, initialNonce: 7n, finalNonce: 11n,
++    proposerIsLeft: false, initialProofbodyHash: ZeroHash, startedByLeft: true, cooperative: false,
++    finalProofbody: { watchSeed: ZeroHash, leftResponseSeconds: 10, rightResponseSeconds: 10,
++      offdeltas: [encodeInt512(0n)], tokenIds: [1n], transformers: [] },
++    starterArguments: '0x5678', otherArguments: '0xabcd', sig: '0x0102',
++  };
++  const calldata = Depository__factory.createInterface().encodeFunctionData('watchtowerCounterDispute', [sender, proof, 4n, 11n, '0x0304']);
++  // Depository authorizes the selected counter, then sets executable.sig=""
++  // before hashing DisputeFinalized. Raw calldata.sig is not the emitted evidence.
++  const event = { sender, counterentity: proof.counterentity, initialNonce: 7n, finalProofbodyHash: ZeroHash,
++    finalizationEvidenceHash: keccak256(AbiCoder.defaultAbiCoder().encode(
++      ['bytes32', 'uint256', 'bool', 'bool', 'bytes32', 'bytes32', 'bytes32'],
++      [proof.initialProofbodyHash, proof.finalNonce, proof.proposerIsLeft, proof.startedByLeft,
++        keccak256(proof.starterArguments), keccak256(proof.otherArguments), keccak256('0x')],
++    )) };
++  const candidates = decodeDisputeFinalizationEvidenceCalldata(calldata);
++  expect(resolveDisputeFinalizationEvidence(candidates, ZeroHash, event).sig).toBe('0x');
++  expect(() => resolveDisputeFinalizationEvidence(candidates.map(c => ({ ...c, sig: proof.sig })), ZeroHash, event))
++    .toThrow('J_DISPUTE_FINALIZATION_EVIDENCE_NOT_FOUND');
++});
+diff --git a/docs/evidence/rc-20261012/watchtower-finalization-fix.patch b/docs/evidence/rc-20261012/watchtower-finalization-fix.patch
+new file mode 100644
+index 0000000000000000000000000000000000000000..404b2ebc0941354f916e059fb947ba60abb33f04
+--- /dev/null
++++ b/docs/evidence/rc-20261012/watchtower-finalization-fix.patch
+@@ -0,0 +1,25 @@
++--- a/core/jurisdiction/adapter/rpc-public.ts
+++++ b/core/jurisdiction/adapter/rpc-public.ts
++@@ -236,7 +236,10 @@
++           leftArguments: startedByLeft ? starterArguments : otherArguments,
++           rightArguments: startedByLeft ? otherArguments : starterArguments,
++           startedByLeft,
++-          sig: toFinalizationHex(Reflect.get(proof, 'sig')),
+++          // Depository authorizes the selected counter, then clears this repeated
+++          // inner signature before emitting its finalization evidence commitment.
+++          // Match the executed parameters; retaining calldata.sig halts every watcher.
+++          sig: '0x',
++         },
++       ];
++     }
++--- a/core/__tests__/j-watcher-finalization-evidence.test.ts
+++++ b/core/__tests__/j-watcher-finalization-evidence.test.ts
++@@ -53,7 +53,7 @@
++       [bytes32('11'), params, 25n, 3n, '0x0304'],
++     );
++ 
++-    expect(decodeDisputeFinalizationEvidenceCalldata(calldata)).toEqual([expectedEvidence]);
+++    expect(decodeDisputeFinalizationEvidenceCalldata(calldata)).toEqual([{ ...expectedEvidence, sig: '0x' }]);
++   });
++ 
++   test('keeps the processBatch finalization path byte-for-byte equivalent', () => {
+diff --git a/ui/tests/dispute-stale.ts b/ui/tests/dispute-stale.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e09060238ee198dde3b9ffd22c8993a3e405299a
+--- /dev/null
++++ b/ui/tests/dispute-stale.ts
+@@ -0,0 +1,94 @@
++import { expect, type Page } from '@playwright/test';
++import { readFileSync } from 'node:fs';
++import { join } from 'node:path';
++import { Wallet, ZeroHash, type JsonRpcProvider } from 'ethers';
++import type { RuntimeReplica, XLNModule } from '../../core/api/public/runtime-module';
++import { deriveMeshChildSeed } from '../../core/orchestrator/mesh/mesh-seeds';
++import { deriveManagedEntityIdentity } from '../../core/orchestrator/daemon-control';
++import { buildSingleSignerHanko } from '../../core/hanko/batch';
++import { createEmptyBatch, computeBatchHankoHash, encodeJBatch } from '../../core/jurisdiction/machine/batch';
++import { Depository__factory } from '../../jurisdictions/typechain-types/factories/Depository.sol/Depository__factory';
++
++/** Capture actual bilateral signatures before a later payment makes them stale. */
++export async function signedDisputePage(page: Page, hubId: string) {
++  return page.evaluate(async hubId => {
++    const debug = (
++      window as Window & {
++        __xln: {
++          env(): RuntimeReplica;
++          xln(): Promise<XLNModule>;
++          store: { getState(): { activeEntityId: string | null } };
++        };
++      }
++    ).__xln;
++    const xln = await debug.xln();
++    const env = debug.env();
++    const entityId = debug.store.getState().activeEntityId;
++    const entity = [...env.state.eReplicas.values()].find(e => e.entityId === entityId);
++    const account = entity?.state.accounts.get(hubId);
++    if (!entity || !account || account.pendingFrame || account.mempool.length)
++      throw new Error('P6_SIGNED_ACCOUNT_NOT_QUIESCENT');
++    const proof = xln.buildAccountProofBodyFromJurisdictions(env.state, account);
++    const nonce = account.currentDisputeProofNonce;
++    const proposerIsLeft = account.currentDisputeProofProposerIsLeft;
++    const sig = account.currentDisputeProofHanko;
++    const peerNonce = account.counterpartyDisputeProofNonce;
++    if (
++      !nonce ||
++      !peerNonce ||
++      proposerIsLeft === undefined ||
++      !sig ||
++      proof.proofBodyHash !== account.currentDisputeProofBodyHash
++    )
++      throw new Error('P6_COMMITTED_PROOF_SIGNATURE_MISSING');
++    return {
++      entityId: entity.entityId,
++      nonce,
++      peerNonce,
++      proposerIsLeft,
++      sig,
++      body: proof.proofBodyStruct,
++      hash: proof.proofBodyHash,
++    };
++  }, hubId);
++}
++
++/** The adversary signs its own outer batch, reusing only the victim's old genuine proof. */
++export async function startStaleDispute(
++  provider: JsonRpcProvider,
++  depository: string,
++  hubId: string,
++  stale: Awaited<ReturnType<typeof signedDisputePage>>,
++) {
++  const root = process.env['XLN_RDB_ROOT'];
++  if (!root || (await provider.getNetwork()).chainId !== 31337n) throw new Error('P6_PRIVATE_STAND_REQUIRED');
++  const seed = readFileSync(join(root, 'secrets/mesh-root.seed'), 'utf8').trim();
++  const hub = deriveManagedEntityIdentity({
++    name: 'H1',
++    seed: deriveMeshChildSeed(seed, 'runtime:H1'),
++    signerLabel: 'h1-hub',
++  });
++  expect(hub.entityId.toLowerCase()).toBe(hubId);
++  const contract = Depository__factory.connect(depository, new Wallet(hub.privateKeyHex, provider));
++  const batch = createEmptyBatch();
++  batch.disputeStarts.push({
++    counterentity: stale.entityId,
++    nonce: stale.nonce,
++    proposerIsLeft: stale.proposerIsLeft,
++    proofbodyHash: stale.hash,
++    initialProofbody: stale.body,
++    watchSeed: String(stale.body.watchSeed),
++    sig: stale.sig,
++    starterInitialArguments: '0x',
++    starterCounterArguments: '0x',
++    starterCounterProofCommitment: ZeroHash,
++  });
++  const encoded = encodeJBatch(batch);
++  const nonce = (await contract.entityNonces(hubId)) + 1n;
++  const hash = computeBatchHankoHash(31337n, depository, encoded, nonce);
++  const receipt = await (
++    await contract.processBatch(encoded, buildSingleSignerHanko(hubId, hash, hub.privateKeyHex), nonce)
++  ).wait();
++  if (!receipt || receipt.status !== 1) throw new Error('P6_STALE_START_FAILED');
++  return receipt;
++}
+diff --git a/ui/tests/e2e-dispute-protection.spec.ts b/ui/tests/e2e-dispute-protection.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e751626513c4bcc2cbfa9ecf54b75d7ee9226ca9
+--- /dev/null
++++ b/ui/tests/e2e-dispute-protection.spec.ts
+@@ -0,0 +1,131 @@
++import { expect, test } from '@playwright/test';
++import { ZeroHash } from 'ethers';
++import { Depository__factory } from '../../jurisdictions/typechain-types/factories/Depository.sol/Depository__factory';
++import { computeAccountKey } from '../../core/jurisdiction/adapter/events/contract-codec';
++import { safeStringify } from '../../core/protocol/serialization';
++import { privateChain, chainMoney } from './dispute-chain';
++import { AMOUNT, WAIT, fundCollateral, readState } from './dispute-wallet';
++import { signedDisputePage, startStaleDispute } from './dispute-stale';
++import { enterStack, fundFromHub, reopenStack } from './stack';
++
++test.skip(!process.env['XLN_UI_DISPUTE_PRIVATE_RPC'], 'requires the private dispute stand');
++
++test(
++  'P6 appointed tower counters a stale signed state while the React wallet is offline and finalizes its full collateral',
++  { tag: '@resilience' },
++  async ({ page, context, baseURL }, testInfo) => {
++    test.setTimeout(60_000);
++    const provider = privateChain(baseURL);
++    try {
++      const wallet = await enterStack(page);
++      await page.getByTestId('account-row').first().click();
++      const hubId = new URL(page.url()).pathname.split('/accounts/')[1];
++      if (!hubId) throw new Error('P6_HUB_ACCOUNT_MISSING');
++      await fundCollateral(page, hubId);
++      await page.getByTestId('home-pay').click();
++      await page.getByTestId('pay-to').fill('H1');
++      await page.getByTestId('pay-amount').fill('25');
++      await expect(page.getByTestId('pay-submit')).toBeEnabled(WAIT);
++      await page.getByTestId('pay-submit').click();
++      await page.getByTestId('receipt-open').click();
++      await expect(page.getByTestId('receipt-kicker')).toHaveText('Paid', WAIT);
++      await page.getByTestId('receipt-done').click();
++      await expect.poll(async () => (await readState(page, hubId)).ownValue, WAIT).toBe('75000000');
++      const stale = await signedDisputePage(page, hubId);
++      await fundFromHub(page, '25');
++      await expect
++        .poll(async () => {
++          const s = await readState(page, hubId);
++          return [s.ownValue, s.pending, s.mempool];
++        }, WAIT)
++        .toEqual([AMOUNT.toString(), false, 0]);
++      const latest = await signedDisputePage(page, hubId);
++      expect(latest.peerNonce).toBeGreaterThan(stale.nonce);
++      expect(latest.hash).not.toBe(stale.hash);
++      const before = await readState(page, hubId);
++      const contract = Depository__factory.connect(before.depository, provider);
++      const tower = process.env['UI_E2E_TOWER_URL'];
++      if (!tower) throw new Error('P6_TOWER_URL_MISSING');
++      const healthResponse = await fetch(`${tower}/api/tower/healthz`);
++      expect(healthResponse.ok).toBe(true);
++      const health = (await healthResponse.json()) as { signerAddress: string; sweep: { enabled: boolean } };
++      expect(health.sweep.enabled).toBe(true);
++      await page.getByTestId('home-sovereignty').click();
++      await page.getByTestId('watchtower-url').fill(tower);
++      await page.getByTestId('watchtower-add').click();
++      await expect(page.getByTestId('sovereignty-watchtower')).toHaveAttribute('data-covered', 'yes', WAIT);
++      await page.getByTestId('protection-appoint').click();
++      await expect(page.getByTestId('protection-state')).toContainText('1 account appointment receipts received', WAIT);
++      await expect(page.getByRole('alert')).toHaveCount(0);
++      const ownerNonce = await provider.getTransactionCount(before.signerId);
++      await page.close();
++
++      const start = await startStaleDispute(provider, before.depository, hubId, stale);
++      const key = computeAccountKey(wallet.entityId, hubId);
++      const started = await contract._accounts(key);
++      expect(started.disputeHash).not.toBe(ZeroHash);
++      expect(started.disputeCounterNonce).toBe(0n);
++      const window = Number(stale.body.leftResponseSeconds) + Number(stale.body.rightResponseSeconds);
++      const lastResortSeconds = Math.ceil(window * 0.2);
++      await provider.send('evm_setNextBlockTimestamp', [Number(started.disputeTimeout) - lastResortSeconds + 1]);
++      await provider.send('evm_mine', []);
++      await expect
++        .poll(async () => (await contract._accounts(key)).disputeCounterNonce, WAIT)
++        .toBe(BigInt(latest.peerNonce));
++      const counters = await contract.queryFilter(
++        contract.filters.CounterDisputeRegistered(wallet.entityId, hubId),
++        start.blockNumber,
++      );
++      expect(counters).toHaveLength(1);
++      const counter = counters[0]!;
++      expect(counter.args.nonce).toBe(BigInt(latest.peerNonce));
++      expect(counter.args.proofbodyHash).toBe(latest.hash);
++      const counterReceipt = await provider.getTransactionReceipt(counter.transactionHash);
++      expect(counterReceipt?.from.toLowerCase()).toBe(health.signerAddress.toLowerCase());
++      expect(counterReceipt?.gasUsed).toBeLessThanOrEqual(5_000_000n);
++      await provider.send('evm_setNextBlockTimestamp', [Number(started.disputeTimeout) + 1]);
++      await provider.send('evm_mine', []);
++      await expect
++        .poll(async () => (await chainMoney(contract, wallet.entityId, hubId)).reserve, WAIT)
++        .toBe(AMOUNT.toString());
++      const final = await chainMoney(contract, wallet.entityId, hubId);
++      expect([final.disputeHash, final.collateral]).toEqual([ZeroHash, '0']);
++      expect(await provider.getTransactionCount(before.signerId)).toBe(ownerNonce);
++      const finalizations = await contract.queryFilter(
++        contract.filters.DisputeFinalized(wallet.entityId, hubId),
++        start.blockNumber,
++      );
++      expect(finalizations).toHaveLength(1);
++      const finalReceipt = await provider.getTransactionReceipt(finalizations[0]!.transactionHash);
++      expect(finalReceipt?.from.toLowerCase()).toBe(health.signerAddress.toLowerCase());
++      expect(finalReceipt?.gasUsed).toBeLessThanOrEqual(5_000_000n);
++
++      const returned = await context.newPage();
++      await returned.goto('/');
++      await reopenStack(returned, wallet);
++      await expect
++        .poll(async () => {
++          const s = await readState(returned, hubId);
++          return [s.status, s.reserve, s.dispute];
++        }, WAIT)
++        .toEqual(['disputed', AMOUNT.toString(), null]);
++      await expect(returned.getByTestId('home-reserve').locator('strong')).toHaveText('$100.00');
++      await expect(returned.getByTestId('home-risk').locator('strong')).toHaveText('$0.00');
++      await testInfo.attach('p6-offline-defence', {
++        body: safeStringify({
++          oldNonce: stale.nonce,
++          newNonce: latest.peerNonce,
++          ownerNonce,
++          tower: health.signerAddress,
++          start: { hash: start.hash, gas: start.gasUsed },
++          counter: { hash: counterReceipt?.hash, gas: counterReceipt?.gasUsed },
++          finalize: { hash: finalReceipt?.hash, gas: finalReceipt?.gasUsed },
++          final,
++        }),
++        contentType: 'application/json',
++      });
++    } finally {
++      provider.destroy();
++    }
++  },
++);

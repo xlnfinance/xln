@@ -1,0 +1,58 @@
+HISTORICAL NON-EXECUTABLE EVIDENCE - do not apply over current main.
+This draft predates the current canonical implementation; see README.md.
+stash: stash@{9} d971ee852f800194fcc8e6a0f9ac5bdbf2690530
+subject: On main: user deploy-contracts confirmations before v0.1.28 fast-forward
+date: 2026-07-25T23:41:26+03:00
+base: 6783928924ab0146f17b3d3b86b691937ec349f5
+sections: tracked worktree diff, then untracked files as new files
+
+diff --git a/deploy-contracts.sh b/deploy-contracts.sh
+index 07e78aa44b49356a4cf9e0db675d0deac6fe1f79..2fc756949a4f1dd74bb713dbf8a3f3a7c7d07bc0 100755
+--- a/deploy-contracts.sh
++++ b/deploy-contracts.sh
+@@ -21,6 +21,32 @@ CONTRACT_8546_DEP=""
+ CONTRACT_8547_EP=""
+ CONTRACT_8547_DEP=""
+ 
++rpc_block_number() {
++    local port="$1" hex
++    hex=$(curl -s -X POST -H 'Content-Type: application/json' \
++        --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
++        "http://127.0.0.1:${port}" | sed -n 's/.*"result":"0x\([0-9a-fA-F]*\)".*/\1/p')
++    [ -n "$hex" ] || return 1
++    printf '%d\n' "$((16#$hex))"
++}
++
++# Hardhat Ignition refuses to start while transactions from the deployer are
++# younger than 5 confirmations (IGN403). EntityProvider is deployed with a raw
++# transaction immediately before the Ignition run, so the Depository deploy has
++# to wait for those confirmations or it fails every time.
++wait_for_confirmations() {
++    local port="$1" needed="$2" start now tries=0
++    start=$(rpc_block_number "$port") || return 1
++    while [ "$tries" -lt 120 ]; do
++        now=$(rpc_block_number "$port") || return 1
++        if [ "$((now - start))" -ge "$needed" ]; then return 0; fi
++        sleep 1
++        tries=$((tries + 1))
++    done
++    echo "   ❌ Timed out waiting for $needed confirmations on port $port"
++    return 1
++}
++
+ deploy_to_network() {
+     local port=$1
+     local network_name=$2
+@@ -189,6 +215,12 @@ deploy_to_network() {
+     entityprovider_address=$(echo "$entityprovider_output" | grep "DEPLOYED_ADDRESS=" | cut -d'=' -f2)
+     echo "   ✅ EntityProvider: $entityprovider_address"
+ 
++    echo "   ⏳ Waiting for EntityProvider confirmations before Ignition..."
++    if ! wait_for_confirmations "$port" 6; then
++        cd ..
++        return 1
++    fi
++
+     echo "   🔧 Deploying Depository..."
+     # Deploy Depository using ignition; accept prompts if any
+     if ! depository_output=$(printf "y\n" | bunx hardhat ignition deploy ignition/modules/Depository.cjs --network "$network_config" 2>&1); then

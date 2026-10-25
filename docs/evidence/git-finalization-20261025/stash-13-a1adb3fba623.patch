@@ -1,0 +1,98 @@
+HISTORICAL NON-EXECUTABLE EVIDENCE - do not apply over current main.
+This draft predates the current canonical implementation; see README.md.
+stash: stash@{13} a1adb3fba623d86fe25a3303f353efaebbe2ab5a
+subject: WIP on main: 710dcc1 debug(graph3d): add comprehensive entity click logging
+date: 2025-12-10T05:44:17+03:00
+base: 35d4a4432ef057076d2cca138af0e8e20b4a659b
+sections: tracked worktree diff, then untracked files as new files
+
+diff --git a/runtime/prepopulate-ahb.ts b/runtime/prepopulate-ahb.ts
+index 408490c3bff6ad65cf9a6ae43877389591051690..4b1c51f04ad7c5cf46648466a5c9bc4ad0c7b5e1 100644
+--- a/runtime/prepopulate-ahb.ts
++++ b/runtime/prepopulate-ahb.ts
+@@ -1013,12 +1013,83 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
+       ]
+     }, { expectedSolvency: TOTAL_SOLVENCY }); // Off-chain payment: pure netting, no solvency change
+ 
++    // ============================================================================
++    // PHASE 4: Hub Rebalancing - Risk Management (Frames 11-13)
++    // ============================================================================
++    console.log('\n💰 PHASE 4: Hub Rebalances to Reduce Total Risk');
++    console.log('   Current state: Hub owes Bob $125K (credit-backed = UNINSURED)');
++    console.log('   Hub has Alice collateral: $375K (oversecured)');
++    console.log('   Action: Withdraw from Alice, deposit to Hub-Bob account');
++
++    const rebalanceAmount = usd(125_000);
++
++    // Frame 11: Hub creates settlements for rebalancing
++    // Settlement 1: Hub-Alice (withdraw collateral → Hub reserve)
++    // Settlement 2: Hub-Bob (deposit Hub reserve → Bob collateral)
++    console.log('\n📤 FRAME 11: Hub creates rebalance settlements');
++
++    await processUntilEmpty(env, [{
++      entityId: hub.id,
++      signerId: hub.signer,
++      entityTxs: [{
++        type: 'settleDiffs',
++        data: {
++          settlements: [
++            // Withdraw from Alice (collateral → Hub reserve)
++            {
++              leftEntity: alice.id < hub.id ? alice.id : hub.id,
++              rightEntity: alice.id < hub.id ? hub.id : alice.id,
++              diffs: [{
++                tokenId: USDC_TOKEN_ID,
++                leftDiff: alice.id < hub.id ? 0n : rebalanceAmount,  // Hub gains reserve
++                rightDiff: alice.id < hub.id ? rebalanceAmount : 0n,
++                collateralDiff: -rebalanceAmount, // Alice collateral decreases
++                ondeltaDiff: 0n
++              }],
++              forgiveDebtsInTokenIds: [],
++              insuranceRegs: [],
++              sig: '' // Hub proposes, Alice will sign
++            },
++            // Deposit to Bob (Hub reserve → Bob collateral)
++            {
++              leftEntity: bob.id < hub.id ? bob.id : hub.id,
++              rightEntity: bob.id < hub.id ? hub.id : bob.id,
++              diffs: [{
++                tokenId: USDC_TOKEN_ID,
++                leftDiff: hub.id < bob.id ? -rebalanceAmount : 0n,  // Hub spends reserve
++                rightDiff: hub.id < bob.id ? 0n : -rebalanceAmount,
++                collateralDiff: rebalanceAmount, // Increases collateral (secures debt)
++                ondeltaDiff: 0n
++              }],
++              forgiveDebtsInTokenIds: [],
++              insuranceRegs: [],
++              sig: '' // Hub proposes, Bob will sign
++            }
++          ]
++        }
++      }]
++    }]);
++
++    await pushSnapshot(env, 'Hub Requests Rebalance Withdrawal ($125K from Alice)', {
++      title: '🔄 Risk Management: Withdrawal Request',
++      what: 'Hub identifies $125K uninsured risk (Hub→Bob credit). Requests withdrawal from Alice who has $375K collateral.',
++      why: 'Total Risk management: Hub must secure all credit-backed positions. Alice has surplus collateral.',
++      tradfiParallel: 'Like Basel capital adequacy: bank must maintain reserves against risk-weighted assets.',
++      keyMetrics: [
++        'Hub Total Risk (TR): $125K → target $0',
++        'Alice secured: $375K (can spare $125K)',
++        'Withdrawal request sent to Alice',
++        'Status: Awaiting Alice approval'
++      ]
++    }, { expectedSolvency: TOTAL_SOLVENCY });
++
+     console.log('\n=====================================');
+-    console.log('✅ AHB Demo Complete (Full Flow)!');
+-    console.log('11 frames captured for time machine playback');
++    console.log('✅ AHB Demo Complete (with Rebalancing)!');
++    console.log('13+ frames captured for time machine playback');
+     console.log('Phase 1: R2R reserve distribution');
+     console.log('Phase 2: Bilateral accounts + R2C + credit');
+     console.log('Phase 3: First off-chain routed payment');
++    console.log('Phase 4: Hub rebalancing for risk management');
+     console.log('Use arrow keys to step through the demo');
+     console.log('=====================================\n');
+     console.log(`[AHB] FINAL: Total snapshots pushed: ${pushSnapshotCount}`);
