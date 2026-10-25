@@ -4,7 +4,7 @@ import {
   buildCarriedProvenValues,
   buildDebtAnchorRoot,
   buildProvenValuesRoot,
-  provenValuesBytes32 as bytes32,
+  provenValuesBytes32,
   type DebtAnchorLeaf,
   type EntityDebtAnchorView,
   type EntityProvenValues,
@@ -66,7 +66,7 @@ const fail = (code: string, detail = ''): never => {
 
 /** Storage side: only proven queue words, counters and generations. */
 export const debtViewFromStorage = (anchor: OutDebtStorageAnchor, entityId: string): EntityDebtAnchorView => {
-  const entity = bytes32(entityId, 'entity');
+  const entity = provenValuesBytes32(entityId, 'entity');
   const own = anchor.debtors.get(entity) ?? fail('DEBT_ENTITY_MISSING', entity);
   const leavesOf = (debtor: string, predicate: (creditor: string) => boolean, counterparty: (creditor: string) => string): DebtAnchorLeaf[] => {
     const view = anchor.debtors.get(debtor) ?? fail('DEBT_ENTITY_MISSING', debtor);
@@ -102,7 +102,7 @@ export const readEntityProvenValuesFromStorage = async (input: {
   inDebtorIds: readonly string[];
   heldTokenIds?: readonly number[];
 }): Promise<StorageProvenValues> => {
-  const entityId = bytes32(input.entityId, 'entity');
+  const entityId = provenValuesBytes32(input.entityId, 'entity');
   const base = await readDepositoryAnchorBase({
     send: input.send,
     depositoryAddress: String(input.jurisdiction.depositoryAddress ?? ''),
@@ -136,7 +136,7 @@ export const readEntityProvenValuesFromStorage = async (input: {
     jurisdiction: input.jurisdiction,
     blockNumber: input.blockNumber,
     authenticatedBlockHash: input.authenticatedBlockHash,
-    debtorIds: [...new Set([entityId, ...input.inDebtorIds.map(debtor => bytes32(debtor, 'debtor'))])],
+    debtorIds: [...new Set([entityId, ...input.inDebtorIds.map(debtor => provenValuesBytes32(debtor, 'debtor'))])],
     ...(input.heldTokenIds === undefined ? {} : { heldTokenIds: input.heldTokenIds }),
     base,
   });
