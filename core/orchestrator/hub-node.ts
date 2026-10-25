@@ -216,6 +216,20 @@ const resolveHubSignerIndex = (name: string): number => {
   return Number.isSafeInteger(ordinal) && ordinal >= 1 ? ordinal - 1 : 0;
 };
 
+/**
+ * Anvil funds dev accounts 0..9. Operators take them from the bottom (`H<n>`
+ * -> n - 1, and MM/custody sign as 0); each Hub's faucet gas comes from the
+ * top (`H<n>` -> 10 - n), so no Runtime ever signs as a faucet funder.
+ */
+const ANVIL_FUNDED_DEV_ACCOUNTS = 10;
+const resolveFaucetFunderIndex = (hubSignerIndex: number, hubCount: number): number => {
+  const index = ANVIL_FUNDED_DEV_ACCOUNTS - 1 - hubSignerIndex;
+  if (index < Math.max(hubCount, hubSignerIndex + 1)) {
+    throw new Error(`FAUCET_FUNDER_INDEX_COLLIDES_WITH_OPERATOR:signerIndex=${hubSignerIndex}:hubs=${hubCount}`);
+  }
+  return index;
+};
+
 const deriveAnvilDevPrivateKey = (index: number): string => {
   const mnemonic = Mnemonic.fromPhrase(process.env['ANVIL_MNEMONIC'] || DEFAULT_ANVIL_MNEMONIC);
   const wallet = HDNodeWallet.fromMnemonic(mnemonic, getIndexedAccountPath(index));
@@ -1019,6 +1033,9 @@ const createHubExternalWalletApi = (live: HubNodeLiveContext) =>
     jsonHeaders: JSON_HEADERS,
     faucetSeed: `${resolvedArgs.seed}:faucet`,
     faucetSignerLabel: FAUCET_SIGNER_LABEL,
+    devChainFaucetFunderKey: deriveAnvilDevPrivateKey(
+      resolveFaucetFunderIndex(resolveHubSignerIndex(resolvedArgs.name), meshHubIdentities.length),
+    ),
     faucetWalletEthTarget: FAUCET_WALLET_ETH_TARGET,
     faucetTokenTargetUnits: FAUCET_TOKEN_TARGET_UNITS,
     emitDebugEvent: entry => {

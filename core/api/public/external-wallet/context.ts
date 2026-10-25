@@ -7,6 +7,11 @@ export interface ExternalWalletApiContext {
   jsonHeaders: Record<string, string>;
   faucetSeed: string;
   faucetSignerLabel: string;
+  /**
+   * Dev-chain faucet gas comes from a genesis account that no Runtime signs
+   * with, so its nonce has exactly one owner. Null where none is reserved.
+   */
+  devChainFaucetFunderKey: string | null;
   faucetWalletEthTarget: bigint;
   faucetTokenTargetUnits: bigint;
   emitDebugEvent(entry: {

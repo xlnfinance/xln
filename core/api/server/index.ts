@@ -283,6 +283,8 @@ const externalWalletApi = createExternalWalletApi({
   jsonHeaders: JSON_HEADERS,
   faucetSeed: FAUCET_SEED,
   faucetSignerLabel: FAUCET_SIGNER_LABEL,
+  // This server never provisions faucet gas (Hub nodes do).
+  devChainFaucetFunderKey: null,
   faucetWalletEthTarget: FAUCET_WALLET_ETH_TARGET,
   faucetTokenTargetUnits: FAUCET_TOKEN_TARGET_UNITS,
   emitDebugEvent: entry => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ethers } from 'ethers';
+import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { safeStringify } from '../../../protocol/serialization';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -10,9 +10,14 @@ import {
   MAX_WALLET_SNAPSHOT_BODY_BYTES,
   MAX_WALLET_SNAPSHOT_TOKEN_ADDRESSES,
 } from '../../../api/public/external-wallet/http';
-import { createXlnJsonRpcProvider, resolveJAdapterPrivateKey } from '../../../jurisdiction/adapter';
+import { createXlnJsonRpcProvider } from '../../../jurisdiction/adapter';
 import type { JAdapter } from '../../../jurisdiction/adapter/types';
 
+const anvilDevKey = (index: number): string =>
+  HDNodeWallet.fromMnemonic(Mnemonic.fromPhrase('test test test test test test test test test test test junk'),
+    getIndexedAccountPath(index)).privateKey;
+const OPERATOR_DEV_KEY = anvilDevKey(0);
+const FUNDER_DEV_KEY = anvilDevKey(9);
 const USER_ADDRESS = new ethers.Wallet(`0x${'22'.repeat(32)}`).address;
 const USDC_ADDRESS = '0x1111111111111111111111111111111111111111';
 
@@ -61,6 +66,7 @@ const makeContext = (
   jsonHeaders: { 'content-type': 'application/json' },
   faucetSeed: 'external-wallet-api-test-seed',
   faucetSignerLabel: 'faucet-1',
+  devChainFaucetFunderKey: null,
   faucetWalletEthTarget: 1n,
   faucetTokenTargetUnits: 1n,
   emitDebugEvent: () => {},
@@ -212,12 +218,10 @@ describe('external wallet API faucet transaction gate', () => {
     return { adapter, rpcCalls, transfers };
   };
 
-  test('funds a dev-chain faucet by a sequenced mined transfer, never a hot state write', async () => {
-    const funderKey = resolveJAdapterPrivateKey({ mode: 'rpc', chainId: 31337 });
-    if (!funderKey) throw new Error('DEV_CHAIN_FUNDER_KEY_MISSING');
-    const funder = new ethers.Wallet(funderKey).address;
-    const { adapter, rpcCalls, transfers } = makeDevChainFaucetAdapter(funder);
-    const context = makeContext(adapter, async () => false);
+  test('funds a dev-chain faucet from its reserved funder, never the operator nonce or a hot state write', async () => {
+    const operator = new ethers.Wallet(OPERATOR_DEV_KEY).address;
+    const { adapter, rpcCalls, transfers } = makeDevChainFaucetAdapter(operator);
+    const context = { ...makeContext(adapter, async () => false), devChainFaucetFunderKey: FUNDER_DEV_KEY };
 
     await provisionFaucetWalletFunding(context, adapter, [], {
       ensureEth: true,
@@ -228,17 +232,19 @@ describe('external wallet API faucet transaction gate', () => {
       ethers.hexlify(deriveSignerKeySync(context.faucetSeed, context.faucetSignerLabel)),
     ).address;
     expect(rpcCalls).toEqual([]);
-    expect(transfers).toEqual([{ funder, to: faucetAddress, amount: 1n }]);
+    expect(transfers).toEqual([{ funder: new ethers.Wallet(FUNDER_DEV_KEY).address, to: faucetAddress, amount: 1n }]);
   });
 
-  test('refuses dev-chain faucet funding from a key that is not the adapter signer', async () => {
-    const { adapter, rpcCalls, transfers } = makeDevChainFaucetAdapter(`0x${'99'.repeat(20)}`);
-    const context = makeContext(adapter, async () => false);
+  test('refuses dev-chain faucet funding from the operator EOA or without a reserved funder', async () => {
+    const operator = new ethers.Wallet(OPERATOR_DEV_KEY).address;
+    const { adapter, rpcCalls, transfers } = makeDevChainFaucetAdapter(operator);
+    const base = makeContext(adapter, async () => false);
+    const options = { ensureEth: true, ensureTokens: false };
 
-    await expect(provisionFaucetWalletFunding(context, adapter, [], {
-      ensureEth: true,
-      ensureTokens: false,
-    })).rejects.toThrow('DEV_CHAIN_FAUCET_FUNDER_MISMATCH:chainId=31337');
+    await expect(provisionFaucetWalletFunding({ ...base, devChainFaucetFunderKey: OPERATOR_DEV_KEY }, adapter, [], options))
+      .rejects.toThrow('DEV_CHAIN_FAUCET_FUNDER_IS_OPERATOR:chainId=31337');
+    await expect(provisionFaucetWalletFunding(base, adapter, [], options))
+      .rejects.toThrow('DEV_CHAIN_FAUCET_FUNDER_UNAVAILABLE:chainId=31337');
     expect(rpcCalls).toEqual([]);
     expect(transfers).toEqual([]);
   });
