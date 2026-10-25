@@ -33,6 +33,7 @@ type CrashProof = {
   hankoBatchLogCount: number;
   anchorFrameHeights: number[];
   anchorFinalizedJHeights: Record<string, number>;
+  receiverFunding: string;
 };
 
 type RecoveryProof = {
@@ -59,7 +60,10 @@ type RecoveryProof = {
   hankoBatchLogCount: number;
   anchorFrameHeights: number[];
   checkpointHeightsAtRestore: number[];
+  selectedCheckpointHeight: number;
+  replayedFrameCount: number;
   restoredJHistoryScannedThrough: Record<string, number | null>;
+  receiverAdmissionFrames: number | null;
 };
 
 const reservePort = async (): Promise<number> => await new Promise((resolvePort, reject) => {
@@ -242,24 +246,31 @@ for (const { cut, storageEnv, checkpointCarriesAnchor } of anchoredCuts) {
     try {
       const crashed = await runFixture('anchor-crash', seed, anvil, join(root, 'db'), proofPath, recoveryPath, storageEnv);
       expect(crashed.exitCode, `${crashed.stdout}\n${crashed.stderr}\nanvil=${anvil.stderr}`).toBe(137);
+      expect(crashed.signalCode, `${crashed.stdout}\n${crashed.stderr}`).toBe('SIGKILL');
       const crashProof = JSON.parse(await Bun.file(proofPath).text()) as CrashProof;
       expect(crashProof.anchorFrameHeights.length).toBeGreaterThan(0);
       expect(Object.keys(crashProof.anchorFinalizedJHeights)).toHaveLength(2);
       expect(crashProof.submitAttempts).toBe(1);
-      expect([crashProof.chainNonce, crashProof.senderReserve, crashProof.receiverReserve]).toEqual(['1', '90', '10']);
+      expect([crashProof.chainNonce, crashProof.senderReserve, crashProof.receiverReserve]).toEqual(['1', '90', '60']);
       expect(crashProof.hankoBatchLogCount).toBe(1);
 
       const recovered = await runFixture('anchor-recover', seed, anvil, join(root, 'db'), proofPath, recoveryPath, storageEnv);
       expect(recovered.exitCode, `${recovered.stdout}\n${recovered.stderr}\nanvil=${anvil.stderr}`).toBe(0);
+      expect(recovered.signalCode).toBeNull();
       const recoveryProof = JSON.parse(await Bun.file(recoveryPath).text()) as RecoveryProof;
+      expect(recoveryProof.receiverAdmissionFrames).toBeGreaterThan(0);
       expect(recoveryProof.anchorFrameHeights).toEqual(crashProof.anchorFrameHeights);
       const anchorHeight = Math.min(...crashProof.anchorFrameHeights);
       expect(recoveryProof.checkpointHeightsAtRestore.length).toBeGreaterThan(0);
       expect(recoveryProof.checkpointHeightsAtRestore.some(height => height >= anchorHeight)).toBe(checkpointCarriesAnchor);
+      // A replays the committed j_anchor frame from the WAL; B restores a checkpoint that already holds it.
+      expect(recoveryProof.selectedCheckpointHeight >= anchorHeight).toBe(checkpointCarriesAnchor);
+      expect(recoveryProof.selectedCheckpointHeight + recoveryProof.replayedFrameCount).toBeGreaterThanOrEqual(anchorHeight);
       expect([recoveryProof.pendingBefore, recoveryProof.pendingAfter, recoveryProof.submitAttempts]).toEqual([1, 0, 1]);
-      expect(recoveryProof.resultAttemptId).toBeNull();
+      // The pre-poll admission frame records the exact wire as observer-only 'submitted'.
+      expect([recoveryProof.resultAttemptId, recoveryProof.resultOutcome]).toEqual([crashProof.attemptId, 'submitted']);
       expect(recoveryProof.entityNonce).toBe(1);
-      expect([recoveryProof.chainNonce, recoveryProof.senderReserve, recoveryProof.receiverReserve]).toEqual(['1', '90', '10']);
+      expect([recoveryProof.chainNonce, recoveryProof.senderReserve, recoveryProof.receiverReserve]).toEqual(['1', '90', '60']);
       expect(recoveryProof.hankoBatchLogCount).toBe(1);
       console.info('J_ANCHOR_CRASH_RECOVERY_PROOF', cut, await Bun.file(recoveryPath).text());
     } finally {

@@ -28,6 +28,7 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import type { JurisdictionConfig } from '../../../entity/types';
 import { formatRuntime } from '../../../qa/runtime-ascii';
+import { readRuntimeMetadata } from '../../../runtime/loop/loop-environment';
 import { safeStringify } from '../../../protocol/serialization';
 import type { RuntimeReplica, JAdapter } from '../../../runtime/types';
 import {
@@ -62,6 +63,7 @@ type CrashProof = {
   /** Runtime frames whose committed record carries a 'j_anchor' (anchored phases only). */
   anchorFrameHeights: number[];
   anchorFinalizedJHeights: Record<string, number>;
+  receiverFunding: string;
 };
 
 const [requestedPhase, seed, rpcUrl, proofPath, recoveryPath] = Bun.argv.slice(2);
@@ -244,7 +246,12 @@ const runCrashPhase = async (): Promise<never> => {
   const anchorFrameHeights = anchored ? await readAnchorFrameHeights(env) : [];
   if (anchored && anchorFrameHeights.length === 0) fail('j-anchor-frame-not-persisted');
 
-  await fundEntities(env, jadapter, [{ id: sender.id, tokenId: 1, amount: 100n }]);
+  // Anchored receivers hold their own reserve so restore can prove new J-authority work.
+  const receiverFunding = anchored ? 50n : 0n;
+  await fundEntities(env, jadapter, [
+    { id: sender.id, tokenId: 1, amount: 100n },
+    ...(anchored ? [{ id: receiver.id, tokenId: 1, amount: receiverFunding }] : []),
+  ]);
   await processRuntime(env, [{
     entityId: sender.id,
     signerId: sender.signer,
@@ -314,6 +321,7 @@ const runCrashPhase = async (): Promise<never> => {
       hankoBatchLogCount: await countExactHankoBatchLogs(jadapter, sender.id, sentBatch.batchHash),
       anchorFrameHeights,
       anchorFinalizedJHeights,
+      receiverFunding: receiverFunding.toString(),
     };
     await Bun.write(proofPath, JSON.stringify(proof));
     if (phase === 'accepted-crash' || phase === 'prepared-crash') crashNow();
@@ -355,6 +363,9 @@ const runRecoverPhase = async (): Promise<void> => {
   const restored = await loadEnvFromDB(runtimeId, seed, restoreOptions);
   if (!restored) fail('restore-returned-null');
   const checkpointHeightsAtRestore = await listPersistedCheckpointHeights(restored);
+  // Recovery's own selection record: the checkpoint it actually restored and the WAL frames it replayed.
+  const replayMeta = readRuntimeMetadata(restored, '__replayMeta') as { checkpointHeight: number; replayedFrameCount: number } | undefined;
+  if (!replayMeta) fail('replay-meta-missing');
   await verifyCommittedRuntimeRoot(restored);
   assertEqual(restored.state.jReplicas.get(proof.jurisdictionName)?.rpcs?.join(','), rpcUrl, 'first-restore-preserves-rpcs');
   restored.scenarioMode = true;
@@ -384,6 +395,51 @@ const runRecoverPhase = async (): Promise<void> => {
   const nextRetryTimestampBefore = getNextJSubmitRetryTimestamp(restored);
   assertEqual(nextRetryTimestampBefore, null, 'pending-attempt-must-not-schedule-second-attempt');
 
+  // J authority restored from committed anchor state admits new reserve work
+  // before any watcher scan applies the mined batch: the sender still holds it.
+  let receiverAdmissionFrames: number | null = null;
+  if (Object.keys(proof.anchorFinalizedJHeights).length > 0) {
+    const committedJState = () => {
+      const senderState = findReplica(restored, proof.senderId).state;
+      const receiverState = findReplica(restored, proof.receiverId).state;
+      return {
+        senderEntityNonce: senderState.jBatchState?.entityNonce,
+        senderReserve: senderState.reserves.get(1),
+        receiverReserve: receiverState.reserves.get(1),
+      };
+    };
+    const before = committedJState();
+    // initJBatch leaves entityNonce absent until the first J event; j_broadcast reads it as `?? 0`.
+    assertEqual(before.senderEntityNonce ?? 0, proof.entityNonce - 1, 'restored-sender-committed-entity-nonce');
+    assertEqual(before.senderReserve, 100n, 'restored-sender-committed-reserve');
+    assertEqual(before.receiverReserve, BigInt(proof.receiverFunding), 'restored-receiver-committed-reserve');
+    const receiverReplica = findReplica(restored, proof.receiverId);
+    const heightBefore = receiverReplica.state.height;
+    await processRuntime(restored, [{
+      entityId: proof.receiverId,
+      signerId: receiverReplica.signerId,
+      entityTxs: [{ type: 'r2r', data: { toEntityId: proof.senderId, tokenId: 1, amount: 5n } }],
+    }]);
+    await driveUntil(
+      restored,
+      () => (findReplica(restored, proof.receiverId).state.jBatchState?.batch.reserveToReserve.length ?? 0) === 1,
+      'restored-anchor-r2r-admitted',
+    );
+    const admitted = findReplica(restored, proof.receiverId).state.jBatchState?.batch.reserveToReserve[0];
+    assertEqual(admitted?.receivingEntity.toLowerCase(), proof.senderId.toLowerCase(), 'restored-r2r-receiving-entity');
+    assertEqual(admitted?.tokenId, 1, 'restored-r2r-token');
+    assertEqual(admitted?.amount, 5n, 'restored-r2r-amount');
+    // Queuing moves no money and no nonce: only the authenticated J event may.
+    const after = committedJState();
+    assertEqual(after.senderEntityNonce, before.senderEntityNonce, 'r2r-admission-sender-entity-nonce-unchanged');
+    assertEqual(after.senderReserve, before.senderReserve, 'r2r-admission-sender-reserve-unchanged');
+    assertEqual(after.receiverReserve, before.receiverReserve, 'r2r-admission-receiver-reserve-unchanged');
+    assertEqual(findReplica(restored, proof.senderId).state.jBatchState?.sentBatch?.batchHash, proof.batchHash,
+      'r2r-admitted-before-j-event');
+    assertEqual(restored.infrastructure?.pendingCommittedJOutbox?.length ?? 0, 1, 'r2r-admitted-before-reconcile');
+    receiverAdmissionFrames = findReplica(restored, proof.receiverId).state.height - heightBefore;
+  }
+
   await adapter.stopWatchingAndWait?.();
   adapter.startWatching(restored);
   await adapter.pollNow?.();
@@ -402,14 +458,23 @@ const runRecoverPhase = async (): Promise<void> => {
   const finalTimestamp = restored.state.timestamp;
   const retryBackoffAt = proof.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS;
   const resultAttemptId = reconciledReplica.jSubmitState?.lastResultAttemptId;
-  assertEqual(resultAttemptId, undefined, 'submit-result-must-not-replace-j-event-authority');
+  if (receiverAdmissionFrames === null) {
+    assertEqual(resultAttemptId, undefined, 'submit-result-must-not-replace-j-event-authority');
+  } else {
+    // The pre-poll admission frame re-read the exact mined wire: an observer-only
+    // 'submitted' result. sentBatch/entityNonce still advanced only via the J event.
+    assertEqual(resultAttemptId, proof.attemptId, 'pre-poll-result-exact-attempt');
+    assertEqual(reconciledReplica.jSubmitState?.lastResultOutcome, 'submitted', 'submit-result-must-not-replace-j-event-authority');
+    assertEqual(reconciledReplica.jSubmitState?.txHash, proof.txHash, 'pre-poll-result-exact-wire');
+  }
   assertEqual(reconciledReplica.jSubmitState?.submitAttempts, 1, 'no-second-submit-attempt');
   if (finalTimestamp >= retryBackoffAt) {
     fail(`reconcile-waited-for-backoff:backoffAt=${retryBackoffAt}:actual=${finalTimestamp}`);
   }
   assertEqual(await adapter.getEntityNonce(proof.senderId), 1n, 'chain-nonce-after-reconcile');
   assertEqual(await adapter.getReserves(proof.senderId, 1), 90n, 'sender-reserve-after-reconcile');
-  assertEqual(await adapter.getReserves(proof.receiverId, 1), 10n, 'receiver-reserve-after-reconcile');
+  const receiverReserve = 10n + BigInt(proof.receiverFunding);
+  assertEqual(await adapter.getReserves(proof.receiverId, 1), receiverReserve, 'receiver-reserve-after-reconcile');
   assertEqual(
     await countExactHankoBatchLogs(adapter, proof.senderId, proof.batchHash),
     1,
@@ -471,7 +536,10 @@ const runRecoverPhase = async (): Promise<void> => {
     hankoBatchLogCount: finalHankoBatchLogCount,
     anchorFrameHeights: proof.anchorFrameHeights,
     checkpointHeightsAtRestore,
+    selectedCheckpointHeight: replayMeta.checkpointHeight,
+    replayedFrameCount: replayMeta.replayedFrameCount,
     restoredJHistoryScannedThrough,
+    receiverAdmissionFrames,
   }));
   await closeEnv(reopened);
 };
