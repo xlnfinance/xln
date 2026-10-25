@@ -154,6 +154,7 @@ const OUTBOX_BACKPRESSURE_EXEMPT_TXS = new Set<EntityTx['type']>([
   'proposeAccountsNow',
   'accountInput',
   'j_event',
+  'j_anchor',
   'processHtlcTimeouts',
   'prepareDispute',
   'disputeStart',

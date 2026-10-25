@@ -22,7 +22,7 @@ describe('shared transaction semantic parity catalog', () => {
     const keys = TX_SEMANTIC_CATALOG.map(entry => `${entry.layer}:${entry.type}`);
     expect(new Set(keys).size).toBe(keys.length);
     expect(ACCOUNT_TX_SEMANTIC_CATALOG).toHaveLength(23);
-    expect(ENTITY_TX_SEMANTIC_CATALOG).toHaveLength(66);
+    expect(ENTITY_TX_SEMANTIC_CATALOG).toHaveLength(67);
   });
 
   test('points only to existing production and semantic-evidence files', () => {

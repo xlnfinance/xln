@@ -53,13 +53,14 @@ pub fn decode_jurisdiction_event(value: &AbiValue) -> Result<JurisdictionEvent, 
             })
         }
         3 => {
-            let row = exact(fields, 6, "BOARD_ACTIVATED")?;
+            let row = exact(fields, 7, "BOARD_ACTIVATED")?;
             JurisdictionEvent::BoardActivated(BoardActivatedEvent {
                 metadata: metadata(&row[1])?,
                 entity_id: entity(&row[2], "ENTITY_ID")?,
                 previous_board_hash: fixed(&row[3], "PREVIOUS_BOARD_HASH")?,
                 new_board_hash: fixed(&row[4], "NEW_BOARD_HASH")?,
                 previous_board_valid_until: big(&row[5], "PREVIOUS_BOARD_VALID_UNTIL")?,
+                board_epoch: big(&row[6], "BOARD_EPOCH")?,
             })
         }
         4 => {
@@ -113,7 +114,7 @@ pub fn decode_jurisdiction_event(value: &AbiValue) -> Result<JurisdictionEvent, 
             })
         }
         11 => {
-            let row = exact(fields, 7, "DEBT_CREATED")?;
+            let row = exact(fields, 8, "DEBT_CREATED")?;
             JurisdictionEvent::DebtCreated(DebtCreatedEvent {
                 metadata: metadata(&row[1])?,
                 debtor: text(&row[2], "DEBTOR")?,
@@ -121,6 +122,7 @@ pub fn decode_jurisdiction_event(value: &AbiValue) -> Result<JurisdictionEvent, 
                 token_id: i64_value(&row[4], "TOKEN_ID")?,
                 amount: big(&row[5], "AMOUNT")?,
                 debt_index: i64_value(&row[6], "DEBT_INDEX")?,
+                debt_seq: big(&row[7], "DEBT_SEQ")?,
             })
         }
         12 => decode_dispute_started(fields)?,

@@ -169,7 +169,7 @@ contract DebtLifecycleInvariants is XlnFixture {
 
     assertEq(handler.disputesFinalized(), 1, "control: finalize not accepted");
     assertEq(_boundedOutstanding(entity[_leftActor()], 1), 800, "control: exact debt not booked");
-    (bytes32 creditor,) = dep._debts(entity[_leftActor()], 1, 0);
+    (bytes32 creditor,,,) = dep._debts(entity[_leftActor()], 1, 0);
     assertEq(creditor, entity[_rightActor()], "control: wrong creditor");
     assertEq(handler.ghostLiveDebt(1), 800, "control: ghost live debt wrong");
     assertEq(handler.checkDebtBooks(), 0, "control: books desynced");
@@ -190,17 +190,20 @@ contract DebtLifecycleInvariants is XlnFixture {
     // 300−100 spendable = 200 booked, then 400 with zero spendable = 600 total.
     assertEq(_boundedOutstanding(entity[_leftActor()], 1), 600, "control: two debts not stacked");
     assertEq(handler.debtsCreated(), 2, "control: debt count");
+    assertEq(dep.inActiveDebts(entity[_rightActor()]), 2, "control: creditor count after two debts");
 
     // Partial enforcement with cap 1 and reserve for exactly one debt.
     handler.mint(_leftActor(), 0, 300);
     handler.enforceDebt(_leftActor(), 0, 1 /*capSeed 1 → maxIterations 1*/);
     assertEq(_boundedOutstanding(entity[_leftActor()], 1), 400, "control: partial enforcement wrong");
     assertEq(dep._debtIndex(entity[_leftActor()], 1), 1, "control: cursor must rest on entry 1");
+    assertEq(dep.inActiveDebts(entity[_rightActor()]), 1, "control: paid entry still counted for creditor");
 
     // Forgiveness removes ONLY the live head (entry 1, amount 400).
     handler.forgiveDebt(_leftActor(), _rightActor(), 0, 0);
     assertEq(_boundedOutstanding(entity[_leftActor()], 1), 0, "control: head not forgiven");
     assertEq(handler.ghostDebtForgiven(), 400, "control: forgiven amount wrong");
+    assertEq(dep.inActiveDebts(entity[_rightActor()]), 0, "control: forgiven entry still counted for creditor");
     assertEq(handler.forgivenessSettlements(), 1, "control: settlement not accepted");
     assertEq(handler.checkDebtBooks(), 0, "control: books desynced");
     assertEq(handler.forgivenessDesyncs(), 0, "control: O(1) oracle flagged");
@@ -265,6 +268,90 @@ contract DebtLifecycleInvariants is XlnFixture {
     }
   }
 
+  /// @notice Corrupt the REAL creditor-keyed live count and confirm the books
+  ///         invariant trips: a creditor set proven against this counter must
+  ///         never look complete while one live entry is missing.
+  function test_meta_creditorCountIsSensitive() public {
+    handler.mint(_leftActor(), 0, 100);
+    handler.openDebtDispute(_leftActor(), _rightActor(), 0, 300, 0, 1);
+    handler.finalizeDebtDispute(0, 1);
+    bytes32 creditor = entity[_rightActor()];
+    assertEq(dep.inActiveDebts(creditor), 1, "meta: creditor count not booked");
+    this.invariant_debtBooksMirrorGhost();
+
+    bytes32 slot = _findCreditorCountSlot(creditor);
+    vm.store(address(dep), slot, bytes32(0));
+    vm.expectRevert();
+    this.invariant_debtBooksMirrorGhost();
+    vm.store(address(dep), slot, bytes32(uint256(1)));
+  }
+
+  /// @notice Corrupt the REAL stored generation (createdSeq) of a live debt
+  ///         and confirm the books invariant trips: a debt recreated at a
+  ///         reused queue index must never pass as the retired one.
+  function test_meta_debtGenerationIsSensitive() public {
+    handler.mint(_leftActor(), 0, 100);
+    handler.openDebtDispute(_leftActor(), _rightActor(), 0, 300, 0, 1);
+    handler.finalizeDebtDispute(0, 1);
+    bytes32 debtor = entity[_leftActor()];
+    (,, uint64 createdBlock, uint192 createdSeq) = dep._debts(debtor, 1, 0);
+    assertEq(createdBlock, uint64(block.number), "meta: createdBlock not stored");
+    assertEq(createdSeq, uint192(dep.debtSeq()), "meta: createdSeq not stored");
+    assertEq(dep.debtSeq(), handler.debtsCreated(), "meta: debtSeq not one per booking");
+    this.invariant_debtBooksMirrorGhost();
+
+    bytes32 slot = _findDebtGenerationSlot(debtor, 1, 0);
+    bytes32 original = vm.load(address(dep), slot);
+    vm.store(address(dep), slot, bytes32(uint256(original) + (uint256(1) << 64)));
+    vm.expectRevert();
+    this.invariant_debtBooksMirrorGhost();
+    vm.store(address(dep), slot, original);
+    this.invariant_debtBooksMirrorGhost();
+  }
+
+  /// @notice BOUNDARY: Depository supplies a uint256 debtSeq that is stored as
+  ///         uint192. The last representable seq stores exactly; one past it
+  ///         must reject the booking, never truncate into an older generation.
+  function test_boundary_createdSeqNeverTruncates() public {
+    bytes32 debtor = entity[_leftActor()];
+    bytes32 seqSlot = _findDebtSeqSlot();
+    handler.mint(_leftActor(), 0, 100);
+    handler.openDebtDispute(_leftActor(), _rightActor(), 0, 300, 0, 1);
+
+    vm.store(address(dep), seqSlot, bytes32(uint256(type(uint192).max)));
+    handler.finalizeDebtDispute(0, 1);
+    assertEq(handler.disputesFinalized(), 0, "boundary: wrapped createdSeq booked");
+    assertEq(dep.debtSeq(), uint256(type(uint192).max), "boundary: debtSeq advanced on reject");
+    assertEq(_boundedOutstanding(debtor, 1), 0, "boundary: debt booked on reject");
+
+    vm.store(address(dep), seqSlot, bytes32(uint256(type(uint192).max) - 1));
+    handler.finalizeDebtDispute(0, 1);
+    assertEq(handler.disputesFinalized(), 1, "boundary: last createdSeq rejected");
+    (,,, uint192 createdSeq) = dep._debts(debtor, 1, 0);
+    assertEq(createdSeq, type(uint192).max, "boundary: last createdSeq not exact");
+    assertEq(_boundedOutstanding(debtor, 1), 200, "boundary: exact debt not booked");
+  }
+
+  /// @notice BOUNDARY: block.number is stored as uint64 createdBlock. The last
+  ///         representable block stores exactly; one past it must reject.
+  function test_boundary_createdBlockNeverTruncates() public {
+    bytes32 debtor = entity[_leftActor()];
+    handler.mint(_leftActor(), 0, 100);
+    handler.openDebtDispute(_leftActor(), _rightActor(), 0, 300, 0, 1);
+
+    vm.roll(uint256(type(uint64).max) + 1);
+    handler.finalizeDebtDispute(0, 1);
+    assertEq(handler.disputesFinalized(), 0, "boundary: wrapped createdBlock booked");
+    assertEq(_boundedOutstanding(debtor, 1), 0, "boundary: debt booked on reject");
+
+    vm.roll(type(uint64).max);
+    handler.finalizeDebtDispute(0, 1);
+    assertEq(handler.disputesFinalized(), 1, "boundary: last createdBlock rejected");
+    (,, uint64 createdBlock,) = dep._debts(debtor, 1, 0);
+    assertEq(createdBlock, type(uint64).max, "boundary: last createdBlock not exact");
+    assertEq(_boundedOutstanding(debtor, 1), 200, "boundary: exact debt not booked");
+  }
+
   /// @notice Corrupt the ghost live-debt aggregate and confirm the aggregate
   ///         debt oracle trips (real state vs ghost, both directions).
   function test_meta_ghostDebtIsSensitive() public {
@@ -294,6 +381,50 @@ contract DebtLifecycleInvariants is XlnFixture {
       vm.store(address(dep), slot, original);
     }
     revert("debtOutstanding slot not found");
+  }
+
+  /// @dev Locates inActiveDebts[creditor] by sentinel-writing each candidate
+  ///      slot and reading the public getter back (no hardcoded layout).
+  function _findCreditorCountSlot(bytes32 creditor) internal returns (bytes32) {
+    for (uint256 base = 0; base < 60; base++) {
+      bytes32 slot = keccak256(abi.encode(creditor, uint256(base)));
+      bytes32 original = vm.load(address(dep), slot);
+      vm.store(address(dep), slot, bytes32(uint256(987_654_321)));
+      bool found = dep.inActiveDebts(creditor) == 987_654_321;
+      vm.store(address(dep), slot, original);
+      if (found) return slot;
+    }
+    revert("inActiveDebts slot not found");
+  }
+
+  /// @dev Locates the packed (createdBlock, createdSeq) word of
+  ///      _debts[debtor][tokenId][index] by sentinel-writing each candidate
+  ///      mapping base and reading the public getter back.
+  function _findDebtGenerationSlot(bytes32 debtor, uint256 tokenId, uint256 index) internal returns (bytes32) {
+    for (uint256 base = 0; base < 60; base++) {
+      bytes32 lengthSlot = keccak256(abi.encode(tokenId, keccak256(abi.encode(debtor, base))));
+      bytes32 slot = bytes32(uint256(keccak256(abi.encode(lengthSlot))) + index * 4 + 3);
+      bytes32 original = vm.load(address(dep), slot);
+      vm.store(address(dep), slot, bytes32(uint256(987_654_321)));
+      (,, uint64 createdBlock,) = dep._debts(debtor, tokenId, index);
+      vm.store(address(dep), slot, original);
+      if (createdBlock == 987_654_321) return slot;
+    }
+    revert("debt generation slot not found");
+  }
+
+  /// @dev Locates Depository.debtSeq by sentinel-writing each candidate slot
+  ///      and reading the public getter back (no hardcoded layout).
+  function _findDebtSeqSlot() internal returns (bytes32) {
+    for (uint256 base = 0; base < 60; base++) {
+      bytes32 slot = bytes32(base);
+      bytes32 original = vm.load(address(dep), slot);
+      vm.store(address(dep), slot, bytes32(uint256(987_654_321)));
+      bool found = dep.debtSeq() == 987_654_321;
+      vm.store(address(dep), slot, original);
+      if (found) return slot;
+    }
+    revert("debtSeq slot not found");
   }
 
   // ═══════════════ coverage report ═══════════════

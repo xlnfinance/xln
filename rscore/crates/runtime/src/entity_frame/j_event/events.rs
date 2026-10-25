@@ -389,13 +389,15 @@ pub(super) fn normalize_event_data(kind: &str, data: &Map<String, Value>) -> Opt
                     ("previousBoardHash", as_bytes32),
                     ("newBoardHash", as_bytes32),
                     ("previousBoardValidUntil", as_big),
+                    ("boardEpoch", as_big),
                 ],
             )?;
             let until = decoded["previousBoardValidUntil"]
                 .as_str()?
                 .parse::<BigInt>()
                 .ok()?;
-            (until > BigInt::from(0)).then_some(Value::Object(decoded))
+            let epoch = decoded["boardEpoch"].as_str()?.parse::<BigInt>().ok()?;
+            (until > BigInt::from(0) && epoch > BigInt::from(0)).then_some(Value::Object(decoded))
         }
         "ReserveUpdated" => decode_object(
             data,
@@ -493,6 +495,7 @@ pub(super) fn normalize_event_data(kind: &str, data: &Map<String, Value>) -> Opt
                 ("tokenId", as_int),
                 ("amount", as_big),
                 ("debtIndex", as_int),
+                ("debtSeq", as_big),
             ],
         )
         .map(Value::Object),

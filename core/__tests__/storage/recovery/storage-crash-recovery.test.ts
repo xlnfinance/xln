@@ -108,10 +108,6 @@ describe('storage crash recovery', () => {
       boardEpoch: 0,
       previousBoardHash: `0x${'00'.repeat(32)}`,
       previousBoardValidUntil: 0,
-      activatedAtJHeight: 1,
-      logIndex: 0,
-      blockHash: `0x${'44'.repeat(32)}`,
-      transactionHash: `0x${'55'.repeat(32)}`,
       source: 'EntityRegistered',
     });
     const boardStore = new Map(update.newNodes);

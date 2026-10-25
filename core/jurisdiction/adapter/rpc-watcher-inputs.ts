@@ -268,24 +268,24 @@ export const createWatchedErc20TokenReader = (
   sendBatch: RpcBatchSend,
   emitDebug: (payload: Record<string, unknown>) => void,
 ): (() => Promise<WatchedErc20Token[]>) => {
+  // Registry length confirmed by the previous refresh. While it fits one
+  // batch, the next refresh reads the length inside the entry batch.
+  let knownLength: number | null = null;
+  const decodeLength = (raw: unknown): number | null => {
+    if (typeof raw !== 'string') return null;
+    try {
+      return Number(depository.interface.decodeFunctionResult('getTokensLength', raw)[0]);
+    } catch {
+      return null;
+    }
+  };
   return async (): Promise<WatchedErc20Token[]> => {
     const tokens: WatchedErc20Token[] = [];
     try {
-      const length = Number(await depository.getTokensLength());
-      if (!Number.isSafeInteger(length) || length < 1) throw new Error('J_TOKEN_REGISTRY_LENGTH_INVALID');
       const address = await depository.getAddress();
-      // Refresh the complete registry on every poll. Batch transport only:
-      // a failed entry must reject this range before its cursor can advance.
-      for (let start = 1; start < length; start += MAX_RPC_BATCH_CALLS) {
-        const calls = Array.from({ length: Math.min(MAX_RPC_BATCH_CALLS, length - start) }, (_, index) => ({
-          method: 'eth_call',
-          params: [
-            { to: address, data: depository.interface.encodeFunctionData('_tokens', [start + index]) },
-            'latest',
-          ],
-        }));
-        const entries = await sendBatch(calls);
-        if (entries.length !== calls.length) throw new Error('J_TOKEN_REGISTRY_BATCH_LENGTH_MISMATCH');
+      const call = (data: string) => ({ method: 'eth_call', params: [{ to: address, data }, 'latest'] });
+      const entryCall = (tokenId: number) => call(depository.interface.encodeFunctionData('_tokens', [tokenId]));
+      const collect = (start: number, entries: readonly unknown[]): void => {
         for (let index = 0; index < entries.length; index += 1) {
           const tokenId = start + index;
           const raw = entries[index];
@@ -295,7 +295,36 @@ export const createWatchedErc20TokenReader = (
           const address = normalizeEvmAddress(contractAddress);
           if (address && address !== ethers.ZeroAddress) tokens.push({ tokenId, address });
         }
+      };
+      // Refresh the complete registry on every poll. Batch transport only:
+      // a failed entry must reject this range before its cursor can advance.
+      const cached = knownLength;
+      knownLength = null;
+      if (cached !== null && cached <= MAX_RPC_BATCH_CALLS) {
+        const calls = [
+          call(depository.interface.encodeFunctionData('getTokensLength')),
+          ...Array.from({ length: cached - 1 }, (_, index) => entryCall(index + 1)),
+        ];
+        // Any failure here (a reorged-out entry reverts, a transport outage)
+        // falls through to the exact read below, which owns every error.
+        const entries = await sendBatch(calls).catch(() => null);
+        // Only an unchanged length proves these entries are the complete set.
+        if (entries?.length === calls.length && decodeLength(entries[0]) === cached) {
+          collect(1, entries.slice(1));
+          knownLength = cached;
+          return tokens;
+        }
       }
+      const length = Number(await depository.getTokensLength());
+      if (!Number.isSafeInteger(length) || length < 1) throw new Error('J_TOKEN_REGISTRY_LENGTH_INVALID');
+      for (let start = 1; start < length; start += MAX_RPC_BATCH_CALLS) {
+        const calls = Array.from({ length: Math.min(MAX_RPC_BATCH_CALLS, length - start) }, (_, index) =>
+          entryCall(start + index));
+        const entries = await sendBatch(calls);
+        if (entries.length !== calls.length) throw new Error('J_TOKEN_REGISTRY_BATCH_LENGTH_MISMATCH');
+        collect(start, entries);
+      }
+      knownLength = length;
     } catch (error) {
       emitDebug({
         event: 'j_watch_erc20_registry_read_failed',

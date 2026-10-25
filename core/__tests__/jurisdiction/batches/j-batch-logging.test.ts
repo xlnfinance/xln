@@ -89,6 +89,7 @@ test('r2r admission treats open debt as senior to reserve', async () => {
     currentDebtIndex: 0,
     status: 'open',
     createdAtBlock: 1,
+    createdSeq: 1n,
     createdTxHash: `0x${'01'.repeat(32)}`,
     lastUpdatedBlock: 1,
     lastUpdatedTxHash: `0x${'01'.repeat(32)}`,

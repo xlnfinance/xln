@@ -198,7 +198,7 @@ const installCertifiedBoardEvents = (
 const certifiedBoardEvent = (
   type: 'FoundationBootstrapped' | 'EntityRegistered' | 'BoardActivated',
   boardHash: string,
-  options: { height: number; logIndex?: number; entityId?: string; previousBoardHash?: string } = { height: 1 },
+  options: { height: number; logIndex?: number; entityId?: string; previousBoardHash?: string; boardEpoch?: number } = { height: 1 },
 ): JurisdictionEvent => {
   const blockHash = entityId(options.height.toString(16).padStart(2, '0'));
   const transactionHash = entityId((options.height + 64).toString(16).padStart(2, '0'));
@@ -231,6 +231,7 @@ const certifiedBoardEvent = (
       previousBoardHash: options.previousBoardHash ?? entityId('00'),
       newBoardHash: boardHash,
       previousBoardValidUntil: '1700604800',
+      boardEpoch: String(options.boardEpoch ?? 1),
     },
   };
 };
@@ -692,6 +693,7 @@ describe('signed Entity command admission', () => {
         logIndex: 9,
         entityId: registeredEntityId,
         previousBoardHash: boardB,
+        boardEpoch: 2,
       }),
     ]);
 

@@ -224,6 +224,7 @@ export interface DepositoryDebtHarnessInterface extends Interface {
       | "adminRegisterExternalToken"
       | "computeWatchtowerCounterDisputeHash"
       | "debtOutstanding"
+      | "debtSeq"
       | "deltaTransformer"
       | "enforceDebts"
       | "entityNonces"
@@ -233,6 +234,7 @@ export interface DepositoryDebtHarnessInterface extends Interface {
       | "harnessAddDebt"
       | "harnessAddWideDebt"
       | "harnessForgiveCurrent"
+      | "inActiveDebts"
       | "mintToReserve"
       | "onERC1155Received"
       | "processBatch"
@@ -316,6 +318,7 @@ export interface DepositoryDebtHarnessInterface extends Interface {
     functionFragment: "debtOutstanding",
     values: [BytesLike, BigNumberish]
   ): string;
+  encodeFunctionData(functionFragment: "debtSeq", values?: undefined): string;
   encodeFunctionData(
     functionFragment: "deltaTransformer",
     values?: undefined
@@ -351,6 +354,10 @@ export interface DepositoryDebtHarnessInterface extends Interface {
   encodeFunctionData(
     functionFragment: "harnessForgiveCurrent",
     values: [BytesLike, BytesLike, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "inActiveDebts",
+    values: [BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "mintToReserve",
@@ -413,6 +420,7 @@ export interface DepositoryDebtHarnessInterface extends Interface {
     functionFragment: "debtOutstanding",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(functionFragment: "debtSeq", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "deltaTransformer",
     data: BytesLike
@@ -447,6 +455,10 @@ export interface DepositoryDebtHarnessInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "harnessForgiveCurrent",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "inActiveDebts",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -539,14 +551,16 @@ export namespace DebtCreatedEvent {
     creditor: BytesLike,
     tokenId: BigNumberish,
     amount: Uint512Struct,
-    debtIndex: BigNumberish
+    debtIndex: BigNumberish,
+    debtSeq: BigNumberish
   ];
   export type OutputTuple = [
     debtor: string,
     creditor: string,
     tokenId: bigint,
     amount: Uint512StructOutput,
-    debtIndex: bigint
+    debtIndex: bigint,
+    debtSeq: bigint
   ];
   export interface OutputObject {
     debtor: string;
@@ -554,6 +568,7 @@ export namespace DebtCreatedEvent {
     tokenId: bigint;
     amount: Uint512StructOutput;
     debtIndex: bigint;
+    debtSeq: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -998,9 +1013,11 @@ export interface DepositoryDebtHarness extends BaseContract {
   _debts: TypedContractMethod<
     [arg0: BytesLike, arg1: BigNumberish, arg2: BigNumberish],
     [
-      [string, Uint512StructOutput] & {
+      [string, Uint512StructOutput, bigint, bigint] & {
         creditor: string;
         amount: Uint512StructOutput;
+        createdBlock: bigint;
+        createdSeq: bigint;
       }
     ],
     "view"
@@ -1054,6 +1071,8 @@ export interface DepositoryDebtHarness extends BaseContract {
     "view"
   >;
 
+  debtSeq: TypedContractMethod<[], [bigint], "view">;
+
   deltaTransformer: TypedContractMethod<[], [string], "view">;
 
   enforceDebts: TypedContractMethod<
@@ -1106,6 +1125,8 @@ export interface DepositoryDebtHarness extends BaseContract {
     [[boolean, boolean] & { hasCurrentDebt: boolean; forgiven: boolean }],
     "nonpayable"
   >;
+
+  inActiveDebts: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
   mintToReserve: TypedContractMethod<
     [entity: BytesLike, tokenId: BigNumberish, amount: BigNumberish],
@@ -1228,9 +1249,11 @@ export interface DepositoryDebtHarness extends BaseContract {
   ): TypedContractMethod<
     [arg0: BytesLike, arg1: BigNumberish, arg2: BigNumberish],
     [
-      [string, Uint512StructOutput] & {
+      [string, Uint512StructOutput, bigint, bigint] & {
         creditor: string;
         amount: Uint512StructOutput;
+        createdBlock: bigint;
+        createdSeq: bigint;
       }
     ],
     "view"
@@ -1290,6 +1313,9 @@ export interface DepositoryDebtHarness extends BaseContract {
     [[bigint, bigint, bigint] & { high: bigint; middle: bigint; low: bigint }],
     "view"
   >;
+  getFunction(
+    nameOrSignature: "debtSeq"
+  ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "deltaTransformer"
   ): TypedContractMethod<[], [string], "view">;
@@ -1352,6 +1378,9 @@ export interface DepositoryDebtHarness extends BaseContract {
     [[boolean, boolean] & { hasCurrentDebt: boolean; forgiven: boolean }],
     "nonpayable"
   >;
+  getFunction(
+    nameOrSignature: "inActiveDebts"
+  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "mintToReserve"
   ): TypedContractMethod<
@@ -1544,7 +1573,7 @@ export interface DepositoryDebtHarness extends BaseContract {
       CounterDisputeRegisteredEvent.OutputObject
     >;
 
-    "DebtCreated(bytes32,bytes32,uint256,tuple,uint256)": TypedContractEvent<
+    "DebtCreated(bytes32,bytes32,uint256,tuple,uint256,uint256)": TypedContractEvent<
       DebtCreatedEvent.InputTuple,
       DebtCreatedEvent.OutputTuple,
       DebtCreatedEvent.OutputObject

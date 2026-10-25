@@ -29,16 +29,16 @@ test('AccountSettled retains a negative allocation beyond the old signed word', 
 test('all debt events preserve unsigned512 amounts in canonical decimal fields', () => {
   const amount = { high: 1n, low: 7n };
   const expected = (word + 7n).toString();
-  const created = decodeEvent(depository, 'DebtCreated', [left, right, 1n, amount, 0n]);
+  const created = decodeEvent(depository, 'DebtCreated', [left, right, 1n, amount, 0n, 1n]);
   const enforced = decodeEvent(depository, 'DebtEnforced', [left, right, 1n, 9n, amount, 0n]);
   const forgiven = decodeEvent(depository, 'DebtForgiven', [left, right, 1n, amount, 0n]);
-  expect(created[0]?.data).toMatchObject({ amount: expected });
+  expect(created[0]?.data).toMatchObject({ amount: expected, debtSeq: '1' });
   expect(enforced[0]?.data).toMatchObject({ amountPaid: '9', remainingAmount: expected });
   expect(forgiven[0]?.data).toMatchObject({ amountForgiven: expected });
 });
 
 test('a retired scalar debt payload is rejected at the raw ABI boundary', () => {
   expect(() => rawEventToJEvents({ name: 'DebtCreated', args: {
-    debtor: left, creditor: right, tokenId: 1n, amount: 7n, debtIndex: 0n,
+    debtor: left, creditor: right, tokenId: 1n, amount: 7n, debtIndex: 0n, debtSeq: 1n,
   }, blockNumber: 1 }, left)).toThrow('ABI_MONEY_TUPLE');
 });

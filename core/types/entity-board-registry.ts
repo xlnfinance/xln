@@ -26,10 +26,6 @@ export type CertifiedBoardRecord = {
   previousBoardHash: string;
   /** Exclusive Unix-second validity boundary; zero means no previous board. */
   previousBoardValidUntil: number;
-  activatedAtJHeight: number;
-  logIndex: number;
-  blockHash: string;
-  transactionHash: string;
   source: CertifiedBoardSource;
 };
 

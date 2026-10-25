@@ -695,19 +695,22 @@ export namespace BoardActivatedEvent {
     entityId: BytesLike,
     previousBoardHash: BytesLike,
     newBoardHash: BytesLike,
-    previousBoardValidUntil: BigNumberish
+    previousBoardValidUntil: BigNumberish,
+    boardEpoch: BigNumberish
   ];
   export type OutputTuple = [
     entityId: string,
     previousBoardHash: string,
     newBoardHash: string,
-    previousBoardValidUntil: bigint
+    previousBoardValidUntil: bigint,
+    boardEpoch: bigint
   ];
   export interface OutputObject {
     entityId: string;
     previousBoardHash: string;
     newBoardHash: string;
     previousBoardValidUntil: bigint;
+    boardEpoch: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -2180,7 +2183,7 @@ export interface EntityProviderSupplyHarness extends BaseContract {
       ApprovalForAllEvent.OutputObject
     >;
 
-    "BoardActivated(bytes32,bytes32,bytes32,uint256)": TypedContractEvent<
+    "BoardActivated(bytes32,bytes32,bytes32,uint256,uint256)": TypedContractEvent<
       BoardActivatedEvent.InputTuple,
       BoardActivatedEvent.OutputTuple,
       BoardActivatedEvent.OutputObject

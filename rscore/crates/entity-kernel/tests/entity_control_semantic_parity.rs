@@ -96,10 +96,6 @@ fn provider_registry(case: &Value, target: bool) -> CertifiedBoardState {
             board_epoch: 0,
             previous_board_hash: [0; 32],
             previous_board_valid_until: 0,
-            activated_at_j_height: 2,
-            log_index: 0,
-            block_hash: [0x12; 32],
-            transaction_hash: [0x22; 32],
             source: CertifiedBoardSource::EntityRegistered,
         })
         .expect("current record");
@@ -116,10 +112,6 @@ fn provider_registry(case: &Value, target: bool) -> CertifiedBoardState {
                 board_epoch: 1,
                 previous_board_hash: [0x44; 32],
                 previous_board_valid_until: 1_700_604_800,
-                activated_at_j_height: 4,
-                log_index: 0,
-                block_hash: [0x14; 32],
-                transaction_hash: [0x24; 32],
                 source: CertifiedBoardSource::BoardActivated,
             })
             .expect("target record");
@@ -684,6 +676,7 @@ fn typescript_and_rust_board_handover_match_post_authority_sections() {
             previous_board_hash,
             new_board_hash,
             previous_board_valid_until: BigInt::from(1_700_604_800_u64),
+            board_epoch: BigInt::from(1_u8),
         })],
         dispute_finalization_evidence: Vec::new(),
         reserve_updates: Vec::new(),

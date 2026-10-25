@@ -157,6 +157,7 @@ describe('authenticated J watcher receipts', () => {
       hash,
       parentHash,
       receiptsRoot: `0x${'00'.repeat(32)}`,
+      stateRoot: `0x${'55'.repeat(32)}`,
       logsBloom: zeroBloom,
       transactions: [],
     });
@@ -187,6 +188,39 @@ describe('authenticated J watcher receipts', () => {
     await mixedFork.catch((error) => expect(isTransientRpcUnavailableError(error)).toBe(true));
   });
 
+  test('binds the tip stateRoot to both header passes and requires it on Ethereum', async () => {
+    const block = (number: number, hash: string, parentHash: string, stateRoot?: string) => ({
+      number: ethers.toQuantity(number),
+      hash,
+      parentHash,
+      receiptsRoot: `0x${'00'.repeat(32)}`,
+      ...(stateRoot === undefined ? {} : { stateRoot }),
+      logsBloom: zeroBloom,
+      transactions: [],
+    });
+    const genesisHash = `0x${'11'.repeat(32)}`;
+    const tipHash = `0x${'22'.repeat(32)}`;
+    const reader = (stateRootForRead: (read: number) => string | undefined) => {
+      let reads = 0;
+      return async (method: string, params: unknown[]): Promise<unknown> => {
+        expect(method).toBe('eth_getBlockByNumber');
+        const height = Number(BigInt(String(params[0])));
+        if (height === 1) return block(1, genesisHash, `0x${'00'.repeat(32)}`, `0x${'55'.repeat(32)}`);
+        reads += 1;
+        return block(2, tipHash, genesisHash, stateRootForRead(reads));
+      };
+    };
+    const watched = ['0x000000000000000000000000000000000000dEaD'];
+
+    const stable = await readAuthenticatedReceiptRange(reader(() => `0x${'66'.repeat(32)}`), 2, 2, watched);
+    expect(stable.tipStateRoot).toBe(`0x${'66'.repeat(32)}`);
+    // Same hash and parent, different stateRoot in the fence pass: one of the
+    // two observations is not this header, so the range is not authenticated.
+    const swapped = reader(read => `0x${(read === 1 ? '66' : '77').repeat(32)}`);
+    await expect(readAuthenticatedReceiptRange(swapped, 2, 2, watched)).rejects.toThrow('J_RECEIPT_RANGE_REORG');
+    await expect(readAuthenticatedReceiptRange(reader(() => undefined), 2, 2, watched)).rejects.toThrow('STATE_ROOT');
+  });
+
   test('retries an unfinalized parent reorg but fails closed on a certified parent', async () => {
     const blocks = new Map([
       [1, {
@@ -194,6 +228,7 @@ describe('authenticated J watcher receipts', () => {
         hash: `0x${'11'.repeat(32)}`,
         parentHash: `0x${'00'.repeat(32)}`,
         receiptsRoot: `0x${'00'.repeat(32)}`,
+        stateRoot: `0x${'55'.repeat(32)}`,
         logsBloom: zeroBloom,
         transactions: [],
       }],
@@ -202,6 +237,7 @@ describe('authenticated J watcher receipts', () => {
         hash: `0x${'22'.repeat(32)}`,
         parentHash: `0x${'11'.repeat(32)}`,
         receiptsRoot: `0x${'00'.repeat(32)}`,
+        stateRoot: `0x${'55'.repeat(32)}`,
         logsBloom: zeroBloom,
         transactions: [],
       }],
@@ -247,6 +283,7 @@ describe('authenticated J watcher receipts', () => {
     await expect(verifyCanonicalReceiptProof({
       ...proof,
       receiptsRoot: `0x${'11'.repeat(32)}`,
+      stateRoot: `0x${'55'.repeat(32)}`,
     })).rejects.toThrow();
   });
 

@@ -37,6 +37,7 @@
         "blockHash": "0x1212121212121212121212121212121212121212121212121212121212121212",
         "blockNumber": 3,
         "data": {
+          "boardEpoch": "1",
           "entityId": "0x0000000000000000000000000000000000000000000000000000000000000003",
           "newBoardHash": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
           "previousBoardHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
@@ -63,45 +64,37 @@
   "stackKey": "0xb4f6c4ac068d635fd2a654a727e971a2fe1e16c3c7a6a20c434dd50b587040b9",
   "steps": [
     {
-      "boardRegistryRoot": "0x7ef6540710bb38809b19b79f2322fca26225ae10c6d2f6643f711fed6836bc26",
+      "boardRegistryRoot": "0xfd1bbbd2ebc5e6f8c42284ee6500f63f4089c4fcccd8ea29dd40b2645cd4b5ea",
       "event": "FoundationBootstrapped",
       "jHeight": 1,
       "resolvedPeerBoard": null
     },
     {
-      "boardRegistryRoot": "0xeefcbfd98d897f87a60c0f5f7d89ead6f093923affbdd94f9c45e97c681fe67a",
+      "boardRegistryRoot": "0x99ce4b41e7e5e1263a84106f29b2fb5541f1e3faa1fd8fa3fe89fb37c159ff0c",
       "event": "EntityRegistered",
       "jHeight": 2,
       "resolvedPeerBoard": {
-        "activatedAtJHeight": 2,
-        "blockHash": "0x1111111111111111111111111111111111111111111111111111111111111111",
         "boardEpoch": 0,
         "boardHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
         "entityId": "0x0000000000000000000000000000000000000000000000000000000000000003",
-        "logIndex": 0,
         "previousBoardHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
         "previousBoardValidUntil": 0,
         "source": "EntityRegistered",
-        "stackKey": "0xb4f6c4ac068d635fd2a654a727e971a2fe1e16c3c7a6a20c434dd50b587040b9",
-        "transactionHash": "0x2121212121212121212121212121212121212121212121212121212121212121"
+        "stackKey": "0xb4f6c4ac068d635fd2a654a727e971a2fe1e16c3c7a6a20c434dd50b587040b9"
       }
     },
     {
-      "boardRegistryRoot": "0xf5247920b9684e321a3165ce39ac1c337388e0b6085a5d3f13fe175a9d7478bc",
+      "boardRegistryRoot": "0xfcfe381fa3f4248fc55ecd59f48d2a5ef7164aaf2261c9c1664ded03f9e47350",
       "event": "BoardActivated",
       "jHeight": 3,
       "resolvedPeerBoard": {
-        "activatedAtJHeight": 3,
-        "blockHash": "0x1212121212121212121212121212121212121212121212121212121212121212",
         "boardEpoch": 1,
         "boardHash": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
         "entityId": "0x0000000000000000000000000000000000000000000000000000000000000003",
-        "logIndex": 0,
         "previousBoardHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
         "previousBoardValidUntil": 1700604800,
         "source": "BoardActivated",
-        "stackKey": "0xb4f6c4ac068d635fd2a654a727e971a2fe1e16c3c7a6a20c434dd50b587040b9",
-        "transactionHash": "0x2222222222222222222222222222222222222222222222222222222222222222"
+        "stackKey": "0xb4f6c4ac068d635fd2a654a727e971a2fe1e16c3c7a6a20c434dd50b587040b9"
       }
     }
   ],

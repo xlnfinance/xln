@@ -37,7 +37,7 @@ test('wallet debt totals include every active J debt beyond both compact view li
   for (let tokenId = 1; tokenId <= 21; tokenId++) for (let debtIndex = 0; debtIndex < 21; debtIndex++) {
     applyDebtCreated(state, {
       type: 'DebtCreated', blockNumber: 1, transactionHash: `0x${'44'.repeat(32)}`,
-      data: { creditor, debtor, tokenId, amount: '50', debtIndex },
+      data: { creditor, debtor, tokenId, amount: '50', debtIndex, debtSeq: String((tokenId - 1) * 21 + debtIndex + 1) },
     });
   }
   const before = compactEntityCoreForRemote(projectEntityCoreDoc(state));

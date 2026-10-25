@@ -115,3 +115,29 @@ test('nested stand CLI preserves the parent lease through child exit and timeout
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('stand CLI reads --flag=value and never the child argv', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'xln-stand-flags-test-'));
+  const cli = new URL('../../../../../tools/stand-lock.ts', import.meta.url).pathname;
+  try {
+    expect(spawnSync('git', ['init', '-q', root]).status).toBe(0);
+    const run = async (args: string[]) => {
+      const child = Bun.spawn([process.execPath, cli, 'run', ...args], {
+        cwd: root,
+        env: { ...process.env, XLN_STAND_LOCK_TOKEN: '' },
+        stdout: 'ignore',
+        stderr: 'inherit',
+      });
+      return await child.exited;
+    };
+    // The default timeout is 30 s, so an ignored `=` form would outlive this test.
+    expect(await run(['--reason=equals', '--wait-ms=0', '--timeout-ms=100', '--',
+      process.execPath, '-e', 'setInterval(()=>{},1000)'])).toBe(124);
+    // A child flag of the same name must not replace the supervisor's own.
+    expect(await run(['--reason=child-flag', '--wait-ms=0', '--timeout-ms=5000', '--',
+      process.execPath, '-e', 'setTimeout(()=>process.exit(0),200)', '--timeout-ms', '1'])).toBe(0);
+    expect(readStandLockHolder(join(root, '.xln-stand-lock'), 0)).toBeNull();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

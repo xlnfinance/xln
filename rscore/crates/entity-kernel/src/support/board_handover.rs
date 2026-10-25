@@ -320,6 +320,7 @@ mod tests {
                 previous_board_hash,
                 new_board_hash,
                 previous_board_valid_until: BigInt::from(100_u8),
+                board_epoch: BigInt::from(1_u8),
             })],
             dispute_finalization_evidence: Vec::new(),
             reserve_updates: Vec::new(),

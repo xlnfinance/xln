@@ -45,7 +45,7 @@ test('Move subtracts all debts before bounded details, including the twenty-firs
         type: 'DebtCreated',
         blockNumber: 1,
         transactionHash: `0x${'44'.repeat(32)}`,
-        data: { creditor, debtor, tokenId, amount: '50', debtIndex },
+        data: { creditor, debtor, tokenId, amount: '50', debtIndex, debtSeq: String((tokenId - 1) * 21 + debtIndex + 1) },
       });
     }
   }
@@ -66,7 +66,7 @@ test('fully repaid debt stops reducing Move availability; missing debt never cre
     type: 'DebtCreated',
     blockNumber: 1,
     transactionHash: `0x${'44'.repeat(32)}`,
-    data: { creditor, debtor, tokenId: 1, amount: '50', debtIndex: 0 },
+    data: { creditor, debtor, tokenId: 1, amount: '50', debtIndex: 0, debtSeq: '1' },
   });
   expect(reserveAvailable(frameFor(state), 1)).toBe(50n);
   applyDebtEnforced(state, {

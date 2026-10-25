@@ -228,9 +228,15 @@ export const standLockStatus = (rootOverride?: string): string => {
 
 if (import.meta.main) {
   const command = String(process.argv[2] ?? 'status');
+  // Own flags end at `--`; the child's argv is never read as ours. Both
+  // `--name value` and `--name=value` are accepted.
+  const separator = process.argv.indexOf('--');
+  const ownArgs = separator >= 0 ? process.argv.slice(0, separator) : process.argv;
   const flag = (name: string): string => {
-    const index = process.argv.indexOf(`--${name}`);
-    return index >= 0 ? String(process.argv[index + 1] ?? '') : '';
+    const inline = ownArgs.find(arg => arg.startsWith(`--${name}=`));
+    if (inline !== undefined) return inline.slice(name.length + 3);
+    const index = ownArgs.indexOf(`--${name}`);
+    return index >= 0 ? String(ownArgs[index + 1] ?? '') : '';
   };
   if (command === 'status') console.log(standLockStatus());
   else if (command === 'reap') console.log(`reaped=${reapStandLockSlots(standLockRoot())}`);
@@ -243,7 +249,6 @@ if (import.meta.main) {
   } else if (command === 'run') {
     // The manual primitive: hold the machine for any command that is not yet
     // wired (cargo bench, an ad-hoc profile run), and release it on exit.
-    const separator = process.argv.indexOf('--');
     const child = separator >= 0 ? process.argv.slice(separator + 1) : [];
     if (child.length === 0) throw new Error('STAND_LOCK_RUN_COMMAND_REQUIRED');
     const inherited = inheritedStandLock();

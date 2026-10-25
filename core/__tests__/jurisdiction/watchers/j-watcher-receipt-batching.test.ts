@@ -13,6 +13,7 @@ const blockFor = (height: number) => ({
   hash: hashFor(height),
   parentHash: height === 1 ? `0x${'00'.repeat(32)}` : hashFor(height - 1),
   receiptsRoot: `0x${'00'.repeat(32)}`,
+  stateRoot: `0x${'55'.repeat(32)}`,
   logsBloom: zeroBloom,
   transactions: [],
 });

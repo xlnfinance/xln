@@ -48,6 +48,21 @@ export const decodeJEventLog = (
   };
 };
 
+/**
+ * Money topics of earlier Depository deployments. A configured carrier that
+ * emits one runs an old deployment whose state the current ABI cannot carry
+ * (pre-debtSeq DebtCreated has no queue generation), so stop instead of
+ * skipping it. Same set as rscore j_watcher/abi.rs
+ * require_current_depository_money_abi.
+ */
+const RETIRED_DEPOSITORY_MONEY_TOPICS = new Set([
+  '0x784575545124eef27f8fcc1472fb5f2483beb9cc23e6fe3dbf588eb7bd501f7c',
+  '0xae767eeb0c57abd46e2e0b422895ba3b89372fbd0510a58f00d996faf66f027d',
+  '0x1ffe8e6348fe244a8988797c02b57999821149e7b25c9f93a85c77819efdde67',
+  '0x0971ac81b80f99fe0089c3fbe4af4fa1148f2ce78bc6345e76b05be73500de1f',
+  '0xf77919d8ab0bbcbc7feb0269986072624ad50811e07c7a87aa97e234ad7717db',
+]);
+
 const hasEventTopic = (
   carrierInterface: ethers.Interface,
   topic: string,
@@ -123,9 +138,19 @@ export const parseReceiptLogsToJEvents = (
     const carrier = carrierByAddress.get(
       ethers.getAddress(log.address).toLowerCase(),
     );
+    // Non-carrier emitters (tokens, wrappers) are skipped before the retired
+    // fence, so an unrelated contract cannot force this halt.
     if (!carrier) continue;
     const topic = String(log.topics[0] ?? '').toLowerCase();
-    if (!hasEventTopic(carrier.interface, topic)) continue;
+    if (!hasEventTopic(carrier.interface, topic)) {
+      if (RETIRED_DEPOSITORY_MONEY_TOPICS.has(topic)) {
+        throw new Error(
+          `J_RECEIPT_RETIRED_MONEY_ABI:${receipt.hash}:${receiptIndex}` +
+            `:${ethers.getAddress(log.address).toLowerCase()}:${topic}`,
+        );
+      }
+      continue;
+    }
     events.push(
       decodeJEventLog(
         log,

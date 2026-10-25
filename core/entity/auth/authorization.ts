@@ -73,6 +73,7 @@ const protocolTxTypes = new Set<EntityTx['type']>([
   'scheduledWake',
   'proposeAccountsNow',
   'j_event',
+  'j_anchor',
   'accountInput',
 ]);
 

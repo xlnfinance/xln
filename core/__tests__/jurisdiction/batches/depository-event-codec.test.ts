@@ -5,7 +5,8 @@ import {
   extractCanonicalDepositoryEventArgs,
   parseKnownDepositoryLog,
 } from '../../../jurisdiction/adapter/events/depository-event-codec';
-import { parseReceiptLogsToJEvents } from '../../../jurisdiction/adapter/j-event-log-decoder';
+import { ethers } from 'ethers';
+import { decodeJEventLog, parseReceiptLogsToJEvents } from '../../../jurisdiction/adapter/j-event-log-decoder';
 
 const iface = Depository__factory.createInterface();
 const word = (suffix: string): string => `0x${suffix.padStart(64, '0')}`;
@@ -67,5 +68,36 @@ describe('Depository watcher event codec', () => {
       }],
     );
     expect(events[0]?.args['initialNonce']).toBe(7n);
+  });
+
+  test('halts on a pre-debtSeq DebtCreated from a configured carrier, not from an unrelated emitter', () => {
+    // Exact event of the deployment before debtSeq (HEAD 4e1c9a606 Depository ABI).
+    const oldIface = new ethers.Interface([
+      'event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, (uint256 high, uint256 low) amount, uint256 debtIndex)',
+    ]);
+    const oldFragment = oldIface.getEvent('DebtCreated');
+    if (!oldFragment) throw new Error('missing old DebtCreated');
+    expect(oldFragment.topicHash).toBe('0xf77919d8ab0bbcbc7feb0269986072624ad50811e07c7a87aa97e234ad7717db');
+    const encoded = oldIface.encodeEventLog(oldFragment, [word('a'), word('b'), 1n, [0n, 7n], 0n]);
+    const depository = '0x0000000000000000000000000000000000000001';
+    const unrelated = '0x0000000000000000000000000000000000000002';
+    const receipt = (address: string) => ({
+      logs: [{ address, topics: encoded.topics, data: encoded.data, index: 0 }],
+      blockNumber: 1,
+      blockHash: word('5'),
+      hash: word('6'),
+    });
+    const carriers = [{ address: depository, interface: iface }];
+    expect(() => parseReceiptLogsToJEvents(receipt(depository), carriers)).toThrow(
+      `J_RECEIPT_RETIRED_MONEY_ABI:${word('6')}:0:${depository}:${oldFragment.topicHash}`,
+    );
+    expect(parseReceiptLogsToJEvents(receipt(unrelated), carriers)).toEqual([]);
+    // The authenticated watcher decodes every carrier log and already fails closed.
+    expect(() => decodeJEventLog(encoded, iface, {
+      blockNumber: 1,
+      blockHash: word('5'),
+      transactionHash: word('6'),
+      logIndex: 0,
+    }, 'J_WATCHER_CANONICAL_EVENT_DECODE_FAILED')).toThrow('J_WATCHER_CANONICAL_EVENT_DECODE_FAILED:empty');
   });
 });

@@ -68,6 +68,7 @@ pub struct DebtEntry {
     pub created_debt_index: u64,
     pub current_debt_index: u64,
     pub created_at_block: u64,
+    pub created_seq: BigInt,
     pub created_tx_hash: String,
     pub last_updated_block: u64,
     pub last_updated_tx_hash: String,
@@ -133,6 +134,7 @@ fn validate_entry(entry: &DebtEntry) -> Result<(), EntityKernelError> {
         || entry.created_debt_index > MAX_SAFE_INTEGER
         || entry.current_debt_index > MAX_SAFE_INTEGER
         || entry.created_at_block > MAX_SAFE_INTEGER
+        || entry.created_seq <= BigInt::from(0)
         || entry.last_updated_block > MAX_SAFE_INTEGER
     {
         return Err(invalid(format!("ENTRY_INVALID:{}", entry.debt_id)));
@@ -173,6 +175,10 @@ pub fn canonical_debt_entry(entry: &DebtEntry) -> Result<CanonicalValue, EntityK
         (
             "createdAtBlock".into(),
             number("createdAtBlock", entry.created_at_block)?,
+        ),
+        (
+            "createdSeq".into(),
+            CanonicalValue::BigInt(entry.created_seq.clone()),
         ),
         ("createdTxHash".into(), text(&entry.created_tx_hash)),
         (
@@ -378,6 +384,9 @@ pub(crate) fn apply_created(
     if event.amount <= BigInt::from(0) {
         return Err(invalid("CREATED_AMOUNT_INVALID"));
     }
+    if event.debt_seq <= BigInt::from(0) {
+        return Err(invalid("CREATED_SEQ_INVALID"));
+    }
     let (block, transaction) = event_location(&event.metadata);
     let debtor = normalized(&event.debtor);
     let creditor = normalized(&event.creditor);
@@ -395,6 +404,7 @@ pub(crate) fn apply_created(
         created_debt_index: debt_index,
         current_debt_index: debt_index,
         created_at_block: block,
+        created_seq: event.debt_seq.clone(),
         created_tx_hash: transaction.clone(),
         last_updated_block: block,
         last_updated_tx_hash: transaction,
@@ -584,6 +594,7 @@ pub fn decode_canonical_debt_entry(value: &CanonicalValue) -> Result<DebtEntry, 
         "currentDebtIndex",
         "status",
         "createdAtBlock",
+        "createdSeq",
         "createdTxHash",
         "lastUpdatedBlock",
         "lastUpdatedTxHash",
@@ -618,6 +629,7 @@ pub fn decode_canonical_debt_entry(value: &CanonicalValue) -> Result<DebtEntry, 
         created_debt_index: uint(field(fields, "createdDebtIndex")?, "createdDebtIndex")?,
         current_debt_index: uint(field(fields, "currentDebtIndex")?, "currentDebtIndex")?,
         created_at_block: uint(field(fields, "createdAtBlock")?, "createdAtBlock")?,
+        created_seq: bigint(field(fields, "createdSeq")?, "createdSeq")?,
         created_tx_hash: string(field(fields, "createdTxHash")?, "createdTxHash")?,
         last_updated_block: uint(field(fields, "lastUpdatedBlock")?, "lastUpdatedBlock")?,
         last_updated_tx_hash: string(field(fields, "lastUpdatedTxHash")?, "lastUpdatedTxHash")?,
@@ -672,6 +684,7 @@ mod tests {
             created_debt_index: 1,
             current_debt_index: 1,
             created_at_block: 2,
+            created_seq: BigInt::from(1),
             created_tx_hash: "0xaa".into(),
             last_updated_block: 2,
             last_updated_tx_hash: "0xaa".into(),
@@ -706,6 +719,7 @@ mod tests {
                 token_id: 3,
                 amount: BigInt::from(10),
                 debt_index: 4,
+                debt_seq: BigInt::from(1),
             },
         )
         .expect("created");

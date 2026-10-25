@@ -20,7 +20,7 @@ export const ENTITY_TX_TYPES = [
   'entityCommand', 'entityProviderActivateBoard', 'entityProviderCancelAction',
   'entityProviderProposeControlBoard', 'entityProviderReleaseControlShares',
   'entityProviderTransfer', 'extendCredit', 'htlcPayment',
-  'initOrderbookExt', 'j_abort_sent_batch', 'j_broadcast', 'j_clear_batch', 'j_event',
+  'initOrderbookExt', 'j_abort_sent_batch', 'j_anchor', 'j_broadcast', 'j_clear_batch', 'j_event',
   'j_rebroadcast', 'lendingApprove', 'lendingBorrow', 'lendingClosePosition',
   'lendingOffer', 'lendingRepay', 'lendingSetTerms', 'mintReserves', 'openAccount',
   'orderbookSweepCrossJurisdiction', 'placeSwapOffer',

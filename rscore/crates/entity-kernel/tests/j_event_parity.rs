@@ -11,10 +11,11 @@ use xln_rscore_entity_kernel::{
     CommittedAccountTransition, ConsensusMode, DeterministicContext, EMPTY_J_HISTORY_ROOT,
     EntityConsensusConfig, EntityFrameAuthority, EntityFrameEvent, EntityKernelError,
     EntityKernelOutput, EntityLeaderState, EntityStateSlice, FinalizedJEventBatch, JClaimIngress,
-    JReserveUpdate, JurisdictionScope, OrderedAccountCommit, apply_entity_kernel,
-    apply_finalized_j_event_batches, canonical_j_event_blocks, canonical_j_event_range_hash,
-    capture_entity_state, compute_entity_owned_sections, fold_j_history_root, j_event_range_digest,
-    restore_entity_state,
+    JHistoryStorageAnchor, JReserveUpdate, JurisdictionScope, OrderedAccountCommit,
+    apply_entity_kernel, apply_finalized_j_event_batches, canonical_j_event_blocks,
+    canonical_j_event_range_hash, capture_entity_state, compute_entity_owned_sections,
+    fold_j_history_root, j_event_range_digest, j_history_anchor_claim_digest,
+    j_history_anchor_root, restore_entity_state,
 };
 
 fn entity(byte: u8) -> EntityId {
@@ -397,6 +398,53 @@ fn j_history_range_hashes_match_typescript_goldens() {
         hex::encode(digest),
         "35c3d84e153353c001a5e873eeccf05ffe8b4c4ee5e7a96407ab07baca3a5507"
     );
+}
+
+#[test]
+fn j_history_anchor_claim_digest_matches_typescript_golden() {
+    // Same vector as core/__tests__/jurisdiction/history/j-history-consensus.test.ts.
+    let anchor = JHistoryStorageAnchor {
+        jurisdiction_ref: format!("chain:31337:depository:0x{}", "88".repeat(20)),
+        anchor_height: 4049,
+        anchor_block_hash: [0xcc; 32],
+        state_root: [0xdd; 32],
+        proven_values_root: [0xee; 32],
+    };
+    let entity_id = format!("0x{}", "aa".repeat(32));
+    let signer_id = format!("0x{}", "11".repeat(20));
+    assert_eq!(
+        hex::encode(j_history_anchor_root(&anchor).expect("anchor root")),
+        "e9b5cff3f0be460e3ed90d3b9a7ab16b2599de16e71e255252c3334a03290531"
+    );
+    let digest =
+        j_history_anchor_claim_digest(&entity_id, &signer_id, 41, &anchor).expect("anchor digest");
+    assert_eq!(
+        hex::encode(digest),
+        "430b8bb7f2b981eb66ffeaeef08b129921f8d8f18375d9a3f892a3d5996552a6"
+    );
+    let other_entity = format!("0x{}", "ab".repeat(32));
+    assert_ne!(
+        j_history_anchor_claim_digest(&other_entity, &signer_id, 41, &anchor).expect("mutant"),
+        digest
+    );
+    assert_ne!(
+        j_history_anchor_claim_digest(&entity_id, &signer_id, 40, &anchor).expect("mutant"),
+        digest
+    );
+    let moved = JHistoryStorageAnchor {
+        proven_values_root: [0xef; 32],
+        ..anchor.clone()
+    };
+    assert_ne!(
+        j_history_anchor_claim_digest(&entity_id, &signer_id, 41, &moved).expect("mutant"),
+        digest
+    );
+    assert!(j_history_anchor_claim_digest(&entity_id, &signer_id, 4049, &anchor).is_err());
+    let genesis = JHistoryStorageAnchor {
+        anchor_height: 0,
+        ..anchor
+    };
+    assert!(j_history_anchor_root(&genesis).is_err());
 }
 
 #[test]

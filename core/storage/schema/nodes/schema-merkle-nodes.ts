@@ -36,13 +36,12 @@ const validateCertifiedBoardRecord = (value: unknown, code: string): void => {
   const record = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(record, [
     'stackKey', 'entityId', 'boardHash', 'boardEpoch', 'previousBoardHash',
-    'previousBoardValidUntil', 'activatedAtJHeight', 'logIndex', 'blockHash',
-    'transactionHash', 'source',
+    'previousBoardValidUntil', 'source',
   ], [], `${code}_FIELDS`);
-  for (const key of ['stackKey', 'entityId', 'boardHash', 'previousBoardHash', 'blockHash', 'transactionHash']) {
+  for (const key of ['stackKey', 'entityId', 'boardHash', 'previousBoardHash']) {
     requireStorageHash(record[key], `${code}_${key}`);
   }
-  for (const key of ['boardEpoch', 'previousBoardValidUntil', 'activatedAtJHeight', 'logIndex']) {
+  for (const key of ['boardEpoch', 'previousBoardValidUntil']) {
     requireBoundaryInteger(record[key], `${code}_${key}`);
   }
   if (!['FoundationBootstrapped', 'EntityRegistered', 'BoardActivated'].includes(String(record['source']))) {

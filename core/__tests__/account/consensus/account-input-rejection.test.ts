@@ -322,8 +322,7 @@ describe('typed Account input rejection', () => {
         owningEntityIsHub: false,
         counterpartyCertifiedBoard: {
           boardHash: currentBoardHash,
-          activatedAtJHeight: 2,
-          logIndex: 1,
+          boardEpoch: 2,
         },
         verifyHanko: context.verifyHanko,
       });

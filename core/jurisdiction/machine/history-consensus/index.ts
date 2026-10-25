@@ -7,6 +7,8 @@ const HISTORY_LEAF_DOMAIN = 'xln:j-history-event-block:v1';
 const HISTORY_FOLD_DOMAIN = 'xln:j-history-fold:v1';
 const HISTORY_RANGE_DOMAIN = 'xln:j-history-range:v1';
 const HISTORY_RANGE_BODY_DOMAIN = 'xln:j-history-range-body:v1';
+const HISTORY_ANCHOR_DOMAIN = 'xln:j-history-storage-anchor:v1';
+const HISTORY_ANCHOR_CLAIM_DOMAIN = 'xln:j-history-anchor-claim:v1';
 
 export const EMPTY_J_HISTORY_ROOT = ethers.keccak256(ethers.toUtf8Bytes(HISTORY_EMPTY_DOMAIN));
 
@@ -81,6 +83,66 @@ export const foldJHistoryRoot = (
     ));
   }
   return root;
+};
+
+export type JHistoryStorageAnchor = {
+  jurisdictionRef: string;
+  anchorHeight: number;
+  anchorBlockHash: string;
+  /** Must come from a header whose hash was recomputed (readHashBoundStateRoot). */
+  stateRoot: string;
+  /** Root over every storage value the Entity loads at the anchor. */
+  provenValuesRoot: string;
+};
+
+// Base root for an Entity whose J state is loaded from storage proven at one
+// authenticated block instead of folded from deployment. Later blocks fold onto
+// it with foldJHistoryRoot unchanged. It never equals a genesis-replay root at
+// the same height, so a stack uses one base for every Entity, never both.
+export const buildJHistoryAnchorRoot = (anchor: JHistoryStorageAnchor): string => {
+  const anchorHeight = normalizeHeight(anchor.anchorHeight, 'ANCHOR_HEIGHT');
+  if (anchorHeight === 0) throw new Error('J_HISTORY_INVALID_ANCHOR_HEIGHT');
+  const jurisdictionRef = String(anchor.jurisdictionRef ?? '').trim();
+  if (!jurisdictionRef) throw new Error('J_HISTORY_INVALID_ANCHOR_JURISDICTION');
+  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+    ['bytes32', 'bytes32', 'uint64', 'bytes32', 'bytes32', 'bytes32'],
+    [
+      textHash(HISTORY_ANCHOR_DOMAIN),
+      textHash(jurisdictionRef),
+      anchorHeight,
+      normalizeRoot(anchor.anchorBlockHash, 'ANCHOR_BLOCK_HASH'),
+      normalizeRoot(anchor.stateRoot, 'ANCHOR_STATE_ROOT'),
+      normalizeRoot(anchor.provenValuesRoot, 'ANCHOR_VALUES_ROOT'),
+    ],
+  ));
+};
+
+export type JHistoryAnchorClaimDigestInput = JHistoryStorageAnchor & {
+  entityId: string;
+  signerId: string;
+  baseHeight: number;
+};
+
+// A range claim must carry one header per block from base to scanned, so an
+// anchor start is its own claim kind. Like the range digest it binds the Entity
+// and signer; the anchor root commits every anchor field, and the base it
+// replaces is explicit so a claim cannot be replayed onto a later finality.
+export const buildJHistoryAnchorClaimDigest = (input: JHistoryAnchorClaimDigestInput): string => {
+  const baseHeight = normalizeHeight(input.baseHeight, 'BASE_HEIGHT');
+  const anchorHeight = normalizeHeight(input.anchorHeight, 'ANCHOR_HEIGHT');
+  if (anchorHeight <= baseHeight) throw new Error('J_HISTORY_ANCHOR_NOT_AFTER_BASE');
+  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+    ['bytes32', 'bytes32', 'bytes32', 'bytes32', 'uint64', 'uint64', 'bytes32'],
+    [
+      textHash(HISTORY_ANCHOR_CLAIM_DOMAIN),
+      textHash(input.entityId),
+      textHash(input.jurisdictionRef),
+      textHash(input.signerId),
+      baseHeight,
+      anchorHeight,
+      buildJHistoryAnchorRoot(input),
+    ],
+  ));
 };
 
 const normalizeRangeBlocks = (

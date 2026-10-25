@@ -282,10 +282,16 @@ describe('JAdapter watcher ingress', () => {
             typeof transaction.data !== 'string'
           )
             throw new Error('TEST_TOKEN_CALL_INVALID');
+          // -1 marks the registry length read inside an entry batch.
+          if (transaction.data === iface.encodeFunctionData('getTokensLength')) return -1;
           return Number(iface.decodeFunctionData('_tokens', transaction.data)[0]);
         });
         batches.push(ids);
         const results = ids.map(tokenId => {
+          if (tokenId === -1) {
+            lengthReads += 1;
+            return iface.encodeFunctionResult('getTokensLength', [entries.length]);
+          }
           if (tokenId === failedToken) throw new Error(`TEST_TOKEN_READ_FAILED:${tokenId}`);
           const entry = entries[tokenId];
           if (!entry) throw new Error(`TEST_TOKEN_MISSING:${tokenId}`);
@@ -297,11 +303,27 @@ describe('JAdapter watcher ingress', () => {
     );
     expect(await readWatchedTokens()).toEqual([{ tokenId: 1, address: erc20 }]);
     expect(batches.splice(0)).toEqual([[1, 2, 3]]);
-    // A token registered after the first poll must be included on the next.
+    expect(lengthReads).toBe(1);
+    // An unchanged registry costs one batch: its length rides with the entries.
+    expect(await readWatchedTokens()).toEqual([{ tokenId: 1, address: erc20 }]);
+    expect(batches.splice(0)).toEqual([[-1, 1, 2, 3]]);
+    expect(lengthReads).toBe(2);
+    // A reorged-out entry fails the one-batch read; the exact read returns the
+    // shorter registry instead of halting, and the next poll re-reads exactly.
+    const reorgedOut = entries.pop();
+    expect(await readWatchedTokens()).toEqual([{ tokenId: 1, address: erc20 }]);
+    expect(batches.splice(0)).toEqual([[-1, 1, 2, 3], [1, 2]]);
+    if (reorgedOut) entries.push(reorgedOut);
+    expect(await readWatchedTokens()).toEqual([{ tokenId: 1, address: erc20 }]);
+    expect(batches.splice(0)).toEqual([[-1, 1, 2], [1, 2, 3]]);
+    expect(lengthReads).toBe(6);
+    // A token registered after the first poll must be included on the next:
+    // the changed length rejects the one-batch read and the exact read runs.
     for (let id = 4; id <= 130; id += 1) entries.push([`0x${id.toString(16).padStart(40, '0')}`, 0n, 0n]);
     const refreshed = await readWatchedTokens();
-    expect(lengthReads).toBe(2);
+    expect(lengthReads).toBe(8);
     expect(refreshed.map(token => token.tokenId)).toEqual([1, ...Array.from({ length: 127 }, (_, i) => i + 4)]);
+    expect(batches.shift()).toEqual([-1, 1, 2, 3]);
     expect(batches.map(batch => batch.length)).toEqual([128, 2]);
     expect(batches.flat()).toEqual(Array.from({ length: 130 }, (_, i) => i + 1));
     failedToken = 129;
@@ -311,7 +333,7 @@ describe('JAdapter watcher ingress', () => {
     await expect(readWatchedTokens()).rejects.toThrow('J_TOKEN_REGISTRY_BATCH_LENGTH_MISMATCH');
     truncate = false;
     expect(await readWatchedTokens()).toEqual(refreshed);
-    expect(lengthReads).toBe(5);
+    expect(lengthReads).toBe(11);
     expect(failures).toHaveLength(2);
     // The watcher must retain locally typed outages through the registry
     // context wrapper; permanent registry failures must still halt the poll.
@@ -511,8 +533,8 @@ describe('JAdapter watcher ingress', () => {
 
   test('RPC watcher bounds historical catch-up without skipping the safe tip', () => {
     expect(resolveWatcherPollToBlock(1, 10_000, 256)).toBe(256);
-    expect(resolveWatcherPollToBlock(1, 190_000)).toBe(1023);
-    expect(resolveWatcherPollToBlock(257, 190_000)).toBe(1279);
+    expect(resolveWatcherPollToBlock(1, 190_000)).toBe(8191);
+    expect(resolveWatcherPollToBlock(257, 190_000)).toBe(8447);
     expect(resolveWatcherPollToBlock(189_900, 190_000)).toBe(190_000);
     expect(resolveWatcherPollToBlock(257, 10_000, 256)).toBe(512);
     expect(resolveWatcherPollToBlock(9_900, 10_000, 256)).toBe(10_000);
@@ -540,8 +562,9 @@ describe('JAdapter watcher ingress', () => {
     expect(nextWatcherPollWindow(1, false)).toBe(1);
     expect(nextWatcherPollWindow(128, true)).toBe(256);
     expect(nextWatcherPollWindow(256, true)).toBe(512);
-    expect(nextWatcherPollWindow(512, true)).toBe(1023);
-    expect(watcherPollWindowLimit('rpc')).toBe(1023);
+    expect(nextWatcherPollWindow(512, true)).toBe(1024);
+    expect(nextWatcherPollWindow(4096, true)).toBe(8191);
+    expect(watcherPollWindowLimit('rpc')).toBe(8191);
     expect(watcherPollWindowLimit('tron')).toBe(255);
     expect(nextWatcherPollWindow(128, true, watcherPollWindowLimit('tron'))).toBe(255);
     expect(resolveWatcherPollToBlock(2, 1000, watcherPollWindowLimit('tron'))).toBe(256);

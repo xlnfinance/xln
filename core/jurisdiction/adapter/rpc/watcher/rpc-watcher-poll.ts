@@ -18,7 +18,8 @@ import {
   watcherPollWindowLimit,
   shouldAuditCanonicalWatcherState,
 } from '../../watcher/observe/watcher-poll-policy';
-import { assertAuthorityEvidenceCanonical, reconcileWatcherCanonicalTip } from './rpc-watcher-canonical';
+import { startWatcherFromStorageAnchor } from './rpc-watcher-anchor-start';
+import { auditWatcherCanonicalState } from './rpc-watcher-canonical';
 import { applyAuthenticatedWatcherRange } from './rpc-watcher-ingress';
 import type { RpcWatcherServices, RpcWatcherSession, RpcWatcherTrace } from './rpc-watcher-types';
 
@@ -120,10 +121,14 @@ const auditCanonicalStateWhenDue = async (
   });
   session.lastObservedHead = currentBlock;
   if (!auditDue) return false;
-  request.trace.step = `verifyAuthorityEvidence:${currentBlock}`;
-  await assertAuthorityEvidenceCanonical(session, session.env, currentBlock, request.services);
-  request.trace.step = `verifyCanonicalTip:${session.lastSyncedBlock}`;
-  const rewound = await reconcileWatcherCanonicalTip(session, session.env, request.services, request.emitDebug);
+  request.trace.step = `verifyCanonicalState:${currentBlock}:${session.lastSyncedBlock}`;
+  const rewound = await auditWatcherCanonicalState(
+    session,
+    session.env,
+    currentBlock,
+    request.services,
+    request.emitDebug,
+  );
   session.lastCanonicalAuditAtMs = nowMs;
   if (!rewound) return false;
   session.pendingHistoryRange = null;
@@ -180,6 +185,16 @@ export const runWatcherPoll = async (request: PollRequest): Promise<void> => {
   if (!watcherReplica) {
     throw new Error(`J_WATCHER_JURISDICTION_NOT_FOUND:poll:${services.chainId}:` + services.depositoryAddress);
   }
+  request.trace.step = `anchorStart:${safeToBlock}`;
+  if (await startWatcherFromStorageAnchor({
+    session,
+    services,
+    watcherReplica,
+    safeToBlock,
+    isCancelled: request.isCancelled,
+    isPaused: () => isIngressPaused(session.env),
+    emitDebug: request.emitDebug,
+  })) return;
   const minimumLocalScan = getMinimumScannedSignerJHeight(session.env, watcherReplica);
   const nextGlobalBlock = session.lastSyncedBlock + 1;
   const fromBlock = Math.min(nextGlobalBlock, minimumLocalScan === null ? nextGlobalBlock : minimumLocalScan + 1);

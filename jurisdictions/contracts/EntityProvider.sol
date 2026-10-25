@@ -119,7 +119,8 @@ contract EntityProvider is ERC1155 {
     bytes32 indexed entityId,
     bytes32 previousBoardHash,
     bytes32 newBoardHash,
-    uint256 previousBoardValidUntil
+    uint256 previousBoardValidUntil,
+    uint256 boardEpoch
   );
   event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId);
   event FoundationBootstrapped(
@@ -541,7 +542,7 @@ contract EntityProvider is ERC1155 {
     entity.proposedBoardHash = bytes32(0);
     entity.activateAt = 0;
 
-    emit BoardActivated(entityId, previousBoardHash, proposedBoardHash, previousBoardValidUntil);
+    emit BoardActivated(entityId, previousBoardHash, proposedBoardHash, previousBoardValidUntil, boardEpochs[entityId]);
   }
 
   /**

@@ -1,4 +1,6 @@
 import type { JurisdictionEventData } from './jurisdiction-events';
+import type { JHistoryAnchorClaimData } from '../jurisdiction/machine/j-event-range-validation';
+import type { JHistoryAnchorValues } from '../jurisdiction/machine/state-anchor/proven-values-root';
 import type { AccountInput, AccountState, AccountStateDomain, SettlementOp } from './account';
 import type { CrossJurisdictionCloseProof, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { LendingTermId } from './finance/lending';
@@ -181,6 +183,11 @@ type EntityTxPayload =
   | {
       type: 'j_event';
       data: JurisdictionEventData;
+    }
+  | {
+      /** Signed anchor start in place of the genesis fold; only valid before any J finality. */
+      type: 'j_anchor';
+      data: JHistoryAnchorClaimData & { values: JHistoryAnchorValues };
     }
   | {
       type: 'accountInput';

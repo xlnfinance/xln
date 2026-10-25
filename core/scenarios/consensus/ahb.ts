@@ -29,14 +29,12 @@ import {
   resolveScenarioJurisdictionAddress,
 } from '../harness/boot';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
-import { checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, advanceScenarioTime, advanceScenarioPastDisputeTimeout, readScenarioJurisdictionUnix, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, formatTokenMoney, syncChain, commitRuntimeInput, setScenarioStorageEnabled } from '../harness/helpers';
+import { checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, advanceScenarioTime, advanceScenarioPastDisputeTimeout, readScenarioJurisdictionUnix, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, formatTokenMoney, syncChain, commitRuntimeInput } from '../harness/helpers';
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { announce, tell } from '../harness/narration';
 import { disputeWindowText } from '../harness/story';
 import { AHB_ACCOUNTS, AHB_PAYMENTS, AHB_REBALANCE, AHB_SETUP, AHB_STRESS_STORY } from './ahb-story';
 import { deriveDelta, isLeftEntity } from '../../account/utils';
-import { createGossipLayer } from '../../network/p2p/gossip';
-import { clearRuntimeFrameEvents } from '../../runtime/observability/env-events';
 import {
   readRuntimeTraceForTesting,
   startRuntimeTraceForTesting,
@@ -82,8 +80,14 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     env.quietRuntimeLogs = false;
     env.scenarioLogLevel = 'info';
   }
-  // Puppet scenarios must not append onto a leftover durable Runtime head.
-  setScenarioStorageEnabled(env, false);
+  // The caller owns the Runtime and its persistence (run.ts: fresh isolated WAL,
+  // browser preview: fresh RAM Runtime). A leftover head is refused, never rewound.
+  if (env.state.height !== 0 || env.state.eReplicas.size > 0 || env.state.jReplicas.size > 0) {
+    throw new Error(
+      `AHB_FRESH_RUNTIME_REQUIRED:height=${env.state.height}:` +
+      `entities=${env.state.eReplicas.size}:jurisdictions=${env.state.jReplicas.size}`,
+    );
+  }
   const restoreStrict = enableStrictScenario(env, 'AHB');
 
   // Require real runtime seed and derive signer keys (no test keys)
@@ -107,22 +111,6 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   env.scenarioMode = true; // Deterministic time control (scenarios set env.timestamp manually)
 
   try {
-    // Reset runtime state for clean scenario runs in browser (persisted env can cause nonce/mempool drift)
-    if (env.state.jReplicas && env.state.jReplicas.size > 0) {
-      console.log(`[AHB] Clearing ${env.state.jReplicas.size} old jurisdictions from previous scenario`);
-      env.state.jReplicas.clear();
-    }
-    if (env.state.eReplicas && env.state.eReplicas.size > 0) {
-      console.log(`[AHB] Clearing ${env.state.eReplicas.size} old entities from previous scenario`);
-      env.state.eReplicas.clear();
-    }
-    env.state.height = 0;
-    env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
-    env.pendingOutputs = [];
-    env.pendingNetworkOutputs = [];
-    clearRuntimeFrameEvents(env);
-    env.gossip = createGossipLayer();
-    env.activeJurisdiction = undefined;
     if (env.scenarioMode) {
       env.state.timestamp = 1;
     }

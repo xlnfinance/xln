@@ -52,6 +52,7 @@ pub(crate) fn canonical_event_data_value(
                 "previousBoardValidUntil",
                 text(&value.previous_board_valid_until.to_string()),
             ),
+            ("boardEpoch", text(&value.board_epoch.to_string())),
         ]),
         JurisdictionEvent::ReserveUpdated(value) => object(vec![
             ("entity", text(&value.entity)),
@@ -136,6 +137,7 @@ pub(crate) fn canonical_event_data_value(
             ("tokenId", i64_number(value.token_id)?),
             ("amount", text(&value.amount.to_string())),
             ("debtIndex", i64_number(value.debt_index)?),
+            ("debtSeq", text(&value.debt_seq.to_string())),
         ]),
         JurisdictionEvent::DisputeStarted(value) => {
             let mut fields = vec![

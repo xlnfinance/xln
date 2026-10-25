@@ -121,6 +121,9 @@ fn every_typescript_entity_tx_decodes_and_reencodes_byte_identically() {
                 "lendingApprove" | "lendingSetTerms" => {
                     detail.starts_with("RUNTIME_ENTITY_TX_EXECUTION_UNSUPPORTED:")
                 }
+                // The anchor start has no native mirror yet; native ingress
+                // must reject it by name rather than skip it.
+                "j_anchor" => detail == "RUNTIME_ENTITY_TX_EXECUTION_UNSUPPORTED:j_anchor",
                 // This vector deliberately places an ordinary action inside
                 // EntityCommand; collective actions must first be proposed.
                 // The shared vector carries a canonical placeholder signature
@@ -146,7 +149,7 @@ fn every_typescript_entity_tx_decodes_and_reencodes_byte_identically() {
         assert_eq!(encoded, bytes, "{name}: Rust changed TypeScript bytes");
     }
 
-    assert_eq!(covered.len(), 66, "shared EntityTx vector cardinality");
+    assert_eq!(covered.len(), 67, "shared EntityTx vector cardinality");
     assert_eq!(
         covered,
         ENTITY_TX_TYPES.into_iter().map(str::to_string).collect(),

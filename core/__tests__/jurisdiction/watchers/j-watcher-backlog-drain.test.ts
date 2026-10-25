@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ethers } from 'ethers';
 
+import { BLOCKCHAIN } from '../../../config/constants';
 import { createEmptyEnv, processRuntime } from '../../../runtime';
 import { safeStringify } from '../../../protocol/serialization';
 import { deriveSignerAddressSync, getSignerPrivateKey } from '../../../account/crypto';
@@ -17,6 +18,7 @@ import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
 } from '../../../jurisdiction/machine/board-registry';
+import { getJHistoryRegistrationBaseHeight } from '../../../jurisdiction/machine/history-consensus';
 import {
   commitRuntimeInput,
   ensureSignerKeysFromSeed,
@@ -58,6 +60,10 @@ type RpcGateProxy = {
   armBlockNumberGate(): RpcGateControl;
   armHeaderBatchGate(status?: 429 | 'missing-header'): RpcGateControl;
   takeHeaderBlocks(): number[];
+  waitForHeaderBlockCount(count: number): Promise<void>;
+  /** Heights every sparse canonical audit batch must contain; such batches stay out of range gates and counts. */
+  setAuthorityAuditHeights(heights: readonly number[] | null): void;
+  takeAuthorityAuditBatchCount(): number;
   close(): Promise<void>;
 };
 
@@ -145,7 +151,9 @@ const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
   let releasePromise: Promise<void> | null = null;
   let releaseResolve: (() => void) | null = null;
   const headerBlocks: number[] = [];
-  const armGate = (target: 'block-number' | 'headers', status?: 429 | 'missing-header'): RpcGateControl => {
+  let authorityAuditHeights: ReadonlySet<number> | null = null;
+  let authorityAuditBatchCount = 0;
+  const armGate =(target: 'block-number' | 'headers', status?: 429 | 'missing-header'): RpcGateControl => {
     if (armedGate || releasePromise) throw new Error('J_WATCHER_RPC_GATE_ALREADY_ARMED');
     armedGate = { target, ...(status === undefined ? {} : { status }) };
     const entered = new Promise<void>(resolve => {
@@ -175,15 +183,28 @@ const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
       type RpcCall = { id: number; method?: string; params?: unknown[] };
       const payload = JSON.parse(body) as RpcCall | RpcCall[];
       const methods = Array.isArray(payload) ? payload.map(entry => entry.method) : [payload.method];
-      const headerBatch =
+      let headerBatch =
         Array.isArray(payload) && payload.length > 1 && payload.every(entry => entry.method === 'eth_getBlockByNumber');
-      if (headerBatch) {
-        for (const entry of payload) {
+      if (headerBatch && Array.isArray(payload)) {
+        const heights = payload.map(entry => {
           const height = entry.params?.[0];
           if (typeof height !== 'string' || !/^0x[0-9a-f]+$/i.test(height)) {
             throw new Error('J_WATCHER_RPC_HEADER_HEIGHT_INVALID');
           }
-          headerBlocks.push(Number(BigInt(height)));
+          return Number(BigInt(height));
+        });
+        const required = authorityAuditHeights;
+        const distinct = [...new Set(heights)].sort((left, right) => left - right);
+        const contiguous = (distinct.at(-1) ?? 0) - (distinct[0] ?? 0) === distinct.length - 1;
+        if (required && !contiguous && [...required].every(height => distinct.includes(height))) {
+          // The canonical audit reads the head, every authority evidence height
+          // and the local committed tips in one sparse batch before the range
+          // scan, whose pages are contiguous. Forward it unchanged and count it
+          // apart from the scanned range.
+          authorityAuditBatchCount += 1;
+          headerBatch = false;
+        } else {
+          headerBlocks.push(...heights);
         }
       }
       const gate = armedGate;
@@ -215,6 +236,25 @@ const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
     armBlockNumberGate: () => armGate('block-number'),
     armHeaderBatchGate: status => armGate('headers', status),
     takeHeaderBlocks: () => headerBlocks.splice(0),
+    async waitForHeaderBlockCount(count: number): Promise<void> {
+      const deadline = performance.now() + 5_000;
+      while (headerBlocks.length < count) {
+        if (performance.now() > deadline) {
+          throw new Error(
+            `J_WATCHER_RPC_HEADER_COUNT_NOT_REACHED:${headerBlocks.length}/${count}:${headerBlocks.slice(0, 16).join(',')}`,
+          );
+        }
+        await Bun.sleep(5);
+      }
+    },
+    setAuthorityAuditHeights(heights) {
+      authorityAuditHeights = heights ? new Set(heights) : null;
+    },
+    takeAuthorityAuditBatchCount() {
+      const count = authorityAuditBatchCount;
+      authorityAuditBatchCount = 0;
+      return count;
+    },
     async close(): Promise<void> {
       await server.stop(true);
     },
@@ -312,8 +352,12 @@ describe('RPC J-watcher backlog drain', () => {
         throw new Error('J_WATCHER_BACKLOG_ENTITY_REGISTRATION_FAILED');
       }
       const registeredEntityId = ethers.zeroPadValue(ethers.toBeHex(nextEntityNumber), 32).toLowerCase();
-      const signerAddress = new ethers.Wallet(ethers.hexlify(signerPrivateKey)).address;
-      const entityId = generateLazyEntityId([signerAddress], 1n).toLowerCase();
+      // A fresh lazy import starts from a storage anchor at the tip, so this
+      // backlog uses the full-history path of a registered numbered Entity:
+      // the watcher authenticates its EntityRegistered receipt, then the
+      // replica is imported with that receipt block, as the numbered intent does.
+      await processJEvents(env);
+      const entityId = registeredEntityId;
       await commitRuntimeInput(env, {
         runtimeTxs: [
           createTestEntityImportRuntimeTx(env, {
@@ -326,7 +370,7 @@ describe('RPC J-watcher backlog drain', () => {
                 threshold: 1n,
                 validators: [SIGNER_ID],
                 shares: { [SIGNER_ID]: 1n },
-                jurisdiction,
+                jurisdiction: { ...jurisdiction, registrationBlock: registerReceipt.blockNumber },
               },
             },
           }),
@@ -385,20 +429,39 @@ describe('RPC J-watcher backlog drain', () => {
             mempool: env.runtimeMempool,
           });
         const beforeFailures = failureState();
+        const safeTip = await provider.getBlockNumber();
+        // The registered Entity's watcher-authenticated registration evidence
+        // is re-audited with the head before the range scan. Account for that
+        // exact sparse batch apart from the gated, exactly counted range.
+        const authorityEvidence = [...(env.infrastructure?.certifiedRegistrationEvidence?.values() ?? [])].filter(
+          candidate => candidate.entityId === entityId,
+        );
+        expect(authorityEvidence).toHaveLength(1);
+        rpcProxy.setAuthorityAuditHeights([
+          safeTip,
+          ...authorityEvidence.flatMap(candidate => [candidate.activationHeight, candidate.observedThroughHeight]),
+        ]);
+        rpcProxy.takeAuthorityAuditBatchCount();
         rpcProxy.takeHeaderBlocks();
-        // Start all eight chunks, then halve on each unavailable header. Drain
-        // every in-flight sibling without committing any partial range or state.
-        for (const window of [1023, 511, 255]) {
+        // The production window exceeds this backlog: the first failure reads
+        // the whole range, and each failure halves the range actually read.
+        // Refill every free slot while one chunk is held, then drain every
+        // in-flight sibling without committing any partial range or state.
+        let window: number = BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL;
+        for (let failure = 0; failure < 3; failure += 1) {
+          const readBlocks = Math.min(window, safeTip - fromBlock + 1);
           const missingHeaderGate = rpcProxy.armHeaderBatchGate('missing-header');
           const missingHeaderPoll = pollWatcher();
-          await waitForGate(`missing-header-${window}`, missingHeaderGate, missingHeaderPoll);
+          await waitForGate(`missing-header-${readBlocks}`, missingHeaderGate, missingHeaderPoll);
+          await rpcProxy.waitForHeaderBlockCount(readBlocks);
           missingHeaderGate.release();
           await missingHeaderPoll;
           expect(failureState()).toEqual(beforeFailures);
           expect(adapter.isWatching()).toBe(true);
           expect(rpcProxy.takeHeaderBlocks().sort((left, right) => left - right)).toEqual(
-            Array.from({ length: window }, (_, index) => fromBlock + index),
+            Array.from({ length: readBlocks }, (_, index) => fromBlock + index),
           );
+          window = Math.floor(readBlocks / 2);
         }
 
         const timeoutGate = rpcProxy.armHeaderBatchGate();
@@ -418,17 +481,20 @@ describe('RPC J-watcher backlog drain', () => {
         expect(failureState()).toEqual(beforeFailures);
         expect(adapter.isWatching()).toBe(true);
         // The retry still begins at block 1, which has no preceding anchor.
-        expect(rpcProxy.takeHeaderBlocks()).toHaveLength(127);
+        expect(rpcProxy.takeHeaderBlocks()).toHaveLength(window);
 
-        // All four failures shrink the actual poll: 1023 -> 511 -> 255 -> 127 -> 63.
-        // Every successful response is forwarded from Anvil, including the fence.
+        // All four failures halve the actual poll; the recovered page stays
+        // below the liveness interval. Every successful response is forwarded
+        // from Anvil, including the fence.
+        const recoveredWindow = Math.floor(window / 2);
+        expect(recoveredWindow).toBeLessThan(BLOCKCHAIN.JBLOCK_LIVENESS_INTERVAL);
         await pollWatcher();
         const readHeights = [...new Set(rpcProxy.takeHeaderBlocks())].sort((left, right) => left - right);
         const anchorHeight = Math.max(1, fromBlock - 1);
         expect(readHeights).toEqual(
-          Array.from({ length: fromBlock + 63 - anchorHeight }, (_, index) => anchorHeight + index),
+          Array.from({ length: fromBlock + recoveredWindow - anchorHeight }, (_, index) => anchorHeight + index),
         );
-        expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 62);
+        expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + recoveredWindow - 1);
 
         const successfulRetryAt = performance.now();
         // Commit the first real observed range so the next poll can advance.
@@ -448,13 +514,15 @@ describe('RPC J-watcher backlog drain', () => {
           retainedPressureGate.release();
         }
         await retainedPressurePoll;
-        expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 125);
+        expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 2 * recoveredWindow - 1);
 
         // A pressure-limited page below the liveness interval stays ephemeral,
         // but the next authenticated read must advance beyond it, not loop forever.
         rpcProxy.takeHeaderBlocks();
         await pollWatcher();
-        expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 188);
+        expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 3 * recoveredWindow - 1);
+        expect(rpcProxy.takeAuthorityAuditBatchCount()).toBeGreaterThanOrEqual(1);
+        rpcProxy.setAuthorityAuditHeights(null);
       }
 
       await processJEvents(env);
@@ -578,7 +646,15 @@ describe('RPC J-watcher backlog drain', () => {
 
       const lateReplica = env.state.eReplicas.get(`${lateEntityId}:${LATE_SIGNER_ID}`);
       expect(lateReplica?.jHistory?.scannedThroughHeight).toBe(irrelevantLogHeight);
-      expect(lateReplica?.state.lastFinalizedJHeight).toBeLessThan(irrelevantLogHeight);
+      // The first late frame certifies exactly its first authenticated page.
+      // This history fits one production page; the page-straddling suffix is
+      // proven by its own fresh-chain case below.
+      expect(lateReplica?.state.lastFinalizedJHeight).toBe(
+        Math.min(
+          irrelevantLogHeight,
+          getJHistoryRegistrationBaseHeight(jurisdiction) + BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL,
+        ),
+      );
       if (!lateReplica) throw new Error('J_WATCHER_BACKLOG_LATE_REPLICA_MISSING');
       expect(
         resolveObserverCertifiedBoardHash(lateReplica.state, getCertifiedBoardNodeStore(env), registeredEntityId),
@@ -642,4 +718,167 @@ describe('RPC J-watcher backlog drain', () => {
     },
     60_000,
   );
+
+  describe('late history straddling the production page', () => {
+    // Anvil block production grows with chain height (4000 empty blocks take
+    // ~20 s), so preparation gets its own measured budget; the semantic step
+    // keeps the original 60 s deadline.
+    const PREPARATION_TIMEOUT_MS = 180_000;
+    let prepared: {
+      env: ReturnType<typeof createEmptyEnv>;
+      jurisdiction: ReturnType<typeof createJurisdictionConfig>;
+      registeredEntityId: string;
+      registeredBoardHash: string;
+      registrationBlock: number;
+      firstLatePageEnd: number;
+      lateTailHeight: number;
+      preparationMs: number;
+    } | null = null;
+
+    beforeAll(async () => {
+      const preparationStartedAt = performance.now();
+      managedAnvil = await startAnvil();
+      adapter = await createJAdapter({ mode: 'rpc', chainId: CHAIN_ID, rpcUrl: managedAnvil.rpcUrl, watchPollMs: 100 });
+      await adapter.deployStack();
+
+      const env = createEmptyEnv(RUNTIME_SEED);
+      env.scenarioMode = true;
+      env.state.timestamp = 1;
+      setScenarioStorageEnabled(env, false);
+      ensureSignerKeysFromSeed(env, ['2', '3'], RUNTIME_SEED);
+
+      const jurisdictionName = 'Backlog Straddle';
+      const jReplica = createJReplica(env, jurisdictionName, adapter.addresses.depository);
+      jReplica.chainId = CHAIN_ID;
+      jReplica.watcherConfirmationDepth = 0;
+      jReplica.rpcs = [managedAnvil.rpcUrl];
+      jReplica.contracts = { ...adapter.addresses };
+      attachLiveJAdapter(env, jurisdictionName, adapter);
+      const jurisdiction = createJurisdictionConfig(
+        jurisdictionName,
+        adapter.addresses.depository,
+        adapter.addresses.entityProvider,
+        managedAnvil.rpcUrl,
+        CHAIN_ID,
+      );
+
+      // An old board inside the first page must still be certified late.
+      const registeredEncodedBoard = singleSignerEncodedBoard(getSignerPrivateKey(env, SIGNER_ID));
+      const nextEntityNumber = await adapter.entityProvider.nextNumber();
+      const registerReceipt = await (
+        await adapter.entityProvider.registerNumberedEntitiesBatch([registeredEncodedBoard])
+      ).wait();
+      if (!registerReceipt || registerReceipt.status !== 1) {
+        throw new Error('J_WATCHER_STRADDLE_ENTITY_REGISTRATION_FAILED');
+      }
+
+      // Place an authentic but unrelated watched receipt beyond the first
+      // production page and one liveness interval, so its suffix is scanned
+      // rather than carried and the late history cannot fit one page.
+      const provider = adapter.provider as ethers.JsonRpcProvider;
+      const firstLatePageEnd =
+        getJHistoryRegistrationBaseHeight(jurisdiction) + BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL;
+      if (registerReceipt.blockNumber > firstLatePageEnd) {
+        throw new Error('J_WATCHER_STRADDLE_REGISTRATION_OUTSIDE_FIRST_PAGE');
+      }
+      const lateTailFloor = firstLatePageEnd + BLOCKCHAIN.JBLOCK_LIVENESS_INTERVAL;
+      await provider.send('anvil_mine', [ethers.toQuantity(lateTailFloor - (await provider.getBlockNumber()))]);
+      const [watchedToken] = await adapter.getTokenRegistry();
+      if (!watchedToken) throw new Error('J_WATCHER_STRADDLE_WATCHED_TOKEN_MISSING');
+      const watchedErc20 = new ethers.Contract(
+        watchedToken.address,
+        ['function transfer(address to, uint256 amount) returns (bool)'],
+        adapter.signer,
+      );
+      await (
+        await watchedErc20.getFunction('transfer')('0x000000000000000000000000000000000000dEaD', 1n)
+      ).wait();
+      const lateTailHeight = await provider.getBlockNumber();
+      if (lateTailHeight <= lateTailFloor) throw new Error('J_WATCHER_STRADDLE_TAIL_INSIDE_LIVENESS_INTERVAL');
+      prepared = {
+        env,
+        jurisdiction,
+        registeredEntityId: ethers.zeroPadValue(ethers.toBeHex(nextEntityNumber), 32).toLowerCase(),
+        registeredBoardHash: hashBoard(registeredEncodedBoard).toLowerCase(),
+        registrationBlock: registerReceipt.blockNumber,
+        firstLatePageEnd,
+        lateTailHeight,
+        preparationMs: performance.now() - preparationStartedAt,
+      };
+    }, PREPARATION_TIMEOUT_MS);
+
+    test(
+      'certifies only the first production page of a late history that straddles it',
+      async () => {
+        if (!prepared || !adapter) throw new Error('J_WATCHER_STRADDLE_NOT_PREPARED');
+        const { env, jurisdiction, firstLatePageEnd, lateTailHeight } = prepared;
+        const semanticStartedAt = performance.now();
+        adapter.startWatching(env);
+        const lateSignerAddress = new ethers.Wallet(ethers.hexlify(getSignerPrivateKey(env, LATE_SIGNER_ID))).address;
+        const lateEntityId = generateLazyEntityId([lateSignerAddress], 1n).toLowerCase();
+        // The registered numbered Entity is imported alongside: its
+        // registration fence keeps this watcher on the full authenticated
+        // history, which is the path whose late first frame is checked here
+        // (a lone fresh lazy import starts from the storage anchor instead).
+        // As the numbered intent does, the watcher first authenticates its
+        // EntityRegistered receipt, then the replica is imported.
+        await processJEvents(env);
+        await commitRuntimeInput(env, {
+          runtimeTxs: [
+            createTestEntityImportRuntimeTx(env, {
+              entityId: prepared.registeredEntityId,
+              signerId: SIGNER_ID,
+              data: {
+                isProposer: true,
+                config: {
+                  mode: 'proposer-based',
+                  threshold: 1n,
+                  validators: [SIGNER_ID],
+                  shares: { [SIGNER_ID]: 1n },
+                  jurisdiction: { ...jurisdiction, registrationBlock: prepared.registrationBlock },
+                },
+              },
+            }),
+            createTestEntityImportRuntimeTx(env, {
+              entityId: lateEntityId,
+              signerId: LATE_SIGNER_ID,
+              data: {
+                isProposer: true,
+                config: {
+                  mode: 'proposer-based',
+                  threshold: 1n,
+                  validators: [LATE_SIGNER_ID],
+                  shares: { [LATE_SIGNER_ID]: 1n },
+                  jurisdiction,
+                },
+              },
+            }),
+          ],
+          entityInputs: [],
+        });
+        await processJEvents(env);
+        console.log(
+          `J_WATCHER_STRADDLE_TIMING ${safeStringify({
+            preparationMs: prepared.preparationMs,
+            semanticMs: performance.now() - semanticStartedAt,
+            firstLatePageEnd,
+            lateTailHeight,
+          })}`,
+        );
+
+        const lateReplica = env.state.eReplicas.get(`${lateEntityId}:${LATE_SIGNER_ID}`);
+        if (!lateReplica) throw new Error('J_WATCHER_STRADDLE_LATE_REPLICA_MISSING');
+        // Authenticated scan reaches the unrelated tail, while the first late
+        // frame certifies exactly its first page and stays strictly before it.
+        expect(lateReplica.jHistory?.scannedThroughHeight).toBe(lateTailHeight);
+        expect(lateReplica.state.lastFinalizedJHeight).toBeLessThan(lateTailHeight);
+        expect(lateReplica.state.lastFinalizedJHeight).toBe(firstLatePageEnd);
+        expect(
+          resolveObserverCertifiedBoardHash(lateReplica.state, getCertifiedBoardNodeStore(env), prepared.registeredEntityId),
+        ).toBe(prepared.registeredBoardHash);
+        await adapter.stopWatchingAndWait();
+      },
+      60_000,
+    );
+  });
 });

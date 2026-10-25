@@ -104,8 +104,10 @@ function findEarliestOutstandingDebt(
 }
 
 export function applyDebtCreated(state: EntityState, event: Extract<JurisdictionEvent, { type: 'DebtCreated' }>): void {
-  const { debtor, creditor, tokenId, amount, debtIndex } = event.data;
+  const { debtor, creditor, tokenId, amount, debtIndex, debtSeq } = event.data;
   const debtAmount = BigInt(amount);
+  const createdSeq = BigInt(debtSeq);
+  if (createdSeq <= 0n) throw new Error(`DEBT_CREATED_SEQ_INVALID:${debtSeq}`);
   if (debtAmount <= 0n) throw new Error(`DEBT_CREATED_AMOUNT_INVALID:${amount}`);
   if (!Number.isSafeInteger(tokenId) || tokenId < 0) throw new Error(`DEBT_CREATED_TOKEN_INVALID:${tokenId}`);
   if (!Number.isSafeInteger(debtIndex) || debtIndex < 0) throw new Error(`DEBT_CREATED_INDEX_INVALID:${debtIndex}`);
@@ -122,6 +124,7 @@ export function applyDebtCreated(state: EntityState, event: Extract<Jurisdiction
   if (existing) {
     const exactDuplicate =
       existing.lastEventType === 'DebtCreated' &&
+      existing.createdSeq === createdSeq &&
       existing.createdAmount === debtAmount &&
       existing.remainingAmount === debtAmount &&
       existing.paidAmount === 0n;
@@ -143,6 +146,7 @@ export function applyDebtCreated(state: EntityState, event: Extract<Jurisdiction
     currentDebtIndex: debtIndex,
     status: 'open',
     createdAtBlock: block,
+    createdSeq,
     createdTxHash: txHash,
     lastUpdatedBlock: block,
     lastUpdatedTxHash: txHash,

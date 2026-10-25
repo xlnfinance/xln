@@ -6,6 +6,7 @@ import type {
 import type { RuntimeReplica } from '../../../../runtime/types';
 import type { DisputeFinalizationEvidence } from '../../../../types/jurisdiction-events';
 import type { TxDisputeProofBodyEvidence } from '../../rpc-public';
+import type { EntityProvenValues } from '../state-anchor/rpc-proven-values-root';
 import type {
   EventBatchCounter,
   PendingWatcherJBlockMap,
@@ -73,8 +74,22 @@ export type RpcWatcherSession = {
   pendingBlocks: PendingWatcherJBlockMap;
   pendingHistoryRange: PendingWatcherJHistoryRange | null;
   pendingHistoryWaitKey: string;
+  /** A fresh-import 'j_anchor' enqueued at this height; scanning waits until every replica committed it. */
+  pendingAnchor: { height: number; replicaKeys: string[] } | null;
   pendingRewindReplicaKeys: string[];
   lastAuthorityAuditKey: string;
+  /** Finalized board registries proven equal to EntityProvider storage: audit key -> storage registry root. */
+  boardAnchorAudits: Map<string, string>;
+  /** Finalized Entity reserves proven equal to Depository storage: audit key -> per-Entity reserve root, proven _tokens.length and entityNonces. */
+  reserveAnchorAudits: Map<string, { root: string; tokenCount: bigint; batchNonce: bigint }>;
+  /** Finalized Entity action nonces read from EntityProvider storage: audit key -> raw entityActionNonces. */
+  actionNonceAudits: Map<string, bigint>;
+  /** Finalized Entity open debts proven equal to Depository storage: audit key -> per-Entity storage debt root. */
+  debtAnchorAudits: Map<string, string>;
+  /** Open DebtEntry creations proven under their header, and creation hashes linked to a certified anchor. */
+  debtProvenanceAudits: Set<string>;
+  /** Process-local per-replica proven-values roots (fold == storage) of the last audit. Observation only. */
+  provenValues: Map<string, EntityProvenValues>;
   lastObservedHead: number;
   lastCanonicalAuditAtMs: number;
   transientFailures: number;
@@ -102,4 +117,6 @@ export type RpcWatcherMethods = {
   stopWatching(): void;
   stopWatchingAndWait(): Promise<void>;
   getWatcherScanProgress(): RpcWatcherScanProgress;
+  /** Per-Entity proven-values roots (fold == storage) of the last canonical audit. Observation only. */
+  getWatcherProvenValues(): EntityProvenValues[];
 };

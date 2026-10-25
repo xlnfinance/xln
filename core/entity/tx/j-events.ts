@@ -1087,6 +1087,13 @@ const retireObservedCounterDisputeOperations = (
 const applyCounterDisputeRegisteredJEvent = (context: FinalizedJEventContext): void => {
   const data = context.event.data as CounterDisputeRegisteredEventData;
   const resolved = resolveDisputeAccountContext(context.newState, data.sender, data.counterentity);
+  // As DisputeStarted and the Rust kernel (dispute_account): an Entity with no
+  // Account for the pair, e.g. a mnemonic re-imported without a checkpoint, has
+  // no dispute state to select into. An Account without activeDispute still halts.
+  if (!resolved.account) {
+    jEventLog.warn('counter_dispute.account_missing', { account: shortId(resolved.candidateCounterpartyId), entity: shortId(resolved.entityIdNorm) });
+    return;
+  }
   const nonce = requireBoundaryUint(data.nonce, 'COUNTER_DISPUTE_NONCE_INVALID');
   const proofbodyHash = String(data.proofbodyHash || '').toLowerCase();
   const selected = selectObservedCounterDispute(

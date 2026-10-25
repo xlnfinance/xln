@@ -66,10 +66,13 @@ pub(crate) fn validate_event(event: &JurisdictionEvent) -> Result<(), StateError
         JurisdictionEvent::AccountSettled(value) => validate_account_settled(value),
         JurisdictionEvent::FoundationBootstrapped(_) => Ok(()),
         JurisdictionEvent::EntityRegistered(_) => Ok(()),
-        JurisdictionEvent::BoardActivated(value) => require_positive(
-            &value.previous_board_valid_until,
-            "BOARD_PREVIOUS_VALID_UNTIL",
-        ),
+        JurisdictionEvent::BoardActivated(value) => {
+            require_positive(
+                &value.previous_board_valid_until,
+                "BOARD_PREVIOUS_VALID_UNTIL",
+            )?;
+            require_positive(&value.board_epoch, "BOARD_EPOCH")
+        }
         JurisdictionEvent::ReserveUpdated(value) => {
             validate_entity(&value.entity)?;
             validate_i64(value.token_id, "RESERVE_TOKEN_ID")

@@ -43,8 +43,11 @@ const boardActivated = defineEventNormalizer('BoardActivated', data => {
     previousBoardHash: normalizeBytes32,
     newBoardHash: normalizeBytes32,
     previousBoardValidUntil: normalizeBigNumberish,
+    boardEpoch: normalizeBigNumberish,
   });
-  return decoded && BigInt(decoded.previousBoardValidUntil) > 0n ? decoded : null;
+  return decoded && BigInt(decoded.previousBoardValidUntil) > 0n && BigInt(decoded.boardEpoch) > 0n
+    ? decoded
+    : null;
 });
 
 const reserveUpdated = defineEventNormalizer('ReserveUpdated', data =>
@@ -172,6 +175,7 @@ const debtCreated = defineEventNormalizer('DebtCreated', data =>
     tokenId: normalizeInt,
     amount: normalizeBigNumberish,
     debtIndex: normalizeInt,
+    debtSeq: normalizeBigNumberish,
   }));
 
 const debtEnforced = defineEventNormalizer('DebtEnforced', data =>

@@ -12,6 +12,8 @@ const HISTORY_LEAF_DOMAIN_TEXT: &str = "xln:j-history-event-block:v1";
 const HISTORY_FOLD_DOMAIN_TEXT: &str = "xln:j-history-fold:v1";
 const HISTORY_RANGE_DOMAIN_TEXT: &str = "xln:j-history-range:v1";
 const HISTORY_RANGE_BODY_DOMAIN_TEXT: &str = "xln:j-history-range-body:v1";
+const HISTORY_ANCHOR_DOMAIN_TEXT: &str = "xln:j-history-storage-anchor:v1";
+const HISTORY_ANCHOR_CLAIM_DOMAIN_TEXT: &str = "xln:j-history-anchor-claim:v1";
 
 pub const EMPTY_J_HISTORY_ROOT: [u8; 32] = [
     0x11, 0xf1, 0x89, 0xb4, 0xdb, 0x64, 0x0a, 0x8b, 0xcb, 0xdf, 0x48, 0xda, 0x58, 0xbc, 0xa9, 0xfc,
@@ -204,6 +206,61 @@ pub fn j_event_range_digest(
         text_hash(&render_hex(tip_block_hash)),
         *event_history_root,
         *range_hash,
+    ]))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JHistoryStorageAnchor {
+    pub jurisdiction_ref: String,
+    pub anchor_height: u64,
+    pub anchor_block_hash: [u8; 32],
+    /// Must come from a header whose hash was recomputed.
+    pub state_root: [u8; 32],
+    /// Root over every storage value the Entity loads at the anchor.
+    pub proven_values_root: [u8; 32],
+}
+
+/// Base root for an Entity whose J state is loaded from storage proven at one
+/// authenticated block; later blocks fold onto it with `fold_j_history_root`.
+pub fn j_history_anchor_root(
+    anchor: &JHistoryStorageAnchor,
+) -> Result<[u8; 32], EntityKernelError> {
+    if anchor.anchor_height == 0 {
+        return Err(invalid("J_HISTORY_INVALID_ANCHOR_HEIGHT"));
+    }
+    if anchor.jurisdiction_ref.trim().is_empty() {
+        return Err(invalid("J_HISTORY_INVALID_ANCHOR_JURISDICTION"));
+    }
+    Ok(keccak_words(&[
+        text_hash(HISTORY_ANCHOR_DOMAIN_TEXT),
+        text_hash(&anchor.jurisdiction_ref),
+        word(anchor.anchor_height),
+        anchor.anchor_block_hash,
+        anchor.state_root,
+        anchor.proven_values_root,
+    ]))
+}
+
+/// Signed digest of an anchor-start claim. A range claim must carry one header
+/// per block, so the anchor is its own claim kind bound to Entity, signer and
+/// the base it replaces.
+pub fn j_history_anchor_claim_digest(
+    entity_id: &str,
+    signer_id: &str,
+    base_height: u64,
+    anchor: &JHistoryStorageAnchor,
+) -> Result<[u8; 32], EntityKernelError> {
+    if anchor.anchor_height <= base_height {
+        return Err(invalid("J_HISTORY_ANCHOR_NOT_AFTER_BASE"));
+    }
+    Ok(keccak_words(&[
+        text_hash(HISTORY_ANCHOR_CLAIM_DOMAIN_TEXT),
+        text_hash(entity_id),
+        text_hash(&anchor.jurisdiction_ref),
+        text_hash(signer_id),
+        word(base_height),
+        word(anchor.anchor_height),
+        j_history_anchor_root(anchor)?,
     ]))
 }
 

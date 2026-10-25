@@ -83,6 +83,7 @@ const activation = (entityId: string, logIndex = 2): Extract<JurisdictionEvent, 
     previousBoardHash: digest(46),
     newBoardHash: digest(47),
     previousBoardValidUntil: '1700604800',
+    boardEpoch: '1',
   },
 });
 

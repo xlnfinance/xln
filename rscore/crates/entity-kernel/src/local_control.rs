@@ -2779,6 +2779,7 @@ mod tests {
                 created_debt_index: 1,
                 current_debt_index: 1,
                 created_at_block: 1,
+                created_seq: BigInt::from(1),
                 created_tx_hash: format!("0x{}", "aa".repeat(32)),
                 last_updated_block: 1,
                 last_updated_tx_hash: format!("0x{}", "aa".repeat(32)),

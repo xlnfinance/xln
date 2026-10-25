@@ -20,6 +20,8 @@ const ALLOWED_RPC_METHODS = new Set([
   'eth_getCode',
   'eth_getLogs',
   'eth_getProof',
+  // Raw bytes are the transactionsRoot leaves the watcher proves debt creation against.
+  'eth_getRawTransactionByBlockHashAndIndex',
   'eth_getStorageAt',
   'eth_getTransactionByBlockHashAndIndex',
   'eth_getTransactionByBlockNumberAndIndex',

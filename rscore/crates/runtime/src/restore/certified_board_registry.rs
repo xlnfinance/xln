@@ -38,10 +38,6 @@ struct CertifiedBoardRecord {
     board_epoch: u64,
     previous_board_hash: [u8; 32],
     previous_board_valid_until: u64,
-    activated_at_j_height: u64,
-    log_index: u32,
-    block_hash: [u8; 32],
-    transaction_hash: [u8; 32],
     source: u8,
 }
 
@@ -121,10 +117,6 @@ fn safe_u64(value: &Value, path: &str) -> Result<u64, CertifiedBoardRegistryRest
         .ok_or_else(|| invalid(format!("SAFE_INTEGER:{path}")))
 }
 
-fn safe_u32(value: &Value, path: &str) -> Result<u32, CertifiedBoardRegistryRestoreError> {
-    u32::try_from(safe_u64(value, path)?).map_err(|_| invalid(format!("U32:{path}")))
-}
-
 fn domain(label: &[u8]) -> [u8; 32] {
     Keccak256::digest(label).into()
 }
@@ -149,17 +141,13 @@ fn certified_board_entity_key(stack_key: [u8; 32], entity_id: [u8; 32]) -> [u8; 
 
 fn record_hash(record: &CertifiedBoardRecord) -> [u8; 32] {
     hash_slots(&[
-        domain(b"xln.certified-board.record.v1"),
+        domain(b"xln.certified-board.record.v2"),
         record.stack_key,
         record.entity_id,
         record.board_hash,
         uint_slot(record.board_epoch),
         record.previous_board_hash,
         uint_slot(record.previous_board_valid_until),
-        uint_slot(record.activated_at_j_height),
-        uint_slot(u64::from(record.log_index)),
-        record.block_hash,
-        record.transaction_hash,
         uint_slot(u64::from(record.source)),
     ])
 }
@@ -253,10 +241,6 @@ fn parse_record(value: &Value) -> Result<CertifiedBoardRecord, CertifiedBoardReg
             "boardEpoch",
             "previousBoardHash",
             "previousBoardValidUntil",
-            "activatedAtJHeight",
-            "logIndex",
-            "blockHash",
-            "transactionHash",
             "source",
         ],
         "node.record",
@@ -267,11 +251,6 @@ fn parse_record(value: &Value) -> Result<CertifiedBoardRecord, CertifiedBoardReg
         Some("BoardActivated") => 3,
         _ => return Err(invalid("RECORD_SOURCE")),
     };
-    let activated_at_j_height =
-        safe_u64(&record["activatedAtJHeight"], "record.activatedAtJHeight")?;
-    if activated_at_j_height == 0 {
-        return Err(invalid("RECORD_ACTIVATION_HEIGHT"));
-    }
     let record = CertifiedBoardRecord {
         stack_key: word(&record["stackKey"], "record.stackKey")?,
         entity_id: word(&record["entityId"], "record.entityId")?,
@@ -282,10 +261,6 @@ fn parse_record(value: &Value) -> Result<CertifiedBoardRecord, CertifiedBoardReg
             &record["previousBoardValidUntil"],
             "record.previousBoardValidUntil",
         )?,
-        activated_at_j_height,
-        log_index: safe_u32(&record["logIndex"], "record.logIndex")?,
-        block_hash: word(&record["blockHash"], "record.blockHash")?,
-        transaction_hash: word(&record["transactionHash"], "record.transactionHash")?,
         source,
     };
     let rotation = record.source == 3;
@@ -433,10 +408,6 @@ impl Walker<'_> {
                     board_epoch: record.board_epoch,
                     previous_board_hash: record.previous_board_hash,
                     previous_board_valid_until: record.previous_board_valid_until,
-                    activated_at_j_height: record.activated_at_j_height,
-                    log_index: record.log_index,
-                    block_hash: record.block_hash,
-                    transaction_hash: record.transaction_hash,
                     source,
                 });
                 key
@@ -560,10 +531,6 @@ mod tests {
             "boardEpoch": 7,
             "previousBoardHash": word_text(0x44),
             "previousBoardValidUntil": 1_700_604_800_u64,
-            "activatedAtJHeight": 9,
-            "logIndex": 3,
-            "blockHash": word_text(0x55),
-            "transactionHash": word_text(0x66),
             "source": "BoardActivated"
         })
     }
@@ -626,7 +593,7 @@ mod tests {
         );
         assert_eq!(
             hex(&root),
-            "20b786c1f8ecdae119ddcc7e840d4c96b25a3dc195d3eb106100aa91807eab67"
+            "f74a3694c314b2513761da3cea718295b8bda51f13f89b588a6b529c87bce485"
         );
         let records = hydrate_certified_board_state(&BTreeMap::from([(key, value)]), &core(root))
             .expect("restored Entity records");

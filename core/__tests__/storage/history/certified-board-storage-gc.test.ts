@@ -191,10 +191,6 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
         boardEpoch: epoch,
         previousBoardHash: `0x${Math.max(0, epoch - 1).toString(16).padStart(64, '0')}`,
         previousBoardValidUntil: 0,
-        activatedAtJHeight: epoch,
-        logIndex: 0,
-        blockHash: `0x${(epoch + 10).toString(16).padStart(64, '0')}`,
-        transactionHash: `0x${(epoch + 20).toString(16).padStart(64, '0')}`,
         source: epoch === 1 ? 'EntityRegistered' : 'BoardActivated',
       };
       const updated = putCertifiedBoardRecord(getCertifiedBoardNodeStore(env), previous.boardRegistryRoot, record);

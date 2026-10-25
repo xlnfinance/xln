@@ -18,6 +18,7 @@ import {
   type SwapCancelRequestEvent,
 } from './handlers/account';
 import { applyJEvent } from './j-events';
+import { applyJAnchor } from './j-anchor/j-anchor-finality';
 import { FailureDispositionError } from '../../protocol/errors/failure-taxonomy';
 import { createStructuredLogger } from '../../support/logger';
 import { handleR2E } from './handlers/j-batch/r2e';
@@ -213,6 +214,12 @@ const handleJEventEntityTx: EntityTxDispatcher = async (env, entityState, entity
   };
 };
 
+const handleJAnchorEntityTx: EntityTxDispatcher = (env, entityState, entityTx, options) => {
+  if (entityTx.type !== 'j_anchor') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
+  const newState = applyJAnchor(entityState, entityTx.data, env, options?.mutableFrameState);
+  return { newState, outputs: [] };
+};
+
 const handleAccountInputEntityTx: EntityTxDispatcher = async (env, entityState, entityTx, options) => {
   if (entityTx.type !== 'accountInput') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
   const result = await applyAccountInputToEntity(
@@ -318,6 +325,7 @@ const entityTxDispatchers = {
       options?.mutableFrameState,
     ),
   j_event: handleJEventEntityTx,
+  j_anchor: handleJAnchorEntityTx,
   boardHandover: (env, state, tx, options) =>
     handleBoardHandoverEntityTx(
       state,

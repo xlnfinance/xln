@@ -82,6 +82,8 @@ pub struct BoardActivatedEvent {
     pub previous_board_hash: [u8; 32],
     pub new_board_hash: [u8; 32],
     pub previous_board_valid_until: BigInt,
+    /// EntityProvider boardEpochs[entityId] after this activation (always >= 1).
+    pub board_epoch: BigInt,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -184,6 +186,7 @@ pub struct DebtCreatedEvent {
     pub token_id: i64,
     pub amount: BigInt,
     pub debt_index: i64,
+    pub debt_seq: BigInt,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

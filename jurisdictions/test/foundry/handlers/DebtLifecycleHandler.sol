@@ -76,6 +76,8 @@ contract DebtLifecycleHandler is CommonBase, StdCheats, StdUtils {
   struct GhostDebt {
     bytes32 creditor;
     uint256 amount;
+    uint64 createdBlock;
+    uint192 createdSeq;
   }
   struct DebtQueue {
     GhostDebt[] queue;
@@ -102,6 +104,7 @@ contract DebtLifecycleHandler is CommonBase, StdCheats, StdUtils {
   uint256 public disputesStarted;
   uint256 public disputesFinalized;
   uint256 public debtsCreated; // count of _addDebt bookings
+  uint256 public ghostDebtSeq; // expected Depository.debtSeq (one per booking)
   uint256 public debtsPaidOff; // finalize-time coverage of existing debt
   uint256 public forgivenessSettlements; // accepted
   uint256 public e2GuardedForgivenessRejections;
@@ -243,6 +246,25 @@ contract DebtLifecycleHandler is CommonBase, StdCheats, StdUtils {
     for (uint256 ti = 0; ti < 2; ti++) count += _ghostActiveCount(a, TOKENS[ti]);
   }
 
+  /// @dev Depository.inActiveDebts: live entries owed TO creditor `c` across
+  ///      every debtor queue and token.
+  function _ghostCreditorCount(uint256 c) internal view returns (uint256 count) {
+    for (uint256 a = 0; a < ACTORS; a++) {
+      for (uint256 ti = 0; ti < 2; ti++) {
+        GhostDebt[] memory q = debtGhosts[a][TOKENS[ti]].queue;
+        for (uint256 i = 0; i < q.length; i++) {
+          if (q[i].amount != 0 && q[i].creditor == entityOf[c]) count++;
+        }
+      }
+    }
+  }
+
+  function _creditorCountDesyncs() internal view returns (uint256 desyncs) {
+    for (uint256 c = 0; c < ACTORS; c++) {
+      if (dep.inActiveDebts(entityOf[c]) != _ghostCreditorCount(c)) desyncs++;
+    }
+  }
+
   /// @dev Exact simulation of Account.enforceDebts (Account.sol:160-229) on
   ///      the ghost queue, given the debtor's real reserve at call time.
   ///      Returns the total paid. Mirrors: zero-amount skip, full-reserve
@@ -319,14 +341,22 @@ contract DebtLifecycleHandler is CommonBase, StdCheats, StdUtils {
     uint256 len = g.queue.length;
     if (_boundedOutstanding(entityOf[a], t) != _ghostOutstanding(a, t)) bookDesyncs++;
     if (dep.activeDebts(entityOf[a]) != _ghostActiveCountAll(a)) bookDesyncs++;
+    bookDesyncs += _creditorCountDesyncs();
+    if (dep.debtSeq() != ghostDebtSeq) bookDesyncs++;
     if (len == 0) {
       if (dep._debtIndex(entityOf[a], t) != 0) bookDesyncs++;
       return;
     }
     if (dep._debtIndex(entityOf[a], t) != g.cursor) bookDesyncs++;
     for (uint256 i = 0; i < len; i++) {
-      try dep._debts(entityOf[a], t, i) returns (bytes32 creditor, Uint512 memory amount) {
+      try dep._debts(entityOf[a], t, i) returns (
+        bytes32 creditor,
+        Uint512 memory amount,
+        uint64 createdBlock,
+        uint192 createdSeq
+      ) {
         if (creditor != g.queue[i].creditor || amount.high != 0 || amount.low != g.queue[i].amount) bookDesyncs++;
+        if (createdBlock != g.queue[i].createdBlock || createdSeq != g.queue[i].createdSeq) bookDesyncs++;
       } catch {
         bookDesyncs++; // real queue shorter than the ghost
       }
@@ -361,9 +391,14 @@ contract DebtLifecycleHandler is CommonBase, StdCheats, StdUtils {
     DebtQueue storage g = debtGhosts[a][t];
     delete g.queue;
     for (uint256 i = 0; i < 256; i++) {
-      try dep._debts(entityOf[a], t, i) returns (bytes32 creditor, Uint512 memory amount) {
+      try dep._debts(entityOf[a], t, i) returns (
+        bytes32 creditor,
+        Uint512 memory amount,
+        uint64 createdBlock,
+        uint192 createdSeq
+      ) {
         require(amount.high == 0, "queue exceeds bounded ghost");
-        g.queue.push(GhostDebt({ creditor: creditor, amount: amount.low }));
+        g.queue.push(GhostDebt({ creditor: creditor, amount: amount.low, createdBlock: createdBlock, createdSeq: createdSeq }));
       } catch {
         break;
       }
@@ -374,7 +409,7 @@ contract DebtLifecycleHandler is CommonBase, StdCheats, StdUtils {
   /// @dev Live head exists at the real cursor for (entity, token).
   function _headAlive(bytes32 e, uint256 t) internal view returns (bool alive) {
     uint256 cursor = dep._debtIndex(e, t);
-    try dep._debts(e, t, cursor) returns (bytes32, Uint512 memory amt) {
+    try dep._debts(e, t, cursor) returns (bytes32, Uint512 memory amt, uint64, uint192) {
       if (!WideMath.isZero(amt)) alive = true;
     } catch {}
   }
@@ -386,7 +421,7 @@ contract DebtLifecycleHandler is CommonBase, StdCheats, StdUtils {
     returns (bool forgivable, uint256 amount)
   {
     uint256 cursor = dep._debtIndex(debtor, t);
-    try dep._debts(debtor, t, cursor) returns (bytes32 headCreditor, Uint512 memory amt) {
+    try dep._debts(debtor, t, cursor) returns (bytes32 headCreditor, Uint512 memory amt, uint64, uint192) {
       if (!WideMath.isZero(amt) && headCreditor == creditor) {
         require(amt.high == 0, "head exceeds bounded ghost");
         forgivable = true;
@@ -693,7 +728,12 @@ contract DebtLifecycleHandler is CommonBase, StdCheats, StdUtils {
         }
         if (magnitude > 0) {
           debtGhosts[debtorActor][t].queue.push(
-            GhostDebt({ creditor: entityOf[creditorActor], amount: magnitude })
+            GhostDebt({
+              creditor: entityOf[creditorActor],
+              amount: magnitude,
+              createdBlock: uint64(block.number),
+              createdSeq: uint192(++ghostDebtSeq)
+            })
           );
           ghostDebtCreated += magnitude;
           ghostLiveDebt[t] += magnitude;
@@ -837,6 +877,8 @@ contract DebtLifecycleHandler is CommonBase, StdCheats, StdUtils {
 
   /// @dev Full ghost-vs-real comparison across every actor × token.
   function checkDebtBooks() external view returns (uint256 violations) {
+    violations = _creditorCountDesyncs();
+    if (dep.debtSeq() != ghostDebtSeq) violations++;
     for (uint256 a = 0; a < ACTORS; a++) {
       for (uint256 ti = 0; ti < 2; ti++) {
         uint256 t = TOKENS[ti];
@@ -850,8 +892,16 @@ contract DebtLifecycleHandler is CommonBase, StdCheats, StdUtils {
         }
         if (dep._debtIndex(entityOf[a], t) != g.cursor) violations++;
         for (uint256 i = 0; i < len; i++) {
-          try dep._debts(entityOf[a], t, i) returns (bytes32 creditor, Uint512 memory amount) {
+          try dep._debts(entityOf[a], t, i) returns (
+            bytes32 creditor,
+            Uint512 memory amount,
+            uint64 createdBlock,
+            uint192 createdSeq
+          ) {
             if (creditor != g.queue[i].creditor || amount.high != 0 || amount.low != g.queue[i].amount) violations++;
+            // Generation: a reset queue reuses index 0, so each live slot must
+            // carry the block and global sequence of the booking it mirrors.
+            if (createdBlock != g.queue[i].createdBlock || createdSeq != g.queue[i].createdSeq) violations++;
           } catch {
             violations++;
           }

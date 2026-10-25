@@ -104,14 +104,14 @@ contract DebtChunkingTest is XlnFixture {
 
   function _queueLength(bytes32 e) internal view returns (uint256 len) {
     for (uint256 i = 0; i < 256; i++) {
-      try dep._debts(e, T, i) returns (bytes32, Uint512 memory) { len = i + 1; } catch { break; }
+      try dep._debts(e, T, i) returns (bytes32, Uint512 memory, uint64, uint192) { len = i + 1; } catch { break; }
     }
   }
 
   function _liveDebt(bytes32 e) internal view returns (Uint768 memory sum, uint256 count) {
     uint256 len = _queueLength(e);
     for (uint256 i = 0; i < len; i++) {
-      (, Uint512 memory amount) = dep._debts(e, T, i);
+      (, Uint512 memory amount,,) = dep._debts(e, T, i);
       if (!WideMath.isZero(amount)) { sum = WideMath.add(sum, WideMath.expand(amount)); count++; }
     }
   }
@@ -124,7 +124,7 @@ contract DebtChunkingTest is XlnFixture {
     uint256 cursor = dep._debtIndex(debtor, T);
     uint256 len = _queueLength(debtor);
     for (uint256 i = 0; i < cursor && i < len; i++) {
-      (, Uint512 memory amount) = dep._debts(debtor, T, i);
+      (, Uint512 memory amount,,) = dep._debts(debtor, T, i);
       assertTrue(WideMath.isZero(amount), string.concat(tag, ": cursor skipped an unpaid debt"));
     }
   }
@@ -179,7 +179,7 @@ contract DebtChunkingTest is XlnFixture {
     _assertBoundedOutstanding(5 * DEBT_SIZE - (2 * DEBT_SIZE + DEBT_SIZE / 2), "partial outstanding");
     assertEq(dep.activeDebts(debtor), 3, "partially paid entry must stay active");
     assertEq(dep._debtIndex(debtor, T), 2, "cursor must rest on the partially paid entry");
-    (, Uint512 memory remainder) = dep._debts(debtor, T, 2);
+    (, Uint512 memory remainder,,) = dep._debts(debtor, T, 2);
     assertEq(remainder.high, 0, "partial remainder high");
     assertEq(remainder.low, DEBT_SIZE / 2, "partial remainder wrong");
   }
@@ -244,7 +244,7 @@ contract DebtChunkingTest is XlnFixture {
   function test_signedDebtCrossesUint256WordOnPartialRepayment() public {
     _mintDebt(Int512(-1, 0));
     _assertOutstanding(Uint768(0, 1, 0), "wide debt created");
-    (bytes32 owner, Uint512 memory amount) = dep._debts(debtor, T, 0);
+    (bytes32 owner, Uint512 memory amount,,) = dep._debts(debtor, T, 0);
     assertEq(owner, creditor, "wrong signed creditor");
     assertEq(amount.high, 1, "debt high");
     assertEq(amount.low, 0, "debt low");
@@ -253,7 +253,7 @@ contract DebtChunkingTest is XlnFixture {
     dep.enforceDebts(debtor, T, 1);
     _assertBooksAgree("after debt-word borrow");
     _assertBoundedOutstanding(type(uint256).max, "exact remaining debt");
-    (, amount) = dep._debts(debtor, T, 0);
+    (, amount,,) = dep._debts(debtor, T, 0);
     assertEq(amount.high, 0, "borrow did not clear high word");
     assertEq(amount.low, type(uint256).max, "borrow remainder");
     assertEq(dep.activeDebts(debtor), 1, "partial debt must remain active");
@@ -275,8 +275,8 @@ contract DebtChunkingTest is XlnFixture {
     dep.enforceDebts(debtor, T, 1);
     _assertBooksAgree("after outstanding borrow");
     _assertOutstanding(Uint768(0, type(uint256).max, type(uint256).max), "2^512 minus one");
-    (, Uint512 memory head) = dep._debts(debtor, T, 0);
-    (, Uint512 memory tail) = dep._debts(debtor, T, 1);
+    (, Uint512 memory head,,) = dep._debts(debtor, T, 0);
+    (, Uint512 memory tail,,) = dep._debts(debtor, T, 1);
     assertEq(head.high, uint256(type(int256).max), "head borrowed high");
     assertEq(head.low, type(uint256).max, "head borrowed low");
     assertEq(tail.high, uint256(1) << 255, "tail high unchanged");

@@ -328,6 +328,7 @@ fn event_abi(value: &Value, path: &str) -> Result<AbiValue, JWatcherError> {
             b("previousBoardHash")?,
             b("newBoardHash")?,
             big("previousBoardValidUntil")?,
+            big("boardEpoch")?,
         ]),
         "ReserveUpdated" => row.extend([t("entity")?, n("tokenId")?, big("newBalance")?]),
         "ExternalWalletSnapshot" => {
@@ -397,6 +398,7 @@ fn event_abi(value: &Value, path: &str) -> Result<AbiValue, JWatcherError> {
             n("tokenId")?,
             big("amount")?,
             n("debtIndex")?,
+            big("debtSeq")?,
         ]),
         "DisputeStarted" => row.extend([
             t("sender")?,

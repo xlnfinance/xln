@@ -70,6 +70,14 @@ const CASES = [
   { type: 'htlcPayment', data: { targetEntityId: B, tokenId: 1, amount: 5n, maxSenderDebit: 6n, route: [A, B], description: 'htlc', deliveryMode: 'instant', startedAtMs: 100, hashlock: H } },
   { type: 'initOrderbookExt', data: { name: 'book', spreadDistribution: { makerBps: 1, takerBps: 2, hubBps: 3, makerReferrerBps: 4, takerReferrerBps: 5 }, referenceTokenId: 1, usdQuoteAuthorityEntityId: A, minTradeSize: 1n, supportedPairs: ['1/2'] } },
   { type: 'j_abort_sent_batch', data: { reason: 'abort', requeueToCurrent: true } },
+  { type: 'j_anchor', data: {
+    from: 'owner', jurisdictionRef: 'j1', baseHeight: 10, anchorHeight: 20, anchorBlockHash: H, stateRoot: H2,
+    provenValuesRoot: H, signature: SIGNATURE,
+    values: {
+      tokenCount: 2n, batchNonce: 3n, actionNonce: null, reserves: new Map([[1, 5n]]),
+      boardRecords: [{ stackKey: 'j1', entityId: A, boardHash: H, boardEpoch: 1, previousBoardHash: H2, previousBoardValidUntil: 0, source: 'BoardActivated' }],
+    },
+  } },
   { type: 'j_broadcast', data: { hankoSignature: SIGNATURE, feeOverrides: { gasBumpBps: 100, maxFeePerGasWei: '2', maxPriorityFeePerGasWei: '1' } } },
   { type: 'j_clear_batch', data: { reason: 'clear' } },
   { type: 'j_event', data: { from: SIGNER, jurisdictionRef: 'j1', baseHeight: 0, scannedThroughHeight: 0, tipBlockHash: H, eventHistoryRoot: H, rangeHash: H2, blocks: [], signature: SIGNATURE, observedAt: 100 } },
@@ -127,10 +135,10 @@ if (Bun.env['RSCORE_GENERATE_ENTITY_TX_WIRE'] === '1') {
     await Bun.write(VECTORS, `${safeStringify(rows, 2)}\n`);
   });
 } else describe('EntityTx wire', () => {
-  test('production TypeScript admission covers exactly the canonical 66-kind catalog', () => {
+  test('production TypeScript admission covers exactly the canonical 67-kind catalog', () => {
     expect(validatedCases().map(tx => tx.type)).toEqual([...ENTITY_TX_TYPES]);
     expect(vectors().map(row => row.name)).toEqual([...ENTITY_TX_TYPES]);
-    expect(new Set(ENTITY_TX_TYPES).size).toBe(66);
+    expect(new Set(ENTITY_TX_TYPES).size).toBe(67);
   });
   test('TypeScript writes the reviewed shared bytes', () => {
     const recorded = new Map(vectors().map(row => [row.name, row.bytes]));

@@ -511,7 +511,7 @@ fn collect_single_event(
             })
         }
         ContractEventKind::DebtCreated => {
-            let words = decode_static_words(log, 3, 3)?;
+            let words = decode_static_words(log, 3, 4)?;
             let debtor = entity_word_value(&words.topics[0], "debtor")?;
             let creditor = entity_word_value(&words.topics[1], "creditor")?;
             if !local_entity(config, &debtor) && !local_entity(config, &creditor) {
@@ -524,6 +524,7 @@ fn collect_single_event(
                 token_id: i64_word(&words.topics[2], "debtTokenId")?,
                 amount: uint512(&words.data[0], &words.data[1]),
                 debt_index: i64_word(&words.data[2], "debtIndex")?,
+                debt_seq: super::abi::bigint(&words.data[3]),
             })
         }
         ContractEventKind::DebtEnforced => {
@@ -596,10 +597,14 @@ fn collect_single_event(
             })
         }
         ContractEventKind::BoardActivated => {
-            let words = decode_static_words(log, 1, 3)?;
+            let words = decode_static_words(log, 1, 4)?;
             let until = bigint(&words.data[2]);
             if until <= 0.into() {
                 return Err(JWatcherError::EventAbi("previousBoardValidUntil"));
+            }
+            let board_epoch = bigint(&words.data[3]);
+            if board_epoch <= 0.into() {
+                return Err(JWatcherError::EventAbi("boardEpoch"));
             }
             JurisdictionEvent::BoardActivated(BoardActivatedEvent {
                 metadata,
@@ -607,6 +612,7 @@ fn collect_single_event(
                 previous_board_hash: words.data[0],
                 new_board_hash: words.data[1],
                 previous_board_valid_until: until,
+                board_epoch,
             })
         }
         ContractEventKind::EntityProviderActionExecuted => {

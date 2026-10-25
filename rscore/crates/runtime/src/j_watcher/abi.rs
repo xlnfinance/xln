@@ -11,7 +11,7 @@ pub(crate) const SECRET_REVEALED_TOPIC: &str =
 pub(crate) const COUNTER_DISPUTE_REGISTERED_TOPIC: &str =
     "0xdf1d21d89097ae482123e351724eb4c07eb3b9319a0e116643d815958aea1609";
 pub(crate) const DEBT_CREATED_TOPIC: &str =
-    "0xf77919d8ab0bbcbc7feb0269986072624ad50811e07c7a87aa97e234ad7717db";
+    "0x56978d6bc8167a25c988d2ebd75ebb3446092e2f58bde00d65917f25aee71b41";
 pub(crate) const DEBT_ENFORCED_TOPIC: &str =
     "0xe01b32b8e28f8e86247102729966a946377fa0bdf0e5f26515c2784e3309ab05";
 pub(crate) const DEBT_FORGIVEN_TOPIC: &str =
@@ -29,7 +29,7 @@ pub(crate) const FOUNDATION_BOOTSTRAPPED_TOPIC: &str =
 pub(crate) const ENTITY_REGISTERED_TOPIC: &str =
     "0xc9234525033c1ac098f69b4dc192ce416b13f69ec0b6de127022496be73337fd";
 pub(crate) const BOARD_ACTIVATED_TOPIC: &str =
-    "0x87d65572891e5985b42b8cf8b7ab8a9d757f3e8bb56af8226e44066a6c7f6b80";
+    "0x1a569e26c489359ec4ca9e3bb9c3ef2a293f6fa8a6f414bc2ac9ba93f1dce1cd";
 pub(crate) const ENTITY_PROVIDER_ACTION_EXECUTED_TOPIC: &str =
     "0x4786dc81db7a17df666525a369e46949b73ca65024d9a16dfcc2263b013ac583";
 pub(crate) const ENTITY_PROVIDER_ACTION_CANCELLED_TOPIC: &str =
@@ -300,7 +300,7 @@ mod catalog_tests {
                 COUNTER_DISPUTE_REGISTERED_TOPIC,
             ),
             (
-                "DebtCreated(bytes32,bytes32,uint256,(uint256,uint256),uint256)",
+                "DebtCreated(bytes32,bytes32,uint256,(uint256,uint256),uint256,uint256)",
                 DEBT_CREATED_TOPIC,
             ),
             (
@@ -336,7 +336,7 @@ mod catalog_tests {
                 ENTITY_REGISTERED_TOPIC,
             ),
             (
-                "BoardActivated(bytes32,bytes32,bytes32,uint256)",
+                "BoardActivated(bytes32,bytes32,bytes32,uint256,uint256)",
                 BOARD_ACTIVATED_TOPIC,
             ),
             (
@@ -626,6 +626,7 @@ mod money_event_tests {
             "0xae767eeb0c57abd46e2e0b422895ba3b89372fbd0510a58f00d996faf66f027d",
             "0x1ffe8e6348fe244a8988797c02b57999821149e7b25c9f93a85c77819efdde67",
             "0x0971ac81b80f99fe0089c3fbe4af4fa1148f2ce78bc6345e76b05be73500de1f",
+            "0xf77919d8ab0bbcbc7feb0269986072624ad50811e07c7a87aa97e234ad7717db",
         ] {
             let event = log(&[topic], "0x");
             assert!(
@@ -642,23 +643,28 @@ mod money_event_tests {
     fn debt_created_preserves_uint512_magnitude_and_index() {
         let event = log(
             &[
-                "0xf77919d8ab0bbcbc7feb0269986072624ad50811e07c7a87aa97e234ad7717db",
+                "0x56978d6bc8167a25c988d2ebd75ebb3446092e2f58bde00d65917f25aee71b41",
                 "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                 "0x0000000000000000000000000000000000000000000000000000000000000001",
             ],
-            "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0000000000000000000000000000000000000000000000000000000000000002",
+            "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000007",
         );
         assert_eq!(
             event_kind(&event).expect("kind"),
             Some(ContractEventKind::DebtCreated)
         );
-        let words = decode_static_words(&event, 3, 3).expect("wide static event");
+        let words = decode_static_words(&event, 3, 4).expect("wide static event");
         assert_eq!(
             uint512(&words.data[0], &words.data[1]),
             (BigInt::from(1) << 512_u32) - 1
         );
         assert_eq!(safe_uint(&words.data[2], "debtIndex").expect("index"), 2);
+        assert_eq!(bigint(&words.data[3]), BigInt::from(7));
+        assert!(
+            decode_static_words(&event, 3, 3).is_err(),
+            "pre-debtSeq event width rejected"
+        );
         assert!(
             decode_static_words(&event, 3, 2).is_err(),
             "old scalar event width rejected"
@@ -686,6 +692,8 @@ pub(crate) fn require_current_depository_money_abi(
             | "0xae767eeb0c57abd46e2e0b422895ba3b89372fbd0510a58f00d996faf66f027d"
             | "0x1ffe8e6348fe244a8988797c02b57999821149e7b25c9f93a85c77819efdde67"
             | "0x0971ac81b80f99fe0089c3fbe4af4fa1148f2ce78bc6345e76b05be73500de1f"
+            // DebtCreated before debtSeq: its queue generation is unknowable.
+            | "0xf77919d8ab0bbcbc7feb0269986072624ad50811e07c7a87aa97e234ad7717db"
     ) {
         return Err(JWatcherError::RetiredMoneyAbi {
             address: hex(address),

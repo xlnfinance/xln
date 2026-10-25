@@ -365,14 +365,16 @@ export namespace DebtCreatedEvent {
     creditor: BytesLike,
     tokenId: BigNumberish,
     amount: Uint512Struct,
-    debtIndex: BigNumberish
+    debtIndex: BigNumberish,
+    debtSeq: BigNumberish
   ];
   export type OutputTuple = [
     debtor: string,
     creditor: string,
     tokenId: bigint,
     amount: Uint512StructOutput,
-    debtIndex: bigint
+    debtIndex: bigint,
+    debtSeq: bigint
   ];
   export interface OutputObject {
     debtor: string;
@@ -380,6 +382,7 @@ export namespace DebtCreatedEvent {
     tokenId: bigint;
     amount: Uint512StructOutput;
     debtIndex: bigint;
+    debtSeq: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -738,7 +741,7 @@ export interface Account extends BaseContract {
       CounterDisputeRegisteredEvent.OutputObject
     >;
 
-    "DebtCreated(bytes32,bytes32,uint256,tuple,uint256)": TypedContractEvent<
+    "DebtCreated(bytes32,bytes32,uint256,tuple,uint256,uint256)": TypedContractEvent<
       DebtCreatedEvent.InputTuple,
       DebtCreatedEvent.OutputTuple,
       DebtCreatedEvent.OutputObject

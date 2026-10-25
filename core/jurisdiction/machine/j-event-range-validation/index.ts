@@ -9,7 +9,15 @@ import {
   canonicalJurisdictionEventsHash,
   normalizeDisputeFinalizationEvidence,
 } from '../event-observation';
-import { buildJEventRangeDigest, canonicalJEventRangeHash } from '../history-consensus';
+import type { EntityState } from '../../../entity/types';
+import {
+  buildJEventRangeDigest,
+  buildJHistoryAnchorClaimDigest,
+  buildJHistoryAnchorRoot,
+  canonicalJEventRangeHash,
+  getJHistoryRegistrationBaseHeight,
+  type JHistoryStorageAnchor,
+} from '../history-consensus';
 import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
@@ -195,5 +203,82 @@ export const validateJEventRangeEnvelope = (input: {
     };
   } catch (error) {
     return { ok: false, code: error instanceof Error ? error.message : 'J_RANGE_INVALID' };
+  }
+};
+
+export type JHistoryAnchorClaimData = {
+  from: string;
+  jurisdictionRef: string;
+  baseHeight: number;
+  anchorHeight: number;
+  anchorBlockHash: string;
+  stateRoot: string;
+  provenValuesRoot: string;
+  signature: string;
+};
+
+export type JHistoryAnchorClaimValidationResult =
+  | {
+      ok: true;
+      signerId: string;
+      baseHeight: number;
+      anchor: JHistoryStorageAnchor;
+      /** Replaces the genesis fold base; later ranges fold onto it unchanged. */
+      eventHistoryRoot: string;
+    }
+  | { ok: false; code: string };
+
+/**
+ * Anchor start admission, the sibling of the range envelope check. It is only
+ * valid where a range from registration base would otherwise be the first
+ * range: no finality yet and lastFinalizedJHeight still at registration base.
+ * `recomputedValuesRoot` is the caller's buildProvenValuesRoot over the values
+ * the claim carries; a claim root that differs from it is never admitted.
+ */
+export const validateJHistoryAnchorClaim = (input: {
+  entityId: string;
+  state: Pick<EntityState, 'jHistoryFinality' | 'lastFinalizedJHeight' | 'config'>;
+  expectedJurisdictionRef: string;
+  activeProposerId: string;
+  data: JHistoryAnchorClaimData;
+  recomputedValuesRoot: string;
+  verifySignature: JEventRangeSignatureVerifier;
+}): JHistoryAnchorClaimValidationResult => {
+  try {
+    if (input.state.jHistoryFinality) return { ok: false, code: 'J_ANCHOR_FINALITY_EXISTS' };
+    const registrationBase = getJHistoryRegistrationBaseHeight(input.state.config.jurisdiction);
+    const stateHeight = height(input.state.lastFinalizedJHeight ?? 0, 'J_ANCHOR_STATE_HEIGHT_INVALID');
+    if (stateHeight !== registrationBase) return { ok: false, code: 'J_ANCHOR_STATE_NOT_AT_BASE' };
+    const signerId = text(input.data.from);
+    if (!signerId || signerId !== text(input.activeProposerId)) {
+      return { ok: false, code: 'J_ANCHOR_NOT_ACTIVE_PROPOSER' };
+    }
+    const jurisdictionRef = text(input.data.jurisdictionRef);
+    if (jurisdictionRef !== text(input.expectedJurisdictionRef)) {
+      return { ok: false, code: 'J_ANCHOR_JURISDICTION_MISMATCH' };
+    }
+    const baseHeight = height(input.data.baseHeight, 'J_ANCHOR_BASE_HEIGHT_INVALID');
+    if (baseHeight !== registrationBase) return { ok: false, code: 'J_ANCHOR_BASE_MISMATCH' };
+    const anchorHeight = height(input.data.anchorHeight, 'J_ANCHOR_HEIGHT_INVALID');
+    if (anchorHeight <= baseHeight) return { ok: false, code: 'J_ANCHOR_HEIGHT_INVALID' };
+    const anchor: JHistoryStorageAnchor = {
+      jurisdictionRef,
+      anchorHeight,
+      anchorBlockHash: hash(input.data.anchorBlockHash, 'J_ANCHOR_BLOCK_HASH_INVALID'),
+      stateRoot: hash(input.data.stateRoot, 'J_ANCHOR_STATE_ROOT_INVALID'),
+      provenValuesRoot: hash(input.data.provenValuesRoot, 'J_ANCHOR_VALUES_ROOT_INVALID'),
+    };
+    if (hash(input.recomputedValuesRoot, 'J_ANCHOR_VALUES_ROOT_INVALID') !== anchor.provenValuesRoot) {
+      return { ok: false, code: 'J_ANCHOR_VALUES_ROOT_MISMATCH' };
+    }
+    const signature = text(input.data.signature);
+    if (!signature) return { ok: false, code: 'J_ANCHOR_PROPOSER_SIGNATURE_INVALID' };
+    const digest = buildJHistoryAnchorClaimDigest({ ...anchor, entityId: input.entityId, signerId, baseHeight });
+    if (!input.verifySignature(signerId, digest, signature)) {
+      return { ok: false, code: 'J_ANCHOR_PROPOSER_SIGNATURE_INVALID' };
+    }
+    return { ok: true, signerId, baseHeight, anchor, eventHistoryRoot: buildJHistoryAnchorRoot(anchor) };
+  } catch (error) {
+    return { ok: false, code: error instanceof Error ? error.message : 'J_ANCHOR_INVALID' };
   }
 };

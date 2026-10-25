@@ -10,7 +10,7 @@ import { generateLazyEntityId } from '../../entity/factory';
 import { getSignerPrivateKey } from '../../account/crypto';
 import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 import { bindScenarioJReplica, createJReplica, resolveScenarioBoardSigner } from '../harness/boot';
-import { setScenarioStorageEnabled, requireRuntimeSeed, findReplica } from '../harness/helpers';
+import { setScenarioStorageEnabled, requireRuntimeSeed, findReplica, processJEvents } from '../harness/helpers';
 import { createDirectRuntimeWsRoute } from '../../network/p2p/direct-runtime-bun';
 import { RuntimeWsClient } from '../../network/p2p/ws-client';
 import { RuntimeP2P } from '../../network/p2p/p2p';
@@ -84,6 +84,9 @@ const importActor = async (
       entityTxs: [{ type: 'chatMessage', data: { message: 'publish recovery peer', timestamp: env.state.timestamp } }],
     },
   ]);
+  // A live Runtime polls its watcher right after import, so a fresh lazy wallet
+  // starts from the authenticated state anchor before any financial work.
+  await processJEvents(env);
   return { env, adapter, seed, id, signer };
 };
 

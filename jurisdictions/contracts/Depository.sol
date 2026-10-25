@@ -97,7 +97,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   // larger transfers remain losslessly expressible across sequential nonces.
   // Runtime permits up to 1,000 open swaps in one account proof. The canonical
   // DeltaTransformer path is regression-tested below this cap.
-  event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, Uint512 amount, uint256 debtIndex);
+  event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, Uint512 amount, uint256 debtIndex, uint256 debtSeq);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, Uint512 remainingAmount, uint256 newDebtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, Uint512 amountForgiven, uint256 debtIndex);
   event TransformerDeltaClamped(
@@ -305,6 +305,18 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   /// @notice Sequential nonce for each entity authorising batches via Hanko.
   mapping(bytes32 => uint256) public entityNonces;
 
+  /// @notice Live (unpaid) debt entries owed TO each creditor, across all
+  ///         debtors and tokens: the creditor-keyed mirror of activeDebts.
+  ///         Debt queues are debtor-keyed, so without this count a storage
+  ///         proof cannot show that a creditor's open-debt set is complete.
+  ///         Appended last so every earlier storage slot keeps its position.
+  mapping(bytes32 => uint256) public inActiveDebts;
+
+  /// @notice Count of debts ever created; each new queue entry stores its value
+  ///         so a storage proof can tell a recreated debt from a retired one.
+  ///         Appended last so every earlier storage slot keeps its position.
+  uint256 public debtSeq;
+
   /// @notice Domain separator used when hashing Hanko payloads for verification.
   bytes32 public constant DOMAIN_SEPARATOR = keccak256("XLN_DEPOSITORY_HANKO_V1");
   bytes32 public constant WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR =
@@ -440,6 +452,9 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
    */
   function mintToReserve(bytes32 entity, uint tokenId, uint amount) external onlyLocalDevAdmin {
     if (amount == 0) revert E1();
+    // Every other reserve source is bound to a listed token; keep reserves
+    // enumerable over [0, _tokens.length) for storage-proven import.
+    if (tokenId >= _tokens.length) revert E11();
     _increaseReserve(entity, tokenId, amount);
   }
 
@@ -587,9 +602,11 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       debtor,
       tokenId,
       creditor,
-      amount
+      amount,
+      ++debtSeq
     );
     activeDebts[debtor]++;
+    inActiveDebts[creditor]++;
   }
 
   function _afterDebtCleared(bytes32 entity) internal {
@@ -732,6 +749,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       _debtIndex,
       debtOutstanding,
       activeDebts,
+      inActiveDebts,
       entity,
       tokenId,
       maxIterations
@@ -775,6 +793,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     delete current.amount;
     _reduceDebtOutstanding(debtor, tokenId, amount);
     _afterDebtCleared(debtor);
+    inActiveDebts[creditor]--;
     emit DebtForgiven(debtor, creditor, tokenId, amount, idx);
     if (idx + 1 == len) {
       _debtIndex[debtor][tokenId] = 0;

@@ -7,8 +7,9 @@ use xln_rscore_engine::AccountTx;
 
 pub(crate) use followups::apply_committed_j_event_claim;
 pub use history::{
-    CanonicalJEventBlock, EMPTY_J_HISTORY_ROOT, canonical_j_event_blocks,
+    CanonicalJEventBlock, EMPTY_J_HISTORY_ROOT, JHistoryStorageAnchor, canonical_j_event_blocks,
     canonical_j_event_range_hash, fold_j_history_root, j_event_range_digest,
+    j_history_anchor_claim_digest, j_history_anchor_root,
 };
 pub(crate) use ingress::apply_finalized_j_event_batches_in_frame;
 pub use ingress::{apply_finalized_j_event_batches, project_finalized_j_event_batch};

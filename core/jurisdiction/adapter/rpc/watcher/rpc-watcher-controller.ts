@@ -69,8 +69,15 @@ const createWatcherSession = (
     pendingBlocks: new Map(),
     pendingHistoryRange: null,
     pendingHistoryWaitKey: '',
+    pendingAnchor: null,
     pendingRewindReplicaKeys: [],
     lastAuthorityAuditKey: '',
+    boardAnchorAudits: new Map(),
+    reserveAnchorAudits: new Map(),
+    actionNonceAudits: new Map(),
+    debtAnchorAudits: new Map(),
+    debtProvenanceAudits: new Set(),
+    provenValues: new Map(),
     lastObservedHead: -1,
     lastCanonicalAuditAtMs: 0,
     transientFailures: 0,
@@ -158,7 +165,11 @@ const handlePollFailure = (
     // Bound both ingress and transport pressure with the same window. A
     // throttled 2048-block read otherwise retries its entire prefix forever;
     // no cursor advances until a complete authenticated window is admitted.
-    session.maxBlocksPerPoll = nextWatcherPollWindow(session.maxBlocksPerPoll, false);
+    // Halve the range actually read: halving a window wider than the backlog
+    // re-reads the identical range and only compounds the cooldown.
+    const attemptedBlocks =
+      trace.fromBlock !== null && trace.toBlock !== null ? trace.toBlock - trace.fromBlock + 1 : Infinity;
+    session.maxBlocksPerPoll = nextWatcherPollWindow(Math.min(session.maxBlocksPerPoll, attemptedBlocks), false);
     if (transportUnavailable) {
       session.rpcCooldown.backoffMs = nextWatcherRpcBackoffMs(session.rpcCooldown.backoffMs, false);
     }
@@ -328,6 +339,10 @@ export const createRpcWatcherController = (services: RpcWatcherServices): RpcWat
 
     getWatcherScanProgress() {
       return state.session?.scanProgress ?? state.lastScanProgress;
+    },
+
+    getWatcherProvenValues() {
+      return [...(state.session?.provenValues.values() ?? [])];
     },
   };
 };

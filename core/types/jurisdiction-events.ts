@@ -58,6 +58,8 @@ export type JurisdictionEvent =
         newBoardHash: string;
         /** Exclusive Unix-second validity boundary emitted by EntityProvider. */
         previousBoardValidUntil: string;
+        /** EntityProvider boardEpochs[entityId] after this activation (>= 1). */
+        boardEpoch: string;
       };
     })
   | (JEventMetadata & {
@@ -156,6 +158,7 @@ export type JurisdictionEvent =
         tokenId: number;
         amount: string;
         debtIndex: number;
+        debtSeq: string;
       };
     })
   | (JEventMetadata & {

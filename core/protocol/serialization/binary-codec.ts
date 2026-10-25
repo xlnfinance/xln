@@ -159,9 +159,22 @@ addExtension({
 const projectBinaryScalar = (value: unknown): unknown =>
   typeof value === 'string' && isCanonicalHexBytes(value) ? new CanonicalHexBytes(value) : value;
 
+// Set only inside withSharedBinaryProjection: a canonical subtree projected by
+// one pack is reused by the next pack of the same synchronous block.
+let sharedProjections: Map<object, unknown> | null = null;
+
 const projectBinaryValue = (value: unknown): unknown => {
   const scalar = projectBinaryScalar(value);
   if (scalar !== value || value === null || typeof value !== 'object' || ArrayBuffer.isView(value)) return scalar;
+  if (sharedProjections === null || !isAlreadyCanonical(value)) return projectBinaryObject(value);
+  const cached = sharedProjections.get(value);
+  if (cached !== undefined) return cached;
+  const projected = projectBinaryObject(value);
+  sharedProjections.set(value, projected);
+  return projected;
+};
+
+const projectBinaryObject = (value: object): unknown => {
   if (Array.isArray(value)) return value.map(projectBinaryValue);
   if (value instanceof Map) {
     return new Map(Array.from(value, ([key, entry]) => [projectBinaryValue(key), projectBinaryValue(entry)]));
@@ -383,6 +396,21 @@ export const createSequentialTransportValueCodec = (): Readonly<{
     pack: value => asBytes(codec.pack(projectBinaryValue(value))),
     unpack: bytes => codec.unpack(bytes),
   };
+};
+
+/**
+ * Runs synchronous encodes that share canonical subtrees (a frame hash and its
+ * stored row) so each shared subtree is hex-projected and cloned once. Every
+ * byte equals a separate encode; a canonical subtree must not change in `run`.
+ */
+export const withSharedBinaryProjection = <T>(run: () => T): T => {
+  const previous = sharedProjections;
+  sharedProjections = previous ?? new Map();
+  try {
+    return run();
+  } finally {
+    sharedProjections = previous;
+  }
 };
 
 /** Canonical (sorted, marked) copy of a value; later encodes of it skip the walk. */

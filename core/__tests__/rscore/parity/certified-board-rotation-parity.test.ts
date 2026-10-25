@@ -76,13 +76,14 @@ test('the two frame orders resolve different counterparty boards', () => {
   // What Rust resolves for the whole frame, and what TypeScript resolved before
   // the frame's `j_event` transaction: the retired registration board.
   expect(ordering.beforeFrame?.boardHash).toBe(ordering.registeredBoardHash);
-  expect(ordering.beforeFrame?.activatedAtJHeight).toBe(2);
+  expect(ordering.beforeFrame?.boardEpoch).toBe(0);
+  expect(ordering.beforeFrame?.source).toBe('EntityRegistered');
 
   // What TypeScript resolves for an `accountInput` placed after that `j_event`
   // in the SAME frame: the board the frame just activated.
   expect(ordering.accountInputResolved?.boardHash).toBe(ordering.rotatedBoardHash);
-  expect(ordering.accountInputResolved?.activatedAtJHeight).toBe(3);
-  expect(ordering.accountInputResolved?.logIndex).toBe(0);
+  expect(ordering.accountInputResolved?.boardEpoch).toBe(1);
+  expect(ordering.accountInputResolved?.source).toBe('BoardActivated');
 
   // One row, one frame, two certified boards. That is why the shape is refused.
   expect(ordering.accountInputResolved?.boardHash).not.toBe(ordering.beforeFrame?.boardHash);

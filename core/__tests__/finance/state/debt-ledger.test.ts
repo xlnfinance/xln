@@ -163,6 +163,7 @@ describe('debt ledger', () => {
         tokenId: 1,
         amount: '150',
         debtIndex: 3,
+        debtSeq: '4',
       },
     };
 
@@ -260,7 +261,7 @@ describe('debt ledger', () => {
       type: 'DebtCreated',
       blockNumber: 1,
       transactionHash: `0x${'01'.repeat(32)}`,
-      data: { debtor: ALICE, creditor: BOB, tokenId: 1, amount: '1000001', debtIndex: 0 },
+      data: { debtor: ALICE, creditor: BOB, tokenId: 1, amount: '1000001', debtIndex: 0, debtSeq: '1' },
     });
 
     for (let index = 0; index < 3; index += 1) {
@@ -343,11 +344,11 @@ describe('debt ledger', () => {
     const applySequence = (state: EntityState): EntityState => {
       applyDebtCreated(state, {
         type: 'DebtCreated', blockNumber: 1, transactionHash: `0x${'11'.repeat(32)}`,
-        data: { debtor: ALICE, creditor: BOB, tokenId: 1, amount: '5', debtIndex: 0 },
+        data: { debtor: ALICE, creditor: BOB, tokenId: 1, amount: '5', debtIndex: 0, debtSeq: '1' },
       });
       applyDebtCreated(state, {
         type: 'DebtCreated', blockNumber: 2, transactionHash: `0x${'12'.repeat(32)}`,
-        data: { debtor: ALICE, creditor: CAROL, tokenId: 1, amount: '7', debtIndex: 1 },
+        data: { debtor: ALICE, creditor: CAROL, tokenId: 1, amount: '7', debtIndex: 1, debtSeq: '2' },
       });
       applyDebtEnforced(state, {
         type: 'DebtEnforced', blockNumber: 3, transactionHash: `0x${'13'.repeat(32)}`,
@@ -381,7 +382,7 @@ describe('debt ledger', () => {
     const state = makeState(ALICE, ALICE_SIGNER);
     const created: JurisdictionEvent = {
       type: 'DebtCreated', blockNumber: 20, transactionHash: `0x${'21'.repeat(32)}`,
-      data: { debtor: ALICE, creditor: BOB, tokenId: 1, amount: '9', debtIndex: 0 },
+      data: { debtor: ALICE, creditor: BOB, tokenId: 1, amount: '9', debtIndex: 0, debtSeq: '1' },
     };
     const enforced: JurisdictionEvent = {
       type: 'DebtEnforced', blockNumber: 20, transactionHash: `0x${'21'.repeat(32)}`,

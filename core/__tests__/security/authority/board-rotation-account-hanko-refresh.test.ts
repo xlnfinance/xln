@@ -327,6 +327,7 @@ test('board Hanko refresh routing is identical with sparse and populated validat
       previousBoardHash: digest('f4'),
       newBoardHash: digest('f5'),
       previousBoardValidUntil: '1700604800',
+      boardEpoch: '1',
     },
   } satisfies JurisdictionEvent;
 
@@ -409,6 +410,7 @@ test('one uncertified Account cannot block BoardActivated Hanko refreshes for ce
       previousBoardHash: digest('a1'),
       newBoardHash: digest('a2'),
       previousBoardValidUntil: '1700604800',
+      boardEpoch: '1',
     },
   } satisfies JurisdictionEvent;
 
@@ -503,6 +505,7 @@ test('partial bilateral dispute evidence never emits a frame-only board Hanko re
       previousBoardHash: digest('b1'),
       newBoardHash: digest('b2'),
       previousBoardValidUntil: '1700604800',
+      boardEpoch: '1',
     },
   } satisfies JurisdictionEvent;
 
@@ -571,6 +574,7 @@ test('one board Hanko refresh pass emits at most 32 deterministic Accounts', asy
       previousBoardHash: digest('c1'),
       newBoardHash: digest('c2'),
       previousBoardValidUntil: '1700604800',
+      boardEpoch: '1',
     },
   } satisfies JurisdictionEvent;
 
@@ -666,6 +670,7 @@ test('two board rotations in one finalized J range collapse to the latest board 
       previousBoardHash: digest('32'),
       newBoardHash: digest('33'),
       previousBoardValidUntil: '1700604800',
+      boardEpoch: '1',
     },
   }, {
     type: 'BoardActivated',
@@ -678,6 +683,7 @@ test('two board rotations in one finalized J range collapse to the latest board 
       previousBoardHash: digest('33'),
       newBoardHash: digest('34'),
       previousBoardValidUntil: '1700604801',
+      boardEpoch: '2',
     },
   }] satisfies JurisdictionEvent[];
   const applied = await applyJEventRange(state, {
@@ -782,6 +788,7 @@ test('certified counterparty board activation arms an exact 24-hour board Hanko 
       previousBoardHash: digest('32'),
       newBoardHash: digest('33'),
       previousBoardValidUntil: '1700604800',
+      boardEpoch: '1',
     },
   } satisfies JurisdictionEvent;
   const applied = await applyJEventRange(state, {

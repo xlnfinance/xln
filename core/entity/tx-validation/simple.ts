@@ -24,6 +24,7 @@ type SpecializedEntityTxType =
   | 'chat'
   | 'entityCommand'
   | 'htlcPayment'
+  | 'j_anchor'
   | 'materializeCrossJurisdictionClear'
   | 'materializeCrossJurisdictionSwap'
   | 'propose'

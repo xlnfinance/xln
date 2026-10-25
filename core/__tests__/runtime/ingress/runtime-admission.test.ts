@@ -15,6 +15,7 @@ describe('runtime outbox admission', () => {
       'scheduledWake',
       'accountInput',
       'j_event',
+      'j_anchor',
       'prepareDispute',
       'disputeStart',
       'disputeFinalize',

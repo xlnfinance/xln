@@ -189,7 +189,7 @@ contract DepositoryInvariants is XlnFixture {
         }
         // Everything before the cursor must already be settled.
         for (uint256 idx = 0; idx < cursor && idx < len; idx++) {
-          (, Uint512 memory amount) = dep._debts(entity[i], t, idx);
+          (, Uint512 memory amount,,) = dep._debts(entity[i], t, idx);
           assertTrue(WideMath.isZero(amount), "cursor skipped an unpaid debt");
         }
       }
@@ -199,7 +199,7 @@ contract DepositoryInvariants is XlnFixture {
   function _debtQueueLength(bytes32 e, uint256 t) internal view returns (uint256 len) {
     // Debt[] has no length getter; probe the public array getter until it panics.
     for (uint256 i = 0; i < 128; i++) {
-      try dep._debts(e, t, i) returns (bytes32, Uint512 memory) { len = i + 1; }
+      try dep._debts(e, t, i) returns (bytes32, Uint512 memory, uint64, uint192) { len = i + 1; }
       catch { break; }
     }
   }
@@ -207,7 +207,7 @@ contract DepositoryInvariants is XlnFixture {
   function _walkDebtQueue(bytes32 e, uint256 t) internal view returns (Uint768 memory sum, uint256 live) {
     uint256 len = _debtQueueLength(e, t);
     for (uint256 i = 0; i < len; i++) {
-      (, Uint512 memory amount) = dep._debts(e, t, i);
+      (, Uint512 memory amount,,) = dep._debts(e, t, i);
       if (!WideMath.isZero(amount)) {
         sum = WideMath.add(sum, WideMath.expand(amount));
         live++;

@@ -59,7 +59,7 @@ library Account {
     bool proposerIsLeft,
     bytes32 proofbodyHash
   );
-  event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, Uint512 amount, uint256 debtIndex);
+  event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, Uint512 amount, uint256 debtIndex, uint256 debtSeq);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, Uint512 remainingAmount, uint256 newDebtIndex);
   // This signature intentionally matches Depository's public event ABI. The
   // library executes by DELEGATECALL, so logs are emitted from Depository.
@@ -144,15 +144,24 @@ library Account {
     bytes32 debtor,
     uint256 tokenId,
     bytes32 creditor,
-    Uint512 memory amount
+    Uint512 memory amount,
+    uint256 createdSeq
   ) external {
     if (WideMath.isZero(amount)) return;
+    // The generation is stored narrowed; a truncated block or seq would let a
+    // recreated debt alias a retired one at a reused queue index.
+    if (block.number > type(uint64).max || createdSeq > type(uint192).max) revert E8();
     Uint768 memory outstanding = debtOutstanding[debtor][tokenId];
-    debts[debtor][tokenId].push(Debt({ amount: amount, creditor: creditor }));
+    debts[debtor][tokenId].push(Debt({
+      amount: amount,
+      creditor: creditor,
+      createdBlock: uint64(block.number),
+      createdSeq: uint192(createdSeq)
+    }));
     uint256 index = debts[debtor][tokenId].length - 1;
     if (index == 0) debtIndex[debtor][tokenId] = 0;
     debtOutstanding[debtor][tokenId] = WideMath.add(outstanding, WideMath.expand(amount));
-    emit DebtCreated(debtor, creditor, tokenId, amount, index);
+    emit DebtCreated(debtor, creditor, tokenId, amount, index, createdSeq);
   }
 
   /// @notice Enforce one debtor/token FIFO without exposing Depository internals.
@@ -164,6 +173,7 @@ library Account {
     mapping(bytes32 => mapping(uint256 => uint256)) storage debtIndex,
     mapping(bytes32 => mapping(uint256 => Uint768)) storage debtOutstanding,
     mapping(bytes32 => uint256) storage activeDebts,
+    mapping(bytes32 => uint256) storage inActiveDebts,
     bytes32 entity,
     uint256 tokenId,
     uint256 maxIterations
@@ -210,6 +220,9 @@ library Account {
             activeDebts[entity] = active - 1;
           }
         }
+        // Checked: an underflow means the creditor count lost a live debt,
+        // which would make a storage-proven creditor set look complete.
+        inActiveDebts[creditor]--;
         delete queue[cursor];
         cursor++;
       } else {

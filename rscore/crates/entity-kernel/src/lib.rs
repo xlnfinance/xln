@@ -115,9 +115,10 @@ pub use j_batch::{
 };
 pub use j_events::{
     CanonicalJEventBlock, EMPTY_J_HISTORY_ROOT, EntityJEventIngress, FinalizedJEventBatch,
-    JClaimIngress, JEventClaimQueued, JReserveUpdate, apply_finalized_j_event_batches,
-    canonical_j_event_blocks, canonical_j_event_range_hash, fold_j_history_root,
-    j_event_range_digest, project_finalized_j_event_batch,
+    JClaimIngress, JEventClaimQueued, JHistoryStorageAnchor, JReserveUpdate,
+    apply_finalized_j_event_batches, canonical_j_event_blocks, canonical_j_event_range_hash,
+    fold_j_history_root, j_event_range_digest, j_history_anchor_claim_digest,
+    j_history_anchor_root, project_finalized_j_event_batch,
 };
 pub use kernel::apply_entity_kernel;
 pub use lendbook::{

@@ -414,8 +414,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       boardHash: accountId,
       previousBoardHash: `0x${'00'.repeat(32)}`,
       previousBoardValidUntil: 0,
-      activatedAtJHeight: 0,
-      logIndex: 0,
+      boardEpoch: 0,
     };
     const inbound = await coordinator.applyAccountInputs({
       frameId: 'certified-board-frame',

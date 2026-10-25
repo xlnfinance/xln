@@ -77,6 +77,24 @@ export const getFrameJPrefixValidationError = (
   }
 };
 
+/**
+ * A committed 'j_anchor' certifies finality with no scanned range behind it.
+ * The validator-local history it implies is exactly what a scan through the
+ * anchor leaves after pruning: no events, the certified tip hash. Without it
+ * no J-prefix vote can be built and every later frame waits for a watcher page.
+ */
+export const seedReplicaJHistoryFromCommittedAnchor = (replica: EntityReplica, txs: readonly EntityTx[]): void => {
+  if (replica.jHistory || !txs.some(tx => tx.type === 'j_anchor')) return;
+  const finality = replica.state.jHistoryFinality;
+  if (!finality) throw new Error(`J_ANCHOR_COMMITTED_WITHOUT_FINALITY:${replica.entityId}`);
+  replica.jHistory = recordValidatorJHistory(undefined, {
+    jurisdictionRef: finality.jurisdictionRef,
+    scannedThroughHeight: finality.finalizedThroughHeight,
+    tipBlockHash: finality.tipBlockHash,
+    blocks: [],
+  }, replica.state);
+};
+
 export const pruneReplicaFinalizedJHistory = (replica: EntityReplica): void => {
   const pruned = pruneFinalizedValidatorJHistory(replica.jHistory, replica.state.lastFinalizedJHeight);
   if (pruned) replica.jHistory = pruned;
@@ -209,6 +227,7 @@ import {
   getJEventRangeValidationError,
   getValidatorJContiguousThroughHeight,
   pruneFinalizedValidatorJHistory,
+  recordValidatorJHistory,
 } from '../../../jurisdiction/machine/local-history';
 import { getEntityFrameJRangeBudgetError } from '../../../jurisdiction/machine/range-budget';
 import type { EntityTx } from '../../../types/entity-tx';

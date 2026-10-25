@@ -92,6 +92,7 @@ fn decode_native_action_txs(
                 | "runtimeOutput"
                 | "scheduledWake"
                 | "j_event"
+                | "j_anchor"
                 | "accountInput"
         ) {
             return Err(invalid(format!(

@@ -9,6 +9,7 @@ import type { Address } from '@ethereumjs/util';
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../../jurisdictions/typechain-types/index.ts';
 import type { BrowserVMState, RuntimeReplica } from '../../runtime/types';
 import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-events';
+import type { EntityProvenValues } from './rpc/state-anchor/rpc-proven-values-root';
 import type { JAdapterFailure, JReplica, JTx } from '../../types/jurisdiction-runtime';
 
 export type JAdapterMode = 'browservm' | 'anvil' | 'rpc' | 'tron';
@@ -245,6 +246,8 @@ export interface JAdapter {
     scannedThroughHeight: number;
     replicaScannedThrough: Record<string, number>;
   };
+  /** Per-Entity proven-values roots (fold == storage) of the last canonical audit. Observation only. */
+  getWatcherProvenValues?(): EntityProvenValues[];
 
   // BrowserVM-specific (returns null for RPC mode)
   getBrowserVM(): BrowserVMProvider | null;

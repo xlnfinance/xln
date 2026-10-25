@@ -174,6 +174,7 @@ fn decode_runtime_output(
             EntityTxKind::AccountInput
                 | EntityTxKind::BoardHandover
                 | EntityTxKind::EntityCommand
+                | EntityTxKind::JAnchor
                 | EntityTxKind::JEvent
                 // Locally authored recovery marker: it must never re-enter
                 // through a peer's authenticated runtime output wrapper.
@@ -294,6 +295,21 @@ mod tests {
             error
                 .to_string()
                 .contains("RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:proposeAccountsNow"),
+            "unexpected rejection: {error}",
+        );
+    }
+
+    /// Parity target: `protocolTxTypes` in `core/entity/auth/authorization.ts`.
+    /// The anchor claim authenticates itself like `j_event`; no peer wrapper
+    /// may carry it.
+    #[test]
+    fn runtime_output_may_not_nest_a_j_anchor_claim() {
+        let error = decode_local_entity_tx(&runtime_output("j_anchor"))
+            .expect_err("a nested anchor claim must be refused");
+        assert!(
+            error
+                .to_string()
+                .contains("RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:j_anchor"),
             "unexpected rejection: {error}",
         );
     }

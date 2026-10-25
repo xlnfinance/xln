@@ -256,7 +256,8 @@ mod tests {
                 "entityId": hash,
                 "previousBoardHash": hash,
                 "newBoardHash": hash,
-                "previousBoardValidUntil": "0"
+                "previousBoardValidUntil": "0",
+                "boardEpoch": "1"
             }
         }])))
         .expect_err("zero until");
@@ -304,7 +305,8 @@ mod tests {
                     "creditor": entity("22"),
                     "tokenId": 1,
                     "amount": "BigInt(9)",
-                    "debtIndex": 0
+                    "debtIndex": 0,
+                    "debtSeq": "BigInt(1)"
                 }
             },
             {

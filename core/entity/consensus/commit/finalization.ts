@@ -16,6 +16,7 @@ import {
 import {
   pruneReplicaFinalizedJHistory,
   runLocalPostCommitHooks,
+  seedReplicaJHistoryFromCommittedAnchor,
 } from '../j-prefix/prefix-round';
 import { materializeCommittedEntityOutputs } from '../output/publication';
 import {
@@ -257,6 +258,7 @@ const installCommittedState = (
     candidateEffects,
   );
   candidateEffects.push(...execution.candidateEffects);
+  seedReplicaJHistoryFromCommittedAnchor(workingReplica, frame.txs);
   pruneReplicaFinalizedJHistory(workingReplica);
   if (frame.txs.length > 0) {
     workingReplica.mempool = removeCommittedTxsFromMempool(

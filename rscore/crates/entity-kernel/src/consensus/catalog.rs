@@ -7,7 +7,7 @@
 use thiserror::Error;
 
 /// Closed canonical EntityTx discriminant set shared with TypeScript.
-pub const ENTITY_TX_TYPES: [&str; 66] = [
+pub const ENTITY_TX_TYPES: [&str; 67] = [
     "accountInput",
     "admitCrossJurisdictionBookOrder",
     "boardHandover",
@@ -32,6 +32,7 @@ pub const ENTITY_TX_TYPES: [&str; 66] = [
     "htlcPayment",
     "initOrderbookExt",
     "j_abort_sent_batch",
+    "j_anchor",
     "j_broadcast",
     "j_clear_batch",
     "j_event",
@@ -102,6 +103,7 @@ pub enum EntityTxKind {
     HtlcPayment,
     InitOrderbookExt,
     JAbortSentBatch,
+    JAnchor,
     JBroadcast,
     JClearBatch,
     JEvent,
@@ -179,6 +181,7 @@ impl EntityTxKind {
             "htlcPayment" => Self::HtlcPayment,
             "initOrderbookExt" => Self::InitOrderbookExt,
             "j_abort_sent_batch" => Self::JAbortSentBatch,
+            "j_anchor" => Self::JAnchor,
             "j_broadcast" => Self::JBroadcast,
             "j_clear_batch" => Self::JClearBatch,
             "j_event" => Self::JEvent,
@@ -252,6 +255,7 @@ impl EntityTxKind {
             Self::HtlcPayment => "htlcPayment",
             Self::InitOrderbookExt => "initOrderbookExt",
             Self::JAbortSentBatch => "j_abort_sent_batch",
+            Self::JAnchor => "j_anchor",
             Self::JBroadcast => "j_broadcast",
             Self::JClearBatch => "j_clear_batch",
             Self::JEvent => "j_event",

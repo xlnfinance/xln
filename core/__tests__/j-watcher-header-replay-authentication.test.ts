@@ -19,6 +19,7 @@ const rangeWith = (headerHash: string, receiptHash: string): AuthenticatedReceip
     jBlockHash: headerHash,
     parentHash: `0x${'00'.repeat(32)}`,
   }],
+  tipStateRoot: null,
   logs: [{
     address: '0x0000000000000000000000000000000000000001',
     topics: [],

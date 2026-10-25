@@ -43,6 +43,13 @@ const coveredEntity = <K extends EntityTx['type']>(
   layer: 'entity', type, productionPath, semanticEvidence: 'covered', evidence,
 });
 
+const missingEntity = <K extends EntityTx['type']>(
+  type: K,
+  productionPath: string,
+): EntityTxSemanticCatalogEntry<K> => ({
+  layer: 'entity', type, productionPath, semanticEvidence: 'missing',
+});
+
 const ACCOUNT_BALANCE_EVIDENCE = [
   'rscore/crates/engine/tests/monetary/balance_parity.rs',
 ] as const;
@@ -182,6 +189,8 @@ export const ENTITY_TX_SEMANTIC_CATALOG = [
   coveredEntity('htlcPayment', 'core/entity/tx/handlers/htlc/payment.ts', ENTITY_SAME_J_FINANCIAL_EVIDENCE),
   coveredEntity('initOrderbookExt', 'core/entity/tx/handlers/system/basic.ts', ENTITY_CONTROL_SEMANTIC_EVIDENCE),
   coveredEntity('j_abort_sent_batch', 'core/entity/tx/handlers/j-batch/j-abort-sent-batch.ts', ENTITY_ROUTING_SEMANTIC_EVIDENCE),
+  // No Rust mirror yet: native admission must reject it explicitly.
+  missingEntity('j_anchor', 'core/entity/tx/j-anchor/j-anchor-finality.ts#applyJAnchor'),
   coveredEntity('j_broadcast', 'core/entity/tx/handlers/j-batch/j-broadcast.ts', MIXED_REPLAY_EVIDENCE),
   coveredEntity('j_clear_batch', 'core/entity/tx/handlers/j-batch/j-clear-batch.ts', ENTITY_ROUTING_SEMANTIC_EVIDENCE),
   coveredEntity('j_event', 'core/entity/tx/apply.ts#handleJEventEntityTx', ENTITY_ROUTING_SEMANTIC_EVIDENCE),

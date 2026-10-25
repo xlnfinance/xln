@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildJEventRangeDigest,
+  buildJHistoryAnchorClaimDigest,
+  buildJHistoryAnchorRoot,
   canonicalJEventRangeHash,
   canonicalJHistoryObservationLeaf,
   EMPTY_J_HISTORY_ROOT,
@@ -138,6 +140,51 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       .toBe('0x102170f17aafa712ef03a338733ddd7f690fb9888b9062ed91e3cf8d48b771bb');
     expect(foldJHistoryRoot(EMPTY_J_HISTORY_ROOT, [observation]))
       .toBe('0xee3695ffeafd31c849dd235ee631c09389a477eba163b82e22187857cb61e308');
+  });
+
+  test('anchor claim digest matches the Rust kernel vector and binds every field', () => {
+    const claim = {
+      entityId: `0x${'aa'.repeat(32)}`,
+      signerId: `0x${'11'.repeat(20)}`,
+      baseHeight: 41,
+      jurisdictionRef: `chain:31337:depository:0x${'88'.repeat(20)}`,
+      anchorHeight: 4049,
+      anchorBlockHash: `0x${'cc'.repeat(32)}`,
+      stateRoot: `0x${'dd'.repeat(32)}`,
+      provenValuesRoot: `0x${'ee'.repeat(32)}`,
+    };
+    // Same vector as rscore entity-kernel tests/j_event_parity.rs.
+    expect(buildJHistoryAnchorRoot(claim))
+      .toBe('0xe9b5cff3f0be460e3ed90d3b9a7ab16b2599de16e71e255252c3334a03290531');
+    const digest = buildJHistoryAnchorClaimDigest(claim);
+    expect(digest).toBe('0x430b8bb7f2b981eb66ffeaeef08b129921f8d8f18375d9a3f892a3d5996552a6');
+
+    const mutants = [
+      { ...claim, entityId: `0x${'ab'.repeat(32)}` },
+      { ...claim, signerId: `0x${'12'.repeat(20)}` },
+      { ...claim, baseHeight: 40 },
+      { ...claim, jurisdictionRef: `chain:31337:depository:0x${'89'.repeat(20)}` },
+      { ...claim, anchorHeight: 4050 },
+      { ...claim, anchorBlockHash: `0x${'cd'.repeat(32)}` },
+      { ...claim, stateRoot: `0x${'de'.repeat(32)}` },
+      { ...claim, provenValuesRoot: `0x${'ef'.repeat(32)}` },
+    ];
+    for (const mutant of mutants) expect(buildJHistoryAnchorClaimDigest(mutant)).not.toBe(digest);
+    expect(new Set(mutants.map(buildJHistoryAnchorClaimDigest)).size).toBe(mutants.length);
+    expect(buildJEventRangeDigest({
+      entityId: claim.entityId,
+      jurisdictionRef: claim.jurisdictionRef,
+      signerId: claim.signerId,
+      baseHeight: claim.baseHeight,
+      scannedThroughHeight: claim.anchorHeight,
+      tipBlockHash: claim.anchorBlockHash,
+      eventHistoryRoot: buildJHistoryAnchorRoot(claim),
+      rangeHash: claim.provenValuesRoot,
+    })).not.toBe(digest);
+    expect(() => buildJHistoryAnchorClaimDigest({ ...claim, anchorHeight: 41 }))
+      .toThrow('J_HISTORY_ANCHOR_NOT_AFTER_BASE');
+    expect(() => buildJHistoryAnchorClaimDigest({ ...claim, stateRoot: '0x1234' }))
+      .toThrow('J_HISTORY_INVALID_ANCHOR_STATE_ROOT');
   });
 
   test('range digest binds proposer, exact body, range and history root', () => {

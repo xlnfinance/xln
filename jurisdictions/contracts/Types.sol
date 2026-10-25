@@ -125,6 +125,10 @@ struct Debt {
   // The queue length is uint256, so its unsigned aggregate fits Uint768 even
   // when several independently authorized debts cross the lower word.
   Uint512 amount;
+  // Generation of this queue slot: a reset queue reuses index 0, so creditor,
+  // amount and position alone cannot tell a recreated debt from a retired one.
+  uint64 createdBlock;
+  uint192 createdSeq;
 }
 
 // ========== TRANSFORMERS (was Subcontracts) ==========

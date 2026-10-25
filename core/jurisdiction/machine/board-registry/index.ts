@@ -16,7 +16,7 @@ const ABI = ethers.AbiCoder.defaultAbiCoder();
 const domain = (label: string): string => ethers.keccak256(ethers.toUtf8Bytes(label));
 const STACK_DOMAIN = domain('xln.certified-board.stack.v1');
 const KEY_DOMAIN = domain('xln.certified-board.key.v1');
-const RECORD_DOMAIN = domain('xln.certified-board.record.v1');
+const RECORD_DOMAIN = domain('xln.certified-board.record.v2');
 const LEAF_DOMAIN = domain('xln.certified-board.leaf.v1');
 const BRANCH_DOMAIN = domain('xln.certified-board.branch.v1');
 export const EMPTY_CERTIFIED_BOARD_ROOT = domain('xln.certified-board.empty.v1');
@@ -134,15 +134,11 @@ const sameRecord = (left: CertifiedBoardRecord, right: CertifiedBoardRecord): bo
   left.boardEpoch === right.boardEpoch &&
   left.previousBoardHash === right.previousBoardHash &&
   left.previousBoardValidUntil === right.previousBoardValidUntil &&
-  left.activatedAtJHeight === right.activatedAtJHeight &&
-  left.logIndex === right.logIndex &&
-  left.blockHash === right.blockHash &&
-  left.transactionHash === right.transactionHash &&
   left.source === right.source;
 
 export const hashCertifiedBoardRecord = (record: CertifiedBoardRecord): string =>
   ethers.keccak256(ABI.encode(
-    ['bytes32', 'bytes32', 'bytes32', 'bytes32', 'uint64', 'bytes32', 'uint64', 'uint64', 'uint32', 'bytes32', 'bytes32', 'uint8'],
+    ['bytes32', 'bytes32', 'bytes32', 'bytes32', 'uint64', 'bytes32', 'uint64', 'uint8'],
     [
       RECORD_DOMAIN,
       normalizeBytes32(record.stackKey, 'STACK_KEY'),
@@ -151,10 +147,6 @@ export const hashCertifiedBoardRecord = (record: CertifiedBoardRecord): string =
       record.boardEpoch,
       normalizeBytes32(record.previousBoardHash, 'PREVIOUS_HASH'),
       normalizeUnixSeconds(record.previousBoardValidUntil, 'PREVIOUS_VALID_UNTIL'),
-      normalizeJHeight(record.activatedAtJHeight),
-      record.logIndex,
-      normalizeBytes32(record.blockHash, 'BLOCK_HASH'),
-      normalizeBytes32(record.transactionHash, 'TRANSACTION_HASH'),
       SOURCE_CODE[record.source],
     ],
   )).toLowerCase();
@@ -314,10 +306,6 @@ const makeRecord = (params: {
   boardEpoch?: unknown;
   previousBoardHash?: unknown;
   previousBoardValidUntil?: unknown;
-  jHeight: unknown;
-  blockHash: unknown;
-  transactionHash: unknown;
-  logIndex: unknown;
   source: CertifiedBoardSource;
 }): CertifiedBoardRecord => ({
   stackKey: normalizeBytes32(params.stackKey, 'STACK_KEY'),
@@ -332,18 +320,20 @@ const makeRecord = (params: {
   })(),
   previousBoardHash: normalizeBytes32(params.previousBoardHash ?? ethers.ZeroHash, 'PREVIOUS_HASH'),
   previousBoardValidUntil: normalizeUnixSeconds(params.previousBoardValidUntil ?? 0, 'PREVIOUS_VALID_UNTIL'),
-  activatedAtJHeight: normalizeJHeight(params.jHeight),
-  logIndex: (() => {
-    const index = Number(params.logIndex);
-    if (!Number.isSafeInteger(index) || index < 0 || index > 0xffff_ffff) {
-      throw new Error(`CERTIFIED_BOARD_LOG_INDEX_INVALID:${String(params.logIndex)}`);
-    }
-    return index;
-  })(),
-  blockHash: normalizeBytes32(params.blockHash, 'BLOCK_HASH'),
-  transactionHash: normalizeBytes32(params.transactionHash, 'TRANSACTION_HASH'),
   source: params.source,
 });
+
+// Event position is committed by eventsHash -> eventHistoryRoot, not by the
+// leaf: the leaf holds only what EntityProvider storage can also prove.
+const assertCertifiedBoardEventPosition = (event: JurisdictionEvent): void => {
+  normalizeJHeight(event.blockNumber);
+  normalizeBytes32(event.blockHash, 'BLOCK_HASH');
+  normalizeBytes32(event.transactionHash, 'TRANSACTION_HASH');
+  const index = Number(event.logIndex);
+  if (!Number.isSafeInteger(index) || index < 0 || index > 0xffff_ffff) {
+    throw new Error(`CERTIFIED_BOARD_LOG_INDEX_INVALID:${String(event.logIndex)}`);
+  }
+};
 
 export const applyCertifiedBoardRegistryEvent = (
   current: CertifiedBoardRegistryState | undefined,
@@ -357,10 +347,7 @@ export const applyCertifiedBoardRegistryEvent = (
   if (event.type !== 'FoundationBootstrapped' && event.type !== 'EntityRegistered' && event.type !== 'BoardActivated') {
     return { state, newNodes: new Map() };
   }
-  const jHeight = normalizeJHeight(event.blockNumber);
-  const blockHash = normalizeBytes32(event.blockHash, 'BLOCK_HASH');
-  const transactionHash = normalizeBytes32(event.transactionHash, 'TRANSACTION_HASH');
-  const logIndex = Number(event.logIndex);
+  assertCertifiedBoardEventPosition(event);
   const existingStore = store;
 
   let record: CertifiedBoardRecord;
@@ -372,10 +359,6 @@ export const applyCertifiedBoardRegistryEvent = (
       stackKey,
       entityId: FOUNDATION_ENTITY_ID,
       boardHash: event.data.boardHash,
-      jHeight,
-      blockHash,
-      transactionHash,
-      logIndex,
       source: 'FoundationBootstrapped',
     });
   } else {
@@ -390,24 +373,25 @@ export const applyCertifiedBoardRegistryEvent = (
       if (entityNumber <= 0n || entityNumber > ethers.MaxUint256 || BigInt(entityId) !== entityNumber) {
         throw new Error(`CERTIFIED_BOARD_ENTITY_NUMBER_MISMATCH:${entityId}:${entityNumber.toString()}`);
       }
-      record = makeRecord({ stackKey, entityId, boardHash: event.data.boardHash, jHeight, blockHash, transactionHash, logIndex, source: 'EntityRegistered' });
+      record = makeRecord({ stackKey, entityId, boardHash: event.data.boardHash, source: 'EntityRegistered' });
     } else {
       const entityId = normalizeBytes32(event.data.entityId, 'ENTITY_ID');
-      const previous = lookupCertifiedBoardRecord(existingStore, state.boardRegistryRoot, stackKey, entityId);
-      if (!previous) throw new Error(`CERTIFIED_BOARD_ACTIVATION_BEFORE_REGISTRATION:${entityId}`);
+      let boardEpoch: bigint;
+      try { boardEpoch = BigInt(String(event.data.boardEpoch)); } catch {
+        throw new Error(`CERTIFIED_BOARD_EPOCH_INVALID:${String(event.data.boardEpoch)}`);
+      }
+      if (boardEpoch <= 0n || boardEpoch > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error(`CERTIFIED_BOARD_EPOCH_INVALID:${String(event.data.boardEpoch)}`);
+      }
       record = makeRecord({
         stackKey,
         entityId,
         boardHash: event.data.newBoardHash,
-        boardEpoch: previous.activatedAtJHeight === jHeight && previous.logIndex === logIndex
-          ? previous.boardEpoch
-          : previous.boardEpoch + 1,
+        // EntityProvider increments boardEpochs[entityId] once per activation
+        // and emits the result, so the epoch alone orders activations.
+        boardEpoch: Number(boardEpoch),
         previousBoardHash: event.data.previousBoardHash,
         previousBoardValidUntil: event.data.previousBoardValidUntil,
-        jHeight,
-        blockHash,
-        transactionHash,
-        logIndex,
         source: 'BoardActivated',
       });
     }
@@ -416,15 +400,15 @@ export const applyCertifiedBoardRegistryEvent = (
   const existing = lookupCertifiedBoardRecord(existingStore, state.boardRegistryRoot, stackKey, record.entityId);
   if (record.source === 'BoardActivated') {
     if (!existing) throw new Error(`CERTIFIED_BOARD_ACTIVATION_BEFORE_REGISTRATION:${record.entityId}`);
-    const order = existing.activatedAtJHeight === record.activatedAtJHeight
-      ? existing.logIndex - record.logIndex
-      : existing.activatedAtJHeight - record.activatedAtJHeight;
-    if (order > 0) {
-      throw new Error(`CERTIFIED_BOARD_ACTIVATION_STALE:${record.entityId}:${record.activatedAtJHeight}`);
+    if (record.boardEpoch < existing.boardEpoch) {
+      throw new Error(`CERTIFIED_BOARD_ACTIVATION_STALE:${record.entityId}:${record.boardEpoch}:${existing.boardEpoch}`);
     }
-    if (order === 0) {
-      if (!sameRecord(existing, record)) throw new Error(`CERTIFIED_BOARD_ACTIVE_CONFLICT:${record.entityId}:${record.activatedAtJHeight}`);
+    if (record.boardEpoch === existing.boardEpoch) {
+      if (!sameRecord(existing, record)) throw new Error(`CERTIFIED_BOARD_ACTIVE_CONFLICT:${record.entityId}:${record.boardEpoch}`);
       return { state, newNodes: new Map() };
+    }
+    if (record.boardEpoch !== existing.boardEpoch + 1) {
+      throw new Error(`CERTIFIED_BOARD_ACTIVATION_EPOCH_GAP:${record.entityId}:${existing.boardEpoch}:${record.boardEpoch}`);
     }
     if (record.previousBoardHash !== existing.boardHash) {
       throw new Error(
@@ -528,7 +512,7 @@ export const resolveSigningCertifiedBoardHash = (
     if (!registry) throw new Error(`CERTIFIED_BOARD_SIGNING_ROOT_MISSING:${normalizedEntityId}:${stackKey}`);
     const record = lookupCertifiedBoardRecord(store, registry.boardRegistryRoot, stackKey, normalizedEntityId);
     if (!record) throw new Error(`CERTIFIED_BOARD_SIGNING_MEMBERSHIP_MISSING:${normalizedEntityId}:${stackKey}`);
-    return `${stackKey}:${record.activatedAtJHeight}:${record.logIndex}:${record.boardEpoch}:${record.boardHash}`;
+    return `${stackKey}:${record.boardEpoch}:${record.boardHash}`;
   });
   const unique = new Set(bindings);
   if (unique.size !== 1) throw new Error(`CERTIFIED_BOARD_SIGNING_REPLICA_DIVERGENCE:${normalizedEntityId}:${[...unique].sort().join(',')}`);
@@ -567,23 +551,13 @@ export const resolveUniqueCertifiedRegisteredBoardRecord = (
     );
   }
   const records = [...perStack.values()][0]!;
-  const latest = records.reduce((selected, record) =>
-    record.activatedAtJHeight > selected.activatedAtJHeight ||
-    (
-      record.activatedAtJHeight === selected.activatedAtJHeight &&
-      record.logIndex > selected.logIndex
-    )
-      ? record
-      : selected);
-  const current = records.filter((record) =>
-    record.activatedAtJHeight === latest.activatedAtJHeight &&
-    record.logIndex === latest.logIndex);
+  // EntityProvider increments boardEpochs[entityId] once per activation, so
+  // within one stack the highest epoch is the latest certified board.
+  const latestEpoch = records.reduce((max, record) => Math.max(max, record.boardEpoch), 0);
+  const current = records.filter((record) => record.boardEpoch === latestEpoch);
   const recordHashes = new Set(current.map(hashCertifiedBoardRecord));
   if (recordHashes.size !== 1) {
-    throw new Error(
-      `CERTIFIED_BOARD_AUTHORITY_AMBIGUOUS:${normalizedEntityId}:` +
-      `height=${latest.activatedAtJHeight}:logIndex=${latest.logIndex}`,
-    );
+    throw new Error(`CERTIFIED_BOARD_AUTHORITY_AMBIGUOUS:${normalizedEntityId}:epoch=${latestEpoch}`);
   }
   return current[0]!;
 };

@@ -113,6 +113,7 @@ const EVENTS: readonly { readonly name: string; readonly event: JurisdictionEven
         previousBoardHash: REGISTERED_BOARD,
         newBoardHash: ROTATED_BOARD,
         previousBoardValidUntil: PREVIOUS_BOARD_VALID_UNTIL,
+        boardEpoch: '1',
       },
     } as unknown as JurisdictionEvent,
   },

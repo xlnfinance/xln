@@ -6,7 +6,7 @@
 import { getPerfMs } from '../support/time';
 import { auditEntityStateRootAtCheckpoint } from '../entity/consensus/state-root';
 import { decodeValidatedBuffer, encodeBuffer, encodeBufferAsIs, encodeBufferPrepared, writeBatch } from './codec/codec';
-import { canonicalizeBinaryPayload } from '../protocol/serialization/binary-codec';
+import { canonicalizeBinaryPayload, withSharedBinaryProjection } from '../protocol/serialization/binary-codec';
 import {
   boundedStorageRowsBytes,
   prepareBoundedStorageValueRows,
@@ -1352,15 +1352,18 @@ const buildStorageFrameRecordPlan = (
     runtimeMachineGraph?.root,
   ), { omitSymbolKeys: true });
   mark('frameEncode.frameBase');
-  const frameRecord = {
-    ...frameBase,
-    frameHash: computeStorageFrameHash(frameBase),
-  } satisfies RuntimeFrame;
-  mark('frameEncode.frameHash');
+  // The hash and the row pack the same canonical input log; project it once.
+  const { frameRecord, frameBuffer } = withSharedBinaryProjection(() => {
+    const record = {
+      ...frameBase,
+      frameHash: computeStorageFrameHash(frameBase),
+    } satisfies RuntimeFrame;
+    mark('frameEncode.frameHash');
+    // frameBase is already a canonical (marked) tree; the row is decoded back
+    // into a record and its hash is computed above, never over these bytes.
+    return { frameRecord: record, frameBuffer: encodeBufferAsIs(record) };
+  });
   const frameKey = keyFrame(options.env.state.height);
-  // frameBase is already a canonical (marked) tree; the row is decoded back
-  // into a record and its hash is computed above, never over these bytes.
-  const frameBuffer = encodeBufferAsIs(frameRecord);
   const frameRows = prepareBoundedStorageValueRows(frameKey, frameBuffer);
   mark('frameEncode.frameBuffer');
   const authoritativeBaseBytes =

@@ -15,6 +15,8 @@ export interface DebtEntry {
   currentDebtIndex: number;
   status: 'open';
   createdAtBlock: number;
+  /** Depository debtSeq stamped at creation; with createdAtBlock it is the queue-slot generation. */
+  createdSeq: bigint;
   createdTxHash: string;
   lastUpdatedBlock: number;
   lastUpdatedTxHash: string;

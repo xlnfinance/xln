@@ -11,6 +11,7 @@ import { nodeProcess } from '../../../support/process/runtime-process';
 import type { EntityReplica } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
+import { getJAnchorLocalRefusal } from '../../tx/j-anchor/j-anchor-finality';
 import { hasProposableAccount } from '../account/work-index';
 import { prioritizeScheduledWakeTransactions } from '../input/merge';
 import { getReplicaProposalLeader } from '../leader';
@@ -89,6 +90,14 @@ const logReplicaMetaSelection = (
   });
 };
 
+const dropLocallyRefusedJAnchors = (replica: EntityReplica): void => {
+  if (!replica.mempool.some(tx => tx.type === 'j_anchor')) return;
+  const refusal = getJAnchorLocalRefusal(replica.state);
+  if (!refusal) return;
+  replica.mempool = replica.mempool.filter(tx => tx.type !== 'j_anchor');
+  entityLog.warn('proposal.j_anchor_refused', { entityId: replica.entityId, reason: refusal });
+};
+
 export const selectEntityProposal = async (
   env: EntityRuntimeContext,
   replica: EntityReplica,
@@ -117,6 +126,7 @@ export const selectEntityProposal = async (
     !proposalJPrefixCertificate &&
     (entityRequiresJPrefixCertificate(authorityReplica.state) ||
       hasPendingLocalJEvent(replica.state, replica.jHistory));
+  if (options.localCanPropose) dropLocallyRefusedJAnchors(replica);
   const shouldRollFrozenBaseJPrefixRound = isFrozenBaseJPrefixRollAuthorized(
     replica,
     proposalJPrefixCertificate,

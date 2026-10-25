@@ -41,10 +41,6 @@ pub struct CertifiedBoardRecord {
     pub board_epoch: u64,
     pub previous_board_hash: [u8; 32],
     pub previous_board_valid_until: u64,
-    pub activated_at_j_height: u64,
-    pub log_index: u32,
-    pub block_hash: [u8; 32],
-    pub transaction_hash: [u8; 32],
     pub source: CertifiedBoardSource,
 }
 
@@ -196,13 +192,6 @@ pub fn canonical_certified_board_record(
             "previousBoardValidUntil",
             number(record.previous_board_valid_until)?,
         ),
-        ("activatedAtJHeight", number(record.activated_at_j_height)?),
-        ("logIndex", number(u64::from(record.log_index))?),
-        ("blockHash", CanonicalValue::String(hex(&record.block_hash))),
-        (
-            "transactionHash",
-            CanonicalValue::String(hex(&record.transaction_hash)),
-        ),
         (
             "source",
             CanonicalValue::String(record.source.text().to_string()),
@@ -337,17 +326,13 @@ fn hash_slots(slots: &[[u8; 32]]) -> [u8; 32] {
 
 fn record_hash(record: &CertifiedBoardRecord) -> [u8; 32] {
     hash_slots(&[
-        domain(b"xln.certified-board.record.v1"),
+        domain(b"xln.certified-board.record.v2"),
         record.stack_key,
         record.entity_id,
         record.board_hash,
         uint_slot(record.board_epoch),
         record.previous_board_hash,
         uint_slot(record.previous_board_valid_until),
-        uint_slot(record.activated_at_j_height),
-        uint_slot(u64::from(record.log_index)),
-        record.block_hash,
-        record.transaction_hash,
         uint_slot(record.source.code()),
     ])
 }
@@ -533,16 +518,18 @@ impl CertifiedBoardState {
     }
 
     pub fn apply_j_event(&mut self, event: &JurisdictionEvent) -> Result<(), EntityKernelError> {
+        // Event position is committed by eventsHash -> eventHistoryRoot, not
+        // by the leaf: the leaf holds only what EntityProvider storage proves.
         let metadata = event.metadata();
-        let j_height = metadata
+        metadata
             .block_number
             .filter(|height| *height > 0)
             .ok_or_else(|| invalid("J_HEIGHT"))?;
-        let block_hash = metadata.block_hash.ok_or_else(|| invalid("BLOCK_HASH"))?;
-        let transaction_hash = metadata
+        metadata.block_hash.ok_or_else(|| invalid("BLOCK_HASH"))?;
+        metadata
             .transaction_hash
             .ok_or_else(|| invalid("TRANSACTION_HASH"))?;
-        let log_index = u32::try_from(metadata.log_index.ok_or_else(|| invalid("LOG_INDEX"))?)
+        u32::try_from(metadata.log_index.ok_or_else(|| invalid("LOG_INDEX"))?)
             .map_err(|_| invalid("LOG_INDEX"))?;
         let foundation_id = {
             let mut id = [0_u8; 32];
@@ -557,10 +544,6 @@ impl CertifiedBoardState {
                 board_epoch: 0,
                 previous_board_hash: [0; 32],
                 previous_board_valid_until: 0,
-                activated_at_j_height: j_height,
-                log_index,
-                block_hash,
-                transaction_hash,
                 source: CertifiedBoardSource::FoundationBootstrapped,
             },
             JurisdictionEvent::EntityRegistered(event) => {
@@ -579,10 +562,6 @@ impl CertifiedBoardState {
                     board_epoch: 0,
                     previous_board_hash: [0; 32],
                     previous_board_valid_until: 0,
-                    activated_at_j_height: j_height,
-                    log_index,
-                    block_hash,
-                    transaction_hash,
                     source: CertifiedBoardSource::EntityRegistered,
                 }
             }
@@ -592,10 +571,23 @@ impl CertifiedBoardState {
                     .resolve(&entity_id)
                     .cloned()
                     .ok_or_else(|| invalid("ACTIVATION_BEFORE_REGISTRATION"))?;
-                let order =
-                    (j_height, log_index).cmp(&(prior.activated_at_j_height, prior.log_index));
+                // EntityProvider increments boardEpochs[entityId] once per
+                // activation and emits the result, so the epoch alone orders
+                // activations.
+                let board_epoch = event.board_epoch.to_u64_digits();
+                if board_epoch.0 != Sign::Plus
+                    || board_epoch.1.len() != 1
+                    || board_epoch.1[0] > 9_007_199_254_740_991
+                {
+                    return Err(invalid("EPOCH_INVALID"));
+                }
+                let board_epoch = board_epoch.1[0];
+                let order = board_epoch.cmp(&prior.board_epoch);
                 if order.is_lt() {
                     return Err(invalid("ACTIVATION_STALE"));
+                }
+                if order.is_gt() && prior.board_epoch.checked_add(1) != Some(board_epoch) {
+                    return Err(invalid("ACTIVATION_EPOCH_GAP"));
                 }
                 let previous_board_valid_until = event.previous_board_valid_until.to_u64_digits();
                 if previous_board_valid_until.0 == Sign::Minus
@@ -608,20 +600,9 @@ impl CertifiedBoardState {
                     stack_key: self.stack_key,
                     entity_id,
                     board_hash: event.new_board_hash,
-                    board_epoch: if order.is_eq() {
-                        prior.board_epoch
-                    } else {
-                        prior
-                            .board_epoch
-                            .checked_add(1)
-                            .ok_or_else(|| invalid("BOARD_EPOCH_OVERFLOW"))?
-                    },
+                    board_epoch,
                     previous_board_hash: event.previous_board_hash,
                     previous_board_valid_until: previous_board_valid_until.1[0],
-                    activated_at_j_height: j_height,
-                    log_index,
-                    block_hash,
-                    transaction_hash,
                     source: CertifiedBoardSource::BoardActivated,
                 };
                 if order.is_eq() {
@@ -653,7 +634,8 @@ impl CertifiedBoardState {
 mod tests {
     use super::*;
     use xln_rscore_engine::{
-        EntityId, EntityRegisteredEvent, FoundationBootstrappedEvent, JEventMetadata,
+        BoardActivatedEvent, EntityId, EntityRegisteredEvent, FoundationBootstrappedEvent,
+        JEventMetadata,
     };
 
     fn bytes(value: &str) -> [u8; 32] {
@@ -675,20 +657,16 @@ mod tests {
             board_epoch: 0,
             previous_board_hash: [0; 32],
             previous_board_valid_until: 0,
-            activated_at_j_height: 7,
-            log_index: 2,
-            block_hash: [0x55; 32],
-            transaction_hash: [0x66; 32],
             source: CertifiedBoardSource::EntityRegistered,
         };
         assert_eq!(
             record_hash(&record),
-            bytes("0x2813ffaf9d76daa5204778da8d83f9e5c02be9790de955d6c47c3041ed64e0e8")
+            bytes("0x5efbf9bbd6071f5b3dc8cec178c4a12559c6b2487afde08aaf0a68afa842f279")
         );
         state.put(record).expect("insert");
         assert_eq!(
             state.board_registry_root,
-            bytes("0x828e78c7a6779aa8c7c317e2b5619bd7c4c72fc7795768eed10da59bd02693a2")
+            bytes("0x5427fbbbeaad7a2e5dddc8deb3a6cea886c116c51f980a1cf6c6e85f121a47fa")
         );
         let nodes = project_certified_board_storage_nodes(&state).expect("project one leaf");
         assert_eq!(nodes.len(), 1);
@@ -723,17 +701,13 @@ mod tests {
                     board_epoch: 0,
                     previous_board_hash: [0; 32],
                     previous_board_valid_until: 0,
-                    activated_at_j_height: 7,
-                    log_index: u32::from(byte),
-                    block_hash: [0x55; 32],
-                    transaction_hash: [0x66; 32],
                     source: CertifiedBoardSource::EntityRegistered,
                 })
                 .expect("insert");
         }
         assert_eq!(
             multi.board_registry_root,
-            bytes("0x29dda28a72b63ad42d371e89c2ee9f1af8d36b59d4f3ab1d8fda23eb88431c54")
+            bytes("0x49e123523d1ca67412365d898c303d8e3c69de697ca19daffd7f877d0a51333d")
         );
         let nodes = project_certified_board_storage_nodes(&multi).expect("project tree");
         assert_eq!(nodes.len(), 5);
@@ -796,7 +770,91 @@ mod tests {
             .expect("registration");
         assert_eq!(
             state.board_registry_root,
-            bytes("0x49402054db24826a8e8b06fdad7e8028519cdbc827f5fdbf2c69f851b828d6ef")
+            bytes("0x198c607dbe3334e27bc452671a59aa9b948b2c5d3d738db25a7f601daf26faf9")
+        );
+    }
+
+    #[test]
+    fn board_activation_is_ordered_by_emitted_epoch() {
+        let metadata = |height, transaction| JEventMetadata {
+            block_number: Some(height),
+            block_hash: Some([height as u8; 32]),
+            transaction_hash: Some([transaction; 32]),
+            log_index: Some(0),
+            event_index: None,
+        };
+        let entity_id = EntityId::parse(&format!("0x{}", "22".repeat(32))).expect("entity");
+        let activation = |height, transaction, previous, next, epoch: u64| {
+            JurisdictionEvent::BoardActivated(BoardActivatedEvent {
+                metadata: metadata(height, transaction),
+                entity_id: entity_id.clone(),
+                previous_board_hash: [previous; 32],
+                new_board_hash: [next; 32],
+                previous_board_valid_until: BigInt::from(height + 100),
+                board_epoch: BigInt::from(epoch),
+            })
+        };
+        let rejected = |state: &mut CertifiedBoardState, event: &JurisdictionEvent| {
+            let root = state.board_registry_root;
+            let error = state
+                .apply_j_event(event)
+                .expect_err("rejected")
+                .to_string();
+            assert_eq!(state.board_registry_root, root);
+            error
+        };
+        let mut state = CertifiedBoardState::empty([0x77; 32]);
+        state
+            .apply_j_event(&JurisdictionEvent::FoundationBootstrapped(
+                FoundationBootstrappedEvent {
+                    metadata: metadata(1, 0xb1),
+                    recipient: [0xcc; 20],
+                    board_hash: [0x11; 32],
+                    control_token_id: BigInt::from(1),
+                    dividend_token_id: BigInt::from(2),
+                },
+            ))
+            .expect("foundation");
+        state
+            .apply_j_event(&JurisdictionEvent::EntityRegistered(
+                EntityRegisteredEvent {
+                    metadata: metadata(2, 0xb2),
+                    entity_number: BigInt::from_bytes_be(Sign::Plus, entity_id.as_bytes()),
+                    entity_id: entity_id.clone(),
+                    board_hash: [0xaa; 32],
+                },
+            ))
+            .expect("registration");
+        let a_to_b = activation(3, 0xb3, 0xaa, 0xbb, 1);
+        state.apply_j_event(&a_to_b).expect("A->B at epoch 1");
+        let after_first = state.board_registry_root;
+        state.apply_j_event(&a_to_b).expect("re-delivered epoch 1");
+        assert_eq!(state.board_registry_root, after_first);
+        assert!(
+            rejected(&mut state, &activation(4, 0xb4, 0xaa, 0xcc, 1)).contains("ACTIVE_CONFLICT")
+        );
+        assert!(
+            rejected(&mut state, &activation(4, 0xb4, 0xbb, 0xaa, 3))
+                .contains("ACTIVATION_EPOCH_GAP")
+        );
+        assert!(
+            rejected(&mut state, &activation(4, 0xb4, 0xbb, 0xaa, 0)).contains("EPOCH_INVALID")
+        );
+        assert!(
+            rejected(&mut state, &activation(4, 0xb4, 0xcc, 0xaa, 2))
+                .contains("PREVIOUS_HASH_MISMATCH")
+        );
+
+        state
+            .apply_j_event(&activation(5, 0xb5, 0xbb, 0xaa, 2))
+            .expect("B->A at epoch 2");
+        let record = state.resolve(entity_id.as_bytes()).expect("active");
+        assert_eq!((record.board_hash, record.board_epoch), ([0xaa; 32], 2));
+        assert_ne!(state.board_registry_root, after_first);
+        assert!(rejected(&mut state, &a_to_b).contains("ACTIVATION_STALE"));
+        assert!(
+            rejected(&mut state, &activation(6, 0xb6, 0xaa, 0xbb, 4))
+                .contains("ACTIVATION_EPOCH_GAP")
         );
     }
 }

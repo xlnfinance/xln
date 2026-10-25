@@ -172,6 +172,15 @@ const applyJRangeBudgetToSelection = (selection: ProposableEntityTxSelection): P
 };
 
 /**
+ * An anchor start replaces the genesis fold, so it applies before any queued
+ * work in its frame can create the local state it refuses.
+ */
+const withJAnchorFirst = (txs: EntityTx[]): EntityTx[] => {
+  if (!txs.some(tx => tx.type === 'j_anchor')) return txs;
+  return [...txs.filter(tx => tx.type === 'j_anchor'), ...txs.filter(tx => tx.type !== 'j_anchor')];
+};
+
+/**
  * Select only transactions whose authority prerequisites are already
  * committed. Deferred work remains in the replica mempool unchanged.
  */
@@ -227,7 +236,7 @@ export const selectProposableEntityTxs = async (
     return { txs: [], currentAuthorityReady: false, reason: 'SELF_BOARD_CERTIFICATION_REQUIRED' };
   }
 
-  const proposable = withoutCounterpartyBoardActivationConflicts(normalizedEntityId, mempool);
+  const proposable = withJAnchorFirst(withoutCounterpartyBoardActivationConflicts(normalizedEntityId, mempool));
   const deferredForCounterpartyBoard = proposable.length !== mempool.length;
   const phaseSelection = selectCrossJCommitPhaseTxs(proposable);
   return applyJRangeBudgetToSelection({

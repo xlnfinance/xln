@@ -89,11 +89,17 @@ describe('rpc proxy safety', () => {
       });
       expect((await readRpcProxyRequest(request)).forbiddenMethod).toBe(method);
     }
-    const allowed = new Request('http://localhost/rpc', {
-      method: 'POST',
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
-    });
-    expect((await readRpcProxyRequest(allowed)).forbiddenMethod).toBeNull();
+    // The watcher's state-anchor and debt-provenance reads must pass the public bridge.
+    for (const method of [
+      'eth_blockNumber',
+      'eth_getProof',
+      'eth_getBlockReceipts',
+      'eth_getBlockTransactionCountByHash',
+      'eth_getRawTransactionByBlockHashAndIndex',
+    ]) {
+      const allowed = rpcRequest({ jsonrpc: '2.0', id: 1, method, params: [] });
+      expect((await readRpcProxyRequest(allowed)).forbiddenMethod).toBeNull();
+    }
   });
 
   test('relays a wallet-signed raw transaction, alone or in a read batch', async () => {

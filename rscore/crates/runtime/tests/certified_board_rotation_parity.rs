@@ -113,6 +113,9 @@ fn j_event(event: &Value) -> JurisdictionEvent {
                     .as_u64()
                     .expect("previousBoardValidUntil"),
             ),
+            board_epoch: text(&data["boardEpoch"])
+                .parse::<BigInt>()
+                .expect("boardEpoch"),
         }),
         other => panic!("unsupported fixture J event: {other}"),
     }

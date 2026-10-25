@@ -6,6 +6,7 @@ import {
   encodeBinaryPayload,
   encodeCanonicalConsensusBytes,
   packPreorderedBinaryPayload,
+  withSharedBinaryProjection,
 } from '../../../protocol/serialization/binary-codec';
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
@@ -63,5 +64,32 @@ describe('binary codec byte form', () => {
     expect(decoded.encSeq).toBe(1);
     // Re-encoding the decoded frame reproduces the bytes a peer MACs.
     expect(hex(encodeBinaryPayload({ payload: decoded.payload, encSeq: decoded.encSeq, type: 'entity_inputs' }))).toBe(hex(encoded));
+  });
+
+  // The storage frame hash and its WAL row pack one canonical input log.
+  test('shared projection keeps every frame-hash and row byte and projects the shared log once', () => {
+    const headers = Array.from({ length: 64 }, (_, index) => ({
+      jHeight: index + 1,
+      jBlockHash: `0x${(index + 1).toString(16).padStart(64, '0')}`,
+    }));
+    const log = canonicalizeBinaryPayload({ headers, label: 'observeJRange', amount: 7n }, { omitSymbolKeys: true });
+    const frameHash = `0x${'ab'.repeat(32)}`;
+    const hashDomain = (): Uint8Array => encodeBinaryPayload({ kind: 'frame', log }, { omitSymbolKeys: true });
+    const row = (): Uint8Array => packPreorderedBinaryPayload({ log, frameHash });
+    const separate = [hashDomain(), row()].map(hex);
+    expect(withSharedBinaryProjection(() => [hashDomain(), row()].map(hex))).toEqual(separate);
+
+    // Discriminating: inside one block the second pack reuses the first
+    // projection, so a (forbidden) mid-block edit is not re-read; outside
+    // the block nothing is cached.
+    const edited = `0x${'cd'.repeat(32)}`;
+    const shared = withSharedBinaryProjection(() => {
+      const first = hex(row());
+      (log.headers[0] as { jBlockHash: string }).jBlockHash = edited;
+      return [first, hex(row())];
+    });
+    expect(shared[1]).toBe(shared[0]);
+    expect(shared[0]).not.toContain('cd'.repeat(32));
+    expect(hex(row())).toContain('cd'.repeat(32));
   });
 });

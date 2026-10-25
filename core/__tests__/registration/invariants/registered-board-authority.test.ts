@@ -111,6 +111,7 @@ const event = (
     logIndex?: number;
     previousBoardHash?: string;
     previousBoardValidUntil?: number;
+    boardEpoch?: number;
   } = {},
 ): JurisdictionEvent => {
   const height = options.height ?? (type === 'FoundationBootstrapped' ? 1 : 2);
@@ -139,6 +140,7 @@ const event = (
       previousBoardHash: options.previousBoardHash ?? blockHash('32'),
       newBoardHash: boardHash,
       previousBoardValidUntil: String(options.previousBoardValidUntil ?? 1_700_604_800),
+      boardEpoch: String(options.boardEpoch ?? 1),
     },
     ...common,
   };
@@ -731,6 +733,7 @@ describe('registered Entity certified board authority', () => {
       height: 3,
       logIndex: 1,
       previousBoardHash: intermediateBoard,
+      boardEpoch: 2,
     });
     const handover = {
       type: 'boardHandover',
@@ -1147,21 +1150,21 @@ describe('registered Entity certified board authority', () => {
     const expected = [
       {
         key: '0x101d8743884cf0bcfb79aac20c3e58f2e38223ef22c443f130f465fcab2dfe5d',
-        record: '0x724cdba3163adeb56edf88b0e441c3bb51fae1cf732644280c059cbda1acd2dd',
-        leaf: '0x980d5268f7e3bdf01f53f8a6afe93a0cc0f4d2bd83e26f42cb53ea507a0c069e',
-        root: '0x980d5268f7e3bdf01f53f8a6afe93a0cc0f4d2bd83e26f42cb53ea507a0c069e',
+        record: '0x990d35217fd2bf852f8d7d4da266c8ce3a0b276b087e3292797f38588941a988',
+        leaf: '0x418253f7ed093e49d794d4834d78f5e90e1ec59d29149c4c33a8555b1dcfebc0',
+        root: '0x418253f7ed093e49d794d4834d78f5e90e1ec59d29149c4c33a8555b1dcfebc0',
       },
       {
         key: '0x6a4415fffbcfa0b81563e18f4533cef61b69e68423d73670ce00274e29b8f345',
-        record: '0x4fc4850e544743d1040276a8a5a87f0ac19473ef2a5c0fc459a56000b3893580',
-        leaf: '0xa5705ed4971fbb3a25f13c1616135a9f7ad7f0632cfdd4eedad05deb5fd5d2df',
-        root: '0x0ea2deb2ebf15eb1364fbfbfe473d0c81e2868ca9b83d5a20fa773e325242359',
+        record: '0xe100fa5202515fb2c2ba8d30ca0462f139cd420394e1ae9701d82d34d8c94018',
+        leaf: '0x1f62a50321552b11e5a5d68960319abdd50b12b5c61a25acbedfd96169e4d463',
+        root: '0x87ad07db80ff53d664a491767be0bdcfd49edaa4374a46ea17fb4dadd7d7feba',
       },
       {
         key: '0x995cbe426d58a56ecfe2c946c943b3e7c0737a8b5e3482da001332fee22e361f',
-        record: '0x904c77a7073e4c1d2495cbf01eac089c84b831352d3d520b3b0bd97c6a6fa1dd',
-        leaf: '0x5fcae0e62e38fcc64fbc68c239adcd56dab72ad26a687669bb3e1ef69bbdb427',
-        root: '0x2c29bb6991678092f07063daa0c50f0ffd288c6808a8a27c23d3d8307efe69c6',
+        record: '0x9d70048f0a17ee464f9ae2a5df5179e555fead7920fa45e5e31de17ecc9c3985',
+        leaf: '0x4436b61bd25a37aca495c15611354df227bb0d268b9096c4bf7ee4f16779ce5e',
+        root: '0x23d4ceee9fee9afbbecb4f74d9227d5121651dba0368ac8730d36b62495698d2',
       },
     ];
     for (let index = 0; index < expected.length; index += 1) {
@@ -1173,10 +1176,6 @@ describe('registered Entity certified board authority', () => {
         boardEpoch: 0,
         previousBoardHash: blockHash('00'),
         previousBoardValidUntil: 0,
-        activatedAtJHeight: 10 + number,
-        logIndex: number,
-        blockHash: `0x${(40 + number).toString(16).repeat(32)}`,
-        transactionHash: `0x${(50 + number).toString(16).repeat(32)}`,
         source: 'EntityRegistered' as const,
       };
       const update = putCertifiedBoardRecord(store, root, record);
@@ -1385,6 +1384,7 @@ describe('registered Entity certified board authority', () => {
         logIndex: 9,
         previousBoardHash: blockHash('33'),
         previousBoardValidUntil: 1_700_604_801,
+        boardEpoch: 2,
       }),
     ]);
     expect(resolveObserverCertifiedBoardHash(state, getCertifiedBoardNodeStore(env), registeredEntityId)).toBe(blockHash('34'));
@@ -1422,7 +1422,45 @@ describe('registered Entity certified board authority', () => {
     expect(state.certifiedBoardState!.boardRegistryRoot).toBe(root);
   });
 
-  test('unique authority resolves the full latest activation position and rejects epoch conflicts', () => {
+  test('the emitted boardEpoch orders A->B->A activations and rejects stale and gapped epochs', () => {
+    const env = createEmptyEnv('registry-activation-epoch-order');
+    const state = makeState(entity('77'), addr('77'), jurisdiction);
+    const toB = event('BoardActivated', blockHash('33'), { height: 3, logIndex: 4, previousBoardHash: blockHash('32') });
+    const backToA = event('BoardActivated', blockHash('32'), {
+      height: 4,
+      logIndex: 0,
+      previousBoardHash: blockHash('33'),
+      boardEpoch: 2,
+    });
+    installEvents(env, state, [
+      event('FoundationBootstrapped', blockHash('31')),
+      event('EntityRegistered', blockHash('32')),
+      toB,
+      backToA,
+    ]);
+    const root = state.certifiedBoardState!.boardRegistryRoot;
+    expect(lookupCertifiedBoardRecord(
+      getCertifiedBoardNodeStore(env),
+      root,
+      getCertifiedBoardStackKey(jurisdiction),
+      registeredEntityId,
+    )).toMatchObject({ boardHash: blockHash('32'), boardEpoch: 2, previousBoardHash: blockHash('33') });
+
+    expect(() => installEvents(env, state, [backToA])).not.toThrow();
+    expect(state.certifiedBoardState!.boardRegistryRoot).toBe(root);
+    expect(() => installEvents(env, state, [toB])).toThrow('CERTIFIED_BOARD_ACTIVATION_STALE');
+    expect(() => installEvents(env, state, [
+      event('BoardActivated', blockHash('34'), {
+        height: 5,
+        logIndex: 0,
+        previousBoardHash: blockHash('32'),
+        boardEpoch: 4,
+      }),
+    ])).toThrow('CERTIFIED_BOARD_ACTIVATION_EPOCH_GAP');
+    expect(state.certifiedBoardState!.boardRegistryRoot).toBe(root);
+  });
+
+  test('unique authority resolves the latest certified epoch and rejects same-epoch conflicts', () => {
     const env = createEmptyEnv('registry-unique-full-position');
     const prefix = [
       event('FoundationBootstrapped', blockHash('31')),
@@ -1438,6 +1476,7 @@ describe('registered Entity certified board authority', () => {
         height: 3,
         logIndex: 9,
         previousBoardHash: blockHash('33'),
+        boardEpoch: 2,
       }),
     ];
     const stale = makeState(entity('70'), addr('70'), jurisdiction);
@@ -1462,8 +1501,8 @@ describe('registered Entity certified board authority', () => {
     expect(resolveUniqueCertifiedRegisteredBoardRecord(env, registeredEntityId)).toMatchObject({
       boardHash: blockHash('32'),
       boardEpoch: 2,
-      activatedAtJHeight: 3,
-      logIndex: 9,
+      previousBoardHash: blockHash('33'),
+      source: 'BoardActivated',
     });
 
     const currentRecord = resolveObserverCertifiedBoardRecord(
@@ -1472,10 +1511,12 @@ describe('registered Entity certified board authority', () => {
       registeredEntityId,
     );
     if (!currentRecord) throw new Error('TEST_LATEST_CERTIFIED_BOARD_RECORD_MISSING');
+    // EntityProvider emits one board per epoch, so an equal epoch carrying a
+    // different board is the only conflict another replica can present.
     const conflictUpdate = putCertifiedBoardRecord(
       getCertifiedBoardNodeStore(env),
       latest.certifiedBoardState!.boardRegistryRoot,
-      { ...currentRecord, boardEpoch: currentRecord.boardEpoch + 1 },
+      { ...currentRecord, boardHash: blockHash('35') },
     );
     cacheCertifiedBoardNodes(env, conflictUpdate.newNodes);
     const conflict = createEntityFrameCandidateState(latest);
@@ -1503,10 +1544,6 @@ describe('registered Entity certified board authority', () => {
       boardEpoch: 0,
       previousBoardHash: blockHash('00'),
       previousBoardValidUntil: 0,
-      activatedAtJHeight: 4 + index,
-      logIndex: index,
-      blockHash: blockHash((70 + index).toString(16)),
-      transactionHash: blockHash((80 + index).toString(16)),
       source: 'EntityRegistered' as const,
     }));
     const build = (ordered: typeof records) => {

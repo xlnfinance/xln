@@ -82,6 +82,7 @@ fn catalog() -> Vec<JurisdictionEvent> {
             previous_board_hash: b32(4),
             new_board_hash: b32(5),
             previous_board_valid_until: 6.into(),
+            board_epoch: 7.into(),
         }),
         JurisdictionEvent::ReserveUpdated(ReserveUpdatedEvent {
             metadata: metadata(),
@@ -160,6 +161,7 @@ fn catalog() -> Vec<JurisdictionEvent> {
             token_id: 28,
             amount: 29.into(),
             debt_index: 30,
+            debt_seq: 1.into(),
         }),
         JurisdictionEvent::DisputeStarted(DisputeStartedEvent {
             metadata: metadata(),
@@ -245,10 +247,11 @@ fn all_eighteen_events_round_trip_and_match_typescript_hash() {
     // `canonicalJurisdictionEventsHash`) over this exact catalog. The previous
     // constant predated the Int512 ProofBody offsets: `validateProofBody`
     // rejects a flat offdelta outright, so no TypeScript event ever hashed the
-    // shape the old value pinned.
+    // shape the old value pinned. Re-derived again when BoardActivated gained
+    // boardEpoch and DebtCreated gained debtSeq.
     assert_eq!(
         hex_bytes(&canonical_events_hash(&events).expect("events hash")),
-        "0x57518b290e3b29241be269838aec91a8ed3767b2f2b47d0f428211465c5557ab",
+        "0xbe88a33acbe8ad98df1ec1e26cf407c65d3aaee0f53913cad0d15dadcec745ff",
     );
 }
 

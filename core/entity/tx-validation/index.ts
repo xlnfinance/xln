@@ -174,6 +174,48 @@ const validateCrossJClearMaterialization = (value: unknown, code: string): void 
   }
 };
 
+const J_ANCHOR_BOARD_RECORD_KEYS = [
+  'stackKey', 'entityId', 'boardHash', 'boardEpoch', 'previousBoardHash', 'previousBoardValidUntil', 'source',
+] as const;
+
+const validateJAnchor = (value: unknown, code: string): void => {
+  const data = requireBoundaryRecord(value, code);
+  requireExactBoundaryKeys(data, [
+    'from', 'jurisdictionRef', 'baseHeight', 'anchorHeight', 'anchorBlockHash', 'stateRoot',
+    'provenValuesRoot', 'signature', 'values',
+  ], [], `${code}_FIELDS`);
+  for (const field of ['from', 'jurisdictionRef', 'anchorBlockHash', 'stateRoot', 'provenValuesRoot', 'signature']) {
+    requireString(data[field], `${code}_${field.toUpperCase()}`);
+  }
+  requireBoundaryInteger(data['baseHeight'], `${code}_BASE_HEIGHT`);
+  requireBoundaryInteger(data['anchorHeight'], `${code}_ANCHOR_HEIGHT`);
+  const values = requireBoundaryRecord(data['values'], `${code}_VALUES`);
+  requireExactBoundaryKeys(
+    values,
+    ['tokenCount', 'boardRecords', 'reserves', 'batchNonce', 'actionNonce'],
+    [],
+    `${code}_VALUES_FIELDS`,
+  );
+  requireBigInt(values['tokenCount'], `${code}_TOKEN_COUNT`, 0n);
+  requireBigInt(values['batchNonce'], `${code}_BATCH_NONCE`, 0n);
+  if (values['actionNonce'] !== null) requireBigInt(values['actionNonce'], `${code}_ACTION_NONCE`, 0n);
+  requireArray(values['boardRecords'], `${code}_BOARD_RECORDS`).forEach((entry, index) => {
+    const record = requireBoundaryRecord(entry, `${code}_BOARD_RECORD_${index}`);
+    requireExactBoundaryKeys(record, J_ANCHOR_BOARD_RECORD_KEYS, [], `${code}_BOARD_RECORD_${index}_FIELDS`);
+    for (const field of ['stackKey', 'entityId', 'boardHash', 'previousBoardHash', 'source']) {
+      requireString(record[field], `${code}_BOARD_RECORD_${index}_${field.toUpperCase()}`);
+    }
+    requireBoundaryInteger(record['boardEpoch'], `${code}_BOARD_RECORD_${index}_EPOCH`);
+    requireBoundaryInteger(record['previousBoardValidUntil'], `${code}_BOARD_RECORD_${index}_VALID_UNTIL`);
+  });
+  const reserves = values['reserves'];
+  if (!(reserves instanceof Map)) throw new Error(`${code}_RESERVES`);
+  for (const [tokenId, amount] of reserves) {
+    requireBoundaryInteger(tokenId, `${code}_RESERVE_TOKEN`);
+    requireBigInt(amount, `${code}_RESERVE_AMOUNT`, 0n);
+  }
+};
+
 function assertEntityTxRecord(
   value: unknown,
   code: string,
@@ -186,6 +228,7 @@ function assertEntityTxRecord(
   requireBoundaryRecord(tx['data'], `${code}_DATA`);
   if (type === 'entityCommand') validateEntityCommand(tx['data'], `${code}_DATA`, depth);
   else if (type === 'boardHandover') validateBoardHandover(tx['data'], `${code}_DATA`);
+  else if (type === 'j_anchor') validateJAnchor(tx['data'], `${code}_DATA`);
   else if (type === 'propose') validateProposal(tx['data'], `${code}_DATA`, depth);
   else if (type === 'runtimeOutput') validateRuntimeOutput(tx['data'], `${code}_DATA`, depth);
   else if (type === 'scheduledWake') validateScheduledWake(tx['data'], `${code}_DATA`);
