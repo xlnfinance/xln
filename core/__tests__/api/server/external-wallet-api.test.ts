@@ -10,7 +10,7 @@ import {
   MAX_WALLET_SNAPSHOT_BODY_BYTES,
   MAX_WALLET_SNAPSHOT_TOKEN_ADDRESSES,
 } from '../../../api/public/external-wallet/http';
-import { createXlnJsonRpcProvider } from '../../../jurisdiction/adapter';
+import { createXlnJsonRpcProvider, resolveJAdapterPrivateKey } from '../../../jurisdiction/adapter';
 import type { JAdapter } from '../../../jurisdiction/adapter/types';
 
 const USER_ADDRESS = new ethers.Wallet(`0x${'22'.repeat(32)}`).address;
@@ -184,12 +184,13 @@ describe('external wallet API faucet transaction gate', () => {
     }
   });
 
-  test('funds a dev-chain faucet without consuming the shared contract-admin nonce', async () => {
-    const calls: Array<{ method: string; params: unknown[] }> = [];
+  const makeDevChainFaucetAdapter = (signerAddress: string) => {
+    const rpcCalls: Array<{ method: string; params: unknown[] }> = [];
+    const transfers: Array<{ funder: string; to: string; amount: bigint }> = [];
     const provider = {
       getBalance: async () => 0n,
       send: async (method: string, params: unknown[]) => {
-        calls.push({ method, params });
+        rpcCalls.push({ method, params });
         return null;
       },
     } as unknown as ethers.Provider;
@@ -198,11 +199,24 @@ describe('external wallet API faucet transaction gate', () => {
       chainId: 31337,
       provider,
       signer: {
+        getAddress: async () => signerAddress,
         sendTransaction: async () => {
-          throw new Error('DEV_CHAIN_ADMIN_NONCE_MUST_NOT_BE_CONSUMED');
+          throw new Error('DEV_CHAIN_ADMIN_NONCE_MUST_NOT_BYPASS_SEQUENCER');
         },
       },
+      transferNative: async (signerPrivateKey: Uint8Array, to: string, amount: bigint) => {
+        transfers.push({ funder: new ethers.Wallet(ethers.hexlify(signerPrivateKey)).address, to, amount });
+        return `0x${'ab'.repeat(32)}`;
+      },
     } as unknown as JAdapter;
+    return { adapter, rpcCalls, transfers };
+  };
+
+  test('funds a dev-chain faucet by a sequenced mined transfer, never a hot state write', async () => {
+    const funderKey = resolveJAdapterPrivateKey({ mode: 'rpc', chainId: 31337 });
+    if (!funderKey) throw new Error('DEV_CHAIN_FUNDER_KEY_MISSING');
+    const funder = new ethers.Wallet(funderKey).address;
+    const { adapter, rpcCalls, transfers } = makeDevChainFaucetAdapter(funder);
     const context = makeContext(adapter, async () => false);
 
     await provisionFaucetWalletFunding(context, adapter, [], {
@@ -213,10 +227,20 @@ describe('external wallet API faucet transaction gate', () => {
     const faucetAddress = new ethers.Wallet(
       ethers.hexlify(deriveSignerKeySync(context.faucetSeed, context.faucetSignerLabel)),
     ).address;
-    expect(calls).toEqual([{
-      method: 'anvil_setBalance',
-      params: [faucetAddress, '0x1'],
-    }]);
+    expect(rpcCalls).toEqual([]);
+    expect(transfers).toEqual([{ funder, to: faucetAddress, amount: 1n }]);
+  });
+
+  test('refuses dev-chain faucet funding from a key that is not the adapter signer', async () => {
+    const { adapter, rpcCalls, transfers } = makeDevChainFaucetAdapter(`0x${'99'.repeat(20)}`);
+    const context = makeContext(adapter, async () => false);
+
+    await expect(provisionFaucetWalletFunding(context, adapter, [], {
+      ensureEth: true,
+      ensureTokens: false,
+    })).rejects.toThrow('DEV_CHAIN_FAUCET_FUNDER_MISMATCH:chainId=31337');
+    expect(rpcCalls).toEqual([]);
+    expect(transfers).toEqual([]);
   });
 
   test('BrowserVM faucet targets only the requested token in its trusted raw units', async () => {

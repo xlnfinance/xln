@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../../../../jurisdictions/typechain-types/index.ts';
 import { deriveSignerKeySync } from '../../../account/crypto';
 import { DEV_CHAIN_IDS } from '../../../jurisdiction/adapter/chain-ids';
+import { resolveJAdapterPrivateKey } from '../../../jurisdiction/adapter/kernel/factory';
 import type { JAdapter, JTokenInfo } from '../../../jurisdiction/adapter/types';
 import { safeStringify } from '../../../protocol/serialization';
 import { readPositiveIntegerEnv } from '../../../config/environment';
@@ -191,19 +192,17 @@ const provisionEthBalance = async (
   const threshold = refillThresholdFor(context.faucetWalletEthTarget);
   if (balance >= threshold) return;
   if (DEV_CHAIN_IDS.has(adapter.chainId)) {
-    const provider = adapter.provider as ethers.Provider & {
-      send?(method: string, params: unknown[]): Promise<unknown>;
-    };
-    if (typeof provider.send !== 'function') {
-      throw new Error(`DEV_CHAIN_BALANCE_RPC_UNAVAILABLE:chainId=${adapter.chainId}`);
+    // anvil_setBalance rewrites state under an already sealed header: from then
+    // on eth_getProof at that height disagrees with header.stateRoot and every
+    // watcher state proof there fails. Fund with a mined transfer from the
+    // adapter's own genesis-funded dev EOA. transferNative runs on that EOA's
+    // per-signer sequencer, so prepared J batches keep their reserved nonces.
+    const funderKey = resolveJAdapterPrivateKey({ mode: adapter.mode, chainId: adapter.chainId });
+    const adapterAddress = (await adapter.signer.getAddress()).toLowerCase();
+    if (!funderKey || new ethers.Wallet(funderKey).address.toLowerCase() !== adapterAddress) {
+      throw new Error(`DEV_CHAIN_FAUCET_FUNDER_MISMATCH:chainId=${adapter.chainId}`);
     }
-    const result = await provider.send('anvil_setBalance', [
-      faucetAddress,
-      ethers.toQuantity(context.faucetWalletEthTarget),
-    ]);
-    if (result !== null) {
-      throw new Error(`DEV_CHAIN_BALANCE_RPC_REJECTED:chainId=${adapter.chainId}`);
-    }
+    await adapter.transferNative(ethers.getBytes(funderKey), faucetAddress, context.faucetWalletEthTarget - balance);
     return;
   }
   const tx = await adapter.signer.sendTransaction({
