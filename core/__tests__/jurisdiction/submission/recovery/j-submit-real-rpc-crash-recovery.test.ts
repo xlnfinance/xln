@@ -31,6 +31,8 @@ type CrashProof = {
   senderReserve: string;
   receiverReserve: string;
   hankoBatchLogCount: number;
+  anchorFrameHeights: number[];
+  anchorFinalizedJHeights: Record<string, number>;
 };
 
 type RecoveryProof = {
@@ -55,6 +57,9 @@ type RecoveryProof = {
   senderReserve: string;
   receiverReserve: string;
   hankoBatchLogCount: number;
+  anchorFrameHeights: number[];
+  checkpointHeightsAtRestore: number[];
+  restoredJHistoryScannedThrough: Record<string, number | null>;
 };
 
 const reservePort = async (): Promise<number> => await new Promise((resolvePort, reject) => {
@@ -125,12 +130,14 @@ const stopAnvil = async (managed: ManagedAnvil): Promise<void> => {
 };
 
 const runFixture = async (
-  phase: 'crash' | 'recover' | 'pending-crash' | 'pending-recover' | 'accepted-crash' | 'prepared-crash' | 'prepared-recover',
+  phase: 'crash' | 'recover' | 'pending-crash' | 'pending-recover' | 'accepted-crash' | 'prepared-crash' | 'prepared-recover'
+    | 'anchor-crash' | 'anchor-recover',
   seed: string,
   anvil: ManagedAnvil,
   dbRoot: string,
   proofPath: string,
   recoveryPath: string,
+  storageEnv: Record<string, string> = {},
 ): Promise<{ exitCode: number; signalCode: string | null; stdout: string; stderr: string }> => {
   console.info(`J_SUBMIT_REAL_RPC_CHILD_START:${phase}`);
   const child = Bun.spawn({
@@ -142,6 +149,7 @@ const runFixture = async (
       ANVIL_RPC: anvil.rpcUrl,
       XLN_RPC_POLLING_INTERVAL_MS: '50',
       JADAPTER_TX_WAIT_TIMEOUT_MS: '10000',
+      ...storageEnv,
     },
     stdout: 'pipe',
     stderr: 'pipe',
@@ -217,6 +225,49 @@ test('applies a mined processBatch JEvent after the runtime is SIGKILLed before 
   }
 }, 120_000);
 
+// Cut A replays the committed 'j_anchor' from the WAL tail; cut B carries it in
+// a checkpoint. Either way the restored Entity keeps anchor finality and the
+// mined batch applies exactly once through the authenticated J event.
+const anchoredCuts = [
+  { cut: 'A WAL-replayed anchor', storageEnv: {}, checkpointCarriesAnchor: false },
+  { cut: 'B checkpoint-carried anchor', storageEnv: { XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES: '2' }, checkpointCarriesAnchor: true },
+] as const;
+for (const { cut, storageEnv, checkpointCarriesAnchor } of anchoredCuts) {
+  test(`recovers anchored lazy Entities after SIGKILL before the batch result is durable (${cut})`, async () => {
+    const anvil = await startAnvil();
+    const root = await mkdtemp(join(tmpdir(), 'xln-j-anchor-crash-'));
+    const proofPath = join(root, 'crash-proof.json');
+    const recoveryPath = join(root, 'recovery-proof.json');
+    const seed = `J anchor real RPC crash ${process.pid} ${cut}`;
+    try {
+      const crashed = await runFixture('anchor-crash', seed, anvil, join(root, 'db'), proofPath, recoveryPath, storageEnv);
+      expect(crashed.exitCode, `${crashed.stdout}\n${crashed.stderr}\nanvil=${anvil.stderr}`).toBe(137);
+      const crashProof = JSON.parse(await Bun.file(proofPath).text()) as CrashProof;
+      expect(crashProof.anchorFrameHeights.length).toBeGreaterThan(0);
+      expect(Object.keys(crashProof.anchorFinalizedJHeights)).toHaveLength(2);
+      expect(crashProof.submitAttempts).toBe(1);
+      expect([crashProof.chainNonce, crashProof.senderReserve, crashProof.receiverReserve]).toEqual(['1', '90', '10']);
+      expect(crashProof.hankoBatchLogCount).toBe(1);
+
+      const recovered = await runFixture('anchor-recover', seed, anvil, join(root, 'db'), proofPath, recoveryPath, storageEnv);
+      expect(recovered.exitCode, `${recovered.stdout}\n${recovered.stderr}\nanvil=${anvil.stderr}`).toBe(0);
+      const recoveryProof = JSON.parse(await Bun.file(recoveryPath).text()) as RecoveryProof;
+      expect(recoveryProof.anchorFrameHeights).toEqual(crashProof.anchorFrameHeights);
+      const anchorHeight = Math.min(...crashProof.anchorFrameHeights);
+      expect(recoveryProof.checkpointHeightsAtRestore.length).toBeGreaterThan(0);
+      expect(recoveryProof.checkpointHeightsAtRestore.some(height => height >= anchorHeight)).toBe(checkpointCarriesAnchor);
+      expect([recoveryProof.pendingBefore, recoveryProof.pendingAfter, recoveryProof.submitAttempts]).toEqual([1, 0, 1]);
+      expect(recoveryProof.resultAttemptId).toBeNull();
+      expect(recoveryProof.entityNonce).toBe(1);
+      expect([recoveryProof.chainNonce, recoveryProof.senderReserve, recoveryProof.receiverReserve]).toEqual(['1', '90', '10']);
+      expect(recoveryProof.hankoBatchLogCount).toBe(1);
+      console.info('J_ANCHOR_CRASH_RECOVERY_PROOF', cut, await Bun.file(recoveryPath).text());
+    } finally {
+      await stopAnvil(anvil);
+      await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 60_000);
+}
 
 test('restores a pending broadcast hash after SIGKILL and polls it without a second transaction', async () => {
   const anvil = await startAnvil();

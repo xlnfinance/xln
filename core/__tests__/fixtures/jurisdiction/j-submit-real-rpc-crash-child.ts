@@ -7,9 +7,10 @@ import {
   loadEnvFromDB,
   processRuntime,
   enqueueRuntimeInput,
+  listPersistedCheckpointHeights,
   readPersistedStorageFrameRecord,
 } from '../../../runtime';
-import { deriveSignerAddressSync } from '../../../account/crypto';
+import { deriveSignerAddressSync, getSignerPrivateKey } from '../../../account/crypto';
 import { getNextJSubmitRetryTimestamp } from '../../../runtime/j-submit/j-submit-scheduler';
 import { ENTITY_J_SUBMIT_RETRY_MS } from '../../../entity/consensus/leader';
 import { computeCanonicalEntityHash } from '../../../storage/canonical-hash';
@@ -20,7 +21,12 @@ import {
   bootScenario,
   fundEntities,
   registerEntities,
+  resolveScenarioBoardSigner,
 } from '../../../scenarios/harness/boot';
+import { processJEvents } from '../../../scenarios/harness/helpers';
+import { generateLazyEntityId } from '../../../entity/factory';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
+import type { JurisdictionConfig } from '../../../entity/types';
 import { formatRuntime } from '../../../qa/runtime-ascii';
 import { safeStringify } from '../../../protocol/serialization';
 import type { RuntimeReplica, JAdapter } from '../../../runtime/types';
@@ -30,7 +36,10 @@ import {
   detachLiveJAdapter,
 } from '../../../runtime/j-submit/live-jadapters';
 
-type Phase = 'crash' | 'recover' | 'pending-crash' | 'pending-recover' | 'accepted-crash' | 'prepared-crash' | 'prepared-recover';
+type Phase = 'crash' | 'recover' | 'pending-crash' | 'pending-recover' | 'accepted-crash' | 'prepared-crash' | 'prepared-recover'
+  | 'anchor-crash' | 'anchor-recover';
+const PHASES: readonly Phase[] = ['crash', 'recover', 'pending-crash', 'pending-recover', 'accepted-crash', 'prepared-crash',
+  'prepared-recover', 'anchor-crash', 'anchor-recover'];
 
 type CrashProof = {
   runtimeId: string;
@@ -50,13 +59,16 @@ type CrashProof = {
   senderReserve: string;
   receiverReserve: string;
   hankoBatchLogCount: number;
+  /** Runtime frames whose committed record carries a 'j_anchor' (anchored phases only). */
+  anchorFrameHeights: number[];
+  anchorFinalizedJHeights: Record<string, number>;
 };
 
 const [requestedPhase, seed, rpcUrl, proofPath, recoveryPath] = Bun.argv.slice(2);
 if (!requestedPhase || !seed || !rpcUrl || !proofPath || !recoveryPath) {
   throw new Error('phase, seed, rpcUrl, proofPath and recoveryPath are required');
 }
-if (!['crash', 'recover', 'pending-crash', 'pending-recover', 'accepted-crash', 'prepared-crash', 'prepared-recover'].includes(requestedPhase)) {
+if (!PHASES.some(candidate => candidate === requestedPhase)) {
   throw new Error(`J_SUBMIT_REAL_RPC_PHASE_INVALID:${requestedPhase}`);
 }
 const phase = requestedPhase as Phase;
@@ -142,6 +154,41 @@ const closeEnv = async (env: RuntimeReplica): Promise<void> => {
   }
 };
 
+// A fresh lazy Entity starts from the authenticated storage anchor the watcher
+// proposes right after import, not from a registration-history scan.
+const importLazyEntity = async (
+  env: RuntimeReplica,
+  jadapter: JAdapter,
+  jurisdiction: JurisdictionConfig,
+  signerIndex: string,
+): Promise<{ id: string; signer: string }> => {
+  const signer = resolveScenarioBoardSigner(env, signerIndex);
+  const id = generateLazyEntityId([signer], 1n, env).toLowerCase();
+  jadapter.registerEntityWallet?.(id, ethers.hexlify(getSignerPrivateKey(env, signer)));
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
+      entityId: id,
+      signerId: signer,
+      data: {
+        isProposer: true,
+        config: { mode: 'proposer-based', threshold: 1n, validators: [signer], shares: { [signer]: 1n }, jurisdiction },
+      },
+    })],
+    entityInputs: [],
+  });
+  await processRuntime(env);
+  return { id, signer };
+};
+
+const readAnchorFrameHeights = async (env: RuntimeReplica): Promise<number[]> => {
+  const heights: number[] = [];
+  for (let height = 1; height <= env.state.height; height += 1) {
+    const frame = await readPersistedStorageFrameRecord(env, height);
+    if (frame && safeStringify(frame.runtimeInput).includes('"j_anchor"')) heights.push(height);
+  }
+  return heights;
+};
+
 const runCrashPhase = async (): Promise<never> => {
   process.env['ANVIL_RPC'] = rpcUrl;
   const { env, jadapter, jurisdiction } = await bootScenario({
@@ -171,13 +218,31 @@ const runCrashPhase = async (): Promise<never> => {
     await sibling.close();
   }
 
-  const senderSigner = deriveSignerAddressSync(seed, '1').toLowerCase();
-  const receiverSigner = deriveSignerAddressSync(seed, '2').toLowerCase();
-  const [sender, receiver] = await registerEntities(env, jadapter, [
-    { name: 'Sender', signer: senderSigner, position: { x: -10, y: 0, z: 0 } },
-    { name: 'Receiver', signer: receiverSigner, position: { x: 10, y: 0, z: 0 } },
-  ], jurisdiction);
+  const anchored = phase === 'anchor-crash';
+  const [sender, receiver] = anchored
+    ? [
+      await importLazyEntity(env, jadapter, jurisdiction, '1'),
+      await importLazyEntity(env, jadapter, jurisdiction, '2'),
+    ]
+    : await registerEntities(env, jadapter, [
+      { name: 'Sender', signer: deriveSignerAddressSync(seed, '1').toLowerCase(), position: { x: -10, y: 0, z: 0 } },
+      { name: 'Receiver', signer: deriveSignerAddressSync(seed, '2').toLowerCase(), position: { x: 10, y: 0, z: 0 } },
+    ], jurisdiction);
   if (!sender || !receiver) fail('entities-not-registered');
+  const anchorFinalizedJHeights: Record<string, number> = {};
+  if (anchored) {
+    await processJEvents(env);
+    await driveUntil(
+      env,
+      () => [sender, receiver].every(entity => findReplica(env, entity.id).state.jHistoryFinality !== undefined),
+      'lazy-entities-anchored',
+    );
+    for (const entity of [sender, receiver]) {
+      anchorFinalizedJHeights[entity.id] = Number(findReplica(env, entity.id).state.lastFinalizedJHeight);
+    }
+  }
+  const anchorFrameHeights = anchored ? await readAnchorFrameHeights(env) : [];
+  if (anchored && anchorFrameHeights.length === 0) fail('j-anchor-frame-not-persisted');
 
   await fundEntities(env, jadapter, [{ id: sender.id, tokenId: 1, amount: 100n }]);
   await processRuntime(env, [{
@@ -247,6 +312,8 @@ const runCrashPhase = async (): Promise<never> => {
       senderReserve: (await jadapter.getReserves(sender.id, 1)).toString(),
       receiverReserve: (await jadapter.getReserves(receiver.id, 1)).toString(),
       hankoBatchLogCount: await countExactHankoBatchLogs(jadapter, sender.id, sentBatch.batchHash),
+      anchorFrameHeights,
+      anchorFinalizedJHeights,
     };
     await Bun.write(proofPath, JSON.stringify(proof));
     if (phase === 'accepted-crash' || phase === 'prepared-crash') crashNow();
@@ -287,6 +354,7 @@ const runRecoverPhase = async (): Promise<void> => {
   };
   const restored = await loadEnvFromDB(runtimeId, seed, restoreOptions);
   if (!restored) fail('restore-returned-null');
+  const checkpointHeightsAtRestore = await listPersistedCheckpointHeights(restored);
   await verifyCommittedRuntimeRoot(restored);
   assertEqual(restored.state.jReplicas.get(proof.jurisdictionName)?.rpcs?.join(','), rpcUrl, 'first-restore-preserves-rpcs');
   restored.scenarioMode = true;
@@ -297,6 +365,14 @@ const runRecoverPhase = async (): Promise<void> => {
   assertEqual(adapter.mode, 'rpc', 'restored-adapter-mode');
   assertEqual((adapter.provider as ethers.JsonRpcProvider)._getConnection().url, trustedRpcUrl, 'first-restore-live-rpc');
   adapter.setQuietLogs?.(true);
+  // Committed anchor finality is durable state: restore must not fall back to a scan.
+  const restoredJHistoryScannedThrough: Record<string, number | null> = {};
+  for (const [entityId, height] of Object.entries(proof.anchorFinalizedJHeights)) {
+    const anchoredReplica = findReplica(restored, entityId);
+    if (anchoredReplica.state.jHistoryFinality === undefined) fail(`restored-anchor-finality-missing:${entityId}`);
+    assertEqual(Number(anchoredReplica.state.lastFinalizedJHeight) >= height, true, `restored-anchor-height:${entityId}`);
+    restoredJHistoryScannedThrough[entityId] = anchoredReplica.jHistory?.scannedThroughHeight ?? null;
+  }
 
   const pendingBefore = restored.infrastructure?.pendingCommittedJOutbox ?? [];
   assertEqual(pendingBefore.length, 1, 'pending-before-reconcile');
@@ -393,6 +469,9 @@ const runRecoverPhase = async (): Promise<void> => {
     senderReserve: (await reopenedAdapter.getReserves(proof.senderId, 1)).toString(),
     receiverReserve: (await reopenedAdapter.getReserves(proof.receiverId, 1)).toString(),
     hankoBatchLogCount: finalHankoBatchLogCount,
+    anchorFrameHeights: proof.anchorFrameHeights,
+    checkpointHeightsAtRestore,
+    restoredJHistoryScannedThrough,
   }));
   await closeEnv(reopened);
 };
@@ -491,7 +570,8 @@ if (phase === 'prepared-recover') {
   await runPreparedNonceRecovery();
 } else if (phase === 'pending-recover') {
   await runPendingRecoverPhase();
-} else if (phase === 'crash' || phase === 'pending-crash' || phase === 'accepted-crash' || phase === 'prepared-crash') {
+} else if (phase === 'crash' || phase === 'pending-crash' || phase === 'accepted-crash' || phase === 'prepared-crash'
+  || phase === 'anchor-crash') {
   await runCrashPhase();
 } else {
   await runRecoverPhase();
