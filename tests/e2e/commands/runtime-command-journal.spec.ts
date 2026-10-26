@@ -304,6 +304,18 @@ test('remote command replay lease has exactly one browser-tab owner', { tag: '@r
   await contender.close();
 });
 
+const expectPendingJournalMutations = (page: Page, count: number) =>
+  expect
+    .poll(() =>
+      page.evaluate(
+        async () =>
+          ((await navigator.locks.query()).pending ?? []).filter(
+            lock => lock.name === 'xln-runtime-command-journal-mutation-v1',
+          ).length,
+      ),
+    )
+    .toBe(count);
+
 test('cross-tab terminal settlement cannot be resurrected by a stale accepted write', { tag: '@resilience' }, async ({ page, context }) => {
   const settler = await context.newPage();
   const staleWriter = await context.newPage();
@@ -330,6 +342,9 @@ test('cross-tab terminal settlement cannot be resurrected by a stale accepted wr
   await page.waitForFunction(() =>
     typeof (window as typeof window & { __releaseJournalMutation?: unknown }).__releaseJournalMutation === 'function');
 
+  // Web Locks grant FIFO once a request reaches the manager, but cross-tab arrival order is
+  // not guaranteed: start from an empty queue, admit settle, and only then the stale write.
+  await expectPendingJournalMutations(page, 0);
   await settler.evaluate(async (id) => {
     const target = window as typeof window & { __journalSettleState?: string };
     target.__journalSettleState = 'waiting';
@@ -340,6 +355,7 @@ test('cross-tab terminal settlement cannot be resurrected by a stale accepted wr
       error => { target.__journalSettleState = `error:${error instanceof Error ? error.message : String(error)}`; },
     );
   }, commandId);
+  await expectPendingJournalMutations(page, 1);
   await staleWriter.evaluate(async (id) => {
     const target = window as typeof window & { __journalAcceptedState?: string };
     target.__journalAcceptedState = 'waiting';
@@ -350,8 +366,7 @@ test('cross-tab terminal settlement cannot be resurrected by a stale accepted wr
       error => { target.__journalAcceptedState = `error:${error instanceof Error ? error.message : String(error)}`; },
     );
   }, commandId);
-
-  await page.waitForTimeout(100);
+  await expectPendingJournalMutations(page, 2);
   expect(await settler.evaluate(() =>
     (window as typeof window & { __journalSettleState?: string }).__journalSettleState)).toBe('waiting');
   expect(await staleWriter.evaluate(() =>
