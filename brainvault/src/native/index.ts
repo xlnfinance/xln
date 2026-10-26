@@ -40,7 +40,8 @@ import {
   createShardSalt,
   shardRequestFingerprint,
 } from '../core/primitives/spec.ts';
-import { copyAndWipe, hexToBytes } from '../core/primitives/encoding.ts';
+import { copyAndWipe } from '../core/primitives/encoding.ts';
+import { acceptShard, createShardSlots, finalizeShards, type ShardMessage } from './shard-collector.ts';
 
 type BrainVaultNativeInput = Readonly<{
   name: string;
@@ -140,7 +141,7 @@ export const deriveBrainVaultNative = async (
 ): Promise<BrainVaultNativeResult> => {
   const { shardCount, factor, workers } = validateInput(input);
   const startedAt = performance.now();
-  const shards = new Array<Uint8Array>(shardCount);
+  const shards = createShardSlots(shardCount);
   let nextShard = 0;
   let completed = 0;
   const workerPath = options.workerPath ?? `${import.meta.dir}/workers/native.ts`;
@@ -186,42 +187,16 @@ export const deriveBrainVaultNative = async (
           worker.on('exit', code => {
             if (!settled && completed < shardCount) fail(new Error(`BRAINVAULT_WORKER_EXITED:${code}`));
           });
-          worker.on('message', (message: unknown) => {
+          worker.on('message', (message: ShardMessage) => {
             if (settled) return;
-            const record = message && typeof message === 'object' ? message as Record<string, unknown> : null;
-            const workerSpecId = record?.['specId'];
-            if (workerSpecId !== BRAINVAULT_V1_SPEC_ID) {
-              fail(new Error('BRAINVAULT_WORKER_SPEC_MISMATCH'));
-              return;
-            }
-            const shardIndex = record?.['shardIndex'];
-            const result = record?.['result'];
-            if (!Number.isSafeInteger(shardIndex) || Number(shardIndex) < 0 || Number(shardIndex) >= shardCount) {
-              fail(new Error('BRAINVAULT_WORKER_SHARD_INDEX_INVALID'));
-              return;
-            }
-            const exactIndex = Number(shardIndex);
-            const requestId = record?.['requestId'];
-            const expectedRequestId = shardRequestFingerprint(
-              exactIndex,
-              shardCount,
-              BRAINVAULT_V1.ALG_ID,
-              BRAINVAULT_V1.SHARD_MEMORY_KB,
-            );
-            if (requestId !== expectedRequestId) {
-              fail(new Error(`BRAINVAULT_WORKER_REQUEST_MISMATCH:${exactIndex}`));
-              return;
-            }
-            if (shards[exactIndex] !== undefined) {
-              fail(new Error(`BRAINVAULT_WORKER_SHARD_DUPLICATE:${exactIndex}`));
-              return;
-            }
-            if (typeof result !== 'string' || result.length !== BRAINVAULT_V1.SHARD_OUTPUT_BYTES * 2) {
-              fail(new Error(`BRAINVAULT_WORKER_RESULT_INVALID:${exactIndex}`));
-              return;
-            }
             try {
-              shards[exactIndex] = hexToBytes(result);
+              acceptShard(
+                shards,
+                message,
+                BRAINVAULT_V1_SPEC_ID,
+                BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
+                index => shardRequestFingerprint(index, shardCount, BRAINVAULT_V1.ALG_ID, BRAINVAULT_V1.SHARD_MEMORY_KB),
+              );
             } catch (error) {
               fail(error);
               return;
@@ -261,10 +236,7 @@ export const deriveBrainVaultNative = async (
   try {
     await deriveShards();
     requireNotAborted(options.signal);
-    for (let index = 0; index < shardCount; index += 1) {
-      if (!(shards[index] instanceof Uint8Array)) throw new Error(`BRAINVAULT_NATIVE_SHARD_MISSING:${index}`);
-    }
-    const masterKey = await combineShards(shards, factor);
+    const masterKey = await combineShards(finalizeShards(shards), factor);
     try {
       const entropy24 = await deriveKey(masterKey, 'bip39/entropy/v1.0', 32);
       try {

@@ -1,4 +1,6 @@
 import {
+	BRAINVAULT_V1,
+	BRAINVAULT_V1_SPEC_ID,
 	combineShards,
 	deriveKey,
 	entropyToMnemonic,
@@ -6,6 +8,8 @@ import {
 	getShardCount,
 	validateInputs,
 } from '../../../brainvault/src/core/index.ts';
+import { shardRequestFingerprint } from '../../../brainvault/src/core/primitives/spec.ts';
+import { acceptShard, createShardSlots, finalizeShards } from '../../../brainvault/src/native/shard-collector.ts';
 
 export type BrainvaultWork = {
 	factor: number;
@@ -44,15 +48,6 @@ export type BrainvaultResult = {
 	derivationTimeMs: number;
 };
 
-function hexToBytes(hex: string): Uint8Array {
-	const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
-	const bytes = new Uint8Array(clean.length / 2);
-	for (let i = 0; i < bytes.length; i++) {
-		bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
-	}
-	return bytes;
-}
-
 type WorkerMessage = {
 	type: 'ready' | 'probe_result' | 'shard_complete' | 'error';
 	id: number;
@@ -85,7 +80,7 @@ export async function deriveBrainvaultMnemonic(
 	const workerCount = Math.max(1, Math.min(navigator.hardwareConcurrency ? navigator.hardwareConcurrency - 1 : 2, shardCount, 4));
 	const startedAt = performance.now();
 
-	const shards: Array<Uint8Array | null> = new Array(shardCount).fill(null);
+	const shards = createShardSlots(shardCount);
 	let completed = 0;
 	let nextShard = 0;
 	let messageSeq = 0;
@@ -134,11 +129,22 @@ export async function deriveBrainvaultMnemonic(
 						return fail(new Error(String(message.data['message'] ?? 'BRAINVAULT_WORKER_FAILED')));
 					}
 					if (message.type === 'ready') {
+						// A stale cached worker must fail loudly, never derive a different wallet.
+						if (message.data['specId'] !== BRAINVAULT_V1_SPEC_ID) return fail(new Error('BRAINVAULT_WORKER_SPEC_MISMATCH'));
 						return dispatch(worker);
 					}
 					if (message.type === 'shard_complete') {
-						const shardIndex = Number(message.data['shardIndex']);
-						shards[shardIndex] = hexToBytes(String(message.data['resultHex']));
+						try {
+							acceptShard(
+								shards,
+								{ specId: message.data['specId'], shardIndex: message.data['shardIndex'], requestId: message.data['requestId'], result: message.data['resultHex'] },
+								BRAINVAULT_V1_SPEC_ID,
+								BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
+								index => shardRequestFingerprint(index, shardCount, BRAINVAULT_V1.ALG_ID, BRAINVAULT_V1.SHARD_MEMORY_KB),
+							);
+						} catch (error) {
+							return fail(error instanceof Error ? error : new Error(String(error)));
+						}
 						completed += 1;
 						onProgress?.({
 							completed,
@@ -154,19 +160,20 @@ export async function deriveBrainvaultMnemonic(
 				worker.postMessage({ type: 'init', id: ++messageSeq, data: {} });
 			}
 		});
+		const masterKey = await combineShards(finalizeShards(shards), factor);
+		try {
+			const entropy = await deriveKey(masterKey, 'bip39/entropy/v1.0', 32);
+			try {
+				const mnemonic = await entropyToMnemonic(entropy);
+				return { mnemonic, factor, shardCount, derivationTimeMs: performance.now() - startedAt };
+			} finally {
+				entropy.fill(0);
+			}
+		} finally {
+			masterKey.fill(0);
+		}
 	} finally {
 		terminateAll();
+		for (const shard of shards) shard?.fill(0);
 	}
-
-	if (shards.some(shard => shard === null)) throw new Error('BRAINVAULT_SHARDS_INCOMPLETE');
-	const masterKey = await combineShards(shards as Uint8Array[], factor);
-	const entropy = await deriveKey(masterKey, 'bip39/entropy/v1.0', 32);
-	const mnemonic = await entropyToMnemonic(entropy);
-
-	return {
-		mnemonic,
-		factor,
-		shardCount,
-		derivationTimeMs: performance.now() - startedAt,
-	};
 }

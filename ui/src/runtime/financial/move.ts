@@ -23,6 +23,7 @@ import {
 	routeRequiresExplicitExternalAllowance,
 	type MoveEndpoint,
 } from '@xln/frontend/lib/components/Entity/move-routes';
+import { normalizeExternalRecipient } from '@xln/frontend/lib/components/Entity/move/external-recipient';
 import { getXLN } from '../xln-loader';
 import type { WalletView } from '../views';
 
@@ -128,6 +129,19 @@ export function countBatchOps(batch: JBatch | null | undefined): number {
 }
 
 export type MoveMode = 'draft' | 'now';
+
+/**
+ * The canonical wallet-boundary recipient: hex lowercased, TRON Base58 only on a TRON
+ * J-adapter. Input that does not normalize is returned as typed, so validateMove
+ * rejects it instead of a guess being sent.
+ */
+export function normalizeMoveRecipient(input: string, jurisdictionMode: string | undefined): string {
+	try {
+		return normalizeExternalRecipient(input, jurisdictionMode);
+	} catch {
+		return input.trim();
+	}
+}
 
 /** Same rules the SvelteKit move workspace enforces before a route is queued. */
 export function validateMove(input: {

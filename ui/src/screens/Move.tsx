@@ -6,6 +6,8 @@ import { Icon } from '../components/Icons';
 import { PendingBatch } from '../components/PendingBatch';
 import { TokenPicker } from '../components/TokenPicker';
 import { useApp } from '../runtime/store';
+import { getEmbeddedEnv } from '../runtime/adapter';
+import { peekXLN } from '../runtime/xln-loader';
 import { formatMoney, parseAmount, amountInputText } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
 import { usdOf } from '../runtime/financial/prices';
@@ -18,6 +20,7 @@ import {
 	hasSentBatch,
 	isExternalTransferMoveRoute,
 	isMoveRouteSupported,
+	normalizeMoveRecipient,
 	sendExternal,
 	submitMove,
 	validateMove,
@@ -109,6 +112,19 @@ export function Move() {
 			return 0n;
 		}
 	}, [amountText, meta.decimals]);
+	// Only a local runtime holds the J-adapter; without it Base58 stays rejected (EVM rules).
+	const env = getEmbeddedEnv();
+	const xln = peekXLN();
+	const jurisdictionMode = (() => {
+		if (!env || !xln || !wallet.entityId) return undefined;
+		try {
+			return xln.getEntityJAdapter(env, wallet.entityId, wallet.signerId)?.mode;
+		} catch (error) {
+			// An Entity without a jurisdiction yet validates recipients by EVM rules; a conflict stays loud.
+			if (error instanceof Error && error.message.startsWith('ENTITY_JURISDICTION_MISSING')) return undefined;
+			throw error;
+		}
+	})();
 	const intent: MoveIntent = {
 		from,
 		to,
@@ -118,7 +134,7 @@ export function Move() {
 		targetEntityId: recipientId,
 		targetHubId: targetAccounts.some(account => account.counterpartyId === targetHubId) ? targetHubId : '',
 		reserveRecipientId: reserveRecipientId.trim().toLowerCase() || wallet.entityId,
-		externalRecipient: externalRecipient.trim(),
+		externalRecipient: normalizeMoveRecipient(externalRecipient, jurisdictionMode),
 		tokenAddress: externalRow?.tokenAddress ?? '',
 	};
 	const available = availableAt(from, wallet, tokenId, sourceAccountId, external);
