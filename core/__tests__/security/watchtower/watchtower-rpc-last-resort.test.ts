@@ -222,6 +222,35 @@ const deployWatchtowerContracts = async (
     nonce: await nextNonce(deployer),
   });
   await depository.waitForDeployment();
+
+  // Depository reserves are bound to listed tokens (mintToReserve reverts E11
+  // for tokenId >= _tokens.length), so list one fixed-supply ERC20 as token 1
+  // through the Foundation lane. At genesis the Foundation board is the 1-of-1
+  // foundationRecipient, which is this deployer.
+  const erc20Artifact = await artifact('ERC20Mock.sol/ERC20Mock.json');
+  const token = await deploy(erc20Artifact, erc20Artifact.bytecode, ['Watchtower USD', 'WUSD', 18, 10n ** 24n]);
+  const depositoryAddress = await depository.getAddress();
+  const tokenAddress = await token.getAddress();
+  const foundationEntityId = ethers.zeroPadValue(ethers.toBeHex(1), 32);
+  const actionNonce = BigInt(await entityProvider.entityActionNonces(foundationEntityId)) + 1n;
+  const actionHash = await entityProvider.computeFoundationActionHash(
+    await entityProvider.FOUNDATION_REGISTER_TOKEN(),
+    ethers.keccak256(abiCoder.encode(
+      ['address', 'uint8', 'address', 'uint256'],
+      [depositoryAddress, 0, tokenAddress, 0n],
+    )),
+    actionNonce,
+  );
+  await (await entityProvider.foundationRegisterExternalToken(
+    depositoryAddress,
+    0,
+    tokenAddress,
+    0n,
+    buildSingleSignerHanko(foundationEntityId, actionHash, deployer.privateKey),
+    actionNonce,
+    { nonce: await nextNonce(deployer) },
+  )).wait();
+  expect(BigInt(await depository.getTokensLength())).toBe(2n);
   return depository;
 };
 
