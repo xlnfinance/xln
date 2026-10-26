@@ -1,9 +1,9 @@
 # XLN Mainnet Bar
 
-**[Index](readme.md)** | **[Current Status](status.md)** | **[Roadmap](roadmap.md)** | **[TODO](../todo.md)**
+**[Index](readme.md)** | **[Roadmap](roadmap.md)** | **[TODO](../todo.md)**
 
 This file defines the release bar for real user funds. It is narrower than
-`status.md`: status explains what is active now; this file explains what must
+`todo.md`: the TODO explains what is active now; this file explains what must
 be true before mainnet is acceptable.
 
 Owner decision, 2026-10-10: an external auditor is not a required launch gate.
@@ -66,7 +66,7 @@ The current public-testnet/demo surface includes:
 - hub lending offer/borrow/repay through the shared app UI;
 - official same-origin watchtower backup restore and delayed-last-resort
   counter-dispute infrastructure;
-- browser E2E for wiped-browser watchtower restore and post-restore channel
+- browser E2E for wiped-browser watchtower restore and post-restore account
   payments.
 
 BrowserVM remains useful as a local simulator, but BrowserVM success alone is

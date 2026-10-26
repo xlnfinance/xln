@@ -1,11 +1,11 @@
 # XLN Roadmap
 
-**[← Index](readme.md)** | **[Current Status](status.md)** | **[Mainnet Bar](mainnet.md)**
+**[← Index](readme.md)** | **[TODO](../todo.md)** | **[Mainnet Bar](mainnet.md)**
 
 This file is the strategic roadmap.
 
 It is intentionally different from:
-- `status.md` — current blockers and active work
+- `../todo.md` — current blockers and active work
 - `mainnet.md` — the release bar for real-user-fund launch
 
 ## Strategic Goal
@@ -126,7 +126,7 @@ That means the roadmap should never depend on CBDCs for near-term relevance.
 
 ## What This Roadmap Does Not Try To Do
 
-- it does not duplicate the active blocker list from `status.md`
+- it does not duplicate the active blocker list from `todo.md`
 - it does not restate the launch gates from `mainnet.md`
 - it does not promise timelines that outrun the current engineering reality
 

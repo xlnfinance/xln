@@ -3,35 +3,30 @@
 **[Index](readme.md)** | **[Mainnet Bar](mainnet.md)** | **[Ops Runbook](deployment/ops-runbook.md)**
 
 This document is the strict release gate for the next public xln launch loop.
-Owner update 2026-10-11: participation is open, including the owner, friends and
-other users spending their own funds. There is no global protocol funding ceiling.
-The current scope is TypeScript, React and Ethereum same-J. New lending admission
-is deferred by the October 12 owner correction; signed historical claims remain
-valid exit evidence. The preflight executes the canonical local/peer admission
-rejection tests instead of requiring completion of the deferred product.
-Sepolia evidence precedes mainnet. Financial, signer-authority and recovery gates
-remain mandatory. Existing `capped-testnet` command names identify the historical
-operator gate; they no longer promise or require a monetary cap.
+Scope follows [AGENTS.md](../AGENTS.md) RELEASE SCOPE (owner decision 2026-10-18):
+Pay, same-J Swap, Cross-swap and Lending on EVM and native TRON, served by the React
+wallet. Participation is open to everyone spending their own funds; there is no
+protocol funding ceiling. Testnet evidence precedes and never authorizes mainnet.
+Financial, signer-authority and recovery gates remain mandatory. Existing
+`capped-testnet` command names identify the operator gate; they no longer promise or
+require a monetary cap.
 
-Owner update, 2026-10-10: external audit sign-off is optional. Codex performs
-the engineering review without claiming independent external assurance.
-Mainnet still requires the applicable financial/recovery gates and a real-funds
-ops posture. No wording in this document downgrades the
-real-funds bar in [mainnet.md](mainnet.md).
+External audit sign-off is optional (owner 2026-10-10); every bug and fix is confirmed
+by at least three different AIs per AGENTS.md, without claiming independent external
+assurance. No wording in this document downgrades the real-funds bar in
+[mainnet.md](mainnet.md).
 
 ## Decision Snapshot
 
-Date: 2026-10-11
-
 | Item | Decision |
 |------|----------|
-| Launch scope | TypeScript, React, Ethereum same-J; new lending admission deferred |
+| Launch scope | Pay, same-J Swap, Cross-swap, Lending; EVM and native TRON; React wallet |
 | Value cap | None at protocol level; each creditor accepts its own bilateral risk |
-| Soak duration | 1 hour uninterrupted for capped testnet |
-| External audit | Optional for testnet and mainnet, owner decision 2026-10-10; engineering/security gates remain required |
+| Soak duration | 1 hour uninterrupted on the release candidate |
+| External audit | Optional; engineering/security gates and >=3-AI bug confirmation remain required |
 | Topology | One official tower and three hubs |
-| Default exception rule | P0/P1 exceptions forbidden; P2 only with explicit owner sign-off |
-| Default recovery SLA | Restore path must complete in less than 60 seconds after seed entry or local backup upload |
+| Exception rule | P0/P1 never ship; P2 only with explicit owner sign-off; P3 with an issue |
+| Recovery SLA | Restore path completes in less than 60 seconds after seed entry or local backup upload |
 
 Executable policy file: [../ops/capped-testnet-policy.json](../ops/capped-testnet-policy.json).
 
@@ -134,7 +129,8 @@ Required scope:
 - direct payments
 - same-account swaps
 - cross-j swaps
-- lending unavailable for new admission; signed historical claims remain verifiable
+- lending (bank/facility/term-loan/savings through canonical production admission)
+- every flow above on EVM and on native TRON (TVM); two EVM simulators do not count
 - persistence/WAL restore
 - contracts and RPC settlement
 - relay/P2P/hub topology
@@ -151,7 +147,7 @@ Required evidence:
    `bun core/scripts/release/run-soak-gate.ts --profile=release --minutes=60`.
 8. Production-health output proving one tower and three hubs are healthy.
 9. Browser/F12 console evidence for landing, bootstrap, recovery, payment,
-   swap, dispute, and reload flows with zero uncaught errors.
+   swap, cross-swap, lending, dispute, and reload flows with zero uncaught errors.
 10. Rollback drill evidence from the same deployment topology.
 
 Hard FAIL if any of these are true:
@@ -174,7 +170,6 @@ Report format:
 - Commit:
 - Scope:
 - Topology:
-- Risk cap:
 - Evidence table:
 - Blockers by severity:
 - Residual risks:
@@ -194,8 +189,9 @@ Report format:
 | Last-resort dispute | Tower acts only after valid breach condition and only with newer proof | watchtower dispute unit/e2e coverage |
 | Payments | Direct payment survives reload, recovery, and hub reconnect | e2e full and browser drill |
 | Swaps | Same-account and cross-j swaps settle or fail loudly | e2e full, flow coverage, cross-j tests |
-| Deferred lending | Wallet availability follows production admission; local admission and remote AccountInput reject without mutation and historical claims remain hashable | `core/__tests__/proofs/fx-admission.test.ts`, React availability |
-| Landing | Landing does not bypass cap, security, recovery, or onboarding warnings | browser drill and console evidence |
+| Lending | Funding, draw, repayment, maturity/default and savings close settle exactly and survive crash recovery | lending financial scenarios, `tests/e2e/product/e2e-lending.spec.ts` |
+| Native TRON | Pay, Swap, Cross-swap and Lending pass on genuine TVM/native RPC with finality | native TRON stand evidence |
+| Landing | Landing does not bypass security, recovery, or onboarding warnings | browser drill and console evidence |
 | Topology | One tower and three hubs are healthy from the production endpoint | `bun run prod:health` plus deployment health payload |
 | Ops | Rollback, secrets, RPCs, gas funding, and alerts are explicit | ops runbook drill evidence |
 
@@ -236,10 +232,9 @@ Report format:
 6. Classify every issue.
    - P0: loss of funds, silent wrong state, deterministic divergence,
      unauthorized dispute, plaintext backup exposure.
-   - P1: recovery cannot complete, payment/swap/lending broken, cap bypass,
-     health/rollback blind spot.
-   - P2: degraded UX or operator friction that does not threaten funds under
-     the USD 10,000 cap.
+   - P1: recovery cannot complete, payment/swap/cross-swap/lending broken on EVM
+     or TRON, health/rollback blind spot.
+   - P2: degraded UX or operator friction that does not threaten funds.
    - P3: polish only.
 
 7. Fix one blocker at a time.
@@ -261,8 +256,7 @@ The launch owner must paste this block into the release issue:
 Verdict:
 Commit:
 Dirty worktree:
-Scope: all current user-facing features + landing
-Risk cap: USD 10,000 equivalent aggregate
+Scope: Pay, same-J Swap, Cross-swap, Lending on EVM and native TRON + landing
 Topology: one tower, three hubs
 1h soak artifact:
 Gate artifacts:
@@ -272,14 +266,3 @@ Open P2/P3:
 Explicit exceptions:
 Next rollback command:
 ```
-
-## Open Questions
-
-1. Should the USD 10,000 cap be enforced in code, in operator config, or as an
-   off-chain launch policy?
-2. Confirm the exception rule: P0/P1 never ship, P2 ships only with explicit
-   owner sign-off, P3 can ship with an issue.
-3. Confirm recovery SLA: less than 60 seconds from seed entry or backup upload
-   to restored wallet choice.
-4. Is the landing allowed to onboard public users immediately, or must it be
-   waitlist/invite-only until the 1-hour capped soak is complete?

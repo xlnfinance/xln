@@ -47,17 +47,14 @@ design documents in `/docs`; do not generate a progress-file trail by default.
 
 ## Second opinion: one bounded question
 
-Current owner authorization and review cadence are recorded in
-[night-work-plan.md](night-work-plan.md): from 2026-09-06 18:31:42 UTC, USD 10 per
-rolling hour across all agents and attempts, with one Quorum reservation owner.
-Unresolved new calls retain their full maximum reservation even after an hour;
-known final costs occupy the window for 60 minutes after settlement. Historical
-overnight grants, holds and unverified costs remain intact under their original
-authorization. The USD 1 wave target remains an economical default, not a fresh
-allocation. Do not infer extra budget from an account balance or a new agent.
+Budget and confirmation rules live in [AGENTS.md](../AGENTS.md) (REVIEW AND EXTERNAL
+MODELS): subscriptions first (Codex, Claude, Z.ai via pi `zai-coding-cn`), OpenRouter
+capped at USD 10 per rolling hour across all agents and attempts, and every bug plus
+fix confirmed by at least three different AIs. Unresolved calls retain their full
+reservation; do not infer extra budget from an account balance or a new agent.
 
-Use an advisor when the owner requests external input and it can resolve a real
-uncertainty. Default one response. A consequential unresolved disagreement may
+Use an advisor to confirm a bug and its fix or to resolve a real uncertainty.
+Default one response. A consequential unresolved disagreement may
 justify one independent tie-break within the authorized scope. No recursive
 all-to-all review, never-ending paid loop or score threshold that blocks the first
 production artifact. Persist history indefinitely; bound each run and its cost.

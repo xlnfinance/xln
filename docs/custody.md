@@ -7,7 +7,7 @@ Scope: prepaid unilateral fee balance inside bilateral account state
 Audience: runtime, wallet, hub-fee, and rebalance implementers
 
 This document defines the custody-balance mechanism itself. It is not the
-canonical source for current launch sequencing; use [status.md](status.md) and
+canonical source for current launch sequencing; use [todo.md](../todo.md) and
 [mainnet.md](mainnet.md) for that.
 
 ## what

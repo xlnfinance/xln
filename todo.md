@@ -1,323 +1,74 @@
 # xln mainnet release status
 
-This is the only live TODO/NEXT file. It is a fail-closed release status, not a
-product backlog; long-term work belongs in `docs/roadmap.md`.
+This is the only live TODO/NEXT file. It is a fail-closed release queue, not a product
+backlog; long-term work belongs in `docs/roadmap.md`. Scope and authority come from
+[AGENTS.md](AGENTS.md) RELEASE SCOPE (2026-10-18); the current execution handoff is
+[docs/night-work-plan.md](docs/night-work-plan.md). Delete an item when it is done.
 
-September 30 implementation and verification: [J/E/A continuation](docs/jea-continuation.md).
-The 138-target E2E snapshot and green full check are dated evidence, not mainnet acceptance.
+## Release scope
 
-## Current execution order — 2026-10-14
+Pay, same-J Swap, Cross-swap and Lending on EVM and native TRON, served by the React
+`ui/` wallet. Open participation with users' own funds; no protocol monetary cap.
+Testnet evidence never authorizes real-funds activation.
 
-Scope: TS, React, Ethereum same-J. Rust and new production lending are frozen.
-Public Sepolia runs clean `4c4413992`: PR #77 passed all seven required checks
-and merged. H1 and tower are healthy; the existing P6 dispute is finalized with
-zero collateral. The reviewed RPC fix retries temporary missing headers without
-advancing incomplete authenticated state. Contracts and WAL were preserved.
+## Blockers, in order
 
-1. Remove the obsolete mainnet preflight requirement to finish deferred lending.
-   Run the existing production admission rejection and historical-proof tests
-   instead. Keep all financial, recovery, topology and soak requirements.
-2. Verify the clean candidate with the source and money-invariant checks, then
-   execute the existing release integration gate and fix its first real failure.
-   No more repeats of green faucet/payment/recovery demonstrations.
-3. Finish outstanding exact-build mainnet evidence and prepare the owner-reviewed
-   deployment package. Public Sepolia is usable testnet evidence, not mainnet approval.
+1. Verify the current `main` SHA: `bun run check`, then `bun run gate:release`; fix the
+   first real failure. The 2026-10-18 "swap frame 48 eventBarrier" red came from the retired
+   live-vs-live oracle (replaced 2026-10-19 by recorded checkpoint/WAL replay); swap and
+   swap-market pass `check:determinism` on 00092a4c2.
+2. Same-J Swap, Cross-swap and Lending: browserless financial scenarios plus owning React
+   E2E on one immutable candidate. Public `xln.finance` proves only import, faucet,
+   reserve, pay, credit and reload (6/6 on `e4abb8c14`).
+3. Native TRON: genuine TVM/native RPC/event/finality evidence for all four flows. The
+   validating-node trust decision for receipt authentication is open in
+   [docs/tron-native-test-plan.md](docs/tron-native-test-plan.md).
+4. Public Sepolia on current bytecode with a real clock: three disputes (own collateral;
+   counterparty owes beyond collateral → exact payout plus debt row; stale dispute against
+   an offline wallet → watchtower counters) and secured/unsecured exits.
+5. Wallet import latency (32.1 s) and reload (20.1 s): remove the duplicate authenticated
+   header pass in `core/jurisdiction/adapter/receipt/reader.ts`.
+6. Valid 1,000-user live TPS run under the AGENTS.md rules (last run: 20,000 payments,
+   zero pending ACKs, drain 26,183 ms against the unchanged 25,000 ms limit).
+7. Uninterrupted one-hour soak and `bun run gate:mainnet` on the final clean SHA.
+8. Real mainnet operations documented and drilled: chain/RPC, operator keys, tower gas
+   policy, backup/restore and last-resort dispute drills, monitoring thresholds, rollback.
+9. Solidity 2^200 money domain: coherent arithmetic and transformer ABI decision pending
+   owner confirmation in [docs/money-domain.md](docs/money-domain.md). Do not claim all
+   contract monetary ceilings are gone.
+10. Classify every runtime exception as `drop`, `defer`, `debug-assert` or `fatal` (open P1
+    from the former status queue; no closure evidence yet).
+11. Release review packets for authorized reviewers include the documented consensus/Hanko
+    and contract-governance manual-review questions (the scans run in `security:audit-pack`).
+12. Rust financial parity and the history-reader counterexamples (carried from the former
+    handoff; Rust is the second engine for high-TPS hubs, not a launch blocker for TS).
+13. R2C guard with runtime parity (delegated 2026-10-14; mark done only with a cited SHA/test).
 
-Completed: public React faucet 100 test USDT → pay 25 → retain 75 → reload;
-fresh-device file recovery 6.157 seconds and fresh tower recovery 5.968 seconds.
-Three new profiles, one wallet/Account; seven authenticated snapshots preserve
-all 16 compared Account state and signature fields. Tampered ciphertext rejects.
-See [deployed release](docs/evidence/sepolia-header-20261013/release-4c4413992.json)
-and [cold recovery](docs/evidence/sepolia-cold-recovery-20261014/recovery-4c4413992.json).
-Earlier frozen-import, P6 catch-up and CI boot blockers are resolved; do not
-repeat the old promotion/funding commands. The latest handoff lives in
-[the work plan](docs/night-work-plan.md).
+## Product and network work that gates public launch
 
-## Historical pre-freeze lending work — not current release scope
-
-Latest October 11 owner update: create/manage the Sepolia signer, obtain test ETH
-and deploy current contracts autonomously. Mainnet participation is open; no
-invite restriction or arbitrary protocol funding ceiling. Lending is in scope:
-savers lend to a bank Entity for interest, borrowers borrow from it, and both
-claims live in bilateral Accounts. Only collateral secures recovery; a borrower
-default never erases the bank's liability to its savers. Prove the signed lending
-and maturity/default paths before calling the product release-ready.
-
-Current lending boundary: the bank publishes rates and a bounded late-interest
-window; a named, expiring facility and exact borrower authorization gate funding.
-Only collateral secures recovery. The full signed term-plus-late coupon reserves
-accepted Account risk. Repayment debits the exact Account-clock quote within the
-borrower's maximum; borrower default never erases the saver liability.
-
-Latest owner correction: bank funding must be pooled by asset/jurisdiction, with
-no direct saver-to-borrower allocation. That matcher and its allocation counters
-are now removed: two 60-unit deposits support an approved 100 or 150 draw, with
-independent savings liabilities. Focused tests, real SIGKILL recovery,
-three rebuilt browser journeys and source checks pass. All six owner policy choices are
-resolved: both term and demand deposits; bank-authorized lending above deposits;
-maturity/request ordered unpaid withdrawals; actual-time loan interest; partial
-interest-first repayments; automatic draws inside signed borrower facilities.
-Early repayment now uses the same elapsed-time formula as the contract. Current
-evidence: 558 related tests, 87 focused financial cases, three React journeys,
-102 fresh WAL frames exact through TS W1/W4, and full check. Demand terms,
-ordered servicing and partial repayment remain release work.
-Prefer one general signed-obligation mechanism and delete redundant paths.
-
-Checkpoint evidence: 554 related tests / 448,400 assertions, three real-clock local
-funding/exit proofs, two watchtower tests, nine rebuilt browser journeys,
-145 exact fixed WAL frames before/after through TS W1/W4, 49 Hardhat cases and
-16 gas vectors. Old native claims missing explicit late terms reject;
-use a fresh deployment domain, never retrofit old signatures. The full `bun run check` passes for the coherent local
-source/tests/artifacts checkpoint. Four real SIGKILL boundaries preserve
-loan maturity/default, saver close and exact repayment, including a deferred local
-ACK across two crashes. This uses a controlled clock; funded public Sepolia
-real-clock exits, valid live load and immutable release gates remain required.
-The subsequent payment/swap run exposed a bootstrap crash: outbox matching tried
-to consensus-hash a live recovery marker. Using the canonical WAL payload encoder
-fixes it without changing signed inputs. Six payment/swap journeys, 37 related
-recovery tests, 110-frame TS W1/W4 exact replay and full check now pass.
-The current read-only proposal candidate passes 28 focused tests, 554 related
-tests, three rebuilt lending journeys and exact 35/110-frame WAL replay with one
-and four TS workers. Selection no longer claims unchanged Accounts for writing;
-actual writes and all root/signature verification remain in place. Full check passes.
-The current 1,000-user run settles 20,000 payments with zero pending ACKs but
-drains in 26,183ms against the unchanged 25,000ms limit, with production diagnostic
-counters disabled. Redundant signed gossip, old-state proof calculation and parent
-dispute-signature warming are removed; resulting proofs and worker verification
-stay mandatory. First funding still refreshes routing. React refreshes the bank's
-state independently of local Account ACKs. Load and public deployment remain red.
-See `docs/night-work-plan.md` for the current boundary.
-
-30-day plan:
-
-1. R2C guard with runtime parity — owned by the parallel session.
-2. Honest CI green on `main`, 10 consecutive runs.
-3. TS = Solidity entitlement differential harness.
-4. Sepolia, current bytecode, real clock — three disputes: own collateral; counterparty
-   owes beyond collateral → exact payout plus debt row; stale dispute against an offline
-   wallet → watchtower counters.
-5. MML v0 formula in `docs/intro.md`: unaffiliated obligations only; a hub-routed payment
-   counts once, on the commercial edge.
-6. Owner: 10 conversations with OTC/MM/payout firms → at least 2 written intents.
-
-Working method: [improvement-loop.md](docs/improvement-loop.md). XLN-1000 steers the work;
-binary evidence coverage (passed / frozen required checks) decides release.
-
-## Adopted launch design — 2026-09-05
-
-Canonical product and evidence contract: [launch-design.md](docs/launch-design.md).
-
-- First product: executable USDT Tron ↔ USDT Ethereum liquidity, with payment,
-  same-jurisdiction WETH/USDT exchange and cross-jurisdiction USDT exchange.
-  Keep assets jurisdiction-local; never merge their balances by ticker.
-- Two market makers and three independent hub operators are the network-launch
-  target. Our H1–H3/MM remain the engineering stand, not evidence of independent
-  failure domains. The latest adopted design proposes a USD 10,000 canary,
-  then 100,000 / 500,000 / 2–5 million / dynamic risk-managed stages; no funds
-  move and no policy cap becomes real merely by accepting this design.
-- Product evidence is executable liquidity by amount/direction, all-in price,
-  quote availability, completion rate and p50/p95 execution. Count unique
-  settled economic operations. Display unavailable values honestly; publish
-  no illustrative balances, volumes, latencies, or unsupported privacy claims.
-- Verification is discovery/trust metadata, never protocol permission. Prove
-  H2 failure while an independently funded H1–H3 route remains executable.
-- Ethereum, Tron, Base and experimental XLNC remain architecture targets;
-  the first public liquidity workflow is Tron ↔ Ethereum. Landing-page work
-  follows real quotes and same-candidate financial/recovery evidence.
-
-## Earlier owner launch decisions — 2026-09-05
-
-- Target: soft mainnet on Ethereum, Tron, Base and experimental XLNC.
-  Earlier initial total capital/risk budget: USD 1,000; the later adopted design
-  above proposes a larger canary. Growth still requires measured safety evidence.
-  H1–H3 and MM are currently operated by us; do not describe them as independent operators.
-- Mainnet correctness before customer acquisition. XLNC may start with one validator,
-  but local full-node verification does not remove censorship/liveness/governance trust.
-- The latest owner instruction rejects arbitrary protocol monetary ceilings. Limit our
-  own funded launch exposure operationally; do not restrict other users' transfer amounts.
-  Full-width arithmetic, solvency, signer authority and representable state remain mandatory.
-- Add final governance evidence: CONTROL/DIVIDEND fixed supplies, board proposal/rotation,
-  treasury authority, buyback execution and replay/rejection cases on the same candidate.
-- Replace the second-Anvil-only Tron claim with genuine TVM/native RPC/event/finality evidence.
-  Preserve the smallest shared adapter boundary; Anvil is only an EVM test fixture.
-- Target ordinary verification cycles at 60 seconds through measured startup reuse and
-  duplicate-work removal. Do not skip financial assertions or relabel smoke as parity/TPS.
-- Validate pricing against actual all-in competing use cases; 1 bp payments / 3 bp swaps
-  are hypotheses, not an established two-times advantage over every CEX tier.
-
-## Active launch recovery boundary — 2026-09-05
-
-- Separate P2P authentication and financial readiness is implemented in the
-  working tree: retain the existing outbox until the exact recipient is ready;
-  close new financial operations through J catch-up. Local WAL and portable
-  checkpoint recovery retain the same ordered outbox evidence.
-- Fresh production R7 is green after the TS recovery-mark correction: one cross-j
-  swap in 625 ms, full process replacement and recovery complete in 38.681 s.
-  Frozen checkpoint23/tail24–90: 67 frames, 108 Entity inputs, 104 outputs. TS W1/W4
-  match all five evidence arrays. Native W1 verifies every frame/root/ordered digest
-  and fsync, then fails its mandatory same-native restart with
-  `RRS_NATIVE_RESTORE_STORAGE:RRS_ENTITY_CONTEXT_FRAME_REFS`. Native h29 context keys
-  and digests are complete; the reader confuses canonical encoded-key order with raw
-  string order. Fix that decoder boundary and repeat R7 before W4/live J/final gates.
-  Evidence: `docs/evidence/archive-tmp/xln-cross-j-wal-r7-20260905.log` and
-  `docs/evidence/archive-tmp/xln-cross-j-parity-r7-20260905/rust-w1.stderr.log`.
-  Fixes preserve exact startup signer inventories, authenticated Runtime output
-  boundaries/source frames and replay-only WAL routes; live guards remain strict.
-  Focused Runtime regressions: 87 tests / 330 assertions / 2.89 s.
-- Runtime output/readiness changes have focused TS and Rust vectors. A fresh production
-  cross-j WAL is bound at `docs/evidence/archive-tmp/xln-cross-j-wal-r4-20260905/recording-manifest.json`:
-  checkpoint 22, tail through 57, 35 frames, 64 Entity inputs, 56 outputs. TS W1/W4
-  replay verifies every frame and all five per-frame evidence arrays agree exactly.
-  Rust restores the original signed checkpoint through canonical offline Account import;
-  frames 23–44 match (22/35). Frame 45 exposed a TS worker bug: it proposes the whole
-  mempool before the cross-j selector, so the later guard sees an empty mempool. Real
-  worker regressions reproduce four failures (W1/W4, missing reciprocal leg/nine orders)
-  in 1.385 s. Canonical preproposal selection and the same failed-HTLC continuation
-  edge are fixed: 52 tests / 41,146 assertions / 9.42 s. R4 remains bug evidence.
-  New immutable R6 checkpoint 24 plus tail 25–89 contains 65 frames, 105 Entity inputs
-  and 104 outbox envelopes. TS W1/W4 match every frame and all five arrays exactly in
-  2.837 s / 3.115 s. Native per-input admission, per-owner cascade order and late-intent
-  admission pass 85 machine tests. Further R6 fixes cover J-height, atomic sibling
-  publication, same-J-only pair dimensions and deferred remote Runtime outputs.
-  Rust now matches 48/65 frames, heights 25–72. h67 fixes preserve speculative Cross
-  book publication, canonical reveal admission and committed-only match metrics.
-  At h68, restoring the existing per-input hub-rebalance kick makes all 46 Entity
-  sections, canonical state hash and ordered outbox exact. Correcting an absent-order
-  event closes the remaining signed frame mismatch. h69 now preserves same-frame
-  scheduled collective work, exact rebalance Account touches and the canonical
-  financial-effect subset. h72 now verifies retained prior native outbox evidence;
-  seven focused regressions pass. First red h73: roots, metadata and outbox are exact,
-  but the first live post-restart TS frame inherits 16 Account/two book dirty marks
-  from recovery. Fixed in TS by clearing only successful per-frame recovery marks;
-  real payment/recovery regression passes 31 assertions in 2.12 s and preserves
-  cumulative checkpoint overlay. Fresh R7 above passes this boundary. Prior TS replay checks did not
-  independently regenerate this touch list.
-  Evidence: `docs/evidence/archive-tmp/xln-cross-j-parity-r6-20260905/recording-native-import.json.w1.diffs/first-divergence-h73.json`.
-  Completeness remains a final gate.
-- Evidence-mode restart exposed two startup dependency errors and a real crypto worker
-  process-liveness failure (pending job, process exits 0). Both are fixed and r5 restart
-  is green. The original base checkpoint survives workload setup and recovery.
-- Full check r4 passed 15 Solidity invariants in 8.23 s, then stopped on a new test's
-  folder width. The test is grouped and the unchanged width threshold passes. Rust
-  all-target/all-feature clippy is green. Run full check on the next stable candidate.
-- Existing company-ipo scenario passed on actual local Anvil RPC: custody 100 billion
-  CONTROL and DIVIDEND, settled takeover/handover and successor reserve authority.
-  Buyback now proves exact committed movement of 10 billion CONTROL and 1 trillion
-  six-decimal USDT base units, fee 0 under that fixture's policy, across eight asset
-  copies. This is one buyback, not eight operations. All 211 frames survive persistence
-  reload with the same root. Evidence: `docs/evidence/archive-tmp/xln-company-ipo-20260905.log`.
-  Four existing Solidity tests passed in 266 ms on current compiled source/bytecode:
-  initial emission for Foundation/numbered Entity and retired-board rejection for batch,
-  C2R and settlement, while historical dispute signatures remain accepted. These are
-  local EDR tests; they do not prove every future issuance path. This result makes no
-  burn, public-USDT or on-chain buyback-return claim.
-- Incoming Spectrum and own Reserve→Account Move passed real browser R10 in 28.926 s:
-  25→27.5 credit, 25.000025 funded including route fee, payment review restored without
-  automatic send; zero page/MAC/auth errors and zero activity-view gap warnings.
-  Same-j Swap also passed its real browser scenario in 24.100 s overall: 199.999992
-  USDC debited, 0.0799760016 WETH received, 0.0879824 permanent WETH credit, zero pending
-  work. Cross fresh-wallet setup is fixed by the existing canonical per-jurisdiction
-  signer/import path and passed in 22.381 s. Actual Cross input then accepted explicit
-  0.03→0.033 WETH credit with unchanged balances before confirmation, but its submitted
-  order stayed resting. Selecting actual opposite MM liquidity now proves settlement:
-  Cross debits 10,200 USDC, receives 10,198.98 gross USDT, net 10,197.860102 plus the signed
-  1.119898 collateral fee. R14 Same-J + Cross pass 2/2 in 38.099 s with one bootstrap;
-  pre-submit tariff, correct Account settings link and 12 px mobile clearance verified.
-  Lending R1 stops at lending_fund admission: D3 still excludes live Lending despite
-  existing handlers. Real worker proves no Account mutation; aggregate diagnostics
-  now preserve the primary error. Spectrum/close payout and actual lease remain open.
-- Native TVM deployed all eight contracts and passed canonical reserve deposit/withdraw:
-  reserve 0→1,000,000→0, nonce 1→2, external balance restored. Evidence:
-  `docs/evidence/tron-native-20260905/manifest.json`. Native cross-j and public rails remain.
-  Configured native graph now passes the real provisioner with distinct contract addresses
-  and native endpoints/finality. Bytecode templates 9/9 unchanged. Native import reached
-  J_AUTHORITY_RECEIPT_MPT_PROOF_MISSING:FoundationBootstrapped:25:3; stock Tron headers
-  do not authenticate arbitrary logs with a receipt root. The explicit validating-node
-  trust decision is pending in docs/tron-native-test-plan.md; native cross-j stays closed.
-- TS/Rust arbitrary payment/credit ceilings are removed, with full-width state and hold
-  checks before mutation. The Solidity 2^200 domain still requires a coherent arithmetic
-  and transformer ABI decision; owner confirmation requested in `docs/money-domain.md`.
-  Do not claim all contract monetary ceilings are gone.
-
-## Active Rust H1 milestone — 2026-08-31
-
-- Remove avoidable Account-input/outbox data movement. Current 1000-user,
-  five-second profile moves 52.3 MB of Runtime inputs and 45.5 MB of outbox;
-  31.0 MB of the outbox is repeated frame/dispute Hanko material.
-- Explain and reduce the `w1 -> w4` full-flow gap. Current diagnostic Account
-  work improves 2.55x per Account input, while end-to-end drain improves only
-  1.27x because W4 seals 51 Runtime frames / 14,655 Account inputs while W1
-  seals 21 / 10,526 for the same 5,000 payments. The Account outcome trace has
-  zero `FrameDuplicate`; isolate Account-frame fragmentation/bundling rather
-  than misclassifying the ledger's repeated appearances as duplicate apply.
-- Collapse the production Entity plan to the canonical three stages. Today an
-  interleaved local transaction can split one frame into multiple
-  `AccountRange` worker visits; the target is one Account ingress batch, one
-  Entity financial batch, and one Account proposal batch.
-- Collapse `commit_paybook_changes` from two shared-pool dispatches into one
-  `256 shard -> changes[]` dispatch. Current code first maps every change into
-  a mutation and then wakes the pool again for active radix slots; measured
-  Paybook commit wall is 45 ms at W1 versus 168 ms at W4 for the same payment
-  smoke, proving coordination overhead instead of scaling.
-- Remove the two conditional post-proposal Account continuations from the
-  normal architecture: failed-forward compensation must be decided before
-  Paybook emits proposal work, and locally-produced settlement Hankos must be
-  attached at publication instead of mutating the Account candidate after
-  Entity certification.
-- Remove derived Runtime-frame touch lists from the canonical WAL format once
-  the TS storage/UI readers derive their views from canonical input/output
-  rows; do not retain both representations.
-- Eliminate duplicate EntityInput encoding: admission currently encodes the
-  complete input only to measure it, then Runtime projection encodes it again
-  inside the frame. One canonical byte representation must cross both steps.
-- Run fresh, sequential Rust H1 payment saturation evidence at 5,000 users for
-  20 seconds with W1 and W4, then run the same-chain swap gate. Report only
-  committed operations with zero pending Account ACKs and zero transport loss.
-- Run `bun run check`, checkpoint the coherent change on `main`, and push only
-  after the focused Rust parity tests and live H1 gates are green.
-
-## Current candidate — 2026-08-14
-
-- Branch: `main` (the only writable release worktree).
-- Open mainnet protocol/code blockers: **5**. Testnet remains the active product target.
-- The executable mainnet gate currently blocks uncapped launch until aggregate
-  financial-risk enforcement and the bilateral/on-chain lending covenant are real.
-- Live Runtime/Entity/Account replicas must contain only the current committed
-  head and bounded in-flight coordination. Historical frames, terminal orders
-  and finalized J-event bodies are moving to their dedicated LevelDB history
-  stores; release remains blocked while any live historical collection remains.
-- Runtime/Entity/Account/Book candidates must use separate recomputable
-  persistent-Merkle overlays. A frame may not clone or traverse the complete
-  machine, and throughput evidence is not valid until every matched swap is
-  bilaterally committed with all Runtime/outbox queues at zero.
-- Cross-j Pulls intentionally use independent jurisdiction dispute clocks. Any
-  observed leg dispute must make the user or hub Runtime atomically start every
-  sibling dispute in one WAL candidate and port Source evidence to Target. This
-  best-effort recovery invariant does not impose a shared settlement epoch and
-  does not disable the product.
-- Hash-ladder publication is an independent Sprites-like `processBatch`
-  operation authenticated by the publishing Entity. The registry stores the
-  account-scoped ladder record; it does not authorize against, retain, or
-  promote a dispute ProofBody.
-- `proposerIsLeft` is signed proof-header consensus data. LEFT wins an equal
-  nonce; a strictly newer nonce wins regardless of side.
-- Pull-free early finalization is available only to the non-starter as fresh
-  mutual acceptance. The starter waits until T; every Pull finalization waits
-  until T. Watchtowers may lock a newer signed counter-proof before T and may
-  execute it only at T.
+- Honest CI green on `main`, 10 consecutive runs.
+- TS = Solidity entitlement differential harness.
+- Account-level recovery coverage UI with tower receipt/failure visibility.
+- Explicit token support boundary: prove multi-token E2E or label the wallet single-token.
+- Two market makers and three independent hub operators; our H1–H3/MM are the
+  engineering stand, not independent failure domains. Prove H2 failure while an
+  independently funded H1–H3 route stays executable ([launch design](docs/launch-design.md)).
+- MML v0 formula in `docs/intro.md`: unaffiliated obligations only; a hub-routed payment
+  counts once, on the commercial edge.
+- Owner: 10 conversations with OTC/MM/payout firms → at least 2 written intents.
 
 ## Release evidence contract
 
-The candidate is publishable only after all commands below are green on the
-same bytes and an independent contract/runtime audit reports no blocker:
+The candidate is publishable only after all of the following are green on the same bytes
+and the independent contract/runtime audit (each bug and fix confirmed by >=3 different
+AIs; external sign-off optional) reports no blocker:
 
 - `bun run check`
 - `bun run gate:release`
-- `bun run gate:mainnet-preflight` (owner explicitly excluded the soak gate)
+- `bun run gate:mainnet` (includes the one-hour soak)
 - post-deploy `bun run prod:health`
-- fully green unit tests, deterministic scenarios, and browser E2E on the same
-  immutable candidate bytes
+- fully green unit tests, deterministic scenarios and browser E2E on the same immutable
+  candidate bytes
 
-Completed work and stale findings are deleted rather than retained as open
-checkboxes. Any new blocker must be added here immediately and removes release
-authority until fixed and re-gated.
+Any new blocker is added here immediately and removes release authority until fixed and
+re-gated.

@@ -1,68 +1,20 @@
 # XLN Status
 
-Use the repository root [todo.md](../todo.md) for current release scope and
-blocker order, and [night-work-plan.md](night-work-plan.md) for the current
-execution handoff. This file preserves architectural context and dated status;
-its historical results are not current acceptance evidence. The
-[2026-10-11 crisis review](crisis-review-20261011.md) explains the current diagnosis.
-
-## Owner alignment — 2026-09-30
-
-The [launch design](launch-design.md#minimum-remaining-work--owner-alignment-2026-09-30)
-records the minimum implementation tasks and accepted exposure-based reaction
-schedule. The documentation review changed no runtime or contract behavior.
-The full repository check stopped at `rscore:fmt` because `cargo` was unavailable;
-the file-size and contract-artifact gates passed first. This is a verification
-blocker, not evidence of a protocol failure or a green release candidate.
-
-The dated evidence below remains historical. Reproduce it on the actual candidate
-before assigning current readiness or declaring an old blocker resolved.
-
-## Historical snapshot — 2026-07-25
-
-**Date:** 2026-07-25
-**State recorded then:** production-demo/public-testnet grade, not mainnet-ready.
-
-What was reported at that snapshot:
-
-- the bilateral runtime and consensus architecture exist and are actively
-  exercised by local, browser, and prod-facing checks;
-- official same-origin watchtower recovery is live, encrypted, scheduled, and
-  no longer exposes public sweep;
-- wiped-browser watchtower recovery and post-restore channel payments are
-  covered by browser E2E;
-- direct same-chain swaps, direct cross-j swaps, and lending are included in the
-  fast E2E gate;
-- `bun run gate:release` passed on the current release line;
-- `bun run test:all:fast` passed on 2026-07-08 with scenarios green and
-  95/95 isolated browser shards green;
-- `bun run security:contract-governance`, `bun run security:consensus-hanko`,
-  `bun run security:failure-taxonomy`, `bun run security:delivery-boundary`,
-  `bun run security:canonical-identity`, `bun run security:canonical-fill`,
-  `bun run security:swap-cancel-canonical`, and `bun run security:audit-pack`
-  passed on 2026-07-09;
-- test runners now clean old generated artifacts by default and enforce a
-  50GiB generated-workspace budget unless an operator explicitly keeps
-  artifacts;
-- a release soak passed 13 complete `gate:ci + hub10k` iterations before manual
-  stop, but the current one-hour mainnet-preflight soak has not completed
-  uninterrupted on this line;
-- remaining mainnet risk is concentrated in uninterrupted release-duration
-  soak, external audit, real mainnet ops, observability, and explicit product
-  boundaries. Runtime is the policy engine; mandatory HSM/external policy
-  signing is explicitly not a launch gate. PSR/peer recovery is an optional
-  third-line recovery aid rather than a launch gate.
+This page holds no queue. The only live release queue is the repository
+[todo.md](../todo.md); the current execution handoff is
+[night-work-plan.md](night-work-plan.md); scope and authority are in
+[AGENTS.md](../AGENTS.md). Release requires `bun run gate:mainnet` (including the
+uninterrupted one-hour mainnet-preflight soak) on the final clean SHA, per
+[mainnet-acceptance-gate.md](mainnet-acceptance-gate.md) and [mainnet.md](mainnet.md).
 
 ## Precedence
 
 Newer owner decisions and [AGENTS.md](../AGENTS.md) govern scope and authority.
-The canonical protocol specifications define intended behavior; code and tests
-provide evidence of implemented behavior, including defects. An implementation
-does not silently override an invariant. Use [todo.md](../todo.md) for the current
-queue and [mainnet.md](mainnet.md) for the real-funds release bar. Dated snapshots
-and archives do not override current decisions or prove current readiness.
+Canonical protocol specifications define intended behavior; code and tests provide
+evidence of implemented behavior, including defects. An implementation does not
+silently override an invariant. Dated evidence does not prove current readiness.
 
-## Non-Negotiable Current Assumptions
+## Non-negotiable assumptions
 
 ### Network shape
 
@@ -72,156 +24,23 @@ and archives do not override current decisions or prove current readiness.
   authorities.
 - **Bilateral state is the main execution surface.** The J-layer is the court
   and settlement anchor, not the fast path.
-- **Transport must support direct/public runtime operation.** Relay and public
-  WS exist to deliver messages, not to own protocol state.
+- **Transport delivers messages; it never owns protocol state.** Direct hub
+  sockets and authenticated relay are both canonical delivery paths.
 
 ### Product shape
 
-- **USDC-first is acceptable only if explicit.** Silent single-token
-  assumptions are not acceptable.
-- **Recovery/watchtower is not optional for mainnet.** Offline users need a
-  recovery/dispute story.
+- **Token support is explicit.** Silent single-token assumptions are not acceptable.
+- **Recovery/watchtower is required for mainnet.** Offline users need a
+  recovery/dispute story; local encrypted backups and independent watchtowers are
+  the required recovery paths, Peer State Refresh is optional.
 - **Debug surfaces are protocol infrastructure.** `/api/debug/events`, health,
   metrics, and replayability are part of the product.
 
-## Recently Closed By `0.1.5`
-
-- Contract, RPC settlement, persistence, watchtower, runtime type, frontend
-  type, and browser E2E gates passed in `bun run gate:ci`.
-- Full browser E2E passed: `bun run test:e2e:full`.
-- Prod payment smoke passed: `bun run test:e2e:prod:payment`.
-- Prod health passed: `bun run prod:health`.
-- Official tower moved to same-origin `/api/tower/*`.
-- Watchtower sweep is scheduled inside the daemon and public
-  `/api/watchtower/*` is not exposed through nginx.
-- Last-resort tower remedies are encrypted to the account `watchSeed`, decrypted
-  only after a `DisputeStarted` reveal, and plaintext remedies are rejected by
-  both tower HTTP and store insertion.
-- Tower uploads are gated by reliable local backup barriers before remote side
-  effects continue.
-- Browser restart after tower restore keeps recovered core/channel state.
-
-## Recently Closed On Current `main`
-
-- Historical pre-seconds Ethereum Sepolia evidence used solc `0.8.36`, chain ID
-  `11155111`, and a 25-block dispute delay. That archived deployment is not the
-  current protocol configuration. Its authenticated `status=1` receipts cover deposit,
-  settlement, replay rejection, cooperative close, dispute start, unilateral
-  finalize, and withdrawal. The proof script is
-  `jurisdictions/scripts/public-proof-smoke.ts` at `53e8e1259`; reserve parity
-  held at `900 + 1000 - 100 - 50 = 1750`.
-- Runtime ↔ Sepolia reserve and J-event parity was proven with
-  `core/scripts/operations/settlement/rpc-settlement-parity.ts --mode=attach
---jurisdiction=ethereum-sepolia`: reserves moved `1750 → 1627` / `0 → 123`,
-  and receipt events matched an independent chain refetch. Evidence receipt:
-  `0xe3b7370d960c8901f506a5239c4395c72b50e1a1c95574bdef413d20d73d9f6d`
-  at block `11344290`.
-- `bun run gate:release` passed, including source checks, runtime core unit
-  tests, soundcheck, frontend check, contract full suite, RPC settlement parity,
-  security audit pack, persistence, watchtower, fast E2E, bounded soak, core
-  E2E, RPC system scenarios, hub10k benchmark, and production health smoke.
-- On 2026-07-08, `bun run test:all:fast` passed end to end: scenarios exited
-  `0`, E2E exited `0`, and all 95 isolated browser shards passed.
-- On 2026-07-09, `bun run check`, `bun run security:contract-governance`,
-  `bun run security:consensus-hanko`, `bun run security:failure-taxonomy`, and
-  `bun run security:delivery-boundary`, `bun run security:canonical-identity`,
-  `bun run security:canonical-fill`, `bun run security:swap-cancel-canonical`,
-  and `bun run security:audit-pack` passed after the runtime hardening,
-  remote-runtime import cleanup, typed failure taxonomy, delivery-boundary, and
-  canonical-identity/fill/swap-cancel scans, and test-artifact cleanup pass.
-- The capped-testnet soak policy is one hour in `MAINNET_GATE.soakMinutes`, the
-  capped policy file, gate builders, and the `soak:capped-testnet` package
-  script.
-- The RPC/JAdapter Anvil latest-state snapshot race that produced repeated
-  `staticCall`/`J_SUBMIT_FATAL` failures is fixed without relaxing real ABI
-  reverts or non-dev-chain failures.
-- Fast E2E now includes hub lending: funding a pool, borrowing, and repaying
-  from the Lending tab.
-- Direct runtime websocket policy is covered: hub direct sockets are allowed,
-  non-hub direct endpoints are ignored, plaintext direct entity input is
-  rejected, and duplicate hellos do not displace a live socket.
-
-## Active Blocker Order
-
-### P0 - release and mainnet readiness
-
-1. Complete the current one-hour `bun run gate:mainnet` before calling any
-   build a mainnet candidate. `bun run gate:release` already passed on the
-   release line; the soak has only partial historical evidence so far.
-2. Document real mainnet chain/RPC, operator keys, tower gas policy,
-   backup/restore drills, last-resort dispute drills, and monitoring
-   thresholds.
-3. Keep the external audit pack current and treat independent external audit as
-   required for real user funds.
-
-### P1 - protocol and runtime
-
-4. Keep Peer State Refresh optional and outside the launch gate; local encrypted
-   backups and independent watchtowers are the required recovery paths.
-5. Add account-level recovery coverage UI and tower receipt/failure visibility.
-6. Classify runtime exceptions as `drop`, `defer`, `debug-assert`, or `fatal`.
-7. Keep consensus/Hanko source-shape scan green and hand its documented
-   manual-review questions to the external auditor.
-8. Keep contract governance/access-control scan green and hand its documented
-   manual-review questions to the external auditor.
-9. Keep runtime failure taxonomy scan green so health/import/bootstrap/faucet
-   regressions fail loudly instead of returning hidden string-only warnings.
-10. Keep runtime delivery boundary scan green so direct/relay/P2P callers
-    cannot regress to boolean sends or per-call-site retry parsing.
-11. Keep canonical identity scan green so jurisdiction display labels cannot
-    recapture stack identity.
-12. Keep canonical fill scan green so exact bigint settlement amounts cannot
-    regress into lossy uint16 proof projection.
-13. Keep swap-cancel canonical scan green so runtime producers use only
-    `proposeCancelSwap` and legacy aliases stay out of execution types.
-14. Keep destructive reset/clearDB/dev actions strongly gated.
-
-### P2 - product clarity
-
-10. Make the token support boundary explicit: prove multi-token E2E or keep
-    the current release line visibly single-token/USDC-first.
-11. Clean up custody/fee UX, settlement flow consistency, and activity/account
-    cards enough for support/debug use.
-
-## Workstreams
-
-### Contracts and J-Layer
-
-- keep current Depository coverage green;
-- preserve explicit nonce/replay tests;
-- keep RPC settlement and dispute scenarios in the required gate set;
-- improve RPC-side state commitment quality.
-
-### Runtime and Consensus
-
-- run release-duration restart/crash/load soaks;
-- keep `consensus-invariants.md` as the living bug-prevention checklist;
-- simplify exception handling only after each path has a clear disposition.
-
-### Recovery and Offline Safety
-
-- keep optional PSR work outside the launch gate; recovery coverage UX must
-  prioritize local encrypted backup and independent watchtowers;
-- keep tower backup, restore, and delayed-last-resort tests in the gate set;
-- prove restore and defense on realistic offline cases, not only clean demos.
-
-### Transport and Ops
-
-- keep one coherent deployment surface for frontend, runtime, relay, tower, and
-  local chain/testnet components;
-- make runtime, market maker, storage, relay, and tower readiness visible in
-  health/metrics.
-
-### Product and UI
-
-- keep dev/scenario surfaces out of the normal wallet path;
-- make settlements, disputes, and recovery visible enough for demo and support.
-
-### Multisigner-First Direction
+### Multisigner-first direction
 
 - one authorization envelope for entity actions;
 - proposer is coordinator, not implicit authority;
 - ingress verification is quorum-aware;
 - `1-of-1` is configuration, not a separate auth model;
-- J-batch auth moves to strict entity quorum semantics;
+- J-batch auth uses strict entity quorum semantics;
 - complex-board tests must exist, not just happy-path single-signer tests.
