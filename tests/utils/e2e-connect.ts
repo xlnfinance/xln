@@ -17,6 +17,8 @@ type ConnectRuntimeOptions = {
   };
 };
 
+// The wallet screen opens on committed state; P2P starts only after the first
+// authenticated J catch-up, so a missing transport right after unlock is "not yet".
 const stringifyDebug = (value: unknown): string =>
   JSON.stringify(value, (_key, item) => (typeof item === 'bigint' ? item.toString() : item), 2);
 
@@ -50,9 +52,7 @@ export async function ensureRuntimeOnline(page: Page, tag: string): Promise<void
         page.evaluate(() => {
           const env = (window as CurrentRuntimeWindow).__xln?.env();
           if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
-          const p2p = env.infrastructure?.p2p;
-          if (!p2p) throw new Error('CURRENT_WALLET_P2P_MISSING');
-          return p2p.isConnected();
+          return Boolean(env.infrastructure?.p2p?.isConnected());
         }),
       { timeout: 20_000, message: `[${tag}] runtime must be online` },
     )
@@ -61,9 +61,10 @@ export async function ensureRuntimeOnline(page: Page, tag: string): Promise<void
 
 async function nudgeRuntimeOnline(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const p2p = (window as CurrentRuntimeWindow).__xln?.env()?.infrastructure?.p2p;
-    if (!p2p) throw new Error('CURRENT_WALLET_P2P_MISSING');
-    if (!p2p.isConnected()) p2p.connect();
+    const env = (window as CurrentRuntimeWindow).__xln?.env();
+    if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+    const p2p = env.infrastructure?.p2p;
+    if (p2p && !p2p.isConnected()) p2p.connect();
   });
 }
 
@@ -191,8 +192,9 @@ async function waitForHubRuntimeTransportReady(page: Page, hubId: string, timeou
       () =>
         page.evaluate(hubId => {
           const env = (window as CurrentRuntimeWindow).__xln?.env();
-          const p2p = env?.infrastructure?.p2p;
-          if (!env || !p2p) throw new Error('CURRENT_WALLET_P2P_MISSING');
+          if (!env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
+          const p2p = env.infrastructure?.p2p;
+          if (!p2p) return false;
           const profile = env.gossip.getProfile(hubId.toLowerCase());
           if (!profile?.runtimeId) return false;
           if (p2p.isConnected()) return true;
