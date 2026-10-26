@@ -13,8 +13,14 @@ export async function expectCrossActivity(
   const visible = (id: string) => page.getByTestId(id).locator('visible=true').first();
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 860 });
-    const receipt = page.getByRole('dialog', { name: 'Receipt', exact: true });
-    if (await receipt.isVisible()) await receipt.getByRole('button', { name: 'Close', exact: true }).click();
+    if (evidence.length) {
+      // The desktop selection reopens as a modal Receipt sheet only after the phone media
+      // query flips; it makes the tabbar inert, so wait for it and close it before navigating.
+      const receipt = page.getByRole('dialog', { name: 'Receipt', exact: true });
+      await expect(receipt).toBeVisible();
+      await receipt.getByRole('button', { name: 'Close', exact: true }).click();
+      await expect(receipt).toBeHidden();
+    }
     await visible('nav-home').click();
     await visible('entity-switcher-trigger').click();
     await page.locator(`[data-testid="entity-switcher-entity"][data-entity-id="${order.entityId}"]`).click();
