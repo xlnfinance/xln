@@ -17,6 +17,7 @@ import {
   encodeBoard,
   encodeSingleSignerBoard,
   singleSignerLazyEntityId,
+  mintListedReserve,
 } from '../helpers/hanko.ts';
 
 const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
@@ -129,6 +130,7 @@ describe('EntityProvider board rotation grace', function () {
     await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 0, [support]);
     await time.increase(DEFAULT_ARTICLES.controlDelay);
 
+    const epochBefore = await provider.boardEpochs(entityId);
     const activation = await provider.activateBoard(entityId);
     const receipt = await activation.wait();
     const activationBlock = await ethers.provider.getBlock(receipt!.blockNumber);
@@ -139,6 +141,7 @@ describe('EntityProvider board rotation grace', function () {
       oldBoardHash,
       newBoardHash,
       validUntil,
+      epochBefore + 1n,
     );
     const entity = await provider.entities(entityId);
     expect(entity.currentBoardHash).to.equal(newBoardHash);
@@ -376,7 +379,7 @@ describe('EntityProvider board rotation grace', function () {
     const signOuterBatch = (batch: unknown, nonce: bigint) =>
       signBatch(initiator, initiatorKey, batch, nonce);
 
-    await depository.mintToReserve(initiator, tokenId, 2n);
+    await mintListedReserve(depository, initiator, tokenId, 2n);
     const funding = await signOuterBatch(emptyBatch({
       reserveToCollateral: [{
         tokenId,

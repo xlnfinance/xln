@@ -20,6 +20,7 @@ import {
   emptyBatch,
   encodeBatch,
   singleSignerLazyEntityId,
+  mintListedReserve,
 } from '../helpers/hanko.ts';
 const abi = ethers.AbiCoder.defaultAbiCoder();
 const DISPUTE_PROOF = 1;
@@ -259,7 +260,7 @@ describe('Depository', () => {
     const collateralPerToken = 100n;
     if (!argumentOverrides.skipFunding) {
       for (const tokenId of tokenIds) {
-        await target.mintToReserve(left.entityId, tokenId, collateralPerToken);
+        await mintListedReserve(target, left.entityId, tokenId, collateralPerToken);
       }
       const funding = await signDepositoryBatch(
         target,
@@ -421,7 +422,7 @@ describe('Depository', () => {
     const fromEntity = singleSignerLazyEntityId(user0.address);
     const toEntity = addressEntityId(user1.address);
     const tokenId = 1;
-    await depository.mintToReserve(fromEntity, tokenId, 1_000n);
+    await mintListedReserve(depository, fromEntity, tokenId, 1_000n);
     const batch = emptyBatch({
       reserveToReserve: [{ receivingEntity: toEntity, tokenId, amount: 250n }],
     });
@@ -442,7 +443,7 @@ describe('Depository', () => {
     const tokenId = 1n;
     const firstCounterparty = addressEntityId(user1.address);
     const secondCounterparty = addressEntityId(user2.address);
-    await depository.mintToReserve(actor.entityId, tokenId, 10n);
+    await mintListedReserve(depository, actor.entityId, tokenId, 10n);
     const batch = emptyBatch({
       reserveToCollateral: [
         {
@@ -806,7 +807,7 @@ describe('Depository', () => {
     const actor = lazyActor(user0, 0);
     const recipient = addressEntityId(user1.address);
     const tokenId = 1;
-    await depository.mintToReserve(actor.entityId, tokenId, 1_000n);
+    await mintListedReserve(depository, actor.entityId, tokenId, 1_000n);
     const firstBatch = emptyBatch({
       reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 100n }],
     });
@@ -837,7 +838,7 @@ describe('Depository', () => {
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
     const forgiveOnlyTokenId = 2n;
-    await depository.mintToReserve(left.entityId, tokenId, 1_000n);
+    await mintListedReserve(depository, left.entityId, tokenId, 1_000n);
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
     const settlementNonce = 1n;
     const diffs = [
@@ -1094,8 +1095,8 @@ describe('Depository', () => {
     const UINT256_MAX = (1n << 256n) - 1n;
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
-    await depository.mintToReserve(left.entityId, tokenId, UINT256_MAX);
-    await depository.mintToReserve(right.entityId, tokenId, 1n);
+    await mintListedReserve(depository, left.entityId, tokenId, UINT256_MAX);
+    await mintListedReserve(depository, right.entityId, tokenId, 1n);
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
     const settlementNonce = 1n;
     const diffs = [
@@ -1135,8 +1136,8 @@ describe('Depository', () => {
     const UINT256_MAX = (1n << 256n) - 1n;
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
-    await depository.mintToReserve(left.entityId, tokenId, UINT256_MAX);
-    await depository.mintToReserve(right.entityId, tokenId, 2n);
+    await mintListedReserve(depository, left.entityId, tokenId, UINT256_MAX);
+    await mintListedReserve(depository, right.entityId, tokenId, 2n);
     // Fund collateral to UINT256_MAX via R2C from left.
     const fundMax = await signDepositoryBatch(
       depository,
@@ -1249,7 +1250,7 @@ describe('Depository', () => {
     const { depository } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
-    await depository.mintToReserve(left.entityId, tokenId, 300n);
+    await mintListedReserve(depository, left.entityId, tokenId, 300n);
     const fundCollateralBatch = emptyBatch({
       reserveToCollateral: [
         {
@@ -1388,7 +1389,7 @@ describe('Depository', () => {
 
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
-    await depository.mintToReserve(left.entityId, tokenId, 1_000n);
+    await mintListedReserve(depository, left.entityId, tokenId, 1_000n);
 
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
     const settlementNonce = 1n;
@@ -1442,7 +1443,7 @@ describe('Depository', () => {
     const actor = lazyActor(user0, 0);
     const recipient = addressEntityId(user1.address);
     const tokenId = 1n;
-    await depository.mintToReserve(actor.entityId, tokenId, 1_000n);
+    await mintListedReserve(depository, actor.entityId, tokenId, 1_000n);
 
     const oversizedTransfers = Array.from({ length: 65 }, () => ({
       receivingEntity: recipient,
@@ -1495,7 +1496,7 @@ describe('Depository', () => {
     const actor = lazyActor(user0, 0);
     const recipient = addressEntityId(user1.address);
     const tokenId = 1n;
-    await depository.mintToReserve(actor.entityId, tokenId, 1_000n);
+    await mintListedReserve(depository, actor.entityId, tokenId, 1_000n);
 
     const transfers = Array.from({ length: 51 }, () => ({
       receivingEntity: recipient,
@@ -1520,7 +1521,7 @@ describe('Depository', () => {
     const attacker = lazyActor(signers[2]!, 2);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
 
-    await depository.mintToReserve(left.entityId, 1n, 1n);
+    await mintListedReserve(depository, left.entityId, 1n, 1n);
     const validFunding = await signDepositoryBatch(
       depository,
       left.entityId,
@@ -1565,7 +1566,7 @@ describe('Depository', () => {
 
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
-    await depository.mintToReserve(left.entityId, tokenId, 1_000n);
+    await mintListedReserve(depository, left.entityId, tokenId, 1_000n);
 
     const fundCollateralBatch = emptyBatch({
       reserveToCollateral: [
@@ -1722,7 +1723,7 @@ describe('Depository', () => {
     const { depository } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
-    await depository.mintToReserve(left.entityId, tokenId, 1_000n);
+    await mintListedReserve(depository, left.entityId, tokenId, 1_000n);
 
     const fund = await signDepositoryBatch(
       depository,
@@ -2774,7 +2775,7 @@ describe('Depository', () => {
     const tokenId = 1n;
     const appointmentSequence = 7n;
     const lastResortWindowSeconds = 16n;
-    await depository.mintToReserve(left.entityId, tokenId, 1_000n);
+    await mintListedReserve(depository, left.entityId, tokenId, 1_000n);
 
     const fundCollateralBatch = emptyBatch({
       reserveToCollateral: [

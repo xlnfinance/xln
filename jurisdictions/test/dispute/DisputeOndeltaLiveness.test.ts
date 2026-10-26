@@ -15,6 +15,7 @@ import {
   encodeBatch,
   foundationListExternalToken,
   singleSignerLazyEntityId,
+  mintListedReserve,
 } from '../helpers/hanko.ts';
 
 const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
@@ -106,7 +107,7 @@ describe('dispute ondelta liveness', function () {
     const owner = actor(signer0, 0);
     const maximum = (1n << 256n) - 1n;
     const { tokenId } = await registerFixedErc20(depository, maximum);
-    await depository.mintToReserve(owner.entityId, tokenId, maximum);
+    await mintListedReserve(depository, owner.entityId, tokenId, maximum);
     expect(await depository._reserves(owner.entityId, tokenId)).to.equal(maximum);
     await expect(depository.mintToReserve(owner.entityId, tokenId, 1n)).to.be.revertedWithPanic(0x11);
     expect(await depository._reserves(owner.entityId, tokenId)).to.equal(maximum);
@@ -122,7 +123,7 @@ describe('dispute ondelta liveness', function () {
     const proofNonce = 1n;
     const accountKey = canonicalAccountKey(left.entityId, right.entityId);
 
-    await depository.mintToReserve(left.entityId, tokenId, MAX_MONEY);
+    await mintListedReserve(depository, left.entityId, tokenId, MAX_MONEY);
     await processBatch(depository, left, emptyBatch({
       reserveToCollateral: [{
         tokenId,
@@ -196,7 +197,7 @@ describe('dispute ondelta liveness', function () {
     const accountKey = canonicalAccountKey(left.entityId, right.entityId);
 
     // RIGHT-funded collateral does not change LEFT-oriented ondelta.
-    await depository.mintToReserve(right.entityId, tokenId, collateralAmount);
+    await mintListedReserve(depository, right.entityId, tokenId, collateralAmount);
     await processBatch(depository, right, emptyBatch({
       reserveToCollateral: [{
         tokenId,

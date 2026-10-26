@@ -17,6 +17,7 @@ import {
   encodeBatch,
   encodeSingleSignerBoard,
   singleSignerLazyEntityId,
+  mintListedReserve,
 } from "../helpers/hanko.ts";
 
 // Single envelope: abi.encode(HankoBytes{placeholders, packedSignatures, claims, memberSignatures}).
@@ -180,7 +181,7 @@ describe("Hanko Authorization", function () {
     const fundAmount = 1_000n;
     const transferAmount = 100n;
 
-    await depository.mintToReserve(entity1Id, tokenId, fundAmount);
+    await mintListedReserve(depository, entity1Id, tokenId, fundAmount);
 
     const batch = emptyBatch({
       reserveToReserve: [{ receivingEntity: entity2Id, tokenId, amount: transferAmount }],
@@ -210,7 +211,7 @@ describe("Hanko Authorization", function () {
     const entity1Id = singleSignerLazyEntityId(entity1.address);
     const entity2Id = addressEntityId(entity2.address);
     const tokenId = 1;
-    await depository.mintToReserve(entity1Id, tokenId, 1_000n);
+    await mintListedReserve(depository, entity1Id, tokenId, 1_000n);
 
     const batch = emptyBatch({
       reserveToReserve: [{ receivingEntity: entity2Id, tokenId, amount: 100n }],
@@ -452,7 +453,7 @@ describe("Hanko Authorization", function () {
     // processBatch: raw signature and full envelope drive the same entity nonce lane.
     const tokenId = 1;
     const recipient = addressEntityId(entity2.address);
-    await depository.mintToReserve(lazyId, tokenId, 300n);
+    await mintListedReserve(depository, lazyId, tokenId, 300n);
     const encoded = encodeBatch(emptyBatch({
       reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 100n }],
     }));

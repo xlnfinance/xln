@@ -18,6 +18,7 @@ import {
   emptyBatch,
   encodeBatch,
   singleSignerLazyEntityId,
+  mintListedReserve,
 } from '../helpers/hanko.ts';
 
 const abi = ethers.AbiCoder.defaultAbiCoder();
@@ -184,7 +185,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     const { depository, transformer } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
-    await depository.mintToReserve(left.entityId, tokenId, 100_000n);
+    await mintListedReserve(depository, left.entityId, tokenId, 100_000n);
     const fund = emptyBatch({
       reserveToCollateral: [
         { tokenId, receivingEntity: left.entityId, pairs: [{ entity: right.entityId, amount: 100_000n }] },
@@ -835,7 +836,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     const { depository, transformer } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
-    await depository.mintToReserve(left.entityId, tokenId, 100_000n);
+    await mintListedReserve(depository, left.entityId, tokenId, 100_000n);
     const fund = emptyBatch({
       reserveToCollateral: [
         { tokenId, receivingEntity: left.entityId, pairs: [{ entity: right.entityId, amount: 100_000n }] },

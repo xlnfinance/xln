@@ -3,7 +3,7 @@
  * the production Depository path, dispute them and read back what was paid.
  *
  * Path per account (≤ MAX_DISPUTE_PROOF_TOKENS tokens, unique token ids):
- *   mintToReserve(funder, custody) → funder batch of R2R (reserves) + R2C
+ *   list the token ids → mintToReserve(funder, custody) → funder batch of R2R (reserves) + R2C
  *   (left receiver = ondelta, right receiver = rest of collateral) → left starts a
  *   right-signed dispute → timeout → left finalizes unilaterally.
  */
@@ -30,6 +30,7 @@ import {
   deployEntityProvider,
   emptyBatch,
   encodeBatch,
+  listReserveTokensThrough,
   singleSignerLazyEntityId,
 } from './hanko.ts';
 import type { EntitlementCase } from './entitlement-cases.ts';
@@ -44,7 +45,7 @@ const NO_ARGUMENTS = abi.encode(['bytes[]'], [[]]);
 
 type Target = Pick<
   Depository,
-  'processBatch' | 'interface' | 'mintToReserve' | '_reserves' | 'debtOutstanding' | '_collaterals' | '_accounts' | 'getAddress'
+  'processBatch' | 'interface' | 'mintToReserve' | 'getTokensLength' | 'entityProvider' | '_reserves' | 'debtOutstanding' | '_collaterals' | '_accounts' | 'getAddress'
 >;
 type Actor = { entityId: string; privateKey: string; nonce: bigint };
 export type Stand = Readonly<{ target: Target; harness: DepositoryDebtHarness | null; domain: DepositoryHankoDomain; funder: Actor; seed: bigint }>;
@@ -145,6 +146,7 @@ const assertFunded = async (stand: Stand, pair: Pair, items: readonly ChainCase[
 
 /** One mint per token, then as few production batches as the 50-op cap allows. */
 export const fundGroup = async (stand: Stand, pair: Pair, items: readonly ChainCase[]): Promise<void> => {
+  await listReserveTokensThrough(stand.target, Math.max(...items.map(item => item.tokenId)));
   for (const item of items) {
     const custody = item.state.collateral + item.state.leftReserve + item.state.rightReserve;
     if (custody > 0n) await stand.target.mintToReserve(stand.funder.entityId, item.tokenId, custody);

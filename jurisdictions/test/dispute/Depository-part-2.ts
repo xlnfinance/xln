@@ -27,6 +27,7 @@ import {
   encodeSingleSignerBoard,
   foundationListExternalToken,
   singleSignerLazyEntityId,
+  mintListedReserve,
 } from '../helpers/hanko.ts';
 
 const abi = ethers.AbiCoder.defaultAbiCoder();
@@ -345,7 +346,7 @@ describe('Depository', () => {
 
     if (!argumentOverrides.skipFunding) {
       for (const tokenId of tokenIds) {
-        await target.mintToReserve(left.entityId, tokenId, collateralPerToken);
+        await mintListedReserve(target, left.entityId, tokenId, collateralPerToken);
       }
       const funding = await signDepositoryBatch(
         target,
@@ -431,7 +432,7 @@ describe('Depository', () => {
     const tokenId = 1n;
     const appointmentSequence = 3n;
     const lastResortWindowSeconds = 12n;
-    await depository.mintToReserve(left.entityId, tokenId, 1_000n);
+    await mintListedReserve(depository, left.entityId, tokenId, 1_000n);
 
     const fundCollateralBatch = emptyBatch({
       reserveToCollateral: [
@@ -566,7 +567,7 @@ describe('Depository', () => {
     const tokenId = 1n;
     const lastResortWindowSeconds = 16n;
 
-    await depository.mintToReserve(right.entityId, tokenId, 1_000n);
+    await mintListedReserve(depository, right.entityId, tokenId, 1_000n);
     const fundCollateral = await signDepositoryBatch(depository, right.entityId, right.privateKey, emptyBatch({
       reserveToCollateral: [{ tokenId, receivingEntity: right.entityId, pairs: [{ entity: left.entityId, amount: 300n }] }],
     }));
@@ -667,8 +668,8 @@ describe('Depository', () => {
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenA = 1n;
     const tokenB = 2n;
-    await depository.mintToReserve(right.entityId, tokenA, 1_000n);
-    await depository.mintToReserve(left.entityId, tokenB, 1_000n);
+    await mintListedReserve(depository, right.entityId, tokenA, 1_000n);
+    await mintListedReserve(depository, left.entityId, tokenB, 1_000n);
 
     const fundRightCollateral = emptyBatch({
       reserveToCollateral: [
@@ -823,7 +824,7 @@ describe('Depository', () => {
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const recipient = addressEntityId(user1.address);
     const tokenId = await registerFixedSupplyErc20(depository, 1_000_000n);
-    await depository.mintToReserve(left.entityId, tokenId, 100n);
+    await mintListedReserve(depository, left.entityId, tokenId, 100n);
 
     const fundCollateralBatch = emptyBatch({
       reserveToCollateral: [
@@ -894,10 +895,10 @@ describe('Depository', () => {
     expect(decodeUint768(await depository.debtOutstanding(left.entityId, tokenId))).to.equal(200n);
     expect(await depository.activeDebts(left.entityId)).to.equal(1n);
 
-    await depository.mintToReserve(left.entityId, tokenId, 100n);
+    await mintListedReserve(depository, left.entityId, tokenId, 100n);
 
     const independentTokenId = await registerFixedSupplyErc20(depository, 1_000_000n);
-    await depository.mintToReserve(left.entityId, independentTokenId, 7n);
+    await mintListedReserve(depository, left.entityId, independentTokenId, 7n);
     const blockedBatch = emptyBatch({
       reserveToReserve: [
         { receivingEntity: recipient, tokenId, amount: 1n },
@@ -988,7 +989,7 @@ describe('Depository', () => {
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
     expect(decodeUint768(await depository.debtOutstanding(left.entityId, tokenId))).to.equal(100n);
 
-    await depository.mintToReserve(left.entityId, tokenId, 150n);
+    await mintListedReserve(depository, left.entityId, tokenId, 150n);
     const spendableTransferBatch = emptyBatch({
       reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 50n }],
     });
@@ -1076,7 +1077,7 @@ describe('Depository', () => {
 
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
-    await depository.mintToReserve(left.entityId, tokenId, 500n);
+    await mintListedReserve(depository, left.entityId, tokenId, 500n);
 
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
     const settlementNonce = 1n;
@@ -1144,7 +1145,7 @@ describe('Depository', () => {
   //    settlements, ..., R2C, external withdrawals.
 
   async function fundCollateral(target: Depository, from: TestActor, to: TestActor, tokenId: bigint, amount: bigint) {
-    await target.mintToReserve(from.entityId, tokenId, amount);
+    await mintListedReserve(target, from.entityId, tokenId, amount);
     const fund = await signDepositoryBatch(target, from.entityId, from.privateKey, emptyBatch({
       reserveToCollateral: [{ tokenId, receivingEntity: from.entityId, pairs: [{ entity: to.entityId, amount }] }],
     }));
@@ -1192,7 +1193,7 @@ describe('Depository', () => {
     const counterparty = lazyActor(user1, 1);
     const recipient = addressEntityId(user1.address);
     const tokenId = 1n;
-    await depository.mintToReserve(initiator.entityId, tokenId, 100n);
+    await mintListedReserve(depository, initiator.entityId, tokenId, 100n);
     await fundCollateral(depository, initiator, counterparty, tokenId, 1_000n);
     const acctKey = await accountKeyFor(depository, initiator.entityId, counterparty.entityId);
 
@@ -1223,7 +1224,7 @@ describe('Depository', () => {
     const counterparty = lazyActor(user1, 1);
     const recipient = addressEntityId(user1.address);
     const tokenId = 1n;
-    await depository.mintToReserve(initiator.entityId, tokenId, 100n);
+    await mintListedReserve(depository, initiator.entityId, tokenId, 100n);
     await fundCollateral(depository, initiator, counterparty, tokenId, 1_000n);
 
     const unpaid = await signDepositoryBatch(depository, initiator.entityId, initiator.privateKey, emptyBatch({
@@ -1254,7 +1255,7 @@ describe('Depository', () => {
     const payee = lazyActor(user1, 1);
     const funder = lazyActor(user2!, 2);
     const tokenId = 1n;
-    await depository.mintToReserve(funder.entityId, tokenId, 1_000n);
+    await mintListedReserve(depository, funder.entityId, tokenId, 1_000n);
 
     const batch = emptyBatch({
       settlements: [
@@ -1320,7 +1321,7 @@ describe('Depository', () => {
 
     // Exactly the shape that succeeds for a debt-free initiator in (a'): the
     // same-batch inflow would repay the overdraw, but a debtor may not open one.
-    await depository.mintToReserve(funder.entityId, tokenId, 1_000n);
+    await mintListedReserve(depository, funder.entityId, tokenId, 1_000n);
     const batch = emptyBatch({
       reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 50n }],
       settlements: [await paySettlement(depository, funder, left, tokenId, 50n, funder)],
@@ -1338,8 +1339,8 @@ describe('Depository', () => {
     const initiator = lazyActor(user0, 0);
     const counterparty = lazyActor(user1, 1);
     const tokenId = 1n;
-    await depository.mintToReserve(initiator.entityId, tokenId, 1_000n);
-    await depository.mintToReserve(counterparty.entityId, tokenId, 50n);
+    await mintListedReserve(depository, initiator.entityId, tokenId, 1_000n);
+    await mintListedReserve(depository, counterparty.entityId, tokenId, 50n);
 
     // Counterparty signs a settlement paying 100 it does not have.
     const batch = emptyBatch({
@@ -1399,6 +1400,16 @@ describe('Depository', () => {
         overdrawWithdrawal.encodedBatch, overdrawWithdrawal.hankoData, overdrawWithdrawal.nonce,
       ),
     ).to.be.revertedWithCustomError(depository, 'E3');
+  });
+
+  it('mintToReserve refuses a token id that was never listed', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const entity = addressEntityId(user1.address);
+    const unlisted = await depository.getTokensLength();
+
+    await expect(depository.mintToReserve(entity, unlisted, 1n)).to.be.revertedWithCustomError(depository, 'E11');
+    expect(await depository._reserves(entity, unlisted)).to.equal(0n);
+    expect(await depository.getTokensLength()).to.equal(unlisted);
   });
 
   it('rejects non-admin use of local dev bootstrap helpers', async function () {

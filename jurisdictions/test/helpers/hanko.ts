@@ -1,4 +1,5 @@
 import { DepositoryBounds__factory } from '../../typechain-types/factories/DepositoryBounds__factory.js';
+import { EntityProvider__factory } from '../../typechain-types/factories/EntityProvider__factory.js';
 import { encodeCooperativeUpdateDiff } from '../../../core/hanko/onchain-domain.ts';
 import { requireBoundaryRecord, requireBigInt } from '../../../core/protocol/boundary/boundary-primitives.ts';
 import hre from "hardhat";
@@ -289,6 +290,55 @@ export const foundationListExternalToken = async (
   await (await provider.foundationRegisterExternalToken(
     depositoryAddress, tokenType, contractAddress, externalTokenId, authorization.hankoData, authorization.actionNonce,
   )).wait();
+};
+
+type ReserveTokenDepository = {
+  getAddress(): Promise<string>;
+  entityProvider(): Promise<string>;
+  getTokensLength(): Promise<bigint>;
+};
+
+/**
+ * Make internal token ids 1..highestTokenId listed reserve tokens.
+ *
+ * mintToReserve refuses an unlisted id (E11) so every reserve stays
+ * enumerable over [0, _tokens.length) for storage-proven import. Fixtures that
+ * fund reserves by dev mint therefore list each id first, through the same
+ * Foundation lane production uses: a fresh positive-supply ERC20 per id,
+ * registered by EntityProvider.foundationRegisterExternalToken under the
+ * Foundation Hanko (signer 0). Ids already listed are left as they are.
+ */
+export const listReserveTokensThrough = async (
+  depository: ReserveTokenDepository,
+  highestTokenId: bigint | number,
+  privateKey = deriveHardhatPrivateKey(0),
+): Promise<void> => {
+  const target = BigInt(highestTokenId);
+  let length = await depository.getTokensLength();
+  if (length > target) return;
+  const [foundationSender] = await ethers.getSigners();
+  const provider = EntityProvider__factory.connect(await depository.entityProvider(), foundationSender!);
+  const depositoryAddress = await depository.getAddress();
+  const ERC20Mock = await ethers.getContractFactory('ERC20Mock');
+  for (; length <= target; length++) {
+    const token = await ERC20Mock.deploy(`Reserve ${length}`, `R${length}`, 18, 1n);
+    await token.waitForDeployment();
+    await foundationListExternalToken(provider, depositoryAddress, 0, await token.getAddress(), 0, privateKey);
+  }
+  if (await depository.getTokensLength() !== target + 1n) throw new Error(`RESERVE_TOKEN_LISTING_GAP:${target}`);
+};
+
+/** Dev-mint a reserve of a listed token id, listing ids up to it first. */
+export const mintListedReserve = async <T>(
+  depository: ReserveTokenDepository & {
+    mintToReserve(entity: string, tokenId: bigint | number, amount: bigint | number): Promise<T>;
+  },
+  entity: string,
+  tokenId: bigint | number,
+  amount: bigint | number,
+): Promise<T> => {
+  await listReserveTokensThrough(depository, tokenId);
+  return depository.mintToReserve(entity, tokenId, amount);
 };
 
 /** Register a numbered 1-of-1 entity and return its number. */
