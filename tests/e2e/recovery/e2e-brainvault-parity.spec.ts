@@ -76,12 +76,15 @@ async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string
   if (errors.length) throw new Error(`BRAINVAULT_START_FAILED:${errors.join(';')}`);
 }
 
-async function readCanonicalEntity(page: Page) {
+// The Runtime mutates State in place until the frame's WAL write resolves, so a read is
+// committed only when it observes stateMutationInFlight=false in the same evaluate.
+async function tryReadCommittedEntity(page: Page) {
   return page.evaluate(() => {
     const debug = (window as TestWindow).__xln;
     const env = debug?.env();
     const entityId = debug?.store.getState().activeEntityId;
     if (!env || !entityId) throw new Error('CURRENT_WALLET_IDENTITY_MISSING');
+    if (env.infrastructure?.stateMutationInFlight) return null;
     const entries = [...env.state.eReplicas.entries()].filter(([, replica]) => replica.entityId === entityId);
     const [entry] = entries;
     if (entries.length !== 1 || !entry) throw new Error('CURRENT_WALLET_SIGNER_NOT_UNIQUE');
@@ -102,6 +105,17 @@ async function readCanonicalEntity(page: Page) {
         .map(([id]) => id),
     };
   });
+}
+
+async function readCanonicalEntity(page: Page) {
+  let entity: Awaited<ReturnType<typeof tryReadCommittedEntity>> = null;
+  await expect
+    .poll(async () => (entity = await tryReadCommittedEntity(page)) !== null, {
+      timeout: 15_000,
+      message: 'Runtime frame must finish its WAL write before the committed read',
+    })
+    .toBe(true);
+  return entity!;
 }
 
 async function readCurrentHubIds(page: Page): Promise<string[]> {
@@ -173,7 +187,8 @@ async function waitForCanonicalProfile(page: Page, profileName: string) {
           );
         });
         if (!ready) return null;
-        const entity = await readCanonicalEntity(page);
+        const entity = await tryReadCommittedEntity(page);
+        if (!entity) return null;
         return {
           profileName: entity.profileName,
           accountCount: entity.accountIds.length,
