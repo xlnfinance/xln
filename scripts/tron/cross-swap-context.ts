@@ -11,6 +11,9 @@ import { safeStringify } from '../../core/protocol/serialization';
 import type { RuntimeReplica } from '../../core/runtime/types';
 import { createHubDirectRuntimeRoute } from '../../core/orchestrator/hub/hub-runtime-transport';
 import { startStandaloneRelayServer } from '../../core/network/relay/standalone-server';
+// Canonical hub minimum (10 reference units); 10^18 rejected every same-J
+// order on the 6-decimal native TVM reference token.
+import { HUB_DEFAULT_MIN_TRADE_SIZE } from '../../core/orchestrator/mesh/mesh-common';
 
 export const hubSeed = 'xln-native-cross-release-20260918-public-observer';
 export const userSeed = 'xln-native-cross-release-20260918-public-users';
@@ -98,7 +101,7 @@ export const enableHubs = async (env: RuntimeReplica, wallet: EmbeddedRuntimeAda
       { type: 'setHubConfig', data: { matchingStrategy: 'amount', policyVersion: 1, routingFeePPM: 0,
         baseFee: 0n, swapTakerFeeBps: 0, rebalanceLiquidityFeeBps: 0n, rebalanceTimeoutMs: 60_000 } },
       { type: 'initOrderbookExt', data: { name: hub.name, spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
-        referenceTokenId: 1, usdQuoteAuthorityEntityId: hub.entityId, minTradeSize: 10n ** 18n,
+        referenceTokenId: 1, usdQuoteAuthorityEntityId: hub.entityId, minTradeSize: HUB_DEFAULT_MIN_TRADE_SIZE,
         supportedPairs: ['1/2'] } },
     ] }] });
     await waitFor(`configured ${hub.name}`, () => Boolean(replica(env, hub).state.orderbookExt));

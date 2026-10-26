@@ -72,7 +72,8 @@ try {
   const configurationText = JSON.stringify(configuration, null, 2);
   if (await Bun.file(configurationPath).exists()) assert.equal(await Bun.file(configurationPath).text(), configurationText);
   else await Bun.write(configurationPath, configurationText);
-  const script = process.argv.includes('--automatic-withdraw') ? 'scripts/tron/withdrawal/automatic.ts' :
+  const script = process.argv.includes('--same-j') ? 'scripts/tron/flows/same-j.ts' :
+    process.argv.includes('--automatic-withdraw') ? 'scripts/tron/withdrawal/automatic.ts' :
     process.argv.includes('--withdraw') ? 'scripts/tron/withdrawal/cross.ts' :
     process.argv.includes('--swap') ? 'scripts/tron/cross-swap.ts' : 'scripts/tron/cross-network.ts';
   const callbackAt = process.argv.indexOf('--exec');

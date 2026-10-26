@@ -92,14 +92,16 @@ try {
   console.log(safeStringify(report));
   const swap = standArguments.some(arg => ['--cross-swap', '--cross-swap-resume', '--cross-swap-restore'].includes(arg));
   const automaticWithdraw = standArguments.some(arg => ['--automatic-withdraw', '--automatic-withdraw-restore'].includes(arg));
+  const sameJurisdiction = standArguments.some(arg => ['--same-j', '--same-j-restore'].includes(arg));
   const withdraw = automaticWithdraw || standArguments.some(arg => ['--cross-withdraw', '--cross-withdraw-restore', '--cross-withdraw-inspect', '--cross-withdraw-resume'].includes(arg));
-  if (withdraw || swap || standArguments.includes('--cross-network') || standArguments.includes('--cross-network-restore') || standArguments.includes('--cross-network-resume')) {
+  if (sameJurisdiction || withdraw || swap || standArguments.includes('--cross-network') || standArguments.includes('--cross-network-restore') || standArguments.includes('--cross-network-resume')) {
     const child = Bun.spawn(['bun', 'scripts/tron/ethereum-stand.ts',
       ...(withdraw ? ['--withdraw'] : []),
       ...(automaticWithdraw ? ['--automatic-withdraw'] : []),
       ...(standArguments.includes('--cross-withdraw-inspect') ? ['--inspect'] : []),
       ...(swap ? ['--swap'] : []),
-      ...(standArguments.includes('--cross-network-restore') || standArguments.includes('--cross-swap-restore') || standArguments.includes('--cross-withdraw-restore') || standArguments.includes('--automatic-withdraw-restore') ? ['--restore'] : []),
+      ...(sameJurisdiction ? ['--same-j'] : []),
+      ...(standArguments.includes('--same-j-restore') || standArguments.includes('--cross-network-restore') || standArguments.includes('--cross-swap-restore') || standArguments.includes('--cross-withdraw-restore') || standArguments.includes('--automatic-withdraw-restore') ? ['--restore'] : []),
       ...(standArguments.includes('--cross-network-resume') || standArguments.includes('--cross-swap-resume') || standArguments.includes('--cross-withdraw-resume') ? ['--resume'] : [])], {
       cwd: root, stdout: 'inherit', stderr: 'inherit', env: process.env,
     });

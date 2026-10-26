@@ -104,8 +104,9 @@ try {
     .map(event => ({ block: event.blockNumber, transaction: event.transactionHash,
       entity: event.data.entity, tokenId: event.data.tokenId, balance: String(event.data.newBalance) }));
   assert.deepEqual(reserves, [
-    { block: 23, transaction: economic.deposit.transactionHash, entity: entityId, tokenId: 1, balance: '1000000' },
-    { block: 24, transaction: economic.withdrawal.txHash, entity: entityId, tokenId: 1, balance: '0' },
+    // Heights come from this ledger's own receipts; 23/24 were one historical fixture.
+    { block: economic.deposit.blockNumber, transaction: economic.deposit.transactionHash, entity: entityId, tokenId: 1, balance: '1000000' },
+    { block: economic.withdrawal.blockNumber, transaction: economic.withdrawal.txHash, entity: entityId, tokenId: 1, balance: '0' },
   ], 'Committed signed prefix must contain both real receipts, in order, exactly once');
   assert.deepEqual(events.filter(event => event.type === 'HankoBatchProcessed').map(event => event.data.nonce), [1, 2]);
   const head = await readStorageFrameRecord(db, env.state.height);
