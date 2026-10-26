@@ -119,10 +119,9 @@ test.describe('Canonical storage schema rejection', () => {
     { tag: '@resilience' },
     async ({ page }, testInfo) => {
       test.setTimeout(55_000);
+      // Unlock no longer re-verifies the WAL when it opens; the schema boundary rejects
+      // the obsolete head once, when the Runtime loads it.
       for (const message of [
-        new RegExp(
-          `runtime_wal\\.open_failed .*STORAGE_SCHEMA_MISMATCH:stored=${INCOMPATIBLE_STORAGE_SCHEMA_VERSION}:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
-        ),
         new RegExp(
           `load_env_from_db\\.failed .*STORAGE_SCHEMA_MISMATCH:stored=${INCOMPATIBLE_STORAGE_SCHEMA_VERSION}:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
         ),
@@ -321,7 +320,7 @@ test.describe('Canonical storage schema rejection', () => {
       });
       await expect.poll(() => readPersistedStorageSchema(resetPage, runtimeId)).toBe(STORAGE_SCHEMA_VERSION);
 
-      expect(issues.filter(issue => issue.message.includes('STORAGE_SCHEMA_MISMATCH'))).toHaveLength(2);
+      expect(issues.filter(issue => issue.message.includes('STORAGE_SCHEMA_MISMATCH'))).toHaveLength(1);
       expect(issues.filter(issue => issue.type !== 'console')).toEqual([]);
       expect(
         issues.filter(issue => issue.type === 'console' && !issue.message.includes('STORAGE_SCHEMA_MISMATCH')),
