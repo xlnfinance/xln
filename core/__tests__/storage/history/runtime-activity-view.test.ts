@@ -335,9 +335,16 @@ describe('disposable Runtime activity view', () => {
       unavailableThroughHeight: 1,
     });
     await resetRuntimeActivityViewAtFloor(env, 2);
-    await expect(readPersistedRuntimeActivityPage(env)).rejects.toThrow(
-      'RUNTIME_ACTIVITY_VIEW_UNAVAILABLE:height=2:through=2',
-    );
+    // Fresh-restore shape: head == floor. The page is empty and partial, never a
+    // read error (the wallet booted into "Activity unavailable" until frame H+1).
+    expect(await readPersistedRuntimeActivityPage(env)).toMatchObject({
+      latestHeight: 2,
+      scannedFrames: 0,
+      events: [],
+      nextBeforeHeight: null,
+      availability: 'partial',
+      unavailableThroughHeight: 2,
+    });
     await closeRuntimeDb(env);
     await closeInfraDb(env);
     cleanup(runtimeId);

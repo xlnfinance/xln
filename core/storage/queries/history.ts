@@ -491,14 +491,13 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     const start = latestHeight <= 0 ? 0 : Math.max(1, Math.min(latestHeight, Math.floor(Number(opts.beforeHeight ?? latestHeight))));
     const unavailableThroughHeight = status?.unavailableThroughHeight ?? 0;
     const availableFromHeight = status?.availableFromHeight ?? 0;
-    if (start > 0 && start <= unavailableThroughHeight) {
-      throw new Error(`RUNTIME_ACTIVITY_VIEW_UNAVAILABLE:height=${start}:through=${unavailableThroughHeight}`);
-    }
     const events: RuntimeActivityEvent[] = [];
     let scannedFrames = 0;
     let height = start;
     let lastScannedHeight = 0;
-    const floor = Math.max(1, availableFromHeight);
+    // A restore floor is a page boundary reported as `availability: 'partial'`,
+    // not a read failure: right after restore the head equals the floor.
+    const floor = Math.max(1, availableFromHeight, unavailableThroughHeight + 1);
     for (; height >= floor && scannedFrames < scanLimit; height -= 1) {
       lastScannedHeight = height;
       const activity = await readReadyRuntimeActivityJournal(env, height);
