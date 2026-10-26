@@ -17,7 +17,12 @@ import {
 
 const PAGE_SIZE = 250;
 const PAGE_SCAN_LIMIT = 2_000;
-const REMOTE_CONNECT_TIMEOUT_MS = 6_000;
+// The attach deadline covers the adapter's bounded socket open plus its bounded
+// authentication request. A shorter pool deadline cancelled healthy-but-slow
+// handshakes (a busy Hub under load) and then retried them.
+export const REMOTE_OPEN_TIMEOUT_MS = 15_000;
+export const REMOTE_REQUEST_TIMEOUT_MS = 15_000;
+export const REMOTE_CONNECT_TIMEOUT_MS = REMOTE_OPEN_TIMEOUT_MS + REMOTE_REQUEST_TIMEOUT_MS + 500;
 
 const runtimeId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
@@ -143,7 +148,7 @@ class RemoteRuntimeReaderPool {
       REMOTE_CONNECT_TIMEOUT_MS,
     );
     void adapter.connect({
-      mode: 'remote', runtimeId: id, wsUrl, authKey: apiKey, requestTimeoutMs: 15_000,
+      mode: 'remote', runtimeId: id, wsUrl, authKey: apiKey, openTimeoutMs: REMOTE_OPEN_TIMEOUT_MS, requestTimeoutMs: REMOTE_REQUEST_TIMEOUT_MS,
     }).then(() => finish(), (error) => finish(error instanceof Error ? error : new Error(String(error))));
     return entry;
   }

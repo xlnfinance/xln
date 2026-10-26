@@ -353,12 +353,22 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     const generation = ++this.socketGeneration;
     this.clearAuthenticatedSession('adapter-connecting');
     this.setStatus('connecting');
+    const openTimeoutMs = Math.max(1_000, Number(this.config?.openTimeoutMs ?? this.config?.requestTimeoutMs ?? 15_000));
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(wsUrl);
       const context: SocketContext = { ws, generation };
       ws.binaryType = 'arraybuffer';
       let settled = false;
+      // A socket that never opens would otherwise hold connect() forever and
+      // leave every enclosing deadline to guess how long opening may take.
+      const openTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new RuntimeAdapterError('E_INTERNAL', `runtime adapter socket open timed out after ${openTimeoutMs}ms: ${wsUrl}`, true));
+        ws.close();
+      }, openTimeoutMs);
       ws.onopen = () => {
+        clearTimeout(openTimer);
         if (generation !== this.socketGeneration) {
           if (!settled) {
             settled = true;
@@ -373,6 +383,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
         resolve();
       };
       ws.onerror = () => {
+        clearTimeout(openTimer);
         if (!settled) {
           settled = true;
           reject(new RuntimeAdapterError('E_INTERNAL', `failed to connect ${wsUrl}`, true));
@@ -380,6 +391,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       };
       ws.onmessage = (event) => this.handleMessage(event.data, context);
       ws.onclose = (event?: { code?: number; reason?: string | Buffer }) => {
+        clearTimeout(openTimer);
         // Close cause is the deciding evidence for drain investigations: a
         // 1009/1013 from the server names the exact pressure that broke the
         // reader while a 1000/1006 names transport idleness.

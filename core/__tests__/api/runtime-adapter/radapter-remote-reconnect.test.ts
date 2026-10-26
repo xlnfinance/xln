@@ -270,3 +270,33 @@ test('remote adapter refreshes authority and catches up durable payments across 
     (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = previousWebSocket;
   }
 });
+
+// A peer that accepts TCP but never answers the WebSocket upgrade used to hold
+// connect() forever, so every enclosing deadline had to guess how long opening
+// may take (observer attach was cut at 6 s while auth alone allows 15 s).
+test('remote adapter bounds a WebSocket open that never completes', async () => {
+  const stalled = Bun.listen({
+    hostname: '127.0.0.1',
+    port: 0,
+    socket: { data() {}, open() {} },
+  });
+  const adapter = new RemoteRuntimeAdapter();
+  const startedAt = performance.now();
+  try {
+    await expect(adapter.connect({
+      mode: 'remote',
+      runtimeId: `0x${'11'.repeat(20)}`,
+      wsUrl: `ws://127.0.0.1:${stalled.port}/ws`,
+      authKey: 'unused',
+      openTimeoutMs: 1_000,
+      requestTimeoutMs: 15_000,
+      reconnectMaxMs: 0,
+    })).rejects.toThrow('runtime adapter socket open timed out after 1000ms');
+    const elapsedMs = performance.now() - startedAt;
+    expect(elapsedMs).toBeGreaterThanOrEqual(950);
+    expect(elapsedMs).toBeLessThan(5_000);
+  } finally {
+    adapter.disconnect();
+    stalled.stop(true);
+  }
+});

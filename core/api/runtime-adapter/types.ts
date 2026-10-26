@@ -33,6 +33,8 @@ export type RuntimeAdapterConfig = {
   seed?: string;
   reconnectMaxMs?: number;
   requestTimeoutMs?: number;
+  /** Bounds WebSocket opening; authentication then has its own request timeout. */
+  openTimeoutMs?: number;
   /** Memory-only signer supplied by an unlocked vault; never serialize it. */
   ownerBindingSigner?: RuntimeAdapterOwnerBindingSigner;
 };

@@ -5,14 +5,18 @@ import {
   invalidateNetworkGraphSubscription,
   pruneNetworkGraphReaders,
   readRemoteRuntimeGraphFrame,
+  REMOTE_CONNECT_TIMEOUT_MS,
+  REMOTE_REQUEST_TIMEOUT_MS,
   subscribeNetworkRuntimeChanges,
   type NetworkRuntimeChangeSubscription,
 } from './timeline/networkTimelineLoader';
 
 export const runtimeGraphLiveFrameCache = writable<Map<string, RuntimeAdapterGraphFrame>>(new Map());
 
-const DEFAULT_GRAPH_ATTACH_TIMEOUT_MS = 6_500;
-const DEFAULT_GRAPH_READ_TIMEOUT_MS = 16_000;
+// Outer bounds derive from the reader pool's own deadlines so a slow but
+// healthy attach is never cut off by a shorter enclosing timer.
+const DEFAULT_GRAPH_ATTACH_TIMEOUT_MS = REMOTE_CONNECT_TIMEOUT_MS + 500;
+const DEFAULT_GRAPH_READ_TIMEOUT_MS = REMOTE_CONNECT_TIMEOUT_MS + REMOTE_REQUEST_TIMEOUT_MS + 1_000;
 let refreshSequence = 0;
 
 type RuntimeGraphFrameReader = (runtime: Runtime) => Promise<RuntimeAdapterGraphFrame>;
