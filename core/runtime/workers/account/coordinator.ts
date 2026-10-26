@@ -41,6 +41,7 @@ import {
   aggregateWorkerPhaseResults,
   type ExpectedWorkerEffect,
 } from './coordinator/result';
+import { tsAccountWorkerThreadSlot } from './coordinator/pool';
 
 type PhaseDispatch = Readonly<{
   workerIndex: number;
@@ -81,10 +82,11 @@ const expectedPhaseEffects = (
 };
 
 /**
- * Resident Account coordinator. Its worker pool lives for the Runtime process:
+ * Resident Account coordinator for one owner Entity replica. Its logical
+ * workers are residents on the process-wide pool (`coordinator/pool.ts`):
  * Account replicas cross IPC once at initialization and leave workers only as
- * dirty checkpoint documents when explicitly due. Fatal poison terminates the
- * pool; normal process exit owns shutdown so Bun never races Worker teardown.
+ * dirty checkpoint documents when explicitly due. Close and fatal poison free
+ * only this owner's residents; the pool threads live for the process.
  */
 export class TsAccountWorkerCoordinator {
   readonly #clients: TsAccountWorkerClient[];
@@ -154,7 +156,7 @@ export class TsAccountWorkerCoordinator {
       bucket.push([accountId, projectPortableAccountDoc(account)]);
     }
     const clients = Array.from({ length: workerCount }, (_, workerIndex) =>
-      new TsAccountWorkerClient(workerIndex));
+      new TsAccountWorkerClient(workerIndex, tsAccountWorkerThreadSlot(ownerEntityId, workerIndex)));
     const common = {
       ownerEntityId,
       workerCount,
@@ -223,7 +225,7 @@ export class TsAccountWorkerCoordinator {
         initialization,
       );
     } catch (error) {
-      for (const client of clients) client.terminate();
+      for (const client of clients) client.close(asWorkerError(error));
       throw error;
     }
   }
@@ -329,7 +331,7 @@ export class TsAccountWorkerCoordinator {
   close(): void {
     if (this.#inFlight) throw new Error('TS_ACCOUNT_WORKER_COORDINATOR_CLOSE_IN_FLIGHT');
     if (!this.#fatal) this.#fatal = new Error('TS_ACCOUNT_WORKER_COORDINATOR_CLOSED');
-    for (const client of this.#clients) client.terminate();
+    for (const client of this.#clients) client.close(this.#fatal);
   }
 
   #assertUsable(): void {
@@ -341,7 +343,7 @@ export class TsAccountWorkerCoordinator {
     const cause = asWorkerError(error);
     if (!this.#fatal) {
       this.#fatal = new Error(`TS_ACCOUNT_WORKER_COORDINATOR_FATAL:${cause.message}`, { cause });
-      for (const client of this.#clients) client.poison(this.#fatal);
+      for (const client of this.#clients) client.close(this.#fatal);
     }
     return this.#fatal;
   }

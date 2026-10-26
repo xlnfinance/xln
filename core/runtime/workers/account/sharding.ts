@@ -33,10 +33,7 @@ export const createBalancedTsAccountShardAssignment = (workerCount: number): rea
   if (!Number.isSafeInteger(workerCount) || workerCount <= 0) {
     throw new Error(`TS_ACCOUNT_WORKER_COUNT_INVALID:${workerCount}`);
   }
-  return Object.freeze(Array.from(
-    { length: TS_ACCOUNT_LOGICAL_SHARDS },
-    (_, shardId) => shardId % workerCount,
-  ));
+  return Array.from({ length: TS_ACCOUNT_LOGICAL_SHARDS }, (_, shardId) => shardId % workerCount);
 };
 
 /** Validate and detach the complete logical-shard -> physical-worker assignment. */
@@ -62,7 +59,8 @@ export const validateTsAccountShardAssignment = (
   });
   const emptyWorker = ownedCounts.findIndex(count => count === 0);
   if (emptyWorker >= 0) throw new Error(`TS_ACCOUNT_WORKER_ASSIGNMENT_EMPTY:${emptyWorker}`);
-  return Object.freeze(assignment);
+  // Readonly by type only: freezing 4096 elements costs ms per coordinator.
+  return assignment;
 };
 
 /** Resolve ownership without coupling logical shards to worker-count arithmetic. */

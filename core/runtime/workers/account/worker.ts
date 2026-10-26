@@ -44,7 +44,6 @@ import { accountHasProposableMempoolForEntity } from '../../../entity/consensus/
 
 type WorkerScope = {
   postMessage(value: unknown, transfer?: Transferable[]): void;
-  close(): void;
   onmessage: ((event: MessageEvent<TsAccountWorkerRequestEnvelope>) => void) | null;
 };
 
@@ -55,11 +54,21 @@ type PhaseWorkspace = Readonly<{
   forWrite(accountId: string): AccountReplica;
 }>;
 
+/**
+ * One owner replica's logical worker on this shared thread. State and the
+ * sequential codec pair are per resident, so co-residents never share
+ * Accounts, J-claim nodes, candidates or codec structure history.
+ */
+type Resident = {
+  state: TsAccountWorkerState | null;
+  readonly requestDecoder: TsAccountWorkerTransferDecoder;
+  readonly responseEncoder: TsAccountWorkerTransferEncoder;
+};
+
 const scope: WorkerScope = self;
-let state: TsAccountWorkerState | null = null;
-let busy = false;
-const requestDecoder = new TsAccountWorkerTransferDecoder();
-const responseEncoder = new TsAccountWorkerTransferEncoder();
+const residents = new Map<number, Resident>();
+let mailbox: Promise<void> = Promise.resolve();
+let closed = false;
 
 type ThreadCpuUsage = Readonly<{ user: number; system: number }>;
 type ThreadCpuProcess = Readonly<{
@@ -273,9 +282,7 @@ const phaseShardOperationCounts = (input: TsAccountWorkerPhasePayload): Map<numb
   return shardRows;
 };
 
-const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult> => {
-  const worker = state;
-  if (!worker) throw new Error('TS_ACCOUNT_WORKER_NOT_INITIALIZED');
+const processPhase = async (worker: TsAccountWorkerState, value: unknown): Promise<TsAccountWorkerPhaseResult> => {
   const input = decodeWorkerPhasePayload(worker, value);
   const startedAt = getPerfMs();
   const operationsBefore = snapshotOpCounters();
@@ -365,9 +372,9 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
   };
 };
 
-const postResult = (requestId: number, result: unknown): void => {
+const postResult = (resident: Resident, requestId: number, result: unknown): void => {
   const startedAt = getPerfMs();
-  const payload = responseEncoder.encode(result);
+  const payload = resident.responseEncoder.encode(result);
   const encodeUs = Math.round((getPerfMs() - startedAt) * 1_000);
   const response: TsAccountWorkerResponseEnvelope = { requestId, kind: 'result', payload, encodeUs };
   scope.postMessage(response, [payload]);
@@ -382,51 +389,75 @@ const postFatal = (requestId: number, error: unknown): void => {
     ...(failure.stack ? { stack: failure.stack } : {}),
   };
   scope.postMessage(response);
-  // A fatal response poisons the coordinator. Closing after enqueueing it
-  // gives the owner a second deterministic rejection signal if Bun loses the
-  // final cross-thread message under contention.
-  scope.close();
+  // A fatal response retires this whole thread and every co-resident; this
+  // isolate never serves another request. The unhandled rejection is a second,
+  // independent signal carrying the same evidence in case Bun loses the final
+  // cross-thread message under contention (Bun workers have no `self.close`).
+  closed = true;
+  void Promise.reject(new Error(`TS_ACCOUNT_WORKER_FATAL_CLOSE:${failure.message}`));
 };
 
-scope.onmessage = event => {
-  const request = event.data;
-  if (busy) {
-    postFatal(request.requestId, new Error('TS_ACCOUNT_WORKER_CONCURRENT_REQUEST'));
+const initializedState = (resident: Resident): TsAccountWorkerState => {
+  if (resident.state === null) throw new Error('TS_ACCOUNT_WORKER_NOT_INITIALIZED');
+  return resident.state;
+};
+
+const residentFor = (request: TsAccountWorkerRequestEnvelope): Resident => {
+  const existing = residents.get(request.residentId);
+  if (request.kind !== 'init') {
+    if (!existing) throw new Error(`TS_ACCOUNT_WORKER_NOT_INITIALIZED:resident=${request.residentId}`);
+    return existing;
+  }
+  if (existing) throw new Error('TS_ACCOUNT_WORKER_ALREADY_INITIALIZED');
+  const created: Resident = {
+    state: null,
+    requestDecoder: new TsAccountWorkerTransferDecoder(),
+    responseEncoder: new TsAccountWorkerTransferEncoder(),
+  };
+  residents.set(request.residentId, created);
+  return created;
+};
+
+const handleRequest = async (request: TsAccountWorkerRequestEnvelope): Promise<void> => {
+  if (request.kind === 'release') {
+    if (!residents.delete(request.residentId)) {
+      throw new Error(`TS_ACCOUNT_WORKER_RELEASE_UNKNOWN:resident=${request.residentId}`);
+    }
     return;
   }
-  busy = true;
-  void (async () => {
+  const resident = residentFor(request);
+  const decoded = resident.requestDecoder.decode(request.payload);
+  if (request.kind === 'init') {
+    const initialized = initializeWorkerState(decodeWorkerInitPayload(decoded));
+    resident.state = initialized.state;
+    postResult(resident, request.requestId, initialized.result);
+  } else if (request.kind === 'phase') {
+    postResult(resident, request.requestId, await processPhase(initializedState(resident), decoded));
+  } else if (request.kind === 'books') {
+    postResult(resident, request.requestId, processBookSlots(
+      initializedState(resident).workerIndex,
+      decoded as import('./protocol').TsBookWorkerPayload,
+    ));
+  } else if (request.kind === 'install_hankos') {
+    postResult(resident, request.requestId, installWorkerCommittedHankos(
+      initializedState(resident),
+      decoded as import('./protocol').TsAccountWorkerInstallHankosPayload,
+    ));
+  } else {
+    throw new Error(`TS_ACCOUNT_WORKER_REQUEST_UNKNOWN:${String((request as { kind: unknown }).kind)}`);
+  }
+};
+
+// One request at a time in arrival order: a co-resident's await can never
+// interleave with another owner's transition or its op-counter window.
+scope.onmessage = event => {
+  const request = event.data;
+  mailbox = mailbox.then(async () => {
+    if (closed) return;
     try {
-      const decoded = requestDecoder.decode(request.payload);
-      if (request.kind === 'init') {
-        if (state !== null) throw new Error('TS_ACCOUNT_WORKER_ALREADY_INITIALIZED');
-        const initialized = initializeWorkerState(decodeWorkerInitPayload(decoded));
-        state = initialized.state;
-        postResult(request.requestId, initialized.result);
-      } else if (request.kind === 'phase') {
-        postResult(request.requestId, await processPhase(decoded));
-      } else if (request.kind === 'books') {
-        if (state === null) throw new Error('TS_ACCOUNT_WORKER_NOT_INITIALIZED');
-        postResult(request.requestId, processBookSlots(
-          state.workerIndex,
-          decoded as import('./protocol').TsBookWorkerPayload,
-        ));
-      } else if (request.kind === 'install_hankos') {
-        if (state === null) throw new Error('TS_ACCOUNT_WORKER_NOT_INITIALIZED');
-        postResult(
-          request.requestId,
-          installWorkerCommittedHankos(
-            state,
-            decoded as import('./protocol').TsAccountWorkerInstallHankosPayload,
-          ),
-        );
-      } else {
-        throw new Error(`TS_ACCOUNT_WORKER_REQUEST_UNKNOWN:${String(request.kind)}`);
-      }
+      await handleRequest(request);
     } catch (error) {
       postFatal(request.requestId, error);
-    } finally {
-      busy = false;
     }
-  })();
+  });
 };

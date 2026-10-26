@@ -24,20 +24,6 @@ import type { ManagedPeerIdentity } from '../../market-maker/identity-resolver';
 
 type LeaseManager = ReturnType<typeof createManagedRuntimeLeaseManager>;
 
-/**
- * Default MM Account execution to one worker per owner replica; preserve
- * explicit operator configuration. Each MM Entity holds one Account per hub,
- * while the default pool (runtime/workers/account/provider.ts) sizes for a
- * Hub. Sharding and input-position result order are fixed for any count.
- */
-export const MARKET_MAKER_TS_ACCOUNT_WORKERS = '1';
-
-export const buildMarketMakerAccountWorkerEnv = (
-  source: NodeJS.ProcessEnv,
-): Record<'XLN_TS_ACCOUNT_WORKERS', string> => ({
-  XLN_TS_ACCOUNT_WORKERS: source['XLN_TS_ACCOUNT_WORKERS'] ?? MARKET_MAKER_TS_ACCOUNT_WORKERS,
-});
-
 type MarketMakerSpawnerDeps = {
   args: Pick<Args, 'host' | 'publicWsBaseUrl' | 'rpcUrl'>;
   relayUrl: string;
@@ -141,7 +127,6 @@ export const createMarketMakerSpawner = (deps: MarketMakerSpawnerDeps) => async 
     env: sanitizeChildProcessEnv({
       ...buildManagedRuntimeChildSecretEnv(process.env),
       ...buildRuntimeChildGcEnv(process.env),
-      ...buildMarketMakerAccountWorkerEnv(process.env),
       XLN_DB_PATH: child.dbPath,
       XLN_JURISDICTIONS_PATH: deps.shardJurisdictionsPath,
       ...deps.buildRpcChildEnv(),
@@ -156,6 +141,9 @@ export const createMarketMakerSpawner = (deps: MarketMakerSpawnerDeps) => async 
       XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL:
         process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] ?? join(child.dbPath, 'bootstrap-events.jsonl'),
       XLN_LOG_LEVEL: process.env['XLN_MARKET_MAKER_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn',
+      // MM Entities run sequentially with a few Accounts each: inline Account
+      // execution beats worker round trips. An operator setting still wins.
+      XLN_TS_ACCOUNT_WORKERS: process.env['XLN_TS_ACCOUNT_WORKERS'] ?? '0',
     }),
   });
   child.proc = proc;

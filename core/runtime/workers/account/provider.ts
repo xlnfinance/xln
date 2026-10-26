@@ -36,6 +36,7 @@ import { selectCrossJOpeningAccountProposalTxs } from '../../../entity/transitio
 import { accountHankoWitnessRequirements } from '../../../entity/consensus/input/hanko-witness';
 import { TsAccountWorkerCoordinator } from './coordinator';
 import { assertAccountRootMatch } from './root-divergence';
+import { startTsAccountWorkerPool, tsAccountWorkerPoolSize } from './coordinator/pool';
 import type {
   TsAccountWorkerBatchResult,
   TsAccountWorkerEffect,
@@ -758,15 +759,7 @@ export class TsAccountWorkerAuthority {
   }
 }
 
-export const canonicalTsAccountWorkerCount = (): number => {
-  const processValue = Reflect.get(globalThis, 'process') as
-    | { env?: Record<string, string | undefined> }
-    | undefined;
-  const configured = Number(processValue?.env?.['XLN_TS_ACCOUNT_WORKERS'] ?? '');
-  if (Number.isSafeInteger(configured) && configured >= 1 && configured <= 64) return configured;
-  const hardwareConcurrency = typeof navigator === 'undefined' ? 8 : navigator.hardwareConcurrency;
-  return Math.max(1, Math.min(8, hardwareConcurrency || 8));
-};
+export { canonicalTsAccountWorkerCount } from './coordinator/pool';
 
 /** Install the sole TypeScript H1 Account executor before its first frame. */
 export const installTsAccountWorkerAuthority = (env: RuntimeReplica): void => {
@@ -777,14 +770,16 @@ export const installTsAccountWorkerAuthority = (env: RuntimeReplica): void => {
   // OS workers. Spawning another Account worker pool per Runtime multiplies a
   // 1,000-user HLT into thousands of threads without adding Account-level
   // parallelism. Zero explicitly selects the canonical inline TS transition;
-  // Hub processes keep their configured/default shared Account worker pool.
+  // the MM spawner defaults to it. Hub processes multiplex every owner
+  // replica over the one process-wide Account worker pool.
   if (processValue?.env?.['XLN_TS_ACCOUNT_WORKERS'] === '0') {
     if (processValue.env?.['XLN_HUB_NAME']?.toUpperCase() === 'H1') {
       throw new Error('TS_H1_BOOK_WORKER_PROVIDER_REQUIRED');
     }
     return;
   }
-  const authority = new TsAccountWorkerAuthority(env, canonicalTsAccountWorkerCount());
+  const authority = new TsAccountWorkerAuthority(env, tsAccountWorkerPoolSize());
   env.accountAuthorityExecutionMode = 'cutover';
   env.accountAuthorityEntityStageProvider = authority.provider;
+  startTsAccountWorkerPool();
 };

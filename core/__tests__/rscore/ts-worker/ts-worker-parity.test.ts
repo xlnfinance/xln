@@ -14,6 +14,10 @@ import type { AccountInput, AccountReplica, AccountTx } from '../../../types/acc
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { TsAccountWorkerAuthority, TsAccountWorkerCoordinator } from '../../../runtime/workers/account';
 import { tsAccountLogicalShard } from '../../../runtime/workers/account/sharding';
+import {
+  tsAccountWorkerPoolStats,
+  tsAccountWorkerThreadSlot,
+} from '../../../runtime/workers/account/coordinator/pool';
 import { createWorkerConsensusContext, type TsAccountWorkerState } from '../../../runtime/workers/account/worker-state';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
 import { encodeBoard, hashBoard } from '../../../entity/factory';
@@ -69,6 +73,9 @@ const PARITY_JURISDICTION: JReplica = {
 
 const signingEnv = createEmptyEnv(RUNTIME_SEED);
 
+/** Co-located owners whose logical workers land on the same pool threads. */
+const SHARED_OWNERS = [OWNER, `0x${'ff'.repeat(31)}fe`, `0x${'ff'.repeat(31)}fd`] as const;
+
 /**
  * Deterministic synthetic Account ids spread across many three-nibble shards
  * for local-admission traffic; inbound dispute peers use real board-hash ids.
@@ -107,13 +114,13 @@ const peerAccountId = (index: number): string => {
 const INBOUND_COUNT = 32;
 const inboundAccountIds = Array.from({ length: INBOUND_COUNT }, (_, index) => peerAccountId(index));
 
-const parityAccount = (accountId: string, disputePeer = false): AccountReplica => {
-  const account = makeAccount(OWNER, accountId);
+const parityAccount = (accountId: string, disputePeer = false, owner = OWNER): AccountReplica => {
+  const account = makeAccount(owner, accountId);
   const tokenTwo = createDefaultDelta(2);
   tokenTwo.leftCreditLimit = 10n ** 30n;
   tokenTwo.rightCreditLimit = 10n ** 30n;
   account.state.deltas = account.state.deltas.updated(2, tokenTwo);
-  account.proofHeader = { fromEntity: OWNER, toEntity: accountId, nextProofNonce: 1 };
+  account.proofHeader = { fromEntity: owner, toEntity: accountId, nextProofNonce: 1 };
   if (disputePeer) {
     // Dispute-lane preconditions, mirroring the canonical monotonicity fixture:
     // fresh proof nonce 5 strictly above jNonce 4, with a live proof body.
@@ -130,13 +137,13 @@ const parityAccount = (accountId: string, disputePeer = false): AccountReplica =
   return account;
 };
 
-const paymentTx = (accountId: string, amount: bigint): AccountTx => ({
+const paymentTx = (accountId: string, amount: bigint, owner = OWNER): AccountTx => ({
   type: 'direct_payment',
   data: {
     tokenId: 1,
     amount,
     route: [accountId],
-    fromEntityId: OWNER,
+    fromEntityId: owner,
     toEntityId: accountId,
     deliveryMode: 'direct',
   },
@@ -211,11 +218,12 @@ const runSequential = async (
   txsByAccount: readonly AccountTx[][],
   inboundIds: readonly string[],
   inboundInputs: readonly AccountInput[],
+  owner = OWNER,
 ): Promise<SequentialOutcome> => {
   const accounts = new Map<string, AccountReplica>();
   const isInbound = new Set(inboundIds);
   for (const accountId of ids) {
-    accounts.set(accountId, parityAccount(accountId, isInbound.has(accountId)));
+    accounts.set(accountId, parityAccount(accountId, isInbound.has(accountId), owner));
   }
   const workerStub = {
     jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
@@ -262,7 +270,7 @@ const runSequential = async (
   }
   const accountsRoot = PersistentEntityAccountMap.fromEntries(
     accounts,
-    OWNER,
+    owner,
     computeEntityAccountValueHash,
   ).rootHash();
   return { accountsRoot, inboundEffects, outboundEffects };
@@ -273,11 +281,12 @@ const runCoordinator = async (
   txsByAccount: readonly AccountTx[][],
   inboundInputs: readonly AccountInput[],
   workers: number,
+  owner = OWNER,
 ) => {
   const isInbound = new Set(inboundInputs.map(input => input.fromEntityId));
-  const accounts = new Map(ids.map(accountId => [accountId, parityAccount(accountId, isInbound.has(accountId))]));
+  const accounts = new Map(ids.map(accountId => [accountId, parityAccount(accountId, isInbound.has(accountId), owner)]));
   const coordinator = await TsAccountWorkerCoordinator.create({
-    ownerEntityId: OWNER,
+    ownerEntityId: owner,
     workerCount: workers,
     logicalShardToWorker: Array.from({ length: 4096 }, (_, shardId) => shardId % workers),
     accounts,
@@ -308,7 +317,7 @@ const runCoordinator = async (
   if (outbound.postAccounts?.length !== ids.length) {
     throw new Error(`PARITY_POST_ACCOUNT_ARITY:${outbound.postAccounts?.length ?? -1}:${ids.length}`);
   }
-  return { inbound, outbound };
+  return { inbound, outbound, coordinator };
 };
 
 const digest = (effects: readonly unknown[]): string =>
@@ -376,6 +385,50 @@ describe('TS Account worker engine parity with canonical sequential transitions'
         inputs: [],
       }),
     ).rejects.toThrow('TS_ACCOUNT_WORKER_COORDINATOR_FATAL');
+  });
+
+  test('a fatal resident retires its shared thread loudly for every co-resident owner', async () => {
+    const [ownerA, ownerB, ownerC] = SHARED_OWNERS;
+    expect(new Set(SHARED_OWNERS.map(owner => tsAccountWorkerThreadSlot(owner, 0))).size).toBe(1);
+    const validId = `0x000${'2'.repeat(61)}`;
+    const missingId = `0x001${'d'.repeat(61)}`;
+    const create = (owner: string) => TsAccountWorkerCoordinator.create({
+      ownerEntityId: owner,
+      workerCount: 1,
+      accounts: new Map([[validId, parityAccount(validId, false, owner)]]),
+      jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
+    });
+    const frame = (coordinator: TsAccountWorkerCoordinator, owner: string, accountId: string) =>
+      coordinator.applyAccountInputs({
+        frameId: `shared-fatal-${owner}`,
+        expectedAccountsRoot: coordinator.accountsRoot,
+        entityTimestamp: 1_000,
+        finalizedJHeight: 0,
+        owningEntityIsHub: false,
+        inputs: [],
+      }).then(() => coordinator.proposeAccountFrames({
+        frameId: `shared-fatal-${owner}`,
+        timestamp: 1_000,
+        jHeight: 0,
+        envelopeUpdates: [],
+        txs: [{ accountId, txs: [paymentTx(accountId, 1n, owner)] }],
+        proposals: [],
+      }));
+    const a = await create(ownerA);
+    const b = await create(ownerB);
+    const bRoot = b.accountsRoot;
+    await expect(frame(a, ownerA, missingId)).rejects.toThrow('TS_ACCOUNT_WORKER_COORDINATOR_FATAL');
+    // B's Accounts died with the shared isolate: it must stop, never continue,
+    // and its rejection carries A's root cause whichever signal arrived first.
+    const bFailure = await frame(b, ownerB, validId).then(() => null, (error: unknown) => error);
+    expect(bFailure).toBeInstanceOf(Error);
+    expect((bFailure as Error).message).toStartWith('TS_ACCOUNT_WORKER_COORDINATOR_FATAL:');
+    expect((bFailure as Error).message).toContain(missingId);
+    expect(b.accountsRoot).toBe(bRoot);
+    // An owner created afterwards gets a fresh thread in that slot.
+    const c = await create(ownerC);
+    const result = await frame(c, ownerC, validId);
+    expect(result.effects.every(effect => effect.result.ok)).toBeTrue();
   });
 
   test('fixture mixes inbound peers, payments, HTLC locks, and same-J swap offers', async () => {
@@ -504,6 +557,79 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     expect(w8.outbound.accountsRoot).toBe(w1.outbound.accountsRoot);
     expect(digest(w8.outbound.effects)).toBe(digest(w1.outbound.effects));
   }, 30_000);
+
+  for (const workers of [1, 2, 4, 8] as const) {
+    test(`w=${workers}: co-located owners sharing one pool match their isolated sequential runs`, async () => {
+      const localIds = syntheticAccountIds(COUNT - INBOUND_COUNT);
+      // Same Account ids for every owner: identical shards, identical logical
+      // workers and identical threads, but owner-specific amounts. Any
+      // cross-owner leakage of Accounts, candidates or codec state diverges.
+      const traffic = SHARED_OWNERS.map((owner, ownerIndex) => localIds.map((accountId, index) => {
+        if (index % 3 === 0) return [paymentTx(accountId, BigInt(index + 1 + ownerIndex), owner), htlcLockTx(index)];
+        if (index % 3 === 1) return [swapOfferTx(`shared-${String(ownerIndex)}-${String(index)}`)];
+        return [paymentTx(accountId, BigInt((index + 1) * (ownerIndex + 1)), owner)];
+      }));
+      const baselines = await Promise.all(SHARED_OWNERS.map((owner, ownerIndex) =>
+        runSequential(localIds, traffic[ownerIndex] ?? [], [], [], owner)));
+      const before = tsAccountWorkerPoolStats();
+      const shared = await Promise.all(SHARED_OWNERS.map((owner, ownerIndex) =>
+        runCoordinator(localIds, traffic[ownerIndex] ?? [], [], workers, owner)));
+      const during = tsAccountWorkerPoolStats();
+      expect(during.threads).toBeLessThanOrEqual(during.size);
+      expect(during.residents - before.residents).toBe(SHARED_OWNERS.length * workers);
+      for (const [ownerIndex, run] of shared.entries()) {
+        const baseline = baselines[ownerIndex];
+        if (!baseline) throw new Error(`SHARED_POOL_BASELINE_MISSING:${ownerIndex}`);
+        expect(run.outbound.effects.map(effect => effect.order)).toEqual(
+          Array.from({ length: localIds.length * 2 }, (_, order) => order),
+        );
+        expect(digest(run.outbound.effects)).toBe(digest(baseline.outboundEffects));
+        expect(run.outbound.accountsRoot).toBe(baseline.accountsRoot);
+        // Request bytes are measured before postMessage detaches the buffer.
+        expect(run.coordinator.initialization.requestBytes).toBeGreaterThan(0);
+        expect(run.outbound.ipc.requestBytes).toBeGreaterThan(0);
+        expect(run.outbound.workers.every(metric => metric.requestBytes > 0)).toBeTrue();
+      }
+      expect(new Set(baselines.map(baseline => baseline.accountsRoot)).size).toBe(SHARED_OWNERS.length);
+      // Releasing two owners frees only their residents; the survivor's next
+      // frame on the same threads still matches its own sequential parent.
+      for (const run of shared.slice(1)) run.coordinator.close();
+      expect(tsAccountWorkerPoolStats().residents - before.residents).toBe(workers);
+      const survivor = shared[0];
+      if (!survivor) throw new Error('SHARED_POOL_SURVIVOR_MISSING');
+      const secondFrame = async (coordinator: TsAccountWorkerCoordinator) => {
+        await coordinator.applyAccountInputs({
+          frameId: 'shared-pool-frame-2',
+          expectedAccountsRoot: coordinator.accountsRoot,
+          entityTimestamp: 2_000,
+          finalizedJHeight: 0,
+          owningEntityIsHub: false,
+          inputs: [],
+        });
+        const touched = localIds.slice(0, 8);
+        return coordinator.proposeAccountFrames({
+          frameId: 'shared-pool-frame-2',
+          timestamp: 2_000,
+          jHeight: 0,
+          envelopeUpdates: [],
+          txs: touched.map((accountId, index) => ({ accountId, txs: [paymentTx(accountId, BigInt(index + 7))] })),
+          proposals: touched.map(accountId => ({ accountId })),
+        });
+      };
+      const shared2 = await secondFrame(survivor.coordinator);
+      const alone = await runCoordinator(localIds, traffic[0] ?? [], [], workers, OWNER);
+      const alone2 = await secondFrame(alone.coordinator);
+      // Frame-1 proposals still await ACK: admissions apply, proposals skip.
+      expect(shared2.effects).toHaveLength(8);
+      expect(shared2.skippedProposals).toEqual(alone2.skippedProposals);
+      expect(shared2.skippedProposals).toHaveLength(8);
+      expect(digest(shared2.effects)).toBe(digest(alone2.effects));
+      expect(shared2.accountsRoot).toBe(alone2.accountsRoot);
+      survivor.coordinator.close();
+      alone.coordinator.close();
+      expect(tsAccountWorkerPoolStats().residents).toBe(before.residents);
+    }, 30_000);
+  }
 
   test('post-commit Account Hankos return to the shard owner without changing its root', async () => {
     const accountId = `0xabc${'1'.repeat(61)}`;

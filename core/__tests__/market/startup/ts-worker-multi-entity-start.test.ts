@@ -2,9 +2,11 @@ import { expect, test } from 'bun:test';
 import { TsAccountWorkerCoordinator } from '../../../runtime/workers/account';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
+import { tsAccountWorkerPoolStats } from '../../../runtime/workers/account/coordinator/pool';
 
 test('thirteen empty MM Entity owners retain roots without starting unused Account workers', async () => {
   const coordinators: TsAccountWorkerCoordinator[] = [];
+  const before = tsAccountWorkerPoolStats();
   try {
     // Bootstrap used to start 104 idle workers for these thirteen owners.
     // Retain every coordinator, as the Runtime provider does, without fake roots.
@@ -25,6 +27,8 @@ test('thirteen empty MM Entity owners retain roots without starting unused Accou
       console.log(`WORKER_OWNER_READY index=${index} ms=${Math.round(performance.now() - started)}`);
     }
     expect(coordinators).toHaveLength(13);
+    // Empty owners take no residency on the shared process pool.
+    expect(tsAccountWorkerPoolStats()).toEqual(before);
   } finally {
     for (const coordinator of coordinators) coordinator.close();
   }

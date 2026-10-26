@@ -5,9 +5,11 @@ import type {
   TsAccountWorkerInitPayload,
   TsAccountWorkerPhaseResult,
   TsAccountWorkerRequestEnvelope,
-  TsAccountWorkerResponseEnvelope,
   TsBookWorkerResult,
 } from './protocol';
+import { acquireTsAccountWorkerResidency, type TsAccountWorkerResidency } from './coordinator/pool';
+
+type WorkerRequestKind = Exclude<TsAccountWorkerRequestEnvelope['kind'], 'release'>;
 
 export type WorkerRequestResult = Readonly<{
   value: unknown;
@@ -19,22 +21,18 @@ export type WorkerRequestResult = Readonly<{
   workerEncodeMs: number;
 }>;
 
-type PendingRequest = Readonly<{
-  resolve(value: WorkerRequestResult): void;
-  reject(error: Error): void;
-  requestBytes: number;
-  encodeMs: number;
-  sentAt: number;
-}>;
-
 export const asWorkerError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
+/**
+ * One owner replica's logical Account worker: a resident on a shared pool
+ * thread. It owns that resident's sequential codec pair and initialization;
+ * the thread only carries envelopes (see `coordinator/pool.ts`).
+ */
 export class TsAccountWorkerClient {
-  #worker: Worker | null = null;
   readonly #workerIndex: number;
-  readonly #pending = new Map<number, PendingRequest>();
-  #nextRequestId = 1;
+  readonly #threadSlot: number;
+  #residency: TsAccountWorkerResidency | null = null;
   #closed = false;
   readonly #requestEncoder = new TsAccountWorkerTransferEncoder();
   readonly #responseDecoder = new TsAccountWorkerTransferDecoder();
@@ -44,8 +42,9 @@ export class TsAccountWorkerClient {
     | { kind: 'starting'; pending: Promise<void> } = { kind: 'ready' };
   #initializationTransfer = { requestBytes: 0, responseBytes: 0 };
 
-  constructor(workerIndex: number) {
+  constructor(workerIndex: number, threadSlot: number) {
     this.#workerIndex = workerIndex;
+    this.#threadSlot = threadSlot;
   }
 
   get initializationTransfer(): Readonly<{ requestBytes: number; responseBytes: number }> {
@@ -55,7 +54,7 @@ export class TsAccountWorkerClient {
   initialize(input: TsAccountWorkerInitPayload): Promise<WorkerRequestResult | undefined> {
     if (input.accounts.length > 0) return this.request('init', input);
     // An empty shard contributes the canonical empty root. Keep its client
-    // and frame lifecycle, but allocate the isolate only for actual work;
+    // and frame lifecycle, but take a pool residency only for actual work;
     // the unchanged init must succeed before its first financial request.
     this.#deferEmptyInitialization(input);
     return Promise.resolve(undefined);
@@ -64,8 +63,7 @@ export class TsAccountWorkerClient {
   #deferEmptyInitialization(input: TsAccountWorkerInitPayload): void {
     if (
       input.accounts.length !== 0 ||
-      this.#worker ||
-      this.#nextRequestId !== 1 ||
+      this.#residency ||
       this.#initialization.kind !== 'ready' ||
       this.#closed
     ) {
@@ -78,81 +76,7 @@ export class TsAccountWorkerClient {
     this.#initialization = { kind: 'deferred', payload, encodeMs: getPerfMs() - startedAt };
   }
 
-  #startWorker(): Worker {
-    if (this.#worker) return this.#worker;
-    // Bun resolves the source module beside this file. A production browser
-    // loads the separately bundled worker from the same public origin; using
-    // the source-relative URL there incorrectly requested `/worker.ts`.
-    const location = Reflect.get(globalThis, 'location') as { origin?: unknown } | undefined;
-    const workerUrl = typeof location?.origin === 'string'
-      ? new URL('/account-worker.js', location.origin)
-      : new URL('./worker.ts', import.meta.url);
-    // The browser bundle intentionally retains import.meta in the optional
-    // shadow instrumentation path. A classic worker rejects that syntax before
-    // initialization; module workers accept it and Bun supports the same mode.
-    this.#worker = new Worker(workerUrl, { type: 'module' });
-    this.#worker.onmessage = event => this.#handleResponse(event.data as TsAccountWorkerResponseEnvelope);
-    this.#worker.onerror = event =>
-      this.#retire(
-        new Error(
-          `TS_ACCOUNT_WORKER_ERROR:${this.#workerIndex}:${event.message}:${event.filename}:${event.lineno}:${event.colno}`,
-        ),
-      );
-    this.#worker.addEventListener('close', () => {
-      if (!this.#closed) this.#retire(new Error(`TS_ACCOUNT_WORKER_CLOSED:${this.#workerIndex}`));
-    });
-    return this.#worker;
-  }
-
-  #handleResponse(response: TsAccountWorkerResponseEnvelope): void {
-    const pending = this.#pending.get(response.requestId);
-    if (!pending) {
-      // Preserve envelope shape, never financial payloads or signing material,
-      // when a foreign/malformed message poisons this isolate's mailbox.
-      const fields = Object.keys(response).slice(0, 8).map(key => key.slice(0, 32)).join(',');
-      this.#retire(new Error(
-        `TS_ACCOUNT_WORKER_UNMATCHED_RESPONSE:${this.#workerIndex}:${response.requestId}`
-        + `:fields=${fields}:kindType=${typeof response.kind}:pending=${this.#pending.size}`,
-      ));
-      return;
-    }
-    this.#pending.delete(response.requestId);
-    if (response.kind === 'fatal') {
-      pending.reject(new Error(
-        `TS_ACCOUNT_WORKER_FATAL:${this.#workerIndex}:${response.error}`
-        + (response.stack ? `\n${response.stack}` : ''),
-      ));
-      return;
-    }
-    try {
-      const decodeStart = getPerfMs();
-      const value = this.#responseDecoder.decode(response.payload);
-      const decodeMs = getPerfMs() - decodeStart;
-      pending.resolve({
-        value,
-        requestBytes: pending.requestBytes,
-        responseBytes: response.payload.byteLength,
-        encodeMs: pending.encodeMs,
-        decodeMs,
-        roundTripMs: getPerfMs() - pending.sentAt,
-        workerEncodeMs: response.encodeUs / 1_000,
-      });
-    } catch (error) {
-      pending.reject(new Error(
-        `TS_ACCOUNT_WORKER_RESPONSE_DECODE:${this.#workerIndex}:${asWorkerError(error).message}`,
-      ));
-    }
-  }
-
-  #retire(error: Error): void {
-    if (this.#closed) return;
-    this.#closed = true;
-    const pending = [...this.#pending.values()];
-    this.#pending.clear();
-    for (const request of pending) request.reject(error);
-  }
-
-  async request(kind: TsAccountWorkerRequestEnvelope['kind'], value: unknown): Promise<WorkerRequestResult> {
+  async request(kind: WorkerRequestKind, value: unknown): Promise<WorkerRequestResult> {
     if (this.#closed) throw new Error(`TS_ACCOUNT_WORKER_CLIENT_CLOSED:${this.#workerIndex}`);
     // Freeze this request before awaiting cold initialization, just as a warm
     // client does before posting; caller mutations cannot change accepted work.
@@ -174,55 +98,46 @@ export class TsAccountWorkerClient {
     return this.#send(kind, payload, encodeMs);
   }
 
-  #send(
-    kind: TsAccountWorkerRequestEnvelope['kind'],
-    payload: ArrayBuffer,
-    encodeMs: number,
-  ): Promise<WorkerRequestResult> {
-    if (this.#closed) {
-      return Promise.reject(new Error(`TS_ACCOUNT_WORKER_CLIENT_CLOSED:${this.#workerIndex}`));
-    }
-    const requestId = this.#nextRequestId;
-    this.#nextRequestId += 1;
-    const request: TsAccountWorkerRequestEnvelope = { requestId, kind, payload };
+  async #send(kind: WorkerRequestKind, payload: ArrayBuffer, encodeMs: number): Promise<WorkerRequestResult> {
+    if (this.#closed) throw new Error(`TS_ACCOUNT_WORKER_CLIENT_CLOSED:${this.#workerIndex}`);
+    // The first message of every resident is its init, direct or deferred.
+    this.#residency ??= acquireTsAccountWorkerResidency(this.#threadSlot);
+    const { thread, residentId } = this.#residency;
+    // Posting transfers (detaches) the buffer; measure it first.
+    const requestBytes = payload.byteLength;
     const sentAt = getPerfMs();
-    return new Promise<WorkerRequestResult>((resolve, reject) => {
-      this.#pending.set(requestId, { resolve, reject, requestBytes: payload.byteLength, encodeMs, sentAt });
-      try {
-        this.#startWorker().postMessage(request, [payload]);
-      } catch (error) {
-        this.#pending.delete(requestId);
-        reject(asWorkerError(error));
-      }
-    }).then(result => {
-      if (kind === 'init')
-        this.#initializationTransfer = {
-          requestBytes: result.requestBytes,
-          responseBytes: result.responseBytes,
-        };
-      return result;
-    });
-  }
-
-  terminate(): void {
-    if (!this.#closed) {
-      this.#closed = true;
-      const error = new Error(`TS_ACCOUNT_WORKER_TERMINATED:${this.#workerIndex}`);
-      const pending = [...this.#pending.values()];
-      this.#pending.clear();
-      for (const request of pending) request.reject(error);
+    const response = await thread.send(residentId, kind, payload);
+    let value: unknown;
+    const decodeStart = getPerfMs();
+    try {
+      value = this.#responseDecoder.decode(response.payload);
+    } catch (error) {
+      throw new Error(`TS_ACCOUNT_WORKER_RESPONSE_DECODE:${this.#workerIndex}:${asWorkerError(error).message}`);
     }
-    this.#worker?.terminate();
+    const decodeMs = getPerfMs() - decodeStart;
+    const result: WorkerRequestResult = {
+      value,
+      requestBytes,
+      responseBytes: response.payload.byteLength,
+      encodeMs,
+      decodeMs,
+      roundTripMs: getPerfMs() - sentAt,
+      workerEncodeMs: response.encodeUs / 1_000,
+    };
+    if (kind === 'init') {
+      this.#initializationTransfer = { requestBytes: result.requestBytes, responseBytes: result.responseBytes };
+    }
+    return result;
   }
 
   /**
-   * Fail-stop owns the isolate as well as its mailbox. A poisoned coordinator
-   * can never dispatch again, so retaining the Worker only leaks a schedulable
-   * thread and can starve the next Runtime/test pool under aggregate load.
+   * Owner shutdown or fail-stop poison: reject this resident's in-flight
+   * requests and free its isolate state. Co-residents keep their thread.
    */
-  poison(error: Error): void {
-    this.#retire(error);
-    this.#worker?.terminate();
+  close(error: Error): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#residency?.thread.release(this.#residency.residentId, error);
   }
 }
 

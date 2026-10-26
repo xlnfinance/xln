@@ -299,11 +299,20 @@ export type TsAccountWorkerInitResult = Readonly<{
   heapUsedBytes: number;
 }>;
 
-export type TsAccountWorkerRequestEnvelope = Readonly<{
-  requestId: number;
-  kind: 'init' | 'phase' | 'books' | 'install_hankos';
-  payload: ArrayBuffer;
-}>;
+/** `residentId` names one owner replica's logical worker on a shared pool thread. */
+export type TsAccountWorkerRequestEnvelope =
+  | Readonly<{
+      requestId: number;
+      residentId: number;
+      kind: 'init' | 'phase' | 'books' | 'install_hankos';
+      payload: ArrayBuffer;
+    }>
+  | Readonly<{
+      requestId: number;
+      residentId: number;
+      /** Drop the resident's state; no response. */
+      kind: 'release';
+    }>;
 
 export type TsAccountWorkerResponseEnvelope =
   | Readonly<{
