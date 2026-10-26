@@ -20,7 +20,7 @@ import {
   assertRuntimeAdapterCommandTxAuthorized,
   markLocalRuntimeAdapterCommandTx,
 } from '../../../runtime/command/frontier-auth';
-import { Packr } from 'msgpackr';
+import { Packr } from 'msgpackr/pack';
 import {
   XLN_BINARY_MSGPACK_MAGIC,
   createSequentialTransportValueCodec,

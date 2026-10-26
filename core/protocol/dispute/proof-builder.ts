@@ -1,5 +1,5 @@
 import { exclusiveUnixMsBigIntToUnixS } from '../units';
-import { Packr } from 'msgpackr';
+import { Packr } from 'msgpackr/pack';
 import { ethers } from 'ethers';
 import { LIMITS } from '../../config/constants';
 import type { AccountReplica, AccountState, Delta } from '../../types/account.js';

@@ -1,4 +1,7 @@
-import { Packr, addExtension } from 'msgpackr';
+// Pure-JS entry: the bare Bun/Node entry loads msgpackr-extract, whose
+// per-isolate NAPI init clears a process-global token table that a racing
+// main-thread decode reads (binary-codec-native-extractor.test.ts).
+import { Packr, addExtension } from 'msgpackr/pack';
 import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
 import { getPerfMs } from '../../support/time';
 
