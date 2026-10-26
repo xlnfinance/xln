@@ -7,6 +7,7 @@ import {
   acquireLocalTestPortLease,
   acquireLocalHltLaneLease,
   buildInheritedLocalTestLeaseEnv,
+  LOCAL_TEST_STACK_BASES,
   stripLocalTestLeaseEnv,
 } from '../../../scripts/e2e/harness/local-test-port-lease';
 import { resetOwnedLocalRunRoot } from '../../../scripts/e2e/harness/local-run-root';
@@ -72,6 +73,27 @@ test('local test lease capability enables assert-only startup and forbids proces
     expect(rejected.stderr).toContain('LOCAL_TEST_LEASE_OWNER_INVALID');
   } finally {
     lease.release();
+  }
+});
+
+// The shell start policy keeps its own lane list; a pool lane it does not know
+// fails every stack started there with LOCAL_TEST_LEASE_BASE_INVALID.
+test('the shell start policy accepts every machine-wide stack lane', async () => {
+  for (const base of LOCAL_TEST_STACK_BASES) {
+    const lease = await acquireLocalTestPortLease({ slotBases: [base], timeoutMs: 1_000 });
+    try {
+      const env = { ...stripLocalTestLeaseEnv(process.env), ...buildInheritedLocalTestLeaseEnv(lease, repoRoot) };
+      const accepted = await run('bash', [
+        '-c',
+        'source scripts/lib/start-common.sh; xln_configure_start_policy "$1"; printf "%s" "$XLN_PORT_BASE"',
+        'lease-lane-policy',
+        repoRoot,
+      ], env);
+      expect(accepted.stderr, String(base)).toBe('');
+      expect(accepted.stdout).toBe(String(base));
+    } finally {
+      lease.release();
+    }
   }
 });
 

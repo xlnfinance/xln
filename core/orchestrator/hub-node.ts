@@ -15,7 +15,7 @@ import {
 } from './hub/node/hub-reserves';
 import { createHubControlRequestHandler, handleHubHttpRequest, type HubHttpContext } from './hub/node/hub-http';
 import { configureCryptoPoolEntry } from '../protocol/crypto/crypto-pool';
-import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
+import { ethers } from 'ethers';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createExternalWalletApi } from '../api/public/external-wallet-api';
@@ -47,6 +47,7 @@ import { safeStringify } from '../protocol/serialization';
 import { writeDurableFile } from '../storage/fs-durability';
 import { createStructuredLogger } from '../support/logger';
 import { getPerfMs } from '../support/time';
+import { deriveAnvilDevPrivateKey, resolveFaucetFunderIndex } from './support/anvil-dev-accounts';
 import { handleMeshBootstrapLoopError } from './mesh/mesh-bootstrap-fail-fast';
 import { reportManagedChildFatal } from './process/managed-child-fatal-ipc';
 import {
@@ -197,7 +198,6 @@ const parseArgs = (): HubNodeArgs => {
   };
 };
 
-const DEFAULT_ANVIL_MNEMONIC = 'test test test test test test test test test test test junk';
 const FAUCET_SIGNER_LABEL = 'faucet-1';
 const FAUCET_WALLET_ETH_TARGET = ethers.parseEther('10');
 const FAUCET_TOKEN_TARGET_UNITS = 1_000_000n;
@@ -214,26 +214,6 @@ const resolveHubSignerIndex = (name: string): number => {
   );
   const ordinal = match ? Number(match[1]) : 1;
   return Number.isSafeInteger(ordinal) && ordinal >= 1 ? ordinal - 1 : 0;
-};
-
-/**
- * Anvil funds dev accounts 0..9. Operators take them from the bottom (`H<n>`
- * -> n - 1, and MM/custody sign as 0); each Hub's faucet gas comes from the
- * top (`H<n>` -> 10 - n), so no Runtime ever signs as a faucet funder.
- */
-const ANVIL_FUNDED_DEV_ACCOUNTS = 10;
-const resolveFaucetFunderIndex = (hubSignerIndex: number, hubCount: number): number => {
-  const index = ANVIL_FUNDED_DEV_ACCOUNTS - 1 - hubSignerIndex;
-  if (index < Math.max(hubCount, hubSignerIndex + 1)) {
-    throw new Error(`FAUCET_FUNDER_INDEX_COLLIDES_WITH_OPERATOR:signerIndex=${hubSignerIndex}:hubs=${hubCount}`);
-  }
-  return index;
-};
-
-const deriveAnvilDevPrivateKey = (index: number): string => {
-  const mnemonic = Mnemonic.fromPhrase(process.env['ANVIL_MNEMONIC'] || DEFAULT_ANVIL_MNEMONIC);
-  const wallet = HDNodeWallet.fromMnemonic(mnemonic, getIndexedAccountPath(index));
-  return wallet.privateKey;
 };
 
 const resolvedArgs = parseArgs();

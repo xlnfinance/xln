@@ -1,4 +1,5 @@
 import { scheduler } from 'node:timers/promises';
+import { ethers } from 'ethers';
 import { safeStringify } from '../../protocol/serialization';
 import { requireBoundaryRecord } from '../../protocol/boundary-validation';
 import { createStructuredLogger } from '../../support/logger';
@@ -10,6 +11,7 @@ import { verifyProfileSignature } from '../../entity/profile/profile-signing';
 import { storeVerifiedGossipProfile, type RelayStore } from '../../network/relay/store';
 import { resolveJurisdictionTransport } from '../../jurisdiction/adapter/kernel/jurisdiction-loader';
 import { createJAdapter } from '../../jurisdiction/adapter';
+import { DEV_CHAIN_IDS } from '../../jurisdiction/adapter/chain-ids';
 import type { JAdapter, JTokenInfo } from '../../jurisdiction/adapter/types';
 import { getBootstrapTokenAmount } from '../../jurisdiction/machine/config/bootstrap-economy';
 import { canDeployHubDefaultTokens, requiredHubTokenCount, selectHubTokenCatalog } from '../hub/node/token-catalog';
@@ -29,6 +31,7 @@ import {
 import type { ManagedPeerIdentity } from '../market-maker/identity-resolver';
 import { planNativeHubBootstrapPeers, waitForNativeH1DeliveryReady } from '../process/reset-startup';
 import type { NativeH1MeshPair, NativeH1ReserveTarget } from '../support/runtime-support';
+import { deriveAnvilDevPrivateKey, resolveBootstrapFunderIndex } from '../support/anvil-dev-accounts';
 
 type NativeH1BootstrapDeps = Readonly<{
   args: Pick<Args, 'host' | 'rpcUrl'>;
@@ -266,36 +269,22 @@ const creditGrantedByNativeHub = (
   return row ? BigInt(row.hubGranted) : 0n;
 };
 
-const fundLocalJOperator = async (
-  rpcUrl: string,
-  chainId: number,
-  signerId: string,
-): Promise<void> => {
-  if (chainId !== 31_337 && chainId !== 31_338) return;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2_000);
-  try {
-    const response = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: safeStringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'anvil_setBalance',
-        params: [signerId, '0x8ac7230489e80000'],
-      }),
-      signal: controller.signal,
-    });
-    const payload = requireBoundaryRecord(
-      await response.json(),
-      'RUST_HUB_J_OPERATOR_FUND_RESPONSE',
-    );
-    if (!response.ok || payload['error'] !== undefined || payload['result'] !== null) {
-      throw new Error(`RUST_HUB_J_OPERATOR_FUND_FAILED:${safeStringify(payload)}`);
-    }
-  } finally {
-    clearTimeout(timeout);
-  }
+const LOCAL_J_OPERATOR_ETH_TARGET = ethers.parseEther('10');
+
+/**
+ * Tops up the H1 Hanko signer's gas on a dev chain with a mined transfer.
+ * anvil_setBalance would rewrite state under the already sealed latest header,
+ * so eth_getProof there would stop matching header.stateRoot and every J
+ * watcher auditing that height would fail-stop with STATE_PROOF_NODE_HASH_MISMATCH.
+ * The funder is a genesis account reserved for this orchestrator, so no
+ * Runtime's nonce reservations are shared with it.
+ */
+const fundLocalJOperator = async (adapter: JAdapter, hubCount: number, signerId: string): Promise<void> => {
+  if (!DEV_CHAIN_IDS.has(adapter.chainId)) return;
+  const balance = await adapter.provider.getBalance(signerId);
+  if (balance >= LOCAL_J_OPERATOR_ETH_TARGET) return;
+  const funderKey = deriveAnvilDevPrivateKey(resolveBootstrapFunderIndex(hubCount));
+  await adapter.transferNative(ethers.getBytes(funderKey), signerId, LOCAL_J_OPERATOR_ETH_TARGET - balance);
 };
 
 const fundH1OwnedBootstrapReserves = async (
@@ -334,7 +323,6 @@ const fundH1OwnedBootstrapReserves = async (
   for (const { jurisdiction, entityIds } of targets) {
     if (entityIds.length === 0) continue;
     const rpcUrl = resolveLocalMarketMakerRpcUrl(jurisdiction.rpc);
-    await fundLocalJOperator(rpcUrl, jurisdiction.chainId, signerId);
     const transport = await resolveJurisdictionTransport(jurisdiction.chainId, jurisdiction.contracts.depository);
     if (!transport) throw new Error(`H1_BOOTSTRAP_TRANSPORT_MISSING:${jurisdiction.chainId}`);
     const adapter: JAdapter = await createJAdapter({
@@ -354,6 +342,7 @@ const fundH1OwnedBootstrapReserves = async (
       entities: entityIds.length,
     });
     try {
+    await fundLocalJOperator(adapter, hubChildren.length, signerId);
     const catalog = await adapter.getTokenRegistry();
     logNativeH1Bootstrap('bootstrap_funding_catalog_ready', {
       elapsedMs: Date.now() - startedAt,

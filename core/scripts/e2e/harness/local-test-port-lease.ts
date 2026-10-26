@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url';
  * actually bind and never signal an existing listener.
  */
 export const LOCAL_TEST_PORT_POOL_VERSION = 'local-test-stack-v1';
+/**
+ * Sixteen 20-port lanes (20_000..20_319) stay below the HLT lane floor and
+ * above its guard ports; a 32-core stand runs one full stack per lane.
+ */
 export const LOCAL_TEST_STACK_BASES = Object.freeze([
   20_000,
   20_020,
@@ -18,6 +22,15 @@ export const LOCAL_TEST_STACK_BASES = Object.freeze([
   20_080,
   20_100,
   20_120,
+  20_140,
+  20_160,
+  20_180,
+  20_200,
+  20_220,
+  20_240,
+  20_260,
+  20_280,
+  20_300,
 ] as const);
 const LOCAL_TEST_STACK_GUARD_OFFSET = 19;
 const HLT_LANE_BLOCK_PORTS = 4_096;

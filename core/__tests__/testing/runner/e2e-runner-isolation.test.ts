@@ -101,7 +101,7 @@ describe('isolated E2E runner resources', () => {
       expect(second.basePort).toBe(50_020);
       await expect(acquireLocalTestPortLease({ slotBases, timeoutMs: 0 }))
         .rejects.toThrow('LOCAL_TEST_PORT_SLOTS_EXHAUSTED');
-      expect(LOCAL_TEST_STACK_BASES).toHaveLength(7);
+      expect(LOCAL_TEST_STACK_BASES).toHaveLength(16);
     } finally {
       first.release();
       second.release();

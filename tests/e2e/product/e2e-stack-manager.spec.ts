@@ -1,6 +1,11 @@
+import { ethers } from 'ethers';
 import { expect, test, type Page } from '../../global-setup.mts';
 import { resolveRuntimeImportAppUrl } from '../../utils/runtime/e2e-runtime-import';
 import { requireIsolatedBaseUrl } from '../../utils/runtime/e2e-isolated-env';
+import {
+  deriveAnvilDevPrivateKey,
+  STACK_MANAGER_E2E_FUNDER_INDEX,
+} from '../../../core/orchestrator/support/anvil-dev-accounts';
 
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const INIT_TIMEOUT = 30_000;
@@ -12,28 +17,19 @@ const requireAnvilRpc = (): string => {
   return rpcUrl;
 };
 
-const isExactAnvilMutationReceipt = (value: unknown): value is Readonly<{
-  jsonrpc: '2.0';
-  id: 1;
-  result: null;
-}> => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const keys = Object.keys(value).sort();
-  if (keys.length !== 3 || keys[0] !== 'id' || keys[1] !== 'jsonrpc' || keys[2] !== 'result') return false;
-  return 'jsonrpc' in value && value.jsonrpc === '2.0'
-    && 'id' in value && value.id === 1
-    && 'result' in value && value.result === null;
-};
+// Gas arrives by a mined transfer from the Anvil account reserved for this
+// spec: anvil_setBalance would rewrite state under the sealed header that the
+// mesh's J watchers verify with eth_getProof, and fail-stop them.
+const STACK_MANAGER_FUNDER_KEY = deriveAnvilDevPrivateKey(STACK_MANAGER_E2E_FUNDER_INDEX);
 
 const fundSigner = async (rpcUrl: string, signerId: string): Promise<void> => {
-  const response = await fetch(rpcUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: `{"jsonrpc":"2.0","id":1,"method":"anvil_setBalance","params":["${signerId}","0x56bc75e2d63100000"]}`,
-  });
-  const body: unknown = await response.json();
-  if (!response.ok || !isExactAnvilMutationReceipt(body)) {
-    throw new Error(`STACK_MANAGER_E2E_SIGNER_FUNDING_FAILED:${response.status}`);
+  const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, { staticNetwork: true, cacheTimeout: -1 });
+  try {
+    const funder = new ethers.Wallet(STACK_MANAGER_FUNDER_KEY, provider);
+    const receipt = await (await funder.sendTransaction({ to: signerId, value: ethers.parseEther('100') })).wait();
+    if (receipt?.status !== 1) throw new Error(`STACK_MANAGER_E2E_SIGNER_FUNDING_FAILED:${receipt?.hash ?? 'none'}`);
+  } finally {
+    provider.destroy();
   }
 };
 

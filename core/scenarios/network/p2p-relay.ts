@@ -91,18 +91,12 @@ const prefundRpcWallets = async (): Promise<void> => {
   const targetEth = ethers.parseEther('2');
   for (const wallet of wallets) {
     const address = deriveSignerAddressSync(wallet.seed, wallet.signerId);
-    try {
-      const providerWithSend = jadapter.provider as { send?: (method: string, params: unknown[]) => Promise<unknown> };
-      if (typeof providerWithSend.send !== 'function') {
-        throw new Error('provider.send unavailable');
-      }
-      await providerWithSend.send('anvil_setBalance', [address, ethers.toBeHex(targetEth)]);
-    } catch {
-      const current = await jadapter.provider.getBalance(address);
-      if (current < targetEth) {
-        const tx = await jadapter.signer.sendTransaction({ to: address, value: targetEth - current });
-        await tx.wait();
-      }
+    // A mined transfer, never anvil_setBalance: rewriting state under a sealed
+    // header breaks every eth_getProof the J watcher verifies at that height.
+    const current = await jadapter.provider.getBalance(address);
+    if (current < targetEth) {
+      const tx = await jadapter.signer.sendTransaction({ to: address, value: targetEth - current });
+      await tx.wait();
     }
   }
 
