@@ -65,7 +65,8 @@ export function formatUsd(value: number): string {
 }
 
 export function parseAmount(input: string, decimals: number): bigint {
-	const text = input.trim().replace(/,/g, '');
+	// No comma stripping: "1,5" meant 1.5 to many users and parsed as 15.
+	const text = input.trim();
 	if (!/^\d*(\.\d*)?$/.test(text) || text === '' || text === '.') {
 		throw new Error('Enter a valid amount');
 	}
