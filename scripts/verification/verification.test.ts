@@ -29,14 +29,21 @@ const commit = (root: string): void => {
   git(root, ['-c', 'commit.gpgsign=false', 'commit', '-qm', 'verification fixture']);
 };
 
-const fixture = (body = 'console.log("fixture-check-output");'): string => {
+const fixture = (
+  body = 'console.log("fixture-check-output");',
+  contracts = 'console.log("fixture-contracts-output");',
+): string => {
   const root = join(temporary, `repo ${sequence++}`);
   mkdirSync(root);
   git(root, ['init', '-b', 'main']);
   git(root, ['config', 'user.name', 'Verification Test']);
   git(root, ['config', 'user.email', 'verification@example.invalid']);
-  writeFileSync(join(root, 'package.json'), JSON.stringify({ scripts: { check: 'bun check.ts' } }));
+  writeFileSync(
+    join(root, 'package.json'),
+    JSON.stringify({ scripts: { check: 'bun check.ts', 'test:contracts:full': 'bun contracts.ts' } }),
+  );
   writeFileSync(join(root, 'check.ts'), body);
+  writeFileSync(join(root, 'contracts.ts'), contracts);
   writeFileSync(join(root, 'input.txt'), 'committed\n');
   commit(root);
   return root;
@@ -68,7 +75,9 @@ describe('host-independent verification', () => {
     expect(result.command.argv).toEqual([process.execPath, 'run', 'check']);
     expect(result.command.budgetMs).toBe(300_000);
     expect(result.tools.bun.executable).toBe(process.execPath);
+    expect(result.contracts.argv).toEqual([process.execPath, 'run', 'test:contracts:full']);
     expect(readFileSync(result.logPath, 'utf8')).toContain('fixture-check-output');
+    expect(readFileSync(result.logPath, 'utf8')).toContain('fixture-contracts-output');
     expect(JSON.parse(readFileSync(result.resultPath, 'utf8')).passed).toBe(true);
     expect(readdirSync(dirname(result.resultPath)).sort()).toEqual(['check.log', 'result.json']);
     expect((await verify(root)).resultPath).not.toBe(result.resultPath);
@@ -97,6 +106,20 @@ describe('host-independent verification', () => {
     const log = readFileSync(result.logPath, 'utf8');
     expect(log).toContain('before-failure');
     expect(log).toContain('failure-detail');
+  });
+
+  test('rejects a red contract suite after a green check', async () => {
+    const result = await verify(fixture(undefined, 'console.error("contract-red"); process.exit(3);'));
+    expect(result.passed).toBe(false);
+    expect(result.problem).toBe('VERIFY_CONTRACTS_FAILED:exitCode=3');
+    expect(result.command.result?.exitCode).toBe(0);
+    expect(readFileSync(result.logPath, 'utf8')).toContain('contract-red');
+  });
+
+  test('skips the contract suite when check fails', async () => {
+    const result = await verify(fixture('process.exit(7);', 'throw new Error("must not execute");'));
+    expect(result.problem).toBe('VERIFY_CHECK_FAILED:exitCode=7');
+    expect(result.contracts.result).toBeNull();
   });
 
   test('rejects index flags that hide modified tracked source without resetting them', async () => {

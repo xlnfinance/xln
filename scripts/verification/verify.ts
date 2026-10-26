@@ -8,6 +8,9 @@ import { runBoundedCommand, type CommandResult } from './process';
 // The aggregate release check includes the full repository lint and parallel gates;
 // its measured 186-second run exceeds the ordinary single-check 60-second budget.
 const CHECK_TIMEOUT_MS = 300_000;
+// `check` runs only the Foundry invariant subset; the Hardhat suite (~48 s) once stayed
+// red for 22 pushed commits after a Solidity change, so every push runs it as well.
+const CONTRACTS_TIMEOUT_MS = 300_000;
 
 const toolVersion = (command: string, args: string[]) => {
   try {
@@ -55,18 +58,30 @@ export const verify = async (cwd: string) => {
   const started = performance.now();
   let after: SourceState | null = null;
   let command: CommandResult | null = null;
+  let contracts: CommandResult | null = null;
   let problem = sourceProblem(before);
   const commandLine = [process.execPath, 'run', 'check'] as const;
+  const contractsLine = [process.execPath, 'run', 'test:contracts:full'] as const;
   const versions = tools();
+  const commandProblem = (name: string, result: CommandResult, budgetMs: number): string | null => {
+    if (result.error) return `VERIFY_${name}_PROCESS_ERROR:${result.error}`;
+    if (result.timedOut) return `VERIFY_${name}_TIMEOUT:budgetMs=${budgetMs}`;
+    if (result.interrupted) return `VERIFY_INTERRUPTED:${result.interrupted}`;
+    if (result.exitCode !== 0) return `VERIFY_${name}_FAILED:exitCode=${result.exitCode}`;
+    return null;
+  };
   try {
-    if (!problem) command = await runBoundedCommand(commandLine, root, logFd, CHECK_TIMEOUT_MS);
+    if (!problem) {
+      command = await runBoundedCommand(commandLine, root, logFd, CHECK_TIMEOUT_MS);
+      problem = commandProblem('CHECK', command, CHECK_TIMEOUT_MS);
+    }
+    if (!problem) {
+      contracts = await runBoundedCommand(contractsLine, root, logFd, CONTRACTS_TIMEOUT_MS);
+      problem = commandProblem('CONTRACTS', contracts, CONTRACTS_TIMEOUT_MS);
+    }
     after = sourceState(root);
     problem ??= sourceProblem(after);
     if (after.head !== before.head || after.tree !== before.tree) problem = 'VERIFY_COMMIT_CHANGED_DURING_CHECK';
-    if (command?.timedOut) problem = `VERIFY_CHECK_TIMEOUT:budgetMs=${CHECK_TIMEOUT_MS}`;
-    else if (command?.interrupted) problem = `VERIFY_INTERRUPTED:${command.interrupted}`;
-    else if (command && command.exitCode !== 0) problem = `VERIFY_CHECK_FAILED:exitCode=${command.exitCode}`;
-    if (command?.error) problem = `VERIFY_CHECK_PROCESS_ERROR:${command.error}`;
   } catch (error) {
     problem = error instanceof Error ? error.message : String(error);
   } finally {
@@ -75,7 +90,7 @@ export const verify = async (cwd: string) => {
   }
   const result = {
     schema: 1,
-    passed: problem === null && command?.exitCode === 0,
+    passed: problem === null && command?.exitCode === 0 && contracts?.exitCode === 0,
     problem,
     startedAt,
     finishedAt: new Date().toISOString(),
@@ -84,6 +99,7 @@ export const verify = async (cwd: string) => {
     before,
     after,
     command: { argv: commandLine, budgetMs: CHECK_TIMEOUT_MS, result: command },
+    contracts: { argv: contractsLine, budgetMs: CONTRACTS_TIMEOUT_MS, result: contracts },
     tools: versions,
     logPath,
   };

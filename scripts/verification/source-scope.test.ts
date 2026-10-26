@@ -17,7 +17,11 @@ const fixture = (): string => {
   git(root, ['init', '-b', 'main']);
   git(root, ['config', 'user.name', 'Verification Test']);
   git(root, ['config', 'user.email', 'verification@example.invalid']);
-  write(root, 'package.json', JSON.stringify({ scripts: { check: 'bun check.ts' } }));
+  write(
+    root,
+    'package.json',
+    JSON.stringify({ scripts: { check: 'bun check.ts', 'test:contracts:full': 'bun check.ts' } }),
+  );
   write(root, 'check.ts', 'console.log("scope check ran");');
   for (const path of ['brainvault/package.json', 'core/fixture.ts', '.githooks/pre-push', 'input.txt']) {
     write(root, path, 'committed\n');

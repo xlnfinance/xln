@@ -54,5 +54,6 @@ For release evidence, preserve the result and log in `docs/evidence/` with
 the checked commit named explicitly. Those reports describe that immutable
 source commit; adding a report does not retroactively verify a different
 commit. Keep focused L1/L2 and browser evidence required by the change beside
-the release report. `verify` covers only the existing `check` command and
-does not claim replay parity, live economics, TPS or mainnet readiness.
+the release report. `verify` covers `check` followed by the Hardhat suite
+`test:contracts:full`, and does not claim replay parity, live economics, TPS or
+mainnet readiness.
