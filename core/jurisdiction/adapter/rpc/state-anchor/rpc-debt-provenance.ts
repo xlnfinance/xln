@@ -8,7 +8,7 @@ import {
 } from '../../../machine/receipt-codec';
 import { sendBatchInChunks, type RpcBatchSend } from '../../rpc-utils';
 import { readHashBoundHeaderRoots, readHashBoundStateRoot } from './rpc-header-hash';
-import { verifyGetProofResponse, type GetProofResponse } from './rpc-state-proof';
+import { readVerifiedGetProof } from './rpc-state-proof';
 
 // Authenticates where an open DebtEntry was created, under one hash-bound
 // header: createdTxHash is keccak of the raw transaction at index i of the
@@ -153,10 +153,7 @@ export const assertBlockHashInAnchorHistory = async (
   if (anchor.blockNumber - blockNumber > HISTORY_SERVE_WINDOW) fail('HISTORY_OUT_OF_WINDOW', `${blockNumber}:${anchor.blockNumber}`);
   const stateRoot = await readHashBoundStateRoot(send, anchor.blockNumber, anchor.blockHash);
   const slot = BigInt(blockNumber % HISTORY_SERVE_WINDOW);
-  const response = (await send('eth_getProof', [
-    HISTORY_STORAGE_ADDRESS, [ethers.toBeHex(slot, 32)], ethers.toQuantity(anchor.blockNumber),
-  ])) as GetProofResponse;
-  const proven = verifyGetProofResponse(stateRoot, HISTORY_STORAGE_ADDRESS, [slot], response);
+  const proven = await readVerifiedGetProof(send, stateRoot, HISTORY_STORAGE_ADDRESS, [slot], anchor.blockNumber);
   if (proven.account?.codeHash.toLowerCase() !== HISTORY_CODE_HASH) fail('HISTORY_CONTRACT_MISSING', HISTORY_STORAGE_ADDRESS);
   const recorded = proven.storage.get(slot);
   if (recorded === undefined) return fail('HISTORY_SLOT_MISSING', String(slot));

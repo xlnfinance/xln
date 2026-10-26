@@ -12,7 +12,7 @@ import type {
   CertifiedBoardRegistryState,
 } from '../../../../types/entity-board-registry';
 import { readHashBoundStateRoot } from './rpc-header-hash';
-import { verifyGetProofResponse, type GetProofResponse } from './rpc-state-proof';
+import { readVerifiedGetProof } from './rpc-state-proof';
 import {
   entityProviderBoardEpochSlot,
   entityProviderFieldSlot,
@@ -70,14 +70,8 @@ export const readCertifiedBoardAnchor = async (input: {
   if (!Number.isSafeInteger(blockNumber) || blockNumber < 0) fail('BLOCK_INVALID', String(blockNumber));
   const address = ethers.getAddress(String(jurisdiction.entityProviderAddress ?? ''));
   const stateRoot = String(input.authenticatedStateRoot).toLowerCase();
-  const blockTag = ethers.toQuantity(blockNumber);
   const prove = async (slots: bigint[]): Promise<Map<bigint, bigint>> => {
-    const response = (await send('eth_getProof', [
-      address,
-      slots.map(slot => ethers.toBeHex(slot, 32)),
-      blockTag,
-    ])) as GetProofResponse;
-    const proven = verifyGetProofResponse(stateRoot, address, slots, response);
+    const proven = await readVerifiedGetProof(send, stateRoot, address, slots, blockNumber);
     // An absent or code-less account would prove every slot zero, i.e. an empty
     // registry; that is a wrong address, not an empty EntityProvider.
     if (!proven.account || proven.account.codeHash.toLowerCase() === EMPTY_CODE_HASH) {

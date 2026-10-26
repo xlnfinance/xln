@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import type { JurisdictionConfig } from '../../../../entity/types';
 import type { DebtEntry } from '../../../../types/finance/debt';
 import { resolveDepositoryAnchorBase, type DepositoryAnchorBase } from './rpc-depository-base';
-import { verifyGetProofResponse, type GetProofResponse } from './rpc-state-proof';
+import { readVerifiedGetProof } from './rpc-state-proof';
 import {
   depositoryActiveDebtsSlot,
   depositoryDebtEntrySlot,
@@ -184,19 +184,13 @@ export const readOutDebtAnchor = async (input: {
     base: input.base,
     fail,
   });
-  const blockTag = ethers.toQuantity(blockNumber);
 
   // One proof per chunk; every requested slot must come back proven.
   const prove = async (slots: readonly bigint[]): Promise<Map<bigint, bigint>> => {
     const values = new Map<bigint, bigint>();
     for (let start = 0; start < slots.length; start += perProof) {
       const chunk = slots.slice(start, start + perProof);
-      const response = (await send('eth_getProof', [
-        address,
-        chunk.map(slot => ethers.toBeHex(slot, 32)),
-        blockTag,
-      ])) as GetProofResponse;
-      const proven = verifyGetProofResponse(stateRoot, address, chunk, response);
+      const proven = await readVerifiedGetProof(send, stateRoot, address, chunk, blockNumber);
       if (!proven.account || proven.account.codeHash.toLowerCase() === EMPTY_CODE_HASH) fail('CONTRACT_MISSING', address);
       for (const slot of chunk) values.set(slot, proven.storage.get(slot) ?? fail('SLOT_MISSING', ethers.toBeHex(slot, 32)));
     }

@@ -213,3 +213,43 @@ export const verifyGetProofResponse = (
   });
   return { account, storage };
 };
+
+type RpcSend = (method: string, params: unknown[]) => Promise<unknown>;
+
+// One request plus two re-requests; the backoff lets the node publish its head.
+const GET_PROOF_RETRY_DELAYS_MS = [25, 100] as const;
+
+// The first account-trie node is the root of the state this response proves.
+const provesOtherStateRoot = (stateRoot: string, response: GetProofResponse): boolean => {
+  const root = Array.isArray(response.accountProof) ? response.accountProof[0] : undefined;
+  return typeof root === 'string' && ethers.isHexString(root)
+    && ethers.keccak256(root).toLowerCase() !== stateRoot.toLowerCase();
+};
+
+/**
+ * Fetches eth_getProof at blockNumber and binds it to stateRoot.
+ *
+ * Anvil (backend with_database_at) reads its best number first and only then
+ * waits for the state lock. A proof for the head requested while the next
+ * block executes is answered from that next block's state: a consistent trie
+ * under a different root, never the requested one. A response that proves a
+ * different root is re-requested; by then the height is historical and served
+ * from its own snapshot. Acceptance is unchanged: only a proof bound to
+ * stateRoot is returned, and a persistent mismatch still fails verification.
+ */
+export const readVerifiedGetProof = async (
+  send: RpcSend,
+  stateRoot: string,
+  address: string,
+  slots: readonly bigint[],
+  blockNumber: number,
+): Promise<VerifiedStateProof> => {
+  const params = [address, slots.map(slot => ethers.toBeHex(slot, 32)), ethers.toQuantity(blockNumber)];
+  let response = (await send('eth_getProof', params)) as GetProofResponse;
+  for (const delayMs of GET_PROOF_RETRY_DELAYS_MS) {
+    if (!provesOtherStateRoot(stateRoot, response)) break;
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+    response = (await send('eth_getProof', params)) as GetProofResponse;
+  }
+  return verifyGetProofResponse(stateRoot, address, slots, response);
+};

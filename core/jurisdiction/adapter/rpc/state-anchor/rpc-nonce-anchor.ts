@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import type { JurisdictionConfig } from '../../../../entity/types';
 import { buildNonceAnchorRoot, nonceViewFromStorage, type EntityNonceView } from '../../../machine/state-anchor/nonce-root';
 import { resolveDepositoryAnchorBase, type DepositoryAnchorBase } from './rpc-depository-base';
-import { verifyGetProofResponse, type GetProofResponse } from './rpc-state-proof';
+import { readVerifiedGetProof } from './rpc-state-proof';
 import { depositoryEntityNonceSlot, entityProviderActionNonceSlot } from './rpc-storage-slots';
 
 // Per-Entity replay nonces at one fenced block, proven by eth_getProof against
@@ -57,12 +57,7 @@ const proveContractSlots = async (
   blockNumber: number,
   slots: bigint[],
 ): Promise<Map<bigint, bigint>> => {
-  const response = (await send('eth_getProof', [
-    address,
-    slots.map(slot => ethers.toBeHex(slot, 32)),
-    ethers.toQuantity(blockNumber),
-  ])) as GetProofResponse;
-  const proven = verifyGetProofResponse(stateRoot, address, slots, response);
+  const proven = await readVerifiedGetProof(send, stateRoot, address, slots, blockNumber);
   // A code-less account proves every nonce zero; that is a wrong address.
   if (!proven.account || proven.account.codeHash.toLowerCase() === EMPTY_CODE_HASH) fail('CONTRACT_MISSING', address);
   return proven.storage;

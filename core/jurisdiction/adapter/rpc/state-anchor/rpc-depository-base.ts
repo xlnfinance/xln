@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
 import { readHashBoundStateRoot } from './rpc-header-hash';
-import { verifyGetProofResponse, type GetProofResponse } from './rpc-state-proof';
+import { readVerifiedGetProof } from './rpc-state-proof';
 import { depositoryTokenCountSlot } from './rpc-storage-slots';
 
 // Proof context shared by the Depository anchors (E1 reserves, D2 out-debts)
@@ -35,12 +35,7 @@ export const readDepositoryAnchorBase = async (input: {
   const address = ethers.getAddress(String(input.depositoryAddress ?? ''));
   const stateRoot = await readHashBoundStateRoot(send, blockNumber, input.authenticatedBlockHash);
   const slot = depositoryTokenCountSlot();
-  const response = (await send('eth_getProof', [
-    address,
-    [ethers.toBeHex(slot, 32)],
-    ethers.toQuantity(blockNumber),
-  ])) as GetProofResponse;
-  const proven = verifyGetProofResponse(stateRoot, address, [slot], response);
+  const proven = await readVerifiedGetProof(send, stateRoot, address, [slot], blockNumber);
   // A code-less account proves every slot zero; that is a wrong address.
   if (!proven.account || proven.account.codeHash.toLowerCase() === EMPTY_CODE_HASH) fail('CONTRACT_MISSING', address);
   const tokenCount = proven.storage.get(slot) ?? fail('SLOT_MISSING', 'tokens');

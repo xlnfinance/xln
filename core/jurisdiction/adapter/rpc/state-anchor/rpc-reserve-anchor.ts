@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import type { JurisdictionConfig } from '../../../../entity/types';
 import { buildReserveAnchorRoot, projectNonZeroReserves } from '../../../machine/state-anchor/reserve-root';
 import { resolveDepositoryAnchorBase, type DepositoryAnchorBase } from './rpc-depository-base';
-import { verifyGetProofResponse, type GetProofResponse } from './rpc-state-proof';
+import { readVerifiedGetProof } from './rpc-state-proof';
 import { depositoryEntityNonceSlot, depositoryReserveSlot } from './rpc-storage-slots';
 
 // Reads Depository._reserves for a set of entities at one block, proven by
@@ -74,14 +74,8 @@ export const readReserveAnchor = async (input: {
     base: input.base,
     fail,
   });
-  const blockTag = ethers.toQuantity(blockNumber);
   const prove = async (slots: bigint[]): Promise<Map<bigint, bigint>> => {
-    const response = (await send('eth_getProof', [
-      address,
-      slots.map(slot => ethers.toBeHex(slot, 32)),
-      blockTag,
-    ])) as GetProofResponse;
-    const proven = verifyGetProofResponse(stateRoot, address, slots, response);
+    const proven = await readVerifiedGetProof(send, stateRoot, address, slots, blockNumber);
     // A code-less account proves every reserve zero; that is a wrong address.
     if (!proven.account || proven.account.codeHash.toLowerCase() === EMPTY_CODE_HASH) {
       fail('CONTRACT_MISSING', address);
