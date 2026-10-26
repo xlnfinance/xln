@@ -437,9 +437,10 @@ const parseArgs = (): CliArgs => {
   const phaseWarnRaw = Number(getFlag('phase-warn-ms') || '30000');
   const maxFailuresRaw = Number(getFlag('max-failures') || '1');
   const maxMmConcurrencyRaw = Number(getFlag('max-mm-concurrency') || '1');
-  // Cold resets each start three worker-backed hubs. The measured four-reset
-  // cohort exceeded the unchanged hub drain deadline; serialize preparation,
-  // then let healthy stacks run their browser work concurrently.
+  // Cold resets each start three worker-backed hubs against the fixed 10 s
+  // ORDERBOOK_INIT_DRAIN_TIMEOUT_MS (hub-node.ts). Default 1 is the conservative
+  // CI/unknown-host setting; test:e2e:full uses 4 on the Studio, where no drain
+  // timeout has been observed at x4 (docs/mac-studio.md).
   const maxResetConcurrencyRaw = Number(getFlag('max-reset-concurrency') || '1');
   const workersPerShardRaw = Number(getFlag('workers-per-shard') || '1');
   const startAtRaw = Number(getFlag('start-at') || '0');

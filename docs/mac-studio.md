@@ -38,11 +38,13 @@ bun -e 'let t=performance.now();let x=0;for(let i=0;i<1e8;i++)x=(x+i*7)%1000003;
 | Studio, throttled (before) | ~1030 ms | ~2400 ms | ~3300 ms | ~1040 ms (same as default) |
 | MacBook M1 Max | ~550 ms | n/a | n/a | ~1160 ms |
 
-E2E on a healthy Studio (`bun run test:e2e:full`, 16 lanes, MM x4, reset x1):
+E2E on a healthy Studio (`bun run test:e2e:full`, 16 lanes, MM x4, reset x4):
 
-- Single isolated stack: ~20 s total. For example the screenshot smoke is health ~10 s,
-  pw ~7 s. It took 87 s while throttled.
-- Full 158-target run: TBD (first healthy run 2026-10-26, see `.logs/claude-20261026/e2e-full-9.log`).
+- Single isolated stack: ~20 s total (health ~4.5 s, pw ~7-12 s). It took 87 s while throttled.
+- Full 157-target run on `c25cdcf6d` (2026-10-27): 157/157 in 516 s.
+- Reset concurrency is the dominant knob: at reset x1 each shard queued ~4 s per other
+  lane for its baseline reset (health median 47.7 s, max 72 s, full run ~16 min); at
+  reset x4 health median is 9.7 s, max 24.5 s.
 - While throttled, 16 lanes overloaded the 8 usable cores (blank pages, 30 s UI
   timeouts) and a full run took ~2 h.
 
