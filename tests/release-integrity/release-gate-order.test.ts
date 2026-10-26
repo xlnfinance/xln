@@ -43,7 +43,7 @@ describe('release gate ordering', () => {
   });
 
   for (const profile of ['ci', 'release']) {
-    test(`${profile} runs React payment, dispute, offline protection and recovery after cheaper release checks`, () => {
+    test(`${profile} runs React payment, credit, swap, cross-swap, dispute, protection, recovery and lending after cheaper release checks`, () => {
       const result = Bun.spawnSync({
         cmd: ['bun', 'core/scripts/release/run-release-gate.ts', `--profile=${profile}`, '--plan'],
         cwd: process.cwd(),
@@ -56,6 +56,12 @@ describe('release gate ordering', () => {
       expect(result.exitCode).toBe(0);
       expect(browserCommands.map(command => command.match(/XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=(\S+)/)?.[1])).toEqual([
         'e2e-payment.spec.ts,e2e-lending-availability.spec.ts,e2e-reserve-funding.spec.ts',
+        'e2e-direct-credit.spec.ts',
+        'e2e-collateral.spec.ts',
+        'e2e-swap.spec.ts',
+        'e2e-swap-cancel.spec.ts',
+        'e2e-cross-swap.spec.ts',
+        'e2e-cross-swap-partial.spec.ts',
         'e2e-dispute-finality.spec.ts',
         'e2e-dispute-protection.spec.ts',
         'e2e-file-restore.spec.ts',
