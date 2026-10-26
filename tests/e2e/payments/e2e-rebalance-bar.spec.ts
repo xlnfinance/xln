@@ -1663,6 +1663,7 @@ test.describe('Rebalance E2E', () => {
       message: 'H1_UNEXPECTED_EXIT code=null signal=SIGKILL',
     });
     let h1OutageExpected = false;
+    const h1Outage = { start: 0, end: 0 };
     const unexpectedUnavailableResponses: string[] = [];
     page.on('response', response => {
       if (response.status() !== 503) return;
@@ -1763,6 +1764,7 @@ test.describe('Rebalance E2E', () => {
           hubId,
         });
         h1OutageExpected = true;
+        h1Outage.start = Date.now();
         process.kill(oldPid, 'SIGSTOP');
         h1Frozen = true;
         await callTestnetRpc<unknown>(page, 'anvil_mine', ['0x1']);
@@ -1809,6 +1811,24 @@ test.describe('Rebalance E2E', () => {
       systemOk: true,
     });
     h1OutageExpected = false;
+    h1Outage.end = Date.now();
+    // While H1 is down its peers cannot reach it as a profile authority. Admit
+    // exactly those drops: inside the outage window and reported by another Hub.
+    const outageEvents = await page.request.get(`${API_BASE_URL}/api/debug/events?last=5000&event=error&since=${h1Outage.start}`);
+    expect(outageEvents.ok()).toBe(true);
+    const outageHealth = await getHealth(page, API_BASE_URL);
+    const h1Authority = outageHealth!.hubs!.find(row => row.name === 'H1')!.apiUrl!;
+    const peerRuntimeIds = outageHealth!.hubs!.filter(row => row.name !== 'H1').map(row => row.runtimeId);
+    const { events: errorEvents } = (await outageEvents.json()) as {
+      events: Array<{ ts: number; from: string; reason: string; status: string; details: { message: string } }>;
+    };
+    for (const event of errorEvents.filter(row => row.reason === 'GOSSIP_PROFILE_AUTHORITY_UNAVAILABLE')) {
+      expect(event.ts >= h1Outage.start && event.ts <= h1Outage.end).toBe(true);
+      expect(event.status).toBe('rejected');
+      expect(event.details.message).toBe(`PROFILE_AUTHORITY_UNAVAILABLE:ECONNREFUSED:${h1Authority}`);
+      expect(peerRuntimeIds).toContain(event.from);
+      allowDebugIncident({ source: 'error', code: 'GOSSIP_PROFILE_AUTHORITY_UNAVAILABLE', message: event.details.message, runtimeId: event.from });
+    }
     const recoveredTokens = await page.request.get(`${API_BASE_URL}/api/tokens`);
     expect(recoveredTokens.ok(), `token catalog must recover with the hub: ${recoveredTokens.status()} ${await recoveredTokens.text()}`).toBe(true);
 
@@ -1890,6 +1910,11 @@ test.describe('Rebalance E2E', () => {
       }),
     });
     expect(unexpectedUnavailableResponses, '503 is expected only for token discovery during the injected H1 outage').toEqual([]);
+    // The outage allowance is bounded: no authority drop may appear after H1 recovered.
+    const lateEvents = await page.request.get(`${API_BASE_URL}/api/debug/events?last=5000&event=error&since=${h1Outage.end}`);
+    expect(lateEvents.ok()).toBe(true);
+    const { events: lateErrors } = (await lateEvents.json()) as { events: Array<{ ts: number; reason: string }> };
+    expect(lateErrors.filter(row => row.reason === 'GOSSIP_PROFILE_AUTHORITY_UNAVAILABLE' && row.ts > h1Outage.end)).toEqual([]);
     expect(criticalConsole, `critical consensus/runtime errors:\n${criticalConsole.join('\n')}`).toEqual([]);
   });
 
