@@ -226,7 +226,6 @@ describe('storage filesystem durability', () => {
       infrastructure: {
         runtimeWalDb: { close: () => frameClose.promise },
         runtimeWalDbOpenPromise: Promise.resolve(true),
-        storageVerifiedWalHeight: 9,
         infraDb: { close: () => infraClose.promise },
         infraDbOpenPromise: Promise.resolve(true),
       },
@@ -245,7 +244,6 @@ describe('storage filesystem durability', () => {
     );
     expect(env.infrastructure?.runtimeWalDb).toBeNull();
     expect(env.infrastructure?.runtimeWalDbOpenPromise).toBeNull();
-    expect(env.infrastructure?.storageVerifiedWalHeight).toBeUndefined();
     expect(env.infrastructure?.infraDb).toBeNull();
     expect(env.infrastructure?.infraDbOpenPromise).toBeNull();
 

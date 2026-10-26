@@ -51,7 +51,6 @@ async function boot(entropy: unknown): Promise<void> {
   if (!stack) throw new Error('The xln network is unavailable. Your wallet remains on this iPhone.');
   const seed = Mnemonic.fromEntropy(entropy).phrase;
   await bootHostedVault(seed, {
-    chainScanTimeoutMs: 180_000,
     vaultId: 'ios-keychain',
     vaultName: 'My wallet',
     kind: 'mnemonic',

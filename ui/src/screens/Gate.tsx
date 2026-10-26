@@ -292,11 +292,9 @@ export function Gate() {
         id: vault.id,
         name: vault.name,
         open: async (seed, currentStack) => {
-          if (runtimeIdForSeed(seed).toLowerCase() !== vault.id.toLowerCase())
-            throw new Error('Wallet identity mismatch.');
           if (vault.kind === 'test') assertDemoNetwork(currentStack.jurisdictions.map(chain => chain.chainId));
-          await useApp.getState().finishPasswordEnrollment(vault.id);
           await bootHostedVault(seed, {
+            runtimeId: vault.id,
             vaultId: vault.id,
             vaultName: vault.name,
             kind: vault.kind,
@@ -304,6 +302,8 @@ export function Gate() {
             stack: currentStack,
             onStep: setBusyStep,
           });
+          // Device authority is revoked only after boot proved this seed is the vault's identity.
+          await useApp.getState().finishPasswordEnrollment(vault.id);
         },
       });
       return;
@@ -316,9 +316,9 @@ export function Gate() {
           throw new Error('This device no longer has this test wallet key. Restore with its recovery phrase.');
         setBusyStep('Opening your test wallet');
         const secrets = await unprotectVaultSecrets(vault.id, vault.deviceProtection);
-        if (!secrets || runtimeIdForSeed(secrets.seed).toLowerCase() !== vault.id.toLowerCase())
-          throw new Error('Test wallet key unavailable or identity mismatch. Restore with its recovery phrase.');
+        if (!secrets) throw new Error('Test wallet key unavailable. Restore with its recovery phrase.');
         await bootHostedVault(secrets.seed, {
+          runtimeId: vault.id,
           vaultId: vault.id,
           vaultName: vault.name,
           kind: 'test',

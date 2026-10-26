@@ -1206,14 +1206,16 @@ export const loadEntityStateFromStorage = async (options: {
     );
     if (!entityCore) return null;
     const accounts = new Map<string, StorageAccountDoc>();
-    for await (const key of iterateKeys(db, { prefix: keyLiveAccountPrefix(entityId) })) {
+    const accountKeys: Buffer[] = [];
+    for await (const key of iterateKeys(db, { prefix: keyLiveAccountPrefix(entityId) })) accountKeys.push(key);
+    // Accounts are independent graphs: read them together, bind them in key order.
+    const layouts = await Promise.all(accountKeys.map(key => {
       const parsed = parseLiveAccountKey(key);
-      const stored = await readAccountStorageLayout(
-        db,
-        parsed.entityId,
-        parsed.counterpartyId,
-        key,
-      );
+      return readAccountStorageLayout(db, parsed.entityId, parsed.counterpartyId, key);
+    }));
+    for (const [index, key] of accountKeys.entries()) {
+      const parsed = parseLiveAccountKey(key);
+      const stored = layouts[index];
       if (!stored) throw new Error(`STORAGE_LIVE_ACCOUNT_LAYOUT_MISSING:${key.toString('hex')}`);
       const doc = assertStorageAccountDocBinding(
         validateStorageAccountDocValue(stored.doc),

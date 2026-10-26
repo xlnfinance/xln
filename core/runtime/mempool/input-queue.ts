@@ -79,7 +79,7 @@ export const isRuntimeMempoolCapacityError = (error: unknown): boolean => {
   return false;
 };
 
-const assertRuntimeMempoolCapacity = (
+export const assertRuntimeMempoolCapacity = (
   mempool: RuntimeInput,
   incoming: {
     runtimeTxs: number;

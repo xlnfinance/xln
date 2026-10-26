@@ -6,12 +6,11 @@ import {
 import { sendRuntimeInput } from './commands';
 import { getXLN } from './xln-loader';
 import type { RuntimeRecoveryCandidate } from './restore';
-import { connectEmbedded, getEmbeddedEnv, requireAdapter } from './adapter';
-import { computeAddress, hexlify } from 'ethers';
-import { derivePrivateKeyBytes } from './keys';
+import { connectEmbedded, getEmbeddedEnv, lockEmbeddedRuntime, requireAdapter } from './adapter';
 import { readJson } from './http';
 import { waitFor } from './tx';
 import { accountDisputeConfig } from './financial/roles';
+import { entityTxOpensAccount } from './financial/open-account-match';
 import type { EntityTx, RuntimeAdapterEntitySummary, RuntimeReplica } from '@xln/core/api/public/runtime-module';
 import type { AccountDisputeConfig } from '@xln/core/account/config/dispute-config';
 import { deriveJurisdictionSignerIndex } from '@xln/core/jurisdiction/machine/config/signer-derivation';
@@ -45,58 +44,15 @@ export type Stack = {
 
 const USDC = 1;
 
-/**
- * Capture one finalized target and use the Runtime's canonical drain criterion.
- * Authenticated empty headers need not create financial frames, but pending
- * financial events and certified prefixes must finish before admission opens.
- */
-async function waitForChainScan(
-  xln: Awaited<ReturnType<typeof getXLN>>,
-  env: RuntimeReplica,
-  entityId: string,
-  signerId: string,
-  timeoutMs: number,
-  onProgress?: (step: string) => void,
-): Promise<void> {
-  const jadapter = xln.getEntityJAdapter(env, entityId, signerId);
-  if (!jadapter?.getCurrentBlockNumber || !jadapter.getFinalityDepth)
-    throw new Error(`J_WATCHER_DRAIN_API_MISSING:${entityId}`);
-  const head = Number(await jadapter.getCurrentBlockNumber());
-  const depth = Number(jadapter.getFinalityDepth());
-  if (!Number.isSafeInteger(head) || head < 0 || !Number.isSafeInteger(depth) || depth < 0)
-    throw new Error(`J_WATCHER_TARGET_INVALID:${head}:${depth}`);
-  const target = { adapter: jadapter, targetBlock: Math.max(0, head - depth) };
-  const startedAt = performance.now();
-  const baseline = xln.getJWatcherDrainStatus(env, target).committedCursor;
-  let progress: ReturnType<typeof xln.observeJWatcherDrainProgress> | null = null;
+async function relayConnected(xln: Awaited<ReturnType<typeof getXLN>>, env: RuntimeReplica): Promise<boolean> {
   try {
-    // The canonical progress tracker owns the stall deadline; waitFor retains
-    // the Runtime halt check without imposing a second absolute deadline.
-    await waitFor(
-      () => {
-        const status = xln.getJWatcherDrainStatus(env, target);
-        const complete = xln.isJWatcherDrainComplete(status);
-        if (!complete)
-          progress = xln.observeJWatcherDrainProgress(
-            progress,
-            xln.getJWatcherDrainProgressKey(status),
-            performance.now(),
-            timeoutMs,
-          );
-        onProgress?.(
-          `Syncing with the chain · ${Math.max(0, Math.min(100, Math.floor(((status.authenticatedThrough - baseline) * 100) / Math.max(1, status.targetBlock - baseline))))}%`,
-        );
-        return complete;
-      },
-      'chain scan',
-      Number.POSITIVE_INFINITY,
-      250,
-    );
-  } finally {
-    console.info('[hosted] chain scan', {
-      ...xln.getJWatcherDrainStatus(env, target),
-      elapsedMs: performance.now() - startedAt,
-    });
+    await waitFor(() => Boolean(xln.getP2P(env)?.isConnected?.()), 'relay connection', 20_000);
+    return true;
+  } catch {
+    useApp
+      .getState()
+      .toast('The network relay is not reachable. Reconnect before opening your hub account from Home.', 'danger');
+    return false;
   }
 }
 
@@ -107,6 +63,21 @@ export function findReplicaState(env: RuntimeReplica, entityId: string) {
   }
   return undefined;
 }
+
+/** An openAccount for this pair is queued, in the Entity mempool, or in an open frame. */
+const openAccountPending = (env: RuntimeReplica, entityId: string, counterpartyId: string): boolean => {
+  const opensPair = (tx: EntityTx): boolean => entityTxOpensAccount(tx, counterpartyId);
+  const replica = findReplicaState(env, entityId);
+  return (env.runtimeMempool?.entityInputs ?? []).some(input =>
+    input.entityId.toLowerCase() === entityId.toLowerCase() && (input.entityTxs ?? []).some(opensPair))
+    || Boolean(replica?.mempool.some(opensPair))
+    || Boolean(replica?.proposal?.txs.some(opensPair))
+    || Boolean(replica?.lockedFrame?.txs.some(opensPair));
+};
+
+/** One open per pair: a user's open and the automatic first-hub open never both send. */
+export const accountOpenedOrPending = (env: RuntimeReplica, entityId: string, counterpartyId: string): boolean =>
+  accountReady(env, entityId, counterpartyId) || openAccountPending(env, entityId, counterpartyId);
 
 export function accountReady(env: RuntimeReplica, entityId: string, counterpartyId: string): boolean {
   return Boolean(findReplicaState(env, entityId)?.state?.accounts?.get?.(counterpartyId));
@@ -230,10 +201,112 @@ export type HostedVaultOptions = {
   selfLabel: string;
   stack: Stack;
   recovery?: RuntimeRecoveryCandidate;
-  /** Maximum time without authenticated scan progress; admission stays gated. */
-  chainScanTimeoutMs?: number;
+  /** Runtime id the stored vault records; a seed deriving another fails closed. */
+  runtimeId?: string;
   onStep?: (step: string) => void;
 };
+
+/** The first hub Account is J-dependent admission: it runs after catch-up. */
+async function openFirstHubAccount(
+  xln: Awaited<ReturnType<typeof getXLN>>,
+  env: RuntimeReplica,
+  stack: Stack,
+  entityId: string,
+  signerId: string,
+): Promise<void> {
+  // importEntity initializes a new profile. Unlock/recovery must preserve the
+  // committed profile, including an explicitly published name, bio and website.
+  const hub = stack.hubs.find(entry => entry.online) ?? stack.hubs[0];
+  if (hub && !accountReady(env, entityId, hub.entityId) && (await relayConnected(xln, env))) {
+    await xln.ensureGossipProfiles(env, [hub.entityId]);
+    // The response clocks are signed into the Account for its whole life, so
+    // they are derived from the two parties' roles, never assumed. A hub whose
+    // role we cannot establish gets no account rather than a user's window.
+    let disputeConfig: AccountDisputeConfig | null = null;
+    try {
+      const summaries = await requireAdapter().read<RuntimeAdapterEntitySummary[]>('entities');
+      disputeConfig = accountDisputeConfig({ entityId, counterpartyId: hub.entityId, summaries });
+    } catch (error) {
+      useApp
+        .getState()
+        .toast(
+          `${hub.name} has not published its role yet, so the dispute window cannot be set. Open the account from Home once it is online. (${error instanceof Error ? error.message : String(error)})`,
+          'danger',
+        );
+    }
+    if (disputeConfig) {
+      await hydrateJurisdictionPolicyDefaults(stack.jurisdiction.name);
+      const decimals = xln.getTokenInfo(USDC).decimals;
+      const rebalancePolicy = getOpenAccountRebalancePolicyData(decimals);
+      // The user (or another tab) may have opened this Account while the
+      // automatic open awaited the network; decide in the same turn as sending.
+      if (accountOpenedOrPending(env, entityId, hub.entityId)) return;
+      await sendEntity(entityId, signerId, [
+        {
+          type: 'openAccount',
+          // Automatic discovery opens the Account, not an unsecured exposure.
+          // Only the user's receive/credit controls may authorize that risk.
+          data: {
+            targetEntityId: hub.entityId,
+            creditAmount: 0n,
+            ...(rebalancePolicy ? { rebalancePolicy } : {}),
+            tokenId: USDC,
+            disputeConfig,
+          },
+        },
+      ]);
+      try {
+        await waitFor(() => accountReady(env, entityId, hub.entityId), `account with ${hub.name}`, 60_000);
+      } catch {
+        useApp.getState().toast(`${hub.name} has not answered yet; the account opens when it does.`);
+      }
+    }
+  }
+}
+
+/**
+ * The existing drain criterion for every attached jurisdiction: each watcher
+ * authenticates through one captured finalized target before the fence opens.
+ * A failure keeps the fence closed and is shown, never retried silently.
+ */
+async function openAfterJCatchup(
+  xln: Awaited<ReturnType<typeof getXLN>>,
+  env: RuntimeReplica,
+  stack: Stack,
+  entityId: string,
+  signerId: string,
+  owners: ReadonlyArray<{ entityId: string; signerId: string }>,
+): Promise<void> {
+  try {
+    const targets = await Promise.all(owners.map(async owner => {
+      const adapter = xln.getEntityJAdapter(env, owner.entityId, owner.signerId);
+      if (!adapter?.getCurrentBlockNumber || !adapter.getFinalityDepth)
+        throw new Error(`J_WATCHER_DRAIN_API_MISSING:${owner.entityId}`);
+      const head = Number(await adapter.getCurrentBlockNumber());
+      const depth = Number(adapter.getFinalityDepth());
+      if (!Number.isSafeInteger(head) || head < 0 || !Number.isSafeInteger(depth) || depth < 0)
+        throw new Error(`J_WATCHER_TARGET_INVALID:${head}:${depth}`);
+      return { adapter, targetBlock: Math.max(0, head - depth) };
+    }));
+    let progress: ReturnType<typeof xln.observeJWatcherDrainProgress> | null = null;
+    await waitFor(() => {
+      const statuses = targets.map(target => xln.getJWatcherDrainStatus(env, target));
+      if (statuses.every(xln.isJWatcherDrainComplete)) return true;
+      progress = xln.observeJWatcherDrainProgress(progress, statuses.map(xln.getJWatcherDrainProgressKey).join('|'), performance.now());
+      return false;
+    }, 'chain catch-up', Number.POSITIVE_INFINITY);
+    xln.setRuntimeDeliveryReady(env, true);
+    if (!xln.getP2P(env)) {
+      xln.startP2P(env, { signerId: String(env.runtimeId), relayUrls: [stack.relayUrl], gossipPollMs: 2_000 });
+    }
+    await openFirstHubAccount(xln, env, stack, entityId, signerId);
+  } catch (error) {
+    console.error('[hosted] chain catch-up failed; new commands stay paused', error);
+    useApp
+      .getState()
+      .toast(`Chain sync stopped, so new payments stay paused. Reopen the wallet to retry. (${error instanceof Error ? error.message : String(error)})`, 'danger');
+  }
+}
 
 /**
  * Boot a personal runtime against the stack: import its jurisdiction over RPC,
@@ -255,26 +328,36 @@ export async function bootHostedVault(seed: string, options: HostedVaultOptions)
     }
     step('Starting your runtime');
     const xln = await getXLN();
-    // Replay can sign for any local jurisdiction before main() returns. Register
-    // the same seed-derived EOAs used at creation before opening the WAL; a
-    // secondary HD path is outside the Runtime's numeric prewarm range.
-    const signerIds = new Map<string, string>();
-    for (const chain of stack.jurisdictions) {
-      const index = chain.key === stack.jurisdiction.key ? 0 : deriveJurisdictionSignerIndex(chain.name);
-      const privateKey = derivePrivateKeyBytes(seed, index);
-      const address = computeAddress(hexlify(privateKey)).toLowerCase();
-      xln.registerSignerKey(seed, address, privateKey);
-      signerIds.set(chain.key, address);
-    }
-    await connectEmbedded(seed, options.recovery);
+    // Replay can sign for any local jurisdiction before main() returns. Warm
+    // every seed-derived EOA used at creation from one BIP-39 root before the
+    // WAL opens; numeric signer 1 is also the Runtime id main() reuses.
+    const signerIndex = (chain: Stack['jurisdictions'][number]): number =>
+      chain.key === stack.jurisdiction.key ? 0 : deriveJurisdictionSignerIndex(chain.name);
+    const addresses = xln.prewarmNumericSigners(seed, stack.jurisdictions.map(chain => String(signerIndex(chain) + 1)));
+    const signerIds = new Map(stack.jurisdictions.map((chain, index) => {
+      const address = addresses[index];
+      if (!address) throw new Error(`STACK_SIGNER_PREWARM_MISSING:${chain.key}`);
+      return [chain.key, address.toLowerCase()] as const;
+    }));
+    const runtimeId = signerIds.get(stack.jurisdiction.key);
+    if (!runtimeId) throw new Error(`STACK_PRIMARY_SIGNER_MISSING:${stack.jurisdiction.key}`);
+    if (options.runtimeId && options.runtimeId.toLowerCase() !== runtimeId) throw new Error('Wallet identity mismatch.');
+    await connectEmbedded(seed, runtimeId, options.recovery);
     const env = getEmbeddedEnv();
     if (!env) throw new Error('EMBEDDED_ENV_MISSING');
-    const signerId = signerIds.get(stack.jurisdiction.key);
-    if (!signerId) throw new Error(`STACK_PRIMARY_SIGNER_MISSING:${stack.jurisdiction.key}`);
+    const signerId = runtimeId;
     const entityId = String(xln.generateLazyEntityId([signerId], 1n)).toLowerCase();
     const j = stack.jurisdiction;
 
     // Every chain the stack runs: the entity lives on the primary, swaps may cross into the others.
+    const chainOwners = new Map<string, { entityId: string; signerId: string }>();
+    // Stable secondary HD paths keep primary identity independent of order.
+    const chainOwner = (chain: (typeof stack.jurisdictions)[number]) => {
+      const chainSignerId = signerIds.get(chain.key);
+      if (!chainSignerId) throw new Error(`STACK_JURISDICTION_SIGNER_MISSING:${chain.key}`);
+      const chainEntityId = chain.key === j.key ? entityId : String(xln.generateLazyEntityId([chainSignerId], 1n)).toLowerCase();
+      return { entityId: chainEntityId, signerId: chainSignerId };
+    };
     const joinChain = async (chain: (typeof stack.jurisdictions)[number]): Promise<void> => {
       step(`Joining ${chain.name}`);
       const ready = (): boolean => Boolean(env.state.jReplicas?.get?.(chain.name)?.contracts?.depository);
@@ -302,11 +385,9 @@ export async function bootHostedVault(seed: string, options: HostedVaultOptions)
         await waitFor(ready, `importJ ${chain.name}`, 45_000);
       }
 
-      // Stable secondary HD paths keep primary identity independent of order.
       const primary = chain.key === j.key;
-      const chainSignerId = signerIds.get(chain.key);
-      if (!chainSignerId) throw new Error(`STACK_JURISDICTION_SIGNER_MISSING:${chain.key}`);
-      const chainEntityId = primary ? entityId : String(xln.generateLazyEntityId([chainSignerId], 1n)).toLowerCase();
+      const { entityId: chainEntityId, signerId: chainSignerId } = chainOwner(chain);
+      chainOwners.set(chain.key, { entityId: chainEntityId, signerId: chainSignerId });
       if (findReplicaState(env, chainEntityId)) return;
       step(`Creating your ${chain.name} entity`);
       await sendRuntimeInput({
@@ -339,86 +420,25 @@ export async function bootHostedVault(seed: string, options: HostedVaultOptions)
       });
       await waitFor(() => Boolean(findReplicaState(env, chainEntityId)), `importReplica ${chain.name}`, 45_000);
     };
-    // Readiness waits only for the primary history. Every watcher authenticates
-    // its full history on this one browser thread; a concurrent secondary scan
-    // halved the primary's header throughput. Secondaries join after it.
-    const primaryChain = stack.jurisdictions.find(chain => chain.key === j.key);
-    if (!primaryChain) throw new Error(`STACK_PRIMARY_JURISDICTION_MISSING:${j.key}`);
-    await joinChain(primaryChain);
-
-    step('Connecting to the network');
-    if (!xln.getP2P(env)) {
-      xln.startP2P(env, { signerId: String(env.runtimeId), relayUrls: [stack.relayUrl], gossipPollMs: 2_000 });
-    }
-    // Transport authentication may advance during catch-up; new financial
-    // operations stay behind the gate and replayed outputs retain their outbox.
-    step('Syncing with the chain');
-    await waitForChainScan(xln, env, entityId, signerId, options.chainScanTimeoutMs ?? 60_000, options.onStep);
-    for (const chain of stack.jurisdictions) if (chain !== primaryChain) await joinChain(chain);
-
-    const connected = (): boolean => Boolean(xln.getP2P(env)?.isConnected?.());
-    let online = true;
-    try {
-      await waitFor(connected, 'relay connection', 20_000);
-    } catch {
-      online = false;
-      useApp
-        .getState()
-        .toast('The network relay is not reachable. Reconnect before opening your hub account from Home.', 'danger');
-    }
-
-    // importEntity initializes a new profile. Unlock/recovery must preserve the
-    // committed profile, including an explicitly published name, bio and website.
-
-    const hub = stack.hubs.find(entry => entry.online) ?? stack.hubs[0];
-    if (hub && online && !accountReady(env, entityId, hub.entityId)) {
-      step(`Opening an account with ${hub.name}`);
-      await xln.ensureGossipProfiles(env, [hub.entityId]);
-      // The response clocks are signed into the Account for its whole life, so
-      // they are derived from the two parties' roles, never assumed. A hub whose
-      // role we cannot establish gets no account rather than a user's window.
-      let disputeConfig: AccountDisputeConfig | null = null;
-      try {
-        const summaries = await requireAdapter().read<RuntimeAdapterEntitySummary[]>('entities');
-        disputeConfig = accountDisputeConfig({ entityId, counterpartyId: hub.entityId, summaries });
-      } catch (error) {
-        useApp
-          .getState()
-          .toast(
-            `${hub.name} has not published its role yet, so the dispute window cannot be set. Open the account from Home once it is online. (${error instanceof Error ? error.message : String(error)})`,
-            'danger',
-          );
-      }
-      if (disputeConfig) {
-        await hydrateJurisdictionPolicyDefaults(stack.jurisdiction.name);
-        const decimals = xln.getTokenInfo(USDC).decimals;
-        const rebalancePolicy = getOpenAccountRebalancePolicyData(decimals);
-        await sendEntity(entityId, signerId, [
-          {
-            type: 'openAccount',
-            // Automatic discovery opens the Account, not an unsecured exposure.
-            // Only the user's receive/credit controls may authorize that risk.
-            data: {
-              targetEntityId: hub.entityId,
-              creditAmount: 0n,
-              ...(rebalancePolicy ? { rebalancePolicy } : {}),
-              tokenId: USDC,
-              disputeConfig,
-            },
-          },
-        ]);
-        try {
-          await waitFor(() => accountReady(env, entityId, hub.entityId), `account with ${hub.name}`, 60_000);
-        } catch {
-          useApp.getState().toast(`${hub.name} has not answered yet; the account opens when it does.`);
-        }
-      }
-    }
+    // The wallet screen opens on committed state. Until every jurisdiction's
+    // watcher finishes its first authenticated pass, the Runtime's j-catchup
+    // fence admits only chain joins, holds peer input, due hooks and J
+    // submission, and no P2P transport exists: stale J height would admit HTLC
+    // reveals past revealBeforeHeight and sign over unseen disputes. A restored
+    // Runtime is already behind it; every chain is joined, then all drain once.
+    xln.setRuntimeDeliveryReady(env, false);
+    for (const chain of stack.jurisdictions) await joinChain(chain);
+    void openAfterJCatchup(xln, env, stack, entityId, signerId, [...chainOwners.values()]);
 
     step('Ready');
     app.setActiveEntityId(entityId);
     app.setActiveVault(options.vaultId);
     app.unlockSeed(options.vaultId, seed);
+  } catch (error) {
+    // No failed boot keeps a Runtime or this seed's keys in memory.
+    await lockEmbeddedRuntime();
+    (await getXLN()).clearSignerKeys(seed);
+    throw error;
   } finally {
     useApp.getState().setBooting(false);
   }

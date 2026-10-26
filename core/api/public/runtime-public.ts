@@ -52,6 +52,7 @@ export {
   deriveSignerKeySync,
   getCachedSignerPrivateKey,
   registerSignerKey,
+  prewarmNumericSigners,
   clearSignerKeys,
   signAccountFrame,
   verifyAccountSignature,
@@ -134,6 +135,8 @@ export { createJAdapter } from '../../jurisdiction/adapter';
 export type { JAdapter, JAdapterConfig, JAdapterMode, JEvent } from '../../jurisdiction/adapter';
 export { applyJEventsToEnv, buildJEventsRuntimeInput } from '../../jurisdiction/adapter/watcher';
 export { getJWatcherDrainStatus, isJWatcherDrainComplete, observeJWatcherDrainProgress, getJWatcherDrainProgressKey } from '../../jurisdiction/adapter/operations/backlog-drain-status';
+export { setRuntimeDeliveryReady } from '../../runtime/envelope/p2p-lifecycle';
+export { assertRuntimeCommandReady } from '../../runtime/replica/lifecycle';
 export {
   getActiveJAdapter,
   getEntityJAdapter,

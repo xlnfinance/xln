@@ -14,6 +14,7 @@ import {
   getRuntimeStorageDb,
   getPersistedLatestHeight,
   listPersistedCheckpointHeights,
+  loadEnvFromDB,
   loadEnvFromStorageByReplay,
   readPersistedStorageFrameRecord,
   readPersistedStorageFramePayloads,
@@ -93,20 +94,16 @@ const commitRuntimeTick = async (env: ReturnType<typeof createEmptyEnv>): Promis
 };
 
 describe('disposable Runtime activity view', () => {
-  test('open WAL verification preserves current repair and rejects a damaged later head', async () => {
-    const { env, runtimeId } = await createStoredRuntime('verified-open-wal-recovery');
+  test('current repair is preserved and restore rejects a damaged later head', async () => {
+    const { env, runtimeId, seed } = await createStoredRuntime('verified-open-wal-recovery');
     try {
       await commitRuntimeTick(env);
       await closeRuntimeDb(env);
-      expect(env.infrastructure?.storageVerifiedWalHeight).toBeUndefined();
       await tryOpenStorageDb(env);
       await tryOpenRuntimeWalDb(env);
-      const verifiedWalHeight = env.infrastructure?.storageVerifiedWalHeight;
-      expect(verifiedWalHeight).toBe(2);
-      if (verifiedWalHeight === undefined) throw new Error('Open WAL verification height missing');
       const db = getRuntimeStorageDb(env);
       const walDb = getRuntimeWalDb(env);
-      const recoveryOptions = { db, walDb, config: resolveStorageRuntimeConfig(env), verifiedWalHeight };
+      const recoveryOptions = { db, walDb, config: resolveStorageRuntimeConfig(env) };
       const intact = await recoverStorageDbFromWal(recoveryOptions);
       expect(intact.diagnostics.verifiedCurrent).toBe(true);
       expect(intact.recovered).toBe(false);
@@ -123,10 +120,10 @@ describe('disposable Runtime activity view', () => {
       const frame = await readStorageFrameRecord(walDb, 3);
       if (!frame) throw new Error('Recovery regression frame missing');
       await walDb.put(keyFrame(3), encodeBuffer({ ...frame, timestamp: frame.timestamp + 1 }));
-      await expect(recoverStorageDbFromWal(recoveryOptions)).rejects.toThrow('STORAGE_VERIFY_CANONICAL_HASH_MISMATCH');
       await closeRuntimeDb(env);
-      expect(env.infrastructure?.storageVerifiedWalHeight).toBeUndefined();
-      await expect(tryOpenRuntimeWalDb(env)).rejects.toThrow('STORAGE_VERIFY_CANONICAL_HASH_MISMATCH');
+      // Opening the device's own WAL does not re-hash it; the restore binds the
+      // loaded state to the damaged frame's canonical roots and fails closed.
+      await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('CANONICAL_HASH_MISMATCH');
     } finally {
       await closeRuntimeDb(env);
       await closeInfraDb(env);

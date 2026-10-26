@@ -17,7 +17,7 @@ import type {
 } from '../../protocol/state/persistent-radix-value-map';
 import { radixMerklePathSlots } from '../../protocol/state/radix-merkle';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
-import { readRequiredRaw, iterateKeys } from '../database/level';
+import { iterateKeys, readPrefixRows } from '../database/level';
 import {
   KEY_LIVE_ACCOUNT_BRANCH,
   KEY_LIVE_ACCOUNT_LEAF,
@@ -236,20 +236,21 @@ const readTreeRecords = async (
   namespace: AccountStateMapNamespace,
 ): Promise<AccountTreeRecord[]> => {
   const tag = ACCOUNT_TREE_NAMESPACE_TAG[namespace];
-  const records: AccountTreeRecord[] = [];
-  const branchPrefix = keyLiveAccountTreePrefix(KEY_LIVE_ACCOUNT_BRANCH, entityId, counterpartyId, tag);
-  for await (const key of iterateKeys(db, { prefix: branchPrefix })) {
+  const [branches, leaves] = await Promise.all([
+    readPrefixRows(db, keyLiveAccountTreePrefix(KEY_LIVE_ACCOUNT_BRANCH, entityId, counterpartyId, tag)),
+    readPrefixRows(db, keyLiveAccountTreePrefix(KEY_LIVE_ACCOUNT_LEAF, entityId, counterpartyId, tag)),
+  ]);
+  const records: AccountTreeRecord[] = branches.map(({ key, value }) => {
     const parsed = parseLiveAccountBranchKey(key);
     if (ACCOUNT_TREE_NAMESPACE_BY_TAG.get(parsed.namespaceTag) !== namespace)
       throw new Error('STORAGE_ACCOUNT_BRANCH_NAMESPACE');
-    records.push(decodeBranch(decodeBuffer(await readRequiredRaw(db, key)), parsed.path));
-  }
-  const leafPrefix = keyLiveAccountTreePrefix(KEY_LIVE_ACCOUNT_LEAF, entityId, counterpartyId, tag);
-  for await (const key of iterateKeys(db, { prefix: leafPrefix })) {
+    return decodeBranch(decodeBuffer(value), parsed.path);
+  });
+  for (const { key, value } of leaves) {
     const parsed = parseLiveAccountLeafKey(key);
     if (ACCOUNT_TREE_NAMESPACE_BY_TAG.get(parsed.namespaceTag) !== namespace)
       throw new Error('STORAGE_ACCOUNT_LEAF_NAMESPACE');
-    records.push(decodeLeaf(decodeBuffer(await readRequiredRaw(db, key)), parsed.payload));
+    records.push(decodeLeaf(decodeBuffer(value), parsed.payload));
   }
   return records;
 };
@@ -261,8 +262,9 @@ export const hydrateAccountTrees = async (
   descriptors: readonly StorageAccountTreeDescriptor[],
 ): Promise<Map<AccountStateMapNamespace, AccountTree>> => {
   const trees = new Map<AccountStateMapNamespace, AccountTree>();
-  for (const descriptor of descriptors) {
-    const records = await readTreeRecords(db, entityId, counterpartyId, descriptor.namespace);
+  const loaded = await Promise.all(descriptors.map(async descriptor =>
+    ({ descriptor, records: await readTreeRecords(db, entityId, counterpartyId, descriptor.namespace) })));
+  for (const { descriptor, records } of loaded) {
     const tree = PersistentAccountStateMap.fromNodeRecords(descriptor.namespace, records);
     if (tree.rootHash() !== descriptor.rootHash || tree.size !== descriptor.leafCount) {
       throw new Error(`STORAGE_ACCOUNT_TREE_ROOT_MISMATCH:${descriptor.namespace}`);

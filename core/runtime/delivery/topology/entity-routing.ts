@@ -1,5 +1,5 @@
 import type { AccountInput, AccountFrame, AccountTx } from '../../../types/account';
-import type { RuntimeInputQueueOptions } from '../../mempool/input-queue';
+import { assertRuntimeMempoolCapacity, requireRuntimeMempool, type RuntimeInputQueueOptions } from '../../mempool/input-queue';
 import type { EntityInput, EntityReplica } from '../../../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeTx } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
@@ -1460,6 +1460,45 @@ const validateInboundP2PEntityInput = (
   return { kind: 'accepted' };
 };
 
+/**
+ * Common inbound admission. Behind the j-catchup fence no inbound entity input reaches
+ * the Runtime mempool: authenticated, validated bytes are held in arrival
+ * order and enqueued when setRuntimeDeliveryReady(true) releases them. The
+ * hold is charged against mempool capacity, so a flood throws the same
+ * RuntimeMempoolCapacityError as an open-fence mempool; nothing else refuses.
+ * Local enqueues do not see the held count, so the mempool plus the hold can
+ * transiently reach twice the capacity: bounded, never unbounded. While any
+ * entry is still held (a release stopped), new input queues behind it so peer
+ * order is kept.
+ * Like the mempool it is not durable: a crash loses held inputs exactly as it
+ * loses queued ones. A bilateral Account proposal survives that because its
+ * sender keeps it as pendingAccountInput and re-sends it when this Runtime's
+ * route becomes deliverable again (propose-accounts-now.ts, p2p.ts readiness
+ * listeners); other inbound inputs have no transport retry contract.
+ */
+const admitInboundEntityInputs = (
+  env: RuntimeReplica,
+  deps: RuntimeEntityRoutingDeps,
+  count: number,
+  enqueue: (release: { localContinuation?: true }) => void,
+): 'enqueued' | 'held' => {
+  const infrastructure = deps.ensureRuntimeInfrastructure(env);
+  if ((infrastructure.entityInputsReady !== false && !infrastructure.fencedInboundEntityInputs) || env.scenarioMode) {
+    enqueue({});
+    return 'enqueued';
+  }
+  const held = infrastructure.fencedInboundEntityInputs ?? { count: 0, entries: [] };
+  assertRuntimeMempoolCapacity(requireRuntimeMempool(env), {
+    runtimeTxs: 0,
+    jInputs: 0,
+    entityInputs: held.count + count,
+  });
+  held.count += count;
+  held.entries.push({ count, enqueue });
+  infrastructure.fencedInboundEntityInputs = held;
+  return 'held';
+};
+
 export const routeInboundP2PEntityInput = (
   env: RuntimeReplica,
   from: string,
@@ -1474,14 +1513,14 @@ export const routeInboundP2PEntityInput = (
   // Transport admission only appends authenticated bytes. Reliable frontier
   // registration is a Runtime-frame mutation and must happen inside isolation.
   // `from` is trusted transport provenance. Never retain a peer-supplied value.
-  deps.enqueueRuntimeInputs(
+  admitInboundEntityInputs(env, deps, 1, release => deps.enqueueRuntimeInputs(
     env,
     [{ ...input, from }],
     undefined,
     undefined,
     ingressTimestamp,
-    options,
-  );
+    { ...options, ...release },
+  ));
   env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
   return { kind: 'queued' };
 };
@@ -1633,13 +1672,18 @@ export const routeInboundP2PEntityInputs = (
   // Validate the complete envelope before appending any bytes.
   const inputs = validateInboundP2PEntityInputsEnvelope(env, from, envelope, deps, options);
   if (inputs.length > 0) {
-    deps.enqueueRuntimeInputs(env, inputs, undefined, undefined, envelope.sourceRuntimeTimestamp, options);
-    traceAccountDeliveryHop('runtime-mempool', envelope, {
-      runtimeId: env.runtimeId,
-      peerRuntimeId: from,
-      queuedInputs: inputs.length,
-      runtimeMempoolEntityInputs: env.runtimeMempool?.entityInputs.length ?? null,
-    });
+    const admitted = admitInboundEntityInputs(env, deps, inputs.length, release =>
+      deps.enqueueRuntimeInputs(env, inputs, undefined, undefined, envelope.sourceRuntimeTimestamp, { ...options, ...release }));
+    // A held envelope has not reached the mempool; no runtime-mempool hop is
+    // traced for it, here or at release.
+    if (admitted === 'enqueued') {
+      traceAccountDeliveryHop('runtime-mempool', envelope, {
+        runtimeId: env.runtimeId,
+        peerRuntimeId: from,
+        queuedInputs: inputs.length,
+        runtimeMempoolEntityInputs: env.runtimeMempool?.entityInputs.length ?? null,
+      });
+    }
     env.info('network', 'INBOUND_ENTITY_INPUTS', {
       fromRuntimeId: from,
       sourceRuntimeHeight: envelope.sourceRuntimeHeight,

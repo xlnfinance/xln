@@ -144,7 +144,7 @@ const validateRuntimeInputAdmission = (
   env: RuntimeReplica,
   runtimeInput: RuntimeInput,
 ): void => {
-  assertRuntimeCommandReady(env);
+  assertRuntimeCommandReady(env, runtimeInput);
   validateRuntimeInputShapeAndLimits(env, runtimeInput, message => {
     throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: ${message}`);
   });

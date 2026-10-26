@@ -2,7 +2,7 @@ import { assertCertifiedRegistrationEvidenceStore } from '../../../jurisdiction/
 import { safeStringify } from '../../../protocol/serialization';
 import { writeRuntimeMetadata } from '../../../runtime/loop/loop-environment.ts';
 import type { RuntimeReplica } from '../../../runtime/types';
-import { type RuntimeFrame } from '../..';
+import { computeStorageFrameHash, type RuntimeFrame } from '../..';
 import { computeCanonicalEntityHashesFromEnv } from '../../canonical-hash';
 import type { PersistedStorageReadApi } from '../../read/persisted-read';
 import { buildRecoveryJournalFromStorageFrame } from '../../queries';
@@ -98,6 +98,21 @@ const assertReplayedFrameMatches = (
   );
 };
 
+/**
+ * Bind each frame record replay reads to its own hash and to its parent. The
+ * open no longer re-hashes the WAL tail, so these are the frames restore trusts.
+ */
+const assertFrameRecordLinked = (frame: RuntimeFrame, parentHash: string | null): string => {
+  const actualHash = computeStorageFrameHash(frame);
+  if (frame.frameHash !== actualHash) {
+    throw new Error(`STORAGE_RESTORE_FRAME_HASH_MISMATCH:height=${frame.height}:expected=${actualHash}:actual=${frame.frameHash ?? 'none'}`);
+  }
+  if (parentHash !== null && frame.prevFrameHash !== parentHash) {
+    throw new Error(`STORAGE_RESTORE_FRAME_CHAIN_BROKEN:height=${frame.height}:expectedPrev=${parentHash}:actualPrev=${frame.prevFrameHash ?? 'none'}`);
+  }
+  return actualHash;
+};
+
 const restoreReplayOverlay = async (
   reads: PersistedStorageReadApi,
   env: RuntimeReplica,
@@ -155,12 +170,19 @@ export const createRuntimeReplayLoader =
       const restored = await loadPersistedRuntime(env, target.selectedCheckpointHeight);
       if (!restored) return null;
       let targetFrame: RuntimeFrame | null = null;
+      let parentHash: string | null = null;
       for (let height = target.selectedCheckpointHeight; height <= target.targetHeight; height += 1) {
         const frame = await reads.readPersistedStorageFrameRecord(restored.env, height);
         if (!frame) {
           throw new Error(`STORAGE_RESTORE_FRAME_MISSING:height=${height}`);
         }
+        parentHash = assertFrameRecordLinked(frame, parentHash);
         targetFrame = frame;
+        // The checkpoint state must equal its frame before any later input
+        // replays through consensus on top of it.
+        if (height === target.selectedCheckpointHeight && height < target.targetHeight) {
+          assertReplayedFrameMatches(restored.env, frame);
+        }
         if (height > target.selectedCheckpointHeight) {
           const payloads = await reads.readPersistedStorageFramePayloads(restored.env, frame);
           await deps.replayRecoveryFrameJournals(restored.env, [buildRecoveryJournalFromStorageFrame(frame, payloads)]);

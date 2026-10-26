@@ -42,6 +42,7 @@ import {
 } from '../keys';
 import { readStorageFrameRecord, readStorageHead } from '../read/read';
 import { verifyStorageSnapshotIntegrity, verifyStorageTailIntegrity } from '../read/verify';
+import { verifyLiveStorageIntegrity } from '../read/integrity/live';
 import { projectReplayVerifiableRuntimePostStateView } from '../wal/snapshot';
 import { prepareRuntimeMachineGraphRows } from '../wal/runtime-machine-graph';
 import { prepareRuntimeOutputRows } from '../wal/outbox-payload';
@@ -197,6 +198,7 @@ const readAuthoritativeReplicaMetas = async (db: RuntimeDbLike): Promise<Replica
 };
 
 const decideExistingWal = async (options: RestoredStorageBaseOptions): Promise<ExistingWalDecision> => {
+  await verifyLiveStorageIntegrity(options.walDb);
   const verified = await verifyStorageTailIntegrity(options.walDb);
   if (verified.latestHeight === 0) return { kind: 'replace' };
   const head = await readStorageHead(options.walDb);

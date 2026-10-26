@@ -212,9 +212,11 @@ async function waitForRuntimeOnline(page: Page, label: string): Promise<void> {
     .poll(
       () =>
         page.evaluate(() => {
-          const p2p = (window as CurrentWalletWindow).__xln?.env()?.infrastructure?.p2p;
-          if (!p2p) throw new Error('RECOVERY_RUNTIME_P2P_UNAVAILABLE');
-          return p2p.isConnected();
+          // The wallet screen opens on committed state; P2P starts only after
+          // the first authenticated J catch-up, so a missing transport is "not yet".
+          const env = (window as CurrentWalletWindow).__xln?.env();
+          if (!env) throw new Error('RECOVERY_RUNTIME_UNAVAILABLE');
+          return Boolean(env.infrastructure?.p2p?.isConnected());
         }),
       { timeout: 15_000, message: `${label} Runtime must be online` },
     )

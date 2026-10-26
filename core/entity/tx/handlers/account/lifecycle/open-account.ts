@@ -11,6 +11,7 @@ import type { AccountConsensusContext } from '../../../../../account/consensus/c
 import type { EntityTx } from '../../../../../types/entity-tx';
 import { getEntityAccountForWrite, putEntityAccountCandidate } from '../../../../state/persistent-account-map';
 import { prepareEntityTxState } from '../../../../state-clone';
+import { MalformedEntityFrameInputError } from '../../../processing/invariant-errors';
 import { addMessage } from '../../../../frame-events';
 import { findAccountKey, normalizeEntityRef } from '../../../account-key';
 import { DEFAULT_ACCOUNT_TOKEN_IDS , resolveJurisdictionRebalanceDefaults } from '../../../../../account/config/defaults';
@@ -215,11 +216,14 @@ export const handleOpenAccountEntityTx = async (
     const error =
       `OPEN_ACCOUNT_ALREADY_EXISTS: entity=${entityState.entityId} ` +
       `counterparty=${counterpartyId}`;
-    openAccountLog.error('already_exists', {
+    openAccountLog.warn('already_exists', {
       entity: shortId(entityState.entityId),
       counterparty: shortId(counterpartyId),
     });
-    throw new Error(error);
+    // A second open (a user tab, a host's automatic first-hub open) is a
+    // sender-caused reject of this one tx, decided before any mutation; it must
+    // never halt the Runtime (docs/reject-policy.md).
+    throw new MalformedEntityFrameInputError('openAccount', error);
   }
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];

@@ -74,7 +74,9 @@ export const resolvePersistedRestoreSource = async (
   const usesLiveMaterializedCheckpoint = persistedHandles.some(handle =>
     handle.latestMaterializedHeight === targetHeight,
   );
-  if (selectedSnapshotHeight > 0) {
+  // A restore from the live materialized graph never reads the snapshot; only
+  // a snapshot-sourced restore authenticates the snapshot it loads.
+  if (selectedSnapshotHeight > 0 && !usesLiveMaterializedCheckpoint) {
     const snapshotHandle = persistedHandles.find(handle =>
       handle.snapshotHeights.includes(selectedSnapshotHeight),
     );

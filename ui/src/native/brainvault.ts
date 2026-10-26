@@ -63,7 +63,7 @@ export async function openNativeBrainvault(command: Record<string, unknown>, pub
     derivation = null;
     publish({ kind: 'brainvaultFinalizing' });
     await bootHostedVault(result.mnemonic, { vaultId, vaultName: name.trim(), kind: 'brainvault',
-      selfLabel: name.trim(), stack, chainScanTimeoutMs: 180_000,
+      selfLabel: name.trim(), stack,
       ...(recovery ? { recovery } : {}), onStep: message => publish({ kind: 'progress', message }) });
     if (recovery) saveRecovery(vaultId, { mode: 'tower', towers: [address] });
     if (creating) {

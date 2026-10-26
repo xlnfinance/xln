@@ -410,15 +410,25 @@ const readGraphRecords = async (
   db: RuntimeDbLike,
 ): Promise<PersistentRadixNodeRecord<StorageValueGraphPath, StorageValueGraphValue>[]> => {
   const records: PersistentRadixNodeRecord<StorageValueGraphPath, StorageValueGraphValue>[] = [];
-  const branchPrefix = keyRuntimeMachineTreePrefix(KEY_RUNTIME_MACHINE_BRANCH);
-  for await (const key of iterateKeys(db, { prefix: branchPrefix })) {
+  const rows = async (prefix: Buffer) => {
+    const keys: Buffer[] = [];
+    for await (const key of iterateKeys(db, { prefix })) keys.push(key);
+    // Request every owner row together: one awaited get per row cost an
+    // IndexedDB round trip each on every browser restore.
+    const values = await Promise.all(keys.map(key => readGraphRowValue(db, key)));
+    return keys.map((key, index) => ({ key, value: values[index] }));
+  };
+  const [branches, leaves] = await Promise.all([
+    rows(keyRuntimeMachineTreePrefix(KEY_RUNTIME_MACHINE_BRANCH)),
+    rows(keyRuntimeMachineTreePrefix(KEY_RUNTIME_MACHINE_LEAF)),
+  ]);
+  for (const { key, value: rowValue } of branches) {
     const parsed = parseRuntimeMachineBranchKey(key);
-    records.push(decodeStorageValueGraphBranch(await readGraphRowValue(db, key), parsed.path));
+    records.push(decodeStorageValueGraphBranch(rowValue, parsed.path));
   }
-  const leafPrefix = keyRuntimeMachineTreePrefix(KEY_RUNTIME_MACHINE_LEAF);
-  for await (const key of iterateKeys(db, { prefix: leafPrefix })) {
+  for (const { key, value: rowValue } of leaves) {
     const parsed = parseRuntimeMachineLeafKey(key);
-    const [path, value] = decodeStorageValueGraphLeaf(parsed.payload, await readGraphRowValue(db, key));
+    const [path, value] = decodeStorageValueGraphLeaf(parsed.payload, rowValue);
     records.push({
       kind: 'leaf',
       path: radixMerklePathSlots(parsed.payload, 16),

@@ -1,6 +1,5 @@
 import { Level } from 'level';
 import { createStructuredLogger } from '../support/logger';
-import { timePerfPhase } from '../support/performance/profile';
 import { nodeProcess } from '../support/process/runtime-process';
 import {
   requireBoundaryInteger,
@@ -12,8 +11,8 @@ import type { RuntimeReplica } from '../runtime/types';
 import {
   readStorageHead,
   seedFreshStorageEpoch,
-  verifyStorageTailIntegrity,
 } from './';
+import { assertTypeScriptStorageNamespaces } from './read/integrity/native-authority';
 import { assertStorageSafetyOverridesAllowed } from './commit/safety';
 import {
   fsyncStorageParentDirectory,
@@ -1038,13 +1037,11 @@ export const closeRuntimeWalDb = async (env: RuntimeReplica): Promise<void> => {
     state.runtimeWalDb = null;
     state.runtimeWalDbOpenPromise = null;
     delete state.runtimeWalDbBorrowed;
-    delete state.storageVerifiedWalHeight;
     return;
   }
   beginRuntimeDbClose(env, 'runtime-wal');
   state!.runtimeWalDb = null;
   state!.runtimeWalDbOpenPromise = null;
-  delete state!.storageVerifiedWalHeight;
   try {
     await db.close();
   } catch (error) {
@@ -1078,9 +1075,6 @@ export const borrowOpenRuntimeWalDb = async (
   targetState.runtimeWalDb = sourceState.runtimeWalDb;
   targetState.runtimeWalDbOpenPromise = Promise.resolve(true);
   targetState.runtimeWalDbBorrowed = true;
-  if (sourceState.storageVerifiedWalHeight !== undefined) {
-    targetState.storageVerifiedWalHeight = sourceState.storageVerifiedWalHeight;
-  }
 };
 
 export const closeInfraDb = async (env: RuntimeReplica): Promise<void> => {
@@ -1110,13 +1104,11 @@ export async function tryOpenRuntimeWalDb(
     state.runtimeWalDbOpenPromise = (async () => {
       try {
         await db.open();
-        const previousVerifiedHeight = Number(state.storageVerifiedWalHeight ?? -1);
-        const verified = await timePerfPhase('storage.open.verifyWalTail', () =>
-          verifyStorageTailIntegrity(db, { tailFrames: 128 }),
-        );
-        if (verified.latestHeight > previousVerifiedHeight) {
-          state.storageVerifiedWalHeight = verified.latestHeight;
-        }
+        // The WAL is this device's own committed state. Restore checks the
+        // loaded state against its frame's canonical roots and replays later
+        // frames against their recorded roots; a full re-verification on
+        // every open only re-hashed bytes that those checks already bind.
+        await assertTypeScriptStorageNamespaces(db);
         return true;
       } catch (error) {
         const isBlocked =

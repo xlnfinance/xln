@@ -1,4 +1,4 @@
-import type { RuntimeReplica } from '../types';
+import type { RuntimeInput, RuntimeReplica } from '../types';
 
 export type RuntimeLifecyclePhase = 'booting' | 'running' | 'quiescing' | 'stopped' | 'halted';
 
@@ -57,7 +57,16 @@ export type RuntimeCommandReadiness =
   | { ready: true; reason: null }
   | { ready: false; reason: string };
 
-export const getRuntimeCommandReadiness = (env: RuntimeReplica): RuntimeCommandReadiness => {
+/**
+ * Joining a jurisdiction or importing an Entity replica reads no J state and
+ * creates no obligation, so the j-catchup fence admits exactly these: a
+ * wallet joins every chain first and then waits for all of them at once.
+ */
+const isJCatchupBootstrapInput = (input: RuntimeInput): boolean =>
+  input.entityInputs.length === 0 && (input.jInputs?.length ?? 0) === 0 && input.runtimeTxs.length > 0 &&
+  input.runtimeTxs.every(tx => tx.type === 'importJ' || tx.type === 'importReplica');
+
+export const getRuntimeCommandReadiness = (env: RuntimeReplica, input?: RuntimeInput): RuntimeCommandReadiness => {
   const state = env.infrastructure ?? {};
   if (state.operatorStatus === 'HALTED_REQUIRES_OPERATOR') {
     return { ready: false, reason: 'HALTED_REQUIRES_OPERATOR' };
@@ -67,11 +76,13 @@ export const getRuntimeCommandReadiness = (env: RuntimeReplica): RuntimeCommandR
   if (state.persistencePaused === true || state.persistenceQuiescing === true) {
     return { ready: false, reason: 'persistence-fenced' };
   }
-  if (state.entityInputsReady === false) return { ready: false, reason: 'j-catchup' };
+  if (state.entityInputsReady === false && !(input && isJCatchupBootstrapInput(input))) {
+    return { ready: false, reason: 'j-catchup' };
+  }
   return { ready: true, reason: null };
 };
 
-export const assertRuntimeCommandReady = (env: RuntimeReplica): void => {
-  const readiness = getRuntimeCommandReadiness(env);
+export const assertRuntimeCommandReady = (env: RuntimeReplica, input?: RuntimeInput): void => {
+  const readiness = getRuntimeCommandReadiness(env, input);
   if (!readiness.ready) throw new Error(`RUNTIME_COMMAND_NOT_READY:${readiness.reason}`);
 };

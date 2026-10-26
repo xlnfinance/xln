@@ -261,12 +261,16 @@ export const readEntityStorageLayout = async (
   if (!rootValue) return null;
   const manifest = decodeEntityGraphManifest(rootValue);
   const raw: Record<string, unknown> = {};
-  for (const descriptor of manifest.fields) {
+  // Field rows and collection trees are requested together; validation stays in manifest order.
+  const [values, trees] = await Promise.all([
+    Promise.all(manifest.fields.map(async descriptor => ({ descriptor, value: await readEntityField(db, entityId, descriptor) }))),
+    hydrateEntityTrees(db, entityId, manifest.trees),
+  ]);
+  for (const { descriptor, value } of values) {
     const field = STORAGE_ENTITY_FIELD_BY_TAG.get(descriptor.tag);
     if (!field || TREE_FIELDS.has(field)) throw new Error(`STORAGE_ENTITY_FIELD_UNKNOWN:${descriptor.tag}`);
-    raw[field] = decodeBuffer(await readEntityField(db, entityId, descriptor));
+    raw[field] = decodeBuffer(value);
   }
-  const trees = await hydrateEntityTrees(db, entityId, manifest.trees);
   for (const [namespace, tree] of trees) {
     if (namespace === 'paybookEntries') {
       const paybook = raw['paybook'];

@@ -237,25 +237,30 @@ const privateKeyToAddress = (privateKey: Uint8Array): string => {
   return `0x${hash.slice(-40)}`.toLowerCase();
 };
 
+/**
+ * Warm exactly these numeric signers (one-based ids). BIP-39's password
+ * derivation is identical for all of them, so its root is derived at most
+ * once per call and never retained across lock. Signers already in this
+ * vault's cache (an earlier call, or recovery's other Runtime envelopes)
+ * derive nothing. Returns their addresses in the given order.
+ */
+export function prewarmNumericSigners(seed: Uint8Array | string, signerIds: readonly string[]): string[] {
+  let root: HDNodeWallet | undefined;
+  return signerIds.map(signerId => {
+    const index = parseSignerIndex(signerId);
+    if (index === null) throw new Error(`SIGNER_CACHE_PREWARM_ID_NOT_NUMERIC:${signerId}`);
+    return getOrDeriveNumericSigner(seed, signerId, () => {
+      root ??= HDNodeWallet.fromPhrase(resolveMnemonic(seed), undefined, 'm');
+      return deriveBip39Key(seed, index, root);
+    }).address;
+  });
+}
+
 export function prewarmSignerKeyCache(seed: Uint8Array | string, count = 20): string[] {
   if (!Number.isSafeInteger(count) || count <= 0) {
     throw new Error(`SIGNER_CACHE_PREWARM_COUNT_INVALID:${String(count)}`);
   }
-  const warmed: string[] = [];
-  // BIP-39's password derivation is identical for these numeric keys. Share
-  // its root only within this owning vault's call; never retain it across lock.
-  let root: HDNodeWallet | undefined;
-  for (let i = 1; i <= count; i++) {
-    // Recovery creates several Runtime envelopes for the same vault. Reuse
-    // its existing numeric key cache; another vault has a different store.
-    warmed.push(
-      getOrDeriveNumericSigner(seed, String(i), () => {
-        root ??= HDNodeWallet.fromPhrase(resolveMnemonic(seed), undefined, 'm');
-        return deriveBip39Key(seed, i - 1, root);
-      }).address,
-    );
-  }
-  return warmed;
+  return prewarmNumericSigners(seed, Array.from({ length: count }, (_unused, index) => String(index + 1)));
 }
 
 export function prewarmSignerLabels(seed: Uint8Array | string, signerLabels: readonly string[]): string[] {

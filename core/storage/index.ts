@@ -72,7 +72,7 @@ import {
   getSafePendingAccountJClaimDeletes,
 } from '../entity/account/account-j-claim-node-store';
 import { buildStorageRuntimeMachineSnapshot, buildReplayVerifiableRuntimePostStateView } from './wal/snapshot';
-import { verifyStorageSnapshotIntegrity, verifyStorageTailIntegrity } from './read/verify';
+import { verifyStorageSnapshotIntegrity } from './read/verify';
 import { verifyLiveStorageIntegrity } from './read/integrity/live';
 import {
   validatePersistedAccountJClaimPathNode,
@@ -372,7 +372,6 @@ export const recoverStorageDbFromWal = async (options: {
   config: Required<StorageRuntimeConfig>;
   onPersistenceProgress?: StoragePersistenceProgressHook;
   verifyCurrentProjection?: boolean;
-  verifiedWalHeight?: number;
 }): Promise<{ recovered: boolean; diagnostics: StorageRecoveryDiagnostics }> => {
   await assertTypeScriptStorageNamespaces(options.walDb);
   const recoveryStages: Record<string, number> = {};
@@ -418,11 +417,6 @@ export const recoverStorageDbFromWal = async (options: {
     return { recovered: false, diagnostics: diagnosticsOf(false, false, false) };
   }
 
-  // Verify the authoritative source before rebuilding even a missing current
-  // projection. Only this open WAL's already-verified head can reuse the check.
-  if (options.verifiedWalHeight !== walLatestHeight) {
-    await verifyStorageTailIntegrity(options.walDb);
-  }
   const headsMatch = Boolean(rawCurrentHead) && storageHeadsEqual(walHead, currentHead);
   const shouldVerifyCurrent = headsMatch && options.verifyCurrentProjection !== false;
   let currentProjectionInvalid = false;
@@ -808,7 +802,6 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
       walDb,
       config,
       verifyCurrentProjection: state.storageCurrentProjectionVerified !== true,
-      ...(state.storageVerifiedWalHeight === undefined ? {} : { verifiedWalHeight: state.storageVerifiedWalHeight }),
       ...(options.onPersistenceProgress
         ? { onPersistenceProgress: options.onPersistenceProgress }
         : {}),
@@ -954,12 +947,13 @@ const resolveStorageAppendPosition = async (
   if (head.latestHeight > 0 && !previous) {
     throw new Error(`STORAGE_PREV_FRAME_MISSING: height=${head.latestHeight}`);
   }
-  return {
-    previousFrame: previous,
-    prevFrameHash: previous
-      ? previous.frameHash ?? computeStorageFrameHash(previous)
-      : ZERO_FRAME_HASH,
-  };
+  if (!previous) return { previousFrame: null, prevFrameHash: ZERO_FRAME_HASH };
+  // A new frame links to the bytes of its parent, never to a stored claim.
+  const prevFrameHash = computeStorageFrameHash(previous);
+  if (previous.frameHash !== prevFrameHash) {
+    throw new Error(`STORAGE_PREV_FRAME_HASH_MISMATCH:height=${previous.height}:expected=${prevFrameHash}:actual=${previous.frameHash ?? 'none'}`);
+  }
+  return { previousFrame: previous, prevFrameHash };
 };
 
 const collectAuxiliaryTreeOwners = (replicas: StorageReplicaLookup): AuxiliaryTreeOwner[] =>

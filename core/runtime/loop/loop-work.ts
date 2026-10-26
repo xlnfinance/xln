@@ -139,7 +139,8 @@ export const resolveRuntimeWorkReason = (
   deps: RuntimeWorkDeps,
 ): string | null => {
   const mempool = requireRuntimeMempool(env);
-  if (hasReadyCommittedJOutbox(env)) return 'committed-j-outbox';
+  const jCatchupFenced = isJCatchupFenced(env);
+  if (!jCatchupFenced && hasReadyCommittedJOutbox(env)) return 'committed-j-outbox';
   if (hasDueJurisdictionImport(env)) return 'jurisdiction-import';
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return 'runtime-mempool';
   if ((mempool.jInputs?.length ?? 0) > 0) return 'j-input';
@@ -157,7 +158,7 @@ export const resolveRuntimeWorkReason = (
   if (replicaWakes.accountInputs.length > 0) return 'account-mempool';
   // Quiesce drains only work accepted before its ingress fence. Timers remain
   // durable and fire after explicit resume.
-  if (!env.infrastructure?.persistenceQuiescing && hasDueEntityHooks(env)) {
+  if (!env.infrastructure?.persistenceQuiescing && !jCatchupFenced && hasDueEntityHooks(env)) {
     return 'entity-hook';
   }
   return null;
@@ -293,12 +294,21 @@ export const resolveNextWallClockWakeTimestamp = (
   return getNextWallClockWakeTimestamp(env);
 };
 
+/**
+ * The j-catchup fence: until every watcher completes its first authenticated
+ * pass, local J state may be stale. Scheduled hooks (dispute finalize, HTLC
+ * timeouts, J retries) would create new obligations from it, so they wait.
+ * Authenticated catch-up input still processes; timers stay durable.
+ */
+export const isJCatchupFenced = (env: RuntimeReplica): boolean =>
+  env.infrastructure?.entityInputsReady === false;
+
 export const generateHookPings = (
   env: RuntimeReplica,
   nowMs = env.state.timestamp ?? 0,
   queuedAt = env.state.timestamp ?? 0,
 ): void => {
-  if (env.infrastructure?.persistenceQuiescing) return;
+  if (env.infrastructure?.persistenceQuiescing || isJCatchupFenced(env)) return;
   generateHookPingsWithDeps(env, runtimeWakeDeps, nowMs, queuedAt);
 };
 

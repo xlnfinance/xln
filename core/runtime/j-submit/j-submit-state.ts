@@ -454,6 +454,12 @@ export const makeJSubmitResultRuntimeTx = (
   });
 };
 
+/** Permissionless, non-durable J maintenance; see splitJOutboxForDurableSubmit. */
+export const isMaintenanceJTx = (
+  jTx: JTx,
+): jTx is Extract<JTx, { type: 'mint' | 'debtEnforcement' | 'entityProviderActivateBoard' }> =>
+  jTx.type === 'mint' || jTx.type === 'debtEnforcement' || jTx.type === 'entityProviderActivateBoard';
+
 export const splitJOutboxForDurableSubmit = (
   jOutbox: JInput[],
 ): { maintenance: JInput[]; durable: JInput[]; retries: RuntimeTx[] } => {
@@ -488,11 +494,7 @@ export const splitJOutboxForDurableSubmit = (
             },
           }));
         }
-      } else if (
-        jTx.type === 'mint' ||
-        jTx.type === 'debtEnforcement' ||
-        jTx.type === 'entityProviderActivateBoard'
-      ) {
+      } else if (isMaintenanceJTx(jTx)) {
         // These are deliberately not consensus settlement commands:
         // - mint is a local-dev/testnet admin utility and is unavailable on
         //   production chains;

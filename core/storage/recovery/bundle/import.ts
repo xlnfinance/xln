@@ -7,6 +7,7 @@ import { iterateKeys } from '../../database/level';
 import { writeBatch } from '../../codec/codec';
 import { readStorageHead } from '../../read/read';
 import { verifyStorageTailIntegrity } from '../../read/verify';
+import { verifyLiveStorageIntegrity } from '../../read/integrity/live';
 import { assertRuntimeActivityViewEmpty, resetRuntimeActivityViewAtFloor } from '../../history/runtime-activity-view';
 import { validateRuntimeRecording } from './recording';
 import { assertRuntimeRecoveryBundleAuthenticity } from './index';
@@ -82,6 +83,8 @@ const publishArchive = async (
   const head = await readStorageHead(source);
   if (!head || head.latestHeight !== height || stage.state.height !== height)
     throw new Error('RECOVERY_IMPORT_STAGE_TIP_MISMATCH');
+  // Imported bytes come from outside this device: authenticate the whole graph.
+  await verifyLiveStorageIntegrity(source);
   await verifyStorageTailIntegrity(source, { tailFrames: 10_001 });
   await withStorageWriterLock(target, async () => {
     await assertFreshDestination(deps, target);

@@ -6,6 +6,7 @@ import {
 } from '../../account/crypto';
 import { createStructuredLogger } from '../../support/logger';
 import { attachEventEmitters } from '../observability/env-events';
+import { setRuntimeDeliveryReady } from '../envelope/p2p-lifecycle';
 import { nodeProcess, runtimeIsBrowser } from '../../support/process/runtime-process';
 import type { RuntimeReplica } from '../types';
 import type { TrustedJurisdictionRpcBinding } from '../recovery/j-adapter-restore';
@@ -22,6 +23,11 @@ export type RuntimeCreationOptions = Readonly<{
   localSigners?: readonly RuntimeLocalSigner[];
   /** Cache warmup only; omitted numeric signers remain available lazily. */
   numericSignerPrewarmCount?: number;
+  /**
+   * The host opens the j-catchup fence after its first authenticated watcher
+   * pass (setRuntimeDeliveryReady). A restored Runtime then starts behind it.
+   */
+  jCatchupFence?: boolean;
 }>;
 
 export type RuntimeBootstrapDeps = {
@@ -122,6 +128,14 @@ export const bootstrapRuntime = async (
   }
   ensureBootstrapRuntimeId(env);
   if (runtimeIsBrowser) {
+    // A restored wallet's J state is only as fresh as its last frame. The
+    // j-catchup fence closes before the loop starts and holds: user commands
+    // (chain joins excepted), inbound entity inputs, due hooks and timers, and durable J
+    // submission. It does not hold entity-mempool or account-mempool wakes, so
+    // work admitted and persisted before the restart may still propose and
+    // sign. The host that asked for the fence opens it after every watcher's
+    // first authenticated pass.
+    if (options?.jCatchupFence && restored.restored && env.state.eReplicas.size > 0) setRuntimeDeliveryReady(env, false);
     runtimeLog.info('main.loop_start_browser');
     deps.startRuntimeLoop(env);
   }

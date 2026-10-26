@@ -10,7 +10,6 @@ import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
 import { getXLN } from './xln-loader';
 import { useApp } from './store';
 import { restoreFreshRuntime, type RuntimeRecoveryCandidate } from './restore';
-import { runtimeIdForSeed } from './keys';
 import {
   listUnresolvedRemoteRuntimeCommandIntents,
   markRemoteRuntimeCommandIntentAccepted,
@@ -133,7 +132,12 @@ async function closeAndLockRuntime(): Promise<void> {
   releaseOwnership = null;
 }
 
-export async function connectEmbedded(seed: string, recovery?: RuntimeRecoveryCandidate): Promise<RuntimeAdapter> {
+/** `runtimeId` is the caller's already-derived numeric signer 1 address for `seed`. */
+export async function connectEmbedded(
+  seed: string,
+  runtimeId: string,
+  recovery?: RuntimeRecoveryCandidate,
+): Promise<RuntimeAdapter> {
   await closing;
   const xln = await getXLN();
   if (recovery && currentEnv) throw new Error('Close this wallet and reload before restoring on a clean device.');
@@ -144,8 +148,12 @@ export async function connectEmbedded(seed: string, recovery?: RuntimeRecoveryCa
     getEnv: () => env,
     main: async (runtimeSeed?: string | null) => {
       // Serialize local bootstrap/import across tabs before either opens storage.
-      env = await navigator.locks.request(`xln-wallet-bootstrap:${runtimeIdForSeed(seed)}`, () =>
-        recovery ? restoreFreshRuntime(xln, seed, recovery) : xln.main(runtimeSeed ?? seed),
+      // bootHostedVault registers every signer this wallet uses before boot;
+      // further numeric signers derive lazily, so warm only the Runtime id.
+      env = await navigator.locks.request(`xln-wallet-bootstrap:${runtimeId}`, () =>
+        recovery
+          ? restoreFreshRuntime(xln, seed, recovery)
+          : xln.main(runtimeSeed ?? seed, { numericSignerPrewarmCount: 1, jCatchupFence: true }),
       );
       installHostedLivenessObserver(env);
       currentEnv = env;

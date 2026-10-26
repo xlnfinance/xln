@@ -1,6 +1,7 @@
 import { inspectStorage, readStorageHead, type StorageHead } from '..';
 import { resolveRuntimeWalDbPath, resolveStorageDbPath } from '../runtime-dbs';
 import { verifyStorageTailIntegrity } from '../read/verify';
+import { verifyLiveStorageIntegrity } from '../read/integrity/live';
 import { assertCertifiedJHistoryIntegrity } from '../../jurisdiction/machine/local-history';
 import { projectAccountDoc } from '../read/projections';
 import { normalizeEntityId } from '../keys';
@@ -181,6 +182,8 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
   }> => {
     if (!(await deps.tryOpenRuntimeWalDb(env))) throw new Error('LIVE_RUNTIME_STORAGE_UNAVAILABLE');
     return deps.withStorageConsistentRead(env, async () => {
+      // An explicit operator verification also authenticates the whole live graph.
+      await verifyLiveStorageIntegrity(deps.getRuntimeWalDb(env));
       const result = await verifyStorageTailIntegrity(deps.getRuntimeWalDb(env));
       return { ok: true, runtimeId: String(env.runtimeId || ''), ...result };
     });

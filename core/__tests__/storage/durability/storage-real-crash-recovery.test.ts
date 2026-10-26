@@ -521,8 +521,9 @@ describe('real process storage crash recovery', () => {
     await closeRuntimeDb(probe);
     await closeInfraDb(probe);
 
+    // Restore binds replica metadata into the replayed frame's post-state root.
     await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow(
-      'STORAGE_VERIFY_REPLICA_META_DIGEST_MISMATCH',
+      'STORAGE_RESTORE_REPLAY_HASH_MISMATCH',
     );
   }, 30_000);
 

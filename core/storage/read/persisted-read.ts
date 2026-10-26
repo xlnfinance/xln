@@ -1,3 +1,4 @@
+import { runtimeIsBrowser } from '../../support/process/runtime-process';
 import type { Level } from 'level';
 
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
@@ -35,7 +36,12 @@ const createPersistedStorageNavigationApi = (
     runtimeId?: string | null,
     runtimeSeed?: string | null,
   ): RuntimeReplica => {
-    const env = deps.createEmptyEnv(runtimeSeed ?? null);
+    // A browser wallet warmed its own signers before boot; warming the default
+    // 20 here re-derived 19 HD keys on every unlock. Other processes keep the
+    // default prewarm.
+    const env = runtimeIsBrowser
+      ? deps.createEmptyEnv(runtimeSeed ?? null, 1)
+      : deps.createEmptyEnv(runtimeSeed ?? null);
     const normalizedRuntimeId = normalizeRuntimeId(
       runtimeId ?? env.runtimeId ?? null,
     );

@@ -599,7 +599,6 @@ interface RuntimeInfrastructure {
   /** WAL/current projection reconciliation is settled when the namespace opens, not per frame. */
   storageWalRecovered?: boolean;
   storageVerifiedPreviousHeight?: number;
-  storageVerifiedWalHeight?: number;
   storageEpochRotatePromise?: Promise<void> | null;
   /** Last physically committed Book roots; identity enables O(dirty-path) storage diffs. */
   storagePersistedBooks?: Map<string, BookState>;
@@ -715,6 +714,14 @@ interface RuntimeInfrastructure {
   ) => Promise<void>) | null;
   /** Already committed J side effects awaiting a durable result RuntimeTx. */
   pendingCommittedJOutbox?: JInput[];
+  /**
+   * Inbound entity inputs admitted behind the j-catchup fence: their count is charged
+   * against mempool capacity; released in arrival order when it opens.
+   */
+  fencedInboundEntityInputs?: {
+    count: number;
+    entries: Array<{ count: number; enqueue: (options: { localContinuation: true }) => void }>;
+  };
   /** Process-local preparation tasks; recovery derives work from the committed outbox. */
   jPreparationTasks?: Map<string, Promise<void>>;
   /** Durable import intents awaiting a local, replayable completeImportJ result. */

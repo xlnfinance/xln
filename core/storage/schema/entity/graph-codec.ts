@@ -10,7 +10,7 @@ import type {
 } from '../../../protocol/state/persistent-radix-value-map';
 import { radixMerklePathSlots } from '../../../protocol/state/radix-merkle';
 import { decodeBuffer, encodeBuffer } from '../../codec/codec';
-import { readRequiredRaw, iterateKeys } from '../../database/level';
+import { iterateKeys, readPrefixRows } from '../../database/level';
 import {
   KEY_LIVE_ENTITY_BRANCH,
   KEY_LIVE_ENTITY_LEAF,
@@ -207,18 +207,19 @@ const readTreeRecords = async (
   namespace: EntityCollectionNamespace,
 ): Promise<EntityTreeRecord[]> => {
   const tag = ENTITY_COLLECTION_NAMESPACE_TAG[namespace];
-  const records: EntityTreeRecord[] = [];
-  const branchPrefix = keyLiveEntityTreePrefix(KEY_LIVE_ENTITY_BRANCH, entityId, tag);
-  for await (const key of iterateKeys(db, { prefix: branchPrefix })) {
+  const [branches, leaves] = await Promise.all([
+    readPrefixRows(db, keyLiveEntityTreePrefix(KEY_LIVE_ENTITY_BRANCH, entityId, tag)),
+    readPrefixRows(db, keyLiveEntityTreePrefix(KEY_LIVE_ENTITY_LEAF, entityId, tag)),
+  ]);
+  const records: EntityTreeRecord[] = branches.map(({ key, value }) => {
     const parsed = parseLiveEntityBranchKey(key);
     if (NAMESPACE_BY_TAG.get(parsed.namespaceTag) !== namespace) throw new Error('STORAGE_ENTITY_BRANCH_NAMESPACE');
-    records.push(decodeBranch(decodeBuffer(await readRequiredRaw(db, key)), parsed.path));
-  }
-  const leafPrefix = keyLiveEntityTreePrefix(KEY_LIVE_ENTITY_LEAF, entityId, tag);
-  for await (const key of iterateKeys(db, { prefix: leafPrefix })) {
+    return decodeBranch(decodeBuffer(value), parsed.path);
+  });
+  for (const { key, value } of leaves) {
     const parsed = parseLiveEntityLeafKey(key);
     if (NAMESPACE_BY_TAG.get(parsed.namespaceTag) !== namespace) throw new Error('STORAGE_ENTITY_LEAF_NAMESPACE');
-    records.push(decodeLeaf(decodeBuffer(await readRequiredRaw(db, key)), parsed.payload));
+    records.push(decodeLeaf(decodeBuffer(value), parsed.payload));
   }
   return records;
 };
@@ -229,9 +230,11 @@ export const hydrateEntityTrees = async (
   descriptors: readonly StorageEntityTreeDescriptor[],
 ): Promise<Map<EntityCollectionNamespace, EntityTree>> => {
   const trees = new Map<EntityCollectionNamespace, EntityTree>();
-  for (const descriptor of descriptors) {
+  const loaded = await Promise.all(descriptors.map(async descriptor =>
+    ({ descriptor, records: await readTreeRecords(db, entityId, descriptor.namespace) })));
+  for (const { descriptor, records } of loaded) {
     const tree = PersistentEntityCollectionMap.fromNodeRecords(
-      await readTreeRecords(db, entityId, descriptor.namespace),
+      records,
       descriptor.namespace === 'paybookEntries' ? 'paybookHashlock' : 'text',
     );
     if (tree.rootHash() !== descriptor.rootHash || tree.size !== descriptor.leafCount) {

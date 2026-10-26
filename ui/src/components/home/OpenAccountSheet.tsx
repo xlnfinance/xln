@@ -13,6 +13,8 @@ import { getTokenMeta } from '../../runtime/token-meta';
 import type { WalletView } from '../../runtime/views';
 import type { RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
 import { useAdapterRead } from '../../runtime/hooks';
+import { getEmbeddedEnv } from '../../runtime/adapter';
+import { accountOpenedOrPending } from '../../runtime/hosted';
 
 export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onClose: () => void }) {
   const commandReady = useApp(s => s.commandReady);
@@ -70,6 +72,14 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
         counterpartyId: targetId,
         summaries,
       });
+      // The wallet host may already be opening its first hub Account; a second
+      // open for the same pair would only be rejected by the Entity.
+      const env = getEmbeddedEnv();
+      if (env && accountOpenedOrPending(env, wallet.entityId, targetId)) {
+        toast('An account with this counterparty is already open or being opened.');
+        onClose();
+        return;
+      }
       await sendEntityTxs(wallet.entityId, wallet.signerId, [
         {
           type: 'openAccount',

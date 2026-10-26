@@ -86,9 +86,8 @@ test('already-certified local Entity commits drain after WAL reopen without appe
     }
     if (!restored) throw new Error('TEST_WAL_RESTORE_MISSING');
     env = restored;
-    // Selecting the checkpoint and replaying its tail share one verified WAL
-    // handle. Reopening it repeats the same integrity decode before any work.
-    expect(snapshotPerfPhases().phases['storage.open.verifyWalTail']?.count).toBe(1);
+    // Opening the device's own WAL performs no full integrity re-decode.
+    expect(snapshotPerfPhases().phases['storage.open.verifyWalTail']).toBeUndefined();
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
     for (let round = 0; round < 4; round++) await processRuntime(env);

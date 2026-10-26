@@ -18,6 +18,7 @@ import {
 } from '../../entity/auth/crypto';
 import type { RuntimeInboundEntityInputsResult, RuntimeInboundEntityInputOptions } from '../delivery/topology/entity-routing';
 import { ensureRuntimeInfrastructure } from './replica-envelope';
+import { notifyRuntimeStateChanged } from '../frame/notifications';
 import { requestRuntimeLoopWake } from '../mempool/input-queue';
 import { enqueuePeerReadyProposeAccountsNow } from '../mempool/propose-accounts-now';
 
@@ -81,9 +82,47 @@ const prepareCommittedPeerRoutes = (env: RuntimeReplica): void => {
 export const setRuntimeDeliveryReady = (env: RuntimeReplica, ready: boolean): void => {
   const state = ensureRuntimeInfrastructure(env);
   state.entityInputsReady = ready;
-  state.p2p?.setReady(ready);
-  prepareCommittedPeerRoutes(env);
-  requestRuntimeLoopWake(env);
+  // Delivery opens only once every held inbound entity input reached the mempool.
+  let deliverable = ready;
+  try {
+    if (ready) deliverable = releaseFencedInboundEntityInputs(env);
+  } finally {
+    state.p2p?.setReady(deliverable);
+    prepareCommittedPeerRoutes(env);
+    requestRuntimeLoopWake(env);
+    // Command readiness is part of the published notice; observers must not
+    // keep showing a fence that already opened (or admit work through one).
+    notifyRuntimeStateChanged(env);
+  }
+};
+
+/**
+ * Enqueue inbound entity inputs held behind the j-catchup fence, in arrival order. They
+ * were charged against capacity when held, so they skip it now. The only way
+ * an enqueue throws is a persistence pause; the release then stops, keeps the
+ * failed entry and the tail held (never dropped), and returns false so the
+ * transport stays not-ready. The next runtime loop start retries it.
+ */
+const releaseFencedInboundEntityInputs = (env: RuntimeReplica): boolean => {
+  const state = ensureRuntimeInfrastructure(env);
+  const held = state.fencedInboundEntityInputs;
+  if (!held) return true;
+  for (const [index, entry] of held.entries.entries()) {
+    try {
+      entry.enqueue({ localContinuation: true });
+    } catch (error) {
+      const tail = held.entries.slice(index);
+      state.fencedInboundEntityInputs = { count: tail.reduce((sum, item) => sum + item.count, 0), entries: tail };
+      p2pLifecycleLog.error('fenced_inbound.release_blocked', {
+        released: index,
+        held: tail.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+  delete state.fencedInboundEntityInputs;
+  return true;
 };
 
 const reconnectP2P = (p2p: P2Pish): void => {
@@ -226,7 +265,7 @@ export const startRuntimeP2P = (
   }
 
   state.p2p = new RuntimeP2P(buildRuntimeP2POptions(env, config, resolvedRuntimeId, deps));
-  state.p2p.setReady(state.entityInputsReady !== false);
+  state.p2p.setReady(state.entityInputsReady !== false && !state.fencedInboundEntityInputs);
   // Offline -> online edge only: the transport fires this callback on change.
   // A peer that never received our proposal is owed one explicit, consensus
   // visible re-emission, never a silent transport resend.

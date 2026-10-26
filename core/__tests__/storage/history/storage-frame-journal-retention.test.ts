@@ -1176,7 +1176,7 @@ describe('storage frame journal retention', () => {
     await closeRuntimeDb(restoredFromHistory);
     await closeInfraDb(restoredFromHistory);
 
-    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_VERIFY_REPLICA_META_DIGEST_MISMATCH');
+    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_RESTORE_REPLICA_META_REQUIRED');
   });
 
   test('stores one minimal Runtime replay journal', async () => {
@@ -1465,10 +1465,11 @@ describe('storage frame journal retention', () => {
     corrupted['name'] = 'corrupted snapshot body';
     await getRuntimeWalDb(env).put(snapshotKey, encodeBuffer(corrupted));
 
+    // The live materialized graph is the restore source and is untouched; the
+    // damaged retained snapshot fails the explicit verification that reads it.
+    await expect(verifyStorageTailIntegrity(getRuntimeWalDb(env))).rejects.toThrow('STORAGE_ENTITY_FIELD_BYTES_MISMATCH');
     await closeRuntimeDb(env);
     await closeInfraDb(env);
-
-    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_ENTITY_FIELD_BYTES_MISMATCH');
   });
 
   test('rotates current storage epoch after byte-threshold snapshot and keeps frame tail usable', async () => {

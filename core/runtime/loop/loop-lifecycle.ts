@@ -10,6 +10,7 @@ import {
   generateHookPings,
   getRemainingRuntimeFrameDelayMs,
   getRuntimeFramePeriodMs,
+  isJCatchupFenced,
 } from './loop-work.ts';
 import { yieldRuntimeIoTurn } from '../replica/platform.ts';
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope.ts';
@@ -26,6 +27,7 @@ import {
 } from './loop-drain.ts';
 import { emitRuntimeLoopError, reportFatalLoopError } from './loop-failure.ts';
 import { sleep } from '../../support/boundary-guards';
+import { setRuntimeDeliveryReady } from '../envelope/p2p-lifecycle.ts';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
@@ -84,7 +86,8 @@ const waitForNextRuntimeWork = async (
     return;
   }
   const nextDueAt = deps.getNextWallClockWakeTimestamp(env);
-  if (nextDueAt === null) {
+  // A closed j-catchup fence holds due hooks; opening it wakes the loop.
+  if (nextDueAt === null || isJCatchupFenced(env)) {
     await waitForRuntimeLoopWake(env);
     return;
   }
@@ -175,6 +178,10 @@ const startRuntimeLoopWithDeps = (
 
   const control: LoopControl = { running: true, promise: null };
   transitionRuntimeLifecycle(state, 'running');
+  // Every start (durable resume, checkpoint rollback, plain resume) passes
+  // here: inbound entity input whose release a persistence pause stopped after the
+  // j-catchup fence opened is released now, before delivery reopens.
+  if (state.entityInputsReady !== false && state.fencedInboundEntityInputs) setRuntimeDeliveryReady(env, true);
   rebuildScheduledWakeIndex(env);
   startJurisdictionWatchers(env);
   control.promise = runRuntimeLoop(env, state, config, control, deps);

@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { installBrowserErrorTelemetry } from '@xln/frontend/lib/debug/browser-telemetry';
 import { getAdapter } from './runtime/adapter';
+import { preloadXLN } from './runtime/xln-loader';
 import './styles/tokens.css';
 import './styles/base.css';
 import './styles/app.css';
@@ -14,6 +15,8 @@ installBrowserErrorTelemetry(() => {
   const adapter = getAdapter();
   return adapter?.mode === 'remote' && adapter.authLevel === 'admin';
 });
+
+preloadXLN();
 
 const root = document.getElementById('root');
 if (!root) throw new Error('UI_ROOT_MISSING');

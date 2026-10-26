@@ -3,6 +3,7 @@ import {
 import {
   isProductionRuntime,
   readRuntimeEnv,
+  runtimeIsBrowser,
 } from '../../support/process/runtime-process.ts';
 import { resolveRuntimeMinFrameDelayMs } from '../config/frame-cadence.ts';
 import { safeStringify } from '../../protocol/serialization';
@@ -156,10 +157,21 @@ const runtimeMinFrameDelayMs = (): number =>
     isProductionRuntime,
   );
 
+/**
+ * Recovery replays every frame after the last materialized graph through full
+ * Entity/Account consensus (~40-90 ms per wallet frame). A browser Runtime is
+ * reopened on every unlock and reload, so the hub cadence of 100 frames made
+ * each unlock replay up to 99 frames. Materializing at each quiescent frame
+ * bounds that replay to the in-flight suffix: a frame whose Entity replicas
+ * are not quiescent keeps accumulating until the next quiescent one.
+ */
+export const BROWSER_RUNTIME_STORAGE_CONFIG = { materializePeriodFrames: 1 } as const;
+
 /** New replicas persist the resolved cadence before their first frame. */
 export const createRuntimeConfig = (): RuntimeReplica['runtimeConfig'] => ({
   minFrameDelayMs: runtimeMinFrameDelayMs(),
   loopIntervalMs: isProductionRuntime ? 25 : 0,
+  ...(runtimeIsBrowser ? { storage: { ...BROWSER_RUNTIME_STORAGE_CONFIG } } : {}),
 });
 
 export const ensureRuntimeConfig = (env: RuntimeReplica): NonNullable<RuntimeReplica['runtimeConfig']> => {

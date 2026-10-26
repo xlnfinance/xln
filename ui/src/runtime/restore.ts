@@ -42,6 +42,9 @@ export async function restoreFreshRuntime(xln: XLNModule, seed: string, candidat
 	const recording = xln.buildRuntimeRecording(candidate.bundles);
 	if (recording.targetHeight !== candidate.runtimeHeight) throw new Error('Recovery archive does not cover the selected height.');
 	const env = await xln.importRuntimeRecoveryRecording(recording, seed);
+	// A recovered wallet's J state is as old as its archive: start behind the
+	// same j-catchup fence as a restored Runtime; bootHostedVault opens it.
+	xln.setRuntimeDeliveryReady(env, false);
 	xln.resumeRuntimeAfterPersistenceQuiesce(env);
 	return env;
 }

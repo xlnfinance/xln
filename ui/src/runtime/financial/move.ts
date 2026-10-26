@@ -254,7 +254,10 @@ async function signerPrivateKey(signerId: string): Promise<Uint8Array> {
 	if (!env) throw new Error('ONCHAIN_ACTIONS_NEED_A_LOCAL_RUNTIME');
 	// Hosted boot and recovery register the exact signer keys, including the
 	// jurisdiction-derived HD paths. Never guess a path or another vault's key.
-	const key = (await getXLN()).getCachedSignerPrivateKey(env, signerId);
+	// Direct on-chain signing obeys the same j-catchup fence as Runtime commands.
+	const xln = await getXLN();
+	xln.assertRuntimeCommandReady(env);
+	const key = xln.getCachedSignerPrivateKey(env, signerId);
 	if (!key) throw new Error('SIGNER_KEY_NOT_IN_VAULT');
 	return key;
 }

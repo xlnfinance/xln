@@ -3,7 +3,6 @@ import { computeCanonicalRuntimeStateHash } from '../canonical-hash';
 import { computeStorageFrameHash } from '../hashes';
 import { computeStorageReplicaMetaDigest } from '../replica/replica-meta-digest';
 import { readSnapshotDocs } from '../database/lifecycle';
-import { verifyLiveStorageIntegrity } from './integrity/live';
 import {
   KEY_LIVE_REPLICA_META,
   STORAGE_VERIFY_TAIL_FRAMES,
@@ -155,7 +154,6 @@ export const verifyStorageTailIntegrity = async (
     return { latestHeight: 0, checkedFrames: 0 };
   }
   const latestHeight = Math.max(0, Math.floor(Number(head.latestHeight)));
-  await verifyLiveStorageIntegrity(db);
   await verifyStorageSnapshotIntegrity(db, head);
   const tailFrames = Math.max(1, Math.floor(Number(options.tailFrames ?? STORAGE_VERIFY_TAIL_FRAMES)));
   const snapshotHeight = Math.max(0, Math.floor(Number(head.latestSnapshotHeight ?? 0)));

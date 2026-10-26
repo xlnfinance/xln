@@ -143,7 +143,7 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
   async send(input: RuntimeInput): Promise<RuntimeAdapterSendResult> {
     const env = this.resolveEnv();
     if (!env) throw new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true);
-    requireRuntimeAdapterCommandReady(env);
+    requireRuntimeAdapterCommandReady(env, input);
     this.deps.validateRuntimeInputAdmission(env, input);
     this.deps.enqueueRuntimeInput(env, input);
     return { height: Math.max(0, Math.floor(Number(env.state.height ?? 0))) };

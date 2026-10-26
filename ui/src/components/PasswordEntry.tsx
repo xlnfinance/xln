@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { savePasswordVault, unlockPasswordVault } from '../../../frontend/src/lib/security/passwordVault';
+import { warmXLN } from '../runtime/xln-loader';
 
 type Props = {
   status?: string | null;
@@ -14,6 +15,8 @@ export function PasswordEntry({ status, id, name, seed, onOpen, onBack }: Props)
   const [confirmation, setConfirmation] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // The Runtime opens right after this form; evaluate its bundle while the password is typed.
+  useEffect(warmXLN, []);
   const submit = async () => {
     if (busy) return;
     setBusy(true);

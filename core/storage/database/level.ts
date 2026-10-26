@@ -61,6 +61,19 @@ export async function* iterateKeys(db: RuntimeDbLike, range: KeyRangeOptions): A
   }
 }
 
+/**
+ * Every row under `prefix`, in key order. Values are requested together: on
+ * IndexedDB one awaited get per row cost a full round trip each.
+ */
+export const readPrefixRows = async (
+  db: RuntimeDbLike,
+  prefix: Buffer,
+): Promise<Array<Readonly<{ key: Buffer; value: Buffer }>>> => {
+  const keys: Buffer[] = [];
+  for await (const key of iterateKeys(db, { prefix })) keys.push(key);
+  return Promise.all(keys.map(async key => ({ key, value: await readRequiredRaw(db, key) })));
+};
+
 export const countKeys = async (db: RuntimeDbLike, range: KeyRangeOptions): Promise<number> => {
   let count = 0;
   for await (const _key of iterateKeys(db, range)) count += 1;

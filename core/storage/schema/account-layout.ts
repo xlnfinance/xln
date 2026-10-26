@@ -392,10 +392,15 @@ export const readAccountStorageLayout = async (
   const manifest = decodeAccountGraphManifest(root);
   const replica: Record<string, unknown> = {};
   const state: Record<string, unknown> = {};
-  for (const descriptor of manifest.fields) {
+  // Field rows and state trees are requested together; validation stays in manifest order.
+  const [values, trees] = await Promise.all([
+    Promise.all(manifest.fields.map(async descriptor =>
+      ({ descriptor, value: await readAccountField(db, entityId, counterpartyId, descriptor) }))),
+    hydrateAccountTrees(db, entityId, counterpartyId, manifest.trees),
+  ]);
+  for (const { descriptor, value } of values) {
     const field = STORAGE_ACCOUNT_FIELD_BY_TAG.get(descriptor.tag);
     if (!field) throw new Error(`STORAGE_ACCOUNT_MANIFEST_FIELD_UNKNOWN:${descriptor.tag}`);
-    const value = await readAccountField(db, entityId, counterpartyId, descriptor);
     const actualHash = computeIntegrityDigest(value);
     if (actualHash !== descriptor.valueHash) {
       throw new Error(`STORAGE_ACCOUNT_FIELD_HASH_MISMATCH:${field}:${descriptor.valueHash}:${actualHash}`);
@@ -405,7 +410,6 @@ export const readAccountStorageLayout = async (
     else replica[field] = decoded;
   }
   replica['state'] = state;
-  const trees = await hydrateAccountTrees(db, entityId, counterpartyId, manifest.trees);
   for (const [namespace, tree] of trees) installTree(state, replica, namespace, tree);
   const doc = validateStorageAccountDocValue({ ...replica, state });
   return { doc, logicalValue: root, representation: 'graph' };

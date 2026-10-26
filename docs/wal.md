@@ -458,7 +458,9 @@ retention. Rotation never implies immediate deletion.
 
 Required configuration:
 
-- `materializePeriodFrames`, default `100`;
+- `materializePeriodFrames`, default `100`; a new browser Runtime persists `1`,
+  because a wallet reopens on every unlock and reload and must not replay up to
+  99 frames through full consensus each time;
 - `epochPeriodFrames`, default `10_000`;
 - `epochPeriodBytes`, default `0` (disabled until measured);
 - `maxFrameInputRecords`, operator-configurable;

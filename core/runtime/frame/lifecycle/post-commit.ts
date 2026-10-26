@@ -1,5 +1,6 @@
 import { materializePendingJurisdictionImportResults } from '../../j-submit/jurisdiction-import';
 import { submitRuntimeJOutbox, type RuntimeJOutboxQueue } from '../../j-submit/j-submit';
+import { isMaintenanceJTx } from '../../j-submit/j-submit-state';
 import { ensureRuntimeInfrastructure } from '../../envelope/replica-envelope';
 import type { RuntimeReplica, RuntimeInput, RuntimeTx } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
@@ -75,7 +76,15 @@ export const runCommittedRuntimeEffects = async (
   profile.mark('dispatchOutputs');
   profile.metrics.pendingNetworkAfter = env.pendingNetworkOutputs?.length ?? 0;
 
-  await submitRuntimeJOutbox(env, effects.jOutbox, {
+  // Behind the j-catchup fence durable attempts stay in pendingCommittedJOutbox
+  // (WAL-recoverable, re-presented every frame) and go to chain from the first
+  // frame after it opens, in that order. Only permissionless maintenance
+  // (mint, enforceDebts, activateBoard) is submitted meanwhile: the contract
+  // validates it and it carries no Entity authority over stale J state.
+  const submittable = state.entityInputsReady === false
+    ? effects.jOutbox.filter(input => input.jTxs.every(isMaintenanceJTx))
+    : effects.jOutbox;
+  await submitRuntimeJOutbox(env, submittable, {
     enqueueRuntimeInputs: enqueueInputs,
   });
   profile.mark('jOutbox');

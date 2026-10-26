@@ -1,5 +1,5 @@
 import type { RuntimeAdapterErrorCode, RuntimeAdapterErrorPayload } from './types';
-import type { RuntimeReplica } from '../../runtime/types';
+import type { RuntimeInput, RuntimeReplica } from '../../runtime/types';
 import { getRuntimeCommandReadiness } from '../../runtime/replica/lifecycle';
 import { RuntimeCommittedStateUnavailableError } from '../../runtime/frame/lifecycle/writer-lock';
 
@@ -48,8 +48,8 @@ const TERMINAL_COMMAND_READINESS = new Set(['HALTED_REQUIRES_OPERATOR', 'phase=h
  * an operator. Reporting a halt as retryable made clients poll it every 250 ms
  * forever.
  */
-export const requireRuntimeAdapterCommandReady = (env: RuntimeReplica): void => {
-  const readiness = getRuntimeCommandReadiness(env);
+export const requireRuntimeAdapterCommandReady = (env: RuntimeReplica, input?: RuntimeInput): void => {
+  const readiness = getRuntimeCommandReadiness(env, input);
   if (readiness.ready) return;
   const message = `RUNTIME_COMMAND_NOT_READY:${readiness.reason}`;
   if (TERMINAL_COMMAND_READINESS.has(readiness.reason)) {
