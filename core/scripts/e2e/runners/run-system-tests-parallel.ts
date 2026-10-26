@@ -178,6 +178,7 @@ function spawnAnvil(
       '--prune-history',
       '256',
       '--silent',
+      '--disable-default-create2-deployer',
     ],
     {
       stdio: ['ignore', 'pipe', 'pipe'],

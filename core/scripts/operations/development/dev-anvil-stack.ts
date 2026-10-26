@@ -117,6 +117,7 @@ const main = async (): Promise<void> => {
       '--block-gas-limit', '60000000',
       '--code-size-limit', '65536',
       '--prune-history', '256',
+      '--disable-default-create2-deployer',
     ], {
       stdio: args.jsonOnly ? ['ignore', 'ignore', 'inherit'] : ['ignore', 'pipe', 'pipe'],
     });

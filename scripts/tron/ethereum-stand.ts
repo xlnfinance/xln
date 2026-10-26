@@ -22,7 +22,8 @@ const rpcUrl = 'http://127.0.0.1:18546';
 const provider = createXlnJsonRpcProvider(rpcUrl, 31337);
 const node = Bun.spawn(['anvil', '--host', '127.0.0.1', '--port', '18546', '--chain-id', '31337',
   '--mixed-mining', '--block-time', '1', '--block-gas-limit', '60000000', '--code-size-limit', '65536',
-  '--state', `${path}/state.json`, '--preserve-historical-states', '--quiet'], {
+  '--state', `${path}/state.json`, '--preserve-historical-states', '--quiet',
+  '--disable-default-create2-deployer'], {
   cwd: path, stdout: Bun.file(`${path}/node.stdout.log`), stderr: Bun.file(`${path}/node.stderr.log`),
 });
 let stopped = false;

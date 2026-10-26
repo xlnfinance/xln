@@ -134,6 +134,8 @@ run_anvil() {
     --mixed-mining --block-time "$ANVIL_BLOCK_TIME" --block-gas-limit 60000000 --code-size-limit 65536
     --cache-path "$chain_tmp_dir"
     --state "$state_path" --state-interval "$ANVIL_STATE_INTERVAL_SECONDS"
+    # Reload must equal the dump; see scripts/operations/start-anvil.sh.
+    --disable-default-create2-deployer
   )
   if [[ "$DEV_VERBOSE" == "1" ]]; then
     run_owned env TMPDIR="$chain_tmp_dir" ANVIL_TMPDIR="$chain_tmp_dir" "${args[@]}"

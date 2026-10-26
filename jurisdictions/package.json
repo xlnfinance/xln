@@ -17,7 +17,7 @@
     "test:forge:deep": "bun run forge:setup && FOUNDRY_PROFILE=deep forge test --root . --match-path 'test/foundry/*.invariants.t.sol'",
     "deploy": "bun scripts/deploy-chain-matrix.cjs",
     "console": "bunx hardhat console",
-    "node": "anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-gas-limit 60000000 --code-size-limit 65536"
+    "node": "anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-gas-limit 60000000 --code-size-limit 65536 --disable-default-create2-deployer"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^4.2.1",

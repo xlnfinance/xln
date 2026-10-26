@@ -1747,6 +1747,8 @@ const runShard = async (
           '--state',
           anvilStatePath,
           '--silent',
+          // A --state reload must equal the dump; see scripts/operations/start-anvil.sh.
+          '--disable-default-create2-deployer',
         ],
         {
           stdio: ['ignore', 'pipe', 'pipe'],
@@ -1773,6 +1775,7 @@ const runShard = async (
           '--state',
           anvil2StatePath,
           '--silent',
+          '--disable-default-create2-deployer',
         ],
         {
           stdio: ['ignore', 'pipe', 'pipe'],

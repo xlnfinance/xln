@@ -63,6 +63,7 @@ export const startAnvil = async (options: AnvilSpawnOptions): Promise<ManagedAnv
     '--code-size-limit', '65536',
     '--prune-history', '256',
     '--state', join(anvilTmpRoot, 'state.json'),
+    '--disable-default-create2-deployer',
   ], {
     stdio: ['ignore', 'ignore', 'pipe'],
     env: { ...process.env, TMPDIR: anvilTmpRoot },

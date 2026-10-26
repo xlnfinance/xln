@@ -196,6 +196,7 @@ const startManagedAnvil = async (rpcUrl: string, chainId: number): Promise<void>
     '--block-gas-limit', '60000000',
     '--code-size-limit', '65536',
     '--prune-history', '256',
+    '--disable-default-create2-deployer',
   ], {
     stdio: 'ignore',
   });

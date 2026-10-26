@@ -86,6 +86,12 @@ if [ -n "${ANVIL_GENESIS_TIMESTAMP:-}" ]; then
     ANVIL_MINING_ARGS+=(--timestamp "$ANVIL_GENESIS_TIMESTAMP")
 fi
 
+# --disable-default-create2-deployer: Anvil injects the CREATE2 deployer
+# 0x4e59b44847b379578588920cA78FbF26c0B4956C at every process start, before
+# loading --state, but anvil_reset drops it. A dump taken without it would then
+# reload as dump + deployer under the dumped header, so eth_getProof(head) stops
+# proving header.stateRoot and every J watcher fail-stops. Without injection a
+# --state reload equals the dump. No XLN deployment uses that factory.
 # exec makes Anvil the supervised process. A logging pipeline would leave PM2
 # monitoring this shell, so max_memory_restart could never observe Anvil RSS.
 exec anvil --host 0.0.0.0 --port "$ANVIL_PORT" \
@@ -99,4 +105,5 @@ exec anvil --host 0.0.0.0 --port "$ANVIL_PORT" \
       --cache-path "$ANVIL_TMPDIR" \
       --state "$ANVIL_STATE" \
       --state-interval "$ANVIL_STATE_INTERVAL" \
+      --disable-default-create2-deployer \
       >> "$ANVIL_LOG" 2>&1
