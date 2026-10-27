@@ -1,5 +1,6 @@
 import { safeStringify } from '../../../protocol/serialization';
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 import { toPublicJurisdictionsPayload } from '../../../orchestrator/j-select/jurisdictions';
 import { selectPrimaryHubJurisdiction } from '../../../orchestrator/j-select/jurisdiction-select';
@@ -66,7 +67,7 @@ describe('orchestrator public RPC routes', () => {
           name: 'rpc8',
           status: 'active',
           chainId: 31344,
-          rpc: '',
+          rpc: '/rpc8',
           entityProviderDeploymentBlock: 2,
           contracts,
         },
@@ -87,6 +88,38 @@ describe('orchestrator public RPC routes', () => {
     expect(payload.jurisdictions.custom8.rpc).toBe('/rpc8');
     expect(payload.jurisdictions.external.rpc).toBe('https://example.invalid/rpc');
     expect(payload.ephemeralTestnet).toBe(true);
+  });
+
+  const config = {
+    shardJurisdictionsPath: '/tmp/unused-jurisdictions.json',
+    rpc2Url: 'http://127.0.0.1:8546',
+    rpcUrls: { 1: 'http://127.0.0.1:20740', 2: 'http://127.0.0.1:8546' },
+  };
+  const publishRpc = (rpc: string) => JSON.parse(toPublicJurisdictionsPayload(config,
+    safeStringify({ jurisdictions: { test: { rpc } } }))).jurisdictions.test.rpc;
+
+  test.each(['/rpc', '/rpc2', 'https://nile.trongrid.io/jsonrpc', 'http://example.invalid/rpc'])(
+    'preserves the explicit public RPC %s', rpc => {
+      expect(publishRpc(rpc)).toBe(rpc);
+    },
+  );
+
+  test.each(['/rpc3', '/rpc9', '/rpc1', '/rpc2/unsafe', '', 'ftp://example.invalid/rpc',
+    'http://localhost:9999', 'http://127.0.0.1:9999', 'http://[::1]:9999'])(
+    'rejects an unconfigured or invalid RPC %s', rpc => {
+      expect(() => publishRpc(rpc)).toThrow('JURISDICTION_PUBLIC_RPC_UNMAPPED:test:');
+    },
+  );
+
+  test('publishes the repo seed after local provisioning supplies deployment metadata', () => {
+    const raw = readFileSync(new URL('../../../../jurisdictions/jurisdictions.json', import.meta.url), 'utf8');
+    const seed = JSON.parse(raw);
+    // Local deployment metadata comes from provisioning, not from the repo seed.
+    for (const key of ['arrakis', 'tron']) seed.jurisdictions[key].entityProviderDeploymentBlock = 2;
+    const published = JSON.parse(toPublicJurisdictionsPayload(config, safeStringify(seed)));
+    expect(published.jurisdictions.arrakis.rpc).toBe('/rpc');
+    expect(published.jurisdictions.tron.rpc).toBe('/rpc2');
+    expect(published.jurisdictions['tron-nile'].rpc).toBe(seed.jurisdictions['tron-nile'].rpc);
   });
 
   test('rejects malformed jurisdiction JSON instead of publishing it verbatim', () => {

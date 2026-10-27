@@ -7,7 +7,7 @@ import { resolveJurisdictionsJsonPath } from '../../jurisdiction/adapter/jurisdi
 import { computeJurisdictionsNetworkVersion } from '../../jurisdiction/adapter/kernel/jurisdictions-version';
 import { decodeJurisdictionTransport } from '../../jurisdiction/adapter/kernel/jurisdiction-loader';
 import { DEV_CHAIN_IDS } from '../../jurisdiction/adapter/chain-ids';
-import { normalizeLoopbackUrl, toPublicRpcUrl } from '../../network/p2p/loopback-url';
+import { isLoopbackUrl, normalizeLoopbackUrl, toPublicRpcUrl } from '../../network/p2p/loopback-url';
 import { requireBoundaryRecord, requireBoundaryUint } from '../../protocol/boundary-validation';
 import {
   assertCanonicalRpcContractStack,
@@ -243,6 +243,9 @@ const resolvePublicRpcPath = (
   jurisdiction: HubJurisdictionEntry,
 ): string => {
   const rpc = String(jurisdiction.rpc || '').trim();
+  const url = URL.canParse(rpc) ? new URL(rpc) : null;
+  const loopback = isLoopbackUrl(rpc);
+  if (url && (url.protocol === 'http:' || url.protocol === 'https:') && !loopback) return rpc;
   const normalizedRpc = normalizeLoopbackUrl(rpc);
   const rpcUrls = config.rpcUrls ?? {
     1: '',
@@ -251,7 +254,9 @@ const resolvePublicRpcPath = (
   for (const [rawIndex, rawUrl] of Object.entries(rpcUrls)) {
     const index = Number(rawIndex);
     if (!Number.isInteger(index) || index < 1 || index > 8 || !rawUrl) continue;
-    if (normalizedRpc === normalizeLoopbackUrl(rawUrl)) {
+    if (rpc === rpcPublicPath(index) ||
+        (loopback && url && (url.protocol === 'http:' || url.protocol === 'https:') &&
+          normalizedRpc === normalizeLoopbackUrl(rawUrl))) {
       return rpcPublicPath(index);
     }
   }

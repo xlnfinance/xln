@@ -21,6 +21,7 @@ import { discoverFileRestore, discoverTowerRestore } from '../runtime/restore';
 import { defaultTowerUrl, normalizeTowerUrl, saveRecovery } from '../runtime/recovery';
 import { useApp } from '../runtime/store';
 import { bootHostedVault, detectStack, type Stack } from '../runtime/hosted';
+import { settleStackDiscovery } from '../runtime/stack-discovery';
 import {
   FACTOR_PRESETS,
   customWork,
@@ -46,15 +47,21 @@ export function Gate() {
 
   /** The xln stack serving this page (local orchestrator or xln.finance); null on a static host. */
   const [stack, setStack] = useState<Stack | null | undefined>(undefined);
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
+  const [discoveryAttempt, setDiscoveryAttempt] = useState(0);
   useEffect(() => {
     let alive = true;
-    void detectStack().then(found => {
-      if (alive) setStack(found);
+    setStack(undefined);
+    setDiscoveryError(null);
+    void settleStackDiscovery(detectStack()).then(result => {
+      if (!alive) return;
+      setStack(result.stack);
+      setDiscoveryError(result.error);
     });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [discoveryAttempt]);
   const [busyStep, setBusyStep] = useState<string | null>(null);
   const [progress, setProgress] = useState<BrainvaultProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -424,14 +431,25 @@ export function Gate() {
         <p
           className={`gate-stack state ${stack ? 'st-settled' : stack === undefined ? 'st-pending' : 'st-dispute'}`}
           data-testid="gate-stack"
-          data-state={stack === undefined ? 'probing' : stack ? 'online' : 'offline'}
+          data-state={discoveryError ? 'error' : stack === undefined ? 'probing' : stack ? 'online' : 'offline'}
         >
-          {stack === undefined
-            ? 'Looking for a network at this address…'
-            : stack
-              ? `${stack.jurisdiction.name} · Connected`
-              : 'No xln network at this address. Open the wallet from a running stack.'}
+          {discoveryError
+            ? 'Network discovery failed.'
+            : stack === undefined
+              ? 'Looking for a network at this address…'
+              : stack
+                ? `${stack.jurisdiction.name} · Connected`
+                : 'No xln network at this address. Open the wallet from a running stack.'}
         </p>
+
+        {discoveryError ? (
+          <div className="gate-error" role="alert">
+            <p>{discoveryError}</p>
+            <button type="button" className="btn" onClick={() => setDiscoveryAttempt(attempt => attempt + 1)}>
+              Retry
+            </button>
+          </div>
+        ) : null}
 
         {error ? (
           <p className="gate-error" role="alert">

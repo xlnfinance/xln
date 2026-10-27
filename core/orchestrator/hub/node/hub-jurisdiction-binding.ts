@@ -88,6 +88,7 @@ export const attachValidatedJurisdictionAdapter = (env: RuntimeReplica, jadapter
   attachLiveJAdapter(env, activeName, jadapter);
 };
 
+/** Non-local entities have no local binding: /api/debug/reserve callers must pass their exact jurisdiction stack ref. */
 export const requireJAdapterForDebugReserve = (
   env: RuntimeReplica,
   entityId: string,
