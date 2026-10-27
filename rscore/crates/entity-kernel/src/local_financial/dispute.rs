@@ -575,6 +575,22 @@ fn start(
             .as_mut()
             .expect("nonempty draft")
             .auto_broadcast_draft = true;
+        // A latch resumes only after a sent receipt; an idle draft needs an
+        // actual self-output. Resident output binding validates its signer
+        // against the current frame authority before Runtime publication.
+        if state.j_batch_state.as_ref().unwrap().sent_batch.is_none() {
+            routed_outputs.push(LocalEntityOutput {
+                entity_id: state.entity_id.clone(),
+                target_signer_id: None,
+                entity_txs: vec![crate::LocalEntityOutputTx::Projected(
+                    crate::CanonicalEntityTx::from_frame_projection(
+                        crate::EntityTxKind::JBroadcast,
+                        CanonicalValue::Object(Vec::new()),
+                    )
+                    .map_err(|error| invalid("disputeStart", error.to_string()))?,
+                )],
+            });
+        }
         crate::schedule_hook(
             state
                 .crontab
@@ -2037,6 +2053,7 @@ mod tests {
             });
         state.j_batch_state = Some(batch);
         let mut mutations = Vec::new();
+        let mut outputs = Vec::new();
         let tx = || DisputeStartEntityTx {
             counterparty_entity_id: PEER.into(),
             description: None,
@@ -2051,7 +2068,7 @@ mod tests {
             &views,
             None,
             &mut mutations,
-            &mut Vec::new(),
+            &mut outputs,
             &mut Vec::new(),
         )
         .unwrap();
@@ -2066,7 +2083,53 @@ mod tests {
             "wait for clean draft"
         );
         assert!(mutations.is_empty(), "retain dispute_preparing");
-        state.j_batch_state = Some(JBatchState::default());
+        assert!(state.j_batch_state.as_ref().unwrap().auto_broadcast_draft);
+        assert_eq!(
+            outputs.len(),
+            1,
+            "an idle dirty draft needs an actual broadcast output"
+        );
+        assert_eq!(outputs[0].entity_id, OWNER);
+        assert!(matches!(&outputs[0].entity_txs[0],
+            crate::LocalEntityOutputTx::Projected(tx) if tx.kind == EntityTxKind::JBroadcast));
+        let hook = state
+            .crontab
+            .as_ref()
+            .unwrap()
+            .hooks
+            .iter()
+            .find(|(_, hook)| hook.id == format!("dispute-deadline:{PEER}"))
+            .unwrap();
+        assert_eq!(hook.1.trigger_at, 2_000);
+        assert!(
+            outputs[0]
+                .clone()
+                .bind_projected_target_signer(OWNER, "")
+                .is_err()
+        );
+        let bound = outputs[0]
+            .clone()
+            .bind_projected_target_signer(OWNER, "signer")
+            .unwrap();
+        assert_eq!(bound.target_signer_id.as_deref(), Some("signer"));
+        // An existing immutable sent batch owns the next broadcast via its
+        // receipt; emitting another self-output would race that submission.
+        let j_state = state.j_batch_state.as_mut().unwrap();
+        j_state.sent_batch = Some(crate::j_batch::SentJBatch {
+            batch: j_state.batch.clone(),
+            batch_hash: [0x88; 32],
+            encoded_batch: crate::encode_j_batch(&j_state.batch).unwrap(),
+            entity_nonce: 1,
+            first_submitted_at: 1_000,
+            last_submitted_at: 0,
+            submit_attempts: 0,
+            fee_overrides: None,
+            transaction_hash: None,
+            last_failure: None,
+            terminal_failure: None,
+        });
+        let sent = j_state.sent_batch.clone();
+        outputs.clear();
         apply_start(
             &mut state,
             &PaybookChanges::default(),
@@ -2074,20 +2137,13 @@ mod tests {
             &views,
             None,
             &mut mutations,
-            &mut Vec::new(),
+            &mut outputs,
             &mut Vec::new(),
         )
         .unwrap();
-        assert_eq!(
-            state
-                .j_batch_state
-                .as_ref()
-                .unwrap()
-                .batch
-                .dispute_starts
-                .len(),
-            1
-        );
+        assert!(outputs.is_empty());
+        assert!(mutations.is_empty());
+        assert_eq!(state.j_batch_state.as_ref().unwrap().sent_batch, sent);
     }
 
     #[test]

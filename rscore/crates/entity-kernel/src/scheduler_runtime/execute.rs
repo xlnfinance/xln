@@ -100,8 +100,8 @@ pub struct CrontabExecutionContext<'a> {
     /// Overdue loans derived from committed lending state by the caller, in
     /// `(due_at, loan id)` order; never from hooks.
     pub overdue_lending_loans: &'a [crate::OverdueLendingLoan],
-    /// Verified active locks, in derived (deadline, hashlock) order.
-    pub secret_acks_requiring_dispute: &'a [(String, String)],
+    /// Verified active locks with their exact derived trigger, hashlock and peer.
+    pub secret_acks_requiring_dispute: &'a [(u64, String, String)],
     pub dispute_views: &'a BTreeMap<String, xln_rscore_batch::ResidentAccountDisputeView>,
     pub j_batch_state: Option<&'a JBatchState>,
     pub dispute_auto_finalize: bool,
@@ -372,12 +372,7 @@ pub fn execute_crontab(
     } = context;
     validate_scheduled_wake(wake, expected_proposer_signer_id, now)?;
     let mut next = state.clone();
-    let mut due_hooks = next.hooks.due(now).cloned().collect::<Vec<_>>();
-    due_hooks.sort_by(|left, right| {
-        left.trigger_at
-            .cmp(&right.trigger_at)
-            .then_with(|| left.id.cmp(&right.id))
-    });
+    let due_hooks = next.hooks.due(now).cloned().collect::<Vec<_>>();
 
     for hook in &due_hooks {
         cancel_hook(&mut next, &hook.id).map_err(|error| SchedulerError::HookCommitment {
@@ -392,27 +387,54 @@ pub fn execute_crontab(
     let mut counterparties = Vec::new();
     let mut planned = BTreeSet::new();
     let starts = j_batch_state.map_or(0, |value| value.batch.dispute_starts.len());
-    for (hashlock, counterparty) in secret_acks_requiring_dispute {
-        if dispute_views
-            .get(counterparty)
-            .is_some_and(|view| view.active_dispute.is_some())
-        {
-            continue;
-        }
-        if planned.contains(counterparty) {
-            continue;
-        }
-        if starts + counterparties.len() >= crate::j_batch::MAX_DISPUTE_STARTS {
-            commands.push(SchedulerCommand::DeferSecretAck {
-                hashlock: hashlock.clone(),
-            });
-        } else {
-            planned.insert(counterparty.clone());
-            counterparties.push(counterparty.clone());
-        }
+    enum DueDeadline<'a> {
+        SecretAck(&'a String, &'a String),
+        Hook(&'a ScheduledHook),
     }
+    // TS drains derived ACKs and hooks together by (triggerAt, id). Planning
+    // hooks first on ties also reserves their slots before fresh ACK disputes;
+    // separate loops can change both EntityTx order and batch admission.
+    let mut due = due_hooks
+        .iter()
+        .map(|hook| (hook.trigger_at, hook.id.clone(), DueDeadline::Hook(hook)))
+        .chain(
+            secret_acks_requiring_dispute
+                .iter()
+                .map(|(trigger_at, hashlock, peer)| {
+                    (
+                        *trigger_at,
+                        format!("htlc-secret-ack:{hashlock}"),
+                        DueDeadline::SecretAck(hashlock, peer),
+                    )
+                }),
+        )
+        .collect::<Vec<_>>();
+    due.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
     let mut account_envelope_mutations = Vec::new();
-    for hook in &due_hooks {
+    for (_, _, deadline) in due {
+        let hook = match deadline {
+            DueDeadline::SecretAck(hashlock, counterparty) => {
+                if dispute_views
+                    .get(counterparty)
+                    .is_some_and(|view| view.active_dispute.is_some())
+                {
+                    continue;
+                }
+                if planned.contains(counterparty) {
+                    continue;
+                }
+                if starts + counterparties.len() >= crate::j_batch::MAX_DISPUTE_STARTS {
+                    commands.push(SchedulerCommand::DeferSecretAck {
+                        hashlock: hashlock.clone(),
+                    });
+                } else {
+                    planned.insert(counterparty.clone());
+                    counterparties.push(counterparty.clone());
+                }
+                continue;
+            }
+            DueDeadline::Hook(hook) => hook,
+        };
         match &hook.kind {
             ScheduledHookKind::HubRebalanceKick { .. } => {
                 let task = next.tasks.get_mut(&CrontabTaskMethod::HubRebalance).ok_or(
@@ -716,7 +738,7 @@ mod tests {
     #[test]
     fn secret_ack_timeout_does_not_halt_the_runtime() {
         let crontab = state();
-        let pending = vec![("hashlock".to_string(), "upstream".to_string())];
+        let pending = vec![(1_000, "hashlock".to_string(), "upstream".to_string())];
         let result = execute_crontab(
             &crontab,
             &wake(vec![ScheduledWakeJob {
@@ -750,7 +772,7 @@ mod tests {
     #[test]
     fn secret_ack_disputes_preserve_deadline_order_and_defer_overflow() {
         let pending = (0..9)
-            .map(|index| (format!("lock-{index}"), format!("upstream-{index}")))
+            .map(|index| (1_000, format!("lock-{index}"), format!("upstream-{index}")))
             .collect::<Vec<_>>();
         let result = execute_crontab(
             &state(),
@@ -778,7 +800,112 @@ mod tests {
                     hashlock: "lock-8".into()
                 },
                 SchedulerCommand::PrepareSecretAckDisputes {
-                    counterparties: pending[..8].iter().map(|(_, peer)| peer.clone()).collect(),
+                    counterparties: pending[..8]
+                        .iter()
+                        .map(|(_, _, peer)| peer.clone())
+                        .collect(),
+                },
+            ]
+        );
+    }
+
+    fn mixed_dispute_deadlines(
+        queued_starts: usize,
+        hook_at: u64,
+        ack_at: u64,
+    ) -> SchedulerExecution {
+        let mut crontab = state();
+        add_hook(
+            &mut crontab,
+            ScheduledHook {
+                id: "dispute-deadline:pull-peer".into(),
+                trigger_at: hook_at,
+                kind: ScheduledHookKind::DisputeDeadline {
+                    account_id: "pull-peer".into(),
+                },
+            },
+        );
+        let mut preparing = dispute_view(false, 0);
+        preparing.status = "dispute_preparing".into();
+        preparing.active_dispute = None;
+        let views = BTreeMap::from([("pull-peer".into(), preparing)]);
+        let pending = vec![(ack_at, "hashlock".to_string(), "ack-peer".to_string())];
+        let mut batch = JBatchState::default();
+        for index in 0..queued_starts {
+            let proof = final_dispute([index as u8; 32]);
+            batch
+                .batch
+                .dispute_starts
+                .push(crate::j_batch::InitialDisputeProof {
+                    counterentity: proof.counterentity,
+                    nonce: proof.final_nonce,
+                    proposer_is_left: true,
+                    proofbody_hash: proof.initial_proofbody_hash,
+                    watch_seed: proof.final_proofbody.watch_seed,
+                    initial_proofbody: proof.final_proofbody,
+                    sig: proof.sig,
+                    starter_initial_arguments: Vec::new(),
+                    starter_counter_arguments: Vec::new(),
+                    starter_counter_proof_commitment: [0; 32],
+                });
+        }
+        execute_crontab(
+            &crontab,
+            &wake(vec![ScheduledWakeJob {
+                kind: ScheduledWakeJobKind::Hook,
+                id: "dispute-deadline:pull-peer".into(),
+                due_at: 1_000,
+            }]),
+            CrontabExecutionContext {
+                expected_proposer_signer_id: "HUB",
+                now: 1_000,
+                expired_htlc_locks: &[],
+                overdue_lending_loans: &[],
+                secret_acks_requiring_dispute: &pending,
+                dispute_views: &views,
+                j_batch_state: Some(&batch),
+                dispute_auto_finalize: true,
+            },
+        )
+        .expect("mixed deadline wake")
+    }
+
+    #[test]
+    fn mixed_dispute_deadlines_use_trigger_at_then_id() {
+        // Mirrors the TS one-wake counterexample; the hook id sorts first.
+        assert_eq!(
+            mixed_dispute_deadlines(0, 1_000, 1_000).commands,
+            vec![SchedulerCommand::PrepareSecretAckDisputes {
+                counterparties: vec!["pull-peer".into(), "ack-peer".into()],
+            },]
+        );
+    }
+
+    #[test]
+    fn mixed_dispute_deadlines_use_time_before_id() {
+        for (hook_at, ack_at, peers) in [
+            (1_000, 999, vec!["ack-peer".into(), "pull-peer".into()]),
+            (999, 1_000, vec!["pull-peer".into(), "ack-peer".into()]),
+        ] {
+            assert_eq!(
+                mixed_dispute_deadlines(0, hook_at, ack_at).commands,
+                vec![SchedulerCommand::PrepareSecretAckDisputes {
+                    counterparties: peers
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn mixed_dispute_deadlines_count_hook_prepare_before_secret_ack() {
+        assert_eq!(
+            mixed_dispute_deadlines(7, 1_000, 1_000).commands,
+            vec![
+                SchedulerCommand::DeferSecretAck {
+                    hashlock: "hashlock".into()
+                },
+                SchedulerCommand::PrepareSecretAckDisputes {
+                    counterparties: vec!["pull-peer".into()]
                 },
             ]
         );

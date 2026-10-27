@@ -2256,7 +2256,11 @@ fn apply_scheduled_wake(
             ScheduledHookKind::DisputeDeadline { account_id } => Some(account_id.clone()),
             _ => None,
         })
-        .chain(due_secret_acks.iter().map(|(_, account)| account.clone()))
+        .chain(
+            due_secret_acks
+                .iter()
+                .map(|(_, _, account)| account.clone()),
+        )
         .filter(|account| state.known_accounts.contains(account))
         .collect::<BTreeSet<_>>();
     let dispute_views = accounts
@@ -2279,7 +2283,7 @@ fn apply_scheduled_wake(
         .collect::<BTreeMap<_, _>>();
     let due_secret_acks = due_secret_acks
         .into_iter()
-        .filter(|(_, peer)| {
+        .filter(|(_, _, peer)| {
             dispute_views
                 .get(peer)
                 .is_some_and(|view| view.status == "active" && view.active_dispute.is_none())
@@ -2290,7 +2294,7 @@ fn apply_scheduled_wake(
     // writes included). A deadline whose lock is still active needs a
     // dispute; one whose lock is gone just terminates the route.
     let mut requested_locks = BTreeMap::<AccountId, Vec<String>>::new();
-    for (hashlock, counterparty) in &due_secret_acks {
+    for (_, hashlock, counterparty) in &due_secret_acks {
         if state.known_accounts.contains(counterparty) {
             requested_locks
                 .entry(account_id(counterparty)?)
@@ -2308,12 +2312,12 @@ fn apply_scheduled_wake(
         .map(|(account, lock_id)| (account_text(*account), lock_id.clone()))
         .collect::<BTreeSet<_>>();
     let mut secret_acks_requiring_dispute = Vec::new();
-    for (hashlock, counterparty) in due_secret_acks {
+    for (trigger_at, hashlock, counterparty) in due_secret_acks {
         if !state.known_accounts.contains(&counterparty) {
             continue;
         }
         if active_text.contains(&(counterparty.clone(), hashlock.clone())) {
-            secret_acks_requiring_dispute.push((hashlock, counterparty));
+            secret_acks_requiring_dispute.push((trigger_at, hashlock, counterparty));
         } else {
             terminate_route_in_frame(state, paybook, &hashlock)?;
         }

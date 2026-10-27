@@ -8,7 +8,9 @@ import { encodeSignedHanko } from '../../../hanko/codec';
 import { resolveHankoBoardDelays } from '../../../hanko/claims';
 import { createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 import { generateLazyEntityId } from '../../../entity/factory';
-import { handleDisputeFinalize, handleDisputeStart } from '../../../entity/tx/handlers/dispute';
+import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from '../../../entity/tx/handlers/dispute';
+import { handleJBroadcast } from '../../../entity/tx/handlers/j-batch/j-broadcast';
+import { applyHankoBatchProcessedEvent } from '../../../entity/tx/j-events-batch';
 import { initJBatch } from '../../../jurisdiction/machine/batch';
 import { addr, entity, installJurisdictions, makeJurisdiction, makeState, openWritableEntityAccounts, putTestAccountPull } from '../../helpers/cross-j';
 
@@ -77,20 +79,61 @@ test('review 3: Pull start waits for a clean draft and retries without losing pr
   expect(result.newState.accounts.get(peer)!.disputePrepare).toEqual(account.disputePrepare);
   expect(result.newState.jBatchState!.batch.disputeStarts).toHaveLength(0);
   expect(result.newState.jBatchState!.batch.reserveToReserve).toHaveLength(1);
-  const hook = [...result.newState.crontabState!.hooks.values()][0]!;
+  expect(result.newState.jBatchState!.autoBroadcastDraft).toBe(true);
+  expect(result.outputs).toEqual([{
+    entityId: owner, signerId: addr('31'), entityTxs: [{ type: 'j_broadcast', data: {} }],
+  }]);
+  // The flag alone cannot drain an idle entity. Execute the emitted broadcast
+  // and its exact finalized receipt; never replace the draft to simulate progress.
+  result.newState.leaderState = { view: 0, activeValidatorId: addr('31'), changedAtHeight: 0 };
+  const broadcastTx = result.outputs[0]!.entityTxs![0]!;
+  if (broadcastTx.type !== 'j_broadcast') throw new Error('expected j_broadcast');
+  const broadcast = await handleJBroadcast(result.newState, broadcastTx, env);
+  expect(broadcast.jOutputs).toHaveLength(1);
+  expect(broadcast.newState.jBatchState!.batch.reserveToReserve).toHaveLength(0);
+  const sent = broadcast.newState.jBatchState!.sentBatch!;
+  expect(sent.batch.reserveToReserve).toHaveLength(1);
+  await applyHankoBatchProcessedEvent({
+    newState: broadcast.newState, blockNumber: 1,
+    event: { type: 'HankoBatchProcessed', data: { entityId: owner, batchHash: sent.batchHash, nonce: sent.entityNonce } },
+  });
+  expect(broadcast.newState.jBatchState!.sentBatch).toBeUndefined();
+  const hook = [...broadcast.newState.crontabState!.hooks.values()][0]!;
   expect(hook).toMatchObject({ type: 'dispute_deadline', triggerAt: 121_000, data: { accountId: peer } });
   const { handleScheduledWakeEntityTx } = await import('../../../entity/tx/handlers/system/scheduled-wake');
-  result.newState.timestamp = 121_000;
-  result.newState.leaderState = { view: 0, activeValidatorId: addr('31'), changedAtHeight: 0 };
-  const wake = await handleScheduledWakeEntityTx(env, result.newState, {
+  broadcast.newState.timestamp = 121_000;
+  const wake = await handleScheduledWakeEntityTx(env, broadcast.newState, {
     type: 'scheduledWake', data: { version: 1, proposerSignerId: addr('31'), dueAt: 121_000,
       jobs: [{ kind: 'hook', id: hook.id, dueAt: 121_000 }] },
   }, false);
-  expect(wake.approvedEntityTxs?.some(tx => tx.type === 'prepareDispute')).toBe(true);
-  result.newState.jBatchState = initJBatch();
-  const retried = await handleDisputeStart(result.newState, tx, env);
+  const retryTx = wake.approvedEntityTxs?.find(tx => tx.type === 'prepareDispute');
+  expect(retryTx).toBeDefined();
+  if (!retryTx || retryTx.type !== 'prepareDispute') throw new Error('expected prepareDispute');
+  const retried = await handlePrepareDispute(wake.newState, retryTx, env);
   expect(retried.newState.jBatchState!.batch.disputeStarts).toHaveLength(1);
   expect(retried.newState.accounts.get(peer)!.status).toBe('disputed');
+});
+
+test('review 3: dirty Pull drafts require a signer and wait behind an immutable sent batch', async () => {
+  const { env, state, account } = setup();
+  account.status = 'dispute_preparing';
+  account.disputePrepare = { startedAt: 1000, readyAfter: 1000, reason: 'test' };
+  state.jBatchState = initJBatch();
+  const op = { receivingEntity: entity('55'), tokenId: 1, amount: 1n };
+  state.jBatchState.batch.reserveToReserve.push(op);
+  const tx = { type: 'disputeStart' as const, data: { counterpartyEntityId: peer } };
+  state.config.validators = [];
+  await expect(handleDisputeStart(state, tx, env)).rejects.toThrow('DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING');
+  state.config.validators = [addr('31')];
+  state.leaderState = { view: 0, activeValidatorId: addr('31'), changedAtHeight: 0 };
+  const broadcast = await handleJBroadcast(state, { type: 'j_broadcast', data: {} }, env);
+  broadcast.newState.jBatchState!.batch.reserveToReserve.push(op);
+  const sent = broadcast.newState.jBatchState!.sentBatch;
+  const result = await handleDisputeStart(broadcast.newState, tx, env);
+  expect(result.outputs).toEqual([]);
+  expect(result.newState.jBatchState!.sentBatch).toEqual(sent);
+  expect(result.newState.jBatchState!.autoBroadcastDraft).toBe(true);
+  expect(result.newState.accounts.get(peer)!.disputePrepare).toEqual(account.disputePrepare);
 });
 
 test('review 4: TRON appointments are refused by builder and tower admission', async () => {

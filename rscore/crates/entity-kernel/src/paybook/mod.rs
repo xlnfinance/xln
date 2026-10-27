@@ -110,7 +110,7 @@ impl PaybookChanges {
         state: &EntityStateSlice,
         now: u64,
         lock_deadlines: &BTreeMap<(String, String), u64>,
-    ) -> Result<Vec<(String, String)>, EntityKernelError> {
+    ) -> Result<Vec<(u64, String, String)>, EntityKernelError> {
         let mut due = Vec::new();
         let mut consider = |entry: &PaybookEntry| {
             let (Some(counterparty), Some(deadline), Some(started_at)) = (
@@ -145,10 +145,7 @@ impl PaybookChanges {
             consider(entry);
         }
         due.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
-        Ok(due
-            .into_iter()
-            .map(|(_, hashlock, counterparty)| (hashlock, counterparty))
-            .collect())
+        Ok(due)
     }
 
     pub(crate) fn into_mutations(
@@ -1161,7 +1158,7 @@ mod key_tests {
             changes
                 .due_secret_acks(&state, deadline, &BTreeMap::new())
                 .expect("due"),
-            vec![(hashlock.clone(), "upstream".to_string())]
+            vec![(deadline, hashlock.clone(), "upstream".to_string())]
         );
     }
 

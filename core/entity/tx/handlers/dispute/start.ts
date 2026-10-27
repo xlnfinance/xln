@@ -49,6 +49,20 @@ const applyStartEvidenceBoundary = <T>(operation: () => T): T => {
   }
 };
 
+// A latch only resumes after a sent receipt. An idle dirty draft needs a
+// signed self-output now, or its retry hook waits forever on the same draft.
+const requestPullDraftBroadcast = (state: EntityState, outputs: EntityInput[]): void => {
+  state.jBatchState!.autoBroadcastDraft = true;
+  if (state.jBatchState!.sentBatch) return;
+  const signerId = state.config.validators[0];
+  if (!signerId) throw haltRuntimeFailure("DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING", 'DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING');
+  outputs.push({
+    entityId: state.entityId,
+    signerId,
+    entityTxs: [{ type: 'j_broadcast', data: {} }],
+  });
+};
+
 const queuePullDisputeRegistrations = (
   state: EntityState,
   tx: StartTx,
@@ -80,15 +94,7 @@ const queuePullDisputeRegistrations = (
         : `⏳ Cross-j claim ${sourceClaim.routeId}: start/reveal held behind immutable jBatch`,
     );
   }
-  state.jBatchState!.autoBroadcastDraft = true;
-  if (state.jBatchState!.sentBatch) return;
-  const signerId = state.config.validators[0];
-  if (!signerId) throw haltRuntimeFailure("DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING", 'DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING');
-  outputs.push({
-    entityId: state.entityId,
-    signerId,
-    entityTxs: [{ type: 'j_broadcast', data: {} }],
-  });
+  requestPullDraftBroadcast(state, outputs);
 };
 
 const queueDisputeStart = (
@@ -109,7 +115,7 @@ const queueDisputeStart = (
   // account's scheduled start must defer, never halt or leave preparation.
   if (hasPulls && batchOpCount(batch) !== 0) {
     addMessage(state, '⏳ Pull dispute start waiting for an empty jBatch draft');
-    batchState.autoBroadcastDraft = true;
+    requestPullDraftBroadcast(state, outputs);
     state.crontabState ??= initCrontab();
     scheduleHook(state.crontabState, {
       id: `dispute-deadline:${tx.data.counterpartyEntityId.toLowerCase()}`,

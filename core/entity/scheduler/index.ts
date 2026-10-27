@@ -147,7 +147,8 @@ export async function executeCrontab(
   // ── 1. Scheduled hooks (setTimeout-like, fires once) plus the deadlines
   // derived from Account locks and paybook entries, drained together in
   // (triggerAt, id) order so same-tick deadlines never depend on how they
-  // were recorded.
+  // were recorded. A dispute-deadline prepare must precede a same-time
+  // secret ACK and count against its start limit; separate drains diverge.
   const dueHooks: Array<ScheduledHook | DerivedDeadline> = collectDerivedDeadlines(replica.state, now);
   if (crontabState.hooks && crontabState.hooks.size > 0) {
     for (const [id, hook] of crontabState.hooks) {
