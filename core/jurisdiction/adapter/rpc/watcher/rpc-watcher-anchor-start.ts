@@ -1,3 +1,4 @@
+import { emptyDisputeReferences, referencesThrough } from '../../events/dispute/reference-state';
 import type { EntityReplica } from '../../../../entity/types';
 import type { RuntimeReplica } from '../../../../runtime/types';
 import type { EntityTx } from '../../../../types/entity-tx';
@@ -89,7 +90,9 @@ export const startWatcherFromStorageAnchor = async (request: AnchorStartRequest)
       return false;
     }
     session.pendingAnchor = null;
-    delete session.disputeReferences;
+    session.disputeReferences = referencesThrough(
+      request.watcherReplica.disputeReferences ?? emptyDisputeReferences(), pending.height,
+    );
     session.lastSyncedBlock = Math.max(session.lastSyncedBlock, pending.height);
     request.emitDebug({ event: 'j_watch_anchor_committed', height: pending.height, replicas: pending.replicaKeys });
     return false;

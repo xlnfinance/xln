@@ -123,6 +123,7 @@ struct LiveJWatcher {
     poll_interval: Duration,
     next_poll: Instant,
     pending_scan: Option<PendingJScan>,
+    reference_recovery: Option<(u64, Option<u64>)>,
     startup_target: u64,
     authenticated_through: u64,
 }
@@ -153,7 +154,7 @@ impl ResidentRuntimeService {
                 ingress: ingress.runtime_id().into(),
             });
         }
-        let j_watchers = live_j_watchers(replica, &BTreeSet::new())?;
+        let j_watchers = live_j_watchers(&mut processor, &BTreeSet::new())?;
         processor.attach_inbound_sessions(ingress.sessions());
         // A crash can happen after fsync but before the best-effort socket
         // write. There is intentionally no transport receipt or delivered
@@ -220,7 +221,7 @@ impl ResidentRuntimeService {
                 ingress: ingress.runtime_id().into(),
             });
         }
-        let j_watchers = live_j_watchers(replica, &BTreeSet::new())?;
+        let j_watchers = live_j_watchers(&mut processor, &BTreeSet::new())?;
         processor.attach_inbound_sessions(ingress.sessions());
         let retried = processor.retry_publication()?;
         let mut deferred_publication = DeferredPublicationTelemetry::default();
@@ -500,11 +501,83 @@ impl ResidentRuntimeService {
             })
             .collect();
         self.j_watchers
-            .extend(live_j_watchers(self.processor.replica()?, &watched)?);
+            .extend(live_j_watchers(&mut self.processor, &watched)?);
         let count = self.j_watchers.len();
         let mut selected = None;
         for _ in 0..count {
             let mut watcher = self.j_watchers.pop_front().expect("bounded watcher queue");
+            if watcher.reference_recovery.is_some() {
+                if Instant::now() < watcher.next_poll {
+                    self.j_watchers.push_back(watcher);
+                    continue;
+                }
+                let (state, local) = self
+                    .processor
+                    .replica()?
+                    .entity_slot(watcher.config.entity_id.as_bytes(), &watcher.signer_id)
+                    .ok_or_else(|| {
+                        ResidentRuntimeServiceError::JWatcher("ENTITY_SLOT_MISSING".into())
+                    })?;
+                let height = restored_entity_j_height(local.replica_metadata(), &state.entity)?;
+                let hash = committed_cursor_hash(local.replica_metadata(), &state.entity, height)?;
+                let rewind = crate::j_watcher::reconcile_recovery_frontier(
+                    &watcher.rpc,
+                    &watcher.cursor,
+                    hash.map(|hash| (height, hash)),
+                )
+                .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?;
+                if let Some((height, hash)) = rewind {
+                    self.pending_runtime_txs
+                        .push_back(RuntimeTx::RewindJHistory(crate::RewindJHistory {
+                            entity_id: *watcher.config.entity_id.as_bytes(),
+                            signer_id: watcher.signer_id.clone(),
+                            jurisdiction_ref: watcher.jurisdiction_ref.clone(),
+                            conflicting_height: height,
+                            conflicting_block_hash: hash,
+                        }));
+                    let report = self
+                        .process_entity_inputs_at(Vec::new(), None, wall_clock_ms()?)?
+                        .ok_or_else(|| {
+                            ResidentRuntimeServiceError::JWatcher(
+                                "REWIND_FRAME_NOT_PRODUCED".into(),
+                            )
+                        })?;
+                    self.sync_committed()?.ok_or_else(|| {
+                        ResidentRuntimeServiceError::JWatcher("FSYNC_REPORT_MISSING".into())
+                    })?;
+                    self.j_watchers.push_back(watcher);
+                    return Ok(Some(report));
+                }
+            }
+            // Retry an unfinalized page race from the certified anchor. Nothing
+            // is published until every watcher sharing this cursor has recovered.
+            if let Some((durable, start)) = watcher.reference_recovery {
+                match crate::j_watcher::recover_dispute_references(
+                    &watcher.rpc,
+                    &watcher.config,
+                    &watcher.cursor,
+                    durable,
+                    start,
+                ) {
+                    Ok(cursor) => {
+                        watcher.cursor = cursor;
+                        watcher.reference_recovery = None;
+                    }
+                    Err(crate::j_watcher::JWatcherError::RangeChanged(height)) => {
+                        eprintln!(
+                            "J_DISPUTE_REFERENCE_RETRY:{}:{height}",
+                            watcher.depository_text
+                        );
+                        watcher.next_poll = Instant::now() + watcher.poll_interval;
+                        self.j_watchers.push_back(watcher);
+                        continue;
+                    }
+                    Err(error) => {
+                        return Err(ResidentRuntimeServiceError::JWatcher(error.to_string()));
+                    }
+                }
+            }
+
             if let Some(prefix_input) = crate::machine::build_pending_local_j_prefix_entity_input(
                 self.processor.replica()?,
                 watcher.config.entity_id.as_bytes(),
@@ -564,11 +637,18 @@ impl ResidentRuntimeService {
                 watcher.config.chain_id,
                 &watcher.depository_text,
             )?;
+            let recovery_pending = self.j_watchers.iter().any(|other| {
+                other.config.chain_id == watcher.config.chain_id
+                    && other.config.depository_address == watcher.config.depository_address
+                    && other.reference_recovery.is_some()
+            });
             if let Some(cursor_height) = certified_watcher_cursor_candidate(
                 watcher.cursor.scanned_through,
                 certified_height,
                 durable_height,
-            ) {
+            )
+            .filter(|_| !recovery_pending)
+            {
                 // The shared cursor covers every served Entity. Its evidence must
                 // include all per-Entity watchers before any one advances it.
                 let mut references = watcher.cursor.dispute_references.through(cursor_height);
@@ -1839,10 +1919,58 @@ fn submit_committed_governance_attempt(
     }
 }
 
+// Read current Account heads once per new Entity watcher; never historical frames.
+// Only start coordinates cross the worker boundary, not Account replicas.
+fn watcher_dispute_starts(
+    processor: &mut DurableRuntimeProcessor,
+    watched: &BTreeSet<([u8; 32], String)>,
+) -> Result<BTreeMap<([u8; 32], String), Option<u64>>, ResidentRuntimeServiceError> {
+    let requests = processor
+        .replica()?
+        .state
+        .e_replicas
+        .iter()
+        .filter(|(key, _)| !watched.contains(&(key.entity_id, key.signer_id.clone())))
+        .map(|(key, state)| {
+            let ids = state
+                .entity
+                .known_accounts
+                .iter()
+                .map(|id| {
+                    xln_rscore_engine::EntityId::parse(id)
+                        .map(|id| AccountId::from_bytes(*id.as_bytes()))
+                        .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((key.clone(), ids))
+        })
+        .collect::<Result<Vec<_>, ResidentRuntimeServiceError>>()?;
+    let mut starts = BTreeMap::new();
+    for (key, ids) in requests {
+        let rows = processor.read_account_views(&key, ids, |account| {
+            Ok(account
+                .replica()
+                .envelope()
+                .field("activeDispute")
+                .and_then(|value| canonical_field(value, "observedBlockNumber"))
+                .cloned()
+                .unwrap_or(xln_rscore_protocol::CanonicalValue::Null))
+        })?;
+        let start = rows
+            .iter()
+            .filter_map(|(_, value)| canonical_u64(Some(value)))
+            .min();
+        starts.insert((key.entity_id, key.signer_id), start);
+    }
+    Ok(starts)
+}
+
 fn live_j_watchers(
-    replica: &crate::RuntimeReplica,
+    processor: &mut DurableRuntimeProcessor,
     watched: &BTreeSet<([u8; 32], String)>,
 ) -> Result<VecDeque<LiveJWatcher>, ResidentRuntimeServiceError> {
+    let starts = watcher_dispute_starts(processor, watched)?;
+    let replica = processor.replica()?;
     let mut candidates = Vec::new();
     for (entity_key, entity_replica) in &replica.e_replicas {
         if watched.contains(&(entity_key.entity_id, entity_key.signer_id.clone())) {
@@ -2019,25 +2147,19 @@ fn live_j_watchers(
             poll_interval: Duration::from_millis(block_delay.ceil().min(u64::MAX as f64) as u64),
             next_poll: Instant::now(),
             pending_scan: None,
+            reference_recovery: Some((
+                durable_watcher_cursor_height(replica, chain_id, &depository_text)?,
+                starts
+                    .get(&(entity_key.entity_id, entity_key.signer_id.clone()))
+                    .copied()
+                    .flatten(),
+            )),
             startup_target: 0,
             authenticated_through: 0,
         });
     }
     let mut targets = BTreeMap::new();
     for watcher in &mut candidates {
-        // Recovery must precede shared-cursor publication and forward polling.
-        let durable_height = durable_watcher_cursor_height(
-            replica,
-            watcher.config.chain_id,
-            &watcher.depository_text,
-        )?;
-        watcher.cursor = crate::j_watcher::recover_dispute_references(
-            &watcher.rpc,
-            &watcher.config,
-            &watcher.cursor,
-            durable_height,
-        )
-        .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?;
         let stack = (watcher.config.chain_id, watcher.config.depository_address);
         watcher.startup_target = match targets.get(&stack) {
             Some(target) => *target,
@@ -2241,6 +2363,18 @@ fn committed_entity_j_height(
     metadata: &Value,
     state: &xln_rscore_entity_kernel::EntityStateSlice,
 ) -> Result<u64, ResidentRuntimeServiceError> {
+    if restored_entity_j_height(metadata, state)? < state.last_finalized_j_height {
+        return Err(ResidentRuntimeServiceError::JWatcher(
+            "ENTITY_CURSOR_BELOW_FINALITY".into(),
+        ));
+    }
+    Ok(state.last_finalized_j_height)
+}
+
+fn restored_entity_j_height(
+    metadata: &Value,
+    state: &xln_rscore_entity_kernel::EntityStateSlice,
+) -> Result<u64, ResidentRuntimeServiceError> {
     match metadata
         .get("jHistory")
         .and_then(|history| history.get("scannedThroughHeight"))
@@ -2337,6 +2471,17 @@ fn committed_cursor_hash(
     if height == 0 {
         return Ok(None);
     }
+    if state.last_finalized_j_height == height
+        && let Some(finality) = state.j_history_finality.as_ref()
+    {
+        let json = crate::tagged_json_from_canonical_value(finality)
+            .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?;
+        if let Some(hash) = json.get("tipBlockHash").and_then(Value::as_str) {
+            return parse_digest(hash).map(Some).ok_or_else(|| {
+                ResidentRuntimeServiceError::JWatcher("CURSOR_HASH_INVALID".into())
+            });
+        }
+    }
     if let Some(history) = metadata.get("jHistory") {
         if history.get("scannedThroughHeight").and_then(Value::as_u64) == Some(height)
             && let Some(hash) = history.get("tipBlockHash").and_then(Value::as_str)
@@ -2356,17 +2501,6 @@ fn committed_cursor_hash(
                     .flatten()
             })
         {
-            return parse_digest(hash).map(Some).ok_or_else(|| {
-                ResidentRuntimeServiceError::JWatcher("CURSOR_HASH_INVALID".into())
-            });
-        }
-    }
-    if state.last_finalized_j_height == height
-        && let Some(finality) = state.j_history_finality.as_ref()
-    {
-        let json = crate::tagged_json_from_canonical_value(finality)
-            .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?;
-        if let Some(hash) = json.get("tipBlockHash").and_then(Value::as_str) {
             return parse_digest(hash).map(Some).ok_or_else(|| {
                 ResidentRuntimeServiceError::JWatcher("CURSOR_HASH_INVALID".into())
             });
@@ -2824,8 +2958,11 @@ mod tests {
             "scannedThroughHeight": 29, "tipBlockHash": hash,
             "blockHashes": {"__xlnType":"Map", "value":[[29, hash]]}
         }});
-        let state =
+        let mut state =
             xln_rscore_entity_kernel::EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 0);
+        state.last_finalized_j_height = 29;
+        state.j_history_finality =
+            Some(crate::canonical_value_from_tagged_json(&json!({"tipBlockHash":hash})).unwrap());
         let height = committed_entity_j_height(&metadata, &state).unwrap();
         assert_eq!(height, 29);
         assert_eq!(
@@ -2834,6 +2971,16 @@ mod tests {
         );
         // A shared cursor of 24 is not permission to invent an old hash.
         assert!(committed_cursor_hash(&metadata, &state, 24).is_err());
+    }
+
+    #[test]
+    fn restart_recovery_target_excludes_unfinalized_local_42_above_certified_41() {
+        let metadata = json!({"jHistory": {"scannedThroughHeight": 42,
+            "tipBlockHash": format!("0x{}", "aa".repeat(32))}});
+        let mut state =
+            xln_rscore_entity_kernel::EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 0);
+        state.last_finalized_j_height = 41;
+        assert_eq!(committed_entity_j_height(&metadata, &state).unwrap(), 41);
     }
 
     #[test]

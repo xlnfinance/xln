@@ -174,6 +174,7 @@ const handlePollFailure = (
     if (transportUnavailable) {
       session.rpcCooldown.backoffMs = nextWatcherRpcBackoffMs(session.rpcCooldown.backoffMs, false);
     }
+    session.lastCanonicalAuditAtMs = 0;
     handleTransientFailure(services, session, trace, message, error);
     return;
   }

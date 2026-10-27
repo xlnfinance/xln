@@ -16,6 +16,8 @@ type RecoveryRequest = {
   fromBlock: number;
   toBlock: number;
   tipBlockHash: string;
+  targetFinalized: boolean;
+  isCancelled?(): boolean;
   readRange(from: number, to: number): Promise<AuthenticatedReceiptRange>;
 };
 
@@ -23,14 +25,16 @@ type RecoveryRequest = {
  * that gap before publishing a cursor: hash-valid bytes alone cannot prove the
  * start coordinate. Link every page to the next and the final certified anchor;
  * remember only, so a finalized hash-only event cannot stall recovery. */
-export const rebuildWatcherDisputeReferences = async (request: RecoveryRequest): Promise<DisputeReferenceState> => {
+export const rebuildWatcherDisputeReferences = async (request: RecoveryRequest): Promise<DisputeReferenceState | null> => {
   const references = structuredClone(request.references);
   let parentHash: string | undefined;
   for (let from = request.fromBlock; from <= request.toBlock; from += 256) {
+    if (request.isCancelled?.()) return null;
     const to = Math.min(from + 255, request.toBlock);
     const range = await request.readRange(from, to);
+    if (request.isCancelled?.()) return null;
     const ingress = prepareAuthenticatedWatcherIngress(range, parentHash
-      ? { height: from - 1, hash: parentHash, finalized: true } : undefined);
+      ? { height: from - 1, hash: parentHash, finalized: false } : undefined);
     for (const log of ingress.logs) {
       if (log.address.toLowerCase() !== request.watcherReplica.contracts?.depository?.toLowerCase()) continue;
       const event = decodeJEventLog(log, iface, { ...log, logIndex: log.index }, 'J_REFERENCE_RECOVERY_DECODE');
@@ -39,7 +43,8 @@ export const rebuildWatcherDisputeReferences = async (request: RecoveryRequest):
     parentHash = ingress.tipBlockHash;
   }
   if (request.fromBlock <= request.toBlock && parentHash !== request.tipBlockHash.toLowerCase()) {
-    throw new Error(`J_DISPUTE_REFERENCE_ANCHOR_MISMATCH:${request.toBlock}`);
+    const code = request.targetFinalized ? 'J_DISPUTE_REFERENCE_ANCHOR_MISMATCH' : 'J_RECEIPT_RANGE_REORG';
+    throw new Error(`${code}:${request.toBlock}`);
   }
   return references;
 };

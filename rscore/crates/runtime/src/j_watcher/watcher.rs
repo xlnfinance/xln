@@ -54,7 +54,25 @@ pub fn poll_finalized_j_events(
     let mut config = config.clone();
     config.erc20_tokens = super::read_erc20_token_registry(rpc, &config.depository_address)?;
     config.validate()?;
-    read_and_authenticate_range(rpc, &config, cursor, from, to)
+    read_and_authenticate_range(rpc, &config, cursor, from, to, true)
+}
+
+/// Audit the certified anchor first, then the restored private suffix. The
+/// caller commits a returned rewind through the Runtime before recovering bytes.
+pub(crate) fn reconcile_recovery_frontier(
+    rpc: &impl JsonRpc,
+    certified: &FinalizedWatcherCursor,
+    frontier: Option<(u64, [u8; 32])>,
+) -> Result<Option<(u64, [u8; 32])>, JWatcherError> {
+    verify_cursor_anchor(rpc, certified)?;
+    let Some((height, expected)) = frontier else {
+        return Ok(None);
+    };
+    if height <= certified.scanned_through {
+        return Ok(None);
+    }
+    let canonical = read_initial_watcher_anchor(rpc, height)?.ok_or(JWatcherError::Cursor)?;
+    Ok((canonical != expected).then_some((height, canonical)))
 }
 
 /// Rebuild the cache lost between Entity certification and shared-cursor fsync.
@@ -66,23 +84,31 @@ pub(crate) fn recover_dispute_references(
     config: &JWatcherConfig,
     anchor: &FinalizedWatcherCursor,
     durable_height: u64,
+    earliest_start: Option<u64>,
 ) -> Result<FinalizedWatcherCursor, JWatcherError> {
+    // Reconcile the certified target BEFORE any receipt recovery, even when
+    // no cache is needed. A scan frontier is never promoted to finality here.
+    config.validate()?;
+    assert_chain_id(rpc, config.chain_id)?;
+    let finalized = anchor.scanned_through <= config.last_finalized_j_height;
+    if anchor.scanned_through > 0 {
+        let block = read_block(rpc, anchor.scanned_through)?;
+        assert_cursor_anchor(anchor, Some(&block), finalized)?;
+    }
     let mut result = anchor.clone();
     result.dispute_references = result.dispute_references.through(anchor.scanned_through);
+    // A fresh storage anchor with no referenced active starts reads zero receipt
+    // blocks. Otherwise N = max(0, anchor - max(durable+1, earliest_start) + 1),
+    // P = ceil(N/256): <= 2(N+P)+2 header reads and all transactions' receipts
+    // in those N blocks; reconciliation adds at most two header reads.
+    // The deployment floor is used only by lazy hash-bound reference refill.
+    let Some(start) = earliest_start else {
+        return Ok(result);
+    };
     if durable_height >= anchor.scanned_through {
         return Ok(result);
     }
-    config.validate()?;
-    assert_chain_id(rpc, config.chain_id)?;
-    let floor = match (durable_height, config.entity_provider_deployment_block) {
-        (0, None) => {
-            return Err(JWatcherError::DisputeReferenceUnavailable(
-                "start-block-missing",
-            ));
-        }
-        (_, floor) => floor.unwrap_or(durable_height + 1),
-    };
-    let from = (durable_height + 1).max(floor);
+    let from = (durable_height + 1).max(start);
     if from > anchor.scanned_through {
         return Ok(result);
     }
@@ -100,11 +126,16 @@ pub(crate) fn recover_dispute_references(
             &cursor,
             start,
             anchor.scanned_through.min(start + 255),
+            false,
         )?
         .cursor;
     }
     if cursor.block_hash != anchor.block_hash {
-        return Err(JWatcherError::FinalizedReorg(anchor.scanned_through));
+        return Err(if finalized {
+            JWatcherError::FinalizedReorg(anchor.scanned_through)
+        } else {
+            JWatcherError::RangeChanged(anchor.scanned_through)
+        });
     }
     Ok(cursor)
 }
@@ -191,11 +222,12 @@ fn read_and_authenticate_range(
     cursor: &FinalizedWatcherCursor,
     from: u64,
     to: u64,
+    parent_finalized: bool,
 ) -> Result<JWatcherPoll, JWatcherError> {
     let anchor = range_anchor(from);
     let before = read_blocks(rpc, anchor, to)?;
     assert_contiguous(&before)?;
-    assert_cursor_anchor(cursor, before.first())?;
+    assert_cursor_anchor(cursor, before.first(), parent_finalized)?;
     let mut references = cursor.dispute_references.clone();
     let batches = authenticate_blocks(rpc, config, &before, from, &mut references)?;
     let after = read_blocks(rpc, anchor, to)?;
@@ -1155,12 +1187,13 @@ fn verify_cursor_anchor(
         return Ok(());
     }
     let block = read_block(rpc, cursor.scanned_through)?;
-    assert_cursor_anchor(cursor, Some(&block))
+    assert_cursor_anchor(cursor, Some(&block), true)
 }
 
 fn assert_cursor_anchor(
     cursor: &FinalizedWatcherCursor,
     block: Option<&RpcBlock>,
+    finalized: bool,
 ) -> Result<(), JWatcherError> {
     if cursor.scanned_through == 0 {
         return Ok(());
@@ -1169,7 +1202,11 @@ fn assert_cursor_anchor(
     if block_height(block)? != cursor.scanned_through
         || Some(fixed_hex::<32>(&block.hash, "blockHash")?) != cursor.block_hash
     {
-        return Err(JWatcherError::FinalizedReorg(cursor.scanned_through));
+        return Err(if finalized {
+            JWatcherError::FinalizedReorg(cursor.scanned_through)
+        } else {
+            JWatcherError::RangeChanged(cursor.scanned_through)
+        });
     }
     Ok(())
 }

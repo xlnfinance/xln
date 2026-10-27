@@ -33,7 +33,8 @@ pub use types::{
 };
 pub use watcher::poll_finalized_j_events;
 pub(crate) use watcher::{
-    capture_startup_target, read_initial_watcher_anchor, recover_dispute_references,
+    capture_startup_target, read_initial_watcher_anchor, reconcile_recovery_frontier,
+    recover_dispute_references,
 };
 pub use xln_rscore_entity_kernel::{FinalizedJEventBatch, JClaimIngress, JReserveUpdate};
 

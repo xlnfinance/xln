@@ -1,4 +1,3 @@
-import { DisputeEvidenceUnavailableError } from '../../kernel/failure';
 import { emptyDisputeReferences, referencesThrough } from '../../events/dispute/reference-state';
 import { readAuthenticatedReceiptRange } from '../../receipt-root';
 import { rebuildWatcherDisputeReferences } from './rpc-watcher-reference-recovery';
@@ -200,17 +199,35 @@ export const runWatcherPoll = async (request: PollRequest): Promise<void> => {
     isPaused: () => isIngressPaused(session.env),
     emitDebug: request.emitDebug,
   })) return;
+  const nextFromBlock = (): number => {
+    const minimumLocalScan = getMinimumScannedSignerJHeight(session.env, watcherReplica);
+    const nextGlobalBlock = session.lastSyncedBlock + 1;
+    return Math.min(nextGlobalBlock, minimumLocalScan === null ? nextGlobalBlock : minimumLocalScan + 1);
+  };
+  if (await auditCanonicalStateWhenDue(request, currentBlock, nextFromBlock(), safeToBlock)) return;
+  if (waitForPendingHistory(request)) return;
   if (!session.disputeReferences) {
     const durableHeight = Number(watcherReplica.blockNumber);
-    if (durableHeight === 0 && session.lastSyncedBlock > 0 && watcherReplica.entityProviderDeploymentBlock === undefined) {
-      throw new DisputeEvidenceUnavailableError('J_DISPUTE_EVENT_START_BLOCK_MISSING');
+    const target = getMinimumCommittedSignerJHeight(session.env, watcherReplica) ?? durableHeight;
+    // Only active starts referenced by committed Entity state need eager recovery.
+    // Fresh storage anchors have none: zero receipt reads regardless of chain age.
+    // Worst case: N = max(0, target - max(durable+1, earliestStart) + 1),
+    // P = ceil(N/256): <= 2(N+P) header reads + all transactions' receipts
+    // in those N blocks. Chain age before the earliest start adds no reads.
+    // Deployment-floor lookup belongs exclusively to lazy, hash-bound refill.
+    let fromBlock = target + 1;
+    for (const replica of session.env.state.eReplicas.values()) {
+      if (!isEntityReplicaRelevantToWatcher(session.env, replica, watcherReplica)) continue;
+      for (const account of replica.state.accounts.values()) {
+        const start = account.activeDispute?.observedBlockNumber;
+        if (start !== undefined) fromBlock = Math.min(fromBlock, Math.max(durableHeight + 1, start));
+      }
     }
-    const fromBlock = Math.max(durableHeight + 1, watcherReplica.entityProviderDeploymentBlock ?? durableHeight + 1);
-    const target = session.lastSyncedBlock;
     const anchor = resolveExpectedParent(session.env, watcherReplica, target);
     if (fromBlock <= target && !anchor.hash) throw new Error(`J_DISPUTE_REFERENCE_ANCHOR_MISSING:${target}`);
     const references = await rebuildWatcherDisputeReferences({
-      env: session.env, watcherReplica, fromBlock, toBlock: target, tipBlockHash: anchor.hash ?? '',
+      env: session.env, watcherReplica, fromBlock, toBlock: target, tipBlockHash: anchor.hash ?? '', targetFinalized: anchor.finalized,
+      isCancelled: () => request.isCancelled() || isIngressPaused(session.env),
       references: referencesThrough(watcherReplica.disputeReferences ?? emptyDisputeReferences(), target),
       readRange: (from, to) => readAuthenticatedReceiptRange(
         (method, params) => services.provider.send(method, params), from, to, [services.depositoryAddress],
@@ -219,14 +236,13 @@ export const runWatcherPoll = async (request: PollRequest): Promise<void> => {
               rpcUrl: services.rpcUrl ?? '', solidifiedThroughHeight: safeHead } }
           : { commitment: 'ethereum-trie' }, services.sendAuthenticatedBatch),
     });
-    if (request.isCancelled() || isIngressPaused(session.env)) return;
+    if (!references || request.isCancelled() || isIngressPaused(session.env)) return;
     session.disputeReferences = references;
+    // The restored private suffix has no durable cache. Reauthenticate it on
+    // the normal scan path before it can become a cursor carrying that cache.
+    session.lastSyncedBlock = Math.min(session.lastSyncedBlock, target);
   }
-  const minimumLocalScan = getMinimumScannedSignerJHeight(session.env, watcherReplica);
-  const nextGlobalBlock = session.lastSyncedBlock + 1;
-  const fromBlock = Math.min(nextGlobalBlock, minimumLocalScan === null ? nextGlobalBlock : minimumLocalScan + 1);
-  if (await auditCanonicalStateWhenDue(request, currentBlock, fromBlock, safeToBlock)) return;
-  if (waitForPendingHistory(request)) return;
+  const fromBlock = nextFromBlock();
   const committedCursor = commitScannedWatcherCursor(session, services);
   if (fromBlock > safeToBlock) {
     // The canonical audit validated the restored local frontier. Report that

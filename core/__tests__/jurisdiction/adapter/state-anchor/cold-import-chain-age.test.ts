@@ -170,6 +170,14 @@ test('a cold import reads a chain-age-independent number of headers and folds th
       await Bun.sleep(100);
       await processJEvents(env);
     }
+    // Exercise the controller poll AFTER j_anchor commits, then restart before
+    // the shared cursor is flushed. Neither path may rebuild deployment history.
+    await coldAdapter.pollNow!();
+    expect(methodCounts.get('eth_getTransactionReceipt') ?? 0).toBe(0);
+    await coldAdapter.stopWatchingAndWait();
+    coldAdapter.startWatching(env);
+    await coldAdapter.pollNow!();
+    expect(methodCounts.get('eth_getTransactionReceipt') ?? 0).toBe(0);
     await coldAdapter.stopWatchingAndWait();
     await coldAdapter.close();
     const headerReads = methodCounts.get('eth_getBlockByNumber') ?? 0;
