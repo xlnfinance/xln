@@ -55,14 +55,15 @@ export const readTourState = (page: Page, hubId: string, entityId?: string) =>
         mempool: account.mempoolCount,
         locks: account.state.locks.size,
         pulls: account.state.pulls?.size ?? 0,
-        tokens: new Map(tokens),
+        // A Map does not survive page.evaluate serialization; rebuild it in Node.
+        tokens,
         claims: [...(account.state.subcontracts ?? [])].flatMap(([id, claim]) =>
           'creditorIsLeft' in claim ? [{ id, kind: claim.kind, principal: claim.principal }] : [],
         ),
       };
     },
     { peer: hubId, selectedOwner: entityId ?? '' },
-  );
+  ).then(state => ({ ...state, tokens: new Map(state.tokens) }));
 
 export async function settledTourState(page: Page, hubId: string, label: string) {
   await expect
