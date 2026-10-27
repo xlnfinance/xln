@@ -321,13 +321,19 @@ async function openAfterJCatchup(
     // A lock or a replacement session detaches this env; its catch-up then ends silently.
     const owns = (): boolean => getEmbeddedEnv() === env;
     const probe = createChainCatchupProbe(xln, env, targets, nameOf, useApp.getState().setChainSync, owns);
-    await openAfterChainCatchup(xln, env, probe, owns, poll =>
-      waitFor(poll, 'chain catch-up', Number.POSITIVE_INFINITY, CHAIN_CATCHUP_POLL_MS),
+    await openAfterChainCatchup(
+      xln,
+      env,
+      probe,
+      owns,
+      poll => waitFor(poll, 'chain catch-up', Number.POSITIVE_INFINITY, CHAIN_CATCHUP_POLL_MS),
+      () => {
+        if (!xln.getP2P(env)) {
+          xln.startP2P(env, { signerId: String(env.runtimeId), relayUrls: [stack.relayUrl], gossipPollMs: 2_000 });
+        }
+      },
     );
     if (!owns()) return;
-    if (!xln.getP2P(env)) {
-      xln.startP2P(env, { signerId: String(env.runtimeId), relayUrls: [stack.relayUrl], gossipPollMs: 2_000 });
-    }
     await openFirstHubAccount(xln, env, stack, entityId, signerId, owns);
   } catch (error) {
     if (isChainCatchupCancelled(error) || getEmbeddedEnv() !== env) return;

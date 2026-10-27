@@ -35,13 +35,19 @@ test('a stalled chain catch-up is shown and keeps the fence closed until progres
     authenticatedThrough: through,
     replicas: [],
   });
+  // Opening the fence wakes the writer; record whether a transport existed then.
+  const transportAtOpen: boolean[] = [];
+  let transportStarted = false;
   const xln = {
     // A stalled-but-not-throwing RPC: the watcher simply stops advancing.
     getJWatcherDrainStatus: () => status(),
     isJWatcherDrainComplete,
     observeJWatcherDrainProgress,
     getJWatcherDrainProgressKey,
-    setRuntimeDeliveryReady,
+    setRuntimeDeliveryReady: (target: typeof env, ready: boolean) => {
+      if (ready) transportAtOpen.push(transportStarted);
+      setRuntimeDeliveryReady(target, ready);
+    },
   };
   const views: Array<ChainSyncView | null> = [];
   const probe = createChainCatchupProbe(xln, env, [{ adapter: {}, targetBlock: 10 } as Target], () => 'Testnet', view => views.push(view), () => true, () => nowMs);
@@ -70,7 +76,13 @@ test('a stalled chain catch-up is shown and keeps the fence closed until progres
       expect(poll()).toBe(true);
       expect(views.at(-1)).toBeNull();
       fenced();
+      expect(transportStarted).toBe(false);
+    }, () => {
+      // The transport starts while the fence is still closed.
+      expect(env.infrastructure?.entityInputsReady).toBe(false);
+      transportStarted = true;
     });
+    expect(transportAtOpen).toEqual([true]);
     expect(env.infrastructure?.entityInputsReady).toBe(true);
     expect(getRuntimeCommandReadiness(env, payment).ready).toBe(true);
   } finally {
@@ -114,6 +126,8 @@ test('a lock during a stalled catch-up ends the wait silently and keeps the fenc
       nowMs += 30_000;
       if (polls === 3) session = false;
     }
+  }, () => {
+    throw new Error('TRANSPORT_STARTED_FOR_LOCKED_SESSION');
   });
   const error = await result.then(() => null, (caught: unknown) => caught);
   expect(isChainCatchupCancelled(error)).toBe(true);
@@ -136,10 +150,14 @@ test('a replaced session cannot publish into the new session view or open its fe
   expect(newProbe()).toBe(false);
   expect(() => oldProbe()).toThrow('WALLET_LOCKED');
   expect(views.map(entry => entry.owner)).toEqual(['old', 'new']);
-  const opened = await openAfterChainCatchup(xln, env, () => true, () => owner === 'old', async () => {}).then(
+  let started = false;
+  const opened = await openAfterChainCatchup(xln, env, () => true, () => owner === 'old', async () => {}, () => {
+    started = true;
+  }).then(
     () => true,
     (caught: unknown) => !isChainCatchupCancelled(caught),
   );
   expect(opened).toBe(false);
+  expect(started).toBe(false);
   expect(env.infrastructure?.entityInputsReady).toBe(false);
 });

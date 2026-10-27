@@ -95,15 +95,24 @@ export const chainSyncText = (view: ChainSyncView): string => {
     : `Syncing ${position}. Payments open when sync completes.`;
 };
 
-/** Opens the j-catchup fence only after `wait` saw the probe report a full drain, for the owning session. */
+/**
+ * Opens the j-catchup fence only after `wait` saw the probe report a full
+ * drain, for the owning session. The transport starts first, still behind the
+ * fence (inbound stays held, readiness stays closed), as hubs and the market
+ * maker do: opening wakes the writer, and that wake must never find committed
+ * outputs with no transport to send them.
+ */
 export const openAfterChainCatchup = async (
   xln: Pick<XLNModule, 'setRuntimeDeliveryReady'>,
   env: RuntimeReplica,
   probe: () => boolean,
   owns: () => boolean,
   wait: (probe: () => boolean) => Promise<void>,
+  startTransport: () => void,
 ): Promise<void> => {
   await wait(probe);
+  assertSessionOwned(owns);
+  startTransport();
   assertSessionOwned(owns);
   xln.setRuntimeDeliveryReady(env, true);
 };
