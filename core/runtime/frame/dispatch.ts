@@ -99,6 +99,18 @@ export const dispatchCommittedEntityOutputs = async (
     }
   }
   const committedOutbox = env.pendingNetworkOutputs ?? [];
+  // A wallet behind the j-catchup fence has no transport yet: P2P starts when
+  // the fence opens. Its outputs are already in the durable outbox, and the
+  // first deliverable route wakes the writer to send them; routing them now
+  // would only fail and halt the Runtime.
+  const awaitsTransport = !p2p && !env.infrastructure?.directEntityInputsDispatch &&
+    env.infrastructure?.entityInputsReady === false;
+  if (awaitsTransport) {
+    if (plan.remoteOutputs.length > 0) {
+      runtimeLog.debug('side_effect.remote_outputs.retained_until_catchup', { remoteOutputs: plan.remoteOutputs.length });
+    }
+    return;
+  }
   dispatchEntityOutputs(env, plan.remoteOutputs, routing, plan.preparedOutputGraph);
   const retainedRemoteKeys = new Set((env.pendingNetworkOutputs ?? []).map(output =>
     plan.preparedOutputGraph.prepare(output).routeKey));

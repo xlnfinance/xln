@@ -31,6 +31,31 @@ const planFor = (pending: RoutedEntityInput) => ({
 });
 
 describe('committed Runtime output dispatch', () => {
+  test('a wallet behind the j-catchup fence retains its outbox until P2P starts, without halting', async () => {
+    const env = createEmptyEnv('committed-output-j-catchup');
+    const pending = output();
+    env.pendingNetworkOutputs = [pending];
+    env.infrastructure!.entityInputsReady = false;
+    const errors: string[] = [];
+    env.error = ((_scope: string, code: string) => errors.push(code)) as never;
+    await expect(dispatchCommittedEntityOutputs(env, new Set(), planFor(pending), routing)).resolves.toBeUndefined();
+    expect(env.pendingNetworkOutputs).toEqual([pending]);
+    expect(errors).toEqual([]);
+    // The fence opened and P2P started: the same durable outbox is sent once.
+    env.infrastructure!.entityInputsReady = true;
+    let attempts = 0;
+    env.infrastructure!.p2p = {
+      bootstrapEntityRoutes: async () => true,
+      enqueueEntityInputsDelivery: () => {
+        attempts += 1;
+        return deliveryAccepted();
+      },
+    } as never;
+    await dispatchCommittedEntityOutputs(env, new Set(), planFor(pending), routing);
+    expect(attempts).toBe(1);
+    expect(env.pendingNetworkOutputs).toEqual([]);
+  });
+
   test('retains the committed outbox without halting when lazy route bootstrap is not ready', async () => {
     const env = createEmptyEnv('committed-output-bootstrap-refused');
     const pending = output();
