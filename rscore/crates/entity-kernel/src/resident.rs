@@ -2267,7 +2267,7 @@ fn apply_scheduled_wake(
         .collect::<Vec<_>>();
 
     let mut ack_locks = BTreeMap::<AccountId, Vec<String>>::new();
-    for (hashlock, peer) in paybook.due_secret_acks(state, u64::MAX, &BTreeMap::new())? {
+    for (_, hashlock, peer) in paybook.due_secret_acks(state, u64::MAX, &BTreeMap::new())? {
         if state.known_accounts.contains(&peer) {
             ack_locks
                 .entry(account_id(&peer)?)
