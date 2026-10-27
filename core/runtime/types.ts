@@ -687,6 +687,8 @@ interface RuntimeInfrastructure {
   }>;
   externalWalletWatchOwners?: Map<string, Map<string, number>>;
   watcherDedupCounter?: import('../jurisdiction/adapter/watcher').EventBatchCounter;
+  /** Last retained-outbox target set logged; the warning repeats only when it changes. */
+  lastRetainedOutboxReport?: string;
   directEntityInputsDispatch?: ((
     targetRuntimeId: string,
     envelope: RuntimeEntityInputsEnvelope,

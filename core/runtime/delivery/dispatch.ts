@@ -431,8 +431,6 @@ const dispatchOutputEnvelope = (
   return dispatchP2POutputEnvelope(env, group, sendable, envelope, deps);
 };
 
-const lastRetainedReport = new WeakMap<RuntimeReplica, string>();
-
 /**
  * A retained output is not a drop, but it is only safe while a readiness edge
  * can still wake the Runtime writer. Report the exact retained targets and
@@ -444,11 +442,11 @@ const reportRetainedNetworkOutbox = (
   deps: RuntimeOutputRoutingDeps,
 ): void => {
   const retained = env.pendingNetworkOutputs ?? [];
+  const state = deps.ensureRuntimeInfrastructure(env);
   if (retained.length === 0) {
-    lastRetainedReport.delete(env);
+    delete state.lastRetainedOutboxReport;
     return;
   }
-  const state = deps.ensureRuntimeInfrastructure(env);
   const perTarget = new Map<string, number>();
   for (const output of retained) {
     const runtimeId = output.runtimeId;
@@ -461,9 +459,9 @@ const reportRetainedNetworkOutbox = (
     deliverable: canDeliverCommittedOutput(state, runtimeId),
   }));
   // Every dispatch re-reports the same offline peer; log only when the retained set changes.
-  const signature = JSON.stringify(targets);
-  if (lastRetainedReport.get(env) === signature) return;
-  lastRetainedReport.set(env, signature);
+  const signature = targets.map(target => `${target.runtimeId}:${target.count}:${target.deliverable}`).join(',');
+  if (state.lastRetainedOutboxReport === signature) return;
+  state.lastRetainedOutboxReport = signature;
   routeLog.warn('output.retained', { runtimeId: env.runtimeId, retained: retained.length, targets });
 };
 
