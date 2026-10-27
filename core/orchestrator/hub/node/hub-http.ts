@@ -43,7 +43,11 @@ import {
   hasAccount,
   serializeAccountDelta,
 } from '../../mesh/mesh-common';
-import { checkpointNodeRuntime, quiesceNodeRuntime } from '../../process/node-runtime-quiesce';
+import {
+  checkpointNodeRuntime,
+  quiesceNodeRuntime,
+  refuseQuiesceDuringBootstrap,
+} from '../../process/node-runtime-quiesce';
 import type { DirectEntityInputDebug } from '../hub-runtime-transport';
 import { handleMarketPairCatalogRequest } from '../market-catalog-http';
 import { requireJAdapterForDebugReserve } from './hub-jurisdiction-binding';
@@ -298,17 +302,32 @@ const handleDebugReserveRequest = async (
   }
 };
 
-export const createHubControlRequestHandler = (dependencies: {
+// Control requests that fence Runtime ingress; see refuseQuiesceDuringBootstrap.
+const BOOTSTRAP_FENCED_CONTROL_PATHS: ReadonlySet<string> = new Set([
+  '/api/control/runtime/snapshot',
+  '/api/control/p2p/stop',
+  '/api/control/core/quiesce',
+]);
+
+type HubControlDependencies = {
   state: RuntimeReplica;
   nodeName: string;
   pauseBootstrap: () => Promise<() => void>;
   markShuttingDown: () => void;
-}): ((request: Request, url: URL) => Promise<Response | null>) =>
+  isBootstrapComplete: () => boolean;
+};
+
+export const createHubControlRequestHandler = (
+  dependencies: HubControlDependencies,
+): ((request: Request, url: URL) => Promise<Response | null>) =>
   async (request, url) => {
     if (request.method === 'GET' && url.pathname === '/api/control/performance/op-counters') {
       return new Response(safeStringify({ counters: snapshotOpCounters() }), { headers: JSON_HEADERS });
     }
     if (request.method !== 'POST') return null;
+    if (BOOTSTRAP_FENCED_CONTROL_PATHS.has(url.pathname) && !dependencies.isBootstrapComplete()) {
+      return refuseQuiesceDuringBootstrap();
+    }
     if (url.pathname === '/api/control/gossip/verify-profile') {
       return handleGossipProfileVerification(request, dependencies.state, JSON_HEADERS);
     }

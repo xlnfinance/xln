@@ -12,6 +12,8 @@ import { enqueueRuntimeContinuation } from '../../runtime/loop/loop-envelope';
 import { haltRuntimeRequiresOperator, transitionRuntimeLifecycle } from '../../runtime/replica/lifecycle';
 import type { RuntimeP2PConfig } from '../../runtime/envelope/p2p-types';
 import type { RuntimeReplica } from '../../runtime/types';
+import { JSON_HEADERS } from '../../api/server/utils';
+import { safeStringify } from '../../protocol/serialization';
 
 export type NodeRuntimeQuiesceOptions = {
   workTimeoutMs: number;
@@ -61,6 +63,26 @@ export const requestChildQuiesce = async (url: string, timeoutMs: number, log: C
     log('quiesce.post_failed', { url, error: errorText(error) });
   }
 };
+
+export const NODE_BOOTSTRAP_IN_PROGRESS = 'NODE_BOOTSTRAP_IN_PROGRESS';
+
+/**
+ * Node side: admission of a quiesce/checkpoint control request during startup.
+ * Authority: the local operator (orchestrator) that may already stop the node.
+ * Startup stages (J import, Hub/MM entity bootstrap, J backlog drain, pending
+ * registration resume) enqueue Runtime inputs outside every producer pause
+ * lease. A quiesce fence set between two stages made the next stage's enqueue
+ * fail closed (RUNTIME_INPUT_INGRESS_AFTER_PERSISTENCE_PAUSE) and the startup
+ * promise exited the node. Waiting is unsafe too: a stage can wait for a dead
+ * peer's token catalog. So the request is refused before it fences anything;
+ * the orchestrator logs the 409 and stops the child, and the committed WAL
+ * prefix stays the recovery source.
+ */
+export const refuseQuiesceDuringBootstrap = (): Response =>
+  new Response(safeStringify({ ok: false, error: NODE_BOOTSTRAP_IN_PROGRESS }), {
+    status: 409,
+    headers: JSON_HEADERS,
+  });
 
 export const quiesceNodeRuntime = async (
   env: RuntimeReplica,

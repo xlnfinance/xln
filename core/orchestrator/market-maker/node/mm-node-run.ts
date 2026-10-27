@@ -80,7 +80,7 @@ import {
 } from '../../mesh/mesh-jurisdictions';
 import { marketMakerBootstrapProgressSignature } from './mm-bootstrap-progress';
 import { areMarketMakerHubTransportsReady } from './mm-transport';
-import { quiesceNodeRuntime } from '../../process/node-runtime-quiesce';
+import { quiesceNodeRuntime, refuseQuiesceDuringBootstrap } from '../../process/node-runtime-quiesce';
 import { MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS } from '../../orchestrator-config';
 import { startParentLivenessWatch } from '../../../support/process/parent-watch';
 import {
@@ -726,6 +726,7 @@ type MarketMakerHttpHandlerDeps = {
   readCachedHealthResponseJson: () => string | null;
   rebuildCachedHealthResponseJson: () => void;
   stopRuntimeLoops: () => void;
+  isBootstrapComplete: () => boolean;
 };
 
 const quiesceMarketMakerRuntime = async (
@@ -733,6 +734,7 @@ const quiesceMarketMakerRuntime = async (
   label: string,
   options: { workTimeoutMs: number; loopTimeoutMs: number; quietMs?: number },
 ): Promise<Response> => {
+  if (!deps.isBootstrapComplete()) return refuseQuiesceDuringBootstrap();
   deps.stopRuntimeLoops();
   try {
     const result = await quiesceNodeRuntime(deps.env, options);
@@ -2225,6 +2227,8 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
       readCachedHealthResponseJson: health.readHealthResponseJson,
       rebuildCachedHealthResponseJson: health.rebuildHealthResponse,
       stopRuntimeLoops: () => state.stopRuntimeLoops(),
+      // Set after the last startup stage below (registration resume).
+      isBootstrapComplete: () => state.externalIngressReady,
     }),
     websocket: createMarketMakerWebSocketHandler(env, directRuntimeWs, handleRuntimeAdapterWsMessage),
   });

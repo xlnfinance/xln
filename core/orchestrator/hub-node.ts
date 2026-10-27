@@ -1115,6 +1115,8 @@ const startHubHttpSurface = (
     markShuttingDown: () => {
       live.shuttingDown = true;
     },
+    // External ingress opens synchronously after the last startup stage.
+    isBootstrapComplete: () => live.externalIngressReady,
   });
   const stackManagerController = createStackManagerController({
     parseBody: parseTaggedControlBody,
