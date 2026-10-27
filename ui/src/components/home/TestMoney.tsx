@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { CreditLimitFullError } from '../../runtime/financial/credit-limit';
 import { useApp } from '../../runtime/store';
 import type { WalletView } from '../../runtime/views';
 import { requireAdapter } from '../../runtime/adapter';
@@ -12,12 +14,15 @@ export function TestMoney({ wallet }: { wallet: WalletView }) {
   const hub = wallet.accounts.find(account => account.isHub && !account.disputed);
   const [stage, setStage] = useState('');
   const [error, setError] = useState('');
+  const [limitAccountId, setLimitAccountId] = useState('');
+  const navigate = useNavigate();
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const receive = async () => {
     if (busy || !hub || !requireAdapter().commandReady) return;
     setBusy(true);
     setError('');
+    setLimitAccountId('');
     setDone(false);
     try {
       await receiveTestMoney(wallet, setStage);
@@ -25,6 +30,7 @@ export function TestMoney({ wallet }: { wallet: WalletView }) {
       setStage('');
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
+      if (failure instanceof CreditLimitFullError) setLimitAccountId(failure.accountId);
       setStage('');
     } finally {
       setBusy(false);
@@ -50,8 +56,8 @@ export function TestMoney({ wallet }: { wallet: WalletView }) {
         <details className="disclosure">
           <summary>How test money works</summary>
           <p className="note">
-            Each click adds 100 {symbol} of test money. Existing credit is used first; if needed, this action increases
-            how much {hub.label} can owe you without collateral.
+            Each click sends 100 {symbol} of test money from {hub.label}. It arrives on the credit limit you extend to{' '}
+            {hub.label} and never changes that limit.
           </p>
         </details>
       )}
@@ -69,7 +75,15 @@ export function TestMoney({ wallet }: { wallet: WalletView }) {
             : 'Connecting your hub account…'}
         </p>
       )}
-      {error && <p role="alert">{error} Check your balance before trying again.</p>}
+      {error && limitAccountId && (
+        <p role="alert" data-testid="test-money-limit-full">
+          {error}{' '}
+          <button type="button" className="btn sm" onClick={() => navigate(`/accounts/${limitAccountId}`)} data-testid="test-money-raise-limit">
+            Raise limit
+          </button>
+        </p>
+      )}
+      {error && !limitAccountId && <p role="alert">{error} Check your balance before trying again.</p>}
     </section>
   );
 }

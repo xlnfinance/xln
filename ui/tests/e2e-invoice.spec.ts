@@ -87,17 +87,12 @@ async function fundWithFaucet(party: Party): Promise<void> {
   await settled(party.page, party.wallet.entityId, FAUCET_UNITS);
 }
 
-/** Bob requests 7 USDC with a note, accepts the missing capacity as credit and copies the wallet link. */
+/** Bob requests 7 USDC with a note; the default 10,000-USDC credit he extends covers it. */
 async function requestByLink(bob: Party): Promise<string> {
   const page = bob.page;
   await page.getByTestId('home-receive').click();
   await page.getByTestId('receive-amount').fill(INVOICE_AMOUNT);
-  const spectrum = page.getByTestId('receive-spectrum');
-  await expect(spectrum).toBeVisible();
-  await spectrum.getByRole('button', { name: '0% collateral', exact: true }).click();
-  await expect(page.getByTestId('receive-spectrum-confirm')).toHaveText('Extend credit limit');
-  await page.getByTestId('receive-spectrum-confirm').click();
-  await expect(spectrum).toHaveCount(0, { timeout: CONSENSUS_TIMEOUT });
+  await expect(page.getByTestId('receive-spectrum')).toHaveCount(0);
   await settled(page, bob.wallet.entityId, 0n);
   await page.getByTestId('receive-note').fill(MEMO);
   await page.getByTestId('receive-copy-link').click();

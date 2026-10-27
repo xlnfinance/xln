@@ -79,14 +79,11 @@ test(
           .poll(() => balance(page, wallet.entityId))
           .toEqual({ owned: '100000000', pending: false, mempool: 0 });
       }
-      // Faucet filled Bob's explicitly granted 100-USDC receive limit. Bob
-      // prepares the next invoice through Receive; no implicit credit increase.
+      // The faucet used 100 USDC of Bob's default 10,000-USDC credit line and
+      // never changed it, so the next invoice needs no new credit.
       await b.getByTestId('home-receive').click();
       await b.getByTestId('receive-amount').fill('25');
-      await expect(b.getByTestId('receive-spectrum')).toBeVisible();
-      await b.getByRole('button', { name: '0% collateral', exact: true }).click();
-      await b.getByTestId('receive-spectrum-confirm').click();
-      await expect(b.getByTestId('receive-spectrum')).toHaveCount(0, { timeout: 10_000 });
+      await expect(b.getByTestId('receive-spectrum')).toHaveCount(0);
       expect((await balance(b, bob.wallet.entityId)).owned).toBe('100000000');
       const [beforeA, beforeB] = await Promise.all([readWalletCheckpoint(a), readWalletCheckpoint(b)]);
       await a.getByTestId('home-pay').click();

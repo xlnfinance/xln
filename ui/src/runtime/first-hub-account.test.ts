@@ -84,3 +84,20 @@ test('a session replaced while waiting for the relay sends nothing and shows no 
   expect(sends).toEqual([]);
   expect(shown).toEqual([]);
 });
+
+test('the first hub Account extends the default 10,000-token credit line to the hub', async () => {
+  sends.length = 0;
+  shown.length = 0;
+  let session = true;
+  const run = settle(openFirstHubAccount(xlnWith(() => true), env, stack, entityId, `0x${'ef'.repeat(20)}`, () => session));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  releaseHydration();
+  while (sends.length === 0) await new Promise(resolve => setTimeout(resolve, 5));
+  session = false;
+  expect(isChainCatchupCancelled(await run)).toBe(true);
+  const input = sends[0] as { entityInputs: Array<{ entityTxs: Array<{ type: string; data: Record<string, unknown> }> }> };
+  const open = input.entityInputs[0]!.entityTxs[0]!;
+  expect(open.type).toBe('openAccount');
+  expect(open.data['creditAmount']).toBe(10_000_000_000n);
+  expect(open.data['tokenId']).toBe(1);
+});

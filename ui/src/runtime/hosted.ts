@@ -7,6 +7,7 @@ import {
   openAfterChainCatchup,
 } from './chain-catchup';
 import {
+  getHubOpeningCredit,
   getOpenAccountRebalancePolicyData,
   hydrateJurisdictionPolicyDefaults,
 } from '@xln/frontend/lib/utils/onboarding/onboardingPreferences';
@@ -268,11 +269,12 @@ export async function openFirstHubAccount(
       await sendEntity(entityId, signerId, [
         {
           type: 'openAccount',
-          // Automatic discovery opens the Account, not an unsecured exposure.
-          // Only the user's receive/credit controls may authorize that risk.
+          // Owner default: the user extends 10,000 whole tokens of credit to
+          // its hub, so incoming payments arrive without collateral. Nothing
+          // raises it later; a full limit is shown and raised by the user.
           data: {
             targetEntityId: hub.entityId,
-            creditAmount: 0n,
+            creditAmount: getHubOpeningCredit(decimals),
             ...(rebalancePolicy ? { rebalancePolicy } : {}),
             tokenId: USDC,
             disputeConfig,

@@ -232,6 +232,9 @@ describe('offchain faucet admission', () => {
     expect(response.status).toBe(409);
     expect(body.success).toBe(false);
     expect(body.code).toBe('FAUCET_INSUFFICIENT_OUT_CAPACITY');
+    expect(body.error).toBe(
+      'The receiving Account cannot hold this faucet payment: raise the credit limit you extend to this hub, then retry. The faucet never changes credit limits.',
+    );
     expect(body.category).toBe('ExpectedEmpty');
     expect(body.retryable).toBe(false);
     expect(body.fatal).toBe(false);

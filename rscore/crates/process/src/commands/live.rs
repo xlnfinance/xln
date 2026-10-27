@@ -734,7 +734,7 @@ fn native_offchain_faucet(
         return Ok(faucet_failure(
             409,
             "FAUCET_INSUFFICIENT_OUT_CAPACITY",
-            "Selected hub does not have enough outbound capacity for offchain faucet.",
+            "The receiving Account cannot hold this faucet payment: raise the credit limit you extend to this hub, then retry. The faucet never changes credit limits.",
         ));
     }
     let input = RuntimeEntityInput::decode(serde_json::json!({

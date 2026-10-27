@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { safeStringify } from '../../../core/protocol/serialization';
 import { enterStack } from '../stack';
-import { readAccount, readPools, readRoutingEvidence, type Parties } from './financial-evidence';
+import { readAccount, readPools, setCreditLimit, readRoutingEvidence, type Parties } from './financial-evidence';
 import { setBankPolicy } from './bank-policy';
 
 const lending = async (page: Page) => {
@@ -20,6 +20,7 @@ async function fundedWallet(page: Page): Promise<Parties> {
   if (!hubId) throw new Error('LENDING_HUB_MISSING');
   const ids = { ownerId: wallet.entityId, hubId, tokenId: 1 };
   await expect.poll(async () => (await readAccount(page, ids)).balance).toBe('100000000');
+  await setCreditLimit(page, ids, '100', '100000000');
   return ids;
 }
 async function loans(page: Page, ids: Parties) {

@@ -122,3 +122,17 @@ export async function readPools(page: Page, ids: Parties) {
     };
   });
 }
+
+/**
+ * Set the absolute credit limit the wallet extends to its hub, from the open
+ * Account screen. Wallets start at 10,000 USDC; scenarios that exercise risk
+ * consent first pin it to what the faucet already used.
+ */
+export async function setCreditLimit(page: Page, parties: Parties, amount: string, raw: string): Promise<void> {
+  await page.getByRole('button', { name: 'Extend credit', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Extend credit', exact: true });
+  await dialog.locator('input').fill(amount);
+  await dialog.getByRole('button', { name: 'Extend credit', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(async () => (await readAccount(page, parties)).credit).toBe(raw);
+}

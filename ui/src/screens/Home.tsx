@@ -6,6 +6,7 @@ import { BalanceDetails } from '../components/home/BalanceDetails';
 import { BalancePanel } from '../components/home/BalancePanel';
 import { HomeAside } from '../components/home/HomeAside';
 import { TestMoney } from '../components/home/TestMoney';
+import { CreditLimitNotice } from '../components/home/CreditLimitNotice';
 import { OpenAccountSheet } from '../components/home/OpenAccountSheet';
 import { EntitySwitcher } from '../components/EntitySwitcher';
 import { Icon } from '../components/Icons';
@@ -38,6 +39,7 @@ export function Home() {
   return (
     <WalletScale>
       <TestMoney key={wallet.entityId} wallet={wallet} />
+      <CreditLimitNotice wallet={wallet} />
       <header className="page-head">
         <div>
           <span className="crumb static">Wallet{wallet.jurisdiction ? ` · ${wallet.jurisdiction}` : ''}</span>

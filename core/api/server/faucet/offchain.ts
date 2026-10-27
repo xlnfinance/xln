@@ -254,7 +254,7 @@ const admitFaucetAccount = (
   })) {
     return fail(input.headers, 409, {
       success: false,
-      error: 'Selected hub does not have enough outbound capacity for offchain faucet.',
+      error: 'The receiving Account cannot hold this faucet payment: raise the credit limit you extend to this hub, then retry. The faucet never changes credit limits.',
       code: 'FAUCET_INSUFFICIENT_OUT_CAPACITY',
       extra: {
         requestId: request.requestId,

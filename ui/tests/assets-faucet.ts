@@ -137,14 +137,21 @@ export async function exerciseAssetFaucets(
   expect(initial.external).toBe('0');
   expect(initial.reserve).toBe('0');
   expect(initial.owned).toBe('0');
-  expect(initial.credit).toBe('0');
-  expect(initial.capacity).toBe('0');
+  // A hub Account opens with the default 10,000-token line the wallet extends
+  // on its opening asset; any other asset starts without credit and needs consent.
+  const preGranted = initial.credit !== '0';
+  if (preGranted) expect(initial.credit).toBe((10_000n * 10n ** BigInt(initial.decimals)).toString());
+  expect(initial.capacity).toBe(initial.credit);
   await expect(page.getByTestId('faucet-amount')).toHaveValue('100');
   const spectrum = page.getByTestId('receive-spectrum');
-  await expect(spectrum).toBeVisible();
-  await expect(page.getByTestId('receive-spectrum-slider')).toHaveValue('0');
-  await expect(spectrum.getByRole('button', { name: '100% collateral', exact: true })).toHaveClass(/active/);
-  await expect(page.getByTestId('faucet-offchain')).toBeDisabled();
+  if (preGranted) {
+    await expect(spectrum).toHaveCount(0);
+  } else {
+    await expect(spectrum).toBeVisible();
+    await expect(page.getByTestId('receive-spectrum-slider')).toHaveValue('0');
+    await expect(spectrum.getByRole('button', { name: '100% collateral', exact: true })).toHaveClass(/active/);
+    await expect(page.getByTestId('faucet-offchain')).toBeDisabled();
+  }
   expect((await readAssets(page, symbol)).credit).toBe(initial.credit);
   await page.screenshot({ path: testInfo.outputPath('faucet-before-credit.png'), fullPage: true });
 
@@ -192,17 +199,19 @@ export async function exerciseAssetFaucets(
   await expect
     .poll(async () => (await readAssets(page, symbol)).reserve, { timeout: 15_000 })
     .toBe((BigInt(beforeReserve.reserve) + amount).toString());
-  await expect(page.getByTestId('faucet-offchain')).toBeDisabled();
-  await expect(page.getByTestId('receive-spectrum-slider')).toHaveValue('0');
-  expect((await readAssets(page, symbol)).credit).toBe('0');
-  await spectrum.getByRole('button', { name: '0% collateral', exact: true }).click();
-  await expect(page.getByTestId('receive-spectrum-slider')).toHaveValue('100');
-  await expect(spectrum.getByRole('checkbox')).toBeChecked();
-  expect((await readAssets(page, symbol)).credit).toBe('0');
-  await page.getByTestId('receive-spectrum-confirm').click();
-  await expect(spectrum).toHaveCount(0, { timeout: 15_000 });
+  if (!preGranted) {
+    await expect(page.getByTestId('faucet-offchain')).toBeDisabled();
+    await expect(page.getByTestId('receive-spectrum-slider')).toHaveValue('0');
+    expect((await readAssets(page, symbol)).credit).toBe('0');
+    await spectrum.getByRole('button', { name: '0% collateral', exact: true }).click();
+    await expect(page.getByTestId('receive-spectrum-slider')).toHaveValue('100');
+    await expect(spectrum.getByRole('checkbox')).toBeChecked();
+    expect((await readAssets(page, symbol)).credit).toBe('0');
+    await page.getByTestId('receive-spectrum-confirm').click();
+    await expect(spectrum).toHaveCount(0, { timeout: 15_000 });
+  }
   const ready = await readAssets(page, symbol);
-  expect(ready.credit).toBe(((amount * 11n) / 10n).toString());
+  expect(ready.credit).toBe(preGranted ? initial.credit : ((amount * 11n) / 10n).toString());
   expect(ready.owned).toBe('0');
   expect(requests.offchain).toEqual([]);
   await clickFaucet(page, 'offchain', expect);

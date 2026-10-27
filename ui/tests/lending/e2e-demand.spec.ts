@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { enterStack, reopenStack, readWalletCheckpoint } from '../stack';
-import { readAccount, readPools } from './financial-evidence';
+import { readAccount, readPools, setCreditLimit } from './financial-evidence';
 import { setBankPolicy } from './bank-policy';
 
 test(
@@ -20,6 +20,7 @@ test(
     const hubId = new URL(page.url()).pathname.split('/accounts/')[1];
     if (!hubId) throw new Error('DEMAND_HUB_MISSING');
     const ids = { ownerId: wallet.entityId, hubId, tokenId: 1 };
+    await setCreditLimit(page, ids, '100', '100000000');
     await setBankPolicy(page, ids, { termId: 'demand', savingsInterestBps: 500, loanInterestBps: 0 });
     await page.getByTestId('nav-manage').locator('visible=true').first().click();
     await page.getByTestId('manage-lend').click();

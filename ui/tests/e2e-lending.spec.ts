@@ -44,9 +44,9 @@ test(
     await page.getByRole('button', { name: '1 day', exact: true }).click();
     await page.getByTestId('lend-amount').fill('100');
     await expect(page.getByTestId('lend-rate')).toHaveValue('100');
-    // The funding UI already signed 110 USDC including its 10% buffer. It
-    // covers this 101 USDC maximum claim; no second risk grant is necessary.
-    expect(funded.credit).toBe('110000000');
+    // The default 10,000-USDC credit line the wallet extends covers this 101
+    // USDC maximum claim; the faucet never changed it and no risk grant is needed.
+    expect(funded.credit).toBe('10000000000');
     await expect(page.getByTestId('lending-risk-consent')).toHaveCount(0);
     await expect(page.getByTestId('lend-submit')).toBeEnabled();
     await page.getByTestId('lend-submit').click();

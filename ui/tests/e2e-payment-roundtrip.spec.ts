@@ -2,8 +2,8 @@
  * Two fresh wallets pay each other back and forth through the stack hub: the
  * React counterpart of the SvelteKit tests/e2e/payments/e2e-ahb-payment.spec.ts.
  *
- * Alice gets 100 USDC from the faucet; Bob accepts 100 USDC of incoming credit
- * on Receive. Alice pays Bob 20, Bob pays 5 back, Alice pays Bob 5 more. After
+ * Alice gets 100 USDC from the faucet; Bob's default 10,000-USDC credit to the
+ * hub already covers incoming payments. Alice pays Bob 20, Bob pays 5 back, Alice pays Bob 5 more. After
  * every hop both committed positions are exact: the recipient gains exactly the
  * amount, the sender loses exactly amount + committed fee (never above the fee
  * quoted on screen), and Alice + Bob always equals 100 USDC minus those fees.
@@ -167,13 +167,9 @@ test(
       const prepareBob = async (): Promise<void> => {
         const page = bob.page;
         await page.getByTestId('home-receive').click();
-        // Ample incoming credit, so only Alice's own capacity can limit the overspend below.
+        // The default credit line is ample, so only Alice's own capacity can limit the overspend below.
         await page.getByTestId('receive-amount').fill('100');
-        const spectrum = page.getByTestId('receive-spectrum');
-        await expect(spectrum).toBeVisible();
-        await spectrum.getByRole('button', { name: '0% collateral', exact: true }).click();
-        await page.getByTestId('receive-spectrum-confirm').click();
-        await expect(spectrum).toHaveCount(0, { timeout: CONSENSUS_TIMEOUT });
+        await expect(page.getByTestId('receive-spectrum')).toHaveCount(0);
         await settled(bob, 0n);
       };
       const fundAlice = async (): Promise<void> => {

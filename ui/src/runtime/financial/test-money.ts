@@ -4,8 +4,9 @@ import { peekXLN } from '../xln-loader';
 import { requestFaucet } from '../financial/external';
 import { readAccountState } from '../financial/swap';
 import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
-import { sendEntityTxs, waitFor } from '../tx';
-import { parseAmount } from '../format';
+import { waitFor } from '../tx';
+import { formatAmount, parseAmount } from '../format';
+import { CreditLimitFullError } from './credit-limit';
 import { getTokenMeta, knownTokenIds } from '../token-meta';
 
 export async function receiveTestMoney(wallet: WalletView, onStage: (stage: string) => void): Promise<void> {
@@ -41,15 +42,13 @@ export async function receiveTestMoney(wallet: WalletView, onStage: (stage: stri
   };
   const account = await read();
   const before = balance(account);
+  // The faucet is a plain payment: it never changes a credit limit. When the
+  // limit the user extends cannot hold it, say so and leave the raise to them.
   const plan = xln.planReceiveCapacity({ ...input, account });
   if (plan.status !== 'ready') {
-    if (plan.status !== 'credit') throw new Error('This account cannot receive test money yet');
-    onStage('Preparing…');
-    await sendEntityTxs(entityId, wallet.signerId, [...plan.setupTxs]);
-    await waitFor(
-      async () => xln.planReceiveCapacity({ ...input, account: await read() }).status === 'ready',
-      'hub confirmation',
-    );
+    const money = (value: bigint) => `${formatAmount(value, token.decimals, 2)} ${token.symbol}`;
+    throw new CreditLimitFullError(hub.counterpartyId,
+      `Your credit limit to ${hub.label} is too low for this faucet: you can receive ${money(plan.currentInboundCapacity)} more on a ${money(plan.currentPeerCreditLimit)} limit, and it sends ${money(amount)}. The faucet never raises it; raise the limit, then try again.`);
   }
   onStage('Receiving…');
   await requestFaucet('offchain', {

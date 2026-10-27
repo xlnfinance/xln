@@ -36,12 +36,14 @@ test('faucet can fund twice on the same page without duplicate payments', { tag:
           const derived = (await debug.xln()).deriveDelta(delta, account.state.leftEntity === owner);
           return {
             owned: String(derived.outCollateral + derived.outPeerCredit - derived.inOwnCredit),
+            credit: String(derived.peerCreditLimit),
             pending: Boolean(account.pendingFrame),
             mempool: account.mempoolCount,
           };
         }, wallet.entityId),
       )
-      .toEqual({ owned: String(count * 100_000_000), pending: false, mempool: 0 });
+      // The faucet is a plain payment over the default 10,000-USDC line; it never raises the limit.
+      .toEqual({ owned: String(count * 100_000_000), credit: '10000000000', pending: false, mempool: 0 });
     expect(requests).toHaveLength(count);
     await expect(page.getByTestId('home-balance-breakdown')).toBeVisible();
     await expect(page.getByTestId('home-secured')).toHaveText('Collateral-backed$0.00');
@@ -51,7 +53,7 @@ test('faucet can fund twice on the same page without duplicate payments', { tag:
       `Can send now${count * 100}.00 USDC`,
     );
     await expect(page.getByTestId('token-row-USDC').locator('.account-limits')).toContainText(
-      'Can receive now0.00 USDC',
+      `Can receive now${(10_000 - count * 100).toLocaleString('en-US')}.00 USDC`,
     );
     await expect(faucet).toBeEnabled();
     await expect(faucet).toHaveText('Get 100 USDC');

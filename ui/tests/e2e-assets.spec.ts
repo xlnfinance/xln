@@ -4,7 +4,7 @@ import { enterStack } from './stack';
 import { privateChain } from './dispute-chain';
 
 test(
-  'Assets faucets fund four real balances once and require explicit incoming credit consent',
+  'Assets faucets fund four real balances once over the default USDC credit line, which they never change',
   { tag: '@functional' },
   async ({ page, baseURL }, testInfo) => {
     test.setTimeout(50_000);
