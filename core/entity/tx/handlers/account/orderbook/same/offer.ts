@@ -34,7 +34,10 @@ const commitSameCommandResult = (
       baseTokenDecimals: offer.baseTokenDecimals,
       quoteTokenDecimals: offer.quoteTokenDecimals,
     });
-    if (!accepted && !pass.ext.books.has(offer.bookKey) && result.state.orders.size === 0) return;
+    // Earlier commands in this pass own a pair before ext.books is published.
+    // Keep their cancellation event hash even when the last maker is removed.
+    const pairExists = pass.bookCache.has(offer.bookKey) || pass.ext.books.has(offer.bookKey);
+    if (!accepted && !pairExists && result.state.orders.size === 0) return;
     const acceptedBook = commitBookOverlayInto(result.state, offer.book);
     pass.bookCache.set(offer.bookKey, acceptedBook);
     pass.bookUpdates.push({ pairId: offer.bookKey, book: acceptedBook });

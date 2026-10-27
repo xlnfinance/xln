@@ -30,7 +30,7 @@ const availableCapacity = (
 /** Command-local reservations disappear with a rejected FOK/fee preview. */
 export const sameMatchCapacity = (pass: SameOrderbookPass): NonNullable<ApplyCommandOptions['admitMatch']> => {
   const consumed = new Map<string, bigint>();
-  const leg = (orderId: string, price: bigint, qty: bigint) => {
+  const leg = (orderId: string, price: bigint, qty: bigint, reserve: boolean) => {
     const offer = pass.orderbookOfferMeta.get(orderId) ?? buildLiveSameOfferMeta(pass, orderId);
     if (!offer) throw new Error(`ORDERBOOK_SAME_SNAPSHOT_MISSING:${orderId}`);
     const account = pass.hubState.accounts.get(offer.accountId);
@@ -44,15 +44,15 @@ export const sameMatchCapacity = (pass: SameOrderbookPass): NonNullable<ApplyCom
     const key = `${offer.accountId}:${offer.wantTokenId}`;
     const delta = account.state.deltas.get(offer.wantTokenId) ?? createDefaultDelta(offer.wantTokenId);
     const available = availableCapacity(pass, offer, delta);
-    return { key, amount, available: available - (consumed.get(key) ?? 0n) };
+    return { key, amount, available: available - (reserve ? consumed.get(key) ?? 0n : 0n) };
   };
-  return (maker, takerOrderId, price, qty) => {
-    const makerLeg = leg(maker.orderId, price, qty);
+  return (maker, takerOrderId, price, qty, reserve = true) => {
+    const makerLeg = leg(maker.orderId, price, qty, reserve);
     if (makerLeg.amount > makerLeg.available) return 'cancel-maker';
-    const takerLeg = leg(takerOrderId, price, qty);
+    const takerLeg = leg(takerOrderId, price, qty, reserve);
     if (takerLeg.amount > takerLeg.available) return 'cancel-taker';
     // Check both counterparties before reserving either: no one-sided resolve.
-    for (const entry of [makerLeg, takerLeg]) consumed.set(entry.key, (consumed.get(entry.key) ?? 0n) + entry.amount);
+    if (reserve) for (const entry of [makerLeg, takerLeg]) consumed.set(entry.key, (consumed.get(entry.key) ?? 0n) + entry.amount);
     return 'fill';
   };
 };

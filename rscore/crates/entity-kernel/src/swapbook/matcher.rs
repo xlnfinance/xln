@@ -1187,7 +1187,11 @@ fn process_one_offer<'a>(
                 .get_mut(&materialized.pair_id)
                 .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_PAIR_MISSING"))?;
             let mut reserved = OrderbookCapacity::new();
-            let mut admit = |maker: &BookOrder, taker: &AddOrder, price: &BigInt, qty: &BigInt| {
+            let mut admit = |maker: &BookOrder,
+                             taker: &AddOrder,
+                             price: &BigInt,
+                             qty: &BigInt,
+                             reserve: bool| {
                 admit_match(
                     &state.offers,
                     capacity,
@@ -1196,6 +1200,7 @@ fn process_one_offer<'a>(
                     taker,
                     price,
                     qty,
+                    reserve,
                 )
             };
             let resumed = resume_crossed(
@@ -1235,9 +1240,19 @@ fn process_one_offer<'a>(
         .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_INTERNAL_BOOK_MISSING"))?;
     let is_cross_jurisdiction = offer.cross_jurisdiction.is_some();
     let mut reserved = OrderbookCapacity::new();
-    let mut admit = |maker: &BookOrder, taker: &AddOrder, price: &BigInt, qty: &BigInt| {
-        admit_match(offers, capacity, &mut reserved, maker, taker, price, qty)
-    };
+    let mut admit =
+        |maker: &BookOrder, taker: &AddOrder, price: &BigInt, qty: &BigInt, reserve: bool| {
+            admit_match(
+                offers,
+                capacity,
+                &mut reserved,
+                maker,
+                taker,
+                price,
+                qty,
+                reserve,
+            )
+        };
     let events_and_taker = if is_identical && is_cross_jurisdiction {
         None
     } else {

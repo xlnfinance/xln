@@ -16,6 +16,7 @@ pub(crate) fn admit_match(
     taker: &AddOrder,
     price: &BigInt,
     qty: &BigInt,
+    reserve: bool,
 ) -> Result<MatchAdmission, EntityKernelError> {
     let leg = |id: &str, side: Side| {
         let (account, offer_id) = id
@@ -37,7 +38,13 @@ pub(crate) fn admit_match(
     let taker_leg = leg(&taker.order_id, taker.side)?;
     let affordable = |(key, amount): &((String, u32), BigInt)| {
         capacity.get(key).is_some_and(|available| {
-            available - consumed.get(key).cloned().unwrap_or_default() >= *amount
+            available
+                - if reserve {
+                    consumed.get(key).cloned().unwrap_or_default()
+                } else {
+                    BigInt::from(0)
+                }
+                >= *amount
         })
     };
     if !affordable(&maker_leg) {
@@ -47,8 +54,10 @@ pub(crate) fn admit_match(
         return Ok(MatchAdmission::CancelTaker);
     }
     // Reserve only after both legs pass; never emit a one-sided fill.
-    for (key, amount) in [maker_leg, taker_leg] {
-        *consumed.entry(key).or_default() += amount;
+    if reserve {
+        for (key, amount) in [maker_leg, taker_leg] {
+            *consumed.entry(key).or_default() += amount;
+        }
     }
     Ok(MatchAdmission::Fill)
 }

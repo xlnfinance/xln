@@ -897,3 +897,177 @@ fn capacity_consumption_cancellation_and_next_level_match_typescript() {
         }
     }
 }
+
+fn capacity_amendment_case(name: &str) {
+    use std::collections::BTreeMap;
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../fixtures/entity-kernel/capacity-amendments.json"
+    ))
+    .unwrap();
+    let row = fixture["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["name"] == name)
+        .unwrap();
+    let mut rows = row["asks"].as_array().unwrap().clone();
+    rows.push(serde_json::json!({"id":"bid", "account":"33", "units":row["takerUnits"]}));
+    let mut accounts = BTreeMap::from([
+        (MAKER.to_string(), account(MAKER, &[1, 2])),
+        (TAKER.to_string(), account(TAKER, &[1, 2])),
+        (NEXT.to_string(), account(NEXT, &[1, 2])),
+    ]);
+    let mut commits = Vec::new();
+    for (index, input) in rows.iter().enumerate() {
+        let remote = match input["account"].as_str().unwrap() {
+            "22" => MAKER,
+            "33" => TAKER,
+            "44" => NEXT,
+            _ => panic!("account"),
+        };
+        let ask = input["id"] != "bid";
+        let mut tx = offer_tx_units(
+            input["id"].as_str().unwrap(),
+            ask,
+            input["units"].as_u64().unwrap() as u32,
+        );
+        if let AccountTx::SwapOffer { time_in_force, .. } = &mut tx {
+            *time_in_force = Some(if ask {
+                0
+            } else {
+                row["tif"].as_u64().unwrap() as u8
+            });
+        }
+        let (next, outputs) = apply_account(
+            &accounts[remote],
+            Side::Right,
+            &tx,
+            index as u64,
+            index as u64 + 1,
+        );
+        accounts.insert(remote.to_string(), next);
+        commits.push(commit(
+            remote,
+            0x41 + index as u8,
+            index as u64 + 1,
+            tx,
+            outputs,
+        ));
+    }
+    let mut capacity = support::orderbook_capacity();
+    capacity.insert((MAKER.into(), 1), fixture_bigint(row, "makerCapacity"));
+    capacity.insert((TAKER.into(), 2), fixture_bigint(row, "takerCapacity"));
+    let mut state = entity_state(2_000);
+    state.known_accounts = accounts.keys().cloned().collect::<BTreeSet<_>>().into();
+    state.orderbook = Some(OrderbookState::empty(10_000));
+    state.orderbook_metadata = Some(orderbook_metadata());
+    let mut context = DeterministicContext::hlt_default();
+    context.swap_taker_fee_bps = 0;
+    let result = apply_entity_kernel(state, &commits, &context, &capacity).unwrap();
+    let mut canceled = Vec::new();
+    for group in &result.proposal_work {
+        for tx in &group.txs {
+            let AccountTx::SwapResolve {
+                offer_id,
+                fill_ratio,
+                cancel_remainder,
+                ..
+            } = tx
+            else {
+                panic!("resolve")
+            };
+            assert_eq!(*fill_ratio, 0, "{name}");
+            assert!(*cancel_remainder);
+            canceled.push(offer_id.clone());
+            let (next, _) = apply_account(&accounts[&group.account_id], Side::Left, tx, 4, 5);
+            accounts.insert(group.account_id.clone(), next);
+        }
+    }
+    let mut expected = row["canceled"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|id| id.as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    canceled.sort();
+    expected.sort();
+    assert_eq!(
+        canceled, expected,
+        "{name}: every disappearing offer resolves exactly once"
+    );
+    let book = &result.state.orderbook.as_ref().unwrap().books["1/2"];
+    assert_eq!(book.trade_count, 0);
+    let mut orders = book.orders.values().collect::<Vec<_>>();
+    orders.sort_by_key(|order| order.seq);
+    let resting = orders
+        .iter()
+        .map(|order| order.order_id.rsplit(':').next().unwrap())
+        .collect::<Vec<_>>();
+    let expected_resting = row["resting"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|id| id.as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(resting, expected_resting, "{name}");
+    // Literal oracle: rest the asks, explicitly cancel only independently unfundable rows.
+    assert_eq!(
+        compute_book_commitment_hash(book).unwrap(),
+        row["bookCommitmentHash"].as_str().unwrap(),
+        "{name}: TS/Rust commitment"
+    );
+    for (remote, account) in &accounts {
+        for token_id in [1, 2] {
+            let held: BigInt = rows
+                .iter()
+                .filter(|input| {
+                    input["id"]
+                        .as_str()
+                        .is_some_and(|id| expected_resting.contains(&id))
+                        && format!("0x{}", input["account"].as_str().unwrap().repeat(32)) == *remote
+                        && token_id == 2
+                })
+                .map(|input| {
+                    BigInt::from(input["units"].as_u64().unwrap()) * BigInt::from(10u8).pow(18)
+                })
+                .sum();
+            assert_eq!(
+                account
+                    .state()
+                    .delta(support::token(token_id))
+                    .unwrap()
+                    .hold(Side::Right),
+                &held,
+                "{name}: surviving holds only"
+            );
+        }
+        assert_eq!(
+            account.state().swap_offers().count(),
+            orders
+                .iter()
+                .filter(|order| order.order_id.starts_with(remote))
+                .count()
+        );
+    }
+}
+
+#[test]
+fn capacity_amendment_ioc_releases_taker_after_maker_cancel() {
+    capacity_amendment_case("ioc-releases-taker-after-maker-cancel");
+}
+#[test]
+fn capacity_amendment_fok_restores_shared_capacity_makers() {
+    capacity_amendment_case("fok-restores-shared-capacity-makers");
+}
+#[test]
+fn capacity_amendment_fresh_pair_fok_publishes_maker_cancel() {
+    capacity_amendment_case("fresh-pair-fok-publishes-maker-cancel");
+}
+#[test]
+fn capacity_amendment_fok_retains_independently_unfundable_cancel() {
+    capacity_amendment_case("fok-retains-independently-unfundable-cancel");
+}
+#[test]
+fn capacity_amendment_ioc_rejects_on_takers_own_capacity_once() {
+    capacity_amendment_case("ioc-rejects-on-takers-own-capacity-once");
+}

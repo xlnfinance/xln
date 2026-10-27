@@ -45,7 +45,13 @@ pub(crate) enum MatchAdmission {
     CancelMaker,
     CancelTaker,
 }
-pub(crate) type AdmitMatch<'a> = dyn FnMut(&BookOrder, &AddOrder, &BigInt, &BigInt) -> Result<MatchAdmission, EntityKernelError>
+pub(crate) type AdmitMatch<'a> = dyn FnMut(
+        &BookOrder,
+        &AddOrder,
+        &BigInt,
+        &BigInt,
+        bool,
+    ) -> Result<MatchAdmission, EntityKernelError>
     + 'a;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,6 +69,7 @@ pub(crate) struct AddOrder {
 struct MatchResult {
     remaining: BigInt,
     blocking_order_id: Option<String>,
+    capacity_cancels: Vec<(BookOrder, BigInt, BigInt)>,
 }
 
 fn low_u32(value: &BigInt) -> u32 {
@@ -305,6 +312,7 @@ where
     P: FnMut(&BookOrder, &AddOrder) -> BigInt,
 {
     let mut remaining = taker.qty_lots.clone();
+    let mut capacity_cancels = Vec::new();
     let mut dust = std::collections::BTreeSet::new();
     while remaining > BigInt::from(0) {
         let Some(maker) = next_maker(state, taker, &mut |maker| {
@@ -324,6 +332,7 @@ where
             return Ok(MatchResult {
                 remaining,
                 blocking_order_id: Some(maker.order_id),
+                capacity_cancels,
             });
         }
         let candidate = maker.qty_lots.clone().min(remaining.clone());
@@ -336,11 +345,12 @@ where
             continue;
         }
         let verdict = match admission.as_deref_mut() {
-            Some(admit) => admit(&maker, taker, &price, &fill)?,
+            Some(admit) => admit(&maker, taker, &price, &fill, true)?,
             None => MatchAdmission::Fill,
         };
         match verdict {
             MatchAdmission::CancelMaker => {
+                capacity_cancels.push((maker.clone(), price, fill));
                 cancel_order(state, &maker.order_id)?;
                 events.push(BookEvent::CapacityCanceled {
                     order_id: maker.order_id,
@@ -355,6 +365,7 @@ where
                 return Ok(MatchResult {
                     remaining,
                     blocking_order_id: Some(maker.order_id),
+                    capacity_cancels,
                 });
             }
             MatchAdmission::Fill => {}
@@ -368,6 +379,7 @@ where
     Ok(MatchResult {
         remaining,
         blocking_order_id: None,
+        capacity_cancels,
     })
 }
 
@@ -443,10 +455,19 @@ where
     {
         *state = snapshot;
         let mut cancels = Vec::new();
-        for event in events {
-            if let BookEvent::CapacityCanceled { ref order_id } = event {
-                cancel_order(state, order_id)?;
-                cancels.push(event);
+        // No tentative fill or reservation survives FOK failure. Revalidate
+        // each exact canceled leg against pre-command capacity: a prior fill
+        // on the same Account cannot authorize canceling an otherwise funded row.
+        for (maker, price, qty) in matched.capacity_cancels {
+            let verdict = match admission.as_deref_mut() {
+                Some(admit) => admit(&maker, &input, &price, &qty, false)?,
+                None => MatchAdmission::Fill,
+            };
+            if verdict == MatchAdmission::CancelMaker {
+                cancel_order(state, &maker.order_id)?;
+                cancels.push(BookEvent::CapacityCanceled {
+                    order_id: maker.order_id,
+                });
             }
         }
         cancels.push(BookEvent::Reject {
@@ -497,7 +518,12 @@ where
             }
             events.push(BookEvent::Ack);
         }
-    } else if matched.remaining == input.qty_lots && events.is_empty() {
+    // Maker cancellations cannot release the unfilled IOC taker hold.
+    } else if matched.remaining == input.qty_lots
+        && !events
+            .iter()
+            .any(|event| matches!(event, BookEvent::Reject { .. }))
+    {
         events.push(BookEvent::Reject {
             reason: "no fill",
             blocking_order_id: None,

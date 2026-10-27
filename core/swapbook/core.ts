@@ -79,7 +79,8 @@ export interface ApplyCommandOptions {
   /** Lazy external-authority verdict for a maker actually consulted by the price walk. */
   makerDisposition?: (maker: Readonly<BookOrderState>) => 'eligible' | 'suspended' | 'cancel';
   executionPriceTicksForMatch?: (maker: bigint, taker: bigint, side: Side) => bigint;
-  admitMatch?: (maker: Readonly<BookOrderState>, takerOrderId: string, price: bigint, qty: bigint) => 'fill' | 'cancel-maker' | 'cancel-taker';
+  /** reserve=false revalidates against pre-command capacity without tentative reservations. */
+  admitMatch?: (maker: Readonly<BookOrderState>, takerOrderId: string, price: bigint, qty: bigint, reserve?: boolean) => 'fill' | 'cancel-maker' | 'cancel-taker';
   executionQtyMultipleAtPrice?: (priceTicks: bigint) => bigint;
 }
 
@@ -276,8 +277,9 @@ const matchPricePages = (
   taker: Readonly<{ side: Side; ownerId: string; orderId: string; priceTicks: bigint; qtyLots: bigint }>,
   events: BookEvent[],
   options: ApplyCommandOptions,
-): Readonly<{ remaining: bigint; blockingOrderId?: string }> => {
+): Readonly<{ remaining: bigint; blockingOrderId?: string; capacityCancels: readonly { maker: BookOrderState; price: bigint; qty: bigint }[] }> => {
   let remaining = taker.qtyLots;
+  const capacityCancels: { maker: BookOrderState; price: bigint; qty: bigint }[] = [];
   const makerSide: Side = taker.side === 0 ? 1 : 0;
   for (const [key, sourcePage] of orderedPages(state, makerSide)) {
     if (remaining <= 0n || !crosses(taker.side, taker.priceTicks, key.priceTicks)) break;
@@ -309,7 +311,7 @@ const matchPricePages = (
           liveCount, totalQtyLots, slots,
         });
         events.push({ type: 'REJECT', orderId: taker.orderId, ownerId: taker.ownerId, reason: 'STP cancel taker', blockingOrderId: maker.orderId });
-        return { remaining, blockingOrderId: maker.orderId };
+        return { remaining, blockingOrderId: maker.orderId, capacityCancels };
       }
       const fill = execution(options, maker.priceTicks, taker.priceTicks, taker.side,
         maker.qtyLots < remaining ? maker.qtyLots : remaining);
@@ -317,6 +319,7 @@ const matchPricePages = (
       if (fill.qty <= 0n) continue;
       const admission = options.admitMatch?.(maker, taker.orderId, fill.price, fill.qty) ?? 'fill';
       if (admission === 'cancel-maker') {
+        capacityCancels.push({ maker, price: fill.price, qty: fill.qty });
         slots[slot] = null;
         liveCount -= 1;
         totalQtyLots -= maker.qtyLots;
@@ -332,7 +335,7 @@ const matchPricePages = (
           liveCount, totalQtyLots, slots,
         });
         events.push({ type: 'REJECT', orderId: taker.orderId, ownerId: taker.ownerId, reason: 'counterparty-capacity' });
-        return { remaining, blockingOrderId: maker.orderId };
+        return { remaining, blockingOrderId: maker.orderId, capacityCancels };
       }
       state.tradeCount += 1;
       state.tradeQtySum += fill.qty;
@@ -371,7 +374,7 @@ const matchPricePages = (
       });
     if (stopAfterPage) break;
   }
-  return { remaining };
+  return { remaining, capacityCancels };
 };
 
 const matchAgainstBook = matchPricePages;
@@ -459,10 +462,15 @@ export function applyCommand(
   );
   if (tif === 2 && matched.remaining > 0n) {
     const restored = forkBookState(state) as MutableBookState;
-    const cancels = events.filter((event): event is Extract<BookEvent, { type: 'CANCELED' }> => event.type === 'CANCELED' && event.reason === 'counterparty-capacity');
-    for (const event of cancels) {
-      const removed = removeOrder(restored, event.orderId);
+    const cancels: BookEvent[] = [];
+    // A failed FOK has no fills or reservations. A same-account maker that
+    // failed only after a tentative fill must survive; recheck the exact leg
+    // against pre-command capacity, retaining only independently invalid rows.
+    for (const { maker, price, qty } of matched.capacityCancels) {
+      if (commandOptions.admitMatch?.(maker, orderId, price, qty, false) !== 'cancel-maker') continue;
+      const removed = removeOrder(restored, maker.orderId);
       if (removed) bumpHash(restored, 5, removed.priceTicks, 0);
+      cancels.push({ type: 'CANCELED', orderId: maker.orderId, ownerId: maker.ownerId, reason: 'counterparty-capacity' });
     }
     return { state: restored, events: [...cancels, { type: 'REJECT', orderId, ownerId, reason: 'FOK cannot fill entirely' }] };
   }
@@ -481,7 +489,8 @@ export function applyCommand(
       events.push({ type: 'ACK', orderId, ownerId });
       bumpHash(mutable, 1, priceTicks, resting);
     }
-  } else if (matched.remaining === qtyLots && events.length === 0) {
+  // Maker cancellations do not resolve the unfilled IOC taker's hold.
+  } else if (matched.remaining === qtyLots && !events.some(event => event.type === 'REJECT' && event.orderId === orderId)) {
     events.push({ type: 'REJECT', orderId, ownerId, reason: 'no fill' });
   }
   return { state: mutable, events };

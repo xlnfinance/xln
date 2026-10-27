@@ -1,0 +1,125 @@
+{
+  "cases": [
+    {
+      "name": "ioc-releases-taker-after-maker-cancel",
+      "makerCapacity": "0",
+      "takerCapacity": "1000000000000000000000000000000",
+      "asks": [
+        {
+          "id": "ask",
+          "account": "22",
+          "units": 1
+        }
+      ],
+      "takerUnits": 1,
+      "tif": 1,
+      "canceled": [
+        "ask",
+        "bid"
+      ],
+      "resting": [],
+      "bookCommitmentHash": "0xcfffea1f11733a711c6764e6aede020c"
+    },
+    {
+      "name": "fok-restores-shared-capacity-makers",
+      "makerCapacity": "2500000000",
+      "takerCapacity": "1000000000000000000000000000000",
+      "asks": [
+        {
+          "id": "first",
+          "account": "22",
+          "units": 1
+        },
+        {
+          "id": "second",
+          "account": "22",
+          "units": 1
+        }
+      ],
+      "takerUnits": 2,
+      "tif": 2,
+      "canceled": [
+        "bid"
+      ],
+      "resting": [
+        "first",
+        "second"
+      ],
+      "bookCommitmentHash": "0x4357f4ab6477f9a603b61c56ba35e1d2"
+    },
+    {
+      "name": "fresh-pair-fok-publishes-maker-cancel",
+      "makerCapacity": "0",
+      "takerCapacity": "1000000000000000000000000000000",
+      "asks": [
+        {
+          "id": "ask",
+          "account": "22",
+          "units": 1
+        }
+      ],
+      "takerUnits": 1,
+      "tif": 2,
+      "canceled": [
+        "ask",
+        "bid"
+      ],
+      "resting": [],
+      "bookCommitmentHash": "0xcfffea1f11733a711c6764e6aede020c"
+    },
+    {
+      "name": "fok-retains-independently-unfundable-cancel",
+      "makerCapacity": "2500000000",
+      "takerCapacity": "1000000000000000000000000000000",
+      "asks": [
+        {
+          "id": "first",
+          "account": "22",
+          "units": 1
+        },
+        {
+          "id": "second",
+          "account": "22",
+          "units": 2
+        }
+      ],
+      "takerUnits": 3,
+      "tif": 2,
+      "canceled": [
+        "second",
+        "bid"
+      ],
+      "resting": [
+        "first"
+      ],
+      "bookCommitmentHash": "0xf2a6c20be4dfe89330921bea12b0d307"
+    },
+    {
+      "name": "ioc-rejects-on-takers-own-capacity-once",
+      "makerCapacity": "0",
+      "takerCapacity": "0",
+      "asks": [
+        {
+          "id": "ask",
+          "account": "22",
+          "units": 1
+        },
+        {
+          "id": "funded",
+          "account": "44",
+          "units": 1
+        }
+      ],
+      "takerUnits": 1,
+      "tif": 1,
+      "canceled": [
+        "ask",
+        "bid"
+      ],
+      "resting": [
+        "funded"
+      ],
+      "bookCommitmentHash": "0x5f6b41f23fede98e3bf7646034b9b9b1"
+    }
+  ]
+}
