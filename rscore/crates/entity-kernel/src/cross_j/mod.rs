@@ -402,9 +402,20 @@ struct HashLadderProof {
     partial_root: [u8; 32],
 }
 
+// ECMAScript WhiteSpace + LineTerminator, exactly as TS String.trim().
+// Rust includes U+0085 and excludes U+FEFF; either difference forks commitments.
+fn trim_runtime_seed(seed: &str) -> &str {
+    seed.trim_matches(|c| {
+        matches!(c,
+            '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' |
+            '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' |
+            '\u{205f}' | '\u{3000}' | '\u{feff}'
+        )
+    })
+}
+
 fn hash_ladder_proof(runtime_seed: &str, route_hash: &str) -> HashLadderProof {
-    // The private-seed boundary matches TS: whitespace never changes ladder bytes.
-    let runtime_seed = runtime_seed.trim();
+    let runtime_seed = trim_runtime_seed(runtime_seed);
     let private_seed = prefixed_hex(&keccak_text(&format!(
         "xln:cross-j:hashladder-private-seed:v1:{runtime_seed}:{route_hash}"
     )));
@@ -833,7 +844,7 @@ pub fn build_proposer_materializations(
     if normalized(proposer_signer_id) != proposer || commit_phase {
         return Ok(Vec::new());
     }
-    if runtime_seed.trim().is_empty() {
+    if trim_runtime_seed(runtime_seed).is_empty() {
         return Err(invalid(
             EntityTxKind::MaterializeCrossJurisdictionSwap,
             "RUNTIME_SEED_MISSING",
@@ -3012,8 +3023,18 @@ fn apply_register(
     let opening = existing
         .is_none_or(|prior| matches!(text(prior, "status"), Some("intent" | "target_prepared")));
     let proposal_work = if opening && text(&route, "status") == Some("resting") {
-        xln_rscore_engine::cross_j_route::validate_pull_binding(&route)
-            .map_err(|detail| rejected(tx.kind, detail))?;
+        // Peer binding failure commits the same refusal status as TS before
+        // storing the route or queuing any signed Account opening work.
+        if let Err(detail) = xln_rscore_engine::cross_j_route::validate_pull_binding(&route) {
+            return Ok(CrossJurisdictionApplyResult {
+                events: vec![EntityFrameEvent::Status {
+                    message: format!(
+                        "❌ Cross-j register {order_id} rejected before Account queue: {detail}"
+                    ),
+                }],
+                ..Default::default()
+            });
+        }
         registration_work(state, &route, tx.kind)?
     } else {
         Vec::new()
@@ -4027,9 +4048,10 @@ fn queue_hash_ladder_registration(
     registration: crate::j_batch::HashLadderRegistration,
     kind: EntityTxKind,
 ) -> Result<RegistrationQueueResult, EntityKernelError> {
-    // Confirmed equal evidence is sticky on both roles: a retry cannot move
-    // revealedAt beyond the beneficiary window after the draft has drained.
-    let mut highest = None;
+    // Exact membership precedes monotonicity across confirmed, queued and
+    // pending evidence: confirmed 100 + queued 200 must absorb retry 100.
+    // A new 150 still conflicts; retries cannot refresh revealedAt.
+    let mut ratios = BTreeSet::new();
     for (_, route) in state
         .cross_jurisdiction_swaps
         .as_ref()
@@ -4059,12 +4081,20 @@ fn queue_hash_ladder_registration(
             == Some(prefixed_hex(&registration.counterparty_entity).as_str())
             && text(pull, "fullHash") == Some(prefixed_hex(&registration.full_hash).as_str())
             && text(pull, "partialRoot") == Some(prefixed_hex(&registration.partial_root).as_str())
-            && let Some(ratio) = unsigned(&route, ratio_name)
         {
-            highest =
-                Some(highest.unwrap_or(0_u16).max(
+            if let Some(ratio) = unsigned(&route, ratio_name) {
+                ratios.insert(
                     u16::try_from(ratio).map_err(|_| invalid(kind, "CONFIRMED_RATIO_INVALID"))?,
-                ));
+                );
+            }
+            let pending_name = if registration.target_role {
+                "pendingTargetRegistryReveal"
+            } else {
+                "pendingSourceRegistryReveal"
+            };
+            if let Some(pending) = field(&route, pending_name) {
+                ratios.insert(pending_witness(pending, kind)?.fill_ratio);
+            }
         }
     }
     let j_state = state.j_batch_state.get_or_insert_with(Default::default);
@@ -4092,13 +4122,13 @@ fn queue_hash_ladder_registration(
         )
         .filter(|value| matching(value))
     {
-        highest = Some(highest.unwrap_or(0_u16).max(value.witness.fill_ratio));
+        ratios.insert(value.witness.fill_ratio);
     }
-    if highest == Some(registration.witness.fill_ratio) {
+    if ratios.contains(&registration.witness.fill_ratio) {
         return Ok(RegistrationQueueResult::AlreadyQueued);
     }
-    if let Some(ratio) = highest
-        && (!registration.target_role || registration.witness.fill_ratio < ratio)
+    if let Some(ratio) = ratios.last()
+        && (!registration.target_role || registration.witness.fill_ratio < *ratio)
     {
         return Err(invalid(
             kind,
@@ -4249,7 +4279,7 @@ pub(crate) fn queue_source_hub_claim_registrations(
                 continue;
             }
         }
-        if runtime_seed.trim().is_empty() {
+        if trim_runtime_seed(runtime_seed).is_empty() {
             return Err(invalid(kind, "RUNTIME_SEED_MISSING"));
         }
         let route_hash =
@@ -4612,9 +4642,19 @@ fn apply_salvage(
         .ok_or_else(|| invalid(tx.kind, "ROUTE_ID_MISSING"))?
         .to_string();
     let binary = text(data, "binary").ok_or_else(|| invalid(tx.kind, "BINARY_MISSING"))?;
-    let claimed_ratio = unsigned(data, "fillRatio")
-        .filter(|value| *value > 0 && *value <= 65_535)
-        .ok_or_else(|| invalid(tx.kind, "FILL_RATIO_INVALID"))?;
+    let claimed_ratio =
+        unsigned(data, "fillRatio").ok_or_else(|| invalid(tx.kind, "FILL_RATIO_INVALID"))?;
+    // The ported claim is untrusted, not committed authority. Zero is ignored
+    // before route lookup; oversized claims reach binary verification and the
+    // mismatch status. Neither may mask owned-route corruption after lookup.
+    if binary.is_empty() || claimed_ratio == 0 {
+        return Ok(CrossJurisdictionApplyResult {
+            events: vec![EntityFrameEvent::Status {
+                message: format!("🌉 Cross-j reveal port ignored for {route_id}: invalid result"),
+            }],
+            ..Default::default()
+        });
+    }
     let mut route = state
         .cross_jurisdiction_swaps
         .as_ref()
@@ -4733,7 +4773,11 @@ fn apply_salvage(
             } else {
                 Vec::new()
             },
-            events: vec![EntityFrameEvent::Status { message: format!("⏳ Cross-j reveal port {route_id}: deferred until the pending jBatch is acknowledged") }],
+            events: vec![EntityFrameEvent::Status {
+                message: format!(
+                    "⏳ Cross-j reveal port {route_id}: deferred until the pending jBatch is acknowledged"
+                ),
+            }],
             ..Default::default()
         });
     }
@@ -5564,7 +5608,7 @@ pub fn apply_cross_jurisdiction_entity_txs(
                 let raw =
                     field(&route, "sourcePull").is_none() && field(&route, "targetPull").is_none();
                 let peer = if source_hub.as_deref() == Some(local.as_str()) {
-                    source_user
+                    source_user.clone()
                 } else if source_user.as_deref() == Some(local.as_str()) {
                     source_hub
                 } else {
@@ -5591,10 +5635,21 @@ pub fn apply_cross_jurisdiction_entity_txs(
                     if actual != Some(expected) {
                         let order = route_order_id(tx.kind, &route)?;
                         let reason = match actual {
-                            Some((left, right)) => format!("CROSS_J_PREPARED_SOURCE_ACCOUNT_CLOCK_MISMATCH:{order}:actual={left},{right}:route={},{}", expected.0, expected.1),
+                            Some((left, right)) => format!(
+                                "CROSS_J_PREPARED_SOURCE_ACCOUNT_CLOCK_MISMATCH:{order}:actual={left},{right}:route={},{}",
+                                expected.0, expected.1
+                            ),
                             None => format!("CROSS_J_PREPARED_SOURCE_ACCOUNT_MISSING:{order}"),
                         };
-                        combined.events.push(EntityFrameEvent::Status { message: format!("❌ Cross-j prepare {order} blocked: {reason}") });
+                        // TS catches a peer intent at the hub, but source-user
+                        // authorization propagates missing/mismatched committed
+                        // Account evidence as a halt. Never soften that authority.
+                        if source_user.as_deref() == Some(local.as_str()) {
+                            return Err(invalid(tx.kind, reason));
+                        }
+                        combined.events.push(EntityFrameEvent::Status {
+                            message: format!("❌ Cross-j prepare {order} blocked: {reason}"),
+                        });
                         continue;
                     }
                 }

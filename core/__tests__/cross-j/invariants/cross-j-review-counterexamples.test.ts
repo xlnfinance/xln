@@ -9,6 +9,7 @@ import { handleCrossJurisdictionSalvageEntityTx } from '../../../entity/tx/handl
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { AccountTx } from '../../../types/account';
 import { addr, entity, makeJurisdiction, jref, makeState, installJurisdictions, getTestAccountForWrite } from '../../helpers/cross-j';
+import { readEntityFrameEvents } from '../../../entity/frame-events';
 import { initJBatch } from '../../../jurisdiction/machine/batch';
 
 const sourceJ = makeJurisdiction('source', 1, '11', '12');
@@ -63,6 +64,8 @@ test('review 2: target hub refuses registration of different ladders', async () 
   const result = await applyEntityTx(env, state, { type: 'registerCrossJurisdictionSwap', data: { route } });
   expect(result.newState.crossJurisdictionSwaps!.has(route.orderId)).toBe(false);
   expect(result.accountTxs ?? []).toEqual([]);
+  expect(result.skippedError).toBeUndefined();
+  expect(readEntityFrameEvents(result.newState)).toContainEqual({ type: 'status', message: `❌ Cross-j register ${route.orderId} rejected before Account queue: Cross-j pull ladders do not match` });
 });
 
 test('review 3: confirmed equal target ratio cannot queue a timestamp refresh', () => {
@@ -178,4 +181,90 @@ test('review 12: forged salvage ratio is absorbed without state changes', async 
 
 test('review 13: private seed whitespace canonicalizes before hashing', () => {
   expect(deriveCrossJurisdictionPrivateSeed(' review-seed\n', intent())).toBe(deriveCrossJurisdictionPrivateSeed('review-seed', intent()));
+});
+
+for (const existing of ['confirmed', 'queued', 'pending'] as const) {
+  test(`review 3 amend: retry 100 remains a no-op with ${existing} 100 and queued 200`, () => {
+    const { state } = context('targetUser');
+    const route = resting();
+    const seed = deriveCrossJurisdictionPrivateSeed('review-seed', route);
+    const reveal = (ratio: number) => buildCrossJurisdictionPullReveal(route, ratio, seed);
+    state.crossJurisdictionSwaps!.set(route.orderId, route);
+    if (existing === 'confirmed') route.targetRegistryFillRatio = 100;
+    if (existing === 'pending') route.pendingTargetRegistryReveal = reveal(100);
+    state.jBatchState = initJBatch();
+    for (const ratio of existing === 'queued' ? [100, 200] : [200]) {
+      // The older queued witness lives in recovery; the newer draft is canonical.
+      const batch = ratio === 100 ? initJBatch().batch : state.jBatchState.batch;
+      batch.hashLadderRegistrations.push({ counterpartyEntity: entity('03'), targetRole: true,
+        fullHash: route.targetPull!.fullHash, partialRoot: route.targetPull!.partialRoot,
+        witness: { fillRatio: ratio, fullSecret: `0x${'00'.repeat(32)}`, reveals: [`0x${'00'.repeat(32)}`, `0x${'00'.repeat(32)}`, `0x${'00'.repeat(32)}`, `0x${'00'.repeat(32)}`] } });
+      if (ratio === 100) state.jBatchState.recoveryBatches = [batch];
+    }
+    const before = structuredClone(state.jBatchState);
+    expect(queueHashLadderRevealRegistration(state, entity('03'), route.targetPull!, reveal(100), true)).toBe('already-queued');
+    expect(state.jBatchState).toEqual(before);
+    expect(() => queueHashLadderRevealRegistration(state, entity('03'), route.targetPull!, reveal(150), true)).toThrow('REGISTRATION_CONFLICT');
+  });
+}
+
+test('review 3 amend: pending 200 prevents a new stale ratio 150', () => {
+  const { state } = context('targetUser');
+  const route = resting();
+  const seed = deriveCrossJurisdictionPrivateSeed('review-seed', route);
+  route.pendingTargetRegistryReveal = buildCrossJurisdictionPullReveal(route, 200, seed);
+  state.crossJurisdictionSwaps!.set(route.orderId, route);
+  expect(() => queueHashLadderRevealRegistration(state, entity('03'), route.targetPull!, buildCrossJurisdictionPullReveal(route, 150, seed), true)).toThrow('REGISTRATION_CONFLICT');
+});
+
+for (const fillRatio of [0, 65536]) {
+  test(`review 12 amend: valid salvage binary with claimed ${fillRatio} is a status without route mutation`, async () => {
+    const { state } = context('targetUser');
+    const route = resting();
+    state.crossJurisdictionSwaps!.set(route.orderId, route);
+    const binary = buildCrossJurisdictionPullReveal(route, 65535, deriveCrossJurisdictionPrivateSeed('review-seed', route)).binary;
+    const result = await handleCrossJurisdictionSalvageEntityTx(state, { type: 'crossJurisdictionSalvage', data: { routeId: route.orderId, binary, fillRatio } });
+    expect(result.outputs).toEqual([]);
+    expect(result.newState.crossJurisdictionSwaps!.get(route.orderId)).toEqual(route);
+    expect(readEntityFrameEvents(result.newState)).toContainEqual({ type: 'status', message: fillRatio === 0
+      ? `🌉 Cross-j reveal port ignored for ${route.orderId}: invalid result`
+      : `❌ Cross-j reveal port ${route.orderId} fill mismatch: claimed 65536, verified 65535` });
+  });
+}
+
+test('review 12 amend: owned missing target pull remains fatal with an oversized claim', async () => {
+  const { state } = context('targetUser');
+  const route = resting();
+  const binary = buildCrossJurisdictionPullReveal(route, 65535, deriveCrossJurisdictionPrivateSeed('review-seed', route)).binary;
+  delete route.targetPull;
+  state.crossJurisdictionSwaps!.set(route.orderId, route);
+  await expect(handleCrossJurisdictionSalvageEntityTx(state, { type: 'crossJurisdictionSalvage', data: { routeId: route.orderId, binary, fillRatio: 65536 } })).rejects.toThrow('CROSS_J_REVEAL_PORT_TARGET_PULL_MISSING');
+});
+
+for (const missing of [false, true]) {
+  test(`review 5 amend: source user ${missing ? 'missing Account' : 'clock mismatch'} remains fatal`, async () => {
+    const { state, env } = context('sourceUser');
+    const route = intent();
+    if (missing) state.accounts.delete(entity('02'));
+    else route.sourceDisputeConfig = { leftResponseSeconds: 11, rightResponseSeconds: 10 };
+    await expect(applyEntityTx(env, state, { type: 'prepareCrossJurisdictionSwap', data: { route } })).rejects.toThrow(missing ? 'CROSS_J_PREPARED_SOURCE_ACCOUNT_MISSING' : 'CROSS_J_PREPARED_SOURCE_ACCOUNT_CLOCK_MISMATCH');
+    expect(state.crossJurisdictionAuthorizations?.has(route.orderId) ?? false).toBe(false);
+  });
+}
+
+test('review 13 amend: exact ECMAScript trim set determines ladder commitments', () => {
+  const plain = deriveCrossJurisdictionPrivateSeed('review-seed', intent());
+  const trim = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0xa0, 0x1680,
+    0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a,
+    0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff];
+  for (const codepoint of trim) {
+    const char = String.fromCodePoint(codepoint);
+    expect(deriveCrossJurisdictionPrivateSeed(`${char}review-seed${char}`, intent())).toBe(plain);
+    expect(() => deriveCrossJurisdictionPrivateSeed(char, intent())).toThrow('CRYPTO_DETERMINISM_VIOLATION');
+  }
+  for (const codepoint of [0x85, 0x180e, 0x200b]) {
+    const char = String.fromCodePoint(codepoint);
+    expect(deriveCrossJurisdictionPrivateSeed(`${char}review-seed${char}`, intent())).not.toBe(plain);
+    expect(deriveCrossJurisdictionPrivateSeed(char, intent())).toMatch(/^0x[0-9a-f]{64}$/);
+  }
 });
