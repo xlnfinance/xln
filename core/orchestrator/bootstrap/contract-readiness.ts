@@ -223,6 +223,16 @@ const materializeImmutableReferences = (
   context: string,
   expectedImmutableAddress?: string,
 ): string => {
+  // A replaced/truncated runtime is a code mismatch, before immutable offsets
+  // can be read. DeltaTransformer now embeds its deployment authority; short
+  // attacker code must not masquerade as invalid canonical artifact metadata.
+  if (actualCode.length !== expectedCode.length) {
+    throw new Error(
+      `${context}_CODE_MISMATCH:${key}` +
+      `:actualBytes=${Math.max(0, (actualCode.length - 2) / 2)}` +
+      `:expectedBytes=${Math.max(0, (expectedCode.length - 2) / 2)}`,
+    );
+  }
   let expected = expectedCode.slice(2);
   const actual = actualCode.slice(2);
   const boundAddress = expectedImmutableAddress ?? (key === 'account' ? contracts.account : undefined);
