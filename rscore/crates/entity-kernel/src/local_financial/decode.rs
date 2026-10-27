@@ -1,17 +1,16 @@
 use num_bigint::BigInt;
 use sha3::{Digest as _, Keccak256};
 use xln_rscore_engine::{
-    AccountDisputeConfig, AccountDomain, CanonicalValue, DeliveryMode, DepositoryAddress,
-    LendingTermId, TokenId, WatchSeed,
+    AccountDisputeConfig, AccountDomain, CanonicalValue, DeliveryMode, DepositoryAddress, TokenId,
+    WatchSeed,
 };
 
 use crate::{CanonicalEntityTx, EntityKernelError, EntityTxKind, OriginatedHtlcDeliveryMode};
 
 use super::types::{
     CanonicalRebalancePolicy, DirectPaymentEntityTx, DisputeFinalizeEntityTx, DisputeStartEntityTx,
-    ExtendCreditEntityTx, ForceSiblingDisputeEntityTx, HtlcPaymentEntityTx, LendingBorrowEntityTx,
-    LendingClosePositionEntityTx, LendingOfferEntityTx, LendingRepayEntityTx,
-    LocalEntityFinancialTx, OpenAccountEntityTx, PlaceSwapOfferEntityTx, PrepareDisputeEntityTx,
+    ExtendCreditEntityTx, ForceSiblingDisputeEntityTx, HtlcPaymentEntityTx, LocalEntityFinancialTx,
+    OpenAccountEntityTx, PlaceSwapOfferEntityTx, PrepareDisputeEntityTx,
     ProcessHtlcTimeoutsEntityTx, ProposeCancelSwapEntityTx, QuoteBackedR2cEntityTx,
     RequestCollateralEntityTx, RequestCreditEntityTx, ResolveHtlcLockEntityTx,
     SetRebalancePolicyEntityTx, SettleApproveEntityTx, SettleExecuteEntityTx,
@@ -185,26 +184,6 @@ fn u32_number(
 
 fn token(value: &CanonicalValue, kind: &'static str) -> Result<TokenId, EntityKernelError> {
     TokenId::new(u32_number(value, kind, "TOKEN_ID")?).map_err(|_| invalid(kind, "TOKEN_ID"))
-}
-
-fn lending_term(
-    value: &CanonicalValue,
-    kind: &'static str,
-) -> Result<LendingTermId, EntityKernelError> {
-    match string(value, kind, "TERM_ID")?.as_str() {
-        "1h" => Ok(LendingTermId::OneHour),
-        "1d" => Ok(LendingTermId::OneDay),
-        "1m" => Ok(LendingTermId::OneMonth),
-        "demand" => Ok(LendingTermId::Demand),
-        _ => Err(invalid(kind, "TERM_ID")),
-    }
-}
-
-fn interest_bps(value: &CanonicalValue, kind: &'static str) -> Result<u16, EntityKernelError> {
-    u16::try_from(u64_number(value, kind, "INTEREST_BPS")?)
-        .ok()
-        .filter(|value| *value <= 10_000)
-        .ok_or_else(|| invalid(kind, "INTEREST_BPS"))
 }
 
 fn string_array(
@@ -744,106 +723,6 @@ fn cancel_swap(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, EntityK
     ))
 }
 
-fn lending_offer(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, EntityKernelError> {
-    const KIND: &str = "lendingOffer";
-    let data = object(frame_data(tx, KIND)?, KIND)?;
-    exact_fields(
-        data,
-        &[
-            "positionId",
-            "hubEntityId",
-            "tokenId",
-            "amount",
-            "termId",
-            "interestBps",
-        ],
-        &[],
-        KIND,
-    )?;
-    Ok(LocalEntityFinancialTx::LendingOffer(LendingOfferEntityTx {
-        position_id: string(field(data, "positionId", KIND)?, KIND, "POSITION_ID")?
-            .trim()
-            .to_ascii_lowercase(),
-        hub_entity_id: entity_id(field(data, "hubEntityId", KIND)?, KIND, "HUB_ENTITY_ID")?,
-        token_id: token(field(data, "tokenId", KIND)?, KIND)?,
-        amount: bigint(field(data, "amount", KIND)?, KIND, "AMOUNT")?,
-        term_id: lending_term(field(data, "termId", KIND)?, KIND)?,
-        interest_bps: interest_bps(field(data, "interestBps", KIND)?, KIND)?,
-    }))
-}
-
-fn lending_borrow(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, EntityKernelError> {
-    const KIND: &str = "lendingBorrow";
-    let data = object(frame_data(tx, KIND)?, KIND)?;
-    exact_fields(
-        data,
-        &[
-            "requestId",
-            "hubEntityId",
-            "tokenId",
-            "amount",
-            "termId",
-            "maxInterestBps",
-            "expiresAt",
-            "maxLateMs",
-        ],
-        &[],
-        KIND,
-    )?;
-    let max_interest_bps = optional_field(data, "maxInterestBps")
-        .map(|value| interest_bps(value, KIND))
-        .transpose()?
-        .unwrap_or(10_000);
-    Ok(LocalEntityFinancialTx::LendingBorrow(
-        LendingBorrowEntityTx {
-            request_id: string(field(data, "requestId", KIND)?, KIND, "REQUEST_ID")?
-                .trim()
-                .to_ascii_lowercase(),
-            hub_entity_id: entity_id(field(data, "hubEntityId", KIND)?, KIND, "HUB_ENTITY_ID")?,
-            token_id: u64_number(field(data, "tokenId", KIND)?, KIND, "TOKEN_ID")?,
-            amount: bigint(field(data, "amount", KIND)?, KIND, "AMOUNT")?,
-            term_id: lending_term(field(data, "termId", KIND)?, KIND)?,
-            max_interest_bps,
-            expires_at: u64_number(field(data, "expiresAt", KIND)?, KIND, "EXPIRES_AT")?,
-            max_late_ms: u64_number(field(data, "maxLateMs", KIND)?, KIND, "MAX_LATE_MS")?,
-        },
-    ))
-}
-
-fn lending_repay(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, EntityKernelError> {
-    const KIND: &str = "lendingRepay";
-    let data = object(frame_data(tx, KIND)?, KIND)?;
-    exact_fields(
-        data,
-        &["hubEntityId", "loanId", "tokenId", "amount"],
-        &[],
-        KIND,
-    )?;
-    Ok(LocalEntityFinancialTx::LendingRepay(LendingRepayEntityTx {
-        hub_entity_id: entity_id(field(data, "hubEntityId", KIND)?, KIND, "HUB_ENTITY_ID")?,
-        loan_id: string(field(data, "loanId", KIND)?, KIND, "LOAN_ID")?
-            .trim()
-            .to_ascii_lowercase(),
-        token_id: token(field(data, "tokenId", KIND)?, KIND)?,
-        amount: bigint(field(data, "amount", KIND)?, KIND, "AMOUNT")?,
-        claim_hash: String::new(),
-    }))
-}
-
-fn lending_close(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, EntityKernelError> {
-    const KIND: &str = "lendingClosePosition";
-    let data = object(frame_data(tx, KIND)?, KIND)?;
-    exact_fields(data, &["hubEntityId", "positionId"], &[], KIND)?;
-    Ok(LocalEntityFinancialTx::LendingClosePosition(
-        LendingClosePositionEntityTx {
-            hub_entity_id: entity_id(field(data, "hubEntityId", KIND)?, KIND, "HUB_ENTITY_ID")?,
-            position_id: string(field(data, "positionId", KIND)?, KIND, "POSITION_ID")?
-                .trim()
-                .to_ascii_lowercase(),
-        },
-    ))
-}
-
 fn process_htlc_timeouts(
     tx: &CanonicalEntityTx,
 ) -> Result<LocalEntityFinancialTx, EntityKernelError> {
@@ -1098,10 +977,16 @@ pub fn decode_local_entity_financial_tx(
         EntityTxKind::DisputeStart => dispute_start(tx).map(Some),
         EntityTxKind::ExtendCredit => extend_credit(tx).map(Some),
         EntityTxKind::HtlcPayment => htlc_payment(tx).map(Some),
-        EntityTxKind::LendingBorrow => lending_borrow(tx).map(Some),
-        EntityTxKind::LendingClosePosition => lending_close(tx).map(Some),
-        EntityTxKind::LendingOffer => lending_offer(tx).map(Some),
-        EntityTxKind::LendingRepay => lending_repay(tx).map(Some),
+        // Unsupported bank semantics are a sender reject, never a Runtime halt.
+        EntityTxKind::LendingOffer
+        | EntityTxKind::LendingBorrow
+        | EntityTxKind::LendingRepay
+        | EntityTxKind::LendingClosePosition
+        | EntityTxKind::LendingApprove
+        | EntityTxKind::LendingSetTerms => Err(EntityKernelError::RejectedEntityTx {
+            kind: tx.kind.as_str(),
+            detail: "LENDING_UNSUPPORTED".into(),
+        }),
         EntityTxKind::OpenAccount => open_account(tx).map(Some),
         EntityTxKind::PlaceSwapOffer => place_swap_offer(tx).map(Some),
         EntityTxKind::PrepareDispute => prepare_dispute(tx).map(Some),

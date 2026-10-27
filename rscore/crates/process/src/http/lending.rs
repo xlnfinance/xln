@@ -1,8 +1,6 @@
 //! Read-only product projection of the committed Entity lending collection.
-use num_bigint::BigInt;
-use serde_json::{Value, json};
-use xln_rscore_entity_kernel::{LendingLoanStatus, LendingState, canonical_lending_state};
-use xln_rscore_protocol::CanonicalValue;
+use serde_json::Value;
+use xln_rscore_entity_kernel::LendingState;
 
 pub struct LendingStateQuery {
     pub hub_entity_id: [u8; 32],
@@ -59,95 +57,11 @@ impl LendingStateQuery {
     }
 }
 
-fn product_json(value: CanonicalValue) -> Result<Value, String> {
-    match value {
-        CanonicalValue::String(text) => Ok(Value::String(text)),
-        CanonicalValue::BigInt(amount) => Ok(Value::String(amount.to_string())),
-        CanonicalValue::Number(number) => {
-            serde_json::from_str(number.as_str()).map_err(|error| error.to_string())
-        }
-        CanonicalValue::Object(fields) => fields
-            .into_iter()
-            .map(|(name, value)| Ok((name, product_json(value)?)))
-            .collect::<Result<serde_json::Map<_, _>, String>>()
-            .map(Value::Object),
-        _ => Err("RRS_LENDING_PRODUCT_VALUE_INVALID".into()),
-    }
-}
-
 pub fn lending_state_response(
-    state: Option<&LendingState>,
-    query: &LendingStateQuery,
+    _state: Option<&LendingState>,
+    _query: &LendingStateQuery,
 ) -> Result<Value, String> {
-    let empty = LendingState::empty();
-    let state = state.unwrap_or(&empty);
-    let matches_token = |token: u16| {
-        query
-            .token_id
-            .is_none_or(|filter| f64::from(token) == filter)
-    };
-    let pools = state
-        .pools()
-        .filter(|pool| matches_token(pool.token_id))
-        .collect::<Vec<_>>();
-    let loans = state
-        .loans()
-        .filter(|loan| matches_token(loan.token_id))
-        .collect::<Vec<_>>();
-    // TS totals describe the selected token's entire hub, even for a user-filtered response.
-    let available: BigInt = pools.iter().map(|pool| &pool.available_amount).sum();
-    let borrowed: BigInt = pools.iter().map(|pool| &pool.borrowed_amount).sum();
-    let active: BigInt = loans
-        .iter()
-        .filter(|loan| {
-            matches!(
-                loan.status,
-                LendingLoanStatus::Opening | LendingLoanStatus::Active | LendingLoanStatus::Closing
-            )
-        })
-        .map(|loan| &loan.principal_amount)
-        .sum();
-    let CanonicalValue::Object(fields) =
-        canonical_lending_state(state).map_err(|error| error.to_string())?
-    else {
-        return Err("RRS_LENDING_STATE_OBJECT".into());
-    };
-    let mut response = json!({"success":true,"hubEntityId":query.hub_entity_id_text,"totals":{"availableAmount":available.to_string(),"borrowedAmount":borrowed.to_string(),"activePrincipalAmount":active.to_string()}});
-    for (name, collection) in fields {
-        let CanonicalValue::Map(entries) = collection else {
-            return Err("RRS_LENDING_STATE_MAP".into());
-        };
-        let mut rows = entries
-            .into_iter()
-            .map(|(_, value)| product_json(value))
-            .collect::<Result<Vec<_>, _>>()?;
-        rows.retain(|row| {
-            query
-                .token_id
-                .is_none_or(|token| row["tokenId"].as_f64() == Some(token))
-                && (query.user_entity_id.is_empty()
-                    || row["lenderEntityId"]
-                        .as_str()
-                        .is_some_and(|id| id.eq_ignore_ascii_case(&query.user_entity_id))
-                    || (name == "loans"
-                        && row["borrowerEntityId"]
-                            .as_str()
-                            .is_some_and(|id| id.eq_ignore_ascii_case(&query.user_entity_id))))
-        });
-        let id = if name == "pools" {
-            "positionId"
-        } else {
-            "loanId"
-        };
-        rows.sort_by(|a, b| {
-            b["updatedAt"]
-                .as_u64()
-                .cmp(&a["updatedAt"].as_u64())
-                .then_with(|| a[id].as_str().cmp(&b[id].as_str()))
-        });
-        response[name] = Value::Array(rows);
-    }
-    Ok(response)
+    Err("LENDING_UNSUPPORTED".into())
 }
 
 #[cfg(test)]

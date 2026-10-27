@@ -385,56 +385,6 @@ fn validate_reserves(reserves: &BTreeMap<u16, BigInt>) -> Result<(), EntityKerne
     Ok(())
 }
 
-fn validate_lending(
-    entity_id: &str,
-    lending: &crate::LendingState,
-    known_accounts: &BTreeSet<String>,
-) -> Result<(), EntityKernelError> {
-    for pool in lending.pools() {
-        require_entity(&pool.hub_entity_id, "LENDING_POOL_HUB")?;
-        require_entity(&pool.lender_entity_id, "LENDING_POOL_LENDER")?;
-        if pool.hub_entity_id != entity_id
-            || !known_accounts.contains(&pool.lender_entity_id)
-            || pool.token_id == 0
-            || pool.principal_amount <= BigInt::from(0)
-            || pool.available_amount < BigInt::from(0)
-            || pool.borrowed_amount < BigInt::from(0)
-            || pool.interest_bps > 10_000
-            || pool.term_ms == 0
-            || pool.created_at > MAX_SAFE_INTEGER
-            || pool.updated_at > MAX_SAFE_INTEGER
-        {
-            return Err(invalid("LENDING_POOL_VALUE"));
-        }
-    }
-    for loan in lending.loans() {
-        require_entity(&loan.hub_entity_id, "LENDING_LOAN_HUB")?;
-        require_entity(&loan.borrower_entity_id, "LENDING_LOAN_BORROWER")?;
-        require_entity(&loan.lender_entity_id, "LENDING_LOAN_LENDER")?;
-        let pool = lending
-            .pool(&loan.position_id)
-            .ok_or_else(|| invalid("LENDING_LOAN_POOL_MISSING"))?;
-        if loan.hub_entity_id != entity_id
-            || !known_accounts.contains(&loan.borrower_entity_id)
-            || loan.lender_entity_id != pool.lender_entity_id
-            || loan.token_id != pool.token_id
-            || loan.principal_amount <= BigInt::from(0)
-            || loan.interest_amount < BigInt::from(0)
-            || loan.repayment_amount != loan.principal_amount.clone() + &loan.interest_amount
-            || loan.repaid_amount < BigInt::from(0)
-            || loan.repaid_amount > loan.repayment_amount
-            || loan.interest_bps > 10_000
-            || loan.term_ms == 0
-            || loan.opened_at > MAX_SAFE_INTEGER
-            || loan.due_at > MAX_SAFE_INTEGER
-            || loan.updated_at > MAX_SAFE_INTEGER
-        {
-            return Err(invalid("LENDING_LOAN_VALUE"));
-        }
-    }
-    Ok(())
-}
-
 fn validate_metadata(
     entity_id: &str,
     metadata: &OrderbookConsensusMetadata,
@@ -538,7 +488,7 @@ pub fn restore_entity_state(
     }
     validate_paybook(&snapshot.paybook, &snapshot.known_accounts)?;
     if let Some(lending) = &snapshot.lending {
-        validate_lending(&snapshot.entity_id, lending, &snapshot.known_accounts)?;
+        match *lending {}
     }
     if let Some(pairs) = &snapshot.swap_trading_pairs {
         validate_swap_trading_pairs(pairs)?;

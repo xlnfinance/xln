@@ -122,9 +122,8 @@ pub use j_events::{
 };
 pub use kernel::apply_entity_kernel;
 pub use lendbook::{
-    LendingLoan, LendingLoanStatus, LendingPoolPosition, LendingPoolStatus, LendingState,
-    OverdueLendingLoan, canonical_lending_state, decode_canonical_lending_state,
-    overdue_lending_loans, settle_overdue_lending_loans,
+    LendingState, OverdueLendingLoan, canonical_lending_state, decode_canonical_lending_state,
+    settle_overdue_lending_loans,
 };
 pub use local_control::{
     EntityPropose, EntityVote, LocalEntityControlTx, ProfileUpdate, apply_local_entity_control_tx,

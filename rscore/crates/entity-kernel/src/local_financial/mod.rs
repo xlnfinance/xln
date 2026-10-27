@@ -8,7 +8,6 @@ mod credit_request;
 mod extend_credit;
 #[path = "payments/htlc_payment.rs"]
 mod htlc_payment;
-mod lending;
 mod open_account;
 #[path = "payments/quote_r2c.rs"]
 mod quote_r2c;
@@ -69,6 +68,22 @@ pub(crate) fn apply_local_entity_financial_txs(
     genesis_policy: Option<&xln_rscore_batch::EntityAccountGenesisPolicy>,
     runtime_seed: Option<&str>,
 ) -> Result<LocalFinancialResult, EntityKernelError> {
+    // Direct typed callers have the same refusal as wire admission, before any
+    // earlier command in this batch can mutate the Entity candidate.
+    if txs.iter().any(|tx| {
+        matches!(
+            tx,
+            LocalEntityFinancialTx::LendingBorrow(_)
+                | LocalEntityFinancialTx::LendingClosePosition(_)
+                | LocalEntityFinancialTx::LendingOffer(_)
+                | LocalEntityFinancialTx::LendingRepay(_)
+        )
+    }) {
+        return Err(EntityKernelError::RejectedEntityTx {
+            kind: "lending",
+            detail: "LENDING_UNSUPPORTED".into(),
+        });
+    }
     let mut account_creates = Vec::new();
     let mut account_txs = Vec::new();
     let mut outputs = Vec::new();
@@ -146,22 +161,14 @@ pub(crate) fn apply_local_entity_financial_txs(
                 &mut outputs,
                 &mut events,
             )?,
-            LocalEntityFinancialTx::LendingBorrow(tx) => {
-                lending::apply_borrow(state, tx, &mut account_txs, &mut events, &mut wake_targets)?
-            }
-            LocalEntityFinancialTx::LendingClosePosition(tx) => {
-                lending::apply_close(state, tx, &mut account_txs, &mut events, &mut wake_targets)?
-            }
-            LocalEntityFinancialTx::LendingOffer(tx) => lending::apply_offer(
-                state,
-                tx,
-                account_views,
-                &mut account_txs,
-                &mut events,
-                &mut wake_targets,
-            )?,
-            LocalEntityFinancialTx::LendingRepay(tx) => {
-                lending::apply_repay(state, tx, &mut account_txs, &mut events, &mut wake_targets)?
+            LocalEntityFinancialTx::LendingBorrow(_)
+            | LocalEntityFinancialTx::LendingClosePosition(_)
+            | LocalEntityFinancialTx::LendingOffer(_)
+            | LocalEntityFinancialTx::LendingRepay(_) => {
+                return Err(EntityKernelError::RejectedEntityTx {
+                    kind: "lending",
+                    detail: "LENDING_UNSUPPORTED".into(),
+                });
             }
             LocalEntityFinancialTx::OpenAccount(tx) => open_account::apply(
                 state,

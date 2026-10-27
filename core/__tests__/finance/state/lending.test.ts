@@ -883,3 +883,26 @@ describe('payer-authenticated hub lending', () => {
     expect(after).not.toBe(before);
   });
 });
+
+test('disbursement ACK followed by full repayment uses each committed frame clock', async () => {
+  const state = makeState();
+  state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
+  authorizeTestLending(state, BORROWER);
+  const [draw] = await commit(state, BORROWER, { type: 'lending_borrow_request', data: {
+    requestId: BORROW_REQUEST_ID, hubEntityId: HUB, borrowerEntityId: BORROWER,
+    tokenId: 1, amount: 2_500n, termId: '1d', maxInterestBps: 100, maxLateMs: 0, expiresAt: 9_000,
+  } }, false, 2_000);
+  if (!draw || draw.tx.type !== 'lending_disburse') throw new Error('Missing draw');
+  expect((await applyOnly(state, BORROWER, draw.tx, true, 2_001)).ok).toBe(true);
+  const repay: AccountTx = { type: 'lending_repay', data: {
+    loanId: draw.tx.data.loanId, hubEntityId: HUB, borrowerEntityId: BORROWER, tokenId: 1,
+    amount: 2_500n, claimHash: currentClaimHash(state, draw.tx.data.loanId),
+  } };
+  expect((await applyOnly(state, BORROWER, repay, false, 2_002)).ok).toBe(true);
+  expect(state.accounts.get(BORROWER)!.state.subcontracts!.has(draw.tx.data.loanId)).toBe(false);
+  // committed-input publishes both Account commits before running their ordered follow-ups.
+  const followups: AccountTxTarget[] = [];
+  applyCommittedAccountFrameFollowups(state, BORROWER, frame(draw.tx, 2_001), true, followups, undefined, []);
+  applyCommittedAccountFrameFollowups(state, BORROWER, frame(repay, 2_002), false, followups, undefined, []);
+  expect(state.lending!.loans.get(draw.tx.data.loanId)).toMatchObject({ status: 'repaid', openedAt: 2_001, accruedAt: 2_002, principalAmount: 0n });
+});

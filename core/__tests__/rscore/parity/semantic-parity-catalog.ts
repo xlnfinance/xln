@@ -56,11 +56,6 @@ const ACCOUNT_BALANCE_EVIDENCE = [
 const ACCOUNT_HTLC_EVIDENCE = [
   'rscore/crates/engine/tests/htlc_parity.rs',
 ] as const;
-const ACCOUNT_LENDING_EVIDENCE = [
-  'core/__tests__/rscore/parity/account-lending-semantic-parity.test.ts',
-  'rscore/crates/engine/tests/lending_parity.rs',
-  'rscore/fixtures/account-semantics/lending-v1.json',
-] as const;
 const ACCOUNT_CREDIT_REQUEST_EVIDENCE = [
   'core/__tests__/rscore/parity/account/credit-request.test.ts',
   'rscore/crates/engine/tests/monetary/credit_request.rs',
@@ -134,13 +129,13 @@ const ACCOUNT_SWAP_OFFER_EVIDENCE = [
  */
 export const ACCOUNT_TX_SEMANTIC_CATALOG = [
   covered('account', 'direct_payment', 'core/account/tx/handlers/balance/direct-payment.ts', ACCOUNT_BALANCE_EVIDENCE),
-  covered('account', 'lending_fund', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
-  covered('account', 'lending_rate', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
-  covered('account', 'lending_borrow_request', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
-  covered('account', 'lending_repay', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
-  covered('account', 'lending_disburse', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
-  covered('account', 'lending_close_request', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
-  covered('account', 'lending_close_payout', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
+  { layer: 'account', type: 'lending_fund', productionPath: 'core/account/tx/handlers/balance/lending.ts', semanticEvidence: 'missing' },
+  { layer: 'account', type: 'lending_rate', productionPath: 'core/account/tx/handlers/balance/lending.ts', semanticEvidence: 'missing' },
+  { layer: 'account', type: 'lending_borrow_request', productionPath: 'core/account/tx/handlers/balance/lending.ts', semanticEvidence: 'missing' },
+  { layer: 'account', type: 'lending_repay', productionPath: 'core/account/tx/handlers/balance/lending.ts', semanticEvidence: 'missing' },
+  { layer: 'account', type: 'lending_disburse', productionPath: 'core/account/tx/handlers/balance/lending.ts', semanticEvidence: 'missing' },
+  { layer: 'account', type: 'lending_close_request', productionPath: 'core/account/tx/handlers/balance/lending.ts', semanticEvidence: 'missing' },
+  { layer: 'account', type: 'lending_close_payout', productionPath: 'core/account/tx/handlers/balance/lending.ts', semanticEvidence: 'missing' },
   covered('account', 'add_delta', 'core/account/tx/handlers/balance/add-delta.ts', ACCOUNT_BALANCE_EVIDENCE),
   covered('account', 'set_credit_limit', 'core/account/tx/handlers/balance/set-credit-limit.ts', ACCOUNT_BALANCE_EVIDENCE),
   covered('account', 'credit_request', 'core/account/tx/handlers/balance/credit-request.ts', ACCOUNT_CREDIT_REQUEST_EVIDENCE),
@@ -195,12 +190,12 @@ export const ENTITY_TX_SEMANTIC_CATALOG = [
   coveredEntity('j_clear_batch', 'core/entity/tx/handlers/j-batch/j-clear-batch.ts', ENTITY_ROUTING_SEMANTIC_EVIDENCE),
   coveredEntity('j_event', 'core/entity/tx/apply.ts#handleJEventEntityTx', ENTITY_ROUTING_SEMANTIC_EVIDENCE),
   coveredEntity('j_rebroadcast', 'core/entity/tx/handlers/j-batch/j-rebroadcast.ts', ENTITY_ROUTING_SEMANTIC_EVIDENCE),
-  coveredEntity('lendingApprove', 'core/entity/tx/handlers/payments/lending.ts', ENTITY_SAME_J_FINANCIAL_EVIDENCE),
-  coveredEntity('lendingBorrow', 'core/entity/tx/handlers/payments/lending.ts', ENTITY_SAME_J_FINANCIAL_EVIDENCE),
-  coveredEntity('lendingClosePosition', 'core/entity/tx/handlers/payments/lending.ts', ENTITY_SAME_J_FINANCIAL_EVIDENCE),
-  coveredEntity('lendingOffer', 'core/entity/tx/handlers/payments/lending.ts', ENTITY_SAME_J_FINANCIAL_EVIDENCE),
-  coveredEntity('lendingRepay', 'core/entity/tx/handlers/payments/lending.ts', ENTITY_SAME_J_FINANCIAL_EVIDENCE),
-  coveredEntity('lendingSetTerms', 'core/entity/tx/handlers/payments/lending.ts', ENTITY_SAME_J_FINANCIAL_EVIDENCE),
+  missingEntity('lendingApprove', 'core/entity/tx/handlers/payments/lending.ts'),
+  missingEntity('lendingBorrow', 'core/entity/tx/handlers/payments/lending.ts'),
+  missingEntity('lendingClosePosition', 'core/entity/tx/handlers/payments/lending.ts'),
+  missingEntity('lendingOffer', 'core/entity/tx/handlers/payments/lending.ts'),
+  missingEntity('lendingRepay', 'core/entity/tx/handlers/payments/lending.ts'),
+  missingEntity('lendingSetTerms', 'core/entity/tx/handlers/payments/lending.ts'),
   coveredEntity('mintReserves', 'core/entity/tx/handlers/j-batch/mint-reserves.ts', ENTITY_CONTROL_SEMANTIC_EVIDENCE),
   coveredEntity('openAccount', 'core/entity/tx/handlers/account/lifecycle/open-account.ts', ENTITY_SAME_J_FINANCIAL_EVIDENCE),
   coveredEntity('orderbookSweepCrossJurisdiction', 'core/entity/tx/handlers/cross-j/sweep.ts', CROSS_J_ENTITY_KINDS_EVIDENCE),

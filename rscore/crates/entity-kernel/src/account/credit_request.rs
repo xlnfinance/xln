@@ -58,8 +58,7 @@ pub(crate) fn apply_committed_credit_request_followup(
     let target = std::cmp::min(amount.clone(), cap);
     let view = account_view
         .ok_or_else(|| EntityKernelError::output("CREDIT_REQUEST_ACCOUNT_VIEW_MISSING"))?;
-    let current =
-        crate::lendbook::projected_credit(view, &commit.account_id, *token_id, account_txs);
+    let current = projected_credit(view, &commit.account_id, *token_id, account_txs);
     if current >= target {
         return Ok(true);
     }
@@ -210,4 +209,43 @@ mod tests {
             None
         );
     }
+}
+
+pub(crate) fn projected_credit(
+    view: &LocalAccountFinancialView,
+    account_id: &str,
+    token_id: TokenId,
+    queued: &[TargetedAccountTx],
+) -> BigInt {
+    projected_credit_from(
+        view.owner_peer_credit_limit
+            .get(&token_id)
+            .cloned()
+            .unwrap_or_else(|| BigInt::from(0)),
+        account_id,
+        token_id,
+        queued,
+    )
+}
+
+/// The single credit-grant projection: the committed grant plus every write
+/// this frame already decided. Repay, close and the overdue settlement share
+/// it so no second grant formula can drift.
+fn projected_credit_from(
+    committed: BigInt,
+    account_id: &str,
+    token_id: TokenId,
+    queued: &[TargetedAccountTx],
+) -> BigInt {
+    let mut value = committed;
+    for (_, tx) in queued.iter().filter(|(target, _)| target == account_id) {
+        match tx {
+            AccountTx::SetCreditLimit {
+                token_id: tx_token,
+                amount,
+            } if tx_token == &token_id => value = amount.clone(),
+            _ => {}
+        }
+    }
+    value
 }

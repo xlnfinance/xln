@@ -1164,13 +1164,6 @@ fn local_financial_view_requests(
                     .and_then(|value| xln_rscore_engine::TokenId::new(value).ok()),
                 AccountTx::LendingRepay { token_id, .. }
                 | AccountTx::CreditRequest { token_id, .. } => Some(*token_id),
-                AccountTx::LendingCloseRequest { position_id, .. } => state
-                    .lending
-                    .as_ref()
-                    .and_then(|lending| lending.pool(position_id))
-                    .and_then(|pool| {
-                        xln_rscore_engine::TokenId::new(u32::from(pool.token_id)).ok()
-                    }),
                 _ => continue,
             };
             let entry = &mut requested
@@ -2274,43 +2267,6 @@ fn apply_scheduled_wake(
         }
     }
 
-    // Overdue loans are derived from committed lending state exactly like
-    // Account timelocks: the hub reads its own credit grant on each borrower
-    // Account so the settlement transition stays a pure state function.
-    let overdue = crate::lendbook::overdue_lending_loans(state, state.timestamp)?;
-    let overdue_lending_loans = if overdue.is_empty() {
-        Vec::new()
-    } else {
-        let borrower_views = accounts
-            .local_financial_views(
-                overdue
-                    .iter()
-                    .map(|(_, borrower, _)| borrower.as_str())
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .map(|borrower| Ok((account_id(borrower)?, Default::default())))
-                    .collect::<Result<Vec<_>, ResidentEntityError>>()?,
-            )?
-            .into_iter()
-            .map(|(account, view)| (account_text(account), view))
-            .collect::<BTreeMap<_, _>>();
-        overdue
-            .into_iter()
-            .map(|(loan_id, borrower_entity_id, token_id)| {
-                let committed_credit_limit = borrower_views
-                    .get(&borrower_entity_id)
-                    .and_then(|view| view.owner_peer_credit_limit.get(&token_id).cloned())
-                    .unwrap_or_else(|| num_bigint::BigInt::from(0));
-                crate::OverdueLendingLoan {
-                    loan_id,
-                    borrower_entity_id,
-                    token_id,
-                    committed_credit_limit,
-                }
-            })
-            .collect()
-    };
-
     let execution = execute_crontab(
         state
             .crontab
@@ -2321,7 +2277,7 @@ fn apply_scheduled_wake(
             expected_proposer_signer_id,
             now: state.timestamp,
             expired_htlc_locks: &expired_locks,
-            overdue_lending_loans: &overdue_lending_loans,
+            overdue_lending_loans: &[],
             secret_acks_requiring_dispute: &secret_acks_requiring_dispute,
             dispute_views: &dispute_views,
             j_batch_state: state.j_batch_state.as_ref(),

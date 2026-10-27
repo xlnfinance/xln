@@ -3,14 +3,12 @@ mod common;
 
 use common::{entity, entity_text, replica, token};
 use xln_rscore_engine::{
-    AccountTx, AccountVerdict, Delta, LendingIntentKind, LendingTermId, SequentialAccountEngine,
-    Side,
+    AccountTx, AccountVerdict, Delta, LendingTermId, SequentialAccountEngine, Side,
 };
 
 #[test]
-fn lending_fund_requires_unreserved_owned_assets_in_both_directions() {
-    // Same concrete amounts as TypeScript lending-funding.test.ts. Never fund
-    // a pool by spending permission to borrow, including when owned funds are held.
+fn unsupported_lending_never_moves_owned_or_borrowed_assets() {
+    // Even previously accepted pool deposits must reject without touching funds.
     let vectors: [(i64, i64, i64, i64, bool); 7] = [
         (0, 100, 0, 100, false),
         (100, 0, 0, 100, true),
@@ -22,7 +20,7 @@ fn lending_fund_requires_unreserved_owned_assets_in_both_directions() {
     ];
     for side in [Side::Left, Side::Right] {
         let left = side == Side::Left;
-        for (owned, credit, hold, amount, accepted) in vectors {
+        for (owned, credit, hold, amount, _ts_accepted) in vectors {
             let old_offdelta = if left { owned } else { -owned };
             let delta = Delta::new(
                 token(1),
@@ -53,8 +51,8 @@ fn lending_fund_requires_unreserved_owned_assets_in_both_directions() {
             };
             let transition = SequentialAccountEngine::apply(&base, side, &tx).expect("transition");
             assert_eq!(
-                transition.verdict() == &AccountVerdict::Applied,
-                accepted,
+                matches!(transition.verdict(), AccountVerdict::Rejected(_)),
+                true,
                 "side={side:?} owned={owned} credit={credit} hold={hold} amount={amount}"
             );
             assert_eq!(
@@ -63,22 +61,13 @@ fn lending_fund_requires_unreserved_owned_assets_in_both_directions() {
                     .expect("root"),
                 before
             );
-            if accepted {
-                let candidate = transition.candidate().expect("candidate");
-                assert_eq!(
-                    candidate.state().delta(token(1)).expect("delta").offdelta(),
-                    &(old_offdelta + if left { -amount } else { amount }).into()
-                );
-                assert_eq!(
-                    candidate
-                        .state()
-                        .lending_intent("fund:lend-1111111111111111"),
-                    Some(LendingIntentKind::Fund)
-                );
-            } else {
-                assert!(transition.candidate().is_none());
-                assert_eq!(base.state().lending_intent_count(), 0);
-            }
+            assert!(transition.candidate().is_none());
+            assert!(transition.outputs().is_empty());
+            assert_eq!(base.state().lending_intent_count(), 0);
+            assert_eq!(
+                common::rejected_message(SequentialAccountEngine::apply(&base, side, &tx)),
+                "LENDING_UNSUPPORTED:lending_fund"
+            );
         }
     }
 }

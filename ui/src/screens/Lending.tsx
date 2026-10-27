@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LENDING_TERM_MS, lendingLoanMaximumAmount } from '@xln/core/lendbook/state';
+import { LENDING_TERM_MS } from '@xln/core/lendbook/state';
 import { MANAGE, PageHead } from '../components/PageHead';
+import { LendingPositionSummary } from '../components/LendingPositionSummary';
 import { TokenIcon } from '../components/TokenPicker';
 import { LendingClose } from '../components/LendingClose';
 import { LendingRepay } from '../components/LendingRepay';
@@ -22,7 +23,6 @@ import {
 	buildLendingOfferTx,
 	bankOfferFor,
 	fetchLendingState,
-	isLendingLoanRepayable,
 	type LendingState,
 	type TermId,
 } from '../runtime/financial/lending';
@@ -30,6 +30,7 @@ import {
 const rate = (bps: number): string => `${(bps / 100).toFixed(2)}%`;
 
 export function Lending() {
+	const tokenCatalog = useApp(s => s.tokenCatalog);
 	const entityId = useApp(s => s.activeEntityId);
 	const selectedTokenId = useApp(s => s.selectedTokenId);
 	const toast = useApp(s => s.toast);
@@ -43,8 +44,11 @@ export function Lending() {
 	const [amountText, setAmountText] = useState('');
 	const [termId, setTermId] = useState<TermId>('demand');
 	const [rateText, setRateText] = useState(side === 'lend' ? '100' : '250');
-	const [state, setState] = useState<LendingState | null>(null);
-	const [stateError, setStateError] = useState('');
+	const stateKey = `${hubId}:${wallet.entityId}:${tokenId}`;
+	const [snapshot, setSnapshot] = useState<{ key: string; state: LendingState | null; error: string } | null>(null);
+	// Changing selection hides the old result in this render, before effects or HTTP complete.
+	const state = snapshot?.key === stateKey ? snapshot.state : null;
+	const stateError = snapshot?.key === stateKey ? snapshot.error : '';
 	const [loading, setLoading] = useState(false);
 	const refreshVersion = useRef(0);
 	const [busy, setBusy] = useState(false);
@@ -74,16 +78,14 @@ export function Lending() {
 		try {
 			const next = await fetchLendingState({ hubEntityId: hubId, userEntityId: wallet.entityId, tokenId, ...(requestId ? { requestId } : {}) });
 			if (version !== refreshVersion.current) return;
-			setState(next);
-			setStateError('');
+			setSnapshot({ key: stateKey, state: next, error: '' });
 		} catch (error) {
 			if (version !== refreshVersion.current) return;
-			setState(null);
-			setStateError(error instanceof Error ? error.message : String(error));
+			setSnapshot({ key: stateKey, state: null, error: error instanceof Error ? error.message : String(error) });
 		} finally {
 			if (version === refreshVersion.current) setLoading(false);
 		}
-	}, [hubId, wallet.entityId, tokenId, requestId]);
+	}, [hubId, wallet.entityId, tokenId, requestId, stateKey]);
 
 	useEffect(() => {
 		let stopped = false;
@@ -297,12 +299,7 @@ export function Lending() {
 								<div className={`row${index === 0 ? ' first' : ''}`}>
 									<span className="rt">
 										<TokenIcon tokenId={pool.tokenId} />
-										<span className="tx">
-											<span className="t">{formatMoney(pool.principalAmount, meta.decimals)} {meta.symbol}</span>
-											<span className="s">
-												{pool.termId === 'demand' ? 'On demand' : pool.termId} · {rate(pool.interestBps)}{pool.termId === 'demand' ? ' per year' : ''} · {pool.status} · {formatMoney(pool.closeAmount, meta.decimals)} claim
-											</span>
-										</span>
+										<LendingPositionSummary row={pool} catalog={tokenCatalog} />
 									</span>
 								</div>
 								{pool.rateExpiresAt !== null && <p className="note" data-testid="savings-rate-coverage">{pool.rateExpiresAt <= Date.now() ? 'Rate coverage ended. Your principal and earned interest remain owed; further interest needs a signed renewal.' : `Signed rate coverage ends ${new Date(pool.rateExpiresAt).toLocaleString()}. Renewal cannot exceed your accepted risk.`}</p>}
@@ -318,14 +315,7 @@ export function Lending() {
 								<div key={loan.loanId} className={`row${index === 0 ? ' first' : ''}`}>
 									<span className="rt">
 										<TokenIcon tokenId={loan.tokenId} />
-										<span className="tx">
-											<span className="t">{formatMoney(loan.principalAmount, meta.decimals)} {meta.symbol}</span>
-											<span className="s">
-												{loan.termId} · {rate(loan.interestBps)} · {loan.status} · due {loan.dueAt ? new Date(loan.dueAt).toLocaleString() : '—'} · repaid{' '}
-												{formatMoney(loan.repaidAmount, meta.decimals)} of {formatMoney(loan.repaymentAmount, meta.decimals)}
-											{isLendingLoanRepayable(loan) && <> · Repay authorizes up to {formatAmount(lendingLoanMaximumAmount(loan), meta.decimals, meta.decimals)} {meta.symbol}; only the amount due at confirmation is debited.</>}
-											</span>
-										</span>
+										<LendingPositionSummary row={loan} catalog={tokenCatalog} />
 									</span>
 									<LendingRepay loan={loan} wallet={wallet} onSubmitted={() => void refresh()} />
 								</div>

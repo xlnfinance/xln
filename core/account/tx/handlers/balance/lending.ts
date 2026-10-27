@@ -30,7 +30,7 @@ const INTENT_ID_RE = /^(?:lend|borrow|loan)-[0-9a-f]{16}$/;
 const normalized = (value: unknown): string => String(value || '').trim().toLowerCase();
 
 const proposerId = (account: AccountReplica, byLeft: boolean): string =>
-  normalized(byLeft ? account.state.leftEntity : account.state.rightEntity);
+  byLeft ? account.state.leftEntity : account.state.rightEntity;
 
 const requireRole = (
   account: AccountReplica,
@@ -38,7 +38,7 @@ const requireRole = (
   role: 'lender' | 'borrower' | 'hub',
   claimedEntityId: string,
 ): void => {
-  const claimed = normalized(claimedEntityId);
+  const claimed = claimedEntityId;
   if (!ENTITY_ID_RE.test(claimed)) {
     throw rejectFailure(`LENDING_${role.toUpperCase()}_INVALID`, `LENDING_${role.toUpperCase()}_INVALID:${claimedEntityId}`);
   }
@@ -52,13 +52,13 @@ const requireRole = (
 };
 
 const requireCounterparty = (account: AccountReplica, proposer: string, counterparty: string): void => {
-  const left = normalized(account.state.leftEntity);
-  const right = normalized(account.state.rightEntity);
+  const left = account.state.leftEntity;
+  const right = account.state.rightEntity;
   const expected = proposer === left ? right : left;
-  if (normalized(counterparty) !== expected) {
+  if (counterparty !== expected) {
     throw rejectFailure(
       'LENDING_COUNTERPARTY_INVALID',
-      `LENDING_COUNTERPARTY_INVALID: expected=${expected} got=${normalized(counterparty)}`,
+      `LENDING_COUNTERPARTY_INVALID: expected=${expected} got=${counterparty}`,
     );
   }
 };
@@ -160,7 +160,7 @@ const applyTermLoanFunding = (
   const payer = isSavings ? tx.data.lenderEntityId : tx.data.hubEntityId;
   const recipient = isSavings ? tx.data.hubEntityId : tx.data.borrowerEntityId;
   requireRole(account, byLeft, isSavings ? 'lender' : 'hub', payer);
-  requireCounterparty(account, normalized(payer), recipient);
+  requireCounterparty(account, payer, recipient);
   requireLendingTokenId(tx.data.tokenId);
   positiveAmount(tx.data.amount, 'LENDING_FUND');
   normalizeLendingTerm(tx.data.termId);
@@ -212,7 +212,7 @@ const applySavingsRate = (
 ): LendingResult => {
   requireIntentId(tx.data.positionId, 'lend');
   requireRole(account, byLeft, 'hub', tx.data.hubEntityId);
-  requireCounterparty(account, normalized(tx.data.hubEntityId), tx.data.lenderEntityId);
+  requireCounterparty(account, tx.data.hubEntityId, tx.data.lenderEntityId);
   const claim = account.state.subcontracts.get(tx.data.positionId);
   // Only the bank may propose a new prospective rate. The exact preceding
   // signed claim prevents replay/repricing; pending withdrawal has priority.
@@ -233,7 +233,7 @@ const applySavingsCloseRequest = (
 ): LendingResult => {
   requireIntentId(tx.data.positionId, 'lend');
   requireRole(account, byLeft, 'lender', tx.data.lenderEntityId);
-  requireCounterparty(account, normalized(tx.data.lenderEntityId), tx.data.hubEntityId);
+  requireCounterparty(account, tx.data.lenderEntityId, tx.data.hubEntityId);
   const covenant = account.state.subcontracts.get(tx.data.positionId);
   if (!covenant || !('kind' in covenant) || (covenant.kind !== 'savings' && covenant.kind !== 'demand') || covenant.creditorIsLeft !== byLeft) {
     return accountTxValidationRejected('LENDING_CLOSE_COVENANT_MISMATCH', []);
@@ -270,7 +270,7 @@ export const handleLendingAccountTx = (
     if (tx.data.termId === 'demand') return accountTxValidationRejected('LENDING_LOAN_TERM_REQUIRED', []);
     requireIntentId(tx.data.requestId, 'borrow');
     requireRole(account, byLeft, 'borrower', tx.data.borrowerEntityId);
-    requireCounterparty(account, normalized(tx.data.borrowerEntityId), tx.data.hubEntityId);
+    requireCounterparty(account, tx.data.borrowerEntityId, tx.data.hubEntityId);
     requireLendingTokenId(tx.data.tokenId);
     positiveAmount(tx.data.amount, 'LENDING_BORROW');
     normalizeLendingTerm(tx.data.termId);
@@ -293,7 +293,7 @@ export const handleLendingAccountTx = (
   if (tx.type === 'lending_repay') {
     requireIntentId(tx.data.loanId, 'loan');
     requireRole(account, byLeft, 'borrower', tx.data.borrowerEntityId);
-    requireCounterparty(account, normalized(tx.data.borrowerEntityId), tx.data.hubEntityId);
+    requireCounterparty(account, tx.data.borrowerEntityId, tx.data.hubEntityId);
     positiveAmount(tx.data.amount, 'LENDING_REPAY');
     const intentKey = `repay:${normalized(tx.data.loanId)}`;
     requireUnusedIntent(account, intentKey);
@@ -321,7 +321,7 @@ export const handleLendingAccountTx = (
 
   requireIntentId(tx.data.positionId, 'lend');
   requireRole(account, byLeft, 'hub', tx.data.hubEntityId);
-  requireCounterparty(account, normalized(tx.data.hubEntityId), tx.data.lenderEntityId);
+  requireCounterparty(account, tx.data.hubEntityId, tx.data.lenderEntityId);
   positiveAmount(tx.data.amount, 'LENDING_CLOSE_PAYOUT');
   const intentKey = `payout:${normalized(tx.data.positionId)}`;
   requireUnusedIntent(account, intentKey);

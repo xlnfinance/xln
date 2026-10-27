@@ -4,8 +4,10 @@ import {
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
 import { TOKENS } from '../../config/constants';
+import { rejectFailure } from '../../protocol/errors/failure-taxonomy';
 
 type AccountTxFieldKind =
+  | 'entityId'
   | 'array'
   | 'bigint'
   | 'boolean'
@@ -23,6 +25,13 @@ export type AccountTxDataSchema = Readonly<{
 }>;
 
 const validateField = (value: unknown, kind: AccountTxFieldKind, code: string): void => {
+  // Identity must have one spelling before bank policy and Account authorization.
+  if (kind === 'entityId') {
+    if (typeof value !== 'string' || !/^0x[0-9a-f]{64}$/.test(value)) {
+      throw rejectFailure('ACCOUNT_TX_ENTITY_ID_NON_CANONICAL', code);
+    }
+    return;
+  }
   if (kind === 'array' && Array.isArray(value)) return;
   if (kind === 'bigint' && typeof value === 'bigint') return;
   if (kind === 'boolean' && typeof value === 'boolean') return;

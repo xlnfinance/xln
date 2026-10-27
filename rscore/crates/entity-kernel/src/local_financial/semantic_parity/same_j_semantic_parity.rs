@@ -361,8 +361,19 @@ fn same_j_financial_entity_projections_match_typescript() {
             &account_views,
             policy.as_ref(),
             None,
-        )
-        .unwrap_or_else(|error| panic!("{}: {error}", expected.name));
+        );
+        if expected.name.starts_with("lending") {
+            assert!(
+                matches!(result, Err(EntityKernelError::RejectedEntityTx { detail, .. }) if detail == "LENDING_UNSUPPORTED")
+            );
+            assert_eq!(
+                state,
+                self::state(true),
+                "unsupported lending mutated Entity state"
+            );
+            continue;
+        }
+        let result = result.unwrap_or_else(|error| panic!("{}: {error}", expected.name));
         assert_eq!(
             result
                 .account_txs

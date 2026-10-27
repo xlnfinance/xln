@@ -5,7 +5,6 @@ import { lendingLoanRepaymentAmount, lendingPositionCloseAmount } from './state'
 import type { LendingFollowupContext } from './committed';
 import type { AccountTxTarget } from '../entity/tx/handlers/account/orderbook/queue';
 import { createStructuredLogger, shortId } from '../support/logger';
-import { normalizeEntityRef } from '../support/boundary-guards';
 
 const lendingLog = createStructuredLogger('entity.lending');
 
@@ -47,7 +46,7 @@ export function applyLendingCloseRequest(
   tx: Extract<AccountTx, { type: 'lending_close_request' }>,
 ): void {
   const { lending, counterpartyId, proposer, accountTimestamp } = context;
-  if (proposer !== normalizeEntityRef(tx.data.lenderEntityId) || proposer !== counterpartyId) {
+  if (proposer !== tx.data.lenderEntityId || proposer !== counterpartyId) {
     throw new Error(`LENDING_CLOSE_PROPOSER_MISMATCH:${tx.data.positionId}`);
   }
   const pool = lending.savings.get(tx.data.positionId);
@@ -81,7 +80,7 @@ export function applyLendingClosePayout(
     throw new Error(`LENDING_PAYOUT_POSITION_NOT_QUEUED:${tx.data.positionId}`);
   }
   if (
-    pool.lenderEntityId !== normalizeEntityRef(tx.data.lenderEntityId) ||
+    pool.lenderEntityId !== tx.data.lenderEntityId ||
     pool.tokenId !== tx.data.tokenId ||
     (pool.termId !== 'demand' && lendingPositionCloseAmount(pool, now) !== tx.data.amount)
   ) {

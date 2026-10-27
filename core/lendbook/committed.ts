@@ -12,12 +12,11 @@ import {
   LENDING_TERM_MS,
 } from './state';
 import type { AccountTxTarget } from '../entity/tx/handlers/account/orderbook/queue';
-import { assertLendingCovenant, settleLendingPayment } from '../protocol/dispute/lending-covenant';
+import { settleLendingPayment } from '../protocol/dispute/lending-covenant';
 import {
   applyLendingClosePayout,
   applyLendingCloseRequest,
 } from './lifecycle';
-import { normalizeEntityRef } from '../support/boundary-guards';
 
 export type LendingFollowupContext = {
   state: EntityState;
@@ -37,7 +36,7 @@ function applyLendingFund(
 ): void {
   const { lending, hubEntityId, counterpartyId, proposer, now } = context;
   if (
-    proposer !== normalizeEntityRef(tx.data.lenderEntityId) ||
+    proposer !== tx.data.lenderEntityId ||
     proposer !== counterpartyId
   ) {
     throw new Error(`LENDING_FUND_PROPOSER_MISMATCH:${tx.data.positionId}`);
@@ -45,8 +44,6 @@ function applyLendingFund(
   if (lending.savings.has(tx.data.positionId)) {
     throw new Error(`LENDING_POSITION_ALREADY_EXISTS:${tx.data.positionId}`);
   }
-  const covenant = context.account.state.subcontracts?.get(tx.data.positionId);
-  assertLendingCovenant(covenant);
   lending.savings.set(tx.data.positionId, {
     positionId: tx.data.positionId,
     hubEntityId,
@@ -56,7 +53,7 @@ function applyLendingFund(
     interestBps: tx.data.interestBps,
     termId: tx.data.termId,
     termMs: LENDING_TERM_MS[tx.data.termId],
-    createdAt: covenant.openedAt,
+    createdAt: context.accountTimestamp,
     updatedAt: now,
     status: 'open',
   });
@@ -68,7 +65,7 @@ function applyLendingBorrow(
 ): { status: 'opening' } | { status: 'declined'; reason: string } {
   const { lending, hubEntityId, counterpartyId, proposer, now, accountTxs } = context;
   if (
-    proposer !== normalizeEntityRef(tx.data.borrowerEntityId) ||
+    proposer !== tx.data.borrowerEntityId ||
     proposer !== counterpartyId
   ) {
     throw new Error(`LENDING_BORROW_PROPOSER_MISMATCH:${tx.data.requestId}`);
@@ -132,11 +129,11 @@ function applyLendingDisburse(
     throw new Error(`LENDING_DISBURSE_MISMATCH:${loan.loanId}`);
   }
   loan.status = 'active';
-  const covenant = context.account.state.subcontracts?.get(loan.loanId);
-  assertLendingCovenant(covenant);
-  loan.openedAt = covenant.openedAt;
-  loan.accruedAt = covenant.accruedAt;
-  loan.dueAt = covenant.openedAt + covenant.termMs;
+  // ACK + repayment can commit in one input and delete the latest claim.
+  // Funding terms and its own signed frame clock remain authoritative.
+  loan.openedAt = context.accountTimestamp;
+  loan.accruedAt = context.accountTimestamp;
+  loan.dueAt = context.accountTimestamp + LENDING_TERM_MS[tx.data.termId];
   loan.updatedAt = now;
 }
 
@@ -146,7 +143,7 @@ function applyLendingRepay(
 ): void {
   const { lending, counterpartyId, proposer, now } = context;
   if (
-    proposer !== normalizeEntityRef(tx.data.borrowerEntityId) ||
+    proposer !== tx.data.borrowerEntityId ||
     proposer !== counterpartyId
   ) {
     throw new Error(`LENDING_REPAY_PROPOSER_MISMATCH:${tx.data.loanId}`);
@@ -182,12 +179,12 @@ export function applyCommittedLendingFollowup(
   proposerIsLeft: boolean,
   accountTxs: AccountTxTarget[],
 ): void {
-  const hubEntityId = normalizeEntityRef(state.entityId);
+  const hubEntityId = state.entityId;
   if (state.profile?.isHub !== true) return;
-  if (!('hubEntityId' in tx.data) || normalizeEntityRef(tx.data.hubEntityId) !== hubEntityId) {
+  if (!('hubEntityId' in tx.data) || tx.data.hubEntityId !== hubEntityId) {
     return;
   }
-  const counterpartyId = normalizeEntityRef(counterpartyIdRaw);
+  const counterpartyId = counterpartyIdRaw;
   const account = state.accounts.get(counterpartyId);
   if (!account) throw new Error(`LENDING_ACCOUNT_MISSING:${counterpartyIdRaw}`);
   const context: LendingFollowupContext = {
@@ -196,7 +193,7 @@ export function applyCommittedLendingFollowup(
     lending: ensureLendingState(state),
     hubEntityId,
     counterpartyId,
-    proposer: normalizeEntityRef(proposerIsLeft ? account.state.leftEntity : account.state.rightEntity),
+    proposer: proposerIsLeft ? account.state.leftEntity : account.state.rightEntity,
     now: Math.max(
       Math.floor(Number(frame.timestamp || 0)),
       Math.floor(Number(state.timestamp || 0)),

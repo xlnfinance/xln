@@ -1,66 +1,5 @@
+use crate::{AccountReplica, LendingIntentKind, TransitionError};
 use num_bigint::BigInt;
-
-use crate::{AccountReplica, LendingIntentKind, Side, TransitionError};
-
-pub(super) fn normalize(value: &str) -> String {
-    value.trim().to_ascii_lowercase()
-}
-
-pub(super) fn require_role(
-    replica: &AccountReplica,
-    proposer_side: Side,
-    role: &'static str,
-    claimed_entity_id: &str,
-) -> Result<(), TransitionError> {
-    let claimed = normalize(claimed_entity_id);
-    if !is_entity_id(&claimed) {
-        return Err(TransitionError::LendingRoleInvalid {
-            role,
-            claimed: claimed_entity_id.into(),
-        });
-    }
-    let proposer = replica.state().identity().entity(proposer_side).to_string();
-    if claimed != proposer {
-        return Err(TransitionError::LendingRoleNotProposer {
-            role,
-            claimed,
-            proposer,
-        });
-    }
-    Ok(())
-}
-
-pub(super) fn require_counterparty(
-    replica: &AccountReplica,
-    proposer: &str,
-    counterparty: &str,
-) -> Result<(), TransitionError> {
-    let proposer = normalize(proposer);
-    let identity = replica.state().identity();
-    let expected = if proposer == identity.left().to_string() {
-        identity.right().to_string()
-    } else {
-        identity.left().to_string()
-    };
-    let actual = normalize(counterparty);
-    if actual != expected {
-        return Err(TransitionError::LendingCounterpartyInvalid { expected, actual });
-    }
-    Ok(())
-}
-
-pub(super) fn require_intent_id(value: &str, expected_prefix: &str) -> Result<(), TransitionError> {
-    let normalized = normalize(value);
-    let Some((prefix, suffix)) = normalized.split_once('-') else {
-        return Err(TransitionError::LendingIntentIdInvalid(value.into()));
-    };
-    let allowed_prefix = matches!(prefix, "lend" | "borrow" | "loan");
-    let valid_suffix = suffix.len() == 16 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit());
-    if !allowed_prefix || prefix != expected_prefix || !valid_suffix {
-        return Err(TransitionError::LendingIntentIdInvalid(value.into()));
-    }
-    Ok(())
-}
 
 pub(super) fn positive_amount(
     value: &BigInt,
@@ -68,13 +7,6 @@ pub(super) fn positive_amount(
 ) -> Result<(), TransitionError> {
     if value <= &BigInt::from(0) {
         return Err(TransitionError::LendingAmountNotPositive { context });
-    }
-    Ok(())
-}
-
-pub(super) fn validate_interest_bps(value: i64) -> Result<(), TransitionError> {
-    if !(0..=10_000).contains(&value) {
-        return Err(TransitionError::LendingInterestBpsInvalid(value));
     }
     Ok(())
 }
@@ -96,21 +28,5 @@ pub(super) fn consume_intent(
 ) -> Result<(), TransitionError> {
     require_unused_intent(replica, &key)?;
     replica.state_mut().put_intent(key, kind)?;
-    Ok(())
-}
-
-fn is_entity_id(value: &str) -> bool {
-    value.len() == 66
-        && value.starts_with("0x")
-        && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
-/// Parity target: `requireLendingTokenId` (core/account/tx/handlers/balance/
-/// lending.ts). A lending claim is an Account-row claim and token 0 is never a
-/// delta row, so the author's token 0 is rejected before any balance read.
-pub(super) fn require_lending_token(token_id: u64) -> Result<(), TransitionError> {
-    if token_id < 1 {
-        return Err(TransitionError::LendingTokenInvalid(token_id));
-    }
     Ok(())
 }

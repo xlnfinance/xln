@@ -1044,22 +1044,6 @@ fn derived_wake_jobs(
             });
         }
     }
-    // Committed lending state carries `due_at`, so an overdue loan derives its
-    // settlement deadline exactly like an Account timelock. TS
-    // `collectDerivedDeadlines` emits the same `lending-overdue:<loanId>` id.
-    if let Some(lending) = state.entity.lending.as_ref() {
-        for loan in lending.loans() {
-            if loan.status == xln_rscore_entity_kernel::LendingLoanStatus::Active
-                && loan.due_at <= now
-            {
-                jobs.push(ScheduledWakeJob {
-                    kind: ScheduledWakeJobKind::Hook,
-                    id: format!("lending-overdue:{}", loan.loan_id),
-                    due_at: loan.due_at,
-                });
-            }
-        }
-    }
     Ok(jobs)
 }
 

@@ -8,11 +8,13 @@ import type { StorageAccountDoc } from '../../../storage/types';
  * presumed to run a bank HTTP endpoint. Aggregate before compacting details.
  */
 export function accountLendingBalances(account: StorageAccountDoc): Map<number, bigint> {
-  const timestamp = account.activeDispute?.disputeStartTimestamp ?? account.currentFrame.timestamp;
+  // J dispute clocks are Unix seconds; covenant accrual uses milliseconds.
+  const disputeStartSeconds = account.activeDispute?.disputeStartTimestamp;
+  const timestampMs = disputeStartSeconds === undefined ? account.currentFrame.timestamp : disputeStartSeconds * 1_000;
   const totals = new Map<number, bigint>();
   for (const claim of account.state.subcontracts?.values() ?? []) {
     if (!('kind' in claim)) continue;
-    const amount = lendingExitAmount(claim, timestamp);
+    const amount = lendingExitAmount(claim, timestampMs);
     totals.set(claim.tokenId, (totals.get(claim.tokenId) ?? 0n) + (claim.creditorIsLeft ? amount : -amount));
   }
   return totals;

@@ -76,3 +76,19 @@ test('a right-side bank loan is its asset and the left borrower liability, never
   expect(walletLendingBalance({ accounts: [{ doc: compact, isLeft: false }] }).get(1)).toBe(10_100n);
   expect(compact.state.deltas.get(1)).toEqual(delta);
 });
+
+test('dispute seconds accrue the same signed interest as the millisecond Account clock', () => {
+  const account = makeAccount(entity('11'), entity('22'));
+  const openedAt = 1_700_000_000_000;
+  account.currentFrame.timestamp = openedAt;
+  account.state.subcontracts = PersistentAccountStateMap.fromEntries('subcontracts', [[
+    'loan-1111111111111111', { kind: 'loan', tokenId: 1, creditorIsLeft: true, principal: 10_000n,
+      interestBps: 200, openedAt, accruedAt: openedAt, accruedInterest: 0n, interestRemainder: 0n,
+      termMs: 3_600_000, lateMs: 0 },
+  ]]);
+  account.activeDispute = { startedByLeft: true, initialProofbodyHash: `0x${'00'.repeat(32)}`,
+    initialNonce: 1, initialProposerIsLeft: true, disputeTimeout: 1_700_002_000,
+    disputeStartTimestamp: 1_700_001_800, jNonce: 0, starterInitialArguments: '0x',
+    starterCounterArguments: '0x', starterCounterProofCommitment: `0x${'00'.repeat(32)}` };
+  expect(compactAccountDocForView(account).lendingBalances.get(1)).toBe(10_100n);
+});

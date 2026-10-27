@@ -45,3 +45,9 @@ describe('shared transaction semantic parity catalog', () => {
     },
   );
 });
+
+test('unsupported Rust lending cannot be advertised as semantic parity', () => {
+  const lending = TX_SEMANTIC_CATALOG.filter(entry => entry.type.startsWith('lending'));
+  expect(lending).toHaveLength(13);
+  for (const entry of lending) expect(entry.semanticEvidence, entry.type).toBe('missing');
+});

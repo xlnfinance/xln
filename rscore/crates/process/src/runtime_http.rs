@@ -1068,8 +1068,8 @@ mod tests {
         let invalid = get(&format!("{hub}&tokenId=bad"));
         assert!(invalid.starts_with("HTTP/1.1 400"), "{invalid}");
         let valid = get(&format!("{hub}&tokenId=1"));
-        assert!(valid.starts_with("HTTP/1.1 200"), "{valid}");
-        assert!(valid.contains("\"pools\":[]"), "{valid}");
+        assert!(valid.starts_with("HTTP/1.1 503"), "{valid}");
+        assert!(valid.contains("LENDING_UNSUPPORTED"), "{valid}");
         let missing = get(&hub);
         assert!(missing.starts_with("HTTP/1.1 404"), "{missing}");
         assert!(

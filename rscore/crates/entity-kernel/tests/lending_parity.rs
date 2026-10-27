@@ -1,117 +1,36 @@
-use num_bigint::BigInt;
-use xln_rscore_entity_kernel::{
-    CanonicalEntityTx, EntityTxKind, LocalEntityFinancialTx, decode_local_entity_tx,
-};
-use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
-
-fn entity(byte: &str) -> String {
-    format!("0x{}", byte.repeat(32))
-}
-
-fn number(value: u32) -> CanonicalValue {
-    CanonicalValue::Number(CanonicalNumber::from_u32(value))
-}
-
+use xln_rscore_entity_kernel::{CanonicalEntityTx, EntityTxKind, decode_local_entity_tx};
+use xln_rscore_protocol::CanonicalValue;
 fn object(entries: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
-    CanonicalValue::Object(
-        entries
-            .into_iter()
-            .map(|(key, value)| (key.to_string(), value))
-            .collect(),
-    )
+    CanonicalValue::Object(entries.into_iter().map(|(k, v)| (k.into(), v)).collect())
 }
-
-fn decode(kind: EntityTxKind, data: CanonicalValue) -> LocalEntityFinancialTx {
-    let tx = CanonicalEntityTx::from_frame_projection(kind, data).expect("canonical tx");
-    let Some(xln_rscore_entity_kernel::LocalEntityTx::Financial(tx)) =
-        decode_local_entity_tx(&tx).expect("decode")
-    else {
-        panic!("financial tx")
-    };
-    tx
+#[test]
+fn lending_entity_admission_is_explicitly_unsupported() {
+    for kind in [
+        EntityTxKind::LendingOffer,
+        EntityTxKind::LendingBorrow,
+        EntityTxKind::LendingRepay,
+        EntityTxKind::LendingClosePosition,
+        EntityTxKind::LendingApprove,
+        EntityTxKind::LendingSetTerms,
+    ] {
+        let tx =
+            CanonicalEntityTx::from_frame_projection(kind, object(vec![])).expect("canonical tx");
+        assert!(
+            matches!(decode_local_entity_tx(&tx), Err(xln_rscore_entity_kernel::EntityKernelError::RejectedEntityTx { detail, .. }) if detail == "LENDING_UNSUPPORTED"),
+            "{kind:?}"
+        );
+    }
 }
 
 #[test]
-fn all_four_typescript_entity_lending_shapes_decode_exactly() {
-    let hub = CanonicalValue::String(entity("10"));
-    assert!(matches!(
-        decode(
-            EntityTxKind::LendingOffer,
-            object(vec![
-                ("positionId", CanonicalValue::String("lend-1111111111111111".into())),
-                ("hubEntityId", hub.clone()),
-                ("tokenId", number(1)),
-                ("amount", CanonicalValue::BigInt(BigInt::from(10_000))),
-                ("termId", CanonicalValue::String("1d".into())),
-                ("interestBps", number(100)),
-            ]),
-        ),
-        LocalEntityFinancialTx::LendingOffer(tx)
-            if tx.position_id == "lend-1111111111111111"
-                && tx.token_id.get() == 1
-                && tx.amount == BigInt::from(10_000)
-                && tx.interest_bps == 100
-    ));
-    assert!(matches!(
-        decode(
-            EntityTxKind::LendingBorrow,
-            object(vec![
-                ("requestId", CanonicalValue::String("borrow-2222222222222222".into())),
-                ("hubEntityId", hub.clone()),
-                ("tokenId", number(1)),
-                ("amount", CanonicalValue::BigInt(BigInt::from(2_500))),
-                ("termId", CanonicalValue::String("1d".into())),
-                ("maxInterestBps", number(150)),
-                ("maxLateMs", number(86_400_000)),
-                ("expiresAt", number(5_000)),
-            ]),
-        ),
-        LocalEntityFinancialTx::LendingBorrow(tx)
-            if tx.request_id == "borrow-2222222222222222"
-                && tx.max_interest_bps == 150
-                && tx.max_late_ms == 86_400_000
-                && tx.expires_at == 5_000
-    ));
-    assert!(matches!(
-        decode(
-            EntityTxKind::LendingRepay,
-            object(vec![
-                ("hubEntityId", hub.clone()),
-                ("loanId", CanonicalValue::String("loan-0327fd9035d42518".into())),
-                ("tokenId", number(1)),
-                ("amount", CanonicalValue::BigInt(BigInt::from(2_525))),
-            ]),
-        ),
-        LocalEntityFinancialTx::LendingRepay(tx)
-            if tx.loan_id == "loan-0327fd9035d42518" && tx.amount == BigInt::from(2_525)
-    ));
-    assert!(matches!(
-        decode(
-            EntityTxKind::LendingClosePosition,
-            object(vec![
-                ("hubEntityId", hub),
-                ("positionId", CanonicalValue::String("lend-1111111111111111".into())),
-            ]),
-        ),
-        LocalEntityFinancialTx::LendingClosePosition(tx)
-            if tx.position_id == "lend-1111111111111111"
-    ));
-}
-
-#[test]
-fn lending_wire_rejects_extra_fields_and_out_of_range_interest() {
-    let invalid = object(vec![
-        (
-            "positionId",
-            CanonicalValue::String("lend-1111111111111111".into()),
-        ),
-        ("hubEntityId", CanonicalValue::String(entity("10"))),
-        ("tokenId", number(1)),
-        ("amount", CanonicalValue::BigInt(BigInt::from(1))),
-        ("termId", CanonicalValue::String("1d".into())),
-        ("interestBps", number(10_001)),
+fn retired_pool_state_cannot_be_restored() {
+    let old = object(vec![
+        ("pools", CanonicalValue::Map(vec![])),
+        ("loans", CanonicalValue::Map(vec![])),
     ]);
-    let tx = CanonicalEntityTx::from_frame_projection(EntityTxKind::LendingOffer, invalid)
-        .expect("canonical tx");
-    assert!(decode_local_entity_tx(&tx).is_err());
+    let result = xln_rscore_entity_kernel::decode_canonical_lending_state(&old);
+    assert!(
+        result.is_err(),
+        "retired pool schema must never reenter execution"
+    );
 }
