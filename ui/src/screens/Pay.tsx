@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { resolvePayRecipient, invoiceNote } from './pay-intent';
+import { resolvePayRecipient, invoiceNote, assertInvoiceJurisdiction } from './pay-intent';
 import { HOME, PageHead } from '../components/PageHead';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import type { PaymentDeliveryMode } from '@xln/core/api/public/runtime-module';
@@ -9,6 +9,9 @@ import { Icon } from '../components/Icons';
 import { ScanSheet } from '../components/ScanSheet';
 import { TokenPicker } from '../components/TokenPicker';
 import { PaymentTopUp } from '../components/PaymentTopUp';
+import { loadStackJurisdictions } from '../runtime/hosted';
+import { nativeInvoiceJurisdictionKeys } from '../native/payment-request';
+import { jurisdictionRef } from '../runtime/financial/swap';
 import { paymentMode } from '../runtime/financial/payment-funding';
 import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
 import { useApp } from '../runtime/store';
@@ -18,6 +21,8 @@ import { amountInputText, formatAmount, formatMoney, formatLimit, parseAmount, s
 import { getTokenMeta } from '../runtime/token-meta';
 import { usdOf } from '../runtime/financial/prices';
 import { displayEntityName, useWallet, type AccountView } from '../runtime/views';
+
+declare const __XLN_STACK_ORIGIN__: string;
 
 /** Re-ask a retryable route quote (profiles still syncing) with doubling delays up to the cap:
  * each attempt re-syncs gossip profiles from the relay, so an unknown target must not poll it at 1 Hz. */
@@ -64,17 +69,30 @@ export function Pay() {
 	const self = wallet.entityId;
 
 	const manualDescription = useRef(description);
+	const invoiceSeq = useRef(0);
+	const invoiceIdentity = jurisdictionRef(wallet.frame);
+	const invoiceJurisdictions = useCallback(async (): Promise<string[]> => [
+		wallet.jurisdiction, invoiceIdentity,
+		...nativeInvoiceJurisdictionKeys(invoiceIdentity, await loadStackJurisdictions(__XLN_STACK_ORIGIN__)),
+	], [wallet.jurisdiction, invoiceIdentity]);
 	const clearInvoice = useCallback(() => {
+		++invoiceSeq.current;
 		setInvoice(null);
 		setDescription(manualDescription.current);
 		setNoteOpen(Boolean(manualDescription.current));
 		setInvoiceError(null);
 	}, []);
 
-	const applyInvoice = useCallback((raw: string): boolean => {
+	useEffect(() => { ++invoiceSeq.current; }, [wallet.entityId, wallet.jurisdiction, invoiceIdentity]);
+
+	const applyInvoice = useCallback(async (raw: string): Promise<boolean> => {
+		const seq = ++invoiceSeq.current;
 		try {
 			const parsed = parseXlnInvoice(raw);
-			const note = invoiceNote(parsed, wallet.jurisdiction);
+			const accepted = parsed.jurisdictionId ? await invoiceJurisdictions() : [];
+			if (seq !== invoiceSeq.current) return false;
+			assertInvoiceJurisdiction(parsed, accepted);
+			const note = invoiceNote(parsed);
 			setInvoice(parsed);
 			setInvoiceError(null);
 			setToText(parsed.targetEntityId);
@@ -85,18 +103,19 @@ export function Pay() {
 			setNoteOpen(Boolean(note.description) || note.locked);
 			return true;
 		} catch (error) {
+			if (seq !== invoiceSeq.current) return false;
 			clearInvoice();
 			setPickedEntityId(null);
 			setToText(raw);
 			setInvoiceError(error instanceof Error ? error.message : String(error));
 			return false;
 		}
-	}, [clearInvoice, wallet.jurisdiction]);
+	}, [clearInvoice, invoiceJurisdictions]);
 
 	// Deep link: /#pay/<invoice> lands here with the full href in navigation state.
 	useEffect(() => {
 		const state = location.state as { invoice?: string } | null;
-		if (state?.invoice) applyInvoice(state.invoice);
+		if (state?.invoice) void applyInvoice(state.invoice);
 	}, [location.state, applyInvoice]);
 
 	const known = useMemo(
@@ -206,7 +225,11 @@ export function Pay() {
 		setSending(true);
 		try {
 			// The active wallet may have changed since this invoice was applied.
-			if (invoice) invoiceNote(invoice, wallet.jurisdiction);
+			if (invoice) {
+				const seq = invoiceSeq.current;
+				assertInvoiceJurisdiction(invoice, invoice.jurisdictionId ? await invoiceJurisdictions() : []);
+				if (seq !== invoiceSeq.current) throw new Error('Payment form changed; review the invoice again.');
+			}
 			await submitPayment({
 				entityId: self,
 				signerId: wallet.signerId,
@@ -269,7 +292,7 @@ export function Pay() {
 									setPickedEntityId(null);
 									clearInvoice();
 									setInvoiceError(null);
-									if (looksLikeInvoice(value)) applyInvoice(value);
+									if (looksLikeInvoice(value)) void applyInvoice(value);
 								}}
 								onFocus={() => setToFocused(true)}
 								onBlur={() => setToFocused(false)}
@@ -540,7 +563,9 @@ export function Pay() {
 					onClose={() => setScanning(false)}
 					onDecode={value => {
 						setScanning(false);
-						if (!applyInvoice(value)) toast('That QR is not an xln invoice', 'danger');
+						void applyInvoice(value).then(applied => {
+							if (!applied) toast('That QR is not an xln invoice', 'danger');
+						});
 					}}
 				/>
 			)}

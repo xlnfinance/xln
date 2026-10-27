@@ -29,6 +29,10 @@ test('fixpay-9 proposal-time capacity loss retains the failed direct payment and
   });
   const result = await proposeAccountFrame(createAccountConsensusContext(createEmptyEnv('fixpay-9')), account, 1000, 0);
   expect(account.mempool).toHaveLength(0);
+  expect(result.failedDirectPayments?.map(failure => failure.data)).toEqual([
+    { tokenId: 1, amount: 10n ** 31n, route: [hub], fromEntityId: alice,
+      toEntityId: hub, deliveryMode: 'direct' },
+  ]);
   expect(result).toMatchObject({
     outcome: 'idle',
     failedDirectPayments: [
@@ -78,4 +82,18 @@ test('fixpay-9 a trusted hub retains the committed upstream payment when its dir
   // atomic refund authority after the hub has received the upstream payment.
   expect(upstream.state.deltas.get(1)?.offdelta).toBe(-100n);
   expect(downstream.state.deltas.get(1)?.offdelta).toBe(0n);
+});
+
+// The public reducer always owns an effect collector, even without caller options.
+test('fixpay-9 public Entity reducer preserves the full ordered capacity failure without options', async () => {
+  const { applyEntityTx } = await import('../../../../entity/tx/apply');
+  const state = makeState(alice, entity('66'), j, hub);
+  const result = await applyEntityTx(createEmptyEnv('fixpay-no-options'), state, {
+    type: 'directPayment', data: { tokenId: 1, amount: 10n ** 31n,
+      targetEntityId: hub, route: [alice, hub], deliveryMode: 'direct' },
+  });
+  expect(result.accountTxs).toEqual([]);
+  expect(result.candidateEffects).toEqual([{ kind: 'runtimeEvent', eventName: 'PaymentFailed',
+    data: { entityId: alice, targetEntityId: hub, tokenId: 1, amount: 10n ** 31n,
+      reason: 'insufficient_capacity' } }]);
 });

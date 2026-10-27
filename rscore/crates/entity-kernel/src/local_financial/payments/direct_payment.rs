@@ -137,6 +137,7 @@ mod tests {
                 settlement_execution: Err("unused".into()),
                 rebalance_active_quote: None,
                 htlc_locks: BTreeMap::new(),
+                pending_htlc_lock_ids: Default::default(),
                 pulls: BTreeMap::new(),
                 swap_offers: BTreeMap::new(),
                 pending_cross_pull_close_ids: Default::default(),
@@ -167,6 +168,7 @@ mod tests {
             settlement_execution: Err("unused".into()),
             rebalance_active_quote: None,
             htlc_locks: BTreeMap::new(),
+            pending_htlc_lock_ids: Default::default(),
             pulls: BTreeMap::new(),
             swap_offers: BTreeMap::new(),
             pending_cross_pull_close_ids: Default::default(),
@@ -179,23 +181,29 @@ mod tests {
                 DirectPaymentEntityTx {
                     target_entity_id: peer.clone(),
                     token_id: xln_rscore_engine::TokenId::new(1).unwrap(),
-                    amount: 7.into(),
-                    route: vec![owner, peer.clone()],
+                    amount: BigInt::from(10_u8).pow(31),
+                    route: vec![owner.clone(), peer.clone()],
                     description: None,
                     delivery_mode: DeliveryMode::Direct,
                     trusted_gateway_entity_id: None,
                 },
             )],
             &DeterministicContext::hlt_default(),
-            &BTreeMap::from([(peer, view)]),
+            &BTreeMap::from([(peer.clone(), view)]),
             None,
             None,
         )
         .unwrap();
         assert!(result.account_txs.is_empty());
-        assert_eq!(result.outputs.len(), 1);
-        assert!(
-            matches!(&result.outputs[0], crate::EntityKernelOutput::PaymentFailed { reason, .. } if reason == "insufficient_capacity")
+        assert_eq!(
+            result.outputs,
+            vec![crate::EntityKernelOutput::PaymentFailed {
+                entity_id: owner,
+                target_entity_id: peer,
+                token_id: 1,
+                amount: BigInt::from(10_u8).pow(31),
+                reason: "insufficient_capacity".into(),
+            }]
         );
     }
 

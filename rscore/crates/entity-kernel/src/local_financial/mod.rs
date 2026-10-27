@@ -212,8 +212,10 @@ pub(crate) fn apply_local_entity_financial_txs(
                             .outbound_entity
                             .as_ref()
                             .and_then(|peer| account_views.get(peer))
-                            .and_then(|view| view.htlc_locks.get(&lock_id))
-                            .is_some();
+                            .is_some_and(|view| {
+                                view.htlc_locks.contains_key(&lock_id)
+                                    || view.pending_htlc_lock_ids.contains(&lock_id)
+                            });
                         if crate::inbound_payment_timeout_blocked(
                             route,
                             &account_id,

@@ -226,6 +226,7 @@ fn account_view(case: &Value) -> LocalAccountFinancialView {
         settlement_execution: settlement_execution(&view["settlementExecution"]),
         rebalance_active_quote: None,
         htlc_locks: BTreeMap::new(),
+        pending_htlc_lock_ids: Default::default(),
         pulls: BTreeMap::new(),
         swap_offers: BTreeMap::new(),
         pending_cross_pull_close_ids: BTreeSet::new(),

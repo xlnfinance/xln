@@ -2266,10 +2266,11 @@ fn apply_scheduled_wake(
         .filter(|(account, _)| state.known_accounts.contains(account))
         .collect::<Vec<_>>();
 
+    // ACK enforcement reserves time against the signed timelock, not height expiry.
     let lock_deadlines = accounts
         .expired_htlc_locks(
             now.saturating_add(xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS),
-            j_clock,
+            None,
         )?
         .into_iter()
         .map(|(account, hashlock, timelock)| ((account_text(account), hashlock), timelock))
@@ -2675,7 +2676,7 @@ fn protect_inbound_payment_timeouts(
         let Some(lock) = locks.get(&hashlock) else {
             continue;
         };
-        if lock.sender() == *owner_side {
+        if *lock == *owner_side {
             continue;
         }
         let awaiting = outbound

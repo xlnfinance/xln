@@ -203,6 +203,7 @@ fn empty_account_view(owner_is_left: bool) -> LocalAccountFinancialView {
         settlement_execution: Err("group-d fixture has no settlement".into()),
         rebalance_active_quote: None,
         htlc_locks: BTreeMap::new(),
+        pending_htlc_lock_ids: Default::default(),
         pulls: BTreeMap::new(),
         swap_offers: BTreeMap::new(),
         pending_cross_pull_close_ids: BTreeSet::new(),

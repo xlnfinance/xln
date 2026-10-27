@@ -87,6 +87,12 @@ to either nonce.
   The declared gateway must equal that hop. The gateway-proposed bilateral frame
   and its Hanko are the receipt; after it commits, refund semantics do not apply.
 
+A routed inbound refund waits until its downstream obligation is resolved,
+including a retained outbound proposal whose ACK may have been lost. A known
+secret also blocks refund. The payer retains on-chain recourse after timelock;
+off-chain refund can wait for the hub's downstream resolution or dispute.
+Finalized height alone cannot prove the timestamp-based registry cutoff passed.
+
 The frame proposer is always the payer. `fromEntityId` and `toEntityId` are
 assertions only and are rejected if they disagree with the canonical proposer
 direction.

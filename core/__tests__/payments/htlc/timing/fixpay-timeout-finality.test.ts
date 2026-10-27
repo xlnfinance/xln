@@ -5,6 +5,8 @@ import { makeAccount, makeState, makeJurisdiction, entity, openWritableEntityAcc
 import { createEmptyEnv } from '../../../../runtime';
 import { prepareAccountConsensusRun } from '../../../../entity/tx/handlers/account/input-phases';
 import { PersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
+import { createAccountConsensusContext } from '../../../../entity/account/account-consensus-context';
+import { proposeAccountFrame } from '../../../../account/consensus';
 import { hashHtlcSecret } from '../../../../protocol/htlc/utils';
 
 const alice = entity('11');
@@ -98,4 +100,31 @@ test('fixpay-2 the local scheduler cannot refund the same unsafe inbound lock', 
       data: { expiredLocks: [{ accountId: alice, lockId: hashlock }] },
     }).accountTxs,
   ).toHaveLength(1);
+});
+
+// Bob can commit our signed proposal even if his ACK never reaches us.
+test.each([true, false])('fixpay-2 lost outbound ACK guards only the matching lock (match=%s)', async matches => {
+  const { state, run } = fixture(111, false, false);
+  const outbound = state.accounts.get(bob)!;
+  const pendingHash = matches ? hashlock : entity('cd');
+  outbound.mempool.push({ type: 'htlc_lock', data: { lockId: pendingHash, hashlock: pendingHash,
+    tokenId: 1, amount: 99n, timelock: 110_000n, revealBeforeHeight: 110 } });
+  expect(run).not.toThrow(); // An unsigned mempool intent is not a downstream obligation.
+  const env = createEmptyEnv('fixpay-lost-ack');
+  env.state.jReplicas.set('test', { name: 'test', chainId: 31337,
+    depositoryAddress: outbound.state.domain.depositoryAddress,
+    contracts: { depository: outbound.state.domain.depositoryAddress,
+      entityProvider: entity('55').slice(0, 42), account: entity('66').slice(0, 42),
+      deltaTransformer: entity('77').slice(0, 42) },
+    blockNumber: 90n, stateRoot: null, mempool: [], blockDelayMs: 0,
+    lastBlockTimestamp: 1000, position: { x: 0, y: 0, z: 0 } });
+  const proposed = await proposeAccountFrame(createAccountConsensusContext(env), outbound, 1000, 90);
+  expect(proposed.outcome).toBe('proposed');
+  expect(outbound.state.locks.size).toBe(0);
+  expect(outbound.pendingAccountInput?.proposal?.frame.accountTxs[0]?.type).toBe('htlc_lock');
+  if (!matches) { expect(run).not.toThrow(); return; }
+  expect(run).toThrow('HTLC_INBOUND_TIMEOUT_AWAITING_DOWNSTREAM_RESOLUTION');
+  expect(collectDerivedDeadlines(state).filter(d => d.type === 'htlc_timeout')).toEqual([]);
+  expect(handleProcessHtlcTimeoutsEntityTx(state, { type: 'processHtlcTimeouts',
+    data: { expiredLocks: [{ accountId: alice, lockId: hashlock }] } }).accountTxs).toEqual([]);
 });

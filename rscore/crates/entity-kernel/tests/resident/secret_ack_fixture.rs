@@ -18,6 +18,7 @@ pub(super) struct Case {
     pub expired_lock: bool,
     pub ready_proof: bool,
     pub manual_prepare: bool,
+    pub height_expired_early: bool,
 }
 
 pub(super) const DUE: u64 = TIMESTAMP + 120_000;
@@ -95,8 +96,14 @@ pub(super) fn run_case(
                 let tx = AccountTx::HtlcLock(HtlcLockTx {
                     lock_id: entry.hashlock.clone(),
                     hashlock: HtlcHashlock::parse(&entry.hashlock).unwrap(),
-                    timelock: BigInt::from(if case.expired_lock { DUE } else { DUE + 60_000 }),
-                    reveal_before_height: 1_000,
+                    timelock: BigInt::from(if case.height_expired_early {
+                        TIMESTAMP + 100_000
+                    } else if case.expired_lock {
+                        DUE
+                    } else {
+                        DUE + 60_000
+                    }),
+                    reveal_before_height: if case.height_expired_early { 99 } else { 1_000 },
                     amount: BigInt::from(100),
                     token_id: TokenId::new(1).unwrap(),
                     delivery_mode: None,
@@ -109,15 +116,19 @@ pub(super) fn run_case(
                     &AccountExecutionContext::with_market(
                         1_000,
                         TIMESTAMP,
-                        100,
+                        if case.height_expired_early { 90 } else { 100 },
                         0,
-                        100,
+                        if case.height_expired_early { 90 } else { 100 },
                         support::market(),
                     ),
                 )
                 .unwrap()
                 .committed()
                 .expect("committed production lock");
+            }
+            let mut entry = entry;
+            if case.height_expired_early {
+                entry.secret_ack_deadline_at = Some(DUE + 120_000);
             }
             entries.push(entry);
         }
@@ -157,7 +168,13 @@ pub(super) fn run_case(
         seeds,
     )
     .unwrap();
-    let mut state = EntityStateSlice::empty(hub.to_string(), DUE);
+    let now = if case.height_expired_early {
+        TIMESTAMP + 50_000
+    } else {
+        DUE
+    };
+    let mut state = EntityStateSlice::empty(hub.to_string(), now);
+    state.last_finalized_j_height = 100;
     if !case.unknown_account {
         for peer in &peers {
             state.known_accounts.insert(peer.to_string());
@@ -215,6 +232,16 @@ pub(super) fn run_case(
                 ),
             },
         ]));
+    }
+    let mut request = request;
+    if case.height_expired_early {
+        request.inbound.clock.entity_timestamp = now;
+        request.outbound_timestamp = now;
+        let wake = request.scheduled_wake.as_mut().unwrap();
+        wake.due_at = now;
+        for job in &mut wake.jobs {
+            job.due_at = now;
+        }
     }
     let result = apply_resident_entity_round(
         &mut accounts,

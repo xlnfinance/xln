@@ -234,6 +234,7 @@ mod parity_evidence {
             settlement_execution: Err("not requested".into()),
             rebalance_active_quote: None,
             htlc_locks: BTreeMap::new(),
+            pending_htlc_lock_ids: Default::default(),
             pulls: BTreeMap::new(),
             swap_offers: BTreeMap::new(),
             pending_cross_pull_close_ids: BTreeSet::new(),

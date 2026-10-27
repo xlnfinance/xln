@@ -172,6 +172,7 @@ pub struct ResidentAccountFinancialView {
     pub settlement_execution: Result<xln_rscore_engine::PreparedSettlementExecution, String>,
     pub rebalance_active_quote: Option<CanonicalValue>,
     pub htlc_locks: BTreeMap<String, xln_rscore_engine::HtlcLock>,
+    pub pending_htlc_lock_ids: BTreeSet<String>,
     pub pulls: BTreeMap<String, CanonicalValue>,
     pub swap_offers: BTreeMap<String, SwapOfferSnapshot>,
     pub pending_cross_pull_close_ids: std::collections::BTreeSet<String>,
@@ -247,6 +248,16 @@ fn cross_j_opening_txs(txs: &[AccountTx]) -> Vec<AccountTx> {
         })
         .cloned()
         .collect()
+}
+
+fn has_pending_htlc_lock(account: &AccountConsensus, id: &str) -> bool {
+    account.pending().is_some_and(|pending| {
+        pending.frame.txs.iter().any(|tx| {
+            matches!(tx,
+                AccountTx::HtlcLock(lock) if lock.lock_id == id && lock.hashlock.as_str() == id
+            )
+        })
+    })
 }
 
 fn pending_cross_pull_close_ids(account: &AccountConsensus) -> BTreeSet<String> {
@@ -1099,7 +1110,7 @@ impl ResidentConsensusEngine {
             AccountId,
             (
                 xln_rscore_engine::Side,
-                BTreeMap<String, xln_rscore_engine::HtlcLock>,
+                BTreeMap<String, xln_rscore_engine::Side>,
             ),
         >,
         BatchError,
@@ -1114,8 +1125,14 @@ impl ResidentConsensusEngine {
                             .replica()
                             .state()
                             .htlc_lock(&id)
-                            .cloned()
-                            .map(|lock| (id, lock))
+                            .map(xln_rscore_engine::HtlcLock::sender)
+                            .or_else(|| {
+                                // Bob can hold this signed obligation while his ACK
+                                // is lost; committed locks alone cannot guard Alice.
+                                has_pending_htlc_lock(account, &id)
+                                    .then_some(account.replica().owner_side())
+                            })
+                            .map(|sender| (id, sender))
                     })
                     .collect();
                 Ok((account.replica().owner_side(), locks))
@@ -1150,6 +1167,11 @@ impl ResidentConsensusEngine {
                     Some(_) => false,
                 };
                 let owner_side = account.replica().owner_side();
+                let pending_htlc_lock_ids = htlc_lock_ids
+                    .iter()
+                    .filter(|id| has_pending_htlc_lock(account, id))
+                    .cloned()
+                    .collect();
                 let htlc_locks = htlc_lock_ids
                     .into_iter()
                     .filter_map(|lock_id| {
@@ -1307,6 +1329,7 @@ impl ResidentConsensusEngine {
                         detail: error.to_string(),
                     })?,
                     htlc_locks,
+                    pending_htlc_lock_ids,
                     pulls,
                     swap_offers,
                     pending_cross_pull_close_ids,

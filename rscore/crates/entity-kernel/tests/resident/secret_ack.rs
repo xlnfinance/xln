@@ -311,3 +311,28 @@ fn scheduled_prepare_is_visible_to_later_manual_prepare_in_same_frame() {
         );
     }
 }
+
+#[test]
+fn fixpay_5_height_expiry_does_not_accelerate_secret_ack_enforcement() {
+    let mut oracle = None;
+    for workers in [1, 4] {
+        let (result, mut accounts, peers) = run_case(
+            workers,
+            Case {
+                height_expired_early: true,
+                ..base_case()
+            },
+        );
+        assert_eq!(account_statuses(&mut accounts, &peers), ["active"]);
+        let evidence = (
+            result.commitments,
+            result.entity_frame_events,
+            result.outputs,
+        );
+        if let Some(expected) = &oracle {
+            assert_eq!(&evidence, expected);
+        } else {
+            oracle = Some(evidence);
+        }
+    }
+}

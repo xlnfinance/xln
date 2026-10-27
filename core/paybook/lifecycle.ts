@@ -31,11 +31,16 @@ export function inboundPaymentTimeoutError(
   const route = bookIntentSlot ? bookIntentSlot.getPaybookEntry(state, hashlock) : state.paybook.entries.get(hashlock);
   if (route?.inboundEntity?.toLowerCase() !== counterpartyId.toLowerCase()) return undefined;
   if (route.secret) return `HTLC_INBOUND_TIMEOUT_SECRET_KNOWN:${hashlock}`;
-  const outbound = route.outboundEntity ? state.accounts.get(route.outboundEntity)?.state.locks.get(hashlock) : undefined;
+  const outbound = route.outboundEntity ? state.accounts.get(route.outboundEntity) : undefined;
+  // Our retained proposal may already be committed by Bob even when his ACK
+  // is lost. Refunding Alice then would leave two enforceable obligations.
+  const pendingLock = outbound?.pendingAccountInput?.proposal?.frame.accountTxs.some(
+    tx => tx.type === 'htlc_lock' && tx.data.lockId === hashlock && tx.data.hashlock === hashlock,
+  );
   // L1's registry cutoff is a timestamp; the certified J head has only height.
   // Height alone cannot exclude a timely reveal on a faster-than-planned chain.
   // Resolve the downstream obligation first instead of guessing chain time.
-  return outbound ? `HTLC_INBOUND_TIMEOUT_AWAITING_DOWNSTREAM_RESOLUTION:${hashlock}` : undefined;
+  return outbound?.state.locks.has(hashlock) || pendingLock ? `HTLC_INBOUND_TIMEOUT_AWAITING_DOWNSTREAM_RESOLUTION:${hashlock}` : undefined;
 }
 
 export function persistVerifiedPaymentSecret(

@@ -79,6 +79,7 @@ fn account_view() -> LocalAccountFinancialView {
         settlement_execution: Err("fixture has no settlement".into()),
         rebalance_active_quote: None,
         htlc_locks: BTreeMap::new(),
+        pending_htlc_lock_ids: Default::default(),
         pulls: BTreeMap::new(),
         swap_offers: BTreeMap::new(),
         pending_cross_pull_close_ids: BTreeSet::new(),
@@ -487,36 +488,43 @@ fn same_j_financial_entity_projections_match_typescript() {
                 expected_entry["outboundEntity"].as_str()
             );
         }
-        if let Some(expected_effects) = expected.runtime_effects.as_ref() {
-            assert_eq!(expected_effects.len(), 1, "fixture effect count");
-            assert!(
-                matches!(
-                    result.outputs.as_slice(),
-                    [EntityKernelOutput::HtlcInitiated {
-                        entity_id, from_entity, to_entity, token_id, amount, sender_amount,
-                        fee, hashlock: output_hashlock, lock_id, route, description, started_at_ms,
-                    }] if entity_id == expected_effects[0]["data"]["entityId"].as_str().unwrap()
-                        && from_entity == expected_effects[0]["data"]["fromEntity"].as_str().unwrap()
-                        && to_entity == expected_effects[0]["data"]["toEntity"].as_str().unwrap()
-                        && u64::from(*token_id) == expected_effects[0]["data"]["tokenId"].as_u64().unwrap()
-                        && amount.to_string() == expected_effects[0]["data"]["amount"].as_str().unwrap()
-                        && sender_amount.to_string() == expected_effects[0]["data"]["senderAmount"].as_str().unwrap()
-                        && fee.to_string() == expected_effects[0]["data"]["fee"].as_str().unwrap()
-                        && output_hashlock == expected_effects[0]["data"]["hashlock"].as_str().unwrap()
-                        && lock_id == expected_effects[0]["data"]["lockId"].as_str().unwrap()
-                        && route.iter().map(String::as_str).eq(expected_effects[0]["data"]["route"].as_array().unwrap().iter().map(|value| value.as_str().unwrap()))
-                        && description.as_deref() == expected_effects[0]["data"]["description"].as_str()
-                        && *started_at_ms == expected_effects[0]["data"]["startedAtMs"].as_u64().unwrap()
-                ),
-                "{} runtime effect",
-                expected.name
-            );
-        } else {
-            assert!(
-                result.outputs.is_empty(),
-                "{} unexpected output",
-                expected.name
-            );
-        }
+        let actual_effects = result
+            .outputs
+            .iter()
+            .map(|output| {
+                let EntityKernelOutput::HtlcInitiated {
+                    entity_id,
+                    from_entity,
+                    to_entity,
+                    token_id,
+                    amount,
+                    sender_amount,
+                    fee,
+                    hashlock,
+                    lock_id,
+                    route,
+                    description,
+                    started_at_ms,
+                } = output
+                else {
+                    panic!("{} unexpected output: {output:?}", expected.name)
+                };
+                serde_json::json!({
+                    "kind": "runtimeEvent", "eventName": "HtlcInitiated", "data": {
+                        "entityId": entity_id, "fromEntity": from_entity, "toEntity": to_entity,
+                        "tokenId": token_id, "amount": amount.to_string(),
+                        "senderAmount": sender_amount.to_string(), "fee": fee.to_string(),
+                        "hashlock": hashlock, "lockId": lock_id, "route": route,
+                        "description": description, "startedAtMs": started_at_ms,
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual_effects,
+            expected.runtime_effects.unwrap_or_default(),
+            "{} complete ordered runtime effect payloads",
+            expected.name
+        );
     }
 }

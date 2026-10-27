@@ -1036,12 +1036,13 @@ fn derived_wake_jobs(
             due_at: timelock,
         })
         .collect::<Vec<_>>();
+    // ACK enforcement reserves time against the signed timelock, not height expiry.
     let lock_deadlines = replica
         .accounts
         .selected_htlc_deadlines(
             state.accounts_root,
             now.saturating_add(xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS),
-            j_clock,
+            None,
         )?
         .1
         .into_iter()

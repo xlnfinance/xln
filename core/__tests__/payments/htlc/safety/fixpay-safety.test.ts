@@ -116,3 +116,20 @@ test('fixpay-9 direct payment without capacity emits PaymentFailed before queuin
   expect(result.accountTxs ?? []).toHaveLength(0);
   expect(effects).toContainEqual(expect.objectContaining({ kind: 'runtimeEvent', eventName: 'PaymentFailed' }));
 });
+
+test('fixpay-5 height-expired lock retains the timelock-based 70s ACK enforcement deadline', () => {
+  const state = makeState(self, entity('55'), j, peer);
+  state.timestamp = 50_000;
+  state.lastFinalizedJHeight = 101;
+  const account = makeAccount(self, peer, j);
+  account.state.locks = PersistentAccountStateMap.fromEntries('locks', [[hashlock, lock]]);
+  openWritableEntityAccounts(state).set(peer, account);
+  state.paybook.entries.set(hashlock, { hashlock, tokenId: 1, amount: 99n, inboundEntity: peer,
+    createdTimestamp: 100, secret, secretAckPending: true, secretAckStartedAt: 100,
+    secretAckDeadlineAt: 170_000 });
+  expect(collectDerivedDeadlines(state).filter(d => d.type === 'htlc_secret_ack_timeout')).toEqual([
+    { id: `htlc-secret-ack:${hashlock}`, triggerAt: 70_000, type: 'htlc_secret_ack_timeout',
+      data: { hashlock, counterpartyEntityId: peer } },
+  ]);
+  expect(collectDerivedDeadlines(state, 50_000).filter(d => d.type === 'htlc_secret_ack_timeout')).toEqual([]);
+});

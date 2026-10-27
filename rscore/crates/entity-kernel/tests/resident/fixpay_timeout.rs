@@ -10,12 +10,14 @@ fn fixpay_2_refund_waits_for_downstream_finality_and_known_secret_never_refunds(
     let payer = entity(&payer_signer);
     let bob = entity(&identity("fixpay-bob"));
     let hash = format!("0x{}", hex::encode(Keccak256::digest([0xab; 32])));
-    for (coverage, secret_known, outbound_live, blocked) in [
-        (100, false, true, true),
-        (110, false, true, true),
-        (111, false, true, true),
-        (111, false, false, false),
-        (111, true, false, true),
+    for (coverage, secret_known, outbound_live, pending, local, blocked) in [
+        (100, false, true, false, false, true),
+        (110, false, true, false, false, true),
+        (111, false, true, false, false, true),
+        (111, false, false, false, false, false),
+        (111, true, false, false, false, true),
+        (111, false, false, true, false, true),
+        (111, false, false, true, true, true),
     ] {
         let lock_tx = |deadline: u64, height: u64| {
             AccountTx::HtlcLock(HtlcLockTx {
@@ -75,6 +77,29 @@ fn fixpay_2_refund_waits_for_downstream_finality_and_known_secret_never_refunds(
         .unwrap()
         .committed()
         .unwrap();
+        let mut downstream = AccountConsensus::new(if outbound_live {
+            outbound
+        } else {
+            outbound_base
+        });
+        if pending {
+            downstream
+                .admit_txs(vec![lock_tx(110_000, 110)], "lost-ack")
+                .unwrap();
+            assert!(matches!(
+                propose_account_frame(
+                    &mut downstream,
+                    &identity(hub_label),
+                    TIMESTAMP,
+                    90,
+                    &support::market()
+                )
+                .unwrap(),
+                ProposalOutcome::Proposed(_)
+            ));
+            assert!(downstream.replica().state().htlc_lock(&hash).is_none());
+            assert!(!downstream.pending().unwrap().hanko.is_empty());
+        }
         let payer_id = AccountId::from_bytes(*payer.as_bytes());
         let mut accounts = ResidentConsensusEngine::restore(
             EngineGeneration::from_bytes([0x72; 8]),
@@ -91,12 +116,8 @@ fn fixpay_2_refund_waits_for_downstream_finality_and_known_secret_never_refunds(
                 },
                 AccountSeed {
                     account_id: AccountId::from_bytes(*bob.as_bytes()),
-                    replica: if outbound_live {
-                        outbound
-                    } else {
-                        outbound_base
-                    },
-                    consensus: None,
+                    replica: downstream.replica().clone(),
+                    consensus: Some(downstream.consensus_snapshot()),
                 },
             ],
         )
@@ -127,68 +148,100 @@ fn fixpay_2_refund_waits_for_downstream_finality_and_known_secret_never_refunds(
         )
         .unwrap();
         let root = accounts.accounts_root();
+        let mut request = ResidentEntityRequest {
+            inbound: EntityInboundRequest {
+                owner_entity_id: *hub.as_bytes(),
+                expected_accounts_root: root,
+                clock: ReceiverClock {
+                    entity_timestamp: TIMESTAMP + 120_000,
+                    finalized_j_height: coverage,
+                },
+                owning_entity_is_hub: false,
+                post_accounts: false,
+                rows: vec![AccountInputRow {
+                    operation_index: 0,
+                    account_id: payer_id,
+                    genesis_policy: None,
+                    certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                    local_certified_board_authority:
+                        xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                    input: AccountInput {
+                        envelope: AccountInputEnvelope {
+                            from_entity_id: *payer.as_bytes(),
+                            to_entity_id: *hub.as_bytes(),
+                            domain: domain(),
+                            dispute_config: AccountDisputeConfig::new(10, 10).unwrap(),
+                            watch_seed: Some(
+                                WatchSeed::parse(&format!("0x{}", "99".repeat(32))).unwrap(),
+                            ),
+                        },
+                        kind: AccountInputKind::AckFrame {
+                            ack: None,
+                            frame: Box::new(IncomingFrame {
+                                frame: proposed.frame,
+                                state_hash: proposed.state_hash,
+                                frame_hanko: Some(proposed.hanko),
+                                dispute: None,
+                            }),
+                        },
+                    },
+                }],
+            },
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+            entity_height: 1,
+            outbound_timestamp: TIMESTAMP + 120_000,
+            outbound_j_height: coverage,
+            checkpoint_due: false,
+            post_accounts: false,
+            runtime_seed: None,
+            scheduled_wake: None,
+            propose_accounts_now: vec![],
+            expected_proposer_signer_id: hub_label.into(),
+            finalized_j_events: None,
+            entity_authority: None,
+            local_account_genesis_policy: None,
+            cross_j_opening_sibling_views: vec![],
+            operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 1 }],
+        };
+        if local {
+            request.inbound.rows.clear();
+            let tx = CanonicalEntityTx::from_frame_projection(
+                EntityTxKind::ProcessHtlcTimeouts,
+                CanonicalValue::Object(vec![(
+                    "expiredLocks".into(),
+                    CanonicalValue::Array(vec![CanonicalValue::Object(vec![
+                        (
+                            "accountId".into(),
+                            CanonicalValue::String(payer.to_string()),
+                        ),
+                        ("lockId".into(), CanonicalValue::String(hash.clone())),
+                    ])]),
+                )]),
+            )
+            .unwrap();
+            request.operations = vec![ResidentEntityOperation::Local(vec![
+                AdmittedLocalEntityTx {
+                    signer_id: hub_label.into(),
+                    board_epoch: 0,
+                    tx: LocalEntityTx::Financial(
+                        decode_local_entity_financial_tx(&tx).unwrap().unwrap(),
+                    ),
+                },
+            ])];
+        }
         let result = apply_resident_entity_round_core(
             &mut accounts,
             state,
-            ResidentEntityRequest {
-                inbound: EntityInboundRequest {
-                    owner_entity_id: *hub.as_bytes(),
-                    expected_accounts_root: root,
-                    clock: ReceiverClock {
-                        entity_timestamp: TIMESTAMP + 120_000,
-                        finalized_j_height: coverage,
-                    },
-                    owning_entity_is_hub: false,
-                    post_accounts: false,
-                    rows: vec![AccountInputRow {
-                        operation_index: 0,
-                        account_id: payer_id,
-                        genesis_policy: None,
-                        certified_board_authority:
-                            xln_rscore_batch::AccountInputBoardAuthority::Lazy,
-                        local_certified_board_authority:
-                            xln_rscore_batch::AccountInputBoardAuthority::Lazy,
-                        input: AccountInput {
-                            envelope: AccountInputEnvelope {
-                                from_entity_id: *payer.as_bytes(),
-                                to_entity_id: *hub.as_bytes(),
-                                domain: domain(),
-                                dispute_config: AccountDisputeConfig::new(10, 10).unwrap(),
-                                watch_seed: Some(
-                                    WatchSeed::parse(&format!("0x{}", "99".repeat(32))).unwrap(),
-                                ),
-                            },
-                            kind: AccountInputKind::AckFrame {
-                                ack: None,
-                                frame: Box::new(IncomingFrame {
-                                    frame: proposed.frame,
-                                    state_hash: proposed.state_hash,
-                                    frame_hanko: Some(proposed.hanko),
-                                    dispute: None,
-                                }),
-                            },
-                        },
-                    }],
-                },
-                local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
-                entity_height: 1,
-                outbound_timestamp: TIMESTAMP + 120_000,
-                outbound_j_height: coverage,
-                checkpoint_due: false,
-                post_accounts: false,
-                runtime_seed: None,
-                scheduled_wake: None,
-                propose_accounts_now: vec![],
-                expected_proposer_signer_id: hub_label.into(),
-                finalized_j_events: None,
-                entity_authority: None,
-                local_account_genesis_policy: None,
-                cross_j_opening_sibling_views: vec![],
-                operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 1 }],
-            },
+            request,
             &DeterministicContext::hlt_default(),
         );
-        if blocked {
+        if local {
+            let result = result.expect("local timeout round");
+            assert!(
+                result.outbound.proposals.is_empty(),
+                "local refund proposed before downstream ACK"
+            );
+        } else if blocked {
             assert!(
                 matches!(result, Err(ResidentEntityError::InboundAdmissionRejected { ref detail, .. })
                 if detail.starts_with("HTLC_INBOUND_TIMEOUT_")),
