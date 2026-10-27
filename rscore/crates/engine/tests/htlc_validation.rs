@@ -423,9 +423,39 @@ fn lock_timelock_beyond_the_safe_integer_ms_domain_is_a_typed_rejection() {
     let at_maximum = SequentialAccountEngine::apply_with_context(
         &base,
         Side::Left,
-        &with_timelock(9_007_199_254_740_991),
+        &with_timelock(87_441_000),
         &execution_context(1_000, 10),
     )
     .expect("maximum timelock");
     assert_eq!(at_maximum.verdict(), &AccountVerdict::Applied);
+    let over_horizon = SequentialAccountEngine::apply_with_context(
+        &base,
+        Side::Left,
+        &with_timelock(87_441_001),
+        &execution_context(1_000, 10),
+    )
+    .unwrap();
+    assert!(matches!(
+        over_horizon.verdict(),
+        AccountVerdict::Rejected(_)
+    ));
+}
+
+#[test]
+fn fixpay_6_ten_year_timelock_cannot_hold_hub_capacity() {
+    let base = left_base(100);
+    let mut tx = lock_tx(HASHLOCK, 10.into());
+    let AccountTx::HtlcLock(lock) = &mut tx else {
+        unreachable!()
+    };
+    lock.timelock = 315_360_000_000_u64.into();
+    let result = SequentialAccountEngine::apply_with_context(
+        &base,
+        Side::Left,
+        &tx,
+        &execution_context(1_000, 10),
+    )
+    .unwrap();
+    assert!(matches!(result.verdict(), AccountVerdict::Rejected(_)));
+    assert!(result.candidate().is_none());
 }

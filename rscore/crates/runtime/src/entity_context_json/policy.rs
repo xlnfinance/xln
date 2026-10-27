@@ -146,6 +146,7 @@ pub(crate) fn apply_entity_state_policy(
         None => None,
     };
 
+    context.block_time_ms = xln_rscore_entity_kernel::payment_block_time_ms(jurisdiction);
     context.minimum_trade_size = minimum_trade_size;
     context.swap_taker_fee_bps = swap_taker_fee_bps;
     context.jurisdiction_id = jurisdiction_id;

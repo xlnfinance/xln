@@ -114,14 +114,29 @@ fn prepare(
     if domain(&local_domain)? != domains[0] {
         return Err(invalid("SOURCE_ACCOUNT_DOMAIN_MISMATCH"));
     }
-    let (expiry_ms, expiry_blocks) = match tx.delivery_mode {
-        OriginatedHtlcDeliveryMode::Instant => (120_000u64, 50u64),
-        OriginatedHtlcDeliveryMode::Async => (86_400_000, 17_280),
-    };
+    let block_time_ms = xln_rscore_entity_kernel::payment_block_time_ms(
+        request
+            .replica
+            .entity_consensus
+            .state
+            .authority
+            .config
+            .jurisdiction
+            .as_ref(),
+    )
+    .ok_or_else(|| invalid("PAYMENT_BLOCK_TIME_INVALID"))?;
+    let (expiry_ms, expiry_blocks) = xln_rscore_entity_kernel::payment_deadline_window(
+        tx.delivery_mode == OriginatedHtlcDeliveryMode::Async,
+        hops as u64,
+        block_time_ms,
+    )
+    .ok_or_else(|| invalid("PAYMENT_DEADLINE_INVALID"))?;
+    let gap = xln_rscore_entity_kernel::payment_reveal_height_delta_blocks(block_time_ms)
+        .ok_or_else(|| invalid("PAYMENT_BLOCK_TIME_INVALID"))?;
     let timelock = BigInt::from(
         request
             .timestamp
-            .checked_add(expiry_ms.max(hops as u64 * 10_000 + 20_000))
+            .checked_add(expiry_ms)
             .ok_or_else(|| invalid("TIMELOCK_OVERFLOW"))?,
     );
     let reveal = request
@@ -130,7 +145,7 @@ fn prepare(
         .copied()
         .ok_or_else(|| invalid("J_HEIGHT_MISSING"))?
         .checked_add(expiry_blocks)
-        .and_then(|height| height.checked_add(hops as u64 * 3))
+        .and_then(|height| height.checked_add(hops as u64 * gap))
         .filter(|height| *height <= 9_007_199_254_740_991)
         .ok_or_else(|| invalid("REVEAL_OVERFLOW"))?;
     let mut envelope: Option<OpaqueHtlcCiphertext> = None;
@@ -158,7 +173,7 @@ fn prepare(
             token_id: tx.token_id.get(),
             amount: amounts[index - 1].clone(),
             timelock: &timelock - BigInt::from((index - 1) * 10_000),
-            reveal_before_height: reveal - (index - 1) as u64 * 3,
+            reveal_before_height: reveal - (index - 1) as u64 * gap,
         };
         let key = bytes(
             profile(profiles, &tx.route[index])?["entityEncryptionPublicKey"]

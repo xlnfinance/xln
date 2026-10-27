@@ -21,7 +21,7 @@ import { createAccountJClaimSession } from '../../j-claims/j-claim-session';
 import { prepareAccountJClaimTx } from '../../j-claims/j-claim-transition';
 import type { AccountJClaimNodeStore } from '../../../types/finance/account-j-claims';
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
-import type { AccountFailedHtlcLock, AccountFailedLendingDisbursement, ProposalDroppedTransaction } from '../types';
+import type { AccountFailedDirectPayment, AccountFailedHtlcLock, AccountFailedLendingDisbursement, ProposalDroppedTransaction } from '../types';
 import {
   ACCOUNT_TX_FAILURE_DISPOSITIONS,
   type AccountTxFailureDisposition,
@@ -35,6 +35,7 @@ const accountLog = createStructuredLogger('account');
 export type ProposalTransactionEffects = {
   events: string[];
   failedHtlcLocks: AccountFailedHtlcLock[];
+  failedDirectPayments: AccountFailedDirectPayment[];
   failedLendingDisbursements: AccountFailedLendingDisbursement[];
   /** Commit-time effects of the validated txs, kept for the prepared ACK commit. */
   candidateEffects: AccountOutput[];
@@ -69,6 +70,7 @@ type AppliedProposalTx = {
 const createTransactionEffects = (): ProposalTransactionEffects => ({
   events: [],
   failedHtlcLocks: [],
+  failedDirectPayments: [],
   failedLendingDisbursements: [],
   candidateEffects: [],
   timedOutHashlocks: [],
@@ -247,6 +249,7 @@ const classifyFailedTransaction = (
     txType: tx.type,
     rejection: result.rejection,
   });
+  if (tx.type === 'direct_payment') effects.failedDirectPayments.push({ data: tx.data, reason: result.rejection.message });
   if (tx.type === 'lending_disburse') effects.failedLendingDisbursements.push(tx.data);
   if (tx.type === 'htlc_lock') {
     effects.failedHtlcLocks.push({

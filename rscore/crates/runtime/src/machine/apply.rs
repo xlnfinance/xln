@@ -959,11 +959,77 @@ fn derived_wake_jobs(
     replica: &mut RuntimeEntityReplica,
     now: u64,
 ) -> Result<Vec<ScheduledWakeJob>, RuntimeMachineError> {
-    let (_, due_locks) = replica
+    let j_clock = xln_rscore_entity_kernel::payment_block_time_ms(
+        replica
+            .entity_consensus
+            .state
+            .authority
+            .config
+            .jurisdiction
+            .as_ref(),
+    )
+    .map(|ms| {
+        (
+            state.entity.timestamp,
+            state.entity.last_finalized_j_height,
+            ms,
+        )
+    });
+    let (_, due_locks) =
+        replica
+            .accounts
+            .selected_htlc_deadlines(state.accounts_root, now, j_clock)?;
+    let mut requests =
+        std::collections::BTreeMap::<xln_rscore_batch::AccountId, Vec<String>>::new();
+    let mut checks = Vec::new();
+    for (account, lock_id, _) in &due_locks {
+        let peer = format!("0x{}", hex::encode(account.as_bytes()));
+        let Some(route) = state
+            .entity
+            .paybook
+            .entry(lock_id)
+            .map_err(RuntimeMachineError::EntityFinancial)?
+        else {
+            continue;
+        };
+        if route.inbound_entity.as_deref() != Some(peer.as_str()) {
+            continue;
+        }
+        let outbound = route
+            .outbound_entity
+            .as_ref()
+            .map(|id| {
+                let bytes = parse_hex32(id)
+                    .ok_or_else(|| RuntimeMachineError::EntityInputEntityIdInvalid(id.clone()))?;
+                Ok::<_, RuntimeMachineError>(xln_rscore_batch::AccountId::from_bytes(bytes))
+            })
+            .transpose()?;
+        if let Some(outbound) = outbound {
+            requests.entry(outbound).or_default().push(lock_id.clone());
+        }
+        checks.push((*account, lock_id, peer, route, outbound));
+    }
+    let views = replica
         .accounts
-        .selected_htlc_deadlines(state.accounts_root, now)?;
+        .head_htlc_locks(requests.into_iter().collect())?;
+    let blocked = checks
+        .into_iter()
+        .filter_map(|(account, lock_id, peer, route, outbound)| {
+            let outbound_lock_live = outbound
+                .and_then(|id| views.get(&id))
+                .and_then(|(_, locks)| locks.get(lock_id))
+                .is_some();
+            xln_rscore_entity_kernel::inbound_payment_timeout_blocked(
+                route,
+                &peer,
+                outbound_lock_live,
+            )
+            .then(|| (account, lock_id.clone()))
+        })
+        .collect::<std::collections::BTreeSet<_>>();
     let mut jobs = due_locks
         .into_iter()
+        .filter(|(account, lock_id, _)| !blocked.contains(&(*account, lock_id.clone())))
         .map(|(_, lock_id, timelock)| ScheduledWakeJob {
             kind: ScheduledWakeJobKind::Hook,
             id: format!("htlc-timeout:{lock_id}"),
@@ -975,6 +1041,7 @@ fn derived_wake_jobs(
         .selected_htlc_deadlines(
             state.accounts_root,
             now.saturating_add(xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS),
+            j_clock,
         )?
         .1
         .into_iter()

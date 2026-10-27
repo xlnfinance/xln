@@ -170,6 +170,7 @@ describe("DeltaTransformer", function () {
     const factory = await ethers.getContractFactory("DeltaTransformer");
     const transformer = await factory.deploy();
     await transformer.waitForDeployment();
+    await (await transformer.bindDepository((await ethers.getSigners())[0].address)).wait();
     const registryFactory = await ethers.getContractFactory("MockRevealRegistry");
     const registry = await registryFactory.deploy();
     await registry.waitForDeployment();

@@ -1,3 +1,4 @@
+import { deriveDelta } from '../../../../account/utils';
 import { UINT256_MAX } from '../../../../protocol/boundary/integer-ranges';
 import { FINANCIAL } from '../../../../config/constants';
 import type { AccountTx } from '../../../../types/account';
@@ -103,7 +104,7 @@ export const handleDirectPaymentEntityTx = async (
   env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: DirectPaymentEntityTx,
-  _candidateEffects: EntityCandidateEffect[] = [],
+  candidateEffects: EntityCandidateEffect[] = [],
   mutableFrameState = false,
 ): Promise<DirectPaymentResult> => {
   const trace = createPaymentTrace(env);
@@ -128,6 +129,17 @@ export const handleDirectPaymentEntityTx = async (
   const validationError = validateEntityPayment(newState, entityTx, route, []);
   if (validationError) return validationError;
   const { nextHop, accountTx } = buildNextHopPayment(newState, entityTx, route);
+  const account = newState.accounts.get(nextHop);
+  if (!account) throw directPaymentInvariant('NEXT_HOP_ACCOUNT_MISSING', nextHop);
+  const delta = account.state.deltas.get(entityTx.data.tokenId);
+  const isLeft = account.state.leftEntity.toLowerCase() === newState.entityId.toLowerCase();
+  if (!delta || deriveDelta(delta, isLeft).outCapacity < entityTx.data.amount) {
+    candidateEffects.push({ kind: 'runtimeEvent', eventName: 'PaymentFailed', data: {
+      entityId: newState.entityId, targetEntityId: entityTx.data.targetEntityId,
+      tokenId: entityTx.data.tokenId, amount: entityTx.data.amount, reason: 'insufficient_capacity',
+    } });
+    return { newState, outputs, accountTxs };
+  }
   accountTxs.push({ accountId: nextHop, tx: accountTx });
   trace('mempool.queued', {
     account: shortId(nextHop),

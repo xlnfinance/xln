@@ -104,6 +104,7 @@ export const deployDepositoryStack = async (
     await deltaTransformer.getAddress(),
   );
   await depository.waitForDeployment();
+  await (await deltaTransformer.bindDepository(await depository.getAddress())).wait();
   if (options.bindShareDepository !== false) {
     const entityProvider = await ethers.getContractAt('EntityProvider', entityProviderAddress);
     await (await entityProvider.bindShareDepository(await depository.getAddress())).wait();

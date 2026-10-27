@@ -48,7 +48,7 @@ struct InboundOutcome {
     changed: bool,
     proposable: bool,
     has_rebalance_work: bool,
-    lock_deadlines: Vec<(String, u64)>,
+    lock_deadlines: Vec<(String, u64, u64)>,
 }
 
 /// Borrow the resident head until an Account transition can actually mutate.
@@ -105,14 +105,14 @@ struct OutboundOutcome {
     proposal: Option<ProposalRow>,
     proposable: bool,
     has_rebalance_work: bool,
-    lock_deadlines: Vec<(String, u64)>,
+    lock_deadlines: Vec<(String, u64, u64)>,
 }
 
 /// Coordinator-side projection of every committed HTLC lock deadline,
 /// `account → [(lockId, timelock)]` sorted by (timelock, lockId). Workers
 /// report an Account's list whenever they seal it, so a wake reads deadlines
 /// without a worker round-trip and without a hook map.
-type LockDeadlines = BTreeMap<AccountId, Vec<(String, u64)>>;
+type LockDeadlines = BTreeMap<AccountId, Vec<(String, u64, u64)>>;
 
 /// Earliest committed HTLC timelock plus the locks due at a wake timestamp,
 /// `(accountId, lockId, timelock)` in (timelock, lockId) order.
@@ -924,6 +924,7 @@ impl ResidentConsensusEngine {
         &self,
         expected_accounts_root: [u8; 32],
         now: u64,
+        j_clock: Option<(u64, u64, u64)>,
     ) -> Result<HtlcDeadlineView, BatchError> {
         let selected = if self
             .forest
@@ -935,7 +936,7 @@ impl ResidentConsensusEngine {
         } else {
             &self.base_lock_deadlines
         };
-        Ok(htlc_deadlines(selected, now))
+        Ok(htlc_deadlines(selected, now, j_clock))
     }
 
     /// Every HTLC lock due at or before `now` on the round's active Account
@@ -943,8 +944,9 @@ impl ResidentConsensusEngine {
     pub fn expired_htlc_locks(
         &self,
         now: u64,
+        j_clock: Option<(u64, u64, u64)>,
     ) -> Result<Vec<(AccountId, String, u64)>, BatchError> {
-        Ok(htlc_deadlines(self.active_lock_deadlines()?, now).1)
+        Ok(htlc_deadlines(self.active_lock_deadlines()?, now, j_clock).1)
     }
 
     /// Read the committed active/inactive bit only for Accounts named by one
@@ -1088,6 +1090,40 @@ impl ResidentConsensusEngine {
     /// after the inbound visit. This mirrors the narrow fields consulted by
     /// TypeScript's `validatePreparedHtlcPayment`; it never materializes or
     /// copies an Account replica at the Entity coordinator.
+    /// Pre-ingress point reads for the parent Entity's routed-refund guard.
+    pub fn head_htlc_locks(
+        &mut self,
+        requests: Vec<(AccountId, Vec<String>)>,
+    ) -> Result<
+        BTreeMap<
+            AccountId,
+            (
+                xln_rscore_engine::Side,
+                BTreeMap<String, xln_rscore_engine::HtlcLock>,
+            ),
+        >,
+        BatchError,
+    > {
+        Ok(self
+            .forest
+            .read_head(requests, |_, account, ids| {
+                let locks = ids
+                    .into_iter()
+                    .filter_map(|id| {
+                        account
+                            .replica()
+                            .state()
+                            .htlc_lock(&id)
+                            .cloned()
+                            .map(|lock| (id, lock))
+                    })
+                    .collect();
+                Ok((account.replica().owner_side(), locks))
+            })?
+            .into_iter()
+            .collect())
+    }
+
     pub fn local_financial_views(
         &mut self,
         requests: Vec<(AccountId, ResidentAccountFinancialViewRequest)>,
@@ -2593,6 +2629,7 @@ fn apply_outbound_work(
             proposed: None,
             dropped: Vec::new(),
             failed_htlc_locks: Vec::new(),
+            failed_direct_payments: Vec::new(),
         })
     } else if work.obligation.resend_pending_proposal {
         // `proposeAccountsNow` recovery: an Account that retains nothing owes
@@ -2604,6 +2641,7 @@ fn apply_outbound_work(
             proposed: None,
             dropped: Vec::new(),
             failed_htlc_locks: Vec::new(),
+            failed_direct_payments: Vec::new(),
         })
     } else {
         None
@@ -2660,7 +2698,7 @@ fn proposable_from_entries(
 
 /// An inactive Account or an already queued/proposed resolve cannot act on a
 /// timeout. Re-arming that deadline would create a signed no-op wake each tick.
-fn lock_deadlines(account: &AccountConsensus) -> Result<Vec<(String, u64)>, BatchError> {
+fn lock_deadlines(account: &AccountConsensus) -> Result<Vec<(String, u64, u64)>, BatchError> {
     if !active(account)? {
         return Ok(Vec::new());
     }
@@ -2687,7 +2725,13 @@ fn lock_deadlines(account: &AccountConsensus) -> Result<Vec<(String, u64)>, Batc
             u64::try_from(lock.timelock())
                 .ok()
                 .filter(|value| *value > 0 && *value <= JS_MAX_SAFE_INTEGER)
-                .map(|timelock| (lock.lock_id().to_string(), timelock))
+                .map(|timelock| {
+                    (
+                        lock.lock_id().to_string(),
+                        timelock,
+                        lock.reveal_before_height(),
+                    )
+                })
         })
         .collect::<Vec<_>>();
     deadlines.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
@@ -2707,7 +2751,7 @@ fn lock_deadlines_from_entries(
 fn set_lock_deadlines(
     deadlines: &mut LockDeadlines,
     account_id: AccountId,
-    next: Vec<(String, u64)>,
+    next: Vec<(String, u64, u64)>,
 ) {
     if next.is_empty() {
         deadlines.remove(&account_id);
@@ -2718,14 +2762,27 @@ fn set_lock_deadlines(
 
 /// Earliest deadline over every Account plus the locks due at or before
 /// `now`, in (timelock, lockId) order across Accounts.
-fn htlc_deadlines(deadlines: &LockDeadlines, now: u64) -> HtlcDeadlineView {
+fn htlc_deadlines(
+    deadlines: &LockDeadlines,
+    now: u64,
+    j_clock: Option<(u64, u64, u64)>,
+) -> HtlcDeadlineView {
     let mut earliest = None::<u64>;
     let mut due = Vec::new();
     for (account_id, locks) in deadlines {
-        for (lock_id, timelock) in locks {
-            earliest = Some(earliest.map_or(*timelock, |current| current.min(*timelock)));
-            if *timelock <= now {
-                due.push((*account_id, lock_id.clone(), *timelock));
+        for (lock_id, timelock, reveal_height) in locks {
+            let trigger = j_clock.map_or(*timelock, |(timestamp, finalized, block_ms)| {
+                let height_at = if finalized > *reveal_height {
+                    timestamp
+                } else {
+                    timestamp
+                        .saturating_add((reveal_height - finalized + 1).saturating_mul(block_ms))
+                };
+                (*timelock).min(height_at)
+            });
+            earliest = Some(earliest.map_or(trigger, |current| current.min(trigger)));
+            if trigger <= now {
+                due.push((*account_id, lock_id.clone(), trigger));
             }
         }
     }
@@ -2995,12 +3052,15 @@ mod lock_deadline_tests {
         set_lock_deadlines(
             &mut deadlines,
             AccountId::from_bytes([0xaa; 32]),
-            vec![("lock-z".to_string(), 100), ("lock-b".to_string(), 200)],
+            vec![
+                ("lock-z".to_string(), 100, 100),
+                ("lock-b".to_string(), 200, 100),
+            ],
         );
         set_lock_deadlines(
             &mut deadlines,
             AccountId::from_bytes([0xbb; 32]),
-            vec![("lock-a".to_string(), 200)],
+            vec![("lock-a".to_string(), 200, 100)],
         );
         set_lock_deadlines(
             &mut deadlines,
@@ -3011,8 +3071,19 @@ mod lock_deadline_tests {
     }
 
     #[test]
+    fn fixpay_5_finalized_height_wakes_before_wallclock_timelock() {
+        let deadlines = LockDeadlines::from([(
+            AccountId::from_bytes([0xaa; 32]),
+            vec![("lock".into(), 86_400_000, 100)],
+        )]);
+        let (earliest, due) = htlc_deadlines(&deadlines, 1000, Some((1000, 101, 3000)));
+        assert_eq!(earliest, Some(1000));
+        assert_eq!(due.len(), 1);
+    }
+
+    #[test]
     fn htlc_deadlines_order_by_timelock_then_lock_id_across_accounts() {
-        let (earliest, due) = htlc_deadlines(&deadline_fixture(), u64::MAX);
+        let (earliest, due) = htlc_deadlines(&deadline_fixture(), u64::MAX, None);
         assert_eq!(earliest, Some(100));
         assert_eq!(
             due.iter()
@@ -3027,7 +3098,7 @@ mod lock_deadline_tests {
     fn htlc_deadline_minus_one_is_not_due_and_deadline_is() {
         let fixture = deadline_fixture();
         let due_ids = |now: u64| {
-            htlc_deadlines(&fixture, now)
+            htlc_deadlines(&fixture, now, None)
                 .1
                 .into_iter()
                 .map(|(_, lock_id, _)| lock_id)
@@ -3038,7 +3109,7 @@ mod lock_deadline_tests {
         assert_eq!(due_ids(199), vec!["lock-z"]);
         assert_eq!(due_ids(200).len(), 3);
         assert_eq!(due_ids(201).len(), 3);
-        assert_eq!(htlc_deadlines(&LockDeadlines::new(), 1).0, None);
+        assert_eq!(htlc_deadlines(&LockDeadlines::new(), 1, None).0, None);
     }
 
     #[test]
@@ -3050,11 +3121,11 @@ mod lock_deadline_tests {
             set_lock_deadlines(
                 &mut deadlines,
                 account_id,
-                vec![("shared-lock".to_string(), 200)],
+                vec![("shared-lock".to_string(), 200, 100)],
             );
         }
 
-        let (_, due) = htlc_deadlines(&deadlines, 200);
+        let (_, due) = htlc_deadlines(&deadlines, 200, None);
         assert_eq!(
             due,
             vec![

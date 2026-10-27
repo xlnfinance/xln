@@ -19,12 +19,13 @@ fn secret_hash(secret: &str) -> Result<String, EntityKernelError> {
 pub(super) fn apply(
     state: &EntityStateSlice,
     paybook: &mut PaybookChanges,
-    tx: ResolveHtlcLockEntityTx,
+    mut tx: ResolveHtlcLockEntityTx,
     account_views: &std::collections::BTreeMap<String, LocalAccountFinancialView>,
     account_txs: &mut Vec<(String, AccountTx)>,
     events: &mut Vec<EntityFrameEvent>,
     wake_targets: &mut Vec<String>,
 ) -> Result<(), EntityKernelError> {
+    tx.secret = tx.secret.to_ascii_lowercase();
     let account_id = tx.counterparty_entity_id.to_ascii_lowercase();
     if !state.known_accounts.contains(&account_id) {
         return Err(EntityKernelError::AccountMissing { account_id });
@@ -71,14 +72,15 @@ pub(super) fn apply(
     if entry
         .secret
         .as_ref()
-        .is_some_and(|secret| secret != &tx.secret)
+        .is_some_and(|secret| !secret.eq_ignore_ascii_case(&tx.secret))
         || entry
             .token_id
             .is_some_and(|token| token != lock.token_id().get())
-        || entry
-            .amount
-            .as_ref()
-            .is_some_and(|amount| amount != lock.amount())
+        || !local_sent
+            && entry
+                .amount
+                .as_ref()
+                .is_some_and(|amount| amount != lock.amount())
     {
         return Err(EntityKernelError::local(
             "resolveHtlcLock",
@@ -125,6 +127,89 @@ mod tests {
     use xln_rscore_engine::{HtlcHashlock, HtlcLock, Side, TokenId};
 
     use super::*;
+
+    #[test]
+    fn fixpay_4_fee_bearing_outbound_lock_and_mixed_case_secret() {
+        let owner = format!("0x{}", "11".repeat(32));
+        let peer = format!("0x{}", "22".repeat(32));
+        let secret = format!("0x{}", "ab".repeat(32));
+        let lock_id = secret_hash(&secret).unwrap();
+        let lock = HtlcLock::restore(
+            lock_id.clone(),
+            HtlcHashlock::parse(&lock_id).unwrap(),
+            100_000.into(),
+            100,
+            99.into(),
+            TokenId::new(1).unwrap(),
+            Side::Left,
+            1,
+            1,
+            None,
+        )
+        .unwrap();
+        let mut state = EntityStateSlice::empty(owner, 3);
+        state.known_accounts.insert(peer.clone());
+        let mut entry = PaybookEntry {
+            hashlock: lock_id.clone(),
+            description: None,
+            token_id: Some(1),
+            amount: Some(100.into()),
+            started_at_ms: None,
+            originated: false,
+            inbound_entity: Some("upstream".into()),
+            outbound_entity: Some(peer.clone()),
+            inbound_settled: false,
+            outbound_settled: false,
+            secret: Some(secret.clone()),
+            secret_ack_pending: false,
+            secret_ack_started_at: None,
+            secret_ack_deadline_at: None,
+            pending_fee: None,
+            created_timestamp: 1,
+        };
+        let view = LocalAccountFinancialView {
+            active: true,
+            owner_side: Side::Left,
+            owner_out_capacity: BTreeMap::new(),
+            owner_peer_credit_limit: BTreeMap::new(),
+            settlement_workspace: None,
+            settlement_transition_pending: false,
+            settlement_execution: Err("unused".into()),
+            rebalance_active_quote: None,
+            htlc_locks: BTreeMap::from([(lock_id.clone(), lock)]),
+            pulls: BTreeMap::new(),
+            swap_offers: BTreeMap::new(),
+            pending_cross_pull_close_ids: Default::default(),
+            dispute: None,
+        };
+        for case_only in [false, true] {
+            if case_only {
+                entry.amount = Some(99.into());
+            }
+            let mut changes = PaybookChanges::default();
+            changes.put(entry.clone()).unwrap();
+            let result = apply(
+                &state,
+                &mut changes,
+                ResolveHtlcLockEntityTx {
+                    counterparty_entity_id: peer.clone(),
+                    lock_id: lock_id.clone(),
+                    secret: if case_only {
+                        format!("0x{}", "AB".repeat(32))
+                    } else {
+                        secret.clone()
+                    },
+                    cross_jurisdiction_route_id: None,
+                    description: None,
+                },
+                &BTreeMap::from([(peer.clone(), view.clone())]),
+                &mut vec![],
+                &mut vec![],
+                &mut vec![],
+            );
+            assert!(result.is_ok(), "fee/case parity: {result:?}");
+        }
+    }
 
     #[test]
     fn verified_account_lock_is_recorded_once_in_paybook_and_queued() {

@@ -12,11 +12,7 @@ import {
   applyAccountInput,
   proposeAccountFrame,
 } from '../../../account/consensus/index';
-import {
-  getIncomingAccountDeadlineViolation,
-  HTLC_ENFORCEMENT_RESERVE_MS,
-  isHtlcSecretEnforcementWindowClosed,
-} from '../../../account/consensus/dispute/deadline-policy';
+import { getIncomingAccountDeadlineViolation, isHtlcSecretEnforcementWindowClosed } from '../../../account/consensus/dispute/deadline-policy';
 import {
   computeFrameHash,
   getAccountFrameStructuralError,
@@ -57,7 +53,7 @@ import {
   runPostFrameAutoRebalanceCheck,
 } from '../../../account/consensus/helpers';
 
-import { HTLC, LIMITS } from '../../../config/constants';
+import { HTLC_ENFORCEMENT_RESERVE_MS, HTLC, LIMITS } from '../../../config/constants';
 
 import { executeCrontab, initCrontab } from '../../../entity/scheduler';
 import { collectDerivedDeadlines } from '../../../entity/scheduler/derived-deadlines';

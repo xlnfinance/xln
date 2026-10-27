@@ -1058,6 +1058,30 @@ fn local_financial_view_requests(
                     .or_default()
                     .dispute = true;
             }
+            LocalEntityFinancialTx::DirectPayment(tx) => {
+                if let Some(next) = tx.route.get(1) {
+                    if state.known_accounts.contains(next) {
+                        requested
+                            .entry(account_id(next)?)
+                            .or_default()
+                            .token_ids
+                            .insert(tx.token_id);
+                    }
+                }
+            }
+            LocalEntityFinancialTx::ProcessHtlcTimeouts(tx) => {
+                for (_, hashlock) in &tx.expired_locks {
+                    if let Some(route) = state.paybook.entry(hashlock)? {
+                        if let Some(peer) = &route.outbound_entity {
+                            requested
+                                .entry(account_id(peer)?)
+                                .or_default()
+                                .htlc_lock_ids
+                                .insert(hashlock.clone());
+                        }
+                    }
+                }
+            }
             LocalEntityFinancialTx::HtlcPayment(tx) => {
                 let Some(prepared) = context.originated_htlcs.get(&tx.tx_hash) else {
                     continue;
@@ -2226,22 +2250,27 @@ fn apply_scheduled_wake(
     paybook: &mut PaybookChanges,
     wake: Option<&ScheduledWake>,
     expected_proposer_signer_id: &str,
+    block_time_ms: Option<u64>,
 ) -> Result<ScheduledWakeResult, ResidentEntityError> {
     let Some(wake) = wake else {
         return Ok((Vec::new(), Vec::new()));
     };
     let now = state.timestamp;
+    let j_clock = block_time_ms.map(|ms| (state.timestamp, state.last_finalized_j_height, ms));
     // Expired HTLC locks are derived from committed Account state, in
     // (timelock, lockId) order — the key the hook map used to drain by.
     let expired_locks = accounts
-        .expired_htlc_locks(now)?
+        .expired_htlc_locks(now, j_clock)?
         .into_iter()
         .map(|(account, lock_id, _)| (account_text(account), lock_id))
         .filter(|(account, _)| state.known_accounts.contains(account))
         .collect::<Vec<_>>();
 
     let lock_deadlines = accounts
-        .expired_htlc_locks(now.saturating_add(xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS))?
+        .expired_htlc_locks(
+            now.saturating_add(xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS),
+            j_clock,
+        )?
         .into_iter()
         .map(|(account, hashlock, timelock)| ((account_text(account), hashlock), timelock))
         .collect();
@@ -2376,6 +2405,25 @@ fn failed_proposal_followups(
 ) -> Result<Vec<FailedHtlcFollowup>, ResidentEntityError> {
     let mut followups = Vec::new();
     for proposal in outbound.proposals() {
+        for (tx, reason) in &proposal.failed_direct_payments {
+            if let AccountTx::DirectPayment {
+                token_id,
+                amount,
+                route,
+                to_entity_id,
+                ..
+            } = tx
+            {
+                outputs.push(EntityKernelOutput::PaymentFailed {
+                    entity_id: state.entity_id.clone(),
+                    target_entity_id: route.last().unwrap_or(to_entity_id).clone(),
+                    token_id: token_id.get(),
+                    amount: amount.clone(),
+                    reason: reason.clone(),
+                });
+            }
+        }
+
         for failed in &proposal.failed_htlc_locks {
             let hashlock = hex_prefixed(&failed.hashlock);
             if failed.lock_id != hashlock {
@@ -2557,6 +2605,98 @@ fn refuse_counterparty_board_activation_mix(
     Ok(())
 }
 
+// Parent-owned route facts never enter Account state. A payer refund cannot
+// race a downstream reveal that the finalized J prefix has not covered yet.
+fn protect_inbound_payment_timeouts(
+    accounts: &mut ResidentConsensusEngine,
+    state: &EntityStateSlice,
+    rows: &[xln_rscore_batch::AccountInputRow],
+) -> Result<(), ResidentEntityError> {
+    let mut checks = Vec::new();
+    let mut requests = BTreeMap::<AccountId, BTreeSet<String>>::new();
+    for (index, row) in rows.iter().enumerate() {
+        let xln_rscore_batch::AccountInputKind::AckFrame { frame, .. } = &row.input.kind else {
+            continue;
+        };
+        let peer = account_text(row.account_id);
+        for tx in &frame.frame.txs {
+            let xln_rscore_engine::AccountTx::HtlcResolve(resolve) = tx else {
+                continue;
+            };
+            if !matches!(
+                resolve.outcome,
+                xln_rscore_engine::HtlcResolveOutcome::Error { .. }
+            ) {
+                continue;
+            }
+            let Some(route) = state.paybook.entry(&resolve.lock_id)? else {
+                continue;
+            };
+            if route.inbound_entity.as_deref() != Some(peer.as_str()) {
+                continue;
+            }
+            let outbound = route
+                .outbound_entity
+                .as_ref()
+                .map(|peer| account_id(peer))
+                .transpose()?;
+            requests
+                .entry(row.account_id)
+                .or_default()
+                .insert(resolve.lock_id.clone());
+            if let Some(outbound) = outbound {
+                requests
+                    .entry(outbound)
+                    .or_default()
+                    .insert(resolve.lock_id.clone());
+            }
+            checks.push((
+                index,
+                row.account_id,
+                resolve.lock_id.clone(),
+                outbound,
+                route.secret.is_some(),
+            ));
+        }
+    }
+    if checks.is_empty() {
+        return Ok(());
+    }
+    let views = accounts.head_htlc_locks(
+        requests
+            .into_iter()
+            .map(|(account, ids)| (account, ids.into_iter().collect()))
+            .collect(),
+    )?;
+    for (index, inbound, hashlock, outbound, known_secret) in checks {
+        let Some((owner_side, locks)) = views.get(&inbound) else {
+            continue;
+        };
+        let Some(lock) = locks.get(&hashlock) else {
+            continue;
+        };
+        if lock.sender() == *owner_side {
+            continue;
+        }
+        let awaiting = outbound
+            .and_then(|id| views.get(&id))
+            .and_then(|(_, locks)| locks.get(&hashlock))
+            .is_some();
+        if known_secret || awaiting {
+            let reason = if known_secret {
+                "SECRET_KNOWN"
+            } else {
+                "AWAITING_DOWNSTREAM_RESOLUTION"
+            };
+            return Err(ResidentEntityError::InboundAdmissionRejected {
+                row_index: index,
+                detail: format!("HTLC_INBOUND_TIMEOUT_{reason}:{hashlock}"),
+            });
+        }
+    }
+    Ok(())
+}
+
 fn apply_resident_entity_round_core_attempt(
     accounts: &mut ResidentConsensusEngine,
     mut state: EntityStateSlice,
@@ -2599,6 +2739,7 @@ fn apply_resident_entity_round_core_attempt(
     let clock = request.inbound.clock;
     let expected_root = request.inbound.expected_accounts_root;
     let mut rows = std::mem::take(&mut request.inbound.rows);
+    protect_inbound_payment_timeouts(accounts, &state, &rows)?;
     let mut first_row_by_account = BTreeMap::new();
     for (index, row) in rows.iter_mut().enumerate() {
         row.operation_index = u64::try_from(index)
@@ -2695,6 +2836,7 @@ fn apply_resident_entity_round_core_attempt(
         &mut accumulated.paybook_changes,
         request.scheduled_wake.as_ref(),
         &request.expected_proposer_signer_id,
+        context.block_time_ms,
     )?;
     accumulated
         .account_envelope_mutations
@@ -4313,6 +4455,7 @@ mod tests {
                 disposition,
             }],
             failed_htlc_locks: Vec::new(),
+            failed_direct_payments: Vec::new(),
         };
 
         assert!(!proposal_records_account_change(&row(
@@ -4522,6 +4665,7 @@ mod tests {
                 outbound_input: None,
                 proposed: Some(proposed),
                 failed_htlc_locks: Vec::new(),
+                failed_direct_payments: Vec::new(),
                 dropped: Vec::new(),
             }],
             ..EntityRoundResult::default()

@@ -100,8 +100,8 @@ pub use swap::{SwapMarketPolicy, SwapOffer, SwapOfferSnapshot, SwapToken};
 pub use tx::apply_result::AccountOutput;
 pub use tx::handlers::htlc::{
     HTLC_OPAQUE_CIPHERTEXT_VERSION, HtlcBoundaryError, HtlcDeliveryMode, HtlcHashlock, HtlcLock,
-    HtlcLockTx, HtlcRejection, HtlcResolveOutcome, HtlcResolveTx, OpaqueHtlcCiphertext,
-    encode_htlc_lock_value, htlc_lock_radix_key, htlc_lock_value_digest,
+    HtlcLockTx, HtlcRejection, HtlcResolveOutcome, HtlcResolveTx, MAX_HTLC_HORIZON_MS,
+    OpaqueHtlcCiphertext, encode_htlc_lock_value, htlc_lock_radix_key, htlc_lock_value_digest,
 };
 /// Verify the one canonical hash-ladder wire used by Account close and
 /// cross-j registry forwarding. Entity must call this instead of growing a

@@ -5,46 +5,46 @@ import {
 } from '../../../protocol/payments/delivery';
 import { HTLC } from '../../../config/constants';
 import { calculateHopRevealHeight, calculateHopTimelock } from '../../../protocol/htlc/utils';
-import { ASYNC_PAYMENT_EXPIRY_BLOCKS, ASYNC_PAYMENT_EXPIRY_MS } from '../../../types/finance/payment';
+import { paymentExpiryBlocks, ASYNC_PAYMENT_EXPIRY_MS } from '../../../types/finance/payment';
 import { toJHeight, toUnixMs } from '../../../protocol/units';
 
 describe('payment delivery modes', () => {
   test('async is a deterministic 24-hour window', () => {
     const deadline = resolvePaymentDeadlineWindow({
-      mode: 'async',
+      blockTimeMs: 10_000, mode: 'async',
       runtimeJHeight: toJHeight(123),
       timestamp: toUnixMs(1_000),
       totalHops: 3,
     });
     expect(deadline.baseTimelock).toBe(BigInt(1_000 + ASYNC_PAYMENT_EXPIRY_MS));
-    expect(deadline.baseHeight).toBe(123 + ASYNC_PAYMENT_EXPIRY_BLOCKS);
+    expect(deadline.baseHeight).toBe(123 + paymentExpiryBlocks(ASYNC_PAYMENT_EXPIRY_MS, 10_000));
   });
 
   test('instant retains the short bounded window', () => {
     const deadline = resolvePaymentDeadlineWindow({
-      mode: 'instant',
+      blockTimeMs: 10_000, mode: 'instant',
       runtimeJHeight: toJHeight(123),
       timestamp: toUnixMs(1_000),
       totalHops: 3,
     });
     expect(deadline.baseTimelock).toBe(121_000n);
-    expect(deadline.baseHeight).toBe(173);
+    expect(deadline.baseHeight).toBe(135);
   });
 
   test('reserves multiple jurisdiction blocks for every upstream reveal', () => {
     const baseHeight = 100;
-    const upstream = calculateHopRevealHeight(baseHeight, 0, 3);
-    const intermediary = calculateHopRevealHeight(baseHeight, 1, 3);
-    const recipient = calculateHopRevealHeight(baseHeight, 2, 3);
+    const upstream = calculateHopRevealHeight(baseHeight, 0, 3, 10_000);
+    const intermediary = calculateHopRevealHeight(baseHeight, 1, 3, 10_000);
+    const recipient = calculateHopRevealHeight(baseHeight, 2, 3, 10_000);
 
-    expect(upstream - intermediary).toBe(HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS);
-    expect(intermediary - recipient).toBe(HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS);
-    expect(HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS).toBeGreaterThan(1);
+    expect(upstream - intermediary).toBe(3);
+    expect(intermediary - recipient).toBe(3);
+    expect(3).toBeGreaterThan(1);
   });
 
   test('charges the timelock delta exactly once per actual forward', () => {
     const sixHopWindow = resolvePaymentDeadlineWindow({
-      mode: 'instant',
+      blockTimeMs: 10_000, mode: 'instant',
       runtimeJHeight: toJHeight(0),
       timestamp: toUnixMs(0),
       totalHops: 6,
@@ -53,13 +53,13 @@ describe('payment delivery modes', () => {
     expect(calculateHopTimelock(sixHopWindow.baseTimelock, 5)).toBe(70_000n);
 
     const maxHopWindow = resolvePaymentDeadlineWindow({
-      mode: 'instant',
+      blockTimeMs: 10_000, mode: 'instant',
       runtimeJHeight: toJHeight(0),
       timestamp: toUnixMs(0),
       totalHops: HTLC.MAX_HOPS,
     });
     const finalHop = calculateHopTimelock(maxHopWindow.baseTimelock, HTLC.MAX_HOPS - 1);
-    expect(finalHop).toBeGreaterThan(BigInt(HTLC.MIN_FORWARD_TIMELOCK_MS));
+    expect(finalHop).toBeGreaterThan(BigInt(30_000));
     expect(() => calculateHopTimelock(maxHopWindow.baseTimelock, -1)).toThrow('HTLC_HOP_INDEX_INVALID');
   });
 

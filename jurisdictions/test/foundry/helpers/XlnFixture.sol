@@ -37,6 +37,7 @@ abstract contract XlnFixture is Test {
     ep = new EntityProvider(vm.addr(FOUNDATION_PK));
     deltaTransformer = new DeltaTransformer();
     dep = new Depository(address(ep), address(deltaTransformer));
+    deltaTransformer.bindDepository(address(dep));
     vm.prank(vm.addr(FOUNDATION_PK));
     ep.bindShareDepository(address(dep));
 

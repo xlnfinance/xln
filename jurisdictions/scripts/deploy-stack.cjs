@@ -165,6 +165,7 @@ async function main() {
   const depository = await Depository.deploy(entityProviderAddr, deltaTransformerAddr, await transactionFees());
   await depository.waitForDeployment();
   const depositoryAddr = await depository.getAddress();
+  await (await deltaTransformer.bindDepository(depositoryAddr, await transactionFees())).wait();
   const depositoryDeployment = await deploymentEvidence(depository, depositoryAddr, 'DEPOSITORY');
   console.log(`   Depository: ${depositoryAddr}`);
 

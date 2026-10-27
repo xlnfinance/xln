@@ -10,6 +10,7 @@ use crate::{
 };
 
 const MAX_ACCOUNT_HTLC_LOCKS: usize = 32;
+pub const MAX_HTLC_HORIZON_MS: u64 = 86_400_000 + 100 * 10_000 + 40_000;
 
 /// JavaScript `Number.MAX_SAFE_INTEGER`, the TS UnixMs domain.
 const MAX_HTLC_TIMELOCK_MS: u64 = 9_007_199_254_740_991;
@@ -41,6 +42,14 @@ pub(crate) fn apply_lock(
     // The ProofBody deadline is a safe-integer unix second on the TS side, so
     // a larger timelock is refused here instead of diverging at proof build.
     let maximum = BigInt::from(MAX_HTLC_TIMELOCK_MS);
+    if tx.timelock > maximum {
+        return Ok(rejected(HtlcRejection::TimelockOutOfRange {
+            timelock: tx.timelock.clone(),
+            maximum,
+        }));
+    }
+    // A signed peer lock may not freeze capacity beyond the bounded route horizon.
+    let maximum = BigInt::from(context.enforcement_timestamp) + MAX_HTLC_HORIZON_MS;
     if tx.timelock > maximum {
         return Ok(rejected(HtlcRejection::TimelockOutOfRange {
             timelock: tx.timelock.clone(),

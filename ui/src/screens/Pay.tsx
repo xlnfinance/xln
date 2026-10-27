@@ -74,13 +74,13 @@ export function Pay() {
 	const applyInvoice = useCallback((raw: string): boolean => {
 		try {
 			const parsed = parseXlnInvoice(raw);
+			const note = invoiceNote(parsed, wallet.jurisdiction);
 			setInvoice(parsed);
 			setInvoiceError(null);
 			setToText(parsed.targetEntityId);
 			setPickedEntityId(parsed.targetEntityId);
 			if (parsed.tokenId) setTokenId(parsed.tokenId);
 			if (parsed.amount) setAmountText(parsed.amount);
-			const note = invoiceNote(parsed);
 			setDescription(note.description);
 			setNoteOpen(Boolean(note.description) || note.locked);
 			return true;
@@ -91,7 +91,7 @@ export function Pay() {
 			setInvoiceError(error instanceof Error ? error.message : String(error));
 			return false;
 		}
-	}, [clearInvoice]);
+	}, [clearInvoice, wallet.jurisdiction]);
 
 	// Deep link: /#pay/<invoice> lands here with the full href in navigation state.
 	useEffect(() => {
@@ -205,6 +205,8 @@ export function Pay() {
 		submissionStarted.current = true;
 		setSending(true);
 		try {
+			// The active wallet may have changed since this invoice was applied.
+			if (invoice) invoiceNote(invoice, wallet.jurisdiction);
 			await submitPayment({
 				entityId: self,
 				signerId: wallet.signerId,

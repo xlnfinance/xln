@@ -305,6 +305,16 @@ pub(super) fn materialize_inbound_htlc_context(
     let materialized = materialize_decrypted_htlc_entries(
         decrypted,
         &HtlcMaterializeEnvironment {
+            block_time_ms: xln_rscore_entity_kernel::payment_block_time_ms(
+                request
+                    .replica
+                    .entity_consensus
+                    .state
+                    .authority
+                    .config
+                    .jurisdiction
+                    .as_ref(),
+            ),
             entity_encryption_public_key: public_key,
             entity_encryption_private_key: private_key,
             entity_timestamp: request.timestamp,
@@ -421,7 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn production_extraction_matches_the_typescript_inbound_final_golden() {
+    fn production_extraction_rejects_authenticated_nonpaying_typescript_golden() {
         let row = golden_row();
         let mut inputs = Vec::new();
         let AccountInputKind::AckFrame { ack: None, frame } = &row.input.kind else {
@@ -445,6 +455,7 @@ mod tests {
         let entries = materialize_decrypted_htlc_entries(
             decrypted,
             &HtlcMaterializeEnvironment {
+                block_time_ms: Some(10_000),
                 entity_encryption_public_key: public_key,
                 entity_encryption_private_key: private_key,
                 entity_timestamp: 1,
@@ -475,12 +486,9 @@ mod tests {
                     "timelock": { "__xlnType": "BigInt", "value": "987654321" },
                     "revealBeforeHeight": 1_234,
                 },
-                "outcome": {
-                    "kind": "final",
-                    "secret": format!("0x{}", "66".repeat(32)),
-                    "description": "rust-ts-golden",
-                    "startedAtMs": 777,
-                },
+                // The ciphertext and binding stay byte-identical. Independent
+                // `cast keccak` of 0x66*32 is not the signed 0x55*32 hashlock.
+                "outcome": { "kind": "reject", "reason": "ciphertext_invalid" },
             }))
             .expect("tagged canonical fixture"),
         );

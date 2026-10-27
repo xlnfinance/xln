@@ -21,6 +21,23 @@ const assertEndpoint = (
   }
 };
 
+/** Refunding an inbound routed lock must not race a hidden downstream reveal. */
+export function inboundPaymentTimeoutError(
+  state: EntityState,
+  counterpartyId: string,
+  hashlock: string,
+  bookIntentSlot?: BookIntentSlotWriter,
+): string | undefined {
+  const route = bookIntentSlot ? bookIntentSlot.getPaybookEntry(state, hashlock) : state.paybook.entries.get(hashlock);
+  if (route?.inboundEntity?.toLowerCase() !== counterpartyId.toLowerCase()) return undefined;
+  if (route.secret) return `HTLC_INBOUND_TIMEOUT_SECRET_KNOWN:${hashlock}`;
+  const outbound = route.outboundEntity ? state.accounts.get(route.outboundEntity)?.state.locks.get(hashlock) : undefined;
+  // L1's registry cutoff is a timestamp; the certified J head has only height.
+  // Height alone cannot exclude a timely reveal on a faster-than-planned chain.
+  // Resolve the downstream obligation first instead of guessing chain time.
+  return outbound ? `HTLC_INBOUND_TIMEOUT_AWAITING_DOWNSTREAM_RESOLUTION:${hashlock}` : undefined;
+}
+
 export function persistVerifiedPaymentSecret(
   state: EntityState,
   counterpartyId: string,
@@ -29,6 +46,7 @@ export function persistVerifiedPaymentSecret(
   bookIntentSlot: BookIntentSlotWriter,
 ): PaybookEntry {
   assertCanonicalPaymentId(lock);
+  secret = secret.toLowerCase();
   const existing = bookIntentSlot.getPaybookEntry(state, lock.hashlock);
   const entry = existing
     ? bookIntentSlot.getPaybookEntryForWrite(state, lock.hashlock)

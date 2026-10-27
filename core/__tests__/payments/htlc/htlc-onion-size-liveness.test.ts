@@ -1,3 +1,4 @@
+import { paymentRevealHeightDeltaBlocks } from '../../../types/finance/payment';
 import { expect, test } from 'bun:test';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -22,12 +23,12 @@ test('MAX_HOPS opaque onion stays bounded and every Entity decrypts one layer', 
   const domains = Array.from({ length: HTLC.MAX_HOPS }, () => domain);
   const forwards = new Map(route.slice(1, -1).map(entityId => [entityId, 1n]));
   const timelock = BigInt(HTLC.MIN_TIMELOCK_DELTA_MS * (HTLC.MAX_HOPS + 2));
-  const revealBeforeHeight = HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS * (HTLC.MAX_HOPS + 2);
+  const revealBeforeHeight = paymentRevealHeightDeltaBlocks(10_000) * (HTLC.MAX_HOPS + 2);
   const hashlock = bytes32(0x7_002);
   const envelope = await createOnionEnvelopes(
     route, bytes32(0x7_003), publicKeys, domains, forwards,
     undefined, 1,
-    { hashlock, tokenId: 1, senderLockAmount: 1n, timelock, revealBeforeHeight },
+    { hashlock, tokenId: 1, senderLockAmount: 1n, timelock, revealBeforeHeight, blockTimeMs: 10_000 },
     hopIndex => privateKeyAt(route.length + hopIndex),
   );
   expect(new TextEncoder().encode(JSON.stringify(envelope)).byteLength).toBeLessThan(LIMITS.MAX_FRAME_SIZE_BYTES);
@@ -42,7 +43,7 @@ test('MAX_HOPS opaque onion stays bounded and every Entity decrypts one layer', 
         fromEntityId: route[hopIndex - 1]!, toEntityId: hop, domain,
         hashlock, tokenId: 1, amount,
         timelock: timelock - BigInt(hopIndex - 1) * BigInt(HTLC.MIN_TIMELOCK_DELTA_MS),
-        revealBeforeHeight: revealBeforeHeight - (hopIndex - 1) * HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS,
+        revealBeforeHeight: revealBeforeHeight - (hopIndex - 1) * paymentRevealHeightDeltaBlocks(10_000),
       }),
     );
     const layer = decodeOnionLayer(plaintext);

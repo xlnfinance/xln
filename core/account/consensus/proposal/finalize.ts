@@ -130,6 +130,7 @@ export const finalizeAccountProposal = (
     ...(effects.failedLendingDisbursements.length > 0
       ? { failedLendingDisbursements: effects.failedLendingDisbursements }
       : {}),
+    ...(effects.failedDirectPayments.length > 0 ? { failedDirectPayments: effects.failedDirectPayments } : {}),
     ...(effects.failedHtlcLocks.length > 0 ? { failedHtlcLocks: effects.failedHtlcLocks } : {}),
   });
   return result;

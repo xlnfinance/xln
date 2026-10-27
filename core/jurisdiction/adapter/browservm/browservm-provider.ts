@@ -346,6 +346,7 @@ export class BrowserVMProvider {
     await this.deployHashLadderRegistry();
     await this.deployNftCustody();
     await this.deployDepository();
+    await this.bindTransformerDepository();
     await this.bindShareDepository();
     await this.deployDefaultTokens();
 
@@ -455,6 +456,23 @@ export class BrowserVMProvider {
   }
 
   /** Complete the one-time bidirectional stack binding before any share release. */
+  private async bindTransformerDepository(): Promise<void> {
+    const transformer = this.deltaTransformerAddress;
+    const depository = this.depositoryAddress;
+    const artifact = this.deltaTransformerArtifact;
+    if (!transformer || !depository || !artifact) throw new Error('TRANSFORMER_BINDING_CONTRACTS_REQUIRED');
+    const callData = new ethers.Interface(artifact.abi)
+      .encodeFunctionData('bindDepository', [depository.toString()]);
+    const { result } = await this.runTxWithNonce(this.deployerAddress, currentNonce =>
+      createLegacyTx({
+        to: transformer, gasLimit: 1_000_000n, gasPrice: 10n,
+        data: callData as `0x${string}`, nonce: currentNonce,
+      }, { common: this.common }).sign(this.deployerPrivKey));
+    if (result.execResult.exceptionError) {
+      throw new Error(`Transformer Depository binding failed: ${result.execResult.exceptionError}`);
+    }
+  }
+
   private async bindShareDepository(): Promise<void> {
     if (!this.entityProviderAddress || !this.depositoryAddress || !this.entityProviderInterface) {
       throw new Error('Share Depository binding requires both deployed contracts');

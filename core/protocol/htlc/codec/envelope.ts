@@ -1,3 +1,4 @@
+import { paymentRevealHeightDeltaBlocks } from '../../../types/finance/payment';
 /**
  * HTLC Onion Envelope Types
  * Privacy-preserving routing: each node only knows previous/next hop
@@ -29,6 +30,7 @@ export type HtlcEnvelopeBinding = Readonly<{
   hashlock: string;
   tokenId: number;
   senderLockAmount: bigint;
+  blockTimeMs: number | undefined;
   timelock: bigint;
   revealBeforeHeight: number;
 }>;
@@ -121,7 +123,7 @@ const contextAt = (
   amount: inboundAmountAt(route, hopIndex, binding.senderLockAmount, hopForwardAmounts),
   timelock: binding.timelock - BigInt(hopIndex - 1) * BigInt(HTLC.MIN_TIMELOCK_DELTA_MS),
   revealBeforeHeight: binding.revealBeforeHeight
-    - (hopIndex - 1) * HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS,
+    - (hopIndex - 1) * paymentRevealHeightDeltaBlocks(binding.blockTimeMs),
 });
 
 /**

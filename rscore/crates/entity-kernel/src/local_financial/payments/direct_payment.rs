@@ -10,6 +10,8 @@ const MAX_ROUTE_HOPS: usize = 100;
 pub(super) fn apply_direct_payment(
     state: &EntityStateSlice,
     tx: DirectPaymentEntityTx,
+    account_views: &std::collections::BTreeMap<String, super::types::LocalAccountFinancialView>,
+    outputs: &mut Vec<crate::EntityKernelOutput>,
     account_txs: &mut Vec<(String, AccountTx)>,
     events: &mut Vec<EntityFrameEvent>,
     wake_targets: &mut Vec<String>,
@@ -61,6 +63,23 @@ pub(super) fn apply_direct_payment(
             account_id: next_hop,
         });
     }
+    let view = account_views
+        .get(&next_hop)
+        .ok_or_else(|| EntityKernelError::local("directPayment", "ACCOUNT_VIEW_MISSING"))?;
+    if view
+        .owner_out_capacity
+        .get(&tx.token_id)
+        .is_none_or(|capacity| capacity < &tx.amount)
+    {
+        outputs.push(crate::EntityKernelOutput::PaymentFailed {
+            entity_id: state.entity_id.clone(),
+            target_entity_id: tx.target_entity_id,
+            token_id: tx.token_id.get(),
+            amount: tx.amount,
+            reason: "insufficient_capacity".into(),
+        });
+        return Ok(());
+    }
     let description = Some(match tx.description {
         Some(value) if !value.is_empty() => value,
         _ => format!("Payment to {}", tx.target_entity_id),
@@ -99,6 +118,87 @@ mod tests {
         format!("0x{}", byte.repeat(32))
     }
 
+    fn capacity_views(
+        peer: &str,
+    ) -> std::collections::BTreeMap<String, super::super::types::LocalAccountFinancialView> {
+        use std::collections::BTreeMap;
+        BTreeMap::from([(
+            peer.into(),
+            super::super::types::LocalAccountFinancialView {
+                active: true,
+                owner_side: xln_rscore_engine::Side::Left,
+                owner_out_capacity: BTreeMap::from([(
+                    xln_rscore_engine::TokenId::new(1).unwrap(),
+                    BigInt::from(1) << 256_usize,
+                )]),
+                owner_peer_credit_limit: BTreeMap::new(),
+                settlement_workspace: None,
+                settlement_transition_pending: false,
+                settlement_execution: Err("unused".into()),
+                rebalance_active_quote: None,
+                htlc_locks: BTreeMap::new(),
+                pulls: BTreeMap::new(),
+                swap_offers: BTreeMap::new(),
+                pending_cross_pull_close_ids: Default::default(),
+                dispute: None,
+            },
+        )])
+    }
+
+    #[test]
+    fn fixpay_9_no_capacity_reports_failure_without_account_admission() {
+        use crate::local_financial::{LocalAccountFinancialView, apply_local_entity_financial_txs};
+        use crate::{DeterministicContext, LocalEntityFinancialTx};
+        use std::collections::BTreeMap;
+        let owner = entity("11");
+        let peer = entity("22");
+        let mut state = EntityStateSlice::empty(owner.clone(), 100);
+        state.known_accounts.insert(peer.clone());
+        let view = LocalAccountFinancialView {
+            active: true,
+            owner_side: xln_rscore_engine::Side::Left,
+            owner_out_capacity: BTreeMap::from([(
+                xln_rscore_engine::TokenId::new(1).unwrap(),
+                0.into(),
+            )]),
+            owner_peer_credit_limit: BTreeMap::new(),
+            settlement_workspace: None,
+            settlement_transition_pending: false,
+            settlement_execution: Err("unused".into()),
+            rebalance_active_quote: None,
+            htlc_locks: BTreeMap::new(),
+            pulls: BTreeMap::new(),
+            swap_offers: BTreeMap::new(),
+            pending_cross_pull_close_ids: Default::default(),
+            dispute: None,
+        };
+        let result = apply_local_entity_financial_txs(
+            &mut state,
+            &mut crate::paybook::PaybookChanges::default(),
+            vec![LocalEntityFinancialTx::DirectPayment(
+                DirectPaymentEntityTx {
+                    target_entity_id: peer.clone(),
+                    token_id: xln_rscore_engine::TokenId::new(1).unwrap(),
+                    amount: 7.into(),
+                    route: vec![owner, peer.clone()],
+                    description: None,
+                    delivery_mode: DeliveryMode::Direct,
+                    trusted_gateway_entity_id: None,
+                },
+            )],
+            &DeterministicContext::hlt_default(),
+            &BTreeMap::from([(peer, view)]),
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(result.account_txs.is_empty());
+        assert_eq!(result.outputs.len(), 1);
+        assert!(
+            matches!(&result.outputs[0], crate::EntityKernelOutput::PaymentFailed { reason, .. } if reason == "insufficient_capacity")
+        );
+    }
+
     #[test]
     fn empty_description_uses_the_exact_ts_default_and_emits_one_self_wake() {
         let owner = entity("11");
@@ -119,6 +219,8 @@ mod tests {
                 delivery_mode: DeliveryMode::Direct,
                 trusted_gateway_entity_id: None,
             },
+            &capacity_views(&peer),
+            &mut Vec::new(),
             &mut account_txs,
             &mut events,
             &mut wakes,
@@ -157,6 +259,8 @@ mod tests {
                     delivery_mode: DeliveryMode::Direct,
                     trusted_gateway_entity_id: None,
                 },
+                &capacity_views(&peer),
+                &mut Vec::new(),
                 &mut account_txs,
                 &mut events,
                 &mut wakes,

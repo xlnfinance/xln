@@ -14,8 +14,19 @@ use crate::types::{
 use crate::{DeterministicContext, EntityKernelError, OrderedAccountCommit};
 
 const MIN_TIMELOCK_DELTA_MS: u64 = 10_000;
-const MIN_REVEAL_HEIGHT_DELTA_BLOCKS: u64 = 3;
 pub(crate) const SECRET_ACK_TIMEOUT_MS: u64 = 120_000;
+
+/// A routed inbound refund waits for complete downstream reveal coverage.
+pub fn inbound_payment_timeout_blocked(
+    route: &PaybookEntry,
+    counterparty: &str,
+    outbound_lock_live: bool,
+) -> bool {
+    // Registry expiry is timestamp-based, while certified J coverage has only
+    // height. Never infer that the on-chain reveal window closed from height.
+    route.inbound_entity.as_deref() == Some(counterparty)
+        && (route.secret.is_some() || outbound_lock_live)
+}
 
 /// Same derived wake as TS: a withheld ACK cannot spend the signed lock's reserve.
 pub fn secret_ack_trigger_at(deadline: u64, started_at: u64, timelock: Option<u64>) -> u64 {
@@ -410,7 +421,27 @@ fn apply_final_prepared(
             created_timestamp: state.timestamp,
         })?;
     }
-    queue_secret(effects, &commit.account_id, &tx.lock_id, secret);
+    // Persist the verified preimage before the payer can withhold its ACK.
+    let mut entry = paybook
+        .entry(state, tx.hashlock.as_str())?
+        .cloned()
+        .ok_or_else(|| EntityKernelError::htlc("PAYBOOK_ENTRY_WRITE_MISSING"))?;
+    entry.secret = Some(secret.to_ascii_lowercase());
+    entry.secret_ack_pending = true;
+    entry.secret_ack_started_at = Some(state.timestamp);
+    entry.secret_ack_deadline_at = Some(
+        state
+            .timestamp
+            .checked_add(SECRET_ACK_TIMEOUT_MS)
+            .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_DEADLINE_OVERFLOW"))?,
+    );
+    paybook.put(entry)?;
+    queue_secret(
+        effects,
+        &commit.account_id,
+        &tx.lock_id,
+        &secret.to_ascii_lowercase(),
+    );
     Ok(())
 }
 
@@ -423,6 +454,7 @@ fn apply_forward_prepared(
     paybook: &mut PaybookChanges,
     commit: &OrderedAccountCommit,
     tx: &HtlcLockTx,
+    block_time_ms: Option<u64>,
     next_hop: &str,
     forward_amount: &BigInt,
     inner_envelope: &xln_rscore_engine::OpaqueHtlcCiphertext,
@@ -436,7 +468,13 @@ fn apply_forward_prepared(
     let timelock = &tx.timelock - BigInt::from(MIN_TIMELOCK_DELTA_MS);
     let reveal = tx
         .reveal_before_height
-        .checked_sub(MIN_REVEAL_HEIGHT_DELTA_BLOCKS)
+        .checked_sub(
+            crate::payment_reveal_height_delta_blocks(
+                block_time_ms
+                    .ok_or_else(|| EntityKernelError::htlc("PAYMENT_BLOCK_TIME_INVALID"))?,
+            )
+            .ok_or_else(|| EntityKernelError::htlc("PAYMENT_BLOCK_TIME_INVALID"))?,
+        )
         .ok_or_else(|| EntityKernelError::htlc("HTLC_FORWARD_REVEAL_UNDERFLOW"))?;
     if timelock <= BigInt::from(0)
         || forward_amount <= &BigInt::from(0)
@@ -552,6 +590,7 @@ pub(crate) fn committed_htlc_lock(
             paybook,
             commit,
             tx,
+            context.block_time_ms,
             next_hop_entity_id,
             forward_amount,
             inner_envelope,
@@ -861,6 +900,61 @@ mod key_tests {
         CrontabState, EntityKernelOutput, EntityStateSlice, LocalAccountFinancialView,
         PaybookEntry, PaybookState,
     };
+
+    #[test]
+    fn fixpay_3_final_recipient_persists_secret_before_withheld_ack() {
+        use crate::{JurisdictionScope, OrderedAccountCommit};
+        use xln_rscore_engine::{AccountDomain, DepositoryAddress, HtlcLockTx};
+        let (hashlock, secret) = evidence();
+        let mut state = EntityStateSlice::empty("local", 1_000);
+        let commit = OrderedAccountCommit {
+            account_id: "payer".into(),
+            domain: AccountDomain::new(
+                31337,
+                DepositoryAddress::parse(&format!("0x{}", "11".repeat(20))).unwrap(),
+            )
+            .unwrap(),
+            scope: JurisdictionScope::Same,
+            committed_via_new_frame: true,
+            frame_state_hash: "frame".into(),
+            frame_height: 1,
+            frame_timestamp: 1_000,
+            inbound_position: 0,
+            transitions: vec![],
+        };
+        let tx = HtlcLockTx {
+            lock_id: hashlock.clone(),
+            hashlock: HtlcHashlock::parse(&hashlock).unwrap(),
+            timelock: 100_000.into(),
+            reveal_before_height: 100,
+            amount: 50.into(),
+            token_id: TokenId::new(1).unwrap(),
+            delivery_mode: None,
+            envelope: None,
+        };
+        let mut changes = PaybookChanges::default();
+        let mut txs = vec![];
+        let mut outputs = vec![];
+        super::apply_final_prepared(
+            &mut state,
+            &mut changes,
+            &commit,
+            &tx,
+            &secret,
+            None,
+            None,
+            &mut PaybookEffects {
+                account_txs: &mut txs,
+                outputs: &mut outputs,
+            },
+        )
+        .unwrap();
+        let entry = changes.entry(&state, &hashlock).unwrap().unwrap();
+        assert_eq!(entry.secret.as_deref(), Some(secret.as_str()));
+        assert!(entry.secret_ack_pending);
+        assert_eq!(entry.secret_ack_deadline_at, Some(121_000));
+        assert_eq!(txs.len(), 1);
+    }
 
     #[test]
     fn secret_ack_wake_preserves_signed_enforcement_reserve() {

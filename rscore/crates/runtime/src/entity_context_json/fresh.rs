@@ -560,6 +560,7 @@ fn materialize_fresh_entity_context(
     ]);
     let canonical_done = total_started.elapsed();
     let execution = DeterministicContext {
+        block_time_ms: None,
         minimum_trade_size: BigInt::from(0),
         swap_taker_fee_bps: 0,
         jurisdiction_id: None,

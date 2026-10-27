@@ -10,6 +10,7 @@ import { decodeWave, type Wave } from '../wave-decode';
 import { decodeRscoreCanonicalValue } from '../canonical-wire';
 
 type RscoreEntityOutput =
+  | Readonly<{ kind: 'paymentFailed'; entityId: string; targetEntityId: string; tokenId: number; amount: bigint; reason: string }>
   | Readonly<{
       kind: 'htlcInitiated'; entityId: string; fromEntity: string; toEntity: string;
       tokenId: number; amount: bigint; senderAmount: bigint; fee: bigint;
@@ -138,6 +139,7 @@ export const entityDeterministicContextWire = (
     jurisdictionId ?? null,
     pairIds(state).map(pairId => pairPolicyWire(state, pairId)),
     context.htlc.entries.map(preparedWire),
+    state.config.jurisdiction?.blockTimeMs ?? null,
   ];
 };
 
@@ -278,6 +280,12 @@ const entityOutput = (value: unknown): RscoreEntityOutput => {
         prepaidFee: BigInt(text(row[5], 'RSCORE_ENTITY_OUTPUT_PREPAID_FEE')),
         requestedAt: integer(row[6], 'RSCORE_ENTITY_OUTPUT_REQUESTED_AT'),
       };
+    }
+    case 9: {
+      const row = tuple(value, 6, 'RSCORE_ENTITY_PAYMENT_FAILED');
+      return { kind: 'paymentFailed', entityId: digest(row[1], 32, 'RSCORE_ENTITY_OUTPUT_ENTITY'),
+        targetEntityId: digest(row[2], 32, 'RSCORE_ENTITY_OUTPUT_TARGET'), tokenId: integer(row[3], 'RSCORE_ENTITY_OUTPUT_TOKEN'),
+        amount: BigInt(text(row[4], 'RSCORE_ENTITY_OUTPUT_AMOUNT')), reason: text(row[5], 'RSCORE_ENTITY_OUTPUT_REASON') };
     }
     default: throw new Error(`RSCORE_ENTITY_OUTPUT_TAG:${String(value[0])}`);
   }

@@ -676,7 +676,7 @@ fn decode_prepared_htlc(
 }
 
 pub fn decode_context(value: &AbiValue) -> Result<DeterministicContext, ProcessError> {
-    let row = exact(tuple(value)?, 5, "entityDeterministicContext")?;
+    let row = exact(tuple(value)?, 6, "entityDeterministicContext")?;
     let mut pair_policies = BTreeMap::new();
     for value in tuple(&row[3])? {
         let entry = exact(tuple(value)?, 4, "pairPolicy")?;
@@ -697,6 +697,11 @@ pub fn decode_context(value: &AbiValue) -> Result<DeterministicContext, ProcessE
         map_insert(&mut prepared_htlcs, key, entry, "preparedHtlcDuplicate")?;
     }
     Ok(DeterministicContext {
+        block_time_ms: if matches!(row[5], AbiValue::Nil) {
+            None
+        } else {
+            Some(unsigned(&row[5], "blockTimeMs")?)
+        },
         minimum_trade_size: bigint(&row[0], "minimumTradeSize")?,
         swap_taker_fee_bps: u16::try_from(bounded_u32(&row[1], "swapTakerFeeBps")?)
             .map_err(|_| ProcessError::Expected("swapTakerFeeBps"))?,
@@ -746,6 +751,7 @@ mod prepared_context_wire_tests {
             AbiValue::Nil,
             tuple(Vec::new()),
             tuple(vec![tuple(vec![binding, outcome])]),
+            AbiValue::Integer(10_000),
         ]);
         let decoded = decode_context(&context).expect("context");
         let outcome = &decoded
@@ -913,6 +919,20 @@ fn entity_output(value: &EntityKernelOutput) -> Result<AbiValue, ProcessError> {
             AbiValue::Integer(0),
             AbiValue::Bytes(fixed_hex_bytes(entity_id, 32, "entityId")?),
             AbiValue::Bytes(fixed_hex_bytes(hashlock, 32, "hashlock")?),
+        ],
+        EntityKernelOutput::PaymentFailed {
+            entity_id,
+            target_entity_id,
+            token_id,
+            amount,
+            reason,
+        } => vec![
+            AbiValue::Integer(9),
+            AbiValue::Bytes(fixed_hex_bytes(entity_id, 32, "entityId")?),
+            AbiValue::Bytes(fixed_hex_bytes(target_entity_id, 32, "targetEntityId")?),
+            AbiValue::Integer(i128::from(*token_id)),
+            AbiValue::Text(amount.to_string()),
+            AbiValue::Text(reason.clone()),
         ],
         EntityKernelOutput::HtlcFailed {
             entity_id,

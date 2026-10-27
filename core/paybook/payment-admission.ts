@@ -211,13 +211,14 @@ export const materializeOriginatedHtlcPayments = async (
       }
       if (quote.senderLockAmount > candidate.data.maxSenderDebit) rejectHtlcPayment('HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
       const window = resolvePaymentDeadlineWindow({
+        blockTimeMs: input.state.config.jurisdiction?.blockTimeMs,
         mode: candidate.data.deliveryMode,
         runtimeJHeight: toJHeight(jHeight),
         timestamp: toUnixMs(startedAtMs),
         totalHops: route.length - 1,
       });
       const timelock = calculateHopTimelock(window.baseTimelock, 0);
-      const revealBeforeHeight = calculateHopRevealHeight(window.baseHeight, 0, route.length - 1);
+      const revealBeforeHeight = calculateHopRevealHeight(window.baseHeight, 0, route.length - 1, input.state.config.jurisdiction?.blockTimeMs);
       const sourceProfile = uniqueProfile(profileIndex, source);
       if (sourceProfile.entityEncryptionPublicKey !== input.state.entityEncryptionPublicKey) {
         rejectHtlcPayment('HTLC_PAYMENT_SOURCE_PROFILE_KEY_MISMATCH');
@@ -237,7 +238,7 @@ export const materializeOriginatedHtlcPayments = async (
       const envelope = await createOnionEnvelopes(
         route, secret, publicKeys, domains,
         quote.hopForwardAmounts, candidate.data.description, startedAtMs,
-        { hashlock, tokenId: candidate.data.tokenId, senderLockAmount: quote.senderLockAmount, timelock, revealBeforeHeight },
+        { blockTimeMs: input.state.config.jurisdiction?.blockTimeMs, hashlock, tokenId: candidate.data.tokenId, senderLockAmount: quote.senderLockAmount, timelock, revealBeforeHeight },
         (() => {
           let keyIndex = 0;
           return () => generateHtlcEphemeralPrivateKey(
@@ -313,6 +314,7 @@ const assertOriginEconomics = (
   const quote = quoteHtlcPaymentRouteWithIndex(profileIndex, [...origin.route], tx.data.tokenId, tx.data.amount);
   if (quote.senderLockAmount > tx.data.maxSenderDebit) rejectHtlcPayment('HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
   const window = resolvePaymentDeadlineWindow({
+    blockTimeMs: input.state.config.jurisdiction?.blockTimeMs,
     mode: tx.data.deliveryMode,
     runtimeJHeight: toJHeight(jHeight),
     timestamp: toUnixMs(startedAtMs),
@@ -324,7 +326,7 @@ const assertOriginEconomics = (
     startedAtMs, senderLockAmount: quote.senderLockAmount, maxSenderDebit: tx.data.maxSenderDebit,
     totalFee: quote.senderLockAmount - tx.data.amount,
     timelock: calculateHopTimelock(window.baseTimelock, 0),
-    revealBeforeHeight: calculateHopRevealHeight(window.baseHeight, 0, origin.route.length - 1),
+    revealBeforeHeight: calculateHopRevealHeight(window.baseHeight, 0, origin.route.length - 1, input.state.config.jurisdiction?.blockTimeMs),
     nextHopEntityId: origin.route[1]!,
   };
   if (tx.data.hashlock !== undefined && tx.data.hashlock !== origin.hashlock) {

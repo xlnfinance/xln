@@ -81,6 +81,7 @@ fn log(event: &EntityKernelOutput, index: usize, timestamp: u64) -> Result<Optio
         "htlcInitiated" => "HtlcInitiated",
         "htlcForwardAccepted" => "HtlcForwardAccepted",
         "htlcFailed" => "HtlcFailed",
+        "paymentFailed" => "PaymentFailed",
         "htlcReceived" => "HtlcReceived",
         "htlcFinalized" => "HtlcFinalized",
         "swapMatched" => "SwapMatched",

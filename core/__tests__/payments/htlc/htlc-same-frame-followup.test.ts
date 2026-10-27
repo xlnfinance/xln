@@ -287,3 +287,16 @@ describe('same-frame incoming HTLC followup', () => {
     expect(state.paybook.entries.has(hashlock)).toBe(true);
   });
 });
+
+
+test('fixpay-3 final recipient persists recovery evidence before exposing secret to a withholding payer', async () => {
+  const fixture = setup('final');
+  fixture.state.accounts.set(fixture.from, makeAccount(fixture.state.entityId, fixture.from));
+  await applyLock(fixture);
+  applyBookIntentProgram(fixture.state, fixture.program);
+  expect(fixture.state.paybook.entries.get(hashlock)).toMatchObject({
+    secret, secretAckPending: true, secretAckStartedAt: 1,
+    secretAckDeadlineAt: 1 + HTLC_SECRET_ACK_TIMEOUT_MS,
+  });
+  expect(collectDerivedDeadlines(fixture.state).some(d => d.type === 'htlc_secret_ack_timeout')).toBe(true);
+});

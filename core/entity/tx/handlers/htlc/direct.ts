@@ -5,7 +5,7 @@ import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import { findAccountKey } from '../../account-key';
 import type { AccountTxTarget } from '../account';
-import { persistVerifiedPaymentSecret } from '../../../../paybook/lifecycle';
+import { persistVerifiedPaymentSecret, inboundPaymentTimeoutError } from '../../../../paybook/lifecycle';
 import type { BookIntentSlotWriter } from '../../../books/book-intents';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
@@ -30,7 +30,8 @@ export const handleResolveHtlcLockEntityTx = (
   bookIntentSlot?: BookIntentSlotWriter,
 ): HtlcEntityTxResult => {
   if (!bookIntentSlot) throw new Error('HTLC_RESOLVE_BOOK_INTENT_SLOT_REQUIRED');
-  const { counterpartyEntityId, lockId, secret } = entityTx.data;
+  const { counterpartyEntityId, lockId } = entityTx.data;
+  const secret = entityTx.data.secret.toLowerCase();
   const normalizedCounterparty = findAccountKey(entityState, counterpartyEntityId);
   if (!normalizedCounterparty) {
     throw new Error(`HTLC_RESOLVE_ACCOUNT_MISSING:${counterpartyEntityId}`);
@@ -83,6 +84,7 @@ export const handleProcessHtlcTimeoutsEntityTx = (
   const accountTxs: AccountTxTarget[] = [];
 
   for (const { accountId, lockId } of entityTx.data.expiredLocks || []) {
+    if (inboundPaymentTimeoutError(newState, accountId, lockId)) continue;
     accountTxs.push({
       accountId,
       tx: {

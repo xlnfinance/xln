@@ -3215,3 +3215,6 @@ fn propose_accounts_now_from_a_non_leader_is_rejected_before_account_mutation() 
         "the forged marker is judged before any Account mutation",
     );
 }
+
+#[path = "resident/fixpay_timeout.rs"]
+mod fixpay_timeout;

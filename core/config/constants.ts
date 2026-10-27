@@ -151,22 +151,11 @@ export const FINANCIAL = {
 // HTLC (Hash Time-Locked Contracts)
 // ═══════════════════════════════════════════════════════════════
 
+export const HTLC_ENFORCEMENT_RESERVE_MS = 30_000;
+
 export const HTLC = {
   /** Minimum timelock delta per hop (simnet-optimized for speed) */
   MIN_TIMELOCK_DELTA_MS: 10_000, // 10 seconds per hop
-
-  /**
-   * Jurisdiction-block reserve between adjacent hops.
-   *
-   * One block is unsafe: the downstream Account can commit at its deadline
-   * while the watcher advances before the upstream Account can durably reveal.
-   * Three blocks match the 30-second Account network allowance without using a
-   * live wall clock or a chain-specific block-time estimate in consensus.
-   */
-  MIN_REVEAL_HEIGHT_DELTA_BLOCKS: 3,
-
-  /** Minimum time remaining for the first forward (prevents TIMELOCK_TOO_TIGHT) */
-  MIN_FORWARD_TIMELOCK_MS: 20_000, // 20 seconds minimum at first hop
 
   /** Maximum hops for HTLC routing (prevents loops) */
   MAX_HOPS: 100,

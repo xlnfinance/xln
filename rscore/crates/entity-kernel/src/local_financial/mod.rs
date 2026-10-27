@@ -127,6 +127,8 @@ pub(crate) fn apply_local_entity_financial_txs(
             LocalEntityFinancialTx::DirectPayment(tx) => direct_payment::apply_direct_payment(
                 state,
                 tx,
+                account_views,
+                &mut outputs,
                 &mut account_txs,
                 &mut events,
                 &mut wake_targets,
@@ -204,17 +206,32 @@ pub(crate) fn apply_local_entity_financial_txs(
                 &mut orderbook_deltas,
             )?,
             LocalEntityFinancialTx::ProcessHtlcTimeouts(tx) => {
-                account_txs.extend(tx.expired_locks.into_iter().map(|(account_id, lock_id)| {
-                    (
+                for (account_id, lock_id) in tx.expired_locks {
+                    if let Some(route) = paybook.entry(state, &lock_id)? {
+                        let outbound_lock_live = route
+                            .outbound_entity
+                            .as_ref()
+                            .and_then(|peer| account_views.get(peer))
+                            .and_then(|view| view.htlc_locks.get(&lock_id))
+                            .is_some();
+                        if crate::inbound_payment_timeout_blocked(
+                            route,
+                            &account_id,
+                            outbound_lock_live,
+                        ) {
+                            continue;
+                        }
+                    }
+                    account_txs.push((
                         account_id,
                         AccountTx::HtlcResolve(xln_rscore_engine::HtlcResolveTx {
                             lock_id,
                             outcome: xln_rscore_engine::HtlcResolveOutcome::Error {
-                                reason: Some("timeout".to_string()),
+                                reason: Some("timeout".into()),
                             },
                         }),
-                    )
-                }));
+                    ));
+                }
             }
             LocalEntityFinancialTx::ProposeCancelSwap(tx) => {
                 swap_requests::apply_cancel_swap(state, tx, &mut account_txs, &mut wake_targets)?;

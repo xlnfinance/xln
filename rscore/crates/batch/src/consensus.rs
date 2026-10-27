@@ -246,6 +246,7 @@ pub struct ProposalRow {
     /// Entity frame. The exact hashlock and rejection reason are Account
     /// outputs; the parent must not infer them from a digest or log string.
     pub failed_htlc_locks: Vec<FailedHtlcLockRow>,
+    pub failed_direct_payments: Vec<(AccountTx, String)>,
 }
 
 /// The frame an attempt produced.
@@ -318,6 +319,17 @@ pub struct UpstreamHtlcResolutionRow {
     pub account_id: AccountId,
     pub lock_id: String,
     pub reason: String,
+}
+
+fn failed_direct_payments(dropped: &[xln_rscore_engine::DroppedTx]) -> Vec<(AccountTx, String)> {
+    dropped
+        .iter()
+        .filter(|drop| {
+            matches!(drop.tx, AccountTx::DirectPayment { .. })
+                && drop.disposition == xln_rscore_engine::Disposition::Removed
+        })
+        .map(|drop| (drop.tx.clone(), drop.rejection.message()))
+        .collect()
 }
 
 fn failed_htlc_locks(dropped: &[xln_rscore_engine::DroppedTx]) -> Vec<FailedHtlcLockRow> {
@@ -496,11 +508,13 @@ pub(crate) fn proposal_row(
             outbound_input: None,
             proposed: None,
             failed_htlc_locks: failed_htlc_locks(&dropped),
+            failed_direct_payments: failed_direct_payments(&dropped),
             dropped: dropped_rows(account_id, &dropped)?,
         },
         ProposalOutcome::Proposed(proposed) => {
             let proposed = *proposed;
             let failed_htlc_locks = failed_htlc_locks(&proposed.dropped);
+            let failed_direct_payments = failed_direct_payments(&proposed.dropped);
             let dropped = dropped_rows(account_id, &proposed.dropped)?;
             let frame_height = proposed.frame.height;
             let outbound_input = Some(outgoing_account_input(
@@ -529,6 +543,7 @@ pub(crate) fn proposal_row(
                 proposed: Some(proposed),
                 dropped,
                 failed_htlc_locks,
+                failed_direct_payments,
             }
         }
     })

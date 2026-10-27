@@ -83,7 +83,7 @@ describe('htlc envelope validation', () => {
       new Map(),
       undefined,
       1,
-      binding,
+      { ...binding, blockTimeMs: 10_000 },
       () => `0x${'77'.repeat(32)}`,
     )).rejects.toThrow(`Missing Entity encryption key for final recipient ${route[1]}`);
   });
@@ -108,7 +108,7 @@ describe('htlc envelope validation', () => {
         new Map(),
         undefined,
         1,
-        binding,
+        { ...binding, blockTimeMs: 10_000 },
         () => `0x${'77'.repeat(32)}`,
       ).then(() => null, (error: unknown) => error);
       expect(failure).toBeInstanceOf(FailureDispositionError);

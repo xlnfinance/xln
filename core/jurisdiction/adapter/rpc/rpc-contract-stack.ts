@@ -248,6 +248,10 @@ export const createRpcContractStack = async (
       addresses.entityProvider,
       requireContract('entity_provider', state.entityProvider),
     );
+    const transformerDepository = await requireContract('delta_transformer', state.deltaTransformer).depository();
+    if (transformerDepository.toLowerCase() !== addresses.depository.toLowerCase()) {
+      throw new Error(`TRANSFORMER_DEPOSITORY_BINDING_MISMATCH:${context}`);
+    }
     state.bindingVerified = true;
   };
   if (state.deployed) {
@@ -265,6 +269,11 @@ export const createRpcContractStack = async (
     await deployEntityProvider(config, signer, addresses, state);
     await deployDeltaTransformer(signer, addresses, state);
     await deployDepository(config, provider, signer, addresses, state);
+    await chainIo.waitForReceipt(
+      await requireContract('delta_transformer', state.deltaTransformer).bindDepository(
+        addresses.depository, await chainIo.buildFeeOverrides(),
+      ), 'delta-transformer.bind-depository',
+    );
     await chainIo.waitForReceipt(
       await requireContract('entity_provider', state.entityProvider).bindShareDepository(
         addresses.depository,

@@ -1,3 +1,4 @@
+import { paymentRevealHeightDeltaBlocks } from '../../types/finance/payment';
 /**
  * HTLC Utility Functions
  * Fee calculation, timelock derivation, lock ID generation
@@ -93,8 +94,9 @@ export function calculateHopTimelock(
 export function calculateHopRevealHeight(
   baseHeight: number,
   hopIndex: number,  // 0 = Alice, 1 = Hub, 2 = Bob
-  totalHops: number
+  totalHops: number,
+  blockTimeMs: number | undefined,
 ): number {
   return baseHeight
-    + (totalHops - hopIndex) * HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS;
+    + (totalHops - hopIndex) * paymentRevealHeightDeltaBlocks(blockTimeMs);
 }

@@ -23,7 +23,7 @@ describe('opaque Entity HTLC encryption', () => {
     };
     const build = (hashlock = binding.hashlock) => createOnionEnvelopes(
       route, `0x${'81'.repeat(32)}`, new Map([[route[0]!, hex(x25519.getPublicKey(getBytes(sourceSecret)))], [route[1]!, recipientPublic]]),
-      [domain], new Map(), undefined, 1, { ...binding, hashlock }, () => sourceSecret,
+      [domain], new Map(), undefined, 1, { ...binding, hashlock, blockTimeMs: 10_000 }, () => sourceSecret,
     );
     const first = await build();
     expect(await build()).toEqual(first);
@@ -59,7 +59,7 @@ describe('opaque Entity HTLC encryption', () => {
     const preimage = `0x${'71'.repeat(32)}`;
     const encrypted = await createOnionEnvelopes(
       [source, hub, target], preimage, publicKeys, [domain, domain],
-      new Map([[hub, 9n]]), undefined, 1, binding, () => sourceSecret,
+      new Map([[hub, 9n]]), undefined, 1, { ...binding, blockTimeMs: 10_000 }, () => sourceSecret,
     );
     const hubLayer = unwrapEnvelope(decryptOpaqueHtlcBytes(
       encrypted, publicKeys.get(hub)!, hubSecret,

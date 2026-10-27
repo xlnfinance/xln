@@ -9,6 +9,7 @@ import type {
   Result,
   Interface,
   EventFragment,
+  AddressLike,
   ContractRunner,
   ContractMethod,
   Listener,
@@ -179,9 +180,11 @@ export interface DeltaTransformerInterface extends Interface {
   getFunction(
     nameOrSignature:
       | "applyBatch"
+      | "bindDepository"
       | "containsPull"
       | "decodeArgumentsStrict"
       | "decodeTransformerArgumentListStrict"
+      | "depository"
       | "encodeBatch"
       | "hashToTimestamp"
       | "revealSecret"
@@ -208,6 +211,10 @@ export interface DeltaTransformerInterface extends Interface {
     ]
   ): string;
   encodeFunctionData(
+    functionFragment: "bindDepository",
+    values: [AddressLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "containsPull",
     values: [BytesLike]
   ): string;
@@ -218,6 +225,10 @@ export interface DeltaTransformerInterface extends Interface {
   encodeFunctionData(
     functionFragment: "decodeTransformerArgumentListStrict",
     values: [BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "depository",
+    values?: undefined
   ): string;
   encodeFunctionData(
     functionFragment: "encodeBatch",
@@ -234,6 +245,10 @@ export interface DeltaTransformerInterface extends Interface {
 
   decodeFunctionResult(functionFragment: "applyBatch", data: BytesLike): Result;
   decodeFunctionResult(
+    functionFragment: "bindDepository",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "containsPull",
     data: BytesLike
   ): Result;
@@ -245,6 +260,7 @@ export interface DeltaTransformerInterface extends Interface {
     functionFragment: "decodeTransformerArgumentListStrict",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(functionFragment: "depository", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "encodeBatch",
     data: BytesLike
@@ -335,6 +351,12 @@ export interface DeltaTransformer extends BaseContract {
     "view"
   >;
 
+  bindDepository: TypedContractMethod<
+    [canonicalDepository: AddressLike],
+    [void],
+    "nonpayable"
+  >;
+
   containsPull: TypedContractMethod<
     [encodedBatch: BytesLike],
     [boolean],
@@ -352,6 +374,8 @@ export interface DeltaTransformer extends BaseContract {
     [string[]],
     "view"
   >;
+
+  depository: TypedContractMethod<[], [string], "view">;
 
   encodeBatch: TypedContractMethod<
     [b: DeltaTransformer.BatchStruct],
@@ -389,6 +413,13 @@ export interface DeltaTransformer extends BaseContract {
     "view"
   >;
   getFunction(
+    nameOrSignature: "bindDepository"
+  ): TypedContractMethod<
+    [canonicalDepository: AddressLike],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
     nameOrSignature: "containsPull"
   ): TypedContractMethod<[encodedBatch: BytesLike], [boolean], "view">;
   getFunction(
@@ -401,6 +432,9 @@ export interface DeltaTransformer extends BaseContract {
   getFunction(
     nameOrSignature: "decodeTransformerArgumentListStrict"
   ): TypedContractMethod<[encoded: BytesLike], [string[]], "view">;
+  getFunction(
+    nameOrSignature: "depository"
+  ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "encodeBatch"
   ): TypedContractMethod<[b: DeltaTransformer.BatchStruct], [string], "view">;

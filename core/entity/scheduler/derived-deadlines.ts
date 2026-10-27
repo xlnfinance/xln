@@ -1,3 +1,5 @@
+import { HTLC_ENFORCEMENT_RESERVE_MS } from '../../config/constants';
+import { inboundPaymentTimeoutError } from '../../paybook/lifecycle';
 /**
  * Per-payment deadlines are not crontab hooks. Every HTLC lock already
  * carries its `timelock` in Account state and every secret-ack wait carries
@@ -11,10 +13,10 @@ import { demandSavingsRenewals } from '../../lendbook/renewals';
 import type { EntityState } from '../types';
 import type { ScheduledHookBase } from './types';
 import { isSecretAckPendingPayment, type SecretAckPendingPayment } from '../../paybook/views';
-import { HTLC_ENFORCEMENT_RESERVE_MS } from '../../account/consensus/dispute/deadline-policy';
+
 import { compareStableText } from '../../protocol/serialization';
 import { canProcessAccountTxForDisputeStatus } from '../../account/consensus/dispute/policy';
-import type { AccountReplica, AccountTx } from '../../types/account';
+import type { HtlcLock, AccountReplica, AccountTx } from '../../types/account';
 
 type DerivedHtlcTimeout = ScheduledHookBase<'htlc_timeout', {
   accountId: string;
@@ -62,10 +64,15 @@ const actionableSecretAckAccount = (state: EntityState, entry: SecretAckPendingP
   return account && canProcessAccountTxForDisputeStatus(account.status) && !account.activeDispute ? account : undefined;
 };
 
-const htlcTimeoutAt = (timelock: bigint | number | undefined): number | null => {
+const htlcTimeoutAt = (state: EntityState, lock: HtlcLock): number | null => {
+  const timelock = lock.timelock;
   if (timelock === undefined || timelock === null) return null;
   const value = Number(timelock);
-  return Number.isSafeInteger(value) && value > 0 ? value : null;
+  if (!Number.isSafeInteger(value) || value <= 0) return null;
+  if (state.lastFinalizedJHeight > lock.revealBeforeHeight) return Math.min(value, state.timestamp);
+  const blockTimeMs = state.config?.jurisdiction?.blockTimeMs;
+  return blockTimeMs === undefined ? value : Math.min(value,
+    state.timestamp + (lock.revealBeforeHeight - state.lastFinalizedJHeight + 1) * blockTimeMs);
 };
 
 /**
@@ -82,8 +89,8 @@ export const collectDerivedDeadlines = (state: EntityState, now?: number): Deriv
   for (const [accountId, account] of state.accounts.entries()) {
     if (!canProcessAccountTxForDisputeStatus(account.status)) continue;
     for (const lock of account.state.locks.values()) {
-      if (hasQueuedResolve(account, lock.lockId)) continue;
-      const triggerAt = htlcTimeoutAt(lock.timelock);
+      if (hasQueuedResolve(account, lock.lockId) || inboundPaymentTimeoutError(state, accountId, lock.hashlock)) continue;
+      const triggerAt = htlcTimeoutAt(state, lock);
       if (triggerAt === null || (now !== undefined && triggerAt > now)) continue;
       due.push({
         id: `htlc-timeout:${lock.lockId}`,
@@ -128,11 +135,11 @@ export const collectDerivedDeadlines = (state: EntityState, now?: number): Deriv
 /** Earliest derived deadline, or null when no payment is waiting on time. */
 export const earliestDerivedDeadline = (state: EntityState): number | null => {
   let earliest = Infinity;
-  for (const account of state.accounts.values()) {
+  for (const [accountId, account] of state.accounts.entries()) {
     if (!canProcessAccountTxForDisputeStatus(account.status)) continue;
     for (const lock of account.state.locks.values()) {
-      if (hasQueuedResolve(account, lock.lockId)) continue;
-      const triggerAt = htlcTimeoutAt(lock.timelock);
+      if (hasQueuedResolve(account, lock.lockId) || inboundPaymentTimeoutError(state, accountId, lock.hashlock)) continue;
+      const triggerAt = htlcTimeoutAt(state, lock);
       if (triggerAt !== null && triggerAt < earliest) earliest = triggerAt;
     }
   }

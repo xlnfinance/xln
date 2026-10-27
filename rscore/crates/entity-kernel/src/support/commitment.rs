@@ -903,6 +903,20 @@ pub fn canonical_entity_kernel_output(
             ("entityId", text(entity_id)),
             ("hashlock", text(hashlock)),
         ]),
+        EntityKernelOutput::PaymentFailed {
+            entity_id,
+            target_entity_id,
+            token_id,
+            amount,
+            reason,
+        } => object(vec![
+            ("kind", text("paymentFailed")),
+            ("entityId", text(entity_id)),
+            ("targetEntityId", text(target_entity_id)),
+            ("tokenId", number_u16(*token_id)),
+            ("amount", CanonicalValue::BigInt(amount.clone())),
+            ("reason", text(reason)),
+        ]),
         EntityKernelOutput::HtlcFailed {
             entity_id,
             hashlock,

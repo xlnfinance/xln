@@ -2,11 +2,10 @@ import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import type { AccountFrame, AccountState, HtlcLock } from '../../../types/account';
 import type { HankoString } from '../../../types/hanko';
 import { isHtlcDeadlineExpired, isHtlcTimelockExpired } from '../../htlc-deadline';
-import { ACCOUNT_NETWORK_ALLOWANCE_MS } from '../constants';
+import { HTLC_ENFORCEMENT_RESERVE_MS } from '../../../config/constants';
 import { announcedRebalancePolicy, DEFAULT_TERM_NOTICE_SECONDS, validTermNoticeSeconds } from '../../config/term-notice';
 import type { RebalanceFeePolicySnapshot } from '../../../types/finance/rebalance';
 
-export const HTLC_ENFORCEMENT_RESERVE_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;
 
 export type AccountInputSecurityContext = {
   entityTimestamp: number;

@@ -1,3 +1,4 @@
+import { HTLC_ENFORCEMENT_RESERVE_MS } from '../../config/constants';
 /** Late preimage + withheld upstream ACK survive WAL reopen and reach the real J. */
 import { closeRuntimeDb, closeInfraDb, loadEnvFromDB, processRuntime } from '../../runtime';
 import type { RuntimeReplica } from '../../runtime/types';
@@ -14,7 +15,7 @@ import { quoteHtlcPaymentRoute } from '../../pathfinding/htlc-quote';
 import { withDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { earliestDerivedDeadline } from '../../entity/scheduler/derived-deadlines';
-import { HTLC_ENFORCEMENT_RESERVE_MS } from '../../account/consensus/dispute/deadline-policy';
+
 import { deriveDelta, isLeftEntity } from '../../account/utils';
 import {
   createRecoveryNetwork,

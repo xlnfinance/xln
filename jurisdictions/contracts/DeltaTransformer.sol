@@ -39,6 +39,18 @@ Subcontracts - Programmable Delta Transformers
   This is DeFi within bilateral accounts. Genuinely new.
   */
 contract DeltaTransformer {
+  error UnauthorizedRevealCaller();
+  address private immutable deploymentAuthority = msg.sender;
+  address public depository;
+
+  /// Deployment authority binds once; a peer cannot install a fake registry.
+  function bindDepository(address canonicalDepository) external {
+    if (msg.sender != deploymentAuthority || depository != address(0) || canonicalDepository == address(0)) {
+      revert UnauthorizedRevealCaller();
+    }
+    depository = canonicalDepository;
+  }
+
   error InvalidDeltaIndex();
   error ContextLengthMismatch();
   error PullRevealWindowActive(uint256 disputeTimeout);
@@ -450,11 +462,10 @@ contract DeltaTransformer {
 
 
 
-  /// @notice Persist optional public recovery evidence for a payment secret.
-  /// @dev Normal payment finalization supplies secrets just in time through
-  /// transformer arguments. This registry remains the canonical primitive for
-  /// durable dispute recovery and future permissionless/watchtower callers.
+  /// @notice Every registry write must also emit the watched Depository reveal.
+  /// @dev Bob must not reveal directly, claim B-C, then refund A-B while B is blind.
   function revealSecret(bytes32 secret) public {
+    if (msg.sender != depository) revert UnauthorizedRevealCaller();
     bytes32 hash = keccak256(abi.encode(secret));
     // Exact retries are expected after response loss or crash recovery. A
     // revert here would abort the whole Depository batch before its dispute

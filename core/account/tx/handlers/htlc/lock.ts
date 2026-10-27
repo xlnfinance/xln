@@ -18,7 +18,7 @@ import { deriveDelta } from '../../../utils';
 import { FINANCIAL, LIMITS } from '../../../../config/constants';
 import { commitDeltaDraft, createDeltaDraft, getOffdeltaRepresentationError } from '../../delta-utils';
 import { addHold } from '../../hold-utils';
-import { isHtlcTimelockExpired } from '../../../htlc-deadline';
+import { isHtlcTimelockExpired, MAX_HTLC_HORIZON_MS } from '../../../htlc-deadline';
 import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../../protocol/htlc/codec/onion-layer';
 import type { ApplyAccountTxResult } from '../../apply-types';
 import { accountTxApplied, accountTxHtlcLockCapacityRejected, accountTxValidationRejected } from '../../apply-result';
@@ -50,6 +50,10 @@ const validateHtlcLock = (
   // Parity: HtlcRejection::TimelockOutOfRange (Rust htlc/transition.rs).
   if (timelock > MAX_HTLC_TIMELOCK_MS) {
     return `Timelock ${timelock} exceeds maximum ${MAX_HTLC_TIMELOCK_MS}`;
+  }
+  // A valid peer signature cannot reserve hub capacity for an unbounded horizon.
+  if (timelock > BigInt(currentTimestamp) + BigInt(MAX_HTLC_HORIZON_MS)) {
+    return `Timelock ${timelock} exceeds maximum ${BigInt(currentTimestamp) + BigInt(MAX_HTLC_HORIZON_MS)}`;
   }
   if (revealBeforeHeight <= currentJHeight) {
     return `revealBeforeHeight ${revealBeforeHeight} already passed (current J height: ${currentJHeight})`;

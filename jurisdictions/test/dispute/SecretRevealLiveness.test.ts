@@ -8,6 +8,7 @@ describe('DeltaTransformer secret reveal liveness', function () {
     const factory = await ethers.getContractFactory('DeltaTransformer');
     const transformer = await factory.deploy();
     await transformer.waitForDeployment();
+    await (await transformer.bindDepository((await ethers.getSigners())[0].address)).wait();
 
     const secret = ethers.encodeBytes32String('idempotent-secret');
     const hash = ethers.keccak256(

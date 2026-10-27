@@ -1,3 +1,4 @@
+import { inboundPaymentTimeoutError } from '../../../../paybook/lifecycle';
 import type { AccountInput, AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
@@ -206,6 +207,15 @@ export const finishAccountConsensusInput = async (
   return assertNeverAccountResult(result);
 };
 
+const incomingPaymentTimeoutError = (context: AccountInputPhaseContext, tx: import('../../../../types/account').AccountTx): string | undefined => {
+  if (tx.type !== 'htlc_resolve' || tx.data.outcome !== 'error') return undefined;
+  const { state, account, input, options } = context;
+  const lock = account.state.locks.get(tx.data.lockId);
+  const proposerIsLeft = input.fromEntityId.toLowerCase() === account.state.leftEntity.toLowerCase();
+  if (!lock || lock.senderIsLeft !== proposerIsLeft) return undefined;
+  return inboundPaymentTimeoutError(state, input.fromEntityId, lock.hashlock, options?.bookIntentSlot);
+};
+
 export const prepareAccountConsensusRun = (
   context: AccountInputPhaseContext,
 ): PreparedAccountConsensusRun => {
@@ -214,6 +224,8 @@ export const prepareAccountConsensusRun = (
   const incomingProposal = accountInputProposal(input);
   if (incomingProposal && incomingProposal.frame.height > account.currentHeight) {
     for (const tx of incomingProposal.frame.accountTxs) {
+      const timeoutError = incomingPaymentTimeoutError(context, tx);
+      if (timeoutError) throw new AccountFrameRejectionError(timeoutError);
       const rejection = bankSavingsAdmissionError(state, account, tx, Math.max(state.timestamp, incomingProposal.frame.timestamp));
       if (rejection) throw new AccountFrameRejectionError(rejection);
     }

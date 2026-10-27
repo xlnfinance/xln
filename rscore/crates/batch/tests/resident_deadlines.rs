@@ -125,7 +125,7 @@ fn queued_resolves_and_frozen_accounts_do_not_rearm_htlc_deadlines() {
             )
             .expect("resident restore");
             let (earliest, due) = engine
-                .selected_htlc_deadlines(engine.accounts_root(), 2_000)
+                .selected_htlc_deadlines(engine.accounts_root(), 2_000, None)
                 .expect("deadlines");
             assert_eq!(
                 earliest,

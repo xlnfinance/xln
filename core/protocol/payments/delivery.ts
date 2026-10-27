@@ -1,7 +1,8 @@
-import { HTLC } from '../../config/constants';
+
+import { HTLC_ENFORCEMENT_RESERVE_MS, HTLC } from '../../config/constants';
 import { rejectFailure } from '../errors/failure-taxonomy';
 import {
-  ASYNC_PAYMENT_EXPIRY_BLOCKS,
+  paymentExpiryBlocks,
   ASYNC_PAYMENT_EXPIRY_MS,
   type PaymentDeliveryMode,
 } from '../../types/finance/payment';
@@ -14,12 +15,13 @@ export const resolvePaymentDeadlineWindow = (input: {
   runtimeJHeight: JHeight;
   timestamp: UnixMs;
   totalHops: number;
+  blockTimeMs: number | undefined;
 }): { baseTimelock: bigint; baseHeight: JHeight } => {
-  const minExpiryMs = input.totalHops * HTLC.MIN_TIMELOCK_DELTA_MS + HTLC.MIN_FORWARD_TIMELOCK_MS;
+  const minExpiryMs = input.totalHops * HTLC.MIN_TIMELOCK_DELTA_MS + HTLC_ENFORCEMENT_RESERVE_MS + HTLC.MIN_TIMELOCK_DELTA_MS;
   const expiryMs = input.mode === 'async'
     ? Math.max(ASYNC_PAYMENT_EXPIRY_MS, minExpiryMs)
     : Math.max(120_000, minExpiryMs);
-  const expiryBlocks = input.mode === 'async' ? ASYNC_PAYMENT_EXPIRY_BLOCKS : 50;
+  const expiryBlocks = paymentExpiryBlocks(expiryMs, input.blockTimeMs);
   return {
     baseTimelock: BigInt(input.timestamp + expiryMs),
     baseHeight: toJHeight(input.runtimeJHeight + expiryBlocks),

@@ -34,6 +34,8 @@ export type AccountCommittedFrame = {
 
 export type AccountFailedLendingDisbursement = Readonly<Extract<AccountTx, { type: 'lending_disburse' }>['data']>;
 
+export type AccountFailedDirectPayment = { data: Extract<AccountTx, { type: 'direct_payment' }>['data']; reason: string };
+
 export type AccountFailedHtlcLock = {
   hashlock: string;
   reason: string;
@@ -131,7 +133,8 @@ export type ProposeAccountFrameProposed = Readonly<
       accountChanged: true;
       accountInput: AccountInput;
       failedHtlcLocks?: AccountFailedHtlcLock[];
-      failedLendingDisbursements?: AccountFailedLendingDisbursement[];
+      failedDirectPayments?: AccountFailedDirectPayment[];
+    failedLendingDisbursements?: AccountFailedLendingDisbursement[];
     }
 >;
 
@@ -143,6 +146,7 @@ export type ProposeAccountFrameIdle = Readonly<
     events: string[];
     accountChanged?: true;
     failedHtlcLocks?: AccountFailedHtlcLock[];
+    failedDirectPayments?: AccountFailedDirectPayment[];
     failedLendingDisbursements?: AccountFailedLendingDisbursement[];
   }
 >;

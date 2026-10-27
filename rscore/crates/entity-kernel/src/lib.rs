@@ -32,7 +32,7 @@ mod local_financial;
 mod local_tx;
 mod paybook;
 mod swapbook;
-pub use paybook::secret_ack_trigger_at;
+pub use paybook::{inbound_payment_timeout_blocked, secret_ack_trigger_at};
 mod prepared_context;
 #[path = "support/proposal.rs"]
 mod proposal;
@@ -197,4 +197,8 @@ pub use types::{
     HubProfile, JurisdictionScope, KnownAccounts, OrderbookConsensusMetadata, OrderedAccountCommit,
     OriginatedHtlcDeliveryMode, PaybookEntry, PaybookState, PreparedHtlcEntry,
     PreparedOriginatedHtlcPayment, SpreadDistribution,
+};
+
+pub use prepared_context::{
+    payment_block_time_ms, payment_deadline_window, payment_reveal_height_delta_blocks,
 };

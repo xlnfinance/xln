@@ -474,6 +474,15 @@ const deployTron = async (chain, options) => {
     HashLadderRegistry: hashLadderRegistry,
     NftCustody: nftCustody,
   });
+  const transformerContract = await tronWeb.contract(loadTronArtifact('DeltaTransformer').abi, deltaTransformer.base58);
+  const transformerDepository = tronAddressInfo(tronWeb, await transformerContract.depository().call());
+  if (/^0x0{40}$/i.test(transformerDepository.evm)) {
+    await transformerContract.bindDepository(depository.base58).send({
+      feeLimit: Number(process.env.TRON_FEE_LIMIT || '15000000000'), shouldPollResponse: true,
+    });
+  } else if (transformerDepository.evm.toLowerCase() !== depository.evm.toLowerCase()) {
+    throw new Error(`TRON_TRANSFORMER_DEPOSITORY_BINDING_MISMATCH:${transformerDepository.evm}`);
+  }
   const entityProviderArtifact = loadTronArtifact('EntityProvider');
   const entityProviderContract = await tronWeb.contract(entityProviderArtifact.abi, entityProvider.base58);
   const boundDepository = tronAddressInfo(tronWeb, await entityProviderContract.shareDepository().call());

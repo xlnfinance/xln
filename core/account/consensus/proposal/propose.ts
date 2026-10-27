@@ -60,6 +60,7 @@ const finishEmptyProposal = (
     ...(validation.failedLendingDisbursements.length > 0
       ? { failedLendingDisbursements: validation.failedLendingDisbursements }
       : {}),
+    ...(validation.failedDirectPayments.length > 0 ? { failedDirectPayments: validation.failedDirectPayments } : {}),
     ...(validation.failedHtlcLocks.length > 0 ? { failedHtlcLocks: validation.failedHtlcLocks } : {}),
     ...(accountChanged ? { accountChanged: true as const } : {}),
   });

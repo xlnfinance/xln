@@ -17,7 +17,11 @@ export function resolvePayRecipient(
 }
 
 /** Keep the PaymentPanel invoice attribution and note-lock semantics. */
-export function invoiceNote(invoice: ParsedXlnInvoice): { description: string; locked: boolean } {
+export function invoiceNote(invoice: ParsedXlnInvoice, activeJurisdiction?: string): { description: string; locked: boolean } {
+  // Token ids and the recipient are meaningful only inside the active jurisdiction.
+  if (invoice.jurisdictionId && invoice.jurisdictionId !== activeJurisdiction) {
+    throw new Error('Invoice jurisdiction does not match the active jurisdiction');
+  }
   const parts: string[] = [];
   if (invoice.description) parts.push(invoice.description);
   if (invoice.recipientUserId) parts.push(`uid:${invoice.recipientUserId}`);

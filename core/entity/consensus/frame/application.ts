@@ -592,6 +592,12 @@ const proposeAccountFrameCandidate = async (
   if (isProposedAccountFrame(proposal) && proposal.hashesToSign) {
     collectedHashes.push(...proposal.hashesToSign);
   }
+  for (const { data, reason } of ('failedDirectPayments' in proposal ? proposal.failedDirectPayments : undefined) ?? []) {
+    context.candidateEffects.push({ kind: 'runtimeEvent', eventName: 'PaymentFailed', data: {
+      entityId: state.entityId, targetEntityId: data.route?.at(-1) ?? data.toEntityId,
+      tokenId: data.tokenId, amount: data.amount, reason,
+    } });
+  }
   for (const { hashlock, reason } of ('failedHtlcLocks' in proposal ? proposal.failedHtlcLocks : undefined) ?? []) {
     const followup = failedProposalHtlcFollowup(state, { hashlock, reason });
     if (followup.kind === 'absent') continue;

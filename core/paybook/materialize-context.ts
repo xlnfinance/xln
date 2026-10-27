@@ -1,3 +1,7 @@
+import { hashHtlcSecret } from '../protocol/htlc/utils';
+import { paymentRevealHeightDeltaBlocks } from '../types/finance/payment';
+import { MAX_HTLC_HORIZON_MS } from '../account/htlc-deadline';
+
 import { MalformedEntityFrameInputError } from '../entity/tx/processing/invariant-errors';
 import { deriveDelta } from '../account/utils';
 import { getAccountPerspective } from '../account/state/perspective';
@@ -21,7 +25,7 @@ import {
 import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../protocol/htlc/codec/onion-layer';
 import type { EntityState } from '../entity/types';
 import { findAccountKey } from '../entity/tx/account-key';
-import { HTLC } from '../config/constants';
+import { HTLC_ENFORCEMENT_RESERVE_MS, HTLC } from '../config/constants';
 import { calculateDirectionalFeePPM, calculateHopFee, sanitizeBaseFee, sanitizeFeePPM } from '../pathfinding/fees';
 import type { Profile } from '../entity/profile';
 import { assertOriginatedHtlcPayments, materializeOriginatedHtlcPayments } from './payment-admission';
@@ -253,9 +257,10 @@ const materializeForwardOutcome = (
   );
   if (binding.amount - forwardAmount < requiredFee) return reject(binding, 'fee_below_policy');
   if (
-    binding.timelock - BigInt(HTLC.MIN_TIMELOCK_DELTA_MS)
-      <= BigInt(input.state.timestamp) + BigInt(HTLC.MIN_FORWARD_TIMELOCK_MS)
-    || binding.revealBeforeHeight - HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS
+    binding.timelock > BigInt(input.state.timestamp) + BigInt(MAX_HTLC_HORIZON_MS)
+    || binding.timelock - BigInt(HTLC.MIN_TIMELOCK_DELTA_MS)
+      <= BigInt(input.state.timestamp) + BigInt(HTLC_ENFORCEMENT_RESERVE_MS)
+    || binding.revealBeforeHeight - paymentRevealHeightDeltaBlocks(input.state.config.jurisdiction?.blockTimeMs)
       <= input.state.lastFinalizedJHeight
   ) return reject(binding, 'deadline_unsafe');
   return {
@@ -282,6 +287,8 @@ const materializeInboundEntry = (
   const envelope = decryptInboundEnvelope(input, accountTx, binding, contextHash);
   if ('binding' in envelope) return envelope;
   if ('finalRecipient' in envelope) {
+    // Ciphertext authentication proves its sender, not that its preimage pays this lock.
+    if (hashHtlcSecret(envelope.secret) !== binding.hashlock) return reject(binding, 'ciphertext_invalid');
     return {
       binding,
       outcome: {

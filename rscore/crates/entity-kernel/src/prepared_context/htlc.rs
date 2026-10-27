@@ -24,8 +24,6 @@ const MAX_HTLC_BINARY_LAYER_BYTES: usize = (10_000_000 - 1_000_000) * 3 / 4;
 const MAX_ENTITY_HTLC_NOTE_BYTES: usize = 256;
 const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const MIN_TIMELOCK_DELTA_MS: u64 = 10_000;
-const MIN_FORWARD_TIMELOCK_MS: u64 = 20_000;
-const MIN_REVEAL_HEIGHT_DELTA_BLOCKS: u64 = 3;
 const MAX_ROUTING_FEE_PPM: u32 = 999_999;
 const PPM_DENOMINATOR: u64 = 1_000_000;
 const DIRECTIONAL_UTIL_STEP_PPM: u64 = 50_000;
@@ -46,6 +44,7 @@ pub struct HtlcMaterializeInput {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HtlcMaterializeEnvironment {
+    pub block_time_ms: Option<u64>,
     pub entity_encryption_public_key: [u8; 32],
     pub entity_encryption_private_key: [u8; 32],
     pub entity_timestamp: u64,
@@ -561,14 +560,21 @@ fn materialize_decrypted_one(
                 secret,
                 description,
                 started_at_ms,
-            } => Ok(PreparedHtlcEntry {
-                binding: input.binding,
-                outcome: HtlcPreparedOutcome::Final {
-                    secret,
-                    description,
-                    started_at_ms,
-                },
-            }),
+            } => {
+                // Authenticated ciphertext can still contain a non-paying preimage.
+                let bytes = lower_hex::<32>(&secret, "FINAL_SECRET")?;
+                if prefixed_hex(&Keccak256::digest(bytes)) != input.binding.hashlock {
+                    return Ok(reject(input.binding, "ciphertext_invalid"));
+                }
+                Ok(PreparedHtlcEntry {
+                    binding: input.binding,
+                    outcome: HtlcPreparedOutcome::Final {
+                        secret,
+                        description,
+                        started_at_ms,
+                    },
+                })
+            }
             DecodedOnionLayer::Forward {
                 next_hop,
                 inner_envelope,
@@ -595,10 +601,10 @@ fn materialize_decrypted_one(
                 }
                 let minimum_timestamp = env
                     .entity_timestamp
-                    .checked_add(MIN_FORWARD_TIMELOCK_MS)
+                    .checked_add(xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS)
                     .ok_or(PreparedContextError::BindingInvalid {
-                    detail: "TIMESTAMP_OVERFLOW",
-                })?;
+                        detail: "TIMESTAMP_OVERFLOW",
+                    })?;
                 let minimum_timelock = minimum_timestamp.checked_add(MIN_TIMELOCK_DELTA_MS).ok_or(
                     PreparedContextError::BindingInvalid {
                         detail: "TIMESTAMP_OVERFLOW",
@@ -608,11 +614,27 @@ fn materialize_decrypted_one(
                 let reveal_safe = input.binding.reveal_before_height
                     > env
                         .last_finalized_j_height
-                        .checked_add(MIN_REVEAL_HEIGHT_DELTA_BLOCKS)
+                        .checked_add(
+                            crate::payment_reveal_height_delta_blocks(env.block_time_ms.ok_or(
+                                PreparedContextError::BindingInvalid {
+                                    detail: "PAYMENT_BLOCK_TIME_INVALID",
+                                },
+                            )?)
+                            .ok_or(
+                                PreparedContextError::BindingInvalid {
+                                    detail: "PAYMENT_BLOCK_TIME_INVALID",
+                                },
+                            )?,
+                        )
                         .ok_or(PreparedContextError::BindingInvalid {
                             detail: "HEIGHT_OVERFLOW",
                         })?;
-                if !timelock_safe || !reveal_safe {
+                if !timelock_safe
+                    || !reveal_safe
+                    || input.binding.timelock
+                        > BigInt::from(env.entity_timestamp)
+                            + xln_rscore_engine::MAX_HTLC_HORIZON_MS
+                {
                     return Ok(reject(input.binding, "deadline_unsafe"));
                 }
                 Ok(PreparedHtlcEntry {
@@ -700,6 +722,35 @@ mod tests {
     }
 
     #[test]
+    fn fixpay_3_final_evidence_must_match_the_committed_hashlock() {
+        let input = DecryptedHtlcMaterializeInput {
+            binding: golden_binding(),
+            layer: DecryptedHtlcLayer::Decoded(DecodedOnionLayer::Final {
+                secret: format!("0x{}", "82".repeat(32)),
+                description: None,
+                started_at_ms: None,
+            }),
+        };
+        let rows = materialize_decrypted_htlc_entries(
+            vec![input],
+            &HtlcMaterializeEnvironment {
+                block_time_ms: Some(1000),
+                entity_encryption_public_key: [0; 32],
+                entity_encryption_private_key: [0; 32],
+                entity_timestamp: 1000,
+                last_finalized_j_height: 0,
+                routing_fee_ppm: 0,
+                routing_base_fee: 0.into(),
+                accounts: BTreeMap::new(),
+            },
+        )
+        .unwrap();
+        assert!(
+            matches!(&rows[0].outcome, HtlcPreparedOutcome::Reject { reason } if reason == "ciphertext_invalid")
+        );
+    }
+
+    #[test]
     fn matches_typescript_context_hash_and_decrypts_final_layer() {
         let binding = golden_binding();
         assert_eq!(
@@ -749,6 +800,7 @@ mod tests {
         let rows = materialize_htlc_prepared_entries(
             vec![HtlcMaterializeInput { binding, envelope }],
             &HtlcMaterializeEnvironment {
+                block_time_ms: Some(10_000),
                 entity_encryption_public_key: public_key,
                 entity_encryption_private_key: private_key,
                 entity_timestamp: 1,
@@ -778,6 +830,7 @@ mod tests {
                 binding.account_frame_hash = format!("0x{:064x}", token_id + 100);
                 binding.token_id = token_id;
                 binding.amount = BigInt::from(200);
+                binding.timelock = BigInt::from(100_000);
                 DecryptedHtlcMaterializeInput {
                     binding,
                     layer: DecryptedHtlcLayer::Decoded(DecodedOnionLayer::Forward {
@@ -809,6 +862,7 @@ mod tests {
         let materialized = materialize_decrypted_htlc_entries(
             rows,
             &HtlcMaterializeEnvironment {
+                block_time_ms: Some(10_000),
                 entity_encryption_public_key: [0; 32],
                 entity_encryption_private_key: [0; 32],
                 entity_timestamp: 1,

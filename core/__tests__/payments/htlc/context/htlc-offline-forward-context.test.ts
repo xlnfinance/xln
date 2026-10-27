@@ -55,7 +55,7 @@ describe('offline HTLC forwarding from committed Entity context', () => {
       new Map([[hub, forwardAmount]]),
       undefined,
       state.timestamp,
-      { hashlock, tokenId: 1, senderLockAmount: amount, timelock, revealBeforeHeight },
+      { hashlock, tokenId: 1, senderLockAmount: amount, timelock, revealBeforeHeight, blockTimeMs: 1_000 },
       () => sourcePrivateKey,
     );
     const lock = {
@@ -176,7 +176,7 @@ describe('offline HTLC forwarding from committed Entity context', () => {
     const envelope = await createOnionEnvelopes(
       [source, hub, target], preimage, publicKeys, [domain, domain],
       new Map([[hub, 9n]]), undefined, state.timestamp,
-      { hashlock, tokenId: 1, senderLockAmount: 10n, timelock: 100_000n, revealBeforeHeight: 100 },
+      { hashlock, tokenId: 1, senderLockAmount: 10n, timelock: 100_000n, revealBeforeHeight: 100, blockTimeMs: 1_000 },
       () => sourcePrivateKey,
     );
     const lockOf = (amount: bigint) => ({
@@ -219,4 +219,34 @@ describe('offline HTLC forwarding from committed Entity context', () => {
     );
     expect((error as MalformedEntityFrameInputError).frameTx).toBe(accountInput);
   });
+});
+
+test('fixpay-3 final recovery evidence must hash to the committed lock before it is persisted', async () => {
+  const source = entity('11'); const target = entity('22');
+  const jurisdiction = makeJurisdiction('verified-final', 31337, '44', '55');
+  const state = makeState(target, entity('66'), jurisdiction, source);
+  const privateKey = hexlify(deriveSignerKeySync(target, 'entity-encryption'));
+  const sourceKey = secret('71');
+  const hashlock = hashHtlcSecret(secret('81'));
+  const domain = { chainId: jurisdiction.chainId, depositoryAddress: jurisdiction.depositoryAddress };
+  const envelope = await createOnionEnvelopes([source, target], secret('82'),
+    new Map([[source, x25519Public(sourceKey)], [target, state.entityEncryptionPublicKey]]),
+    [domain], new Map(), undefined, state.timestamp,
+    { hashlock, tokenId: 1, senderLockAmount: 10n, timelock: 100_000n, revealBeforeHeight: 100, blockTimeMs: 1000 },
+    () => sourceKey);
+  const proposal = { type: 'accountInput', data: {
+    kind: 'ack_frame', fromEntityId: source, toEntityId: target, domain,
+    disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+    proposal: { frame: { height: 1, timestamp: state.timestamp, jHeight: 0,
+      prevFrameHash: '', accountStateRoot: secret('91'), stateHash: secret('92'), accountTxs: [{
+        type: 'htlc_lock', data: { lockId: hashlock, hashlock, tokenId: 1, amount: 10n,
+          timelock: 100_000n, revealBeforeHeight: 100, envelope },
+      }] }, frameHanko: secret('93') },
+  } } satisfies EntityTx;
+  const prepared = await materializeHtlcPreparedInfraContext({ state, proposalTxs: [proposal],
+    entityEncryptionPublicKey: state.entityEncryptionPublicKey, entityEncryptionPrivateKey: privateKey,
+    isEntityOnline: () => true, profiles: [], parentFrameHash: state.prevFrameHash, height: state.height + 1,
+    resolveRoute: async () => { throw new Error('unused'); },
+  });
+  expect(prepared.entries[0]?.outcome).toEqual({ kind: 'reject', reason: 'ciphertext_invalid' });
 });

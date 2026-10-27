@@ -65,6 +65,7 @@ pub(crate) fn decode_entity_frame_context(
 ) -> Result<DeterministicContext, EntityContextJsonError> {
     let (prepared_htlcs, originated_htlcs) = prepared_context(context)?;
     Ok(DeterministicContext {
+        block_time_ms: None,
         minimum_trade_size: BigInt::from(0),
         swap_taker_fee_bps: 0,
         jurisdiction_id: None,
@@ -107,6 +108,7 @@ pub fn decode_entity_deterministic_policy(
     )?;
     let pair_policies = pair_policies(required(policy, "pairPolicies", "policy")?)?;
     Ok(DeterministicContext {
+        block_time_ms: None,
         minimum_trade_size,
         swap_taker_fee_bps,
         jurisdiction_id,

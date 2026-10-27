@@ -14,3 +14,8 @@ pub use htlc::{
     materialize_decrypted_htlc_entries, materialize_htlc_prepared_entries,
     required_htlc_account_tokens, required_htlc_inbound,
 };
+
+mod payment_deadlines;
+pub use payment_deadlines::{
+    payment_block_time_ms, payment_deadline_window, payment_reveal_height_delta_blocks,
+};

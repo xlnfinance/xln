@@ -109,6 +109,7 @@ pub struct PreparedOriginatedHtlcPayment {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeterministicContext {
+    pub block_time_ms: Option<u64>,
     pub minimum_trade_size: BigInt,
     pub swap_taker_fee_bps: u16,
     pub jurisdiction_id: Option<String>,
@@ -120,6 +121,7 @@ pub struct DeterministicContext {
 impl DeterministicContext {
     pub fn hlt_default() -> Self {
         Self {
+            block_time_ms: Some(10_000),
             minimum_trade_size: BigInt::from(0),
             swap_taker_fee_bps: 1,
             jurisdiction_id: None,
@@ -683,6 +685,13 @@ pub enum EntityKernelOutput {
         entity_id: String,
         hashlock: String,
     },
+    PaymentFailed {
+        entity_id: String,
+        target_entity_id: String,
+        token_id: u16,
+        amount: BigInt,
+        reason: String,
+    },
     HtlcFailed {
         entity_id: String,
         hashlock: String,
@@ -735,6 +744,7 @@ impl EntityKernelOutput {
             | Self::HtlcInitiated { .. }
             | Self::HtlcForwardAccepted { .. }
             | Self::HtlcFailed { .. }
+            | Self::PaymentFailed { .. }
             | Self::HtlcReceived { .. }
             | Self::HtlcFinalized { .. }
             | Self::SwapMatched { .. } => true,

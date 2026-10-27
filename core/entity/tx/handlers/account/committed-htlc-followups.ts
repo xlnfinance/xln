@@ -1,3 +1,4 @@
+import { paymentRevealHeightDeltaBlocks } from '../../../../types/finance/payment';
 import type {
   AccountFrame,
   AccountOutput,
@@ -127,8 +128,14 @@ const applyPreparedHtlcOutcome = (
         inboundEntity, createdTimestamp: ctx.newState.timestamp,
       });
     }
+    // The verified onion preimage must survive a payer withholding the ACK.
+    // Persist recovery evidence and arm enforcement before exposing it.
+    const route = bookIntentSlot.getPaybookEntryForWrite(ctx.newState, lock.hashlock);
+    if (!route) throw new Error(`PAYBOOK_ENTRY_WRITE_MISSING:${lock.hashlock}`);
+    route.secret = prepared.outcome.secret.toLowerCase();
+    armPaymentSecretAckTimeout(ctx.newState, route);
     ctx.accountTxs.push({ accountId: inboundEntity, tx: {
-      type: 'htlc_resolve', data: { lockId: lock.lockId, outcome: 'secret', secret: prepared.outcome.secret },
+      type: 'htlc_resolve', data: { lockId: lock.lockId, outcome: 'secret', secret: route.secret },
     } });
     countOp('htlc.inbound.final');
     return;
@@ -149,7 +156,7 @@ const applyPreparedHtlcOutcome = (
     lockId: lock.hashlock, hashlock: lock.hashlock, tokenId: lock.tokenId,
     amount: prepared.outcome.forwardAmount,
     timelock: lock.timelock - BigInt(HTLC.MIN_TIMELOCK_DELTA_MS),
-    revealBeforeHeight: lock.revealBeforeHeight - HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS,
+    revealBeforeHeight: lock.revealBeforeHeight - paymentRevealHeightDeltaBlocks(ctx.newState.config.jurisdiction?.blockTimeMs),
     envelope: prepared.outcome.innerEnvelope,
   } } });
   countOp('htlc.inbound.forward');

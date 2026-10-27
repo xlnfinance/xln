@@ -238,7 +238,9 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
       message: 'Timelock 9007199254740992 exceeds maximum 9007199254740991',
     });
     expect(draft.state.locks.size).toBe(0);
-    expect((await applyAccountTx(draft, lock(9_007_199_254_740_991n), true, 1_000)).ok).toBe(true);
+    expect((await applyAccountTx(draft, lock(87_441_001n), true, 1_000)).ok).toBe(false);
+    expect(draft.state.locks.size).toBe(0);
+    expect((await applyAccountTx(draft, lock(87_441_000n), true, 1_000)).ok).toBe(true);
     discardAccountTransition(transition);
   });
 

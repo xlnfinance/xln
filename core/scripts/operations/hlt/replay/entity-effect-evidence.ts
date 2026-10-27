@@ -16,6 +16,7 @@ const ENTITY_EFFECT_EVENT_NAMES = new Set([
   'HtlcInitiated',
   'HtlcForwardAccepted',
   'HtlcFailed',
+  'PaymentFailed',
   'HtlcReceived',
   'HtlcFinalized',
   'SwapMatched',
@@ -169,6 +170,14 @@ const htlcForwardAcceptedEffect = (entry: FrameLogEntry, index: number): Record<
   };
 };
 
+const paymentFailedEffect = (entry: FrameLogEntry, index: number): Record<string, unknown> => {
+  const data = eventData(entry, index, ['entityId', 'targetEntityId', 'tokenId', 'amount', 'reason']);
+  return { kind: 'paymentFailed', entityId: requireEntityId(data, 'entityId', 'PAYMENT_FAILED'),
+    targetEntityId: requireEntityId(data, 'targetEntityId', 'PAYMENT_FAILED'),
+    tokenId: requireBoundaryInteger(data['tokenId'], 'PAYMENT_FAILED_TOKEN'),
+    amount: requireDecimal(data, 'amount', 'PAYMENT_FAILED'), reason: requireText(data, 'reason', 'PAYMENT_FAILED') };
+};
+
 const htlcFailedEffect = (entry: FrameLogEntry, index: number): Record<string, unknown> => {
   const data = eventData(entry, index, ['entityId', 'hashlock', 'reason'], ['lockId']);
   const code = `HLT_ENTITY_EFFECT_HTLC_FAILED_INVALID:${index}`;
@@ -265,6 +274,7 @@ const projectEntityEffect = (entry: FrameLogEntry, index: number): Record<string
     case 'request_collateral_committed': return requestCollateralCommittedEffect(entry, index);
     case 'HtlcInitiated': return htlcInitiatedEffect(entry, index);
     case 'HtlcForwardAccepted': return htlcForwardAcceptedEffect(entry, index);
+    case 'PaymentFailed': return paymentFailedEffect(entry, index);
     case 'HtlcFailed': return htlcFailedEffect(entry, index);
     case 'HtlcReceived': return htlcReceivedEffect(entry, index);
     case 'HtlcFinalized': return htlcFinalizedEffect(entry, index);
