@@ -363,6 +363,7 @@ fn output_value(output: &AccountOutput) -> AbiValue {
             token_id,
             amount,
             reason,
+            ..
         } => values_tuple(vec![
             AbiValue::Text("htlcError".into()),
             AbiValue::Text(lock_id.clone()),
