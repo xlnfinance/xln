@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from './Icons';
 import { useApp } from '../runtime/store';
+import { getAdapter } from '../runtime/adapter';
 import { useWallet } from '../runtime/views';
 import { TOUR_STEPS, type TourContext } from '../tour/steps';
+import { useTourObservations } from '../tour/observations';
 import { useTradeCompletion } from '../tour/use-trade';
 
 const nodeFor = (id: string): HTMLElement | undefined =>
@@ -26,7 +28,12 @@ export function Tour() {
   const index = Math.max(0, Math.min(tour.index, TOUR_STEPS.length - 1));
   const step = tour.active ? TOUR_STEPS[index] : undefined;
   const trade = useTradeCompletion(step?.id === 'trade', wallet.entityId);
-  const ctx = useMemo(() => ({ wallet, pathname, tradeFilled: trade.filled, dom }), [wallet, pathname, trade.filled]);
+  const observations = useTourObservations();
+  const runtimeId = getAdapter()?.runtimeId ?? '';
+  const start = useRef<{ step: typeof step; wallet: typeof wallet } | null>(null);
+  if (start.current?.step !== step && wallet.frame && !wallet.loading) start.current = { step, wallet };
+  const before = start.current && start.current.step === step ? start.current.wallet : undefined;
+  const ctx = useMemo(() => ({ wallet, before, runtimeId, pathname, tradeFilled: trade.filled, dom, ...observations }), [wallet, before, runtimeId, pathname, trade.filled, observations]);
   const target = step?.target(ctx) ?? '';
 
   useEffect(() => {
@@ -64,6 +71,7 @@ export function Tour() {
       data-testid="tour"
       data-step={step.id}
       data-target={target}
+      data-exercise={step.done ? 'committed' : 'reading'}
       aria-label="Wallet tutorial"
     >
       <div className="tour-card anchored">
@@ -97,11 +105,12 @@ export function Tour() {
         </div>
         <p className="tour-body" data-testid="tour-hint">
           {step.instruction(ctx)}
-          {step.id === 'company' && (
+          {step.skipReason?.(ctx) && <span className="note" data-testid="tour-skip-reason"> {step.skipReason(ctx)}</span>}
+          {['company', 'move', 'withdraw'].includes(step.id) && (
             <>
               {' '}
               <Link to="/assets" data-testid="tour-company-gas">
-                Get registration gas →
+                Get test gas / reserve →
               </Link>
             </>
           )}
@@ -148,7 +157,7 @@ export function Tour() {
                 data-testid="tour-advance"
                 onClick={() => setTour({ index: index + 1 })}
               >
-                Next chapter
+                {step.done ? 'Skip exercise' : 'Next chapter'}
               </button>
             </div>
           ) : (

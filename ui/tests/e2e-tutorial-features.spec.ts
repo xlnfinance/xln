@@ -12,6 +12,7 @@ const chapters = [
   ['lending', '/lend'],
   ['borrow', '/lend'],
   ['repay', '/lend'],
+  ['savings-withdraw', '/lend'],
   ['protection', '/sovereignty'],
   ['recovery', '/sovereignty'],
   ['company', '/ownership'],
@@ -31,7 +32,7 @@ test(
     await page.getByTestId('jurisdiction-stack').locator('summary').click();
     await expect(page.getByTestId('jurisdiction-stack').locator('code')).toHaveCount(2);
     await page.getByTestId('wallet-tutorial').click();
-    await expect(page.getByTestId('tour-chapter').locator('option')).toHaveCount(24);
+    await expect(page.getByTestId('tour-chapter').locator('option')).toHaveCount(25);
     for (const [id, path] of chapters) {
       await page.getByTestId('tour-chapter').selectOption(id!);
       await expect(page.getByTestId('tour')).toHaveAttribute('data-step', id!);

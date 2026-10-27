@@ -198,6 +198,7 @@ export function Lending() {
 							{bankOfferUnavailable && <p className="note" data-testid="lending-bank-terms">{bankOffer.kind === 'not-lending'
 								? side === 'lend' ? `This bank does not take ${meta.symbol} savings for this term.` : `This bank does not lend ${meta.symbol} for this term.`
 								: 'This bank has not published an offer for this asset and term yet.'}</p>}
+							{side === 'borrow' && state && !state.facilities.some(facility => facility.borrowerEntityId.toLowerCase() === wallet.entityId && facility.tokenId === tokenId && facility.termId === termId && facility.maxPrincipal > 0n && facility.expiresAt > Date.now()) && <p className="note" data-testid="lending-no-facility">No approved facility for this borrower, token and term.</p>}
 							{side === 'borrow' && <p className="note" data-testid="lending-bank-approval">{bankTerms ? `Bank loan rate: ${rate(bankTerms.loanInterestBps)} per term. ` : ''}The bank must approve your facility before it can fund a request.</p>}
 							{borrowPreview && <p className="note" data-testid="lending-borrow-preview">
 								{!borrowPreview.ok ? borrowPreview.error : <>
@@ -234,7 +235,7 @@ export function Lending() {
 					)}
 				</div>
 				<div className="aside">
-					<div className="card" data-testid="lending-state">
+					<div className="card" data-testid="lending-state" data-ready={state !== null ? 'yes' : 'no'}>
 						<div className="sect" style={{ marginTop: 0 }}>
 							<h3 className="caps">{hub ? `${hub.label} pool` : 'Pool'}</h3>
 							<button type="button" className="more" onClick={() => void refresh()} disabled={loading}>

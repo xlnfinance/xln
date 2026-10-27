@@ -1,11 +1,19 @@
 import { FEATURE_CHAPTERS } from './chapters';
 import { WALLET_LESSONS } from '@xln/frontend/lib/tutorial/curriculum';
+import { collateral, committed } from './outcomes';
 import type { WalletView } from '../runtime/views';
 
 export type TourContext = {
   wallet: WalletView;
   pathname: string;
   tradeFilled: boolean;
+  runtimeId: string;
+  before?: WalletView | undefined;
+  backup?: { runtimeId: string; entityId: string; height: number; storedBytes: number };
+  exported?: { runtimeId: string; entityId: string; height: number };
+  restored?: { runtimeId: string; entityIds: string[]; height: number };
+  shareTokens?: { runtimeId: string; entityId: string; ids: number[] };
+  governance?: { runtimeId: string; entityId: string; targetId: string; oldHash: string; newHash: string };
   dom: { has(id: string): boolean; value(id: string): string; text(id: string): string };
 };
 export type TourStep = {
@@ -19,6 +27,7 @@ export type TourStep = {
   prerequisite?: string;
   route?(ctx: TourContext): string;
   done?(ctx: TourContext): boolean;
+  skipReason?(ctx: TourContext): string;
 };
 const home = (ctx: TourContext, target: string) =>
   ctx.pathname === '/' ? target : ctx.dom.has('nav-home') ? 'nav-home' : 'back';
@@ -113,6 +122,7 @@ const steps: TourStep[] = [
       'Open Cover it on your hub account. Review the amount and on-chain fee before asking the hub to lock collateral.',
     target: () => 'account-cover',
     route: ctx => (ctx.wallet.accounts[0] ? `/accounts/${ctx.wallet.accounts[0].counterpartyId}` : '/'),
+    done: ctx => committed(ctx) && collateral(ctx.wallet) > collateral(ctx.before!),
   },
   {
     id: 'evidence',
@@ -121,6 +131,7 @@ const steps: TourStep[] = [
       'Export your evidence bundle from Security and recovery. Keep the co-signed frames needed to enforce your collateral-backed claim.',
     target: () => 'evidence-export',
     route: () => '/sovereignty',
+    done: ctx => ctx.exported?.runtimeId === ctx.runtimeId && ctx.exported.entityId === ctx.wallet.entityId && ctx.exported.height >= (ctx.before?.frameHeight ?? Infinity),
   },
   ...FEATURE_CHAPTERS.filter(step => step.id === 'dispute'),
   {

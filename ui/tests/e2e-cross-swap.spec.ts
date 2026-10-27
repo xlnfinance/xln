@@ -253,6 +253,8 @@ for (const scenario of [
     await page.getByTestId('wallet-tutorial').click();
     await page.getByTestId('tour-chapter').selectOption('cross');
     await expect(page.getByTestId('tour-result')).toContainText('source debit AND destination credit');
+    // The whole-tutorial spec owns automatic chapter advancement; keep this financial inspection on Swap.
+    await page.getByTestId('tour-exit').click();
     const across = page.getByRole('button', { name: 'Across networks', exact: true });
     await expect(across).toBeEnabled({ timeout: 5_000 });
     await across.click();
