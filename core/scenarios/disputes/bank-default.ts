@@ -36,7 +36,7 @@ import {
 import { announce, tell } from '../harness/narration';
 import { disputeWindowText } from '../harness/story';
 import { safeStringify } from '../../protocol/serialization';
-import { BANK_DEFAULT_STORY as STORY, type CustomerClaim } from './bank-default-story';
+import { BANK_DEFAULT_STORY, type CustomerClaim } from './bank-default-story';
 
 const USDC = 1;
 const CAPITAL = usd(350_000);
@@ -89,7 +89,7 @@ const claimOf = ({ env, hub }: Context, customer: Party): CustomerClaim => {
 };
 
 const openAccounts = async (ctx: Context, customers: readonly Party[]): Promise<void> => {
-  announce(ctx.env, STORY.accounts(CREDIT));
+  announce(ctx.env, BANK_DEFAULT_STORY.accounts(CREDIT));
   await ctx.process(ctx.env, customers.map((customer) => ({
     entityId: customer.id,
     signerId: customer.signer,
@@ -107,7 +107,7 @@ const openAccounts = async (ctx: Context, customers: readonly Party[]): Promise<
 };
 
 const postCollateral = async (ctx: Context, carol: Party): Promise<void> => {
-  announce(ctx.env, STORY.collateral(CAPITAL));
+  announce(ctx.env, BANK_DEFAULT_STORY.collateral(CAPITAL));
   await ctx.process(ctx.env, [{
     entityId: ctx.hub.id,
     signerId: ctx.hub.signer,
@@ -124,7 +124,7 @@ const postCollateral = async (ctx: Context, carol: Party): Promise<void> => {
 
 const payDeposits = async (ctx: Context, customers: readonly Party[]): Promise<void> => {
   const amountOf = (customer: Party): bigint => DEPOSITS[customer.name as keyof typeof DEPOSITS];
-  announce(ctx.env, STORY.deposits(customers.map((customer) => ({ name: customer.name, amount: amountOf(customer) }))));
+  announce(ctx.env, BANK_DEFAULT_STORY.deposits(customers.map((customer) => ({ name: customer.name, amount: amountOf(customer) }))));
   await ctx.process(ctx.env, [{
     entityId: ctx.hub.id,
     signerId: ctx.hub.signer,
@@ -154,7 +154,7 @@ const finalizeAfterWindow = async (ctx: Context, customer: Party): Promise<void>
   for (let round = 0; round < 40 && active(); round++) {
     // The runtime clock makes the dispute-deadline hook due; its frame drafts the finalization.
     ctx.env.state.timestamp = (ctx.env.state.timestamp || 0) + 1000;
-    if (round === 0) announce(ctx.env, STORY.windowCloses(customer.name));
+    if (round === 0) announce(ctx.env, BANK_DEFAULT_STORY.windowCloses(customer.name));
     await ctx.process(ctx.env);
     await syncChain(ctx.env, 3);
     await processJEvents(ctx.env);
@@ -167,7 +167,7 @@ const finalizeAfterWindow = async (ctx: Context, customer: Party): Promise<void>
 const exitAlone = async (ctx: Context, customer: Party, first: boolean): Promise<void> => {
   const input = (entityTxs: EntityTx[]): EntityInput[] =>
     [{ entityId: customer.id, signerId: customer.signer, entityTxs }];
-  announce(ctx.env, STORY.exits(customer.name, first));
+  announce(ctx.env, BANK_DEFAULT_STORY.exits(customer.name, first));
   await ctx.process(ctx.env, input([{
     type: 'prepareDispute',
     data: { counterpartyEntityId: ctx.hub.id, description: `bank-default exit ${customer.name}` },
@@ -176,7 +176,7 @@ const exitAlone = async (ctx: Context, customer: Party, first: boolean): Promise
   assert(frozen?.status === 'disputed', `BANK_DEFAULT_NOT_FROZEN:${customer.name}`, ctx.env);
   // Anvil automining follows host time; pin the first dispute block so every run is identical.
   if (first) await pinScenarioJurisdictionUnix(ctx.env, ctx.jadapter, DISPUTE_START_UNIX);
-  announce(ctx.env, STORY.filed(customer.name, disputeWindowText(frozen.state.disputeConfig)));
+  announce(ctx.env, BANK_DEFAULT_STORY.filed(customer.name, disputeWindowText(frozen.state.disputeConfig)));
   await ctx.process(ctx.env, input([{ type: 'j_broadcast', data: {} }]));
   await syncChain(ctx.env, 5);
   await processJEvents(ctx.env);
@@ -196,7 +196,7 @@ const unsecuredExit = async (ctx: Context, customer: Party, position: number): P
   assert(debts.length === position && debts[position - 1]?.creditor === customer.id.toLowerCase(),
     `BANK_DEFAULT_QUEUE_ORDER:${customer.name}:${debts.map((debt) => debt.creditor).join(',')}`, ctx.env);
   assert(debts[position - 1]?.remaining === claim.unsecured, `BANK_DEFAULT_DEBT_AMOUNT:${customer.name}`, ctx.env);
-  tell(ctx.env, STORY.becameDebt(customer.name, claim.unsecured, position, totalDebt(ctx)));
+  tell(ctx.env, BANK_DEFAULT_STORY.becameDebt(customer.name, claim.unsecured, position, totalDebt(ctx)));
 };
 
 const securedExit = async (ctx: Context, customer: Party): Promise<void> => {
@@ -207,13 +207,13 @@ const securedExit = async (ctx: Context, customer: Party): Promise<void> => {
   const surplus = (await reserveOf(ctx, ctx.hub)) - hubBefore;
   assert(paid === claim.secured && claim.unsecured === 0n, `BANK_DEFAULT_SECURED_PAYOUT:${paid}`, ctx.env);
   assert(surplus === CAPITAL - claim.secured, `BANK_DEFAULT_SURPLUS:${surplus}`, ctx.env);
-  tell(ctx.env, STORY.securedPaid(customer.name, paid, surplus, totalDebt(ctx)));
+  tell(ctx.env, BANK_DEFAULT_STORY.securedPaid(customer.name, paid, surplus, totalDebt(ctx)));
 };
 
 /** Permissionless enforcement: one J input, then wait until Hub's queue reflects it. */
 const enforceDebts = async (ctx: Context, round: number): Promise<void> => {
   const before = totalDebt(ctx);
-  announce(ctx.env, STORY.enforce(round));
+  announce(ctx.env, BANK_DEFAULT_STORY.enforce(round));
   await commitRuntimeInput(ctx.env, buildDebtEnforcementRuntimeInputFromProjection({
     entityId: ctx.hub.id,
     jurisdictionName: DEMO_JURISDICTION_NAME,
@@ -239,11 +239,11 @@ const firstEnforcement = async (ctx: Context, queue: readonly Party[]): Promise<
   const [first, second] = rows;
   assert(first!.remaining === 0n && second!.amount > 0n && second!.remaining > 0n,
     `BANK_DEFAULT_FIFO:${safeStringify(rows)}`, ctx.env);
-  tell(ctx.env, STORY.enforced(rows, await reserveOf(ctx, ctx.hub)));
+  tell(ctx.env, BANK_DEFAULT_STORY.enforced(rows, await reserveOf(ctx, ctx.hub)));
 };
 
 const refillAndSettle = async (ctx: Context, last: Party): Promise<void> => {
-  announce(ctx.env, STORY.refill(REFILL));
+  announce(ctx.env, BANK_DEFAULT_STORY.refill(REFILL));
   await fundEntities(ctx.env, ctx.jadapter, [{ id: ctx.hub.id, tokenId: USDC, amount: REFILL }]);
   const owed = debtTo(ctx, last);
   const lastBefore = await reserveOf(ctx, last);
@@ -251,7 +251,7 @@ const refillAndSettle = async (ctx: Context, last: Party): Promise<void> => {
   const paid = (await reserveOf(ctx, last)) - lastBefore;
   const free = await reserveOf(ctx, ctx.hub);
   assert(paid === owed && hubDebts(ctx).length === 0 && free === REFILL - owed, `BANK_DEFAULT_FINAL:${paid}:${free}`, ctx.env);
-  tell(ctx.env, STORY.settled(last.name, paid, free));
+  tell(ctx.env, BANK_DEFAULT_STORY.settled(last.name, paid, free));
 };
 
 const setUp = async (ctx: Context, customers: readonly Party[]): Promise<void> => {
@@ -260,7 +260,7 @@ const setUp = async (ctx: Context, customers: readonly Party[]): Promise<void> =
   await openAccounts(ctx, customers);
   await postCollateral(ctx, carol);
   await payDeposits(ctx, customers);
-  tell(ctx.env, { ...STORY.startingPoint([alice, bob, carol].map((customer) => claimOf(ctx, customer))), focusEntityIds: [ctx.hub.id, ...customers.map((customer) => customer.id)] });
+  tell(ctx.env, { ...BANK_DEFAULT_STORY.startingPoint([alice, bob, carol].map((customer) => claimOf(ctx, customer))), focusEntityIds: [ctx.hub.id, ...customers.map((customer) => customer.id)] });
 };
 
 export async function runBankDefault(runtimeReplica: RuntimeReplica): Promise<RuntimeReplica> {
@@ -274,7 +274,7 @@ export async function runBankDefault(runtimeReplica: RuntimeReplica): Promise<Ru
   env.quietRuntimeLogs = true;
   const restoreStrict = enableStrictScenario(env, 'bank-default');
   try {
-    announce(env, STORY.register);
+    announce(env, BANK_DEFAULT_STORY.register);
     const registered = await registerEntities(env, jadapter, PARTIES, jurisdiction) as Party[];
     const byName = (name: string): Party => {
       const party = registered.find((entry) => entry.name === name);
@@ -283,7 +283,7 @@ export async function runBankDefault(runtimeReplica: RuntimeReplica): Promise<Ru
     };
     const [alice, bob, carol, hub] = ['Alice', 'Bob', 'Carol', 'Hub'].map(byName) as [Party, Party, Party, Party];
     const ctx: Context = { env, jadapter, process, hub };
-    announce(env, STORY.capital(CAPITAL));
+    announce(env, BANK_DEFAULT_STORY.capital(CAPITAL));
     await setUp(ctx, [alice, bob, carol]);
     await unsecuredExit(ctx, alice, 1);
     await unsecuredExit(ctx, bob, 2);
