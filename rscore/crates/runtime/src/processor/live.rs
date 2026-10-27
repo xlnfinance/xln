@@ -519,11 +519,16 @@ impl ResidentRuntimeService {
                         ResidentRuntimeServiceError::JWatcher("ENTITY_SLOT_MISSING".into())
                     })?;
                 let height = restored_entity_j_height(local.replica_metadata(), &state.entity)?;
-                let hash = committed_cursor_hash(local.replica_metadata(), &state.entity, height)?;
+                let frontier = if height > watcher.cursor.scanned_through {
+                    committed_cursor_hash(local.replica_metadata(), &state.entity, height)?
+                        .map(|hash| (height, hash))
+                } else {
+                    None
+                };
                 let rewind = crate::j_watcher::reconcile_recovery_frontier(
                     &watcher.rpc,
                     &watcher.cursor,
-                    hash.map(|hash| (height, hash)),
+                    frontier,
                 )
                 .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?;
                 if let Some((height, hash)) = rewind {

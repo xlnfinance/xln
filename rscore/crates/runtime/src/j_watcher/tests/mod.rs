@@ -15,6 +15,7 @@ use xln_rscore_engine::{AccountTx, EntityId, JurisdictionEvent};
 use super::types::ACCOUNT_SETTLED_TOPIC;
 use super::*;
 
+mod deployment_import;
 mod dispute;
 mod dispute_recovery;
 
