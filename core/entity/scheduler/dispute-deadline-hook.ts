@@ -53,6 +53,10 @@ export const processDisputeDeadlineHook = (
 ): void => {
   const { accountId } = hook.data;
   const visible = replica.state.accounts.get(accountId);
+  if (visible?.status === 'dispute_preparing') {
+    plan.disputePrepareCounterparties.set(accountId, 'auto-prepare-dispute-after-secret-ack-timeout');
+    return;
+  }
   if (!visible?.activeDispute) return;
   if (replica.state.hubRebalanceConfig?.disputeAutoFinalizeMode === 'ignore') return;
   const weAreLeft = visible.state.leftEntity === replica.state.entityId;

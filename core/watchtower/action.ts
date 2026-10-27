@@ -1,3 +1,4 @@
+import { assertWatchtowerSubmissionSupported } from './submission-support';
 import { JsonRpcProvider, Wallet, ethers } from 'ethers';
 import { Depository__factory } from '../../jurisdictions/typechain-types/index.ts';
 import {
@@ -291,6 +292,7 @@ const normalizeWatch = (watch: unknown): TowerLastResortWatchV1 => {
   }
   const chainId = toInt(candidate['chainId'], 'WATCH_CHAIN_ID');
   if (chainId <= 0) throw new Error('WATCHTOWER_REMEDY_WATCH_CHAIN_ID_INVALID');
+  assertWatchtowerSubmissionSupported(chainId);
   return {
     rpcUrl: normalizeRpcUrl(String(candidate['rpcUrl'] || '')),
     chainId,

@@ -1,3 +1,4 @@
+import { assertWatchtowerSubmissionSupported } from '../submission-support';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   TowerAppointmentV1,
@@ -91,6 +92,9 @@ const validateAppointmentMode = (appointment: TowerAppointmentV1, towerMode: Tow
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_MISSING');
   }
   if (towerMode === 'delayed_last_resort') {
+    const watch = appointment.lastResortPayload?.watch;
+    if (!watch) throw new Error('TOWER_LAST_RESORT_PAYLOAD_WATCH_MISSING');
+    assertWatchtowerSubmissionSupported(watch.chainId);
     assertEncryptedLastResortPayload(appointment.lastResortPayload);
   }
 };

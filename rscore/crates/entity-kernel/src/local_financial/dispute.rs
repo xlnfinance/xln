@@ -558,16 +558,37 @@ fn start(
     // state. Binding it changed the Account envelope and J batch at WAL h474.
     let starter_counter_arguments = Vec::new();
     let starter_counter_proof_commitment = ZERO_WORD;
-    if cross_jurisdiction_route_id.is_some()
+    if dispute.pull_count > 0
         && state
             .j_batch_state
             .as_ref()
             .is_some_and(|j_state| batch_op_count(&j_state.batch) != 0)
     {
-        return Err(invalid(
-            "disputeStart",
-            "DISPUTE_START_PULL_BATCH_NOT_EMPTY",
-        ));
+        // Every Pull start needs a clean atomic start/registration draft.
+        // Keep preparation intact while another account's batch drains.
+        status(
+            events,
+            "⏳ Pull dispute start waiting for an empty jBatch draft",
+        );
+        state
+            .j_batch_state
+            .as_mut()
+            .expect("nonempty draft")
+            .auto_broadcast_draft = true;
+        crate::schedule_hook(
+            state
+                .crontab
+                .get_or_insert_with(crate::CrontabState::default),
+            crate::ScheduledHook {
+                id: format!("dispute-deadline:{}", counterparty.to_lowercase()),
+                trigger_at: state.timestamp + 1000,
+                kind: crate::ScheduledHookKind::DisputeDeadline {
+                    account_id: counterparty.into(),
+                },
+            },
+        )
+        .map_err(|error| invalid("disputeStart", error.to_string()))?;
+        return Ok(());
     }
     {
         let j_state = state.j_batch_state.get_or_insert_with(JBatchState::default);
@@ -1169,6 +1190,14 @@ pub(super) fn apply_finalize(
     }
     let has_pulls = dispute.pull_count > 0;
     let has_selected_counter = selected_nonce.is_some();
+    // Pull counter-proofs require on-chain registration even after timeout.
+    if has_pulls && use_counter && !has_selected_counter {
+        status(
+            events,
+            "⏳ Pull counter-proof must be locked on-chain before finalization",
+        );
+        return Ok(());
+    }
     let now_sec = state.timestamp / 1_000;
     let submit_not_before_timestamp = if timeout > 0 && now_sec >= timeout {
         (has_pulls || caller_is_starter || has_selected_counter).then_some(timeout)
@@ -1900,6 +1929,164 @@ mod tests {
                     hex(&unacked_hash)
                 ),
             }],
+        );
+    }
+
+    fn install_review_pull(view: &mut ResidentAccountDisputeView) {
+        use xln_rscore_engine::{DisputeAllowance, DisputeTransformerClause};
+        let body = view.proof_body.as_mut().unwrap();
+        body.token_ids = vec![1];
+        body.offdeltas = vec![0.into()];
+        body.transformers = vec![DisputeTransformerClause {
+            transformer_address: [0x22; 20],
+            allowances: vec![DisputeAllowance {
+                delta_index: 0,
+                right_allowance: 1.into(),
+                left_allowance: 0.into(),
+            }],
+            encoded_batch: ethabi::encode(&[Token::Tuple(vec![
+                Token::Array(vec![]),
+                Token::Array(vec![]),
+                Token::Array(vec![Token::Tuple(vec![
+                    Token::Uint(0.into()),
+                    Token::Tuple(vec![Token::Bool(false), Token::Uint(1.into())]),
+                    Token::Uint(0.into()),
+                    Token::FixedBytes(vec![0x41; 32]),
+                    Token::FixedBytes(vec![0x42; 32]),
+                    Token::Bool(true),
+                ])]),
+                Token::Array(vec![]),
+            ])]),
+        }];
+        view.pull_count = 1;
+        view.counterparty_dispute.as_mut().unwrap().proof_body_hash =
+            proof_body_hash(&proof_body_from_engine(body.clone()).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn review_1_unregistered_pull_counter_waits_after_timeout() {
+        let mut counter = counterparty_proof();
+        counter.nonce = 8;
+        let mut views = account_view("disputed", None, None, Some(counter.clone()));
+        let view = views.get_mut(PEER).unwrap().dispute.as_mut().unwrap();
+        install_review_pull(view);
+        counter.proof_body_hash = view.counterparty_dispute.as_ref().unwrap().proof_body_hash;
+        let mut active =
+            active_dispute_value(view, counter.proof_body_hash, 7, false, &[], &[], ZERO_WORD)
+                .unwrap();
+        set_object_field(&mut active, "observedOnChain", CanonicalValue::Bool(true));
+        set_object_field(&mut active, "startedByLeft", CanonicalValue::Bool(false));
+        set_object_field(&mut active, "disputeTimeout", number_value(100));
+        view.active_dispute = Some(active);
+        let mut state = state(120_000);
+        let mut mutations = Vec::new();
+        let mut events = Vec::new();
+        apply_finalize(
+            &mut state,
+            &PaybookChanges::default(),
+            DisputeFinalizeEntityTx {
+                counterparty_entity_id: PEER.into(),
+                use_onchain_registry: false,
+                description: None,
+            },
+            &views,
+            &mut mutations,
+            &mut Vec::new(),
+            &mut events,
+        )
+        .unwrap();
+        assert!(
+            state
+                .j_batch_state
+                .as_ref()
+                .is_none_or(|j| j.batch.dispute_finalizations.is_empty()),
+            "Pull counter-proof must be registered before finalize"
+        );
+        assert!(mutations.is_empty(), "must not latch finalizeQueued");
+        assert_eq!(
+            events,
+            vec![EntityFrameEvent::Status {
+                message: "⏳ Pull counter-proof must be locked on-chain before finalization".into(),
+            }]
+        );
+    }
+
+    fn number_value(value: u64) -> CanonicalValue {
+        CanonicalValue::Number(CanonicalNumber::try_from_u64(value).unwrap())
+    }
+
+    #[test]
+    fn review_3_pull_start_defers_dirty_draft_without_route_override() {
+        let prepare = CanonicalValue::Object(vec![("readyAfter".into(), number_value(0))]);
+        let mut views = account_view(
+            "dispute_preparing",
+            Some(prepare),
+            None,
+            Some(counterparty_proof()),
+        );
+        install_review_pull(views.get_mut(PEER).unwrap().dispute.as_mut().unwrap());
+        let mut state = state(1_000);
+        let mut batch = JBatchState::default();
+        batch
+            .batch
+            .reserve_to_reserve
+            .push(crate::j_batch::ReserveToReserve {
+                receiving_entity: [0x55; 32],
+                token_id: 1.into(),
+                amount: 1.into(),
+            });
+        state.j_batch_state = Some(batch);
+        let mut mutations = Vec::new();
+        let tx = || DisputeStartEntityTx {
+            counterparty_entity_id: PEER.into(),
+            description: None,
+            cross_jurisdiction_route_id: None,
+            starter_initial_arguments: None,
+            starter_counter_arguments: None,
+        };
+        apply_start(
+            &mut state,
+            &PaybookChanges::default(),
+            tx(),
+            &views,
+            None,
+            &mut mutations,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert!(
+            state
+                .j_batch_state
+                .as_ref()
+                .unwrap()
+                .batch
+                .dispute_starts
+                .is_empty(),
+            "wait for clean draft"
+        );
+        assert!(mutations.is_empty(), "retain dispute_preparing");
+        state.j_batch_state = Some(JBatchState::default());
+        apply_start(
+            &mut state,
+            &PaybookChanges::default(),
+            tx(),
+            &views,
+            None,
+            &mut mutations,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            state
+                .j_batch_state
+                .as_ref()
+                .unwrap()
+                .batch
+                .dispute_starts
+                .len(),
+            1
         );
     }
 

@@ -428,6 +428,12 @@ pub fn execute_crontab(
                 let Some(view) = dispute_views.get(account_id) else {
                     continue;
                 };
+                if view.status == "dispute_preparing" {
+                    if planned.insert(account_id.clone()) {
+                        counterparties.push(account_id.clone());
+                    }
+                    continue;
+                }
                 let Some(active) = view.active_dispute.as_ref() else {
                     continue;
                 };

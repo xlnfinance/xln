@@ -1,3 +1,4 @@
+import { assertWatchtowerSubmissionSupported } from './submission-support';
 import { ethers } from 'ethers';
 import { serializeTaggedJson } from '../protocol/serialization';
 import {
@@ -215,6 +216,7 @@ const verifyLastResortWatch = (watch: unknown, assertActionRpcUrl: TowerActionRp
   }
   assertActionRpcUrl?.(rpcUrl);
   requireTowerInteger(candidate['chainId'], 'LAST_RESORT_PAYLOAD_WATCH_CHAIN_ID', 1);
+  assertWatchtowerSubmissionSupported(Number(candidate['chainId']));
   if (!ethers.isAddress(String(candidate['depositoryAddress'] || ''))) {
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_WATCH_DEPOSITORY_INVALID');
   }

@@ -1,3 +1,4 @@
+import { initCrontab, scheduleHook } from '../../../scheduler';
 import type { AccountReplica, RuntimeOverlayRecord } from '../../../../types/account';
 import type { EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
@@ -100,19 +101,22 @@ const queueDisputeStart = (
   outputs: EntityInput[],
   runtimeSeed: string | undefined,
   canonicalDeltaTransformerAddress: string,
-): void => {
-  const batch = state.jBatchState!.batch;
-  const hasPulls = proofBodyHasPulls(
-    evidence.initialProofbody,
-    canonicalDeltaTransformerAddress,
-  );
+): boolean => {
+  const batchState = state.jBatchState!;
+  const batch = batchState.batch;
+  const hasPulls = proofBodyHasPulls(evidence.initialProofbody, canonicalDeltaTransformerAddress);
+  // Pull starts and their registrations need one clean draft. Another
+  // account's scheduled start must defer, never halt or leave preparation.
   if (hasPulls && batchOpCount(batch) !== 0) {
-    // A Pull-bearing start defines the inclusive reveal second S. Mixing it
-    // into an existing mutable draft can exhaust registration capacity after
-    // the Account is already frozen, leaving a valid zero-window claim
-    // impossible. Require a clean draft so start plus every Account-scoped
-    // Source/Target registration is one indivisible processBatch operation.
-    throw haltRuntimeFailure("DISPUTE_START_PULL_BATCH_NOT_EMPTY", `DISPUTE_START_PULL_BATCH_NOT_EMPTY:${batchOpCount(batch)}`);
+    addMessage(state, '⏳ Pull dispute start waiting for an empty jBatch draft');
+    batchState.autoBroadcastDraft = true;
+    state.crontabState ??= initCrontab();
+    scheduleHook(state.crontabState, {
+      id: `dispute-deadline:${tx.data.counterpartyEntityId.toLowerCase()}`,
+      type: 'dispute_deadline', triggerAt: state.timestamp + 1000,
+      data: { accountId: tx.data.counterpartyEntityId },
+    });
+    return false;
   }
   if (batch.disputeStarts.length >= J_BATCH_CONTRACT_LIMITS.maxDisputeStarts) {
     throw haltRuntimeFailure(
@@ -180,6 +184,7 @@ const queueDisputeStart = (
     );
   }
   encodeJBatch(batch);
+  return true;
 };
 
 export const handleDisputeStart = async (
@@ -230,7 +235,7 @@ export const handleDisputeStart = async (
   if (!(await verifyStartHanko(entityState, newState, account, counterpartyId, evidence, env))) {
     return { newState, outputs };
   }
-  queueDisputeStart(
+  if (!queueDisputeStart(
     env,
     entityState,
     newState,
@@ -240,7 +245,7 @@ export const handleDisputeStart = async (
     outputs,
     env.runtimeSeed,
     requireAccountDeltaTransformerAddress(env.state, account.state),
-  );
+  )) return { newState, outputs };
   disputeLog.debug('start.jbatch_queued', {
     entity: shortId(entityState.entityId),
     counterparty: shortId(counterpartyId),

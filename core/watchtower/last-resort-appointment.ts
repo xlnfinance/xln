@@ -1,3 +1,4 @@
+import { assertWatchtowerSubmissionSupported } from './submission-support';
 import { Wallet } from 'ethers';
 import type { AccountReplica } from '../types/account';
 import { buildAccountProofBodyFromJurisdictions } from '../account/consensus/helpers';
@@ -233,6 +234,7 @@ const buildAccountLastResortAppointment = async (
   rawCounterpartyId: string,
   account: AccountReplica,
 ): Promise<LastResortTowerAppointmentUpload | null> => {
+  assertWatchtowerSubmissionSupported(entity.chainId);
   const claim = readFrozenProofClaim(rawCounterpartyId, account);
   if (!claim) return null;
 
