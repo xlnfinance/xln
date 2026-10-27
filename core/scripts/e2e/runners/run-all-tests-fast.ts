@@ -10,6 +10,7 @@
  *   bun core/scripts/e2e/runners/run-all-tests-fast.ts --scenario-workers=3 --e2e-shards=2
  */
 
+import { assertCheckEnvironment } from '../../../../tools/check-environment';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import {
@@ -83,6 +84,7 @@ const runJob = async (
 };
 
 async function main(): Promise<void> {
+  assertCheckEnvironment();
   if (process.argv.slice(2).some(argument => argument === '--help' || argument === '-h')) {
     console.log('Usage: bun core/scripts/e2e/runners/run-all-tests-fast.ts [--quick|--smoke] [--scenario-workers=N] [--e2e-shards=N]');
     return;

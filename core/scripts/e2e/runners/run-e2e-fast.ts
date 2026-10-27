@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { assertCheckEnvironment } from '../../../../tools/check-environment';
 import { spawn } from 'node:child_process';
 
 import {
@@ -93,6 +94,7 @@ const FAST_E2E_TARGETS = [
 ];
 
 const fastTargets = FAST_E2E_TARGETS.map((target) => `${target.file}::${target.title}`);
+assertCheckEnvironment();
 const passthrough = process.argv.slice(2);
 if (passthrough.some(argument => argument === '--help' || argument === '-h')) {
   console.log('Usage: bun core/scripts/e2e/runners/run-e2e-fast.ts [isolated-runner options]');

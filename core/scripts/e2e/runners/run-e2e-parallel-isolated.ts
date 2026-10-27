@@ -12,6 +12,7 @@
  *   bun core/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --start-at=18 --preserve-artifacts
  */
 
+import { assertCheckEnvironment } from '../../../../tools/check-environment';
 import { createHash } from 'node:crypto';
 
 // React specs use their owning Playwright package and the same isolated J stand.
@@ -2286,6 +2287,7 @@ const runShard = async (
 };
 
 async function main(): Promise<void> {
+  assertCheckEnvironment();
   if (process.argv.slice(2).some(arg => arg === '--help' || arg === '-h')) {
     console.log(ISOLATED_E2E_RUNNER_USAGE);
     return;

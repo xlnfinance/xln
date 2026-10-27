@@ -9,6 +9,7 @@
  *   bun core/scenarios/run.ts lock-ahb --mode=rpc --rpc=http://127.0.0.1:18545
  */
 
+import { assertCheckEnvironment } from '../../tools/check-environment';
 import { execFileSync, spawn, type ChildProcessByStdio } from 'node:child_process';
 import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -408,6 +409,7 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
 }
 
 async function main() {
+  assertCheckEnvironment();
   if (process.argv.slice(2).some(argument => argument === '--help' || argument === '-h')) {
     console.log('Usage: bun core/scenarios/run.ts [all|<scenario>] [--hub-engine=ts] [--mode=browservm|rpc] [--rpc=URL] [--workers=N] [--trail=DIR|FILE] [--input-trace=FILE] [--recording=FILE] [--single]');
     console.log(`\nAvailable scenarios: ${availableScenarioIds().join(', ')}`);

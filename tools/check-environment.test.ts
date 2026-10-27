@@ -17,6 +17,12 @@ for (const entry of [
   'scripts/verification/verify.ts',
   'scripts/verification/pre-push.ts',
   'core/scripts/e2e/runners/run-unit-tests.ts',
+  'core/scripts/e2e/runners/run-with-test-cleanup.ts',
+  'core/scripts/e2e/runners/run-all-tests-fast.ts',
+  'core/scripts/e2e/runners/run-e2e-parallel-isolated.ts',
+  'core/scripts/e2e/runners/run-system-tests-parallel.ts',
+  'core/scripts/e2e/runners/run-e2e-fast.ts',
+  'core/scenarios/run.ts',
 ]) {
   test(`${entry} rejects a nested cwd before launching work or reading stdin`, () => {
     const child = Bun.spawnSync([process.execPath, resolve(root, entry)], {

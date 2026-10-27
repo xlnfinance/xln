@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { assertCheckEnvironment } from '../../../../tools/check-environment';
 import { spawn, type ChildProcess } from 'node:child_process';
 
 import {
@@ -174,6 +175,7 @@ const run = async (): Promise<number> => {
 };
 
 if (import.meta.main) {
+  assertCheckEnvironment();
   run()
     .then((code) => process.exit(code))
     .catch((error) => {

@@ -12,6 +12,7 @@
  *   bun core/scripts/e2e/runners/run-system-tests-parallel.ts --base-port=18545 --stream
  */
 
+import { assertCheckEnvironment } from '../../../../tools/check-environment';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { mkdirSync, createWriteStream, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -302,6 +303,7 @@ export const summarizeSystemScenarioResults = (scenarios: readonly string[], res
 };
 
 async function main(): Promise<void> {
+  assertCheckEnvironment();
   if (process.argv.slice(2).some(argument => argument === '--help' || argument === '-h')) {
     console.log('Usage: bun core/scripts/e2e/runners/run-system-tests-parallel.ts [--scenarios=a,b] [--workers=N]');
     return;
