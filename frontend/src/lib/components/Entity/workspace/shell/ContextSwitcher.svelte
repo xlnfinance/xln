@@ -517,7 +517,7 @@
 
   async function handleReset() {
     open = false;
-    await resetEverything({ confirmed: true, reason: 'context-switcher-manual-reset' });
+    await resetEverything({ reason: 'context-switcher-manual-reset' });
   }
 </script>
 

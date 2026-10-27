@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { resolvePayRecipient, invoiceNote } from './pay-intent';
 import { HOME, PageHead } from '../components/PageHead';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import type { PaymentDeliveryMode } from '@xln/core/api/public/runtime-module';
@@ -12,7 +13,7 @@ import { paymentMode } from '../runtime/financial/payment-funding';
 import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
 import { useApp } from '../runtime/store';
 import { peekXLN } from '../runtime/xln-loader';
-import { DELIVERY_OPTIONS, eligibleRoutes, isEntityId, quotePaymentRoutes, routeModeError, submitPayment, type PaymentRouteQuote } from '../runtime/financial/payments';
+import { DELIVERY_OPTIONS, eligibleRoutes, quotePaymentRoutes, routeModeError, submitPayment, type PaymentRouteQuote } from '../runtime/financial/payments';
 import { amountInputText, formatAmount, formatMoney, formatLimit, parseAmount, shortId } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
 import { usdOf } from '../runtime/financial/prices';
@@ -40,6 +41,7 @@ export function Pay() {
 	const wallet = useWallet(entityId);
 
 	const [toText, setToText] = useState(params.get('to')?.toLowerCase() ?? '');
+	const [pickedEntityId, setPickedEntityId] = useState<string | null>(null);
 	const [toFocused, setToFocused] = useState(false);
 	const [invoice, setInvoice] = useState<ParsedXlnInvoice | null>(null);
 	const [invoiceError, setInvoiceError] = useState<string | null>(null);
@@ -67,15 +69,17 @@ export function Pay() {
 			setInvoice(parsed);
 			setInvoiceError(null);
 			setToText(parsed.targetEntityId);
+			setPickedEntityId(parsed.targetEntityId);
 			if (parsed.tokenId) setTokenId(parsed.tokenId);
 			if (parsed.amount) setAmountText(parsed.amount);
-			if (parsed.description) {
-				setDescription(parsed.description);
-				setNoteOpen(true);
-			}
+			const note = invoiceNote(parsed);
+			setDescription(note.description);
+			setNoteOpen(Boolean(note.description) || note.locked);
 			return true;
 		} catch (error) {
 			setInvoice(null);
+			setPickedEntityId(null);
+			setToText(raw);
 			setInvoiceError(error instanceof Error ? error.message : String(error));
 			return false;
 		}
@@ -103,11 +107,8 @@ export function Pay() {
 	const recents = useMemo(() => wallet.accounts.filter(account => !account.disputed).slice(0, 4), [wallet.accounts]);
 
 	const query = toText.trim().toLowerCase();
-	const target = useMemo(() => {
-		if (isEntityId(query)) return query;
-		const byName = known.find(entry => entry.label.toLowerCase() === query);
-		return byName?.entityId ?? '';
-	}, [query, known]);
+	const { target, ambiguous } = resolvePayRecipient(toText, pickedEntityId, known);
+	const descriptionLocked = invoice !== null && invoiceNote(invoice).locked;
 	const validTarget = Boolean(target);
 	const suggestions = useMemo(() => {
 		if (validTarget) return [];
@@ -255,6 +256,7 @@ export function Pay() {
 								onChange={event => {
 									const value = event.target.value;
 									setToText(value);
+									setPickedEntityId(null);
 									setInvoice(null);
 									setInvoiceError(null);
 									if (looksLikeInvoice(value)) applyInvoice(value);
@@ -273,6 +275,8 @@ export function Pay() {
 											onMouseDown={event => {
 												event.preventDefault();
 												setToText(entry.label || entry.entityId);
+												setPickedEntityId(entry.entityId);
+												setInvoice(null);
 												setToFocused(false);
 											}}
 										>
@@ -286,6 +290,7 @@ export function Pay() {
 								</div>
 							)}
 						</div>
+						{ambiguous ? <span role="alert">Several entities share this name. Pick a recipient by entity ID.</span> : null}
 						{validTarget ? <span className="hash">{target}</span> : null}
 						{invoiceError ? <span style={{ color: 'var(--dispute)', fontSize: 12.5 }}>{invoiceError}</span> : null}
 					</div>
@@ -293,7 +298,11 @@ export function Pay() {
 					{recents.length > 0 && !validTarget && (
 						<div className="chips">
 							{recents.map(account => (
-								<button key={account.counterpartyId} type="button" onClick={() => setToText(account.label)} data-testid={`pay-recent-${account.label}`}>
+								<button key={account.counterpartyId} type="button" onClick={() => {
+									setToText(account.label);
+									setPickedEntityId(account.counterpartyId);
+									setInvoice(null);
+								}} data-testid={`pay-recent-${account.label}`}>
 									{account.label}
 									{account.isHub ? <span className="chip hub">hub</span> : null}
 								</button>
@@ -457,7 +466,7 @@ export function Pay() {
 					</button>
 					{noteOpen && (
 						<div className="field fade-in">
-							<input className="input" value={description} onChange={event => setDescription(event.target.value)} placeholder="What is this for?" data-testid="pay-note" />
+							<input className="input" value={description} disabled={descriptionLocked} onChange={event => setDescription(event.target.value)} placeholder="What is this for?" data-testid="pay-note" />
 						</div>
 					)}
 

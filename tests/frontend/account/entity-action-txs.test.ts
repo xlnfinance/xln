@@ -80,7 +80,7 @@ describe('entity action tx builders', () => {
       },
     });
     expect(buildDisputeFinalizeTx(hubId, 'final')).toEqual({ type: 'disputeFinalize', data: { counterpartyEntityId: hubId, description: 'final' } });
-    expect(buildAddTokenToAccountTx(hubId, 4)).toEqual({ type: 'extendCredit', data: { counterpartyEntityId: hubId, tokenId: 4, amount: 0n } });
+    expect(buildAddTokenToAccountTx(hubId, 4, new Map())).toEqual({ type: 'extendCredit', data: { counterpartyEntityId: hubId, tokenId: 4, amount: 0n } });
   });
 
   test('builds a durable post-settlement continuation', () => {
@@ -103,4 +103,11 @@ describe('entity action tx builders', () => {
       broadcast: true,
     });
   });
+});
+
+test('Add Token rejects an active token without replacing its existing credit', () => {
+  const deltas = new Map([[4, { leftCreditLimit: 120n, rightCreditLimit: 60n }]]);
+  expect(() => buildAddTokenToAccountTx(hubId, 4, deltas)).toThrow('TOKEN_ALREADY_ACTIVE');
+  expect(deltas.get(4)).toEqual({ leftCreditLimit: 120n, rightCreditLimit: 60n });
+  expect(buildAddTokenToAccountTx(hubId, 5, deltas).data).toEqual({ counterpartyEntityId: hubId, tokenId: 5, amount: 0n });
 });

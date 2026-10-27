@@ -192,7 +192,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
           class="btn-add-token"
           data-testid="configure-token-add"
           on:click={addTokenToAccount}
-          disabled={!activeIsLive || !workspaceAccountId}
+          disabled={!activeIsLive || !workspaceAccountId || !configureTokenOptions.some(token => token.id === configureTokenId)}
         >
           Add Token
         </button>

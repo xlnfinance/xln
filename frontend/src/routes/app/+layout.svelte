@@ -75,7 +75,6 @@
   const initialSearchParams = browser ? new URLSearchParams(window.location.search) : null;
   let lockTestMode = $state(initialSearchParams?.get('locktest') === '1' && canUseLockTestMode());
   let scenarioPreviewMode = $state(initialSearchParams?.get('scenarioPreview') === '1');
-  let currentHash = $state('');
   let pendingRemoteRuntime = $state<RemoteRuntimeRequest | null>(null);
   let remoteRuntimeAuthInput = $state('');
   let remoteRuntimeAuthError = $state('');
@@ -94,39 +93,11 @@
     errorLog.log(message, 'App Shell', details);
   }
 
-  type HashRouteState = {
-    route: string;
-    params: URLSearchParams;
-  };
-
-  function readCurrentHash(): string {
-    if (!browser) return '';
-    return window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-  }
-
-  function parseHashRouteState(rawHash: string): HashRouteState {
-    const hash = String(rawHash || '').trim();
-    const queryIndex = hash.indexOf('?');
-    const route = queryIndex >= 0 ? hash.slice(0, queryIndex).trim().toLowerCase() : hash.trim().toLowerCase();
-    const params = new URLSearchParams(queryIndex >= 0 ? hash.slice(queryIndex + 1) : hash);
-    return { route, params };
-  }
-
-  function isResetHashActive(): boolean {
-    return parseHashRouteState(currentHash).route === 'reset';
-  }
-
-  async function maybeHandleResetHash(): Promise<boolean> {
-    if (!isResetHashActive()) return false;
-    await resetEverything({ confirmed: true, reason: 'hash-reset' });
-    return true;
-  }
-
   async function handleResetEverything(): Promise<void> {
     if (resettingEverything) return;
     resettingEverything = true;
     try {
-      await resetEverything({ confirmed: true, reason: 'loading-screen' });
+      await resetEverything({ reason: 'loading-screen' });
     } finally {
       resettingEverything = false;
     }
@@ -136,11 +107,6 @@
     if (!browser) return false;
     const hostname = window.location.hostname;
     return hostname === 'localhost' || hostname === '127.0.0.1';
-  }
-
-  function syncHashLocation(): void {
-    if (!browser) return;
-    currentHash = readCurrentHash();
   }
 
   function shouldBootRemoteRuntime(): boolean {
@@ -411,11 +377,6 @@
       return false;
     }
     if (action === 'continue') return false;
-    if (action === 'reset-ephemeral-testnet') {
-      await resetEverything({ confirmed: true, reason: 'deploy-version-change-testnet' });
-      return true;
-    }
-
     error.set(`Deploy version changed from ${storedVersion} to ${current.version}. Review recovery coverage before resetting local data.`);
     isLoading.set(false);
     return true;
@@ -496,14 +457,11 @@
     };
 
     const handleLocationChange = () => {
-      syncHashLocation();
       void (async () => {
-        if (await maybeHandleResetHash()) return;
         await processRuntimeImportLocationChange();
       })();
     };
 
-    syncHashLocation();
     window.addEventListener('pagehide', handlePageHide);
     window.addEventListener('hashchange', handleLocationChange);
 
@@ -511,7 +469,6 @@
       const pairingToken = readLocalRuntimePairingToken();
       const importSource = readRemoteRuntimeImportSourceFromHash();
       const remoteRequest = readRemoteRuntimeRequestFromUrl();
-      if (await maybeHandleResetHash()) return;
       const hasExplicitRemoteRuntimeBootstrap = Boolean(pairingToken || importSource || remoteRequest);
       if (isInactiveTabStandby()) {
         showInactiveTabStandby();

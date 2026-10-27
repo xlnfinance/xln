@@ -130,6 +130,7 @@ describe('entity panel option helpers', () => {
     ]);
     const options = buildConfigureTokenOptions({
       reserveTokenIds: [9, 'bad', 0],
+      activeTokenIds: [],
       getTokenInfo: (tokenId) => tokenInfo.get(tokenId) || {},
       compareSymbols: (left, right) => left.localeCompare(right),
     });
@@ -138,4 +139,12 @@ describe('entity panel option helpers', () => {
     expect(resolveConfigureTokenId(9, options)).toBe(9);
     expect(resolveConfigureTokenId(7, options)).toBe(3);
   });
+});
+
+test('Add Token options exclude account deltas and leave no selection when all are active', () => {
+  const input = { reserveTokenIds: [9], getTokenInfo: (id: number) => ({ symbol: `TKN${id}` }), compareSymbols: (a: string, b: string) => a.localeCompare(b) };
+  expect(buildConfigureTokenOptions({ ...input, activeTokenIds: [1, 9] }).map(token => token.id)).toEqual([2, 3]);
+  const options = buildConfigureTokenOptions({ ...input, activeTokenIds: [1, 2, 3, 9] });
+  expect(options).toEqual([]);
+  expect(resolveConfigureTokenId(1, options)).toBe(0);
 });

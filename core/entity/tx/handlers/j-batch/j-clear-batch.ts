@@ -13,6 +13,7 @@ import type { EntityState, EntityInput } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { JInput } from '../../../../jurisdiction/machine/input';
 import type { EntityTx } from '../../../../types/entity-tx';
+import { rejectFailure } from '../../../../protocol/errors/failure-taxonomy';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import { createEmptyBatch, batchOpCount } from '../../../../jurisdiction/machine/batch';
@@ -29,6 +30,11 @@ export async function handleJClearBatch(
   env: EntityRuntimeContext,
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs: JInput[] }> {
+  // A signed batch can still execute on-chain. Clearing it would erase the
+  // evidence/latches required to reconcile its nonce and financial effects.
+  if (entityState.jBatchState?.sentBatch || (entityState.jBatchState?.recoveryBatches?.length ?? 0) > 0) {
+    throw rejectFailure('J_CLEAR_BATCH_PENDING', 'Cannot clear a sent or recovery batch awaiting reconciliation');
+  }
   const { reason } = entityTx.data;
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
@@ -40,28 +46,14 @@ export async function handleJClearBatch(
   }
 
   const oldBatchSize = batchOpCount(newState.jBatchState.batch);
-  const recoveryBatchSize = (newState.jBatchState.recoveryBatches ?? [])
-    .reduce((total, batch) => total + batchOpCount(batch), 0);
-  const sentBatchSize = newState.jBatchState.sentBatch ? batchOpCount(newState.jBatchState.sentBatch.batch) : 0;
-  const hadSentBatch = !!newState.jBatchState.sentBatch;
   const droppedFinalizeCounterparties = new Set<string>();
   for (const op of newState.jBatchState.batch.disputeFinalizations || []) {
     droppedFinalizeCounterparties.add(String(op.counterentity).toLowerCase());
   }
-  for (const op of newState.jBatchState.sentBatch?.batch.disputeFinalizations || []) {
-    droppedFinalizeCounterparties.add(String(op.counterentity).toLowerCase());
-  }
-  for (const recoveryBatch of newState.jBatchState.recoveryBatches ?? []) {
-    for (const op of recoveryBatch.disputeFinalizations) {
-      droppedFinalizeCounterparties.add(String(op.counterentity).toLowerCase());
-    }
-  }
   let resetSubmittedMarkers = 0;
 
-  // Clear current + sent batch and reset lifecycle
+  // Only the unsigned draft may be cleared.
   newState.jBatchState.batch = createEmptyBatch();
-  delete newState.jBatchState.sentBatch;
-  delete newState.jBatchState.recoveryBatches;
   newState.jBatchState.status = 'empty';
 
   // Manual recovery: release stale "submitted" latches so hub can retry requests.
@@ -70,10 +62,12 @@ export async function handleJClearBatch(
     if (!account) continue;
     // One typed release per token rather than one generic map write: the
     // Account stage must see exactly which markers this recovery dropped.
-    const submittedTokenIds = [...requirePersistentAccountStateMap(
-      account.shadow.rebalance.submittedAtByToken,
-      'rebalanceShadowSubmitted',
-    ).keys()].sort((left, right) => left - right);
+    const submittedTokenIds = [
+      ...requirePersistentAccountStateMap(
+        account.shadow.rebalance.submittedAtByToken,
+        'rebalanceShadowSubmitted',
+      ).keys(),
+    ].sort((left, right) => left - right);
     resetSubmittedMarkers += submittedTokenIds.length;
     for (const tokenId of submittedTokenIds) {
       applyEntityAccountEnvelopeUpdate(env, accountId, account, {
@@ -100,19 +94,14 @@ export async function handleJClearBatch(
   }
 
   const reasonMsg = reason ? ` (${reason})` : '';
-  const pendingMsg = hadSentBatch ? ` [sentBatch=${sentBatchSize} ops]` : '';
-  const recoveryMsg = recoveryBatchSize > 0 ? ` [recoveryBatch=${recoveryBatchSize} ops]` : '';
   const resetMsg = resetSubmittedMarkers > 0 ? `; reset ${resetSubmittedMarkers} submitted rebalance marker(s)` : '';
   jBatchActionLog.debug('clear.completed', {
     entity: shortId(entityState.entityId),
     currentOps: oldBatchSize,
-    recoveryOps: recoveryBatchSize,
-    sentOps: sentBatchSize,
-    hadSentBatch,
     resetSubmittedMarkers,
     reason: reason ?? '',
   });
-  addMessage(newState, `🗑️ Cleared jBatch current=${oldBatchSize}${pendingMsg}${recoveryMsg}${reasonMsg}${resetMsg}`);
+  addMessage(newState, `🗑️ Cleared jBatch current=${oldBatchSize}${reasonMsg}${resetMsg}`);
 
   return { newState, outputs, jOutputs };
 }

@@ -125,7 +125,12 @@ export function buildDisputeFinalizeTx(counterpartyEntityId: string, description
   };
 }
 
-export function buildAddTokenToAccountTx(counterpartyEntityId: string, tokenId: number): EntityTxOf<'extendCredit'> {
+export function buildAddTokenToAccountTx(
+  counterpartyEntityId: string,
+  tokenId: number,
+  activeDeltas: { has(tokenId: number): boolean },
+): EntityTxOf<'extendCredit'> {
+  if (activeDeltas.has(tokenId)) throw new Error('TOKEN_ALREADY_ACTIVE: use Extend Credit to change its limit');
   return {
     type: 'extendCredit',
     data: { counterpartyEntityId, tokenId, amount: 0n },

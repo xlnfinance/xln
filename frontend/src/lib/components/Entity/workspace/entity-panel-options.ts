@@ -119,6 +119,7 @@ export function resolveMoveTargetHubEntityId(input: {
 
 export function buildConfigureTokenOptions(input: {
   reserveTokenIds: Iterable<unknown>;
+  activeTokenIds: Iterable<number>;
   getTokenInfo: (tokenId: number) => { symbol?: string };
   compareSymbols: (left: string, right: string) => number;
 }): Array<{ id: number; symbol: string }> {
@@ -127,6 +128,7 @@ export function buildConfigureTokenOptions(input: {
     const numericId = Number(tokenId);
     if (Number.isFinite(numericId) && numericId > 0) ids.add(numericId);
   }
+  for (const tokenId of input.activeTokenIds) ids.delete(tokenId);
   return Array.from(ids).sort((leftId, rightId) => {
     const leftInfo = input.getTokenInfo(leftId);
     const rightInfo = input.getTokenInfo(rightId);
@@ -140,9 +142,8 @@ export function buildConfigureTokenOptions(input: {
 export function resolveConfigureTokenId(
   currentTokenId: number,
   options: readonly { id: number }[],
-  defaultTokenId = 1,
 ): number {
   return options.some((opt) => opt.id === currentTokenId)
     ? currentTokenId
-    : options[0]?.id ?? defaultTokenId;
+    : options[0]?.id ?? 0;
 }

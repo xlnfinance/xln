@@ -70,6 +70,7 @@ export function PendingBatch({ wallet, compact = false }: { wallet: WalletView; 
 	const state = wallet.frame?.activeEntity?.core?.jBatchState;
 	const draft = state?.batch ?? null;
 	const sent = state?.sentBatch?.batch ?? null;
+	const clearBlocked = Boolean(state?.sentBatch) || (state?.recoveryBatches?.length ?? 0) > 0;
 	const draftCount = countBatchOps(draft);
 	const sentCount = countBatchOps(sent);
 	if (draftCount === 0 && sentCount === 0) return null;
@@ -78,7 +79,7 @@ export function PendingBatch({ wallet, compact = false }: { wallet: WalletView; 
 	const items = batchItems(batch, wallet.entityId, wallet.names);
 
 	const run = async (action: 'clear' | 'broadcast' | 'rebroadcast'): Promise<void> => {
-		if (!wallet.signerId) return;
+		if (!wallet.signerId || (action === 'clear' && clearBlocked)) return;
 		setBusy(action);
 		try {
 			await sendEntityTxs(wallet.entityId, wallet.signerId, [
@@ -141,7 +142,7 @@ export function PendingBatch({ wallet, compact = false }: { wallet: WalletView; 
 							<Icon name="check" size={15} />
 							{busy === 'broadcast' ? 'Signing…' : 'Sign & send'}
 						</button>
-						<button type="button" className="btn ghost" disabled={busy !== null || !commandReady} onClick={() => void run('clear')}>
+						<button type="button" className="btn ghost" disabled={busy !== null || clearBlocked || !commandReady} onClick={() => void run('clear')}>
 							Clear
 						</button>
 					</>

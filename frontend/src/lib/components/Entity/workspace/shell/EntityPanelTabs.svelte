@@ -815,6 +815,7 @@ $: if (assetWorkspaceTab === "move" && moveToEndpoint === "account") {
 }
 $: configureTokenOptions = buildConfigureTokenOptions({
   reserveTokenIds: replica?.state?.reserves?.keys?.() || [],
+  activeTokenIds: replica?.state.accounts.get(workspaceAccountId)?.state.deltas.keys() ?? [],
   getTokenInfo,
   compareSymbols: compareTokenSymbols,
 });
@@ -2383,7 +2384,9 @@ async function addTokenToAccount() {
     return;
   }
   try {
-    await submitEntityInputs([buildEntityInput(entityId, signerId, [buildAddTokenToAccountTx(counterpartyEntityId, configureTokenId)])]);
+    const account = replica?.state.accounts.get(counterpartyEntityId);
+    if (!account) throw new Error('Select an active account first');
+    await submitEntityInputs([buildEntityInput(entityId, signerId, [buildAddTokenToAccountTx(counterpartyEntityId, configureTokenId, account.state.deltas)])]);
     const symbol = getTokenInfo(configureTokenId).symbol || `TKN${configureTokenId}`;
     toasts.success(`Token ${symbol} added to account`);
   } catch (err) {
@@ -2480,7 +2483,7 @@ async function handleResetEverything(): Promise<void> {
   if (resettingEverything) return;
   resettingEverything = true;
   try {
-    await resetEverything({ confirmed: true, reason: "entity-empty-state" });
+    await resetEverything({ reason: "entity-empty-state" });
   } finally {
     resettingEverything = false;
   }

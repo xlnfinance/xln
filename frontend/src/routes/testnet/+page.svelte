@@ -3,7 +3,7 @@
   import { resetEverything } from '#lib/utils/control/resetEverything.ts';
 
   async function resetTestnet(): Promise<void> {
-    await resetEverything({ confirmed: true, reason: 'testnet-tools' });
+    await resetEverything({ reason: 'testnet-tools' });
   }
 
   const cards = [
