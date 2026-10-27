@@ -210,7 +210,7 @@ export const deleteExpiredLookups = async (context: WatchtowerStoreContext, now:
     const expired: string[] = [];
     for await (const [key, raw] of context.db.iterator({ gte: 'lookup:', lte: 'lookup:\xff' })) {
       const doc = decodeWatchtowerStoredValue('lookup', String(key), String(raw), decodeStoredLookupDoc);
-      if (doc.receipts.every(receipt => receipt.expiresAt < now)) expired.push(String(key));
+      if (doc.receipts.every(receipt => receipt.expiresAt !== undefined && receipt.expiresAt < now)) expired.push(String(key));
     }
     if (expired.length === 0) return 0;
     await context.db.batch(expired.map(key => ({ type: 'del' as const, key })));
