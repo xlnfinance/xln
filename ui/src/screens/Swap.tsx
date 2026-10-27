@@ -65,7 +65,13 @@ export function Swap() {
   const [giveTokenId, setGiveTokenId] = useState(1);
   const [wantTokenId, setWantTokenId] = useState(2);
   const [giveText, setGiveText] = useState('');
-  const [wantText, setWantText] = useState('');
+  const [wantText, setWantTextState] = useState('');
+  // A picked book level fixes the price, so later pay edits keep receiving at that level.
+  const [pickedRatio, setPickedRatio] = useState<{ give: bigint; want: bigint; wantDecimals: number; giveDecimals: number } | null>(null);
+  const setWantText = (text: string): void => {
+    setPickedRatio(null);
+    setWantTextState(text);
+  };
   const [submitting, setSubmitting] = useState(false);
   // The hub's book stays open, as in the SvelteKit panel; a level fills the ticket.
   const [showBook, setShowBook] = useState(true);
@@ -177,6 +183,17 @@ export function Swap() {
     relayUrl: bookRelayUrl,
     ...(crossMarket ? { crossMarket } : {}),
   });
+  const setGiveAmount = (text: string): void => {
+    setGiveText(text);
+    if (!pickedRatio) return;
+    let give: bigint;
+    try {
+      give = parseAmount(text || '0', pickedRatio.giveDecimals);
+    } catch {
+      return;
+    }
+    setWantTextState(give > 0n ? plainAmount((pickedRatio.want * give) / pickedRatio.give, pickedRatio.wantDecimals) : '');
+  };
   const pickLevel = (side: BookSide, level: Pick<BookLevel, 'priceTicks' | 'size'>): void => {
     if (!assetsReady || (mode === 'cross' && !crossMarket)) return;
     const { base, quote } = bookMetadata;
@@ -195,8 +212,11 @@ export function Swap() {
       setGiveTokenId(selectedGive);
       setWantTokenId(side === 'ask' ? book.baseTokenId : book.quoteTokenId);
     }
-    setGiveText(plainAmount(picked.give, side === 'ask' ? quote.decimals : base.decimals));
-    setWantText(plainAmount(picked.want, side === 'ask' ? base.decimals : quote.decimals));
+    const giveDecimals = side === 'ask' ? quote.decimals : base.decimals;
+    const wantDecimals = side === 'ask' ? base.decimals : quote.decimals;
+    setGiveText(plainAmount(picked.give, giveDecimals));
+    setWantTextState(plainAmount(picked.want, wantDecimals));
+    setPickedRatio({ give: picked.give, want: picked.want, giveDecimals, wantDecimals });
   };
 
   // A level picked on the Desk arrives as query parameters, because the Desk
@@ -273,6 +293,18 @@ export function Swap() {
       return null;
     }
   }, [wantText, impliedWantText, wantMeta.decimals, assetsReady]);
+
+  // A typed amount the parser refuses must say why, not just disable Swap.
+  const inputError = (text: string, decimals: number): string | null => {
+    if (!text.trim()) return null;
+    try {
+      parseAmount(text, decimals);
+      return null;
+    } catch (error) {
+      return (error as Error).message;
+    }
+  };
+  const amountError = inputError(giveText, giveMeta.decimals) ?? inputError(wantText, wantMeta.decimals);
 
   // Equal token ids on distinct jurisdictions identify different balances.
   const sameToken = mode === 'same' && giveTokenId === wantTokenId;
@@ -477,6 +509,7 @@ export function Swap() {
       ? targetAccountError ||
         (!targetEntity || !targetHub ? 'Choose an available destination on the same hub runtime' : null)
       : null) ??
+    amountError ??
     marketError ??
     (!hub
       ? 'No hub account to swap through'
@@ -536,7 +569,7 @@ export function Swap() {
                 className="btn quiet num"
                 style={{ fontSize: 12 }}
                 disabled={giveSpendable <= 0n}
-                onClick={() => setGiveText(amountInputText(giveSpendable, giveMeta.decimals))}
+                onClick={() => setGiveAmount(amountInputText(giveSpendable, giveMeta.decimals))}
               >
                 Up to {formatLimit(giveSpendable, giveMeta.decimals)}
                 {hub ? ` with ${hub.label}` : ''}
@@ -548,7 +581,7 @@ export function Swap() {
                 placeholder="0.00"
                 inputMode="decimal"
                 value={giveText}
-                onChange={event => setGiveText(event.target.value)}
+                onChange={event => setGiveAmount(event.target.value)}
                 data-testid="swap-give"
               />
               <TokenPicker
