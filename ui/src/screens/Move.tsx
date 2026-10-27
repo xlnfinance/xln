@@ -36,7 +36,7 @@ import { batchFundsAccount, claimFundingSubmission, fundingSubmissionKey, releas
 const PLACE_LABEL: Record<MoveEndpoint, { title: string; hint: string; kind: 'onchain' | 'reserve' | 'coll' }> = {
 	external: { title: 'Wallet', hint: 'On-chain, in your signer', kind: 'onchain' },
 	reserve: { title: 'Reserve', hint: 'Depository escrow', kind: 'reserve' },
-	account: { title: 'Account', hint: 'Bilateral, instant', kind: 'coll' },
+	account: { title: 'Account', hint: 'Collateral, withdrawable', kind: 'coll' },
 };
 
 const isPlace = (value: string | null): value is MoveEndpoint => value === 'external' || value === 'reserve' || value === 'account';
