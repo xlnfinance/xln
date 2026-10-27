@@ -1,6 +1,8 @@
 import { ethers } from 'ethers';
+import { assertSolidityAbi, schema, type Schema } from './rpc-watcher-solidity';
 import { DepositoryBounds__factory, Depository__factory } from '../../../../../jurisdictions/typechain-types';
 import { decodeIncludedTronTransactionCall } from '../../operations/tron-transaction';
+import type { TxDisputeProofBodyEvidence, TxFinalizationEvidence } from '../../rpc-public';
 import { HANKO_MAX_BYTES } from '../../../../hanko/codec';
 import { J_BATCH_CONTRACT_LIMITS } from '../../../machine/batch/limits';
 
@@ -36,32 +38,6 @@ const requireValue = <T>(value: T | null | undefined): T => {
   if (value === null || value === undefined) throw new Error('J_DISPUTE_CALL_LAYOUT_VALUE_MISSING');
   return value;
 };
-type Schema = Readonly<{
-  param: ethers.ParamType;
-  dynamic: boolean;
-  size: number;
-  children: readonly Schema[];
-}>;
-const schema = (param: ethers.ParamType): Schema => {
-  const children = param.isTuple()
-    ? param.components.map(schema)
-    : param.isArray()
-      ? [schema(param.arrayChildren)]
-      : [];
-  const dynamic =
-    param.baseType === 'bytes' ||
-    param.baseType === 'string' ||
-    (param.isArray() && (param.arrayLength === -1 || requireValue(children[0]).dynamic)) ||
-    (param.isTuple() && children.some(child => child.dynamic));
-  const size = dynamic
-    ? 32
-    : param.isTuple()
-      ? children.reduce((sum, child) => sum + child.size, 0)
-      : param.isArray()
-        ? param.arrayLength * requireValue(children[0]).size
-        : 32;
-  return { param, dynamic, size, children };
-};
 const depository = Depository__factory.createInterface();
 const calls = (['processBatch', 'watchtowerCounterDispute'] as const).map(name => {
   const fragment = depository.getFunction(name);
@@ -87,6 +63,9 @@ export class DisputeCalldata {
   private readonly hashes = new Map<string, string>();
   readonly decodedBodies = new Map<string, unknown>();
   hasCanonicalCall = false;
+  directProofBodyEvidence?: readonly TxDisputeProofBodyEvidence[];
+  directFinalizationEvidence?: readonly TxFinalizationEvidence[];
+  private directData?: string | null;
 
   constructor(data: string) {
     this.bytes = ethers.getBytes(data);
@@ -191,8 +170,8 @@ export class DisputeCalldata {
     return ethers.toBigInt(this.bytes.subarray(start, start + 32)).toString();
   }
 
-  *canonicalCalls(directOnly = false): Generator<{ offset: number; end: number; call: (typeof calls)[number] }> {
-    for (let offset = 0; offset + 4 <= this.bytes.length && (!directOnly || offset === 0); offset += 1) {
+  *canonicalCalls(includeDirect = true): Generator<{ offset: number; end: number; call: (typeof calls)[number] }> {
+    for (let offset = includeDirect ? 0 : 1; offset + 4 <= this.bytes.length; offset += 1) {
       const call = calls.find(candidate => candidate.selector.every((byte, i) => this.bytes[offset + i] === byte));
       if (!call) continue;
       const args = offset + 4;
@@ -222,9 +201,9 @@ export class DisputeCalldata {
     return { tuple, body, eventNames, callOffset, watchtower };
   }
 
-  *entries(directOnly = false): Generator<RawDisputeEntry> {
-    // Offset zero is yielded before scanning any embedded selectors. No claimed span advances the scanner.
-    for (const { offset, end, call } of this.canonicalCalls(directOnly)) {
+  *entries(): Generator<RawDisputeEntry> {
+    // Only embedded candidates use canonical spans. No claimed span advances the scanner.
+    for (const { offset, end, call } of this.canonicalCalls(false)) {
       if (call.name === 'watchtowerCounterDispute') {
         if (end - offset > J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes) continue;
         const tuple = { start: offset + 4 + requireValue(this.word(offset + 36)), layout: requireValue(call.args[1]) };
@@ -287,27 +266,31 @@ export class DisputeCalldata {
     return hash;
   }
 
-  private directBytes(slot: number, limit: number): string | null {
-    const offset = this.word(slot);
-    if (offset === null || offset < 96) return null;
-    const length = this.word(4 + offset);
-    if (length === null || length > limit || 4 + offset + 32 + length > this.bytes.length) return null;
-    return this.hex(4 + offset + 32, 4 + offset + 32 + length);
-  }
-
-  /** Decode only the executed call's ABI-referenced regions; trailing bytes are not arguments. */
+  /** The executed ABI is independent of embedded candidates and unreferenced calldata. */
   directCallData(): string | null {
+    if (this.directData !== undefined) return this.directData;
     const call = calls.find(call => call.selector.every((byte, i) => this.bytes[i] === byte));
-    if (!call) return null;
-    if (call.name === 'watchtowerCounterDispute')
-      return this.bytes.length <= J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes ? this.hex(0, this.bytes.length) : null;
-    const batch = this.directBytes(4, J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes);
-    const hanko = this.directBytes(36, HANKO_MAX_BYTES);
-    if (batch === null || hanko === null || this.bytes.length < 100) return null;
-    const root = this.word(4 + requireValue(this.word(4)) + 32);
-    // A forwarding wrapper's opaque bytes are not themselves an encoded Batch.
-    if (root === null || root + 32 > ethers.dataLength(batch)) return null;
-    return depository.encodeFunctionData('processBatch', [batch, hanko, ethers.toBigInt(this.bytes.subarray(68, 100))]);
+    if (!call) return (this.directData = null);
+    try {
+      assertSolidityAbi(this.bytes.subarray(4), call.args);
+      if (call.name === 'processBatch') {
+        const data = 4 + requireValue(this.word(4));
+        const length = requireValue(this.word(data));
+        assertSolidityAbi(this.bytes.subarray(data + 32, data + 32 + length), [batchSchema]);
+        const hanko = 4 + requireValue(this.word(36));
+        const hankoLength = requireValue(this.word(hanko));
+        // Rebuild only referenced bytes; gaps and trailing junk are never decoded.
+        return (this.directData = depository.encodeFunctionData('processBatch', [
+          this.hex(data + 32, data + 32 + length),
+          this.hex(hanko + 32, hanko + 32 + hankoLength),
+          ethers.toBigInt(this.bytes.subarray(68, 100)),
+        ]));
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === 'J_DISPUTE_SOLIDITY_ABI_INVALID') return (this.directData = null);
+      throw error;
+    }
+    return (this.directData = this.hex(0, this.bytes.length));
   }
 
   assertRecognized(kind: string): void {

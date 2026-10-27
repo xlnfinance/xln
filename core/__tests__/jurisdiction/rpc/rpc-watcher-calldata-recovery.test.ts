@@ -10,7 +10,6 @@ import {
   argsFor,
   body,
   depository,
-  encodedBodyBytes,
   location,
   signedTransaction,
   startCall,
@@ -41,7 +40,7 @@ test('an authenticated decoder resource failure is typed, evicted, and succeeds 
   }
 });
 
-test('one body is decoded once across distinct event entries; cached bodies never bypass event metadata', async () => {
+test('a direct Batch is decoded once across events; cached evidence never bypasses event metadata', async () => {
   const batch = decodeJBatch(depository.decodeFunctionData('processBatch', startCall())[0]);
   batch.disputeStarts.push({ ...batch.disputeStarts[0]!, nonce: 8 });
   const tx = await signedTransaction(wrap(encodeJBatch(batch)));
@@ -57,8 +56,11 @@ test('one body is decoded once across distinct event entries; cached bodies neve
   });
   try {
     expect(await read(tx.hash, 'DisputeStarted', argsFor(body), location)).toEqual(body);
+    const firstDecodeBytes = bytes;
+    expect(firstDecodeBytes).toBeGreaterThan(0);
+    expect(firstDecodeBytes).toBeLessThanOrEqual(2 * ethers.dataLength(wrap(encodeJBatch(batch))));
     expect(await read(tx.hash, 'DisputeStarted', { ...argsFor(body), nonce: 8n }, location)).toEqual(body);
-    expect(bytes).toBe(encodedBodyBytes(body));
+    expect(bytes).toBe(firstDecodeBytes);
     expect(tx.reads()).toBe(1);
     for (const args of [
       { ...argsFor(body), nonce: 9n },

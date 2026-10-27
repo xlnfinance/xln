@@ -11,12 +11,13 @@
 
 import { ethers } from 'ethers';
 import { DisputeCalldata } from './rpc/watcher/rpc-watcher-calldata';
+import { assertSolidityAbi, schema } from './rpc/watcher/rpc-watcher-solidity';
 
-import { Depository__factory } from '../../../jurisdictions/typechain-types/index.ts';
+import { DepositoryBounds__factory, Depository__factory } from '../../../jurisdictions/typechain-types/index.ts';
 
 import { BLOCKCHAIN } from '../../config/constants';
 import { createStructuredLogger } from '../../support/logger';
-import { decodeJBatch, materializeAbiValue, type JBatch } from '../machine/batch';
+import { materializeAbiValue, type JBatch } from '../machine/batch';
 import { validateProofBody } from '../machine/batch-validation';
 import { PROOF_BODY_ABI } from '../../protocol/dispute/proof-body';
 import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-events';
@@ -81,8 +82,17 @@ const toFinalizationHex = (value: unknown): string => {
   throw new Error('J_DISPUTE_FINALIZATION_HEX_INVALID');
 };
 
-const depositoryTransactionInterface = Depository__factory.createInterface();
+const depositoryTransactionInterface: ethers.Interface = Depository__factory.createInterface();
 const DISPUTE_PROOF_BODY_PARAM = ethers.ParamType.from(PROOF_BODY_ABI);
+const DISPUTE_BATCH_PARAM = DepositoryBounds__factory.createInterface().getFunction('assertBatch')?.inputs[0];
+if (!DISPUTE_BATCH_PARAM) throw new Error('J_BATCH_ABI_SCHEMA_MISSING');
+const decodeCalldataProofBody = (value: unknown): TxDisputeProofBodyEvidence['proofbody'] =>
+  validateProofBody(
+    materializeAbiValue(DISPUTE_PROOF_BODY_PARAM, value, 'dispute.proofbody'),
+    'J_DISPUTE_PROOFBODY_AUTHENTICATED',
+  ) as TxDisputeProofBodyEvidence['proofbody'];
+const decodeCallBatch = (encodedBatch: string): ethers.Result =>
+  ethers.AbiCoder.defaultAbiCoder().decode([DISPUTE_BATCH_PARAM], encodedBatch, true)[0];
 const FINALIZATION_EVIDENCE_TYPES = ['bytes32', 'uint256', 'bool', 'bool', 'bytes32', 'bytes32', 'bytes32'] as const;
 const hashCalldataProofBody = (proofbody: TxDisputeProofBodyEvidence['proofbody']): string =>
   ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode([DISPUTE_PROOF_BODY_PARAM], [proofbody]));
@@ -114,11 +124,11 @@ export const recoverDisputeProofBody = (
   const finalized = eventName === 'DisputeFinalized';
   const nonce = toFinalizationDecimal(finalized ? args['initialNonce'] : args['nonce']);
   const hash = toFinalizationHex(finalized ? args['finalProofbodyHash'] : args['proofbodyHash']);
-  // Canonical offset zero retains body-only decoding. Otherwise decode its own
-  // bounded regions before any embedded decoy can affect recovery (I1/I7).
-  const direct = raw.entries(true).next().done ? raw.directCallData() : null;
+  // Offset zero always uses solc semantics before any embedded canonical scan (I1/I7).
+  const direct = raw.directCallData();
   if (direct !== null) {
-    const candidates = decodeDisputeProofBodyEvidenceCalldata(direct).filter(
+    raw.directProofBodyEvidence ??= decodeDisputeProofBodyEvidenceCalldata(direct);
+    const candidates = raw.directProofBodyEvidence.filter(
       candidate => hashCalldataProofBody(candidate.proofbody) === candidate.proofbodyHash.toLowerCase(),
     );
     const matched = findDisputeProofBodyEvidence(candidates, eventName, args);
@@ -162,11 +172,14 @@ export const recoverDisputeProofBody = (
 export const recoverDisputeFinalizationEvidence = (raw: DisputeCalldata): TxFinalizationEvidence[] => {
   const candidates: TxFinalizationEvidence[] = [];
   const seen = new Set<number>();
-  let hasDirect = false;
+  const direct = raw.directCallData();
+  if (direct !== null) {
+    raw.directFinalizationEvidence ??= decodeDisputeFinalizationEvidenceCalldata(direct);
+    candidates.push(...raw.directFinalizationEvidence);
+  }
   for (const entry of raw.entries()) {
     if (!entry.eventNames.includes('DisputeFinalized') || seen.has(entry.tuple.start)) continue;
     seen.add(entry.tuple.start);
-    if (entry.callOffset === 0) hasDirect = true;
     const value = (name: string): string => raw.value(entry.tuple, name);
     const startedByLeft = value('startedByLeft') === '1';
     const starter = value('starterArguments');
@@ -183,47 +196,58 @@ export const recoverDisputeFinalizationEvidence = (raw: DisputeCalldata): TxFina
       sig: entry.watchtower ? '0x' : value('sig'),
     });
   }
-  const direct = hasDirect ? null : raw.directCallData();
-  if (direct !== null) candidates.push(...decodeDisputeFinalizationEvidenceCalldata(direct));
   if (direct === null) raw.assertRecognized('FINALIZATION');
   return candidates;
+};
+
+/** Decode only the executed selector with solc bounds/cleanup and ethers loose tails. */
+const decodeDisputeCall = (data: string) => {
+  const fragment = depositoryTransactionInterface.getFunction(data.slice(0, 10));
+  if (!fragment || !['processBatch', 'watchtowerCounterDispute'].includes(fragment.name)) return null;
+  const bytes = ethers.getBytes(data).subarray(4);
+  assertSolidityAbi(bytes, fragment.inputs.map(schema));
+  const args = ethers.AbiCoder.defaultAbiCoder().decode(fragment.inputs, bytes, true);
+  if (fragment.name === 'processBatch') {
+    assertSolidityAbi(ethers.getBytes(args[0]), [schema(DISPUTE_BATCH_PARAM)]);
+  }
+  return { name: fragment.name, args };
 };
 
 /** Decode the exact signed ProofBody carried by every dispute transaction. */
 export const decodeDisputeProofBodyEvidenceCalldata = (data: string): TxDisputeProofBodyEvidence[] => {
   try {
-    const parsed = depositoryTransactionInterface.parseTransaction({ data });
+    const parsed = decodeDisputeCall(data);
     if (!parsed) throw new Error('J_DISPUTE_PROOFBODY_CALLDATA_UNKNOWN');
     if (parsed.name === 'processBatch') {
       const encodedBatch = toFinalizationHex(parsed.args[0]);
       if (encodedBatch === '0x') throw new Error('J_DISPUTE_PROOFBODY_BATCH_CALLDATA_MISSING');
-      const batch = decodeJBatch(encodedBatch);
+      const batch = decodeCallBatch(encodedBatch);
       return [
-        ...batch.disputeStarts.map(start => ({
+        ...batch['disputeStarts'].map((start: ethers.Result) => ({
           eventName: 'DisputeStarted' as const,
-          counterentity: toFinalizationHex(start.counterentity),
-          nonce: toFinalizationDecimal(start.nonce),
-          proposerIsLeft: start.proposerIsLeft,
-          proofbodyHash: toFinalizationHex(start.proofbodyHash),
-          proofbody: start.initialProofbody,
+          counterentity: toFinalizationHex(start['counterentity']),
+          nonce: toFinalizationDecimal(start['nonce']),
+          proposerIsLeft: start['proposerIsLeft'],
+          proofbodyHash: toFinalizationHex(start['proofbodyHash']),
+          proofbody: decodeCalldataProofBody(start['initialProofbody']),
         })),
-        ...batch.counterDisputes.map(counter => ({
+        ...batch['counterDisputes'].map((counter: ethers.Result) => ({
           eventName: 'CounterDisputeRegistered' as const,
-          counterentity: toFinalizationHex(counter.counterentity),
-          nonce: toFinalizationDecimal(counter.counterNonce),
-          proposerIsLeft: counter.proposerIsLeft,
-          proofbodyHash: hashCalldataProofBody(counter.counterProofbody),
-          proofbody: counter.counterProofbody,
+          counterentity: toFinalizationHex(counter['counterentity']),
+          nonce: toFinalizationDecimal(counter['counterNonce']),
+          proposerIsLeft: counter['proposerIsLeft'],
+          proofbodyHash: hashCalldataProofBody(decodeCalldataProofBody(counter['counterProofbody'])),
+          proofbody: decodeCalldataProofBody(counter['counterProofbody']),
         })),
-        ...batch.disputeFinalizations.map(finalization => ({
+        ...batch['disputeFinalizations'].map((finalization: ethers.Result) => ({
           eventName: 'DisputeFinalized' as const,
-          counterentity: toFinalizationHex(finalization.counterentity),
-          nonce: toFinalizationDecimal(finalization.finalNonce),
-          proposerIsLeft: finalization.proposerIsLeft,
-          proofbodyHash: hashCalldataProofBody(finalization.finalProofbody),
-          initialNonce: toFinalizationDecimal(finalization.initialNonce),
-          initialProofbodyHash: toFinalizationHex(finalization.initialProofbodyHash),
-          proofbody: finalization.finalProofbody,
+          counterentity: toFinalizationHex(finalization['counterentity']),
+          nonce: toFinalizationDecimal(finalization['finalNonce']),
+          proposerIsLeft: finalization['proposerIsLeft'],
+          proofbodyHash: hashCalldataProofBody(decodeCalldataProofBody(finalization['finalProofbody'])),
+          initialNonce: toFinalizationDecimal(finalization['initialNonce']),
+          initialProofbodyHash: toFinalizationHex(finalization['initialProofbodyHash']),
+          proofbody: decodeCalldataProofBody(finalization['finalProofbody']),
         })),
       ];
     }
@@ -234,10 +258,7 @@ export const decodeDisputeProofBodyEvidenceCalldata = (data: string): TxDisputeP
       }
       // ethers Result is a proxy, not cloneable committed state. Use the same
       // ABI materialization and proof validation as processBatch before ingress.
-      const finalProofbody = validateProofBody(
-        materializeAbiValue(DISPUTE_PROOF_BODY_PARAM, Reflect.get(proof, 'finalProofbody'), 'watchtower.proofbody'),
-        'J_DISPUTE_PROOFBODY_WATCHTOWER',
-      ) as TxDisputeProofBodyEvidence['proofbody'];
+      const finalProofbody = decodeCalldataProofBody(Reflect.get(proof, 'finalProofbody'));
       const evidence = {
         counterentity: toFinalizationHex(Reflect.get(proof, 'counterentity')),
         nonce: toFinalizationDecimal(Reflect.get(proof, 'finalNonce')),
@@ -295,26 +316,26 @@ export const resolveDisputeProofBodyEvidence = (
 /** Decode reducer sidecar data from a transaction that emitted DisputeFinalized. */
 export const decodeDisputeFinalizationEvidenceCalldata = (data: string): TxFinalizationEvidence[] => {
   try {
-    const parsed = depositoryTransactionInterface.parseTransaction({ data });
+    const parsed = decodeDisputeCall(data);
     if (!parsed) throw new Error('J_DISPUTE_FINALIZATION_CALLDATA_UNKNOWN');
     if (parsed.name === 'processBatch') {
       const encodedBatch = toFinalizationHex(parsed.args[0]);
       if (encodedBatch === '0x') throw new Error('J_DISPUTE_FINALIZATION_BATCH_CALLDATA_MISSING');
-      const batch = decodeJBatch(encodedBatch);
-      return (batch.disputeFinalizations ?? []).map(finalization => {
-        const starterArguments = toFinalizationHex(finalization.starterArguments);
-        const otherArguments = toFinalizationHex(finalization.otherArguments);
-        const startedByLeft = Boolean(finalization.startedByLeft);
+      const batch = decodeCallBatch(encodedBatch);
+      return (batch['disputeFinalizations'] ?? []).map((finalization: ethers.Result) => {
+        const starterArguments = toFinalizationHex(finalization['starterArguments']);
+        const otherArguments = toFinalizationHex(finalization['otherArguments']);
+        const startedByLeft = Boolean(finalization['startedByLeft']);
         return {
-          counterentity: toFinalizationHex(finalization.counterentity),
-          initialNonce: toFinalizationDecimal(finalization.initialNonce),
-          finalNonce: toFinalizationDecimal(finalization.finalNonce),
-          initialProofbodyHash: toFinalizationHex(finalization.initialProofbodyHash),
-          proposerIsLeft: Boolean(finalization.proposerIsLeft),
+          counterentity: toFinalizationHex(finalization['counterentity']),
+          initialNonce: toFinalizationDecimal(finalization['initialNonce']),
+          finalNonce: toFinalizationDecimal(finalization['finalNonce']),
+          initialProofbodyHash: toFinalizationHex(finalization['initialProofbodyHash']),
+          proposerIsLeft: Boolean(finalization['proposerIsLeft']),
           leftArguments: startedByLeft ? starterArguments : otherArguments,
           rightArguments: startedByLeft ? otherArguments : starterArguments,
           startedByLeft,
-          sig: toFinalizationHex(finalization.sig),
+          sig: toFinalizationHex(finalization['sig']),
         };
       });
     }

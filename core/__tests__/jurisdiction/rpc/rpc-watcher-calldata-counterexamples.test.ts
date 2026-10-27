@@ -100,13 +100,14 @@ test('(d) 1900 nested canonical wrappers recover without a recursion/decode budg
   expect(result.decodedBytes).toBeLessThanOrEqual(encodedBodyBytes(body));
 });
 
-test('(e) a valid direct call wins before decoys in its signature bytes are scanned or decoded', async () => {
+test('(e) a valid direct call wins before embedded decoys are scanned', async () => {
   const actual = startCall();
   const parsed = depository.decodeFunctionData('processBatch', actual);
   const decoys = nested(wrap('0x'), 120);
   const direct = depository.encodeFunctionData('processBatch', [parsed[0], decoys, 1n]);
   const result = await measureRecovery(direct);
-  expect(result.decodedBytes).toBeLessThanOrEqual(encodedBodyBytes(body));
+  expect(result.decodedBytes).toBeLessThanOrEqual(2 * ethers.dataLength(direct));
+  expect(result.scannedOffsets).toEqual([]);
 });
 
 test('(e2) decoys before a valid direct-call encoding cannot starve it', async () => {
@@ -204,7 +205,8 @@ test.each([0, 3])('C1: processBatch accepts a trailing batch word through %i wra
   const direct = depository.encodeFunctionData('processBatch', [ethers.concat([batch, ethers.ZeroHash]), hanko, nonce]);
   expect(decodeDisputeProofBodyEvidenceCalldata(direct)[0]!.proofbody).toEqual(body);
   const result = await measureRecovery(depth === 0 ? direct : nested(direct, depth));
-  expect(result.decodedBytes).toBeLessThanOrEqual(encodedBodyBytes(body));
+  const limit = depth === 0 ? 2 * ethers.dataLength(direct) : encodedBodyBytes(body);
+  expect(result.decodedBytes).toBeLessThanOrEqual(limit);
 });
 
 const shortBytesBody = { ...body, transformers: [{ ...body.transformers[0]!, encodedBatch: '0xab' }] };
