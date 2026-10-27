@@ -1,3 +1,4 @@
+import { useTourObservations } from '../tour/observations';
 import { useMemo, useState } from 'react';
 import { MANAGE, PageHead } from '../components/PageHead';
 import { useNavigate } from 'react-router-dom';
@@ -65,6 +66,7 @@ export function Sovereignty() {
 			anchor.download = `xln-recovery-${wallet.entityId.slice(2, 10)}.json`;
 			anchor.click();
 			setTimeout(() => URL.revokeObjectURL(url), 1_000);
+			useTourObservations.setState({ exported: { runtimeId: String(env.runtimeId), entityId: wallet.entityId, height: wallet.frameHeight } });
 			toast('Encrypted backup saved');
 		} catch (error) {
 			setExportError(error instanceof Error ? error.message : String(error));

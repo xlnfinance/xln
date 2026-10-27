@@ -1,7 +1,9 @@
+import { getAdapter } from '../runtime/adapter';
+import { useTourObservations } from '../tour/observations';
 import { asTokenDecimals } from '@xln/core/account/tx/units';
 import { Formation } from '../components/Formation';
 import { MANAGE, PageHead } from '../components/PageHead';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { CopyId } from '../components/CopyId';
 import { useApp } from '../runtime/store';
 import { formatMoney, shortId } from '../runtime/format';
@@ -45,6 +47,7 @@ export function Ownership() {
 	const [busy, setBusy] = useState<string | null>(null);
 	const [targetId, setTargetId] = useState('');
 	const [takeoverStatus, setStatus] = useState<TakeoverStatus | null>(null);
+	const previousStatus = useRef<TakeoverStatus | null>(null);
 	const status = takeoverStatus?.targetEntityId === targetId ? takeoverStatus : null;
 	const activationReady = takeoverActivationReady(status);
 	const targets = takeoverTargets(wallet.entityId, wallet.signerId, wallet.names);
@@ -55,7 +58,9 @@ export function Ownership() {
 	const refreshShares = useCallback(async () => {
 		if (!numbered || !wallet.entityId || !wallet.signerId) return;
 		try {
-			setShares(await shareTokens(wallet.entityId, wallet.signerId, core?.reserves ?? new Map()));
+			const tokens = await shareTokens(wallet.entityId, wallet.signerId, core?.reserves ?? new Map());
+      setShares(tokens);
+      useTourObservations.setState({ shareTokens: { runtimeId: getAdapter()?.runtimeId ?? '', entityId: wallet.entityId, ids: tokens.flatMap(token => token.internalTokenId === null ? [] : [token.internalTokenId]) } });
 			setSharesError('');
 		} catch (error) {
 			setSharesError(error instanceof Error ? error.message : String(error));
@@ -65,7 +70,20 @@ export function Ownership() {
 	useEffect(() => {
 		void refreshShares();
 	}, [refreshShares, height]);
-	useEffect(() => { setTargetId(''); setStatus(null); }, [wallet.entityId]);
+	useEffect(() => { setTargetId(''); setStatus(null); previousStatus.current = null; useTourObservations.setState({ takeover: undefined }); }, [wallet.entityId]);
+
+  const refreshTakeover = async (): Promise<void> => {
+    const next = await readTakeoverStatus(wallet.entityId, wallet.signerId, targetId);
+    useTourObservations.setState({ takeover: { runtimeId: getAdapter()?.runtimeId ?? '', entityId: wallet.entityId, targetId,
+      controlMajority: next.controlMajority, proposedBoardHash: next.proposedBoardHash, activateAt: next.activateAt, currentUnix: next.currentUnix } });
+    const old = previousStatus.current;
+    if (old?.targetEntityId === targetId && old.currentBoardHash !== next.currentBoardHash &&
+      old.proposedBoardHash === next.currentBoardHash) {
+      useTourObservations.setState({ governance: { runtimeId: getAdapter()?.runtimeId ?? '', entityId: wallet.entityId, targetId, oldHash: old.currentBoardHash, newHash: next.currentBoardHash } });
+    }
+    previousStatus.current = next;
+    setStatus(next);
+  };
 
 	const run = async (key: string, label: string, work: () => Promise<void>): Promise<void> => {
 		setBusy(key);
@@ -176,7 +194,7 @@ export function Ownership() {
 									<span className="field-label">Target</span>
 									<div className="mode-grid">
 										{targets.map(target => (
-											<button key={target.entityId} type="button" className={`mode-card${targetId === target.entityId ? ' active' : ''}`} onClick={() => { setTargetId(target.entityId); setStatus(null); }}>
+											<button key={target.entityId} type="button" className={`mode-card${targetId === target.entityId ? ' active' : ''}`} onClick={() => { setTargetId(target.entityId); setStatus(null); useTourObservations.setState({ takeover: undefined }); }}>
 												<span className="t">{target.name}</span>
 												<span className="s">{shortId(target.entityId, 8, 4)}</span>
 											</button>
@@ -206,7 +224,7 @@ export function Ownership() {
 									</>
 								) : null}
 								<div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
-									<button type="button" className="btn ghost" disabled={!targetId || busy !== null} onClick={() => void run('status', 'Takeover status refreshed', async () => { setStatus(await readTakeoverStatus(wallet.entityId, wallet.signerId, targetId)); })}>
+									<button type="button" className="btn ghost" disabled={!targetId || busy !== null} onClick={() => void run('status', 'Takeover status refreshed', refreshTakeover)}>
 										{busy === 'status' ? 'Reading…' : 'Read status'}
 									</button>
 									<button type="button" className="btn" disabled={!targetId || busy !== null || !commandReady} onClick={() => void run('propose', 'CONTROL board proposal submitted', () => proposeTakeover(wallet.entityId, wallet.signerId, targetId))} data-testid="takeover-propose">

@@ -1,3 +1,4 @@
+import { useTourObservations } from '../tour/observations';
 import { PushNotifications } from './PushNotifications';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DisputeProtection } from './DisputeProtection';
@@ -47,7 +48,12 @@ export function Watchtower({ accountCount }: { accountCount: number }) {
         setCoverage([]);
         return;
       }
-      setCoverage(await Promise.all(towers.map(url => readTowerCoverage(url, lookupKey))));
+      const entityId = useApp.getState().activeEntityId;
+      const runtimeId = String(getEmbeddedEnv()?.runtimeId ?? '');
+      const rows = await Promise.all(towers.map(url => readTowerCoverage(url, lookupKey)));
+      setCoverage(rows);
+      const receipt = rows.filter(row => row.protecting && !row.error).sort((a, b) => b.height - a.height)[0];
+      if (receipt && entityId && runtimeId && entityId === useApp.getState().activeEntityId && runtimeId === String(getEmbeddedEnv()?.runtimeId ?? '')) useTourObservations.setState({ backup: { runtimeId, entityId, height: receipt.height, storedBytes: receipt.storedBytes } });
     },
     [lookupKey],
   );

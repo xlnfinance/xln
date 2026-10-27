@@ -2,9 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from './Icons';
 import { useApp } from '../runtime/store';
+import { getAdapter } from '../runtime/adapter';
+import { getJson, resolveApiBase } from '../runtime/http';
 import { useWallet } from '../runtime/views';
 import { TOUR_STEPS, type TourContext } from '../tour/steps';
+import { pruneTourPayments, useTourObservations } from '../tour/observations';
+import { useReceipts } from '../runtime/financial/receipt-state';
 import { useTradeCompletion } from '../tour/use-trade';
+import { tourBaseline, type TourBaseline } from '../tour/outcomes';
 
 const nodeFor = (id: string): HTMLElement | undefined =>
   [...document.querySelectorAll<HTMLElement>(`[data-testid="${id}"]`)].find(node => node.getClientRects().length > 0);
@@ -26,8 +31,51 @@ export function Tour() {
   const index = Math.max(0, Math.min(tour.index, TOUR_STEPS.length - 1));
   const step = tour.active ? TOUR_STEPS[index] : undefined;
   const trade = useTradeCompletion(step?.id === 'trade', wallet.entityId);
-  const ctx = useMemo(() => ({ wallet, pathname, tradeFilled: trade.filled, dom }), [wallet, pathname, trade.filled]);
+  const observations = useTourObservations();
+  const openedReceipt = useReceipts(s => s.opened);
+  const runtimeId = getAdapter()?.runtimeId ?? '';
+  const apiBase = resolveApiBase();
+  const needsCreditOfficer = step?.id === 'borrow' || step?.id === 'repay';
+  const [creditOfficerUnavailable, setCreditOfficerUnavailable] = useState('');
+  useEffect(() => {
+    let stopped = false;
+    setCreditOfficerUnavailable('');
+    if (needsCreditOfficer)
+      void getJson('/api/credit-officer/status', {}, apiBase)
+        .then(status => {
+          if (typeof status['enabled'] !== 'boolean') throw new Error('Invalid credit officer status');
+          if (!stopped) setCreditOfficerUnavailable(status['enabled'] ? '' : 'disabled on this stack');
+        })
+        .catch(error => {
+          if (!stopped) setCreditOfficerUnavailable(error instanceof Error ? error.message : String(error));
+        });
+    return () => {
+      stopped = true;
+    };
+  }, [needsCreditOfficer, runtimeId, apiBase]);
+  const start = useRef<TourBaseline | null>(null);
+  start.current = tourBaseline(start.current, step?.id ?? '', wallet);
+  const before = start.current?.step === step?.id ? start.current?.wallet : undefined;
+  const ctx = useMemo(
+    () => ({
+      wallet,
+      before,
+      runtimeId,
+      pathname,
+      tradeFilled: trade.filled,
+      dom,
+      creditOfficerUnavailable,
+      ...observations,
+      openedReceipt,
+    }),
+    [wallet, before, runtimeId, pathname, trade.filled, creditOfficerUnavailable, observations, openedReceipt],
+  );
   const target = step?.target(ctx) ?? '';
+  const route = step?.route?.(ctx);
+
+  useEffect(() => {
+    if (step && before) pruneTourPayments(before.frameHeight);
+  }, [step, before]);
 
   useEffect(() => {
     if (step?.done?.(ctx)) setTour({ index: index + 1 });
@@ -40,8 +88,8 @@ export function Tour() {
   }, [step]);
 
   useEffect(() => {
-    if (step?.route) navigate(step.route(ctx));
-  }, [step]);
+    if (route) navigate(route);
+  }, [step, route, wallet.entityId]);
 
   useEffect(() => {
     // Reveal guidance after navigation/replay, without interrupting typing or guide ticks.
@@ -64,6 +112,7 @@ export function Tour() {
       data-testid="tour"
       data-step={step.id}
       data-target={target}
+      data-exercise={step.done ? 'committed' : 'reading'}
       aria-label="Wallet tutorial"
     >
       <div className="tour-card anchored">
@@ -97,11 +146,17 @@ export function Tour() {
         </div>
         <p className="tour-body" data-testid="tour-hint">
           {step.instruction(ctx)}
-          {step.id === 'company' && (
+          {step.skipReason?.(ctx) && (
+            <span className="note" data-testid="tour-skip-reason">
+              {' '}
+              {step.skipReason(ctx)}
+            </span>
+          )}
+          {['company', 'move', 'withdraw'].includes(step.id) && (
             <>
               {' '}
-              <Link to="/assets" data-testid="tour-company-gas">
-                Get registration gas →
+              <Link to={pathname === '/assets' ? (route ?? '/ownership') : '/assets'} data-testid="tour-company-gas">
+                {pathname === '/assets' ? 'Return to exercise →' : 'Get test gas / reserve →'}
               </Link>
             </>
           )}
@@ -148,7 +203,7 @@ export function Tour() {
                 data-testid="tour-advance"
                 onClick={() => setTour({ index: index + 1 })}
               >
-                Next chapter
+                {step.done ? 'Skip exercise' : 'Next chapter'}
               </button>
             </div>
           ) : (
