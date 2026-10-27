@@ -628,6 +628,7 @@ export function createJReplica(
     stateRoot: new Uint8Array(32),
     mempool: [] as JTx[],
     blockDelayMs: 300,
+    blockTimeMs: 1_000,
     lastBlockTimestamp: env.state.timestamp,
     position,
     contracts: {

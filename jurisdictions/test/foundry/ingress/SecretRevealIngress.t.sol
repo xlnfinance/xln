@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
-import {XlnFixture} from "./helpers/XlnFixture.sol";
-import {XlnHanko} from "./helpers/XlnHanko.sol";
-import "../../contracts/Types.sol";
+import {XlnFixture} from "../helpers/XlnFixture.sol";
+import {XlnHanko} from "../helpers/XlnHanko.sol";
+import "../../../contracts/Types.sol";
 
 contract SecretRevealIngressTest is XlnFixture {
   function setUp() public { _deployXln(); }

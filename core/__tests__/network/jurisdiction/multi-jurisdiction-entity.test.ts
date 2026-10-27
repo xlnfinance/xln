@@ -14,6 +14,8 @@ import { applyEntityTx } from '../../../entity/tx/apply';
 import {
   getJReplicaByJurisdictionRef,
   getJurisdictionIdentityRef,
+  requireRuntimeJurisdictionConfigByName,
+  resolveRuntimeJurisdictionConfig,
   sameJurisdictionIdentity,
 } from '../../../jurisdiction/machine/jurisdiction-runtime';
 import {
@@ -159,6 +161,18 @@ describe('multi-jurisdiction entity binding', () => {
     await importEntity(env, entityId, '33', incoming);
 
     expect(findState(env, entityId)?.config.jurisdiction?.blockTimeMs).toBe(9_876);
+  });
+
+  test('jurisdiction resolution carries the selected chain cadence without replacing a committed clock', () => {
+    const env = makeEnv('jurisdiction-block-time-resolution');
+    const trusted = { ...makeJurisdiction('J1', 31337, '11', '12'), blockTimeMs: 3_000 };
+    installJurisdiction(env, trusted);
+    installJurisdiction(env, { ...makeJurisdiction('J2', 31338, '21', '22'), blockTimeMs: 12_000 });
+    env.activeJurisdiction = 'J2';
+
+    expect(requireRuntimeJurisdictionConfigByName(env, 'J1').blockTimeMs).toBe(3_000);
+    expect(resolveRuntimeJurisdictionConfig(env)?.blockTimeMs).toBe(12_000);
+    expect(resolveRuntimeJurisdictionConfig(env, { ...trusted, blockTimeMs: 9_876 })?.blockTimeMs).toBe(9_876);
   });
 
   const importEntity = async (

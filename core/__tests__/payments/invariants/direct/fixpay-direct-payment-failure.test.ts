@@ -1,13 +1,13 @@
 import { expect, test } from 'bun:test';
-import { makeAccount, makeState, makeJurisdiction, entity, openWritableEntityAccounts } from '../../helpers/cross-j';
-import { applyAccountTxToMutableReplica } from '../../../account/tx/apply';
-import { applyDirectPaymentForwardFollowups } from '../../../entity/tx/handlers/account/committed-htlc-followups';
-import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
-import { createDefaultDelta } from '../../../account/state/delta';
-import { createEmptyEnv } from '../../../runtime';
-import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
-import { proposeAccountFrame } from '../../../account/consensus';
-import type { AccountTx } from '../../../types/account';
+import { makeAccount, makeState, makeJurisdiction, entity, openWritableEntityAccounts } from '../../../helpers/cross-j';
+import { applyAccountTxToMutableReplica } from '../../../../account/tx/apply';
+import { applyDirectPaymentForwardFollowups } from '../../../../entity/tx/handlers/account/committed-htlc-followups';
+import { PersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
+import { createDefaultDelta } from '../../../../account/state/delta';
+import { createEmptyEnv } from '../../../../runtime';
+import { createAccountConsensusContext } from '../../../../entity/account/account-consensus-context';
+import { proposeAccountFrame } from '../../../../account/consensus';
+import type { AccountTx } from '../../../../types/account';
 
 const alice = entity('11');
 const hub = entity('22');

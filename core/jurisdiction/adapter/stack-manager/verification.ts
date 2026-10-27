@@ -181,6 +181,7 @@ export const verifyJurisdictionStack = async (
         ? { library_deploy_address: deployment.address }
         : {}),
       ...(name === 'entityProvider' ? { foundationDeployer: manifest.foundationRecipient } : {}),
+      ...(name === 'deltaTransformer' ? { deploymentAuthority: manifest.deployer } : {}),
       ...(name === 'depository'
         ? {
             entityProvider: manifest.contracts.entityProvider,

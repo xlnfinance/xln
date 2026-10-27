@@ -138,6 +138,7 @@ export function resolveRuntimeJurisdictionConfig(
     replica?.entityProviderDeploymentBlock,
     current?.entityProviderDeploymentBlock,
   );
+  const blockTimeMs = firstDefined(current?.blockTimeMs, replica?.blockTimeMs);
 
   const currentName = current?.name?.trim() || undefined;
   const currentAddress = current?.address?.trim() || undefined;
@@ -160,6 +161,7 @@ export function resolveRuntimeJurisdictionConfig(
     entityProviderAddress,
     depositoryAddress,
     ...(chainId !== undefined ? { chainId } : {}),
+    ...(blockTimeMs !== undefined ? { blockTimeMs } : {}),
     ...(entityProviderDeploymentBlock !== undefined ? { entityProviderDeploymentBlock } : {}),
   };
 }

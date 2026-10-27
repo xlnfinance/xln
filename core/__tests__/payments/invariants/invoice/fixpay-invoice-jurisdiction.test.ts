@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { parseXlnInvoice } from '../../../../frontend/src/lib/utils/xlnInvoice';
-import { invoiceNote } from '../../../../ui/src/screens/pay-intent';
+import { parseXlnInvoice } from '../../../../../frontend/src/lib/utils/xlnInvoice';
+import { invoiceNote } from '../../../../../ui/src/screens/pay-intent';
 
 test('fixpay-8 a TRON invoice cannot populate an EVM Pay form', () => {
   const invoice = parseXlnInvoice(`xln://pay?target=0x${'22'.repeat(32)}&jId=tron`);

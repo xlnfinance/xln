@@ -96,8 +96,8 @@ const STEP_MS = 1_000;
 const SIDES: readonly HarnessSide[] = ['alpha', 'beta'];
 const PEER_OF: Record<HarnessSide, HarnessSide> = { alpha: 'beta', beta: 'alpha' };
 const GENESIS_COLLATERAL = 10n ** 12n;
-/** HTLC timelock far above any in-run clock; reveal window far above frame jHeight. */
-const HTLC_TIMELOCK_MS = 10n ** 12n;
+/** One hour stays within the admission horizon and above the bounded harness run. */
+const HTLC_LIFETIME_MS = 60n * 60n * 1_000n;
 const HTLC_REVEAL_BEFORE_HEIGHT = 1 << 20;
 
 const STATE_COLLECTION_FIELDS = [
@@ -520,7 +520,7 @@ class BilateralHarness {
           data: {
             lockId,
             hashlock: lockId,
-            timelock: HTLC_TIMELOCK_MS,
+            timelock: BigInt(this.clock) + HTLC_LIFETIME_MS,
             revealBeforeHeight: HTLC_REVEAL_BEFORE_HEIGHT,
             amount: spec.amount,
             tokenId: spec.tokenId,
