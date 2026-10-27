@@ -17,6 +17,13 @@ xln_require_pinned_bun() {
   fi
 }
 
+xln_validate_local_test_stack_base() {
+  case "$1" in
+    20000|20020|20040|20060|20080|20100|20120|20140|20160|20180|20200|20220|20240|20260|20280|20300) ;;
+    *) echo "LOCAL_TEST_LEASE_BASE_INVALID:$1" >&2; return 1 ;;
+  esac
+}
+
 xln_configure_start_policy() {
   local requested_repo_root="$1"
   local names=(
@@ -48,10 +55,7 @@ xln_configure_start_policy() {
     echo "LOCAL_TEST_LEASE_NUMBER_INVALID" >&2
     return 1
   fi
-  case "$XLN_LOCAL_TEST_LEASE_BASE" in
-    20000|20020|20040|20060|20080|20100|20120|20140|20160|20180|20200|20220|20240|20260|20280|20300) ;;
-    *) echo "LOCAL_TEST_LEASE_BASE_INVALID:${XLN_LOCAL_TEST_LEASE_BASE}" >&2; return 1 ;;
-  esac
+  xln_validate_local_test_stack_base "$XLN_LOCAL_TEST_LEASE_BASE" || return 1
   if [[ "$XLN_LOCAL_TEST_LEASE_GUARD" -ne $((XLN_LOCAL_TEST_LEASE_BASE + 19)) \
     || "$XLN_LOCAL_TEST_LEASE_OWNER_PID" -ne "$PPID" ]] || ! kill -0 "$XLN_LOCAL_TEST_LEASE_OWNER_PID" 2>/dev/null; then
     echo "LOCAL_TEST_LEASE_OWNER_INVALID" >&2

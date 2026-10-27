@@ -79,21 +79,27 @@ test('local test lease capability enables assert-only startup and forbids proces
 // The shell start policy keeps its own lane list; a pool lane it does not know
 // fails every stack started there with LOCAL_TEST_LEASE_BASE_INVALID.
 test('the shell start policy accepts every machine-wide stack lane', async () => {
+  // Validate the complete policy without reserving lanes owned by other live runs.
+  // The test above exercises authenticated startup with a real available lease.
   for (const base of LOCAL_TEST_STACK_BASES) {
-    const lease = await acquireLocalTestPortLease({ slotBases: [base], timeoutMs: 1_000 });
-    try {
-      const env = { ...stripLocalTestLeaseEnv(process.env), ...buildInheritedLocalTestLeaseEnv(lease, repoRoot) };
-      const accepted = await run('bash', [
-        '-c',
-        'source scripts/lib/start-common.sh; xln_configure_start_policy "$1"; printf "%s" "$XLN_PORT_BASE"',
-        'lease-lane-policy',
-        repoRoot,
-      ], env);
-      expect(accepted.stderr, String(base)).toBe('');
-      expect(accepted.stdout).toBe(String(base));
-    } finally {
-      lease.release();
-    }
+    const accepted = await run('bash', [
+      '-c',
+      'source scripts/lib/start-common.sh; xln_validate_local_test_stack_base "$1"',
+      'lease-lane-policy',
+      String(base),
+    ], stripLocalTestLeaseEnv(process.env));
+    expect(accepted.code, String(base)).toBe(0);
+    expect(accepted.stderr, String(base)).toBe('');
+  }
+  for (const base of ['19980', '20001', '20320', 'not-a-port']) {
+    const rejected = await run('bash', [
+      '-c',
+      'source scripts/lib/start-common.sh; xln_validate_local_test_stack_base "$1"',
+      'lease-lane-policy',
+      base,
+    ], stripLocalTestLeaseEnv(process.env));
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr.trim()).toBe(`LOCAL_TEST_LEASE_BASE_INVALID:${base}`);
   }
 });
 

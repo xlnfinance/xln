@@ -1,6 +1,6 @@
 import { isTronChainId } from '../jurisdiction/adapter/chain-ids';
 
-export class WatchtowerUnsupportedChainError extends Error {
+class WatchtowerUnsupportedChainError extends Error {
   readonly code = 'WATCHTOWER_TRON_SUBMISSION_UNSUPPORTED';
   constructor() {
     super('WATCHTOWER_TRON_SUBMISSION_UNSUPPORTED: Native TRON watchtower submission is unavailable.');
