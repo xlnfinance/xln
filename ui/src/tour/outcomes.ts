@@ -92,15 +92,20 @@ export const received = (ctx: TourContext): boolean =>
 
 export function recovered(ctx: TourContext): boolean {
   const event = ctx.outgoing;
-  // A durable terminal receipt identifies the committed payment by hashlock and
-  // frame. Net balance can stay flat or rise when unrelated incoming credit commits.
+  // Recovery requires the same payment to be committed as initiated after both
+  // restore and chapter entry, then finalized. Offsetting credit may leave balances flat.
   return Boolean(committed(ctx) && ctx.restored?.runtimeId === ctx.runtimeId &&
     ctx.restored.entityIds.includes(ctx.wallet.entityId) && ctx.wallet.frameHeight >= ctx.restored.height &&
     event?.runtimeId === ctx.runtimeId && event.name === 'HtlcFinalized' &&
     event.height > Math.max(ctx.restored.height, ctx.before!.frameHeight) && event.height <= ctx.wallet.frameHeight &&
     event.data.entityId === ctx.wallet.entityId && event.data.fromEntity === ctx.wallet.entityId &&
     event.data.tokenId === 1 && /^\d+$/.test(String(event.data.amount)) && BigInt(String(event.data.amount)) >= 1_000_000n &&
-    typeof event.data.hashlock === 'string' && /^0x[0-9a-f]{64}$/i.test(event.data.hashlock));
+    typeof event.data.hashlock === 'string' && /^0x[0-9a-f]{64}$/i.test(event.data.hashlock) &&
+    ctx.initiations?.some(initiated => initiated.name === 'HtlcInitiated' &&
+      initiated.height > Math.max(ctx.restored!.height, ctx.before!.frameHeight) && initiated.height <= event.height &&
+      initiated.runtimeId === event.runtimeId && initiated.data.entityId === event.data.entityId &&
+      initiated.data.fromEntity === event.data.fromEntity && initiated.data.hashlock === event.data.hashlock &&
+      initiated.data.tokenId === event.data.tokenId && initiated.data.amount === event.data.amount));
 }
 
 export type TourBaseline = { step: string; wallet: WalletView };

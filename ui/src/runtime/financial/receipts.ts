@@ -33,8 +33,13 @@ async function readReceipts(request: PaymentTerminalReadRequest): Promise<Paymen
 		toHeight: request.toHeight,
 		limit: 500,
 		entityId: request.entityId,
-		eventNames: [...PAYMENT_TERMINAL_EVENT_NAMES],
+		eventNames: [...PAYMENT_TERMINAL_EVENT_NAMES, 'HtlcInitiated'],
 	});
+	for (const receipt of response.receipts) for (const log of receipt.logs) {
+		if (log.message === 'HtlcInitiated' && log.data) observeTourPayment({
+			runtimeId: request.runtimeId, height: receipt.height, name: 'HtlcInitiated', data: log.data,
+		});
+	}
 	return { scannedThroughHeight: response.toHeight, receipts: response.receipts };
 }
 

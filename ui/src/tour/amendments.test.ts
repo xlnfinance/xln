@@ -115,11 +115,12 @@ test('Recovery requires a specific durable payment, even when an incoming credit
     name: 'HtlcFinalized',
     data: { entityId: owner, fromEntity: owner, tokenId: 1, amount: '1000000', hashlock: `0x${'d'.repeat(64)}` },
   };
-  const ctx = context({ before, wallet: after, restored, outgoing });
+  const initiated = { ...outgoing, name: 'HtlcInitiated' as const };
+  const ctx = context({ before, wallet: after, restored, outgoing, initiations: [initiated] });
   expect(done('recovery', ctx)).toBe(true);
   expect(done('recovery', { ...ctx, outgoing: undefined })).toBe(false);
   // A concurrent 1 USDC credit leaves the net balance unchanged; the durable
-  // HtlcFinalized receipt still proves this hashlock's committed payment.
+  // initiation and finalization still prove this hashlock's committed payment.
   expect(done('recovery', { ...ctx, wallet: { ...before, frameHeight: 11 } })).toBe(true);
   expect(done('recovery', { ...ctx, wallet: before })).toBe(false);
   const changes: Partial<PaymentTerminalEvent>[] = [
@@ -135,6 +136,30 @@ test('Recovery requires a specific durable payment, even when an incoming credit
     { data: { ...outgoing.data, amount: '999999' } },
   ];
   for (const change of changes) expect(done('recovery', { ...ctx, outgoing: { ...outgoing, ...change } })).toBe(false);
+  for (const change of [
+    { runtimeId: 'other' }, { height: 12 },
+    ...[{ entityId: company }, { fromEntity: company }, { hashlock: `0x${'e'.repeat(64)}` },
+      { tokenId: 2 }, { amount: '2000000' }].map(data => ({ data: { ...initiated.data, ...data } })),
+  ]) expect(done('recovery', { ...ctx, initiations: [{ ...initiated, ...change }] })).toBe(false);
+});
+
+test('Recovery rejects pre-backup initiation finalized after restore without a new payment', () => {
+  const outgoing: PaymentTerminalEvent = {
+    runtimeId: 'runtime', height: 13, name: 'HtlcFinalized',
+    data: { entityId: owner, fromEntity: owner, tokenId: 1, amount: '1000000', hashlock: `0x${'d'.repeat(64)}` },
+  };
+  const ctx = context({
+    before: wallet({ frameHeight: 11 }), wallet: wallet({ frameHeight: 13 }),
+    restored: { runtimeId: 'runtime', entityIds: [owner], height: 10 }, outgoing,
+  });
+  for (const height of [9, 10, 11]) {
+    const initiations = [{ ...outgoing, name: 'HtlcInitiated' as const, height }];
+    expect(done('recovery', { ...ctx, initiations })).toBe(false);
+  }
+  expect(done('recovery', ctx)).toBe(false);
+  const initiations = [{ ...outgoing, name: 'HtlcInitiated' as const, height: 12 }];
+  expect(done('recovery', { ...ctx, initiations })).toBe(true);
+  expect(done('recovery', { ...ctx, restored: { ...ctx.restored!, height: 12 }, initiations })).toBe(false);
 });
 
 test('first share release folds nonce 1 and survives the wallet projection before completing Shares', () => {
@@ -234,7 +259,13 @@ test('terminal observations retain correlated committed evidence across unrelate
     name: 'HtlcFinalized',
     data: { ...incoming.data, fromEntity: owner, amount: '1000000', hashlock: `0x${'d'.repeat(64)}` },
   };
+  const initiated = { ...outgoing, name: 'HtlcInitiated' as const };
+  observeTourPayment({ ...initiated, height: 10 });
+  expect(useTourObservations.getState().initiations).toBeUndefined();
+  observeTourPayment(initiated);
+  observeTourPayment({ ...initiated, data: { ...initiated.data, hashlock: `0x${'e'.repeat(64)}` } });
   observeTourPayment(outgoing);
   observeTourPayment({ ...outgoing, name: 'HtlcFailed' });
   expect(useTourObservations.getState().outgoing).toBe(outgoing);
+  expect(done('recovery', context(useTourObservations.getState()))).toBe(true);
 });
