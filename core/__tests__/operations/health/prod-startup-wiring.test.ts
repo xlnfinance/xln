@@ -582,7 +582,7 @@ describe('production startup wiring', () => {
     expect(criticalFiles.length).toBeGreaterThanOrEqual(15);
     for (const relativePath of criticalFiles) {
       const source = readFileSync(join(repoRoot, 'core', relativePath), 'utf8');
-      const header = source.match(/\/\*\*([\s\S]*?)\*\//)?.[1] ?? '';
+      const header = source.match(/^\/\*\*([\s\S]*?)\*\//)?.[1] ?? '';
       expect(header).toContain('Human-audit importance:');
       expect(header).toMatch(
         /Key (entrypoint|entrypoints|surface|builders|checks|functions|paths|projection|projections):/,

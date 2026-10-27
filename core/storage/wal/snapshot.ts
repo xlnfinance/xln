@@ -1,9 +1,9 @@
-import { storageFailure } from '../../protocol/errors/failure-taxonomy';
 /**
  * Projects live Runtime/Entity/Jurisdiction replicas into durable recovery snapshots.
  * Key builders: canonical checkpoints that exclude proposals, handles, and transport state.
  * Human-audit importance: 99/100 — projection coverage defines recoverable authority.
  */
+import { storageFailure } from '../../protocol/errors/failure-taxonomy';
 import type { EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica, EnvSnapshot, RoutedEntityInput, RuntimeInput } from '../../runtime/types';
 import type { FrameLogEntry } from '../../types/logging';
