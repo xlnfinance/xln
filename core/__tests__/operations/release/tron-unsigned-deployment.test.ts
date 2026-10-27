@@ -1,8 +1,22 @@
-import { describe, expect, test } from 'bun:test';
+import { beforeAll, describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
 import { TronWeb } from 'tronweb';
 
 const require = createRequire(import.meta.url);
+const repoRoot = resolve(import.meta.dir, '../../../..');
+beforeAll(async () => {
+  const artifacts = ['Account', 'HankoVerifier', 'EntityProvider'];
+  if (artifacts.every(name => existsSync(resolve(repoRoot, 'jurisdictions/build-tron/contracts', `${name}.json`)))) return;
+  const child = Bun.spawn([
+    'bun', 'run', 'stand:run', '--reason', 'tron-unsigned-test-artifacts', '--timeout-ms', '180000', '--',
+    'bun', 'jurisdictions/scripts/compile-tron.cjs', '--all', '--quiet',
+  ], { cwd: repoRoot, stdout: 'inherit', stderr: 'inherit' });
+  const code = await child.exited;
+  if (code !== 0) throw new Error(`TRON_TEST_ARTIFACT_COMPILE_FAILED:${code}`);
+}, 180_000);
+
 type Prepared = Awaited<ReturnType<TronWeb['transactionBuilder']['createSmartContract']>>;
 type Header = Pick<Prepared['raw_data'], 'ref_block_bytes' | 'ref_block_hash' | 'timestamp' | 'expiration'>;
 const { prepareTronContract } = require('../../../../jurisdictions/scripts/deploy-chain-matrix.cjs') as {

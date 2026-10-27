@@ -493,6 +493,8 @@ describe('multi-jurisdiction entity binding', () => {
       liquidityFeeBps: 5n,
       gasFee: 0n,
       updatedAt: userAccount?.currentFrame.timestamp,
+      effectiveAt: userAccount?.currentFrame.timestamp,
+      noticePeriodSeconds: 30 * 24 * 60 * 60,
     });
     expect(hubAccount?.state.rebalanceFeePolicies).toEqual(userAccount?.state.rebalanceFeePolicies);
   });

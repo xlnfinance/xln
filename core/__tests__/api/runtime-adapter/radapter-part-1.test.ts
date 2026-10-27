@@ -2799,7 +2799,7 @@ test('remote runtime adapter rejects a tampered server identity proof', async ()
     await expect(
       adapter.connect({
         mode: 'remote',
-        wsUrl: 'ws://runtime-adapter.invalid/rpc',
+        wsUrl: 'wss://runtime-adapter.invalid/rpc',
         authKey: 'token',
         reconnectMaxMs: 1_000,
         requestTimeoutMs: 1_000,

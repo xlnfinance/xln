@@ -668,7 +668,7 @@ describe('test artifact cleanup', () => {
     expect(rootScripts['check:contract-invariants']).toContain('--keep-test-artifacts');
     expect(rootScripts['check']).toBe('bun run check:short && bun run check:long');
     expect(rootScripts['check:short']).toBe(
-      'bun tools/run-parallel-checks.ts check:contract-artifact-drift check:frontend-file-size',
+      'bun tools/run-parallel-checks.ts check:first-hub-account check:contract-artifact-drift check:frontend-file-size',
     );
     expect(rootScripts['check:long']).toBe(
       'bun tools/run-parallel-checks.ts check:src check:frontend check:ui-types',

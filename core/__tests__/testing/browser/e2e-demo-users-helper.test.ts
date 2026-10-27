@@ -149,7 +149,7 @@ describe('e2e demo user helper', () => {
     expect(body).toContain('env.gossip.getProfile(hubId.toLowerCase())?.runtimeId');
     expect(body).toContain('CURRENT_WALLET_RUNTIME_MISSING');
     expect(helper).toContain('await waitForHubRuntimeProfile(page, hubId, timeoutMs)');
-    expect(helper).toContain('await xln.ensureGossipProfiles(env, targets)');
+    expect(helper).toContain('await xln.ensureGossipProfiles(env, targets, { missIsRetried: true })');
     expect(helper).toContain('env.gossip.getProfiles()');
     expect(body).not.toContain('isolatedEnv.infrastructure');
   });

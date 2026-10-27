@@ -2287,11 +2287,11 @@ const runShard = async (
 };
 
 async function main(): Promise<void> {
-  assertCheckEnvironment();
   if (process.argv.slice(2).some(arg => arg === '--help' || arg === '-h')) {
     console.log(ISOLATED_E2E_RUNNER_USAGE);
     return;
   }
+  assertCheckEnvironment();
   canonicalHubEngine('H1');
   const args = parseArgs();
   const exactRequestedTarget = args.pwFiles.length === 1 && /^.+\.spec\.ts::.+$/.test(args.pwFiles[0] ?? '');
