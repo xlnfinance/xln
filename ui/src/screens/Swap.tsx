@@ -34,7 +34,7 @@ import {
   readAccountState,
   submitSwapPlan,
 } from '../runtime/financial/swap';
-import { amountInputText, formatMoney, formatLimit, parseAmount, plainAmount } from '../runtime/format';
+import { amountInputText, formatAmount, formatMoney, formatLimit, parseAmount, plainAmount } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
 import { openSwapOffers, useWallet } from '../runtime/views';
 import { counterpartyFeePolicy } from '../runtime/financial/manage';
@@ -733,7 +733,7 @@ export function Swap() {
                   <span className={`v num ${feeBps === null ? 'st-pending' : ''}`}>
                     {feeBps === null
                       ? 'not published yet'
-                      : `${feeBps} bps · up to ${formatMoney((prepared.effectiveWant * BigInt(feeBps)) / 10_000n, wantMeta.decimals, 4)} ${wantMeta.symbol}`}
+                      : `${feeBps} bps · up to ${formatAmount((prepared.effectiveWant * BigInt(feeBps) + 9_999n) / 10_000n, wantMeta.decimals, wantMeta.decimals)} ${wantMeta.symbol}`}
                   </span>
                 </div>
               )}
