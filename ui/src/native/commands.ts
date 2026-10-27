@@ -1,8 +1,7 @@
 import { swapMinimumError } from '../runtime/financial/orderbook-quote';
-import { nativeAmountText } from './amount';
+import { nativeAmountText, nativeLimitAmounts } from './amount';
 import { nativePaymentRequest, nativeInvoiceJurisdictionKeys } from './payment-request';
 import { loadStackJurisdictions } from '../runtime/hosted';
-import { nativeLimitAmounts } from './market';
 import type { WalletView } from '../runtime/views';
 import { formatMoney, parseAmount } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';

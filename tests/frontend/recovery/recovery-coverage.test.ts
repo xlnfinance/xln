@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, onTestFinished, test } from 'bun:test';
+import { installMemoryStorage } from '../support/memory-storage';
 import { readFileSync } from 'fs';
 
 import {
@@ -27,22 +28,6 @@ const runtimeFixture = (recovery: Runtime['recovery'] = {}): Runtime => ({
 const byId = (items: ReturnType<typeof buildRuntimeRecoveryCoverage>) =>
   Object.fromEntries(items.map((item) => [item.id, item]));
 
-const installMemoryLocalStorage = (): void => {
-  const values = new Map<string, string>();
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: (key: string) => values.get(key) ?? null,
-      setItem: (key: string, value: string) => values.set(key, value),
-      removeItem: (key: string) => values.delete(key),
-      clear: () => values.clear(),
-      key: (index: number) => Array.from(values.keys())[index] ?? null,
-      get length() {
-        return values.size;
-      },
-    } as Storage,
-  });
-};
 
 test('runtime recovery coverage shows local state and missing remote coverage honestly', () => {
   const coverage = byId(buildRuntimeRecoveryCoverage({
@@ -166,7 +151,7 @@ test('runtime recovery coverage surfaces typed peer refresh failures', () => {
 });
 
 test('runtime recovery discovery status persists peer refresh counters', () => {
-  installMemoryLocalStorage();
+  onTestFinished(installMemoryStorage());
   const runtimeId = '0x1111111111111111111111111111111111111111';
 
   writeRuntimeRecoveryDiscoveryStatus({

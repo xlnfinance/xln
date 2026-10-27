@@ -1,12 +1,15 @@
-import { expect, mock, test } from 'bun:test';
+import { afterAll, expect, mock, spyOn, test } from 'bun:test';
 
-// Commands always target the current adapter; count what a stale session sends.
-const sends: unknown[] = [];
+// Bun shares one module registry across test files and a mock.module cannot be
+// undone. Only the wallet store, adapter and command bus are replaced: they
+// need a browser (storage, document theme) or Vite build defines to load, so
+// no Bun test can use the real ones. Every other dependency is the real
+// module, spied on, with each spy restored when this file ends.
 const shown: string[] = [];
 mock.module('./store', () => ({
   useApp: { getState: () => ({ toast: (text: string) => shown.push(text), setChainSync: () => {} }) },
 }));
-let releaseHydration: () => void = () => {};
+const sends: unknown[] = [];
 mock.module('./commands', () => ({
   sendRuntimeInput: async (input: unknown) => {
     sends.push(input);
@@ -19,17 +22,22 @@ mock.module('./adapter', () => ({
   connectEmbedded: async () => {},
   lockEmbeddedRuntime: async () => {},
 }));
-mock.module('./financial/roles', () => ({
-  accountDisputeConfig: () => ({ leftResponseSeconds: 10, rightResponseSeconds: 10 }),
-}));
-mock.module('@xln/frontend/lib/utils/onboarding/onboardingPreferences', () => ({
-  getOpenAccountRebalancePolicyData: () => null,
-  hydrateJurisdictionPolicyDefaults: () => new Promise<void>(resolve => (releaseHydration = resolve)),
-}));
+const roles = await import('./financial/roles');
+const onboarding = await import('@xln/frontend/lib/utils/onboarding/onboardingPreferences');
+let releaseHydration: () => void = () => {};
+const spies = [
+  spyOn(roles, 'accountDisputeConfig').mockImplementation(() => ({ leftResponseSeconds: 10, rightResponseSeconds: 10 })),
+  spyOn(onboarding, 'getOpenAccountRebalancePolicyData').mockImplementation(() => null),
+  spyOn(onboarding, 'hydrateJurisdictionPolicyDefaults').mockImplementation(
+    () => new Promise(resolve => (releaseHydration = () => resolve({ softLimitUsd: 1, hardLimitUsd: 1, maxFeeUsd: 0 }))),
+  ),
+];
+afterAll(() => {
+  for (const spy of spies) spy.mockRestore();
+});
 
 const { openFirstHubAccount } = await import('./hosted');
 const { isChainCatchupCancelled } = await import('./chain-catchup');
-
 
 const hubId = `0x${'ab'.repeat(32)}`;
 const entityId = `0x${'cd'.repeat(32)}`;

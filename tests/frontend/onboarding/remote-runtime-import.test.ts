@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { installMemoryStorage } from '../support/memory-storage';
 import { safeStringify } from '../../../core/protocol/serialization';
 
 import {
@@ -70,33 +71,10 @@ const makeStored = (
   };
 };
 
-const createMemoryStorage = (): Storage => {
-  const values = new Map<string, string>();
-  return {
-    getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => values.set(key, value),
-    removeItem: (key: string) => values.delete(key),
-    clear: () => values.clear(),
-    key: (index: number) => Array.from(values.keys())[index] ?? null,
-    get length() {
-      return values.size;
-    },
-  } as Storage;
-};
-
-const installMemoryWebStorage = (): void => {
-  Object.defineProperty(globalThis, 'sessionStorage', {
-    configurable: true,
-    value: createMemoryStorage(),
-  });
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: createMemoryStorage(),
-  });
-};
-
 describe('remote runtime import manager utilities', () => {
-  beforeEach(() => installMemoryWebStorage());
+  let restoreStorage: Array<() => void> = [];
+  beforeEach(() => { restoreStorage = [installMemoryStorage('localStorage'), installMemoryStorage('sessionStorage')]; });
+  afterEach(() => restoreStorage.forEach(restore => restore()));
 
   test('persists ordered failure evidence when every remote validation fails', () => {
     const entries = parseRemoteRuntimeImportText([

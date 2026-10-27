@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { installMemoryStorage } from '../support/memory-storage';
 import { Wallet, zeroPadValue } from 'ethers';
 
 import {
@@ -19,23 +20,6 @@ import {
 
 const entityId = (n: number): string => zeroPadValue(`0x${n.toString(16).padStart(2, '0')}`, 32).toLowerCase();
 
-const installMemoryLocalStorage = (): Map<string, string> => {
-  const values = new Map<string, string>();
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: (key: string) => values.get(key) ?? null,
-      setItem: (key: string, value: string) => values.set(key, value),
-      removeItem: (key: string) => values.delete(key),
-      clear: () => values.clear(),
-      key: (index: number) => Array.from(values.keys())[index] ?? null,
-      get length() {
-        return values.size;
-      },
-    } satisfies Partial<Storage>,
-  });
-  return values;
-};
 
 const makeEnv = (
   runtimeId: string,
@@ -78,7 +62,9 @@ const makeEnv = (
 });
 
 describe('push wake registration frontend contract', () => {
-  beforeEach(() => installMemoryLocalStorage());
+  let restoreStorage = () => {};
+  beforeEach(() => { restoreStorage = installMemoryStorage(); });
+  afterEach(() => restoreStorage());
 
   test('builds signed register/unregister requests against compact runtime target', async () => {
     const wallet = Wallet.createRandom();
