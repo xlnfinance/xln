@@ -2032,7 +2032,7 @@ mod tests {
     }
 
     #[test]
-    fn review_3_pull_start_defers_dirty_draft_without_route_override() {
+    fn review_3_pull_start_defers_dirty_draft_to_active_leader_b_without_route_override() {
         let prepare = CanonicalValue::Object(vec![("readyAfter".into(), number_value(0))]);
         let mut views = account_view(
             "dispute_preparing",
@@ -2089,9 +2089,6 @@ mod tests {
             1,
             "an idle dirty draft needs an actual broadcast output"
         );
-        assert_eq!(outputs[0].entity_id, OWNER);
-        assert!(matches!(&outputs[0].entity_txs[0],
-            crate::LocalEntityOutputTx::Projected(tx) if tx.kind == EntityTxKind::JBroadcast));
         let hook = state
             .crontab
             .as_ref()
@@ -2107,11 +2104,62 @@ mod tests {
                 .bind_projected_target_signer(OWNER, "")
                 .is_err()
         );
-        let bound = outputs[0]
-            .clone()
-            .bind_projected_target_signer(OWNER, "signer")
-            .unwrap();
-        assert_eq!(bound.target_signer_id.as_deref(), Some("signer"));
+        // Same [A, B] / active B authority as the TS regression. Binding to
+        // validators[0] would address A after a certified leader change.
+        let signer_a = format!("0x{}", "31".repeat(20));
+        let signer_b = format!("0x{}", "32".repeat(20));
+        let authority = crate::EntityFrameAuthority {
+            config: crate::EntityConsensusConfig {
+                mode: crate::ConsensusMode::ProposerBased,
+                threshold: 1,
+                validators: vec![signer_a.clone(), signer_b.clone()],
+                shares: BTreeMap::from([(signer_a, 1), (signer_b.clone(), 1)]),
+                jurisdiction: None,
+            },
+            leader_state: crate::EntityLeaderState {
+                active_validator_id: signer_b.clone(),
+                view: 1,
+                changed_at_height: 0,
+            },
+        };
+        let authority = authority.validate_and_normalize().unwrap();
+        let bound = outputs
+            .iter()
+            .cloned()
+            .map(|output| {
+                output
+                    .bind_projected_target_signer(
+                        OWNER,
+                        &authority.leader_state.active_validator_id,
+                    )
+                    .unwrap()
+            })
+            .map(|output| {
+                let txs = output
+                    .entity_txs
+                    .into_iter()
+                    .map(|tx| match tx {
+                        crate::LocalEntityOutputTx::Projected(tx) => tx,
+                        _ => panic!("expected projected broadcast"),
+                    })
+                    .collect::<Vec<_>>();
+                (output.entity_id, output.target_signer_id, txs)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            bound,
+            vec![(
+                OWNER.into(),
+                Some(signer_b),
+                vec![
+                    CanonicalEntityTx::from_frame_projection(
+                        EntityTxKind::JBroadcast,
+                        CanonicalValue::Object(vec![]),
+                    )
+                    .unwrap(),
+                ]
+            )]
+        );
         // An existing immutable sent batch owns the next broadcast via its
         // receipt; emitting another self-output would race that submission.
         let j_state = state.j_batch_state.as_mut().unwrap();

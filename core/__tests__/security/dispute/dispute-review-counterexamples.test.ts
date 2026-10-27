@@ -67,8 +67,11 @@ test('review 1: unregistered Pull counter-proof cannot queue finalization after 
   expect(ready.newState.jBatchState!.batch.disputeFinalizations).toHaveLength(1);
 });
 
-test('review 3: Pull start waits for a clean draft and retries without losing preparation', async () => {
+test.each([addr('31'), addr('32')])('review 3: Pull start broadcasts to active leader %s and retries without losing preparation', async (leader) => {
   const { env, state, account } = setup();
+  state.config.validators = [addr('31'), addr('32')];
+  state.config.shares = { [addr('31')]: 1n, [addr('32')]: 1n };
+  state.leaderState = { view: 1, activeValidatorId: leader, changedAtHeight: 0 };
   account.status = 'dispute_preparing';
   account.disputePrepare = { startedAt: 1000, readyAfter: 1000, reason: 'test' };
   state.jBatchState = initJBatch();
@@ -81,11 +84,10 @@ test('review 3: Pull start waits for a clean draft and retries without losing pr
   expect(result.newState.jBatchState!.batch.reserveToReserve).toHaveLength(1);
   expect(result.newState.jBatchState!.autoBroadcastDraft).toBe(true);
   expect(result.outputs).toEqual([{
-    entityId: owner, signerId: addr('31'), entityTxs: [{ type: 'j_broadcast', data: {} }],
+    entityId: owner, signerId: leader, entityTxs: [{ type: 'j_broadcast', data: {} }],
   }]);
   // The flag alone cannot drain an idle entity. Execute the emitted broadcast
   // and its exact finalized receipt; never replace the draft to simulate progress.
-  result.newState.leaderState = { view: 0, activeValidatorId: addr('31'), changedAtHeight: 0 };
   const broadcastTx = result.outputs[0]!.entityTxs![0]!;
   if (broadcastTx.type !== 'j_broadcast') throw new Error('expected j_broadcast');
   const broadcast = await handleJBroadcast(result.newState, broadcastTx, env);
@@ -103,7 +105,7 @@ test('review 3: Pull start waits for a clean draft and retries without losing pr
   const { handleScheduledWakeEntityTx } = await import('../../../entity/tx/handlers/system/scheduled-wake');
   broadcast.newState.timestamp = 121_000;
   const wake = await handleScheduledWakeEntityTx(env, broadcast.newState, {
-    type: 'scheduledWake', data: { version: 1, proposerSignerId: addr('31'), dueAt: 121_000,
+    type: 'scheduledWake', data: { version: 1, proposerSignerId: leader, dueAt: 121_000,
       jobs: [{ kind: 'hook', id: hook.id, dueAt: 121_000 }] },
   }, false);
   const retryTx = wake.approvedEntityTxs?.find(tx => tx.type === 'prepareDispute');

@@ -4,6 +4,7 @@ import type { EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { prepareEntityTxState } from '../../../state-clone';
+import { getEntityLeaderState } from '../../../consensus/leader';
 import { addMessage } from '../../../frame-events';
 import {
   encodeJBatch,
@@ -54,8 +55,8 @@ const applyStartEvidenceBoundary = <T>(operation: () => T): T => {
 const requestPullDraftBroadcast = (state: EntityState, outputs: EntityInput[]): void => {
   state.jBatchState!.autoBroadcastDraft = true;
   if (state.jBatchState!.sentBatch) return;
-  const signerId = state.config.validators[0];
-  if (!signerId) throw haltRuntimeFailure("DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING", 'DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING');
+  if (!state.config.validators[0]) throw haltRuntimeFailure("DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING", 'DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING');
+  const signerId = getEntityLeaderState(state).activeValidatorId;
   outputs.push({
     entityId: state.entityId,
     signerId,
