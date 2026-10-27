@@ -38,7 +38,7 @@ export function BankLendingPolicy({ wallet }: { wallet: WalletView }) {
   }, [borrowerId, tokenId, wallet.entityId]);
   useEffect(() => { void refresh(); }, [refresh, wallet.frameHeight]);
 
-  const submit = async (action: 'terms' | 'approve' | 'revoke') => {
+  const submit = async (action: 'terms' | 'withdraw' | 'approve' | 'revoke') => {
     if (!account || !canSubmit) return;
     setBusy(true);
     setError('');
@@ -50,8 +50,10 @@ export function BankLendingPolicy({ wallet }: { wallet: WalletView }) {
       if (termId !== 'demand' && (!lateHours.trim() || !Number.isSafeInteger(loanLateMs) || loanLateMs < 0)) throw new Error('Enter a nonnegative late-interest duration');
       const maxPrincipal = action === 'approve' ? parseAmount(principal, meta.decimals) : 0n;
       if (action === 'approve' && maxPrincipal <= 0n) throw new Error('Enter a positive facility principal cap');
-      const tx: EntityTx = action === 'terms' ? { type: 'lendingSetTerms', data: {
-        ...account.doc.state.domain, tokenId, termId, expiresAt,
+      // Withdrawing republishes the terms already expired: no new savings or
+      // loans on this asset and term; signed positions keep their own terms.
+      const tx: EntityTx = action === 'terms' || action === 'withdraw' ? { type: 'lendingSetTerms', data: {
+        ...account.doc.state.domain, tokenId, termId, expiresAt: action === 'withdraw' ? 0 : expiresAt,
         loanLateMs, savingsInterestBps: normalizeInterestBps(saverRate), loanInterestBps: termId === 'demand' ? 0 : normalizeInterestBps(loanRate),
       } } : { type: 'lendingApprove', data: { borrowerEntityId: borrowerId, tokenId, termId, maxPrincipal, expiresAt } };
       await sendEntityTxs(wallet.entityId, wallet.signerId, [tx]);
@@ -84,9 +86,13 @@ export function BankLendingPolicy({ wallet }: { wallet: WalletView }) {
     <p className="note">The ordinary loan rate continues as simple interest until this end. Zero stops interest at maturity. Existing loans keep their original signed terms.</p>
     </>}
     <label className="field"><span className="field-label">New offers and renewals valid for · hours</span><input className="input" value={validHours} onChange={event => setValidHours(event.target.value)} data-testid="bank-valid-hours" /></label>
-    <button type="button" className="btn" disabled={!canSubmit || busy || !commandReady} onClick={() => void submit('terms')} data-testid="bank-publish-rates">Publish bank rates</button>
+    <div className="field-row">
+      <button type="button" className="btn" disabled={!canSubmit || busy || !commandReady} onClick={() => void submit('terms')} data-testid="bank-publish-rates">Publish bank rates</button>
+      <button type="button" className="btn" disabled={!canSubmit || busy || !commandReady} onClick={() => void submit('withdraw')} data-testid="bank-not-lending">Not lending</button>
+    </div>
+    <p className="note">Not lending withdraws this asset and term: no new savings or loans. Existing positions keep their signed terms.</p>
     {termId === 'demand' && <p className="note">Prospective annual rate. Existing earnings never change. Online Accounts renew before their signed coverage ends, within accepted risk; queued withdrawals retain their current rate.</p>}
-    {terms && <p className="note" data-testid="bank-committed-rates">Committed rates: savings {(terms.savingsInterestBps / 100).toFixed(2)}% {termId === 'demand' ? 'per year.' : `· loans ${(terms.loanInterestBps / 100).toFixed(2)}% per term. Late interest ends ${terms.loanLateMs / 3_600_000} hours after maturity.`} {terms.expiresAt <= Date.now() ? 'Expired' : `Valid until ${new Date(terms.expiresAt).toLocaleString()}`}</p>}
+    {terms && <p className="note" data-testid="bank-committed-rates">Committed rates: savings {(terms.savingsInterestBps / 100).toFixed(2)}% {termId === 'demand' ? 'per year.' : `· loans ${(terms.loanInterestBps / 100).toFixed(2)}% per term. Late interest ends ${terms.loanLateMs / 3_600_000} hours after maturity.`} {terms.expiresAt <= Date.now() ? 'Not lending: withdrawn or expired.' : `Valid until ${new Date(terms.expiresAt).toLocaleString()}`}</p>}
     {termId !== 'demand' && <>
     <label className="field"><span className="field-label">Facility principal cap · {meta.symbol}</span><input className="input" value={principal} onChange={event => setPrincipal(event.target.value)} data-testid="bank-facility-principal" /></label>
     <div className="field-row">

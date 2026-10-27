@@ -19,6 +19,7 @@ import {
 	previewSavingsRisk,
 	buildLendingBorrowTx,
 	buildLendingOfferTx,
+	bankOfferFor,
 	fetchLendingState,
 	isLendingLoanRepayable,
 	type LendingState,
@@ -50,9 +51,8 @@ export function Lending() {
 	const requestId = submittedRequest?.owner === wallet.entityId && submittedRequest.hub === hubId && submittedRequest.token === tokenId ? submittedRequest.id : undefined;
 	const meta = getTokenMeta(tokenId);
 	const hub = hubs.find(account => account.counterpartyId === hubId) ?? null;
-	const bankTerms = hub ? state?.terms.find(value => value.tokenId === tokenId && value.termId === termId
-		&& value.chainId === hub.doc.state.domain.chainId && value.depositoryAddress === hub.doc.state.domain.depositoryAddress
-		&& value.expiresAt > Date.now()) : undefined;
+	const bankOffer = hub && state ? bankOfferFor(state.terms, hub.doc.state.domain, tokenId, termId, Date.now()) : { kind: 'none' as const };
+	const bankTerms = bankOffer.kind === 'active' ? bankOffer.terms : undefined;
 	const quotedRate = side === 'lend' ? (bankTerms ? String(bankTerms.savingsInterestBps) : '') : rateText;
 	const bankOfferUnavailable = !bankTerms;
 	const borrowPreview = side === 'borrow' ? previewLendingTerms(amountText, rateText, meta.decimals, { termMs: LENDING_TERM_MS[termId], lateMs: bankTerms?.loanLateMs ?? 0 }) : null;
@@ -192,10 +192,12 @@ export function Lending() {
 								<span className="field-label">{side === 'lend' ? 'Bank savings rate · basis points' : 'Maximum interest you accept · basis points'}</span>
 								<div className="field-row">
 									<input className="input" inputMode="numeric" readOnly={side === 'lend'} value={quotedRate} onChange={event => setRateText(event.target.value)} data-testid="lend-rate" />
-									<span className="muted">{quotedRate ? `= ${rate(Number(quotedRate))} ${termId === 'demand' ? 'per year · simple interest' : 'per term'}` : 'No current offer'}</span>
+									<span className="muted">{quotedRate ? `= ${rate(Number(quotedRate))} ${termId === 'demand' ? 'per year · simple interest' : 'per term'}` : bankOffer.kind === 'not-lending' ? 'Not offered' : 'No offer yet'}</span>
 								</div>
 							</div>
-							{bankOfferUnavailable && <p className="note" data-testid="lending-bank-terms">This bank has not published a current offer for this asset and term.</p>}
+							{bankOfferUnavailable && <p className="note" data-testid="lending-bank-terms">{bankOffer.kind === 'not-lending'
+								? side === 'lend' ? `This bank does not take ${meta.symbol} savings for this term.` : `This bank does not lend ${meta.symbol} for this term.`
+								: 'This bank has not published an offer for this asset and term yet.'}</p>}
 							{side === 'borrow' && <p className="note" data-testid="lending-bank-approval">{bankTerms ? `Bank loan rate: ${rate(bankTerms.loanInterestBps)} per term. ` : ''}The bank must approve your facility before it can fund a request.</p>}
 							{borrowPreview && <p className="note" data-testid="lending-borrow-preview">
 								{!borrowPreview.ok ? borrowPreview.error : <>

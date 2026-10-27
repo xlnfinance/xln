@@ -37,6 +37,9 @@ import {
 } from '../jurisdiction/machine/config/jurisdiction-key';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/adapter/jurisdictions-path';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../swapbook';
+import { buildDefaultBankTermsTxs } from '../lendbook/default-terms';
+import { accountStateDomainFromJurisdiction } from '../account/commitment/state-root';
+import { getKnownTokenIds } from '../account/utils';
 import { toPublicRpcUrl } from '../network/p2p/loopback-url';
 import { startParentLivenessWatch } from '../support/process/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
@@ -623,6 +626,32 @@ const ensureOrderbook = async (env: RuntimeReplica, entityId: string, signerId: 
   finishTiming('orderbook_init', startedAt);
 };
 
+const LENDING_TERMS_INIT_DRAIN_TIMEOUT_MS = 10_000;
+
+/**
+ * A hub that has never published bank terms gets the defaults once. Any
+ * committed terms, including withdrawn ones, are the operator's stance and
+ * are never overwritten on restart.
+ */
+const ensureLendingTerms = async (env: RuntimeReplica, entityId: string, signerId: string): Promise<void> => {
+  const replica = getEntityReplicaById(env, entityId);
+  if (!replica) throw new Error(`LENDING_TERMS_HUB_REPLICA_MISSING:${entityId}`);
+  if ((replica.state.lending?.terms?.size ?? 0) > 0) return;
+  const jurisdiction = replica.state.config.jurisdiction;
+  if (!jurisdiction) throw new Error(`LENDING_TERMS_HUB_JURISDICTION_MISSING:${entityId}`);
+  const domain = accountStateDomainFromJurisdiction(jurisdiction);
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [],
+    entityInputs: [{ entityId, signerId, entityTxs: buildDefaultBankTermsTxs(domain, getKnownTokenIds(), env.state.timestamp) }],
+  });
+  if (!(await waitForRuntimeWorkDrained(env, LENDING_TERMS_INIT_DRAIN_TIMEOUT_MS, 0))) {
+    throw new Error(`LENDING_TERMS_INIT_DRAIN_TIMEOUT:${entityId}`);
+  }
+  if ((getEntityReplicaById(env, entityId)?.state.lending?.terms?.size ?? 0) === 0) {
+    throw new Error(`LENDING_TERMS_INIT_NOT_COMMITTED:${entityId}`);
+  }
+};
+
 type ImportedJurisdictionContracts = {
   chainId?: number;
   depositoryAddress?: string;
@@ -709,6 +738,7 @@ const bootstrapHubJurisdictions = async (
     },
   ];
   await ensureOrderbook(env, primaryBootstrap.entityId, primaryBootstrap.signerId);
+  await ensureLendingTerms(env, primaryBootstrap.entityId, primaryBootstrap.signerId);
 
   for (const [index, configured] of resolveSecondaryJurisdictions(primary.rpc).entries()) {
     const name = String(configured.name || `Secondary ${index + 1}`).trim();
@@ -754,6 +784,7 @@ const bootstrapHubJurisdictions = async (
       primary: false,
     });
     await ensureOrderbook(env, sibling.entityId, sibling.signerId);
+    await ensureLendingTerms(env, sibling.entityId, sibling.signerId);
     nodeLog.debug('sibling_jurisdiction.ready', {
       jurisdiction: name,
       entityId: sibling.entityId,

@@ -36,6 +36,23 @@ export function previewSavingsRisk(hub: AccountView, tokenId: number, amount: st
   return { ok: true as const, currentLimit, requiredLimit: currentLimit + shortfall };
 }
 
+/**
+ * A bank's committed stance for one asset and term in this Account's domain.
+ * `not-lending`: terms were published but are withdrawn or expired.
+ * `none`: the bank has never published terms here.
+ */
+export type BankOffer = { kind: 'active'; terms: LendingBankTerms } | { kind: 'not-lending' } | { kind: 'none' };
+
+export function bankOfferFor(
+  terms: readonly LendingBankTerms[], domain: { chainId: number; depositoryAddress: string },
+  tokenId: number, termId: LendingTermId, now: number,
+): BankOffer {
+  const committed = terms.find(value => value.tokenId === tokenId && value.termId === termId
+    && value.chainId === domain.chainId && value.depositoryAddress === domain.depositoryAddress);
+  if (!committed) return { kind: 'none' };
+  return committed.expiresAt > now ? { kind: 'active', terms: committed } : { kind: 'not-lending' };
+}
+
 export type TermId = LendingTermId;
 
 export const LENDING_TERMS: Array<{ id: TermId; label: string }> = [
