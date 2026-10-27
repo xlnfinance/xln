@@ -1,0 +1,236 @@
+{
+ "sha": "e838188fd",
+ "date": "2026-10-27",
+ "host": "Mac Studio M3 Ultra (bun 1.4.3, anvil 1.7.1)",
+ "fullE2E": {
+  "command": "bun run test:e2e:full",
+  "flags": "--all --strict-browser-health --shards=16 --max-mm-concurrency=4 --max-reset-concurrency=4",
+  "targets": 157,
+  "passed": 157,
+  "failed": 0,
+  "browserHealth": "0 issues",
+  "wallSeconds": 514,
+  "logSha256": "d10d1528f279a31a6252cbecd623029a2b416b9f747c2c00f678563fe40ec10b",
+  "realAiMascotCase": "not declared (XLN_REAL_AI_E2E unset)",
+  "manifestSha256": "a7facc6ae972bfea3262d23c458fd86e3a24912543218ccb34e56ae1432cd654",
+  "targetsSha256": "20cd9537c78c52ef0fb2bc5ce6ccc8a0a1c5eeec72116982832e3ccb4163894a"
+ },
+ "releaseGate": {
+  "command": "bun run gate:release",
+  "result": "pass",
+  "steps": [
+   {
+    "step": "frontend generated aliases",
+    "result": "pass",
+    "seconds": 0.8
+   },
+   {
+    "step": "source checks",
+    "result": "pass",
+    "seconds": 18.8
+   },
+   {
+    "step": "release integrity tests",
+    "result": "pass",
+    "seconds": 15.6
+   },
+   {
+    "step": "runtime core unit tests",
+    "result": "pass",
+    "seconds": 103.4
+   },
+   {
+    "step": "bilateral same-height collision",
+    "result": "pass",
+    "seconds": 5
+   },
+   {
+    "step": "diff whitespace check",
+    "result": "pass",
+    "seconds": 0
+   },
+   {
+    "step": "flow E2E coverage contract",
+    "result": "pass",
+    "seconds": 0
+   },
+   {
+    "step": "frontend check",
+    "result": "pass",
+    "seconds": 14.6
+   },
+   {
+    "step": "contract full suite",
+    "result": "pass",
+    "seconds": 52.1
+   },
+   {
+    "step": "signed exit gas budget",
+    "result": "pass",
+    "seconds": 1.1
+   },
+   {
+    "step": "RPC settlement parity",
+    "result": "pass",
+    "seconds": 7.7
+   },
+   {
+    "step": "security audit pack",
+    "result": "pass",
+    "seconds": 0.8
+   },
+   {
+    "step": "storage WAL smoke",
+    "result": "pass",
+    "seconds": 4.6
+   },
+   {
+    "step": "watchtower smoke",
+    "result": "pass",
+    "seconds": 4.3
+   },
+   {
+    "step": "bootstrap soundcheck",
+    "result": "pass",
+    "seconds": 39.2
+   },
+   {
+    "step": "bootstrap epoch rotation",
+    "result": "pass",
+    "seconds": 21.7
+   },
+   {
+    "step": "deterministic replay oracle",
+    "result": "pass",
+    "seconds": 83.4
+   },
+   {
+    "step": "real WebSocket P2P relay",
+    "result": "pass",
+    "seconds": 6.6
+   },
+   {
+    "step": "all deterministic scenarios",
+    "result": "pass",
+    "seconds": 104
+   },
+   {
+    "step": "RPC system scenarios",
+    "result": "pass",
+    "seconds": 16.6
+   },
+   {
+    "step": "cross-j system scenario",
+    "result": "pass",
+    "seconds": 10.1
+   },
+   {
+    "step": "MM mesh system scenario",
+    "result": "pass",
+    "seconds": 20.8
+   },
+   {
+    "step": "hub 10k storage benchmark",
+    "result": "pass",
+    "seconds": 1.3
+   },
+   {
+    "step": "frozen core final",
+    "result": "pass",
+    "seconds": 0.1
+   },
+   {
+    "step": "Foundation release Hanko",
+    "result": "pass",
+    "seconds": 0.2
+   },
+   {
+    "step": "React payment and admission E2E",
+    "result": "pass",
+    "seconds": 74
+   },
+   {
+    "step": "React direct credit E2E",
+    "result": "pass",
+    "seconds": 25.9
+   },
+   {
+    "step": "React collateral and signed credit request E2E",
+    "result": "pass",
+    "seconds": 32.7
+   },
+   {
+    "step": "React ordinary swap E2E",
+    "result": "pass",
+    "seconds": 28.3
+   },
+   {
+    "step": "React swap cancellation E2E",
+    "result": "pass",
+    "seconds": 28.8
+   },
+   {
+    "step": "React cross swap E2E",
+    "result": "pass",
+    "seconds": 44.7
+   },
+   {
+    "step": "React partial cross swap E2E",
+    "result": "pass",
+    "seconds": 25.6
+   },
+   {
+    "step": "React dispute E2E",
+    "result": "pass",
+    "seconds": 49.8
+   },
+   {
+    "step": "React offline protection E2E",
+    "result": "pass",
+    "seconds": 33.9
+   },
+   {
+    "step": "React file recovery E2E",
+    "result": "pass",
+    "seconds": 46.7
+   },
+   {
+    "step": "React tower recovery E2E",
+    "result": "pass",
+    "seconds": 39.5
+   },
+   {
+    "step": "React lending E2E",
+    "result": "pass",
+    "seconds": 70.3
+   },
+   {
+    "step": "React onboarding and ownership E2E",
+    "result": "pass",
+    "seconds": 35.8
+   },
+   {
+    "step": "React production build",
+    "result": "pass",
+    "seconds": 0.9
+   },
+   {
+    "step": "React production artifact E2E",
+    "result": "pass",
+    "seconds": 31.5
+   }
+  ],
+  "totalSeconds": 1101,
+  "logSha256": "e022c58ce088914a3dfef2afc18b9e33a10fb39293305d8c7a990cb705346b84"
+ },
+ "logs": "mac-studio:/tmp/e2e-run30.log, /tmp/gate-release-run30.log (not committed)",
+ "notCovered": [
+  "public testnet deploy of this SHA",
+  "native TRON receipts trust decision and four-flow evidence",
+  "Sepolia real-clock disputes and exits",
+  "1000-user TPS",
+  "1h soak",
+  "gate:mainnet",
+  "owner fork D (peer J-dependent frames while a jurisdiction is paused)"
+ ]
+}
