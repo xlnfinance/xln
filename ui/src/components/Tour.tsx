@@ -3,13 +3,13 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from './Icons';
 import { useApp } from '../runtime/store';
 import { getAdapter } from '../runtime/adapter';
-import { getJson, resolveApiBase } from '../runtime/http';
 import { useWallet } from '../runtime/views';
 import { TOUR_STEPS, type TourContext } from '../tour/steps';
 import { pruneTourPayments, useTourObservations } from '../tour/observations';
 import { useReceipts } from '../runtime/financial/receipt-state';
 import { useTradeCompletion } from '../tour/use-trade';
 import { tourBaseline, type TourBaseline } from '../tour/outcomes';
+import { useCreditOfficerStatus } from '../tour/use-credit-officer';
 
 const nodeFor = (id: string): HTMLElement | undefined =>
   [...document.querySelectorAll<HTMLElement>(`[data-testid="${id}"]`)].find(node => node.getClientRects().length > 0);
@@ -34,25 +34,7 @@ export function Tour() {
   const observations = useTourObservations();
   const openedReceipt = useReceipts(s => s.opened);
   const runtimeId = getAdapter()?.runtimeId ?? '';
-  const apiBase = resolveApiBase();
-  const needsCreditOfficer = step?.id === 'borrow' || step?.id === 'repay';
-  const [creditOfficerUnavailable, setCreditOfficerUnavailable] = useState('');
-  useEffect(() => {
-    let stopped = false;
-    setCreditOfficerUnavailable('');
-    if (needsCreditOfficer)
-      void getJson('/api/credit-officer/status', {}, apiBase)
-        .then(status => {
-          if (typeof status['enabled'] !== 'boolean') throw new Error('Invalid credit officer status');
-          if (!stopped) setCreditOfficerUnavailable(status['enabled'] ? '' : 'disabled on this stack');
-        })
-        .catch(error => {
-          if (!stopped) setCreditOfficerUnavailable(error instanceof Error ? error.message : String(error));
-        });
-    return () => {
-      stopped = true;
-    };
-  }, [needsCreditOfficer, runtimeId, apiBase]);
+  const { creditOfficerUnavailable, error: creditOfficerError } = useCreditOfficerStatus(tour.active);
   const start = useRef<TourBaseline | null>(null);
   start.current = tourBaseline(start.current, step?.id ?? '', wallet);
   const before = start.current?.step === step?.id ? start.current?.wallet : undefined;
@@ -162,6 +144,9 @@ export function Tour() {
           )}
         </p>
         {trade.error && <p role="alert">Could not verify the swap: {trade.error}</p>}
+        {creditOfficerError && ['borrow', 'repay'].includes(step.id) && (
+          <p role="alert">Could not check the credit officer: {creditOfficerError}</p>
+        )}
         <div className="tour-footer">
           <details className="tour-example" key={step.id}>
             <summary>How this works</summary>
