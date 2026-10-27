@@ -211,6 +211,51 @@ test('review 12: forged salvage ratio is absorbed without state changes', async 
   expect(result.newState.crossJurisdictionSwaps!.get(route.orderId)).toEqual(route);
 });
 
+for (const status of ['resting', 'settled'] as const) {
+  for (const missingPull of [false, true]) {
+    test(`q46 salvage: empty binary on owned ${status} route with ${missingPull ? 'missing' : 'valid'} target pull`, async () => {
+      const { state } = context('targetUser');
+      const route = { ...resting(), status };
+      if (missingPull) delete route.targetPull;
+      state.crossJurisdictionSwaps!.set(route.orderId, route);
+      const before = computeEntityConsensusSectionDigestsCold(state);
+      const result = handleCrossJurisdictionSalvageEntityTx(state, { type: 'crossJurisdictionSalvage', data: { routeId: route.orderId, binary: '0x', fillRatio: 1 } });
+      if (missingPull) {
+        await expect(result).rejects.toThrow('CROSS_J_REVEAL_PORT_TARGET_PULL_MISSING');
+      } else {
+        const applied = await result;
+        expect(applied.outputs).toEqual([]);
+        expect(computeEntityConsensusSectionDigestsCold(applied.newState)).toEqual(before);
+        expect(applied.newState.crossJurisdictionSwaps!.get(route.orderId)).toEqual(route);
+        expect(readEntityFrameEvents(applied.newState)).toEqual(status === 'settled' ? [] : [
+          { type: 'status', message: `🌉 Cross-j reveal port ignored for ${route.orderId}: empty result` },
+        ]);
+      }
+      expect(computeEntityConsensusSectionDigestsCold(state)).toEqual(before);
+    });
+  }
+}
+
+for (const ownership of ['missing collection', 'unknown route', 'non-owner'] as const) {
+  test(`q46 salvage: positive claim with ${ownership} returns the ownership status only`, async () => {
+    const { state } = context(ownership === 'non-owner' ? 'targetHub' : 'targetUser');
+    const route = resting();
+    const binary = buildCrossJurisdictionPullReveal(route, 65535, deriveCrossJurisdictionPrivateSeed('review-seed', route)).binary;
+    if (ownership === 'non-owner') {
+      delete route.targetPull; // Unowned mirror corruption must not enter owned-route validation.
+      state.crossJurisdictionSwaps!.set(route.orderId, route);
+    } else if (ownership === 'missing collection') delete state.crossJurisdictionSwaps;
+    const before = computeEntityConsensusSectionDigestsCold(state);
+    const result = await handleCrossJurisdictionSalvageEntityTx(state, { type: 'crossJurisdictionSalvage', data: { routeId: route.orderId, binary, fillRatio: 1 } });
+    expect(result.outputs).toEqual([]);
+    expect(computeEntityConsensusSectionDigestsCold(result.newState)).toEqual(before);
+    expect(computeEntityConsensusSectionDigestsCold(state)).toEqual(before);
+    expect(readEntityFrameEvents(result.newState)).toEqual([
+      { type: 'status', message: `🌉 Cross-j reveal port ${route.orderId} skipped: route not owned here` },
+    ]);
+  });
+}
+
 test('review 13: private seed whitespace canonicalizes before hashing', () => {
   expect(deriveCrossJurisdictionPrivateSeed(' review-seed\n', intent())).toBe(deriveCrossJurisdictionPrivateSeed('review-seed', intent()));
 });

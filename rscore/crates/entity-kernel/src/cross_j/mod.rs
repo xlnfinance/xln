@@ -4679,24 +4679,37 @@ fn apply_salvage(
             ..Default::default()
         });
     }
-    let mut route = state
+    let local = normalized(&state.entity_id);
+    let Some(mut route) = state
         .cross_jurisdiction_swaps
         .as_ref()
         .and_then(|routes| routes.get(&route_id))
+        .filter(|route| {
+            nested_text(route, "target", "counterpartyEntityId")
+                .is_some_and(|target_user| normalized(target_user) == local)
+        })
         .cloned()
-        .ok_or_else(|| invalid(tx.kind, format!("ROUTE_MISSING:{route_id}")))?;
-    let local = normalized(&state.entity_id);
-    let target_user = nested_text(&route, "target", "counterpartyEntityId")
-        .map(normalized)
-        .ok_or_else(|| invalid(tx.kind, "TARGET_USER_MISSING"))?;
-    if local != target_user {
-        return Ok(CrossJurisdictionApplyResult::default());
-    }
+    else {
+        return Ok(CrossJurisdictionApplyResult {
+            events: vec![EntityFrameEvent::Status {
+                message: format!("🌉 Cross-j reveal port {route_id} skipped: route not owned here"),
+            }],
+            ..Default::default()
+        });
+    };
     let target_pull = field(&route, "targetPull")
         .ok_or_else(|| invalid(tx.kind, format!("TARGET_PULL_MISSING:{route_id}")))?;
     // Owned mirror corruption stays fatal even after finality, as in TS.
     if terminal_route(&route) {
         return Ok(CrossJurisdictionApplyResult::default());
+    }
+    if binary == "0x" {
+        return Ok(CrossJurisdictionApplyResult {
+            events: vec![EntityFrameEvent::Status {
+                message: format!("🌉 Cross-j reveal port ignored for {route_id}: empty result"),
+            }],
+            ..Default::default()
+        });
     }
     let target_hub = nested_text(&route, "target", "entityId")
         .map(normalized)

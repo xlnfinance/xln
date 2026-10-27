@@ -606,6 +606,109 @@ fn review_3_amend_pending_ratio_prevents_stale_admission() {
 }
 
 #[test]
+fn q46_salvage_empty_binary_preserves_owned_route_validation_and_finality() {
+    for status in ["resting", "settled"] {
+        for missing_pull in [false, true] {
+            let (mut state, views, command) = salvage_setup();
+            let mut route = state
+                .cross_jurisdiction_swaps
+                .as_ref()
+                .unwrap()
+                .get("order-1")
+                .unwrap()
+                .clone();
+            set(&mut route, "status", string(status)).unwrap();
+            if missing_pull {
+                remove(&mut route, "targetPull").unwrap();
+            }
+            stored(&mut state, route);
+            let mut data = command.frame_data().unwrap().clone();
+            set(&mut data, "binary", string("0x")).unwrap();
+            set(
+                &mut data,
+                "fillRatio",
+                number(1, command.kind, "RATIO").unwrap(),
+            )
+            .unwrap();
+            let command = projected(command.kind, data).unwrap();
+            let before = state.clone();
+            let result = apply_salvage(&mut state, &views, &command);
+            assert_eq!(state, before);
+            if missing_pull {
+                assert!(
+                    matches!(result.unwrap_err(), EntityKernelError::InvalidLocalEntityTx { detail, .. }
+                    if detail.contains("TARGET_PULL_MISSING"))
+                );
+            } else {
+                let result = result.unwrap();
+                assert!(result.outputs.is_empty());
+                assert!(result.proposal_work.is_empty());
+                let events = if status == "settled" {
+                    vec![]
+                } else {
+                    vec![EntityFrameEvent::Status {
+                        message: "🌉 Cross-j reveal port ignored for order-1: empty result".into(),
+                    }]
+                };
+                assert_eq!(result.events, events);
+            }
+        }
+    }
+}
+
+#[test]
+fn q46_salvage_unowned_positive_claim_is_status_only() {
+    for ownership in ["missing collection", "unknown route", "non-owner"] {
+        let (mut state, views, command) = salvage_setup();
+        match ownership {
+            "missing collection" => state.cross_jurisdiction_swaps = None,
+            "unknown route" => {
+                state
+                    .cross_jurisdiction_swaps
+                    .as_mut()
+                    .unwrap()
+                    .remove("order-1")
+                    .unwrap();
+            }
+            "non-owner" => {
+                state.entity_id = format!("0x{}", "33".repeat(32));
+                let mut route = state
+                    .cross_jurisdiction_swaps
+                    .as_ref()
+                    .unwrap()
+                    .get("order-1")
+                    .unwrap()
+                    .clone();
+                // Unowned corruption must not enter owned-route validation.
+                remove(&mut route, "targetPull").unwrap();
+                stored(&mut state, route);
+            }
+            _ => unreachable!(),
+        }
+        let mut data = command.frame_data().unwrap().clone();
+        set(
+            &mut data,
+            "fillRatio",
+            number(1, command.kind, "RATIO").unwrap(),
+        )
+        .unwrap();
+        let command = projected(command.kind, data).unwrap();
+        let before = state.clone();
+        let result =
+            apply_salvage(&mut state, &views, &command).expect("unowned evidence cannot halt");
+        assert_eq!(state, before);
+        assert!(result.outputs.is_empty());
+        assert!(result.proposal_work.is_empty());
+        assert_eq!(
+            result.events,
+            vec![EntityFrameEvent::Status {
+                message: "🌉 Cross-j reveal port order-1 skipped: route not owned here".into(),
+            }]
+        );
+    }
+}
+
+#[test]
 fn review_12_amend_out_of_range_claim_is_status_not_fatal() {
     for (ratio, normalized_claim) in [
         ("-1", None),
