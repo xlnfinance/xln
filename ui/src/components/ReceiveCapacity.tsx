@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react';
+import { useApp } from '../runtime/store';
 import type { AccountCapacityViewInput } from '@xln/core/account/capacity-plan';
 import { peekXLN } from '../runtime/xln-loader';
 import { readAccountState } from '../runtime/financial/swap';
@@ -31,6 +32,7 @@ export function ReceiveCapacity(props: Props) {
 function ReceiveCapacityIntent(props: Props) {
   const id = useId();
   const [creditPercent, setCreditPercent] = useState(0);
+  const commandReady = useApp(s => s.commandReady);
   const [buffer, setBuffer] = useState(true);
   const [busy, setBusy] = useState(false);
   const [pendingLimit, setPendingLimit] = useState<bigint | null>(null);
@@ -188,7 +190,7 @@ function ReceiveCapacityIntent(props: Props) {
         <button
           type="button"
           className="btn primary"
-          disabled={plan.status !== 'credit' || busy || pendingLimit !== null || props.disabled || !props.signerId}
+          disabled={plan.status !== 'credit' || busy || pendingLimit !== null || props.disabled || !props.signerId || !commandReady}
           onClick={() => void prepare()}
           data-testid="receive-spectrum-confirm"
         >

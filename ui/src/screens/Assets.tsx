@@ -374,6 +374,7 @@ function DebtRows({
   busy: boolean;
   onEnforce?: () => void;
 }) {
+  const commandReady = useApp(s => s.commandReady);
   const meta = getTokenMeta(group.tokenId);
   const open = group.entries.filter(entry => entry.remainingAmount > 0n);
   return (
@@ -402,7 +403,7 @@ function DebtRows({
           type="button"
           className="btn ghost sm"
           style={{ marginTop: 8 }}
-          disabled={busy}
+          disabled={busy || !commandReady}
           onClick={onEnforce}
           data-testid={`debt-enforce-${meta.symbol}`}
         >

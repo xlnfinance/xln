@@ -7,6 +7,7 @@ import { CopyId } from './CopyId';
 
 export function Formation() {
   const entityId = useApp(state => state.activeEntityId);
+  const commandReady = useApp(state => state.commandReady);
   const wallet = useWallet(entityId);
   const networks = [...(getEmbeddedEnv()?.state.jReplicas.keys() ?? [])];
   const [name, setName] = useState('');
@@ -29,7 +30,7 @@ export function Formation() {
   return <details className="card" data-testid="entity-formation">
     <summary className="caps">Create an entity</summary>
     <p className="note">Separate your personal wallet, business or shared treasury. Each has its own accounts and approval rules.</p>
-    {!networks.length ? <p className="note">Connect a network on this device first.</p> : <form onSubmit={event => { event.preventDefault(); void submit(); }}>
+    {!networks.length ? <p className="note">Connect a network on this device first.</p> : <form onSubmit={event => { event.preventDefault(); if (kind === 'numbered' && !commandReady) return; void submit(); }}>
       <fieldset disabled={busy} style={{ border: 0, margin: 0, padding: 0 }}>
         <label className="field">Name<input className="input" required value={name} onChange={event => setName(event.target.value)} data-testid="formation-name" /></label>
         <label className="field">Network<select className="input" value={network || networks[0]} onChange={event => setNetwork(event.target.value)}>{networks.map(value => <option key={value}>{value}</option>)}</select></label>
@@ -46,7 +47,7 @@ export function Formation() {
           <label className="field">Required voting weight · total {total}<input className="input" type="number" min="1" max={total} required value={threshold} onChange={event => setThreshold(Number(event.target.value))} /></label>
           <p className="note">Signers must operate their own runtimes. Funds may become inaccessible if the required signing weight is unavailable.</p>
         </>}
-        <button className="btn primary" disabled={!wallet.signerId} data-testid="formation-submit">{busy ? 'Creating…' : kind === 'numbered' ? 'Register on-chain' : 'Create entity'}</button>
+        <button className="btn primary" disabled={!wallet.signerId || (kind === 'numbered' && !commandReady)} data-testid="formation-submit">{busy ? 'Creating…' : kind === 'numbered' ? 'Register on-chain' : 'Create entity'}</button>
       </fieldset>
     </form>}
     {error && <p className="note" role="alert">{error}</p>}

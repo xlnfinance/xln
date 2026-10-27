@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useApp } from '../runtime/store';
 import { sendEntityTxs } from '../runtime/tx';
 import { formatAmount } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
@@ -9,6 +10,7 @@ export function LendingRiskConsent({ entityId, signerId, hubId, tokenId, current
   currentLimit: bigint; requiredLimit: bigint; disabled: boolean;
 }) {
   const [busy, setBusy] = useState(false);
+  const commandReady = useApp(s => s.commandReady);
   const [error, setError] = useState('');
   const meta = getTokenMeta(tokenId);
   const money = (value: bigint) => `${formatAmount(value, meta.decimals, meta.decimals)} ${meta.symbol}`;
@@ -29,7 +31,7 @@ export function LendingRiskConsent({ entityId, signerId, hubId, tokenId, current
   return <div className="card" data-testid="lending-risk-consent">
     <p>Your current maximum unsecured risk with this bank is {money(currentLimit)}.</p>
     <p>Including this deposit's interest requires {money(requiredLimit)}. This limit covers all obligations on this Account. Only collateral secures recovery.</p>
-    <button type="button" className="btn ghost" disabled={disabled || busy} onClick={() => void authorize()} data-testid="lending-risk-authorize">
+    <button type="button" className="btn ghost" disabled={disabled || busy || !commandReady} onClick={() => void authorize()} data-testid="lending-risk-authorize">
       {busy ? 'Authorizing…' : `Set maximum risk to ${money(requiredLimit)}`}
     </button>
     {error && <p role="alert">{error}</p>}

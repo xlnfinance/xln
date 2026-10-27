@@ -8,12 +8,38 @@ import { isRuntimeCommandJournalUnlocked } from '@xln/frontend/lib/stores/comman
 import { waitForObservedRemoteCommand } from '@xln/frontend/lib/stores/commands/remote-command-observation';
 import { getAdapter, requireAdapter } from './adapter';
 
+/** The j-catchup fence admits only chain joins (Runtime isJCatchupBootstrapInput). */
+const isBootstrapOnlyInput = (input: RuntimeInput): boolean =>
+  input.entityInputs.length === 0 &&
+  (input.jInputs?.length ?? 0) === 0 &&
+  input.runtimeTxs.length > 0 &&
+  input.runtimeTxs.every(tx => tx.type === 'importJ' || tx.type === 'importReplica');
+
+/** A command refused before dispatch; `code` keeps the Runtime readiness reason. */
+export class WalletCommandsPausedError extends Error {
+  readonly code: string;
+  constructor(reason: string) {
+    super(
+      reason === 'j-catchup' || reason === 'persistence-fenced'
+        ? `Wallet is syncing (${reason}). Payments open when sync completes.`
+        : `Wallet commands are paused (${reason}).`,
+    );
+    this.name = 'WalletCommandsPausedError';
+    this.code = `RUNTIME_COMMAND_NOT_READY:${reason}`;
+  }
+}
+
 /** Both wallet shells use the same command identity, journal and observed frontier. */
 export async function sendRuntimeInput(
   input: RuntimeInput,
   options: RuntimeCommandExecutionOptions = {},
 ): Promise<RuntimeAdapterSendResult> {
   const adapter = requireAdapter();
+  // One guard for every caller (buttons, Enter submits, future flows).
+  // The Runtime admits bootstrap imports only during the J catch-up, never under a halt or other fence.
+  if (!adapter.commandReady && !(adapter.commandReadyReason === 'j-catchup' && isBootstrapOnlyInput(input))) {
+    throw new WalletCommandsPausedError(adapter.commandReadyReason ?? 'not-ready');
+  }
   if (adapter.mode === 'embedded') return adapter.send(input);
   const runtimeId = adapter.runtimeId;
   const serverFingerprint = adapter.serverFingerprint;

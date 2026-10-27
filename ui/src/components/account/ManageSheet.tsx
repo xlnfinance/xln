@@ -29,6 +29,7 @@ export function ManageSheet({
   initialTab?: ManageTab;
 }) {
   const toast = useApp(s => s.toast);
+  const commandReady = useApp(s => s.commandReady);
   const selectedTokenId = useApp(s => s.selectedTokenId);
   const [selectedTab, setTab] = useState<ManageTab>(
     initialTab ?? (account.dispute !== 'none' ? 'dispute' : 'collateral'),
@@ -215,7 +216,7 @@ export function ManageSheet({
           <button
             type="button"
             className="btn primary"
-            disabled={account.disputed || busy || !policy || amount <= 0n || net <= 0n}
+            disabled={account.disputed || busy || !commandReady || !policy || amount <= 0n || net <= 0n}
             onClick={() =>
               void run(`Collateral request sent to ${account.label}`, async () => {
                 await send([buildRequestCollateralTx(counterpartyId, tokenId, amount, policy!)]);
@@ -267,7 +268,7 @@ export function ManageSheet({
           <button
             type="button"
             className="btn primary"
-            disabled={account.disputed || busy || !creditText.trim()}
+            disabled={account.disputed || busy || !commandReady || !creditText.trim()}
             onClick={() =>
               void run('Credit requested from the hub', async () => {
                 const value = parseAmount(creditText, meta.decimals);
@@ -321,7 +322,7 @@ export function ManageSheet({
           <button
             type="button"
             className="btn primary"
-            disabled={account.disputed || busy || addTokenId === null}
+            disabled={account.disputed || busy || !commandReady || addTokenId === null}
             onClick={() =>
               void run(`${getTokenMeta(addTokenId ?? 0).symbol} lane proposed`, async () => {
                 await send([buildAddTokenTx(counterpartyId, addTokenId!)]);

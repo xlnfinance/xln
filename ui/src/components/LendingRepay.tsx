@@ -18,9 +18,10 @@ export function LendingRepay({
   const [amount, setAmount] = useState('');
   const [busy, setBusy] = useState(false);
   const toast = useApp(s => s.toast);
+  const commandReady = useApp(s => s.commandReady);
   if (!isLendingLoanRepayable(loan)) return null;
   const meta = getTokenMeta(loan.tokenId);
-  const disabled = busy || !wallet.signerId;
+  const disabled = busy || !wallet.signerId || !commandReady;
   const repay = async () => {
     if (disabled) return;
     setBusy(true);

@@ -1,4 +1,4 @@
-import { sendRuntimeInput } from '../commands';
+import { sendRuntimeInput, WalletCommandsPausedError } from '../commands';
 import { isAddress } from 'ethers';
 import { isTronChainId } from '@xln/core/api/public/runtime-module';
 import { getEmbeddedEnv, requireAdapter } from '../adapter';
@@ -36,6 +36,8 @@ export async function formEntity(draft: FormationDraft): Promise<{ entityId: str
   const localSignerId = members.some(member => member.name === draft.signerId.toLowerCase()) ? draft.signerId.toLowerCase() : null;
   await adapter.ensureOwnerCommandLane();
   if (draft.kind === 'numbered') {
+    // On-chain registration bypasses sendRuntimeInput; the adapter would refuse it with a raw code.
+    if (!adapter.commandReady) throw new WalletCommandsPausedError(adapter.commandReadyReason ?? 'not-ready');
     if (isTronChainId(Number(network.chainId))) throw new Error('Registered entities are not supported on this network.');
     const result = await adapter.registerNumberedEntities({ jurisdictionRef: draft.jurisdiction, payerSignerId: draft.signerId, entities: [{
       name: draft.name.trim(), profileName: draft.name.trim(), validators: members, threshold: BigInt(draft.threshold),

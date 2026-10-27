@@ -53,6 +53,7 @@ export function Swap() {
   const [params] = useSearchParams();
   const entityId = useApp(s => s.activeEntityId);
   const toast = useApp(s => s.toast);
+  const commandReady = useApp(s => s.commandReady);
   const wallet = useWallet(entityId);
   const xln = peekXLN();
 
@@ -841,7 +842,7 @@ export function Swap() {
             type="button"
             className="btn primary"
             data-testid="swap-submit"
-            disabled={!prepared || Boolean(disabledReason) || submitting || !wallet.signerId}
+            disabled={!commandReady || !prepared || Boolean(disabledReason) || submitting || !wallet.signerId}
             onClick={() => void place()}
           >
             <Icon name="swap" size={15} />
@@ -921,7 +922,7 @@ export function Swap() {
                             type="button"
                             className="btn quiet"
                             style={{ fontSize: 12 }}
-                            disabled={cancelingId === order.orderId || order.clearRequested}
+                            disabled={!commandReady || cancelingId === order.orderId || order.clearRequested}
                             onClick={() => void clearCross(order.orderId, false)}
                             data-testid="cross-order-clear"
                           >
@@ -931,7 +932,7 @@ export function Swap() {
                             type="button"
                             className="btn quiet"
                             style={{ fontSize: 12 }}
-                            disabled={cancelingId === order.orderId || order.clearRequested}
+                            disabled={!commandReady || cancelingId === order.orderId || order.clearRequested}
                             onClick={() => void clearCross(order.orderId, true)}
                             data-testid="cross-order-cancel-clear"
                           >
@@ -982,7 +983,7 @@ export function Swap() {
                             type="button"
                             className="btn quiet"
                             style={{ fontSize: 12 }}
-                            disabled={cancelingId === offer.offerId}
+                            disabled={!commandReady || cancelingId === offer.offerId}
                             onClick={() => void cancel(offer.counterpartyId, offer.offerId)}
                             data-testid="swap-offer-cancel"
                           >

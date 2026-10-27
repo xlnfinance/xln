@@ -23,6 +23,7 @@ export function AccountDetail() {
 	const entityId = useApp(s => s.activeEntityId);
 	const selectedTokenId = useApp(s => s.selectedTokenId);
 	const toast = useApp(s => s.toast);
+	const commandReady = useApp(s => s.commandReady);
 	const wallet = useWallet(entityId);
 	const [showEmpty, setShowEmpty] = useState(false);
 	const [showFrames, setShowFrames] = useState(false);
@@ -253,7 +254,7 @@ export function AccountDetail() {
 							<span className="muted">{meta.symbol}</span>
 						</div>
 					</div>
-					<button type="button" className="btn" disabled={account?.disputed || submitting || !creditText.trim()} onClick={() => void extendCredit()}>
+					<button type="button" className="btn" disabled={account?.disputed || submitting || !commandReady || !creditText.trim()} onClick={() => void extendCredit()}>
 						{submitting ? 'Extending…' : 'Extend credit'}
 					</button>
 				</Sheet>

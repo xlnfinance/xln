@@ -30,6 +30,7 @@ const formatUnix = (seconds: bigint): string => seconds > 0n ? new Date(Number(s
 export function Ownership() {
 	const entityId = useApp(s => s.activeEntityId);
 	const toast = useApp(s => s.toast);
+	const commandReady = useApp(s => s.commandReady);
 	const height = useApp(s => s.height);
 	const wallet = useWallet(entityId);
 	const numbered = isNumbered(wallet.entityId);
@@ -149,7 +150,7 @@ export function Ownership() {
 								type="button"
 								className="btn"
 								style={{ marginTop: 10 }}
-								disabled={busy !== null || release.pendingNonce !== null || !depository || !boardReady}
+								disabled={busy !== null || !commandReady || release.pendingNonce !== null || !depository || !boardReady}
 								onClick={() => void run('release', 'Share issuance submitted to the board', () => releaseShares(wallet.entityId, wallet.signerId, depository))}
 								data-testid="release-shares"
 							>
@@ -207,10 +208,10 @@ export function Ownership() {
 									<button type="button" className="btn ghost" disabled={!targetId || busy !== null} onClick={() => void run('status', 'Takeover status refreshed', async () => { setStatus(await readTakeoverStatus(wallet.entityId, wallet.signerId, targetId)); })}>
 										{busy === 'status' ? 'Reading…' : 'Read status'}
 									</button>
-									<button type="button" className="btn" disabled={!targetId || busy !== null} onClick={() => void run('propose', 'CONTROL board proposal submitted', () => proposeTakeover(wallet.entityId, wallet.signerId, targetId))} data-testid="takeover-propose">
+									<button type="button" className="btn" disabled={!targetId || busy !== null || !commandReady} onClick={() => void run('propose', 'CONTROL board proposal submitted', () => proposeTakeover(wallet.entityId, wallet.signerId, targetId))} data-testid="takeover-propose">
 										{busy === 'propose' ? 'Proposing…' : 'Propose a board with only me'}
 									</button>
-										<button type="button" className="btn danger" disabled={!targetId || busy !== null || !activationReady} onClick={() => void run('activate', 'Board activation and handover submitted', () => activateTakeover(wallet.entityId, wallet.signerId, targetId))} data-testid="takeover-activate">
+										<button type="button" className="btn danger" disabled={!targetId || busy !== null || !commandReady || !activationReady} onClick={() => void run('activate', 'Board activation and handover submitted', () => activateTakeover(wallet.entityId, wallet.signerId, targetId))} data-testid="takeover-activate">
 										{busy === 'activate' ? 'Activating…' : 'Activate after the delay'}
 									</button>
 								</div>

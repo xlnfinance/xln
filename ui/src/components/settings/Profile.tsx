@@ -5,6 +5,7 @@ import { useWallet } from '../../runtime/views';
 
 export function Profile() {
   const toast = useApp(s => s.toast);
+  const commandReady = useApp(s => s.commandReady);
   const entityId = useApp(s => s.activeEntityId);
   const wallet = useWallet(entityId);
   const [profileName, setProfileName] = useState('');
@@ -63,7 +64,7 @@ export function Profile() {
           <button
             type="button"
             className="btn sm"
-            disabled={publishing || !profileName.trim() || profileName.trim() === wallet.name}
+            disabled={publishing || !commandReady || !profileName.trim() || profileName.trim() === wallet.name}
             onClick={() => void publishProfile()}
             data-testid="profile-publish"
           >

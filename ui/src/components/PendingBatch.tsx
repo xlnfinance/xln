@@ -63,6 +63,7 @@ export function batchItems(batch: JBatch, self: string, names: Map<string, strin
  */
 export function PendingBatch({ wallet, compact = false }: { wallet: WalletView; compact?: boolean }) {
 	const toast = useApp(s => s.toast);
+	const commandReady = useApp(s => s.commandReady);
 	const [bumpBps, setBumpBps] = useState(FIRST_BUMP_BPS);
 	const [busy, setBusy] = useState<string | null>(null);
 	const [open, setOpen] = useState(!compact);
@@ -136,16 +137,16 @@ export function PendingBatch({ wallet, compact = false }: { wallet: WalletView; 
 			<div className="actions" style={{ marginTop: 12 }}>
 				{mode === 'draft' ? (
 					<>
-						<button type="button" className="btn primary" disabled={busy !== null || sentCount > 0} onClick={() => void run('broadcast')} data-testid="batch-broadcast">
+						<button type="button" className="btn primary" disabled={busy !== null || sentCount > 0 || !commandReady} onClick={() => void run('broadcast')} data-testid="batch-broadcast">
 							<Icon name="check" size={15} />
 							{busy === 'broadcast' ? 'Signing…' : 'Sign & send'}
 						</button>
-						<button type="button" className="btn ghost" disabled={busy !== null} onClick={() => void run('clear')}>
+						<button type="button" className="btn ghost" disabled={busy !== null || !commandReady} onClick={() => void run('clear')}>
 							Clear
 						</button>
 					</>
 				) : (
-					<button type="button" className="btn ghost" disabled={busy !== null} onClick={() => void run('rebroadcast')}>
+					<button type="button" className="btn ghost" disabled={busy !== null || !commandReady} onClick={() => void run('rebroadcast')}>
 						{busy === 'rebroadcast' ? 'Sending…' : `Re-send at +${(bumpBps / 100).toFixed(bumpBps % 100 === 0 ? 0 : 1)}%`}
 					</button>
 				)}

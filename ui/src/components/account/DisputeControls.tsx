@@ -10,6 +10,7 @@ import { useApp } from '../../runtime/store';
 export function DisputeControls({ account, wallet, onClose }: { account: AccountView; wallet: WalletView; onClose: () => void }) {
 	const navigate = useNavigate();
 	const toast = useApp(s => s.toast);
+	const commandReady = useApp(s => s.commandReady);
 	const [busy, setBusy] = useState(false);
 	const [confirmDispute, setConfirmDispute] = useState(false);
 	const counterpartyId = account.counterpartyId;
@@ -35,7 +36,7 @@ export function DisputeControls({ account, wallet, onClose }: { account: Account
 								{dispute.timeout > 0 ? `Challenge window closes ${new Date(dispute.timeout * 1000).toLocaleString()}. ` : ''}
 								While this wallet is unlocked and online, it automatically submits finalization after the challenge window. If it locks, unlock it to resume. Your collateral-backed entitlement is paid to your reserve. Any excess is collected from the debtor’s available reserve; the unpaid remainder stays as debt. Gas is required.
 							</p>
-							<button type="button" className="btn primary danger" disabled={busy || dispute.finalizeQueued || !finalizationReady} onClick={() => void run('Dispute finalization queued', async () => { await send([buildDisputeFinalizeTx(counterpartyId)]); })} data-testid="dispute-finalize">
+							<button type="button" className="btn primary danger" disabled={busy || dispute.finalizeQueued || !finalizationReady || !commandReady} onClick={() => void run('Dispute finalization queued', async () => { await send([buildDisputeFinalizeTx(counterpartyId)]); })} data-testid="dispute-finalize">
 								{dispute.finalizeQueued ? 'Finalize already queued' : !finalizationReady ? 'Waiting for challenge window' : busy ? 'Queuing…' : 'Queue dispute finalize'}
 							</button>
 						</>
@@ -116,7 +117,7 @@ export function DisputeControls({ account, wallet, onClose }: { account: Account
 								</button>
 							) : (
 								<div className="actions">
-									<button type="button" className="btn primary danger" disabled={busy} onClick={() => void run('Dispute prepared; the on-chain start joins your batch', async () => { await send([buildPrepareDisputeTx(counterpartyId)]); })} data-testid="dispute-prepare-confirm">
+									<button type="button" className="btn primary danger" disabled={busy || !commandReady} onClick={() => void run('Dispute prepared; the on-chain start joins your batch', async () => { await send([buildPrepareDisputeTx(counterpartyId)]); })} data-testid="dispute-prepare-confirm">
 										{busy ? 'Preparing…' : 'Yes, dispute'}
 									</button>
 									<button type="button" className="btn ghost" disabled={busy} onClick={() => setConfirmDispute(false)}>

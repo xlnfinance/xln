@@ -36,6 +36,7 @@ export function Pay() {
 	const selectedTokenId = useApp(s => s.selectedTokenId);
 	const setSelectedTokenId = useApp(s => s.setSelectedTokenId);
 	const toast = useApp(s => s.toast);
+	const commandReady = useApp(s => s.commandReady);
 	const wallet = useWallet(entityId);
 
 	const [toText, setToText] = useState(params.get('to')?.toLowerCase() ?? '');
@@ -458,7 +459,7 @@ export function Pay() {
 						type="button"
 						className="btn primary"
 						data-testid="pay-submit"
-						disabled={!validTarget || !chosen || !parsedAmount || sending || quoting || !enoughCapacity || Boolean(modeError) || !wallet.signerId}
+						disabled={!commandReady || !validTarget || !chosen || !parsedAmount || sending || quoting || !enoughCapacity || Boolean(modeError) || !wallet.signerId}
 						onClick={() => void send()}
 					>
 						<Icon name="pay" size={15} />

@@ -31,6 +31,7 @@ export function Lending() {
 	const entityId = useApp(s => s.activeEntityId);
 	const selectedTokenId = useApp(s => s.selectedTokenId);
 	const toast = useApp(s => s.toast);
+	const commandReady = useApp(s => s.commandReady);
 	const height = useApp(s => s.height);
 	const wallet = useWallet(entityId);
 	const hubs = useMemo(() => wallet.accounts.filter(account => account.isHub), [wallet.accounts]);
@@ -213,7 +214,7 @@ export function Lending() {
 								currentLimit={savingsRisk.currentLimit} requiredLimit={savingsRisk.requiredLimit}
 								disabled={busy || !wallet.signerId || Boolean(hub?.disputed)}
 							/>}
-							<button type="button" className="btn primary" disabled={bankOfferUnavailable || busy || !amountText.trim() || !hubId || quoteError || needsRiskConsent || needsReceiveCapacity} onClick={() => void submit()} data-testid="lend-submit">
+							<button type="button" className="btn primary" disabled={bankOfferUnavailable || busy || !commandReady || !amountText.trim() || !hubId || quoteError || needsRiskConsent || needsReceiveCapacity} onClick={() => void submit()} data-testid="lend-submit">
 								{busy ? 'Sending…' : side === 'lend' ? 'Save with this bank' : 'Request the loan'}
 							</button>
 							{requestId && <p role="status" data-testid="lending-request-status">

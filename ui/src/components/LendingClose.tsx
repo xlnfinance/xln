@@ -20,6 +20,7 @@ export function LendingClose({
 }) {
   const [busy, setBusy] = useState(false);
   const toast = useApp(s => s.toast);
+  const commandReady = useApp(s => s.commandReady);
   const account = wallet.accounts.find(entry => entry.counterpartyId === pool.hubEntityId.toLowerCase());
   if (
     (pool.status !== 'open' && pool.status !== 'queued') ||
@@ -32,7 +33,7 @@ export function LendingClose({
   const meta = getTokenMeta(pool.tokenId);
   const tariff = counterpartyFeePolicy(account.doc, account.isLeft, pool.tokenId);
   const close = async () => {
-    if (queued || busy || account.disputed || !wallet.signerId) return;
+    if (queued || busy || account.disputed || !wallet.signerId || !commandReady) return;
     setBusy(true);
     try {
       await sendEntityTxs(wallet.entityId, wallet.signerId, [
@@ -85,7 +86,7 @@ export function LendingClose({
         <button
           type="button"
           className="btn ghost"
-          disabled={busy || account.disputed || !wallet.signerId}
+          disabled={busy || account.disputed || !wallet.signerId || !commandReady}
           onClick={() => void close()}
           data-testid="lending-close"
         >

@@ -18,6 +18,7 @@ const moneyOf = (tokenId: number, amount: bigint): string => {
  */
 export function SettlementCard({ account, wallet }: { account: AccountView; wallet: WalletView }) {
 	const toast = useApp(s => s.toast);
+	const commandReady = useApp(s => s.commandReady);
 	const [busy, setBusy] = useState(false);
 	const view = settlementView(account.doc, account.isLeft);
 	if (!view) return null;
@@ -69,7 +70,7 @@ export function SettlementCard({ account, wallet }: { account: AccountView; wall
 				</p>
 			) : null}
 			{view.phase === 'awaiting_you' ? (
-				<button type="button" className="btn primary" style={{ marginTop: 12 }} disabled={busy || !wallet.signerId} onClick={() => void sign()} data-testid="settlement-sign">
+				<button type="button" className="btn primary" style={{ marginTop: 12 }} disabled={busy || !wallet.signerId || !commandReady} onClick={() => void sign()} data-testid="settlement-sign">
 					<Icon name="check" size={15} />
 					{busy ? 'Signing…' : 'Sign settlement'}
 				</button>

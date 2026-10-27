@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useApp } from '../runtime/store';
 import { normalizeInterestBps } from '@xln/core/lendbook/state';
 import type { EntityTx } from '@xln/core/types/entity-tx';
 import type { WalletView } from '../runtime/views';
@@ -10,6 +11,7 @@ import { sendEntityTxs } from '../runtime/tx';
 /** These controls submit ordinary authenticated bank Entity commands. */
 export function BankLendingPolicy({ wallet }: { wallet: WalletView }) {
   const [borrowerId, setBorrowerId] = useState('');
+  const commandReady = useApp(s => s.commandReady);
   const [tokenId, setTokenId] = useState(1);
   const [termId, setTermId] = useState<TermId>('1d');
   const [saverRate, setSaverRate] = useState('100');
@@ -82,14 +84,14 @@ export function BankLendingPolicy({ wallet }: { wallet: WalletView }) {
     <p className="note">The ordinary loan rate continues as simple interest until this end. Zero stops interest at maturity. Existing loans keep their original signed terms.</p>
     </>}
     <label className="field"><span className="field-label">New offers and renewals valid for · hours</span><input className="input" value={validHours} onChange={event => setValidHours(event.target.value)} data-testid="bank-valid-hours" /></label>
-    <button type="button" className="btn" disabled={!canSubmit || busy} onClick={() => void submit('terms')} data-testid="bank-publish-rates">Publish bank rates</button>
+    <button type="button" className="btn" disabled={!canSubmit || busy || !commandReady} onClick={() => void submit('terms')} data-testid="bank-publish-rates">Publish bank rates</button>
     {termId === 'demand' && <p className="note">Prospective annual rate. Existing earnings never change. Online Accounts renew before their signed coverage ends, within accepted risk; queued withdrawals retain their current rate.</p>}
     {terms && <p className="note" data-testid="bank-committed-rates">Committed rates: savings {(terms.savingsInterestBps / 100).toFixed(2)}% {termId === 'demand' ? 'per year.' : `· loans ${(terms.loanInterestBps / 100).toFixed(2)}% per term. Late interest ends ${terms.loanLateMs / 3_600_000} hours after maturity.`} {terms.expiresAt <= Date.now() ? 'Expired' : `Valid until ${new Date(terms.expiresAt).toLocaleString()}`}</p>}
     {termId !== 'demand' && <>
     <label className="field"><span className="field-label">Facility principal cap · {meta.symbol}</span><input className="input" value={principal} onChange={event => setPrincipal(event.target.value)} data-testid="bank-facility-principal" /></label>
     <div className="field-row">
-      <button type="button" className="btn primary" disabled={!canSubmit || busy || !principal.trim()} onClick={() => void submit('approve')} data-testid="bank-approve">Approve facility</button>
-      <button type="button" className="btn" disabled={!canSubmit || busy} onClick={() => void submit('revoke')} data-testid="bank-revoke">Revoke new draws</button>
+      <button type="button" className="btn primary" disabled={!canSubmit || busy || !principal.trim() || !commandReady} onClick={() => void submit('approve')} data-testid="bank-approve">Approve facility</button>
+      <button type="button" className="btn" disabled={!canSubmit || busy || !commandReady} onClick={() => void submit('revoke')} data-testid="bank-revoke">Revoke new draws</button>
     </div>
     {facility && <p className="note" data-testid="bank-committed-facility">Principal cap: {formatAmount(facility.maxPrincipal, meta.decimals, meta.decimals)} {meta.symbol}. {facility.maxPrincipal === 0n ? 'New draws revoked.' : facility.expiresAt <= Date.now() || facility.jNonce !== account?.doc.state.jNonce ? 'Approval expired.' : `Valid until ${new Date(facility.expiresAt).toLocaleString()}`}</p>}
     </>}

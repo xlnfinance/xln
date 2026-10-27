@@ -42,8 +42,10 @@ export function LoadTestingPanel({
   const status = useApp(s => s.adapterStatus);
   const vaultId = useApp(s => s.activeVaultId);
   const activeEntityId = useApp(s => s.activeEntityId);
+  const commandReady = useApp(s => s.commandReady);
   const ready =
     status === 'connected' &&
+    commandReady &&
     activeEntityId === entityId &&
     Boolean(getEmbeddedEnv()) &&
     external?.owner.toLowerCase() === signerId.toLowerCase();

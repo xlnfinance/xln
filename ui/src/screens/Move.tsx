@@ -50,6 +50,7 @@ export function Move() {
 	const [params] = useSearchParams();
 	const entityId = useApp(s => s.activeEntityId);
 	const toast = useApp(s => s.toast);
+	const commandReady = useApp(s => s.commandReady);
 	const wallet = useWallet(entityId);
 	const [from, setFrom] = useState<MoveEndpoint>(isPlace(params.get('from')) ? params.get('from') as MoveEndpoint : 'reserve');
 	const [to, setTo] = useState<MoveEndpoint>(isPlace(params.get('to')) ? params.get('to') as MoveEndpoint : 'account');
@@ -355,22 +356,22 @@ export function Move() {
 					{!supported ? <p style={{ color: 'var(--dispute)', fontSize: 13 }}>This route is not available.</p> : null}
 
 					{direct ? (
-						<button type="button" className="btn" disabled={busy !== null || Boolean(nowIssue)} onClick={() => void sendDirect()} data-testid="move-send-external">
+						<button type="button" className="btn" disabled={busy !== null || !commandReady || Boolean(nowIssue)} onClick={() => void sendDirect()} data-testid="move-send-external">
 							<Icon name="pay" size={15} />
 							{busy === 'direct' ? 'Sending…' : 'Send from wallet'}
 						</button>
 					) : (
 						<div className="actions">
 							{needsAllowance ? (
-								<button type="button" className="btn" disabled={busy !== null || amount <= 0n} onClick={() => void approve()} data-testid="move-approve">
+								<button type="button" className="btn" disabled={busy !== null || !commandReady || amount <= 0n} onClick={() => void approve()} data-testid="move-approve">
 									{busy === 'approve' ? 'Allowing…' : `Allow ${meta.symbol}`}
 								</button>
 							) : null}
-							<button type="button" className="btn primary" disabled={busy !== null || fundingSubmitted || Boolean(nowIssue) || needsAllowance} onClick={() => void go('now')} data-testid="move-now">
+							<button type="button" className="btn primary" disabled={busy !== null || !commandReady || fundingSubmitted || Boolean(nowIssue) || needsAllowance} onClick={() => void go('now')} data-testid="move-now">
 								<Icon name="check" size={15} />
 								{busy === 'now' ? 'Sending…' : from === 'account' ? 'Propose settlement' : 'Sign & send'}
 							</button>
-							<button type="button" className="btn ghost" disabled={busy !== null || fundingSubmitted || Boolean(draftIssue) || Boolean(fundingRequest.error) || !fundingOwnerMatches} onClick={() => void go('draft')} data-testid="move-draft">
+							<button type="button" className="btn ghost" disabled={busy !== null || !commandReady || fundingSubmitted || Boolean(draftIssue) || Boolean(fundingRequest.error) || !fundingOwnerMatches} onClick={() => void go('draft')} data-testid="move-draft">
 								{busy === 'draft' ? 'Adding…' : 'Add to batch'}
 							</button>
 						</div>

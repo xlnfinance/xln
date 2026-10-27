@@ -25,6 +25,7 @@ export function createWalletLoadController(input: {
     const state = useApp.getState();
     return (
       state.adapterStatus === 'connected' &&
+      state.commandReady &&
       state.activeVaultId === vaultId &&
       state.activeEntityId === input.entityId &&
       getEmbeddedEnv() === env &&
