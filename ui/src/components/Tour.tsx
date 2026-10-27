@@ -7,6 +7,7 @@ import { useWallet } from '../runtime/views';
 import { TOUR_STEPS, type TourContext } from '../tour/steps';
 import { useTourObservations } from '../tour/observations';
 import { useTradeCompletion } from '../tour/use-trade';
+import { tourBaseline, type TourBaseline } from '../tour/outcomes';
 
 const nodeFor = (id: string): HTMLElement | undefined =>
   [...document.querySelectorAll<HTMLElement>(`[data-testid="${id}"]`)].find(node => node.getClientRects().length > 0);
@@ -30,11 +31,12 @@ export function Tour() {
   const trade = useTradeCompletion(step?.id === 'trade', wallet.entityId);
   const observations = useTourObservations();
   const runtimeId = getAdapter()?.runtimeId ?? '';
-  const start = useRef<{ step: typeof step; wallet: typeof wallet } | null>(null);
-  if (start.current?.step !== step && wallet.frame && !wallet.loading) start.current = { step, wallet };
-  const before = start.current && start.current.step === step ? start.current.wallet : undefined;
+  const start = useRef<TourBaseline | null>(null);
+  start.current = tourBaseline(start.current, step?.id ?? '', wallet);
+  const before = start.current?.step === step?.id ? start.current?.wallet : undefined;
   const ctx = useMemo(() => ({ wallet, before, runtimeId, pathname, tradeFilled: trade.filled, dom, ...observations }), [wallet, before, runtimeId, pathname, trade.filled, observations]);
   const target = step?.target(ctx) ?? '';
+  const route = step?.route?.(ctx);
 
   useEffect(() => {
     if (step?.done?.(ctx)) setTour({ index: index + 1 });
@@ -47,8 +49,8 @@ export function Tour() {
   }, [step]);
 
   useEffect(() => {
-    if (step?.route) navigate(step.route(ctx));
-  }, [step]);
+    if (route) navigate(route);
+  }, [step, route, wallet.entityId]);
 
   useEffect(() => {
     // Reveal guidance after navigation/replay, without interrupting typing or guide ticks.
@@ -109,8 +111,8 @@ export function Tour() {
           {['company', 'move', 'withdraw'].includes(step.id) && (
             <>
               {' '}
-              <Link to="/assets" data-testid="tour-company-gas">
-                Get test gas / reserve →
+              <Link to={pathname === '/assets' ? route ?? '/ownership' : '/assets'} data-testid="tour-company-gas">
+                {pathname === '/assets' ? 'Return to exercise →' : 'Get test gas / reserve →'}
               </Link>
             </>
           )}

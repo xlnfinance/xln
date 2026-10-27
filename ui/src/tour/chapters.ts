@@ -12,6 +12,8 @@ import {
   moved,
   newClaim,
   reserve,
+  received,
+  recovered,
   withdrawn,
 } from './outcomes';
 
@@ -51,10 +53,7 @@ const exercises: Record<string, Exercise> = {
     target: 'receive-amount',
     instruction:
       'Request 5 USDC, copy the payment link and pay it from a second test wallet. Wait here for the committed incoming balance increase.',
-    done: ctx =>
-      committed(ctx) &&
-      ctx.wallet.accounts.reduce((sum, account) => sum + (account.tokens.find(t => t.tokenId === 1)?.signed ?? 0n), 0n) >=
-        ctx.before!.accounts.reduce((sum, account) => sum + (account.tokens.find(t => t.tokenId === 1)?.signed ?? 0n), 0n) + 5_000_000n,
+    done: received,
   },
   hubs: {
     path: '/',
@@ -140,13 +139,7 @@ const exercises: Record<string, Exercise> = {
   recovery: {
     path: '/sovereignty',
     target: 'watchtower-backup-now',
-    done: ctx =>
-      Boolean(
-        ctx.restored?.runtimeId === ctx.runtimeId &&
-        ctx.restored.entityIds.includes(ctx.wallet.entityId) &&
-        ctx.wallet.frameHeight >= ctx.restored.height &&
-        ctx.wallet.accounts.length > 0,
-      ),
+    done: recovered,
     skipReason: () =>
       'New-device recovery requires a separate clean browser profile, the original secret and a reachable tower. Restore there, then open this recovery chapter on the restored wallet. Compare identity, committed balances and a 1 USDC payment; keeping the same secret alone is not recovery.',
   },
@@ -162,10 +155,11 @@ const exercises: Record<string, Exercise> = {
     target: 'release-shares',
     instruction:
       'On your new registered company, release treasury shares to the Depository. Wait until both share reserves are committed.',
-    // Nonces start at 0, so the first release is "confirmed nonce 0": the committed
-    // outcome is both share reserves growing, not the nonce moving.
+    // EntityProvider increments before execution: the first release confirms nonce 1.
+    // Require both the executed action and its two committed reserve credits.
     done: ctx =>
       committed(ctx) &&
+      (core(ctx.wallet)?.entityProviderActionState?.confirmedNonce ?? 0n) > (core(ctx.before!)?.entityProviderActionState?.confirmedNonce ?? 0n) &&
       ctx.shareTokens?.runtimeId === ctx.runtimeId &&
       ctx.shareTokens.entityId === ctx.wallet.entityId &&
       ctx.shareTokens.ids.length === 2 &&
@@ -182,7 +176,12 @@ const exercises: Record<string, Exercise> = {
       ctx.governance?.runtimeId === ctx.runtimeId &&
       ctx.governance.entityId === ctx.wallet.entityId &&
       ctx.governance.oldHash !== ctx.governance.newHash,
-    skipReason: () =>
+    skipReason: ctx =>
+      ctx.takeover?.runtimeId === ctx.runtimeId && ctx.takeover.entityId === ctx.wallet.entityId &&
+      ctx.takeover.targetId !== ctx.wallet.entityId && /^0x0{55}[0-9a-f]{9}$/i.test(ctx.takeover.targetId) &&
+      ctx.takeover.controlMajority &&
+      (/^0x0{64}$/.test(ctx.takeover.proposedBoardHash) ||
+        (ctx.takeover.activateAt > 0n && ctx.takeover.currentUnix >= ctx.takeover.activateAt)) ? '' :
       'Requires a separate disposable registered target, settled CONTROL majority and the on-chain activation delay. Do not replace a live company board for this tutorial. A proposal is not activation; read status before proposing and again after activation to verify the confirmed board hash changed to the proposal.',
   },
   dispute: {

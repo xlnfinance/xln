@@ -18,7 +18,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { Wallet, keccak256, toUtf8Bytes } from 'ethers';
 import { API_BASE_URL, APP_BASE_URL, ensureE2EBaseline } from '../../utils/e2e-baseline';
-import { startWatchtower, stopWatchtower, type WatchtowerChild } from '../../utils/watchtower-daemon';
+import { startWatchtower, stopWatchtower, type WatchtowerChild } from '../../utils/tour/watchtower-daemon';
 import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,

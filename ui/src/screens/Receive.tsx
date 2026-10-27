@@ -1,8 +1,10 @@
+import { useTourObservations } from '../tour/observations';
+import { getAdapter } from '../runtime/adapter';
 import { useEffect, useMemo, useState } from 'react';
 import { HOME, PageHead } from '../components/PageHead';
 import { useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
-import { buildWalletPayHref, buildXlnInvoiceDeepLink, buildXlnInvoiceUri } from '$lib/utils/xlnInvoice';
+import { buildWalletPayHref, buildXlnInvoiceDeepLink, buildXlnInvoiceUri, parseXlnInvoice } from '$lib/utils/xlnInvoice';
 import { CopyId } from '../components/CopyId';
 import { Icon } from '../components/Icons';
 import { TokenPicker } from '../components/TokenPicker';
@@ -58,6 +60,17 @@ export function Receive() {
 	const requiredAmount = useMemo(() => {
 		try { return parseAmount(amount, meta.decimals); } catch { return 0n; }
 	}, [amount, meta.decimals]);
+
+	useEffect(() => {
+		if (!entityId) return;
+		useTourObservations.setState({
+			invoice: {
+				runtimeId: getAdapter()?.runtimeId ?? '', entityId, tokenId: selectedTokenId,
+				amount: requiredAmount, description: parseXlnInvoice(invoice).description, fromHeight: wallet.frameHeight + 1,
+			},
+			incoming: undefined,
+		});
+	}, [intent, requiredAmount]);
 
 	const copy = async (text: string, label: string): Promise<void> => {
 		await navigator.clipboard.writeText(text);

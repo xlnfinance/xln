@@ -6,6 +6,7 @@ import { sendRuntimeInput } from '../commands';
  */
 import type { RuntimeAdapterViewFrame, RuntimeInput } from '@xln/core/api/public/runtime-module';
 import {
+	ENTITY_SHARE_SUPPLY,
 	buildControlBoardActivationInputs,
 	buildControlBoardProposalInput,
 	buildEntityShareReleaseInput,
@@ -103,13 +104,18 @@ const takeoverBoard = (mode: ControlTakeoverBoard['mode'], signerId: string): Co
 	shares: { [normalize(signerId)]: 1n },
 });
 
-export async function readTakeoverStatus(entityId: string, signerId: string, targetEntityId: string): Promise<TakeoverStatus> {
+export async function readTakeoverStatus(entityId: string, signerId: string, targetEntityId: string): Promise<TakeoverStatus & { controlMajority: boolean }> {
 	const { replica } = requireTarget(targetEntityId, signerId);
 	const jadapter = await hostedJAdapter(entityId, signerId);
 	const entity = await jadapter.entityProvider.entities(replica.state.entityId);
 	const latestBlock = await jadapter.provider.getBlock('latest');
 	if (!latestBlock) throw new Error('CONTROL_TAKEOVER_LATEST_BLOCK_MISSING');
+	const registry = await jadapter.getTokenRegistry();
+	const control = registry.find(token => token.tokenType === 2 &&
+		normalize(token.address) === normalize(jadapter.addresses.entityProvider) && token.externalTokenId === BigInt(targetEntityId));
+	const support = control ? await jadapter.getReserves(entityId, control.tokenId) : 0n;
 	return {
+		controlMajority: support > ENTITY_SHARE_SUPPLY / 2n,
 		targetEntityId: normalize(replica.state.entityId),
 		currentBoardHash: normalize(entity.currentBoardHash),
 		proposedBoardHash: normalize(entity.proposedBoardHash),

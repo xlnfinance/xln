@@ -1,5 +1,6 @@
 import { FEATURE_CHAPTERS } from './chapters';
 import { WALLET_LESSONS } from '@xln/frontend/lib/tutorial/curriculum';
+import type { PaymentTerminalEvent } from '@xln/frontend/lib/stores/network/paymentTerminalMonitor';
 import { collateral, committed } from './outcomes';
 import type { WalletView } from '../runtime/views';
 
@@ -9,6 +10,10 @@ export type TourContext = {
   tradeFilled: boolean;
   runtimeId: string;
   before?: WalletView | undefined;
+  invoice?: { runtimeId: string; entityId: string; tokenId: number; amount: bigint; description: string; fromHeight: number; id?: string; hashlock?: string } | undefined;
+  incoming?: PaymentTerminalEvent | undefined;
+  outgoing?: PaymentTerminalEvent | undefined;
+  takeover?: { runtimeId: string; entityId: string; targetId: string; controlMajority: boolean; proposedBoardHash: string; activateAt: bigint; currentUnix: bigint } | undefined;
   backup?: { runtimeId: string; entityId: string; height: number; storedBytes: number };
   exported?: { runtimeId: string; entityId: string; height: number };
   restored?: { runtimeId: string; entityIds: string[]; height: number };
@@ -123,6 +128,7 @@ const steps: TourStep[] = [
     target: () => 'account-cover',
     route: ctx => (ctx.wallet.accounts[0] ? `/accounts/${ctx.wallet.accounts[0].counterpartyId}` : '/'),
     done: ctx => committed(ctx) && collateral(ctx.wallet) > collateral(ctx.before!),
+    skipReason: ctx => ctx.wallet.accounts.some(account => account.isHub) ? '' : 'Select your original personal wallet: this entity has no hub account.',
   },
   {
     id: 'evidence',

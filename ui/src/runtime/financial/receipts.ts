@@ -1,3 +1,4 @@
+import { observeTourPayment } from '../../tour/observations';
 import { useReceipts } from './receipt-state';
 import type { RuntimeAdapterFrameReceiptResponse } from '@xln/core/api/runtime-adapter/types';
 import {
@@ -45,6 +46,7 @@ export function startPaymentTerminal(): () => void {
 	const monitor = createPaymentTerminalMonitor({
 		readPage: readReceipts,
 		onEvent: event => {
+			observeTourPayment(event);
 			if (event.name === 'HtlcFailed') {
 				const reason = String(event.data['reason'] || event.data['error'] || '').trim();
 				useApp.getState().toast(reason ? `Payment failed: ${reason}` : 'Payment failed', 'danger');

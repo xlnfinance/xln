@@ -1,100 +1,9 @@
 import { expect, test } from 'bun:test';
 import type { CrossJurisdictionSwapRoute } from '@xln/core/types/cross-jurisdiction';
-import type { AccountLendingCovenant } from '@xln/core/types/account';
-import type { AccountView, WalletView } from '../runtime/views';
-import { TOUR_STEPS, type TourContext } from './steps';
+import type { WalletView } from '../runtime/views';
+import { TOUR_STEPS } from './steps';
 
-const owner = `0x${'a'.repeat(64)}`;
-const company = `0x${'0'.repeat(63)}1`;
-const frame = (entityId = owner, reserves = new Map<number, bigint>()) =>
-  ({
-    activeEntity: { core: { entityId, height: 2, reserves, config: { validators: ['signer'] } } },
-  }) as NonNullable<WalletView['frame']>;
-const wallet = (changes: Partial<WalletView> = {}): WalletView => ({
-  frame: frame(),
-  entityId: owner,
-  signerId: 'signer',
-  name: 'Test',
-  jurisdiction: 'Testnet',
-  frameHeight: 10,
-  summaries: [],
-  names: new Map(),
-  hubs: new Set(),
-  accounts: [],
-  reserves: [],
-  onchain: [],
-  totals: [],
-  usd: {
-    onchain: 0,
-    reserve: 0,
-    pending: 0,
-    receivable: 0,
-    secured: 0,
-    risk: 0,
-    owed: 0,
-    net: 0,
-    sendCapacity: 0,
-    receiveCapacity: 0,
-    feesEarned: 0,
-    mmlExposure: 0,
-  },
-  paybookFeesEarned: 0n,
-  loading: false,
-  error: null,
-  refresh: () => {},
-  ...changes,
-});
-const account = (changes: Partial<AccountView> = {}): AccountView =>
-  ({
-    counterpartyId: 'hub',
-    isLeft: true,
-    isHub: true,
-    frameHeight: 1,
-    tokens: [],
-    dispute: 'none',
-    doc: { state: { subcontracts: new Map() } },
-    ...changes,
-  }) as AccountView;
-const token = (credit = 0n, coll = 0n, signed = 0n) =>
-  ({
-    tokenId: 1,
-    derived: { peerCreditLimit: credit },
-    delta: { collateral: coll },
-    signed,
-  }) as AccountView['tokens'][number];
-const context = (changes: Partial<TourContext> = {}): TourContext => ({
-  wallet: wallet({ frameHeight: 11 }),
-  before: wallet(),
-  tradeFilled: false,
-  runtimeId: 'runtime',
-  pathname: '/',
-  dom: { has: () => true, text: () => 'Submitted', value: () => '5' },
-  ...changes,
-});
-const step = (id: string) => {
-  const found = TOUR_STEPS.find(row => row.id === id);
-  if (!found) throw new Error(`Missing chapter ${id}`);
-  return found;
-};
-const done = (id: string, ctx: TourContext) => step(id).done?.(ctx) ?? false;
-const covenant = (kind: AccountLendingCovenant['kind'], creditorIsLeft: boolean): AccountLendingCovenant => ({
-  kind,
-  creditorIsLeft,
-  tokenId: 1,
-  principal: 5_000_000n,
-  interestBps: 100,
-  openedAt: 1,
-  accruedAt: 1,
-  accruedInterest: 0n,
-  interestRemainder: 0n,
-  termMs: 86_400_000,
-  lateMs: 0,
-});
-function withClaim(kind: AccountLendingCovenant['kind'], creditorIsLeft: boolean, height = 11) {
-  const row = account();
-  row.doc.state.subcontracts = new Map([['claim', covenant(kind, creditorIsLeft)]]);
-  return wallet({ accounts: [row], frameHeight: height });
-}
+import { owner, company, frame, wallet, account, token, context, done, withClaim } from './fixtures';
 
 test('opening screens, entering amounts and submitted notices never complete financial chapters', () => {
   for (const chapter of TOUR_STEPS.filter(row => row.done && !['faucet', 'pay', 'trade'].includes(row.id))) {
@@ -129,10 +38,10 @@ test('reserve moves require both committed legs; pending batch or external credi
   expect(done('cover', context({ before, wallet: after }))).toBe(true);
 });
 
-test('invoices complete only after a committed incoming USDC position increase', () => {
+test('a USDC position increase alone does not prove an invoice payment', () => {
   const before = wallet({ accounts: [account({ tokens: [token(0n, 0n, 10n)] })] });
   const after = wallet({ frameHeight: 11, accounts: [account({ tokens: [token(0n, 0n, 5_000_010n)] })] });
-  expect(done('receive', context({ before, wallet: after }))).toBe(true);
+  expect(done('receive', context({ before, wallet: after }))).toBe(false);
   expect(done('receive', context({ before, wallet: { ...after, frameHeight: 10 } }))).toBe(false);
 });
 
@@ -184,7 +93,7 @@ test('backup and export require actual current owner evidence, not enabled setti
         wallet: wallet({ frameHeight: 11, accounts: [account()] }),
       }),
     ),
-  ).toBe(true);
+  ).toBe(false);
   expect(done('recovery', context({ restored: { runtimeId: 'runtime', entityIds: [company], height: 10 } }))).toBe(false);
 });
 
@@ -236,9 +145,9 @@ test('share release needs both registered share tokens and committed reserve gro
   expect(done('shares', context({ wallet: after }))).toBe(false);
   expect(done('shares', context({ wallet: after, shareTokens: { runtimeId: 'runtime', entityId: owner, ids: [8] } }))).toBe(false);
   expect(done('shares', context({ wallet: after, shareTokens: { runtimeId: 'runtime', entityId: company, ids: [8, 9] } }))).toBe(false);
-  // The first release confirms nonce 0; it still completes the chapter.
+  // Nonce 0 is the initial state, not a confirmed release.
   view.activeEntity!.core.entityProviderActionState.confirmedNonce = 0n;
-  expect(done('shares', context({ wallet: after, shareTokens }))).toBe(true);
+  expect(done('shares', context({ wallet: after, shareTokens }))).toBe(false);
   view.activeEntity!.core.reserves.set(9, 0n);
   expect(done('shares', context({ wallet: after, shareTokens }))).toBe(false);
 });

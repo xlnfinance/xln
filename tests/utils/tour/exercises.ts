@@ -43,9 +43,9 @@ export async function fundReserve(page: Page, hubId: string): Promise<void> {
   await page.getByTestId('faucet-reserve').click();
   await expect(page.getByTestId('faucet-reserve')).toBeEnabled({ timeout: 20_000 });
   await expect.poll(async () => tourToken(await settledTourState(page, hubId, 'funding'), 1).reserve).toBe(20_000_000n);
-  // Re-entering the chapter captures the funded committed starting point.
-  await page.getByTestId('tour-chapter').selectOption('balance');
-  await page.getByTestId('tour-chapter').selectOption('move');
+  await next(page, 'move');
+  await page.getByTestId('tour-company-gas').click();
+  await expect(page.getByTestId('move-amount')).toBeVisible();
 }
 
 export async function openSecondHub(page: Page): Promise<void> {
@@ -89,12 +89,14 @@ export async function proveRecoveredPayment(page: Page, hubId: string): Promise<
   await expect(page.getByTestId('pay-submit')).toBeEnabled();
   const quoted = await page.getByTestId('pay-quote').getAttribute('data-sender-amount');
   if (!quoted) throw new Error('TUTORIAL_RECOVERED_PAYMENT_QUOTE_MISSING');
+  await next(page, 'recovery');
   await page.getByTestId('pay-submit').click();
   await page.getByTestId('receipt-open').click();
   await expect(page.getByTestId('receipt-kicker')).toHaveText('Paid', { timeout: 20_000 });
   await page.getByTestId('receipt-done').click();
   const after = await settledTourState(page, hubId, 'recovered-after-payment');
   expect(tourToken(after, 1).ownValue).toBe(tourToken(before, 1).ownValue - BigInt(quoted));
+  await next(page, 'company');
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
@@ -102,4 +104,5 @@ export async function proveRecoveredPayment(page: Page, hubId: string): Promise<
   await waitForWalletBoot(page);
   expect((await settledTourState(page, hubId, 'recovered-after-reload')).tokens).toEqual(after.tokens);
   await page.getByTestId('wallet-tutorial').click();
+  await next(page, 'company');
 }

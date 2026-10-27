@@ -1,7 +1,7 @@
 import { gotoApp } from '../../../utils/e2e-demo-users';
 import { test, expect } from '../../../global-setup.mts';
 import { enterStack, readWalletCheckpoint, readTourState, settledTourState, tourToken } from '../../../utils/tour/committed';
-import { startWatchtower, stopWatchtower, type WatchtowerChild } from '../../../utils/watchtower-daemon';
+import { startWatchtower, stopWatchtower, type WatchtowerChild } from '../../../utils/tour/watchtower-daemon';
 import { readWalletIdentity, waitForWalletBoot, LOCAL_PASSWORD } from '../../../../ui/tests/wallet-ui';
 import {
   next,
@@ -196,7 +196,7 @@ test(
       expect(restored.canonicalStateHash).toBe(backed.frame.canonicalStateHash);
       await page.getByTestId('wallet-tutorial').click();
       await page.getByTestId('tour-chapter').selectOption('recovery');
-      await next(page, 'company');
+      await next(page, 'recovery');
       await proveRecoveredPayment(page, hubId);
       await visit('company');
       await page.getByTestId('entity-formation').locator('summary').click();
@@ -213,10 +213,12 @@ test(
       await expect(page.getByTestId('shares-dividend')).toHaveText('100,000,000,000');
       await skip(page, /separate disposable registered target/, skipped);
       await visit('balance');
-      await page.getByTestId('entity-switcher-trigger').click();
-      await page.locator(`[data-testid="entity-switcher-entity"][data-entity-id="${wallet.entityId}"]`).click();
       await page.getByTestId('tour-advance').click();
       await visit('cover');
+      await expect(page.getByTestId('tour-skip-reason')).toContainText('Select your original personal wallet');
+      await page.getByTestId('entity-switcher-trigger').click();
+      await page.locator(`[data-testid="entity-switcher-entity"][data-entity-id="${wallet.entityId}"]`).click();
+      await expect(page.getByTestId('account-cover')).toBeVisible();
       await page.getByTestId('account-cover').click();
       await page.getByTestId('collateral-amount').fill('5');
       await page.getByTestId('collateral-request').click();

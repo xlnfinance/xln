@@ -70,10 +70,12 @@ export function Ownership() {
 	useEffect(() => {
 		void refreshShares();
 	}, [refreshShares, height]);
-	useEffect(() => { setTargetId(''); setStatus(null); }, [wallet.entityId]);
+	useEffect(() => { setTargetId(''); setStatus(null); previousStatus.current = null; useTourObservations.setState({ takeover: undefined }); }, [wallet.entityId]);
 
   const refreshTakeover = async (): Promise<void> => {
     const next = await readTakeoverStatus(wallet.entityId, wallet.signerId, targetId);
+    useTourObservations.setState({ takeover: { runtimeId: getAdapter()?.runtimeId ?? '', entityId: wallet.entityId, targetId,
+      controlMajority: next.controlMajority, proposedBoardHash: next.proposedBoardHash, activateAt: next.activateAt, currentUnix: next.currentUnix } });
     const old = previousStatus.current;
     if (old?.targetEntityId === targetId && old.currentBoardHash !== next.currentBoardHash &&
       old.proposedBoardHash === next.currentBoardHash) {
@@ -192,7 +194,7 @@ export function Ownership() {
 									<span className="field-label">Target</span>
 									<div className="mode-grid">
 										{targets.map(target => (
-											<button key={target.entityId} type="button" className={`mode-card${targetId === target.entityId ? ' active' : ''}`} onClick={() => { setTargetId(target.entityId); setStatus(null); }}>
+											<button key={target.entityId} type="button" className={`mode-card${targetId === target.entityId ? ' active' : ''}`} onClick={() => { setTargetId(target.entityId); setStatus(null); useTourObservations.setState({ takeover: undefined }); }}>
 												<span className="t">{target.name}</span>
 												<span className="s">{shortId(target.entityId, 8, 4)}</span>
 											</button>
