@@ -125,7 +125,7 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
             style={{ padding: '10px 10px' }}
             onClick={() => {
               setTargetId(id);
-              setCreditText(wallet.hubs.has(id) ? plainAmount(getHubOpeningCredit(meta.decimals), meta.decimals) : '0');
+              setCreditText(wallet.hubs.has(id) ? plainAmount(getHubOpeningCredit(selectedTokenId), meta.decimals) : '0');
             }}
           >
             <span className="t">
@@ -145,7 +145,7 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
           onChange={event => {
             const id = event.target.value.trim().toLowerCase();
             setTargetId(id);
-            setCreditText(wallet.hubs.has(id) ? plainAmount(getHubOpeningCredit(meta.decimals), meta.decimals) : '0');
+            setCreditText(wallet.hubs.has(id) ? plainAmount(getHubOpeningCredit(selectedTokenId), meta.decimals) : '0');
           }}
           spellCheck={false}
           data-testid="open-account-target"

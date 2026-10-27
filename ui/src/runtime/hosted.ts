@@ -261,8 +261,7 @@ export async function openFirstHubAccount(
     if (disputeConfig) {
       await hydrateJurisdictionPolicyDefaults(stack.jurisdiction.name, () => assertSessionOwned(owns));
       assertSessionOwned(owns);
-      const decimals = xln.getTokenInfo(USDC).decimals;
-      const rebalancePolicy = getOpenAccountRebalancePolicyData(decimals);
+      const rebalancePolicy = getOpenAccountRebalancePolicyData(USDC);
       // The user (or another tab) may have opened this Account while the
       // automatic open awaited the network; decide in the same turn as sending.
       if (accountOpenedOrPending(env, entityId, hub.entityId)) return;
@@ -274,7 +273,7 @@ export async function openFirstHubAccount(
           // raises it later; a full limit is shown and raised by the user.
           data: {
             targetEntityId: hub.entityId,
-            creditAmount: getHubOpeningCredit(decimals),
+            creditAmount: getHubOpeningCredit(USDC),
             ...(rebalancePolicy ? { rebalancePolicy } : {}),
             tokenId: USDC,
             disputeConfig,
