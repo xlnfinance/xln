@@ -113,7 +113,7 @@ const assertLocalCrossJDisputeClock = (
 };
 
 const assertBytes32 = (value: unknown, code: string): string => {
-  const normalized = String(value ?? '').trim().toLowerCase();
+  const normalized = String(value ?? '');
   if (!/^0x[0-9a-f]{64}$/.test(normalized)) throw new Error(code);
   return normalized;
 };

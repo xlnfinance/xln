@@ -135,12 +135,35 @@ fn authority(signer: &str) -> EntityFrameAuthority {
     }
 }
 
+fn source_account_view() -> BTreeMap<String, xln_rscore_entity_kernel::LocalAccountFinancialView> {
+    use xln_rscore_entity_kernel::LocalAccountFinancialView;
+    BTreeMap::from([(
+        "source-hub".into(),
+        LocalAccountFinancialView {
+            dispute_config: xln_rscore_engine::AccountDisputeConfig::new(3600, 86400).unwrap(),
+            active: true,
+            owner_side: xln_rscore_engine::Side::Left,
+            owner_out_capacity: BTreeMap::new(),
+            owner_peer_credit_limit: BTreeMap::new(),
+            settlement_workspace: None,
+            settlement_transition_pending: false,
+            settlement_execution: Err("no settlement".into()),
+            rebalance_active_quote: None,
+            htlc_locks: BTreeMap::new(),
+            pulls: BTreeMap::new(),
+            swap_offers: BTreeMap::new(),
+            pending_cross_pull_close_ids: Default::default(),
+            dispute: None,
+        },
+    )])
+}
+
 #[test]
 fn typescript_route_hash_vector_is_materialized_before_state_commit() {
     let mut state = EntityStateSlice::empty("source-user", 1_000);
     apply_cross_jurisdiction_entity_txs(
         &mut state,
-        &std::collections::BTreeMap::new(),
+        &source_account_view(),
         &[prepare(route(None))],
         Some("source-user-signer"),
         &authority("source-user-signer"),
@@ -202,7 +225,7 @@ fn cross_j_domain_override_preserves_typescript_authorization_and_rejects_substi
     // the same hash, nor may canonicalization rewrite the signed domain.
     apply_cross_jurisdiction_entity_txs(
         &mut state,
-        &BTreeMap::new(),
+        &source_account_view(),
         &[prepare(supplied.clone())],
         Some("source-user-signer"),
         &authority("source-user-signer"),

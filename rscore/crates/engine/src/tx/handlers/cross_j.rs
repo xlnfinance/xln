@@ -340,13 +340,14 @@ pub(crate) fn apply_pull_lock(
         if absolute > maximum {
             return Err(format!("Pull amount out of bounds: {absolute}"));
         }
-        let full_hash =
-            normalized_hex(&string(data, "fullHash")?, 32, "pull hashladder commitment")?;
-        let partial_root = normalized_hex(
-            &string(data, "partialRoot")?,
-            32,
-            "pull hashladder commitment",
-        )?;
+        let full_hash = string(data, "fullHash")?;
+        let partial_root = string(data, "partialRoot")?;
+        // Preserve identical state bytes in TS/Rust: reject noncanonical case.
+        if !crate::cross_j_route::canonical_pull_hash(&full_hash)
+            || !crate::cross_j_route::canonical_pull_hash(&partial_root)
+        {
+            return Err("Invalid pull hashladder commitment".into());
+        }
         let binding = object(data, "crossJurisdiction")?;
         let route = object(data, "crossJurisdictionRoute")?;
         // TS `validateCrossJurisdictionPullRoute`: the supplied route must be
@@ -357,6 +358,7 @@ pub(crate) fn apply_pull_lock(
         if !same_canonical_object(&canonical, &supplied)? {
             return Err("Cross-j pull route is not canonical".into());
         }
+        crate::cross_j_route::validate_pull_binding(&canonical)?;
         if string(route, "status")? != "resting" || string(binding, "status")? != "resting" {
             return Err("Cross-j pull opening must be a zero-progress resting route".into());
         }
@@ -886,7 +888,7 @@ mod tests {
             ])
         };
         // The Account layer admits only the canonical route (TS parity).
-        crate::cross_j_route::canonical_route(&object(vec![
+        let mut route = crate::cross_j_route::canonical_route(&object(vec![
             ("orderId", text("order-1")),
             ("source", source),
             ("target", target),
@@ -896,7 +898,31 @@ mod tests {
             ("targetDisputeConfig", dispute()),
             ("status", text("resting")),
         ]))
-        .expect("canonical route")
+        .expect("canonical route");
+        let hash = string(fields(&route).unwrap(), "routeHash").unwrap();
+        let CanonicalValue::Object(ref mut entries) = route else {
+            unreachable!()
+        };
+        for (name, leg) in [("sourcePull", "source"), ("targetPull", "target")] {
+            let CanonicalValue::Object(pull) =
+                &mut entries.iter_mut().find(|(key, _)| key == name).unwrap().1
+            else {
+                unreachable!()
+            };
+            pull.iter_mut().find(|(key, _)| key == "pullId").unwrap().1 =
+                text(test_pull_id(&hash, leg));
+        }
+        route
+    }
+
+    fn test_pull_id(hash: &str, leg: &str) -> String {
+        use sha3::{Digest, Keccak256};
+        format!(
+            "0x{}",
+            hex::encode(Keccak256::digest(
+                format!("xln:cross-j:pull-id:v1:{hash}:{leg}").as_bytes()
+            ))
+        )
     }
 
     fn lock_route_hash() -> String {
@@ -907,6 +933,114 @@ mod tests {
         lock_tx_with_amount(10.into())
     }
 
+    #[test]
+    fn review_2_cross_leg_ladder_substitution_rejects() {
+        let AccountTx::CrossPullLock { mut data } = lock_tx() else {
+            unreachable!()
+        };
+        let CanonicalValue::Object(ref mut entries) = data else {
+            unreachable!()
+        };
+        let route = &mut entries
+            .iter_mut()
+            .find(|(key, _)| key == "crossJurisdictionRoute")
+            .unwrap()
+            .1;
+        let CanonicalValue::Object(route) = route else {
+            unreachable!()
+        };
+        let target = &mut route
+            .iter_mut()
+            .find(|(key, _)| key == "targetPull")
+            .unwrap()
+            .1;
+        let CanonicalValue::Object(target) = target else {
+            unreachable!()
+        };
+        target
+            .iter_mut()
+            .find(|(key, _)| key == "fullHash")
+            .unwrap()
+            .1 = text(format!("0x{}", "dd".repeat(32)));
+        let result = SequentialAccountEngine::apply_with_context(
+            &replica(),
+            Side::Left,
+            &AccountTx::CrossPullLock { data },
+            &AccountExecutionContext::new(1_000, 1_000, 10, 7, 10),
+        )
+        .unwrap();
+        assert!(
+            result.committed().is_none(),
+            "different source and target ladders must reject"
+        );
+    }
+
+    #[test]
+    fn review_2_non_derived_pull_ids_reject() {
+        let AccountTx::CrossPullLock { mut data } = lock_tx() else {
+            unreachable!()
+        };
+        let CanonicalValue::Object(ref mut entries) = data else {
+            unreachable!()
+        };
+        entries
+            .iter_mut()
+            .find(|(key, _)| key == "pullId")
+            .unwrap()
+            .1 = text("forged-id");
+        let CanonicalValue::Object(route) = &mut entries
+            .iter_mut()
+            .find(|(key, _)| key == "crossJurisdictionRoute")
+            .unwrap()
+            .1
+        else {
+            unreachable!()
+        };
+        let CanonicalValue::Object(pull) = &mut route
+            .iter_mut()
+            .find(|(key, _)| key == "sourcePull")
+            .unwrap()
+            .1
+        else {
+            unreachable!()
+        };
+        pull.iter_mut().find(|(key, _)| key == "pullId").unwrap().1 = text("forged-id");
+        let result = SequentialAccountEngine::apply_with_context(
+            &replica(),
+            Side::Left,
+            &AccountTx::CrossPullLock { data },
+            &AccountExecutionContext::new(1_000, 1_000, 10, 7, 10),
+        )
+        .unwrap();
+        assert!(result.committed().is_none(), "unbound pull IDs must reject");
+    }
+
+    #[test]
+    fn review_6_uppercase_hash_is_rejected_not_normalized() {
+        let AccountTx::CrossPullLock { mut data } = lock_tx() else {
+            unreachable!()
+        };
+        let CanonicalValue::Object(ref mut entries) = data else {
+            unreachable!()
+        };
+        entries
+            .iter_mut()
+            .find(|(key, _)| key == "fullHash")
+            .unwrap()
+            .1 = text(format!("0x{}", "BB".repeat(32)));
+        let result = SequentialAccountEngine::apply_with_context(
+            &replica(),
+            Side::Left,
+            &AccountTx::CrossPullLock { data },
+            &AccountExecutionContext::new(1_000, 1_000, 10, 7, 10),
+        )
+        .unwrap();
+        assert!(
+            result.committed().is_none(),
+            "case-changing storage would diverge from TS"
+        );
+    }
+
     fn lock_tx_with_amount(amount: BigInt) -> AccountTx {
         let full_hash = format!("0x{}", "bb".repeat(32));
         let partial_root = format!("0x{}", "cc".repeat(32));
@@ -914,13 +1048,13 @@ mod tests {
         let route_hash = string(fields(&route).expect("route"), "routeHash").expect("route hash");
         let binding = object(vec![
             ("orderId", text("order-1")),
-            ("routeHash", text(route_hash)),
+            ("routeHash", text(route_hash.clone())),
             ("leg", text("source")),
             ("status", text("resting")),
         ]);
         AccountTx::CrossPullLock {
             data: object(vec![
-                ("pullId", text("pull-1")),
+                ("pullId", text(test_pull_id(&route_hash, "source"))),
                 ("tokenId", number(1).expect("number")),
                 ("amount", CanonicalValue::BigInt(amount)),
                 ("fullHash", text(full_hash)),
@@ -1197,8 +1331,13 @@ mod tests {
             .expect("lock")
             .committed()
             .expect("lock candidate");
-            let pull =
-                fields(locked.state().pull("pull-1").expect("stored pull")).expect("pull fields");
+            let pull = fields(
+                locked
+                    .state()
+                    .pull(&test_pull_id(&lock_route_hash(), "source"))
+                    .expect("stored pull"),
+            )
+            .expect("pull fields");
             assert_eq!(uint(pull, "createdHeight").expect("height"), frame_j_height);
             assert_eq!(uint(pull, "createdTimestamp").expect("timestamp"), 1_000);
         }
@@ -1228,15 +1367,21 @@ mod tests {
 
         let close = AccountTx::CrossPullClose {
             data: object(vec![
-                ("pullId", text("pull-1")),
+                ("pullId", text(test_pull_id(&lock_route_hash(), "source"))),
                 ("binary", text("0x")),
                 (
                     "proof",
                     object(vec![
                         ("orderId", text("order-1")),
                         ("routeHash", text(lock_route_hash())),
-                        ("sourcePullId", text("pull-1")),
-                        ("targetPullId", text("target-pull")),
+                        (
+                            "sourcePullId",
+                            text(test_pull_id(&lock_route_hash(), "source")),
+                        ),
+                        (
+                            "targetPullId",
+                            text(test_pull_id(&lock_route_hash(), "target")),
+                        ),
                         ("fillRatio", number(0).expect("number")),
                         ("cumulativeSourceAmount", CanonicalValue::BigInt(0.into())),
                         ("cumulativeTargetAmount", CanonicalValue::BigInt(0.into())),

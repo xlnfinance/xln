@@ -121,6 +121,7 @@ mod tests {
 
     fn view(hub_grant: u64) -> LocalAccountFinancialView {
         LocalAccountFinancialView {
+            dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
             active: true,
             owner_side: xln_rscore_engine::Side::Left,
             owner_out_capacity: BTreeMap::new(),

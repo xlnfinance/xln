@@ -162,6 +162,8 @@ impl PreparedEntityOutbound {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResidentAccountFinancialView {
     pub active: bool,
+    /// Point-read signed Account clocks; this view is transient, never committed.
+    pub dispute_config: xln_rscore_engine::AccountDisputeConfig,
     pub owner_side: xln_rscore_engine::Side,
     pub owner_in_capacity: BTreeMap<TokenId, BigInt>,
     pub owner_out_capacity: BTreeMap<TokenId, BigInt>,
@@ -1349,6 +1351,7 @@ impl ResidentConsensusEngine {
                     .transpose()?;
                 Ok(ResidentAccountFinancialView {
                     active,
+                    dispute_config: state.dispute_config(),
                     owner_side,
                     owner_in_capacity,
                     owner_out_capacity,

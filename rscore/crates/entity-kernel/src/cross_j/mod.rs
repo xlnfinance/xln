@@ -282,6 +282,12 @@ fn canonical_route(
     if object(route).is_none() {
         return Err(invalid(kind, "ROUTE_OBJECT"));
     }
+    if kind == EntityTxKind::PrepareCrossJurisdictionSwap
+        && nested_text(route, "source", "jurisdiction").map(normalized)
+            == nested_text(route, "target", "jurisdiction").map(normalized)
+    {
+        return Err(rejected(kind, "DISTINCT_STACKS_REQUIRED"));
+    }
     xln_rscore_engine::cross_j_route::canonical_route(route).map_err(|detail| invalid(kind, detail))
 }
 
@@ -397,6 +403,8 @@ struct HashLadderProof {
 }
 
 fn hash_ladder_proof(runtime_seed: &str, route_hash: &str) -> HashLadderProof {
+    // The private-seed boundary matches TS: whitespace never changes ladder bytes.
+    let runtime_seed = runtime_seed.trim();
     let private_seed = prefixed_hex(&keccak_text(&format!(
         "xln:cross-j:hashladder-private-seed:v1:{runtime_seed}:{route_hash}"
     )));
@@ -643,6 +651,21 @@ pub(crate) fn cross_jurisdiction_account_view_requests(
             request.dispute |= dispute;
         };
         match tx.kind {
+            EntityTxKind::PrepareCrossJurisdictionSwap => {
+                let route = route(tx)?;
+                let local = normalized(&state.entity_id);
+                let user = nested_text(&route, "source", "entityId").map(normalized);
+                let hub = nested_text(&route, "source", "counterpartyEntityId").map(normalized);
+                if user.as_deref() == Some(local.as_str()) {
+                    if let Some(hub) = hub {
+                        add(hub, None, None, false);
+                    }
+                } else if hub.as_deref() == Some(local.as_str()) {
+                    if let Some(user) = user {
+                        add(user, None, None, false);
+                    }
+                }
+            }
             EntityTxKind::CrossPullClose => {
                 let account = text(data, "counterpartyEntityId")
                     .map(normalized)
@@ -828,6 +851,7 @@ pub fn build_proposer_materializations(
         if text(route, "status") != Some("intent")
             || field(route, "sourcePull").is_some()
             || field(route, "targetPull").is_some()
+            || route_runtime_expired(route, runtime_timestamp)
             || pending_keys.contains(&format!("setup:{order_id}"))
             || nested_text(route, "source", "counterpartyEntityId")
                 .is_none_or(|value| normalized(value) != local)
@@ -2510,6 +2534,16 @@ pub(crate) fn build_cross_jurisdiction_cancel_fill(
             "cumulativeFillRatio".into(),
             number(ratio, kind, "FILL_RATIO")?,
         ),
+        // Cancellation repeats the current sequence and exact execution totals.
+        // Omitting amounts would forge a zero-total retry at the receiving hub.
+        (
+            "cumulativeExecutionSourceAmount".into(),
+            CanonicalValue::BigInt(bigint(&route, "executionSourceAmount").unwrap_or_default()),
+        ),
+        (
+            "cumulativeExecutionTargetAmount".into(),
+            CanonicalValue::BigInt(bigint(&route, "executionTargetAmount").unwrap_or_default()),
+        ),
         ("cancelRemainder".into(), CanonicalValue::Bool(true)),
     ]);
     Ok(CrossJurisdictionBookFill {
@@ -2665,6 +2699,14 @@ fn apply_prepare(
     if local != source_hub {
         return Err(invalid(tx.kind, format!("WRONG_ENTITY:{order_id}:{local}")));
     }
+    if route_runtime_expired(&route, state.timestamp) {
+        return Ok(CrossJurisdictionApplyResult {
+            events: vec![EntityFrameEvent::Status {
+                message: format!("❌ Cross-j prepare {order_id} expired"),
+            }],
+            ..Default::default()
+        });
+    }
     let inserted = insert_exact(
         &mut state.cross_jurisdiction_swaps,
         &order_id,
@@ -2697,7 +2739,10 @@ fn apply_materialize_swap(
         .as_ref()
         .and_then(|values| values.get(&order_id))
         .ok_or_else(|| invalid(tx.kind, format!("INTENT_MISSING:{order_id}")))?;
-    if text(prior, "status") != Some("intent") {
+    let retired_intent = terminal_route(prior)
+        && field(prior, "sourcePull").is_none()
+        && field(prior, "targetPull").is_none();
+    if text(prior, "status") != Some("intent") && !retired_intent {
         return Err(invalid(tx.kind, format!("INTENT_STATUS:{order_id}")));
     }
     if field(prior, "sourcePull").is_some() || field(prior, "targetPull").is_some() {
@@ -2728,6 +2773,10 @@ fn apply_materialize_swap(
         .map_err(|error| invalid(tx.kind, format!("MATERIALIZED_INTENT_ENCODE:{error}")))?;
     if materialized_bytes != prior_bytes {
         return Err(invalid(tx.kind, format!("INTENT_MISMATCH:{order_id}")));
+    }
+    // J events precede proposer work: absorb only byte-exact retired intent work.
+    if retired_intent {
+        return Ok(CrossJurisdictionApplyResult::default());
     }
     collection(&mut state.cross_jurisdiction_swaps).insert(order_id.clone(), route.clone())?;
     let mut ready = route;
@@ -2929,31 +2978,89 @@ fn apply_register(
     {
         return Err(invalid(tx.kind, format!("NON_PARTICIPANT:{order_id}")));
     }
-    let registered_event = EntityFrameEvent::Status {
-        message: format!("🌉 Cross-j swap {order_id} registered"),
-    };
-    let proposal_work = registration_work(state, &route, tx.kind)?;
-    let collection = collection(&mut state.cross_jurisdiction_swaps);
-    match collection.get(&order_id) {
-        Some(existing) if existing == &route => {}
-        Some(existing)
-            if text(existing, "routeHash").is_some()
-                && text(existing, "routeHash") == text(&route, "routeHash") =>
-        {
-            collection.insert(order_id, route.clone())?;
+    let existing = state
+        .cross_jurisdiction_swaps
+        .as_ref()
+        .and_then(|routes| routes.get(&order_id));
+    let transition_error = existing.and_then(|prior| {
+        if text(prior, "routeHash").map(normalized) != text(&route, "routeHash").map(normalized) {
+            Some("route hash mismatch".to_string())
+        } else if terminal_route(prior) {
+            Some(format!(
+                "terminal state {}",
+                text(prior, "status").unwrap_or_default()
+            ))
+        } else if !route_transition_allowed(text(prior, "status"), text(&route, "status")) {
+            Some(format!(
+                "invalid transition {}->{}",
+                text(prior, "status").unwrap_or_default(),
+                text(&route, "status").unwrap_or_default()
+            ))
+        } else {
+            None
         }
-        Some(_) => return Err(invalid(tx.kind, "ROUTE_CONFLICT")),
-        None => {
-            collection.insert(order_id, route.clone())?;
-        }
+    });
+    if let Some(error) = transition_error {
+        return Ok(CrossJurisdictionApplyResult {
+            events: vec![EntityFrameEvent::Status {
+                message: format!("❌ Cross-j swap {order_id} register blocked: {error}"),
+            }],
+            ..Default::default()
+        });
     }
+    // Registration retry never replays opening Account work or resurrects finality.
+    let opening = existing
+        .is_none_or(|prior| matches!(text(prior, "status"), Some("intent" | "target_prepared")));
+    let proposal_work = if opening && text(&route, "status") == Some("resting") {
+        xln_rscore_engine::cross_j_route::validate_pull_binding(&route)
+            .map_err(|detail| rejected(tx.kind, detail))?;
+        registration_work(state, &route, tx.kind)?
+    } else {
+        Vec::new()
+    };
+    let mut merged = existing.cloned().unwrap_or_else(|| route.clone());
+    for (key, value) in object(&route).unwrap() {
+        set(&mut merged, key, value.clone())?;
+    }
+    collection(&mut state.cross_jurisdiction_swaps).insert(order_id.clone(), merged)?;
     Ok(CrossJurisdictionApplyResult {
-        outputs: Vec::new(),
         proposal_work,
-        events: vec![registered_event],
-        orderbook_deltas: Vec::new(),
-        account_envelope_mutations: Vec::new(),
+        events: vec![EntityFrameEvent::Status {
+            message: format!("🌉 Cross-j swap {order_id} registered"),
+        }],
+        ..Default::default()
     })
+}
+
+fn route_transition_allowed(current: Option<&str>, next: Option<&str>) -> bool {
+    match (current, next) {
+        (None, _) | (_, None) => true,
+        (
+            Some("intent"),
+            Some("intent" | "target_prepared" | "resting" | "cancelled" | "expired"),
+        ) => true,
+        (
+            Some("target_prepared"),
+            Some("target_prepared" | "resting" | "clearing" | "cancelled" | "expired"),
+        ) => true,
+        (
+            Some("resting"),
+            Some(
+                "resting" | "partially_filled" | "clear_requested" | "clearing" | "cancelled"
+                | "expired",
+            ),
+        ) => true,
+        (
+            Some("partially_filled"),
+            Some("partially_filled" | "clear_requested" | "clearing" | "cancelled" | "expired"),
+        ) => true,
+        (
+            Some("clear_requested"),
+            Some("clear_requested" | "clearing" | "cancelled" | "expired"),
+        ) => true,
+        (Some("clearing"), Some("clearing" | "settled" | "cancelled" | "expired")) => true,
+        _ => false,
+    }
 }
 
 fn status_rank(status: Option<&str>) -> u8 {
@@ -3319,6 +3426,14 @@ fn apply_book_order_removed(
         (
             "cumulativeFillRatio".into(),
             number(ratio, tx.kind, "FILL_RATIO")?,
+        ),
+        (
+            "cumulativeExecutionSourceAmount".into(),
+            CanonicalValue::BigInt(bigint(progress, "executionSourceAmount").unwrap_or_default()),
+        ),
+        (
+            "cumulativeExecutionTargetAmount".into(),
+            CanonicalValue::BigInt(bigint(progress, "executionTargetAmount").unwrap_or_default()),
         ),
         ("cancelRemainder".into(), CanonicalValue::Bool(true)),
     ]);
@@ -3912,6 +4027,46 @@ fn queue_hash_ladder_registration(
     registration: crate::j_batch::HashLadderRegistration,
     kind: EntityTxKind,
 ) -> Result<RegistrationQueueResult, EntityKernelError> {
+    // Confirmed equal evidence is sticky on both roles: a retry cannot move
+    // revealedAt beyond the beneficiary window after the draft has drained.
+    let mut highest = None;
+    for (_, route) in state
+        .cross_jurisdiction_swaps
+        .as_ref()
+        .map(EntityCanonicalCollection::text_entries)
+        .transpose()?
+        .unwrap_or_default()
+    {
+        let (pull_name, leg, peer, ratio_name) = if registration.target_role {
+            (
+                "targetPull",
+                "target",
+                "entityId",
+                "targetRegistryFillRatio",
+            )
+        } else {
+            (
+                "sourcePull",
+                "source",
+                "entityId",
+                "sourceRegistryFillRatio",
+            )
+        };
+        let Some(pull) = field(&route, pull_name) else {
+            continue;
+        };
+        if nested_text(&route, leg, peer).map(normalized).as_deref()
+            == Some(prefixed_hex(&registration.counterparty_entity).as_str())
+            && text(pull, "fullHash") == Some(prefixed_hex(&registration.full_hash).as_str())
+            && text(pull, "partialRoot") == Some(prefixed_hex(&registration.partial_root).as_str())
+            && let Some(ratio) = unsigned(&route, ratio_name)
+        {
+            highest =
+                Some(highest.unwrap_or(0_u16).max(
+                    u16::try_from(ratio).map_err(|_| invalid(kind, "CONFIRMED_RATIO_INVALID"))?,
+                ));
+        }
+    }
     let j_state = state.j_batch_state.get_or_insert_with(Default::default);
     let matching = |value: &crate::j_batch::HashLadderRegistration| {
         value.target_role == registration.target_role
@@ -3919,7 +4074,6 @@ fn queue_hash_ladder_registration(
             && value.full_hash == registration.full_hash
             && value.partial_root == registration.partial_root
     };
-    let mut highest = None;
     for value in j_state
         .batch
         .hash_ladder_registrations
@@ -4486,13 +4640,31 @@ fn apply_salvage(
         .ok_or_else(|| invalid(tx.kind, "TARGET_PULL_FULL_HASH_MISSING"))?;
     let partial_root = text(target_pull, "partialRoot")
         .ok_or_else(|| invalid(tx.kind, "TARGET_PULL_PARTIAL_ROOT_MISSING"))?;
-    let verified = xln_rscore_engine::verify_hash_ladder_binary(full_hash, partial_root, binary)
-        .map_err(|detail| invalid(tx.kind, detail))?;
+    // Ported peer evidence is not committed authority. Invalid binary/ratio
+    // must leave the route intact, exactly like the TS salvage handler.
+    let verified =
+        match xln_rscore_engine::verify_hash_ladder_binary(full_hash, partial_root, binary) {
+            Ok(ratio) => ratio,
+            Err(detail) => {
+                return Ok(CrossJurisdictionApplyResult {
+                    events: vec![EntityFrameEvent::Status {
+                        message: format!(
+                            "❌ Cross-j reveal port {route_id} invalid pull binary: {detail}"
+                        ),
+                    }],
+                    ..Default::default()
+                });
+            }
+        };
     if verified != claimed_ratio {
-        return Err(invalid(
-            tx.kind,
-            format!("FILL_RATIO_MISMATCH:{claimed_ratio}:{verified}"),
-        ));
+        return Ok(CrossJurisdictionApplyResult {
+            events: vec![EntityFrameEvent::Status {
+                message: format!(
+                    "❌ Cross-j reveal port {route_id} fill mismatch: claimed {claimed_ratio}, verified {verified}"
+                ),
+            }],
+            ..Default::default()
+        });
     }
     let witness = salvage_witness(binary, verified, tx.kind)?;
     let active_dispute = account_views
@@ -4542,8 +4714,28 @@ fn apply_salvage(
             "updatedAt",
             number(state.timestamp, tx.kind, "TIMESTAMP")?,
         )?;
-        collection(&mut state.cross_jurisdiction_swaps).insert(route_id, route)?;
-        return Ok(CrossJurisdictionApplyResult::default());
+        collection(&mut state.cross_jurisdiction_swaps).insert(route_id.clone(), route)?;
+        // With no sent batch, draining the full draft is the only continuation
+        // that makes room for this durable deferred witness (TS salvage parity).
+        let broadcast = state.j_batch_state.as_ref().is_some_and(|batch| {
+            batch.sent_batch.is_none() && !crate::j_batch::batch_is_empty(&batch.batch)
+        });
+        return Ok(CrossJurisdictionApplyResult {
+            outputs: if broadcast {
+                vec![routed(
+                    &local,
+                    None,
+                    vec![projected(
+                        EntityTxKind::JBroadcast,
+                        CanonicalValue::Object(Vec::new()),
+                    )?],
+                )]
+            } else {
+                Vec::new()
+            },
+            events: vec![EntityFrameEvent::Status { message: format!("⏳ Cross-j reveal port {route_id}: deferred until the pending jBatch is acknowledged") }],
+            ..Default::default()
+        });
     }
     if !matches!(
         queued,
@@ -4702,6 +4894,20 @@ fn apply_clear_request(
         });
     }
 
+    if field(&route, "sourcePull").is_none() || field(&route, "targetPull").is_none() {
+        // A user can cancel before proposer materialization. No pull exists to
+        // clear; only a later status missing pulls is committed corruption.
+        if text(&route, "status") == Some("intent") {
+            return Err(rejected(
+                tx.kind,
+                format!("CROSS_J_CLEAR_INTENT_UNMATERIALIZED:{order_id}"),
+            ));
+        }
+        return Err(invalid(
+            tx.kind,
+            format!("CROSS_J_CLEAR_CORRUPT_ROUTE:{order_id}"),
+        ));
+    }
     if text(&route, "status") == Some("clearing") {
         // The paired close is already queued; a later cancel or removal ACK has
         // nothing left to decide.
@@ -5349,7 +5555,51 @@ pub fn apply_cross_jurisdiction_entity_txs(
         validate_materialize_proposer(tx, admitted_signer_id, authority)?;
         let result = match tx.kind {
             EntityTxKind::AdmitCrossJurisdictionBookOrder => apply_admit(state, tx)?,
-            EntityTxKind::PrepareCrossJurisdictionSwap => apply_prepare(state, tx)?,
+            EntityTxKind::PrepareCrossJurisdictionSwap => {
+                let route = route(tx)?;
+                let local = normalized(&state.entity_id);
+                let source_hub =
+                    nested_text(&route, "source", "counterpartyEntityId").map(normalized);
+                let source_user = nested_text(&route, "source", "entityId").map(normalized);
+                let raw =
+                    field(&route, "sourcePull").is_none() && field(&route, "targetPull").is_none();
+                let peer = if source_hub.as_deref() == Some(local.as_str()) {
+                    source_user
+                } else if source_user.as_deref() == Some(local.as_str()) {
+                    source_hub
+                } else {
+                    None
+                };
+                if raw
+                    && !route_runtime_expired(&route, state.timestamp)
+                    && let Some(peer) = peer
+                {
+                    // Before storing an intent, read its exact source Account
+                    // clock from the owning worker. Missing evidence is refusal,
+                    // never a guessed default or a poisoned future wake.
+                    let expected = xln_rscore_engine::cross_j_route::canonical_dispute_config(
+                        &route,
+                        "sourceDisputeConfig",
+                    )
+                    .map_err(|detail| rejected(tx.kind, detail))?;
+                    let actual = account_views.get(&peer).map(|view| {
+                        (
+                            view.dispute_config.left_response_seconds(),
+                            view.dispute_config.right_response_seconds(),
+                        )
+                    });
+                    if actual != Some(expected) {
+                        let order = route_order_id(tx.kind, &route)?;
+                        let reason = match actual {
+                            Some((left, right)) => format!("CROSS_J_PREPARED_SOURCE_ACCOUNT_CLOCK_MISMATCH:{order}:actual={left},{right}:route={},{}", expected.0, expected.1),
+                            None => format!("CROSS_J_PREPARED_SOURCE_ACCOUNT_MISSING:{order}"),
+                        };
+                        combined.events.push(EntityFrameEvent::Status { message: format!("❌ Cross-j prepare {order} blocked: {reason}") });
+                        continue;
+                    }
+                }
+                apply_prepare(state, tx)?
+            }
             EntityTxKind::MaterializeCrossJurisdictionSwap => apply_materialize_swap(state, tx)?,
             EntityTxKind::MaterializeCrossJurisdictionClear => {
                 apply_materialize_clear(state, account_views, tx)?
@@ -5377,6 +5627,7 @@ pub fn apply_cross_jurisdiction_entity_txs(
 
 #[cfg(test)]
 mod tests {
+    mod review_counterexamples;
     mod sub_step;
     use super::*;
 
@@ -5438,6 +5689,24 @@ mod tests {
         let error = proof_body_has_signed_pulls(&malformed_canonical, canonical)
             .expect_err("malformed canonical transformer must fail");
         assert!(error.to_string().contains("CANONICAL_DELTA_BATCH_INVALID"));
+    }
+
+    pub(super) fn source_clock_view(
+        left: u32,
+        right: u32,
+    ) -> crate::local_financial::LocalAccountFinancialView {
+        let mut view = review_counterexamples::account_view();
+        view.dispute_config =
+            xln_rscore_engine::AccountDisputeConfig::new(u64::from(left), u64::from(right))
+                .unwrap();
+        view
+    }
+
+    fn source_clock_views() -> BTreeMap<String, crate::local_financial::LocalAccountFinancialView> {
+        BTreeMap::from([
+            ("source-user".into(), source_clock_view(3600, 86400)),
+            ("source-hub".into(), source_clock_view(3600, 86400)),
+        ])
     }
 
     fn obj(entries: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
@@ -5811,7 +6080,7 @@ mod tests {
         });
         let result = apply_cross_jurisdiction_entity_txs(
             &mut state,
-            &std::collections::BTreeMap::new(),
+            &source_clock_views(),
             &txs,
             Some("source-hub-signer"),
             &authority(
@@ -5839,7 +6108,7 @@ mod tests {
         let root = state.cross_jurisdiction_swaps.as_ref().unwrap().root_hash();
         let duplicate = apply_cross_jurisdiction_entity_txs(
             &mut state,
-            &std::collections::BTreeMap::new(),
+            &source_clock_views(),
             &txs,
             Some("source-hub-signer"),
             &authority(
@@ -5861,7 +6130,7 @@ mod tests {
         let mut state = EntityStateSlice::empty("source-user", 1);
         let result = apply_cross_jurisdiction_entity_txs(
             &mut state,
-            &std::collections::BTreeMap::new(),
+            &source_clock_views(),
             &[tx(
                 EntityTxKind::PrepareCrossJurisdictionSwap,
                 route("intent", false),
@@ -6087,6 +6356,7 @@ mod tests {
         let views = BTreeMap::from([(
             "target-user".to_string(),
             crate::local_financial::LocalAccountFinancialView {
+                dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
                 active: false,
                 owner_side: xln_rscore_engine::Side::Left,
                 owner_out_capacity: BTreeMap::new(),
@@ -6190,7 +6460,7 @@ mod tests {
         let mut state = EntityStateSlice::empty("source-hub", 1);
         apply_cross_jurisdiction_entity_txs(
             &mut state,
-            &std::collections::BTreeMap::new(),
+            &source_clock_views(),
             &[tx(
                 EntityTxKind::PrepareCrossJurisdictionSwap,
                 route("intent", false),
@@ -6210,7 +6480,7 @@ mod tests {
         .expect("prepared route");
         let result = apply_cross_jurisdiction_entity_txs(
             &mut state,
-            &std::collections::BTreeMap::new(),
+            &source_clock_views(),
             &[tx(EntityTxKind::MaterializeCrossJurisdictionSwap, prepared)],
             Some("source-hub-signer"),
             &authority(

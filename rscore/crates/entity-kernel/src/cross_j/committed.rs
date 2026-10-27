@@ -691,6 +691,19 @@ pub(super) fn apply_source_hub_fill_progress(
             format!("CROSS_J_FILL_NOTICE_STALE_CONFLICT:{order_id}:{incoming_seq}:{ratio}"),
         ));
     }
+    // Equal sequence authenticates the same execution amounts, not just the
+    // coarse ladder ratio. A conflicting peer retry is a typed rejection.
+    if incoming_seq == current_seq
+        && (Some(bigint(&route, "executionSourceAmount").unwrap_or_default())
+            != bigint(data, "cumulativeExecutionSourceAmount")
+            || Some(bigint(&route, "executionTargetAmount").unwrap_or_default())
+                != bigint(data, "cumulativeExecutionTargetAmount"))
+    {
+        return Err(super::rejected(
+            kind,
+            format!("CROSS_J_EXECUTION_NOTICE_CONFLICT:{order_id}:{incoming_seq}"),
+        ));
+    }
     if !is_cancel && incoming_seq <= current_seq {
         return Ok(None);
     }

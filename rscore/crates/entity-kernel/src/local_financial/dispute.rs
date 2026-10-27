@@ -1417,6 +1417,7 @@ mod tests {
         BTreeMap::from([(
             PEER.to_string(),
             LocalAccountFinancialView {
+                dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
                 active: status == "active",
                 owner_side: xln_rscore_engine::Side::Left,
                 owner_out_capacity: BTreeMap::new(),

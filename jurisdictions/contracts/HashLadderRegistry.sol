@@ -84,10 +84,16 @@ library HashLadderRegistry {
         if (existingRatio == witness.fillRatio) return;
         revert E12();
       }
-      // Target is the ported namespace. A lower replay cannot erase progress;
-      // equal/higher evidence deliberately refreshes the timestamp so an early
-      // port can be republished inside the target dispute's signed window.
+      // Equal Target evidence is sticky inside this dispute: a late redelivery
+      // must not turn a timely payout into zero. Only a pre-dispute record may
+      // refresh into the new active window; higher ratios still advance.
       if (witness.fillRatio < existingRatio) revert E12();
+      if (witness.fillRatio == existingRatio) {
+        bytes memory accountKey = entityId < registration.counterpartyEntity
+          ? abi.encodePacked(entityId, registration.counterpartyEntity)
+          : abi.encodePacked(registration.counterpartyEntity, entityId);
+        if ((existing >> 16) >= accounts[accountKey].disputeStartTimestamp) return;
+      }
     }
 
     uint256 revealedAt = block.timestamp;

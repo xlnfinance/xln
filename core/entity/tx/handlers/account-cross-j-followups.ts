@@ -1,4 +1,4 @@
-import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+import { haltRuntimeFailure, rejectFailure } from "../../../protocol/errors/failure-taxonomy";
 
 import { normalizeEntityRef } from '../account-key';
 import type { AccountTx, RuntimeOverlayRecord } from '../../../types/account';
@@ -629,7 +629,7 @@ export const applySourceHubCrossJurisdictionFillProgress = (
     ((route.executionSourceAmount ?? 0n) !== fill.cumulativeExecutionSourceAmount ||
       (route.executionTargetAmount ?? 0n) !== fill.cumulativeExecutionTargetAmount)
   ) {
-    throw haltRuntimeFailure('CROSS_J_EXECUTION_NOTICE_CONFLICT', `CROSS_J_EXECUTION_NOTICE_CONFLICT:${fill.orderId}:${incomingSeq}`);
+    throw rejectFailure('CROSS_J_EXECUTION_NOTICE_CONFLICT', `CROSS_J_EXECUTION_NOTICE_CONFLICT:${fill.orderId}:${incomingSeq}`);
   }
   if (!isCancel && incomingSeq <= currentSeq) return false;
 

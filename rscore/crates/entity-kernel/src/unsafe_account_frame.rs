@@ -225,6 +225,7 @@ mod parity_evidence {
 
     fn empty_view() -> LocalAccountFinancialView {
         LocalAccountFinancialView {
+            dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
             active: true,
             owner_side: Side::Left,
             owner_out_capacity: BTreeMap::new(),

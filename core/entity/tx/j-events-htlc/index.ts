@@ -359,7 +359,7 @@ export const queueHashLadderRevealRegistration = (
     targetRole,
   );
   if (queuedRatios.includes(decoded.fillRatio)) return 'already-queued';
-  if (!targetRole && confirmedRatios.includes(decoded.fillRatio)) return 'already-queued';
+  if (confirmedRatios.includes(decoded.fillRatio)) return 'already-queued';
   const existingRatios = [...confirmedRatios, ...queuedRatios];
   if (existingRatios.length > 0) {
     const currentRatio = Math.max(...existingRatios);

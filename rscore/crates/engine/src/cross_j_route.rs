@@ -232,6 +232,45 @@ pub fn canonical_dispute_config(
     Ok((left, right))
 }
 
+/// Same route-derived IDs and ladder on both legs prevent a hub from collecting
+/// the source while making the target unspendable. Ladder seed derives from the
+/// route hash, so including the ladder in that hash would create a cycle.
+pub fn validate_pull_binding(route: &CanonicalValue) -> Result<(), String> {
+    let source = field(route, "sourcePull").ok_or("Cross-j opening pulls missing")?;
+    let target = field(route, "targetPull").ok_or("Cross-j opening pulls missing")?;
+    let hash = text(route, "routeHash").ok_or("Cross-j route hash missing")?;
+    for (leg, pull) in [("source", source), ("target", target)] {
+        for name in ["fullHash", "partialRoot"] {
+            if !text(pull, name).is_some_and(canonical_pull_hash) {
+                return Err("Invalid pull hashladder commitment".into());
+            }
+        }
+        let expected = format!(
+            "0x{}",
+            hex(&Keccak256::digest(
+                format!("xln:cross-j:pull-id:v1:{hash}:{leg}").as_bytes()
+            ))
+        );
+        if text(pull, "pullId") != Some(expected.as_str()) {
+            return Err("Cross-j pull ID does not match route".into());
+        }
+    }
+    if text(source, "fullHash") != text(target, "fullHash")
+        || text(source, "partialRoot") != text(target, "partialRoot")
+    {
+        return Err("Cross-j pull ladders do not match".into());
+    }
+    Ok(())
+}
+
+pub fn canonical_pull_hash(value: &str) -> bool {
+    value.len() == 66
+        && value.starts_with("0x")
+        && value[2..]
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 pub fn route_hash(route: &CanonicalValue) -> Result<String, String> {
     let source = field(route, "source").ok_or_else(|| "SOURCE_MISSING".to_string())?;
     let target = field(route, "target").ok_or_else(|| "TARGET_MISSING".to_string())?;

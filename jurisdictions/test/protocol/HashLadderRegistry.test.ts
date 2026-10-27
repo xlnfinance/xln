@@ -508,20 +508,22 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0x0123n);
   });
 
-  it('target same-ratio re-registration refreshes revealedAt', async function () {
+  it('target same-ratio late redelivery preserves timely settlement', async function () {
     const dispute = await openPullDispute({ label: 'registry-same-ratio', fillRatio: 0x0123, targetRole: true });
     await registerReveal(dispute, dispute.right, { fillRatio: 0x0123 });
     const ladder = ladderHashOf(dispute.pullProof);
     const [, firstAt] = await dispute.depository.getHashLadderReveal(
       dispute.right.entityId, dispute.left.entityId, ladder, true,
     );
-    await time.increase(5);
+    await minePastTimeout(dispute.depository, dispute.acctKey);
     await registerReveal(dispute, dispute.right, { fillRatio: 0x0123 });
     const [ratio, secondAt] = await dispute.depository.getHashLadderReveal(
       dispute.right.entityId, dispute.left.entityId, ladder, true,
     );
     expect(ratio).to.equal(0x0123);
-    expect(secondAt).to.be.gt(firstAt);
+    expect(secondAt).to.equal(firstAt);
+    await finalizeDispute(dispute, dispute.right);
+    expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0x0123n);
   });
 
   it('reads a missing record as a zero fill and releases the payer collateral', async function () {

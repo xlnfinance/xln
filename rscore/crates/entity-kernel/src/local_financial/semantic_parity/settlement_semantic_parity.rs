@@ -210,6 +210,7 @@ fn account_view(case: &Value) -> LocalAccountFinancialView {
                 pending_swap_fill_ratios: BTreeMap::new(),
             });
     LocalAccountFinancialView {
+        dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
         active: true,
         owner_side: if owner_is_left {
             Side::Left

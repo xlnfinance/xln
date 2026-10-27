@@ -190,6 +190,7 @@ fn route_from(state: &EntityStateSlice, tx: &CanonicalEntityTx) -> Option<Canoni
 
 fn empty_account_view(owner_is_left: bool) -> LocalAccountFinancialView {
     LocalAccountFinancialView {
+        dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
         active: true,
         owner_side: if owner_is_left {
             Side::Left
@@ -236,6 +237,16 @@ fn account_views(
     let mut views = BTreeMap::new();
     for account_id in state.known_accounts.iter() {
         let mut view = empty_account_view(local < normalized(account_id));
+        if transaction.kind == EntityTxKind::PrepareCrossJurisdictionSwap {
+            let (left, right) = xln_rscore_engine::cross_j_route::canonical_dispute_config(
+                &route,
+                "sourceDisputeConfig",
+            )
+            .expect("signed source clock");
+            view.dispute_config =
+                xln_rscore_engine::AccountDisputeConfig::new(u64::from(left), u64::from(right))
+                    .unwrap();
+        }
         if case_name == "crossJurisdictionForceSiblingDispute" {
             view.dispute = Some(xln_rscore_batch::ResidentAccountDisputeView {
                 status: "active".into(),

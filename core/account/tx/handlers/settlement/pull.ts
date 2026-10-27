@@ -21,11 +21,12 @@ import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/del
 import { createDefaultDelta } from '../../../state/delta';
 import type { ApplyAccountTxResult } from '../../apply-types';
 import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
+import { crossJurisdictionPullBindingError } from '../../../../extensions/cross-j/pull-binding';
 
 type PullLockTx = Extract<AccountTx, { type: 'cross_pull_lock' }>;
 type CrossPullCloseTx = Extract<AccountTx, { type: 'cross_pull_close' }>;
 
-const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
+const HEX_32_RE = /^0x[0-9a-f]{64}$/;
 
 const absBigInt = (value: bigint): bigint => (value >= 0n ? value : -value);
 const crossProofMatchesBinding = (
@@ -118,6 +119,8 @@ const validateCrossJurisdictionPullRoute = (account: AccountState, tx: PullLockT
     return `Cross-j pull route invalid: ${error instanceof Error ? error.message : String(error)}`;
   }
   if (safeStringify(route) !== safeStringify(supplied)) return 'Cross-j pull route is not canonical';
+  const bindingError = crossJurisdictionPullBindingError(route);
+  if (bindingError) return bindingError;
   if (
     route.status !== 'resting' ||
     binding.status !== 'resting' ||

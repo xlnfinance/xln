@@ -302,6 +302,7 @@ pub enum LocalEntityFinancialTx {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LocalAccountFinancialView {
     pub active: bool,
+    pub dispute_config: xln_rscore_engine::AccountDisputeConfig,
     pub owner_side: xln_rscore_engine::Side,
     pub owner_out_capacity: BTreeMap<TokenId, BigInt>,
     pub owner_peer_credit_limit: BTreeMap<TokenId, BigInt>,
@@ -321,6 +322,7 @@ impl From<xln_rscore_batch::ResidentAccountFinancialView> for LocalAccountFinanc
     fn from(view: xln_rscore_batch::ResidentAccountFinancialView) -> Self {
         Self {
             active: view.active,
+            dispute_config: view.dispute_config,
             owner_side: view.owner_side,
             owner_out_capacity: view.owner_out_capacity,
             owner_peer_credit_limit: view.owner_peer_credit_limit,

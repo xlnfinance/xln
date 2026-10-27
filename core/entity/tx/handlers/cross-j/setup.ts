@@ -160,13 +160,6 @@ const prepareRawCrossJurisdictionIntent = (
     addMessage(state, `❌ Cross-j prepare ${route.orderId} expired`);
     return { newState: state, outputs };
   }
-  const sameJurisdiction =
-    String(route.source.jurisdiction).trim().toLowerCase() ===
-    String(route.target.jurisdiction).trim().toLowerCase();
-  if (sameJurisdiction && Number(route.source.tokenId) === Number(route.target.tokenId)) {
-    addMessage(state, `❌ Cross-j prepare ${route.orderId} must cross a jurisdiction or asset boundary`);
-    return { newState: state, outputs };
-  }
   try {
     // Validate every public prerequisite before making the intent durable.
     // The private seed remains untouched until the default proposer signs
@@ -293,6 +286,11 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
   // derived.
   viaProposerMaterialization = false,
 ): CrossJSetupResult => {
+  // A same-stack route has no cross-J market; reject before storing an intent
+  // whose later proposer materialization would otherwise halt the Runtime.
+  if (normalizeEntityRef(entityTx.data.route.source.jurisdiction) === normalizeEntityRef(entityTx.data.route.target.jurisdiction)) {
+    throw rejectFailure('DISTINCT_STACKS_REQUIRED');
+  }
   let route: CrossJurisdictionSwapRoute;
   const newState = stateForEntityTx(entityState, options);
   const outputs: EntityInput[] = [];
