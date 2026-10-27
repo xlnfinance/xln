@@ -117,9 +117,15 @@ test(
       expect(walAfter.latest).toBeGreaterThanOrEqual(walBefore.latest);
       const replay = walAfter.replay;
       if (!replay) throw new Error('PERSISTENCE_REPLAY_EVIDENCE_MISSING');
-      expect(replay.checkpointHeight).toBe(walBefore.checkpoint);
-      expect(replay.label).toBe(`checkpoint:${walBefore.checkpoint}`);
-      expect(replay.replayedFrames).toBeGreaterThan(0);
+      // The browser materializes its current graph every frame, so reload
+      // restores from the newest durable checkpoint, normally the WAL tip, and
+      // replays whatever tail remains (often none). The retained checkpoint and
+      // its WAL tail stay byte-exact above; checkpoint-plus-tail replay is
+      // proven at hub cadence in browser-wallet-restore-cadence.test.ts.
+      expect(replay.checkpointHeight).toBeGreaterThanOrEqual(walBefore.checkpoint);
+      expect(replay.label).toBe(`checkpoint:${replay.checkpointHeight}`);
+      expect(replay.replayedFrames).toBeGreaterThanOrEqual(0);
+      expect(replay.checkpointHeight + replay.replayedFrames).toBe(replay.latestHeight);
       expect(replay.latestHeight).toBeGreaterThanOrEqual(walBefore.latest);
       expect(await readFinancialState(bobPage, bob.entityId, hubId)).toEqual(bobBefore);
       await testInfo.attach('checkpoint-wal-proof', {
