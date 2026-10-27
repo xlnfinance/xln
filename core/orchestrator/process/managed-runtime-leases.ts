@@ -152,6 +152,8 @@ export const readManagedProcessTable = async (
   return await new Promise<ManagedProcessTableEntry[]>((resolve, reject) => {
     const child = spawnProcess('ps', ['-axo', 'pid=,lstart=,command='], {
       cwd: process.cwd(),
+      // lstart follows the user's locale ("Tue  6 Oct" in en_GB); the parser expects the C format.
+      env: { ...process.env, LC_ALL: 'C' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     if (!child.stdout || !child.stderr) {
