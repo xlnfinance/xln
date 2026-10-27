@@ -193,7 +193,9 @@ test(
       for (const event of events.events.filter(row => row.reason === 'GOSSIP_PROFILE_AUTHORITY_UNAVAILABLE')) {
         expect(outages.some(window => event.ts >= window.start && event.ts <= window.end)).toBe(true);
         expect(event.status).toBe('rejected');
-        expect(event.details.message).toBe(`PROFILE_AUTHORITY_UNAVAILABLE:ECONNREFUSED:${authority}`);
+        expect(
+          ['ECONNREFUSED', 'ECONNRESET'].map(code => `PROFILE_AUTHORITY_UNAVAILABLE:${code}:${authority}`),
+        ).toContain(event.details.message);
         expect(health.hubs!.filter(row => row.name !== 'H1').map(row => row.runtimeId)).toContain(event.from);
         allowDebugIncident({
           source: 'error',

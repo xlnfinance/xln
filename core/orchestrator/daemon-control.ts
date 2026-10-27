@@ -421,10 +421,11 @@ export class DaemonControlClient {
       this.timeoutMs,
       'POST /api/control/gossip/verify-profile',
     ).catch(error => {
-      // Only an actual refused connection is an authority outage. HTTP auth,
-      // registry/schema corruption and route-hash failures below remain errors.
-      if (error instanceof Error && 'code' in error && error.code === 'ECONNREFUSED') {
-        throw new ProfileAuthorityUnavailableError(this.baseUrl, error);
+      // Only a connection that was refused or dropped before any response is an
+      // authority outage (a hub restart drops in-flight requests with ECONNRESET).
+      // HTTP auth, registry/schema corruption and route-hash failures below remain errors.
+      if (error instanceof Error && 'code' in error && (error.code === 'ECONNREFUSED' || error.code === 'ECONNRESET')) {
+        throw new ProfileAuthorityUnavailableError(this.baseUrl, error.code, error);
       }
       throw error;
     });

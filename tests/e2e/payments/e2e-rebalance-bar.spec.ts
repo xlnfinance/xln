@@ -1826,7 +1826,7 @@ test.describe('Rebalance E2E', () => {
     for (const event of errorEvents.filter(row => row.reason === 'GOSSIP_PROFILE_AUTHORITY_UNAVAILABLE')) {
       expect(event.ts >= h1Outage.start && event.ts <= h1Outage.end).toBe(true);
       expect(event.status).toBe('rejected');
-      expect(event.details.message).toBe(`PROFILE_AUTHORITY_UNAVAILABLE:ECONNREFUSED:${h1Authority}`);
+      expect(['ECONNREFUSED', 'ECONNRESET'].map(code => `PROFILE_AUTHORITY_UNAVAILABLE:${code}:${h1Authority}`)).toContain(event.details.message);
       expect(peerRuntimeIds).toContain(event.from);
       allowDebugIncident({ source: 'error', code: 'GOSSIP_PROFILE_AUTHORITY_UNAVAILABLE', message: event.details.message, runtimeId: event.from });
     }

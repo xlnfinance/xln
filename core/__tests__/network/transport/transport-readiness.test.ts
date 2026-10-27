@@ -210,6 +210,34 @@ describe('authenticated direct delivery readiness', () => {
     expect(h.received).toEqual([]);
   });
 
+  test('a profile authority that drops the request before answering is an outage, not a malformed profile', async () => {
+    const dropping = Bun.listen({
+      hostname: '127.0.0.1',
+      port: 0,
+      socket: { data: socket => socket.terminate(), open: () => {}, close: () => {} },
+    });
+    const authority = `http://127.0.0.1:${dropping.port}`;
+    const profile = certifySingleSignerProfileFixture(
+      buildCryptographicProfileFixture({
+        entityId: deriveSingleSignerFixtureEntityId(SERVER_SEED),
+        signingSeed: SERVER_SEED,
+        name: 'signed owner',
+      }),
+      SERVER_SEED,
+    );
+    let failure: unknown;
+    try {
+      await new DaemonControlClient({ baseUrl: authority }).verifyProfile(profile);
+    } catch (error) {
+      failure = error;
+    } finally {
+      dropping.stop(true);
+    }
+    expect(failure).toBeInstanceOf(ProfileAuthorityUnavailableError);
+    expect((failure as Error).message).toBe(`PROFILE_AUTHORITY_UNAVAILABLE:ECONNRESET:${authority}`);
+    expect((failure as Error).cause).toMatchObject({ code: 'ECONNRESET' });
+  });
+
   test('committed custody owner joins the Hub publication policy without exposing unrelated signers', async () => {
     const env = createEmptyEnv(SERVER_SEED, 1);
     env.dbNamespace = `custody-profile-${process.pid}-${Date.now()}`;
