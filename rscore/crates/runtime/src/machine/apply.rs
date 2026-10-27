@@ -1036,39 +1036,43 @@ fn derived_wake_jobs(
             due_at: timelock,
         })
         .collect::<Vec<_>>();
-    // ACK enforcement reserves time against the signed timelock, not height expiry.
+    let mut ack_locks = std::collections::BTreeMap::<AccountId, Vec<String>>::new();
+    for (_, entry) in state.entity.paybook.entries.iter() {
+        if !entry.secret_ack_pending || entry.secret.is_none() {
+            continue;
+        }
+        let Some(peer) = entry.inbound_entity.as_ref() else {
+            continue;
+        };
+        if !state.entity.known_accounts.contains(peer) {
+            continue;
+        }
+        let id = parse_hex32(peer)
+            .map(AccountId::from_bytes)
+            .ok_or_else(|| {
+                RuntimeMachineError::ReplicaMetadata(format!(
+                    "SECRET_ACK_ACCOUNT_ID_INVALID:{peer}"
+                ))
+            })?;
+        ack_locks
+            .entry(id)
+            .or_default()
+            .push(entry.hashlock.clone());
+    }
+    let ack_accounts = ack_locks.keys().copied().collect();
+    // The refund index omits queued/pending resolves; committed locks still
+    // own the enforcement reserve until their resolve is ACKed.
     let lock_deadlines = replica
         .accounts
-        .selected_htlc_deadlines(
-            state.accounts_root,
-            now.saturating_add(xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS),
-            None,
-        )?
-        .1
+        .secret_ack_timelocks(ack_locks.into_iter().collect(), Some(state.accounts_root))?
         .into_iter()
-        .map(|(account, hashlock, timelock)| {
+        .map(|((account, hashlock), timelock)| {
             (
                 (format!("0x{}", hex::encode(account.as_bytes())), hashlock),
                 timelock,
             )
         })
         .collect::<std::collections::BTreeMap<_, _>>();
-    let ack_accounts = state
-        .entity
-        .paybook
-        .entries
-        .iter()
-        .filter(|(_, entry)| entry.secret_ack_pending && entry.secret.is_some())
-        .filter_map(|(_, entry)| entry.inbound_entity.as_ref())
-        .filter(|peer| state.entity.known_accounts.contains(*peer))
-        .map(|peer| {
-            parse_hex32(peer).map(AccountId::from_bytes).ok_or_else(|| {
-                RuntimeMachineError::ReplicaMetadata(format!(
-                    "SECRET_ACK_ACCOUNT_ID_INVALID:{peer}"
-                ))
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
     let actionable = replica
         .accounts
         .selected_secret_ack_account_ids(state.accounts_root, ack_accounts)?

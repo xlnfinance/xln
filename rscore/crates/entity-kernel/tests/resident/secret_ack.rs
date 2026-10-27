@@ -336,3 +336,60 @@ fn fixpay_5_height_expiry_does_not_accelerate_secret_ack_enforcement() {
         }
     }
 }
+
+#[test]
+fn fixpay_5_entity_queued_secret_resolve_retains_ack_reserve() {
+    assert_withheld_resolve_reserve(false);
+}
+
+#[test]
+fn fixpay_5_entity_signed_pending_secret_resolve_retains_ack_reserve() {
+    assert_withheld_resolve_reserve(true);
+}
+
+fn assert_withheld_resolve_reserve(proposed: bool) {
+    for now in [50_000, 70_000] {
+        let mut oracle = None;
+        for workers in [1, 4] {
+            let (result, mut accounts, peers) = run_case(
+                workers,
+                Case {
+                    withheld_resolve: Some(proposed),
+                    wake_at: Some(now),
+                    ..base_case()
+                },
+            );
+            assert_eq!(
+                account_statuses(&mut accounts, &peers),
+                [if now == 50_000 {
+                    "active"
+                } else {
+                    "dispute_preparing"
+                }]
+            );
+            let entry = result.state.paybook.entries.iter().next().unwrap().1;
+            assert!(entry.secret_ack_pending);
+            assert_eq!(entry.secret_ack_deadline_at, Some(170_000));
+            assert_eq!(
+                result
+                    .entity_frame_events
+                    .iter()
+                    .filter(|event| matches!(event,
+                        EntityFrameEvent::Status { message } if message.contains("Dispute prepared")
+                    ))
+                    .count(),
+                usize::from(now == 70_000)
+            );
+            let evidence = (
+                result.commitments,
+                result.entity_frame_events,
+                result.outputs,
+            );
+            if let Some(expected) = &oracle {
+                assert_eq!(&evidence, expected);
+            } else {
+                oracle = Some(evidence);
+            }
+        }
+    }
+}

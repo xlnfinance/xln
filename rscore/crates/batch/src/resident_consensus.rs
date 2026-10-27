@@ -960,6 +960,45 @@ impl ResidentConsensusEngine {
         Ok(htlc_deadlines(self.active_lock_deadlines()?, now, j_clock).1)
     }
 
+    /// Read signed timelocks for the named committed inbound locks. A queued
+    /// or signed-pending resolve does not release the lock: a withholding peer
+    /// must still leave time for ACK enforcement. Only refund deadlines filter
+    /// those resolves. Runtime selects its parent root; Entity reads its round.
+    pub fn secret_ack_timelocks(
+        &mut self,
+        requests: Vec<(AccountId, Vec<String>)>,
+        selected_root: Option<[u8; 32]>,
+    ) -> Result<BTreeMap<(AccountId, String), u64>, BatchError> {
+        let read = |_: AccountId, account: &AccountConsensus, ids: Vec<String>| {
+            Ok(ids
+                .into_iter()
+                .filter_map(|id| {
+                    account
+                        .replica()
+                        .state()
+                        .htlc_lock(&id)
+                        .and_then(|lock| u64::try_from(lock.timelock()).ok())
+                        .filter(|time| *time > 0 && *time <= JS_MAX_SAFE_INTEGER)
+                        .map(|time| (id, time))
+                })
+                .collect::<Vec<_>>())
+        };
+        let rows = match selected_root {
+            Some(root) => self.forest.read_selected(root, requests, read)?,
+            None => self
+                .forest
+                .read_outbound(requests, move |id, account, _, ids| read(id, account, ids))?,
+        };
+        Ok(rows
+            .into_iter()
+            .flat_map(|(account, locks)| {
+                locks
+                    .into_iter()
+                    .map(move |(id, time)| ((account, id), time))
+            })
+            .collect())
+    }
+
     /// Read the committed active/inactive bit only for Accounts named by one
     /// authenticated J-event range. This stays shard-parallel and never scans
     /// the forest or materializes Account replicas at the coordinator.

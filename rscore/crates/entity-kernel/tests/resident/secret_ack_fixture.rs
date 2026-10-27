@@ -19,6 +19,8 @@ pub(super) struct Case {
     pub ready_proof: bool,
     pub manual_prepare: bool,
     pub height_expired_early: bool,
+    pub withheld_resolve: Option<bool>,
+    pub wake_at: Option<u64>,
 }
 
 pub(super) const DUE: u64 = TIMESTAMP + 120_000;
@@ -96,7 +98,9 @@ pub(super) fn run_case(
                 let tx = AccountTx::HtlcLock(HtlcLockTx {
                     lock_id: entry.hashlock.clone(),
                     hashlock: HtlcHashlock::parse(&entry.hashlock).unwrap(),
-                    timelock: BigInt::from(if case.height_expired_early {
+                    timelock: BigInt::from(if case.withheld_resolve.is_some() {
+                        100_000
+                    } else if case.height_expired_early {
                         TIMESTAMP + 100_000
                     } else if case.expired_lock {
                         DUE
@@ -115,7 +119,11 @@ pub(super) fn run_case(
                     &tx,
                     &AccountExecutionContext::with_market(
                         1_000,
-                        TIMESTAMP,
+                        if case.withheld_resolve.is_some() {
+                            100
+                        } else {
+                            TIMESTAMP
+                        },
                         if case.height_expired_early { 90 } else { 100 },
                         0,
                         if case.height_expired_early { 90 } else { 100 },
@@ -127,6 +135,11 @@ pub(super) fn run_case(
                 .expect("committed production lock");
             }
             let mut entry = entry;
+            if case.withheld_resolve.is_some() {
+                entry.secret_ack_started_at = Some(100);
+                entry.secret_ack_deadline_at = Some(170_000);
+                entry.created_timestamp = 100;
+            }
             if case.height_expired_early {
                 entry.secret_ack_deadline_at = Some(DUE + 120_000);
             }
@@ -138,6 +151,41 @@ pub(super) fn run_case(
         } else {
             AccountConsensus::new(replica)
         };
+        if let Some(proposed) = case.withheld_resolve {
+            let entry = entries.last().unwrap();
+            consensus
+                .admit_txs(
+                    vec![AccountTx::HtlcResolve(HtlcResolveTx {
+                        lock_id: entry.hashlock.clone(),
+                        outcome: HtlcResolveOutcome::Secret {
+                            secret: entry.secret.clone().unwrap(),
+                        },
+                    })],
+                    "withheld-secret-ack",
+                )
+                .unwrap();
+            if proposed {
+                let result = propose_account_frame(
+                    &mut consensus,
+                    &identity("hub"),
+                    1_000,
+                    100,
+                    &support::market(),
+                )
+                .unwrap();
+                assert!(matches!(result, ProposalOutcome::Proposed(_)));
+                assert!(consensus.pending().is_some());
+            } else {
+                assert_eq!(consensus.mempool().len(), 1);
+            }
+            assert!(
+                consensus
+                    .replica()
+                    .state()
+                    .htlc_lock(&entry.hashlock)
+                    .is_some()
+            );
+        }
         if case.active_dispute {
             consensus
                 .replace_entity_dispute_lifecycle(
@@ -168,7 +216,9 @@ pub(super) fn run_case(
         seeds,
     )
     .unwrap();
-    let now = if case.height_expired_early {
+    let now = if let Some(now) = case.wake_at {
+        now
+    } else if case.height_expired_early {
         TIMESTAMP + 50_000
     } else {
         DUE
@@ -234,7 +284,7 @@ pub(super) fn run_case(
         ]));
     }
     let mut request = request;
-    if case.height_expired_early {
+    if case.height_expired_early || case.wake_at.is_some() {
         request.inbound.clock.entity_timestamp = now;
         request.outbound_timestamp = now;
         let wake = request.scheduled_wake.as_mut().unwrap();

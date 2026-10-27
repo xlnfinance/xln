@@ -2266,14 +2266,20 @@ fn apply_scheduled_wake(
         .filter(|(account, _)| state.known_accounts.contains(account))
         .collect::<Vec<_>>();
 
-    // ACK enforcement reserves time against the signed timelock, not height expiry.
+    let mut ack_locks = BTreeMap::<AccountId, Vec<String>>::new();
+    for (hashlock, peer) in paybook.due_secret_acks(state, u64::MAX, &BTreeMap::new())? {
+        if state.known_accounts.contains(&peer) {
+            ack_locks
+                .entry(account_id(&peer)?)
+                .or_default()
+                .push(hashlock);
+        }
+    }
+    // A pending resolve suppresses refunds, never the committed lock's ACK reserve.
     let lock_deadlines = accounts
-        .expired_htlc_locks(
-            now.saturating_add(xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS),
-            None,
-        )?
+        .secret_ack_timelocks(ack_locks.into_iter().collect(), None)?
         .into_iter()
-        .map(|(account, hashlock, timelock)| ((account_text(account), hashlock), timelock))
+        .map(|((account, hashlock), timelock)| ((account_text(account), hashlock), timelock))
         .collect();
     let due_secret_acks = paybook.due_secret_acks(state, now, &lock_deadlines)?;
     let dispute_account_ids = state

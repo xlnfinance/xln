@@ -71,11 +71,27 @@ fn secret_ack_wakes_require_an_existing_active_inbound_account() {
 
 #[test]
 fn fixpay_5_runtime_ack_wake_uses_timelock_while_refund_uses_expired_height() {
+    assert_ack_reserve(None);
+}
+
+#[test]
+fn fixpay_5_runtime_queued_secret_resolve_retains_ack_reserve() {
+    assert_ack_reserve(Some(false));
+}
+
+#[test]
+fn fixpay_5_runtime_signed_pending_secret_resolve_retains_ack_reserve() {
+    assert_ack_reserve(Some(true));
+}
+
+fn assert_ack_reserve(proposed: Option<bool>) {
+    use sha3::{Digest, Keccak256};
     use xln_rscore_engine::{
-        AccountExecutionContext, AccountTx, Delta, HtlcHashlock, HtlcLockTx,
-        SequentialAccountEngine, TokenId,
+        AccountConsensus, AccountExecutionContext, AccountTx, Delta, HtlcHashlock, HtlcLockTx,
+        HtlcResolveOutcome, HtlcResolveTx, SequentialAccountEngine, TokenId,
     };
-    let hashlock = format!("0x{}", "44".repeat(32));
+    let secret = format!("0x{}", "55".repeat(32));
+    let hashlock = format!("0x{}", hex::encode(Keccak256::digest([0x55; 32])));
     let token = TokenId::new(1).unwrap();
     let delta = Delta::new(
         token,
@@ -112,6 +128,48 @@ fn fixpay_5_runtime_ack_wake_uses_timelock_while_refund_uses_expired_height() {
             .unwrap()
             .committed()
             .unwrap();
+            if let Some(proposed) = proposed {
+                let mut consensus = AccountConsensus::new(seed.replica);
+                consensus
+                    .admit_txs(
+                        vec![AccountTx::HtlcResolve(HtlcResolveTx {
+                            lock_id: hashlock.clone(),
+                            outcome: HtlcResolveOutcome::Secret {
+                                secret: secret.clone(),
+                            },
+                        })],
+                        "withheld-secret-ack",
+                    )
+                    .unwrap();
+                if proposed {
+                    let identity = xln_rscore_engine::SigningIdentity::lazy_from_seed(
+                        "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+                        crate::machine::tests::SIGNER,
+                        1,
+                        1,
+                        Default::default(),
+                    )
+                    .unwrap();
+                    let result = xln_rscore_engine::propose_account_frame(
+                        &mut consensus,
+                        &identity,
+                        100,
+                        90,
+                        &std::sync::Arc::new(xln_rscore_engine::SwapMarketPolicy::default()),
+                    )
+                    .unwrap();
+                    assert!(matches!(
+                        result,
+                        xln_rscore_engine::ProposalOutcome::Proposed(_)
+                    ));
+                    assert!(consensus.pending().is_some());
+                } else {
+                    assert_eq!(consensus.mempool().len(), 1);
+                }
+                assert!(consensus.replica().state().htlc_lock(&hashlock).is_some());
+                seed.replica = consensus.replica().clone();
+                seed.consensus = Some(consensus.consensus_snapshot());
+            }
             seed
         },
     )
@@ -136,7 +194,7 @@ fn fixpay_5_runtime_ack_wake_uses_timelock_while_refund_uses_expired_height() {
             outbound_entity: None,
             inbound_settled: false,
             outbound_settled: true,
-            secret: Some(format!("0x{}", "55".repeat(32))),
+            secret: Some(secret),
             secret_ack_pending: true,
             secret_ack_started_at: Some(100),
             secret_ack_deadline_at: Some(170_000),
@@ -168,6 +226,17 @@ fn fixpay_5_runtime_ack_wake_uses_timelock_while_refund_uses_expired_height() {
             due_at: 70_000,
         }]
     );
+    if proposed.is_some() {
+        assert!(
+            live.accounts
+                .selected_htlc_deadlines(state.accounts_root, 170_000, None)
+                .unwrap()
+                .1
+                .is_empty(),
+            "queued resolves suppress refunds only"
+        );
+        return;
+    }
     state.entity.paybook =
         PaybookState::from_entries(Vec::<PaybookEntry>::new(), 0.into()).unwrap();
     assert_eq!(
