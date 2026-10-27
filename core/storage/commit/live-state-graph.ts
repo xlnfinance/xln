@@ -7,7 +7,7 @@
 import type { EntityState } from '../../entity/types';
 import { prepareAccountStorageDelete, prepareAccountStorageLayout } from '../schema/account-layout';
 import { prepareEntityStorageDelete, prepareEntityStorageLayout } from '../schema/entity/layout';
-import { liveKeyForDoc, liveKeyForRef } from '../schema/doc-refs';
+import { liveKeyForRef } from '../schema/doc-refs';
 import type {
   RuntimeDbLike,
   StorageAccountDoc,
@@ -42,7 +42,7 @@ export const prepareLiveStateGraph = async (options: {
 }): Promise<PreparedLiveStateGraph> => {
   const effectivePuts = new Map<string, StorageDoc>();
   for (const doc of options.puts) {
-    effectivePuts.set(liveKeyForDoc(doc).toString('hex'), doc);
+    effectivePuts.set(liveKeyForRef(doc).toString('hex'), doc);
   }
   const effectiveDels = new Map<string, StorageDocRef>();
   for (const ref of options.dels) {
@@ -81,7 +81,7 @@ export const prepareLiveStateGraph = async (options: {
       options.db,
       doc.entityId,
       doc.counterpartyId,
-      liveKeyForDoc(doc),
+      liveKeyForRef(doc),
       doc.value,
       options.previousAccounts?.get(cacheKey),
     );

@@ -293,11 +293,12 @@ export const resolveRuntimeWsMaxMessageBytes = (): number => {
   if (cachedWsMaxMessageBytes !== undefined && cachedWsMaxMessageEnv === configured) {
     return cachedWsMaxMessageBytes;
   }
-  const parsed = Number(configured);
+  const parsed = configured === undefined ? DEFAULT_MAX_WS_MESSAGE_BYTES : Number(configured);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new RangeError(`WS_MAX_MESSAGE_BYTES_INVALID:${String(configured)}`);
+  }
   cachedWsMaxMessageEnv = configured;
-  cachedWsMaxMessageBytes = Number.isSafeInteger(parsed) && parsed > 0
-    ? parsed
-    : DEFAULT_MAX_WS_MESSAGE_BYTES;
+  cachedWsMaxMessageBytes = parsed;
   return cachedWsMaxMessageBytes;
 };
 

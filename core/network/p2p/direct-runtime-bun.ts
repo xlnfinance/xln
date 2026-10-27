@@ -1,3 +1,4 @@
+import { retryFailure } from '../../protocol/errors/failure-taxonomy';
 import type { RuntimeEntityInputsEnvelope } from '../../runtime/types';
 import { accountInputProposal } from '../../account/consensus/flush';
 import {
@@ -262,7 +263,9 @@ const send = (ws: DirectWebSocket, msg: RuntimeWsMessage): void => {
     toRuntimeId: String(msg.to ?? ''),
     bytes: payload.length,
   });
-  ws.send(payload);
+  if (classifyWebSocketSendResult(ws.send(payload)) === 'dropped') {
+    throw retryFailure('DIRECT_CONTROL_FRAME_DROPPED', `DIRECT_CONTROL_FRAME_DROPPED:${msg.type}`);
+  }
 };
 
 const signSessionFrame = (

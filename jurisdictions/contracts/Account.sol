@@ -1632,11 +1632,8 @@ library Account {
     // SET nonce = signedNonce (not +1)
     _accounts[acct_key].nonce = s.nonce;
 
-    // Every successful nonce transition must be observable. A pure debt
-    // forgiveness has no diffs, but it still invalidates old proofs and must
-    // therefore publish AccountSettled with snapshots for the forgiven tokens.
-    // Compute forgiveness dedup once; the emission pass must reuse it so the
-    // AccountSettled payload stays byte-identical to the previous dual-scan.
+    // Forgiveness IDs are unique at admission; only overlap with diffs needs deduplication.
+    // Pure forgiveness still emits AccountSettled because it invalidates old proofs.
     uint tokenCount = s.diffs.length;
     bool[] memory alreadyIncluded = new bool[](s.forgiveDebtsInTokenIds.length);
     for (uint i = 0; i < s.forgiveDebtsInTokenIds.length; i++) {
@@ -1644,9 +1641,6 @@ library Account {
       bool included = false;
       for (uint j = 0; j < s.diffs.length; j++) {
         if (s.diffs[j].tokenId == forgiveTokenId) included = true;
-      }
-      for (uint j = 0; j < i; j++) {
-        if (s.forgiveDebtsInTokenIds[j] == forgiveTokenId) included = true;
       }
       alreadyIncluded[i] = included;
       if (!included) tokenCount++;

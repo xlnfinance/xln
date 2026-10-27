@@ -9,7 +9,7 @@ import {
   KEY_HEAD,
   KEY_LIVE_ENTITY,
   decodeEntityId,
-  hexBytes,
+  keySnapshotAccount,
   keyCertifiedBoardNodePrefix,
   keyCertifiedBoardPathNode,
   keyAccountJClaimNodePrefix,
@@ -36,7 +36,7 @@ import {
   parseSnapshotAccountKey,
   parseSnapshotEntityKey,
   prefixUpperBound,
-  textBytes,
+  keySnapshotBook,
 } from '../keys';
 import { readAccountStorageLayout } from '../schema/account-layout';
 import { readEntityStorageLayout } from '../schema/entity/layout';
@@ -525,12 +525,6 @@ const accountPageFromCandidates = (
   };
 };
 
-const keySnapshotAccountCursor = (height: number, entityId: string, counterpartyId: string): Buffer =>
-  Buffer.concat([keySnapshotAccountPrefix(height, entityId), hexBytes(counterpartyId)]);
-
-const keySnapshotBookCursor = (height: number, entityId: string, pairId: string): Buffer =>
-  Buffer.concat([keySnapshotBookPrefix(height, entityId), textBytes(pairId)]);
-
 const listAccountPageFromKeyspace = async (options: {
   db: RuntimeDbLike;
   entityId: string;
@@ -889,7 +883,7 @@ const loadAccountDocPageAtHeight = async (
     db,
     entityId: normalized,
     prefix,
-    cursorKey: cursor ? keySnapshotAccountCursor(targetHeight, normalized, cursor) : undefined,
+    cursorKey: cursor ? keySnapshotAccount(targetHeight, normalized, cursor) : undefined,
     parseKey: parseSnapshotAccountKey,
     cursor,
     limit,
@@ -1082,7 +1076,7 @@ const loadBookDocPageAtHeight = async (
   const page = await listBookPageFromKeyspace({
     db,
     prefix: keySnapshotBookPrefix(targetHeight, normalized),
-    cursorKey: cursor ? keySnapshotBookCursor(targetHeight, normalized, cursor) : undefined,
+    cursorKey: cursor ? keySnapshotBook(targetHeight, normalized, cursor) : undefined,
     parseKey: (key) => parseLiveBookKey(key, 9),
     cursor,
     limit,

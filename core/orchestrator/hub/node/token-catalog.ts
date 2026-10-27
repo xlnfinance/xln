@@ -13,7 +13,11 @@ export const selectHubTokenCatalog = (catalog: JTokenInfo[], chainId: number, de
   if (!DEV_CHAIN_IDS.has(chainId)) return catalog;
   const desired = new Set(desiredTokenIds);
   const selected = catalog.filter(token => desired.has(Number(token.tokenId)));
-  return selected.length >= 3 ? selected : catalog.slice(0, 3);
+  const present = new Set(selected.map(token => Number(token.tokenId)));
+  if ([...desired].some(tokenId => !present.has(tokenId))) {
+    throw new RangeError('HUB_TOKEN_CATALOG_INCOMPLETE');
+  }
+  return selected;
 };
 
 const normalizePositiveTokenIds = (tokenIds: readonly number[]): number[] =>

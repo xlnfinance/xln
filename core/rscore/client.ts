@@ -529,10 +529,10 @@ export class RscoreProcessClient {
       throw new Error(`RSCORE_PROCESS_ERROR:${safeStringify(error)}`);
     }
     const body = decoded.body as unknown[];
-    return {
-      result: Array.isArray(body) && body.length === 1 ? body[0] : body,
-      requestId,
-    };
+    if (!Array.isArray(body) || body.length !== 1) {
+      throw this.#poisonAuthority(new TypeError('RSCORE_RESPONSE_BODY_ARITY'));
+    }
+    return { result: body[0], requestId };
   }
 
   async #request(opTag: number, payload: RscoreWireValue[]): Promise<unknown> {

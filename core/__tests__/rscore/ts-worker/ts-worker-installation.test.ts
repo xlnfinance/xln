@@ -152,3 +152,19 @@ for (const message of [
     expect(outcome['terminated']).toBe(true);
   });
 }
+
+test('explicit worker count must be a bounded positive integer', async () => {
+  const { canonicalTsAccountWorkerCount } = await import('../../../runtime/workers/account/coordinator/pool');
+  const previous = process.env['XLN_TS_ACCOUNT_WORKERS'];
+  try {
+    for (const value of ['', '0', '-1', '1.5', '65', 'wrong']) {
+      process.env['XLN_TS_ACCOUNT_WORKERS'] = value;
+      expect(canonicalTsAccountWorkerCount).toThrow('TS_ACCOUNT_WORKER_COUNT_INVALID');
+    }
+    process.env['XLN_TS_ACCOUNT_WORKERS'] = '4';
+    expect(canonicalTsAccountWorkerCount()).toBe(4);
+  } finally {
+    if (previous === undefined) delete process.env['XLN_TS_ACCOUNT_WORKERS'];
+    else process.env['XLN_TS_ACCOUNT_WORKERS'] = previous;
+  }
+});

@@ -277,3 +277,39 @@ test('relocation clear removes only profiles owned by the moved runtime', async 
     await rm(infraPath, { recursive: true, force: true });
   }
 });
+
+test('gossip publication failure leaves the profile retryable', () => {
+  let fails = true;
+  const gossip = createGossipLayer({ onAnnounce: () => { if (fails) throw new Error('publication failed'); } });
+  const profile = buildCryptographicProfileFixture({
+    entityId: deriveSingleSignerFixtureEntityId('publication-retry'),
+    signingSeed: 'publication-retry', name: 'Retry',
+  });
+  expect(() => gossip.announce(profile)).toThrow('publication failed');
+  expect(gossip.getProfile(profile.entityId)).toBeUndefined();
+  fails = false;
+  gossip.announce(profile);
+  expect(gossip.getProfile(profile.entityId)?.entityId).toBe(profile.entityId);
+});
+
+test('infra write rejection halts the owning Runtime', async () => {
+  const { trackInfraDbWrite, drainInfraDbWrites } = await import('../../../runtime/loop/loop-envelope');
+  const env = createEmptyEnv('infra-write-failure', 1);
+  trackInfraDbWrite(env, Promise.reject(new Error('disk unavailable')));
+  await drainInfraDbWrites(env);
+  expect(env.infrastructure?.operatorStatus).toBe('HALTED_REQUIRES_OPERATOR');
+  expect(env.infrastructure?.fatalDebugPayload?.message).toBe('disk unavailable');
+});
+
+test('a storage read failure preserves the durable profile and rejects restore', async () => {
+  const entityId = `0x${'aa'.repeat(32)}`;
+  const db = new FakeInfraDb();
+  const key = `gossip:profile:${entityId}`;
+  db.store.set(key, Buffer.from('persisted evidence'));
+  const error = new Error('storage read unavailable');
+  db.get = async () => { throw error; };
+  await expect(loadGossipProfilesFromInfraDb(createEmptyEnv('gossip-read-failure', 1), {
+    tryOpenInfraDb: async () => true, getInfraDb: () => db as never,
+  })).rejects.toBe(error);
+  expect(db.store.get(key)?.toString()).toBe('persisted evidence');
+});

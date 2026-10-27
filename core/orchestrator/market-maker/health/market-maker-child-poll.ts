@@ -83,8 +83,13 @@ export const createMarketMakerChildPoller = ({
   const pollHealthOnce = async (): Promise<void> => {
     const proc = child.proc;
     if (!isCurrentProc(proc)) return;
-    const health = await fetchJson<MarketMakerHealthPayload>(`${apiBase()}/api/health`, healthTimeoutMs);
-    if (health) applyHealth(health, proc);
+    let health: MarketMakerHealthPayload | null = null;
+    try {
+      health = await fetchJson<MarketMakerHealthPayload>(`${apiBase()}/api/health`, healthTimeoutMs);
+      if (health) applyHealth(health, proc);
+    } finally {
+      if (!health && isCurrentProc(proc)) child.lastHealth = null;
+    }
   };
 
   const pollHealth = async (): Promise<void> => {

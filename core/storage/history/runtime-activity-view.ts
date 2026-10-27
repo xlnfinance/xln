@@ -8,7 +8,6 @@ import {
 } from '../../protocol/boundary-validation';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { FrameLogEntry } from '../../types/logging';
-import { createStructuredLogger } from '../../support/logger';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
 import { MAX_STORAGE_RECORD_BYTES } from '../schema/book-graph-codec';
 import { resolveDbPath } from '../runtime-db-path';
@@ -42,7 +41,6 @@ const handles = new Map<string, ActivityViewHandle>();
 const operationTails = new Map<string, Promise<void>>();
 const repairFlights = new Map<string, Promise<void>>();
 const closingPaths = new Set<string>();
-const storageLog = createStructuredLogger('runtime.storage');
 
 const resolveRuntimeActivityViewPath = (env: RuntimeReplica): string => `${resolveDbPath(env, 'core')}-history-views`;
 
@@ -347,14 +345,9 @@ export const closeRuntimeActivityViewDb = async (env: RuntimeReplica): Promise<v
     await operationTails.get(path)?.catch(() => {});
     const handle = handles.get(path);
     if (!handle) return;
-    handles.delete(path);
     await handle.open;
     await handle.db.close();
-  } catch (error) {
-    storageLog.warn('activity_view.close_failed', {
-      path,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    handles.delete(path);
   } finally {
     closingPaths.delete(path);
   }

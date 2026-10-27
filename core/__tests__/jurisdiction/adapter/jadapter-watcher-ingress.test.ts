@@ -2259,3 +2259,14 @@ describe('JAdapter watcher ingress', () => {
     expect(safeStringify(gated)).toBe(safeStringify(observe(everyBody.events)));
   });
 });
+
+test('wallet snapshots reject present non-array collections', async () => {
+  const { walletEventNormalizers } = await import('../../../jurisdiction/machine/event-normalizers-wallet');
+  const base = { entityId: `0x${'11'.repeat(32)}`, owner: `0x${'22'.repeat(20)}` };
+  expect(walletEventNormalizers.ExternalWalletSnapshot(base)).not.toBeNull();
+  for (const field of ['tokenBalances', 'allowances']) {
+    for (const value of [null, {}, 'bad', false]) {
+      expect(walletEventNormalizers.ExternalWalletSnapshot({ ...base, [field]: value })).toBeNull();
+    }
+  }
+});

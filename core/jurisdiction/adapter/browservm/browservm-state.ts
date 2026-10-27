@@ -251,10 +251,7 @@ const normalizeBrowserVmHex = (value: unknown): string | null => {
 
 export const normalizeBrowserVmAddress = (value: unknown): string | null => {
   const hex = normalizeBrowserVmHex(value);
-  if (hex === null) return null;
-  const trimmed = hex.length > 40 ? hex.slice(-40) : hex.padStart(40, '0');
-  if (trimmed.length !== 40) return null;
-  return trimmed;
+  return hex !== null && hex.length === 40 ? hex : null;
 };
 
 const hexToBytesSafe = (hex: string): Uint8Array => {

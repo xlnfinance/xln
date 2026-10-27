@@ -74,6 +74,7 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
       logDebug('GOSSIP', `📡 Gossip REJECTED: ${profile.entityId.slice(-4)} ts=${newTimestamp}<=${existingTimestamp}`);
       return;
     }
+    if (publish) options.onAnnounce?.(normalized);
     if (existing?.runtimeId) {
       const previousRuntimeId = normalizeRuntimeIdKey(existing.runtimeId);
       const previousRuntimeProfiles = runtimeProfiles.get(previousRuntimeId);
@@ -91,15 +92,6 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
       'GOSSIP',
       `📡 Gossip SAVED: ${profile.entityId.slice(-4)} ts=${newTimestamp} accounts=${normalized.accounts.length}`,
     );
-    if (!publish) return;
-    try {
-      options.onAnnounce?.(normalized);
-    } catch (error) {
-      console.warn(
-        `[GOSSIP] persist callback failed for ${profile.entityId.slice(-8)}:`,
-        error instanceof Error ? error.message : String(error),
-      );
-    }
   };
   const announce = (profile: Profile): void => installProfile(profile, true);
 

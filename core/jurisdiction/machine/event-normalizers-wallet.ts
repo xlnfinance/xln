@@ -18,6 +18,7 @@ type TokenBalance = {
 };
 
 const tokenBalances = (value: unknown): TokenBalance[] | null => {
+  if (value !== undefined && !Array.isArray(value)) return null;
   const balances: TokenBalance[] = [];
   for (const raw of Array.isArray(value) ? value : []) {
     const entry = toRecord(raw);
@@ -43,6 +44,7 @@ type Allowance = {
 };
 
 const allowances = (value: unknown): Allowance[] | null => {
+  if (value !== undefined && !Array.isArray(value)) return null;
   const normalized: Allowance[] = [];
   for (const raw of Array.isArray(value) ? value : []) {
     const entry = toRecord(raw);

@@ -1,3 +1,4 @@
+import { storageFailure } from '../../protocol/errors/failure-taxonomy';
 import { countOp, countOpWithSite } from '../../support/performance/op-counters';
 import { decodeValidatedBuffer, writeBatch } from '../codec/codec';
 import { prefixUpperBound } from '../keys';
@@ -55,7 +56,7 @@ export const readRequiredRaw = async (db: Pick<RuntimeDbLike, 'get'>, key: Buffe
 };
 
 export async function* iterateKeys(db: RuntimeDbLike, range: KeyRangeOptions): AsyncGenerator<Buffer> {
-  if (typeof db.keys !== 'function') return;
+  if (typeof db.keys !== 'function') throw storageFailure('STORAGE_KEY_ITERATION_UNSUPPORTED');
   for await (const rawKey of db.keys(keyIteratorOptions(range))) {
     yield storageKeyToBuffer(rawKey);
   }

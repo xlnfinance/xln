@@ -5,6 +5,7 @@ import {
 } from './snapshot';
 import { normalizeMarketEntityId, normalizeMarketPairId } from './identifiers';
 import {
+  sendError,
   cleanupSubscription,
   ensurePublisher,
   handleSnapshotFailure,
@@ -39,20 +40,6 @@ const connectedHubIds = <WS extends MarketSocket>(context: MarketSubscriptionCon
       .map(normalizeMarketEntityId)
       .filter((value): value is string => value !== null),
   )).sort();
-
-const sendError = (
-  ws: MarketSocket,
-  inReplyTo: string | undefined,
-  error: string,
-  code?: string,
-): void => {
-  ws.send(encodeMarketWireMessage({
-    type: 'error',
-    ...(inReplyTo ? { inReplyTo } : {}),
-    ...(code ? { code } : {}),
-    error,
-  }));
-};
 
 const requestedDepth = (depth: unknown): number => {
   const numericDepth = Number(depth);

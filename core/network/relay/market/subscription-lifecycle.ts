@@ -9,7 +9,7 @@ import type {
   MarketSubscriptionContext,
 } from './subscription-types';
 
-const sendError = (
+export const sendError = (
   ws: MarketSocket,
   inReplyTo: string | undefined,
   error: string,

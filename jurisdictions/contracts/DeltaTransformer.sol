@@ -227,7 +227,6 @@ contract DeltaTransformer {
       }
 
       applySwap(deltas, swap, fillRatio);
-      //logDeltas("Deltas after swap", deltas);
     }
 
     for (uint i = 0; i < decodedBatch.pull.length; i++) {

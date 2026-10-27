@@ -266,13 +266,7 @@ export const openRelayIncidentJournal = (path: string): RelayIncidentJournal => 
       return nextDebugId++;
     },
     record(incident: RelayDebugIncident): void {
-      let persisted: PersistedIncident;
-      try {
-        persisted = withoutSample(incident);
-      } catch {
-        // Never write a line restore would reject; the incident stays in RAM.
-        return;
-      }
+      const persisted = withoutSample(incident);
       debugId = Math.max(debugId, persisted.lastEventId);
       latest.set(persisted.fingerprint, persisted);
       appendDurable(

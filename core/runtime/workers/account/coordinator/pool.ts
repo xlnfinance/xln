@@ -189,8 +189,14 @@ export const canonicalTsAccountWorkerCount = (): number => {
   const processValue = Reflect.get(globalThis, 'process') as
     | { env?: Record<string, string | undefined> }
     | undefined;
-  const configured = Number(processValue?.env?.['XLN_TS_ACCOUNT_WORKERS'] ?? '');
-  if (Number.isSafeInteger(configured) && configured >= 1 && configured <= 64) return configured;
+  const raw = processValue?.env?.['XLN_TS_ACCOUNT_WORKERS'];
+  if (raw !== undefined) {
+    const configured = Number(raw);
+    if (!Number.isSafeInteger(configured) || configured < 1 || configured > 64) {
+      throw new RangeError(`TS_ACCOUNT_WORKER_COUNT_INVALID:${raw}`);
+    }
+    return configured;
+  }
   const hardwareConcurrency = typeof navigator === 'undefined' ? 8 : navigator.hardwareConcurrency;
   return Math.max(1, Math.min(8, hardwareConcurrency || 8));
 };

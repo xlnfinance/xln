@@ -41,12 +41,13 @@ export const shouldRequireCanonicalStorageAudit = (
 };
 
 const resolveStorageWriteTimeoutMs = (): number => {
-  const raw = String(
-    getRuntimeProcessGlobal()?.env?.['XLN_STORAGE_WRITE_TIMEOUT_MS'] || '',
-  ).trim();
-  if (!raw) return 0;
+  const raw = getRuntimeProcessGlobal()?.env?.['XLN_STORAGE_WRITE_TIMEOUT_MS'];
+  if (raw === undefined) return 0;
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new RangeError(`STORAGE_WRITE_TIMEOUT_INVALID:${raw}`);
+  }
+  return parsed;
 };
 
 export const waitForRuntimeProcessingIdle = async (

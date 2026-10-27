@@ -69,7 +69,9 @@ export const resolveMeshJurisdictionConfig = (
   for (const entry of Object.values(map)) {
     if (hasRequiredContracts(entry)) entries.push(entry);
   }
+  if (entries.length === 0) throw new Error('JURISDICTION_NOT_FOUND');
   const exactMatch = entries.find((entry) => sameMeshRpc(entry.rpc, requestedRpc));
+  if (requestedRpc && !exactMatch) throw new Error(`MESH_RPC_OVERRIDE_UNMAPPED:${requestedRpc}`);
   const selected = exactMatch ?? entries.find(isPrimaryJurisdiction) ?? entries[0];
   if (!selected) {
     throw new Error('JURISDICTION_NOT_FOUND');
@@ -90,7 +92,7 @@ export const requireJurisdictionBlockTimeMs = (
 
 const isSecondaryJurisdictionConfig = (
   key: string,
-  jurisdiction: MeshJurisdictionConfig,
+  jurisdiction: Pick<MeshJurisdictionConfig, 'name' | 'rpc'>,
   primaryRpc: string,
 ): boolean => {
   const normalizedKey = String(key || '').trim().toLowerCase();
@@ -118,13 +120,13 @@ export const resolveSecondaryJurisdictions = (
   if (primaryOnly === '1') return [];
   resetMeshJurisdictionsCache();
   const data = loadJurisdictions();
-  const entries: Array<[string, ResolvedMeshJurisdictionConfig]> = [];
+  const entries: ResolvedMeshJurisdictionConfig[] = [];
   for (const [key, jurisdiction] of Object.entries(data.jurisdictions ?? {})) {
-    if (hasRequiredContracts(jurisdiction)) entries.push([key, jurisdiction]);
+    if (!isSecondaryJurisdictionConfig(key, jurisdiction, primaryRpc)) continue;
+    if (!hasRequiredContracts(jurisdiction)) throw new TypeError(`MESH_JURISDICTION_INCOMPLETE:${key}`);
+    entries.push(jurisdiction);
   }
-  return entries
-    .filter(([key, jurisdiction]) => isSecondaryJurisdictionConfig(key, jurisdiction, primaryRpc))
-    .map(([, jurisdiction]) => jurisdiction);
+  return entries;
 };
 
 export const resolveMeshJurisdictionRpcBindings = (

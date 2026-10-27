@@ -134,28 +134,8 @@ const describeMarketMakerAccountBlocker = (
   entityId: string,
   counterpartyEntityId: string,
 ): MarketMakerCrossRouteBlocker | null => {
-  const account = getAccountReplica(env, entityId, counterpartyEntityId);
-  const status = account ? String(account.status || 'active') : null;
-  const currentHeight = account ? Number(account.currentHeight ?? 0) : null;
-  const pendingFrame = Boolean(account?.pendingFrame);
-  const mempoolLength = Number(account?.mempool?.length || 0);
-  let reason: MarketMakerCrossRouteBlocker['reason'] | null = null;
-  if (!account) reason = 'missing-account';
-  else if (status !== 'active') reason = 'inactive-account';
-  else if (Number(currentHeight ?? 0) <= 0) reason = 'height-zero';
-  if (!reason) return null;
-  return {
-    role,
-    entityId,
-    counterpartyEntityId,
-    reason,
-    status,
-    currentHeight,
-    pendingFrame,
-    pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height ?? 0) : null,
-    mempoolLength,
-    swapOffers: Number(account?.state.swapOffers?.size || 0),
-  };
+  const blocker = describeMarketMakerSameHubBlocker(env, entityId, counterpartyEntityId);
+  return blocker ? { role, ...blocker } : null;
 };
 
 export const describeMarketMakerSameHubBlocker = (

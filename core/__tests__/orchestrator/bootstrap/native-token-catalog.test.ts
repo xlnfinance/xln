@@ -15,3 +15,12 @@ test('explicit dev chains retain the three-token bootstrap requirement', () => {
     expect(canDeployHubDefaultTokens(chainId)).toBe(true);
   }
 });
+
+test('dev bootstrap rejects missing desired tokens instead of funding unrelated ones', () => {
+  const catalog = [1, 4, 5].map(tokenId => ({
+    tokenId, symbol: 'T', name: 'Token', decimals: 18,
+    address: `0x${String(tokenId).padStart(40, '0')}`, tokenType: 0, externalTokenId: 0n,
+  }));
+  expect(() => selectHubTokenCatalog(catalog, 31337, [1, 2, 3])).toThrow('HUB_TOKEN_CATALOG_INCOMPLETE');
+  expect(selectHubTokenCatalog(catalog, 31337, [1, 4, 5])).toEqual(catalog);
+});

@@ -239,9 +239,6 @@ const readEntityField = async (
   const missing = rows.findIndex(row => row === null);
   if (missing >= 0) throw new Error(`STORAGE_ENTITY_FIELD_ROW_MISSING:${descriptor.tag}:${missing}`);
   const inline = rows[0];
-  if (descriptor.chunkCount === 0 && inline === null) {
-    throw new Error(`STORAGE_ENTITY_FIELD_ROW_MISSING:${descriptor.tag}:0`);
-  }
   const value = descriptor.chunkCount === 0 ? inline as Buffer : Buffer.concat(rows as Buffer[]);
   if (value.byteLength !== descriptor.byteLength) {
     throw new Error(`STORAGE_ENTITY_FIELD_BYTES_MISMATCH:${descriptor.tag}:${descriptor.byteLength}:${value.byteLength}`);

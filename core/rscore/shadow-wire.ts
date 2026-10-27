@@ -367,11 +367,7 @@ export const accountConsensusWire = (account: AccountReplica): RscoreWireValue =
   ];
   const localCommittedHanko = committedHankoWire(account, committed !== null, pending !== undefined);
   return [
-    account.mempool.map(tx => {
-      const wire = accountTxWire(tx);
-      if (wire === null) throw new Error(`SHADOW_MEMPOOL_TX_UNSUPPORTED:${tx.type}`);
-      return wire;
-    }),
+    account.mempool.map(accountTxWire),
     // Height zero is no frame at all: the engine chains its first frame to the
     // genesis marker, exactly as this side does.
     committed,
@@ -506,11 +502,7 @@ const accountFrameWire = (frame: AccountFrame): RscoreWireValue => [
   frame.height,
   frame.timestamp,
   frame.jHeight,
-  frame.accountTxs.map(tx => {
-    const wire = accountTxWire(tx);
-    if (wire === null) throw new Error(`SHADOW_FRAME_TX_UNSUPPORTED:${tx.type}`);
-    return wire;
-  }),
+  frame.accountTxs.map(accountTxWire),
   frame.prevFrameHash,
   hexToWireBytes(frame.accountStateRoot, 32, 'SHADOW_FRAME_STATE_ROOT'),
 ];

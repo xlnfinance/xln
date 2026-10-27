@@ -144,7 +144,7 @@ describe('orchestrator reset HTTP body', () => {
 
   test('a malformed reset body is rejected with 400 instead of resetting with defaults', async () => {
     resetCalls.length = 0;
-    for (const body of ['{"enableMarketMaker": false,', '[]', '"reset"']) {
+    for (const body of ['{"enableMarketMaker": false,', '[]', '"reset"', '{"enableMarketMaker":"false"}', '{"enableCustody":null}']) {
       const response = await handleResetHttpRequest(post(body), '/api/reset', true, {}, deps);
       expect(response?.status).toBe(400);
       expect(await response?.text()).toContain('RESET_BODY_INVALID');

@@ -42,3 +42,7 @@ describe('EVM jurisdiction finality remains unchanged', () => {
     expect(resolveRpcFinalityDepth(config, true)).toBe(0);
   });
 });
+
+test.each([-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])('rejects invalid explicit finality depth %s', confirmationDepth => {
+  expect(() => resolveRpcFinalityDepth({ mode: 'rpc', chainId: 1, confirmationDepth }, false)).toThrow('RPC_CONFIRMATION_DEPTH_INVALID');
+});

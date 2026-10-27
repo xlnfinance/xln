@@ -5,7 +5,7 @@ import {
   isJurisdictionStackRef,
 } from '../../../jurisdiction/machine/jurisdiction-runtime';
 import { requireJurisdictionChainId } from '../../../jurisdiction/machine/jurisdiction-stack';
-import { getActiveJAdapter, getEntityJAdapter } from '../../../runtime';
+import { getEntityJAdapter } from '../../../runtime';
 import { attachLiveJAdapter, getLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
@@ -105,17 +105,7 @@ export const requireJAdapterForDebugReserve = (
     }
     return adapter;
   }
-  let entityAdapter: JAdapter | null = null;
-  try {
-    entityAdapter = getEntityJAdapter(env, entityId);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!message.startsWith('ENTITY_JURISDICTION_MISSING')) throw error;
-  }
-  if (entityAdapter) return entityAdapter;
-  const activeAdapter = getActiveJAdapter(env);
-  if (!activeAdapter) {
-    throw new Error(`DEBUG_RESERVE_JADAPTER_MISSING: entity=${entityId}`);
-  }
-  return activeAdapter;
+  const entityAdapter = getEntityJAdapter(env, entityId);
+  if (!entityAdapter) throw new Error(`DEBUG_RESERVE_JADAPTER_MISSING: entity=${entityId}`);
+  return entityAdapter;
 };

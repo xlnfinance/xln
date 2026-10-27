@@ -51,10 +51,12 @@ test('a malformed reply poisons every concurrent request before another is sent'
   }
 });
 
-test('an invalid reply header poisons the session', async () => {
+test('an invalid reply header or body poisons the session', async () => {
   for (const [marker, error] of [
     [0x55, 'RSCORE_CLIENT_ABI_VERSION:true'],
     [0x56, 'RSCORE_CLIENT_MESSAGE_KIND:3'],
+    [0x57, 'RSCORE_RESPONSE_BODY_ARITY'],
+    [0x58, 'RSCORE_RESPONSE_BODY_ARITY'],
   ] as const) {
     const client = new RscoreProcessClient(POISONED_PROCESS, identity());
     try {

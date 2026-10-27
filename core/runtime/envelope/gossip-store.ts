@@ -68,17 +68,19 @@ export const loadGossipProfilesFromInfraDb = async (
   const entityIds = await listInfraGossipEntityIds(db);
   if (entityIds.length === 0) return;
   for (const entityId of entityIds) {
+    const raw = await db.get(Buffer.from(makeInfraGossipProfileKey(entityId)));
+    let profile: Profile;
     try {
-      const raw = await db.get(Buffer.from(makeInfraGossipProfileKey(entityId)));
-      const profile = parseProfile(deserializeTaggedJson(raw.toString()));
-      env.gossip.announce(profile);
+      profile = parseProfile(deserializeTaggedJson(raw.toString()));
     } catch (error) {
       infraGossipLog.warn('profile.restore_failed', {
         entityId: shortId(entityId, 8),
         error: error instanceof Error ? error.message : String(error),
       });
       await pruneInfraGossipProfile(db, entityId);
+      continue;
     }
+    env.gossip.announce(profile);
   }
 };
 

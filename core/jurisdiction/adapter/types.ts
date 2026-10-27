@@ -329,6 +329,8 @@ export interface BrowserVMProvider {
 }
 
 export type BrowserVmEthersProviderTarget = {
+  runReadOnlyCall(request: Parameters<BrowserVmEthersProviderTarget['vm']['evm']['runCall']>[0]):
+    ReturnType<BrowserVmEthersProviderTarget['vm']['evm']['runCall']>;
   runExclusiveVmOperation<T>(operation: () => Promise<T>): Promise<T>;
   vm: {
     stateManager: {

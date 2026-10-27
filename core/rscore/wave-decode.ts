@@ -967,11 +967,7 @@ const frameBodyWire = (frame: AccountFrame): RscoreWireValue[] => [
   frame.height,
   frame.timestamp,
   frame.jHeight,
-  frame.accountTxs.map(tx => {
-    const wire = accountTxWire(tx);
-    if (wire === null) return rscoreWireDecodeFail('transcript.tx:unsupported');
-    return wire;
-  }),
+  frame.accountTxs.map(accountTxWire),
   frame.prevFrameHash,
   hexToBytes(frame.accountStateRoot, 'transcript.accountStateRoot'),
   hexToBytes(frame.stateHash, 'transcript.stateHash'),

@@ -425,3 +425,16 @@ describe('aggregated market maker health', () => {
     expect(aggregated.cross.ok).toBe(true);
   });
 });
+
+test('matching offer counts cannot override negative readiness or absent pair evidence', () => {
+  for (const flags of [{ ready: false, depthReady: false }, { ready: true, depthReady: true }]) {
+    const health = buildAggregatedMarketMakerHealth({
+      mmEnabled: true, marketMakerActive: true, hubEntityIds: ['hub'], expectedHubCount: 1,
+      entityId: 'mm', startupPhase: 'ready',
+      marketMakerHealth: { marketMaker: { enabled: true, ok: true, expectedOffersPerHub: 20,
+        hubs: [{ hubEntityId: 'hub', offers: 20, ...flags, pairs: [] }] } },
+    });
+    expect(health.hubs[0]?.ready).toBe(flags.ready);
+    expect(health.hubs[0]?.depthReady).toBe(false);
+  }
+});

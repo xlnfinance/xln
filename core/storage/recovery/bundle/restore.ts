@@ -1,3 +1,4 @@
+import { rejectFailure } from '../../../protocol/errors/failure-taxonomy';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { CheckpointRestoreOptions, DecodedCheckpointSnapshot } from '../checkpoint';
 import type { Profile } from '../../../entity/profile';
@@ -62,6 +63,10 @@ const selectRecoveryCandidate = (bundles: RuntimeRecoveryBundleV1[], targetHeigh
   const candidate = candidates[0];
   if (!candidate) {
     throw new Error(`RECOVERY_BUNDLE_TARGET_HEIGHT_UNAVAILABLE:${String(targetHeight)}`);
+  }
+  const requiredHeight = targetHeight ?? Math.max(...bundles.map(bundle => bundle.runtimeHeight));
+  if (candidate.height !== requiredHeight) {
+    throw rejectFailure('RECOVERY_BUNDLE_TARGET_HEIGHT_UNAVAILABLE', `RECOVERY_BUNDLE_TARGET_HEIGHT_UNAVAILABLE:${requiredHeight}`);
   }
   return candidate;
 };

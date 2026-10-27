@@ -9,7 +9,6 @@ export {
 export {
   debugFundReserves,
   getEntityInfoFromChain,
-  submitProcessBatch,
 } from '../../jurisdiction/adapter';
 export { getAvailableJurisdictions } from '../../jurisdiction/adapter/kernel/config';
 export {

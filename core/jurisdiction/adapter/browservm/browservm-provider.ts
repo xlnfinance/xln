@@ -1,3 +1,4 @@
+import { storageFailure } from '../../../protocol/errors/failure-taxonomy';
 /**
  * BrowserVMProvider - In-browser EVM using @ethereumjs/vm
  * Self-contained environment with Depository.sol
@@ -46,7 +47,6 @@ import { buildSingleSignerHanko, prepareSignedBatch } from '../../../hanko/batch
 import { assertChainHankoShape, chainHankoTargetEntityId } from '../../../hanko/short';
 import {
   hashCooperativeUpdateHankoPayload,
-  hashDisputeProofHankoPayload,
 } from '../../../hanko/onchain-domain';
 import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../../machine/config/default-tokens';
 import { buildNonFungibleTokenInfo } from '../registry/token-metadata';
@@ -66,7 +66,6 @@ import {
 } from '../../machine/receipt-codec';
 import {
   BROWSERVM_CONTRACT_VERSION,
-  decodeBrowserVmSerializedState,
   decodeBrowserVmStateRoot,
   normalizeBrowserVmAddress,
   restoreBrowserVmTrieData,
@@ -1151,37 +1150,6 @@ export class BrowserVMProvider {
     };
   }
 
-  /**
-   * R2C (Reserve to Collateral) - Move funds from reserve to bilateral account collateral
-   * Emits AccountSettled event for j-watcher
-   * Note: Solidity prefundAccount() was deleted - this is BrowserVM-only implementation
-   *
-   * @param entityId - Entity depositing collateral (must be a valid entityId for Hanko signing)
-   * @param counterpartyId - The counterparty entity (must sign the settlement)
-   */
-  async reserveToCollateralDirect(entityId: string, counterpartyId: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
-    if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
-
-    // Use settle() with appropriate diffs to achieve R2C effect
-    const isLeft = isLeftEntity(entityId, counterpartyId);
-    const leftEntity = isLeft ? entityId : counterpartyId;
-    const rightEntity = isLeft ? counterpartyId : entityId;
-
-    // R2C: Reduce entity's reserve, increase collateral + ondelta
-    const diffs = [{
-      tokenId,
-      leftDiff: isLeft ? -BigInt(amount) : 0n,
-      rightDiff: isLeft ? 0n : -BigInt(amount),
-      collateralDiff: BigInt(amount),
-      ondeltaDiff: isLeft ? BigInt(amount) : -BigInt(amount),
-    }];
-
-    // Generate counterparty signature (REQUIRED)
-    const sig = await this.signSettlement(entityId, counterpartyId, diffs, []);
-
-    return this.settle(leftEntity, rightEntity, diffs, [], sig);
-  }
-
   /** Get collateral for an account */
   async getCollateral(entityId: string, counterpartyId: string, tokenId: number): Promise<{ collateral: bigint; ondelta: bigint }> {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
@@ -1342,33 +1310,6 @@ export class BrowserVMProvider {
     const hankoEncoded = buildSingleSignerHanko(counterpartyEntityId, hash, counterpartyWallet.privateKey);
     console.log(`[BrowserVM] Built Hanko signature for entity ${counterpartyEntityId.slice(0, 10)}... (signer=${counterpartyWallet.address.slice(0, 10)}...)`);
     return hankoEncoded;
-  }
-
-  /**
-   * Sign a dispute proof message.
-   * The COUNTERPARTY must sign to prove they agreed to this state.
-   */
-  async signDisputeProof(
-    entityId: string,
-    counterpartyEntityId: string,
-    nonce: bigint,
-    proposerIsLeft: boolean,
-    proofbodyHash: string,
-    watchSeed: string,
-  ): Promise<string> {
-    const accountKey = computeAccountKey(entityId, counterpartyEntityId);
-    if (!this.depositoryAddress) throw new Error('Depository not deployed');
-
-    const hash = hashDisputeProofHankoPayload(
-      { chainId: this.getChainId(), depositoryAddress: this.depositoryAddress.toString() },
-      accountKey,
-      nonce,
-      proposerIsLeft,
-      proofbodyHash,
-      watchSeed,
-    );
-    const counterpartyWallet = this.getSigningWallet(counterpartyEntityId);
-    return buildSingleSignerHanko(counterpartyEntityId, hash, counterpartyWallet.privateKey);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -2308,6 +2249,9 @@ export class BrowserVMProvider {
         `BROWSERVM_STATE_CHAIN_ID_MISMATCH:${stateChainId}:${this.configuredChainId}`,
       );
     }
+    const depositoryHex = normalizeBrowserVmAddress(data.addresses.depository);
+    const entityProviderHex = normalizeBrowserVmAddress(data.addresses.entityProvider);
+    if (!depositoryHex || !entityProviderHex) throw storageFailure('BROWSERVM_STATE_ADDRESS_INVALID');
     if (!this.initialized) {
       // Need to init first to get contracts deployed structure
       await this.init({ chainId: this.configuredChainId });
@@ -2333,60 +2277,11 @@ export class BrowserVMProvider {
       const validated = await this.validateChainCheckpoint(data.chain);
       this.applyChainCheckpoint(data.chain, validated);
 
-      const depositoryHex = normalizeBrowserVmAddress(data.addresses?.depository);
-      if (depositoryHex) {
-        this.depositoryAddress = createAddressFromString(`0x${depositoryHex}`);
-      }
-      const entityProviderHex = normalizeBrowserVmAddress(data.addresses?.entityProvider);
-      if (entityProviderHex) {
-        this.entityProviderAddress = createAddressFromString(`0x${entityProviderHex}`);
-      }
+      this.depositoryAddress = createAddressFromString(`0x${depositoryHex}`);
+      this.entityProviderAddress = createAddressFromString(`0x${entityProviderHex}`);
 
       this.log(`[BrowserVM] Restored state: ${data.trieData.length} trie nodes, root ${data.stateRoot.slice(0, 16)}...`);
     });
-  }
-
-  /** Save full EVM state to localStorage */
-  async saveToLocalStorage(key: string = 'xln-evm-state'): Promise<void> {
-    try {
-      const state = await this.serializeState();
-      const json = JSON.stringify(state);
-      localStorage.setItem(key, json);
-      this.log(`[BrowserVM] Saved state to localStorage: ${key} (${(json.length / 1024).toFixed(1)}KB)`);
-    } catch (err) {
-      browserVmLog.error('state.save_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-      throw err;
-    }
-  }
-
-  /** Load full EVM state from localStorage */
-  async loadFromLocalStorage(key: string = 'xln-evm-state'): Promise<boolean> {
-    try {
-      const json = localStorage.getItem(key);
-      if (!json) {
-        this.log('[BrowserVM] No saved state found');
-        return false;
-      }
-
-      const data = decodeBrowserVmSerializedState(JSON.parse(json));
-
-      await this.restoreState(data);
-      this.log(`[BrowserVM] Loaded state from localStorage: ${key} (v${data.version})`);
-      return true;
-    } catch (err) {
-      browserVmLog.error('state.load_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-      throw err;
-    }
-  }
-
-  /** Clear saved state from localStorage */
-  clearLocalStorage(key: string = 'xln-evm-state'): void {
-    localStorage.removeItem(key);
-    this.log(`[BrowserVM] Cleared saved state: ${key}`);
   }
 
   /** Sync all collaterals from BrowserVM for given account pairs */
@@ -2489,9 +2384,17 @@ export class BrowserVMProvider {
     removed: boolean;
   }> {
     const parseBlock = (value: unknown, defaultValue: number): number => {
-      if (value === undefined || value === null || value === 'latest') return defaultValue;
+      if (value === undefined) return defaultValue;
+      if (value === 'latest') return Number(this.getBlockNumber());
+      if (value === 'earliest') return 0;
+      if (!['number', 'bigint', 'string'].includes(typeof value) || String(value).trim() === '') {
+        throw new TypeError(`BROWSERVM_BLOCK_FILTER_INVALID:${String(value)}`);
+      }
       const parsed = Number(value);
-      return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : defaultValue;
+      if (!Number.isSafeInteger(parsed) || parsed < 0) {
+        throw new RangeError(`BROWSERVM_BLOCK_FILTER_INVALID:${String(value)}`);
+      }
+      return parsed;
     };
     const fromBlock = parseBlock(filter?.fromBlock, 0);
     const toBlock = parseBlock(filter?.toBlock, Number.MAX_SAFE_INTEGER);
@@ -2606,7 +2509,7 @@ export class BrowserVMProvider {
     }
   }
 
-  private async runReadOnlyCall(
+  async runReadOnlyCall(
     request: Parameters<EthereumVm['evm']['runCall']>[0],
   ): Promise<Awaited<ReturnType<EthereumVm['evm']['runCall']>>> {
     return await this.runExclusiveVmOperation(async () => {
@@ -2673,11 +2576,6 @@ export class BrowserVMProvider {
       },
     );
     return result;
-  }
-
-  /** Check if saved state exists */
-  hasSavedState(key: string = 'xln-evm-state'): boolean {
-    return localStorage.getItem(key) !== null;
   }
 
   /** Register numbered entities via EntityProvider contract (abi.encode(Board) preimages). */

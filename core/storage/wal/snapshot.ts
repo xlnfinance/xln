@@ -1,3 +1,4 @@
+import { storageFailure } from '../../protocol/errors/failure-taxonomy';
 /**
  * Projects live Runtime/Entity/Jurisdiction replicas into durable recovery snapshots.
  * Key builders: canonical checkpoints that exclude proposals, handles, and transport state.
@@ -55,14 +56,12 @@ const normalizeJStateRoot = (
   stateRoot: unknown,
   options?: { rpcBacked?: boolean },
 ): Uint8Array | null => {
-  const normalized = stateRoot instanceof Uint8Array
-    ? stateRoot
-    : Array.isArray(stateRoot)
-      ? new Uint8Array(stateRoot.map((value) => Number(value) & 0xff))
-      : null;
-  if (!(normalized instanceof Uint8Array) || normalized.length === 0) return null;
-  if (options?.rpcBacked && isZeroBytes32(normalized)) return null;
-  return new Uint8Array(normalized);
+  if (stateRoot === null) return null;
+  if (!(stateRoot instanceof Uint8Array) || stateRoot.length !== 32) {
+    throw storageFailure('RUNTIME_MACHINE_J_STATE_ROOT_INVALID');
+  }
+  if (options?.rpcBacked && isZeroBytes32(stateRoot)) return null;
+  return new Uint8Array(stateRoot);
 };
 
 const normalizeJBlockNumber = (value: unknown): bigint => {

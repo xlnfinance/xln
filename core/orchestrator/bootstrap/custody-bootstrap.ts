@@ -828,10 +828,15 @@ export const startCustodySupport = async (
       daemonAuthKey,
     };
   } catch (error) {
-    await Promise.allSettled([
-      stopManagedChild(custodyChild),
-      stopManagedChild(daemonChild),
-    ]);
+    const children = [custodyChild, daemonChild].filter((child): child is ManagedChild => child !== null);
+    const results = await Promise.allSettled(children.map(child => stopManagedChild(child)));
+    const failedChildren = children.filter((_, index) => results[index]?.status === 'rejected');
+    if (failedChildren.length > 0) {
+      throw Object.assign(new AggregateError(
+        [error, ...results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])],
+        'CUSTODY_STARTUP_CLEANUP_FAILED',
+      ), { failedChildren });
+    }
     throw error;
   }
 };

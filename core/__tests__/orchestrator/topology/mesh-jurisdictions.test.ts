@@ -147,3 +147,17 @@ describe('mesh jurisdiction config resolution', () => {
     });
   });
 });
+
+test('an unknown RPC cannot inherit a configured chain identity', () => {
+  withJurisdictions(jurisdictionsDocument({
+    primary: stack('Primary', 'https://known.invalid', `0x${'11'.repeat(20)}`, `0x${'22'.repeat(20)}`, { primary: true }),
+  }), () => expect(() => resolveMeshJurisdictionConfig('https://unknown.invalid')).toThrow('MESH_RPC_OVERRIDE_UNMAPPED'));
+});
+
+test('selected secondary jurisdiction must have the complete deployed stack', () => {
+  withJurisdictions(jurisdictionsDocument({
+    tron: stack('Tron', '/rpc2', `0x${'11'.repeat(20)}`, `0x${'22'.repeat(20)}`, {
+      contracts: { depository: `0x${'11'.repeat(20)}`, entityProvider: `0x${'22'.repeat(20)}` },
+    }),
+  }), () => expect(() => resolveSecondaryJurisdictions('/rpc')).toThrow('MESH_JURISDICTION_INCOMPLETE'));
+});

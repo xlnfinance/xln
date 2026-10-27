@@ -52,3 +52,12 @@ test('an unreachable tower is coded where fetch fails and stays a retryable outa
     { category: 'TransientRace', code: 'RECOVERY_TOWER_UNREACHABLE' },
   ]);
 });
+
+test('a malformed declared bundle cannot downgrade a backup to its valid prefix', async () => {
+  const { extractEncryptedRecoveryBundles } = await import('../../../../storage/recovery/discovery/candidates');
+  const valid = { version: 1, runtimeId: 'r', lookupKey: 'l', bundleHash: 'b', iv: 'i', ciphertext: 'c' };
+  expect(extractEncryptedRecoveryBundles({ bundles: [valid] })).toEqual([valid]);
+  for (const bad of [null, {}, { ...valid, ciphertext: undefined }]) {
+    expect(() => extractEncryptedRecoveryBundles({ bundles: [valid, bad] })).toThrow('RECOVERY_BACKUP_BUNDLE_INVALID');
+  }
+});

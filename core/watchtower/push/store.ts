@@ -1,3 +1,4 @@
+import { storageFailure } from '../../protocol/errors/failure-taxonomy';
 /**
  * LevelDB-backed push registry + dispute-watch cursor + wake dedup store.
  *
@@ -320,7 +321,10 @@ const getCursor = async (
   const raw = await getStoredValue(context, cursorKey(chainId, depository));
   if (raw === null) return null;
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
+  if (String(raw).trim() === '' || !Number.isSafeInteger(parsed) || parsed < 0) {
+    throw storageFailure('PUSH_CURSOR_INVALID');
+  }
+  return parsed;
 };
 
 const setCursor = async (

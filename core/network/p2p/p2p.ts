@@ -1,3 +1,4 @@
+import { FailureDispositionError } from '../../protocol/errors/failure-taxonomy';
 /**
  * P2P is a dumb encrypted transport. Replay protection and tx validity belong
  * to entity/account consensus; this layer only authenticates runtime sockets,
@@ -292,10 +293,10 @@ const p2pDeliveryResult = (
 const p2pSendFalseDelivery = (transport: EntityInputDeliveryTransport): EntityInputDeliveryResult =>
   p2pDeliveryResult(
     deliveryFailure({
-      category: 'Contradiction',
+      category: 'TransientRace',
       code: 'P2P_SEND_RETURNED_FALSE',
       message: 'Transport send returned false',
-      terminal: true,
+      terminal: false,
     }),
     transport,
   );
@@ -303,31 +304,15 @@ const p2pSendFalseDelivery = (transport: EntityInputDeliveryTransport): EntityIn
 const p2pNotDeliveredResult = (transport: EntityInputDeliveryTransport, message: string): EntityInputDeliveryResult =>
   p2pDeliveryResult(
     deliveryFailure({
-      category: 'Contradiction',
+      category: 'TransientRace',
       code: 'P2P_ENTITY_INPUT_NOT_DELIVERED',
       message,
-      terminal: true,
+      terminal: false,
     }),
     transport,
   );
-
-const p2pSendThrowResult = (transport: EntityInputDeliveryTransport, message: string): EntityInputDeliveryResult => {
-  const code = message.includes('P2P_NO_PUBKEY') ? 'P2P_NO_PUBKEY' : 'P2P_SEND_THROW';
-  return p2pDeliveryResult(
-    deliveryFailure({
-      category: 'Contradiction',
-      code,
-      message,
-      terminal: true,
-    }),
-    transport,
-  );
-};
 
 const p2pShouldRefreshGossip = (delivery: DeliveryResult): boolean => delivery.code === 'P2P_NO_PUBKEY';
-
-const p2pSendThrowDebugCode = (delivery: DeliveryResult): string =>
-  p2pShouldRefreshGossip(delivery) ? 'P2P_NO_PUBKEY_DELIVERY_FAILED' : 'P2P_SEND_THROW';
 
 const normalizeId = (value: string): string => value.toLowerCase();
 const getReplicaSignerId = (replicaKey: string): string => {
@@ -873,24 +858,9 @@ export class RuntimeP2P {
           delivery,
         });
       } catch (error) {
-        const message = (error as Error).message || String(error);
-        const delivery = p2pSendThrowResult(transport, message);
-        this.sendDebugEvent({
-          level: 'error',
-          code: p2pSendThrowDebugCode(delivery),
-          message,
-          targetRuntimeId: normalizedTargetRuntimeId,
-          entityIds: envelope.entityInputs.map(input => input.entityId),
-          transport,
-          delivery,
-        });
-        if (p2pShouldRefreshGossip(delivery)) {
-          this.refreshGossip();
-        }
-        throw new Error(
-          `P2P_ENTITY_INPUTS_SEND_THROW: runtime=${normalizedTargetRuntimeId} entities=${envelope.entityInputs.length} ` +
-            `transport=${transport} error=${message}`,
-        );
+        if (!(error instanceof FailureDispositionError) || error.disposition !== 'retry') throw error;
+        delivery = p2pDeliveryResult(deliveryDeferred({ outcome: 'deferred', code: error.code }), transport);
+        if (p2pShouldRefreshGossip(delivery)) this.refreshGossip();
       }
     }
 
@@ -907,10 +877,7 @@ export class RuntimeP2P {
       directPeers: this.getDirectPeerState(),
       delivery: finalDelivery,
     });
-    throw new Error(
-      `P2P_ENTITY_INPUTS_NOT_DELIVERED: runtime=${normalizedTargetRuntimeId} entities=${envelope.entityInputs.length} ` +
-        `transport=${transport}`,
-    );
+    return finalDelivery;
   }
 
   requestGossip(runtimeId: string) {

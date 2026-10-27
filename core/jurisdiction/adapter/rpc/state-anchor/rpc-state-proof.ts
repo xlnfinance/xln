@@ -1,3 +1,4 @@
+import { rejectFailure } from '../../../../protocol/errors/failure-taxonomy';
 import { ethers } from 'ethers';
 
 // Verifies eth_getProof responses against an already authenticated header
@@ -31,7 +32,7 @@ export type VerifiedStateProof = {
 };
 
 const fail = (code: string): never => {
-  throw new Error(`STATE_PROOF_${code}`);
+  throw rejectFailure(`STATE_PROOF_${code}`);
 };
 
 const normalizeHash = (value: unknown, code: string): string => {
@@ -175,8 +176,9 @@ const proofList = (value: unknown, code: string): string[] => {
 };
 
 const quantity = (value: unknown, code: string): bigint => {
+  if (typeof value !== 'string' || !/^(?:0x[0-9a-fA-F]+|[0-9]+)$/.test(value)) return fail(code);
   try {
-    return BigInt(String(value ?? ''));
+    return BigInt(value);
   } catch {
     return fail(code);
   }

@@ -276,11 +276,7 @@ export const rehydrateRestoredRuntimeInfra = async (
 ): Promise<void> => {
   normalizeRestoredJReplicas(env);
   applyTrustedJurisdictionRpcBindings(env, options.trustedJurisdictionRpcBindings ?? []);
-  try {
-    await options.loadGossipProfiles(env);
-  } catch (error) {
-    infraLog.warn('gossip.restore_skipped', { error: errorMessage(error) });
-  }
+  await options.loadGossipProfiles(env);
 
   options.assertPersistedContractConfigReady(env, 'loadEnvFromDB post-replay');
 

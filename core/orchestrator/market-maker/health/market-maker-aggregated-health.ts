@@ -185,9 +185,9 @@ export const buildAggregatedMarketMakerHealth = ({
   const hubs = hubEntityIds.map((hubEntityId) => {
     const existing = hubsById.get(hubEntityId);
     const offers = existing?.offers ?? 0;
-    const depthReady = existing?.depthReady === true ||
-      (!!expectedOffersPerHub && offers === expectedOffersPerHub);
-    const ready = existing?.ready === true || depthReady;
+    const depthReady = existing?.depthReady === true && existing.pairs.length > 0 &&
+      existing.pairs.every(pair => pair.depthReady);
+    const ready = existing?.ready === true;
     return {
       hubEntityId,
       offers,

@@ -1,8 +1,9 @@
+import { rejectFailure } from '../../../protocol/errors/failure-taxonomy';
+import { requireBoundaryRecord } from '../../../protocol/boundary-validation';
 import { safeStringify } from '../../../protocol/serialization';
 import {
   normalizeTowerBaseUrl,
   type RecoveryTowerConfig,
-  type TowerDiscoverPayload,
   type TowerRestorePayload,
   type TowerServerInfo,
 } from './types';
@@ -93,12 +94,14 @@ export async function towerHasRecoveryBundle(
   if (!response.ok) {
     throw new Error(`HTTP_${response.status}`);
   }
-  const payload = (await response.json()) as TowerDiscoverPayload;
-  if (!payload.ok) {
-    if (payload.error === 'TOWER_BUNDLE_NOT_FOUND') return false;
-    throw new Error(String(payload.error || 'unknown'));
+  const payload = requireBoundaryRecord(await response.json(), 'TOWER_DISCOVERY_PAYLOAD_INVALID');
+  if (typeof payload['ok'] !== 'boolean') throw rejectFailure('TOWER_DISCOVERY_OK_INVALID');
+  if (!payload['ok']) {
+    if (payload['error'] === 'TOWER_BUNDLE_NOT_FOUND') return false;
+    throw new Error(String(payload['error'] || 'unknown'));
   }
-  return payload.available === true;
+  if (typeof payload['available'] !== 'boolean') throw rejectFailure('TOWER_DISCOVERY_AVAILABLE_INVALID');
+  return payload['available'];
 }
 
 type TowerRestoreOutcome =

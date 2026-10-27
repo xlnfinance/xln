@@ -7,15 +7,10 @@ import "./Types.sol";
 /// @dev Linked to keep the settlement contract below EIP-170 while retaining
 ///      fail-loud validation before the first financial mutation.
 library DepositoryBounds {
-  uint256 private constant MAX_BATCH_RESERVE_TO_RESERVE = 64;
-  uint256 private constant MAX_BATCH_RESERVE_TO_COLLATERAL = 64;
-  uint256 private constant MAX_BATCH_COLLATERAL_TO_RESERVE = 64;
   uint256 private constant MAX_BATCH_SETTLEMENTS = 32;
   uint256 private constant MAX_BATCH_DISPUTE_STARTS = 8;
   uint256 private constant MAX_BATCH_COUNTER_DISPUTES = 8;
   uint256 private constant MAX_BATCH_DISPUTE_FINALIZATIONS = 1;
-  uint256 private constant MAX_BATCH_EXTERNAL_TO_RESERVE = 64;
-  uint256 private constant MAX_BATCH_RESERVE_TO_EXTERNAL = 64;
   uint256 private constant MAX_BATCH_SECRET_REVEALS = 32;
   uint256 private constant MAX_BATCH_HASH_LADDER_REGISTRATIONS = 32;
   uint256 private constant MAX_BATCH_TOTAL_OPS = 50;
@@ -37,15 +32,10 @@ library DepositoryBounds {
       batch.hashLadderRegistrations.length > MAX_BATCH_TOTAL_OPS
     ) revert E10();
 
-    if (batch.reserveToReserve.length > MAX_BATCH_RESERVE_TO_RESERVE) revert E10();
-    if (batch.reserveToCollateral.length > MAX_BATCH_RESERVE_TO_COLLATERAL) revert E10();
-    if (batch.collateralToReserve.length > MAX_BATCH_COLLATERAL_TO_RESERVE) revert E10();
     if (batch.settlements.length > MAX_BATCH_SETTLEMENTS) revert E10();
     if (batch.disputeStarts.length > MAX_BATCH_DISPUTE_STARTS) revert E10();
     if (batch.counterDisputes.length > MAX_BATCH_COUNTER_DISPUTES) revert E10();
     if (batch.disputeFinalizations.length > MAX_BATCH_DISPUTE_FINALIZATIONS) revert E10();
-    if (batch.externalTokenToReserve.length > MAX_BATCH_EXTERNAL_TO_RESERVE) revert E10();
-    if (batch.reserveToExternalToken.length > MAX_BATCH_RESERVE_TO_EXTERNAL) revert E10();
     if (batch.revealSecrets.length > MAX_BATCH_SECRET_REVEALS) revert E10();
     if (batch.hashLadderRegistrations.length > MAX_BATCH_HASH_LADDER_REGISTRATIONS) revert E10();
 

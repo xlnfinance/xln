@@ -151,35 +151,9 @@ export const encodeCanonicalRpcReceipt = async (
   return concatBytes(Uint8Array.of(Number(type)), payload);
 };
 
-export const computeCanonicalReceiptsRoot = async (
-  receipts: readonly CanonicalRpcReceipt[],
-): Promise<string> => {
+const buildReceiptTrie = async (receipts: readonly CanonicalRpcReceipt[]) => {
   const [{ createMPT }, { RLP }] = await Promise.all([
-    import('@ethereumjs/mpt'),
-    import('@ethereumjs/rlp'),
-  ]);
-  const ordered = [...receipts].sort((left, right) =>
-    Number(parseReceiptQuantity(left.transactionIndex, 'TRANSACTION_INDEX')) -
-    Number(parseReceiptQuantity(right.transactionIndex, 'TRANSACTION_INDEX')));
-  const trie = await createMPT();
-  for (let index = 0; index < ordered.length; index += 1) {
-    const receipt = ordered[index]!;
-    const transactionIndex = parseReceiptQuantity(receipt.transactionIndex, 'TRANSACTION_INDEX');
-    if (transactionIndex !== BigInt(index)) {
-      throw new Error(`J_RECEIPT_TRANSACTION_INDEX_GAP:expected=${index}:actual=${transactionIndex}`);
-    }
-    await trie.put(RLP.encode(transactionIndex), await encodeCanonicalRpcReceipt(receipt));
-  }
-  return ethers.hexlify(trie.root()).toLowerCase();
-};
-
-export const createCanonicalReceiptProofs = async (
-  receipts: readonly CanonicalRpcReceipt[],
-  expectedRoot: string,
-): Promise<Map<number, Omit<CanonicalReceiptMptProof, 'receiptLogIndex'>>> => {
-  const [{ createMPT, createMerkleProof }, { RLP }] = await Promise.all([
-    import('@ethereumjs/mpt'),
-    import('@ethereumjs/rlp'),
+    import('@ethereumjs/mpt'), import('@ethereumjs/rlp'),
   ]);
   const ordered = [...receipts].sort((left, right) =>
     Number(parseReceiptQuantity(left.transactionIndex, 'TRANSACTION_INDEX')) -
@@ -196,13 +170,30 @@ export const createCanonicalReceiptProofs = async (
     encoded.set(index, receiptBytes);
     await trie.put(RLP.encode(transactionIndex), receiptBytes);
   }
+  return { trie, encoded };
+};
+
+export const computeCanonicalReceiptsRoot = async (receipts: readonly CanonicalRpcReceipt[]): Promise<string> => {
+  const { trie } = await buildReceiptTrie(receipts);
+  return ethers.hexlify(trie.root()).toLowerCase();
+};
+
+export const createCanonicalReceiptProofs = async (
+  receipts: readonly CanonicalRpcReceipt[],
+  expectedRoot: string,
+): Promise<Map<number, Omit<CanonicalReceiptMptProof, 'receiptLogIndex'>>> => {
+  const [{ createMerkleProof }, { RLP }] = await Promise.all([
+    import('@ethereumjs/mpt'),
+    import('@ethereumjs/rlp'),
+  ]);
+  const { trie, encoded } = await buildReceiptTrie(receipts);
   const receiptsRoot = ethers.hexlify(trie.root()).toLowerCase();
   const normalizedExpected = normalizeReceiptHash(expectedRoot, 'ROOT');
   if (receiptsRoot !== normalizedExpected) {
     throw new Error(`J_RECEIPT_ROOT_MISMATCH:expected=${normalizedExpected}:computed=${receiptsRoot}`);
   }
   const proofs = new Map<number, Omit<CanonicalReceiptMptProof, 'receiptLogIndex'>>();
-  for (let index = 0; index < ordered.length; index += 1) {
+  for (let index = 0; index < encoded.size; index += 1) {
     const key = RLP.encode(BigInt(index));
     const proofNodes = await createMerkleProof(trie, key);
     proofs.set(index, {

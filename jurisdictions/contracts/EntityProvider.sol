@@ -166,27 +166,12 @@ contract EntityProvider is ERC1155 {
     uint256 tokenId
   );
 
-  function _singleSignerBoardHash(address signer) internal pure returns (bytes32) {
-    bytes32[] memory entityIds = new bytes32[](1);
-    entityIds[0] = bytes32(uint256(uint160(signer)));
-    uint16[] memory votingPowers = new uint16[](1);
-    votingPowers[0] = 1;
-    return keccak256(abi.encode(Board({
-      votingThreshold: 1,
-      entityIds: entityIds,
-      votingPowers: votingPowers,
-      boardChangeDelay: 0,
-      controlChangeDelay: 0,
-      dividendChangeDelay: 0
-    })));
-  }
-
   constructor(address foundationRecipient) ERC1155("https://xln.com/entity/{id}.json") {
     require(foundationRecipient != address(0), "Invalid foundation recipient");
     foundationDeployer = foundationRecipient;
 
     // Create foundation entity #1 with governance
-    bytes32 foundationQuorum = _singleSignerBoardHash(foundationRecipient);
+    bytes32 foundationQuorum = HankoVerifier.singleSignerEntityId(foundationRecipient);
     bytes32 foundationId = bytes32(FOUNDATION_ENTITY);
 
     entities[foundationId] = Entity({
@@ -794,10 +779,8 @@ contract EntityProvider is ERC1155 {
       uint256 internalTokenId = controlReserveTokenIds[targetEntityId][depository];
       if (internalTokenId == 0) continue;
       anyRegistered = true;
-      // Fault isolation: one broken or malicious Depository must never brick
-      // the CONTROL lane for every entity forever (the list is append-only).
-      // A Depository that reverts, is mid-batch (_status == 2, reserves may be
-      // flash-inflated) or returns malformed data simply contributes zero.
+      // The append-only Depository list cannot let one failed reader veto all CONTROL actions.
+      // Unreadable or mid-batch reserves contribute no weight; a strict total-supply majority is still required.
       (bool statusOk, bytes memory statusData) =
         depository.staticcall(abi.encodeWithSelector(IEntityShareDepository._status.selector));
       if (!statusOk || statusData.length != 32 || abi.decode(statusData, (uint256)) == 2) continue;

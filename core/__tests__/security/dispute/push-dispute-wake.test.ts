@@ -761,3 +761,17 @@ describe('buildDisputeWakeNotification', () => {
     expect(notification.collapseKey).toContain('dispute:');
   });
 });
+
+test('corrupt persisted push cursors cannot restart a sweep at a guessed height', async () => {
+  const dbPath = await mkdtemp(join(tmpdir(), 'xln-invalid-push-cursor-'));
+  for (const cursor of ['', 'broken', '-1', '1.5']) {
+    const db = new Level<string, string>(dbPath, { valueEncoding: 'utf8' });
+    await db.put(`cursor:${CHAIN_ID}:${DEPOSITORY}`, cursor);
+    await db.close();
+    const store = createPushStore({ dbPath });
+    try { await expect(store.getCursor(CHAIN_ID, DEPOSITORY)).rejects.toThrow('PUSH_CURSOR_INVALID'); }
+    finally { await store.close(); }
+  }
+  const { rm } = await import('node:fs/promises');
+  await rm(dbPath, { recursive: true });
+});

@@ -34,10 +34,11 @@ const reply = (
   value: RscoreWireValue,
   abiVersion: RscoreWireValue = 1,
   messageKind = 1,
+  wrapBody = true,
 ): Buffer => {
   const requestIdBytes = Buffer.alloc(8);
   requestIdBytes.writeBigUInt64BE(requestId);
-  const body = packWireValue([value]);
+  const body = packWireValue(wrapBody ? [value] : value);
   const fields: RscoreWireValue[] = [
     DOMAIN,
     abiVersion,
@@ -103,6 +104,10 @@ const handleRequest = (envelope: Buffer): void => {
     } else if (accountId[0] === 0x56) {
       // The digest binds this value, but replies have a closed OK/Error kind.
       process.stdout.write(reply(requestId, opTag, ['must-not-return'], 1, 3));
+    } else if (accountId[0] === 0x57) {
+      process.stdout.write(reply(requestId, opTag, ['unwrapped', 'result'], 1, 1, false));
+    } else if (accountId[0] === 0x58) {
+      process.stdout.write(reply(requestId, opTag, 'unwrapped', 1, 1, false));
     } else if (accountId[0] === 0x44) {
       // Leave only one byte of the next frame in the same stdout write. The
       // rest arrives later, after the valid response would otherwise escape.

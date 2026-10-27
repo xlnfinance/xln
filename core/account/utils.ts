@@ -325,6 +325,14 @@ export function getSwapPairPolicyForDimensions(
     : DEFAULT_SWAP_PAIR_POLICY;
 }
 
+export const compareEntitySwapPairs = (a: EntitySwapPairConfig, b: EntitySwapPairConfig): number => {
+  const primary = getSwapPairOrientation(1, 2);
+  const isPrimary = (pair: EntitySwapPairConfig): boolean =>
+    pair.baseTokenId === primary.baseTokenId && pair.quoteTokenId === primary.quoteTokenId;
+  return Number(isPrimary(b)) - Number(isPrimary(a)) ||
+    a.quoteTokenId - b.quoteTokenId || a.baseTokenId - b.baseTokenId;
+};
+
 export function buildDefaultEntitySwapPairs(
   tokenIds: readonly number[] = DEFAULT_ENTITY_SWAP_PAIR_TOKENS,
 ): EntitySwapPairConfig[] {
@@ -349,17 +357,7 @@ export function buildDefaultEntitySwapPairs(
     }
   }
 
-  const primaryPair = getSwapPairOrientation(1, 2); // WETH/USDC orientation key
-  const primaryKey = `${primaryPair.baseTokenId}/${primaryPair.quoteTokenId}`;
-
-  return pairs.sort((a, b) => {
-    const aKey = `${a.baseTokenId}/${a.quoteTokenId}`;
-    const bKey = `${b.baseTokenId}/${b.quoteTokenId}`;
-    if (aKey === primaryKey && bKey !== primaryKey) return -1;
-    if (bKey === primaryKey && aKey !== primaryKey) return 1;
-    if (a.quoteTokenId !== b.quoteTokenId) return a.quoteTokenId - b.quoteTokenId;
-    return a.baseTokenId - b.baseTokenId;
-  });
+  return pairs.sort(compareEntitySwapPairs);
 }
 
 export function getDefaultSwapTradingPairs(): EntitySwapPairConfig[] {
@@ -367,7 +365,7 @@ export function getDefaultSwapTradingPairs(): EntitySwapPairConfig[] {
 }
 
 /**
- * Default per-token credit limit scaled to token decimals (matches old account behavior)
+ * Default per-token credit limit
  */
 export function getDefaultCreditLimit(tokenId: number): bigint {
   if (!Number.isSafeInteger(tokenId) || tokenId <= 0) {

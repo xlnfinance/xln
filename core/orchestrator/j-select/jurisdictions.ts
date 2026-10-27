@@ -237,14 +237,6 @@ const resolveRepoJurisdictionsJsonPath = (): string => {
 
 const rpcPublicPath = (index: number): string => index <= 1 ? '/rpc' : `/rpc${index}`;
 
-const parseRpcIndex = (value: string): number | null => {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'tron' || normalized === 'localhost2') return 2;
-  const match = normalized.match(/^rpc([2-8])$/);
-  if (!match) return null;
-  return Number(match[1]);
-};
-
 const resolvePublicRpcPath = (
   config: OrchestratorJurisdictionsConfig,
   key: string,
@@ -264,9 +256,7 @@ const resolvePublicRpcPath = (
     }
   }
 
-  const namedIndex = parseRpcIndex(key) ?? parseRpcIndex(String(jurisdiction.name || ''));
-  if (namedIndex !== null) return rpcPublicPath(namedIndex);
-  return '/rpc';
+  throw new Error(`JURISDICTION_PUBLIC_RPC_UNMAPPED:${key}:${rpc}`);
 };
 
 // jurisdictions.json carries deployed contract addresses and the token

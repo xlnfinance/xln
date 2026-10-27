@@ -633,6 +633,19 @@ describe('runtime recovery tower', () => {
       createdAt: 10_001,
     });
 
+    const orphanTail = buildRuntimeRecoveryBundle(env, {
+      signers, kind: 'journal_tail',
+      baseCheckpoint: { height: baseHeight, hash: `0x${'ab'.repeat(32)}` },
+      frames: [frame!], createdAt: 10_001,
+    });
+    await expect(restoreEnvFromRecoveryBundles([snapshotBundle, orphanTail], {
+      runtimeSeed, runtimeId, readOnly: true,
+    })).rejects.toThrow('RECOVERY_BUNDLE_TARGET_HEIGHT_UNAVAILABLE');
+    const older = await restoreEnvFromRecoveryBundles([snapshotBundle, orphanTail], {
+      runtimeSeed, runtimeId, readOnly: true, targetHeight: baseHeight,
+    });
+    expect(older.state.height).toBe(baseHeight);
+
     const restoredEnv = trackRuntimeEnv(
       await restoreEnvFromRecoveryBundles([snapshotBundle, tailBundle], {
         runtimeSeed,

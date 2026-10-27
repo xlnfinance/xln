@@ -84,3 +84,14 @@ describe('market maker child poller', () => {
     expect(calls).toEqual(['http://127.0.0.1:21040/api/health']);
   });
 });
+
+test('failed health poll invalidates previously healthy cached evidence', async () => {
+  const child = createChild();
+  child.lastHealth = { marketMaker: { enabled: true, ok: true } };
+  const poller = createMarketMakerChildPoller({
+    child, host: '127.0.0.1', healthTimeoutMs: 30, fullHealthTimeoutMs: 30,
+    fetchJson: async () => null,
+  });
+  await poller.pollHealthOnce();
+  expect(child.lastHealth).toBeNull();
+});

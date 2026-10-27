@@ -475,3 +475,18 @@ describe('BrowserVM JAdapter boundary', () => {
     }
   });
 });
+
+test('BrowserVM rejects invalid restore addresses before mutating the trie', async () => {
+  const { BrowserVMProvider } = await import('../../../jurisdiction/adapter/browservm/browservm-provider');
+  const vm = new BrowserVMProvider();
+  await vm.init({ chainId: 31337 });
+  const state = await vm.serializeState();
+  for (const depository of ['bad', '0x12', `0x${'12'.repeat(21)}`]) {
+    await expect(vm.restoreState({ ...state, addresses: { ...state.addresses, depository } }))
+      .rejects.toThrow('BROWSERVM_STATE_ADDRESS_INVALID');
+    expect((await vm.serializeState()).stateRoot).toBe(state.stateRoot);
+  }
+  for (const fromBlock of ['invalid', '', -1, 0.5]) {
+    expect(() => vm.getLogs({ fromBlock })).toThrow('BROWSERVM_BLOCK_FILTER_INVALID');
+  }
+});

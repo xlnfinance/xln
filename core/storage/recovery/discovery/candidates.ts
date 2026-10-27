@@ -1,3 +1,4 @@
+import { rejectFailure } from '../../../protocol/errors/failure-taxonomy';
 import { decryptRuntimeRecoveryBundle } from '../bundle/crypto';
 import { deriveRuntimeSignerAddress, normalizeRuntimeId } from '../bundle/seed-identity';
 import { isRecord } from '../../../support/boundary-guards';
@@ -31,9 +32,14 @@ const isEncryptedRuntimeRecoveryBundle = (value: unknown): value is EncryptedRun
 
 export const extractEncryptedRecoveryBundles = (payload: unknown): EncryptedRuntimeRecoveryBundleV1[] => {
   if (isEncryptedRuntimeRecoveryBundle(payload)) return [payload];
-  if (!isRecord(payload)) return [];
-  const rawBundles = Array.isArray(payload['bundles']) ? payload['bundles'] : [];
-  return rawBundles.filter(isEncryptedRuntimeRecoveryBundle);
+  if (!isRecord(payload) || !Array.isArray(payload['bundles'])) {
+    throw rejectFailure('RECOVERY_BACKUP_BUNDLES_INVALID');
+  }
+  const rawBundles: unknown[] = payload['bundles'];
+  if (!rawBundles.every(isEncryptedRuntimeRecoveryBundle)) {
+    throw rejectFailure('RECOVERY_BACKUP_BUNDLE_INVALID');
+  }
+  return rawBundles;
 };
 
 const getBundleReferenceHash = (bundle: RuntimeRecoveryBundleV1): string =>

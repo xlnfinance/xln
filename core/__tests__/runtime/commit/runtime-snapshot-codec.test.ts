@@ -186,3 +186,35 @@ describe('runtime snapshot codec', () => {
       .toThrow('RUNTIME_SNAPSHOT_J_REPLICAS_MISSING');
   });
 });
+
+test('storage deadline rejects malformed explicit configuration before starting a write', async () => {
+  const { withStorageWriteDeadline } = await import('../../../storage/commit/commit-deadline');
+  const previous = process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'];
+  let writes = 0;
+  try {
+    for (const value of ['', 'abc', '0', '-1', '1.5']) {
+      process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] = value;
+      await expect(withStorageWriteDeadline(createEmptyEnv('deadline-invalid', 1), async () => { writes++; }))
+        .rejects.toThrow('STORAGE_WRITE_TIMEOUT_INVALID');
+    }
+    expect(writes).toBe(0);
+  } finally {
+    if (previous === undefined) delete process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'];
+    else process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] = previous;
+  }
+});
+
+test('checkpoint state roots accept only null or exactly 32 bytes', () => {
+  const env = createEmptyEnv('invalid-checkpoint-root', 1);
+  const replica = {
+    name: 'Test', blockNumber: 0n, stateRoot: null,
+    mempool: [], blockDelayMs: 300, lastBlockTimestamp: 0, position: { x: 0, y: 0, z: 0 },
+  };
+  env.state.jReplicas.set('Test', replica);
+  for (const stateRoot of [undefined, '0x00', [], new Uint8Array(0), new Uint8Array(31), new Uint8Array(33)]) {
+    Object.assign(replica, { stateRoot });
+    expect(() => buildDurableRuntimeMachineSnapshot(env)).toThrow('RUNTIME_MACHINE_J_STATE_ROOT_INVALID');
+  }
+  Object.assign(replica, { stateRoot: null });
+  expect(() => buildDurableRuntimeMachineSnapshot(env)).not.toThrow();
+});

@@ -1,3 +1,4 @@
+import { haltRuntimeFailure, retryFailure } from '../../protocol/errors/failure-taxonomy';
 import type { RuntimeEntityInputsEnvelope } from '../../runtime/types';
 import {
   deriveRuntimeWsSessionKeys,
@@ -947,12 +948,12 @@ export class RuntimeWsClient {
     if (this.options.helloAudience.startsWith('xln-runtime:') && !this.canDeliver()) return false;
     // Encryption is mandatory for the complete per-R-frame envelope.
     if (!this.options.getTargetEncryptionKey || !this.options.encryptionKeyPair) {
-      throw new Error('P2P_NO_ENCRYPTION: Encryption not configured');
+      throw haltRuntimeFailure('P2P_NO_ENCRYPTION');
     }
 
     const targetPubKey = this.options.getTargetEncryptionKey(to);
     if (!targetPubKey) {
-      throw new Error(`P2P_NO_PUBKEY: No encryption key for ${to}`);
+      throw retryFailure('P2P_NO_PUBKEY', `P2P_NO_PUBKEY:${to}`);
     }
 
     // Encrypt - throws on error (fail-fast, never send plaintext). A keyed
@@ -968,7 +969,7 @@ export class RuntimeWsClient {
       const signed = envelope.sourceSignature
         ? envelope
         : this.options.signEnvelope?.(to, envelope);
-      if (!signed?.sourceSignature) throw new Error('P2P_RELAY_ENVELOPE_UNSIGNED');
+      if (!signed?.sourceSignature) throw haltRuntimeFailure('P2P_RELAY_ENVELOPE_UNSIGNED');
       payload = encryptPayload(signed, targetPubKey);
     }
 
@@ -1173,9 +1174,7 @@ export class RuntimeWsClient {
       }
     } catch (error) {
       this.options.onError?.(error as Error);
-      // Never report a send failure through this same transport: the debug
-      // frame must satisfy the same failed preconditions and would recurse.
-      return false;
+      throw error;
     }
     const payload = serializeWsMessage(outboundMsg);
     const transport = this.options.url.includes('/relay') ? 'relay' : 'direct';

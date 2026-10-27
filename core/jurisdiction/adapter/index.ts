@@ -10,4 +10,4 @@ export * from './browservm/browservm-registry';
 export * from './chain-ids';
 export * from './kernel/factory';
 export * from './kernel/jurisdiction';
-export { debugFundReserves, getEntityInfoFromChain, submitProcessBatch } from './kernel/runtime-api';
+export { debugFundReserves, getEntityInfoFromChain } from './kernel/runtime-api';

@@ -43,7 +43,7 @@ export type EntityProfileDescriptor = Readonly<{
   }>;
 }>;
 
-const profileJurisdiction = (state: EntityState): ProfileJurisdiction | undefined => {
+export const profileJurisdiction = (state: EntityState): ProfileJurisdiction | undefined => {
   const jurisdiction = state.config.jurisdiction;
   const name = String(jurisdiction?.name || '').trim();
   if (!jurisdiction || !name) return undefined;

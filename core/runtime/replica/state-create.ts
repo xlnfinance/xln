@@ -66,12 +66,7 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
           env.infrastructure?.infraDbClosing ||
           readRuntimeMetadata(env, ENV_REPLAY_MODE_KEY) === true
         ) return;
-        const write = persistGossipProfileToInfraDb(env, deps.infraGossipDbAccess, profile).catch(error => {
-          runtimeLog.warn('infra_db.gossip_persist_failed', {
-            entity: String(profile?.entityId || '').slice(-8),
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
+        const write = persistGossipProfileToInfraDb(env, deps.infraGossipDbAccess, profile);
         deps.trackInfraDbWrite(env, write);
       },
       getLiveProfiles: () => {

@@ -1,5 +1,6 @@
 import {
   buildDefaultEntitySwapPairs,
+  compareEntitySwapPairs,
   getTokenIdsForJurisdiction,
   getSwapPairOrientation,
 } from '../../account/utils';
@@ -40,8 +41,6 @@ export function normalizeEntitySwapTradingPairs(state: RuntimeSwapTradingPairsSt
     });
   }
 
-  const primary = getSwapPairOrientation(1, 2); // WETH/USDC
-  const primaryKey = `${primary.baseTokenId}/${primary.quoteTokenId}`;
   const basePairs = normalized.length > 0 ? [...normalized] : [...defaultPairs];
   for (const pair of defaultPairs) {
     const key = `${pair.baseTokenId}/${pair.quoteTokenId}`;
@@ -49,14 +48,6 @@ export function normalizeEntitySwapTradingPairs(state: RuntimeSwapTradingPairsSt
     basePairs.push(pair);
   }
 
-  const ordered = basePairs.sort((a, b) => {
-    const aKey = `${a.baseTokenId}/${a.quoteTokenId}`;
-    const bKey = `${b.baseTokenId}/${b.quoteTokenId}`;
-    if (aKey === primaryKey && bKey !== primaryKey) return -1;
-    if (bKey === primaryKey && aKey !== primaryKey) return 1;
-    if (a.quoteTokenId !== b.quoteTokenId) return a.quoteTokenId - b.quoteTokenId;
-    return a.baseTokenId - b.baseTokenId;
-  });
+  state.swapTradingPairs = basePairs.sort(compareEntitySwapPairs);
 
-  state.swapTradingPairs = ordered;
 }

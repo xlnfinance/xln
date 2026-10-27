@@ -1,3 +1,4 @@
+import { FailureDispositionError } from '../../protocol/errors/failure-taxonomy';
 import type {
   DeliverableEntityInput,
   RuntimeReplica,
@@ -382,7 +383,7 @@ const dispatchP2POutputEnvelope = (
   try {
     sent = p2p.enqueueEntityInputsDelivery(group.targetRuntimeId, envelope, envelope.sourceRuntimeTimestamp);
   } catch (error) {
-    // A send throw is the peer's socket state: retain, never halt.
+    if (!(error instanceof FailureDispositionError) || error.disposition !== 'retry') throw error;
     env.error?.('network', 'ROUTE_SEND_FAILED', {
       runtimeId: group.targetRuntimeId,
       inputCount: sendable.length,

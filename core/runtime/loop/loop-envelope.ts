@@ -1,4 +1,5 @@
 import { Level } from 'level';
+import { reportFatalLoopError } from './loop-failure';
 import { createStructuredLogger } from '../../support/logger.ts';
 import {
   enqueueRuntimeInputsWithDeps,
@@ -167,7 +168,8 @@ export const infraGossipDbAccess = {
 export const trackInfraDbWrite = (env: RuntimeReplica, promise: Promise<void>): void => {
   const state = ensureRuntimeInfrastructure(env);
   state.infraDbPendingWrites ??= new Set();
-  const tracked = promise.finally(() => state.infraDbPendingWrites?.delete(tracked));
+  const tracked = promise.catch(error => reportFatalLoopError(env, undefined, error).then(() => {}))
+    .finally(() => state.infraDbPendingWrites?.delete(tracked));
   state.infraDbPendingWrites.add(tracked);
 };
 

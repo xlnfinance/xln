@@ -1,4 +1,3 @@
-import { buildRustHubPeerRoutes } from '../../../orchestrator/process/spawn/hub';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -83,10 +82,10 @@ test('mesh supervisor dispatches canonical per-hub process kinds', () => {
   const source = `${supervisor}\n${hubSpawner}`;
   expect(supervisor).toContain('const engine = canonicalHubEngine(name)');
   expect(supervisor).toContain('engine,');
-  expect(hubSpawner).toContain("child.engine === 'rust'");
-  expect(hubSpawner).toContain("{ executable: 'bun', processArgs, rustIdentity: null }");
+  expect(hubSpawner).not.toContain("child.engine === 'rust'");
+  expect(hubSpawner).toContain("{ executable: 'bun', processArgs }");
   expect(supervisor).toContain("? 'rscore/target/release/xlnrs'");
-  expect(hubSpawner).toContain('stdio: invocation.rustIdentity');
+  expect(hubSpawner).toContain("stdio: ['pipe', 'pipe', 'pipe', 'ipc']");
   const spawnEntry = hubSpawner.slice(hubSpawner.indexOf('export const createHubSpawner'));
   expect(spawnEntry.indexOf('canonicalHubEngine(child.name)'))
     .toBeLessThan(spawnEntry.indexOf('await deps.reapStaleHubProcess(child)'));
@@ -98,8 +97,7 @@ test('mesh supervisor dispatches canonical per-hub process kinds', () => {
   expect(supervisor).toContain('/api/account/status');
   expect(source).not.toContain('offlineTsImport');
   expect(source).not.toContain('rust-handoff');
-  expect(hubSpawner).toContain("const custodyRuntimeSeed = deps.runtimeSeedFor('CUSTODY')");
-  expect(hubSpawner).toMatch(/const routes = \[\s*\.\.\.hubRoutes,\s*\.\.\.supportRoutes/);
+  expect(hubSpawner).not.toContain('buildRustHubInvocation');
 });
 
 test('dev validates the TS-only selector before setup without a native build preflight', () => {
@@ -313,16 +311,4 @@ test.each([
   expect(genesis.entities[0]!.entityProfile).toMatchObject({ name: 'H1', isHub: true });
   expect(safeStringify(genesis)).not.toContain('checkpoint');
   expect(safeStringify(genesis)).not.toContain('import');
-});
-
-test('native restart retains configured peer dialing routes without transient gossip', () => {
-  const peers = ['H1', 'H2', 'H3'].map((name, index) => ({
-    name, seed: `restart-route-${name}`, signerLabel: `hub-${index + 1}`, publicPort: 8090 + index,
-  }));
-  const routes = buildRustHubPeerRoutes('H1', peers, 'wss://xln.finance');
-  expect(routes).toHaveLength(2);
-  expect(routes.map(route => route.websocketUrl)).toEqual(['wss://xln.finance:8091/ws', 'wss://xln.finance:8092/ws']);
-  expect(new Set(routes.map(route => route.targetRuntimeId)).size).toBe(2);
-  expect(buildRustHubPeerRoutes('H1', peers, 'ws://127.0.0.1').map(route => route.websocketUrl))
-    .toEqual(['ws://127.0.0.1:8091/ws', 'ws://127.0.0.1:8092/ws']);
 });

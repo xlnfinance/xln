@@ -1,3 +1,4 @@
+import { rejectFailure } from '../../../protocol/errors/failure-taxonomy';
 import type { ConsensusConfig, EntityReplica, JurisdictionConfig } from '../../../entity/types';
 import type { EntityRuntimeContext } from '../../../entity/runtime-context';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
@@ -105,6 +106,17 @@ export function resolveRuntimeJurisdictionConfig(
   current?: JurisdictionConfig,
 ): JurisdictionConfig | undefined {
   const replica = getCandidateReplica(env, current);
+  if (replica && current) {
+    for (const [field, supplied, selected] of [
+      ['chainId', current.chainId, replica.chainId],
+      ['depositoryAddress', current.depositoryAddress, replica.contracts?.depository],
+      ['entityProviderAddress', current.entityProviderAddress, replica.contracts?.entityProvider],
+    ] as const) {
+      if (supplied !== undefined && String(supplied).toLowerCase() !== String(selected).toLowerCase()) {
+        throw rejectFailure('ENTITY_JURISDICTION_BINDING_MISMATCH', `ENTITY_JURISDICTION_BINDING_MISMATCH:${field}`);
+      }
+    }
+  }
 
   const depositoryAddress = firstUsableContractAddress(
     replica?.contracts?.depository,

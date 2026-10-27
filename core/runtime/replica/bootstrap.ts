@@ -118,13 +118,7 @@ export const bootstrapRuntime = async (
   const env = restored.env;
   attachEventEmitters(env);
   if (!restored.restored && !runtimeRestoreDisabled()) {
-    try {
-      await deps.loadGossipProfiles(env);
-    } catch (error) {
-      runtimeLog.warn('main.infra_gossip_restore_skipped', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    await deps.loadGossipProfiles(env);
   }
   ensureBootstrapRuntimeId(env);
   if (runtimeIsBrowser) {

@@ -7,31 +7,14 @@ import type { EntityState } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type {
   Profile,
-  ProfileJurisdiction,
   ProfileMirror,
 } from '../../../entity/profile';
 import { compareStableText } from '../../../protocol/serialization';
 import { deriveSignerAddressSync, getSignerPrivateKeyIfAvailable } from '../../../account/crypto';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../../../protocol/crypto/p2p-crypto';
-import { buildEntityProfileDescriptor } from '../../../entity/profile/profile-descriptor';
+import { buildEntityProfileDescriptor, profileJurisdiction } from '../../../entity/profile/profile-descriptor';
 
 type BuiltProfile = Omit<Profile, 'runtimeId' | 'runtimeEncPubKey'>;
-
-const buildProfileJurisdiction = (state: EntityState): ProfileJurisdiction | undefined => {
-  const jurisdiction = state.config?.jurisdiction;
-  const name = typeof jurisdiction?.name === 'string' ? jurisdiction.name.trim() : '';
-  if (!jurisdiction || !name) return undefined;
-  return {
-    name,
-    ...(jurisdiction.chainId !== undefined ? { chainId: jurisdiction.chainId } : {}),
-    ...(jurisdiction.entityProviderAddress
-      ? { entityProviderAddress: jurisdiction.entityProviderAddress.toLowerCase() }
-      : {}),
-    ...(jurisdiction.depositoryAddress
-      ? { depositoryAddress: jurisdiction.depositoryAddress.toLowerCase() }
-      : {}),
-  };
-};
 
 const buildProfileMirrors = (env: RuntimeReplica, entityState: EntityState): ProfileMirror[] => {
   const mirrors = new Map<string, ProfileMirror>();
@@ -39,7 +22,7 @@ const buildProfileMirrors = (env: RuntimeReplica, entityState: EntityState): Pro
     const entityId = String(replica?.state?.entityId || replica?.entityId || '').trim();
     if (!entityId || entityId.toLowerCase() === entityState.entityId.toLowerCase()) continue;
     if (getSignerPrivateKeyIfAvailable(env, replica.signerId) === null) continue;
-    const jurisdiction = buildProfileJurisdiction(replica.state);
+    const jurisdiction = profileJurisdiction(replica.state);
     if (!jurisdiction) continue;
     mirrors.set(entityId.toLowerCase(), { entityId, jurisdiction });
   }
@@ -110,7 +93,6 @@ export const buildLocalEntityProfile = (
   }
   const profileTimestamp = Math.max(1, timestamp);
   const profile = buildEntityProfile(entityState, profileTimestamp);
-  const jurisdiction = buildProfileJurisdiction(entityState);
   const mirrors = env.runtimeConfig?.advertiseProfileMirrors === true
     ? buildProfileMirrors(env, entityState)
     : [];
@@ -118,7 +100,6 @@ export const buildLocalEntityProfile = (
     ...profile,
     metadata: {
       ...profile.metadata,
-      ...(jurisdiction ? { jurisdiction } : {}),
       ...(mirrors.length > 0 ? { mirrors } : {}),
     },
     runtimeId: resolveProfileRuntimeId(env, entityState.entityId),

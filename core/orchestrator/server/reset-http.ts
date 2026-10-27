@@ -57,6 +57,11 @@ export const handleResetHttpRequest = async (
       bindHost: deps.bindHost,
       resetToken: deps.resetToken,
     });
+    for (const key of ['enableMarketMaker', 'requireMarketMaker', 'enableCustody', 'requireCustody'] as const) {
+      if (body && Object.hasOwn(body, key) && typeof body[key] !== 'boolean') {
+        throw new OrchestratorResetRejectedError('RESET_BODY_INVALID', 400);
+      }
+    }
     const requestedMarketMaker =
       body?.enableMarketMaker ?? body?.requireMarketMaker;
     const enableMarketMaker =

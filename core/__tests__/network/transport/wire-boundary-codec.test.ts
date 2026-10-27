@@ -304,3 +304,40 @@ describe('binary decoders reject msgpack reference extensions', () => {
     expect(() => createSequentialTransportValueCodec().unpack(body)).toThrow(disabled);
   });
 });
+
+test('explicit invalid transport limits never select defaults or poison the cache', async () => {
+  const { resolveRuntimeWsMaxMessageBytes } = await import('../../../network/p2p/ws-protocol');
+  const previous = process.env['XLN_WS_MAX_MESSAGE_BYTES'];
+  try {
+    process.env['XLN_WS_MAX_MESSAGE_BYTES'] = '1024';
+    expect(resolveRuntimeWsMaxMessageBytes()).toBe(1024);
+    for (const invalid of ['', 'abc', '0', '-1', '0.5', '9007199254740992']) {
+      process.env['XLN_WS_MAX_MESSAGE_BYTES'] = invalid;
+      expect(resolveRuntimeWsMaxMessageBytes).toThrow('WS_MAX_MESSAGE_BYTES_INVALID');
+      expect(resolveRuntimeWsMaxMessageBytes).toThrow('WS_MAX_MESSAGE_BYTES_INVALID');
+    }
+  } finally {
+    if (previous === undefined) delete process.env['XLN_WS_MAX_MESSAGE_BYTES'];
+    else process.env['XLN_WS_MAX_MESSAGE_BYTES'] = previous;
+  }
+});
+
+test('missing proof quantities cannot impersonate authenticated zero values', async () => {
+  const { EMPTY_TRIE_ROOT, verifyGetProofResponse } = await import('../../../jurisdiction/adapter/rpc/state-anchor/rpc-state-proof');
+  const { ethers } = await import('ethers');
+  const address = `0x${'11'.repeat(20)}`;
+  const proof = {
+    address, nonce: '0x0', balance: '0x0', accountProof: [],
+    storageHash: EMPTY_TRIE_ROOT, codeHash: ethers.keccak256('0x'),
+    storageProof: [{ key: '0x0', value: '0x0', proof: [] }],
+  };
+  expect(verifyGetProofResponse(EMPTY_TRIE_ROOT, address, [0n], proof).storage.get(0n)).toBe(0n);
+  for (const value of [undefined, null, '', false]) {
+    for (const field of ['nonce', 'balance']) {
+      expect(() => verifyGetProofResponse(EMPTY_TRIE_ROOT, address, [0n], { ...proof, [field]: value })).toThrow('STATE_PROOF_');
+    }
+    expect(() => verifyGetProofResponse(EMPTY_TRIE_ROOT, address, [0n], {
+      ...proof, storageProof: [{ key: '0x0', value, proof: [] }],
+    })).toThrow('STATE_PROOF_STORAGE_VALUE_SHAPE');
+  }
+});

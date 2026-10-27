@@ -61,15 +61,11 @@ const activityTipMatchesWal = async (
   const status = await view.readStatus();
   if (!status || status.latestHeight !== latestHeight) return false;
   if (latestHeight <= status.unavailableThroughHeight) return true;
-  try {
-    const [activity, frame] = await Promise.all([
-      view.readFrame(latestHeight),
-      deps.readPersistedStorageFrameRecord(env, latestHeight),
-    ]);
-    return Boolean(activity && frame?.frameHash === activity.marker.frameHash);
-  } catch {
-    return false;
-  }
+  const [activity, frame] = await Promise.all([
+    view.readFrame(latestHeight),
+    deps.readPersistedStorageFrameRecord(env, latestHeight),
+  ]);
+  return Boolean(activity && frame?.frameHash === activity.marker.frameHash);
 };
 
 const resetInconsistentTip = async (
