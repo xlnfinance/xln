@@ -8,7 +8,16 @@ export const validateCrossJurisdictionSourceBinding = (
 ): string | null => {
   const route = tx.data.crossJurisdiction;
   if (!route) return null;
-  const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
+  // The route is peer-authored. Canonicalization raises haltRuntimeFailure on
+  // a claimed routeHash that is not the canonical one (and plain errors on
+  // unsupported risk or dispute terms): correct for our own prepared routes,
+  // but on this lane it is the proposer's malformed offer, so reject the tx.
+  let canonicalRoute: ReturnType<typeof withCanonicalCrossJurisdictionRouteHash>;
+  try {
+    canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
+  } catch (error) {
+    return `CROSS_J_SWAP_OFFER_ROUTE_INVALID:${error instanceof Error ? error.message : String(error)}`;
+  }
   const sourcePull = route.sourcePull;
   const pairedPull = sourcePull
     ? account.pulls?.get(sourcePull.pullId)

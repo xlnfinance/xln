@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { assertCrossJurisdictionSwapRoute } from '../../../entity/tx-validation/cross-j-route';
+import { assertCrossJurisdictionSwapRoute } from '../../../extensions/cross-j/route-shape';
 import { withCanonicalCrossJurisdictionRouteHash } from '../../../extensions/cross-j';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 

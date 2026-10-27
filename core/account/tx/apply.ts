@@ -16,7 +16,13 @@ import {
 } from '../state/candidate-overlay';
 import type { ApplyAccountTxResult } from './apply-types';
 import { applyAccountTxMutation } from './mutation';
-import { accountTxRejected, accountTxValidationRejected, senderDeltaRejection, withAccountTxCandidateEffects } from './apply-result';
+import {
+  accountTxRejected,
+  accountTxValidationRejected,
+  senderDeltaRejection,
+  senderFailureRejection,
+  withAccountTxCandidateEffects,
+} from './apply-result';
 import { accountDisputeGasCharge, disputeGasAdmissionError, previousDisputeGasCharge } from '../validation/dispute-gas-budget';
 import { collectSameJurisdictionSwapOutputs } from './same-j-swap-output';
 import { accountLendingRisk, lendingRiskAdmissionError } from '../validation/lending-risk';
@@ -59,7 +65,8 @@ export async function applyAccountTx(
     // settlement alike; before, only add_delta/set_credit_limit caught them
     // and a peer payment on a 129th token row halted the Runtime. The caller
     // discards this tx's transition, so a partial draft never commits.
-    const rejection = senderDeltaRejection(error);
+    // Handlers signal other author-caused input faults with rejectFailure.
+    const rejection = senderDeltaRejection(error) ?? senderFailureRejection(error);
     if (!rejection) throw error;
     return accountTxRejected(rejection, [rejection.message]);
   }

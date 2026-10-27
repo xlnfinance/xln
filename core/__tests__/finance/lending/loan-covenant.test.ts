@@ -145,7 +145,7 @@ for (const bankIsLeft of [true, false]) {
     expect(account.state.deltas.get(1)?.offdelta).toBe(bankIsLeft ? 25n : -25n);
     expect(account.state.subcontracts?.size).toBe(0);
     expect(computeAccountStateRoot(restore(account).state)).toBe(computeAccountStateRoot(account.state));
-    await expect(applyAccountTxToMutableReplica(account, repay, !bankIsLeft, at + 1)).rejects.toThrow('LENDING_INTENT_REPLAY');
+    await expect(applyAccountTxToMutableReplica(account, repay, !bankIsLeft, at + 1)).resolves.toMatchObject({ ok: false, rejection: { message: expect.stringContaining('LENDING_INTENT_REPLAY') } });
   });
   test(`loan repayment consumes one exact claim and survives recovery, bankLeft=${bankIsLeft}`, async () => {
     const account = await funded(bankIsLeft);
@@ -168,7 +168,7 @@ for (const bankIsLeft of [true, false]) {
     expect(restored.state.deltas.get(1)?.offdelta).toBe(bankIsLeft ? 25n : -25n);
     expect(buildAccountProofBody(restored, TRANSFORMER).proofBodyStruct.transformers).toHaveLength(0);
     expect(computeAccountStateRoot(restore(restored).state)).toBe(computeAccountStateRoot(restored.state));
-    await expect(applyAccountTxToMutableReplica(restored, repay(2_525n), !bankIsLeft, 86_402_000)).rejects.toThrow('LENDING_INTENT_REPLAY');
+    await expect(applyAccountTxToMutableReplica(restored, repay(2_525n), !bankIsLeft, 86_402_000)).resolves.toMatchObject({ ok: false, rejection: { message: expect.stringContaining('LENDING_INTENT_REPLAY') } });
   });
   test(`on-chain loan finality cannot resurrect a receivable after recovery, bankLeft=${bankIsLeft}`, async () => {
     const account = await funded(bankIsLeft);
@@ -261,7 +261,7 @@ for (const bankIsLeft of [true, false]) {
     expect(account.state.deltas.get(1)?.offdelta).toBe(bankIsLeft ? 37n : -37n);
     expect(account.state.subcontracts?.size).toBe(0);
     expect(computeAccountStateRoot(restore(account).state)).toBe(computeAccountStateRoot(account.state));
-    await expect(applyAccountTxToMutableReplica(account, repay, !bankIsLeft, at + 1)).rejects.toThrow('LENDING_INTENT_REPLAY');
+    await expect(applyAccountTxToMutableReplica(account, repay, !bankIsLeft, at + 1)).resolves.toMatchObject({ ok: false, rejection: { message: expect.stringContaining('LENDING_INTENT_REPLAY') } });
   });
   test(`loan admission reserves all authorized late interest, bankLeft=${bankIsLeft}`, async () => {
     const account = makeAccount(LEFT, RIGHT);

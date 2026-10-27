@@ -444,8 +444,39 @@ fn sender_delta_rejection(
                 vec![message],
             ))
         }
+        Err(error) if is_sender_lending_error(&error) => {
+            // Parity target: core/account/tx/apply.ts (`senderFailureRejection`)
+            // and credit-request.ts reject with the same ACCOUNT_TX_VALIDATION
+            // text. Rejected-tx events are never committed.
+            let message = error.to_string();
+            Ok(MutationDecision::rejected_with_events(
+                AccountRejection::Validation(crate::ValidationRejection::AccountTx {
+                    message: message.clone(),
+                }),
+                vec![message],
+            ))
+        }
         other => other,
     }
+}
+
+/// The transaction author chooses every field these variants judge (role ids,
+/// counterparty, intent id, amount, rate, credit-request id and token). A peer
+/// frame carrying one is a rejected frame, never a Runtime fault.
+const fn is_sender_lending_error(error: &TransitionError) -> bool {
+    matches!(
+        error,
+        TransitionError::LendingRoleInvalid { .. }
+            | TransitionError::LendingRoleNotProposer { .. }
+            | TransitionError::LendingCounterpartyInvalid { .. }
+            | TransitionError::LendingIntentIdInvalid(_)
+            | TransitionError::LendingIntentReplay(_)
+            | TransitionError::LendingAmountNotPositive { .. }
+            | TransitionError::LendingInterestBpsInvalid(_)
+            | TransitionError::CreditRequestIdInvalid(_)
+            | TransitionError::CreditRequestRequesterNotProposer { .. }
+            | TransitionError::CreditRequestTokenNotEnabled(_)
+    )
 }
 
 fn validate_context(context: &AccountExecutionContext) -> Result<(), TransitionError> {

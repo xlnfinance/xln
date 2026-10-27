@@ -4,6 +4,8 @@ import { FINANCIAL, LIMITS } from '../../../../../config/constants';
 import { getAccountSwapMarketLimitError } from '../../../../swap/swap-limits';
 import { assertSwapNetAuthorization } from '../../../../swap/swap-net-authorization';
 import { isCanonicalOfferId, SWAP_OFFER_ID_REJECTION } from '../../../../../swapbook/swap-keys';
+import { assertCrossJurisdictionSwapRoute } from '../../../../../extensions/cross-j/route-shape';
+import { deriveCanonicalCrossJurisdictionMarket } from '../../../../../extensions/cross-j/market';
 
 export type SwapOfferTx = Extract<AccountTx, { type: 'swap_offer' }>;
 
@@ -76,6 +78,19 @@ const validateOfferShape = (tx: SwapOfferTx): string | null => {
   }
   if (giveTokenId === wantTokenId && !crossJurisdiction) {
     return `Cannot swap same token: ${giveTokenId}`;
+  }
+  // The account-tx schema only proves `crossJurisdiction` is a record. Every
+  // field read below (makerEntityId, source.counterpartyEntityId, legs, pulls,
+  // jurisdictions) is peer-authored, so decode the exact route shape and its
+  // canonical market first: a malformed route is this tx's rejection, never a
+  // TypeError or market-derivation throw that halts the Runtime.
+  if (crossJurisdiction) {
+    try {
+      assertCrossJurisdictionSwapRoute(crossJurisdiction, 'CROSS_J_SWAP_OFFER_ROUTE');
+      deriveCanonicalCrossJurisdictionMarket(crossJurisdiction);
+    } catch (error) {
+      return `CROSS_J_SWAP_OFFER_ROUTE_INVALID:${error instanceof Error ? error.message : String(error)}`;
+    }
   }
   if (
     crossJurisdiction &&

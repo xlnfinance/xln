@@ -71,3 +71,22 @@ pub fn replica(
 pub fn root_hex(replica: &AccountReplica) -> String {
     hex::encode(replica.state().deltas_root())
 }
+
+/// A sender-caused lending or credit-request fault is a typed Account-tx
+/// rejection, never a `TransitionError` that would halt the Runtime.
+pub fn rejected_message(
+    result: Result<xln_rscore_engine::AccountTransition, xln_rscore_engine::TransitionError>,
+) -> String {
+    let transition = result.expect("sender-caused fault is a rejection, not a TransitionError");
+    match transition.verdict() {
+        xln_rscore_engine::AccountVerdict::Rejected(
+            xln_rscore_engine::AccountRejection::Validation(
+                xln_rscore_engine::ValidationRejection::AccountTx { message },
+            ),
+        ) => {
+            assert!(transition.candidate().is_none());
+            message.clone()
+        }
+        other => panic!("expected ACCOUNT_TX_VALIDATION rejection, got {other:?}"),
+    }
+}

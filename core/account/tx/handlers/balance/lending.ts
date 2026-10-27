@@ -9,7 +9,7 @@ import { deriveDelta } from '../../../utils';
 import { keccakTextHash } from '../../../../protocol/crypto/keccak-text';
 import { safeStringify } from '../../../../protocol/serialization';
 import { assertLendingCovenant, lendingCovenantHash, lendingMaximumAmount, settleLendingPayment, renewDemandSavings, lendingExitAmount } from '../../../../protocol/dispute/lending-covenant';
-import { requireBoundaryInteger } from '../../../../protocol/boundary-validation';
+import { rejectFailure } from '../../../../protocol/errors/failure-taxonomy';
 
 type LendingAccountTx = Extract<AccountTx, {
   type:
@@ -39,10 +39,15 @@ const requireRole = (
   claimedEntityId: string,
 ): void => {
   const claimed = normalized(claimedEntityId);
-  if (!ENTITY_ID_RE.test(claimed)) throw new Error(`LENDING_${role.toUpperCase()}_INVALID:${claimedEntityId}`);
+  if (!ENTITY_ID_RE.test(claimed)) {
+    throw rejectFailure(`LENDING_${role.toUpperCase()}_INVALID`, `LENDING_${role.toUpperCase()}_INVALID:${claimedEntityId}`);
+  }
   const proposer = proposerId(account, byLeft);
   if (claimed !== proposer) {
-    throw new Error(`LENDING_${role.toUpperCase()}_NOT_PROPOSER: claimed=${claimed} proposer=${proposer}`);
+    throw rejectFailure(
+      `LENDING_${role.toUpperCase()}_NOT_PROPOSER`,
+      `LENDING_${role.toUpperCase()}_NOT_PROPOSER: claimed=${claimed} proposer=${proposer}`,
+    );
   }
 };
 
@@ -51,14 +56,17 @@ const requireCounterparty = (account: AccountReplica, proposer: string, counterp
   const right = normalized(account.state.rightEntity);
   const expected = proposer === left ? right : left;
   if (normalized(counterparty) !== expected) {
-    throw new Error(`LENDING_COUNTERPARTY_INVALID: expected=${expected} got=${normalized(counterparty)}`);
+    throw rejectFailure(
+      'LENDING_COUNTERPARTY_INVALID',
+      `LENDING_COUNTERPARTY_INVALID: expected=${expected} got=${normalized(counterparty)}`,
+    );
   }
 };
 
 const requireIntentId = (value: string, prefix: 'lend' | 'borrow' | 'loan'): void => {
   const id = normalized(value);
   if (!INTENT_ID_RE.test(id) || !id.startsWith(`${prefix}-`)) {
-    throw new Error(`LENDING_INTENT_ID_INVALID:${value}`);
+    throw rejectFailure('LENDING_INTENT_ID_INVALID', `LENDING_INTENT_ID_INVALID:${value}`);
   }
 };
 
@@ -68,16 +76,28 @@ const consumeIntent = (
   key: string,
   kind: AccountLendingIntentKind,
 ): void => {
-  if (account.state.lendingIntents.has(key)) throw new Error(`LENDING_INTENT_REPLAY:${key}`);
+  if (account.state.lendingIntents.has(key)) throw rejectFailure('LENDING_INTENT_REPLAY', `LENDING_INTENT_REPLAY:${key}`);
   account.state.lendingIntents.put(key, kind);
 };
 
 const requireUnusedIntent = (account: AccountReplica, key: string): void => {
-  if (account.state.lendingIntents?.has(key)) throw new Error(`LENDING_INTENT_REPLAY:${key}`);
+  if (account.state.lendingIntents?.has(key)) throw rejectFailure('LENDING_INTENT_REPLAY', `LENDING_INTENT_REPLAY:${key}`);
 };
 
 const positiveAmount = (value: bigint, context: string): void => {
-  if (value <= 0n) throw new Error(`${context}_AMOUNT_MUST_BE_POSITIVE`);
+  if (value <= 0n) throw rejectFailure(`${context}_AMOUNT_MUST_BE_POSITIVE`);
+};
+
+/** Lending covenants are Account-row claims: token 0 is never a delta row. */
+const requireLendingTokenId = (tokenId: number): void => {
+  if (!Number.isSafeInteger(tokenId) || tokenId < 1) {
+    throw rejectFailure('LENDING_TOKEN_INVALID', `LENDING_TOKEN_INVALID:${String(tokenId)}`);
+  }
+};
+
+/** Author-chosen clock fields; an unsafe sum is the author's input fault. */
+const requireLendingClock = (value: number, code: string): void => {
+  if (!Number.isSafeInteger(value) || value < 0) throw rejectFailure(code, `${code}:${String(value)}`);
 };
 
 const borrowAuthorizationKey = (
@@ -141,6 +161,7 @@ const applyTermLoanFunding = (
   const recipient = isSavings ? tx.data.hubEntityId : tx.data.borrowerEntityId;
   requireRole(account, byLeft, isSavings ? 'lender' : 'hub', payer);
   requireCounterparty(account, normalized(payer), recipient);
+  requireLendingTokenId(tx.data.tokenId);
   positiveAmount(tx.data.amount, 'LENDING_FUND');
   normalizeLendingTerm(tx.data.termId);
   normalizeInterestBps(tx.data.interestBps);
@@ -148,8 +169,8 @@ const applyTermLoanFunding = (
   const intentKey = `${intentKind}:${id}`;
   requireUnusedIntent(account, intentKey);
   if (!isSavings) {
-    requireBoundaryInteger(tx.data.lateMs, 'LENDING_LATE_WINDOW_INVALID');
-    requireBoundaryInteger(tx.data.maxLateMs, 'LENDING_MAX_LATE_WINDOW_INVALID');
+    requireLendingClock(tx.data.lateMs, 'LENDING_LATE_WINDOW_INVALID');
+    requireLendingClock(tx.data.maxLateMs, 'LENDING_MAX_LATE_WINDOW_INVALID');
   }
   if (!isSavings && (timestamp >= tx.data.expiresAt || tx.data.interestBps > tx.data.maxInterestBps || tx.data.lateMs > tx.data.maxLateMs ||
     account.state.lendingIntents.get(borrowAuthorizationKey(account, tx.data)) !== 'borrow')) {
@@ -250,11 +271,12 @@ export const handleLendingAccountTx = (
     requireIntentId(tx.data.requestId, 'borrow');
     requireRole(account, byLeft, 'borrower', tx.data.borrowerEntityId);
     requireCounterparty(account, normalized(tx.data.borrowerEntityId), tx.data.hubEntityId);
+    requireLendingTokenId(tx.data.tokenId);
     positiveAmount(tx.data.amount, 'LENDING_BORROW');
     normalizeLendingTerm(tx.data.termId);
     normalizeInterestBps(tx.data.maxInterestBps);
-    requireBoundaryInteger(tx.data.maxLateMs, 'LENDING_MAX_LATE_WINDOW_INVALID');
-    requireBoundaryInteger(tx.data.expiresAt + LENDING_TERM_MS[tx.data.termId] + tx.data.maxLateMs, 'LENDING_BORROW_CLOCK_OVERFLOW');
+    requireLendingClock(tx.data.maxLateMs, 'LENDING_MAX_LATE_WINDOW_INVALID');
+    requireLendingClock(tx.data.expiresAt + LENDING_TERM_MS[tx.data.termId] + tx.data.maxLateMs, 'LENDING_BORROW_CLOCK_OVERFLOW');
     if (tx.data.requestId !== normalized(tx.data.requestId) || !Number.isSafeInteger(tx.data.expiresAt) || timestamp >= tx.data.expiresAt) {
       return accountTxValidationRejected('LENDING_BORROW_AUTHORIZATION_EXPIRED_OR_INVALID', []);
     }

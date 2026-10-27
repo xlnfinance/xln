@@ -123,7 +123,7 @@ for (const saverIsLeft of [true, false]) {
       const paidRoot = computeAccountStateRoot(account.state);
       await expect(
         applyAccountTxToMutableReplica(account, fixture.payout(expectedAmount), !saverIsLeft, MATURITY + 30_000),
-      ).rejects.toThrow('LENDING_INTENT_REPLAY');
+      ).resolves.toMatchObject({ ok: false, rejection: { message: expect.stringContaining('LENDING_INTENT_REPLAY') } });
       expect((await applyAccountTxToMutableReplica(account, fixture.request, saverIsLeft, MATURITY + 30_000)).ok).toBe(
         false,
       );
@@ -137,7 +137,7 @@ for (const saverIsLeft of [true, false]) {
     const before = computeAccountStateRoot(early.account.state);
     await expect(
       applyAccountTxToMutableReplica(early.account, early.request, !saverIsLeft, MATURITY - 1),
-    ).rejects.toThrow('LENDING_LENDER_NOT_PROPOSER');
+    ).resolves.toMatchObject({ ok: false, rejection: { message: expect.stringContaining('LENDING_LENDER_NOT_PROPOSER') } });
     expect(computeAccountStateRoot(early.account.state)).toBe(before);
     expect((await applyAccountTxToMutableReplica(early.account, early.request, saverIsLeft, MATURITY - 1)).ok).toBe(
       true,

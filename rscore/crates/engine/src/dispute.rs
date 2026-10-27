@@ -276,10 +276,21 @@ pub(crate) fn validate_counterparty_dispute_hash(
             "COUNTERPARTY_ACCOUNT_BINDING".to_string(),
         ));
     }
-    if dispute.nonce > JS_MAX_SAFE_INTEGER {
+    // Parity target: `validateCounterpartyDisputeHanko`
+    // (core/account/consensus/dispute/hanko.ts). TypeScript keeps every proof
+    // nonce strictly below MAX_SAFE_INTEGER, and the next settlement or proof
+    // nonce is chosen above this witness. A witness at MAX_SAFE_INTEGER - 1
+    // leaves no executable successor, so it is refused on every lane before it
+    // is stored: a peer may exhaust its Account, never the Runtime.
+    if dispute.nonce >= JS_MAX_SAFE_INTEGER {
         return Err(StateError::DisputeHankoInvalid(format!(
             "SHAPE_INVALID:PROOF_NONCE:{}",
             dispute.nonce
+        )));
+    }
+    if dispute.nonce == JS_MAX_SAFE_INTEGER - 1 {
+        return Err(StateError::DisputeHankoInvalid(format!(
+            "SETTLEMENT_NONCE_EXHAUSTED:{JS_MAX_SAFE_INTEGER}"
         )));
     }
     let identity = replica.state().identity();

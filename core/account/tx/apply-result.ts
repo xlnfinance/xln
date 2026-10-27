@@ -1,5 +1,6 @@
 import type { AccountOutput, AccountTx } from '../../types/account';
 import { AccountDeltaError } from '../state/delta';
+import { FailureDispositionError } from '../../protocol/errors/failure-taxonomy';
 import { isLeftEntity } from '../../protocol/identity/entity-id';
 import type {
   AccountTxRejection,
@@ -218,6 +219,19 @@ export const senderDeltaRejection = (error: unknown): AccountTxRejection | null 
     };
   }
   return null;
+};
+
+/**
+ * A handler that validates transaction-author input throws `rejectFailure`.
+ * Inside an Account transition that disposition belongs to exactly this tx:
+ * the peer's frame (or our own queued tx) is rejected with a typed reason and
+ * the Runtime keeps running. Every other disposition and every plain Error
+ * remains a local invariant and halts. Parity: Rust `apply_to_candidate` maps
+ * the same sender-caused `TransitionError` variants to `Validation`.
+ */
+export const senderFailureRejection = (error: unknown): AccountTxRejection | null => {
+  if (!(error instanceof FailureDispositionError) || error.disposition !== 'reject') return null;
+  return { kind: 'validation', code: ACCOUNT_TX_REJECTION_CODES.validation, message: error.message };
 };
 
 export const assertNever = (value: never): never => {

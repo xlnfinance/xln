@@ -3729,8 +3729,9 @@ fn a_signed_dispute_for_another_proof_body_is_refused() {
 }
 
 /// Account leaves encode proof nonces through the same safe-integer domain as
-/// TypeScript. The inclusive boundary remains valid; the next u64 is refused
-/// before signature recovery so it can never be rounded in the leaf.
+/// TypeScript. The last nonce that still leaves an executable successor is
+/// valid; MAX_SAFE_INTEGER - 1 is refused as exhausted and anything above as
+/// out of shape, before the witness is stored.
 #[test]
 fn dispute_nonce_respects_the_typescript_safe_integer_boundary() {
     const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -3752,7 +3753,7 @@ fn dispute_nonce_respects_the_typescript_safe_integer_boundary() {
     let proposed = *proposed;
     let mut incoming = incoming_with_dispute(&proposed, &left.identity);
     let dispute = incoming.dispute.as_mut().expect("wire dispute");
-    dispute.nonce = MAX_SAFE_INTEGER;
+    dispute.nonce = MAX_SAFE_INTEGER - 2;
     resign_dispute(&right.account, &left.identity, dispute);
     let outcome = apply_incoming_frame(
         &mut right.account,
@@ -3766,8 +3767,52 @@ fn dispute_nonce_respects_the_typescript_safe_integer_boundary() {
     assert!(matches!(outcome, IncomingOutcome::Committed { .. }));
     assert_eq!(
         right.account.counterparty_dispute().expect("stored").nonce,
-        MAX_SAFE_INTEGER,
+        MAX_SAFE_INTEGER - 2,
     );
+
+    for (nonce, expected) in [
+        (
+            MAX_SAFE_INTEGER - 1,
+            "ACCOUNT_INPUT_DISPUTE_HANKO_INVALID:SETTLEMENT_NONCE_EXHAUSTED:9007199254740991",
+        ),
+        (
+            MAX_SAFE_INTEGER,
+            "ACCOUNT_INPUT_DISPUTE_HANKO_INVALID:SHAPE_INVALID:PROOF_NONCE:9007199254740991",
+        ),
+    ] {
+        let (mut left, mut right) = parties_with_transformer(Some(transformer));
+        left.account
+            .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+            .expect("admit");
+        let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+            &mut left.account,
+            &left.identity,
+            1_700_000_000_000,
+            7,
+            &market(),
+        )
+        .expect("propose") else {
+            panic!("expected proposal");
+        };
+        let mut incoming = incoming_with_dispute(&proposed, &left.identity);
+        let dispute = incoming.dispute.as_mut().expect("wire dispute");
+        dispute.nonce = nonce;
+        resign_dispute(&right.account, &left.identity, dispute);
+        let outcome = apply_incoming_frame(
+            &mut right.account,
+            &right.identity,
+            left.identity.entity_id(),
+            CLOCK,
+            incoming,
+            &market(),
+        )
+        .expect("exhausted nonce is an Account input rejection");
+        assert!(
+            matches!(&outcome, IncomingOutcome::Rejected { reason } if reason == expected),
+            "{outcome:?}"
+        );
+        assert!(right.account.counterparty_dispute().is_none());
+    }
 
     let (mut left, mut right) = parties_with_transformer(Some(transformer));
     left.account

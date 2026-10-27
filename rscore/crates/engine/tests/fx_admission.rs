@@ -552,10 +552,9 @@ fn an_incoming_lending_frame_is_judged_by_lending_semantics_not_the_profile() {
             .entity_account_leaf()
             .expect("preflight Account leaf");
         let (envelope, incoming) = hashed_incoming_from_left(&left, &right, tx);
-        // Same shape as the TypeScript twin: the verdict may arrive as a typed
-        // rejection or as the per-transaction transition failure the Runtime
-        // loop dispositions, exactly as for the in-profile kinds that validate
-        // by throwing. Either way it names lending, never the profile.
+        // Same shape as the TypeScript twin: a sender-caused lending fault is
+        // a typed frame rejection that names lending, never the profile and
+        // never an engine error that would halt the Runtime.
         let reason = match apply_incoming_frame(
             &mut right.account,
             &right.identity,
@@ -567,7 +566,7 @@ fn an_incoming_lending_frame_is_judged_by_lending_semantics_not_the_profile() {
         ) {
             Ok(IncomingOutcome::Rejected { reason }) => reason,
             Ok(outcome) => panic!("{kind} must not be accepted, got {outcome:?}"),
-            Err(error) => error.to_string(),
+            Err(error) => panic!("{kind} must be a typed rejection, not a halt: {error}"),
         };
         assert!(
             reason.contains("LENDING_"),
@@ -610,4 +609,40 @@ fn an_incoming_frame_with_an_out_of_range_policy_version_is_rejected_before_repl
         format!("ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE:{version}:{MAX_POLICY_VERSION}"),
     );
     assert_eq!(right.account.current_height(), 0);
+}
+
+/// A peer chooses both rebalance fees. One above uint256 used to commit and
+/// only fail at the Account leaf size limit (ACCOUNT_STATE_LEAF_TOO_LARGE);
+/// it is now this frame's typed rejection, as in TypeScript
+/// `handleRebalancePolicy`, and the receiver Account is unchanged.
+#[test]
+fn an_incoming_rebalance_policy_fee_above_uint256_is_a_typed_rejection() {
+    let max = (BigInt::from(1) << 256) - 1;
+    for (base_fee, gas_fee) in [(&max + 1, BigInt::from(1)), (BigInt::from(1), &max + 1)] {
+        let (left, mut right) = parties();
+        let tx = AccountTx::RebalancePolicy {
+            token_id: 1,
+            policy_version: 1,
+            base_fee,
+            liquidity_fee_bps: BigInt::from(375),
+            gas_fee,
+        };
+        let (envelope, incoming) = hashed_incoming_from_left(&left, &right, tx);
+        let outcome = apply_incoming_frame(
+            &mut right.account,
+            &right.identity,
+            &envelope,
+            CLOCK,
+            incoming,
+            &market(),
+            false,
+        )
+        .expect("oversized fee is a frame rejection, not an engine error");
+        assert!(
+            matches!(&outcome, IncomingOutcome::Rejected { reason }
+                if reason.contains("RebalancePolicyFeeTerms { token_id: 1 }")),
+            "{outcome:?}"
+        );
+        assert_eq!(right.account.current_height(), 0);
+    }
 }

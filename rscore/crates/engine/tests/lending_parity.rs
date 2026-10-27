@@ -4,7 +4,7 @@ use num_bigint::BigInt;
 use serde::Deserialize;
 use xln_rscore_engine::{
     AccountExecutionContext, AccountTx, AccountVerdict, LendingIntentKind, LendingTermId,
-    SequentialAccountEngine, Side, TransitionError,
+    SequentialAccountEngine, Side,
 };
 
 use common::{delta, entity, entity_text, replica, root_hex, token};
@@ -174,14 +174,17 @@ fn fund_matches_literal_delta_and_intent_roots() {
 }
 
 #[test]
-fn forged_lender_and_replay_are_fail_fast_and_atomic() {
+fn forged_lender_and_replay_are_typed_rejects_and_atomic() {
     let base = lender_account();
     let before = root_hex(&base);
-    let forged = SequentialAccountEngine::apply(&base, Side::Left, &fund());
-    assert!(matches!(
-        forged,
-        Err(TransitionError::LendingRoleNotProposer { role: "LENDER", .. })
-    ));
+    // A peer frame carrying a forged role must reject that frame, never halt
+    // the Runtime (core/account/tx/apply.ts senderFailureRejection).
+    let forged =
+        common::rejected_message(SequentialAccountEngine::apply(&base, Side::Left, &fund()));
+    assert!(
+        forged.starts_with("LENDING_LENDER_NOT_PROPOSER"),
+        "{forged}"
+    );
     assert_eq!(root_hex(&base), before);
 
     let funded = SequentialAccountEngine::apply(&base, Side::Right, &fund())
@@ -189,11 +192,12 @@ fn forged_lender_and_replay_are_fail_fast_and_atomic() {
         .committed()
         .expect("candidate");
     let funded_root = root_hex(&funded);
-    let replay = SequentialAccountEngine::apply(&funded, Side::Right, &fund());
-    assert!(matches!(
-        replay,
-        Err(TransitionError::LendingIntentReplay(_))
+    let replay = common::rejected_message(SequentialAccountEngine::apply(
+        &funded,
+        Side::Right,
+        &fund(),
     ));
+    assert!(replay.starts_with("LENDING_INTENT_REPLAY:"), "{replay}");
     assert_eq!(root_hex(&funded), funded_root);
 }
 
@@ -340,7 +344,9 @@ fn principal_disbursement_preserves_credit_and_cannot_pay_twice() {
     let delta = candidate.state().delta(token(1)).expect("delta");
     assert_eq!(delta.offdelta(), &BigInt::from(-2_500));
     assert_eq!(delta.right_credit_limit(), &BigInt::from(20_000));
-    assert!(SequentialAccountEngine::apply(&candidate, Side::Left, &tx).is_err());
+    let replay =
+        common::rejected_message(SequentialAccountEngine::apply(&candidate, Side::Left, &tx));
+    assert!(replay.starts_with("LENDING_INTENT_REPLAY:"), "{replay}");
     assert_eq!(
         candidate.state().delta(token(1)).expect("delta").offdelta(),
         &BigInt::from(-2_500)

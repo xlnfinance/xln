@@ -83,15 +83,17 @@ export const validateCounterpartyDisputeHanko = async (
     );
   }
 
-  if (accountInputProposal(input)) {
-    // Reject before committing the peer frame if its proof leaves no executable
-    // nonce for our ACK. A peer may exhaust its Account, never the Runtime.
-    try {
-      getMinimumSafeSettlementNonce({ ...account, counterpartyDisputeProofNonce: disputeHanko.proofNonce });
-    } catch (error) {
-      if (!(error instanceof AccountNonceExhaustedError)) throw error;
-      throw new AccountInputEvidenceError('ACCOUNT_INPUT_DISPUTE_HANKO_INVALID', error.message);
-    }
+  // Every lane (frame, ACK, standalone dispute, board refresh) stores this
+  // witness as counterpartyDisputeProofNonce, and every later settlement or
+  // proof nonce is chosen above it. A peer that signs MAX_SAFE_INTEGER - 1
+  // would leave no executable nonce, and the next cursor read would throw a
+  // plain AccountNonceExhaustedError that halts the Runtime. Reject the input
+  // here, before storage: a peer may exhaust its Account, never the Runtime.
+  try {
+    getMinimumSafeSettlementNonce({ ...account, counterpartyDisputeProofNonce: disputeHanko.proofNonce });
+  } catch (error) {
+    if (!(error instanceof AccountNonceExhaustedError)) throw error;
+    throw new AccountInputEvidenceError('ACCOUNT_INPUT_DISPUTE_HANKO_INVALID', `${context}:${error.message}`);
   }
 
   const expectedHash = createDisputeProofHashWithNonce(

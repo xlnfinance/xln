@@ -177,8 +177,14 @@ pub(crate) fn apply_policy(
         return Ok(rejected(ValidationRejection::RebalancePolicyTimestamp));
     }
     let zero = BigInt::from(0);
+    // Parity target: handleRebalancePolicy (core/account/tx/handlers/
+    // rebalance/policy.ts). Both fees are peer-chosen token amounts; above
+    // uint256 they would only fail later at the Account leaf size limit.
+    let max_amount = (BigInt::from(1) << 256) - 1;
     if base_fee < &zero
+        || base_fee > &max_amount
         || gas_fee < &zero
+        || gas_fee > &max_amount
         || liquidity_fee_bps < &zero
         || liquidity_fee_bps > &BigInt::from(MAX_LIQUIDITY_FEE_BPS)
     {

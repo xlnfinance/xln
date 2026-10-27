@@ -2,6 +2,7 @@ import type { AccountTx } from '../../../../types/account';
 import type { AccountDraftState } from '../../../state/account-state-draft';
 import type { RebalanceFeePolicySnapshot } from '../../../../types/finance/rebalance';
 import { TOKENS } from '../../../../config/constants';
+import { UINT256_MAX } from '../../../../protocol/boundary/integer-ranges';
 import type { ApplyAccountTxResult } from '../../apply-types';
 import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 
@@ -37,7 +38,14 @@ export const handleRebalancePolicy = (
       [],
     );
   }
-  if (baseFee < 0n || liquidityFeeBps < 0n || liquidityFeeBps > 10_000n || gasFee < 0n) {
+  // The peer chooses both fees. Unbounded bigints committed here reached the
+  // Account leaf encoder as ACCOUNT_STATE_LEAF_TOO_LARGE and halted the commit;
+  // a fee is a token amount, so it shares the uint256 domain of every amount.
+  if (
+    baseFee < 0n || baseFee > UINT256_MAX ||
+    liquidityFeeBps < 0n || liquidityFeeBps > 10_000n ||
+    gasFee < 0n || gasFee > UINT256_MAX
+  ) {
     return accountTxValidationRejected(`rebalance_policy: invalid fee terms for token ${tokenId}`, []);
   }
   if (!account.deltas.has(tokenId)) {

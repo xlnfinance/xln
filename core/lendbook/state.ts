@@ -6,6 +6,7 @@ import type { LendingBankTerms, LendingFacility, LendingLoan, LendingSavings, Le
 import { lendingMaximumAmount, lendingExitAmount, assertLendingCovenant, LENDING_YEAR_MS, type LendingClock } from '../protocol/dispute/lending-covenant';
 import { deriveDelta } from '../account/utils';
 import { compareStableText } from '../protocol/serialization';
+import { rejectFailure } from '../protocol/errors/failure-taxonomy';
 
 export const LENDING_TERM_MS: Record<LendingTermId, number> = {
   demand: LENDING_YEAR_MS,
@@ -16,13 +17,13 @@ export const LENDING_TERM_MS: Record<LendingTermId, number> = {
 
 export const normalizeLendingTerm = (value: unknown): LendingTermId => {
   if (value === '1h' || value === '1d' || value === '1m' || value === 'demand') return value;
-  throw new Error(`LENDING_INVALID_TERM: ${String(value)}`);
+  throw rejectFailure('LENDING_INVALID_TERM', `LENDING_INVALID_TERM: ${String(value)}`);
 };
 
 export const normalizeInterestBps = (value: unknown): number => {
   const next = Math.floor(Number(value));
   if (!Number.isFinite(next) || next < 0 || next > 10_000) {
-    throw new Error(`LENDING_INVALID_INTEREST_BPS: ${String(value)}`);
+    throw rejectFailure('LENDING_INVALID_INTEREST_BPS', `LENDING_INVALID_INTEREST_BPS: ${String(value)}`);
   }
   return next;
 };

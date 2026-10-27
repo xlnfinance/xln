@@ -706,7 +706,7 @@ describe('payer-authenticated hub lending', () => {
     expect(loan.status).toBe('active');
     expect(summarizeLendingState(state, { userEntityId: BORROWER, requestId: BORROW_REQUEST_ID }).requestStatus).toBe('active');
     const principalDelta = state.accounts.get(BORROWER)!.state.deltas.get(1)!.offdelta;
-    await expect(applyOnly(state, BORROWER, grant!.tx, true, 2_002)).rejects.toThrow('LENDING_INTENT_REPLAY');
+    await expect(applyOnly(state, BORROWER, grant!.tx, true, 2_002)).resolves.toMatchObject({ ok: false, rejection: { message: expect.stringContaining('LENDING_INTENT_REPLAY') } });
     expect(state.accounts.get(BORROWER)!.state.deltas.get(1)!.offdelta).toBe(principalDelta);
 
 
@@ -835,7 +835,7 @@ describe('payer-authenticated hub lending', () => {
     const afterRepay = state.accounts.get(BORROWER)!.state.deltas.get(1)!.offdelta;
     expect(afterRepay).toBe(beforeRepay + actualPaid);
     await expect(applyOnly(state, BORROWER, repayment, false, repaymentAt + 1))
-      .rejects.toThrow('LENDING_INTENT_REPLAY');
+      .resolves.toMatchObject({ ok: false, rejection: { message: expect.stringContaining('LENDING_INTENT_REPLAY') } });
     expect(state.accounts.get(BORROWER)!.state.deltas.get(1)!.offdelta).toBe(afterRepay);
   });
 
@@ -854,11 +854,11 @@ describe('payer-authenticated hub lending', () => {
       },
     };
 
-    await expect(applyAccountTxToMutableReplica(account, tx, true)).rejects.toThrow('LENDING_LENDER_NOT_PROPOSER');
+    await expect(applyAccountTxToMutableReplica(account, tx, true)).resolves.toMatchObject({ ok: false, rejection: { message: expect.stringContaining('LENDING_LENDER_NOT_PROPOSER') } });
     const first = await applyAccountTxToMutableReplica(account, tx, false);
     expect(first.ok).toBe(true);
     const offdeltaAfterFirst = account.state.deltas.get(1)!.offdelta;
-    await expect(applyAccountTxToMutableReplica(account, tx, false)).rejects.toThrow('LENDING_INTENT_REPLAY');
+    await expect(applyAccountTxToMutableReplica(account, tx, false)).resolves.toMatchObject({ ok: false, rejection: { message: expect.stringContaining('LENDING_INTENT_REPLAY') } });
     expect(account.state.deltas.get(1)!.offdelta).toBe(offdeltaAfterFirst);
   });
 

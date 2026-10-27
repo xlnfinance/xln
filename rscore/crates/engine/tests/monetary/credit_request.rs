@@ -7,7 +7,6 @@ use crate::common;
 use serde::Deserialize;
 use xln_rscore_engine::{
     AccountFrame, AccountTx, AccountVerdict, LendingIntentKind, SequentialAccountEngine, Side,
-    TransitionError,
 };
 
 use common::{delta, entity, entity_text, replica, token};
@@ -165,33 +164,47 @@ fn replay_non_party_zero_amount_and_unknown_lane_are_rejected() {
             .expect("first request")
             .committed()
             .expect("candidate");
-    assert!(matches!(
-        SequentialAccountEngine::apply(&accepted, Side::Right, &request("credit-1111111111111111", 2)),
-        Err(TransitionError::LendingIntentReplay(key)) if key == "credit:credit-1111111111111111"
-    ));
+    assert_eq!(
+        common::rejected_message(SequentialAccountEngine::apply(
+            &accepted,
+            Side::Right,
+            &request("credit-1111111111111111", 2)
+        )),
+        "LENDING_INTENT_REPLAY:credit:credit-1111111111111111"
+    );
     // The hub (LEFT) signs a request that names the user as requester.
-    assert!(matches!(
-        SequentialAccountEngine::apply(&base, Side::Left, &request("credit-1111111111111111", 1)),
-        Err(TransitionError::CreditRequestRequesterNotProposer { .. })
-    ));
-    assert!(matches!(
-        SequentialAccountEngine::apply(&base, Side::Right, &request("credit-1111111111111111", 0)),
-        Err(TransitionError::LendingAmountNotPositive {
-            context: "CREDIT_REQUEST"
-        })
-    ));
+    assert!(
+        common::rejected_message(SequentialAccountEngine::apply(
+            &base,
+            Side::Left,
+            &request("credit-1111111111111111", 1)
+        ))
+        .starts_with("CREDIT_REQUEST_REQUESTER_NOT_PROPOSER")
+    );
+    assert_eq!(
+        common::rejected_message(SequentialAccountEngine::apply(
+            &base,
+            Side::Right,
+            &request("credit-1111111111111111", 0)
+        )),
+        "CREDIT_REQUEST_AMOUNT_MUST_BE_POSITIVE"
+    );
     let no_lane = AccountTx::CreditRequest {
         request_id: "credit-1111111111111111".into(),
         requester_entity_id: entity_text(0x30),
         token_id: token(2),
         amount: 1.into(),
     };
-    assert!(matches!(
-        SequentialAccountEngine::apply(&base, Side::Right, &no_lane),
-        Err(TransitionError::CreditRequestTokenNotEnabled(_))
-    ));
-    assert!(matches!(
-        SequentialAccountEngine::apply(&base, Side::Right, &request("credit-XYZ", 1)),
-        Err(TransitionError::CreditRequestIdInvalid(_))
-    ));
+    assert!(
+        common::rejected_message(SequentialAccountEngine::apply(&base, Side::Right, &no_lane))
+            .starts_with("CREDIT_REQUEST_TOKEN_NOT_ENABLED:")
+    );
+    assert_eq!(
+        common::rejected_message(SequentialAccountEngine::apply(
+            &base,
+            Side::Right,
+            &request("credit-XYZ", 1)
+        )),
+        "CREDIT_REQUEST_ID_INVALID:credit-XYZ"
+    );
 }

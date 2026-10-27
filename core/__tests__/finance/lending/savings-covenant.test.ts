@@ -65,7 +65,7 @@ for (const saverIsLeft of [true, false]) {
     expect(buildAccountProofBody(account, TRANSFORMER).proofBodyStruct.transformers).toHaveLength(0);
     const delta = account.state.deltas.get(1)!;
     expect(delta.offdelta).toBe(saverIsLeft ? 100n : -100n);
-    await expect(applyAccountTxToMutableReplica(account, tx(10_100n), !saverIsLeft, 86_402_000)).rejects.toThrow('LENDING_INTENT_REPLAY');
+    await expect(applyAccountTxToMutableReplica(account, tx(10_100n), !saverIsLeft, 86_402_000)).resolves.toMatchObject({ ok: false, rejection: { message: expect.stringContaining('LENDING_INTENT_REPLAY') } });
   });
 }
 

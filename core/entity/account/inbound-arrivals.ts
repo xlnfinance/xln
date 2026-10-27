@@ -1,13 +1,21 @@
 import type { EntityTx } from '../../types/entity-tx';
-import type { AccountInput } from '../../types/account';
 import { safeStringify } from '../../protocol/serialization';
 
 const fail = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
   throw new Error(`RSCORE_ROUND_${code}:${safeStringify(detail)}`);
 };
 
-/** The two network arrival shapes accepted by Account. */
-type AccountArrivalInput = Extract<AccountInput, { kind: 'ack' | 'ack_frame' }>;
+/**
+ * Every peer-wire Account input an `accountInput` Entity transaction carries
+ * (`enqueue` is local admission and never travels as one). `dispute` and
+ * `board_hanko_refresh` are honest peer traffic too: board rotation emits
+ * `board_hanko_refresh` to every counterparty
+ * (core/entity/tx/state-effects/board-rotation-hanko-refresh.ts). The Account
+ * worker applies every kind through the same `applyAccountInput` as the
+ * non-resident path; refusing them here halted a cutover hub on a peer's
+ * ordinary board rotation.
+ */
+type AccountArrivalInput = Extract<EntityTx, { type: 'accountInput' }>['data'];
 
 /** One arrival waiting to be handed over, in the order the frame carries it. */
 export type InboundArrival = Readonly<{
@@ -30,8 +38,5 @@ export const inboundArrivals = (entityTxs: readonly EntityTx[]): InboundArrival[
       .trim()
       .toLowerCase();
     if (accountId.length === 0) return fail('ARRIVAL_PEER_MISSING');
-    if (input.kind !== 'ack' && input.kind !== 'ack_frame') {
-      return fail('ARRIVAL_KIND_OUTSIDE_PROFILE', { account: accountId, kind: input.kind });
-    }
     return [{ accountId, input }];
   });

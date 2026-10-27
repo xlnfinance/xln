@@ -19,10 +19,8 @@ import {
   isSimpleEntityTxType,
   validateSimpleEntityTxData,
 } from './simple';
-import {
-  assertCrossJurisdictionSwapRoute,
-  validateCrossJurisdictionRouteEntityTx,
-} from './cross-j-route';
+import { validateCrossJurisdictionRouteEntityTx } from './cross-j-route';
+import { assertCrossJurisdictionSwapRoute } from '../../extensions/cross-j/route-shape';
 
 const ENTITY_TX_NESTING_LIMIT = 16;
 
