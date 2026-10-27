@@ -1,7 +1,7 @@
 import { FEATURE_CHAPTERS } from './chapters';
 import { WALLET_LESSONS } from '@xln/frontend/lib/tutorial/curriculum';
 import type { PaymentTerminalEvent } from '@xln/frontend/lib/stores/network/paymentTerminalMonitor';
-import { collateral, committed } from './outcomes';
+import { collateral, committed, committedPayment } from './outcomes';
 import type { WalletView } from '../runtime/views';
 
 export type TourContext = {
@@ -76,7 +76,7 @@ const steps: TourStep[] = [
             : !ctx.dom.value('pay-amount').trim()
               ? 'Choose the funded asset and enter 25.'
               : 'Review the amount and fee, then confirm the payment.',
-    done: ctx => ctx.dom.text('receipt-kicker') === 'Paid',
+    done: ctx => committedPayment(ctx) && ctx.dom.text('receipt-kicker') === 'Paid',
   },
   {
     id: 'trade',

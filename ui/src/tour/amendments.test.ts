@@ -261,7 +261,7 @@ test('terminal observations retain correlated committed evidence across unrelate
   };
   const initiated = { ...outgoing, name: 'HtlcInitiated' as const };
   observeTourPayment({ ...initiated, height: 10 });
-  expect(useTourObservations.getState().initiations).toBeUndefined();
+  expect(done('recovery', context({ ...useTourObservations.getState(), outgoing }))).toBe(false);
   observeTourPayment(initiated);
   observeTourPayment({ ...initiated, data: { ...initiated.data, hashlock: `0x${'e'.repeat(64)}` } });
   observeTourPayment(outgoing);

@@ -90,23 +90,31 @@ export const received = (ctx: TourContext): boolean =>
   ctx.incoming!.height > ctx.before!.frameHeight && ctx.incoming!.height <= ctx.wallet.frameHeight &&
   signedBalance(ctx.wallet) >= signedBalance(ctx.before!) + 5_000_000n;
 
-export function recovered(ctx: TourContext): boolean {
+/**
+ * Both chapters require this sender's same runtime/entity/hashlock/token/amount
+ * to initiate after entry (and restore for Recovery), then finalize by the current
+ * committed frame. An old Paid receipt or pre-restore initiation cannot prove it;
+ * offsetting credit may legitimately leave the signed balance unchanged.
+ */
+export function committedPayment(ctx: TourContext, afterHeight = ctx.before?.frameHeight ?? Infinity): boolean {
   const event = ctx.outgoing;
-  // Recovery requires the same payment to be committed as initiated after both
-  // restore and chapter entry, then finalized. Offsetting credit may leave balances flat.
-  return Boolean(committed(ctx) && ctx.restored?.runtimeId === ctx.runtimeId &&
-    ctx.restored.entityIds.includes(ctx.wallet.entityId) && ctx.wallet.frameHeight >= ctx.restored.height &&
+  const baseline = Math.max(afterHeight, ctx.before?.frameHeight ?? Infinity);
+  return Boolean(committed(ctx) &&
     event?.runtimeId === ctx.runtimeId && event.name === 'HtlcFinalized' &&
-    event.height > Math.max(ctx.restored.height, ctx.before!.frameHeight) && event.height <= ctx.wallet.frameHeight &&
+    event.height > baseline && event.height <= ctx.wallet.frameHeight &&
     event.data.entityId === ctx.wallet.entityId && event.data.fromEntity === ctx.wallet.entityId &&
     event.data.tokenId === 1 && /^\d+$/.test(String(event.data.amount)) && BigInt(String(event.data.amount)) >= 1_000_000n &&
     typeof event.data.hashlock === 'string' && /^0x[0-9a-f]{64}$/i.test(event.data.hashlock) &&
     ctx.initiations?.some(initiated => initiated.name === 'HtlcInitiated' &&
-      initiated.height > Math.max(ctx.restored!.height, ctx.before!.frameHeight) && initiated.height <= event.height &&
+      initiated.height > baseline && initiated.height <= event.height &&
       initiated.runtimeId === event.runtimeId && initiated.data.entityId === event.data.entityId &&
       initiated.data.fromEntity === event.data.fromEntity && initiated.data.hashlock === event.data.hashlock &&
       initiated.data.tokenId === event.data.tokenId && initiated.data.amount === event.data.amount));
 }
+
+export const recovered = (ctx: TourContext): boolean =>
+  Boolean(ctx.restored?.runtimeId === ctx.runtimeId && ctx.restored.entityIds.includes(ctx.wallet.entityId) &&
+    committedPayment(ctx, ctx.restored.height));
 
 export type TourBaseline = { step: string; wallet: WalletView };
 

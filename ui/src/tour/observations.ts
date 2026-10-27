@@ -8,15 +8,11 @@ export const useTourObservations = create<Pick<TourContext, 'backup' | 'exported
 
 /** Retain matching durable evidence even after the receipt notification is dismissed. */
 export function observeTourPayment(event: PaymentTerminalEvent | NonNullable<TourContext['initiations']>[number]): void {
-  const { invoice, restored } = useTourObservations.getState();
+  const { invoice } = useTourObservations.getState();
   if (event.name !== 'HtlcInitiated' && invoicePaid(invoice, event)) useTourObservations.setState({ incoming: event });
-  if (restored?.runtimeId !== event.runtimeId || event.height <= restored.height ||
-    !restored.entityIds.includes(String(event.data.entityId))) return;
   if (event.name === 'HtlcInitiated') {
     useTourObservations.setState(state => ({ initiations: [...(state.initiations ?? []), event] }));
-  } else if (event.name === 'HtlcFinalized' && event.data.fromEntity === event.data.entityId &&
-    event.data.tokenId === 1 && typeof event.data.hashlock === 'string' && /^0x[0-9a-f]{64}$/i.test(event.data.hashlock) &&
-    /^\d+$/.test(String(event.data.amount)) && BigInt(String(event.data.amount)) >= 1_000_000n) {
+  } else if (event.name === 'HtlcFinalized') {
     useTourObservations.setState({ outgoing: event });
   }
 }
