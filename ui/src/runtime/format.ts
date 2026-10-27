@@ -39,10 +39,16 @@ export function formatMoney(amount: bigint, decimals: number, fraction = 2): str
 	return fraction > 0 && decimals > 0 ? `${sign}${whole.toLocaleString('en-US')}.${digits}` : `${sign}${whole.toLocaleString('en-US')}`;
 }
 
-/** A limit shown to cents never overstates what is available: it rounds toward zero. */
+/**
+ * A limit never overstates what is available: it rounds toward zero. Below one whole
+ * token it keeps six places, so 0.0159 WETH does not read as 0.01.
+ */
 export function formatLimit(amount: bigint, decimals: number, fraction = 2): string {
-	const unit = 10n ** BigInt(Math.max(0, decimals - fraction));
-	return formatMoney(amount - (amount % unit), decimals, fraction);
+	const subUnit = amount > 0n && amount < 10n ** BigInt(decimals);
+	const places = subUnit ? Math.min(decimals, 6) : fraction;
+	const unit = 10n ** BigInt(Math.max(0, decimals - places));
+	const text = formatMoney(amount - (amount % unit), decimals, places);
+	return subUnit && places > fraction ? text.replace(new RegExp(`0{1,${places - fraction}}$`), '') : text;
 }
 
 /** Signed money: "+230.00" / "−120.00" / "0.00". */
