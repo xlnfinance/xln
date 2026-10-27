@@ -100,7 +100,8 @@ const inspectPolicyNotice = (
   // A peer's signed clock cannot spend the receiver's notice on an idle
   // account. Active terms come from ordered frame execution, including a
   // prior announcement in this frame; no speculative state is published.
-  if (next.previous && next.effectiveAt < scan.context.entityTimestamp + next.previous.noticePeriodSeconds * 1000) {
+  if (next.previous && next.effectiveAt + ACCOUNT_NETWORK_ALLOWANCE_MS
+    < scan.context.entityTimestamp + next.previous.noticePeriodSeconds * 1000) {
     return rejectedDeadline(
       `REBALANCE_POLICY_NOTICE_TOO_SHORT: token=${tx.data.tokenId} version=${tx.data.policyVersion}`,
     );
@@ -204,6 +205,18 @@ export function getIncomingAccountDeadlineViolation(
   proposerIsLeft: boolean,
   context: AccountInputSecurityContext,
 ): IncomingDeadlineViolation | undefined {
+  // A signed future clock must not activate either side's pending terms, even
+  // on an unrelated frame: v3 could otherwise erase v1 as an "improvement" on
+  // v2 before the customer's receiver clock has reached v2's notice deadline.
+  // Certified duplicate proposals are handled before this new-frame guard.
+  for (const policy of account.rebalanceFeePolicies?.values() ?? []) {
+    for (const side of ['left', 'right'] as const) {
+      const pending = policy[side];
+      if (pending?.previous && context.entityTimestamp < pending.effectiveAt && pending.effectiveAt <= frame.timestamp) {
+        return rejectedDeadline(`REBALANCE_POLICY_ACTIVATION_BEFORE_RECEIVER: side=${side} version=${pending.policyVersion}`);
+      }
+    }
+  }
   const scan: DeadlineScan = {
     locks: cloneLocks(account),
     policies: new Map(),

@@ -32,6 +32,164 @@ mod notice_backdate {
     }
 
     #[test]
+    fn honest_notice_accepts_receiver_ahead_through_network_allowance() {
+        for ahead in [
+            1,
+            xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS,
+            xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS + 1,
+        ] {
+            let (mut left, mut right) = parties();
+            let start = CLOCK.entity_timestamp;
+            commit_txs_bilaterally(
+                &mut left,
+                &mut right,
+                vec![policy(1, 10, 2)],
+                start,
+                true,
+                false,
+            );
+            let frame = proposed(&mut left, vec![policy(2, 30, 2)], start);
+            let result = apply_incoming_frame(
+                &mut right.account,
+                &right.identity,
+                left.identity.entity_id(),
+                ReceiverClock {
+                    entity_timestamp: start + ahead,
+                    ..CLOCK
+                },
+                incoming_of(&frame.frame, frame.state_hash, frame.hanko.clone()),
+                &market(),
+            )
+            .unwrap();
+            if ahead <= xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS {
+                assert!(
+                    matches!(result, IncomingOutcome::Committed { .. }),
+                    "ahead={ahead}: {result:?}"
+                );
+            } else {
+                assert!(
+                    matches!(result, IncomingOutcome::Rejected { ref reason }
+                    if reason.contains("REBALANCE_POLICY_NOTICE_TOO_SHORT")),
+                    "{result:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn future_frame_cannot_activate_either_policy_early_even_without_policy_tx() {
+        for policy_is_left in [true, false] {
+            for replacement in [true, false] {
+                for same_side in [true, false] {
+                    if replacement && !same_side {
+                        continue;
+                    }
+                    let (mut left, mut right) = parties();
+                    let start = CLOCK.entity_timestamp;
+                    let (hub, customer) = if policy_is_left {
+                        (&mut left, &mut right)
+                    } else {
+                        (&mut right, &mut left)
+                    };
+                    commit_txs_bilaterally(
+                        hub,
+                        customer,
+                        vec![policy(1, 10, 2)],
+                        start - 9000,
+                        true,
+                        false,
+                    );
+                    commit_txs_bilaterally(
+                        hub,
+                        customer,
+                        vec![policy(2, 30, 2)],
+                        start,
+                        true,
+                        false,
+                    );
+                    let (proposer, receiver) = if same_side {
+                        (hub, customer)
+                    } else {
+                        (customer, hub)
+                    };
+                    let tx = if replacement {
+                        policy(3, 20, 2)
+                    } else {
+                        payment(&proposer.entity_id, &receiver.entity_id, 1)
+                    };
+                    let frame = proposed(proposer, vec![tx], start + 2000);
+                    let before = receiver.account.entity_account_leaf().unwrap();
+                    for restart in [false, true] {
+                        if restart {
+                            receiver.account = AccountConsensus::restore_from_checkpoint(
+                                receiver.account.replica().clone(),
+                                receiver.account.consensus_snapshot(),
+                                &market(),
+                            )
+                            .unwrap();
+                        }
+                        let result = apply_incoming_frame(
+                            &mut receiver.account,
+                            &receiver.identity,
+                            proposer.identity.entity_id(),
+                            ReceiverClock {
+                                entity_timestamp: start + 1,
+                                ..CLOCK
+                            },
+                            incoming_of(&frame.frame, frame.state_hash, frame.hanko.clone()),
+                            &market(),
+                        )
+                        .unwrap();
+                        assert!(
+                            matches!(result, IncomingOutcome::Rejected { ref reason }
+                            if reason.contains("REBALANCE_POLICY_ACTIVATION_BEFORE_RECEIVER")),
+                            "{result:?}"
+                        );
+                        assert_eq!(receiver.account.entity_account_leaf().unwrap(), before);
+                    }
+                    let incoming =
+                        || incoming_of(&frame.frame, frame.state_hash, frame.hanko.clone());
+                    let result = apply_incoming_frame(
+                        &mut receiver.account,
+                        &receiver.identity,
+                        proposer.identity.entity_id(),
+                        ReceiverClock {
+                            entity_timestamp: start + 2000,
+                            ..CLOCK
+                        },
+                        incoming(),
+                        &market(),
+                    )
+                    .unwrap();
+                    assert!(
+                        matches!(result, IncomingOutcome::Committed { .. }),
+                        "{result:?}"
+                    );
+                    let root = receiver.account.entity_account_leaf().unwrap();
+                    // A certified duplicate must bypass the new-frame activation guard.
+                    let retry = apply_incoming_frame(
+                        &mut receiver.account,
+                        &receiver.identity,
+                        proposer.identity.entity_id(),
+                        ReceiverClock {
+                            entity_timestamp: start + 1,
+                            ..CLOCK
+                        },
+                        incoming(),
+                        &market(),
+                    )
+                    .unwrap();
+                    assert!(
+                        matches!(retry, IncomingOutcome::Duplicate { .. }),
+                        "{retry:?}"
+                    );
+                    assert_eq!(receiver.account.entity_account_leaf().unwrap(), root);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn newer_policy_rejects_backdated_timestamp_but_exact_retry_is_idempotent() {
         let (left, _) = parties();
         let context = |timestamp| AccountExecutionContext::new(timestamp, timestamp, 0, 0, 0);
@@ -105,7 +263,7 @@ mod notice_backdate {
         );
         let frame = proposed(&mut left, vec![policy(2, 30, 2)], start + 1000);
         let clock = ReceiverClock {
-            entity_timestamp: start + 10_000,
+            entity_timestamp: start + 40_001,
             ..CLOCK
         };
         let before = right.account.entity_account_leaf().unwrap();
@@ -213,7 +371,7 @@ mod notice_backdate {
             &right.identity,
             left.identity.entity_id(),
             ReceiverClock {
-                entity_timestamp: start + 10_000,
+                entity_timestamp: start + 40_001,
                 ..CLOCK
             },
             incoming_of(&frame.frame, frame.state_hash, frame.hanko.clone()),

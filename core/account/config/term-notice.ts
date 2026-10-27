@@ -1,3 +1,10 @@
+/**
+ * N1: Adverse terms cannot price a customer request before announcement plus
+ * the full notice, measured by the receiver's committed Entity clock.
+ * N2: Honest announcements tolerate the canonical network clock/latency allowance.
+ * N3: Both sides execute the signed frame identically; receiver time gates
+ * admission only and never changes committed terms, deadlines or state roots.
+ */
 import type { RebalanceFeePolicySnapshot, RebalanceFeeTerms } from '../../types/finance/rebalance';
 
 export const DEFAULT_TERM_NOTICE_SECONDS = 30 * 24 * 60 * 60;
@@ -9,7 +16,7 @@ export const validTermNoticeSeconds = (value: number): boolean =>
 export const worseRebalanceTerms = (previous: RebalanceFeeTerms, next: RebalanceFeeTerms): boolean =>
   next.baseFee > previous.baseFee || next.gasFee > previous.gasFee || next.liquidityFeeBps > previous.liquidityFeeBps;
 
-/** The signed frame clock is the sole activation authority, including after recovery. */
+/** Accepted signed frame time selects terms identically on both sides and after recovery. */
 export const effectiveRebalanceTerms = (policy: RebalanceFeePolicySnapshot, timestamp: number) =>
   policy.previous && timestamp < policy.effectiveAt ? policy.previous : policy;
 

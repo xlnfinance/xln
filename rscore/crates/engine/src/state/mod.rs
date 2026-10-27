@@ -429,6 +429,10 @@ impl AccountState {
         self.rebalance_fee_policies.get(&token_id.radix_key())
     }
 
+    pub(crate) fn rebalance_policies(&self) -> impl Iterator<Item = &BilateralRebalanceFeePolicy> {
+        self.rebalance_fee_policies.iter().map(|(_, policy)| policy)
+    }
+
     pub fn rebalance_fee_policies_root(&self) -> [u8; 32] {
         self.rebalance_fee_policies.root_hash()
     }

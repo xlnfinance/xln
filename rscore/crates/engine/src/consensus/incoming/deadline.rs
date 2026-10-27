@@ -103,7 +103,9 @@ fn inspect_policy_notice(
         let earliest = clock
             .entity_timestamp
             .checked_add(active.notice_period_seconds() * 1000);
-        if earliest.is_none_or(|earliest| next.effective_at() < earliest) {
+        if earliest
+            .is_none_or(|earliest| next.effective_at() + HTLC_ENFORCEMENT_RESERVE_MS < earliest)
+        {
             return Some(reject(format!(
                 "REBALANCE_POLICY_NOTICE_TOO_SHORT: token={token_id} version={policy_version}"
             )));
@@ -120,6 +122,25 @@ pub fn incoming_deadline_violation(
     proposer: Side,
     clock: ReceiverClock,
 ) -> Option<IncomingDeadlineViolation> {
+    // New frames cannot spend either side's notice using a signed future clock,
+    // even without a policy tx. A replacement could otherwise erase the old
+    // terms as an "improvement" before the receiver reaches activation.
+    // Certified duplicates are handled before this guard, as in TypeScript.
+    for policy in state.rebalance_policies() {
+        for side in [Side::Left, Side::Right] {
+            if let Some(pending) = policy.side(side)
+                && pending.previous().is_some()
+                && clock.entity_timestamp < pending.effective_at()
+                && pending.effective_at() <= frame.timestamp
+            {
+                let side = if side == Side::Left { "left" } else { "right" };
+                return Some(reject(format!(
+                    "REBALANCE_POLICY_ACTIVATION_BEFORE_RECEIVER: side={side} version={}",
+                    pending.policy_version()
+                )));
+            }
+        }
+    }
     let mut policies = BTreeMap::new();
     let mut locks: BTreeMap<String, DeadlineLock> = state
         .htlc_locks()
