@@ -1,3 +1,4 @@
+import { asTokenId } from '../../../../../account/tx/units';
 import type { AccountTx } from '../../../../../types/account';
 import type { EntityInput, EntityState } from '../../../../types';
 import type { EntityRuntimeContext } from '../../../../runtime-context';
@@ -41,7 +42,7 @@ export const buildHubRebalancePolicyTx = (
   data: {
     tokenId,
     policyVersion: config.policyVersion,
-    baseFee: getDefaultRebalanceBaseFeeForToken(tokenId),
+    baseFee: getDefaultRebalanceBaseFeeForToken(asTokenId(tokenId)),
     liquidityFeeBps: config.rebalanceLiquidityFeeBps,
     gasFee: 0n,
   },

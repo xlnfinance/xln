@@ -1,3 +1,4 @@
+import { asTokenId } from '../../../account/tx/units';
 import { describe, expect, test } from 'bun:test';
 
 import {
@@ -11,28 +12,29 @@ import { defaultCrossJCreditPairs } from '../../../scenarios/cross-j/phase-asser
 
 describe('rebalance defaults are USD amounts in token raw units', () => {
   test('USDC token 1 uses six-decimal raw amounts', () => {
-    expect(getDefaultRebalancePolicyForToken(1)).toEqual({
+    expect(getDefaultRebalancePolicyForToken(asTokenId(1))).toEqual({
       r2cRequestSoftLimit: 500n * 10n ** 6n,
       hardLimit: 10_000n * 10n ** 6n,
       maxAcceptableFee: 15n * 10n ** 6n,
     });
-    expect(getDefaultRebalanceBaseFeeForToken(1)).toBe(10n ** 5n);
+    expect(getDefaultRebalanceBaseFeeForToken(asTokenId(1))).toBe(10n ** 5n);
   });
 
   test('WETH token 2 converts the same USD amounts at the $2,500 reference rate', () => {
-    expect(getDefaultRebalancePolicyForToken(2)).toEqual({
+    expect(getDefaultRebalancePolicyForToken(asTokenId(2))).toEqual({
       r2cRequestSoftLimit: 2n * 10n ** 17n,
       hardLimit: 4n * 10n ** 18n,
       maxAcceptableFee: 6n * 10n ** 15n,
     });
-    expect(getDefaultRebalanceBaseFeeForToken(2)).toBe(4n * 10n ** 13n);
+    expect(getDefaultRebalanceBaseFeeForToken(asTokenId(2))).toBe(4n * 10n ** 13n);
   });
 
   test('TRX base fee floors $0.10 at the $0.12 reference rate', () => {
-    expect(getDefaultRebalanceBaseFeeForToken(4)).toBe(833_333n);
+    expect(getDefaultRebalanceBaseFeeForToken(asTokenId(4))).toBe(833_333n);
   });
 
   test('a token without a catalog rate fails instead of assuming a price', () => {
+    // @ts-expect-error Exercise runtime rejection of an unvalidated caller.
     expect(() => getDefaultRebalancePolicyForToken(999_999))
       .toThrow('TOKEN_USD_RATE_UNAVAILABLE:999999');
   });

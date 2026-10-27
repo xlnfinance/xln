@@ -1,3 +1,4 @@
+import { asTokenId } from '../../../../account/tx/units';
 import type { AccountTx } from '../../../../types/account';
 import type { EntityInput, EntityState } from '../../../types';
 import type { EntityTx } from '../../../../types/entity-tx';
@@ -77,7 +78,7 @@ export function applyCommittedCreditRequestFollowup(
   if (!account) throw new Error(`CREDIT_REQUEST_ACCOUNT_MISSING:${counterpartyIdRaw}`);
   const proposer = normalized(proposerIsLeft ? account.state.leftEntity : account.state.rightEntity);
   if (proposer !== counterpartyId) return;
-  const cap = getCreditRequestCapForToken(tx.data.tokenId);
+  const cap = getCreditRequestCapForToken(asTokenId(tx.data.tokenId));
   if (cap === undefined) return;
   const target = tx.data.amount < cap ? tx.data.amount : cap;
   const delta = account.state.deltas.get(tx.data.tokenId);

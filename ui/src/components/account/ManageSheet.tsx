@@ -35,7 +35,7 @@ export function ManageSheet({
     initialTab ?? (account.dispute !== 'none' ? 'dispute' : 'collateral'),
   );
   const tab = account.dispute === 'closed' ? 'dispute' : selectedTab;
-  const [tokenId, setTokenId] = useState(selectedTokenId);
+  const [tokenId, setTokenId] = useState<number>(selectedTokenId);
   const [amountText, setAmountText] = useState('');
   const [creditText, setCreditText] = useState('');
   const [addTokenId, setAddTokenId] = useState<number | null>(null);

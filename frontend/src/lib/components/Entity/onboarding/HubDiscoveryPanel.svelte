@@ -3,6 +3,7 @@
   Compact sortable list with expandable details.
 -->
 <script lang="ts">
+import { asTokenId } from "@xln/core/account/tx/units";
   import type { RuntimeReplica, RuntimeInput } from '@xln/core/api/public/runtime-module';
   import { errorLog } from '../../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../../stores/runtimeControllerStore';
@@ -118,8 +119,8 @@
         || (currentEnv ? requireSignerIdForEntity(currentEnv, entityId, 'hub-connect') : '');
       if (!signerId) throw new Error('No signer available for hub account setup');
 
-      const creditAmount = getHubOpeningCredit(1);
-      const rebalancePolicy = getOpenAccountRebalancePolicyData(1);
+      const creditAmount = getHubOpeningCredit(asTokenId(1));
+      const rebalancePolicy = getOpenAccountRebalancePolicyData(asTokenId(1));
       const normalizedSourceEntityId = normalizeHubEntityId(entityId);
       const sourceIsHub = hubDiscoveryProjection.committedRoles.get(normalizedSourceEntityId);
       if (typeof sourceIsHub !== 'boolean' || hub.metadata.isHub !== true) {

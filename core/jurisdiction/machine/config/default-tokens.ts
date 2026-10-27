@@ -1,3 +1,4 @@
+import { asTokenDecimals, type TokenDecimals } from '../../../account/tx/units';
 /**
  * Shared default token catalog for dev/testnets.
  */
@@ -8,7 +9,7 @@ export const TOKEN_REGISTRATION_AMOUNT = 1n;
 export type DefaultTokenDefinition = {
   symbol: string;
   name: string;
-  decimals: number;
+  decimals: TokenDecimals;
   /**
    * Committed reference rate: integer USD micros per one whole token. Every
    * protocol USD amount (rebalance fee/policy, credit-request cap, MM mid) and
@@ -19,14 +20,14 @@ export type DefaultTokenDefinition = {
 };
 
 export const DEFAULT_TOKENS = [
-  { symbol: 'USDC', name: 'USD Coin', decimals: 6, usdMicros: 1_000_000n },
-  { symbol: 'WETH', name: 'Wrapped Ether', decimals: 18, usdMicros: 2_500_000_000n },
-  { symbol: 'USDT', name: 'Tether USD', decimals: 6, usdMicros: 1_000_000n },
+  { symbol: 'USDC', name: 'USD Coin', decimals: asTokenDecimals(6), usdMicros: 1_000_000n },
+  { symbol: 'WETH', name: 'Wrapped Ether', decimals: asTokenDecimals(18), usdMicros: 2_500_000_000n },
+  { symbol: 'USDT', name: 'Tether USD', decimals: asTokenDecimals(6), usdMicros: 1_000_000n },
 ] satisfies DefaultTokenDefinition[];
 
 const TRON_ONLY_DEFAULT_TOKENS = [
-  { symbol: 'TRX', name: 'Tron Native', decimals: 6, usdMicros: 120_000n },
-  { symbol: 'SUN', name: 'Sun Token', decimals: 18, usdMicros: 20_000n },
+  { symbol: 'TRX', name: 'Tron Native', decimals: asTokenDecimals(6), usdMicros: 120_000n },
+  { symbol: 'SUN', name: 'Sun Token', decimals: asTokenDecimals(18), usdMicros: 20_000n },
 ] satisfies DefaultTokenDefinition[];
 
 /** Built-in token id N is `CATALOG_TOKENS[N - 1]`. */

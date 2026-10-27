@@ -1,3 +1,4 @@
+import { asTokenId } from '../../account/tx/units';
 /**
  * Merged Settlement + Rebalance Scenario
  *
@@ -431,7 +432,7 @@ export async function runSettleRebalance(runtimeReplica: RuntimeReplica): Promis
     }] as const;
   }));
   const expectedC2R = new Map<string, bigint>();
-  const c2rSoftLimit = getDefaultRebalancePolicyForToken(USDC).r2cRequestSoftLimit;
+  const c2rSoftLimit = getDefaultRebalancePolicyForToken(asTokenId(USDC)).r2cRequestSoftLimit;
   for (const user of [alice, charlie]) {
     const account = hubBeforeMixedRebalance.accounts.get(user.id);
     const delta = account?.state.deltas.get(USDC);

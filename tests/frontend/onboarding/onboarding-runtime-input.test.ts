@@ -1,3 +1,4 @@
+import { asTokenId } from '../../../core/account/tx/units';
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
@@ -20,16 +21,17 @@ const REBALANCE_POLICY = {
 };
 
 test('onboarding policy converts human defaults to trusted token raw units', () => {
-  expect(getOpenAccountRebalancePolicyData(1)).toEqual({
+  expect(getOpenAccountRebalancePolicyData(asTokenId(1))).toEqual({
     r2cRequestSoftLimit: 500n * 10n ** 6n,
     hardLimit: 10_000n * 10n ** 6n,
     maxAcceptableFee: 15n * 10n ** 6n,
   });
-  expect(getOpenAccountRebalancePolicyData(2)).toEqual({
+  expect(getOpenAccountRebalancePolicyData(asTokenId(2))).toEqual({
     r2cRequestSoftLimit: 2n * 10n ** 17n,
     hardLimit: 4n * 10n ** 18n,
     maxAcceptableFee: 6n * 10n ** 15n,
   });
+  // @ts-expect-error Exercise runtime rejection of an unvalidated caller.
   expect(() => getOpenAccountRebalancePolicyData(Number.NaN)).toThrow('TOKEN_USD_RATE_UNAVAILABLE:NaN');
 });
 

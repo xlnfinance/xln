@@ -1,3 +1,4 @@
+import { asTokenId, type TokenId } from '@xln/core/account/tx/units';
 import { deleteVaultDeviceKey, type ProtectedVaultSecrets } from '../../../frontend/src/lib/security/vaultProtection';
 import type { ChainSyncView } from './chain-catchup';
 import { niceUsdPerPx } from './bar-scale';
@@ -220,7 +221,7 @@ type AppState = {
   tokenCatalog: TokenCatalogEntry[];
   setExternalWallet: (wallet: ExternalWallet | null) => void;
 
-  selectedTokenId: number;
+  selectedTokenId: TokenId;
   setSelectedTokenId: (tokenId: number) => void;
 
   toasts: Toast[];
@@ -379,8 +380,8 @@ export const useApp = create<AppState>((set, get) => ({
   tokenCatalog: [],
   setExternalWallet: wallet => set({ externalWallet: wallet, tokenCatalog: wallet?.catalog ?? [] }),
 
-  selectedTokenId: 1,
-  setSelectedTokenId: tokenId => set({ selectedTokenId: tokenId }),
+  selectedTokenId: asTokenId(1),
+  setSelectedTokenId: tokenId => set({ selectedTokenId: asTokenId(tokenId) }),
 
   toasts: [],
   toast: (text, kind = 'info', key) => {

@@ -1,3 +1,4 @@
+import { asTokenId } from '@xln/core/account/tx/units';
 import { getTokenInfo } from '@xln/core/account/utils';
 import { getTokenUsdMicros } from '@xln/core/jurisdiction/machine/config/usd-reference-rate';
 
@@ -28,7 +29,7 @@ const buildMicroscopeToken = (options: {
     name: metadata.name,
     decimals: metadata.decimals,
     color: options.color,
-    usdPriceMicros: getTokenUsdMicros(options.tokenId),
+    usdPriceMicros: getTokenUsdMicros(asTokenId(options.tokenId)),
     grossAmount: options.grossWhole * scale,
     userReserve: options.userReserveWhole * scale,
     hubReserve: options.hubReserveWhole * scale,

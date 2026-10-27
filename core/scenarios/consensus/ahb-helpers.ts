@@ -1,3 +1,4 @@
+import { asTokenId } from '../../account/tx/units';
 import { wholeUsdToTokenAmount } from '../../jurisdiction/machine/config/usd-reference-rate';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { EntityInput, EntityReplica } from '../../entity/types';
@@ -24,7 +25,7 @@ export const getProcess = async (): Promise<ProcessFn> => {
   return cachedProcess;
 };
 
-export const USDC_TOKEN_ID = 1;
+export const USDC_TOKEN_ID = asTokenId(1);
 export const DECIMALS = BigInt(DEFAULT_TOKENS[USDC_TOKEN_ID - 1]!.decimals);
 export const ONE_TOKEN = 10n ** DECIMALS;
 

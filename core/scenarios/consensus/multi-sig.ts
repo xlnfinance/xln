@@ -1,3 +1,4 @@
+import { asTokenId } from '../../account/tx/units';
 /**
  * Multi-Signer Consensus Test
  *
@@ -46,7 +47,7 @@ import {
 } from '../harness/helpers';
 import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 
-const USDC = 1;
+const USDC = asTokenId(1);
 const usd = (amount: number | bigint) => wholeUsdToTokenAmount(USDC, BigInt(amount));
 
 const hasFinalizedHankoBatch = (replica: EntityReplica): boolean =>

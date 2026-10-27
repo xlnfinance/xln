@@ -1,3 +1,4 @@
+import { asTokenId } from '../../../account/tx/units';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { RuntimeReplica, RuntimeInput } from '../../../runtime/types';
 import { safeStringify } from '../../../protocol/serialization';
@@ -282,7 +283,7 @@ const buildFaucetRuntimeInput = (
       Number.isFinite(Number(policy?.policyVersion)) && Number(policy?.policyVersion) > 0
         ? Number(policy?.policyVersion)
         : 1,
-    baseFee: getDefaultRebalanceBaseFeeForToken(request.tokenId),
+    baseFee: getDefaultRebalanceBaseFeeForToken(asTokenId(request.tokenId)),
     liquidityFeeBps: policy?.rebalanceLiquidityFeeBps ?? 1n,
     gasFee: 0n,
   });

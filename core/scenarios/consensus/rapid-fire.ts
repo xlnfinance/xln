@@ -1,3 +1,4 @@
+import { asTokenId } from '../../account/tx/units';
 /**
  * Rapid-Fire Payment Stress Test
  *
@@ -44,7 +45,7 @@ const getProcess = async () => {
   return _process;
 };
 
-const USDC = 1;
+const USDC = asTokenId(1);
 const usd = (amount: number | bigint) => wholeUsdToTokenAmount(USDC, BigInt(amount));
 
 // Using helpers from helpers.ts (no duplication)

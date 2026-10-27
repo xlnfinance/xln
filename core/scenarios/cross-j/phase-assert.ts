@@ -1,3 +1,4 @@
+import { asTokenId } from '../../account/tx/units';
 /**
  * Fail-fast phase asserts for cross-j dual-Runtime scenarios / e2e.
  * Reuses orchestrator mesh + orderbook helpers — no parallel credit math.
@@ -105,8 +106,8 @@ export const defaultCrossJCreditPairs = (
   mmId: string,
   hubTgtId: string,
   mmtId: string,
-  usdc = 1,
-  weth = 2,
+  usdc = asTokenId(1),
+  weth = asTokenId(2),
 ): CrossJAccountPair[] => [
   {
     hubEntityId: hubSrcId,

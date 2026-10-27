@@ -1,3 +1,4 @@
+import type { TokenDecimals } from '@xln/core/account/tx/units';
 /**
  * Hub lending: offer liquidity to a hub's pool, borrow from it, repay. Entity
  * txs are the frontend's exact shapes; the pool and loan state is served by
@@ -10,7 +11,7 @@ import { parseAmount } from '../format';
 import { decodeLendingBankTerms, decodeLendingFacility } from '@xln/core/lendbook/policy';
 import type { LendingTermId, LendingBankTerms, LendingFacility, LendingLoan as CoreLendingLoan } from '@xln/core/types/finance/lending';
 
-export function previewLendingTerms(amount: string, rate: string, decimals: number, late?: { termMs: number; lateMs: number }) {
+export function previewLendingTerms(amount: string, rate: string, decimals: TokenDecimals, late?: { termMs: number; lateMs: number }) {
   if (!amount.trim()) return null;
   try {
     const principal = parseAmount(amount, decimals);
@@ -25,7 +26,7 @@ export function previewLendingTerms(amount: string, rate: string, decimals: numb
   }
 }
 
-export function previewSavingsRisk(hub: AccountView, tokenId: number, amount: string, rate: string, decimals: number) {
+export function previewSavingsRisk(hub: AccountView, tokenId: number, amount: string, rate: string, decimals: TokenDecimals) {
   const quote = previewLendingTerms(amount, rate, decimals);
   if (!quote || !quote.ok) return quote;
   const risk = hub.doc.lendingRisk.get(tokenId);

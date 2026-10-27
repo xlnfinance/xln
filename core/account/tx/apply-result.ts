@@ -19,7 +19,7 @@ import {
   toHashlock,
   toHtlcSecret,
   toTokenAmount,
-  toTokenId,
+  asTokenId,
 } from './units';
 
 const eventsOf = (events: readonly string[]): string[] => [...events];
@@ -46,7 +46,7 @@ export const accountTxHtlcSecret = (
   lockId,
   hashlock: toHashlock(hashlock),
   secret: toHtlcSecret(secret),
-  tokenId: toTokenId(tokenId),
+  tokenId: asTokenId(tokenId),
   amount: toTokenAmount(amount),
 });
 
@@ -64,7 +64,7 @@ export const accountTxHtlcError = (
   events: eventsOf(events),
   lockId,
   hashlock: toHashlock(hashlock),
-  tokenId: toTokenId(tokenId),
+  tokenId: asTokenId(tokenId),
   amount: toTokenAmount(amount),
   senderIsLeft,
   ...(reason === undefined ? {} : { reason }),

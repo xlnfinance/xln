@@ -1,4 +1,5 @@
 <script lang="ts">
+import { asTokenId } from "@xln/core/account/tx/units";
 import WalletGuide from "#lib/tutorial/WalletGuide.svelte";
 import { replaceState } from "$app/navigation";
 import { createEventDispatcher } from "svelte";
@@ -2227,7 +2228,7 @@ async function openAccountWithFullId(targetEntityId: string) {
   }
   try {
     const env = getRuntimeEnv(actionRuntimeEnv);
-    const rebalancePolicy = getOpenAccountRebalancePolicyData(1);
+    const rebalancePolicy = getOpenAccountRebalancePolicyData(asTokenId(1));
     if (env) await prewarmCounterpartyProfiles(env, [trimmed]);
     const targetReplica = findReplicaForEntityTab(activeReplicas, trimmed, "");
     const sourceIsHub = replica?.state?.profile?.isHub;

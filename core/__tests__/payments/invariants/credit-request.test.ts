@@ -1,3 +1,4 @@
+import { asTokenId } from '../../../account/tx/units';
 import { describe, expect, test } from 'bun:test';
 
 import { applyAccountTx, applyAccountTxToMutableReplica } from '../../../account/tx/apply';
@@ -145,12 +146,12 @@ describe('credit_request AccountTx', () => {
 });
 
 describe('committed credit_request hub follow-up', () => {
-  const cap = getCreditRequestCapForToken(USDC)!;
+  const cap = getCreditRequestCapForToken(asTokenId(USDC))!;
 
   test('the deterministic cap is $1,000 at the committed reference rate', () => {
     expect(cap).toBe(1_000n * WHOLE);
-    expect(getCreditRequestCapForToken(2)).toBe(400_000_000_000_000_000n); // 0.4 WETH
-    expect(getCreditRequestCapForToken(999)).toBeUndefined();
+    expect(getCreditRequestCapForToken(asTokenId(2))).toBe(400_000_000_000_000_000n); // 0.4 WETH
+    expect(getCreditRequestCapForToken(asTokenId(999))).toBeUndefined();
   });
 
   test('hub raises its line to min(requested, cap)', async () => {

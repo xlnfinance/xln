@@ -1,3 +1,4 @@
+import { asTokenDecimals, type TokenDecimals } from '@xln/core/account/tx/units';
 /** Token glyph for the round icon: currency sign where one exists, first letter otherwise. */
 export function tokenGlyph(symbol: string): string {
 	const upper = symbol.toUpperCase();
@@ -7,7 +8,7 @@ export function tokenGlyph(symbol: string): string {
 }
 
 /** "12,480.2" grouped integer part, trailing zeros trimmed, never exponent. */
-export function formatAmount(amount: bigint, decimals: number, maxFraction = 6): string {
+export function formatAmount(amount: bigint, decimals: TokenDecimals, maxFraction = 6): string {
 	const negative = amount < 0n;
 	const abs = negative ? -amount : amount;
 	const base = 10n ** BigInt(decimals);
@@ -23,7 +24,7 @@ export function formatAmount(amount: bigint, decimals: number, maxFraction = 6):
 }
 
 /** Rounds a raw amount to `fraction` decimals, half away from zero; never truncates. */
-function roundToFraction(abs: bigint, decimals: number, fraction: number): { whole: bigint; digits: string } {
+function roundToFraction(abs: bigint, decimals: TokenDecimals, fraction: number): { whole: bigint; digits: string } {
 	const keep = Math.min(decimals, fraction);
 	const drop = decimals - keep;
 	const unit = 10n ** BigInt(drop);
@@ -33,11 +34,11 @@ function roundToFraction(abs: bigint, decimals: number, fraction: number): { who
 }
 
 /** Places for an amount below one whole token: cents would print 0.005 WETH as 0.01. */
-function subUnitPlaces(abs: bigint, decimals: number, fraction: number): number {
+function subUnitPlaces(abs: bigint, decimals: TokenDecimals, fraction: number): number {
 	return abs > 0n && abs < 10n ** BigInt(decimals) ? Math.max(fraction, Math.min(decimals, 6)) : fraction;
 }
 
-export function formatMoney(amount: bigint, decimals: number, fraction = 2): string {
+export function formatMoney(amount: bigint, decimals: TokenDecimals, fraction = 2): string {
 	const negative = amount < 0n;
 	const places = subUnitPlaces(negative ? -amount : amount, decimals, fraction);
 	if (places > fraction) {
@@ -54,20 +55,20 @@ export function formatMoney(amount: bigint, decimals: number, fraction = 2): str
  * A limit never overstates what is available: it rounds toward zero. Below one whole
  * token it keeps six places, so 0.0159 WETH does not read as 0.01.
  */
-export function formatLimit(amount: bigint, decimals: number, fraction = 2): string {
+export function formatLimit(amount: bigint, decimals: TokenDecimals, fraction = 2): string {
 	const places = subUnitPlaces(amount, decimals, fraction);
 	const unit = 10n ** BigInt(Math.max(0, decimals - places));
 	return formatMoney(amount - (amount % unit), decimals, fraction);
 }
 
 /** Signed money: "+230.00" / "−120.00" / "0.00". */
-export function formatSigned(amount: bigint, decimals: number, fraction = 2): string {
+export function formatSigned(amount: bigint, decimals: TokenDecimals, fraction = 2): string {
 	const body = formatMoney(amount < 0n ? -amount : amount, decimals, fraction);
 	return amount > 0n ? `+${body}` : amount < 0n ? `−${body}` : body;
 }
 
 /** Big-numeral split for the display font: ["12,480", ".20"]. */
-export function splitAmountForDisplay(amount: bigint, decimals: number): [string, string] {
+export function splitAmountForDisplay(amount: bigint, decimals: TokenDecimals): [string, string] {
 	const negative = amount < 0n;
 	const { whole, digits } = roundToFraction(negative ? -amount : amount, decimals, 2);
 	return [`${negative ? '−' : ''}${whole.toLocaleString('en-US')}`, decimals > 0 ? `.${digits}` : ''];
@@ -79,7 +80,7 @@ export function formatUsd(value: number): string {
 	return `${sign}$${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-export function parseAmount(input: string, decimals: number): bigint {
+export function parseAmount(input: string, decimals: TokenDecimals): bigint {
 	// No comma stripping: "1,5" meant 1.5 to many users and parsed as 15.
 	const text = input.trim();
 	if (!/^\d*(\.\d*)?$/.test(text) || text === '' || text === '.') {
@@ -95,7 +96,7 @@ export function parseAmount(input: string, decimals: number): bigint {
 }
 
 /** Exact input text for a bigint amount: "730.5" (no grouping, no trailing zeros). */
-export function amountInputText(value: bigint, decimals: number): string {
+export function amountInputText(value: bigint, decimals: TokenDecimals): string {
 	const base = 10n ** BigInt(decimals);
 	const whole = value / base;
 	const fraction = (value % base).toString().padStart(decimals, '0').replace(/0+$/, '');
@@ -136,9 +137,12 @@ export function dayLabel(timestamp: number): string {
 }
 
 /** Decimal text for an input field: no grouping, trailing zeros trimmed. */
-export function plainAmount(amount: bigint, decimals: number): string {
+export function plainAmount(amount: bigint, decimals: TokenDecimals): string {
 	const unit = 10n ** BigInt(decimals);
 	const whole = amount / unit;
 	const fraction = (amount % unit).toString().padStart(decimals, '0').replace(/0+$/, '');
 	return fraction ? `${whole}.${fraction}` : whole.toString();
 }
+
+/** Orderbook prices have four fixed decimal places. */
+export const PRICE_DECIMALS = asTokenDecimals(4);

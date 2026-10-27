@@ -1,3 +1,4 @@
+import { asTokenId } from '../../account/tx/units';
 import { getDefaultRebalancePolicyForToken, hasRebalanceTokenMetadata } from '../../account/config/defaults';
 import { hasPendingSettlementTransition } from '../../account/tx/handlers/settlement/transition';
 import { deriveDelta } from '../../account/utils';
@@ -32,7 +33,8 @@ const hasRebalanceWork = (
       workspace.ops.every(op => op.type === 'c2r') &&
       Boolean(ownerIsLeft ? workspace.rightHanko : workspace.leftHanko);
   }
-  for (const [tokenId, delta] of account.state.deltas) {
+  for (const [rawTokenId, delta] of account.state.deltas) {
+    const tokenId = asTokenId(rawTokenId);
     if ((account.state.requestedRebalance.get(tokenId) ?? 0n) > 0n) continue;
     const derived = deriveDelta(delta, ownerIsLeft);
     const availableCollateral = derived.outCollateral - derived.outTotalHold;

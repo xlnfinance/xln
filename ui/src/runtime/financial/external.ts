@@ -1,3 +1,4 @@
+import { asTokenId, asTokenDecimals, type TokenId, type TokenDecimals } from '@xln/core/account/tx/units';
 /**
  * The signer's on-chain wallet and the faucets. Balances come straight from
  * the jurisdiction adapter (the same `readWalletSnapshot` the SvelteKit
@@ -23,11 +24,11 @@ import {
 } from '@xln/frontend/lib/components/Entity/external-wallet-reader';
 
 export type ExternalWalletRow = {
-  tokenId: number;
+  tokenId: TokenId;
   symbol: string;
   name: string;
   address: string;
-  decimals: number;
+  decimals: TokenDecimals;
   balance: bigint;
   /** Allowance granted to the Depository; null for the native coin. */
   allowance: bigint | null;
@@ -71,11 +72,11 @@ export async function readExternalWallet(entityId: string, signerId: string): Pr
   const rows: ExternalWalletRow[] = tokens.map((token, index) => {
     const error = tokenErrors.get(normalize(token.address));
     return {
-      tokenId: Number(token.tokenId),
+      tokenId: asTokenId(Number(token.tokenId)),
       symbol: token.symbol,
       name: token.name,
       address: normalize(token.address),
-      decimals: Number(token.decimals),
+      decimals: asTokenDecimals(Number(token.decimals)),
       balance: snapshot.tokenBalances[index] ?? 0n,
       allowance: snapshot.allowances?.[index] ?? 0n,
       ...(error ? { error } : {}),
@@ -88,10 +89,10 @@ export async function readExternalWallet(entityId: string, signerId: string): Pr
     native: snapshot.nativeBalance,
     rows,
     catalog: registry.map(token => ({
-      tokenId: Number(token.tokenId),
+      tokenId: asTokenId(Number(token.tokenId)),
       symbol: token.symbol,
       name: token.name,
-      decimals: token.decimals,
+      decimals: asTokenDecimals(token.decimals),
     })),
   };
 }
@@ -124,11 +125,11 @@ async function readRemoteExternalWallet(entityId: string, signerId: string): Pro
       entry => normalize(entry.tokenAddress) === normalize(token.address),
     )?.error;
     return {
-      tokenId: token.tokenId!,
+      tokenId: asTokenId(token.tokenId!),
       symbol: token.symbol,
       name: token.symbol,
       address: token.address,
-      decimals: token.decimals,
+      decimals: asTokenDecimals(token.decimals),
       balance: snapshot.balances[index]!,
       allowance: snapshot.allowanceValues[index]!,
       ...(error ? { error } : {}),
@@ -141,10 +142,10 @@ async function readRemoteExternalWallet(entityId: string, signerId: string): Pro
     native: snapshot.nativeBalance,
     rows,
     catalog: registry.map(token => ({
-      tokenId: Number(token.tokenId),
+      tokenId: asTokenId(Number(token.tokenId)),
       symbol: token.symbol,
       name: token.symbol,
-      decimals: token.decimals,
+      decimals: asTokenDecimals(token.decimals),
     })),
   };
 }

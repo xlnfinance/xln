@@ -1,3 +1,4 @@
+import { asTokenDecimals } from '@xln/core/account/tx/units';
 import { expect, test } from 'bun:test';
 import { buildWalletPayHref, buildXlnInvoiceDeepLink } from '@xln/frontend/lib/utils/xlnInvoice';
 import { nativePaymentRequest, nativeInvoiceJurisdictionKeys } from './payment-request';
@@ -5,7 +6,7 @@ import { nativePaymentRequest, nativeInvoiceJurisdictionKeys } from './payment-r
 const target = `0x${'ab'.repeat(32)}`;
 const context = {
   defaultToken: 1,
-  assets: [{ id: 1, decimals: 6 }, { id: 2, decimals: 18 }],
+  assets: [{ id: 1, decimals: asTokenDecimals(6) }, { id: 2, decimals: asTokenDecimals(18) }],
   jurisdictions: ['Ethereum'],
   decimalSeparator: '.',
 };

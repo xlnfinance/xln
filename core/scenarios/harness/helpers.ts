@@ -1,3 +1,4 @@
+import { asTokenId } from '../../account/tx/units';
 /**
  * Shared scenario helpers
  */
@@ -793,7 +794,7 @@ export const formatTokenMoney = (tokenId: number, amount: bigint): string => {
   return `${sign}${whole}${fraction ? `.${fraction}` : ''} ${symbol}`;
 };
 
-export const usd = (amount: number | bigint) => wholeUsdToTokenAmount(1, BigInt(amount));
+export const usd = (amount: number | bigint) => wholeUsdToTokenAmount(asTokenId(1), BigInt(amount));
 export const eth = (amount: number | bigint) => wholeTokenAmount(amount, 2);
 export const dai = (amount: number | bigint) => wholeTokenAmount(amount, 3);
 

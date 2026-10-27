@@ -1,3 +1,4 @@
+import { asTokenId } from '../../../../account/tx/units';
 import type {
   AccountFrame,
   AccountOutput,
@@ -411,7 +412,7 @@ export const buildInitialHubPolicyTargets = (
   // TOKEN_METADATA_UNAVAILABLE halting the hub after the frame committed.
   const tokenIds = new Set(committedInboundGenesis.accountTxs
     .filter(tx => tx.type === 'add_delta')
-    .map(tx => tx.data.tokenId)
+    .map(tx => asTokenId(tx.data.tokenId))
     .filter(hasRebalanceTokenMetadata));
   return [...tokenIds]
     .sort((left, right) => left - right)

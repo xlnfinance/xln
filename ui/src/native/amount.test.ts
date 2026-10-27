@@ -1,3 +1,4 @@
+import { asTokenDecimals } from '@xln/core/account/tx/units';
 import { describe, expect, test } from 'bun:test';
 import { nativeAmountText, nativeLimitAmounts } from './amount';
 
@@ -15,7 +16,7 @@ describe('native amount entry', () => {
 });
 
 const order = (side: string, amount: string, price: string, decimalSeparator = '.') =>
-  nativeLimitAmounts({ side, amount, price, decimalSeparator }, 2, 1, 18, 6);
+  nativeLimitAmounts({ side, amount, price, decimalSeparator }, 2, 1, asTokenDecimals(18), asTokenDecimals(6));
 
 test('buy and sell use exact base size and the shared price conversion', () => {
   expect(order('buy', '0.005', '2500')).toEqual({

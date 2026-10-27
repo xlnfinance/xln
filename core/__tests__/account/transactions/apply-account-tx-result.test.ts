@@ -11,7 +11,7 @@ import {
   toHashlock,
   toHtlcSecret,
   toTokenAmount,
-  toTokenId,
+  asTokenId,
 } from '../../../account/tx/units';
 import {
   toJHeight,
@@ -65,7 +65,7 @@ describe('ApplyAccountTxResult units', () => {
   test('constructors validate before minting brands', () => {
     expect(() => toHashlock('not-a-hashlock')).toThrow('ACCOUNT_TX_HASHLOCK_INVALID');
     expect(() => toHtlcSecret('0x1234')).toThrow('ACCOUNT_TX_HTLC_SECRET_INVALID');
-    expect(() => toTokenId(TOKENS.MAX_TOKEN_ID + 1)).toThrow('ACCOUNT_TX_TOKEN_ID_INVALID');
+    expect(() => asTokenId(TOKENS.MAX_TOKEN_ID + 1)).toThrow('ACCOUNT_TX_TOKEN_ID_INVALID');
     expect(() => toTokenAmount(-1n)).toThrow('ACCOUNT_TX_TOKEN_AMOUNT_INVALID');
     expect(() => toUnixMs(-1)).toThrow('PROTOCOL_UNIX_MS_INVALID');
     expect(() => toJHeight(1.5)).toThrow('PROTOCOL_J_HEIGHT_INVALID');

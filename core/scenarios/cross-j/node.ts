@@ -1,3 +1,4 @@
+import { asTokenId, type TokenId } from '../../account/tx/units';
 /**
  * Cross-j P2P node — one Runtime per process.
  *
@@ -78,9 +79,9 @@ const stacksJson = readCliOption(args, '--stacks', '');
 const orderId = readCliOption(args, '--order-id', 'cross-j-scenario-1');
 const barrierDir = readCliOption(args, '--barrier-dir', '');
 
-const USDC = 1;
-const WETH = 2;
-const usd = (tokenId: number, n: number) => wholeUsdToTokenAmount(tokenId, BigInt(n));
+const USDC = asTokenId(1);
+const WETH = asTokenId(2);
+const usd = (tokenId: TokenId, n: number) => wholeUsdToTokenAmount(tokenId, BigInt(n));
 
 type StackPub = {
   name: string;

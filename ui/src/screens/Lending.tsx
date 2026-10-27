@@ -37,7 +37,7 @@ export function Lending() {
 	const wallet = useWallet(entityId);
 	const hubs = useMemo(() => wallet.accounts.filter(account => account.isHub), [wallet.accounts]);
 	const [hubId, setHubId] = useState('');
-	const [tokenId, setTokenId] = useState(selectedTokenId);
+	const [tokenId, setTokenId] = useState<number>(selectedTokenId);
 	const [side, setSide] = useState<'lend' | 'borrow'>('lend');
 	const [amountText, setAmountText] = useState('');
 	const [termId, setTermId] = useState<TermId>('demand');

@@ -1,3 +1,4 @@
+import type { TokenDecimals } from '@xln/core/account/tx/units';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { explainWalletError } from '@xln/frontend/lib/utils/ui/walletError';
@@ -34,7 +35,7 @@ import {
   readAccountState,
   submitSwapPlan,
 } from '../runtime/financial/swap';
-import { amountInputText, formatAmount, formatMoney, formatLimit, parseAmount, plainAmount } from '../runtime/format';
+import { PRICE_DECIMALS, amountInputText, formatAmount, formatMoney, formatLimit, parseAmount, plainAmount } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
 import { openSwapOffers, useWallet } from '../runtime/views';
 import { counterpartyFeePolicy } from '../runtime/financial/manage';
@@ -302,7 +303,7 @@ export function Swap() {
   }, [wantText, impliedWantText, wantMeta.decimals, assetsReady]);
 
   // A typed amount the parser refuses must say why, not just disable Swap.
-  const inputError = (text: string, decimals: number): string | null => {
+  const inputError = (text: string, decimals: TokenDecimals): string | null => {
     if (!text.trim()) return null;
     try {
       parseAmount(text, decimals);
@@ -735,7 +736,7 @@ export function Swap() {
               <div className="kv">
                 <span className="k">Limit price</span>
                 <span className="v num" data-testid="swap-limit-price">
-                  {formatMoney(prepared.priceTicks, 4, 4)} {prepared.side === 1 ? wantMeta.symbol : giveMeta.symbol} per{' '}
+                  {formatMoney(prepared.priceTicks, PRICE_DECIMALS, 4)} {prepared.side === 1 ? wantMeta.symbol : giveMeta.symbol} per{' '}
                   {prepared.side === 1 ? giveMeta.symbol : wantMeta.symbol}
                 </span>
               </div>

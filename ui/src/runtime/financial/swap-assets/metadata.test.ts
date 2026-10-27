@@ -1,3 +1,4 @@
+import { asTokenId, asTokenDecimals } from '@xln/core/account/tx/units';
 import { expect, test } from 'bun:test';
 import { prepareSwapOrderForDimensions } from '@xln/core/swapbook/types';
 import type { TokenCatalogEntry } from '../../token-meta';
@@ -6,11 +7,11 @@ import { crossBookMarket } from '../cross-book';
 import { pickBookLevel } from '../orderbook-quote';
 
 const tron: TokenCatalogEntry[] = [
-  { tokenId: 2, symbol: 'WETH', name: 'Wrapped Ether', decimals: 18 },
-  { tokenId: 3, symbol: 'USDT', name: 'Tron Tether', decimals: 6 },
-  { tokenId: 4, symbol: 'TRX', name: 'Tron', decimals: 6 },
+  { tokenId: asTokenId(2), symbol: 'WETH', name: 'Wrapped Ether', decimals: asTokenDecimals(18) },
+  { tokenId: asTokenId(3), symbol: 'USDT', name: 'Tron Tether', decimals: asTokenDecimals(6) },
+  { tokenId: asTokenId(4), symbol: 'TRX', name: 'Tron', decimals: asTokenDecimals(6) },
 ];
-const destination: TokenCatalogEntry[] = [{ tokenId: 3, symbol: 'DEST', name: 'Destination asset', decimals: 8 }];
+const destination: TokenCatalogEntry[] = [{ tokenId: asTokenId(3), symbol: 'DEST', name: 'Destination asset', decimals: asTokenDecimals(8) }];
 
 test('destination token metadata never substitutes a different Depository asset with the same id', () => {
   expect(tokenCatalogMeta(tron, 4).symbol).toBe('TRX');
@@ -19,7 +20,7 @@ test('destination token metadata never substitutes a different Depository asset 
   const give = tokenCatalogMeta(tron, 2);
   const want = tokenCatalogMeta(destination, 3);
   expect(want.symbol).toBe('DEST');
-  expect(want.decimals).toBe(8);
+  expect(want.decimals).toBe(asTokenDecimals(8));
   const order = prepareSwapOrderForDimensions(2, 3, 10n ** 18n, 2500n * 10n ** 8n, {
     giveTokenDecimals: give.decimals,
     wantTokenDecimals: want.decimals,
@@ -29,8 +30,8 @@ test('destination token metadata never substitutes a different Depository asset 
 });
 
 test('same token id across chains retains distinct units in both market directions', () => {
-  const source = { jurisdiction: `stack:31338:0x${'11'.repeat(20)}`, tokenId: 3, hubId: `0x${'aa'.repeat(32)}` };
-  const target = { jurisdiction: `stack:31337:0x${'22'.repeat(20)}`, tokenId: 3, hubId: `0x${'bb'.repeat(32)}` };
+  const source = { jurisdiction: `stack:31338:0x${'11'.repeat(20)}`, tokenId: asTokenId(3), hubId: `0x${'aa'.repeat(32)}` };
+  const target = { jurisdiction: `stack:31337:0x${'22'.repeat(20)}`, tokenId: asTokenId(3), hubId: `0x${'bb'.repeat(32)}` };
   const give = tokenCatalogMeta(tron, 3);
   const want = tokenCatalogMeta(destination, 3);
   const market = crossBookMarket(source, target);

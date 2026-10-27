@@ -1,3 +1,4 @@
+import type { TokenDecimals } from '@xln/core/account/tx/units';
 import { parseXlnInvoice } from '@xln/frontend/lib/utils/xlnInvoice';
 import { parseAmount } from '../runtime/format';
 import { nativeAmountText } from './amount';
@@ -13,7 +14,7 @@ export function nativeInvoiceJurisdictionKeys(stackId: string, catalog: readonly
 
 type RequestContext = {
   defaultToken: number;
-  assets: readonly { id: number; decimals: number }[];
+  assets: readonly { id: number; decimals: TokenDecimals }[];
   jurisdictions: readonly string[];
   decimalSeparator: unknown;
 };

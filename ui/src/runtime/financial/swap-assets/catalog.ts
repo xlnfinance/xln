@@ -1,3 +1,4 @@
+import { asTokenId, asTokenDecimals } from '@xln/core/account/tx/units';
 import { useEffect, useState } from 'react';
 import { fetchExternalTokenCatalog } from '@xln/frontend/lib/components/Entity/external-wallet-reader';
 import { requireAdapter } from '../../adapter';
@@ -12,18 +13,18 @@ async function readCatalog(entityId: string, signerId: string): Promise<TokenCat
   if (requireAdapter().mode === 'remote') {
     const registry = await fetchExternalTokenCatalog(resolveApiBase(), entityId);
     return registry.map(token => ({
-      tokenId: Number(token.tokenId),
+      tokenId: asTokenId(Number(token.tokenId)),
       symbol: token.symbol,
       name: token.symbol,
-      decimals: token.decimals,
+      decimals: asTokenDecimals(token.decimals),
     }));
   }
   const registry = await (await hostedJAdapter(entityId, signerId)).getTokenRegistry();
   return registry.map(token => ({
-    tokenId: Number(token.tokenId),
+    tokenId: asTokenId(Number(token.tokenId)),
     symbol: token.symbol,
     name: token.name,
-    decimals: token.decimals,
+    decimals: asTokenDecimals(token.decimals),
   }));
 }
 

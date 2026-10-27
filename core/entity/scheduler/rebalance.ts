@@ -1,3 +1,4 @@
+import { asTokenId } from '../../account/tx/units';
 import type { AccountReplica, SettlementOp } from '../../types/account';
 import type { EntityInput } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
@@ -184,7 +185,7 @@ const validateR2CRequestPolicy = (
     });
     return null;
   }
-  if (!hasRebalanceTokenMetadata(tokenId)) {
+  if (!hasRebalanceTokenMetadata(asTokenId(tokenId))) {
     console.warn(
       `⏸️ R→C request pending (no catalog metadata, manual action required): ` +
       `token=${tokenId} cp=${counterpartyId.slice(-4)}`,
@@ -199,7 +200,7 @@ const validateR2CRequestPolicy = (
     return null;
   }
   const minFee =
-    getDefaultRebalanceBaseFeeForToken(tokenId) +
+    getDefaultRebalanceBaseFeeForToken(asTokenId(tokenId)) +
     (requestedAmount * run.liquidityFeeBps) / 10_000n;
   if (feeState.feePaidUpfront >= minFee) {
     return {
@@ -449,7 +450,8 @@ const collectC2RAccountWork = (
 
   const ops: SettlementOp[] = [];
   let totalAmount = 0n;
-  for (const [tokenId, delta] of account.state.deltas) {
+  for (const [rawTokenId, delta] of account.state.deltas) {
+    const tokenId = asTokenId(rawTokenId);
     if ((account.state.requestedRebalance.get(tokenId) ?? 0n) > 0n) continue;
     const derived = deriveDelta(delta, hubIsLeft);
     if (derived.outTotalHold === undefined) {

@@ -1,3 +1,4 @@
+import type { TokenDecimals } from '@xln/core/account/tx/units';
 import { formatUsd, splitAmountForDisplay } from '../runtime/format';
 
 /** Display numeral with dimmed decimals. Tabular digits so columns line up. */
@@ -9,7 +10,7 @@ export function Amount({
 	testId,
 }: {
 	value: bigint;
-	decimals: number;
+	decimals: TokenDecimals;
 	symbol?: string;
 	size?: number;
 	testId?: string;

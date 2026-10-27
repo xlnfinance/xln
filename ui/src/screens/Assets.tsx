@@ -1,3 +1,4 @@
+import { asTokenDecimals } from '@xln/core/account/tx/units';
 import { useEffect, useState } from 'react';
 import { MANAGE, PageHead } from '../components/PageHead';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -134,7 +135,7 @@ export function Assets() {
                   <div className="kv">
                     <span className="k">Gas</span>
                     <span className="v num">
-                      {external.native === null ? '—' : `${formatMoney(external.native, 18, 4)} ETH`}
+                      {external.native === null ? '—' : `${formatMoney(external.native, asTokenDecimals(18), 4)} ETH`}
                     </span>
                   </div>
                   {external.rows.map((row, index) => (

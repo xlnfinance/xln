@@ -30,6 +30,7 @@ const BRAND_NAMES = new Set([
   'SignerId',
   'StateHash',
   'TokenAmount',
+  'TokenDecimals',
   'TokenId',
   'UnixMs',
   'UnixS',

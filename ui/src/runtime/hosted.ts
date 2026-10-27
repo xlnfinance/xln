@@ -1,3 +1,4 @@
+import { asTokenId } from '@xln/core/account/tx/units';
 import { assertDemoNetwork } from '@xln/frontend/lib/config/demo-accounts';
 import {
   assertSessionOwned,
@@ -50,7 +51,7 @@ export type Stack = {
   hubs: StackHub[];
 };
 
-const USDC = 1;
+const USDC = asTokenId(1);
 
 async function relayConnected(
   xln: Awaited<ReturnType<typeof getXLN>>,

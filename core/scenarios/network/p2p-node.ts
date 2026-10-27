@@ -1,3 +1,4 @@
+import { asTokenId } from '../../account/tx/units';
 /**
  * P2P node runner for multi-runtime relay tests.
  * Usage (internal): bun run core/scenarios/network/p2p-node.ts --role hub|alice|bob ...
@@ -52,7 +53,7 @@ const skipWalletFunding = hasFlag('--skip-wallet-funding');
 const waitForBobReady = hasFlag('--wait-for-bob-ready');
 const stayAliveAfterPayment = hasFlag('--stay-alive-after-payment');
 
-let USDC = 1;
+let USDC = asTokenId(1);
 const usd = (amount: number | bigint) => wholeUsdToTokenAmount(USDC, BigInt(amount));
 const FAUCET_DEPOSIT_AMOUNT = usd(1_000);
 const FAUCET_WALLET_AMOUNT = usd(5_000);
@@ -788,7 +789,7 @@ const run = async () => {
       throw new Error('TOKEN_CATALOG_EMPTY');
     }
     if (typeof usdcToken.tokenId === 'number') {
-      USDC = usdcToken.tokenId;
+      USDC = asTokenId(usdcToken.tokenId);
     }
     await fundWalletAndDeposit(env, jadapter, usdcToken, entityId, signerId, FAUCET_DEPOSIT_AMOUNT);
     // RPC watcher default poll is 15s; force immediate fetch so reserve sync is not timing-sensitive.

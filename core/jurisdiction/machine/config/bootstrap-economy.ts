@@ -1,3 +1,4 @@
+import { asTokenId } from '../../../account/tx/units';
 import { CATALOG_TOKENS } from './default-tokens';
 import { wholeUsdToTokenAmount } from './usd-reference-rate';
 
@@ -14,7 +15,7 @@ export const getBootstrapTokenAmount = (tokenId: number, decimals: number): bigi
   if (token && decimals !== token.decimals) {
     throw new Error(`BOOTSTRAP_TOKEN_DECIMALS_MISMATCH:${tokenId}:${decimals}`);
   }
-  return wholeUsdToTokenAmount(tokenId, BOOTSTRAP_USD_NOTIONAL);
+  return wholeUsdToTokenAmount(asTokenId(tokenId), BOOTSTRAP_USD_NOTIONAL);
 };
 
 export const getBootstrapTokenAmountBySymbol = (symbol: string, decimals: number): bigint => {

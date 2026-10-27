@@ -1,3 +1,4 @@
+import { asTokenId } from '../../../account/tx/units';
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -24,8 +25,8 @@ const stateWithJurisdiction = (jurisdiction: JurisdictionConfig): EntityState =>
 test('rebalance defaults fall back to token defaults when the jurisdiction declares no policy', () => {
   const state = stateWithJurisdiction(baseJurisdiction);
   for (const tokenId of DEFAULT_ACCOUNT_TOKEN_IDS) {
-    expect(resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, tokenId))
-      .toEqual(getDefaultRebalancePolicyForToken(tokenId));
+    expect(resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, asTokenId(tokenId)))
+      .toEqual(getDefaultRebalancePolicyForToken(asTokenId(tokenId)));
   }
 });
 
@@ -36,12 +37,12 @@ test('rebalance defaults scale jurisdiction USD policy into each token precision
   } as JurisdictionConfig);
 
   // Same USD policy through the committed reference rate: USDC $1 (6 decimals), WETH $2,500 (18).
-  expect(resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, 1)).toEqual({
+  expect(resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, asTokenId(1))).toEqual({
     r2cRequestSoftLimit: 500_000_000n,
     hardLimit: 10_000_000_000n,
     maxAcceptableFee: 15_000_000n,
   });
-  expect(resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, 2)).toEqual({
+  expect(resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, asTokenId(2))).toEqual({
     r2cRequestSoftLimit: 200_000_000_000_000_000n, // 0.2 WETH = $500
     hardLimit: 4_000_000_000_000_000_000n, // 4 WETH = $10,000
     maxAcceptableFee: 6_000_000_000_000_000n, // 0.006 WETH = $15
@@ -53,14 +54,14 @@ test('rebalance defaults reject an inverted or negative jurisdiction policy', ()
     ...baseJurisdiction,
     rebalancePolicyUsd: { r2cRequestSoftLimit: 10_000, hardLimit: 500, maxFee: 15 },
   } as JurisdictionConfig);
-  expect(() => resolveJurisdictionRebalanceDefaults(inverted.config.jurisdiction, 1))
+  expect(() => resolveJurisdictionRebalanceDefaults(inverted.config.jurisdiction, asTokenId(1)))
     .toThrow('REBALANCE_POLICY_USD_INVALID:token=1');
 
   const negative = stateWithJurisdiction({
     ...baseJurisdiction,
     rebalancePolicyUsd: { r2cRequestSoftLimit: -1, hardLimit: 500, maxFee: 15 },
   } as JurisdictionConfig);
-  expect(() => resolveJurisdictionRebalanceDefaults(negative.config.jurisdiction, 1))
+  expect(() => resolveJurisdictionRebalanceDefaults(negative.config.jurisdiction, asTokenId(1)))
     .toThrow('REBALANCE_POLICY_USD_INVALID:token=1');
 });
 

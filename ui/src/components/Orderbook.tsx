@@ -1,4 +1,4 @@
-import { formatMoney } from '../runtime/format';
+import { PRICE_DECIMALS, formatMoney } from '../runtime/format';
 import { getTokenMeta, type TokenMeta } from '../runtime/token-meta';
 import { ORDERBOOK_PRICE_SCALE } from '@xln/core/swapbook/types';
 import type { BookLevel, BookView } from '../runtime/financial/orderbook';
@@ -7,7 +7,7 @@ export type BookSide = 'bid' | 'ask';
 
 /** Price in quote units per one base unit: ticks carry four decimals. */
 export function formatPrice(priceTicks: bigint): string {
-  return formatMoney(priceTicks, 4, 4);
+  return formatMoney(priceTicks, PRICE_DECIMALS, 4);
 }
 
 function Row({

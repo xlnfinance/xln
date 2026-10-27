@@ -1,3 +1,4 @@
+import type { TokenId } from '@xln/core/account/tx/units';
 import { wholeUsdToTokenAmount } from '@xln/core/jurisdiction/machine/config/usd-reference-rate';
 
 export type HubJoinPreference = 'manual' | '1' | '2' | '3';
@@ -35,7 +36,7 @@ const toUsdInt = (value: unknown, defaultValue: number): number => {
   return Math.max(0, Math.floor(raw));
 };
 
-const usdToRawTokenAmount = (value: number, tokenId: number): bigint =>
+const usdToRawTokenAmount = (value: number, tokenId: TokenId): bigint =>
   wholeUsdToTokenAmount(tokenId, BigInt(toUsdInt(value, 0)));
 
 const normalizeHubJoinPreference = (value: unknown): HubJoinPreference => {
@@ -181,7 +182,7 @@ export const writeHubJoinPreference = (value: HubJoinPreference): HubJoinPrefere
   return normalized;
 };
 
-export const getOpenAccountRebalancePolicyData = (tokenId: number): {
+export const getOpenAccountRebalancePolicyData = (tokenId: TokenId): {
   r2cRequestSoftLimit: bigint;
   hardLimit: bigint;
   maxAcceptableFee: bigint;
@@ -196,4 +197,4 @@ export const getOpenAccountRebalancePolicyData = (tokenId: number): {
 };
 import { isUnknownRecord, parseJsonUnknown, readJsonUnknown } from '../boundary/index.ts';
 
-export const getHubOpeningCredit = (tokenId: number): bigint => usdToRawTokenAmount(10_000, tokenId);
+export const getHubOpeningCredit = (tokenId: TokenId): bigint => usdToRawTokenAmount(10_000, tokenId);

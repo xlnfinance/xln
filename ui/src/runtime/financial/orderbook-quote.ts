@@ -1,3 +1,4 @@
+import type { TokenDecimals } from '@xln/core/account/tx/units';
 import { SWAP_CONSTANTS } from '@xln/core/config/constants';
 import { deriveSameOrderbookPriceBandBounds, resolveOrderbookPriceReference } from '@xln/core/swapbook/price-band';
 import { formatAmount } from '../format';
@@ -56,7 +57,7 @@ export function swapMinimumError(
   book: Pick<BookView, 'minTradeSize' | 'quoteTokenId'>,
   giveTokenId: number,
   prepared: { effectiveGive: bigint; effectiveWant: bigint },
-  quote: { decimals: number; symbol: string },
+  quote: { decimals: TokenDecimals; symbol: string },
 ): string | null {
   if (book.minTradeSize === null) return 'Waiting for the market minimum.';
   const quoteAmount = giveTokenId === book.quoteTokenId ? prepared.effectiveGive : prepared.effectiveWant;

@@ -1,3 +1,4 @@
+import { asTokenId, type TokenDecimals } from './tx/units';
 /**
  * Account utilities for calculating balances and derived states
  * Based on old_src/app/Channel.ts deriveDelta logic
@@ -170,7 +171,7 @@ export function deriveDelta(delta: Delta, isLeft: boolean, signedProgramMovement
  * USDC is primary token (1), ETH is secondary (2)
  */
 const TOKEN_COLORS = ['#2775ca', '#627eea', '#26a17b', '#ef0027', '#f59e0b'] as const;
-const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; decimals: number; color: string }> =
+const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; decimals: TokenDecimals; color: string }> =
   Object.fromEntries(
     CATALOG_TOKENS.map(({ symbol, name, decimals }, index) => [
       index + 1,
@@ -274,7 +275,7 @@ const SWAP_PAIR_GRID_BY_BASE_QUOTE: Record<string, SwapPairGrid> = {
 
 /** Quote per one base in ticks, floored; a pair the rates cannot express fails closed. */
 function getReferenceMidPriceTicks(baseTokenId: number, quoteTokenId: number): bigint {
-  const mid = (getTokenUsdMicros(baseTokenId) * ONE_PRICE_TICKS) / getTokenUsdMicros(quoteTokenId);
+  const mid = (getTokenUsdMicros(asTokenId(baseTokenId)) * ONE_PRICE_TICKS) / getTokenUsdMicros(asTokenId(quoteTokenId));
   if (mid <= 0n) throw new Error(`SWAP_REFERENCE_MID_UNREPRESENTABLE:${baseTokenId}/${quoteTokenId}`);
   return mid;
 }

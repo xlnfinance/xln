@@ -1,3 +1,4 @@
+import { asTokenId } from '../../account/tx/units';
 /**
  * Grid Scalability Scenario
  *
@@ -44,7 +45,7 @@ function pushSnapshot(_env: RuntimeReplica, tag: string, description: string, me
 const GRID_DIMS = { x: 2, y: 2, z: 2 };
 const GRID_SPACING = 60; // px between nodes
 const J_MARGIN = 150; // Grid margin around J-Machine
-const USDC_TOKEN_ID = 1;
+const USDC_TOKEN_ID = asTokenId(1);
 type GridReserveTransferTx = {
   type: 'r2r';
   from: string;

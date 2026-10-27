@@ -1,3 +1,4 @@
+import { asTokenDecimals } from '@xln/core/account/tx/units';
 import { expect, test } from 'bun:test';
 import { quoteAtBestLevel, swapMinimumError, swapPriceBandError } from './orderbook-quote';
 import type { BookView } from './orderbook';
@@ -10,7 +11,7 @@ const level = {
   ownerIds: [],
   own: false,
 };
-const usdc = { decimals: 6, symbol: 'USDC' };
+const usdc = { decimals: asTokenDecimals(6), symbol: 'USDC' };
 const book: BookView = {
   baseTokenId: 2,
   quoteTokenId: 1,
@@ -52,7 +53,7 @@ test('minimum checks the rounded quote amount on either side and fails closed wi
   expect(swapMinimumError({ ...book, minTradeSize: null }, 1, roundedBuy, usdc)).toBe('Waiting for the market minimum.');
   expect(swapMinimumError({ ...book, minTradeSize: 0n }, 1, roundedBuy, usdc)).toBeNull();
   expect(
-    swapMinimumError({ ...book, minTradeSize: 1n }, 1, { effectiveGive: 0n, effectiveWant: 0n }, { decimals: 18, symbol: 'ETH' }),
+    swapMinimumError({ ...book, minTradeSize: 1n }, 1, { effectiveGive: 0n, effectiveWant: 0n }, { decimals: asTokenDecimals(18), symbol: 'ETH' }),
   ).toBe('Minimum swap is 0.000000000000000001 ETH after lot rounding.');
 });
 

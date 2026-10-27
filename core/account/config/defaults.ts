@@ -1,3 +1,4 @@
+import { asTokenId, type TokenId } from '../tx/units';
 import type { JurisdictionConfig } from '../../protocol/config/jurisdiction-config';
 import type { RebalancePolicy } from '../../types/finance/rebalance';
 import {
@@ -6,7 +7,7 @@ import {
   wholeUsdToTokenAmount,
 } from '../../jurisdiction/machine/config/usd-reference-rate';
 
-export const DEFAULT_ACCOUNT_TOKEN_IDS = [1, 3, 2] as const; // USDC, USDT, WETH
+export const DEFAULT_ACCOUNT_TOKEN_IDS = [asTokenId(1), asTokenId(3), asTokenId(2)] as const; // USDC, USDT, WETH
 
 type TokenlessHubRawOverrides = {
   c2rWithdrawSoftLimit?: bigint;
@@ -33,7 +34,7 @@ export const assertNoTokenlessHubRawOverrides = (config: TokenlessHubRawOverride
  * deltas may hold any u16 token id (genesis add_delta, on-chain tokens beyond
  * the catalog), so every hub rebalance path checks this before pricing one.
  */
-export const hasRebalanceTokenMetadata = (tokenId: number): boolean => hasTokenUsdRate(tokenId);
+export const hasRebalanceTokenMetadata = (tokenId: TokenId): boolean => hasTokenUsdRate(tokenId);
 
 // Protocol USD amounts; each converts to raw token units through the one
 // committed catalog rate (usd-reference-rate.ts). Rust twins:
@@ -43,7 +44,7 @@ const REBALANCE_BASE_FEE_USD_MICROS = 100_000n; // $0.10
 const CREDIT_REQUEST_CAP_USD = 1_000n;
 
 const policyFromWholeUsd = (
-  tokenId: number,
+  tokenId: TokenId,
   usd: { r2cRequestSoftLimit: bigint; hardLimit: bigint; maxFee: bigint },
 ): RebalancePolicy => {
   const r2cRequestSoftLimit = wholeUsdToTokenAmount(tokenId, usd.r2cRequestSoftLimit);
@@ -55,10 +56,10 @@ const policyFromWholeUsd = (
   return { r2cRequestSoftLimit, hardLimit, maxAcceptableFee };
 };
 
-export const getDefaultRebalancePolicyForToken = (tokenId: number): RebalancePolicy =>
+export const getDefaultRebalancePolicyForToken = (tokenId: TokenId): RebalancePolicy =>
   policyFromWholeUsd(tokenId, DEFAULT_REBALANCE_POLICY_USD);
 
-export const getDefaultRebalanceBaseFeeForToken = (tokenId: number): bigint =>
+export const getDefaultRebalanceBaseFeeForToken = (tokenId: TokenId): bigint =>
   usdMicrosToTokenAmount(tokenId, REBALANCE_BASE_FEE_USD_MICROS);
 
 /**
@@ -67,10 +68,10 @@ export const getDefaultRebalanceBaseFeeForToken = (tokenId: number): bigint =>
  * protocol constant shared with Rust (`entity-kernel/src/account/credit_request.rs`).
  * `undefined` for a token without a catalog rate: no automatic grant.
  */
-export const getCreditRequestCapForToken = (tokenId: number): bigint | undefined =>
+export const getCreditRequestCapForToken = (tokenId: TokenId): bigint | undefined =>
   hasTokenUsdRate(tokenId) ? wholeUsdToTokenAmount(tokenId, CREDIT_REQUEST_CAP_USD) : undefined;
 
-const wholeUsd = (tokenId: number, value: number): bigint => {
+const wholeUsd = (tokenId: TokenId, value: number): bigint => {
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(`REBALANCE_POLICY_USD_INVALID:token=${tokenId}:value=${String(value)}`);
   }
@@ -83,7 +84,7 @@ const wholeUsd = (tokenId: number, value: number): bigint => {
  */
 export const resolveJurisdictionRebalanceDefaults = (
   jurisdiction: JurisdictionConfig | undefined,
-  tokenId: number,
+  tokenId: TokenId,
 ): RebalancePolicy => {
   const raw = jurisdiction?.rebalancePolicyUsd;
   if (!raw) return getDefaultRebalancePolicyForToken(tokenId);

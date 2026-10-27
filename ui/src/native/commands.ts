@@ -3,7 +3,7 @@ import { nativeAmountText, nativeLimitAmounts } from './amount';
 import { nativePaymentRequest, nativeInvoiceJurisdictionKeys } from './payment-request';
 import { loadStackJurisdictions } from '../runtime/hosted';
 import type { WalletView } from '../runtime/views';
-import { formatMoney, parseAmount } from '../runtime/format';
+import { PRICE_DECIMALS, formatMoney, parseAmount } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
 import {
   eligibleRoutes,
@@ -170,7 +170,7 @@ async function swap(command: Record<string, unknown>, wallet: WalletView, book: 
   const net = xln.deriveSwapNetAuthorization(prepared.effectiveWant, hubTakerFeeBps(hub.counterpartyId));
   const display = {
     title: 'Review swap',
-    price: `${formatMoney(prepared.priceTicks, 4, 4)} ${getTokenMeta(book.quoteTokenId).symbol}`,
+    price: `${formatMoney(prepared.priceTicks, PRICE_DECIMALS, 4)} ${getTokenMeta(book.quoteTokenId).symbol}`,
     give: money(prepared.effectiveGive, giveToken),
     receive: money(net.minNetReceive, wantToken),
     fee: money(net.maxFee, wantToken),

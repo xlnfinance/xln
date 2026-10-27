@@ -1,3 +1,4 @@
+import { asTokenDecimals } from '@xln/core/account/tx/units';
 import { Formation } from '../components/Formation';
 import { MANAGE, PageHead } from '../components/PageHead';
 import { useCallback, useEffect, useState } from 'react';
@@ -19,7 +20,7 @@ import {
 } from '../runtime/financial/ownership';
 import { takeoverActivationReady } from '../runtime/financial/ownership-activation';
 
-const SHARE_DECIMALS = 0;
+const SHARE_DECIMALS = asTokenDecimals(0);
 const formatUnix = (seconds: bigint): string => seconds > 0n ? new Date(Number(seconds) * 1000).toLocaleString() : '—';
 
 /**

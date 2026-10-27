@@ -15,7 +15,7 @@ export async function receiveTestMoney(wallet: WalletView, onStage: (stage: stri
   const xln = peekXLN();
   if (!xln) throw new Error('Wallet runtime is not ready');
   const entityId = wallet.entityId;
-  if (!knownTokenIds().includes(1)) throw new Error('The test faucet asset is not registered on this network.');
+  if (!knownTokenIds().some(tokenId => tokenId === 1)) throw new Error('The test faucet asset is not registered on this network.');
   const token = getTokenMeta(1);
   const amount = parseAmount('100', token.decimals);
   const input = {
