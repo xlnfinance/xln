@@ -36,6 +36,7 @@ import {
 } from '../state/persistent-account-map';
 import { entityCollectionCommitment } from '../state/persistent-collection-map';
 import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
+import { canonicalAccountDisputeFloorSeconds } from '../../account/config/dispute-config';
 import { RecencyMemo } from '../../support/collections/recency-memo';
 
 const entityRootLog = createStructuredLogger('entity.state-root');
@@ -379,6 +380,7 @@ const JURISDICTION_CONFIG_KEYS = new Set([
   'registrationBlock',
   'entityProviderDeploymentBlock',
   'blockTimeMs',
+  'accountDisputeFloorSeconds',
   'rebalancePolicyUsd',
 ]);
 const REBALANCE_POLICY_KEYS = new Set(['r2cRequestSoftLimit', 'hardLimit', 'maxFee']);
@@ -430,6 +432,13 @@ const projectConsensusConfigCommitment = (config: ConsensusConfig): Record<strin
               ? { entityProviderDeploymentBlock: jurisdiction.entityProviderDeploymentBlock }
               : {}),
             ...(jurisdiction.blockTimeMs !== undefined ? { blockTimeMs: jurisdiction.blockTimeMs } : {}),
+            ...(jurisdiction.accountDisputeFloorSeconds !== undefined
+              ? {
+                  accountDisputeFloorSeconds: canonicalAccountDisputeFloorSeconds(
+                    jurisdiction.accountDisputeFloorSeconds,
+                  ),
+                }
+              : {}),
             ...(jurisdiction.rebalancePolicyUsd
               ? {
                   rebalancePolicyUsd: structuredClone(jurisdiction.rebalancePolicyUsd),

@@ -40,6 +40,8 @@ test('verified financial WAL replay leaves no historic storage marks in the next
   const jurisdiction = {
     name: 'recovery-overlay-marks', address: 'browservm://recovery-overlay-marks', chainId: 31337,
     depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+    // Explicit test floor: fixtures sign short dispute windows.
+    accountDisputeFloorSeconds: 10,
     entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
   };
   env.activeJurisdiction = jurisdiction.name;

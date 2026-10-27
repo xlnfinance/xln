@@ -129,6 +129,7 @@ fn inbound_genesis_policy_is_typed_exact_and_not_peer_derived() {
         tuple(Vec::new()),
         AbiValue::Bytes(vec![0x92; 20]),
         AbiValue::Bool(false),
+        AbiValue::Integer(3_600),
     ]);
     let value = replace_at(&ack_frame_row(), &[3], policy);
     let row = decode_input_row(&value).expect("decode typed genesis policy");
@@ -142,11 +143,14 @@ fn inbound_genesis_policy_is_typed_exact_and_not_peer_derived() {
     assert!(genesis.shadow_policy_rows.is_empty());
     assert_eq!(genesis.delta_transformer, [0x92; 20]);
     assert!(!genesis.public_pinned);
+    assert_eq!(genesis.min_own_response_seconds, 3_600);
 
     for mutation in [
         width_at(&value, &[3, 1], 31),
         width_at(&value, &[3, 3], 21),
         replace_at(&value, &[3, 4], AbiValue::Integer(0)),
+        replace_at(&value, &[3, 5], AbiValue::Integer(0)),
+        replace_at(&value, &[3, 5], AbiValue::Integer(i128::from(u32::MAX) + 1)),
     ] {
         assert!(decode_input_row(&mutation).is_err());
     }

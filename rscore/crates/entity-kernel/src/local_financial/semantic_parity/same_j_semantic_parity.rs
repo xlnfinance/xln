@@ -259,6 +259,7 @@ fn open_policy() -> EntityAccountGenesisPolicy {
         shadow_policy_rows: rows,
         delta_transformer: [0x55; 20],
         public_pinned: true,
+        min_own_response_seconds: 10,
     }
 }
 

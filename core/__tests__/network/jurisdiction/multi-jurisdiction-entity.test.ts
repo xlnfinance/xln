@@ -67,6 +67,8 @@ const makeJurisdiction = (name: string, chainId: number, depByte: string, epByte
   chainId,
   depositoryAddress: addr(depByte),
   entityProviderAddress: addr(epByte),
+  // Explicit test floor: fixtures sign short dispute windows.
+  accountDisputeFloorSeconds: 10,
 });
 
 const installJurisdiction = (env: RuntimeReplica, jurisdiction: JurisdictionConfig, adapter?: JAdapter): void => {
@@ -367,6 +369,58 @@ describe('multi-jurisdiction entity binding', () => {
     expect(accountB?.currentHeight).toBe(1);
     expect(accountA?.pendingFrame).toBeUndefined();
     expect(accountB?.pendingFrame).toBeUndefined();
+  });
+
+  test('a below-floor inbound genesis is evicted while an honest open in the same input commits', async () => {
+    const env = makeEnv('multi-jurisdiction-open-dispute-floor');
+    env.scenarioMode = true;
+    // The receiver's committed floor is 10 s (explicit test floor).
+    const j1 = makeJurisdiction('J1', 31337, '11', '12');
+    installJurisdiction(env, j1);
+    env.activeJurisdiction = 'J1';
+
+    const seed = `multi-jurisdiction-open-dispute-floor-${Date.now()}`;
+    const ids = ['1', '2', '3'].map(slot => {
+      const signerId = deriveSignerAddressSync(seed, slot);
+      registerSignerKey(env, signerId, deriveSignerKeySync(seed, slot));
+      return { signerId, entityId: generateLazyEntityId([signerId], 1n).toLowerCase() };
+    });
+    const [honest, attacker, receiver] = ids as [typeof ids[0], typeof ids[0], typeof ids[0]];
+    for (const party of ids) await importEntity(env, party.entityId, party.signerId, j1);
+
+    // The attacker leaves the receiver a 1-second window: no block to counter in.
+    const receiverIsLeft = receiver.entityId < attacker.entityId;
+    const attackerClock = receiverIsLeft
+      ? { leftResponseSeconds: 1, rightResponseSeconds: 86_400 }
+      : { leftResponseSeconds: 86_400, rightResponseSeconds: 1 };
+    const open = (from: typeof honest, disputeConfig: { leftResponseSeconds: number; rightResponseSeconds: number }) => ({
+      entityId: from.entityId,
+      signerId: from.signerId,
+      entityTxs: [{
+        type: 'openAccount' as const,
+        data: { targetEntityId: receiver.entityId, disputeConfig, tokenId: 1, creditAmount: 1_000n },
+      }],
+    });
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [
+        open(attacker, attackerClock),
+        open(honest, { leftResponseSeconds: 10, rightResponseSeconds: 10 }),
+      ],
+    });
+
+    for (let i = 0; i < 8; i += 1) {
+      await processRuntime(env);
+      const committed = findState(env, receiver.entityId)?.accounts.get(honest.entityId);
+      if (Number(committed?.currentHeight ?? 0) > 0) break;
+    }
+    await processRuntime(env);
+
+    const receiverState = findState(env, receiver.entityId);
+    expect(receiverState?.accounts.get(honest.entityId)?.currentHeight).toBe(1);
+    expect(findState(env, honest.entityId)?.accounts.get(receiver.entityId)?.currentHeight).toBe(1);
+    expect(receiverState?.accounts.get(attacker.entityId)).toBeUndefined();
+    expect(findState(env, attacker.entityId)?.accounts.get(receiver.entityId)?.currentHeight).toBe(0);
   });
 
   test('configured Hub publishes fee policy only after inbound Account genesis commits', async () => {

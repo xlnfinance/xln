@@ -4023,6 +4023,7 @@ fn apply_entity_group(
                 .jurisdiction
                 .as_ref(),
             j_replicas,
+            slot.state.entity.profile.is_hub,
         )?;
         apply_profile.account_inputs = rows.len();
         let profiled_account_inputs = profile_account_input_outcomes_enabled().then(|| {
@@ -4063,6 +4064,7 @@ fn apply_entity_group(
                             )
                         })?,
                     j_replicas,
+                    slot.state.entity.profile.is_hub,
                 )
             })
             .transpose()?;

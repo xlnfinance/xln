@@ -13,13 +13,19 @@ import {
 const validateJurisdictionConfig = (value: unknown, code: string): void => {
   const jurisdiction = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(jurisdiction, ['address', 'name', 'entityProviderAddress', 'depositoryAddress'], [
-    'chainId', 'blockTimeMs', 'registrationBlock', 'entityProviderDeploymentBlock', 'rebalancePolicyUsd',
+    'chainId', 'blockTimeMs', 'registrationBlock', 'entityProviderDeploymentBlock',
+    'accountDisputeFloorSeconds', 'rebalancePolicyUsd',
   ], `${code}_FIELDS`);
   for (const field of ['address', 'name', 'entityProviderAddress', 'depositoryAddress']) {
     requireString(jurisdiction[field], `${code}_${field.toUpperCase()}`);
   }
-  for (const field of ['chainId', 'blockTimeMs', 'registrationBlock', 'entityProviderDeploymentBlock']) {
+  for (const field of [
+    'chainId', 'blockTimeMs', 'registrationBlock', 'entityProviderDeploymentBlock', 'accountDisputeFloorSeconds',
+  ]) {
     if (jurisdiction[field] !== undefined) requireBoundaryInteger(jurisdiction[field], `${code}_${field.toUpperCase()}`);
+  }
+  if (jurisdiction['accountDisputeFloorSeconds'] !== undefined) {
+    requireBoundaryInteger(jurisdiction['accountDisputeFloorSeconds'], `${code}_ACCOUNTDISPUTEFLOORSECONDS`, 1);
   }
   if (jurisdiction['rebalancePolicyUsd'] !== undefined) {
     const policy = requireBoundaryRecord(jurisdiction['rebalancePolicyUsd'], `${code}_REBALANCE`);

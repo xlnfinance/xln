@@ -268,6 +268,7 @@ mod tests {
             shadow_policy_rows: rows,
             delta_transformer: [0x55; 20],
             public_pinned: false,
+            min_own_response_seconds: 10,
         };
         let mut state = EntityStateSlice::empty(owner.to_string(), 100);
         let mut creates = Vec::new();

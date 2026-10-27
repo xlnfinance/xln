@@ -1137,6 +1137,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
             threshold: 1n,
             validators: [hub2Signer],
             shares: { [hub2Signer]: 1n },
+            jurisdiction,
           },
         },
       })],

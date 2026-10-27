@@ -154,6 +154,8 @@ const makeJurisdiction = (): JurisdictionConfig => ({
   blockTimeMs: 1_000,
   depositoryAddress: addr('de'),
   entityProviderAddress: addr('ef'),
+  // Explicit bench floor: bench Accounts sign 10 s test clocks.
+  accountDisputeFloorSeconds: 10,
 });
 
 const makeConfig = (signerId: string, jurisdiction: JurisdictionConfig): ConsensusConfig => ({

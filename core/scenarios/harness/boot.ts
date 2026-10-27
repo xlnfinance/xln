@@ -689,8 +689,14 @@ export function createJurisdictionConfig(
     entityProviderAddress,
     depositoryAddress,
     blockTimeMs,
+    // Explicit dev floor: scenarios sign short test clocks and do not always
+    // commit hub role (setHubConfig) before peers open Accounts to it.
+    accountDisputeFloorSeconds: SCENARIO_ACCOUNT_DISPUTE_FLOOR_SECONDS,
   };
 }
+
+/** Lowest receiver-side Account response window scenario Entities accept. */
+export const SCENARIO_ACCOUNT_DISPUTE_FLOOR_SECONDS = 10;
 
 // ============================================================================
 // GRID HELPERS (used by grid.ts)

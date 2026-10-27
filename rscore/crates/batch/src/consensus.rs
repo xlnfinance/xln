@@ -1548,17 +1548,27 @@ pub(crate) fn inbound_genesis_account(
     };
     // The peer chooses the bilateral clock but we sign every proof carrying it.
     // Our own side is our counter-dispute share of T = S + left + right and our
-    // Pull reveal window; a peer-chosen zero lets it finalize a stale proof in
-    // the start block. Mirrors TS resolveInboundDisputeConfig.
+    // Pull reveal window; a short one lets the peer finalize a stale proof
+    // before we can counter. Reject (never rewrite) an own window below the
+    // owner's trusted floor. Mirrors TS resolveInboundDisputeConfig.
     let own_seconds = if owner_entity_id < envelope.from_entity_id {
         envelope.dispute_config.left_response_seconds()
     } else {
         envelope.dispute_config.right_response_seconds()
     };
-    if own_seconds == 0 {
+    if policy.min_own_response_seconds == 0 {
         return Err(BatchError::InboundGenesis {
             account_id,
-            detail: "DISPUTE_CONFIG_OWN_WINDOW_ZERO".to_string(),
+            detail: "DISPUTE_FLOOR_INVALID".to_string(),
+        });
+    }
+    if own_seconds < policy.min_own_response_seconds {
+        return Err(BatchError::InboundGenesis {
+            account_id,
+            detail: format!(
+                "DISPUTE_CONFIG_OWN_WINDOW_BELOW_FLOOR:{own_seconds}:{}",
+                policy.min_own_response_seconds
+            ),
         });
     }
     let frame_height = match &input.kind {
@@ -1888,8 +1898,9 @@ mod inbound_genesis_dispute_config_tests {
         WatchSeed,
     };
 
-    const OWNER: [u8; 32] = [0x11; 32]; // left
-    const PEER: [u8; 32] = [0x22; 32]; // right
+    const LOW: [u8; 32] = [0x11; 32];
+    const HIGH: [u8; 32] = [0x22; 32];
+    const HUB_FLOOR: u32 = 3_600;
 
     fn domain() -> AccountDomain {
         AccountDomain::new(
@@ -1899,11 +1910,23 @@ mod inbound_genesis_dispute_config_tests {
         .expect("domain")
     }
 
-    fn detail(left: u64, right: u64) -> String {
+    /// `own`/`peer` are the receiver's and the proposer's windows; the owner
+    /// is left when `owner_is_left`, so both orientations map them correctly.
+    fn detail(owner_is_left: bool, own: u64, peer: u64, floor: u32) -> String {
+        let (owner, from) = if owner_is_left {
+            (LOW, HIGH)
+        } else {
+            (HIGH, LOW)
+        };
+        let (left, right) = if owner_is_left {
+            (own, peer)
+        } else {
+            (peer, own)
+        };
         let input = AccountInput {
             envelope: AccountInputEnvelope {
-                from_entity_id: PEER,
-                to_entity_id: OWNER,
+                from_entity_id: from,
+                to_entity_id: owner,
                 domain: domain(),
                 dispute_config: AccountDisputeConfig::new(left, right).expect("config"),
                 watch_seed: Some(
@@ -1923,23 +1946,39 @@ mod inbound_genesis_dispute_config_tests {
             shadow_policy_rows: Vec::new(),
             delta_transformer: [0; 20],
             public_pinned: false,
+            min_own_response_seconds: floor,
         };
-        match inbound_genesis_account(AccountId::from_bytes(PEER), OWNER, &input, &policy) {
+        match inbound_genesis_account(AccountId::from_bytes(from), owner, &input, &policy) {
             Err(BatchError::InboundGenesis { detail, .. }) => detail,
             other => panic!("expected InboundGenesis error, got {:?}", other.map(|_| ())),
         }
     }
 
     #[test]
-    fn peer_chosen_zero_window_for_receiver_side_is_rejected() {
-        assert_eq!(detail(0, 0), "DISPUTE_CONFIG_OWN_WINDOW_ZERO");
-        assert_eq!(detail(0, 86_400), "DISPUTE_CONFIG_OWN_WINDOW_ZERO");
+    fn own_window_below_the_trusted_floor_is_rejected_in_both_orientations() {
+        for owner_is_left in [true, false] {
+            for own in [0, 1, u64::from(HUB_FLOOR) - 1] {
+                assert_eq!(
+                    detail(owner_is_left, own, 86_400, HUB_FLOOR),
+                    format!("DISPUTE_CONFIG_OWN_WINDOW_BELOW_FLOOR:{own}:{HUB_FLOOR}"),
+                );
+            }
+        }
     }
 
     #[test]
-    fn non_zero_receiver_window_passes_the_clock_check() {
-        // The peer may waive its own side; the next gate (frame kind) decides.
-        assert_eq!(detail(10, 10), "FRAME_REQUIRED");
-        assert_eq!(detail(3_600, 0), "FRAME_REQUIRED");
+    fn own_window_at_the_floor_passes_even_when_the_peer_waives_its_own() {
+        // The clock check passes; the next gate (frame kind) decides.
+        for owner_is_left in [true, false] {
+            assert_eq!(
+                detail(owner_is_left, u64::from(HUB_FLOOR), 0, HUB_FLOOR),
+                "FRAME_REQUIRED"
+            );
+        }
+    }
+
+    #[test]
+    fn a_zero_floor_is_never_trusted() {
+        assert_eq!(detail(true, 10, 10, 0), "DISPUTE_FLOOR_INVALID");
     }
 }

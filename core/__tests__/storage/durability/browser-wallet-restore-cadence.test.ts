@@ -59,6 +59,8 @@ const restoreAfterPayments = async (storage: Record<string, number>, ending: End
   const jurisdiction = {
     name: 'browser-restore-cadence', address: 'browservm://browser-restore-cadence', chainId: 31337,
     depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+    // Explicit test floor: fixtures sign short dispute windows.
+    accountDisputeFloorSeconds: 10,
     entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
   };
   env.activeJurisdiction = jurisdiction.name;

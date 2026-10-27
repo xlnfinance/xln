@@ -27,7 +27,10 @@ import { createStructuredLogger, shortId } from '../../../../support/logger';
 import { addMessage } from '../../../frame-events';
 import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
 import { isLeftEntity } from '../../../id';
-import { canonicalAccountDisputeConfig } from '../../../../account/config/dispute-config';
+import {
+  accountDisputeOwnFloorSeconds,
+  canonicalAccountDisputeConfig,
+} from '../../../../account/config/dispute-config';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
 
@@ -209,10 +212,10 @@ const createInboundAccountState = (
 
 /**
  * The genesis proposer chooses the bilateral clock, but the receiver signs every
- * proof carrying it. Never adopt a peer-chosen zero window for our own side:
- * our window is both our counter-dispute share of T = S + left + right and our
- * Pull reveal window, so zero lets the peer start with a stale proof and
- * finalize in the same block. A party may still waive only its own window.
+ * proof carrying it. Our own window is our counter-dispute share of
+ * T = S + left + right and our Pull reveal window; a short one lets the peer
+ * start with a stale proof and finalize before we can counter. Reject (never
+ * rewrite) an own window below our committed floor. The peer may waive its own.
  */
 const resolveInboundDisputeConfig = (
   state: EntityState,
@@ -231,10 +234,14 @@ const resolveInboundDisputeConfig = (
   const ownSeconds = isLeftEntity(state.entityId, counterpartyId)
     ? disputeConfig.leftResponseSeconds
     : disputeConfig.rightResponseSeconds;
-  if (ownSeconds < 1) {
+  const floorSeconds = accountDisputeOwnFloorSeconds(
+    state.profile.isHub,
+    state.config.jurisdiction?.accountDisputeFloorSeconds,
+  );
+  if (ownSeconds < floorSeconds) {
     return rejectAccountInput(
       'ACCOUNT_INPUT_DISPUTE_CONFIG_INVALID',
-      `ACCOUNT_INPUT_DISPUTE_CONFIG_OWN_WINDOW_ZERO:${counterpartyId}`,
+      `ACCOUNT_INPUT_DISPUTE_CONFIG_OWN_WINDOW_BELOW_FLOOR:${counterpartyId}:${ownSeconds}:${floorSeconds}`,
     );
   }
   return disputeConfig;

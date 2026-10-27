@@ -13,6 +13,10 @@ use super::RuntimeMachineError;
 
 /// TS `DEFAULT_ACCOUNT_TOKEN_IDS` (USDC, USDT, WETH).
 const DEFAULT_POLICY_TOKENS: [u16; 3] = [1, 3, 2];
+/// Role defaults mirror TS `account/config/dispute-config.ts`.
+const HUB_RESPONSE_SECONDS: u32 = 60 * 60;
+const USER_RESPONSE_SECONDS: u32 = 24 * 60 * 60;
+const MAX_ACCOUNT_DISPUTE_SECONDS: u64 = 365 * 24 * 60 * 60;
 
 /// Attach owner-derived H=0 policy only to the first row for each Account that
 /// is absent from the committed Entity state. Peer bytes never choose any of
@@ -22,6 +26,7 @@ pub(super) fn attach_inbound_genesis_policies(
     known_accounts: &KnownAccounts,
     jurisdiction: Option<&CanonicalValue>,
     j_replicas: &Value,
+    owner_is_hub: bool,
 ) -> Result<(), RuntimeMachineError> {
     if rows.iter().any(|row| row.genesis_policy.is_some()) {
         return Err(policy_error("CALLER_POLICY_FORBIDDEN"));
@@ -37,6 +42,7 @@ pub(super) fn attach_inbound_genesis_policies(
     let policy = derive_policy(
         jurisdiction.ok_or_else(|| policy_error("JURISDICTION_REQUIRED"))?,
         j_replicas,
+        owner_is_hub,
     )?;
     first_unknown.clear();
     for row in rows {
@@ -51,6 +57,7 @@ pub(super) fn attach_inbound_genesis_policies(
 pub(super) fn derive_policy(
     jurisdiction: &CanonicalValue,
     j_replicas: &Value,
+    owner_is_hub: bool,
 ) -> Result<EntityAccountGenesisPolicy, RuntimeMachineError> {
     let fields = canonical_object(jurisdiction, "JURISDICTION_OBJECT")?;
     let chain_id = canonical_u64(required_canonical(fields, "chainId")?, "CHAIN_ID")?;
@@ -66,7 +73,23 @@ pub(super) fn derive_policy(
         .iter()
         .find_map(|(name, value)| (name == "rebalancePolicyUsd").then_some(value));
     let shadow_policy_rows = shadow_policy_rows(overrides)?;
+    let min_own_response_seconds = match fields
+        .iter()
+        .find_map(|(name, value)| (name == "accountDisputeFloorSeconds").then_some(value))
+    {
+        Some(value) => {
+            let seconds = canonical_u64(value, "ACCOUNT_DISPUTE_FLOOR_SECONDS")?;
+            if !(1..=MAX_ACCOUNT_DISPUTE_SECONDS).contains(&seconds) {
+                return Err(policy_error("ACCOUNT_DISPUTE_FLOOR_SECONDS_INVALID"));
+            }
+            u32::try_from(seconds)
+                .map_err(|_| policy_error("ACCOUNT_DISPUTE_FLOOR_SECONDS_INVALID"))?
+        }
+        None if owner_is_hub => HUB_RESPONSE_SECONDS,
+        None => USER_RESPONSE_SECONDS,
+    };
     Ok(EntityAccountGenesisPolicy {
+        min_own_response_seconds,
         shadow_policy_root: shadow_policy_root(&shadow_policy_rows)?,
         shadow_policy_rows,
         delta_transformer: resolve_delta_transformer(j_replicas, chain_id, depository_text)?,
@@ -461,7 +484,7 @@ mod tests {
                 "deltaTransformer":format!("0x{}", "d8".repeat(20))
             }
         }]]);
-        let policy = derive_policy(&jurisdiction, &j_replicas).expect("trusted policy");
+        let policy = derive_policy(&jurisdiction, &j_replicas, false).expect("trusted policy");
         assert_eq!(policy.expected_domain.chain_id(), 31_337);
         assert_eq!(policy.delta_transformer, [0xd8; 20]);
         assert_eq!(
@@ -469,6 +492,38 @@ mod tests {
             "29d86f0619ead274f88e66d73dc2fe583a2d0a087f1978ae36c37cf29a936755"
         );
         assert!(!policy.public_pinned);
+        assert_eq!(policy.min_own_response_seconds, 86_400);
+        let hub = derive_policy(&jurisdiction, &j_replicas, true).expect("hub policy");
+        assert_eq!(hub.min_own_response_seconds, 3_600);
+    }
+
+    #[test]
+    fn dispute_floor_comes_from_the_committed_jurisdiction_override() {
+        let j_replicas = serde_json::json!([["Testnet", {
+            "name":"Testnet",
+            "chainId":31337,
+            "contracts":{
+                "depository":format!("0x{}", "a5".repeat(20)),
+                "entityProvider":format!("0x{}", "b6".repeat(20)),
+                "account":format!("0x{}", "c7".repeat(20)),
+                "deltaTransformer":format!("0x{}", "d8".repeat(20))
+            }
+        }]]);
+        let jurisdiction = |floor: u64| {
+            CanonicalValue::Object(vec![
+                ("chainId".into(), number(31_337)),
+                (
+                    "depositoryAddress".into(),
+                    CanonicalValue::String(format!("0x{}", "a5".repeat(20))),
+                ),
+                ("accountDisputeFloorSeconds".into(), number(floor)),
+            ])
+        };
+        for is_hub in [false, true] {
+            let policy = derive_policy(&jurisdiction(10), &j_replicas, is_hub).expect("override");
+            assert_eq!(policy.min_own_response_seconds, 10);
+        }
+        assert!(derive_policy(&jurisdiction(0), &j_replicas, true).is_err());
     }
 
     #[test]
@@ -513,7 +568,8 @@ mod tests {
                 }
             }]
         ]);
-        let policy = derive_policy(&jurisdiction, &j_replicas).expect("skips malformed rows");
+        let policy =
+            derive_policy(&jurisdiction, &j_replicas, false).expect("skips malformed rows");
         assert_eq!(policy.delta_transformer, [0xd8; 20]);
     }
 
@@ -533,7 +589,8 @@ mod tests {
                 "depository":format!("0x{}", "a5".repeat(20))
             }
         }]]);
-        let error = derive_policy(&jurisdiction, &j_replicas).expect_err("missing full stack");
+        let error =
+            derive_policy(&jurisdiction, &j_replicas, false).expect_err("missing full stack");
         assert!(format!("{error:?}").contains("J_STACK_ENTITYPROVIDER_REQUIRED"));
     }
 

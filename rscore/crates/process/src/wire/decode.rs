@@ -293,7 +293,7 @@ fn decode_entity_account_genesis_policy(
     if matches!(value, AbiValue::Nil) {
         return Ok(None);
     }
-    let fields = exact(tuple(value)?, 5, "accountGenesisPolicy")?;
+    let fields = exact(tuple(value)?, 6, "accountGenesisPolicy")?;
     let domain = exact(tuple(&fields[0])?, 2, "accountGenesisDomain")?;
     let shadow_policy_rows = tuple(&fields[2])?
         .iter()
@@ -315,6 +315,13 @@ fn decode_entity_account_genesis_policy(
         shadow_policy_rows,
         delta_transformer: fixed_bytes(&fields[3], "accountGenesisDeltaTransformer")?,
         public_pinned: strict_boolean(&fields[4], "accountGenesisPublicPinned")?,
+        min_own_response_seconds: u32::try_from(js_number(
+            &fields[5],
+            "accountGenesisDisputeFloor",
+        )?)
+        .ok()
+        .filter(|seconds| *seconds > 0)
+        .ok_or(ProcessError::Expected("accountGenesisDisputeFloor"))?,
     }))
 }
 

@@ -194,6 +194,9 @@ export function requireRuntimeJurisdictionConfigByName(
       : replica.entityProviderDeploymentBlock !== undefined
           ? { entityProviderDeploymentBlock: replica.entityProviderDeploymentBlock }
           : {}),
+    ...(current?.accountDisputeFloorSeconds !== undefined
+      ? { accountDisputeFloorSeconds: current.accountDisputeFloorSeconds }
+      : {}),
     ...(current?.rebalancePolicyUsd ? { rebalancePolicyUsd: current.rebalancePolicyUsd } : {}),
   };
 

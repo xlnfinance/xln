@@ -21,6 +21,8 @@ const TEST_JURISDICTION = {
   name: 'open-account-profile-advertise',
   address: 'rpc://open-account-profile-advertise',
   chainId: 31337,
+  // Explicit test floor: fixtures sign short dispute windows.
+  accountDisputeFloorSeconds: 10,
   entityProviderAddress: '0x00000000000000000000000000000000000000e1',
   depositoryAddress: '0x00000000000000000000000000000000000000d1',
 };

@@ -763,6 +763,8 @@ fn inbound_genesis_bundles_required_ack_with_hub_policy_proposal() {
                         shadow_policy_rows: Vec::new(),
                         delta_transformer: transformer,
                         public_pinned: false,
+                        // Explicit test floor matching the 10 s fixture clock.
+                        min_own_response_seconds: 10,
                     }),
                     certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
                     local_certified_board_authority:

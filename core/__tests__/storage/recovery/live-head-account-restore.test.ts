@@ -83,6 +83,8 @@ describe('live-head restore after advertised account opens', () => {
       depositoryAddress: '0x000000000000000000000000000000000000dEaD',
       entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
       chainId: 31337,
+      // Explicit test floor: fixtures sign short dispute windows.
+      accountDisputeFloorSeconds: 10,
     };
     env.activeJurisdiction = jurisdiction.name;
     env.state.jReplicas.set(jurisdiction.name, createTestJReplica({

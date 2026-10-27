@@ -45,6 +45,8 @@ const jurisdiction: JurisdictionConfig = {
   name: 'resource-bounds',
   address: 'http://localhost:8545',
   chainId: 31337,
+  // Explicit test floor: fixtures sign short dispute windows.
+  accountDisputeFloorSeconds: 10,
   depositoryAddress: `0x${'44'.repeat(20)}`,
   entityProviderAddress: `0x${'55'.repeat(20)}`,
 };

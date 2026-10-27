@@ -84,6 +84,9 @@ fn normalized_signer(value: &str) -> Result<String, EntityAuthorityError> {
     Ok(signer)
 }
 
+/// Mirrors TS `MAX_ACCOUNT_DISPUTE_SECONDS` (365 days).
+const MAX_ACCOUNT_DISPUTE_FLOOR_SECONDS: u64 = 365 * 24 * 60 * 60;
+
 fn project_jurisdiction(value: CanonicalValue) -> Result<CanonicalValue, EntityAuthorityError> {
     let CanonicalValue::Object(entries) = value else {
         return Err(EntityAuthorityError::Jurisdiction("OBJECT_REQUIRED".into()));
@@ -97,6 +100,7 @@ fn project_jurisdiction(value: CanonicalValue) -> Result<CanonicalValue, EntityA
         "registrationBlock",
         "entityProviderDeploymentBlock",
         "blockTimeMs",
+        "accountDisputeFloorSeconds",
         "rebalancePolicyUsd",
     ]);
     let committed = BTreeSet::from([
@@ -106,6 +110,7 @@ fn project_jurisdiction(value: CanonicalValue) -> Result<CanonicalValue, EntityA
         "registrationBlock",
         "entityProviderDeploymentBlock",
         "blockTimeMs",
+        "accountDisputeFloorSeconds",
         "rebalancePolicyUsd",
     ]);
     let mut projected = Vec::new();
@@ -131,6 +136,17 @@ fn project_jurisdiction(value: CanonicalValue) -> Result<CanonicalValue, EntityA
                 )));
             }
             value = CanonicalValue::String(address);
+        }
+        if key == "accountDisputeFloorSeconds" {
+            let valid = matches!(&value, CanonicalValue::Number(seconds)
+            if seconds.as_str().parse::<u64>().is_ok_and(|seconds| {
+                (1..=MAX_ACCOUNT_DISPUTE_FLOOR_SECONDS).contains(&seconds)
+            }));
+            if !valid {
+                return Err(EntityAuthorityError::Jurisdiction(
+                    "ACCOUNT_DISPUTE_FLOOR_SECONDS_INVALID".into(),
+                ));
+            }
         }
         if key == "rebalancePolicyUsd" {
             let CanonicalValue::Object(policy) = &value else {

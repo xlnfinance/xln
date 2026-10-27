@@ -62,6 +62,10 @@ pub struct EntityAccountGenesisPolicy {
     /// policy change cannot silently alter H=0 leaves. Inbound peer genesis is
     /// currently never public-pinned and any true value is rejected.
     pub public_pinned: bool,
+    /// Lowest own-side response window the owner accepts from a peer-proposed
+    /// genesis: its committed `accountDisputeFloorSeconds`, else the role
+    /// default. Never peer-derived; always at least one second.
+    pub min_own_response_seconds: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

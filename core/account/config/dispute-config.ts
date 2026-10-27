@@ -26,7 +26,8 @@ const requireResponseSeconds = (value: unknown, side: 'left' | 'right'): number 
 /**
  * Validate the exact bilateral clock committed by every Account state root.
  * Zero is shape-valid: a party may waive its own window. Inbound genesis never
- * adopts a peer-chosen zero for the receiver's side (inbound-account.ts). The only
+ * adopts a peer-chosen own window below the receiver's committed floor
+ * (`accountDisputeOwnFloorSeconds`). The only
  * protocol ceiling prevents an accidental account from remaining disputed for
  * more than one year; there is deliberately no jurisdiction-wide substitute.
  */
@@ -43,6 +44,33 @@ export const canonicalAccountDisputeConfig = (value: AccountDisputeConfig): Acco
   }
   return { leftResponseSeconds, rightResponseSeconds };
 };
+
+/**
+ * The lowest own-side response window this Entity accepts from a peer-proposed
+ * Account genesis. It comes only from the receiver's committed policy: an
+ * explicit `accountDisputeFloorSeconds` in its committed jurisdiction config,
+ * else its role default. A floor below one second is never valid: a zero own
+ * window leaves no block in which to counter a stale-proof dispute.
+ */
+export const canonicalAccountDisputeFloorSeconds = (value: unknown): number => {
+  const seconds = Number(value);
+  if (
+    typeof value !== 'number'
+    || !Number.isSafeInteger(seconds)
+    || seconds < 1
+    || seconds > MAX_ACCOUNT_DISPUTE_SECONDS
+  ) {
+    throw new Error(`ACCOUNT_DISPUTE_FLOOR_SECONDS_INVALID:${String(value)}`);
+  }
+  return seconds;
+};
+
+export const accountDisputeOwnFloorSeconds = (
+  isHub: boolean,
+  configuredFloorSeconds: number | undefined,
+): number => configuredFloorSeconds === undefined
+  ? (isHub ? HUB_RESPONSE_SECONDS : USER_RESPONSE_SECONDS)
+  : canonicalAccountDisputeFloorSeconds(configuredFloorSeconds);
 
 /** Defaults are materialized once at account creation and then signed. */
 const defaultAccountDisputeConfig = (

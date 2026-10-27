@@ -9,6 +9,12 @@ export interface JurisdictionConfig {
   registrationBlock?: number;
   /** Authenticated history scan starts at this EntityProvider deployment block. */
   entityProviderDeploymentBlock?: number;
+  /**
+   * Committed minimum own-side Account response window this Entity accepts
+   * when a peer proposes Account genesis. Absent means the role default
+   * (hub 1 h, user 24 h). Tests and dev stacks set a lower one explicitly.
+   */
+  accountDisputeFloorSeconds?: number;
   rebalancePolicyUsd?: {
     r2cRequestSoftLimit: number;
     hardLimit: number;
