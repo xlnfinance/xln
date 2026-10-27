@@ -64,7 +64,7 @@ const applySpeculativeCrossCommand = (
         orderId: offer.namespacedOrderId,
         side: offer.marketOffer.side,
         tif: offer.rawOffer.timeInForce,
-        postOnly: pass.debugRebuildProjectionOnly,
+        postOnly: false,
         priceTicks: offer.marketOffer.priceTicks,
         qtyLots: offer.qtyLots,
       },
@@ -86,12 +86,11 @@ const applySpeculativeCrossCommand = (
       queueRejectedCrossOfferCancellation(pass, offer);
       return null;
     }
-    pass.rejectInvalidCrossOffer(
+    return pass.rejectInvalidCrossOffer(
       offer.accountId,
       offer.rawOffer.offerId,
       `cross-pair-error:${error instanceof Error ? error.message : String(error)}`,
     );
-    return null;
   }
 };
 
@@ -207,30 +206,18 @@ export const processCrossOrderbookOffer = (
       queueRejectedCrossOfferCancellation(pass, offer);
       return;
     }
-    pass.rejectInvalidCrossOffer(
+    return pass.rejectInvalidCrossOffer(
       offer.accountId,
       rawOffer.offerId,
       `cross-post-only-reject:${rejects.map(event => event.reason).join(',')}`,
     );
-    return;
   }
   if (rejects.length > 0 && !expectedLifecycleReject) {
-    pass.rejectInvalidCrossOffer(
+    return pass.rejectInvalidCrossOffer(
       offer.accountId,
       rawOffer.offerId,
       `cross-order-reject:${rejects.map(event => event.reason).join(',')}`,
     );
-    return;
-  }
-  if (pass.debugRebuildProjectionOnly) {
-    if (trades.length > 0) {
-      pass.recordDebugProjectionReject(
-        offer.accountId,
-        rawOffer.offerId,
-        `debug-rebuild-cross-trade:${trades.length}`,
-      );
-    }
-    return;
   }
   const working = commitBookOverlay(result.state);
   pass.workingBookCache.set(offer.marketOffer.pairId, working);

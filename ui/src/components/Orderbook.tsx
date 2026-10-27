@@ -1,6 +1,7 @@
 import { formatMoney } from '../runtime/format';
 import { getTokenMeta, type TokenMeta } from '../runtime/token-meta';
-import { PRICE_SCALE, type BookLevel, type BookView } from '../runtime/financial/orderbook';
+import { ORDERBOOK_PRICE_SCALE } from '@xln/core/swapbook/types';
+import type { BookLevel, BookView } from '../runtime/financial/orderbook';
 
 export type BookSide = 'bid' | 'ask';
 
@@ -162,7 +163,7 @@ export function Orderbook({
         </>
       )}
       <p className="note" style={{ marginTop: 10 }}>
-        Tap a level to fill the ticket at that price. 1 tick = 1/{PRICE_SCALE.toLocaleString('en-US')}{' '}
+        Tap a level to fill the ticket at that price. 1 tick = 1/{ORDERBOOK_PRICE_SCALE.toLocaleString('en-US')}{' '}
         {quoteMeta.symbol}.
       </p>
     </div>

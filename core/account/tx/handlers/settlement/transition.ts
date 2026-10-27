@@ -151,7 +151,7 @@ export const assertCanonicalSettlementWorkspace = (
   return expected;
 };
 
-// Reserve movements do not spend channel capacity. Hold only the decrease in
+// Reserve movements do not spend Account capacity. Hold only the decrease in
 // each side's collateral share, or a c2r can spend that share twice while a
 // harmless r2c/r2r incorrectly freezes existing off-chain purchasing power.
 const holdPlan = (diffs: readonly SettlementDiff[]): HoldPlan[] =>

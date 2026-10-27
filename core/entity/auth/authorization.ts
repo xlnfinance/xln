@@ -113,7 +113,7 @@ export const isIndividualEntityCommandTx = (tx: EntityTx): boolean => individual
 export const isCollectiveEntityActionTx = (tx: EntityTx): boolean =>
   !isEntityProtocolTx(tx) && !isIndividualEntityCommandTx(tx);
 
-const assertTxBatchShape: (txs: unknown, code: string) => asserts txs is EntityTx[] = (txs, code) => {
+const assertTxBatchStructure: (txs: unknown, code: string) => asserts txs is EntityTx[] = (txs, code) => {
   if (!Array.isArray(txs) || txs.length === 0 || txs.length > LIMITS.MEMPOOL_SIZE) {
     throw new Error(`${code}_TX_COUNT_INVALID:${Array.isArray(txs) ? txs.length : 'not-array'}`);
   }
@@ -122,6 +122,10 @@ const assertTxBatchShape: (txs: unknown, code: string) => asserts txs is EntityT
       throw new Error(`${code}_TX_INVALID`);
     }
   }
+};
+
+const assertTxBatchShape: (txs: unknown, code: string) => asserts txs is EntityTx[] = (txs, code) => {
+  assertTxBatchStructure(txs, code);
   const byteLength = encodeCanonicalConsensusBytes({
     domain: ENTITY_PROPOSAL_ACTION_DOMAIN,
     txs,
@@ -157,11 +161,22 @@ export const buildEntityTransactionProposalAction = (
   },
 });
 
+/** Read each own enumerable field once; an accessor could return a different value per read. */
+export const snapshotOwnDataFields = (value: object, code: string): Record<string, unknown> => {
+  const snapshot: Record<string, unknown> = Object.create(null);
+  for (const key of Object.keys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !('value' in descriptor)) throw new Error(`${code}:accessor:${key}`);
+    snapshot[key] = descriptor.value;
+  }
+  return snapshot;
+};
+
 export const assertEntityProposalAction = (value: unknown): ProposalAction => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('ENTITY_PROPOSAL_ACTION_INVALID');
   }
-  const action = value as Record<string, unknown>;
+  const action = snapshotOwnDataFields(value, 'ENTITY_PROPOSAL_ACTION_FIELDS_INVALID');
   if (Object.keys(action).sort().join(',') !== 'data,type') {
     throw new Error('ENTITY_PROPOSAL_ACTION_FIELDS_INVALID');
   }
@@ -170,7 +185,7 @@ export const assertEntityProposalAction = (value: unknown): ProposalAction => {
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
       throw new Error('ENTITY_PROPOSAL_MESSAGE_DATA_INVALID');
     }
-    const messageData = data as Record<string, unknown>;
+    const messageData = snapshotOwnDataFields(data, 'ENTITY_PROPOSAL_MESSAGE_DATA_INVALID');
     if (Object.keys(messageData).join(',') !== 'message' || typeof messageData['message'] !== 'string') {
       throw new Error('ENTITY_PROPOSAL_MESSAGE_DATA_INVALID');
     }
@@ -183,12 +198,15 @@ export const assertEntityProposalAction = (value: unknown): ProposalAction => {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
     throw new Error('ENTITY_PROPOSAL_TRANSACTION_DATA_INVALID');
   }
-  const txData = data as Record<string, unknown>;
-  if (Object.keys(txData).sort().join(',') !== 'actionHash,txs,version' || txData['version'] !== 1) {
+  const txData = snapshotOwnDataFields(data, 'ENTITY_PROPOSAL_TRANSACTION_DATA_INVALID');
+  const hashType = typeof txData['actionHash'];
+  if (Object.keys(txData).sort().join(',') !== 'actionHash,txs,version' || txData['version'] !== 1 ||
+    (hashType === 'object' && txData['actionHash'] !== null) || hashType === 'function') {
     throw new Error('ENTITY_PROPOSAL_TRANSACTION_DATA_INVALID');
   }
-  assertTxBatchShape(txData['txs'], 'ENTITY_COLLECTIVE_ACTION');
+  // Check and hash the owned clone: cloning can drop own properties of exotic objects.
   const txs = structuredClone(txData['txs']);
+  assertTxBatchStructure(txs, 'ENTITY_COLLECTIVE_ACTION');
   const actionHash = String(txData['actionHash'] ?? '')
     .trim()
     .toLowerCase();

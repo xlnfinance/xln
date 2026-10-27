@@ -7,7 +7,7 @@ import { ethers } from 'ethers';
 import { LIMITS } from '../../config/constants';
 
 import type { EntityTx, SignedEntityCommandV1 } from '../../types/entity-tx';
-import { canonicalEntityBoardSignerId, isEntityProtocolTx } from '../auth/authorization';
+import { canonicalEntityBoardSignerId, isEntityProtocolTx, snapshotOwnDataFields } from '../auth/authorization';
 import { EntityCommandRejectionError } from '../tx/processing/invariant-errors';
 
 const ENTITY_COMMAND_DOMAIN = 'xln:entity-command:binary' as const;
@@ -53,6 +53,11 @@ export const canonicalEntityCommandBoardEpoch = (value: unknown): number => {
 export const isEntityCommandForbiddenTx = (tx: EntityTx): boolean => isEntityProtocolTx(tx);
 
 export function assertEntityCommandTxs(txs: unknown): asserts txs is EntityTx[] {
+  encodeEntityCommandTxs(txs);
+}
+
+/** Structure-check, encode once, bound the bytes; size check and hash share them. */
+const encodeEntityCommandTxs = (txs: unknown): Uint8Array => {
   if (!Array.isArray(txs) || txs.length === 0 || txs.length > LIMITS.MEMPOOL_SIZE) {
     throw new Error(`ENTITY_COMMAND_TX_COUNT_INVALID:${Array.isArray(txs) ? txs.length : 'not-array'}`);
   }
@@ -64,14 +69,12 @@ export function assertEntityCommandTxs(txs: unknown): asserts txs is EntityTx[] 
       throw new Error(`ENTITY_COMMAND_PROTOCOL_TX_FORBIDDEN:${String((tx as { type: unknown }).type)}`);
     }
   }
-  const byteLength = encodeCanonicalConsensusBytes({
-    version: ENTITY_COMMAND_DOMAIN,
-    txs,
-  }).byteLength;
-  if (byteLength > MAX_ENTITY_COMMAND_BYTES) {
-    throw new Error(`ENTITY_COMMAND_BYTE_LIMIT_EXCEEDED:${byteLength}:${MAX_ENTITY_COMMAND_BYTES}`);
+  const bytes = encodeCanonicalConsensusBytes({ version: ENTITY_COMMAND_DOMAIN, txs });
+  if (bytes.byteLength > MAX_ENTITY_COMMAND_BYTES) {
+    throw new Error(`ENTITY_COMMAND_BYTE_LIMIT_EXCEEDED:${bytes.byteLength}:${MAX_ENTITY_COMMAND_BYTES}`);
   }
-}
+  return bytes;
+};
 
 /**
  * Fields that claim an individual board identity must equal the command
@@ -103,22 +106,15 @@ export const assertEntityCommandAuthorBindings = (authorSignerId: string, txs: E
   }
 };
 
-export const hashEntityCommandTxs = (txs: EntityTx[]): string => {
-  assertEntityCommandTxs(txs);
-  return keccakBytesHash(
-    encodeCanonicalConsensusBytes({
-      version: ENTITY_COMMAND_DOMAIN,
-      txs,
-    }),
-  );
-};
+export const hashEntityCommandTxs = (txs: EntityTx[]): string =>
+  keccakBytesHash(encodeEntityCommandTxs(txs));
 
 const normalizeEntityCommandBody = (command: EntityCommandBody): EntityCommandBody => {
   if (command.version !== 1) throw new Error(`ENTITY_COMMAND_VERSION_INVALID:${String(command.version)}`);
   if (typeof command.nonce !== 'bigint' || command.nonce < 1n) {
     throw new Error(`ENTITY_COMMAND_NONCE_INVALID:${String(command.nonce)}`);
   }
-  assertEntityCommandTxs(command.txs);
+  // The owned clone (not the caller's value) is structure/size-checked and hashed.
   const body: EntityCommandBody = {
     version: 1,
     entityId: canonicalEntityCommandEntityId(command.entityId),
@@ -184,13 +180,16 @@ const exactCommandKeys = new Set([
 
 export const normalizeSignedEntityCommand = (value: unknown): SignedEntityCommandV1 => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('ENTITY_COMMAND_INVALID');
-  const raw = value as Record<string, unknown>;
+  const raw = snapshotOwnDataFields(value, 'ENTITY_COMMAND_FIELDS_INVALID');
   const keys = Object.keys(raw);
   const unexpected = keys.find(key => !exactCommandKeys.has(key));
   if (unexpected || keys.length !== exactCommandKeys.size) {
     throw new Error(`ENTITY_COMMAND_FIELDS_INVALID:${unexpected ?? `count=${keys.length}`}`);
   }
-  assertEntityCommandTxs(raw['txs']);
+  // Scalars are coerced below; an object could run toString/valueOf code.
+  const nonPrimitive = keys.find(key =>
+    key !== 'txs' && ((typeof raw[key] === 'object' && raw[key] !== null) || typeof raw[key] === 'function'));
+  if (nonPrimitive) throw new Error(`ENTITY_COMMAND_FIELDS_INVALID:non-primitive:${nonPrimitive}`);
   const body = normalizeEntityCommandBody({
     version: raw['version'] as 1,
     entityId: String(raw['entityId'] ?? ''),
@@ -201,7 +200,7 @@ export const normalizeSignedEntityCommand = (value: unknown): SignedEntityComman
     authorSigner: String(raw['authorSigner'] ?? ''),
     nonce: raw['nonce'] as bigint,
     txsHash: String(raw['txsHash'] ?? ''),
-    txs: raw['txs'],
+    txs: raw['txs'] as EntityTx[],
   });
   const signature = String(raw['signature'] ?? '')
     .trim()

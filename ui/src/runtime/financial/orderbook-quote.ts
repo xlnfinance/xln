@@ -1,17 +1,8 @@
 import { SWAP_CONSTANTS } from '@xln/core/config/constants';
 import { deriveSameOrderbookPriceBandBounds, resolveOrderbookPriceReference } from '@xln/core/swapbook/price-band';
 import { formatAmount } from '../format';
+import { quoteAmountAtPriceForDecimals } from '@xln/core/swapbook/types';
 import type { BookLevel, BookView } from './orderbook';
-
-/** Canonical price unit: ticks per quote unit, four decimals. */
-export const PRICE_SCALE = 10_000n;
-
-/** Quote amount for `size` base units at `priceTicks`, in raw quote units. */
-export function quoteForBase(size: bigint, priceTicks: bigint, baseDecimals: number, quoteDecimals: number): bigint {
-  const baseUnit = 10n ** BigInt(baseDecimals);
-  const quoteUnit = 10n ** BigInt(quoteDecimals);
-  return (size * priceTicks * quoteUnit) / (PRICE_SCALE * baseUnit);
-}
 
 /** Fill a draft from the selected level; Cross never changes the chosen asset direction. */
 export function pickBookLevel(input: {
@@ -29,7 +20,7 @@ export function pickBookLevel(input: {
     return null;
   const { size, priceTicks } = input.level;
   if (size <= 0n || priceTicks <= 0n) return null;
-  const quote = quoteForBase(size, priceTicks, input.baseDecimals, input.quoteDecimals);
+  const quote = quoteAmountAtPriceForDecimals(input.baseDecimals, input.quoteDecimals, size, priceTicks);
   if (quote <= 0n) return null;
   const available = input.side === 'ask' ? quote : size;
   const desired = input.side === 'ask' ? size : quote;
@@ -52,10 +43,10 @@ export function quoteAtBestLevel(
   if (!buying && !selling) return null;
   const level = buying ? book.asks[0] : book.bids[0];
   if (!level || level.size <= 0n || level.priceTicks <= 0n) return null;
-  const cost = quoteForBase(level.size, level.priceTicks, baseDecimals, quoteDecimals);
+  const cost = quoteAmountAtPriceForDecimals(baseDecimals, quoteDecimals, level.size, level.priceTicks);
   if (cost <= 0n) return null;
   return {
-    want: buying ? (level.size * give) / cost : quoteForBase(give, level.priceTicks, baseDecimals, quoteDecimals),
+    want: buying ? (level.size * give) / cost : quoteAmountAtPriceForDecimals(baseDecimals, quoteDecimals, give, level.priceTicks),
     availableGive: buying ? cost : level.size,
   };
 }

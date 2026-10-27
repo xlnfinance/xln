@@ -11,6 +11,8 @@ export type StorageEntityViewQuery = {
   booksCursor?: string;
   accountsLimit?: number;
   booksLimit?: number;
+  /** Only this pair's book; book paging is ignored. */
+  pairId?: string;
   sortDir?: 'asc' | 'desc';
 };
 
@@ -88,6 +90,11 @@ const pageBooks = (
   query: StorageEntityViewQuery | undefined,
 ): StorageEntityViewPage['books'] => {
   const books = replica.state.orderbookExt?.books;
+  const pairId = String(query?.pairId ?? '').trim();
+  if (pairId) {
+    const book = books?.get(pairId);
+    return { items: book ? [{ pairId, book }] : [], nextCursor: null };
+  }
   const page = pageKeys(
     books ?? EMPTY_BOOKS_MAP,
     String(query?.booksCursor ?? (query?.accountsCursor ? '' : query?.cursor ?? '')).trim(),

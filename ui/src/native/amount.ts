@@ -1,4 +1,4 @@
-import { quoteForBase } from '../runtime/financial/orderbook-quote';
+import { quoteAmountAtPriceForDecimals } from '@xln/core/swapbook/types';
 import { parseAmount } from '../runtime/format';
 
 /** Match the iPhone's decimal separator; grouping, exponents and ambiguous formats are rejected. */
@@ -26,7 +26,7 @@ export function nativeLimitAmounts(
   const base = read('amount', baseDecimals);
   const price = read('price', 4);
   if (base <= 0n || price <= 0n) throw new Error('Amount and price must be greater than zero.');
-  const quote = quoteForBase(base, price, baseDecimals, quoteDecimals);
+  const quote = quoteAmountAtPriceForDecimals(baseDecimals, quoteDecimals, base, price);
   if (quote <= 0n) throw new Error('Amount is below the market minimum.');
   return command['side'] === 'buy'
     ? { giveToken: quoteTokenId, wantToken: baseTokenId, give: quote, want: base }

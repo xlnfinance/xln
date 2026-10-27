@@ -43,8 +43,8 @@
 
 <main class="lobby" data-testid="demo-lobby">
   <header>
-    <div class="brand"><span class="logo">xln</span><span class="tag">Bilateral settlement, step by step</span></div>
-    <h1>Five short demonstrations, recorded from the real protocol.</h1>
+    <div class="brand"><span class="logo">xln</span><span class="tag">Banking on a jurisdiction machine, step by step</span></div>
+    <h1>Six short demonstrations, recorded from the real protocol.</h1>
     <p class="intro">
       Every frame you will see was produced by the xln runtime settling on an EVM Depository contract on a local test chain,
       with a USDC test token as the settlement asset. Banks hold bilateral accounts backed by collateral, credit limits or both;

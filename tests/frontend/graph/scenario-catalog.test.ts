@@ -13,8 +13,8 @@ describe('canonical scenario catalog', () => {
       'htlc-ack-recovery', 'hub-preserved-reserve-refill', 'hub-quiesce-offline-peer',
       'rebalance', 'lock-ahb', 'htlc-lazy', 'ahb', 'swap', 'settle', 'htlc-4hop',
       'grid', 'swap-market', 'multi-sig', 'company-ipo', 'rapid-fire',
-      'settle-rebalance', 'processbatch', 'dispute-lifecycle', 'dispute-transformer',
-      'cross-j', 'mm-mesh',
+      'settle-rebalance', 'processbatch', 'dispute-lifecycle', 'bank-default',
+      'dispute-transformer', 'cross-j', 'mm-mesh',
     ]);
 
     for (const scenario of SCENARIOS) {

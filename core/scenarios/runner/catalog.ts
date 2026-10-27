@@ -141,6 +141,12 @@ export const SCENARIOS: ScenarioMetadata[] = [
     browserSafe: true, run: async (env) => (await import('../disputes/lifecycle')).runDisputeLifecycle(env),
   },
   {
+    id: 'bank-default', name: 'Bank Default and Debt Enforcement',
+    description: 'Failed bank: unilateral exits, collateral payout, first-come on-chain debt paid as its reserve refills',
+    tags: ['dispute', 'debt', 'safety'],
+    browserSafe: true, run: async (env) => (await import('../disputes/bank-default')).runBankDefault(env),
+  },
+  {
     id: 'dispute-transformer', name: 'Programmable Dispute Transformer',
     description: 'Depository dispute with payment, HTLC, swaps, freeze, and late ACK', tags: ['dispute', 'htlc', 'swap', 'rpc'],
     browserSafe: false, browserUnsafeReason: 'Requires a real Depository RPC contract.',
@@ -184,7 +190,7 @@ const CORE_SCENARIOS = [
   'ahb', 'lock-ahb', 'htlc-lazy', 'htlc-4hop', 'htlc-ack-recovery',
   'hub-preserved-reserve-refill', 'hub-quiesce-offline-peer', 'swap', 'swap-market', 'multi-sig',
   'settle', 'rebalance', 'settle-rebalance', 'processbatch',
-  'dispute-lifecycle', 'dispute-transformer', 'cross-j',
+  'dispute-lifecycle', 'bank-default', 'dispute-transformer', 'cross-j',
 ] as const;
 
 export const resolveScenarioSet = (set: string): readonly string[] => {

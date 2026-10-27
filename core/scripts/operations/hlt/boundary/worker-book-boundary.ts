@@ -88,14 +88,19 @@ export const deriveExecutableBidForAsk = (
   return { baseAmount, quoteAmount };
 };
 
-/** One side of the bounded depth ladder: ascending price levels with a quantity. */
+/** One side of the bounded depth ladder: best-first price levels with quantity, order count and makers. */
 const decodeBookSideLevels = (value: unknown, code: string): void => {
   if (!Array.isArray(value)) throw new Error(`${code}_INVALID`);
   for (const [index, entry] of value.entries()) {
     const level = requireBoundaryRecord(entry, `${code}_ENTRY_INVALID:${index}`);
-    requireExactBoundaryKeys(level, ['priceTicks', 'qtyLots'], [], `${code}_ENTRY_FIELDS_INVALID:${index}`);
+    requireExactBoundaryKeys(level, ['priceTicks', 'qtyLots', 'orderCount', 'ownerIds'], [], `${code}_ENTRY_FIELDS_INVALID:${index}`);
     requireBigInt(level['priceTicks'], `${code}_PRICE_INVALID:${index}`);
     requireBigInt(level['qtyLots'], `${code}_QTY_INVALID:${index}`);
+    requireBoundaryInteger(level['orderCount'], `${code}_ORDER_COUNT_INVALID:${index}`, 1);
+    const owners = level['ownerIds'];
+    if (!Array.isArray(owners) || owners.some(owner => typeof owner !== 'string')) {
+      throw new Error(`${code}_OWNERS_INVALID:${index}`);
+    }
   }
 };
 

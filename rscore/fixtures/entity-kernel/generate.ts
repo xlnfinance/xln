@@ -391,7 +391,7 @@ const match = processOrderbookSwaps(
   hubState,
   [maker, taker].map(markWorkingOrderbookOffer),
 );
-if (match.crossJurisdictionFills.length !== 0 || match.debugProjectionRejects.length !== 0) {
+if (match.crossJurisdictionFills.length !== 0) {
   throw new Error('ENTITY_KERNEL_FIXTURE_UNEXPECTED_CROSS_OR_REJECT');
 }
 const finalBook = match.bookUpdates.find((row) => row.pairId === '1/2')?.book;

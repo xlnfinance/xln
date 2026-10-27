@@ -17,6 +17,8 @@ import {
   type RuntimeAdapterBookPage,
   type RuntimeAdapterEntityCoreDoc,
 } from './context';
+import { RuntimeAdapterError } from '../errors';
+import type { RuntimeAdapterReadQuery } from '../types';
 
 // Bounded network DTOs for Entity cores, Account docs, J-batches and books:
 // samples, counts and redactions so a view never clones unbounded live state.
@@ -95,10 +97,38 @@ export type RuntimeAdapterPortableBookPage = Omit<RuntimeAdapterBookPage, 'items
 type PortableBookState = Omit<BookState, 'orders' | 'bidPages' | 'askPages'> & Readonly<{
   bidPages: ReadonlyMap<string, BookPricePage>;
   askPages: ReadonlyMap<string, BookPricePage>;
-  /** Full committed depth; page slots are only the bounded visible order sample. */
-  bidLevels: ReadonlyArray<{ priceTicks: bigint; qtyLots: bigint }>;
-  askLevels: ReadonlyArray<{ priceTicks: bigint; qtyLots: bigint }>;
+  /** Best-first committed levels to the requested depth; page slots are only the bounded order sample. */
+  bidLevels: ReadonlyArray<PortableBookLevel>;
+  askLevels: ReadonlyArray<PortableBookLevel>;
 }>;
+
+type PortableBookLevel = Readonly<{
+  priceTicks: bigint;
+  qtyLots: bigint;
+  orderCount: number;
+  /**
+   * Distinct maker Entities, at most BOOK_VIEW_MAX_LEVEL_OWNERS: the query's
+   * `ownerEntityId` first when it rests an order here, then book order.
+   */
+  ownerIds: readonly string[];
+}>;
+
+type BookViewOptions = Readonly<{ depth?: number; ownerEntityId?: string }>;
+
+const BOOK_VIEW_DEFAULT_DEPTH = 5;
+const BOOK_VIEW_MAX_DEPTH = 100;
+const BOOK_VIEW_MAX_LEVEL_OWNERS = 16;
+
+export const readBookViewOptions = (query?: RuntimeAdapterReadQuery): BookViewOptions => {
+  const depth = query?.bookDepth;
+  if (depth !== undefined && (!Number.isInteger(depth) || depth < 1 || depth > BOOK_VIEW_MAX_DEPTH)) {
+    throw new RuntimeAdapterError('E_BAD_QUERY', `bookDepth must be an integer in 1..${BOOK_VIEW_MAX_DEPTH}`);
+  }
+  return {
+    ...(depth === undefined ? {} : { depth }),
+    ...(query?.ownerEntityId ? { ownerEntityId: query.ownerEntityId } : {}),
+  };
+};
 
 const compactArrayTail = <T>(value: readonly T[] | undefined, limit = 20): T[] | undefined =>
   Array.isArray(value) ? value.slice(-limit) : undefined;
@@ -479,18 +509,28 @@ export const accountPageSummaryForView = (
   };
 };
 
+const compactBookLevels = (book: BookState, side: 0 | 1, depth: number, owner: string): PortableBookLevel[] =>
+  getBookSideLevels(book, side, depth).map(({ priceTicks, qtyLots, orderIds, ownerIds }) => {
+    const owners = ownerIds.map(normalizeEntityId);
+    const ordered = owner !== '' && owners.includes(owner) ? [owner, ...owners.filter((id) => id !== owner)] : owners;
+    return { priceTicks, qtyLots, orderCount: orderIds.length, ownerIds: ordered.slice(0, BOOK_VIEW_MAX_LEVEL_OWNERS) };
+  });
+
 const compactBookStateForView = (
   book: BookState,
-  maxLevelsPerSide = 5,
+  options: BookViewOptions = {},
   maxOrdersPerLevel = 20,
 ): PortableBookState => {
   // This is a bounded remote view, never a persistence format. LevelDB stores
-  // the original Patricia header/branch/leaf graph directly.
-  const compact = projectBookDepth(book, maxLevelsPerSide, maxOrdersPerLevel);
+  // the original Patricia header/branch/leaf graph directly. Level aggregates
+  // follow the requested depth; the order sample stays at the default depth.
+  const depth = options.depth ?? BOOK_VIEW_DEFAULT_DEPTH;
+  const owner = options.ownerEntityId ? normalizeEntityId(options.ownerEntityId) : '';
+  const compact = projectBookDepth(book, BOOK_VIEW_DEFAULT_DEPTH, maxOrdersPerLevel);
   return {
     params: compact.params,
-    bidLevels: getBookSideLevels(book, 0, maxLevelsPerSide).map(({ priceTicks, qtyLots }) => ({ priceTicks, qtyLots })),
-    askLevels: getBookSideLevels(book, 1, maxLevelsPerSide).map(({ priceTicks, qtyLots }) => ({ priceTicks, qtyLots })),
+    bidLevels: compactBookLevels(book, 0, depth, owner),
+    askLevels: compactBookLevels(book, 1, depth, owner),
     bidPages: projectBookPricePageTree(compact.bidPages),
     askPages: projectBookPricePageTree(compact.askPages),
     nextSeq: compact.nextSeq,
@@ -507,7 +547,7 @@ export const compactViewPageForRemote = (entityId: string, view: {
   core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
-}): {
+}, bookOptions: BookViewOptions = {}): {
   core: RuntimeAdapterEntityCoreView;
   accounts: RuntimeAdapterAccountViewPage;
   books: RuntimeAdapterPortableBookPage;
@@ -522,7 +562,7 @@ export const compactViewPageForRemote = (entityId: string, view: {
     ...view.books,
     items: view.books.items.map((item) => ({
       pairId: item.pairId,
-      book: compactBookStateForView(item.book),
+      book: compactBookStateForView(item.book, bookOptions),
     })),
   },
 });

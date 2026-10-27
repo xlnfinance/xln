@@ -11,12 +11,7 @@ type RejectInvalidCrossOffer = (
   accountId: string,
   offerId: string,
   reason: string,
-) => void;
-type RecordDebugProjectionReject = (
-  accountId: string,
-  offerId: string,
-  reason: string,
-) => true;
+) => never;
 
 export type CrossOrderbookProcessInput = {
   candidateEffects?: EntityCandidateEffect[];
@@ -28,9 +23,7 @@ export type CrossOrderbookProcessInput = {
   accountTxs: AccountTxTarget[];
   crossJurisdictionFills: CrossJurisdictionFillInstruction[];
   queuedSwapResolutions: Set<string>;
-  debugRebuildProjectionOnly: boolean;
   rejectInvalidCrossOffer: RejectInvalidCrossOffer;
-  recordDebugProjectionReject: RecordDebugProjectionReject;
 };
 
 type CrossAggregatedFill = {

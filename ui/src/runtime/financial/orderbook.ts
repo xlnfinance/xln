@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { StorageEntityCoreDoc } from '@xln/core/storage/types';
-import type { AccountState, RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
+import type { RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
+import type { RuntimeAdapterPortableBookPage } from '@xln/core/api/runtime-adapter/read/compact-view';
 import { decodeMarketWireResponse, encodeMarketWireMessage } from '@xln/core/network/relay/market/wire';
 import type { RelayMarketSnapshotPayload } from '@xln/core/network/relay/market/aggregate';
 import type { MarketSideLevel } from '@xln/core/network/relay/market/snapshot';
+import { getSwapPairOrientation } from '@xln/core/account/utils';
+import { getSwapLotScaleForDecimals } from '@xln/core/swapbook/types';
 import { selectRelaySnapshot, selectOrderbookSource } from './relay-book-snapshot';
 import {
   resolveOrderbookRelayWsUrl,
@@ -12,7 +15,6 @@ import {
 import { getAdapter } from '../adapter';
 import { useAdapterRead } from '../hooks';
 import { useApp } from '../store';
-import { peekXLN } from '../xln-loader';
 import type { CrossBookMarket } from './cross-book';
 
 export type BookLevel = {
@@ -49,99 +51,27 @@ const normalizeId = (value: unknown): string =>
     .trim()
     .toLowerCase();
 
-export function orientPair(
-  tokenA: number,
-  tokenB: number,
-): { baseTokenId: number; quoteTokenId: number; pairId: string } {
-  const xln = peekXLN();
-  if (xln?.getSwapPairOrientation) return xln.getSwapPairOrientation(tokenA, tokenB);
-  const left = Math.min(tokenA, tokenB);
-  const right = Math.max(tokenA, tokenB);
-  const liquid = (id: number): boolean => id === 1 || id === 3;
-  const pairId = `${left}/${right}`;
-  if (liquid(tokenA) && !liquid(tokenB)) return { baseTokenId: tokenB, quoteTokenId: tokenA, pairId };
-  if (!liquid(tokenA) && liquid(tokenB)) return { baseTokenId: tokenA, quoteTokenId: tokenB, pairId };
-  return { baseTokenId: left, quoteTokenId: right, pairId };
-}
+export { quoteAtBestLevel, pickBookLevel, swapMinimumError, swapPriceBandError } from './orderbook-quote';
 
-export {
-  quoteForBase,
-  quoteAtBestLevel,
-  pickBookLevel,
-  swapMinimumError,
-  swapPriceBandError,
-  PRICE_SCALE,
-} from './orderbook-quote';
+// Hosted hub: the committed BookState through the canonical books read.
 
-// ---------------------------------------------------------------------------
-// Hosted hub: the book is the union of resting offers on the hub's accounts.
-// ---------------------------------------------------------------------------
+type HostedBookLevels = RuntimeAdapterPortableBookPage['items'][number]['book']['bidLevels'];
 
-type HostedAccountDoc = { state?: AccountState };
-type HostedAccountsPage = { items?: HostedAccountDoc[] };
-
-function foldLevels(
-  entries: Array<{ priceTicks: bigint; size: bigint; own: boolean; ownerId: string }>,
-  bestFirst: (a: bigint, b: bigint) => number,
-  depth: number,
-): BookLevel[] {
-  const byPrice = new Map<bigint, BookLevel>();
-  for (const entry of entries) {
-    const level = byPrice.get(entry.priceTicks) ?? {
-      priceTicks: entry.priceTicks,
-      size: 0n,
-      total: 0n,
-      orders: 0,
-      own: false,
-      ownerIds: [],
-    };
-    level.size += entry.size;
-    level.orders += 1;
-    level.own = level.own || entry.own;
-    if (!level.ownerIds.includes(entry.ownerId)) level.ownerIds = [...level.ownerIds, entry.ownerId];
-    byPrice.set(entry.priceTicks, level);
-  }
-  const levels = [...byPrice.values()].sort((a, b) => bestFirst(a.priceTicks, b.priceTicks)).slice(0, depth);
-  let running = 0n;
-  for (const level of levels) {
-    running += level.size;
-    level.total = running;
-  }
-  return levels;
-}
-
-/** Build the hub's book for one pair from the offers resting on its accounts. */
-export function bookFromHostedAccounts(
-  docs: readonly HostedAccountDoc[],
-  pair: { baseTokenId: number; quoteTokenId: number; pairId: string },
-  ownEntityId: string,
-  depth: number,
-): Pick<BookView, 'bids' | 'asks'> {
+function hostedLevels(levels: HostedBookLevels, ownEntityId: string, lotScale: bigint): BookLevel[] {
   const own = normalizeId(ownEntityId);
-  const bids: Array<{ priceTicks: bigint; size: bigint; own: boolean; ownerId: string }> = [];
-  const asks: Array<{ priceTicks: bigint; size: bigint; own: boolean; ownerId: string }> = [];
-  for (const doc of docs) {
-    const state = doc.state;
-    if (!state?.swapOffers) continue;
-    const left = normalizeId(state.leftEntity);
-    const right = normalizeId(state.rightEntity);
-    for (const offer of state.swapOffers.values()) {
-      if (offer.crossJurisdiction) continue;
-      const maker = offer.makerIsLeft ? left : right;
-      const isOwn = maker === own;
-      if (offer.giveTokenId === pair.baseTokenId && offer.wantTokenId === pair.quoteTokenId) {
-        // Maker sells base for quote: an ask, sized by what is still offered.
-        asks.push({ priceTicks: offer.priceTicks, size: offer.giveAmount, own: isOwn, ownerId: maker });
-      } else if (offer.giveTokenId === pair.quoteTokenId && offer.wantTokenId === pair.baseTokenId) {
-        // Maker buys base with quote: a bid, sized by the base still wanted.
-        bids.push({ priceTicks: offer.priceTicks, size: offer.wantAmount, own: isOwn, ownerId: maker });
-      }
-    }
-  }
-  return {
-    bids: foldLevels(bids, (a, b) => (a > b ? -1 : a < b ? 1 : 0), depth),
-    asks: foldLevels(asks, (a, b) => (a < b ? -1 : a > b ? 1 : 0), depth),
-  };
+  let running = 0n;
+  return levels.map(level => {
+    const size = level.qtyLots * lotScale;
+    running += size;
+    return {
+      priceTicks: level.priceTicks,
+      size,
+      total: running,
+      orders: level.orderCount,
+      ownerIds: level.ownerIds,
+      own: level.ownerIds.some(id => normalizeId(id) === own),
+    };
+  });
 }
 
 // Relay market stream for hubs this runtime does not host.
@@ -310,7 +240,7 @@ export function useOrderbook(input: {
 }): BookView {
   const depth = input.depth ?? 12;
   const pair = useMemo(
-    () => input.crossMarket ?? orientPair(input.tokenA, input.tokenB),
+    () => input.crossMarket ?? getSwapPairOrientation(input.tokenA, input.tokenB),
     [input.crossMarket, input.tokenA, input.tokenB],
   );
   const hubId = normalizeId(input.crossMarket?.hubId ?? input.hubId);
@@ -320,17 +250,19 @@ export function useOrderbook(input: {
     summaries: input.summaries,
     crossMarket: Boolean(input.crossMarket),
   });
-  const query = useMemo(() => ({ accountsLimit: 200 }), []);
-  const hosted = useAdapterRead<HostedAccountsPage>(
-    hubId && source === 'hosted' ? `entity/${encodeURIComponent(hubId)}/accounts` : null,
+  const query = useMemo(
+    () => ({ pairId: pair.pairId, bookDepth: depth, ownerEntityId: input.ownEntityId }),
+    [pair.pairId, depth, input.ownEntityId],
+  );
+  const hosted = useAdapterRead<RuntimeAdapterPortableBookPage>(
+    hubId && source === 'hosted' ? `entity/${encodeURIComponent(hubId)}/books` : null,
     query,
   );
   const policy = useAdapterRead<StorageEntityCoreDoc>(
     hosted.data && hubId ? `entity/${encodeURIComponent(hubId)}` : null,
   );
   const height = useApp(s => s.height);
-  // Relay lots are base units scaled to six decimals; a base token with fewer decimals uses its own scale.
-  const lotScale = 10n ** BigInt(Math.max(0, input.baseDecimals - Math.min(input.baseDecimals, 6)));
+  const lotScale = getSwapLotScaleForDecimals(input.baseDecimals);
   const relay = useRelayBook({
     enabled: Boolean(hubId) && source === 'relay',
     hubId,
@@ -352,8 +284,9 @@ export function useOrderbook(input: {
         ...relay,
       };
     }
-    const docs = hosted.data?.items ?? [];
-    const { bids, asks } = bookFromHostedAccounts(docs, pair, input.ownEntityId, depth);
+    const book = hosted.data?.items.find(item => item.pairId === pair.pairId)?.book;
+    const bids = book ? hostedLevels(book.bidLevels, input.ownEntityId, lotScale) : [];
+    const asks = book ? hostedLevels(book.askLevels, input.ownEntityId, lotScale) : [];
     const bestBid = bids[0]?.priceTicks ?? null;
     const bestAsk = asks[0]?.priceTicks ?? null;
     return {
@@ -364,7 +297,7 @@ export function useOrderbook(input: {
       bids,
       asks,
       spreadTicks: bestBid !== null && bestAsk !== null ? bestAsk - bestBid : null,
-      lastTradeTicks: null,
+      lastTradeTicks: book && book.tradeCount > 0 && book.lastTradePriceTicks > 0n ? book.lastTradePriceTicks : null,
       status: hosted.loading && !hosted.data ? 'syncing' : hosted.error ? 'unavailable' : 'live',
       source: 'hosted',
       updatedAt: height,
@@ -378,9 +311,8 @@ export function useOrderbook(input: {
     hosted.error,
     policy.data,
     pair,
-    input.crossMarket,
     input.ownEntityId,
-    depth,
+    lotScale,
     height,
   ]);
 }

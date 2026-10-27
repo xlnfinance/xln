@@ -1,9 +1,7 @@
 #!/usr/bin/env bun
 
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { Readable } from 'node:stream';
 
 import { MAINNET_GATE, MAINNET_GATE_LABELS } from './mainnet-gate-constants';
 import {
@@ -11,8 +9,7 @@ import {
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
 } from '../e2e/harness/test-artifact-cleanup';
 import { sanitizeChildProcessEnv } from '../../api/server/child-process-env';
-import { GATE_CHILD_PROCESS_DETACHED, terminateGateProcessGroup } from './gate-child-process';
-import { XLN_RELEASE_PATHS } from '../../../tools/release-snapshot/scope';
+import { readGateSource, runGateSteps } from './gate-child-process';
 
 const DEFAULT_POLICY_PATH = 'ops/capped-testnet-policy.json';
 
@@ -50,11 +47,6 @@ export type GateStep = {
   name: string;
   command: string;
   timeoutMs: number;
-};
-
-type StepResult = GateStep & {
-  code: number | null;
-  durationMs: number;
 };
 
 const timestampForPath = (): string =>
@@ -189,52 +181,6 @@ export const buildCappedTestnetGateSteps = (
   return steps;
 };
 
-const runTextCommand = async (command: string): Promise<{ code: number | null; stdout: string; stderr: string }> => {
-  const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', command], {
-    cwd: process.cwd(),
-    env: sanitizeChildProcessEnv(process.env),
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  let stdout = '';
-  let stderr = '';
-  proc.stdout.on('data', chunk => {
-    stdout += chunk.toString();
-  });
-  proc.stderr.on('data', chunk => {
-    stderr += chunk.toString();
-  });
-  const code = await new Promise<number | null>((resolve, reject) => {
-    proc.once('error', reject);
-    proc.once('exit', resolve);
-  });
-  return { code, stdout, stderr };
-};
-
-const runStep = async (step: GateStep): Promise<StepResult> => {
-  const startedAt = Date.now();
-  const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', step.command], {
-    cwd: process.cwd(),
-    env: sanitizeChildProcessEnv(process.env),
-    detached: GATE_CHILD_PROCESS_DETACHED,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const prefix = `[capped:${step.name}]`;
-  proc.stdout.on('data', chunk => process.stdout.write(`${prefix} ${chunk.toString()}`));
-  proc.stderr.on('data', chunk => process.stderr.write(`${prefix} ${chunk.toString()}`));
-  let termination: Promise<void> | null = null;
-  const timer = setTimeout(() => {
-    termination = terminateGateProcessGroup(proc);
-  }, step.timeoutMs);
-  timer.unref();
-  const code = await new Promise<number | null>((resolve, reject) => {
-    proc.once('error', reject);
-    proc.once('exit', resolve);
-  });
-  clearTimeout(timer);
-  if (termination) await termination;
-  return { ...step, code, durationMs: Date.now() - startedAt };
-};
-
 const writeReport = (path: string, payload: unknown): void => {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`);
@@ -248,15 +194,8 @@ const main = async (): Promise<void> => {
     throw new Error(`CAPPED_TESTNET_POLICY_INVALID:${policyErrors.join(',')}`);
   }
 
-  const commit = await runTextCommand('git rev-parse HEAD');
-  if (commit.code !== 0) throw new Error(`GIT_COMMIT_UNAVAILABLE:${commit.stderr || commit.stdout}`);
-  const dirty = await runTextCommand(
-    `git status --short --untracked-files=all -- ${XLN_RELEASE_PATHS.join(' ')}`,
-  );
-  if (dirty.code !== 0) throw new Error(`GIT_STATUS_UNAVAILABLE:${dirty.stderr || dirty.stdout}`);
-  if (dirty.stdout.trim() && !args.allowDirty) {
-    throw new Error(`CAPPED_TESTNET_DIRTY_WORKTREE:\n${dirty.stdout}`);
-  }
+  const source = readGateSource();
+  if (source.dirty && !args.allowDirty) throw new Error(`CAPPED_TESTNET_DIRTY_WORKTREE:\n${source.dirty}`);
 
   if (!args.dryRun) {
     cleanupTestArtifactsBeforeRun({
@@ -270,8 +209,8 @@ const main = async (): Promise<void> => {
   const baseReport = {
     verdict: args.dryRun ? 'DRY_RUN' : 'RUNNING',
     startedAt: new Date().toISOString(),
-    commit: commit.stdout.trim(),
-    dirtyWorktree: dirty.stdout.trim(),
+    commit: source.head,
+    dirtyWorktree: source.dirty,
     policyPath: args.policyPath,
     policy,
     steps,
@@ -279,21 +218,20 @@ const main = async (): Promise<void> => {
   writeReport(args.outPath, baseReport);
 
   console.log('XLN capped-testnet gate');
-  console.log(`commit=${commit.stdout.trim()}`);
+  console.log(`commit=${source.head}`);
   console.log(`policy=${args.policyPath}`);
   console.log(`report=${args.outPath}`);
   steps.forEach((step, index) => console.log(`${index + 1}. ${step.name}: ${step.command}`));
   if (args.dryRun) return;
 
-  const results: StepResult[] = [];
-  for (const step of steps) {
-    const result = await runStep(step);
-    results.push(result);
-    writeReport(args.outPath, { ...baseReport, verdict: 'RUNNING', results });
-    if (result.code !== 0) {
-      writeReport(args.outPath, { ...baseReport, verdict: 'CAPPED_TESTNET_FAIL', results });
-      process.exit(result.code ?? 1);
-    }
+  const { results, firstRed } = await runGateSteps(steps, {
+    label: step => `capped:${step.name}`,
+    env: () => sanitizeChildProcessEnv(process.env),
+    afterStep: done => writeReport(args.outPath, { ...baseReport, verdict: 'RUNNING', results: done }),
+  });
+  if (firstRed) {
+    writeReport(args.outPath, { ...baseReport, verdict: 'CAPPED_TESTNET_FAIL', results });
+    process.exit(firstRed.code ?? 1);
   }
   writeReport(args.outPath, {
     ...baseReport,

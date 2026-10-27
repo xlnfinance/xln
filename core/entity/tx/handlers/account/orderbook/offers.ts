@@ -29,9 +29,4 @@ export interface MatchResult {
     pairId: string;
     book: BookState;
   }[];
-  debugProjectionRejects: Array<{
-    offerId: string;
-    accountId: string;
-    reason: string;
-  }>;
 }

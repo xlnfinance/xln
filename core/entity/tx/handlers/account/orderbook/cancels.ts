@@ -120,7 +120,6 @@ export function processOrderbookCancels(
   const accountTxs: AccountTxTarget[] = [];
   const crossJurisdictionFills: CrossJurisdictionFillInstruction[] = [];
   const workingBooks = new Map<string, BookState>();
-  const debugProjectionRejects: MatchResult['debugProjectionRejects'] = [];
   const queuedSwapResolutions = new Set<string>();
   const ext = hubState.orderbookExt as OrderbookExtState | undefined;
   if (!ext) throw haltRuntimeFailure("ORDERBOOK_EXTENSION_REQUIRED_FOR_CANCEL", 'ORDERBOOK_EXTENSION_REQUIRED_FOR_CANCEL');
@@ -194,5 +193,5 @@ export function processOrderbookCancels(
   }
 
   const bookUpdates = [...workingBooks].map(([pairId, book]) => ({ pairId, book }));
-  return { accountTxs, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
+  return { accountTxs, crossJurisdictionFills, bookUpdates };
 }

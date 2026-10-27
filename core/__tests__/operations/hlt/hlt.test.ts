@@ -779,7 +779,7 @@ describe('production swap load evidence', () => {
     // Shaped exactly like the remote view the runtime adapter emits: the bounded
     // ladder travels beside the page tree, so the boundary must see it here too.
     const sideLevels = (side: 0 | 1) => getBookSideLevels(canonical, side, 5)
-      .map(({ priceTicks, qtyLots }) => ({ priceTicks, qtyLots }));
+      .map(({ priceTicks, qtyLots, orderIds, ownerIds }) => ({ priceTicks, qtyLots, orderCount: orderIds.length, ownerIds }));
     const portable = {
       params: canonical.params,
       bidLevels: sideLevels(0),

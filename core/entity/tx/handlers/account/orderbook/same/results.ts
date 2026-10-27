@@ -139,10 +139,6 @@ const rejectUnfilledOffer = (
     bestAsk: String(offer.bestAsk),
     reason: reasons || 'unknown',
   });
-  if (pass.debugRebuildProjectionOnly) {
-    pass.recordDebugProjectionReject(offer.accountId, offer.offer.offerId, reason);
-    return;
-  }
   const queued = queueSameSwapResolve(
     pass,
     offer.accountId,
@@ -180,14 +176,12 @@ export const processSameCommandEvents = (
     rejectUnfilledOffer(pass, offer, reasons, resolveComment);
     return;
   }
-  if (!pass.debugRebuildProjectionOnly) {
-    const profile = pass.ext.hubProfile;
-    if (isAuthorizedUsdReferenceAsk(profile, offer)) {
-      // The accepted command and price reference commit in the same Entity
-      // frame. User/cross quotes and trades never enter this branch, so a tiny
-      // wash trade cannot move the $6.5m cross-j risk boundary.
-      result.state = recordAcceptedUsdAskPrice(result.state, offer.priceTicks);
-    }
-    queueSameTradeFills(pass, offer, result.state, trades, resolveComment);
+  const profile = pass.ext.hubProfile;
+  if (isAuthorizedUsdReferenceAsk(profile, offer)) {
+    // The accepted command and price reference commit in the same Entity
+    // frame. User/cross quotes and trades never enter this branch, so a tiny
+    // wash trade cannot move the $6.5m cross-j risk boundary.
+    result.state = recordAcceptedUsdAskPrice(result.state, offer.priceTicks);
   }
+  queueSameTradeFills(pass, offer, result.state, trades, resolveComment);
 };

@@ -42,6 +42,7 @@ import {
   compactAccountDocForView,
   compactEntityCoreForRemote,
   compactViewPageForRemote,
+  readBookViewOptions,
   singleAccountViewPage,
 } from './read/compact-view';
 import { projectHistoryFrameBatch, projectViewFrame } from './read/view-frame';
@@ -426,7 +427,7 @@ const resolveScopedRuntimeAdapterRead = async <T>(
       }
       const isCurrentHeight = height === null || targetHeight === envHeight(ctx.env);
       const stored = await loadViewPageForHeight(ctx, entityId, targetHeight, isCurrentHeight, query);
-      const compactStored = compactViewPageForRemote(entityId, stored);
+      const compactStored = compactViewPageForRemote(entityId, stored, readBookViewOptions(query));
       return (parts[2] === 'accounts' ? compactStored.accounts : compactStored.books) as T;
     }
 

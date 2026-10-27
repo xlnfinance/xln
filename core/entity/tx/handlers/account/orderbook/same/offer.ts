@@ -33,9 +33,7 @@ const commitSameCommandResult = (
     });
     const acceptedBook = commitBookOverlayInto(result.state, offer.book);
     pass.bookCache.set(offer.bookKey, acceptedBook);
-    if (!pass.debugRebuildProjectionOnly) {
-      pass.bookUpdates.push({ pairId: offer.bookKey, book: acceptedBook });
-    }
+    pass.bookUpdates.push({ pairId: offer.bookKey, book: acceptedBook });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (error instanceof SwapNetAuthorizationError) {
@@ -43,7 +41,6 @@ const commitSameCommandResult = (
       return;
     }
     containSamePairFailure(
-      pass,
       offer.bookKey,
       offer.accountId,
       offer.offer.offerId,

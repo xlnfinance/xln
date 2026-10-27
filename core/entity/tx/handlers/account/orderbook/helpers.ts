@@ -52,7 +52,6 @@ import { resolveStoredOfferEntityRefs } from './offers';
 import type { SwapResolveEnqueueData } from './queue';
 
 export type OrderbookProcessOptions = {
-  debugRebuildProjectionOnly?: boolean;
   candidateEffects?: EntityCandidateEffect[];
   resumeSamePairIds?: readonly string[];
 };

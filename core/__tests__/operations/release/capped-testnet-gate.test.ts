@@ -103,17 +103,22 @@ test('capped testnet gate starts from cleanup before writing run artifacts', () 
   expect(source).toContain("reason: 'capped-testnet'");
   expect(source).toContain('TEST_ARTIFACT_CLEANUP_DONE_ENV');
   expect(source).toContain("import { sanitizeChildProcessEnv } from '../../api/server/child-process-env';");
-  expect(source).toContain('env: sanitizeChildProcessEnv(process.env)');
+  expect(source).toContain('env: () => sanitizeChildProcessEnv(process.env)');
   expect(source.indexOf('cleanupTestArtifactsBeforeRun({')).toBeLessThan(
     source.indexOf('writeReport(args.outPath, baseReport)'),
   );
 });
 
 test('capped testnet timeout terminates the entire spawned process group', () => {
-  const source = readFileSync('core/scripts/release/run-capped-testnet-gate.ts', 'utf8');
-  expect(source).toContain("import { GATE_CHILD_PROCESS_DETACHED, terminateGateProcessGroup } from './gate-child-process';");
-  expect(source).toContain('detached: GATE_CHILD_PROCESS_DETACHED');
-  expect(source).toContain('termination = terminateGateProcessGroup(proc)');
-  expect(source).not.toContain("proc.kill('SIGTERM')");
-  expect(source).not.toContain("proc.kill('SIGKILL')");
+  // All three release gates share one step runner; the group kill lives there.
+  for (const gate of ['run-capped-testnet-gate.ts', 'run-mainnet-preflight-gate.ts', 'run-release-gate.ts']) {
+    const source = readFileSync(`core/scripts/release/${gate}`, 'utf8');
+    expect(source, gate).toContain('await runGateSteps(steps, {');
+    expect(source, gate).not.toContain('spawn(');
+  }
+  const runner = readFileSync('core/scripts/release/gate-child-process.ts', 'utf8');
+  expect(runner).toContain('detached: GATE_CHILD_PROCESS_DETACHED');
+  expect(runner).toContain('termination = terminateGateProcessGroup(proc)');
+  expect(runner).not.toContain("proc.kill('SIGTERM')");
+  expect(runner).not.toContain("proc.kill('SIGKILL')");
 });

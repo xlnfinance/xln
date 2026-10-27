@@ -45,7 +45,7 @@ test('mainnet preflight builds money, recovery, health, and full e2e evidence by
   const categories = steps.map(step => step.category);
   const commands = steps.map(step => step.command);
 
-  expect(categories).toEqual(['source', 'invariant', 'security', 'release', 'e2e', 'recovery', 'health']);
+  expect(categories).toEqual(['source', 'invariant', 'security', 'release', 'e2e', 'native', 'recovery', 'health']);
   expect(commands).toContain('bun run check');
   expect(commands).toContain('bun run gate:release');
   expect(commands).toContain('bun run test:e2e:full');
@@ -54,6 +54,17 @@ test('mainnet preflight builds money, recovery, health, and full e2e evidence by
   // Execute the canonical local/peer rejection and historical-proof vectors.
   // Deferred lending must stay closed; completing it is not a launch requirement.
   expect(commands.some(command => command.includes('core/__tests__/proofs/fx-admission.test.ts'))).toBe(true);
+});
+
+test('mainnet preflight runs the native TRON four flows on one never-used TVM ledger', () => {
+  const native = buildMainnetPreflightSteps({ includeSoak: false, includeScale: false })
+    .find(step => step.category === 'native')!.command.split(' && ');
+  expect(native[0]).toStartWith('export XLN_TRON_STAND_PATH="$PWD/db/native-tron-preflight-');
+  expect(native[1]).toBe('test ! -e "$XLN_TRON_STAND_PATH"');
+  const phases = native.slice(2).map(command => command.split('native-stand.ts ')[1]);
+  expect(phases).toEqual(['--deploy-graph', '--economic', '--runtime-import', '--cross-network', '--cross-swap', '--same-j', '--same-j-restore']);
+  for (const command of native.slice(2)) expect(command).toContain('bun run stand:run --reason preflight-native-');
+  expect(native.filter(command => command.startsWith('XLN_TS_ACCOUNT_WORKERS=0 '))).toHaveLength(2);
 });
 
 test('canonical mainnet package gate always includes soak and scale evidence', () => {

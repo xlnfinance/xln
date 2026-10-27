@@ -52,6 +52,12 @@ export type RuntimeAdapterReadQuery = {
   booksCursor?: string;
   accountsLimit?: number;
   booksLimit?: number;
+  /** Books read: only this pair's book, ignoring book paging. */
+  pairId?: string;
+  /** Books read: price levels per side, 1..100 (default 5). */
+  bookDepth?: number;
+  /** Books read: list this Entity first in level ownerIds when it rests an order there. */
+  ownerEntityId?: string;
   sortBy?: string;
   sortDir?: 'asc' | 'desc';
   kind?: RuntimeActivityFilters['kind'];

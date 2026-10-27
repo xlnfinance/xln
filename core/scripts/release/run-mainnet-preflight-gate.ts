@@ -1,10 +1,8 @@
 #!/usr/bin/env bun
 
-import { spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { Readable } from 'node:stream';
-import { GATE_CHILD_PROCESS_DETACHED, terminateGateProcessGroup } from './gate-child-process';
+import { readGateSource, runGateSteps } from './gate-child-process';
 
 import { assertMinDiskFree, getMinDiskFreeBytes } from '../../support/storage-monitor';
 import { MAINNET_GATE } from './mainnet-gate-constants';
@@ -14,7 +12,6 @@ import {
   withoutTestArtifactCleanupDoneEnv,
 } from '../e2e/harness/test-artifact-cleanup';
 
-import { XLN_RELEASE_PATHS } from '../../../tools/release-snapshot/scope';
 export type MainnetPreflightArgs = {
   dryRun: boolean;
   allowDirty: boolean;
@@ -26,14 +23,9 @@ export type MainnetPreflightArgs = {
 
 export type MainnetPreflightStep = {
   name: string;
-  category: 'source' | 'invariant' | 'security' | 'release' | 'e2e' | 'recovery' | 'health' | 'soak' | 'scale';
+  category: 'source' | 'invariant' | 'security' | 'release' | 'e2e' | 'native' | 'recovery' | 'health' | 'soak' | 'scale';
   command: string;
   timeoutMs: number;
-};
-
-type StepResult = MainnetPreflightStep & {
-  code: number | null;
-  durationMs: number;
 };
 
 const timestampForPath = (): string =>
@@ -91,6 +83,17 @@ export const parseMainnetPreflightArgs = (argv = process.argv.slice(2)): Mainnet
   return { dryRun, allowDirty, includeSoak, includeScale, keepTestArtifacts, outPath };
 };
 
+// Pay, same-J Swap and Lending (--same-j) plus Cross-swap on genuine TVM. Each phase
+// consumes the ledger the previous one left, so the run needs a never-used stand path.
+const NATIVE_TRON_PHASES = ['deploy-graph', 'economic', 'runtime-import', 'cross-network', 'cross-swap', 'same-j', 'same-j-restore'];
+const NATIVE_TRON_FOUR_FLOWS = [
+  'export XLN_TRON_STAND_PATH="$PWD/db/native-tron-preflight-$(date -u +%Y%m%dT%H%M%SZ)"',
+  'test ! -e "$XLN_TRON_STAND_PATH"',
+  // Same-J replay evidence requires inline Account execution (scripts/tron/flows/same-j-steps.ts).
+  ...NATIVE_TRON_PHASES.map(phase => `${phase.startsWith('same-j') ? 'XLN_TS_ACCOUNT_WORKERS=0 ' : ''}`
+    + `bun run stand:run --reason preflight-native-${phase} --timeout-ms 600000 -- bun scripts/tron/native-stand.ts --${phase}`),
+].join(' && ');
+
 export const buildMainnetPreflightSteps = (
   options: Pick<MainnetPreflightArgs, 'includeSoak' | 'includeScale'>,
 ): MainnetPreflightStep[] => {
@@ -112,6 +115,7 @@ export const buildMainnetPreflightSteps = (
     { name: 'security audit pack', category: 'security', command: 'bun run security:audit-pack', timeoutMs: 120_000 },
     { name: 'release integration gate', category: 'release', command: 'bun run gate:release', timeoutMs: 7_200_000 },
     { name: 'full browser e2e evidence', category: 'e2e', command: 'bun run test:e2e:full', timeoutMs: 7_200_000 },
+    { name: 'native TRON four flows', category: 'native', command: NATIVE_TRON_FOUR_FLOWS, timeoutMs: 4_500_000 },
     { name: 'watchtower recovery smoke', category: 'recovery', command: 'bun run test:watchtower:smoke', timeoutMs: 240_000 },
     { name: 'one tower / three hub health', category: 'health', command: 'bun run prod:health:capped-testnet', timeoutMs: 180_000 },
   ];
@@ -137,56 +141,6 @@ export const buildMainnetPreflightSteps = (
   return steps;
 };
 
-const spawnText = (command: string, args: string[]): string | null => {
-  const result = spawnSync(command, args, { cwd: process.cwd(), encoding: 'utf8' });
-  if (result.status !== 0) return null;
-  return String(result.stdout || '').trim();
-};
-
-const runTextCommand = async (command: string): Promise<{ code: number | null; stdout: string; stderr: string }> => {
-  const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', command], {
-    cwd: process.cwd(),
-    env: withoutTestArtifactCleanupDoneEnv(),
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  let stdout = '';
-  let stderr = '';
-  proc.stdout.on('data', chunk => { stdout += chunk.toString(); });
-  proc.stderr.on('data', chunk => { stderr += chunk.toString(); });
-  const code = await new Promise<number | null>((resolve, reject) => {
-    proc.once('error', reject);
-    proc.once('exit', resolve);
-  });
-  return { code, stdout, stderr };
-};
-
-const runStep = async (step: MainnetPreflightStep): Promise<StepResult> => {
-  const startedAt = Date.now();
-  const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', step.command], {
-    cwd: process.cwd(),
-    env: withoutTestArtifactCleanupDoneEnv(),
-    detached: GATE_CHILD_PROCESS_DETACHED,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const prefix = `[mainnet:${step.category}:${step.name}]`;
-  proc.stdout.on('data', chunk => process.stdout.write(`${prefix} ${chunk.toString()}`));
-  proc.stderr.on('data', chunk => process.stderr.write(`${prefix} ${chunk.toString()}`));
-
-  let termination: Promise<void> | null = null;
-  const timer = setTimeout(() => {
-    termination = terminateGateProcessGroup(proc);
-  }, step.timeoutMs);
-  timer.unref();
-
-  const code = await new Promise<number | null>((resolve, reject) => {
-    proc.once('error', reject);
-    proc.once('exit', resolve);
-  });
-  clearTimeout(timer);
-  if (termination) await termination;
-  return { ...step, code, durationMs: Date.now() - startedAt };
-};
-
 const writeReport = (path: string, payload: unknown): void => {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`);
@@ -206,16 +160,8 @@ const printPlan = (steps: MainnetPreflightStep[]): void => {
 
 const main = async (): Promise<void> => {
   const args = parseMainnetPreflightArgs();
-  const gitHead = spawnText('git', ['rev-parse', 'HEAD']);
-  if (!gitHead) throw new Error('MAINNET_PREFLIGHT_GIT_HEAD_UNAVAILABLE');
-
-  const dirty = await runTextCommand(
-    `git status --short --untracked-files=all -- ${XLN_RELEASE_PATHS.join(' ')}`,
-  );
-  if (dirty.code !== 0) throw new Error(`MAINNET_PREFLIGHT_GIT_STATUS_UNAVAILABLE:${dirty.stderr || dirty.stdout}`);
-  if (dirty.stdout.trim() && !args.allowDirty) {
-    throw new Error(`MAINNET_PREFLIGHT_DIRTY_WORKTREE:\n${dirty.stdout}`);
-  }
+  const { head: gitHead, dirty } = readGateSource();
+  if (dirty && !args.allowDirty) throw new Error(`MAINNET_PREFLIGHT_DIRTY_WORKTREE:\n${dirty}`);
 
   if (!args.dryRun) {
     cleanupTestArtifactsBeforeRun({
@@ -231,8 +177,8 @@ const main = async (): Promise<void> => {
     verdict: args.dryRun ? 'DRY_RUN' : 'RUNNING',
     startedAt: new Date().toISOString(),
     gitHead,
-    dirty: Boolean(dirty.stdout.trim()),
-    gitStatus: dirty.stdout.trim(),
+    dirty: Boolean(dirty),
+    gitStatus: dirty,
     thresholds: {
       regressionThresholdPct: MAINNET_GATE.regressionThresholdPct,
       soakMinutes: MAINNET_GATE.soakMinutes,
@@ -246,20 +192,19 @@ const main = async (): Promise<void> => {
 
   writeReport(args.outPath, report);
   printPlan(steps);
-  console.log(`gitHead=${gitHead.slice(0, 12)}${dirty.stdout.trim() ? ' dirty' : ''}`);
+  console.log(`gitHead=${gitHead.slice(0, 12)}${dirty ? ' dirty' : ''}`);
   console.log(`minDiskFreeBytes=${getMinDiskFreeBytes()}`);
   console.log(`report=${args.outPath}`);
   if (args.dryRun) return;
 
-  const results: StepResult[] = [];
-  for (const step of steps) {
-    const result = await runStep(step);
-    results.push(result);
-    writeReport(args.outPath, { ...report, verdict: 'RUNNING', results });
-    if (result.code !== 0) {
-      writeReport(args.outPath, { ...report, verdict: 'MAINNET_PREFLIGHT_FAIL', results, finishedAt: new Date().toISOString() });
-      process.exit(result.code ?? 1);
-    }
+  const { results, firstRed } = await runGateSteps(steps, {
+    label: step => `mainnet:${step.category}:${step.name}`,
+    env: withoutTestArtifactCleanupDoneEnv,
+    afterStep: done => writeReport(args.outPath, { ...report, verdict: 'RUNNING', results: done }),
+  });
+  if (firstRed) {
+    writeReport(args.outPath, { ...report, verdict: 'MAINNET_PREFLIGHT_FAIL', results, finishedAt: new Date().toISOString() });
+    process.exit(firstRed.code ?? 1);
   }
 
   writeReport(args.outPath, {

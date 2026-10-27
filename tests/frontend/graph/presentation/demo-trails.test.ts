@@ -67,7 +67,7 @@ describe('offline demo trails', () => {
 
   test('every shipped trail replays and carries payment motion', async () => {
     const files = readdirSync(TRAIL_DIR).filter((name) => name.endsWith('.json')).sort();
-    expect(files).toEqual(['ahb.json', 'dispute-lifecycle.json', 'lock-ahb.json', 'settle.json', 'swap.json']);
+    expect(files).toEqual(['ahb.json', 'bank-default.json', 'dispute-lifecycle.json', 'lock-ahb.json', 'settle.json', 'swap.json']);
     for (const file of files) {
       const trail = parseNetworkTrail(readFileSync(`${TRAIL_DIR}/${file}`, 'utf8'));
       const source = trailNetworkTimelineSource(trail);
@@ -89,7 +89,7 @@ describe('offline demo trails', () => {
   });
 
   test('shipped trails speak to the audience: named banks, a named jurisdiction, money in words', () => {
-    const fullyNarrated = new Set(['ahb.json', 'lock-ahb.json', 'swap.json', 'settle.json', 'dispute-lifecycle.json']);
+    const fullyNarrated = new Set(['ahb.json', 'bank-default.json', 'lock-ahb.json', 'swap.json', 'settle.json', 'dispute-lifecycle.json']);
     for (const file of readdirSync(TRAIL_DIR).filter((name) => name.endsWith('.json')).sort()) {
       const trail = parseNetworkTrail(readFileSync(`${TRAIL_DIR}/${file}`, 'utf8'));
       const last = trail.frames[String(trail.index.frames.at(-1)!.height)]!;
@@ -159,8 +159,42 @@ describe('offline demo trails', () => {
     expect(ahb.some((cue) => /Gross bilateral flow/.test((cue.keyMetrics ?? []).join()) && /Moved on-chain: 0/.test((cue.keyMetrics ?? []).join()))).toBe(true);
     const settle = cues('settle.json');
     expect(settle.some((cue) => (cue.keyMetrics ?? []).some((metric) => /^Settled on-chain:/.test(metric)))).toBe(true);
-    for (const file of ['ahb.json', 'swap.json', 'dispute-lifecycle.json']) {
+    for (const file of ['ahb.json', 'swap.json', 'dispute-lifecycle.json', 'bank-default.json']) {
       expect(cues(file).some((cue) => (cue.keyMetrics ?? []).some((metric) => /^Challenge window: \d+ hours?$/.test(metric))), file).toBe(true);
     }
+  });
+
+  test('a bank failure is enforced first-come, and its narration states the recorded Depository state', () => {
+    const trail = parseNetworkTrail(readFileSync(`${TRAIL_DIR}/bank-default.json`, 'utf8'));
+    const hubAt = (height: number) => {
+      const hub = trail.frames[String(height)]!.entities.find((entity) => entity.summary.label === 'Hub')!;
+      const core = hub.core as { debts?: Array<{ creditor: string; remaining: bigint; queueIndex: number }>; reserves: Map<number, bigint> };
+      return { debts: core.debts ?? [], reserve: core.reserves.get(1) ?? 0n };
+    };
+    const idOf = (label: string) => trail.frames[String(trail.index.frames.at(-1)!.height)]!.entities.find((entity) => entity.summary.label === label)!.summary.entityId;
+    const usdc = (amount: bigint) => `${(amount / 1_000_000n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')} USDC`;
+    const cue = (pattern: RegExp) => {
+      const found = trail.cues.find((entry) => pattern.test(entry.title));
+      if (!found) throw new Error(`BANK_DEFAULT_CUE_MISSING:${pattern}`);
+      return { cue: found, hub: hubAt(found.at.height), text: cueText(found) };
+    };
+
+    expect(cue(/^Starting point/).cue.condensePrior).toBe(true);
+    // Unsecured claims queue in finalization order, oldest first.
+    const queued = cue(/^Bob's claim becomes Hub's debt/);
+    expect(queued.hub.debts.map((debt) => [debt.creditor, debt.queueIndex])).toEqual([[idOf('Alice'), 0], [idOf('Bob'), 1]]);
+    expect(queued.text).toContain(usdc(queued.hub.debts[1]!.remaining));
+    // The secured customer's surplus collateral refills the reserve while the queue still stands.
+    const refilled = cue(/^Carol is paid from collateral/);
+    expect(refilled.hub.debts).toHaveLength(2);
+    expect(refilled.text).toContain(`Hub reserve: ${usdc(refilled.hub.reserve)}`);
+    // Enforcement pays Alice in full before Bob receives anything beyond the remainder.
+    const firstCome = cue(/^The queue is paid first-come/);
+    expect(firstCome.hub.debts.map((debt) => debt.creditor)).toEqual([idOf('Bob')]);
+    expect(firstCome.text).toContain(`still owed ${usdc(firstCome.hub.debts[0]!.remaining)}`);
+    const settled = cue(/is made whole; the queue is empty$/);
+    expect(settled.cue.endsPresentation).toBe(true);
+    expect(settled.hub.debts).toEqual([]);
+    expect(settled.text).toContain(`Hub reserve: ${usdc(settled.hub.reserve)}`);
   });
 });

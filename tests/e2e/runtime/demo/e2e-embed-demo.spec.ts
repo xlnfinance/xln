@@ -1,13 +1,15 @@
 import { expect, test } from '../../../global-setup.mts';
 import type { Page } from '@playwright/test';
 import { timedStep } from '../../../utils/e2e-timing.mts';
+import { capturePageScreenshot } from '../../../utils/e2e-screenshots';
 
 /**
  * Presenter demo: the shipped trails play offline in presentation mode, step by step, with
- * narration, a rendered stage and keyboard control; the lobby opens each of them.
+ * narration, a rendered stage and keyboard control; the lobby opens each of them. Any console
+ * error or page error fails the test through the global browser-issue guard.
  */
 
-const TRAILS = ['ahb', 'lock-ahb', 'swap', 'settle', 'dispute-lifecycle'] as const;
+const TRAILS = ['ahb', 'lock-ahb', 'swap', 'settle', 'dispute-lifecycle', 'bank-default'] as const;
 
 const narration = (page: Page) => page.getByTestId('presentation-narration');
 
@@ -57,6 +59,7 @@ test.describe('presenter demo', () => {
     test(`${trail} trail narrates, renders and responds to the presenter keys`, { tag: '@functional' }, async ({ page }) => {
       test.setTimeout(120_000);
       await timedStep(`embed_demo.${trail}.open`, async () => openPresentation(page, trail));
+      await capturePageScreenshot(page, test.info(), `${trail}-1-open.png`, { fullPage: false });
       await expect(page.getByTestId('presentation-part')).toContainText(`Part ${TRAILS.indexOf(trail) + 1} of ${TRAILS.length}`);
       // The Depository's own balances are on stage from the first step.
       await expect(page.getByTestId('depository-ledger')).toBeVisible({ timeout: 15_000 });
@@ -73,6 +76,7 @@ test.describe('presenter demo', () => {
         title = await narrationTitle(page);
       }
       expect(title, 'narration title should change within the first steps').not.toBe(firstTitle);
+      await capturePageScreenshot(page, test.info(), `${trail}-2-step-${await currentStep(page)}.png`, { fullPage: false });
 
       // The stage is drawn, not a blank canvas.
       await expect
@@ -95,8 +99,41 @@ test.describe('presenter demo', () => {
       await expect(next).toBeVisible({ timeout: 10_000 });
       const expectedNext = TRAILS[TRAILS.indexOf(trail) + 1];
       await expect(next).toHaveAttribute('href', expectedNext ? `/embed?trail=${expectedNext}&present=1` : '/demo');
+      await capturePageScreenshot(page, test.info(), `${trail}-3-end.png`, { fullPage: false });
     });
   }
+
+  test('a failed bank\'s debts stand in a first-come queue on the Depository ledger', { tag: '@functional' }, async ({ page }) => {
+    test.setTimeout(120_000);
+    await timedStep('embed_demo.bank_default_queue.open', async () => openPresentation(page, 'bank-default'));
+    const ledger = page.getByTestId('depository-ledger');
+    const advanceTo = async (pattern: RegExp): Promise<void> => {
+      for (let press = 0; press < 60 && !pattern.test(await narrationTitle(page)); press += 1) {
+        const step = await currentStep(page);
+        await page.keyboard.press('ArrowRight');
+        await expect.poll(() => currentStep(page), { timeout: 10_000 }).toBe(step + 1);
+      }
+      expect(await narrationTitle(page)).toMatch(pattern);
+    };
+    // Two unsecured claims queue oldest-first while Hub's reserve is empty.
+    await advanceTo(/^Bob's claim becomes Hub's debt/);
+    await expect(ledger).toContainText('Debts, first-come queue');
+    const debts = ledger.locator('li[data-ledger-row^="debt:"]');
+    await expect(debts).toHaveCount(2);
+    await expect(debts.nth(0)).toContainText('Hub owes Alice');
+    await expect(debts.nth(1)).toContainText('Hub owes Bob');
+    await capturePageScreenshot(page, test.info(), 'bank-default-queue.png', { fullPage: false });
+    // Enforcement pays the head of the queue in full before the next claim.
+    await advanceTo(/^The queue is paid first-come/);
+    await expect(debts).toHaveCount(1);
+    await expect(debts.first()).toContainText('Hub owes Bob');
+    await capturePageScreenshot(page, test.info(), 'bank-default-enforced.png', { fullPage: false });
+    // The time machine scrubs back: the queue and the narration return to the starting point.
+    await page.getByTestId('presentation-scrubber').fill('0');
+    await expect.poll(() => currentStep(page), { timeout: 10_000 }).toBe(1);
+    await expect(narration(page).locator('h1')).toHaveText(/^Starting point/);
+    await expect(debts).toHaveCount(0);
+  });
 
   test('payments narrate their three layers of finality as a step of their own', { tag: '@functional' }, async ({ page }) => {
     test.setTimeout(120_000);
@@ -135,6 +172,6 @@ test.describe('presenter demo', () => {
     await page.goto('/demo');
     await page.getByTestId('demo-start-story').click();
     await expect(page).toHaveURL(/\/embed\?trail=ahb&present=1$/);
-    await expect(page.getByTestId('presentation-part')).toContainText('Part 1 of 5', { timeout: 30_000 });
+    await expect(page.getByTestId('presentation-part')).toContainText(`Part 1 of ${TRAILS.length}`, { timeout: 30_000 });
   });
 });

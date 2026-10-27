@@ -5,8 +5,8 @@ import {
   type BookState,
   type OrderbookExtState,
 } from '../../../../../swapbook';
-import { createStructuredLogger, shortId, shortOrder } from '../../../../../support/logger';
-import { type WorkingOrderbookOffer, swapKey } from '../../../../../swapbook/swap-execution';
+import { createStructuredLogger } from '../../../../../support/logger';
+import { type WorkingOrderbookOffer } from '../../../../../swapbook/swap-execution';
 import { type CrossJurisdictionFillInstruction } from '../../../../../extensions/cross-j/orderbook';
 import {
   type AccountTxTarget,
@@ -29,7 +29,6 @@ import {
 } from './same/pass';
 import { processSameOrderbookOffer, resumeCrossedSameOrderbookPair } from './same/offer';
 
-const orderbookLog = createStructuredLogger('orderbook');
 const orderbookSameLog = createStructuredLogger('orderbook.same');
 
 export { crossBookQtyLots };
@@ -108,10 +107,8 @@ export function processOrderbookSwaps(
   const accountTxs: AccountTxTarget[] = [];
   const crossJurisdictionFills: CrossJurisdictionFillInstruction[] = [];
   const bookUpdates: { pairId: string; book: BookState }[] = [];
-  const debugProjectionRejects: Array<{ offerId: string; accountId: string; reason: string }> = [];
   const ext = hubState.orderbookExt as OrderbookExtState | undefined;
-  if (!ext) return { accountTxs, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
-  const debugRebuildProjectionOnly = options.debugRebuildProjectionOnly === true;
+  if (!ext) return { accountTxs, crossJurisdictionFills, bookUpdates };
   const splitOffers = splitWorkingOrderbookOffers(swapOffers);
   const sameAccountSwapOffers = sortSwapOffersForOrderbook(splitOffers.sameAccountSwapOffers);
   const crossJurisdictionSwapOffers = sortSwapOffersForOrderbook(splitOffers.crossJurisdictionSwapOffers);
@@ -124,27 +121,11 @@ export function processOrderbookSwaps(
   // The book is a deterministic projection of account swapOffers, not a second owner of order lifecycle.
   const bookCache = new Map<string, BookState>();
   const queuedSwapResolutions = new Set<string>();
-  const debugProjectionRejectKeys = new Set<string>();
-  const recordDebugProjectionReject = (accountId: string, offerId: string, reason: string): true => {
-    if (!debugRebuildProjectionOnly) {
-      throw haltRuntimeFailure("ORDERBOOK_LIVE_PROJECTION_REJECT", `ORDERBOOK_LIVE_PROJECTION_REJECT: account=${accountId} offer=${offerId} reason=${reason}`);
-    }
-    const key = swapKey(accountId, offerId);
-    if (debugProjectionRejectKeys.has(key)) return true;
-    debugProjectionRejectKeys.add(key);
-    debugProjectionRejects.push({ accountId, offerId, reason });
-    return true;
-  };
-  const rejectInvalidCrossOffer = (accountId: string, offerId: string, reason: string): void => {
-    // Cross-j orders settle through fill notices and pull clearing. The book
-    // row is never refreshed from route/admission data: the account swapOffer
-    // or admitted route must validate the existing row exactly.
-    recordDebugProjectionReject(accountId, offerId, reason);
-    orderbookLog.warn('crossj.offer_rejected', {
-      offer: shortOrder(offerId, 8),
-      account: shortId(accountId, 8),
-      reason,
-    });
+  // Cross-j orders settle through fill notices and pull clearing. The book
+  // row is never refreshed from route/admission data: the account swapOffer
+  // or admitted route must validate the existing row exactly.
+  const rejectInvalidCrossOffer = (accountId: string, offerId: string, reason: string): never => {
+    throw haltRuntimeFailure("ORDERBOOK_LIVE_PROJECTION_REJECT", `ORDERBOOK_LIVE_PROJECTION_REJECT: account=${accountId} offer=${offerId} reason=${reason}`);
   };
   processCrossJurisdictionOrderbookOffers({
     ...(options.candidateEffects ? { candidateEffects: options.candidateEffects } : {}),
@@ -156,9 +137,7 @@ export function processOrderbookSwaps(
     accountTxs,
     crossJurisdictionFills,
     queuedSwapResolutions,
-    debugRebuildProjectionOnly,
     rejectInvalidCrossOffer,
-    recordDebugProjectionReject,
   });
   processSameAccountOrderbookOffers({
     hubState,
@@ -170,14 +149,11 @@ export function processOrderbookSwaps(
     bookUpdates,
     accountTxs,
     queuedSwapResolutions,
-    debugRebuildProjectionOnly,
-    recordDebugProjectionReject,
   }, options.resumeSamePairIds ?? []);
 
   return {
     accountTxs,
     crossJurisdictionFills,
     bookUpdates: finalBookUpdates(bookUpdates),
-    debugProjectionRejects,
   };
 }

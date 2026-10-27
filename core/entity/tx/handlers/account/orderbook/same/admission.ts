@@ -51,18 +51,13 @@ export const materializeSameOffer = (
       account: shortId(accountId, 8),
       reason: materialized.reason,
       message: materialized.message,
-      projectionOnly: pass.debugRebuildProjectionOnly,
     });
-    if (pass.debugRebuildProjectionOnly) {
-      pass.recordDebugProjectionReject(accountId, offer.offerId, materialized.reason);
-    } else {
-      queueSameSwapResolve(pass, accountId, {
-        offerId: offer.offerId,
-        fillRatio: 0,
-        cancelRemainder: true,
-        comment: materialized.reason,
-      });
-    }
+    queueSameSwapResolve(pass, accountId, {
+      offerId: offer.offerId,
+      fillRatio: 0,
+      cancelRemainder: true,
+      comment: materialized.reason,
+    });
     return null;
   }
   const order = materialized.order;
@@ -72,18 +67,13 @@ export const materializeSameOffer = (
     orderbookSameLog.debug('offer.reject_pair_decimals', {
       offer: shortOrder(offer.offerId, 8),
       account: shortId(accountId, 8),
-      projectionOnly: pass.debugRebuildProjectionOnly,
     });
-    if (pass.debugRebuildProjectionOnly) {
-      pass.recordDebugProjectionReject(accountId, offer.offerId, 'pair-decimals-mismatch');
-    } else {
-      queueSameSwapResolve(pass, accountId, {
-        offerId: offer.offerId,
-        fillRatio: 0,
-        cancelRemainder: true,
-        comment: 'pair-decimals-mismatch',
-      });
-    }
+    queueSameSwapResolve(pass, accountId, {
+      offerId: offer.offerId,
+      fillRatio: 0,
+      cancelRemainder: true,
+      comment: 'pair-decimals-mismatch',
+    });
     return null;
   }
   return {
@@ -108,10 +98,6 @@ const rejectOutsidePriceBand = (
   offer: MaterializedSameOffer,
   reason: string,
 ): void => {
-  if (pass.debugRebuildProjectionOnly) {
-    pass.recordDebugProjectionReject(offer.accountId, offer.offer.offerId, reason);
-    return;
-  }
   queueSameSwapResolve(
     pass,
     offer.accountId,
@@ -167,7 +153,6 @@ export const prepareSameOffer = (
       account: shortId(offer.accountId, 8),
       reason: band.rejectReason,
       message: band.rejectMessage,
-      projectionOnly: pass.debugRebuildProjectionOnly,
     });
     rejectOutsidePriceBand(pass, offer, band.rejectReason);
     return null;

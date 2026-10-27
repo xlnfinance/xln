@@ -1,9 +1,7 @@
 #!/usr/bin/env bun
 
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
-import type { Readable } from 'node:stream';
-import { GATE_CHILD_PROCESS_DETACHED, terminateGateProcessGroup } from './gate-child-process';
+import { runGateSteps, type GateStepResult } from './gate-child-process';
 
 import { assertMinDiskFree, getMinDiskFreeBytes } from '../../support/storage-monitor';
 import {
@@ -18,15 +16,10 @@ type GateProfile = 'quick' | 'ci' | 'release';
 type GateStep = {
   name: string;
   command: string;
-  timeoutMs?: number;
+  timeoutMs: number;
 };
 
-type StepResult = {
-  name: string;
-  command: string;
-  code: number | null;
-  durationMs: number;
-};
+type StepResult = GateStepResult<GateStep>;
 
 // Cross-j and hash-ladder tests are a release family, not a hand-maintained
 // sample. Discovering the family makes every new edge-case suite enter the
@@ -269,42 +262,6 @@ function parseProfile(): GateProfile {
   return 'quick';
 }
 
-async function runStep(step: GateStep): Promise<StepResult> {
-  const startedAt = Date.now();
-  const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', step.command], {
-    cwd: process.cwd(),
-    env: withoutTestArtifactCleanupDoneEnv(),
-    detached: GATE_CHILD_PROCESS_DETACHED,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  const prefix = `[${step.name}]`;
-  proc.stdout.on('data', chunk => process.stdout.write(`${prefix} ${chunk.toString()}`));
-  proc.stderr.on('data', chunk => process.stderr.write(`${prefix} ${chunk.toString()}`));
-
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let termination: Promise<void> | null = null;
-  const code = await new Promise<number | null>((resolve, reject) => {
-    proc.once('error', reject);
-    proc.once('exit', resolve);
-    if (step.timeoutMs && step.timeoutMs > 0) {
-      timer = setTimeout(() => {
-        termination = terminateGateProcessGroup(proc);
-      }, step.timeoutMs);
-      timer.unref();
-    }
-  });
-  if (timer) clearTimeout(timer);
-  if (termination) await termination;
-
-  return {
-    name: step.name,
-    command: step.command,
-    code,
-    durationMs: Date.now() - startedAt,
-  };
-}
-
 function printPlan(profile: GateProfile, steps: GateStep[]): void {
   console.log('');
   console.log('='.repeat(76));
@@ -316,7 +273,7 @@ function printPlan(profile: GateProfile, steps: GateStep[]): void {
   steps.forEach((step, index) => {
     console.log(`${index + 1}. ${step.name}`);
     console.log(`   ${step.command}`);
-    console.log(`   timeoutMs=${step.timeoutMs ?? 0}`);
+    console.log(`   timeoutMs=${step.timeoutMs}`);
   });
   console.log('='.repeat(76));
   console.log('');
@@ -347,18 +304,15 @@ async function main(): Promise<void> {
   if (profile !== 'quick') assertMinDiskFree();
   printPlan(profile, steps);
 
-  const results: StepResult[] = [];
-  for (const step of steps) {
-    const result = await runStep(step);
-    results.push(result);
-    if (result.code !== 0) {
-      printSummary(profile, results);
-      console.error(`Release gate failed at step: ${step.name}`);
-      process.exit(result.code ?? 1);
-    }
-  }
-
+  const { results, firstRed } = await runGateSteps(steps, {
+    label: step => step.name,
+    env: withoutTestArtifactCleanupDoneEnv,
+  });
   printSummary(profile, results);
+  if (firstRed) {
+    console.error(`Release gate failed at step: ${firstRed.name}`);
+    process.exit(firstRed.code ?? 1);
+  }
 }
 
 main().catch(error => {

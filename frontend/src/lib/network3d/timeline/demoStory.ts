@@ -1,6 +1,6 @@
 /**
  * The presenter's story: the shipped demo trails in the order they build the argument, from a
- * single payment to unilateral exit. The lobby lists these chapters and each presentation
+ * single payment to a bank failure enforced on-chain. The lobby lists these chapters and each presentation
  * offers the next one at its last step, so both read the order from here.
  */
 
@@ -37,6 +37,11 @@ export const DEMO_STORY: readonly DemoChapter[] = [
     trail: 'dispute-lifecycle',
     title: 'Unilateral exit and finality',
     see: 'A bank exits alone with the last co-signed state. After the challenge window, its claim is paid from the counterparty\'s reserve.',
+  },
+  {
+    trail: 'bank-default',
+    title: 'A bank fails: claims enforced first-come',
+    see: 'Hub owes three customers and its reserve is empty. Each exits alone: collateral pays the secured one, the rest becomes on-chain debt, and the queue is paid oldest-first as reserves refill.',
   },
 ];
 

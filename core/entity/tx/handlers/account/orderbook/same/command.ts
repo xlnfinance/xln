@@ -28,10 +28,6 @@ const rejectFullBook = (
     account: shortId(offer.accountId, 8),
   });
   const reason = `book-full:${offer.book.params.maxOrders}`;
-  if (pass.debugRebuildProjectionOnly) {
-    pass.recordDebugProjectionReject(offer.accountId, offer.offer.offerId, reason);
-    return;
-  }
   const queued = queueSameSwapResolve(
     pass,
     offer.accountId,
@@ -72,7 +68,7 @@ export const applySameOfferCommand = (
         orderId: offer.namespacedOrderId,
         side: offer.side,
         tif: offer.offer.timeInForce,
-        postOnly: pass.debugRebuildProjectionOnly,
+        postOnly: false,
         priceTicks: offer.priceTicks,
         qtyLots: offer.qtyLots,
       },
@@ -94,7 +90,6 @@ export const applySameOfferCommand = (
       rejectFullBook(pass, offer);
     } else {
       containSamePairFailure(
-        pass,
         offer.bookKey,
         offer.accountId,
         offer.offer.offerId,
@@ -122,7 +117,6 @@ export const resumeCrossedSameBook = (
     });
   } catch (error) {
     containSamePairFailure(
-      pass,
       offer.bookKey,
       offer.accountId,
       offer.offer.offerId,

@@ -54,7 +54,7 @@ function EntityActivity({ entityId }: { entityId: string | null }) {
 	}), [cursors, search, from, to]);
 	const types = FILTERS.find(entry => entry.id === filter)?.types ?? USER_ACTIVITY_TYPES;
 	const accountIds = useMemo(() => wallet.accounts.map(account => account.counterpartyId), [wallet.accounts]);
-	const { movements: loaded, loading, error, nextBeforeHeight } = useMovements(filter === 'swaps' ? null : entityId, types, limit, accountIds, filters);
+	const { movements: loaded, loading, error, nextBeforeHeight, partial } = useMovements(filter === 'swaps' ? null : entityId, types, limit, accountIds, filters);
 	const more = nextBeforeHeight !== null;
 	const movements = loaded;
 	// Desktop shows the latest movement's receipt until the user picks another; on a phone the sheet opens only on tap.
@@ -165,7 +165,9 @@ function EntityActivity({ entityId }: { entityId: string | null }) {
 							))}
 						</div>
 					)}
-					{filter !== 'swaps' && movements.length === 0 && !loading && !error && (
+					{filter !== 'swaps' && !more && partial && !loading && !error ? (
+						<p className="note faint" style={{ padding: '18px 0' }}>Earlier activity is unavailable on this device.</p>
+					) : filter !== 'swaps' && movements.length === 0 && !loading && !error && (
 						<p className="note" style={{ padding: '18px 0' }}>
 							{searching ? `Nothing loaded matches "${searching}".` : more ? 'No matching activity on this page.' : 'No matching activity.'}
 						</p>

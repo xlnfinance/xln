@@ -49,8 +49,7 @@ export const prepareCrossOrderbookOffer = (
   const namespacedOrderId = swapKey(accountId, rawOffer.offerId);
   const marketOffer = getCrossMarketOffer(pass, rawOffer);
   if (!marketOffer) {
-    pass.rejectInvalidCrossOffer(accountId, rawOffer.offerId, 'invalid-cross-j-route');
-    return null;
+    return pass.rejectInvalidCrossOffer(accountId, rawOffer.offerId, 'invalid-cross-j-route');
   }
   const qtyLots = crossBookQtyLots(marketOffer.baseTokenId, marketOffer.quoteTokenId, marketOffer.baseAmount, marketOffer.quoteAmount, marketOffer.priceTicks);
   if (qtyLots <= 0n) {
@@ -61,12 +60,11 @@ export const prepareCrossOrderbookOffer = (
     return null;
   }
   if (qtyLots > MAX_ORDERBOOK_QTY_LOTS) {
-    pass.rejectInvalidCrossOffer(
+    return pass.rejectInvalidCrossOffer(
       accountId,
       rawOffer.offerId,
       `invalid-cross-qty:${qtyLots.toString()}`,
     );
-    return null;
   }
   const normalized = marketOffer.offer;
   const baseTokenDecimals = marketOffer.side === 1
@@ -81,12 +79,11 @@ export const prepareCrossOrderbookOffer = (
     marketOffer.priceTicks,
   );
   if (qtyLots % exactQuoteLots !== 0n) {
-    pass.rejectInvalidCrossOffer(
+    return pass.rejectInvalidCrossOffer(
       accountId,
       rawOffer.offerId,
       `cross-quote-lot-misaligned:${qtyLots.toString()}:${exactQuoteLots.toString()}`,
     );
-    return null;
   }
   pass.crossLiveOfferMeta.set(namespacedOrderId, marketOffer);
   if (

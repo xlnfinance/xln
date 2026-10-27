@@ -93,10 +93,11 @@ describe('presentation numbers', () => {
 });
 
 describe('presenter story', () => {
-  test('chapters run from a payment to unilateral exit, each pointing at the next', () => {
-    expect(DEMO_STORY.map((chapter) => chapter.trail)).toEqual(['ahb', 'lock-ahb', 'swap', 'settle', 'dispute-lifecycle']);
-    expect(demoChapterPosition('swap')).toMatchObject({ index: 2, count: 5, next: { trail: 'settle' } });
-    expect(demoChapterPosition('dispute-lifecycle')?.next).toBeNull();
+  test('chapters run from a payment to a bank failure, each pointing at the next', () => {
+    expect(DEMO_STORY.map((chapter) => chapter.trail)).toEqual(['ahb', 'lock-ahb', 'swap', 'settle', 'dispute-lifecycle', 'bank-default']);
+    expect(demoChapterPosition('swap')).toMatchObject({ index: 2, count: 6, next: { trail: 'settle' } });
+    expect(demoChapterPosition('dispute-lifecycle')?.next?.trail).toBe('bank-default');
+    expect(demoChapterPosition('bank-default')?.next).toBeNull();
     expect(demoChapterPosition('grid')).toBeNull();
     expect(demoChapterHref('lock-ahb')).toBe('/embed?trail=lock-ahb&present=1');
   });

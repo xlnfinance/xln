@@ -40,6 +40,8 @@ import { buildRuntimeAdapterOwnerBindingDigest } from '../../../api/runtime-adap
 import { signRuntimeAdapterServerIdentity } from '../../../api/runtime-adapter/security/server-identity-signer';
 
 import { resolveRuntimeAdapterRead } from '../../../api/runtime-adapter/resolve';
+import { validateRequest } from '../../../api/runtime-adapter/wire/request-schema';
+import { projectEntityViewPageFromReplica } from '../../../storage/queries/entity-view-page';
 import {
   assertRuntimeAdapterGraphFrameWireBudget,
   type RuntimeAdapterGraphFrame,
@@ -831,6 +833,55 @@ test('runtime adapter books path is bounded and paged', async () => {
   expect(books.nextCursor).toBeTruthy();
 });
 
+test('runtime adapter books read serves one pair to a bounded depth with order counts and the viewer first', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
+  const maker = (index: number): string => `0x${(index + 1).toString(16).padStart(64, '0')}`;
+  const viewer = maker(249);
+  // 250 distinct makers over 25 bid and 25 ask levels: more than any 200-Account sample.
+  let book = createBook({ bucketWidthTicks: 1n, maxOrders: 1_000, stpPolicy: 0 });
+  for (let index = 0; index < 250; index++) {
+    const ask = index % 2 === 1;
+    const level = Math.floor(index / 2) % 25;
+    book = materializeCommittedRemainder(book, {
+      orderId: `order-${index.toString().padStart(3, '0')}`,
+      ownerId: maker(index),
+      side: ask ? 1 : 0,
+      priceTicks: ask ? 1_000n + BigInt(level) : 999n - BigInt(level),
+      qtyLots: 1n,
+    });
+  }
+  replica.state.orderbookExt = makeOrderbookExt(new Map([['1/2', book], ['1/3', makeBook(1n)]]));
+  const ctx = { env, loadEntityViewPage: makeTestViewPageLoader(env) };
+  const query = { pairId: '1/2', bookDepth: 12, ownerEntityId: viewer.toUpperCase().replace('0X', '0x') };
+  expect(validateRequest({ v: XLN_PROTOCOL_VERSION, id: 'books', op: 'read', path: `entity/${entityId}/books`, query }))
+    .toBeTruthy();
+  const page = await resolveRuntimeAdapterRead<{
+    items: Array<{ pairId: string; book: { bidLevels: Array<{ priceTicks: bigint; qtyLots: bigint; orderCount: number; ownerIds: string[] }>; askLevels: Array<{ priceTicks: bigint; orderCount: number; ownerIds: string[] }> } }>;
+  }>(ctx, `entity/${entityId}/books`, query);
+  expect(page.items.map(item => item.pairId)).toEqual(['1/2']);
+  const { bidLevels, askLevels } = page.items[0]!.book;
+  expect(bidLevels).toHaveLength(12);
+  expect(askLevels).toHaveLength(12);
+  expect(bidLevels.map(level => level.priceTicks)).toEqual(Array.from({ length: 12 }, (_, i) => 999n - BigInt(i)));
+  expect(askLevels.map(level => level.priceTicks)).toEqual(Array.from({ length: 12 }, (_, i) => 1_000n + BigInt(i)));
+  // Level 0 of each side holds five makers (indexes 0,50,...,200 bid; 1,51,...,201 ask).
+  expect(bidLevels[0]).toEqual({ priceTicks: 999n, qtyLots: 5n, orderCount: 5, ownerIds: [0, 50, 100, 150, 200].map(maker) });
+  // The viewer (maker 249, ask level 24) is beyond depth 12 here; at depth 25 it is listed first.
+  expect(askLevels.some(level => level.ownerIds.includes(viewer))).toBe(false);
+  const deep = await resolveRuntimeAdapterRead<typeof page>(ctx, `entity/${entityId}/books`, { ...query, bookDepth: 25 });
+  const viewerLevel = deep.items[0]!.book.askLevels[24]!;
+  expect(viewerLevel.orderCount).toBe(5);
+  expect(viewerLevel.ownerIds).toEqual([viewer, ...[49, 99, 149, 199].map(maker)]);
+  expect((await resolveRuntimeAdapterRead<typeof page>(ctx, `entity/${entityId}/books`, { pairId: '9/9' })).items).toEqual([]);
+  // Historical reads replay the same filter inside the storage projection.
+  expect(projectEntityViewPageFromReplica(replica, { pairId: '1/3' }).books.items.map(item => item.pairId)).toEqual(['1/3']);
+  await expect(resolveRuntimeAdapterRead(ctx, `entity/${entityId}/books`, { ...query, bookDepth: 101 }))
+    .rejects.toThrow('bookDepth');
+  const wire = { v: XLN_PROTOCOL_VERSION, inReplyTo: 'books', ok: true as const, payload: deep };
+  expect(decodeRuntimeAdapterMessage(encodeRuntimeAdapterMessage(wire))).toEqual(wire);
+});
+
 test('runtime adapter compact book view preserves full level depth while trimming visible orders', async () => {
   const env = makeEnv();
   const replica = Array.from(env.state.eReplicas.values())[0]!;
@@ -842,7 +893,12 @@ test('runtime adapter compact book view preserves full level depth while trimmin
   const book = frame.activeEntity!.books.items[0]!.book;
   const visibleOrders = Array.from(book.bidPages.values()).flatMap(page => page.slots.filter(slot => slot !== null));
   expect(visibleOrders).toHaveLength(20);
-  expect(book.bidLevels).toEqual([{ priceTicks: 100n, qtyLots: 25n }]);
+  expect(book.bidLevels).toEqual([{
+    priceTicks: 100n,
+    qtyLots: 25n,
+    orderCount: 25,
+    ownerIds: Array.from({ length: 16 }, (_, index) => `0x${(index + 1).toString(16).padStart(64, '0')}`),
+  }]);
   expect(book.askLevels).toEqual([]);
   expect(source.orders.size).toBe(25);
   expect(getBookSideLevels(source, 0, 1)[0]!.qtyLots).toBe(25n);

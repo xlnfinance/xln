@@ -142,6 +142,8 @@ export function Home() {
                     <button type="button" className="more" onClick={() => navigate('/activity')}>
                       Open full payment history
                     </button>
+                  ) : recent.partial ? (
+                    <p className="note wallet-empty">Earlier activity is unavailable on this device.</p>
                   ) : (
                     <p className="note wallet-empty">Your payments and swaps will appear here.</p>
                   ))}

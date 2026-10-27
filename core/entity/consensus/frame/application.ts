@@ -952,12 +952,6 @@ const commitOrderbookMatchResult = (
   result: OrderbookMatchResult,
 ): void => {
   const { env, currentEntityState: state, storageChanges, candidateEffects } = context;
-  if (result.debugProjectionRejects.length > 0) {
-    const detail = result.debugProjectionRejects
-      .map(({ accountId, offerId, reason }) => `${accountId.slice(-8)}:${offerId.slice(-8)}:${reason}`)
-      .join(', ');
-    throw haltRuntimeFailure("ORDERBOOK_LIVE_PROJECTION_REJECT", `ORDERBOOK_LIVE_PROJECTION_REJECT: ${detail}`);
-  }
   const ext = state.orderbookExt as OrderbookExtState;
   const previousTradeCounts = new Map<string, number>();
   let matchedSwaps = 0;

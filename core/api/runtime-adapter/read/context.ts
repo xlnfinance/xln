@@ -498,6 +498,23 @@ const projectLiveBooksPage = (
   if (!books) {
     return { items: [], ...emptyPageMeta(limit) };
   }
+  const pairId = String(query?.pairId ?? '').trim();
+  if (pairId) {
+    const book = books.get(pairId);
+    return book
+      ? {
+          items: [{ pairId, book }],
+          nextCursor: null,
+          prevCursor: null,
+          firstCursor: pairId,
+          lastCursor: pairId,
+          pageIndex: 0,
+          pageCount: 1,
+          totalItems: 1,
+          limit,
+        }
+      : { items: [], ...emptyPageMeta(limit) };
+  }
   const pageIndex = readPageIndex(query?.booksPage);
   const orderedKeys = sortedStringMapKeys(books as Map<string, unknown>);
   const keys = query?.sortDir === 'desc' ? [...orderedKeys].reverse() : orderedKeys;

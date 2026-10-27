@@ -36,11 +36,6 @@ import {
 
 const orderbookSameLog = createStructuredLogger('orderbook.same');
 
-type RecordDebugProjectionReject = (
-  accountId: string,
-  offerId: string,
-  reason: string,
-) => true;
 export type SameOrderbookProcessInput = {
   hubState: EntityState;
   ext: OrderbookExtState;
@@ -51,8 +46,6 @@ export type SameOrderbookProcessInput = {
   bookUpdates: { pairId: string; book: BookState }[];
   accountTxs: AccountTxTarget[];
   queuedSwapResolutions: Set<string>;
-  debugRebuildProjectionOnly: boolean;
-  recordDebugProjectionReject: RecordDebugProjectionReject;
 };
 
 export type SameOrderbookPass = SameOrderbookProcessInput & {
@@ -195,7 +188,6 @@ export const classifySameBookMaker = (
 };
 
 export const containSamePairFailure = (
-  pass: SameOrderbookPass,
   pairId: string,
   accountId: string,
   offerId: string,
@@ -207,10 +199,6 @@ export const containSamePairFailure = (
     account: shortId(accountId, 8),
     error: message,
   });
-  if (pass.debugRebuildProjectionOnly) {
-    pass.recordDebugProjectionReject(accountId, offerId, `pair-error:${message}`);
-    return;
-  }
   throw haltRuntimeFailure("ORDERBOOK_PAIR_COMMAND_FAILED", `ORDERBOOK_PAIR_COMMAND_FAILED: pair=${pairId} account=${accountId} ` +
     `offer=${offerId} error=${message}`);
 };
@@ -248,14 +236,6 @@ export const sweepSamePairOutOfBandOffers = (
       bandLabel: label,
       bandAnchor: anchor.toString(),
     });
-    if (pass.debugRebuildProjectionOnly && liveOffer) {
-      pass.recordDebugProjectionReject(
-        liveOffer.accountId,
-        liveOffer.offerId,
-        `outside-anchor-band:${order.priceTicks.toString()}`,
-      );
-      continue;
-    }
     nextBook = commitBookOverlay(applyCommand(nextBook, {
       kind: 1,
       ownerId: order.ownerId,

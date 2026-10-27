@@ -179,6 +179,8 @@ export const compactReadQueryForLog = (query: RuntimeAdapterReadQuery | undefine
     'cursor',
     'accountsCursor',
     'booksCursor',
+    'pairId',
+    'bookDepth',
     'beforeHeight',
     'scanLimit',
     'fromTimestamp',
