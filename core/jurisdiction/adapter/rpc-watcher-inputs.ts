@@ -82,8 +82,8 @@ const readAuthenticatedTransactionCalldata = async (
 };
 
 /**
- * Every dispute call one transaction carries. A direct call, or calldata with
- * no embedded call, keeps the strict decoder and its exact failure. An
+ * Every dispute call one transaction carries. Calldata with no canonical
+ * candidate keeps the strict decoder and its exact failure. An
  * embedded call whose batch does not decode could never have executed, so it
  * only stops being a candidate; the event match still decides acceptance.
  */
@@ -93,7 +93,7 @@ const decodeDisputeCalls = <T>(
   isSelfConsistent: (candidate: T) => boolean = () => true,
 ): T[] => {
   const embedded = extractEmbeddedDisputeCalls(data);
-  if (!embedded || embedded.length === 0) return decode(data);
+  if (embedded.length === 0) return decode(data);
   return embedded.flatMap(call => {
     try {
       return decode(call).filter(isSelfConsistent);

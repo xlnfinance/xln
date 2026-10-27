@@ -84,6 +84,12 @@ describe('J watcher dispute calldata embedded in a wrapper call', () => {
     expect(await resolveStart(safeWrapper(processBatchCall(startArgs.proofbodyHash)))).toEqual(body);
   });
 
+  test('a forwarding wrapper can reuse processBatch selector without hiding its embedded call', async () => {
+    const wrapped = safeWrapper(processBatchCall(startArgs.proofbodyHash));
+    const data = depository.getFunction('processBatch')!.selector + wrapped.slice(10);
+    expect(await resolveStart(data)).toEqual(body);
+  });
+
   test('resolves the ProofBody of processBatch inside a packed MultiSend record', async () => {
     const inner = processBatchCall(startArgs.proofbodyHash);
     const data = multiSend('0x01', inner);
@@ -158,6 +164,40 @@ describe('J watcher dispute calldata embedded in a wrapper call', () => {
   test('calldata with no embedded dispute call keeps the strict decoder failure', async () => {
     await expect(resolveStart(safeWrapper('0x1234'))).rejects.toThrow('J_DISPUTE_PROOFBODY_CALLDATA_UNKNOWN');
   });
+
+  test('a malformed direct selector with no canonical candidate keeps its strict decode error', async () => {
+    await expect(resolveStart(`${depository.getFunction('processBatch')!.selector}00`))
+      .rejects.toThrow('J_DISPUTE_PROOFBODY_CALLDATA_DECODE_FAILED');
+  });
+});
+
+test('2048 consistent-length decoys in 1 MiB resolve the dispute body in less than one second', async () => {
+  const bytes = new Uint8Array(1024 * 1024);
+  const word = (target: Uint8Array, offset: number, value: number): void => {
+    target.set(ethers.getBytes(ethers.toBeHex(value, 32)), offset);
+  };
+  const selector = ethers.getBytes(depository.getFunction('processBatch')!.selector);
+  for (let index = 0; index < 2048; index += 1) {
+    const offset = index * 480;
+    bytes.set(selector, offset);
+    word(bytes, offset + 4, 96);
+    word(bytes, offset + 36, 128);
+    // These last-offset/length words pass the old two-word preflight. But the
+    // first bytes tail ends at 160, so the next offset 128 overlaps its data.
+    word(bytes, offset + 100, 1);
+    word(bytes, offset + 132, Math.min(256 * 1024, Math.floor((bytes.length - offset - 164) / 32) * 32));
+  }
+  const actual = processBatchCall(startArgs.proofbodyHash);
+  bytes.set(ethers.getBytes(actual), 2048 * 480);
+  const data = ethers.hexlify(bytes);
+  const { hash, provider } = await signedTransaction(data);
+  const reader = createTxDisputeProofBodyReader(provider);
+  const start = performance.now();
+  const recovered = await reader(hash, 'DisputeStarted', startArgs, location);
+  const elapsed = performance.now() - start;
+  expect(recovered).toEqual(body);
+  expect(elapsed).toBeLessThan(1000);
+  console.info(`dispute-body recovery: 2048 decoys, ${bytes.length} bytes, ${elapsed.toFixed(1)} ms`);
 });
 
 /** A counterparty's TriggerSmartContract built by TronWeb's own protobuf codec:

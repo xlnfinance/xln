@@ -46,12 +46,13 @@ const requireFunction = (name: string): ethers.FunctionFragment => {
 };
 
 const isDynamic = (param: ethers.ParamType): boolean =>
-  param.baseType === 'bytes' || param.baseType === 'string' ||
+  param.baseType === 'bytes' ||
+  param.baseType === 'string' ||
   (param.isArray() && (param.arrayLength === -1 || isDynamic(param.arrayChildren))) ||
   (param.isTuple() && param.components.some(isDynamic));
 
 /**
- * Where a canonical encoding of `fragment` must end, read from two words.
+ * Where a canonical encoding of `fragment` must end, before walking its tails.
  * Canonical ABI lays dynamic tails out in argument order, and the last
  * dynamic argument of both dispute calls is `bytes`, so the call ends after
  * that tail. Every head slot is one word only while no argument is a static
@@ -67,8 +68,11 @@ const canonicalLayout = (fragment: ethers.FunctionFragment): { lastSlot: number;
   return { lastSlot, headBytes: 32 * inputs.length };
 };
 
-const DISPUTE_CALLS = [requireFunction('processBatch'), requireFunction('watchtowerCounterDispute')]
-  .map(fragment => ({ fragment, selector: ethers.getBytes(fragment.selector), layout: canonicalLayout(fragment) }));
+const DISPUTE_CALLS = [requireFunction('processBatch'), requireFunction('watchtowerCounterDispute')].map(fragment => ({
+  fragment,
+  selector: ethers.getBytes(fragment.selector),
+  layout: canonicalLayout(fragment),
+}));
 type DisputeCall = (typeof DISPUTE_CALLS)[number];
 
 /**
@@ -91,12 +95,68 @@ const smallWordAt = (bytes: Uint8Array, offset: number): number | null => {
 const callAt = (bytes: Uint8Array, offset: number): DisputeCall | undefined =>
   DISPUTE_CALLS.find(call => matchesAt(bytes, offset, call.selector));
 
-/**
- * The canonical ABI call starting at `offset`, or null when those bytes only
- * resemble one. Its exact length comes from two words before any decode, so a
- * decoy costs O(1) unless it also forges a consistent layout, and a decode
- * never reads past the call it claims to be.
- */
+/** Static composites occupy their full head; dynamic values occupy one offset. */
+const headBytes = (param: ethers.ParamType): number => {
+  if (isDynamic(param)) return 32;
+  if (param.isTuple()) return param.components.reduce((size, child) => size + headBytes(child), 0);
+  if (param.isArray()) return param.arrayLength * headBytes(param.arrayChildren);
+  return 32;
+};
+
+/** Require contiguous, ordered tails, including nested tuple/array offsets. */
+const canonicalTupleEnd = (
+  bytes: Uint8Array,
+  start: number,
+  limit: number,
+  count: number,
+  paramAt: (index: number) => ethers.ParamType | undefined,
+): number | null => {
+  // Every element consumes at least one word; reject forged counts before looping.
+  if (count > (limit - start) / 32) return null;
+  let tail = 0;
+  for (let index = 0; index < count; index += 1) {
+    const param = paramAt(index);
+    if (!param) throw new Error('J_DISPUTE_CALL_LAYOUT_PARAM_MISSING');
+    tail += headBytes(param);
+  }
+  if (start + tail > limit) return null;
+  let slot = start;
+  for (let index = 0; index < count; index += 1) {
+    const param = paramAt(index);
+    if (!param) throw new Error('J_DISPUTE_CALL_LAYOUT_PARAM_MISSING');
+    if (isDynamic(param)) {
+      if (smallWordAt(bytes, slot) !== tail) return null;
+      const end = canonicalTailEnd(bytes, start + tail, limit, param);
+      if (end === null) return null;
+      tail = end - start;
+    }
+    slot += headBytes(param);
+  }
+  return start + tail;
+};
+
+const canonicalTailEnd = (bytes: Uint8Array, start: number, limit: number, param: ethers.ParamType): number | null => {
+  if (param.isTuple()) {
+    return canonicalTupleEnd(bytes, start, limit, param.components.length, index => param.components[index]);
+  }
+  if (param.isArray()) {
+    const count = param.arrayLength === -1 ? smallWordAt(bytes, start) : param.arrayLength;
+    if (count === null) return null;
+    const head = start + (param.arrayLength === -1 ? 32 : 0);
+    if (!isDynamic(param.arrayChildren)) {
+      const end = head + count * headBytes(param.arrayChildren);
+      return end <= limit ? end : null;
+    }
+    return canonicalTupleEnd(bytes, head, limit, count, () => param.arrayChildren);
+  }
+  if (param.baseType !== 'bytes' && param.baseType !== 'string') return null;
+  const length = smallWordAt(bytes, start);
+  if (length === null) return null;
+  const end = start + 32 + Math.ceil(length / 32) * 32;
+  return end <= limit ? end : null;
+};
+
+/** Reject inconsistent offset chains before allocating or decoding a claimed span. */
 const canonicalCallAt = (bytes: Uint8Array, offset: number, call: DisputeCall): string | null => {
   const args = offset + 4;
   const lastOffset = smallWordAt(bytes, args + 32 * call.layout.lastSlot);
@@ -105,6 +165,10 @@ const canonicalCallAt = (bytes: Uint8Array, offset: number, call: DisputeCall): 
   if (lastLength === null) return null;
   const length = 4 + lastOffset + 32 + Math.ceil(lastLength / 32) * 32;
   if (length > MAX_EXECUTABLE_DISPUTE_CALL_BYTES || offset + length > bytes.length) return null;
+  const inputs = call.fragment.inputs;
+  if (canonicalTupleEnd(bytes, args, offset + length, inputs.length, index => inputs[index]) !== offset + length) {
+    return null;
+  }
   const candidate = ethers.hexlify(bytes.subarray(offset, offset + length));
   try {
     const encoded = depositoryInterface.encodeFunctionData(
@@ -121,23 +185,24 @@ const canonicalCallAt = (bytes: Uint8Array, offset: number, call: DisputeCall): 
 /**
  * Exact Depository dispute calls embedded in wrapper calldata.
  *
- * Returns null for a direct processBatch/watchtowerCounterDispute call, which
- * keeps its strict decoder. A wrapper (Safe, ERC-4337, forwarder, packed
- * MultiSend) places the call at any byte offset, so every selector hit in the
- * whole calldata is checked and kept only when the bytes there are exactly
- * its canonical encoding.
+ * A wrapper (Safe, ERC-4337, forwarder, packed MultiSend) can reuse a Depository
+ * selector, so even offset zero must pass the same canonical check. With no
+ * match the caller retains its strict decoder. Exact matches consume their
+ * whole span: selector-shaped bytes inside an already decoded call are data.
  * A hit proves nothing about execution: callers accept a body only when it
  * matches the authenticated event exactly, proofbodyHash included, so a decoy
  * copy can never substitute a different body.
  */
-export const extractEmbeddedDisputeCalls = (data: string): string[] | null => {
+export const extractEmbeddedDisputeCalls = (data: string): string[] => {
   const bytes = ethers.getBytes(data);
-  if (bytes.length >= 4 && callAt(bytes, 0)) return null;
   const calls: string[] = [];
-  for (let offset = 1; offset + 4 <= bytes.length; offset += 1) {
+  for (let offset = 0; offset + 4 <= bytes.length; offset += 1) {
     const call = callAt(bytes, offset);
     const encoded = call ? canonicalCallAt(bytes, offset, call) : null;
-    if (encoded) calls.push(encoded);
+    if (encoded) {
+      calls.push(encoded);
+      offset += ethers.dataLength(encoded) - 1;
+    }
   }
   return calls;
 };

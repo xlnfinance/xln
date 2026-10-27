@@ -650,7 +650,14 @@ const recordFailedSubmit = async (
     jurisdictionName,
     error: message,
   };
-  if (failure.code === 'STALE_FINALIZATION_AWAITING_FINALITY') {
+  const attempt = jTx.type === 'batch' ? jTx.data.runtimeSubmitAttempt : undefined;
+  if (attempt && attempt.attemptNumber >= 3 && !attempt.rawTransaction && !result.txHash &&
+    failure.category === 'transient' && ['CALL_EXCEPTION', 'NO_ACTIVE_DISPUTE'].includes(failure.code)) {
+    // RPC simulation is not chain authority: alert the operator, but retain retries.
+    jSubmitLog.warn('tx.preflight_revert_retrying', {
+      ...fields, attemptNumber: attempt.attemptNumber, batchHash: jTx.type === 'batch' ? jTx.data.batchHash : undefined,
+    });
+  } else if (failure.code === 'STALE_FINALIZATION_AWAITING_FINALITY') {
     jSubmitLog.info('tx.competing_finalization_awaiting_finality', fields);
   } else if (failure.code === 'DISPUTE_FINALIZATION_AWAITING_CHAIN_TIME') {
     jSubmitLog.info('tx.dispute_finalization_awaiting_chain_time', fields);

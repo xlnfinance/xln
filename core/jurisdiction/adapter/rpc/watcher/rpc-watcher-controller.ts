@@ -118,7 +118,7 @@ const handleTransientFailure = (
 ): void => {
   session.transientFailures += 1;
   const now = Date.now();
-  if (session.transientFailures !== 1 && now - session.lastTransientLogAtMs < 10_000) return;
+  if (session.transientFailures !== 1 && session.transientFailures !== 3 && now - session.lastTransientLogAtMs < 10_000) return;
   session.lastTransientLogAtMs = now;
   emitWatcherDebug(session, {
     event: 'j_watch_transient_rpc_unavailable',
@@ -133,10 +133,11 @@ const handleTransientFailure = (
     error: watcherErrorDetails(error),
   });
   if (session.transientFailures >= 3) {
-    console.warn(
-      `[JAdapter:rpc] watcher poll retrying ` +
-        `(chain=${services.chainId}, failures=${session.transientFailures}): ${message}`,
-    );
+    rpcLog.warn(error instanceof DisputeEvidenceUnresolvedError
+      ? 'watcher.dispute_body_unresolved' : 'watcher.poll_retrying', {
+      ...buildFailurePayload(services, session, trace, message, error),
+      consecutiveFailures: session.transientFailures,
+    });
   }
 };
 
