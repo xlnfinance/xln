@@ -205,7 +205,10 @@ const createCalldataReader = (provider: Provider, native?: SolidifiedTronTransac
     } catch (error) {
       if (cache.get(hash) === pending) cache.delete(hash);
       // Resource failures are operator-visible, retain tx identity/limit, and retry from fresh bytes.
-      if (error instanceof Error && /BUDGET|LIMIT|RESOURCE|out of memory|allocation|stack size/i.test(error.message)) {
+      if (
+        error instanceof Error &&
+        /(?:^|:)J_DISPUTE_CALLDATA_BUDGET_EXCEEDED(?::|$)|out of memory|allocation|stack size/i.test(error.message)
+      ) {
         const signal = new Error(`J_DISPUTE_CALLDATA_RESOURCE_LIMIT:${hash}:${error.message}`, { cause: error });
         signal.name = 'DisputeCalldataResourceError';
         throw signal;

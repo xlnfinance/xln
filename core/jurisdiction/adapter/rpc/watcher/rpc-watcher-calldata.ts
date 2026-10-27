@@ -195,7 +195,7 @@ export class DisputeCalldata {
       const call = calls.find(candidate => candidate.selector.every((byte, i) => this.bytes[offset + i] === byte));
       if (!call) continue;
       const args = offset + 4;
-      const lastSlot = call.name === 'processBatch' ? 1 : 4;
+      const lastSlot = call.args.findLastIndex(arg => arg.dynamic);
       const lastOffset = this.word(args + lastSlot * 32);
       if (lastOffset === null || lastOffset < call.args.length * 32) continue;
       const length = this.word(args + lastOffset);
@@ -240,7 +240,8 @@ export class DisputeCalldata {
     const start = data + 32;
     if (length > J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes || this.word(start) !== 32) return;
     const tuple = { start: start + 32, layout: batchSchema };
-    if (this.end(tuple.start, tuple.layout) !== start + length) return;
+    const batchEnd = this.end(tuple.start, tuple.layout);
+    if (batchEnd === null || batchEnd > start + length) return;
     const kinds = [
       ['disputeStarts', 'DisputeStarted', 'initialProofbody'],
       ['counterDisputes', 'CounterDisputeRegistered', 'counterProofbody'],
@@ -276,6 +277,28 @@ export class DisputeCalldata {
       this.hashes.set(key, hash);
     }
     return hash;
+  }
+
+  /** One bounded executed call; never ABI-decode embedded selector candidates. */
+  directCallData(): string | null {
+    if (this.bytes.length > maxCallBytes) return null;
+    const call = calls.find(call => call.selector.every((byte, i) => this.bytes[i] === byte));
+    if (!call) return null;
+    if (call.name === 'processBatch') {
+      const offset = this.word(4);
+      if (offset === null) return null;
+      const length = this.word(4 + offset);
+      const root = this.word(4 + offset + 32);
+      // A forwarding wrapper's opaque bytes are not themselves an encoded Batch.
+      if (
+        length === null ||
+        length > J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes ||
+        root === null ||
+        root + 32 > length
+      )
+        return null;
+    } else if (this.bytes.length > J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes) return null;
+    return this.hex(0, this.bytes.length);
   }
 
   assertRecognized(kind: string): void {

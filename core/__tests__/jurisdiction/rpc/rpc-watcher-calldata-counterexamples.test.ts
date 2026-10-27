@@ -1,5 +1,6 @@
 import { expect, spyOn, test } from 'bun:test';
 import { ethers } from 'ethers';
+import { decodeDisputeProofBodyEvidenceCalldata } from '../../../jurisdiction/adapter/rpc-public';
 import {
   createTxDisputeProofBodyReader,
   createTxFinalizationEvidenceReader,
@@ -180,4 +181,83 @@ test('I3: inconsistent offset chains do not trigger full candidate decoding', as
   bytes.set(ethers.getBytes(startCall()), 2048 * 480);
   const result = await measureRecovery(ethers.hexlify(bytes));
   expect(result.decodedBytes).toBeLessThanOrEqual(encodedBodyBytes(body));
+});
+
+test.each([0, 3])('C1: processBatch accepts a trailing batch word through %i wrappers', async depth => {
+  const [batch, hanko, nonce] = depository.decodeFunctionData('processBatch', startCall());
+  const direct = depository.encodeFunctionData('processBatch', [ethers.concat([batch, ethers.ZeroHash]), hanko, nonce]);
+  expect(decodeDisputeProofBodyEvidenceCalldata(direct)[0]!.proofbody).toEqual(body);
+  const result = await measureRecovery(depth === 0 ? direct : nested(direct, depth));
+  expect(result.decodedBytes).toBeLessThanOrEqual(encodedBodyBytes(body));
+});
+
+const shortBytesBody = { ...body, transformers: [{ ...body.transformers[0]!, encodedBatch: '0xab' }] };
+const dirtyPadding = (data: string): string => {
+  const marker = `ab${'00'.repeat(31)}`;
+  const index = data.indexOf(marker);
+  if (index < 0 || data.indexOf(marker, index + 1) !== -1) throw new Error('FIXTURE_PADDING_NOT_UNIQUE');
+  return `${data.slice(0, index + 2)}01${data.slice(index + 4)}`;
+};
+
+test('C2: direct processBatch ignores non-zero encodedBatch padding', async () => {
+  const data = dirtyPadding(startCall(shortBytesBody));
+  expect(decodeDisputeProofBodyEvidenceCalldata(data)[0]!.proofbody).toEqual(shortBytesBody);
+  await measureRecovery(data, shortBytesBody);
+});
+
+test('C2: direct processBatch follows out-of-order proof-body tails', async () => {
+  const bytes = ethers.getBytes(startCall());
+  const bodyStart = (ethers.hexlify(bytes).lastIndexOf(body.watchSeed.slice(2)) - 2) / 2;
+  const readWord = (slot: number) => Number(ethers.toBigInt(bytes.subarray(slot, slot + 32)));
+  const offdeltas = bodyStart + readWord(bodyStart + 3 * 32);
+  const tokenIds = bodyStart + readWord(bodyStart + 4 * 32);
+  // Swap the 96-byte Int512[] and 64-byte uint256[] tails, preserving their values.
+  const deltas = bytes.slice(offdeltas, tokenIds);
+  const tokens = bytes.slice(tokenIds, tokenIds + 64);
+  bytes.set(tokens, offdeltas);
+  bytes.set(deltas, offdeltas + tokens.length);
+  word(bytes, bodyStart + 3 * 32, offdeltas + tokens.length - bodyStart);
+  word(bytes, bodyStart + 4 * 32, offdeltas - bodyStart);
+  const data = ethers.hexlify(bytes);
+  expect(decodeDisputeProofBodyEvidenceCalldata(data)[0]!.proofbody).toEqual(body);
+  await measureRecovery(data);
+});
+
+const dirtyWatchtowerCall = (): string => {
+  const args = [...depository.decodeFunctionData('watchtowerCounterDispute', finalizationCall())];
+  args[1] = { ...args[1].toObject(), finalProofbody: shortBytesBody };
+  return dirtyPadding(depository.encodeFunctionData('watchtowerCounterDispute', args));
+};
+
+test('C2: direct watchtower recovers a body with dirty padding', async () => {
+  const tx = await signedTransaction(dirtyWatchtowerCall());
+  const event = {
+    ...argsFor(shortBytesBody),
+    initialNonce: 7n,
+    finalProofbodyHash: argsFor(shortBytesBody).proofbodyHash,
+  };
+  expect(await createTxDisputeProofBodyReader(tx.provider)(tx.hash, 'DisputeFinalized', event, location)).toEqual(
+    shortBytesBody,
+  );
+});
+
+test('C2: direct watchtower recovers a finalization sidecar with dirty padding', async () => {
+  const tx = await signedTransaction(dirtyWatchtowerCall());
+  expect(await createTxFinalizationEvidenceReader(tx.provider)(tx.hash, location)).toEqual([
+    expect.objectContaining({
+      initialNonce: '7',
+      finalNonce: '11',
+      leftArguments: '0x12',
+      rightArguments: '0x34',
+      sig: '0x',
+    }),
+  ]);
+});
+
+test('C2/I6: the direct decoder rejects a copied hash on a different body', async () => {
+  const forged = { ...shortBytesBody, watchSeed: ethers.ZeroHash };
+  const tx = await signedTransaction(dirtyPadding(startCall(forged, argsFor(shortBytesBody).proofbodyHash)));
+  await expect(
+    createTxDisputeProofBodyReader(tx.provider)(tx.hash, 'DisputeStarted', argsFor(shortBytesBody), location),
+  ).rejects.toThrow('J_DISPUTE_PROOFBODY_EVIDENCE_NOT_FOUND');
 });

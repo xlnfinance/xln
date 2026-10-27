@@ -14,6 +14,9 @@
   or expose a typed, operator-visible error with the transaction and work limit.
 - I6: Accept only a proof body whose computed hash equals the authenticated event's
   hash; also match event kind, counterentity, nonce and proposer where applicable.
+- I7: Any calldata Solidity accepts for the executed direct call is recoverable.
+  Non-zero bytes padding and gapped or out-of-order tails are valid encodings,
+  not authority. Existing contract byte/count limits and I6 still apply.
 
 ## Algorithm
 
@@ -35,6 +38,12 @@
 6. Decode only authenticated matching spans, once each. Reuse their validated
    bodies across events. Metadata distinguishes entries sharing a proof body.
    Finalization sidecar fields remain bound to finalizationEvidenceHash.
+7. If the raw scan has no matching evidence, decode the bounded direct call once
+   with the existing validated ABI decoder, only when offset zero has a supported
+   Depository selector. Never decode embedded noncanonical candidates. Recompute
+   every candidate body hash before event matching (including dispute starts,
+   whose claimed hash alone is insufficient). Apply the same direct-call recovery
+   to finalization sidecars; the resolver still verifies their event commitment.
 
 The scanner and memoized structural checks are linear in input positions for
 the fixed ABI. Contract byte/count caps bound each raw hashing span; deduplication
@@ -57,8 +66,10 @@ fails canonical validation is an explicit evidence error, never accepted data.
   also bounded by that fixed ceiling before traversal. Schema/start memoization
   stores intrinsic ends (including rejection), so a result does not depend on
   the enclosing candidate's limit. Enclosing tails must end exactly where
-  their canonical offsets/lengths require. Scalar widths and zero padding are
-  checked without decoding.
+  their canonical offsets/lengths require. A decoded Batch may end before its
+  declared bytes length: Solidity ignores trailing batch bytes, including through
+  canonical forwarding wrappers. Scalar widths and zero padding are checked
+  without decoding on the raw path.
 - The proof reader matches event metadata, hashes the exact raw body with the
   single-tuple offset prefix, then materializes and validates only that body.
   Raw hashes are cached by absolute span; validated bodies are cached by hash
@@ -72,6 +83,13 @@ fails canonical validation is an explicit evidence error, never accepted data.
   as `DisputeCalldataResourceError`, carrying the transaction and original
   resource-limit message. A successful body lookup does not enumerate later
   embedded candidates.
+- A Solidity-valid direct call rejected by canonical span checks uses the existing
+  strict decoder once, after the raw scan. Its input is bounded by the executable
+  call byte ceiling. Full direct-call and batch decoding remains O(calldata length)
+  for the fixed contract limits; canonical matching calls still decode only their
+  matching proof body. Protocol validation errors such as TOKEN_LIMIT and
+  TRANSFORMER_LIMIT retain their original identity; only the exact calldata budget
+  error code and allocation failures become resource errors.
 - EVM authentication copies all signed envelope fields into ethers and compares
   the recomputed hash with the receipt-attested transaction ID. It avoids
   passing the RPC transaction object itself to `Transaction.from`, which reads

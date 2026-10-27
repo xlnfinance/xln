@@ -144,6 +144,15 @@ export const recoverDisputeProofBody = (
     }
     return proofbody as TxDisputeProofBodyEvidence['proofbody'];
   }
+  const direct = raw.directCallData();
+  if (direct !== null) {
+    // Solidity ignores bytes padding and follows noncontiguous tails. Decode only
+    // the bounded direct call; a copied claimed hash must never authorize a body.
+    const candidates = decodeDisputeProofBodyEvidenceCalldata(direct).filter(
+      candidate => hashCalldataProofBody(candidate.proofbody) === candidate.proofbodyHash.toLowerCase(),
+    );
+    return resolveDisputeProofBodyEvidence(candidates, eventName, args);
+  }
   raw.assertRecognized('PROOFBODY');
   throw new Error(`J_DISPUTE_PROOFBODY_EVIDENCE_NOT_FOUND:${eventName}:${nonce}`);
 };
@@ -171,6 +180,8 @@ export const recoverDisputeFinalizationEvidence = (raw: DisputeCalldata): TxFina
       sig: entry.watchtower ? '0x' : value('sig'),
     });
   }
+  const direct = candidates.length === 0 ? raw.directCallData() : null;
+  if (direct !== null) return decodeDisputeFinalizationEvidenceCalldata(direct);
   raw.assertRecognized('FINALIZATION');
   return candidates;
 };
