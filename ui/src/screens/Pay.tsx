@@ -13,7 +13,7 @@ import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
 import { useApp } from '../runtime/store';
 import { peekXLN } from '../runtime/xln-loader';
 import { DELIVERY_OPTIONS, eligibleRoutes, isEntityId, quotePaymentRoutes, routeModeError, submitPayment, type PaymentRouteQuote } from '../runtime/financial/payments';
-import { amountInputText, formatMoney, formatLimit, parseAmount, shortId } from '../runtime/format';
+import { amountInputText, formatAmount, formatMoney, formatLimit, parseAmount, shortId } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
 import { usdOf } from '../runtime/financial/prices';
 import { displayEntityName, useWallet, type AccountView } from '../runtime/views';
@@ -425,7 +425,7 @@ export function Pay() {
 												))}
 											</span>
 											<span className="meta">
-												<span>Fee {formatMoney(route.totalFee, meta.decimals, 6)}</span>
+												<span>Fee {formatAmount(route.totalFee, meta.decimals, meta.decimals)}</span>
 												<span>You send {formatMoney(route.senderAmount, meta.decimals)}</span>
 											</span>
 										</button>
@@ -492,7 +492,7 @@ export function Pay() {
 													? wallet.jurisdiction || 'sender'
 													: index === chosen.path.length - 1
 														? shortId(hop, 10, 6)
-														: `forwards atomically · fee ${formatMoney(fee, meta.decimals, 6)}${chosen.totalFee !== fee ? ` of ${formatMoney(chosen.totalFee, meta.decimals, 6)} total` : ''}`}
+														: `forwards atomically · fee ${formatAmount(fee, meta.decimals, meta.decimals)}${chosen.totalFee !== fee ? ` of ${formatAmount(chosen.totalFee, meta.decimals, meta.decimals)} total` : ''}`}
 											</div>
 										</div>
 									);
