@@ -1,6 +1,7 @@
 import { gotoApp } from '../../../utils/e2e-demo-users';
 import { test, expect } from '../../../global-setup.mts';
 import { enterStack, readWalletCheckpoint, readTourState, settledTourState, tourToken } from '../../../utils/tour/committed';
+import { startWatchtower, stopWatchtower, type WatchtowerChild } from '../../../utils/watchtower-daemon';
 import { readWalletIdentity, waitForWalletBoot, LOCAL_PASSWORD } from '../../../../ui/tests/wallet-ui';
 import {
   next,
@@ -23,6 +24,7 @@ test(
     expect(health.ok()).toBe(true);
     expect((await health.json()).marketMaker).toMatchObject({ enabled: requirements.requireMarketMaker, ok: true });
     const skipped: Record<string, string> = {};
+    let towerDaemon: WatchtowerChild | null = null;
     let page = initial;
     const wallet = await enterStack(page);
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -159,12 +161,9 @@ test(
     if (skipped.lending) await skip(page, /No signed savings position/, skipped);
     else await page.getByTestId('lending-close').click();
     await visit('protection');
-    // The stack serves its tower through the API proxy; the wallet knows that address.
-    const tower = await page.evaluate(async () => {
-      const modulePath = '/src/native/backup.ts';
-      const { nativeBackupAddress } = await import(modulePath);
-      return nativeBackupAddress() as string;
-    });
+    // Recovery needs a real tower: start the standalone daemon on this shard's leased port.
+    towerDaemon = await startWatchtower();
+    const tower = towerDaemon.baseUrl;
     await page.getByTestId('watchtower-url').fill(tower);
     await page.getByTestId('watchtower-add').click();
     await expect(page.getByTestId('sovereignty-watchtower')).toHaveAttribute('data-covered', 'yes', { timeout: 30_000 });
@@ -244,6 +243,7 @@ test(
       });
     } finally {
       await restoredContext.close();
+      await stopWatchtower(towerDaemon);
     }
   },
 );
