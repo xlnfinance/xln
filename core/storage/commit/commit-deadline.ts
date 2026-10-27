@@ -44,7 +44,7 @@ const resolveStorageWriteTimeoutMs = (): number => {
   const raw = getRuntimeProcessGlobal()?.env?.['XLN_STORAGE_WRITE_TIMEOUT_MS'];
   if (raw === undefined) return 0;
   const parsed = Number(raw);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+  if (raw.trim() === '' || !Number.isSafeInteger(parsed) || parsed < 0) {
     throw new RangeError(`STORAGE_WRITE_TIMEOUT_INVALID:${raw}`);
   }
   return parsed;

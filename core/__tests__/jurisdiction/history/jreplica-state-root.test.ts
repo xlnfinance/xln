@@ -243,7 +243,7 @@ describe('JReplica stateRoot semantics', () => {
     }
   }, 30_000);
 
-  test('retired persisted RPC zero roots normalize to explicit unavailable', () => {
+  test('retired persisted RPC array roots are rejected', () => {
     const persisted = {
       jReplicas: new Map<string, unknown>([[
         'arrakis',
@@ -260,12 +260,9 @@ describe('JReplica stateRoot semantics', () => {
       ]]),
     };
 
-    normalizePersistedSnapshotInPlace(persisted, {
+    expect(() => normalizePersistedSnapshotInPlace(persisted, {
       normalizeReplicaMap: normalizeMap,
       normalizeJReplicaMap: normalizeMap,
-    });
-
-    const restored = persisted.jReplicas.get('arrakis') as JReplica;
-    expect(restored.stateRoot).toBeNull();
+    })).toThrow('RUNTIME_MACHINE_J_STATE_ROOT_INVALID');
   });
 });

@@ -8,7 +8,7 @@ test('runtime infra restore diagnostics use structured logging', () => {
   expect(source).toContain("const infraLog = createStructuredLogger('runtime.restore');");
   expect(source).toContain("infraLog.info('jadapter.restore_retry'");
   expect(source).toContain("infraLog.debug('jadapter.derived'");
-  expect(source).toContain("infraLog.warn('gossip.restore_skipped'");
+  expect(source).not.toContain('gossip.restore_skipped');
   expect(source).toContain("infraLog.debug('browservm.restored'");
   expect(source).toContain("infraLog.error('jadapter.restore_failed'");
   expect(source).not.toContain('console.');

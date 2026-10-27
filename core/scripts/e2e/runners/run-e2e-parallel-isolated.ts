@@ -2693,6 +2693,7 @@ if (import.meta.main) {
   // (which also resolves a git common dir and therefore cannot run outside a
   // checkout). `main` answers --help before parsing anything else.
   const usageOnly = process.argv.slice(2).some(arg => arg === '--help' || arg === '-h');
+  if (!usageOnly) assertCheckEnvironment();
   // One machine, several agent worktrees: a browser batch and an HLT stand
   // must not share 32 cores, or both results are noise. See tools/stand-lock.ts.
   const standLock =

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { SigningKey, computeAddress, zeroPadValue } from 'ethers';
 
 import {
@@ -45,7 +45,7 @@ import { canonicalJurisdictionEventsHash , getJEventJurisdictionRef } from '../.
 import { foldJHistoryRoot, EMPTY_J_HISTORY_ROOT } from '../../../jurisdiction/machine/history-consensus';
 import { buildLocalJPrefixAttestation } from '../../../jurisdiction/machine/history/j-prefix-consensus';
 import { recordValidatorJHistory } from '../../../jurisdiction/machine/local-history';
-import { createEmptyEnv, restoreEnvFromCheckpointSnapshot } from '../../../runtime';
+import { closeInfraDb, createEmptyEnv, restoreEnvFromCheckpointSnapshot } from '../../../runtime';
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../../../runtime/mempool/scheduled-wake';
 import { buildRuntimeRecoveryCheckpointSnapshot } from '../../../storage/wal/snapshot';
 import {
@@ -242,6 +242,11 @@ const signDigest = (privateKey: Uint8Array, digest: string): string => {
   return `${hex(signed.signature)}${signed.recovery.toString(16).padStart(2, '0')}`;
 };
 
+const profileRuntimes: RuntimeReplica[] = [];
+afterEach(async () => {
+  for (const env of profileRuntimes.splice(0)) await closeInfraDb(env);
+});
+
 const buildRegisteredProfile = async (
   accountCount = 0,
 ): Promise<{
@@ -266,6 +271,7 @@ const buildRegisteredProfile = async (
   const state = makeState(registeredEntityId, signer, jurisdiction);
   state.config = config;
   const localEnv = createEmptyEnv('registered-board-authority:local');
+  profileRuntimes.push(localEnv);
   localEnv.runtimeSeed = 'registered-board-authority:runtime';
   state.entityEncryptionPublicKey = provisionCanonicalTestEntityEncryptionKey(
     localEnv,
@@ -1770,6 +1776,7 @@ describe('registered Entity certified board authority', () => {
     const restored = await restoreEnvFromCheckpointSnapshot(buildRuntimeRecoveryCheckpointSnapshot(localEnv), {
       runtimeId: addr('88'),
     });
+    profileRuntimes.push(restored);
     restored.state.timestamp = localEnv.state.timestamp;
     expect((await verifyHankoForHash(
       hanko,
@@ -1814,6 +1821,7 @@ describe('registered Entity certified board authority', () => {
       runtimeSeed: localEnv.runtimeSeed,
       runtimeId: localEnv.runtimeId,
     });
+    profileRuntimes.push(restored);
     expect(resolveObserverCertifiedBoardHash(
       [...restored.state.eReplicas.values()][0]!.state,
       getCertifiedBoardNodeStore(restored),

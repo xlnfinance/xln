@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import type { RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../../../runtime/types';
+import { retryFailure } from '../../../protocol/errors/failure-taxonomy';
 import { RuntimeP2P } from '../../../network/p2p/p2p';
 import { createEmptyEnv } from '../../../runtime';
 import { signRuntimeEntityInputsEnvelope } from '../../../runtime/admit/entity-input-envelope-auth.ts';
@@ -278,16 +279,21 @@ test('enqueueEntityInputsDelivery reports typed delivery result when transport s
     entityTxs: [],
   };
 
-  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toThrow(
-    /P2P_ENTITY_INPUTS_NOT_DELIVERED/,
-  );
+  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toMatchObject({
+    outcome: 'failed',
+    code: 'P2P_SEND_RETURNED_FALSE',
+    retryable: true,
+    fatal: false,
+    terminal: false,
+    transport: 'direct',
+  });
   expect(warnings[0]?.[2]).toMatchObject({
     delivery: {
       outcome: 'failed',
       code: 'P2P_SEND_RETURNED_FALSE',
-      retryable: false,
-      fatal: true,
-      terminal: true,
+      retryable: true,
+      fatal: false,
+      terminal: false,
       transport: 'direct',
     },
   });
@@ -295,9 +301,9 @@ test('enqueueEntityInputsDelivery reports typed delivery result when transport s
     code: 'P2P_ENTITY_INPUT_NOT_DELIVERED',
     delivery: {
       code: 'P2P_SEND_RETURNED_FALSE',
-      retryable: false,
-      fatal: true,
-      terminal: true,
+      retryable: true,
+      fatal: false,
+      terminal: false,
       transport: 'direct',
     },
   });
@@ -311,7 +317,7 @@ test('enqueueEntityInputsDelivery refreshes gossip from typed no-pubkey delivery
     isOpen: () => true,
     canDeliver: () => true,
     sendEntityInputsRaw: () => {
-      throw new Error('P2P_NO_PUBKEY missing gossip profile');
+      throw retryFailure('P2P_NO_PUBKEY', 'missing gossip profile');
     },
   };
 
@@ -339,22 +345,27 @@ test('enqueueEntityInputsDelivery refreshes gossip from typed no-pubkey delivery
     entityTxs: [],
   };
 
-  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toThrow(
-    /P2P_ENTITY_INPUTS_SEND_THROW/,
-  );
+  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toMatchObject({
+    outcome: 'deferred',
+    code: 'P2P_NO_PUBKEY',
+    retryable: true,
+    fatal: false,
+    terminal: false,
+    transport: 'direct',
+  });
   expect(refreshes).toBe(1);
   expect(debugEvents.at(-1)).toMatchObject({
     level: 'error',
-    code: 'P2P_NO_PUBKEY_DELIVERY_FAILED',
+    code: 'P2P_ENTITY_INPUT_NOT_DELIVERED',
     targetRuntimeId: TARGET_RUNTIME_ID,
     entityIds: [SOURCE_ENTITY_ID],
     transport: 'direct',
     delivery: {
-      outcome: 'failed',
+      outcome: 'deferred',
       code: 'P2P_NO_PUBKEY',
-      retryable: false,
-      fatal: true,
-      terminal: true,
+      retryable: true,
+      fatal: false,
+      terminal: false,
     },
   });
 });
@@ -578,9 +589,14 @@ test('enqueueEntityInputsDelivery never reroutes after direct accepts zero bytes
     signerId: '0x2222222222222222222222222222222222222222',
     entityTxs: [],
   };
-  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toThrow(
-    /P2P_ENTITY_INPUTS_NOT_DELIVERED/,
-  );
+  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toMatchObject({
+    outcome: 'failed',
+    code: 'P2P_SEND_RETURNED_FALSE',
+    retryable: true,
+    fatal: false,
+    terminal: false,
+    transport: 'direct',
+  });
   expect({ directAttempts, relayAttempts }).toEqual({ directAttempts: 1, relayAttempts: 0 });
 });
 
@@ -591,7 +607,7 @@ test('enqueueEntityInputsDelivery never reroutes after a direct pre-send encrypt
     isOpen: () => true,
     canDeliver: () => true,
     sendEntityInputsRaw: () => {
-      throw new Error('P2P_NO_PUBKEY: direct profile is stale');
+      throw retryFailure('P2P_NO_PUBKEY', 'direct profile is stale');
     },
   };
   const relayClient = {
@@ -618,9 +634,14 @@ test('enqueueEntityInputsDelivery never reroutes after a direct pre-send encrypt
     signerId: '0x2222222222222222222222222222222222222222',
     entityTxs: [],
   };
-  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toThrow(
-    /P2P_ENTITY_INPUTS_SEND_THROW/,
-  );
+  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toMatchObject({
+    outcome: 'deferred',
+    code: 'P2P_NO_PUBKEY',
+    retryable: true,
+    fatal: false,
+    terminal: false,
+    transport: 'direct',
+  });
   expect(relayAttempts).toBe(0);
 });
 

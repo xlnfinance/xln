@@ -113,7 +113,8 @@ test('restore HTTP handler returns only the canonical bundles array', async () =
     const payload = await response.json();
     expect(payload).not.toHaveProperty('bundle');
     expect(extractEncryptedRecoveryBundles(payload)).toEqual([uploaded.bundle]);
-    expect(extractEncryptedRecoveryBundles({ bundle: uploaded.bundle })).toEqual([]);
+    expect(() => extractEncryptedRecoveryBundles({ bundle: uploaded.bundle }))
+      .toThrow('RECOVERY_BACKUP_BUNDLES_INVALID');
   } finally {
     await store.close();
     rmSync(root, { recursive: true, force: true });

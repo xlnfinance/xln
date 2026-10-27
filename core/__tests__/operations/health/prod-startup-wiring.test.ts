@@ -582,7 +582,7 @@ describe('production startup wiring', () => {
     expect(criticalFiles.length).toBeGreaterThanOrEqual(15);
     for (const relativePath of criticalFiles) {
       const source = readFileSync(join(repoRoot, 'core', relativePath), 'utf8');
-      const header = source.match(/^\/\*\*([\s\S]*?)\*\//)?.[1] ?? '';
+      const header = source.match(/\/\*\*([\s\S]*?)\*\//)?.[1] ?? '';
       expect(header).toContain('Human-audit importance:');
       expect(header).toMatch(
         /Key (entrypoint|entrypoints|surface|builders|checks|functions|paths|projection|projections):/,
@@ -949,8 +949,8 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('...hubBootstraps.map(owner =>\n      planSupportAccountSetupInputs(');
     expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');
     expect(hubNode).toContain('entityAdapter = getEntityJAdapter(env, entityId);');
-    expect(hubNode).toContain("if (!message.startsWith('ENTITY_JURISDICTION_MISSING')) throw error;");
-    expect(hubNode).toContain('const activeAdapter = getActiveJAdapter(env);');
+    expect(hubNode).toContain('if (!entityAdapter) throw new Error(`DEBUG_RESERVE_JADAPTER_MISSING: entity=${entityId}`)');
+    expect(hubNode).not.toContain('const activeAdapter = getActiveJAdapter(env);');
     expect(hubNode).not.toContain("return requireJAdapterForEntity(env, entityId, 'DEBUG_RESERVE');");
     expect(hubNode).toContain('const configureHubRuntimeLogging = (env: RuntimeReplica): void => {');
     expect(hubNode).toContain("if (readBooleanEnv('XLN_HUB_VERBOSE_RUNTIME_LOGS', false)) return;");

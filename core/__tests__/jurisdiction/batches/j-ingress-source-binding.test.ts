@@ -388,23 +388,15 @@ describe('manual J-event ingress source binding', () => {
       process.cwd(),
       'frontend/src/lib/components/Entity/external-wallet-reader.ts',
     ), 'utf8');
-    const snapshotSubstituteStart = walletSource.indexOf(
-      'const response = await fetch(`${apiBase}/api/external-wallet/snapshot`',
-    );
-    const snapshotSubstituteEnd = walletSource.indexOf('const balanceByToken = new Map(', snapshotSubstituteStart);
-    const faucetStart = panelSource.indexOf('async function faucetReserves(');
-    const faucetEnd = panelSource.indexOf('async function faucetOffchain(', faucetStart);
-    expect(snapshotSubstituteStart).toBeGreaterThan(0);
-    expect(snapshotSubstituteEnd).toBeGreaterThan(snapshotSubstituteStart);
-    expect(faucetStart).toBeGreaterThan(0);
-    expect(faucetEnd).toBeGreaterThan(faucetStart);
-    expect(walletSource.slice(snapshotSubstituteStart, snapshotSubstituteEnd)).not.toContain(
-      'applyCanonicalJEventsToActiveEnv',
-    );
-    expect(panelSource.slice(faucetStart, faucetEnd)).not.toContain(
-      'applyCanonicalJEventsToActiveEnv(result.events',
-    );
-    expect(panelSource).not.toContain('async function applyCanonicalJEventsToActiveEnv');
-    expect(walletSource).not.toContain('async function applyCanonicalJEventsToActiveEnv');
+    // Guard the complete response consumers: helper extraction must not hide
+    // promotion of unauthenticated HTTP data into locally trusted J events.
+    expect(walletSource).toContain('/api/external-wallet/snapshot');
+    expect(panelSource).toContain('async function faucetReserves(');
+    for (const source of [walletSource, panelSource]) {
+      expect(source).not.toContain('applyCanonicalJEventsToActiveEnv');
+      expect(source).not.toContain('buildJEventsRuntimeInput');
+      expect(source).not.toContain('bindLocalJEventIngressSource');
+      expect(source).not.toContain('applyJEventsToEnv');
+    }
   });
 });
