@@ -96,6 +96,7 @@ const processCommittedOrderbookSwaps = (
   options,
 );
 
+// Matching requires committed offers, give-token holds and bilateral credit capacity.
 function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountReplica {
   const offers = (Array.isArray(input) ? input : [input]).map(withZeroFeeTestAuthorization).map(offer =>
     offer.crossJurisdiction
@@ -351,7 +352,7 @@ describe('orderbook matching execution mapping', () => {
       accounts: new Map([
         [MAKER_ONE, makeAccountMachine([makerOffer1])],
         [MAKER_TWO, makeAccountMachine([makerOffer2])],
-        [ALICE, makeAccountMachine([])],
+        [ALICE, makeAccountMachine([swapOffer])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -426,7 +427,7 @@ describe('orderbook matching execution mapping', () => {
       entityId: HUB_ENTITY,
       accounts: new Map([
         [MAKER_ACCOUNT, makeAccountMachine([makerOffer])],
-        [TAKER_ACCOUNT, makeAccountMachine([])],
+        [TAKER_ACCOUNT, makeAccountMachine([takerOffer])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -513,8 +514,8 @@ describe('orderbook matching execution mapping', () => {
     const entityState = {
       entityId: HUB_ENTITY,
       accounts: new Map([
-        [MAKER_ACCOUNT, makeAccountMachine([])],
-        [TAKER_ACCOUNT, makeAccountMachine([])],
+        [MAKER_ACCOUNT, makeAccountMachine([makerOffer])],
+        [TAKER_ACCOUNT, makeAccountMachine([takerOffer])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -613,9 +614,9 @@ describe('orderbook matching execution mapping', () => {
     const entityState = {
       entityId: HUB_ENTITY,
       accounts: new Map([
-        [MAKER_ACCOUNT_ONE, makeAccountMachine([])],
-        [MAKER_ACCOUNT_TWO, makeAccountMachine([])],
-        [TAKER_ACCOUNT, makeAccountMachine([])],
+        [MAKER_ACCOUNT_ONE, makeAccountMachine([makerAsk1])],
+        [MAKER_ACCOUNT_TWO, makeAccountMachine([makerAsk2])],
+        [TAKER_ACCOUNT, makeAccountMachine([takerBuy])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -722,9 +723,9 @@ describe('orderbook matching execution mapping', () => {
     const entityState = {
       entityId: HUB_ENTITY,
       accounts: new Map([
-        [ALICE_MAKER_ACCOUNT, makeAccountMachine([])],
-        [BOB_MAKER_ACCOUNT, makeAccountMachine([])],
-        [ALICE_TAKER_ACCOUNT, makeAccountMachine([])],
+        [ALICE_MAKER_ACCOUNT, makeAccountMachine([selfMakerOffer])],
+        [BOB_MAKER_ACCOUNT, makeAccountMachine([otherAskOffer])],
+        [ALICE_TAKER_ACCOUNT, makeAccountMachine([takerBuyOffer])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -888,9 +889,9 @@ describe('orderbook matching execution mapping', () => {
     const entityState = {
       entityId: HUB_ENTITY,
       accounts: new Map([
-        [BID_MAKER_ACCOUNT, makeAccountMachine([])],
-        [ASK_MAKER_ACCOUNT, makeAccountMachine([])],
-        [TAKER_ACCOUNT, makeAccountMachine([])],
+        [BID_MAKER_ACCOUNT, makeAccountMachine([makerBid])],
+        [ASK_MAKER_ACCOUNT, makeAccountMachine([makerAsk])],
+        [TAKER_ACCOUNT, makeAccountMachine([takerBuy])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -978,9 +979,9 @@ describe('orderbook matching execution mapping', () => {
     const entityState = {
       entityId: HUB_ENTITY,
       accounts: new Map([
-        [BID_MAKER_ACCOUNT, makeAccountMachine([])],
-        [ASK_MAKER_ACCOUNT, makeAccountMachine([])],
-        [TAKER_ACCOUNT, makeAccountMachine([])],
+        [BID_MAKER_ACCOUNT, makeAccountMachine([makerBid])],
+        [ASK_MAKER_ACCOUNT, makeAccountMachine([makerAsk])],
+        [TAKER_ACCOUNT, makeAccountMachine([takerSell])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -1055,38 +1056,22 @@ describe('orderbook matching execution mapping', () => {
     const entityState = {
       entityId: HUB_ENTITY,
       accounts: new Map([
-        [
-          MAKER_ACCOUNT,
-          {
-            ...makeAccountMachine([]),
-            state: {
-              ...makeAccountMachine([]).state,
-              leftEntity: HUB_ENTITY,
-              rightEntity: MAKER_ACCOUNT,
-              swapOffers: new Map([
-                [
-                  'maker-ask-historical',
-                  {
-                    offerId: 'maker-ask-historical',
-                    ...getStaticSwapTokenDimensions(2, 5),
-                    giveTokenId: 2,
-                    giveAmount: lot,
-                    wantTokenId: 5,
-                    wantAmount: (1000n * lot) / 10_000n,
-                    maxFee: 0n,
-                    minNetReceive: (1000n * lot) / 10_000n,
-                    makerIsLeft: false,
-                    createdHeight: 1,
-                    priceTicks: 1000n,
-                    quantizedGive: lot,
-                    quantizedWant: (1000n * lot) / 10_000n,
-                  },
-                ],
-              ]),
-            },
-          },
-        ],
-        [TAKER_ACCOUNT, makeAccountMachine([])],
+        [MAKER_ACCOUNT, makeAccountMachine({
+          offerId: 'maker-ask-historical',
+          fromEntity: HUB_ENTITY,
+          toEntity: MAKER_ACCOUNT,
+          accountId: MAKER_ACCOUNT,
+          giveTokenId: 2,
+          giveAmount: lot,
+          wantTokenId: 5,
+          wantAmount: (1000n * lot) / 10_000n,
+          makerIsLeft: false,
+          createdHeight: 1,
+          priceTicks: 1000n,
+          quantizedGive: lot,
+          quantizedWant: (1000n * lot) / 10_000n,
+        })],
+        [TAKER_ACCOUNT, makeAccountMachine([takerOffer])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -1243,7 +1228,7 @@ describe('orderbook matching execution mapping', () => {
       priceTicks: makerPriceTicks,
     };
 
-    const makeFeeEntityState = () => ({
+    const makeFeeEntityState = (maker: SwapOffer, taker: SwapOffer) => ({
       entityId: HUB_ENTITY,
       hubRebalanceConfig: {
         matchingStrategy: 'amount',
@@ -1256,8 +1241,8 @@ describe('orderbook matching execution mapping', () => {
         rebalanceTimeoutMs: 10 * 60 * 1000,
       },
       accounts: new Map([
-        [MAKER_ACCOUNT, makeAccountMachine([])],
-        [TAKER_ACCOUNT, makeAccountMachine([])],
+        [MAKER_ACCOUNT, makeAccountMachine([maker])],
+        [TAKER_ACCOUNT, makeAccountMachine([taker])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -1296,11 +1281,14 @@ describe('orderbook matching execution mapping', () => {
       priceTicks: makerPriceTicks,
     };
 
-    const unauthorized = processCommittedOrderbookSwaps(makeFeeEntityState(), [makerOffer, {
+    const unauthorizedTaker = {
       ...takerOffer,
       maxFee: 0n,
       minNetReceive: makerBaseQty,
-    }]);
+    };
+    const unauthorized = processCommittedOrderbookSwaps(
+      makeFeeEntityState(makerOffer, unauthorizedTaker), [makerOffer, unauthorizedTaker],
+    );
     expect(unauthorized.accountTxs.some(
       item => item.accountId === MAKER_ACCOUNT && item.tx.type === 'swap_resolve',
     )).toBe(false);
@@ -1317,7 +1305,7 @@ describe('orderbook matching execution mapping', () => {
       }),
     }));
 
-    const result = processCommittedOrderbookSwaps(makeFeeEntityState(), [makerOffer, takerOffer]);
+    const result = processCommittedOrderbookSwaps(makeFeeEntityState(makerOffer, takerOffer), [makerOffer, takerOffer]);
     const takerResolve = result.accountTxs.find(
       item =>
         item.accountId === TAKER_ACCOUNT &&
@@ -1339,7 +1327,7 @@ describe('orderbook matching execution mapping', () => {
       priceTicks: 1100n,
     };
     const improved = processCommittedOrderbookSwaps(
-      makeFeeEntityState(),
+      makeFeeEntityState(makerOffer, improvedTakerOffer),
       [makerOffer, improvedTakerOffer],
     );
     const improvedMakerResolve = improved.accountTxs.find(
@@ -1394,7 +1382,7 @@ describe('orderbook matching execution mapping', () => {
       priceTicks: makerPriceTicks,
     };
     const improvedSell = processCommittedOrderbookSwaps(
-      makeFeeEntityState(),
+      makeFeeEntityState(makerBid, improvedSellTaker),
       [makerBid, improvedSellTaker],
     );
     const improvedSellMakerResolve = improvedSell.accountTxs.find(
