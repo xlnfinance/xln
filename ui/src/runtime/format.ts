@@ -32,8 +32,19 @@ function roundToFraction(abs: bigint, decimals: number, fraction: number): { who
 	return { whole: scaled / base, digits: (scaled % base).toString().padStart(keep, '0').padEnd(fraction, '0') };
 }
 
+/** Places for an amount below one whole token: cents would print 0.005 WETH as 0.01. */
+function subUnitPlaces(abs: bigint, decimals: number, fraction: number): number {
+	return abs > 0n && abs < 10n ** BigInt(decimals) ? Math.max(fraction, Math.min(decimals, 6)) : fraction;
+}
+
 export function formatMoney(amount: bigint, decimals: number, fraction = 2): string {
 	const negative = amount < 0n;
+	const places = subUnitPlaces(negative ? -amount : amount, decimals, fraction);
+	if (places > fraction) {
+		const { whole, digits } = roundToFraction(negative ? -amount : amount, decimals, places);
+		const trimmed = digits.replace(new RegExp(`0{1,${places - fraction}}$`), '');
+		return `${negative ? '−' : ''}${whole.toLocaleString('en-US')}.${trimmed}`;
+	}
 	const { whole, digits } = roundToFraction(negative ? -amount : amount, decimals, fraction);
 	const sign = negative ? '−' : '';
 	return fraction > 0 && decimals > 0 ? `${sign}${whole.toLocaleString('en-US')}.${digits}` : `${sign}${whole.toLocaleString('en-US')}`;
@@ -44,11 +55,9 @@ export function formatMoney(amount: bigint, decimals: number, fraction = 2): str
  * token it keeps six places, so 0.0159 WETH does not read as 0.01.
  */
 export function formatLimit(amount: bigint, decimals: number, fraction = 2): string {
-	const subUnit = amount > 0n && amount < 10n ** BigInt(decimals);
-	const places = subUnit ? Math.min(decimals, 6) : fraction;
+	const places = subUnitPlaces(amount, decimals, fraction);
 	const unit = 10n ** BigInt(Math.max(0, decimals - places));
-	const text = formatMoney(amount - (amount % unit), decimals, places);
-	return subUnit && places > fraction ? text.replace(new RegExp(`0{1,${places - fraction}}$`), '') : text;
+	return formatMoney(amount - (amount % unit), decimals, fraction);
 }
 
 /** Signed money: "+230.00" / "−120.00" / "0.00". */
