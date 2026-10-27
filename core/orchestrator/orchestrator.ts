@@ -1771,6 +1771,18 @@ const handlePerformanceControl = (
   return new Response(safeStringify({ ok: true }), { headers });
 };
 
+const handleChildApiRequest = async (
+  request: Request,
+  url: URL,
+  headers: Record<string, string>,
+): Promise<Response | null> => {
+  const creditResponse = await creditOfficerChild.proxy(request);
+  if (creditResponse) return creditResponse;
+  const hubApiResponse = await handleHubApiRequest(request, url);
+  if (hubApiResponse) return hubApiResponse;
+  return handleHubAccountRequest(request, url, headers);
+};
+
 const server = Bun.serve<OrchestratorWebSocket['data']>({
   hostname: args.host,
   port: args.port,
@@ -1820,16 +1832,8 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
       return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '', operatorAuthorized);
     }
 
-    const creditResponse = await creditOfficerChild.proxy(request);
-    if (creditResponse) return creditResponse;
-    const hubApiResponse = await handleHubApiRequest(request, url);
-    if (hubApiResponse) return hubApiResponse;
-    const hubAccountResponse = await handleHubAccountRequest(
-      request,
-      url,
-      headers,
-    );
-    if (hubAccountResponse) return hubAccountResponse;
+    const childApiResponse = await handleChildApiRequest(request, url, headers);
+    if (childApiResponse) return childApiResponse;
 
     if (pathname === '/api/lending/state' && request.method === 'GET') {
       return await proxyAnyHubGet(request, `${pathname}${url.search}`);
