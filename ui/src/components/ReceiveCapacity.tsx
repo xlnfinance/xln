@@ -31,7 +31,8 @@ export function ReceiveCapacity(props: Props) {
 
 function ReceiveCapacityIntent(props: Props) {
   const id = useId();
-  const [creditPercent, setCreditPercent] = useState(0);
+  // Collateral for a future receipt is not offered yet, so the working choice (credit) is the default.
+  const [creditPercent, setCreditPercent] = useState(100);
   const commandReady = useApp(s => s.commandReady);
   const [buffer, setBuffer] = useState(true);
   const [busy, setBusy] = useState(false);
