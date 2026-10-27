@@ -207,6 +207,16 @@ const eventFromDirectPayment = (
   });
 };
 
+/** Executed want minus a fee charged in the want token; the gross alone overstates the fill. */
+const netFillWant = (data: RawRecord): string | undefined => {
+  const gross = bigintText(data['executionWantAmount']);
+  const fee = bigintText(data['feeAmount']);
+  if (gross === undefined || fee === undefined) return gross;
+  const wantTokenId = numberValue(data['restingWantTokenId']);
+  const feeTokenId = numberValue(data['feeTokenId']) ?? wantTokenId;
+  return feeTokenId === wantTokenId ? (BigInt(gross) - BigInt(fee)).toString() : gross;
+};
+
 const eventFromSwap = (
   journal: PersistedActivityJournal,
   index: number,
@@ -238,13 +248,14 @@ const eventFromSwap = (
     status: action,
     entityId: viewedEntityId || inputEntityId,
     ...(counterpartyId ? { counterpartyId } : {}),
-    // A fill names the resting offer's tokens and the executed amounts, not the original ask.
+    // A fill names the resting offer's tokens and what the maker actually received:
+    // settlement takes the hub fee out of the want token.
     ...(txType === 'swap_resolve'
       ? {
           tokenId: numberValue(data['restingGiveTokenId']),
           amount: bigintText(data['executionGiveAmount']),
           quoteTokenId: numberValue(data['restingWantTokenId']),
-          quoteAmount: bigintText(data['executionWantAmount']),
+          quoteAmount: netFillWant(data),
         }
       : {
           tokenId: numberValue(data['giveTokenId']),

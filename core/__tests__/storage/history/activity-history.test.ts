@@ -293,7 +293,7 @@ describe('runtime activity history', () => {
     });
   });
 
-  test('names a swap fill by its executed amounts, resting tokens and account counterparty', () => {
+  test('names a swap fill by its executed amounts net of the want-token fee, resting tokens and account counterparty', () => {
     const events = buildRuntimeActivityEvents({
       height: 26,
       timestamp: 1_700_000_036_000,
@@ -325,6 +325,8 @@ describe('runtime activity history', () => {
                       executionWantAmount: 11_996_000_000_000_000n,
                       restingGiveTokenId: 1,
                       restingWantTokenId: 2,
+                      feeTokenId: 2,
+                      feeAmount: 1_196_000_000_000n,
                     },
                   }],
                   deltas: [],
@@ -345,7 +347,7 @@ describe('runtime activity history', () => {
       tokenId: 1,
       amount: '29995998',
       quoteTokenId: 2,
-      quoteAmount: '11996000000000000',
+      quoteAmount: '11994804000000000',
       orderId: 'swap-1',
     });
   });
