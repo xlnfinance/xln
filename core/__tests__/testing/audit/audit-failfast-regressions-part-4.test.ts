@@ -1971,9 +1971,11 @@ describe('audit fail-fast regressions', () => {
       toEntity: left.entityId,
       nextProofNonce: 0,
     };
+    // RIGHT sent the lock, so LEFT's committed release is RIGHT's own
+    // downstream failure and must survive the collision commit as a timeout.
     const collisionDelta = {
       ...createDefaultDelta(1),
-      leftHold: 1n,
+      rightHold: 1n,
     };
     const collisionLock = {
       lockId: collisionLockId,
@@ -1982,7 +1984,7 @@ describe('audit fail-fast regressions', () => {
       revealBeforeHeight: 0,
       amount: 1n,
       tokenId: 1,
-      senderIsLeft: true,
+      senderIsLeft: false,
       createdHeight: 0,
       createdTimestamp: 0,
     };

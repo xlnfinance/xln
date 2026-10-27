@@ -19,6 +19,7 @@ import {
   publishAccountOverlay,
 } from '../../state/candidate-overlay';
 import { applyAccountTx } from '../../tx/apply';
+import { isLocallySentHtlcFailure } from '../../tx/apply-result';
 import type { AccountConsensusContext } from '../context';
 import type { HtlcEnforcementClock } from '../../htlc-deadline';
 import { assertLiveCommitMatchesFrame } from '../incoming/commit-root';
@@ -80,7 +81,9 @@ export const commitAccountFrameTransition = async (
           );
         }
         candidateEffects.push(...(result.candidateEffects ?? []));
-        if (result.outcome === 'htlc_error') timedOutHashlocks.push(result.hashlock);
+        if (result.outcome === 'htlc_error' && isLocallySentHtlcFailure(account, result)) {
+          timedOutHashlocks.push(result.hashlock);
+        }
       }
     });
 

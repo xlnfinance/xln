@@ -1,7 +1,7 @@
 use num_bigint::BigInt;
 
 use crate::swap::SwapOfferSnapshot;
-use crate::{DeliveryMode, TokenId};
+use crate::{DeliveryMode, Side, TokenId};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AccountOutput {
@@ -58,5 +58,8 @@ pub enum AccountOutput {
         token_id: TokenId,
         amount: BigInt,
         reason: Option<String>,
+        /// Payer side of the released lock. The Entity unwinds a route only
+        /// for a lock it sent (TS `isLocallySentHtlcFailure`). Not on the wire.
+        sender: Side,
     },
 }

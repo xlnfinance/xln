@@ -110,6 +110,7 @@ function applyHtlcResolution(
     lock.hashlock,
     lock.tokenId,
     lock.amount,
+    lock.senderIsLeft,
     data.outcome === 'error' ? data.reason : undefined,
   );
 }

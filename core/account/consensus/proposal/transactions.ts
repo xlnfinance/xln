@@ -27,7 +27,7 @@ import {
   type AccountTxFailureDisposition,
   type AccountTxRejection,
 } from '../../tx/apply-types';
-import { accountTxRejectionMessage, assertNever } from '../../tx/apply-result';
+import { accountTxRejectionMessage, assertNever, isLocallySentHtlcFailure } from '../../tx/apply-result';
 import { canonicalAccountTxForFrameHash } from '../frame/hash';
 import { encodeAccountStateValue } from '../../commitment/account-state-value';
 import { createHash } from '../../../support/platform-crypto';
@@ -150,6 +150,7 @@ const applyProposalTransaction = async (
 };
 
 const collectSuccessfulTransaction = (
+  account: ProposalTransactionContext['account'],
   effects: ProposalTransactionEffects,
   validTxs: AccountTx[],
   validMempoolTxs: AccountTx[],
@@ -169,7 +170,7 @@ const collectSuccessfulTransaction = (
   }
   switch (result.outcome) {
     case 'htlc_error':
-      effects.timedOutHashlocks.push(result.hashlock);
+      if (isLocallySentHtlcFailure(account, result)) effects.timedOutHashlocks.push(result.hashlock);
       return;
     case 'applied':
     case 'htlc_secret':
@@ -305,6 +306,7 @@ export const validateProposalTransactions = async (
   if (optimistic) {
     for (const applied of optimistic.applied) {
       collectSuccessfulTransaction(
+        context.account,
         effects,
         validTxs,
         validMempoolTxs,
@@ -351,6 +353,7 @@ export const validateProposalTransactions = async (
     }
     clonedMachine = commitAccountTransition(transition, 'proposalTx').account;
     collectSuccessfulTransaction(
+      context.account,
       effects,
       validTxs,
       validMempoolTxs,

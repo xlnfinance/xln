@@ -212,6 +212,7 @@ pub(crate) fn apply_resolve(
                     token_id: lock.token_id(),
                     amount: lock.amount().clone(),
                     reason: reason.clone(),
+                    sender: lock.sender(),
                 },
             )
         }

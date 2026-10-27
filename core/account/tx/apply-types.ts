@@ -126,6 +126,8 @@ export type ApplyAccountTxHtlcError = Readonly<AccountTxEvents & {
   hashlock: Hashlock;
   amount: TokenAmount;
   tokenId: TokenId;
+  /** Payer side of the released lock; Entity followups act only on locks they sent. */
+  senderIsLeft: boolean;
   reason?: string;
 }>;
 

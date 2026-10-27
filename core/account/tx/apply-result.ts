@@ -1,5 +1,6 @@
 import type { AccountOutput, AccountTx } from '../../types/account';
 import { AccountDeltaError } from '../state/delta';
+import { isLeftEntity } from '../../protocol/identity/entity-id';
 import type {
   AccountTxRejection,
   ApplyAccountTxApplied,
@@ -54,6 +55,7 @@ export const accountTxHtlcError = (
   hashlock: string,
   tokenId: number,
   amount: bigint,
+  senderIsLeft: boolean,
   reason?: string,
 ): ApplyAccountTxHtlcError => ({
   ok: true,
@@ -63,8 +65,22 @@ export const accountTxHtlcError = (
   hashlock: toHashlock(hashlock),
   tokenId: toTokenId(tokenId),
   amount: toTokenAmount(amount),
+  senderIsLeft,
   ...(reason === undefined ? {} : { reason }),
 });
+
+/**
+ * Only a failed lock this Entity sent is a downstream failure that may unwind
+ * its Paybook route. Releasing a lock the counterparty sent (our own
+ * `hashlock_already_active` rejection, an inbound expiry, or our upstream
+ * `downstream_error`) never authorizes touching the route: a colliding peer
+ * could otherwise cancel the honest upstream lock while our downstream lock
+ * stays claimable.
+ */
+export const isLocallySentHtlcFailure = (
+  account: { proofHeader: { fromEntity: string; toEntity: string } },
+  result: ApplyAccountTxHtlcError,
+): boolean => result.senderIsLeft === isLeftEntity(account.proofHeader.fromEntity, account.proofHeader.toEntity);
 
 export const accountTxSwapOfferCreated = (
   events: readonly string[],

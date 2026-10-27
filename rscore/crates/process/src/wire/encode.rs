@@ -164,6 +164,7 @@ fn account_output(value: &AccountOutput) -> AbiValue {
             token_id,
             amount,
             reason,
+            ..
         } => tuple(vec![
             AbiValue::Integer(2),
             AbiValue::Text(lock_id.clone()),

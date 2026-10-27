@@ -29,7 +29,12 @@ import { HEAVY_LOGS } from '../../support/debug-flags';
 import { applyAccountTx } from '../tx/apply';
 import type { AccountDraftReplica } from '../state/account-state-draft';
 import type { AccountTxRejection, ApplyAccountTxOk } from '../tx/apply-types';
-import { accountTxFailureMessage, accountTxValidationRejected, assertNever } from '../tx/apply-result';
+import {
+  accountTxFailureMessage,
+  accountTxValidationRejected,
+  assertNever,
+  isLocallySentHtlcFailure,
+} from '../tx/apply-result';
 import { prepareAccountJClaimTx } from '../j-claims/j-claim-transition';
 import { encodeAccountStateValue } from '../commitment/account-state-value';
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
@@ -179,6 +184,7 @@ const collectIncomingOkOutcome = (
   result: ApplyAccountTxOk,
   replay: IncomingFrameReplay,
   fromEntityId: string,
+  account: AccountDraftReplica,
 ): void => {
   switch (result.outcome) {
     case 'applied':
@@ -187,7 +193,7 @@ const collectIncomingOkOutcome = (
       replay.revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
       return;
     case 'htlc_error':
-      replay.timedOutHashlocks.push(result.hashlock);
+      if (isLocallySentHtlcFailure(account, result)) replay.timedOutHashlocks.push(result.hashlock);
       return;
     case 'swap_offer_created':
       replay.swapOffersCreated.push(result.swapOfferCreated);
@@ -290,7 +296,7 @@ const replayIncomingFrameOnClone = async (
     }
     replay.processEvents.push(...result.events);
     replay.candidateEffects.push(...(result.candidateEffects ?? []));
-    collectIncomingOkOutcome(result, replay, input.fromEntityId);
+    collectIncomingOkOutcome(result, replay, input.fromEntityId, clonedMachine);
   }
   return { kind: 'continue', replay };
 };

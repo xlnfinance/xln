@@ -259,9 +259,14 @@ export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHash
   if (timedOutHashlocks.length === 0) return;
   const bookIntentSlot = ctx.bookIntentSlot;
   if (!bookIntentSlot) throw new Error('ACCOUNT_INPUT_BOOK_INTENT_SLOT_REQUIRED');
+  // Account consensus reports only failures of locks this Entity sent. The
+  // hashlock alone does not name the route's lock: the same hashlock can be
+  // locked toward us on any Account, so the failure must also come from the
+  // route's own outbound Account before it may unwind the upstream lock.
+  const counterparty = ctx.input.fromEntityId.toLowerCase();
   for (const timedOutHashlock of timedOutHashlocks) {
     const route = bookIntentSlot.getPaybookEntry(newState, timedOutHashlock);
-    if (!route) continue;
+    if (!route || route.outboundEntity?.toLowerCase() !== counterparty) continue;
     if (hasInboundPayment(route)) {
       accountTxs.push({
         accountId: route.inboundEntity,

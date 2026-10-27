@@ -334,6 +334,11 @@ fn preapply_resolves(
         account_txs,
         outputs,
     };
+    let local_side = if state.entity_id.as_str() < commit.account_id.as_str() {
+        xln_rscore_engine::Side::Left
+    } else {
+        xln_rscore_engine::Side::Right
+    };
     let mut retained = Vec::with_capacity(commit.transitions.len());
     let mut timed_out = Vec::new();
     let mut revealed = Vec::new();
@@ -358,7 +363,13 @@ fn preapply_resolves(
             .ok_or_else(|| EntityKernelError::output("HTLC_RESOLVE_OUTPUT_MISSING"))?;
         match output {
             AccountOutput::HtlcSecret { .. } => revealed.push(output),
-            AccountOutput::HtlcError { .. } => timed_out.push(output),
+            // Only a released lock this Entity sent may unwind a route; our own
+            // rejection of a colliding inbound lock must never reach it.
+            AccountOutput::HtlcError { sender, .. } => {
+                if sender == local_side {
+                    timed_out.push(output);
+                }
+            }
             _ => return Err(EntityKernelError::output("HTLC_RESOLVE_KIND_OR_ID")),
         }
     }
@@ -677,7 +688,7 @@ fn apply_commit_transitions(
         direct_payment_forward(state, output, &mut effects)?;
     }
     for output in &timed_out {
-        timed_out_followup(state, paybook, output, &mut effects)?;
+        timed_out_followup(state, paybook, &commit.account_id, output, &mut effects)?;
     }
     for output in &revealed {
         revealed_secret_followup(
@@ -1238,4 +1249,163 @@ pub fn apply_entity_kernel(
         outputs: result.outputs,
         commitments,
     })
+}
+
+#[cfg(test)]
+mod htlc_timeout_tests {
+    use xln_rscore_engine::{AccountDomain, DepositoryAddress, HtlcResolveTx, Side};
+
+    use super::*;
+    use crate::types::CommittedAccountTransition;
+    use crate::{PaybookEntry, PaybookState};
+
+    const HUB: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
+    const INBOUND: &str = "0x1111111111111111111111111111111111111111111111111111111111111111";
+    const OUTBOUND: &str = "0x3333333333333333333333333333333333333333333333333333333333333333";
+    const ATTACKER: &str = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const HASHLOCK: &str = "0x4545454545454545454545454545454545454545454545454545454545454545";
+
+    fn forwarding_hub() -> EntityStateSlice {
+        let mut state = EntityStateSlice::empty(HUB, 1_700_000_000_000);
+        let entry = PaybookEntry {
+            hashlock: HASHLOCK.to_string(),
+            description: None,
+            token_id: Some(1),
+            amount: Some(BigInt::from(10)),
+            started_at_ms: None,
+            originated: false,
+            inbound_entity: Some(INBOUND.to_string()),
+            outbound_entity: Some(OUTBOUND.to_string()),
+            inbound_settled: false,
+            outbound_settled: false,
+            secret: None,
+            secret_ack_pending: false,
+            secret_ack_started_at: None,
+            secret_ack_deadline_at: None,
+            pending_fee: Some(BigInt::from(1)),
+            created_timestamp: 1_700_000_000_000,
+        };
+        state.paybook = PaybookState::from_entries([entry], BigInt::from(0)).unwrap();
+        state
+    }
+
+    fn error_commit(account_id: &str, sender: Side, reason: &str) -> OrderedAccountCommit {
+        OrderedAccountCommit {
+            account_id: account_id.to_string(),
+            domain: AccountDomain::new(
+                31_337,
+                DepositoryAddress::parse(&format!("0x{}", "88".repeat(20))).expect("depository"),
+            )
+            .expect("domain"),
+            scope: JurisdictionScope::Same,
+            committed_via_new_frame: false,
+            frame_state_hash: format!("0x{}", "55".repeat(32)),
+            frame_height: 2,
+            frame_timestamp: 2_000,
+            inbound_position: 0,
+            transitions: vec![CommittedAccountTransition {
+                tx: AccountTx::HtlcResolve(HtlcResolveTx {
+                    lock_id: HASHLOCK.into(),
+                    outcome: HtlcResolveOutcome::Error {
+                        reason: Some(reason.to_string()),
+                    },
+                }),
+                outputs: vec![AccountOutput::HtlcError {
+                    lock_id: HASHLOCK.into(),
+                    hashlock: HASHLOCK.into(),
+                    token_id: TokenId::new(1).unwrap(),
+                    amount: BigInt::from(10),
+                    reason: Some(reason.to_string()),
+                    sender,
+                }],
+            }],
+        }
+    }
+
+    fn run(
+        state: &mut EntityStateSlice,
+        mut commit: OrderedAccountCommit,
+    ) -> (
+        Vec<AccountOutput>,
+        Vec<TargetedAccountTx>,
+        Vec<EntityKernelOutput>,
+    ) {
+        let mut changes = PaybookChanges::default();
+        let mut outputs = Vec::new();
+        let mut account_txs = Vec::new();
+        let (timed_out, _) = preapply_resolves(
+            state,
+            &mut changes,
+            &mut commit,
+            None,
+            &mut outputs,
+            &mut account_txs,
+        )
+        .unwrap();
+        let mut effects = PaybookEffects {
+            account_txs: &mut account_txs,
+            outputs: &mut outputs,
+        };
+        for output in &timed_out {
+            timed_out_followup(
+                state,
+                &mut changes,
+                &commit.account_id,
+                output,
+                &mut effects,
+            )
+            .unwrap();
+        }
+        changes.commit_sequential(state).unwrap();
+        (timed_out, account_txs, outputs)
+    }
+
+    fn route_live(state: &EntityStateSlice) -> bool {
+        state.paybook.entry(HASHLOCK).unwrap().is_some()
+    }
+
+    #[test]
+    fn committed_collision_rejection_from_a_third_peer_never_unwinds_the_route() {
+        let mut state = forwarding_hub();
+        // ATTACKER (right of HUB) sent the colliding lock; HUB's own
+        // hashlock_already_active rejection released it.
+        let (timed_out, account_txs, outputs) = run(
+            &mut state,
+            error_commit(ATTACKER, Side::Right, "hashlock_already_active"),
+        );
+        assert!(timed_out.is_empty());
+        assert!(
+            account_txs.is_empty(),
+            "honest upstream lock stays claimable"
+        );
+        assert!(outputs.is_empty());
+        assert!(route_live(&state));
+    }
+
+    #[test]
+    fn committed_collision_rejection_from_the_inbound_peer_never_unwinds_the_route() {
+        let mut state = forwarding_hub();
+        // INBOUND is left of HUB and sent the colliding lock.
+        let (timed_out, account_txs, _) = run(
+            &mut state,
+            error_commit(INBOUND, Side::Left, "hashlock_already_active"),
+        );
+        assert!(timed_out.is_empty());
+        assert!(account_txs.is_empty());
+        assert!(route_live(&state));
+    }
+
+    #[test]
+    fn downstream_failure_of_the_hub_lock_still_unwinds_upstream() {
+        let mut state = forwarding_hub();
+        // HUB is left of OUTBOUND and sent the routed lock.
+        let (timed_out, account_txs, _) = run(
+            &mut state,
+            error_commit(OUTBOUND, Side::Left, "no_capacity"),
+        );
+        assert_eq!(timed_out.len(), 1);
+        assert_eq!(account_txs.len(), 1);
+        assert_eq!(account_txs[0].0, INBOUND);
+        assert!(!route_live(&state));
+    }
 }

@@ -7,6 +7,8 @@ import { failOriginatedPayment, HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../payb
 import { applyBookIntentProgram, createBookIntentProgram, type BookIntentProgram } from '../../../entity/books/book-intents';
 import type { EntityState, PaybookEntry } from '../../../entity/types';
 import { handleHtlcResolve } from '../../../account/tx/handlers/htlc/resolve';
+import { isLocallySentHtlcFailure } from '../../../account/tx/apply-result';
+import { isLeftEntity } from '../../../protocol/identity/entity-id';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { beginAccountCollectionOverlay } from '../../../account/state/account-overlay-map';
@@ -58,6 +60,28 @@ const setup = (kind: 'forward' | 'reject' | 'final', overrides: {
 
 const applyLock = (fixture: ReturnType<typeof setup>, committedViaNewFrame = true) =>
   applyCommittedHtlcLockFollowup(fixture.context as never, fixture.tx, fixture.frame as never, fixture.proposerIsLeft, committedViaNewFrame);
+
+/**
+ * Commit the hub's queued collision rejection on the colliding peer's Account
+ * through the real resolve handler, then report the committed failure exactly
+ * as Account consensus does: only a lock the hub itself sent is a timeout.
+ */
+const commitHubRejection = async (hub: string, peer: string, rejection: unknown): Promise<string[]> => {
+  const hubIsLeft = isLeftEntity(hub, peer);
+  const locks = PersistentAccountStateMap.fromEntries('locks', [[hashlock, {
+    lockId: hashlock, hashlock, tokenId: 1, amount: 10n, timelock: 100_000n,
+    revealBeforeHeight: 100, senderIsLeft: !hubIsLeft, createdHeight: 1, createdTimestamp: 1,
+  }]]);
+  const deltas = PersistentAccountStateMap.fromEntries('deltas', [[1, {
+    tokenId: 1, collateral: 0n, ondelta: 0n, offdelta: 0n, leftCreditLimit: 0n, rightCreditLimit: 0n,
+    leftHold: hubIsLeft ? 0n : 10n, rightHold: hubIsLeft ? 10n : 0n,
+  }]]);
+  const draft = { locks: beginAccountCollectionOverlay(locks).view, deltas: beginAccountCollectionOverlay(deltas).view };
+  const result = await handleHtlcResolve(draft as never, rejection as never, hubIsLeft, 1, 1);
+  if (!result.ok || result.outcome !== 'htlc_error') throw new Error('HUB_REJECTION_DID_NOT_COMMIT');
+  expect(result.senderIsLeft).toBe(!hubIsLeft);
+  return isLocallySentHtlcFailure({ proofHeader: { fromEntity: hub, toEntity: peer } }, result) ? [result.hashlock] : [];
+};
 
 const secretResolve = (accountId: string) => ({
   accountId, tx: { type: 'htlc_resolve', data: { lockId: hashlock, outcome: 'secret', secret } },
@@ -207,7 +231,7 @@ describe('same-frame incoming HTLC followup', () => {
     const state = paymentState([[hashlock, { hashlock, inboundEntity: id('1'), outboundEntity: id('3'), createdTimestamp: 1 }]]);
     const program = createBookIntentProgram();
     const accountTxs: Array<{ accountId: string; tx: unknown }> = [];
-    const context = { state, newState: state, accountTxs, candidateEffects: [] };
+    const context = { state, newState: state, input: { fromEntityId: id('3') }, accountTxs, candidateEffects: [] };
     applyHtlcTimeoutFollowups({ ...context, bookIntentSlot: program.openSlot() } as never, [hashlock]);
     applyHtlcTimeoutFollowups({ ...context, bookIntentSlot: program.openSlot() } as never, [hashlock]);
     applyBookIntentProgram(state, program);
@@ -216,5 +240,50 @@ describe('same-frame incoming HTLC followup', () => {
     }]);
     expect(state.paybook.entries.has(hashlock)).toBe(false);
     expect(context.candidateEffects).toEqual([]);
+  });
+  for (const [label, colliding] of [['third peer', id('a')], ['route inbound peer', id('1')]] as const) {
+    test(`committed collision rejection from the ${label} never unwinds the existing route`, async () => {
+      const first = setup('forward');
+      await applyLock(first);
+      applyBookIntentProgram(first.state, first.program);
+      const route = first.state.paybook.entries.get(hashlock);
+      expect(route).toMatchObject({ inboundEntity: first.from, outboundEntity: first.next });
+      // The route's inbound peer can re-lock the hashlock only after its own
+      // Account lock left (same lockId); any other peer can at once.
+      const collision = setup('forward', { from: colliding, next: id('b'), frameHash: id('d'), state: first.state });
+      await applyLock(collision);
+      const [rejection] = collision.accountTxs;
+      expect(rejection).toEqual({ accountId: colliding, tx: {
+        type: 'htlc_resolve', data: { lockId: hashlock, outcome: 'error', reason: 'hashlock_already_active' },
+      } });
+      const timedOut = await commitHubRejection(first.state.entityId, colliding, rejection!.tx);
+      expect(timedOut).toEqual([]);
+      const program = createBookIntentProgram();
+      const accountTxs: Array<{ accountId: string; tx: unknown }> = [];
+      const candidateEffects: unknown[] = [];
+      const context = { state: first.state, newState: first.state, input: { fromEntityId: colliding }, accountTxs, candidateEffects };
+      // Bound by counterparty too: even a reported hashlock from a non-outbound
+      // Account must not touch the route.
+      applyHtlcTimeoutFollowups({ ...context, bookIntentSlot: program.openSlot() } as never, [hashlock]);
+      applyBookIntentProgram(first.state, program);
+      expect(accountTxs).toEqual([]);
+      expect(candidateEffects).toEqual([]);
+      expect(first.state.paybook.entries.get(hashlock)).toBe(route);
+      // The colluding recipient's downstream reveal still pays the hub upstream.
+      const secretProgram = createBookIntentProgram();
+      applyHtlcSecretFollowups({ ...context, bookIntentSlot: secretProgram.openSlot() } as never, [{ secret, hashlock }]);
+      expect(accountTxs).toEqual([secretResolve(first.from)]);
+    });
+  }
+
+  test('failure of an originated lock from a non-outbound Account keeps the payment live', () => {
+    const state = paymentState([[hashlock, { hashlock, originated: true, outboundEntity: id('3'), createdTimestamp: 1 }]]);
+    const program = createBookIntentProgram();
+    const candidateEffects: unknown[] = [];
+    const context = { state, newState: state, input: { fromEntityId: id('a') }, accountTxs: [], candidateEffects };
+    applyHtlcTimeoutFollowups({ ...context, bookIntentSlot: program.openSlot() } as never, [hashlock]);
+    applyBookIntentProgram(state, program);
+    expect(candidateEffects).toEqual([]);
+    expect(state.paybook.entries.has(hashlock)).toBe(true);
   });
 });

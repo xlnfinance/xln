@@ -176,6 +176,7 @@ fn error_output_preserves_lock_identity_and_returns_exact_base_root() {
             token_id: token(1),
             amount: 10.into(),
             reason: Some(String::new()),
+            sender: Side::Left,
         }]
     );
     let candidate = transition.candidate().expect("error candidate");

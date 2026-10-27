@@ -816,12 +816,23 @@ pub(crate) fn dispute_evidence_secret(
 pub(crate) fn timed_out_followup(
     state: &mut EntityStateSlice,
     paybook: &mut PaybookChanges,
+    account_id: &str,
     output: &AccountOutput,
     effects: &mut PaybookEffects<'_>,
 ) -> Result<(), EntityKernelError> {
     let AccountOutput::HtlcError { hashlock, .. } = output else {
         return Err(EntityKernelError::output("HTLC_ERROR_OUTPUT_KIND"));
     };
+    // The hashlock alone does not name the route's lock (TS
+    // applyHtlcTimeoutFollowups): only the route's own outbound Account may
+    // unwind it.
+    let owns_route = paybook
+        .entry(state, hashlock)?
+        .and_then(|route| route.outbound_entity.as_deref())
+        .is_some_and(|outbound| outbound.eq_ignore_ascii_case(account_id));
+    if !owns_route {
+        return Ok(());
+    }
     let Some(route) = terminate_route_in_frame(state, paybook, hashlock)? else {
         return Ok(());
     };
