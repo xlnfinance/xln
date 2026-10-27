@@ -187,7 +187,14 @@ test(
       await page.getByLabel('Confirm password', { exact: true }).fill(LOCAL_PASSWORD);
       await page.getByRole('button', { name: 'Save and open', exact: true }).click();
       await waitForWalletBoot(page);
-      expect((await readWalletCheckpoint(page, backed.frame.height)).frame).toEqual(backed.frame);
+      // A snapshot restore re-derives state, not the original frame's input metadata:
+      // compare identity, accounts and the committed state roots.
+      const restored = await readWalletCheckpoint(page, backed.frame.height);
+      expect(restored.runtimeId).toBe(backed.runtimeId);
+      expect(restored.entityId).toBe(backed.entityId);
+      expect(restored.accounts).toEqual(backed.accounts);
+      expect(restored.frame.stateHash).toBe(backed.frame.stateHash);
+      expect(restored.frame.postStateHash).toBe(backed.frame.postStateHash);
       await page.getByTestId('wallet-tutorial').click();
       await page.getByTestId('tour-chapter').selectOption('recovery');
       await next(page, 'company');
