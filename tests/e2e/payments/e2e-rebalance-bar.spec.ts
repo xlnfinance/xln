@@ -1162,7 +1162,11 @@ async function driveFaucetsUntilRequestCollateralCommitted(
       return { faucets: faucets + 1, snapshot: lastSnapshot, committed };
     }
 
+    // A request already in the Account (its fee taken, so uncollateralized can
+    // sit just under the soft limit) is the trigger too; the persisted receipt
+    // may lag the live state, so wait for it instead of sending another faucet.
     const triggeredOrSettled =
+      BigInt(lastSnapshot.requested || '0') > 0n ||
       BigInt(lastSnapshot.uncollateralized || '0') >= softLimitUnits ||
       BigInt(lastSnapshot.collateral || '0') > initialCollateral;
     if (!triggeredOrSettled) {
