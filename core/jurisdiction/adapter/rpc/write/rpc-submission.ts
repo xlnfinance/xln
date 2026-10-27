@@ -12,7 +12,7 @@ import {
   applyBatchFeeOverrides,
   planRpcBatchSubmission,
 } from './rpc-batch-plan';
-import { preflightProcessBatch } from './rpc-batch-preflight';
+import { preflightProcessBatch, simulationFailure } from './rpc-batch-preflight';
 import { eventCarriers } from '../rpc-boundary';
 import type { RpcChainIo } from '../rpc-chain-io';
 import type { RpcContractStack } from '../rpc-contract-stack';
@@ -362,9 +362,14 @@ const executeBatchSubmission = async (
     depositoryAddress: await context.stack.getDepositoryAddress(),
   });
   try {
-    const estimatedGas = await context.chainIo.estimateGas(
-      () => depository.processBatch.estimateGas(data.encodedBatch, hankoData, entityNonce),
-    );
+    let estimatedGas: bigint;
+    try {
+      estimatedGas = await context.chainIo.estimateGas(
+        () => depository.processBatch.estimateGas(data.encodedBatch, hankoData, entityNonce),
+      );
+    } catch (error) {
+      return await reconcileFailure(simulationFailure(error), hasNoActiveDisputeSelector(error));
+    }
     const gasLimit = resolveProcessBatchGasLimit(
       estimatedGas,
       plan.batch,

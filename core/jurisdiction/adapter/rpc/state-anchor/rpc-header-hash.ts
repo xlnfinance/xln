@@ -40,7 +40,8 @@ const FORK_FIELDS = [
   ['requestsHash', hash32],
 ] as const;
 
-const ethereumHeaderHash = (header: Record<string, unknown>): string => {
+/** keccak256(RLP(header)) of an RPC block object; throws on any malformed field. */
+export const ethereumHeaderHash = (header: Record<string, unknown>): string => {
   const fields = [
     hash32(header['parentHash'], 'parentHash'),
     hash32(header['sha3Uncles'], 'sha3Uncles'),

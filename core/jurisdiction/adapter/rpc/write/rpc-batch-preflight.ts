@@ -50,6 +50,18 @@ const revertDetail = (depository: Depository, revertData: unknown): string => {
   }
 };
 
+/**
+ * eth_call and eth_estimateGas are answers from one unauthenticated RPC, which
+ * may lag or lie. Their revert never latches terminalFailure: that would let
+ * the node permanently block, say, a counter-dispute. Only a mined receipt
+ * revert is chain evidence; a simulation failure stays retryable.
+ */
+export const simulationFailure = (
+  error: unknown,
+  override: { code?: string; message?: string } = {},
+): ReturnType<typeof makeJAdapterFailureResult> =>
+  makeJAdapterFailureResult(error, { ...override, category: 'transient' });
+
 export const preflightProcessBatch = async (input: ProcessBatchPreflight): Promise<JSubmitResult | null> => {
   try {
     await input.depository.processBatch.staticCall(input.encodedBatch, input.hankoData, input.entityNonce, {
@@ -71,8 +83,7 @@ export const preflightProcessBatch = async (input: ProcessBatchPreflight): Promi
     if (input.disputeStartDebug.length > 0) {
       detail += ` disputeStart=${safeStringify(input.disputeStartDebug)}`;
     }
-    return makeJAdapterFailureResult(error, {
-      category: 'terminal',
+    return simulationFailure(error, {
       code: selector === NO_ACTIVE_DISPUTE_SELECTOR
         ? 'NO_ACTIVE_DISPUTE'
         : failure.code === 'J_ADAPTER_TERMINAL' ? 'CALL_EXCEPTION' : failure.code,

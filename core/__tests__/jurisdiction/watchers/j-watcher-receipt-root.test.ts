@@ -21,6 +21,7 @@ import {
 import { isTransientRpcUnavailableError } from '../../../jurisdiction/adapter/rpc-public';
 import { createLogBloomMatcher, normalizeReceiptHash, parseReceiptHex } from '../../../jurisdiction/machine/receipt-codec';
 import { ERC20Mock__factory } from '../../../../jurisdictions/typechain-types';
+import { sealedHeader } from '../../helpers/sealed-header';
 
 const zeroBloom = `0x${'00'.repeat(256)}`;
 
@@ -152,23 +153,15 @@ describe('authenticated J watcher receipts', () => {
   });
 
   test('rejects a mixed-fork range at the exact post-receipt header fence', async () => {
-    const block = (number: number, hash: string, parentHash: string) => ({
-      number: ethers.toQuantity(number),
-      hash,
-      parentHash,
-      receiptsRoot: `0x${'00'.repeat(32)}`,
-      stateRoot: `0x${'55'.repeat(32)}`,
-      logsBloom: zeroBloom,
-      transactions: [],
-    });
-    const forkA = new Map([
-      [1, block(1, `0x${'11'.repeat(32)}`, `0x${'00'.repeat(32)}`)],
-      [2, block(2, `0x${'22'.repeat(32)}`, `0x${'11'.repeat(32)}`)],
-    ]);
-    const forkB = new Map([
-      [1, block(1, `0x${'33'.repeat(32)}`, `0x${'00'.repeat(32)}`)],
-      [2, block(2, `0x${'44'.repeat(32)}`, `0x${'33'.repeat(32)}`)],
-    ]);
+    const fork = (extraData: string) => {
+      const first = sealedHeader({ number: 1, parentHash: `0x${'00'.repeat(32)}`, stateRoot: `0x${'55'.repeat(32)}`, extraData });
+      return new Map([
+        [1, first],
+        [2, sealedHeader({ number: 2, parentHash: first.hash, stateRoot: `0x${'55'.repeat(32)}`, extraData })],
+      ]);
+    };
+    const forkA = fork('0x0a');
+    const forkB = fork('0x0b');
     const reads = new Map<number, number>();
     const send = async (method: string, params: unknown[]): Promise<unknown> => {
       expect(method).toBe('eth_getBlockByNumber');
@@ -189,58 +182,36 @@ describe('authenticated J watcher receipts', () => {
   });
 
   test('binds the tip stateRoot to both header passes and requires it on Ethereum', async () => {
-    const block = (number: number, hash: string, parentHash: string, stateRoot?: string) => ({
-      number: ethers.toQuantity(number),
-      hash,
-      parentHash,
-      receiptsRoot: `0x${'00'.repeat(32)}`,
-      ...(stateRoot === undefined ? {} : { stateRoot }),
-      logsBloom: zeroBloom,
-      transactions: [],
-    });
-    const genesisHash = `0x${'11'.repeat(32)}`;
-    const tipHash = `0x${'22'.repeat(32)}`;
-    const reader = (stateRootForRead: (read: number) => string | undefined) => {
+    const genesis = sealedHeader({ number: 1, parentHash: `0x${'00'.repeat(32)}`, stateRoot: `0x${'55'.repeat(32)}` });
+    const tip = (stateRoot?: string) => sealedHeader({ number: 2, parentHash: genesis.hash, ...(stateRoot ? { stateRoot } : {}) });
+    const reader = (blockForRead: (read: number) => Record<string, unknown>) => {
       let reads = 0;
       return async (method: string, params: unknown[]): Promise<unknown> => {
         expect(method).toBe('eth_getBlockByNumber');
         const height = Number(BigInt(String(params[0])));
-        if (height === 1) return block(1, genesisHash, `0x${'00'.repeat(32)}`, `0x${'55'.repeat(32)}`);
+        if (height === 1) return structuredClone(genesis);
         reads += 1;
-        return block(2, tipHash, genesisHash, stateRootForRead(reads));
+        return blockForRead(reads);
       };
     };
     const watched = ['0x000000000000000000000000000000000000dEaD'];
 
-    const stable = await readAuthenticatedReceiptRange(reader(() => `0x${'66'.repeat(32)}`), 2, 2, watched);
+    const stable = await readAuthenticatedReceiptRange(reader(() => tip(`0x${'66'.repeat(32)}`)), 2, 2, watched);
     expect(stable.tipStateRoot).toBe(`0x${'66'.repeat(32)}`);
-    // Same hash and parent, different stateRoot in the fence pass: one of the
-    // two observations is not this header, so the range is not authenticated.
-    const swapped = reader(read => `0x${(read === 1 ? '66' : '77').repeat(32)}`);
-    await expect(readAuthenticatedReceiptRange(swapped, 2, 2, watched)).rejects.toThrow('J_RECEIPT_RANGE_REORG');
-    await expect(readAuthenticatedReceiptRange(reader(() => undefined), 2, 2, watched)).rejects.toThrow('STATE_ROOT');
+    // Two different tips in the two passes: the range is not authenticated.
+    const resealed = reader(read => tip(`0x${(read === 1 ? '66' : '77').repeat(32)}`));
+    await expect(readAuthenticatedReceiptRange(resealed, 2, 2, watched)).rejects.toThrow('J_RECEIPT_RANGE_REORG');
+    // Same hash, different stateRoot: the header no longer hashes to its claim.
+    const swapped = reader(read => ({ ...tip(`0x${'66'.repeat(32)}`), ...(read === 2 ? { stateRoot: `0x${'77'.repeat(32)}` } : {}) }));
+    await expect(readAuthenticatedReceiptRange(swapped, 2, 2, watched)).rejects.toThrow('J_RECEIPT_HEADER_HASH_MISMATCH');
+    await expect(readAuthenticatedReceiptRange(reader(() => tip()), 2, 2, watched)).rejects.toThrow('STATE_ROOT');
   });
 
   test('retries an unfinalized parent reorg but fails closed on a certified parent', async () => {
+    const first = sealedHeader({ number: 1, parentHash: `0x${'00'.repeat(32)}`, stateRoot: `0x${'55'.repeat(32)}` });
     const blocks = new Map([
-      [1, {
-        number: '0x1',
-        hash: `0x${'11'.repeat(32)}`,
-        parentHash: `0x${'00'.repeat(32)}`,
-        receiptsRoot: `0x${'00'.repeat(32)}`,
-        stateRoot: `0x${'55'.repeat(32)}`,
-        logsBloom: zeroBloom,
-        transactions: [],
-      }],
-      [2, {
-        number: '0x2',
-        hash: `0x${'22'.repeat(32)}`,
-        parentHash: `0x${'11'.repeat(32)}`,
-        receiptsRoot: `0x${'00'.repeat(32)}`,
-        stateRoot: `0x${'55'.repeat(32)}`,
-        logsBloom: zeroBloom,
-        transactions: [],
-      }],
+      [1, first],
+      [2, sealedHeader({ number: 2, parentHash: first.hash, stateRoot: `0x${'55'.repeat(32)}` })],
     ]);
     const send = async (_method: string, params: unknown[]): Promise<unknown> => (
       structuredClone(blocks.get(Number(BigInt(String(params[0])))))
@@ -391,6 +362,37 @@ describe('authenticated J watcher receipts', () => {
     expect(methods.filter(method => method === 'eth_getBlockReceipts')).toHaveLength(1);
     expect(methods).not.toContain('eth_getTransactionReceipt');
     expect(methods).not.toContain('eth_getLogs');
+  }, 20_000);
+
+  test('an RPC that zeroes the bloom to hide a log fails the header hash instead of skipping the block', async () => {
+    const wallet = new ethers.Wallet(anvilPrivateKey, provider);
+    const token = await new ERC20Mock__factory(wallet).deploy('Hidden Log Token', 'HLT', 18, 1000n);
+    const deploymentReceipt = await token.deploymentTransaction()?.wait();
+    if (!deploymentReceipt) throw new Error('J_RECEIPT_TEST_HIDDEN_LOG_RECEIPT_MISSING');
+    const methods: string[] = [];
+    const watched = [await token.getAddress()];
+    const read = (tamper: (block: Record<string, unknown>) => void) => readAuthenticatedLogsForRange(
+      async (method, params) => {
+        methods.push(method);
+        const result = await provider.send(method, params);
+        if (method !== 'eth_getBlockByNumber' || Number(BigInt(String(params[0]))) !== deploymentReceipt.blockNumber) {
+          return result;
+        }
+        const block = structuredClone(result) as Record<string, unknown>;
+        tamper(block);
+        return block;
+      },
+      deploymentReceipt.blockNumber,
+      deploymentReceipt.blockNumber,
+      watched,
+    );
+    await expect(read(block => { block['logsBloom'] = zeroBloom; })).rejects.toThrow(
+      `J_RECEIPT_HEADER_HASH_MISMATCH:${deploymentReceipt.blockNumber}:`,
+    );
+    expect(methods).not.toContain('eth_getBlockReceipts');
+    await expect(read(block => { block['receiptsRoot'] = `0x${'11'.repeat(32)}`; })).rejects.toThrow(
+      'J_RECEIPT_HEADER_HASH_MISMATCH',
+    );
   }, 20_000);
 
   test('cross-checks complete receipts on Tron-compatible zero-root blocks', async () => {

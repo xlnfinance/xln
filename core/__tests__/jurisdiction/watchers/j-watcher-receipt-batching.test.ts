@@ -4,19 +4,21 @@ import { BLOCKCHAIN } from '../../../config/constants';
 
 import { readAuthenticatedReceiptRange, type RpcBatchCall } from '../../../jurisdiction/adapter/receipt-root';
 import { sendBatchInChunks } from '../../../jurisdiction/adapter/rpc-utils';
+import { sealedHeader } from '../../helpers/sealed-header';
 
-const zeroBloom = `0x${'00'.repeat(256)}`;
-const hashFor = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
-
-const blockFor = (height: number) => ({
-  number: ethers.toQuantity(height),
-  hash: hashFor(height),
-  parentHash: height === 1 ? `0x${'00'.repeat(32)}` : hashFor(height - 1),
-  receiptsRoot: `0x${'00'.repeat(32)}`,
-  stateRoot: `0x${'55'.repeat(32)}`,
-  logsBloom: zeroBloom,
-  transactions: [],
-});
+const sealed = new Map<number, ReturnType<typeof sealedHeader>>();
+const sealedAt = (height: number): ReturnType<typeof sealedHeader> => {
+  for (let next = sealed.size + 1; next <= height; next += 1) {
+    sealed.set(next, sealedHeader({
+      number: next,
+      parentHash: next === 1 ? `0x${'00'.repeat(32)}` : sealed.get(next - 1)!.hash,
+      stateRoot: `0x${'55'.repeat(32)}`,
+    }));
+  }
+  return sealed.get(height)!;
+};
+const hashFor = (height: number): string => sealedAt(height).hash;
+const blockFor = (height: number) => structuredClone(sealedAt(height));
 
 describe('authenticated J watcher RPC batching', () => {
   test.each([false, true])(
@@ -67,11 +69,18 @@ describe('authenticated J watcher RPC batching', () => {
       return calls.map(call => {
         const height = Number(BigInt(String(call.params[0])));
         const block = blockFor(height);
-        // An untrusted RPC can claim unchanged endpoints while changing an
-        // interior hash and its child's parent. Both complete observations
-        // must still agree; parent continuity alone cannot authenticate this.
-        if (fence && height === interior) block.hash = hashFor(rangeSize + 100);
-        if (fence && height === interior + 1) block.parentHash = hashFor(rangeSize + 100);
+        // An untrusted RPC can serve a real sibling of an interior block and
+        // relink its child while claiming unchanged endpoints. The child's
+        // claimed hash no longer covers its header, so parent continuity
+        // can never carry the swap to the fence comparison.
+        if (fence && height === interior) {
+          return sealedHeader({ number: height, parentHash: block.parentHash, stateRoot: `0x${'55'.repeat(32)}`, extraData: '0x01' });
+        }
+        if (fence && height === interior + 1) {
+          block.parentHash = sealedHeader({
+            number: interior, parentHash: hashFor(interior - 1), stateRoot: `0x${'55'.repeat(32)}`, extraData: '0x01',
+          }).hash;
+        }
         return block;
       });
     };
@@ -86,7 +95,7 @@ describe('authenticated J watcher RPC batching', () => {
         {},
         sendBatch,
       ),
-    ).rejects.toThrow(`J_RECEIPT_RANGE_REORG:height=${interior}:`);
+    ).rejects.toThrow(`J_RECEIPT_HEADER_HASH_MISMATCH:${interior + 1}:`);
     expect(requested).toBe(2 * (rangeSize + 1));
   });
 

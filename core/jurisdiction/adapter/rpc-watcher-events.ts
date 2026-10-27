@@ -13,6 +13,7 @@ import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-event
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { RuntimeReplica, RuntimeTx } from '../../runtime/types';
 import { decodeJEventLog } from './j-event-log-decoder';
+import { DisputeEvidenceUnresolvedError } from './kernel/failure';
 import {
   shouldEmitExternalWalletAllowanceDelta,
   shouldEmitExternalWalletBalanceDelta,
@@ -169,6 +170,14 @@ const decodeExternalWalletEvents = (
   );
 };
 
+const unresolvedEvidence = async <T>(read: () => Promise<T>): Promise<T> => {
+  try {
+    return await read();
+  } catch (error) {
+    throw new DisputeEvidenceUnresolvedError(error instanceof Error ? error.message : String(error), { cause: error });
+  }
+};
+
 const decodeCanonicalContractEvent = async (
   log: PreparedAuthenticatedWatcherLog,
   carrierInterface: ethers.Interface,
@@ -196,7 +205,8 @@ const decodeCanonicalContractEvent = async (
       blockHash: log.authenticatedBlockHash,
       blockNumber: log.blockNumber,
     };
-    const proofbody = await findProofBody(log.transactionHash, event.name, event.args, location);
+    const { name, args } = event;
+    const proofbody = await unresolvedEvidence(() => findProofBody(log.transactionHash, name, args, location));
     event.args[
       event.name === 'DisputeStarted'
         ? 'initialProofbody'
@@ -207,10 +217,10 @@ const decodeCanonicalContractEvent = async (
   }
   const disputeFinalizationEvidence =
     event.name === 'DisputeFinalized'
-      ? await findEvidence(log.transactionHash, event.args, {
+      ? await unresolvedEvidence(() => findEvidence(log.transactionHash, event.args, {
           blockHash: log.authenticatedBlockHash,
           blockNumber: log.blockNumber,
-        })
+        }))
       : undefined;
   if (disputeFinalizationEvidence) {
     event.args['initialProofbodyHash'] = disputeFinalizationEvidence.initialProofbodyHash;
@@ -299,9 +309,11 @@ export const decodeAuthenticatedWatcherEvents = async (
       await decodeWatcherLog(input, log, result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(
+      const Failure = error instanceof DisputeEvidenceUnresolvedError ? DisputeEvidenceUnresolvedError : Error;
+      throw new Failure(
         `J_EVENT_LOG_DECODE_FAILED:block=${log.blockNumber} ` +
           `tx=${log.transactionHash || 'unknown'} index=${log.index}: ${message}`,
+        { cause: error },
       );
     }
   }

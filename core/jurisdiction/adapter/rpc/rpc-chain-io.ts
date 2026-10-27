@@ -16,8 +16,10 @@ import {
   type RpcReceipt,
 } from './rpc-boundary';
 import {
+  sendBatchInChunks,
   sendRpcBatch,
   type RpcBatchRequest,
+  type RpcBatchSend,
   type RpcBatchResponse,
 } from '../rpc-utils';
 import type { JAdapterConfig } from '../types';
@@ -311,15 +313,20 @@ const createHeaderReader = (
   config: JAdapterConfig,
 ): RpcChainIo['readBlockHeaders'] => async heights => {
   const canonicalHeights = [...new Set(heights)].sort((left, right) => left - right);
-  const requests: RpcBatchRequest[] = canonicalHeights.map(jHeight => ({
-    id: jHeight,
-    jsonrpc: '2.0',
+  // The audit batch grows with authority evidence; above MAX_RPC_BATCH_CALLS
+  // the proxy answers 413, which is fatal, so split it like every range read.
+  const sendChunk: RpcBatchSend = async calls => {
+    // Request id = height, unique within the deduplicated set.
+    const requests: RpcBatchRequest[] = calls.map(call => ({ id: Number(call.params[0]), jsonrpc: '2.0', ...call }));
+    const responses = await sendCalls(config, requests);
+    return requests.map(({ id }) => responses.get(id));
+  };
+  const responses = await sendBatchInChunks(sendChunk, canonicalHeights.map(jHeight => ({
     method: 'eth_getBlockByNumber',
     params: [ethers.toQuantity(jHeight), false],
-  }));
-  const responses = await sendCalls(config, requests);
-  const headers = requests.map(({ id }) => {
-    const response = responses.get(id);
+  })), config.mode === 'tron' ? 1 : 4) as Array<RpcBatchResponse | undefined>;
+  const headers = canonicalHeights.map((id, index) => {
+    const response = responses[index];
     const block = response?.result && typeof response.result === 'object'
       ? response.result as { hash?: unknown; number?: unknown; parentHash?: unknown }
       : null;

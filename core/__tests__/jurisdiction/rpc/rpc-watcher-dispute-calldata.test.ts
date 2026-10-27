@@ -8,6 +8,9 @@ import {
   createTxDisputeProofBodyReader,
   createTxFinalizationEvidenceReader,
 } from '../../../jurisdiction/adapter/rpc-watcher-inputs';
+import { decodeAuthenticatedWatcherEvents } from '../../../jurisdiction/adapter/rpc-watcher-events';
+import { DisputeEvidenceUnresolvedError } from '../../../jurisdiction/adapter/kernel/failure';
+import { createEmptyEnv } from '../../../runtime';
 import { encodeInt512 } from '../../../protocol/crypto/abi-money';
 import { hashProofBodyStruct } from '../../../protocol/dispute/proof-builder';
 
@@ -112,6 +115,44 @@ describe('J watcher dispute calldata embedded in a wrapper call', () => {
     expect(await createTxFinalizationEvidenceReader(provider)(hash, location)).toEqual([expect.objectContaining({
       counterentity: proof.counterentity, initialNonce: '7', finalNonce: '11', leftArguments: '0x5678',
     })]);
+  });
+
+  test('a decoy flood ahead of the executed call cannot exhaust the scan', async () => {
+    // Each decoy is a selector hit with a canonical first head word; the old
+    // 64-hit scan stopped long before the executed call.
+    const decoy = ethers.concat([depository.getFunction('processBatch')!.selector, ethers.toBeHex(0x60, 32)]);
+    const data = safeWrapper(ethers.concat([...Array.from({ length: 1_000 }, () => decoy), processBatchCall(startArgs.proofbodyHash)]));
+    const started = performance.now();
+    expect(await resolveStart(data)).toEqual(body);
+    expect(performance.now() - started).toBeLessThan(5_000);
+  });
+
+  test('an unrecoverable served dispute body is a retryable stall, never a fatal decode', async () => {
+    const blockHash = bytes32('81');
+    const log = {
+      ...depository.encodeEventLog('DisputeStarted', [
+        bytes32('b2'), startArgs.counterentity, 7n, true, startArgs.proofbodyHash, body.watchSeed,
+        '0x', '0x', bytes32('00'), 120n, 100n, 10n, 10n,
+      ]),
+      address: `0x${'47'.repeat(20)}`, blockNumber: 9, blockHash, authenticatedBlockHash: blockHash,
+      transactionHash: bytes32('5a'), index: 0,
+    };
+    const failure = await decodeAuthenticatedWatcherEvents({
+      env: createEmptyEnv('dispute-evidence-unresolved'),
+      logs: [log],
+      depositoryAddress: log.address,
+      entityProviderAddress: `0x${'48'.repeat(20)}`,
+      tokenByAddress: new Map(),
+      trackedOwners: new Map(),
+      observedThroughHeight: 9,
+      observedTipBlockHash: blockHash,
+      observedHeadHeight: 9,
+      confirmationDepth: 0,
+      findDisputeFinalizationEvidence: async () => undefined,
+      findDisputeProofBody: async () => { throw new Error('J_DISPUTE_PROOFBODY_EVIDENCE_NOT_FOUND:DisputeStarted:7'); },
+    } as unknown as Parameters<typeof decodeAuthenticatedWatcherEvents>[0]).catch(error => error);
+    expect(failure).toBeInstanceOf(DisputeEvidenceUnresolvedError);
+    expect(String(failure.message)).toContain('J_DISPUTE_PROOFBODY_EVIDENCE_NOT_FOUND');
   });
 
   test('calldata with no embedded dispute call keeps the strict decoder failure', async () => {

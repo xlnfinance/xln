@@ -81,3 +81,35 @@ test('the adapter\'s own TRON transport outages are retryable, never a watcher e
     await server.stop(true);
   }
 });
+
+test('a header audit wider than one proxy batch is split, never a fatal 413', async () => {
+  const hashAt = (height: number) => ethers.zeroPadValue(ethers.toBeHex(height + 1), 32);
+  const batchSizes: number[] = [];
+  const server = Bun.serve({
+    port: 0,
+    fetch: async request => {
+      const batch = await request.json() as Array<{ id: number; params: [string, boolean] }>;
+      batchSizes.push(batch.length);
+      if (batch.length > 128) return new Response('too many calls', { status: 413 });
+      return Response.json(batch.map(({ id, params }) => {
+        const height = Number(params[0]);
+        return { jsonrpc: '2.0', id, result: { number: params[0], hash: hashAt(height), parentHash: hashAt(height - 1) } };
+      }));
+    },
+  });
+  try {
+    const rpcUrl = `http://127.0.0.1:${server.port}`;
+    const chainIo = createRpcChainIo(
+      { mode: 'rpc', rpcUrl } as JAdapterConfig,
+      new ethers.JsonRpcProvider(rpcUrl),
+      ethers.Wallet.createRandom(),
+    );
+    const heights = Array.from({ length: 300 }, (_, index) => index + 1);
+    const headers = await chainIo.readBlockHeaders([...heights].reverse());
+    expect(headers.map(header => header.jHeight)).toEqual(heights);
+    expect(headers.at(-1)?.jBlockHash).toBe(hashAt(300));
+    expect(Math.max(...batchSizes)).toBeLessThanOrEqual(128);
+  } finally {
+    await server.stop(true);
+  }
+});

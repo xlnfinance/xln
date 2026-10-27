@@ -11,6 +11,8 @@ import {
   reconcileProcessedBatchFailure,
   selectCompetingFinalization,
 } from '../../../jurisdiction/adapter/rpc/write/rpc-submission';
+import { preflightProcessBatch, simulationFailure } from '../../../jurisdiction/adapter/rpc/write/rpc-batch-preflight';
+import { classifyJAdapterFailure } from '../../../jurisdiction/adapter/kernel/failure';
 import { createRpcReceiptReaders } from '../../../jurisdiction/adapter/rpc/rpc-receipts';
 import { parseBlockTimestamp } from '../../../jurisdiction/adapter/rpc/rpc-chain-io';
 import type { RpcContractStack } from '../../../jurisdiction/adapter/rpc/rpc-contract-stack';
@@ -319,4 +321,30 @@ test('receipt reader canonicalizes DisputeFinalized nonce before binding calldat
     7n,
     initialProofbodyHash,
   )).resolves.toEqual({ blockNumber: 100, transactionHash });
+});
+
+test('a simulation revert from one RPC stays retryable; only a mined receipt revert is terminal', async () => {
+  const depository = Depository__factory.createInterface();
+  const revert = Object.assign(new Error('execution reverted'), {
+    code: 'CALL_EXCEPTION',
+    data: depository.encodeErrorResult('E2', []),
+  });
+  const preflight = await preflightProcessBatch({
+    depository: {
+      interface: depository,
+      processBatch: { staticCall: async () => { throw revert; } },
+    } as unknown as Parameters<typeof preflightProcessBatch>[0]['depository'],
+    encodedBatch: '0x',
+    hankoData: '0x',
+    entityNonce: 1n,
+    gasLimit: 1_000_000n,
+    disputeStartDebug: [],
+  });
+  expect(preflight?.failure).toMatchObject({ category: 'transient', code: 'CALL_EXCEPTION', message: 'staticCall revert: E2()' });
+  expect(simulationFailure(revert).failure.category).toBe('transient');
+  const mined = Object.assign(new Error('transaction execution reverted'), {
+    code: 'CALL_EXCEPTION',
+    receipt: { status: 0 },
+  });
+  expect(classifyJAdapterFailure(mined).category).toBe('terminal');
 });

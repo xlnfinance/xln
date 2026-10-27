@@ -14,6 +14,7 @@ import {
   type CanonicalRpcReceipt,
   type CanonicalReceiptMptProof,
 } from '../../machine/receipt-codec';
+import { ethereumHeaderHash } from '../rpc/state-anchor/rpc-header-hash';
 
 type CanonicalRpcBlock = {
   number: number;
@@ -101,6 +102,14 @@ const parseCanonicalBlock = (
   const receiptsRoot = normalizeReceiptHash(block.receiptsRoot, 'ROOT');
   const stateRoot = withStateRoot ? normalizeReceiptHash((raw as { stateRoot?: unknown }).stateRoot, 'STATE_ROOT') : null;
   const watchedBloom = matchesWatchedBloom(String(block.logsBloom ?? ''));
+  // receiptsRoot authenticates receipts and logsBloom lets a block skip its
+  // receipt read entirely; both are trusted only once they hash to the
+  // block hash. An RPC that zeroes the bloom to hide a DisputeStarted, or
+  // swaps the root under a real hash, fails here instead of skipping a block.
+  if (withStateRoot) {
+    const computed = ethereumHeaderHash(raw as Record<string, unknown>);
+    if (computed !== hash) throw new Error(`J_RECEIPT_HEADER_HASH_MISMATCH:${height}:${hash}:${computed}`);
+  }
   if (!Array.isArray(block.transactions) || block.transactions.some(hash => typeof hash !== 'string')) {
     throw new Error(`J_RECEIPT_BLOCK_TRANSACTIONS_INVALID:${height}`);
   }
