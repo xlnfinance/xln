@@ -1,0 +1,11 @@
+PASS eslint-ratchet 14878ms
+PASS unsafe-types 635ms
+PASS frontend-unsafe-types 308ms
+PASS determinism 52ms
+PASS no-weak-collections 264ms
+PASS runtime-dependencies 776ms
+PASS fints-negative-types 1903ms
+PASS fints-compiler-policy 131ms
+PASS fints-decoder-authority 659ms
+PASS nested-hash-coverage 160ms
+SOUNDCHECK_OK gates=10
