@@ -28,6 +28,8 @@ import { addMessage } from '../../../frame-events';
 import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
 import { isLeftEntity } from '../../../id';
 import { canonicalAccountDisputeConfig } from '../../../../account/config/dispute-config';
+import type { EntityTx } from '../../../../types/entity-tx';
+import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
 
 const accountHandlerLog = createStructuredLogger('account.handler');
 const rejectAccountInput = (code: AccountInputRejectionCode, reason: string): never => {
@@ -275,4 +277,25 @@ export const resolveInboundAccount = (
   );
   accountHandlerLog.debug('machine.candidate_created', { counterparty: shortId(counterpartyId) });
   return { account, counterpartyId, createdAccount: true };
+};
+
+/**
+ * The Account worker stage creates inbound genesis accounts before the per-tx
+ * loop, so an evidence rejection there has no owning frame tx and would halt
+ * the Runtime. Bind it to the exact `accountInput` tx that carried the input,
+ * the same typed reject the in-loop path raises, so the proposer evicts it.
+ */
+export const inboundAccountEvidenceFrameRejection = (
+  error: unknown,
+  input: AccountInput,
+  entityTxs: readonly EntityTx[],
+): unknown => {
+  if (!(error instanceof AccountInputEvidenceError)) return error;
+  const rejected = new MalformedEntityFrameInputError(
+    'accountInput',
+    `ACCOUNT_INPUT_EVIDENCE_REJECTED:${error.code}:${error.message}`,
+  );
+  const owner = entityTxs.find(tx => tx.type === 'accountInput' && tx.data === input);
+  if (owner) rejected.frameTx = owner;
+  return rejected;
 };

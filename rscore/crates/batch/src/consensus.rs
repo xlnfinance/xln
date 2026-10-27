@@ -1546,6 +1546,21 @@ pub(crate) fn inbound_genesis_account(
             detail: "WATCH_SEED_REQUIRED".to_string(),
         });
     };
+    // The peer chooses the bilateral clock but we sign every proof carrying it.
+    // Our own side is our counter-dispute share of T = S + left + right and our
+    // Pull reveal window; a peer-chosen zero lets it finalize a stale proof in
+    // the start block. Mirrors TS resolveInboundDisputeConfig.
+    let own_seconds = if owner_entity_id < envelope.from_entity_id {
+        envelope.dispute_config.left_response_seconds()
+    } else {
+        envelope.dispute_config.right_response_seconds()
+    };
+    if own_seconds == 0 {
+        return Err(BatchError::InboundGenesis {
+            account_id,
+            detail: "DISPUTE_CONFIG_OWN_WINDOW_ZERO".to_string(),
+        });
+    }
     let frame_height = match &input.kind {
         AccountInputKind::AckFrame { frame, .. } => frame.frame.height,
         AccountInputKind::Ack(_)
@@ -1861,5 +1876,70 @@ mod proposable_settlement_freeze_tests {
     fn empty_mempool_stays_unproposable_with_and_without_a_signed_workspace() {
         assert!(!proposable(&account(None, Vec::new())).expect("proposable"));
         assert!(!proposable(&account(Some(signed_workspace()), Vec::new())).expect("proposable"));
+    }
+}
+
+#[cfg(test)]
+mod inbound_genesis_dispute_config_tests {
+    use super::{AccountInput, AccountInputKind, inbound_genesis_account};
+    use crate::{AccountId, BatchError, EntityAccountGenesisPolicy};
+    use xln_rscore_engine::{
+        AccountDisputeConfig, AccountDomain, AccountInputEnvelope, DepositoryAddress, IncomingAck,
+        WatchSeed,
+    };
+
+    const OWNER: [u8; 32] = [0x11; 32]; // left
+    const PEER: [u8; 32] = [0x22; 32]; // right
+
+    fn domain() -> AccountDomain {
+        AccountDomain::new(
+            31_337,
+            DepositoryAddress::parse(&format!("0x{}", "88".repeat(20))).expect("depository"),
+        )
+        .expect("domain")
+    }
+
+    fn detail(left: u64, right: u64) -> String {
+        let input = AccountInput {
+            envelope: AccountInputEnvelope {
+                from_entity_id: PEER,
+                to_entity_id: OWNER,
+                domain: domain(),
+                dispute_config: AccountDisputeConfig::new(left, right).expect("config"),
+                watch_seed: Some(
+                    WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("seed"),
+                ),
+            },
+            kind: AccountInputKind::Ack(IncomingAck {
+                height: 1,
+                frame_hash: [0; 32],
+                frame_hanko: None,
+                dispute: None,
+            }),
+        };
+        let policy = EntityAccountGenesisPolicy {
+            expected_domain: domain(),
+            shadow_policy_root: [0; 32],
+            shadow_policy_rows: Vec::new(),
+            delta_transformer: [0; 20],
+            public_pinned: false,
+        };
+        match inbound_genesis_account(AccountId::from_bytes(PEER), OWNER, &input, &policy) {
+            Err(BatchError::InboundGenesis { detail, .. }) => detail,
+            other => panic!("expected InboundGenesis error, got {:?}", other.map(|_| ())),
+        }
+    }
+
+    #[test]
+    fn peer_chosen_zero_window_for_receiver_side_is_rejected() {
+        assert_eq!(detail(0, 0), "DISPUTE_CONFIG_OWN_WINDOW_ZERO");
+        assert_eq!(detail(0, 86_400), "DISPUTE_CONFIG_OWN_WINDOW_ZERO");
+    }
+
+    #[test]
+    fn non_zero_receiver_window_passes_the_clock_check() {
+        // The peer may waive its own side; the next gate (frame kind) decides.
+        assert_eq!(detail(10, 10), "FRAME_REQUIRED");
+        assert_eq!(detail(3_600, 0), "FRAME_REQUIRED");
     }
 }

@@ -89,7 +89,10 @@ import {
 } from '../account/work-index';
 import { applyAccountInput } from '../../../account/consensus';
 import { requireAccountDeltaTransformerAddress } from '../../../account/consensus/helpers';
-import { resolveInboundAccount } from '../../tx/handlers/account/inbound-account';
+import {
+  inboundAccountEvidenceFrameRejection,
+  resolveInboundAccount,
+} from '../../tx/handlers/account/inbound-account';
 import { createAccountConsensusContext } from '../../account/account-consensus-context';
 import { getEntityFrameTxByteBudgetError } from '../frame';
 import { invalidateEntityAccountCommitment } from '../state-root';
@@ -1318,12 +1321,17 @@ const prepareEntityFrameWorkingSet = async (
     accounts: currentEntityState.accounts,
     accountForWrite: accountId => getEntityAccountForWrite(currentEntityState.accounts, accountId),
     createInboundAccount: input => {
-      const resolution = resolveInboundAccount(
-        currentEntityState,
-        input,
-        Boolean(accountInputAck(input)),
-        Boolean(accountInputProposal(input)),
-      );
+      let resolution: ReturnType<typeof resolveInboundAccount>;
+      try {
+        resolution = resolveInboundAccount(
+          currentEntityState,
+          input,
+          Boolean(accountInputAck(input)),
+          Boolean(accountInputProposal(input)),
+        );
+      } catch (error) {
+        throw inboundAccountEvidenceFrameRejection(error, input, entityTxs);
+      }
       if (!resolution.createdAccount) {
         throw new Error(`ACCOUNT_AUTHORITY_INBOUND_CREATE_EXPECTED:${resolution.counterpartyId}`);
       }
