@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { Depository__factory } from '../../../../../jurisdictions/typechain-types';
 import { decodeDisputeFinalizationLog, extractCanonicalDepositoryEventArgs, validateDisputeFinalizationLog } from '../depository-event-codec';
 import type { JEvent } from '../../types';
+import { DisputeEvidenceUnavailableError } from '../../kernel/failure';
 
 const iface = Depository__factory.createInterface();
 type DisputeReferenceLog = { topics: readonly string[]; data: string; blockNumber: number; index?: number; logIndex?: number };
@@ -40,12 +41,15 @@ export const resolveDisputeLogReferences = async (event: JEvent, readLogs: ReadD
   const finalized = event.name === 'DisputeFinalized';
   const data = finalized ? validateDisputeFinalizationLog(args) : undefined;
   if (args['proofbody'] === '0x' || (data && data.starterArgumentsHash !== ethers.keccak256('0x'))) {
-    for (const log of await readLogs(event)) {
+    const logs = await readLogs(event).catch(cause => {
+      throw new DisputeEvidenceUnavailableError('J_DISPUTE_EVENT_REFERENCE_READ_FAILED', { cause });
+    });
+    for (const log of logs) {
       const source = earlierSource(event, log);
       if (source) applyReference(event, args, source);
     }
   }
-  if (!args[finalized ? 'finalProofbody' : 'counterProofbody']) throw new Error('J_DISPUTE_EVENT_PROOFBODY_LOG_MISSING');
+  if (!args[finalized ? 'finalProofbody' : 'counterProofbody']) throw new DisputeEvidenceUnavailableError('J_DISPUTE_EVENT_PROOFBODY_LOG_MISSING');
   return { ...event, args, ...(finalized ? { disputeFinalizationEvidence: decodeDisputeFinalizationLog(args) } : {}) };
 };
 

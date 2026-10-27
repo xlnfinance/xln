@@ -2159,7 +2159,7 @@ describe('JAdapter watcher ingress', () => {
     expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
   });
 
-  test('foreign and served disputes decode bodies directly from logs', async () => {
+  test('only served disputes decode bodies for watcher delivery', async () => {
     const env = createEmptyEnv('jadapter-foreign-dispute-calldata');
     env.quietRuntimeLogs = true;
     const jurisdiction = makeJurisdiction('dispute-audience', 31_337, `0x${'47'.repeat(20)}`);
@@ -2220,8 +2220,8 @@ describe('JAdapter watcher ingress', () => {
       confirmationDepth: 0,
     };
     const decoded = await decodeAuthenticatedWatcherEvents({ ...input, logs: [foreign, served] });
-    expect(decoded.events.map(event => event.transactionHash)).toEqual([foreign.transactionHash, served.transactionHash]);
-    expect(decoded.events.map(event => event.args['initialProofbody'])).toEqual([body, body]);
+    expect(decoded.events.map(event => event.transactionHash)).toEqual([served.transactionHash]);
+    expect(decoded.events.map(event => event.args['initialProofbody'])).toEqual([body]);
     const observe = (events: typeof decoded.events) =>
       processEventBatch(
         events,

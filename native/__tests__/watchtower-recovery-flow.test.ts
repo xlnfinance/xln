@@ -51,7 +51,7 @@ const resetRuntimeStorage = async (env: ReturnType<typeof xln.createEmptyEnv>): 
   tempRoots.push(...paths);
 };
 const disputeStartedInterface = new Interface([
-  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds)',
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds, bytes proofbody)',
 ]);
 const abiCoder = AbiCoder.defaultAbiCoder();
 // The frozen counterparty proof is the one the canonical builder rebuilds from
@@ -686,6 +686,7 @@ describe('watchtower recovery full flow', () => {
               disputeStartTimestamp,
               4,
               6,
+              '0x',
             ],
           );
           return [{ topics: event.topics, data: event.data }];

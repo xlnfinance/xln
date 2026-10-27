@@ -2074,12 +2074,18 @@ export class BrowserVMProvider {
     transactionHash: string,
   ): Promise<JEvent[]> {
     this.log(`🔊 [BrowserVM] emitEvents ENTRY: raw logs=${logs.length}, callbacks=${this.eventCallbacks.size}`);
+    const receipt = this.txReceipts.get(transactionHash);
+    if (!receipt) throw new Error(`BROWSERVM_EVENT_RECEIPT_MISSING:${transactionHash}`);
+    const blockLogOffset = this.canonicalReceiptsAt(receipt.blockNumber)
+      .filter(candidate => Number(candidate.transactionIndex) < receipt.transactionIndex)
+      .reduce((count, candidate) => count + candidate.logs.length, 0);
     const decoded = decodeBrowserVmEvents(
       logs,
       this.eventCarriers(),
       this.blockHeight,
       this.blockHash,
       transactionHash,
+      blockLogOffset,
     );
     const events = await Promise.all(decoded.map(event => resolveDisputeLogReferences(event, async target =>
       this.getLogs(disputeReferenceFilter(target, this.getDepositoryAddress())))));
@@ -2454,13 +2460,23 @@ export class BrowserVMProvider {
       logIndex: number;
       removed: boolean;
     }> = [];
-    for (const receipt of this.txReceipts.values()) {
+    const receipts = [...this.txReceipts.values()].sort((left, right) =>
+      left.blockNumber - right.blockNumber || left.transactionIndex - right.transactionIndex);
+    let blockNumber = -1;
+    let blockLogIndex = 0;
+    for (const receipt of receipts) {
       if (receipt.blockNumber < fromBlock || receipt.blockNumber > toBlock) continue;
+      if (receipt.blockNumber !== blockNumber) {
+        blockNumber = receipt.blockNumber;
+        blockLogIndex = 0;
+      }
       for (const log of receipt.logs) {
+        const logIndex = blockLogIndex++;
         if (addresses && !addresses.has(log.address.toLowerCase())) continue;
         if (!topicMatches(log.topics)) continue;
         logs.push({
           ...log,
+          logIndex,
           blockHash: receipt.blockHash,
           transactionIndex: receipt.transactionIndex,
           removed: false,

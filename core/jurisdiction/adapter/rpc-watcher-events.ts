@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { resolveDisputeLogReferences, type ReadDisputeReferenceLogs } from './events/dispute/log-reference';
+import { isJEventDeliveredByWatcher } from './events/event-observation';
 import {
   Depository__factory,
   EntityProvider__factory,
@@ -237,6 +238,7 @@ const decodeWatcherLog = async (
       }),
     );
   }
+  if (!isJEventDeliveredByWatcher(input.env, event, input.watcherReplica)) return;
   result.events.push(await resolveDisputeLogReferences(event, input.readDisputeReferenceLogs ?? (async () => {
     throw new Error('J_DISPUTE_EVENT_REFERENCE_READER_MISSING');
   })));

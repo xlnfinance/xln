@@ -20,6 +20,17 @@ export class RpcTransportUnavailableError extends Error {
   }
 }
 
+/** Missing hash-bound dispute bytes may become available on a later evidence read. */
+export class DisputeEvidenceUnavailableError extends Error {
+  constructor(
+    readonly code: 'J_DISPUTE_EVENT_PROOFBODY_LOG_MISSING' | 'J_DISPUTE_EVENT_STARTER_ARGUMENTS_MISSING' | 'J_DISPUTE_EVENT_REFERENCE_READ_FAILED',
+    options?: { cause?: unknown },
+  ) {
+    super(code, options);
+    this.name = 'DisputeEvidenceUnavailableError';
+  }
+}
+
 export const TRANSIENT_RPC_HTTP_STATUSES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504]);
 
 export const isRpcTransportUnavailable = (error: unknown): boolean => {

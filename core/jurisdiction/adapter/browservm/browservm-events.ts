@@ -53,6 +53,7 @@ export const decodeBrowserVmEvents = (
   blockNumber: number,
   blockHash: string,
   transactionHash: string,
+  blockLogOffset = 0,
 ): JEvent[] => {
   const decoded: JEvent[] = [];
   for (const [logIndex, log] of logs.entries()) {
@@ -69,7 +70,7 @@ export const decodeBrowserVmEvents = (
         const parsed = iface.parseLog({ topics, data });
         if (!parsed) continue;
         decoded.push(decodeJEventLog({ topics, data }, iface,
-          { blockNumber, blockHash, transactionHash, logIndex }, 'BROWSERVM_LOG_DECODE_FAILED'));
+          { blockNumber, blockHash, transactionHash, logIndex: blockLogOffset + logIndex }, 'BROWSERVM_LOG_DECODE_FAILED'));
         parsedKnownLog = true;
         break;
       } catch {

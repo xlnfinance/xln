@@ -15,7 +15,7 @@ import {
   isTransientRpcUnavailableError,
 } from '../rpc-public';
 import { ReceiptAvailabilityError } from '../receipt-root';
-import { isRpcTransportUnavailable } from '../kernel/failure';
+import { DisputeEvidenceUnavailableError, isRpcTransportUnavailable } from '../kernel/failure';
 import { createRpcReadMethods } from './rpc-reads';
 import { createRpcReceiptReaders } from './rpc-receipts';
 import { createRpcSubmitTx } from './write/rpc-submission';
@@ -25,10 +25,13 @@ import { createRpcWatcherController } from './watcher/rpc-watcher-controller';
 import { createRpcWriteMethods } from './write/rpc-write-methods';
 import { prepareDurableTransaction } from './write/prepared/durable-transaction';
 
-export const isRpcWatcherTransientError = (error: unknown): boolean =>
-  error instanceof ReceiptAvailabilityError ||
-  isRpcTransportUnavailable(error) ||
-  isTransientRpcUnavailableError(error);
+export const isRpcWatcherTransientError = (error: unknown): boolean => {
+  for (let current = error, depth = 0; current !== undefined && depth < 8; depth += 1) {
+    if (current instanceof ReceiptAvailabilityError || current instanceof DisputeEvidenceUnavailableError) return true;
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return isRpcTransportUnavailable(error) || isTransientRpcUnavailableError(error);
+};
 
 export async function createRpcAdapter(
   config: JAdapterConfig,

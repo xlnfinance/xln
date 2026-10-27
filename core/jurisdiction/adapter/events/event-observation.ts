@@ -18,7 +18,7 @@ import {
   isEntityReplicaRelevantToWatcher,
   requireWatcherJurisdictionReplica,
 } from '../watcher/observe/watcher-replica';
-import type { JEventIngress } from '../types';
+import type { JEvent, JEventIngress } from '../types';
 
 const log = createStructuredLogger('jadapter.event-observation');
 
@@ -150,6 +150,13 @@ const collectDeliveries = (
   }
   return deliveries;
 };
+
+/** Use the delivery audience before fetching evidence for a dispute log. */
+export const isJEventDeliveredByWatcher = (
+  env: RuntimeReplica,
+  event: JEvent,
+  watcher: JReplica,
+): boolean => collectDeliveries(env, [event], event.blockNumber, watcher).length > 0;
 
 const evidenceEntries = (
   events: JEventIngress[],

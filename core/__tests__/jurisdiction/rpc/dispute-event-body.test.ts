@@ -4,6 +4,11 @@ import { Depository__factory } from '../../../../jurisdictions/typechain-types';
 import { decodeJEventLog, parseReceiptLogsToJEvents } from '../../../jurisdiction/adapter/j-event-log-decoder';
 import { resolveDisputeLogReferences } from '../../../jurisdiction/adapter/events/dispute/log-reference';
 import { PROOF_BODY_ABI } from '../../../protocol/dispute/proof-body';
+import { decodeAuthenticatedWatcherEvents } from '../../../jurisdiction/adapter/rpc-watcher-events';
+import { isRpcWatcherTransientError } from '../../../jurisdiction/adapter/rpc/rpc-adapter';
+import { createEntityProposalFixture } from '../../helpers/entity-proposal-fixture';
+import { createTestJReplica } from '../../helpers/j-replica';
+import { createJurisdictionConfig } from '../../../scenarios/harness/boot';
 
 const word = (byte: string) => `0x${byte.repeat(32)}`;
 const coder = ethers.AbiCoder.defaultAbiCoder();
@@ -144,4 +149,70 @@ test('a counter reusing an earlier body resolves its hash without re-emitting by
   const resolved = await resolveDisputeLogReferences(event, async () => [reference('CounterDisputeRegistered', counter)]);
   expect(resolved.args['counterProofbody']).toEqual(body);
   await expect(resolveDisputeLogReferences(event, async () => [])).rejects.toThrow('PROOFBODY_LOG_MISSING');
+});
+
+const watcherInput = () => {
+  const { env, replica } = createEntityProposalFixture('dispute-audience', 1n, ['1']).createValidator('1');
+  env.state.eReplicas.set(`${replica.entityId}:${replica.signerId}`, replica);
+  const depositoryAddress = `0x${'aa'.repeat(20)}`;
+  const entityProviderAddress = `0x${'bb'.repeat(20)}`;
+  const watcherReplica = createTestJReplica({ name: 'disputes', chainId: 31337,
+    contracts: { depository: depositoryAddress, entityProvider: entityProviderAddress } });
+  env.state.jReplicas.set(watcherReplica.name, watcherReplica);
+  replica.state.config.jurisdiction = createJurisdictionConfig(watcherReplica.name,
+    depositoryAddress, entityProviderAddress, 'http://127.0.0.1:8545', 31337);
+  return { env, replica, watcherReplica, depositoryAddress, entityProviderAddress,
+    tokenByAddress: new Map(), trackedOwners: new Map(), observedThroughHeight: 42,
+    observedTipBlockHash: coordinates.blockHash, observedHeadHeight: 42, confirmationDepth: 0 };
+};
+const watcherLog = (address: string, name: string, values: unknown[], index = 0) => ({
+  ...iface.encodeEventLog(name, values), address, ...coordinates, index,
+});
+
+test('watcher ignores foreign-pair dispute start, counter and finalization without reading references', async () => {
+  const input = watcherInput();
+  let reads = 0;
+  const result = await decodeAuthenticatedWatcherEvents({ ...input,
+    logs: [watcherLog(input.depositoryAddress, 'DisputeStarted', start),
+      watcherLog(input.depositoryAddress, 'CounterDisputeRegistered', [...counter.slice(0, 5), '0x'], 1),
+      watcherLog(input.depositoryAddress, 'DisputeFinalized', [...finalized.slice(0, 5), '0x', finalization], 2)],
+    readDisputeReferenceLogs: async () => { reads += 1; throw new Error('FOREIGN_PAIR_MUST_NOT_FETCH'); },
+  });
+  expect(reads).toBe(0);
+  expect(result.events).toEqual([]);
+});
+
+test('served-pair missing proof body and reference RPC errors are retryable through decode wrapping', async () => {
+  for (const readLogs of [async () => [], async () => { throw new Error('RPC_LOG_HISTORY_UNAVAILABLE'); }]) {
+    const input = watcherInput();
+    const values = [input.replica.entityId, word('22'), 8n, false, hash, '0x'];
+    const error = await decodeAuthenticatedWatcherEvents({ ...input,
+      logs: [watcherLog(input.depositoryAddress, 'CounterDisputeRegistered', values)],
+      readDisputeReferenceLogs: readLogs,
+    }).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(isRpcWatcherTransientError(error)).toBe(true);
+  }
+});
+
+test('served-pair missing starter arguments are retryable while invalid evidence stays fatal', async () => {
+  const input = watcherInput();
+  const fields = { ...finalization, starterArgumentsHash: ethers.keccak256('0x1234') };
+  const commitment = ethers.keccak256(coder.encode(
+    ['bytes32', 'uint256', 'bool', 'bool', 'bytes32', 'bytes32', 'bytes32'],
+    [fields.initialProofbodyHash, 11n, false, true, fields.starterArgumentsHash,
+      ethers.keccak256(fields.otherArguments), ethers.keccak256(fields.sig)],
+  ));
+  const values = [input.replica.entityId, word('22'), 7n, hash, commitment, encodedBody, fields];
+  const run = (values: unknown[]) => decodeAuthenticatedWatcherEvents({ ...input,
+    logs: [watcherLog(input.depositoryAddress, 'DisputeFinalized', values)],
+    readDisputeReferenceLogs: async () => [],
+  }).catch((error: unknown) => error);
+  const missing = await run(values);
+  expect(String(missing)).toContain('STARTER_ARGUMENTS_MISSING');
+  expect(isRpcWatcherTransientError(missing)).toBe(true);
+  values[4] = ethers.ZeroHash;
+  const corrupt = await run(values);
+  expect(String(corrupt)).toContain('FINALIZATION_HASH_MISMATCH');
+  expect(isRpcWatcherTransientError(corrupt)).toBe(false);
 });

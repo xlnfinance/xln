@@ -97,7 +97,8 @@ test(
         start.blockNumber,
       );
       expect(finalizations).toHaveLength(1);
-      expect(keccak256(finalizations[0]!.args.proofbody)).toBe(finalizations[0]!.args.finalProofbodyHash);
+      expect(finalizations[0]!.args.proofbody).toBe('0x');
+      expect(finalizations[0]!.args.finalProofbodyHash).toBe(counter.args.proofbodyHash);
       expect(finalizations[0]!.args.finalization.sig).toBe('0x');
       const finalReceipt = await provider.getTransactionReceipt(finalizations[0]!.transactionHash);
       expect(finalReceipt?.from.toLowerCase()).toBe(health.signerAddress.toLowerCase());

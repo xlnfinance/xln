@@ -1,5 +1,6 @@
 import { Depository__factory } from '../../../../jurisdictions/typechain-types/index.ts';
 import { ethers } from 'ethers';
+import { DisputeEvidenceUnavailableError } from '../kernel/failure';
 import { PROOF_BODY_ABI } from '../../../protocol/dispute/proof-body';
 import { materializeAbiValue, type JBatch } from '../../machine/batch';
 import { validateProofBody } from '../../machine/batch-validation';
@@ -57,7 +58,7 @@ export const validateDisputeFinalizationLog = (args: Record<string, unknown>) =>
 export const decodeDisputeFinalizationLog = (args: Record<string, unknown>): DisputeFinalizationEvidence => {
   const { initialProofbodyHash, finalNonce, proposerIsLeft, startedByLeft, starterArgumentsHash, otherArguments, sig } = validateDisputeFinalizationLog(args);
   const starterArguments = hex(args['starterArguments'] ?? '0x');
-  if (ethers.keccak256(starterArguments) !== starterArgumentsHash) throw new Error('J_DISPUTE_EVENT_STARTER_ARGUMENTS_MISSING');
+  if (ethers.keccak256(starterArguments) !== starterArgumentsHash) throw new DisputeEvidenceUnavailableError('J_DISPUTE_EVENT_STARTER_ARGUMENTS_MISSING');
   return {
     sender: hex(args['sender']), counterentity: hex(args['counterentity']),
     initialNonce: decimal(args['initialNonce']), finalNonce, initialProofbodyHash,
