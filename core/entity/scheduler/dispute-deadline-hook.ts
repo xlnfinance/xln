@@ -43,6 +43,27 @@ const setDisputeFinalizeQueued = (
   });
 };
 
+const findQueuedDisputeFinalizations = (
+  replica: EntityTransitionContext,
+  accountId: string,
+) => {
+  const accountIdNorm = accountId.toLowerCase();
+  const draft = replica.state.jBatchState?.batch?.disputeFinalizations || [];
+  const sent = replica.state.jBatchState?.sentBatch?.batch?.disputeFinalizations || [];
+  const recovered = (replica.state.jBatchState?.recoveryBatches ?? [])
+    .flatMap(batch => batch.disputeFinalizations);
+  const draftHasFinalize = draft.some(
+    entry => String(entry?.counterentity || '').toLowerCase() === accountIdNorm,
+  );
+  const sentHasFinalize = sent.some(
+    entry => String(entry?.counterentity || '').toLowerCase() === accountIdNorm,
+  );
+  const recoveryHasFinalize = recovered.some(
+    entry => String(entry?.counterentity || '').toLowerCase() === accountIdNorm,
+  );
+  return { draftHasFinalize, sentHasFinalize, recoveryHasFinalize };
+};
+
 export const processDisputeDeadlineHook = (
   env: EntityRuntimeContext,
   hook: ScheduledHook & { type: 'dispute_deadline' },
@@ -91,20 +112,8 @@ export const processDisputeDeadlineHook = (
     });
     return;
   }
-  const accountIdNorm = accountId.toLowerCase();
-  const draft = replica.state.jBatchState?.batch?.disputeFinalizations || [];
-  const sent = replica.state.jBatchState?.sentBatch?.batch?.disputeFinalizations || [];
-  const recovered = (replica.state.jBatchState?.recoveryBatches ?? [])
-    .flatMap(batch => batch.disputeFinalizations);
-  const draftHasFinalize = draft.some(
-    entry => String(entry?.counterentity || '').toLowerCase() === accountIdNorm,
-  );
-  const sentHasFinalize = sent.some(
-    entry => String(entry?.counterentity || '').toLowerCase() === accountIdNorm,
-  );
-  const recoveryHasFinalize = recovered.some(
-    entry => String(entry?.counterentity || '').toLowerCase() === accountIdNorm,
-  );
+  const { draftHasFinalize, sentHasFinalize, recoveryHasFinalize } =
+    findQueuedDisputeFinalizations(replica, accountId);
   const account = getEntityAccountForWrite(replica.state.accounts, accountId);
   if (!account?.activeDispute) throw new Error(`DISPUTE_DEADLINE_WRITE_ACCOUNT_MISSING:${accountId}`);
   if (sentHasFinalize || replica.state.jBatchState?.sentBatch) {
