@@ -681,7 +681,7 @@ export async function waitForReceiveReadyGossipProfiles(
                 const env = debug?.env();
                 if (!debug || !env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
                 const xln = await debug.xln();
-                await xln.ensureGossipProfiles(env, targets);
+                await xln.ensureGossipProfiles(env, targets, { missIsRetried: true });
                 const profiles = env.gossip.getProfiles();
                 const byId = new Map<string, (typeof profiles)[number]>();
                 for (const profile of profiles) {

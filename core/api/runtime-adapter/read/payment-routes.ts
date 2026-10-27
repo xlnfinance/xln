@@ -36,7 +36,8 @@ export const findPaymentRoutes = async (
   // Network refresh runs outside the committed-read lease; only the graph
   // search reads committed State, so only it holds the frame writer.
   if (env.infrastructure?.p2p?.syncProfiles) await env.infrastructure.p2p.syncProfiles();
-  const profilesReady = await ensureGossipProfiles(env, [sourceEntityId, targetEntityId]);
+  // The unavailable answer below is retryable; the caller asks again.
+  const profilesReady = await ensureGossipProfiles(env, [sourceEntityId, targetEntityId], { missIsRetried: true });
   if (!profilesReady) {
     throw new RuntimeAdapterError('E_INTERNAL', 'payment route profiles are unavailable', true);
   }

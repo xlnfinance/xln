@@ -35,6 +35,7 @@ import { MAX_PENDING_NETWORK_OUTPUTS, sendEntityInputWithRouting } from '../deli
 import { normalizeDbNamespace } from '../../storage/runtime-dbs.ts';
 import { decodeRoutedEntityInput } from '../delivery/topology/routing-validation.ts';
 import type { EntityInput } from '../../entity/types.ts';
+import type { GossipProfileFetchOptions } from '../../network/p2p/p2p.ts';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeInput } from '../types.ts';
 import { clearRuntimeGossip } from '../envelope/gossip.ts';
 import { assertRuntimeInputCapabilitiesAuthorized } from '../tx/internal-tx-auth.ts';
@@ -242,8 +243,8 @@ export const createRuntimeRoutingApi = (deps: RuntimeRoutingApiDeps) => {
     getP2P: (env: RuntimeReplica) => getRuntimeP2P(env, p2pDeps()),
     getP2PState: (env: RuntimeReplica) => getRuntimeP2PState(env, p2pDeps()),
     refreshGossip: (env: RuntimeReplica) => refreshRuntimeGossip(env, p2pDeps()),
-    ensureGossipProfiles: (env: RuntimeReplica, entityIds: string[]) =>
-      ensureRuntimeGossipProfiles(env, p2pDeps(), entityIds),
+    ensureGossipProfiles: (env: RuntimeReplica, entityIds: string[], options: GossipProfileFetchOptions = {}) =>
+      ensureRuntimeGossipProfiles(env, p2pDeps(), entityIds, options),
     clearGossip: (env: RuntimeReplica, options: { runtimeId?: string } = {}) =>
       clearRuntimeGossip(env, deps.notifyEnvChange, options),
   };

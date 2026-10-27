@@ -455,7 +455,7 @@ async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs =
           const debug = (window as RebalanceWindow).__xln;
           const env = debug?.env();
           if (!debug || !env) throw new Error('REBALANCE_RUNTIME_UNAVAILABLE');
-          await (await debug.xln()).ensureGossipProfiles(env, [target]);
+          await (await debug.xln()).ensureGossipProfiles(env, [target], { missIsRetried: true });
           return env.gossip
             .getProfiles()
             .some(

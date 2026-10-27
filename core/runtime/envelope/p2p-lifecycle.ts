@@ -6,7 +6,7 @@
 
 import type { RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
 import { createStructuredLogger, shortId } from '../../support/logger';
-import { RuntimeP2P, type P2PConfig } from '../../network/p2p/p2p';
+import { RuntimeP2P, type GossipProfileFetchOptions, type P2PConfig } from '../../network/p2p/p2p';
 import {
   getConfiguredOfficialFoundationSignerId,
   loadJurisdictions,
@@ -372,8 +372,9 @@ export const ensureRuntimeGossipProfiles = async (
   env: RuntimeReplica,
   deps: RuntimeP2PLifecycleDeps,
   entityIds: string[],
+  options: GossipProfileFetchOptions = {},
 ): Promise<boolean> => {
   const state = deps.ensureRuntimeInfrastructure(env);
   if (!state.p2p) return false;
-  return state.p2p.ensureProfiles(entityIds);
+  return state.p2p.ensureProfiles(entityIds, 1, options);
 };

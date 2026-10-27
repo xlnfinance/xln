@@ -145,7 +145,7 @@ async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs =
           const debug = (window as CurrentRuntimeWindow).__xln;
           const env = debug?.env();
           if (!debug || !env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
-          await (await debug.xln()).ensureGossipProfiles(env, [target]);
+          await (await debug.xln()).ensureGossipProfiles(env, [target], { missIsRetried: true });
           return Boolean(env.gossip.getProfile(target)?.runtimeId);
         }, entityId),
       { timeout: timeoutMs, intervals: [400] },
@@ -237,7 +237,7 @@ async function waitForRouteProfiles(page: Page, route: string[]): Promise<void> 
           const debug = (window as CurrentRuntimeWindow).__xln;
           const env = debug?.env();
           if (!debug || !env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
-          await (await debug.xln()).ensureGossipProfiles(env, targets);
+          await (await debug.xln()).ensureGossipProfiles(env, targets, { missIsRetried: true });
           const profiles = env.gossip.getProfiles();
           const matches = (id: string) =>
             profiles.filter((profile: any) => String(profile?.entityId || '').toLowerCase() === id);

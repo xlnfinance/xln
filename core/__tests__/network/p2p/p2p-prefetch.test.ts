@@ -729,3 +729,43 @@ test('verified profile routes advance monotonically and never replay backward', 
   });
   expect(p2p.env.infrastructure.verifiedProfileRoutes).toBe(p2p.verifiedProfileRoutes);
 });
+
+test('a profile miss the requester retries is not warned; a final miss still is', async () => {
+  const make = () => {
+    const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+    const warnings: string[] = [];
+    const debugEvents: unknown[] = [];
+    p2p.profileFetches = new Map();
+    p2p.closing = false;
+    p2p.closed = false;
+    p2p.runtimeId = SOURCE_RUNTIME_ID;
+    p2p.env = {
+      gossip: { getHubs: () => [{}], getProfiles: () => [] },
+      warn: (_scope: string, code: string) => warnings.push(code),
+    };
+    p2p.getActiveClient = () => ({ sendGossipRequest: () => {} });
+    p2p.requestSeedGossip = () => {};
+    p2p.waitForActiveDelay = async () => true;
+    p2p.expandRequiredProfileIds = (ids: string[]) => ids;
+    p2p.hasProfileForEntity = () => false;
+    p2p.sendDebugEvent = (event: unknown) => debugEvents.push(event);
+    return { p2p, warnings, debugEvents };
+  };
+  const retried = make();
+  expect(await retried.p2p.ensureProfiles([TARGET_ENTITY_ID], 1, { missIsRetried: true })).toBe(false);
+  expect(retried.warnings).toEqual([]);
+  expect(retried.debugEvents).toEqual([]);
+  const final = make();
+  expect(await final.p2p.ensureProfiles([TARGET_ENTITY_ID])).toBe(false);
+  expect(final.warnings).toEqual(['GOSSIP_PROFILE_MISS', 'GOSSIP_PROFILE_MISS']);
+  expect(final.debugEvents).toHaveLength(2);
+  // Before the relay session opens: the retried request is quiet, a final one warns.
+  const noClientRetried = make();
+  noClientRetried.p2p.getActiveClient = () => null;
+  expect(await noClientRetried.p2p.ensureProfiles([TARGET_ENTITY_ID], 1, { missIsRetried: true })).toBe(false);
+  expect(noClientRetried.warnings).toEqual([]);
+  const noClientFinal = make();
+  noClientFinal.p2p.getActiveClient = () => null;
+  expect(await noClientFinal.p2p.ensureProfiles([TARGET_ENTITY_ID])).toBe(false);
+  expect(noClientFinal.warnings).toContain('GOSSIP_PROFILE_FETCH_NO_CLIENT');
+});

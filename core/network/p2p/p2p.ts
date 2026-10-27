@@ -76,6 +76,9 @@ import {
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');
+
+/** `missIsRetried`: the requester asks again on a miss, so the miss is logged at debug, not warned. */
+export type GossipProfileFetchOptions = { missIsRetried?: boolean };
 const MIN_GOSSIP_POLL_MS = 250;
 const SLOW_BROWSER_TIMER_MS = 32;
 /**
@@ -1277,14 +1280,20 @@ export class RuntimeP2P {
    * targets' publicAccounts peers, 3 the peers of those — enough to see the
    * routes around a target and choose one locally.
    */
-  async ensureProfiles(entityIds: string[], depth: number = 1): Promise<boolean> {
+  async ensureProfiles(
+    entityIds: string[],
+    depth: number = 1,
+    options: GossipProfileFetchOptions = {},
+  ): Promise<boolean> {
     const requestedEntityIds = uniqueTransportValues(entityIds.map(normalizeId)).filter(Boolean);
     if (requestedEntityIds.length === 0) return true;
     const boundedDepth = Math.min(MAX_GOSSIP_IDS_DEPTH, Math.max(1, Math.floor(depth)));
-    const key = `${boundedDepth}:${[...requestedEntityIds].sort(compareStableText).join(',')}`;
+    const missIsRetried = options.missIsRetried === true;
+    // A final request never shares a retried one's quiet miss.
+    const key = `${boundedDepth}:${missIsRetried ? 'retried' : 'final'}:${[...requestedEntityIds].sort(compareStableText).join(',')}`;
     const inFlight = this.profileFetches.get(key);
     if (inFlight) return inFlight;
-    const fetch = this.ensureProfilesUncoalesced(requestedEntityIds, boundedDepth);
+    const fetch = this.ensureProfilesUncoalesced(requestedEntityIds, boundedDepth, missIsRetried);
     this.profileFetches.set(key, fetch);
     try {
       return await fetch;
@@ -1334,18 +1343,22 @@ export class RuntimeP2P {
     return false;
   }
 
-  private async ensureProfilesUncoalesced(requestedEntityIds: string[], depth: number = 1): Promise<boolean> {
+  private async ensureProfilesUncoalesced(
+    requestedEntityIds: string[],
+    depth: number = 1,
+    missIsRetried = false,
+  ): Promise<boolean> {
     let requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
     let missingEntityIds = requiredEntityIds.filter(entityId => !this.hasProfileForEntity(entityId));
 
     if (missingEntityIds.length > 0) {
-      await this.fetchProfilesWithRetry(missingEntityIds, depth);
+      await this.fetchProfilesWithRetry(missingEntityIds, depth, missIsRetried);
     }
 
     requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
     missingEntityIds = requiredEntityIds.filter(entityId => !this.hasProfileForEntity(entityId));
     if (missingEntityIds.length > 0) {
-      await this.fetchProfilesWithRetry(missingEntityIds);
+      await this.fetchProfilesWithRetry(missingEntityIds, 1, missIsRetried);
     }
 
     const hubCountBeforeFullFetch = this.env.gossip?.getHubs?.().length || 0;
@@ -1353,7 +1366,7 @@ export class RuntimeP2P {
     // But once the target is resolved and we already have hubs in cache, avoid
     // forcing an extra full-batch fetch on every sender-side payment attempt.
     if (missingEntityIds.length > 0 || hubCountBeforeFullFetch === 0) {
-      await this.fetchProfilesWithRetry([]);
+      await this.fetchProfilesWithRetry([], 1, missIsRetried);
     }
 
     requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
@@ -1407,12 +1420,16 @@ export class RuntimeP2P {
    * the exclusive `after` id. The relay does not learn which entry is wanted.
    * Resolves the page as applied to the local cache (verified profiles only).
    */
-  private async fetchProfilesWithRetry(missingEntityIds: string[] = [], depth: number = 1): Promise<boolean> {
+  private async fetchProfilesWithRetry(
+    missingEntityIds: string[] = [],
+    depth: number = 1,
+    missIsRetried = false,
+  ): Promise<boolean> {
     if (this.closing || this.closed) return false;
     if (!this.getActiveClient()) {
-      this.env.warn('network', 'GOSSIP_PROFILE_FETCH_NO_CLIENT', {
-        missingEntityIds,
-      });
+      // Before the relay session opens, a retried request simply asks again.
+      if (missIsRetried) p2pLog.debug('profile.fetch_no_client_retried', { missingEntityIds });
+      else this.env.warn('network', 'GOSSIP_PROFILE_FETCH_NO_CLIENT', { missingEntityIds });
       return false;
     }
     const startCount = this.env.gossip?.getProfiles?.()?.length || 0;
@@ -1437,7 +1454,15 @@ export class RuntimeP2P {
       }
     }
     if (missingEntityIds.length === 0) return false;
-    if (missingEntityIds.length > 0) {
+    if (missIsRetried) {
+      // The requester asks again (a retryable read, a readiness poll): a miss
+      // while the peer is still publishing is expected, not an incident.
+      p2pLog.debug('profile.miss_retried', {
+        missingEntityIds,
+        retries: GOSSIP_FETCH_RETRY_DELAYS_MS.length,
+        elapsedMs: Date.now() - startedAt,
+      });
+    } else {
       this.env.warn('network', 'GOSSIP_PROFILE_MISS', {
         missingEntityIds,
         retries: GOSSIP_FETCH_RETRY_DELAYS_MS.length,

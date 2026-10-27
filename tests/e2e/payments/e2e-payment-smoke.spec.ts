@@ -154,7 +154,7 @@ async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs =
           const debug = (window as CurrentWalletWindow).__xln;
           const env = debug?.env();
           if (!debug || !env) throw new Error('CURRENT_WALLET_RUNTIME_MISSING');
-          await (await debug.xln()).ensureGossipProfiles(env, [target]);
+          await (await debug.xln()).ensureGossipProfiles(env, [target], { missIsRetried: true });
           return env.gossip
             .getProfiles()
             .some(
