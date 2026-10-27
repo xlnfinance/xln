@@ -3,6 +3,8 @@ import type { AccountFrame, AccountState, HtlcLock } from '../../../types/accoun
 import type { HankoString } from '../../../types/hanko';
 import { isHtlcDeadlineExpired, isHtlcTimelockExpired } from '../../htlc-deadline';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from '../constants';
+import { announcedRebalancePolicy, DEFAULT_TERM_NOTICE_SECONDS, validTermNoticeSeconds } from '../../config/term-notice';
+import type { RebalanceFeePolicySnapshot } from '../../../types/finance/rebalance';
 
 export const HTLC_ENFORCEMENT_RESERVE_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;
 
@@ -69,9 +71,42 @@ const validHtlcSecret = (lock: HtlcLock, secret: string | undefined): boolean =>
 type AccountFrameTx = AccountFrame['accountTxs'][number];
 type DeadlineScan = {
   locks: Map<string, HtlcLock>;
+  policies: Map<number, RebalanceFeePolicySnapshot>;
   proposerIsLeft: boolean;
   frame: AccountFrame;
   context: AccountInputSecurityContext;
+};
+
+const inspectPolicyNotice = (
+  scan: DeadlineScan,
+  account: AccountState,
+  tx: AccountFrameTx,
+): IncomingDeadlineViolation | undefined => {
+  if (tx.type !== 'rebalance_policy') return undefined;
+  const side = scan.proposerIsLeft ? 'left' : 'right';
+  const current = scan.policies.get(tx.data.tokenId) ?? account.rebalanceFeePolicies?.get(tx.data.tokenId)?.[side];
+  if (current && (tx.data.policyVersion <= current.policyVersion || scan.frame.timestamp < current.updatedAt)) return undefined;
+  const noticePeriodSeconds = tx.data.noticePeriodSeconds ?? DEFAULT_TERM_NOTICE_SECONDS;
+  if (!validTermNoticeSeconds(noticePeriodSeconds)) return undefined; // The transition issues the typed rejection.
+  const next = announcedRebalancePolicy(current, {
+    policyVersion: tx.data.policyVersion,
+    baseFee: tx.data.baseFee,
+    liquidityFeeBps: tx.data.liquidityFeeBps,
+    gasFee: tx.data.gasFee,
+    updatedAt: scan.frame.timestamp,
+    noticePeriodSeconds,
+  });
+  if (!Number.isSafeInteger(next.effectiveAt)) return undefined; // Rejected by the transition, as in Rust.
+  // A peer's signed clock cannot spend the receiver's notice on an idle
+  // account. Active terms come from ordered frame execution, including a
+  // prior announcement in this frame; no speculative state is published.
+  if (next.previous && next.effectiveAt < scan.context.entityTimestamp + next.previous.noticePeriodSeconds * 1000) {
+    return rejectedDeadline(
+      `REBALANCE_POLICY_NOTICE_TOO_SHORT: token=${tx.data.tokenId} version=${tx.data.policyVersion}`,
+    );
+  }
+  scan.policies.set(tx.data.tokenId, next);
+  return undefined;
 };
 
 const inspectHtlcDeadline = (
@@ -171,11 +206,14 @@ export function getIncomingAccountDeadlineViolation(
 ): IncomingDeadlineViolation | undefined {
   const scan: DeadlineScan = {
     locks: cloneLocks(account),
+    policies: new Map(),
     proposerIsLeft,
     frame,
     context,
   };
   for (const tx of frame.accountTxs) {
+    const policyViolation = inspectPolicyNotice(scan, account, tx);
+    if (policyViolation) return policyViolation;
     const htlcViolation = inspectHtlcDeadline(scan, tx);
     if (htlcViolation) return htlcViolation;
   }

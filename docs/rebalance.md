@@ -578,6 +578,24 @@ in a single processBatch.
 
 ---
 
+## term notice and deployment
+
+An adverse fee change (any higher fee component or shorter notice period) takes
+effect at the signed announcement frame timestamp plus the active committed
+`noticePeriodSeconds * 1000`. A newer policy version cannot precede the current
+policy's `updatedAt`. Receiver admission additionally requires the resulting
+`effectiveAt` to be at least the receiver's committed Entity timestamp plus that
+full active notice. A stale announcement is rejected for the hub to re-propose;
+certified frame duplicates and exact policy retries retain their existing handling.
+These admission checks do not alter valid frame hashes or replay state.
+
+Deploying this notice schema requires a **testnet chain reset** if any persisted
+policy snapshot lacks `noticePeriodSeconds` (including previous terms). Stop the
+owning XLN runtimes, reset only their verified testnet stores, and regenerate from
+current canonical code. Unsupported snapshots fail closed with an explicit reset
+error; there is no migration or inferred notice period. Current-format checkpoint
+and ordered WAL recovery remain required.
+
 ## defaults
 
 ```typescript

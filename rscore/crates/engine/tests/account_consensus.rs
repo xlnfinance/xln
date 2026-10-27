@@ -2,6 +2,232 @@
 //! holds its own mempool, builds and signs its own frames, and verifies the
 //! other's before committing.
 
+#[cfg(test)]
+mod notice_backdate {
+    use super::*;
+    use xln_rscore_engine::{
+        AccountExecutionContext, AccountVerdict, SequentialAccountEngine, Side,
+    };
+
+    fn policy(version: u64, fee: i64, notice: u64) -> AccountTx {
+        AccountTx::RebalancePolicy {
+            token_id: 1,
+            policy_version: version,
+            base_fee: fee.into(),
+            liquidity_fee_bps: 10.into(),
+            gas_fee: 1.into(),
+            notice_period_seconds: Some(notice),
+        }
+    }
+
+    fn proposed(party: &mut Party, txs: Vec<AccountTx>, timestamp: u64) -> Box<ProposedFrame> {
+        party.account.admit_txs(txs, "notice-regression").unwrap();
+        let ProposalOutcome::Proposed(frame) =
+            propose_account_frame(&mut party.account, &party.identity, timestamp, 7, &market())
+                .unwrap()
+        else {
+            panic!("expected notice proposal")
+        };
+        frame
+    }
+
+    #[test]
+    fn newer_policy_rejects_backdated_timestamp_but_exact_retry_is_idempotent() {
+        let (left, _) = parties();
+        let context = |timestamp| AccountExecutionContext::new(timestamp, timestamp, 0, 0, 0);
+        let initial = SequentialAccountEngine::apply_with_context(
+            left.account.replica(),
+            Side::Left,
+            &policy(1, 10, 2),
+            &context(10_000),
+        )
+        .unwrap()
+        .committed()
+        .unwrap();
+        let root = initial
+            .state()
+            .payment_profile_account_state_root()
+            .unwrap();
+        for fee in [10, 30, 5] {
+            let result = SequentialAccountEngine::apply_with_context(
+                &initial,
+                Side::Left,
+                &policy(2, fee, 2),
+                &context(1000),
+            )
+            .unwrap();
+            assert!(
+                matches!(result.verdict(), AccountVerdict::Rejected(_)),
+                "backdated fee={fee} accepted"
+            );
+            assert!(
+                format!("{:?}", result.verdict()).contains("REBALANCE_POLICY_TIMESTAMP_REGRESSION")
+            );
+            assert!(result.candidate().is_none());
+            assert_eq!(
+                initial
+                    .state()
+                    .payment_profile_account_state_root()
+                    .unwrap(),
+                root
+            );
+        }
+        let retry = SequentialAccountEngine::apply_with_context(
+            &initial,
+            Side::Left,
+            &policy(1, 10, 2),
+            &context(1000),
+        )
+        .unwrap()
+        .committed()
+        .unwrap();
+        assert_eq!(
+            retry.state().payment_profile_account_state_root().unwrap(),
+            root
+        );
+    }
+
+    #[test]
+    fn idle_receiver_rejects_stale_adverse_notice_replays_rejection_and_reuses_certified_ack() {
+        let (mut left, mut right) = parties();
+        let start = CLOCK.entity_timestamp;
+        commit_txs_bilaterally(
+            &mut left,
+            &mut right,
+            vec![policy(1, 10, 2)],
+            start,
+            true,
+            false,
+        );
+        let proposer_checkpoint = (
+            left.account.replica().clone(),
+            left.account.consensus_snapshot(),
+        );
+        let frame = proposed(&mut left, vec![policy(2, 30, 2)], start + 1000);
+        let clock = ReceiverClock {
+            entity_timestamp: start + 10_000,
+            ..CLOCK
+        };
+        let before = right.account.entity_account_leaf().unwrap();
+        for restart in [false, true] {
+            if restart {
+                right.account = AccountConsensus::restore_from_checkpoint(
+                    right.account.replica().clone(),
+                    right.account.consensus_snapshot(),
+                    &market(),
+                )
+                .expect("restore after rejection");
+            }
+            let result = apply_incoming_frame(
+                &mut right.account,
+                &right.identity,
+                left.identity.entity_id(),
+                clock,
+                incoming_of(&frame.frame, frame.state_hash, frame.hanko.clone()),
+                &market(),
+            )
+            .unwrap();
+            assert!(
+                matches!(result, IncomingOutcome::Rejected { ref reason }
+                if reason.contains("REBALANCE_POLICY_NOTICE_TOO_SHORT")),
+                "{result:?}"
+            );
+            assert_eq!(right.account.entity_account_leaf().unwrap(), before);
+        }
+        left.account = AccountConsensus::restore_from_checkpoint(
+            proposer_checkpoint.0,
+            proposer_checkpoint.1,
+            &market(),
+        )
+        .unwrap();
+        let fresh = proposed(&mut left, vec![policy(2, 30, 2)], clock.entity_timestamp);
+        let incoming = || incoming_of(&fresh.frame, fresh.state_hash, fresh.hanko.clone());
+        let IncomingOutcome::Committed { ack_hanko, .. } = apply_incoming_frame(
+            &mut right.account,
+            &right.identity,
+            left.identity.entity_id(),
+            clock,
+            incoming(),
+            &market(),
+        )
+        .unwrap() else {
+            panic!("fresh proposal must commit")
+        };
+        let root = right
+            .account
+            .replica()
+            .state()
+            .payment_profile_account_state_root()
+            .unwrap();
+        right.account = AccountConsensus::restore_from_checkpoint(
+            right.account.replica().clone(),
+            right.account.consensus_snapshot(),
+            &market(),
+        )
+        .unwrap();
+        let retry = apply_incoming_frame(
+            &mut right.account,
+            &right.identity,
+            left.identity.entity_id(),
+            ReceiverClock {
+                entity_timestamp: start + 99_000,
+                ..CLOCK
+            },
+            incoming(),
+            &market(),
+        )
+        .unwrap();
+        assert!(
+            matches!(retry, IncomingOutcome::Duplicate { ack_hanko: ref cached, .. } if cached == &ack_hanko)
+        );
+        assert_eq!(
+            right
+                .account
+                .replica()
+                .state()
+                .payment_profile_account_state_root()
+                .unwrap(),
+            root
+        );
+    }
+
+    #[test]
+    fn receiver_scans_ordered_policy_changes_and_notice_reductions() {
+        let (mut left, mut right) = parties();
+        let start = CLOCK.entity_timestamp;
+        commit_txs_bilaterally(
+            &mut left,
+            &mut right,
+            vec![policy(1, 10, 30)],
+            start,
+            true,
+            false,
+        );
+        let frame = proposed(
+            &mut left,
+            vec![policy(2, 5, 30), policy(3, 5, 1)],
+            start + 1000,
+        );
+        let result = apply_incoming_frame(
+            &mut right.account,
+            &right.identity,
+            left.identity.entity_id(),
+            ReceiverClock {
+                entity_timestamp: start + 10_000,
+                ..CLOCK
+            },
+            incoming_of(&frame.frame, frame.state_hash, frame.hanko.clone()),
+            &market(),
+        )
+        .unwrap();
+        assert!(
+            matches!(result, IncomingOutcome::Rejected { ref reason }
+            if reason.contains("REBALANCE_POLICY_NOTICE_TOO_SHORT") && reason.contains("version=3")),
+            "{result:?}"
+        );
+    }
+}
+
 use num_bigint::BigInt;
 use xln_rscore_engine::{
     ACCOUNT_MEMPOOL_SIZE, AccountConsensus, AccountDisputeConfig, AccountDisputeFinality,

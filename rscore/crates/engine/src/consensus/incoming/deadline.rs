@@ -7,6 +7,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::tx::handlers::rebalance::policy::{RebalancePolicyTx, announced_policy};
+use crate::{RebalanceFeePolicySnapshot, TokenId};
 use num_bigint::BigInt;
 
 use crate::{
@@ -53,6 +55,64 @@ fn valid_secret(lock: &DeadlineLock, secret: &str) -> bool {
     crate::tx::handlers::htlc::hash_secret(secret).is_ok_and(|actual| actual == lock.hashlock)
 }
 
+fn inspect_policy_notice(
+    policies: &mut BTreeMap<u32, RebalanceFeePolicySnapshot>,
+    state: &AccountState,
+    frame: &AccountFrame,
+    proposer: Side,
+    clock: ReceiverClock,
+    tx: &AccountTx,
+) -> Option<IncomingDeadlineViolation> {
+    let AccountTx::RebalancePolicy {
+        token_id,
+        policy_version,
+        base_fee,
+        liquidity_fee_bps,
+        gas_fee,
+        notice_period_seconds,
+    } = tx
+    else {
+        return None;
+    };
+    let token = TokenId::new(*token_id).ok()?;
+    let current = policies.get(token_id).or_else(|| {
+        state
+            .rebalance_policy(token)
+            .and_then(|entry| entry.side(proposer))
+    });
+    if current.is_some_and(|old| {
+        *policy_version <= old.policy_version() || frame.timestamp < old.updated_at()
+    }) {
+        return None;
+    }
+    let next = announced_policy(
+        current,
+        &RebalancePolicyTx {
+            token_id: *token_id,
+            policy_version: *policy_version,
+            base_fee,
+            liquidity_fee_bps,
+            gas_fee,
+            notice_period_seconds: *notice_period_seconds,
+        },
+        frame.timestamp,
+    )?;
+    // The peer's signed clock cannot spend notice during an idle interval.
+    // Only this frame's ordered policy prefix is held speculatively here.
+    if let Some(active) = next.previous() {
+        let earliest = clock
+            .entity_timestamp
+            .checked_add(active.notice_period_seconds() * 1000);
+        if earliest.is_none_or(|earliest| next.effective_at() < earliest) {
+            return Some(reject(format!(
+                "REBALANCE_POLICY_NOTICE_TOO_SHORT: token={token_id} version={policy_version}"
+            )));
+        }
+    }
+    policies.insert(*token_id, next);
+    None
+}
+
 /// Return the first canonical deadline violation in transaction order.
 pub fn incoming_deadline_violation(
     state: &AccountState,
@@ -60,6 +120,7 @@ pub fn incoming_deadline_violation(
     proposer: Side,
     clock: ReceiverClock,
 ) -> Option<IncomingDeadlineViolation> {
+    let mut policies = BTreeMap::new();
     let mut locks: BTreeMap<String, DeadlineLock> = state
         .htlc_locks()
         .map(|lock| {
@@ -76,6 +137,11 @@ pub fn incoming_deadline_violation(
         .collect();
 
     for tx in &frame.txs {
+        if let Some(violation) =
+            inspect_policy_notice(&mut policies, state, frame, proposer, clock, tx)
+        {
+            return Some(violation);
+        }
         match tx {
             AccountTx::HtlcLock(tx) => {
                 if locks.contains_key(&tx.lock_id) {

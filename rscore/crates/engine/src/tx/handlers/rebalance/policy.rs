@@ -215,6 +215,59 @@ pub(crate) struct RebalancePolicyTx<'a> {
     pub gas_fee: &'a BigInt,
 }
 
+/// One notice derivation for both execution and speculative receiver admission.
+pub(crate) fn announced_policy(
+    current: Option<&RebalanceFeePolicySnapshot>,
+    tx: &RebalancePolicyTx<'_>,
+    committed_timestamp: u64,
+) -> Option<RebalanceFeePolicySnapshot> {
+    let RebalancePolicyTx {
+        policy_version,
+        base_fee,
+        liquidity_fee_bps,
+        gas_fee,
+        notice_period_seconds,
+        ..
+    } = *tx;
+    let notice_period_seconds = notice_period_seconds.unwrap_or(2_592_000);
+    if !(1..=9_007_199_254_740).contains(&notice_period_seconds) {
+        return None;
+    }
+    let active = current.map(|policy| policy.effective(committed_timestamp));
+    let worse = active.is_some_and(|old| {
+        base_fee > old.base_fee()
+            || gas_fee > old.gas_fee()
+            || liquidity_fee_bps > old.liquidity_fee_bps()
+            || notice_period_seconds < old.notice_period_seconds()
+    });
+    let effective_at = committed_timestamp.checked_add(if worse {
+        active.unwrap().notice_period_seconds() * 1000
+    } else {
+        0
+    });
+    let effective_at = effective_at.filter(|value| *value <= 9_007_199_254_740_991)?;
+    let previous = if worse {
+        active.map(|old| {
+            let mut old = old.clone();
+            old.previous = None;
+            old.effective_at = old.updated_at;
+            old
+        })
+    } else {
+        None
+    };
+    Some(
+        RebalanceFeePolicySnapshot::new(
+            policy_version,
+            base_fee.clone(),
+            liquidity_fee_bps.clone(),
+            gas_fee.clone(),
+            committed_timestamp,
+        )
+        .with_notice(notice_period_seconds, effective_at, previous),
+    )
+}
+
 pub(crate) fn apply_policy(
     replica: &mut AccountReplica,
     tx: RebalancePolicyTx<'_>,
@@ -295,39 +348,22 @@ pub(crate) fn apply_policy(
         }
     }
 
-    let active = current.map(|policy| policy.effective(committed_timestamp));
-    let worse = active.is_some_and(|old| {
-        base_fee > old.base_fee()
-            || gas_fee > old.gas_fee()
-            || liquidity_fee_bps > old.liquidity_fee_bps()
-            || notice_period_seconds < old.notice_period_seconds()
-    });
-    let effective_at = committed_timestamp.checked_add(if worse {
-        active.unwrap().notice_period_seconds() * 1000
-    } else {
-        0
-    });
-    let Some(effective_at) = effective_at.filter(|value| *value <= 9_007_199_254_740_991) else {
+    // A new version cannot predate its predecessor: a signed regressed clock
+    // could exhaust notice immediately and create unrestorable policy state.
+    // Same-version retries above retain their original canonical evidence.
+    if current.is_some_and(|policy| committed_timestamp < policy.updated_at()) {
+        let side = if proposer == Side::Left {
+            "left"
+        } else {
+            "right"
+        };
+        return Ok(super::reject(format!(
+            "REBALANCE_POLICY_TIMESTAMP_REGRESSION: side={side} token={token_id} version={policy_version}"
+        )));
+    }
+    let Some(next) = announced_policy(current, &tx, committed_timestamp) else {
         return Ok(super::reject("rebalance_policy: invalid effectiveAt"));
     };
-    let previous = if worse {
-        active.map(|old| {
-            let mut old = old.clone();
-            old.previous = None;
-            old.effective_at = old.updated_at;
-            old
-        })
-    } else {
-        None
-    };
-    let next = RebalanceFeePolicySnapshot::new(
-        policy_version,
-        base_fee.clone(),
-        liquidity_fee_bps.clone(),
-        gas_fee.clone(),
-        committed_timestamp,
-    )
-    .with_notice(notice_period_seconds, effective_at, previous);
     let updated = register.unwrap_or_default().with_side(proposer, next);
     replica.state_mut().put_rebalance_policy(token, updated)?;
     let side = if proposer == Side::Left {

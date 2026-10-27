@@ -68,6 +68,11 @@ export const validateRebalanceFeePolicySnapshot = (value: unknown, context: stri
     context,
   );
   const noticePeriod = policy['noticePeriodSeconds'];
+  if (noticePeriod === undefined) {
+    throw new FinancialDataCorruptionError(
+      `${context}.noticePeriodSeconds is missing: unsupported policy snapshot; testnet chain reset required`,
+    );
+  }
   if (typeof noticePeriod !== 'number' || !validTermNoticeSeconds(noticePeriod)) {
     throw new FinancialDataCorruptionError(`${context}.noticePeriodSeconds is invalid`);
   }

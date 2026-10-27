@@ -146,7 +146,7 @@ test('checkpoint recovery preserves the pending deadline and rejects obsolete po
   expect(() => validateStorageAccountDocValue(parsed)).toThrow('notice is too short');
   old.effectiveAt = 4000;
   Reflect.deleteProperty(old, 'noticePeriodSeconds');
-  expect(() => validateStorageAccountDocValue(parsed)).toThrow('noticePeriodSeconds');
+  expect(() => validateStorageAccountDocValue(parsed)).toThrow('testnet chain reset required');
 });
 
 test('ordered Account frames replay with identical roots/effects across a restart during notice', async () => {

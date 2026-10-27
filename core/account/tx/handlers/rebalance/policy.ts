@@ -7,9 +7,8 @@ import type { ApplyAccountTxResult } from '../../apply-types';
 import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 import {
   DEFAULT_TERM_NOTICE_SECONDS,
-  effectiveRebalanceTerms,
+  announcedRebalancePolicy,
   validTermNoticeSeconds,
-  worseRebalanceTerms,
 } from '../../../config/term-notice';
 
 type RebalancePolicyTx = Extract<AccountTx, { type: 'rebalance_policy' }>;
@@ -75,37 +74,25 @@ export const handleRebalancePolicy = (
     return accountTxApplied([`rebalance_policy: exact v${policyVersion} retry`]);
   }
 
-  const active = current && effectiveRebalanceTerms(current, committedTimestamp);
-  const terms = {
+  // The signing side owns its version, not the clock: backdating v2 before
+  // v1 could exhaust notice immediately and create unrestorable policy state.
+  // Certified/exact retries above retain their original timestamp and bytes.
+  if (current && committedTimestamp < current.updatedAt) {
+    return accountTxValidationRejected(
+      `REBALANCE_POLICY_TIMESTAMP_REGRESSION: side=${side} token=${tokenId} version=${policyVersion}`,
+      [],
+    );
+  }
+  const next = announcedRebalancePolicy(current, {
     policyVersion,
     baseFee,
     liquidityFeeBps,
     gasFee,
     updatedAt: committedTimestamp,
     noticePeriodSeconds,
-  };
-  const worse = active && (worseRebalanceTerms(active, terms) || noticePeriodSeconds < active.noticePeriodSeconds);
-  // Every adverse replacement starts a full notice against the still-active
-  // terms. A bank cannot shorten an outstanding notice by replacing its offer.
-  const effectiveAt = committedTimestamp + (worse ? active.noticePeriodSeconds * 1000 : 0);
-  if (!Number.isSafeInteger(effectiveAt))
+  });
+  if (!Number.isSafeInteger(next.effectiveAt))
     return accountTxValidationRejected('rebalance_policy: invalid effectiveAt', []);
-  const next: RebalanceFeePolicySnapshot = {
-    ...terms,
-    effectiveAt,
-    ...(worse
-      ? {
-          previous: {
-            policyVersion: active.policyVersion,
-            baseFee: active.baseFee,
-            liquidityFeeBps: active.liquidityFeeBps,
-            gasFee: active.gasFee,
-            updatedAt: active.updatedAt,
-            noticePeriodSeconds: active.noticePeriodSeconds,
-          },
-        }
-      : {}),
-  };
   account.rebalanceFeePolicies.put(tokenId, {
     ...account.rebalanceFeePolicies.get(tokenId),
     [side]: next,

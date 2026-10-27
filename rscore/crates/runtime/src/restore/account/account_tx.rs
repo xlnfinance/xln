@@ -17,6 +17,20 @@ use super::account_value::{
     js_number, optional_fixed_bytes, optional_text, text, text_list, token, tuple, unsigned,
 };
 
+#[cfg(test)]
+mod notice_schema_tests {
+    use super::*;
+    use xln_rscore_abi::BodyTuple;
+
+    #[test]
+    fn obsolete_policy_snapshot_requires_testnet_chain_reset() {
+        let value = AbiValue::Tuple(BodyTuple::from_vec(vec![AbiValue::Integer(1); 5]));
+        let error = policy_snapshot(&value).unwrap_err().to_string();
+        assert!(error.contains("noticePeriodSeconds"), "{error}");
+        assert!(error.contains("testnet chain reset required"), "{error}");
+    }
+}
+
 fn optional_bigint(
     value: &AbiValue,
     field: &'static str,
@@ -605,11 +619,23 @@ pub fn policy_snapshot(
     if matches!(value, AbiValue::Nil) {
         return Ok(None);
     }
-    let fields = exact(tuple(value)?, 8, "rebalancePolicySnapshot")?;
+    let fields = tuple(value)?;
+    if fields.len() < 8 || matches!(fields[5], AbiValue::Nil) {
+        return Err(invalid(
+            "rebalancePolicySnapshot missing noticePeriodSeconds/effectiveAt: unsupported policy snapshot; testnet chain reset required",
+        ));
+    }
+    let fields = exact(fields, 8, "rebalancePolicySnapshot")?;
     let previous = if matches!(&fields[7], AbiValue::Nil) {
         None
     } else {
-        let old = exact(tuple(&fields[7])?, 6, "previousRebalanceTerms")?;
+        let old = tuple(&fields[7])?;
+        if old.len() < 6 || matches!(old[5], AbiValue::Nil) {
+            return Err(invalid(
+                "previousRebalanceTerms missing noticePeriodSeconds: unsupported policy snapshot; testnet chain reset required",
+            ));
+        }
+        let old = exact(old, 6, "previousRebalanceTerms")?;
         Some(
             RebalanceFeePolicySnapshot::new(
                 js_number(&old[0], "policyVersion")?,
