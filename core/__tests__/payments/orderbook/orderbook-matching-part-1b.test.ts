@@ -935,7 +935,7 @@ describe('orderbook matching execution mapping', () => {
     expect(getBookOrder(finalBook!, makerOrderId)?.qtyLots).toBe(1n);
   });
 
-  test('drains every eligible crossing after a committed removal exposes the pair', () => {
+  test.each(['removal', 'identical-offer'] as const)('drains every eligible crossing after %s', trigger => {
     const pairId = '2/5';
     const priceTicks = 10_000n;
     const rows = [
@@ -1006,9 +1006,9 @@ describe('orderbook matching execution mapping', () => {
       },
     } as any;
 
-    const result = processCommittedOrderbookSwaps(entityState, [], {
-      resumeSamePairIds: [pairId],
-    } as any);
+    const result = trigger === 'identical-offer'
+      ? processCommittedOrderbookSwaps(entityState, [offers[1]!] as any)
+      : processCommittedOrderbookSwaps(entityState, [], { resumeSamePairIds: [pairId] });
     const finalBook = result.bookUpdates.at(-1)?.book;
     expect(finalBook?.tradeCount).toBe(2);
     expect(result.accountTxs.map(item => item.tx.type === 'swap_resolve' && item.tx.data.offerId))

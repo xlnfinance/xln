@@ -1,0 +1,61 @@
+{
+  "makerCapacity": "2500000000",
+  "offers": [
+    {
+      "id": "first",
+      "account": "22",
+      "ask": true,
+      "units": 1,
+      "price": "25000000"
+    },
+    {
+      "id": "unfunded",
+      "account": "22",
+      "ask": true,
+      "units": 1,
+      "price": "25000000"
+    },
+    {
+      "id": "next-level",
+      "account": "44",
+      "ask": true,
+      "units": 1,
+      "price": "25010000"
+    },
+    {
+      "id": "taker",
+      "account": "33",
+      "ask": false,
+      "units": 2,
+      "price": "25010000"
+    }
+  ],
+  "resolves": [
+    {
+      "id": "unfunded",
+      "fill": 0,
+      "give": "0",
+      "want": "0"
+    },
+    {
+      "id": "first",
+      "fill": 65535,
+      "give": "1000000000000000000",
+      "want": "2500000000"
+    },
+    {
+      "id": "taker",
+      "fill": 65522,
+      "give": "5001000000",
+      "want": "2000000000000000000"
+    },
+    {
+      "id": "next-level",
+      "fill": 65535,
+      "give": "1000000000000000000",
+      "want": "2501000000"
+    }
+  ],
+  "tradeCount": 2,
+  "bookCommitmentHash": "0x18aad53901f745784f7f6407a1a8c2ba"
+}

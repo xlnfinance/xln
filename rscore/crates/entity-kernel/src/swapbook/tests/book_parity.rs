@@ -107,6 +107,9 @@ fn classifier(
 
 fn project_event(event: &BookEvent) -> String {
     match event {
+        BookEvent::CapacityCanceled { order_id } => {
+            format!("CANCELED:{order_id}:counterparty-capacity")
+        }
         BookEvent::Ack => "ACK".to_string(),
         BookEvent::Reduced => "REDUCED".to_string(),
         BookEvent::Reject {
@@ -182,7 +185,7 @@ fn apply_step(
                 qty_lots: bigint(qty_lots),
                 time_in_force: *time_in_force,
             };
-            let events = apply_gtc(book, input, dimensions, classifier(suspended))?;
+            let events = apply_gtc(book, input, dimensions, classifier(suspended), None)?;
             Ok(if is_book_full(&events) {
                 observe(book, "book-full", &[], None, Vec::new())
             } else {
@@ -190,7 +193,7 @@ fn apply_step(
             })
         }
         Operation::Resume { suspended } => Ok(
-            match resume_crossed(book, dimensions, classifier(suspended))? {
+            match resume_crossed(book, dimensions, classifier(suspended), None)? {
                 Some((taker, events)) => observe(book, "applied", &events, Some(taker), Vec::new()),
                 None => observe(book, "idle", &[], None, Vec::new()),
             },

@@ -257,3 +257,23 @@ pub fn assert_owned_sections(
         );
     }
 }
+
+pub fn orderbook_capacity() -> xln_rscore_entity_kernel::OrderbookCapacity {
+    [MAKER, TAKER, NEXT]
+        .into_iter()
+        .flat_map(|remote| {
+            let account = account(remote, &[1, 2]);
+            [1, 2].into_iter().map(move |id| {
+                (
+                    (remote.to_string(), id),
+                    account
+                        .state()
+                        .delta(token(id))
+                        .unwrap()
+                        .perspective(account.owner_side())
+                        .out_capacity,
+                )
+            })
+        })
+        .collect()
+}

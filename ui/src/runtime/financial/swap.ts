@@ -11,7 +11,7 @@ import type { SwapCommandPlan, SwapCommandPlanInput } from '@xln/core/runtime/sw
 
 import { getEmbeddedEnv, requireAdapter } from '../adapter';
 import { getXLN } from '../xln-loader';
-import { committedRoles, gossipProfile, partyRoles } from './roles';
+import { committedRoles, partyRoles } from './roles';
 
 const normalizeId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
@@ -29,16 +29,17 @@ export function jurisdictionRef(frame: RuntimeAdapterViewFrame | null): string {
 	return config ? getJurisdictionStackId(config) : '';
 }
 
-/** The hub's published taker fee. No fee policy means no order: the runtime would reject an unauthorized net. */
-export function hubTakerFeeBps(hubEntityId: string): number {
-	const feeBps = gossipProfile(normalizeId(hubEntityId))?.metadata?.swapTakerFeeBps;
+/** Adapter summaries carry the same published policy in embedded and remote wallets.
+ * The hub's published taker fee. No fee policy means no order: the runtime would reject an unauthorized net. */
+export function hubTakerFeeBps(hubEntityId: string, summaries: readonly RuntimeAdapterEntitySummary[]): number {
+	const feeBps = summaries.find(summary => normalizeId(summary.entityId) === normalizeId(hubEntityId))?.swapTakerFeeBps;
 	if (!Number.isSafeInteger(feeBps)) throw new Error('SWAP_FEE_POLICY_UNAVAILABLE');
 	return Number(feeBps);
 }
 
-export function compatibleSwapHubs(sourceHubId: string, targetHubId: string): boolean {
-	const sourceRuntime = normalizeId(gossipProfile(sourceHubId)?.runtimeId);
-	const targetRuntime = normalizeId(gossipProfile(targetHubId)?.runtimeId);
+export function compatibleSwapHubs(sourceHubId: string, targetHubId: string, summaries: readonly RuntimeAdapterEntitySummary[]): boolean {
+	const sourceRuntime = normalizeId(summaries.find(summary => normalizeId(summary.entityId) === normalizeId(sourceHubId))?.runtimeId);
+	const targetRuntime = normalizeId(summaries.find(summary => normalizeId(summary.entityId) === normalizeId(targetHubId))?.runtimeId);
 	return Boolean(sourceRuntime && sourceRuntime === targetRuntime);
 }
 
@@ -115,7 +116,7 @@ export async function planSwap(request: SwapPlanRequest): Promise<SwapCommandPla
 
 	const net =
 		request.mode === 'same'
-			? xln.deriveSwapNetAuthorization(request.expectedWantAmount, hubTakerFeeBps(request.source.hubEntityId))
+			? xln.deriveSwapNetAuthorization(request.expectedWantAmount, hubTakerFeeBps(request.source.hubEntityId, summaries))
 			: { maxFee: 0n, minNetReceive: request.expectedWantAmount };
 
 	const source: SwapCommandPlanInput['source'] = {

@@ -8,7 +8,6 @@ use num_bigint::BigInt;
 
 use super::settlement::SettledLegs;
 use crate::error::ValidationRejection;
-use crate::swap::fill_ratio::MAX_SWAP_FILL_RATIO;
 use crate::swap::market::SwapMarketPolicy;
 use crate::swap::net_authorization::{SwapNetAuthorization, requantize};
 use crate::swap::offer::SwapOffer;
@@ -47,17 +46,17 @@ pub(crate) fn apply_swap_resolve_remainder(
         )
     };
 
-    if resolve.effective_cancel_remainder || resolve.canonical_fill_ratio == MAX_SWAP_FILL_RATIO {
+    // A rounded wire ratio cannot close an exact, tradable residual lot.
+    let fully_filled = remaining_give == BigInt::from(0);
+    if resolve.effective_cancel_remainder || fully_filled {
         if let Err(rejection) = release(&mut give_delta, hold_side, &remaining_give) {
             return Ok(Err(rejection));
         }
-        events.push(close(
-            if resolve.canonical_fill_ratio == MAX_SWAP_FILL_RATIO {
-                "fully filled"
-            } else {
-                "cancelled"
-            },
-        ));
+        events.push(close(if fully_filled {
+            "fully filled"
+        } else {
+            "cancelled"
+        }));
         return Ok(Ok(close_offer(
             replica,
             give_delta,

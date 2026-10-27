@@ -87,7 +87,8 @@ fn canonical_account_outputs_fuse_direct_and_htlc_forward_work() {
             outputs: lock_outputs,
         });
 
-    let result = apply_entity_kernel(state, &[inbound], &context).expect("entity kernel");
+    let result = apply_entity_kernel(state, &[inbound], &context, &Default::default())
+        .expect("entity kernel");
     let oracle = fixture();
     assert_eq!(result.proposal_work.len(), 1);
     assert_eq!(result.proposal_work[0].account_id, NEXT);
@@ -246,7 +247,8 @@ fn account_runtime_output_precedes_htlc_forward_followup_in_mixed_frame() {
             outputs: request_outputs,
         });
 
-    let result = apply_entity_kernel(state, &[inbound], &context).expect("mixed Account frame");
+    let result = apply_entity_kernel(state, &[inbound], &context, &Default::default())
+        .expect("mixed Account frame");
     assert_eq!(
         result.outputs,
         vec![
@@ -327,6 +329,7 @@ fn canonical_account_secret_resolve_completes_final_htlc_in_two_fused_passes() {
         state,
         &[commit(MAKER, 0x71, 1, lock, lock_outputs)],
         &context,
+        &Default::default(),
     )
     .expect("prepared final pass");
     assert!(first.outputs.is_empty());
@@ -363,6 +366,7 @@ fn canonical_account_secret_resolve_completes_final_htlc_in_two_fused_passes() {
         first.state,
         &[commit(MAKER, 0x72, 2, resolve, resolve_outputs)],
         &settle_context,
+        &Default::default(),
     )
     .expect("committed secret pass");
     assert!(settled.proposal_work.is_empty());
@@ -451,6 +455,7 @@ fn zero_forwarding_fee_remains_present_after_secret_reveal() {
         state,
         &[commit(NEXT, 0x81, 2, resolve, vec![output])],
         &DeterministicContext::hlt_default(),
+        &Default::default(),
     )
     .expect("forward secret");
     let route = result

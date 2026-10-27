@@ -22,8 +22,15 @@ fn match_routes(
     let context = crate::DeterministicContext::hlt_default();
     let entity_id = owner.entity_id.clone();
     let book = owner.orderbook.as_mut().unwrap();
-    let mut prepared = prepare_orderbook_outputs(book, &deltas, &context, &entity_id, None)
-        .expect("prepare production matcher");
+    let mut prepared = prepare_orderbook_outputs(
+        book,
+        &deltas,
+        &context,
+        &entity_id,
+        None,
+        &Default::default(),
+    )
+    .expect("prepare production matcher");
     let results = prepared
         .take_jobs()
         .into_iter()

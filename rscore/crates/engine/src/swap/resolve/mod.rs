@@ -25,7 +25,8 @@ pub(crate) fn apply_resolve(
     if policy.is_empty() {
         return Err(TransitionError::SwapMarketPolicyMissing);
     }
-    let validated = match validation::validate_swap_resolve(replica.state(), &tx, proposer) {
+    let validated = match validation::validate_swap_resolve(policy, replica.state(), &tx, proposer)
+    {
         Ok(validated) => validated,
         Err(rejection) => return Ok(rejected(rejection)),
     };

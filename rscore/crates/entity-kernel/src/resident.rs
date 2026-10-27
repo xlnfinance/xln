@@ -1772,6 +1772,58 @@ impl EntityTransitionAccumulator {
     }
 }
 
+fn orderbook_capacity(
+    accounts: &mut ResidentConsensusEngine,
+    kernel: &crate::kernel::EntityTransitionResult,
+) -> Result<crate::OrderbookCapacity, ResidentEntityError> {
+    let mut requested = BTreeMap::<String, BTreeSet<u32>>::new();
+    let mut add = |account: &String, offer: &crate::SameJOffer| {
+        if offer.cross_jurisdiction.is_none() {
+            requested
+                .entry(account.clone())
+                .or_default()
+                .insert(offer.want_token_id);
+        }
+    };
+    if let Some(book) = &kernel.state.orderbook {
+        for ((account, _), offer) in &book.offers {
+            add(account, offer);
+        }
+    }
+    for delta in &kernel.orderbook_deltas {
+        if let crate::swapbook::SameJOutputDelta::Upsert { account_id, offer } = delta {
+            add(account_id, offer);
+        }
+    }
+    let requests = requested
+        .into_iter()
+        .map(|(account, tokens)| {
+            Ok((
+                account_id(&account)?,
+                xln_rscore_batch::ResidentAccountFinancialViewRequest {
+                    token_ids: tokens
+                        .into_iter()
+                        .map(xln_rscore_engine::TokenId::new)
+                        .collect::<Result<_, _>>()
+                        .map_err(|_| EntityKernelError::orderbook("ORDERBOOK_TOKEN_INVALID"))?,
+                    ..Default::default()
+                },
+            ))
+        })
+        .collect::<Result<Vec<_>, ResidentEntityError>>()?;
+    // Read the finalized post-inbound Delta perspective, exactly as TS does.
+    Ok(accounts
+        .local_financial_views(requests)?
+        .into_iter()
+        .flat_map(|(account, view)| {
+            let account = account_text(account);
+            view.owner_out_capacity
+                .into_iter()
+                .map(move |(token, amount)| ((account.clone(), u32::from(token.get())), amount))
+        })
+        .collect())
+}
+
 fn local_account_views(
     accounts: &mut ResidentConsensusEngine,
     state: &EntityStateSlice,
@@ -3163,7 +3215,8 @@ fn apply_resident_entity_round_core_attempt(
     // Prepare the coordinator-owned Orderbook candidate before J ingress, as
     // before, but defer every independent pair job to the one mixed Book
     // worker dispatch shared with active Paybook radix slots.
-    let prepared_book_stage = prepare_orderbook_stage(&mut kernel, context)?;
+    let capacity = orderbook_capacity(accounts, &kernel)?;
+    let prepared_book_stage = prepare_orderbook_stage(&mut kernel, context, &capacity)?;
     let j_ingress_started = Instant::now();
     let mut deferred_j_ingress = None;
     if let Some(j_events) = request.finalized_j_events.as_ref() {

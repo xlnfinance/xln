@@ -34,7 +34,6 @@ pub(crate) struct ValidatedSwapResolve {
     pub effective_cancel_remainder: bool,
     pub filled_give: BigInt,
     pub filled_want: BigInt,
-    pub canonical_fill_ratio: u32,
     pub effective_fee_token_id: u32,
     pub fee_amount: BigInt,
 }
@@ -45,8 +44,8 @@ pub(crate) struct AppliedSwapResolve {
 }
 
 pub(crate) struct ExecutionFill {
+    pub canonical_fill_ratio: u32,
     pub filled_give: BigInt,
     pub filled_want: BigInt,
-    pub canonical_fill_ratio: u32,
     pub execution_provided: bool,
 }

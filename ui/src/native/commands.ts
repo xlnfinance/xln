@@ -167,7 +167,7 @@ async function swap(command: Record<string, unknown>, wallet: WalletView, book: 
     }, 'incoming capacity confirmation');
     if (Date.now() - book.updatedAt > 30_000) throw new Error('Waiting for a fresh market price.');
   }
-  const net = xln.deriveSwapNetAuthorization(prepared.effectiveWant, hubTakerFeeBps(hub.counterpartyId));
+  const net = xln.deriveSwapNetAuthorization(prepared.effectiveWant, hubTakerFeeBps(hub.counterpartyId, wallet.summaries));
   const display = {
     title: 'Review swap',
     price: `${formatMoney(prepared.priceTicks, PRICE_DECIMALS, 4)} ${getTokenMeta(book.quoteTokenId).symbol}`,

@@ -1,3 +1,4 @@
+use super::capacity::{OrderbookCapacity, admit_match};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Bound::{Excluded, Unbounded};
@@ -55,7 +56,8 @@ pub(crate) struct OrderbookEffects {
 }
 
 pub(crate) struct OrderbookPairJob {
-    pair_id: String,
+    capacity: OrderbookCapacity,
+    pair_ids: Vec<String>,
     state: OrderbookState,
     commands: Vec<(usize, String, SameJOffer)>,
     usd_quote_authority: Option<UsdQuoteAuthority>,
@@ -89,7 +91,7 @@ fn is_authorized_usd_reference_ask(
 }
 
 pub(crate) struct OrderbookPairOutcome {
-    pair_id: String,
+    pair_ids: Vec<String>,
     state: OrderbookState,
     effects: Vec<(usize, OrderbookEffects)>,
 }
@@ -115,6 +117,7 @@ impl PreparedOrderbookStage {
 
 impl OrderbookPairJob {
     pub(crate) fn apply(mut self, context: &DeterministicContext) -> OrderbookPairResult {
+        let pair_id = &self.pair_ids[0];
         let mut swept = BTreeSet::new();
         let mut batch = BTreeMap::new();
         let mut effects = Vec::with_capacity(self.commands.len());
@@ -122,8 +125,7 @@ impl OrderbookPairJob {
         // committed. Publishing their working book double-applies the fill
         // and changes counters/roots (R6 S77). Only the resting prefix before
         // the first trade is publishable; later commands keep using the preview.
-        let mut published_cross_book = self
-            .pair_id
+        let mut published_cross_book = pair_id
             .starts_with("cross:")
             .then(|| (self.state.books.clone(), self.state.pair_by_order.clone()));
         let mut cross_trade_previewed = false;
@@ -141,16 +143,16 @@ impl OrderbookPairJob {
                 &execution,
                 &mut swept,
                 &mut batch,
+                &mut self.capacity,
             ) {
                 return Err((*ordinal, error));
             }
             if let Some((books, pair_by_order)) = &mut published_cross_book {
-                let published_trade_count =
-                    books.get(&self.pair_id).map_or(0, |book| book.trade_count);
+                let published_trade_count = books.get(pair_id).map_or(0, |book| book.trade_count);
                 cross_trade_previewed |= self
                     .state
                     .books
-                    .get(&self.pair_id)
+                    .get(pair_id)
                     .is_some_and(|book| book.trade_count != published_trade_count);
                 if !cross_trade_previewed {
                     books.clone_from(&self.state.books);
@@ -169,7 +171,7 @@ impl OrderbookPairJob {
             self.state.pair_by_order = pair_by_order;
         }
         Ok(OrderbookPairOutcome {
-            pair_id: self.pair_id,
+            pair_ids: self.pair_ids,
             state: self.state,
             effects,
         })
@@ -370,6 +372,9 @@ fn apply_pair_index_events(
     events: &[BookEvent],
 ) {
     for event in events {
+        if let BookEvent::CapacityCanceled { order_id } = event {
+            unindex_order_pair(state, pair_id, order_id);
+        }
         let BookEvent::Trade {
             qty,
             maker_order_id,
@@ -873,6 +878,18 @@ fn process_events(
     batch: &BTreeMap<String, &SameJOffer>,
     taker_fee_bps: u16,
 ) -> Result<(), EntityKernelError> {
+    for event in events {
+        if let BookEvent::CapacityCanceled { order_id } = event {
+            let (account, offer) = split_order_id(order_id)?;
+            queue_cancel(
+                state,
+                effects,
+                &account,
+                &offer,
+                "counterparty-capacity".into(),
+            );
+        }
+    }
     let trades = events
         .iter()
         .filter(|event| matches!(event, BookEvent::Trade { .. }))
@@ -1013,6 +1030,37 @@ fn identical_order(
     Ok(true)
 }
 
+fn process_resumed_events(
+    state: &mut OrderbookState,
+    effects: &mut OrderbookEffects,
+    pair_id: &str,
+    taker_order_id: &str,
+    events: &[BookEvent],
+    batch: &BTreeMap<String, &SameJOffer>,
+    context: &DeterministicContext,
+) -> Result<(), EntityKernelError> {
+    apply_pair_index_events(state, pair_id, taker_order_id, events);
+    let (taker_account, taker_offer_id) = split_order_id(taker_order_id)?;
+    let taker_offer = state
+        .offers
+        .get(&(taker_account.clone(), taker_offer_id))
+        .cloned()
+        .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_SAME_SNAPSHOT_MISSING"))?;
+    let taker_materialized =
+        materialize(&taker_account, &taker_offer, &context.minimum_trade_size)?;
+    process_events(
+        state,
+        effects,
+        &taker_materialized,
+        taker_order_id,
+        &taker_offer,
+        events,
+        batch,
+        context.swap_taker_fee_bps,
+    )?;
+    Ok(())
+}
+
 fn process_one_offer<'a>(
     state: &mut OrderbookState,
     effects: &mut OrderbookEffects,
@@ -1021,11 +1069,27 @@ fn process_one_offer<'a>(
     execution: &OfferExecutionContext<'_>,
     swept: &mut BTreeSet<String>,
     batch: &mut BTreeMap<String, &'a SameJOffer>,
+    capacity: &mut OrderbookCapacity,
 ) -> Result<(), EntityKernelError> {
     if state
         .resolving_offers
         .contains(&(account_id.to_string(), offer.offer_id.clone()))
     {
+        return Ok(());
+    }
+    // A signed offer cannot redefine the registry layout of a shared same-J pair.
+    if offer.cross_jurisdiction.is_none()
+        && (super::canonical_token_decimals(offer.give_token_id) != Some(offer.give_token_decimals)
+            || super::canonical_token_decimals(offer.want_token_id)
+                != Some(offer.want_token_decimals))
+    {
+        queue_cancel(
+            state,
+            effects,
+            account_id,
+            &offer.offer_id,
+            "token-decimals-mismatch".into(),
+        );
         return Ok(());
     }
     let context = execution.deterministic;
@@ -1104,13 +1168,6 @@ fn process_one_offer<'a>(
     // makes a rejected first offer mutate pairDimensions/books and forks the
     // Entity root even though both engines emit the same cancel transaction.
     if !pair_already_exists {
-        // TS commits pairDimensions only for same-J markets. R6 h44 proved
-        // that adding a Cross-J entry forks the Entity root despite exact books.
-        if offer.cross_jurisdiction.is_none() {
-            state
-                .pair_dimensions
-                .insert(materialized.pair_id.clone(), materialized.dimensions);
-        }
         state.books.insert(
             materialized.pair_id.clone(),
             BookState::empty(state.max_orders_per_pair, policy.book_bucket_width_ticks),
@@ -1122,6 +1179,54 @@ fn process_one_offer<'a>(
         &materialized,
         offer,
     )?;
+    if is_identical && offer.cross_jurisdiction.is_none() {
+        let limit = require_book(state, &materialized.pair_id)?.orders.len();
+        for resumed_count in 0.. {
+            let book = state
+                .books
+                .get_mut(&materialized.pair_id)
+                .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_PAIR_MISSING"))?;
+            let mut reserved = OrderbookCapacity::new();
+            let mut admit = |maker: &BookOrder, taker: &AddOrder, price: &BigInt, qty: &BigInt| {
+                admit_match(
+                    &state.offers,
+                    capacity,
+                    &mut reserved,
+                    maker,
+                    taker,
+                    price,
+                    qty,
+                )
+            };
+            let resumed = resume_crossed(
+                book,
+                materialized.dimensions,
+                |maker| classify_maker(&state.offers, &state.resolving_offers, maker),
+                Some(&mut admit),
+            )?;
+            let Some((taker_order_id, events)) = resumed else {
+                return Ok(());
+            };
+            if resumed_count >= limit {
+                return Err(EntityKernelError::orderbook(
+                    "ORDERBOOK_SAME_DRAIN_NON_TERMINATING",
+                ));
+            }
+            process_resumed_events(
+                state,
+                effects,
+                &materialized.pair_id,
+                &taker_order_id,
+                &events,
+                batch,
+                context,
+            )?;
+            for (key, amount) in reserved {
+                *capacity.get_mut(&key).expect("admitted capacity") -= amount;
+            }
+        }
+        unreachable!();
+    }
     let offers = &state.offers;
     let resolving = &state.resolving_offers;
     let book = state
@@ -1129,12 +1234,12 @@ fn process_one_offer<'a>(
         .get_mut(&materialized.pair_id)
         .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_INTERNAL_BOOK_MISSING"))?;
     let is_cross_jurisdiction = offer.cross_jurisdiction.is_some();
+    let mut reserved = OrderbookCapacity::new();
+    let mut admit = |maker: &BookOrder, taker: &AddOrder, price: &BigInt, qty: &BigInt| {
+        admit_match(offers, capacity, &mut reserved, maker, taker, price, qty)
+    };
     let events_and_taker = if is_identical && is_cross_jurisdiction {
         None
-    } else if is_identical {
-        resume_crossed(book, materialized.dimensions, |maker| {
-            classify_maker(offers, resolving, maker)
-        })?
     } else {
         let input = AddOrder {
             order_id: materialized.order_id.clone(),
@@ -1159,11 +1264,16 @@ fn process_one_offer<'a>(
                         maker.price_ticks.clone()
                     }
                 },
+                None,
             )?
         } else {
-            apply_gtc(book, input, materialized.dimensions, |maker| {
-                classify_maker(offers, resolving, maker)
-            })?
+            apply_gtc(
+                book,
+                input,
+                materialized.dimensions,
+                |maker| classify_maker(offers, resolving, maker),
+                Some(&mut admit),
+            )?
         };
         Some((materialized.order_id.clone(), events))
     };
@@ -1176,6 +1286,11 @@ fn process_one_offer<'a>(
             .any(|event| matches!(event, BookEvent::Reject { .. }));
         has_trade || !has_reject
     });
+    if accepted && offer.cross_jurisdiction.is_none() {
+        state
+            .pair_dimensions
+            .insert(materialized.pair_id.clone(), materialized.dimensions);
+    }
     if accepted
         && is_authorized_usd_reference_ask(execution.usd_quote_authority, &materialized, offer)
     {
@@ -1188,27 +1303,61 @@ fn process_one_offer<'a>(
         record_accepted_usd_ask_price(book, &offer.price_ticks)?;
     }
     if let Some((taker_order_id, events)) = events_and_taker {
-        apply_pair_index_events(state, &materialized.pair_id, &taker_order_id, &events);
-        let (taker_account, taker_offer_id) = split_order_id(&taker_order_id)?;
-        let taker_offer = state
-            .offers
-            .get(&(taker_account.clone(), taker_offer_id))
-            .cloned()
-            .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_SAME_SNAPSHOT_MISSING"))?;
-        let taker_materialized =
-            materialize(&taker_account, &taker_offer, &context.minimum_trade_size)?;
-        process_events(
+        process_resumed_events(
             state,
             effects,
-            &taker_materialized,
+            &materialized.pair_id,
             &taker_order_id,
-            &taker_offer,
             &events,
             batch,
-            context.swap_taker_fee_bps,
+            context,
         )?;
     }
+    if accepted {
+        for (key, amount) in reserved {
+            *capacity.get_mut(&key).expect("admitted capacity") -= amount;
+        }
+    }
+    if !accepted && !pair_already_exists {
+        state.books.remove(&materialized.pair_id);
+    }
     Ok(())
+}
+
+/// Pairs sharing an Account/token are not independent: preserve accepted input
+/// positions inside one worker job so the committed budget is consumed once.
+fn group_capacity_jobs(jobs: Vec<OrderbookPairJob>) -> Vec<OrderbookPairJob> {
+    let mut groups: Vec<OrderbookPairJob> = Vec::new();
+    for mut job in jobs {
+        let mut index = 0;
+        while index < groups.len() {
+            if !groups[index]
+                .capacity
+                .keys()
+                .any(|key| job.capacity.contains_key(key))
+            {
+                index += 1;
+                continue;
+            }
+            let group = groups.remove(index);
+            job.pair_ids.extend(group.pair_ids);
+            job.commands.extend(group.commands);
+            job.capacity.extend(group.capacity);
+            job.state.books.extend(group.state.books);
+            job.state.offers.extend(group.state.offers);
+            job.state
+                .resolving_offers
+                .extend(group.state.resolving_offers);
+            job.state.pair_by_order.extend(group.state.pair_by_order);
+            job.state
+                .pair_dimensions
+                .extend(group.state.pair_dimensions);
+            index = 0;
+        }
+        job.commands.sort_by_key(|(ordinal, _, _)| *ordinal);
+        groups.push(job);
+    }
+    groups
 }
 
 pub(crate) fn prepare_orderbook_outputs(
@@ -1217,6 +1366,7 @@ pub(crate) fn prepare_orderbook_outputs(
     context: &DeterministicContext,
     entity_id: &str,
     hub_profile: Option<&HubProfile>,
+    capacity: &OrderbookCapacity,
 ) -> Result<PreparedOrderbookStage, EntityKernelError> {
     let mut effects = OrderbookEffects::default();
     apply_final_offer_index(state, deltas, entity_id);
@@ -1306,7 +1456,17 @@ pub(crate) fn prepare_orderbook_outputs(
         pair_state.resolving_offers = resolving_offers;
         pair_state.pair_by_order = pair_by_order;
         jobs.push(OrderbookPairJob {
-            pair_id,
+            capacity: pair_state
+                .offers
+                .iter()
+                .filter(|(_, offer)| offer.cross_jurisdiction.is_none())
+                .map(|((account, _), offer)| {
+                    let key = (account.clone(), offer.want_token_id);
+                    let available = capacity.get(&key).cloned().unwrap_or_default();
+                    (key, available)
+                })
+                .collect(),
+            pair_ids: vec![pair_id],
             state: pair_state,
             commands,
             usd_quote_authority: hub_profile.map(|profile| UsdQuoteAuthority {
@@ -1319,7 +1479,7 @@ pub(crate) fn prepare_orderbook_outputs(
     Ok(PreparedOrderbookStage {
         effects,
         effect_slots,
-        jobs,
+        jobs: group_capacity_jobs(jobs),
     })
 }
 
@@ -1454,24 +1614,38 @@ pub(crate) fn install_orderbook_outputs(
     state: &mut OrderbookState,
     mut validated: ValidatedOrderbookStage,
 ) -> OrderbookEffects {
-    for mut outcome in validated.outcomes {
+    for outcome in validated.outcomes {
         state
             .pair_by_order
-            .retain(|_, pair_id| pair_id != &outcome.pair_id);
+            .retain(|_, pair_id| !outcome.pair_ids.contains(pair_id));
         state
             .resolving_offers
             .extend(outcome.state.resolving_offers);
         state.pair_by_order.extend(outcome.state.pair_by_order);
-        if let Some(dimensions) = outcome.state.pair_dimensions.remove(&outcome.pair_id) {
-            state
-                .pair_dimensions
-                .insert(outcome.pair_id.clone(), dimensions);
-        }
-        if let Some(book) = outcome.state.books.remove(&outcome.pair_id) {
-            state.books.insert(outcome.pair_id.clone(), book);
-        }
+        state.pair_dimensions.extend(outcome.state.pair_dimensions);
+        state.books.extend(outcome.state.books);
     }
     std::mem::take(&mut validated.effects)
+}
+
+#[cfg(test)]
+fn test_capacity(state: &OrderbookState, deltas: &[SameJOutputDelta]) -> OrderbookCapacity {
+    let offers = state
+        .offers
+        .iter()
+        .map(|((account, _), offer)| (account, offer))
+        .chain(deltas.iter().filter_map(|delta| match delta {
+            SameJOutputDelta::Upsert { account_id, offer } => Some((account_id, offer.as_ref())),
+            _ => None,
+        }));
+    offers
+        .map(|(account, offer)| {
+            (
+                (account.clone(), offer.want_token_id),
+                BigInt::from(10u8).pow(40),
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1481,7 +1655,14 @@ fn apply_orderbook_outputs(
     context: &DeterministicContext,
     entity_id: &str,
 ) -> Result<OrderbookEffects, EntityKernelError> {
-    let mut prepared = prepare_orderbook_outputs(state, deltas, context, entity_id, None)?;
+    let mut prepared = prepare_orderbook_outputs(
+        state,
+        deltas,
+        context,
+        entity_id,
+        None,
+        &test_capacity(state, deltas),
+    )?;
     let jobs = prepared.take_jobs();
     let results = jobs.into_iter().map(|job| job.apply(context)).collect();
     let validated = validate_orderbook_outputs(prepared, results)?;
@@ -1567,6 +1748,65 @@ mod tests {
             account_id: account_id.to_string(),
             offer: Box::new(offer.clone()),
         }
+    }
+
+    #[test]
+    fn identical_offer_drains_all_eligible_crossings() {
+        let context = DeterministicContext::hlt_default();
+        let mut state = OrderbookState::empty(20_000);
+        let ask1 = resting_ask("a", "ask1", 2, 18, 25_000_000, 1);
+        let ask2 = resting_ask("b", "ask2", 2, 18, 25_000_000, 2);
+        let bid1 = resting_bid("c", "bid1", 3);
+        let bid2 = resting_bid("d", "bid2", 4);
+        apply_orderbook_outputs(
+            &mut state,
+            &[upsert("a", &ask1), upsert("b", &ask2)],
+            &context,
+            "hub",
+        )
+        .unwrap();
+        state.resolving_offers.insert(("a".into(), "ask1".into()));
+        state.resolving_offers.insert(("b".into(), "ask2".into()));
+        apply_orderbook_outputs(
+            &mut state,
+            &[upsert("c", &bid1), upsert("d", &bid2)],
+            &context,
+            "hub",
+        )
+        .unwrap();
+        state.resolving_offers.clear();
+        let effects =
+            apply_orderbook_outputs(&mut state, &[upsert("a", &ask1)], &context, "hub").unwrap();
+        assert_eq!(effects.account_txs.len(), 4);
+        assert_eq!(state.books.values().next().unwrap().trade_count, 2);
+    }
+
+    #[test]
+    fn rejected_first_fok_cannot_commit_pair_dimensions() {
+        let context = DeterministicContext::hlt_default();
+        let mut state = OrderbookState::empty(20_000);
+        let mut offer = resting_ask("a", "fok", 2, 18, 25_000_000, 1);
+        offer.time_in_force = Some(2);
+        let effects =
+            apply_orderbook_outputs(&mut state, &[upsert("a", &offer)], &context, "hub").unwrap();
+        assert_eq!(effects.account_txs.len(), 1);
+        assert!(state.books.is_empty());
+        assert!(state.pair_dimensions.is_empty());
+    }
+
+    #[test]
+    fn wrong_first_decimals_do_not_poison_pair() {
+        let context = DeterministicContext::hlt_default();
+        let mut state = OrderbookState::empty(20_000);
+        let wrong = resting_ask("a", "wrong", 2, 6, 25_000_000, 1);
+        let effects =
+            apply_orderbook_outputs(&mut state, &[upsert("a", &wrong)], &context, "hub").unwrap();
+        assert!(state.pair_dimensions.is_empty());
+        assert!(state.books.is_empty());
+        assert_eq!(effects.account_txs.len(), 1);
+        let valid = resting_ask("b", "valid", 2, 18, 25_000_000, 2);
+        apply_orderbook_outputs(&mut state, &[upsert("b", &valid)], &context, "hub").unwrap();
+        assert_eq!(state.books.values().next().unwrap().orders.len(), 1);
     }
 
     #[test]
@@ -1856,6 +2096,41 @@ mod tests {
     }
 
     #[test]
+    fn shared_account_capacity_groups_pair_jobs_in_input_order() {
+        let asks = [
+            resting_ask("shared", "second-pair", 4, 6, 1_200, 1),
+            resting_ask("shared", "first-pair", 2, 18, 25_000_000, 2),
+        ];
+        let deltas = asks
+            .iter()
+            .map(|offer| upsert("shared", offer))
+            .collect::<Vec<_>>();
+        let mut state = OrderbookState::empty(20_000);
+        let capacity = test_capacity(&state, &deltas);
+        let mut prepared = prepare_orderbook_outputs(
+            &mut state,
+            &deltas,
+            &DeterministicContext::hlt_default(),
+            "hub",
+            None,
+            &capacity,
+        )
+        .unwrap();
+        let jobs = prepared.take_jobs();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].pair_ids.len(), 2);
+        assert_eq!(jobs[0].capacity.len(), 1);
+        assert_eq!(
+            jobs[0]
+                .commands
+                .iter()
+                .map(|(ordinal, _, _)| *ordinal)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
     fn independent_pairs_are_identical_when_worker_completion_order_reverses() {
         let deltas = vec![
             SameJOutputDelta::Upsert {
@@ -1875,8 +2150,15 @@ mod tests {
         let mut mapper = ReverseOrderbookPairMapper {
             job_counts: Vec::new(),
         };
-        let mut prepared = prepare_orderbook_outputs(&mut reversed, &deltas, &context, "hub", None)
-            .expect("prepare");
+        let mut prepared = prepare_orderbook_outputs(
+            &mut reversed,
+            &deltas,
+            &context,
+            "hub",
+            None,
+            &test_capacity(&sequential, &deltas),
+        )
+        .expect("prepare");
         let jobs = prepared.take_jobs();
         let results = mapper
             .map_pairs(jobs, context.clone())

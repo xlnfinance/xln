@@ -1151,6 +1151,7 @@ impl PreparedEntityBookStage {
 pub(crate) fn prepare_orderbook_stage(
     result: &mut EntityTransitionResult,
     context: &DeterministicContext,
+    capacity: &crate::OrderbookCapacity,
 ) -> Result<PreparedEntityBookStage, EntityKernelError> {
     if !result.orderbook_deltas.is_empty() && result.state.orderbook.is_none() {
         return Err(EntityKernelError::orderbook("ORDERBOOK_EXTENSION_REQUIRED"));
@@ -1166,6 +1167,7 @@ pub(crate) fn prepare_orderbook_stage(
                 .orderbook_metadata
                 .as_ref()
                 .map(|metadata| &metadata.hub_profile),
+            capacity,
         )?)
     } else {
         None
@@ -1237,6 +1239,7 @@ pub fn apply_entity_kernel(
     state: EntityStateSlice,
     commits: &[OrderedAccountCommit],
     context: &DeterministicContext,
+    capacity: &crate::OrderbookCapacity,
 ) -> Result<EntityKernelResult, EntityKernelError> {
     let mut result = apply_entity_transitions(
         state,
@@ -1250,7 +1253,7 @@ pub fn apply_entity_kernel(
         None,
         context,
     )?;
-    let mut prepared = prepare_orderbook_stage(&mut result, context)?;
+    let mut prepared = prepare_orderbook_stage(&mut result, context, capacity)?;
     let pair_results = prepared
         .take_orderbook_jobs()
         .into_iter()

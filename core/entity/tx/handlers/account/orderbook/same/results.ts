@@ -39,6 +39,7 @@ const queueSameTradeFills = (
   book: BookState,
   trades: ReturnType<typeof collectTradeEvents>,
   resolveComment: string | undefined,
+  events: Parameters<typeof rejectEventsForOrder>[0],
 ): void => {
   for (const event of trades) {
     orderbookSameLog.debug('trade', {
@@ -96,6 +97,7 @@ const queueSameTradeFills = (
   // Build and authorize every paired Account resolution before queuing any of
   // them. A taker fee rejection must discard the preview atomically; otherwise
   // the maker Account could move while the taker Account rejects its half.
+  queueCapacityCancels(pass, events);
   for (const plan of plans) {
     const queued = queueSameSwapResolve(
       pass,
@@ -157,6 +159,16 @@ const rejectUnfilledOffer = (
   }
 };
 
+const queueCapacityCancels = (pass: SameOrderbookPass, events: Parameters<typeof rejectEventsForOrder>[0]): void => {
+  // Capacity cancellations are published only with the accepted command preview.
+  for (const event of events) {
+    if (event.type !== 'CANCELED' || event.reason !== 'counterparty-capacity') continue;
+    const { accountId, offerId } = parseNamespacedOrderId(event.orderId, 'ORDERBOOK_FILL_LOOKUP_FAILED');
+    recordZeroFillCancel(pass, event.reason);
+    queueSameSwapResolve(pass, accountId, { offerId, fillRatio: 0, cancelRemainder: true, comment: event.reason });
+  }
+};
+
 export const processSameCommandEvents = (
   pass: SameOrderbookPass,
   offer: PreparedSameOffer,
@@ -168,11 +180,13 @@ export const processSameCommandEvents = (
   const rejects = rejectEventsForOrder(result.events, offer.namespacedOrderId);
   const trades = collectTradeEvents(result.events);
   const stpReject = rejects.find(event => event.reason === 'STP cancel taker');
-  const resolveComment = stpReject
+  const resolveComment = rejects.some(event => event.reason === 'counterparty-capacity')
+    ? 'counterparty-capacity' : stpReject
     ? `STP:${String(stpReject.blockingOrderId || '')}`
     : undefined;
   if (rejects.length > 0 && trades.length === 0) {
     const reasons = rejects.map(event => event.reason).filter(Boolean).join(', ');
+    queueCapacityCancels(pass, result.events);
     rejectUnfilledOffer(pass, offer, reasons, resolveComment);
     return;
   }
@@ -183,5 +197,5 @@ export const processSameCommandEvents = (
     // wash trade cannot move the $6.5m cross-j risk boundary.
     result.state = recordAcceptedUsdAskPrice(result.state, offer.priceTicks);
   }
-  queueSameTradeFills(pass, offer, result.state, trades, resolveComment);
+  queueSameTradeFills(pass, offer, result.state, trades, resolveComment, result.events);
 };

@@ -1,3 +1,4 @@
+import { getKnownTokenIds, getTokenInfo } from '../../../../../../account/utils';
 import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
 
 import { equalSwapPairDimensions, forkBookState, getBestAsk, getBestBid, getBookOrder } from '../../../../../../swapbook';
@@ -43,6 +44,18 @@ export const materializeSameOffer = (
     offer: shortOrder(offer.offerId),
     account: shortId(accountId, 8),
   });
+  // Peer-signed dimensions cannot choose the registry layout of a shared pair.
+  if (!getKnownTokenIds().includes(offer.giveTokenId) ||
+      !getKnownTokenIds().includes(offer.wantTokenId) ||
+      getTokenInfo(offer.giveTokenId).decimals !== offer.giveTokenDecimals ||
+      getTokenInfo(offer.wantTokenId).decimals !== offer.wantTokenDecimals) {
+    recordZeroFillCancel(pass, 'token-decimals-mismatch');
+    queueSameSwapResolve(pass, accountId, {
+      offerId: offer.offerId, fillRatio: 0, cancelRemainder: true,
+      comment: 'token-decimals-mismatch',
+    });
+    return null;
+  }
   const materialized = deriveSameOrderbookMaterialization(offer, pass.minTradeSize);
   if (materialized.kind === 'reject') {
     recordZeroFillCancel(pass, `materialization-${materialized.reason}`);

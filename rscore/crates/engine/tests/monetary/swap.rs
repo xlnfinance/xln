@@ -242,3 +242,91 @@ fn swap_resolve_rejects_mismatched_resting_token_ids_before_mutation() {
         assert!(result.outputs().is_empty());
     }
 }
+
+fn exact_offer(give: u32, want: u32, amount: u64, receive: u64, tif: u8) -> AccountReplica {
+    let rows = [1, 2].map(|id| {
+        Delta::new(
+            token(id),
+            0.into(),
+            0.into(),
+            0.into(),
+            1_000_000.into(),
+            1_000_000.into(),
+            0.into(),
+            0.into(),
+            0.into(),
+            0.into(),
+        )
+        .unwrap()
+    });
+    let base = replica(entity(0x11), entity(0x11), entity(0x22), rows.to_vec());
+    SequentialAccountEngine::apply_with_context(
+        &base,
+        Side::Left,
+        &AccountTx::SwapOffer {
+            offer_id: "net-fee".into(),
+            give_token_id: give,
+            give_token_decimals: 6,
+            give_amount: amount.into(),
+            want_token_id: want,
+            want_token_decimals: 6,
+            want_amount: receive.into(),
+            max_fee: 0.into(),
+            min_net_receive: receive.into(),
+            time_in_force: Some(tif),
+            price_ticks: None,
+            cross_jurisdiction: None,
+        },
+        &market(),
+    )
+    .unwrap()
+    .committed()
+    .unwrap()
+}
+
+#[test]
+fn gtc_maximum_wire_ratio_preserves_a_tradable_partial_remainder() {
+    let base = exact_offer(1, 2, 65536, 65536, 0);
+    let mut tx = resolve(0);
+    if let AccountTx::SwapResolve {
+        execution_give_amount,
+        execution_want_amount,
+        ..
+    } = &mut tx
+    {
+        *execution_give_amount = Some(65535.into());
+        *execution_want_amount = Some(65535.into());
+    }
+    let result =
+        SequentialAccountEngine::apply_with_context(&base, Side::Right, &tx, &market()).unwrap();
+    assert_eq!(result.verdict(), &AccountVerdict::Applied);
+    let next = result.candidate().unwrap();
+    assert_eq!(next.state().swap_offer_count(), 1);
+    assert_eq!(
+        next.state().delta(token(1)).unwrap().hold(Side::Left),
+        &BigInt::from(1)
+    );
+}
+
+#[test]
+fn fok_bid_at_2500_accepts_full_base_at_2400() {
+    let base = exact_offer(2, 1, 2500, 1, 2);
+    let mut tx = resolve(0);
+    if let AccountTx::SwapResolve {
+        fill_ratio,
+        execution_give_amount,
+        execution_want_amount,
+        cancel_remainder,
+        ..
+    } = &mut tx
+    {
+        *fill_ratio = 62914;
+        *execution_give_amount = Some(2400.into());
+        *execution_want_amount = Some(1.into());
+        *cancel_remainder = true;
+    }
+    let result =
+        SequentialAccountEngine::apply_with_context(&base, Side::Right, &tx, &market()).unwrap();
+    assert_eq!(result.verdict(), &AccountVerdict::Applied);
+    assert_eq!(result.candidate().unwrap().state().swap_offer_count(), 0);
+}

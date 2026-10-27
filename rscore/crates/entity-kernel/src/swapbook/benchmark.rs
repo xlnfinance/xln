@@ -57,6 +57,7 @@ fn run_sweep(swaps: usize, levels: usize) -> Result<OrderbookBenchmarkResult, En
             order("ask", index, Side::Ask, BASE_PRICE_TICKS + level)?,
             dimensions,
             |_| Ok(MakerDisposition::Eligible),
+            None,
         )?;
         if events
             .iter()
@@ -74,6 +75,7 @@ fn run_sweep(swaps: usize, levels: usize) -> Result<OrderbookBenchmarkResult, En
             order("buy", index, Side::Bid, BASE_PRICE_TICKS + level_count)?,
             dimensions,
             |_| Ok(MakerDisposition::Eligible),
+            None,
         )?;
         let event_trades = events
             .iter()

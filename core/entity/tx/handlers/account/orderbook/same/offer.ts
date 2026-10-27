@@ -27,10 +27,14 @@ const commitSameCommandResult = (
 ): void => {
   try {
     processSameCommandEvents(pass, offer, result);
-    pass.ext.pairDimensions.set(offer.bookKey, {
+    const accepted = result.events.some(event => event.type === 'TRADE') ||
+      !result.events.some(event => event.type === 'REJECT');
+    // Rejected first orders cannot establish consensus pair dimensions.
+    if (accepted) pass.ext.pairDimensions.set(offer.bookKey, {
       baseTokenDecimals: offer.baseTokenDecimals,
       quoteTokenDecimals: offer.quoteTokenDecimals,
     });
+    if (!accepted && !pass.ext.books.has(offer.bookKey) && result.state.orders.size === 0) return;
     const acceptedBook = commitBookOverlayInto(result.state, offer.book);
     pass.bookCache.set(offer.bookKey, acceptedBook);
     pass.bookUpdates.push({ pairId: offer.bookKey, book: acceptedBook });

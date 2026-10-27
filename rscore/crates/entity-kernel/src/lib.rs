@@ -182,10 +182,10 @@ pub use storage_projection::{
 };
 pub use swapbook::{
     BookOrder, BookPricePageEntrySnapshot, BookPricePageSnapshot, BookSideLevel, BookState,
-    BookStateSnapshot, ORDERBOOK_PRICE_SCALE, OrderbookState, OrderbookStateSnapshot,
-    PairDimensions, PairPolicy, SameJOffer, Side, canonical_pair_orientation,
-    canonical_pair_policy, canonical_token_decimals, compute_book_commitment_hash,
-    is_canonical_liquid_token,
+    BookStateSnapshot, ORDERBOOK_PRICE_SCALE, OrderbookCapacity, OrderbookState,
+    OrderbookStateSnapshot, PairDimensions, PairPolicy, SameJOffer, Side,
+    canonical_pair_orientation, canonical_pair_policy, canonical_token_decimals,
+    compute_book_commitment_hash, is_canonical_liquid_token,
 };
 #[cfg(feature = "bench")]
 pub use swapbook::{OrderbookBenchmarkResult, run_orderbook_benchmark};

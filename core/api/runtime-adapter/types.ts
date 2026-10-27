@@ -310,6 +310,7 @@ export type RuntimeAdapterPush =
     };
 
 export type RuntimeAdapterEntitySummary = {
+  swapTakerFeeBps?: number;
   entityId: string;
   runtimeId?: string;
   signerId?: string;

@@ -235,6 +235,7 @@ const summaryFromProfile = (
     label: profileName || entityId,
     height: Math.max(0, Math.floor(Number(profile.lastUpdated || defaultHeight || 0))),
     isHub: profile.metadata?.isHub === true,
+    ...withDefinedProp('swapTakerFeeBps', profile.metadata?.swapTakerFeeBps),
     ...(jurisdiction ? { jurisdiction } : {}),
   };
 };
@@ -342,6 +343,7 @@ export const listLiveEntitySummaries = (
         label: labelForState(replica.state),
         height: Math.max(0, Math.floor(Number(replica.state.height ?? 0))),
         isHub,
+        ...withDefinedProp('swapTakerFeeBps', replica.state.hubRebalanceConfig?.swapTakerFeeBps),
         ...(jurisdiction ? { jurisdiction } : {}),
       };
     });
@@ -391,6 +393,7 @@ export const listEntitySummaries = async (
         label: profileName || (loaded ? labelForState(loaded) : normalizedId),
         height: loadedView?.core.height ?? loaded?.height ?? height,
         isHub,
+        ...withDefinedProp('swapTakerFeeBps', loaded?.hubRebalanceConfig?.swapTakerFeeBps ?? loadedView?.core.hubRebalanceConfig?.swapTakerFeeBps),
         ...(jurisdiction ? { jurisdiction } : {}),
       });
     }

@@ -5701,9 +5701,15 @@ mod tests {
         let tail = canonical_route(&tail_raw, kind).expect("canonical later resting route");
         let context = crate::DeterministicContext::hlt_default();
         let match_orders = |book: &mut crate::OrderbookState, deltas: &[SameJOutputDelta]| {
-            let mut prepared =
-                prepare_orderbook_outputs(book, deltas, &context, "source-hub", None)
-                    .expect("prepare canonical matcher");
+            let mut prepared = prepare_orderbook_outputs(
+                book,
+                deltas,
+                &context,
+                "source-hub",
+                None,
+                &Default::default(),
+            )
+            .expect("prepare canonical matcher");
             let results = prepared
                 .take_jobs()
                 .into_iter()

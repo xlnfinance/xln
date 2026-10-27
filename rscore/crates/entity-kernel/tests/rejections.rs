@@ -42,6 +42,7 @@ fn state_only_transactions_are_inert_but_cross_j_fails_loudly() {
         state.clone(),
         &[unknown],
         &DeterministicContext::hlt_default(),
+        &Default::default(),
     )
     .expect("Account-only genesis transaction has no Entity effect");
     assert_eq!(applied.state, state);
@@ -68,6 +69,7 @@ fn state_only_transactions_are_inert_but_cross_j_fails_loudly() {
             state.clone(),
             &[account_only],
             &DeterministicContext::hlt_default(),
+            &Default::default(),
         )
         .expect("committed Account-only transition must not invent an Entity effect");
         assert_eq!(applied.state, state);
@@ -84,7 +86,12 @@ fn state_only_transactions_are_inert_but_cross_j_fails_loudly() {
     );
     cross.scope = JurisdictionScope::Cross;
     assert_eq!(
-        apply_entity_kernel(state, &[cross], &DeterministicContext::hlt_default()),
+        apply_entity_kernel(
+            state,
+            &[cross],
+            &DeterministicContext::hlt_default(),
+            &Default::default()
+        ),
         Err(EntityKernelError::CrossJurisdictionUnsupported {
             account_id: MAKER.to_string(),
         })

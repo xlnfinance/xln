@@ -34,7 +34,19 @@ pub(crate) enum BookEvent {
         taker_qty_total: BigInt,
     },
     Reduced,
+    CapacityCanceled {
+        order_id: String,
+    },
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MatchAdmission {
+    Fill,
+    CancelMaker,
+    CancelTaker,
+}
+pub(crate) type AdmitMatch<'a> = dyn FnMut(&BookOrder, &AddOrder, &BigInt, &BigInt) -> Result<MatchAdmission, EntityKernelError>
+    + 'a;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AddOrder {
@@ -286,14 +298,22 @@ fn match_order<F, P>(
     classify: &mut F,
     execution_price: &mut P,
     events: &mut Vec<BookEvent>,
+    admission: &mut Option<&mut AdmitMatch<'_>>,
 ) -> Result<MatchResult, EntityKernelError>
 where
     F: FnMut(&BookOrder) -> Result<MakerDisposition, EntityKernelError>,
     P: FnMut(&BookOrder, &AddOrder) -> BigInt,
 {
     let mut remaining = taker.qty_lots.clone();
+    let mut dust = std::collections::BTreeSet::new();
     while remaining > BigInt::from(0) {
-        let Some(maker) = next_maker(state, taker, classify)? else {
+        let Some(maker) = next_maker(state, taker, &mut |maker| {
+            if dust.contains(&maker.order_id) {
+                return Ok(MakerDisposition::Suspended);
+            }
+            classify(maker)
+        })?
+        else {
             break;
         };
         if maker.owner_id == taker.owner_id && state.stp_policy == 1 {
@@ -311,7 +331,33 @@ where
         let multiple = exact_quote_lot_multiple(dimensions, &price)?;
         let fill = execution_qty(&candidate, &multiple);
         if fill <= BigInt::from(0) {
-            break;
+            // Skip this unexecutable row without deleting its resting liquidity.
+            dust.insert(maker.order_id.clone());
+            continue;
+        }
+        let verdict = match admission.as_deref_mut() {
+            Some(admit) => admit(&maker, taker, &price, &fill)?,
+            None => MatchAdmission::Fill,
+        };
+        match verdict {
+            MatchAdmission::CancelMaker => {
+                cancel_order(state, &maker.order_id)?;
+                events.push(BookEvent::CapacityCanceled {
+                    order_id: maker.order_id,
+                });
+                continue;
+            }
+            MatchAdmission::CancelTaker => {
+                events.push(BookEvent::Reject {
+                    reason: "counterparty-capacity",
+                    blocking_order_id: None,
+                });
+                return Ok(MatchResult {
+                    remaining,
+                    blocking_order_id: Some(maker.order_id),
+                });
+            }
+            MatchAdmission::Fill => {}
         }
         apply_fill(state, &maker, taker, &remaining, &fill, &price, events)?;
         remaining -= &fill;
@@ -330,13 +376,19 @@ pub(crate) fn apply_gtc<F>(
     input: AddOrder,
     dimensions: PairDimensions,
     classify: F,
+    admission: Option<&mut AdmitMatch<'_>>,
 ) -> Result<Vec<BookEvent>, EntityKernelError>
 where
     F: FnMut(&BookOrder) -> Result<MakerDisposition, EntityKernelError>,
 {
-    apply_gtc_with_execution_price(state, input, dimensions, classify, |maker, _| {
-        maker.price_ticks.clone()
-    })
+    apply_gtc_with_execution_price(
+        state,
+        input,
+        dimensions,
+        classify,
+        |maker, _| maker.price_ticks.clone(),
+        admission,
+    )
 }
 
 pub(crate) fn apply_gtc_with_execution_price<F, P>(
@@ -345,6 +397,7 @@ pub(crate) fn apply_gtc_with_execution_price<F, P>(
     dimensions: PairDimensions,
     mut classify: F,
     mut execution_price: P,
+    mut admission: Option<&mut AdmitMatch<'_>>,
 ) -> Result<Vec<BookEvent>, EntityKernelError>
 where
     F: FnMut(&BookOrder) -> Result<MakerDisposition, EntityKernelError>,
@@ -383,15 +436,24 @@ where
         &mut classify,
         &mut execution_price,
         &mut events,
+        &mut admission,
     )?;
     if let Some(snapshot) = fok_snapshot
         && matched.remaining > BigInt::from(0)
     {
         *state = snapshot;
-        return Ok(vec![BookEvent::Reject {
+        let mut cancels = Vec::new();
+        for event in events {
+            if let BookEvent::CapacityCanceled { ref order_id } = event {
+                cancel_order(state, order_id)?;
+                cancels.push(event);
+            }
+        }
+        cancels.push(BookEvent::Reject {
             reason: "FOK cannot fill entirely",
             blocking_order_id: None,
-        }]);
+        });
+        return Ok(cancels);
     }
     if matched.remaining > BigInt::from(0)
         && matched.blocking_order_id.is_none()
@@ -493,6 +555,7 @@ pub(crate) fn resume_crossed<F>(
     state: &mut BookState,
     dimensions: PairDimensions,
     mut classify: F,
+    mut admission: Option<&mut AdmitMatch<'_>>,
 ) -> Result<Option<(String, Vec<BookEvent>)>, EntityKernelError>
 where
     F: FnMut(&BookOrder) -> Result<MakerDisposition, EntityKernelError>,
@@ -516,6 +579,7 @@ where
         &mut classify,
         &mut |maker: &BookOrder, _taker: &AddOrder| maker.price_ticks.clone(),
         &mut events,
+        &mut admission,
     )?;
     // TS `resumeCrossedBook`: a self-trade-blocked resting taker leaves the
     // book as a cancel and folds tag 5 into the event hash; a fully filled
@@ -525,17 +589,24 @@ where
     } else if matched.remaining == BigInt::from(0) {
         remove_order(state, &taker.order_id)?;
     } else if matched.remaining < taker.qty_lots {
-        page_tree_mut(&mut state.bid_pages, &mut state.ask_pages, taker_order.side).reduce(
-            &taker_order.price_ticks,
-            BookPricePageLocation {
-                sequence: taker_order.page_sequence,
-                slot: taker_order.page_slot,
-            },
-            &taker_order.order_id,
-            &matched.remaining,
-        )?;
-        if let Some(stored) = state.orders.get_mut(&taker.order_id) {
-            stored.qty_lots = matched.remaining;
+        // Rest only exact lots at the taker's own price, just like new admission.
+        let multiple = exact_quote_lot_multiple(dimensions, &taker.price_ticks)?;
+        let resting = execution_qty(&matched.remaining, &multiple);
+        if resting == BigInt::from(0) {
+            remove_order(state, &taker.order_id)?;
+        } else {
+            page_tree_mut(&mut state.bid_pages, &mut state.ask_pages, taker_order.side).reduce(
+                &taker_order.price_ticks,
+                BookPricePageLocation {
+                    sequence: taker_order.page_sequence,
+                    slot: taker_order.page_slot,
+                },
+                &taker_order.order_id,
+                &resting,
+            )?;
+            if let Some(stored) = state.orders.get_mut(&taker.order_id) {
+                stored.qty_lots = resting;
+            }
         }
     }
     Ok((!events.is_empty()).then_some((taker.order_id, events)))
@@ -561,6 +632,89 @@ mod tests {
             base_token_decimals: 6,
             quote_token_decimals: 18,
         }
+    }
+
+    fn rounding_order(id: &str, side: Side, price: u32, qty: u32) -> AddOrder {
+        AddOrder {
+            order_id: id.into(),
+            owner_id: id.into(),
+            side,
+            price_ticks: price.into(),
+            qty_lots: qty.into(),
+            time_in_force: 0,
+        }
+    }
+
+    #[test]
+    fn resumed_taker_rounds_remainder_to_its_own_price_lot() {
+        let dims = PairDimensions {
+            base_token_decimals: 6,
+            quote_token_decimals: 6,
+        };
+        for qty in [2, 4] {
+            let mut book = BookState::empty(16, 1);
+            apply_gtc(
+                &mut book,
+                rounding_order("ask", Side::Ask, 10000, 1),
+                dims,
+                |_| Ok(MakerDisposition::Eligible),
+                None,
+            )
+            .unwrap();
+            apply_gtc(
+                &mut book,
+                rounding_order("bid", Side::Bid, 15000, qty),
+                dims,
+                |_| Ok(MakerDisposition::Suspended),
+                None,
+            )
+            .unwrap();
+            assert!(
+                resume_crossed(&mut book, dims, |_| Ok(MakerDisposition::Eligible), None)
+                    .unwrap()
+                    .is_some()
+            );
+            assert_eq!(
+                book.orders
+                    .get("bid")
+                    .map(|order| order.qty_lots.clone())
+                    .unwrap_or_default(),
+                BigInt::from(qty - 2)
+            );
+        }
+    }
+
+    #[test]
+    fn zero_fill_skips_to_executable_price_level() {
+        let dims = PairDimensions {
+            base_token_decimals: 6,
+            quote_token_decimals: 6,
+        };
+        let mut book = BookState::empty(16, 1);
+        for order in [
+            rounding_order("dust-price", Side::Ask, 15000, 2),
+            rounding_order("exact-price", Side::Ask, 20000, 1),
+        ] {
+            apply_gtc(
+                &mut book,
+                order,
+                dims,
+                |_| Ok(MakerDisposition::Eligible),
+                None,
+            )
+            .unwrap();
+        }
+        let events = apply_gtc(
+            &mut book,
+            rounding_order("bid", Side::Bid, 20000, 1),
+            dims,
+            |_| Ok(MakerDisposition::Eligible),
+            None,
+        )
+        .unwrap();
+        assert!(events.iter().any(|event| matches!(event, BookEvent::Trade { maker_order_id, .. } if maker_order_id == "exact-price")));
+        assert!(!book.orders.contains_key("bid"));
+        assert_eq!(book.orders["dust-price"].qty_lots, BigInt::from(2));
     }
 
     #[test]
@@ -600,9 +754,13 @@ mod tests {
         let before = state.clone();
         let mut taker = order("overflow", "buyer", Side::Bid);
         taker.qty_lots = 2.into();
-        let events = apply_gtc(&mut state, taker, dimensions(), |_| {
-            Ok(MakerDisposition::Eligible)
-        })
+        let events = apply_gtc(
+            &mut state,
+            taker,
+            dimensions(),
+            |_| Ok(MakerDisposition::Eligible),
+            None,
+        )
         .expect("typed reject");
         assert_eq!(
             events,
@@ -623,6 +781,7 @@ mod tests {
             order("maker", "same-owner", Side::Ask),
             dimensions(),
             |_| Ok(MakerDisposition::Eligible),
+            None,
         )
         .expect("maker accepted");
 
@@ -631,6 +790,7 @@ mod tests {
             order("taker", "same-owner", Side::Bid),
             dimensions(),
             |_| Ok(MakerDisposition::Eligible),
+            None,
         )
         .expect("self trade allowed");
 
@@ -650,6 +810,7 @@ mod tests {
             order("maker", "same-owner", Side::Ask),
             dimensions(),
             |_| Ok(MakerDisposition::Eligible),
+            None,
         )
         .expect("maker accepted");
 
@@ -658,6 +819,7 @@ mod tests {
             order("taker", "same-owner", Side::Bid),
             dimensions(),
             |_| Ok(MakerDisposition::Eligible),
+            None,
         )
         .expect("self trade rejected");
 
@@ -678,6 +840,7 @@ mod tests {
             order("maker", "m", Side::Ask),
             dimensions(),
             |_| Ok(MakerDisposition::Eligible),
+            None,
         )
         .expect("maker accepted");
         let events = apply_gtc(
@@ -689,6 +852,7 @@ mod tests {
             },
             dimensions(),
             |_| Ok(MakerDisposition::Eligible),
+            None,
         )
         .expect("ioc applied");
         assert_eq!(
@@ -711,6 +875,7 @@ mod tests {
             order("maker", "m", Side::Ask),
             dimensions(),
             |_| Ok(MakerDisposition::Eligible),
+            None,
         )
         .expect("maker accepted");
         let before = state.clone();
@@ -723,6 +888,7 @@ mod tests {
             },
             dimensions(),
             |_| Ok(MakerDisposition::Eligible),
+            None,
         )
         .expect("fok applied");
         assert!(matches!(

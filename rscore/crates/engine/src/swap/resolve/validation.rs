@@ -4,6 +4,7 @@
 //! the resolving counterparty may never pick the price its own claim is
 //! checked against.
 
+use crate::swap::market::SwapMarketPolicy;
 use num_bigint::BigInt;
 
 use super::types::{ExecutionFill, SwapResolveTx, ValidatedSwapResolve};
@@ -176,6 +177,7 @@ fn validate_fee_authorization(
 }
 
 fn validate_execution_economics(
+    policy: &SwapMarketPolicy,
     tx: &SwapResolveTx<'_>,
     canonical: &CanonicalOffer,
     fill: &ExecutionFill,
@@ -201,7 +203,7 @@ fn validate_execution_economics(
             }
         }
     }
-    validate_time_in_force(tx, canonical, fill)?;
+    validate_time_in_force(tx, canonical, fill, policy)?;
     validate_filled_amount_bounds(fill)
 }
 
@@ -212,9 +214,19 @@ fn validate_time_in_force(
     tx: &SwapResolveTx<'_>,
     canonical: &CanonicalOffer,
     fill: &ExecutionFill,
+    policy: &SwapMarketPolicy,
 ) -> Result<(), ValidationRejection> {
     let has_fill = fill.filled_give > BigInt::from(0);
-    let full_fill = fill.filled_give == canonical.quantized_give;
+    // Full execution is the base leg; price improvement can leave quote unspent.
+    let full_fill = if policy.derive_side(
+        canonical.offer.give_token_id(),
+        canonical.offer.want_token_id(),
+    ) == 1
+    {
+        fill.filled_give == canonical.quantized_give
+    } else {
+        fill.filled_want == canonical.quantized_want
+    };
     if canonical.offer.time_in_force() == Some(1) && has_fill && !full_fill && !tx.cancel_remainder
     {
         return Err(rejected("SWAP_RESOLVE_IOC_REMAINDER_NOT_CANCELLED"));
@@ -241,13 +253,14 @@ fn validate_filled_amount_bounds(fill: &ExecutionFill) -> Result<(), ValidationR
 }
 
 pub(crate) fn validate_swap_resolve(
+    policy: &SwapMarketPolicy,
     state: &AccountState,
     tx: &SwapResolveTx<'_>,
     proposer: Side,
 ) -> Result<ValidatedSwapResolve, ValidationRejection> {
     let canonical = resolve_canonical_offer(state, tx, proposer)?;
     let fill = derive_execution_fill(tx, &canonical)?;
-    validate_execution_economics(tx, &canonical, &fill)?;
+    validate_execution_economics(policy, tx, &canonical, &fill)?;
     Ok(ValidatedSwapResolve {
         effective_fee_token_id: tx.fee_token_id.unwrap_or(canonical.offer.want_token_id()),
         fee_amount: tx.fee_amount.clone().unwrap_or_else(|| BigInt::from(0)),
@@ -258,6 +271,5 @@ pub(crate) fn validate_swap_resolve(
         offer: canonical.offer,
         filled_give: fill.filled_give,
         filled_want: fill.filled_want,
-        canonical_fill_ratio: fill.canonical_fill_ratio,
     })
 }

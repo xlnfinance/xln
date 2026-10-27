@@ -603,6 +603,7 @@ fn committed_bilateral_finality_projects_the_exact_runtime_event() {
             }],
         }],
         &DeterministicContext::hlt_default(),
+        &Default::default(),
     )
     .expect("committed claim");
     assert_eq!(

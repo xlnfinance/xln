@@ -1,6 +1,8 @@
 #[cfg(feature = "bench")]
 mod benchmark;
 mod book;
+mod capacity;
+pub use capacity::OrderbookCapacity;
 mod commitment;
 mod matcher;
 mod math;

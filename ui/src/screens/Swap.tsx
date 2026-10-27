@@ -99,7 +99,7 @@ export function Swap() {
           summary.isHub &&
           targetEntity &&
           hub &&
-          compatibleSwapHubs(hub.counterpartyId, summary.entityId) &&
+          compatibleSwapHubs(hub.counterpartyId, summary.entityId, wallet.summaries) &&
           (summary.jurisdiction?.name || '') === (targetEntity.jurisdiction?.name || '') &&
           normalizeId(summary.entityId) !== normalizeId(targetEntity.entityId),
       ),
@@ -336,11 +336,11 @@ export function Swap() {
   const feeBps = useMemo(() => {
     if (!hub || mode !== 'same') return null;
     try {
-      return hubTakerFeeBps(hub.counterpartyId);
+      return hubTakerFeeBps(hub.counterpartyId, wallet.summaries);
     } catch {
       return null;
     }
-  }, [hub, mode, wallet.frameHeight]);
+  }, [hub, mode, wallet.summaries]);
 
   const overCapacity = Boolean(prepared && prepared.effectiveGive > giveSpendable);
 

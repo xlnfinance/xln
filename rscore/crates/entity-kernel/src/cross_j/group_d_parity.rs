@@ -595,8 +595,15 @@ fn cross_quote_outside_same_j_anchor_uses_cross_admission() {
             account_id,
             offer: Box::new(offer),
         };
-        let mut prepared =
-            prepare_orderbook_outputs(&mut state, &[delta], &context, &hub, None).unwrap();
+        let mut prepared = prepare_orderbook_outputs(
+            &mut state,
+            &[delta],
+            &context,
+            &hub,
+            None,
+            &Default::default(),
+        )
+        .unwrap();
         let results = prepared
             .take_jobs()
             .into_iter()

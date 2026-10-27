@@ -1,3 +1,4 @@
+import { sameMatchCapacity } from './capacity';
 import {
   applyCommand,
   getSwapExactQuoteLotMultipleAtPriceForDimensions,
@@ -74,6 +75,7 @@ export const applySameOfferCommand = (
       },
       {
         suspendedOrderIds: pass.suspendedSameOrderIds,
+        admitMatch: sameMatchCapacity(pass),
         makerDisposition: maker => classifySameBookMaker(pass, offer.bookKey, maker),
         executionQtyMultipleAtPrice: (priceTicks) =>
           getSwapExactQuoteLotMultipleAtPriceForDimensions(
@@ -107,6 +109,7 @@ export const resumeCrossedSameBook = (
   try {
     return resumeCrossedBook(offer.book, {
       suspendedOrderIds: pass.suspendedSameOrderIds,
+      admitMatch: sameMatchCapacity(pass),
       makerDisposition: maker => classifySameBookMaker(pass, offer.bookKey, maker),
       executionQtyMultipleAtPrice: (priceTicks) =>
         getSwapExactQuoteLotMultipleAtPriceForDimensions(

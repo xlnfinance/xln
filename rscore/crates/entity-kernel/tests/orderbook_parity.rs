@@ -178,6 +178,7 @@ fn canonical_usd_quote_authority_ask_matches_typescript_book_state() {
         state,
         &[commit(MAKER, 0x40, 1, ask, outputs)],
         &DeterministicContext::hlt_default(),
+        &support::orderbook_capacity(),
     )
     .expect("authorized USD ask");
     let book = &result.state.orderbook.expect("orderbook").books["1/2"];
@@ -234,6 +235,7 @@ fn same_j_offer_match_and_committed_resolve_lifecycle() {
             commit(TAKER, 0x42, 1, bid, taker_outputs),
         ],
         &DeterministicContext::hlt_default(),
+        &support::orderbook_capacity(),
     )
     .expect("match pass");
     let oracle = fixture();
@@ -364,6 +366,7 @@ fn same_j_offer_match_and_committed_resolve_lifecycle() {
             commit(TAKER, 0x44, 2, taker_resolve, taker_remove),
         ],
         &DeterministicContext::hlt_default(),
+        &support::orderbook_capacity(),
     )
     .expect("committed resolves");
     assert!(settled.proposal_work.is_empty());
@@ -390,6 +393,7 @@ fn same_j_partial_fill_rests_exact_remainder_after_committed_resolve() {
             commit(TAKER, 0x62, 1, bid, taker_outputs),
         ],
         &DeterministicContext::hlt_default(),
+        &support::orderbook_capacity(),
     )
     .expect("partial match");
     let oracle = fixture();
@@ -470,6 +474,7 @@ fn same_j_partial_fill_rests_exact_remainder_after_committed_resolve() {
             commit(TAKER, 0x64, 2, taker_resolve, taker_remove),
         ],
         &DeterministicContext::hlt_default(),
+        &support::orderbook_capacity(),
     )
     .expect("partial resolve commits");
     assert!(settled.proposal_work.is_empty());
@@ -506,6 +511,7 @@ fn same_j_hlt_sweep_matches_two_price_levels_with_weighted_taker_resolution() {
             commit(TAKER, 0x83, 1, bid, taker_outputs),
         ],
         &DeterministicContext::hlt_default(),
+        &support::orderbook_capacity(),
     )
     .expect("two-level HLT sweep");
     let oracle = fixture();
@@ -590,6 +596,7 @@ fn same_j_hlt_sweep_matches_two_price_levels_with_weighted_taker_resolution() {
             commit(TAKER, 0x86, 2, taker_resolve, taker_remove),
         ],
         &DeterministicContext::hlt_default(),
+        &support::orderbook_capacity(),
     )
     .expect("sweep resolves commit");
     assert!(settled.proposal_work.is_empty());
@@ -609,6 +616,7 @@ fn same_j_cancel_request_is_resolved_then_removed() {
         state,
         &[commit(MAKER, 0x51, 1, ask, offer_outputs)],
         &DeterministicContext::hlt_default(),
+        &support::orderbook_capacity(),
     )
     .expect("rest offer");
     assert!(resting.proposal_work.is_empty());
@@ -621,6 +629,7 @@ fn same_j_cancel_request_is_resolved_then_removed() {
         resting.state,
         &[commit(MAKER, 0x52, 2, cancel, cancel_outputs)],
         &DeterministicContext::hlt_default(),
+        &support::orderbook_capacity(),
     )
     .expect("cancel pass");
     let resolve = proposal(&cancel_pass, MAKER).clone();
@@ -645,6 +654,7 @@ fn same_j_cancel_request_is_resolved_then_removed() {
         cancel_pass.state,
         &[commit(MAKER, 0x53, 3, resolve, removed)],
         &DeterministicContext::hlt_default(),
+        &support::orderbook_capacity(),
     )
     .expect("cancel resolve commit");
     assert!(
@@ -655,4 +665,235 @@ fn same_j_cancel_request_is_resolved_then_removed() {
             .offers
             .is_empty()
     );
+}
+
+#[test]
+fn zero_hub_outgoing_capacity_cancels_without_paired_fill() {
+    for (capacity, tif) in [(0u64, 0u8), (2_499_999_999, 0), (0, 2)] {
+        assert_capacity_cancel(capacity, tif);
+    }
+}
+
+fn assert_capacity_cancel(capacity: u64, tif: u8) {
+    use xln_rscore_engine::{AccountDisputeConfig, AccountState, Delta};
+    let initial = account(MAKER, &[1, 2]);
+    let zero_want = Delta::new(
+        support::token(1),
+        0.into(),
+        0.into(),
+        0.into(),
+        capacity.into(),
+        BigInt::from(10_u8).pow(30),
+        0.into(),
+        0.into(),
+        0.into(),
+        0.into(),
+    )
+    .unwrap();
+    let state = AccountState::new(
+        initial.state().identity().clone(),
+        AccountDisputeConfig::new(10, 10).unwrap(),
+        vec![
+            zero_want,
+            initial.state().delta(support::token(2)).unwrap().clone(),
+        ],
+    )
+    .unwrap();
+    let initial =
+        AccountReplica::new(xln_rscore_engine::EntityId::parse(HUB).unwrap(), state).unwrap();
+    let ask = offer_tx("no-credit-ask", true);
+    let mut bid = offer_tx("funded-bid", false);
+    if let AccountTx::SwapOffer { time_in_force, .. } = &mut bid {
+        *time_in_force = Some(tif);
+    }
+    let (_, maker_outputs) = apply_account(&initial, Side::Right, &ask, 0, 1);
+    let (_, taker_outputs) = offered_account(TAKER, &bid, 2);
+    let mut state = entity_state(2_000);
+    state.known_accounts = BTreeSet::from([MAKER.to_string(), TAKER.to_string()]).into();
+    state.orderbook = Some(OrderbookState::empty(10_000));
+    state.orderbook_metadata = Some(orderbook_metadata());
+    let mut capacity = support::orderbook_capacity();
+    capacity.insert(
+        (MAKER.into(), 1),
+        initial
+            .state()
+            .delta(support::token(1))
+            .unwrap()
+            .perspective(initial.owner_side())
+            .out_capacity,
+    );
+    let result = apply_entity_kernel(
+        state,
+        &[
+            commit(MAKER, 0x41, 1, ask, maker_outputs),
+            commit(TAKER, 0x42, 1, bid, taker_outputs),
+        ],
+        &DeterministicContext::hlt_default(),
+        &capacity,
+    )
+    .unwrap();
+    assert!(matches!(
+        proposal(&result, MAKER),
+        AccountTx::SwapResolve {
+            fill_ratio: 0,
+            cancel_remainder: true,
+            comment: Some(reason),
+            ..
+        } if reason == "counterparty-capacity"
+    ));
+    assert!(
+        result
+            .outputs
+            .iter()
+            .all(|output| !matches!(output, EntityKernelOutput::SwapMatched { .. }))
+    );
+}
+
+#[test]
+fn capacity_consumption_cancellation_and_next_level_match_typescript() {
+    use std::collections::BTreeMap;
+    use xln_rscore_engine::{AccountDisputeConfig, AccountState, Delta};
+    let vector: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../fixtures/entity-kernel/capacity.json"
+    ))
+    .unwrap();
+    let initial = account(MAKER, &[1, 2]);
+    let delta = Delta::new(
+        support::token(1),
+        0.into(),
+        0.into(),
+        0.into(),
+        vector["makerCapacity"].as_str().unwrap().parse().unwrap(),
+        BigInt::from(10u8).pow(30),
+        0.into(),
+        0.into(),
+        0.into(),
+        0.into(),
+    )
+    .unwrap();
+    let maker = AccountReplica::new(
+        initial.owner().clone(),
+        AccountState::new(
+            initial.state().identity().clone(),
+            AccountDisputeConfig::new(10, 10).unwrap(),
+            vec![
+                delta,
+                initial.state().delta(support::token(2)).unwrap().clone(),
+            ],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let mut accounts = BTreeMap::from([
+        (MAKER.to_string(), maker),
+        (TAKER.to_string(), account(TAKER, &[1, 2])),
+        (NEXT.to_string(), account(NEXT, &[1, 2])),
+    ]);
+    let mut commits = Vec::new();
+    for (index, row) in vector["offers"].as_array().unwrap().iter().enumerate() {
+        let remote = match row["account"].as_str().unwrap() {
+            "22" => MAKER,
+            "33" => TAKER,
+            "44" => NEXT,
+            _ => panic!("account"),
+        };
+        let tx = offer_tx_at(
+            row["id"].as_str().unwrap(),
+            row["ask"].as_bool().unwrap(),
+            row["units"].as_u64().unwrap() as u32,
+            row["price"].as_str().unwrap().parse().unwrap(),
+        );
+        let (next, outputs) = apply_account(
+            &accounts[remote],
+            Side::Right,
+            &tx,
+            index as u64,
+            index as u64 + 1,
+        );
+        accounts.insert(remote.to_string(), next);
+        commits.push(commit(
+            remote,
+            0x41 + index as u8,
+            index as u64 + 1,
+            tx,
+            outputs,
+        ));
+    }
+    let capacity = accounts
+        .iter()
+        .flat_map(|(remote, account)| {
+            [1, 2].into_iter().map(move |id| {
+                (
+                    (remote.clone(), id),
+                    account
+                        .state()
+                        .delta(support::token(id))
+                        .unwrap()
+                        .perspective(account.owner_side())
+                        .out_capacity,
+                )
+            })
+        })
+        .collect();
+    let mut state = entity_state(2_000);
+    state.known_accounts = accounts.keys().cloned().collect::<BTreeSet<_>>().into();
+    state.orderbook = Some(OrderbookState::empty(10_000));
+    state.orderbook_metadata = Some(orderbook_metadata());
+    let mut context = DeterministicContext::hlt_default();
+    context.swap_taker_fee_bps = 0;
+    let result = apply_entity_kernel(state, &commits, &context, &capacity).unwrap();
+    let book = &result.state.orderbook.as_ref().unwrap().books["1/2"];
+    assert_eq!(
+        compute_book_commitment_hash(book).unwrap(),
+        vector["bookCommitmentHash"].as_str().unwrap()
+    );
+    assert_eq!(book.trade_count, vector["tradeCount"].as_u64().unwrap());
+    assert!(book.orders.is_empty());
+    let mut observed = BTreeMap::new();
+    for group in &result.proposal_work {
+        for tx in &group.txs {
+            let AccountTx::SwapResolve {
+                offer_id,
+                fill_ratio,
+                execution_give_amount,
+                execution_want_amount,
+                comment,
+                ..
+            } = tx
+            else {
+                panic!("resolve")
+            };
+            observed.insert(
+                offer_id.clone(),
+                serde_json::json!({ "id": offer_id, "fill": fill_ratio,
+                "give": execution_give_amount.clone().unwrap_or_default().to_string(),
+                "want": execution_want_amount.clone().unwrap_or_default().to_string() }),
+            );
+            if offer_id == "unfunded" {
+                assert_eq!(comment.as_deref(), Some("counterparty-capacity"));
+            }
+            let (next, _) = apply_account(&accounts[&group.account_id], Side::Left, tx, 4, 5);
+            accounts.insert(group.account_id.clone(), next);
+        }
+    }
+    let expected = vector["resolves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| (row["id"].as_str().unwrap().to_string(), row.clone()))
+        .collect();
+    assert_eq!(observed, expected);
+    for account in accounts.values() {
+        assert!(account.state().swap_offers().next().is_none());
+        for id in [1, 2] {
+            assert_eq!(
+                account
+                    .state()
+                    .delta(support::token(id))
+                    .unwrap()
+                    .hold(Side::Right),
+                &BigInt::from(0)
+            );
+        }
+    }
 }

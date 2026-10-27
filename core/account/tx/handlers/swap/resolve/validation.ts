@@ -1,3 +1,4 @@
+import { deriveSide } from '../../../../../swapbook/types';
 import { UINT256_MAX } from '../../../../../protocol/boundary/integer-ranges';
 import type { AccountState, SwapOffer } from '../../../../../types/account';
 import { FINANCIAL } from '../../../../../config/constants';
@@ -196,7 +197,10 @@ const validateTimeInForceClose = (
 ): SwapResolveFailure | null => {
   const timeInForce = canonical.offer.timeInForce;
   const hasFill = fill.filledGive > 0n;
-  const fullFill = fill.filledGive === canonical.quantizedGive;
+  // Full execution is the base leg: a bid may spend less quote at a better price.
+  const fullFill = deriveSide(canonical.offer.giveTokenId, canonical.offer.wantTokenId) === 1
+    ? fill.filledGive === canonical.quantizedGive
+    : fill.filledWant === canonical.quantizedWant;
   if (timeInForce === 1 && hasFill && !fullFill && !tx.data.cancelRemainder) {
     return failure(events, `Swap offer ${tx.data.offerId} is IOC: cancel the unfilled remainder`);
   }

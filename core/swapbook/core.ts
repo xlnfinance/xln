@@ -37,7 +37,7 @@ export type BookEvent =
   | { type: 'REJECT'; orderId: string; ownerId: string; reason: string; blockingOrderId?: string }
   | { type: 'TRADE'; price: bigint; qty: bigint; makerOwnerId: string; takerOwnerId: string; makerOrderId: string; takerOrderId: string; makerQtyBefore: bigint; takerQtyTotal: bigint }
   | { type: 'REDUCED'; orderId: string; ownerId: string; delta: bigint; remain: bigint }
-  | { type: 'CANCELED'; orderId: string; ownerId: string };
+  | { type: 'CANCELED'; orderId: string; ownerId: string; reason?: 'counterparty-capacity' };
 
 export interface BookParams { bucketWidthTicks: bigint; maxOrders: number; stpPolicy: 0 | 1 }
 
@@ -79,6 +79,7 @@ export interface ApplyCommandOptions {
   /** Lazy external-authority verdict for a maker actually consulted by the price walk. */
   makerDisposition?: (maker: Readonly<BookOrderState>) => 'eligible' | 'suspended' | 'cancel';
   executionPriceTicksForMatch?: (maker: bigint, taker: bigint, side: Side) => bigint;
+  admitMatch?: (maker: Readonly<BookOrderState>, takerOrderId: string, price: bigint, qty: bigint) => 'fill' | 'cancel-maker' | 'cancel-taker';
   executionQtyMultipleAtPrice?: (priceTicks: bigint) => bigint;
 }
 
@@ -312,7 +313,27 @@ const matchPricePages = (
       }
       const fill = execution(options, maker.priceTicks, taker.priceTicks, taker.side,
         maker.qtyLots < remaining ? maker.qtyLots : remaining);
-      if (fill.qty <= 0n) { stopAfterPage = true; break; }
+      // Dust at one price cannot hide an executable order at a later price.
+      if (fill.qty <= 0n) continue;
+      const admission = options.admitMatch?.(maker, taker.orderId, fill.price, fill.qty) ?? 'fill';
+      if (admission === 'cancel-maker') {
+        slots[slot] = null;
+        liveCount -= 1;
+        totalQtyLots -= maker.qtyLots;
+        state.orders.delete(maker.orderId);
+        bumpHash(state, 5, maker.priceTicks, 0);
+        pageChanged = true;
+        events.push({ type: 'CANCELED', orderId: maker.orderId, ownerId: maker.ownerId, reason: 'counterparty-capacity' });
+        continue;
+      }
+      if (admission === 'cancel-taker') {
+        if (pageChanged) publishMatchedPage(state, makerSide, key, {
+          ...sourcePage, headSlot: liveCount === 0 ? 0 : nextLiveSlot(slots, sourcePage.headSlot),
+          liveCount, totalQtyLots, slots,
+        });
+        events.push({ type: 'REJECT', orderId: taker.orderId, ownerId: taker.ownerId, reason: 'counterparty-capacity' });
+        return { remaining, blockingOrderId: maker.orderId };
+      }
       state.tradeCount += 1;
       state.tradeQtySum += fill.qty;
       state.lastTradePriceTicks = fill.price;
@@ -437,7 +458,13 @@ export function applyCommand(
     commandOptions,
   );
   if (tif === 2 && matched.remaining > 0n) {
-    return { state: forkBookState(state), events: [{ type: 'REJECT', orderId, ownerId, reason: 'FOK cannot fill entirely' }] };
+    const restored = forkBookState(state) as MutableBookState;
+    const cancels = events.filter((event): event is Extract<BookEvent, { type: 'CANCELED' }> => event.type === 'CANCELED' && event.reason === 'counterparty-capacity');
+    for (const event of cancels) {
+      const removed = removeOrder(restored, event.orderId);
+      if (removed) bumpHash(restored, 5, removed.priceTicks, 0);
+    }
+    return { state: restored, events: [...cancels, { type: 'REJECT', orderId, ownerId, reason: 'FOK cannot fill entirely' }] };
   }
   if (matched.remaining > 0n && matched.blockingOrderId === undefined && tif === 0) {
     if (mutable.orders.size >= mutable.params.maxOrders) throw new OrderbookCapacityError();

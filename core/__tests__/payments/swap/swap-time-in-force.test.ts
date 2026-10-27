@@ -140,7 +140,7 @@ describe('swap_resolve time-in-force', () => {
   });
 
   test('swap_resolve.gtc_maximum_wire_ratio_preserves_a_tradable_partial_remainder', async () => {
-    const amount = 100_000n * SWAP_LOT_SCALE;
+    const amount = 65_536n * SWAP_LOT_SCALE;
     const filled = amount - SWAP_LOT_SCALE;
     const fillRatio = exactFillRatioToUint16({ numerator: filled, denominator: amount });
     expect(fillRatio).toBe(MAX_SWAP_FILL_RATIO);
@@ -165,4 +165,31 @@ describe('swap_resolve time-in-force', () => {
     if (mismatch.ok) throw new Error('expected resting mismatch');
     expect(mismatch.rejection.message).toBe('Resting swap terms mismatch live offer');
   });
+});
+
+// A bid buys a base quantity, even when price improvement spends less quote.
+test('FOK bid at 2500 accepts its entire base leg at 2400', async () => {
+  const account = makeAccount('alice', 'hub');
+  const quote = createDefaultDelta(2);
+  quote.leftCreditLimit = quote.rightCreditLimit = 10n ** 30n;
+  account.state.deltas = account.state.deltas.updated(2, quote);
+  const base = 10n ** 18n;
+  const quoteUnit = 10n ** 6n;
+  const offered = await applyAccountTxToMutableReplica(account, {
+    type: 'swap_offer', data: {
+      offerId: 'improved-fok', giveTokenId: 1, wantTokenId: 2,
+      ...getStaticSwapTokenDimensions(1, 2),
+      giveAmount: 2500n * quoteUnit, wantAmount: base,
+      maxFee: 0n, minNetReceive: base, timeInForce: 2,
+    },
+  }, true, 1000, 7, false, undefined, undefined, undefined, CLOCK);
+  expect(offered.ok).toBe(true);
+  const result = await resolve(account, 'improved-fok', {
+    fillRatio: exactFillRatioToUint16({ numerator: 24n, denominator: 25n }),
+    executionGiveAmount: 2400n * quoteUnit, executionWantAmount: base,
+    cancelRemainder: true,
+  });
+  expect(result.ok).toBe(true);
+  expect(account.state.swapOffers.has('improved-fok')).toBe(false);
+  expect(account.state.deltas.get(1)?.leftHold).toBe(0n);
 });
