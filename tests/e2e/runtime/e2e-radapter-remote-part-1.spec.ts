@@ -880,6 +880,18 @@ test(
     expect(restored).toEqual(created);
     expect(created.runtimeId).toMatch(/^0x[a-f0-9]{40}$/i);
     expect(created.runtimeId).not.toBe(endpoint.runtimeId);
+    // The wallet screen opens before the first J catch-up; commands open after it.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              (window as Window & { __xln?: { adapter(): RuntimeAdapterInspection | null } }).__xln?.adapter()
+                ?.commandReady ?? null,
+          ),
+        { timeout: REMOTE_E2E_WAIT_MS },
+      )
+      .toBe(true);
     const state = await page.evaluate(key => {
       const adapter = (window as Window & { __xln?: { adapter(): RuntimeAdapterInspection | null } }).__xln?.adapter();
       if (!adapter) throw new Error('LOCAL_ADAPTER_MISSING');
