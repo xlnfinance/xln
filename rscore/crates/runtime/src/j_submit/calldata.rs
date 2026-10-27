@@ -52,21 +52,6 @@ pub(crate) fn dispute_call_selectors() -> [[u8; 4]; 2] {
     ]
 }
 
-/// The canonical ABI dispute call that starts `bytes`, when one does. A call
-/// embedded in wrapper calldata is followed by the wrapper's own bytes, so the
-/// call ends where its canonical re-encoding ends; any other encoding is not it.
-pub(crate) fn canonical_dispute_call_prefix(bytes: &[u8]) -> Option<&[u8]> {
-    let selectors = dispute_call_selectors();
-    let params = match bytes.get(..4)? {
-        found if found == selectors[0] => process_batch_params(),
-        found if found == selectors[1] => watchtower_params(),
-        _ => return None,
-    };
-    let encoded = ethabi::encode(&ethabi::decode(&params, &bytes[4..]).ok()?);
-    let end = encoded.len().checked_add(4)?;
-    (bytes.get(4..end)? == encoded.as_slice()).then(|| &bytes[..end])
-}
-
 pub fn decode_process_batch_calldata(
     calldata: &[u8],
 ) -> Result<(Vec<u8>, Vec<u8>, U256, JBatch), JSubmitError> {

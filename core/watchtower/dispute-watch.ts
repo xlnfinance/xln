@@ -9,7 +9,7 @@
  * chain beyond read-only getLogs.
  */
 
-import { Interface } from 'ethers';
+import { Depository__factory } from '../../jurisdictions/typechain-types';
 import { createXlnJsonRpcProvider } from '../jurisdiction/adapter';
 import { assertWatchtowerRpcUrlAllowed } from './action';
 import { buildDisputeWakeNotification, disputeWakeCollapseKey, selectWakeTargets } from './push/dispute-wake';
@@ -22,10 +22,7 @@ import type {
   StoredPushRegistration,
 } from './push/types';
 
-const DISPUTE_STARTED_ABI = [
-  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds)',
-] as const;
-const DISPUTE_INTERFACE = new Interface(DISPUTE_STARTED_ABI);
+const DISPUTE_INTERFACE = Depository__factory.createInterface();
 const DISPUTE_STARTED_TOPIC = DISPUTE_INTERFACE.getEvent('DisputeStarted')!.topicHash;
 
 const DEFAULT_MAX_BLOCK_RANGE = 5_000;

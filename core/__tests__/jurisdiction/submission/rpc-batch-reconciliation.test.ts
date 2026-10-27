@@ -1,3 +1,4 @@
+import { PROOF_BODY_ABI } from '../../../protocol/dispute/proof-body';
 import { encodeInt512 } from "../../../protocol/crypto/abi-money";
 import { expect, test } from 'bun:test';
 import { ethers } from 'ethers';
@@ -245,7 +246,7 @@ test('competing finalization receipt boundaries reject unsafe Number coercion', 
   })).toThrow('STALE_FINALIZATION_RECEIPT_BOUNDARY_INVALID');
 });
 
-test('receipt reader canonicalizes DisputeFinalized nonce before binding calldata evidence', async () => {
+test('receipt reader authenticates DisputeFinalized evidence entirely from the log', async () => {
   const entityId = bytes32('11');
   const counterentity = bytes32('22');
   const initialProofbodyHash = bytes32('33');
@@ -264,16 +265,14 @@ test('receipt reader canonicalizes DisputeFinalized nonce before binding calldat
       tokenIds: [1n, 2n],
       transformers: [],
     },
-    starterArguments: '0x5678',
+    starterArgumentsHash: ethers.keccak256('0x5678'),
     otherArguments: '0xabcd',
     sig: '0x0102',
     startedByLeft: true,
     cooperative: false,
   };
-  const batch = createEmptyBatch();
-  batch.disputeFinalizations.push(finalization);
   const iface = Depository__factory.createInterface();
-  const calldata = iface.encodeFunctionData('processBatch', [encodeJBatch(batch), '0x0102', 3n]);
+  const proofbody = ethers.AbiCoder.defaultAbiCoder().encode([PROOF_BODY_ABI], [finalization.finalProofbody]);
   const finalizationEvidenceHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
     ['bytes32', 'uint256', 'bool', 'bool', 'bytes32', 'bytes32', 'bytes32'],
     [
@@ -290,11 +289,10 @@ test('receipt reader canonicalizes DisputeFinalized nonce before binding calldat
     entityId,
     counterentity,
     7n,
-    ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-      ['bytes32', 'uint256', 'uint256', 'int256[]', 'uint256[]'],
-      [bytes32('55'), 10, 10, [5n, -3n], [1n, 2n]],
-    )),
+    ethers.keccak256(proofbody),
     finalizationEvidenceHash,
+    proofbody,
+    finalization,
   ]);
   const provider = {
     getLogs: async ({ topics }: { topics: readonly string[] }) => topics[1]?.toLowerCase() === entityId.toLowerCase()
@@ -307,7 +305,7 @@ test('receipt reader canonicalizes DisputeFinalized nonce before binding calldat
           index: 0,
         }]
       : [],
-    getTransaction: async () => ({ data: calldata }),
+    getTransaction: async () => { throw new Error("transaction lookup must not occur"); },
   } as unknown as ethers.JsonRpcProvider;
   const stack = {
     depository: { interface: iface },

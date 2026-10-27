@@ -1,3 +1,4 @@
+import { resolveDisputeLogReferences, disputeReferenceFilter } from '../events/dispute/log-reference';
 import type { Depository, EntityProvider } from '../../../../jurisdictions/typechain-types/index';
 import type { RuntimeReplica, RuntimeTx } from '../../../runtime/types';
 import {
@@ -11,7 +12,7 @@ import {
   updateWatcherJurisdictionCursor,
   type EventBatchCounter,
 } from '../watcher';
-import type { JEventIngress } from '../types';
+import type { JEvent, JEventIngress } from '../types';
 import type { BrowserVMProvider } from './browservm-provider';
 import type { AuthenticatedRpcLog } from '../../machine/receipt-codec';
 import {
@@ -20,13 +21,6 @@ import {
 } from '../../machine/registration-evidence';
 import { CANONICAL_J_EVENTS } from '../../machine/event-catalog';
 import { decodeJEventLog } from '../j-event-log-decoder';
-import {
-  decodeDisputeFinalizationEvidenceCalldata,
-  decodeDisputeProofBodyEvidenceCalldata,
-  resolveDisputeFinalizationEvidence,
-  resolveDisputeProofBodyEvidence,
-} from '../rpc-public';
-
 type BrowserVmHistoryOptions = {
   chainId: number;
   depositoryAddress: string;
@@ -41,7 +35,7 @@ type BrowserVmWatcherProgress = {
   replicaScannedThrough: Record<string, number>;
 };
 
-const decodeHistoricalLog = (options: BrowserVmHistoryOptions, log: AuthenticatedRpcLog): JEventIngress | null => {
+const decodeHistoricalLog = (options: BrowserVmHistoryOptions, log: AuthenticatedRpcLog): JEvent | null => {
   const address = log.address.toLowerCase();
   const carrier =
     address === options.depositoryAddress.toLowerCase()
@@ -62,41 +56,6 @@ const decodeHistoricalLog = (options: BrowserVmHistoryOptions, log: Authenticate
     `BROWSERVM_HISTORICAL_LOG_DECODE_FAILED:block=${log.blockNumber}` +
       `:tx=${log.transactionHash}:index=${log.logIndex}`,
   );
-  if (
-    event.name === 'DisputeStarted' ||
-    event.name === 'CounterDisputeRegistered' ||
-    event.name === 'DisputeFinalized'
-  ) {
-    const receipt = options.browserVM.getTransactionReceipt(log.transactionHash);
-    if (!receipt) {
-      throw new Error(`BROWSERVM_DISPUTE_RECEIPT_MISSING:${log.transactionHash}`);
-    }
-    const proofbody = resolveDisputeProofBodyEvidence(
-      decodeDisputeProofBodyEvidenceCalldata(receipt.data),
-      event.name,
-      event.args,
-    );
-    event.args[
-      event.name === 'DisputeStarted'
-        ? 'initialProofbody'
-        : event.name === 'CounterDisputeRegistered'
-          ? 'counterProofbody'
-          : 'finalProofbody'
-    ] = proofbody;
-    if (event.name === 'DisputeFinalized') {
-      const evidence = resolveDisputeFinalizationEvidence(
-        decodeDisputeFinalizationEvidenceCalldata(receipt.data),
-        log.transactionHash,
-        event.args,
-      );
-      // The Solidity log commits only the evidence hash; calldata recovery
-      // supplies the initial proof hash that Runtime consensus validates. Keep
-      // BrowserVM identical to the RPC watcher: attaching only the sidecar
-      // would leave the canonical event payload incomplete and fail closed.
-      event.args['initialProofbodyHash'] = evidence.initialProofbodyHash;
-      event.disputeFinalizationEvidence = evidence;
-    }
-  }
   return CANONICAL_J_EVENTS.some(name => name === event.name) ? event : null;
 };
 
@@ -110,17 +69,17 @@ const buildHistoryHeaders = (
     return { jHeight, jBlockHash: browserVM.getBlockHashAt(jHeight) };
   });
 
-const collectHistoricalEvents = (
+const collectHistoricalEvents = async (
   options: BrowserVmHistoryOptions,
   env: RuntimeReplica,
   logs: AuthenticatedRpcLog[],
   fromBlock: number,
   targetBlock: number,
   tipBlockHash: string,
-): {
+): Promise<{
   byBlock: Map<number, JEventIngress[]>;
   authorityTxsByBlock: Map<number, RuntimeTx[]>;
-} => {
+}> => {
   const byBlock = new Map<number, JEventIngress[]>();
   const authorityTxsByBlock = new Map<number, RuntimeTx[]>();
   const watcherReplica = findWatcherJurisdictionReplica(env, options.depositoryAddress, options.chainId);
@@ -128,7 +87,9 @@ const collectHistoricalEvents = (
     throw new Error(`BROWSERVM_WATCHER_JURISDICTION_MISSING:${options.chainId}:${options.depositoryAddress}`);
   }
   for (const log of logs) {
-    const event = decodeHistoricalLog(options, log);
+    const decoded = decodeHistoricalLog(options, log);
+    const event = decoded && await resolveDisputeLogReferences(decoded, async event =>
+      options.browserVM.getLogs(disputeReferenceFilter(event, options.depositoryAddress)));
     if (!event) continue;
     const block = Number(event.blockNumber);
     if (!Number.isSafeInteger(block) || block < fromBlock || block > targetBlock) {
@@ -227,7 +188,7 @@ export const createBrowserVmHistoryWatcher = (options: BrowserVmHistoryOptions) 
       options.depositoryAddress,
       options.entityProviderAddress,
     ]);
-    const { byBlock, authorityTxsByBlock } = collectHistoricalEvents(
+    const { byBlock, authorityTxsByBlock } = await collectHistoricalEvents(
       options,
       env,
       logs,

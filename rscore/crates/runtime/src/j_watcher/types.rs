@@ -260,20 +260,8 @@ pub enum JWatcherError {
     RetiredMoneyAbi { address: String, topic: String },
     #[error("J_WATCHER_EVENT_ABI:{0}")]
     EventAbi(&'static str),
-    #[error("J_WATCHER_DISPUTE_CALLDATA_REQUIRED")]
-    DisputeCalldataRequired,
-    #[error("J_WATCHER_DISPUTE_CALLDATA:{0}")]
-    DisputeCalldata(String),
     #[error("J_WATCHER_DISPUTE_EVIDENCE_MISMATCH:{0}")]
     DisputeEvidence(&'static str),
-    #[error("J_WATCHER_TRANSACTION_MISSING")]
-    TransactionMissing,
-    #[error("J_WATCHER_TRANSACTION_FIELD:{0}")]
-    TransactionField(&'static str),
-    #[error("J_WATCHER_TRANSACTION_TYPE:{0}")]
-    TransactionType(u64),
-    #[error("J_WATCHER_TRANSACTION_HASH_MISMATCH")]
-    TransactionHashMismatch,
     #[error("J_WATCHER_ACCOUNT_SETTLED_NONCE:{0}")]
     AccountSettledNonce(String),
     #[error("J_WATCHER_ACCOUNT_SETTLED_TOKEN:{0}")]

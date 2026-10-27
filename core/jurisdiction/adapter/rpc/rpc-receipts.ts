@@ -2,12 +2,7 @@ import { ethers } from 'ethers';
 import { normalizeEntityId } from '../../../entity/id';
 import type { JEvent } from '../types';
 import type { RpcContractStack } from './rpc-contract-stack';
-import { extractCanonicalDepositoryEventArgs } from '../events/depository-event-codec';
-import {
-  decodeDisputeFinalizationEvidenceCalldata,
-  resolveDisputeFinalizationEvidence,
-} from '../rpc-public';
-
+import { extractCanonicalDepositoryEventArgs, validateDisputeFinalizationLog } from '../events/depository-event-codec';
 type DisputeFinalizationReceipt = {
   blockNumber: number;
   transactionHash: string;
@@ -128,15 +123,9 @@ export const createRpcReceiptReaders = (
       throw new Error(`DISPUTE_FINALIZATION_RECEIPT_DECODE_FAILED:${log.transactionHash}`);
     }
     const args = extractCanonicalDepositoryEventArgs(parsed);
-    const transaction = await provider.getTransaction(log.transactionHash);
-    if (!transaction) throw new Error(`DISPUTE_FINALIZATION_TRANSACTION_MISSING:${log.transactionHash}`);
-    const evidence = resolveDisputeFinalizationEvidence(
-      decodeDisputeFinalizationEvidenceCalldata(transaction.data),
-      log.transactionHash,
-      args,
-    );
+    const evidence = validateDisputeFinalizationLog(args);
     if (
-      evidence.initialNonce !== initialNonce.toString() ||
+      String(args['initialNonce']) !== initialNonce.toString() ||
       evidence.initialProofbodyHash.toLowerCase() !== initialProofbodyHash.toLowerCase()
     ) return null;
     return {

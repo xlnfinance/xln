@@ -381,3 +381,14 @@ enum MessageType {
   FinalDisputeProof,
   CooperativeDisputeProof
 }
+
+// Starter arguments already occur in DisputeStarted; finality authenticates their hash.
+struct DisputeFinalizationData {
+  bytes32 initialProofbodyHash;
+  uint256 finalNonce;
+  bool proposerIsLeft;
+  bool startedByLeft;
+  bytes32 starterArgumentsHash;
+  bytes otherArguments;
+  bytes sig;
+}

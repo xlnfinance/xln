@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { ZeroHash } from 'ethers';
+import { ZeroHash, keccak256 } from 'ethers';
 import { Depository__factory } from '../../jurisdictions/typechain-types/factories/Depository.sol/Depository__factory';
 import { computeAccountKey } from '../../core/jurisdiction/adapter/events/contract-codec';
 import { safeStringify } from '../../core/protocol/serialization';
@@ -80,6 +80,7 @@ test(
       const counter = counters[0]!;
       expect(counter.args.nonce).toBe(BigInt(latest.peerNonce));
       expect(counter.args.proofbodyHash).toBe(latest.hash);
+      expect(keccak256(counter.args.proofbody)).toBe(counter.args.proofbodyHash);
       const counterReceipt = await provider.getTransactionReceipt(counter.transactionHash);
       expect(counterReceipt?.from.toLowerCase()).toBe(health.signerAddress.toLowerCase());
       expect(counterReceipt?.gasUsed).toBeLessThanOrEqual(5_000_000n);
@@ -96,6 +97,8 @@ test(
         start.blockNumber,
       );
       expect(finalizations).toHaveLength(1);
+      expect(keccak256(finalizations[0]!.args.proofbody)).toBe(finalizations[0]!.args.finalProofbodyHash);
+      expect(finalizations[0]!.args.finalization.sig).toBe('0x');
       const finalReceipt = await provider.getTransactionReceipt(finalizations[0]!.transactionHash);
       expect(finalReceipt?.from.toLowerCase()).toBe(health.signerAddress.toLowerCase());
       expect(finalReceipt?.gasUsed).toBeLessThanOrEqual(5_000_000n);

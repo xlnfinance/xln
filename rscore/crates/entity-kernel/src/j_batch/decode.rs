@@ -413,3 +413,14 @@ pub fn decode_j_batch(encoded: &[u8]) -> Result<JBatch, JSubmitError> {
     }
     Ok(batch)
 }
+
+/// Decode the exact abi.encode(ProofBody) emitted by current dispute events.
+pub fn decode_proof_body(encoded: &[u8]) -> Result<ProofBody, JSubmitError> {
+    let mut tokens =
+        ethabi::decode(&[schema::proof_body()], encoded).map_err(|e| abi(&e.to_string()))?;
+    let body = decode_proof(tokens.remove(0))?;
+    if super::encode_proof_body(&body)? != encoded {
+        return Err(abi("non-canonical-proof-body"));
+    }
+    Ok(body)
+}

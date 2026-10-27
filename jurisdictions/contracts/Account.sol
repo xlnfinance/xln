@@ -50,14 +50,25 @@ library Account {
     uint256 disputeTimeout,
     uint256 disputeStartTimestamp,
     uint32 leftResponseSeconds,
-    uint32 rightResponseSeconds
+    uint32 rightResponseSeconds,
+    bytes proofbody
+  );
+  event DisputeFinalized(
+    bytes32 indexed sender,
+    bytes32 indexed counterentity,
+    uint indexed nonce,
+    bytes32 finalProofbodyHash,
+    bytes32 finalizationEvidenceHash,
+    bytes proofbody,
+    DisputeFinalizationData finalization
   );
   event CounterDisputeRegistered(
     bytes32 indexed sender,
     bytes32 indexed counterentity,
     uint256 indexed nonce,
     bool proposerIsLeft,
-    bytes32 proofbodyHash
+    bytes32 proofbodyHash,
+    bytes proofbody
   );
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, Uint512 amount, uint256 debtIndex, uint256 debtSeq);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, Uint512 remainingAmount, uint256 newDebtIndex);
@@ -1486,6 +1497,8 @@ library Account {
         }
       }
     }
+    bool bodyEmitted = bodyHash == account.disputeInitialProofbodyHash
+      || bodyHash == account.disputeCounterProofbodyHash;
     account.disputeCounterNonce = params.counterNonce;
     account.disputeCounterProofbodyHash = bodyHash;
     account.disputeCounterProposerIsLeft = params.proposerIsLeft;
@@ -1510,7 +1523,8 @@ library Account {
       params.counterentity,
       params.counterNonce,
       params.proposerIsLeft,
-      bodyHash
+      bodyHash,
+      bodyEmitted ? bytes("") : abi.encode(params.counterProofbody)
     );
   }
 
@@ -1815,6 +1829,12 @@ library Account {
     // SET nonce = signedNonce (any settlement signed at ≤ this nonce is now dead)
     _accounts[acct_key].nonce = params.nonce;
 
+    _emitDisputeStarted(entityId, params, timeout, startTimestamp);
+  }
+
+  function _emitDisputeStarted(bytes32 entityId, InitialDisputeProof memory params,
+    uint256 timeout, uint256 startTimestamp) private {
+    bytes memory proofbody = abi.encode(params.initialProofbody);
     emit DisputeStarted(
       entityId,
       params.counterentity,
@@ -1827,8 +1847,9 @@ library Account {
       params.starterCounterProofCommitment,
       timeout,
       startTimestamp,
-      leftResponseSeconds,
-      rightResponseSeconds
+      params.initialProofbody.leftResponseSeconds,
+      params.initialProofbody.rightResponseSeconds,
+      proofbody
     );
   }
 

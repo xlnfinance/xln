@@ -78,6 +78,34 @@ export type Uint512StructOutput = [high: bigint, low: bigint] & {
   low: bigint;
 };
 
+export type DisputeFinalizationDataStruct = {
+  initialProofbodyHash: BytesLike;
+  finalNonce: BigNumberish;
+  proposerIsLeft: boolean;
+  startedByLeft: boolean;
+  starterArgumentsHash: BytesLike;
+  otherArguments: BytesLike;
+  sig: BytesLike;
+};
+
+export type DisputeFinalizationDataStructOutput = [
+  initialProofbodyHash: string,
+  finalNonce: bigint,
+  proposerIsLeft: boolean,
+  startedByLeft: boolean,
+  starterArgumentsHash: string,
+  otherArguments: string,
+  sig: string
+] & {
+  initialProofbodyHash: string;
+  finalNonce: bigint;
+  proposerIsLeft: boolean;
+  startedByLeft: boolean;
+  starterArgumentsHash: string;
+  otherArguments: string;
+  sig: string;
+};
+
 export type Int768Struct = {
   high: BigNumberish;
   middle: BigNumberish;
@@ -523,14 +551,16 @@ export namespace CounterDisputeRegisteredEvent {
     counterentity: BytesLike,
     nonce: BigNumberish,
     proposerIsLeft: boolean,
-    proofbodyHash: BytesLike
+    proofbodyHash: BytesLike,
+    proofbody: BytesLike
   ];
   export type OutputTuple = [
     sender: string,
     counterentity: string,
     nonce: bigint,
     proposerIsLeft: boolean,
-    proofbodyHash: string
+    proofbodyHash: string,
+    proofbody: string
   ];
   export interface OutputObject {
     sender: string;
@@ -538,6 +568,7 @@ export namespace CounterDisputeRegisteredEvent {
     nonce: bigint;
     proposerIsLeft: boolean;
     proofbodyHash: string;
+    proofbody: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -641,14 +672,18 @@ export namespace DisputeFinalizedEvent {
     counterentity: BytesLike,
     nonce: BigNumberish,
     finalProofbodyHash: BytesLike,
-    finalizationEvidenceHash: BytesLike
+    finalizationEvidenceHash: BytesLike,
+    proofbody: BytesLike,
+    finalization: DisputeFinalizationDataStruct
   ];
   export type OutputTuple = [
     sender: string,
     counterentity: string,
     nonce: bigint,
     finalProofbodyHash: string,
-    finalizationEvidenceHash: string
+    finalizationEvidenceHash: string,
+    proofbody: string,
+    finalization: DisputeFinalizationDataStructOutput
   ];
   export interface OutputObject {
     sender: string;
@@ -656,6 +691,8 @@ export namespace DisputeFinalizedEvent {
     nonce: bigint;
     finalProofbodyHash: string;
     finalizationEvidenceHash: string;
+    proofbody: string;
+    finalization: DisputeFinalizationDataStructOutput;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -677,7 +714,8 @@ export namespace DisputeStartedEvent {
     disputeTimeout: BigNumberish,
     disputeStartTimestamp: BigNumberish,
     leftResponseSeconds: BigNumberish,
-    rightResponseSeconds: BigNumberish
+    rightResponseSeconds: BigNumberish,
+    proofbody: BytesLike
   ];
   export type OutputTuple = [
     sender: string,
@@ -692,7 +730,8 @@ export namespace DisputeStartedEvent {
     disputeTimeout: bigint,
     disputeStartTimestamp: bigint,
     leftResponseSeconds: bigint,
-    rightResponseSeconds: bigint
+    rightResponseSeconds: bigint,
+    proofbody: string
   ];
   export interface OutputObject {
     sender: string;
@@ -708,6 +747,7 @@ export namespace DisputeStartedEvent {
     disputeStartTimestamp: bigint;
     leftResponseSeconds: bigint;
     rightResponseSeconds: bigint;
+    proofbody: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -1562,7 +1602,7 @@ export interface DepositoryDebtHarness extends BaseContract {
       CooperativeCloseEvent.OutputObject
     >;
 
-    "CounterDisputeRegistered(bytes32,bytes32,uint256,bool,bytes32)": TypedContractEvent<
+    "CounterDisputeRegistered(bytes32,bytes32,uint256,bool,bytes32,bytes)": TypedContractEvent<
       CounterDisputeRegisteredEvent.InputTuple,
       CounterDisputeRegisteredEvent.OutputTuple,
       CounterDisputeRegisteredEvent.OutputObject
@@ -1606,7 +1646,7 @@ export interface DepositoryDebtHarness extends BaseContract {
       DebtForgivenEvent.OutputObject
     >;
 
-    "DisputeFinalized(bytes32,bytes32,uint256,bytes32,bytes32)": TypedContractEvent<
+    "DisputeFinalized(bytes32,bytes32,uint256,bytes32,bytes32,bytes,tuple)": TypedContractEvent<
       DisputeFinalizedEvent.InputTuple,
       DisputeFinalizedEvent.OutputTuple,
       DisputeFinalizedEvent.OutputObject
@@ -1617,7 +1657,7 @@ export interface DepositoryDebtHarness extends BaseContract {
       DisputeFinalizedEvent.OutputObject
     >;
 
-    "DisputeStarted(bytes32,bytes32,uint256,bool,bytes32,bytes32,bytes,bytes,bytes32,uint256,uint256,uint32,uint32)": TypedContractEvent<
+    "DisputeStarted(bytes32,bytes32,uint256,bool,bytes32,bytes32,bytes,bytes,bytes32,uint256,uint256,uint32,uint32,bytes)": TypedContractEvent<
       DisputeStartedEvent.InputTuple,
       DisputeStartedEvent.OutputTuple,
       DisputeStartedEvent.OutputObject

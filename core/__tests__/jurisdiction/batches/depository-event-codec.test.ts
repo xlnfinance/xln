@@ -2,7 +2,6 @@ import { encodeInt768 } from "../../../protocol/crypto/abi-money";
 import { describe, expect, test } from 'bun:test';
 import { Depository__factory } from '../../../../jurisdictions/typechain-types/index.ts';
 import {
-  extractCanonicalDepositoryEventArgs,
   parseKnownDepositoryLog,
 } from '../../../jurisdiction/adapter/events/depository-event-codec';
 import { ethers } from 'ethers';
@@ -34,40 +33,6 @@ describe('Depository watcher event codec', () => {
   ])('recognizes known non-canonical $name telemetry before filtering', ({ name, values }) => {
     const encoded = encode(name, values);
     expect(parseKnownDepositoryLog(encoded)?.name).toBe(name);
-  });
-
-  test('maps the Solidity DisputeFinalized nonce to the canonical initialNonce field', () => {
-    const encoded = encode('DisputeFinalized', [word('1'), word('2'), 7n, word('3'), word('4')]);
-    const parsed = parseKnownDepositoryLog(encoded);
-    if (!parsed) throw new Error('DisputeFinalized did not parse');
-    const args = extractCanonicalDepositoryEventArgs(parsed);
-    expect(args['nonce']).toBe(7n);
-    expect(args['initialNonce']).toBe(7n);
-  });
-
-  test('uses the same canonical DisputeFinalized payload for receipt ingestion', () => {
-    const encoded = encode(
-      'DisputeFinalized',
-      [word('1'), word('2'), 7n, word('3'), word('4')],
-    );
-    const events = parseReceiptLogsToJEvents(
-      {
-        logs: [{
-          address: '0x0000000000000000000000000000000000000001',
-          topics: encoded.topics,
-          data: encoded.data,
-          index: 0,
-        }],
-        blockNumber: 1,
-        blockHash: word('5'),
-        hash: word('6'),
-      },
-      [{
-        address: '0x0000000000000000000000000000000000000001',
-        interface: iface,
-      }],
-    );
-    expect(events[0]?.args['initialNonce']).toBe(7n);
   });
 
   test('halts on a pre-debtSeq DebtCreated from a configured carrier, not from an unrelated emitter', () => {

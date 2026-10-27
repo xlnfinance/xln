@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::abi::{
-    ContractEventKind, address_word, bigint, bool_word, decode_account_settled,
+    ContractEventKind, address_word, bigint, bool_word, decode_account_settled, decode_dispute_log,
     decode_dispute_started, decode_static_words, entity_word_value, event_kind, hex, into_event,
-    require_current_depository_money_abi, safe_uint, uint512,
+    require_current_depository_money_abi, safe_uint, token_bool, token_bytes, token_word, uint512,
 };
 use super::receipt::{block_height, fixed_hex, safe_u64, validate_block, validate_receipts};
 use super::types::{
@@ -20,8 +20,7 @@ use xln_rscore_engine::{
     ProofAllowance, ProofBody, ProofTransformerClause, ReserveUpdatedEvent, SecretRevealedEvent,
 };
 use xln_rscore_entity_kernel::{
-    FinalizedJEventBatch, JBatch, j_batch::ProofBody as JBatchProofBody,
-    project_finalized_j_event_batch,
+    FinalizedJEventBatch, j_batch::ProofBody as JBatchProofBody, project_finalized_j_event_batch,
 };
 
 pub fn poll_finalized_j_events(
@@ -190,18 +189,32 @@ fn authenticate_blocks(
             validate_receipts(block, &mut receipts)?;
             receipts
         };
-        if let Some(batch) = build_block_batch(rpc, config, block, &receipts)? {
+        let history = super::dispute_reference::read_history(rpc, config, &receipts)?;
+        if let Some(batch) = build_block_batch_with_history(config, block, &receipts, &history)? {
             batches.push(batch);
         }
     }
     Ok(batches)
 }
 
+#[cfg(test)]
 pub(super) fn build_block_batch(
-    rpc: &impl JsonRpc,
     config: &JWatcherConfig,
     block: &RpcBlock,
     receipts: &[RpcReceipt],
+) -> Result<Option<FinalizedJEventBatch>, JWatcherError> {
+    let history = receipts
+        .iter()
+        .flat_map(|receipt| receipt.logs.iter().cloned())
+        .collect::<Vec<_>>();
+    build_block_batch_with_history(config, block, receipts, &history)
+}
+
+pub(super) fn build_block_batch_with_history(
+    config: &JWatcherConfig,
+    block: &RpcBlock,
+    receipts: &[RpcReceipt],
+    history: &[super::types::RpcLog],
 ) -> Result<Option<FinalizedJEventBatch>, JWatcherError> {
     let height = block_height(block)?;
     let block_hash = fixed_hex::<32>(&block.hash, "blockHash")?;
@@ -210,7 +223,7 @@ pub(super) fn build_block_batch(
     let mut seen = BTreeSet::new();
     let mut global_log_index = 0_u64;
     for receipt in receipts {
-        let dispute_batch = receipt_dispute_batch(rpc, config, receipt)?;
+        let batch_nonces = receipt_batch_nonces(config, receipt)?;
         for log in &receipt.logs {
             collect_log(
                 config,
@@ -221,7 +234,8 @@ pub(super) fn build_block_batch(
                 &mut events,
                 &mut dispute_finalization_evidence,
                 &mut seen,
-                dispute_batch.as_ref(),
+                &batch_nonces,
+                history,
             )?;
             global_log_index = global_log_index
                 .checked_add(1)
@@ -242,42 +256,9 @@ pub(super) fn build_block_batch(
     .map_err(|error| JWatcherError::Account(error.to_string()))
 }
 
-/// Dispute evidence of one receipt: every dispute call its transaction carries,
-/// and the Hanko batch nonce each Entity's processBatch committed in it.
-struct ReceiptDisputeBatch {
-    calls: Vec<super::calldata::DisputeCall>,
-    batch_nonces: BTreeMap<EntityId, i64>,
-}
-
-impl ReceiptDisputeBatch {
-    /// Calls an event from `sender` may come from: a watchtower call is bound
-    /// to the Entity it names, a processBatch call to its Hanko signer.
-    fn batches_for<'a>(&'a self, sender: &'a EntityId) -> impl Iterator<Item = &'a JBatch> {
-        self.calls
-            .iter()
-            .filter(move |call| call.sender.as_ref().is_none_or(|named| named == sender))
-            .map(|call| &call.batch)
-    }
-
-    /// Same source as the TS watcher: the HankoBatchProcessed nonce the sender
-    /// committed in this transaction, never a calldata copy a wrapper could forge.
-    fn batch_nonce(&self, sender: &EntityId) -> Option<i64> {
-        self.batch_nonces.get(sender).copied()
-    }
-}
-
-fn is_dispute_kind(kind: ContractEventKind) -> bool {
-    matches!(
-        kind,
-        ContractEventKind::DisputeStarted
-            | ContractEventKind::DisputeFinalized
-            | ContractEventKind::CounterDisputeRegistered
-    )
-}
-
 /// The audience of every dispute event: its sender and its counterentity, as
 /// in TS `isEventRelevantToEntity`. This watcher serves `config.entity_id`, so
-/// any other dispute is never emitted and its calldata is never needed.
+/// any other dispute is never emitted.
 fn dispute_log_is_local(
     config: &JWatcherConfig,
     log: &super::types::RpcLog,
@@ -315,31 +296,6 @@ fn receipt_batch_nonces(
     Ok(nonces)
 }
 
-fn receipt_dispute_batch(
-    rpc: &impl JsonRpc,
-    config: &JWatcherConfig,
-    receipt: &RpcReceipt,
-) -> Result<Option<ReceiptDisputeBatch>, JWatcherError> {
-    let mut has_local_dispute = false;
-    for log in &receipt.logs {
-        if fixed_hex::<20>(&log.address, "logAddress")? != config.depository_address {
-            continue;
-        }
-        if event_kind(log)?.is_some_and(is_dispute_kind) && dispute_log_is_local(config, log)? {
-            has_local_dispute = true;
-        }
-    }
-    if !has_local_dispute {
-        return Ok(None);
-    }
-    let transaction_hash = fixed_hex::<32>(&receipt.transaction_hash, "transactionHash")?;
-    let calldata = super::calldata::read_authenticated_calldata(rpc, &transaction_hash)?;
-    Ok(Some(ReceiptDisputeBatch {
-        calls: super::calldata::decode_dispute_calls(&calldata)?,
-        batch_nonces: receipt_batch_nonces(config, receipt)?,
-    }))
-}
-
 #[allow(clippy::too_many_arguments)]
 fn collect_log(
     config: &JWatcherConfig,
@@ -350,7 +306,8 @@ fn collect_log(
     events: &mut Vec<JurisdictionEvent>,
     dispute_finalization_evidence: &mut Vec<DisputeFinalizationEvidence>,
     seen: &mut BTreeSet<([u8; 32], u64, u64, EntityId)>,
-    dispute_batch: Option<&ReceiptDisputeBatch>,
+    batch_nonces: &BTreeMap<EntityId, i64>,
+    history: &[super::types::RpcLog],
 ) -> Result<(), JWatcherError> {
     let address = fixed_hex::<20>(&log.address, "logAddress")?;
     require_current_depository_money_abi(log, &address, &config.depository_address)?;
@@ -384,7 +341,8 @@ fn collect_log(
             metadata,
             events,
             dispute_finalization_evidence,
-            dispute_batch,
+            batch_nonces,
+            history,
         )?;
         return Ok(());
     }
@@ -448,7 +406,8 @@ fn collect_single_event(
     metadata: JEventMetadata,
     events: &mut Vec<JurisdictionEvent>,
     dispute_finalization_evidence: &mut Vec<DisputeFinalizationEvidence>,
-    dispute_batch: Option<&ReceiptDisputeBatch>,
+    batch_nonces: &BTreeMap<EntityId, i64>,
+    history: &[super::types::RpcLog],
 ) -> Result<(), JWatcherError> {
     let event = match kind {
         ContractEventKind::ReserveUpdated => {
@@ -672,12 +631,7 @@ fn collect_single_event(
             if !dispute_log_is_local(config, log)? {
                 return Ok(());
             }
-            let decoded = decode_dispute_event(
-                kind,
-                log,
-                metadata,
-                dispute_batch.ok_or(JWatcherError::DisputeCalldataRequired)?,
-            )?;
+            let decoded = decode_dispute_event(kind, log, metadata, batch_nonces, history)?;
             if let Some(evidence) = decoded.evidence {
                 dispute_finalization_evidence.push(evidence);
             }
@@ -809,12 +763,6 @@ fn proof_body(value: &JBatchProofBody) -> ProofBody {
     }
 }
 
-fn u256_eq_biguint(value: &ethabi::ethereum_types::U256, expected: &num_bigint::BigUint) -> bool {
-    let mut bytes = [0_u8; 32];
-    value.to_big_endian(&mut bytes);
-    num_bigint::BigUint::from_bytes_be(&bytes) == *expected
-}
-
 fn finalization_evidence_hash(
     value: &xln_rscore_entity_kernel::j_batch::FinalDisputeProof,
 ) -> [u8; 32] {
@@ -841,29 +789,23 @@ struct DecodedDisputeEvent {
     evidence: Option<DisputeFinalizationEvidence>,
 }
 
-fn proof_body_hash_is(value: &JBatchProofBody, expected: &[u8; 32]) -> bool {
-    xln_rscore_entity_kernel::proof_body_hash(value)
-        .ok()
-        .as_ref()
-        == Some(expected)
-}
-
-/// The caller has already established that this dispute is local. Its body
-/// comes from the one call entry that matches the authenticated event
-/// exactly; a decoy entry elsewhere in wrapper calldata never matches it.
+// Current logs bind bodies and starter arguments from earlier logs by hash; no transaction lookup.
 fn decode_dispute_event(
     kind: ContractEventKind,
     log: &super::types::RpcLog,
     metadata: JEventMetadata,
-    receipt: &ReceiptDisputeBatch,
+    batch_nonces: &BTreeMap<EntityId, i64>,
+    history: &[super::types::RpcLog],
 ) -> Result<DecodedDisputeEvent, JWatcherError> {
     match kind {
-        ContractEventKind::DisputeStarted => decode_dispute_started_event(log, metadata, receipt),
+        ContractEventKind::DisputeStarted => {
+            decode_dispute_started_event(log, metadata, batch_nonces)
+        }
         ContractEventKind::CounterDisputeRegistered => {
-            decode_counter_dispute_event(log, metadata, receipt)
+            decode_counter_dispute_event(log, metadata, batch_nonces, history)
         }
         ContractEventKind::DisputeFinalized => {
-            decode_dispute_finalized_event(log, metadata, receipt)
+            decode_dispute_finalized_event(log, metadata, batch_nonces, history)
         }
         _ => Err(JWatcherError::EventAbi("disputeDispatch")),
     }
@@ -872,7 +814,7 @@ fn decode_dispute_event(
 fn decode_dispute_started_event(
     log: &super::types::RpcLog,
     metadata: JEventMetadata,
-    receipt: &ReceiptDisputeBatch,
+    batch_nonces: &BTreeMap<EntityId, i64>,
 ) -> Result<DecodedDisputeEvent, JWatcherError> {
     let decoded = decode_dispute_started(log)?;
     if decoded.dispute_start_timestamp == 0
@@ -885,22 +827,13 @@ fn decode_dispute_started_event(
     {
         return Err(JWatcherError::DisputeEvidence("start-binding"));
     }
-    let candidate = receipt
-        .batches_for(&decoded.sender)
-        .flat_map(|batch| &batch.dispute_starts)
-        .find(|candidate| {
-            candidate.counterentity == *decoded.counterentity.as_bytes()
-                && u256_eq_biguint(&candidate.nonce, &decoded.nonce)
-                && candidate.proposer_is_left == decoded.proposer_is_left
-                && candidate.proofbody_hash == decoded.proofbody_hash
-                && candidate.watch_seed == decoded.watch_seed
-                && u64::from(candidate.initial_proofbody.left_response_seconds)
-                    == decoded.left_response_seconds
-                && u64::from(candidate.initial_proofbody.right_response_seconds)
-                    == decoded.right_response_seconds
-                && proof_body_hash_is(&candidate.initial_proofbody, &decoded.proofbody_hash)
-        })
-        .ok_or(JWatcherError::DisputeEvidence("start"))?;
+    let body = decode_log_proof_body(&decoded.proofbody, &decoded.proofbody_hash)?;
+    if body.watch_seed != decoded.watch_seed
+        || u64::from(body.left_response_seconds) != decoded.left_response_seconds
+        || u64::from(body.right_response_seconds) != decoded.right_response_seconds
+    {
+        return Err(JWatcherError::DisputeEvidence("start-binding"));
+    }
     Ok(DecodedDisputeEvent {
         event: JurisdictionEvent::DisputeStarted(DisputeStartedEvent {
             metadata,
@@ -913,12 +846,12 @@ fn decode_dispute_started_event(
             starter_initial_arguments: decoded.starter_initial_arguments,
             starter_counter_arguments: decoded.starter_counter_arguments,
             starter_counter_proof_commitment: decoded.starter_counter_proof_commitment,
-            initial_proofbody: proof_body(&candidate.initial_proofbody),
+            initial_proofbody: proof_body(&body),
             dispute_timeout: decoded.dispute_timeout,
             dispute_start_timestamp: decoded.dispute_start_timestamp,
             left_response_seconds: decoded.left_response_seconds,
             right_response_seconds: decoded.right_response_seconds,
-            batch_nonce: receipt.batch_nonce(&decoded.sender),
+            batch_nonce: batch_nonces.get(&decoded.sender).copied(),
         }),
         evidence: None,
     })
@@ -927,24 +860,38 @@ fn decode_dispute_started_event(
 fn decode_counter_dispute_event(
     log: &super::types::RpcLog,
     metadata: JEventMetadata,
-    receipt: &ReceiptDisputeBatch,
+    _batch_nonces: &BTreeMap<EntityId, i64>,
+    history: &[super::types::RpcLog],
 ) -> Result<DecodedDisputeEvent, JWatcherError> {
-    let words = decode_static_words(log, 3, 2)?;
-    let sender = entity_word_value(&words.topics[0], "counterSender")?;
-    let counterentity = entity_word_value(&words.topics[1], "counterEntity")?;
-    let nonce = safe_uint(&words.topics[2], "counterNonce")?;
-    let proposer_is_left = bool_word(&words.data[0], "counterProposerIsLeft")?;
-    let proofbody_hash = words.data[1];
-    let candidate = receipt
-        .batches_for(&sender)
-        .flat_map(|batch| &batch.counter_disputes)
-        .find(|candidate| {
-            candidate.counterentity == *counterentity.as_bytes()
-                && candidate.counter_nonce == nonce.into()
-                && candidate.proposer_is_left == proposer_is_left
-                && proof_body_hash_is(&candidate.counter_proofbody, &proofbody_hash)
-        })
-        .ok_or(JWatcherError::DisputeEvidence("counter"))?;
+    let values = decode_dispute_log(
+        log,
+        &[
+            ethabi::ParamType::Bool,
+            ethabi::ParamType::FixedBytes(32),
+            ethabi::ParamType::Bytes,
+        ],
+    )?;
+    let sender = entity_word_value(
+        &fixed_hex::<32>(&log.topics[1], "counterSender")?,
+        "counterSender",
+    )?;
+    let counterentity = entity_word_value(
+        &fixed_hex::<32>(&log.topics[2], "counterEntity")?,
+        "counterEntity",
+    )?;
+    let nonce = safe_uint(
+        &fixed_hex::<32>(&log.topics[3], "counterNonce")?,
+        "counterNonce",
+    )?;
+    let proposer_is_left = token_bool(&values[0])?;
+    let proofbody_hash = token_word(&values[1])?;
+    let encoded = super::dispute_reference::body_bytes(
+        log,
+        &token_bytes(&values[2])?,
+        &proofbody_hash,
+        history,
+    )?;
+    let body = decode_log_proof_body(&encoded, &proofbody_hash)?;
     Ok(DecodedDisputeEvent {
         event: JurisdictionEvent::CounterDisputeRegistered(CounterDisputeRegisteredEvent {
             metadata,
@@ -953,7 +900,7 @@ fn decode_counter_dispute_event(
             nonce: i64::try_from(nonce).map_err(|_| JWatcherError::SafeInteger("counterNonce"))?,
             proposer_is_left,
             proofbody_hash,
-            counter_proofbody: proof_body(&candidate.counter_proofbody),
+            counter_proofbody: proof_body(&body),
         }),
         evidence: None,
     })
@@ -962,24 +909,76 @@ fn decode_counter_dispute_event(
 fn decode_dispute_finalized_event(
     log: &super::types::RpcLog,
     metadata: JEventMetadata,
-    receipt: &ReceiptDisputeBatch,
+    batch_nonces: &BTreeMap<EntityId, i64>,
+    history: &[super::types::RpcLog],
 ) -> Result<DecodedDisputeEvent, JWatcherError> {
-    let words = decode_static_words(log, 3, 2)?;
-    let sender = entity_word_value(&words.topics[0], "finalSender")?;
-    let counterentity = entity_word_value(&words.topics[1], "finalCounterentity")?;
-    let initial_nonce = bigint(&words.topics[2]);
-    let final_proofbody_hash = words.data[0];
-    let evidence_hash = words.data[1];
-    let candidate = receipt
-        .batches_for(&sender)
-        .flat_map(|batch| &batch.dispute_finalizations)
-        .find(|candidate| {
-            candidate.counterentity == *counterentity.as_bytes()
-                && u256_bigint(&candidate.initial_nonce) == initial_nonce
-                && proof_body_hash_is(&candidate.final_proofbody, &final_proofbody_hash)
-                && finalization_evidence_hash(candidate) == evidence_hash
-        })
-        .ok_or(JWatcherError::DisputeEvidence("finalized"))?;
+    use ethabi::{ParamType as P, Token};
+    let values = decode_dispute_log(
+        log,
+        &[
+            P::FixedBytes(32),
+            P::FixedBytes(32),
+            P::Bytes,
+            P::Tuple(vec![
+                P::FixedBytes(32),
+                P::Uint(256),
+                P::Bool,
+                P::Bool,
+                P::FixedBytes(32),
+                P::Bytes,
+                P::Bytes,
+            ]),
+        ],
+    )?;
+    let sender = entity_word_value(
+        &fixed_hex::<32>(&log.topics[1], "finalSender")?,
+        "finalSender",
+    )?;
+    let counterentity = entity_word_value(
+        &fixed_hex::<32>(&log.topics[2], "finalCounterentity")?,
+        "finalCounterentity",
+    )?;
+    let initial_nonce = bigint(&fixed_hex::<32>(&log.topics[3], "initialNonce")?);
+    let final_proofbody_hash = token_word(&values[0])?;
+    let evidence_hash = token_word(&values[1])?;
+    let encoded = super::dispute_reference::body_bytes(
+        log,
+        &token_bytes(&values[2])?,
+        &final_proofbody_hash,
+        history,
+    )?;
+    let body = decode_log_proof_body(&encoded, &final_proofbody_hash)?;
+    let Token::Tuple(fields) = &values[3] else {
+        return Err(JWatcherError::EventAbi("finalizationData"));
+    };
+    let Token::Uint(final_nonce) = fields[1] else {
+        return Err(JWatcherError::EventAbi("finalNonce"));
+    };
+    let candidate = xln_rscore_entity_kernel::j_batch::FinalDisputeProof {
+        counterentity: *counterentity.as_bytes(),
+        initial_nonce: ethabi::ethereum_types::U256::from_big_endian(&fixed_hex::<32>(
+            &log.topics[3],
+            "initialNonce",
+        )?),
+        final_nonce,
+        proposer_is_left: token_bool(&fields[2])?,
+        initial_proofbody_hash: token_word(&fields[0])?,
+        final_proofbody: body,
+        starter_arguments: super::dispute_reference::starter_arguments(
+            log,
+            &token_word(&fields[0])?,
+            &token_word(&fields[4])?,
+            history,
+        )?,
+        other_arguments: token_bytes(&fields[5])?,
+        sig: token_bytes(&fields[6])?,
+        started_by_left: token_bool(&fields[3])?,
+        cooperative: false,
+        submit_not_before_timestamp: None,
+    };
+    if finalization_evidence_hash(&candidate) != evidence_hash {
+        return Err(JWatcherError::DisputeEvidence("finalized"));
+    }
     let starter_arguments = hex(&candidate.starter_arguments);
     let other_arguments = hex(&candidate.other_arguments);
     let (left_arguments, right_arguments) = if candidate.started_by_left {
@@ -997,7 +996,7 @@ fn decode_dispute_finalized_event(
             final_proofbody_hash: hex(&final_proofbody_hash),
             finalization_evidence_hash: hex(&evidence_hash),
             final_proofbody: proof_body(&candidate.final_proofbody),
-            batch_nonce: receipt.batch_nonce(&sender),
+            batch_nonce: batch_nonces.get(&sender).copied(),
         }),
         evidence: Some(DisputeFinalizationEvidence {
             sender: sender.as_hex(),
@@ -1090,4 +1089,13 @@ fn assert_cursor_anchor(
         return Err(JWatcherError::FinalizedReorg(cursor.scanned_through));
     }
     Ok(())
+}
+
+fn decode_log_proof_body(bytes: &[u8], hash: &[u8; 32]) -> Result<JBatchProofBody, JWatcherError> {
+    use sha3::{Digest, Keccak256};
+    if <[u8; 32]>::from(Keccak256::digest(bytes)) != *hash {
+        return Err(JWatcherError::DisputeEvidence("proofbody-hash"));
+    }
+    xln_rscore_entity_kernel::decode_proof_body(bytes)
+        .map_err(|_| JWatcherError::DisputeEvidence("proofbody-abi"))
 }

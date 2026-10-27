@@ -4,15 +4,13 @@ import type {
   EntityProvider,
 } from '../../../../../jurisdictions/typechain-types/index';
 import type { RuntimeReplica } from '../../../../runtime/types';
-import type { DisputeFinalizationEvidence } from '../../../../types/jurisdiction-events';
-import type { TxDisputeProofBodyEvidence } from '../../rpc-public';
 import type { EntityProvenValues } from '../state-anchor/rpc-proven-values-root';
 import type {
   EventBatchCounter,
   PendingWatcherJBlockMap,
   PendingWatcherJHistoryRange,
 } from '../../watcher';
-import type { WatchedErc20Token , AuthenticatedTxLocation } from '../../rpc-watcher-inputs';
+import type { WatchedErc20Token } from '../../rpc-watcher-inputs';
 import type { JAdapterMode } from '../../types';
 
 type RpcWatcherScanProgress = {
@@ -48,17 +46,6 @@ export type RpcWatcherServices = {
     calls: readonly { method: string; params: unknown[] }[],
   ): Promise<unknown[]>;
   resolveFinalityDepth(scenarioMode: boolean): number;
-  resolveDisputeFinalizationEvidence(
-    txHash: string,
-    args: Record<string, unknown>,
-    location: AuthenticatedTxLocation,
-  ): Promise<DisputeFinalizationEvidence | undefined>;
-  resolveDisputeProofBody(
-    txHash: string,
-    eventName: TxDisputeProofBodyEvidence['eventName'],
-    args: Record<string, unknown>,
-    location: AuthenticatedTxLocation,
-  ): Promise<TxDisputeProofBodyEvidence['proofbody']>;
   isTransientRpcUnavailable(error: unknown): boolean;
 };
 

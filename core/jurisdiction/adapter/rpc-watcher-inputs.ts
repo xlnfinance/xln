@@ -1,22 +1,10 @@
-import type { Interface, Provider } from 'ethers';
+import { watcherErrorDetails } from './rpc/rpc-boundary';
+import type { Interface } from 'ethers';
 import { MAX_RPC_BATCH_CALLS, type RpcBatchSend } from './rpc-utils';
 import { ethers } from 'ethers';
 import { compareStableText } from '../../protocol/serialization';
 import type { RuntimeReplica } from '../../runtime/types';
-import {
-  recoverDisputeFinalizationEvidence,
-  recoverDisputeProofBody,
-  type ExternalWalletTrackedOwnerCursor,
-  type TxDisputeProofBodyEvidence,
-  type TxFinalizationEvidence,
-} from './rpc-public';
-import { watcherErrorDetails } from './rpc/rpc-boundary';
-import {
-  DisputeCalldata,
-  readIncludedTronCalldata,
-  type SolidifiedTronTransactionReader,
-} from './rpc/watcher/rpc-watcher-calldata';
-
+import type { ExternalWalletTrackedOwnerCursor } from './rpc-public';
 export type WatchedErc20Token = {
   tokenId: number;
   address: string;
@@ -26,76 +14,6 @@ type WatchedTokenRegistry = {
   getTokensLength(): Promise<bigint>;
   getAddress(): Promise<string>;
   interface: Interface;
-};
-
-export type AuthenticatedTxLocation = Readonly<{
-  blockHash: string;
-  blockNumber: number;
-}>;
-
-const readSignedEvmCalldata = async (provider: Provider, txHash: string, normalizedHash: string): Promise<string> => {
-  const tx = await provider.getTransaction(txHash);
-  if (!tx) throw new Error(`J_DISPUTE_TX_MISSING:${normalizedHash}`);
-  const claimedHash = String(tx.hash || '').toLowerCase();
-  if (claimedHash !== normalizedHash) {
-    throw new Error(`J_DISPUTE_TX_HASH_CLAIM_MISMATCH:${normalizedHash}:${claimedHash || 'missing'}`);
-  }
-  let computedHash: string | undefined;
-  try {
-    // Copy signed fields only. Transaction.from(tx) also reads tx.hash/from repeatedly;
-    // those getters reserialize/hash large calldata and recover an irrelevant sender.
-    // The complete signed envelope below is still recomputed and compared to the receipt txID.
-    computedHash = ethers.Transaction.from({
-      type: tx.type,
-      chainId: tx.chainId,
-      nonce: tx.nonce,
-      to: tx.to,
-      gasLimit: tx.gasLimit,
-      gasPrice: tx.gasPrice,
-      maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
-      maxFeePerGas: tx.maxFeePerGas,
-      maxFeePerBlobGas: tx.maxFeePerBlobGas,
-      data: tx.data,
-      value: tx.value,
-      signature: tx.signature,
-      accessList: tx.accessList,
-      blobVersionedHashes: tx.blobVersionedHashes,
-      authorizationList: tx.authorizationList,
-    }).hash?.toLowerCase();
-  } catch (error) {
-    throw new Error(`J_DISPUTE_TX_HASH_INVALID:${normalizedHash}`, { cause: error });
-  }
-  if (computedHash !== normalizedHash) {
-    throw new Error(`J_DISPUTE_TX_HASH_INVALID:${normalizedHash}:${computedHash || 'missing'}`);
-  }
-  return typeof tx.data === 'string' ? tx.data : '';
-};
-
-/**
- * Calldata bound to the receipt-attested transaction hash: an EVM signed
- * envelope recomputes to its keccak hash, a native TRON raw_data to its
- * sha256 txID. The committed jurisdiction mode selects the native reader.
- */
-const readAuthenticatedTransactionCalldata = async (
-  provider: Provider,
-  txHash: string,
-  location: AuthenticatedTxLocation,
-  readNativeTronTransaction?: SolidifiedTronTransactionReader,
-): Promise<string> => {
-  const normalizedHash = txHash.toLowerCase();
-  const data = readNativeTronTransaction
-    ? await readIncludedTronCalldata(readNativeTronTransaction, normalizedHash)
-    : await readSignedEvmCalldata(provider, txHash, normalizedHash);
-  if (!ethers.isHexString(location.blockHash, 32) || !Number.isSafeInteger(location.blockNumber)) {
-    throw new Error(`J_DISPUTE_TX_LOCATION_INVALID:${normalizedHash}`);
-  }
-  // Receipt membership already proves that this exact transaction hash
-  // occupied the authenticated block. Recomputing the transaction hash binds
-  // calldata cryptographically; comparing the RPC's mutable location
-  // metadata is redundant and breaks across honest local reorg/replay where an
-  // identical signed tx is re-mined under the same hash in a different block.
-  if (!data || data === '0x') throw new Error(`J_DISPUTE_TX_CALLDATA_MISSING:${normalizedHash}`);
-  return data;
 };
 
 export const normalizeEvmAddress = (value: unknown): string => {
@@ -175,69 +93,6 @@ export const buildTrackedExternalOwners = (env: RuntimeReplica): Map<string, Ext
       [...byEntity.values()].sort((left, right) => compareStableText(left.entityId, right.entityId)),
     ]),
   );
-};
-
-/** Cache authenticated bytes and complete structural memoization, never partial decoded results. */
-const createCalldataReader = (provider: Provider, native?: SolidifiedTronTransactionReader) => {
-  const cache = new Map<string, Promise<DisputeCalldata>>();
-  return async <T>(
-    txHash: string,
-    location: AuthenticatedTxLocation,
-    kind: string,
-    read: (raw: DisputeCalldata) => T,
-  ): Promise<T> => {
-    const hash = String(txHash || '').toLowerCase();
-    if (!hash || hash === '0x') throw new Error(`J_DISPUTE_${kind}_TX_HASH_MISSING`);
-    let pending = cache.get(hash);
-    if (!pending) {
-      if (typeof provider.getTransaction !== 'function') throw new Error(`J_DISPUTE_${kind}_TX_LOOKUP_UNAVAILABLE`);
-      pending = readAuthenticatedTransactionCalldata(provider, txHash, location, native).then(
-        data => new DisputeCalldata(data),
-      );
-      cache.set(hash, pending);
-      if (cache.size > 2_000) {
-        const oldest = cache.keys().next().value;
-        if (oldest) cache.delete(oldest);
-      }
-    }
-    try {
-      return read(await pending);
-    } catch (error) {
-      if (cache.get(hash) === pending) cache.delete(hash);
-      // Resource failures are operator-visible, retain tx identity/limit, and retry from fresh bytes.
-      if (
-        error instanceof Error &&
-        /(?:^|:)J_DISPUTE_CALLDATA_BUDGET_EXCEEDED(?::|$)|out of memory|allocation|stack size/i.test(error.message)
-      ) {
-        const signal = new Error(`J_DISPUTE_CALLDATA_RESOURCE_LIMIT:${hash}:${error.message}`, { cause: error });
-        signal.name = 'DisputeCalldataResourceError';
-        throw signal;
-      }
-      throw error;
-    }
-  };
-};
-
-export const createTxFinalizationEvidenceReader = (
-  provider: Provider,
-  readNativeTronTransaction?: SolidifiedTronTransactionReader,
-): ((txHash: string, location: AuthenticatedTxLocation) => Promise<TxFinalizationEvidence[]>) => {
-  const read = createCalldataReader(provider, readNativeTronTransaction);
-  return (txHash, location) => read(txHash, location, 'FINALIZATION', recoverDisputeFinalizationEvidence);
-};
-
-export const createTxDisputeProofBodyReader = (
-  provider: Provider,
-  readNativeTronTransaction?: SolidifiedTronTransactionReader,
-): ((
-  txHash: string,
-  eventName: TxDisputeProofBodyEvidence['eventName'],
-  args: Record<string, unknown>,
-  location: AuthenticatedTxLocation,
-) => Promise<TxDisputeProofBodyEvidence['proofbody']>) => {
-  const read = createCalldataReader(provider, readNativeTronTransaction);
-  return (txHash, eventName, args, location) =>
-    read(txHash, location, 'PROOFBODY', raw => recoverDisputeProofBody(raw, eventName, args));
 };
 
 export const createWatchedErc20TokenReader = (

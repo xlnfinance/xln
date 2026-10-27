@@ -9,7 +9,6 @@ import {
 import { isDebugEventEmitter } from '../../rpc-utils';
 import { haltProcessForFatalWatcherError, watcherErrorDetails, watcherErrorMessage } from '../rpc-boundary';
 import { rpcLog } from '../../rpc-public';
-import { DisputeEvidenceUnresolvedError } from '../../kernel/failure';
 import { getMinimumScannedSignerJHeight, getWatcherStartBlock } from '../../watcher';
 import { requireWatcherJurisdictionReplica } from '../../watcher/observe/watcher-replica';
 import { runWatcherPoll } from './rpc-watcher-poll';
@@ -133,8 +132,7 @@ const handleTransientFailure = (
     error: watcherErrorDetails(error),
   });
   if (session.transientFailures >= 3) {
-    rpcLog.warn(error instanceof DisputeEvidenceUnresolvedError
-      ? 'watcher.dispute_body_unresolved' : 'watcher.poll_retrying', {
+    rpcLog.warn('watcher.poll_retrying', {
       ...buildFailurePayload(services, session, trace, message, error),
       consecutiveFailures: session.transientFailures,
     });
@@ -162,10 +160,8 @@ const handlePollFailure = (
     });
     return;
   }
-  // An unresolved dispute body backs off like an outage: the cursor stays,
-  // nothing bodiless is delivered, and the process keeps serving.
   const transportUnavailable =
-    services.isTransientRpcUnavailable(error) || error instanceof DisputeEvidenceUnresolvedError;
+    services.isTransientRpcUnavailable(error);
   if (isRuntimeMempoolCapacityError(error) || transportUnavailable) {
     // Bound both ingress and transport pressure with the same window. A
     // throttled 2048-block read otherwise retries its entire prefix forever;

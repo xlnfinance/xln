@@ -1,3 +1,4 @@
+import { PROOF_BODY_ABI } from '../../../protocol/dispute/proof-body';
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -46,7 +47,6 @@ import {
 import { enqueueRuntimeInput, isRuntimeMempoolCapacityError } from '../../../runtime/mempool/input-queue';
 import { findReserveUpdatedEvidence } from '../../../jurisdiction/machine/events/event-evidence';
 import { decodeAuthenticatedWatcherEvents } from '../../../jurisdiction/adapter/rpc-watcher-events';
-import { decodeServedWatcherEvents } from '../../../jurisdiction/adapter/rpc/watcher/rpc-watcher-ingress';
 import { Depository__factory } from '../../../../jurisdictions/typechain-types';
 import { encodeInt512 } from '../../../protocol/crypto/abi-money';
 import { safeStringify } from '../../../protocol/serialization';
@@ -390,7 +390,6 @@ describe('JAdapter watcher ingress', () => {
       observedTipBlockHash: baseLog.blockHash,
       observedHeadHeight: 10,
       confirmationDepth: 0,
-      findDisputeFinalizationEvidence: async () => undefined,
     };
 
     const decoded = await decodeAuthenticatedWatcherEvents({
@@ -2160,7 +2159,7 @@ describe('JAdapter watcher ingress', () => {
     expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
   });
 
-  test('a foreign dispute needs no calldata and committed bytes of a served dispute are unchanged', async () => {
+  test('foreign and served disputes decode bodies directly from logs', async () => {
     const env = createEmptyEnv('jadapter-foreign-dispute-calldata');
     env.quietRuntimeLogs = true;
     const jurisdiction = makeJurisdiction('dispute-audience', 31_337, `0x${'47'.repeat(20)}`);
@@ -2179,6 +2178,7 @@ describe('JAdapter watcher ingress', () => {
       tokenIds: [1n],
       transformers: [],
     };
+    const encodedBody = AbiCoder.defaultAbiCoder().encode([PROOF_BODY_ABI], [body]);
     const depositoryEvents = Depository__factory.createInterface();
     const blockHash = `0x${'81'.repeat(32)}`;
     const disputeLog = (sender: string, counterentity: string, index: number) => ({
@@ -2187,7 +2187,7 @@ describe('JAdapter watcher ingress', () => {
         counterentity,
         7n,
         true,
-        `0x${'77'.repeat(32)}`,
+        keccak256(encodedBody),
         body.watchSeed,
         '0x',
         '0x',
@@ -2196,6 +2196,7 @@ describe('JAdapter watcher ingress', () => {
         100n,
         10n,
         10n,
+        encodedBody,
       ]),
       address: depository,
       blockNumber: 9,
@@ -2206,7 +2207,6 @@ describe('JAdapter watcher ingress', () => {
     });
     const foreign = disputeLog(`0x${'b2'.repeat(32)}`, `0x${'c3'.repeat(32)}`, 0);
     const served = disputeLog(`0x${'b2'.repeat(32)}`, local, 1);
-    const reads: string[] = [];
     const input = {
       env,
       watcherReplica,
@@ -2218,28 +2218,10 @@ describe('JAdapter watcher ingress', () => {
       observedTipBlockHash: blockHash,
       observedHeadHeight: 9,
       confirmationDepth: 0,
-      findDisputeFinalizationEvidence: async () => undefined,
-      findDisputeProofBody: async (txHash: string) => {
-        reads.push(txHash);
-        if (txHash === foreign.transactionHash) throw new Error('J_DISPUTE_PROOFBODY_CALLDATA_UNKNOWN');
-        return body;
-      },
     };
-    const decoded = await decodeServedWatcherEvents({ ...input, logs: [foreign, served] });
-    expect(reads).toEqual([served.transactionHash]);
-    expect(decoded.undeliveredDisputes.map(event => event.transactionHash)).toEqual([foreign.transactionHash]);
-    expect(decoded.events.map(event => event.transactionHash)).toEqual([served.transactionHash]);
-    await expect(decodeAuthenticatedWatcherEvents({ ...input, logs: [foreign, served] })).rejects.toThrow(
-      'J_EVENT_LOG_DECODE_FAILED',
-    );
-
-    // The pre-gate decode of the same range, given a body for every log, must
-    // commit the identical observation: the gate only drops undelivered events.
-    const everyBody = await decodeAuthenticatedWatcherEvents({
-      ...input,
-      logs: [foreign, served],
-      findDisputeProofBody: async () => body,
-    });
+    const decoded = await decodeAuthenticatedWatcherEvents({ ...input, logs: [foreign, served] });
+    expect(decoded.events.map(event => event.transactionHash)).toEqual([foreign.transactionHash, served.transactionHash]);
+    expect(decoded.events.map(event => event.args['initialProofbody'])).toEqual([body, body]);
     const observe = (events: typeof decoded.events) =>
       processEventBatch(
         events,
@@ -2256,7 +2238,7 @@ describe('JAdapter watcher ingress', () => {
     const gated = observe(decoded.events);
     expect(gated).toHaveLength(1);
     expect(gated?.[0]?.data.blocks[0]?.events).toHaveLength(1);
-    expect(safeStringify(gated)).toBe(safeStringify(observe(everyBody.events)));
+    expect(safeStringify(gated)).toBe(safeStringify(observe(decoded.events.filter(event => event.transactionHash === served.transactionHash))));
   });
 });
 

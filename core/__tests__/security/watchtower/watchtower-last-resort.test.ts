@@ -14,7 +14,7 @@ import type { TowerAppointmentV1 } from '../../../storage/recovery/bundle/types'
 
 const makeLookupKey = (label: string): string => keccak256(toUtf8Bytes(label));
 const disputeStartedInterface = new Interface([
-  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds)',
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds, bytes proofbody)',
 ]);
 const abiCoder = AbiCoder.defaultAbiCoder();
 const emptyCounterProofCommitment = `0x${'00'.repeat(32)}`;
@@ -427,6 +427,7 @@ describe('watchtower delayed last-resort sweep', () => {
               disputeStartTimestamp,
               4,
               6,
+              '0x',
             ],
           );
           return [{ topics: event.topics, data: event.data }];
@@ -843,6 +844,7 @@ describe('watchtower delayed last-resort sweep', () => {
               disputeStartTimestamp,
               4,
               6,
+              '0x',
             ],
           );
           return [{ topics: event.topics, data: event.data }];
@@ -1035,7 +1037,7 @@ const activeDisputeScenario = async (towerWallet: { address: string }, lookupKey
   };
   const disputeLog = disputeStartedInterface.encodeEventLog(disputeStartedInterface.getEvent('DisputeStarted'), [
     watchedEntityId, counterentity, 1n, true, initialProofbodyHash, watchSeed, '0x', '0x',
-    emptyCounterProofCommitment, 100n, disputeStartTimestamp, 4, 6,
+    emptyCounterProofCommitment, 100n, disputeStartTimestamp, 4, 6, '0x',
   ]);
   return { appointment, account, disputeLog };
 };

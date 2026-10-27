@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { resolveDisputeLogReferences, type ReadDisputeReferenceLogs } from './events/dispute/log-reference';
 import {
   Depository__factory,
   EntityProvider__factory,
@@ -9,11 +10,9 @@ import {
   buildCertifiedRegistrationEvidence,
   markLocalJAuthorityRuntimeTx,
 } from '../machine/registration-evidence';
-import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-events';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { RuntimeReplica, RuntimeTx } from '../../runtime/types';
 import { decodeJEventLog } from './j-event-log-decoder';
-import { DisputeEvidenceUnresolvedError } from './kernel/failure';
 import {
   shouldEmitExternalWalletAllowanceDelta,
   shouldEmitExternalWalletBalanceDelta,
@@ -22,11 +21,9 @@ import {
 } from './rpc-public';
 import {
   normalizeEvmAddress,
-  type AuthenticatedTxLocation,
   type WatchedErc20Token,
 } from './rpc-watcher-inputs';
 import type { JEvent } from './types';
-import type { TxDisputeProofBodyEvidence } from './rpc-public';
 
 type WatcherLogKind = 'depository' | 'entityProvider' | 'erc20';
 
@@ -42,17 +39,7 @@ type WatcherEventDecodeInput = {
   observedTipBlockHash: string;
   observedHeadHeight: number;
   confirmationDepth: number;
-  findDisputeFinalizationEvidence(
-    txHash: string,
-    args: Record<string, unknown>,
-    location: AuthenticatedTxLocation,
-  ): Promise<DisputeFinalizationEvidence | undefined>;
-  findDisputeProofBody(
-    txHash: string,
-    eventName: TxDisputeProofBodyEvidence['eventName'],
-    args: Record<string, unknown>,
-    location: AuthenticatedTxLocation,
-  ): Promise<TxDisputeProofBodyEvidence['proofbody']>;
+  readDisputeReferenceLogs?: ReadDisputeReferenceLogs;
 };
 
 export type WatcherEventDecodeResult = {
@@ -170,20 +157,10 @@ const decodeExternalWalletEvents = (
   );
 };
 
-const unresolvedEvidence = async <T>(read: () => Promise<T>): Promise<T> => {
-  try {
-    return await read();
-  } catch (error) {
-    throw new DisputeEvidenceUnresolvedError(error instanceof Error ? error.message : String(error), { cause: error });
-  }
-};
-
-const decodeCanonicalContractEvent = async (
+const decodeCanonicalContractEvent = (
   log: PreparedAuthenticatedWatcherLog,
   carrierInterface: ethers.Interface,
-  findEvidence: WatcherEventDecodeInput['findDisputeFinalizationEvidence'],
-  findProofBody: WatcherEventDecodeInput['findDisputeProofBody'],
-): Promise<JEvent | null> => {
+): JEvent | null => {
   const event = decodeJEventLog(
     log,
     carrierInterface,
@@ -196,39 +173,7 @@ const decodeCanonicalContractEvent = async (
     'J_WATCHER_CANONICAL_EVENT_DECODE_FAILED',
   );
   if (!CANONICAL_J_EVENTS.some(name => name === event.name)) return null;
-  if (
-    event.name === 'DisputeStarted' ||
-    event.name === 'CounterDisputeRegistered' ||
-    event.name === 'DisputeFinalized'
-  ) {
-    const location = {
-      blockHash: log.authenticatedBlockHash,
-      blockNumber: log.blockNumber,
-    };
-    const { name, args } = event;
-    const proofbody = await unresolvedEvidence(() => findProofBody(log.transactionHash, name, args, location));
-    event.args[
-      event.name === 'DisputeStarted'
-        ? 'initialProofbody'
-        : event.name === 'CounterDisputeRegistered'
-          ? 'counterProofbody'
-          : 'finalProofbody'
-    ] = proofbody;
-  }
-  const disputeFinalizationEvidence =
-    event.name === 'DisputeFinalized'
-      ? await unresolvedEvidence(() => findEvidence(log.transactionHash, event.args, {
-          blockHash: log.authenticatedBlockHash,
-          blockNumber: log.blockNumber,
-        }))
-      : undefined;
-  if (disputeFinalizationEvidence) {
-    event.args['initialProofbodyHash'] = disputeFinalizationEvidence.initialProofbodyHash;
-  }
-  return {
-    ...event,
-    ...(disputeFinalizationEvidence ? { disputeFinalizationEvidence } : {}),
-  };
+  return event;
 };
 
 const decodeWatcherLog = async (
@@ -262,11 +207,9 @@ const decodeWatcherLog = async (
     return;
   }
 
-  const event = await decodeCanonicalContractEvent(
+  const event = decodeCanonicalContractEvent(
     log,
     kind === 'depository' ? depositoryInterface : entityProviderInterface,
-    input.findDisputeFinalizationEvidence,
-    input.findDisputeProofBody,
   );
   if (!event) return;
   if (
@@ -294,7 +237,9 @@ const decodeWatcherLog = async (
       }),
     );
   }
-  result.events.push(event);
+  result.events.push(await resolveDisputeLogReferences(event, input.readDisputeReferenceLogs ?? (async () => {
+    throw new Error('J_DISPUTE_EVENT_REFERENCE_READER_MISSING');
+  })));
 };
 
 export const decodeAuthenticatedWatcherEvents = async (
@@ -309,8 +254,7 @@ export const decodeAuthenticatedWatcherEvents = async (
       await decodeWatcherLog(input, log, result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const Failure = error instanceof DisputeEvidenceUnresolvedError ? DisputeEvidenceUnresolvedError : Error;
-      throw new Failure(
+      throw new Error(
         `J_EVENT_LOG_DECODE_FAILED:block=${log.blockNumber} ` +
           `tx=${log.transactionHash || 'unknown'} index=${log.index}: ${message}`,
         { cause: error },

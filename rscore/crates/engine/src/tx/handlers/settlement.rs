@@ -2060,29 +2060,67 @@ mod tests {
         for side in [Side::Left, Side::Right] {
             let mut account = replica();
             let token = TokenId::new(1).expect("token");
-            account.state_mut().put_delta(Delta::new(
-                token, 100.into(), 60.into(), 0.into(), 0.into(), 0.into(),
-                0.into(), 0.into(), 0.into(), 0.into(),
-            ).expect("funded delta")).expect("delta");
+            account
+                .state_mut()
+                .put_delta(
+                    Delta::new(
+                        token,
+                        100.into(),
+                        60.into(),
+                        0.into(),
+                        0.into(),
+                        0.into(),
+                        0.into(),
+                        0.into(),
+                        0.into(),
+                        0.into(),
+                    )
+                    .expect("funded delta"),
+                )
+                .expect("delta");
             let template = upsert();
-            let withdrawal = replace_fields(object(&template, "upsert").expect("fields"), &[(
-                "ops", CanonicalValue::Array(vec![CanonicalValue::Object(vec![
-                    ("type".into(), CanonicalValue::String("c2r".into())),
-                    ("tokenId".into(), number(1).expect("token")),
-                    ("amount".into(), CanonicalValue::BigInt(10.into())),
-                ])]),
-            )]);
+            let withdrawal = replace_fields(
+                object(&template, "upsert").expect("fields"),
+                &[(
+                    "ops",
+                    CanonicalValue::Array(vec![CanonicalValue::Object(vec![
+                        ("type".into(), CanonicalValue::String("c2r".into())),
+                        ("tokenId".into(), number(1).expect("token")),
+                        ("amount".into(), CanonicalValue::BigInt(10.into())),
+                    ])]),
+                )],
+            );
             let context = AccountExecutionContext::new(1_000, 1_000, 10, 0, 10);
-            assert!(matches!(apply(&mut account, &withdrawal, side, &context).expect("withdraw"), MutationDecision::Applied { .. }));
-            assert_eq!(account.state().delta(token).expect("delta").hold(side), &BigInt::from(10));
-            let workspace = workspace_view(account.state().settlement_workspace().expect("workspace")).expect("view");
+            assert!(matches!(
+                apply(&mut account, &withdrawal, side, &context).expect("withdraw"),
+                MutationDecision::Applied { .. }
+            ));
+            assert_eq!(
+                account.state().delta(token).expect("delta").hold(side),
+                &BigInt::from(10)
+            );
+            let workspace =
+                workspace_view(account.state().settlement_workspace().expect("workspace"))
+                    .expect("view");
             let clear = CanonicalValue::Object(vec![
                 ("kind".into(), CanonicalValue::String("clear".into())),
-                ("revision".into(), number(workspace.revision).expect("revision")),
-                ("workspaceHash".into(), CanonicalValue::String(workspace.workspace_hash.into())),
+                (
+                    "revision".into(),
+                    number(workspace.revision).expect("revision"),
+                ),
+                (
+                    "workspaceHash".into(),
+                    CanonicalValue::String(workspace.workspace_hash.into()),
+                ),
             ]);
-            assert!(matches!(apply(&mut account, &clear, side, &context).expect("clear"), MutationDecision::Applied { .. }));
-            assert_eq!(account.state().delta(token).expect("delta").hold(side), &BigInt::from(0));
+            assert!(matches!(
+                apply(&mut account, &clear, side, &context).expect("clear"),
+                MutationDecision::Applied { .. }
+            ));
+            assert_eq!(
+                account.state().delta(token).expect("delta").hold(side),
+                &BigInt::from(0)
+            );
         }
     }
 

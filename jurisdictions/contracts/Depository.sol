@@ -136,16 +136,19 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     uint256 disputeTimeout,
     uint256 disputeStartTimestamp,
     uint32 leftResponseSeconds,
-    uint32 rightResponseSeconds
+    uint32 rightResponseSeconds,
+    bytes proofbody
   );
   event DisputeFinalized(
     bytes32 indexed sender,
     bytes32 indexed counterentity,
     uint indexed nonce,
     bytes32 finalProofbodyHash,
-    bytes32 finalizationEvidenceHash
+    bytes32 finalizationEvidenceHash,
+    bytes proofbody,
+    DisputeFinalizationData finalization
   );
-  event CounterDisputeRegistered(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash);
+  event CounterDisputeRegistered(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes proofbody);
   event CooperativeClose(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed nonce);
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -817,6 +820,8 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     bytes memory acct_key = _accountKey(entityId, params.counterentity);
     AccountInfo storage account = _accounts[acct_key];
     bool initialProposerIsLeft = account.disputeInitialProposerIsLeft;
+    bytes32 initialBodyHash = account.disputeInitialProofbodyHash;
+    bytes32 counterBodyHash = account.disputeCounterProofbodyHash;
     (
       bytes memory leftArguments,
       bytes memory rightArguments,
@@ -836,6 +841,8 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       deltaTransformer
     );
 
+    bool bodyEmitted = finalProofbodyHash == initialBodyHash
+      || finalProofbodyHash == counterBodyHash;
     _finalizeAccount(
       entityId,
       params.counterentity,
@@ -864,6 +871,16 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       account.nonce += 1;
     }
 
+    _emitDisputeFinalized(entityId, params, eventInitialNonce, finalProofbodyHash, bodyEmitted);
+  }
+
+  function _emitDisputeFinalized(
+    bytes32 entityId,
+    FinalDisputeProof memory params,
+    uint256 eventInitialNonce,
+    bytes32 finalProofbodyHash,
+    bool bodyEmitted
+  ) private {
     bytes32 initialProofbodyHash = params.initialProofbodyHash;
     uint256 finalNonce = params.finalNonce;
     bool proposerIsLeft = params.proposerIsLeft;
@@ -886,13 +903,17 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       finalizationEvidenceHash := keccak256(ptr, 0xe0)
     }
 
+    bytes memory proofbody = bodyEmitted ? bytes("") : abi.encode(params.finalProofbody);
     emit DisputeFinalized(
       entityId,
       params.counterentity,
       eventInitialNonce,
       finalProofbodyHash,
-      // Receipt MPT authenticates this commitment to the non-emitted sidecar.
-      finalizationEvidenceHash
+      finalizationEvidenceHash,
+      proofbody,
+      DisputeFinalizationData(params.initialProofbodyHash, params.finalNonce,
+        params.proposerIsLeft, params.startedByLeft,
+        starterArgumentsHash, params.otherArguments, params.sig)
     );
   }
 

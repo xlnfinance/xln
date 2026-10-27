@@ -110,7 +110,7 @@ pub use external_wallet::{
 pub use j_batch::{
     JBatch, JBatchError, JBatchState, JBatchStatus, SealedJBatch, SentJBatch, canonical_j_batch,
     canonical_j_batch_state, decode_canonical_j_batch, decode_canonical_j_batch_state,
-    decode_j_batch, encode_j_batch, encode_proof_body, proof_body_from_engine,
+    decode_j_batch, decode_proof_body, encode_j_batch, encode_proof_body, proof_body_from_engine,
     proof_body_from_j_event, proof_body_hash,
 };
 pub use j_events::{

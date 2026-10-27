@@ -124,26 +124,6 @@ const deliveryIdentity = (
   };
 };
 
-/**
- * True when some Entity replica this watcher serves is in the event audience,
- * by the exact replica and audience rule `collectDeliveries` applies below.
- * An event outside it is never delivered, so no external evidence (dispute
- * calldata) may be required to decode it: a third party's dispute between two
- * foreign Entities must never be able to stop this Runtime's watcher.
- */
-export const isJEventDeliveredByWatcher = (
-  env: RuntimeReplica,
-  watcher: JReplica,
-  event: JEventIngress,
-): boolean => {
-  for (const [replicaKey, replica] of env.state.eReplicas) {
-    if (!isEntityReplicaRelevantToWatcher(env, replica, watcher)) continue;
-    const { entityId, signerId } = deliveryIdentity(replicaKey, replica);
-    if (entityId && signerId && isEventRelevantToEntity(event, entityId, replica.state)) return true;
-  }
-  return false;
-};
-
 const collectDeliveries = (
   env: RuntimeReplica,
   events: JEventIngress[],

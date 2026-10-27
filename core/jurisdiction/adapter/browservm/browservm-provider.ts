@@ -1,4 +1,5 @@
 import { storageFailure } from '../../../protocol/errors/failure-taxonomy';
+import { resolveDisputeLogReferences, disputeReferenceFilter } from '../events/dispute/log-reference';
 /**
  * BrowserVMProvider - In-browser EVM using @ethereumjs/vm
  * Self-contained environment with Depository.sol
@@ -2073,13 +2074,15 @@ export class BrowserVMProvider {
     transactionHash: string,
   ): Promise<JEvent[]> {
     this.log(`🔊 [BrowserVM] emitEvents ENTRY: raw logs=${logs.length}, callbacks=${this.eventCallbacks.size}`);
-    const events = decodeBrowserVmEvents(
+    const decoded = decodeBrowserVmEvents(
       logs,
       this.eventCarriers(),
       this.blockHeight,
       this.blockHash,
       transactionHash,
     );
+    const events = await Promise.all(decoded.map(event => resolveDisputeLogReferences(event, async target =>
+      this.getLogs(disputeReferenceFilter(target, this.getDepositoryAddress())))));
     this.log(`🔊 [BrowserVM] emitEvents: parsed ${events.length} events`);
 
     // Log individual events for debugging

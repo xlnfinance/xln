@@ -9,6 +9,8 @@ import {console} from "forge-std/Test.sol";
 
 /// The selected newer state must retain the same exit budget as an initial proof.
 contract DisputeCounterGasTest is DisputeGasFixture {
+    bool private watchtower;
+
     // Skip 2 so adopting the signed branch differs from initial-nonce + 1.
     uint256 private constant COUNTER_NONCE = 3;
 
@@ -75,11 +77,7 @@ contract DisputeCounterGasTest is DisputeGasFixture {
                 )
             )
         );
-        console.log("counter total conservative gas", _submitBudget(1, counter));
-        AccountInfo memory selected = _account();
-        assertEq(selected.disputeCounterNonce, COUNTER_NONCE);
-        assertEq(selected.disputeCounterProofbodyHash, newerHash);
-
+        // Publish Pull witnesses before the last-resort tower window.
         if (pulls > 0) {
             Batch memory reveal = XlnHanko.emptyBatch();
             reveal.hashLadderRegistrations = new HashLadderRegistration[](pulls);
@@ -91,6 +89,32 @@ contract DisputeCounterGasTest is DisputeGasFixture {
             }
             console.log("reveal total conservative gas", _submitBudget(beneficiary, reveal));
         }
+        if (watchtower) {
+            vm.warp(block.timestamp + DISPUTE_WINDOW_SECONDS - 10);
+            FinalDisputeProof memory params = FinalDisputeProof(entity[0], 1, COUNTER_NONCE,
+                counterProposerIsLeft, initialHash, newer, starter, args,
+                counter.counterDisputes[0].sig, entity[0] < entity[1], false);
+            bytes32 ownerHash = dep.computeWatchtowerCounterDisputeHash(address(this), entity[1], entity[0],
+                COUNTER_NONCE, newerHash, 10, 1);
+            bytes memory data = abi.encodeCall(dep.watchtowerCounterDispute,
+                (entity[1], params, 10, 1, _hanko(1, ownerHash)));
+            vm.cool(address(dep));
+            vm.cool(address(ep));
+            uint256 overhead = 21_000 + data.length * 16;
+            uint256 before = gasleft();
+            (bool ok,) = address(dep).call{gas: BUDGET - overhead}(data);
+            uint256 used = before - gasleft() + 21_000 + data.length * 16;
+            uint256 floor = 21_000 + data.length * 40;
+            assertTrue(ok, "watchtower counter must execute within 5M");
+            assertLt(used > floor ? used : floor, BUDGET);
+            console.log("watchtower counter total conservative gas", used > floor ? used : floor);
+        } else {
+            console.log("counter total conservative gas", _submitBudget(1, counter));
+        }
+        AccountInfo memory selected = _account();
+        assertEq(selected.disputeCounterNonce, COUNTER_NONCE);
+        assertEq(selected.disputeCounterProofbodyHash, newerHash);
+
         vm.warp(block.timestamp + DISPUTE_WINDOW_SECONDS);
         Batch memory finish = XlnHanko.emptyBatch();
         finish.disputeFinalizations = new FinalDisputeProof[](1);
@@ -116,6 +140,22 @@ contract DisputeCounterGasTest is DisputeGasFixture {
 
     function test_budget5m_minimalSingleToken() public {
         _exercise(1, 0, 0, 0, false);
+    }
+
+    function test_budget5m_watchtowerSingleToken() public {
+        watchtower = true;
+        _counterExercise(1, 0, 0, 0);
+    }
+
+    function test_budget5m_watchtowerWideColdDebts22() public {
+        watchtower = true;
+        _counterExercise(22, 0, 0, 0);
+    }
+
+    function test_budget5m_watchtowerMmFrontierMaxStarter() public {
+        watchtower = true;
+        maximalStarter = true;
+        _counterExercise(5, 0, 32, 18);
     }
 
     function test_budget5m_counterSingleToken() public {

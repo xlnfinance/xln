@@ -10,7 +10,7 @@ use ethabi::ethereum_types::U256;
 use num_bigint::Sign;
 use thiserror::Error;
 
-pub use decode::{decode_final_dispute_token, decode_j_batch};
+pub use decode::{decode_final_dispute_token, decode_j_batch, decode_proof_body};
 pub(crate) use encode::MAX_DISPUTE_STARTS;
 pub use encode::{encode_j_batch, encode_proof_body};
 pub use reserve::{

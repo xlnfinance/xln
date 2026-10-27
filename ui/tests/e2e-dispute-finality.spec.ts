@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { ZeroHash } from 'ethers';
+import { ZeroHash, keccak256 } from 'ethers';
 import { Depository__factory } from '../../jurisdictions/typechain-types/factories/Depository.sol/Depository__factory';
 import { safeStringify } from '../../core/protocol/serialization';
 import type { RuntimeAdapterViewFrame } from '../../core/api/public/runtime-module';
@@ -87,6 +87,7 @@ for (const shortfall of [false, true])
         if (!start) throw new Error('DisputeStarted receipt unavailable');
         expect((await start.getTransactionReceipt()).gasUsed).toBeLessThanOrEqual(5_000_000n);
         expect(start.args.proofbodyHash).toBe(active.initialProofbodyHash);
+        expect(keccak256(start.args.proofbody)).toBe(start.args.proofbodyHash);
         expect(Number(start.args.nonce)).toBe(active.initialNonce);
         expect(Number(start.args.disputeTimeout)).toBe(active.disputeTimeout);
         // The receipt must use the bilateral windows committed before the dispute.

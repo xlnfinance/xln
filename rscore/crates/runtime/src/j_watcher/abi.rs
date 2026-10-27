@@ -9,7 +9,7 @@ pub(crate) const RESERVE_UPDATED_TOPIC: &str =
 pub(crate) const SECRET_REVEALED_TOPIC: &str =
     "0x47172349c05bf58f7f6a376def3bbc250cd3295a7eead0290d8fa3531c6ca9fb";
 pub(crate) const COUNTER_DISPUTE_REGISTERED_TOPIC: &str =
-    "0xdf1d21d89097ae482123e351724eb4c07eb3b9319a0e116643d815958aea1609";
+    "0x7307e695ba296613f130e8eeb32f63bd586acf2f079ebf56fcdb8f306ecad3f8";
 pub(crate) const DEBT_CREATED_TOPIC: &str =
     "0x56978d6bc8167a25c988d2ebd75ebb3446092e2f58bde00d65917f25aee71b41";
 pub(crate) const DEBT_ENFORCED_TOPIC: &str =
@@ -17,9 +17,9 @@ pub(crate) const DEBT_ENFORCED_TOPIC: &str =
 pub(crate) const DEBT_FORGIVEN_TOPIC: &str =
     "0x06d1c6c555988787b444c60a7950da22c166ee53650221b9fa4d81602e94e226";
 pub(crate) const DISPUTE_FINALIZED_TOPIC: &str =
-    "0x6d46d52b5fda2a9055705ba74bf5e95807cfa39decf819cdfeaa14f9b2ba346a";
+    "0x211cce47a1dea389179c11248e84447e57b9f449136475f84619b1c60fea3727";
 pub(crate) const DISPUTE_STARTED_TOPIC: &str =
-    "0xb3a65f8a2fc99051b8235a54207bb2434556eb7682695e9374cf539c9ba453a7";
+    "0xeabf2c0dc74ccf2202f580a38a998d894324d35b6cc2e1249a8b68c030311de6";
 pub(crate) const HANKO_BATCH_PROCESSED_TOPIC: &str =
     "0x6ae7376aaf94e00d6598cb4305ba9943f431e6a66da007871ecddb33f054eda3";
 pub(crate) const HASH_LADDER_REVEAL_REGISTERED_TOPIC: &str =
@@ -107,6 +107,7 @@ pub(crate) struct DisputeStartedLog {
     pub proposer_is_left: bool,
     pub proofbody_hash: [u8; 32],
     pub watch_seed: [u8; 32],
+    pub proofbody: Vec<u8>,
     pub starter_initial_arguments: Vec<u8>,
     pub starter_counter_arguments: Vec<u8>,
     pub starter_counter_proof_commitment: [u8; 32],
@@ -173,6 +174,7 @@ pub(crate) fn decode_dispute_started(log: &RpcLog) -> Result<DisputeStartedLog, 
         ethabi::ParamType::Uint(256),
         ethabi::ParamType::Uint(32),
         ethabi::ParamType::Uint(32),
+        ethabi::ParamType::Bytes,
     ];
     let values = ethabi::decode(&params, &bytes)
         .map_err(|_| JWatcherError::EventAbi("disputeStartedData"))?;
@@ -195,6 +197,7 @@ pub(crate) fn decode_dispute_started(log: &RpcLog) -> Result<DisputeStartedLog, 
         nonce: uint(&fixed_hex::<32>(&log.topics[3], "disputeNonce")?),
         proposer_is_left,
         proofbody_hash: fixed_token(&values[1], "proofbodyHash")?,
+        proofbody: bytes_token(&values[10], "proofbody")?,
         watch_seed: fixed_token(&values[2], "watchSeed")?,
         starter_initial_arguments: bytes_token(&values[3], "starterInitialArguments")?,
         starter_counter_arguments: bytes_token(&values[4], "starterCounterArguments")?,
@@ -296,7 +299,7 @@ mod catalog_tests {
                 SECRET_REVEALED_TOPIC,
             ),
             (
-                "CounterDisputeRegistered(bytes32,bytes32,uint256,bool,bytes32)",
+                "CounterDisputeRegistered(bytes32,bytes32,uint256,bool,bytes32,bytes)",
                 COUNTER_DISPUTE_REGISTERED_TOPIC,
             ),
             (
@@ -312,11 +315,11 @@ mod catalog_tests {
                 DEBT_FORGIVEN_TOPIC,
             ),
             (
-                "DisputeFinalized(bytes32,bytes32,uint256,bytes32,bytes32)",
+                "DisputeFinalized(bytes32,bytes32,uint256,bytes32,bytes32,bytes,(bytes32,uint256,bool,bool,bytes32,bytes,bytes))",
                 DISPUTE_FINALIZED_TOPIC,
             ),
             (
-                "DisputeStarted(bytes32,bytes32,uint256,bool,bytes32,bytes32,bytes,bytes,bytes32,uint256,uint256,uint32,uint32)",
+                "DisputeStarted(bytes32,bytes32,uint256,bool,bytes32,bytes32,bytes,bytes,bytes32,uint256,uint256,uint32,uint32,bytes)",
                 DISPUTE_STARTED_TOPIC,
             ),
             (
@@ -694,6 +697,9 @@ pub(crate) fn require_current_depository_money_abi(
             | "0x0971ac81b80f99fe0089c3fbe4af4fa1148f2ce78bc6345e76b05be73500de1f"
             // DebtCreated before debtSeq: its queue generation is unknowable.
             | "0xf77919d8ab0bbcbc7feb0269986072624ad50811e07c7a87aa97e234ad7717db"
+            | "0xb3a65f8a2fc99051b8235a54207bb2434556eb7682695e9374cf539c9ba453a7"
+            | "0x6d46d52b5fda2a9055705ba74bf5e95807cfa39decf819cdfeaa14f9b2ba346a"
+            | "0xdf1d21d89097ae482123e351724eb4c07eb3b9319a0e116643d815958aea1609"
     ) {
         return Err(JWatcherError::RetiredMoneyAbi {
             address: hex(address),
@@ -701,4 +707,33 @@ pub(crate) fn require_current_depository_money_abi(
         });
     }
     Ok(())
+}
+
+pub(crate) fn decode_dispute_log(
+    log: &RpcLog,
+    params: &[ethabi::ParamType],
+) -> Result<Vec<ethabi::Token>, JWatcherError> {
+    if log.topics.len() != 4 {
+        return Err(JWatcherError::EventAbi("disputeTopics"));
+    }
+    let bytes = super::receipt::parse_hex(&log.data, None, "disputeData")?;
+    let values =
+        ethabi::decode(params, &bytes).map_err(|_| JWatcherError::EventAbi("disputeData"))?;
+    if ethabi::encode(&values) != bytes {
+        return Err(JWatcherError::EventAbi("disputeCanonical"));
+    }
+    Ok(values)
+}
+
+pub(crate) fn token_word(value: &ethabi::Token) -> Result<[u8; 32], JWatcherError> {
+    fixed_token(value, "disputeWord")
+}
+pub(crate) fn token_bytes(value: &ethabi::Token) -> Result<Vec<u8>, JWatcherError> {
+    bytes_token(value, "disputeBytes")
+}
+pub(crate) fn token_bool(value: &ethabi::Token) -> Result<bool, JWatcherError> {
+    match value {
+        ethabi::Token::Bool(value) => Ok(*value),
+        _ => Err(JWatcherError::EventAbi("disputeBool")),
+    }
 }

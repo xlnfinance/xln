@@ -20,20 +20,6 @@ export class RpcTransportUnavailableError extends Error {
   }
 }
 
-/**
- * A served dispute event whose ProofBody (or finalization evidence) this poll
- * could not recover from its transaction. The cursor must not pass it, since
- * a bodiless dispute is never delivered, but its calldata is chosen by the
- * dispute sender: halting the process would let any sender crash-loop every
- * hub watching this jurisdiction. The watcher retries the range with backoff.
- */
-export class DisputeEvidenceUnresolvedError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'DisputeEvidenceUnresolvedError';
-  }
-}
-
 export const TRANSIENT_RPC_HTTP_STATUSES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504]);
 
 export const isRpcTransportUnavailable = (error: unknown): boolean => {

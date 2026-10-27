@@ -9,7 +9,7 @@
 //! generated ingress.
 
 mod abi;
-mod calldata;
+mod dispute_reference;
 mod http;
 mod observation;
 mod receipt;

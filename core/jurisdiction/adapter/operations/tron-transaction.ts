@@ -63,14 +63,6 @@ const TRIGGER_SMART_CONTRACT = 'type.googleapis.com/protocol.TriggerSmartContrac
 type TronFieldSet = { raw: number[]; contract: number[]; call: number[] };
 /** Exactly the fields the canonical xln submitter signs. */
 const SUBMITTED_FIELDS: TronFieldSet = { raw: [1, 4, 8, 11, 14, 18], contract: [1, 2], call: [1, 2, 3, 4] };
-/** The complete protocol.Transaction.raw, Contract and TriggerSmartContract
- * schemas: an included call may come from any wallet, multisig or memo. */
-const PROTOCOL_FIELDS: TronFieldSet = {
-  raw: [1, 3, 4, 8, 9, 10, 11, 12, 14, 18],
-  contract: [1, 2, 3, 4, 5],
-  call: [1, 2, 3, 4, 5, 6],
-};
-
 /** The single TriggerSmartContract carried by one raw_data. */
 const triggerSmartContract = (data: Map<number, Field>, allowed: TronFieldSet): Map<number, Field> => {
   const contract = fields(bytes(data, 11), allowed.contract);
@@ -110,29 +102,4 @@ export const decodeSignedTronTransaction = (rawTransaction: string) => {
   }
   return { hash, from, to, data: ethers.hexlify(bytes(call, 4)), value: call.has(3) ? number(call, 3) : 0n,
     nonce: 0, refBlockBytes, refBlockHash, expiration, timestamp, feeLimit };
-};
-
-/**
- * The contract call of an INCLUDED native transaction, bound by its id.
- *
- * A TRON txID is sha256(raw_data protobuf), not keccak over an Ethereum signed
- * envelope. Recomputing it over the native raw_data binds the calldata to the
- * receipt-attested transaction. Signatures, fee limit and lifetime were the
- * chain's admission rules; re-judging them by the submitter's own policy
- * would reject a counterparty's valid transaction.
- */
-export const decodeIncludedTronTransactionCall = (txId: string, rawData: string) => {
-  if (!/^0x(?:[0-9a-f]{2})+$/i.test(rawData) || rawData.length > 524_290) {
-    throw new Error('TRON_RAW_DATA_INVALID');
-  }
-  const raw = ethers.getBytes(rawData);
-  const hash = ethers.sha256(raw);
-  if (hash !== txId.toLowerCase()) throw new Error(`TRON_TRANSACTION_ID_MISMATCH:${txId}:${hash}`);
-  const call = triggerSmartContract(fields(raw, PROTOCOL_FIELDS.raw), PROTOCOL_FIELDS);
-  return {
-    hash,
-    from: address(bytes(call, 1, 21)),
-    to: address(bytes(call, 2, 21)),
-    data: ethers.hexlify(bytes(call, 4)),
-  };
 };

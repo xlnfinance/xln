@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { extractCanonicalDepositoryEventArgs } from './events/depository-event-codec';
+import { extractCanonicalDepositoryEventArgs, decodeDisputeFinalizationLog, validateDisputeFinalizationLog } from './events/depository-event-codec';
 import type { JEvent } from './types';
 
 export type JEventLog = {
@@ -41,9 +41,16 @@ export const decodeJEventLog = (
     throw new Error(`${failureCode}:${message}`);
   }
   if (!parsed) throw new Error(`${failureCode}:empty`);
+  const args = extractCanonicalDepositoryEventArgs(parsed);
+  const finalization = parsed.name === 'DisputeFinalized' ? validateDisputeFinalizationLog(args) : undefined;
+  if (finalization) args['initialProofbodyHash'] = finalization.initialProofbodyHash;
+  const evidence = finalization && finalization.starterArgumentsHash === ethers.keccak256('0x')
+    ? decodeDisputeFinalizationLog(args) : undefined;
+  if (evidence) args['initialProofbodyHash'] = evidence.initialProofbodyHash;
   return {
     name: parsed.name,
-    args: extractCanonicalDepositoryEventArgs(parsed),
+    args,
+    ...(evidence ? { disputeFinalizationEvidence: evidence } : {}),
     ...coordinates,
   };
 };
@@ -56,6 +63,10 @@ export const decodeJEventLog = (
  * require_current_depository_money_abi.
  */
 const RETIRED_DEPOSITORY_MONEY_TOPICS = new Set([
+  '0xb3a65f8a2fc99051b8235a54207bb2434556eb7682695e9374cf539c9ba453a7',
+  '0x6d46d52b5fda2a9055705ba74bf5e95807cfa39decf819cdfeaa14f9b2ba346a',
+  '0xdf1d21d89097ae482123e351724eb4c07eb3b9319a0e116643d815958aea1609',
+
   '0x784575545124eef27f8fcc1472fb5f2483beb9cc23e6fe3dbf588eb7bd501f7c',
   '0xae767eeb0c57abd46e2e0b422895ba3b89372fbd0510a58f00d996faf66f027d',
   '0x1ffe8e6348fe244a8988797c02b57999821149e7b25c9f93a85c77819efdde67',

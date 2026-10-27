@@ -224,16 +224,6 @@ const SUBMITTED_FIELDS: TronFieldSet = TronFieldSet {
     contract: &[1, 2],
     call: &[1, 2, 3, 4],
 };
-/// The complete protocol.Transaction.raw, Contract and TriggerSmartContract
-/// schemas: an included call may come from any wallet, multisig or memo.
-const PROTOCOL_FIELDS: TronFieldSet = TronFieldSet {
-    raw: &[1, 3, 4, 8, 9, 10, 11, 12, 14, 18],
-    contract: &[1, 2, 3, 4, 5],
-    call: &[1, 2, 3, 4, 5, 6],
-};
-/// Same bound as the TS decoders: 524_288 hex digits.
-const MAX_TRON_WIRE_BYTES: usize = 262_144;
-
 /// The single TriggerSmartContract carried by one raw_data.
 fn trigger_smart_contract<'a>(
     raw: &[(u64, ProtoField<'a>)],
@@ -288,27 +278,6 @@ fn decode_tron(wire: &[u8]) -> Result<PreparedTransaction, JSubmitError> {
         chain_id: None,
         expires_at: Some(expiration),
     })
-}
-
-/// The contract calldata of an INCLUDED native transaction, bound by its id.
-///
-/// A TRON txID is sha256(raw_data protobuf), not keccak over an Ethereum
-/// signed envelope. Recomputing it over the native raw_data binds the calldata
-/// to the receipt-attested transaction. Signatures, fee limit and lifetime were
-/// the chain's admission rules; re-judging them by the submitter's own policy
-/// would reject a counterparty's valid transaction. Mirrors the TS
-/// `decodeIncludedTronTransactionCall`.
-pub(crate) fn decode_included_tron_call(tx_id: &Word, raw: &[u8]) -> Result<Vec<u8>, JSubmitError> {
-    if raw.is_empty() || raw.len() > MAX_TRON_WIRE_BYTES {
-        return Err(bad());
-    }
-    if <Word>::from(Sha256::digest(raw)) != *tx_id {
-        return Err(JSubmitError::Transaction("tron-transaction-id"));
-    }
-    let call = trigger_smart_contract(&proto(raw, PROTOCOL_FIELDS.raw)?, &PROTOCOL_FIELDS)?;
-    tron_address(bytes(&call, 1)?)?;
-    tron_address(bytes(&call, 2)?)?;
-    Ok(bytes(&call, 4)?.to_vec())
 }
 
 #[cfg(test)]

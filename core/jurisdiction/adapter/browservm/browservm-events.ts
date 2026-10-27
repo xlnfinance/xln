@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import { bytesToHex } from '@ethereumjs/util';
 import type { Address } from '@ethereumjs/util';
-import { extractCanonicalDepositoryEventArgs } from '../events/depository-event-codec';
+import { decodeJEventLog } from '../j-event-log-decoder';
 import type { JEvent } from '../types';
 
 export type EthereumLog = [
@@ -68,17 +68,8 @@ export const decodeBrowserVmEvents = (
       try {
         const parsed = iface.parseLog({ topics, data });
         if (!parsed) continue;
-        const args = parsed.name === 'DisputeFinalized'
-          ? extractCanonicalDepositoryEventArgs(parsed)
-          : Object.fromEntries(parsed.fragment.inputs.map((input, index) => [input.name, parsed.args[index]]));
-        decoded.push({
-          name: parsed.name,
-          args,
-          blockNumber,
-          blockHash,
-          transactionHash,
-          logIndex,
-        });
+        decoded.push(decodeJEventLog({ topics, data }, iface,
+          { blockNumber, blockHash, transactionHash, logIndex }, 'BROWSERVM_LOG_DECODE_FAILED'));
         parsedKnownLog = true;
         break;
       } catch {

@@ -1,6 +1,5 @@
 import {
   createNativeTronClient,
-  createSolidifiedTronTransactionReader,
   readTronExpiryEvidence,
 } from '../operations/tron-authority';
 import { broadcastPreparedRpcTransaction } from './write/prepared/prepared-broadcast';
@@ -14,7 +13,6 @@ import { createRpcLifecycleMethods } from './rpc-lifecycle';
 import { readAndAssertRpcChainId } from './rpc-network';
 import {
   isTransientRpcUnavailableError,
-  resolveDisputeFinalizationEvidence,
 } from '../rpc-public';
 import { ReceiptAvailabilityError } from '../receipt-root';
 import { isRpcTransportUnavailable } from '../kernel/failure';
@@ -24,10 +22,6 @@ import { createRpcSubmitTx } from './write/rpc-submission';
 import { createRpcTransactionSequencer } from './write/rpc-transaction-sequencer';
 import { createRpcWalletWriteMethods } from './wallet/rpc-wallet-writes';
 import { createRpcWatcherController } from './watcher/rpc-watcher-controller';
-import {
-  createTxDisputeProofBodyReader,
-  createTxFinalizationEvidenceReader,
-} from '../rpc-watcher-inputs';
 import { createRpcWriteMethods } from './write/rpc-write-methods';
 import { prepareDurableTransaction } from './write/prepared/durable-transaction';
 
@@ -72,9 +66,6 @@ export async function createRpcAdapter(
     mintDebugEnabled: process.env['XLN_JADAPTER_MINT_DEBUG'] === '1',
     isQuiet: () => quietLogs,
   });
-  const readNativeTronTransaction = config.mode === 'tron' ? createSolidifiedTronTransactionReader(config) : undefined;
-  const readTxFinalizationEvidence = createTxFinalizationEvidenceReader(provider, readNativeTronTransaction);
-  const readTxDisputeProofBody = createTxDisputeProofBodyReader(provider, readNativeTronTransaction);
   const watcher = createRpcWatcherController({
     provider,
     mode: config.mode,
@@ -97,9 +88,6 @@ export async function createRpcAdapter(
     readBlockHeaders: chainIo.readBlockHeaders,
     sendAuthenticatedBatch: chainIo.sendAuthenticatedBatch,
     resolveFinalityDepth: chainIo.resolveFinalityDepth,
-    resolveDisputeFinalizationEvidence: async (txHash, args, location) =>
-      resolveDisputeFinalizationEvidence(await readTxFinalizationEvidence(txHash, location), txHash, args),
-    resolveDisputeProofBody: readTxDisputeProofBody,
     isTransientRpcUnavailable: isRpcWatcherTransientError,
   });
   const lifecycle = createRpcLifecycleMethods({

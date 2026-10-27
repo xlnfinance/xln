@@ -57,7 +57,6 @@ describe('authenticated watcher header replay boundary', () => {
     );
     expect(ingress.headers).toEqual([{ jHeight: 2, jBlockHash: HASH_B }]);
     expect(ingress.logs.map(log => log.blockHash)).toEqual([HASH_B]);
-    expect(ingress.logs.map(log => log.authenticatedBlockHash)).toEqual([HASH_A]);
     expect(ingress.tipBlockHash).toBe(HASH_B);
     expect(transformedHeights).toEqual([1, 2]);
   });

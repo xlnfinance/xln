@@ -433,7 +433,7 @@ describe('runDisputeWatchSweep', () => {
     // Build a real DisputeStarted log via the same interface the engine uses.
     const { Interface, id } = await import('ethers');
     const iface = new Interface([
-      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds)',
+      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds, bytes proofbody)',
     ]);
     const topicHash = iface.getEvent('DisputeStarted')!.topicHash;
     const encoded = iface.encodeEventLog('DisputeStarted', [
@@ -450,6 +450,7 @@ describe('runDisputeWatchSweep', () => {
       5_000,
       600,
       310,
+      '0x',
     ]);
     const log = { topics: [...encoded.topics] as string[], data: encoded.data, blockNumber: 150 };
 
@@ -479,11 +480,11 @@ describe('runDisputeWatchSweep', () => {
   const disputeLog = async (victim: number, nonce: number, blockNumber: number) => {
     const { Interface, id } = await import('ethers');
     const iface = new Interface([
-      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds)',
+      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds, bytes proofbody)',
     ]);
     const encoded = iface.encodeEventLog('DisputeStarted', [
       entityId(1), entityId(victim), nonce, false, id(`proof-${nonce}`), id(`seed-${nonce}`), '0x', '0x',
-      `0x${'00'.repeat(32)}`, 5_910, 5_000, 600, 310,
+      `0x${'00'.repeat(32)}`, 5_910, 5_000, 600, 310, '0x',
     ]);
     return { topics: [...encoded.topics] as string[], data: encoded.data, blockNumber };
   };
@@ -596,7 +597,7 @@ describe('runDisputeWatchSweep', () => {
   test('fails loud on a malformed matching event and does not advance its cursor', async () => {
     const { Interface } = await import('ethers');
     const iface = new Interface([
-      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds)',
+      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds, bytes proofbody)',
     ]);
     const { store, cursors } = buildFakeStore();
     const result = await runDisputeWatchSweep(store, {
@@ -639,11 +640,11 @@ describe('runDisputeWatchSweep', () => {
   test('a newer registration cannot point the jurisdiction scan at another chain', async () => {
     const { Interface, id } = await import('ethers');
     const iface = new Interface([
-      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds)',
+      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds, bytes proofbody)',
     ]);
     const encoded = iface.encodeEventLog('DisputeStarted', [
       entityId(1), entityId(2), 8, false, id('proof-chain'), id('seed-chain'), '0x', '0x',
-      `0x${'00'.repeat(32)}`, 5_910, 5_000, 600, 310,
+      `0x${'00'.repeat(32)}`, 5_910, 5_000, 600, 310, '0x',
     ]);
     const honestRpc = 'http://b-honest.test/';
     // Sorts first and was registered last: both orders the old pick could use.

@@ -34,8 +34,7 @@ describe('contract artifact publication', () => {
     expect(scripts['check']).toContain('bun run check:short');
     expect(scripts['check:short']).toContain('check:contract-artifact-drift');
     expect(scripts['check:contract-artifact-drift']).toBe(
-      'bun run contracts:sync && git diff --exit-code -- ' +
-      'frontend/static/contracts jurisdictions/typechain-types',
+      'bun core/scripts/checks/contracts/check-contract-artifact-drift.ts',
     );
   });
 });
