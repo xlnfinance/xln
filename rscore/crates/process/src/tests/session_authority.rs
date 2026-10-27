@@ -5,6 +5,19 @@ use crate::test_fixture::{hello, hello_authority, load_accounts, request, shutdo
 
 const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
 
+#[test]
+fn entity_bootstrap_reply_has_one_payload_tuple() {
+    let body = crate::entity_wire::encode_entity_loaded([0xab; 32], &[]).unwrap();
+    let [AbiValue::Tuple(payload)] = body.fields() else {
+        panic!("entity bootstrap body must contain exactly one payload tuple")
+    };
+    let [AbiValue::Bytes(root), AbiValue::Tuple(sections)] = payload.fields() else {
+        panic!("entity bootstrap payload must contain root and sections")
+    };
+    assert_eq!(root, &[0xab; 32]);
+    assert!(sections.fields().is_empty());
+}
+
 fn assert_ok(envelope: Envelope) {
     assert_eq!(envelope.message_kind, MessageKind::Ok, "{envelope:?}");
 }

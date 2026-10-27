@@ -1013,7 +1013,7 @@ pub fn encode_entity_loaded(
     accounts_root: [u8; 32],
     sections: &[EntityConsensusSection],
 ) -> Result<BodyTuple, ProcessError> {
-    Ok(BodyTuple::from_array([
+    Ok(crate::wire_encode::body(vec![
         AbiValue::Bytes(accounts_root.to_vec()),
         sections_value(sections)?,
     ]))
