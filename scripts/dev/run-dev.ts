@@ -14,7 +14,7 @@ import { stopProcessGroup } from '../../core/scripts/e2e/runners/process-group';
 import { selectDevWebTls } from './launcher/web-tls';
 import { fetchLoopback } from '../../core/orchestrator/server/loopback-fetch';
 import { assertTypeScriptAccountExecution } from '../../core/runtime/config/account-execution';
-import { LOCAL_TESTNET_ENV } from '../../core/orchestrator/process/local-testnet-env';
+import { LOCAL_TESTNET_ENV } from '../../core/orchestrator/process/spawn/local-testnet-env';
 import { acquireStandLock, releaseStandLock, readStandLockHolder, standLockRoot, standLockCapacity, STAND_LOCK_TOKEN_ENV, type StandLockGrant } from '../../tools/stand-lock';
 
 export const DEV_SINGLETON_PORT = 17_999;

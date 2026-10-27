@@ -49,7 +49,7 @@ import { assertMinDiskFree } from '../../../support/storage-monitor';
 import { compareStableText } from '../../../protocol/serialization';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
 import { canonicalHubEngine } from '../../../orchestrator/process/hub-engine-plan';
-import { LOCAL_TESTNET_ENV } from '../../../orchestrator/process/local-testnet-env';
+import { LOCAL_TESTNET_ENV } from '../../../orchestrator/process/spawn/local-testnet-env';
 import {
   createIncrementalRuntimeFatalLogScanner,
   findRuntimeFatalLogLines,

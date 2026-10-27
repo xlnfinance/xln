@@ -1,3 +1,4 @@
+import { safeStringify } from '../../../../core/protocol/serialization';
 import { gotoApp } from '../../../utils/e2e-demo-users';
 import { test, expect } from '../../../global-setup.mts';
 import {
@@ -263,7 +264,7 @@ test(
       expect(final.claims).toEqual([]);
       expect(visited).toEqual(chapters);
       await info.attach('tutorial-chapters', {
-        body: JSON.stringify(
+        body: safeStringify(
           {
             visited,
             verified: visited.filter(
@@ -271,7 +272,6 @@ test(
             ),
             skipped,
           },
-          null,
           2,
         ),
         contentType: 'application/json',
