@@ -4,6 +4,8 @@
 
 - I1: Try the executed direct Depository call at offset zero first; a matching
   direct call returns without scanning the transaction for embedded selectors.
+  Offset 0 is decoded by its own ABI-referenced regions regardless of trailing
+  bytes or other candidates.
 - I2: Recover the real dispute through ABI-canonical forwarding wrappers,
   including `processBatch(actual, decoys, 1)` and arbitrarily deep bytes wrappers.
 - I3: Bound decoded bytes per transaction by O(calldata length); never repeatedly
@@ -16,7 +18,9 @@
   hash; also match event kind, counterentity, nonce and proposer where applicable.
 - I7: Any calldata Solidity accepts for the executed direct call is recoverable.
   Non-zero bytes padding and gapped or out-of-order tails are valid encodings,
-  not authority. Existing contract byte/count limits and I6 still apply.
+  not authority. Offset 0 is decoded by its own ABI-referenced regions regardless
+  of trailing bytes or other candidates. Existing contract byte/count limits and
+  I6 still apply.
 
 ## Algorithm
 
@@ -38,12 +42,13 @@
 6. Decode only authenticated matching spans, once each. Reuse their validated
    bodies across events. Metadata distinguishes entries sharing a proof body.
    Finalization sidecar fields remain bound to finalizationEvidenceHash.
-7. If the raw scan has no matching evidence, decode the bounded direct call once
-   with the existing validated ABI decoder, only when offset zero has a supported
-   Depository selector. Never decode embedded noncanonical candidates. Recompute
+7. If offset zero has no canonical raw entry, decode its bounded direct call once
+   with the existing validated ABI decoder before scanning embedded candidates,
+   only when offset zero has a supported Depository selector. Never decode embedded noncanonical candidates. Recompute
    every candidate body hash before event matching (including dispute starts,
    whose claimed hash alone is insufficient). Apply the same direct-call recovery
-   to finalization sidecars; the resolver still verifies their event commitment.
+   to finalization sidecars even when embedded raw candidates exist; append the
+   direct evidence and let the resolver verify the event commitment.
 
 The scanner and memoized structural checks are linear in input positions for
 the fixed ABI. Contract byte/count caps bound each raw hashing span; deduplication
@@ -84,8 +89,11 @@ fails canonical validation is an explicit evidence error, never accepted data.
   resource-limit message. A successful body lookup does not enumerate later
   embedded candidates.
 - A Solidity-valid direct call rejected by canonical span checks uses the existing
-  strict decoder once, after the raw scan. Its input is bounded by the executable
-  call byte ceiling. Full direct-call and batch decoding remains O(calldata length)
+  strict decoder once, before the embedded scan. For processBatch, validate each
+  bytes offset against the 96-byte argument head, its own contract length cap and
+  transaction bounds; extract only those two regions and the nonce. Unreferenced
+  gaps and trailing calldata do not count toward either bytes cap. Watchtower
+  calls retain the contract total-calldata ceiling. Full direct-call and batch decoding remains O(calldata length)
   for the fixed contract limits; canonical matching calls still decode only their
   matching proof body. Protocol validation errors such as TOKEN_LIMIT and
   TRANSFORMER_LIMIT retain their original identity; only the exact calldata budget

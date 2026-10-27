@@ -74,6 +74,7 @@ const maxCallBytes = 4 + 5 * 32 + J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes +
 type RawTuple = Readonly<{ start: number; layout: Schema }>;
 export type RawDisputeEntry = Readonly<{
   eventNames: readonly string[];
+  callOffset: number;
   tuple: RawTuple;
   body: RawTuple;
   watchtower: boolean;
@@ -190,8 +191,8 @@ export class DisputeCalldata {
     return ethers.toBigInt(this.bytes.subarray(start, start + 32)).toString();
   }
 
-  *canonicalCalls(): Generator<{ offset: number; end: number; call: (typeof calls)[number] }> {
-    for (let offset = 0; offset + 4 <= this.bytes.length; offset += 1) {
+  *canonicalCalls(directOnly = false): Generator<{ offset: number; end: number; call: (typeof calls)[number] }> {
+    for (let offset = 0; offset + 4 <= this.bytes.length && (!directOnly || offset === 0); offset += 1) {
       const call = calls.find(candidate => candidate.selector.every((byte, i) => this.bytes[offset + i] === byte));
       if (!call) continue;
       const args = offset + 4;
@@ -212,21 +213,28 @@ export class DisputeCalldata {
     tuple: RawTuple,
     eventNames: readonly string[],
     bodyName: string,
+    callOffset: number,
     watchtower = false,
   ): RawDisputeEntry | null {
     const body = this.field(tuple, bodyName);
     const end = requireValue(this.end(body.start, body.layout));
     if (end - body.start + 32 > J_BATCH_CONTRACT_LIMITS.maxDisputeProofBodyBytes) return null;
-    return { tuple, body, eventNames, watchtower };
+    return { tuple, body, eventNames, callOffset, watchtower };
   }
 
-  *entries(): Generator<RawDisputeEntry> {
+  *entries(directOnly = false): Generator<RawDisputeEntry> {
     // Offset zero is yielded before scanning any embedded selectors. No claimed span advances the scanner.
-    for (const { offset, end, call } of this.canonicalCalls()) {
+    for (const { offset, end, call } of this.canonicalCalls(directOnly)) {
       if (call.name === 'watchtowerCounterDispute') {
         if (end - offset > J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes) continue;
         const tuple = { start: offset + 4 + requireValue(this.word(offset + 36)), layout: requireValue(call.args[1]) };
-        const entry = this.entry(tuple, ['CounterDisputeRegistered', 'DisputeFinalized'], 'finalProofbody', true);
+        const entry = this.entry(
+          tuple,
+          ['CounterDisputeRegistered', 'DisputeFinalized'],
+          'finalProofbody',
+          offset,
+          true,
+        );
         if (entry) yield entry;
       } else {
         yield* this.batchEntries(offset);
@@ -255,7 +263,7 @@ export class DisputeCalldata {
           start: head + requireValue(this.word(head + i * 32)),
           layout: requireValue(array.layout.children[0]),
         };
-        const entry = this.entry(item, [event], bodyName);
+        const entry = this.entry(item, [event], bodyName, offset);
         if (entry) yield entry;
       }
     }
@@ -279,26 +287,27 @@ export class DisputeCalldata {
     return hash;
   }
 
-  /** One bounded executed call; never ABI-decode embedded selector candidates. */
+  private directBytes(slot: number, limit: number): string | null {
+    const offset = this.word(slot);
+    if (offset === null || offset < 96) return null;
+    const length = this.word(4 + offset);
+    if (length === null || length > limit || 4 + offset + 32 + length > this.bytes.length) return null;
+    return this.hex(4 + offset + 32, 4 + offset + 32 + length);
+  }
+
+  /** Decode only the executed call's ABI-referenced regions; trailing bytes are not arguments. */
   directCallData(): string | null {
-    if (this.bytes.length > maxCallBytes) return null;
     const call = calls.find(call => call.selector.every((byte, i) => this.bytes[i] === byte));
     if (!call) return null;
-    if (call.name === 'processBatch') {
-      const offset = this.word(4);
-      if (offset === null) return null;
-      const length = this.word(4 + offset);
-      const root = this.word(4 + offset + 32);
-      // A forwarding wrapper's opaque bytes are not themselves an encoded Batch.
-      if (
-        length === null ||
-        length > J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes ||
-        root === null ||
-        root + 32 > length
-      )
-        return null;
-    } else if (this.bytes.length > J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes) return null;
-    return this.hex(0, this.bytes.length);
+    if (call.name === 'watchtowerCounterDispute')
+      return this.bytes.length <= J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes ? this.hex(0, this.bytes.length) : null;
+    const batch = this.directBytes(4, J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes);
+    const hanko = this.directBytes(36, HANKO_MAX_BYTES);
+    if (batch === null || hanko === null || this.bytes.length < 100) return null;
+    const root = this.word(4 + requireValue(this.word(4)) + 32);
+    // A forwarding wrapper's opaque bytes are not themselves an encoded Batch.
+    if (root === null || root + 32 > ethers.dataLength(batch)) return null;
+    return depository.encodeFunctionData('processBatch', [batch, hanko, ethers.toBigInt(this.bytes.subarray(68, 100))]);
   }
 
   assertRecognized(kind: string): void {

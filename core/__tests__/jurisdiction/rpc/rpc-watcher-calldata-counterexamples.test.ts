@@ -1,6 +1,10 @@
 import { expect, spyOn, test } from 'bun:test';
 import { ethers } from 'ethers';
-import { decodeDisputeProofBodyEvidenceCalldata } from '../../../jurisdiction/adapter/rpc-public';
+import {
+  decodeDisputeProofBodyEvidenceCalldata,
+  resolveDisputeFinalizationEvidence,
+} from '../../../jurisdiction/adapter/rpc-public';
+import { DisputeCalldata } from '../../../jurisdiction/adapter/rpc/watcher/rpc-watcher-calldata';
 import {
   createTxDisputeProofBodyReader,
   createTxFinalizationEvidenceReader,
@@ -33,6 +37,17 @@ const measureRecovery = async (data: string, proofbody = body) => {
     decodedBytes += ethers.dataLength(args[1]);
     return original.apply(this, args);
   });
+  const canonicalCalls = DisputeCalldata.prototype.canonicalCalls;
+  const scannedOffsets: number[] = [];
+  const scan = spyOn(DisputeCalldata.prototype, 'canonicalCalls').mockImplementation(function* (
+    this: DisputeCalldata,
+    ...args
+  ) {
+    for (const call of canonicalCalls.apply(this, args)) {
+      scannedOffsets.push(call.offset);
+      yield call;
+    }
+  });
   const started = performance.now();
   try {
     const recovered = await createTxDisputeProofBodyReader(tx.provider)(
@@ -42,8 +57,9 @@ const measureRecovery = async (data: string, proofbody = body) => {
       location,
     );
     expect(recovered).toEqual(proofbody);
-    return { decodedBytes, elapsedMs: performance.now() - started };
+    return { decodedBytes, scannedOffsets, elapsedMs: performance.now() - started };
   } finally {
+    scan.mockRestore();
     observation.mockRestore();
     console.info(
       `recovery input=${ethers.dataLength(data)} decoded=${decodedBytes} elapsed=${(performance.now() - started).toFixed(1)}ms`,
@@ -260,4 +276,62 @@ test('C2/I6: the direct decoder rejects a copied hash on a different body', asyn
   await expect(
     createTxDisputeProofBodyReader(tx.provider)(tx.hash, 'DisputeStarted', argsFor(shortBytesBody), location),
   ).rejects.toThrow('J_DISPUTE_PROOFBODY_EVIDENCE_NOT_FOUND');
+});
+
+test('C3: direct processBatch recovers with dirty padding and 327,845 total calldata bytes', async () => {
+  const bytes = new Uint8Array(327_845);
+  bytes.set(ethers.getBytes(dirtyPadding(startCall(shortBytesBody))));
+  const result = await measureRecovery(ethers.hexlify(bytes), shortBytesBody);
+  expect(result.decodedBytes).toBeLessThan(10_000);
+});
+
+test('C3/I1: dirty hanko padding decodes offset zero before 120 nested decoys', async () => {
+  const [batch] = depository.decodeFunctionData('processBatch', startCall());
+  const bytes = ethers.getBytes(wrap(batch, nested(wrap('0x'), 120)));
+  const hanko = 4 + Number(ethers.toBigInt(bytes.subarray(36, 68)));
+  const length = Number(ethers.toBigInt(bytes.subarray(hanko, hanko + 32)));
+  bytes[hanko + 32 + length] = 1;
+  const result = await measureRecovery(ethers.hexlify(bytes));
+  expect(result.scannedOffsets.filter(offset => offset !== 0)).toEqual([]);
+});
+
+test('C4: a canonical decoy cannot suppress dirty direct watchtower finalization evidence', async () => {
+  const decoy = [...depository.decodeFunctionData('watchtowerCounterDispute', finalizationCall())];
+  decoy[1] = { ...decoy[1].toObject(), initialNonce: 8n, finalNonce: 12n };
+  const tx = await signedTransaction(
+    ethers.concat([dirtyWatchtowerCall(), depository.encodeFunctionData('watchtowerCounterDispute', decoy)]),
+  );
+  const event = {
+    ...argsFor(shortBytesBody),
+    sender: ethers.ZeroHash,
+    initialNonce: 7n,
+    finalProofbodyHash: argsFor(shortBytesBody).proofbodyHash,
+    finalizationEvidenceHash: ethers.keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode(
+        ['bytes32', 'uint256', 'bool', 'bool', 'bytes32', 'bytes32', 'bytes32'],
+        [ethers.ZeroHash, 11n, false, true, ethers.keccak256('0x12'), ethers.keccak256('0x34'), ethers.keccak256('0x')],
+      ),
+    ),
+  };
+  expect(await createTxDisputeProofBodyReader(tx.provider)(tx.hash, 'DisputeFinalized', event, location)).toEqual(
+    shortBytesBody,
+  );
+  const candidates = await createTxFinalizationEvidenceReader(tx.provider)(tx.hash, location);
+  expect(resolveDisputeFinalizationEvidence(candidates, tx.hash, event)).toMatchObject({
+    initialNonce: '7',
+    finalNonce: '11',
+    sig: '0x',
+  });
+  expect(() =>
+    resolveDisputeFinalizationEvidence(candidates, tx.hash, { ...event, finalizationEvidenceHash: ethers.ZeroHash }),
+  ).toThrow('J_DISPUTE_FINALIZATION_EVIDENCE_NOT_FOUND');
+});
+
+test('C4/I1: dirty direct DisputeStarted wins before a canonical decoy with another nonce', async () => {
+  const bytes = ethers.getBytes(startCall());
+  // The start tuple begins with counterentity, then nonce.
+  const tuple = (ethers.hexlify(bytes).indexOf(argsFor(body).counterentity.slice(2)) - 2) / 2;
+  word(bytes, tuple + 32, 8);
+  const result = await measureRecovery(ethers.concat([dirtyPadding(startCall(shortBytesBody)), bytes]), shortBytesBody);
+  expect(result.scannedOffsets.filter(offset => offset !== 0)).toEqual([]);
 });

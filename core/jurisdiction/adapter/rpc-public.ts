@@ -114,6 +114,16 @@ export const recoverDisputeProofBody = (
   const finalized = eventName === 'DisputeFinalized';
   const nonce = toFinalizationDecimal(finalized ? args['initialNonce'] : args['nonce']);
   const hash = toFinalizationHex(finalized ? args['finalProofbodyHash'] : args['proofbodyHash']);
+  // Canonical offset zero retains body-only decoding. Otherwise decode its own
+  // bounded regions before any embedded decoy can affect recovery (I1/I7).
+  const direct = raw.entries(true).next().done ? raw.directCallData() : null;
+  if (direct !== null) {
+    const candidates = decodeDisputeProofBodyEvidenceCalldata(direct).filter(
+      candidate => hashCalldataProofBody(candidate.proofbody) === candidate.proofbodyHash.toLowerCase(),
+    );
+    const matched = findDisputeProofBodyEvidence(candidates, eventName, args);
+    if (matched) return matched.proofbody;
+  }
   for (const entry of raw.entries()) {
     const value = (name: string): string => raw.value(entry.tuple, name);
     const nonceField = finalized
@@ -144,16 +154,7 @@ export const recoverDisputeProofBody = (
     }
     return proofbody as TxDisputeProofBodyEvidence['proofbody'];
   }
-  const direct = raw.directCallData();
-  if (direct !== null) {
-    // Solidity ignores bytes padding and follows noncontiguous tails. Decode only
-    // the bounded direct call; a copied claimed hash must never authorize a body.
-    const candidates = decodeDisputeProofBodyEvidenceCalldata(direct).filter(
-      candidate => hashCalldataProofBody(candidate.proofbody) === candidate.proofbodyHash.toLowerCase(),
-    );
-    return resolveDisputeProofBodyEvidence(candidates, eventName, args);
-  }
-  raw.assertRecognized('PROOFBODY');
+  if (direct === null) raw.assertRecognized('PROOFBODY');
   throw new Error(`J_DISPUTE_PROOFBODY_EVIDENCE_NOT_FOUND:${eventName}:${nonce}`);
 };
 
@@ -161,9 +162,11 @@ export const recoverDisputeProofBody = (
 export const recoverDisputeFinalizationEvidence = (raw: DisputeCalldata): TxFinalizationEvidence[] => {
   const candidates: TxFinalizationEvidence[] = [];
   const seen = new Set<number>();
+  let hasDirect = false;
   for (const entry of raw.entries()) {
     if (!entry.eventNames.includes('DisputeFinalized') || seen.has(entry.tuple.start)) continue;
     seen.add(entry.tuple.start);
+    if (entry.callOffset === 0) hasDirect = true;
     const value = (name: string): string => raw.value(entry.tuple, name);
     const startedByLeft = value('startedByLeft') === '1';
     const starter = value('starterArguments');
@@ -180,9 +183,9 @@ export const recoverDisputeFinalizationEvidence = (raw: DisputeCalldata): TxFina
       sig: entry.watchtower ? '0x' : value('sig'),
     });
   }
-  const direct = candidates.length === 0 ? raw.directCallData() : null;
-  if (direct !== null) return decodeDisputeFinalizationEvidenceCalldata(direct);
-  raw.assertRecognized('FINALIZATION');
+  const direct = hasDirect ? null : raw.directCallData();
+  if (direct !== null) candidates.push(...decodeDisputeFinalizationEvidenceCalldata(direct));
+  if (direct === null) raw.assertRecognized('FINALIZATION');
   return candidates;
 };
 
@@ -258,17 +261,17 @@ export const decodeDisputeProofBodyEvidenceCalldata = (data: string): TxDisputeP
   }
 };
 
-export const resolveDisputeProofBodyEvidence = (
+const findDisputeProofBodyEvidence = (
   candidates: readonly TxDisputeProofBodyEvidence[],
   eventName: TxDisputeProofBodyEvidence['eventName'],
   args: Record<string, unknown>,
-): TxDisputeProofBodyEvidence['proofbody'] => {
+): TxDisputeProofBodyEvidence | undefined => {
   const counterentity = toFinalizationHex(args['counterentity']);
   const nonce = toFinalizationDecimal(eventName === 'DisputeFinalized' ? args['initialNonce'] : args['nonce']);
   const proofbodyHash = toFinalizationHex(
     eventName === 'DisputeFinalized' ? args['finalProofbodyHash'] : args['proofbodyHash'],
   );
-  const matched = candidates.find(
+  return candidates.find(
     candidate =>
       candidate.eventName === eventName &&
       candidate.counterentity === counterentity &&
@@ -276,6 +279,15 @@ export const resolveDisputeProofBodyEvidence = (
       candidate.proofbodyHash.toLowerCase() === proofbodyHash.toLowerCase() &&
       (eventName === 'DisputeFinalized' || candidate.proposerIsLeft === Boolean(args['proposerIsLeft'])),
   );
+};
+
+export const resolveDisputeProofBodyEvidence = (
+  candidates: readonly TxDisputeProofBodyEvidence[],
+  eventName: TxDisputeProofBodyEvidence['eventName'],
+  args: Record<string, unknown>,
+): TxDisputeProofBodyEvidence['proofbody'] => {
+  const matched = findDisputeProofBodyEvidence(candidates, eventName, args);
+  const nonce = toFinalizationDecimal(eventName === 'DisputeFinalized' ? args['initialNonce'] : args['nonce']);
   if (!matched) throw new Error(`J_DISPUTE_PROOFBODY_EVIDENCE_NOT_FOUND:${eventName}:${nonce}`);
   return matched.proofbody;
 };
