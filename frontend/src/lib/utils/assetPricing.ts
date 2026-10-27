@@ -1,10 +1,12 @@
 import { requireTokenDecimals } from '#lib/components/Entity/token-metadata.ts';
 
+// ETH matches the WETH/USDC market maker mid (core/account/utils.ts, mmMidPriceTicks 2500.0000);
+// a different figure here made a swap look like it grew the balance.
 const USD_MICROS_BY_SYMBOL: Record<string, bigint> = {
   USDC: 1_000_000n,
   USDT: 1_000_000n,
-  ETH: 3_500_000_000n,
-  WETH: 3_500_000_000n,
+  ETH: 2_500_000_000n,
+  WETH: 2_500_000_000n,
 };
 
 function normalizeSymbol(symbol: string): string {
