@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -109,6 +109,14 @@ const ensureContractArtifacts = async (): Promise<void> => {
 };
 
 const runTests = async (args: string[], cwd: string): Promise<number> => await runCommand('bun', args, cwd);
+
+// Bun 1.3.x fails real tests (stale OpenSSL error after a rejected X25519
+// exchange, structuredClone of shared frames) that pass on the pinned Bun.
+const pinnedBun = (JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8')) as { packageManager?: string })
+  .packageManager?.replace(/^bun@/, '');
+if (pinnedBun && Bun.version !== pinnedBun) {
+  throw new Error(`UNIT_TESTS_BUN_VERSION_MISMATCH:running=${Bun.version}:pinned=${pinnedBun}`);
+}
 
 await ensureContractArtifacts();
 
