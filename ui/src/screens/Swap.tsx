@@ -4,7 +4,7 @@ import { explainWalletError } from '@xln/frontend/lib/utils/ui/walletError';
 import { HOME, PageHead } from '../components/PageHead';
 import type { AccountState, RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
 import { getJurisdictionStackId } from '@xln/core/api/public/runtime-module';
-import { prepareSwapOrderForDimensions } from '@xln/core/swapbook/types';
+import { prepareSwapOrderForDimensions, requantizeRemainingSwapAtPriceForDimensions } from '@xln/core/swapbook/types';
 import { DeltaBar, DeltaCaption } from '../components/Bars';
 import { Orderbook, type BookSide } from '../components/Orderbook';
 import {
@@ -66,10 +66,10 @@ export function Swap() {
   const [wantTokenId, setWantTokenId] = useState(2);
   const [giveText, setGiveText] = useState('');
   const [wantText, setWantTextState] = useState('');
-  // A picked book level fixes the price, so later pay edits keep receiving at that level.
-  const [pickedRatio, setPickedRatio] = useState<{ give: bigint; want: bigint; wantDecimals: number; giveDecimals: number } | null>(null);
+  // A picked book level fixes the price, so later pay edits keep receiving at exactly that level.
+  const [pickedPriceTicks, setPickedPriceTicks] = useState<bigint | null>(null);
   const setWantText = (text: string): void => {
-    setPickedRatio(null);
+    setPickedPriceTicks(null);
     setWantTextState(text);
   };
   const [submitting, setSubmitting] = useState(false);
@@ -185,14 +185,21 @@ export function Swap() {
   });
   const setGiveAmount = (text: string): void => {
     setGiveText(text);
-    if (!pickedRatio) return;
+    if (pickedPriceTicks === null) return;
     let give: bigint;
     try {
-      give = parseAmount(text || '0', pickedRatio.giveDecimals);
+      give = parseAmount(text || '0', giveMeta.decimals);
     } catch {
       return;
     }
-    setWantTextState(give > 0n ? plainAmount((pickedRatio.want * give) / pickedRatio.give, pickedRatio.wantDecimals) : '');
+    const atPrice =
+      give > 0n
+        ? requantizeRemainingSwapAtPriceForDimensions(giveTokenId, wantTokenId, give, pickedPriceTicks, {
+            giveTokenDecimals: giveMeta.decimals,
+            wantTokenDecimals: wantMeta.decimals,
+          })
+        : null;
+    setWantTextState(atPrice ? plainAmount(atPrice.effectiveWant, wantMeta.decimals) : '');
   };
   const pickLevel = (side: BookSide, level: Pick<BookLevel, 'priceTicks' | 'size'>): void => {
     if (!assetsReady || (mode === 'cross' && !crossMarket)) return;
@@ -216,7 +223,7 @@ export function Swap() {
     const wantDecimals = side === 'ask' ? base.decimals : quote.decimals;
     setGiveText(plainAmount(picked.give, giveDecimals));
     setWantTextState(plainAmount(picked.want, wantDecimals));
-    setPickedRatio({ give: picked.give, want: picked.want, giveDecimals, wantDecimals });
+    setPickedPriceTicks(mode === 'same' ? level.priceTicks : null);
   };
 
   // A level picked on the Desk arrives as query parameters, because the Desk
@@ -310,15 +317,20 @@ export function Swap() {
   const sameToken = mode === 'same' && giveTokenId === wantTokenId;
   const prepared = useMemo(() => {
     if (!xln || !parsedGive || !parsedWant || sameToken) return null;
+    const dimensions = { giveTokenDecimals: giveMeta.decimals, wantTokenDecimals: wantMeta.decimals };
     try {
-      return prepareSwapOrderForDimensions(giveTokenId, wantTokenId, parsedGive, parsedWant, {
-        giveTokenDecimals: giveMeta.decimals,
-        wantTokenDecimals: wantMeta.decimals,
-      });
+      // Give dust would shift a price rebuilt from amounts; at a picked level, quantize first.
+      const atPrice =
+        pickedPriceTicks === null
+          ? null
+          : requantizeRemainingSwapAtPriceForDimensions(giveTokenId, wantTokenId, parsedGive, pickedPriceTicks, dimensions);
+      return atPrice
+        ? prepareSwapOrderForDimensions(giveTokenId, wantTokenId, atPrice.effectiveGive, atPrice.effectiveWant, dimensions)
+        : prepareSwapOrderForDimensions(giveTokenId, wantTokenId, parsedGive, parsedWant, dimensions);
     } catch {
       return null;
     }
-  }, [xln, sameToken, giveTokenId, wantTokenId, parsedGive, parsedWant, giveMeta.decimals, wantMeta.decimals]);
+  }, [xln, sameToken, giveTokenId, wantTokenId, parsedGive, parsedWant, giveMeta.decimals, wantMeta.decimals, pickedPriceTicks]);
 
   const feeBps = useMemo(() => {
     if (!hub || mode !== 'same') return null;
