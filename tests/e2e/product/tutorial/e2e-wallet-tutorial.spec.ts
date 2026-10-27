@@ -159,9 +159,15 @@ test(
     if (skipped.lending) await skip(page, /No signed savings position/, skipped);
     else await page.getByTestId('lending-close').click();
     await visit('protection');
-    const tower = process.env['UI_E2E_TOWER_URL'] || `http://127.0.0.1:${process.env['E2E_WATCHTOWER_PORT'] || '9100'}`;
+    // The stack serves its tower through the API proxy; the wallet knows that address.
+    const tower = await page.evaluate(async () => {
+      const modulePath = '/src/native/backup.ts';
+      const { nativeBackupAddress } = await import(modulePath);
+      return nativeBackupAddress() as string;
+    });
     await page.getByTestId('watchtower-url').fill(tower);
     await page.getByTestId('watchtower-add').click();
+    await expect(page.getByTestId('sovereignty-watchtower')).toHaveAttribute('data-covered', 'yes', { timeout: 30_000 });
     await visit('recovery');
     const coverage = await page.getByTestId('watchtower-coverage-backup').innerText();
     const backupHeight = coverage.match(/#([\d,]+)/)?.[1];
