@@ -155,7 +155,13 @@ export function Pay() {
 				})
 				.catch((error: unknown) => {
 					if (seq !== quoteSeq.current) return;
-					setRouteError(error instanceof Error ? error.message : String(error));
+					// The graph search names raw entity ids; the person needs the reason, not the ids.
+					const notFound = (error as { code?: unknown }).code === 'E_NOT_FOUND';
+					setRouteError(
+						notFound
+							? 'No route can carry this amount right now, fees included. Try a smaller amount or top up.'
+							: error instanceof Error ? error.message : String(error),
+					);
 					// A retryable read (route profiles still syncing after unlock) is
 					// asked again for the same draft; anything else is final.
 					const retry = error as { retryable?: unknown; retryAfterMs?: unknown };
