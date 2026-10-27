@@ -81,6 +81,17 @@ test(
           return { balance: account.balance, pending: account.pending, mempool: account.mempool };
         })
         .toEqual({ balance: '100000000', pending: false, mempool: 0 });
+      for (const field of ['bank-valid-hours', 'bank-late-hours', 'bank-savings-rate', 'bank-loan-rate']) {
+        await officer.getByTestId(field).fill('invalid');
+      }
+      await officer.getByTestId('bank-not-lending').click();
+      await expect(officer.getByTestId('bank-committed-rates')).toContainText('Not lending: withdrawn or expired.');
+      await expect.poll(readPolicy).toMatchObject({
+        terms: expect.arrayContaining([expect.objectContaining({
+          tokenId: 1, termId: '1d', savingsInterestBps: 100, loanInterestBps: 200,
+          loanLateMs: 43_200_000, expiresAt: 0,
+        })]),
+      });
       expect(errors).toEqual([]);
     } finally {
       await context.close();

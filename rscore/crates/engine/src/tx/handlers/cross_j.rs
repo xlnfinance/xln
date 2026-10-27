@@ -1,8 +1,8 @@
 //! Canonical cross-j Account transitions.
 //!
 //! The nested route/proof objects remain `CanonicalValue` so the Rust engine
-//! commits exactly the TS bytes. This module validates and mutates only the
-//! Account-owned fields; no parallel Rust route codec exists.
+//! commits exactly the TS bytes. Offer admission validates the exact TS route
+//! shape before canonicalization; mutations remain Account-owned.
 
 use num_bigint::BigInt;
 use sha3::{Digest as _, Keccak256};
@@ -194,6 +194,8 @@ pub(crate) fn validate_swap_offer_route(
     want_token_id: u32,
     proposer: Side,
 ) -> Result<Side, String> {
+    super::cross_j_route_shape::validate(route_value)
+        .map_err(|detail| format!("CROSS_J_SWAP_OFFER_ROUTE_INVALID:{detail}"))?;
     let route = fields(route_value)?;
     if string(route, "status")? != "resting"
         || get(route, "sourcePull").is_none()

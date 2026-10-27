@@ -55,7 +55,7 @@ test('cross_pull_close with a malformed binary is a typed rejection, matching Ru
   expect(account.state.pulls?.size).toBe(1);
 });
 
-test('a non-canonical cross-j offer route hash is the same typed rejection as Rust', async () => {
+test('malformed and non-canonical cross-j offer routes are the same typed rejection as Rust', async () => {
   // Rust replays this file in account_cross_j_semantic_parity.rs and must
   // reach the identical rejection text without mutating the Account.
   const actual = await executeCrossJRouteHashAccountSemanticVector();
@@ -67,5 +67,9 @@ test('a non-canonical cross-j offer route hash is the same typed rejection as Ru
   expect(actual.cases.map(testCase => testCase.rejection)).toEqual([
     'CROSS_J_SWAP_OFFER_ROUTE_INVALID:CROSS_J_ROUTE_HASH_MISMATCH:order-1',
     'CROSS_J_SWAP_OFFER_ROUTE_INVALID:CROSS_J_ROUTE_HASH_MISMATCH:order-1',
+    'CROSS_J_SWAP_OFFER_ROUTE_INVALID:CROSS_J_SWAP_OFFER_ROUTE_FIELDS:missing=updatedAt:extra=none',
+    'CROSS_J_SWAP_OFFER_ROUTE_INVALID:CROSS_J_SWAP_OFFER_ROUTE_FIELDS:missing=none:extra=unknownField',
+    'CROSS_J_SWAP_OFFER_ROUTE_INVALID:CROSS_J_SWAP_OFFER_ROUTE_SOURCE_DISPUTE_LEFT:-1',
   ]);
+  expect(actual.cases.every(testCase => testCase.rejectionCode === 'ACCOUNT_TX_VALIDATION')).toBe(true);
 });

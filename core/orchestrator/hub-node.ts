@@ -39,7 +39,7 @@ import { resolveJurisdictionsJsonPath } from '../jurisdiction/adapter/jurisdicti
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../swapbook';
 import { buildDefaultBankTermsTxs } from '../lendbook/default-terms';
 import { accountStateDomainFromJurisdiction } from '../account/commitment/state-root';
-import { getKnownTokenIds } from '../account/utils';
+import { getTokenIdsForJurisdiction } from '../account/utils';
 import { toPublicRpcUrl } from '../network/p2p/loopback-url';
 import { startParentLivenessWatch } from '../support/process/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
@@ -642,7 +642,7 @@ const ensureLendingTerms = async (env: RuntimeReplica, entityId: string, signerI
   const domain = accountStateDomainFromJurisdiction(jurisdiction);
   enqueueRuntimeInput(env, {
     runtimeTxs: [],
-    entityInputs: [{ entityId, signerId, entityTxs: buildDefaultBankTermsTxs(domain, getKnownTokenIds(), env.state.timestamp) }],
+    entityInputs: [{ entityId, signerId, entityTxs: buildDefaultBankTermsTxs(domain, getTokenIdsForJurisdiction(jurisdiction), env.state.timestamp) }],
   });
   if (!(await waitForRuntimeWorkDrained(env, LENDING_TERMS_INIT_DRAIN_TIMEOUT_MS, 0))) {
     throw new Error(`LENDING_TERMS_INIT_DRAIN_TIMEOUT:${entityId}`);

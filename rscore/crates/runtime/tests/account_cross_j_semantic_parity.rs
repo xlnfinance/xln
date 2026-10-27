@@ -262,14 +262,16 @@ struct RouteHashCase {
     name: String,
     input: String,
     account_state_root: String,
+    rejection_code: String,
     rejection: String,
 }
 
 /// Parity target: rscore/fixtures/account-semantics/cross-j-route-hash.ts.
 /// Rust recomputes the canonical route hash exactly as TypeScript
 /// `validateCrossJurisdictionSourceBinding`: a changed claim and a changed
-/// hashed field under the pull-bound claim are the same typed rejection, and
-/// the Account is unchanged.
+/// hashed field under the pull-bound claim are the same typed rejection.
+/// Missing/unknown route keys and malformed nested fields reject before
+/// canonicalization, preserving the Account and the TypeScript error text.
 #[test]
 fn non_canonical_cross_j_offer_route_hash_matches_the_typescript_rejection() {
     let fixture: RouteHashFixture =
@@ -279,8 +281,9 @@ fn non_canonical_cross_j_offer_route_hash_matches_the_typescript_rejection() {
         fixture.canonical_source,
         "TypeScript applyAccountTxToMutableReplica"
     );
-    assert_eq!(fixture.cases.len(), 2);
+    assert_eq!(fixture.cases.len(), 5);
     for test_case in fixture.cases {
+        assert_eq!(test_case.rejection_code, "ACCOUNT_TX_VALIDATION");
         let mut replica = account(true, false);
         let lock = tx(&fixture.inputs["sourceLock"], "cross_pull_lock");
         let locked = SequentialAccountEngine::apply_with_context(

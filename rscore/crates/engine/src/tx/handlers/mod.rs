@@ -2,6 +2,7 @@
 
 pub(crate) mod balance;
 pub(crate) mod cross_j;
+mod cross_j_route_shape;
 pub(crate) mod htlc;
 pub(crate) mod j_events;
 pub(crate) mod lending;

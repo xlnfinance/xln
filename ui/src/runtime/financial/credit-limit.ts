@@ -12,12 +12,13 @@ export type FullCreditLimit = { accountId: string; label: string; tokenId: numbe
 
 /**
  * Credit lines the user extends that are fully used: the counterparty already
- * owes the whole limit, so no further payment can arrive on that token until
- * the user raises the limit. Accounts frozen by a dispute cannot change limits.
+ * owes the whole limit and has no collateral or own debt to repay, so no further
+ * payment can arrive. Accounts frozen by a dispute cannot change limits.
  */
 export const fullCreditLimits = (accounts: readonly AccountView[]): FullCreditLimit[] =>
   accounts
     .filter(account => !account.disputed)
     .flatMap(account => account.tokens
-      .filter(token => token.derived.peerCreditLimit > 0n && token.derived.inPeerCredit === 0n)
+      .filter(({ derived }) => derived.peerCreditLimit > 0n && derived.inPeerCredit === 0n
+        && derived.inCollateral === 0n && derived.inOwnCredit === 0n)
       .map(token => ({ accountId: account.counterpartyId, label: account.label, tokenId: token.tokenId, limit: token.derived.peerCreditLimit })));

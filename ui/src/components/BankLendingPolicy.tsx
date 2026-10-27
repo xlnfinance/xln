@@ -43,6 +43,16 @@ export function BankLendingPolicy({ wallet }: { wallet: WalletView }) {
     setBusy(true);
     setError('');
     try {
+      if (action === 'withdraw') {
+        // Expire committed policy independently of unfinished form edits.
+        await sendEntityTxs(wallet.entityId, wallet.signerId, [{ type: 'lendingSetTerms', data: {
+          ...(terms ?? { ...account.doc.state.domain, tokenId, termId,
+            savingsInterestBps: 0, loanInterestBps: 0, loanLateMs: 0 }), expiresAt: 0,
+        } }]);
+        setNotice('Command sent. The committed bank policy appears below.');
+        void refresh();
+        return;
+      }
       const hours = Number(validHours);
       const expiresAt = Date.now() + hours * 3_600_000;
       if (!Number.isFinite(hours) || hours <= 0 || !Number.isSafeInteger(expiresAt)) throw new Error('Enter a valid approval duration');
@@ -50,10 +60,8 @@ export function BankLendingPolicy({ wallet }: { wallet: WalletView }) {
       if (termId !== 'demand' && (!lateHours.trim() || !Number.isSafeInteger(loanLateMs) || loanLateMs < 0)) throw new Error('Enter a nonnegative late-interest duration');
       const maxPrincipal = action === 'approve' ? parseAmount(principal, meta.decimals) : 0n;
       if (action === 'approve' && maxPrincipal <= 0n) throw new Error('Enter a positive facility principal cap');
-      // Withdrawing republishes the terms already expired: no new savings or
-      // loans on this asset and term; signed positions keep their own terms.
-      const tx: EntityTx = action === 'terms' || action === 'withdraw' ? { type: 'lendingSetTerms', data: {
-        ...account.doc.state.domain, tokenId, termId, expiresAt: action === 'withdraw' ? 0 : expiresAt,
+      const tx: EntityTx = action === 'terms' ? { type: 'lendingSetTerms', data: {
+        ...account.doc.state.domain, tokenId, termId, expiresAt,
         loanLateMs, savingsInterestBps: normalizeInterestBps(saverRate), loanInterestBps: termId === 'demand' ? 0 : normalizeInterestBps(loanRate),
       } } : { type: 'lendingApprove', data: { borrowerEntityId: borrowerId, tokenId, termId, maxPrincipal, expiresAt } };
       await sendEntityTxs(wallet.entityId, wallet.signerId, [tx]);

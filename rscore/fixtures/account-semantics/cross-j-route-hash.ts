@@ -11,10 +11,13 @@ const address = (byte: string): string => `0x${byte.repeat(20)}`;
  * `claimedHashChanged` alters only the claimed routeHash; `hashedFieldChanged`
  * keeps the claimed (and pull-bound) hash but changes a hashed route field,
  * which Rust used to accept because it compared the binding with the claim.
- * Both engines must recompute the canonical hash and reject with one reason.
+ * Malformed routes must reject before canonicalization, including fields such
+ * as updatedAt that are not bound by the hash. Neither engine may retain them.
  */
 export const executeCrossJRouteHashAccountSemanticVector = async () => {
   const prepared = route();
+  const missingUpdatedAt = { ...prepared };
+  Reflect.deleteProperty(missingUpdatedAt, 'updatedAt');
   const base = inputs(prepared);
   const tampered = (crossJurisdiction: typeof prepared): Extract<AccountTx, { type: 'swap_offer' }> => ({
     ...base.swapOffer,
@@ -23,6 +26,9 @@ export const executeCrossJRouteHashAccountSemanticVector = async () => {
   const offers = {
     claimedHashChanged: tampered({ ...prepared, routeHash: `0x${'ee'.repeat(32)}` }),
     hashedFieldChanged: tampered({ ...prepared, targetSignerId: entity('55') }),
+    missingUpdatedAt: tampered(missingUpdatedAt),
+    unknownField: tampered({ ...prepared, ...{ unknownField: true } }),
+    malformedNestedField: tampered({ ...prepared, sourceDisputeConfig: { ...prepared.sourceDisputeConfig, leftResponseSeconds: -1 } }),
   } as const;
   const cases = [];
   for (const [name, offer] of Object.entries(offers)) {
@@ -35,7 +41,7 @@ export const executeCrossJRouteHashAccountSemanticVector = async () => {
     if (computeAccountStateRootCold(account.state) !== accountStateRoot) {
       throw new Error(`CROSS_J_ROUTE_HASH_VECTOR_MUTATED:${name}`);
     }
-    cases.push({ name, input: name, accountStateRoot, rejection: result.rejection.message });
+    cases.push({ name, input: name, accountStateRoot, rejectionCode: result.rejection.code, rejection: result.rejection.message });
   }
   return {
     version: 1,
