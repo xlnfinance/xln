@@ -13,10 +13,10 @@ Testnet evidence never authorizes real-funds activation.
 
 ## Blockers, in order
 
-1. Verify the current `main` SHA: `bun run check`, then `bun run gate:release`; fix the
-   first real failure. The 2026-10-18 "swap frame 48 eventBarrier" red came from the retired
-   live-vs-live oracle (replaced 2026-10-19 by recorded checkpoint/WAL replay); swap and
-   swap-market pass `check:determinism` on 00092a4c2.
+1. One immutable SHA green on both `bun run test:e2e:full` and `bun run gate:release`.
+   `gate:release` passed 40/40 on `31f080d3d`
+   ([evidence](docs/evidence/release-gate-31f080d3-20261027/result.json)); the full E2E is
+   red at the rebalance persistence spec (see the handoff).
 2. Same-J Swap, Cross-swap and Lending: browserless financial scenarios plus owning React
    E2E on one immutable candidate. Public `xln.finance` proves only import, faucet,
    reserve, pay, credit and reload (6/6 on `e4abb8c14`).

@@ -1,0 +1,221 @@
+{
+ "sha": "31f080d3d",
+ "command": "bun run gate:release",
+ "host": "Mac Studio M3 Ultra (bun 1.4.3, anvil 1.7.1)",
+ "date": "2026-10-27",
+ "result": "pass",
+ "steps": [
+  {
+   "step": "frontend generated aliases",
+   "result": "pass",
+   "seconds": 0.5
+  },
+  {
+   "step": "source checks",
+   "result": "pass",
+   "seconds": 18.9
+  },
+  {
+   "step": "release integrity tests",
+   "result": "pass",
+   "seconds": 15.4
+  },
+  {
+   "step": "runtime core unit tests",
+   "result": "pass",
+   "seconds": 103.4
+  },
+  {
+   "step": "bilateral same-height collision",
+   "result": "pass",
+   "seconds": 4.9
+  },
+  {
+   "step": "diff whitespace check",
+   "result": "pass",
+   "seconds": 0
+  },
+  {
+   "step": "flow E2E coverage contract",
+   "result": "pass",
+   "seconds": 0
+  },
+  {
+   "step": "frontend check",
+   "result": "pass",
+   "seconds": 14.6
+  },
+  {
+   "step": "contract full suite",
+   "result": "pass",
+   "seconds": 52
+  },
+  {
+   "step": "signed exit gas budget",
+   "result": "pass",
+   "seconds": 1.1
+  },
+  {
+   "step": "RPC settlement parity",
+   "result": "pass",
+   "seconds": 7.8
+  },
+  {
+   "step": "security audit pack",
+   "result": "pass",
+   "seconds": 0.8
+  },
+  {
+   "step": "storage WAL smoke",
+   "result": "pass",
+   "seconds": 4.7
+  },
+  {
+   "step": "watchtower smoke",
+   "result": "pass",
+   "seconds": 4.4
+  },
+  {
+   "step": "bootstrap soundcheck",
+   "result": "pass",
+   "seconds": 39
+  },
+  {
+   "step": "bootstrap epoch rotation",
+   "result": "pass",
+   "seconds": 21.9
+  },
+  {
+   "step": "deterministic replay oracle",
+   "result": "pass",
+   "seconds": 86.3
+  },
+  {
+   "step": "real WebSocket P2P relay",
+   "result": "pass",
+   "seconds": 6.1
+  },
+  {
+   "step": "all deterministic scenarios",
+   "result": "pass",
+   "seconds": 103.9
+  },
+  {
+   "step": "RPC system scenarios",
+   "result": "pass",
+   "seconds": 16.7
+  },
+  {
+   "step": "cross-j system scenario",
+   "result": "pass",
+   "seconds": 10.1
+  },
+  {
+   "step": "MM mesh system scenario",
+   "result": "pass",
+   "seconds": 21.1
+  },
+  {
+   "step": "hub 10k storage benchmark",
+   "result": "pass",
+   "seconds": 1.3
+  },
+  {
+   "step": "frozen core final",
+   "result": "pass",
+   "seconds": 0.1
+  },
+  {
+   "step": "Foundation release Hanko",
+   "result": "pass",
+   "seconds": 0.2
+  },
+  {
+   "step": "React payment and admission E2E",
+   "result": "pass",
+   "seconds": 71.5
+  },
+  {
+   "step": "React direct credit E2E",
+   "result": "pass",
+   "seconds": 25.6
+  },
+  {
+   "step": "React collateral and signed credit request E2E",
+   "result": "pass",
+   "seconds": 30.3
+  },
+  {
+   "step": "React ordinary swap E2E",
+   "result": "pass",
+   "seconds": 27.5
+  },
+  {
+   "step": "React swap cancellation E2E",
+   "result": "pass",
+   "seconds": 28.8
+  },
+  {
+   "step": "React cross swap E2E",
+   "result": "pass",
+   "seconds": 43.4
+  },
+  {
+   "step": "React partial cross swap E2E",
+   "result": "pass",
+   "seconds": 24.5
+  },
+  {
+   "step": "React dispute E2E",
+   "result": "pass",
+   "seconds": 48.8
+  },
+  {
+   "step": "React offline protection E2E",
+   "result": "pass",
+   "seconds": 32.3
+  },
+  {
+   "step": "React file recovery E2E",
+   "result": "pass",
+   "seconds": 45.3
+  },
+  {
+   "step": "React tower recovery E2E",
+   "result": "pass",
+   "seconds": 38.1
+  },
+  {
+   "step": "React lending E2E",
+   "result": "pass",
+   "seconds": 71
+  },
+  {
+   "step": "React onboarding and ownership E2E",
+   "result": "pass",
+   "seconds": 33.5
+  },
+  {
+   "step": "React production build",
+   "result": "pass",
+   "seconds": 0.6
+  },
+  {
+   "step": "React production artifact E2E",
+   "result": "pass",
+   "seconds": 31.5
+  }
+ ],
+ "totalSeconds": 1088,
+ "logSha256": "9ff76f339371f14bf5c11109ec43bd8cdeb0a750f06a0d30943bc30c723259a4",
+ "logPath": "mac-studio:/tmp/gate-release-31f0.log (not committed, 1.5+ MB)",
+ "notCovered": [
+  "full browser E2E (test:e2e:full) on the same SHA: red at e2e-storage-schema-recovery (fixed in 62af9959b) and e2e-rebalance-bar persistence (open)",
+  "public testnet deploy",
+  "native TRON receipts",
+  "Sepolia disputes",
+  "1000-user TPS",
+  "1h soak",
+  "gate:mainnet"
+ ]
+}

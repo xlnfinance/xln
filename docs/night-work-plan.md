@@ -5,48 +5,56 @@ The live queue is [todo.md](../todo.md); scope and authority are in [AGENTS.md](
 
 ## Current SHA
 
-- `main`: `<CURRENT_SHA>` (fill in with `git rev-parse --short HEAD` at handoff).
-- Public testnet `xln.finance` (private chains 31337/31338) serves `e4abb8c14`:
-  [rollout evidence](evidence/public-testnet-e4abb8c1-20261024.json).
-- Uncommitted work from other agents may be present; preserve it.
+- `main`: `62af9959b` (2026-10-27).
+- Public testnet `xln.finance` (private chains 31337/31338) still serves `e4abb8c14`:
+  [rollout evidence](evidence/public-testnet-e4abb8c1-20261024.json). Not redeployed since.
+- Uncommitted work from other agents may be present in other checkouts; preserve it.
 
 ## Last green command
 
-- Public React wallet on `e4abb8c14`: `ui/tests/e2e-production-wallet.spec.ts`
-  passed 6/6 (import 32.1 s, faucet 3.9 s, reserve 5.1 s, pay 6.4 s,
-  credit 4.7 s, reload 20.1 s); all 131 hub Account roots and financial fields
-  identical across the rollout.
-- No full `bun run check` or `bun run gate:release` is recorded on any newer SHA.
+- `bun run gate:release` on `31f080d3d`: 40/40 steps, 1088 s
+  ([evidence](evidence/release-gate-31f080d3-20261027/result.json)).
+- `bun run test:e2e:full` 157/157 in 516 s on `c25cdcf6d` (before the J catch-up fence landed).
 
 ## First red command/error
 
-1. Unverified on the current SHA: run `bun run check`, then `bun run gate:release`,
-   and record the first failure here. The last integrated release run (2026-10-18)
-   failed the swap oracle at frame 48 (`eventBarrier` versus `submitted/txHash` in
-   `lastResultFingerprint`); confirm whether it still reproduces before any fix.
-2. Wallet import latency: 32.1 s, reload 20.1 s. Dominant phase is two full
-   authenticated header passes from EntityProvider deployment
-   (`core/jurisdiction/adapter/receipt/reader.ts`, range pass + fence pass, O(J height)).
+1. `bun run test:e2e:full` on `62af9959b`: `tests/e2e/payments/e2e-rebalance-bar.spec.ts:1658`
+   "persistence: mined rebalance survives H1 and user restart exactly once" — after the user
+   reload the rebalance state never reaches requested 0 / uncollateralized 0 / finalized at the
+   mined J height within 60 s. Passed before `e3b434a7c` (J catch-up fence); under investigation.
 
 ## Artifact path
 
-- `docs/evidence/public-testnet-e4abb8c1-20261024.json`
-- `docs/evidence/cold-import-primary-first-20261024.json`
-- `docs/evidence/cold-import-page-amortization-20261024.json`
+- `docs/evidence/release-gate-31f080d3-20261027/result.json`
+- Mac Studio: `/tmp/e2e-run21.log`, `/tmp/run21-shard43/` (failing shard copy).
 
 ## Next single command
 
 ```bash
-bun run stand:status && bun run check && bun run stand:run --reason release -- bun run gate:release
+bun run test:e2e:full && bun run gate:release
 ```
+
+Run both on one SHA. Do not wrap `gate:release` in `stand:run`: its steps take the stand
+themselves and the wrapper's default 30 s timeout kills it. Exact reruns that the runner
+demands (`BROAD_RUN_BLOCKED_EXACT_RERUN_REQUIRED`) must pass before a broad run starts.
+
+## Open decisions and known gaps
+
+- Owner fork (bad RPC → pause jurisdiction): peer-originated J-dependent Account frames while a
+  jurisdiction is paused — A) per-Entity not-ready to peers, senders keep outputs in their
+  committed outbox, or B) paused set as a WAL Runtime input and Accounts withhold ACK. The local
+  command fence is ready as an unlanded patch.
+- Hub/MM crash when a quiesce arrives during startup bootstrap
+  (`RUNTIME_INPUT_INGRESS_AFTER_PERSISTENCE_PAUSE`): fix in progress.
+- Wallet RPC snapshot reads at a numeric height are not authenticated against a header root.
 
 ## Remaining final gates
 
-- Same-J Swap, Cross-swap and Lending on EVM and native TRON: browserless financial
-  scenarios plus owning React E2E on one immutable candidate.
-- Native TRON (TVM) four-flow evidence; two EVM simulators do not count.
-- Public Sepolia financial proof on current bytecode (real clock disputes and exits).
-- Wallet import/reload latency within the acceptance budget.
+- Same-J Swap, Cross-swap and Lending on EVM and native TRON: browserless scenarios plus owning
+  React E2E on one immutable candidate (EVM React steps are green in `gate:release`).
+- Native TRON (TVM) four-flow evidence; receipt-authentication trust decision is open.
+- Public Sepolia financial proof on current bytecode (real-clock disputes and exits).
+- Public testnet redeploy of the current candidate with served-SHA browser verification.
 - Valid 1,000-user live TPS run (AGENTS.md TPS rules) and uninterrupted 1-hour soak.
 - `bun run gate:mainnet` on the final clean SHA, then owner-reviewed deployment packet.
 
