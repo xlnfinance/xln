@@ -1,4 +1,4 @@
-import { useTourObservations } from '../tour/observations';
+import { observeTourRestore } from '../tour/observations';
 import type { RuntimeRecoveryCandidate } from '@xln/core/storage/recovery/discovery/types';
 import type { XLNModule, RuntimeReplica } from '@xln/core/api/public/runtime-module';
 import { runtimeIdForSeed } from './keys';
@@ -47,8 +47,8 @@ export async function restoreFreshRuntime(xln: XLNModule, seed: string, candidat
 	// same j-catchup fence as a restored Runtime; bootHostedVault opens it.
 	xln.setRuntimeDeliveryReady(env, false);
 	xln.resumeRuntimeAfterPersistenceQuiesce(env);
-	useTourObservations.setState({ restored: {
+	observeTourRestore({
     runtimeId, entityIds: [...env.state.eReplicas.values()].map(replica => replica.entityId), height: candidate.runtimeHeight,
-  } });
+  });
 	return env;
 }

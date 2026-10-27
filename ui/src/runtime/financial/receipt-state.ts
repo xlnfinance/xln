@@ -3,6 +3,7 @@ import type { PaymentTerminalEvent } from '@xln/frontend/lib/stores/network/paym
 
 export type PaymentReceipt = {
 	id: string;
+	runtimeId: string;
 	height: number;
 	name: PaymentTerminalEvent['name'];
 	data: Record<string, unknown>;
@@ -33,6 +34,7 @@ export const useReceipts = create<ReceiptState>((set, get) => ({
 		set({
 			latest: {
 				id,
+				runtimeId: event.runtimeId,
 				height: event.height,
 				name: event.name,
 				data: event.data,

@@ -5,7 +5,8 @@ import { useApp } from '../runtime/store';
 import { getAdapter } from '../runtime/adapter';
 import { useWallet } from '../runtime/views';
 import { TOUR_STEPS, type TourContext } from '../tour/steps';
-import { useTourObservations } from '../tour/observations';
+import { pruneTourPayments, useTourObservations } from '../tour/observations';
+import { useReceipts } from '../runtime/financial/receipt-state';
 import { useTradeCompletion } from '../tour/use-trade';
 import { tourBaseline, type TourBaseline } from '../tour/outcomes';
 
@@ -30,13 +31,18 @@ export function Tour() {
   const step = tour.active ? TOUR_STEPS[index] : undefined;
   const trade = useTradeCompletion(step?.id === 'trade', wallet.entityId);
   const observations = useTourObservations();
+  const openedReceipt = useReceipts(s => s.opened);
   const runtimeId = getAdapter()?.runtimeId ?? '';
   const start = useRef<TourBaseline | null>(null);
   start.current = tourBaseline(start.current, step?.id ?? '', wallet);
   const before = start.current?.step === step?.id ? start.current?.wallet : undefined;
-  const ctx = useMemo(() => ({ wallet, before, runtimeId, pathname, tradeFilled: trade.filled, dom, ...observations }), [wallet, before, runtimeId, pathname, trade.filled, observations]);
+  const ctx = useMemo(() => ({ wallet, before, runtimeId, pathname, tradeFilled: trade.filled, dom, ...observations, openedReceipt }), [wallet, before, runtimeId, pathname, trade.filled, observations, openedReceipt]);
   const target = step?.target(ctx) ?? '';
   const route = step?.route?.(ctx);
+
+  useEffect(() => {
+    if (step && before) pruneTourPayments(before.frameHeight);
+  }, [step, before]);
 
   useEffect(() => {
     if (step?.done?.(ctx)) setTour({ index: index + 1 });

@@ -13,6 +13,7 @@ export type TourContext = {
   invoice?: { runtimeId: string; entityId: string; tokenId: number; amount: bigint; description: string; fromHeight: number; id?: string; hashlock?: string } | undefined;
   incoming?: PaymentTerminalEvent | undefined;
   outgoing?: PaymentTerminalEvent | undefined;
+  openedReceipt?: PaymentTerminalEvent | null | undefined;
   initiations?: Array<Omit<PaymentTerminalEvent, 'name'> & { name: 'HtlcInitiated' }> | undefined;
   takeover?: { runtimeId: string; entityId: string; targetId: string; controlMajority: boolean; proposedBoardHash: string; activateAt: bigint; currentUnix: bigint } | undefined;
   backup?: { runtimeId: string; entityId: string; height: number; storedBytes: number };
@@ -76,7 +77,8 @@ const steps: TourStep[] = [
             : !ctx.dom.value('pay-amount').trim()
               ? 'Choose the funded asset and enter 25.'
               : 'Review the amount and fee, then confirm the payment.',
-    done: ctx => committedPayment(ctx) && ctx.dom.text('receipt-kicker') === 'Paid',
+    done: ctx => committedPayment({ ...ctx, outgoing: ctx.openedReceipt ?? undefined }) &&
+      ctx.dom.has('payment-receipt') && ctx.dom.text('receipt-kicker') === 'Paid',
   },
   {
     id: 'trade',
