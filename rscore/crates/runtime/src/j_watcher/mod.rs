@@ -10,6 +10,7 @@
 
 mod abi;
 mod dispute_reference;
+pub use dispute_reference::DisputeReferences;
 mod http;
 mod observation;
 mod receipt;

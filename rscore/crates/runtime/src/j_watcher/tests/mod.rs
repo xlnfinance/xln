@@ -402,6 +402,7 @@ fn config() -> JWatcherConfig {
 
 fn cursor_42() -> FinalizedWatcherCursor {
     FinalizedWatcherCursor {
+        dispute_references: Default::default(),
         scanned_through: 42,
         block_hash: Some([0xee; 32]),
     }

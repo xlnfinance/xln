@@ -1,12 +1,13 @@
+import { disputePair, earlierReferenceBytes, rememberDisputeReference, type DisputeReferenceState } from './reference-state';
 import { ethers } from 'ethers';
 import { Depository__factory } from '../../../../../jurisdictions/typechain-types';
-import { decodeDisputeFinalizationLog, extractCanonicalDepositoryEventArgs, validateDisputeFinalizationLog } from '../depository-event-codec';
+import { decodeDisputeLogBody, decodeDisputeFinalizationLog, extractCanonicalDepositoryEventArgs, validateDisputeFinalizationLog } from '../depository-event-codec';
 import type { JEvent } from '../../types';
 import { DisputeEvidenceUnavailableError } from '../../kernel/failure';
 
 const iface = Depository__factory.createInterface();
 type DisputeReferenceLog = { topics: readonly string[]; data: string; blockNumber: number; index?: number; logIndex?: number };
-export type ReadDisputeReferenceLogs = (event: JEvent) => Promise<readonly DisputeReferenceLog[]>;
+export type ReadDisputeReferenceLogs = (event: JEvent, fromBlock?: number, toBlock?: number) => Promise<readonly DisputeReferenceLog[]>;
 
 const earlierSource = (event: JEvent, log: DisputeReferenceLog) => {
   if (log.blockNumber > event.blockNumber || (log.blockNumber === event.blockNumber
@@ -35,18 +36,38 @@ const applyReference = (event: JEvent, args: Record<string, unknown>, source: No
 };
 
 /** The final receipt commits to every resolved byte string; a forged RPC log cannot substitute bytes. */
-export const resolveDisputeLogReferences = async (event: JEvent, readLogs: ReadDisputeReferenceLogs): Promise<JEvent> => {
+export const resolveDisputeLogReferences = async (event: JEvent, readLogs: ReadDisputeReferenceLogs, state?: DisputeReferenceState): Promise<JEvent> => {
   if (event.name !== 'DisputeFinalized' && event.name !== 'CounterDisputeRegistered') return event;
   const args = { ...event.args };
   const finalized = event.name === 'DisputeFinalized';
   const data = finalized ? validateDisputeFinalizationLog(args) : undefined;
-  if (args['proofbody'] === '0x' || (data && data.starterArgumentsHash !== ethers.keccak256('0x'))) {
-    const logs = await readLogs(event).catch(cause => {
-      throw new DisputeEvidenceUnavailableError('J_DISPUTE_EVENT_REFERENCE_READ_FAILED', { cause });
-    });
-    for (const log of logs) {
-      const source = earlierSource(event, log);
-      if (source) applyReference(event, args, source);
+  const field = finalized ? 'finalProofbody' : 'counterProofbody';
+  const pair = disputePair(args);
+  if (state) {
+    const body = earlierReferenceBytes(state.bodies[`${pair}:${String(args[finalized ? 'finalProofbodyHash' : 'proofbodyHash'])}`], event);
+    if (!args[field] && body) args[field] = decodeDisputeLogBody({ ...args, proofbody: body }, finalized);
+    if (data) args['starterArguments'] = earlierReferenceBytes(state.arguments[
+      `${pair}:${String(args['initialNonce'])}:${data.initialProofbodyHash}:${data.starterArgumentsHash}`], event) ?? args['starterArguments'];
+  }
+  const missing = () => !args[field] || (data && data.starterArgumentsHash !== ethers.keccak256(String(args['starterArguments'] ?? '0x')));
+  if (missing()) {
+    const start = state?.startBlocks[pair];
+    if (state && start === undefined) throw new DisputeEvidenceUnavailableError('J_DISPUTE_EVENT_START_BLOCK_MISSING');
+    // RPC pages are bounded even when a dispute remains open for years. Local VM
+    // callers have their complete in-memory logs and do not perform network I/O.
+    for (let from = start; ; from = Number(from) + 256) {
+      const to = from === undefined ? undefined : Math.min(from + 255, event.blockNumber);
+      const logs = await readLogs(event, from, to).catch(cause => {
+        throw new DisputeEvidenceUnavailableError('J_DISPUTE_EVENT_REFERENCE_READ_FAILED', { cause });
+      });
+      for (const log of logs) {
+        const source = earlierSource(event, log);
+        if (!source) continue;
+        applyReference(event, args, source);
+        if (state) rememberDisputeReference(state, { ...event, ...source,
+          blockNumber: log.blockNumber, logIndex: Number(log.index ?? log.logIndex) });
+      }
+      if (!missing() || to === undefined || to >= event.blockNumber) break;
     }
   }
   if (!args[finalized ? 'finalProofbody' : 'counterProofbody']) throw new DisputeEvidenceUnavailableError('J_DISPUTE_EVENT_PROOFBODY_LOG_MISSING');
@@ -54,8 +75,8 @@ export const resolveDisputeLogReferences = async (event: JEvent, readLogs: ReadD
 };
 
 /** Queries only body-bearing logs at this Depository, in either pair direction. */
-export const disputeReferenceFilter = (event: JEvent, address: string) => ({
-  address, fromBlock: 0, toBlock: event.blockNumber,
+export const disputeReferenceFilter = (event: JEvent, address: string, fromBlock = 1, toBlock = event.blockNumber) => ({
+  address, fromBlock, toBlock,
   topics: [[iface.getEvent('DisputeStarted').topicHash, iface.getEvent('CounterDisputeRegistered').topicHash],
     [String(event.args['sender']), String(event.args['counterentity'])],
     [String(event.args['sender']), String(event.args['counterentity'])]],

@@ -211,7 +211,11 @@ export const applyAuthenticatedWatcherRange = async (
     env: request.activeEnv,
     watcherReplica: request.watcherReplica,
     logs: authenticatedIngress.logs,
-    readDisputeReferenceLogs: event => request.services.provider.getLogs(disputeReferenceFilter(event, depositoryAddress)),
+    ...(request.session.disputeReferences ? { disputeReferences: request.session.disputeReferences } : {}),
+    readDisputeReferenceLogs: (event, from, to) => {
+      if (from === undefined || from < 1) throw new Error('J_DISPUTE_EVENT_START_BLOCK_MISSING');
+      return request.services.provider.getLogs(disputeReferenceFilter(event, depositoryAddress, from, to));
+    },
     depositoryAddress,
     entityProviderAddress,
     tokenByAddress,
@@ -293,5 +297,6 @@ const ingestAuthenticatedRange = (
     authenticatedIngress.headers,
     authenticatedIngress.tipBlockHash,
   );
+  request.session.disputeReferences = decoded.disputeReferences;
   return true;
 };

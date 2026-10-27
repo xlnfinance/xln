@@ -50,6 +50,7 @@ export type RpcWatcherServices = {
 };
 
 export type RpcWatcherSession = {
+  disputeReferences?: import('../../events/dispute/reference-state').DisputeReferenceState;
   env: RuntimeReplica;
   generation: number;
   interval: ReturnType<typeof setTimeout> | null;

@@ -1,3 +1,4 @@
+import { validateDisputeReferences, emptyDisputeReferences, mergeDisputeReferences, referencesThrough, type DisputeReferenceState } from '../../events/dispute/reference-state';
 import type { RuntimeReplica, RuntimeTx } from '../../../../runtime/types';
 import { enqueueRuntimeInput } from '../../../../runtime/mempool/input-queue';
 import {
@@ -46,6 +47,7 @@ export const updateWatcherJurisdictionCursor = (
   blockNumber: number,
   depositoryAddress?: string,
   chainId?: number,
+  disputeReferences?: DisputeReferenceState,
 ): void => {
   const replica = depositoryAddress || chainId !== undefined
     ? requireWatcherJurisdictionReplica(env, depositoryAddress, chainId, 'cursor-update')
@@ -74,6 +76,7 @@ export const updateWatcherJurisdictionCursor = (
       depositoryAddress: depository,
       chainId: replicaChainId,
       blockNumber,
+      ...(disputeReferences ? { disputeReferences: referencesThrough(disputeReferences, blockNumber) } : {}),
     },
   };
   enqueueRuntimeInput(env, {
@@ -100,6 +103,10 @@ export const applyWatcherJurisdictionCursor = (
   const current = replica.blockNumber ?? 0n;
   if (typeof current !== 'bigint' || current < 0n) {
     throw new Error(`J_WATCHER_COMMITTED_CURSOR_INVALID:${String(current)}`);
+  }
+  if (data.disputeReferences) {
+    validateDisputeReferences(data.disputeReferences, data.blockNumber);
+    replica.disputeReferences = mergeDisputeReferences(replica.disputeReferences ?? emptyDisputeReferences(), data.disputeReferences);
   }
   replica.blockNumber = current > BigInt(data.blockNumber)
     ? current

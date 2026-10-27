@@ -153,6 +153,7 @@ export const hydratePersistedEntityReplicaSnapshot = (
 
 export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
   name: jr.name,
+  ...(jr.disputeReferences ? { disputeReferences: structuredClone(jr.disputeReferences) } : {}),
   // Storage can reconstruct jurisdiction identity before its external adapter
   // is attached. Canonical snapshots must still be complete JReplica values;
   // zero means no local tip has been observed yet, not an invented chain tip.

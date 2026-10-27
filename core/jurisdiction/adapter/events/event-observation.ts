@@ -151,12 +151,15 @@ const collectDeliveries = (
   return deliveries;
 };
 
-/** Use the delivery audience before fetching evidence for a dispute log. */
+/** Rebuild served-pair references even when Entity finality leads the durable
+ * watcher cursor after a crash; delivery itself still suppresses old events. */
 export const isJEventDeliveredByWatcher = (
   env: RuntimeReplica,
   event: JEvent,
   watcher: JReplica,
-): boolean => collectDeliveries(env, [event], event.blockNumber, watcher).length > 0;
+): boolean => [...env.state.eReplicas.values()].some(replica =>
+  isEntityReplicaRelevantToWatcher(env, replica, watcher)
+    && isEventRelevantToEntity(event, replica.entityId, replica.state));
 
 const evidenceEntries = (
   events: JEventIngress[],

@@ -1,3 +1,4 @@
+import { validateDisputeReferences } from '../../jurisdiction/adapter/events/dispute/reference-state';
 import { validateRuntimeAdapterCommandMarker } from '../command/frontier';
 import { normalizeJurisdictionImportRequest } from '../j-submit/jurisdiction-import-request';
 import type { JurisdictionImportRequest, RuntimeTx } from '../types';
@@ -287,9 +288,10 @@ const validateRuntimeTxData = (type: string, value: unknown, code: string): void
   else if (type === 'observeJRange') validateJObservationData(value, code);
   else if (type === 'advanceJWatcherCursor') {
     const data = requireBoundaryRecord(value, code);
-    requireExactBoundaryKeys(data, ['depositoryAddress', 'chainId', 'blockNumber'], [], `${code}_FIELDS`);
+    requireExactBoundaryKeys(data, ['depositoryAddress', 'chainId', 'blockNumber'], ['disputeReferences'], `${code}_FIELDS`);
     requireAddress(data['depositoryAddress'], `${code}_DEPOSITORY`);
     requireBoundaryInteger(data['blockNumber'], `${code}_BLOCK_NUMBER`);
+    if (data['disputeReferences'] !== undefined) validateDisputeReferences(data['disputeReferences'], Number(data['blockNumber']));
     requireBoundaryInteger(data['chainId'], `${code}_CHAIN_ID`, 1);
   } else if (type === 'rewindJHistory') {
     const data = requireBoundaryRecord(value, code);

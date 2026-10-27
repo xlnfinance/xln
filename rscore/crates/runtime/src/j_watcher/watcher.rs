@@ -1,3 +1,4 @@
+use super::dispute_reference::DisputeReferences;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::abi::{
@@ -143,7 +144,8 @@ fn read_and_authenticate_range(
     let before = read_blocks(rpc, anchor, to)?;
     assert_contiguous(&before)?;
     assert_cursor_anchor(cursor, before.first())?;
-    let batches = authenticate_blocks(rpc, config, &before, from)?;
+    let mut references = cursor.dispute_references.clone();
+    let batches = authenticate_blocks(rpc, config, &before, from, &mut references)?;
     let after = read_blocks(rpc, anchor, to)?;
     assert_exact_range(&before, &after)?;
     let tip = before.last().ok_or(JWatcherError::BlockMissing(to))?;
@@ -159,6 +161,7 @@ fn read_and_authenticate_range(
         .collect::<Result<Vec<_>, JWatcherError>>()?;
     Ok(JWatcherPoll {
         cursor: FinalizedWatcherCursor {
+            dispute_references: references,
             scanned_through: to,
             block_hash: Some(fixed_hex::<32>(&tip.hash, "tipHash")?),
         },
@@ -172,6 +175,7 @@ fn authenticate_blocks(
     config: &JWatcherConfig,
     blocks: &[RpcBlock],
     from: u64,
+    references: &mut DisputeReferences,
 ) -> Result<Vec<FinalizedJEventBatch>, JWatcherError> {
     let mut batches = Vec::new();
     for block in blocks {
@@ -189,8 +193,15 @@ fn authenticate_blocks(
             validate_receipts(block, &mut receipts)?;
             receipts
         };
-        let history = super::dispute_reference::read_history(rpc, config, &receipts)?;
-        if let Some(batch) = build_block_batch_with_history(config, block, &receipts, &history)? {
+        super::dispute_reference::read_history(config, &receipts, references)?;
+        let result = build_block_batch_with_references(config, block, &receipts, references);
+        let result = if matches!(result, Err(JWatcherError::DisputeReferenceUnavailable(_))) {
+            super::dispute_reference::refill(rpc, config, &receipts, references)?;
+            build_block_batch_with_references(config, block, &receipts, references)
+        } else {
+            result
+        };
+        if let Some(batch) = result? {
             batches.push(batch);
         }
     }
@@ -210,11 +221,25 @@ pub(super) fn build_block_batch(
     build_block_batch_with_history(config, block, receipts, &history)
 }
 
+#[cfg(test)]
 pub(super) fn build_block_batch_with_history(
     config: &JWatcherConfig,
     block: &RpcBlock,
     receipts: &[RpcReceipt],
     history: &[super::types::RpcLog],
+) -> Result<Option<FinalizedJEventBatch>, JWatcherError> {
+    let mut references = DisputeReferences::default();
+    for log in history {
+        super::dispute_reference::remember(&mut references, log)?;
+    }
+    build_block_batch_with_references(config, block, receipts, &references)
+}
+
+pub(super) fn build_block_batch_with_references(
+    config: &JWatcherConfig,
+    block: &RpcBlock,
+    receipts: &[RpcReceipt],
+    history: &DisputeReferences,
 ) -> Result<Option<FinalizedJEventBatch>, JWatcherError> {
     let height = block_height(block)?;
     let block_hash = fixed_hex::<32>(&block.hash, "blockHash")?;
@@ -307,7 +332,7 @@ fn collect_log(
     dispute_finalization_evidence: &mut Vec<DisputeFinalizationEvidence>,
     seen: &mut BTreeSet<([u8; 32], u64, u64, EntityId)>,
     batch_nonces: &BTreeMap<EntityId, i64>,
-    history: &[super::types::RpcLog],
+    history: &DisputeReferences,
 ) -> Result<(), JWatcherError> {
     let address = fixed_hex::<20>(&log.address, "logAddress")?;
     require_current_depository_money_abi(log, &address, &config.depository_address)?;
@@ -407,7 +432,7 @@ fn collect_single_event(
     events: &mut Vec<JurisdictionEvent>,
     dispute_finalization_evidence: &mut Vec<DisputeFinalizationEvidence>,
     batch_nonces: &BTreeMap<EntityId, i64>,
-    history: &[super::types::RpcLog],
+    history: &DisputeReferences,
 ) -> Result<(), JWatcherError> {
     let event = match kind {
         ContractEventKind::ReserveUpdated => {
@@ -795,7 +820,7 @@ fn decode_dispute_event(
     log: &super::types::RpcLog,
     metadata: JEventMetadata,
     batch_nonces: &BTreeMap<EntityId, i64>,
-    history: &[super::types::RpcLog],
+    history: &DisputeReferences,
 ) -> Result<DecodedDisputeEvent, JWatcherError> {
     match kind {
         ContractEventKind::DisputeStarted => {
@@ -861,7 +886,7 @@ fn decode_counter_dispute_event(
     log: &super::types::RpcLog,
     metadata: JEventMetadata,
     _batch_nonces: &BTreeMap<EntityId, i64>,
-    history: &[super::types::RpcLog],
+    history: &DisputeReferences,
 ) -> Result<DecodedDisputeEvent, JWatcherError> {
     let values = decode_dispute_log(
         log,
@@ -910,7 +935,7 @@ fn decode_dispute_finalized_event(
     log: &super::types::RpcLog,
     metadata: JEventMetadata,
     batch_nonces: &BTreeMap<EntityId, i64>,
-    history: &[super::types::RpcLog],
+    history: &DisputeReferences,
 ) -> Result<DecodedDisputeEvent, JWatcherError> {
     use ethabi::{ParamType as P, Token};
     let values = decode_dispute_log(
@@ -1058,6 +1083,7 @@ fn assert_exact_range(before: &[RpcBlock], after: &[RpcBlock]) -> Result<(), JWa
 }
 
 fn validate_cursor(cursor: &FinalizedWatcherCursor) -> Result<(), JWatcherError> {
+    cursor.dispute_references.validate(cursor.scanned_through)?;
     match (cursor.scanned_through, cursor.block_hash) {
         (0, None) | (1.., Some(_)) => Ok(()),
         _ => Err(JWatcherError::Cursor),
@@ -1091,7 +1117,10 @@ fn assert_cursor_anchor(
     Ok(())
 }
 
-fn decode_log_proof_body(bytes: &[u8], hash: &[u8; 32]) -> Result<JBatchProofBody, JWatcherError> {
+pub(super) fn decode_log_proof_body(
+    bytes: &[u8],
+    hash: &[u8; 32],
+) -> Result<JBatchProofBody, JWatcherError> {
     use sha3::{Digest, Keccak256};
     if <[u8; 32]>::from(Keccak256::digest(bytes)) != *hash {
         return Err(JWatcherError::DisputeEvidence("proofbody-hash"));

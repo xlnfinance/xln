@@ -320,11 +320,15 @@ fn hash_only_finalization_recovers_body_and_starter_arguments_from_earlier_logs(
         ]),
     );
     let (block, receipts) = block_with(&tx, vec![final_log]);
-    let result = super::super::watcher::build_block_batch_with_history(
+    let mut references = super::super::DisputeReferences::default();
+    super::super::dispute_reference::remember(&mut references, &start_log).expect("observed start");
+    let references = serde_json::from_str(&serde_json::to_string(&references).expect("checkpoint"))
+        .expect("restore");
+    let result = super::super::watcher::build_block_batch_with_references(
         &config(),
         &block,
         &receipts,
-        &[start_log.clone()],
+        &references,
     )
     .expect("restart resolves earlier log")
     .expect("batch");
@@ -338,7 +342,9 @@ fn hash_only_finalization_recovers_body_and_starter_arguments_from_earlier_logs(
     );
     assert!(matches!(
         super::super::watcher::build_block_batch_with_history(&config(), &block, &receipts, &[]),
-        Err(JWatcherError::DisputeEvidence("proofbody-log-missing"))
+        Err(JWatcherError::DisputeReferenceUnavailable(
+            "proofbody-log-missing"
+        ))
     ));
     start_log.topics[3] = word(8);
     assert!(matches!(
@@ -348,8 +354,200 @@ fn hash_only_finalization_recovers_body_and_starter_arguments_from_earlier_logs(
             &receipts,
             &[start_log]
         ),
-        Err(JWatcherError::DisputeEvidence(
+        Err(JWatcherError::DisputeReferenceUnavailable(
             "starter-arguments-log-missing"
         ))
     ));
+}
+
+#[test]
+fn compiled_abi_dispute_signatures_equal_decoder_topics() {
+    use super::super::abi::{COUNTER_DISPUTE_REGISTERED_TOPIC, DISPUTE_FINALIZED_TOPIC};
+    for artifact in [
+        include_str!("../../../../../../frontend/static/contracts/Depository.json"),
+        include_str!("../../../../../../frontend/static/contracts/Account.json"),
+    ] {
+        let artifact: Value = serde_json::from_str(artifact).expect("compiled artifact");
+        let contract = ethabi::Contract::load(artifact["abi"].to_string().as_bytes()).expect("ABI");
+        for (name, topic) in [
+            ("DisputeStarted", DISPUTE_STARTED_TOPIC),
+            ("CounterDisputeRegistered", COUNTER_DISPUTE_REGISTERED_TOPIC),
+            ("DisputeFinalized", DISPUTE_FINALIZED_TOPIC),
+        ] {
+            assert_eq!(
+                hex(contract.event(name).expect("event").signature().as_bytes()),
+                topic
+            );
+        }
+    }
+}
+
+#[test]
+fn observed_reference_does_not_query_history() {
+    struct NoHistory;
+    impl super::super::types::JsonRpc for NoHistory {
+        fn call(&self, method: &str, _: Value) -> Result<Value, JWatcherError> {
+            panic!("observed reference must not call {method}")
+        }
+    }
+    let tx = hex_repeat(0x99, 32);
+    let counter = log(
+        &tx,
+        1,
+        vec![
+            super::super::abi::COUNTER_DISPUTE_REGISTERED_TOPIC.into(),
+            hex(&PEER),
+            hex(&LOCAL),
+            word(8),
+        ],
+        ethabi::encode(&[
+            Token::Bool(false),
+            Token::FixedBytes(body_hash(5).to_vec()),
+            Token::Bytes(vec![]),
+        ]),
+    );
+    let (_, receipts) = block_with(
+        &tx,
+        vec![
+            dispute_started_log(&tx, 0, PEER, LOCAL, body_hash(5)),
+            counter,
+        ],
+    );
+    let mut state = super::super::DisputeReferences::default();
+    super::super::dispute_reference::read_history(&config(), &receipts[..1], &mut state)
+        .expect("observe");
+    let restored = serde_json::from_str::<super::super::DisputeReferences>(
+        &serde_json::to_string(&state).expect("checkpoint"),
+    )
+    .expect("restore");
+    let (block, _) = block_with(&tx, vec![]);
+    let batch = super::super::watcher::build_block_batch_with_references(
+        &config(),
+        &block,
+        &receipts,
+        &restored,
+    )
+    .expect("no history required")
+    .expect("batch");
+    assert_eq!(batch.events.len(), 2);
+    let _rpc = NoHistory;
+}
+
+#[test]
+fn actual_bytecode_emitted_logs_round_trip_and_restore() {
+    use super::super::{DisputeReferences, types::RpcLog};
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../../../../core/__tests__/fixtures/jurisdiction/dispute-emitted-logs.json"
+    ))
+    .expect("real emitted logs");
+    let artifact: Value = serde_json::from_str(include_str!(
+        "../../../../../../frontend/static/contracts/Depository.json"
+    ))
+    .expect("artifact");
+    let contract = ethabi::Contract::load(artifact["abi"].to_string().as_bytes()).expect("ABI");
+    let mut state = DisputeReferences::default();
+    let mut kinds = std::collections::BTreeSet::new();
+    for value in fixture["logs"].as_array().expect("logs") {
+        let mut value = value.clone();
+        value["transactionIndex"] = json!(0);
+        let log: RpcLog = serde_json::from_value(value).expect("log");
+        let event = contract
+            .events()
+            .find(|e| hex(e.signature().as_bytes()) == log.topics[0])
+            .expect("ABI event");
+        kinds.insert(event.name.clone());
+        let raw = ethabi::RawLog {
+            topics: log
+                .topics
+                .iter()
+                .map(|t| {
+                    super::super::receipt::fixed_hex::<32>(t, "topic")
+                        .expect("topic")
+                        .into()
+                })
+                .collect(),
+            data: super::super::receipt::parse_hex(&log.data, None, "data").expect("data"),
+        };
+        let decoded = event.parse_log(raw).expect("compiled ABI decode");
+        let nonindexed: Vec<_> = event
+            .inputs
+            .iter()
+            .zip(&decoded.params)
+            .filter(|(p, _)| !p.indexed)
+            .map(|(_, v)| v.value.clone())
+            .collect();
+        assert_eq!(hex(&ethabi::encode(&nonindexed)), log.data);
+        assert!(
+            super::super::abi::event_kind(&log)
+                .expect("dispatch")
+                .is_some()
+        );
+        super::super::dispute_reference::remember(&mut state, &log).expect("remember");
+        state = serde_json::from_str(&serde_json::to_string(&state).expect("checkpoint"))
+            .expect("restore");
+        let mut cfg = config();
+        cfg.depository_address =
+            super::super::receipt::fixed_hex::<20>(&log.address, "address").expect("address");
+        cfg.entity_id = xln_rscore_engine::EntityId::parse(&log.topics[1]).expect("sender");
+        let (mut block, mut receipts) = block_with(&log.transaction_hash, vec![]);
+        block.number = log.block_number.clone();
+        block.hash = log.block_hash.clone();
+        receipts[0].logs = vec![log];
+        let batch = super::super::watcher::build_block_batch_with_references(
+            &cfg, &block, &receipts, &state,
+        )
+        .expect("production decoder")
+        .expect("dispute delivered");
+        assert_eq!(batch.events.len(), 1);
+    }
+    assert_eq!(kinds.len(), 3);
+}
+
+#[test]
+fn missing_reference_uses_only_bounded_pages_from_recorded_start() {
+    use super::super::{DisputeReferences, types::JsonRpc};
+    struct Pages(std::cell::RefCell<Vec<(u64, u64)>>);
+    impl JsonRpc for Pages {
+        fn call(&self, method: &str, params: Value) -> Result<Value, JWatcherError> {
+            assert_eq!(method, "eth_getLogs");
+            let from = super::super::receipt::safe_u64(&params[0]["fromBlock"], "from")?;
+            let to = super::super::receipt::safe_u64(&params[0]["toBlock"], "to")?;
+            assert!(from >= 700 && to - from < 256);
+            self.0.borrow_mut().push((from, to));
+            Ok(json!([]))
+        }
+    }
+    let tx = hex_repeat(0x99, 32);
+    let mut counter = log(
+        &tx,
+        0,
+        vec![
+            super::super::abi::COUNTER_DISPUTE_REGISTERED_TOPIC.into(),
+            hex(&PEER),
+            hex(&LOCAL),
+            word(8),
+        ],
+        ethabi::encode(&[
+            Token::Bool(false),
+            Token::FixedBytes(body_hash(5).to_vec()),
+            Token::Bytes(vec![]),
+        ]),
+    );
+    counter["blockNumber"] = json!(1000);
+    let (_, receipts) = block_with(&tx, vec![counter]);
+    let mut state = DisputeReferences::default();
+    let rpc = Pages(Default::default());
+    assert!(matches!(
+        super::super::dispute_reference::refill(&rpc, &config(), &receipts, &mut state),
+        Err(JWatcherError::DisputeReferenceUnavailable(
+            "start-block-missing"
+        ))
+    ));
+    assert!(rpc.0.borrow().is_empty());
+    state
+        .start_blocks
+        .insert(format!("{}:{}", hex(&LOCAL), hex(&PEER)), 700);
+    super::super::dispute_reference::refill(&rpc, &config(), &receipts, &mut state)
+        .expect("bounded refill");
+    assert_eq!(*rpc.0.borrow(), vec![(700, 955), (956, 1000)]);
 }

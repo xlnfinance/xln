@@ -4716,6 +4716,7 @@ fn apply_runtime_txs(
                 }
             }
             super::RuntimeTx::AdvanceJWatcherCursor {
+                dispute_references,
                 depository_address,
                 chain_id,
                 block_number,
@@ -4723,6 +4724,7 @@ fn apply_runtime_txs(
                 depository_address,
                 *chain_id,
                 *block_number,
+                dispute_references.as_ref(),
             )?,
             super::RuntimeTx::RewindJHistory(value) => {
                 let (state, live) = replica

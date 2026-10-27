@@ -1,3 +1,4 @@
+import { validateDisputeReferences } from '../../../jurisdiction/adapter/events/dispute/reference-state';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import type { JReplica , JTx } from '../../../types/jurisdiction-runtime';
 import {
@@ -250,13 +251,14 @@ function assertJReplica(
     'name', 'blockNumber', 'stateRoot', 'mempool', 'blockDelayMs',
     'lastBlockTimestamp', 'position',
   ], [
-    'blockTimeMs', 'blockReady', 'watcherConfirmationDepth', 'watcherReceiptCommitment',
+    'disputeReferences', 'blockTimeMs', 'blockReady', 'watcherConfirmationDepth', 'watcherReceiptCommitment',
     'rpcs', 'chainId', 'entityProviderDeploymentBlock', 'contracts',
   ], `${code}_FIELDS`);
   const name = requireString(replica['name'], `${code}_NAME`);
   if (name !== expectedName) throw new Error(`${code}_NAME_KEY_MISMATCH`);
   toJId(name);
   requireBigInt(replica['blockNumber'], `${code}_BLOCK_NUMBER`, 0n);
+  if (replica['disputeReferences'] !== undefined) validateDisputeReferences(replica['disputeReferences'], Number(replica['blockNumber']));
   if (replica['stateRoot'] !== null) requireBytes(replica['stateRoot'], `${code}_STATE_ROOT`, 32);
   requireArray(replica['mempool'], `${code}_MEMPOOL`).forEach((tx, index) =>
     validateJTx(tx, `${code}_MEMPOOL_${index}`));

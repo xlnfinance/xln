@@ -131,6 +131,7 @@ impl JWatcherConfig {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FinalizedWatcherCursor {
+    pub dispute_references: super::dispute_reference::DisputeReferences,
     pub scanned_through: u64,
     pub block_hash: Option<[u8; 32]>,
 }
@@ -262,6 +263,8 @@ pub enum JWatcherError {
     EventAbi(&'static str),
     #[error("J_WATCHER_DISPUTE_EVIDENCE_MISMATCH:{0}")]
     DisputeEvidence(&'static str),
+    #[error("J_DISPUTE_REFERENCE_UNAVAILABLE:{0}")]
+    DisputeReferenceUnavailable(&'static str),
     #[error("J_WATCHER_ACCOUNT_SETTLED_NONCE:{0}")]
     AccountSettledNonce(String),
     #[error("J_WATCHER_ACCOUNT_SETTLED_TOKEN:{0}")]

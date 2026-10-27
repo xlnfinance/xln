@@ -51,7 +51,8 @@ const J_REPLICA_REQUIRED_FIELDS: [&str; 7] = [
     "position",
     "stateRoot",
 ];
-const J_REPLICA_OPTIONAL_FIELDS: [&str; 9] = [
+const J_REPLICA_OPTIONAL_FIELDS: [&str; 10] = [
+    "disputeReferences",
     "blockTimeMs",
     "blockReady",
     "watcherConfirmationDepth",
@@ -343,6 +344,7 @@ impl RuntimeDurableEnvelope {
         depository_address: &str,
         chain_id: u64,
         block_number: u64,
+        references: Option<&crate::j_watcher::DisputeReferences>,
     ) -> Result<(), RuntimeDurableEnvelopeError> {
         let rows = self
             .j_replicas
@@ -363,6 +365,23 @@ impl RuntimeDurableEnvelope {
         let CanonicalValue::BigInt(current) = current else {
             return Err(RuntimeDurableEnvelopeError::JReplicaBlock(*index));
         };
+        if let Some(references) = references {
+            references
+                .validate(block_number)
+                .map_err(|_| RuntimeDurableEnvelopeError::JReplicaRow(*index))?;
+            let mut merged: crate::j_watcher::DisputeReferences = replica
+                .get("disputeReferences")
+                .map(|v| serde_json::from_value(v.clone()))
+                .transpose()
+                .map_err(|_| RuntimeDurableEnvelopeError::JReplicaRow(*index))?
+                .unwrap_or_default();
+            merged.merge(references);
+            replica.insert(
+                "disputeReferences".into(),
+                serde_json::to_value(merged)
+                    .map_err(|_| RuntimeDurableEnvelopeError::JReplicaRow(*index))?,
+            );
+        }
         if current < BigInt::from(block_number) {
             replica.insert(
                 "blockNumber".into(),
@@ -682,6 +701,24 @@ fn validate_j_replicas(value: &Value) -> Result<(), RuntimeDurableEnvelopeError>
         )?;
         if string(replica, "name")? != key {
             return Err(RuntimeDurableEnvelopeError::JReplicaName(index));
+        }
+        if let Some(value) = replica.get("disputeReferences") {
+            let references: crate::j_watcher::DisputeReferences =
+                serde_json::from_value(value.clone())
+                    .map_err(|_| RuntimeDurableEnvelopeError::JReplicaRow(index))?;
+            let CanonicalValue::BigInt(height) =
+                canonical_value_from_tagged_json(required(replica, "blockNumber")?)?
+            else {
+                return Err(RuntimeDurableEnvelopeError::JReplicaRow(index));
+            };
+            references
+                .validate(
+                    height
+                        .to_string()
+                        .parse()
+                        .map_err(|_| RuntimeDurableEnvelopeError::JReplicaRow(index))?,
+                )
+                .map_err(|_| RuntimeDurableEnvelopeError::JReplicaRow(index))?;
         }
         finite_number(replica, "blockDelayMs", true)?;
         if replica.contains_key("blockTimeMs") {
@@ -1005,6 +1042,39 @@ mod tests {
             },
             "jReplicas":[["Testnet",j("Testnet","1")],["Tron",j("Tron","2")]]
         })
+    }
+
+    #[test]
+    fn dispute_references_commit_with_cursor_and_survive_checkpoint_decode() {
+        use sha3::{Digest, Keccak256};
+        let address = format!("0x{}", "aa".repeat(20));
+        let mut machine = fixture();
+        machine["jReplicas"][0][1]["contracts"]["depository"] = json!(address);
+        let key = format!(
+            "0x{}:0x{}:0x{}",
+            "11".repeat(32),
+            "22".repeat(32),
+            hex::encode(Keccak256::digest([0x12, 0x34]))
+        );
+        let references: crate::j_watcher::DisputeReferences = serde_json::from_value(json!({
+            "bodies":{key.clone():{"bytes":"0x1234","blockNumber":41,"logIndex":0}},
+            "arguments":{},"startBlocks":{}
+        }))
+        .expect("reference state");
+        let mut envelope = RuntimeDurableEnvelope::decode(&machine, [0; 32]).expect("envelope");
+        envelope
+            .advance_j_watcher_cursor(&address, 31337, 42, Some(&references))
+            .expect("WAL cursor apply");
+        machine["jReplicas"] = envelope.j_replicas().clone();
+        let restored =
+            RuntimeDurableEnvelope::decode(&machine, [0; 32]).expect("checkpoint restore");
+        assert_eq!(
+            restored.j_replicas()[0][1]["disputeReferences"],
+            serde_json::to_value(references).expect("state")
+        );
+        assert_eq!(restored.j_replicas()[0][1]["blockNumber"]["value"], "42");
+        machine["jReplicas"][0][1]["disputeReferences"]["bodies"][&key]["bytes"] = json!("0x00");
+        assert!(RuntimeDurableEnvelope::decode(&machine, [0; 32]).is_err());
     }
 
     #[test]

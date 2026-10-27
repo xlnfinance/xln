@@ -568,10 +568,21 @@ impl ResidentRuntimeService {
                 certified_height,
                 durable_height,
             ) {
+                // The shared cursor covers every served Entity. Its evidence must
+                // include all per-Entity watchers before any one advances it.
+                let mut references = watcher.cursor.dispute_references.through(cursor_height);
+                for other in &self.j_watchers {
+                    if other.config.chain_id == watcher.config.chain_id
+                        && other.config.depository_address == watcher.config.depository_address
+                    {
+                        references.merge(&other.cursor.dispute_references.through(cursor_height));
+                    }
+                }
                 self.pending_runtime_txs.push_back(watcher_cursor_tx(
                     watcher.depository_text.clone(),
                     watcher.config.chain_id,
                     &FinalizedWatcherCursor {
+                        dispute_references: references,
                         scanned_through: cursor_height,
                         block_hash: None,
                     },
@@ -593,8 +604,19 @@ impl ResidentRuntimeService {
                 self.j_watchers.push_back(watcher);
                 continue;
             }
-            let poll = poll_finalized_j_events(&watcher.rpc, &watcher.config, &watcher.cursor)
-                .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?;
+            let poll = match poll_finalized_j_events(&watcher.rpc, &watcher.config, &watcher.cursor)
+            {
+                Err(crate::j_watcher::JWatcherError::DisputeReferenceUnavailable(reason)) => {
+                    eprintln!(
+                        "J_DISPUTE_REFERENCE_RETRY:{}:{reason}",
+                        watcher.depository_text
+                    );
+                    self.j_watchers.push_back(watcher);
+                    continue;
+                }
+                result => result
+                    .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?,
+            };
             watcher.authenticated_through = poll.cursor.scanned_through;
             if poll.cursor == watcher.cursor {
                 self.j_watchers.push_back(watcher);
@@ -1276,6 +1298,8 @@ fn watcher_cursor_tx(
     RuntimeTx::AdvanceJWatcherCursor {
         depository_address,
         chain_id,
+        dispute_references: (cursor.dispute_references != Default::default())
+            .then(|| cursor.dispute_references.through(cursor.scanned_through)),
         block_number: cursor.scanned_through,
     }
 }
@@ -1971,6 +1995,16 @@ fn live_j_watchers(
                 max_blocks_per_poll: J_WATCHER_MAX_BLOCKS_PER_POLL,
             },
             cursor: FinalizedWatcherCursor {
+                dispute_references: j_replica
+                    .get("disputeReferences")
+                    .map(|v| serde_json::from_value(v.clone()))
+                    .transpose()
+                    .map_err(|e| {
+                        ResidentRuntimeServiceError::JWatcher(format!(
+                            "DISPUTE_REFERENCE_RESTORE:{e}"
+                        ))
+                    })?
+                    .unwrap_or_default(),
                 scanned_through: cursor_height,
                 block_hash: cursor_hash,
             },
@@ -2787,6 +2821,7 @@ mod tests {
     #[test]
     fn watcher_cursor_uses_its_chain_height_not_runtime_global_maximum() {
         let cursor = FinalizedWatcherCursor {
+            dispute_references: Default::default(),
             scanned_through: 73,
             block_hash: Some([0x44; 32]),
         };
@@ -2795,6 +2830,7 @@ mod tests {
             RuntimeTx::AdvanceJWatcherCursor {
                 depository_address: "0x1111".into(),
                 chain_id: 31338,
+                dispute_references: None,
                 block_number: 73,
             }
         );
@@ -2803,6 +2839,7 @@ mod tests {
     fn watcher_poll(from: u64, through: u64) -> JWatcherPoll {
         JWatcherPoll {
             cursor: FinalizedWatcherCursor {
+                dispute_references: Default::default(),
                 scanned_through: through,
                 block_hash: Some([u8::try_from(through).expect("small height"); 32]),
             },

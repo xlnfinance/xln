@@ -9,6 +9,7 @@ import { isRpcWatcherTransientError } from '../../../jurisdiction/adapter/rpc/rp
 import { createEntityProposalFixture } from '../../helpers/entity-proposal-fixture';
 import { createTestJReplica } from '../../helpers/j-replica';
 import { createJurisdictionConfig } from '../../../scenarios/harness/boot';
+import { safeParse, safeStringify } from '../../../protocol/serialization';
 
 const word = (byte: string) => `0x${byte.repeat(32)}`;
 const coder = ethers.AbiCoder.defaultAbiCoder();
@@ -209,10 +210,131 @@ test('served-pair missing starter arguments are retryable while invalid evidence
     readDisputeReferenceLogs: async () => [],
   }).catch((error: unknown) => error);
   const missing = await run(values);
-  expect(String(missing)).toContain('STARTER_ARGUMENTS_MISSING');
+  expect(String(missing)).toContain('START_BLOCK_MISSING');
   expect(isRpcWatcherTransientError(missing)).toBe(true);
   values[4] = ethers.ZeroHash;
   const corrupt = await run(values);
   expect(String(corrupt)).toContain('FINALIZATION_HASH_MISMATCH');
   expect(isRpcWatcherTransientError(corrupt)).toBe(false);
+});
+
+test('only B served retains A receipt nonce for its dispute against B', async () => {
+  const input = watcherInput();
+  const values = [...start]; values[1] = input.replica.entityId;
+  const decoded = await decodeAuthenticatedWatcherEvents({ ...input, logs: [
+    watcherLog(input.depositoryAddress, 'DisputeStarted', values),
+    watcherLog(input.depositoryAddress, 'HankoBatchProcessed', [word('11'), word('77'), 3n], 1),
+  ] });
+  const { buildJEventObservationInput } = await import('../../../jurisdiction/adapter/events/event-observation');
+  const observed = buildJEventObservationInput(input.env, decoded.events, {
+    ...coordinates, adapterLabel: 'nonce-regression', watcherChainId: 31337,
+    watcherDepositoryAddress: input.depositoryAddress,
+  });
+  // Rust served_start_uses_log_body_and_authenticated_batch_nonce_without_rpc expects the same N=3.
+  const event = observed?.evidenceEvents.find(event => event.name === 'DisputeStarted');
+  expect(event?.args['batchNonce']).toBe('3');
+  expect(observed?.evidenceEvents.some(event => event.name === 'HankoBatchProcessed')).toBe(false);
+});
+
+test('compiled Account/Depository dispute topics equal TS and Rust decoder topics', async () => {
+  const rust = await Bun.file('rscore/crates/runtime/src/j_watcher/abi.rs').text();
+  for (const name of ['Account', 'Depository']) {
+    const artifact = await Bun.file(`frontend/static/contracts/${name}.json`).json();
+    const compiled = new ethers.Interface(artifact.abi);
+    for (const [event, constant] of [
+      ['DisputeStarted', 'DISPUTE_STARTED_TOPIC'],
+      ['CounterDisputeRegistered', 'COUNTER_DISPUTE_REGISTERED_TOPIC'],
+      ['DisputeFinalized', 'DISPUTE_FINALIZED_TOPIC'],
+    ]) {
+      const signature = compiled.getEvent(event!)!.format('sighash');
+      const topic = rust.match(new RegExp(`${constant}: &str =\\s*"(0x[0-9a-f]+)"`))![1];
+      expect(ethers.id(signature)).toBe(topic);
+      expect(iface.getEvent(event!)!.topicHash).toBe(topic);
+    }
+  }
+});
+
+test('observed dispute survives watcher checkpoint/restore and finalizes without getLogs', async () => {
+  const input = watcherInput();
+  const values = [...start]; values[1] = input.replica.entityId; values[6] = '0x1234';
+  const started = await decodeAuthenticatedWatcherEvents({ ...input,
+    logs: [watcherLog(input.depositoryAddress, 'DisputeStarted', values)],
+  });
+  const { applyWatcherJurisdictionCursor } = await import('../../../jurisdiction/adapter/watcher/observe/watcher-cursor');
+  const { buildCanonicalJReplicaSnapshot } = await import('../../../storage/wal/snapshot');
+  const { validateRuntimeTx } = await import('../../../runtime/decode/runtime-tx');
+  const walTx = validateRuntimeTx(safeParse(safeStringify({ type: 'advanceJWatcherCursor', data: {
+    depositoryAddress: input.depositoryAddress, chainId: 31337, blockNumber: 42,
+    disputeReferences: started.disputeReferences,
+  } })), 'TEST_CURSOR_WAL');
+  if (walTx.type !== 'advanceJWatcherCursor') throw new Error('TEST_CURSOR_TYPE');
+  applyWatcherJurisdictionCursor(input.env, walTx.data);
+  const { validateJReplicas } = await import('../../../storage/wal/runtime-machine-schema/j');
+  const snapshot = structuredClone(buildCanonicalJReplicaSnapshot(input.watcherReplica));
+  const restored = validateJReplicas([[snapshot.name, snapshot]], 'TEST_CHECKPOINT')[0]![1];
+  const final = [...finalized]; final[1] = input.replica.entityId; final[5] = '0x';
+  const fields = { ...finalization, initialProofbodyHash: hash, starterArgumentsHash: ethers.keccak256('0x1234') };
+  final[6] = fields;
+  final[4] = ethers.keccak256(coder.encode(
+    ['bytes32', 'uint256', 'bool', 'bool', 'bytes32', 'bytes32', 'bytes32'],
+    [hash, 11n, false, true, fields.starterArgumentsHash, ethers.keccak256(fields.otherArguments), ethers.keccak256(fields.sig)],
+  ));
+  let reads = 0;
+  const decoded = await decodeAuthenticatedWatcherEvents({ ...input, watcherReplica: restored,
+    logs: [{ ...watcherLog(input.depositoryAddress, 'DisputeFinalized', final), blockNumber: 43 }],
+    readDisputeReferenceLogs: async () => { reads++; throw new Error('NO_HISTORY_READ_EXPECTED'); },
+  });
+  expect(reads).toBe(0);
+  expect(decoded.events[0]?.args['finalProofbody']).toEqual(body);
+  expect(decoded.events[0]?.disputeFinalizationEvidence?.leftArguments).toBe('0x1234');
+});
+
+test('actual bytecode-emitted dispute logs round-trip and resolve after checkpoint restore', async () => {
+  const { logs } = await Bun.file('core/__tests__/fixtures/jurisdiction/dispute-emitted-logs.json').json();
+  const { emptyDisputeReferences, rememberDisputeReference } = await import('../../../jurisdiction/adapter/events/dispute/reference-state');
+  let state = emptyDisputeReferences();
+  const names = new Set<string>();
+  for (const log of logs) {
+    const parsed = iface.parseLog(log)!;
+    expect(iface.encodeEventLog(parsed.fragment, parsed.args)).toEqual({ topics: log.topics, data: log.data });
+    const event = decodeJEventLog(log, iface, { ...log, logIndex: log.logIndex }, 'EMITTED_DISPUTE');
+    rememberDisputeReference(state, event);
+    state = safeParse(safeStringify(state)) as typeof state;
+    const resolved = await resolveDisputeLogReferences(event, async () => { throw new Error('UNEXPECTED_GET_LOGS'); }, state);
+    expect(resolved.args[event.name === 'DisputeStarted' ? 'initialProofbody' : event.name === 'DisputeFinalized' ? 'finalProofbody' : 'counterProofbody']).toBeDefined();
+    names.add(event.name);
+  }
+  expect([...names].sort()).toEqual(['CounterDisputeRegistered', 'DisputeFinalized', 'DisputeStarted']);
+});
+
+test('cache miss queries bounded pages from recorded start, never genesis', async () => {
+  const { emptyDisputeReferences, disputePair } = await import('../../../jurisdiction/adapter/events/dispute/reference-state');
+  const event = { ...decode('DisputeFinalized', [...finalized.slice(0, 5), '0x', finalization]), blockNumber: 1000 };
+  const state = emptyDisputeReferences(); state.startBlocks[disputePair(event.args)] = 700;
+  const pages: Array<[number | undefined, number | undefined]> = [];
+  const resolved = await resolveDisputeLogReferences(event, async (_, from, to) => {
+    pages.push([from, to]);
+    return from === 956 ? [reference('DisputeStarted', start, 960)] : [];
+  }, state);
+  expect(pages).toEqual([[700, 955], [956, 1000]]);
+  expect(resolved.args['finalProofbody']).toEqual(body);
+});
+
+test('cursor state rejects future evidence and wrong hash bytes before checkpointing', async () => {
+  const { emptyDisputeReferences, rememberDisputeReference, validateDisputeReferences } = await import('../../../jurisdiction/adapter/events/dispute/reference-state');
+  const state = emptyDisputeReferences(); rememberDisputeReference(state, decode('DisputeStarted', start));
+  expect(() => validateDisputeReferences(state, 41)).toThrow('HEIGHT_INVALID');
+  validateDisputeReferences(state, 42);
+  Object.values(state.bodies)[0]!.bytes = '0x00';
+  expect(() => validateDisputeReferences(state, 42)).toThrow('BYTES_INVALID');
+});
+
+test('rescan rebuilds dispute references when Entity finality leads the watcher cursor', async () => {
+  const input = watcherInput();
+  input.replica.state.lastFinalizedJHeight = 42;
+  const values = [...start]; values[1] = input.replica.entityId;
+  const result = await decodeAuthenticatedWatcherEvents({ ...input,
+    logs: [watcherLog(input.depositoryAddress, 'DisputeStarted', values)],
+  });
+  expect(Object.keys(result.disputeReferences.bodies)).toHaveLength(1);
 });

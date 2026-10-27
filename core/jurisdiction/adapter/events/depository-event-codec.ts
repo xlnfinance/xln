@@ -10,7 +10,7 @@ const coder = ethers.AbiCoder.defaultAbiCoder();
 const proofParam = ethers.ParamType.from(PROOF_BODY_ABI);
 
 /** The receipt authenticates these bytes; a mismatched or noncanonical body is never admitted. */
-const decodeDisputeLogBody = (args: Record<string, unknown>, finalized: boolean): JBatch['disputeStarts'][number]['initialProofbody'] => {
+export const decodeDisputeLogBody = (args: Record<string, unknown>, finalized: boolean): JBatch['disputeStarts'][number]['initialProofbody'] => {
   const body = args['proofbody'];
   const hash = args[finalized ? 'finalProofbodyHash' : 'proofbodyHash'];
   if (typeof body !== 'string' || !ethers.isHexString(body) || ethers.keccak256(body) !== hash) {

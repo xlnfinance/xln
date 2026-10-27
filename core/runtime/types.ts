@@ -313,6 +313,7 @@ export type RuntimeTx =
       /** Internal-only, WAL-replayable publication of an authenticated watcher cursor. */
       type: 'advanceJWatcherCursor';
       data: {
+        disputeReferences?: import('../jurisdiction/adapter/events/dispute/reference-state').DisputeReferenceState;
         depositoryAddress: string;
         chainId: number;
         blockNumber: number;

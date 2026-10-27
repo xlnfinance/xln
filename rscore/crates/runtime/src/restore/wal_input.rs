@@ -320,16 +320,27 @@ fn decode_runtime_tx(value: &Value, index: usize) -> Result<RuntimeTx, ConcreteW
     if kind != "advanceJWatcherCursor" {
         return Err(invalid(format!("RUNTIME_TX_UNSUPPORTED:{index}:{kind}")));
     }
-    exact_fields(
-        data,
-        &["depositoryAddress", "chainId", "blockNumber"],
-        &data_path,
-    )?;
+    let mut fields = vec!["depositoryAddress", "chainId", "blockNumber"];
+    if data.get("disputeReferences").is_some() {
+        fields.push("disputeReferences");
+    }
+    exact_fields(data, &fields, &data_path)?;
+    let references: Option<crate::j_watcher::DisputeReferences> = data
+        .get("disputeReferences")
+        .map(|v| serde_json::from_value(v.clone()))
+        .transpose()
+        .map_err(|e| invalid(e.to_string()))?;
+    if let Some(references) = &references {
+        references
+            .validate(safe_unsigned(&data["blockNumber"], &data_path)?)
+            .map_err(|e| invalid(e.to_string()))?;
+    }
     let chain_id = safe_unsigned(&data["chainId"], &format!("{data_path}.chainId"))?;
     if chain_id == 0 {
         return Err(invalid(format!("UNSIGNED:{data_path}.chainId")));
     }
     Ok(RuntimeTx::AdvanceJWatcherCursor {
+        dispute_references: references,
         depository_address: address(
             &data["depositoryAddress"],
             &format!("{data_path}.depositoryAddress"),

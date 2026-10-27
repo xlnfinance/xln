@@ -1140,20 +1140,25 @@ fn encode_runtime_txs<'a>(
             depository_address,
             chain_id,
             block_number,
-        } => Ok(object([
-            ("type", Value::String("advanceJWatcherCursor".into())),
-            (
-                "data",
-                object([
-                    (
-                        "depositoryAddress",
-                        Value::String(depository_address.clone()),
-                    ),
-                    ("chainId", Value::Number((*chain_id).into())),
-                    ("blockNumber", Value::Number((*block_number).into())),
-                ]),
-            ),
-        ])),
+            dispute_references,
+        } => {
+            let mut data = object([
+                (
+                    "depositoryAddress",
+                    Value::String(depository_address.clone()),
+                ),
+                ("chainId", Value::Number((*chain_id).into())),
+                ("blockNumber", Value::Number((*block_number).into())),
+            ]);
+            if let Some(references) = dispute_references {
+                data["disputeReferences"] = serde_json::to_value(references)
+                    .map_err(|e| RuntimeFrameProjectionError::RuntimeTx(e.to_string()))?;
+            }
+            Ok(object([
+                ("type", Value::String("advanceJWatcherCursor".into())),
+                ("data", data),
+            ]))
+        }
         crate::RuntimeTx::RewindJHistory(value) => Ok(object([
             ("type", Value::String("rewindJHistory".into())),
             (

@@ -28,6 +28,7 @@ pub enum RuntimeTx {
     ReplaceNumberedRegistrationIntent(crate::NumberedRegistrationReplacement),
     ObserveJRange(crate::j_watcher::ObserveJRange),
     AdvanceJWatcherCursor {
+        dispute_references: Option<crate::j_watcher::DisputeReferences>,
         depository_address: String,
         chain_id: u64,
         block_number: u64,

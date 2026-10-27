@@ -56,7 +56,7 @@ const commitScannedWatcherCursor = (session: RpcWatcherSession, services: RpcWat
     certifiedCursor === null ? currentCursor : Math.min(session.lastSyncedBlock, certifiedCursor);
   const resolvedCursor = resolveCommittedWatcherCursor(env, session.pendingBlocks, durableCandidate, currentCursor);
   if (resolvedCursor > currentCursor) {
-    updateWatcherJurisdictionCursor(env, resolvedCursor, services.depositoryAddress, services.chainId);
+    updateWatcherJurisdictionCursor(env, resolvedCursor, services.depositoryAddress, services.chainId, session.disputeReferences);
   }
   return resolvedCursor;
 };
@@ -132,6 +132,7 @@ const auditCanonicalStateWhenDue = async (
   session.lastCanonicalAuditAtMs = nowMs;
   if (!rewound) return false;
   session.pendingHistoryRange = null;
+  delete session.disputeReferences;
   session.scanProgress = { scannedThroughHeight: 0, replicaScannedThrough: {} };
   return true;
 };

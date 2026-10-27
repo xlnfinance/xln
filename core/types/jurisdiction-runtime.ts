@@ -59,6 +59,7 @@ export type JAdapterFailure = {
  * RPC-backed jurisdictions are external machines; do not fake a bytes32 root.
  */
 export interface JReplica {
+  disputeReferences?: import('../jurisdiction/adapter/events/dispute/reference-state').DisputeReferenceState;
   name: string;                           // "ethereum", "base", "simnet"
   blockNumber: bigint;                    // Current J-block height
   stateRoot: Uint8Array | null;           // 32 bytes for BrowserVM time travel; null for RPC/external roots

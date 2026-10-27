@@ -1,3 +1,4 @@
+import { emptyDisputeReferences, rememberDisputeReference, type DisputeReferenceState } from './events/dispute/reference-state';
 import { ethers } from 'ethers';
 import { resolveDisputeLogReferences, type ReadDisputeReferenceLogs } from './events/dispute/log-reference';
 import { isJEventDeliveredByWatcher } from './events/event-observation';
@@ -40,10 +41,12 @@ type WatcherEventDecodeInput = {
   observedTipBlockHash: string;
   observedHeadHeight: number;
   confirmationDepth: number;
+  disputeReferences?: DisputeReferenceState;
   readDisputeReferenceLogs?: ReadDisputeReferenceLogs;
 };
 
 export type WatcherEventDecodeResult = {
+  disputeReferences: DisputeReferenceState;
   events: JEvent[];
   authorityTxsByBlock: Map<number, RuntimeTx[]>;
 };
@@ -238,16 +241,22 @@ const decodeWatcherLog = async (
       }),
     );
   }
-  if (!isJEventDeliveredByWatcher(input.env, event, input.watcherReplica)) return;
+  // Receipt-wide Hanko nonces must survive until dispute enrichment, even when
+  // only the sender's counterparty is served. Gate only dispute evidence I/O.
+  if ((event.name === 'DisputeStarted' || event.name === 'CounterDisputeRegistered'
+    || event.name === 'DisputeFinalized')
+    && !isJEventDeliveredByWatcher(input.env, event, input.watcherReplica)) return;
+  rememberDisputeReference(result.disputeReferences, event);
   result.events.push(await resolveDisputeLogReferences(event, input.readDisputeReferenceLogs ?? (async () => {
     throw new Error('J_DISPUTE_EVENT_REFERENCE_READER_MISSING');
-  })));
+  }), result.disputeReferences));
 };
 
 export const decodeAuthenticatedWatcherEvents = async (
   input: WatcherEventDecodeInput,
 ): Promise<WatcherEventDecodeResult> => {
   const result: WatcherEventDecodeResult = {
+    disputeReferences: structuredClone(input.disputeReferences ?? input.watcherReplica.disputeReferences ?? emptyDisputeReferences()),
     events: [],
     authorityTxsByBlock: new Map(),
   };
