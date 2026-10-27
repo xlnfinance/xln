@@ -20,6 +20,7 @@ type ReceiptState = {
 };
 
 let receiptSeq = 0;
+const RECEIPT_NOTICE_MS = 15_000;
 
 export const useReceipts = create<ReceiptState>((set, get) => ({
 	latest: null,
@@ -27,15 +28,21 @@ export const useReceipts = create<ReceiptState>((set, get) => ({
 	open: () => set({ opened: get().latest, latest: null }),
 	close: () => set({ opened: null }),
 	dismissNotification: () => set({ latest: null }),
-	show: event =>
+	show: event => {
+		const id = `receipt-${++receiptSeq}`;
 		set({
 			latest: {
-				id: `receipt-${++receiptSeq}`,
+				id,
 				height: event.height,
 				name: event.name,
 				data: event.data,
 				observedAt: Date.now(),
 			},
-		}),
+		});
+		// A short notice: it leaves on its own unless a newer receipt replaced it.
+		setTimeout(() => {
+			if (get().latest?.id === id) set({ latest: null });
+		}, RECEIPT_NOTICE_MS);
+	},
 	dismiss: () => set({ latest: null, opened: null }),
 }));
