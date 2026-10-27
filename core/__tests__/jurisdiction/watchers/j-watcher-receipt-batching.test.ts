@@ -4,7 +4,7 @@ import { BLOCKCHAIN } from '../../../config/constants';
 
 import { readAuthenticatedReceiptRange, type RpcBatchCall } from '../../../jurisdiction/adapter/receipt-root';
 import { sendBatchInChunks } from '../../../jurisdiction/adapter/rpc-utils';
-import { sealedHeader } from '../../helpers/sealed-header';
+import { sealedHeader } from '../../helpers/jurisdiction/sealed-header';
 
 const sealed = new Map<number, ReturnType<typeof sealedHeader>>();
 const sealedAt = (height: number): ReturnType<typeof sealedHeader> => {

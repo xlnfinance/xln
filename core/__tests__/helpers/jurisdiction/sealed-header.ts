@@ -1,4 +1,4 @@
-import { ethereumHeaderHash } from '../../jurisdiction/adapter/rpc/state-anchor/rpc-header-hash';
+import { ethereumHeaderHash } from '../../../jurisdiction/adapter/rpc/state-anchor/rpc-header-hash';
 
 const word = (byte: string): string => `0x${byte.repeat(32)}`;
 

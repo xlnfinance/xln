@@ -21,7 +21,7 @@ import {
 import { isTransientRpcUnavailableError } from '../../../jurisdiction/adapter/rpc-public';
 import { createLogBloomMatcher, normalizeReceiptHash, parseReceiptHex } from '../../../jurisdiction/machine/receipt-codec';
 import { ERC20Mock__factory } from '../../../../jurisdictions/typechain-types';
-import { sealedHeader } from '../../helpers/sealed-header';
+import { sealedHeader } from '../../helpers/jurisdiction/sealed-header';
 
 const zeroBloom = `0x${'00'.repeat(256)}`;
 
