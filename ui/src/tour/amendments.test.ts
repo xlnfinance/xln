@@ -1,6 +1,12 @@
 import { afterEach, expect, test } from 'bun:test';
 import type { EntityState } from '@xln/core/entity/types';
 import { applyEntityProviderActionExecuted } from '@xln/core/entity/tx/j-events-entity-provider-action';
+import { projectEntityCoreDoc } from '@xln/core/storage/read/projections';
+import { compactEntityCoreForRemote } from '@xln/core/api/runtime-adapter/read/compact-view';
+import { PersistentEntityAccountMap } from '@xln/core/entity/state/persistent-account-map';
+import { computeEntityAccountValueHash } from '@xln/core/entity/consensus/state-root';
+import { recomputeEntityProviderActionHash } from '@xln/core/entity/entity-provider-action';
+import type { EntityProviderActionIntent } from '@xln/core/types/entity-provider-actions';
 import { observeTourPayment, useTourObservations } from './observations';
 import { tourBaseline } from './outcomes';
 import { TOUR_STEPS, type TourContext } from './steps';
@@ -99,7 +105,7 @@ test('Receive rejects reserve transfers and requires this invoice’s committed 
   expect(done('receive', { ...ctx, wallet: ctx.before! })).toBe(false);
 });
 
-test('Recovery stays until the restored identity commits the instructed payment debit', () => {
+test('Recovery requires a specific durable payment, even when an incoming credit offsets its debit', () => {
   const before = wallet({ accounts: [account({ tokens: [token(0n, 0n, 5_000_000n)] })] });
   const after = wallet({ frameHeight: 11, accounts: [account({ tokens: [token(0n, 0n, 4_000_000n)] })] });
   const restored = { runtimeId: 'runtime', entityIds: [owner], height: 10 };
@@ -107,24 +113,31 @@ test('Recovery stays until the restored identity commits the instructed payment 
     runtimeId: 'runtime',
     height: 11,
     name: 'HtlcFinalized',
-    data: { entityId: owner, fromEntity: owner, tokenId: 1, amount: '1000000', hashlock: 'paid' },
+    data: { entityId: owner, fromEntity: owner, tokenId: 1, amount: '1000000', hashlock: `0x${'d'.repeat(64)}` },
   };
   const ctx = context({ before, wallet: after, restored, outgoing });
   expect(done('recovery', ctx)).toBe(true);
   expect(done('recovery', { ...ctx, outgoing: undefined })).toBe(false);
-  expect(done('recovery', { ...ctx, wallet: { ...before, frameHeight: 11 } })).toBe(false);
+  // A concurrent 1 USDC credit leaves the net balance unchanged; the durable
+  // HtlcFinalized receipt still proves this hashlock's committed payment.
+  expect(done('recovery', { ...ctx, wallet: { ...before, frameHeight: 11 } })).toBe(true);
+  expect(done('recovery', { ...ctx, wallet: before })).toBe(false);
   const changes: Partial<PaymentTerminalEvent>[] = [
     { runtimeId: 'other' },
     { height: 10 },
+    { height: 12 },
     { name: 'HtlcReceived' },
     { data: { ...outgoing.data, entityId: company } },
+    { data: { ...outgoing.data, fromEntity: company } },
+    { data: { ...outgoing.data, hashlock: undefined } },
+    { data: { ...outgoing.data, hashlock: 'invalid' } },
     { data: { ...outgoing.data, tokenId: 2 } },
     { data: { ...outgoing.data, amount: '999999' } },
   ];
   for (const change of changes) expect(done('recovery', { ...ctx, outgoing: { ...outgoing, ...change } })).toBe(false);
 });
 
-test('Shares requires a strictly newer confirmed action nonce and both committed share reserves', () => {
+test('first share release folds nonce 1 and survives the wallet projection before completing Shares', () => {
   const before = wallet({ entityId: company, frame: frame(company) });
   const after = wallet({
     entityId: company,
@@ -140,19 +153,40 @@ test('Shares requires a strictly newer confirmed action nonce and both committed
   const shareTokens = { runtimeId: 'runtime', entityId: company, ids: [8, 9] };
   const ctx = context({ before, wallet: after, shareTokens });
   expect(done('shares', ctx)).toBe(false);
-  const released = { entityId: company } as EntityState;
+  const released = {
+    ...after.frame!.activeEntity!.core,
+    timestamp: 0,
+    nonces: new Map(),
+    proposals: new Map(),
+    accounts: PersistentEntityAccountMap.empty(company, computeEntityAccountValueHash),
+    paybook: { entries: new Map(), feesEarned: 0n },
+    lastFinalizedJHeight: 0,
+  } as EntityState;
+  const intent: Omit<EntityProviderActionIntent, 'actionHash'> = {
+    version: 1, entityId: company, entityNumber: 1n, chainId: 31337n,
+    entityProviderAddress: `0x${'b'.repeat(40)}`, boardEpoch: 1n,
+    actionNonce: 1n, generation: 1, createdAt: 0,
+    payload: { kind: 'releaseControlShares', release: {
+      recipientAddress: `0x${'e'.repeat(40)}`, controlAmount: 10n, dividendAmount: 10n, purpose: 'Tutorial',
+    } },
+  };
+  const pending = { ...intent, actionHash: recomputeEntityProviderActionHash(intent) };
+  released.entityProviderActionState = { version: 1, confirmedNonce: 0n, generation: 1, pending };
+  after.frame!.activeEntity!.core = compactEntityCoreForRemote(projectEntityCoreDoc(released));
+  expect(done('shares', ctx)).toBe(false);
   applyEntityProviderActionExecuted(
     released,
     {
       entityId: company,
-      actionNonce: 1n,
+      actionNonce: '1', // Normalized RPC event; Solidity emits stored nonce + 1.
       actionKind: 1,
-      actionHash: `0x${'c'.repeat(64)}`,
+      actionHash: pending.actionHash,
     },
     1,
   );
-  after.frame!.activeEntity!.core.entityProviderActionState = released.entityProviderActionState!;
-  expect(released.entityProviderActionState!.confirmedNonce).toBe(1n);
+  expect(released.entityProviderActionState).toEqual({ version: 1, confirmedNonce: 1n, generation: 1 });
+  after.frame!.activeEntity!.core = compactEntityCoreForRemote(projectEntityCoreDoc(released));
+  expect(after.frame!.activeEntity!.core.entityProviderActionState).toEqual(released.entityProviderActionState);
   expect(done('shares', ctx)).toBe(true);
   before.frame!.activeEntity!.core.entityProviderActionState = { version: 1, confirmedNonce: 1n, generation: 0 };
   expect(done('shares', ctx)).toBe(false);
@@ -198,7 +232,7 @@ test('terminal observations retain correlated committed evidence across unrelate
   const outgoing: PaymentTerminalEvent = {
     ...incoming,
     name: 'HtlcFinalized',
-    data: { ...incoming.data, fromEntity: owner, amount: '1000000' },
+    data: { ...incoming.data, fromEntity: owner, amount: '1000000', hashlock: `0x${'d'.repeat(64)}` },
   };
   observeTourPayment(outgoing);
   observeTourPayment({ ...outgoing, name: 'HtlcFailed' });

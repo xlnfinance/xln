@@ -13,6 +13,7 @@ export function observeTourPayment(event: PaymentTerminalEvent): void {
   if (restored?.runtimeId === event.runtimeId && event.height > restored.height &&
     restored.entityIds.includes(String(event.data.entityId)) && event.name === 'HtlcFinalized' &&
     event.data.fromEntity === event.data.entityId && event.data.tokenId === 1 &&
+    typeof event.data.hashlock === 'string' && /^0x[0-9a-f]{64}$/i.test(event.data.hashlock) &&
     /^\d+$/.test(String(event.data.amount)) && BigInt(String(event.data.amount)) >= 1_000_000n) {
     useTourObservations.setState({ outgoing: event });
   }

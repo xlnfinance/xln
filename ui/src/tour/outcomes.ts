@@ -92,13 +92,15 @@ export const received = (ctx: TourContext): boolean =>
 
 export function recovered(ctx: TourContext): boolean {
   const event = ctx.outgoing;
+  // A durable terminal receipt identifies the committed payment by hashlock and
+  // frame. Net balance can stay flat or rise when unrelated incoming credit commits.
   return Boolean(committed(ctx) && ctx.restored?.runtimeId === ctx.runtimeId &&
     ctx.restored.entityIds.includes(ctx.wallet.entityId) && ctx.wallet.frameHeight >= ctx.restored.height &&
     event?.runtimeId === ctx.runtimeId && event.name === 'HtlcFinalized' &&
     event.height > Math.max(ctx.restored.height, ctx.before!.frameHeight) && event.height <= ctx.wallet.frameHeight &&
     event.data.entityId === ctx.wallet.entityId && event.data.fromEntity === ctx.wallet.entityId &&
     event.data.tokenId === 1 && /^\d+$/.test(String(event.data.amount)) && BigInt(String(event.data.amount)) >= 1_000_000n &&
-    signedBalance(ctx.wallet) <= signedBalance(ctx.before!) - 1_000_000n);
+    typeof event.data.hashlock === 'string' && /^0x[0-9a-f]{64}$/i.test(event.data.hashlock));
 }
 
 export type TourBaseline = { step: string; wallet: WalletView };

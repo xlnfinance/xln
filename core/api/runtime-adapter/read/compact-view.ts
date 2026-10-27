@@ -425,6 +425,7 @@ export const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): R
       outgoing: debtTotalsByToken(core.outDebtsByToken),
     },
     ...withDefinedProp('metrics', core.metrics),
+    ...withDefinedProp('entityProviderActionState', core.entityProviderActionState),
   };
 
   if (core.prevFrameHash) compact.prevFrameHash = core.prevFrameHash;

@@ -155,8 +155,8 @@ const exercises: Record<string, Exercise> = {
     target: 'release-shares',
     instruction:
       'On your new registered company, release treasury shares to the Depository. Wait until both share reserves are committed.',
-    // EntityProvider increments before execution: the first release confirms nonce 1.
-    // Require both the executed action and its two committed reserve credits.
+    // The fold records the emitted nonce (first release: 1), not a zero-based
+    // index. Require its advance in the wallet view and both reserve credits.
     done: ctx =>
       committed(ctx) &&
       (core(ctx.wallet)?.entityProviderActionState?.confirmedNonce ?? 0n) > (core(ctx.before!)?.entityProviderActionState?.confirmedNonce ?? 0n) &&
