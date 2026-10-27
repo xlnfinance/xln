@@ -349,7 +349,7 @@ export function Swap() {
     if (!wallet.frame || !hub || !prepared || !wallet.signerId) return;
     if (
       mode === 'same' &&
-      (swapMinimumError(book, giveTokenId, prepared) || swapPriceBandError(book, prepared.priceTicks))
+      (swapMinimumError(book, giveTokenId, prepared, getTokenMeta(book.quoteTokenId, sourceTokens.catalog)) || swapPriceBandError(book, prepared.priceTicks))
     )
       return;
     setSubmitting(true);
@@ -463,7 +463,7 @@ export function Swap() {
       ?.jurisdiction?.name || stack;
   const marketError =
     mode === 'same' && prepared
-      ? (swapMinimumError(book, giveTokenId, prepared) ?? swapPriceBandError(book, prepared.priceTicks))
+      ? (swapMinimumError(book, giveTokenId, prepared, getTokenMeta(book.quoteTokenId, sourceTokens.catalog)) ?? swapPriceBandError(book, prepared.priceTicks))
       : null;
   const disabledReason =
     (sourceTokens.error ||
@@ -853,7 +853,7 @@ export function Swap() {
             <div className="card">
               <h3 className="caps">Your account with {hub.label}</h3>
               <DeltaBar derived={giveToken.derived} tokenId={giveTokenId} />
-              <DeltaCaption derived={giveToken.derived} format={value => formatMoney(value, giveMeta.decimals)} />
+              <DeltaCaption derived={giveToken.derived} format={value => formatLimit(value, giveMeta.decimals)} />
               <p className="note" style={{ marginTop: 12 }}>
                 The order rests on this account: a fill moves the balance you both sign, nothing moves on-chain.
               </p>

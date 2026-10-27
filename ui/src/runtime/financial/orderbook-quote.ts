@@ -1,5 +1,6 @@
 import { SWAP_CONSTANTS } from '@xln/core/config/constants';
 import { deriveSameOrderbookPriceBandBounds, resolveOrderbookPriceReference } from '@xln/core/swapbook/price-band';
+import { formatAmount } from '../format';
 import type { BookLevel, BookView } from './orderbook';
 
 /** Canonical price unit: ticks per quote unit, four decimals. */
@@ -64,10 +65,13 @@ export function swapMinimumError(
   book: Pick<BookView, 'minTradeSize' | 'quoteTokenId'>,
   giveTokenId: number,
   prepared: { effectiveGive: bigint; effectiveWant: bigint },
+  quote: { decimals: number; symbol: string },
 ): string | null {
   if (book.minTradeSize === null) return 'Waiting for the market minimum.';
   const quoteAmount = giveTokenId === book.quoteTokenId ? prepared.effectiveGive : prepared.effectiveWant;
-  return quoteAmount < book.minTradeSize ? 'Amount is below the market minimum.' : null;
+  return quoteAmount < book.minTradeSize
+    ? `Minimum swap is ${formatAmount(book.minTradeSize, quote.decimals)} ${quote.symbol} after lot rounding.`
+    : null;
 }
 
 /** Preview the Entity's same-market band; admission still validates its committed book. */

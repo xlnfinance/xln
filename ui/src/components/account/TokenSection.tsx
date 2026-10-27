@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { DeltaBar, DeltaCaption, Legend } from '../Bars';
 import { Icon } from '../Icons';
 import { TokenIcon } from '../TokenPicker';
-import { formatMoney, formatSigned } from '../../runtime/format';
+import { formatLimit, formatMoney, formatSigned } from '../../runtime/format';
 import { getTokenMeta } from '../../runtime/token-meta';
 import type { AccountTokenView } from '../../runtime/views';
 export function TokenSection({ token, disputed = false, closed = false }: { token: AccountTokenView; disputed?: boolean; closed?: boolean }) {
@@ -27,7 +27,7 @@ export function TokenSection({ token, disputed = false, closed = false }: { toke
 			<DeltaBar derived={d} tokenId={token.tokenId} />
 			{disputed
 				? <p role="status">{closed ? 'Account permanently closed after dispute. The settlement returned funds to your reserve.' : 'Account frozen by dispute. Sending and receiving are unavailable.'}</p>
-				: <DeltaCaption derived={d} format={money} />}
+				: <DeltaCaption derived={d} format={value => formatLimit(value, meta.decimals)} />}
 			<div className="lane-legend"><Legend /></div>
 			<div style={{ marginTop: 14 }}>
 				<div className="kv">

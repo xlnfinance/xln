@@ -10,6 +10,7 @@ const level = {
   ownerIds: [],
   own: false,
 };
+const usdc = { decimals: 6, symbol: 'USDC' };
 const book: BookView = {
   baseTokenId: 2,
   quoteTokenId: 1,
@@ -43,13 +44,13 @@ test('an empty, zero-valued or mismatched market never produces a payable quote'
 
 test('minimum checks the rounded quote amount on either side and fails closed without policy', () => {
   const roundedBuy = { effectiveGive: 9_996_999n, effectiveWant: 3_998_000_000_000_000n };
-  expect(swapMinimumError(book, 1, roundedBuy)).toBe('Amount is below the market minimum.');
+  expect(swapMinimumError(book, 1, roundedBuy, usdc)).toBe('Minimum swap is 10 USDC after lot rounding.');
   expect(
-    swapMinimumError(book, 2, { effectiveGive: roundedBuy.effectiveWant, effectiveWant: roundedBuy.effectiveGive }),
-  ).toBe('Amount is below the market minimum.');
-  expect(swapMinimumError(book, 1, { ...roundedBuy, effectiveGive: 10_000_000n })).toBeNull();
-  expect(swapMinimumError({ ...book, minTradeSize: null }, 1, roundedBuy)).toBe('Waiting for the market minimum.');
-  expect(swapMinimumError({ ...book, minTradeSize: 0n }, 1, roundedBuy)).toBeNull();
+    swapMinimumError(book, 2, { effectiveGive: roundedBuy.effectiveWant, effectiveWant: roundedBuy.effectiveGive }, usdc),
+  ).toBe('Minimum swap is 10 USDC after lot rounding.');
+  expect(swapMinimumError(book, 1, { ...roundedBuy, effectiveGive: 10_000_000n }, usdc)).toBeNull();
+  expect(swapMinimumError({ ...book, minTradeSize: null }, 1, roundedBuy, usdc)).toBe('Waiting for the market minimum.');
+  expect(swapMinimumError({ ...book, minTradeSize: 0n }, 1, roundedBuy, usdc)).toBeNull();
 });
 
 test('price band uses the canonical midpoint and accepts exact boundaries, not one tick outside', () => {

@@ -329,7 +329,7 @@ export function Pay() {
 											<span>{formatMoney(hopToken.signed, meta.decimals)}</span>
 										</div>
 										<DeltaBar derived={hopToken.derived} tokenId={tokenId} />
-										<DeltaCaption derived={hopToken.derived} format={value => formatMoney(value, meta.decimals)} />
+										<DeltaCaption derived={hopToken.derived} format={value => formatLimit(value, meta.decimals)} />
 									</>
 								) : null}
 							</div>
@@ -560,7 +560,7 @@ function BeforeAfter({ account, tokenId, senderAmount }: { account: AccountView;
 				</span>
 			</div>
 			<DeltaBar derived={token.derived} tokenId={tokenId} />
-			<DeltaCaption derived={token.derived} format={money} />
+			<DeltaCaption derived={token.derived} format={value => formatLimit(value, meta.decimals)} />
 			<div className="kv" style={{ marginTop: 14 }}>
 				<span className="k">After</span>
 				<span className="v num">
@@ -571,7 +571,7 @@ function BeforeAfter({ account, tokenId, senderAmount }: { account: AccountView;
 				</span>
 			</div>
 			<DeltaBar derived={after} tokenId={tokenId} />
-			<DeltaCaption derived={after} format={money} />
+			<DeltaCaption derived={after} format={value => formatLimit(value, meta.decimals)} />
 			{parts.length > 0 ? (
 				<p className="note" style={{ marginTop: 14 }}>
 					{parts.join('. ')}. Nothing moves on-chain.

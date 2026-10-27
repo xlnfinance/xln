@@ -41,14 +41,18 @@ export function HomeAside({
             <span className="display num">{formatUsd(wallet.usd.sendCapacity)}</span>
             <p className="note">Spendable now across all accounts, credit included</p>
           </div>
-          <div className="kv">
-            <span className="k">Can send {meta?.symbol ?? ''}</span>
-            <span className="v num">{money(token?.sendCapacity ?? 0n)}</span>
-          </div>
-          <div className="kv">
-            <span className="k">Can receive {meta?.symbol ?? ''}</span>
-            <span className="v num">{money(token?.receiveCapacity ?? 0n)}</span>
-          </div>
+          {token ? (
+            <>
+              <div className="kv">
+                <span className="k">Can send {meta?.symbol}</span>
+                <span className="v num">{money(token.sendCapacity)}</span>
+              </div>
+              <div className="kv">
+                <span className="k">Can receive {meta?.symbol}</span>
+                <span className="v num">{money(token.receiveCapacity)}</span>
+              </div>
+            </>
+          ) : null}
           {token && token.owed < 0n ? (
             <div className="kv">
               <span className="k">You owe</span>

@@ -136,7 +136,7 @@ async function swap(command: Record<string, unknown>, wallet: WalletView, book: 
   const xln = await getXLN();
   const prepared = xln.prepareSwapOrder(giveToken, wantToken, give, want);
   if (!prepared) throw new Error('Amount is below the market minimum.');
-  const minimumError = swapMinimumError(book, giveToken, prepared);
+  const minimumError = swapMinimumError(book, giveToken, prepared, getTokenMeta(book.quoteTokenId));
   if (minimumError) throw new Error(minimumError);
   const hub = wallet.accounts.find(row => row.isHub && !row.disputed);
   if (!hub) throw new Error('Connect a hub before swapping.');
