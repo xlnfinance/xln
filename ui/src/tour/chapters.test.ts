@@ -221,7 +221,7 @@ test('cross orders need a new owned terminal route; an open or historical order 
   expect(done('cross', context({ before: withOrder('settled'), wallet: withOrder('settled') }))).toBe(false);
 });
 
-test('share release needs both registered share tokens, confirmed nonce and committed reserves', () => {
+test('share release needs both registered share tokens and committed reserve growth', () => {
   const view = frame(
     owner,
     new Map([
@@ -236,7 +236,10 @@ test('share release needs both registered share tokens, confirmed nonce and comm
   expect(done('shares', context({ wallet: after }))).toBe(false);
   expect(done('shares', context({ wallet: after, shareTokens: { runtimeId: 'runtime', entityId: owner, ids: [8] } }))).toBe(false);
   expect(done('shares', context({ wallet: after, shareTokens: { runtimeId: 'runtime', entityId: company, ids: [8, 9] } }))).toBe(false);
+  // The first release confirms nonce 0; it still completes the chapter.
   view.activeEntity!.core.entityProviderActionState.confirmedNonce = 0n;
+  expect(done('shares', context({ wallet: after, shareTokens }))).toBe(true);
+  view.activeEntity!.core.reserves.set(9, 0n);
   expect(done('shares', context({ wallet: after, shareTokens }))).toBe(false);
 });
 

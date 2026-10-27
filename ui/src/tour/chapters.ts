@@ -161,11 +161,11 @@ const exercises: Record<string, Exercise> = {
     path: '/ownership',
     target: 'release-shares',
     instruction:
-      'On your new registered company, release treasury shares to the Depository. Wait for the confirmed action nonce and both positive share reserves.',
+      'On your new registered company, release treasury shares to the Depository. Wait until both share reserves are committed.',
+    // Nonces start at 0, so the first release is "confirmed nonce 0": the committed
+    // outcome is both share reserves growing, not the nonce moving.
     done: ctx =>
       committed(ctx) &&
-      (core(ctx.wallet)?.entityProviderActionState?.confirmedNonce ?? 0n) >
-        (core(ctx.before!)?.entityProviderActionState?.confirmedNonce ?? 0n) &&
       ctx.shareTokens?.runtimeId === ctx.runtimeId &&
       ctx.shareTokens.entityId === ctx.wallet.entityId &&
       ctx.shareTokens.ids.length === 2 &&
