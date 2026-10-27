@@ -107,6 +107,7 @@ import {
   buildCrossJurisdictionPullReveal,
   buildPreparedCrossJurisdictionRoute,
   deriveCrossJurisdictionPrivateSeed,
+  deriveCrossJurisdictionPullId,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../extensions/cross-j/index';
 
@@ -1464,10 +1465,13 @@ describe('audit fail-fast regressions', () => {
       createdAt: 1,
       updatedAt: 1,
     });
+    if (!route.sourcePull || !route.targetPull) throw new Error('TIMESTAMP_PARITY_PULLS_MISSING');
+    route.sourcePull.pullId = deriveCrossJurisdictionPullId(route, 'source');
+    route.targetPull.pullId = deriveCrossJurisdictionPullId(route, 'target');
     const pullLock: AccountTx = {
       type: 'cross_pull_lock',
       data: {
-        pullId: 'timestamp-parity-pull',
+        pullId: route.sourcePull.pullId,
         tokenId: 1,
         amount: -100n,
         fullHash: `0x${'a1'.repeat(32)}`,

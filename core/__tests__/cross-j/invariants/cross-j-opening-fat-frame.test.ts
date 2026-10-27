@@ -7,6 +7,7 @@ import type { AccountState, AccountTx } from '../../../types/account';
 import {
   buildCrossJurisdictionPullBinding,
   cloneCrossJurisdictionRoute,
+  deriveCrossJurisdictionPullId,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../extensions/cross-j';
 import { createEmptyEnv } from '../../../runtime';
@@ -371,6 +372,9 @@ describe('cross-j pull hash material durability', () => {
         partialRoot: secret('cc'),
       },
     });
+    if (!collidingRoute.sourcePull || !collidingRoute.targetPull) throw new Error('COLLISION_PULLS_MISSING');
+    collidingRoute.sourcePull.pullId = deriveCrossJurisdictionPullId(collidingRoute, 'source');
+    collidingRoute.targetPull.pullId = deriveCrossJurisdictionPullId(collidingRoute, 'target');
     const collideFull: Extract<AccountTx, { type: 'cross_pull_lock' }> = {
       type: 'cross_pull_lock',
       data: {
@@ -406,6 +410,9 @@ describe('cross-j pull hash material durability', () => {
         partialRoot: secret('bb'),
       },
     });
+    if (!collidePartialRoute.sourcePull || !collidePartialRoute.targetPull) throw new Error('COLLISION_PULLS_MISSING');
+    collidePartialRoute.sourcePull.pullId = deriveCrossJurisdictionPullId(collidePartialRoute, 'source');
+    collidePartialRoute.targetPull.pullId = deriveCrossJurisdictionPullId(collidePartialRoute, 'target');
     const collidePartial: Extract<AccountTx, { type: 'cross_pull_lock' }> = {
       type: 'cross_pull_lock',
       data: {

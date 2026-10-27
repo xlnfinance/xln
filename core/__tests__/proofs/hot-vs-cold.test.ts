@@ -75,6 +75,7 @@ import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import {
   buildCrossJurisdictionPullBinding,
   cloneCrossJurisdictionRoute,
+  deriveCrossJurisdictionPullId,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../extensions/cross-j';
 import { getJurisdictionStackId } from '../../jurisdiction/machine/jurisdiction-stack';
@@ -434,7 +435,7 @@ class BilateralHarness {
    * (withCanonicalCrossJurisdictionRouteHash + buildCrossJurisdictionPullBinding),
    * exactly as the Entity command planner would emit them.
    */
-  buildPullLockTx(side: HarnessSide, orderNum: number, tokenId: number, amount: bigint): AccountTx {
+  buildPullLockTx(side: HarnessSide, orderNum: number, tokenId: number, amount: bigint): Extract<AccountTx, { type: 'cross_pull_lock' }> {
     const account = this.committed(side);
     const orderId = `ord${orderNum}`;
     const fullHash = `0x${((orderNum * 17 + 3) & 0xff).toString(16).padStart(2, '0').repeat(32)}`;
@@ -468,10 +469,13 @@ class BilateralHarness {
       updatedAt: 1,
       expiresAt: 20_000,
     });
+    if (!route.sourcePull || !route.targetPull) throw new Error('HARNESS_PULLS_MISSING');
+    route.sourcePull.pullId = deriveCrossJurisdictionPullId(route, 'source');
+    route.targetPull.pullId = deriveCrossJurisdictionPullId(route, 'target');
     return {
       type: 'cross_pull_lock',
       data: {
-        pullId: `${orderId}s`,
+        pullId: route.sourcePull.pullId,
         tokenId,
         amount: -amount,
         fullHash,
@@ -565,8 +569,8 @@ class BilateralHarness {
       }
       case 'cross_pull_lock': {
         const account = this.committed(side);
-        const orderId = `ord${spec.orderId}`;
-        const pullId = `${orderId}s`;
+        const tx = this.buildPullLockTx(side, spec.orderId, spec.tokenId, spec.amount);
+        const pullId = tx.data.pullId;
         // Model bound (finding C2-H2): the Entity command planner never emits
         // two live pulls for one order leg, and a second same-pullId
         // cross_pull_lock — which local enqueue DOES admit (fingerprint dedup
@@ -578,7 +582,7 @@ class BilateralHarness {
           || batchPullIds.has(pullId);
         if (account.state.pulls?.has(pullId) || queuedDuplicate) return [];
         batchPullIds.add(pullId);
-        return [this.buildPullLockTx(side, spec.orderId, spec.tokenId, spec.amount)];
+        return [tx];
       }
       case 'rebalance_policy':
         return [{
@@ -1056,8 +1060,8 @@ describe('proofs/C2 hot-vs-cold account roots', () => {
 
   test('duplicate-pullId cross_pull_lock halts at proposal (finding C2-H2, current behavior)', async () => {
     // Found by the hardened generator (seed 20260826, 100 runs): local enqueue
-    // admits two cross_pull_lock txs with the same pullId but different
-    // amounts (mempool fingerprint dedup only catches exact bytes), and the
+    // admits two cross_pull_lock txs with the same pullId but different route
+    // update timestamps (mempool fingerprint dedup only catches exact bytes), and the
     // second one then trips the deliberate proposal tripwire
     // CROSS_J_PULL_LOCK_PROPOSAL_FAILED (halt_runtime) instead of a typed
     // row rejection. Production pulls come from the deterministic Entity
@@ -1065,11 +1069,17 @@ describe('proofs/C2 hot-vs-cold account roots', () => {
     // the same authority class as F1/FX-3. Availability candidate on owner
     // decision; this pin holds the current halt behavior and proves the
     // committed roots stay hot==cold up to the halt.
+    // Amounts now belong to the route-derived ID; vary only updatedAt to keep
+    // both openings canonical while exercising a genuine duplicate pull ID.
     const harness = new BilateralHarness();
-    const first = await harness.admitRaw('alpha', [harness.buildPullLockTx('alpha', 2, 4, 150n)]);
+    const firstTx = harness.buildPullLockTx('alpha', 2, 4, 150n);
+    const secondTx = harness.buildPullLockTx('alpha', 2, 4, 150n);
+    secondTx.data.crossJurisdictionRoute.updatedAt = 2;
+    expect(secondTx.data.pullId).toBe(firstTx.data.pullId);
+    const first = await harness.admitRaw('alpha', [firstTx]);
     expect(first.ok && first.admittedAccountTxCount).toBe(1);
     harness.checkAll('c2-h2 step-1');
-    const second = await harness.admitRaw('alpha', [harness.buildPullLockTx('alpha', 2, 4, 1_213n)]);
+    const second = await harness.admitRaw('alpha', [secondTx]);
     expect(second.ok && second.admittedAccountTxCount).toBe(1);
     harness.checkAll('c2-h2 step-2');
     await expect(harness.step({ kind: 'propose', side: 'alpha' })).rejects.toThrow('CROSS_J_PULL_LOCK_PROPOSAL_FAILED');
