@@ -1,4 +1,7 @@
 /** Runs independent package gates concurrently and reports each result immediately. */
+import { assertCheckEnvironment } from './check-environment';
+
+assertCheckEnvironment();
 
 const gateNames = process.argv.slice(2);
 if (gateNames.length === 0 || gateNames.some(name => !/^[a-z0-9:-]+$/.test(name))) {

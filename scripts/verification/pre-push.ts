@@ -1,4 +1,5 @@
 import { repository, sourceState } from './git';
+import { assertCheckEnvironment } from '../../tools/check-environment';
 import { verify } from './verify';
 
 export const validateUpdates = (input: string, head: string): boolean => {
@@ -27,6 +28,7 @@ export const validateUpdates = (input: string, head: string): boolean => {
 };
 
 export const prePush = async (cwd: string, input: string): Promise<void> => {
+  assertCheckEnvironment();
   const { root } = repository(cwd);
   const head = sourceState(root).head;
   if (!validateUpdates(input, head)) return;
@@ -36,6 +38,7 @@ export const prePush = async (cwd: string, input: string): Promise<void> => {
 };
 
 if (import.meta.main) {
+  assertCheckEnvironment();
   prePush(process.cwd(), await Bun.stdin.text()).catch(error => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

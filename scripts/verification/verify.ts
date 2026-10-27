@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { assertCheckEnvironment } from '../../tools/check-environment';
 import { closeSync, fsyncSync, mkdirSync, openSync, renameSync, writeSync } from 'node:fs';
 import { arch, hostname, platform, release } from 'node:os';
 import { join } from 'node:path';
@@ -43,6 +44,7 @@ const atomicResult = (path: string, value: unknown): void => {
 };
 
 export const verify = async (cwd: string) => {
+  assertCheckEnvironment();
   const { root, commonDir } = repository(cwd);
   const before = sourceState(root);
   const startedAt = new Date().toISOString();

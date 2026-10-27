@@ -128,7 +128,7 @@ describe('openAccount profile advertise', () => {
           type: 'openAccount',
           data: {
             targetEntityId: hubEntityId,
-            creditAmount: 10_000n,
+            creditAmount: 10_000_000_000n,
             tokenId: 1,
             disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
           },
@@ -152,6 +152,7 @@ describe('openAccount profile advertise', () => {
     expect(dump.descriptorAccounts, `descriptor ${JSON.stringify(dump)}`).toContain(hubEntityId);
     expect(dump.gossipAccounts, `gossip ${JSON.stringify(dump)}`).toContain(hubEntityId);
     expect(BigInt(dump.liquidity ?? '0'), `liquidity ${JSON.stringify(dump)}`).toBeGreaterThan(0n);
+    expect(BigInt(dump.liquidity ?? '0')).toBe(10_000_000_000n);
 
     const unchangedProfileReplica: EntityReplica = {
       ...user,

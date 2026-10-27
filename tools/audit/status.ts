@@ -88,6 +88,7 @@ const invariantStatus = (
     moduleId: invariant.moduleId,
     coverage: requiredWeight === 0 ? 0 : roundMetric((passedWeight / requiredWeight) * 100),
     missingEvidence: invariant.requiredEvidence.filter(kind => current.get(kind)?.state !== 'PASS'),
+    failedEvidence: invariant.requiredEvidence.filter(kind => current.get(kind)?.state === 'FAIL'),
     staleEvidence: invariant.requiredEvidence.filter(kind => historical.has(kind) && !current.has(kind)),
   };
 };
@@ -151,14 +152,10 @@ export const computeAuditStatus = (
       sum + (status.coverage * owned[index]!.importance)
     ), 0) / totalImportance);
     const currentFingerprint = fingerprints.get(module.id) ?? '';
-    const currentEvidence = owned.reduce((sum, invariant) => {
-      const current = latestEvidenceByKind(registry.evidence.filter(item => (
-        item.invariantId === invariant.id
-        && item.moduleFingerprint === currentFingerprint
-        && item.environmentFingerprint === environmentFingerprint
-      )));
-      return sum + invariant.requiredEvidence.filter(kind => current.has(kind)).length;
-    }, 0);
+    const currentEvidence = statuses.reduce((sum, status, index) => (
+      sum + owned[index]!.requiredEvidence.length - status.missingEvidence.length
+    ), 0);
+    const failedEvidence = statuses.reduce((sum, status) => sum + status.failedEvidence.length, 0);
     const staleEvidence = statuses.reduce((sum, status) => sum + status.staleEvidence.length, 0);
     const findings = registry.findings.filter(finding => findingIsOpen(finding) && (
       dependencyModuleIds.has(finding.moduleId)
@@ -174,10 +171,11 @@ export const computeAuditStatus = (
       id: module.id,
       title: module.title,
       criticality: module.criticality,
-      state: moduleState(coverage, currentEvidence, staleEvidence, findings),
+      state: moduleState(coverage, currentEvidence + failedEvidence, staleEvidence, findings),
       coverage,
       quality: moduleQuality(module, coverage, findings),
       currentEvidence,
+      failedEvidence,
       staleEvidence,
       openFindings: findings.length,
       openHighFindings: findings.filter(finding => finding.severity === 'P0' || finding.severity === 'P1').length,
@@ -205,6 +203,8 @@ export const computeAuditStatus = (
     modules,
     invariants,
     currentEvidence: modules.reduce((sum, module) => sum + module.currentEvidence, 0),
+    failedEvidence: modules.reduce((sum, module) => sum + module.failedEvidence, 0),
+    blockedRunIds: registry.agentRuns.filter(run => run.state === 'BLOCKED').map(run => run.id),
     staleEvidence: modules.reduce((sum, module) => sum + module.staleEvidence, 0),
   };
 };

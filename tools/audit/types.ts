@@ -163,6 +163,7 @@ export type InvariantAuditStatus = Readonly<{
   moduleId: string;
   coverage: number;
   missingEvidence: readonly EvidenceKind[];
+  failedEvidence: readonly EvidenceKind[];
   staleEvidence: readonly EvidenceKind[];
 }>;
 
@@ -176,6 +177,7 @@ export type ModuleAuditStatus = Readonly<{
   coverage: number;
   quality: number;
   currentEvidence: number;
+  failedEvidence: number;
   staleEvidence: number;
   openFindings: number;
   openHighFindings: number;
@@ -194,5 +196,7 @@ export type AuditStatus = Readonly<{
   modules: readonly ModuleAuditStatus[];
   invariants: readonly InvariantAuditStatus[];
   currentEvidence: number;
+  failedEvidence: number;
   staleEvidence: number;
+  blockedRunIds: readonly string[];
 }>;

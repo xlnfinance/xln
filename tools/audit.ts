@@ -59,10 +59,9 @@ const criticalityOrder: Readonly<Record<ModuleCriticality, number>> = {
 };
 
 const printAgentLedger = (registry: AuditRegistry): void => {
-  const completed = registry.agentRuns.filter(run => run.state === 'COMPLETED').length;
   const running = registry.agentRuns.filter(run => run.state === 'RUNNING').length;
   const blocked = registry.agentRuns.filter(run => run.state === 'BLOCKED').length;
-  console.log(`\nAGENTS total=${registry.agentRuns.length} completed=${completed} active=${running} blocked=${blocked}`);
+  console.log(`\nAGENT EXECUTIONS total=${registry.agentRuns.length} active=${running} blocked=${blocked} (coverage counts passed evidence only)`);
   const reviewers = new Map(registry.reviewers.map(reviewer => [reviewer.id, reviewer]));
   for (const run of [...registry.agentRuns].sort((left, right) => right.usefulnessScore - left.usefulnessScore)) {
     const marker = run.provisional ? 'PROVISIONAL' : 'ADJUDICATED';
@@ -103,7 +102,14 @@ const statusCommand = (registry: AuditRegistry, json: boolean): void => {
     console.log(JSON.stringify({ status, agentRuns: registry.agentRuns }, null, 2));
     return;
   }
-  console.log(`AUDIT STATUS sha=${status.sourceSha.slice(0, 10)} coverage=${status.coverage}% quality=${status.quality}% evidence=${status.currentEvidence} current/${status.staleEvidence} stale`);
+  console.log(`AUDIT STATUS sha=${status.sourceSha.slice(0, 10)} coverage=${status.coverage}% quality=${status.quality}% evidence=${status.currentEvidence} passed/${status.failedEvidence} failed/${status.staleEvidence} stale blocked=${status.blockedRunIds.length}`);
+  for (const invariant of status.invariants) {
+    if (invariant.failedEvidence.length) console.log(`FAILED ${invariant.id}: ${invariant.failedEvidence.join(',')}`);
+    if (invariant.staleEvidence.length) console.log(`STALE ${invariant.id}: ${invariant.staleEvidence.join(',')}`);
+  }
+  for (const run of registry.agentRuns.filter(run => status.blockedRunIds.includes(run.id))) {
+    console.log(`BLOCKED ${run.id}: ${run.summary}`);
+  }
   console.log('COV    QUAL   SCORE  REV/FAM  LEFT   P0/1  STATE       CRIT      MODULE · NEXT');
   const invariantStatuses = new Map(status.invariants.map(invariant => [invariant.id, invariant]));
   const modules = [...status.modules].sort((left, right) => (
