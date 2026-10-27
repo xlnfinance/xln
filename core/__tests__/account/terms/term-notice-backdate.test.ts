@@ -164,7 +164,7 @@ test('authenticated receiver rejects, restarts, accepts re-proposal and retries 
   const stale = await inputFor(await makeFrame(account, [policy(2, 30n)], 2000));
   const root = computeAccountStateRoot(account.state);
   const preflight = (input: AccountInput, entityTimestamp = 40_001) => preflightIncomingAccountFrame(
-    account, input, undefined, account.currentHeight, [], [], { ...clock, entityTimestamp },
+    account, input, undefined, [], [], { ...clock, entityTimestamp },
   );
   for (const restart of [false, true]) {
     if (restart) account = restore(account);

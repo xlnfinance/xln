@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { AccountView } from '../runtime/views';
 import { getTokenMeta } from '../runtime/token-meta';
-import { plainAmount } from '../runtime/format';
+import { amountInputText } from '../runtime/format';
 
 /** Notices come from the signed Account register, never a profile or wall clock. */
 export function TermChangeNotice({
@@ -25,14 +25,14 @@ export function TermChangeNotice({
       const changes = [
         [
           'collateral base fee',
-          plainAmount(old.baseFee, meta.decimals),
-          plainAmount(next.baseFee, meta.decimals),
+          amountInputText(old.baseFee, meta.decimals),
+          amountInputText(next.baseFee, meta.decimals),
           meta.symbol,
         ],
         [
           'collateral gas fee',
-          plainAmount(old.gasFee, meta.decimals),
-          plainAmount(next.gasFee, meta.decimals),
+          amountInputText(old.gasFee, meta.decimals),
+          amountInputText(next.gasFee, meta.decimals),
           meta.symbol,
         ],
         [`collateral liquidity fee (${meta.symbol})`, String(old.liquidityFeeBps), String(next.liquidityFeeBps), 'bps'],
