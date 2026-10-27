@@ -113,3 +113,26 @@ test('proof replay and allowance reservations survive database reopen and compet
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('first observation is durable, scoped per hub/borrower, and never rewritten by another connection', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'xln-credit-age-'));
+  const path = join(dir, 'ledger.sqlite');
+  let ledger = new CreditLedger(path);
+  try {
+    expect(ledger.observe(request, now)).toBe(now);
+    ledger.close();
+    ledger = new CreditLedger(path);
+    const competitor = new CreditLedger(path);
+    try {
+      expect(competitor.observe(request, now - 30 * 86_400_000)).toBe(now);
+      expect(ledger.observe({ ...request, tokenId: 4, day: '2026-10-28' }, now + 86_400_000)).toBe(now);
+      expect(ledger.observe({ ...request, hubEntityId: request.borrowerEntityId }, now + 1)).toBe(now + 1);
+      expect(ledger.observe({ ...request, borrowerEntityId: request.hubEntityId }, now + 2)).toBe(now + 2);
+    } finally {
+      competitor.close();
+    }
+  } finally {
+    ledger.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

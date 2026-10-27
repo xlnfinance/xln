@@ -15,7 +15,29 @@ export class CreditLedger {
       id INTEGER PRIMARY KEY, hub TEXT NOT NULL, borrower TEXT NOT NULL, day TEXT NOT NULL,
       nonce TEXT NOT NULL, usd TEXT NOT NULL, reserved INTEGER NOT NULL, evidence TEXT NOT NULL,
       UNIQUE(hub, borrower, day, nonce));
-      CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, evidence TEXT NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, evidence TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS observations (
+        hub TEXT NOT NULL, borrower TEXT NOT NULL, firstSeenAt INTEGER NOT NULL,
+        PRIMARY KEY(hub, borrower));`);
+  }
+  /** Called only after a verified committed read. Peer timestamps never age a
+   * borrower; the first officer observation survives restarts and competing writers. */
+  observe(r: CreditRequest, now: number): number {
+    if (!Number.isSafeInteger(now) || now < 0) throw new Error('INVALID_OFFICER_TIME');
+    return this.db
+      .transaction(() => {
+        this.db
+          .query('INSERT INTO observations(hub,borrower,firstSeenAt) VALUES(?,?,?) ON CONFLICT DO NOTHING')
+          .run(r.hubEntityId, r.borrowerEntityId, now);
+        const row = this.db
+          .query<{ firstSeenAt: number }, [string, string]>(
+            'SELECT firstSeenAt FROM observations WHERE hub=? AND borrower=?',
+          )
+          .get(r.hubEntityId, r.borrowerEntityId);
+        if (!row) throw new Error('CREDIT_OBSERVATION_MISSING');
+        return row.firstSeenAt;
+      })
+      .immediate();
   }
   spent(r: CreditRequest): bigint {
     const rows = this.db

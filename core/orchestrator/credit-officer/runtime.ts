@@ -4,13 +4,15 @@ import type { AccountFrame } from '../../types/account';
 import type { LendingBankTerms, LendingFacility, LendingLoan } from '../../types/finance/lending';
 import { creditUsd, type CreditFacts } from './policy';
 import type { CreditRequest } from './proof';
+import type { CreditLedger } from './ledger';
 
 type CreditBook = { loans: LendingLoan[]; facilities: LendingFacility[]; terms: LendingBankTerms[] };
 
 /** Only committed adapter reads supply reputation. The bounded signed frame
- * sample gives lower bounds for age/volume, never a claim of complete history.
+ * sample gives a volume lower bound, never a claim of complete history.
+ * Registration age belongs only to the officer's durable observation clock.
  * Transfers involving the bank or borrower themselves earn no volume points. */
-export async function readCreditEvidence(adapter: RuntimeAdapter, r: CreditRequest, now: number) {
+export async function readCreditEvidence(adapter: RuntimeAdapter, r: CreditRequest, now: number, ledger: CreditLedger) {
   const path = `/entity/${r.hubEntityId}`;
   const snapshot = await adapter.read<ReturnType<typeof readLendingEvidence>>(`${path}/lending`, {
     accountId: r.borrowerEntityId,
@@ -18,9 +20,9 @@ export async function readCreditEvidence(adapter: RuntimeAdapter, r: CreditReque
   const { atHeight, account, book, signerId, isHub } = snapshot;
   if (!isHub || !signerId || atHeight < 1) throw new Error('HUB_AUTHORITY_UNAVAILABLE');
   if (account.status !== 'active' || !account.state.deltas.has(r.tokenId)) throw new Error('ACCOUNT_UNAVAILABLE');
+  const firstSeenAt = ledger.observe(r, now);
   const frames = await adapter.read<AccountFrame[]>(`${path}/account/${r.borrowerEntityId}/frames`, { limit: 500 });
   const committedFrames = frames.filter(frame => frame.height <= account.currentHeight);
-  const facts = creditFacts(account, book, committedFrames, now, r);
   const terms = book.terms.find(
     row =>
       row.tokenId === r.tokenId &&
@@ -29,7 +31,8 @@ export async function readCreditEvidence(adapter: RuntimeAdapter, r: CreditReque
       row.depositoryAddress === account.state.domain.depositoryAddress,
   );
   if (!terms || terms.expiresAt <= now) throw new Error('BANK_TERMS_UNAVAILABLE');
-  return { signerId, atHeight, accountRoot: account.currentFrame.accountStateRoot, facts, terms };
+  const facts = creditFacts(account, book, committedFrames, now, r, firstSeenAt);
+  return { signerId, atHeight, accountRoot: account.currentFrame.accountStateRoot, firstSeenAt, facts, terms };
 }
 
 function creditFacts(
@@ -38,6 +41,7 @@ function creditFacts(
   frames: AccountFrame[],
   now: number,
   request: CreditRequest,
+  firstSeenAt: number,
 ): CreditFacts {
   let volumeUsd = 0n;
   for (const frame of frames)
@@ -64,10 +68,9 @@ function creditFacts(
     loans
       .filter(row => row.status !== 'repaid' && row.principalAmount > 0n)
       .reduce((sum, row) => sum + creditUsd(row.tokenId, row.principalAmount), 0n);
-  const oldest = frames.reduce((value, frame) => Math.min(value, frame.timestamp), now);
   return {
     chainId: account.state.domain.chainId,
-    ageDays: Math.max(0, Math.floor((now - oldest) / 86_400_000)),
+    ageDays: Math.max(0, Math.floor((now - firstSeenAt) / 86_400_000)),
     volumeUsd,
     exposureUsd,
     repaid: loans.filter(row => row.status === 'repaid' && row.updatedAt <= row.dueAt).length,

@@ -20,7 +20,9 @@ the existing facility remains revolving, not a cap on gross payment turnover.
 All values use integer USD micros and the canonical committed token catalog.
 Exposure rounds up. One committed runtime read binds bank authority, the
 borrower's Account, terms, loans and facilities. At most 500 signed Account
-frames provide conservative age and volume lower bounds. Only committed
+frames provide a conservative volume lower bound. Age uses only officer-owned
+`firstSeenAt` per hub/borrower, persisted in SQLite after the first verified
+committed read and retained across restarts; Account timestamps never prove age. Only committed
 borrower-originated trusted source legs earn volume, not bank hops or self
 transfers. On-time repayment comes from the committed loan book. Defaults,
 disputes, overdue loans and changed Account epochs require manual review.
@@ -36,6 +38,8 @@ owned solely by the hub's checkpoint/WAL and authenticated command frontier.
 The service logs evidence and submission/denial separately. It fails closed
 on unavailable reads, expired capability, storage errors or command failure.
 Restart the orchestrator to mint a new 24-hour officer capability after expiry.
+Officer startup failures are reported and trigger bounded officer-only cleanup; approval requests return HTTP 503 while hubs keep running.
+Testnet accepts limits per address and advance mining of daily proofs; neither establishes unique borrower identity.
 
 Tests: `bun test core/__tests__/orchestrator/credit-officer`.
 Browser flow: with an enabled testnet stand, run

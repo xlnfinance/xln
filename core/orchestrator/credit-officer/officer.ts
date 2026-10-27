@@ -34,7 +34,7 @@ export class CreditOfficer {
     if (this.busy) throw new Error('OFFICER_BUSY');
     this.busy = true;
     try {
-      const evidence = await readCreditEvidence(adapter, request, now);
+      const evidence = await readCreditEvidence(adapter, request, now, this.ledger);
       const spent = this.ledger.spent(request);
       const score = scoreCredit(request, { ...evidence.facts, exposureUsd: evidence.facts.exposureUsd + spent }, spent);
       const audit = { request, now, ...evidence, score };
