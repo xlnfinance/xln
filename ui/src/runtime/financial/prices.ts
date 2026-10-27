@@ -3,8 +3,8 @@ import { getAssetValueUsd } from '$lib/components/Entity/assets/entity-asset-val
 import { getTokenMeta } from '../token-meta';
 
 /**
- * USD valuation for the visceral scale. Same static reference table the
- * SvelteKit frontend renders with; one source, two shells.
+ * USD valuation for the visceral scale. Reads the committed catalog
+ * reference rate that protocol fees, caps and the MM mid derive from.
  */
 export function usdOf(tokenId: number, amount: bigint): number {
 	const meta = getTokenMeta(tokenId);

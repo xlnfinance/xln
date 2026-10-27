@@ -35,16 +35,16 @@ test('rebalance defaults scale jurisdiction USD policy into each token precision
     rebalancePolicyUsd: { r2cRequestSoftLimit: 500, hardLimit: 10_000, maxFee: 15 },
   } as JurisdictionConfig);
 
-  // USDC carries 6 decimals, WETH 18. Same USD policy, different raw scale.
+  // Same USD policy through the committed reference rate: USDC $1 (6 decimals), WETH $2,500 (18).
   expect(resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, 1)).toEqual({
     r2cRequestSoftLimit: 500_000_000n,
     hardLimit: 10_000_000_000n,
     maxAcceptableFee: 15_000_000n,
   });
   expect(resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, 2)).toEqual({
-    r2cRequestSoftLimit: 500_000_000_000_000_000_000n,
-    hardLimit: 10_000_000_000_000_000_000_000n,
-    maxAcceptableFee: 15_000_000_000_000_000_000n,
+    r2cRequestSoftLimit: 200_000_000_000_000_000n, // 0.2 WETH = $500
+    hardLimit: 4_000_000_000_000_000_000n, // 4 WETH = $10,000
+    maxAcceptableFee: 6_000_000_000_000_000n, // 0.006 WETH = $15
   });
 });
 

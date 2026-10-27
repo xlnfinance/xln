@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   getSwapPairPolicyForDimensions,
   getTokenInfo,
   hasSwapPairPolicyForDimensions,
 } from '../../../account/utils';
-import { defaultTokensForJurisdiction } from '../../../jurisdiction/machine/config/default-tokens';
+import { CATALOG_TOKENS, defaultTokensForJurisdiction } from '../../../jurisdiction/machine/config/default-tokens';
 import { getBootstrapCreditAmount } from '../../../orchestrator/mesh/mesh-common';
 
 describe('supported-token metadata boundary', () => {
@@ -34,5 +36,28 @@ describe('supported-token metadata boundary', () => {
     // not the six-decimal built-in TRX asset from another jurisdiction.
     expect(hasSwapPairPolicyForDimensions(4, 3, 0, 6)).toBeFalse();
     expect(getSwapPairPolicyForDimensions(4, 3, 0, 6).mmMidPriceTicks).toBe(10_000n);
+  });
+
+  // Both engines price every protocol USD amount through their own copy of the
+  // catalog rate; any drift would split base fee, credit cap and MM mid.
+  test('Rust token catalog carries the same decimals, symbol and USD reference rate', () => {
+    const source = readFileSync(
+      join(import.meta.dir, '../../../../rscore/crates/protocol/src/tokens.rs'),
+      'utf8',
+    );
+    const rows = [...source.matchAll(/(\d+) => Some\(\((\d+), "([A-Z]+)", ([\d_]+)\)\)/g)].map(match => ({
+      tokenId: Number(match[1]),
+      decimals: Number(match[2]),
+      symbol: match[3],
+      usdMicros: BigInt(match[4]!.replaceAll('_', '')),
+    }));
+    expect(rows).toEqual(
+      CATALOG_TOKENS.map((token, index) => ({
+        tokenId: index + 1,
+        decimals: token.decimals,
+        symbol: token.symbol,
+        usdMicros: token.usdMicros,
+      })),
+    );
   });
 });

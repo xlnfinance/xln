@@ -70,9 +70,6 @@ export interface AccountRebalanceShadowState {
   pendingRequest?: { tokenId: number; targetAmount: bigint };
 }
 
-const DEFAULT_SOFT_LIMIT_WHOLE = 500n;
-const DEFAULT_HARD_LIMIT_WHOLE = 10_000n;
-const DEFAULT_MAX_FEE_WHOLE = 15n;
 export const QUOTE_EXPIRY_MS = 300_000;
 
 const requireTokenDecimals = (value: number): bigint => {
@@ -84,16 +81,4 @@ const requireTokenDecimals = (value: number): bigint => {
 
 export const scaleWholeTokenAmount = (amount: bigint, decimals: number): bigint =>
   amount * 10n ** requireTokenDecimals(decimals);
-
-export const buildDefaultRebalancePolicy = (decimals: number): RebalancePolicy => ({
-  r2cRequestSoftLimit: scaleWholeTokenAmount(DEFAULT_SOFT_LIMIT_WHOLE, decimals),
-  hardLimit: scaleWholeTokenAmount(DEFAULT_HARD_LIMIT_WHOLE, decimals),
-  maxAcceptableFee: scaleWholeTokenAmount(DEFAULT_MAX_FEE_WHOLE, decimals),
-});
-
-export const buildDefaultRebalanceBaseFee = (decimals: number): bigint => {
-  const normalized = requireTokenDecimals(decimals);
-  if (normalized === 0n) throw new Error('TOKEN_AMOUNT_PRECISION_UNREPRESENTABLE:0.1:0');
-  return 10n ** (normalized - 1n);
-};
 import type { AccountStateCollection } from '../../account/state/persistent-state-map';

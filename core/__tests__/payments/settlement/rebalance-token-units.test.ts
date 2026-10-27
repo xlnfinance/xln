@@ -8,7 +8,7 @@ import {
 import { dai, eth, usd } from '../../../scenarios/harness/helpers';
 import { getBootstrapTokenAmount } from '../../../jurisdiction/machine/config/bootstrap-economy';
 
-describe('rebalance defaults use token raw units', () => {
+describe('rebalance defaults are USD amounts in token raw units', () => {
   test('USDC token 1 uses six-decimal raw amounts', () => {
     expect(getDefaultRebalancePolicyForToken(1)).toEqual({
       r2cRequestSoftLimit: 500n * 10n ** 6n,
@@ -18,18 +18,22 @@ describe('rebalance defaults use token raw units', () => {
     expect(getDefaultRebalanceBaseFeeForToken(1)).toBe(10n ** 5n);
   });
 
-  test('WETH token 2 uses eighteen-decimal raw amounts', () => {
+  test('WETH token 2 converts the same USD amounts at the $2,500 reference rate', () => {
     expect(getDefaultRebalancePolicyForToken(2)).toEqual({
-      r2cRequestSoftLimit: 500n * 10n ** 18n,
-      hardLimit: 10_000n * 10n ** 18n,
-      maxAcceptableFee: 15n * 10n ** 18n,
+      r2cRequestSoftLimit: 2n * 10n ** 17n,
+      hardLimit: 4n * 10n ** 18n,
+      maxAcceptableFee: 6n * 10n ** 15n,
     });
-    expect(getDefaultRebalanceBaseFeeForToken(2)).toBe(10n ** 17n);
+    expect(getDefaultRebalanceBaseFeeForToken(2)).toBe(4n * 10n ** 13n);
   });
 
-  test('unsupported token metadata fails instead of assuming eighteen decimals', () => {
+  test('TRX base fee floors $0.10 at the $0.12 reference rate', () => {
+    expect(getDefaultRebalanceBaseFeeForToken(4)).toBe(833_333n);
+  });
+
+  test('a token without a catalog rate fails instead of assuming a price', () => {
     expect(() => getDefaultRebalancePolicyForToken(999_999))
-      .toThrow('TOKEN_METADATA_UNAVAILABLE:999999');
+      .toThrow('TOKEN_USD_RATE_UNAVAILABLE:999999');
   });
 
   test('tokenless raw amount overrides are rejected', () => {

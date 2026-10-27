@@ -18,13 +18,19 @@ use crate::{
     CommittedAccountTransition, EntityKernelError, EntityStateSlice, OrderedAccountCommit,
 };
 
-/// TS `CREDIT_REQUEST_CAP_WHOLE` in `core/account/config/defaults.ts`.
-const CREDIT_REQUEST_CAP_WHOLE: u16 = 1_000;
-
-/// `None` for a token without canonical metadata: no automatic grant.
-pub(crate) fn credit_request_cap(token_id: TokenId) -> Option<BigInt> {
-    crate::canonical_token_decimals(u32::from(token_id.get()))
-        .map(|decimals| BigInt::from(CREDIT_REQUEST_CAP_WHOLE) * BigInt::from(10_u8).pow(decimals))
+/// TS `getCreditRequestCapForToken`: $1,000 at the committed reference rate.
+/// `None` for a token without a catalog rate: no automatic grant.
+pub(crate) fn credit_request_cap(token_id: TokenId) -> Result<Option<BigInt>, EntityKernelError> {
+    let token_id = u32::from(token_id.get());
+    if xln_rscore_protocol::canonical_token_usd_micros(token_id).is_none() {
+        return Ok(None);
+    }
+    xln_rscore_protocol::whole_usd_to_token_amount(
+        token_id,
+        &BigInt::from(xln_rscore_protocol::CREDIT_REQUEST_CAP_USD),
+    )
+    .map(Some)
+    .map_err(|error| EntityKernelError::output(format!("CREDIT_REQUEST_CAP:{error}")))
 }
 
 pub(crate) fn apply_committed_credit_request_followup(
@@ -46,7 +52,7 @@ pub(crate) fn apply_committed_credit_request_followup(
     if !state.profile.is_hub || !commit.committed_via_new_frame {
         return Ok(true);
     }
-    let Some(cap) = credit_request_cap(*token_id) else {
+    let Some(cap) = credit_request_cap(*token_id)? else {
         return Ok(true);
     };
     let target = std::cmp::min(amount.clone(), cap);
@@ -170,7 +176,7 @@ mod tests {
     #[test]
     fn hub_raises_its_line_to_min_requested_cap() {
         assert_eq!(
-            credit_request_cap(usdc()),
+            credit_request_cap(usdc()).expect("cap"),
             Some(BigInt::from(1_000 * WHOLE))
         );
         assert_eq!(answer(true, true, 25 * WHOLE, 0), grant(25 * WHOLE));
@@ -190,7 +196,18 @@ mod tests {
     }
 
     #[test]
+    fn weth_cap_is_one_thousand_dollars_at_the_reference_rate() {
+        assert_eq!(
+            credit_request_cap(TokenId::new(2).expect("token")).expect("cap"),
+            Some(BigInt::from(400_000_000_000_000_000_u64))
+        );
+    }
+
+    #[test]
     fn unknown_token_has_no_cap() {
-        assert_eq!(credit_request_cap(TokenId::new(999).expect("token")), None);
+        assert_eq!(
+            credit_request_cap(TokenId::new(999).expect("token")).expect("cap"),
+            None
+        );
     }
 }

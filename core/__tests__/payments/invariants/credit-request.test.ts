@@ -147,8 +147,9 @@ describe('credit_request AccountTx', () => {
 describe('committed credit_request hub follow-up', () => {
   const cap = getCreditRequestCapForToken(USDC)!;
 
-  test('the deterministic cap is 1,000 whole tokens', () => {
+  test('the deterministic cap is $1,000 at the committed reference rate', () => {
     expect(cap).toBe(1_000n * WHOLE);
+    expect(getCreditRequestCapForToken(2)).toBe(400_000_000_000_000_000n); // 0.4 WETH
     expect(getCreditRequestCapForToken(999)).toBeUndefined();
   });
 

@@ -38,12 +38,12 @@ fn hub_policy_tx(config: &CanonicalValue, token_id: u32) -> Result<AccountTx, En
         Some(CanonicalValue::BigInt(value)) => value.clone(),
         _ => return Err(invalid("HUB_POLICY_LIQUIDITY_FEE")),
     };
-    let decimals = crate::canonical_token_decimals(token_id)
-        .ok_or_else(|| invalid(format!("TOKEN_DECIMALS_UNKNOWN:{token_id}")))?;
+    let base_fee = xln_rscore_protocol::rebalance_base_fee(token_id)
+        .map_err(|error| invalid(format!("HUB_POLICY_BASE_FEE:{error}")))?;
     Ok(AccountTx::RebalancePolicy {
         token_id,
         policy_version,
-        base_fee: BigInt::from(10_u8).pow(decimals - 1),
+        base_fee,
         liquidity_fee_bps,
         gas_fee: BigInt::from(0_u8),
     })
@@ -207,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn hub_open_account_supports_all_canonical_token_decimals() {
+    fn hub_open_account_prices_the_base_fee_at_ten_cents_for_every_catalog_token() {
         let config = CanonicalValue::Object(vec![
             (
                 "policyVersion".into(),
@@ -219,11 +219,11 @@ mod tests {
             ),
         ]);
         for (token, expected_fee) in [
-            (1, 100_000_u64),
-            (2, 100_000_000_000_000_000),
-            (3, 100_000),
-            (4, 100_000),
-            (5, 100_000_000_000_000_000),
+            (1, 100_000_u64),               // 0.1 USDC
+            (2, 40_000_000_000_000),        // 0.00004 WETH at $2,500
+            (3, 100_000),                   // 0.1 USDT
+            (4, 833_333),                   // floor(0.1 / 0.12) TRX
+            (5, 5_000_000_000_000_000_000), // 5 SUN at $0.02
         ] {
             let AccountTx::RebalancePolicy { base_fee, .. } =
                 hub_policy_tx(&config, token).unwrap()

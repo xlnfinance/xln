@@ -11,10 +11,8 @@ use xln_rscore_protocol::{CanonicalValue, PersistentRadixMap, encode_account_sta
 
 use super::RuntimeMachineError;
 
-const DEFAULT_POLICY_TOKENS: [(u16, u32); 3] = [(1, 6), (3, 6), (2, 18)];
-const DEFAULT_SOFT_LIMIT: u64 = 500;
-const DEFAULT_HARD_LIMIT: u64 = 10_000;
-const DEFAULT_MAX_FEE: u64 = 15;
+/// TS `DEFAULT_ACCOUNT_TOKEN_IDS` (USDC, USDT, WETH).
+const DEFAULT_POLICY_TOKENS: [u16; 3] = [1, 3, 2];
 
 /// Attach owner-derived H=0 policy only to the first row for each Account that
 /// is absent from the committed Entity state. Peer bytes never choose any of
@@ -84,20 +82,25 @@ fn shadow_policy_rows(
         .map(|value| canonical_object(value, "REBALANCE_POLICY_OBJECT"))
         .transpose()?;
     let mut rows = Vec::with_capacity(DEFAULT_POLICY_TOKENS.len());
-    for (token_id, decimals) in DEFAULT_POLICY_TOKENS {
-        let scale = BigInt::from(10_u8).pow(decimals);
+    let (default_soft, default_hard, default_max_fee) =
+        xln_rscore_protocol::DEFAULT_REBALANCE_POLICY_USD;
+    for token_id in DEFAULT_POLICY_TOKENS {
+        // Whole USD from committed jurisdiction config (or the protocol
+        // default), converted through the catalog reference rate exactly like
+        // TS `resolveJurisdictionRebalanceDefaults`.
         let amount = |name: &str, default: u64| -> Result<BigInt, RuntimeMachineError> {
-            let whole = match override_fields {
+            let dollars = match override_fields {
                 Some(fields) => {
                     canonical_floor_nonnegative(required_canonical(fields, name)?, name)?
                 }
                 None => BigInt::from(default),
             };
-            Ok(whole * &scale)
+            xln_rscore_protocol::whole_usd_to_token_amount(u32::from(token_id), &dollars)
+                .map_err(|error| policy_error(&format!("REBALANCE_POLICY_USD:{error}")))
         };
-        let soft = amount("r2cRequestSoftLimit", DEFAULT_SOFT_LIMIT)?;
-        let hard = amount("hardLimit", DEFAULT_HARD_LIMIT)?;
-        let max_fee = amount("maxFee", DEFAULT_MAX_FEE)?;
+        let soft = amount("r2cRequestSoftLimit", default_soft)?;
+        let hard = amount("hardLimit", default_hard)?;
+        let max_fee = amount("maxFee", default_max_fee)?;
         if soft <= BigInt::from(0_u8) || hard < soft {
             return Err(policy_error("REBALANCE_POLICY_INVALID"));
         }
@@ -435,7 +438,7 @@ mod tests {
         let root = shadow_policy_root(&rows).expect("default policy");
         assert_eq!(
             hex::encode(root),
-            "b6f09b549aac6b836985696c609df76b43c4563570749bcd1c967d261a485e09"
+            "29d86f0619ead274f88e66d73dc2fe583a2d0a087f1978ae36c37cf29a936755"
         );
     }
 
@@ -463,7 +466,7 @@ mod tests {
         assert_eq!(policy.delta_transformer, [0xd8; 20]);
         assert_eq!(
             hex::encode(policy.shadow_policy_root),
-            "b6f09b549aac6b836985696c609df76b43c4563570749bcd1c967d261a485e09"
+            "29d86f0619ead274f88e66d73dc2fe583a2d0a087f1978ae36c37cf29a936755"
         );
         assert!(!policy.public_pinned);
     }

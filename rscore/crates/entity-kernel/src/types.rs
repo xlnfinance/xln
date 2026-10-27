@@ -125,11 +125,15 @@ impl DeterministicContext {
             jurisdiction_id: None,
             pair_policies: BTreeMap::from([(
                 "1/2".to_string(),
-                PairPolicy {
-                    price_step_ticks: 1,
-                    book_bucket_width_ticks: 10_000,
-                    mid_price_ticks: BigInt::from(25_000_000),
-                },
+                crate::swapbook::canonical_pair_policy(
+                    2,
+                    1,
+                    crate::swapbook::PairDimensions {
+                        base_token_decimals: 18,
+                        quote_token_decimals: 6,
+                    },
+                )
+                .0,
             )]),
             prepared_htlcs: BTreeMap::new(),
             originated_htlcs: BTreeMap::new(),

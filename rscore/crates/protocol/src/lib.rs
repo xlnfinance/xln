@@ -13,7 +13,12 @@ mod radix;
 mod rlp;
 mod tokens;
 mod value;
-pub use tokens::{canonical_token_decimals, canonical_token_metadata};
+pub use tokens::{
+    CREDIT_REQUEST_CAP_USD, DEFAULT_REBALANCE_POLICY_USD, REBALANCE_BASE_FEE_USD_MICROS,
+    USD_MICROS_PER_DOLLAR, UsdAmountError, canonical_reference_mid_price_ticks,
+    canonical_token_decimals, canonical_token_metadata, canonical_token_usd_micros,
+    rebalance_base_fee, usd_micros_to_token_amount, whole_usd_to_token_amount,
+};
 
 #[cfg(test)]
 #[path = "persistent/tests.rs"]

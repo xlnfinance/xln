@@ -95,28 +95,29 @@ fn initial_hub_policy_txs(
     // only for tokens with catalog metadata; any other id gets none instead of
     // TOKEN_METADATA_UNAVAILABLE halting the hub after the frame committed
     // (TS buildInitialHubPolicyTargets).
-    let token_decimals = commit
+    commit
         .transitions
         .iter()
         .filter_map(|transition| match transition.tx {
-            AccountTx::AddDelta { token_id } => Some(token_id.get()),
+            AccountTx::AddDelta { token_id } => Some(u32::from(token_id.get())),
             _ => None,
         })
         .collect::<BTreeSet<_>>()
         .into_iter()
-        .filter_map(|token_id| {
-            crate::canonical_token_decimals(u32::from(token_id))
-                .map(|decimals| (token_id, decimals))
-        });
-    Ok(token_decimals
-        .map(|(token_id, decimals)| AccountTx::RebalancePolicy {
-            token_id: u32::from(token_id),
-            policy_version,
-            base_fee: BigInt::from(10_u8).pow(decimals - 1),
-            liquidity_fee_bps: liquidity_fee_bps.clone(),
-            gas_fee: BigInt::from(0),
+        .filter(|token_id| xln_rscore_protocol::canonical_token_usd_micros(*token_id).is_some())
+        .map(|token_id| {
+            let base_fee = xln_rscore_protocol::rebalance_base_fee(token_id).map_err(|error| {
+                EntityKernelError::output(format!("HUB_POLICY_BASE_FEE:{error}"))
+            })?;
+            Ok(AccountTx::RebalancePolicy {
+                token_id,
+                policy_version,
+                base_fee,
+                liquidity_fee_bps: liquidity_fee_bps.clone(),
+                gas_fee: BigInt::from(0),
+            })
         })
-        .collect())
+        .collect()
 }
 
 fn require_one_output<'a>(

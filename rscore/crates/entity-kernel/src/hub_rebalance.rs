@@ -225,26 +225,28 @@ fn config(state: &EntityStateSlice) -> Result<(MatchingStrategy, u64, BigInt), E
     Ok((strategy, policy_version, liquidity_fee_bps))
 }
 
-fn token_decimals(token: TokenId) -> Result<u32, EntityKernelError> {
-    crate::canonical_token_decimals(u32::from(token.get())).ok_or_else(|| {
-        EntityKernelError::HubRebalanceConfigInvalid {
-            detail: format!("TOKEN_METADATA_UNAVAILABLE:{}", token.get()),
-        }
+fn usd_amount(
+    amount: Result<BigInt, xln_rscore_protocol::UsdAmountError>,
+) -> Result<BigInt, EntityKernelError> {
+    amount.map_err(|error| EntityKernelError::HubRebalanceConfigInvalid {
+        detail: error.to_string(),
     })
 }
 
+/// TS `getDefaultRebalanceBaseFeeForToken`: $0.10 at the committed reference rate.
 fn default_base_fee(token: TokenId) -> Result<BigInt, EntityKernelError> {
-    let decimals = token_decimals(token)?;
-    if decimals == 0 {
-        return Err(EntityKernelError::HubRebalanceConfigInvalid {
-            detail: "TOKEN_AMOUNT_PRECISION_UNREPRESENTABLE:0.1:0".into(),
-        });
-    }
-    Ok(BigInt::from(10_u8).pow(decimals - 1))
+    usd_amount(xln_rscore_protocol::rebalance_base_fee(u32::from(
+        token.get(),
+    )))
 }
 
+/// TS `getDefaultRebalancePolicyForToken(...).r2cRequestSoftLimit`.
 fn default_soft_limit(token: TokenId) -> Result<BigInt, EntityKernelError> {
-    Ok(BigInt::from(500_u16) * BigInt::from(10_u8).pow(token_decimals(token)?))
+    let (soft_usd, _, _) = xln_rscore_protocol::DEFAULT_REBALANCE_POLICY_USD;
+    usd_amount(xln_rscore_protocol::whole_usd_to_token_amount(
+        u32::from(token.get()),
+        &BigInt::from(soft_usd),
+    ))
 }
 
 fn positive_u256(value: &BigInt) -> Result<U256, EntityKernelError> {

@@ -1,25 +1,17 @@
 import { requireTokenDecimals } from '#lib/components/Entity/token-metadata.ts';
+import { CATALOG_TOKENS } from '@xln/core/jurisdiction/machine/config/default-tokens';
 
-// ETH matches the WETH/USDC market maker mid (core/account/utils.ts, mmMidPriceTicks 2500.0000);
-// a different figure here made a swap look like it grew the balance.
-const USD_MICROS_BY_SYMBOL: Record<string, bigint> = {
-  USDC: 1_000_000n,
-  USDT: 1_000_000n,
-  ETH: 2_500_000_000n,
-  WETH: 2_500_000_000n,
-};
-
-function normalizeSymbol(symbol: string): string {
-  return String(symbol || '').trim().toUpperCase();
+// Valuation reads the committed catalog reference rate, the same one the
+// protocol and the market maker mid derive from; a second table here made a
+// swap look like it grew the balance. Native ETH is valued as WETH.
+export function getAssetUsdMicros(symbol: string): bigint {
+  const normalized = String(symbol || '').trim().toUpperCase();
+  const lookup = normalized === 'ETH' ? 'WETH' : normalized;
+  return CATALOG_TOKENS.find(token => token.symbol === lookup)?.usdMicros ?? 0n;
 }
 
 export function getAssetUsdPrice(symbol: string): number {
-  const micros = USD_MICROS_BY_SYMBOL[normalizeSymbol(symbol)] ?? 0n;
-  return Number(micros) / 1_000_000;
-}
-
-export function getAssetUsdMicros(symbol: string): bigint {
-  return USD_MICROS_BY_SYMBOL[normalizeSymbol(symbol)] ?? 0n;
+  return Number(getAssetUsdMicros(symbol)) / 1_000_000;
 }
 
 export function amountToUsdMicros(amount: bigint, decimals: number, symbol: string): bigint {

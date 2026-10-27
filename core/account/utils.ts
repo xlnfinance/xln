@@ -9,7 +9,8 @@ import { validateDelta } from './validation/delta-validation';
 // Re-exported under its own name so callers that already reach for account
 // utilities do not need a second import path for the LEFT tie-break.
 export { isLeftEntity } from '../protocol/identity/entity-id';
-import { DEFAULT_TOKENS, TRON_ONLY_DEFAULT_TOKENS, defaultTokensForJurisdiction } from '../jurisdiction/machine/config/default-tokens';
+import { CATALOG_TOKENS, defaultTokensForJurisdiction } from '../jurisdiction/machine/config/default-tokens';
+import { getTokenUsdMicros } from '../jurisdiction/machine/config/usd-reference-rate';
 import { logDebug } from '../support/logger';
 
 // CRITICAL: Default credit is 0 - credit must be explicitly extended via set_credit_limit
@@ -171,9 +172,9 @@ export function deriveDelta(delta: Delta, isLeft: boolean, signedProgramMovement
 const TOKEN_COLORS = ['#2775ca', '#627eea', '#26a17b', '#ef0027', '#f59e0b'] as const;
 const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; decimals: number; color: string }> =
   Object.fromEntries(
-    [...DEFAULT_TOKENS, ...TRON_ONLY_DEFAULT_TOKENS].map((token, index) => [
+    CATALOG_TOKENS.map(({ symbol, name, decimals }, index) => [
       index + 1,
-      { ...token, color: TOKEN_COLORS[index]! },
+      { symbol, name, decimals, color: TOKEN_COLORS[index]! },
     ]),
   );
 
@@ -248,65 +249,46 @@ export type SwapPairPolicy = {
   mmMidPriceTicks: bigint;
 };
 
+// One price unit in ORDERBOOK_PRICE_SCALE ticks (swapbook/types imports this module).
+const ONE_PRICE_TICKS = 10_000n;
+
 const DEFAULT_SWAP_PAIR_POLICY: SwapPairPolicy = {
   priceStepTicks: 1, // 0.0001
   bookBucketWidthTicks: 10_000, // 1.0000
-  mmMidPriceTicks: 10_000n, // 1.0000
+  mmMidPriceTicks: ONE_PRICE_TICKS,
 };
 
-const SWAP_PAIR_POLICY_BY_BASE_QUOTE: Record<string, SwapPairPolicy> = {
-  // WETH/USDC
-  '2/1': {
-    priceStepTicks: 1, // 0.0001 USDC per WETH
-    bookBucketWidthTicks: 10_000, // 1.0000
-    mmMidPriceTicks: 25_000_000n, // 2500.0000
-  },
-  // WETH/USDT
-  '2/3': {
-    priceStepTicks: 1, // 0.0001 USDT per WETH
-    bookBucketWidthTicks: 10_000, // 1.0000
-    mmMidPriceTicks: 25_000_000n, // 2500.0000
-  },
-  // USDC/USDT
-  '1/3': {
-    priceStepTicks: 1, // 0.0001
-    bookBucketWidthTicks: 10_000, // 1.0000
-    mmMidPriceTicks: 10_000n, // 1.0000
-  },
-  // TRX/USDC
-  '4/1': {
-    priceStepTicks: 1, // 0.0001 USDC per TRX
-    bookBucketWidthTicks: 100, // 0.0100
-    mmMidPriceTicks: 1_200n, // 0.1200
-  },
-  // TRX/USDT
-  '4/3': {
-    priceStepTicks: 1, // 0.0001 USDT per TRX
-    bookBucketWidthTicks: 100, // 0.0100
-    mmMidPriceTicks: 1_200n, // 0.1200
-  },
-  // SUN/USDC
-  '5/1': {
-    priceStepTicks: 1, // 0.0001 USDC per SUN
-    bookBucketWidthTicks: 10, // 0.0010
-    mmMidPriceTicks: 200n, // 0.0200
-  },
-  // SUN/USDT
-  '5/3': {
-    priceStepTicks: 1, // 0.0001 USDT per SUN
-    bookBucketWidthTicks: 10, // 0.0010
-    mmMidPriceTicks: 200n, // 0.0200
-  },
+type SwapPairGrid = Omit<SwapPairPolicy, 'mmMidPriceTicks'>;
+
+// Book grid per built-in pair. The MM mid is never listed here: it is
+// rate(base) / rate(quote) from the committed catalog USD reference rate.
+const SWAP_PAIR_GRID_BY_BASE_QUOTE: Record<string, SwapPairGrid> = {
+  '2/1': { priceStepTicks: 1, bookBucketWidthTicks: 10_000 }, // WETH/USDC
+  '2/3': { priceStepTicks: 1, bookBucketWidthTicks: 10_000 }, // WETH/USDT
+  '1/3': { priceStepTicks: 1, bookBucketWidthTicks: 10_000 }, // USDC/USDT
+  '4/1': { priceStepTicks: 1, bookBucketWidthTicks: 100 }, // TRX/USDC
+  '4/3': { priceStepTicks: 1, bookBucketWidthTicks: 100 }, // TRX/USDT
+  '5/1': { priceStepTicks: 1, bookBucketWidthTicks: 10 }, // SUN/USDC
+  '5/3': { priceStepTicks: 1, bookBucketWidthTicks: 10 }, // SUN/USDT
 };
+
+/** Quote per one base in ticks, floored; a pair the rates cannot express fails closed. */
+function getReferenceMidPriceTicks(baseTokenId: number, quoteTokenId: number): bigint {
+  const mid = (getTokenUsdMicros(baseTokenId) * ONE_PRICE_TICKS) / getTokenUsdMicros(quoteTokenId);
+  if (mid <= 0n) throw new Error(`SWAP_REFERENCE_MID_UNREPRESENTABLE:${baseTokenId}/${quoteTokenId}`);
+  return mid;
+}
 
 export function getSwapPairPolicyByBaseQuote(baseTokenId: number, quoteTokenId: number): SwapPairPolicy {
-  const key = `${baseTokenId}/${quoteTokenId}`;
-  return SWAP_PAIR_POLICY_BY_BASE_QUOTE[key] ?? DEFAULT_SWAP_PAIR_POLICY;
+  const grid = SWAP_PAIR_GRID_BY_BASE_QUOTE[`${baseTokenId}/${quoteTokenId}`];
+  return grid
+    ? { ...grid, mmMidPriceTicks: getReferenceMidPriceTicks(baseTokenId, quoteTokenId) }
+    : DEFAULT_SWAP_PAIR_POLICY;
 }
 
 function hasSwapPairPolicyByBaseQuote(baseTokenId: number, quoteTokenId: number): boolean {
   const key = `${baseTokenId}/${quoteTokenId}`;
-  return Object.prototype.hasOwnProperty.call(SWAP_PAIR_POLICY_BY_BASE_QUOTE, key);
+  return Object.prototype.hasOwnProperty.call(SWAP_PAIR_GRID_BY_BASE_QUOTE, key);
 }
 
 /**

@@ -85,7 +85,7 @@ Changing Entity/Account/J/token requires a new check, not a continuation with th
 
 Requesting credit remains a separate Manage path. It is a bilateral `credit_request` AccountTx
 (`requestCredit` EntityTx); a hub answers after commit by raising its own line to
-`max(current line, min(requested, 1,000 whole tokens))` and never lowers a larger line
+`max(current line, min(requested, $1,000 at the committed catalog USD rate))` and never lowers a larger line
 ([credit-request.ts](../core/entity/tx/handlers/account/credit-request.ts)). The new Pay does not
 use this path and does not mask missing capacity with a frontend workaround.
 

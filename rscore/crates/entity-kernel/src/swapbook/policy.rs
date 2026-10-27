@@ -1,5 +1,6 @@
 use num_bigint::BigInt;
 
+use super::math::PRICE_SCALE;
 use super::{PairDimensions, PairPolicy};
 
 pub fn is_canonical_liquid_token(token_id: u32) -> bool {
@@ -27,25 +28,30 @@ pub fn canonical_pair_policy(
     quote: u32,
     dimensions: PairDimensions,
 ) -> (PairPolicy, bool) {
+    // Book grid per built-in pair (TS `SWAP_PAIR_GRID_BY_BASE_QUOTE`). The mid
+    // is never listed: it is rate(base) / rate(quote) from the catalog.
     let explicit = match (base, quote) {
-        (2, 1) | (2, 3) => Some((10_000, 25_000_000)),
-        (1, 3) => Some((10_000, 10_000)),
-        (4, 1) | (4, 3) => Some((100, 1_200)),
-        (5, 1) | (5, 3) => Some((10, 200)),
+        (2, 1) | (2, 3) | (1, 3) => Some(10_000),
+        (4, 1) | (4, 3) => Some(100),
+        (5, 1) | (5, 3) => Some(10),
         _ => None,
     }
     .filter(|_| {
         canonical_token_decimals(base) == Some(dimensions.base_token_decimals)
             && canonical_token_decimals(quote) == Some(dimensions.quote_token_decimals)
+    })
+    .and_then(|width| {
+        xln_rscore_protocol::canonical_reference_mid_price_ticks(base, quote, PRICE_SCALE)
+            .map(|mid| (width, mid))
     });
     let (book_bucket_width_ticks, mid_price_ticks, has_explicit) = explicit
         .map(|(width, mid)| (width, mid, true))
-        .unwrap_or((10_000, 10_000, false));
+        .unwrap_or((10_000, BigInt::from(PRICE_SCALE), false));
     (
         PairPolicy {
             price_step_ticks: 1,
             book_bucket_width_ticks,
-            mid_price_ticks: BigInt::from(mid_price_ticks),
+            mid_price_ticks,
         },
         has_explicit,
     )
