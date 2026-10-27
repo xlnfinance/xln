@@ -1,5 +1,0 @@
-COMMAND: bun run check:runtime-types
-$ bun run check:runtime-types:ts7
-$ bun node_modules/@typescript/native/bin/tsc -p tsconfig.runtime.json --noEmit --checkers 4
-
-EXIT: 0; WALL_SECONDS: 1.043

@@ -1,3 +1,0 @@
-COMMAND: bunx tsc --noEmit -p .
-
-EXIT: 0; WALL_SECONDS: 0.143

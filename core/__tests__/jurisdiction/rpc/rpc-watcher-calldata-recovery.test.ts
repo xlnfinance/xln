@@ -15,7 +15,7 @@ import {
   signedTransaction,
   startCall,
   wrap,
-} from './dispute-calldata-fixtures';
+} from '../../helpers/jurisdiction/dispute-calldata-fixtures';
 
 test('an authenticated decoder resource failure is typed, evicted, and succeeds on the next poll', async () => {
   const tx = await signedTransaction(startCall());

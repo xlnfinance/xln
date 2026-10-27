@@ -18,7 +18,7 @@ import {
   word,
   wrap,
   type Body,
-} from './dispute-calldata-fixtures';
+} from '../../helpers/jurisdiction/dispute-calldata-fixtures';
 
 /** Observe real ABI decoding; no decoder or authentication behavior is replaced. */
 const measureRecovery = async (data: string, proofbody = body) => {
