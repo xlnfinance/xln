@@ -18,6 +18,11 @@ import { getTokenMeta } from '../runtime/token-meta';
 import { usdOf } from '../runtime/financial/prices';
 import { displayEntityName, useWallet, type AccountView } from '../runtime/views';
 
+/** Re-ask a retryable route quote (profiles still syncing) with doubling delays up to the cap:
+ * each attempt re-syncs gossip profiles from the relay, so an unknown target must not poll it at 1 Hz. */
+const QUOTE_RETRY_MS = 1_000;
+const QUOTE_RETRY_MAX_MS = 30_000;
+
 const looksLikeInvoice = (text: string): boolean => {
 	const value = text.trim();
 	return value.startsWith('xln://') || value.startsWith('http://') || value.startsWith('https://') || (value.startsWith('0x') && value.includes('?'));
@@ -137,19 +142,32 @@ export function Pay() {
 		setQuoting(false);
 		if (!self || !validTarget || !parsedAmount) return;
 		setQuoting(true);
-		const timer = setTimeout(() => {
+		let timer: ReturnType<typeof setTimeout>;
+		let retryDelayMs = QUOTE_RETRY_MS;
+		const attempt = (): void => {
 			quotePaymentRoutes({ sourceEntityId: self, targetEntityId: target, tokenId, amount: parsedAmount })
 				.then(found => {
 					if (seq !== quoteSeq.current) return;
+					setRouteError(null);
 					setRoutes(found);
 					setQuoting(false);
 				})
 				.catch((error: unknown) => {
 					if (seq !== quoteSeq.current) return;
 					setRouteError(error instanceof Error ? error.message : String(error));
+					// A retryable read (route profiles still syncing after unlock) is
+					// asked again for the same draft; anything else is final.
+					const retry = error as { retryable?: unknown; retryAfterMs?: unknown };
+					if (retry.retryable === true) {
+						const hintMs = typeof retry.retryAfterMs === 'number' && retry.retryAfterMs > 0 ? retry.retryAfterMs : 0;
+						timer = setTimeout(attempt, Math.max(retryDelayMs, hintMs));
+						retryDelayMs = Math.min(retryDelayMs * 2, QUOTE_RETRY_MAX_MS);
+						return;
+					}
 					setQuoting(false);
 				});
-		}, 250);
+		};
+		timer = setTimeout(attempt, 250);
 		return () => {
 			clearTimeout(timer);
 			quoteSeq.current += 1;
