@@ -205,6 +205,39 @@ const createInboundAccountState = (
   return account;
 };
 
+/**
+ * The genesis proposer chooses the bilateral clock, but the receiver signs every
+ * proof carrying it. Never adopt a peer-chosen zero window for our own side:
+ * our window is both our counter-dispute share of T = S + left + right and our
+ * Pull reveal window, so zero lets the peer start with a stale proof and
+ * finalize in the same block. A party may still waive only its own window.
+ */
+const resolveInboundDisputeConfig = (
+  state: EntityState,
+  input: AccountInput,
+  counterpartyId: string,
+): AccountReplica['state']['disputeConfig'] => {
+  let disputeConfig: AccountReplica['state']['disputeConfig'];
+  try {
+    disputeConfig = canonicalAccountDisputeConfig(input.disputeConfig);
+  } catch {
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_DISPUTE_CONFIG_INVALID',
+      `ACCOUNT_INPUT_DISPUTE_CONFIG_INVALID:${counterpartyId}`,
+    );
+  }
+  const ownSeconds = isLeftEntity(state.entityId, counterpartyId)
+    ? disputeConfig.leftResponseSeconds
+    : disputeConfig.rightResponseSeconds;
+  if (ownSeconds < 1) {
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_DISPUTE_CONFIG_INVALID',
+      `ACCOUNT_INPUT_DISPUTE_CONFIG_OWN_WINDOW_ZERO:${counterpartyId}`,
+    );
+  }
+  return disputeConfig;
+};
+
 export const resolveInboundAccount = (
   state: EntityState,
   input: AccountInput,
@@ -231,13 +264,14 @@ export const resolveInboundAccount = (
     );
   }
   const watchSeed = input.watchSeed.toLowerCase();
+  const disputeConfig = resolveInboundDisputeConfig(state, input, counterpartyId);
   accountHandlerLog.debug('machine.create', { counterparty: shortId(counterpartyId) });
   const account = createInboundAccountState(
     state,
     counterpartyId,
     domain,
     watchSeed,
-    canonicalAccountDisputeConfig(input.disputeConfig),
+    disputeConfig,
   );
   accountHandlerLog.debug('machine.candidate_created', { counterparty: shortId(counterpartyId) });
   return { account, counterpartyId, createdAccount: true };

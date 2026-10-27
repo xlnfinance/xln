@@ -25,7 +25,8 @@ const requireResponseSeconds = (value: unknown, side: 'left' | 'right'): number 
 
 /**
  * Validate the exact bilateral clock committed by every Account state root.
- * Zero is intentional: two parties may choose same-block finality. The only
+ * Zero is shape-valid: a party may waive its own window. Inbound genesis never
+ * adopts a peer-chosen zero for the receiver's side (inbound-account.ts). The only
  * protocol ceiling prevents an accidental account from remaining disputed for
  * more than one year; there is deliberately no jurisdiction-wide substitute.
  */
