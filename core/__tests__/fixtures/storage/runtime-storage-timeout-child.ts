@@ -53,7 +53,7 @@ const importTx = (index: string): RuntimeTx => {
   });
 };
 
-process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] = '0';
+delete process.env['XLN_STORAGE_WRITE_TIMEOUT_MS']; // unset is the only way to disable the deadline
 enqueueRuntimeInput(env, { runtimeTxs: [importTx('1')], entityInputs: [] });
 await processRuntime(env);
 if (env.state.height !== 1) throw new Error(`fixture baseline height ${env.state.height}`);

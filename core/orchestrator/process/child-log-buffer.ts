@@ -26,7 +26,7 @@ export const pushChildLogLines = (target: string[], chunk: Buffer | string): voi
  * unfinished suffix so prefixes and fatal-line inspection see the exact line
  * the child emitted rather than fragments created by stream scheduling.
  */
-export const takeCompleteLines = (state: PrefixLogState, chunk: Buffer | string): string[] => {
+const takeCompleteLines = (state: PrefixLogState, chunk: Buffer | string): string[] => {
   const lines = `${state.pending}${chunk.toString()}`.split(/\r?\n/);
   state.pending = lines.pop() ?? '';
   if (state.pending.length > MAX_PENDING_LOG_LINE_CHARS) {
