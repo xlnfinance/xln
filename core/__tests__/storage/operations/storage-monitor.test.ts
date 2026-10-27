@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { lstatSync, mkdtempSync, rmSync } from 'node:fs';
+import { lstatSync, mkdtempSync, rmSync, statfsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  statDiskBytes,
   assertDiskFreeAtLeast,
   getDiskFreeShortfallBytes,
   getMinDiskFreeBytes,
@@ -60,4 +61,20 @@ describe('storage monitor disk guard', () => {
       rmSync(directory, { recursive: true });
     }
   });
+});
+
+test('disk guard measures configured roots and their nearest existing parent before boot', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'xln-data-root-'));
+  try {
+    const expected = statfsSync(directory);
+    const disk = statDiskBytes([join(directory, 'rdb', 'new'), directory]);
+    expect(disk.totalBytes).toBe(Number(expected.blocks) * Number(expected.bsize));
+    expect(disk.freeBytes).toBeGreaterThan(0);
+    expect(disk.usedBytes + disk.freeBytes).toBe(disk.totalBytes);
+    writeFileSync(join(directory, 'file'), 'not a directory');
+    expect(() => statDiskBytes([join(directory, 'file', 'child')])).toThrow();
+    expect(() => statDiskBytes([])).toThrow('STORAGE_DATA_ROOTS_REQUIRED');
+  } finally {
+    rmSync(directory, { recursive: true });
+  }
 });

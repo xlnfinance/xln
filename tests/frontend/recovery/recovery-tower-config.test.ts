@@ -491,7 +491,7 @@ test('runtime recovery discovery asks every tower and sorts candidates by runtim
     }
     return new Response(safeStringify({
       ok: true,
-      bundle: bundleByTower[towerUrl],
+      bundles: [bundleByTower[towerUrl]],
     }), {
       status: 200,
       headers: { 'content-type': 'application/json' },

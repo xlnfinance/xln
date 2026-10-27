@@ -376,12 +376,13 @@ describe('standalone watchtower service', () => {
     expect(restore.ok).toBe(true);
     const payload = await restore.json() as {
       ok: boolean;
-      bundle?: { lookupKey: string; runtimeId: string };
+      bundles: Array<{ lookupKey: string; runtimeId: string }>;
       receipt?: { runtimeId: string; towerSignature?: string };
     };
     expect(payload.ok).toBe(true);
-    expect(payload.bundle?.lookupKey).toBe(encrypted.lookupKey);
-    expect(payload.bundle?.runtimeId).toBe(appointment.bundle.runtimeId);
+    expect(payload).not.toHaveProperty('bundle');
+    expect(payload.bundles[0]?.lookupKey).toBe(encrypted.lookupKey);
+    expect(payload.bundles[0]?.runtimeId).toBe(appointment.bundle.runtimeId);
     expect(payload.receipt?.runtimeId).toBe(appointment.bundle.runtimeId);
     expect(typeof payload.receipt?.towerSignature).toBe('string');
   });

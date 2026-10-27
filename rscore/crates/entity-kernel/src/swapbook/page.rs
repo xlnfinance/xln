@@ -374,6 +374,15 @@ impl BookPricePageTree {
             .transpose()
     }
 
+    pub(crate) fn sequence_exhausted(
+        &self,
+        price_ticks: &BigInt,
+    ) -> Result<bool, EntityKernelError> {
+        Ok(self.tail(price_ticks)?.is_some_and(|(sequence, page)| {
+            sequence == u16::MAX && page.next_slot == BOOK_PRICE_PAGE_CAPACITY
+        }))
+    }
+
     pub(crate) fn append(
         &mut self,
         price_ticks: &BigInt,
@@ -382,9 +391,13 @@ impl BookPricePageTree {
         let tail = self.tail(price_ticks)?;
         let sequence = match &tail {
             Some((sequence, page)) if page.next_slot < BOOK_PRICE_PAGE_CAPACITY => *sequence,
-            Some((sequence, _)) => sequence
-                .checked_add(1)
-                .ok_or_else(|| page_error("BOOK_PAGE_SEQUENCE_EXHAUSTED"))?,
+            Some((sequence, _)) => {
+                sequence
+                    .checked_add(1)
+                    .ok_or(EntityKernelError::SwapRejected {
+                        code: "BOOK_PAGE_SEQUENCE_EXHAUSTED",
+                    })?
+            }
             None => 0,
         };
         let mut page = match tail {

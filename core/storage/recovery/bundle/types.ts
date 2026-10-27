@@ -194,8 +194,7 @@ export type TowerRestoreRequestV1 = {
 export type TowerRestoreResponseV1 = {
   ok: true;
   receipt: TowerReceiptV1;
-  bundle: EncryptedRuntimeRecoveryBundleV1;
-  bundles?: EncryptedRuntimeRecoveryBundleV1[];
+  bundles: EncryptedRuntimeRecoveryBundleV1[];
 };
 
 export type TowerDiscoverResponseV1 = {

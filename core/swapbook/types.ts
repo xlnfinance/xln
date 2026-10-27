@@ -631,7 +631,9 @@ export const spreadDistributionTotal = (dist: SpreadDistribution): number =>
   dist.makerBps + dist.takerBps + dist.hubBps + dist.makerReferrerBps + dist.takerReferrerBps;
 
 export function validateSpreadDistribution(dist: SpreadDistribution): boolean {
-  return spreadDistributionTotal(dist) === BPS_BASE;
+  return [dist.makerBps, dist.takerBps, dist.hubBps, dist.makerReferrerBps, dist.takerReferrerBps]
+    .every(value => Number.isSafeInteger(value) && value >= 0 && value <= BPS_BASE)
+    && spreadDistributionTotal(dist) === BPS_BASE;
 }
 
 /** Default: 100% to taker so limit orders always get full market price improvement */

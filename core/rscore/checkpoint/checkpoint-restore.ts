@@ -8,6 +8,7 @@
  * root-only section.
  */
 import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame/hash';
+import { settlementWorkspaceWithoutHankos } from '../../account/settlement/witness-projection';
 import { computeCanonicalMerkleRoot, EMPTY_ACCOUNT_STATE_ROOT } from '../../account/commitment/state-root';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import { computeEntityAccountLeafDigest } from '../../entity/consensus/state-root';
@@ -117,6 +118,7 @@ const computeRestoredAccountStateRoot = (seed: RscoreAccountStateSeed): string =
           swapOffersRoot: seed.swapOffers.rootHash(),
           subcontractsRoot: seed.carried.subcontractsRoot,
           lendingIntentsRoot: seed.lendingIntents.rootHash(),
+          settlementWorkspace: settlementWorkspaceWithoutHankos(seed.settlementWorkspace),
         },
       ],
       [

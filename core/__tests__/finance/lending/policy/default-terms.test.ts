@@ -58,3 +58,21 @@ test('withdrawn terms (expired now) stop new savings', () => {
 test('default bank terms refuse an unset clock', () => {
   expect(() => buildDefaultBankTermsTxs(domain, [1], 0)).toThrow('DEFAULT_BANK_TERMS_CLOCK_INVALID:0');
 });
+
+test('bank rejects a savings position id already owned by another Account', () => {
+  const state = bank();
+  const [terms] = buildDefaultBankTermsTxs(domain, [2], state.timestamp);
+  if (terms?.type !== 'lendingSetTerms') throw new Error('UNEXPECTED_TX');
+  handleLendingPolicy(state, terms, true);
+  const tx = fund('demand', 300);
+  if (tx.type !== 'lending_fund') throw new Error('UNEXPECTED_TX');
+  const account = state.accounts.get(SAVER)!;
+  expect(bankSavingsAdmissionError(state, account, tx, state.timestamp)).toBeUndefined();
+  state.lending!.savings.set(tx.data.positionId, {
+    positionId: tx.data.positionId, hubEntityId: BANK, lenderEntityId: entity('44'),
+    tokenId: 2, principalAmount: 10n, interestBps: 300, termId: 'demand', termMs: 0,
+    createdAt: state.timestamp, updatedAt: state.timestamp, status: 'open',
+  });
+  expect(bankSavingsAdmissionError(state, account, tx, state.timestamp)).toBe('LENDING_POSITION_ALREADY_EXISTS');
+  expect(bankSavingsAdmissionError(state, account, { ...tx, data: { ...tx.data, positionId: 'fresh' } }, state.timestamp)).toBeUndefined();
+});

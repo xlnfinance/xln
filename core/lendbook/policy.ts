@@ -108,6 +108,7 @@ const bankTermsForAccount = (state: EntityState, account: AccountReplica, tokenI
  * Already committed or already-signed local proposals retain their authority. */
 export const bankSavingsAdmissionError = (state: EntityState, account: AccountReplica, tx: AccountTx, now: number): string | undefined => {
   if (tx.type !== 'lending_fund' || tx.data.hubEntityId !== state.entityId) return undefined;
+  if (state.lending?.savings.has(tx.data.positionId)) return 'LENDING_POSITION_ALREADY_EXISTS';
   const terms = bankTermsForAccount(state, account, tx.data.tokenId, tx.data.termId);
   if (!terms || terms.expiresAt <= now) return 'LENDING_BANK_TERMS_UNAVAILABLE';
   if (terms.savingsInterestBps !== tx.data.interestBps) return 'LENDING_SAVINGS_RATE_NOT_APPROVED';

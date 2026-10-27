@@ -26,6 +26,14 @@ import { decodeStoredLookupDoc, decodeWatchtowerStoredValue } from './decode';
 
 const towerModeOf = (appointment: TowerAppointmentV1): TowerModeV1 => normalizeTowerModeV1(appointment.towerMode);
 
+export class WatchtowerAppointmentNotRetainedError extends Error {
+  readonly code = 'TOWER_APPOINTMENT_NOT_RETAINED';
+  constructor() {
+    super('TOWER_APPOINTMENT_NOT_RETAINED');
+    this.name = 'WatchtowerAppointmentNotRetainedError';
+  }
+}
+
 const slotOf = (appointment: TowerAppointmentV1): number => Math.max(0, Math.floor(Number(appointment.slot ?? 0)));
 
 /** Ingress and the store both refuse a remedy the tower could read in plaintext. */
@@ -146,6 +154,7 @@ const prepareAppointment = async (
       || (entry.bundle.kind ?? 'snapshot') !== (appointment.bundle.kind ?? 'snapshot')),
   ]);
   const nextBundles = retainAppointmentBundles(sortedBundles, towerMode, context.maxBundlesPerLookupKey);
+  if (!nextBundles.includes(candidate)) throw new WatchtowerAppointmentNotRetainedError();
   const nextDoc: StoredLookupDoc = {
     lookupKey,
     runtimeId,

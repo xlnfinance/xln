@@ -300,9 +300,9 @@ describe('watchtower restart resilience', () => {
       body: JSON.stringify({ lookupKey: encrypted.lookupKey }),
     });
     expect(restore.ok).toBe(true);
-    const restorePayload = await restore.json() as { ok: boolean; bundle?: { lookupKey: string } };
+    const restorePayload = await restore.json() as { ok: boolean; bundles: Array<{ lookupKey: string }> };
     expect(restorePayload.ok).toBe(true);
-    expect(restorePayload.bundle?.lookupKey).toBe(encrypted.lookupKey);
+    expect(restorePayload.bundles[0]?.lookupKey).toBe(encrypted.lookupKey);
 
     const publicActions = await fetch(`http://127.0.0.1:${server.server.port}/api/watchtower/actions/${lastResortLookupKey}`);
     expect(publicActions.status).toBe(404);

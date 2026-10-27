@@ -904,7 +904,11 @@ fn process_events(
         if !rejects.iter().all(|(reason, _)| {
             matches!(
                 *reason,
-                "no fill" | "FOK cannot fill entirely" | "STP cancel taker" | BOOK_FULL_REJECT
+                "no fill"
+                    | "FOK cannot fill entirely"
+                    | "STP cancel taker"
+                    | BOOK_FULL_REJECT
+                    | "BOOK_PAGE_SEQUENCE_EXHAUSTED"
             )
         }) {
             return Err(EntityKernelError::orderbook(format!(

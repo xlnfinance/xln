@@ -368,6 +368,13 @@ where
     let fok_snapshot = (input.time_in_force == 2).then(|| state.clone());
     let full_book_snapshot =
         (input.time_in_force == 0 && state.orders.len() >= state.max_orders).then(|| state.clone());
+    let pages = match input.side {
+        Side::Bid => &state.bid_pages,
+        Side::Ask => &state.ask_pages,
+    };
+    let page_snapshot = (input.time_in_force == 0
+        && pages.sequence_exhausted(&input.price_ticks)?)
+    .then(|| state.clone());
     let mut events = Vec::new();
     let matched = match_order(
         state,
@@ -405,13 +412,27 @@ where
         let multiple = exact_quote_lot_multiple(dimensions, &input.price_ticks)?;
         let resting = execution_qty(&matched.remaining, &multiple);
         if resting > BigInt::from(0) {
-            add_resting(
+            let added = add_resting(
                 state,
                 AddOrder {
                     qty_lots: resting,
                     ..input
                 },
-            )?;
+            );
+            match added {
+                Err(EntityKernelError::SwapRejected {
+                    code: "BOOK_PAGE_SEQUENCE_EXHAUSTED",
+                }) => {
+                    *state = page_snapshot.ok_or_else(|| {
+                        EntityKernelError::orderbook("BOOK_PAGE_SNAPSHOT_MISSING")
+                    })?;
+                    return Ok(vec![BookEvent::Reject {
+                        reason: "BOOK_PAGE_SEQUENCE_EXHAUSTED",
+                        blocking_order_id: None,
+                    }]);
+                }
+                result => result?,
+            }
             events.push(BookEvent::Ack);
         }
     } else if matched.remaining == input.qty_lots && events.is_empty() {
@@ -540,6 +561,57 @@ mod tests {
             base_token_decimals: 6,
             quote_token_decimals: 18,
         }
+    }
+
+    #[test]
+    fn exhausted_pages_reject_and_roll_back_tentative_fills() {
+        use super::super::page::{
+            BookPricePageEntrySnapshot, BookPricePageSnapshot, BookPricePageTree,
+        };
+        let mut state = BookState::empty(100, 1);
+        let price = BigInt::from(25_000_000);
+        let slots = (0..16)
+            .map(|index| {
+                Some(BookPricePageEntrySnapshot {
+                    order_id: format!("pinned-{index}"),
+                    owner_id: "pinned".into(),
+                    qty_lots: 1.into(),
+                    seq: index + 1,
+                })
+            })
+            .collect();
+        let snapshot = BookPricePageSnapshot {
+            price_ticks: price,
+            page_sequence: u16::MAX,
+            head_slot: 0,
+            next_slot: 16,
+            live_count: 16,
+            total_qty_lots: 16.into(),
+            slots,
+        };
+        let (pages, orders) = BookPricePageTree::restore(Side::Bid, &[snapshot]).expect("pages");
+        state.bid_pages = pages;
+        for order in orders {
+            index_order(&mut state, &order);
+            state.orders.insert(order.order_id.clone(), order);
+        }
+        state.next_seq = 17;
+        add_resting(&mut state, order("ask", "seller", Side::Ask)).expect("ask");
+        let before = state.clone();
+        let mut taker = order("overflow", "buyer", Side::Bid);
+        taker.qty_lots = 2.into();
+        let events = apply_gtc(&mut state, taker, dimensions(), |_| {
+            Ok(MakerDisposition::Eligible)
+        })
+        .expect("typed reject");
+        assert_eq!(
+            events,
+            vec![BookEvent::Reject {
+                reason: "BOOK_PAGE_SEQUENCE_EXHAUSTED",
+                blocking_order_id: None
+            }]
+        );
+        assert_eq!(state, before);
     }
 
     #[test]

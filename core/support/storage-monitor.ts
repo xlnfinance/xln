@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statfsSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 type StorageKind = 'db' | 'log' | 'temp';
 
@@ -100,12 +100,25 @@ let cachedStorageHealth: StorageHealth | null = null;
 let cachedStorageHealthAt = 0;
 let inFlightStorageHealth: Promise<StorageHealth> | null = null;
 
-const statDiskBytes = (): { totalBytes: number; usedBytes: number; freeBytes: number } => {
-  const stat = statfsSync('/');
-  const totalBytes = Number(stat.blocks) * Number(stat.bsize);
-  const freeBytes = Number(stat.bavail) * Number(stat.bsize);
-  const usedBytes = Math.max(0, totalBytes - freeBytes);
-  return { totalBytes, usedBytes, freeBytes };
+export const statDiskBytes = (roots: readonly string[] = [RDB_ROOT, JDB_ROOT]): StorageHealth['disk'] => {
+  const disks = roots.map(root => {
+    let path = resolve(root);
+    for (;;) {
+      try {
+        const stat = statfsSync(path);
+        const totalBytes = Number(stat.blocks) * Number(stat.bsize);
+        const freeBytes = Number(stat.bavail) * Number(stat.bsize);
+        return { totalBytes, freeBytes, usedBytes: Math.max(0, totalBytes - freeBytes) };
+      } catch (error) {
+        // Before first boot, measure the filesystem that will contain the root.
+        if (!isStoragePathMissingError(error) || dirname(path) === path) throw error;
+        path = dirname(path);
+      }
+    }
+  });
+  const limiting = disks.sort((left, right) => left.freeBytes - right.freeBytes)[0];
+  if (!limiting) throw new Error('STORAGE_DATA_ROOTS_REQUIRED');
+  return limiting;
 };
 
 export const assertDiskFreeAtLeast = (freeBytes: number, requiredBytes = MIN_DISK_FREE_BYTES): void => {

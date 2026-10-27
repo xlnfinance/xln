@@ -113,10 +113,12 @@ test('root incident survives 100,000 lower-priority events and restart', () => {
 test('incident journal discards only a torn final append and remains writable', () => {
   const path = journalPath();
   const first = storeFromJournal(path);
-  pushDebugEvent(first.store, { event: 'error', reason: 'FIRST_FATAL', status: 'fatal' });
+  pushDebugEvent(first.store, { event: 'error', reason: 'FIRST_FATAL_é_銀行_💥', status: 'fatal' });
   appendFileSync(path, '{"schema":"xln-debug-incident-v1","incident":');
 
+  const completeBytes = readFileSync(path).subarray(0, readFileSync(path).lastIndexOf(0x0a) + 1);
   const recovered = storeFromJournal(path);
+  expect(readFileSync(path)).toEqual(completeBytes);
   expect(recovered.store.debugIncidents.size).toBe(1);
   pushDebugEvent(recovered.store, { event: 'error', reason: 'SECOND_FATAL', status: 'fatal' });
 

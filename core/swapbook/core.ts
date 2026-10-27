@@ -9,6 +9,7 @@ import {
 } from './book-overlay';
 import {
   appendBookPricePageOrder,
+  BookPageSequenceExhaustedError,
   createBookPricePageTree,
   getBestBookPricePage,
   MAX_BOOK_PAGE_QTY_LOTS,
@@ -442,7 +443,13 @@ export function applyCommand(
     if (mutable.orders.size >= mutable.params.maxOrders) throw new OrderbookCapacityError();
     const resting = quantizeRestingLotsAtPrice(matched.remaining, priceTicks, options);
     if (resting > 0n) {
-      addOrder(mutable, { orderId, ownerId, side, priceTicks, qtyLots: resting, seq: mutable.nextSeq });
+      try {
+        addOrder(mutable, { orderId, ownerId, side, priceTicks, qtyLots: resting, seq: mutable.nextSeq });
+      } catch (error) {
+        if (!(error instanceof BookPageSequenceExhaustedError)) throw error;
+        // Discard any tentative fills together with the unstoreable remainder.
+        return { state: forkBookState(state), events: [{ type: 'REJECT', orderId, ownerId, reason: error.code }] };
+      }
       mutable.nextSeq += 1;
       events.push({ type: 'ACK', orderId, ownerId });
       bumpHash(mutable, 1, priceTicks, resting);

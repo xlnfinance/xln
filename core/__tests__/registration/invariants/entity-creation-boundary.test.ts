@@ -41,9 +41,9 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): void => {
 };
 
 describe('Entity creation custody boundary', () => {
-  test('matches the official BIP-39 seed vector and canonicalizes phrase whitespace', () => {
+  test('domain-separates the official BIP-39 seed vector and canonicalizes whitespace', () => {
     const phrase = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-    const expected = '5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4';
+    const expected = '4d5bd45f26086807332f8449afca9d4e47d3c4902b5760175d7374e3168e8eb45c89c00d8d9dfaf98cac1d4079050413db594f221cdbc897d804ad54f6d74aa9';
     expect(Buffer.from(deriveMnemonicCustodySeed(phrase)).toString('hex')).toBe(expected);
     expect(deriveMnemonicCustodySeed(`  ${phrase.replaceAll(' ', '  ')}\n`))
       .toEqual(deriveMnemonicCustodySeed(phrase));
@@ -184,11 +184,12 @@ describe('Entity creation custody boundary', () => {
     installJurisdiction(source);
     await applyRuntimeTx(source, importEntity({
       entityId: ENTITY_ID, signerId: SIGNER_ID,
-      entitySeed: new Uint8Array(64).fill(13), data: { config: CONFIG, isProposer: true },
+      entitySeed: deriveMnemonicCustodySeed('abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'), data: { config: CONFIG, isProposer: true },
     }));
     const checkpoint = buildDurableRuntimeMachineSnapshot(source);
     expect((checkpoint.infrastructure as { entityEncryptionSeeds?: Map<string, string> })
-      .entityEncryptionSeeds?.get(ENTITY_ID)).toBe(`0x${'0d'.repeat(64)}`);
+      .entityEncryptionSeeds?.get(ENTITY_ID)).toBe('0x4d5bd45f26086807332f8449afca9d4e47d3c4902b5760175d7374e3168e8eb45c89c00d8d9dfaf98cac1d4079050413db594f221cdbc897d804ad54f6d74aa9');
+    expect(serializeTaggedJson(checkpoint)).not.toContain('5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4');
 
     const restored = createEmptyEnv('entity-creation-pruned-import');
     restoreDurableRuntimeSnapshot(restored, checkpoint);

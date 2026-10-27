@@ -100,6 +100,7 @@ const deltaWire = (value: Delta): unknown[] => [
 const restoreFixture = (
   liveJNonce = 4,
   frameJNonce = liveJNonce,
+  settlementWorkspace?: AccountState['settlementWorkspace'],
 ): { row: unknown[]; stateRoot: string; leaf: string; frameHash: string } => {
   const deltas = PersistentAccountStateMap.fromEntries('deltas', [[delta.tokenId, delta]]);
   const locks = PersistentAccountStateMap.fromEntries('locks', [[lock.lockId, lock]]);
@@ -111,6 +112,7 @@ const restoreFixture = (
   ) => PersistentAccountStateMap.empty<K, V>(namespace);
   const claim = createEmptyAccountJClaimAccumulator();
   const state: AccountState = {
+    ...(settlementWorkspace ? { settlementWorkspace } : {}),
     leftEntity: LEFT,
     rightEntity: RIGHT,
     domain: { chainId: 1, depositoryAddress: DEPOSITORY },
@@ -179,7 +181,7 @@ const restoreFixture = (
     ],
     [canonicalWire({ status: 'active', publicPinned: true }), [], [], []],
     null,
-    null,
+    settlementWorkspace ? canonicalWire(settlementWorkspace) : null,
   ];
   const row = [
     bytes(RIGHT),
@@ -366,3 +368,20 @@ describe('rscore checkpoint wire', () => {
   });
 
 });
+
+for (const status of ['awaiting_counterparty', 'ready_to_submit'] as const) {
+  test(`checkpoint restores the canonical Account leaf with ${status} settlement`, () => {
+    const workspace: NonNullable<AccountState['settlementWorkspace']> = {
+      workspaceHash: `0x${'77'.repeat(32)}`, ops: [{ type: 'forgive', tokenId: 1 }],
+      lastModifiedByLeft: true, status, revision: 1, createdAt: 1, lastUpdatedAt: 1,
+      executorIsLeft: true, leftHanko: '0x1234',
+    };
+    const fixture = restoreFixture(4, 4, workspace);
+    const decoded = decodeRscoreAccountRestoreRow(fixture.row);
+    expect(decoded.accountStateRoot).toBe(fixture.stateRoot);
+    expect(decoded.entityAccountLeaf).toBe(fixture.leaf);
+    expect(decoded.stateSeed.settlementWorkspace).toEqual(workspace);
+    const changed = restoreFixture(4, 4, { ...workspace, revision: 2 });
+    expect(changed.stateRoot).not.toBe(fixture.stateRoot);
+  });
+}

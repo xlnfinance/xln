@@ -1,9 +1,13 @@
+import { buildPersistentBookOrderMap } from '../../../../swapbook/book-overlay';
+import { applyCommand, createBook } from '../../../../swapbook/core';
+import { DEFAULT_SPREAD_DISTRIBUTION, validateSpreadDistribution } from '../../../../swapbook/types';
 import { expect, test } from 'bun:test';
 
 import { decodeBuffer, encodeBuffer } from '../../../../storage/codec/codec';
 import {
   appendBookPricePageOrder,
   BOOK_PRICE_PAGE_CAPACITY,
+  BookPageSequenceExhaustedError,
   createBookPricePageTree,
   decodeBookPricePage,
   getBestBookPricePage,
@@ -78,6 +82,11 @@ test('uint16 page exhaustion rejects loudly without mutating the tree', () => {
   expect(() => appendBookPricePageOrder(tree, 9n, {
     orderId: 'overflow', ownerId: 'maker', qtyLots: 1n, seq: 99,
   })).toThrow('BOOK_PAGE_SEQUENCE_EXHAUSTED');
+  try {
+    appendBookPricePageOrder(tree, 9n, { orderId: 'overflow', ownerId: 'maker', qtyLots: 1n, seq: 99 });
+  } catch (error) {
+    expect(error).toBeInstanceOf(BookPageSequenceExhaustedError);
+  }
   expect(tree.rootHash()).toBe(root);
 });
 
@@ -137,4 +146,40 @@ test('page disk/network decoder rejects drift and inconsistent aggregates', () =
   expect(() => decodeBookPricePage({ ...valid, extra: true })).toThrow('BOOK_PAGE_FIELDS');
   expect(() => decodeBookPricePage({ ...valid, totalQtyLots: 2n }))
     .toThrow('BOOK_PAGE_AGGREGATE_INVALID');
+});
+
+test('exhausted price pages reject the order and roll back tentative fills', () => {
+  const priceTicks = 9n;
+  const slots = Array.from({ length: BOOK_PRICE_PAGE_CAPACITY }, (_, index) => ({
+    orderId: `pinned-${index}`, ownerId: 'pinned', qtyLots: 1n, seq: index + 1,
+  }));
+  const bidPages = createBookPricePageTree().updated({ priceTicks, pageSequence: MAX_BOOK_PRICE_PAGE_SEQUENCE }, {
+    headSlot: 0, nextSlot: BOOK_PRICE_PAGE_CAPACITY, liveCount: BOOK_PRICE_PAGE_CAPACITY,
+    totalQtyLots: BigInt(BOOK_PRICE_PAGE_CAPACITY), slots,
+  });
+  let book = createBook({ bucketWidthTicks: 1n, maxOrders: 100, stpPolicy: 0 });
+  book = applyCommand(book, { kind: 0, ownerId: 'seller', orderId: 'ask', side: 1, tif: 0, postOnly: false, priceTicks: 8n, qtyLots: 1n }).state;
+  book = { ...book, bidPages, nextSeq: 100, orders: buildPersistentBookOrderMap([
+    ...book.orders,
+    ...slots.map((entry, pageSlot) => [entry.orderId, { ...entry, side: 0 as const, priceTicks, pageSequence: MAX_BOOK_PRICE_PAGE_SEQUENCE, pageSlot }] as const),
+  ]) };
+  const result = applyCommand(book, { kind: 0, ownerId: 'buyer', orderId: 'overflow', side: 0, tif: 0, postOnly: false, priceTicks, qtyLots: 2n });
+  expect(result.events).toEqual([{ type: 'REJECT', orderId: 'overflow', ownerId: 'buyer', reason: 'BOOK_PAGE_SEQUENCE_EXHAUSTED' }]);
+  expect(result.state.askPages.rootHash()).toBe(book.askPages.rootHash());
+  expect(result.state.bidPages.rootHash()).toBe(book.bidPages.rootHash());
+  expect(result.state.orders.has('ask')).toBe(true);
+  expect(result.state.orders.has('overflow')).toBe(false);
+  expect(result.state.nextSeq).toBe(book.nextSeq);
+  expect(result.state.tradeCount).toBe(book.tradeCount);
+  expect(result.state.eventHash).toBe(book.eventHash);
+});
+
+for (const makerBps of [-1, 0.5, NaN, Infinity, 10_001, Number.MAX_SAFE_INTEGER + 1]) {
+  test(`spread shares reject invalid basis points: ${makerBps}`, () => {
+    expect(validateSpreadDistribution({ ...DEFAULT_SPREAD_DISTRIBUTION, makerBps, takerBps: 10_000 - makerBps })).toBe(false);
+  });
+}
+test('spread shares accept integer endpoints and a complete split', () => {
+  expect(validateSpreadDistribution(DEFAULT_SPREAD_DISTRIBUTION)).toBe(true);
+  expect(validateSpreadDistribution({ makerBps: 2000, takerBps: 2000, hubBps: 2000, makerReferrerBps: 2000, takerReferrerBps: 2000 })).toBe(true);
 });

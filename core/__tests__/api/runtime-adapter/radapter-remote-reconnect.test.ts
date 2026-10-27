@@ -300,3 +300,11 @@ test('remote adapter bounds a WebSocket open that never completes', async () => 
     stalled.stop(true);
   }
 });
+
+for (const wsUrl of ['ws://example.com/rpc', 'ws://192.0.2.1/rpc']) {
+  test(`authenticated remote connect refuses plaintext transport: ${wsUrl}`, async () => {
+    const adapter = new RemoteRuntimeAdapter();
+    await expect(adapter.connect({ mode: 'remote', wsUrl, authKey: 'capability' }))
+      .rejects.toMatchObject({ code: 'E_UNAUTHORIZED' });
+  });
+}

@@ -159,6 +159,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
   async connect(config: RuntimeAdapterConfig): Promise<void> {
     if (config.mode !== 'remote') throw new RuntimeAdapterError('E_BAD_QUERY', 'RemoteRuntimeAdapter requires mode=remote');
     if (!config.wsUrl) throw new RuntimeAdapterError('E_BAD_QUERY', 'wsUrl is required');
+    if (config.authKey) assertBrainVaultTransportIsConfidential(config.wsUrl);
     this.config = config;
     const attempt = ++this.connectionAttempt;
     if (this.reconnectTimer) {

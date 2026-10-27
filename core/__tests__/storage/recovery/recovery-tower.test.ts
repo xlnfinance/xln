@@ -873,13 +873,13 @@ describe('runtime recovery tower', () => {
       }),
       store,
     );
-    const restorePayload = deserializeTaggedJson<{ ok: boolean; bundle?: typeof encrypted }>(
+    const restorePayload = deserializeTaggedJson<{ ok: boolean; bundles: Array<typeof encrypted> }>(
       await restoreResponse.text(),
     );
     expect(restorePayload.ok).toBe(true);
-    expect(restorePayload.bundle?.lookupKey).toBe(encrypted.lookupKey);
+    expect(restorePayload.bundles[0]?.lookupKey).toBe(encrypted.lookupKey);
 
-    const restoredBundle = await decryptRuntimeRecoveryBundle(restorePayload.bundle!, runtimeSeed);
+    const restoredBundle = await decryptRuntimeRecoveryBundle(restorePayload.bundles[0]!, runtimeSeed);
     expect(restoredBundle.checkpointHash).toBe(bundle.checkpointHash);
     expect(serializeTaggedJson(restoredBundle.signers)).toBe(serializeTaggedJson(bundle.signers));
     await store.close();

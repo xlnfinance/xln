@@ -85,7 +85,6 @@ export type TowerServerInfo = {
 export type TowerRestorePayload = {
   ok: boolean;
   receipt?: TowerReceiptV1;
-  bundle?: EncryptedRuntimeRecoveryBundleV1;
   bundles?: EncryptedRuntimeRecoveryBundleV1[];
   error?: string;
 };

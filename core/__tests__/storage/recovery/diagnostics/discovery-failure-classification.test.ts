@@ -31,10 +31,10 @@ test('a tower serving another identity\'s bundle is a contradiction even when it
   // tower look like a retryable outage instead of contradicting evidence.
   const url = serveTower({
     ok: true,
-    bundle: {
+    bundles: [{
       version: 1, runtimeId: 'network timeout', lookupKey: `0x${'00'.repeat(32)}`,
       bundleHash: `0x${'00'.repeat(32)}`, iv: '0x00', ciphertext: '0x00',
-    },
+    }],
   });
   const result = await discoverRuntimeRecoveryCandidates(seed, { towers: [{ url }] });
   expect(result.candidates).toEqual([]);

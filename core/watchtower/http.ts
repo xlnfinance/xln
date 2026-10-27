@@ -358,7 +358,6 @@ export const handleTowerRestore = async (req: Request, store: WatchtowerStore): 
     const response: TowerRestoreResponseV1 = {
       ok: true,
       receipt: restored.receipt,
-      bundle: restored.bundle,
       bundles: restored.bundles,
     };
     return new Response(serializeTaggedJson(response), {

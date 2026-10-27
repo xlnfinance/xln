@@ -12,6 +12,13 @@ import {
 } from './key';
 
 export const BOOK_PRICE_PAGE_CAPACITY = 16;
+export class BookPageSequenceExhaustedError extends Error {
+  readonly code = 'BOOK_PAGE_SEQUENCE_EXHAUSTED';
+  constructor() {
+    super('BOOK_PAGE_SEQUENCE_EXHAUSTED');
+    this.name = 'BookPageSequenceExhaustedError';
+  }
+}
 const MAX_BOOK_PAGE_ORDER_ID_BYTES = 323;
 const MAX_BOOK_PAGE_OWNER_ID_BYTES = 66;
 export const MAX_BOOK_PAGE_QTY_LOTS = 10n ** 24n;
@@ -255,7 +262,7 @@ export const appendBookPricePageOrder = (
   const sequence = tail?.[1].nextSlot === BOOK_PRICE_PAGE_CAPACITY
     ? tail[0].pageSequence + 1
     : tail?.[0].pageSequence ?? 0;
-  if (sequence > MAX_BOOK_PRICE_PAGE_SEQUENCE) throw new Error('BOOK_PAGE_SEQUENCE_EXHAUSTED');
+  if (sequence > MAX_BOOK_PRICE_PAGE_SEQUENCE) throw new BookPageSequenceExhaustedError();
   const key = { priceTicks, pageSequence: sequence };
   const appended = appendToPage(tail?.[0].pageSequence === sequence ? tail[1] : emptyPage(), entry);
   return {

@@ -140,8 +140,9 @@ const collectExpiredKeys = async (context: WatchtowerStoreContext, cutoff: numbe
 
 export const pruneExpired = async (context: WatchtowerStoreContext): Promise<{ deleted: number }> => {
   await ensureWatchtowerStoreOpen(context);
-  const cutoff = context.now() - context.receiptTtlMs;
-  const deletedLookups = await deleteExpiredLookups(context, cutoff);
+  const now = context.now();
+  const cutoff = now - context.receiptTtlMs;
+  const deletedLookups = await deleteExpiredLookups(context, now);
   const keysToDelete = await collectExpiredKeys(context, cutoff);
   if (keysToDelete.length === 0) return { deleted: deletedLookups };
   const metaStats = await readMetaStats(context);

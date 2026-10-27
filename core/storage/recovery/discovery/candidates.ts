@@ -32,11 +32,7 @@ const isEncryptedRuntimeRecoveryBundle = (value: unknown): value is EncryptedRun
 export const extractEncryptedRecoveryBundles = (payload: unknown): EncryptedRuntimeRecoveryBundleV1[] => {
   if (isEncryptedRuntimeRecoveryBundle(payload)) return [payload];
   if (!isRecord(payload)) return [];
-  const rawBundles = Array.isArray(payload['bundles'])
-    ? payload['bundles']
-    : payload['bundle']
-      ? [payload['bundle']]
-      : [];
+  const rawBundles = Array.isArray(payload['bundles']) ? payload['bundles'] : [];
   return rawBundles.filter(isEncryptedRuntimeRecoveryBundle);
 };
 

@@ -190,8 +190,8 @@ const selectRetained = (incidents: Iterable<PersistedIncident>): PersistedIncide
 
 const readJournal = (path: string): { debugId: number; incidents: PersistedIncident[] } => {
   if (!existsSync(path)) return { debugId: 0, incidents: [] };
-  const raw = readFileSync(path, 'utf8');
-  const finalNewline = raw.lastIndexOf('\n');
+  const raw = readFileSync(path);
+  const finalNewline = raw.lastIndexOf(0x0a);
   if (finalNewline < raw.length - 1) {
     truncateSync(path, Math.max(0, finalNewline + 1));
     const fd = openSync(path, 'r+');
@@ -203,7 +203,7 @@ const readJournal = (path: string): { debugId: number; incidents: PersistedIncid
   }
   const latest = new Map<string, PersistedIncident>();
   let debugId = 0;
-  const complete = finalNewline >= 0 ? raw.slice(0, finalNewline) : '';
+  const complete = raw.subarray(0, Math.max(0, finalNewline)).toString('utf8');
   for (const [index, line] of complete.split('\n').entries()) {
     if (!line) continue;
     try {

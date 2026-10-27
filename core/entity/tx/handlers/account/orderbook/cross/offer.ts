@@ -176,6 +176,7 @@ const aggregateCrossTrades = (
 const isExpectedLifecycleReject = (reason: string): boolean =>
   reason === 'no fill' ||
   reason === 'FOK cannot fill entirely' ||
+  reason === 'BOOK_PAGE_SEQUENCE_EXHAUSTED' ||
   reason === 'STP cancel taker';
 
 const queueRejectedCrossOfferCancellation = (
