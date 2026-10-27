@@ -162,7 +162,7 @@ test('remote runtime adapter does not reconnect after unauthorized auth', async 
     await expect(
       adapter.connect({
         mode: 'remote',
-        wsUrl: 'ws://runtime-adapter.invalid/rpc',
+        wsUrl: 'ws://127.0.0.1/rpc',
         authKey: 'wrong',
         reconnectMaxMs: 1_000,
         requestTimeoutMs: 1_000,

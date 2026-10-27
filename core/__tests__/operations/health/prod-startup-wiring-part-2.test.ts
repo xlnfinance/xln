@@ -1198,8 +1198,8 @@ describe('production startup wiring', () => {
     expect(releaseGate).not.toContain("command: 'bun run test:e2e:full'");
     expect(releaseGate).toContain('cleanupTestArtifactsBeforeRun({ reason: `release-gate:${profile}` })');
     expect(releaseGate).toContain("process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1'");
-    expect(releaseGate).toContain('env: withoutTestArtifactCleanupDoneEnv()');
-    expect(mainnetGate).toContain('env: withoutTestArtifactCleanupDoneEnv()');
+    expect(releaseGate).toContain('env: withoutTestArtifactCleanupDoneEnv,');
+    expect(mainnetGate).toContain('env: withoutTestArtifactCleanupDoneEnv,');
     expect(cleanupHelper).toContain("import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';");
     expect(cleanupHelper).toContain('const next = sanitizeChildProcessEnv(env);');
     expect(unitTestsRunner).toContain('cleanupTestArtifactsBeforeRun({');

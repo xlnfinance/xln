@@ -92,7 +92,7 @@ describe('custody daemon rAdapter transport', () => {
     }
 
     globalThis.WebSocket = CanonicalRuntimeSocket as unknown as typeof WebSocket;
-    const client = new DaemonRpcClient('ws://runtime.invalid/rpc', 'capability');
+    const client = new DaemonRpcClient('ws://127.0.0.1/rpc', 'capability');
     const response = await client.getFrameReceipts({ fromHeight: 7, limit: 1 });
     expect(response).toEqual({
       fromHeight: 7,
@@ -215,7 +215,7 @@ describe('custody daemon rAdapter transport', () => {
 
     globalThis.WebSocket = OwnerRuntimeSocket as unknown as typeof WebSocket;
     const persistedSequences: number[] = [];
-    const client = new DaemonRpcClient('ws://runtime.invalid/rpc', 'capability', runtimeSeed);
+    const client = new DaemonRpcClient('ws://127.0.0.1/rpc', 'capability', runtimeSeed);
     const result = await client.queuePayment({
       sourceEntityId,
       signerId,
