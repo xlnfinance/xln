@@ -1,5 +1,12 @@
 import { assertDemoNetwork } from '@xln/frontend/lib/config/demo-accounts';
 import {
+  assertSessionOwned,
+  CHAIN_CATCHUP_POLL_MS,
+  createChainCatchupProbe,
+  isChainCatchupCancelled,
+  openAfterChainCatchup,
+} from './chain-catchup';
+import {
   getOpenAccountRebalancePolicyData,
   hydrateJurisdictionPolicyDefaults,
 } from '@xln/frontend/lib/utils/onboarding/onboardingPreferences';
@@ -44,11 +51,19 @@ export type Stack = {
 
 const USDC = 1;
 
-async function relayConnected(xln: Awaited<ReturnType<typeof getXLN>>, env: RuntimeReplica): Promise<boolean> {
+async function relayConnected(
+  xln: Awaited<ReturnType<typeof getXLN>>,
+  env: RuntimeReplica,
+  owns: () => boolean,
+): Promise<boolean> {
   try {
-    await waitFor(() => Boolean(xln.getP2P(env)?.isConnected?.()), 'relay connection', 20_000);
+    await waitFor(() => {
+      assertSessionOwned(owns);
+      return Boolean(xln.getP2P(env)?.isConnected?.());
+    }, 'relay connection', 20_000);
     return true;
-  } catch {
+  } catch (error) {
+    if (isChainCatchupCancelled(error) || !owns()) throw error;
     useApp
       .getState()
       .toast('The network relay is not reachable. Reconnect before opening your hub account from Home.', 'danger');
@@ -206,27 +221,35 @@ export type HostedVaultOptions = {
   onStep?: (step: string) => void;
 };
 
-/** The first hub Account is J-dependent admission: it runs after catch-up. */
-async function openFirstHubAccount(
+/**
+ * The first hub Account is J-dependent admission: it runs after catch-up.
+ * Commands go to the current adapter, so every await rechecks that this
+ * session still owns the wallet; a replaced session sends and shows nothing.
+ */
+export async function openFirstHubAccount(
   xln: Awaited<ReturnType<typeof getXLN>>,
   env: RuntimeReplica,
   stack: Stack,
   entityId: string,
   signerId: string,
+  owns: () => boolean,
 ): Promise<void> {
   // importEntity initializes a new profile. Unlock/recovery must preserve the
   // committed profile, including an explicitly published name, bio and website.
   const hub = stack.hubs.find(entry => entry.online) ?? stack.hubs[0];
-  if (hub && !accountReady(env, entityId, hub.entityId) && (await relayConnected(xln, env))) {
+  if (hub && !accountReady(env, entityId, hub.entityId) && (await relayConnected(xln, env, owns))) {
     await xln.ensureGossipProfiles(env, [hub.entityId]);
+    assertSessionOwned(owns);
     // The response clocks are signed into the Account for its whole life, so
     // they are derived from the two parties' roles, never assumed. A hub whose
     // role we cannot establish gets no account rather than a user's window.
     let disputeConfig: AccountDisputeConfig | null = null;
     try {
       const summaries = await requireAdapter().read<RuntimeAdapterEntitySummary[]>('entities');
+      assertSessionOwned(owns);
       disputeConfig = accountDisputeConfig({ entityId, counterpartyId: hub.entityId, summaries });
     } catch (error) {
+      if (isChainCatchupCancelled(error) || !owns()) throw error;
       useApp
         .getState()
         .toast(
@@ -235,7 +258,8 @@ async function openFirstHubAccount(
         );
     }
     if (disputeConfig) {
-      await hydrateJurisdictionPolicyDefaults(stack.jurisdiction.name);
+      await hydrateJurisdictionPolicyDefaults(stack.jurisdiction.name, () => assertSessionOwned(owns));
+      assertSessionOwned(owns);
       const decimals = xln.getTokenInfo(USDC).decimals;
       const rebalancePolicy = getOpenAccountRebalancePolicyData(decimals);
       // The user (or another tab) may have opened this Account while the
@@ -256,8 +280,12 @@ async function openFirstHubAccount(
         },
       ]);
       try {
-        await waitFor(() => accountReady(env, entityId, hub.entityId), `account with ${hub.name}`, 60_000);
-      } catch {
+        await waitFor(() => {
+          assertSessionOwned(owns);
+          return accountReady(env, entityId, hub.entityId);
+        }, `account with ${hub.name}`, 60_000);
+      } catch (error) {
+        if (isChainCatchupCancelled(error) || !owns()) throw error;
         useApp.getState().toast(`${hub.name} has not answered yet; the account opens when it does.`);
       }
     }
@@ -288,20 +316,23 @@ async function openAfterJCatchup(
         throw new Error(`J_WATCHER_TARGET_INVALID:${head}:${depth}`);
       return { adapter, targetBlock: Math.max(0, head - depth) };
     }));
-    let progress: ReturnType<typeof xln.observeJWatcherDrainProgress> | null = null;
-    await waitFor(() => {
-      const statuses = targets.map(target => xln.getJWatcherDrainStatus(env, target));
-      if (statuses.every(xln.isJWatcherDrainComplete)) return true;
-      progress = xln.observeJWatcherDrainProgress(progress, statuses.map(xln.getJWatcherDrainProgressKey).join('|'), performance.now());
-      return false;
-    }, 'chain catch-up', Number.POSITIVE_INFINITY);
-    xln.setRuntimeDeliveryReady(env, true);
+    const nameOf = (chainId: number): string =>
+      stack.jurisdictions.find(chain => chain.chainId === chainId)?.name ?? `Chain ${chainId}`;
+    // A lock or a replacement session detaches this env; its catch-up then ends silently.
+    const owns = (): boolean => getEmbeddedEnv() === env;
+    const probe = createChainCatchupProbe(xln, env, targets, nameOf, useApp.getState().setChainSync, owns);
+    await openAfterChainCatchup(xln, env, probe, owns, poll =>
+      waitFor(poll, 'chain catch-up', Number.POSITIVE_INFINITY, CHAIN_CATCHUP_POLL_MS),
+    );
+    if (!owns()) return;
     if (!xln.getP2P(env)) {
       xln.startP2P(env, { signerId: String(env.runtimeId), relayUrls: [stack.relayUrl], gossipPollMs: 2_000 });
     }
-    await openFirstHubAccount(xln, env, stack, entityId, signerId);
+    await openFirstHubAccount(xln, env, stack, entityId, signerId, owns);
   } catch (error) {
+    if (isChainCatchupCancelled(error) || getEmbeddedEnv() !== env) return;
     console.error('[hosted] chain catch-up failed; new commands stay paused', error);
+    useApp.getState().setChainSync(null);
     useApp
       .getState()
       .toast(`Chain sync stopped, so new payments stay paused. Reopen the wallet to retry. (${error instanceof Error ? error.message : String(error)})`, 'danger');

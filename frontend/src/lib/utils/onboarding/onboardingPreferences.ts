@@ -103,8 +103,14 @@ const loadPolicyDefaultsFromJurisdictions = async (): Promise<Map<string, Policy
   return policyDefaultsLoadPromise;
 };
 
-export const hydrateJurisdictionPolicyDefaults = async (jurisdictionName?: string): Promise<PolicyDefaults> => {
+/** beforeApply runs after loading and before the global defaults change, so a caller whose
+ * session ended during the load can refuse without mutating the next session's defaults. */
+export const hydrateJurisdictionPolicyDefaults = async (
+  jurisdictionName?: string,
+  beforeApply?: () => void,
+): Promise<PolicyDefaults> => {
   const defaultsByJurisdiction = await loadPolicyDefaultsFromJurisdictions();
+  beforeApply?.();
   const key = String(jurisdictionName || '').trim().toLowerCase();
   runtimePolicyDefaults =
     (key ? defaultsByJurisdiction.get(key) : undefined) ??

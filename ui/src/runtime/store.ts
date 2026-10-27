@@ -1,4 +1,5 @@
 import { deleteVaultDeviceKey, type ProtectedVaultSecrets } from '../../../frontend/src/lib/security/vaultProtection';
+import type { ChainSyncView } from './chain-catchup';
 import { niceUsdPerPx } from './bar-scale';
 import { hasPasswordVault, removePasswordVault } from '../../../frontend/src/lib/security/passwordVault';
 import { create } from 'zustand';
@@ -196,6 +197,9 @@ type AppState = {
   height: number;
   commandReady: boolean;
   commandReadyReason: string | null;
+  /** Shown while the j-catchup fence is closed; null once every chain drained. */
+  chainSync: ChainSyncView | null;
+  setChainSync: (view: ChainSyncView | null) => void;
   operatorRuntimeId: string;
   /** True while an embedded runtime is booting or seeding: keep the gate up. */
   booting: boolean;
@@ -354,6 +358,8 @@ export const useApp = create<AppState>((set, get) => ({
   height: 0,
   commandReady: false,
   commandReadyReason: null,
+  chainSync: null,
+  setChainSync: chainSync => set({ chainSync }),
   operatorRuntimeId: '',
   booting: false,
   setBooting: booting => set({ booting }),

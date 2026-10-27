@@ -92,6 +92,7 @@ export function disconnectAdapter(): void {
   remoteAdmin = null;
   // Entity selection belongs to this connection; a new adapter must not inherit its authority context.
   useApp.getState().setActiveEntityId(null);
+  useApp.getState().setChainSync(null);
   useApp.getState().setAdapterState({
     status: 'disconnected',
     height: 0,
