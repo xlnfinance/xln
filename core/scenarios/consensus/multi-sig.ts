@@ -15,6 +15,7 @@
  * Run with: bun core/scenarios/consensus/multi-sig.ts
  */
 
+import { wholeUsdToTokenAmount } from '../../jurisdiction/machine/config/usd-reference-rate';
 import type { ConsensusConfig, EntityReplica } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { EntityTx } from '../../types/entity-tx';
@@ -46,8 +47,7 @@ import {
 import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 
 const USDC = 1;
-const ONE = 10n ** 18n;
-const usd = (amount: number | bigint) => BigInt(amount) * ONE;
+const usd = (amount: number | bigint) => wholeUsdToTokenAmount(USDC, BigInt(amount));
 
 const hasFinalizedHankoBatch = (replica: EntityReplica): boolean =>
   (replica.state.jBatchState?.entityNonce ?? 0) > 0 &&

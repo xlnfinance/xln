@@ -1,3 +1,4 @@
+import { wholeUsdToTokenAmount } from '@xln/core/jurisdiction/machine/config/usd-reference-rate';
 import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 import type { Profile, RuntimeInput, XLNModule } from '@xln/core/api/public/runtime-module';
 import { getJurisdictionStackId } from '@xln/core/api/public/runtime-module';
@@ -67,7 +68,7 @@ const rawStableAmount = (
   if (!Number.isSafeInteger(decimals) || decimals < 0) {
     throw new Error('LOAD_TEST_USDC_DECIMALS_INVALID');
   }
-  return BigInt(randomWholeUsd(random, minUsd, maxUsd)) * 10n ** BigInt(decimals);
+  return wholeUsdToTokenAmount(1, BigInt(randomWholeUsd(random, minUsd, maxUsd)));
 };
 
 const skip = (reason: string, stpPrevented = false): LoadTestAttemptResult => ({

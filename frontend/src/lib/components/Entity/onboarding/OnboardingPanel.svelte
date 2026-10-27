@@ -680,8 +680,7 @@
       };
     };
 
-    const tokenDecimals = $xlnFunctions.getTokenInfo(1).decimals;
-    const rebalancePolicy = getOpenAccountRebalancePolicyData(tokenDecimals);
+    const rebalancePolicy = getOpenAccountRebalancePolicyData(1);
     if (!rebalancePolicy) return { joined: 0, required: false };
 
     const selection = await waitForCandidates();
@@ -689,7 +688,7 @@
     const readyCandidates = selection.hubEntityIds
       .filter((hubId) => !hasProjectedCounterpartyAccount(target.entityId, hubId));
 
-    const creditAmount = getHubOpeningCredit(tokenDecimals);
+    const creditAmount = getHubOpeningCredit(1);
     await submitRuntimeInput(buildOnboardingHubOpenRuntimeInput({
       target,
       hubEntityIds: readyCandidates,

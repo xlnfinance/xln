@@ -1,3 +1,5 @@
+import { wholeUsdToTokenAmount } from '@xln/core/jurisdiction/machine/config/usd-reference-rate';
+
 export type HubJoinPreference = 'manual' | '1' | '2' | '3';
 
 export interface SavedCollateralPolicy {
@@ -33,12 +35,8 @@ const toUsdInt = (value: unknown, defaultValue: number): number => {
   return Math.max(0, Math.floor(raw));
 };
 
-const usdToRawTokenAmount = (value: number, tokenDecimals: number): bigint => {
-  if (!Number.isSafeInteger(tokenDecimals) || tokenDecimals < 0 || tokenDecimals > 255) {
-    throw new Error(`ONBOARDING_TOKEN_DECIMALS_INVALID:${String(tokenDecimals)}`);
-  }
-  return BigInt(toUsdInt(value, 0)) * 10n ** BigInt(tokenDecimals);
-};
+const usdToRawTokenAmount = (value: number, tokenId: number): bigint =>
+  wholeUsdToTokenAmount(tokenId, BigInt(toUsdInt(value, 0)));
 
 const normalizeHubJoinPreference = (value: unknown): HubJoinPreference => {
   const normalized = String(value || '').trim();
@@ -183,19 +181,19 @@ export const writeHubJoinPreference = (value: HubJoinPreference): HubJoinPrefere
   return normalized;
 };
 
-export const getOpenAccountRebalancePolicyData = (tokenDecimals: number): {
+export const getOpenAccountRebalancePolicyData = (tokenId: number): {
   r2cRequestSoftLimit: bigint;
   hardLimit: bigint;
   maxAcceptableFee: bigint;
 } | null => {
   const policy = readSavedCollateralPolicy();
   if (policy.mode === 'manual') return null;
-  const r2cRequestSoftLimit = usdToRawTokenAmount(policy.softLimitUsd, tokenDecimals);
-  const hardLimit = usdToRawTokenAmount(policy.hardLimitUsd, tokenDecimals);
-  const maxAcceptableFee = usdToRawTokenAmount(policy.maxFeeUsd, tokenDecimals);
+  const r2cRequestSoftLimit = usdToRawTokenAmount(policy.softLimitUsd, tokenId);
+  const hardLimit = usdToRawTokenAmount(policy.hardLimitUsd, tokenId);
+  const maxAcceptableFee = usdToRawTokenAmount(policy.maxFeeUsd, tokenId);
   if (r2cRequestSoftLimit <= 0n || hardLimit < r2cRequestSoftLimit || maxAcceptableFee < 0n) return null;
   return { r2cRequestSoftLimit, hardLimit, maxAcceptableFee };
 };
 import { isUnknownRecord, parseJsonUnknown, readJsonUnknown } from '../boundary/index.ts';
 
-export const getHubOpeningCredit = (tokenDecimals: number): bigint => usdToRawTokenAmount(10_000, tokenDecimals);
+export const getHubOpeningCredit = (tokenId: number): bigint => usdToRawTokenAmount(10_000, tokenId);

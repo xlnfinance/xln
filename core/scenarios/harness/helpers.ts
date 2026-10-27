@@ -2,6 +2,7 @@
  * Shared scenario helpers
  */
 
+import { wholeUsdToTokenAmount } from '../../jurisdiction/machine/config/usd-reference-rate';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput } from '../../runtime/types';
 import type { EntityInput, EntityReplica } from '../../entity/types';
 import type { Delta } from '../../types/account';
@@ -792,7 +793,7 @@ export const formatTokenMoney = (tokenId: number, amount: bigint): string => {
   return `${sign}${whole}${fraction ? `.${fraction}` : ''} ${symbol}`;
 };
 
-export const usd = (amount: number | bigint) => wholeTokenAmount(amount, 1);
+export const usd = (amount: number | bigint) => wholeUsdToTokenAmount(1, BigInt(amount));
 export const eth = (amount: number | bigint) => wholeTokenAmount(amount, 2);
 export const dai = (amount: number | bigint) => wholeTokenAmount(amount, 3);
 

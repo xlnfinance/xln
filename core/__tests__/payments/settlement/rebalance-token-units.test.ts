@@ -7,6 +7,7 @@ import {
 } from '../../../account/config/defaults';
 import { dai, eth, usd } from '../../../scenarios/harness/helpers';
 import { getBootstrapTokenAmount } from '../../../jurisdiction/machine/config/bootstrap-economy';
+import { defaultCrossJCreditPairs } from '../../../scenarios/cross-j/phase-assert';
 
 describe('rebalance defaults are USD amounts in token raw units', () => {
   test('USDC token 1 uses six-decimal raw amounts', () => {
@@ -51,6 +52,14 @@ describe('rebalance defaults are USD amounts in token raw units', () => {
     expect(usd(1)).toBe(10n ** 6n);
     expect(eth(1)).toBe(10n ** 18n);
     expect(dai(1)).toBe(10n ** 6n);
+  });
+
+  test('cross-j scenario credit floors represent the same USD amounts on both tokens', () => {
+    const [usdc, weth] = defaultCrossJCreditPairs('source', 'maker', 'target', 'sibling');
+    expect(usdc?.hubCreditMin).toBe(500_000n * 10n ** 6n);
+    expect(usdc?.userCreditMin).toBe(100_000n * 10n ** 6n);
+    expect(weth?.hubCreditMin).toBe(200n * 10n ** 18n);
+    expect(weth?.userCreditMin).toBe(40n * 10n ** 18n);
   });
 
   test('bootstrap amounts reject incomplete trusted token metadata', () => {

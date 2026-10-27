@@ -358,6 +358,52 @@ fn wait_for_sibling_routes_required_ack_without_proposing() {
 }
 
 #[test]
+fn rebalance_work_uses_usd_rate_like_ts() {
+    // Twin of the TS rebalance-work parity cases: 0.2 WETH is exactly $500.
+    for workers in [1, 4] {
+        for row in include_str!("../../../fixtures/rebalance-work.tsv").lines() {
+            let fields: Vec<_> = row.split('\t').collect();
+            let token = fields[0].parse::<u32>().unwrap();
+            let amount = fields[1].parse::<BigInt>().unwrap();
+            let expected = fields[2].parse::<bool>().unwrap();
+            let (mut seed, pair) = funded_seed();
+            let state = seed.replica.state();
+            let ondelta = if pair.payer < pair.payee {
+                amount.clone()
+            } else {
+                0.into()
+            };
+            let delta = Delta::new(
+                TokenId::new(token).unwrap(),
+                amount,
+                ondelta,
+                0.into(),
+                0.into(),
+                0.into(),
+                0.into(),
+                0.into(),
+                0.into(),
+                0.into(),
+            )
+            .unwrap();
+            let state = AccountState::new(
+                state.identity().clone(),
+                state.dispute_config(),
+                vec![delta],
+            )
+            .unwrap();
+            seed.replica = AccountReplica::new(pair.payer, state).unwrap();
+            let engine = resident(workers, "payer-0", REVISION, fixture::market(), vec![seed]);
+            assert_eq!(
+                engine.has_rebalance_work().unwrap(),
+                expected,
+                "token={token}, workers={workers}"
+            );
+        }
+    }
+}
+
+#[test]
 fn rebalance_work_index_follows_restore_candidate_abort_and_promotion() {
     let (seed, pair) = funded_seed();
     let mut engine = resident(4, "payer-0", REVISION, fixture::market(), vec![seed]);

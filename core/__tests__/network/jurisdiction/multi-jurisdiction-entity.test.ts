@@ -316,9 +316,9 @@ describe('multi-jurisdiction entity binding', () => {
       maxAcceptableFee: 15n * 10n ** 6n,
     });
     expect(account!.shadow.rebalance.policy.get(2)).toEqual({
-      r2cRequestSoftLimit: 500n * 10n ** 18n,
-      hardLimit: 10_000n * 10n ** 18n,
-      maxAcceptableFee: 15n * 10n ** 18n,
+      r2cRequestSoftLimit: 2n * 10n ** 17n,
+      hardLimit: 4n * 10n ** 18n,
+      maxAcceptableFee: 6n * 10n ** 15n,
     });
   });
 

@@ -1,3 +1,4 @@
+import { getTokenUsdMicros } from '../../../core/jurisdiction/machine/config/usd-reference-rate';
 import { describe, expect, test } from 'bun:test';
 import { deriveRcpanFinanceFrame, deriveFcuanFinanceFrame } from '../../../frontend/src/lib/components/Rcpan/microscope/model/microscope-finance';
 import { deriveRcpanMicroscopeFrame } from '../../../frontend/src/lib/components/Rcpan/microscope/model/microscope-model';
@@ -18,6 +19,12 @@ function timeline(
 }
 
 describe('RCPAN account microscope finance', () => {
+  test('all microscope valuations use the committed catalog rates', () => {
+    for (const token of RCPAN_MICROSCOPE_TOKENS) {
+      expect(token.usdPriceMicros).toBe(getTokenUsdMicros(token.tokenId));
+    }
+  });
+
   test('explicit scenarios hold their terminal state while the auto tour keeps cycling', () => {
     const elapsed = 1_000_000;
     const explicit = deriveMicroscopeTimeline(elapsed, BASE_MS, 'debt-recovery');

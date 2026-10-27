@@ -2227,7 +2227,7 @@ async function openAccountWithFullId(targetEntityId: string) {
   }
   try {
     const env = getRuntimeEnv(actionRuntimeEnv);
-    const rebalancePolicy = getOpenAccountRebalancePolicyData(getTokenInfo(1).decimals);
+    const rebalancePolicy = getOpenAccountRebalancePolicyData(1);
     if (env) await prewarmCounterpartyProfiles(env, [trimmed]);
     const targetReplica = findReplicaForEntityTab(activeReplicas, trimmed, "");
     const sourceIsHub = replica?.state?.profile?.isHub;

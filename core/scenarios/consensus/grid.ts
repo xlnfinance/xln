@@ -16,6 +16,7 @@
  * - Result: O(1) per node - unlimited horizontal scaling
  */
 
+import { wholeUsdToTokenAmount } from '../../jurisdiction/machine/config/usd-reference-rate';
 import type { RuntimeReplica } from '../../runtime/types';
 import { defaultAccountDisputeConfigForParties } from '../../account/config/dispute-config';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
@@ -53,7 +54,7 @@ type GridReserveTransferTx = {
 };
 
 function usd(amount: number): bigint {
-  return BigInt(amount) * 10n ** 18n;
+  return wholeUsdToTokenAmount(USDC_TOKEN_ID, BigInt(amount));
 }
 
 async function openGridAccount(env: RuntimeReplica, fromEntityId: string, toEntityId: string): Promise<void> {

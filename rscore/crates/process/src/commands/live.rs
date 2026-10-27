@@ -638,7 +638,7 @@ fn parse_token_amount(value: &str, decimals: u32) -> Result<num_bigint::BigInt, 
 
 fn faucet_policy_description(
     config: Option<&CanonicalValue>,
-    token_decimals: u32,
+    token_id: u32,
 ) -> Result<String, String> {
     let policy_version = config
         .and_then(|value| canonical_field(value, "policyVersion"))
@@ -655,10 +655,8 @@ fn faucet_policy_description(
             _ => None,
         })
         .unwrap_or_else(|| "1".to_string());
-    if token_decimals == 0 {
-        return Err("FAUCET_TOKEN_AMOUNT_PRECISION".into());
-    }
-    let base_fee = num_bigint::BigInt::from(10_u8).pow(token_decimals - 1);
+    let base_fee =
+        xln_rscore_protocol::rebalance_base_fee(token_id).map_err(|error| error.to_string())?;
     Ok(format!(
         "rebalance-policy:reason=faucet-offchain;v={policy_version};base={base_fee};liq={liquidity_fee};gas=0"
     ))
@@ -698,7 +696,10 @@ fn native_offchain_faucet(
         (
             entity_key,
             decimals,
-            faucet_policy_description(entity_state.entity.hub_rebalance_config.as_ref(), decimals)?,
+            faucet_policy_description(
+                entity_state.entity.hub_rebalance_config.as_ref(),
+                u32::from(request.token_id.get()),
+            )?,
             replica.state.height,
         )
     };
@@ -2169,6 +2170,26 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
 #[cfg(test)]
 mod profile_owner_tests {
     use super::*;
+
+    #[test]
+    fn faucet_memo_uses_usd_reference_base_fee() {
+        for (token, fee) in [
+            (1, "100000"),
+            (2, "40000000000000"),
+            (3, "100000"),
+            (4, "833333"),
+            (5, "5000000000000000000"),
+        ] {
+            assert_eq!(
+                faucet_policy_description(None, token).unwrap(),
+                format!("rebalance-policy:reason=faucet-offchain;v=1;base={fee};liq=1;gas=0")
+            );
+        }
+        assert_eq!(
+            faucet_policy_description(None, 999).unwrap_err(),
+            "TOKEN_USD_RATE_UNAVAILABLE:999"
+        );
+    }
 
     #[test]
     fn r7_sibling_profile_uses_its_resident_signer_and_rejects_ambiguous_authority() {

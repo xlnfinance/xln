@@ -1,6 +1,5 @@
 import { getTokenInfo } from '@xln/core/account/utils';
-
-const USD_MICROS = 1_000_000n;
+import { getTokenUsdMicros } from '@xln/core/jurisdiction/machine/config/usd-reference-rate';
 
 export type RcpanMicroscopeToken = Readonly<{
   tokenId: number;
@@ -17,7 +16,6 @@ export type RcpanMicroscopeToken = Readonly<{
 const buildMicroscopeToken = (options: {
   tokenId: number;
   color: string;
-  usdPriceMicros: bigint;
   grossWhole: bigint;
   userReserveWhole: bigint;
   hubReserveWhole: bigint;
@@ -30,7 +28,7 @@ const buildMicroscopeToken = (options: {
     name: metadata.name,
     decimals: metadata.decimals,
     color: options.color,
-    usdPriceMicros: options.usdPriceMicros,
+    usdPriceMicros: getTokenUsdMicros(options.tokenId),
     grossAmount: options.grossWhole * scale,
     userReserve: options.userReserveWhole * scale,
     hubReserve: options.hubReserveWhole * scale,
@@ -41,7 +39,6 @@ export const RCPAN_MICROSCOPE_TOKENS: readonly RcpanMicroscopeToken[] = [
   buildMicroscopeToken({
     tokenId: 1,
     color: '#2775ca',
-    usdPriceMicros: USD_MICROS,
     grossWhole: 1_000_000n,
     userReserveWhole: 400_000n,
     hubReserveWhole: 2_000_000n,
@@ -49,7 +46,6 @@ export const RCPAN_MICROSCOPE_TOKENS: readonly RcpanMicroscopeToken[] = [
   buildMicroscopeToken({
     tokenId: 2,
     color: '#8b8df8',
-    usdPriceMicros: 3_500n * USD_MICROS,
     grossWhole: 400n,
     userReserveWhole: 200n,
     hubReserveWhole: 800n,
@@ -57,7 +53,6 @@ export const RCPAN_MICROSCOPE_TOKENS: readonly RcpanMicroscopeToken[] = [
   buildMicroscopeToken({
     tokenId: 3,
     color: '#26a17b',
-    usdPriceMicros: USD_MICROS,
     grossWhole: 800_000n,
     userReserveWhole: 300_000n,
     hubReserveWhole: 1_600_000n,
@@ -65,7 +60,6 @@ export const RCPAN_MICROSCOPE_TOKENS: readonly RcpanMicroscopeToken[] = [
   buildMicroscopeToken({
     tokenId: 4,
     color: '#ef445d',
-    usdPriceMicros: 250_000n,
     grossWhole: 6_000_000n,
     userReserveWhole: 2_000_000n,
     hubReserveWhole: 12_000_000n,

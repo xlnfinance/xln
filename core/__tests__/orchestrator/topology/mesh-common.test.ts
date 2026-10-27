@@ -7,17 +7,29 @@ import {
   getBootstrapTokenAmount,
 } from '../../../orchestrator/mesh/mesh-common';
 
+import { getBootstrapTokenAmountBySymbol } from '../../../jurisdiction/machine/config/bootstrap-economy';
+
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 
 describe('mesh account bootstrap ownership', () => {
-  test('targets the same $2M notional for stablecoins and WETH at $1,000', () => {
-    const unit = 10n ** 18n;
+  test.each([
+    [1, 'USDC', 6, 2_000_000_000_000n],
+    [2, 'WETH', 18, 800n * 10n ** 18n],
+    [3, 'USDT', 6, 2_000_000_000_000n],
+    [4, 'TRX', 6, 16_666_666_666_666n],
+    [5, 'SUN', 18, 100_000_000n * 10n ** 18n],
+  ] as const)('targets $2M at the committed rate for %s/%s', (tokenId, symbol, decimals, expected) => {
+    expect(getBootstrapCreditAmount(tokenId)).toBe(expected);
+    expect(getBootstrapTokenAmount(tokenId, decimals)).toBe(expected);
+    expect(getBootstrapTokenAmountBySymbol(symbol, decimals)).toBe(expected);
+    expect(getBootstrapTokenAmountBySymbol(` ${symbol.toLowerCase()} `, decimals)).toBe(expected);
+  });
 
-    expect(getBootstrapCreditAmount(1)).toBe(2_000_000n * 10n ** 6n);
-    expect(getBootstrapCreditAmount(3)).toBe(2_000_000n * 10n ** 6n);
-    expect(getBootstrapCreditAmount(2)).toBe(2_000n * unit);
-    expect(getBootstrapTokenAmount(1, 6)).toBe(2_000_000n * 10n ** 6n);
-    expect(getBootstrapTokenAmount(2, 18)).toBe(2_000n * unit);
+  test('rejects unknown bootstrap tokens and mismatched catalog precision', () => {
+    expect(() => getBootstrapTokenAmountBySymbol('DAI', 18)).toThrow('BOOTSTRAP_TOKEN_SYMBOL_UNKNOWN');
+    expect(() => getBootstrapTokenAmountBySymbol('', 6)).toThrow('BOOTSTRAP_TOKEN_SYMBOL_UNKNOWN');
+    expect(() => getBootstrapTokenAmount(999, 6)).toThrow('TOKEN_USD_RATE_UNAVAILABLE:999');
+    expect(() => getBootstrapTokenAmount(2, 6)).toThrow('BOOTSTRAP_TOKEN_DECIMALS_MISMATCH');
   });
 
   test('derives market-maker entity ids from signer and carries jurisdiction config', () => {

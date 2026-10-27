@@ -20,17 +20,17 @@ const REBALANCE_POLICY = {
 };
 
 test('onboarding policy converts human defaults to trusted token raw units', () => {
-  expect(getOpenAccountRebalancePolicyData(6)).toEqual({
+  expect(getOpenAccountRebalancePolicyData(1)).toEqual({
     r2cRequestSoftLimit: 500n * 10n ** 6n,
     hardLimit: 10_000n * 10n ** 6n,
     maxAcceptableFee: 15n * 10n ** 6n,
   });
-  expect(getOpenAccountRebalancePolicyData(18)).toEqual({
-    r2cRequestSoftLimit: 500n * 10n ** 18n,
-    hardLimit: 10_000n * 10n ** 18n,
-    maxAcceptableFee: 15n * 10n ** 18n,
+  expect(getOpenAccountRebalancePolicyData(2)).toEqual({
+    r2cRequestSoftLimit: 2n * 10n ** 17n,
+    hardLimit: 4n * 10n ** 18n,
+    maxAcceptableFee: 6n * 10n ** 15n,
   });
-  expect(() => getOpenAccountRebalancePolicyData(Number.NaN)).toThrow('ONBOARDING_TOKEN_DECIMALS_INVALID:NaN');
+  expect(() => getOpenAccountRebalancePolicyData(Number.NaN)).toThrow('TOKEN_USD_RATE_UNAVAILABLE:NaN');
 });
 
 test('onboarding profile setup builds explicit RuntimeInput batches', () => {

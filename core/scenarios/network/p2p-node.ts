@@ -3,6 +3,7 @@
  * Usage (internal): bun run core/scenarios/network/p2p-node.ts --role hub|alice|bob ...
  */
 
+import { wholeUsdToTokenAmount } from '../../jurisdiction/machine/config/usd-reference-rate';
 import { ethers } from 'ethers';
 
 import { startStandaloneRelayServer } from '../../network/relay/standalone-server';
@@ -52,8 +53,7 @@ const waitForBobReady = hasFlag('--wait-for-bob-ready');
 const stayAliveAfterPayment = hasFlag('--stay-alive-after-payment');
 
 let USDC = 1;
-const DECIMALS = 18n;
-const usd = (amount: number | bigint) => BigInt(amount) * 10n ** DECIMALS;
+const usd = (amount: number | bigint) => wholeUsdToTokenAmount(USDC, BigInt(amount));
 const FAUCET_DEPOSIT_AMOUNT = usd(1_000);
 const FAUCET_WALLET_AMOUNT = usd(5_000);
 const R2R_AMOUNT = usd(250);
@@ -1057,7 +1057,7 @@ const run = async () => {
     console.log(`  Hub entityId: ${hubProfile.entityId}`);
     console.log(`  Bob entityId: ${bobProfile.entityId}`);
     console.log(`  Route: Alice -> Hub -> Bob`);
-    console.log(`  Amount: $${HTLC_AMOUNT / (10n ** DECIMALS)} USDC`);
+    console.log(`  Amount: $${HTLC_AMOUNT / usd(1)} USDC`);
     console.log('='.repeat(80));
 
     const secret = ethers.keccak256(ethers.toUtf8Bytes(`htlc-${entityId}-${bobProfile.entityId}`));

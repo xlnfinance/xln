@@ -14,6 +14,7 @@
  *   5. SETTLED        — clear/cancel complete
  */
 
+import { wholeUsdToTokenAmount } from '../../jurisdiction/machine/config/usd-reference-rate';
 import fs from 'node:fs';
 import { defaultAccountDisputeConfigForParties } from '../../account/config/dispute-config';
 import path from 'node:path';
@@ -79,9 +80,7 @@ const barrierDir = readCliOption(args, '--barrier-dir', '');
 
 const USDC = 1;
 const WETH = 2;
-const DECIMALS = 18n;
-const usd = (n: number) => BigInt(n) * 10n ** DECIMALS;
-const usdc = (n: number) => BigInt(n) * 10n ** 6n;
+const usd = (tokenId: number, n: number) => wholeUsdToTokenAmount(tokenId, BigInt(n));
 
 type StackPub = {
   name: string;
@@ -216,7 +215,7 @@ const enableHub = async (env: RuntimeReplica, hub: Party): Promise<void> => {
             spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
             referenceTokenId: USDC,
             usdQuoteAuthorityEntityId: hub.id,
-            minTradeSize: 10n * 10n ** DECIMALS,
+            minTradeSize: usd(USDC, 10),
             supportedPairs: ['1/2', '1/3', '2/3'],
           },
         },
@@ -412,8 +411,8 @@ const runHubs = async (): Promise<void> => {
   const hubTgt = await createEntity(env, 'hub-tgt', 'HubTgt', targetJ, { x: 10, y: 0, z: 0 });
   await enableHub(env, hubSrc);
   await enableHub(env, hubTgt);
-  await fund(sourceAdapter, hubSrc.id, USDC, usd(2_000_000));
-  await fund(targetAdapter, hubTgt.id, WETH, usd(2_000_000));
+  await fund(sourceAdapter, hubSrc.id, USDC, usd(USDC, 2_000_000));
+  await fund(targetAdapter, hubTgt.id, WETH, usd(WETH, 2_000_000));
   await processRuntime(env);
 
   const directWsUrl = await startDirectIngress(env);
@@ -483,7 +482,7 @@ const runHubs = async (): Promise<void> => {
           signerId: hub.signer,
           entityTxs: [{
             type: 'extendCredit',
-            data: { counterpartyEntityId: counterparty, tokenId, amount: usd(500_000) },
+            data: { counterpartyEntityId: counterparty, tokenId, amount: usd(tokenId, 500_000) },
           }],
         }],
       });
@@ -499,7 +498,7 @@ const runHubs = async (): Promise<void> => {
       for (const [counterparty, account] of findReplica(env, hub.id).state.accounts) {
         const credit = creditView(account, tokenId);
         // peerCreditLimit = we granted counterparty (deriveDelta only).
-        if (!accountFrameSettled(account, 2) || !credit || credit.peerCreditLimit < usd(500_000)) {
+        if (!accountFrameSettled(account, 2) || !credit || credit.peerCreditLimit < usd(tokenId, 500_000)) {
           if (creditWaitLogs === 1 || creditWaitLogs % 20 === 0) {
             const pending = (account.pendingFrame?.accountTxs ?? []).map(tx => tx.type).join('+') || 'none';
             console.log(
@@ -616,8 +615,8 @@ const runUsers = async (): Promise<void> => {
 
   const mm = await createEntity(env, 'mm', 'MM', jurisdictionFromStack(source), { x: -40, y: 0, z: 0 });
   const mmt = await createEntity(env, 'mmt', 'MMt', jurisdictionFromStack(target), { x: 40, y: 0, z: 0 });
-  await fund(sourceAdapter, mm.id, USDC, usd(2_000_000));
-  await fund(targetAdapter, mmt.id, WETH, usd(2_000_000));
+  await fund(sourceAdapter, mm.id, USDC, usd(USDC, 2_000_000));
+  await fund(targetAdapter, mmt.id, WETH, usd(WETH, 2_000_000));
   await processRuntime(env);
 
   const p2p = startP2P(env, {
@@ -644,7 +643,7 @@ const runUsers = async (): Promise<void> => {
             targetEntityId: hubSrc.id,
             disputeConfig: defaultAccountDisputeConfigForParties(mm.id, false, hubSrc.id, true),
             tokenId: USDC,
-            creditAmount: usd(100_000),
+            creditAmount: usd(USDC, 100_000),
           },
         }],
       },
@@ -657,7 +656,7 @@ const runUsers = async (): Promise<void> => {
             targetEntityId: hubTgt.id,
             disputeConfig: defaultAccountDisputeConfigForParties(mmt.id, false, hubTgt.id, true),
             tokenId: WETH,
-            creditAmount: usd(100_000),
+            creditAmount: usd(WETH, 100_000),
           },
         }],
       },
@@ -686,7 +685,7 @@ const runUsers = async (): Promise<void> => {
       const settled = Boolean(account && accountFrameSettled(account, 2));
       const credit = account ? creditView(account, tokenId) : null;
       // Hub→user grant is ownCreditLimit (peer granted us).
-      if (!settled || !credit || credit.ownCreditLimit < usd(500_000)) {
+      if (!settled || !credit || credit.ownCreditLimit < usd(tokenId, 500_000)) {
         if (userCreditLogs === 1 || userCreditLogs % 20 === 0) {
           console.log(
             `CROSS_J_USER_CREDIT_WAIT user=${user.name} hub=${hub.id.slice(-8)} ` +
@@ -717,12 +716,11 @@ const runUsers = async (): Promise<void> => {
     targetHubEntityId: hubTgt.id,
     targetUserEntityId: mmt.id,
     sourceTokenId: USDC,
-    // Token 1 is the six-decimal USDC reference asset. Using the generic
-    // 18-decimal credit helper here fabricates a $10^15 scenario order and
-    // correctly trips the production $6.5m admission cap.
-    sourceAmount: usdc(1_000),
+    // Each leg carries $1,000 at its committed reference rate. Applying
+    // WETH precision to USDC would fabricate a $10^15 source order.
+    sourceAmount: usd(USDC, 1_000),
     targetTokenId: WETH,
-    targetAmount: usd(1_000),
+    targetAmount: usd(WETH, 1_000),
     sourceUserSignerId: mm.signer,
     sourceHubSignerId: hubSrc.signer,
     targetHubSignerId: hubTgt.signer,

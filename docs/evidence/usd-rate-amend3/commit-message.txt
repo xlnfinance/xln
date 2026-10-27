@@ -1,0 +1,7 @@
+fix: derive remaining USD amounts from canonical token rates
+
+Use the committed reference rates for bootstrap credit, Rust rebalance
+work and faucet memos, onboarding, scenario USD amounts and valuation.
+Add five-token bootstrap coverage and shared TS/Rust work vectors.
+
+Co-Authored-By: Codex <noreply@openai.com>

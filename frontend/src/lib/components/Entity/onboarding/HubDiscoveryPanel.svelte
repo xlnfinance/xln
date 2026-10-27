@@ -6,7 +6,6 @@
   import type { RuntimeReplica, RuntimeInput } from '@xln/core/api/public/runtime-module';
   import { errorLog } from '../../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../../stores/runtimeControllerStore';
-  import { xlnFunctions } from '../../../stores/xlnStore';
   import { getHubOpeningCredit, getOpenAccountRebalancePolicyData } from '#lib/utils/onboarding/onboardingPreferences.ts';
   import {
     normalizeEntityId,
@@ -119,9 +118,8 @@
         || (currentEnv ? requireSignerIdForEntity(currentEnv, entityId, 'hub-connect') : '');
       if (!signerId) throw new Error('No signer available for hub account setup');
 
-      const tokenDecimals = $xlnFunctions.getTokenInfo(1).decimals;
-      const creditAmount = getHubOpeningCredit(tokenDecimals);
-      const rebalancePolicy = getOpenAccountRebalancePolicyData(tokenDecimals);
+      const creditAmount = getHubOpeningCredit(1);
+      const rebalancePolicy = getOpenAccountRebalancePolicyData(1);
       const normalizedSourceEntityId = normalizeHubEntityId(entityId);
       const sourceIsHub = hubDiscoveryProjection.committedRoles.get(normalizedSourceEntityId);
       if (typeof sourceIsHub !== 'boolean' || hub.metadata.isHub !== true) {

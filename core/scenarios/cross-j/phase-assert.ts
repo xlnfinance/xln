@@ -3,6 +3,7 @@
  * Reuses orchestrator mesh + orderbook helpers — no parallel credit math.
  */
 
+import { wholeUsdToTokenAmount } from '../../jurisdiction/machine/config/usd-reference-rate';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import {
@@ -14,8 +15,6 @@ import {
 import { hasCrossJurisdictionBookOrder } from '../../swapbook/cross-j';
 import { getEntityReplicaById } from '../../api/server/entities/lookup';
 import { assert } from '../harness/helpers';
-
-const HUB_CREDIT = (n: number) => BigInt(n) * 10n ** 18n;
 
 export type CrossJAccountPair = Readonly<{
   hubEntityId: string;
@@ -113,15 +112,15 @@ export const defaultCrossJCreditPairs = (
     hubEntityId: hubSrcId,
     userEntityId: mmId,
     tokenId: usdc,
-    hubCreditMin: HUB_CREDIT(500_000),
-    userCreditMin: HUB_CREDIT(100_000),
+    hubCreditMin: wholeUsdToTokenAmount(usdc, 500_000n),
+    userCreditMin: wholeUsdToTokenAmount(usdc, 100_000n),
   },
   {
     hubEntityId: hubTgtId,
     userEntityId: mmtId,
     tokenId: weth,
-    hubCreditMin: HUB_CREDIT(500_000),
-    userCreditMin: HUB_CREDIT(100_000),
+    hubCreditMin: wholeUsdToTokenAmount(weth, 500_000n),
+    userCreditMin: wholeUsdToTokenAmount(weth, 100_000n),
   },
 ];
 

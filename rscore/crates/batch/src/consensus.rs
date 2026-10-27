@@ -1371,12 +1371,15 @@ pub(crate) fn has_rebalance_work(account: &AccountConsensus) -> Result<bool, Bat
         }
         // A delta may hold any u16 token id; only catalog tokens have a
         // default rebalance policy (TS hasRebalanceTokenMetadata).
-        let Some(decimals) =
-            xln_rscore_protocol::canonical_token_decimals(u32::from(token_id.get()))
-        else {
+        let token_id = u32::from(token_id.get());
+        if xln_rscore_protocol::canonical_token_usd_micros(token_id).is_none() {
             continue;
-        };
-        let soft_limit = BigInt::from(500_u16) * BigInt::from(10_u8).pow(decimals);
+        }
+        let soft_limit = xln_rscore_protocol::whole_usd_to_token_amount(
+            token_id,
+            &BigInt::from(xln_rscore_protocol::DEFAULT_REBALANCE_POLICY_USD.0),
+        )
+        .map_err(|error| BatchError::FinancialView(error.to_string()))?;
         if available > soft_limit {
             return Ok(true);
         }

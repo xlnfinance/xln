@@ -16,6 +16,7 @@
  * Run with: bun core/scenarios/consensus/rapid-fire.ts
  */
 
+import { wholeUsdToTokenAmount } from '../../jurisdiction/machine/config/usd-reference-rate';
 import type { RuntimeReplica } from '../../runtime/types';
 import { defaultAccountDisputeConfigForParties } from '../../account/config/dispute-config';
 import type { EntityInput } from '../../entity/types';
@@ -29,7 +30,6 @@ import {
   registerEntities,
 } from '../harness/boot';
 import { getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from '../harness/helpers';
-import { DEFAULT_TOKENS } from '../../jurisdiction/machine/config/default-tokens';
 import { isLeftEntity } from '../../account/utils';
 import { quoteHtlcPaymentRoute } from '../../pathfinding/htlc-quote';
 import { openRuntimeTraceScopeForTesting } from '../../runtime/observability/runtime-trace';
@@ -45,9 +45,7 @@ const getProcess = async () => {
 };
 
 const USDC = 1;
-const DECIMALS = BigInt(DEFAULT_TOKENS[USDC - 1]!.decimals);
-const ONE = 10n ** DECIMALS;
-const usd = (amount: number | bigint) => BigInt(amount) * ONE;
+const usd = (amount: number | bigint) => wholeUsdToTokenAmount(USDC, BigInt(amount));
 
 // Using helpers from helpers.ts (no duplication)
 
@@ -163,7 +161,7 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
   console.log('    STRESS TEST: 100 payments A→H→B + 100 payments B→H→A      ');
   console.log('═══════════════════════════════════════════════════════════════\n');
 
-  const paymentAmount = ONE; // $1 per payment
+  const paymentAmount = usd(1); // $1 per payment
   const paymentCount = 100;
   const batchSize = 5; // Smaller batches for better convergence
   const forwardSenderDebit = quoteHtlcPaymentRoute(

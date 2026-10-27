@@ -1,10 +1,7 @@
-const BOOTSTRAP_USD_NOTIONAL = 2_000_000n;
-const BOOTSTRAP_WETH_USD_RATE = 1_000n;
+import { CATALOG_TOKENS } from './default-tokens';
+import { wholeUsdToTokenAmount } from './usd-reference-rate';
 
-const bootstrapWholeTokens = (tokenId: number): bigint =>
-  tokenId === 2
-    ? BOOTSTRAP_USD_NOTIONAL / BOOTSTRAP_WETH_USD_RATE
-    : BOOTSTRAP_USD_NOTIONAL;
+const BOOTSTRAP_USD_NOTIONAL = 2_000_000n;
 
 export const getBootstrapTokenAmount = (tokenId: number, decimals: number): bigint => {
   if (!Number.isSafeInteger(tokenId) || tokenId <= 0) {
@@ -13,8 +10,16 @@ export const getBootstrapTokenAmount = (tokenId: number, decimals: number): bigi
   if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
     throw new Error(`BOOTSTRAP_TOKEN_DECIMALS_INVALID:${String(decimals)}`);
   }
-  return bootstrapWholeTokens(tokenId) * 10n ** BigInt(decimals);
+  const token = CATALOG_TOKENS[tokenId - 1];
+  if (token && decimals !== token.decimals) {
+    throw new Error(`BOOTSTRAP_TOKEN_DECIMALS_MISMATCH:${tokenId}:${decimals}`);
+  }
+  return wholeUsdToTokenAmount(tokenId, BOOTSTRAP_USD_NOTIONAL);
 };
 
-export const getBootstrapTokenAmountBySymbol = (symbol: string, decimals: number): bigint =>
-  getBootstrapTokenAmount(String(symbol || '').trim().toUpperCase() === 'WETH' ? 2 : 1, decimals);
+export const getBootstrapTokenAmountBySymbol = (symbol: string, decimals: number): bigint => {
+  const normalized = symbol.trim().toUpperCase();
+  const index = CATALOG_TOKENS.findIndex(token => token.symbol === normalized);
+  if (index < 0) throw new Error(`BOOTSTRAP_TOKEN_SYMBOL_UNKNOWN:${symbol}`);
+  return getBootstrapTokenAmount(index + 1, decimals);
+};

@@ -1,3 +1,4 @@
+import { wholeUsdToTokenAmount } from '../../jurisdiction/machine/config/usd-reference-rate';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { EntityInput, EntityReplica } from '../../entity/types';
 import type { Delta } from '../../types/account';
@@ -62,7 +63,7 @@ export const AHB_STRESS_AMOUNT_USD = Number.parseInt(getEnv('AHB_STRESS_AMOUNT',
 export const AHB_STRESS_DRAIN_EVERY = Number.parseInt(getEnv('AHB_STRESS_DRAIN_EVERY', '0'), 10);
 export const AHB_DEBUG = getEnv('AHB_DEBUG', '0') === '1';
 
-export const usd = (amount: number | bigint): bigint => BigInt(amount) * ONE_TOKEN;
+export const usd = (amount: number | bigint): bigint => wholeUsdToTokenAmount(USDC_TOKEN_ID, BigInt(amount));
 
 export async function submitReserveToReserveBatch(
   env: RuntimeReplica,
