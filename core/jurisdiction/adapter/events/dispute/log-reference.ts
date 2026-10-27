@@ -4,7 +4,7 @@ import { decodeDisputeFinalizationLog, extractCanonicalDepositoryEventArgs, vali
 import type { JEvent } from '../../types';
 
 const iface = Depository__factory.createInterface();
-export type DisputeReferenceLog = { topics: readonly string[]; data: string; blockNumber: number; index?: number; logIndex?: number };
+type DisputeReferenceLog = { topics: readonly string[]; data: string; blockNumber: number; index?: number; logIndex?: number };
 export type ReadDisputeReferenceLogs = (event: JEvent) => Promise<readonly DisputeReferenceLog[]>;
 
 const earlierSource = (event: JEvent, log: DisputeReferenceLog) => {
