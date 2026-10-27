@@ -103,9 +103,7 @@ fn inspect_policy_notice(
         let earliest = clock
             .entity_timestamp
             .checked_add(active.notice_period_seconds() * 1000);
-        if earliest
-            .is_none_or(|earliest| next.effective_at() + HTLC_ENFORCEMENT_RESERVE_MS < earliest)
-        {
+        if earliest.is_none_or(|earliest| next.effective_at() < earliest) {
             return Some(reject(format!(
                 "REBALANCE_POLICY_NOTICE_TOO_SHORT: token={token_id} version={policy_version}"
             )));

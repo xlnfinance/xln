@@ -27,7 +27,7 @@ const accountAtExposure = (outPeerCredit: bigint) => {
         baseFee: 1n,
         liquidityFeeBps: 0n,
         gasFee: 0n,
-        updatedAt: 1,
+        updatedAt: 1, noticePeriodSeconds: 2, effectiveAt: 1,
       },
     }],
   ]);
@@ -43,9 +43,9 @@ const accountAtExposure = (outPeerCredit: bigint) => {
 };
 
 test('auto rebalance triggers exactly at the inclusive soft limit', () => {
-  expect(checkAutoRebalance(accountAtExposure(499n), userId, hubId)).toEqual([]);
+  expect(checkAutoRebalance(accountAtExposure(499n), userId, hubId, 1000)).toEqual([]);
 
-  const atLimit = checkAutoRebalance(accountAtExposure(500n), userId, hubId);
+  const atLimit = checkAutoRebalance(accountAtExposure(500n), userId, hubId, 1000);
   expect(atLimit).toHaveLength(1);
   expect(atLimit[0]).toEqual({
     type: 'request_collateral',
@@ -59,9 +59,28 @@ test('auto rebalance triggers exactly at the inclusive soft limit', () => {
   });
 });
 
+test.each([0, 1])('auto rebalance crossing effectiveAt by %s ms applies without a stale-policy rejection', async offset => {
+  const account = accountAtExposure(500n);
+  account.state.rebalanceFeePolicies = PersistentAccountStateMap.fromEntries('rebalanceFeePolicies', []);
+  for (const [version, fee, timestamp] of [[1, 1n, 1000], [2, 2n, 10_000]] as const) {
+    expect((await applyAccountTxToMutableReplica(account, { type: 'rebalance_policy', data: {
+      tokenId: 1, policyVersion: version, baseFee: fee, gasFee: 0n, liquidityFeeBps: 0n, noticePeriodSeconds: 2,
+    } }, false, timestamp, 0)).ok).toBe(true);
+  }
+  const effectiveAt = account.state.rebalanceFeePolicies!.get(1)!.right!.effectiveAt;
+  account.currentFrame = { ...account.currentFrame, timestamp: effectiveAt - 1 };
+  const frameTimestamp = effectiveAt + offset;
+  const [tx] = checkAutoRebalance(account, userId, hubId, frameTimestamp);
+  if (!tx) throw new Error('AUTO_REBALANCE_TX_MISSING');
+  const result = await applyAccountTxToMutableReplica(account, tx, true, frameTimestamp, 0);
+  expect(result.ok).toBe(true);
+  expect(tx).toMatchObject({ data: { policyVersion: 2, feeAmount: 2n } });
+  expect(account.state.requestedRebalance.get(1)).toBe(498n);
+});
+
 test('TS Account worker preserves the committed collateral-request event', async () => {
   const account = accountAtExposure(500n);
-  const tx = checkAutoRebalance(account, userId, hubId)[0];
+  const tx = checkAutoRebalance(account, userId, hubId, 1000)[0];
   if (!tx) throw new Error('AUTO_REBALANCE_TX_MISSING');
   const worker = {
     jReplicas: new Map(),
@@ -96,7 +115,7 @@ test('TS Account worker preserves the committed collateral-request event', async
 
 test('TS Account worker does not emit a committed receipt for collateral-request no-ops', async () => {
   const account = accountAtExposure(500n);
-  const tx = checkAutoRebalance(account, userId, hubId)[0];
+  const tx = checkAutoRebalance(account, userId, hubId, 1000)[0];
   if (!tx) throw new Error('AUTO_REBALANCE_TX_MISSING');
   const worker = {
     jReplicas: new Map(),

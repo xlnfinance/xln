@@ -265,6 +265,7 @@ export const handleSetRebalancePolicyEntityTx = (
         account,
         newState.entityId,
         counterpartyEntityId,
+        Math.max(account.currentFrame.timestamp, newState.timestamp),
       );
 
   return {

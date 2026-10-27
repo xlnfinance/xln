@@ -186,6 +186,7 @@ export function resolveAutoRebalanceFeePolicy(
   account: AccountReplica,
   ourEntityId: string,
   tokenId: number,
+  frameTimestamp: number,
 ): RebalanceFeePolicy | undefined {
   const ours = ourEntityId.toLowerCase();
   const counterpartySide =
@@ -199,7 +200,7 @@ export function resolveAutoRebalanceFeePolicy(
   }
   const snapshot = account.state.rebalanceFeePolicies?.get(tokenId)?.[counterpartySide];
   if (!snapshot) return undefined;
-  const policy = effectiveRebalanceTerms(snapshot, account.currentFrame.timestamp);
+  const policy = effectiveRebalanceTerms(snapshot, frameTimestamp);
   return {
     policyVersion: policy.policyVersion,
     baseFee: policy.baseFee,
@@ -208,7 +209,7 @@ export function resolveAutoRebalanceFeePolicy(
   };
 }
 
-export function checkAutoRebalance(account: AccountReplica, ourEntityId: string, counterpartyId: string): AccountTx[] {
+export function checkAutoRebalance(account: AccountReplica, ourEntityId: string, counterpartyId: string, frameTimestamp: number): AccountTx[] {
   const result: AccountTx[] = [];
 
   // New rebalance cycles must not start during settlement. A committed request
@@ -235,7 +236,7 @@ export function checkAutoRebalance(account: AccountReplica, ourEntityId: string,
     const outPeerCredit = derived.outPeerCredit;
     const existingRequest = account.state.requestedRebalance.get(tokenId) ?? 0n;
     if (existingRequest > 0n) continue;
-    const feePolicy = resolveAutoRebalanceFeePolicy(account, ourEntityId, tokenId);
+    const feePolicy = resolveAutoRebalanceFeePolicy(account, ourEntityId, tokenId, frameTimestamp);
     if (!feePolicy) continue;
     // Rebalance trigger must be based ONLY on uncollateralized peer credit usage.
     //

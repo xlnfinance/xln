@@ -513,6 +513,7 @@ async function commitIncomingFrameOnRealState(
     ourEntityId,
     input.fromEntityId,
     receivedFrame.height,
+    Math.max(receivedFrame.timestamp, securityContext.entityTimestamp),
     securityContext.owningEntityIsHub,
     candidateEffects,
   );

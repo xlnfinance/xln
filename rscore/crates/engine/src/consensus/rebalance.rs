@@ -47,7 +47,10 @@ fn policy(token_id: u32, value: CanonicalValue) -> Result<(BigInt, BigInt, BigIn
     ))
 }
 
-fn requests(account: &AccountConsensus) -> Result<Vec<AccountTx>, StateError> {
+fn requests(
+    account: &AccountConsensus,
+    frame_timestamp: u64,
+) -> Result<Vec<AccountTx>, StateError> {
     if account.pending().is_some() || account.replica().state().settlement_workspace().is_some() {
         return Ok(Vec::new());
     }
@@ -78,8 +81,7 @@ fn requests(account: &AccountConsensus) -> Result<Vec<AccountTx>, StateError> {
         else {
             continue;
         };
-        let fee_policy =
-            fee_policy.effective(account.current().map_or(0, |frame| frame.frame.timestamp));
+        let fee_policy = fee_policy.effective(frame_timestamp);
         let out_peer_credit = delta.perspective(owner_side).out_peer_credit;
         if out_peer_credit < soft_limit {
             continue;
@@ -104,12 +106,16 @@ fn requests(account: &AccountConsensus) -> Result<Vec<AccountTx>, StateError> {
 pub(crate) fn queue_post_commit_auto_rebalance(
     account: &mut AccountConsensus,
     owning_entity_is_hub: bool,
+    entity_timestamp: u64,
     context: &'static str,
 ) -> Result<usize, StateError> {
     if owning_entity_is_hub {
         return Ok(0);
     }
-    let requests = requests(account)?;
+    let timestamp = account.current().map_or(entity_timestamp, |current| {
+        entity_timestamp.max(current.frame.timestamp)
+    });
+    let requests = requests(account, timestamp)?;
     let expected = requests.len();
     if expected == 0 {
         return Ok(0);

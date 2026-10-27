@@ -358,6 +358,7 @@ const queuePostAckWork = async (
     account.proofHeader.fromEntity,
     input.fromEntityId,
     committedHeight,
+    Math.max(account.currentFrame.timestamp, securityContext.entityTimestamp),
     securityContext.owningEntityIsHub,
     candidateEffects,
   );

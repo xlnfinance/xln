@@ -32,6 +32,174 @@ mod notice_backdate {
     }
 
     #[test]
+    fn delayed_adverse_announcement_preserves_full_receiver_notice() {
+        for announced_at in [10_000, 70_000] {
+            let (mut left, mut right) = parties();
+            commit_txs_bilaterally(
+                &mut left,
+                &mut right,
+                vec![policy(1, 10, 2)],
+                1000,
+                true,
+                false,
+            );
+            let frame = proposed(&mut left, vec![policy(2, 30, 2)], announced_at);
+            let received_at = announced_at + xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS;
+            let before = right.account.clone();
+            let receive = |account: &mut AccountConsensus, timestamp| {
+                apply_incoming_frame(
+                    account,
+                    &right.identity,
+                    left.identity.entity_id(),
+                    ReceiverClock {
+                        entity_timestamp: timestamp,
+                        ..CLOCK
+                    },
+                    incoming_of(&frame.frame, frame.state_hash, frame.hanko.clone()),
+                    &market(),
+                )
+                .unwrap()
+            };
+            let result = receive(&mut right.account, received_at);
+            assert!(
+                matches!(result, IncomingOutcome::Committed { .. }),
+                "{result:?}"
+            );
+            let mut late = before;
+            let result = receive(&mut late, received_at + 1);
+            assert!(
+                matches!(result, IncomingOutcome::Rejected { ref reason }
+                if reason.contains("REBALANCE_POLICY_NOTICE_TOO_SHORT")),
+                "{result:?}"
+            );
+            let token = TokenId::new(1).unwrap();
+            assert_eq!(
+                right
+                    .account
+                    .replica()
+                    .state()
+                    .rebalance_policy(token)
+                    .unwrap()
+                    .side(Side::Left)
+                    .unwrap()
+                    .effective_at(),
+                received_at + 2000
+            );
+            for (timestamp, version, fee) in [
+                (received_at + 1, 1, 21),
+                (received_at + 1999, 1, 21),
+                (received_at + 2000, 2, 41),
+            ] {
+                let tx = AccountTx::RequestCollateral {
+                    token_id: token,
+                    amount: 10_000.into(),
+                    fee_token_id: Some(token),
+                    fee_amount: fee.into(),
+                    policy_version: version,
+                };
+                let result = SequentialAccountEngine::apply_with_context(
+                    right.account.replica(),
+                    Side::Right,
+                    &tx,
+                    &AccountExecutionContext::new(timestamp, timestamp, 0, 0, 0),
+                )
+                .unwrap();
+                assert!(
+                    matches!(result.verdict(), AccountVerdict::Applied),
+                    "{:?}",
+                    result.verdict()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn auto_rebalance_crossing_effective_at_uses_application_frame_terms() {
+        let (mut user, mut hub) = parties_with_collateral(0);
+        let start = CLOCK.entity_timestamp;
+        for (version, fee, timestamp) in [(1, 1, start - 1000), (2, 2, start)] {
+            commit_txs_bilaterally(
+                &mut hub,
+                &mut user,
+                vec![AccountTx::RebalancePolicy {
+                    token_id: 1,
+                    policy_version: version,
+                    base_fee: fee.into(),
+                    gas_fee: 0.into(),
+                    liquidity_fee_bps: 0.into(),
+                    notice_period_seconds: Some(2),
+                }],
+                timestamp,
+                true,
+                false,
+            );
+        }
+        let token = TokenId::new(1).unwrap();
+        let effective_at = user
+            .account
+            .replica()
+            .state()
+            .rebalance_policy(token)
+            .unwrap()
+            .side(Side::Right)
+            .unwrap()
+            .effective_at();
+        user.account
+            .set_rebalance_shadow_policy(
+                token,
+                CanonicalValue::Object(vec![
+                    (
+                        "r2cRequestSoftLimit".into(),
+                        CanonicalValue::BigInt(500.into()),
+                    ),
+                    ("hardLimit".into(), CanonicalValue::BigInt(10_000.into())),
+                    (
+                        "maxAcceptableFee".into(),
+                        CanonicalValue::BigInt(100.into()),
+                    ),
+                ]),
+            )
+            .unwrap();
+        let tx = payment(&hub.entity_id, &user.entity_id, 500);
+        let frame = proposed(&mut hub, vec![tx], effective_at - 1);
+        let result = apply_incoming_frame_for_role(
+            &mut user.account,
+            &user.identity,
+            hub.identity.entity_id(),
+            ReceiverClock {
+                entity_timestamp: effective_at,
+                ..CLOCK
+            },
+            incoming_of(&frame.frame, frame.state_hash, frame.hanko.clone()),
+            &market(),
+            false,
+        )
+        .unwrap();
+        assert!(
+            matches!(result, IncomingOutcome::Committed { .. }),
+            "{result:?}"
+        );
+        assert!(
+            matches!(user.account.mempool(), [AccountTx::RequestCollateral {
+            policy_version: 2, fee_amount, ..
+        }] if fee_amount == &BigInt::from(2)),
+            "{:?}",
+            user.account.mempool()
+        );
+        let ProposalOutcome::Proposed(request) = propose_account_frame(
+            &mut user.account,
+            &user.identity,
+            effective_at,
+            7,
+            &market(),
+        )
+        .unwrap() else {
+            panic!("auto rebalance stuck across activation");
+        };
+        assert!(request.dropped.is_empty());
+    }
+
+    #[test]
     fn honest_notice_accepts_receiver_ahead_through_network_allowance() {
         for ahead in [
             1,
@@ -117,7 +285,7 @@ mod notice_backdate {
                     } else {
                         payment(&proposer.entity_id, &receiver.entity_id, 1)
                     };
-                    let frame = proposed(proposer, vec![tx], start + 2000);
+                    let frame = proposed(proposer, vec![tx], start + 32_000);
                     let before = receiver.account.entity_account_leaf().unwrap();
                     for restart in [false, true] {
                         if restart {
@@ -133,7 +301,7 @@ mod notice_backdate {
                             &receiver.identity,
                             proposer.identity.entity_id(),
                             ReceiverClock {
-                                entity_timestamp: start + 1,
+                                entity_timestamp: start + 30_001,
                                 ..CLOCK
                             },
                             incoming_of(&frame.frame, frame.state_hash, frame.hanko.clone()),
@@ -154,7 +322,7 @@ mod notice_backdate {
                         &receiver.identity,
                         proposer.identity.entity_id(),
                         ReceiverClock {
-                            entity_timestamp: start + 2000,
+                            entity_timestamp: start + 32_000,
                             ..CLOCK
                         },
                         incoming(),
@@ -172,7 +340,7 @@ mod notice_backdate {
                         &receiver.identity,
                         proposer.identity.entity_id(),
                         ReceiverClock {
-                            entity_timestamp: start + 1,
+                            entity_timestamp: start + 30_001,
                             ..CLOCK
                         },
                         incoming(),

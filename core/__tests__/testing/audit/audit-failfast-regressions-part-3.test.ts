@@ -1237,6 +1237,7 @@ describe('audit fail-fast regressions', () => {
       accountMachine as Parameters<typeof checkAutoRebalance>[0],
       `0x${'11'.repeat(32)}`,
       `0x${'ff'.repeat(32)}`,
+      2,
     );
 
     expect(txs).toHaveLength(0);
@@ -1249,6 +1250,7 @@ describe('audit fail-fast regressions', () => {
         accountMachine as Parameters<typeof checkAutoRebalance>[0],
         `0x${'11'.repeat(32)}`,
         `0x${'ff'.repeat(32)}`,
+        2,
       ),
     ).toHaveLength(0);
   });
@@ -1273,7 +1275,7 @@ describe('audit fail-fast regressions', () => {
       state: hubState,
     } as never);
 
-    expect(resolveAutoRebalanceFeePolicy(account, entityId, 1)).toBeUndefined();
+    expect(resolveAutoRebalanceFeePolicy(account, entityId, 1, account.currentFrame.timestamp)).toBeUndefined();
 
     account.state.rebalanceFeePolicies = PersistentAccountStateMap.fromEntries('rebalanceFeePolicies', [
       [
@@ -1289,7 +1291,7 @@ describe('audit fail-fast regressions', () => {
         },
       ],
     ]);
-    expect(resolveAutoRebalanceFeePolicy(account, entityId, 1)).toEqual({
+    expect(resolveAutoRebalanceFeePolicy(account, entityId, 1, account.currentFrame.timestamp)).toEqual({
       policyVersion: 3,
       baseFee: 7n,
       liquidityFeeBps: 5n,
@@ -1419,8 +1421,8 @@ describe('audit fail-fast regressions', () => {
       decodeValidatedBuffer(encodeBuffer(projectPortableAccountDoc(account)), validateStorageAccountDocValue),
     );
 
-    const liveTxs = checkAutoRebalance(account, entityId, hubId);
-    const restoredTxs = checkAutoRebalance(restored, entityId, hubId);
+    const liveTxs = checkAutoRebalance(account, entityId, hubId, account.currentFrame.timestamp);
+    const restoredTxs = checkAutoRebalance(restored, entityId, hubId, restored.currentFrame.timestamp);
 
     expect(liveTxs).toEqual(restoredTxs);
     expect(liveTxs.map(tx => tx.data.tokenId)).toEqual([1, 2, 3]);
@@ -1545,8 +1547,8 @@ describe('audit fail-fast regressions', () => {
     } as never);
 
     const [withResult, withoutResult] = await Promise.all([
-      runPostFrameAutoRebalanceCheck(forkAccountReplicaShell(account), entityId, hubId, 1, false),
-      runPostFrameAutoRebalanceCheck(forkAccountReplicaShell(account), entityId, hubId, 1, false),
+      runPostFrameAutoRebalanceCheck(forkAccountReplicaShell(account), entityId, hubId, 1, account.currentFrame.timestamp, false),
+      runPostFrameAutoRebalanceCheck(forkAccountReplicaShell(account), entityId, hubId, 1, account.currentFrame.timestamp, false),
     ]);
 
     expect(withResult).toEqual(withoutResult);
@@ -1683,6 +1685,7 @@ describe('audit fail-fast regressions', () => {
       accountMachine as Parameters<typeof checkAutoRebalance>[0],
       `0x${'11'.repeat(32)}`,
       `0x${'ff'.repeat(32)}`,
+      2,
     );
 
     expect(txs).toHaveLength(0);

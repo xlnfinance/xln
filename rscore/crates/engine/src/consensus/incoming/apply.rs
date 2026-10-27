@@ -768,6 +768,7 @@ pub fn apply_incoming_frame_with_authority(
     let queued = queue_post_commit_auto_rebalance(
         account,
         security.owning_entity_is_hub,
+        clock.entity_timestamp,
         "accountConsensus:postCommitAutoRebalance",
     )?;
     if queued > 0 {
@@ -1105,6 +1106,7 @@ fn apply_incoming_ack_with_authority_mode(
     let queued = queue_post_commit_auto_rebalance(
         account,
         owning_entity_is_hub,
+        clock.entity_timestamp,
         "accountConsensus:ackAutoRebalance",
     )?;
     if queued > 0 {

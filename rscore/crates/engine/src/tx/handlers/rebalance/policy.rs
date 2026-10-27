@@ -5,6 +5,7 @@
 //! for the same slot. Parity target: the TypeScript handler at
 //! `core/account/tx/handlers/rebalance/policy.ts`.
 
+use crate::HTLC_ENFORCEMENT_RESERVE_MS;
 use num_bigint::BigInt;
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
@@ -241,7 +242,7 @@ pub(crate) fn announced_policy(
             || notice_period_seconds < old.notice_period_seconds()
     });
     let effective_at = committed_timestamp.checked_add(if worse {
-        active.unwrap().notice_period_seconds() * 1000
+        active.unwrap().notice_period_seconds() * 1000 + HTLC_ENFORCEMENT_RESERVE_MS
     } else {
         0
     });

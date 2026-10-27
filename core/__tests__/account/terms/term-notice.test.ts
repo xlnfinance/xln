@@ -69,20 +69,20 @@ test.each([
   const increased = buildHubConfig(config, { policyVersion: 2, rebalanceLiquidityFeeBps: 5n }).config;
   expect((await apply(account, buildHubRebalancePolicyTx(increased, tokenId), 2000)).ok).toBe(true);
   const next = account.state.rebalanceFeePolicies!.get(tokenId)!.left!;
-  expect(next.effectiveAt).toBe(4000);
-  expect(effectiveRebalanceTerms(next, 3999)).toMatchObject({ baseFee, liquidityFeeBps: 1n, policyVersion: 1 });
-  expect(effectiveRebalanceTerms(next, 4000)).toMatchObject({ baseFee, liquidityFeeBps: 5n, policyVersion: 2 });
+  expect(next.effectiveAt).toBe(34000);
+  expect(effectiveRebalanceTerms(next, 33999)).toMatchObject({ baseFee, liquidityFeeBps: 1n, policyVersion: 1 });
+  expect(effectiveRebalanceTerms(next, 34000)).toMatchObject({ baseFee, liquidityFeeBps: 5n, policyVersion: 2 });
 });
 
 test('existing customers pay old fees until the exact committed deadline; new accounts get current terms', async () => {
   const account = makeAccount(left, right);
   expect((await apply(account, policy(1, 10n), 1000)).ok).toBe(true);
   expect((await apply(account, policy(2, 30n), 2000)).ok).toBe(true);
-  expect(snapshot(account).effectiveAt).toBe(4000);
+  expect(snapshot(account).effectiveAt).toBe(34000);
   for (const [time, version, fee] of [
-    [3999, 1, 21n],
-    [4000, 2, 41n],
-    [4001, 2, 41n],
+    [33999, 1, 21n],
+    [34000, 2, 41n],
+    [34001, 2, 41n],
   ] as const) {
     const copy = forkAccountReplicaShell(account);
     expect((await apply(copy, request(version, fee), time, false)).ok).toBe(true);
@@ -104,8 +104,8 @@ test('improvements are immediate; retries, side authority and replacement notice
   expect((await apply(account, policy(2, 30n), 2500)).ok).toBe(true);
   expect(computeAccountStateRoot(account.state)).toBe(before);
   expect((await apply(account, policy(3, 40n), 2500)).ok).toBe(true);
-  expect(snapshot(account).effectiveAt).toBe(4500);
-  expect(effectiveRebalanceTerms(snapshot(account), 4000).baseFee).toBe(10n);
+  expect(snapshot(account).effectiveAt).toBe(34500);
+  expect(effectiveRebalanceTerms(snapshot(account), 34000).baseFee).toBe(10n);
   expect((await apply(account, policy(4, 5n), 2500)).ok).toBe(true);
   expect(snapshot(account).previous).toBeUndefined();
   expect(snapshot(account).effectiveAt).toBe(2500);
@@ -117,15 +117,15 @@ test('shortening the notice period itself waits out the previously committed per
   const account = makeAccount(left, right);
   await apply(account, policy(1, 10n, 30), 1000);
   await apply(account, policy(2, 10n, 1), 2000);
-  expect(snapshot(account).effectiveAt).toBe(32000);
-  expect(effectiveRebalanceTerms(snapshot(account), 31999).noticePeriodSeconds).toBe(30);
-  expect(effectiveRebalanceTerms(snapshot(account), 32000).noticePeriodSeconds).toBe(1);
+  expect(snapshot(account).effectiveAt).toBe(62000);
+  expect(effectiveRebalanceTerms(snapshot(account), 61999).noticePeriodSeconds).toBe(30);
+  expect(effectiveRebalanceTerms(snapshot(account), 62000).noticePeriodSeconds).toBe(1);
   const attack = forkAccountReplicaShell(account);
-  expect((await apply(attack, policy(3, 20n, 1), 31999)).ok).toBe(true);
-  expect(snapshot(attack).effectiveAt).toBe(61999);
-  expect(effectiveRebalanceTerms(snapshot(attack), 32000).noticePeriodSeconds).toBe(30);
-  expect((await apply(account, policy(3, 20n, 1), 32000)).ok).toBe(true);
-  expect(snapshot(account).effectiveAt).toBe(33000);
+  expect((await apply(attack, policy(3, 20n, 1), 61999)).ok).toBe(true);
+  expect(snapshot(attack).effectiveAt).toBe(121999);
+  expect(effectiveRebalanceTerms(snapshot(attack), 62000).noticePeriodSeconds).toBe(30);
+  expect((await apply(account, policy(3, 20n, 1), 62000)).ok).toBe(true);
+  expect(snapshot(account).effectiveAt).toBe(93000);
 });
 
 test('checkpoint recovery preserves the pending deadline and rejects obsolete policy state', async () => {
@@ -136,15 +136,15 @@ test('checkpoint recovery preserves the pending deadline and rejects obsolete po
     validateStorageAccountDocValue(decodeBuffer(encodeBuffer(projectPortableAccountDoc(account)))),
   );
   expect(computeAccountStateRoot(restored.state)).toBe(computeAccountStateRoot(account.state));
-  expect((await apply(restored, request(2, 41n), 3999, false)).ok).toBe(false);
-  expect((await apply(restored, request(1, 21n), 3999, false)).ok).toBe(true);
+  expect((await apply(restored, request(2, 41n), 33999, false)).ok).toBe(false);
+  expect((await apply(restored, request(1, 21n), 33999, false)).ok).toBe(true);
   const portable = projectPortableAccountDoc(account);
   const decoded = decodeBuffer(encodeBuffer(portable));
   const parsed = validateStorageAccountDocValue(decoded);
   const old = parsed.state.rebalanceFeePolicies!.get(1)!.left!;
   old.effectiveAt = 3999;
   expect(() => validateStorageAccountDocValue(parsed)).toThrow('notice is too short');
-  old.effectiveAt = 4000;
+  old.effectiveAt = 34000;
   Reflect.deleteProperty(old, 'noticePeriodSeconds');
   expect(() => validateStorageAccountDocValue(parsed)).toThrow('testnet chain reset required');
 });
@@ -156,8 +156,8 @@ test('ordered Account frames replay with identical roots/effects across a restar
   const rows = [
     [1000, policy(1, 10n)],
     [2000, policy(2, 30n)],
-    [3999, policy(2, 30n)],
-    [4000, policy(3, 31n)],
+    [33999, policy(2, 30n)],
+    [34000, policy(3, 31n)],
   ] as const;
   for (const [time, tx] of rows) {
     const candidate = forkAccountReplicaShell(account);
@@ -186,7 +186,7 @@ test('ordered Account frames replay with identical roots/effects across a restar
         validateStorageAccountDocValue(decodeBuffer(encodeBuffer(projectPortableAccountDoc(replay)))),
       );
       expect(snapshot(replay).previous?.baseFee).toBe(10n);
-      expect(snapshot(replay).effectiveAt).toBe(4000);
+      expect(snapshot(replay).effectiveAt).toBe(34000);
     }
   }
 });

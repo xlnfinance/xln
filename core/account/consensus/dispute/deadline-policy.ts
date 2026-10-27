@@ -100,7 +100,7 @@ const inspectPolicyNotice = (
   // A peer's signed clock cannot spend the receiver's notice on an idle
   // account. Active terms come from ordered frame execution, including a
   // prior announcement in this frame; no speculative state is published.
-  if (next.previous && next.effectiveAt + ACCOUNT_NETWORK_ALLOWANCE_MS
+  if (next.previous && next.effectiveAt
     < scan.context.entityTimestamp + next.previous.noticePeriodSeconds * 1000) {
     return rejectedDeadline(
       `REBALANCE_POLICY_NOTICE_TOO_SHORT: token=${tx.data.tokenId} version=${tx.data.policyVersion}`,

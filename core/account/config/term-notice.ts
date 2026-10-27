@@ -1,11 +1,10 @@
 /**
- * N1: Adverse terms cannot price a customer request before announcement plus
- * the full notice, measured by the receiver's committed Entity clock.
- * N2: Honest announcements tolerate the canonical network clock/latency allowance.
+ * N1/N2: adverse effectiveAt = announcement + activeNoticeMs + networkAllowanceMs; admit iff effectiveAt >= receiverTime + activeNoticeMs.
  * N3: Both sides execute the signed frame identically; receiver time gates
  * admission only and never changes committed terms, deadlines or state roots.
  */
 import type { RebalanceFeePolicySnapshot, RebalanceFeeTerms } from '../../types/finance/rebalance';
+import { ACCOUNT_NETWORK_ALLOWANCE_MS } from '../consensus/constants';
 
 export const DEFAULT_TERM_NOTICE_SECONDS = 30 * 24 * 60 * 60;
 
@@ -29,7 +28,7 @@ export const announcedRebalancePolicy = (
   const worse = active && (worseRebalanceTerms(active, terms) || terms.noticePeriodSeconds < active.noticePeriodSeconds);
   return {
     ...terms,
-    effectiveAt: terms.updatedAt + (worse ? active.noticePeriodSeconds * 1000 : 0),
+    effectiveAt: terms.updatedAt + (worse ? active.noticePeriodSeconds * 1000 + ACCOUNT_NETWORK_ALLOWANCE_MS : 0),
     ...(worse ? { previous: {
       policyVersion: active.policyVersion,
       baseFee: active.baseFee,

@@ -150,14 +150,15 @@ export function runPostFrameAutoRebalanceCheck(
   ourEntityId: string,
   counterpartyEntityId: string,
   frameHeight: number,
+  frameTimestamp: number,
   owningEntityIsHub: boolean,
   candidateEffects: AccountOutput[] = [],
 ): AccountTx[] {
   if (owningEntityIsHub) return [];
   const hasCounterpartyPolicy = Array.from(account.shadow.rebalance.policy.keys())
-    .some((tokenId) => resolveAutoRebalanceFeePolicy(account, ourEntityId, tokenId));
+    .some((tokenId) => resolveAutoRebalanceFeePolicy(account, ourEntityId, tokenId, frameTimestamp));
   if (!hasCounterpartyPolicy) return [];
-  const rebalanceTxs = checkAutoRebalance(account, ourEntityId, counterpartyEntityId);
+  const rebalanceTxs = checkAutoRebalance(account, ourEntityId, counterpartyEntityId, frameTimestamp);
   if (rebalanceTxs.length === 0) return [];
   candidateEffects.push({
     kind: 'debug',

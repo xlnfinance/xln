@@ -41,6 +41,27 @@ const makeFrame = async (account: AccountReplica, txs: AccountTx[], timestamp: n
   return built.frame;
 };
 
+test.each([10_000, 70_000])('delayed adverse announcement at %s preserves the full receiver notice', async announcedAt => {
+  const account = makeAccount(entity('11'), entity('22'));
+  await apply(account, policy(1, 10n), 1000);
+  const frame = await makeFrame(account, [policy(2, 30n)], announcedAt);
+  const receivedAt = announcedAt + ACCOUNT_NETWORK_ALLOWANCE_MS;
+  expect(getIncomingAccountDeadlineViolation(account.state, frame, true, receiverClock(receivedAt))).toBeUndefined();
+  expect(getIncomingAccountDeadlineViolation(account.state, frame, true, receiverClock(receivedAt + 1))?.reason)
+    .toContain('REBALANCE_POLICY_NOTICE_TOO_SHORT');
+  await apply(account, policy(2, 30n), announcedAt);
+  expect(account.state.rebalanceFeePolicies!.get(1)!.left!.effectiveAt).toBe(receivedAt + 2000);
+  // Signed at 10,000/70,000, first delivered at 40,000/100,000: v2 must
+  // not charge the customer one millisecond after the first announcement.
+  for (const [time, version, fee] of [[receivedAt + 1, 1, 21n], [receivedAt + 1999, 1, 21n],
+    [receivedAt + 2000, 2, 41n]] as const) {
+    const copy = forkAccountReplicaShell(account);
+    expect((await apply(copy, { type: 'request_collateral', data: {
+      tokenId: 1, amount: 10_000n, policyVersion: version, feeAmount: fee,
+    } }, time, false)).ok).toBe(true);
+  }
+});
+
 test.each([10n, 30n, 5n])('newer policy with fee %s cannot regress updatedAt; rejection survives restart', async fee => {
   const account = makeAccount(entity('11'), entity('22'));
   expect((await apply(account, policy(1, 10n), 10_000)).ok).toBe(true);
@@ -170,10 +191,10 @@ test('authenticated receiver rejects, restarts, accepts re-proposal and retries 
   expect(account.currentHeight).toBe(fresh.height);
   // An unrelated certified frame can cross activation. Retrying its exact
   // certificate with an earlier receiver clock must still reuse the ACK.
-  const crossing = await makeFrame(account, [{ type: 'add_delta', data: { tokenId: 2 } }], 12_000);
+  const crossing = await makeFrame(account, [{ type: 'add_delta', data: { tokenId: 2 } }], 42_000);
   const crossingInput = await inputFor(crossing);
-  for (const early of [crossingInput, await inputFor(await makeFrame(account, [policy(3, 20n)], 12_000))]) {
-    const result = await preflight(early, 10_001);
+  for (const early of [crossingInput, await inputFor(await makeFrame(account, [policy(3, 20n)], 42_000))]) {
+    const result = await preflight(early, 40_001);
     expect(result.kind).toBe('return');
     if (result.kind !== 'return') throw new Error('early activation accepted');
     expect(result.result).toMatchObject({ ok: false, disposition: 'rejected', rejection: {
@@ -181,11 +202,11 @@ test('authenticated receiver rejects, restarts, accepts re-proposal and retries 
     } });
     expect(computeAccountStateRoot(account.state)).toBe(certifiedRoot);
   }
-  expect((await preflight(crossingInput, 12_000)).kind).toBe('continue');
+  expect((await preflight(crossingInput, 42_000)).kind).toBe('continue');
   await certify(crossing);
   account = restore(account);
   const crossedRoot = computeAccountStateRoot(account.state);
-  const retry = await applyAccountInput(signedContext, account, crossingInput, { ...clock, entityTimestamp: 10_001 });
+  const retry = await applyAccountInput(signedContext, account, crossingInput, { ...clock, entityTimestamp: 40_001 });
   expect(retry).toMatchObject({ ok: true, response: { kind: 'ack', ack: { frameHash: crossing.stateHash } } });
   expect(computeAccountStateRoot(account.state)).toBe(crossedRoot);
   expect(account.currentHeight).toBe(crossing.height);
@@ -201,23 +222,23 @@ test.each([true, false])('receiver clock prevents early activation on either pol
     [true, [{ type: 'add_delta', data: { tokenId: 2 } }]],
     [false, [{ type: 'add_delta', data: { tokenId: 2 } }]],
   ] satisfies Array<[boolean, AccountTx[]]>) {
-    const frame = await makeFrame(account, txs, 12_000, proposerIsLeft);
-    expect(getAccountFrameStructuralError(frame, 10_001)).toBe('');
+    const frame = await makeFrame(account, txs, 42_000, proposerIsLeft);
+    expect(getAccountFrameStructuralError(frame, 40_001)).toBe('');
     for (const target of [account, restore(account)]) {
-      const violation = getIncomingAccountDeadlineViolation(target.state, frame, proposerIsLeft, receiverClock(10_001));
+      const violation = getIncomingAccountDeadlineViolation(target.state, frame, proposerIsLeft, receiverClock(40_001));
       expect(violation?.reason).toContain('REBALANCE_POLICY_ACTIVATION_BEFORE_RECEIVER');
       expect(violation?.disposition).toBe('reject');
       expect(computeAccountStateRoot(target.state)).toBe(root);
     }
-    expect(getIncomingAccountDeadlineViolation(account.state, frame, proposerIsLeft, receiverClock(12_000))).toBeUndefined();
-    const before = await makeFrame(account, txs, 11_999, proposerIsLeft);
-    expect(getIncomingAccountDeadlineViolation(account.state, before, proposerIsLeft, receiverClock(10_001))).toBeUndefined();
+    expect(getIncomingAccountDeadlineViolation(account.state, frame, proposerIsLeft, receiverClock(42_000))).toBeUndefined();
+    const before = await makeFrame(account, txs, 41_999, proposerIsLeft);
+    expect(getIncomingAccountDeadlineViolation(account.state, before, proposerIsLeft, receiverClock(40_001))).toBeUndefined();
   }
   // The rejected replacement would erase v1 and admit a v3-priced request 1999ms early.
   const attack = forkAccountReplicaShell(account);
-  await apply(attack, policy(3, 20n), 12_000, policyIsLeft);
+  await apply(attack, policy(3, 20n), 42_000, policyIsLeft);
   expect(attack.state.rebalanceFeePolicies!.get(1)![policyIsLeft ? 'left' : 'right']!.previous).toBeUndefined();
   expect((await apply(attack, { type: 'request_collateral', data: {
     tokenId: 1, amount: 10_000n, feeAmount: 31n, policyVersion: 3,
-  } }, 10_001, !policyIsLeft)).ok).toBe(true);
+  } }, 40_001, !policyIsLeft)).ok).toBe(true);
 });
