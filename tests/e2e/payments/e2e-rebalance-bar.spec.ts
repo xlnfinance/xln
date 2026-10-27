@@ -1079,14 +1079,15 @@ async function waitForRebalanceStateProgress(
       await page.waitForTimeout(250);
       continue;
     }
-    const currentHeight = Number(last.currentHeight || 0);
     const uncollateralized = BigInt(last.uncollateralized || '0');
     const requested = BigInt(last.requested || '0');
     const collateral = BigInt(last.collateral || '0');
     const hubExposure = BigInt(last.hubExposure || '0');
     const outCapacity = BigInt(last.outCapacity || '0');
+    // Only the faucet payment's money effect counts: an unrelated Account frame
+    // (J claim, ACK) can advance the height first, and a snapshot taken then
+    // makes the faucet driver send one payment past the rebalance trigger.
     if (
-      currentHeight > baseline.currentHeight ||
       uncollateralized > baseline.uncollateralized ||
       requested > baseline.requested ||
       collateral !== baseline.collateral ||
