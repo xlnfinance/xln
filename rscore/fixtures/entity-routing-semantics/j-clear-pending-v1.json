@@ -1,0 +1,30 @@
+[
+  {
+    "pending": "sent",
+    "code": "J_CLEAR_BATCH_PENDING",
+    "message": "Cannot clear a sent or recovery batch awaiting reconciliation",
+    "disposition": "reject",
+    "stateUnchanged": true
+  },
+  {
+    "pending": "recovery",
+    "code": "J_CLEAR_BATCH_PENDING",
+    "message": "Cannot clear a sent or recovery batch awaiting reconciliation",
+    "disposition": "reject",
+    "stateUnchanged": true
+  },
+  {
+    "pending": "both",
+    "code": "J_CLEAR_BATCH_PENDING",
+    "message": "Cannot clear a sent or recovery batch awaiting reconciliation",
+    "disposition": "reject",
+    "stateUnchanged": true
+  },
+  {
+    "pending": "empty-recovery",
+    "code": "J_CLEAR_BATCH_PENDING",
+    "message": "Cannot clear a sent or recovery batch awaiting reconciliation",
+    "disposition": "reject",
+    "stateUnchanged": true
+  }
+]

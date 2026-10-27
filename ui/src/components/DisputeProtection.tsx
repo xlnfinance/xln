@@ -77,7 +77,7 @@ export function DisputeProtection({ towers, seed }: { towers: string[]; seed: st
             <dt>Response window</dt>
             <dd>Final {row.windowSeconds} seconds</dd>
             <dt>Receipt expires</dt>
-            <dd>{new Date(row.receipt.expiresAt!).toLocaleString()}</dd>
+            <dd>{new Date(row.receipt.expiresAt ?? 0).toLocaleString()}</dd>
             <dt>Backup hash</dt>
             <dd className="mono">{row.receipt.bundleHash}</dd>
             <dt>Freshness</dt>

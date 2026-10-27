@@ -63,6 +63,14 @@ export function Pay() {
 	const meta = getTokenMeta(tokenId);
 	const self = wallet.entityId;
 
+	const manualDescription = useRef(description);
+	const clearInvoice = useCallback(() => {
+		setInvoice(null);
+		setDescription(manualDescription.current);
+		setNoteOpen(Boolean(manualDescription.current));
+		setInvoiceError(null);
+	}, []);
+
 	const applyInvoice = useCallback((raw: string): boolean => {
 		try {
 			const parsed = parseXlnInvoice(raw);
@@ -77,13 +85,13 @@ export function Pay() {
 			setNoteOpen(Boolean(note.description) || note.locked);
 			return true;
 		} catch (error) {
-			setInvoice(null);
+			clearInvoice();
 			setPickedEntityId(null);
 			setToText(raw);
 			setInvoiceError(error instanceof Error ? error.message : String(error));
 			return false;
 		}
-	}, []);
+	}, [clearInvoice]);
 
 	// Deep link: /#pay/<invoice> lands here with the full href in navigation state.
 	useEffect(() => {
@@ -257,7 +265,7 @@ export function Pay() {
 									const value = event.target.value;
 									setToText(value);
 									setPickedEntityId(null);
-									setInvoice(null);
+									clearInvoice();
 									setInvoiceError(null);
 									if (looksLikeInvoice(value)) applyInvoice(value);
 								}}
@@ -276,7 +284,7 @@ export function Pay() {
 												event.preventDefault();
 												setToText(entry.label || entry.entityId);
 												setPickedEntityId(entry.entityId);
-												setInvoice(null);
+												clearInvoice();
 												setToFocused(false);
 											}}
 										>
@@ -301,7 +309,7 @@ export function Pay() {
 								<button key={account.counterpartyId} type="button" onClick={() => {
 									setToText(account.label);
 									setPickedEntityId(account.counterpartyId);
-									setInvoice(null);
+									clearInvoice();
 								}} data-testid={`pay-recent-${account.label}`}>
 									{account.label}
 									{account.isHub ? <span className="chip hub">hub</span> : null}
@@ -466,7 +474,10 @@ export function Pay() {
 					</button>
 					{noteOpen && (
 						<div className="field fade-in">
-							<input className="input" value={description} disabled={descriptionLocked} onChange={event => setDescription(event.target.value)} placeholder="What is this for?" data-testid="pay-note" />
+							<input className="input" value={description} disabled={descriptionLocked} onChange={event => {
+								manualDescription.current = event.target.value;
+								setDescription(event.target.value);
+							}} placeholder="What is this for?" data-testid="pay-note" />
 						</div>
 					)}
 

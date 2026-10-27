@@ -192,7 +192,14 @@ const prepareAppointment = async (
     ...unsignedReceipt,
     towerSignature: await context.signer.signMessage(buildReceiptMessage(unsignedReceipt)),
   };
-  nextDoc.receipts = [receipt, ...existing.receipts].slice(0, context.maxBundlesPerLookupKey);
+  // A newer short-TTL tail must not erase the snapshot's longer signed promise.
+  // Missing/null expiry was signed as zero and grants no retention lifetime.
+  const receipts = [receipt, ...existing.receipts];
+  const strongest = receipts.reduce((best, candidate) =>
+    (candidate.expiresAt ?? 0) > (best.expiresAt ?? 0) ? candidate : best);
+  const pinned = strongest === receipt ? [receipt] : [receipt, strongest];
+  nextDoc.receipts = [...pinned, ...receipts.filter(candidate => !pinned.includes(candidate))]
+    .slice(0, context.maxBundlesPerLookupKey);
   return nextDoc;
 };
 

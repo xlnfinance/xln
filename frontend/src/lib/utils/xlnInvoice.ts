@@ -96,7 +96,11 @@ const parseInvoiceParams = (params: URLSearchParams, source: ParsedXlnInvoice['s
   const tokenId = parsedToken;
   const amount = sanitizeText(params.get('amount'), 64);
   const description = sanitizeText(params.get('desc'), 200);
-  const recipientUserId = sanitizeText(params.get('u'), 96);
+  const recipientUserId = params.get('u') ?? '';
+  if (params.has('u') && !/^[A-Za-z0-9_-]{1,96}$/.test(recipientUserId))
+    throw new Error('Invoice contains an invalid custody recipient');
+  if (params.has('u') && /(^|[ |])uid:/.test(description))
+    throw new Error('Invoice description contains custody attribution');
   const jurisdictionId = sanitizeText(params.get('jId'), 64);
   const noteLocked = Boolean(recipientUserId);
   const canonicalUri = buildXlnInvoiceUri({

@@ -50,3 +50,22 @@ test('payment links preserve the local wallet origin and entry path while public
     expect(new URL(buildWalletPayHref(intent, href)).pathname).toBe('/app');
   }
 });
+
+test('both wallets reject conflicting description attribution when a custody user is supplied', () => {
+  for (const description of ['uid:bob', 'Lunch uid:bob', 'Lunch|uid:bob', 'Lunch\tuid:bob', 'uid:bob | uid:alice']) {
+    const params = new URLSearchParams({ target: TARGET, desc: description, u: 'alice' });
+    expect(() => parseXlnInvoice(`xln://pay?${params}`)).toThrow('Invoice description contains custody attribution');
+  }
+  expect(parseXlnInvoice(`xln://pay?target=${TARGET}&desc=fluid:ok&u=alice`).recipientUserId).toBe('alice');
+  expect(parseXlnInvoice(`xln://pay?target=${TARGET}&desc=uid:bob`).description).toBe('uid:bob');
+});
+
+test('custody uid is validated before whitespace normalization or truncation', () => {
+  for (const uid of ['', ' alice', 'alice ', 'ali\nce', 'ali ce', 'alice|uid:bob', 'alice:bob', 'álîce', 'a'.repeat(97)]) {
+    const params = new URLSearchParams({ target: TARGET, u: uid });
+    expect(() => parseXlnInvoice(`xln://pay?${params}`)).toThrow();
+  }
+  for (const uid of ['alice', 'Alice_09-z', 'a'.repeat(96)]) {
+    expect(parseXlnInvoice(`xln://pay?target=${TARGET}&u=${uid}`).recipientUserId).toBe(uid);
+  }
+});

@@ -311,3 +311,73 @@ fn authenticated_j_event_matches_typescript_event_effect_and_empty_outbox_projec
             .is_empty()
     );
 }
+
+#[test]
+fn clear_pending_batches_matches_typescript_reject_code_text_and_preserves_evidence() {
+    use xln_rscore_entity_kernel::{EntityKernelError, JBatch, JBatchState, SentJBatch};
+    let cases: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/entity-routing-semantics/j-clear-pending-v1.json"
+    )))
+    .expect("TypeScript clear pending vectors");
+    for expected in cases.as_array().expect("cases") {
+        let pending = expected["pending"].as_str().expect("pending kind");
+        let draft = || JBatch {
+            reserve_to_reserve: vec![xln_rscore_entity_kernel::j_batch::ReserveToReserve {
+                receiving_entity: PEER,
+                token_id: U256::one(),
+                amount: U256::from(10),
+            }],
+            ..JBatch::default()
+        };
+        let mut batch = JBatchState {
+            batch: draft(),
+            ..JBatchState::default()
+        };
+        if pending == "sent" || pending == "both" {
+            batch.sent_batch = Some(SentJBatch {
+                batch: draft(),
+                batch_hash: [0x44; 32],
+                encoded_batch: vec![],
+                entity_nonce: 1,
+                first_submitted_at: 1000,
+                last_submitted_at: 1000,
+                submit_attempts: 1,
+                fee_overrides: None,
+                transaction_hash: None,
+                last_failure: None,
+                terminal_failure: None,
+            });
+        }
+        if pending != "sent" {
+            batch.recovery_batches.push(if pending == "empty-recovery" {
+                JBatch::default()
+            } else {
+                draft()
+            });
+        }
+        let mut state = entity_state(2000);
+        state.j_batch_state = Some(batch);
+        let before = state.clone();
+        let mut events = Vec::new();
+        let error = apply_local_entity_control_tx(
+            &mut state,
+            LocalEntityControlTx::JClearBatch { reason: None },
+            &mut events,
+            &authority(),
+            0,
+        )
+        .expect_err("signed or recovery batch must reject before mutation");
+        let EntityKernelError::RejectedEntityTx { kind, detail } = error else {
+            panic!("expected typed user reject: {error:?}");
+        };
+        assert_eq!(kind, "j_clear_batch");
+        let (code, message) = detail.split_once(':').expect("code and text");
+        assert_eq!(code, expected["code"].as_str().unwrap());
+        assert_eq!(message, expected["message"].as_str().unwrap());
+        assert_eq!(expected["disposition"], "reject");
+        assert_eq!(expected["stateUnchanged"], true);
+        assert_eq!(state, before, "{pending}: no evidence or state mutation");
+        assert!(events.is_empty());
+    }
+}

@@ -2234,9 +2234,14 @@ pub fn apply_local_entity_control_tx(
             let Some(batch) = batch else {
                 return Ok(result);
             };
+            // A sent batch may still execute on-chain; preserve its reconciliation evidence.
+            if batch.sent_batch.is_some() || !batch.recovery_batches.is_empty() {
+                return Err(EntityKernelError::rejected(
+                    "j_clear_batch",
+                    "J_CLEAR_BATCH_PENDING:Cannot clear a sent or recovery batch awaiting reconciliation",
+                ));
+            }
             batch.batch = JBatch::default();
-            batch.sent_batch = None;
-            batch.recovery_batches.clear();
             batch.status = JBatchStatus::Empty;
         }
         LocalEntityControlTx::MintReserves { token_id, amount } => {

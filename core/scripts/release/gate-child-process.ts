@@ -65,7 +65,8 @@ export const runGateStep = async <S extends GateCommand>(
   });
   clearTimeout(timer);
   if (termination) await termination;
-  return { ...step, status: code === 0 ? 'pass' : 'fail', code, durationMs: Date.now() - startedAt };
+  const resultCode = termination !== null ? 124 : code;
+  return { ...step, status: resultCode === 0 ? 'pass' : 'fail', code: resultCode, durationMs: Date.now() - startedAt };
 };
 
 /** Fail-fast sequence shared by every release gate: the first red stops the run. */

@@ -24,3 +24,10 @@ test('runtime and J routing EntityTx kinds match the shared TypeScript semantic 
     'j_event',
   ]);
 });
+
+test('j_clear_batch pending evidence matches shared Rust rejection vectors', async () => {
+  const { executeJClearPendingVectors } = await import('../../../../rscore/fixtures/entity-routing-semantics/j-clear-pending');
+  const expected = JSON.parse(readFileSync(
+    join(import.meta.dir, '../../../../rscore/fixtures/entity-routing-semantics/j-clear-pending-v1.json'), 'utf8'));
+  expect(await executeJClearPendingVectors()).toEqual(expected);
+});

@@ -143,6 +143,8 @@ const decodeReceipt = (value: unknown, lookupKey: string, runtimeId: string): To
   if (receipt['towerSignature'] !== undefined) {
     text(receipt['towerSignature'], 'TOWER_STORED_RECEIPT_SIGNATURE_INVALID');
   }
+  // Omitted/null expiry has the same zero lifetime as the signed receipt message.
+  receipt['expiresAt'] = receipt['expiresAt'] ?? 0;
   return receipt as TowerReceiptV1;
 };
 

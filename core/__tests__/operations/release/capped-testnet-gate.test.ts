@@ -1,5 +1,9 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { safeStringify } from '../../../protocol/serialization';
+import { runGateSteps } from '../../../scripts/release/gate-child-process';
 
 import {
   buildCappedTestnetGateSteps,
@@ -121,4 +125,34 @@ test('capped testnet timeout terminates the entire spawned process group', () =>
   expect(runner).toContain('termination = terminateGateProcessGroup(proc)');
   expect(runner).not.toContain("proc.kill('SIGTERM')");
   expect(runner).not.toContain("proc.kill('SIGKILL')");
+});
+
+test('a timed-out child exiting zero on SIGTERM fails with 124 and stops the gate', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'xln-gate-timeout-'));
+  const child = join(root, 'child.ts');
+  const marker = join(root, 'terminated');
+  const next = join(root, 'next');
+  // exec replaces the gate shell: the observed exit code really is zero.
+  writeFileSync(child, `process.on('SIGTERM', () => { require('node:fs').writeFileSync(${safeStringify(marker)}, 'zero'); process.exit(0); }); setInterval(() => {}, 1000);`);
+  try {
+    const result = await runGateSteps([
+      { name: 'timeout', command: `exec '${process.execPath}' '${child}'`, timeoutMs: 500 },
+      { name: 'next', command: `touch '${next}'`, timeoutMs: 500 },
+    ], { label: step => step.name, env: () => process.env });
+    expect(readFileSync(marker, 'utf8')).toBe('zero');
+    expect(result.results).toHaveLength(1);
+    expect(result.firstRed).toMatchObject({ name: 'timeout', status: 'fail', code: 124 });
+    expect(existsSync(next)).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a successful child without timeout passes and allows the next step', async () => {
+  const result = await runGateSteps([
+    { name: 'first', command: 'exit 0', timeoutMs: 2_000 },
+    { name: 'second', command: 'exit 0', timeoutMs: 2_000 },
+  ], { label: step => step.name, env: () => process.env });
+  expect(result.results.map(step => [step.status, step.code])).toEqual([['pass', 0], ['pass', 0]]);
+  expect(result.firstRed).toBeNull();
 });

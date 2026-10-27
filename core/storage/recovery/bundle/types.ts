@@ -177,7 +177,8 @@ export type TowerReceiptV1 = {
   slot?: number;
   storedAt?: number;
   receivedAt: number;
-  expiresAt?: number;
+  /** Missing/null is signed as zero and promises no retention lifetime. */
+  expiresAt?: number | null;
   sequence: number;
   retainedSlots: number;
   storedBytes?: number;
