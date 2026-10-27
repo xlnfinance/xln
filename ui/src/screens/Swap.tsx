@@ -366,7 +366,7 @@ export function Swap() {
   const receivingFeePolicy =
     receivingAccount && receivingOwnerId && receivingHubId && xln
       ? counterpartyFeePolicy(
-          { state: receivingAccount },
+          { state: receivingAccount, currentFrame: { timestamp: wallet.frame?.activeEntity?.core?.timestamp ?? 0 } },
           xln.isLeftEntity(receivingOwnerId, receivingHubId),
           wantTokenId,
         )

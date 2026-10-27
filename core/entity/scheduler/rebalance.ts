@@ -9,7 +9,6 @@ import { deriveDelta } from '../../account/utils';
 import { normalizeRebalanceMatchingStrategy } from '../../extensions/rebalance/policy';
 import {
   assertNoTokenlessHubRawOverrides,
-  getDefaultRebalanceBaseFeeForToken,
   getDefaultRebalancePolicyForToken,
   hasRebalanceTokenMetadata,
 } from '../../account/config/defaults';
@@ -46,8 +45,6 @@ type RebalanceRun = {
   signerId: string;
   now: number;
   strategy: ReturnType<typeof normalizeRebalanceMatchingStrategy>;
-  liquidityFeeBps: bigint;
-  policyVersion: number;
   hubId: string;
   debug: RebalanceDebug;
 };
@@ -96,11 +93,6 @@ const createRebalanceRun = (
     signerId: getEntityLeaderState(replica.state).activeValidatorId,
     now: replica.state.timestamp,
     strategy: normalizeRebalanceMatchingStrategy(config.matchingStrategy),
-    liquidityFeeBps: config.rebalanceLiquidityFeeBps,
-    policyVersion:
-      Number.isFinite(config.policyVersion) && config.policyVersion > 0
-        ? config.policyVersion
-        : 1,
     hubId,
     debug,
   };
@@ -143,7 +135,6 @@ const validateR2CRequestPolicy = (
   account: AccountReplica,
   counterpartyId: string,
   tokenId: number,
-  requestedAmount: bigint,
 ): { requestedAt: number; feePaidUpfront: bigint } | null => {
   const feeState = account.state.requestedRebalanceFeeState?.get(tokenId);
   if (!feeState) {
@@ -168,23 +159,6 @@ const validateR2CRequestPolicy = (
   // retries the identical sealed batch; only finalized Account state or an
   // explicit drop clears this marker and permits a new economic operation.
   if (submittedAt > 0) return null;
-  if ((feeState.policyVersion || 0) !== run.policyVersion) {
-    console.warn(
-      `⏸️ R→C request pending (policy mismatch, manual action required): ` +
-      `token=${tokenId} cp=${counterpartyId.slice(-4)} ` +
-      `reqPolicy=${feeState.policyVersion} hubPolicy=${run.policyVersion}`,
-    );
-    run.debug({
-      step: 2,
-      status: 'blocked',
-      event: 'policy_mismatch_manual',
-      counterpartyId,
-      tokenId,
-      requestPolicyVersion: feeState.policyVersion || 0,
-      hubPolicyVersion: run.policyVersion,
-    });
-    return null;
-  }
   if (!hasRebalanceTokenMetadata(asTokenId(tokenId))) {
     console.warn(
       `⏸️ R→C request pending (no catalog metadata, manual action required): ` +
@@ -199,30 +173,10 @@ const validateR2CRequestPolicy = (
     });
     return null;
   }
-  const minFee =
-    getDefaultRebalanceBaseFeeForToken(asTokenId(tokenId)) +
-    (requestedAmount * run.liquidityFeeBps) / 10_000n;
-  if (feeState.feePaidUpfront >= minFee) {
-    return {
-      requestedAt: feeState.requestedAt || 0,
-      feePaidUpfront: feeState.feePaidUpfront,
-    };
-  }
-  console.warn(
-    `⏸️ R→C request pending (prepaid fee too low, manual action required): ` +
-    `token=${tokenId} cp=${counterpartyId.slice(-4)} ` +
-    `prepaid=${feeState.feePaidUpfront} < requiredFee=${minFee}`,
-  );
-  run.debug({
-    step: 2,
-    status: 'blocked',
-    event: 'prepaid_fee_too_low_manual',
-    counterpartyId,
-    tokenId,
-    prepaidFee: String(feeState.feePaidUpfront),
-    requiredFee: String(minFee),
-  });
-  return null;
+  // Account admission already certified the price and transferred this fee.
+  // Repricing a paid request after a hub announcement strands the customer's
+  // old-terms request, including one submitted before the notice expired.
+  return { requestedAt: feeState.requestedAt, feePaidUpfront: feeState.feePaidUpfront };
 };
 
 const evaluateR2CRequest = (
@@ -238,7 +192,6 @@ const evaluateR2CRequest = (
     account,
     counterpartyId,
     tokenId,
-    requestedAmountRaw,
   );
   if (!request) return null;
   const delta = account.state.deltas.get(tokenId);

@@ -289,3 +289,37 @@ test('amount priority funds a later larger request first when one token reserve 
   expect(state.accounts.get(largeUserId)?.shadow.rebalance.submittedAtByToken.get(tokenId)).toBeGreaterThan(0);
   expect(state.accounts.get(smallUserId)?.shadow.rebalance.submittedAtByToken.has(tokenId)).toBe(false);
 });
+
+test('a paid old-terms request is fulfilled after the hub increases its current fees', async () => {
+  const { applyAccountTxToMutableReplica } = await import('../../../account/tx/apply');
+  const userId = `0x${'f5'.repeat(32)}`;
+  const account = makeAccount(entityId, userId, jurisdiction);
+  const delta = account.state.deltas.get(1)!;
+  account.state.deltas = account.state.deltas.updated(1, { ...delta, offdelta: -500_000_000n });
+  const publish = (version: number, bps: bigint, timestamp: number) => applyAccountTxToMutableReplica(account, {
+    type: 'rebalance_policy', data: { tokenId: 1, policyVersion: version,
+      baseFee: 100_000n, liquidityFeeBps: bps, gasFee: 0n, noticePeriodSeconds: 2 },
+  }, true, timestamp);
+  expect((await publish(1, 1n, 1000)).ok).toBe(true);
+  expect((await applyAccountTxToMutableReplica(account, { type: 'request_collateral',
+    data: { tokenId: 1, amount: 500_000_000n, feeAmount: 150_000n, policyVersion: 1 },
+  }, false, 1500)).ok).toBe(true);
+  expect((await publish(2, 9000n, 2000)).ok).toBe(true);
+  const env = createEmptyEnv('hub-honors-paid-notice-terms');
+  env.scenarioMode = true;
+  env.quietRuntimeLogs = true;
+  const state = makeHubState(1_000_000, 0);
+  state.hubRebalanceConfig = { ...state.hubRebalanceConfig!, policyVersion: 2, rebalanceLiquidityFeeBps: 9000n };
+  state.reserves.set(1, 1_000_000_000n);
+  state.jBatchState = undefined;
+  state.accounts = state.accounts.updated(userId, account);
+  openWritableEntityAccounts(state);
+  state.crontabState = initCrontab();
+  for (const task of state.crontabState.tasks.values()) task.lastRun = 0;
+  const replica = { entityId, signerId, mempool: [], isProposer: true, state } as EntityReplica;
+  env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
+  await executeCrontab(env, replica, state.crontabState, { manualBroadcastInInput: false, accountChanges: new Set() });
+  expect(state.jBatchState?.batch.reserveToCollateral.flatMap(operation => operation.pairs))
+    .toEqual([{ entity: userId, amount: 499_850_000n }]);
+  expect(state.accounts.get(userId)?.state.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(150_000n);
+});

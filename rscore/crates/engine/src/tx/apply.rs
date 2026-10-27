@@ -196,6 +196,7 @@ pub(crate) fn apply_to_candidate(
             balance::set_credit_limit(candidate, *token_id, amount, proposer)
         }
         AccountTx::RebalancePolicy {
+            notice_period_seconds,
             token_id,
             policy_version,
             base_fee,
@@ -209,6 +210,7 @@ pub(crate) fn apply_to_candidate(
                 candidate,
                 crate::tx::handlers::rebalance::RebalancePolicyTx {
                     token_id: *token_id,
+                    notice_period_seconds: *notice_period_seconds,
                     policy_version: *policy_version,
                     base_fee,
                     liquidity_fee_bps,

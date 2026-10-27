@@ -36,7 +36,7 @@ const makeAccount = (): AccountReplica => {
         [
           1,
           {
-            right: { policyVersion: 3, baseFee: 10n, liquidityFeeBps: 0n, gasFee: 0n, updatedAt: 500 },
+            right: { policyVersion: 3, baseFee: 10n, liquidityFeeBps: 0n, gasFee: 0n, updatedAt: 500, noticePeriodSeconds: 2, effectiveAt: 500 },
           },
         ],
       ]),

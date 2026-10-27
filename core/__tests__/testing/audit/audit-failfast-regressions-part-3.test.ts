@@ -1084,7 +1084,7 @@ describe('audit fail-fast regressions', () => {
       state: {
         deltas: new Map([[1, feeDelta]]),
         rebalanceFeePolicies: new Map([
-          [1, { right: { policyVersion: 1, baseFee: 10n, gasFee: 0n, liquidityFeeBps: 0n, updatedAt: 1 } }],
+          [1, { right: { policyVersion: 1, baseFee: 10n, gasFee: 0n, liquidityFeeBps: 0n, updatedAt: 1, noticePeriodSeconds: 2, effectiveAt: 1 } }],
         ]),
         requestedRebalance: new Map<number, bigint>(),
         requestedRebalanceFeeState: new Map(),
@@ -1124,7 +1124,7 @@ describe('audit fail-fast regressions', () => {
       state: {
         deltas: new Map([[1, delta]]),
         rebalanceFeePolicies: new Map([
-          [1, { right: { policyVersion: 1, baseFee: 10n, gasFee: 0n, liquidityFeeBps: 0n, updatedAt: 1 } }],
+          [1, { right: { policyVersion: 1, baseFee: 10n, gasFee: 0n, liquidityFeeBps: 0n, updatedAt: 1, noticePeriodSeconds: 2, effectiveAt: 1 } }],
         ]),
         requestedRebalance: new Map<number, bigint>([[1, 590n]]),
         requestedRebalanceFeeState: new Map([
@@ -1208,7 +1208,7 @@ describe('audit fail-fast regressions', () => {
                 baseFee: 10n * usd,
                 gasFee: 0n,
                 liquidityFeeBps: 0n,
-                updatedAt: 1,
+                updatedAt: 1, noticePeriodSeconds: 2, effectiveAt: 1,
               },
             },
           ],
@@ -1284,7 +1284,7 @@ describe('audit fail-fast regressions', () => {
             baseFee: 7n,
             liquidityFeeBps: 5n,
             gasFee: 11n,
-            updatedAt: 1,
+            updatedAt: 1, noticePeriodSeconds: 2, effectiveAt: 1,
           },
         },
       ],
@@ -1321,7 +1321,7 @@ describe('audit fail-fast regressions', () => {
       baseFee: 7n,
       liquidityFeeBps: 5n,
       gasFee: 11n,
-      updatedAt: 123,
+      updatedAt: 123, noticePeriodSeconds: 2592000, effectiveAt: 123,
     });
     expect(account.state.rebalanceFeePolicies?.get(1)?.right).toBeUndefined();
 
@@ -1410,7 +1410,7 @@ describe('audit fail-fast regressions', () => {
           baseFee: 1n,
           liquidityFeeBps: 0n,
           gasFee: 0n,
-          updatedAt: 1,
+          updatedAt: 1, noticePeriodSeconds: 2, effectiveAt: 1,
         },
       });
       account.state.rebalanceFeePolicies = PersistentAccountStateMap.fromEntries('rebalanceFeePolicies', policies);
@@ -1447,11 +1447,11 @@ describe('audit fail-fast regressions', () => {
     expect(result.accountTxs?.map(({ tx }) => tx)).toEqual([
       {
         type: 'rebalance_policy',
-        data: { tokenId: 1, policyVersion: 4, baseFee: 100_000n, liquidityFeeBps: 5n, gasFee: 0n },
+        data: { tokenId: 1, policyVersion: 4, baseFee: 100_000n, liquidityFeeBps: 5n, gasFee: 0n, noticePeriodSeconds: 2592000 },
       },
       {
         type: 'rebalance_policy',
-        data: { tokenId: 2, policyVersion: 4, baseFee: 40_000_000_000_000n, liquidityFeeBps: 5n, gasFee: 0n },
+        data: { tokenId: 2, policyVersion: 4, baseFee: 40_000_000_000_000n, liquidityFeeBps: 5n, gasFee: 0n, noticePeriodSeconds: 2592000 },
       },
     ]);
     expect(result.outputs).toHaveLength(1);
@@ -1478,8 +1478,8 @@ describe('audit fail-fast regressions', () => {
       [
         1,
         {
-          left: { policyVersion: 2, baseFee: 3n, liquidityFeeBps: 4n, gasFee: 5n, updatedAt: 6 },
-          right: { policyVersion: 7, baseFee: 8n, liquidityFeeBps: 9n, gasFee: 10n, updatedAt: 11 },
+          left: { policyVersion: 2, baseFee: 3n, liquidityFeeBps: 4n, gasFee: 5n, updatedAt: 6, noticePeriodSeconds: 2, effectiveAt: 6 },
+          right: { policyVersion: 7, baseFee: 8n, liquidityFeeBps: 9n, gasFee: 10n, updatedAt: 11, noticePeriodSeconds: 2, effectiveAt: 11 },
         },
       ],
     ]);
@@ -1514,7 +1514,7 @@ describe('audit fail-fast regressions', () => {
             baseFee: 7n,
             liquidityFeeBps: 5n,
             gasFee: 11n,
-            updatedAt: 1,
+            updatedAt: 1, noticePeriodSeconds: 2, effectiveAt: 1,
           },
         },
       ],
@@ -1569,7 +1569,7 @@ describe('audit fail-fast regressions', () => {
             baseFee: 1n * usd,
             liquidityFeeBps: 1n,
             gasFee: 0n,
-            updatedAt: 1,
+            updatedAt: 1, noticePeriodSeconds: 2, effectiveAt: 1,
           },
         },
       ],
@@ -1654,7 +1654,7 @@ describe('audit fail-fast regressions', () => {
                 baseFee: usd / 10n,
                 gasFee: 0n,
                 liquidityFeeBps: 1n,
-                updatedAt: 1,
+                updatedAt: 1, noticePeriodSeconds: 2, effectiveAt: 1,
               },
             },
           ],

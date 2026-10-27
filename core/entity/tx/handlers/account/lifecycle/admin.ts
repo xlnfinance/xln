@@ -16,6 +16,7 @@ import type { AccountTxTarget } from '..';
 import { getEntityAccountForWrite } from '../../../../state/persistent-account-map';
 import { applyEntityAccountEnvelopeUpdate } from '../../../../account-envelope-update';
 import { rejectFailure } from '../../../../../protocol/errors/failure-taxonomy';
+import { DEFAULT_TERM_NOTICE_SECONDS, validTermNoticeSeconds } from '../../../../../account/config/term-notice';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
@@ -45,6 +46,7 @@ export const buildHubRebalancePolicyTx = (
     baseFee: getDefaultRebalanceBaseFeeForToken(asTokenId(tokenId)),
     liquidityFeeBps: config.rebalanceLiquidityFeeBps,
     gasFee: 0n,
+    noticePeriodSeconds: config.termNoticePeriodSeconds ?? DEFAULT_TERM_NOTICE_SECONDS,
   },
 });
 
@@ -110,13 +112,18 @@ export const buildHubConfig = (
   rejectNegativeHubAmount(data.routingFeePPM, 'HUB_CONFIG_ROUTING_FEE_PPM_NEGATIVE');
   rejectNegativeHubAmount(data.rebalanceTimeoutMs, 'HUB_CONFIG_REBALANCE_TIMEOUT_MS_NEGATIVE');
   const swapTakerFeeBps = resolveSwapTakerFeeBps(data.swapTakerFeeBps);
+  const termNoticePeriodSeconds = data.termNoticePeriodSeconds ?? previous?.termNoticePeriodSeconds ?? DEFAULT_TERM_NOTICE_SECONDS;
+  if (!validTermNoticeSeconds(termNoticePeriodSeconds)) {
+    throw rejectFailure('HUB_TERM_NOTICE_INVALID', `HUB_TERM_NOTICE_INVALID:${termNoticePeriodSeconds}`);
+  }
   const liquidityFeeBps = data.rebalanceLiquidityFeeBps ?? 1n;
   if (liquidityFeeBps < 0n || liquidityFeeBps > 10_000n) {
     throw rejectFailure('HUB_REBALANCE_LIQUIDITY_FEE_BPS_INVALID', `HUB_REBALANCE_LIQUIDITY_FEE_BPS_INVALID:${liquidityFeeBps}`);
   }
   const feePolicyChanged =
     !previous ||
-    previous.rebalanceLiquidityFeeBps !== liquidityFeeBps;
+    previous.rebalanceLiquidityFeeBps !== liquidityFeeBps ||
+    (previous.termNoticePeriodSeconds ?? DEFAULT_TERM_NOTICE_SECONDS) !== termNoticePeriodSeconds;
   const hubName = typeof data.hubName === 'string' && data.hubName.trim()
     ? data.hubName.trim()
     : previous?.hubName;
@@ -129,6 +136,7 @@ export const buildHubConfig = (
       routingFeePPM: data.routingFeePPM ?? 1,
       baseFee: data.baseFee ?? 0n,
       swapTakerFeeBps,
+      termNoticePeriodSeconds,
       disputeAutoFinalizeMode: data.disputeAutoFinalizeMode ?? 'auto',
       minCollateralThreshold: data.minCollateralThreshold ?? 0n,
       rebalanceLiquidityFeeBps: liquidityFeeBps,

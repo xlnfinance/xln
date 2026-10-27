@@ -41,6 +41,16 @@ fn hub_policy_tx(config: &CanonicalValue, token_id: u32) -> Result<AccountTx, En
     let base_fee = xln_rscore_protocol::rebalance_base_fee(token_id)
         .map_err(|error| invalid(format!("HUB_POLICY_BASE_FEE:{error}")))?;
     Ok(AccountTx::RebalancePolicy {
+        notice_period_seconds: match object_field(config, "termNoticePeriodSeconds") {
+            Some(CanonicalValue::Number(value)) => Some(
+                value
+                    .as_str()
+                    .parse::<u64>()
+                    .map_err(|_| EntityKernelError::output("HUB_TERM_NOTICE_INVALID"))?,
+            ),
+            None => Some(2_592_000),
+            _ => return Err(EntityKernelError::output("HUB_TERM_NOTICE_INVALID")),
+        },
         token_id,
         policy_version,
         base_fee,

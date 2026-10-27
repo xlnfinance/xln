@@ -67,6 +67,18 @@ fn encode_policy_snapshot(value: &RebalanceFeePolicySnapshot) -> AbiValue {
         encode_bigint(value.liquidity_fee_bps()),
         encode_bigint(value.gas_fee()),
         integer(value.updated_at()),
+        integer(value.notice_period_seconds()),
+        integer(value.effective_at()),
+        value.previous().map_or(AbiValue::Nil, |old| {
+            tuple(vec![
+                integer(old.policy_version()),
+                encode_bigint(old.base_fee()),
+                encode_bigint(old.liquidity_fee_bps()),
+                encode_bigint(old.gas_fee()),
+                integer(old.updated_at()),
+                integer(old.notice_period_seconds()),
+            ])
+        }),
     ])
 }
 

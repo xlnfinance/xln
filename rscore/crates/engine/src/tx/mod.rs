@@ -102,6 +102,7 @@ pub enum AccountTx {
         amount: BigInt,
     },
     RebalancePolicy {
+        notice_period_seconds: Option<u64>,
         token_id: u32,
         /// TypeScript admits any positive safe integer, so this is u64 and the
         /// wire keeps the whole domain instead of disabling the mirror.

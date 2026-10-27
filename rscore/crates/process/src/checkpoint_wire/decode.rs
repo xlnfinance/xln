@@ -370,14 +370,42 @@ fn policy_snapshot(value: &AbiValue) -> Result<Option<RebalanceFeePolicySnapshot
     if matches!(value, AbiValue::Nil) {
         return Ok(None);
     }
-    let fields = exact(tuple(value)?, 5, "rebalancePolicySnapshot")?;
-    Ok(Some(RebalanceFeePolicySnapshot::new(
+    let fields = exact(tuple(value)?, 8, "rebalancePolicySnapshot")?;
+    let previous = if matches!(&fields[7], AbiValue::Nil) {
+        None
+    } else {
+        let old = exact(tuple(&fields[7])?, 6, "previousRebalanceTerms")?;
+        Some(
+            RebalanceFeePolicySnapshot::new(
+                js_number(&old[0], "policyVersion")?,
+                bigint(&old[1], "baseFee")?,
+                bigint(&old[2], "liquidityFeeBps")?,
+                bigint(&old[3], "gasFee")?,
+                js_number(&old[4], "updatedAt")?,
+            )
+            .with_notice(
+                js_number(&old[5], "noticePeriodSeconds")?,
+                js_number(&old[4], "updatedAt")?,
+                None,
+            ),
+        )
+    };
+    let snapshot = RebalanceFeePolicySnapshot::new(
         js_number(&fields[0], "policyVersion")?,
         bigint(&fields[1], "baseFee")?,
         bigint(&fields[2], "liquidityFeeBps")?,
         bigint(&fields[3], "gasFee")?,
         js_number(&fields[4], "updatedAt")?,
-    )))
+    )
+    .with_notice(
+        js_number(&fields[5], "noticePeriodSeconds")?,
+        js_number(&fields[6], "effectiveAt")?,
+        previous,
+    );
+    if !snapshot.notice_is_valid() {
+        return Err(ProcessError::Expected("rebalance notice"));
+    }
+    Ok(Some(snapshot))
 }
 
 #[cfg(test)]

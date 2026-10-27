@@ -110,6 +110,21 @@ fn initial_hub_policy_txs(
                 EntityKernelError::output(format!("HUB_POLICY_BASE_FEE:{error}"))
             })?;
             Ok(AccountTx::RebalancePolicy {
+                notice_period_seconds: match match config {
+                    CanonicalValue::Object(fields) => fields.iter().find_map(|(key, value)| {
+                        (key == "termNoticePeriodSeconds").then_some(value)
+                    }),
+                    _ => None,
+                } {
+                    Some(CanonicalValue::Number(value)) => Some(
+                        value
+                            .as_str()
+                            .parse::<u64>()
+                            .map_err(|_| EntityKernelError::output("HUB_TERM_NOTICE_INVALID"))?,
+                    ),
+                    None => Some(2_592_000),
+                    _ => return Err(EntityKernelError::output("HUB_TERM_NOTICE_INVALID")),
+                },
                 token_id,
                 policy_version,
                 base_fee,

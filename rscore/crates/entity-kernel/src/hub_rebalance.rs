@@ -170,21 +170,7 @@ fn field<'a>(fields: &'a [(String, CanonicalValue)], name: &str) -> Option<&'a C
         .find_map(|(key, value)| (key == name).then_some(value))
 }
 
-fn number(value: &CanonicalValue, name: &'static str) -> Result<u64, EntityKernelError> {
-    let CanonicalValue::Number(value) = value else {
-        return Err(EntityKernelError::HubRebalanceConfigInvalid {
-            detail: name.into(),
-        });
-    };
-    value
-        .as_str()
-        .parse()
-        .map_err(|_| EntityKernelError::HubRebalanceConfigInvalid {
-            detail: name.into(),
-        })
-}
-
-fn config(state: &EntityStateSlice) -> Result<(MatchingStrategy, u64, BigInt), EntityKernelError> {
+fn config(state: &EntityStateSlice) -> Result<MatchingStrategy, EntityKernelError> {
     let fields = object(
         state.hub_rebalance_config.as_ref().ok_or_else(|| {
             EntityKernelError::HubRebalanceConfigInvalid {
@@ -209,20 +195,7 @@ fn config(state: &EntityStateSlice) -> Result<(MatchingStrategy, u64, BigInt), E
         Some(CanonicalValue::String(value)) if value == "fee" => MatchingStrategy::Fee,
         _ => MatchingStrategy::Amount,
     };
-    let policy_version = field(fields, "policyVersion")
-        .map(|value| number(value, "policyVersion"))
-        .transpose()?
-        .filter(|value| *value > 0)
-        .unwrap_or(1);
-    let liquidity_fee_bps = match field(fields, "rebalanceLiquidityFeeBps") {
-        Some(CanonicalValue::BigInt(value)) if value.sign() != Sign::Minus => value.clone(),
-        _ => {
-            return Err(EntityKernelError::HubRebalanceConfigInvalid {
-                detail: "rebalanceLiquidityFeeBps".into(),
-            });
-        }
-    };
-    Ok((strategy, policy_version, liquidity_fee_bps))
+    Ok(strategy)
 }
 
 fn usd_amount(
@@ -231,13 +204,6 @@ fn usd_amount(
     amount.map_err(|error| EntityKernelError::HubRebalanceConfigInvalid {
         detail: error.to_string(),
     })
-}
-
-/// TS `getDefaultRebalanceBaseFeeForToken`: $0.10 at the committed reference rate.
-fn default_base_fee(token: TokenId) -> Result<BigInt, EntityKernelError> {
-    usd_amount(xln_rscore_protocol::rebalance_base_fee(u32::from(
-        token.get(),
-    )))
 }
 
 /// TS `getDefaultRebalancePolicyForToken(...).r2cRequestSoftLimit`.
@@ -291,8 +257,6 @@ fn collect_r2c_targets(
     state: &EntityStateSlice,
     views: &[HubRebalanceAccountView],
     strategy: MatchingStrategy,
-    policy_version: u64,
-    liquidity_fee_bps: &BigInt,
     effects: &mut Vec<EntityKernelOutput>,
 ) -> Result<Vec<R2cTarget>, EntityKernelError> {
     let mut targets = Vec::new();
@@ -358,32 +322,6 @@ fn collect_r2c_targets(
             if submitted_at > 0 {
                 continue;
             }
-            if fee.policy_version != policy_version {
-                effects.push(diagnostic(
-                    state,
-                    2,
-                    "blocked",
-                    "policy_mismatch_manual",
-                    vec![
-                        (
-                            "counterpartyId".into(),
-                            CanonicalValue::String(view.account_id.clone()),
-                        ),
-                        (
-                            "tokenId".into(),
-                            CanonicalValue::Number(CanonicalNumber::from_u32(u32::from(
-                                token_id.get(),
-                            ))),
-                        ),
-                        (
-                            "requestPolicyVersion".into(),
-                            number_u64(fee.policy_version)?,
-                        ),
-                        ("hubPolicyVersion".into(), number_u64(policy_version)?),
-                    ],
-                ));
-                continue;
-            }
             // Default fees exist only for catalog tokens; a delta may hold any
             // u16 id (TS hasRebalanceTokenMetadata). Block, never halt.
             if crate::canonical_token_decimals(u32::from(token_id.get())).is_none() {
@@ -407,37 +345,9 @@ fn collect_r2c_targets(
                 ));
                 continue;
             }
-            let minimum_fee = default_base_fee(*token_id)?
-                + requested_raw * liquidity_fee_bps / BigInt::from(10_000_u32);
-            if fee.fee_paid_upfront < minimum_fee {
-                effects.push(diagnostic(
-                    state,
-                    2,
-                    "blocked",
-                    "prepaid_fee_too_low_manual",
-                    vec![
-                        (
-                            "counterpartyId".into(),
-                            CanonicalValue::String(view.account_id.clone()),
-                        ),
-                        (
-                            "tokenId".into(),
-                            CanonicalValue::Number(CanonicalNumber::from_u32(u32::from(
-                                token_id.get(),
-                            ))),
-                        ),
-                        (
-                            "prepaidFee".into(),
-                            CanonicalValue::String(fee.fee_paid_upfront.to_string()),
-                        ),
-                        (
-                            "requiredFee".into(),
-                            CanonicalValue::String(minimum_fee.to_string()),
-                        ),
-                    ],
-                ));
-                continue;
-            }
+            // The authenticated Account transition already certified and
+            // transferred the fee. Repricing after announcement strands a
+            // paid request; fulfillment must honor that committed admission.
             let Some(delta) = view.deltas.get(token_id) else {
                 effects.push(diagnostic(
                     state,
@@ -735,7 +645,7 @@ pub(crate) fn apply_hub_rebalance(
     if state.hub_rebalance_config.is_none() {
         return Ok(HubRebalanceResult::default());
     }
-    let (strategy, policy_version, liquidity_fee_bps) = config(state)?;
+    let strategy = config(state)?;
     state.j_batch_state.get_or_insert_with(Default::default);
     let (can_touch_batch, terminal) = resolve_sent_batch(state)?;
     if let Some(outputs) = terminal {
@@ -747,14 +657,7 @@ pub(crate) fn apply_hub_rebalance(
     }
     let mut envelope_mutations = Vec::new();
     let mut effects = Vec::new();
-    let targets = collect_r2c_targets(
-        state,
-        views,
-        strategy,
-        policy_version,
-        &liquidity_fee_bps,
-        &mut effects,
-    )?;
+    let targets = collect_r2c_targets(state, views, strategy, &mut effects)?;
     let mut queued_r2c = 0_usize;
     if can_touch_batch {
         let receiving = fixed_entity_id(&state.entity_id)?;
@@ -1045,21 +948,39 @@ mod tests {
     }
 
     #[test]
+    fn paid_old_terms_request_is_not_repriced_against_the_current_hub_config() {
+        let mut state = hub_state(100);
+        state.reserves.insert(1, BigInt::from(600_u64));
+        let CanonicalValue::Object(fields) = state.hub_rebalance_config.as_mut().unwrap() else {
+            panic!("config")
+        };
+        for (name, value) in fields {
+            if name == "policyVersion" {
+                *value = number_u64(2).unwrap();
+            }
+            if name == "rebalanceLiquidityFeeBps" {
+                *value = CanonicalValue::BigInt(9000.into());
+            }
+        }
+        let view = r2c_view(0x22, 400, 1);
+        let result = apply_hub_rebalance(&mut state, &[view], false).expect("fulfill paid request");
+        assert_eq!(result.envelope_mutations.len(), 1);
+        let batch = &state.j_batch_state.as_ref().unwrap().batch;
+        assert_eq!(
+            batch.reserve_to_collateral[0].pairs[0].amount,
+            ethabi::ethereum_types::U256::from(400)
+        );
+    }
+
+    #[test]
     fn amount_priority_funds_later_larger_request_first_when_reserve_is_scarce() {
         let mut state = hub_state(100);
         state.reserves.insert(1, BigInt::from(600_u64));
         let views = [r2c_view(0x22, 400, 1), r2c_view(0x33, 900, 2)];
         let mut effects = Vec::new();
 
-        let targets = collect_r2c_targets(
-            &state,
-            &views,
-            MatchingStrategy::Amount,
-            1,
-            &BigInt::from(0_u8),
-            &mut effects,
-        )
-        .expect("targets");
+        let targets = collect_r2c_targets(&state, &views, MatchingStrategy::Amount, &mut effects)
+            .expect("targets");
 
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].account_id, format!("0x{}", "33".repeat(32)));
@@ -1080,15 +1001,8 @@ mod tests {
         let views = [r2c_view_for_token(77, 0x22, 400, 1)];
         let mut effects = Vec::new();
 
-        let targets = collect_r2c_targets(
-            &state,
-            &views,
-            MatchingStrategy::Amount,
-            1,
-            &BigInt::from(0_u8),
-            &mut effects,
-        )
-        .expect("targets");
+        let targets = collect_r2c_targets(&state, &views, MatchingStrategy::Amount, &mut effects)
+            .expect("targets");
 
         assert!(targets.is_empty());
         assert_eq!(

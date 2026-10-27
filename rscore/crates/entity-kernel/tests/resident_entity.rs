@@ -2053,6 +2053,7 @@ fn cross_j_r6_h69_scheduled_rebalance_broadcasts_in_the_same_entity_frame() {
         &base,
         requester_side.opposite(),
         &AccountTx::RebalancePolicy {
+            notice_period_seconds: None,
             token_id: 1,
             policy_version: 1,
             base_fee: 100_000.into(),

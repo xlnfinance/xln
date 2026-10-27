@@ -200,6 +200,7 @@ const enableHub = async (env: RuntimeReplica, hub: Party): Promise<void> => {
         {
           type: 'setHubConfig',
           data: {
+            termNoticePeriodSeconds: 2,
             matchingStrategy: 'amount',
             policyVersion: 1,
             routingFeePPM: 1,

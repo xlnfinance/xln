@@ -261,6 +261,7 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
         {
           type: 'setHubConfig',
           data: {
+            termNoticePeriodSeconds: 2,
             matchingStrategy: 'amount',
             routingFeePPM: 1,
             baseFee: 0n,

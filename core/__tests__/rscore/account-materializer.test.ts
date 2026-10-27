@@ -119,6 +119,16 @@ const policySnapshotWire = (value: NonNullable<BilateralRebalanceFeePolicy['left
         value.liquidityFeeBps.toString(),
         value.gasFee.toString(),
         value.updatedAt,
+        value.noticePeriodSeconds,
+        value.effectiveAt,
+        value.previous === undefined ? null : [
+          value.previous.policyVersion,
+          value.previous.baseFee.toString(),
+          value.previous.liquidityFeeBps.toString(),
+          value.previous.gasFee.toString(),
+          value.previous.updatedAt,
+          value.previous.noticePeriodSeconds,
+        ],
       ];
 
 const frameWire = (frame: AccountFrame): RscoreWireValue[] => [
@@ -413,7 +423,11 @@ const nonemptyState = (): AccountState => {
     quantizedWant: 30n,
   };
   const policy: BilateralRebalanceFeePolicy = {
-    left: { policyVersion: 1, baseFee: 2n, liquidityFeeBps: 50n, gasFee: 3n, updatedAt: 88 },
+    left: {
+      policyVersion: 2, baseFee: 2n, liquidityFeeBps: 50n, gasFee: 3n, updatedAt: 88,
+      noticePeriodSeconds: 2, effectiveAt: 2088,
+      previous: { policyVersion: 1, baseFee: 1n, liquidityFeeBps: 50n, gasFee: 3n, updatedAt: 70, noticePeriodSeconds: 2 },
+    },
   };
   return {
     ...state,

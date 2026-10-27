@@ -330,7 +330,10 @@ const policySnapshotWire = (
   snapshot.baseFee.toString(),
   snapshot.liquidityFeeBps.toString(),
   snapshot.gasFee.toString(),
-  snapshot.updatedAt,
+  snapshot.updatedAt, snapshot.noticePeriodSeconds, snapshot.effectiveAt,
+  snapshot.previous ? [snapshot.previous.policyVersion, snapshot.previous.baseFee.toString(),
+    snapshot.previous.liquidityFeeBps.toString(), snapshot.previous.gasFee.toString(),
+    snapshot.previous.updatedAt, snapshot.previous.noticePeriodSeconds] : null,
 ]);
 
 const rebalanceFeePoliciesWire = (
@@ -677,6 +680,7 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] => {
         tx.data.baseFee.toString(),
         tx.data.liquidityFeeBps.toString(),
         tx.data.gasFee.toString(),
+        tx.data.noticePeriodSeconds ?? null,
       ];
     case 'swap_offer':
       return [

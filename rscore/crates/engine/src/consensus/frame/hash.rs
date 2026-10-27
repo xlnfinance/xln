@@ -271,6 +271,7 @@ fn projected_tx_value(
             ("add_delta", vec![("tokenId".to_string(), token(*token_id))])
         }
         AccountTx::RebalancePolicy {
+            notice_period_seconds,
             token_id,
             policy_version,
             base_fee,
@@ -287,16 +288,17 @@ fn projected_tx_value(
                     maximum: MAX_POLICY_VERSION,
                 });
             }
-            (
-                "rebalance_policy",
-                vec![
-                    ("tokenId".to_string(), number_u32(*token_id)),
-                    ("policyVersion".to_string(), number(*policy_version)?),
-                    ("baseFee".to_string(), big(base_fee)),
-                    ("liquidityFeeBps".to_string(), big(liquidity_fee_bps)),
-                    ("gasFee".to_string(), big(gas_fee)),
-                ],
-            )
+            let mut fields = vec![
+                ("tokenId".to_string(), number_u32(*token_id)),
+                ("policyVersion".to_string(), number(*policy_version)?),
+                ("baseFee".to_string(), big(base_fee)),
+                ("liquidityFeeBps".to_string(), big(liquidity_fee_bps)),
+                ("gasFee".to_string(), big(gas_fee)),
+            ];
+            if let Some(seconds) = notice_period_seconds {
+                fields.push(("noticePeriodSeconds".into(), number(*seconds)?));
+            }
+            ("rebalance_policy", fields)
         }
         AccountTx::RequestCollateral {
             token_id,
@@ -795,6 +797,7 @@ mod tests {
 
     fn rebalance_policy() -> AccountTx {
         AccountTx::RebalancePolicy {
+            notice_period_seconds: None,
             token_id: 7,
             policy_version: 9_007_199_254_740_991,
             base_fee: BigInt::parse_bytes(b"123456789012345678901234567890", 10).expect("base fee"),

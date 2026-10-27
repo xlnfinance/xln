@@ -178,6 +178,7 @@ fn account_runtime_output_precedes_htlc_forward_followup_in_mixed_frame() {
     let base = account(MAKER, &[1]);
     // HUB is the left side; its committed policy must authorize the maker's fee.
     let policy = AccountTx::RebalancePolicy {
+        notice_period_seconds: None,
         token_id: 1,
         policy_version: 1,
         base_fee: BigInt::from(1),

@@ -1,3 +1,4 @@
+import { validTermNoticeSeconds } from '../../account/config/term-notice';
 import { validateSpreadDistribution } from '../../swapbook';
 import { isProfileEntityKind, isProfileEntitySector } from '../../entity/profile';
 import { compareStableText } from '../../protocol/serialization';
@@ -76,6 +77,7 @@ const HUB_REBALANCE_CONFIG_REQUIRED = [
 const HUB_REBALANCE_CONFIG_OPTIONAL = [
   'hubName',
   'swapTakerFeeBps',
+  'termNoticePeriodSeconds',
   'disputeAutoFinalizeMode',
   'minCollateralThreshold',
   'c2rWithdrawSoftLimit',
@@ -95,6 +97,9 @@ const validateStorageHubRebalanceConfig = (value: unknown, code: string): void =
   requireBoundaryInteger(config['routingFeePPM'], `${code}_ROUTING_FEE_PPM`);
   requireStorageBigInt(config['baseFee'], `${code}_BASE_FEE`);
   requireStorageBigInt(config['rebalanceLiquidityFeeBps'], `${code}_LIQUIDITY_FEE_BPS`, 0n, 10_000n);
+  if (config['termNoticePeriodSeconds'] !== undefined && !validTermNoticeSeconds(
+    requireBoundaryInteger(config['termNoticePeriodSeconds'], `${code}_TERM_NOTICE_SECONDS`, 1),
+  )) throw new Error(`${code}_TERM_NOTICE_SECONDS_INVALID`);
   if (config['hubName'] !== undefined) requireStorageString(config['hubName'], `${code}_HUB_NAME`);
   if (config['swapTakerFeeBps'] !== undefined)
     requireBoundaryInteger(config['swapTakerFeeBps'], `${code}_SWAP_TAKER_FEE_BPS`);

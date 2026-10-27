@@ -214,20 +214,12 @@ fn policy_value(policy: &xln_rscore_engine::BilateralRebalanceFeePolicy) -> Resu
     let mut fields = vec![];
     for (name, side) in [("left", Side::Left), ("right", Side::Right)] {
         if let Some(p) = policy.side(side) {
-            fields.push((
-                name.into(),
-                object([
-                    ("policyVersion", number(p.policy_version())?),
-                    ("baseFee", V::BigInt(p.base_fee().clone())),
-                    ("liquidityFeeBps", V::BigInt(p.liquidity_fee_bps().clone())),
-                    ("gasFee", V::BigInt(p.gas_fee().clone())),
-                    ("updatedAt", number(p.updated_at())?),
-                ]),
-            ));
+            fields.push((name.into(), p.canonical()?));
         }
     }
     Ok(V::Object(fields))
 }
+
 fn request_fee(fee: &xln_rscore_engine::RebalanceRequestFeeState) -> Result<V, StateError> {
     let mut fields = vec![
         ("requestId".into(), text(fee.request_id.clone())),

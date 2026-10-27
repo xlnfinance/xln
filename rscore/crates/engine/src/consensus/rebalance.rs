@@ -78,6 +78,8 @@ fn requests(account: &AccountConsensus) -> Result<Vec<AccountTx>, StateError> {
         else {
             continue;
         };
+        let fee_policy =
+            fee_policy.effective(account.current().map_or(0, |frame| frame.frame.timestamp));
         let out_peer_credit = delta.perspective(owner_side).out_peer_credit;
         if out_peer_credit < soft_limit {
             continue;

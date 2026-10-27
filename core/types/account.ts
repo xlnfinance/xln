@@ -809,6 +809,7 @@ export type AccountTx =
   | {
       type: 'rebalance_policy';
       data: {
+        noticePeriodSeconds?: number;
         tokenId: number;
         policyVersion: number;
         baseFee: bigint;

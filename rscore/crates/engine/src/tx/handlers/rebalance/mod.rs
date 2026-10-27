@@ -62,6 +62,7 @@ pub(crate) fn apply_request_collateral(
             "request_collateral: hub has no committed fee policy for token {token_id}"
         )));
     };
+    let policy = policy.effective(timestamp);
     if policy_version != policy.policy_version() {
         return Ok(reject(format!(
             "request_collateral: policyVersion {policy_version} does not match hub policy v{}",

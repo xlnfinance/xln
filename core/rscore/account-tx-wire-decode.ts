@@ -175,7 +175,7 @@ const decodeSetCreditLimit = (row: readonly unknown[]): AccountTx => {
 };
 
 const decodeRebalancePolicy = (row: readonly unknown[]): AccountTx => {
-  const fields = rscoreWireTuple(row, 6, 'tx.rebalancePolicy');
+  const fields = rscoreWireTuple(row, 7, 'tx.rebalancePolicy');
   return {
     type: 'rebalance_policy',
     data: {
@@ -184,6 +184,7 @@ const decodeRebalancePolicy = (row: readonly unknown[]): AccountTx => {
       baseFee: rscoreWireBig(fields[3], 'tx.baseFee'),
       liquidityFeeBps: rscoreWireBig(fields[4], 'tx.liquidityFeeBps'),
       gasFee: rscoreWireBig(fields[5], 'tx.gasFee'),
+      ...(fields[6] === null ? {} : { noticePeriodSeconds: rscoreWireInt(fields[6], 'tx.noticePeriodSeconds') }),
     },
   } as AccountTx;
 };

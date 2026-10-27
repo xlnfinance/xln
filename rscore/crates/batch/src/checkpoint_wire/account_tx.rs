@@ -93,6 +93,7 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             encode_bigint(amount),
         ],
         AccountTx::RebalancePolicy {
+            notice_period_seconds,
             token_id,
             policy_version,
             base_fee,
@@ -105,6 +106,7 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             encode_bigint(base_fee),
             encode_bigint(liquidity_fee_bps),
             encode_bigint(gas_fee),
+            notice_period_seconds.map_or(AbiValue::Nil, integer),
         ],
         AccountTx::SwapOffer {
             offer_id,

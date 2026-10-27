@@ -26,6 +26,7 @@ export const ACCOUNT_TX_PAYMENT_SCHEMAS = {
     literals: { reason: ['policy_mismatch', 'timeout', 'fee_too_low', 'manual'] },
   },
   rebalance_policy: {
+    optional: { noticePeriodSeconds: 'integer' },
     required: {
       tokenId: 'tokenId', policyVersion: 'integer', baseFee: 'bigint',
       liquidityFeeBps: 'bigint', gasFee: 'bigint',

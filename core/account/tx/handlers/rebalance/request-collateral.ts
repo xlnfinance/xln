@@ -25,13 +25,15 @@ import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/del
 import type { ApplyAccountTxResult } from '../../apply-types';
 import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 
+import { effectiveRebalanceTerms } from '../../../config/term-notice';
+
 type RequestCollateralTx = Extract<AccountTx, { type: 'request_collateral' }>;
 
 // The requester is the signed frame side; only the other side's committed
 // policy authorizes the hub deposit. A self-selected cheap policy/version
 // must not debit a fee and create a request the hub never agreed to serve.
 const validateCollateralRequest = (
-  account: AccountReplica, data: RequestCollateralTx['data'], requesterIsLeft: boolean,
+  account: AccountReplica, data: RequestCollateralTx['data'], requesterIsLeft: boolean, timestamp: number,
 ): string | undefined => {
   if (data.amount <= 0n) return 'request_collateral: amount must be > 0';
   if (data.feeAmount < 0n) return 'request_collateral: feeAmount must be >= 0';
@@ -41,8 +43,9 @@ const validateCollateralRequest = (
   if (!account.state.deltas.has(data.tokenId)) {
     return `request_collateral: no delta for token ${data.tokenId}`;
   }
-  const policy = account.state.rebalanceFeePolicies?.get(data.tokenId)?.[requesterIsLeft ? 'right' : 'left'];
-  if (!policy) return `request_collateral: hub has no committed fee policy for token ${data.tokenId}`;
+  const snapshot = account.state.rebalanceFeePolicies?.get(data.tokenId)?.[requesterIsLeft ? 'right' : 'left'];
+  if (!snapshot) return `request_collateral: hub has no committed fee policy for token ${data.tokenId}`;
+  const policy = effectiveRebalanceTerms(snapshot, timestamp);
   if (data.policyVersion !== policy.policyVersion) {
     return `request_collateral: policyVersion ${data.policyVersion} does not match hub policy v${policy.policyVersion}`;
   }
@@ -82,7 +85,7 @@ export function handleRequestCollateral(
 ): ApplyAccountTxResult {
   const { tokenId, amount, feeTokenId, feeAmount } = accountTx.data;
 
-  const validationError = validateCollateralRequest(account, accountTx.data, byLeft);
+  const validationError = validateCollateralRequest(account, accountTx.data, byLeft, currentTimestamp);
   if (validationError) return accountTxValidationRejected(validationError, []);
 
   const existingRequest = account.state.requestedRebalance.get(tokenId) ?? 0n;
@@ -194,8 +197,9 @@ export function resolveAutoRebalanceFeePolicy(
   if (!counterpartySide) {
     throw new Error(`REBALANCE_POLICY_ENTITY_NOT_IN_ACCOUNT:${ourEntityId}`);
   }
-  const policy = account.state.rebalanceFeePolicies?.get(tokenId)?.[counterpartySide];
-  if (!policy) return undefined;
+  const snapshot = account.state.rebalanceFeePolicies?.get(tokenId)?.[counterpartySide];
+  if (!snapshot) return undefined;
+  const policy = effectiveRebalanceTerms(snapshot, account.currentFrame.timestamp);
   return {
     policyVersion: policy.policyVersion,
     baseFee: policy.baseFee,
@@ -221,8 +225,6 @@ export function checkAutoRebalance(account: AccountReplica, ourEntityId: string,
     ([leftTokenId], [rightTokenId]) => leftTokenId - rightTokenId,
   );
   for (const [tokenId, policy] of orderedPolicies) {
-    const feePolicy = resolveAutoRebalanceFeePolicy(account, ourEntityId, tokenId);
-    if (!feePolicy) continue;
     // Skip manual mode (r2cRequestSoftLimit === hardLimit convention)
     if (policy.r2cRequestSoftLimit === policy.hardLimit) continue;
 
@@ -233,6 +235,8 @@ export function checkAutoRebalance(account: AccountReplica, ourEntityId: string,
     const outPeerCredit = derived.outPeerCredit;
     const existingRequest = account.state.requestedRebalance.get(tokenId) ?? 0n;
     if (existingRequest > 0n) continue;
+    const feePolicy = resolveAutoRebalanceFeePolicy(account, ourEntityId, tokenId);
+    if (!feePolicy) continue;
     // Rebalance trigger must be based ONLY on uncollateralized peer credit usage.
     //
     // deriveDelta semantics:

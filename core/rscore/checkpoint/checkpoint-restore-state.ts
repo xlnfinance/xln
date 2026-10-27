@@ -1,3 +1,4 @@
+import { validateRebalanceFeePolicySnapshot } from '../../account/validation/rebalance-validation';
 import { canonicalAccountDisputeConfig } from '../../account/config/dispute-config';
 import { assertAccountJClaimAccumulatorState } from '../../account/j-claims/j-claim-accumulator';
 import { PersistentAccountStateMap } from '../../account/state/persistent-state-map';
@@ -238,15 +239,28 @@ const decodeOffer = (value: unknown, index: number): SwapOffer => {
   return offer;
 };
 
+const decodePreviousTerms = (value: unknown, field: string) => {
+  const row = rscoreCheckpointTuple(value, 6, `RESTORE_${field}_PREVIOUS`);
+  return { policyVersion: checkpointSafeInt(row[0], `${field}_VERSION`),
+    baseFee: checkpointBigInt(row[1], `${field}_BASE_FEE`),
+    liquidityFeeBps: checkpointBigInt(row[2], `${field}_LIQUIDITY_FEE`),
+    gasFee: checkpointBigInt(row[3], `${field}_GAS_FEE`),
+    updatedAt: checkpointSafeInt(row[4], `${field}_UPDATED_AT`),
+    noticePeriodSeconds: checkpointSafeInt(row[5], `${field}_NOTICE_PERIOD`) };
+};
+
 const decodePolicySnapshot = (value: unknown, field: string): RebalanceFeePolicySnapshot | undefined => {
   if (value === null) return undefined;
-  const row = rscoreCheckpointTuple(value, 5, `RESTORE_${field}`);
+  const row = rscoreCheckpointTuple(value, 8, `RESTORE_${field}`);
   const snapshot = {
     policyVersion: checkpointSafeInt(row[0], `${field}_VERSION`),
     baseFee: checkpointBigInt(row[1], `${field}_BASE_FEE`),
     liquidityFeeBps: checkpointBigInt(row[2], `${field}_LIQUIDITY_FEE`),
     gasFee: checkpointBigInt(row[3], `${field}_GAS_FEE`),
     updatedAt: checkpointSafeInt(row[4], `${field}_UPDATED_AT`),
+    noticePeriodSeconds: checkpointSafeInt(row[5], `${field}_NOTICE_PERIOD`),
+    effectiveAt: checkpointSafeInt(row[6], `${field}_EFFECTIVE_AT`),
+    ...(row[7] === null ? {} : { previous: decodePreviousTerms(row[7], field) }),
   };
   if (
     snapshot.policyVersion === 0 ||
@@ -256,6 +270,7 @@ const decodePolicySnapshot = (value: unknown, field: string): RebalanceFeePolicy
     snapshot.liquidityFeeBps > 10_000n
   )
     return checkpointRestoreFail(`${field}_INVALID`);
+  validateRebalanceFeePolicySnapshot(snapshot, field);
   return snapshot;
 };
 

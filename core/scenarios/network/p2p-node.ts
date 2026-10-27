@@ -724,7 +724,7 @@ const run = async () => {
     entityInputs: [{
       entityId,
       signerId,
-      entityTxs: [...(isHub ? [{ type: 'setHubConfig' as const, data: {} }] : []), {
+      entityTxs: [...(isHub ? [{ type: 'setHubConfig' as const, data: { termNoticePeriodSeconds: 2 } }] : []), {
         type: 'profile-update',
         data: {
           profile: {

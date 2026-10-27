@@ -842,14 +842,42 @@ fn decode_policy_snapshot(
     if fields.is_empty() {
         return Ok(None);
     }
-    let fields = exact(fields, 5, "rebalanceFeePolicySnapshot")?;
-    Ok(Some(RebalanceFeePolicySnapshot::new(
+    let fields = exact(fields, 8, "rebalanceFeePolicySnapshot")?;
+    let previous = if matches!(&fields[7], AbiValue::Nil) {
+        None
+    } else {
+        let old = exact(tuple(&fields[7])?, 6, "previousRebalanceTerms")?;
+        Some(
+            RebalanceFeePolicySnapshot::new(
+                js_number(&old[0], "policyVersion")?,
+                bigint(&old[1], "baseFee")?,
+                bigint(&old[2], "liquidityFeeBps")?,
+                bigint(&old[3], "gasFee")?,
+                js_number(&old[4], "updatedAt")?,
+            )
+            .with_notice(
+                js_number(&old[5], "noticePeriodSeconds")?,
+                js_number(&old[4], "updatedAt")?,
+                None,
+            ),
+        )
+    };
+    let snapshot = RebalanceFeePolicySnapshot::new(
         js_number(&fields[0], "policyVersion")?,
         bigint(&fields[1], "baseFee")?,
         bigint(&fields[2], "liquidityFeeBps")?,
         bigint(&fields[3], "gasFee")?,
         js_number(&fields[4], "updatedAt")?,
-    )))
+    )
+    .with_notice(
+        js_number(&fields[5], "noticePeriodSeconds")?,
+        js_number(&fields[6], "effectiveAt")?,
+        previous,
+    );
+    if !snapshot.notice_is_valid() {
+        return Err(ProcessError::Expected("rebalance notice"));
+    }
+    Ok(Some(snapshot))
 }
 
 fn decode_claim_accumulator(value: &AbiValue) -> Result<JClaimAccumulator, ProcessError> {
@@ -1203,8 +1231,12 @@ fn decode_credit_request(fields: &[AbiValue]) -> Result<AccountTx, ProcessError>
 }
 
 fn decode_rebalance_policy(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
-    let fields = exact(fields, 6, "rebalancePolicy")?;
+    let fields = exact(fields, 7, "rebalancePolicy")?;
     Ok(AccountTx::RebalancePolicy {
+        notice_period_seconds: match &fields[6] {
+            AbiValue::Nil => None,
+            value => Some(js_number(value, "noticePeriodSeconds")?),
+        },
         token_id: bounded_u32(&fields[1], "tokenId")?,
         policy_version: js_number(&fields[2], "policyVersion")?,
         base_fee: bigint(&fields[3], "baseFee")?,

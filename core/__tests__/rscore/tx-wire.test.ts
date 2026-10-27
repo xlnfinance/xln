@@ -46,6 +46,7 @@ export const TX_WIRE_CASES: { name: string; tx: AccountTx }[] = [
   { name: 'request_collateral', tx: { type: 'request_collateral', data: { tokenId: 1, amount: 100n, feeTokenId: 2, feeAmount: 3n, policyVersion: 7 } } },
   { name: 'rebalance_refund', tx: { type: 'rebalance_refund', data: { requestId: 'rebalance-1', requestTokenId: 1, amount: 25n, reason: 'policy_mismatch' } } },
   { name: 'rebalance_policy', tx: { type: 'rebalance_policy', data: { tokenId: 1, policyVersion: 3, baseFee: 11n, liquidityFeeBps: 12n, gasFee: 13n } } },
+  { name: 'rebalance_policy/notice', tx: { type: 'rebalance_policy', data: { tokenId: 1, policyVersion: 3, baseFee: 11n, liquidityFeeBps: 12n, gasFee: 13n, noticePeriodSeconds: 2 } } },
   { name: 'swap_offer/full', tx: { type: 'swap_offer', data: { offerId: 'offer-1', giveTokenId: 1, giveTokenDecimals: 6, giveAmount: 1_000_000n, wantTokenId: 2, wantTokenDecimals: 6, wantAmount: 2_000_000n, maxFee: 0n, minNetReceive: 1_900_000n, timeInForce: 1, priceTicks: 20_000n } } },
   { name: 'swap_offer/cross', tx: { type: 'swap_offer', data: { offerId: 'offer-cross', giveTokenId: 1, giveTokenDecimals: 6, giveAmount: 10n, wantTokenId: 2, wantTokenDecimals: 6, wantAmount: 20n, maxFee: 1n, minNetReceive: 19n, crossJurisdiction: { routeId: 'route-1', amount: 10n } } } as AccountTx },
   { name: 'swap_offer/minimal', tx: { type: 'swap_offer', data: { offerId: 'offer-2', giveTokenId: 1, giveTokenDecimals: 6, giveAmount: 1_000_000n, wantTokenId: 2, wantTokenDecimals: 6, wantAmount: 2_000_000n, maxFee: 0n, minNetReceive: 1n } } },

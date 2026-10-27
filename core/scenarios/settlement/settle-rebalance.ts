@@ -454,7 +454,7 @@ export async function runSettleRebalance(runtimeReplica: RuntimeReplica): Promis
   try {
     await process(env, [{
       entityId: hub.id, signerId: hub.signer,
-      entityTxs: [{ type: 'setHubConfig', data: { matchingStrategy: 'amount', routingFeePPM: 100, baseFee: 0n } }]
+      entityTxs: [{ type: 'setHubConfig', data: { termNoticePeriodSeconds: 2, matchingStrategy: 'amount', routingFeePPM: 100, baseFee: 0n } }]
     }]);
     await convergeScenario(env, 30);
     await waitForNoSentBatch('mixed-rebalance');

@@ -18,6 +18,7 @@ import { useApp } from '../runtime/store';
 import { useWallet } from '../runtime/views';
 import { USER_ACTIVITY_TYPES, useMovements } from '../runtime/financial/movements';
 import { ActivityHead, ActivityRow } from '../components/history/ActivityRow';
+import { TermChangeNotice } from '../components/TermChangeNotice';
 
 export function Home() {
   const entityId = useApp(s => s.activeEntityId);
@@ -40,6 +41,7 @@ export function Home() {
     <WalletScale>
       <TestMoney key={wallet.entityId} wallet={wallet} />
       <CreditLimitNotice wallet={wallet} />
+      <TermChangeNotice accounts={wallet.accounts} />
       <header className="page-head">
         <div>
           <span className="crumb static">Wallet{wallet.jurisdiction ? ` · ${wallet.jurisdiction}` : ''}</span>

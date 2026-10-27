@@ -120,6 +120,7 @@ fn market() -> std::sync::Arc<xln_rscore_engine::SwapMarketPolicy> {
 
 fn rebalance_policy(policy_version: u64) -> AccountTx {
     AccountTx::RebalancePolicy {
+        notice_period_seconds: None,
         token_id: 1,
         policy_version,
         base_fee: BigInt::from(1),
@@ -621,6 +622,7 @@ fn an_incoming_rebalance_policy_fee_above_uint256_is_a_typed_rejection() {
     for (base_fee, gas_fee) in [(&max + 1, BigInt::from(1)), (BigInt::from(1), &max + 1)] {
         let (left, mut right) = parties();
         let tx = AccountTx::RebalancePolicy {
+            notice_period_seconds: None,
             token_id: 1,
             policy_version: 1,
             base_fee,

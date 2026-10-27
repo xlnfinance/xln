@@ -81,7 +81,7 @@ const offer: SwapOffer = {
 };
 
 const policy: BilateralRebalanceFeePolicy = {
-  left: { policyVersion: 1, baseFee: 2n, liquidityFeeBps: 50n, gasFee: 3n, updatedAt: 88 },
+  left: { policyVersion: 1, baseFee: 2n, liquidityFeeBps: 50n, gasFee: 3n, updatedAt: 88, noticePeriodSeconds: 2, effectiveAt: 88 },
 };
 
 const deltaWire = (value: Delta): unknown[] => [
@@ -225,7 +225,7 @@ const restoreFixture = (
           : canonicalWire(offer.crossJurisdiction),
       ],
     ],
-    [[1, [[1, '2', '50', '3', 88], null]]],
+    [[1, [[1, '2', '50', '3', 88, 2, 88, null], null]]],
     [],
     [],
     [],

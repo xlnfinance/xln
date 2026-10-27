@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { TermChangeNotice } from '../components/TermChangeNotice';
 import { CopyId } from '../components/CopyId';
 import { HOME, PageHead } from '../components/PageHead';
 import { Icon } from '../components/Icons';
@@ -19,6 +20,7 @@ import { useWallet, type AccountTokenView } from '../runtime/views';
 
 export function AccountDetail() {
 	const navigate = useNavigate();
+	const [params] = useSearchParams();
 	const { counterpartyId = '' } = useParams();
 	const entityId = useApp(s => s.activeEntityId);
 	const selectedTokenId = useApp(s => s.selectedTokenId);
@@ -27,7 +29,7 @@ export function AccountDetail() {
 	const wallet = useWallet(entityId);
 	const [showEmpty, setShowEmpty] = useState(false);
 	const [showFrames, setShowFrames] = useState(false);
-	const [managing, setManaging] = useState<false | ManageTab>(false);
+	const [managing, setManaging] = useState<false | ManageTab>(params.get('close') === '1' ? 'dispute' : false);
 	const account = wallet.accounts.find(entry => entry.counterpartyId === counterpartyId.toLowerCase()) ?? null;
 	// A lane with no position, no credit either way and no collateral is plumbing until money touches it.
 	const lanes = useMemo(() => {
@@ -91,6 +93,7 @@ export function AccountDetail() {
 
 	return (
 		<div className="screen fade-in">
+			{account ? <TermChangeNotice accounts={[account]} onClose={() => setManaging('dispute')} /> : null}
 			<PageHead
 				parent={HOME}
 				title={

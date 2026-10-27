@@ -506,6 +506,7 @@ fn rebalance_pair(
             &replica,
             hub_side,
             &AccountTx::RebalancePolicy {
+                notice_period_seconds: None,
                 token_id: 1,
                 policy_version: 1,
                 base_fee: 1.into(),

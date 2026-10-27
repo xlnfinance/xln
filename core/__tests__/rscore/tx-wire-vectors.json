@@ -84,8 +84,12 @@
     "name": "rebalance_refund"
   },
   {
-    "bytes": "96050103a23131a23132a23133",
+    "bytes": "97050103a23131a23132a23133c0",
     "name": "rebalance_policy"
+  },
+  {
+    "bytes": "97050103a23131a23132a2313302",
+    "name": "rebalance_policy/notice"
   },
   {
     "bytes": "9d06a76f666665722d310106a7313030303030300206a732303030303030a130a73139303030303001a53230303030c0",

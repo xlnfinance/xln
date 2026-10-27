@@ -726,7 +726,7 @@
     },
     {
       "after": {
-        "root": "0x7a55fd64f236091eab3d3d2351d5f339fcbd9374de098066549c519e980b6b40",
+        "root": "0x68a1443d2445c3d0f639b987d56b87931b94ae4682eedcee66e1ae2fa7528c4d",
         "sections": [
           {
             "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
@@ -753,7 +753,7 @@
             "field": "height"
           },
           {
-            "digest": "0xe0b4f1ca03d798f23b8a1ec0279b0270d00677aaf25a57e1e230ad19fc19593c",
+            "digest": "0x778c78f6871d361faeaf1cbf7a9ff6bafc8c56475de00bbb7e25ceeb523d7afd",
             "field": "hubRebalanceConfig"
           },
           {

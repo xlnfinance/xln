@@ -714,6 +714,7 @@ pub fn decode_local_entity_control_tx(
                 "rebalanceLiquidityFeeBps",
                 "rebalanceGasFee",
                 "rebalanceTimeoutMs",
+                "termNoticePeriodSeconds",
             ];
             if entries
                 .iter()
@@ -940,9 +941,25 @@ fn apply_set_hub_config(
             format!("HUB_REBALANCE_LIQUIDITY_FEE_BPS_INVALID:{liquidity_fee}"),
         ));
     }
+    let previous_notice = match previous_hub_field(previous, "termNoticePeriodSeconds") {
+        Some(CanonicalValue::Number(value)) => value
+            .as_str()
+            .parse::<u64>()
+            .map_err(|_| invalid("setHubConfig", "HUB_TERM_NOTICE_INVALID"))?,
+        None => 2_592_000,
+        _ => return Err(invalid("setHubConfig", "HUB_TERM_NOTICE_INVALID")),
+    };
+    let notice = hub_config_uint(
+        entries,
+        "termNoticePeriodSeconds",
+        "HUB_TERM_NOTICE_INVALID",
+        previous_notice,
+        1..=9_007_199_254_740,
+    )?;
     let previous_liquidity = previous_hub_field(previous, "rebalanceLiquidityFeeBps");
     let fee_policy_changed = previous.is_none()
-        || previous_liquidity != Some(&CanonicalValue::BigInt(liquidity_fee.clone()));
+        || previous_liquidity != Some(&CanonicalValue::BigInt(liquidity_fee.clone()))
+        || notice != previous_notice;
     let previous_version = match previous_hub_field(previous, "policyVersion") {
         Some(CanonicalValue::Number(value)) => value
             .as_str()
@@ -1039,6 +1056,7 @@ fn apply_set_hub_config(
             CanonicalValue::BigInt(optional_bigint_field(entries, "baseFee", BigInt::from(0))?),
         ),
         ("swapTakerFeeBps".into(), number(swap_fee)?),
+        ("termNoticePeriodSeconds".into(), number(notice)?),
         (
             "disputeAutoFinalizeMode".into(),
             CanonicalValue::String(dispute_mode),

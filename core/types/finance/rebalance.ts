@@ -3,6 +3,7 @@ export interface HubRebalanceConfig {
   hubName?: string;
   matchingStrategy: 'amount' | 'time' | 'fee';
   policyVersion: number;
+  termNoticePeriodSeconds?: number;
   routingFeePPM: number;
   baseFee: bigint;
   swapTakerFeeBps?: number;
@@ -24,12 +25,18 @@ export interface RebalancePolicy {
 }
 
 /** Exact fee terms advertised by one Account side in a committed Account frame. */
-export interface RebalanceFeePolicySnapshot {
+export interface RebalanceFeeTerms {
   policyVersion: number;
   baseFee: bigint;
   liquidityFeeBps: bigint;
   gasFee: bigint;
   updatedAt: number;
+}
+
+export interface RebalanceFeePolicySnapshot extends RebalanceFeeTerms {
+  noticePeriodSeconds: number;
+  effectiveAt: number;
+  previous?: RebalanceFeeTerms & { noticePeriodSeconds: number };
 }
 
 /** Bilateral policy register for one token. Authority is the Account frame side. */

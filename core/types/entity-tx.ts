@@ -646,6 +646,7 @@ type EntityTxPayload =
       // Declare entity as hub: sets rebalance config + routing fees, announces to gossip
       type: 'setHubConfig';
       data: {
+        termNoticePeriodSeconds?: number;
         hubName?: string;                   // Stable mesh hub identity; display profile name can change
         matchingStrategy?: 'amount' | 'time' | 'fee'; // Default: 'amount'
         policyVersion?: number;             // Fee-policy version (auto-counter if omitted)

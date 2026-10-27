@@ -1769,11 +1769,17 @@ fn decode_account_tx_at(
                     "liquidityFeeBps",
                     "gasFee",
                 ],
-                &[],
+                &["noticePeriodSeconds"],
                 operation_index,
                 &data_path,
             )?;
             Ok(AccountTx::RebalancePolicy {
+                notice_period_seconds: optional_unsigned(
+                    data,
+                    "noticePeriodSeconds",
+                    operation_index,
+                    &data_path,
+                )?,
                 token_id: u32_value(
                     field(data, "tokenId", operation_index, &data_path)?,
                     operation_index,

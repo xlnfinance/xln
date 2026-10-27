@@ -24,6 +24,9 @@ pub struct RebalanceFeePolicySnapshot {
     liquidity_fee_bps: BigInt,
     gas_fee: BigInt,
     updated_at: u64,
+    notice_period_seconds: u64,
+    effective_at: u64,
+    previous: Option<Box<Self>>,
 }
 
 impl RebalanceFeePolicySnapshot {
@@ -40,9 +43,61 @@ impl RebalanceFeePolicySnapshot {
             liquidity_fee_bps,
             gas_fee,
             updated_at,
+            notice_period_seconds: 2_592_000,
+            effective_at: updated_at,
+            previous: None,
         }
     }
 
+    pub fn with_notice(mut self, seconds: u64, effective_at: u64, previous: Option<Self>) -> Self {
+        self.notice_period_seconds = seconds;
+        self.effective_at = effective_at;
+        self.previous = previous.map(Box::new);
+        self
+    }
+    pub const fn notice_period_seconds(&self) -> u64 {
+        self.notice_period_seconds
+    }
+    pub const fn effective_at(&self) -> u64 {
+        self.effective_at
+    }
+    pub fn previous(&self) -> Option<&Self> {
+        self.previous.as_deref()
+    }
+    pub fn effective(&self, timestamp: u64) -> &Self {
+        if timestamp < self.effective_at {
+            self.previous().unwrap_or(self)
+        } else {
+            self
+        }
+    }
+    pub fn notice_is_valid(&self) -> bool {
+        if !(1..=9_007_199_254_740).contains(&self.notice_period_seconds)
+            || self.effective_at < self.updated_at
+        {
+            return false;
+        }
+        match self.previous() {
+            None => self.effective_at == self.updated_at,
+            Some(old) => {
+                old.previous().is_none()
+                    && old.notice_is_valid()
+                    && old.policy_version < self.policy_version
+                    && old.updated_at <= self.updated_at
+                    && self
+                        .updated_at
+                        .checked_add(old.notice_period_seconds * 1000)
+                        .is_some_and(|earliest| self.effective_at >= earliest)
+            }
+        }
+    }
+    fn terms_canonical(&self) -> Result<CanonicalValue, StateError> {
+        let mut value = self.canonical()?;
+        if let CanonicalValue::Object(ref mut fields) = value {
+            fields.retain(|(name, _)| name != "effectiveAt" && name != "previous");
+        }
+        Ok(value)
+    }
     pub const fn policy_version(&self) -> u64 {
         self.policy_version
     }
@@ -72,13 +127,13 @@ impl RebalanceFeePolicySnapshot {
             && &self.gas_fee == gas_fee
     }
 
-    fn canonical(&self) -> Result<CanonicalValue, StateError> {
+    pub fn canonical(&self) -> Result<CanonicalValue, StateError> {
         let number = |value| {
             CanonicalNumber::try_from_u64(value)
                 .map(CanonicalValue::Number)
                 .map_err(|error| StateError::AccountStateRoot(error.to_string()))
         };
-        Ok(CanonicalValue::Object(vec![
+        let mut fields = vec![
             ("policyVersion".into(), number(self.policy_version)?),
             (
                 "baseFee".into(),
@@ -93,7 +148,16 @@ impl RebalanceFeePolicySnapshot {
                 CanonicalValue::BigInt(self.gas_fee.clone()),
             ),
             ("updatedAt".into(), number(self.updated_at)?),
-        ]))
+            (
+                "noticePeriodSeconds".into(),
+                number(self.notice_period_seconds)?,
+            ),
+            ("effectiveAt".into(), number(self.effective_at)?),
+        ];
+        if let Some(previous) = self.previous() {
+            fields.push(("previous".into(), previous.terms_canonical()?));
+        }
+        Ok(CanonicalValue::Object(fields))
     }
 }
 
@@ -147,6 +211,7 @@ pub(crate) struct RebalancePolicyTx<'a> {
     pub policy_version: u64,
     pub base_fee: &'a BigInt,
     pub liquidity_fee_bps: &'a BigInt,
+    pub notice_period_seconds: Option<u64>,
     pub gas_fee: &'a BigInt,
 }
 
@@ -162,7 +227,12 @@ pub(crate) fn apply_policy(
         base_fee,
         liquidity_fee_bps,
         gas_fee,
+        notice_period_seconds,
     } = tx;
+    let notice_period_seconds = notice_period_seconds.unwrap_or(2_592_000);
+    if !(1..=9_007_199_254_740).contains(&notice_period_seconds) {
+        return Ok(super::reject("rebalance_policy: invalid notice period"));
+    }
     if token_id == 0 || token_id > MAX_TOKEN_ID {
         return Ok(rejected(ValidationRejection::RebalancePolicyTokenId {
             token_id,
@@ -210,7 +280,9 @@ pub(crate) fn apply_policy(
             )]));
         }
         if policy_version == current.policy_version {
-            if !current.same_terms(base_fee, liquidity_fee_bps, gas_fee) {
+            if !current.same_terms(base_fee, liquidity_fee_bps, gas_fee)
+                || current.notice_period_seconds != notice_period_seconds
+            {
                 return Ok(rejected(ValidationRejection::RebalancePolicyEquivocation {
                     side: proposer,
                     token_id,
@@ -223,13 +295,39 @@ pub(crate) fn apply_policy(
         }
     }
 
+    let active = current.map(|policy| policy.effective(committed_timestamp));
+    let worse = active.is_some_and(|old| {
+        base_fee > old.base_fee()
+            || gas_fee > old.gas_fee()
+            || liquidity_fee_bps > old.liquidity_fee_bps()
+            || notice_period_seconds < old.notice_period_seconds()
+    });
+    let effective_at = committed_timestamp.checked_add(if worse {
+        active.unwrap().notice_period_seconds() * 1000
+    } else {
+        0
+    });
+    let Some(effective_at) = effective_at.filter(|value| *value <= 9_007_199_254_740_991) else {
+        return Ok(super::reject("rebalance_policy: invalid effectiveAt"));
+    };
+    let previous = if worse {
+        active.map(|old| {
+            let mut old = old.clone();
+            old.previous = None;
+            old.effective_at = old.updated_at;
+            old
+        })
+    } else {
+        None
+    };
     let next = RebalanceFeePolicySnapshot::new(
         policy_version,
         base_fee.clone(),
         liquidity_fee_bps.clone(),
         gas_fee.clone(),
         committed_timestamp,
-    );
+    )
+    .with_notice(notice_period_seconds, effective_at, previous);
     let updated = register.unwrap_or_default().with_side(proposer, next);
     replica.state_mut().put_rebalance_policy(token, updated)?;
     let side = if proposer == Side::Left {
@@ -244,4 +342,29 @@ pub(crate) fn apply_policy(
 
 fn rejected(reason: ValidationRejection) -> MutationDecision {
     MutationDecision::rejected(AccountRejection::Validation(reason))
+}
+
+#[cfg(test)]
+mod notice_tests {
+    use super::*;
+
+    #[test]
+    fn committed_notice_selects_the_previous_terms_until_the_exact_deadline() {
+        let old = RebalanceFeePolicySnapshot::new(1, 10.into(), 1.into(), 0.into(), 1000)
+            .with_notice(2, 1000, None);
+        let next = RebalanceFeePolicySnapshot::new(2, 30.into(), 1.into(), 0.into(), 2000)
+            .with_notice(1, 4000, Some(old));
+        assert!(next.notice_is_valid());
+        let forged = next.clone().with_notice(1, 3999, next.previous().cloned());
+        assert!(!forged.notice_is_valid());
+        assert_eq!(next.effective(3999).policy_version(), 1);
+        assert_eq!(next.effective(3999).notice_period_seconds(), 2);
+        assert_eq!(next.effective(4000).policy_version(), 2);
+        assert_eq!(next.effective(4000).notice_period_seconds(), 1);
+        let CanonicalValue::Object(fields) = next.canonical().unwrap() else {
+            panic!("policy object")
+        };
+        assert!(fields.iter().any(|(name, _)| name == "previous"));
+        assert!(fields.iter().any(|(name, _)| name == "effectiveAt"));
+    }
 }

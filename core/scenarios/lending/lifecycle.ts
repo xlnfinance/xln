@@ -101,7 +101,7 @@ export async function lendingLifecycle(
       },
     });
   }
-  await command(env, bank, { type: 'setHubConfig', data: {} });
+  await command(env, bank, { type: 'setHubConfig', data: { termNoticePeriodSeconds: 2 } });
   const expiresAt = env.state.timestamp + 10 * TERM_MS;
   const domain = lendingAccount(env, bank, borrower).state.domain;
   await command(env, bank, {

@@ -91,6 +91,7 @@ export const ENTITY_TX_OPERATION_SCHEMAS = {
   lendingClosePosition: { required: { hubEntityId: 'string', positionId: 'string' } },
   setHubConfig: {
     optional: {
+      termNoticePeriodSeconds: 'integer',
       hubName: 'string', matchingStrategy: 'string', policyVersion: 'integer',
       routingFeePPM: 'integer', baseFee: 'bigint', swapTakerFeeBps: 'integer',
       disputeAutoFinalizeMode: 'string', minCollateralThreshold: 'bigint',

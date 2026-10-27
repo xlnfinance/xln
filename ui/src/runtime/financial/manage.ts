@@ -6,6 +6,7 @@
  */
 import type { EntityTx, JBatch, RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
 import type { SettlementOp } from '@xln/core/types/account';
+import { effectiveRebalanceTerms } from '@xln/core/account/config/term-notice';
 import type { BilateralRebalanceFeePolicy } from '@xln/core/types/finance/rebalance';
 
 /** One account as the view-frame carries it (native maps instead of persistent collections). */
@@ -22,12 +23,13 @@ export type FeePolicy = { policyVersion: number; baseFee: bigint; gasFee: bigint
  * side; the fee we pay is set by the other side's snapshot.
  */
 export function counterpartyFeePolicy(
-	doc: { state: { rebalanceFeePolicies?: ReadonlyMap<number, BilateralRebalanceFeePolicy> } } | null | undefined,
+	doc: { currentFrame: { timestamp: number }; state: { rebalanceFeePolicies?: ReadonlyMap<number, BilateralRebalanceFeePolicy> } } | null | undefined,
 	isLeft: boolean,
 	tokenId: number,
 ): FeePolicy | null {
-	const policy = doc?.state?.rebalanceFeePolicies?.get(tokenId)?.[isLeft ? 'right' : 'left'];
-	if (!policy) return null;
+	const snapshot = doc?.state?.rebalanceFeePolicies?.get(tokenId)?.[isLeft ? 'right' : 'left'];
+	if (!snapshot || !doc) return null;
+	const policy = effectiveRebalanceTerms(snapshot, doc.currentFrame.timestamp);
 	return { policyVersion: policy.policyVersion, baseFee: policy.baseFee, gasFee: policy.gasFee, liquidityFeeBps: policy.liquidityFeeBps };
 }
 

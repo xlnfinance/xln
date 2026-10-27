@@ -26,7 +26,7 @@ export const HASHABLE_ACCOUNT_TX_DATA_FIELDS = {
   credit_request: ['requestId', 'requesterEntityId', 'tokenId', 'amount'],
   request_collateral: ['tokenId', 'amount', 'feeTokenId', 'feeAmount', 'policyVersion'],
   rebalance_refund: ['requestId', 'requestTokenId', 'amount', 'reason'],
-  rebalance_policy: ['tokenId', 'policyVersion', 'baseFee', 'liquidityFeeBps', 'gasFee'],
+  rebalance_policy: ['tokenId', 'policyVersion', 'baseFee', 'liquidityFeeBps', 'gasFee', 'noticePeriodSeconds'],
   htlc_lock: [
     'lockId', 'hashlock', 'timelock', 'revealBeforeHeight', 'amount', 'tokenId',
     'deliveryMode', 'envelope',

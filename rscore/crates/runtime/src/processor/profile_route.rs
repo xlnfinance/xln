@@ -199,6 +199,7 @@ fn profile_descriptor(
         "rebalanceLiquidityFeeBps",
         "rebalanceGasFee",
         "rebalanceTimeoutMs",
+        "termNoticePeriodSeconds",
     ] {
         if let Some(value) = metadata.get(optional) {
             descriptor_metadata.insert(optional.into(), value.clone());

@@ -401,6 +401,7 @@ fn auto_rebalance_shadow_policy() -> CanonicalValue {
 
 fn hub_rebalance_fee_policy() -> AccountTx {
     AccountTx::RebalancePolicy {
+        notice_period_seconds: None,
         token_id: 1,
         policy_version: 1,
         base_fee: BigInt::from(1),
@@ -2361,6 +2362,7 @@ fn certified_checkpoint_restores_post_finality_state_with_historical_frame() {
 fn rebalance_policy_is_hashable_at_admission_and_cross_peer_replay() {
     let (mut left, mut right) = parties();
     let policy = AccountTx::RebalancePolicy {
+        notice_period_seconds: None,
         token_id: 1,
         policy_version: 7,
         base_fee: BigInt::from(19),
@@ -3535,6 +3537,7 @@ fn counterparty_dispute_hankos_are_verified_on_frame_and_ack() {
 fn a_parent_selected_candidate_reuses_its_certified_recovery_draft() {
     let (mut left, mut right) = parties_with_transformer(Some([0x77_u8; 20]));
     let policy = |version| AccountTx::RebalancePolicy {
+        notice_period_seconds: None,
         token_id: 1,
         policy_version: version,
         base_fee: BigInt::from(version),

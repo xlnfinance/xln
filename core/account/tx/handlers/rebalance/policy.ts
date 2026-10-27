@@ -5,15 +5,19 @@ import { TOKENS } from '../../../../config/constants';
 import { UINT256_MAX } from '../../../../protocol/boundary/integer-ranges';
 import type { ApplyAccountTxResult } from '../../apply-types';
 import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
+import {
+  DEFAULT_TERM_NOTICE_SECONDS,
+  effectiveRebalanceTerms,
+  validTermNoticeSeconds,
+  worseRebalanceTerms,
+} from '../../../config/term-notice';
 
 type RebalancePolicyTx = Extract<AccountTx, { type: 'rebalance_policy' }>;
 
-const sameTerms = (
-  current: RebalanceFeePolicySnapshot,
-  next: RebalancePolicyTx['data'],
-): boolean =>
+const sameTerms = (current: RebalanceFeePolicySnapshot, next: RebalancePolicyTx['data']): boolean =>
   current.baseFee === next.baseFee &&
   current.liquidityFeeBps === next.liquidityFeeBps &&
+  current.noticePeriodSeconds === (next.noticePeriodSeconds ?? DEFAULT_TERM_NOTICE_SECONDS) &&
   current.gasFee === next.gasFee;
 
 export const handleRebalancePolicy = (
@@ -23,6 +27,10 @@ export const handleRebalancePolicy = (
   committedTimestamp: number,
 ): ApplyAccountTxResult => {
   const { tokenId, policyVersion, baseFee, liquidityFeeBps, gasFee } = tx.data;
+  const noticePeriodSeconds = tx.data.noticePeriodSeconds ?? DEFAULT_TERM_NOTICE_SECONDS;
+  if (!validTermNoticeSeconds(noticePeriodSeconds)) {
+    return accountTxValidationRejected('rebalance_policy: invalid notice period', []);
+  }
   if (!Number.isSafeInteger(tokenId) || tokenId <= 0 || tokenId > TOKENS.MAX_TOKEN_ID) {
     return accountTxValidationRejected(`rebalance_policy: invalid tokenId ${tokenId}`, []);
   }
@@ -33,18 +41,18 @@ export const handleRebalancePolicy = (
     return accountTxValidationRejected(`rebalance_policy: invalid fee types for token ${tokenId}`, []);
   }
   if (!Number.isSafeInteger(committedTimestamp) || committedTimestamp <= 0) {
-    return accountTxValidationRejected(
-      `rebalance_policy: invalid committed timestamp ${committedTimestamp}`,
-      [],
-    );
+    return accountTxValidationRejected(`rebalance_policy: invalid committed timestamp ${committedTimestamp}`, []);
   }
   // The peer chooses both fees. Unbounded bigints committed here reached the
   // Account leaf encoder as ACCOUNT_STATE_LEAF_TOO_LARGE and halted the commit;
   // a fee is a token amount, so it shares the uint256 domain of every amount.
   if (
-    baseFee < 0n || baseFee > UINT256_MAX ||
-    liquidityFeeBps < 0n || liquidityFeeBps > 10_000n ||
-    gasFee < 0n || gasFee > UINT256_MAX
+    baseFee < 0n ||
+    baseFee > UINT256_MAX ||
+    liquidityFeeBps < 0n ||
+    liquidityFeeBps > 10_000n ||
+    gasFee < 0n ||
+    gasFee > UINT256_MAX
   ) {
     return accountTxValidationRejected(`rebalance_policy: invalid fee terms for token ${tokenId}`, []);
   }
@@ -67,12 +75,36 @@ export const handleRebalancePolicy = (
     return accountTxApplied([`rebalance_policy: exact v${policyVersion} retry`]);
   }
 
-  const next: RebalanceFeePolicySnapshot = {
+  const active = current && effectiveRebalanceTerms(current, committedTimestamp);
+  const terms = {
     policyVersion,
     baseFee,
     liquidityFeeBps,
     gasFee,
     updatedAt: committedTimestamp,
+    noticePeriodSeconds,
+  };
+  const worse = active && (worseRebalanceTerms(active, terms) || noticePeriodSeconds < active.noticePeriodSeconds);
+  // Every adverse replacement starts a full notice against the still-active
+  // terms. A bank cannot shorten an outstanding notice by replacing its offer.
+  const effectiveAt = committedTimestamp + (worse ? active.noticePeriodSeconds * 1000 : 0);
+  if (!Number.isSafeInteger(effectiveAt))
+    return accountTxValidationRejected('rebalance_policy: invalid effectiveAt', []);
+  const next: RebalanceFeePolicySnapshot = {
+    ...terms,
+    effectiveAt,
+    ...(worse
+      ? {
+          previous: {
+            policyVersion: active.policyVersion,
+            baseFee: active.baseFee,
+            liquidityFeeBps: active.liquidityFeeBps,
+            gasFee: active.gasFee,
+            updatedAt: active.updatedAt,
+            noticePeriodSeconds: active.noticePeriodSeconds,
+          },
+        }
+      : {}),
   };
   account.rebalanceFeePolicies.put(tokenId, {
     ...account.rebalanceFeePolicies.get(tokenId),

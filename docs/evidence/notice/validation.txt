@@ -1,0 +1,61 @@
+Re-land of 20ed5712bef3fc0cfe4a0a20ee3999e05fbd1fd6
+Base HEAD: 6b78fe63a68e2561e66ed0a071b94e28681578dc
+Execution host: zigotas-Mac-Studio.local
+
+Result: full change is in the working tree. No commit or push.
+The requested git cherry-pick -x failed before starting because index.lock creation was denied:
+/Users/zigota/xln/.git/worktrees/xln-notice2/index.lock: Operation not permitted.
+CHERRY_PICK_HEAD and sequencer are both absent; no cherry-pick state remains.
+The original patch was merged file-by-file against HEAD and its original parent,
+without modifying the index. Both conflict files are resolved.
+
+Preserved behavior:
+- Existing Accounts retain committed old terms until the announcement frame timestamp
+  plus the previously committed notice period (seconds converted to milliseconds).
+- Improvements apply immediately. Replacing an adverse announcement starts a full notice.
+- Scheduler fulfills already admitted, paid requests without repricing them.
+- Main's committed per-token USD rates, fee/limit conversions and branded type constructors remain.
+- USD-derived policy plus notice boundary regressions pass for USDC, WETH and TRX.
+- Updated checkpoint test fixtures to the current eight-field policy wire tuple;
+  Account materializer also covers pending previous terms.
+
+Validation on this candidate:
+PASS bunx tsc --noEmit -p .
+PASS bunx tsc --noEmit -p tsconfig.runtime.json
+PASS bunx tsc --noEmit -p . (cwd ui/)
+PASS bun tools/soundcheck.ts: 10/10 gates
+PASS notice tests: 10 passed, 0 failed (includes 3 new USD-rate regressions)
+PASS rebalance tests: 33 passed, 0 failed across 6 files
+PASS bun run rscore:parity: 186 passed, 0 failed, 1 existing catalog skip;
+     Rust binary rebuilt from candidate; entity fixture exact; worker/process segments all passed.
+PASS cargo engine/entity-kernel/batch: 588 passed, 0 failed, 1 existing ignored
+PASS cargo process/runtime integration vectors: 14 passed, 0 failed
+PASS bun run build (browser runtime and Account worker)
+PASS React production build via bunx vite build --configLoader runner
+PASS rustfmt --check for every touched Rust file
+PASS git diff --check
+
+Blocked broader gates (no assertions, deadlines or safety gates weakened):
+- core/__tests__/testing/audit: 143 passed, 1 failed, loopback listen EPERM in
+  submitRuntimeJOutbox queues a durable transient result without poisoning Entity consensus.
+- cargo process library: 51 passed, 9 failed; socket binds and process group inspection denied.
+- cargo runtime library: 391 passed, 41 failed; socket permission denial and startup EOF.
+- bun run check stops in check:contract-artifact-drift: Hardhat MultiProcessMutexTimeoutError
+  acquiring /Users/zigota/Library/Caches/hardhat-nodejs/compilers-v3/compiler-download-list (60000ms).
+- Full-workspace cargo fmt --check identifies pre-existing formatting in untouched
+  rscore/crates/engine/src/tx/handlers/settlement.rs; all touched Rust files pass individually.
+- Default UI build cannot write the shared node_modules/.vite-temp cache; configLoader runner
+  builds the same application successfully without changing source or configuration.
+- Browser click/F12 verification was not performed: no browser surfaces are connected and
+  this sandbox denies the loopback server needed to serve the candidate.
+- Three-model review was not performed; no shared Quorum reservation was acquired,
+  no external model calls or spend initiated. No quorum confirmation is claimed.
+
+Installed Studio dependencies were reused through ignored node_modules symlinks at
+root, ui and frontend. TMPDIR=/tmp was used for the writable Bun temporary directory.
+Source hashes in docs/evidence/notice/source-files.sha256 bind all 60 changed source/test files.
+Full check logs are in /Users/zigota/agent-jobs/notice2/validation/.
+
+Recommended next action: rerun the blocked gates with the required Studio permissions,
+then stage these owned files and create ONE commit with the original message and
+(cherry picked from commit 20ed5712bef3fc0cfe4a0a20ee3999e05fbd1fd6).

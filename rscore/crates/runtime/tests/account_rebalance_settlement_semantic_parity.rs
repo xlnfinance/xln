@@ -93,6 +93,7 @@ fn account() -> AccountReplica {
     )
     .expect("fixture replica");
     let policy = AccountTx::RebalancePolicy {
+        notice_period_seconds: Some(2),
         token_id: 1,
         policy_version: 3,
         base_fee: 10.into(),
