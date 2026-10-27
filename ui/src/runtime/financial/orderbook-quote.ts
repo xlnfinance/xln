@@ -70,7 +70,7 @@ export function swapMinimumError(
   if (book.minTradeSize === null) return 'Waiting for the market minimum.';
   const quoteAmount = giveTokenId === book.quoteTokenId ? prepared.effectiveGive : prepared.effectiveWant;
   return quoteAmount < book.minTradeSize
-    ? `Minimum swap is ${formatAmount(book.minTradeSize, quote.decimals)} ${quote.symbol} after lot rounding.`
+    ? `Minimum swap is ${formatAmount(book.minTradeSize, quote.decimals, quote.decimals)} ${quote.symbol} after lot rounding.`
     : null;
 }
 

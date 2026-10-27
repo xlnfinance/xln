@@ -51,6 +51,9 @@ test('minimum checks the rounded quote amount on either side and fails closed wi
   expect(swapMinimumError(book, 1, { ...roundedBuy, effectiveGive: 10_000_000n }, usdc)).toBeNull();
   expect(swapMinimumError({ ...book, minTradeSize: null }, 1, roundedBuy, usdc)).toBe('Waiting for the market minimum.');
   expect(swapMinimumError({ ...book, minTradeSize: 0n }, 1, roundedBuy, usdc)).toBeNull();
+  expect(
+    swapMinimumError({ ...book, minTradeSize: 1n }, 1, { effectiveGive: 0n, effectiveWant: 0n }, { decimals: 18, symbol: 'ETH' }),
+  ).toBe('Minimum swap is 0.000000000000000001 ETH after lot rounding.');
 });
 
 test('price band uses the canonical midpoint and accepts exact boundaries, not one tick outside', () => {
