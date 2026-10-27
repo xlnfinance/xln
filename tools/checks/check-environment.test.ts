@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 import { assertCheckEnvironment } from './check-environment';
 
-const root = resolve(import.meta.dir, '..');
+const root = resolve(import.meta.dir, '../..');
 
 test('checks accept the pinned Bun at the repository root', () => {
   expect(() => assertCheckEnvironment()).not.toThrow();
@@ -13,11 +13,9 @@ test('checks reject a different Bun version', () => {
 });
 
 for (const entry of [
-  'tools/run-parallel-checks.ts',
   'scripts/verification/verify.ts',
   'scripts/verification/pre-push.ts',
   'core/scripts/e2e/runners/run-unit-tests.ts',
-  'core/scripts/e2e/runners/run-with-test-cleanup.ts',
   'core/scripts/e2e/runners/run-all-tests-fast.ts',
   'core/scripts/e2e/runners/run-e2e-parallel-isolated.ts',
   'core/scripts/e2e/runners/run-system-tests-parallel.ts',

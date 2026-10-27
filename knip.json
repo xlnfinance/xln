@@ -14,6 +14,7 @@
     "scripts/**/*.ts",
     "cli/scripts/agent-payments/*.ts",
     "tools/*.ts",
+    "tools/**/*.test.ts",
     "tools/xlnc/prototype.ts",
     "tools/release-snapshot/assert-clean.ts",
     "tools/hlt-viz/*.ts",

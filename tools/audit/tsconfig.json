@@ -8,7 +8,7 @@
     "../audit.ts",
     "./**/*.ts",
     "../../tests/release-integrity/audit-registry.test.ts",
-    "../../tests/release-integrity/audit-status.test.ts"
+    "../checks/audit-status.test.ts"
   ],
   "exclude": []
 }

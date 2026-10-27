@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { assertCheckEnvironment } from '../../../../tools/check-environment';
+import { assertCheckEnvironment } from '../../../../tools/checks/check-environment';
 import { spawn } from 'node:child_process';
 
 import {

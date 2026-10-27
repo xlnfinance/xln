@@ -1,7 +1,10 @@
 /** Runs independent package gates concurrently and reports each result immediately. */
-import { assertCheckEnvironment } from './check-environment';
+import { resolve } from 'node:path';
+import { assertCheckEnvironment } from './checks/check-environment';
 
-assertCheckEnvironment();
+// Sub-packages (frontend/, ui/) run their gates through this runner from their own
+// directory, so only the pinned Bun version is enforced here, not the cwd.
+assertCheckEnvironment(resolve(import.meta.dir, '..'));
 
 const gateNames = process.argv.slice(2);
 if (gateNames.length === 0 || gateNames.some(name => !/^[a-z0-9:-]+$/.test(name))) {

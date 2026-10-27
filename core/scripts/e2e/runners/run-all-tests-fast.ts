@@ -10,7 +10,7 @@
  *   bun core/scripts/e2e/runners/run-all-tests-fast.ts --scenario-workers=3 --e2e-shards=2
  */
 
-import { assertCheckEnvironment } from '../../../../tools/check-environment';
+import { assertCheckEnvironment } from '../../../../tools/checks/check-environment';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import {

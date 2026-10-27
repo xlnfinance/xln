@@ -1,7 +1,7 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const ROOT = realpathSync(resolve(import.meta.dir, '..'));
+const ROOT = realpathSync(resolve(import.meta.dir, '../..'));
 
 export const assertCheckEnvironment = (cwd = process.cwd(), version = Bun.version): void => {
   if (realpathSync(cwd) !== ROOT) {

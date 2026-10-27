@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { assertCheckEnvironment } from '../../tools/check-environment';
+import { assertCheckEnvironment } from '../../tools/checks/check-environment';
 import { closeSync, fsyncSync, mkdirSync, openSync, renameSync, writeSync } from 'node:fs';
 import { arch, hostname, platform, release } from 'node:os';
 import { join } from 'node:path';

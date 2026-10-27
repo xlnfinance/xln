@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
-import { assertCheckEnvironment } from '../../../../tools/check-environment';
+import { resolve } from 'node:path';
+import { assertCheckEnvironment } from '../../../../tools/checks/check-environment';
 import { spawn, type ChildProcess } from 'node:child_process';
 
 import {
@@ -175,7 +176,8 @@ const run = async (): Promise<number> => {
 };
 
 if (import.meta.main) {
-  assertCheckEnvironment();
+  // Fixtures and --child-cwd runs start this wrapper outside the repo root; only Bun is pinned here.
+  assertCheckEnvironment(resolve(import.meta.dir, '../../../..'));
   run()
     .then((code) => process.exit(code))
     .catch((error) => {

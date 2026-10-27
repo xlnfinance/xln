@@ -12,7 +12,7 @@
  *   bun core/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --start-at=18 --preserve-artifacts
  */
 
-import { assertCheckEnvironment } from '../../../../tools/check-environment';
+import { assertCheckEnvironment } from '../../../../tools/checks/check-environment';
 import { createHash } from 'node:crypto';
 
 // React specs use their owning Playwright package and the same isolated J stand.

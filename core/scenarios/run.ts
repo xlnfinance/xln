@@ -9,7 +9,7 @@
  *   bun core/scenarios/run.ts lock-ahb --mode=rpc --rpc=http://127.0.0.1:18545
  */
 
-import { assertCheckEnvironment } from '../../tools/check-environment';
+import { assertCheckEnvironment } from '../../tools/checks/check-environment';
 import { execFileSync, spawn, type ChildProcessByStdio } from 'node:child_process';
 import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';

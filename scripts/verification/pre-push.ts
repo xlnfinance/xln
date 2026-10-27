@@ -1,5 +1,5 @@
 import { repository, sourceState } from './git';
-import { assertCheckEnvironment } from '../../tools/check-environment';
+import { assertCheckEnvironment } from '../../tools/checks/check-environment';
 import { verify } from './verify';
 
 export const validateUpdates = (input: string, head: string): boolean => {

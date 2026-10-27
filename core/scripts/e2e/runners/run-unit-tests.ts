@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 import { cleanupTestArtifactsBeforeRun, TEST_ARTIFACT_CLEANUP_DONE_ENV } from '../harness/test-artifact-cleanup';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
-import { assertCheckEnvironment } from '../../../../tools/check-environment';
+import { assertCheckEnvironment } from '../../../../tools/checks/check-environment';
 
 assertCheckEnvironment();
 

@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { computeAuditStatus } from '../../tools/audit/status';
-import { parseAuditRegistry } from '../../tools/audit/validation';
-import type { AuditEvidence, AuditRegistry } from '../../tools/audit/types';
+import { computeAuditStatus } from '../audit/status';
+import { parseAuditRegistry } from '../audit/validation';
+import type { AuditEvidence, AuditRegistry } from '../audit/types';
 
 const base = parseAuditRegistry(readFileSync(resolve(import.meta.dir, '../../audits/registry.json'), 'utf8'));
 

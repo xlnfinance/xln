@@ -12,7 +12,7 @@
  *   bun core/scripts/e2e/runners/run-system-tests-parallel.ts --base-port=18545 --stream
  */
 
-import { assertCheckEnvironment } from '../../../../tools/check-environment';
+import { assertCheckEnvironment } from '../../../../tools/checks/check-environment';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { mkdirSync, createWriteStream, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

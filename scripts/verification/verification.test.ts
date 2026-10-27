@@ -57,7 +57,7 @@ const copyGate = (root: string): void => {
     ...['git', 'install', 'pre-push', 'process', 'verify'].map(name => `scripts/verification/${name}.ts`),
     'core/scripts/e2e/runners/process-group.ts',
     'tools/release-snapshot/scope.ts',
-    'tools/check-environment.ts',
+    'tools/checks/check-environment.ts',
     '.githooks/pre-push',
   ]) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
