@@ -126,6 +126,24 @@ fn review_7_full_draft_salvage_emits_broadcast_to_make_room() {
         1,
         "deferred witness must drain the full draft"
     );
+    let output = &result.outputs[0];
+    assert_eq!(output.entity_id, state.entity_id);
+    assert_eq!(output.target_signer_id, None);
+    assert_eq!(output.entity_txs.len(), 1);
+    let LocalEntityOutputTx::Projected(command) = &output.entity_txs[0] else {
+        panic!("expected complete j_broadcast payload");
+    };
+    assert_eq!(command.kind, EntityTxKind::JBroadcast);
+    assert_eq!(command.frame_data(), Some(&obj(vec![])));
+    assert!(result.proposal_work.is_empty());
+    assert_eq!(
+        result.events,
+        vec![EntityFrameEvent::Status {
+            message:
+                "⏳ Cross-j reveal port order-1: deferred until the pending jBatch is acknowledged"
+                    .into(),
+        }]
+    );
     assert!(
         field(
             state
@@ -166,6 +184,65 @@ fn review_2_target_hub_rejects_different_ladders() {
         if message == "❌ Cross-j register order-1 rejected before Account queue: Cross-j pull ladders do not match")
     );
     assert!(state.cross_jurisdiction_swaps.is_none());
+}
+
+#[test]
+fn review_2_reamend_missing_opening_pull_is_typed_reject_for_every_participant() {
+    for local in ["source-hub", "target-hub", "source-user", "target-user"] {
+        let mut state = EntityStateSlice::empty(local, 1_000);
+        let mut next = prepared_route(&route("intent", false), "runtime-seed", 1_000).unwrap();
+        set(&mut next, "status", string("resting")).unwrap();
+        remove(&mut next, "targetPull").unwrap();
+        let before = state.clone();
+        let error = apply_register(
+            &mut state,
+            &tx(EntityTxKind::RegisterCrossJurisdictionSwap, next),
+        )
+        .expect_err("a missing opening pull is a typed peer rejection");
+        assert!(
+            matches!(error, EntityKernelError::RejectedEntityTx { detail, .. }
+            if detail == "CROSS_J_REGISTER_OPENING_PULLS_MISSING:order-1")
+        );
+        assert_eq!(state, before);
+    }
+}
+
+#[test]
+fn review_2_reamend_users_store_mismatched_ladders_without_hub_admission() {
+    for local in ["source-user", "target-user"] {
+        let mut state = EntityStateSlice::empty(local, 1_000);
+        let mut next = prepared_route(&route("intent", false), "runtime-seed", 1_000).unwrap();
+        set(&mut next, "status", string("resting")).unwrap();
+        let mut target = field(&next, "targetPull").unwrap().clone();
+        set(
+            &mut target,
+            "partialRoot",
+            string(&format!("0x{}", "ab".repeat(32))),
+        )
+        .unwrap();
+        set(&mut next, "targetPull", target).unwrap();
+        let result = apply_register(
+            &mut state,
+            &tx(EntityTxKind::RegisterCrossJurisdictionSwap, next.clone()),
+        )
+        .unwrap();
+        assert_eq!(
+            state
+                .cross_jurisdiction_swaps
+                .as_ref()
+                .unwrap()
+                .get("order-1"),
+            Some(&next)
+        );
+        assert!(result.outputs.is_empty());
+        assert!(result.proposal_work.is_empty());
+        assert_eq!(
+            result.events,
+            vec![EntityFrameEvent::Status {
+                message: "🌉 Cross-j swap order-1 registered".into(),
+            }]
+        );
+    }
 }
 
 #[test]
@@ -530,13 +607,22 @@ fn review_3_amend_pending_ratio_prevents_stale_admission() {
 
 #[test]
 fn review_12_amend_out_of_range_claim_is_status_not_fatal() {
-    for ratio in [0, 65536] {
+    for (ratio, normalized_claim) in [
+        ("-1", None),
+        ("-0.25", None),
+        ("-1e-7", None),
+        ("0", None),
+        ("0.75", None),
+        ("65536", Some("65536")),
+        ("65536.75", Some("65536")),
+        ("1e+21", Some("1e+21")),
+    ] {
         let (mut state, views, command) = salvage_setup();
         let mut data = command.frame_data().unwrap().clone();
         set(
             &mut data,
             "fillRatio",
-            number(ratio, command.kind, "RATIO").unwrap(),
+            CanonicalValue::Number(CanonicalNumber::parse_js_canonical(ratio).unwrap()),
         )
         .unwrap();
         let command = projected(command.kind, data).unwrap();
@@ -546,10 +632,11 @@ fn review_12_amend_out_of_range_claim_is_status_not_fatal() {
         assert!(result.outputs.is_empty());
         assert!(result.proposal_work.is_empty());
         assert_eq!(state, before);
-        let expected = if ratio == 0 {
-            "🌉 Cross-j reveal port ignored for order-1: invalid result"
-        } else {
-            "❌ Cross-j reveal port order-1 fill mismatch: claimed 65536, verified 65535"
+        let expected = match normalized_claim {
+            None => "🌉 Cross-j reveal port ignored for order-1: invalid result".to_string(),
+            Some(claim) => format!(
+                "❌ Cross-j reveal port order-1 fill mismatch: claimed {claim}, verified 65535"
+            ),
         };
         assert_eq!(
             result.events,
@@ -562,30 +649,159 @@ fn review_12_amend_out_of_range_claim_is_status_not_fatal() {
 
 #[test]
 fn review_12_amend_missing_target_pull_stays_fatal() {
-    let (mut state, views, command) = salvage_setup();
-    let mut prior = state
-        .cross_jurisdiction_swaps
-        .as_ref()
-        .unwrap()
-        .get("order-1")
-        .unwrap()
-        .clone();
-    remove(&mut prior, "targetPull").unwrap();
-    stored(&mut state, prior);
-    let mut data = command.frame_data().unwrap().clone();
-    set(
-        &mut data,
-        "fillRatio",
-        number(65536, command.kind, "RATIO").unwrap(),
-    )
-    .unwrap();
-    let command = projected(command.kind, data).unwrap();
-    let before = state.clone();
-    let error = apply_salvage(&mut state, &views, &command).unwrap_err();
-    assert!(
-        matches!(error, EntityKernelError::InvalidLocalEntityTx { detail, .. } if detail.contains("TARGET_PULL_MISSING"))
-    );
-    assert_eq!(state, before);
+    for status in ["resting", "settled"] {
+        let (mut state, views, command) = salvage_setup();
+        let mut prior = state
+            .cross_jurisdiction_swaps
+            .as_ref()
+            .unwrap()
+            .get("order-1")
+            .unwrap()
+            .clone();
+        remove(&mut prior, "targetPull").unwrap();
+        set(&mut prior, "status", string(status)).unwrap();
+        stored(&mut state, prior);
+        let mut data = command.frame_data().unwrap().clone();
+        set(
+            &mut data,
+            "fillRatio",
+            number(65536, command.kind, "RATIO").unwrap(),
+        )
+        .unwrap();
+        let command = projected(command.kind, data).unwrap();
+        let before = state.clone();
+        let error = apply_salvage(&mut state, &views, &command).unwrap_err();
+        assert!(
+            matches!(error, EntityKernelError::InvalidLocalEntityTx { detail, .. } if detail.contains("TARGET_PULL_MISSING"))
+        );
+        assert_eq!(state, before);
+    }
+}
+
+#[test]
+fn review_3_reamend_salvage_retry_preserves_deferred_witness_until_flush() {
+    for free_slot in [false, true] {
+        let (mut state, views, command) = salvage_setup();
+        let mut data = command.frame_data().unwrap().clone();
+        let route = state
+            .cross_jurisdiction_swaps
+            .as_ref()
+            .unwrap()
+            .get("order-1")
+            .unwrap();
+        let proof = hash_ladder_proof("runtime-seed", text(route, "routeHash").unwrap());
+        let binary = reveal_binary(&proof, 100);
+        let mut registration = target_registration(&state, 100);
+        registration.witness = salvage_witness(&binary, 100, command.kind).unwrap();
+        let mut route = route.clone();
+        set(
+            &mut route,
+            "pendingTargetRegistryReveal",
+            pending_witness_value(&registration.witness, command.kind).unwrap(),
+        )
+        .unwrap();
+        stored(&mut state, route);
+        set(&mut data, "binary", string(&binary)).unwrap();
+        set(
+            &mut data,
+            "fillRatio",
+            number(100, command.kind, "RATIO").unwrap(),
+        )
+        .unwrap();
+        let command = projected(command.kind, data).unwrap();
+        let batch = state.j_batch_state.get_or_insert_with(Default::default);
+        for i in 0..32 {
+            let mut unrelated = registration.clone();
+            unrelated.full_hash = [i; 32];
+            batch.batch.hash_ladder_registrations.push(unrelated);
+        }
+        let peer = prefixed_hex(&registration.counterparty_entity);
+        let mut outputs = Vec::new();
+        assert_eq!(
+            flush_pending_target_reveal_for_route(&mut state, "order-1", &peer, &mut outputs)
+                .unwrap(),
+            0
+        );
+        assert!(outputs.is_empty());
+        assert_eq!(
+            field(
+                state
+                    .cross_jurisdiction_swaps
+                    .as_ref()
+                    .unwrap()
+                    .get("order-1")
+                    .unwrap(),
+                "pendingTargetRegistryReveal"
+            ),
+            Some(&pending_witness_value(&registration.witness, command.kind).unwrap())
+        );
+        if free_slot {
+            state
+                .j_batch_state
+                .as_mut()
+                .unwrap()
+                .batch
+                .hash_ladder_registrations
+                .pop();
+        }
+        let before = state.clone();
+        let result = apply_salvage(&mut state, &views, &command).unwrap();
+        assert_eq!(state, before, "salvage must leave a pending retry intact");
+        assert!(result.outputs.is_empty());
+        assert!(result.proposal_work.is_empty());
+        assert!(result.events.is_empty());
+        if !free_slot {
+            state
+                .j_batch_state
+                .as_mut()
+                .unwrap()
+                .batch
+                .hash_ladder_registrations
+                .pop();
+        }
+        assert_eq!(
+            flush_pending_target_reveal_for_route(&mut state, "order-1", &peer, &mut outputs)
+                .unwrap(),
+            1
+        );
+        let mut expected = before
+            .j_batch_state
+            .unwrap()
+            .batch
+            .hash_ladder_registrations;
+        expected.truncate(31);
+        expected.push(registration);
+        assert_eq!(
+            state
+                .j_batch_state
+                .as_ref()
+                .unwrap()
+                .batch
+                .hash_ladder_registrations,
+            expected
+        );
+        assert!(
+            field(
+                state
+                    .cross_jurisdiction_swaps
+                    .as_ref()
+                    .unwrap()
+                    .get("order-1")
+                    .unwrap(),
+                "pendingTargetRegistryReveal"
+            )
+            .is_none()
+        );
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs[0].entity_id, state.entity_id);
+        assert_eq!(outputs[0].target_signer_id, None);
+        assert_eq!(outputs[0].entity_txs.len(), 1);
+        let LocalEntityOutputTx::Projected(command) = &outputs[0].entity_txs[0] else {
+            panic!("expected complete j_broadcast payload");
+        };
+        assert_eq!(command.kind, EntityTxKind::JBroadcast);
+        assert_eq!(command.frame_data(), Some(&obj(vec![])));
+    }
 }
 
 #[test]

@@ -4,13 +4,14 @@ import { createEmptyEnv } from '../../../runtime';
 import { buildPreparedCrossJurisdictionRoute, buildCrossJurisdictionPullBinding, cloneCrossJurisdictionRoute, deriveCrossJurisdictionPrivateSeed, buildCrossJurisdictionPullReveal, withCanonicalCrossJurisdictionRouteHash } from '../../../extensions/cross-j';
 import { getPullLockAdmissionError } from '../../../account/tx/handlers/settlement/pull';
 import { applySourceHubCrossJurisdictionFillProgress } from '../../../entity/tx/handlers/account-cross-j-followups';
-import { queueHashLadderRevealRegistration } from '../../../entity/tx/j-events-htlc';
+import { flushDeferredHashLadderReveals, queueHashLadderRevealRegistration } from '../../../entity/tx/j-events-htlc';
 import { handleCrossJurisdictionSalvageEntityTx } from '../../../entity/tx/handlers/cross-j/salvage';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { AccountTx } from '../../../types/account';
 import { addr, entity, makeJurisdiction, jref, makeState, installJurisdictions, getTestAccountForWrite } from '../../helpers/cross-j';
 import { readEntityFrameEvents } from '../../../entity/frame-events';
 import { initJBatch } from '../../../jurisdiction/machine/batch';
+import { computeEntityConsensusSectionDigestsCold } from '../../../entity/consensus/state-root';
 
 const sourceJ = makeJurisdiction('source', 1, '11', '12');
 const targetJ = makeJurisdiction('target', 2, '21', '22');
@@ -65,8 +66,38 @@ test('review 2: target hub refuses registration of different ladders', async () 
   expect(result.newState.crossJurisdictionSwaps!.has(route.orderId)).toBe(false);
   expect(result.accountTxs ?? []).toEqual([]);
   expect(result.skippedError).toBeUndefined();
-  expect(readEntityFrameEvents(result.newState)).toContainEqual({ type: 'status', message: `❌ Cross-j register ${route.orderId} rejected before Account queue: Cross-j pull ladders do not match` });
+  expect(result.outputs).toEqual([]);
+  expect(readEntityFrameEvents(result.newState)).toEqual([{ type: 'status', message: `❌ Cross-j register ${route.orderId} rejected before Account queue: Cross-j pull ladders do not match` }]);
 });
+
+for (const role of ['sourceHub', 'targetHub', 'sourceUser', 'targetUser'] as const) {
+  test(`review 2 reamend: ${role} rejects a resting opening missing its target pull`, async () => {
+    const { state, env } = context(role);
+    const route = resting();
+    delete route.targetPull;
+    const before = computeEntityConsensusSectionDigestsCold(state);
+    const result = await applyEntityTx(env, state, { type: 'registerCrossJurisdictionSwap', data: { route } });
+    expect(result.skippedError).toContain(`CROSS_J_REGISTER_OPENING_PULLS_MISSING:${route.orderId}`);
+    expect(computeEntityConsensusSectionDigestsCold(result.newState)).toEqual(before);
+    expect(result.outputs).toEqual([]);
+    expect(result.accountTxs ?? []).toEqual([]);
+    expect(readEntityFrameEvents(result.newState)).toEqual([]);
+  });
+}
+
+for (const role of ['sourceUser', 'targetUser'] as const) {
+  test(`review 2 reamend: ${role} stores mismatched ladders without hub admission`, async () => {
+    const { state, env } = context(role);
+    const route = resting();
+    route.targetPull = { ...route.targetPull!, partialRoot: `0x${'ab'.repeat(32)}` };
+    const result = await applyEntityTx(env, state, { type: 'registerCrossJurisdictionSwap', data: { route } });
+    expect(result.skippedError).toBeUndefined();
+    expect(result.newState.crossJurisdictionSwaps!.get(route.orderId)).toEqual(route);
+    expect(result.outputs).toEqual([]);
+    expect(result.accountTxs ?? []).toEqual([]);
+    expect(readEntityFrameEvents(result.newState)).toEqual([{ type: 'status', message: `🌉 Cross-j swap ${route.orderId} registered` }]);
+  });
+}
 
 test('review 3: confirmed equal target ratio cannot queue a timestamp refresh', () => {
   const { state } = context('targetUser');
@@ -125,7 +156,8 @@ test('review 7: deferred salvage drains a full draft without a sent batch', asyn
   }
   const binary = buildCrossJurisdictionPullReveal(route, 65535, deriveCrossJurisdictionPrivateSeed('review-seed', route)).binary;
   const result = await handleCrossJurisdictionSalvageEntityTx(state, { type: 'crossJurisdictionSalvage', data: { routeId: route.orderId, binary, fillRatio: 65535 } });
-  expect(result.outputs.flatMap(output => output.entityTxs ?? []).map(tx => tx.type)).toEqual(['j_broadcast']);
+  expect(result.outputs).toEqual([{ entityId: state.entityId, signerId: addr('34'), entityTxs: [{ type: 'j_broadcast', data: {} }] }]);
+  expect(readEntityFrameEvents(result.newState)).toEqual([{ type: 'status', message: `⏳ Cross-j reveal port ${route.orderId}: deferred until the pending jBatch is acknowledged` }]);
   expect(result.newState.crossJurisdictionSwaps!.get(route.orderId)!.pendingTargetRegistryReveal).toBeDefined();
 });
 
@@ -217,7 +249,7 @@ test('review 3 amend: pending 200 prevents a new stale ratio 150', () => {
   expect(() => queueHashLadderRevealRegistration(state, entity('03'), route.targetPull!, buildCrossJurisdictionPullReveal(route, 150, seed), true)).toThrow('REGISTRATION_CONFLICT');
 });
 
-for (const fillRatio of [0, 65536]) {
+for (const fillRatio of [-1, -0.25, -1e-7, 0, 0.75, 65536, 65536.75, 1e21]) {
   test(`review 12 amend: valid salvage binary with claimed ${fillRatio} is a status without route mutation`, async () => {
     const { state } = context('targetUser');
     const route = resting();
@@ -226,20 +258,65 @@ for (const fillRatio of [0, 65536]) {
     const result = await handleCrossJurisdictionSalvageEntityTx(state, { type: 'crossJurisdictionSalvage', data: { routeId: route.orderId, binary, fillRatio } });
     expect(result.outputs).toEqual([]);
     expect(result.newState.crossJurisdictionSwaps!.get(route.orderId)).toEqual(route);
-    expect(readEntityFrameEvents(result.newState)).toContainEqual({ type: 'status', message: fillRatio === 0
+    expect(readEntityFrameEvents(result.newState)).toEqual([{ type: 'status', message: Math.floor(fillRatio) <= 0
       ? `🌉 Cross-j reveal port ignored for ${route.orderId}: invalid result`
-      : `❌ Cross-j reveal port ${route.orderId} fill mismatch: claimed 65536, verified 65535` });
+      : `❌ Cross-j reveal port ${route.orderId} fill mismatch: claimed ${Math.floor(fillRatio)}, verified 65535` }]);
   });
 }
 
-test('review 12 amend: owned missing target pull remains fatal with an oversized claim', async () => {
-  const { state } = context('targetUser');
-  const route = resting();
-  const binary = buildCrossJurisdictionPullReveal(route, 65535, deriveCrossJurisdictionPrivateSeed('review-seed', route)).binary;
-  delete route.targetPull;
-  state.crossJurisdictionSwaps!.set(route.orderId, route);
-  await expect(handleCrossJurisdictionSalvageEntityTx(state, { type: 'crossJurisdictionSalvage', data: { routeId: route.orderId, binary, fillRatio: 65536 } })).rejects.toThrow('CROSS_J_REVEAL_PORT_TARGET_PULL_MISSING');
-});
+for (const status of ['resting', 'settled'] as const) {
+  test(`review 12 amend: owned ${status} missing target pull remains fatal with an oversized claim`, async () => {
+    const { state } = context('targetUser');
+    const route = resting();
+    const binary = buildCrossJurisdictionPullReveal(route, 65535, deriveCrossJurisdictionPrivateSeed('review-seed', route)).binary;
+    delete route.targetPull;
+    route.status = status;
+    state.crossJurisdictionSwaps!.set(route.orderId, route);
+    const before = computeEntityConsensusSectionDigestsCold(state);
+    await expect(handleCrossJurisdictionSalvageEntityTx(state, { type: 'crossJurisdictionSalvage', data: { routeId: route.orderId, binary, fillRatio: 65536 } })).rejects.toThrow('CROSS_J_REVEAL_PORT_TARGET_PULL_MISSING');
+    expect(computeEntityConsensusSectionDigestsCold(state)).toEqual(before);
+  });
+}
+
+for (const freeSlot of [false, true]) {
+  test(`review 3 reamend: salvage retry preserves a deferred witness with ${freeSlot ? 'available' : 'full'} capacity`, async () => {
+    const { state } = context('targetUser');
+    const route = resting();
+    const reveal = buildCrossJurisdictionPullReveal(route, 100, deriveCrossJurisdictionPrivateSeed('review-seed', route));
+    const pending = { fillRatio: 100, fullSecret: `0x${'00'.repeat(32)}`, reveals: reveal.reveals! };
+    route.pendingTargetRegistryReveal = pending;
+    state.crossJurisdictionSwaps!.set(route.orderId, route);
+    getTestAccountForWrite(state, entity('03')).activeDispute = {
+      startedByLeft: false, initialProofbodyHash: `0x${'00'.repeat(32)}`, initialNonce: 1, initialProposerIsLeft: false,
+      disputeTimeout: 21, disputeStartTimestamp: 1, jNonce: 1, starterInitialArguments: '0x', starterCounterArguments: '0x',
+      starterCounterProofCommitment: `0x${'00'.repeat(32)}`, observedOnChain: true,
+    };
+    state.jBatchState = initJBatch();
+    for (let i = 0; i < 32; i++) {
+      state.jBatchState.batch.hashLadderRegistrations.push({ counterpartyEntity: entity('03'), targetRole: true,
+        fullHash: `0x${i.toString(16).padStart(64, '0')}`, partialRoot: `0x${'00'.repeat(32)}`,
+        witness: { fillRatio: 65535, fullSecret: `0x${'00'.repeat(32)}`, reveals: [`0x${'00'.repeat(32)}`, `0x${'00'.repeat(32)}`, `0x${'00'.repeat(32)}`, `0x${'00'.repeat(32)}`] } });
+    }
+    expect(flushDeferredHashLadderReveals(state, entity('03'))).toBe(0);
+    expect(state.crossJurisdictionSwaps!.get(route.orderId)!.pendingTargetRegistryReveal).toEqual(pending);
+    if (freeSlot) state.jBatchState.batch.hashLadderRegistrations.pop();
+    const before = computeEntityConsensusSectionDigestsCold(state);
+    const beforeBatch = structuredClone(state.jBatchState);
+    const result = await handleCrossJurisdictionSalvageEntityTx(state, { type: 'crossJurisdictionSalvage', data: { routeId: route.orderId, binary: reveal.binary, fillRatio: 100 } });
+    expect(computeEntityConsensusSectionDigestsCold(result.newState)).toEqual(before);
+    expect(result.newState.jBatchState).toEqual(beforeBatch);
+    expect(result.newState.crossJurisdictionSwaps!.get(route.orderId)).toEqual({ ...route, pendingTargetRegistryReveal: pending });
+    expect(result.outputs).toEqual([]);
+    expect(readEntityFrameEvents(result.newState)).toEqual([]);
+    if (!freeSlot) result.newState.jBatchState!.batch.hashLadderRegistrations.pop();
+    expect(flushDeferredHashLadderReveals(result.newState, entity('03'))).toBe(1);
+    const expected = beforeBatch.batch.hashLadderRegistrations.slice(0, 31);
+    expected.push({ counterpartyEntity: entity('03'), targetRole: true, fullHash: route.targetPull!.fullHash,
+      partialRoot: route.targetPull!.partialRoot, witness: pending });
+    expect(result.newState.jBatchState!.batch.hashLadderRegistrations).toEqual(expected);
+    expect(result.newState.crossJurisdictionSwaps!.get(route.orderId)!.pendingTargetRegistryReveal).toBeUndefined();
+  });
+}
 
 for (const missing of [false, true]) {
   test(`review 5 amend: source user ${missing ? 'missing Account' : 'clock mismatch'} remains fatal`, async () => {

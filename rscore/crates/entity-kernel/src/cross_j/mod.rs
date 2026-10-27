@@ -3023,9 +3023,25 @@ fn apply_register(
     let opening = existing
         .is_none_or(|prior| matches!(text(prior, "status"), Some("intent" | "target_prepared")));
     let proposal_work = if opening && text(&route, "status") == Some("resting") {
-        // Peer binding failure commits the same refusal status as TS before
-        // storing the route or queuing any signed Account opening work.
-        if let Err(detail) = xln_rscore_engine::cross_j_route::validate_pull_binding(&route) {
+        // Missing opening commitments are a peer rejection for every role.
+        // Only hubs admit signed Account work: user mirrors store the route
+        // without claiming authority to validate the hub's local opening.
+        if field(&route, "sourcePull").is_none() || field(&route, "targetPull").is_none() {
+            return Err(rejected(
+                tx.kind,
+                format!("CROSS_J_REGISTER_OPENING_PULLS_MISSING:{order_id}"),
+            ));
+        }
+        let local_is_hub = [
+            nested_text(&route, "source", "counterpartyEntityId"),
+            nested_text(&route, "target", "entityId"),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|hub| normalized(hub) == local);
+        if local_is_hub
+            && let Err(detail) = xln_rscore_engine::cross_j_route::validate_pull_binding(&route)
+        {
             return Ok(CrossJurisdictionApplyResult {
                 events: vec![EntityFrameEvent::Status {
                     message: format!(
@@ -4642,12 +4658,20 @@ fn apply_salvage(
         .ok_or_else(|| invalid(tx.kind, "ROUTE_ID_MISSING"))?
         .to_string();
     let binary = text(data, "binary").ok_or_else(|| invalid(tx.kind, "BINARY_MISSING"))?;
-    let claimed_ratio =
-        unsigned(data, "fillRatio").ok_or_else(|| invalid(tx.kind, "FILL_RATIO_INVALID"))?;
-    // The ported claim is untrusted, not committed authority. Zero is ignored
-    // before route lookup; oversized claims reach binary verification and the
+    let Some(CanonicalValue::Number(claim)) = field(data, "fillRatio") else {
+        return Err(invalid(tx.kind, "FILL_RATIO_INVALID"));
+    };
+    let numeric_claim = claim
+        .as_str()
+        .parse::<f64>()
+        .map_err(|_| invalid(tx.kind, "FILL_RATIO_INVALID"))?;
+    let claimed_ratio = numeric_claim.floor();
+    // Floor the untrusted numeric claim like TS before comparing it to the
+    // verified uint16; negative and fractional claims must not fail unsigned
+    // decoding. Nonpositive claims are ignored before route lookup;
+    // oversized claims reach binary verification and the
     // mismatch status. Neither may mask owned-route corruption after lookup.
-    if binary.is_empty() || claimed_ratio == 0 {
+    if binary.is_empty() || claimed_ratio <= 0.0 {
         return Ok(CrossJurisdictionApplyResult {
             events: vec![EntityFrameEvent::Status {
                 message: format!("🌉 Cross-j reveal port ignored for {route_id}: invalid result"),
@@ -4668,14 +4692,15 @@ fn apply_salvage(
     if local != target_user {
         return Ok(CrossJurisdictionApplyResult::default());
     }
+    let target_pull = field(&route, "targetPull")
+        .ok_or_else(|| invalid(tx.kind, format!("TARGET_PULL_MISSING:{route_id}")))?;
+    // Owned mirror corruption stays fatal even after finality, as in TS.
     if terminal_route(&route) {
         return Ok(CrossJurisdictionApplyResult::default());
     }
     let target_hub = nested_text(&route, "target", "entityId")
         .map(normalized)
         .ok_or_else(|| invalid(tx.kind, "TARGET_HUB_MISSING"))?;
-    let target_pull = field(&route, "targetPull")
-        .ok_or_else(|| invalid(tx.kind, format!("TARGET_PULL_MISSING:{route_id}")))?;
     let full_hash = text(target_pull, "fullHash")
         .ok_or_else(|| invalid(tx.kind, "TARGET_PULL_FULL_HASH_MISSING"))?;
     let partial_root = text(target_pull, "partialRoot")
@@ -4696,11 +4721,20 @@ fn apply_salvage(
                 });
             }
         };
-    if verified != claimed_ratio {
+    // Verification returns a uint16 ratio in a u64 container, exactly
+    // representable as a JS Number; the claim never enters committed state.
+    if verified as f64 != claimed_ratio {
+        // Integral claims already carry JS's exact rendering (including 1e+21).
+        // A positive fractional Number is below 2^52, so its floor is decimal.
+        let claimed_text = if claimed_ratio == numeric_claim {
+            claim.as_str().to_string()
+        } else {
+            claimed_ratio.to_string()
+        };
         return Ok(CrossJurisdictionApplyResult {
             events: vec![EntityFrameEvent::Status {
                 message: format!(
-                    "❌ Cross-j reveal port {route_id} fill mismatch: claimed {claimed_ratio}, verified {verified}"
+                    "❌ Cross-j reveal port {route_id} fill mismatch: claimed {claimed_text}, verified {verified}"
                 ),
             }],
             ..Default::default()
@@ -4740,8 +4774,9 @@ fn apply_salvage(
         partial_root: word(partial_root, tx.kind, "PARTIAL_ROOT")?,
         witness,
     };
-    remove(&mut route, "pendingTargetRegistryReveal")?;
-    collection(&mut state.cross_jurisdiction_swaps).insert(route_id.clone(), route.clone())?;
+    // Salvage retries leave pending evidence intact for every queue outcome.
+    // Only the dispute/ACK flush removes it while moving it into a batch; a
+    // retry must not bypass membership or emit a redundant broadcast.
     let queued = queue_hash_ladder_registration(state, registration.clone(), tx.kind)?;
     if queued == RegistrationQueueResult::Deferred {
         set(
