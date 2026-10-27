@@ -1451,7 +1451,7 @@ describe('audit fail-fast regressions', () => {
       },
       {
         type: 'rebalance_policy',
-        data: { tokenId: 2, policyVersion: 4, baseFee: 100_000_000_000_000_000n, liquidityFeeBps: 5n, gasFee: 0n },
+        data: { tokenId: 2, policyVersion: 4, baseFee: 40_000_000_000_000n, liquidityFeeBps: 5n, gasFee: 0n },
       },
     ]);
     expect(result.outputs).toHaveLength(1);
