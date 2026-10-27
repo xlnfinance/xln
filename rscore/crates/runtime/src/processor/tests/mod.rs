@@ -40,6 +40,7 @@ use crate::{
     transport::derive_local_runtime_id,
 };
 
+mod lending_rejection;
 mod local_profile_publication;
 mod origin_empty_route;
 mod profile_wire;

@@ -1,10 +1,12 @@
-use xln_rscore_entity_kernel::{CanonicalEntityTx, EntityTxKind, decode_local_entity_tx};
+use xln_rscore_entity_kernel::{
+    CanonicalEntityTx, EntityTxKind, LocalEntityFinancialTx, LocalEntityTx, decode_local_entity_tx,
+};
 use xln_rscore_protocol::CanonicalValue;
 fn object(entries: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
     CanonicalValue::Object(entries.into_iter().map(|(k, v)| (k.into(), v)).collect())
 }
 #[test]
-fn lending_entity_admission_is_explicitly_unsupported() {
+fn lending_entity_admission_retains_typed_unsupported_command() {
     for kind in [
         EntityTxKind::LendingOffer,
         EntityTxKind::LendingBorrow,
@@ -16,7 +18,9 @@ fn lending_entity_admission_is_explicitly_unsupported() {
         let tx =
             CanonicalEntityTx::from_frame_projection(kind, object(vec![])).expect("canonical tx");
         assert!(
-            matches!(decode_local_entity_tx(&tx), Err(xln_rscore_entity_kernel::EntityKernelError::RejectedEntityTx { detail, .. }) if detail == "LENDING_UNSUPPORTED"),
+            matches!(decode_local_entity_tx(&tx), Ok(Some(LocalEntityTx::Financial(
+                LocalEntityFinancialTx::UnsupportedLending(retained)
+            ))) if retained == tx),
             "{kind:?}"
         );
     }

@@ -266,6 +266,9 @@ pub struct LendingClosePositionEntityTx {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LocalEntityFinancialTx {
+    /// Preserve signed bytes through admission; Entity application decides the
+    /// sender rejection so Runtime can evict only this outer command.
+    UnsupportedLending(crate::CanonicalEntityTx),
     CrossJurisdictionForceSiblingDispute(ForceSiblingDisputeEntityTx),
     DirectPayment(DirectPaymentEntityTx),
     DisputeFinalize(DisputeFinalizeEntityTx),

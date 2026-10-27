@@ -68,19 +68,19 @@ pub(crate) fn apply_local_entity_financial_txs(
     genesis_policy: Option<&xln_rscore_batch::EntityAccountGenesisPolicy>,
     runtime_seed: Option<&str>,
 ) -> Result<LocalFinancialResult, EntityKernelError> {
-    // Direct typed callers have the same refusal as wire admission, before any
-    // earlier command in this batch can mutate the Entity candidate.
-    if txs.iter().any(|tx| {
-        matches!(
-            tx,
-            LocalEntityFinancialTx::LendingBorrow(_)
-                | LocalEntityFinancialTx::LendingClosePosition(_)
-                | LocalEntityFinancialTx::LendingOffer(_)
-                | LocalEntityFinancialTx::LendingRepay(_)
-        )
+    // Reject at Entity application, after signature/nonce admission. Runtime
+    // rolls back this outer command and certifies neighbouring commands; no
+    // prefix mutations, nonce or effects from the refused command may escape.
+    if let Some(kind) = txs.iter().find_map(|tx| match tx {
+        LocalEntityFinancialTx::UnsupportedLending(tx) => Some(tx.kind.as_str()),
+        LocalEntityFinancialTx::LendingBorrow(_)
+        | LocalEntityFinancialTx::LendingClosePosition(_)
+        | LocalEntityFinancialTx::LendingOffer(_)
+        | LocalEntityFinancialTx::LendingRepay(_) => Some("lending"),
+        _ => None,
     }) {
         return Err(EntityKernelError::RejectedEntityTx {
-            kind: "lending",
+            kind,
             detail: "LENDING_UNSUPPORTED".into(),
         });
     }
@@ -94,6 +94,12 @@ pub(crate) fn apply_local_entity_financial_txs(
     let mut orderbook_deltas = Vec::new();
     for tx in txs {
         match tx {
+            LocalEntityFinancialTx::UnsupportedLending(tx) => {
+                return Err(EntityKernelError::RejectedEntityTx {
+                    kind: tx.kind.as_str(),
+                    detail: "LENDING_UNSUPPORTED".into(),
+                });
+            }
             LocalEntityFinancialTx::CrossJurisdictionForceSiblingDispute(tx) => {
                 let counterparty = crate::cross_j::force_sibling_dispute_counterparty(
                     state,
@@ -306,3 +312,56 @@ pub(crate) fn apply_local_entity_financial_txs(
 }
 
 pub(crate) use settlement::apply_committed_settlement_followup;
+
+#[cfg(test)]
+mod unsupported_lending_tests {
+    use super::*;
+    use crate::{CanonicalEntityTx, EntityTxKind};
+    use xln_rscore_protocol::CanonicalValue;
+
+    #[test]
+    fn unsupported_lending_decodes_then_rejects_at_entity_application() {
+        for kind in [
+            EntityTxKind::LendingOffer,
+            EntityTxKind::LendingBorrow,
+            EntityTxKind::LendingRepay,
+            EntityTxKind::LendingClosePosition,
+            EntityTxKind::LendingApprove,
+            EntityTxKind::LendingSetTerms,
+        ] {
+            let projected = CanonicalEntityTx::from_frame_projection(
+                kind,
+                CanonicalValue::Object(vec![(
+                    "claimHash".into(),
+                    CanonicalValue::String("exact-signed-payload".into()),
+                )]),
+            )
+            .expect("canonical projection");
+            let tx = decode_local_entity_financial_tx(&projected)
+                .expect("unsupported semantics must not reject the whole adapter request")
+                .expect("typed command");
+            assert!(
+                matches!(&tx, LocalEntityFinancialTx::UnsupportedLending(retained) if retained == &projected)
+            );
+            let mut state = EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 100);
+            let before = state.clone();
+            let result = apply_local_entity_financial_txs(
+                &mut state,
+                &mut PaybookChanges::default(),
+                vec![tx],
+                &DeterministicContext::hlt_default(),
+                &BTreeMap::new(),
+                None,
+                None,
+            );
+            assert!(
+                matches!(result, Err(EntityKernelError::RejectedEntityTx { kind: rejected, detail })
+                if rejected == kind.as_str() && detail == "LENDING_UNSUPPORTED")
+            );
+            assert_eq!(
+                state, before,
+                "unsupported lending must not mutate the candidate"
+            );
+        }
+    }
+}

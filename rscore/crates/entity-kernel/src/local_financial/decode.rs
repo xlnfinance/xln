@@ -977,16 +977,16 @@ pub fn decode_local_entity_financial_tx(
         EntityTxKind::DisputeStart => dispute_start(tx).map(Some),
         EntityTxKind::ExtendCredit => extend_credit(tx).map(Some),
         EntityTxKind::HtlcPayment => htlc_payment(tx).map(Some),
-        // Unsupported bank semantics are a sender reject, never a Runtime halt.
+        // Decoding must retain the command: rejecting here discards healthy
+        // neighbouring inputs before Runtime can perform per-command eviction.
         EntityTxKind::LendingOffer
         | EntityTxKind::LendingBorrow
         | EntityTxKind::LendingRepay
         | EntityTxKind::LendingClosePosition
         | EntityTxKind::LendingApprove
-        | EntityTxKind::LendingSetTerms => Err(EntityKernelError::RejectedEntityTx {
-            kind: tx.kind.as_str(),
-            detail: "LENDING_UNSUPPORTED".into(),
-        }),
+        | EntityTxKind::LendingSetTerms => {
+            Ok(Some(LocalEntityFinancialTx::UnsupportedLending(tx.clone())))
+        }
         EntityTxKind::OpenAccount => open_account(tx).map(Some),
         EntityTxKind::PlaceSwapOffer => place_swap_offer(tx).map(Some),
         EntityTxKind::PrepareDispute => prepare_dispute(tx).map(Some),

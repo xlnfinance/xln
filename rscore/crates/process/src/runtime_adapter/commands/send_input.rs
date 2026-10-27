@@ -34,6 +34,40 @@ mod tests {
     use super::*;
     use serde_json::json;
     #[test]
+    fn mixed_payment_lending_adapter_request_reaches_runtime_admission() {
+        let owner = format!("0x{}", "11".repeat(32));
+        let hub = format!("0x{}", "22".repeat(32));
+        let signer = format!("0x{}", "33".repeat(20));
+        let payment = json!({"entityId":owner,"signerId":signer,"entityTxs":[{
+            "type":"directPayment","data":{"targetEntityId":hub,"tokenId":1,
+                "amount":{"__xlnType":"BigInt","value":"7"},"route":[owner,hub],"deliveryMode":"direct"}}]});
+        for kind in [
+            "lendingOffer",
+            "lendingBorrow",
+            "lendingRepay",
+            "lendingClosePosition",
+            "lendingApprove",
+            "lendingSetTerms",
+        ] {
+            let lending = json!({"entityId":owner,"signerId":signer,"entityTxs":[{"type":kind,"data":{"hubEntityId":hub}}]});
+            let request =
+                json!({"input":{"runtimeTxs":[],"entityInputs":[payment,lending],"jInputs":[]}});
+            let decoded = entity_inputs(&request["input"])
+                .unwrap()
+                .iter()
+                .cloned()
+                .map(xln_rscore_runtime::RuntimeEntityInput::decode)
+                .collect::<Result<Vec<_>, _>>()
+                .expect(
+                    "unsupported lending must reach runtime per-command eviction, not E_BAD_QUERY",
+                );
+            assert_eq!(decoded.len(), 2);
+            assert_eq!(decoded[0].canonical(), &request["input"]["entityInputs"][0]);
+            assert_eq!(decoded[1].canonical(), &request["input"]["entityInputs"][1]);
+        }
+    }
+
+    #[test]
     fn remote_privileged_lanes_and_timestamps_are_never_silently_dropped() {
         let valid = json!({"runtimeTxs":[],"entityInputs":[],"jInputs":[]});
         assert!(entity_inputs(&valid).is_ok());
