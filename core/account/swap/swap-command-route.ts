@@ -3,6 +3,7 @@ import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionVenueIdForLegs,
 } from '../../extensions/cross-j/market';
+import { rejectFailure } from '../../protocol/errors/failure-taxonomy';
 import { normalizeEntityRef } from '../../support/boundary-guards';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 
@@ -78,7 +79,10 @@ export const buildCrossJurisdictionSwapIntent = (input: Readonly<{
       : '';
   if (!bookHubSignerId) throw new Error('SWAP_COMMAND_BOOK_HUB_SIGNER_MISSING');
   const now = Math.max(0, Math.floor(Number(input.logicalTimestamp) || 0));
-  const expiresInMs = Math.max(30_000, Math.floor(input.expiresInMs));
+  const expiresInMs = Math.floor(input.expiresInMs);
+  if (!Number.isSafeInteger(expiresInMs) || expiresInMs < 30_000) {
+    throw rejectFailure('SWAP_COMMAND_EXPIRES_IN_BELOW_MINIMUM');
+  }
   return withCanonicalCrossJurisdictionRouteHash({
     orderId: input.offerId,
     bookOwnerEntityId,

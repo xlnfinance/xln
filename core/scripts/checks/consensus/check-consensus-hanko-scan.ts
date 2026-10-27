@@ -150,7 +150,7 @@ assertInitializer(
 assertInitializer(
   'core/account/consensus/incoming/preflight.ts',
   'frameJHeight',
-  'receivedFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0',
+  'receivedFrame.jHeight',
 );
 assertIncludes(accountFrame, 'if (!Number.isSafeInteger(frame.jHeight) || frame.jHeight < 0)', accountFramePath);
 assertIncludes(accountFrame, 'jHeight: frame.jHeight,', accountFramePath);
@@ -276,7 +276,6 @@ assertOrder(entityConsensus, entityConsensusPath, [
   'const accountInputOnly = Boolean(',
   'const workingReplica = forkEntityReplicaForInput(replica, accountInputOnly);',
   'const input = cloneIsolatedEntityInput(ingressInput);',
-  'normalizeProposedFrameCollectedSigs(input.proposedFrame);',
 ]);
 assertIncludes(entityConsensus, 'const supplied = entityInput.entityTxs ?? [];', entityConsensusPath);
 assertOrder(entityConsensus, entityConsensusPath, [

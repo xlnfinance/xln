@@ -100,44 +100,6 @@ const routePathLabel = (hops: RoutedSwapHop[]): string => {
   return [hops[0]!.fromLabel, ...hops.map(hop => hop.toLabel)].join(' -> ');
 };
 
-function stableIdHash(input: string): string {
-  let hash = 0xcbf29ce484222325n;
-  for (let i = 0; i < input.length; i += 1) {
-    hash ^= BigInt(input.charCodeAt(i));
-    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
-  }
-  return hash.toString(36).padStart(13, '0');
-}
-
-export function buildDeterministicSwapOfferId(input: {
-  logicalTimestamp: number;
-  logicalHeight: number;
-  sourceEntityId: string;
-  counterpartyEntityId: string;
-  sellToken: number;
-  buyToken: number;
-  sellAmount: bigint;
-  buyAmount: bigint;
-  priceTicks: bigint;
-  routeValue: string;
-}): string {
-  const logicalTimestamp = Math.max(0, Math.floor(Number(input.logicalTimestamp) || 0));
-  const logicalHeight = Math.max(0, Math.floor(Number(input.logicalHeight) || 0));
-  const seed = [
-    logicalTimestamp,
-    logicalHeight,
-    input.sourceEntityId,
-    input.counterpartyEntityId,
-    input.sellToken,
-    input.buyToken,
-    input.sellAmount.toString(),
-    input.buyAmount.toString(),
-    input.priceTicks.toString(),
-    input.routeValue,
-  ].join('|');
-  return `swap-${logicalTimestamp.toString(36)}-${logicalHeight.toString(36)}-${stableIdHash(seed)}`;
-}
-
 export function orderbookSnapshotCacheKey(hubEntityId: string, pairIdValue: string): string {
   return `${normalizeEntityId(hubEntityId)}::${String(pairIdValue || '').trim()}`;
 }

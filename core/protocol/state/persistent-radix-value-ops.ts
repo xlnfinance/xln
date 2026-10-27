@@ -68,7 +68,7 @@ export const radixPathStartsWith = (path: readonly number[], prefix: readonly nu
   return true;
 };
 
-const compareBytes = (left: Uint8Array, right: Uint8Array): number => {
+export const compareBytes = (left: Uint8Array, right: Uint8Array): number => {
   const limit = Math.min(left.length, right.length);
   for (let index = 0; index < limit; index += 1) {
     const difference = (left[index] ?? 0) - (right[index] ?? 0);

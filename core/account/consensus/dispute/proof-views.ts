@@ -1,4 +1,4 @@
-import type { AccountReplica } from '../../../types/account';
+import type { AccountDisputeHanko, AccountReplica } from '../../../types/account';
 
 export type LocalCertifiedDisputeProof = AccountReplica & {
   currentDisputeHash: string;
@@ -21,3 +21,24 @@ export const hasLocalCertifiedDisputeProof = (
   && hasNonce(account.currentDisputeProofNonce)
   && typeof account.currentDisputeProofProposerIsLeft === 'boolean'
   && hasText(account.currentDisputeProofHanko);
+
+export const reuseCertifiedDisputeHanko = (
+  account: AccountReplica,
+  proofBodyHash: string,
+  proposerIsLeft: boolean,
+  jNonce: number,
+): AccountDisputeHanko | undefined => {
+  if (
+    !hasLocalCertifiedDisputeProof(account) ||
+    account.currentDisputeProofBodyHash.toLowerCase() !== proofBodyHash.toLowerCase() ||
+    account.currentDisputeProofProposerIsLeft !== proposerIsLeft ||
+    account.currentDisputeProofNonce <= jNonce
+  ) return undefined;
+  return {
+    hanko: account.currentDisputeProofHanko,
+    hash: account.currentDisputeHash,
+    proofBodyHash: account.currentDisputeProofBodyHash,
+    proofNonce: account.currentDisputeProofNonce,
+    proposerIsLeft,
+  };
+};

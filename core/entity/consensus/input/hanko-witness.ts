@@ -1,9 +1,8 @@
 import type { AccountInput, AccountReplica, AccountTx } from '../../../types/account';
-import type { EntityOutput, EntityState, HashToSign, HashType, EntityFrame } from '../../types';
+import type { EntityOutput, EntityState, HashToSign, HashType } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import type { HankoString } from '../../../types/hanko';
 import { compareCanonicalText } from '../../../swapbook/swap-execution';
-import { normalizeSignatureMap } from '../../auth/signatures';
 import {
   accountInputAck,
   accountInputBoardHankoRefresh,
@@ -84,12 +83,6 @@ export const pruneHankoWitnessToReachableState = (
     removed += 1;
   }
   return removed;
-};
-
-export const normalizeProposedFrameCollectedSigs = (frame?: EntityFrame): void => {
-  if (!frame?.collectedSigs) return;
-  const normalized = normalizeSignatureMap(frame.collectedSigs);
-  if (normalized) frame.collectedSigs = normalized;
 };
 
 export const isWitnessHashType = (type: HashType): type is HankoWitnessEntry['type'] =>

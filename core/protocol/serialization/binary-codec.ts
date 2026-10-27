@@ -371,13 +371,7 @@ export const packTransportValue = (value: unknown): Uint8Array => packBinaryValu
  * values the caller has already put in canonical shape (sorted plain keys,
  * scalars and bytes): the bytes then equal encodeBinaryPayload's.
  */
-export const packPreorderedBinaryPayload = (value: unknown): Uint8Array => {
-  const body = packBinaryValue(value);
-  const encoded = new Uint8Array(1 + body.byteLength);
-  encoded[0] = XLN_BINARY_MSGPACK_MAGIC;
-  encoded.set(body, 1);
-  return encoded;
-};
+export const packPreorderedBinaryPayload = (value: unknown): Uint8Array => packCanonical(value);
 export const unpackTransportValue = (bytes: Uint8Array): unknown => msgpackCodec.unpack(bytes);
 
 /**

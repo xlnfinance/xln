@@ -2,6 +2,7 @@
  * Bilateral account consensus: two entities agree on a frame chain for one
  * off-chain account, then bubble committed effects back to the entity runtime.
  */
+import { reuseCertifiedDisputeHanko } from './dispute/proof-views';
 
 import type {
   AccountReplica,
@@ -36,10 +37,8 @@ import {
   isLocallySentHtlcFailure,
 } from '../tx/apply-result';
 import { prepareAccountJClaimTx } from '../j-claims/j-claim-transition';
-import { encodeAccountStateValue } from '../commitment/account-state-value';
-import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { createStructuredLogger, shortHash, shortId } from '../../support/logger';
-import { assertAccountFrameHash, canonicalAccountTxForFrameHash } from './frame/hash';
+import { assertAccountFrameHash, accountTxFrameDigest } from './frame/hash';
 import {
   assertNoUnilateralSettlementMutation,
   buildAccountProofBodyFromJurisdictions,
@@ -211,9 +210,6 @@ const collectIncomingOkOutcome = (
       assertNever(result);
   }
 };
-
-const accountTxFrameDigest = (tx: AccountTx): string =>
-  computeIntegrityDigest(encodeAccountStateValue(canonicalAccountTxForFrameHash(tx)));
 
 /**
  * Both claim witnesses are derivable from the committed accumulators, so the
@@ -553,20 +549,7 @@ const selectAckDisputeHanko = (
       proposerIsLeft,
     };
   }
-  const reusable =
-    account.currentDisputeProofHanko &&
-    account.currentDisputeHash &&
-    account.currentDisputeProofBodyHash?.toLowerCase() === proofBodyHash.toLowerCase() &&
-    account.currentDisputeProofProposerIsLeft === proposerIsLeft &&
-    Number(account.currentDisputeProofNonce ?? 0) > Number(account.state.jNonce ?? 0);
-  if (!reusable) return undefined;
-  return {
-    hanko: account.currentDisputeProofHanko!,
-    hash: account.currentDisputeHash!,
-    proofBodyHash: account.currentDisputeProofBodyHash!,
-    proofNonce: account.currentDisputeProofNonce!,
-    proposerIsLeft,
-  };
+  return reuseCertifiedDisputeHanko(account, proofBodyHash, proposerIsLeft, Number(account.state.jNonce ?? 0));
 };
 
 function buildIncomingAckFrameMaterial(
@@ -788,7 +771,6 @@ async function handleIncomingAccountFrame(
   account: AccountReplica,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
-  replayCurrentHeight: number,
   validatedCounterpartyDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
   events: string[],
   timedOutHashlocks: string[],
@@ -805,7 +787,6 @@ async function handleIncomingAccountFrame(
     account,
     input,
     normalizedInputHeight,
-    replayCurrentHeight,
     events,
     committedFrames,
     securityContext,
@@ -1032,7 +1013,6 @@ const handleAccountProposalPhase = async (
     account,
     input,
     normalizedInputHeight,
-    replay,
     securityContext,
     events,
     timedOutHashlocks,
@@ -1057,7 +1037,6 @@ const handleAccountProposalPhase = async (
     account,
     input,
     normalizedInputHeight,
-    replay.currentHeight,
     disputeHanko,
     events,
     timedOutHashlocks,

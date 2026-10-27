@@ -3,6 +3,7 @@
  * One canonical codec is used for logs, network payloads, and persisted snapshots.
  */
 
+import { FailureDispositionError, haltRuntimeFailure, rejectFailure } from '../errors/failure-taxonomy';
 import { decodeBase64Bytes, encodeBase64Bytes } from './base64';
 
 const ALWAYS_EXCLUDED_KEYS = new Set(['provider', 'ethersProvider']);
@@ -135,6 +136,7 @@ const normalizeSerializableValue = (
   input: unknown,
   options: SerializeOptions,
   stack: object[],
+  path = '$',
 ): TaggedJsonValue | undefined => {
   if (input === undefined) return undefined;
   if (input === null) return null;
@@ -157,7 +159,7 @@ const normalizeSerializableValue = (
   }
   if (isTypedArrayView(input)) {
     const kind = input.constructor.name as TypedArrayKind;
-    if (kind in TYPED_ARRAY_CTORS) {
+    if (Object.hasOwn(TYPED_ARRAY_CTORS, kind)) {
       return {
         __xlnType: 'TypedArray',
         kind,
@@ -167,14 +169,14 @@ const normalizeSerializableValue = (
   }
 
   const objectRef = input as object;
-  if (stack.includes(objectRef)) return undefined;
+  if (stack.includes(objectRef)) throw haltRuntimeFailure('SERIALIZATION_CIRCULAR_REFERENCE', `SERIALIZATION_CIRCULAR_REFERENCE:${path}`);
   stack.push(objectRef);
   try {
     if (input instanceof Map) {
       const entries: Array<[TaggedJsonValue, TaggedJsonValue]> = [];
       for (const [rawKey, rawValue] of input.entries()) {
-        const key = normalizeSerializableValue(rawKey, options, stack);
-        const value = normalizeSerializableValue(rawValue, options, stack);
+        const key = normalizeSerializableValue(rawKey, options, stack, `${path}.<map-key>`);
+        const value = normalizeSerializableValue(rawValue, options, stack, `${path}.<map-value>`);
         if (key !== undefined && value !== undefined) {
           entries.push([key, value]);
         }
@@ -185,14 +187,14 @@ const normalizeSerializableValue = (
 
     if (input instanceof Set) {
       const values = Array.from(input.values())
-        .map((value) => normalizeSerializableValue(value, options, stack))
+        .map((value, index) => normalizeSerializableValue(value, options, stack, `${path}.<set:${index}>`))
         .filter((value): value is TaggedJsonValue => value !== undefined)
         .sort(compareTaggedValues);
       return { __xlnType: 'Set', value: values };
     }
 
     if (Array.isArray(input)) {
-      return input.map((item) => normalizeSerializableValue(item, options, stack) ?? null);
+      return input.map((item, index) => normalizeSerializableValue(item, options, stack, `${path}[${index}]`) ?? null);
     }
 
     const source = input as Record<string, unknown>;
@@ -203,7 +205,7 @@ const normalizeSerializableValue = (
         !options.excludeKeys?.has(key))
       .sort(compareStableText);
     for (const key of keys) {
-      const value = normalizeSerializableValue(source[key], options, stack);
+      const value = normalizeSerializableValue(source[key], options, stack, `${path}.${key}`);
       if (value !== undefined) result[key] = value;
     }
     return result;
@@ -230,8 +232,10 @@ const decodeTaggedJson = (value: unknown): unknown => {
     case 'Set':
       return new Set(value.value);
     case 'TypedArray': {
-      const ctor = TYPED_ARRAY_CTORS[value.kind as TypedArrayKind];
-      if (!ctor) return value;
+      if (!Object.hasOwn(TYPED_ARRAY_CTORS, value.kind)) {
+        throw rejectFailure('SERIALIZATION_TYPED_ARRAY_KIND_INVALID', `SERIALIZATION_TYPED_ARRAY_KIND_INVALID:${value.kind}`);
+      }
+      const ctor = TYPED_ARRAY_CTORS[value.kind];
       return new ctor(cloneArrayBuffer(decodeBase64Bytes(value.value)));
     }
     case 'Buffer':
@@ -252,6 +256,7 @@ export function safeStringify(obj: unknown, space?: number): string {
   try {
     return stringifyCanonical(obj, space === undefined ? {} : { space });
   } catch (err) {
+    if (err instanceof FailureDispositionError) throw err;
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`SAFE_STRINGIFY_FAILED: ${message}`, err instanceof Error ? { cause: err } : undefined);
   }
@@ -264,6 +269,7 @@ export function safeParse(jsonString: string): unknown {
   try {
     return JSON.parse(jsonString, (_key, value) => decodeTaggedJson(value)) as unknown;
   } catch (err) {
+    if (err instanceof FailureDispositionError) throw err;
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`Failed to parse JSON: ${message}`, err instanceof Error ? { cause: err } : undefined);
   }

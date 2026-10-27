@@ -102,11 +102,13 @@ test('crypto jobs keep startup alive until every signature and recovered address
 test('a failed crypto worker settles pending jobs and releases its process references', () => {
   const child = runChild(`
     const digest = new Uint8Array(32).fill(2);
-    const results = await Promise.all([
+    const results = await Promise.allSettled([
       signDigestsBatchOnPool(new Uint8Array(32), digest),
       signDigestsBatchOnPool(new Uint8Array(32), digest),
     ]);
-    if (results.some(result => result !== null)) throw Error('FAILED_WORKER_RESULT_INVALID');
+    if (results.some(result => result.status !== 'rejected' || result.reason.code !== 'CRYPTO_POOL_WORKER_FAILED' || !result.reason.cause)) throw Error('FAILED_WORKER_RESULT_INVALID');
+    try { cryptoSignPoolEnabled(); throw Error('FAILED_LANE_REUSED'); }
+    catch (error) { if (error.code !== 'CRYPTO_POOL_WORKER_FAILED') throw error; }
     console.log('CRYPTO_FAILED_JOBS_SETTLED count=2');
   `);
   expect(child.exitCode, child.stderr.toString()).toBe(0);

@@ -5,16 +5,15 @@
 
 import { formatUnits, parseUnits } from 'ethers';
 import { getTokenInfo } from './utils';
+import { haltRuntimeFailure } from '../protocol/errors/failure-taxonomy';
 
 /**
  * Format token amount for display using ethers formatUnits
  * Maintains full precision, uses established ETH ecosystem standards
  */
 export function formatTokenAmount(tokenId: number, amount: bigint | null | undefined): string {
-  // Handle null/undefined values that are causing ethers.js to crash
   if (amount === null || amount === undefined) {
-    const tokenInfo = getTokenInfo(tokenId);
-    return `0 ${tokenInfo.symbol}`;
+    throw haltRuntimeFailure('TOKEN_AMOUNT_MISSING', `TOKEN_AMOUNT_MISSING:${tokenId}`);
   }
 
   const tokenInfo = getTokenInfo(tokenId);

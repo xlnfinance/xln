@@ -1,4 +1,6 @@
 import { ethers } from 'ethers';
+import { computeIntegrityDigest } from '../../../support/bytes/integrity-checksum';
+import { encodeAccountStateValue } from '../../commitment/account-state-value';
 
 import type { AccountFrame, AccountTx } from '../../../types/account';
 import { computeCanonicalMerkleRoot } from '../../commitment/state-root';
@@ -137,3 +139,6 @@ export function assertAccountFrameHash(frame: AccountFrame, code: string): void 
 }
 
 export const computeFrameHash = computeCanonicalAccountFrameHash;
+
+export const accountTxFrameDigest = (tx: AccountTx): string =>
+  computeIntegrityDigest(encodeAccountStateValue(canonicalAccountTxForFrameHash(tx)));

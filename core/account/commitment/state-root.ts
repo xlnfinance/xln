@@ -161,6 +161,16 @@ export const computeCanonicalKeccakLeafRoot = (
   'keccak256',
 );
 
+const accountMapRoot = <K extends AccountStateMapKey, V>(
+  namespace: AccountStateMapNamespace,
+  map: AccountStateCollection<K, V> | undefined,
+  cold: boolean,
+): string => {
+  if (map === undefined) return EMPTY_ACCOUNT_STATE_ROOT;
+  const persistent = requirePersistentAccountStateMap(map, namespace);
+  return cold ? persistent.coldRootHash() : persistent.rootHash();
+};
+
 const accountStateRootEntries = (
   account: AccountState,
   cold = false,
@@ -173,12 +183,7 @@ const accountStateRootEntries = (
     map: AccountStateCollection<K, V> | undefined,
   ): string => {
     const startedAt = mapTimings ? getPerfMs() : 0;
-    const persistent = map === undefined
-      ? undefined
-      : requirePersistentAccountStateMap(map, namespace);
-    const root = persistent === undefined
-      ? EMPTY_ACCOUNT_STATE_ROOT
-      : cold ? persistent.coldRootHash() : persistent.rootHash();
+    const root = accountMapRoot(namespace, map, cold);
     if (mapTimings) mapTimings[namespace] = getPerfMs() - startedAt;
     if (mapStatuses) mapStatuses[namespace] = {
       mode: cold ? 'cold-oracle' : 'persistent',
@@ -247,31 +252,17 @@ const accountCommitmentSectionDetail = (
   account: AccountState,
   cold: boolean,
 ): AccountCommitmentSectionDetail => {
-  const root = <K extends number | string, V>(
-    namespace: 'locks' | 'pulls' | 'swapOffers' | 'subcontracts' | 'lendingIntents',
-    map: AccountStateCollection<K, V> | undefined,
-  ): string => {
-    if (map === undefined) return EMPTY_ACCOUNT_STATE_ROOT;
-    const persistent = requirePersistentAccountStateMap(map, namespace);
-    return cold ? persistent.coldRootHash() : persistent.rootHash();
-  };
   return {
-  locksRoot: root('locks', account.locks),
-  pullsRoot: account.pulls === undefined
-    ? EMPTY_ACCOUNT_STATE_ROOT
-    : root('pulls', account.pulls),
-  swapOffersRoot: root('swapOffers', account.swapOffers),
-  subcontractsRoot: account.subcontracts === undefined
-    ? EMPTY_ACCOUNT_STATE_ROOT
-    : root('subcontracts', account.subcontracts),
-  lendingIntentsRoot: account.lendingIntents === undefined
-    ? EMPTY_ACCOUNT_STATE_ROOT
-    : root('lendingIntents', account.lendingIntents),
-  settlementWorkspaceHash: account.settlementWorkspace === undefined
-    ? null
-    : computeIntegrityDigest(encodeAccountStateValue(
-        settlementWorkspaceWithoutHankos(account.settlementWorkspace),
-      )),
+    locksRoot: accountMapRoot('locks', account.locks, cold),
+    pullsRoot: accountMapRoot('pulls', account.pulls, cold),
+    swapOffersRoot: accountMapRoot('swapOffers', account.swapOffers, cold),
+    subcontractsRoot: accountMapRoot('subcontracts', account.subcontracts, cold),
+    lendingIntentsRoot: accountMapRoot('lendingIntents', account.lendingIntents, cold),
+    settlementWorkspaceHash: account.settlementWorkspace === undefined
+      ? null
+      : computeIntegrityDigest(encodeAccountStateValue(
+          settlementWorkspaceWithoutHankos(account.settlementWorkspace),
+        )),
   };
 };
 

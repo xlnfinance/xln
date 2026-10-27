@@ -124,7 +124,6 @@ interface AccountAuthorityEntityStage extends AccountAuthorityEntityStageCapabil
   readonly ownerEntityId: string;
   readonly ownerSignerId: string;
   typeScriptExecutionCounts(): TypeScriptAccountExecutionCounts;
-  authoritativeExecutionCount(): number;
   discard(): Promise<void>;
 }
 
@@ -234,7 +233,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   private discarded = false;
   private applyAccountInputCount = 0;
   private proposeAccountFrameCount = 0;
-  private authoritativeExecutions = 0;
   private frameOpened = false;
   private frameOutboundPrepared = false;
   private frameBooksExecuted = false;
@@ -393,7 +391,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       return materializeResult(expected);
     });
     countFrameApplyPhase('inbound.materialize', materializeStartedAt);
-    this.authoritativeExecutions += this.inboundRequests.length;
     executionLedger.authoritativeOperations += this.inboundRequests.length;
   }
 
@@ -479,7 +476,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       + this.generatedAdmissions.length
       + this.proposalResults.length;
     countFrameApplyPhase('outbound.materialize', materializeStartedAt);
-    this.authoritativeExecutions += executed;
     executionLedger.authoritativeOperations += executed;
   }
 
@@ -701,9 +697,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     };
   }
 
-  authoritativeExecutionCount(): number {
-    return this.authoritativeExecutions;
-  }
 
   async discard(): Promise<void> {
     if (this.discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARD_DUPLICATE');

@@ -4,6 +4,7 @@
  * This module implements the gossip layer inside the runtime object.
  * It manages entity profiles in a distributed network.
  */
+import { rejectFailure } from '../../protocol/errors/failure-taxonomy';
 
 import { compareCanonicalText } from '../../swapbook/swap-keys';
 import { observePerfCount, timePerfPhase } from '../../support/performance/profile';
@@ -175,9 +176,6 @@ const assertProfileByteLimit = (value: unknown, entityId: string): void => {
   }
 };
 
-const hasOwn = (value: object, key: string): boolean =>
-  Object.prototype.hasOwnProperty.call(value, key);
-
 const assertOnlyAllowedKeys = (
   raw: object,
   allowedKeys: readonly string[],
@@ -258,45 +256,6 @@ const assertCanonicalProfileFields = (
 ): void => {
   assertOnlyAllowedKeys(rawProfile, ALLOWED_PROFILE_KEYS, 'GOSSIP_PROFILE_UNKNOWN_FIELD', entityId);
   assertOnlyAllowedKeys(metadataRaw, ALLOWED_PROFILE_METADATA_KEYS, 'GOSSIP_PROFILE_METADATA_UNKNOWN_FIELD', entityId);
-  if (hasOwn(rawProfile, 'hubs')) {
-    throw new Error(`GOSSIP_PROFILE_HUBS_ALIAS_FORBIDDEN: entity=${entityId}`);
-  }
-  if (hasOwn(rawProfile, 'expiresAt')) {
-    throw new Error(`GOSSIP_PROFILE_EXPIRES_AT_FORBIDDEN: entity=${entityId}`);
-  }
-  if (hasOwn(metadataRaw, 'name')) {
-    throw new Error(`GOSSIP_PROFILE_METADATA_NAME_FORBIDDEN: entity=${entityId}`);
-  }
-  if (hasOwn(metadataRaw, 'avatar')) {
-    throw new Error(`GOSSIP_PROFILE_METADATA_AVATAR_FORBIDDEN: entity=${entityId}`);
-  }
-  if (hasOwn(metadataRaw, 'bio')) {
-    throw new Error(`GOSSIP_PROFILE_METADATA_BIO_FORBIDDEN: entity=${entityId}`);
-  }
-  if (hasOwn(metadataRaw, 'website')) {
-    throw new Error(`GOSSIP_PROFILE_METADATA_WEBSITE_FORBIDDEN: entity=${entityId}`);
-  }
-  if (hasOwn(metadataRaw, 'lastUpdated')) {
-    throw new Error(`GOSSIP_PROFILE_METADATA_LAST_UPDATED_FORBIDDEN: entity=${entityId}`);
-  }
-  if (hasOwn(metadataRaw, 'hankoSignature')) {
-    throw new Error(`GOSSIP_PROFILE_METADATA_HANKO_SIGNATURE_FORBIDDEN: entity=${entityId}`);
-  }
-  if (hasOwn(metadataRaw, 'encryptionPubKey')) {
-    throw new Error(`GOSSIP_PROFILE_METADATA_ENCRYPTION_PUBKEY_FORBIDDEN: entity=${entityId}`);
-  }
-  if (hasOwn(metadataRaw, 'cryptoPublicKey')) {
-    throw new Error(`GOSSIP_PROFILE_METADATA_CRYPTO_PUBLIC_KEY_FORBIDDEN: entity=${entityId}`);
-  }
-  if (hasOwn(metadataRaw, 'encryptionPublicKey')) {
-    throw new Error(`GOSSIP_PROFILE_METADATA_ENCRYPTION_PUBLIC_KEY_FORBIDDEN: entity=${entityId}`);
-  }
-  if (hasOwn(metadataRaw, 'threshold')) {
-    throw new Error(`GOSSIP_PROFILE_METADATA_THRESHOLD_FORBIDDEN: entity=${entityId}`);
-  }
-  if (hasOwn(rawProfile, 'runtimeEncryptionPublicKey')) {
-    throw new Error(`GOSSIP_PROFILE_RUNTIME_ENCRYPTION_PUBLIC_KEY_FORBIDDEN: entity=${entityId}`);
-  }
 };
 
 const normalizeStringArray = (raw: unknown): string[] => {
@@ -374,14 +333,14 @@ const parseBigIntValue = (raw: unknown, field: string, entityId: string): bigint
   if (isRecord(raw) && raw['__xlnType'] === 'BigInt' && typeof raw['value'] === 'string' && /^-?\d+$/.test(raw['value'])) {
     return BigInt(raw['value']);
   }
-  throw new Error(`${field}: entity=${entityId}`);
+  throw rejectFailure(field, `${field}: entity=${entityId}`);
 };
 
 const parseUint256Text = (raw: unknown, field: string, entityId: string): string | undefined => {
   if (raw === undefined) return undefined;
-  if (typeof raw !== 'string' || !/^(0|[1-9][0-9]{0,77})$/.test(raw)) throw new Error(`${field}: entity=${entityId}`);
+  if (typeof raw !== 'string' || !/^(0|[1-9][0-9]{0,77})$/.test(raw)) throw rejectFailure(field, `${field}: entity=${entityId}`);
   const value = BigInt(raw);
-  if (value >= (1n << 256n)) throw new Error(`${field}: entity=${entityId}`);
+  if (value >= (1n << 256n)) throw rejectFailure(field, `${field}: entity=${entityId}`);
   return value.toString();
 };
 
@@ -510,7 +469,7 @@ const parseProfileTokenCapacities = (
 };
 
 const parseProfileAccounts = (raw: unknown, entityId: string): DecodedProfileAccount[] => {
-  if (!Array.isArray(raw)) return [];
+  if (!Array.isArray(raw)) throw rejectFailure('GOSSIP_PROFILE_ACCOUNTS_INVALID', `GOSSIP_PROFILE_ACCOUNTS_INVALID: entity=${entityId}`);
   if (raw.length > 1000) throw new Error(`GOSSIP_PROFILE_ACCOUNTS_COUNT_INVALID: entity=${entityId}`);
   let previousCounterparty = '';
   return raw.map((accountRaw) => {
@@ -573,7 +532,7 @@ const parseProfileMetadata = (
     ...(sectors ? { sectors } : {}),
     ...(hubName ? { hubName } : {}),
     routingFeePPM: parseRoutingFeePPM(metadataRaw['routingFeePPM'], entityId),
-    baseFee: parseBigIntValue(metadataRaw['baseFee'] ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
+    baseFee: parseBigIntValue(metadataRaw['baseFee'], 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
     ...(metadataRaw['swapTakerFeeBps'] !== undefined ? { swapTakerFeeBps: parseUint16(metadataRaw['swapTakerFeeBps'], 'GOSSIP_PROFILE_SWAP_TAKER_FEE_BPS_INVALID', entityId) } : {}),
     ...(jurisdiction ? { jurisdiction } : {}),
     ...(mirrors ? { mirrors } : {}),
@@ -692,7 +651,7 @@ const canonicalizeProfileMetadata = (
   return {
     ...(hubName ? { hubName } : {}),
     routingFeePPM: parseRoutingFeePPM(metadata['routingFeePPM'], entityId),
-    baseFee: parseBigIntValue(metadata['baseFee'] ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
+    baseFee: parseBigIntValue(metadata['baseFee'], 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
     ...(swapTakerFeeBps !== undefined ? { swapTakerFeeBps } : {}),
     ...(entityKind ? { entityKind } : {}),
     ...(sectors ? { sectors } : {}),

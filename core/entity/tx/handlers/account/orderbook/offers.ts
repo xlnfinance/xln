@@ -1,22 +1,19 @@
-import type { AccountState, SwapOffer } from '../../../../../types/account';
+import { haltRuntimeFailure } from '../../../../../protocol/errors/failure-taxonomy';
+import type { AccountState } from '../../../../../types/account';
 import type { SwapCancelEvent, SwapCancelRequestEvent, SwapOfferEvent } from '../../../../../account/tx/apply-types';
 import type { BookState } from '../../../../../swapbook';
 import type { CrossJurisdictionFillInstruction } from '../../../../../extensions/cross-j/orderbook';
 import type { AccountTxTarget } from './queue';
 
-type StoredOfferEntityRefs = {
-  fromEntity?: string;
-  toEntity?: string;
-};
-
 export const resolveStoredOfferEntityRefs = (
   account: AccountState,
-  offer: SwapOffer,
 ): { fromEntity: string; toEntity: string } => {
-  const persistedRefs = offer as SwapOffer & StoredOfferEntityRefs;
+  if (!account.leftEntity || !account.rightEntity) {
+    throw haltRuntimeFailure('ORDERBOOK_ACCOUNT_ENDPOINTS_MISSING');
+  }
   return {
-    fromEntity: account.leftEntity || persistedRefs.fromEntity || '',
-    toEntity: account.rightEntity || persistedRefs.toEntity || '',
+    fromEntity: account.leftEntity,
+    toEntity: account.rightEntity,
   };
 };
 

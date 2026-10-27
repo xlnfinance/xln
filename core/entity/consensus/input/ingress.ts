@@ -8,7 +8,6 @@ import type { EntityRuntimeContext } from '../../runtime-context';
 import { HEAVY_LOGS } from '../../../support/debug-flags';
 import { log } from '../../../support/diagnostics';
 import { copyLocalEntityLeaderTimeoutVoteAuthorization } from '../leader';
-import { normalizeProposedFrameCollectedSigs } from './hanko-witness';
 import {
   type ApplyEntityInputContext,
   type ApplyEntityInputResult,
@@ -128,7 +127,6 @@ export const prepareEntityInputIngress = (
       input.leaderTimeoutVote,
     );
   }
-  normalizeProposedFrameCollectedSigs(input.proposedFrame);
   const entityDisplay = input.entityId;
   const frameHash = input.proposedFrame?.hash?.slice(0, 10) || 'none';
   logEntityInput(env, input, workingReplica, entityDisplay, frameHash);

@@ -9,7 +9,6 @@ import {
   isCrossJurisdictionRouteExpired,
 } from '../../extensions/cross-j';
 import { MAX_ACCOUNT_FRAME_TXS } from '../../account/consensus/frame/hash';
-import { safeStringify } from '../../protocol/serialization';
 import type { AccountReplica, AccountTx } from '../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityReplica, EntityState } from '../types';
@@ -194,71 +193,22 @@ type CrossJOpeningGroup = Readonly<{
   orderIds: Set<string>;
 }>;
 
-/**
- * Both cohort legs must fit one transport envelope: the receiver admits the
- * atomic pair only when both certified Account proposals arrive together, and
- * runtime WS transport refuses messages over DEFAULT_MAX_WS_MESSAGE_BYTES
- * (1MB). A cohort selected past that ceiling is undeliverable by construction
- * — the sender retries the oversized envelope forever and cross-j bootstrap
- * wedges. Budget one quarter of the ceiling of encoded Account txs per leg;
- * the other half of the envelope is certificates, evidence and framing.
- * safeStringify(JSON) over-estimates the msgpack wire size, which keeps the
- * bound conservative. Later arrivals stay queued and ship as the next
- * sequential cohort, which transport already keeps in separate envelopes.
- */
-const CROSS_J_OPENING_COHORT_MAX_TX_BYTES = 256 * 1024;
-
-/**
- * Every opening order adds recovery clauses to both Accounts' signed
- * on-chain ProofBody. The proof has a much smaller hard limit than transport
- * (8KB today), and the two Accounts can have different pre-existing proof
- * bodies. Keeping one order per atomic opening cohort is the only static bound
- * that both sides can select independently without signing mismatched cohorts.
- * Later orders remain queued and are proposed after this pair commits.
- */
-const CROSS_J_OPENING_COHORT_MAX_ORDERS = 1;
-
-const approximateAccountTxBytes = (txs: readonly AccountTx[]): number =>
-  txs.reduce((total, tx) => total + safeStringify(tx).length, 0);
-
+// One order per cohort keeps both Accounts on the same proof-gas boundary;
+// later arrivals cannot change a sibling's already selected opening.
 const fitOpeningCohort = (
   localTxs: readonly AccountTx[],
   siblingTxs: readonly AccountTx[],
   candidateOrderIds: readonly string[],
 ): Set<string> => {
-  const selected = new Set<string>();
-  let localCount = 0;
-  let siblingCount = 0;
-  let localBytes = 0;
-  let siblingBytes = 0;
   for (const orderId of candidateOrderIds) {
-    if (selected.size >= CROSS_J_OPENING_COHORT_MAX_ORDERS) break;
     const oneOrder = new Set([orderId]);
-    const nextLocalTxs = selectOpeningTxs(localTxs, oneOrder);
-    const nextSiblingTxs = selectOpeningTxs(siblingTxs, oneOrder);
-    if (nextLocalTxs.length === 0 || nextSiblingTxs.length === 0) continue;
-    if (
-      localCount + nextLocalTxs.length > MAX_ACCOUNT_FRAME_TXS ||
-      siblingCount + nextSiblingTxs.length > MAX_ACCOUNT_FRAME_TXS
-    )
-      break;
-    const nextLocalBytes = approximateAccountTxBytes(nextLocalTxs);
-    const nextSiblingBytes = approximateAccountTxBytes(nextSiblingTxs);
-    // The first order is always admitted: a single order past the budget can
-    // only be helped by a larger transport limit, never by waiting.
-    if (
-      selected.size > 0 &&
-      (localBytes + nextLocalBytes > CROSS_J_OPENING_COHORT_MAX_TX_BYTES ||
-        siblingBytes + nextSiblingBytes > CROSS_J_OPENING_COHORT_MAX_TX_BYTES)
-    )
-      break;
-    selected.add(orderId);
-    localCount += nextLocalTxs.length;
-    siblingCount += nextSiblingTxs.length;
-    localBytes += nextLocalBytes;
-    siblingBytes += nextSiblingBytes;
+    const local = selectOpeningTxs(localTxs, oneOrder);
+    const sibling = selectOpeningTxs(siblingTxs, oneOrder);
+    if (local.length === 0 || sibling.length === 0) continue;
+    if (local.length > MAX_ACCOUNT_FRAME_TXS || sibling.length > MAX_ACCOUNT_FRAME_TXS) break;
+    return oneOrder;
   }
-  return selected;
+  return new Set();
 };
 
 /**

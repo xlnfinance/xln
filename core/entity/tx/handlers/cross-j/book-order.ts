@@ -72,7 +72,7 @@ const isSameCommittedBookProgress = (
 const buildCommittedCrossJurisdictionOfferEvent = (
   state: EntityState,
   route: ReturnType<typeof withCanonicalCrossJurisdictionRouteHash>,
-): SwapOfferEvent | null => {
+): SwapOfferEvent => {
   const accountId = findAccountKey(state, route.source.entityId);
   const account = accountId ? state.accounts.get(accountId) : undefined;
   const offer = account?.state.swapOffers?.get(route.orderId);
@@ -149,7 +149,6 @@ const updateBookOrderForProgress = (
 ): void => {
   if (route.status === 'partially_filled') {
     const offer = buildCommittedCrossJurisdictionOfferEvent(state, route);
-    if (!offer) throw haltRuntimeFailure("CROSS_J_BOOK_PROGRESS_OFFER_MISSING", `CROSS_J_BOOK_PROGRESS_OFFER_MISSING: order=${route.orderId}`);
     const market = buildCrossJurisdictionMarketOffer(
       normalizeSwapOfferForOrderbook(offer, offer.accountId || route.source.entityId),
       state.entityId,
@@ -238,10 +237,6 @@ export const handleAdmitCrossJurisdictionBookOrderEntityTx = (
   const admission = mergeCrossJurisdictionBookAdmission(newState, route, now);
 
   const offerEvent = buildCommittedCrossJurisdictionOfferEvent(newState, admission.route);
-  if (!offerEvent) {
-    addMessage(newState, `🌉 Cross-j book admit ${route.orderId}: waiting source offer`);
-    return { newState, outputs: [], swapOffersCreated: [] };
-  }
 
   const admissionFailure = getTypedCrossJurisdictionBookAdmissionFailure(
     newState,

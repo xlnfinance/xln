@@ -271,3 +271,31 @@ fn growing_collection_matches_typescript_leaf_admission_limits() {
     );
     assert!(collection.is_empty());
 }
+
+#[test]
+fn malformed_domain_addresses_cannot_hash_as_absent_authorization() {
+    for name in [
+        "sourceEntityProviderAddress",
+        "targetEntityProviderAddress",
+        "sourceDeltaTransformerAddress",
+        "targetDeltaTransformerAddress",
+    ] {
+        for value in [
+            string("invalid"),
+            string(""),
+            CanonicalValue::Null,
+            number(1),
+        ] {
+            let mut supplied = route(None);
+            let CanonicalValue::Object(fields) = &mut supplied else {
+                panic!("route")
+            };
+            fields.push(("domain".into(), object(vec![(name, value)])));
+            assert_eq!(
+                xln_rscore_engine::cross_j_route::canonical_route(&supplied)
+                    .expect_err("malformed address"),
+                "CROSS_J_DOMAIN_ADDRESS_INVALID"
+            );
+        }
+    }
+}

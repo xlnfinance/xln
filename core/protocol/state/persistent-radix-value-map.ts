@@ -480,11 +480,6 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     return { key: owned, keyBytes: this.encodeKey(owned) };
   }
 
-  /** Overlay boundary: own an immutable candidate value before retaining it. */
-  prepareValue(value: V): V {
-    return this.#options.ownValue(value);
-  }
-
   /** One-shot overlay fold. Does not hash; call rootHash at the Runtime boundary. */
   foldMutations(
     mutations: Iterable<RadixFoldMutation<K, V>>,

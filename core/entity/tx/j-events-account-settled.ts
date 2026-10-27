@@ -111,14 +111,6 @@ export const applyAccountSettledJEvent = (
   account.state.lastFinalizedJHeight ??= 0;
 
   const normalized = requireCanonicalJurisdictionEvents([event]);
-  if (normalized.length !== 1 || !normalized[0]) {
-    jEventLog.warn('account_settled.claim_normalize_failed', {
-      tokenId: tokenIdNum,
-      counterparty: shortId(counterpartyId),
-      block: blockNumber,
-    });
-    return;
-  }
   const jHeight = event.blockNumber ?? blockNumber;
   const jBlockHash = event.blockHash || '';
   accountTxs.push({
@@ -128,7 +120,7 @@ export const applyAccountSettledJEvent = (
       data: {
         jHeight,
         jBlockHash,
-        events: [structuredClone(normalized[0])],
+        events: structuredClone(normalized),
       },
     },
   });

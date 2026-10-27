@@ -3,6 +3,7 @@
  * start on the JS implementation, switch to the WASM one once instantiated.
  * Digests are identical on both backends.
  */
+import { haltRuntimeFailure } from '../../errors/failure-taxonomy';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 
@@ -28,7 +29,16 @@ type NativeHmacConstructor = new (algorithm: string, key: Uint8Array) => NativeH
 const nativeHmac = ((): NativeHmacConstructor | undefined => {
   const bunRuntime: unknown = Reflect.get(globalThis, 'Bun');
   const constructor: unknown = bunRuntime && typeof bunRuntime === 'object' ? Reflect.get(bunRuntime, 'CryptoHasher') : undefined;
-  return typeof constructor === 'function' ? constructor as NativeHmacConstructor : undefined;
+  if (typeof constructor !== 'function') return undefined;
+  const candidate = constructor as NativeHmacConstructor;
+  const key = new TextEncoder().encode('xln-fast-sha256-probe-key');
+  const data = new TextEncoder().encode('xln-fast-sha256-probe');
+  const reference = hmac(sha256, key, data);
+  const actual = new Uint8Array(new candidate('sha256', key).update(data).digest());
+  if (actual.length !== reference.length || actual.some((byte, index) => byte !== reference[index])) {
+    throw haltRuntimeFailure('FAST_SHA256_NATIVE_HMAC_MISMATCH');
+  }
+  return candidate;
 })();
 
 /** HMAC-SHA256(key, data) as raw bytes. */
@@ -50,6 +60,7 @@ export const hmacSha256 = (key: Uint8Array, data: Uint8Array): Uint8Array => {
 let installation: Promise<boolean> | null = null;
 
 const installFastSha256 = (): Promise<boolean> => {
+  if (nativeHmac) return Promise.resolve(true);
   if (installation) return installation;
   installation = (async () => {
     try {
@@ -58,13 +69,6 @@ const installFastSha256 = (): Promise<boolean> => {
       const key = new TextEncoder().encode('xln-fast-sha256-probe-key');
       const data = new TextEncoder().encode('xln-fast-sha256-probe');
       const reference = hmac(sha256, key, data);
-      if (nativeHmac) {
-        const native = hmacSha256(key, data);
-        if (native.length !== reference.length || native.some((byte, index) => byte !== reference[index])) {
-          throw new Error('FAST_SHA256_NATIVE_HMAC_MISMATCH');
-        }
-        return true;
-      }
       wasmSha256 = hasher;
       const candidate = hmacSha256(key, data);
       if (candidate.length !== reference.length || candidate.some((byte, index) => byte !== reference[index])) {

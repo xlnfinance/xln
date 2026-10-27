@@ -91,16 +91,6 @@ export const crossJurisdictionRouteSigner = (
   if (normalizeEntityRef(route.target.counterpartyEntityId) === target) {
     return normalizeEntityRef(route.targetSignerId) || null;
   }
-  const bookOwner = normalizeEntityRef(
-    route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId,
-  );
-  if (bookOwner !== target) return null;
-  if (bookOwner === normalizeEntityRef(route.source.counterpartyEntityId)) {
-    return normalizeEntityRef(route.sourceHubSignerId) || null;
-  }
-  if (bookOwner === normalizeEntityRef(route.target.entityId)) {
-    return normalizeEntityRef(route.targetHubSignerId) || null;
-  }
   return null;
 };
 

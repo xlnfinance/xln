@@ -29,12 +29,8 @@ const isEvidenceBearingAccountTx = (tx: AccountTx): boolean => {
   return false;
 };
 
-const isDisputeEvidenceAccountTx = (txOrType: AccountTx | string): boolean => {
-  if (typeof txOrType === 'string') {
-    return txOrType === 'cross_pull_close' || txOrType === 'swap_resolve';
-  }
-  return txOrType.type === 'swap_resolve' || isEvidenceBearingAccountTx(txOrType);
-};
+const isDisputeEvidenceAccountTx = (tx: AccountTx): boolean =>
+  tx.type === 'swap_resolve' || isEvidenceBearingAccountTx(tx);
 
 /** Frozen Accounts accept only Entity-owned finality, never peer AccountInput. */
 export const acceptsExternalAccountInput = (

@@ -268,3 +268,21 @@ test('a gossip profile from a foreign stack rejects the payment routed through i
     expect((error as MalformedEntityFrameInputError).frameTx).toBe(payment);
   }
 });
+
+test('profile decoding rejects missing topology and fees instead of inventing zero', () => {
+  const profile = buildCryptographicProfileFixture({
+    entityId: deriveSingleSignerFixtureEntityId('required-profile-fields'),
+    signingSeed: 'required-profile-fields', name: 'required-fields',
+  });
+  for (const accounts of [undefined, null, {}]) {
+    const malformed = { ...profile, accounts };
+    if (accounts === undefined) Reflect.deleteProperty(malformed, 'accounts');
+    expect(() => parseProfile(malformed)).toThrow('GOSSIP_PROFILE_ACCOUNTS_INVALID');
+  }
+  for (const baseFee of [undefined, null]) {
+    const malformed = { ...profile, metadata: { ...profile.metadata, baseFee } };
+    if (baseFee === undefined) Reflect.deleteProperty(malformed.metadata, 'baseFee');
+    expect(() => parseProfile(malformed)).toThrow('GOSSIP_PROFILE_BASE_FEE_INVALID');
+    expect(() => canonicalizeProfile(malformed)).toThrow('GOSSIP_PROFILE_BASE_FEE_INVALID');
+  }
+});

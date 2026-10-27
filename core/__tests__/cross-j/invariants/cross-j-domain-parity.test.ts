@@ -64,3 +64,14 @@ test('cross-j domain overrides preserve the TS/Rust signed route hash', () => {
     ...supplied, routeHash: baseline.routeHash,
   })).toThrow('CROSS_J_ROUTE_HASH_MISMATCH');
 });
+
+test('explicit malformed domain addresses cannot hash as absent authorization', () => {
+  const baseline = withCanonicalCrossJurisdictionRouteHash(route());
+  for (const field of ['sourceEntityProviderAddress', 'targetEntityProviderAddress', 'sourceDeltaTransformerAddress', 'targetDeltaTransformerAddress']) {
+    for (const value of ['invalid', '', null, 1]) {
+      expect(() => withCanonicalCrossJurisdictionRouteHash({
+        ...baseline, domain: { ...baseline.domain, [field]: value },
+      })).toThrow('CROSS_J_DOMAIN_ADDRESS_INVALID');
+    }
+  }
+});

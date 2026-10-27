@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import {
-  clearBookCommitmentCache,
+  invalidateBookCommitment,
   computeBookCommitmentHash,
   verifyAndWarmBookCommitment,
 } from '../../../swapbook/commitment';
@@ -78,7 +78,7 @@ test('10k-order book rehashes only the dirty order ancestry', () => {
   expect(incrementalRoot).not.toBe(initialRoot);
 
   const coldClone = coldBookProjection(book);
-  clearBookCommitmentCache(coldClone);
+  invalidateBookCommitment(coldClone);
   const rebuiltRoot = computeBookCommitmentHash(coldClone);
   expect(rebuiltRoot).toBe(incrementalRoot);
 
@@ -107,7 +107,7 @@ test('incremental root equals a cold rebuild after every add, partial fill, full
   const assertColdParity = () => {
     const incremental = computeBookCommitmentHash(book);
     const cold = coldBookProjection(book);
-    clearBookCommitmentCache(cold);
+    invalidateBookCommitment(cold);
     expect(computeBookCommitmentHash(cold)).toBe(incremental);
   };
 

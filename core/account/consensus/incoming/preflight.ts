@@ -14,7 +14,7 @@ import {
 import { accountInputProposal } from '../flush';
 import { getIncomingAccountDeadlineViolation, type AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { resolveSameHeightIncomingFrame } from './collision';
-import { buildDuplicateCommittedAckFrame, describeAccountState } from './replay';
+import { describeAccountState } from './replay';
 import type { AccountCommittedFrame, HandleAccountInputResult } from '../types';
 import { accountInputApplied, accountInputDisputeRequired, rejectAccountInput } from '../result';
 import { timePerfPhase } from '../../../support/performance/profile';
@@ -81,27 +81,16 @@ const verifyIncomingFrameHanko = async (
   return undefined;
 };
 
-const handleStaleIncomingFrame = async (
+const handleStaleIncomingFrame = (
   account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
-  replayCurrentHeight: number,
   events: string[],
   committedFrames: AccountCommittedFrame[],
-  securityContext: AccountInputSecurityContext,
-): Promise<HandleAccountInputResult | undefined> => {
+): HandleAccountInputResult | undefined => {
   if (Number(receivedFrame.height) >= Number(account.currentHeight ?? 0)) {
     return undefined;
   }
-  const duplicateAck = await buildDuplicateCommittedAckFrame(
-    account,
-    input,
-    events,
-    replayCurrentHeight,
-    receivedFrame,
-    securityContext,
-  );
-  if (duplicateAck) return duplicateAck;
   preflightLog.debug('frame.stale_ignored', {
     receivedHeight: receivedFrame.height,
     currentHeight: account.currentHeight ?? 0,
@@ -282,7 +271,6 @@ export const preflightIncomingAccountFrame = async (
   account: AccountReplica,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
-  replayCurrentHeight: number,
   events: string[],
   committedFrames: AccountCommittedFrame[],
   securityContext: AccountInputSecurityContext,
@@ -293,14 +281,12 @@ export const preflightIncomingAccountFrame = async (
     throw new Error('preflightIncomingAccountFrame called without newAccountFrame');
   }
 
-  const staleResult = await handleStaleIncomingFrame(
+  const staleResult = handleStaleIncomingFrame(
     account,
     input,
     receivedFrame,
-    replayCurrentHeight,
     events,
     committedFrames,
-    securityContext,
   );
   if (staleResult) return { kind: 'return', result: staleResult };
 
@@ -353,7 +339,7 @@ export const preflightIncomingAccountFrame = async (
     receivedFrame,
     proposerIsLeft: proposer.proposerIsLeft,
     ourEntityId: account.proofHeader.fromEntity,
-    frameJHeight: receivedFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0,
+    frameJHeight: receivedFrame.jHeight,
     rollbackPendingFrame: sameHeightResolution === true,
   };
 };

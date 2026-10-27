@@ -18,7 +18,7 @@ import type {
 import type {
   ProposalTransactionEffects,
 } from './transactions';
-import { hasLocalCertifiedDisputeProof } from '../dispute/proof-views';
+import { reuseCertifiedDisputeHanko } from '../dispute/proof-views';
 
 type DisputeHanko = NonNullable<
   Extract<AccountInput, { kind: 'ack_frame' }>['proposal']['disputeHanko']
@@ -37,22 +37,9 @@ const resolveDisputeHanko = (
       proposerIsLeft: proof.proposerIsLeft,
     };
   }
-  if (
-    hasLocalCertifiedDisputeProof(account) &&
-    account.currentDisputeProofBodyHash.toLowerCase() ===
-      proof.proof.proofBodyHash.toLowerCase() &&
-    account.currentDisputeProofProposerIsLeft === proof.proposerIsLeft &&
-    Number(account.currentDisputeProofNonce ?? 0) > Number(candidate.state.jNonce ?? 0)
-  ) {
-    return {
-      hanko: account.currentDisputeProofHanko,
-      hash: account.currentDisputeHash,
-      proofBodyHash: account.currentDisputeProofBodyHash,
-      proofNonce: account.currentDisputeProofNonce,
-      proposerIsLeft: proof.proposerIsLeft,
-    };
-  }
-  return undefined;
+  return reuseCertifiedDisputeHanko(
+    account, proof.proof.proofBodyHash, proof.proposerIsLeft, Number(candidate.state.jNonce ?? 0),
+  );
 };
 
 const buildOutboundAccountInput = (

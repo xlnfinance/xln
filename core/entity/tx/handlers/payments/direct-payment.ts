@@ -62,22 +62,6 @@ const validateEntityPayment = (
   return undefined;
 };
 
-const finishReceivedPayment = (
-  state: EntityState,
-  tx: DirectPaymentEntityTx,
-  route: string[],
-  trace: PaymentTrace,
-): DirectPaymentResult | undefined => {
-  if (route.length !== 1 || route[0] !== tx.data.targetEntityId) return undefined;
-  trace('final_destination', {
-    entity: shortId(state.entityId),
-    tokenId: tx.data.tokenId,
-    amount: tx.data.amount.toString(),
-  });
-  addMessage(state, `💰 Received payment of ${tx.data.amount} (token ${tx.data.tokenId})`);
-  return { newState: state, outputs: [] };
-};
-
 const buildNextHopPayment = (
   state: EntityState,
   tx: DirectPaymentEntityTx,
@@ -143,8 +127,6 @@ export const handleDirectPaymentEntityTx = async (
 
   const validationError = validateEntityPayment(newState, entityTx, route, []);
   if (validationError) return validationError;
-  const received = finishReceivedPayment(newState, entityTx, route, trace);
-  if (received) return received;
   const { nextHop, accountTx } = buildNextHopPayment(newState, entityTx, route);
   accountTxs.push({ accountId: nextHop, tx: accountTx });
   trace('mempool.queued', {

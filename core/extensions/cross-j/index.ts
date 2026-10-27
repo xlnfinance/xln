@@ -1,4 +1,4 @@
-import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
+import { rejectFailure, haltRuntimeFailure } from '../../protocol/errors/failure-taxonomy';
 
 import { ethers } from 'ethers';
 import { isLeftEntity } from '../../entity/id';
@@ -270,8 +270,11 @@ export const isCrossJurisdictionFillTerminal = (
 };
 
 const normalizeOptionalAddress = (value: unknown): string | undefined => {
-  const text = String(value ?? '').trim().toLowerCase();
-  return /^0x[0-9a-f]{40}$/.test(text) ? text : undefined;
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !/^0x[0-9a-f]{40}$/.test(value.trim().toLowerCase())) {
+    throw rejectFailure('CROSS_J_DOMAIN_ADDRESS_INVALID');
+  }
+  return value.trim().toLowerCase();
 };
 
 const normalizeStackRef = (value: unknown): string =>

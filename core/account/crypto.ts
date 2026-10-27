@@ -2,6 +2,7 @@
  * Real cryptographic signatures for account consensus.
  * Canonical signerId is EOA address (lowercase). Keys are loaded via registerSignerKey.
  */
+import { haltRuntimeFailure } from '../protocol/errors/failure-taxonomy';
 
 import { cryptoSignPoolEnabled, ECDSA_SIGNATURE_BYTES, signDigestsBatchOnPool } from '../protocol/crypto/crypto-pool';
 import { RecencyMemo } from '../support/collections/recency-memo';
@@ -578,7 +579,9 @@ export async function signDigestsBatch(
   );
   return digestsHex.map((_, index) => {
     const signature = signatures.subarray(index * ECDSA_SIGNATURE_BYTES, (index + 1) * ECDSA_SIGNATURE_BYTES);
-    return `0x${Buffer.from(signature.subarray(0, 64)).toString('hex')}${(signature[64] ?? 0).toString(16).padStart(2, '0')}`;
+    const recovery = signature[64];
+    if (recovery === undefined) throw haltRuntimeFailure('SIGN_POOL_SIGNATURE_TRUNCATED');
+    return `0x${Buffer.from(signature.subarray(0, 64)).toString('hex')}${recovery.toString(16).padStart(2, '0')}`;
   });
 }
 

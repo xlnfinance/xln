@@ -3,6 +3,7 @@
  * The replica shell is bounded; collection values remain structural shares.
  * Human-audit importance: 100/100 — Account handlers mutate only this view.
  */
+import { haltRuntimeFailure } from '../../protocol/errors/failure-taxonomy';
 import type {
   AccountLendingIntentKind,
   AccountReplica,
@@ -127,7 +128,12 @@ const persistent = <K extends number | string, V>(
   namespace: DraftCollectionNames,
 ): PersistentAccountStateMap<K, V> => {
   if (source instanceof PersistentAccountStateMap) return source;
-  if (source === undefined) return PersistentAccountStateMap.empty<K, V>(namespace);
+  if (source === undefined) {
+    if (namespace === 'pulls' || namespace === 'subcontracts' || namespace === 'lendingIntents' || namespace === 'rebalanceFeePolicies') {
+      return PersistentAccountStateMap.empty<K, V>(namespace);
+    }
+    throw haltRuntimeFailure('ACCOUNT_STATE_COLLECTION_MISSING', `ACCOUNT_STATE_COLLECTION_MISSING:${namespace}`);
+  }
   throw new Error(`ACCOUNT_STATE_COLLECTION_NOT_PERSISTENT:${namespace}`);
 };
 

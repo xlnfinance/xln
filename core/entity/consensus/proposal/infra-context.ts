@@ -124,7 +124,9 @@ const requestMissingProfiles = (
   const p2p = (env.infrastructure as {
     p2p?: { ensureProfiles?: (ids: string[]) => Promise<boolean> };
   } | undefined)?.p2p;
-  void p2p?.ensureProfiles?.(missing)?.catch(() => undefined);
+  void p2p?.ensureProfiles?.(missing)?.catch(error => {
+    env.error('network', 'ENTITY_INFRA_PROFILE_FETCH_FAILED', { entityId, missing, error });
+  });
 };
 
 const materializeFreshEntityInfraContext = async (

@@ -7,10 +7,11 @@
  * - `onion`:   HTLC onion layers (ciphertext, keypair, context) → plaintexts
  *
  * Callers use results only to warm memo caches; the synchronous code path
- * remains the authority, so a dead worker or failed batch costs nothing but
- * the shortcut. Bun-only: the module is imported by shared core and must not
+ * remains the authority. Unexpected worker faults reject pending jobs and
+ * poison the lane so later work cannot hide the fault. Shared core must not
  * touch node built-ins at load time.
  */
+import { haltRuntimeFailure } from '../errors/failure-taxonomy';
 import { keccak256Bytes } from './fast/fast-keccak';
 import { decryptOpaqueHtlcBytes, type OpaqueHtlcCiphertext } from '../htlc/multi-recipient';
 
@@ -156,7 +157,8 @@ const cores = (): number => (typeof navigator !== 'undefined' ? navigator.hardwa
 class WorkerLane {
   #workers: Worker[] | null | undefined;
   #nextSlot = 0;
-  readonly #pending = new Map<number, (result: JobResult['result']) => void>();
+  #failure: Error | undefined;
+  readonly #pending = new Map<number, { resolve: (result: JobResult['result']) => void; reject: (error: Error) => void }>();
   readonly #size: () => number;
 
   constructor(size: () => number) {
@@ -170,16 +172,19 @@ class WorkerLane {
     }
   }
 
-  /** A dead worker fails every in-flight job closed: callers fall back to the sync path. */
-  #retire(): void {
-    for (const worker of this.#workers ?? []) worker.terminate();
+  #retire(cause: unknown): void {
+    if (this.#failure) return;
+    this.#failure = haltRuntimeFailure('CRYPTO_POOL_WORKER_FAILED', 'CRYPTO_POOL_WORKER_FAILED', cause);
+    const workers = this.#workers;
     this.#workers = null;
     const failed = [...this.#pending.values()];
     this.#pending.clear();
-    for (const resolve of failed) resolve(new Uint8Array(0));
+    for (const { reject } of failed) reject(this.#failure);
+    for (const worker of workers ?? []) worker.terminate();
   }
 
   enabled(): boolean {
+    if (this.#failure) throw this.#failure;
     return (
       this.#workers !== null &&
       this.#size() > 0 &&
@@ -205,14 +210,14 @@ class WorkerLane {
       } as WorkerOptions);
       worker.onmessage = event => {
         const { id, result } = event.data as JobResult;
-        const resolve = this.#pending.get(id);
-        if (!resolve) return;
+        const pending = this.#pending.get(id);
+        if (!pending) return;
         this.#pending.delete(id);
         if (this.#pending.size === 0) this.#setReferenced(false);
-        resolve(result);
+        pending.resolve(result);
       };
-      worker.onerror = () => this.#retire();
-      worker.addEventListener('close', () => this.#retire());
+      worker.onerror = event => this.#retire(event.error ?? event.message);
+      worker.addEventListener('close', () => this.#retire(new Error('CRYPTO_POOL_WORKER_CLOSED')));
       this.#workers.push(worker);
     }
     // Growing an already-busy lane must keep its new workers alive too.
@@ -230,7 +235,7 @@ class WorkerLane {
       // Replay can await crypto before the daemon opens HTTP. Pending Promises
       // do not keep Bun alive: retain the lane until its last job settles.
       if (this.#pending.size === 0) this.#setReferenced(true);
-      this.#pending.set(job.id, resolve);
+      this.#pending.set(job.id, { resolve, reject });
       try {
         worker.postMessage(job, transfer ?? []);
       } catch (error) {

@@ -391,7 +391,7 @@ export const buildCrossMarketOfferFromBookOrder = (
     crossJurisdictionBookAdmissionKeyFor(accountId, offerId),
   );
   if (account && offer?.crossJurisdiction) {
-    const entityRefs = resolveStoredOfferEntityRefs(account.state, offer);
+    const entityRefs = resolveStoredOfferEntityRefs(account.state);
     // The Account offer carries the route as opened; fill progress is
     // Hub-internal and lives on the admitted route. The book row must be
     // validated against the progressed remainder, never the frozen opening.

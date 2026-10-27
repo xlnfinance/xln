@@ -9,6 +9,8 @@ import {
   type PersistentRadixNodeChanges,
 } from './persistent-radix-value-map';
 
+import { compareBytes } from './persistent-radix-value-ops';
+
 const RADIX_OVERLAY_VIEW = Symbol('RADIX_OVERLAY_VIEW');
 const RADIX_OVERLAY_OWNER = Symbol('RADIX_OVERLAY_OWNER');
 
@@ -49,15 +51,6 @@ export type PreparedRadixOverlay<K, V> = Readonly<{
   values: PersistentRadixValueMap<K, V>;
   readonly nodeChanges: PersistentRadixNodeChanges<K, V>;
 }>;
-
-const compareBytes = (left: Uint8Array, right: Uint8Array): number => {
-  const limit = Math.min(left.length, right.length);
-  for (let index = 0; index < limit; index += 1) {
-    const difference = (left[index] ?? 0) - (right[index] ?? 0);
-    if (difference !== 0) return difference;
-  }
-  return left.length - right.length;
-};
 
 const startsWithBytes = (value: Uint8Array, prefix: Uint8Array): boolean => {
   if (prefix.length > value.length) return false;
@@ -108,10 +101,6 @@ class RadixOverlayTransaction<K, V> implements RadixOverlayOwner<K, V> {
     };
     if (typeof key === 'number' || typeof key === 'string') this.#describedKeys.set(key, described);
     return described;
-  }
-
-  prepareValue(value: V): V {
-    return this.#base.prepareValue(value);
   }
 
   sortedMutations(prefix?: Uint8Array): readonly OverlayMutation<K, V>[] {

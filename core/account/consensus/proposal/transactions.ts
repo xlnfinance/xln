@@ -28,9 +28,7 @@ import {
   type AccountTxRejection,
 } from '../../tx/apply-types';
 import { accountTxRejectionMessage, assertNever, isLocallySentHtlcFailure } from '../../tx/apply-result';
-import { canonicalAccountTxForFrameHash } from '../frame/hash';
-import { encodeAccountStateValue } from '../../commitment/account-state-value';
-import { createHash } from '../../../support/platform-crypto';
+import { accountTxFrameDigest } from '../frame/hash';
 
 const accountLog = createStructuredLogger('account');
 
@@ -260,10 +258,6 @@ const classifyFailedTransaction = (
   return 'remove';
 };
 
-const proposalTxDigest = (tx: AccountTx): string => `0x${createHash('sha256')
-  .update(encodeAccountStateValue(canonicalAccountTxForFrameHash(tx)))
-  .digest('hex')}`;
-
 const validateOptimisticBatch = async (
   context: ProposalTransactionContext,
   jClaimSession: ReturnType<typeof createAccountJClaimSession>,
@@ -344,7 +338,7 @@ export const validateProposalTransactions = async (
       else txsToRemove.push(tx);
       droppedTransactions.push({
         index,
-        txDigest: proposalTxDigest(tx),
+        txDigest: accountTxFrameDigest(tx),
         code: applied.result.rejection.code,
         message: applied.result.rejection.message,
         disposition: disposition === 'deferred' ? 'deferred' : 'removed',

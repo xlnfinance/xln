@@ -63,13 +63,9 @@ export const invalidateBookCommitment = (book: BookState): void => {
   delete book.commitmentHash;
 };
 
-export const clearBookCommitmentCache = (book: BookState): void => {
-  delete book.commitmentHash;
-};
-
 export const verifyAndWarmBookCommitment = (book: BookState, code = 'ORDERBOOK_COMMITMENT'): string => {
   const claimedRoot = book.commitmentHash;
-  clearBookCommitmentCache(book);
+  invalidateBookCommitment(book);
   const rebuiltRoot = computeBookCommitmentHash(book);
   if (claimedRoot !== undefined && claimedRoot !== rebuiltRoot) {
     throw new Error(`${code}_MISMATCH:claimed=${claimedRoot}:rebuilt=${rebuiltRoot}`);

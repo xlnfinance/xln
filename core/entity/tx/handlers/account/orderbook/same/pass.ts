@@ -124,7 +124,7 @@ export const buildLiveSameOfferMeta = (
   const account = pass.hubState.accounts.get(accountId);
   const liveOffer = account?.state.swapOffers?.get(offerId);
   if (!account || !liveOffer || liveOffer.crossJurisdiction) return null;
-  const entityRefs = resolveStoredOfferEntityRefs(account.state, liveOffer);
+  const entityRefs = resolveStoredOfferEntityRefs(account.state);
   return normalizeSwapOfferForOrderbook(
     {
       offerId,

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 
+import { hmacSha256 } from '../../protocol/crypto/fast/fast-sha256';
 import { recoverDigestSignerAddress } from '../../account/crypto';
 
 const ethersRecover = (digest: string, signature: string): string | null => {
@@ -49,4 +50,10 @@ describe('recoverDigestSignerAddress', () => {
     }
     expect(recoverDigestSignerAddress('0x12', ethers.concat([signed.r, signed.s, '0x00']))).toBeNull();
   });
+});
+
+// RFC 4231 case 1: backend selection must preserve the cryptographic primitive.
+test('HMAC-SHA256 matches the independent known-answer vector', () => {
+  expect(ethers.hexlify(hmacSha256(new Uint8Array(20).fill(0x0b), new TextEncoder().encode('Hi There'))))
+    .toBe('0xb0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7');
 });

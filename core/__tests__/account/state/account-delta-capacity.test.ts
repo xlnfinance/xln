@@ -112,3 +112,16 @@ test('Account frame decoder rejects retired inline financial rows before replay'
   expect(() => decodeAccountFrame(frame, 'peer-frame'))
     .toThrow('peer-frame.fields:missing=none:extra=byLeft,deltas');
 });
+
+test('a draft rejects missing required collections and preserves optional absence', () => {
+  for (const namespace of ['deltas', 'locks', 'swapOffers', 'requestedRebalance', 'requestedRebalanceFeeState']) {
+    const account = makeAccount('alice', 'hub');
+    Reflect.deleteProperty(account.state, namespace);
+    expect(() => beginAccountStateDraft(account)).toThrow(`ACCOUNT_STATE_COLLECTION_MISSING:${namespace}`);
+  }
+  const account = makeAccount('alice', 'hub');
+  for (const namespace of ['pulls', 'subcontracts', 'lendingIntents', 'rebalanceFeePolicies']) {
+    Reflect.deleteProperty(account.state, namespace);
+  }
+  expect(() => beginAccountStateDraft(account)).not.toThrow();
+});

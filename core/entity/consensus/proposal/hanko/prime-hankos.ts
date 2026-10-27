@@ -40,5 +40,5 @@ export const primeProposalHankos = (
       items.push({ digest: disputeHanko.hash, hanko: disputeHanko.hanko });
   }
   if (items.length === 0) return null;
-  return primeRecoveredHankoSignatures(items).catch(() => 0);
+  return primeRecoveredHankoSignatures(items);
 };

@@ -243,8 +243,6 @@ export class PersistentAccountStateMap<K extends AccountStateMapKey, V>
 
   rootHash(): string { return this.#values.rootHash(); }
 
-  get hash(): string { return this.rootHash(); }
-
   /** Expensive independent oracle reserved for recovery checks and diagnostics. */
   coldRootHash(): string {
     return PersistentRadixValueMap.fromMap(

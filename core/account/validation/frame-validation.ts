@@ -26,12 +26,6 @@ function decodeFrameHash(
   field: 'prevFrameHash',
   height: number,
   context: string,
-): FrameHash | 'genesis' | '';
-function decodeFrameHash(
-  value: unknown,
-  field: 'prevFrameHash',
-  height: number,
-  context: string,
 ): FrameHash | 'genesis' | '' {
   if (typeof value !== 'string') {
     throw new FinancialDataCorruptionError(`${context}.${field} must be a string`);

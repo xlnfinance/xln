@@ -151,15 +151,18 @@ pub fn parse_stack(value: &str) -> Result<(u64, String), String> {
     Ok((chain, address))
 }
 
-fn optional_address(value: Option<&str>) -> String {
-    value
-        .map(normalized)
-        .filter(|value| {
-            value.len() == 42
-                && value.starts_with("0x")
-                && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
-        })
-        .unwrap_or_default()
+fn optional_address(value: Option<&CanonicalValue>) -> Result<Option<String>, String> {
+    let Some(value) = value else { return Ok(None) };
+    if let CanonicalValue::String(value) = value {
+        let address = normalized(value);
+        if address.len() == 42
+            && address.starts_with("0x")
+            && address[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Ok(Some(address));
+        }
+    }
+    Err("CROSS_J_DOMAIN_ADDRESS_INVALID".into())
 }
 
 pub fn canonical_source_is_base(route: &CanonicalValue) -> Result<bool, String> {
@@ -365,8 +368,9 @@ pub fn canonical_route(route: &CanonicalValue) -> Result<CanonicalValue, String>
         "sourceDeltaTransformerAddress",
         "targetDeltaTransformerAddress",
     ] {
-        let address = optional_address(supplied_domain.and_then(|value| text(value, name)));
-        if !address.is_empty() {
+        if let Some(address) =
+            optional_address(supplied_domain.and_then(|value| field(value, name)))?
+        {
             domain.push((name.into(), string(address)));
         }
     }
