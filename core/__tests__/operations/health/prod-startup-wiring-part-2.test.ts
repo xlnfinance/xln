@@ -1720,7 +1720,6 @@ describe('production startup wiring', () => {
       'core/orchestrator/hub/node/hub-mesh-plan.ts',
       'core/orchestrator/market-maker/node/mm-node-core.ts',
       'core/runtime/swap-cmd/swap-command-plan.ts',
-      'frontend/src/lib/components/Entity/onboarding/onboarding-runtime-input.ts',
       'frontend/src/lib/components/Entity/onboarding/hub-discovery-profile.ts',
       'frontend/src/lib/components/Entity/swap-panel-core.ts',
       'frontend/src/lib/view/panels/ArchitectPanel.svelte',

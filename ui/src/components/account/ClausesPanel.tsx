@@ -43,16 +43,6 @@ const TEMPLATES: readonly ClauseTemplate[] = [
 	},
 ];
 
-function computeCreate2Address(saltHex: string, initcodeHashHex: string): string {
-	try {
-		const salt = /^0x[0-9a-fA-F]{64}$/.test(saltHex) ? saltHex : DEFAULT_SALT;
-		const hash = /^0x[0-9a-fA-F]{64}$/.test(initcodeHashHex) ? initcodeHashHex : TEMPLATES[0]!.initcodeHash;
-		return ethers.getCreate2Address(DETERMINISTIC_DEPLOYER, salt, hash).toLowerCase();
-	} catch {
-		return '0x0000000000000000000000000000000000000000';
-	}
-}
-
 export function ClausesPanel({ account }: { account: AccountView }) {
 	const [templateId, setTemplateId] = useState<string>(TEMPLATES[0]!.id);
 	const [salt, setSalt] = useState(DEFAULT_SALT);
@@ -63,26 +53,17 @@ export function ClausesPanel({ account }: { account: AccountView }) {
 	const token = account.tokens[0];
 	const meta = getTokenMeta(token?.tokenId ?? 1);
 
-	const create2Address = useMemo(
-		() => computeCreate2Address(salt.trim(), template.initcodeHash),
-		[salt, template.initcodeHash],
-	);
-
-	const leftAllowance = useMemo(() => {
-		try {
-			return leftCapText.trim() ? parseAmount(leftCapText, meta.decimals) : 0n;
-		} catch {
-			return 0n;
-		}
-	}, [leftCapText, meta.decimals]);
-
-	const rightAllowance = useMemo(() => {
-		try {
-			return rightCapText.trim() ? parseAmount(rightCapText, meta.decimals) : 0n;
-		} catch {
-			return 0n;
-		}
-	}, [rightCapText, meta.decimals]);
+	const preview = useMemo(() => {
+    try {
+      return { value: {
+        address: ethers.getCreate2Address(DETERMINISTIC_DEPLOYER, salt.trim(), template.initcodeHash).toLowerCase(),
+        left: parseAmount(leftCapText, meta.decimals),
+        right: parseAmount(rightCapText, meta.decimals),
+      }, error: null };
+    } catch (error) {
+      return { value: null, error: error instanceof Error ? error.message : String(error) };
+    }
+  }, [salt, template.initcodeHash, leftCapText, rightCapText, meta.decimals]);
 
 	const committedClauses = useMemo(() => {
 		const map = account.doc?.state?.subcontracts;
@@ -180,24 +161,24 @@ export function ClausesPanel({ account }: { account: AccountView }) {
 				/>
 			</div>
 
-			<div className="card tight" style={{ marginBottom: 12 }} data-testid="clause-preview">
+			{preview.value ? <div className="card tight" style={{ marginBottom: 12 }} data-testid="clause-preview">
 				<div className="kv">
 					<span className="k">Counterfactual CREATE2 address</span>
 					<span className="v mono" data-testid="clause-create2-address">
-						{shortId(create2Address, 10, 8)}
+						{shortId(preview.value.address, 10, 8)}
 					</span>
 				</div>
 				<div className="kv">
 					<span className="k">Clamped max shift (Left / Right)</span>
 					<span className="v num">
-						+{formatMoney(leftAllowance, meta.decimals)} / −{formatMoney(rightAllowance, meta.decimals)} {meta.symbol}
+						+{formatMoney(preview.value.left, meta.decimals)} / −{formatMoney(preview.value.right, meta.decimals)} {meta.symbol}
 					</span>
 				</div>
 				<div className="kv">
 					<span className="k">Happy-path on-chain gas</span>
 					<span className="v num st-settled">0 gas (off-chain settlement)</span>
 				</div>
-			</div>
+			</div> : <p role="alert">{preview.error}</p>}
 		</div>
 	);
 }

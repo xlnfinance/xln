@@ -46,12 +46,7 @@ const collectWatchedEntities = (runtime: Runtime, env: RuntimeReplica): LastReso
     const jReplica = findJReplicaByName(env, jurisdictionName);
     if (!jReplica) continue;
 
-    let depositoryAddress = '';
-    try {
-      depositoryAddress = getJReplicaContractAddress(jReplica, 'depository');
-    } catch {
-      continue;
-    }
+    const depositoryAddress = getJReplicaContractAddress(jReplica, 'depository');
     const chainId = Number(jReplica.chainId ?? 0);
     if (!Number.isFinite(chainId) || chainId <= 0) continue;
 

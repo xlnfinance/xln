@@ -793,7 +793,7 @@ test('xlnStore boot diagnostics use persistent error log instead of raw console'
   const refreshSource = source.slice(refreshStart, createAdapterStart);
   expect(initializeSource).toContain("errorLog.log(errorMessage, 'XLN Initialization', err)");
   expect(initializeSource).toContain("'Financial restore failure; refusing automatic local data reset'");
-  expect(initializeSource).toContain("'Embedded runtime adapter failed to connect; local env remains usable'");
+  expect(initializeSource).toContain("'Embedded runtime adapter failed to connect'");
   expect(refreshSource).toContain('Remote entity summary not found: ${entityId}');
   expect(refreshSource).not.toContain('resetting to default entity');
   expect(`${initializeSource}\n${refreshSource}`).not.toContain('console.warn');

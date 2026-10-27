@@ -60,16 +60,22 @@
     return (Number(val) / 1e18).toLocaleString(undefined, { maximumFractionDigits: 0 });
   }
 
-  function parseBigInt(str: string): bigint {
-    const num = parseFloat(str.replace(/,/g, '')) || 0;
-    return BigInt(Math.round(num * 1e18));
+  let inputError = $state('');
+  function parseBigInt(str: string, previous: bigint): bigint {
+    const valid = /^-?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,18})?$/.test(str.trim());
+    const match = valid ? /^(-?)(\d+)(?:\.(\d{1,18}))?$/.exec(str.trim().replace(/,/g, '')) : null;
+    if (!match) { inputError = 'Enter a decimal amount with at most 18 decimal places'; return previous; }
+    inputError = '';
+    return (match[1] ? -1n : 1n) * (BigInt(match[2]!) * 10n ** 18n + BigInt((match[3] || '').padEnd(18, '0')));
   }
+
 </script>
 
 <div class="modal-backdrop">
   <div class="modal">
     <div class="modal-header">
       <h2>deriveDelta Visualizer</h2>
+      {#if inputError}<p role="alert">{inputError}</p>{/if}
       <button class="close-btn" onclick={onClose}>×</button>
     </div>
 
@@ -109,23 +115,23 @@
           <h3>Raw Delta (Canonical)</h3>
           <label>
             <span>collateral</span>
-            <input type="text" value={formatBigInt(collateral)} oninput={(e) => collateral = parseBigInt(e.currentTarget.value)} />
+            <input type="text" value={formatBigInt(collateral)} oninput={(e) => collateral = parseBigInt(e.currentTarget.value, collateral)} />
           </label>
           <label>
             <span>ondelta</span>
-            <input type="text" value={formatBigInt(ondelta)} oninput={(e) => ondelta = parseBigInt(e.currentTarget.value)} />
+            <input type="text" value={formatBigInt(ondelta)} oninput={(e) => ondelta = parseBigInt(e.currentTarget.value, ondelta)} />
           </label>
           <label>
             <span>offdelta</span>
-            <input type="text" value={formatBigInt(offdelta)} oninput={(e) => offdelta = parseBigInt(e.currentTarget.value)} />
+            <input type="text" value={formatBigInt(offdelta)} oninput={(e) => offdelta = parseBigInt(e.currentTarget.value, offdelta)} />
           </label>
           <label>
             <span>leftCreditLimit</span>
-            <input type="text" value={formatBigInt(leftCreditLimit)} oninput={(e) => leftCreditLimit = parseBigInt(e.currentTarget.value)} />
+            <input type="text" value={formatBigInt(leftCreditLimit)} oninput={(e) => leftCreditLimit = parseBigInt(e.currentTarget.value, leftCreditLimit)} />
           </label>
           <label>
             <span>rightCreditLimit</span>
-            <input type="text" value={formatBigInt(rightCreditLimit)} oninput={(e) => rightCreditLimit = parseBigInt(e.currentTarget.value)} />
+            <input type="text" value={formatBigInt(rightCreditLimit)} oninput={(e) => rightCreditLimit = parseBigInt(e.currentTarget.value, rightCreditLimit)} />
           </label>
         </div>
 

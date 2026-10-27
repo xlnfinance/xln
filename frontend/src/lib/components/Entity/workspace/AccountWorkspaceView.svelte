@@ -371,8 +371,6 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
       entityId={replica?.state?.entityId || tab.entityId}
       {replica}
       env={activeEnv}
-      isLive={activeIsLive}
-      historyOnly={true}
       {profiles}
     />
 

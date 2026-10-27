@@ -86,7 +86,12 @@ export function ScanSheet({ onDecode, onClose }: { onDecode: (value: string) => 
 						}
 						loop();
 					})
-					.catch(() => loop());
+					.catch(error => {
+                        if (stopped) return;
+                        stopped = true;
+                        stream?.getTracks().forEach(track => track.stop());
+                        setError(error instanceof Error ? error.message : String(error));
+                    });
 			});
 		};
 

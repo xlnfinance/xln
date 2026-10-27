@@ -21,7 +21,6 @@
     type RuntimeRecoveryDiscoveryFailure,
   } from '#lib/stores/vault/vaultStore.ts';
   import type { VaultUnlockDurationMs } from '#lib/security/vaultProtection.ts';
-  import { deriveRequestSignal, vaultUiOperations } from '#lib/stores/vault/vaultUiStore.ts';
   import { writeRuntimeRecoveryDiscoveryStatus } from '#lib/utils/recovery/recoveryDiscoveryStatus.ts';
   import { buildRemoteRuntimeRecoveryPeerSources } from '#lib/utils/onboarding/remoteRuntimeRecovery.ts';
   import {
@@ -226,13 +225,9 @@
 
   // Device memory detection (navigator.deviceMemory gives GB, default 8GB if unavailable)
   // Safari/iOS does not expose deviceMemory reliably and has much tighter WebContent limits.
-  let deviceMemoryGB = typeof navigator !== 'undefined'
+  const deviceMemoryGB = typeof navigator !== 'undefined'
     ? ((navigator as NavigatorWithDeviceMemory).deviceMemory ?? (isIOSFamilyWebKit ? 2 : 8))
     : 8;
-
-  // POWER USER OVERRIDE: Uncomment to set actual RAM (bypasses browser 8GB cap)
-  // For M3 Ultra 512GB or similar high-RAM machines
-  // deviceMemoryGB = 512;
 
   // Allow user to configure beyond hardwareConcurrency (they'll find sweet spot)
   const hardwareCores = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4;
@@ -380,12 +375,6 @@
     }
   }
 
-  let lastDeriveRequest = 0;
-  $: if ($deriveRequestSignal !== lastDeriveRequest) {
-    lastDeriveRequest = $deriveRequestSignal;
-    reset();
-  }
-
   $: savedVaults = $allRuntimes;
 
   $: selectedRecoveryCandidate = recoveryCandidates.find((candidate) => candidate.id === selectedRecoveryCandidateId) || recoveryCandidates[0] || null;
@@ -464,7 +453,7 @@
       if (runToken !== recoveryRunToken) return false;
       recoveryErrors = [err instanceof Error ? err.message : String(err)];
       recoveryFailures = [];
-      return true;
+      return false;
     } finally {
       if (runToken === recoveryRunToken) recoveryChecking = false;
     }
@@ -556,7 +545,6 @@
   function finishWalletEntry(runtimeId: string): void {
     passwordSetupRuntimeId = null;
     dispatch('walletReady', { runtimeId });
-    vaultUiOperations.hideVault();
     if (!embedded) {
       appStateOperations.setViewMode('home');
     }
@@ -764,7 +752,6 @@
   function closeWalletEntry(): void {
     if (creatingRuntime) return;
     reset();
-    vaultUiOperations.hideVault();
   }
 
   function beginRecoveryRehearsal(mode: RecoveryRehearsalMode, address: string): void {
@@ -1109,7 +1096,6 @@
     if (!completedEntityId) throw new Error('BRAINVAULT_NODE_ENTITY_ID_MISSING');
     dispatch('nodeReadyComplete', { entityId: completedEntityId });
     clearSensitiveWalletMaterial();
-    vaultUiOperations.hideVault();
     if (!embedded) {
       appStateOperations.setViewMode('home');
     }

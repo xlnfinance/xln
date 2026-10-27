@@ -5,6 +5,7 @@
 -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
+  import { getKnownTokenIds, getTokenInfo } from '@xln/core/account/utils';
 
   export let value: number = 1;
   export let disabled: boolean = false;
@@ -13,16 +14,14 @@
 
   const dispatch = createEventDispatcher();
 
-  // Token definitions
-  const tokens = [
-    { id: 2, symbol: 'WETH', name: 'Wrapped Ether', color: '#627eea', icon: 'E' },
-    { id: 3, symbol: 'USDT', name: 'Tether', color: '#26a17b', icon: '$' },
-    { id: 1, symbol: 'USDC', name: 'USD Coin', color: '#2775ca', icon: '$' },
-  ];
+  const tokens = getKnownTokenIds().map(id => {
+    const meta = getTokenInfo(id);
+    return { id, ...meta, icon: meta.symbol === 'USDC' || meta.symbol === 'USDT' ? '$' : meta.symbol[0] };
+  });
 
   let showDropdown = false;
 
-  $: selectedToken = tokens.find(t => t.id === value) ?? tokens[0]!;
+  $: selectedToken = tokens.find(t => t.id === value);
   $: tokenLabel = label || 'Token';
 
   function selectToken(id: number) {
@@ -55,10 +54,12 @@
     on:blur={handleBlur}
     {disabled}
   >
+    {#if selectedToken}
     <span class="token-icon" style="background: {selectedToken.color}">
       {selectedToken.icon}
     </span>
     <span class="token-symbol">{selectedToken.symbol}</span>
+    {:else}<span role="alert">Unknown token #{value}</span>{/if}
     <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="none">
       <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
     </svg>

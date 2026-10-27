@@ -134,7 +134,7 @@
       </article>
       <article>
         <span>watchtowers</span>
-        <strong>{health.watchtowerCount || 'n/a'}</strong>
+        <strong>{health.watchtowerCount}</strong>
       </article>
       <article>
         <span>disk used</span>

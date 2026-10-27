@@ -1,3 +1,4 @@
+import { requireBigInt } from '#lib/utils/boundary/index.ts';
 import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 import type { AccountFrame, AccountState, AccountTx } from '@xln/core/api/public/runtime-module';
 import type { FrontendXlnFunctions } from '#lib/stores/xlnStore.ts';
@@ -179,14 +180,7 @@ function activityTokenAmount(
   options: BuildEntityActivityRowsOptions,
 ): string {
   const tokenId = Number(tokenIdRaw || 0);
-  const amount = (() => {
-    if (typeof amountRaw === 'bigint') return amountRaw;
-    try {
-      return BigInt(String(amountRaw ?? 0));
-    } catch {
-      return 0n;
-    }
-  })();
+  const amount = requireBigInt(amountRaw, 'ACTIVITY_AMOUNT_INVALID');
   if (tokenId > 0 && options.activeXlnFunctions?.formatTokenAmount) {
     return options.activeXlnFunctions.formatTokenAmount(tokenId, amount);
   }

@@ -127,6 +127,12 @@ const clock = (value: unknown, minimum: number): number => {
   return value;
 };
 
+const interest = (value: unknown): number => {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value))
+    throw new Error('LENDING_INTEREST_INVALID');
+  return normalizeInterestBps(value);
+};
+
 const term = normalizeLendingTerm;
 
 export async function fetchLendingState(input: {
@@ -195,7 +201,7 @@ export function decodeLendingState(
         pool['termId'] === 'demand' && (pool['status'] === 'open' || pool['status'] === 'queued')
           ? clock(pool['rateExpiresAt'], 1)
           : null,
-      interestBps: Number(pool['interestBps'] || 0),
+      interestBps: interest(pool['interestBps']),
       termId: term(pool['termId']),
       status: String(pool['status'] || ''),
       updatedAt: Number(pool['updatedAt'] || 0),
@@ -211,7 +217,7 @@ export function decodeLendingState(
       interestRemainder: money(loan['interestRemainder'], 'loan.interestRemainder'),
       repaymentAmount: money(loan['repaymentAmount'], 'loan.repaymentAmount'),
       repaidAmount: money(loan['repaidAmount'], 'loan.repaidAmount'),
-      interestBps: Number(loan['interestBps'] || 0),
+      interestBps: interest(loan['interestBps']),
       termId: term(loan['termId']),
       dueAt: clock(loan['dueAt'], 0),
       openedAt: clock(loan['openedAt'], 0),

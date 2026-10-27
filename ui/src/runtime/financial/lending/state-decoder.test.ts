@@ -84,3 +84,14 @@ test('all current position money remains exact; missing or negative fields canno
     'LENDING_RECORD_INVALID:totals',
   );
 });
+
+
+test('committed savings and loan rates require explicit integral basis points, including explicit zero', () => {
+  for (const interestBps of [undefined, null, '', '100', -1, 0.5, 10001, NaN]) {
+    expect(() => decodeLendingState({ ...response(), savings: [{ ...pool, interestBps }] }, { hubEntityId })).toThrow();
+    expect(() => decodeLendingState({ ...response(), loans: [{ ...loan, interestBps }] }, { hubEntityId })).toThrow();
+  }
+  const decoded = decodeLendingState({ ...response(), savings: [{ ...pool, interestBps: 0 }], loans: [{ ...loan, interestBps: 0 }] }, { hubEntityId });
+  expect(decoded.savings[0]?.interestBps).toBe(0);
+  expect(decoded.loans[0]?.interestBps).toBe(0);
+});

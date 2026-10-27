@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { type Writable, type Readable } from 'svelte/store';
-  import type { RuntimeReplica, EnvSnapshot, JReplica, RuntimeAdapterViewFrame, XLNModule } from '@xln/core/api/public/runtime-module';
+  import type { RuntimeReplica, EnvSnapshot, RuntimeAdapterViewFrame, XLNModule } from '@xln/core/api/public/runtime-module';
   import type { JAdapter } from '@xln/core/jurisdiction/adapter';
   import { DISPLAY, TIME_MACHINE } from '@xln/core/config/constants';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
@@ -71,6 +71,7 @@
   // BrowserVM time-travel: restore EVM state when timeIndex changes
   let lastTimeTravelIndex = -1;
   let timeTravelNonce = 0;
+  let timeTravelError = '';
   let cachedXLN: XLNModule | null = null;
 
   type BrowserVMHandle = NonNullable<ReturnType<JAdapter['getBrowserVM']>>;
@@ -88,40 +89,17 @@
     const targetIndex = $timeIndex < 0 ? $history.length - 1 : Math.max(0, Math.min($timeIndex, $history.length - 1));
     const frame = $history[targetIndex];
     if (frame) {
-      const jReplicas = Array.from(frame.state.jReplicas.values()) as JReplica[];
-      const stateRoot = jReplicas[0]?.stateRoot;
       const browserVMState = frame.browserVMState;
-      const hasBrowserVMState = !!browserVMState &&
-        typeof browserVMState.stateRoot === 'string' &&
-        Array.isArray(browserVMState.trieData);
       const nonce = ++timeTravelNonce;
-
-      (async () => {
+      timeTravelError = '';
+      void (async () => {
         const browserVM = await getBrowserVMFromEnv($env);
-        if (nonce !== timeTravelNonce) return;
-
-        if (hasBrowserVMState && browserVM?.restoreState) {
-          try {
-            await browserVM.restoreState(browserVMState);
-            if (nonce !== timeTravelNonce) return;
-          } catch (e: unknown) {
-            console.warn('[TimeMachine] restoreState failed:', e);
-            if (stateRoot && stateRoot.length === 32 && browserVM?.timeTravel) {
-              browserVM.timeTravel(new Uint8Array(stateRoot))
-                .then(() => {
-                  if (nonce !== timeTravelNonce) return;
-                })
-                .catch((err: unknown) => console.warn('[TimeMachine] timeTravel failed:', err));
-            }
-          }
-        } else if (stateRoot && stateRoot.length === 32 && browserVM?.timeTravel) {
-          browserVM.timeTravel(new Uint8Array(stateRoot))
-            .then(() => {
-              if (nonce !== timeTravelNonce) return;
-            })
-            .catch((e: unknown) => console.warn('[TimeMachine] timeTravel failed:', e));
-        }
-      })();
+        if (nonce !== timeTravelNonce || !browserVM) return;
+        if (!browserVMState || !browserVM.restoreState) throw new Error('HISTORICAL_BROWSERVM_SNAPSHOT_UNAVAILABLE');
+        await browserVM.restoreState(browserVMState);
+      })().catch(error => {
+        if (nonce === timeTravelNonce) timeTravelError = error instanceof Error ? error.message : String(error);
+      });
     }
     lastTimeTravelIndex = $timeIndex;
   }
@@ -234,6 +212,21 @@
   }
 
   // Playback - simplified with guard against multiple intervals
+  function playbackTick() {
+        const end = sliceEnd ?? maxTimeIndex;
+        if (selectedFrameIndex >= end) {
+          if (loopMode === 'all' || loopMode === 'slice') {
+            localTimeOperations.goToTimeIndex(sliceStart ?? 0);
+          } else {
+            playing = false;
+            if (playbackInterval) clearInterval(playbackInterval);
+            playbackInterval = null;
+          }
+        } else {
+          localTimeOperations.stepForward();
+        }
+  }
+
   function togglePlay() {
     playing = !playing;
 
@@ -251,20 +244,7 @@
         localTimeOperations.goToHistoryStart();
       }
 
-      playbackInterval = window.setInterval(() => {
-        const end = sliceEnd ?? maxTimeIndex;
-        if (selectedFrameIndex >= end) {
-          if (loopMode === 'all' || loopMode === 'slice') {
-            localTimeOperations.goToTimeIndex(sliceStart ?? 0);
-          } else {
-            playing = false;
-            if (playbackInterval) clearInterval(playbackInterval);
-            playbackInterval = null;
-          }
-        } else {
-          localTimeOperations.stepForward();
-        }
-      }, 1000 / speed);
+      playbackInterval = window.setInterval(playbackTick, 1000 / speed);
     } else {
       // Stop: clear interval
       if (playbackInterval) {
@@ -280,20 +260,7 @@
     // Restart interval with new speed if playing
     if (playing && playbackInterval) {
       clearInterval(playbackInterval);
-      playbackInterval = window.setInterval(() => {
-        const end = sliceEnd ?? maxTimeIndex;
-        if ($timeIndex >= end) {
-          if (loopMode === 'all' || loopMode === 'slice') {
-            localTimeOperations.goToTimeIndex(sliceStart ?? 0);
-          } else {
-            playing = false;
-            if (playbackInterval) clearInterval(playbackInterval);
-            playbackInterval = null;
-          }
-        } else {
-          localTimeOperations.stepForward();
-        }
-      }, 1000 / speed);
+      playbackInterval = window.setInterval(playbackTick, 1000 / speed);
     }
   }
 
@@ -666,6 +633,7 @@
     });
   }
 </script>
+{#if timeTravelError}<p role="alert">Historical selection failed: {timeTravelError}</p>{/if}
 
 <!--
   In the dock, merged scope scrubs through the NetworkMachine: it reads frames from each

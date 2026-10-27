@@ -13,7 +13,7 @@
   onDestroy(() => solvencyStore.destroy());
 
   let solvencyData = $derived.by(() =>
-    $solvencyStore.data ?? buildSolvencyProjection($runtimeFrameEnv));
+    $solvencyStore.error ? null : $solvencyStore.data ?? buildSolvencyProjection($runtimeFrameEnv));
   let solvencyError = $derived($solvencyStore.error);
 
   const formatRawAmount = (amount: bigint): string => amount.toLocaleString('en-US');
@@ -37,6 +37,7 @@
     </div>
   </div>
 
+  {#if !$solvencyStore.data && solvencyData}<p class="text-tiny">Frame-derived projection</p>{/if}
   {#if solvencyData?.assets.length}
     <div class="asset-list">
       {#each solvencyData.assets as asset (`${asset.stackId}:${asset.tokenId}`)}

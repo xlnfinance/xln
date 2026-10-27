@@ -318,15 +318,6 @@ export function graphAccountMempoolCount(account: GraphAccountViewLike | null | 
   return Array.isArray(account?.mempool) ? account.mempool.length : 0;
 }
 
-export function createGraphRippleMesh(position: THREE.Vector3): THREE.Mesh {
-  const mesh = new THREE.Mesh(
-    new THREE.RingGeometry(0.1, 0.2, 32),
-    new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.8, side: THREE.DoubleSide }),
-  );
-  mesh.position.copy(position);
-  mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-  return mesh;
-}
 
 type GraphConnectionOptions = {
   graphWorld: THREE.Group;
@@ -347,14 +338,15 @@ type GraphConnectionOptions = {
   getEntitySize(entityId: string, tokenId: number): number;
 };
 
+function findGraphReplica(replicas: GraphConnectionOptions['replicas'], entityId: string) {
+  const key = [...replicas.keys()].find(candidate => candidate.startsWith(`${entityId}:`));
+  return key ? replicas.get(key) : null;
+}
+
 export function buildGraphConnection(options: GraphConnectionOptions): GraphConnectionData {
   const geometry = new THREE.BufferGeometry().setFromPoints([options.fromEntity.position, options.toEntity.position]);
-  const findReplica = (entityId: string) => {
-    const key = [...options.replicas.keys()].find(candidate => candidate.startsWith(`${entityId}:`));
-    return key ? options.replicas.get(key) : null;
-  };
-  const fromReplica = findReplica(options.fromId);
-  const toReplica = findReplica(options.toId);
+  const fromReplica = findGraphReplica(options.replicas, options.fromId);
+  const toReplica = findGraphReplica(options.replicas, options.toId);
   const isFedConnection = fromReplica?.signerId?.includes('_fed') || toReplica?.signerId?.includes('_fed');
   const themeColors = getGraphThemeColors(options.theme);
   const material = new THREE.LineDashedMaterial({
@@ -376,15 +368,11 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
   bars: THREE.Group;
   mempoolBoxes: THREE.Group[];
 } {
-  const findReplica = (entityId: string) => {
-    const key = [...options.replicas.keys()].find(candidate => candidate.startsWith(`${entityId}:`));
-    return key ? options.replicas.get(key) : null;
-  };
   const fromIsLeft = options.fromId < options.toId;
   const leftId = fromIsLeft ? options.fromId : options.toId;
   const rightId = fromIsLeft ? options.toId : options.fromId;
-  const leftAccount = findReplica(leftId)?.state?.accounts?.get(rightId);
-  const rightAccount = findReplica(rightId)?.state?.accounts?.get(leftId);
+  const leftAccount = findGraphReplica(options.replicas, leftId)?.state?.accounts?.get(rightId);
+  const rightAccount = findGraphReplica(options.replicas, rightId)?.state?.accounts?.get(leftId);
   const leftHeight = Number(leftAccount?.currentFrame?.height ?? 0);
   const rightHeight = Number(rightAccount?.currentFrame?.height ?? 0);
   let account = leftAccount ?? rightAccount;

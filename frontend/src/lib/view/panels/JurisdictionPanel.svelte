@@ -72,9 +72,10 @@
   // Debts state (on-chain _debts from Depository)
   let entityDebts = $state<Array<{ entityId: string; entityName: string; tokenId: number; debts: Array<{ amount: bigint; creditor: string; creditorName: string }> }>>([]);
   let debtsLoading = $state(false);
+  let debtsError = $state<string | null>(null);
   let debtsRequestId = 0;
 
-  function isBrowserVMDebugAdapter(adapter: unknown): adapter is { mode: 'browservm'; timeTravel?: (stateRoot: Uint8Array) => Promise<void> } {
+  function isBrowserVMDebugAdapter(adapter: unknown): adapter is { mode: 'browservm';  } {
     return !!adapter && typeof adapter === 'object' && 'mode' in adapter && (adapter as { mode?: string }).mode === 'browservm';
   }
 
@@ -469,13 +470,12 @@
     return Array.from(seen.values());
   });
 
-  // Query ERC20 balances (works in both live and history mode via time travel)
+  // Historical chain reads require an isolated snapshot; shared adapters serve live state.
   $effect(() => {
     const tokenMeta = selectedTokenMeta;
     const signers = signerRefs;
     const xln = $xlnInstance;
     const tokenAddress = tokenMeta?.address;
-    const jData = selectedJurisdictionData;
 
     if (!tokenAddress || signers.length === 0 || !xln?.getActiveJAdapter) {
       externalBalances = [];
@@ -504,11 +504,7 @@
 
     (async () => {
       try {
-        // Time travel to historical state if not live
-        const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && isBrowserVMDebugAdapter(jadapter) && jadapter.timeTravel) {
-          await jadapter.timeTravel(stateRoot);
-        }
+        if (!isLive) throw new Error('HISTORICAL_JURISDICTION_READ_UNAVAILABLE');
 
         const nextBalances: Array<{ address: string; label: string; balance: bigint }> = [];
         for (const signer of signers) {
@@ -538,7 +534,6 @@
   $effect(() => {
     const signers = signerRefs;
     const xln = $xlnInstance;
-    const jData = selectedJurisdictionData;
 
     if (signers.length === 0 || !xln?.getActiveJAdapter) {
       externalEthBalances = [];
@@ -568,11 +563,7 @@
 
     (async () => {
       try {
-        // Time travel to historical state if not live
-        const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && isBrowserVMDebugAdapter(jadapter) && jadapter.timeTravel) {
-          await jadapter.timeTravel(stateRoot);
-        }
+        if (!isLive) throw new Error('HISTORICAL_JURISDICTION_READ_UNAVAILABLE');
 
         const nextBalances: Array<{ address: string; label: string; balance: bigint }> = [];
         for (const signer of signers) {
@@ -601,7 +592,6 @@
   // Query on-chain debts from Depository (works in both live and history mode)
   $effect(() => {
     const xln = $xlnInstance;
-    const jData = selectedJurisdictionData;
     const names = entityNames;
     const tokenId = selectedTokenId;
 
@@ -646,14 +636,11 @@
 
     const requestId = ++debtsRequestId;
     debtsLoading = true;
+    debtsError = null;
 
     (async () => {
       try {
-        // Time travel to historical state if not live
-        const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && isBrowserVMDebugAdapter(jadapter) && jadapter.timeTravel) {
-          await jadapter.timeTravel(stateRoot);
-        }
+        if (!isLive) throw new Error('HISTORICAL_JURISDICTION_READ_UNAVAILABLE');
 
         const results: typeof entityDebts = [];
         const entityIds = new Set<string>();
@@ -686,7 +673,7 @@
         entityDebts = results;
       } catch (err) {
         if (requestId !== debtsRequestId) return;
-        console.error('[J-Panel] Failed to query debts:', err);
+        debtsError = err instanceof Error ? err.message : String(err);
         entityDebts = [];
       } finally {
         if (requestId === debtsRequestId) {
@@ -1095,6 +1082,8 @@
         </div>
         {#if debtsLoading}
           <div class="empty">Loading debts…</div>
+        {:else if debtsError}
+          <div class="empty" role="alert">{debtsError}</div>
         {:else if entityDebts.length === 0}
           <div class="empty">No outstanding debts ✓</div>
         {:else}

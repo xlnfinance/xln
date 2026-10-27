@@ -181,12 +181,7 @@ const findStoryVideo = (
     usedShardIndexes.add(best.shardIndex);
     return { shard: best.shard, shardIndex: best.shardIndex, video: best.video };
   }
-  const firstAvailable = run.shards
-    .map((shard, shardIndex) => ({ shard, shardIndex, video: shard.artifacts.find(isVideoArtifact) ?? null }))
-    .find(candidate => !usedShardIndexes.has(candidate.shardIndex) && candidate.video);
-  if (!firstAvailable?.video) return { shard: null, shardIndex: null, video: null };
-  usedShardIndexes.add(firstAvailable.shardIndex);
-  return { shard: firstAvailable.shard, shardIndex: firstAvailable.shardIndex, video: firstAvailable.video };
+  return { shard: null, shardIndex: null, video: null };
 };
 
 export const buildAdminStoryCards = (

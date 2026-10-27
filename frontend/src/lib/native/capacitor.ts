@@ -11,6 +11,7 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 import { normalizeNativeDeepLinkPath } from './deeplink';
 
 type NativeEventName =
+  | 'xln-native-notification-status'
 	| 'xln-native-ready'
 	| 'xln-native-payment-wake'
 	| 'xln-native-push-token'
@@ -114,6 +115,8 @@ export const initializeNativeShell = async (): Promise<void> => {
 		dispatchNativeEvent('xln-native-payment-wake', { source: 'local-action', action });
 	});
 
-	await maybeRegisterPush().catch(() => undefined);
+	await maybeRegisterPush().catch(error => {
+    dispatchNativeEvent('xln-native-notification-status', { status: 'error', error: error instanceof Error ? error.message : String(error) });
+  });
 	await Haptics.impact({ style: ImpactStyle.Light }).catch(() => undefined);
 };

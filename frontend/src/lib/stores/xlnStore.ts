@@ -1169,10 +1169,11 @@ export async function initializeXLN(): Promise<RuntimeReplica | null> {
       });
     } catch (adapterError) {
       errorLog.log(
-        'Embedded runtime adapter failed to connect; local env remains usable',
+        'Embedded runtime adapter failed to connect',
         'Runtime Adapter Connect',
         adapterError,
       );
+      throw adapterError;
     }
 
     error.set(null);

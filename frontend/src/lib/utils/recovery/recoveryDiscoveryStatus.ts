@@ -94,9 +94,8 @@ export function readRuntimeRecoveryDiscoveryStatus(
       failures: normalizeFailureStatuses(parsed['failures']),
       checkedAt: Math.max(0, Math.floor(Number(parsed['checkedAt'] || 0))),
     };
-  } catch {
-    localStorage.removeItem(storageKey(normalizedRuntimeId));
-    return null;
+  } catch (cause) {
+    throw new Error('RUNTIME_RECOVERY_DISCOVERY_INVALID', { cause });
   }
 }
 

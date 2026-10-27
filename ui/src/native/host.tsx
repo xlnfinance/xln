@@ -40,10 +40,6 @@ export const currentWallet = (): WalletView => {
     throw new Error('Wallet is still synchronizing.');
   return wallet;
 };
-export const currentBook = (): BookView => {
-  if (!book || book.status !== 'live') throw new Error('The order book is not available yet.');
-  return book;
-};
 
 async function boot(entropy: unknown): Promise<void> {
   if (typeof entropy !== 'string' || !/^0x[0-9a-f]{32}$/.test(entropy)) throw new Error('INVALID_WALLET_ENTROPY');

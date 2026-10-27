@@ -134,7 +134,10 @@ function pickJurisdictions(payload: Record<string, unknown>, apiBase: string): S
     const rpc = String(config['rpc'] || (Array.isArray(config['rpcs']) ? config['rpcs'][0] : '') || '');
     const status = String(config['status'] || 'active').toLowerCase();
     const deploymentBlock = Number(config['entityProviderDeploymentBlock']);
+    const chainId = config['chainId'];
     if (status !== 'active' || !contracts['depository'] || !contracts['entityProvider'] || !rpc) return [];
+    if (typeof chainId !== 'number' || !Number.isSafeInteger(chainId) || chainId <= 0)
+      throw new Error(`JURISDICTION_CHAIN_ID_INVALID:${key}`);
     if (!Number.isSafeInteger(deploymentBlock) || deploymentBlock < 1) return [];
     return [
       {
@@ -143,7 +146,7 @@ function pickJurisdictions(payload: Record<string, unknown>, apiBase: string): S
         jurisdiction: {
           key,
           name: String(config['name'] || key),
-          chainId: Math.floor(Number(config['chainId'] || 31337)),
+          chainId,
           rpcUrl: resolveRpcUrl(rpc, apiBase),
           blockTimeMs: Math.floor(Number(config['blockTimeMs'] || 10_000)),
           entityProviderDeploymentBlock: deploymentBlock,
@@ -183,20 +186,14 @@ export async function loadStackJurisdictions(apiBase: string): Promise<StackJuri
   return pickJurisdictions(await fetchApi(apiBase, '/api/jurisdictions'), apiBase);
 }
 
-/** Null when this origin serves no xln API: the wallet then offers only the offline sandbox. */
+/** Null only when discovery succeeds with no active jurisdictions. */
 export async function detectStack(apiBase: string = window.location.origin): Promise<Stack | null> {
-  let jurisdictions: StackJurisdiction[];
-  try {
-    jurisdictions = await loadStackJurisdictions(apiBase);
-  } catch {
-    return null;
-  }
+  const jurisdictions = await loadStackJurisdictions(apiBase);
   const jurisdiction = jurisdictions[0];
   if (!jurisdiction) return null;
-  let hubs: StackHub[] = [];
-  try {
-    const payload = await fetchApi(apiBase, '/api/hubs');
-    hubs = (Array.isArray(payload['hubs']) ? payload['hubs'] : [])
+  const payload = await fetchApi(apiBase, '/api/hubs');
+  if (!Array.isArray(payload['hubs'])) throw new Error('HUBS_RESPONSE_INVALID');
+  const hubs: StackHub[] = payload['hubs']
       .map(raw => asRecord(raw))
       .filter(hub => typeof hub['entityId'] === 'string')
       .map(hub => ({
@@ -205,9 +202,6 @@ export async function detectStack(apiBase: string = window.location.origin): Pro
         online: hub['online'] !== false,
       }))
       .sort((left, right) => Number(right.online) - Number(left.online));
-  } catch {
-    hubs = [];
-  }
   return { apiBase, relayUrl: relayUrlFor(socketOrigin(apiBase)), jurisdiction, jurisdictions, hubs };
 }
 

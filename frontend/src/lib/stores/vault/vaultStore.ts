@@ -30,7 +30,6 @@ import {
   resolveRelayUrls,
   resumeRemoteRuntimeCommandIntents,
   setXlnEnvironment,
-  submitEntityInputs as submitXlnEntityInputs,
   xlnInstance,
 } from '../xlnStore';
 
@@ -955,7 +954,7 @@ function ensureRuntimeLoopRunning(env: RuntimeReplica, xln: XLNModule, _reason: 
   xln.resumeRuntimeAfterPersistenceQuiesce(env);
 }
 
-async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strictRestore = false): Promise<RuntimeReplica> {
+async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule): Promise<RuntimeReplica> {
   const runtimeIdLower = normalizeRuntimeId(runtime.id);
   if (!runtimeIdLower) {
     throw new Error(`[VaultStore] Invalid runtime.id for env restore: ${String(runtime.id)}`);
@@ -993,16 +992,8 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
       });
       return true;
     } catch (error) {
-      if (strictRestore) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`[VaultStore] Tower restore failed for ${runtime.id.slice(0, 12)}: ${message}`);
-      }
-      errorLog.log('Failed to restore env from tower; continuing with local recovery path', 'Runtime Restore', {
-        runtimeId: runtime.id,
-        reason,
-        error,
-      });
-      return false;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`[VaultStore] Tower restore failed for ${runtime.id.slice(0, 12)}: ${message}`, { cause: error });
     }
   };
 
@@ -1032,7 +1023,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     errorLog.log(
       `Runtime restore failed for ${runtime.id.slice(0, 12)}; refusing to replace persisted state`,
       'Runtime Restore',
-      { runtimeId: runtime.id, strictRestore, error },
+      { runtimeId: runtime.id, error },
     );
     throw new Error(`[VaultStore] Runtime restore failed for ${runtime.id.slice(0, 12)}: ${message}`, {
       cause: error,
@@ -1045,12 +1036,12 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
 
   persistRuntimeMetadataIfChanged();
 
-  if (!env && strictRestore) {
+  if (!env) {
     throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: persisted env missing`);
   }
 
   if (env && (!env.state.jReplicas || env.state.jReplicas.size === 0)) {
-    if (strictRestore && !restoredFromTower) {
+    if (!restoredFromTower) {
       throw new Error(
         `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: restored env missing jReplicas`,
       );
@@ -1083,7 +1074,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     return false;
   };
 
-  if (env && strictRestore && !restoredFromTower) {
+  if (env && !restoredFromTower) {
     for (const signer of runtime.signers || []) {
       if (!signer?.entityId) continue;
       if (!hasEntityReplica(signer.entityId)) {
@@ -1251,7 +1242,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
       continue;
     }
 
-    if (strictRestore && !anyEntityReplica) {
+    if (!anyEntityReplica) {
       throw new Error(
         `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: entity missing after restore ${entityId.slice(0, 12)}`,
       );
@@ -1435,7 +1426,7 @@ export const vaultOperations = {
       if (persistedLatestHeight <= currentHeight) return false;
 
       await registerRuntimeSignerKeys(runtime, xln);
-      const refreshedEnv = await buildOrRestoreRuntimeEnv(runtime, xln, true);
+      const refreshedEnv = await buildOrRestoreRuntimeEnv(runtime, xln);
       unregisterRuntimeEnvChange(runtimeId);
       await stopRuntimeEnv(env);
 
@@ -1469,7 +1460,7 @@ export const vaultOperations = {
 
     let env = get(runtimes).get(runtimeId)?.env as RuntimeReplica | undefined;
     if (!env) {
-      env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
+      env = await buildOrRestoreRuntimeEnv(runtime, xln);
       runtimes.update(currentRuntimes => {
         const updated = new Map(currentRuntimes);
         updated.set(runtimeId, runtimeToEntry(runtime, env!));
@@ -2357,7 +2348,7 @@ export const vaultOperations = {
       let env = runtimeEntry?.env;
       if (!env) {
         await registerRuntimeSignerKeys(runtime, xln);
-        env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
+        env = await buildOrRestoreRuntimeEnv(runtime, xln);
         const restoredEnv = env;
         runtimes.update(r => {
           const updated = new Map(r);
@@ -2600,19 +2591,6 @@ export const vaultOperations = {
     this.syncRuntime(current.activeRuntimeId ? current.runtimes[current.activeRuntimeId] || null : null);
   },
 
-  // Get private key for active signer
-  getActiveSignerPrivateKey(): string | null {
-    const current = get(runtimesState);
-    if (!current.activeRuntimeId) return null;
-
-    const runtime = current.runtimes[current.activeRuntimeId];
-    if (!runtime?.seed) return null;
-
-    const signer = runtime.signers[runtime.activeSignerIndex];
-    if (!signer) return null;
-    return derivePrivateKey(runtime.seed, getSignerDerivationIndex(signer));
-  },
-
   // Get private key for specific signer
   getSignerPrivateKey(signerIndex: number): string | null {
     const current = get(runtimesState);
@@ -2670,7 +2648,7 @@ export const vaultOperations = {
           }
           await registerRuntimeSignerKeys(runtime, xln);
 
-          const env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
+          const env = await buildOrRestoreRuntimeEnv(runtime, xln);
           if (normalizeRuntimeId(env?.runtimeId || '') !== runtimeId) {
             throw new Error(
               `[VaultStore.initialize] Runtime isolation mismatch: slot=${runtimeId} env.runtimeId=${String(env?.runtimeId || 'none')}`,
@@ -2739,74 +2717,6 @@ export const vaultOperations = {
     runtimes.set(new Map());
     runtimeOperations.setActiveRuntimeId('');
     this.syncRuntime(null);
-  },
-
-  // === MVP: Get XLN balance for active entity ===
-  async getEntityBalance(tokenId: number = 1): Promise<bigint> {
-    const signer = get(activeSigner);
-    if (!signer?.entityId) return 0n;
-
-    try {
-      const xln = await getXLN();
-      const activeId = normalizeRuntimeId(get(activeRuntimeId) || '');
-      const runtimeEntry = activeId ? get(runtimes).get(activeId) : null;
-      const env = runtimeEntry?.env ? (unwrapLiveRuntimeEnv(runtimeEntry.env) ?? runtimeEntry.env) : null;
-      const jadapter = env ? xln.getEntityJAdapter(env, signer.entityId, signer.address) : null;
-      if (!jadapter?.getReserves) return 0n;
-
-      return await jadapter.getReserves(signer.entityId, tokenId);
-    } catch (err) {
-      errorLog.log('Failed to get balance', 'Runtime Balance', {
-        entityId: signer.entityId,
-        tokenId,
-        error: err,
-      });
-      return 0n;
-    }
-  },
-
-  // === MVP: Send tokens to another entity ===
-  async sendTokens(
-    toEntityId: string,
-    amount: bigint,
-    tokenId: number = 1,
-  ): Promise<{ success: boolean; error?: string }> {
-    const current = get(runtimesState);
-    if (!current.activeRuntimeId) return { success: false, error: 'No active runtime' };
-
-    const runtime = current.runtimes[current.activeRuntimeId];
-    const signer = runtime?.signers[runtime.activeSignerIndex];
-    if (!signer?.entityId) return { success: false, error: 'No entity for signer' };
-
-    try {
-      const activeId = normalizeRuntimeId(get(activeRuntimeId) || '');
-      const runtimeEntry = activeId ? get(runtimes).get(activeId) : null;
-      const env = runtimeEntry?.env ? (unwrapLiveRuntimeEnv(runtimeEntry.env) ?? runtimeEntry.env) : null;
-      if (!env) return { success: false, error: 'Runtime env unavailable' };
-
-      await submitXlnEntityInputs([
-        {
-          entityId: signer.entityId,
-          signerId: signer.address,
-          entityTxs: [
-            {
-              type: 'r2r',
-              data: { toEntityId, tokenId, amount },
-            },
-          ],
-        },
-      ]);
-      return { success: true };
-    } catch (err) {
-      errorLog.log('Send failed', 'Runtime Send', {
-        fromEntityId: signer.entityId,
-        toEntityId,
-        tokenId,
-        amount: amount.toString(),
-        error: err,
-      });
-      return { success: false, error: err instanceof Error ? err.message : 'Transfer failed' };
-    }
   },
 
   // Get active entity ID

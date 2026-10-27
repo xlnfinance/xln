@@ -122,7 +122,8 @@ describe('account bar parenting', () => {
     const derived = toDerivedAccountData(runtime.deriveDelta());
     expect(derived.collateral).toBe(500_000);
     expect(derived.inPeerCredit).toBe(100_000);
-    expect(toDerivedAccountData(null).totalCapacity).toBe(0);
+    expect(() => toDerivedAccountData(null)).toThrow('DERIVED_ACCOUNT_FIELD_INVALID');
+    expect(() => toDerivedAccountData({ ...runtime.deriveDelta(), collateral: undefined })).toThrow('DERIVED_ACCOUNT_FIELD_INVALID:collateral');
 
     for (const file of [
       'frontend/src/lib/network3d/AccountBarRenderer.ts',

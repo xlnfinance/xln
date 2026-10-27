@@ -7,6 +7,7 @@ import { asTokenId, asTokenDecimals, type TokenId, type TokenDecimals } from '@x
  * hosts the chain itself.
  */
 import { useEffect, useState } from 'react';
+import { requireExternalSnapshotBigInt } from '@xln/frontend/lib/components/Entity/assets/external-wallet-snapshot';
 import { isAddress } from 'ethers';
 import { postJson, resolveApiBase } from '../http';
 import { useApp } from '../store';
@@ -30,9 +31,10 @@ export type ExternalWalletRow = {
   address: string;
   decimals: TokenDecimals;
   balance: bigint;
-  /** Allowance granted to the Depository; null for the native coin. */
+  /** Null means not applicable or unavailable; allowanceError identifies a failed read. */
   allowance: bigint | null;
   error?: string;
+  allowanceError?: string;
 };
 
 export type ExternalWallet = {
@@ -71,14 +73,16 @@ export async function readExternalWallet(entityId: string, signerId: string): Pr
   );
   const rows: ExternalWalletRow[] = tokens.map((token, index) => {
     const error = tokenErrors.get(normalize(token.address));
+    const allowanceError = snapshot.allowanceErrors?.find(entry => normalize(entry.tokenAddress) === normalize(token.address) && normalize(entry.spender) === depository)?.error;
     return {
       tokenId: asTokenId(Number(token.tokenId)),
       symbol: token.symbol,
       name: token.name,
       address: normalize(token.address),
       decimals: asTokenDecimals(Number(token.decimals)),
-      balance: snapshot.tokenBalances[index] ?? 0n,
-      allowance: snapshot.allowances?.[index] ?? 0n,
+      balance: error ? 0n : requireExternalSnapshotBigInt(snapshot.tokenBalances[index], `tokenBalance:${token.address}`),
+      allowance: allowanceError ? null : requireExternalSnapshotBigInt(snapshot.allowances[index], `allowance:${token.address}`),
+      ...(allowanceError ? { allowanceError } : {}),
       ...(error ? { error } : {}),
     };
   });
@@ -124,6 +128,7 @@ async function readRemoteExternalWallet(entityId: string, signerId: string): Pro
     const error = snapshot.tokenErrors?.find(
       entry => normalize(entry.tokenAddress) === normalize(token.address),
     )?.error;
+    const allowanceError = snapshot.allowanceErrors?.find(entry => normalize(entry.tokenAddress) === normalize(token.address) && normalize(entry.spender) === normalize(depository))?.error;
     return {
       tokenId: asTokenId(token.tokenId!),
       symbol: token.symbol,
@@ -131,7 +136,8 @@ async function readRemoteExternalWallet(entityId: string, signerId: string): Pro
       address: token.address,
       decimals: asTokenDecimals(token.decimals),
       balance: snapshot.balances[index]!,
-      allowance: snapshot.allowanceValues[index]!,
+      allowance: allowanceError ? null : snapshot.allowanceValues[index]!,
+      ...(allowanceError ? { allowanceError } : {}),
       ...(error ? { error } : {}),
     };
   });

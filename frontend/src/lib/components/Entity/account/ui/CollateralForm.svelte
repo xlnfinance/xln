@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { rebalanceFeeFor } from "@xln/core/account/tx/handlers/rebalance/request-collateral";
 import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
   import { get } from 'svelte/store';
@@ -50,7 +51,9 @@ import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-t
   $: tokenList = activeXlnFunctions
     ? [1, 2, 3].map((id) => ({ id, symbol: activeXlnFunctions.getTokenInfo(id).symbol }))
     : [];
+  let derivationError = '';
   $: userDerivedDelta = (() => {
+    derivationError = '';
     if (!effectiveCounterparty || !activeXlnFunctions) return null;
     const account = accountOverride ?? (
       activeEnv ? getCounterpartyAccount(activeEnv, entityId, effectiveCounterparty)?.account ?? null : null
@@ -62,7 +65,8 @@ import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-t
       normalizeEntityId(entityId) < normalizeEntityId(effectiveCounterparty);
     try {
       return activeXlnFunctions.deriveDelta(delta, isUserLeft);
-    } catch {
+    } catch (cause) {
+      derivationError = cause instanceof Error ? cause.message : String(cause);
       return null;
     }
   })();
@@ -160,9 +164,13 @@ import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-t
   $: projectedFeePolicy = activeEnv
     ? resolveCounterpartyPolicy(activeEnv, entityId, effectiveCounterparty, selectedTokenId)
     : resolveProjectedCounterpartyPolicy(accountOverride, entityId, selectedTokenId);
+  function validatedFee(policy: Parameters<typeof rebalanceFeeFor>[0], amount: bigint): bigint {
+    if (policy.baseFee < 0n || policy.gasFee < 0n || policy.liquidityFeeBps < 0n || policy.liquidityFeeBps > 10000n)
+      throw new Error('COLLATERAL_FEE_POLICY_INVALID');
+    return rebalanceFeeFor(policy, amount);
+  }
   $: projectedFeeAmount = projectedFeePolicy
-    ? projectedFeePolicy.baseFee + projectedFeePolicy.gasFee +
-      ((collateralAmount * projectedFeePolicy.liquidityFeeBps) / 10000n)
+    ? validatedFee(projectedFeePolicy, collateralAmount)
     : 0n;
   $: projectedNetCollateral = collateralAmount > projectedFeeAmount
     ? collateralAmount - projectedFeeAmount
@@ -186,6 +194,7 @@ import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-t
 
   async function requestCollateral() {
     if (!effectiveCounterparty) return;
+    if (!userDerivedDelta) throw new Error(derivationError || 'COLLATERAL_ACCOUNT_DATA_UNAVAILABLE');
     if (submitting) throw new Error('COLLATERAL_SUBMISSION_IN_FLIGHT');
     submitting = true;
     try {
@@ -204,16 +213,7 @@ import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-t
       if (!feePolicy) {
         throw new Error('Missing committed counterparty rebalance fee policy. Wait for the Account policy frame.');
       }
-      if (feePolicy.baseFee < 0n || feePolicy.gasFee < 0n || feePolicy.liquidityFeeBps < 0n) {
-        throw new Error('Counterparty rebalance fee policy contains negative values.');
-      }
-      const feeAmount =
-        feePolicy.baseFee +
-        feePolicy.gasFee +
-        ((collateralAmount * feePolicy.liquidityFeeBps) / 10000n);
-      if (feeAmount < 0n) {
-        throw new Error('Computed rebalance fee is negative. Counterparty policy is invalid.');
-      }
+      const feeAmount = validatedFee(feePolicy, collateralAmount);
       if (feeAmount >= collateralAmount) {
         throw new Error('Collateral fee must be lower than the gross request amount.');
       }
@@ -287,21 +287,23 @@ import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-t
     >
       Max
     </button>
-    <button class="action-button collateral" on:click={requestCollateral} disabled={submitting || !effectiveCounterparty || collateralAmount <= 0n || !projectedFeePolicy || projectedNetCollateral <= 0n}>
+    <button class="action-button collateral" on:click={requestCollateral} disabled={submitting || !userDerivedDelta || !effectiveCounterparty || collateralAmount <= 0n || !projectedFeePolicy || projectedNetCollateral <= 0n}>
       {submitting ? 'Submitting…' : 'Request Collateral'}
     </button>
   </div>
+  {#if !userDerivedDelta}<p role="alert">{derivationError || "Account data unavailable"}</p>{:else}
   <div class="max-hint">
     Suggested gross max: {activeXlnFunctions?.formatTokenAmount(selectedTokenId, maxCollateralNeeded) || '0'}
   </div>
-  {#if projectedFeePolicy && collateralAmount > 0n}
+  {/if}
+  {#if userDerivedDelta && projectedFeePolicy && collateralAmount > 0n}
     <div class="max-hint" data-testid="collateral-authorization-breakdown">
       Gross {formatTokenAmount(collateralAmount)} − exact fee {formatTokenAmount(projectedFeeAmount)}
       = net collateral {formatTokenAmount(projectedNetCollateral)} {tokenSymbol(selectedTokenId)}
     </div>
   {/if}
 
-  {#if overCollateralAmount > 0n}
+  {#if userDerivedDelta && overCollateralAmount > 0n}
     <div class="over-collateral-note">
       <div>
         You are requesting over-collateralization of {formatTokenAmount(overCollateralAmount)} {tokenSymbol(selectedTokenId)}.

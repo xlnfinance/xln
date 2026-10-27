@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconForSymbol } from "./delta-types";
   import { createEventDispatcher } from 'svelte';
   import { settings } from '#lib/stores/settingsStore.ts';
   import DeltaCapacityBar from './DeltaCapacityBar.svelte';
@@ -26,13 +27,6 @@
 
   const dispatch = createEventDispatcher<{ action: { tokenId: number | null }; bartoggle: void }>();
 
-  function iconForSymbol(rawSymbol: string): { text: string; cls: string } {
-    const s = String(rawSymbol || '').toUpperCase();
-    if (s === 'USDC') return { text: '$', cls: 'usdc' };
-    if (s === 'USDT') return { text: '$', cls: 'usdt' };
-    if (s === 'WETH' || s === 'ETH') return { text: 'E', cls: 'weth' };
-    return { text: s.slice(0, 1) || 'T', cls: 'other' };
-  }
 
   $: icon = iconForSymbol(symbol);
 

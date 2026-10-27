@@ -4,7 +4,6 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
 import { tick } from 'svelte';
 import { explainWalletError } from '#lib/utils/ui/walletError.ts';
 import type { Tab } from '#lib/types/ui.ts';
-import { writable } from 'svelte/store';
 import type { BookState, CrossJurisdictionSwapRoute, Profile, RuntimeReplica, SwapBookEntry } from '@xln/core/api/public/runtime-module';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
@@ -231,13 +230,6 @@ let preservePriceOnNextContextChange = false;
 let preserveAmountOnNextContextChange = false;
 let selectedSourceEntityValue = '';
 let routeDetailsOpen = false;
-let routeMenuOpen = false;
-const routeMenuOpenStore = writable(false);
-let routeMenuSetCount = 0;
-let routeMenuLastSetReason = 'init';
-let ignoreOutsideMenuClickUntil = 0;
-let ignoreNextWindowMenuClick = false;
-let ignoreWindowMenuClickCount = 0;
 let crossTargetInCapacity = 0n;
 let selectedCrossTargetReplica: EntityReadView | null = null;
 let crossTargetHasAccount = false;
@@ -1462,7 +1454,6 @@ function selectSourceEntityOption(value: string): void {
   routeSelectionCommitNonce += 1;
   selectedOrderLevel = null;
   submitError = '';
-  setRouteMenuOpen(false, 'source-change');
 }
 function handleGiveTokenChange(event: Event): void {
   const nextGive = Number.parseInt(String((event.currentTarget as HTMLSelectElement | null)?.value || ''), 10);
@@ -1491,12 +1482,7 @@ function tokenClass(symbol: string): string {
       .replace(/[^a-z0-9_-]/g, '') || 'token'
   );
 }
-function setRouteMenuOpen(nextOpen: boolean, reason = 'unknown'): void {
-  routeMenuSetCount += 1;
-  routeMenuLastSetReason = `${reason}:${nextOpen ? 'open' : 'closed'}`;
-  routeMenuOpen = nextOpen;
-  routeMenuOpenStore.set(nextOpen);
-}
+
 function handleRouteSelectChange(event: Event): void {
   const nextValue = String((event.currentTarget as HTMLSelectElement | null)?.value || '');
   selectRouteOption(nextValue);
@@ -1512,36 +1498,7 @@ function selectRouteOption(value: string): void {
   const selection = buildCommittedRouteSelectionFromDom(routeSelectElement, value);
   if (!selection || selection.route.disabled) return;
   commitRouteSelection(selection);
-  setRouteMenuOpen(false, 'route-select');
   submitError = '';
-}
-function closeSwapMenus(reason = 'window-close'): void {
-  if (reason === 'escape') {
-    setRouteMenuOpen(false, reason);
-  }
-}
-function handleSwapWindowClick(event: MouseEvent): void {
-  const globalSuppressUntil =
-    typeof window !== 'undefined' ? (window as Window & { __xlnRouteMenuSuppressWindowClickUntil?: number }).__xlnRouteMenuSuppressWindowClickUntil || 0 : 0;
-  if (Date.now() < globalSuppressUntil) return;
-  if (routeMenuLastSetReason === 'route-button:open') return;
-  if (routeMenuOpen) return;
-  if (ignoreWindowMenuClickCount > 0) {
-    ignoreWindowMenuClickCount -= 1;
-    return;
-  }
-  if (ignoreNextWindowMenuClick) {
-    ignoreNextWindowMenuClick = false;
-    return;
-  }
-  if (Date.now() < ignoreOutsideMenuClickUntil) return;
-  const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
-  const clickedInsideMenuRoot = path.some((entry) => entry instanceof HTMLElement && Boolean(entry.closest('[data-swap-menu-root]')));
-  if (clickedInsideMenuRoot) return;
-  closeSwapMenus('window-click');
-}
-function handleSwapWindowKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') closeSwapMenus('escape');
 }
 function formatPriceTicks(ticks: bigint): string {
   const whole = ticks / ORDERBOOK_PRICE_SCALE;
@@ -1743,10 +1700,7 @@ function formatPriceImprovement(amount: bigint, tokenIdValue: number | null): st
   if (!tokenIdValue || amount <= 0n) return '—';
   return `${formatAmount(amount, tokenIdValue)} ${tokenSymbol(tokenIdValue)}`;
 }
-function formatSwapFee(amount: bigint, tokenIdValue: number | null): string {
-  if (!tokenIdValue || amount <= 0n) return '—';
-  return `${formatAmount(amount, tokenIdValue)} ${tokenSymbol(tokenIdValue)}`;
-}
+
 function resolveReferencePriceTicks(): bigint | null {
   const activeMode = orderMode !== 'none' ? orderMode : tradeSide;
   if (String(orderbookSnapshot?.pairId || '').trim() === String(orderbookPairId || '').trim()) {
@@ -2052,7 +2006,6 @@ function handleSelectedHubChange(nextValue: string): void {
     createOrderAccountId = nextValue;
   }
   selectedOrderLevel = null;
-  setRouteMenuOpen(false, 'hub-change');
 }
 function handleOrderbookLevelClick(event: CustomEvent<SwapOrderbookLevelClickDetail>) {
   submitError = '';
@@ -2402,11 +2355,11 @@ $: if (pendingSwapFeedbackOfferId) {
         closed.priceImprovementAmount > 0n
           ? ` with ${formatPriceImprovement(closed.priceImprovementAmount, closed.priceImprovementTokenId)} price improvement`
           : '';
-      const feeNote = closed.feeAmount > 0n ? `. Fee: ${formatSwapFee(closed.feeAmount, closed.feeTokenId)}` : '';
+      const feeNote = closed.feeAmount > 0n ? `. Fee: ${formatPriceImprovement(closed.feeAmount, closed.feeTokenId)}` : '';
       toasts.success(`Order placed and fully filled${improvementNote}${feeNote}`);
     } else if (closed.status === 'partial') {
       if (stpBlockingOrderId) {
-        const feeNote = closed.feeAmount > 0n ? ` Fee: ${formatSwapFee(closed.feeAmount, closed.feeTokenId)}.` : '';
+        const feeNote = closed.feeAmount > 0n ? ` Fee: ${formatPriceImprovement(closed.feeAmount, closed.feeTokenId)}.` : '';
         toasts.info(
           `Swap partially filled (${closed.filledPercent.toFixed(2)}%). Remaining quantity was canceled to avoid matching your own order ${stpBlockingOrderId.slice(-8)}.${feeNote}`,
         );
@@ -2415,7 +2368,7 @@ $: if (pendingSwapFeedbackOfferId) {
           closed.priceImprovementAmount > 0n
             ? ` Price improvement: ${formatPriceImprovement(closed.priceImprovementAmount, closed.priceImprovementTokenId)}.`
             : '';
-        const feeNote = closed.feeAmount > 0n ? ` Fee: ${formatSwapFee(closed.feeAmount, closed.feeTokenId)}.` : '';
+        const feeNote = closed.feeAmount > 0n ? ` Fee: ${formatPriceImprovement(closed.feeAmount, closed.feeTokenId)}.` : '';
         toasts.info(`Swap partially filled (${closed.filledPercent.toFixed(2)}%) and closed the remainder.${improvementNote}${feeNote}`);
       }
     } else if (closed.status === 'canceled') {
@@ -2746,7 +2699,7 @@ function useMarketPrice(): void {
   submitError = '';
 }
 </script>
-<svelte:window on:click={handleSwapWindowClick} on:keydown={handleSwapWindowKeydown} />
+<svelte:window   />
 <div
   class="swap-panel"
 >
@@ -2781,8 +2734,8 @@ function useMarketPrice(): void {
         {wantToken}
         {formatAmount}
         {targetCapacityLabel}
-        maxFee={displayedSwapNetAuthorization?.maxFee ?? 0n}
-        minNetReceive={displayedSwapNetAuthorization?.minNetReceive ?? 0n}
+        maxFee={displayedSwapNetAuthorization?.maxFee ?? null}
+        minNetReceive={displayedSwapNetAuthorization?.minNetReceive ?? null}
         {tokenClass}
         {tokenIconText}
         bind:priceRatioInput
@@ -2895,7 +2848,7 @@ function useMarketPrice(): void {
       {formatAmount}
       {tokenSymbol}
       {formatPriceImprovement}
-      {formatSwapFee}
+      formatSwapFee={formatPriceImprovement}
       on:close={() => (swapCompletionModal = null)}
     />
   {/if}

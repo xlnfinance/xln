@@ -27,7 +27,7 @@ test('EntityInput consumes projected profiles instead of global runtime env', ()
   expect(move).toContain('export let profiles: GossipProfile[] = []');
   expect(settlement).toContain('export let profiles: GossipProfile[] = []');
   expect(settlement).toContain('export let env: RuntimeReplica | EnvSnapshot | null = null');
-  expect(settlement).toContain('if (historyOnly) return;');
+  expect(settlement).not.toContain('submitEntityInputs');
   expect(settlement).not.toContain('activeEnv?.gossip');
   expect(settlement).not.toContain('getFrameReplicaMap');
   expect(accountOpen).toContain('export let profiles: GossipProfile[] = []');
@@ -99,24 +99,6 @@ test('entity factory rechecks bootstrap ownership and dispatches only to its inj
   expect(createSource).not.toContain('submitRuntimeInput(runtimeInput)');
 });
 
-test('vault user token helpers use active RuntimeStore env and RuntimeInput command path', () => {
-  const vaultStore = readFileSync('frontend/src/lib/stores/vault/vaultStore.ts', 'utf8');
-  const balanceStart = vaultStore.indexOf('async getEntityBalance');
-  const clearStart = vaultStore.indexOf('// === MVP: Send tokens', balanceStart);
-  const sendStart = vaultStore.indexOf('async sendTokens');
-  const endStart = vaultStore.indexOf('// === MVP: Get XLN balance for active entity ===', sendStart + 1);
-  expect(balanceStart).toBeGreaterThan(0);
-  expect(sendStart).toBeGreaterThan(balanceStart);
-  const helperSource = vaultStore.slice(balanceStart, endStart > sendStart ? endStart : vaultStore.length);
-
-  expect(helperSource).toContain('const runtimeEntry = activeId ? get(runtimes).get(activeId) : null;');
-  expect(helperSource).toContain('await submitXlnEntityInputs([');
-  expect(helperSource).not.toContain('await submitXlnEntityInputs(env,');
-  expect(helperSource).toContain("type: 'r2r'");
-  expect(helperSource).not.toContain('xlnEnvironment');
-  expect(helperSource).not.toContain('queueEntityInput');
-  expect(vaultStore).not.toContain('async enqueueRuntimeInput');
-});
 
 test('unmounted retired RuntimeReplica owner panels are removed instead of kept as dead code', () => {
   expect(existsSync('frontend/src/lib/components/Admin/AdminPanel.svelte')).toBe(false);

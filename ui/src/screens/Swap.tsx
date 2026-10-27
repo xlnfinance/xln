@@ -35,7 +35,7 @@ import {
   readAccountState,
   submitSwapPlan,
 } from '../runtime/financial/swap';
-import { PRICE_DECIMALS, amountInputText, formatAmount, formatMoney, formatLimit, parseAmount, plainAmount } from '../runtime/format';
+import { PRICE_DECIMALS, amountInputText, formatAmount, formatMoney, formatLimit, parseAmount } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
 import { openSwapOffers, useWallet } from '../runtime/views';
 import { counterpartyFeePolicy } from '../runtime/financial/manage';
@@ -200,7 +200,7 @@ export function Swap() {
             wantTokenDecimals: wantMeta.decimals,
           })
         : null;
-    setWantTextState(atPrice ? plainAmount(atPrice.effectiveWant, wantMeta.decimals) : '');
+    setWantTextState(atPrice ? amountInputText(atPrice.effectiveWant, wantMeta.decimals) : '');
   };
   const pickLevel = (side: BookSide, level: Pick<BookLevel, 'priceTicks' | 'size'>): void => {
     if (!assetsReady || (mode === 'cross' && !crossMarket)) return;
@@ -222,8 +222,8 @@ export function Swap() {
     }
     const giveDecimals = side === 'ask' ? quote.decimals : base.decimals;
     const wantDecimals = side === 'ask' ? base.decimals : quote.decimals;
-    setGiveText(plainAmount(picked.give, giveDecimals));
-    setWantTextState(plainAmount(picked.want, wantDecimals));
+    setGiveText(amountInputText(picked.give, giveDecimals));
+    setWantTextState(amountInputText(picked.want, wantDecimals));
     setPickedPriceTicks(mode === 'same' ? level.priceTicks : null);
   };
 
@@ -279,7 +279,7 @@ export function Swap() {
     const base = getTokenMeta(book.baseTokenId, sourceTokens.catalog);
     const quote = getTokenMeta(book.quoteTokenId, sourceTokens.catalog);
     const quoteAtLevel = quoteAtBestLevel(book, giveTokenId, wantTokenId, give, base.decimals, quote.decimals);
-    return quoteAtLevel ? plainAmount(quoteAtLevel.want, wantMeta.decimals) : '';
+    return quoteAtLevel ? amountInputText(quoteAtLevel.want, wantMeta.decimals) : '';
   }, [
     mode,
     book,
@@ -451,8 +451,8 @@ export function Swap() {
       await submitSwapPlan(plan);
       toast(
         mode === 'cross'
-          ? `Cross-network swap submitted: ${plainAmount(prepared.effectiveGive, giveMeta.decimals)} ${giveMeta.symbol} for ${plainAmount(prepared.effectiveWant, wantMeta.decimals)} ${wantMeta.symbol}`
-          : `Order placed: ${plainAmount(prepared.effectiveGive, giveMeta.decimals)} ${giveMeta.symbol} for ${plainAmount(prepared.effectiveWant, wantMeta.decimals)} ${wantMeta.symbol}`,
+          ? `Cross-network swap submitted: ${amountInputText(prepared.effectiveGive, giveMeta.decimals)} ${giveMeta.symbol} for ${amountInputText(prepared.effectiveWant, wantMeta.decimals)} ${wantMeta.symbol}`
+          : `Order placed: ${amountInputText(prepared.effectiveGive, giveMeta.decimals)} ${giveMeta.symbol} for ${amountInputText(prepared.effectiveWant, wantMeta.decimals)} ${wantMeta.symbol}`,
       );
       setGiveText('');
       setWantText('');
@@ -637,7 +637,7 @@ export function Swap() {
                 style={{ color: 'var(--accent-2)' }}
                 placeholder={
                   impliedWantText
-                    ? plainAmount(parseAmount(impliedWantText, wantMeta.decimals), wantMeta.decimals).replace(
+                    ? amountInputText(parseAmount(impliedWantText, wantMeta.decimals), wantMeta.decimals).replace(
                         /(\.\d{6})\d+$/,
                         '$1',
                       )
@@ -950,14 +950,14 @@ export function Swap() {
                       </span>
                       <span className="tx">
                         <span className="t num">
-                          {plainAmount(order.sourceAmount, sMeta.decimals)} {sMeta.symbol} on{' '}
+                          {amountInputText(order.sourceAmount, sMeta.decimals)} {sMeta.symbol} on{' '}
                           {networkLabel(order.sourceJurisdiction) || 'source'} for{' '}
-                          {plainAmount(order.targetAmount, tMeta.decimals)} {tMeta.symbol} on{' '}
+                          {amountInputText(order.targetAmount, tMeta.decimals)} {tMeta.symbol} on{' '}
                           {networkLabel(order.targetJurisdiction) || 'target'}
                         </span>
                         <span className="s">
                           {order.filledSourceAmount > 0n
-                            ? `filled ${plainAmount(order.filledSourceAmount, sMeta.decimals)} ${sMeta.symbol} so far`
+                            ? `filled ${amountInputText(order.filledSourceAmount, sMeta.decimals)} ${sMeta.symbol} so far`
                             : 'nothing filled yet'}
                         </span>
                       </span>
@@ -1015,8 +1015,8 @@ export function Swap() {
                       </span>
                       <span className="tx">
                         <span className="t num">
-                          {plainAmount(offer.giveAmount, gMeta.decimals)} {gMeta.symbol} for{' '}
-                          {plainAmount(offer.wantAmount, wMeta.decimals)} {wMeta.symbol}
+                          {amountInputText(offer.giveAmount, gMeta.decimals)} {gMeta.symbol} for{' '}
+                          {amountInputText(offer.wantAmount, wMeta.decimals)} {wMeta.symbol}
                         </span>
                         <span className="s">
                           with {wallet.names.get(offer.counterpartyId) || 'hub'} · height {offer.createdHeight}
@@ -1074,7 +1074,7 @@ export function Swap() {
                 <div className="ev">
                   <div className="t">1 · {wallet.jurisdiction || 'here'}</div>
                   <div className="s">
-                    You lock {prepared ? plainAmount(prepared.effectiveGive, giveMeta.decimals) : '…'} {giveMeta.symbol}{' '}
+                    You lock {prepared ? amountInputText(prepared.effectiveGive, giveMeta.decimals) : '…'} {giveMeta.symbol}{' '}
                     with {hub?.label ?? 'the hub'}
                   </div>
                 </div>
@@ -1082,7 +1082,7 @@ export function Swap() {
                   <div className="t">2 · {targetEntity?.jurisdiction?.name || 'there'}</div>
                   <div className="s">
                     {targetHub?.label ?? 'The hub'} pays{' '}
-                    {prepared ? plainAmount(prepared.effectiveWant, wantMeta.decimals) : '…'} {wantMeta.symbol} into
+                    {prepared ? amountInputText(prepared.effectiveWant, wantMeta.decimals) : '…'} {wantMeta.symbol} into
                     your account there
                   </div>
                 </div>

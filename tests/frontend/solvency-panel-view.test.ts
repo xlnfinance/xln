@@ -95,7 +95,6 @@ test('solvency projection fails loud on malformed amounts', () => {
 test('SolvencyPanel reads adapter solvency-summary with the injected environment', () => {
   const source = readFileSync('frontend/src/lib/view/panels/solvency/SolvencyPanel.svelte', 'utf8');
   const dockRoot = readFileSync('frontend/src/lib/view/DockRoot.svelte', 'utf8');
-  const architect = readFileSync('frontend/src/lib/view/panels/ArchitectPanel.svelte', 'utf8');
 
   expect(source).toContain("import { createRuntimeQueryStore } from '#lib/stores/runtimeQueryClient.ts'");
   expect(source).toContain('client.readSolvencySummary()');
@@ -109,5 +108,5 @@ test('SolvencyPanel reads adapter solvency-summary with the injected environment
   expect(source).not.toContain('Date.now');
   expect(dockRoot).toContain('mount(SolvencyPanel, { target: div, props: { runtimeFrameEnv } })');
   expect(dockRoot).toContain("id: 'solvency'");
-  expect(architect).toContain('<SolvencyPanel {runtimeFrameEnv} />');
+  expect(source).toContain('$solvencyStore.error ? null');
 });

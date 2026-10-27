@@ -403,8 +403,7 @@
     if (paymentView.blockedCounterpartyIds.has(normalizeEntityId(entity))) return false;
     if (!hasCertifiedEntityEncryptionKey(currentReplicas, getGossipProfiles(), entity)) return false;
     const profile = getGossipProfileByEntityId(entity);
-    if (!profile) return true; // allow local+gossip mixed discovery; key coverage is enforced above
-    return profile.metadata.isHub === true;
+    return profile?.metadata.isHub === true;
   }
 
   function formatTokenInputValue(tokenIdValue: number, value: bigint): string {
@@ -1436,7 +1435,7 @@
         on:click={() => void findRoutes()}
         disabled={!targetEntityId || !amount}
       >
-        {routes.length > 0 ? 'Refresh routes' : 'Find routes'}
+        Find routes
       </button>
     {/if}
   </div>

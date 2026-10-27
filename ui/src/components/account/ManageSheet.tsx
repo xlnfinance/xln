@@ -5,7 +5,7 @@ import { ClausesPanel } from './ClausesPanel';
 import { DisputeControls } from './DisputeControls';
 import { useApp } from '../../runtime/store';
 import { sendEntityTxs } from '../../runtime/tx';
-import { formatMoney, parseAmount, plainAmount } from '../../runtime/format';
+import { formatMoney, parseAmount, amountInputText } from '../../runtime/format';
 import { getTokenMeta, knownTokenIds } from '../../runtime/token-meta';
 import type { AccountView, WalletView } from '../../runtime/views';
 import {
@@ -164,7 +164,7 @@ export function ManageSheet({
                 <button
                   type="button"
                   className="btn quiet sm"
-                  onClick={() => setAmountText(plainAmount(coverAmount, meta.decimals))}
+                  onClick={() => setAmountText(amountInputText(coverAmount, meta.decimals))}
                   data-testid="collateral-cover-promise"
                 >
                   Cover the promise

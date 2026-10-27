@@ -1,8 +1,9 @@
 import { resolveMicroscopePalette, type RcpanMicroscopeControls } from './microscope-playground';
 import type { RcpanTimelineState } from './microscope-timeline';
-import { microscopeTokens, formatUsdMicros, tokenAmountToUsdMicros } from './microscope-tokens';
+import { microscopeTokens, formatUsdMicros } from './microscope-tokens';
 import { deriveFcuanFinanceFrame, deriveRcpanFinanceFrame } from './microscope-finance';
 import {
+  sumReserveUsdMicros,
   buildMicroscopeLane,
   buildMicroscopeNode,
   type TokenReserveDisplayInput,
@@ -36,14 +37,6 @@ export type RcpanMicroscopeComparisonFrame = Readonly<{
   }>;
 }>;
 
-function totalTokenUsd(
-  values: readonly Readonly<{ token: ReturnType<typeof microscopeTokens>[number]; amount: bigint }>[],
-): bigint {
-  return values.reduce(
-    (sum, { token, amount }) => sum + tokenAmountToUsdMicros(token, amount),
-    0n,
-  );
-}
 
 function phaseAfterPayment(timeline: RcpanTimelineState): boolean {
   return timeline.phase !== 'payment';
@@ -129,19 +122,19 @@ export function deriveRcpanMicroscopeFrame(
   const rcpanFrames = tokens.map((token) => deriveRcpanFinanceFrame(token, timeline));
   const fcuanFrames = tokens.map((token) => deriveFcuanFinanceFrame(token, timeline));
 
-  const grossUsdMicros = totalTokenUsd(tokens.map((token) => ({ token, amount: token.grossAmount })));
-  const collateralUsdMicros = totalTokenUsd(rcpanFrames.map((frame) => ({ token: frame.token, amount: frame.initial.collateral })));
-  const reservePaidUsdMicros = totalTokenUsd(rcpanFrames.map((frame) => ({ token: frame.token, amount: frame.finalization.reservePaid.rightToLeft })));
-  const newDebtUsdMicros = totalTokenUsd(rcpanFrames.map((frame) => ({ token: frame.token, amount: frame.finalization.newDebt.rightToLeft })));
-  const debtUsdMicros = totalTokenUsd(rcpanFrames.map((frame) => ({ token: frame.token, amount: frame.current.debt })));
-  const fcuanExposure = totalTokenUsd(fcuanFrames.map((frame) => ({ token: frame.token, amount: frame.unsecuredClaim })));
+  const grossUsdMicros = sumReserveUsdMicros(tokens.map((token) => ({ token, amount: token.grossAmount })));
+  const collateralUsdMicros = sumReserveUsdMicros(rcpanFrames.map((frame) => ({ token: frame.token, amount: frame.initial.collateral })));
+  const reservePaidUsdMicros = sumReserveUsdMicros(rcpanFrames.map((frame) => ({ token: frame.token, amount: frame.finalization.reservePaid.rightToLeft })));
+  const newDebtUsdMicros = sumReserveUsdMicros(rcpanFrames.map((frame) => ({ token: frame.token, amount: frame.finalization.newDebt.rightToLeft })));
+  const debtUsdMicros = sumReserveUsdMicros(rcpanFrames.map((frame) => ({ token: frame.token, amount: frame.current.debt })));
+  const fcuanExposure = sumReserveUsdMicros(fcuanFrames.map((frame) => ({ token: frame.token, amount: frame.unsecuredClaim })));
 
   const rcpanUserReserves: readonly TokenReserveDisplayInput[] = rcpanFrames.map((frame) => ({ token: frame.token, amount: frame.current.userReserve }));
   const rcpanHubReserves: readonly TokenReserveDisplayInput[] = rcpanFrames.map((frame) => ({ token: frame.token, amount: frame.current.hubReserve }));
   const fcuanUserReserves: readonly TokenReserveDisplayInput[] = fcuanFrames.map((frame) => ({ token: frame.token, amount: frame.userReserve }));
   const fcuanHubReserves: readonly TokenReserveDisplayInput[] = fcuanFrames.map((frame) => ({ token: frame.token, amount: frame.hubReserve }));
 
-  const requestTopUp = totalTokenUsd(rcpanFrames.map((frame) => ({
+  const requestTopUp = sumReserveUsdMicros(rcpanFrames.map((frame) => ({
     token: frame.token,
     amount: frame.externalRequestTopUp,
   })));

@@ -1,3 +1,4 @@
+import { getSwapPairOrientation as resolvePairOrientation, isLiquidSwapToken as isLiquidToken } from '@xln/core/account/utils';
 import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
 import type { FrontendXlnFunctions } from '#lib/stores/xlnStore.ts';
@@ -131,53 +132,17 @@ export const createSwapPanelCore = (deps: SwapPanelCoreDeps) => {
   }
 
   function defaultTradingPairOrientations(): Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }> {
-    const runtimeRequiredPairs = deps.getRuntime()?.getDefaultSwapTradingPairs?.() || [];
-    const requiredPairs =
-      runtimeRequiredPairs.length > 0
-        ? runtimeRequiredPairs.map(pair => resolvePairOrientation(Number(pair.baseTokenId), Number(pair.quoteTokenId)))
-        : [resolvePairOrientation(1, 2), resolvePairOrientation(2, 3), resolvePairOrientation(1, 3)];
-    const seen = new Set<string>();
-    return requiredPairs.filter(pair => {
-      const key = `${pair.baseTokenId}/${pair.quoteTokenId}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }
-
-  function resolvePairOrientation(
-    tokenA: number,
-    tokenB: number,
-  ): { baseTokenId: number; quoteTokenId: number; pairId: string } {
-    const runtimeResolver = deps.getRuntime()?.getSwapPairOrientation;
-    if (runtimeResolver) return runtimeResolver(tokenA, tokenB);
-    const left = Math.min(tokenA, tokenB);
-    const right = Math.max(tokenA, tokenB);
-    const pairId = `${left}/${right}`;
-    const isLiquid = (id: number) => id === 1 || id === 3;
-    if (isLiquid(tokenA) && !isLiquid(tokenB)) return { baseTokenId: tokenB, quoteTokenId: tokenA, pairId };
-    if (!isLiquid(tokenA) && isLiquid(tokenB)) return { baseTokenId: tokenA, quoteTokenId: tokenB, pairId };
-    return { baseTokenId: left, quoteTokenId: right, pairId };
-  }
-
-  function isLiquidToken(tokenIdValue: number): boolean {
-    const runtimeChecker = deps.getRuntime()?.isLiquidSwapToken;
-    if (runtimeChecker) return runtimeChecker(tokenIdValue);
-    return tokenIdValue === 1 || tokenIdValue === 3;
+    const reader = deps.getRuntime()?.getDefaultSwapTradingPairs;
+    if (!reader) throw new Error('SWAP_PAIR_READER_UNAVAILABLE');
+    return reader().map(pair => resolvePairOrientation(pair.baseTokenId, pair.quoteTokenId));
   }
 
   function tokenIdsForJurisdiction(jurisdiction: string): number[] {
     const cleanJurisdiction = String(jurisdiction || '').trim();
     if (!cleanJurisdiction) return [];
     const resolver = deps.getRuntime()?.getTokenIdsForJurisdiction;
-    if (!resolver) return [1, 2, 3];
-    try {
-      return resolver(cleanJurisdiction)
-        .map(tokenId => Number(tokenId))
-        .filter(tokenId => Number.isFinite(tokenId) && tokenId > 0);
-    } catch {
-      return [1, 2, 3];
-    }
+    if (!resolver) throw new Error('SWAP_TOKEN_REGISTRY_UNAVAILABLE');
+    return resolver(cleanJurisdiction);
   }
 
   function buildPairOrientationsForTokenIds(
@@ -205,20 +170,12 @@ export const createSwapPanelCore = (deps: SwapPanelCoreDeps) => {
   }
 
   function buildPairOptions(jurisdiction: string): PairOption[] {
-    const runtimeRequiredPairs = deps.getRuntime()?.getDefaultSwapTradingPairs?.() || [];
+    const runtimeRequiredPairs = defaultTradingPairOrientations();
     const jurisdictionPairs = buildPairOrientationsForTokenIds(tokenIdsForJurisdiction(jurisdiction));
-    const requiredPairCandidates = [
+    const requiredPairs = [
       ...runtimeRequiredPairs.map(pair => resolvePairOrientation(Number(pair.baseTokenId), Number(pair.quoteTokenId))),
       ...jurisdictionPairs,
     ];
-    const requiredPairs =
-      requiredPairCandidates.length > 0
-        ? requiredPairCandidates
-        : [
-            resolvePairOrientation(1, 2), // WETH/USDC
-            resolvePairOrientation(2, 3), // WETH/USDT
-            resolvePairOrientation(1, 3), // USDC/USDT
-          ];
     const allowedPairKeys = new Set(requiredPairs.map(pair => `${pair.baseTokenId}/${pair.quoteTokenId}`));
     const replica = deps.getCurrentReplica();
     const configuredPairs = Array.isArray(replica?.state?.swapTradingPairs) ? replica.state.swapTradingPairs : [];

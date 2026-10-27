@@ -367,7 +367,7 @@
       current = await fetchCurrentDeployVersion();
     } catch (error) {
       logAppShellDiagnostic('Deploy version fetch failed', error);
-      return false;
+      throw error;
     }
 
     const storedVersion = readStoredDeployVersion();

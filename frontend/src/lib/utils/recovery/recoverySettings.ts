@@ -39,7 +39,6 @@ export function normalizeTowerMode(mode: unknown): RecoveryServiceMode {
 export function normalizeRecoveryDraft(towers: RecoveryTowerConfig[] | undefined): RecoveryTowerConfig[] {
   const deduped = new Map<string, RecoveryTowerConfig>();
   for (const tower of towers || []) {
-    try {
       const url = normalizeRecoveryUrl(tower.url);
       if (tower.enabled === false) continue;
       deduped.set(url, {
@@ -49,9 +48,6 @@ export function normalizeRecoveryDraft(towers: RecoveryTowerConfig[] | undefined
         towerMode: normalizeTowerMode(tower.towerMode),
         enabled: true,
       });
-    } catch {
-      // Ignore malformed persisted service URLs in UI drafts.
-    }
   }
   return [...deduped.values()];
 }

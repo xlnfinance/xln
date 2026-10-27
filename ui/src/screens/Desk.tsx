@@ -261,7 +261,8 @@ export function Desk() {
               {recent.movements.slice(0, 8).map((movement, index) => (
                 <ActivityRow key={movement.id} movement={movement} names={wallet.names} first={index === 0} />
               ))}
-              {recent.movements.length === 0 && !recent.loading ? (
+              {recent.error ? <p role="alert" className="note">{recent.error}</p> : null}
+              {recent.movements.length === 0 && !recent.loading && !recent.error ? (
                 <p className="note" style={{ padding: '6px 0' }}>
                   Quiet so far.
                 </p>

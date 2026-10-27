@@ -229,6 +229,8 @@ export async function autoCreateEntityForSigner(
     }
 
     const names = listJMachineNames(runtimeEnv);
+    if (jurisdiction && jurisdiction !== 'default' && !names.includes(jurisdiction))
+      throw new Error(`ENTITY_JURISDICTION_UNAVAILABLE:${jurisdiction}`);
     const targetJurisdiction =
       (jurisdiction && jurisdiction !== 'default' && names.includes(jurisdiction))
         ? jurisdiction

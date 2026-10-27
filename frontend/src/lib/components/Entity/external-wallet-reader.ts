@@ -2,7 +2,7 @@ import { isAddress, ZeroAddress } from 'ethers';
 import type { JAdapter } from '@xln/core/api/public/runtime-module';
 import { safeParse } from '@xln/core/protocol/serialization';
 import { WalletSnapshotSourceAdvancedError } from '@xln/core/jurisdiction/adapter/rpc/wallet/snapshot-source';
-import { isUnknownRecord } from '#lib/utils/boundary/index.ts';
+import { isUnknownRecord, requireBigInt } from '#lib/utils/boundary/index.ts';
 import type { EntityReplica } from '#lib/types/ui.ts';
 import { readJsonResponse } from './account/account-faucet';
 import type { ExternalToken } from './assets/entity-asset-catalog';
@@ -17,7 +17,6 @@ import {
 } from './assets/external-wallet-snapshot';
 
 const REQUEST_TIMEOUT_MS = 5_000;
-type JTokenRegistryItem = Awaited<ReturnType<JAdapter['getTokenRegistry']>>[number];
 type ExternalWalletState = EntityReplica['state']['externalWallet'];
 
 const normalizeOptionalTokenType = (value: unknown): 0 | 1 | 2 | undefined => {
@@ -48,49 +47,14 @@ export function createExternalTokenCatalogLoader(fetchCatalog: () => Promise<Ext
   let cache: ExternalToken[] | null = null;
 
   return async function getTokenList(
-    jadapter: JAdapter | null | undefined,
     runtimeId: string,
     jurisdiction: string,
   ): Promise<ExternalToken[]> {
     const nextKey = `${runtimeId}|${jurisdiction}`;
     if (nextKey === cacheKey && cache) return cloneTokenCatalog(cache);
 
-    let tokens: ExternalToken[] = [];
-    let apiError: unknown = null;
-    try {
-      tokens = await fetchCatalog();
-    } catch (error) {
-      apiError = error;
-    }
-    if (tokens.length === 0 && jadapter?.getTokenRegistry) {
-      const registry = await jadapter.getTokenRegistry();
-      if (registry?.length) {
-        tokens = registry.map((token: JTokenRegistryItem) => {
-          const decimals = Number(token.decimals);
-          const tokenType = normalizeOptionalTokenType(token.tokenType);
-          const externalTokenId = normalizeOptionalExternalTokenId(token.externalTokenId);
-          if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
-            throw new Error(`TOKEN_CATALOG_DECIMALS_INVALID:${String(token.tokenId)}:${String(token.decimals)}`);
-          }
-          if (tokenType === undefined || externalTokenId === undefined) {
-            throw new Error(`TOKEN_CATALOG_ASSET_CLASS_MISSING:${String(token.tokenId)}`);
-          }
-          return {
-            symbol: token.symbol,
-            address: token.address,
-            balance: 0n,
-            decimals,
-            tokenId: normalizeOptionalTokenId(token.tokenId),
-            tokenType,
-            externalTokenId,
-          };
-        });
-      }
-    }
-    if (tokens.length === 0) {
-      const reason = apiError instanceof Error ? apiError.message : String(apiError || 'empty catalog');
-      throw new Error(`TOKEN_CATALOG_UNAVAILABLE:${reason}`, { cause: apiError ?? undefined });
-    }
+    const tokens = await fetchCatalog();
+    if (!tokens.length) throw new Error('TOKEN_CATALOG_UNAVAILABLE:empty catalog');
     cacheKey = nextKey;
     cache = cloneTokenCatalog(tokens);
     return cloneTokenCatalog(cache);
@@ -355,45 +319,40 @@ export async function requestExternalWalletSnapshot(
     }
     throw new Error(data?.error || `External wallet snapshot failed (${response.status})`);
   }
-  // A point-in-time RPC read is display data, not proof that an event prefix is complete.
-  const balanceByToken = new Map(
-    (data.tokenBalances ?? [])
-      .filter(entry => !entry.error)
-      .map(entry => [
-        String(entry.tokenAddress || '')
-          .trim()
-          .toLowerCase(),
-        BigInt(String(entry.balance ?? '0')),
-      ]),
-  );
-  const allowanceByKey = new Map(
-    (data.allowances ?? [])
-      .filter(entry => !entry.error)
-      .map(entry => [
-        `${String(entry.tokenAddress || '')
-          .trim()
-          .toLowerCase()}:${String(entry.spender || '')
-          .trim()
-          .toLowerCase()}`,
-        BigInt(String(entry.allowance ?? '0')),
-      ]),
-  );
+  const tokenErrors = [
+    ...(data.tokenErrors ?? []),
+    ...(data.tokenBalances ?? []).filter(entry => entry.error),
+  ];
+  const allowanceErrors = [
+    ...(data.allowanceErrors ?? []),
+    ...(data.allowances ?? []).filter(entry => entry.error),
+  ];
+  const normalize = (value: string | undefined): string => String(value ?? '').trim().toLowerCase();
+  const balances = tokenList.map(token => {
+    const address = normalize(token.address);
+    if (tokenErrors.some(entry => normalize(entry.tokenAddress) === address)) return 0n;
+    const entry = data.tokenBalances?.find(item => normalize(item.tokenAddress) === address);
+    return requireBigInt(entry?.balance, `tokenBalance:${address}`);
+  });
+  const allowanceValues = allowanceReads.map(read => {
+    const matches = (entry: { tokenAddress?: string; spender?: string }) =>
+      normalize(entry.tokenAddress) === normalize(read.tokenAddress) && normalize(entry.spender) === normalize(read.spender);
+    if (allowanceErrors.some(matches)) return 0n;
+    return requireBigInt(data.allowances?.find(matches)?.allowance, `allowance:${read.tokenAddress}:${read.spender}`);
+  });
   return {
-    nativeBalance: BigInt(String(data.nativeBalance ?? '0')),
-    balances: tokenList.map(token => balanceByToken.get(token.address.trim().toLowerCase()) ?? 0n),
-    allowanceValues: allowanceReads.map(
-      read =>
-        allowanceByKey.get(`${read.tokenAddress.trim().toLowerCase()}:${read.spender.trim().toLowerCase()}`) ?? 0n,
-    ),
+    nativeBalance: requireBigInt(data.nativeBalance, 'nativeBalance'),
+    balances,
+    allowanceValues,
     ...(data.sourceHeight !== undefined || data.blockNumber !== undefined
       ? { sourceHeight: Number(data.sourceHeight ?? data.blockNumber) }
       : {}),
     ...((data.sourceHash ?? data.blockHash) ? { sourceHash: String(data.sourceHash ?? data.blockHash) } : {}),
     ...(data.finalityDepth !== undefined ? { finalityDepth: Number(data.finalityDepth) } : {}),
     ...(data.headBlockNumber !== undefined ? { headBlockNumber: Number(data.headBlockNumber) } : {}),
-    ...(data.tokenErrors?.length
+    ...(tokenErrors.length
       ? {
-          tokenErrors: data.tokenErrors.map(entry => ({
+          tokenErrors: tokenErrors.map(entry => ({
             tokenAddress: String(entry.tokenAddress || '')
               .trim()
               .toLowerCase(),
@@ -401,9 +360,9 @@ export async function requestExternalWalletSnapshot(
           })),
         }
       : {}),
-    ...(data.allowanceErrors?.length
+    ...(allowanceErrors.length
       ? {
-          allowanceErrors: data.allowanceErrors.map(entry => ({
+          allowanceErrors: allowanceErrors.map(entry => ({
             tokenAddress: String(entry.tokenAddress || '')
               .trim()
               .toLowerCase(),

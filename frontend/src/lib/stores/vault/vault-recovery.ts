@@ -485,6 +485,10 @@ export const summarizeRuntimeRecoveryTowerReceipt = (
   tower: RecoveryTowerConfig,
   receipt: TowerReceiptV1,
 ): RuntimeRecoveryTowerReceiptSummary => {
+  for (const field of ['height', 'sequence', 'receivedAt'] as const) {
+    if (typeof receipt[field] !== 'number' || !Number.isSafeInteger(receipt[field]) || receipt[field] < 0)
+      throw new Error(`TOWER_RECEIPT_INVALID:${field}`);
+  }
   const towerUrl = normalizeTowerBaseUrl(tower.url || receipt.towerId || '');
   const storedBytes = optionalNonNegativeInteger(receipt.storedBytes);
   const maxStoredBytes = optionalNonNegativeInteger(receipt.maxStoredBytes);

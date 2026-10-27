@@ -194,7 +194,7 @@ test('vault runtime recovery and restore diagnostics use persistent error log', 
   expect(cleanupSource).toContain("'Runtime Cleanup'");
   expect(cleanupSource).toContain('throw err;');
   expect(restoreSource).toContain('Restored runtime ${runtime.id.slice(0, 12)} from tower after ${reason}');
-  expect(restoreSource).toContain('Failed to restore env from tower; continuing with local recovery path');
+  expect(restoreSource).not.toContain('continuing with local recovery path');
   expect(restoreSource).toContain('Runtime restore failed for ${runtime.id.slice(0, 12)}; refusing to replace persisted state');
   expect(restoreSource).toContain('[VaultStore] Runtime restore failed for ${runtime.id.slice(0, 12)}');
   expect(restoreSource).not.toContain('Failed to load env from DB; falling back to fresh import');
@@ -220,8 +220,6 @@ test('vaultStore diagnostics do not use raw console output', () => {
   expect(persistence).not.toContain('catch');
   expect(source).toContain('createRuntime failed for ${id.slice(0, 12)}');
   expect(source).toContain("errorLog.log('Failed to register key/create entity', 'Runtime Creation'");
-  expect(source).toContain("errorLog.log('Failed to get balance', 'Runtime Balance'");
-  expect(source).toContain("errorLog.log('Send failed', 'Runtime Send'");
   expect(source).not.toContain('console.warn');
   expect(source).not.toContain('console.error');
   expect(source).not.toContain('console.info');

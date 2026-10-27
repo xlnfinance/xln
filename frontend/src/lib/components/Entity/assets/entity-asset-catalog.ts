@@ -144,7 +144,7 @@ export function resolveReserveTransferTokenBySymbol(options: {
   symbol: string;
   externalTokens: ExternalToken[];
   assetLedgerRows: AssetLedgerRow[];
-  resolveReserveTokenMeta: (tokenId: number, symbolHint?: string) => ReserveTokenMeta;
+  resolveReserveTokenMeta: (tokenId: number) => ReserveTokenMeta;
 }): ReserveTransferAsset | null {
   const token = findExternalTokenBySymbol(options.externalTokens, options.symbol);
   if (token && isReserveTransferToken(token)) {
@@ -152,7 +152,7 @@ export function resolveReserveTransferTokenBySymbol(options: {
   }
   const row = findAssetLedgerRowBySymbol(options.assetLedgerRows, options.symbol);
   if (!row || row.isNative || typeof row.tokenId !== 'number' || row.tokenId <= 0) return null;
-  const meta = options.resolveReserveTokenMeta(row.tokenId, row.symbol);
+  const meta = options.resolveReserveTokenMeta(row.tokenId);
   return {
     symbol: row.symbol,
     address: row.address || '',
@@ -164,7 +164,6 @@ export function resolveReserveTransferTokenBySymbol(options: {
 
 export function resolveReserveTokenMetaFromCatalog(options: {
   tokenId: number;
-  symbolHint?: string;
   externalTokens: ExternalToken[];
   getTokenInfo: (tokenId: number) => { symbol?: string; decimals?: number };
 }): ReserveTokenMeta {
@@ -177,18 +176,6 @@ export function resolveReserveTokenMetaFromCatalog(options: {
       symbol: byId.symbol,
       decimals: requireTokenDecimals(byId.decimals, `token:${options.tokenId}`),
     };
-  }
-  if (options.symbolHint) {
-    const bySymbol = options.externalTokens.find(
-      (token) => token.symbol?.toUpperCase?.() === options.symbolHint!.toUpperCase(),
-    );
-    if (bySymbol && typeof bySymbol.tokenId === 'number') {
-      return {
-        tokenId: bySymbol.tokenId,
-        symbol: bySymbol.symbol,
-        decimals: requireTokenDecimals(bySymbol.decimals, `token:${bySymbol.tokenId}`),
-      };
-    }
   }
   const info = options.getTokenInfo(options.tokenId);
   return {

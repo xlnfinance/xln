@@ -151,7 +151,7 @@ export function Assets() {
                           <span className="s">
                             {row.error
                               ? row.error
-                              : row.allowance === null
+                              : row.allowanceError ? `Allowance unavailable: ${row.allowanceError}` : row.allowance === null
                                 ? row.name
                                 : `Depository may pull ${formatMoney(row.allowance, row.decimals)}`}
                           </span>

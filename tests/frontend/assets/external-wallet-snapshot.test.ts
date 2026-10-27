@@ -113,7 +113,7 @@ describe('external wallet snapshot helpers', () => {
     expect(fetchSource).not.toContain('!envAtStart) {');
     expect(fetchSource).toContain('const xln = envAtStart ? await getXLN() : null;');
     expect(fetchSource).toContain('getCurrentEntityJAdapter(xln, envAtStart, "fetch-external-tokens")');
-    expect(fetchSource).toContain('const tokenList = await getTokenList(jadapter, runtimeId, jurisdiction);');
+    expect(fetchSource).toContain('const tokenList = await getTokenList(runtimeId, jurisdiction);');
     expect(fetchSource).toContain(
       'resolveExternalWalletSpender(jadapter, jurisdiction, panelView.jurisdictions ?? [])',
     );

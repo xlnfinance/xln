@@ -48,3 +48,11 @@ export type DeltaCapacityBarPresentation = Readonly<{
   }>;
   creditGradient?: boolean;
 }>;
+
+export function iconForSymbol(rawSymbol: string): { text: string; cls: string } {
+  const symbol = rawSymbol.toUpperCase();
+  if (symbol === 'USDC') return { text: '$', cls: 'usdc' };
+  if (symbol === 'USDT') return { text: '$', cls: 'usdt' };
+  if (symbol === 'WETH' || symbol === 'ETH') return { text: 'E', cls: 'weth' };
+  return { text: symbol.slice(0, 1) || 'T', cls: 'other' };
+}

@@ -1,7 +1,6 @@
 import type {
   RuntimeAdapter,
   RuntimeAdapterGraphFrame,
-  RuntimeAdapterTimelineIndexPage,
 } from '@xln/core/api/public/runtime-module';
 import { RemoteRuntimeAdapter } from '../../../../../core/api/runtime-adapter/remote';
 import type { Runtime } from '#lib/stores/runtimeStore.ts';
@@ -10,13 +9,7 @@ import {
   adapterNetworkTimelineSource,
   type NetworkTimelineSource,
 } from './networkTimelineSource';
-import {
-  normalizeRuntimeTimelineIndex,
-  type RuntimeTimelineIndex,
-} from './runtimeGraphTimeline';
 
-const PAGE_SIZE = 250;
-const PAGE_SCAN_LIMIT = 2_000;
 // The attach deadline covers the adapter's bounded socket open plus its bounded
 // authentication request. A shorter pool deadline cancelled healthy-but-slow
 // handshakes (a busy Hub under load) and then retried them.
@@ -49,31 +42,6 @@ export const networkTimelineSourceFor = async (runtime: Runtime): Promise<Networ
   return adapterNetworkTimelineSource(id, adapter);
 };
 
-export const readTimelineIndexPages = async (
-  adapter: Pick<RuntimeAdapter, 'read'>,
-  expectedRuntimeId: string,
-): Promise<RuntimeTimelineIndex> => {
-  const expected = runtimeId(expectedRuntimeId);
-  const entries: RuntimeAdapterTimelineIndexPage['entries'] = [];
-  let beforeHeight: number | undefined;
-  while (true) {
-    const page = await adapter.read<RuntimeAdapterTimelineIndexPage>('timeline-index', {
-      limit: PAGE_SIZE,
-      scanLimit: PAGE_SCAN_LIMIT,
-      ...(beforeHeight === undefined ? {} : { beforeHeight }),
-    });
-    const actual = runtimeId(page.runtimeId);
-    if (actual !== expected) throw new Error(`NETWORK_TIMELINE_RUNTIME_ID_MISMATCH:${expected}:${actual}`);
-    entries.push(...page.entries);
-    if (page.nextBeforeHeight === null) break;
-    const next = Math.floor(Number(page.nextBeforeHeight));
-    if (!Number.isFinite(next) || next < 2 || (beforeHeight !== undefined && next >= beforeHeight)) {
-      throw new Error(`NETWORK_TIMELINE_CURSOR_INVALID:${expected}:${page.nextBeforeHeight}`);
-    }
-    beforeHeight = next;
-  }
-  return normalizeRuntimeTimelineIndex({ runtimeId: expected, frames: entries });
-};
 
 type PoolEntry = {
   signature: string;

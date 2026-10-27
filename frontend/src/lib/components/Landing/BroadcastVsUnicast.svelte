@@ -396,16 +396,6 @@
             </g>
           {/each}
 
-          <!-- Jail bars over datacenter region at high TPS -->
-          {#if currentTPS >= 10000 && broadcastAlive <= 5}
-            <defs>
-              <pattern id="jail-bars" width="12" height="40" patternUnits="userSpaceOnUse">
-                <rect width="4" height="40" fill="#888"/>
-              </pattern>
-            </defs>
-            <rect x={centerX - 80} y={centerY - 80} width="160" height="160"
-                  fill="url(#jail-bars)" opacity="0.7" rx="8"/>
-          {/if}
         </svg>
       </div>
     </div>

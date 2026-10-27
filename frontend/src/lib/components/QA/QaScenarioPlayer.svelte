@@ -236,6 +236,8 @@
   }
 </script>
 
+{#if mediaError}<p role="alert">{mediaError}</p>{/if}
+
 <section
   class="qa-scenario-player"
   class:theater
@@ -295,7 +297,7 @@
         {/if}
       {:else if selectedVideo?.url}
         <div class="empty-media" data-testid="qa-video-loading">
-          {mediaError ?? 'Loading protected video artifact...'}
+          Loading protected video artifact...
         </div>
       {:else}
         <div class="empty-media" data-testid="qa-video-missing">

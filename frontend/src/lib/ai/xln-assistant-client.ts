@@ -21,7 +21,7 @@ type StreamEvent = Readonly<{ content: string; done: boolean }>;
 function parseJsonObject(value: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
   } catch {
     return null;
   }
@@ -33,6 +33,7 @@ export function parseAssistantSseLine(line: string): StreamEvent {
   const data = trimmed.slice(5).trim();
   if (data === '[DONE]') return { content: '', done: true };
   const parsed = parseJsonObject(data);
+  if (!parsed) throw new Error('AI_STREAM_EVENT_INVALID');
   return {
     content: typeof parsed?.['content'] === 'string' ? parsed['content'] : '',
     done: false,
@@ -125,11 +126,12 @@ export async function streamXlnAssistantReply(input: Readonly<{
     }
   } finally {
     try {
-      if (cancelAfterDone) await reader.cancel('AI_STREAM_DONE');
+      if (cancelAfterDone || !done) await reader.cancel(done ? 'AI_STREAM_DONE' : 'AI_STREAM_INTERRUPTED');
     } finally {
       reader.releaseLock();
     }
   }
+  if (!done) throw new Error('AI_STREAM_INTERRUPTED');
   if (!answer.trim()) throw new Error('Assistant returned no text.');
   return answer;
 }

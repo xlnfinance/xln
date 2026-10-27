@@ -43,41 +43,28 @@ export type TowerCoverage = {
 const STORAGE_KEY = 'xln-ui-recovery';
 const EMPTY: RecoveryConfig = { mode: 'local', towers: [] };
 
+function validateRecovery(value: unknown): RecoveryConfig {
+  if (!value || typeof value !== 'object' || !('mode' in value) || !('towers' in value)
+    || (value.mode !== 'tower' && value.mode !== 'local') || !Array.isArray(value.towers)
+    || !value.towers.every(url => typeof url === 'string')
+    || (value.mode === 'tower' && value.towers.length === 0)) throw new Error('RECOVERY_CONFIG_INVALID');
+  return { mode: value.mode, towers: value.towers.map(normalizeTowerUrl) };
+}
+
 const readAll = (): Record<string, RecoveryConfig> => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, RecoveryConfig>)
-      : {};
-  } catch {
-    return {};
-  }
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (raw === null) return {};
+  const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('RECOVERY_CONFIG_INVALID');
+  return Object.fromEntries(Object.entries(parsed).map(([id, value]) => [id, validateRecovery(value)]));
 };
 
-/** The towers this vault picked. Per vault, because the seed is what a tower stores for. */
 export function readRecovery(vaultId: string | null): RecoveryConfig {
-  if (!vaultId) return EMPTY;
-  const stored = readAll()[vaultId];
-  if (!stored) return EMPTY;
-  const towers = Array.isArray(stored.towers)
-    ? stored.towers
-        .map(url =>
-          String(url || '')
-            .trim()
-            .replace(/\/+$/, ''),
-        )
-        .filter(Boolean)
-    : [];
-  return { mode: stored.mode === 'tower' && towers.length > 0 ? 'tower' : 'local', towers };
+  return vaultId ? readAll()[vaultId] ?? EMPTY : EMPTY;
 }
 
 export function saveRecovery(vaultId: string, config: RecoveryConfig): RecoveryConfig {
-  const next: RecoveryConfig = {
-    mode: config.mode === 'tower' && config.towers.length > 0 ? 'tower' : 'local',
-    towers: config.towers,
-  };
+  const next = validateRecovery(config);
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...readAll(), [vaultId]: next }));
   return next;
 }

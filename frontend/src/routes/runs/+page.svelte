@@ -157,9 +157,7 @@
       const qaAuth = decodeQaAuthInfo(payload['qaAuth']);
       qaAuthLabel = qaAuth?.disabled ? 'open' : qaAuth?.scope ?? 'locked';
       const rawLedger = payload['ledger'];
-      if (rawLedger === undefined) {
-        ledger = [];
-      } else if (Array.isArray(rawLedger) && rawLedger.every(isQaRunLedgerEntry)) {
+      if (Array.isArray(rawLedger) && rawLedger.every(isQaRunLedgerEntry)) {
         ledger = rawLedger;
       } else {
         throw new Error('RUNS_LEDGER_INVALID');

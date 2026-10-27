@@ -15,7 +15,6 @@ import {
   type StoredRemoteRuntimeImportEntry,
 } from '#lib/utils/onboarding/remoteRuntimeImport.ts';
 import { validateRemoteRuntimeEntry } from '#lib/utils/onboarding/remoteRuntimeValidation.ts';
-import { getXLN } from './bootstrap/xlnRuntimeLoader';
 import {
   getRuntimeControllerConfig,
   runtimeControllerHandle,
@@ -314,25 +313,6 @@ const performRuntimeSelection = async (id: string): Promise<boolean> => {
 export const runtimeOperations = {
   setActiveRuntimeId(id: string): void {
     setRuntimeControllerPendingRuntimeId(id);
-  },
-
-  // Add local runtime (for multi-party testing)
-  async addLocalRuntime(label: string): Promise<string> {
-    const currentRuntimes = get(runtimes);
-    const id = `localhost:${8000 + currentRuntimes.size}`;
-
-    const xln = await getXLN();
-
-    runtimes.update(r => setRuntimeEntry(r, id, {
-        id,
-        type: 'local',
-        label,
-        env: publishRuntimeEnvView(xln.createEmptyEnv()),
-        permissions: 'write',
-        status: 'connected'
-      }));
-
-    return id;
   },
 
   async connectRemote(

@@ -76,3 +76,10 @@ export const parseJsonUnknown = (serialized: string, code: string): unknown => {
 };
 
 export const readJsonUnknown = async (response: Response): Promise<unknown> => await response.json();
+
+export const requireBigInt = (value: unknown, code: string): bigint => {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'string' && /^-?(0|[1-9]\d*)$/.test(value)) return BigInt(value);
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return BigInt(value);
+  throw new Error(code);
+};

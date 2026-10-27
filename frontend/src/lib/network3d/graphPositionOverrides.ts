@@ -5,10 +5,8 @@ export const GRAPH_POSITION_OVERRIDES_KEY = 'xln-graph-position-overrides-v1';
 
 const normalizePosition = (value: unknown): RuntimeGraphPosition | null => {
   if (!isUnknownRecord(value)) return null;
-  const x = Number(value['x']);
-  const y = Number(value['y']);
-  const z = Number(value['z']);
-  if (![x, y, z].every(Number.isFinite)) return null;
+  const { x, y, z } = value;
+  if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number' || ![x, y, z].every(Number.isFinite)) return null;
   if (value['jurisdiction'] !== undefined && typeof value['jurisdiction'] !== 'string') return null;
   const jurisdiction = String(value['jurisdiction'] || '').trim();
   return { x, y, z, ...(jurisdiction ? { jurisdiction } : {}) };
@@ -17,12 +15,13 @@ const normalizePosition = (value: unknown): RuntimeGraphPosition | null => {
 export const readGraphPositionOverrides = (storage: Storage | null): Map<string, RuntimeGraphPosition> => {
   if (!storage) return new Map();
   const raw = storage.getItem(GRAPH_POSITION_OVERRIDES_KEY);
-  if (!raw) return new Map();
+  if (raw === null) return new Map();
   const parsed = parseJsonUnknown(raw, 'GRAPH_POSITION_OVERRIDES_JSON_INVALID');
-  if (!isUnknownRecord(parsed)) return new Map();
+  if (!isUnknownRecord(parsed)) throw new Error('GRAPH_POSITION_OVERRIDES_INVALID');
   const entries = Object.entries(parsed).flatMap(([entityId, value]) => {
     const position = normalizePosition(value);
-    return position ? [[entityId.toLowerCase(), position] as const] : [];
+    if (!position) throw new Error(`GRAPH_POSITION_INVALID:${entityId}`);
+    return [[entityId.toLowerCase(), position] as const];
   });
   return new Map(entries);
 };

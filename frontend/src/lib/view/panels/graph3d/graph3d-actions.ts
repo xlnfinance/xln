@@ -38,12 +38,6 @@ export function buildGraphPaymentInput(
   };
 }
 
-export async function loadGraphScenarioSteps<T>(filename: string, parse: (source: string) => T): Promise<T | null> {
-  const response = await fetch(`/worlds/${filename}`);
-  if (!response.ok) return null;
-  return parse(await response.text());
-}
-
 export function collectGraphTokenIds(replicas: Map<string, GraphReplicaLike>): number[] {
   const tokenIds = new Set<number>([1]);
   for (const replica of replicas.values()) {

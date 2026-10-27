@@ -7,11 +7,13 @@ const readAllRecords = (): PushWakeRegistrationRecord[] => {
   const raw = localStorage.getItem(PUSH_WAKE_RECORDS_KEY);
   if (!raw) return [];
   const parsed = parseJsonUnknown(raw, 'PUSH_WAKE_RECORDS_JSON_INVALID');
-  if (!Array.isArray(parsed)) return [];
+  if (!Array.isArray(parsed)) throw new Error('PUSH_WAKE_RECORDS_INVALID');
   const records: PushWakeRegistrationRecord[] = [];
   for (const candidate of parsed) {
-    try {
-      if (!isRecord(candidate)) continue;
+    if (!isRecord(candidate) || typeof candidate['platform'] !== 'string' || !candidate['platform']
+      || typeof candidate['updatedAt'] !== 'number' || !Number.isSafeInteger(candidate['updatedAt']) || candidate['updatedAt'] < 0
+      || typeof candidate['chainId'] !== 'number' || !Number.isSafeInteger(candidate['chainId']))
+      throw new Error('PUSH_WAKE_RECORD_INVALID');
       records.push({
         runtimeId: normalizeRuntimeId(candidate['runtimeId']),
         entityId: normalizeEntityId(candidate['entityId']),
@@ -21,11 +23,8 @@ const readAllRecords = (): PushWakeRegistrationRecord[] => {
         chainId: normalizeChainId(candidate['chainId']),
         depositoryAddress: normalizeAddress(candidate['depositoryAddress'], 'PUSH_DEPOSITORY'),
         rpcUrl: normalizeHttpUrl(candidate['rpcUrl'], 'PUSH_RPC_URL'),
-        updatedAt: Math.max(0, Math.floor(Number(candidate['updatedAt'] || 0))),
+        updatedAt: candidate['updatedAt'],
       });
-    } catch {
-      // Ignore malformed local status entries; server registrations remain authoritative.
-    }
   }
   return records;
 };

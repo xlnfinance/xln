@@ -29,8 +29,7 @@
     mempool?: unknown[];
     state?: EntityStateLike;
   };
-  type JMachineLike = { blockNumber?: number; entities?: unknown[] };
-  type XlnomyLike = { name: string; jMachine?: JMachineLike };
+  type XlnomyLike = Pick<import('@xln/core/api/public/runtime-module').JReplica, 'name' | 'blockNumber'>;
   type RuntimeFrameLike = EnvSnapshot;
 
   // Receive isolated env as prop (passed from View.svelte)
@@ -280,14 +279,12 @@
                   <span class="expand-icon">{expandedXlnomies.has(xlnomy.name) ? '▼' : '▶'}</span>
                   <span class="entity-id">{xlnomy.name}</span>
                   <span class="replica-summary">
-                    block:{xlnomy.jMachine?.blockNumber || 0} |
-                    entities:{xlnomy.jMachine?.entities?.length || 0}
+                    block:{xlnomy.blockNumber}
                   </span>
                 </button>
                 {#if expandedXlnomies.has(xlnomy.name)}
                   <div class="replica-body">
-                    <div class="data-row"><span>Block:</span> {xlnomy.jMachine?.blockNumber || 0}</div>
-                    <div class="data-row"><span>Entities:</span> {xlnomy.jMachine?.entities?.length || 0}</div>
+                    <div class="data-row"><span>Block:</span> {xlnomy.blockNumber}</div>
                   </div>
                 {/if}
               </div>

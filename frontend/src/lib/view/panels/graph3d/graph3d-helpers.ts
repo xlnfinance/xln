@@ -403,15 +403,9 @@ export function formatGraphDualConnectionAccountInfo(input: {
   if (availableTokens.length === 0) {
     return { left: 'No tokens', right: 'No tokens', leftEntity, rightEntity };
   }
-  let tokenDelta = input.getAccountTokenDelta(input.accountData, input.selectedTokenId);
-  let displayTokenId = input.selectedTokenId;
-  if (!tokenDelta && availableTokens.length > 0) {
-    displayTokenId = availableTokens[0]!;
-    tokenDelta = input.getAccountTokenDelta(input.accountData, displayTokenId);
-  }
-  if (!tokenDelta) {
-    throw new Error(`FINTECH-SAFETY: Token ${displayTokenId} not found despite being in availableTokens`);
-  }
+  const tokenDelta = input.getAccountTokenDelta(input.accountData, input.selectedTokenId);
+  const displayTokenId = input.selectedTokenId;
+  if (!tokenDelta) return { left: `Token ${displayTokenId} absent`, right: `Token ${displayTokenId} absent`, leftEntity, rightEntity };
   const leftDerived = input.deriveEntry(tokenDelta, true);
   const rightDerived = input.deriveEntry(tokenDelta, false);
   const decimals = input.getTokenDecimals(displayTokenId);

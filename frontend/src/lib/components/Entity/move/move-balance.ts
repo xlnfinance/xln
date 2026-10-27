@@ -80,9 +80,10 @@ export function computeMoveSourceAvailableBalanceForEndpoint(input: {
       if (!input.liveTransferToken) return input.row?.reserveBalance ?? 0n;
       const tokenId = input.liveTransferToken.tokenId;
       const baseReserve = input.row?.reserveBalance ?? input.reserveBalance(tokenId);
-      const effective = baseReserve + input.draftReserveDelta(tokenId);
-      const debt = input.outgoingDebt(tokenId);
-      return effective > debt ? effective - debt : 0n;
+      return getMoveMaxAmountForEndpoint({
+        ...input, reserveToken: input.liveTransferToken, externalToken: null,
+        reserveBalance: () => baseReserve,
+      }) ?? 0n;
     }
     case 'account':
       return input.liveTransferToken && input.sourceAccountId

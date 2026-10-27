@@ -213,3 +213,13 @@ test('coalesced full fill proves exact give exhaustion without confusing partial
   }] };
   expect(hasCompleteSwapCompletion(partialCancel)).toBe(false);
 });
+
+
+test('positive swap fills cannot fabricate execution totals from ratios', () => {
+  const page = pageWire();
+  const item = page.items[0]!;
+  for (const field of ['executionGiveAmount', 'executionWantAmount'] as const) {
+    const bad = { ...page, items: [{ ...item, resolves: [{ ...item.resolves[0]!, fillRatio: 1, [field]: null }] }] };
+    expect(() => decodeSwapHistoryPage(bad)).toThrow('SWAP_EXECUTION_EVIDENCE_MISSING');
+  }
+});

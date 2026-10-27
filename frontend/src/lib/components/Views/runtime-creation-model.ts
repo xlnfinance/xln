@@ -116,13 +116,6 @@ export function hasSupportedMnemonicWordCount(value: string): boolean {
   return wordCount === 12 || wordCount === 24;
 }
 
-export function formatUSD(value: number): string {
-  if (value === 0) return '$0';
-  if (value < 0.01) return '<$0.01';
-  if (value >= 1000) return `$${(value / 1000).toFixed(1)}k`;
-  return `$${value.toFixed(2)}`;
-}
-
 export function formatRuntimeDurationRounded(ms: number): string {
   const safeMs = Math.max(0, Math.floor(ms));
   const totalSeconds = Math.max(0, Math.ceil(safeMs / 1000));

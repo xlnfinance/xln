@@ -223,6 +223,8 @@
 
   // System stats / MLX state
   let systemStats: SystemStats | null = null;
+  let statsError = '';
+  let saveError = '';
   let mlxLoading = false;
   let mlxLoadProgress = '';
   let mlxActiveModel: string | null = null;
@@ -402,13 +404,16 @@ Help the user understand this entity's state, suggest actions, or answer questio
   async function fetchSystemStats() {
     try {
       const res = await fetch(`${API_URL}/api/system/stats`);
+      if (!res.ok) throw new Error(`Stats HTTP ${res.status}`);
+      statsError = "";
       const data = await res.json();
       systemStats = data;
       mlxLoading = data.mlx?.loading || false;
       mlxLoadProgress = data.mlx?.loadProgress || '';
       mlxActiveModel = data.mlx?.activeModel || null;
     } catch (e) {
-      // Silently fail - stats are optional
+      systemStats = null;
+      statsError = e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -486,14 +491,16 @@ Help the user understand this entity's state, suggest actions, or answer questio
     };
 
     try {
-      await fetch(`${API_URL}/api/chats`, {
+      const response = await fetch(`${API_URL}/api/chats`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(session),
       });
+      if (!response.ok) throw new Error(`Save HTTP ${response.status}`);
+      saveError = "";
       await loadSavedChats();
     } catch (e) {
-      console.error('Failed to save chat:', e);
+      saveError = e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -583,6 +590,8 @@ Help the user understand this entity's state, suggest actions, or answer questio
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
         });
+
+        if (!res.ok) throw new Error(`Chat HTTP ${res.status}: ${await res.text()}`);
 
         if (agentModeEnabled) {
           // Agent mode: non-streaming response, may contain tool calls
@@ -1061,6 +1070,8 @@ Help the user understand this entity's state, suggest actions, or answer questio
     return d.toLocaleTimeString() + '.' + d.getMilliseconds().toString().padStart(3, '0');
   }
 </script>
+{#if saveError}<p role="alert">Unsaved: {saveError} <button on:click={saveChat}>Retry save</button></p>{/if}
+{#if statsError}<p role="alert">Statistics unavailable: {statsError}</p>{/if}
 
 <svelte:window on:paste={handlePaste} />
 

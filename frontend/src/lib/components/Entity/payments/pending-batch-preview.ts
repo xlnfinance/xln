@@ -1,3 +1,4 @@
+import { requireBigInt } from '#lib/utils/boundary/index.ts';
 import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 import type { EntityTx, JBatch } from '@xln/core/api/public/runtime-module';
 import {
@@ -124,15 +125,7 @@ function pendingBatchTokenAmountLabel(
   options: PendingBatchLabelOptions,
 ): string {
   const tokenId = Number(tokenIdRaw || 0);
-  const amount = typeof amountRaw === 'bigint'
-    ? amountRaw
-    : (() => {
-        try {
-          return BigInt(String(amountRaw ?? 0));
-        } catch {
-          return 0n;
-        }
-      })();
+  const amount = requireBigInt(amountRaw, 'BATCH_AMOUNT_INVALID');
   if (tokenId > 0 && options.activeXlnFunctions?.formatTokenAmount) {
     return options.activeXlnFunctions.formatTokenAmount(tokenId, amount);
   }

@@ -52,7 +52,7 @@ describe('RuntimeGraphFrameCache', () => {
     // pool. Borrowing the live graph pool would let timeline disposal kill live rendering.
     const sourceResolver = source.slice(
       source.indexOf('export const networkTimelineSourceFor'),
-      source.indexOf('export const readTimelineIndexPages'),
+      source.indexOf('type PoolEntry'),
     );
     expect(sourceResolver).toContain('timelineRemoteReaders.adapterFor(runtime)');
     expect(sourceResolver).not.toContain('graphRemoteReaders');

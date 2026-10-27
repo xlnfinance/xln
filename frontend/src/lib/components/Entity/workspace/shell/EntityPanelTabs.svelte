@@ -1165,10 +1165,9 @@ function getAccountSpendableCapacity(counterpartyEntityId: string, tokenId: numb
   if (!derived) return 0n;
   return withdrawableCollateral(derived);
 }
-function resolveReserveTokenMeta(tokenId: number, symbolHint?: string): { tokenId: number; symbol: string; decimals: number } {
+function resolveReserveTokenMeta(tokenId: number): { tokenId: number; symbol: string; decimals: number } {
   return resolveReserveTokenMetaFromCatalog({
     tokenId,
-    ...(symbolHint === undefined ? {} : { symbolHint }),
     externalTokens,
     getTokenInfo,
   });
@@ -1254,7 +1253,7 @@ async function faucetReserves(tokenId: number = 1, symbolHint?: string) {
   }
   try {
     const requestApiBase = resolveApiBase();
-    const tokenMeta = resolveReserveTokenMeta(tokenId, symbolHint);
+    const tokenMeta = resolveReserveTokenMeta(tokenId);
     const amountStr = tokenMeta.symbol === "WETH" || tokenMeta.symbol === "ETH" ? "0.1" : "100";
     const amountWei = parseTokenAmountInput(amountStr, tokenMeta.decimals);
     const currentBalance = onchainReserves.get(tokenMeta.tokenId) ?? 0n;
@@ -1563,7 +1562,7 @@ async function fetchExternalTokens(forceSnapshot = false) {
       const envAtStart = getRuntimeEnv(actionRuntimeEnv);
       const xln = envAtStart ? await getXLN() : null;
       const jadapter = envAtStart && xln ? getCurrentEntityJAdapter(xln, envAtStart, "fetch-external-tokens") : null;
-      const tokenList = await getTokenList(jadapter, runtimeId, jurisdiction);
+      const tokenList = await getTokenList(runtimeId, jurisdiction);
       const entityId = resolveSelfEntityId();
       const spender = resolveExternalWalletSpender(jadapter, jurisdiction, panelView.jurisdictions ?? []);
       const allowanceReads = moveAllowanceRouteEnabled && isAddress(spender) && spender !== ZeroAddress ? tokenList.filter((token) => isAddress(token.address) && token.address !== ZeroAddress).map((token) => ({ tokenAddress: token.address, spender })) : [];
@@ -1791,6 +1790,7 @@ async function collateralToReserve(tokenId: number, amount: bigint, counterparty
       error: toErrorMessage(err, "Collateral to reserve failed"),
     });
     toasts.error(`Collateral → Reserve failed: ${(err as Error).message}`);
+    throw err;
   }
 }
 function openAssetMoveWorkspace(): void {
@@ -2677,8 +2677,9 @@ $: pendingBatchReserveIssue = getPendingBatchReserveIssue({
   openDebtByToken: openOutgoingDebtSummary.byToken,
 });
 $: pendingBatchReserveIssueText = formatBatchReserveIssue(pendingBatchReserveIssue, getPendingBatchLabelOptions());
-$: pendingBatchCanBroadcast = canBroadcastPendingBatch(pendingBatchState, pendingBatchReserveIssue);
+$: pendingBatchCanBroadcast = !pendingBatchPreviewError && canBroadcastPendingBatch(pendingBatchState, pendingBatchReserveIssue);
 function enqueueCurrentPendingBatchAction(action: "clear" | "broadcast" | "rebroadcast", context: string): Promise<void> {
+  if (pendingBatchPreviewError && action !== 'clear') throw new Error(pendingBatchPreviewError);
   return enqueuePendingBatchAction({
     activeIsLive,
     action,
@@ -2716,7 +2717,12 @@ async function rebroadcastPendingBatch(): Promise<void> {
 // Pending batch count for Accounts tab badge
 $: pendingBatchCount = pendingBatchState.count;
 $: pendingBatchMode = pendingBatchState.mode;
-$: pendingBatchPreview = buildPendingBatchPreview(pendingBatchState.previewBatch, getPendingBatchLabelOptions());
+let pendingBatchPreviewError = '';
+$: pendingBatchPreview = (() => {
+  pendingBatchPreviewError = '';
+  try { return buildPendingBatchPreview(pendingBatchState.previewBatch, getPendingBatchLabelOptions()); }
+  catch (error) { pendingBatchPreviewError = toErrorMessage(error, 'Batch preview failed'); return []; }
+})();
 const tabs: IconBadgeTabConfig<ViewTab>[] = [
   { id: "assets", icon: Landmark, label: "Assets" },
   { id: "accounts", icon: Users, label: "Accounts" },
@@ -2741,6 +2747,7 @@ $: if (typeof window !== "undefined") {
 }
 </script>
 <EntityPanelShell panelId={tab.id}>
+  {#if pendingBatchPreviewError}<p role="alert">Batch preview unavailable: {pendingBatchPreviewError}</p>{/if}
   <EntityPanelChrome
     {tab} {hideHeader} {showJurisdiction}
     {userModeHeader}

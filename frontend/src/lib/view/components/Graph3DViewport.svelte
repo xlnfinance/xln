@@ -1,19 +1,9 @@
 <script lang="ts">
-  import type { Writable } from 'svelte/store';
-  import type { RuntimeReplica, EnvSnapshot } from '@xln/core/api/public/runtime-module';
-  import EntityMiniPanel from './EntityMiniPanel.svelte';
   import Graph3DFpsOverlay from './Graph3DFpsOverlay.svelte';
   import VRControlsHUD from './VRControlsHUD.svelte';
   import type { RuntimeGraphCanonicity } from '#lib/network3d/runtimeGraphProjection.ts';
 
   export let container: HTMLDivElement;
-  export let showMiniPanel = false;
-  export let miniPanelEntityId = '';
-  export let miniPanelEntityName = '';
-  export let miniPanelPosition: { x: number; y: number } = { x: 0, y: 0 };
-  export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
-  export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
-  export let runtimeFrameTimeIndex: Writable<number>;
   export let showFpsOverlay = false;
   export let renderFps = 0;
   export let frameTime = 0;
@@ -44,9 +34,6 @@
   export let presentMode = false;
   export let onRuntimeScopeChange: (scope: string) => void = () => {};
   export let onCanonicityChange: (policy: RuntimeGraphCanonicity) => void = () => {};
-  export let closeMiniPanel: () => void = () => {};
-  export let handleMiniPanelAction: (event: CustomEvent) => void = () => {};
-  export let handleOpenFullPanel: (event: CustomEvent) => void = () => {};
   export let toggleBarsMode: () => void = () => {};
   export let handleVrPaymentClick: () => void = () => {};
   export let handleVrAutoRotateClick: () => void = () => {};
@@ -136,19 +123,6 @@
     </div>
   {/if}
 
-  {#if showMiniPanel}
-    <EntityMiniPanel
-      entityId={miniPanelEntityId}
-      entityName={miniPanelEntityName}
-      position={miniPanelPosition}
-      {runtimeFrameEnv}
-      {runtimeFrameHistory}
-      {runtimeFrameTimeIndex}
-      on:close={closeMiniPanel}
-      on:action={handleMiniPanelAction}
-      on:openFull={handleOpenFullPanel}
-    />
-  {/if}
 
   {#if showFpsOverlay}
     <Graph3DFpsOverlay

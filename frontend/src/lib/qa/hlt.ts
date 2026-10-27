@@ -67,7 +67,7 @@ const decodeLedgerRun = (value: unknown, index: number): HltLedgerRun => {
   const record = requireUnknownRecord(value, `HLT_LEDGER_RUN_INVALID:${index}`);
   const status = record['status'];
   if (status !== 'green' && status !== 'red') throw new Error(`HLT_LEDGER_STATUS_INVALID:${index}`);
-  const engine = record['engine'] ?? 'ts';
+  const engine = record['engine'];
   if (engine !== 'ts' && engine !== 'rust') throw new Error(`HLT_LEDGER_ENGINE_INVALID:${index}`);
   return {
     at: requireString(record, 'at', `HLT_LEDGER_AT_INVALID:${index}`),

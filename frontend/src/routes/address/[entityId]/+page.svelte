@@ -207,7 +207,7 @@
         entity = null;
       }
       if (!entity) entity = summaryEntity;
-      if (!entity && projectionError) throw projectionError;
+      if (projectionError) throw projectionError;
       if (!entity) error = 'Entity not found in runtime projection.';
     } catch (err) {
       errorLog.log('Entity explorer projection read failed', 'Entity Explorer', { entityId: normalized, err });

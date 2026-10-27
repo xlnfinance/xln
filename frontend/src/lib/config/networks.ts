@@ -101,13 +101,4 @@ export const POPULAR_NETWORKS: NetworkConfig[] = [
   },
 ];
 
-export function isBrowserVM(rpcs: string[]): boolean {
-  return rpcs.length === 0;
-}
-
 export const BROWSERVM_CHAIN_START = 31337;
-export const BROWSERVM_CHAIN_MAX = 31338;
-
-export function isBrowserVMChainId(chainId: number): boolean {
-  return chainId >= BROWSERVM_CHAIN_START && chainId <= BROWSERVM_CHAIN_MAX;
-}

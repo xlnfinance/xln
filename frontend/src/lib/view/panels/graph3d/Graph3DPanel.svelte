@@ -63,7 +63,7 @@ import {
   buildSimpleRadialLayout,
   type EntityLabelContent,
 } from "./graph3d-visuals";
-import type { GraphConnectionData, GraphEntityData, GraphEntityProfile, GraphFrameActivity, GraphRendererMode, GraphRipple, GraphXLNRuntime } from "./graph3d-types";
+import type { GraphConnectionData, GraphEntityData, GraphEntityProfile, GraphFrameActivity, GraphRendererMode, GraphXLNRuntime } from "./graph3d-types";
 import { advanceMotionEffect, createMotionBlock, createMotionPacket, createMotionRipple, MOTION_KIND_STYLE, motionEffectObjects, type MotionAnchor, type MotionEffect, type MotionEndpoint, type MotionStyle } from "./presentation/graph3d-motion";
 import { advanceCameraTween, currentCameraShot, frameGraphPoints, presentationViewDirection, shotFromCameraCue, type CameraShot, type CameraTween } from "./presentation/graph3d-director";
 import { setGraphObjectDimmed } from "./graph3d-focus";
@@ -72,10 +72,6 @@ import { collectGraphTokenIds, getGraphEntitySizeForToken } from "./graph3d-acti
 import { presentationCapacityScale as presentationCapacityScaleFor, stageBarRadiusScale, stageLabelScale, stagePacketScale, stageUnit } from "./graph3d-stage";
 import type { AccountAnnotationContext } from "#lib/network3d/timeline/accountAnnotation.ts";
 import { formatStageAmount, formatStageChange, reservesByEntity } from "#lib/network3d/timeline/presentationStage.ts";
-let showMiniPanel = false;
-let miniPanelEntityId = "";
-let miniPanelEntityName = "";
-let miniPanelPosition = { x: 0, y: 0 };
 export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
 export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
 export let runtimeFrameTimeIndex: Writable<number>;
@@ -407,7 +403,6 @@ $: if (entities.length > 0) {
 }
 let isVRSupported: boolean = false;
 let isVRActive: boolean = false;
-let activeRipples: GraphRipple[] = [];
 let availableRoutes: GraphPaymentRoute[] = [];
 let selectedRouteIndex: number = 0;
 let graphInitialized = false;
@@ -1773,7 +1768,6 @@ function animate() {
     baseMaterial.color = pulseColor;
     baseMaterial.opacity = gridOpacity + gridPulseIntensity * 0.3; // Brighten on pulse
   }
-  updateRipples();
   if (renderer && camera) {
     renderer.render(scene, camera);
     perfMonitor.end(); // Complete FPS measurement
@@ -2189,7 +2183,6 @@ function onMouseClick(event: MouseEvent) {
     }
     selectGraphEntity(entity);
   } else {
-    showMiniPanel = false;
     selectedGraphEntityId = "";
     updateGraphSelectionVisual();
   }
@@ -2288,25 +2281,6 @@ function getEntityName(entityId: string): string {
 }
 function getSignerIdForEntity(entityId: string): string {
   return getGraphSignerIdForEntity(getTimeAwareReplicas(), entityId);
-}
-function closeMiniPanel() {
-  showMiniPanel = false;
-}
-function handleMiniPanelAction(event: CustomEvent) {
-  const { type, entityId } = event.detail;
-  const entityName = getEntityName(entityId);
-  panelBridge.emit("openEntityOperations", {
-    entityId,
-    entityName,
-    signerId: getSignerIdForEntity(entityId),
-    action: type, // 'r2r' or 'r2c'
-  });
-  showMiniPanel = false;
-}
-function handleOpenFullPanel(event: CustomEvent) {
-  const { entityId, entityName, signerId } = event.detail;
-  panelBridge.emit("openEntityOperations", { entityId, entityName, signerId: signerId || entityId });
-  showMiniPanel = false;
 }
 function onMouseDoubleClick(event: MouseEvent) {
   const rect = renderer.domElement.getBoundingClientRect();
@@ -2475,24 +2449,6 @@ function calculateAvailableRoutes(from: string, to: string) {
   });
   selectedRouteIndex = 0;
 }
-function updateRipples() {
-  const now = Date.now();
-  activeRipples = activeRipples.filter((ripple) => {
-    const elapsed = now - ripple.startTime;
-    const progress = Math.min(elapsed / ripple.duration, 1);
-    if (progress >= 1) {
-      graphWorld.remove(ripple.mesh);
-      ripple.mesh.geometry.dispose();
-      (ripple.mesh.material as THREE.Material).dispose();
-      return false;
-    }
-    const scale = 0.1 + progress * ripple.maxRadius;
-    ripple.mesh.scale.set(scale, scale, 1);
-    const material = ripple.mesh.material as THREE.MeshBasicMaterial;
-    material.opacity = 0.8 * (1 - progress); // Fade out
-    return true;
-  });
-}
 function getEntityBalanceInfo(entityId: string): string {
   return formatGraphEntityBalanceInfo({
     entityId,
@@ -2548,7 +2504,7 @@ function handleVrAutoRotateClick(): void {
 </script>
 <Graph3DViewport
   bind:container
-  {showMiniPanel} {miniPanelEntityId} {miniPanelEntityName} {miniPanelPosition} {runtimeFrameEnv} {runtimeFrameHistory} {runtimeFrameTimeIndex} {showFpsOverlay}
+  {showFpsOverlay}
   {renderFps} {frameTime}
   entityCount={entities.length} connectionCount={connections.length} particleCount={motionEffects.length} {presentMode}
   {barsMode} {isVRActive} {tooltip} {dualTooltip}
@@ -2557,5 +2513,5 @@ function handleVrAutoRotateClick(): void {
   timelineRuntimeColor={$networkMachineRuntime.selectedStep?.activeRuntimeColor ?? ''} timelineHeight={$networkMachineRuntime.selectedStep?.event.height ?? 0} timelineTimestamp={$networkMachineRuntime.selectedStep?.event.timestamp ?? 0}
   onRuntimeScopeChange={(scope) => { void selectGraphRuntimeScope(scope).catch(reportGraphInitError); }}
   onCanonicityChange={selectGraphCanonicity}
-  {closeMiniPanel} {handleMiniPanelAction} {handleOpenFullPanel} {toggleBarsMode} {handleVrPaymentClick} {handleVrAutoRotateClick} {exitVR}
+  {toggleBarsMode} {handleVrPaymentClick} {handleVrAutoRotateClick} {exitVR}
 />

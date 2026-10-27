@@ -120,22 +120,4 @@ export class PerformanceMonitor {
     this.frameTime = 16.67;
   }
 
-  /**
-   * Check if WebGPU is supported
-   */
-  static async checkWebGPUSupport(): Promise<boolean> {
-    if (!navigator.gpu) return false;
-
-    try {
-      const adapter = await navigator.gpu.requestAdapter();
-      return !!adapter;
-    } catch (e) {
-      return false;
-    }
-  }
 }
-
-/**
- * Singleton instance for global access
- */
-export const perfMonitor = new PerformanceMonitor();

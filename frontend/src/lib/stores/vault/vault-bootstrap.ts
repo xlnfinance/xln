@@ -30,11 +30,11 @@ export const summarizeHealth = (payload: HealthPayload | null): Record<string, u
 };
 
 export const resolveJurisdictionChainId = (config: JurisdictionConfig, context: string): number => {
-  const chainId = Number(config.chainId || 31337);
-  if (!Number.isFinite(chainId) || chainId <= 0) {
+  const chainId = config.chainId;
+  if (typeof chainId !== 'number' || !Number.isSafeInteger(chainId) || chainId <= 0) {
     throw new Error(`[${context}] CHAIN_ID_INVALID: ${String(config.chainId)}`);
   }
-  return Math.floor(chainId);
+  return chainId;
 };
 
 export const fetchJurisdictions = async (baseOrigin?: string): Promise<JurisdictionsPayload> => {
@@ -44,33 +44,12 @@ export const fetchJurisdictions = async (baseOrigin?: string): Promise<Jurisdict
       ? (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__?.trim() || null
       : null;
   const bust = `ts=${Date.now()}`;
-  const candidates = configuredApiBase
-    ? Array.from(
-        new Set([`${configuredApiBase}/api/jurisdictions?${bust}`, `${primaryOrigin}/api/jurisdictions?${bust}`]),
-      )
-    : [`${primaryOrigin}/api/jurisdictions?${bust}`];
-
-  let lastError: unknown = null;
-  for (const url of candidates) {
-    try {
-      const resp = await fetch(url, {
-        cache: 'no-store',
-        headers: {
-          'cache-control': 'no-cache, no-store, must-revalidate',
-          pragma: 'no-cache',
-        },
-      });
-      if (!resp.ok) {
-        lastError = new Error(`HTTP ${resp.status}`);
-        continue;
-      }
-      const payload = await readJsonUnknown(resp);
-      if (!isJurisdictionsPayload(payload)) throw new Error('JURISDICTIONS_RESPONSE_INVALID');
-      // Each jurisdiction is decoded again before use by the runtime bootstrap.
-      return payload;
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw lastError ?? new Error('Failed to fetch /api/jurisdictions');
+  const resp = await fetch(`${configuredApiBase ?? primaryOrigin}/api/jurisdictions?${bust}`, {
+    cache: 'no-store',
+    headers: { 'cache-control': 'no-cache, no-store, must-revalidate', pragma: 'no-cache' },
+  });
+  if (!resp.ok) throw new Error(`JURISDICTIONS_HTTP_ERROR:${resp.status}`);
+  const payload = await readJsonUnknown(resp);
+  if (!isJurisdictionsPayload(payload)) throw new Error('JURISDICTIONS_RESPONSE_INVALID');
+  return payload;
 };

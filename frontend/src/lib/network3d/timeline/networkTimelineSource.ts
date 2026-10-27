@@ -124,8 +124,8 @@ export const adapterNetworkTimelineSource = (
         if (actual !== expected) throw new Error(`NETWORK_TIMELINE_RUNTIME_ID_MISMATCH:${expected}:${actual}`);
         entries.push(...page.entries);
         if (page.nextBeforeHeight === null) break;
-        const next = Math.floor(Number(page.nextBeforeHeight));
-        if (!Number.isFinite(next) || next < 2 || (beforeHeight !== undefined && next >= beforeHeight)) {
+        const next: number = page.nextBeforeHeight;
+        if (!Number.isSafeInteger(next) || next < 2 || (beforeHeight !== undefined && next >= beforeHeight)) {
           throw new Error(`NETWORK_TIMELINE_CURSOR_INVALID:${expected}:${String(page.nextBeforeHeight)}`);
         }
         beforeHeight = next;
@@ -168,8 +168,9 @@ export const adapterNetworkTimelineSource = (
           collected.set(String(event.id), event);
         }
         if (page.nextBeforeHeight === null) break;
-        const next = Math.floor(Number(page.nextBeforeHeight));
-        if (!Number.isFinite(next) || next < 2 || (beforeHeight !== undefined && next >= beforeHeight)) break;
+        const next: number = page.nextBeforeHeight;
+        if (!Number.isSafeInteger(next) || next < 2 || (beforeHeight !== undefined && next >= beforeHeight))
+          throw new Error(`NETWORK_ACTIVITY_CURSOR_INVALID:${expected}:${page.nextBeforeHeight}`);
         if (next <= from) break;
         beforeHeight = next;
       }

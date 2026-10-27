@@ -63,7 +63,7 @@ export function parseSwapDisplayPriceTicks(displayPrice: string, defaultPriceTic
   const normalized = normalizeDisplayPriceForInput(displayPrice);
   const ticks = parseDecimalAmountToBigInt(normalized, ORDERBOOK_PRICE_DECIMALS);
   if (ticks <= 0n) return defaultPriceTicks;
-  return ticks > 0n ? ticks : defaultPriceTicks;
+  return ticks;
 }
 
 export function computePriceDeviationBps(limitTicks: bigint, referenceTicks: bigint): bigint {

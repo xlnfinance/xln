@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fetchQaBlobUrl } from '#lib/qa/apiClient.ts';
+  import { loadProtectedMedia } from './protected-media';
 
   type Props = {
     url?: string;
@@ -12,30 +12,7 @@
   let blobUrl = $state('');
   let error = $state('');
 
-  $effect(() => {
-    const sourceUrl = String(url || '').trim();
-    let objectUrl = '';
-    let cancelled = false;
-    blobUrl = '';
-    error = '';
-    if (!sourceUrl) return;
-    void fetchQaBlobUrl(sourceUrl)
-      .then((nextUrl) => {
-        objectUrl = nextUrl;
-        if (cancelled) {
-          URL.revokeObjectURL(nextUrl);
-          return;
-        }
-        blobUrl = nextUrl;
-      })
-      .catch((err) => {
-        if (!cancelled) error = err instanceof Error ? err.message : String(err);
-      });
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  });
+  $effect(() => loadProtectedMedia(url, (next, failure) => { blobUrl = next; error = failure; }));
 </script>
 
 {#if blobUrl}

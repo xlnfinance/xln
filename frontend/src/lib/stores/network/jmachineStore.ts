@@ -7,7 +7,6 @@
 
 import { writable, get } from 'svelte/store';
 import { ethers } from 'ethers';
-import { compareStableText } from '#lib/utils/stableSort.ts';
 import { isUnknownRecord as isRecord, parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
 import { errorLog } from '../errorLogStore';
 
@@ -43,10 +42,12 @@ const defaultState: JMachineStoreState = {
 };
 
 const normalizeAddress = (value: unknown): string | undefined => {
-  if (typeof value !== 'string') return undefined;
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') throw new Error('J_MACHINE_ADDRESS_INVALID');
   const trimmed = value.trim();
   if (!trimmed) return undefined;
-  return ethers.isAddress(trimmed) ? ethers.getAddress(trimmed) : undefined;
+  if (!ethers.isAddress(trimmed)) throw new Error(`J_MACHINE_ADDRESS_INVALID:${trimmed}`);
+  return ethers.getAddress(trimmed);
 };
 
 const normalizeRpcList = (value: unknown): string[] => {
@@ -137,18 +138,6 @@ export function normalizeJMachineConfig(raw: unknown): JMachineConfig | null {
       ? Math.floor(createdAtRaw)
       : deriveJMachineCreatedAt({ name, mode, chainId, ticker, rpcs, blockTimeMs }),
   };
-}
-
-export function normalizeJMachineConfigList(raw: unknown): JMachineConfig[] {
-  if (!Array.isArray(raw)) return [];
-  const configs = raw
-    .map((entry) => normalizeJMachineConfig(entry))
-    .filter((entry): entry is JMachineConfig => !!entry);
-  const deduped = new Map<string, JMachineConfig>();
-  for (const config of configs) {
-    deduped.set(config.name.toLowerCase(), config);
-  }
-  return Array.from(deduped.values()).sort((a, b) => compareStableText(a.name, b.name));
 }
 
 export function parseJMachineConfigJson(raw: string): JMachineConfig {
@@ -312,7 +301,7 @@ export const jmachineOperations = {
       const current = get(jmachineState);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
     } catch (error) {
-      errorLog.log('Failed to save J-Machine configs', 'J-Machine Store', error);
+      throw new Error('J_MACHINE_PERSIST_FAILED', { cause: error });
     }
   },
 

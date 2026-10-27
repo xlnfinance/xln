@@ -112,7 +112,10 @@ export const normalizeActivityHistoryPage = (
   if ((raw as { ok?: unknown }).ok === false) {
     throw new Error('ACTIVITY_HISTORY_READ_FAILED');
   }
-  const events = Array.isArray(raw.events) ? raw.events : [];
+  if (!Array.isArray(raw.events) || !Number.isSafeInteger(raw.latestHeight)
+    || (raw.nextBeforeHeight !== null && (!Number.isSafeInteger(raw.nextBeforeHeight) || Number(raw.nextBeforeHeight) < 1)))
+    throw new Error('ACTIVITY_HISTORY_PAGE_INVALID');
+  const events = raw.events;
   const failures = Array.isArray(raw.failures) ? raw.failures : [];
   return {
     ok: true,

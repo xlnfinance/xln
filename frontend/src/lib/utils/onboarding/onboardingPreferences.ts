@@ -46,12 +46,18 @@ const normalizeHubJoinPreference = (value: unknown): HubJoinPreference => {
 };
 
 const normalizePolicyDefaults = (value: unknown): PolicyDefaults | null => {
-  if (!isUnknownRecord(value)) return null;
+  if (value === undefined) return null;
+  if (!isUnknownRecord(value)) throw new Error('COLLATERAL_POLICY_INVALID');
   const raw = value;
+  for (const key of ['r2cRequestSoftLimit', 'hardLimit', 'maxFee']) {
+    const amount = raw[key];
+    if (typeof amount !== 'number' || !Number.isSafeInteger(amount) || amount < 0)
+      throw new Error(`COLLATERAL_POLICY_INVALID:${key}`);
+  }
   const softLimitUsd = toUsdInt(raw['r2cRequestSoftLimit'], DEFAULT_POLICY.softLimitUsd);
   const hardLimitUsd = toUsdInt(raw['hardLimit'], DEFAULT_POLICY.hardLimitUsd);
   const maxFeeUsd = toUsdInt(raw['maxFee'], DEFAULT_POLICY.maxFeeUsd);
-  if (softLimitUsd <= 0 || hardLimitUsd < softLimitUsd) return null;
+  if (softLimitUsd <= 0 || hardLimitUsd < softLimitUsd) throw new Error('COLLATERAL_POLICY_LIMITS_INVALID');
   return { softLimitUsd, hardLimitUsd, maxFeeUsd };
 };
 
@@ -70,20 +76,18 @@ const loadPolicyDefaultsFromJurisdictions = async (): Promise<Map<string, Policy
 
     try {
       const response = await fetch('/api/jurisdictions', { cache: 'no-store' });
-      if (!response.ok) {
-        cachedPolicyDefaultsByJurisdiction = result;
-        return result;
-      }
+      if (!response.ok) throw new Error(`ONBOARDING_POLICY_HTTP_ERROR:${response.status}`);
       const payload = await readJsonUnknown(response);
       if (!isUnknownRecord(payload)) throw new Error('ONBOARDING_POLICY_PAYLOAD_INVALID');
       const defaults = payload['defaults'];
       const jurisdictionsValue = payload['jurisdictions'];
-      if (defaults !== undefined && !isUnknownRecord(defaults)) throw new Error('ONBOARDING_POLICY_DEFAULTS_INVALID');
-      if (jurisdictionsValue !== undefined && !isUnknownRecord(jurisdictionsValue)) throw new Error('ONBOARDING_POLICY_JURISDICTIONS_INVALID');
-      const globalDefaults = normalizePolicyDefaults(defaults?.['rebalancePolicyUsd']) ?? DEFAULT_POLICY;
+      if (!isUnknownRecord(defaults)) throw new Error('ONBOARDING_POLICY_DEFAULTS_INVALID');
+      if (!isUnknownRecord(jurisdictionsValue)) throw new Error('ONBOARDING_POLICY_JURISDICTIONS_INVALID');
+      const globalDefaults = normalizePolicyDefaults(defaults['rebalancePolicyUsd']);
+      if (!globalDefaults) throw new Error('ONBOARDING_POLICY_DEFAULTS_MISSING');
       result.set('default', globalDefaults);
 
-      const jurisdictions = jurisdictionsValue ?? {};
+      const jurisdictions = jurisdictionsValue;
       for (const [key, value] of Object.entries(jurisdictions)) {
         if (!isUnknownRecord(value)) throw new Error(`ONBOARDING_POLICY_JURISDICTION_INVALID:${key}`);
         const jurisdictionDefaults = normalizePolicyDefaults(value['rebalancePolicyUsd']) ?? globalDefaults;
@@ -91,8 +95,9 @@ const loadPolicyDefaultsFromJurisdictions = async (): Promise<Map<string, Policy
         const nameKey = typeof value['name'] === 'string' ? value['name'].trim().toLowerCase() : '';
         if (nameKey) result.set(nameKey, jurisdictionDefaults);
       }
-    } catch {
-      // Keep the canonical policy defaults when the optional endpoint is unavailable.
+    } catch (error) {
+      policyDefaultsLoadPromise = null;
+      throw error;
     }
 
     cachedPolicyDefaultsByJurisdiction = result;
@@ -125,7 +130,13 @@ export const readSavedCollateralPolicy = (): SavedCollateralPolicy => {
     const raw = localStorage.getItem(COLLATERAL_POLICY_KEY);
     if (!raw) return { mode: 'autopilot', ...defaults, timestamp: 0 };
     const parsed = parseJsonUnknown(raw, 'COLLATERAL_POLICY_JSON_INVALID');
-    if (!isUnknownRecord(parsed)) throw new Error('COLLATERAL_POLICY_INVALID');
+    if (!isUnknownRecord(parsed) || (parsed['mode'] !== 'manual' && parsed['mode'] !== 'autopilot'))
+      throw new Error('COLLATERAL_POLICY_INVALID');
+    for (const key of ['softLimitUsd', 'hardLimitUsd', 'maxFeeUsd', 'timestamp']) {
+      const value = parsed[key];
+      if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)
+        throw new Error(`COLLATERAL_POLICY_INVALID:${key}`);
+    }
 
     const softLimitUsd = toUsdInt(parsed['softLimitUsd'], defaults.softLimitUsd);
     const hardLimitUsd = toUsdInt(parsed['hardLimitUsd'], defaults.hardLimitUsd);
@@ -140,8 +151,8 @@ export const readSavedCollateralPolicy = (): SavedCollateralPolicy => {
       maxFeeUsd,
       timestamp: Number.isFinite(timestamp) ? timestamp : 0,
     };
-  } catch {
-    return { mode: 'autopilot', ...defaults, timestamp: 0 };
+  } catch (cause) {
+    throw new Error('COLLATERAL_POLICY_INVALID', { cause });
   }
 };
 

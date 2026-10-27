@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { settings } from '#lib/stores/settingsStore.ts';
-  import type { DeltaParts } from './delta-types';
+  import { iconForSymbol, type DeltaParts } from './delta-types';
 
   export let symbol: string;
   export let name: string = '';
@@ -19,13 +19,6 @@
   let open = expanded;
   $: open = expanded;
 
-  function iconForSymbol(rawSymbol: string): { text: string; cls: string } {
-    const s = String(rawSymbol || '').toUpperCase();
-    if (s === 'USDC') return { text: '$', cls: 'usdc' };
-    if (s === 'USDT') return { text: '$', cls: 'usdt' };
-    if (s === 'WETH' || s === 'ETH') return { text: 'E', cls: 'weth' };
-    return { text: s.slice(0, 1) || 'T', cls: 'other' };
-  }
   $: icon = iconForSymbol(symbol);
 
   const num = (b: bigint | undefined): number => (b == null ? 0 : Number(b));

@@ -239,11 +239,14 @@ const decodeResolveRecord = (value: unknown, index: number): ResolveRecord => {
   const executionWantAmount = record['executionWantAmount'];
   const feeTokenId = record['feeTokenId'];
   const feeAmount = record['feeAmount'];
+  const fillRatio = requireUint(record['fillRatio'], `SWAP_HISTORY_RESOLVE_RATIO_INVALID:${index}`, 65535);
+  if (fillRatio > 0 && (executionGiveAmount === null || executionWantAmount === null))
+    throw new Error(`SWAP_EXECUTION_EVIDENCE_MISSING:${index}`);
   if (typeof record['cancelRemainder'] !== 'boolean' || typeof record['comment'] !== 'string') {
     throw new Error(`SWAP_HISTORY_RESOLVE_VALUE_INVALID:${index}`);
   }
   return {
-    fillRatio: requireUint(record['fillRatio'], `SWAP_HISTORY_RESOLVE_RATIO_INVALID:${index}`, 65535),
+    fillRatio,
     fillNumerator: fillNumerator === null ? null : requireBigInt(fillNumerator, `SWAP_HISTORY_RESOLVE_FILL_NUMERATOR_INVALID:${index}`),
     fillDenominator: fillDenominator === null ? null : requireBigInt(fillDenominator, `SWAP_HISTORY_RESOLVE_FILL_DENOMINATOR_INVALID:${index}`),
     cancelRemainder: record['cancelRemainder'],
@@ -344,18 +347,6 @@ export function isDustOpenOffer(
   return remainingUsd > 0 && remainingUsd < minOrderNotionalUsd;
 }
 
-export function computeFilledPpmFromRatios(resolves: ResolveRecord[]): bigint {
-  let remainingPpm = 1_000_000n;
-  for (const resolve of resolves) {
-    const ratio = BigInt(Math.max(0, Math.min(65535, Math.round(resolve.fillRatio || 0))));
-    const filledThisStep = (remainingPpm * ratio) / 65535n;
-    remainingPpm = remainingPpm - filledThisStep;
-    if (remainingPpm < 0n) remainingPpm = 0n;
-    if (resolve.cancelRemainder) break;
-  }
-  return 1_000_000n - remainingPpm;
-}
-
 export function computeOfferExecutionSummary(
   lifecycle: OfferLifecycle,
   deps: OrderHistoryDeps,
@@ -381,16 +372,16 @@ export function computeOfferExecutionSummary(
   let priceImprovementAmount = 0n;
   let feeAmount = 0n;
   let feeTokenId: number | null = null;
-  let sawExactExecution = false;
 
   const resolves = Array.isArray(lifecycle.resolves) ? lifecycle.resolves : [];
   for (const resolve of resolves) {
     const executionGiveAmount = resolve.executionGiveAmount;
     const executionWantAmount = resolve.executionWantAmount;
+    if (resolve.fillRatio > 0 && (executionGiveAmount === null || executionWantAmount === null))
+      throw new Error('SWAP_EXECUTION_EVIDENCE_MISSING');
     if (executionGiveAmount === null || executionWantAmount === null) continue;
     if (executionGiveAmount <= 0n || executionWantAmount <= 0n) continue;
 
-    sawExactExecution = true;
     filledGiveAmount += executionGiveAmount;
     filledWantAmount += executionWantAmount;
 
@@ -416,21 +407,6 @@ export function computeOfferExecutionSummary(
       feeAmount += resolve.feeAmount ?? 0n;
       feeTokenId = resolve.feeTokenId ?? lifecycle.wantTokenId;
     }
-  }
-
-  if (!sawExactExecution) {
-    const filledPpm = computeFilledPpmFromRatios(resolves);
-    return {
-      filledGiveAmount: (lifecycle.giveAmount * filledPpm) / 1_000_000n,
-      filledWantAmount: (lifecycle.wantAmount * filledPpm) / 1_000_000n,
-      filledBaseAmount: (targetBaseAmount * filledPpm) / 1_000_000n,
-      targetBaseAmount,
-      filledPpm,
-      priceImprovementAmount: 0n,
-      priceImprovementTokenId: null,
-      feeAmount: 0n,
-      feeTokenId: null,
-    };
   }
 
   const boundedFilledBase = filledBaseAmount > targetBaseAmount ? targetBaseAmount : filledBaseAmount;

@@ -86,9 +86,9 @@ describe('entity asset catalog helpers', () => {
   test('resolves reserve transfer metadata from token first, then ledger row', () => {
     const tokens = [token({ symbol: 'USDC', tokenId: 1, balance: 7n })];
     const rows = [row({ symbol: 'USDT', tokenId: 2, externalBalance: 9n })];
-    const resolveReserveTokenMeta = (tokenId: number, symbolHint?: string) => ({
+    const resolveReserveTokenMeta = (tokenId: number) => ({
       tokenId,
-      symbol: symbolHint ?? `TKN${tokenId}`,
+      symbol: `TKN${tokenId}`,
       decimals: 6,
     });
 
@@ -121,10 +121,9 @@ describe('entity asset catalog helpers', () => {
     })).toEqual({ tokenId: 1, symbol: 'USDC', decimals: 6 });
     expect(resolveReserveTokenMetaFromCatalog({
       tokenId: 99,
-      symbolHint: 'dai',
       externalTokens: tokens,
       getTokenInfo: () => ({ symbol: 'RUNTIME', decimals: 8 }),
-    })).toEqual({ tokenId: 3, symbol: 'DAI', decimals: 18 });
+    })).toEqual({ tokenId: 99, symbol: 'RUNTIME', decimals: 8 });
     expect(resolveReserveTokenMetaFromCatalog({
       tokenId: 99,
       externalTokens: tokens,

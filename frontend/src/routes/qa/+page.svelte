@@ -662,9 +662,7 @@
       if (nextRunId && nextRunId !== selectedRunId) {
         selectedRunId = nextRunId;
         await loadRun(nextRunId);
-      } else if (!selectedRunId && nextRunId) {
-        selectedRunId = nextRunId;
-        await loadRun(nextRunId);
+
       }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);

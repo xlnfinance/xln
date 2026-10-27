@@ -44,6 +44,10 @@ export function toDerivedAccountData(
   raw: Partial<Record<keyof DerivedAccountData, unknown>> | null | undefined,
 ): DerivedAccountData {
   const out = {} as DerivedAccountData;
-  for (const field of DERIVED_ACCOUNT_FIELDS) out[field] = Number(raw?.[field] ?? 0n);
+  for (const field of DERIVED_ACCOUNT_FIELDS) {
+    const value = raw?.[field];
+    if (typeof value !== 'bigint' || !Number.isFinite(Number(value))) throw new Error(`DERIVED_ACCOUNT_FIELD_INVALID:${field}`);
+    out[field] = Number(value);
+  }
   return out;
 }

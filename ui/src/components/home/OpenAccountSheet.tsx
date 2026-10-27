@@ -8,7 +8,7 @@ import { Sheet } from '../Sheet';
 import { useApp } from '../../runtime/store';
 import { sendEntityTxs } from '../../runtime/tx';
 import { accountDisputeConfig, gossipProfile } from '../../runtime/financial/roles';
-import { parseAmount, shortId, plainAmount } from '../../runtime/format';
+import { parseAmount, shortId, amountInputText } from '../../runtime/format';
 import { getTokenMeta } from '../../runtime/token-meta';
 import type { WalletView } from '../../runtime/views';
 import type { RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
@@ -125,7 +125,7 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
             style={{ padding: '10px 10px' }}
             onClick={() => {
               setTargetId(id);
-              setCreditText(wallet.hubs.has(id) ? plainAmount(getHubOpeningCredit(selectedTokenId), meta.decimals) : '0');
+              setCreditText(wallet.hubs.has(id) ? amountInputText(getHubOpeningCredit(selectedTokenId), meta.decimals) : '0');
             }}
           >
             <span className="t">
@@ -145,7 +145,7 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
           onChange={event => {
             const id = event.target.value.trim().toLowerCase();
             setTargetId(id);
-            setCreditText(wallet.hubs.has(id) ? plainAmount(getHubOpeningCredit(selectedTokenId), meta.decimals) : '0');
+            setCreditText(wallet.hubs.has(id) ? amountInputText(getHubOpeningCredit(selectedTokenId), meta.decimals) : '0');
           }}
           spellCheck={false}
           data-testid="open-account-target"

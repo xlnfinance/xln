@@ -144,8 +144,8 @@ describe('graph3d helpers', () => {
       getTokenDecimals: getUsdcDecimals,
     });
     expect(info).toEqual({
-      left: 'Their Credit: 7\nCollateral: 3\nOur Credit: 5\nNet: 2',
-      right: 'Our Credit: 6\nCollateral: 4\nTheir Credit: 8\nNet: -2',
+      left: 'Token 1 absent',
+      right: 'Token 1 absent',
       leftEntity: 'ALICE',
       rightEntity: 'BOB',
     });

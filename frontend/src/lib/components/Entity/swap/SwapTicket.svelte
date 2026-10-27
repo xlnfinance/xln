@@ -68,8 +68,8 @@
   export let wantToken = 2;
   export let formatAmount: (amount: bigint, tokenId: number) => string = () => '';
   export let targetCapacityLabel = '0';
-  export let maxFee: bigint = 0n;
-  export let minNetReceive: bigint = 0n;
+  export let maxFee: bigint | null = null;
+  export let minNetReceive: bigint | null = null;
 
   export let tokenClass: (symbol: string) => string = () => '';
   export let tokenIconText: (symbol: string) => string = () => '';
@@ -326,8 +326,8 @@
   />
 
   <div class="swap-net-authorization" data-testid="swap-net-authorization">
-    <span>Maximum fee <strong data-testid="swap-max-fee">{formatAmount(maxFee, wantToken)} {wantTokenSymbol}</strong></span>
-    <span>Minimum receive <strong data-testid="swap-min-net-receive">{formatAmount(minNetReceive, wantToken)} {wantTokenSymbol}</strong></span>
+    <span>Maximum fee <strong data-testid="swap-max-fee">{maxFee === null ? "Unavailable" : formatAmount(maxFee, wantToken)} {wantTokenSymbol}</strong></span>
+    <span>Minimum receive <strong data-testid="swap-min-net-receive">{minNetReceive === null ? "Unavailable" : formatAmount(minNetReceive, wantToken)} {wantTokenSymbol}</strong></span>
   </div>
 
   {#if swapRouteMode === 'cross'}
@@ -366,7 +366,7 @@
     class="swap-ticket-submit"
     data-testid="swap-ticket-submit"
     on:click={placeSwapOffer}
-    disabled={placingSwapOffer || Boolean(swapActionDisabledReason)}
+    disabled={placingSwapOffer || maxFee === null || minNetReceive === null || Boolean(swapActionDisabledReason)}
   >
     {placingSwapOffer ? swapSubmitLabel : (swapActionDisabledReason || swapSubmitLabel)}
   </button>

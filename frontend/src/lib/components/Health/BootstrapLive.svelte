@@ -355,7 +355,7 @@
     const mmOfferTotal = (data.marketMaker?.hubs ?? []).reduce((sum, hub) => sum + numberOrZero(hub.offers), 0);
     const mmExpectedTotal = mmExpectedHubOffers * Math.max(1, mmHubCount);
     const mmFullHubs = (data.marketMaker?.hubs ?? []).filter((hub) =>
-      hub.depthReady === true || (mmExpectedHubOffers > 0 && numberOrZero(hub.offers) >= mmExpectedHubOffers),
+      hub.depthReady === true,
     ).length;
     const cross = data.marketMaker?.cross;
     const routeCount = cross?.routes?.length ?? cross?.routeCount ?? 0;
@@ -690,7 +690,7 @@
           {#each mmHubs as hub (hub.hubEntityId)}
             {@const expected = numberOrZero(health.marketMaker?.expectedOffersPerHub)}
             {@const progress = ratioPercent(numberOrZero(hub.offers), expected)}
-            <article class="book-card" class:ok={hub.depthReady === true || (expected > 0 && hub.offers >= expected)} style={progressStyle(progress)}>
+            <article class="book-card" class:ok={hub.depthReady === true} style={progressStyle(progress)}>
               <div class="book-main">
                 <strong>{short(hub.hubEntityId, 12)}</strong>
                 <span>{formatCount(hub.offers)}/{formatCount(expected)} offers</span>
@@ -699,7 +699,7 @@
               <div class="pair-pills">
                 {#each (hub.pairs ?? []).slice(0, QA.BOOTSTRAP_PAIR_PREVIEW_LIMIT) as pair (pair.pairId)}
                   {@const pairExpected = numberOrZero(pair.expectedOffers || health.marketMaker?.expectedOffersPerPair)}
-                  <span class:ok={pair.depthReady === true || (pairExpected > 0 && pair.offers >= pairExpected)}>
+                  <span class:ok={pair.depthReady === true}>
                     {pair.pairId}: {pair.offers}/{pairExpected}
                   </span>
                 {/each}

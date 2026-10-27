@@ -62,21 +62,20 @@ export const USD_PER_PX_MAX = 1000;
 const USD_PER_PX_DEFAULT = 10;
 
 function readStoredVaults(): VaultMeta[] {
-  try {
-    const raw = localStorage.getItem(VAULTS_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((entry): entry is VaultMeta => {
-      const v = entry as Partial<VaultMeta> | null;
-      return Boolean(v && typeof v.id === 'string' && typeof v.name === 'string' && typeof v.kind === 'string');
-    });
-  } catch {
-    return [];
-  }
+  const raw = localStorage.getItem(VAULTS_KEY);
+  if (raw === null) return [];
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed) || !parsed.every(entry => {
+    const v = entry as Partial<VaultMeta> | null;
+    return v && typeof v.id === 'string' && v.id.length > 0 && typeof v.name === 'string'
+      && ['brainvault', 'mnemonic', 'sandbox', 'remote', 'test'].includes(v.kind!)
+      && typeof v.createdAt === 'number' && Number.isSafeInteger(v.createdAt);
+  })) throw new Error('VAULT_REGISTRY_INVALID');
+  return parsed;
 }
 
 function persistVaults(vaults: VaultMeta[]): void {
+  readStoredVaults();
   localStorage.setItem(VAULTS_KEY, JSON.stringify(vaults));
 }
 

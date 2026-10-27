@@ -597,7 +597,10 @@
         evidence,
       });
     }
-    if (data.systemOk === false || data.coreOk === false) {
+    if (typeof data.systemOk !== 'boolean' || typeof data.coreOk !== 'boolean') {
+      return makeQaSeveritySignal({ severity: 'UNKNOWN', reason: 'Core/system checks unavailable', since: data.timestamp, owner: 'health', evidence });
+    }
+    if (data.systemOk !== true || data.coreOk !== true) {
       return makeQaSeveritySignal({
         severity: 'FAIL',
         reason: (data.degraded ?? []).join(', ') || 'Core/system health gate failed',

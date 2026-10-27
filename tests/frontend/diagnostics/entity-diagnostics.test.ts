@@ -38,11 +38,6 @@ const diagnosticFiles = [
     logLine: "errorLog.log(message, 'Payment Panel'",
   },
   {
-    path: 'frontend/src/lib/components/Entity/payments/SettlementPanel.svelte',
-    importLine: "import { errorLog } from '../../../stores/errorLogStore';",
-    logLine: "errorLog.log(message, 'Settlement Panel'",
-  },
-  {
     path: 'frontend/src/lib/components/Entity/swap/SwapPanel.svelte',
     importLine: "import { errorLog } from '../../../stores/errorLogStore';",
     logLine: "errorLog.log(message, 'Swap Panel'",
@@ -61,18 +56,13 @@ test('entity action surfaces persist diagnostics instead of raw console output',
   }
 });
 
-test('payment and settlement panels persist every critical action failure path', () => {
+test('payment panel persists every critical action failure path', () => {
   const paymentSource = readFileSync('frontend/src/lib/components/Entity/payments/PaymentPanel.svelte', 'utf8');
   expect(paymentSource).toContain("'Payment runtime graph route lookup failed'");
   expect(paymentSource).toContain("'Payment route finding failed'");
   expect(paymentSource).toContain("'Payment submission failed'");
 
-  const settlementSource = readFileSync('frontend/src/lib/components/Entity/payments/SettlementPanel.svelte', 'utf8');
-  expect(settlementSource).toContain("'Settlement batch clear failed'");
-  expect(settlementSource).toContain("'On-J batch broadcast failed'");
-  expect(settlementSource).toContain("'On-J batch rebroadcast failed'");
-  expect(settlementSource).toContain("'On-J transfer action failed'");
-  expect(settlementSource).toContain("'Settlement auto execute into draft failed'");
+
 });
 
 test('swap panel persists every critical action failure path', () => {

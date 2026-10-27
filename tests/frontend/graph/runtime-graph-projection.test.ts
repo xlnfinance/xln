@@ -34,7 +34,7 @@ import {
   parseNetworkMachineConfig,
   type NetworkMachineConfig,
 } from '../../../frontend/src/lib/network3d/networkMachine';
-import { readTimelineIndexPages } from '../../../frontend/src/lib/network3d/timeline/networkTimelineLoader';
+import { adapterNetworkTimelineSource } from '../../../frontend/src/lib/network3d/timeline/networkTimelineSource';
 import { assertNetworkMachineIsLive } from '../../../frontend/src/lib/stores/network/networkMachineRuntimeStore';
 import {
   beginGraphGesture,
@@ -484,7 +484,7 @@ describe('NetworkMachine runtime indexes', () => {
             ], scannedHeights: 2, nextBeforeHeight: 3 };
       },
     };
-    const index = await readTimelineIndexPages(adapter as never, 'remote-a');
+    const index = await adapterNetworkTimelineSource('remote-a', adapter as never).readIndex();
     expect(calls).toEqual([undefined, 3]);
     expect(index.frames.map((frame) => frame.height)).toEqual([1, 2, 3, 4]);
   });

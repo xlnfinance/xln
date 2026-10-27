@@ -9,9 +9,9 @@ describe('wallet lazy Entity id preview', () => {
     ], 1n)).toBe('0x03daa2cc6a91f488a30e6ab87864bdc666916cfedac9d8772974a6e76ae199ea');
   });
 
-  test('preserves a bytes32 child Entity member without truncating it to an EOA', () => {
-    expect(generateLazyEntityIdPreview([
+  test('rejects a child Entity in the proposer position as canonical creation does', () => {
+    expect(() => generateLazyEntityIdPreview([
       '0x03daa2cc6a91f488a30e6ab87864bdc666916cfedac9d8772974a6e76ae199ea',
-    ], 1n)).toBe('0x502411deebd5451d1b9ba9a78af509975364590b775d32f1a741e0d139c7e5e9');
+    ], 1n)).toThrow('BOARD_PROPOSER_EOA_REQUIRED');
   });
 });

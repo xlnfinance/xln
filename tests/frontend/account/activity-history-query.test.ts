@@ -103,6 +103,7 @@ test('activity history normalizes the typed adapter page without alternate sourc
   const page = normalizeActivityHistoryPage({
     ok: true,
     latestHeight: 5,
+    nextBeforeHeight: null,
     fromHeight: 1,
     toHeight: 5,
     scannedFrames: 5,
@@ -135,4 +136,12 @@ test('activity history identifies transient browser storage read failures', () =
   expect(isTransientActivityReadError(new Error('Iterator is not open'))).toBe(true);
   expect(isTransientActivityReadError(new Error('cannot call next() after close'))).toBe(true);
   expect(isTransientActivityReadError(new Error('ACTIVITY_HISTORY_READ_FAILED'))).toBe(false);
+});
+
+
+test('activity responses must contain events and an explicit terminal or advancing cursor', () => {
+  const query = buildActivityHistoryReadQuery(baseInput);
+  for (const raw of [{}, { events: {} }, { events: [], latestHeight: 1 }, { events: [], latestHeight: 1, nextBeforeHeight: NaN }]) {
+    expect(() => normalizeActivityHistoryPage(raw, query)).toThrow('ACTIVITY_HISTORY_PAGE_INVALID');
+  }
 });

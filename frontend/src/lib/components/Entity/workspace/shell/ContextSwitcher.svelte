@@ -457,7 +457,10 @@
     });
   }
 
+  let selectionError = '';
+
   async function selectRemoteRuntime(runtimeId: string, entityId: string, requestId: number): Promise<boolean> {
+    selectionError = '';
     const selected = await runLatestRuntimeSelection(requestId, async (lease) => {
       if (!await runtimeOperations.selectRuntime(runtimeId, lease)) return false;
       if (requestId !== runtimeSelectionRequestId) return false;
@@ -467,7 +470,8 @@
         await refreshCurrentRuntimeProjection();
       } catch (error) {
         errorLog.log(error instanceof Error ? error.message : String(error), 'Remote Runtime Select', error);
-        return requestId === runtimeSelectionRequestId;
+        selectionError = error instanceof Error ? error.message : String(error);
+        return false;
       }
       return requestId === runtimeSelectionRequestId;
     });
@@ -520,6 +524,7 @@
     await resetEverything({ reason: 'context-switcher-manual-reset' });
   }
 </script>
+{#if selectionError}<p role="alert">{selectionError}</p>{/if}
 
 <div class="context-switcher">
 <Dropdown

@@ -270,8 +270,6 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
     <SettlementPanel
       entityId={replica.state?.entityId || tab.entityId}
       {replica}
-      isLive={activeIsLive}
-      historyOnly={true}
       {profiles}
     />
   {/if}

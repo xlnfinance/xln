@@ -84,10 +84,3 @@ export type GraphPaymentJob = {
   startedAt: number;
   intervalId?: number;
 };
-
-export type GraphRipple = {
-  mesh: THREE.Mesh;
-  startTime: number;
-  duration: number;
-  maxRadius: number;
-};

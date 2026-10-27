@@ -1,7 +1,6 @@
 <script lang="ts">
   /**
    * Architect Panel - God-mode controls (extracted from NetworkTopology sidebar)
-   * 5 modes: Explore, Build, Economy, Governance, Resolve
    *
    * @license AGPL-3.0
    * Copyright (C) 2025 XLN Finance
@@ -22,7 +21,6 @@
   import { computeAddress, hexlify } from 'ethers';
   import { activeRuntimeEntry as activeRuntimeStore } from '#lib/stores/runtimeStore.ts';
   import { activeRuntime as activeVaultRuntime } from '#lib/stores/vault/vaultStore.ts';
-  import SolvencyPanel from './solvency/SolvencyPanel.svelte';
 
   // Receive isolated env as props (passed from View.svelte) - REQUIRED
   export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
@@ -30,14 +28,12 @@
   export let runtimeFrameTimeIndex: Writable<number>;
   export let runtimeFrameIsLive: Writable<boolean>;
 
-  type Mode = 'explore' | 'build' | 'economy' | 'solvency' | 'governance' | 'resolve';
   type ArchitectRuntimeInput = {
     runtimeTxs: unknown[];
     entityInputs: unknown[];
     jInputs?: unknown[];
     timestamp?: number;
   };
-  let currentMode: Mode = 'economy';
   let loading = false;
   let lastAction = '';
   const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
@@ -51,7 +47,6 @@
 
   // Entity registration mode
   let numberedEntities = false; // Default: lazy (in-memory only, no blockchain needed)
-  let newEntityName = 'alice'; // For manual entity creation in Build mode
 
   // Xlnomy state
   let showCreateXlnomyModal = false;
@@ -1234,78 +1229,6 @@
   }
 
   /** Create new entity with custom name */
-  async function createEntity() {
-    if (!requireLiveMode('create entity')) return;
-    if (!newEntityName.trim()) {
-      lastAction = ' Enter entity name';
-      return;
-    }
-
-    if (!$runtimeFrameEnv?.activeJurisdiction) {
-      lastAction = ' Create Xlnomy first';
-      return;
-    }
-
-    loading = true;
-    lastAction = `Creating entity "${newEntityName}"...`;
-
-    try {
-      const XLN = await getXLN();
-      const env = requireRuntimeEnv('create entity');
-      const jurisdiction = requireActiveJurisdiction(env);
-
-      // Generate signerId from xlnomy name + entity name
-      const entitySeed = resolveRuntimeSeed();
-      if (!entitySeed) throw new Error('ENTITY_IMPORT_RUNTIME_SEED_REQUIRED');
-      const signerId = computeAddress(hexlify(XLN.deriveSignerKeySync(entitySeed, `architect-${newEntityName}`))).toLowerCase();
-      const entityId = XLN.generateLazyEntityId([signerId], 1n);
-
-      // Random position in 3D space
-      const position = {
-        x: Math.random() * 400 - 200,
-        y: Math.random() * 100,
-        z: Math.random() * 400 - 200
-      };
-
-      // Create entity via importReplica RuntimeTx
-      await ingressRuntimeInput({
-        runtimeTxs: [XLN.importEntity({
-          entityId,
-          signerId,
-          entitySeed,
-          data: {
-            config: {
-              mode: 'proposer-based',
-              threshold: 1n,
-              validators: [signerId],
-              shares: { [signerId]: 1n },
-              jurisdiction
-            },
-            isProposer: true,
-            position
-          }
-        })],
-        entityInputs: []
-      });
-
-      lastAction = ` Created "${newEntityName}"`;
-
-      // Auto-advance to next common name for fast creation
-      const names = ['alice', 'bob', 'charlie', 'dave', 'eve', 'frank', 'grace', 'heidi'];
-      const currentIndex = names.indexOf(newEntityName.toLowerCase());
-      newEntityName = currentIndex >= 0 && currentIndex < names.length - 1
-        ? (names[currentIndex + 1] || 'entity')
-        : 'entity'; // Canonical default name
-
-      publishCurrentEnv();
-    } catch (err: unknown) {
-      lastAction = ` ${errorMessage(err)}`;
-      console.error('[Architect] Create entity error:', err);
-    } finally {
-      loading = false;
-    }
-  }
-
 </script>
 
 <div class="architect-panel" data-testid="architect-panel">
@@ -1313,14 +1236,7 @@
     <h3> Architect</h3>
   </div>
 
-  <div class="mode-selector">
-    <select bind:value={currentMode} class="mode-dropdown">
-      <option value="economy">Economy</option>
-    </select>
-  </div>
-
   <div class="mode-content">
-    {#if currentMode === 'economy'}
       <h4>Economy Mode</h4>
 
       {#if !envReady}
@@ -1573,65 +1489,6 @@
         {/if}
       {/if}
 
-    {:else if currentMode === 'solvency'}
-      <h4>Solvency Monitor</h4>
-      <div class="solvency-embed">
-        <SolvencyPanel {runtimeFrameEnv} />
-      </div>
-
-    {:else if currentMode === 'build'}
-      <h4>Build Mode</h4>
-
-      {#if !envReady}
-        <div class="status loading">
-          ⏳ Initializing XLN environment...
-        </div>
-      {:else if !$runtimeFrameEnv?.activeJurisdiction}
-        <div class="status">
-          ⚠️ Create an Xlnomy first (Economy mode)
-        </div>
-      {:else}
-        <div class="action-section">
-          <h5>Create Entity</h5>
-          <div class="form-group">
-            <label for="entity-name">Entity Name:</label>
-            <input
-              id="entity-name"
-              type="text"
-              bind:value={newEntityName}
-              placeholder="alice"
-              on:keydown={(e) => e.key === 'Enter' && createEntity()}
-            />
-          </div>
-          <button class="action-btn" on:click={createEntity} disabled={loading || !newEntityName.trim()}>
-             Create Entity
-          </button>
-          <p class="help-text">Entities appear as dots in 3D space</p>
-        </div>
-
-        <div class="action-section">
-          <h5>Entities in {$runtimeFrameEnv.activeJurisdiction}</h5>
-          {#if entityIds.length === 0}
-            <p class="help-text">No entities yet. Create alice and bob to start!</p>
-          {:else}
-            <ul class="entity-list">
-              {#each entityIds as entityId}
-                <li>{shortAddress(entityId)}</li>
-              {/each}
-            </ul>
-          {/if}
-        </div>
-
-        {#if lastAction}
-          <div class="status" class:loading>
-            {lastAction}
-          </div>
-        {/if}
-      {/if}
-    {:else}
-      <h4>{currentMode.charAt(0).toUpperCase() + currentMode.slice(1)} Mode</h4>
-      <p>Coming soon...</p>
-    {/if}
   </div>
 </div>
 
@@ -1746,45 +1603,6 @@
 
   .scenario-code-textarea:focus {
     outline: 1px solid #007acc;
-  }
-
-  .mode-selector {
-    padding: 8px;
-    background: #252526;
-    border-bottom: 1px solid #3e3e3e;
-  }
-
-  .mode-dropdown {
-    width: 100%;
-    padding: 8px 12px;
-    background: #2d2d30;
-    border: 1px solid #3e3e3e;
-    color: #fff;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 12px;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23ccc' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 8px center;
-    padding-right: 28px;
-  }
-
-  .mode-dropdown:hover {
-    background-color: #37373d;
-    border-color: #007acc;
-  }
-
-  .mode-dropdown:focus {
-    outline: none;
-    border-color: #0e639c;
-    box-shadow: 0 0 0 1px #0e639c;
-  }
-
-  .mode-dropdown option {
-    background: #2d2d30;
-    color: #fff;
-    padding: 8px;
   }
 
   .mode-content {
@@ -2015,24 +1833,6 @@
 
   .modal-actions .action-btn {
     flex: 1;
-  }
-
-  .entity-list {
-    list-style: none;
-    padding: 0;
-    margin: 8px 0;
-    max-height: 200px;
-    overflow-y: auto;
-  }
-
-  .entity-list li {
-    padding: 6px 12px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 4px;
-    margin-bottom: 4px;
-    font-family: 'Courier New', monospace;
-    font-size: 12px;
-    color: #8be9fd;
   }
 
   /* ============================================ */
