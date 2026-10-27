@@ -4,13 +4,16 @@ use num_bigint::BigInt;
 use serde::Deserialize;
 use serde_json::Value;
 use xln_rscore_engine::{
-    AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountIdentity, AccountReplica,
-    AccountState, AccountTx, AccountVerdict, Delta, DepositoryAddress, EntityId,
-    SequentialAccountEngine, Side, SwapMarketPolicy, SwapToken, TokenId, WatchSeed,
+    AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountIdentity,
+    AccountRejection, AccountReplica, AccountState, AccountTx, AccountVerdict, Delta,
+    DepositoryAddress, EntityId, SequentialAccountEngine, Side, SwapMarketPolicy, SwapToken,
+    TokenId, ValidationRejection, WatchSeed,
 };
 use xln_rscore_runtime::canonical_value_from_tagged_json;
 
 const FIXTURE: &str = include_str!("../../../fixtures/account-semantics/cross-j-v1.json");
+const ROUTE_HASH_FIXTURE: &str =
+    include_str!("../../../fixtures/account-semantics/cross-j-route-hash-v1.json");
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -144,20 +147,13 @@ fn root(bytes: [u8; 32]) -> String {
     format!("0x{}", hex::encode(bytes))
 }
 
-fn assert_step(account: &mut AccountReplica, input: &Value, expected: &ExpectedStep, token: u32) {
-    let transaction = tx(input, &expected.tx_type);
-    assert_eq!(transaction.wire_name(), expected.tx_type);
-    let side = if expected.by_left {
-        Side::Left
-    } else {
-        Side::Right
-    };
-    let context = AccountExecutionContext::with_market(
-        expected.timestamp,
-        expected.timestamp,
-        expected.height,
-        expected.height,
-        expected.height,
+fn context(timestamp: u64, height: u64) -> AccountExecutionContext {
+    AccountExecutionContext::with_market(
+        timestamp,
+        timestamp,
+        height,
+        height,
+        height,
         Arc::new(SwapMarketPolicy::new(
             vec![
                 SwapToken {
@@ -173,7 +169,18 @@ fn assert_step(account: &mut AccountReplica, input: &Value, expected: &ExpectedS
             ],
             Vec::new(),
         )),
-    );
+    )
+}
+
+fn assert_step(account: &mut AccountReplica, input: &Value, expected: &ExpectedStep, token: u32) {
+    let transaction = tx(input, &expected.tx_type);
+    assert_eq!(transaction.wire_name(), expected.tx_type);
+    let side = if expected.by_left {
+        Side::Left
+    } else {
+        Side::Right
+    };
+    let context = context(expected.timestamp, expected.height);
     let transition =
         SequentialAccountEngine::apply_with_context(account, side, &transaction, &context)
             .expect("shared cross-J transition");
@@ -237,5 +244,80 @@ fn cross_j_account_transitions_match_the_shared_typescript_vector() {
             let input = &fixture.inputs[&expected.input];
             assert_step(&mut replica, input, &expected, token);
         }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RouteHashFixture {
+    version: u64,
+    canonical_source: String,
+    inputs: Value,
+    cases: Vec<RouteHashCase>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RouteHashCase {
+    name: String,
+    input: String,
+    account_state_root: String,
+    rejection: String,
+}
+
+/// Parity target: rscore/fixtures/account-semantics/cross-j-route-hash.ts.
+/// Rust recomputes the canonical route hash exactly as TypeScript
+/// `validateCrossJurisdictionSourceBinding`: a changed claim and a changed
+/// hashed field under the pull-bound claim are the same typed rejection, and
+/// the Account is unchanged.
+#[test]
+fn non_canonical_cross_j_offer_route_hash_matches_the_typescript_rejection() {
+    let fixture: RouteHashFixture =
+        serde_json::from_str(ROUTE_HASH_FIXTURE).expect("shared route-hash fixture");
+    assert_eq!(fixture.version, 1);
+    assert_eq!(
+        fixture.canonical_source,
+        "TypeScript applyAccountTxToMutableReplica"
+    );
+    assert_eq!(fixture.cases.len(), 2);
+    for test_case in fixture.cases {
+        let mut replica = account(true, false);
+        let lock = tx(&fixture.inputs["sourceLock"], "cross_pull_lock");
+        let locked = SequentialAccountEngine::apply_with_context(
+            &replica,
+            Side::Right,
+            &lock,
+            &context(1_000, 10),
+        )
+        .expect("source lock");
+        assert_eq!(locked.verdict(), &AccountVerdict::Applied);
+        replica = locked.committed().expect("locked candidate");
+        let before = root(
+            replica
+                .state()
+                .payment_profile_account_state_root()
+                .expect("state root"),
+        );
+        assert_eq!(before, test_case.account_state_root, "{}", test_case.name);
+        let offer = tx(&fixture.inputs[&test_case.input], "swap_offer");
+        let rejected = SequentialAccountEngine::apply_with_context(
+            &replica,
+            Side::Left,
+            &offer,
+            &context(1_000, 10),
+        )
+        .expect("route mismatch is a rejection, not an engine error");
+        assert!(
+            matches!(
+                rejected.verdict(),
+                AccountVerdict::Rejected(AccountRejection::Validation(
+                    ValidationRejection::AccountTx { message }
+                )) if *message == test_case.rejection
+            ),
+            "{}: {:?}",
+            test_case.name,
+            rejected.verdict()
+        );
+        assert!(rejected.candidate().is_none(), "{}", test_case.name);
     }
 }

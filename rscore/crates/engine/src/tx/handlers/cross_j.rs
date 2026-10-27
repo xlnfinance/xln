@@ -189,19 +189,19 @@ pub(crate) fn cross_market_source_is_base(
 
 pub(crate) fn validate_swap_offer_route(
     account: &AccountReplica,
-    route: &CanonicalValue,
+    route_value: &CanonicalValue,
     give_token_id: u32,
     want_token_id: u32,
     proposer: Side,
 ) -> Result<Side, String> {
-    let route = fields(route)?;
+    let route = fields(route_value)?;
     if string(route, "status")? != "resting"
         || get(route, "sourcePull").is_none()
         || get(route, "targetPull").is_none()
     {
         return Err("Cross-j swap must be prepared before entering the book".into());
     }
-    normalized_hex(&string(route, "routeHash")?, 32, "cross-j routeHash")?;
+    let canonical_hash = canonical_offer_route_hash(route_value, route)?;
     let identity = account.state().identity();
     let left = identity.left().as_hex().to_ascii_lowercase();
     let right = identity.right().as_hex().to_ascii_lowercase();
@@ -244,11 +244,32 @@ pub(crate) fn validate_swap_offer_route(
     let binding = object(paired, "crossJurisdiction")?;
     if string(binding, "leg")? != "source"
         || string(binding, "orderId")? != string(route, "orderId")?
-        || !string(binding, "routeHash")?.eq_ignore_ascii_case(&string(route, "routeHash")?)
+        || !string(binding, "routeHash")?.eq_ignore_ascii_case(&canonical_hash)
     {
         return Err("Cross-j source pull binding mismatch".into());
     }
     Ok(maker_side)
+}
+
+/// Parity target: `validateCrossJurisdictionSourceBinding`
+/// (core/account/tx/handlers/swap/offer/cross-j-binding.ts). The peer-authored
+/// route is recomputed to its canonical hash; a claimed routeHash that is not
+/// that hash, or a route that cannot be canonicalized, rejects this offer with
+/// the TypeScript reason text. The binding is then judged against the
+/// canonical hash, never against the peer's claim.
+fn canonical_offer_route_hash(
+    route_value: &CanonicalValue,
+    route: &Fields,
+) -> Result<String, String> {
+    let canonical = crate::cross_j_route::canonical_route(route_value).map_err(|detail| {
+        if detail.starts_with("ROUTE_HASH_MISMATCH:") {
+            let order_id = string(route, "orderId").unwrap_or_default();
+            format!("CROSS_J_SWAP_OFFER_ROUTE_INVALID:CROSS_J_ROUTE_HASH_MISMATCH:{order_id}")
+        } else {
+            format!("CROSS_J_SWAP_OFFER_ROUTE_INVALID:{detail}")
+        }
+    })?;
+    string(fields(&canonical)?, "routeHash")
 }
 
 fn route_leg<'a>(route: &'a Fields, leg: &str) -> Result<&'a Fields, String> {

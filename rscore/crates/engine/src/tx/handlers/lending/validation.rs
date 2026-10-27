@@ -104,3 +104,13 @@ fn is_entity_id(value: &str) -> bool {
         && value.starts_with("0x")
         && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
+
+/// Parity target: `requireLendingTokenId` (core/account/tx/handlers/balance/
+/// lending.ts). A lending claim is an Account-row claim and token 0 is never a
+/// delta row, so the author's token 0 is rejected before any balance read.
+pub(super) fn require_lending_token(token_id: u64) -> Result<(), TransitionError> {
+    if token_id < 1 {
+        return Err(TransitionError::LendingTokenInvalid(token_id));
+    }
+    Ok(())
+}

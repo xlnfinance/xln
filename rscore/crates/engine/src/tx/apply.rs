@@ -471,6 +471,7 @@ const fn is_sender_lending_error(error: &TransitionError) -> bool {
             | TransitionError::LendingCounterpartyInvalid { .. }
             | TransitionError::LendingIntentIdInvalid(_)
             | TransitionError::LendingIntentReplay(_)
+            | TransitionError::LendingTokenInvalid(_)
             | TransitionError::LendingAmountNotPositive { .. }
             | TransitionError::LendingInterestBpsInvalid(_)
             | TransitionError::CreditRequestIdInvalid(_)

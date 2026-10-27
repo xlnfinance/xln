@@ -3,7 +3,7 @@ use sha3::{Digest, Keccak256};
 
 use super::validation::{
     consume_intent, normalize, positive_amount, require_counterparty, require_intent_id,
-    require_role, validate_interest_bps,
+    require_lending_token, require_role, validate_interest_bps,
 };
 use crate::tx::apply_types::MutationDecision;
 use crate::{
@@ -53,6 +53,7 @@ pub(super) fn borrow_request(
     require_intent_id(request_id, "borrow")?;
     require_role(replica, proposer, "BORROWER", borrower_entity_id)?;
     require_counterparty(replica, borrower_entity_id, hub_entity_id)?;
+    require_lending_token(*token_id)?;
     positive_amount(amount, "LENDING_BORROW")?;
     validate_interest_bps(*max_interest_bps)?;
     if expires_at

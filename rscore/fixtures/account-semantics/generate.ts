@@ -5,6 +5,7 @@ import { safeStringify } from '../../../core/protocol/serialization';
 import { executeLendingAccountSemanticVector } from './lending';
 import { executeCreditRequestAccountSemanticVector } from './credit-request';
 import { executeCrossJAccountSemanticVector } from './cross-j';
+import { executeCrossJRouteHashAccountSemanticVector } from './cross-j-route-hash';
 import { executeRebalanceSettlementAccountSemanticVector } from './rebalance-settlement';
 import { executeSwapOfferIdAccountSemanticVector } from './swap-offer-id';
 
@@ -12,6 +13,7 @@ const fixtures = [
   ['lending-v1.json', await executeLendingAccountSemanticVector()],
   ['credit-request-v1.json', await executeCreditRequestAccountSemanticVector()],
   ['cross-j-v1.json', await executeCrossJAccountSemanticVector()],
+  ['cross-j-route-hash-v1.json', await executeCrossJRouteHashAccountSemanticVector()],
   ['rebalance-settlement-v1.json', await executeRebalanceSettlementAccountSemanticVector()],
   ['swap-offer-id-v1.json', await executeSwapOfferIdAccountSemanticVector()],
 ] as const;

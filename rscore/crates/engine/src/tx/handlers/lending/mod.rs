@@ -13,7 +13,7 @@ use crate::{
 use payment::{consume_if_applied, payment};
 use validation::{
     consume_intent, normalize, positive_amount, require_counterparty, require_intent_id,
-    require_role, require_unused_intent, validate_interest_bps,
+    require_lending_token, require_role, require_unused_intent, validate_interest_bps,
 };
 
 pub(crate) fn apply(
@@ -145,6 +145,7 @@ fn fund(
     require_intent_id(args.position_id, "lend")?;
     require_role(replica, proposer, "LENDER", args.lender_entity_id)?;
     require_counterparty(replica, args.lender_entity_id, args.hub_entity_id)?;
+    require_lending_token(u64::from(args.token_id.get()))?;
     positive_amount(args.amount, "LENDING_FUND")?;
     validate_interest_bps(args.interest_bps)?;
     let key = format!("fund:{}", normalize(args.position_id));
@@ -217,6 +218,7 @@ fn disburse(
     require_intent_id(loan_id, "loan")?;
     require_role(replica, proposer, "HUB", hub)?;
     require_counterparty(replica, hub, borrower)?;
+    require_lending_token(u64::from(token_id.get()))?;
     positive_amount(amount, "LENDING_DISBURSE")?;
     // Authenticate the hub payer and consume the loan before any duplicate can pay twice.
     let key = format!("disburse:{}", normalize(loan_id));

@@ -372,6 +372,8 @@ pub enum TransitionError {
     LendingIntentIdInvalid(String),
     #[error("LENDING_INTENT_REPLAY:{0}")]
     LendingIntentReplay(String),
+    #[error("LENDING_TOKEN_INVALID:{0}")]
+    LendingTokenInvalid(u64),
     #[error("{context}_AMOUNT_MUST_BE_POSITIVE")]
     LendingAmountNotPositive { context: &'static str },
     #[error("LENDING_INVALID_INTEREST_BPS: {0}")]

@@ -506,3 +506,36 @@ fn all_lending_variants_match_the_shared_typescript_semantic_vector() {
         assert_shared_step(&mut lender_account, side, tx, expected);
     }
 }
+
+/// Parity target: `requireLendingTokenId` in core/account/tx/handlers/balance/
+/// lending.ts. Token 0 is never a lending row; the proposer's token 0 is the
+/// same typed rejection in both engines and leaves the Account unchanged.
+#[test]
+fn lending_token_zero_is_a_typed_rejection() {
+    let base = lender_account();
+    let before = root_hex(&base);
+    let AccountTx::LendingFund {
+        position_id,
+        hub_entity_id,
+        lender_entity_id,
+        amount,
+        term_id,
+        interest_bps,
+        ..
+    } = fund()
+    else {
+        unreachable!("fund fixture");
+    };
+    let tx = AccountTx::LendingFund {
+        position_id,
+        hub_entity_id,
+        lender_entity_id,
+        token_id: token(0),
+        amount,
+        term_id,
+        interest_bps,
+    };
+    let message = common::rejected_message(SequentialAccountEngine::apply(&base, Side::Right, &tx));
+    assert_eq!(message, "LENDING_TOKEN_INVALID:0");
+    assert_eq!(root_hex(&base), before);
+}

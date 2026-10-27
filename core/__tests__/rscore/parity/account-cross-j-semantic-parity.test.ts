@@ -10,6 +10,7 @@ import {
   makeAccount,
   route,
 } from '../../../../rscore/fixtures/account-semantics/cross-j';
+import { executeCrossJRouteHashAccountSemanticVector } from '../../../../rscore/fixtures/account-semantics/cross-j-route-hash';
 
 test('cross-j Account lock, offer retirement, and close match the shared semantic vector', async () => {
   const actual = await executeCrossJAccountSemanticVector();
@@ -52,4 +53,19 @@ test('cross_pull_close with a malformed binary is a typed rejection, matching Ru
     expect(result.rejection.message).toBe('Invalid cross-j close binary');
   }
   expect(account.state.pulls?.size).toBe(1);
+});
+
+test('a non-canonical cross-j offer route hash is the same typed rejection as Rust', async () => {
+  // Rust replays this file in account_cross_j_semantic_parity.rs and must
+  // reach the identical rejection text without mutating the Account.
+  const actual = await executeCrossJRouteHashAccountSemanticVector();
+  const expected = readFileSync(
+    join(import.meta.dir, '../../../../rscore/fixtures/account-semantics/cross-j-route-hash-v1.json'),
+    'utf8',
+  );
+  expect(`${safeStringify(actual, 2)}\n`).toBe(expected);
+  expect(actual.cases.map(testCase => testCase.rejection)).toEqual([
+    'CROSS_J_SWAP_OFFER_ROUTE_INVALID:CROSS_J_ROUTE_HASH_MISMATCH:order-1',
+    'CROSS_J_SWAP_OFFER_ROUTE_INVALID:CROSS_J_ROUTE_HASH_MISMATCH:order-1',
+  ]);
 });
