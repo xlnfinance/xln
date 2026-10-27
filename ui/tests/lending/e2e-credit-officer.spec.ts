@@ -2,8 +2,9 @@ import { expect, test } from '@playwright/test';
 import { enterStack, fundFromHub } from '../stack';
 import { setBankPolicy } from './bank-policy';
 import { readPools, setCreditLimit } from './financial-evidence';
+import { borrowThroughOfficer } from './credit-officer';
 
-/** Run on a testnet stand started with XLN_CREDIT_OFFICER_TESTNET=1.
+/** Local and isolated testnet launchers enable the officer.
  * Borrow/Repay are real tutorial actions; this scenario never skips them. */
 test(
   'credit officer enables the tutorial borrow and repay chapters for a new borrower',
@@ -12,6 +13,7 @@ test(
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     const status = await page.request.get('/api/credit-officer/status');
+    expect(status.ok()).toBe(true);
     expect(await status.json()).toMatchObject({ success: true, enabled: true });
     const wallet = await enterStack(page);
     await fundFromHub(page, '100');
@@ -34,19 +36,18 @@ test(
     await page.getByTestId('wallet-tutorial').click();
     await page.getByTestId('tour-chapter').selectOption('borrow');
     await page.getByTestId('lend-side-borrow').click();
+    await expect(page.getByTestId('lending-no-facility')).toBeVisible();
     await page.getByTestId('lend-amount').fill('2');
     const receive = page.getByTestId('receive-spectrum');
     await receive.getByRole('button', { name: 'Accept it as credit instead', exact: true }).click();
     await receive.getByRole('checkbox').uncheck();
     await page.getByTestId('receive-spectrum-confirm').click();
     await expect(page.getByTestId('lend-submit')).toBeEnabled();
-    await page.getByTestId('lend-submit').click();
-    await expect(page.getByTestId('credit-officer-decision')).toContainText('Facility check complete');
-    await expect(page.getByTestId('lending-request-status')).toContainText('Loan active');
+    await borrowThroughOfficer(page, ids, expect);
     await page.screenshot({ path: 'tests/test-results/credit-officer-borrow.png', fullPage: true });
     await page.getByTestId('tour-chapter').selectOption('repay');
     await page.getByTestId('lending-repay').click();
-    await expect(page.getByTestId('lending-request-status')).toContainText('Loan repaid');
+    await expect(page.getByTestId('lending-request-status')).toContainText('Loan repaid', { timeout: 30_000 });
     await page.screenshot({ path: 'tests/test-results/credit-officer-repaid.png', fullPage: true });
     expect(errors).toEqual([]);
   },

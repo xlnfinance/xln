@@ -49,6 +49,7 @@ import { assertMinDiskFree } from '../../../support/storage-monitor';
 import { compareStableText } from '../../../protocol/serialization';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
 import { canonicalHubEngine } from '../../../orchestrator/process/hub-engine-plan';
+import { LOCAL_TESTNET_ENV } from '../../../orchestrator/process/local-testnet-env';
 import {
   createIncrementalRuntimeFatalLogScanner,
   findRuntimeFatalLogLines,
@@ -1850,6 +1851,7 @@ const runShard = async (
             XLN_STORAGE_HISTORY_PATH: join(shardPaths.rdbRoot, 'storage-health-history.json'),
             XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
             XLN_EPHEMERAL_TESTNET: '1',
+            ...LOCAL_TESTNET_ENV,
             XLN_WATCHTOWER_PROXY_PORTS: String(watchtowerPort),
             // Same default the deployed stack ships with (scripts/operations/start-server.sh).
             // Tests reach the faucet through the preview proxy, so they arrive as

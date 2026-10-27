@@ -9,6 +9,7 @@ import {
 } from '../../../utils/tour/committed';
 import { startWatchtower, stopWatchtower, type WatchtowerChild } from '../../../utils/tour/watchtower-daemon';
 import { readWalletIdentity, waitForWalletBoot, LOCAL_PASSWORD } from '../../../../ui/tests/wallet-ui';
+import { borrowThroughOfficer } from '../../../../ui/tests/lending/credit-officer';
 import {
   next,
   skip,
@@ -29,6 +30,9 @@ test(
     const health = await initial.request.get('/api/health');
     expect(health.ok()).toBe(true);
     expect((await health.json()).marketMaker).toMatchObject({ enabled: requirements.requireMarketMaker, ok: true });
+    const officerStatus = await initial.request.get('/api/credit-officer/status');
+    expect(officerStatus.ok()).toBe(true);
+    expect(await officerStatus.json()).toMatchObject({ success: true, enabled: true });
     const skipped: Record<string, string> = {};
     let towerDaemon: WatchtowerChild | null = null;
     let page = initial;
@@ -162,22 +166,21 @@ test(
     await visit('borrow');
     await page.getByTestId('lend-side-borrow').click();
     await expect(page.getByTestId('lending-bank-approval')).toBeVisible();
-    const officerStatus = await page.request.get('/api/credit-officer/status');
-    expect(officerStatus.ok()).toBe(true);
-    const officer = await officerStatus.json();
-    expect(officer).toMatchObject({ success: true, enabled: expect.any(Boolean) });
-    if (!officer.enabled && (await page.getByTestId('lending-no-facility').count())) {
-      await skip(page, /Credit officer unavailable:.*approved no borrowing facility/, skipped);
-    } else {
-      await page.getByTestId('lend-amount').fill('2');
-      await prepareCredit(page);
-      await page.getByTestId('lend-submit').click();
-    }
+    await expect(page.getByTestId('lending-no-facility')).toBeVisible();
+    await page.getByRole('button', { name: '1 day', exact: true }).click();
+    await page.getByTestId('lend-amount').fill('2');
+    await prepareCredit(page);
+    await borrowThroughOfficer(page, { ownerId: wallet.entityId, hubId, tokenId: 1 }, expect);
     await visit('repay');
-    if (!officer.enabled && skipped.borrow)
-      await skip(page, /No funded loan exists. Credit officer unavailable:/, skipped);
-    else await page.getByTestId('lending-repay').click();
+    expect((await settledTourState(page, hubId, 'loan-active')).claims).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'loan', principal: 2_000_000n })]),
+    );
+    await page.getByTestId('lending-repay').click();
+    await expect(page.getByTestId('lending-request-status')).toContainText('Loan repaid', { timeout: 30_000 });
     await visit('savings-withdraw');
+    expect((await settledTourState(page, hubId, 'loan-repaid')).claims.filter(claim => claim.kind === 'loan')).toEqual(
+      [],
+    );
     if (skipped.lending) await skip(page, /No signed savings position/, skipped);
     else await page.getByTestId('lending-close').click();
     await visit('protection');

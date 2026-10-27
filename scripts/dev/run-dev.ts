@@ -14,6 +14,7 @@ import { stopProcessGroup } from '../../core/scripts/e2e/runners/process-group';
 import { selectDevWebTls } from './launcher/web-tls';
 import { fetchLoopback } from '../../core/orchestrator/server/loopback-fetch';
 import { assertTypeScriptAccountExecution } from '../../core/runtime/config/account-execution';
+import { LOCAL_TESTNET_ENV } from '../../core/orchestrator/process/local-testnet-env';
 import { acquireStandLock, releaseStandLock, readStandLockHolder, standLockRoot, standLockCapacity, STAND_LOCK_TOKEN_ENV, type StandLockGrant } from '../../tools/stand-lock';
 
 export const DEV_SINGLETON_PORT = 17_999;
@@ -127,6 +128,7 @@ const parseInvocation = (): { mode: DevMode; commands: readonly DevCommand[] } =
 const environmentForMode = (mode: DevMode, lease: DevSingletonLease): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    ...LOCAL_TESTNET_ENV,
     XLN_DEV_LAUNCHER_PORT: String(lease.port),
     XLN_DEV_LAUNCHER_TOKEN: lease.capability,
     RUNTIME_VERBOSE_LOGS: mode === 'verbose' ? '1' : '0',
