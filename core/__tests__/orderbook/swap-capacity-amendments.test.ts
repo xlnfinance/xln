@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { computeFrameHash } from '../../account/consensus/frame/hash';
 import { createDefaultDelta } from '../../account/state/delta';
 import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
 import { handleSwapResolve } from '../../account/tx/handlers/swap/resolve';
@@ -50,17 +51,28 @@ test.each(vector.cases)('TS/Rust capacity amendment: $name', async row => {
     return offer;
   });
   const result = processOrderbookSwaps(state, offers);
-  // Every disappearing offer needs exactly one zero-fill resolve to release its hold.
-  expect(result.accountTxs.map(({ tx }) => {
-    if (tx.type !== 'swap_resolve') throw new Error('unexpected tx');
-    expect(tx.data.fillRatio).toBe(0);
-    expect(tx.data.cancelRemainder).toBe(true);
-    return tx.data.offerId;
-  })).toEqual(row.canceled);
+  // Compare every field and its position: comments and optional execution evidence
+  // are signed Account-frame inputs, not diagnostic-only metadata.
+  const bigintFields = new Set(['fillNumerator', 'fillDenominator', 'executionGiveAmount',
+    'executionWantAmount', 'restingPriceTicks', 'restingGiveAmount', 'restingWantAmount',
+    'restingQuantizedGive', 'restingQuantizedWant']);
+  const expectedResolves = row.resolves.map(({ accountId, tx }) => ({ accountId, tx: {
+    type: tx.type,
+    data: Object.fromEntries(Object.entries(tx.data).map(([key, value]) =>
+      [key, typeof value === 'string' && bigintFields.has(key) ? BigInt(value) : value])),
+  } }));
+  expect(result.accountTxs).toStrictEqual(expectedResolves);
+  // Hold the other signed preimage fields fixed to isolate output-payload parity.
+  for (const frame of row.frames) {
+    expect(computeFrameHash({ height: 3, timestamp: 1700000000000, jHeight: 7,
+      prevFrameHash: 'genesis', accountStateRoot: `0x${'cd'.repeat(32)}`, stateHash: '',
+      accountTxs: result.accountTxs.filter(target => target.accountId === frame.accountId).map(target => target.tx),
+    })).toBe(frame.hash);
+  }
   const book = result.bookUpdates.at(-1)!.book;
-  expect(book.tradeCount).toBe(0);
+  expect(book.tradeCount).toBe(row.tradeCount);
   expect([...book.orders.values()].map(order => order.orderId.split(':').at(-1))).toEqual(row.resting);
-  // Shared literal comes from resting asks + explicit cancels, without capacity/FOK admission.
+  // Shared TS book oracle complements the independently specified resolve payloads.
   expect(computeBookCommitmentHash(book)).toBe(row.bookCommitmentHash);
   for (const { accountId, tx } of result.accountTxs) {
     if (tx.type !== 'swap_resolve') throw new Error('unexpected tx');

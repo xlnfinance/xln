@@ -954,6 +954,11 @@ fn process_events(
             // TS `rejectFullBook` comment: `book-full:<maxOrders>`.
             let max_orders = require_book(state, &materialized.pair_id)?.max_orders;
             format!("{BOOK_FULL_REJECT}:{max_orders}")
+        } else if rejects
+            .iter()
+            .any(|(reason, _)| *reason == "counterparty-capacity")
+        {
+            "counterparty-capacity".into()
         } else {
             rejects
                 .iter()
@@ -962,11 +967,16 @@ fn process_events(
                         .then(|| format!("STP:{}", blocking.clone().unwrap_or_default()))
                 })
                 .unwrap_or_else(|| {
-                    rejects
-                        .iter()
-                        .map(|value| value.0)
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    // TS signs this prefix even for IOC/FOK no-fill outcomes.
+                    // A bare reason produces a different bilateral frame hash.
+                    format!(
+                        "post-only-reject:{}",
+                        rejects
+                            .iter()
+                            .map(|value| value.0)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
                 })
         };
         queue_cancel(

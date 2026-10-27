@@ -898,6 +898,24 @@ fn capacity_consumption_cancellation_and_next_level_match_typescript() {
     }
 }
 
+// Stringify BigInts only at this fixture boundary; retain every optional field.
+fn resolve_fixture_json(value: xln_rscore_protocol::CanonicalValue) -> serde_json::Value {
+    use xln_rscore_protocol::CanonicalValue;
+    match value {
+        CanonicalValue::Bool(value) => value.into(),
+        CanonicalValue::Number(value) => serde_json::from_str(value.as_str()).unwrap(),
+        CanonicalValue::BigInt(value) => value.to_string().into(),
+        CanonicalValue::String(value) => value.into(),
+        CanonicalValue::Object(fields) => serde_json::Value::Object(
+            fields
+                .into_iter()
+                .map(|(key, value)| (key, resolve_fixture_json(value)))
+                .collect(),
+        ),
+        _ => panic!("unexpected resolve fixture value"),
+    }
+}
+
 fn capacity_amendment_case(name: &str) {
     use std::collections::BTreeMap;
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
@@ -964,39 +982,52 @@ fn capacity_amendment_case(name: &str) {
     let mut context = DeterministicContext::hlt_default();
     context.swap_taker_fee_bps = 0;
     let result = apply_entity_kernel(state, &commits, &context, &capacity).unwrap();
-    let mut canceled = Vec::new();
+    let resolves = result
+        .proposal_work
+        .iter()
+        .flat_map(|group| {
+            group.txs.iter().map(|tx| {
+                serde_json::json!({
+                    "accountId": group.account_id,
+                    "tx": resolve_fixture_json(xln_rscore_engine::canonical_tx_value(tx).unwrap())
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        serde_json::json!(resolves),
+        row["resolves"],
+        "{name}: complete ordered resolves"
+    );
+    // Fixed header/root isolate parity of the complete ordered signed payload.
+    for expected in row["frames"].as_array().unwrap() {
+        let group = result
+            .proposal_work
+            .iter()
+            .find(|group| group.account_id == expected["accountId"].as_str().unwrap())
+            .unwrap();
+        let frame = xln_rscore_engine::AccountFrame {
+            height: 3,
+            timestamp: 1_700_000_000_000,
+            j_height: 7,
+            prev_frame_hash: "genesis".into(),
+            account_state_root: [0xcd; 32],
+            txs: group.txs.clone(),
+        };
+        assert_eq!(
+            format!("0x{}", hex::encode(frame.hash().unwrap())),
+            expected["hash"].as_str().unwrap(),
+            "{name}: Account frame hash"
+        );
+    }
     for group in &result.proposal_work {
         for tx in &group.txs {
-            let AccountTx::SwapResolve {
-                offer_id,
-                fill_ratio,
-                cancel_remainder,
-                ..
-            } = tx
-            else {
-                panic!("resolve")
-            };
-            assert_eq!(*fill_ratio, 0, "{name}");
-            assert!(*cancel_remainder);
-            canceled.push(offer_id.clone());
             let (next, _) = apply_account(&accounts[&group.account_id], Side::Left, tx, 4, 5);
             accounts.insert(group.account_id.clone(), next);
         }
     }
-    let mut expected = row["canceled"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|id| id.as_str().unwrap().to_string())
-        .collect::<Vec<_>>();
-    canceled.sort();
-    expected.sort();
-    assert_eq!(
-        canceled, expected,
-        "{name}: every disappearing offer resolves exactly once"
-    );
     let book = &result.state.orderbook.as_ref().unwrap().books["1/2"];
-    assert_eq!(book.trade_count, 0);
+    assert_eq!(book.trade_count, row["tradeCount"].as_u64().unwrap());
     let mut orders = book.orders.values().collect::<Vec<_>>();
     orders.sort_by_key(|order| order.seq);
     let resting = orders
@@ -1070,4 +1101,9 @@ fn capacity_amendment_fok_retains_independently_unfundable_cancel() {
 #[test]
 fn capacity_amendment_ioc_rejects_on_takers_own_capacity_once() {
     capacity_amendment_case("ioc-rejects-on-takers-own-capacity-once");
+}
+
+#[test]
+fn capacity_amendment_ioc_partial_fill_rejects_taker_capacity() {
+    capacity_amendment_case("ioc-partial-fill-rejects-taker-capacity");
 }

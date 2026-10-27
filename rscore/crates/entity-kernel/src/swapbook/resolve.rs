@@ -353,13 +353,27 @@ pub(crate) fn build_resolve_plans(
     dimensions: PairDimensions,
     taker_fee_bps: u16,
 ) -> Result<Vec<ResolvePlan>, EntityKernelError> {
-    let comment = events.iter().find_map(|event| match event {
-        BookEvent::Reject {
-            reason: "STP cancel taker",
-            blocking_order_id: Some(id),
-        } => Some(format!("STP:{id}")),
-        _ => None,
-    });
+    // TS gives capacity rejection precedence over STP, including after a fill.
+    // The exact comment is part of the signed Account transaction payload.
+    let comment = if events.iter().any(|event| {
+        matches!(
+            event,
+            BookEvent::Reject {
+                reason: "counterparty-capacity",
+                ..
+            }
+        )
+    }) {
+        Some("counterparty-capacity".to_string())
+    } else {
+        events.iter().find_map(|event| match event {
+            BookEvent::Reject {
+                reason: "STP cancel taker",
+                blocking_order_id: Some(id),
+            } => Some(format!("STP:{id}")),
+            _ => None,
+        })
+    };
     aggregate_fills(events)
         .iter()
         .map(|(order_id, fill)| {

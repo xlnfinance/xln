@@ -13,12 +13,45 @@
       ],
       "takerUnits": 1,
       "tif": 1,
-      "canceled": [
-        "ask",
-        "bid"
-      ],
       "resting": [],
-      "bookCommitmentHash": "0xcfffea1f11733a711c6764e6aede020c"
+      "bookCommitmentHash": "0xcfffea1f11733a711c6764e6aede020c",
+      "tradeCount": 0,
+      "resolves": [
+        {
+          "accountId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "tx": {
+            "type": "swap_resolve",
+            "data": {
+              "offerId": "ask",
+              "fillRatio": 0,
+              "cancelRemainder": true,
+              "comment": "counterparty-capacity"
+            }
+          }
+        },
+        {
+          "accountId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+          "tx": {
+            "type": "swap_resolve",
+            "data": {
+              "offerId": "bid",
+              "fillRatio": 0,
+              "cancelRemainder": true,
+              "comment": "post-only-reject:no fill"
+            }
+          }
+        }
+      ],
+      "frames": [
+        {
+          "accountId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "hash": "0xda829722ba26b35284310d82cd2d6547e3a938f1070565f662a9bc0b75c2e1d1"
+        },
+        {
+          "accountId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+          "hash": "0x00e735c2bc064ec6984bd186b6e50a1ac86a7e3ebea341a1a8822c81e71f9507"
+        }
+      ]
     },
     {
       "name": "fok-restores-shared-capacity-makers",
@@ -38,14 +71,32 @@
       ],
       "takerUnits": 2,
       "tif": 2,
-      "canceled": [
-        "bid"
-      ],
       "resting": [
         "first",
         "second"
       ],
-      "bookCommitmentHash": "0x4357f4ab6477f9a603b61c56ba35e1d2"
+      "bookCommitmentHash": "0x4357f4ab6477f9a603b61c56ba35e1d2",
+      "tradeCount": 0,
+      "resolves": [
+        {
+          "accountId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+          "tx": {
+            "type": "swap_resolve",
+            "data": {
+              "offerId": "bid",
+              "fillRatio": 0,
+              "cancelRemainder": true,
+              "comment": "post-only-reject:FOK cannot fill entirely"
+            }
+          }
+        }
+      ],
+      "frames": [
+        {
+          "accountId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+          "hash": "0x214d9dd93a19dc08de31753f8f6ceb696155a72c5984a59daea24b22be0b58c6"
+        }
+      ]
     },
     {
       "name": "fresh-pair-fok-publishes-maker-cancel",
@@ -60,12 +111,45 @@
       ],
       "takerUnits": 1,
       "tif": 2,
-      "canceled": [
-        "ask",
-        "bid"
-      ],
       "resting": [],
-      "bookCommitmentHash": "0xcfffea1f11733a711c6764e6aede020c"
+      "bookCommitmentHash": "0xcfffea1f11733a711c6764e6aede020c",
+      "tradeCount": 0,
+      "resolves": [
+        {
+          "accountId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "tx": {
+            "type": "swap_resolve",
+            "data": {
+              "offerId": "ask",
+              "fillRatio": 0,
+              "cancelRemainder": true,
+              "comment": "counterparty-capacity"
+            }
+          }
+        },
+        {
+          "accountId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+          "tx": {
+            "type": "swap_resolve",
+            "data": {
+              "offerId": "bid",
+              "fillRatio": 0,
+              "cancelRemainder": true,
+              "comment": "post-only-reject:FOK cannot fill entirely"
+            }
+          }
+        }
+      ],
+      "frames": [
+        {
+          "accountId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "hash": "0xda829722ba26b35284310d82cd2d6547e3a938f1070565f662a9bc0b75c2e1d1"
+        },
+        {
+          "accountId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+          "hash": "0x214d9dd93a19dc08de31753f8f6ceb696155a72c5984a59daea24b22be0b58c6"
+        }
+      ]
     },
     {
       "name": "fok-retains-independently-unfundable-cancel",
@@ -85,14 +169,47 @@
       ],
       "takerUnits": 3,
       "tif": 2,
-      "canceled": [
-        "second",
-        "bid"
-      ],
       "resting": [
         "first"
       ],
-      "bookCommitmentHash": "0xf2a6c20be4dfe89330921bea12b0d307"
+      "bookCommitmentHash": "0xf2a6c20be4dfe89330921bea12b0d307",
+      "tradeCount": 0,
+      "resolves": [
+        {
+          "accountId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "tx": {
+            "type": "swap_resolve",
+            "data": {
+              "offerId": "second",
+              "fillRatio": 0,
+              "cancelRemainder": true,
+              "comment": "counterparty-capacity"
+            }
+          }
+        },
+        {
+          "accountId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+          "tx": {
+            "type": "swap_resolve",
+            "data": {
+              "offerId": "bid",
+              "fillRatio": 0,
+              "cancelRemainder": true,
+              "comment": "post-only-reject:FOK cannot fill entirely"
+            }
+          }
+        }
+      ],
+      "frames": [
+        {
+          "accountId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "hash": "0xe08d6c475f9e4dc95626e2ae913f6bcbb7d75f1686d77cff7f0ad7f1a8cb41d7"
+        },
+        {
+          "accountId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+          "hash": "0x214d9dd93a19dc08de31753f8f6ceb696155a72c5984a59daea24b22be0b58c6"
+        }
+      ]
     },
     {
       "name": "ioc-rejects-on-takers-own-capacity-once",
@@ -112,14 +229,128 @@
       ],
       "takerUnits": 1,
       "tif": 1,
-      "canceled": [
-        "ask",
-        "bid"
-      ],
       "resting": [
         "funded"
       ],
-      "bookCommitmentHash": "0x5f6b41f23fede98e3bf7646034b9b9b1"
+      "bookCommitmentHash": "0x5f6b41f23fede98e3bf7646034b9b9b1",
+      "tradeCount": 0,
+      "resolves": [
+        {
+          "accountId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "tx": {
+            "type": "swap_resolve",
+            "data": {
+              "offerId": "ask",
+              "fillRatio": 0,
+              "cancelRemainder": true,
+              "comment": "counterparty-capacity"
+            }
+          }
+        },
+        {
+          "accountId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+          "tx": {
+            "type": "swap_resolve",
+            "data": {
+              "offerId": "bid",
+              "fillRatio": 0,
+              "cancelRemainder": true,
+              "comment": "counterparty-capacity"
+            }
+          }
+        }
+      ],
+      "frames": [
+        {
+          "accountId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "hash": "0xda829722ba26b35284310d82cd2d6547e3a938f1070565f662a9bc0b75c2e1d1"
+        },
+        {
+          "accountId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+          "hash": "0xc9392ea5a4814b2e4a14c9dee7b63bbd2347839851bbcb6bc1a9c951d883bc92"
+        }
+      ]
+    },
+    {
+      "name": "ioc-partial-fill-rejects-taker-capacity",
+      "makerCapacity": "1000000000000000000000000000000",
+      "takerCapacity": "1000000000000000000",
+      "asks": [
+        {
+          "id": "first",
+          "account": "22",
+          "units": 1
+        },
+        {
+          "id": "second",
+          "account": "22",
+          "units": 1
+        }
+      ],
+      "takerUnits": 2,
+      "tif": 1,
+      "resting": [
+        "second"
+      ],
+      "bookCommitmentHash": "0xc5cd94c31ee9c49569eb2b04a1f6eaec",
+      "tradeCount": 1,
+      "resolves": [
+        {
+          "accountId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "tx": {
+            "type": "swap_resolve",
+            "data": {
+              "offerId": "first",
+              "fillRatio": 65535,
+              "fillNumerator": "1",
+              "fillDenominator": "1",
+              "cancelRemainder": true,
+              "executionGiveAmount": "1000000000000000000",
+              "executionWantAmount": "2500000000",
+              "restingGiveTokenId": 2,
+              "restingWantTokenId": 1,
+              "restingPriceTicks": "25000000",
+              "restingGiveAmount": "1000000000000000000",
+              "restingWantAmount": "2500000000",
+              "restingQuantizedGive": "1000000000000000000",
+              "restingQuantizedWant": "2500000000"
+            }
+          }
+        },
+        {
+          "accountId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+          "tx": {
+            "type": "swap_resolve",
+            "data": {
+              "offerId": "bid",
+              "fillRatio": 32768,
+              "fillNumerator": "1",
+              "fillDenominator": "2",
+              "cancelRemainder": true,
+              "executionGiveAmount": "2500000000",
+              "executionWantAmount": "1000000000000000000",
+              "restingGiveTokenId": 1,
+              "restingWantTokenId": 2,
+              "restingPriceTicks": "25000000",
+              "restingGiveAmount": "5000000000",
+              "restingWantAmount": "2000000000000000000",
+              "restingQuantizedGive": "5000000000",
+              "restingQuantizedWant": "2000000000000000000",
+              "comment": "counterparty-capacity"
+            }
+          }
+        }
+      ],
+      "frames": [
+        {
+          "accountId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "hash": "0xcd18e437741de8c84b20cbdd1a81bf591bbfb71626831f7a5a5bf105df16b671"
+        },
+        {
+          "accountId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+          "hash": "0x0910902265c2e63b70ff461fd5de6d6baa850685bfc45b8454053995a013f681"
+        }
+      ]
     }
   ]
 }
