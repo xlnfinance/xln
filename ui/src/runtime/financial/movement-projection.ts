@@ -18,6 +18,8 @@ export type Movement = {
 	counterpartyId: string | null;
 	/** First hop when it differs from the counterparty. */
 	viaId: string | null;
+	/** True when an HTLC record names only the adjacent hop, not the final recipient. */
+	hopOnly: boolean;
 	tokenId: number | null;
 	amount: bigint | null;
 	quoteTokenId?: number | null;
@@ -128,6 +130,7 @@ function foldPayment(id: string, events: RuntimeActivityEvent[], self: string): 
 		title: paymentTitle(direction),
 		counterpartyId: recipient ?? hop,
 		viaId: recipient && hop && recipient !== hop ? hop : null,
+		hopOnly: hash !== null && direction !== 'in' && recipient === null,
 		tokenId: withAmount?.tokenId ?? null,
 		amount: withAmount ? parseAmount(withAmount.amount) : null,
 		tone,
@@ -150,6 +153,7 @@ function singleMovement(event: RuntimeActivityEvent, kind: Exclude<MovementKind,
 		title: humanTitle(String(event.title || event.type || 'Update')),
 		counterpartyId: normalizeId(event.counterpartyId) || null,
 		viaId: null,
+		hopOnly: false,
 		tokenId: event.tokenId ?? null,
 		amount: event.amount !== undefined && event.amount !== null ? parseAmount(event.amount) : null,
 		tone,

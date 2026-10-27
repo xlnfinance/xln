@@ -43,7 +43,7 @@ export function movementParty(movement: Movement, names: Map<string, string>): s
   const name = displayEntityName(names, movement.counterpartyId);
   if (movement.kind !== 'payment') return name;
   if (movement.direction === 'in') return `From ${name}`;
-  return `${movement.hash && !movement.viaId ? 'Through' : 'To'} ${name}`;
+  return `${movement.hopOnly ? 'Through' : 'To'} ${name}`;
 }
 
 /** "14:05" today, "Oct 1, 14:05" before; the frame stays in the detail view for whoever needs the proof. */

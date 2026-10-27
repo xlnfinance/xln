@@ -293,6 +293,63 @@ describe('runtime activity history', () => {
     });
   });
 
+  test('names a swap fill by its executed amounts, resting tokens and account counterparty', () => {
+    const events = buildRuntimeActivityEvents({
+      height: 26,
+      timestamp: 1_700_000_036_000,
+      runtimeInput: {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId: alice,
+          signerId: alice,
+          entityTxs: [{
+            type: 'accountInput',
+            data: {
+              kind: 'ack_frame',
+              fromEntityId: hub,
+              toEntityId: alice,
+              proposal: {
+                frame: {
+                  height: 5,
+                  timestamp: 1_700_000_036_000,
+                  jHeight: 9,
+                  prevFrameHash: '0xprev',
+                  stateHash: '0xstate',
+                  accountTxs: [{
+                    type: 'swap_resolve',
+                    data: {
+                      offerId: 'swap-1',
+                      fillRatio: 65535,
+                      cancelRemainder: true,
+                      executionGiveAmount: 29_995_998n,
+                      executionWantAmount: 11_996_000_000_000_000n,
+                      restingGiveTokenId: 1,
+                      restingWantTokenId: 2,
+                    },
+                  }],
+                  deltas: [],
+                },
+                frameHanko: '0xhanko',
+              },
+            },
+          }],
+        }],
+      },
+      logs: [],
+    } as any, { entityId: alice, types: ['swap'] });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      title: 'Swap filled',
+      counterpartyId: hub,
+      tokenId: 1,
+      amount: '29995998',
+      quoteTokenId: 2,
+      quoteAmount: '11996000000000000',
+      orderId: 'swap-1',
+    });
+  });
+
   test('deduplicates repeated htlc lifecycle logs by hashlock', () => {
     const first = buildRuntimeActivityEvents({
       height: 31,

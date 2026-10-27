@@ -238,10 +238,20 @@ const eventFromSwap = (
     status: action,
     entityId: viewedEntityId || inputEntityId,
     ...(counterpartyId ? { counterpartyId } : {}),
-    tokenId: numberValue(data['giveTokenId']),
-    amount: bigintText(data['giveAmount']),
-    quoteTokenId: numberValue(data['wantTokenId']),
-    quoteAmount: bigintText(data['wantAmount']),
+    // A fill names the resting offer's tokens and the executed amounts, not the original ask.
+    ...(txType === 'swap_resolve'
+      ? {
+          tokenId: numberValue(data['restingGiveTokenId']),
+          amount: bigintText(data['executionGiveAmount']),
+          quoteTokenId: numberValue(data['restingWantTokenId']),
+          quoteAmount: bigintText(data['executionWantAmount']),
+        }
+      : {
+          tokenId: numberValue(data['giveTokenId']),
+          amount: bigintText(data['giveAmount']),
+          quoteTokenId: numberValue(data['wantTokenId']),
+          quoteAmount: bigintText(data['wantAmount']),
+        }),
     ...(orderId ? { orderId } : {}),
     rawType: txType,
   });
@@ -356,11 +366,11 @@ const eventFromAccountFrameTx = (
         rawType: txType,
       });
     case 'swap_offer':
-      return eventFromSwap(journal, index, inputEntityId, 'placeSwapOffer', data, viewedEntityId);
+      return { ...eventFromSwap(journal, index, inputEntityId, 'placeSwapOffer', data, viewedEntityId), ...base };
     case 'swap_cancel_request':
-      return eventFromSwap(journal, index, inputEntityId, 'proposeCancelSwap', data, viewedEntityId);
+      return { ...eventFromSwap(journal, index, inputEntityId, 'proposeCancelSwap', data, viewedEntityId), ...base };
     case 'swap_resolve':
-      return eventFromSwap(journal, index, inputEntityId, 'swap_resolve', data, viewedEntityId);
+      return { ...eventFromSwap(journal, index, inputEntityId, 'swap_resolve', data, viewedEntityId), ...base };
     case 'add_delta':
       return makeEvent(journal, index, {
         kind: 'offchain',
