@@ -1,0 +1,7 @@
+COMMAND: bun run stand:status
+$ bun tools/stand-lock.ts status
+root=/Users/zigota/xln-watcher4/.xln-stand-lock
+capacity=1
+slot-0 free
+
+EXIT: 0; WALL_SECONDS: 0.049

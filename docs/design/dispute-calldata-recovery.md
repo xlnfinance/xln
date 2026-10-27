@@ -46,3 +46,38 @@ Unexpected resource-limit failures must carry a typed operator signal and must
 evict their pending cache entry; they cannot masquerade as evidence-not-found.
 Malformed candidates are ignored only before authentication. A matched span that
 fails canonical validation is an explicit evidence error, never accepted data.
+
+## Implementation details
+
+- `DisputeCalldata` compiles the pinned Depository and DepositoryBounds schemas
+  once. Its lazy entry iterator checks offset zero before advancing by one byte
+  at a time. Wrappers are opaque bytes; their nesting does not add stack depth.
+- Before walking a call, the last bytes offset/length bounds its intrinsic end
+  by the executable-call byte ceiling. Array head sizes and bytes lengths are
+  also bounded by that fixed ceiling before traversal. Schema/start memoization
+  stores intrinsic ends (including rejection), so a result does not depend on
+  the enclosing candidate's limit. Enclosing tails must end exactly where
+  their canonical offsets/lengths require. Scalar widths and zero padding are
+  checked without decoding.
+- The proof reader matches event metadata, hashes the exact raw body with the
+  single-tuple offset prefix, then materializes and validates only that body.
+  Raw hashes are cached by absolute span; validated bodies are cached by hash
+  and reused only after each event's metadata is matched again.
+- Finalization sidecars are read directly from canonical raw fields, without
+  decoding bodies. They remain candidates until the existing resolver verifies
+  `finalizationEvidenceHash`; delegated watchtower finalization still uses the
+  effective empty inner signature.
+- Readers cache authenticated calldata and its structural memoization. Any
+  failure evicts the transaction entry. Allocation/budget failures are surfaced
+  as `DisputeCalldataResourceError`, carrying the transaction and original
+  resource-limit message. A successful body lookup does not enumerate later
+  embedded candidates.
+- EVM authentication copies all signed envelope fields into ethers and compares
+  the recomputed hash with the receipt-attested transaction ID. It avoids
+  passing the RPC transaction object itself to `Transaction.from`, which reads
+  expensive `hash`/`from` getters repeatedly. Native TRON authentication is
+  unchanged.
+
+The exported call-span inspection helper retains its outer-span-only inspection
+contract for existing callers/tests. Financial recovery uses the entry iterator,
+which never skips nested selectors or decodes wrapper calls.

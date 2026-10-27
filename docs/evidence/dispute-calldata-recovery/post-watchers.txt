@@ -1,0 +1,604 @@
+COMMAND: bun run stand:run --reason dispute-calldata-final-watchers -- bun test core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts core/__tests__/jurisdiction/adapter/state-anchor/watcher-board-anchor.test.ts core/__tests__/jurisdiction/rpc/rpc-watcher-calldata-recovery.test.ts core/__tests__/jurisdiction/rpc/rpc-watcher-calldata-scan.test.ts core/__tests__/jurisdiction/rpc/rpc-watcher-dispute-calldata.test.ts core/__tests__/jurisdiction/watchers/admission/j-watcher-authority-evidence.test.ts core/__tests__/jurisdiction/watchers/admission/j-watcher-counter-dispute-reimport.test.ts core/__tests__/jurisdiction/watchers/admission/j-watcher-state-unavailable-classifier.test.ts core/__tests__/jurisdiction/watchers/browservm-watcher-domain.test.ts core/__tests__/jurisdiction/watchers/j-import-share-tokens.test.ts core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts core/__tests__/jurisdiction/watchers/j-watcher-browservm-late-import.test.ts core/__tests__/jurisdiction/watchers/j-watcher-domain-conflict.test.ts core/__tests__/jurisdiction/watchers/j-watcher-drain-planning.test.ts core/__tests__/jurisdiction/watchers/j-watcher-poll-policy.test.ts core/__tests__/jurisdiction/watchers/j-watcher-receipt-batching.test.ts core/__tests__/jurisdiction/watchers/j-watcher-receipt-root.test.ts core/__tests__/jurisdiction/watchers/jwatcher-singleton.test.ts core/__tests__/j-watcher-finalization-evidence.test.ts core/__tests__/j-watcher-watchtower-finalization.test.ts
+$ bun tools/stand-lock.ts run --reason dispute-calldata-final-watchers -- bun test core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts core/__tests__/jurisdiction/adapter/state-anchor/watcher-board-anchor.test.ts core/__tests__/jurisdiction/rpc/rpc-watcher-calldata-recovery.test.ts core/__tests__/jurisdiction/rpc/rpc-watcher-calldata-scan.test.ts core/__tests__/jurisdiction/rpc/rpc-watcher-dispute-calldata.test.ts core/__tests__/jurisdiction/watchers/admission/j-watcher-authority-evidence.test.ts core/__tests__/jurisdiction/watchers/admission/j-watcher-counter-dispute-reimport.test.ts core/__tests__/jurisdiction/watchers/admission/j-watcher-state-unavailable-classifier.test.ts core/__tests__/jurisdiction/watchers/browservm-watcher-domain.test.ts core/__tests__/jurisdiction/watchers/j-import-share-tokens.test.ts core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts core/__tests__/jurisdiction/watchers/j-watcher-browservm-late-import.test.ts core/__tests__/jurisdiction/watchers/j-watcher-domain-conflict.test.ts core/__tests__/jurisdiction/watchers/j-watcher-drain-planning.test.ts core/__tests__/jurisdiction/watchers/j-watcher-poll-policy.test.ts core/__tests__/jurisdiction/watchers/j-watcher-receipt-batching.test.ts core/__tests__/jurisdiction/watchers/j-watcher-receipt-root.test.ts core/__tests__/jurisdiction/watchers/jwatcher-singleton.test.ts core/__tests__/j-watcher-finalization-evidence.test.ts core/__tests__/j-watcher-watchtower-finalization.test.ts
+bun test v1.4.3 (c6da4a4d3)
+
+core/__tests__/j-watcher-finalization-evidence.test.ts:
+(pass) J watcher DisputeFinalized calldata evidence > decodes the externally reachable watchtowerCounterDispute path [2.74ms]
+(pass) J watcher DisputeFinalized calldata evidence > keeps the processBatch finalization path byte-for-byte equivalent [2.64ms]
+(pass) J watcher DisputeFinalized calldata evidence > recovers every signed dispute body from authenticated processBatch calldata [3.17ms]
+(pass) J watcher DisputeFinalized calldata evidence > binds calldata evidence to the exact emitted finalization [0.40ms]
+(pass) J watcher DisputeFinalized calldata evidence > fails loudly for malformed or unrelated Depository calldata [0.57ms]
+(pass) J watcher DisputeFinalized calldata evidence > rejects forged RPC calldata even when the provider claims the canonical tx hash [13.82ms]
+
+core/__tests__/j-watcher-watchtower-finalization.test.ts:
+(pass) delegated finalization authenticates the effective empty signature and rejects the repeated calldata signature [0.68ms]
+(pass) delegated proof bodies are validated plain state, including nested amounts and allowances [0.55ms]
+
+core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts:
+(pass) JAdapter watcher ingress > a local batch retains external reserve receipt evidence without widening Entity delivery [33.84ms]
+(pass) JAdapter watcher ingress > pre-registration history stays durable without fencing the next bootstrap chunk [22.77ms]
+(pass) JAdapter watcher ingress > receipt watcher refreshes the complete registry in bounded ordered batches [43.89ms]
+(pass) JAdapter watcher ingress > custom token events do not wedge wallet log projection [20.21ms]
+(pass) JAdapter watcher ingress > J-event observation diagnostics use structured logging only [0.14ms]
+(pass) JAdapter watcher ingress > jadapter ingress depends on the machine queue, not the runtime facade [0.13ms]
+(pass) JAdapter watcher ingress > RPC wallet snapshot reads fail fast on partial RPC errors [0.12ms]
+(pass) JAdapter watcher ingress > external wallet watcher gates deltas by committed per-key baselines only [0.05ms]
+(pass) JAdapter watcher ingress > RPC proxy upstream timeout is transient for the watcher [0.05ms]
+(pass) JAdapter watcher ingress > RPC missing-block responses retry while malformed authority evidence remains fatal [0.03ms]
+(pass) JAdapter watcher ingress > RPC watcher bounds historical catch-up without skipping the safe tip [0.06ms]
+(pass) JAdapter watcher ingress > RPC watcher treats mempool backpressure as a smaller window, never a process exit [19.05ms]
+[jurisdiction] J_EVENT_INGRESS_QUIESCING {
+  label: "history-range",
+}
+[jurisdiction] J_EVENT_INGRESS_QUIESCING {
+  label: "test-quiesce",
+}
+[jurisdiction] J_EVENT_INGRESS_QUIESCING {
+  label: "manual-snapshot",
+}
+(pass) JAdapter watcher ingress > j-event ingress rejects during persistence quiesce before cursor or dedup mutation [21.28ms]
+(pass) JAdapter watcher ingress > external wallet snapshot normalization rejects missing financial fields [0.06ms]
+(pass) JAdapter watcher ingress > uses matching jReplica blockNumber as watcher cursor source [17.02ms]
+(pass) JAdapter watcher ingress > falls back to active jurisdiction block when no depository address is provided [16.23ms]
+(pass) JAdapter watcher ingress > falls back to genesis when no jurisdiction replica is present [16.49ms]
+(pass) JAdapter watcher ingress > watcher cursor advances only when its authenticated RuntimeTx is applied [17.57ms]
+(pass) JAdapter watcher ingress > watcher cursor RuntimeTx is exact-stack scoped and rejects external ingress [16.59ms]
+(pass) JAdapter watcher ingress > watcher start block is capped by committed signer j-blocks when present [16.21ms]
+(pass) JAdapter watcher ingress > durably rewinds only the restored pre-anchor replica whose registration base changed [17.01ms]
+(pass) JAdapter watcher ingress > watcher start block ignores signer j-blocks from unrelated jurisdictions [16.21ms]
+(pass) JAdapter watcher ingress > late replica catch-up starts after its contiguous authenticated prefix, not a sparse tip [15.87ms]
+(pass) JAdapter watcher ingress > watcher identity includes chainId when deterministic deployments share an address [15.62ms]
+(pass) JAdapter watcher ingress > watcher excludes a retired local board replica after handover [18.73ms]
+(pass) JAdapter watcher ingress > watcher rejects a replica whose exact chain identity is missing [15.72ms]
+(pass) JAdapter watcher ingress > watcher cursor waits for relevant signer replicas to finalize their j-block [15.74ms]
+(pass) JAdapter watcher ingress > hash-ladder registry logs derive their audience from committed routes [16.34ms]
+(pass) JAdapter watcher ingress > semantic watcher event holds finality when its validator already signed the current round [391.52ms]
+(pass) JAdapter watcher ingress > authenticated empty watcher progress never creates a global Entity-finality fence [33.59ms]
+(pass) JAdapter watcher ingress > idle Entity carries empty scan progress and checkpoints it once per interval, not every poll [23.38ms]
+(pass) JAdapter watcher ingress > idempotent authenticated scan admission > committed header retry never enqueues another Runtime frame [18.70ms]
+(pass) JAdapter watcher ingress > idempotent authenticated scan admission > older implicit tip and gap headers remain new evidence until committed [1.39ms]
+(pass) JAdapter watcher ingress > idempotent authenticated scan admission > known scan retries still reject conflicting and malformed headers [1.29ms]
+(pass) JAdapter watcher ingress > authenticated empty watcher progress below liveness is carried, not Runtime work [17.06ms]
+(pass) JAdapter watcher ingress > carried scan page rides only a frame addressing its replica, never wakes or joins a barrier, and dies on rewind [17.96ms]
+(pass) JAdapter watcher ingress > pressure-sized carried pages advance the watcher and join one contiguous durable observation [17.11ms]
+(pass) JAdapter watcher ingress > carried-only frontier is audited and discarded on reorg without fabricating durable history [17.48ms]
+(pass) JAdapter watcher ingress > watcher does not enqueue the next authenticated page before the prior local scan is durable [16.17ms]
+(pass) JAdapter watcher ingress > watcher releases a pending page superseded by a higher Entity-certified anchor [16.34ms]
+(pass) JAdapter watcher ingress > a watcher window that never reaches the mempool redelivers its events on retry [16.52ms]
+(pass) JAdapter watcher ingress > processEventBatch durably fans out sparse observations and defers unsigned prefix heads [16.60ms]
+(pass) JAdapter watcher ingress > deferred watcher event stays out of the mempool until its authenticated prefix is queued atomically [18.21ms]
+(pass) JAdapter watcher ingress > sparse semantic event waits for its exact contiguous prefix instead of certifying empty catch-up pages [17.91ms]
+(pass) JAdapter watcher ingress > chain watcher rejects a Solidity event that lost its EVM log index [16.06ms]
+(pass) JAdapter watcher ingress > J-event ingress transform replaces external block identity before durable observation [16.16ms]
+(pass) JAdapter watcher ingress > J-history range ingress transform replaces external tip identity before signing [16.93ms]
+(pass) JAdapter watcher ingress > buildJEventsRuntimeInput returns durable sparse observations without enqueueing [16.43ms]
+(pass) JAdapter watcher ingress > receipt events never advance an unobserved entity on another jurisdiction [16.03ms]
+(pass) JAdapter watcher ingress > watcher reserve evidence survives unrelated two-jurisdiction traffic [28.72ms]
+(pass) JAdapter watcher ingress > malformed standard Solidity reverts log selector and payload length [0.49ms]
+(pass) JAdapter watcher ingress > processEventBatch keeps same ERC20 transfer log deltas for both tracked external owners [16.84ms]
+(pass) JAdapter watcher ingress > a foreign dispute needs no calldata and committed bytes of a served dispute are unchanged [18.01ms]
+
+core/__tests__/jurisdiction/rpc/rpc-watcher-calldata-scan.test.ts:
+(pass) an exact canonical call consumes nested selector-shaped bytes once [218.62ms]
+(pass) noncontiguous and overlapping bytes tails are not canonical calls [0.29ms]
+(pass) watchtower nested tuple and dynamic-array tails must remain contiguous [0.82ms]
+
+core/__tests__/jurisdiction/rpc/rpc-watcher-calldata-recovery.test.ts:
+(pass) an authenticated decoder resource failure is typed, evicted, and succeeds on the next poll [4.74ms]
+(pass) one body is decoded once across distinct event entries; cached bodies never bypass event metadata [7.17ms]
+(pass) raw processBatch counter/final bodies and right-started sidecars preserve event commitments [4.46ms]
+
+core/__tests__/jurisdiction/rpc/rpc-watcher-dispute-calldata.test.ts:
+(pass) J watcher dispute calldata embedded in a wrapper call > resolves the ProofBody of processBatch inside an ABI bytes argument [4.17ms]
+(pass) J watcher dispute calldata embedded in a wrapper call > a forwarding wrapper can reuse processBatch selector without hiding its embedded call [5.17ms]
+(pass) J watcher dispute calldata embedded in a wrapper call > resolves the ProofBody of processBatch inside a packed MultiSend record [4.20ms]
+(pass) J watcher dispute calldata embedded in a wrapper call > accepts only the embedded entry whose proofbodyHash matches the event [11.51ms]
+(pass) J watcher dispute calldata embedded in a wrapper call > resolves DisputeFinalized evidence of an embedded watchtower counter-dispute [2.90ms]
+(pass) J watcher dispute calldata embedded in a wrapper call > a decoy flood ahead of the executed call cannot exhaust the scan [37.17ms]
+(pass) J watcher dispute calldata embedded in a wrapper call > an unrecoverable served dispute body is a retryable stall, never a fatal decode [17.59ms]
+(pass) J watcher dispute calldata embedded in a wrapper call > calldata with no embedded dispute call keeps the strict decoder failure [1.70ms]
+(pass) J watcher dispute calldata embedded in a wrapper call > a malformed direct selector with no canonical candidate keeps its strict decode error [1.36ms]
+dispute-body recovery: 2048 decoys, 1048576 bytes, 231.7 ms
+(pass) 2048 consistent-length decoys in 1 MiB resolve the dispute body in less than one second [957.47ms]
+(pass) J watcher dispute calldata on a TRON jurisdiction > binds calldata to sha256(raw_data) == txID and resolves the ProofBody [3.72ms]
+(pass) J watcher dispute calldata on a TRON jurisdiction > a native transaction whose raw_data does not hash to the txID is refused [1.95ms]
+
+core/__tests__/jurisdiction/watchers/j-watcher-drain-planning.test.ts:
+(pass) scenario J-watcher drain planning > freezes a reached chain target while Entity consensus finalizes it [0.08ms]
+(pass) scenario J-watcher drain planning > accepts a transient authenticated empty suffix without advancing the WAL cursor [0.02ms]
+(pass) scenario J-watcher drain planning > funded wallet reload accepts the authenticated 1136–1186 empty tail, but waits for financial finality [0.04ms]
+(pass) scenario J-watcher drain planning > does not require a global cursor beyond the common durable Entity prefix [0.01ms]
+(pass) scenario J-watcher drain planning > does not fabricate Entity finality for an authenticated empty tail
+(pass) scenario J-watcher drain planning > commits the WAL cursor after a meaningful range becomes durable
+(pass) scenario J-watcher drain planning > polls when either the authenticated watcher scan or a fresh replica is behind
+(pass) scenario J-watcher drain planning > allows transient duplicate polls but fails after the bounded stall deadline [0.04ms]
+(pass) scenario J-watcher drain planning > new blocks cannot hide stalled finalization of a captured target [0.07ms]
+(pass) scenario J-watcher drain planning > keeps a progressing catch-up alive beyond its first minute, then rejects a stall [0.02ms]
+(pass) scenario J-watcher drain planning > resets the stall deadline whenever the drain fingerprint advances
+
+core/__tests__/jurisdiction/watchers/j-watcher-poll-policy.test.ts:
+(pass) J watcher idle canonical audit policy > skips repeated block/header audits while the chain and local frontier are idle [0.02ms]
+(pass) J watcher idle canonical audit policy > audits every causal progress path immediately [0.02ms]
+(pass) J watcher idle canonical audit policy > periodically revalidates a same-height head to detect silent reorgs
+(pass) RPC watcher poll interval > uses the adapter override instead of silently falling back to five seconds [0.02ms]
+(pass) RPC watcher poll interval > rejects invalid configured intervals [0.02ms]
+(pass) RPC watcher transport pressure > keeps healthy catch-up immediate and retains pressure after a success [0.02ms]
+(pass) RPC watcher transport pressure > bounds repeated failures and fully recovers after sustained success [0.03ms]
+
+core/__tests__/jurisdiction/watchers/jwatcher-singleton.test.ts:
+[JAdapter] Mode: browservm, chainId=31337
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4954776
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] onAny registered (1 callbacks)
+[Boot] watcher-health-owner: env + jadapter + jReplica "watcher-health-owner Demo" ready
+[BrowserVM] onAny unsubscribed (0 callbacks)
+(pass) canonical J-watcher ownership > health reports the committed J-watcher cursor instead of the provider head [138.29ms]
+[JAdapter] Mode: browservm, chainId=31337
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4954776
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] onAny registered (1 callbacks)
+[Boot] watcher-duplicate-owner: env + jadapter + jReplica "watcher-duplicate-owner Demo" ready
+[BrowserVM] onAny unsubscribed (0 callbacks)
+[BrowserVM] onAny registered (1 callbacks)
+[BrowserVM] onAny registered (2 callbacks)
+[BrowserVM] onAny unsubscribed (1 callbacks)
+[WARN][runtime.jadapter-watcher] duplicate_stopped {"jurisdictionName":"duplicate","watcherKey":"browservm:31337:0x0b7108b29ad73097cf7e549d542915348d885e5f"}
+[BrowserVM] onAny unsubscribed (0 callbacks)
+(pass) canonical J-watcher ownership > one env starts only one watcher for aliases of the same real observation source [85.35ms]
+[JAdapter] Mode: browservm, chainId=31337
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4954776
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] onAny registered (1 callbacks)
+[Boot] watcher-paused-owner: env + jadapter + jReplica "watcher-paused-owner Demo" ready
+[BrowserVM] onAny unsubscribed (0 callbacks)
+(pass) canonical J-watcher ownership > paused watcher cannot be resurrected by later Runtime work [76.11ms]
+
+core/__tests__/jurisdiction/watchers/j-watcher-browservm-late-import.test.ts:
+(pass) BrowserVM J-watcher historical catch-up > scenario signer initialization binds the witness runtime identity to its seed [10.34ms]
+[JAdapter] Mode: browservm, chainId=31337
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4954776
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] onAny registered (1 callbacks)
+[Boot] numeric-signer-isolation-browservm: env + jadapter + jReplica "numeric-signer-isolation-browservm Demo" ready
+[Boot] computeBoardHash(signer=0x03bb00b8340d7f78ef47a1ed97104cf3a1756bd8): addr=0x03bb00b8340d7f78ef47a1ed97104cf3a1756bd8, boardHash=0x6d2fdf8e666f02dd...
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"6bd8","range":"3-22","root":"0xbfa1a895.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0002","finalizedJHeight":22,"txs":1}
+[Boot] Registered 1 entities: Seed B Entity(0002)
+(pass) BrowserVM J-watcher historical catch-up > isolates the same signer slot as a canonical EOA in each RuntimeReplica key store [264.35ms]
+[JAdapter] Mode: browservm, chainId=31337
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4954776
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] onAny registered (1 callbacks)
+[Boot] j-watcher-browservm-late-import: env + jadapter + jReplica "j-watcher-browservm-late-import Demo" ready
+[Boot] computeBoardHash(signer=0x81d21576ff9457da854ce36cb0b96f991d349371): addr=0x81d21576ff9457da854ce36cb0b96f991d349371, boardHash=0xfb2952bb7a4f7385...
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"9371","range":"3-22","root":"0xa4fc9e85.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0002","finalizedJHeight":22,"txs":1}
+[Boot] Registered 1 entities: Late Numbered Entity(0002)
+(pass) BrowserVM J-watcher historical catch-up > certifies a numbered entity board registered before its replica import [153.00ms]
+[JAdapter] Mode: browservm, chainId=31337
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4954776
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] onAny registered (1 callbacks)
+[Boot] j-watcher-browservm-multi-entity-scan: env + jadapter + jReplica "j-watcher-browservm-multi-entity-scan Demo" ready
+[Boot] computeBoardHash(signer=0x1fab5580f807b2d889803f1addf959bce307c48f): addr=0x1fab5580f807b2d889803f1addf959bce307c48f, boardHash=0xcc47b131c6e1d017...
+[Boot] computeBoardHash(signer=0xf69706eaa0534387f9124a1230214ee4e9f63fa9): addr=0xf69706eaa0534387f9124a1230214ee4e9f63fa9, boardHash=0x087c56c831c97733...
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"c48f","range":"3-22","root":"0x65e5c345.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0002","finalizedJHeight":22,"txs":1}
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":2,"proposer":"3fa9","range":"3-22","root":"0x65e5c345.."}
+[INFO][entity] frame.board_authority_transition_only {"entity":"0003","finalizedJHeight":22,"txs":1}
+[Boot] Registered 2 entities: Sender(0002), Observer(0003)
+[BrowserVM] Funded 0x00000000... with 100 of token 1
+[BrowserVM] debugFundReserves: logs=1
+[INFO][j.event] history.finalized_by_entity {"eventBlocks":1,"proposer":"c48f","range":"23-23","root":"0x6c377c05.."}
+[Boot] Funded 1 entities
+(pass) BrowserVM J-watcher historical catch-up > complete domain-bound watcher advances sibling local evidence without a financial Entity frame [147.54ms]
+
+core/__tests__/jurisdiction/watchers/j-import-share-tokens.test.ts:
+(pass) completeImportJ accepts different ERC1155 company share ids at one EntityProvider [17.01ms]
+(pass) completeImportJ rejects the same ERC1155 identity under two internal ids before publishing [0.17ms]
+
+core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts:
+73 | 
+74 | const reservePort = async (): Promise<number> =>
+75 |   await new Promise((resolve, reject) => {
+76 |     const server = createServer();
+77 |     server.once('error', reject);
+78 |     server.listen(0, '127.0.0.1', () => {
+                ^
+error: Failed to listen at 127.0.0.1
+ syscall: "listen",
+   errno: 1,
+ address: "127.0.0.1",
+    port: 0,
+    code: "EPERM"
+
+      at <anonymous> (node:net:2195:30)
+      at listenInCluster (node:net:2262:24)
+      at listen (node:net:2146:20)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts:78:12)
+      at new Promise (1:11)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts:75:9)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts:110:22)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts:315:28)
+(fail) RPC J-watcher backlog drain > delivers an authenticated event beyond 4096 historical blocks before returning [1.62ms]
+73 | 
+74 | const reservePort = async (): Promise<number> =>
+75 |   await new Promise((resolve, reject) => {
+76 |     const server = createServer();
+77 |     server.once('error', reject);
+78 |     server.listen(0, '127.0.0.1', () => {
+                ^
+error: Failed to listen at 127.0.0.1
+ syscall: "listen",
+   errno: 1,
+ address: "127.0.0.1",
+    port: 0,
+    code: "EPERM"
+
+      at <anonymous> (node:net:2195:30)
+      at listenInCluster (node:net:2262:24)
+      at listen (node:net:2146:20)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts:78:12)
+      at new Promise (1:11)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts:75:9)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts:110:22)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts:315:28)
+(fail) RPC J-watcher backlog drain > retains RPC pressure and recovers authenticated progress below the checkpoint interval [0.08ms]
+73 | 
+74 | const reservePort = async (): Promise<number> =>
+75 |   await new Promise((resolve, reject) => {
+76 |     const server = createServer();
+77 |     server.once('error', reject);
+78 |     server.listen(0, '127.0.0.1', () => {
+                ^
+error: Failed to listen at 127.0.0.1
+ syscall: "listen",
+   errno: 1,
+ address: "127.0.0.1",
+    port: 0,
+    code: "EPERM"
+
+      at <anonymous> (node:net:2195:30)
+      at listenInCluster (node:net:2262:24)
+      at listen (node:net:2146:20)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts:78:12)
+      at new Promise (1:11)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts:75:9)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts:110:22)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts:740:28)
+(fail) RPC J-watcher backlog drain > late history straddling the production page > (unnamed) [0.17ms]
+
+core/__tests__/jurisdiction/watchers/j-watcher-receipt-root.test.ts:
+89 | let provider: ethers.JsonRpcProvider;
+90 | 
+91 | const reservePort = async (): Promise<number> => await new Promise((resolve, reject) => {
+92 |   const server = createServer();
+93 |   server.once('error', reject);
+94 |   server.listen(0, '127.0.0.1', () => {
+              ^
+error: Failed to listen at 127.0.0.1
+ syscall: "listen",
+   errno: 1,
+ address: "127.0.0.1",
+    port: 0,
+    code: "EPERM"
+
+      at <anonymous> (node:net:2195:30)
+      at listenInCluster (node:net:2262:24)
+      at listen (node:net:2146:20)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-receipt-root.test.ts:94:10)
+      at new Promise (1:11)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-receipt-root.test.ts:91:56)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/j-watcher-receipt-root.test.ts:102:22)
+(fail) (unnamed) [0.21ms]
+
+core/__tests__/jurisdiction/watchers/j-watcher-receipt-batching.test.ts:
+(pass) authenticated J watcher RPC batching > validates the complete fence bloom after per-pass normalization: malformed=%s [1.14ms]
+(pass) authenticated J watcher RPC batching > validates the complete fence bloom after per-pass normalization: malformed=%s [0.24ms]
+(pass) authenticated J watcher RPC batching > rejects an interior change across waves even when both endpoints and parent links agree [826.52ms]
+(pass) authenticated J watcher RPC batching > overlaps at most 2 chunks while preserving requested header order [0.66ms]
+(pass) authenticated J watcher RPC batching > overlaps at most 4 chunks while preserving requested header order [0.10ms]
+(pass) authenticated J watcher RPC batching > overlaps at most 8 chunks while preserving requested header order [0.09ms]
+(pass) authenticated J watcher RPC batching > drains all 2 in-flight chunks before rejecting without launching later chunks [0.42ms]
+(pass) authenticated J watcher RPC batching > drains all 4 in-flight chunks before rejecting without launching later chunks [0.07ms]
+(pass) authenticated J watcher RPC batching > drains all 8 in-flight chunks before rejecting without launching later chunks [0.05ms]
+(pass) authenticated J watcher RPC batching > reports the first failed input chunk after draining out-of-order failures [0.14ms]
+(pass) authenticated J watcher RPC batching > bounds ethereum-trie header chunks without overlapping the two passes [89.63ms]
+(pass) authenticated J watcher RPC batching > bounds tron-complete-receipts header chunks without overlapping the two passes [6.80ms]
+(pass) authenticated J watcher RPC batching > reads 8191 headers in bounded RPC batches with the complete reorg fence [657.73ms]
+(pass) authenticated J watcher RPC batching > reads 255 headers in bounded RPC batches with the complete reorg fence [20.82ms]
+(pass) authenticated J watcher RPC batching > reads 256 headers in bounded RPC batches with the complete reorg fence [20.51ms]
+(pass) authenticated J watcher RPC batching > reads 2048 headers in bounded RPC batches with the complete reorg fence [173.21ms]
+
+core/__tests__/jurisdiction/watchers/browservm-watcher-domain.test.ts:
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4954776
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+(pass) BrowserVM stack does not reuse the fresh-Anvil watcher domain [69.17ms]
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4954776
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] Token registered: TRX id=4 addr=0x5d423e3e... (depository pre-funded)
+[BrowserVM] Token registered: SUN id=5 addr=0x11457d5b... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] Serialized state: 803 trie nodes, version=1
+[BrowserVM] Resetting to fresh state...
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4954776
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] Token registered: TRX id=4 addr=0x5d423e3e... (depository pre-funded)
+[BrowserVM] Token registered: SUN id=5 addr=0x11457d5b... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] Reset complete - fresh contracts deployed
+[BrowserVM] Serialized state: 803 trie nodes, version=1
+(pass) BrowserVM reset preserves its configured chain and recreates the same fresh chain [166.34ms]
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4954776
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] Loaded artifacts from typechain factories
+[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)
+[BrowserVM] Unlimited contract size enabled for simnet
+[BrowserVM] Deployer funded: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+[BrowserVM] Deploying Account library...
+[BrowserVM] Account library deployed at: 0xdbf466c5abfc43bc9a6ac923fddb7ad2be209df0
+[BrowserVM] Deploying HankoVerifier library...
+[BrowserVM] HankoVerifier deployed at: 0x58ea05b958f7997dd186c71579b40aa8456c770b
+[BrowserVM] Deploying EntityProvider...
+[BrowserVM] EntityProvider deployed at: 0x74fefc9b47aaea34240d8e015d7ea4201f00cfa4
+[BrowserVM] Deploying DeltaTransformer...
+[BrowserVM] DeltaTransformer deployed at: 0xbdf04ab3c4283b1531b8cf812ef21d4fed9be445
+[BrowserVM] Deploying Depository with canonical linked libraries...
+[BrowserVM] Depository deployed at: 0x0b7108b29ad73097cf7e549d542915348d885e5f
+[BrowserVM] Gas used: 4954776
+[BrowserVM] Token registered: USDC id=1 addr=0xcb65a63b... (depository pre-funded)
+[BrowserVM] Token registered: WETH id=2 addr=0x07bf260a... (depository pre-funded)
+[BrowserVM] Token registered: USDT id=3 addr=0xcd75ddf9... (depository pre-funded)
+[BrowserVM] Token registered: TRX id=4 addr=0x5d423e3e... (depository pre-funded)
+[BrowserVM] Token registered: SUN id=5 addr=0x11457d5b... (depository pre-funded)
+[BrowserVM] All contracts deployed successfully
+[BrowserVM] Serialized state: 565 trie nodes, version=1
+[BrowserVM] Serialized state: 803 trie nodes, version=1
+[BrowserVM] Serialized state: 803 trie nodes, version=1
+(pass) BrowserVM serialized chain domain is exact and mismatch rejects before state mutation [131.21ms]
+
+core/__tests__/jurisdiction/watchers/j-watcher-domain-conflict.test.ts:
+(pass) jurisdiction import rejects a duplicate watcher domain before publication [16.02ms]
+
+core/__tests__/jurisdiction/adapter/state-anchor/watcher-board-anchor.test.ts:
+48 | 
+49 | const reservePort = (): Promise<number> =>
+50 |   new Promise((resolve, reject) => {
+51 |     const server = createServer();
+52 |     server.once('error', reject);
+53 |     server.listen(0, '127.0.0.1', () => {
+                ^
+error: Failed to listen at 127.0.0.1
+ syscall: "listen",
+   errno: 1,
+ address: "127.0.0.1",
+    port: 0,
+    code: "EPERM"
+
+      at <anonymous> (node:net:2195:30)
+      at listenInCluster (node:net:2262:24)
+      at listen (node:net:2146:20)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/adapter/state-anchor/watcher-board-anchor.test.ts:53:12)
+      at new Promise (1:11)
+      at reservePort (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/adapter/state-anchor/watcher-board-anchor.test.ts:50:3)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/adapter/state-anchor/watcher-board-anchor.test.ts:65:22)
+(fail) (unnamed) [0.43ms]
+
+core/__tests__/jurisdiction/watchers/admission/j-watcher-counter-dispute-reimport.test.ts:
+30 | 
+31 | const reservePort = (): Promise<number> =>
+32 |   new Promise((resolve, reject) => {
+33 |     const server = createServer();
+34 |     server.once('error', reject);
+35 |     server.listen(0, '127.0.0.1', () => {
+                ^
+error: Failed to listen at 127.0.0.1
+ syscall: "listen",
+   errno: 1,
+ address: "127.0.0.1",
+    port: 0,
+    code: "EPERM"
+
+      at <anonymous> (node:net:2195:30)
+      at listenInCluster (node:net:2262:24)
+      at listen (node:net:2146:20)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/admission/j-watcher-counter-dispute-reimport.test.ts:35:12)
+      at new Promise (1:11)
+      at reservePort (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/admission/j-watcher-counter-dispute-reimport.test.ts:32:3)
+      at <anonymous> (/Users/zigota/xln-watcher4/core/__tests__/jurisdiction/watchers/admission/j-watcher-counter-dispute-reimport.test.ts:47:22)
+(fail) (unnamed) [0.26ms]
+
+core/__tests__/jurisdiction/watchers/admission/j-watcher-authority-evidence.test.ts:
+(pass) watcher authority evidence audit > an applied rewind is cleared before the one header batch, after which no tip audit runs [0.39ms]
+(pass) watcher authority evidence audit > reads the head and every evidence header in one batch per poll [0.06ms]
+(pass) watcher authority evidence audit > an empty evidence set reads only the head [0.03ms]
+(pass) watcher authority evidence audit > a reorged activation or finality tip halts the audit [0.07ms]
+
+core/__tests__/jurisdiction/watchers/admission/j-watcher-state-unavailable-classifier.test.ts:
+(pass) historical state-unavailable classification > only an older height below the reported head skips observation [0.07ms]
+(pass) historical state-unavailable classification > current, future and wrong heights stay fail-stop [0.01ms]
+(pass) historical state-unavailable classification > other codes, messages and malformed values stay fail-stop [0.02ms]
+
+6 tests failed:
+(fail) RPC J-watcher backlog drain > delivers an authenticated event beyond 4096 historical blocks before returning [1.62ms]
+(fail) RPC J-watcher backlog drain > retains RPC pressure and recovers authenticated progress below the checkpoint interval [0.08ms]
+(fail) RPC J-watcher backlog drain > late history straddling the production page > (unnamed) [0.17ms]
+(fail) (unnamed) [0.21ms]
+(fail) (unnamed) [0.43ms]
+(fail) (unnamed) [0.26ms]
+
+ 133 pass
+ 6 fail
+ 3435 expect() calls
+Ran 139 tests across 20 files. [5.89s]
+error: script "stand:run" exited with code 1
+
+EXIT: 1; WALL_SECONDS: 5.974

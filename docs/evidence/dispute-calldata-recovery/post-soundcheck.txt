@@ -1,0 +1,14 @@
+COMMAND: bun tools/soundcheck.ts
+PASS eslint-ratchet 14755ms
+PASS unsafe-types 642ms
+PASS frontend-unsafe-types 304ms
+PASS determinism 52ms
+PASS no-weak-collections 251ms
+PASS runtime-dependencies 758ms
+PASS fints-negative-types 1776ms
+PASS fints-compiler-policy 123ms
+PASS fints-decoder-authority 636ms
+PASS nested-hash-coverage 149ms
+SOUNDCHECK_OK gates=10
+
+EXIT: 0; WALL_SECONDS: 14.797

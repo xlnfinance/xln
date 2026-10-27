@@ -1,0 +1,30 @@
+COMMAND: bun run stand:run --reason dispute-calldata-final-counterexamples -- bun test core/__tests__/jurisdiction/rpc/rpc-watcher-calldata-counterexamples.test.ts
+$ bun tools/stand-lock.ts run --reason dispute-calldata-final-counterexamples -- bun test core/__tests__/jurisdiction/rpc/rpc-watcher-calldata-counterexamples.test.ts
+bun test v1.4.3 (c6da4a4d3)
+
+core/__tests__/jurisdiction/rpc/rpc-watcher-calldata-counterexamples.test.ts:
+recovery input=61188 decoded=32512 elapsed=21.3ms
+(pass) (a) actual=33,892 bytes survives processBatch(actual, 120 nested decoys=27,076 bytes, 1) [100.92ms]
+recovery input=6372 decoded=1728 elapsed=2.0ms
+(pass) (b) ~3 KB actual survives a shorter 15-level decoy chain with >=164-byte steps [8.50ms]
+recovery input=1048576 decoded=608 elapsed=361.2ms
+(pass) (c) 2048 canonical decoys in 1 MiB cannot spend decode bytes before the real call [1084.22ms]
+recovery input=427588 decoded=608 elapsed=130.5ms
+(pass) (d) 1900 nested canonical wrappers recover without a recursion/decode budget [330.88ms]
+recovery input=29060 decoded=608 elapsed=6.7ms
+(pass) (e) a valid direct call wins before decoys in its signature bytes are scanned or decoded [22.76ms]
+recovery input=25508 decoded=608 elapsed=6.9ms
+(pass) (e2) decoys before a valid direct-call encoding cannot starve it [22.59ms]
+(pass) (f) retry after a decoder budget event succeeds or surfaces a typed operator error [62.02ms]
+(pass) (g) three-level canonical wrappers recover finalized body and sidecar evidence [3.77ms]
+(pass) (g2) three-level canonical wrappers recover the finalization sidecar independently [2.35ms]
+(pass) I6: copying the event hash onto a different raw body does not authenticate it [4.43ms]
+recovery input=1048576 decoded=608 elapsed=349.4ms
+(pass) I3: inconsistent offset chains do not trigger full candidate decoding [957.29ms]
+
+ 11 pass
+ 0 fail
+ 23 expect() calls
+Ran 11 tests across 1 file. [2.71s]
+
+EXIT: 0; WALL_SECONDS: 2.797

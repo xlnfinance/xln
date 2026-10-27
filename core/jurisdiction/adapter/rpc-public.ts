@@ -10,6 +10,7 @@
  */
 
 import { ethers } from 'ethers';
+import { DisputeCalldata } from './rpc/watcher/rpc-watcher-calldata';
 
 import { Depository__factory } from '../../../jurisdictions/typechain-types/index.ts';
 
@@ -101,6 +102,77 @@ const hashFinalizationEvidence = (candidate: TxFinalizationEvidence): string => 
       ]),
     )
     .toLowerCase();
+};
+
+/** Match event authority against raw metadata/hash before any ABI materialization. */
+export const recoverDisputeProofBody = (
+  raw: DisputeCalldata,
+  eventName: TxDisputeProofBodyEvidence['eventName'],
+  args: Record<string, unknown>,
+): TxDisputeProofBodyEvidence['proofbody'] => {
+  const counterentity = toFinalizationHex(args['counterentity']);
+  const finalized = eventName === 'DisputeFinalized';
+  const nonce = toFinalizationDecimal(finalized ? args['initialNonce'] : args['nonce']);
+  const hash = toFinalizationHex(finalized ? args['finalProofbodyHash'] : args['proofbodyHash']);
+  for (const entry of raw.entries()) {
+    const value = (name: string): string => raw.value(entry.tuple, name);
+    const nonceField = finalized
+      ? 'initialNonce'
+      : entry.eventNames[0] === 'DisputeStarted'
+        ? 'nonce'
+        : entry.watchtower
+          ? 'finalNonce'
+          : 'counterNonce';
+    if (
+      !entry.eventNames.includes(eventName) ||
+      value('counterentity') !== counterentity ||
+      value(nonceField) !== nonce ||
+      (!finalized && (value('proposerIsLeft') === '1') !== Boolean(args['proposerIsLeft']))
+    )
+      continue;
+    if (eventName === 'DisputeStarted' && value('proofbodyHash') !== hash) continue;
+    // A copied claimed hash is not authority: hash abi.encode(ProofBody) from the raw tuple first.
+    if (raw.bodyHash(entry) !== hash) continue;
+    let proofbody = raw.decodedBodies.get(hash);
+    if (proofbody === undefined) {
+      const decoded = ethers.AbiCoder.defaultAbiCoder().decode([DISPUTE_PROOF_BODY_PARAM], raw.encodedBody(entry));
+      proofbody = validateProofBody(
+        materializeAbiValue(DISPUTE_PROOF_BODY_PARAM, decoded[0], 'dispute.proofbody'),
+        'J_DISPUTE_PROOFBODY_AUTHENTICATED',
+      );
+      raw.decodedBodies.set(hash, proofbody);
+    }
+    return proofbody as TxDisputeProofBodyEvidence['proofbody'];
+  }
+  raw.assertRecognized('PROOFBODY');
+  throw new Error(`J_DISPUTE_PROOFBODY_EVIDENCE_NOT_FOUND:${eventName}:${nonce}`);
+};
+
+/** Sidecars stay untrusted until resolveDisputeFinalizationEvidence checks the event commitment. */
+export const recoverDisputeFinalizationEvidence = (raw: DisputeCalldata): TxFinalizationEvidence[] => {
+  const candidates: TxFinalizationEvidence[] = [];
+  const seen = new Set<number>();
+  for (const entry of raw.entries()) {
+    if (!entry.eventNames.includes('DisputeFinalized') || seen.has(entry.tuple.start)) continue;
+    seen.add(entry.tuple.start);
+    const value = (name: string): string => raw.value(entry.tuple, name);
+    const startedByLeft = value('startedByLeft') === '1';
+    const starter = value('starterArguments');
+    const other = value('otherArguments');
+    candidates.push({
+      counterentity: value('counterentity'),
+      initialNonce: value('initialNonce'),
+      finalNonce: value('finalNonce'),
+      initialProofbodyHash: value('initialProofbodyHash'),
+      proposerIsLeft: value('proposerIsLeft') === '1',
+      startedByLeft,
+      leftArguments: startedByLeft ? starter : other,
+      rightArguments: startedByLeft ? other : starter,
+      sig: entry.watchtower ? '0x' : value('sig'),
+    });
+  }
+  raw.assertRecognized('FINALIZATION');
+  return candidates;
 };
 
 /** Decode the exact signed ProofBody carried by every dispute transaction. */

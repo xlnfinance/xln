@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { Depository__factory } from '../../../../../jurisdictions/typechain-types';
+import { DepositoryBounds__factory, Depository__factory } from '../../../../../jurisdictions/typechain-types';
 import { decodeIncludedTronTransactionCall } from '../../operations/tron-transaction';
 import { HANKO_MAX_BYTES } from '../../../../hanko/codec';
 import { J_BATCH_CONTRACT_LIMITS } from '../../../machine/batch/limits';
@@ -7,13 +7,7 @@ import { J_BATCH_CONTRACT_LIMITS } from '../../../machine/batch/limits';
 /** Native SolidityNode `walletsolidity/gettransactionbyid` for one bare txID. */
 export type SolidifiedTronTransactionReader = (txId: string) => Promise<unknown>;
 
-/**
- * Calldata of a receipt-attested TRON transaction. The RPC log names the
- * transaction by 0x-prefixed txID; the native node returns raw_data_hex, and
- * sha256(raw_data) must equal that txID before its TriggerSmartContract data
- * is trusted. The eth-compatible RPC cannot serve this: its transaction has
- * no raw_data, and an Ethereum envelope hash never equals a TRON txID.
- */
+/** Native TRON receipt binding: sha256(raw_data) == txID, unavailable in the eth-compatible view. */
 export const readIncludedTronCalldata = async (
   readTransaction: SolidifiedTronTransactionReader,
   txHash: string,
@@ -38,171 +32,268 @@ export const readIncludedTronCalldata = async (
   }
 };
 
-const depositoryInterface: ethers.Interface = Depository__factory.createInterface();
-const requireFunction = (name: string): ethers.FunctionFragment => {
-  const fragment = depositoryInterface.getFunction(name);
+const requireValue = <T>(value: T | null | undefined): T => {
+  if (value === null || value === undefined) throw new Error('J_DISPUTE_CALL_LAYOUT_VALUE_MISSING');
+  return value;
+};
+type Schema = Readonly<{
+  param: ethers.ParamType;
+  dynamic: boolean;
+  size: number;
+  children: readonly Schema[];
+}>;
+const schema = (param: ethers.ParamType): Schema => {
+  const children = param.isTuple()
+    ? param.components.map(schema)
+    : param.isArray()
+      ? [schema(param.arrayChildren)]
+      : [];
+  const dynamic =
+    param.baseType === 'bytes' ||
+    param.baseType === 'string' ||
+    (param.isArray() && (param.arrayLength === -1 || requireValue(children[0]).dynamic)) ||
+    (param.isTuple() && children.some(child => child.dynamic));
+  const size = dynamic
+    ? 32
+    : param.isTuple()
+      ? children.reduce((sum, child) => sum + child.size, 0)
+      : param.isArray()
+        ? param.arrayLength * requireValue(children[0]).size
+        : 32;
+  return { param, dynamic, size, children };
+};
+const depository = Depository__factory.createInterface();
+const calls = (['processBatch', 'watchtowerCounterDispute'] as const).map(name => {
+  const fragment = depository.getFunction(name);
   if (!fragment) throw new Error(`J_DISPUTE_CALL_FRAGMENT_MISSING:${name}`);
-  return fragment;
-};
+  return { name, selector: ethers.getBytes(fragment.selector), args: fragment.inputs.map(schema) };
+});
+const batchParam = DepositoryBounds__factory.createInterface().getFunction('assertBatch')?.inputs[0];
+const batchSchema = schema(requireValue(batchParam));
+const maxCallBytes = 4 + 5 * 32 + J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes + HANKO_MAX_BYTES;
+type RawTuple = Readonly<{ start: number; layout: Schema }>;
+export type RawDisputeEntry = Readonly<{
+  eventNames: readonly string[];
+  tuple: RawTuple;
+  body: RawTuple;
+  watchtower: boolean;
+}>;
 
-const isDynamic = (param: ethers.ParamType): boolean =>
-  param.baseType === 'bytes' ||
-  param.baseType === 'string' ||
-  (param.isArray() && (param.arrayLength === -1 || isDynamic(param.arrayChildren))) ||
-  (param.isTuple() && param.components.some(isDynamic));
+/** Raw canonical ABI spans. Memo entries have intrinsic ends, independent of callers' limits. */
+export class DisputeCalldata {
+  readonly bytes: Uint8Array;
+  private readonly ends = new Map<Schema, Map<number, number | null>>();
+  private readonly hashes = new Map<string, string>();
+  readonly decodedBodies = new Map<string, unknown>();
+  hasCanonicalCall = false;
 
-/**
- * Where a canonical encoding of `fragment` must end, before walking its tails.
- * Canonical ABI lays dynamic tails out in argument order, and the last
- * dynamic argument of both dispute calls is `bytes`, so the call ends after
- * that tail. Every head slot is one word only while no argument is a static
- * tuple or fixed array; an ABI that breaks either property is refused at load.
- */
-const canonicalLayout = (fragment: ethers.FunctionFragment): { lastSlot: number; headBytes: number } => {
-  const { inputs } = fragment;
-  if (inputs.some(input => (input.isTuple() || input.isArray()) && !isDynamic(input))) {
-    throw new Error(`J_DISPUTE_CALL_STATIC_COMPOSITE_UNSUPPORTED:${fragment.name}`);
+  constructor(data: string) {
+    this.bytes = ethers.getBytes(data);
   }
-  const lastSlot = inputs.findLastIndex(isDynamic);
-  if (inputs[lastSlot]?.baseType !== 'bytes') throw new Error(`J_DISPUTE_CALL_LAST_TAIL_NOT_BYTES:${fragment.name}`);
-  return { lastSlot, headBytes: 32 * inputs.length };
-};
 
-const DISPUTE_CALLS = [requireFunction('processBatch'), requireFunction('watchtowerCounterDispute')].map(fragment => ({
-  fragment,
-  selector: ethers.getBytes(fragment.selector),
-  layout: canonicalLayout(fragment),
-}));
-type DisputeCall = (typeof DISPUTE_CALLS)[number];
-
-/**
- * Largest call Depository can execute: processBatch's head and two length
- * words plus its capped batch and hanko (watchtowerCounterDispute caps its
- * whole msg.data lower). A longer claimed call never ran.
- */
-const MAX_EXECUTABLE_DISPUTE_CALL_BYTES = 4 + 5 * 32 + J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes + HANKO_MAX_BYTES;
-
-const matchesAt = (bytes: Uint8Array, offset: number, expected: Uint8Array): boolean =>
-  offset + expected.length <= bytes.length && expected.every((byte, index) => bytes[offset + index] === byte);
-
-/** A big-endian word that fits a safe integer, else null. */
-const smallWordAt = (bytes: Uint8Array, offset: number): number | null => {
-  if (offset < 0 || offset + 32 > bytes.length) return null;
-  for (let index = offset; index < offset + 26; index += 1) if (bytes[index] !== 0) return null;
-  return Number(ethers.toBigInt(bytes.subarray(offset + 26, offset + 32)));
-};
-
-const callAt = (bytes: Uint8Array, offset: number): DisputeCall | undefined =>
-  DISPUTE_CALLS.find(call => matchesAt(bytes, offset, call.selector));
-
-/** Static composites occupy their full head; dynamic values occupy one offset. */
-const headBytes = (param: ethers.ParamType): number => {
-  if (isDynamic(param)) return 32;
-  if (param.isTuple()) return param.components.reduce((size, child) => size + headBytes(child), 0);
-  if (param.isArray()) return param.arrayLength * headBytes(param.arrayChildren);
-  return 32;
-};
-
-/** Require contiguous, ordered tails, including nested tuple/array offsets. */
-const canonicalTupleEnd = (
-  bytes: Uint8Array,
-  start: number,
-  limit: number,
-  count: number,
-  paramAt: (index: number) => ethers.ParamType | undefined,
-): number | null => {
-  // Every element consumes at least one word; reject forged counts before looping.
-  if (count > (limit - start) / 32) return null;
-  let tail = 0;
-  for (let index = 0; index < count; index += 1) {
-    const param = paramAt(index);
-    if (!param) throw new Error('J_DISPUTE_CALL_LAYOUT_PARAM_MISSING');
-    tail += headBytes(param);
+  word(start: number): number | null {
+    if (start < 0 || start + 32 > this.bytes.length) return null;
+    for (let i = start; i < start + 26; i += 1) if (this.bytes[i] !== 0) return null;
+    let value = 0;
+    for (let i = start + 26; i < start + 32; i += 1) value = value * 256 + requireValue(this.bytes[i]);
+    return value;
   }
-  if (start + tail > limit) return null;
-  let slot = start;
-  for (let index = 0; index < count; index += 1) {
-    const param = paramAt(index);
-    if (!param) throw new Error('J_DISPUTE_CALL_LAYOUT_PARAM_MISSING');
-    if (isDynamic(param)) {
-      if (smallWordAt(bytes, slot) !== tail) return null;
-      const end = canonicalTailEnd(bytes, start + tail, limit, param);
+
+  hex(start: number, end: number): string {
+    return ethers.hexlify(this.bytes.subarray(start, end));
+  }
+
+  private tupleEnd(start: number, count: number, childAt: (index: number) => Schema): number | null {
+    if (count > (this.bytes.length - start) / 32) return null;
+    let tail = start;
+    for (let i = 0; i < count; i += 1) tail += childAt(i).size;
+    if (tail > this.bytes.length) return null;
+    let slot = start;
+    for (let i = 0; i < count; i += 1) {
+      const child = childAt(i);
+      if (child.dynamic && this.word(slot) !== tail - start) return null;
+      const end = this.end(child.dynamic ? tail : slot, child);
       if (end === null) return null;
-      tail = end - start;
+      if (child.dynamic) tail = end;
+      slot += child.size;
     }
-    slot += headBytes(param);
+    return tail;
   }
-  return start + tail;
-};
 
-const canonicalTailEnd = (bytes: Uint8Array, start: number, limit: number, param: ethers.ParamType): number | null => {
-  if (param.isTuple()) {
-    return canonicalTupleEnd(bytes, start, limit, param.components.length, index => param.components[index]);
-  }
-  if (param.isArray()) {
-    const count = param.arrayLength === -1 ? smallWordAt(bytes, start) : param.arrayLength;
-    if (count === null) return null;
-    const head = start + (param.arrayLength === -1 ? 32 : 0);
-    if (!isDynamic(param.arrayChildren)) {
-      const end = head + count * headBytes(param.arrayChildren);
-      return end <= limit ? end : null;
+  end(start: number, layout: Schema): number | null {
+    let memo = this.ends.get(layout);
+    if (!memo) {
+      memo = new Map();
+      this.ends.set(layout, memo);
     }
-    return canonicalTupleEnd(bytes, head, limit, count, () => param.arrayChildren);
+    const cached = memo.get(start);
+    if (cached !== undefined) return cached;
+    const end = this.computeEnd(start, layout);
+    memo.set(start, end);
+    return end;
   }
-  if (param.baseType !== 'bytes' && param.baseType !== 'string') return null;
-  const length = smallWordAt(bytes, start);
-  if (length === null) return null;
-  const end = start + 32 + Math.ceil(length / 32) * 32;
-  return end <= limit ? end : null;
-};
 
-/** Reject inconsistent offset chains before allocating or decoding a claimed span. */
-const canonicalCallAt = (bytes: Uint8Array, offset: number, call: DisputeCall): string | null => {
-  const args = offset + 4;
-  const lastOffset = smallWordAt(bytes, args + 32 * call.layout.lastSlot);
-  if (lastOffset === null || lastOffset < call.layout.headBytes || lastOffset % 32 !== 0) return null;
-  const lastLength = smallWordAt(bytes, args + lastOffset);
-  if (lastLength === null) return null;
-  const length = 4 + lastOffset + 32 + Math.ceil(lastLength / 32) * 32;
-  if (length > MAX_EXECUTABLE_DISPUTE_CALL_BYTES || offset + length > bytes.length) return null;
-  const inputs = call.fragment.inputs;
-  if (canonicalTupleEnd(bytes, args, offset + length, inputs.length, index => inputs[index]) !== offset + length) {
-    return null;
+  private computeEnd(start: number, layout: Schema): number | null {
+    if (start < 0 || start + 32 > this.bytes.length) return null;
+    const { param, children } = layout;
+    if (param.isTuple()) return this.tupleEnd(start, children.length, i => requireValue(children[i]));
+    if (param.isArray()) {
+      const count = param.arrayLength === -1 ? this.word(start) : param.arrayLength;
+      return count === null || count * requireValue(children[0]).size > maxCallBytes
+        ? null
+        : this.tupleEnd(start + (param.arrayLength === -1 ? 32 : 0), count, () => requireValue(children[0]));
+    }
+    if (param.baseType === 'bytes' || param.baseType === 'string') {
+      const length = this.word(start);
+      if (length === null || length > maxCallBytes) return null;
+      const end = start + 32 + Math.ceil(length / 32) * 32;
+      if (end > this.bytes.length) return null;
+      for (let i = start + 32 + length; i < end; i += 1) if (this.bytes[i] !== 0) return null;
+      return end;
+    }
+    return this.scalarEnd(start, param.type);
   }
-  const candidate = ethers.hexlify(bytes.subarray(offset, offset + length));
-  try {
-    const encoded = depositoryInterface.encodeFunctionData(
-      call.fragment,
-      depositoryInterface.decodeFunctionData(call.fragment, candidate),
-    );
-    return encoded === candidate ? encoded : null;
-  } catch {
-    // A selector-shaped byte run inside foreign calldata is not a call.
-    return null;
-  }
-};
 
-/**
- * Exact Depository dispute calls embedded in wrapper calldata.
- *
- * A wrapper (Safe, ERC-4337, forwarder, packed MultiSend) can reuse a Depository
- * selector, so even offset zero must pass the same canonical check. With no
- * match the caller retains its strict decoder. Exact matches consume their
- * whole span: selector-shaped bytes inside an already decoded call are data.
- * A hit proves nothing about execution: callers accept a body only when it
- * matches the authenticated event exactly, proofbodyHash included, so a decoy
- * copy can never substitute a different body.
- */
+  private scalarEnd(start: number, type: string): number | null {
+    if (type === 'bool') return this.word(start) === 0 || this.word(start) === 1 ? start + 32 : null;
+    const width =
+      type === 'address'
+        ? 20
+        : /^(?:u?int|bytes)[0-9]+$/.test(type)
+          ? Number(type.replace(/^[a-z]+/, '')) / (type.startsWith('bytes') ? 1 : 8)
+          : 32;
+    const fixedBytes = type.startsWith('bytes');
+    const padding = type.startsWith('int') && (requireValue(this.bytes[start + 32 - width]) & 128) !== 0 ? 255 : 0;
+    for (let i = 0; i < 32 - width; i += 1) {
+      if (this.bytes[start + (fixedBytes ? width + i : i)] !== padding) return null;
+    }
+    return start + 32;
+  }
+
+  private field(tuple: RawTuple, name: string): RawTuple {
+    let slot = tuple.start;
+    for (const child of tuple.layout.children) {
+      if (child.param.name === name)
+        return {
+          start: child.dynamic ? tuple.start + requireValue(this.word(slot)) : slot,
+          layout: child,
+        };
+      slot += child.size;
+    }
+    throw new Error(`J_DISPUTE_CALL_LAYOUT_FIELD_MISSING:${name}`);
+  }
+
+  value(tuple: RawTuple, name: string): string {
+    const { start, layout } = this.field(tuple, name);
+    if (layout.param.baseType === 'bytes') return this.hex(start + 32, start + 32 + requireValue(this.word(start)));
+    if (layout.param.type === 'bytes32') return this.hex(start, start + 32);
+    return ethers.toBigInt(this.bytes.subarray(start, start + 32)).toString();
+  }
+
+  *canonicalCalls(): Generator<{ offset: number; end: number; call: (typeof calls)[number] }> {
+    for (let offset = 0; offset + 4 <= this.bytes.length; offset += 1) {
+      const call = calls.find(candidate => candidate.selector.every((byte, i) => this.bytes[offset + i] === byte));
+      if (!call) continue;
+      const args = offset + 4;
+      const lastSlot = call.name === 'processBatch' ? 1 : 4;
+      const lastOffset = this.word(args + lastSlot * 32);
+      if (lastOffset === null || lastOffset < call.args.length * 32) continue;
+      const length = this.word(args + lastOffset);
+      if (length === null) continue;
+      const end = args + lastOffset + 32 + Math.ceil(length / 32) * 32;
+      if (end > this.bytes.length || end - offset > maxCallBytes) continue;
+      if (this.tupleEnd(args, call.args.length, i => requireValue(call.args[i])) !== end) continue;
+      this.hasCanonicalCall = true;
+      yield { offset, end, call };
+    }
+  }
+
+  private entry(
+    tuple: RawTuple,
+    eventNames: readonly string[],
+    bodyName: string,
+    watchtower = false,
+  ): RawDisputeEntry | null {
+    const body = this.field(tuple, bodyName);
+    const end = requireValue(this.end(body.start, body.layout));
+    if (end - body.start + 32 > J_BATCH_CONTRACT_LIMITS.maxDisputeProofBodyBytes) return null;
+    return { tuple, body, eventNames, watchtower };
+  }
+
+  *entries(): Generator<RawDisputeEntry> {
+    // Offset zero is yielded before scanning any embedded selectors. No claimed span advances the scanner.
+    for (const { offset, end, call } of this.canonicalCalls()) {
+      if (call.name === 'watchtowerCounterDispute') {
+        if (end - offset > J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes) continue;
+        const tuple = { start: offset + 4 + requireValue(this.word(offset + 36)), layout: requireValue(call.args[1]) };
+        const entry = this.entry(tuple, ['CounterDisputeRegistered', 'DisputeFinalized'], 'finalProofbody', true);
+        if (entry) yield entry;
+      } else {
+        yield* this.batchEntries(offset);
+      }
+    }
+  }
+
+  private *batchEntries(offset: number): Generator<RawDisputeEntry> {
+    const data = offset + 4 + requireValue(this.word(offset + 4));
+    const length = requireValue(this.word(data));
+    const start = data + 32;
+    if (length > J_BATCH_CONTRACT_LIMITS.maxEncodedBatchBytes || this.word(start) !== 32) return;
+    const tuple = { start: start + 32, layout: batchSchema };
+    if (this.end(tuple.start, tuple.layout) !== start + length) return;
+    const kinds = [
+      ['disputeStarts', 'DisputeStarted', 'initialProofbody'],
+      ['counterDisputes', 'CounterDisputeRegistered', 'counterProofbody'],
+      ['disputeFinalizations', 'DisputeFinalized', 'finalProofbody'],
+    ] as const;
+    for (const [name, event, bodyName] of kinds) {
+      const array = this.field(tuple, name);
+      const head = array.start + 32;
+      for (let i = 0; i < requireValue(this.word(array.start)); i += 1) {
+        const item = {
+          start: head + requireValue(this.word(head + i * 32)),
+          layout: requireValue(array.layout.children[0]),
+        };
+        const entry = this.entry(item, [event], bodyName);
+        if (entry) yield entry;
+      }
+    }
+  }
+
+  encodedBody(entry: RawDisputeEntry): Uint8Array {
+    const end = requireValue(this.end(entry.body.start, entry.body.layout));
+    const encoded = new Uint8Array(32 + end - entry.body.start);
+    encoded[31] = 32; // abi.encode(single dynamic tuple) prefixes its tail with offset 32.
+    encoded.set(this.bytes.subarray(entry.body.start, end), 32);
+    return encoded;
+  }
+
+  bodyHash(entry: RawDisputeEntry): string {
+    const key = `${entry.body.start}:${this.end(entry.body.start, entry.body.layout)}`;
+    let hash = this.hashes.get(key);
+    if (!hash) {
+      hash = ethers.keccak256(this.encodedBody(entry));
+      this.hashes.set(key, hash);
+    }
+    return hash;
+  }
+
+  assertRecognized(kind: string): void {
+    if (this.hasCanonicalCall) return;
+    const recognized = calls.some(call => call.selector.every((byte, i) => this.bytes[i] === byte));
+    throw new Error(`J_DISPUTE_${kind}_CALLDATA_${recognized ? 'DECODE_FAILED' : 'UNKNOWN'}`);
+  }
+}
+
+/** Call-span inspection helper; financial recovery uses entries(), which also visits nested spans. */
 export const extractEmbeddedDisputeCalls = (data: string): string[] => {
-  const bytes = ethers.getBytes(data);
-  const calls: string[] = [];
-  for (let offset = 0; offset + 4 <= bytes.length; offset += 1) {
-    const call = callAt(bytes, offset);
-    const encoded = call ? canonicalCallAt(bytes, offset, call) : null;
-    if (encoded) {
-      calls.push(encoded);
-      offset += ethers.dataLength(encoded) - 1;
-    }
+  const raw = new DisputeCalldata(data);
+  const result: string[] = [];
+  let consumed = 0;
+  for (const { offset, end } of raw.canonicalCalls()) {
+    if (offset < consumed) continue;
+    result.push(raw.hex(offset, end));
+    consumed = end;
   }
-  return calls;
+  return result;
 };

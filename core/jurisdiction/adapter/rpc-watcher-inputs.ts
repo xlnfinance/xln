@@ -4,17 +4,15 @@ import { ethers } from 'ethers';
 import { compareStableText } from '../../protocol/serialization';
 import type { RuntimeReplica } from '../../runtime/types';
 import {
-  decodeDisputeFinalizationEvidenceCalldata,
-  decodeDisputeProofBodyEvidenceCalldata,
-  resolveDisputeProofBodyEvidence,
+  recoverDisputeFinalizationEvidence,
+  recoverDisputeProofBody,
   type ExternalWalletTrackedOwnerCursor,
   type TxDisputeProofBodyEvidence,
   type TxFinalizationEvidence,
 } from './rpc-public';
-import { hashProofBodyStruct } from '../../protocol/dispute/proof-builder';
 import { watcherErrorDetails } from './rpc/rpc-boundary';
 import {
-  extractEmbeddedDisputeCalls,
+  DisputeCalldata,
   readIncludedTronCalldata,
   type SolidifiedTronTransactionReader,
 } from './rpc/watcher/rpc-watcher-calldata';
@@ -44,7 +42,26 @@ const readSignedEvmCalldata = async (provider: Provider, txHash: string, normali
   }
   let computedHash: string | undefined;
   try {
-    computedHash = ethers.Transaction.from(tx).hash?.toLowerCase();
+    // Copy signed fields only. Transaction.from(tx) also reads tx.hash/from repeatedly;
+    // those getters reserialize/hash large calldata and recover an irrelevant sender.
+    // The complete signed envelope below is still recomputed and compared to the receipt txID.
+    computedHash = ethers.Transaction.from({
+      type: tx.type,
+      chainId: tx.chainId,
+      nonce: tx.nonce,
+      to: tx.to,
+      gasLimit: tx.gasLimit,
+      gasPrice: tx.gasPrice,
+      maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
+      maxFeePerGas: tx.maxFeePerGas,
+      maxFeePerBlobGas: tx.maxFeePerBlobGas,
+      data: tx.data,
+      value: tx.value,
+      signature: tx.signature,
+      accessList: tx.accessList,
+      blobVersionedHashes: tx.blobVersionedHashes,
+      authorizationList: tx.authorizationList,
+    }).hash?.toLowerCase();
   } catch (error) {
     throw new Error(`J_DISPUTE_TX_HASH_INVALID:${normalizedHash}`, { cause: error });
   }
@@ -80,37 +97,6 @@ const readAuthenticatedTransactionCalldata = async (
   if (!data || data === '0x') throw new Error(`J_DISPUTE_TX_CALLDATA_MISSING:${normalizedHash}`);
   return data;
 };
-
-/**
- * Every dispute call one transaction carries. Calldata with no canonical
- * candidate keeps the strict decoder and its exact failure. An
- * embedded call whose batch does not decode could never have executed, so it
- * only stops being a candidate; the event match still decides acceptance.
- */
-const decodeDisputeCalls = <T>(
-  data: string,
-  decode: (calldata: string) => T[],
-  isSelfConsistent: (candidate: T) => boolean = () => true,
-): T[] => {
-  const embedded = extractEmbeddedDisputeCalls(data);
-  if (embedded.length === 0) return decode(data);
-  return embedded.flatMap(call => {
-    try {
-      return decode(call).filter(isSelfConsistent);
-    } catch {
-      return [];
-    }
-  });
-};
-
-/**
- * A dispute start states its proofbodyHash beside the body. Depository
- * reverts an executed start whose body does not hash to it, but a decoy copy
- * in wrapper calldata never executes: only a body that hashes to its claim
- * may match the event, exactly as counter and final bodies are hashed.
- */
-const isProofBodyHashConsistent = (candidate: TxDisputeProofBodyEvidence): boolean =>
-  hashProofBodyStruct(candidate.proofbody).toLowerCase() === candidate.proofbodyHash.toLowerCase();
 
 export const normalizeEvmAddress = (value: unknown): string => {
   const candidate = String(value || '')
@@ -191,37 +177,50 @@ export const buildTrackedExternalOwners = (env: RuntimeReplica): Map<string, Ext
   );
 };
 
+/** Cache authenticated bytes and complete structural memoization, never partial decoded results. */
+const createCalldataReader = (provider: Provider, native?: SolidifiedTronTransactionReader) => {
+  const cache = new Map<string, Promise<DisputeCalldata>>();
+  return async <T>(
+    txHash: string,
+    location: AuthenticatedTxLocation,
+    kind: string,
+    read: (raw: DisputeCalldata) => T,
+  ): Promise<T> => {
+    const hash = String(txHash || '').toLowerCase();
+    if (!hash || hash === '0x') throw new Error(`J_DISPUTE_${kind}_TX_HASH_MISSING`);
+    let pending = cache.get(hash);
+    if (!pending) {
+      if (typeof provider.getTransaction !== 'function') throw new Error(`J_DISPUTE_${kind}_TX_LOOKUP_UNAVAILABLE`);
+      pending = readAuthenticatedTransactionCalldata(provider, txHash, location, native).then(
+        data => new DisputeCalldata(data),
+      );
+      cache.set(hash, pending);
+      if (cache.size > 2_000) {
+        const oldest = cache.keys().next().value;
+        if (oldest) cache.delete(oldest);
+      }
+    }
+    try {
+      return read(await pending);
+    } catch (error) {
+      if (cache.get(hash) === pending) cache.delete(hash);
+      // Resource failures are operator-visible, retain tx identity/limit, and retry from fresh bytes.
+      if (error instanceof Error && /BUDGET|LIMIT|RESOURCE|out of memory|allocation|stack size/i.test(error.message)) {
+        const signal = new Error(`J_DISPUTE_CALLDATA_RESOURCE_LIMIT:${hash}:${error.message}`, { cause: error });
+        signal.name = 'DisputeCalldataResourceError';
+        throw signal;
+      }
+      throw error;
+    }
+  };
+};
+
 export const createTxFinalizationEvidenceReader = (
   provider: Provider,
   readNativeTronTransaction?: SolidifiedTronTransactionReader,
 ): ((txHash: string, location: AuthenticatedTxLocation) => Promise<TxFinalizationEvidence[]>) => {
-  const cache = new Map<string, Promise<TxFinalizationEvidence[]>>();
-  return async (txHash: string, location: AuthenticatedTxLocation): Promise<TxFinalizationEvidence[]> => {
-    const normalizedHash = String(txHash || '').toLowerCase();
-    if (!normalizedHash || normalizedHash === '0x') throw new Error('J_DISPUTE_FINALIZATION_TX_HASH_MISSING');
-    const cached = cache.get(normalizedHash);
-    if (cached) return cached;
-    if (typeof provider.getTransaction !== 'function') {
-      throw new Error('J_DISPUTE_FINALIZATION_TX_LOOKUP_UNAVAILABLE');
-    }
-    const pending = (async (): Promise<TxFinalizationEvidence[]> => {
-      const data = await readAuthenticatedTransactionCalldata(provider, txHash, location, readNativeTronTransaction);
-      return decodeDisputeCalls(data, decodeDisputeFinalizationEvidenceCalldata);
-    })();
-    cache.set(normalizedHash, pending);
-    if (cache.size > 2_000) {
-      const oldest = cache.keys().next().value;
-      if (oldest) cache.delete(oldest);
-    }
-    try {
-      return await pending;
-    } catch (error) {
-      // Rejected promises are never cached: a transient RPC failure must be
-      // retryable on the next poll for the same transaction.
-      if (cache.get(normalizedHash) === pending) cache.delete(normalizedHash);
-      throw error;
-    }
-  };
+  const read = createCalldataReader(provider, readNativeTronTransaction);
+  return (txHash, location) => read(txHash, location, 'FINALIZATION', recoverDisputeFinalizationEvidence);
 };
 
 export const createTxDisputeProofBodyReader = (
@@ -233,34 +232,9 @@ export const createTxDisputeProofBodyReader = (
   args: Record<string, unknown>,
   location: AuthenticatedTxLocation,
 ) => Promise<TxDisputeProofBodyEvidence['proofbody']>) => {
-  const cache = new Map<string, Promise<TxDisputeProofBodyEvidence[]>>();
-  return async (txHash, eventName, args, location) => {
-    const normalizedHash = String(txHash || '').toLowerCase();
-    if (!normalizedHash || normalizedHash === '0x') throw new Error('J_DISPUTE_PROOFBODY_TX_HASH_MISSING');
-    let pending = cache.get(normalizedHash);
-    if (!pending) {
-      if (typeof provider.getTransaction !== 'function') {
-        throw new Error('J_DISPUTE_PROOFBODY_TX_LOOKUP_UNAVAILABLE');
-      }
-      pending = (async () => {
-        const data = await readAuthenticatedTransactionCalldata(provider, txHash, location, readNativeTronTransaction);
-        return decodeDisputeCalls(data, decodeDisputeProofBodyEvidenceCalldata, isProofBodyHashConsistent);
-      })();
-      cache.set(normalizedHash, pending);
-      if (cache.size > 2_000) {
-        const oldest = cache.keys().next().value;
-        if (oldest) cache.delete(oldest);
-      }
-    }
-    try {
-      return resolveDisputeProofBodyEvidence(await pending, eventName, args);
-    } catch (error) {
-      // Never memoize rejection: provider timeouts/429s and evidence lookup
-      // failures must both be retryable on the next canonical poll.
-      if (cache.get(normalizedHash) === pending) cache.delete(normalizedHash);
-      throw error;
-    }
-  };
+  const read = createCalldataReader(provider, readNativeTronTransaction);
+  return (txHash, eventName, args, location) =>
+    read(txHash, location, 'PROOFBODY', raw => recoverDisputeProofBody(raw, eventName, args));
 };
 
 export const createWatchedErc20TokenReader = (
@@ -319,7 +293,8 @@ export const createWatchedErc20TokenReader = (
       if (!Number.isSafeInteger(length) || length < 1) throw new Error('J_TOKEN_REGISTRY_LENGTH_INVALID');
       for (let start = 1; start < length; start += MAX_RPC_BATCH_CALLS) {
         const calls = Array.from({ length: Math.min(MAX_RPC_BATCH_CALLS, length - start) }, (_, index) =>
-          entryCall(start + index));
+          entryCall(start + index),
+        );
         const entries = await sendBatch(calls);
         if (entries.length !== calls.length) throw new Error('J_TOKEN_REGISTRY_BATCH_LENGTH_MISMATCH');
         collect(start, entries);

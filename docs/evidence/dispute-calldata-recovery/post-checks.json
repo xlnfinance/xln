@@ -1,0 +1,37 @@
+[
+  {
+    "check": "tsc",
+    "exit": 0,
+    "wallSeconds": 0.143
+  },
+  {
+    "check": "runtime-types",
+    "exit": 0,
+    "wallSeconds": 1.043
+  },
+  {
+    "check": "stand-counterexamples",
+    "exit": 0,
+    "wallSeconds": 0.049
+  },
+  {
+    "check": "counterexamples",
+    "exit": 0,
+    "wallSeconds": 2.797
+  },
+  {
+    "check": "stand-watchers",
+    "exit": 0,
+    "wallSeconds": 0.049
+  },
+  {
+    "check": "watchers",
+    "exit": 1,
+    "wallSeconds": 5.974
+  },
+  {
+    "check": "soundcheck",
+    "exit": 0,
+    "wallSeconds": 14.797
+  }
+]
