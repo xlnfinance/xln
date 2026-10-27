@@ -338,3 +338,37 @@ test('rescan rebuilds dispute references when Entity finality leads the watcher 
   });
   expect(Object.keys(result.disputeReferences.bodies)).toHaveLength(1);
 });
+
+test('finalized-height rescans remember starts but never resolve old hash-only disputes', async () => {
+  const input = watcherInput();
+  input.replica.state.lastFinalizedJHeight = 42;
+  const oldCounter = [...counter.slice(0, 5), '0x']; oldCounter[1] = input.replica.entityId;
+  const oldFinal = [...finalized.slice(0, 5), '0x', finalization]; oldFinal[1] = input.replica.entityId;
+  let reads = 0;
+  const decoded = await decodeAuthenticatedWatcherEvents({ ...input,
+    logs: [watcherLog(input.depositoryAddress, 'CounterDisputeRegistered', oldCounter),
+      watcherLog(input.depositoryAddress, 'DisputeFinalized', oldFinal, 1)],
+    readDisputeReferenceLogs: async () => { reads++; throw new Error('OLD_EVENT_MUST_NOT_RESOLVE'); },
+  });
+  expect(decoded.events).toEqual([]);
+  expect(reads).toBe(0);
+});
+
+test('fresh storage-anchored import resolves pre-anchor start from bounded deployment pages', async () => {
+  const input = watcherInput();
+  input.watcherReplica.entityProviderDeploymentBlock = 700;
+  input.replica.state.lastFinalizedJHeight = 980;
+  const values = [...start]; values[1] = input.replica.entityId;
+  const final = [...finalized.slice(0, 5), '0x', finalization]; final[1] = input.replica.entityId;
+  const pages: Array<[number | undefined, number | undefined]> = [];
+  const decoded = await decodeAuthenticatedWatcherEvents({ ...input,
+    logs: [{ ...watcherLog(input.depositoryAddress, 'DisputeFinalized', final), blockNumber: 1000 }],
+    readDisputeReferenceLogs: async (_, from, to) => {
+      pages.push([from, to]);
+      return from === 956 ? [reference('DisputeStarted', values, 960)] : [];
+    },
+  });
+  expect(pages).toEqual([[700, 955], [956, 1000]]);
+  expect(decoded.events[0]?.args['finalProofbody']).toEqual(body);
+  expect(Object.values(decoded.disputeReferences.startBlocks)).toEqual([960]);
+});

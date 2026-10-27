@@ -32,7 +32,9 @@ pub use types::{
     WatchedExternalWallet, WatchedHashLadder,
 };
 pub use watcher::poll_finalized_j_events;
-pub(crate) use watcher::{capture_startup_target, read_initial_watcher_anchor};
+pub(crate) use watcher::{
+    capture_startup_target, read_initial_watcher_anchor, recover_dispute_references,
+};
 pub use xln_rscore_entity_kernel::{FinalizedJEventBatch, JClaimIngress, JReserveUpdate};
 
 #[cfg(test)]

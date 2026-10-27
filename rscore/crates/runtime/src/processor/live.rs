@@ -538,6 +538,7 @@ impl ResidentRuntimeService {
                 .0
                 .entity
                 .last_finalized_j_height;
+            watcher.config.last_finalized_j_height = certified_height;
             let certified_height = self
                 .j_watchers
                 .iter()
@@ -1993,6 +1994,10 @@ fn live_j_watchers(
                 hash_ladders,
                 confirmation_depth,
                 max_blocks_per_poll: J_WATCHER_MAX_BLOCKS_PER_POLL,
+                last_finalized_j_height: entity_state.entity.last_finalized_j_height,
+                entity_provider_deployment_block: j_replica
+                    .get("entityProviderDeploymentBlock")
+                    .and_then(Value::as_u64),
             },
             cursor: FinalizedWatcherCursor {
                 dispute_references: j_replica
@@ -2020,6 +2025,19 @@ fn live_j_watchers(
     }
     let mut targets = BTreeMap::new();
     for watcher in &mut candidates {
+        // Recovery must precede shared-cursor publication and forward polling.
+        let durable_height = durable_watcher_cursor_height(
+            replica,
+            watcher.config.chain_id,
+            &watcher.depository_text,
+        )?;
+        watcher.cursor = crate::j_watcher::recover_dispute_references(
+            &watcher.rpc,
+            &watcher.config,
+            &watcher.cursor,
+            durable_height,
+        )
+        .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?;
         let stack = (watcher.config.chain_id, watcher.config.depository_address);
         watcher.startup_target = match targets.get(&stack) {
             Some(target) => *target,

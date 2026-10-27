@@ -36,7 +36,7 @@ const applyReference = (event: JEvent, args: Record<string, unknown>, source: No
 };
 
 /** The final receipt commits to every resolved byte string; a forged RPC log cannot substitute bytes. */
-export const resolveDisputeLogReferences = async (event: JEvent, readLogs: ReadDisputeReferenceLogs, state?: DisputeReferenceState): Promise<JEvent> => {
+export const resolveDisputeLogReferences = async (event: JEvent, readLogs: ReadDisputeReferenceLogs, state?: DisputeReferenceState, deploymentBlock?: number): Promise<JEvent> => {
   if (event.name !== 'DisputeFinalized' && event.name !== 'CounterDisputeRegistered') return event;
   const args = { ...event.args };
   const finalized = event.name === 'DisputeFinalized';
@@ -51,7 +51,9 @@ export const resolveDisputeLogReferences = async (event: JEvent, readLogs: ReadD
   }
   const missing = () => !args[field] || (data && data.starterArgumentsHash !== ethers.keccak256(String(args['starterArguments'] ?? '0x')));
   if (missing()) {
-    const start = state?.startBlocks[pair];
+    // Fresh storage anchors need not have observed a pre-anchor dispute. The
+    // committed stack deployment is the canonical lower bound, never genesis.
+    const start = state?.startBlocks[pair] ?? deploymentBlock;
     if (state && start === undefined) throw new DisputeEvidenceUnavailableError('J_DISPUTE_EVENT_START_BLOCK_MISSING');
     // RPC pages are bounded even when a dispute remains open for years. Local VM
     // callers have their complete in-memory logs and do not perform network I/O.

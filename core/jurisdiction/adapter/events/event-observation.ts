@@ -153,13 +153,17 @@ const collectDeliveries = (
 
 /** Rebuild served-pair references even when Entity finality leads the durable
  * watcher cursor after a crash; delivery itself still suppresses old events. */
-export const isJEventDeliveredByWatcher = (
+export const isJEventRelevantToWatcher = (
   env: RuntimeReplica,
   event: JEvent,
   watcher: JReplica,
 ): boolean => [...env.state.eReplicas.values()].some(replica =>
   isEntityReplicaRelevantToWatcher(env, replica, watcher)
     && isEventRelevantToEntity(event, replica.entityId, replica.state));
+
+/** Finalized events may rebuild references, but must never resolve or redeliver. */
+export const isJEventDeliveredByWatcher = (env: RuntimeReplica, event: JEvent, watcher: JReplica): boolean =>
+  collectDeliveries(env, [event], event.blockNumber, watcher).length > 0;
 
 const evidenceEntries = (
   events: JEventIngress[],

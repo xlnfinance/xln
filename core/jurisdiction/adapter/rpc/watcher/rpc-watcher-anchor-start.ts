@@ -89,6 +89,7 @@ export const startWatcherFromStorageAnchor = async (request: AnchorStartRequest)
       return false;
     }
     session.pendingAnchor = null;
+    delete session.disputeReferences;
     session.lastSyncedBlock = Math.max(session.lastSyncedBlock, pending.height);
     request.emitDebug({ event: 'j_watch_anchor_committed', height: pending.height, replicas: pending.replicaKeys });
     return false;

@@ -57,6 +57,58 @@ pub fn poll_finalized_j_events(
     read_and_authenticate_range(rpc, &config, cursor, from, to)
 }
 
+/// Rebuild the cache lost between Entity certification and shared-cursor fsync.
+/// Authenticate every receipt and link bounded pages to the certified Entity
+/// anchor before returning any cache or publishing a cursor. Old events are
+/// remembered but never resolved/delivered, including hash-only finalizations.
+pub(crate) fn recover_dispute_references(
+    rpc: &impl JsonRpc,
+    config: &JWatcherConfig,
+    anchor: &FinalizedWatcherCursor,
+    durable_height: u64,
+) -> Result<FinalizedWatcherCursor, JWatcherError> {
+    let mut result = anchor.clone();
+    result.dispute_references = result.dispute_references.through(anchor.scanned_through);
+    if durable_height >= anchor.scanned_through {
+        return Ok(result);
+    }
+    config.validate()?;
+    assert_chain_id(rpc, config.chain_id)?;
+    let floor = match (durable_height, config.entity_provider_deployment_block) {
+        (0, None) => {
+            return Err(JWatcherError::DisputeReferenceUnavailable(
+                "start-block-missing",
+            ));
+        }
+        (_, floor) => floor.unwrap_or(durable_height + 1),
+    };
+    let from = (durable_height + 1).max(floor);
+    if from > anchor.scanned_through {
+        return Ok(result);
+    }
+    let mut recovery_config = config.clone();
+    recovery_config.last_finalized_j_height = anchor.scanned_through;
+    let mut cursor = FinalizedWatcherCursor {
+        scanned_through: from - 1,
+        block_hash: read_initial_watcher_anchor(rpc, from - 1)?,
+        dispute_references: result.dispute_references,
+    };
+    for start in (from..=anchor.scanned_through).step_by(256) {
+        cursor = read_and_authenticate_range(
+            rpc,
+            &recovery_config,
+            &cursor,
+            start,
+            anchor.scanned_through.min(start + 255),
+        )?
+        .cursor;
+    }
+    if cursor.block_hash != anchor.block_hash {
+        return Err(JWatcherError::FinalizedReorg(anchor.scanned_through));
+    }
+    Ok(cursor)
+}
+
 fn assert_chain_id(rpc: &impl JsonRpc, expected: u64) -> Result<(), JWatcherError> {
     let actual = safe_u64(&rpc.call("eth_chainId", json!([]))?, "chainId")?;
     if actual != expected {
@@ -242,6 +294,11 @@ pub(super) fn build_block_batch_with_references(
     history: &DisputeReferences,
 ) -> Result<Option<FinalizedJEventBatch>, JWatcherError> {
     let height = block_height(block)?;
+    // read_history already retained authenticated bytes. Finality suppresses
+    // resolution too: otherwise a rescan can stall forever on an old cache miss.
+    if height <= config.last_finalized_j_height {
+        return Ok(None);
+    }
     let block_hash = fixed_hex::<32>(&block.hash, "blockHash")?;
     let mut events = Vec::new();
     let mut dispute_finalization_evidence = Vec::new();

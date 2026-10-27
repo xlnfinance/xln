@@ -266,8 +266,8 @@ pub(super) fn starter_arguments(
     )
 }
 
-// A cache miss can query only a recorded dispute interval, in bounded pages.
-// No deployment/genesis guess can replace a missing start coordinate.
+// Fresh storage anchors may precede our observation of an open dispute. Use
+// its recorded start, otherwise the committed stack deployment; never genesis.
 pub(super) fn refill(
     rpc: &impl JsonRpc,
     config: &JWatcherConfig,
@@ -292,10 +292,18 @@ pub(super) fn refill(
         {
             continue;
         }
-        let start = *state.start_blocks.get(&pair(log)?).ok_or(
-            JWatcherError::DisputeReferenceUnavailable("start-block-missing"),
-        )?;
         let end = position(log)?.0;
+        if end <= config.last_finalized_j_height {
+            continue;
+        }
+        let start = state
+            .start_blocks
+            .get(&pair(log)?)
+            .copied()
+            .or(config.entity_provider_deployment_block)
+            .ok_or(JWatcherError::DisputeReferenceUnavailable(
+                "start-block-missing",
+            ))?;
         for from in (start..=end).step_by(256) {
             let response = rpc.call("eth_getLogs",serde_json::json!([{
                 "address":hex(&config.depository_address),"fromBlock":format!("0x{from:x}"),"toBlock":format!("0x{:x}",end.min(from+255)),

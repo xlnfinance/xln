@@ -1,3 +1,7 @@
+import { DisputeEvidenceUnavailableError } from '../../kernel/failure';
+import { emptyDisputeReferences, referencesThrough } from '../../events/dispute/reference-state';
+import { readAuthenticatedReceiptRange } from '../../receipt-root';
+import { rebuildWatcherDisputeReferences } from './rpc-watcher-reference-recovery';
 import { compareStableText } from '../../../../protocol/serialization';
 import { getEntityCertifiedJAnchor, getValidatorJExpectedBlockHash } from '../../../machine/local-history';
 import type { RuntimeReplica } from '../../../../runtime/types';
@@ -196,6 +200,28 @@ export const runWatcherPoll = async (request: PollRequest): Promise<void> => {
     isPaused: () => isIngressPaused(session.env),
     emitDebug: request.emitDebug,
   })) return;
+  if (!session.disputeReferences) {
+    const durableHeight = Number(watcherReplica.blockNumber);
+    if (durableHeight === 0 && session.lastSyncedBlock > 0 && watcherReplica.entityProviderDeploymentBlock === undefined) {
+      throw new DisputeEvidenceUnavailableError('J_DISPUTE_EVENT_START_BLOCK_MISSING');
+    }
+    const fromBlock = Math.max(durableHeight + 1, watcherReplica.entityProviderDeploymentBlock ?? durableHeight + 1);
+    const target = session.lastSyncedBlock;
+    const anchor = resolveExpectedParent(session.env, watcherReplica, target);
+    if (fromBlock <= target && !anchor.hash) throw new Error(`J_DISPUTE_REFERENCE_ANCHOR_MISSING:${target}`);
+    const references = await rebuildWatcherDisputeReferences({
+      env: session.env, watcherReplica, fromBlock, toBlock: target, tipBlockHash: anchor.hash ?? '',
+      references: referencesThrough(watcherReplica.disputeReferences ?? emptyDisputeReferences(), target),
+      readRange: (from, to) => readAuthenticatedReceiptRange(
+        (method, params) => services.provider.send(method, params), from, to, [services.depositoryAddress],
+        services.mode === 'tron'
+          ? { commitment: 'tron-complete-receipts', nativeRpc: { chainId: services.chainId,
+              rpcUrl: services.rpcUrl ?? '', solidifiedThroughHeight: safeHead } }
+          : { commitment: 'ethereum-trie' }, services.sendAuthenticatedBatch),
+    });
+    if (request.isCancelled() || isIngressPaused(session.env)) return;
+    session.disputeReferences = references;
+  }
   const minimumLocalScan = getMinimumScannedSignerJHeight(session.env, watcherReplica);
   const nextGlobalBlock = session.lastSyncedBlock + 1;
   const fromBlock = Math.min(nextGlobalBlock, minimumLocalScan === null ? nextGlobalBlock : minimumLocalScan + 1);

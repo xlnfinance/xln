@@ -1,7 +1,7 @@
 import { emptyDisputeReferences, rememberDisputeReference, type DisputeReferenceState } from './events/dispute/reference-state';
 import { ethers } from 'ethers';
 import { resolveDisputeLogReferences, type ReadDisputeReferenceLogs } from './events/dispute/log-reference';
-import { isJEventDeliveredByWatcher } from './events/event-observation';
+import { isJEventDeliveredByWatcher, isJEventRelevantToWatcher } from './events/event-observation';
 import {
   Depository__factory,
   EntityProvider__factory,
@@ -245,11 +245,16 @@ const decodeWatcherLog = async (
   // only the sender's counterparty is served. Gate only dispute evidence I/O.
   if ((event.name === 'DisputeStarted' || event.name === 'CounterDisputeRegistered'
     || event.name === 'DisputeFinalized')
-    && !isJEventDeliveredByWatcher(input.env, event, input.watcherReplica)) return;
+    && !isJEventRelevantToWatcher(input.env, event, input.watcherReplica)) return;
   rememberDisputeReference(result.disputeReferences, event);
+  // A crash or signer import can replay finalized evidence. Remember its bytes,
+  // but never fetch missing references for an event no Entity can still accept.
+  if ((event.name === 'DisputeStarted' || event.name === 'CounterDisputeRegistered'
+    || event.name === 'DisputeFinalized')
+    && !isJEventDeliveredByWatcher(input.env, event, input.watcherReplica)) return;
   result.events.push(await resolveDisputeLogReferences(event, input.readDisputeReferenceLogs ?? (async () => {
     throw new Error('J_DISPUTE_EVENT_REFERENCE_READER_MISSING');
-  }), result.disputeReferences));
+  }), result.disputeReferences, input.watcherReplica.entityProviderDeploymentBlock));
 };
 
 export const decodeAuthenticatedWatcherEvents = async (

@@ -16,6 +16,7 @@ use super::types::ACCOUNT_SETTLED_TOPIC;
 use super::*;
 
 mod dispute;
+mod dispute_recovery;
 
 // Current Depository ABI: ondelta is Int512(high, low). Receipt root below
 // is independently encoded by the TS canonical receipt codec, not Rust.
@@ -397,6 +398,8 @@ fn config() -> JWatcherConfig {
         hash_ladders: Default::default(),
         confirmation_depth: 0,
         max_blocks_per_poll: 16,
+        last_finalized_j_height: 0,
+        entity_provider_deployment_block: None,
     }
 }
 

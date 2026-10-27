@@ -64,12 +64,23 @@ pub struct JWatcherConfig {
     pub hash_ladders: BTreeSet<WatchedHashLadder>,
     pub confirmation_depth: u64,
     pub max_blocks_per_poll: u64,
+    /// Entity-certified delivery fence; reference remembrance remains height-agnostic.
+    pub last_finalized_j_height: u64,
+    /// Committed stack lifetime lower bound for fresh imports without a start.
+    pub entity_provider_deployment_block: Option<u64>,
 }
 
 impl JWatcherConfig {
     pub(crate) fn validate(&self) -> Result<(), JWatcherError> {
         if self.chain_id == 0 || self.chain_id > MAX_SAFE_INTEGER {
             return Err(JWatcherError::ChainId(self.chain_id));
+        }
+        if self.last_finalized_j_height > MAX_SAFE_INTEGER
+            || self
+                .entity_provider_deployment_block
+                .is_some_and(|height| height == 0 || height > MAX_SAFE_INTEGER)
+        {
+            return Err(JWatcherError::Cursor);
         }
         if self.max_blocks_per_poll == 0 {
             return Err(JWatcherError::RangeLimit);
