@@ -24,6 +24,7 @@ import {
   loadEntityViewPageFromStorageDb,
   loadEntityViewPagesFromStorageDb,
   readPersistedRuntimeActivityPage,
+  readPersistedAccountFrameHistory,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
   submitCrossJurisdictionIntent,
@@ -322,6 +323,8 @@ export const createHubRadapterMessageHandler =
         loadEntityViewPage: (targetEnv, entityId, height, query) =>
           loadEntityViewPageFromStorageDb(targetEnv, entityId, height, query),
         listEntityIdsAtHeight: (targetEnv, height) => listPersistedEntityIdsAtHeight(targetEnv, height),
+        readAccountFrameHistory: (targetEnv, entityId, counterpartyId, limit) =>
+          readPersistedAccountFrameHistory(targetEnv, entityId, counterpartyId, limit),
         readActivityPage: (targetEnv, options) => readPersistedRuntimeActivityPage(targetEnv, options),
       }),
     ).catch(error => {

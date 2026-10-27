@@ -1,3 +1,4 @@
+import { readLendingEvidence } from './read/lending-evidence';
 import type { EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import { readRuntimeEntityMetricStats } from '../../runtime/observability/entity-metrics';
@@ -384,6 +385,8 @@ const resolveScopedRuntimeAdapterRead = async <T>(
   if (parts[0] === 'entity' && parts.length >= 2) {
     const entityId = parts[1];
     if (!entityId) throw new RuntimeAdapterError('E_BAD_PATH', 'entity id is required');
+
+    if (parts.length === 3 && parts[2] === 'lending') return readLendingEvidence(ctx, entityId, query) as T;
 
     if (parts.length === 4 && parts[2] === 'cross-order' && typeof parts[3] === 'string') {
       return readCommittedCrossOrder(ctx, entityId, parts[3], query) as T;

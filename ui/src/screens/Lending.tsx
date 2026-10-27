@@ -9,7 +9,8 @@ import { BankLendingPolicy } from '../components/BankLendingPolicy';
 import { ReceiveCapacity } from '../components/ReceiveCapacity';
 import { walletHelp } from '@xln/frontend/lib/utils/ui/walletHelp';
 import { useApp } from '../runtime/store';
-import { sendEntityTxs } from '../runtime/tx';
+import { sendEntityTxs, waitFor } from '../runtime/tx';
+import { requestCreditFacility } from '../runtime/credit-officer/request';
 import { formatAmount, formatMoney, parseAmount } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
 import { useWallet } from '../runtime/views';
@@ -47,6 +48,7 @@ export function Lending() {
 	const [loading, setLoading] = useState(false);
 	const refreshVersion = useRef(0);
 	const [busy, setBusy] = useState(false);
+	const [creditDecision, setCreditDecision] = useState('');
 	const [submittedRequest, setSubmittedRequest] = useState<{ id: string; owner: string; hub: string; token: number } | null>(null);
 	const requestId = submittedRequest?.owner === wallet.entityId && submittedRequest.hub === hubId && submittedRequest.token === tokenId ? submittedRequest.id : undefined;
 	const meta = getTokenMeta(tokenId);
@@ -112,12 +114,30 @@ export function Lending() {
 				side === 'lend'
 					? buildLendingOfferTx({ hubEntityId: hubId, tokenId, amount, termId, interestBps: bps })
 					: buildLendingBorrowTx({ hubEntityId: hubId, tokenId, amount, termId, maxInterestBps: bps, maxLateMs: bankTerms.loanLateMs });
+			if (tx.type === 'lendingBorrow') {
+				setCreditDecision('Checking borrowing facility…');
+				const approved = state?.facilities.some(facility => facility.borrowerEntityId === wallet.entityId
+					&& facility.tokenId === tokenId && facility.termId === termId && facility.maxPrincipal >= amount
+					&& facility.expiresAt > Date.now() && facility.jNonce === hub?.doc.state.jNonce);
+				if (!approved && termId !== 'demand') {
+					const submitted = await requestCreditFacility({ hubEntityId: hubId, borrowerEntityId: wallet.entityId,
+						tokenId, amount, termId }, setCreditDecision);
+					if (submitted) await waitFor(async () => {
+						const committed = await fetchLendingState({ hubEntityId: hubId, userEntityId: wallet.entityId, tokenId });
+						return committed.facilities.some(facility => facility.borrowerEntityId === wallet.entityId
+							&& facility.tokenId === tokenId && facility.termId === termId && facility.maxPrincipal >= amount
+							&& facility.expiresAt > Date.now() && facility.jNonce === hub?.doc.state.jNonce);
+					}, 'bank facility commitment', 25_000, 250);
+				}
+				setCreditDecision(approved ? 'Using committed bank approval.' : 'Facility check complete. Submitting the ordinary loan request.');
+			}
 			await sendEntityTxs(wallet.entityId, wallet.signerId, [tx]);
 			if (tx.type === 'lendingBorrow') setSubmittedRequest({ id: tx.data.requestId, owner: wallet.entityId, hub: hubId, token: tokenId });
 			toast(side === 'lend' ? `Offered ${formatMoney(amount, meta.decimals)} ${meta.symbol} to ${hub?.label ?? 'the hub'}` : `Borrow request for ${formatMoney(amount, meta.decimals)} ${meta.symbol} sent`);
 			setAmountText('');
 			if (tx.type !== 'lendingBorrow') void refresh();
 		} catch (error) {
+			setCreditDecision(error instanceof Error ? error.message : String(error));
 			toast(error instanceof Error ? error.message : String(error), 'danger');
 		} finally {
 			setBusy(false);
@@ -219,6 +239,7 @@ export function Lending() {
 							<button type="button" className="btn primary" disabled={bankOfferUnavailable || busy || !commandReady || !amountText.trim() || !hubId || quoteError || needsRiskConsent || needsReceiveCapacity} onClick={() => void submit()} data-testid="lend-submit">
 								{busy ? 'Sending…' : side === 'lend' ? 'Save with this bank' : 'Request the loan'}
 							</button>
+							{creditDecision && <p role="status" data-testid="credit-officer-decision">{creditDecision}</p>}
 							{requestId && <p role="status" data-testid="lending-request-status">
 								{!state || state.requestId !== requestId || state.requestStatus === null || state.requestStatus === 'unseen' ? 'Waiting for the bank to process your request.'
 									: state.requestStatus === 'not-funded' ? 'Request processed. No loan was funded. The bank needs an approved facility and available funds.'

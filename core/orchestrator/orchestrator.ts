@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { createCreditOfficerChild } from './credit-officer/child';
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -389,6 +390,8 @@ const runtimeImportRefreshMarginMs = Math.max(
 const runtimeImportManifestPath = process.env['XLN_RUNTIME_IMPORT_MANIFEST_PATH']?.trim()
   || join(args.dbRoot, 'runtime-import-manifest.json');
 const runtimeImportLogUrlEnabled = readBooleanEnv('XLN_RUNTIME_IMPORT_LOG_URL', false);
+const creditOfficerChild = createCreditOfficerChild(args.dbRoot, args.port + 9);
+process.env['XLN_CREDIT_OFFICER_PORT'] = String(args.port + 9);
 
 const custodyPublicRpcUrlEnv = String(process.env['XLN_CUSTODY_PUBLIC_RPC_URL'] || '').trim();
 
@@ -1079,6 +1082,7 @@ const spawnMarketMaker = createMarketMakerSpawner({
 });
 
 const stopAllChildren = async (options: StopAllChildrenOptions = {}): Promise<void> => {
+  await creditOfficerChild.stop();
   for (const child of hubChildren) {
     clearChildRestartTimer(child);
     child.recoveryInProgress = false;
@@ -1597,6 +1601,7 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
     pendingResetOptions = null;
   }
   await publishRuntimeImportManifest();
+  await creditOfficerChild.start(hubChildren);
 };
 
 const resetCoordinator = createResetCoordinator(runReset);
@@ -1815,6 +1820,8 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
       return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '', operatorAuthorized);
     }
 
+    const creditResponse = await creditOfficerChild.proxy(request);
+    if (creditResponse) return creditResponse;
     const hubApiResponse = await handleHubApiRequest(request, url);
     if (hubApiResponse) return hubApiResponse;
     const hubAccountResponse = await handleHubAccountRequest(

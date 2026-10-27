@@ -792,6 +792,9 @@ const maybeHandleFinancialApi = (
       getCurrentRuntimeHeight: currentRuntimeHeight,
     });
   }
+  if (pathname === '/api/credit-officer/status' && req.method === 'GET') {
+    return new Response(safeStringify({ success: true, enabled: false }), { headers });
+  }
   if (pathname === '/api/lending/state' && req.method === 'GET') {
     return handleLendingStateRequest({
       req,

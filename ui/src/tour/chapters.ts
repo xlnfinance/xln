@@ -30,7 +30,11 @@ export const FEATURE_CHAPTERS: TourStep[] = WALLET_LESSONS.slice(4).map(lesson =
     title: lesson.title,
     example: lesson.example,
     instruction: ctx =>
-      lesson.id === 'shares' && !ctx.dom.has('shares')
+      lesson.id === 'borrow'
+        ? 'Choose Borrow and request 2 test USDC. With the testnet credit officer enabled, the wallet computes proof of work and shows its decision. Wait for committed facility approval and an active loan below before continuing. A denial is not a funded loan.'
+        : lesson.id === 'repay'
+          ? 'Find the active loan from Borrow. Review its exact amount due, press Repay, and wait for the loan to show repaid. If no loan exists, return to Borrow and finish it first.'
+        : lesson.id === 'shares' && !ctx.dom.has('shares')
         ? 'This wallet has no share treasury. Select a registered company you control, or open Create an entity below and review registration. Share issuance is available after registration.'
         : lesson.id === 'cross'
           ? `Choose Across networks. ${lesson.exercise} Use Clear to complete delivery, or Cancel rest for an unmatched remainder.`

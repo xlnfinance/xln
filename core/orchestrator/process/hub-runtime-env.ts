@@ -15,6 +15,8 @@ export const resolveHubRuntimeFrameDelayMs = (env: NodeJS.ProcessEnv): number =>
   resolveRuntimeMinFrameDelayMs(env[RUNTIME_FRAME_DELAY_KEY], true);
 
 const HUB_PASSTHROUGH_ENV_KEYS = [
+  'XLN_CREDIT_OFFICER_TESTNET',
+  'XLN_CREDIT_OFFICER_PORT',
   // Account worker-pool size for the Hub's TypeScript executor. An operator
   // must be able to pin it (1 isolates a suspected parallelism defect, 0
   // selects the inline transition) without editing the orchestrator.

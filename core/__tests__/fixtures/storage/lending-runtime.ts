@@ -43,10 +43,10 @@ export async function command(env: RuntimeReplica, party: typeof bank, tx: Entit
  * Initial balances are explicit bank IOUs within the saver/borrower's signed
  * credit limits, not fabricated collateral or a claim of on-chain funding.
  */
-export async function fundedLoan(savingsTerm: '1h' | 'demand' = '1h'): Promise<RuntimeReplica> {
+export async function fundedLoan(savingsTerm: '1h' | 'demand' = '1h', dbNamespace = bank.signerId): Promise<RuntimeReplica> {
   const env = createEmptyEnv(seed);
   env.runtimeId = bank.signerId;
-  env.dbNamespace = bank.signerId;
+  env.dbNamespace = dbNamespace;
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
   if (!env.infrastructure) throw new Error('LENDING_FIXTURE_INFRASTRUCTURE_MISSING');

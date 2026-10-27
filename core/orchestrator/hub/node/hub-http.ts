@@ -1,3 +1,4 @@
+import { proxyCreditOfficer } from '../../credit-officer/proxy';
 import { isAbsolute } from 'node:path';
 import type { createExternalWalletApi } from '../../../api/public/external-wallet-api';
 import { handleGossipProfilesSendReady } from '../../../api/server/control/gossip-send-ready';
@@ -570,6 +571,9 @@ export const handleHubHttpRequest = async (
     bootstrap.entityId,
   );
   if (marketResponse) return marketResponse;
+  const creditResponse = await proxyCreditOfficer(request, process.env['XLN_CREDIT_OFFICER_TESTNET'] === '1'
+    ? Number(process.env['XLN_CREDIT_OFFICER_PORT']) : null);
+  if (creditResponse) return creditResponse;
   if (url.pathname === '/api/lending/state' && request.method === 'GET') {
     return handleLendingStateRequest({
       req: request,
