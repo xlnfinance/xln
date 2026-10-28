@@ -1,3 +1,12 @@
+import { applyRuntimeTx } from '../../../runtime/tx/tx-handlers';
+import { detachLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
+import { registerPendingCommittedJOutbox, splitJOutboxForDurableSubmit, hasReadyCommittedJOutbox } from '../../../runtime/j-submit/j-submit-state';
+import { getNextGovernanceSubmitTimestamp } from '../../../runtime/registration/governance-submit-state';
+import { submitRuntimeJOutbox } from '../../../runtime/j-submit/j-submit';
+import { buildCanonicalJReplicaSnapshot, buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../../../storage/wal/snapshot';
+import { registerSignerKey } from '../../../account/crypto';
+import { requireRuntimeMempool } from '../../../runtime/mempool/input-queue';
+import type { RuntimeReplica, RuntimeTx } from '../../../runtime/types';
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 import { buildSingleSignerHanko } from '../../../hanko/batch';
@@ -16,7 +25,6 @@ import {
   pinScenarioJurisdictionUnix,
   readScenarioJurisdictionUnix,
 } from '../../../scenarios/harness/helpers';
-import { buildCanonicalJReplicaSnapshot } from '../../../storage/wal/snapshot';
 import type { EntityReplica } from '../../../entity/types';
 
 const makeReplica = (entityId: string, signerId: string): EntityReplica =>
@@ -55,7 +63,7 @@ const makeReplica = (entityId: string, signerId: string): EntityReplica =>
   }) as EntityReplica;
 
 describe('BrowserVM JAdapter boundary', () => {
-  test('publishes a beneficiary-signed Target witness without consuming a batch nonce', async () => {
+  test('mined Target receipt survives committed submitted result, shallow reorg and restart before D_target=1233', async () => {
     const adapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
     try {
       const signer = new ethers.Wallet(`0x${'51'.repeat(32)}`);
@@ -72,17 +80,63 @@ describe('BrowserVM JAdapter boundary', () => {
         data: { registration, revealHash, signerId: signer.address.toLowerCase(),
           hankoSignature: buildSingleSignerHanko(entityId, revealHash, signer.privateKey) } };
       const env = createEmptyEnv('browservm-target-reveal');
+      env.scenarioMode = true;
+      env.state.timestamp = 1_173_000;
+      registerSignerKey(env, signer.address.toLowerCase(), ethers.getBytes(signer.privateKey));
+      bindScenarioJReplica(env, createJReplica(env, 'Target', adapter.addresses.depository), adapter);
       const nonce = await adapter.depository.entityNonces(entityId);
-      const result = await adapter.submitTx(tx, { env });
-      expect(result.success, result.error).toBe(true);
-      expect(result.events?.some(event => event.name === 'HashLadderRevealRegistered')).toBe(true);
+      await pinScenarioJurisdictionUnix(env, adapter, 1173);
+      const beforeReveal = await adapter.snapshot();
+      const durable = splitJOutboxForDurableSubmit([{ jurisdictionName: 'Target', jTxs: [tx] }]).durable;
+      registerPendingCommittedJOutbox(env, durable);
+      const queued: RuntimeTx[] = [];
+      const deps = { enqueueRuntimeInputs: (target: RuntimeReplica, _inputs: unknown, txs: RuntimeTx[] = []) => {
+        queued.push(...txs);
+        requireRuntimeMempool(target).runtimeTxs.push(...txs);
+      } };
+      await submitRuntimeJOutbox(env, env.infrastructure!.pendingCommittedJOutbox!, deps);
+      await submitRuntimeJOutbox(env, env.infrastructure!.pendingCommittedJOutbox!, deps);
+      expect(queued).toHaveLength(1);
+      requireRuntimeMempool(env).runtimeTxs = [];
+      const submitted = queued.shift();
+      if (submitted?.type !== 'recordGovernanceJSubmitResult') throw new Error('TEST_REVEAL_SUBMITTED_RESULT_MISSING');
+      expect(submitted.data.outcome).toBe('submitted');
+      expect(submitted.data.txHash).toMatch(/^0x[0-9a-f]{64}$/);
+      await applyRuntimeTx(env, submitted, { isReplay: false });
+      const committed = buildDurableRuntimeMachineSnapshot(env);
       const read = () => adapter.depository.getHashLadderReveal(entityId, registration.counterpartyEntity,
         ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['bytes32', 'bytes32'],
           [registration.fullHash, registration.partialRoot])), true);
       const record = await read();
       expect(record[0]).toBe(65535n);
+      expect(record[1]).toBe(1173n);
+      await adapter.revert(beforeReveal);
+      expect((await read())[0]).toBe(0n);
+      detachLiveJAdapter(env, 'Target', adapter);
+      const recovered = createEmptyEnv('target-reorg-restart');
+      restoreDurableRuntimeSnapshot(recovered, committed);
+      recovered.scenarioMode = true;
+      registerSignerKey(recovered, signer.address.toLowerCase(), ethers.getBytes(signer.privateKey));
+      bindScenarioJReplica(recovered, recovered.state.jReplicas.get('Target')!, adapter);
+      expect(recovered.infrastructure!.pendingCommittedJOutbox).toHaveLength(1);
+      const dueAt = getNextGovernanceSubmitTimestamp(recovered);
+      expect(dueAt).not.toBeNull();
+      expect(dueAt!).toBeLessThan(1_233_000);
+      recovered.state.timestamp = dueAt!;
+      expect(hasReadyCommittedJOutbox(recovered)).toBe(true);
+      await submitRuntimeJOutbox(recovered, recovered.infrastructure!.pendingCommittedJOutbox!, deps);
+      expect((await read())[0]).toBe(65535n);
+      expect((await read())[1]).toBe(BigInt(dueAt! / 1000));
+      const republished = await read();
+      requireRuntimeMempool(recovered).runtimeTxs = [];
+      const retryResult = queued.shift();
+      if (retryResult?.type !== 'recordGovernanceJSubmitResult') throw new Error('TEST_REVEAL_RETRY_RESULT_MISSING');
+      expect(retryResult.data.outcome).toBe('submitted');
+      await applyRuntimeTx(recovered, retryResult, { isReplay: false });
+      // A second receipt still cannot retire the witness without authenticated finality.
+      expect(recovered.infrastructure!.pendingCommittedJOutbox).toHaveLength(1);
       expect((await adapter.submitTx(tx, { env })).success).toBe(true);
-      expect(await read()).toEqual(record);
+      expect(await read()).toEqual(republished);
       expect(await adapter.depository.entityNonces(entityId)).toBe(nonce);
       const forged = { ...tx, data: { ...tx.data, registration: { ...registration, counterpartyEntity: `0x${'44'.repeat(32)}` } } };
       expect((await adapter.submitTx(forged, { env })).success).toBe(false);

@@ -633,6 +633,8 @@ pub fn apply_governance_result(
     {
         return Err(error("GOVERNANCE_SUBMIT_RESULT_IDENTITY_MISMATCH"));
     }
+    let reveal = matches!(current.payload, PublicationPayload::TargetReveal { .. });
+    let finalized = super::target_reveal::finalized_target_reveal(replica, &current)?;
     let pending = infrastructure_pending_mut(&mut replica.durable)?;
     let index = pending
         .iter()
@@ -640,7 +642,9 @@ pub fn apply_governance_result(
             parse_pending(row).is_ok_and(|attempt| attempt.attempt_id == result.attempt_id)
         })
         .ok_or_else(|| error("GOVERNANCE_SUBMIT_RESULT_ATTEMPT_MISSING"))?;
-    if result.outcome == GovernanceResultOutcome::TransientFailure {
+    if (reveal && !finalized)
+        || (!reveal && result.outcome == GovernanceResultOutcome::TransientFailure)
+    {
         let mut next = current;
         next.attempt_number = next
             .attempt_number
@@ -649,7 +653,7 @@ pub fn apply_governance_result(
             .ok_or_else(|| error("GOVERNANCE_SUBMIT_ATTEMPT_EXHAUSTED"))?;
         next.attempted_at = timestamp;
         next.eligible_at = timestamp
-            .checked_add(RETRY_MS)
+            .checked_add(if reveal { 1_000 } else { RETRY_MS })
             .filter(|value| *value <= MAX_SAFE_INTEGER)
             .ok_or_else(|| error("GOVERNANCE_SUBMIT_RETRY_TIME"))?;
         next.attempt_id = attempt_id(&next, next.attempt_number)?;
@@ -667,6 +671,75 @@ mod target_publication_tests {
     use xln_rscore_entity_kernel::j_batch::{
         HashLadderRegistration, HashLadderWitness, hash_target_reveal,
     };
+
+    #[test]
+    fn mined_target_result_survives_reorg_restart_and_is_due_before_1233() {
+        let mut replica = crate::machine::tests::replica(crate::RuntimeLimits::default()).unwrap();
+        let registration = HashLadderRegistration {
+            counterparty_entity: [0x33; 32],
+            target_role: true,
+            full_hash: Keccak256::digest([0x22; 32]).into(),
+            partial_root: [0; 32],
+            witness: HashLadderWitness {
+                fill_ratio: 65535,
+                full_secret: [0x22; 32],
+                reveals: [[0; 32]; 4],
+            },
+        };
+        let attempt = super::super::target_reveal::prepare_target_reveal(
+            "Target".into(),
+            [0x44; 32],
+            registration,
+            [0x66; 32],
+            hex(&[0x55; 20]),
+            1_149_000,
+            vec![0x12, 0x34],
+        )
+        .unwrap();
+        register_governance_attempt(&mut replica, &attempt).unwrap();
+        let result = GovernanceResultData {
+            jurisdiction_name: attempt.jurisdiction_name.clone(),
+            entity_id: hex(&attempt.shareholder_entity_id),
+            signer_id: hex(&attempt.signer_id),
+            proposal_hash: hex(&attempt.proposal_hash),
+            payload_hash: hex(&attempt.payload_hash),
+            attempt_id: attempt.attempt_id.clone(),
+            attempt_number: 1,
+            attempted_at: 1_149_000,
+            outcome: GovernanceResultOutcome::Submitted,
+            message: None,
+            adapter_failure: None,
+            transaction_hash: Some(hex(&[0x77; 32])),
+        };
+        apply_governance_result(&mut replica, &result, 1_173_000).unwrap();
+        // No finalized event follows the mined receipt: the shallow reorg removed it.
+        let restored: Value =
+            serde_json::from_slice(&serde_json::to_vec(replica.durable.infrastructure()).unwrap())
+                .unwrap();
+        let recovered = decode_pending_governance_attempts(&restored).unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].payload, attempt.payload);
+        assert_eq!(recovered[0].attempt_number, 2);
+        assert_eq!(recovered[0].eligible_at, 1_174_000);
+        assert!(recovered[0].eligible_at < 1_233_000);
+        let mut queued = std::collections::VecDeque::new();
+        assert!(
+            super::super::target_reveal::due_target_reveals(&replica, 1_173_999, &queued)
+                .unwrap()
+                .is_empty()
+        );
+        let due =
+            super::super::target_reveal::due_target_reveals(&replica, 1_174_000, &queued).unwrap();
+        assert_eq!(due, recovered);
+        let mut next_result = result;
+        next_result.attempt_id = due[0].attempt_id.clone();
+        queued.push_back(crate::RuntimeTx::RecordGovernanceJSubmitResult(next_result));
+        assert!(
+            super::super::target_reveal::due_target_reveals(&replica, 1_174_000, &queued)
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     #[test]
     fn target_publication_matches_ts_hash_and_recovers_exact_immutable_outbox() {

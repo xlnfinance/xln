@@ -1,5 +1,6 @@
 import { keccak256, toUtf8Bytes } from 'ethers';
 
+import { finalizedTargetReveal } from './target-reveal-finality';
 import { ENTITY_J_SUBMIT_RETRY_MS } from '../../entity/consensus/leader';
 import { normalizeSubmitId, truncateSubmitFailureMessage } from '../command/submit-identity';
 import { safeStringify } from '../../protocol/serialization';
@@ -207,7 +208,11 @@ export const applyGovernanceSubmitResultRuntimeTx = (
     tx.data.attemptNumber !== attempt.attemptNumber ||
     tx.data.attemptedAt !== attempt.attemptedAt
   ) throw new Error(`GOVERNANCE_SUBMIT_RESULT_IDENTITY_MISMATCH:${tx.data.attemptId}`);
-  if (tx.data.outcome !== 'transientFailure') {
+  // RPC inclusion (or failure) is not registry finality. In particular, a
+  // one-confirmation receipt may be orphaned after this result commits.
+  const reveal = pending.jTx.type === 'hashLadderReveal';
+  if (reveal ? finalizedTargetReveal(env, pending.input.jurisdictionName, pending.jTx)
+    : tx.data.outcome !== 'transientFailure') {
     removePending(env, tx.data.attemptId);
     return;
   }
@@ -218,7 +223,7 @@ export const applyGovernanceSubmitResultRuntimeTx = (
     attemptId: buildGovernanceAttemptId({ ...identity, attemptNumber: nextAttemptNumber }),
     attemptNumber: nextAttemptNumber,
     attemptedAt: nextAttemptedAt,
-    eligibleAt: nextAttemptedAt + ENTITY_J_SUBMIT_RETRY_MS,
+    eligibleAt: nextAttemptedAt + (reveal ? 1_000 : ENTITY_J_SUBMIT_RETRY_MS),
   };
 };
 

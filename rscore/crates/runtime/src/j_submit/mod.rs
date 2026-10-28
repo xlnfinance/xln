@@ -23,7 +23,7 @@ pub(crate) mod prepared_wire;
 pub(crate) mod provider_lifecycle;
 mod submission;
 #[path = "prepared/target_reveal.rs"]
-mod target_reveal;
+pub(crate) mod target_reveal;
 mod transaction;
 mod tron;
 

@@ -1,3 +1,4 @@
+import { finalizedTargetReveal } from '../registration/target-reveal-finality';
 import { ethers } from 'ethers';
 import { parseReceiptLogsToJEvents, type JEventCarrier } from '../../jurisdiction/adapter/j-event-log-decoder';
 import { eventCarriers } from '../../jurisdiction/adapter/rpc/rpc-boundary';
@@ -313,10 +314,22 @@ const queueKnownFailure = (
 // this attempt; wait for that canonical queued input instead of producing a
 // second observation (for example after-submit versus before-submit barriers).
 const hasQueuedJSubmitResult = (env: RuntimeReplica, jTx: JTx): boolean => {
-  if (jTx.type !== 'batch' || !jTx.data.runtimeSubmitAttempt) return false;
+  if ((jTx.type !== 'batch' && jTx.type !== 'hashLadderReveal') || !jTx.data.runtimeSubmitAttempt) return false;
   const attemptId = jTx.data.runtimeSubmitAttempt.attemptId;
   return requireRuntimeMempool(env).runtimeTxs.some(tx =>
-    tx.type === 'recordJSubmitResult' && tx.data.attemptId === attemptId);
+    (tx.type === 'recordJSubmitResult' || tx.type === 'recordGovernanceJSubmitResult')
+    && tx.data.attemptId === attemptId);
+};
+
+const reconcileFinalizedTargetReveal = (
+  env: RuntimeReplica,
+  deps: RuntimeJSubmitDeps,
+  jurisdictionName: string,
+  jTx: JTx,
+): boolean => {
+  if (jTx.type !== 'hashLadderReveal' || !finalizedTargetReveal(env, jurisdictionName, jTx)) return false;
+  queueGovernanceResult(env, deps, jurisdictionName, jTx, 'reconciled');
+  return true;
 };
 
 const collectActiveJTxs = (
@@ -333,6 +346,7 @@ const collectActiveJTxs = (
     !hasQueuedJSubmitResult(env, jTx) &&
     !reconcileDurablyAbortedBatch(env, deps, jInput.jurisdictionName, jTx) &&
     !reconcileDurablyStaleEntityProviderAction(env, deps, jInput.jurisdictionName, jTx) &&
+    !reconcileFinalizedTargetReveal(env, deps, jInput.jurisdictionName, jTx) &&
     (!isGovernanceJTx(jTx) || governanceAttemptIsDue(jTx, now)));
 };
 
@@ -586,7 +600,9 @@ const submitJTxToAdapter = async (
     env,
     ...(signerId ? { signerId } : {}),
     ...(signerPrivateKey ? { signerPrivateKey } : {}),
-    timestamp: jTx.timestamp ?? env.state.timestamp,
+    // The immutable reveal keeps its authored timestamp across retries; chain
+    // execution uses the current committed Runtime clock (also in BrowserVM).
+    timestamp: jTx.type === 'hashLadderReveal' ? env.state.timestamp : jTx.timestamp ?? env.state.timestamp,
   });
 };
 

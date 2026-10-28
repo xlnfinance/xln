@@ -1,3 +1,4 @@
+import { finalizedTargetReveal } from '../../../runtime/registration/target-reveal-finality';
 import { registerPendingCommittedJOutbox, splitJOutboxForDurableSubmit } from '../../../runtime/j-submit/j-submit-state';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../../../storage/wal/snapshot';
 import { applyGovernanceSubmitResultRuntimeTx, makeGovernanceSubmitResultRuntimeTx, requireCanonicalGovernanceAttempt } from '../../../runtime/registration/governance-submit-state';
@@ -1217,7 +1218,41 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(() => requireCanonicalGovernanceAttempt(pendingInput.jurisdictionName, corrupted)).toThrow('ATTEMPT_ID_MISMATCH');
     const submitted = makeGovernanceSubmitResultRuntimeTx(pendingInput.jurisdictionName, pending, 'submitted');
     applyGovernanceSubmitResultRuntimeTx(recovered, submitted);
-    expect(recovered.infrastructure?.pendingCommittedJOutbox).toEqual([]);
+    expect(recovered.infrastructure?.pendingCommittedJOutbox).toHaveLength(1);
+    // Receipt, terminal RPC failure and an unauthenticated reconcile label all retain it.
+    for (const outcome of ['terminalFailure', 'reconciled'] as const) {
+      applyGovernanceSubmitResultRuntimeTx(recovered,
+        makeGovernanceSubmitResultRuntimeTx(pendingInput.jurisdictionName, pending, outcome));
+      expect(recovered.infrastructure?.pendingCommittedJOutbox).toHaveLength(1);
+    }
+    registerPendingCommittedJOutbox(env, split.durable);
+    const ownPublication = split.durable[0]!.jTxs[0]!;
+    if (ownPublication.type !== 'hashLadderReveal') throw new Error('TEST_TARGET_REVEAL_MISSING');
+    expect(finalizedTargetReveal(env, pendingInput.jurisdictionName, ownPublication)).toBe(false);
+    const registration = ownPublication.data.registration;
+    const finalized = await applyJEventRange(committedTarget, {
+      from: targetSigner, observedAt: env.state.timestamp, blockNumber: 2,
+      blockHash: secret('e1'), transactionHash: secret('e2'),
+      event: { type: 'HashLadderRevealRegistered', data: {
+        entity: targetUser, counterpartyEntity: registration.counterpartyEntity,
+        ladderHash: ethers.keccak256(ethers.concat([registration.fullHash, registration.partialRoot])),
+        targetRole: true, ...registration.witness, revealedAt: 30,
+      } },
+    }, env);
+    env.state.eReplicas.get(`${targetUser}:${targetSigner}`)!.state = finalized.newState;
+    expect(finalizedTargetReveal(env, pendingInput.jurisdictionName, ownPublication)).toBe(true);
+    expect(finalizedTargetReveal(env, 'foreign-jurisdiction', ownPublication)).toBe(false);
+    for (const foreign of [
+      { ...registration, counterpartyEntity: entity('ff') },
+      { ...registration, fullHash: secret('ee') },
+      { ...registration, witness: { ...registration.witness, fillRatio: fillRatio + 1 } },
+    ]) {
+      expect(finalizedTargetReveal(env, pendingInput.jurisdictionName,
+        { ...ownPublication, data: { ...ownPublication.data, registration: foreign } })).toBe(false);
+    }
+    applyGovernanceSubmitResultRuntimeTx(env,
+      makeGovernanceSubmitResultRuntimeTx(pendingInput.jurisdictionName, ownPublication, 'reconciled'));
+    expect(env.infrastructure?.pendingCommittedJOutbox).toEqual([]);
     // Hub wrote on-chain — observer must NOT latch the user's own Source slot
     // (shared ladderHash would make target salvage return already-queued).
     const sourceRoute = committedSource.crossJurisdictionSwaps?.get(route.orderId);

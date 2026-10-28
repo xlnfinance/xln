@@ -1003,6 +1003,7 @@ impl ResidentRuntimeService {
         if let Some(report) = self.processor.retry_publication()? {
             self.deferred_publication.add(report)?;
         }
+        self.retry_due_target_reveals(now)?;
         let previous = self.processor.replica()?.state.timestamp;
         let queued_at = queued_at.unwrap_or(now);
         let timestamp = resolve_live_timestamp(previous, queued_at, now)?;
@@ -1046,6 +1047,33 @@ impl ResidentRuntimeService {
         }
         self.deferred_publication.merge_into(&mut report)?;
         Ok(Some(report))
+    }
+
+    fn retry_due_target_reveals(&mut self, now: u64) -> Result<(), ResidentRuntimeServiceError> {
+        if self.j_submit_operator_key.is_none() {
+            return Ok(());
+        }
+        let due = crate::j_submit::target_reveal::due_target_reveals(
+            self.processor.replica()?,
+            now,
+            &self.pending_runtime_txs,
+        )
+        .map_err(|e| ResidentRuntimeServiceError::JSubmit(e.to_string()))?;
+        if due.is_empty() {
+            return Ok(());
+        }
+        // The replica can include a pipelined, un-fsynced frame. Drain it before
+        // external publication, then reselect: its initial submit may have queued a result.
+        self.sync_committed()?;
+        let due = crate::j_submit::target_reveal::due_target_reveals(
+            self.processor.replica()?,
+            now,
+            &self.pending_runtime_txs,
+        )
+        .map_err(|e| ResidentRuntimeServiceError::JSubmit(e.to_string()))?;
+        self.execute_committed_j_attempts(
+            due.into_iter().map(DurableJAttempt::Governance).collect(),
+        )
     }
 
     fn execute_committed_j_attempts(
@@ -1110,6 +1138,16 @@ impl ResidentRuntimeService {
                         .push_back(RuntimeTx::RecordEntityProviderActionSubmitResult(result));
                 }
                 DurableJAttempt::Governance(attempt) => {
+                    if matches!(
+                        attempt.payload,
+                        crate::j_submit::PublicationPayload::TargetReveal { .. }
+                    ) && !crate::j_submit::target_reveal::target_reveal_is_due(
+                        &attempt,
+                        wall_clock_ms()?,
+                        &self.pending_runtime_txs,
+                    ) {
+                        continue;
+                    }
                     let operator_key = self.j_submit_operator_key.ok_or_else(|| {
                         ResidentRuntimeServiceError::JSubmit("OPERATOR_KEY_MISSING".into())
                     })?;
@@ -1814,6 +1852,20 @@ fn submit_committed_governance_attempt(
         adapter_failure: None,
         transaction_hash: None,
     };
+    match crate::j_submit::target_reveal::finalized_target_reveal(replica, attempt) {
+        Ok(true) => {
+            let mut result = base();
+            result.outcome = GovernanceResultOutcome::Reconciled;
+            return result;
+        }
+        Ok(false) => {}
+        Err(error) => {
+            let mut result = base();
+            result.outcome = GovernanceResultOutcome::TerminalFailure;
+            result.message = Some(error.to_string());
+            return result;
+        }
+    }
     let submit = || -> Result<JSubmitOutcome, JSubmitError> {
         let operator = xln_rscore_crypto::address_of_private_key(&operator_private_key)
             .ok_or(JSubmitError::Transaction("operator-key"))?;
