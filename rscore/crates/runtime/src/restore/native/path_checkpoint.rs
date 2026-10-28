@@ -186,7 +186,7 @@ fn tree_value(
         return Err(invalid(format!("LEAF_KEY:{path}")));
     }
     match namespace {
-        3 => {
+        3 | 10 => {
             let length = encoded_key
                 .get(..2)
                 .and_then(|value| <[u8; 2]>::try_from(value).ok())
@@ -251,7 +251,7 @@ fn account_nodes(
                 path: logical_path.to_vec(),
                 value: decoded,
             });
-        } else if (1..=6).contains(&namespace) || matches!(namespace, 8 | 9) {
+        } else if (1..=6).contains(&namespace) || matches!(namespace, 8 | 9 | 10) {
             let logical_path = if kind == 0 {
                 unpack_radix16_path(payload).map_err(invalid)?
             } else {
@@ -432,7 +432,7 @@ pub fn restore_path_checkpoint(
             .and_then(|value| <[u8; 32]>::try_from(value).ok())
             .ok_or_else(|| invalid("ACCOUNT_NODE_KEY"))?;
         let namespace = *key.get(65).ok_or_else(|| invalid("ACCOUNT_NODE_KEY"))?;
-        if !matches!(namespace, 1..=9) || key.len() < 68 {
+        if !matches!(namespace, 1..=10) || key.len() < 68 {
             return Err(invalid("ACCOUNT_NODE_KEY"));
         }
         nodes_by_account
@@ -461,7 +461,7 @@ pub fn restore_path_checkpoint(
             return Err(invalid("ACCOUNT_LEAF"));
         }
         let j_claim_roots = j_claim_accumulators(&account_meta[1]).map_err(invalid)?;
-        let mut row = Vec::with_capacity(13);
+        let mut row = Vec::with_capacity(14);
         row.push(tagged_bytes(&account));
         row.extend([account_meta[0].clone(), account_meta[1].clone()]);
         for namespace in [1, 2, 3, 4, 5, 6, 8, 9, 7] {
@@ -475,6 +475,8 @@ pub fn restore_path_checkpoint(
             )?));
         }
         row.push(account_meta[2].clone());
+        let subcontract_rows = nodes_by_account.remove(&(account, 10)).unwrap_or_default();
+        row.push(Value::Array(account_nodes(&subcontract_rows, 10, None)?));
         accounts.push(Value::Array(row));
     }
     if accounts.len() != meta.account_count {

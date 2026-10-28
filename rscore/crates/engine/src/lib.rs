@@ -18,6 +18,7 @@ mod dispute;
 mod error;
 mod input;
 mod j_claims;
+pub mod lending;
 mod state;
 mod swap;
 mod tx;

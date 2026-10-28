@@ -181,6 +181,7 @@ fn account_view(case: &Value) -> LocalAccountFinancialView {
         view["counterpartyDispute"]
             .as_object()
             .map(|counterparty| ResidentAccountDisputeView {
+                lending_claim_ids: Vec::new(),
                 status: text(&view["status"]),
                 dispute_prepare: (!view["disputePrepare"].is_null())
                     .then(|| canonical(&view["disputePrepare"])),
@@ -212,6 +213,7 @@ fn account_view(case: &Value) -> LocalAccountFinancialView {
             });
     LocalAccountFinancialView {
         dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
+        lending: Default::default(),
         active: true,
         owner_side: if owner_is_left {
             Side::Left

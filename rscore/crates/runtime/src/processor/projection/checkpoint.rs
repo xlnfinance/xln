@@ -61,7 +61,7 @@ pub(crate) fn prepare_account_checkpoint(
     for row in &checkpoint.accounts {
         let encoded = encode_account_checkpoint_rows(row, true)?;
         let fields = tuple(&encoded, "account")?;
-        if fields.len() != 14 {
+        if fields.len() != 15 {
             return Err(AccountCheckpointProjectionError::Shape("account"));
         }
         let account_id = *row.account_id.as_bytes();

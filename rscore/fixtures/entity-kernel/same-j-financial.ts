@@ -99,7 +99,7 @@ const account = (lock?: AccountReplica['state']['locks'] extends { get(key: stri
   };
 };
 
-const state = (lock?: Parameters<typeof account>[0]): EntityState => ({
+export const state = (lock?: Parameters<typeof account>[0]): EntityState => ({
   entityId: OWNER,
   entityEncryptionPublicKey: `0x${'55'.repeat(32)}`,
   height: 0,

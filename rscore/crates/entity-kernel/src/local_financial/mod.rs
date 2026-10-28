@@ -4,6 +4,7 @@ mod direct_payment;
 mod dispute;
 #[path = "dispute/dispute_arguments.rs"]
 mod dispute_arguments;
+mod lending;
 pub(crate) use dispute::draft_prepared_dispute_start_after_removal;
 pub(crate) use dispute_arguments::{
     refresh_broadcast_dispute_arguments, refresh_dispute_secret_arguments,
@@ -49,10 +50,9 @@ pub use types::AccountEnvelopeMutation;
 pub use types::LocalAccountFinancialView;
 pub(crate) use types::PrepareDisputeEntityTx;
 pub use types::{
-    DirectPaymentEntityTx, ExtendCreditEntityTx, HtlcPaymentEntityTx, LendingBorrowEntityTx,
-    LendingClosePositionEntityTx, LendingOfferEntityTx, LendingRepayEntityTx,
-    LocalEntityFinancialTx, PlaceSwapOfferEntityTx, ProposeCancelSwapEntityTx,
-    RequestCollateralEntityTx, RequestCreditEntityTx,
+    DirectPaymentEntityTx, ExtendCreditEntityTx, HtlcPaymentEntityTx, LocalEntityFinancialTx,
+    PlaceSwapOfferEntityTx, ProposeCancelSwapEntityTx, RequestCollateralEntityTx,
+    RequestCreditEntityTx,
 };
 
 pub(crate) struct LocalFinancialResult {
@@ -75,22 +75,6 @@ pub(crate) fn apply_local_entity_financial_txs(
     genesis_policy: Option<&xln_rscore_batch::EntityAccountGenesisPolicy>,
     runtime_seed: Option<&str>,
 ) -> Result<LocalFinancialResult, EntityKernelError> {
-    // Reject at Entity application, after signature/nonce admission. Runtime
-    // rolls back this outer command and certifies neighbouring commands; no
-    // prefix mutations, nonce or effects from the refused command may escape.
-    if let Some(kind) = txs.iter().find_map(|tx| match tx {
-        LocalEntityFinancialTx::UnsupportedLending(tx) => Some(tx.kind.as_str()),
-        LocalEntityFinancialTx::LendingBorrow(_)
-        | LocalEntityFinancialTx::LendingClosePosition(_)
-        | LocalEntityFinancialTx::LendingOffer(_)
-        | LocalEntityFinancialTx::LendingRepay(_) => Some("lending"),
-        _ => None,
-    }) {
-        return Err(EntityKernelError::RejectedEntityTx {
-            kind,
-            detail: "LENDING_UNSUPPORTED".into(),
-        });
-    }
     let mut account_creates = Vec::new();
     let mut account_txs = Vec::new();
     let mut outputs = Vec::new();
@@ -101,12 +85,14 @@ pub(crate) fn apply_local_entity_financial_txs(
     let mut orderbook_deltas = Vec::new();
     for tx in txs {
         match tx {
-            LocalEntityFinancialTx::UnsupportedLending(tx) => {
-                return Err(EntityKernelError::RejectedEntityTx {
-                    kind: tx.kind.as_str(),
-                    detail: "LENDING_UNSUPPORTED".into(),
-                });
-            }
+            LocalEntityFinancialTx::LendingCommand(tx) => lending::apply(
+                state,
+                tx,
+                account_views,
+                &mut account_txs,
+                &mut events,
+                &mut wake_targets,
+            )?,
             LocalEntityFinancialTx::CrossJurisdictionForceSiblingDispute(tx) => {
                 let counterparty = crate::cross_j::force_sibling_dispute_counterparty(
                     state,
@@ -176,15 +162,6 @@ pub(crate) fn apply_local_entity_financial_txs(
                 &mut outputs,
                 &mut events,
             )?,
-            LocalEntityFinancialTx::LendingBorrow(_)
-            | LocalEntityFinancialTx::LendingClosePosition(_)
-            | LocalEntityFinancialTx::LendingOffer(_)
-            | LocalEntityFinancialTx::LendingRepay(_) => {
-                return Err(EntityKernelError::RejectedEntityTx {
-                    kind: "lending",
-                    detail: "LENDING_UNSUPPORTED".into(),
-                });
-            }
             LocalEntityFinancialTx::OpenAccount(tx) => open_account::apply(
                 state,
                 tx,
@@ -340,13 +317,13 @@ pub(crate) fn apply_local_entity_financial_txs(
 pub(crate) use settlement::apply_committed_settlement_followup;
 
 #[cfg(test)]
-mod unsupported_lending_tests {
+mod malformed_lending_tests {
     use super::*;
     use crate::{CanonicalEntityTx, EntityTxKind};
     use xln_rscore_protocol::CanonicalValue;
 
     #[test]
-    fn unsupported_lending_decodes_then_rejects_at_entity_application() {
+    fn malformed_lending_decodes_then_rejects_at_entity_application() {
         for kind in [
             EntityTxKind::LendingOffer,
             EntityTxKind::LendingBorrow,
@@ -364,10 +341,10 @@ mod unsupported_lending_tests {
             )
             .expect("canonical projection");
             let tx = decode_local_entity_financial_tx(&projected)
-                .expect("unsupported semantics must not reject the whole adapter request")
+                .expect("malformed commands must not reject the whole adapter request")
                 .expect("typed command");
             assert!(
-                matches!(&tx, LocalEntityFinancialTx::UnsupportedLending(retained) if retained == &projected)
+                matches!(&tx, LocalEntityFinancialTx::LendingCommand(retained) if retained == &projected)
             );
             let mut state = EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 100);
             let before = state.clone();
@@ -382,11 +359,11 @@ mod unsupported_lending_tests {
             );
             assert!(
                 matches!(result, Err(EntityKernelError::RejectedEntityTx { kind: rejected, detail })
-                if rejected == kind.as_str() && detail == "LENDING_UNSUPPORTED")
+                if rejected == kind.as_str() && !detail.is_empty())
             );
             assert_eq!(
                 state, before,
-                "unsupported lending must not mutate the candidate"
+                "rejected lending must not mutate the candidate"
             );
         }
     }

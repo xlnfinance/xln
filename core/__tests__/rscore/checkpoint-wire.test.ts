@@ -244,6 +244,7 @@ const restoreFixture = (
       null,
     ],
   ];
+  row.push([]);
   return { row, stateRoot, leaf, frameHash: frame.stateHash };
 };
 
@@ -273,7 +274,7 @@ describe('rscore checkpoint wire', () => {
     expect(decoded.stateSeed.lendingIntents.get('intent-1')).toBe('fund');
     expect(decoded.stateSeed.swapOffers.get(offer.offerId)).toEqual(offer);
     expect(decoded.stateSeed.rebalanceFeePolicies.get(1)).toEqual(policy);
-    expect(decoded.rootOnlyCarriedSections).toEqual(['subcontracts']);
+    expect(decoded.rootOnlyCarriedSections).toEqual([]);
   });
 
   test('binds post-finality live state to the Entity leaf while retaining its historical frame', () => {

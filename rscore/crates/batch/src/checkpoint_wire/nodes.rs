@@ -22,6 +22,7 @@ pub enum AccountCheckpointNamespace {
     Pulls = 6,
     RequestedRebalance = 8,
     RequestedRebalanceFeeState = 9,
+    Subcontracts = 10,
 }
 
 impl AccountCheckpointNamespace {
@@ -65,7 +66,7 @@ pub struct EncodedAccountJClaimChanges {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EncodedAccountCheckpointNodes {
-    pub trees: [EncodedAccountCheckpointTreeChanges; 8],
+    pub trees: [EncodedAccountCheckpointTreeChanges; 9],
     pub j_claims: EncodedAccountJClaimChanges,
 }
 
@@ -112,6 +113,11 @@ pub fn encode_account_checkpoint_nodes(
                 AccountCheckpointNamespace::RequestedRebalanceFeeState,
                 &rows.requested_rebalance_fee_state,
                 encode_requested_rebalance_fee_state,
+            )?,
+            tree_changes(
+                AccountCheckpointNamespace::Subcontracts,
+                &rows.subcontracts,
+                |c| encode_canonical_value(&c.canonical()),
             )?,
         ],
         j_claims: EncodedAccountJClaimChanges {

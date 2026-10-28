@@ -1050,12 +1050,26 @@ mod tests {
             assert_eq!(query.hub_entity_id, [0x11; 32]);
             assert_eq!(query.token_id, Some(1.0));
             response
-                .send(crate::lending_http::lending_state_response(None, &query).map(Some))
+                .send(
+                    crate::lending_http::lending_state_response(
+                        None,
+                        &query,
+                        0,
+                        &Default::default(),
+                    )
+                    .map(Some),
+                )
                 .unwrap();
             let RuntimeHttpCommand::LendingState { response, .. } = receiver.recv().unwrap() else {
                 panic!("lending command");
             };
             response.send(Ok(None)).unwrap();
+            let RuntimeHttpCommand::LendingState { response, .. } = receiver.recv().unwrap() else {
+                panic!("lending command");
+            };
+            response
+                .send(Err("lending state unavailable".into()))
+                .unwrap();
         });
         let server = RuntimeHttpServer::bind("127.0.0.1:0".parse().unwrap(), state).unwrap();
         let get = |query: &str| {
@@ -1068,13 +1082,19 @@ mod tests {
         let invalid = get(&format!("{hub}&tokenId=bad"));
         assert!(invalid.starts_with("HTTP/1.1 400"), "{invalid}");
         let valid = get(&format!("{hub}&tokenId=1"));
-        assert!(valid.starts_with("HTTP/1.1 503"), "{valid}");
-        assert!(valid.contains("LENDING_UNSUPPORTED"), "{valid}");
+        assert!(valid.starts_with("HTTP/1.1 200"), "{valid}");
+        assert!(valid.contains("savingsPrincipalAmount"), "{valid}");
         let missing = get(&hub);
         assert!(missing.starts_with("HTTP/1.1 404"), "{missing}");
         assert!(
             missing.contains("Requested hub is not available"),
             "{missing}"
+        );
+        let unavailable = get(&hub);
+        assert!(unavailable.starts_with("HTTP/1.1 503"), "{unavailable}");
+        assert!(
+            unavailable.contains("lending state unavailable"),
+            "{unavailable}"
         );
         worker.join().unwrap();
     }

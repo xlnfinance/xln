@@ -253,6 +253,7 @@ mod tests {
             next.clone(),
             LocalAccountFinancialView {
                 dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
+                lending: Default::default(),
                 active: true,
                 owner_side: xln_rscore_engine::Side::Left,
                 owner_out_capacity: BTreeMap::from([(token_id, BigInt::from(1_000))]),

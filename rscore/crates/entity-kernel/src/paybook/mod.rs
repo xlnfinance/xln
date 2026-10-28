@@ -1003,6 +1003,7 @@ mod key_tests {
     fn view(owner_side: Side, lock: HtlcLock) -> LocalAccountFinancialView {
         ResidentAccountFinancialView {
             dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
+            lending: Default::default(),
             active: true,
             owner_side,
             owner_in_capacity: BTreeMap::new(),

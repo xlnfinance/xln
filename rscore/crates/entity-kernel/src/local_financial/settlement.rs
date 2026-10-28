@@ -874,6 +874,7 @@ mod committed_tests {
     fn financial_view(workspace: CanonicalValue) -> LocalAccountFinancialView {
         LocalAccountFinancialView {
             dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
+            lending: Default::default(),
             active: true,
             owner_side: xln_rscore_engine::Side::Left,
             owner_out_capacity: BTreeMap::new(),

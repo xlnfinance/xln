@@ -434,7 +434,7 @@ export const prepareRscoreCheckpointStorage = async (
     }
     const changedIds = new Set<string>();
     for (const raw of input.checkpoint.accounts) {
-      const row = rscoreCheckpointTuple(raw, 14, 'ACCOUNT');
+      const row = rscoreCheckpointTuple(raw, 15, 'ACCOUNT');
       const account = hex32(rscoreCheckpointBytes(row[0], 32, 'ACCOUNT_ID'));
       if (changedIds.has(account)) throw new Error(`STORAGE_RSCORE_ACCOUNT_DUPLICATE:${account}`);
       changedIds.add(account);
@@ -442,7 +442,7 @@ export const prepareRscoreCheckpointStorage = async (
       if (hex32(rscoreCheckpointBytes(header[0], 32, 'HEADER_OWNER')) !== owner) {
         throw new Error(`STORAGE_RSCORE_ACCOUNT_OWNER:${account}`);
       }
-      rscoreCheckpointTuple(row[3], 8, 'SECTIONS');
+      rscoreCheckpointTuple(row[3], 9, 'SECTIONS');
       rscoreCheckpointTuple(row[13], 11, 'CONSENSUS');
       const accountKey = keyRscoreAccount(owner, account);
       const accountMutation = await prepareBoundedStorageValueMutation(
@@ -453,7 +453,7 @@ export const prepareRscoreCheckpointStorage = async (
       for (const key of accountMutation.dels) addDel(puts, dels, key);
       for (const put of accountMutation.puts) addEncodedPut(puts, dels, put.key, put.value);
       for (const [offset, namespace] of RSCORE_ACCOUNT_TREE_NAMESPACES.entries()) {
-        const changes = rscoreCheckpointTuple(row[4 + offset], 2, `TREE_${namespace}`);
+        const changes = rscoreCheckpointTuple(row[namespace === 10 ? 14 : 4 + offset], 2, `TREE_${namespace}`);
         for (const rawDel of rscoreCheckpointList(changes[1], `TREE_${namespace}_DELS`)) {
           const nodeMutation = await prepareBoundedStorageValueMutation(
             db,
@@ -580,7 +580,7 @@ const leafValues = async (
     if (!buffersEqual(storedKey, Buffer.from(keyBytes))) {
       throw new Error(`STORAGE_RSCORE_STORED_LEAF_KEY_MISMATCH:${key.toString('hex')}`);
     }
-    if (namespace === 3) {
+    if (namespace === 3 || namespace === 10) {
       const bytes = Buffer.from(keyBytes);
       if (bytes.byteLength < 2 || bytes.readUInt16BE(0) !== bytes.byteLength - 2) throw new Error('STORAGE_RSCORE_LENDING_KEY');
       values.push([bytes.subarray(2).toString('utf8'), row[3] as RscoreWireValue]);
@@ -624,6 +624,7 @@ export const loadRscoreCheckpoint = async (
       await leafValues(db, owner, account, 9),
       await jClaimNodeValues(db, owner, account, accountMeta[1]),
       accountMeta[2],
+      await leafValues(db, owner, account, 10),
     ] as RscoreWireValue[]);
   }
   if (accounts.length !== restoreToken[4]) throw new Error(`STORAGE_RSCORE_RESTORE_COUNT:${accounts.length}:${restoreToken[4]}`);

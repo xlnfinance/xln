@@ -488,7 +488,7 @@ pub fn restore_entity_state(
     }
     validate_paybook(&snapshot.paybook, &snapshot.known_accounts)?;
     if let Some(lending) = &snapshot.lending {
-        match *lending {}
+        crate::decode_canonical_lending_state(&crate::canonical_lending_state(lending)?)?;
     }
     if let Some(pairs) = &snapshot.swap_trading_pairs {
         validate_swap_trading_pairs(pairs)?;

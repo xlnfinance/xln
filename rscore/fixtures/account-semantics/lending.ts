@@ -35,7 +35,7 @@ type LendingStep = Readonly<{
   outputCount: number;
 }>;
 
-const makeAccount = (counterparty: string): AccountReplica => {
+export const makeAccount = (counterparty: string): AccountReplica => {
   const delta = createDefaultDelta(1);
   delta.collateral = 20_000n;
   // Each party owns 10,000: savings must spend assets, not unused bank credit.

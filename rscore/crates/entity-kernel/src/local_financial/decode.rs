@@ -985,7 +985,7 @@ pub fn decode_local_entity_financial_tx(
         | EntityTxKind::LendingClosePosition
         | EntityTxKind::LendingApprove
         | EntityTxKind::LendingSetTerms => {
-            Ok(Some(LocalEntityFinancialTx::UnsupportedLending(tx.clone())))
+            Ok(Some(LocalEntityFinancialTx::LendingCommand(tx.clone())))
         }
         EntityTxKind::OpenAccount => open_account(tx).map(Some),
         EntityTxKind::PlaceSwapOffer => place_swap_offer(tx).map(Some),

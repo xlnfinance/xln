@@ -1,10 +1,20 @@
+import { assertLendingCovenant } from '../../protocol/dispute/lending-covenant';
 import { validateRebalanceFeePolicySnapshot } from '../../account/validation/rebalance-validation';
 import { canonicalAccountDisputeConfig } from '../../account/config/dispute-config';
 import { assertAccountJClaimAccumulatorState } from '../../account/j-claims/j-claim-accumulator';
 import { PersistentAccountStateMap } from '../../account/state/persistent-state-map';
 import { validateDelta } from '../../account/validation/delta-validation';
 import { LIMITS } from '../../config/constants';
-import type { AccountLendingIntentKind, AccountStateDomain, Delta, HtlcLock, PullCommitment, SettlementWorkspace, SwapOffer } from '../../types/account';
+import type {
+  AccountLendingCovenant,
+  AccountLendingIntentKind,
+  AccountStateDomain,
+  Delta,
+  HtlcLock,
+  PullCommitment,
+  SettlementWorkspace,
+  SwapOffer,
+} from '../../types/account';
 import type { AccountJClaimAccumulatorState } from '../../types/finance/account-j-claims';
 import type {
   BilateralRebalanceFeePolicy,
@@ -66,6 +76,7 @@ export type RscoreAccountStateSeed = Readonly<{
   deltas: PersistentAccountStateMap<number, Delta>;
   locks: PersistentAccountStateMap<string, HtlcLock>;
   lendingIntents: PersistentAccountStateMap<string, AccountLendingIntentKind>;
+  subcontracts: PersistentAccountStateMap<string, AccountLendingCovenant>;
   swapOffers: PersistentAccountStateMap<string, SwapOffer>;
   rebalanceFeePolicies: PersistentAccountStateMap<number, BilateralRebalanceFeePolicy>;
   pulls: PersistentAccountStateMap<string, PullCommitment>;
@@ -184,6 +195,9 @@ const LENDING_KINDS = [
   'close-payout',
   'disburse',
   'credit-request',
+  'close-early',
+  'close-mature',
+  'dispute-close',
 ] as const satisfies readonly (AccountLendingIntentKind | undefined)[];
 
 const decodeLending = (value: unknown, index: number): readonly [string, AccountLendingIntentKind] => {
@@ -223,10 +237,9 @@ const decodeOffer = (value: unknown, index: number): SwapOffer => {
     ...(row[15] === null
       ? {}
       : {
-          crossJurisdiction: decodeRscoreCanonicalValue(
-            row[15],
-            `OFFER_${index}_CROSS_JURISDICTION`,
-          ) as NonNullable<SwapOffer['crossJurisdiction']>,
+          crossJurisdiction: decodeRscoreCanonicalValue(row[15], `OFFER_${index}_CROSS_JURISDICTION`) as NonNullable<
+            SwapOffer['crossJurisdiction']
+          >,
         }),
   };
   if (
@@ -241,12 +254,14 @@ const decodeOffer = (value: unknown, index: number): SwapOffer => {
 
 const decodePreviousTerms = (value: unknown, field: string) => {
   const row = rscoreCheckpointTuple(value, 6, `RESTORE_${field}_PREVIOUS`);
-  return { policyVersion: checkpointSafeInt(row[0], `${field}_VERSION`),
+  return {
+    policyVersion: checkpointSafeInt(row[0], `${field}_VERSION`),
     baseFee: checkpointBigInt(row[1], `${field}_BASE_FEE`),
     liquidityFeeBps: checkpointBigInt(row[2], `${field}_LIQUIDITY_FEE`),
     gasFee: checkpointBigInt(row[3], `${field}_GAS_FEE`),
     updatedAt: checkpointSafeInt(row[4], `${field}_UPDATED_AT`),
-    noticePeriodSeconds: checkpointSafeInt(row[5], `${field}_NOTICE_PERIOD`) };
+    noticePeriodSeconds: checkpointSafeInt(row[5], `${field}_NOTICE_PERIOD`),
+  };
 };
 
 const decodePolicySnapshot = (value: unknown, field: string): RebalanceFeePolicySnapshot | undefined => {
@@ -276,10 +291,7 @@ const decodePolicySnapshot = (value: unknown, field: string): RebalanceFeePolicy
 
 const decodePolicy = (value: unknown, index: number): readonly [number, BilateralRebalanceFeePolicy] => {
   const row = rscoreCheckpointTuple(value, 2, `RESTORE_POLICY_${index}`);
-  return [
-    checkpointTokenId(row[0], `POLICY_${index}_TOKEN_ID`),
-    decodePolicyValue(row[1], index),
-  ];
+  return [checkpointTokenId(row[0], `POLICY_${index}_TOKEN_ID`), decodePolicyValue(row[1], index)];
 };
 
 const decodePolicyValue = (value: unknown, index: number): BilateralRebalanceFeePolicy => {
@@ -294,6 +306,7 @@ export type RscoreCheckpointSectionName =
   | 'deltas'
   | 'locks'
   | 'lendingIntents'
+  | 'subcontracts'
   | 'swapOffers'
   | 'rebalanceFeePolicies'
   | 'pulls'
@@ -326,8 +339,10 @@ export const decodeRscoreCheckpointSectionKey = (
   keyBytes: Uint8Array,
   index: number,
 ): number | string =>
-  section === 'deltas' || section === 'rebalanceFeePolicies'
-    || section === 'requestedRebalance' || section === 'requestedRebalanceFeeState'
+  section === 'deltas' ||
+  section === 'rebalanceFeePolicies' ||
+  section === 'requestedRebalance' ||
+  section === 'requestedRebalanceFeeState'
     ? checkpointTokenKey(keyBytes, `${section.toUpperCase()}_${index}`)
     : checkpointTextKey(keyBytes, `${section.toUpperCase()}_${index}`);
 
@@ -347,6 +362,11 @@ export const decodeRscoreCheckpointSectionEntry = (
       const lock = decodeLock(value, index);
       return [lock.lockId, lock];
     }
+    case 'subcontracts': {
+      const claim = decodeRscoreCanonicalValue(value, `CLAIM_${index}`);
+      assertLendingCovenant(claim);
+      return [checkpointTextKey(keyBytes, `CLAIM_${index}`), claim];
+    }
     case 'lendingIntents':
       return [checkpointTextKey(keyBytes, `LENDING_${index}`), decodeLendingKind(value, index)];
     case 'swapOffers': {
@@ -364,9 +384,15 @@ export const decodeRscoreCheckpointSectionEntry = (
       return [pullId, pull];
     }
     case 'requestedRebalance':
-      return [checkpointTokenKey(keyBytes, `REQUESTED_REBALANCE_${index}`), checkpointBigInt(value, `REQUESTED_REBALANCE_${index}`)];
+      return [
+        checkpointTokenKey(keyBytes, `REQUESTED_REBALANCE_${index}`),
+        checkpointBigInt(value, `REQUESTED_REBALANCE_${index}`),
+      ];
     case 'requestedRebalanceFeeState':
-      return [checkpointTokenKey(keyBytes, `REQUESTED_REBALANCE_FEE_${index}`), decodeRequestedRebalanceFeeState(value, index)];
+      return [
+        checkpointTokenKey(keyBytes, `REQUESTED_REBALANCE_FEE_${index}`),
+        decodeRequestedRebalanceFeeState(value, index),
+      ];
   }
 };
 
@@ -377,19 +403,21 @@ const REBALANCE_REFUND_REASONS = [
   'manual',
 ] as const satisfies readonly NonNullable<RebalanceRequestFeeState['refund']>['reason'][];
 
-const decodeRequestedRebalanceFeeState = (
-  value: unknown,
-  index: number,
-): RebalanceRequestFeeState => {
+const decodeRequestedRebalanceFeeState = (value: unknown, index: number): RebalanceRequestFeeState => {
   const row = rscoreCheckpointTuple(value, 8, `RESTORE_REQUESTED_REBALANCE_FEE_${index}`);
-  const refund = row[7] === null
-    ? undefined
-    : (() => {
-        const refundRow = rscoreCheckpointTuple(row[7], 2, `RESTORE_REQUESTED_REBALANCE_REFUND_${index}`);
-        const reason = REBALANCE_REFUND_REASONS[checkpointSafeInt(refundRow[0], `REQUESTED_REBALANCE_REFUND_${index}_REASON`)];
-        if (reason === undefined) return checkpointRestoreFail(`REQUESTED_REBALANCE_REFUND_${index}_REASON`);
-        return { reason, refundedAmount: checkpointBigInt(refundRow[1], `REQUESTED_REBALANCE_REFUND_${index}_AMOUNT`) };
-      })();
+  const refund =
+    row[7] === null
+      ? undefined
+      : (() => {
+          const refundRow = rscoreCheckpointTuple(row[7], 2, `RESTORE_REQUESTED_REBALANCE_REFUND_${index}`);
+          const reason =
+            REBALANCE_REFUND_REASONS[checkpointSafeInt(refundRow[0], `REQUESTED_REBALANCE_REFUND_${index}_REASON`)];
+          if (reason === undefined) return checkpointRestoreFail(`REQUESTED_REBALANCE_REFUND_${index}_REASON`);
+          return {
+            reason,
+            refundedAmount: checkpointBigInt(refundRow[1], `REQUESTED_REBALANCE_REFUND_${index}_AMOUNT`),
+          };
+        })();
   return {
     requestId: checkpointText(row[0], `REQUESTED_REBALANCE_FEE_${index}_REQUEST_ID`),
     feeTokenId: checkpointTokenId(row[1], `REQUESTED_REBALANCE_FEE_${index}_FEE_TOKEN`),
@@ -413,6 +441,7 @@ export type RscoreAccountStateTrees = Readonly<{
   deltas: PersistentAccountStateMap<number, Delta>;
   locks: PersistentAccountStateMap<string, HtlcLock>;
   lendingIntents: PersistentAccountStateMap<string, AccountLendingIntentKind>;
+  subcontracts: PersistentAccountStateMap<string, AccountLendingCovenant>;
   swapOffers: PersistentAccountStateMap<string, SwapOffer>;
   rebalanceFeePolicies: PersistentAccountStateMap<number, BilateralRebalanceFeePolicy>;
   pulls: PersistentAccountStateMap<string, PullCommitment>;
@@ -420,9 +449,14 @@ export type RscoreAccountStateTrees = Readonly<{
   requestedRebalanceFeeState: PersistentAccountStateMap<number, RebalanceRequestFeeState>;
 }>;
 
-export const decodeRscoreAccountStateTrees = (
-  sectionValues: readonly unknown[],
-): RscoreAccountStateTrees => {
+export const decodeRscoreAccountStateTrees = (sectionValues: readonly unknown[]): RscoreAccountStateTrees => {
+  const subcontracts = rscoreCheckpointList(sectionValues[8], 'RESTORE_SUBCONTRACTS').map((value, index) => {
+    const row = rscoreCheckpointTuple(value, 2, `CLAIM_${index}`);
+    const claim = decodeRscoreCanonicalValue(row[1], `CLAIM_${index}`);
+    assertLendingCovenant(claim);
+    return [checkpointText(row[0], `CLAIM_${index}`), claim] as const;
+  });
+  duplicateKeys(subcontracts, 'SUBCONTRACTS');
   const deltas = rscoreCheckpointList(sectionValues[0], 'RESTORE_DELTAS').map(decodeRscoreCheckpointDelta);
   const locks = rscoreCheckpointList(sectionValues[1], 'RESTORE_LOCKS').map(decodeLock);
   const lending = rscoreCheckpointList(sectionValues[2], 'RESTORE_LENDING').map(decodeLending);
@@ -435,14 +469,15 @@ export const decodeRscoreAccountStateTrees = (
     }
     return [pull.pullId, pull] as const;
   });
-  const requestedRebalance = rscoreCheckpointList(sectionValues[6], 'RESTORE_REQUESTED_REBALANCE')
-    .map((value, index) => {
+  const requestedRebalance = rscoreCheckpointList(sectionValues[6], 'RESTORE_REQUESTED_REBALANCE').map(
+    (value, index) => {
       const row = rscoreCheckpointTuple(value, 2, `RESTORE_REQUESTED_REBALANCE_${index}`);
       return [
         checkpointTokenId(row[0], `REQUESTED_REBALANCE_${index}_TOKEN`),
         checkpointBigInt(row[1], `REQUESTED_REBALANCE_${index}_AMOUNT`),
       ] as const;
-    });
+    },
+  );
   const requestedRebalanceFeeState = rscoreCheckpointList(
     sectionValues[7],
     'RESTORE_REQUESTED_REBALANCE_FEE_STATE',
@@ -487,6 +522,7 @@ export const decodeRscoreAccountStateTrees = (
       locks.map(value => [value.lockId, value]),
     ),
     lendingIntents: PersistentAccountStateMap.fromEntries('lendingIntents', lending),
+    subcontracts: PersistentAccountStateMap.fromEntries('subcontracts', subcontracts),
     swapOffers: PersistentAccountStateMap.fromEntries(
       'swapOffers',
       offers.map(value => [value.offerId, value]),

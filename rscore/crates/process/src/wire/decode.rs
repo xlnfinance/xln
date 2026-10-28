@@ -442,7 +442,7 @@ fn decode_shutdown(fields: &[AbiValue]) -> Result<Command, ProcessError> {
 }
 
 pub(crate) fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
-    let fields = exact(tuple(value)?, 15, "accountSeed")?;
+    let fields = exact(tuple(value)?, 17, "accountSeed")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let owner = entity(&fields[1], "owner")?;
     // The account id IS the counterparty entity id: one engine process serves
@@ -479,26 +479,54 @@ pub(crate) fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, Proce
         .map(decode_lock)
         .collect::<Result<_, _>>()?;
     let journal = exact(tuple(&fields[10])?, 2, "journal")?;
-    let mut replica = AccountReplica::new(
-        owner,
-        AccountState::restore_full(AccountStateSeed {
-            identity,
-            dispute_config,
-            deltas,
-            locks,
-            j_nonce: js_number(&journal[0], "jNonce")?,
-            last_finalized_j_height: js_number(&journal[1], "lastFinalizedJHeight")?,
-            carried: decode_carried_sections(&fields[11])?,
-            rebalance_fee_policies: decode_rebalance_policies(&fields[11])?,
-            swap_offers: decode_swap_offers(&fields[11])?,
-            pulls: decode_pulls(&fields[11])?,
-            // The wire seed carries no lending intents: no supported account
-            // transaction opens one, so a seeded account starts without any.
-            // A checkpoint restore fills this from what it saved.
-            lending_intents: Vec::new(),
-            settlement_workspace: decode_settlement_workspace(&fields[11])?,
-        })?,
-    )?;
+    let mut state = AccountState::restore_full(AccountStateSeed {
+        identity,
+        dispute_config,
+        deltas,
+        locks,
+        j_nonce: js_number(&journal[0], "jNonce")?,
+        last_finalized_j_height: js_number(&journal[1], "lastFinalizedJHeight")?,
+        carried: decode_carried_sections(&fields[11])?,
+        rebalance_fee_policies: decode_rebalance_policies(&fields[11])?,
+        swap_offers: decode_swap_offers(&fields[11])?,
+        pulls: decode_pulls(&fields[11])?,
+        lending_intents: tuple(&fields[15])?
+            .iter()
+            .map(|v| {
+                let row = exact(tuple(v)?, 2, "lendingIntent")?;
+                use xln_rscore_engine::LendingIntentKind as K;
+                let kind = match text(&row[1])? {
+                    "fund" => K::Fund,
+                    "borrow" => K::Borrow,
+                    "repay" => K::Repay,
+                    "disburse" => K::Disburse,
+                    "close-request" => K::CloseRequest,
+                    "close-early" => K::CloseEarly,
+                    "close-mature" => K::CloseMature,
+                    "close-payout" => K::ClosePayout,
+                    "dispute-close" => K::DisputeClose,
+                    "credit-request" => K::CreditRequest,
+                    _ => return Err(ProcessError::Expected("lendingIntentKind")),
+                };
+                Ok((text(&row[0])?.into(), kind))
+            })
+            .collect::<Result<_, ProcessError>>()?,
+        settlement_workspace: decode_settlement_workspace(&fields[11])?,
+    })?;
+    let claims = tuple(&fields[16])?
+        .iter()
+        .map(|v| {
+            let row = exact(tuple(v)?, 2, "lendingClaim")?;
+            Ok((
+                text(&row[0])?.into(),
+                xln_rscore_engine::lending::LendingCovenant::decode(
+                    &crate::canonical::canonical_value(&row[1])?,
+                )?,
+            ))
+        })
+        .collect::<Result<_, ProcessError>>()?;
+    state.restore_lending_claims(claims)?;
+    let mut replica = AccountReplica::new(owner, state)?;
     if let Some(envelope) = crate::canonical::envelope(&fields[12])? {
         replica.set_envelope(envelope);
     }
@@ -1361,5 +1389,75 @@ fn side(value: &AbiValue, field: &'static str) -> Result<Side, ProcessError> {
         0 => Ok(Side::Left),
         1 => Ok(Side::Right),
         value => Err(ProcessError::Tag { field, value }),
+    }
+}
+
+#[cfg(test)]
+#[path = "../../../../fixtures/lending-oracle.rs"]
+mod lending_oracle;
+
+#[cfg(test)]
+mod lending_snapshot_tests {
+    use super::*;
+    fn wire(v: &serde_json::Value) -> AbiValue {
+        use serde_json::Value as V;
+        match v {
+            V::Null => AbiValue::Nil,
+            V::Bool(b) => AbiValue::Bool(*b),
+            V::String(s) => AbiValue::Text(s.clone()),
+            V::Number(n) => AbiValue::Integer(n.as_i64().unwrap() as i128),
+            V::Array(a) => crate::wire_encode::tuple(a.iter().map(wire).collect()),
+            V::Object(o) => {
+                if o.get("__xlnType").is_some() {
+                    AbiValue::Integer(o["value"].as_str().unwrap().parse().unwrap())
+                } else {
+                    AbiValue::Bytes(hex::decode(o["$bytes"].as_str().unwrap()).unwrap())
+                }
+            }
+        }
+    }
+    #[test]
+    fn restores_every_typescript_lending_snapshot_exactly() {
+        let fixtures = lending_oracle::lending_oracle("account-semantics/lending-edges");
+        let mut count = 0;
+        for case in fixtures["cases"].as_array().unwrap() {
+            for step in case["steps"].as_array().unwrap() {
+                let seed = decode_seed_account(&wire(&step["seed"])).unwrap();
+                assert_eq!(
+                    format!(
+                        "0x{}",
+                        hex::encode(
+                            seed.replica
+                                .state()
+                                .payment_profile_account_state_root()
+                                .unwrap()
+                        )
+                    ),
+                    step["accountStateRoot"]
+                );
+                seed.replica.state().validate_lending_bindings().unwrap();
+                count += 1;
+            }
+        }
+        assert!(count >= 116);
+        let fixture = lending_oracle::lending_oracle("entity-kernel/lending");
+        for raw in fixture["snapshots"].as_array().unwrap() {
+            let snapshot = crate::entity_wire::decode_entity_snapshot(&wire(&raw["wire"])).unwrap();
+            let state = xln_rscore_entity_kernel::restore_entity_state(
+                snapshot,
+                hex::decode(
+                    raw["accountsRoot"]
+                        .as_str()
+                        .unwrap()
+                        .trim_start_matches("0x"),
+                )
+                .unwrap()
+                .try_into()
+                .unwrap(),
+                1,
+            )
+            .unwrap();
+            assert!(state.lending.is_some());
+        }
     }
 }

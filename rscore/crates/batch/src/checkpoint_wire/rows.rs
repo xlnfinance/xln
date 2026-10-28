@@ -15,7 +15,7 @@ use super::{
 };
 use crate::{AccountCheckpointHeader, AccountCheckpointRows};
 
-/// Canonical fourteen-field incremental checkpoint row used by both the
+/// Canonical fifteen-field incremental checkpoint row used by both the
 /// process ABI and path-keyed storage projection.
 pub fn encode_account_checkpoint_rows(
     value: &AccountCheckpointRows,
@@ -39,6 +39,9 @@ pub fn encode_account_checkpoint_rows(
         )?,
         j_claim_changes(&value.j_claim_nodes)?,
         consensus(&value.consensus)?,
+        changes(&value.subcontracts, |c| {
+            encode_canonical_value(&c.canonical())
+        })?,
     ]))
 }
 
@@ -73,6 +76,7 @@ fn sections(value: &crate::AccountCheckpointSections) -> AbiValue {
         descriptor(&value.pulls),
         descriptor(&value.requested_rebalance),
         descriptor(&value.requested_rebalance_fee_state),
+        descriptor(&value.subcontracts),
     ])
 }
 

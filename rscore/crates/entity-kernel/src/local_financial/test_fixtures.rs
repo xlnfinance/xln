@@ -4,6 +4,7 @@ use super::LocalAccountFinancialView;
 
 pub(crate) fn account_view() -> LocalAccountFinancialView {
     LocalAccountFinancialView {
+        lending: Default::default(),
         dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
         active: true,
         owner_side: xln_rscore_engine::Side::Left,

@@ -1094,13 +1094,19 @@ fn local_financial_view_requests(
                         .insert(tx.token_id);
                 }
             }
-            LocalEntityFinancialTx::LendingOffer(tx) => {
-                if state.known_accounts.contains(&tx.hub_entity_id) {
-                    requested
-                        .entry(account_id(&tx.hub_entity_id)?)
-                        .or_default()
-                        .token_ids
-                        .insert(tx.token_id);
+            LocalEntityFinancialTx::LendingCommand(tx) => {
+                use crate::lendbook::state::{number, optional, string};
+                let peer = optional(&tx.wire_data, "hubEntityId")
+                    .or_else(|| optional(&tx.wire_data, "borrowerEntityId"))
+                    .and_then(|v| string(v).ok());
+                if let Some(peer) = peer.filter(|peer| state.known_accounts.contains(*peer)) {
+                    let request = requested.entry(account_id(peer)?).or_default();
+                    if let Ok(token) = number(&tx.wire_data, "tokenId").and_then(|n| {
+                        xln_rscore_engine::TokenId::new(n as u32)
+                            .map_err(|e| crate::lendbook::state::err(e.to_string()))
+                    }) {
+                        request.token_ids.insert(token);
+                    }
                 }
             }
             LocalEntityFinancialTx::QuoteBackedR2c(tx) => {
@@ -1186,8 +1192,13 @@ fn local_financial_view_requests(
                 AccountTx::LendingBorrowRequest { token_id, .. } => u32::try_from(*token_id)
                     .ok()
                     .and_then(|value| xln_rscore_engine::TokenId::new(value).ok()),
-                AccountTx::LendingRepay { token_id, .. }
+                AccountTx::LendingFund { token_id, .. }
+                | AccountTx::LendingRate { token_id, .. }
+                | AccountTx::LendingDisburse { token_id, .. }
+                | AccountTx::LendingClosePayout { token_id, .. }
+                | AccountTx::LendingRepay { token_id, .. }
                 | AccountTx::CreditRequest { token_id, .. } => Some(*token_id),
+                AccountTx::LendingCloseRequest { .. } => None,
                 _ => continue,
             };
             let entry = &mut requested
@@ -1868,6 +1879,29 @@ fn local_account_views(
         )?;
     }
     let mut requests = local_financial_view_requests(state, &financial, commits, context)?;
+    if let Some(book) = &state.lending {
+        use crate::lendbook::state::{number, text};
+        for (_, position) in &book.savings {
+            if matches!(text(position, "status")?, "open" | "queued") {
+                let id = account_id(text(position, "lenderEntityId")?)?;
+                let token = xln_rscore_engine::TokenId::new(number(position, "tokenId")? as u32)
+                    .map_err(|e| crate::lendbook::state::err(e.to_string()))?;
+                if let Some((_, request)) = requests.iter_mut().find(|(key, _)| *key == id) {
+                    if !request.token_ids.contains(&token) {
+                        request.token_ids.push(token);
+                    }
+                } else {
+                    requests.push((
+                        id,
+                        xln_rscore_batch::ResidentAccountFinancialViewRequest {
+                            token_ids: vec![token],
+                            ..Default::default()
+                        },
+                    ));
+                }
+            }
+        }
+    }
     let mut positions = requests
         .iter()
         .enumerate()
@@ -2389,6 +2423,7 @@ fn apply_scheduled_wake(
         }
     }
 
+    let overdue_lending = crate::lendbook::servicing::overdue(state)?;
     let execution = execute_crontab(
         state
             .crontab
@@ -2399,7 +2434,7 @@ fn apply_scheduled_wake(
             expected_proposer_signer_id,
             now: state.timestamp,
             expired_htlc_locks: &expired_locks,
-            overdue_lending_loans: &[],
+            overdue_lending_loans: &overdue_lending,
             secret_acks_requiring_dispute: &secret_acks_requiring_dispute,
             dispute_views: &dispute_views,
             j_batch_state: state.j_batch_state.as_ref(),
@@ -2734,6 +2769,77 @@ fn protect_inbound_payment_timeouts(
     Ok(())
 }
 
+fn protect_lending_admission(
+    accounts: &mut ResidentConsensusEngine,
+    state: &EntityStateSlice,
+    rows: &[xln_rscore_batch::AccountInputRow],
+) -> Result<(), ResidentEntityError> {
+    use crate::lendbook::state::{find, number};
+    for (index, row) in rows.iter().enumerate() {
+        let xln_rscore_batch::AccountInputKind::AckFrame { frame, .. } = &row.input.kind else {
+            continue;
+        };
+        let Some(status) = accounts.account_status(row.account_id, vec![])? else {
+            continue;
+        };
+        if frame.frame.height <= status.current_height {
+            continue;
+        }
+        for tx in &frame.frame.txs {
+            let AccountTx::LendingFund {
+                position_id,
+                hub_entity_id,
+                token_id,
+                term_id,
+                interest_bps,
+                ..
+            } = tx
+            else {
+                continue;
+            };
+            if hub_entity_id != &state.entity_id {
+                continue;
+            }
+            let domain = &row.input.envelope.domain;
+            let term = match term_id {
+                xln_rscore_engine::LendingTermId::OneHour => "1h",
+                xln_rscore_engine::LendingTermId::OneDay => "1d",
+                xln_rscore_engine::LendingTermId::OneMonth => "1m",
+                xln_rscore_engine::LendingTermId::Demand => "demand",
+            };
+            let key = format!(
+                "{}:0x{}:{}:{term}",
+                domain.chain_id(),
+                hex::encode(domain.depository_address().bytes()),
+                token_id.get()
+            );
+            let book = state.lending.as_ref();
+            let terms = book
+                .and_then(|b| b.terms.as_ref())
+                .and_then(|t| find(t, &key));
+            let reason = if book.is_some_and(|b| find(&b.savings, position_id).is_some()) {
+                Some("LENDING_POSITION_ALREADY_EXISTS")
+            } else if terms.is_none()
+                || number(terms.unwrap(), "expiresAt")?
+                    <= state.timestamp.max(frame.frame.timestamp)
+            {
+                Some("LENDING_BANK_TERMS_UNAVAILABLE")
+            } else if number(terms.unwrap(), "savingsInterestBps")? as i64 != *interest_bps {
+                Some("LENDING_SAVINGS_RATE_NOT_APPROVED")
+            } else {
+                None
+            };
+            if let Some(detail) = reason {
+                return Err(ResidentEntityError::InboundAdmissionRejected {
+                    row_index: index,
+                    detail: detail.into(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 fn apply_resident_entity_round_core_attempt(
     accounts: &mut ResidentConsensusEngine,
     mut state: EntityStateSlice,
@@ -2777,6 +2883,7 @@ fn apply_resident_entity_round_core_attempt(
     let expected_root = request.inbound.expected_accounts_root;
     let mut rows = std::mem::take(&mut request.inbound.rows);
     protect_inbound_payment_timeouts(accounts, &state, &rows)?;
+    protect_lending_admission(accounts, &state, &rows)?;
     let mut first_row_by_account = BTreeMap::new();
     for (index, row) in rows.iter_mut().enumerate() {
         row.operation_index = u64::try_from(index)
@@ -3362,7 +3469,7 @@ fn apply_resident_entity_round_core_attempt(
     }
     inbound.applied = ordered_applied;
     let forced_acks = forced_ack_accounts(&inbound.applied);
-    let final_views = BTreeMap::new();
+    let final_views = local_account_views(accounts, &state, &[], &[], &[], context)?;
     let phase_started = Instant::now();
     let final_transition = apply_entity_transitions(
         state,
@@ -3537,6 +3644,41 @@ fn apply_resident_entity_round_core_attempt(
             .routed_entity_outputs
             .extend(ingress.routed_entity_outputs);
         kernel.local_events.extend(ingress.frame_events);
+    }
+
+    let mut lending_views = local_account_views(accounts, &kernel.state, &[], &[], &[], context)?;
+    for work in &kernel.proposal_work {
+        if let Some(view) = lending_views.get_mut(&work.account_id) {
+            view.lending.busy = true;
+        }
+    }
+    for mutation in &kernel.account_envelope_mutations {
+        if let Some(view) = lending_views.get_mut(&mutation.0) {
+            view.lending.busy = true;
+        }
+    }
+    for (peer, tx) in crate::lendbook::servicing::withdrawals(&kernel.state, &lending_views)? {
+        if let Some(view) = lending_views.get_mut(&peer) {
+            view.lending.busy = true;
+        }
+        merge_proposal_work(
+            &mut kernel.proposal_work,
+            vec![crate::AccountProposalWork {
+                account_id: peer,
+                txs: vec![tx],
+            }],
+        );
+    }
+    for (time, peer, tx) in crate::lendbook::servicing::renewals(&kernel.state, &lending_views)? {
+        if time <= kernel.state.timestamp {
+            merge_proposal_work(
+                &mut kernel.proposal_work,
+                vec![crate::AccountProposalWork {
+                    account_id: peer,
+                    txs: vec![tx],
+                }],
+            );
+        }
     }
 
     // A signed continuation becomes executable only after the ordered inputs, including the J receipt,

@@ -42,6 +42,7 @@ fn salvage_setup() -> (
     stored(&mut state, next);
     let mut view = account_view();
     view.dispute = Some(xln_rscore_batch::ResidentAccountDisputeView {
+        lending_claim_ids: vec![],
         status: "disputed".into(),
         active_dispute: Some(obj(vec![])),
         proof_body: Err("not used by salvage".into()),

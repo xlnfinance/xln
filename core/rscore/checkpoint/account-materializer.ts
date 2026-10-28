@@ -481,14 +481,8 @@ const envelopeCollections = (
   return { pendingWithdrawals, shadow };
 };
 
-const stateFromSeed = (
-  seed: RscoreAccountStateSeed,
-  prior: AccountReplica | null,
-): AccountState => {
-  const create = prior === null;
-  const subcontracts = carriedMap(
-    'subcontracts', seed.carried.subcontractsRoot, prior?.state.subcontracts, create, 'SUBCONTRACTS',
-  );
+const stateFromSeed = (seed: RscoreAccountStateSeed): AccountState => {
+  const subcontracts = seed.subcontracts;
   const requestedRebalance = seed.requestedRebalance;
   const requestedRebalanceFeeState = seed.requestedRebalanceFeeState;
   return {
@@ -612,7 +606,7 @@ export const materializeRscoreAccountReplica = (
   const witnesses = localWitnessResolver(witnessPlan, prior);
   assertCurrentDisputeDraftOrder(consensus);
 
-  const state = stateFromSeed(seed, prior);
+  const state = stateFromSeed(seed);
   const accountStateRoot = row.decoded.accountStateRoot;
   if (RSCORE_CUTOVER_VERIFY) {
     if (computeAccountStateRoot(state, undefined, 'rscoreMaterialize') !== accountStateRoot) {

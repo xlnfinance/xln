@@ -662,6 +662,7 @@ mod tests {
         dispute_timeout: u64,
     ) -> xln_rscore_batch::ResidentAccountDisputeView {
         xln_rscore_batch::ResidentAccountDisputeView {
+            lending_claim_ids: Vec::new(),
             status: "disputed".into(),
             dispute_prepare: None,
             active_dispute: Some(CanonicalValue::Object(vec![

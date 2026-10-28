@@ -83,7 +83,7 @@ const KEY_RSCORE_ACCOUNT_NODE = 0x19;
  * 0x19 namespaces, as in Rust `valid_path_key`: radix-16 Account trees and one
  * binary-Patricia J-claim section.
  */
-export const RSCORE_ACCOUNT_TREE_NAMESPACES = [1, 2, 3, 4, 5, 6, 8, 9] as const;
+export const RSCORE_ACCOUNT_TREE_NAMESPACES = [1, 2, 3, 4, 5, 6, 8, 9, 10] as const;
 export const RSCORE_ACCOUNT_J_CLAIM_NAMESPACE = 7;
 export const KEY_LIVE_ENTITY = 0x21;
 export const KEY_LIVE_ACCOUNT = 0x22;
@@ -385,7 +385,7 @@ const keyRscoreAccountNode = (
   kind: 0 | 1,
   payload: Uint8Array,
 ): Buffer => {
-  if (!Number.isSafeInteger(namespaceTag) || namespaceTag < 1 || namespaceTag > 9) {
+  if (!Number.isSafeInteger(namespaceTag) || namespaceTag < 1 || namespaceTag > 10) {
     throw new Error(`STORAGE_RSCORE_NAMESPACE_INVALID:${String(namespaceTag)}`);
   }
   return Buffer.concat([

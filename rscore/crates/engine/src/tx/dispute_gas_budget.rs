@@ -14,7 +14,7 @@ pub(crate) fn projected_charge(
     additional_conditions: usize,
 ) -> Result<usize, StateError> {
     let state = account.state();
-    if state.carried().subcontracts_root != [0; 32] {
+    if !state.lending_bodies_loaded() {
         return Ok(9_007_199_254_740_991);
     }
     let tokens = state.delta_count() + additional_tokens;
@@ -22,7 +22,11 @@ pub(crate) fn projected_charge(
         .swap_offers()
         .filter(|offer| offer.cross_jurisdiction().is_none())
         .count();
-    let conditions = state.htlc_count() + swaps + state.pull_count() + additional_conditions;
+    let conditions = state.htlc_count()
+        + swaps
+        + state.pull_count()
+        + state.lending_claims()?.len() * 2
+        + additional_conditions;
     let clauses = crate::dispute::build_dispute_proof_body(account, &[0; 20])?
         .transformers
         .len()

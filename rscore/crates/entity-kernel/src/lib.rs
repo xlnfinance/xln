@@ -123,7 +123,7 @@ pub use j_events::{
 pub use kernel::apply_entity_kernel;
 pub use lendbook::{
     LendingState, OverdueLendingLoan, canonical_lending_state, decode_canonical_lending_state,
-    settle_overdue_lending_loans,
+    settle_overdue_lending_loans, summarize_lending_state,
 };
 pub use local_control::{
     EntityPropose, EntityVote, LocalEntityControlTx, ProfileUpdate, apply_local_entity_control_tx,
@@ -131,10 +131,9 @@ pub use local_control::{
 };
 pub use local_financial::{
     AccountEnvelopeMutation, DirectPaymentEntityTx, ExtendCreditEntityTx, HtlcPaymentEntityTx,
-    LendingBorrowEntityTx, LendingClosePositionEntityTx, LendingOfferEntityTx,
-    LendingRepayEntityTx, LocalAccountFinancialView, LocalEntityFinancialTx,
-    PlaceSwapOfferEntityTx, ProposeCancelSwapEntityTx, RequestCollateralEntityTx,
-    RequestCreditEntityTx, decode_local_entity_financial_tx,
+    LocalAccountFinancialView, LocalEntityFinancialTx, PlaceSwapOfferEntityTx,
+    ProposeCancelSwapEntityTx, RequestCollateralEntityTx, RequestCreditEntityTx,
+    decode_local_entity_financial_tx,
 };
 pub use local_tx::{
     AdmittedLocalEntityTx, CrossJurisdictionRuntimeOutput, LocalEntityTx, decode_local_entity_tx,
@@ -202,3 +201,7 @@ pub use types::{
 pub use prepared_context::{
     payment_block_time_ms, payment_deadline_window, payment_reveal_height_delta_blocks,
 };
+
+pub use lendbook::servicing::deadlines as lending_deadlines;
+
+pub use lendbook::default_terms::build_default_bank_terms_txs;

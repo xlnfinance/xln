@@ -520,6 +520,7 @@ fn apply_commit_transitions(
             &transition,
             local_account_views.get(&commit.account_id),
             account_txs,
+            entity_events,
         )? {
             continue;
         }

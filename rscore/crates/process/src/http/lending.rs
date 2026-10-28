@@ -7,6 +7,7 @@ pub struct LendingStateQuery {
     pub hub_entity_id_text: String,
     pub user_entity_id: String,
     pub token_id: Option<f64>,
+    pub request_id: Option<String>,
 }
 
 impl LendingStateQuery {
@@ -48,20 +49,64 @@ impl LendingStateQuery {
                 }
             })
             .transpose()?;
+        let request_id = get("requestId").map(str::to_owned);
+        if request_id.as_ref().is_some_and(|id| {
+            user_entity_id.is_empty()
+                || !id.strip_prefix("borrow-").is_some_and(|s| {
+                    s.len() == 16
+                        && s.bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                })
+        }) {
+            return Err("Invalid borrower request");
+        }
         Ok(Self {
             hub_entity_id,
             hub_entity_id_text,
             user_entity_id,
             token_id,
+            request_id,
         })
     }
 }
 
 pub fn lending_state_response(
-    _state: Option<&LendingState>,
-    _query: &LendingStateQuery,
+    state: Option<&LendingState>,
+    query: &LendingStateQuery,
+    timestamp: u64,
+    accounts: &std::collections::BTreeMap<String, xln_rscore_engine::lending::LendingAccountView>,
 ) -> Result<Value, String> {
-    Err("LENDING_UNSUPPORTED".into())
+    let summary = xln_rscore_entity_kernel::summarize_lending_state(
+        state,
+        timestamp,
+        &query.user_entity_id,
+        query.token_id,
+        query.request_id.as_deref(),
+        accounts,
+    )
+    .map_err(|e| e.to_string())?;
+    let mut result = json_value(&summary)?;
+    result["success"] = Value::Bool(true);
+    result["hubEntityId"] = Value::String(query.hub_entity_id_text.clone());
+    result["requestId"] = query.request_id.clone().map_or(Value::Null, Value::String);
+    Ok(result)
+}
+fn json_value(v: &xln_rscore_protocol::CanonicalValue) -> Result<Value, String> {
+    use xln_rscore_protocol::CanonicalValue as V;
+    Ok(match v {
+        V::Null => Value::Null,
+        V::Bool(v) => Value::Bool(*v),
+        V::String(v) => Value::String(v.clone()),
+        V::BigInt(v) => Value::String(v.to_string()),
+        V::Number(v) => serde_json::from_str(v.as_str()).map_err(|e| e.to_string())?,
+        V::Array(rows) => Value::Array(rows.iter().map(json_value).collect::<Result<_, _>>()?),
+        V::Object(rows) => Value::Object(
+            rows.iter()
+                .map(|(k, v)| Ok((k.clone(), json_value(v)?)))
+                .collect::<Result<_, String>>()?,
+        ),
+        _ => return Err("LENDING_PROJECTION_COLLECTION".into()),
+    })
 }
 
 #[cfg(test)]

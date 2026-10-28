@@ -155,6 +155,9 @@ fn lending_entry(value: &AbiValue) -> Result<(String, LendingIntentKind), Accoun
         5 => LendingIntentKind::CloseRequest,
         6 => LendingIntentKind::ClosePayout,
         8 => LendingIntentKind::CreditRequest,
+        9 => LendingIntentKind::CloseEarly,
+        10 => LendingIntentKind::CloseMature,
+        11 => LendingIntentKind::DisputeClose,
         value => return Err(invalid(format!("LENDING_KIND:{value}"))),
     };
     Ok((text(&fields[0])?.to_owned(), kind))
@@ -261,7 +264,7 @@ fn header(value: &AbiValue) -> Result<AccountCheckpointHeader, AccountWireRestor
 }
 
 fn account_restore(value: &AbiValue) -> Result<AccountRestore, AccountWireRestoreError> {
-    let fields = exact(tuple(value)?, 13, "accountRestore")?;
+    let fields = exact(tuple(value)?, 14, "accountRestore")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let account_leaf = fixed_bytes(&fields[1], "accountLeaf")?;
     let header = header(&fields[2])?;
@@ -308,6 +311,19 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, AccountWireRestor
         })
         .collect::<Result<Vec<_>, AccountWireRestoreError>>()?;
     let consensus = consensus(&fields[12])?;
+    let subcontracts = tuple(&fields[13])?
+        .iter()
+        .map(|entry| -> Result<_, AccountWireRestoreError> {
+            let row = exact(tuple(entry)?, 2, "lendingClaim")?;
+            Ok((
+                text(&row[0])?.to_owned(),
+                xln_rscore_engine::lending::LendingCovenant::decode(
+                    &super::account_canonical::value(&row[1])?,
+                )
+                .map_err(|e| invalid(e.to_string()))?,
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let counterparty = if &header.owner == header.identity.left() {
         header.identity.right()
     } else if &header.owner == header.identity.right() {
@@ -333,6 +349,9 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, AccountWireRestor
         settlement_workspace: header.settlement_workspace,
     })
     .map_err(|error| invalid(format!("ACCOUNT_STATE:{error}")))?;
+    state
+        .restore_lending_claims(subcontracts)
+        .map_err(|e| invalid(e.to_string()))?;
     state
         .install_requested_rebalance(requested_rebalance, requested_rebalance_fee_state)
         .map_err(|error| invalid(format!("REQUESTED_REBALANCE:{error}")))?;

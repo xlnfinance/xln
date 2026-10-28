@@ -2561,3 +2561,30 @@ mod tests {
         );
     }
 }
+
+pub(crate) fn lending_risk_deltas(
+    account: &AccountReplica,
+) -> Result<Vec<crate::Delta>, crate::StateError> {
+    let mut deltas = account
+        .state()
+        .deltas()
+        .map(|d| (d.token_id(), d.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if let Some(value) = account.state().settlement_workspace() {
+        let work = workspace_view(value).map_err(crate::StateError::AccountStateRoot)?;
+        let compiled = compile_ops(work.ops, work.last_modified_by_left)
+            .map_err(crate::StateError::AccountStateRoot)?;
+        for diff in compiled.diffs {
+            deltas.insert(
+                diff.token_id,
+                project_delta(account, &diff).map_err(crate::StateError::AccountStateRoot)?,
+            );
+        }
+        for token in compiled.forgive {
+            if !deltas.contains_key(&token) {
+                deltas.insert(token, account.state().delta_or_zero(token)?);
+            }
+        }
+    }
+    Ok(deltas.into_values().collect())
+}

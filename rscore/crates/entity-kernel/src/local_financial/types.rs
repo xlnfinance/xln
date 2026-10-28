@@ -1,9 +1,7 @@
 use num_bigint::BigInt;
 use std::collections::BTreeMap;
 
-use xln_rscore_engine::{
-    AccountDisputeConfig, AccountDomain, DeliveryMode, LendingTermId, TokenId, WatchSeed,
-};
+use xln_rscore_engine::{AccountDisputeConfig, AccountDomain, DeliveryMode, TokenId, WatchSeed};
 
 use crate::types::OriginatedHtlcDeliveryMode;
 
@@ -228,57 +226,16 @@ pub enum AccountEnvelopeMutation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LendingOfferEntityTx {
-    pub position_id: String,
-    pub hub_entity_id: String,
-    pub token_id: TokenId,
-    pub amount: BigInt,
-    pub term_id: LendingTermId,
-    pub interest_bps: u16,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LendingBorrowEntityTx {
-    pub request_id: String,
-    pub hub_entity_id: String,
-    pub token_id: u64,
-    pub amount: BigInt,
-    pub term_id: LendingTermId,
-    pub max_interest_bps: u16,
-    pub expires_at: u64,
-    pub max_late_ms: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LendingRepayEntityTx {
-    pub hub_entity_id: String,
-    pub loan_id: String,
-    pub token_id: TokenId,
-    pub amount: BigInt,
-    pub claim_hash: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LendingClosePositionEntityTx {
-    pub hub_entity_id: String,
-    pub position_id: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LocalEntityFinancialTx {
     /// Preserve signed bytes through admission; Entity application decides the
     /// sender rejection so Runtime can evict only this outer command.
-    UnsupportedLending(crate::CanonicalEntityTx),
+    LendingCommand(crate::CanonicalEntityTx),
     CrossJurisdictionForceSiblingDispute(ForceSiblingDisputeEntityTx),
     DirectPayment(DirectPaymentEntityTx),
     DisputeFinalize(DisputeFinalizeEntityTx),
     DisputeStart(DisputeStartEntityTx),
     ExtendCredit(ExtendCreditEntityTx),
     HtlcPayment(HtlcPaymentEntityTx),
-    LendingBorrow(LendingBorrowEntityTx),
-    LendingClosePosition(LendingClosePositionEntityTx),
-    LendingOffer(LendingOfferEntityTx),
-    LendingRepay(LendingRepayEntityTx),
     OpenAccount(OpenAccountEntityTx),
     PlaceSwapOffer(PlaceSwapOfferEntityTx),
     PrepareDispute(PrepareDisputeEntityTx),
@@ -301,6 +258,7 @@ pub enum LocalEntityFinancialTx {
 /// the permanent Account-worker boundary.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LocalAccountFinancialView {
+    pub lending: xln_rscore_engine::lending::LendingAccountView,
     pub active: bool,
     pub dispute_config: xln_rscore_engine::AccountDisputeConfig,
     pub owner_side: xln_rscore_engine::Side,
@@ -321,6 +279,7 @@ pub struct LocalAccountFinancialView {
 impl From<xln_rscore_batch::ResidentAccountFinancialView> for LocalAccountFinancialView {
     fn from(view: xln_rscore_batch::ResidentAccountFinancialView) -> Self {
         Self {
+            lending: view.lending,
             active: view.active,
             dispute_config: view.dispute_config,
             owner_side: view.owner_side,

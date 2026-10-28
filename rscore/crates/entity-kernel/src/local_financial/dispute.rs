@@ -1448,6 +1448,7 @@ mod tests {
             PEER.to_string(),
             LocalAccountFinancialView {
                 dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
+                lending: Default::default(),
                 active: status == "active",
                 owner_side: xln_rscore_engine::Side::Left,
                 owner_out_capacity: BTreeMap::new(),
@@ -1462,6 +1463,7 @@ mod tests {
                 swap_offers: BTreeMap::new(),
                 pending_cross_pull_close_ids: Default::default(),
                 dispute: Some(ResidentAccountDisputeView {
+                    lending_claim_ids: Vec::new(),
                     status: status.into(),
                     dispute_prepare: prepare,
                     active_dispute: active,

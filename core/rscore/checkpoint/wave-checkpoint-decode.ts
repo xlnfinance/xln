@@ -6,31 +6,18 @@ import {
   type RscoreAccountStateTrees,
   type RscoreCheckpointSectionName,
 } from './checkpoint-restore-state';
-import {
-  buildRscoreAccountRestore,
-  type RscoreDecodedAccountRestore,
-} from './checkpoint-restore';
-import {
-  decodeRscoreConsensusSeed,
-  type RscoreConsensusSeed,
-} from './checkpoint-restore-consensus';
+import { buildRscoreAccountRestore, type RscoreDecodedAccountRestore } from './checkpoint-restore';
+import { decodeRscoreConsensusSeed, type RscoreConsensusSeed } from './checkpoint-restore-consensus';
 import type { AccountReplica } from '../../types/account';
 import { RSCORE_CUTOVER_VERIFY } from '../../entity/state/engine-leaf/verify';
-import {
-  rscoreCheckpointBytes,
-  rscoreCheckpointList,
-  rscoreCheckpointTuple,
-} from './checkpoint-wire';
+import { rscoreCheckpointBytes, rscoreCheckpointList, rscoreCheckpointTuple } from './checkpoint-wire';
 import {
   PersistentAccountStateMap,
   type AccountStateMapKey,
   type AccountStateMapNamespace,
 } from '../../account/state/persistent-state-map';
 import { buffersEqual } from '../../protocol/serialization';
-import {
-  decodeRscoreJClaimNodeChanges,
-  type RscoreJClaimNodeChanges,
-} from './j-claim-checkpoint';
+import { decodeRscoreJClaimNodeChanges, type RscoreJClaimNodeChanges } from './j-claim-checkpoint';
 
 type RscoreCheckpointTreeDescriptor = Readonly<{ root: string; leafCount: number }>;
 
@@ -53,8 +40,7 @@ type RscoreCheckpointNodePut =
     }>;
 
 type RscoreCheckpointNodeDelete =
-  | Readonly<{ kind: 'branch'; path: Uint8Array }>
-  | Readonly<{ kind: 'leaf'; path: Uint8Array; key: Uint8Array }>;
+  Readonly<{ kind: 'branch'; path: Uint8Array }> | Readonly<{ kind: 'leaf'; path: Uint8Array; key: Uint8Array }>;
 
 type RscoreCheckpointNodeChanges = Readonly<{
   puts: readonly RscoreCheckpointNodePut[];
@@ -71,6 +57,7 @@ export type RscoreAccountCheckpointRow = Readonly<{
     deltas: RscoreCheckpointTreeDescriptor;
     locks: RscoreCheckpointTreeDescriptor;
     lendingIntents: RscoreCheckpointTreeDescriptor;
+    subcontracts: RscoreCheckpointTreeDescriptor;
     swapOffers: RscoreCheckpointTreeDescriptor;
     rebalanceFeePolicies: RscoreCheckpointTreeDescriptor;
     pulls: RscoreCheckpointTreeDescriptor;
@@ -81,6 +68,7 @@ export type RscoreAccountCheckpointRow = Readonly<{
     deltas: RscoreCheckpointNodeChanges;
     locks: RscoreCheckpointNodeChanges;
     lendingIntents: RscoreCheckpointNodeChanges;
+    subcontracts: RscoreCheckpointNodeChanges;
     swapOffers: RscoreCheckpointNodeChanges;
     rebalanceFeePolicies: RscoreCheckpointNodeChanges;
     pulls: RscoreCheckpointNodeChanges;
@@ -104,9 +92,10 @@ export type RscoreAccountCheckpointRow = Readonly<{
  * named. Everything the row claims — both roots and the Entity leaf — is
  * recomputed from the result.
  */
-export type RscoreResolvedAccountRow = RscoreAccountCheckpointRow & Readonly<{
-  decoded: RscoreDecodedAccountRestore;
-}>;
+export type RscoreResolvedAccountRow = RscoreAccountCheckpointRow &
+  Readonly<{
+    decoded: RscoreDecodedAccountRestore;
+  }>;
 
 const fail = (code: string): never => {
   throw new Error(`RSCORE_WAVE_DECODE:${code}`);
@@ -123,8 +112,7 @@ const uint = (value: unknown, code: string): number => {
   return value;
 };
 
-const text = (value: unknown, code: string): string =>
-  typeof value === 'string' ? value : fail(`${code}:text`);
+const text = (value: unknown, code: string): string => (typeof value === 'string' ? value : fail(`${code}:text`));
 
 const variableBytes = (value: unknown, code: string): Uint8Array =>
   value instanceof Uint8Array ? value : fail(`${code}:bytes`);
@@ -156,11 +144,11 @@ const put = (value: unknown, code: string): RscoreCheckpointNodePut => {
       if (childKind !== 0 && childKind !== 1) return fail(`${code}.child.${index}.kind:${childKind}`);
       return {
         slot,
-        kind: childKind === 0 ? 'branch' as const : 'leaf' as const,
+        kind: childKind === 0 ? ('branch' as const) : ('leaf' as const),
         path: path(child[2], `${code}.child.${index}.path`),
-        edgeHash: `0x${Buffer.from(
-          rscoreCheckpointBytes(child[3], 32, `${code}_CHILD_${index}_EDGE_HASH`),
-        ).toString('hex')}`,
+        edgeHash: `0x${Buffer.from(rscoreCheckpointBytes(child[3], 32, `${code}_CHILD_${index}_EDGE_HASH`)).toString(
+          'hex',
+        )}`,
       };
     });
     for (let index = 1; index < children.length; index += 1) {
@@ -200,10 +188,8 @@ const del = (value: unknown, code: string): RscoreCheckpointNodeDelete => {
 
 const changes = (value: unknown, code: string): RscoreCheckpointNodeChanges => {
   const row = rscoreCheckpointTuple(value, 2, code);
-  const puts = rscoreCheckpointList(row[0], `${code}_PUTS`)
-    .map((entry, index) => put(entry, `${code}.put.${index}`));
-  const dels = rscoreCheckpointList(row[1], `${code}_DELS`)
-    .map((entry, index) => del(entry, `${code}.del.${index}`));
+  const puts = rscoreCheckpointList(row[0], `${code}_PUTS`).map((entry, index) => put(entry, `${code}.put.${index}`));
+  const dels = rscoreCheckpointList(row[1], `${code}_DELS`).map((entry, index) => del(entry, `${code}.del.${index}`));
   return { puts, dels };
 };
 
@@ -221,8 +207,7 @@ const applySectionChanges = (
   descriptorValue: RscoreCheckpointTreeDescriptor,
   nodeChanges: RscoreCheckpointNodeChanges,
 ): PersistentAccountStateMap<AccountStateMapKey, unknown> => {
-  let tree = prior
-    ?? PersistentAccountStateMap.empty<AccountStateMapKey, unknown>(section as AccountStateMapNamespace);
+  let tree = prior ?? PersistentAccountStateMap.empty<AccountStateMapKey, unknown>(section as AccountStateMapNamespace);
   let leafIndex = 0;
   for (const record of nodeChanges.puts) {
     if (record.kind === 'branch') continue;
@@ -253,9 +238,7 @@ export const resolveRscoreWaveAccount = (
   row: RscoreAccountCheckpointRow,
   prior: AccountReplica | null,
 ): RscoreResolvedAccountRow => {
-  const treeFor = <Section extends RscoreCheckpointSectionName>(
-    section: Section,
-  ): RscoreAccountStateTrees[Section] =>
+  const treeFor = <Section extends RscoreCheckpointSectionName>(section: Section): RscoreAccountStateTrees[Section] =>
     applySectionChanges(
       section,
       prior?.state[section] as PersistentAccountStateMap<AccountStateMapKey, unknown> | undefined,
@@ -266,6 +249,7 @@ export const resolveRscoreWaveAccount = (
     deltas: treeFor('deltas'),
     locks: treeFor('locks'),
     lendingIntents: treeFor('lendingIntents'),
+    subcontracts: treeFor('subcontracts'),
     swapOffers: treeFor('swapOffers'),
     rebalanceFeePolicies: treeFor('rebalanceFeePolicies'),
     pulls: treeFor('pulls'),
@@ -285,10 +269,7 @@ export const resolveRscoreWaveAccount = (
   };
 };
 
-const header = (
-  value: unknown,
-  accountId: Uint8Array,
-): readonly RscoreWireValue[] => {
+const header = (value: unknown, accountId: Uint8Array): readonly RscoreWireValue[] => {
   const row = rscoreCheckpointTuple(value, 10, 'WAVE_POST_ACCOUNT_HEADER');
   const owner = rscoreCheckpointBytes(row[0], 32, 'WAVE_POST_ACCOUNT_OWNER');
   if (text(row[1], 'postAccount.header.signerId').length === 0) {
@@ -306,7 +287,9 @@ const header = (
   if (leftHex >= rightHex) return fail('postAccount.header.parties:order');
   const counterparty = buffersEqual(Buffer.from(owner), Buffer.from(left))
     ? right
-    : buffersEqual(Buffer.from(owner), Buffer.from(right)) ? left : undefined;
+    : buffersEqual(Buffer.from(owner), Buffer.from(right))
+      ? left
+      : undefined;
   if (counterparty === undefined) return fail('postAccount.header.owner:notParty');
   if (!buffersEqual(Buffer.from(accountId), Buffer.from(counterparty))) {
     return fail('postAccount.header.accountId:notCounterparty');
@@ -334,14 +317,15 @@ const header = (
 };
 
 export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckpointRow => {
-  const row = rscoreCheckpointTuple(value, 14, 'WAVE_POST_ACCOUNT');
+  const row = rscoreCheckpointTuple(value, 15, 'WAVE_POST_ACCOUNT');
   const accountId = rscoreCheckpointBytes(row[0], 32, 'WAVE_POST_ACCOUNT_ID');
   const parsedHeader = header(row[2], accountId);
-  const rawSections = rscoreCheckpointTuple(row[3], 8, 'WAVE_POST_ACCOUNT_SECTIONS');
+  const rawSections = rscoreCheckpointTuple(row[3], 9, 'WAVE_POST_ACCOUNT_SECTIONS');
   const sections = {
     deltas: descriptor(rawSections[0], 'WAVE_POST_ACCOUNT_DELTAS'),
     locks: descriptor(rawSections[1], 'WAVE_POST_ACCOUNT_LOCKS'),
     lendingIntents: descriptor(rawSections[2], 'WAVE_POST_ACCOUNT_LENDING'),
+    subcontracts: descriptor(rawSections[8], 'WAVE_POST_ACCOUNT_SUBCONTRACTS'),
     swapOffers: descriptor(rawSections[3], 'WAVE_POST_ACCOUNT_SWAPS'),
     rebalanceFeePolicies: descriptor(rawSections[4], 'WAVE_POST_ACCOUNT_POLICIES'),
     pulls: descriptor(rawSections[5], 'WAVE_POST_ACCOUNT_PULLS'),
@@ -352,6 +336,7 @@ export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckp
     deltas: changes(row[4], 'postAccount.deltas'),
     locks: changes(row[5], 'postAccount.locks'),
     lendingIntents: changes(row[6], 'postAccount.lendingIntents'),
+    subcontracts: changes(row[14], 'postAccount.subcontracts'),
     swapOffers: changes(row[7], 'postAccount.swapOffers'),
     rebalanceFeePolicies: changes(row[8], 'postAccount.rebalanceFeePolicies'),
     pulls: changes(row[9], 'postAccount.pulls'),
@@ -361,9 +346,7 @@ export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckp
   return {
     wire: row,
     accountId: `0x${Buffer.from(accountId).toString('hex')}`,
-    entityAccountLeaf: `0x${Buffer.from(
-      rscoreCheckpointBytes(row[1], 32, 'WAVE_POST_ACCOUNT_LEAF'),
-    ).toString('hex')}`,
+    entityAccountLeaf: `0x${Buffer.from(rscoreCheckpointBytes(row[1], 32, 'WAVE_POST_ACCOUNT_LEAF')).toString('hex')}`,
     header: parsedHeader,
     sections,
     nodeChanges,

@@ -186,6 +186,16 @@ pub(crate) fn apply_to_candidate(
     {
         return Ok(MutationDecision::rejected(rejection));
     }
+    let previous_lending_risk = if !matches!(tx, AccountTx::JEventClaim(_))
+        && (matches!(
+            tx,
+            AccountTx::LendingFund { .. } | AccountTx::LendingDisburse { .. }
+        ) || candidate.state().carried().subcontracts_root != [0; 32])
+    {
+        Some(super::lending_risk::risk(candidate)?)
+    } else {
+        None
+    };
     let previous_dispute_gas = super::dispute_gas_budget::charge(candidate)?;
     let decision = match tx {
         AccountTx::JEventClaim(tx) => {
@@ -417,6 +427,19 @@ pub(crate) fn apply_to_candidate(
     };
     let decision = sender_delta_rejection(decision)?;
     if matches!(&decision, MutationDecision::Applied { .. }) {
+        if let Some(previous_lending_risk) = previous_lending_risk {
+            if let Some(message) = super::lending_risk::admission(
+                &previous_lending_risk,
+                &super::lending_risk::risk(candidate)?,
+            ) {
+                return Ok(MutationDecision::rejected_with_events(
+                    AccountRejection::Validation(crate::ValidationRejection::AccountTx {
+                        message: message.clone(),
+                    }),
+                    vec![message],
+                ));
+            }
+        }
         let after = super::dispute_gas_budget::charge(candidate)?;
         if let Some(message) =
             super::dispute_gas_budget::admission_error(previous_dispute_gas, after, tx)

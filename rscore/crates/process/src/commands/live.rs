@@ -1508,9 +1508,42 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
                         let Some(state) = replica.state.e_replicas.get(&key) else {
                             return Ok(None);
                         };
+                        let lending = state.entity.lending.clone();
+                        let timestamp = state.entity.timestamp;
+                        let ids = state
+                            .entity
+                            .known_accounts
+                            .iter()
+                            .map(|id| {
+                                hex::decode(id.trim_start_matches("0x"))
+                                    .map_err(|e| e.to_string())
+                                    .and_then(|b| {
+                                        b.try_into()
+                                            .map(xln_rscore_batch::AccountId::from_bytes)
+                                            .map_err(|_| "LENDING_ACCOUNT_ID".to_string())
+                                    })
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let rows = service
+                            .read_account_views(
+                                &key,
+                                ids,
+                                xln_rscore_engine::lending::project_lending_account,
+                            )
+                            .map_err(|e| e.to_string())?;
+                        let mut accounts = std::collections::BTreeMap::new();
+                        for (id, v) in rows {
+                            accounts.insert(
+                                format!("0x{}", hex::encode(id.as_bytes())),
+                                xln_rscore_engine::lending::decode_lending_account_projection(&v)
+                                    .map_err(|e| e.to_string())?,
+                            );
+                        }
                         xln_rscore_process::lending_http::lending_state_response(
-                            state.entity.lending.as_ref(),
+                            lending.as_ref(),
                             &query,
+                            timestamp,
+                            &accounts,
                         )
                         .map(Some)
                     })();

@@ -83,6 +83,9 @@ pub enum LendingIntentKind {
     Repay,
     Disburse,
     CloseRequest,
+    CloseEarly,
+    CloseMature,
+    DisputeClose,
     ClosePayout,
     CreditRequest,
 }
@@ -95,6 +98,9 @@ impl LendingIntentKind {
             Self::Repay => "repay",
             Self::Disburse => "disburse",
             Self::CloseRequest => "close-request",
+            Self::CloseEarly => "close-early",
+            Self::CloseMature => "close-mature",
+            Self::DisputeClose => "dispute-close",
             Self::ClosePayout => "close-payout",
             Self::CreditRequest => "credit-request",
         }
@@ -108,6 +114,7 @@ pub struct AccountState {
     deltas: PersistentRadixMap<Delta>,
     locks: PersistentRadixMap<HtlcLock>,
     lending_intents: Option<PersistentRadixMap<LendingIntentKind>>,
+    subcontracts: PersistentRadixMap<crate::lending::LendingCovenant>,
     /// Per-token bilateral fee registers. Owned and interpreted here, unlike
     /// the carried sections below.
     rebalance_fee_policies: PersistentRadixMap<BilateralRebalanceFeePolicy>,
@@ -156,6 +163,8 @@ pub struct AccountStateSeed {
     pub pulls: Vec<(String, CanonicalValue)>,
     pub settlement_workspace: Option<CanonicalValue>,
 }
+
+mod lending;
 
 impl AccountState {
     pub fn new(
@@ -298,6 +307,7 @@ impl AccountState {
             deltas: map,
             locks: lock_map,
             lending_intents: intent_map,
+            subcontracts: PersistentRadixMap::empty(),
             rebalance_fee_policies: policy_map,
             requested_rebalance,
             requested_rebalance_fee_state,
@@ -860,6 +870,10 @@ impl AccountState {
             if &next != current {
                 deltas = put_delta_map(&deltas, next)?;
             }
+        }
+        for (id, _) in self.lending_claims()? {
+            self.put_intent(format!("dispute:{id}"), LendingIntentKind::DisputeClose)?;
+            self.remove_lending_claim(&id)?;
         }
         self.deltas = deltas;
         self.settlement_workspace = None;

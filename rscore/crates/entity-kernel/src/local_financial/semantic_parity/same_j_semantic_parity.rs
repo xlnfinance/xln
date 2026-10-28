@@ -7,15 +7,14 @@ use xln_rscore_batch::{
     AccountId, EntityAccountGenesisPolicy, LocalGenesisSeedParams, build_local_genesis_seed,
 };
 use xln_rscore_engine::{
-    AccountDisputeConfig, AccountDomain, DepositoryAddress, HtlcHashlock, HtlcLock, LendingTermId,
+    AccountDisputeConfig, AccountDomain, DepositoryAddress, HtlcHashlock, HtlcLock,
     OpaqueHtlcCiphertext, Side, TokenId, WatchSeed, canonical_tx_digest,
 };
 
 use super::*;
 use crate::local_financial::types::{
-    LendingBorrowEntityTx, LendingClosePositionEntityTx, LendingOfferEntityTx,
-    LendingRepayEntityTx, PlaceSwapOfferEntityTx, ProposeCancelSwapEntityTx,
-    RequestCollateralEntityTx, SetRebalancePolicyEntityTx,
+    PlaceSwapOfferEntityTx, ProposeCancelSwapEntityTx, RequestCollateralEntityTx,
+    SetRebalancePolicyEntityTx,
 };
 
 const FIXTURE: &str =
@@ -35,6 +34,7 @@ struct Fixture {
 #[serde(rename_all = "camelCase")]
 struct Case {
     name: String,
+    input: Option<serde_json::Value>,
     account_ids: Vec<String>,
     account_tx_types: Vec<String>,
     account_tx_digests: Vec<String>,
@@ -68,6 +68,7 @@ fn state(has_account: bool) -> EntityStateSlice {
 fn account_view() -> LocalAccountFinancialView {
     LocalAccountFinancialView {
         dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
+        lending: crate::lendbook::tests::view().lending,
         active: true,
         owner_side: Side::Left,
         owner_out_capacity: BTreeMap::from([
@@ -90,37 +91,6 @@ fn account_view() -> LocalAccountFinancialView {
 
 fn transaction(name: &str) -> LocalEntityFinancialTx {
     match name {
-        "lendingOffer" => LocalEntityFinancialTx::LendingOffer(LendingOfferEntityTx {
-            position_id: "lend-1111111111111111".into(),
-            hub_entity_id: PEER.into(),
-            token_id: token(1),
-            amount: BigInt::from(10_000),
-            term_id: LendingTermId::OneDay,
-            interest_bps: 100,
-        }),
-        "lendingBorrow" => LocalEntityFinancialTx::LendingBorrow(LendingBorrowEntityTx {
-            request_id: "borrow-2222222222222222".into(),
-            hub_entity_id: PEER.into(),
-            token_id: 1,
-            amount: BigInt::from(2_500),
-            term_id: LendingTermId::OneDay,
-            max_interest_bps: 150,
-            expires_at: 5_000,
-            max_late_ms: 86_400_000,
-        }),
-        "lendingRepay" => LocalEntityFinancialTx::LendingRepay(LendingRepayEntityTx {
-            hub_entity_id: PEER.into(),
-            loan_id: "loan-0327fd9035d42518".into(),
-            token_id: token(1),
-            amount: BigInt::from(2_525),
-            claim_hash: "0xbb90f6a8798ec5519fcd2c8b45c92a2780980f35a3ded297efef54f6ebbee7c6".into(),
-        }),
-        "lendingClosePosition" => {
-            LocalEntityFinancialTx::LendingClosePosition(LendingClosePositionEntityTx {
-                hub_entity_id: PEER.into(),
-                position_id: "lend-1111111111111111".into(),
-            })
-        }
         "placeSwapOffer" => LocalEntityFinancialTx::PlaceSwapOffer(PlaceSwapOfferEntityTx {
             counterparty_entity_id: PEER.into(),
             offer_id: "offer-1".into(),
@@ -296,6 +266,17 @@ fn context_for(expected: &Case) -> DeterministicContext {
 }
 
 fn transaction_for(expected: &Case) -> LocalEntityFinancialTx {
+    if expected.name.starts_with("lending") {
+        let input = expected.input.as_ref().unwrap();
+        let kind = crate::EntityTxKind::parse(&expected.name).unwrap();
+        return LocalEntityFinancialTx::LendingCommand(
+            crate::CanonicalEntityTx::from_frame_projection(
+                kind,
+                crate::lendbook::tests::canonical(&input["data"]),
+            )
+            .unwrap(),
+        );
+    }
     if expected.name == "htlcPayment" {
         return LocalEntityFinancialTx::HtlcPayment(
             crate::local_financial::types::HtlcPaymentEntityTx {
@@ -364,17 +345,6 @@ fn same_j_financial_entity_projections_match_typescript() {
             policy.as_ref(),
             None,
         );
-        if expected.name.starts_with("lending") {
-            assert!(
-                matches!(result, Err(EntityKernelError::RejectedEntityTx { detail, .. }) if detail == "LENDING_UNSUPPORTED")
-            );
-            assert_eq!(
-                state,
-                self::state(true),
-                "unsupported lending mutated Entity state"
-            );
-            continue;
-        }
         let result = result.unwrap_or_else(|error| panic!("{}: {error}", expected.name));
         assert_eq!(
             result

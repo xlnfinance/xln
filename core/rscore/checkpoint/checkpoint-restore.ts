@@ -24,14 +24,9 @@ import {
   type RscoreAccountStateTrees,
 } from './checkpoint-restore-state';
 import { rscoreCheckpointTuple } from './checkpoint-wire';
-import {
-  decodeRscoreExactJClaimNodes,
-  type RscoreJClaimNodeEntry,
-} from './j-claim-checkpoint';
+import { decodeRscoreExactJClaimNodes, type RscoreJClaimNodeEntry } from './j-claim-checkpoint';
 
-const RSCORE_ROOT_ONLY_CARRIED_SECTIONS = Object.freeze([
-  'subcontracts',
-] as const);
+const RSCORE_ROOT_ONLY_CARRIED_SECTIONS = Object.freeze([] as const);
 
 export type RscoreDecodedAccountRestore = Readonly<{
   accountId: string;
@@ -77,68 +72,64 @@ const RECOVERY_ONLY_ENVELOPE_FIELDS: ReadonlySet<string> = new Set([
 
 export const projectRscoreCommittedEnvelopeFields = (
   fields: Readonly<Record<string, unknown>>,
-): Record<string, unknown> => Object.fromEntries(
-  Object.entries(fields).filter(([field]) => !RECOVERY_ONLY_ENVELOPE_FIELDS.has(field)),
-);
+): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(fields).filter(([field]) => !RECOVERY_ONLY_ENVELOPE_FIELDS.has(field)));
 
-const projectRscoreStoredEnvelopeFields = (
-  fields: Readonly<Record<string, unknown>>,
-): Record<string, unknown> => Object.fromEntries(
-  Object.entries(projectRscoreCommittedEnvelopeFields(fields))
-    .filter(([field]) => !REBUILT_COMMITTED_ENVELOPE_FIELDS.has(field)),
-);
+const projectRscoreStoredEnvelopeFields = (fields: Readonly<Record<string, unknown>>): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(projectRscoreCommittedEnvelopeFields(fields)).filter(
+      ([field]) => !REBUILT_COMMITTED_ENVELOPE_FIELDS.has(field),
+    ),
+  );
 
 const computeRestoredAccountStateRoot = (seed: RscoreAccountStateSeed): string =>
-  computeCanonicalMerkleRoot(
-    'account.state',
+  computeCanonicalMerkleRoot('account.state', [
     [
-      [
-        'identity',
-        {
-          chainId: seed.domain.chainId,
-          depositoryAddress: seed.domain.depositoryAddress,
-          leftEntity: seed.leftEntity,
-          rightEntity: seed.rightEntity,
-          watchSeed: seed.watchSeed,
-        },
-      ],
-      [
-        'financial',
-        {
-          deltasRoot: seed.deltas.rootHash(),
-          jNonce: seed.jNonce,
-          disputeConfig: seed.disputeConfig,
-        },
-      ],
-      [
-        'commitments',
-        {
-          locksRoot: seed.locks.rootHash(),
-          pullsRoot: seed.pulls.rootHash(),
-          swapOffersRoot: seed.swapOffers.rootHash(),
-          subcontractsRoot: seed.carried.subcontractsRoot,
-          lendingIntentsRoot: seed.lendingIntents.rootHash(),
-          settlementWorkspace: settlementWorkspaceWithoutHankos(seed.settlementWorkspace),
-        },
-      ],
-      [
-        'jurisdiction',
-        {
-          lastFinalizedJHeight: seed.lastFinalizedJHeight,
-          leftPendingJClaims: seed.carried.leftPendingJClaims,
-          rightPendingJClaims: seed.carried.rightPendingJClaims,
-        },
-      ],
-      [
-        'rebalance',
-        {
-          requestedRebalanceRoot: seed.requestedRebalance.rootHash(),
-          requestedRebalanceFeeStateRoot: seed.requestedRebalanceFeeState.rootHash(),
-          rebalanceFeePoliciesRoot: seed.rebalanceFeePolicies.rootHash(),
-        },
-      ],
+      'identity',
+      {
+        chainId: seed.domain.chainId,
+        depositoryAddress: seed.domain.depositoryAddress,
+        leftEntity: seed.leftEntity,
+        rightEntity: seed.rightEntity,
+        watchSeed: seed.watchSeed,
+      },
     ],
-  );
+    [
+      'financial',
+      {
+        deltasRoot: seed.deltas.rootHash(),
+        jNonce: seed.jNonce,
+        disputeConfig: seed.disputeConfig,
+      },
+    ],
+    [
+      'commitments',
+      {
+        locksRoot: seed.locks.rootHash(),
+        pullsRoot: seed.pulls.rootHash(),
+        swapOffersRoot: seed.swapOffers.rootHash(),
+        subcontractsRoot: seed.subcontracts.rootHash(),
+        lendingIntentsRoot: seed.lendingIntents.rootHash(),
+        settlementWorkspace: settlementWorkspaceWithoutHankos(seed.settlementWorkspace),
+      },
+    ],
+    [
+      'jurisdiction',
+      {
+        lastFinalizedJHeight: seed.lastFinalizedJHeight,
+        leftPendingJClaims: seed.carried.leftPendingJClaims,
+        rightPendingJClaims: seed.carried.rightPendingJClaims,
+      },
+    ],
+    [
+      'rebalance',
+      {
+        requestedRebalanceRoot: seed.requestedRebalance.rootHash(),
+        requestedRebalanceFeeStateRoot: seed.requestedRebalanceFeeState.rootHash(),
+        rebalanceFeePoliciesRoot: seed.rebalanceFeePolicies.rootHash(),
+      },
+    ],
+  ]);
 
 const expectedDisputeHash = (
   draft: Pick<RscoreDisputeDraft, 'proofBodyHash' | 'nonce' | 'proposerIsLeft'>,
@@ -163,8 +154,8 @@ const validateDisputeHashes = (consensus: RscoreConsensusSeed, seed: RscoreAccou
     if (draft.hash !== expectedDisputeHash(draft, seed)) checkpointRestoreFail('DISPUTE_HASH_MISMATCH');
   }
   if (
-    consensus.counterpartyDispute !== undefined
-    && consensus.counterpartyDispute.hash !== expectedDisputeHash(consensus.counterpartyDispute, seed)
+    consensus.counterpartyDispute !== undefined &&
+    consensus.counterpartyDispute.hash !== expectedDisputeHash(consensus.counterpartyDispute, seed)
   ) {
     checkpointRestoreFail('COUNTERPARTY_DISPUTE_HASH_MISMATCH');
   }
@@ -229,11 +220,7 @@ const restoredMempoolRoot = (
       checkpointRestoreFail('ENVELOPE_MEMPOOL_LENGTH');
     }
     for (const [index, expected] of canonicalMempool.entries()) {
-      assertSameRscoreCanonicalValue(
-        envelope.canonicalMempool[index],
-        expected,
-        `RESTORE_ENVELOPE_MEMPOOL_${index}`,
-      );
+      assertSameRscoreCanonicalValue(envelope.canonicalMempool[index], expected, `RESTORE_ENVELOPE_MEMPOOL_${index}`);
     }
   }
   return canonicalMempool.length === 0
@@ -245,12 +232,12 @@ const restoredMempoolRoot = (
 };
 
 export const decodeRscoreAccountRestoreRow = (value: unknown): RscoreDecodedAccountRestore => {
-  const row = rscoreCheckpointTuple(value, 13, 'RESTORE_ACCOUNT');
+  const row = rscoreCheckpointTuple(value, 14, 'RESTORE_ACCOUNT');
   return buildRscoreAccountRestore(
     checkpointHex(row[0], 32, 'ACCOUNT_ID'),
     checkpointHex(row[1], 32, 'ACCOUNT_LEAF'),
     row[2],
-    decodeRscoreAccountStateTrees(row.slice(3, 11)),
+    decodeRscoreAccountStateTrees([...row.slice(3, 11), row[13]]),
     decodeRscoreConsensusSeed(row[12]),
     true,
     decodeRscoreExactJClaimNodes(row[11], 'RESTORE_J_CLAIM_NODES'),
@@ -282,21 +269,16 @@ export const buildRscoreAccountRestore = (
   if (stateSeed.requestedRebalance.rootHash() !== stateSeed.carried.requestedRebalanceRoot) {
     checkpointRestoreFail('REQUESTED_REBALANCE_BODY_ROOT_MISMATCH');
   }
-  if (
-    stateSeed.requestedRebalanceFeeState.rootHash()
-    !== stateSeed.carried.requestedRebalanceFeeStateRoot
-  ) {
+  if (stateSeed.requestedRebalanceFeeState.rootHash() !== stateSeed.carried.requestedRebalanceFeeStateRoot) {
     checkpointRestoreFail('REQUESTED_REBALANCE_FEE_BODY_ROOT_MISMATCH');
   }
+  if (stateSeed.subcontracts.rootHash() !== stateSeed.carried.subcontractsRoot)
+    checkpointRestoreFail('SUBCONTRACTS_ROOT_MISMATCH');
   const accountStateRoot = computeRestoredAccountStateRoot(stateSeed);
   const mempoolRoot = restoredMempoolRoot(stateSeed, consensus, verify);
   if (verify) {
     validateDisputeHashes(consensus, stateSeed);
-    const entityAccountLeaf = computeRestoredEntityLeaf(
-      stateSeed,
-      consensus,
-      accountStateRoot,
-    );
+    const entityAccountLeaf = computeRestoredEntityLeaf(stateSeed, consensus, accountStateRoot);
     // The signed currentFrame is historical bilateral evidence. Certified J
     // finality can advance the live AccountState without rewriting it. The
     // exact Entity leaf, and then the Account forest root, authenticate that

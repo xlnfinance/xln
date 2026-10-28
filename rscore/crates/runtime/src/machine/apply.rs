@@ -1116,6 +1116,45 @@ fn derived_wake_jobs(
             });
         }
     }
+    if state.entity.lending.is_some() {
+        let requests = state
+            .entity
+            .known_accounts
+            .iter()
+            .map(|peer| {
+                parse_hex32(peer)
+                    .map(|id| {
+                        (
+                            AccountId::from_bytes(id),
+                            xln_rscore_batch::ResidentAccountFinancialViewRequest::default(),
+                        )
+                    })
+                    .ok_or_else(|| RuntimeMachineError::EntityInputEntityIdInvalid(peer.clone()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let views = replica
+            .accounts
+            .local_financial_views(requests)?
+            .into_iter()
+            .map(|(id, view)| {
+                (
+                    render_word(id.as_bytes()),
+                    xln_rscore_entity_kernel::LocalAccountFinancialView::from(view),
+                )
+            })
+            .collect();
+        for (id, due_at) in xln_rscore_entity_kernel::lending_deadlines(&state.entity, &views)
+            .map_err(RuntimeMachineError::EntityFinancial)?
+        {
+            if due_at <= now {
+                jobs.push(ScheduledWakeJob {
+                    kind: ScheduledWakeJobKind::Hook,
+                    id,
+                    due_at,
+                });
+            }
+        }
+    }
     Ok(jobs)
 }
 

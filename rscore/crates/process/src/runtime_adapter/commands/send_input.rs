@@ -59,7 +59,7 @@ mod tests {
                 .map(xln_rscore_runtime::RuntimeEntityInput::decode)
                 .collect::<Result<Vec<_>, _>>()
                 .expect(
-                    "unsupported lending must reach runtime per-command eviction, not E_BAD_QUERY",
+                    "malformed lending must reach runtime per-command eviction, not E_BAD_QUERY",
                 );
             assert_eq!(decoded.len(), 2);
             assert_eq!(decoded[0].canonical(), &request["input"]["entityInputs"][0]);

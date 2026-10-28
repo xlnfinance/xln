@@ -1,7 +1,7 @@
 //! Exact inverse of `core/storage/schema/rscore/checkpoint.ts`.
 //!
 //! The durable Runtime WAL stores one checkpoint header per Entity, one
-//! bounded Account shell row, and seven namespaces of Account-owned leaves.
+//! bounded Account shell row, and nine radix namespaces of Account-owned leaves.
 //! Recovery rebuilds the exact `RestoreExact` wire rows; it never imports the
 //! TypeScript Account objects kept in an old Runtime snapshot.
 
@@ -17,7 +17,7 @@ use crate::checkpoint_node_key::{
 const KEY_RSCORE_CHECKPOINT: u8 = 0x17;
 const KEY_RSCORE_ACCOUNT: u8 = 0x18;
 const KEY_RSCORE_ACCOUNT_NODE: u8 = 0x19;
-const TREE_NAMESPACES: std::ops::RangeInclusive<u8> = 1..=6;
+const TREE_NAMESPACES: [u8; 8] = [1, 2, 3, 4, 5, 6, 8, 9];
 const J_CLAIM_NAMESPACE: u8 = 7;
 
 #[derive(Clone, Debug)]
@@ -29,7 +29,7 @@ pub struct StoredRscoreCheckpoint {
     pub accounts_root: [u8; 32],
     pub signer_digest: [u8; 32],
     pub account_count: usize,
-    /// Exact thirteen-field rows accepted by process `RestoreExact`.
+    /// Exact fourteen-field rows accepted by process `RestoreExact`.
     pub accounts: Vec<Value>,
 }
 
@@ -139,7 +139,7 @@ fn tree_value(namespace: u8, row: &[Value], path: &str) -> Result<Value, Runtime
     }
     let key = typed_bytes(&row[2], &format!("{path}.key"))?;
     match namespace {
-        3 => {
+        3 | 10 => {
             let length = key
                 .get(..2)
                 .and_then(|bytes| <[u8; 2]>::try_from(bytes).ok())
@@ -156,7 +156,7 @@ fn tree_value(namespace: u8, row: &[Value], path: &str) -> Result<Value, Runtime
                 row[3].clone(),
             ]))
         }
-        5 => {
+        5 | 8 | 9 => {
             if key.len() != 32 || key[..30].iter().any(|byte| *byte != 0) {
                 return Err(invalid(format!("POLICY_KEY:{path}")));
             }
@@ -305,7 +305,7 @@ impl RuntimeWalReader {
             if leaf.len() != 32 {
                 return Err(invalid("ACCOUNT_LEAF"));
             }
-            let mut row = Vec::with_capacity(11);
+            let mut row = Vec::with_capacity(14);
             row.push(tagged_bytes(&account));
             row.push(meta[0].clone());
             row.push(meta[1].clone());
@@ -322,6 +322,9 @@ impl RuntimeWalReader {
                 Some(&j_claim_roots),
             )?));
             row.push(meta[2].clone());
+            row.push(Value::Array(
+                self.rscore_tree_values(&owner, &account, 10, None)?,
+            ));
             accounts.push(Value::Array(row));
         }
         let node_prefix = prefixed(&[KEY_RSCORE_ACCOUNT_NODE], &owner);

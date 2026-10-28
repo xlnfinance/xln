@@ -151,13 +151,12 @@ export const accountEnvelopeWire = (account: AccountReplica): RscoreWireValue =>
  * Most out-of-profile sections are *carried*: the engine commits their roots
  * verbatim and no supported transaction mutates them, so a live account with
  * swap/pull/rebalance/J-claim state still reproduces its exact state root.
- * Lending intents remain ineligible because the engine owns their map and a
- * live seed does not yet carry its entries. Settlement workspaces are carried
+ * Lending receipts and covenants are imported as native map bodies.
+ * Settlement workspaces are carried
  * exactly, including Hankos; Rust strips only the same non-unique witnesses
  * as `settlementWorkspaceWithoutHankos` when computing the Account root.
  */
 export const shadowIneligibilityReason = (state: AccountState): string | null => {
-  if ((state.lendingIntents?.size ?? 0) > 0) return 'LENDING_INTENTS';
   // Live cutover imports complete same-j and cross-j offers. Quantized amounts
   // must still equal the live resting amounts; exact checkpoint recovery owns
   // the independently committed quantized fields.
@@ -558,6 +557,8 @@ export const accountSeedWire = (
     deltaTransformer === null
       ? null
       : hexToWireBytes(deltaTransformer, 20, 'SHADOW_DELTA_TRANSFORMER'),
+    [...state.lendingIntents ?? []].map(([id,kind]) => [id,kind]),
+    [...state.subcontracts ?? []].map(([id,claim]) => [id,canonicalValueWire(claim)]),
   ];
 };
 

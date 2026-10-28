@@ -61,7 +61,7 @@ const emptyPostAccount = (
     accountId,
     leaf,
     emptyHeader(),
-    [descriptor, descriptor, descriptor, descriptor, descriptor, descriptor, descriptor, descriptor],
+    [descriptor, descriptor, descriptor, descriptor, descriptor, descriptor, descriptor, descriptor, descriptor],
     changes,
     changes,
     changes,
@@ -72,6 +72,7 @@ const emptyPostAccount = (
     changes,
     [[], []],
     emptyConsensus(),
+    changes,
   ];
 };
 

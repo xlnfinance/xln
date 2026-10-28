@@ -6,7 +6,7 @@ fn object(entries: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
     CanonicalValue::Object(entries.into_iter().map(|(k, v)| (k.into(), v)).collect())
 }
 #[test]
-fn lending_entity_admission_retains_typed_unsupported_command() {
+fn lending_entity_admission_retains_signed_command() {
     for kind in [
         EntityTxKind::LendingOffer,
         EntityTxKind::LendingBorrow,
@@ -19,7 +19,7 @@ fn lending_entity_admission_retains_typed_unsupported_command() {
             CanonicalEntityTx::from_frame_projection(kind, object(vec![])).expect("canonical tx");
         assert!(
             matches!(decode_local_entity_tx(&tx), Ok(Some(LocalEntityTx::Financial(
-                LocalEntityFinancialTx::UnsupportedLending(retained)
+                LocalEntityFinancialTx::LendingCommand(retained)
             ))) if retained == tx),
             "{kind:?}"
         );

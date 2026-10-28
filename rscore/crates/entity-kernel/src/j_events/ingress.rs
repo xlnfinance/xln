@@ -1996,6 +1996,7 @@ fn apply_dispute_finalized(
     // finality. The emitted status order is protocol-visible in EntityFrame;
     // moving this below finality changes the frame hash even when state agrees.
     sync_j_batch_nonce(state, &event.sender, event.batch_nonce, frame_events)?;
+    crate::lendbook::servicing::retire_disputed(state, &counterparty, &view.lending_claim_ids)?;
     mutations.push((
         counterparty.clone(),
         AccountEnvelopeMutation::ApplyDisputeFinality(AccountDisputeFinality {
@@ -2802,6 +2803,7 @@ mod tests {
         active_dispute: Option<CanonicalValue>,
     ) -> xln_rscore_batch::ResidentAccountDisputeView {
         xln_rscore_batch::ResidentAccountDisputeView {
+            lending_claim_ids: Vec::new(),
             status: if active_dispute.is_some() {
                 "disputed".into()
             } else {

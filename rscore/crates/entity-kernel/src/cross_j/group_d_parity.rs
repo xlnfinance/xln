@@ -193,6 +193,7 @@ fn route_from(state: &EntityStateSlice, tx: &CanonicalEntityTx) -> Option<Canoni
 fn empty_account_view(owner_is_left: bool) -> LocalAccountFinancialView {
     LocalAccountFinancialView {
         dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
+        lending: Default::default(),
         active: true,
         owner_side: if owner_is_left {
             Side::Left
@@ -251,6 +252,7 @@ fn account_views(
         }
         if case_name == "crossJurisdictionForceSiblingDispute" {
             view.dispute = Some(xln_rscore_batch::ResidentAccountDisputeView {
+                lending_claim_ids: Vec::new(),
                 status: "active".into(),
                 dispute_prepare: None,
                 active_dispute: None,

@@ -6,11 +6,12 @@ pub(crate) mod apply_result;
 pub(crate) mod apply_types;
 pub(crate) mod dispute_gas_budget;
 pub(crate) mod handlers;
+pub(crate) mod lending_risk;
 pub(crate) mod offdelta;
 
 use num_bigint::BigInt;
 
-use crate::{CanonicalValue, HtlcLockTx, HtlcResolveTx, JEventClaimTx, StateError, TokenId};
+use crate::{CanonicalValue, HtlcLockTx, HtlcResolveTx, JEventClaimTx, TokenId};
 
 pub const ACCOUNT_TX_TYPES: [&str; 23] = [
     "direct_payment",

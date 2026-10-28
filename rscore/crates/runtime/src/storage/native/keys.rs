@@ -70,8 +70,8 @@ pub(crate) fn valid_path_key(key: &[u8]) -> bool {
             let kind = key[66];
             let payload = &key[67..];
             match (namespace, kind) {
-                (1..=6 | 8..=9, 0) => canonical_radix16_path(payload),
-                (1..=6 | 8..=9, 1) => !payload.is_empty(),
+                (1..=6 | 8..=10, 0) => canonical_radix16_path(payload),
+                (1..=6 | 8..=10, 1) => !payload.is_empty(),
                 (7, 0) => {
                     payload.first().is_some_and(|side| *side <= 1)
                         && canonical_binary_path(&[vec![0], payload[1..].to_vec()].concat())

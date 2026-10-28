@@ -161,6 +161,7 @@ impl PreparedEntityOutbound {
 /// the coordinator receives one status bit and requested owner capacities.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResidentAccountFinancialView {
+    pub lending: xln_rscore_engine::lending::LendingAccountView,
     pub active: bool,
     /// Point-read signed Account clocks; this view is transient, never committed.
     pub dispute_config: xln_rscore_engine::AccountDisputeConfig,
@@ -297,6 +298,7 @@ fn pending_cross_pull_close_ids(account: &AccountConsensus) -> BTreeSet<String> 
 /// same frozen head.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResidentAccountDisputeView {
+    pub lending_claim_ids: Vec<String>,
     pub status: String,
     pub dispute_prepare: Option<CanonicalValue>,
     pub active_dispute: Option<CanonicalValue>,
@@ -1322,6 +1324,12 @@ impl ResidentConsensusEngine {
                         collect(account.mempool());
                         let delta_transformer = replica.delta_transformer().copied();
                         Ok(ResidentAccountDisputeView {
+                            lending_claim_ids: state
+                                .lending_claims()
+                                .map_err(|e| BatchError::FinancialView(e.to_string()))?
+                                .into_iter()
+                                .map(|(id, _)| id)
+                                .collect(),
                             status: replica
                                 .envelope()
                                 .field("status")
@@ -1358,6 +1366,14 @@ impl ResidentConsensusEngine {
                     })
                     .transpose()?;
                 Ok(ResidentAccountFinancialView {
+                    lending: {
+                        let mut view = account
+                            .replica()
+                            .lending_view()
+                            .map_err(|e| BatchError::FinancialView(e.to_string()))?;
+                        view.busy = account.pending().is_some() || !account.mempool().is_empty();
+                        view
+                    },
                     active,
                     dispute_config: state.dispute_config(),
                     owner_side,

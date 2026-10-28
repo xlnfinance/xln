@@ -342,6 +342,7 @@ const restoreWire = (
     [...state.requestedRebalanceFeeState.entries()].map(([tokenId, fee]) => [tokenId, requestedRebalanceFeeWire(fee)]),
     [],
     consensus,
+    [...state.subcontracts.entries()].map(([key, value]) => [key, canonicalValueWire(value)]),
   ];
 };
 

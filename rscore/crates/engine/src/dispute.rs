@@ -430,7 +430,7 @@ pub fn build_dispute_proof_body(
     delta_transformer: &[u8; 20],
 ) -> Result<DisputeProofBody, StateError> {
     let state = replica.state();
-    if state.carried().subcontracts_root != [0; 32] {
+    if !state.lending_bodies_loaded() {
         // Rust does not keep a second opaque subcontract body behind the
         // committed root.  Silently omitting it would certify a different
         // ProofBody; refuse until that canonical collection is resident.
@@ -517,22 +517,48 @@ pub fn build_dispute_proof_body(
     let mut clauses = chunk_clauses(&payments, |items| {
         Ok(DisputeTransformerClause {
             transformer_address: *delta_transformer,
-            encoded_batch: encode_batch(items, &[], &[])?,
+            encoded_batch: encode_batch(items, &[], &[], &[])?,
             allowances: payment_allowances(items)?,
         })
     })?;
     clauses.extend(chunk_clauses(&swaps, |items| {
         Ok(DisputeTransformerClause {
             transformer_address: *delta_transformer,
-            encoded_batch: encode_batch(&[], items, &[])?,
+            encoded_batch: encode_batch(&[], items, &[], &[])?,
             allowances: swap_allowances(items)?,
         })
     })?);
     clauses.extend(chunk_clauses(&pulls, |items| {
         Ok(DisputeTransformerClause {
             transformer_address: *delta_transformer,
-            encoded_batch: encode_batch(&[], &[], items)?,
+            encoded_batch: encode_batch(&[], &[], items, &[])?,
             allowances: pull_allowances(items),
+        })
+    })?);
+    let mut claims = state.lending_claims()?;
+    claims.sort_by(|(a, _), (b, _)| a.cmp(b));
+    let loans = claims
+        .into_iter()
+        .map(|(_, c)| Ok((index_of(c.token_id, "loanToken")?, c)))
+        .collect::<Result<Vec<_>, StateError>>()?;
+    clauses.extend(chunk_clauses(&loans, |items| {
+        let mut rows = Vec::new();
+        for (index, c) in items {
+            let maximum = c.maximum();
+            add_allowance(
+                &mut rows,
+                *index,
+                &if c.creditor_is_left {
+                    maximum
+                } else {
+                    -maximum
+                },
+            );
+        }
+        Ok(DisputeTransformerClause {
+            transformer_address: *delta_transformer,
+            encoded_batch: encode_batch(&[], &[], &[], items)?,
+            allowances: finish_allowances(rows),
         })
     })?);
     let identity = state.identity();
@@ -697,13 +723,12 @@ fn pull_allowances(pulls: &[Pull]) -> Vec<DisputeAllowance> {
     finish_allowances(rows)
 }
 
-/// `abi.encode(DeltaTransformer.Batch)` uses four arrays. The current Rust
-/// launch profile rejects loan covenant bodies, so its fourth array is empty.
-/// Omitting it changes the signed proof hash and invalidates the peer Hanko.
+/// Exact four-array stock batch, including signed term-loan clocks.
 fn encode_batch(
     payments: &[Payment],
     swaps: &[Swap],
     pulls: &[Pull],
+    loans: &[(usize, crate::lending::LendingCovenant)],
 ) -> Result<Vec<u8>, StateError> {
     let mut payment_bytes = Vec::new();
     payment_bytes.extend_from_slice(&word_from_u64(payments.len() as u64));
@@ -750,7 +775,20 @@ fn encode_batch(
     encoded.extend_from_slice(&payment_bytes);
     encoded.extend_from_slice(&swap_bytes);
     encoded.extend_from_slice(&pull_bytes);
-    encoded.extend_from_slice(&word_from_u64(0));
+    encoded.extend_from_slice(&word_from_u64(loans.len() as u64));
+    for (index, c) in loans {
+        encoded.extend_from_slice(&word_from_u64(*index as u64));
+        encoded.extend_from_slice(&word_from_u64(u64::from(c.creditor_is_left)));
+        encoded.extend_from_slice(&word_from_uint(&c.principal, "loanPrincipal")?);
+        for v in [c.interest_bps, c.opened_at, c.accrued_at] {
+            encoded.extend_from_slice(&word_from_u64(v));
+        }
+        encoded.extend_from_slice(&word_from_uint(&c.accrued_interest, "loanInterest")?);
+        encoded.extend_from_slice(&word_from_uint(&c.interest_remainder, "loanRemainder")?);
+        for v in [c.term_ms, c.late_ms] {
+            encoded.extend_from_slice(&word_from_u64(v));
+        }
+    }
     Ok(encoded)
 }
 
@@ -996,7 +1034,7 @@ mod chunk_parity_tests {
         let mut clauses = chunk_clauses(&payments, |items| {
             Ok(DisputeTransformerClause {
                 transformer_address: [0x22; 20],
-                encoded_batch: encode_batch(items, &[], &[])?,
+                encoded_batch: encode_batch(items, &[], &[], &[])?,
                 allowances: payment_allowances(items)?,
             })
         })
@@ -1005,7 +1043,7 @@ mod chunk_parity_tests {
             chunk_clauses(&swaps, |items| {
                 Ok(DisputeTransformerClause {
                     transformer_address: [0x22; 20],
-                    encoded_batch: encode_batch(&[], items, &[])?,
+                    encoded_batch: encode_batch(&[], items, &[], &[])?,
                     allowances: swap_allowances(items)?,
                 })
             })
@@ -1057,7 +1095,7 @@ mod chunk_parity_tests {
         let clauses = chunk_clauses(&pulls, |items| {
             Ok(DisputeTransformerClause {
                 transformer_address: [0x22; 20],
-                encoded_batch: encode_batch(&[], &[], items)?,
+                encoded_batch: encode_batch(&[], &[], items, &[])?,
                 allowances: pull_allowances(items),
             })
         })
@@ -1088,7 +1126,7 @@ mod chunk_parity_tests {
         let clauses = chunk_clauses(&payments, |items| {
             Ok(DisputeTransformerClause {
                 transformer_address: [2; 20],
-                encoded_batch: encode_batch(items, &[], &[])?,
+                encoded_batch: encode_batch(items, &[], &[], &[])?,
                 allowances: payment_allowances(items)?,
             })
         })

@@ -3,12 +3,12 @@ fn entity(byte: &str) -> String {
     format!("0x{}", byte.repeat(32))
 }
 #[test]
-fn lending_api_explicitly_refuses_unsupported_semantics() {
+fn empty_lending_api_has_canonical_zero_totals() {
     let query = LendingStateQuery::parse(&format!("/?hubEntityId={}", entity("11"))).unwrap();
-    assert_eq!(
-        lending_state_response(None, &query),
-        Err("LENDING_UNSUPPORTED".into())
-    );
+    let value = lending_state_response(None, &query, 1000, &Default::default()).unwrap();
+    assert_eq!(value["success"], true);
+    assert_eq!(value["totals"]["savingsPrincipalAmount"], "0");
+    assert_eq!(value["savings"], serde_json::json!([]));
 }
 #[test]
 fn lending_query_rejects_malformed_ids_and_token_filters() {

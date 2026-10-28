@@ -37,7 +37,7 @@ pub fn restore_request(
 }
 
 fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
-    let fields = exact(tuple(value)?, 13, "accountRestore")?;
+    let fields = exact(tuple(value)?, 14, "accountRestore")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let account_leaf = fixed_bytes(&fields[1], "accountLeaf")?;
     let header = header(&fields[2])?;
@@ -84,6 +84,18 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
         })
         .collect::<Result<Vec<_>, ProcessError>>()?;
     let consensus = consensus(&fields[12])?;
+    let subcontracts = tuple(&fields[13])?
+        .iter()
+        .map(|entry| -> Result<_, ProcessError> {
+            let row = exact(tuple(entry)?, 2, "lendingClaim")?;
+            Ok((
+                text(&row[0])?.to_owned(),
+                xln_rscore_engine::lending::LendingCovenant::decode(
+                    &crate::canonical::canonical_value(&row[1])?,
+                )?,
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let AccountCheckpointHeader {
         owner,
         signer_id,
@@ -120,6 +132,7 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
         pulls,
         settlement_workspace,
     })?;
+    state.restore_lending_claims(subcontracts)?;
     state.install_requested_rebalance(requested_rebalance, requested_rebalance_fee_state)?;
     let mut replica = AccountReplica::new(owner, state)?;
     replica.set_envelope(envelope);
@@ -340,6 +353,9 @@ fn lending_entry(value: &AbiValue) -> Result<(String, LendingIntentKind), Proces
         5 => LendingIntentKind::CloseRequest,
         6 => LendingIntentKind::ClosePayout,
         8 => LendingIntentKind::CreditRequest,
+        9 => LendingIntentKind::CloseEarly,
+        10 => LendingIntentKind::CloseMature,
+        11 => LendingIntentKind::DisputeClose,
         value => {
             return Err(ProcessError::Tag {
                 field: "lendingKind",
@@ -418,6 +434,9 @@ mod intent_tag_tests {
         for (tag, expected) in [
             (7, LendingIntentKind::Disburse),
             (8, LendingIntentKind::CreditRequest),
+            (9, LendingIntentKind::CloseEarly),
+            (10, LendingIntentKind::CloseMature),
+            (11, LendingIntentKind::DisputeClose),
         ] {
             let row = AbiValue::Tuple(BodyTuple::from_vec(vec![
                 AbiValue::Text("intent".into()),
@@ -425,7 +444,7 @@ mod intent_tag_tests {
             ]));
             assert_eq!(lending_entry(&row).expect("current intent").1, expected);
         }
-        for tag in [3, 4, 9] {
+        for tag in [3, 4, 12] {
             let row = AbiValue::Tuple(BodyTuple::from_vec(vec![
                 AbiValue::Text("obsolete".into()),
                 AbiValue::Integer(tag),

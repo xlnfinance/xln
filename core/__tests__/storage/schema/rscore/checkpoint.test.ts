@@ -141,7 +141,7 @@ const checkpoint = (
       null,
       null,
     ],
-    [null, null, null, null, null, null, null, null],
+    [null, null, null, null, null, null, null, null, null],
     [puts, dels],
     emptyTree,
     emptyTree,
@@ -152,6 +152,7 @@ const checkpoint = (
     emptyTree,
     [options.jClaimPuts ?? [], options.jClaimDels ?? []],
     [null, null, null, null, null, null, null, null, null, null, null],
+    emptyTree,
   ];
   return { commitToken, restoreToken, accounts: [account], removed: [] };
 };

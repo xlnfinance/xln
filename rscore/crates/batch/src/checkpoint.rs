@@ -59,6 +59,7 @@ pub struct AccountCheckpointRows {
     pub deltas: PersistentNodeChanges<Delta>,
     pub locks: PersistentNodeChanges<HtlcLock>,
     pub lending_intents: PersistentNodeChanges<LendingIntentKind>,
+    pub subcontracts: PersistentNodeChanges<xln_rscore_engine::lending::LendingCovenant>,
     pub swap_offers: PersistentNodeChanges<SwapOffer>,
     pub rebalance_fee_policies: PersistentNodeChanges<BilateralRebalanceFeePolicy>,
     pub pulls: PersistentNodeChanges<CanonicalValue>,
@@ -83,6 +84,7 @@ pub struct AccountCheckpointSections {
     pub deltas: CheckpointTreeDescriptor,
     pub locks: CheckpointTreeDescriptor,
     pub lending_intents: CheckpointTreeDescriptor,
+    pub subcontracts: CheckpointTreeDescriptor,
     pub swap_offers: CheckpointTreeDescriptor,
     pub rebalance_fee_policies: CheckpointTreeDescriptor,
     pub pulls: CheckpointTreeDescriptor,
@@ -95,6 +97,7 @@ impl AccountCheckpointRows {
         self.deltas.puts.len()
             + self.locks.puts.len()
             + self.lending_intents.puts.len()
+            + self.subcontracts.puts.len()
             + self.swap_offers.puts.len()
             + self.rebalance_fee_policies.puts.len()
             + self.pulls.puts.len()
@@ -107,6 +110,7 @@ impl AccountCheckpointRows {
         self.deltas.dels.len()
             + self.locks.dels.len()
             + self.lending_intents.dels.len()
+            + self.subcontracts.dels.len()
             + self.swap_offers.dels.len()
             + self.rebalance_fee_policies.dels.len()
             + self.pulls.dels.len()
@@ -329,6 +333,10 @@ pub(crate) fn account_rows(
             settlement_workspace: state.settlement_workspace().cloned(),
         },
         sections: AccountCheckpointSections {
+            subcontracts: CheckpointTreeDescriptor {
+                root: state.carried().subcontracts_root,
+                leaf_count: state.lending_claims()?.len(),
+            },
             deltas: CheckpointTreeDescriptor {
                 root: state.deltas_root(),
                 leaf_count: state.delta_count(),
@@ -371,6 +379,9 @@ pub(crate) fn account_rows(
         requested_rebalance,
         requested_rebalance_fee_state,
         j_claim_nodes,
+        subcontracts: previous
+            .map(|p| state.subcontract_node_changes_since(p.replica().state()))
+            .unwrap_or_else(|| full(state.subcontract_node_records())),
         consensus: account.consensus_snapshot(),
     })
 }

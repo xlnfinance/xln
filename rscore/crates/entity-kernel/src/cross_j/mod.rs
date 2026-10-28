@@ -6460,6 +6460,7 @@ mod tests {
             "target-user".to_string(),
             crate::local_financial::LocalAccountFinancialView {
                 dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
+                lending: Default::default(),
                 active: false,
                 owner_side: xln_rscore_engine::Side::Left,
                 owner_out_capacity: BTreeMap::new(),
@@ -6474,6 +6475,7 @@ mod tests {
                 swap_offers: BTreeMap::new(),
                 pending_cross_pull_close_ids: Default::default(),
                 dispute: Some(xln_rscore_batch::ResidentAccountDisputeView {
+                    lending_claim_ids: Vec::new(),
                     status: "dispute_preparing".into(),
                     dispute_prepare: Some(obj(vec![(
                         "pendingOrderbookRemovalIds",

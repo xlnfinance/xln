@@ -158,6 +158,7 @@
     "rscore:fmt": "cargo fmt --manifest-path rscore/Cargo.toml --all -- --check",
     "rscore:clippy": "cargo clippy --manifest-path rscore/Cargo.toml --workspace --all-targets --all-features -- -D warnings",
     "rscore:test": "bun tools/checks/run-rscore-tests.ts",
+    "rscore:lending": "bun tools/rscore-differential/index.ts",
     "rscore:check": "bun run rscore:fmt && bun run rscore:clippy && bun run rscore:test && bun run rscore:parity",
     "rscore:parity": "XLN_RSCORE_REQUIRE_BINARY=1 bun core/scripts/checks/rscore/check-rscore-parity.ts",
     "rscore:evidence:record": "bun core/scripts/operations/hlt/replay/commands/run-authority-evidence-record.ts",
