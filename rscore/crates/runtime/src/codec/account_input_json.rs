@@ -959,7 +959,7 @@ fn decode_lending_repay(
             operation_index,
             &format!("{path}.borrowerEntityId"),
         )?,
-        token_id: token_id(
+        token_id: unsigned(
             field(value, "tokenId", operation_index, path)?,
             operation_index,
             &format!("{path}.tokenId"),

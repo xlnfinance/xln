@@ -7,6 +7,7 @@ import { summarizeLendingState } from '../../../core/lendbook/state';
 import { lendingTermsKey, lendingFacilityKey } from '../../../core/lendbook/policy';
 import { entitySnapshotWire } from '../../../core/rscore/entity/snapshot-wire';
 import { safeStringify } from '../../../core/protocol/serialization';
+import { canonicalAccountTxForFrameHash } from '../../../core/account/consensus/frame/hash';
 import { computeAccountStateRootCold } from '../../../core/account/commitment/state-root';
 import { applyAccountTxToMutableReplica } from '../../../core/account/tx/apply';
 import {
@@ -16,6 +17,7 @@ import {
 import { MalformedEntityFrameInputError } from '../../../core/entity/tx/processing/invariant-errors';
 import { readEntityFrameEvents } from '../../../core/entity/frame-events';
 import type { EntityTx } from '../../../core/types/entity-tx';
+import { PersistentAccountStateMap } from '../../../core/account/state/persistent-state-map';
 import type { AccountTx } from '../../../core/types/account';
 import type { AccountTxTarget } from '../../../core/entity/tx/handlers/account/orderbook/queue';
 const hub = `0x${'11'.repeat(32)}`,
@@ -224,8 +226,13 @@ export async function executeLendingBookVectors() {
 // Token 1 must never authorize token 2^32+1 through a narrowing conversion.
 export async function executeLendingTokenVectors() {
   const rows = [];
-  for (const kind of ['lendingOffer', 'lendingApprove', 'lendingRepay'] as const) {
-    const s = base();
+  for (const [kind, tokenId] of [
+    ['lendingOffer', 4294967297],
+    ['lendingApprove', 4294967297],
+    ['lendingRepay', 4294967297],
+    ['lendingRepay', 2],
+  ] as const) {
+    let s = base();
     s.profile!.isHub = true;
     s.config.jurisdiction = {
       chainId: terms.chainId,
@@ -238,9 +245,11 @@ export async function executeLendingTokenVectors() {
       const id = 'loan-0327fd9035d42518';
       const claim = account.state.subcontracts!.get(id)!;
       account.state.subcontracts = account.state.subcontracts!.updated(id, { ...claim, creditorIsLeft: false });
+      account.state.lendingIntents = PersistentAccountStateMap.fromEntries('lendingIntents', [
+        [`disburse:${id}`, 'disburse'],
+      ]);
     }
     s.accounts = s.accounts.updated(peer, account);
-    const tokenId = 4294967297;
     const tx: EntityTx =
       kind === 'lendingOffer'
         ? {
@@ -260,28 +269,50 @@ export async function executeLendingTokenVectors() {
               data: { borrowerEntityId: peer, tokenId, termId: '1d', maxPrincipal: 10000n, expiresAt: 200000000 },
             }
           : { type: kind, data: { hubEntityId: peer, loanId: 'loan-0327fd9035d42518', tokenId, amount: 100n } };
-    const snapshot = () =>
-      safeStringify({
-        entity: s,
-        wire: entitySnapshotWire(s),
-        accountRoot: computeAccountStateRootCold(account.state),
-      });
-    const before = snapshot();
-    let error = '';
+    const before = safeStringify(entitySnapshotWire(s));
+    const accountRoot = computeAccountStateRootCold(account.state);
+    let entityError = '';
+    let outputs: unknown[] = [];
+    let accountTxs: AccountTxTarget[] = [];
     try {
-      if (tx.type === 'lendingOffer') handleLendingOfferEntityTx(s, tx);
-      else if (tx.type === 'lendingApprove') handleLendingPolicy(s, tx);
-      else if (tx.type === 'lendingRepay') {
-        const queued = handleLendingRepayEntityTx(s, tx).accountTxs![0]!.tx;
-        const result = await applyAccountTxToMutableReplica(account, queued, true, s.timestamp);
-        if (result.ok) throw new Error('OVERSIZED_TOKEN_ACCEPTED');
-        error = result.rejection.message;
-      }
+      const result =
+        tx.type === 'lendingOffer'
+          ? handleLendingOfferEntityTx(s, tx)
+          : tx.type === 'lendingApprove'
+            ? handleLendingPolicy(s, tx)
+            : handleLendingRepayEntityTx(s, tx);
+      s = result.newState;
+      outputs = result.outputs;
+      if ('accountTxs' in result) accountTxs = result.accountTxs ?? [];
     } catch (e) {
-      error = e instanceof MalformedEntityFrameInputError ? e.rejection : e instanceof Error ? e.message : String(e);
+      entityError =
+        e instanceof MalformedEntityFrameInputError ? e.rejection : e instanceof Error ? e.message : String(e);
     }
-    if (!error || snapshot() !== before) throw new Error(`REJECT_MUTATED_STATE:${kind}`);
-    rows.push({ tx, error });
+    const entity = {
+      stateUnchanged: safeStringify(entitySnapshotWire(s)) === before,
+      events: readEntityFrameEvents(s),
+      outputs,
+      accountTxs: accountTxs.map(({ accountId, tx }) => ({ accountId, tx: canonicalAccountTxForFrameHash(tx) })),
+    };
+    let accountResult = null;
+    if (accountTxs.length) {
+      const result = await applyAccountTxToMutableReplica(account, accountTxs[0]!.tx, true, s.timestamp);
+      accountResult = {
+        ok: result.ok,
+        rejection: result.ok ? null : result.rejection,
+        events: result.events,
+        outputCount: result.ok ? (result.candidateEffects?.length ?? 0) : 0,
+        stateUnchanged: computeAccountStateRootCold(account.state) === accountRoot,
+      };
+    }
+    rows.push({
+      tx,
+      entityError,
+      entity,
+      accountResult,
+      accountRoot,
+      claimsRoot: account.state.subcontracts!.coldRootHash(),
+    });
   }
   return rows;
 }

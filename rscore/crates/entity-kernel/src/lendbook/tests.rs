@@ -191,7 +191,7 @@ fn account_tx(value: &Value) -> AccountTx {
             loan_id: id("loanId"),
             hub_entity_id: id("hubEntityId"),
             borrower_entity_id: id("borrowerEntityId"),
-            token_id: token(),
+            token_id: num("tokenId"),
             amount: amount(),
             claim_hash: id("claimHash"),
         },
@@ -453,7 +453,14 @@ fn oversized_token_reject(kind: &str, expected: &str) {
         .iter()
         .find(|r| r["tx"]["type"] == kind)
         .unwrap();
-    assert_eq!(row["error"], expected, "canonical TS rejection");
+    assert_eq!(
+        row["entityError"], expected,
+        "canonical TS Entity rejection"
+    );
+    assert_eq!(row["entity"]["events"], serde_json::json!([]));
+    assert_eq!(row["entity"]["outputs"], serde_json::json!([]));
+    assert_eq!(row["entity"]["accountTxs"], serde_json::json!([]));
+    assert_eq!(row["entity"]["stateUnchanged"], true);
     let mut state = EntityStateSlice::empty(HUB, 1000);
     state.profile.is_hub = true;
     state.known_accounts.insert(PEER.into());
@@ -496,6 +503,171 @@ fn oversized_token_approval_matches_ts_rejection_without_mutation() {
     oversized_token_reject("lendingApprove", "LENDING_FACILITY_ACCOUNT_UNAVAILABLE");
 }
 #[test]
-fn oversized_token_repayment_matches_ts_rejection_without_mutation() {
-    oversized_token_reject("lendingRepay", "LENDING_REPAY_COVENANT_MISMATCH");
+fn repayment_raw_tokens_commit_entity_then_reject_at_account_like_ts() {
+    let fixture = lending_oracle::lending_oracle("entity-kernel/lending-tokens");
+    for row in fixture
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["tx"]["type"] == "lendingRepay")
+    {
+        let mut state = EntityStateSlice::empty(HUB, 1000);
+        state.known_accounts.insert(PEER.into());
+        let before = state.clone();
+        let mut view = view();
+        view.lending
+            .claims
+            .get_mut("loan-0327fd9035d42518")
+            .unwrap()
+            .creditor_is_left = false;
+        let tx = CanonicalEntityTx::from_frame_projection(
+            EntityTxKind::LendingRepay,
+            canonical(&row["tx"]["data"]),
+        )
+        .unwrap();
+        let result = crate::local_financial::apply_local_entity_financial_txs(
+            &mut state,
+            &mut crate::paybook::PaybookChanges::default(),
+            vec![crate::LocalEntityFinancialTx::LendingCommand(tx)],
+            &DeterministicContext::hlt_default(),
+            &BTreeMap::from([(PEER.into(), view.clone())]),
+            None,
+            None,
+        )
+        .expect("TS commits repayment at Entity admission, including oversized tokens");
+        assert_eq!(row["entityError"], "");
+        assert_eq!(
+            state == before,
+            row["entity"]["stateUnchanged"].as_bool().unwrap()
+        );
+        let events = result
+            .events
+            .iter()
+            .map(|e| match e {
+                crate::EntityFrameEvent::Status { message } => {
+                    serde_json::json!({"type":"status", "message":message})
+                }
+                other => panic!("unexpected event {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        equal(
+            &canonical(&serde_json::json!(events)),
+            &canonical(&row["entity"]["events"]),
+        );
+        let wakes = result
+            .wake_targets
+            .iter()
+            .map(|target| serde_json::json!({"entityId": target, "signerId": HUB, "entityTxs": []}))
+            .collect::<Vec<_>>();
+        equal(
+            &canonical(&serde_json::json!(wakes)),
+            &canonical(&row["entity"]["outputs"]),
+        );
+        assert!(result.outputs.is_empty());
+        assert_eq!(result.account_txs.len(), 1);
+        let (target, queued) = &result.account_txs[0];
+        assert_eq!(target, PEER);
+        equal(
+            &xln_rscore_engine::canonical_tx_value(queued).unwrap(),
+            &canonical(&row["entity"]["accountTxs"][0]["tx"]),
+        );
+        let a = repayment_account(&view, &row["claimsRoot"]);
+        let root = a.state().payment_profile_account_state_root().unwrap();
+        assert_eq!(format!("0x{}", hex::encode(root)), row["accountRoot"]);
+        let transition = xln_rscore_engine::SequentialAccountEngine::apply_with_context(
+            &a,
+            Side::Left,
+            queued,
+            &xln_rscore_engine::AccountExecutionContext::new(1000, 1000, 0, 1, 0),
+        )
+        .unwrap();
+        let xln_rscore_engine::AccountVerdict::Rejected(rejection) = transition.verdict() else {
+            panic!("mismatched token must reject at Account")
+        };
+        assert_eq!(rejection.message(), "LENDING_REPAY_COVENANT_MISMATCH");
+        assert_eq!(
+            rejection.message(),
+            row["accountResult"]["rejection"]["message"]
+        );
+        assert_eq!(rejection.code(), row["accountResult"]["rejection"]["code"]);
+        assert_eq!(
+            serde_json::json!(transition.events()),
+            row["accountResult"]["events"]
+        );
+        assert_eq!(
+            transition.outputs().len(),
+            row["accountResult"]["outputCount"].as_u64().unwrap() as usize
+        );
+        assert!(transition.committed().is_none());
+        assert_eq!(
+            a.state().payment_profile_account_state_root().unwrap(),
+            root
+        );
+        assert_eq!(row["accountResult"]["stateUnchanged"], true);
+    }
+}
+fn repayment_account(
+    view: &LocalAccountFinancialView,
+    claims_root: &Value,
+) -> xln_rscore_engine::AccountReplica {
+    use xln_rscore_engine::*;
+    let owner = EntityId::parse(HUB).unwrap();
+    let identity = AccountIdentity::new(
+        AccountDomain::new(
+            31337,
+            DepositoryAddress::parse(&format!("0x{}", "88".repeat(20))).unwrap(),
+        )
+        .unwrap(),
+        owner.clone(),
+        EntityId::parse(PEER).unwrap(),
+        WatchSeed::parse(&format!("0x{}", "99".repeat(32))).unwrap(),
+    )
+    .unwrap();
+    let delta = Delta::new(
+        TokenId::new(1).unwrap(),
+        10000.into(),
+        0.into(),
+        0.into(),
+        10000.into(),
+        10000.into(),
+        0.into(),
+        0.into(),
+        0.into(),
+        0.into(),
+    )
+    .unwrap();
+    let mut state = AccountState::restore_full(AccountStateSeed {
+        identity,
+        dispute_config: view.dispute_config,
+        deltas: vec![delta],
+        locks: vec![],
+        j_nonce: 0,
+        last_finalized_j_height: 0,
+        carried: CarriedSections {
+            subcontracts_root: hex::decode(claims_root.as_str().unwrap().trim_start_matches("0x"))
+                .unwrap()
+                .try_into()
+                .unwrap(),
+            ..Default::default()
+        },
+        rebalance_fee_policies: vec![],
+        swap_offers: vec![],
+        lending_intents: vec![(
+            "disburse:loan-0327fd9035d42518".into(),
+            LendingIntentKind::Disburse,
+        )],
+        pulls: vec![],
+        settlement_workspace: None,
+    })
+    .unwrap();
+    state
+        .restore_lending_claims(
+            view.lending
+                .claims
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        )
+        .unwrap();
+    AccountReplica::new(owner, state).unwrap()
 }

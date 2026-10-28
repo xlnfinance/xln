@@ -1046,7 +1046,7 @@ fn decode_lending_borrow_request(fields: &[AbiValue]) -> Result<AccountTx, Proce
         request_id: text(&fields[1])?.into(),
         hub_entity_id: text(&fields[2])?.into(),
         borrower_entity_id: text(&fields[3])?.into(),
-        token_id: unsigned(&fields[4], "tokenId")?,
+        token_id: js_number(&fields[4], "tokenId")?,
         amount: bigint(&fields[5], "amount")?,
         term_id: decode_lending_term(&fields[6], false)?,
         max_interest_bps: i64::try_from(integer(&fields[7])?)
@@ -1060,7 +1060,7 @@ fn decode_lending_repay(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> 
         loan_id: text(&fields[1])?.into(),
         hub_entity_id: text(&fields[2])?.into(),
         borrower_entity_id: text(&fields[3])?.into(),
-        token_id: token(&fields[4])?,
+        token_id: js_number(&fields[4], "tokenId")?,
         amount: bigint(&fields[5], "amount")?,
         claim_hash: text(&fields[6])?.into(),
     })

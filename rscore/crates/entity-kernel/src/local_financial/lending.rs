@@ -244,9 +244,8 @@ fn prepare(
                 loan_id: id,
                 hub_entity_id: hub.clone(),
                 borrower_entity_id: owner,
-                // TS Account admission binds the exact original token to the claim.
-                token_id: account_token(raw_token)
-                    .ok_or_else(|| reject(kind, "LENDING_REPAY_COVENANT_MISMATCH"))?,
+                // The Account, not Entity admission, checks the exact signed token.
+                token_id: raw_token,
                 amount: amount.clone(),
                 claim_hash: claim.hash(),
             }

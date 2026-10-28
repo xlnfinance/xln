@@ -197,7 +197,8 @@ pub enum AccountTx {
         loan_id: String,
         hub_entity_id: String,
         borrower_entity_id: String,
-        token_id: TokenId,
+        // Preserve the signed safe integer until the Account covenant check.
+        token_id: u64,
         amount: BigInt,
         claim_hash: String,
     },

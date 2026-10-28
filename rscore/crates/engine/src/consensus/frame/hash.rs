@@ -405,7 +405,7 @@ fn projected_tx_value(
                 ("loanId".to_string(), text(loan_id)),
                 ("hubEntityId".to_string(), text(hub_entity_id)),
                 ("borrowerEntityId".to_string(), text(borrower_entity_id)),
-                ("tokenId".to_string(), token(*token_id)),
+                ("tokenId".to_string(), number(*token_id)?),
                 ("amount".to_string(), big(amount)),
                 ("claimHash".to_string(), text(claim_hash)),
             ],

@@ -67,7 +67,7 @@ fn tx(v: &Value) -> AccountTx {
             loan_id: text(&a[1]),
             hub_entity_id: text(&a[2]),
             borrower_entity_id: text(&a[3]),
-            token_id: token(u32::try_from(n(&a[4])).unwrap()),
+            token_id: n(&a[4]),
             amount: big(&a[5]),
             claim_hash: text(&a[6]),
         },

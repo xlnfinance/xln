@@ -23,6 +23,22 @@ mod notice_schema_tests {
     use xln_rscore_abi::BodyTuple;
 
     #[test]
+    fn lending_restore_preserves_raw_safe_integer_tokens() {
+        for raw in [2, 65536, 4294967297, 9007199254740991_u64] {
+            let tx = AccountTx::LendingRepay {
+                loan_id: "loan-0327fd9035d42518".into(),
+                hub_entity_id: format!("0x{}", "11".repeat(32)),
+                borrower_entity_id: format!("0x{}", "22".repeat(32)),
+                token_id: raw,
+                amount: 100.into(),
+                claim_hash: format!("0x{}", "33".repeat(32)),
+            };
+            let wire = xln_rscore_batch::encode_account_tx(&tx).unwrap();
+            assert_eq!(transaction(&wire).unwrap(), tx);
+        }
+    }
+
+    #[test]
     fn obsolete_policy_snapshot_requires_testnet_chain_reset() {
         let value = AbiValue::Tuple(BodyTuple::from_vec(vec![AbiValue::Integer(1); 5]));
         let error = policy_snapshot(&value).unwrap_err().to_string();
@@ -298,7 +314,7 @@ fn lending_borrow_request(fields: &[AbiValue]) -> Result<AccountTx, AccountWireR
         request_id: text(&fields[1])?.to_owned(),
         hub_entity_id: text(&fields[2])?.to_owned(),
         borrower_entity_id: text(&fields[3])?.to_owned(),
-        token_id: unsigned(&fields[4], "tokenId")?,
+        token_id: js_number(&fields[4], "tokenId")?,
         amount: bigint(&fields[5], "amount")?,
         term_id: lending_term(&fields[6], false)?,
         max_interest_bps: i64::try_from(integer(&fields[7])?)
@@ -312,7 +328,7 @@ fn lending_repay(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreErr
         loan_id: text(&fields[1])?.to_owned(),
         hub_entity_id: text(&fields[2])?.to_owned(),
         borrower_entity_id: text(&fields[3])?.to_owned(),
-        token_id: token(&fields[4])?,
+        token_id: js_number(&fields[4], "tokenId")?,
         amount: bigint(&fields[5], "amount")?,
         claim_hash: text(&fields[6])?.to_owned(),
     })

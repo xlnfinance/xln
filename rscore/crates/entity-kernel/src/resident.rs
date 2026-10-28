@@ -1189,14 +1189,14 @@ fn local_financial_view_requests(
                 continue;
             }
             let token = match &transition.tx {
-                AccountTx::LendingBorrowRequest { token_id, .. } => u32::try_from(*token_id)
+                AccountTx::LendingBorrowRequest { token_id, .. }
+                | AccountTx::LendingRepay { token_id, .. } => u32::try_from(*token_id)
                     .ok()
                     .and_then(|value| xln_rscore_engine::TokenId::new(value).ok()),
                 AccountTx::LendingFund { token_id, .. }
                 | AccountTx::LendingRate { token_id, .. }
                 | AccountTx::LendingDisburse { token_id, .. }
                 | AccountTx::LendingClosePayout { token_id, .. }
-                | AccountTx::LendingRepay { token_id, .. }
                 | AccountTx::CreditRequest { token_id, .. } => Some(*token_id),
                 AccountTx::LendingCloseRequest { .. } => None,
                 _ => continue,

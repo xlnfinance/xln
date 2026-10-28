@@ -262,7 +262,7 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             AbiValue::Text(loan_id.clone()),
             AbiValue::Text(hub_entity_id.clone()),
             AbiValue::Text(borrower_entity_id.clone()),
-            integer(token_id.get()),
+            integer(*token_id),
             encode_bigint(amount),
             AbiValue::Text(claim_hash.clone()),
         ],

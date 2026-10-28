@@ -29,12 +29,35 @@ test('production TS withdrawal, renewal, finality and API projections reproduce 
   );
 });
 
-test('oversized lending tokens reject without changing TS state', async () => {
+test('lending token mismatches preserve the TS Entity/Account boundary', async () => {
   const rows = await executeLendingTokenVectors();
-  expect(rows.map(row => row.tx.type)).toEqual(['lendingOffer', 'lendingApprove', 'lendingRepay']);
-  expect(rows.map(row => row.error)).toEqual([
+  expect(rows.map(row => row.tx.type)).toEqual(['lendingOffer', 'lendingApprove', 'lendingRepay', 'lendingRepay']);
+  expect(rows.map(row => row.entityError)).toEqual([
     'LENDING_TOKEN_NOT_ENABLED:4294967297',
     'LENDING_FACILITY_ACCOUNT_UNAVAILABLE',
-    'LENDING_REPAY_COVENANT_MISMATCH',
+    '',
+    '',
   ]);
+  for (const row of rows) {
+    expect(row.entity.stateUnchanged).toBe(true);
+    if (row.entityError) {
+      expect(row.entity.events).toEqual([]);
+      expect(row.entity.outputs).toEqual([]);
+      expect(row.entity.accountTxs).toEqual([]);
+      expect(row.accountResult).toBeNull();
+      continue;
+    }
+    expect(row.entity.events).toEqual([{ type: 'status', message: 'Loan repayment requested: loan-0327fd9035d42518' }]);
+    const owner = `0x${'11'.repeat(32)}`;
+    expect(row.entity.outputs).toEqual([{ entityId: owner, signerId: owner, entityTxs: [] }]);
+    expect(row.entity.accountTxs).toHaveLength(1);
+    expect(row.entity.accountTxs[0]!.tx.data).toMatchObject({ tokenId: row.tx.data.tokenId });
+    expect(row.accountResult).toEqual({
+      ok: false,
+      rejection: { kind: 'validation', code: 'ACCOUNT_TX_VALIDATION', message: 'LENDING_REPAY_COVENANT_MISMATCH' },
+      events: [],
+      outputCount: 0,
+      stateUnchanged: true,
+    });
+  }
 });

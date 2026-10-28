@@ -186,7 +186,7 @@ fn extended_transactions() -> Vec<(&'static str, AccountTx)> {
                 loan_id: "loan-1".to_string(),
                 hub_entity_id: "0xhub".to_string(),
                 borrower_entity_id: "0xborrower".to_string(),
-                token_id: token,
+                token_id: u64::from(token.get()),
                 amount: BigInt::from(10),
                 claim_hash: format!("0x{}", "cc".repeat(32)),
             },

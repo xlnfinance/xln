@@ -205,7 +205,7 @@ pub(crate) fn apply_committed_lending_followup(
             }
             if borrower_entity_id != &commit.account_id
                 || text(v, "borrowerEntityId")? != borrower_entity_id
-                || number(v, "tokenId")? != u64::from(token_id.get())
+                || number(v, "tokenId")? != *token_id
             {
                 return Err(err(format!("LENDING_REPAYMENT_MISMATCH:{loan_id}")));
             }

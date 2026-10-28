@@ -121,15 +121,18 @@ pub(super) fn apply(
             };
             if c.kind != "loan"
                 || c.creditor_is_left == (side == Side::Left)
-                || c.token_id != u32::from(token_id.get())
+                || u64::from(c.token_id) != *token_id
             {
                 return Ok(reject("LENDING_REPAY_COVENANT_MISMATCH"));
             }
             if *claim_hash != c.hash() {
                 return Ok(reject("LENDING_REPAY_COVENANT_CHANGED"));
             }
+            // Bind the borrower's raw signed token before conversion: 2^32+1
+            // must reject here, never authorize payment against token 1.
+            let token = crate::TokenId::new(c.token_id)?;
             let (paid, c) = c.settle(amount, time);
-            let result = payment(a, tx, side, *token_id, &paid)?;
+            let result = payment(a, tx, side, token, &paid)?;
             if applied(&result) {
                 if c.principal == 0.into() {
                     consume_intent(a, key, Intent::Repay)?;
