@@ -1,4 +1,3 @@
-import { fileURLToPath } from 'node:url';
 import hardhatToolboxMochaEthers from "@nomicfoundation/hardhat-toolbox-mocha-ethers";
 import { defineConfig } from "hardhat/config";
 
@@ -32,8 +31,6 @@ const config = defineConfig({
   },
   solidity: {
     version: '0.8.37',
-    // Use the exact lockfile compiler; compilation must not depend on a global download cache.
-    path: fileURLToPath(new URL('../node_modules/solc/soljson.js', import.meta.url)),
     settings: {
       evmVersion: 'osaka',
       optimizer: {
