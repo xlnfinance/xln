@@ -1,4 +1,5 @@
 use super::*;
+use crate::local_financial::test_fixtures::dispute_view;
 
 fn stored(state: &mut EntityStateSlice, route: CanonicalValue) {
     collection(&mut state.cross_jurisdiction_swaps)
@@ -27,19 +28,11 @@ fn salvage_setup() -> (
     let mut view = account_view();
     view.dispute = Some(xln_rscore_batch::ResidentAccountDisputeView {
         status: "disputed".into(),
-        dispute_prepare: None,
         active_dispute: Some(obj(vec![])),
-        local_dispute: None,
-        counterparty_dispute: None,
         proof_body: Err("not used by salvage".into()),
-        j_nonce: 0,
         owner_is_left: false,
-        delta_transformer: None,
-        payment_hashlocks: vec![],
-        pull_ids: vec![],
         pull_count: 1,
-        swap_offers: vec![],
-        pending_swap_fill_ratios: BTreeMap::new(),
+        ..dispute_view()
     });
     let command = projected(
         EntityTxKind::CrossJurisdictionSalvage,

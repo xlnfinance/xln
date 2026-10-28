@@ -21,3 +21,23 @@ pub(crate) fn account_view() -> LocalAccountFinancialView {
         dispute: None,
     }
 }
+
+pub(crate) fn dispute_view() -> xln_rscore_batch::ResidentAccountDisputeView {
+    xln_rscore_batch::ResidentAccountDisputeView {
+        status: "active".into(),
+        dispute_prepare: None,
+        active_dispute: None,
+        local_dispute: None,
+        pending_dispute: None,
+        counterparty_dispute: None,
+        proof_body: Err("unused".into()),
+        j_nonce: 0,
+        owner_is_left: true,
+        delta_transformer: None,
+        payment_hashlocks: Vec::new(),
+        pull_ids: Vec::new(),
+        pull_count: 0,
+        swap_offers: Vec::new(),
+        pending_swap_fill_ratios: BTreeMap::new(),
+    }
+}

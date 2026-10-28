@@ -1,4 +1,5 @@
 use super::*;
+use crate::local_financial::test_fixtures::{account_view, dispute_view};
 use ethabi::ethereum_types::U256;
 use num_bigint::BigInt;
 use sha3::{Digest, Keccak256};
@@ -115,35 +116,14 @@ fn exact_body_secrets_match_typescript_and_refresh_from_frame_overlay() {
 
     let view = LocalAccountFinancialView {
         active: false,
-        owner_side: xln_rscore_engine::Side::Left,
-        owner_out_capacity: BTreeMap::new(),
-        owner_peer_credit_limit: BTreeMap::new(),
-        settlement_workspace: None,
-        settlement_transition_pending: false,
         settlement_execution: Err("unused".into()),
-        rebalance_active_quote: None,
-        htlc_locks: BTreeMap::new(),
-        pending_htlc_lock_ids: Default::default(),
-        pulls: BTreeMap::new(),
-        swap_offers: BTreeMap::new(),
-        pending_cross_pull_close_ids: Default::default(),
         dispute: Some(xln_rscore_batch::ResidentAccountDisputeView {
             status: "disputed".into(),
-            dispute_prepare: None,
-            active_dispute: None,
-            local_dispute: None,
-            pending_dispute: None,
-            counterparty_dispute: None,
             proof_body: Err("N7 must never be consulted".into()),
-            j_nonce: 0,
-            owner_is_left: true,
             delta_transformer: Some([0x44; 20]),
-            payment_hashlocks: Vec::new(),
-            pull_ids: Vec::new(),
-            pull_count: 0,
-            swap_offers: Vec::new(),
-            pending_swap_fill_ratios: BTreeMap::new(),
+            ..dispute_view()
         }),
+        ..account_view()
     };
     let views = BTreeMap::from([(peer, view)]);
     let proof = crate::j_batch::FinalDisputeProof {
