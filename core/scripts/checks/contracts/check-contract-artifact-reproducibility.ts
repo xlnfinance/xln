@@ -19,7 +19,7 @@ function prepareClone(): void {
   run(['git', 'clone', '--local', '--no-hardlinks', root, clone]);
   run(['git', 'checkout', '-B', 'main', 'HEAD'], clone);
   // Include the exact uncommitted candidate, including added/deleted build tooling.
-  const changed = run(['git', 'diff', '--name-only', '-z', 'HEAD']);
+  const changed = run(['git', 'diff', '--no-renames', '--name-only', '-z', 'HEAD']);
   const added = run(['git', 'ls-files', '--others', '--exclude-standard', '-z']);
   for (const path of new Set(`${changed}${added}`.split('\0').filter(Boolean))) {
     rmSync(join(clone, path), { recursive: true, force: true });
