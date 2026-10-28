@@ -3,6 +3,46 @@ use crate::j_submit::{
     Eip1559Transaction, RetryJSubmitData, SealedJBatch, build_j_submit_attempt_id,
 };
 
+fn assert_ts_retry_metadata(attempt: &DurableJSubmitAttempt, signed: bool) {
+    static VECTORS: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    let vectors = VECTORS.get_or_init(|| {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let output = std::process::Command::new("bun")
+            .current_dir(root)
+            .arg("core/__tests__/fixtures/jurisdiction/j-submit-retry-vectors.ts")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_str(
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .last()
+                .unwrap(),
+        )
+        .unwrap()
+    });
+    let mut actual =
+        attempt_value(attempt).unwrap()["jTxs"][0]["data"]["runtimeSubmitAttempt"].clone();
+    actual
+        .as_object_mut()
+        .unwrap()
+        .retain(|key, _| matches!(key.as_str(), "feeBumpedAt" | "requestedGasBumpBps"));
+    let expected = &vectors
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["signed"] == signed)
+        .unwrap()["metadata"];
+    assert_eq!(
+        serde_json::to_vec(&actual).unwrap(),
+        serde_json::to_vec(expected).unwrap()
+    );
+}
+
 fn unsigned_prepared_attempt() -> (
     crate::RuntimeReplica,
     DurableJSubmitAttempt,
@@ -135,10 +175,22 @@ fn wire_less_transient_failures_retry_with_only_the_successor_after_restore() {
                 .unwrap()
                 .unwrap();
         assert_eq!(successor.attempt_number, cycle + 2);
+        assert_ts_retry_metadata(&successor, false);
+        assert_eq!(
+            successor.fee_bumped_at, None,
+            "unsigned retry has no fee metadata"
+        );
+        assert_eq!(successor.requested_gas_bump_bps, None);
+        assert_eq!(successor.evm_fee_limits, None);
+        assert!(successor.competing_transactions.is_empty());
         let committed = replica.durable.infrastructure().clone();
         let restored: Value =
             serde_json::from_slice(&serde_json::to_vec(&committed).unwrap()).unwrap();
         assert_eq!(restored, committed);
+        assert_ts_retry_metadata(
+            &super::super::decode_pending_j_submit_attempts(&restored).unwrap()[0],
+            false,
+        );
         assert_eq!(
             super::super::decode_pending_j_submit_attempts(&restored).unwrap(),
             vec![successor.clone()]
@@ -325,6 +377,9 @@ fn prepared_signed_batch_is_exact_idempotent_and_rejects_well_signed_wrong_inten
                 .unwrap()
                 .unwrap();
         assert_eq!(current.attempt_number, index as u64 + 2);
+        assert_ts_retry_metadata(&current, true);
+        assert_eq!(current.fee_bumped_at, Some(100));
+        assert_eq!(current.requested_gas_bump_bps, Some(0));
         assert_eq!(
             current.raw_transaction.as_ref(),
             Some(&record.raw_transaction)

@@ -735,20 +735,20 @@ pub fn apply_j_submit_retry(
         .ok_or_else(|| error("ATTEMPT_OVERFLOW"))?;
     let attempt_id = build_j_submit_attempt_id(retry, attempt_number)?;
     let carried = completed_prepared_attempt(replica, retry)?;
+    // Only signed predecessors own fee metadata. Preserve TS optional-key presence:
+    // an unsigned retry inventing a timestamp changes the infrastructure commitment.
+    let wire = carried.as_ref().filter(|a| a.raw_transaction.is_some());
     let attempt = DurableJSubmitAttempt {
-        evm_fee_limits: carried.as_ref().and_then(|a| a.evm_fee_limits.clone()),
-        competing_transactions: carried
-            .as_ref()
+        evm_fee_limits: wire.and_then(|a| a.evm_fee_limits.clone()),
+        competing_transactions: wire
             .map(|a| a.competing_transactions.clone())
             .unwrap_or_default(),
-        fee_bumped_at: carried
-            .as_ref()
-            .map(|a| a.fee_bumped_at.unwrap_or(a.attempted_at)),
-        requested_gas_bump_bps: carried.as_ref().and_then(|a| {
+        fee_bumped_at: wire.map(|a| a.fee_bumped_at.unwrap_or(a.attempted_at)),
+        requested_gas_bump_bps: wire.map(|a| {
             if a.batch_generation == retry.batch_generation {
-                a.requested_gas_bump_bps
+                a.requested_gas_bump_bps.unwrap_or(0)
             } else {
-                Some(0)
+                0
             }
         }),
         raw_transaction: carried

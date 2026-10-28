@@ -245,6 +245,9 @@ for (const lateCopy of [false, true]) test(`wire-less transient failures retry w
     expect(buildStorageRuntimeMachineSnapshot(env)).toEqual(committed);
     current = env.infrastructure!.pendingCommittedJOutbox![0]!.jTxs[0]!;
     expect(current.type === 'batch' && current.data.runtimeSubmitAttempt?.attemptNumber).toBe(cycle + 2);
+    if (current.type !== 'batch') throw new Error('successor missing');
+    expect(current.data.runtimeSubmitAttempt).not.toHaveProperty('feeBumpedAt');
+    expect(current.data.runtimeSubmitAttempt).not.toHaveProperty('requestedGasBumpBps');
   }
 });
 
