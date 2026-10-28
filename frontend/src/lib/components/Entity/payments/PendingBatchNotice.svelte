@@ -1,4 +1,6 @@
 <script lang="ts">
+  import BatchFeeWarning from './BatchFeeWarning.svelte';
+  export let entityId = '';
   type PendingBatchPreviewItem = {
     key: string;
     title: string;
@@ -42,6 +44,7 @@
         <span class="workspace-pending-kicker">{pendingMode === 'sent' ? 'Sent Batch' : 'Draft Batch'}</span>
         <span class="workspace-pending-note">What will go on-chain next</span>
       </div>
+      {#if hasSentBatch}<BatchFeeWarning {entityId} />{/if}
       {#if reserveIssueText}
         <div class="workspace-pending-alert">{reserveIssueText}</div>
       {/if}
@@ -59,7 +62,7 @@
       <button class="btn-table-action" type="button" data-testid="settle-clear-batch" on:click={clearBatch} disabled={submitting}>Clear Batch</button>
       {#if hasSentBatch}
         <button class="btn-table-action deposit" type="button" data-testid="settle-rebroadcast" on:click={rebroadcastBatch} disabled={submitting}>
-          {submitting ? 'Working...' : 'Rebroadcast'}
+          {submitting ? 'Working...' : 'Speed up'}
         </button>
       {:else}
         <button class="btn-table-action deposit" type="button" data-testid="settle-sign-broadcast" on:click={broadcastBatch} disabled={!canBroadcast || submitting}>

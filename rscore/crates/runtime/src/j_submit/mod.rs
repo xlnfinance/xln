@@ -7,6 +7,8 @@
 //! watcher ingress may retire a sealed batch.
 
 mod calldata;
+#[path = "prepared/evm_fee.rs"]
+pub(crate) mod evm_fee;
 #[path = "prepared/financial_replacement.rs"]
 mod financial_replacement;
 mod governance_lifecycle;
@@ -36,6 +38,7 @@ pub use calldata::{
     WatchtowerCounterDisputeCall, decode_process_batch_calldata,
     decode_watchtower_counter_dispute_calldata,
 };
+pub use evm_fee::{EvmFeeAuthorization, EvmFeeLimits};
 pub(crate) use financial_replacement::decode_replacement;
 pub use financial_replacement::{JPreparedReplacement, apply_j_prepared_replacement};
 pub(crate) use governance_lifecycle::decode_governance_result;

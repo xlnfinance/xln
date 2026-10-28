@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::j_watcher::JsonRpc;
 use serde_json::Value;
 use sha3::{Digest as _, Keccak256};
 use thiserror::Error;
@@ -1117,11 +1118,14 @@ impl ResidentRuntimeService {
                             minimum_nonce = Some(minimum_nonce.unwrap_or(0).max(next));
                         }
                     }
+                    let response_deadline =
+                        pending_response_deadline(&mut self.processor, &attempt)?;
                     let result = submit_committed_attempt(
                         self.processor.replica()?,
                         operator_key,
                         &attempt,
                         minimum_nonce,
+                        response_deadline,
                     );
                     self.pending_runtime_txs.push_back(result);
                 }
@@ -1226,7 +1230,12 @@ fn live_submit_context(
             chain_id,
             depository_address,
             operator_private_key,
-            max_fee_per_gas: U256::from(200_000_000_000_u64),
+            max_fee_per_gas: match std::env::var("XLN_EVM_FEE_CEILING_WEI") {
+                Ok(value) => U256::from_dec_str(&value)
+                    .map_err(|_| JSubmitError::Transaction("evm-fee-ceiling"))?,
+                Err(std::env::VarError::NotPresent) => U256::from(200_000_000_000_u64),
+                Err(_) => return Err(JSubmitError::Transaction("evm-fee-ceiling")),
+            },
             gas_headroom_bps: 12_000,
         },
         entity_provider_address,
@@ -1449,11 +1458,45 @@ fn resolve_live_timestamp(
     Ok(previous.max(queued_at.min(future_limit)))
 }
 
+fn pending_response_deadline(
+    processor: &mut DurableRuntimeProcessor,
+    attempt: &DurableJSubmitAttempt,
+) -> Result<Option<u64>, ResidentRuntimeServiceError> {
+    let key = crate::RuntimeEntityKey {
+        entity_id: attempt.sealed.entity_id,
+        signer_id: format!("0x{}", hex::encode(attempt.sealed.signer_id)),
+    };
+    let mut earliest = None;
+    for op in &attempt.sealed.batch.counter_disputes {
+        let Some(fields) =
+            processor.account_envelope_fields(&key, AccountId::from_bytes(op.counterentity))?
+        else {
+            continue;
+        };
+        let Some((_, active)) = fields.iter().find(|(name, _)| name == "activeDispute") else {
+            continue;
+        };
+        let active = super::output::canonical_json_ref(active)
+            .map_err(|e| ResidentRuntimeServiceError::JSubmit(e.to_string()))?;
+        if active["observedOnChain"] != true {
+            continue;
+        }
+        if let Some(deadline) = active["disputeTimeout"]
+            .as_u64()
+            .and_then(|v| v.checked_mul(1000))
+        {
+            earliest = Some(earliest.map_or(deadline, |old: u64| old.min(deadline)));
+        }
+    }
+    Ok(earliest)
+}
+
 fn submit_committed_attempt(
     replica: &crate::RuntimeReplica,
     operator_private_key: [u8; 32],
     attempt: &DurableJSubmitAttempt,
     minimum_nonce: Option<u64>,
+    response_deadline: Option<u64>,
 ) -> RuntimeTx {
     let base = || JSubmitResultData {
         entity_id: format!("0x{}", hex::encode(attempt.sealed.entity_id)),
@@ -1471,53 +1514,100 @@ fn submit_committed_attempt(
         transaction_hash: None,
     };
     let mut replacement_evidence = None;
+    let mut prepared_record = None;
     let mut submit = || -> Result<crate::j_submit::JSubmitPreparation, JSubmitError> {
-        let row = replica
-            .durable
-            .j_replicas()
-            .as_array()
-            .and_then(|rows| {
-                rows.iter().find(|row| {
-                    row.as_array().is_some_and(|pair| {
-                        pair.first().and_then(Value::as_str)
-                            == Some(attempt.jurisdiction_name.as_str())
-                    })
-                })
-            })
-            .and_then(Value::as_array)
-            .and_then(|pair| pair.get(1))
-            .and_then(Value::as_object)
-            .ok_or(JSubmitError::Transaction("jurisdiction-replica"))?;
-        let chain_id = row
-            .get("chainId")
-            .and_then(Value::as_u64)
-            .ok_or(JSubmitError::Transaction("chain-id"))?;
-        let depository = row
-            .get("contracts")
-            .and_then(Value::as_object)
-            .and_then(|contracts| contracts.get("depository"))
-            .and_then(Value::as_str)
-            .ok_or(JSubmitError::Transaction("depository"))?;
-        let depository_address =
-            parse_address(depository).ok_or(JSubmitError::Transaction("depository"))?;
-        let endpoint = row
-            .get("rpcs")
-            .and_then(Value::as_array)
-            .and_then(|rpcs| rpcs.iter().find_map(Value::as_str))
-            .ok_or(JSubmitError::Transaction("rpc"))?;
-        let rpc = HttpJsonRpc::for_committed_j(endpoint, row)
-            .map_err(|error| JSubmitError::Rpc(error.to_string()))?;
-        let submitter = JSubmitter::new(
-            &rpc,
-            JSubmitConfig {
-                chain_id,
-                depository_address,
-                operator_private_key,
-                max_fee_per_gas: U256::from(200_000_000_000_u64),
-                gas_headroom_bps: 12_000,
-            },
-        )?;
+        let (rpc, config, _) =
+            live_submit_context(replica, &attempt.jurisdiction_name, operator_private_key)?;
+        let submitter = JSubmitter::new(&rpc, config)?;
         if let Some(raw) = &attempt.raw_transaction {
+            let mut current_hash = String::new();
+            for sibling in attempt
+                .competing_transactions
+                .iter()
+                .chain(std::iter::once(raw))
+            {
+                let wire = crate::j_submit::prepared_wire::decode_prepared_transaction(
+                    sibling,
+                    rpc.tron_rpc_attested(),
+                )?;
+                if sibling == raw {
+                    current_hash = format!("0x{}", hex::encode(wire.hash));
+                }
+                if let Some(receipt) =
+                    submitter
+                        .receipt_status(&wire.hash, &[])
+                        .map_err(|error| match error {
+                            JSubmitError::Transaction("receipt-reverted") => JSubmitError::Rpc(
+                                "J_PREPARED_RECEIPT_REVERTED_AWAITING_AUTHENTICATED_EVIDENCE"
+                                    .into(),
+                            ),
+                            error => error,
+                        })?
+                {
+                    return Ok(crate::j_submit::JSubmitPreparation::Resolved(receipt));
+                }
+            }
+            let node_rejected = replica
+                .entity_slot(
+                    &attempt.sealed.entity_id,
+                    &format!("0x{}", hex::encode(attempt.sealed.signer_id)),
+                )
+                .and_then(|(_, local)| local.replica_metadata().get("jSubmitState"))
+                .is_some_and(|local| {
+                    let message = local
+                        .pointer("/lastFailure/message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+                    local["txHash"].as_str() == Some(current_hash.as_str())
+                        && message.contains("replacement")
+                        && (message.contains("underpriced") || message.contains("fee too low"))
+                });
+            let now = replica.state.timestamp;
+            let urgent = response_deadline
+                .is_some_and(|deadline| deadline > now && deadline - now <= 120000);
+            let manual = u64::from(
+                attempt
+                    .fee_overrides
+                    .as_ref()
+                    .and_then(|f| f.gas_bump_bps)
+                    .unwrap_or(0),
+            ) != attempt.requested_gas_bump_bps.unwrap_or(0);
+            let age = now.saturating_sub(attempt.fee_bumped_at.unwrap_or(attempt.attempted_at));
+            let minimum_bump_bps = std::env::var("XLN_EVM_REPLACEMENT_BUMP_BPS")
+                .ok()
+                .map(|v| {
+                    v.parse::<u64>()
+                        .map_err(|_| JSubmitError::Transaction("replacement-bump"))
+                })
+                .transpose()?
+                .unwrap_or(1250)
+                .max(u64::from(
+                    attempt
+                        .fee_overrides
+                        .as_ref()
+                        .and_then(|f| f.gas_bump_bps)
+                        .unwrap_or(0),
+                ));
+            if (manual
+                || (node_rejected && response_deadline.is_none_or(|deadline| deadline > now))
+                || (age >= if urgent { 30000 } else { 120000 }
+                    && response_deadline.is_none_or(|deadline| deadline > now)))
+                && !rpc.tron_rpc_attested()
+                && let Some(next) = submitter.prepare_evm_replacement(
+                    raw,
+                    minimum_bump_bps,
+                    manual || urgent || node_rejected,
+                    attempt
+                        .evm_fee_limits
+                        .as_ref()
+                        .ok_or(JSubmitError::Transaction("evm-fee-limits-missing"))?,
+                )?
+            {
+                replacement_evidence =
+                    Some(serde_json::json!({"kind":"evm-fee","minimumBumpBps":minimum_bump_bps}));
+                return Ok(crate::j_submit::JSubmitPreparation::Prepared(next));
+            }
             if let Some((next, evidence)) = submitter.prepare_native_replacement(raw)? {
                 replacement_evidence = Some(evidence);
                 return Ok(crate::j_submit::JSubmitPreparation::Prepared(next));
@@ -1561,31 +1651,38 @@ fn submit_committed_attempt(
         let authority = |entity_id: &[u8; 32], board_hash: &[u8; 32], _claim_index: usize| {
             entity_id == &attempt.sealed.entity_id && current_board.as_ref() == Some(board_hash)
         };
-        submitter.prepare_batch(
+        let prepared = submitter.prepare_batch(
             &attempt.sealed,
             attempt.fee_overrides.as_ref(),
             Some(&operator_private_key),
             Some(&authority),
             &[],
             minimum_nonce,
-        )
+        )?;
+        if let crate::j_submit::JSubmitPreparation::Prepared(raw) = &prepared {
+            prepared_record = Some(submitter.prepared_record(
+                &attempt.jurisdiction_name,
+                &attempt.attempt_id,
+                raw.clone(),
+            )?);
+        }
+        Ok(prepared)
     };
     let outcome = match submit() {
         Ok(crate::j_submit::JSubmitPreparation::Prepared(raw_transaction)) => {
             if let Some(evidence) = replacement_evidence {
                 let value = serde_json::json!({"jurisdictionName":attempt.jurisdiction_name,"attemptId":attempt.attempt_id,
-                    "previousTransactionHash":evidence["oldTransactionHash"],"rawTransaction":raw_transaction,"evidence":evidence});
+                    "previousTransactionHash": if evidence["kind"] == "evm-fee" {
+                        let raw = attempt.raw_transaction.as_ref().expect("replacement source");
+                        format!("0x{}", hex::encode(crate::j_submit::prepared_wire::decode_prepared_transaction(raw, false).expect("validated wire").hash))
+                    } else { evidence["oldTransactionHash"].as_str().expect("native source hash").to_owned() },"rawTransaction":raw_transaction,"evidence":evidence});
                 return RuntimeTx::ReplaceJPreparedTransaction(
                     crate::j_submit::decode_replacement(&value)
                         .expect("validated native replacement callback"),
                 );
             }
             return RuntimeTx::RecordJPreparedTransaction(
-                crate::j_submit::JPreparedTransactionData {
-                    jurisdiction_name: attempt.jurisdiction_name.clone(),
-                    attempt_id: attempt.attempt_id.clone(),
-                    raw_transaction,
-                },
+                prepared_record.expect("initial prepared authorization"),
             );
         }
         Ok(crate::j_submit::JSubmitPreparation::Resolved(outcome)) => Ok(outcome),
@@ -2663,6 +2760,47 @@ impl From<DurableRuntimeProcessorError> for ResidentRuntimeServiceError {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn live_preparation_authorizes_the_configured_ceiling_with_the_wire_payer() {
+        let mut replica = crate::machine::tests::replica(crate::RuntimeLimits::default()).unwrap();
+        let key = [0x21; 32];
+        *replica.durable.j_replicas_mut() = json!([["SimNet", {"chainId":31337,
+            "contracts":{"depository":format!("0x{}", "22".repeat(20)), "entityProvider":format!("0x{}", "23".repeat(20))},
+            "rpcs":["http://127.0.0.1:1"]}]]);
+        let (rpc, config, _) = live_submit_context(&replica, "SimNet", key).unwrap();
+        let ceiling = config.max_fee_per_gas;
+        let raw = format!(
+            "0x{}",
+            hex::encode(
+                crate::j_submit::Eip1559Transaction {
+                    chain_id: 31337,
+                    nonce: 7,
+                    to: [0x22; 20],
+                    value: 0.into(),
+                    data: vec![1],
+                    gas_limit: 50000.into(),
+                    max_fee_per_gas: 2.into(),
+                    max_priority_fee_per_gas: 1.into(),
+                }
+                .sign(&key)
+                .unwrap()
+                .raw
+            )
+        );
+        let record = JSubmitter::new(&rpc, config)
+            .unwrap()
+            .prepared_record("SimNet", "initial-attempt", raw.clone())
+            .unwrap();
+        let limits = record
+            .fee_authorization
+            .unwrap()
+            .validate("SimNet", "initial-attempt", &raw)
+            .unwrap();
+        assert_eq!(limits.max_fee_per_gas, ceiling);
+        assert_eq!(limits.max_priority_fee_per_gas, ceiling);
+        assert!(limits.max_fee_per_gas > 2.into());
+    }
 
     #[test]
     fn rejected_runtime_output_does_not_stop_live_ingress_or_admit_batch_prefix() {

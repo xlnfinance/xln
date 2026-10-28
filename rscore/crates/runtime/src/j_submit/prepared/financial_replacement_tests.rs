@@ -29,7 +29,7 @@ fn actual_native_financial_replacement_preserves_sealed_intent_and_rebroadcasts_
         .unwrap()
         .pop()
         .unwrap();
-    let emitted = apply_j_prepared_replacement(&mut replica, &data)
+    let emitted = apply_j_prepared_replacement(&mut replica, &data, 100)
         .unwrap()
         .expect("one post-WAL broadcast");
     let after = super::super::decode_pending_j_submit_attempts(replica.durable.infrastructure())
@@ -47,7 +47,7 @@ fn actual_native_financial_replacement_preserves_sealed_intent_and_rebroadcasts_
     assert_ne!(after.raw_transaction.as_deref(), Some(old.as_str()));
     let committed = replica.durable.infrastructure().clone();
     assert!(
-        apply_j_prepared_replacement(&mut replica, &data)
+        apply_j_prepared_replacement(&mut replica, &data, 100)
             .unwrap()
             .is_none()
     );
@@ -77,7 +77,7 @@ fn actual_native_financial_replacement_rejects_wrong_policy_witness_and_sealed_b
         }
         let before = replica.durable.infrastructure().clone();
         assert!(
-            apply_j_prepared_replacement(&mut replica, &decode_replacement(&value).unwrap())
+            apply_j_prepared_replacement(&mut replica, &decode_replacement(&value).unwrap(), 100)
                 .is_err(),
             "{field}"
         );
@@ -102,7 +102,7 @@ fn watcher_retired_financial_attempt_cannot_be_recreated_by_late_replacement() {
         .clear();
     let before = replica.durable.infrastructure().clone();
     assert!(
-        apply_j_prepared_replacement(&mut replica, &data)
+        apply_j_prepared_replacement(&mut replica, &data, 100)
             .unwrap()
             .is_none()
     );

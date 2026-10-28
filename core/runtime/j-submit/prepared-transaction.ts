@@ -1,3 +1,5 @@
+import { authorizedEvmFeeLimits, signedEvmFeeLimits, withinEvmFeeLimits } from './evm/evm-fee-authorization';
+import { validateEvmReplacement } from './evm/evm-fees';
 import { validateTronReplacement } from '../../jurisdiction/adapter/operations/tron-replacement';
 import { completedJSubmitAttempt } from './j-submit-state';
 import { ethers } from 'ethers';
@@ -46,18 +48,50 @@ export const applyRecordJPreparedTransaction = (
       validatePreparedJBatch(env, input.jurisdictionName, batch, tx.data.rawTransaction);
       const attempt = batch.data.runtimeSubmitAttempt;
       if (tx.type === 'replaceJPreparedTransaction') {
-        if (env.state.jReplicas.get(input.jurisdictionName)?.watcherReceiptCommitment !== 'tron-rpc-attested'
-          || !attempt.rawTransaction) throw new Error('J_PREPARED_REPLACEMENT_NOT_ACTIVE_NATIVE');
-        validateTronReplacement(attempt.rawTransaction, tx.data.rawTransaction, tx.data.previousTransactionHash, tx.data.evidence);
-        if (attempt.rawTransaction === tx.data.rawTransaction) return [];
+        if ('kind' in tx.data.evidence) {
+          const fees = signedEvmFeeLimits(tx.data.rawTransaction);
+          if (!attempt.evmFeeLimits || !withinEvmFeeLimits({ maxFeePerGas: BigInt(fees.maxFeePerGasWei), maxPriorityFeePerGas: BigInt(fees.maxPriorityFeePerGasWei) }, attempt.evmFeeLimits))
+            throw new Error('EVM_REPLACEMENT_FEE_LIMIT_EXCEEDED');
+        }
+        if (!attempt.rawTransaction) throw new Error('J_PREPARED_REPLACEMENT_PREVIOUS_MISSING');
+        if (attempt.rawTransaction === tx.data.rawTransaction) {
+          if ('kind' in tx.data.evidence) {
+            const previous = attempt.competingTransactions?.find(raw => ethers.keccak256(raw) === tx.data.previousTransactionHash);
+            if (!previous) throw new Error('EVM_REPLACEMENT_PREVIOUS_MISSING');
+            validateEvmReplacement(previous, tx.data.rawTransaction, tx.data.previousTransactionHash, tx.data.evidence.minimumBumpBps);
+          } else validateTronReplacement(attempt.rawTransaction, tx.data.rawTransaction, tx.data.previousTransactionHash, tx.data.evidence);
+          return [];
+        }
         if (completedJSubmitAttempt(env, batch)) throw new Error('J_PREPARED_REPLACEMENT_COMPLETED_ATTEMPT');
+        const native = env.state.jReplicas.get(input.jurisdictionName)?.watcherReceiptCommitment === 'tron-rpc-attested';
+        if ('kind' in tx.data.evidence) {
+          if (native) throw new Error('J_PREPARED_REPLACEMENT_CHAIN_MISMATCH');
+          validateEvmReplacement(attempt.rawTransaction, tx.data.rawTransaction, tx.data.previousTransactionHash, tx.data.evidence.minimumBumpBps);
+          attempt.competingTransactions = [...(attempt.competingTransactions ?? []), attempt.rawTransaction];
+          attempt.feeBumpedAt = env.state.timestamp;
+          attempt.requestedGasBumpBps = batch.data.feeOverrides?.gasBumpBps ?? 0;
+        } else {
+          if (!native) throw new Error('J_PREPARED_REPLACEMENT_CHAIN_MISMATCH');
+          validateTronReplacement(attempt.rawTransaction, tx.data.rawTransaction, tx.data.previousTransactionHash, tx.data.evidence);
+        }
         attempt.rawTransaction = tx.data.rawTransaction;
         return [{ jurisdictionName: input.jurisdictionName, jTxs: [batch] }];
       }
+      const native = env.state.jReplicas.get(input.jurisdictionName)?.watcherReceiptCommitment === 'tron-rpc-attested';
+      if (native && tx.data.feeAuthorization) throw new Error('EVM_FEE_AUTHORIZATION_CHAIN');
       if (attempt.rawTransaction !== undefined) {
-        if (attempt.rawTransaction !== tx.data.rawTransaction) throw new Error('J_PREPARED_TRANSACTION_CONFLICT');
+        if (attempt.rawTransaction !== tx.data.rawTransaction) {
+          // A queued payer authorization may lose to a same-nonce replacement.
+          // Verify the exact known sibling, but never raise the current limits.
+          if (!tx.data.feeAuthorization || !attempt.competingTransactions?.includes(tx.data.rawTransaction))
+            throw new Error('J_PREPARED_TRANSACTION_CONFLICT');
+          authorizedEvmFeeLimits(input.jurisdictionName, attempt.attemptId, tx.data.rawTransaction, tx.data.feeAuthorization);
+          return [];
+        }
+        if (tx.data.feeAuthorization) attempt.evmFeeLimits = authorizedEvmFeeLimits(input.jurisdictionName, attempt.attemptId, tx.data.rawTransaction, tx.data.feeAuthorization);
         return [];
       }
+      if (!native) attempt.evmFeeLimits = authorizedEvmFeeLimits(input.jurisdictionName, attempt.attemptId, tx.data.rawTransaction, tx.data.feeAuthorization);
       attempt.rawTransaction = tx.data.rawTransaction;
       return [{ jurisdictionName: input.jurisdictionName, jTxs: [batch] }];
     }

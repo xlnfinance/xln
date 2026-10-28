@@ -56,7 +56,8 @@ const nextRetryAt = (replica: EntityReplica): number | null => {
   if (local.lastResultOutcome === 'eventBarrier') {
     return local.lastResultAt ?? local.lastSubmittedAt;
   }
-  return local.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS;
+  // Responses check twice per minute so an idle wallet sees the 120 s fee window.
+  return local.lastSubmittedAt + (sent.batch.counterDisputes.length ? 30_000 : ENTITY_J_SUBMIT_RETRY_MS);
 };
 
 export const getNextJSubmitRetryTimestamp = (env: RuntimeReplica): number | null => {

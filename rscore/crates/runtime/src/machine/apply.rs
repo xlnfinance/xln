@@ -4804,9 +4804,12 @@ fn apply_runtime_txs(
                 .map_err(|error| RuntimeMachineError::JSubmit(error.to_string()))?;
             }
             super::RuntimeTx::ReplaceJPreparedTransaction(prepared) => {
-                if let Some(attempt) =
-                    crate::j_submit::apply_j_prepared_replacement(replica, prepared)
-                        .map_err(|error| RuntimeMachineError::JSubmit(error.to_string()))?
+                if let Some(attempt) = crate::j_submit::apply_j_prepared_replacement(
+                    replica,
+                    prepared,
+                    current_timestamp,
+                )
+                .map_err(|error| RuntimeMachineError::JSubmit(error.to_string()))?
                 {
                     attempts.push(attempt.into());
                 }

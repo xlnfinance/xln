@@ -1,3 +1,5 @@
+import { authorizeEvmFeeLimits, initialEvmFeeLimits } from './evm/evm-fee-authorization';
+import { evmPayerSigner } from './evm/evm-replacement';
 import type { TronExpiryEvidence } from '../../jurisdiction/adapter/operations/tron-authority';
 import { decodeSignedTronTransaction } from '../../jurisdiction/adapter/operations/tron-transaction';
 import type { RuntimeReplica, RuntimeTx } from '../types';
@@ -33,6 +35,10 @@ export const beginJPreparation = async (
   const started = new Promise<void>((resolve, reject) => { ready = resolve; fail = reject; });
   const task = adapter.submitTx(batch, { ...options, prepareOnly: async prepared => {
     validatePreparedJBatch(env, jurisdictionName, batch, prepared.rawTransaction);
+    const record = adapter.mode === 'tron' ? markLocalJSubmitRuntimeTx({ type: 'recordJPreparedTransaction',
+      data: { jurisdictionName, attemptId: attempt.attemptId, rawTransaction: prepared.rawTransaction } })
+      : await authorizeEvmFeeLimits(await evmPayerSigner(env, adapter, batch, prepared.rawTransaction),
+        jurisdictionName, attempt.attemptId, prepared.rawTransaction, initialEvmFeeLimits(prepared.rawTransaction, adapter.evmFeeCeilingWei));
     const committed = new Promise<JPreparedTransactionAcceptance>((resolve, reject) => {
       const unsubscribe = registerRuntimeFrameCommitCallback(env, ({ runtimeInput }) => {
         if (!runtimeInput.runtimeTxs.some(tx => (tx.type === 'recordJPreparedTransaction' || tx.type === 'replaceJPreparedTransaction')
@@ -50,7 +56,7 @@ export const beginJPreparation = async (
         if (!attempt.rawTransaction) throw new Error('J_REPLACEMENT_PREVIOUS_WIRE_MISSING');
         enqueue(markLocalJSubmitRuntimeTx({ type: 'replaceJPreparedTransaction', data: { ...data,
           previousTransactionHash: decodeSignedTronTransaction(attempt.rawTransaction).hash, evidence: replacement } }));
-      } else enqueue(markLocalJSubmitRuntimeTx({ type: 'recordJPreparedTransaction', data }));
+      } else enqueue(record);
     });
     queued = true;
     ready();

@@ -1,6 +1,9 @@
 import type { JBatch } from '../jurisdiction/machine/batch';
 import type { EntityProviderActionJTxData } from './entity-provider-actions';
 
+export type EvmFeeLimits = { maxFeePerGasWei: string; maxPriorityFeePerGasWei: string };
+export type EvmFeeAuthorization = EvmFeeLimits & { signature: string };
+
 type RegistrationEvidenceBody = {
   version: 1;
   source: 'FoundationBootstrapped' | 'EntityRegistered';
@@ -147,6 +150,12 @@ export type JTx =
           batchGeneration: number;
           /** Exact signed wire accepted before an external broadcast; hash is derived. */
           rawTransaction?: string;
+          /** Signed siblings survive retries/recovery until authenticated batch retirement. */
+          competingTransactions?: string[];
+          /** Payer-authorized absolute ceilings; never raised by RPC feedback or Entity bumps. */
+          evmFeeLimits?: EvmFeeLimits;
+          feeBumpedAt?: number;
+          requestedGasBumpBps?: number;
         };
       };
       timestamp: number;

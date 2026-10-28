@@ -115,11 +115,14 @@ export async function createRpcAdapter(
     sendSignerTxWithExplicitNonce: sequencer.send,
   });
   let closePromise: Promise<void> | null = null;
+  const evmFeeCeilingWei = config.evmFeeCeilingWei ?? process.env['XLN_EVM_FEE_CEILING_WEI'];
   const adapter: JAdapter = {
     mode: config.mode,
     chainId: config.chainId,
     provider,
     signer,
+    replacementMinimumBumpBps: config.replacementMinimumBumpBps ?? Number(process.env['XLN_EVM_REPLACEMENT_BUMP_BPS'] ?? 1250),
+    ...(evmFeeCeilingWei === undefined ? {} : { evmFeeCeilingWei }),
     get account() { return stack.account; },
     get depository() { return stack.depository; },
     get entityProvider() { return stack.entityProvider; },

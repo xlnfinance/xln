@@ -1,3 +1,4 @@
+import type { EvmFeeAuthorizationRequest } from '../../runtime/j-submit/evm/evm-fee-control';
 import type { RuntimeActivityEvent, RuntimeActivityFilters } from '../../storage/views/activity-types';
 import type { PersistedAccountSwapHistoryPage } from '../../storage/queries/history';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
@@ -190,7 +191,7 @@ export type RuntimeAdapterCrossJurisdictionIntentResult = {
   delivered: true;
 };
 
-export type RuntimeAdapterControlAction = 'verify-chain' | SettlementEvidenceRequest;
+export type RuntimeAdapterControlAction = 'verify-chain' | SettlementEvidenceRequest | EvmFeeAuthorizationRequest;
 
 /** Exact secret input sent only to the selected trusted node's admin channel. */
 export type RuntimeAdapterBrainVaultInput = Readonly<{

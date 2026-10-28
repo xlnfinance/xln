@@ -104,6 +104,10 @@ pub struct DurableJSubmitAttempt {
     pub fee_overrides: Option<JBatchFeeOverrides>,
     pub sealed: SealedJBatch,
     pub raw_transaction: Option<String>,
+    pub competing_transactions: Vec<String>,
+    pub fee_bumped_at: Option<u64>,
+    pub requested_gas_bump_bps: Option<u64>,
+    pub evm_fee_limits: Option<super::EvmFeeLimits>,
 }
 
 #[derive(Debug, Error)]
@@ -295,6 +299,22 @@ pub(super) fn attempt_value(
             .unwrap()
             .insert("rawTransaction".into(), Value::String(raw.clone()));
     }
+    let metadata = data["runtimeSubmitAttempt"].as_object_mut().unwrap();
+    if !attempt.competing_transactions.is_empty() {
+        metadata.insert(
+            "competingTransactions".into(),
+            json!(attempt.competing_transactions),
+        );
+    }
+    if let Some(at) = attempt.fee_bumped_at {
+        metadata.insert("feeBumpedAt".into(), json!(at));
+    }
+    if let Some(limits) = &attempt.evm_fee_limits {
+        metadata.insert("evmFeeLimits".into(), limits.encode());
+    }
+    if let Some(bps) = attempt.requested_gas_bump_bps {
+        metadata.insert("requestedGasBumpBps".into(), json!(bps));
+    }
     if let Some(fees) = &attempt.fee_overrides {
         data.insert("feeOverrides".into(), fee_value(fees));
     }
@@ -457,13 +477,13 @@ fn completed_prepared_attempt(
     let mut matching = decode_pending_j_submit_attempts(replica.durable.infrastructure())?
         .into_iter()
         .filter(|attempt| {
-            prepared_attempt_completed(replica, attempt)
+            (prepared_attempt_completed(replica, attempt)
+                || attempt.batch_generation != retry.batch_generation)
                 && normalize(&attempt.jurisdiction_name) == normalize(&retry.jurisdiction_name)
                 && hex(&attempt.sealed.entity_id) == normalize(&retry.entity_id)
                 && hex(&attempt.sealed.signer_id) == normalize(&retry.signer_id)
                 && attempt.batch_hash == normalize(&retry.batch_hash)
                 && attempt.sealed.nonce == U256::from(retry.entity_nonce)
-                && attempt.batch_generation == retry.batch_generation
         });
     let first = matching.next();
     if matching.next().is_some() {
@@ -589,7 +609,11 @@ pub(crate) fn collect_due_j_submit_retries(
                     .and_then(Value::as_u64)
                     .unwrap_or(last)
             } else if field_u64(previous, "submitAttempts")? > 0 {
-                last.saturating_add(RETRY_MS)
+                last.saturating_add(if sent.batch.counter_disputes.is_empty() {
+                    RETRY_MS
+                } else {
+                    30_000
+                })
             } else {
                 0
             };
@@ -681,13 +705,22 @@ pub fn apply_j_submit_retry(
         let last = field_u64(previous, "lastSubmittedAt")?;
         if attempts > 0
             && previous.get("lastResultOutcome").and_then(Value::as_str) != Some("eventBarrier")
-            && current_timestamp < last.saturating_add(RETRY_MS)
+            && current_timestamp
+                < last.saturating_add(if sent.batch.counter_disputes.is_empty() {
+                    RETRY_MS
+                } else {
+                    30_000
+                })
         {
             println!(
                 "[INFO][runtime.jsubmit] RSCORE_J_RETRY_SKIPPED:retry-window:batch={}:remainingMs={}",
                 normalize(&retry.batch_hash),
-                last.saturating_add(RETRY_MS)
-                    .saturating_sub(current_timestamp)
+                last.saturating_add(if sent.batch.counter_disputes.is_empty() {
+                    RETRY_MS
+                } else {
+                    30_000
+                })
+                .saturating_sub(current_timestamp)
             );
             return Ok(None);
         }
@@ -703,6 +736,21 @@ pub fn apply_j_submit_retry(
     let attempt_id = build_j_submit_attempt_id(retry, attempt_number)?;
     let carried = completed_prepared_attempt(replica, retry)?;
     let attempt = DurableJSubmitAttempt {
+        evm_fee_limits: carried.as_ref().and_then(|a| a.evm_fee_limits.clone()),
+        competing_transactions: carried
+            .as_ref()
+            .map(|a| a.competing_transactions.clone())
+            .unwrap_or_default(),
+        fee_bumped_at: carried
+            .as_ref()
+            .map(|a| a.fee_bumped_at.unwrap_or(a.attempted_at)),
+        requested_gas_bump_bps: carried.as_ref().and_then(|a| {
+            if a.batch_generation == retry.batch_generation {
+                a.requested_gas_bump_bps
+            } else {
+                Some(0)
+            }
+        }),
         raw_transaction: carried
             .as_ref()
             .and_then(|value| value.raw_transaction.clone()),
@@ -840,8 +888,36 @@ pub(super) fn parse_attempt(value: &Value) -> Result<DurableJSubmitAttempt, JSub
         .get("runtimeSubmitAttempt")
         .and_then(Value::as_object)
         .ok_or_else(|| error("PENDING_ATTEMPT"))?;
+    if metadata
+        .get("rawTransaction")
+        .and_then(Value::as_str)
+        .is_some_and(|raw| raw.starts_with("0x02"))
+        && !metadata.contains_key("evmFeeLimits")
+    {
+        return Err(error("EVM_FEE_LIMITS_MISSING"));
+    }
     let fee_overrides = data.get("feeOverrides").map(decode_fee_value).transpose()?;
     let attempt = DurableJSubmitAttempt {
+        evm_fee_limits: metadata
+            .get("evmFeeLimits")
+            .map(super::EvmFeeLimits::decode)
+            .transpose()
+            .map_err(|e| error(e.to_string()))?,
+        competing_transactions: metadata
+            .get("competingTransactions")
+            .map(|v| {
+                serde_json::from_value(v.clone()).map_err(|_| error("PENDING_COMPETING_WIRES"))
+            })
+            .transpose()?
+            .unwrap_or_default(),
+        fee_bumped_at: metadata
+            .get("feeBumpedAt")
+            .map(|v| v.as_u64().ok_or_else(|| error("FEE_BUMPED_AT")))
+            .transpose()?,
+        requested_gas_bump_bps: metadata
+            .get("requestedGasBumpBps")
+            .map(|v| v.as_u64().ok_or_else(|| error("REQUESTED_GAS_BUMP")))
+            .transpose()?,
         raw_transaction: metadata
             .get("rawTransaction")
             .map(|value| {
@@ -1399,6 +1475,10 @@ mod tests {
             attempted_at: 1_791_413_147_000,
             fee_overrides: None,
             raw_transaction: None,
+            competing_transactions: vec![],
+            fee_bumped_at: None,
+            requested_gas_bump_bps: None,
+            evm_fee_limits: None,
             sealed: SealedJBatch {
                 entity_id: [1; 32],
                 signer_id: [5; 20],

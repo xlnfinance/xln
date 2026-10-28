@@ -1,9 +1,11 @@
+import type { EvmFeeEvidence } from './j-submit/evm/evm-fees';
 import type { TronExpiryEvidence } from '../jurisdiction/adapter/operations/tron-authority';
 import type { Level } from 'level';
 import type { RuntimeP2P } from '../network/p2p/p2p';
 import type { AccountReplica, RuntimeOverlayRecord } from '../types/account';
 import type { FrameLogEntry, LogCategory } from '../types/logging';
 import type {
+  EvmFeeAuthorization,
   CertifiedRegistrationEvidence,
   JAdapterFailure,
   JReplica,
@@ -345,11 +347,11 @@ export type RuntimeTx =
   | {
       /** Signed batch bytes owned by the existing committed pending J outbox. */
       type: 'recordJPreparedTransaction';
-      data: { jurisdictionName: string; attemptId: string; rawTransaction: string };
+      data: { jurisdictionName: string; attemptId: string; rawTransaction: string; feeAuthorization?: EvmFeeAuthorization };
     }
   | {
       type: 'replaceJPreparedTransaction';
-      data: { jurisdictionName: string; attemptId: string; previousTransactionHash: string; rawTransaction: string; evidence: TronExpiryEvidence };
+      data: { jurisdictionName: string; attemptId: string; previousTransactionHash: string; rawTransaction: string; evidence: TronExpiryEvidence | EvmFeeEvidence };
     }
   | {
       /** Validator-local result for a previously durable retryJSubmit attempt. */

@@ -1,3 +1,4 @@
+export type { JFeeQuote } from '../../runtime/j-submit/evm/evm-replacement';
 /**
  * Browser Runtime module contract.
  *

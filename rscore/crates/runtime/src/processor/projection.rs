@@ -1007,6 +1007,7 @@ mod prepared_wal_roundtrip_tests {
             jurisdiction_name: "Testnet".into(),
             attempt_id: "committed-attempt".into(),
             raw_transaction: "0x02abcd".into(),
+            fee_authorization: None,
         };
         let tx = crate::RuntimeTx::RecordJPreparedTransaction(data.clone());
         let encoded = super::encode_runtime_txs(std::iter::once(&tx)).unwrap();

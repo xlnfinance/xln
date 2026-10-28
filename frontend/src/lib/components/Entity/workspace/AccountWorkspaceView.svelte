@@ -245,6 +245,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
 />
 
 <PendingBatchNotice
+  entityId={replica?.state.entityId || tab.entityId}
   debtCount={openOutgoingDebtSummary.count}
   debtUsdLabel={formatApproxUsd(openOutgoingDebtSummary.usdTotal)}
   debtNote="Reserve spends sweep debts first. Sign & Broadcast stays locked while the draft still overspends after debt collection."

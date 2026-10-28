@@ -19,6 +19,9 @@ pub(crate) struct PreparedTransaction {
     pub data: Vec<u8>,
     pub chain_id: Option<u64>,
     pub expires_at: Option<u64>,
+    pub gas_limit: U256,
+    pub max_fee: U256,
+    pub priority_fee: U256,
 }
 fn bad() -> JSubmitError {
     JSubmitError::Transaction("prepared-wire")
@@ -129,6 +132,9 @@ fn decode_evm(raw: &[u8]) -> Result<PreparedTransaction, JSubmitError> {
         data: tx.data,
         chain_id: Some(tx.chain_id),
         expires_at: None,
+        gas_limit: tx.gas_limit,
+        max_fee: tx.max_fee_per_gas,
+        priority_fee: tx.max_priority_fee_per_gas,
     })
 }
 
@@ -277,6 +283,9 @@ fn decode_tron(wire: &[u8]) -> Result<PreparedTransaction, JSubmitError> {
         data: bytes(&call, 4)?.to_vec(),
         chain_id: None,
         expires_at: Some(expiration),
+        gas_limit: U256::zero(),
+        max_fee: U256::zero(),
+        priority_fee: U256::zero(),
     })
 }
 

@@ -1,4 +1,5 @@
 import { finalizedTargetReveal } from '../registration/target-reveal-finality';
+import { EvmFeeReadError, prepareEvmFeeReplacement } from './evm/evm-replacement';
 import { ethers } from 'ethers';
 import { parseReceiptLogsToJEvents, type JEventCarrier } from '../../jurisdiction/adapter/j-event-log-decoder';
 import { eventCarriers } from '../../jurisdiction/adapter/rpc/rpc-boundary';
@@ -317,7 +318,8 @@ const hasQueuedJSubmitResult = (env: RuntimeReplica, jTx: JTx): boolean => {
   if ((jTx.type !== 'batch' && jTx.type !== 'hashLadderReveal') || !jTx.data.runtimeSubmitAttempt) return false;
   const attemptId = jTx.data.runtimeSubmitAttempt.attemptId;
   return requireRuntimeMempool(env).runtimeTxs.some(tx =>
-    (tx.type === 'recordJSubmitResult' || tx.type === 'recordGovernanceJSubmitResult')
+    (tx.type === 'recordJSubmitResult' || tx.type === 'recordGovernanceJSubmitResult'
+      || tx.type === 'replaceJPreparedTransaction')
     && tx.data.attemptId === attemptId);
 };
 
@@ -554,13 +556,23 @@ const classifyPreparedRevert = async (
 // Only a contradiction or a finalized revert is terminal for a signed wire. A
 // read failure is retried: ethers reports most node errors ("header not found",
 // rate limits) as UNKNOWN_ERROR, which the generic classifier calls terminal.
-const submitPreparedJBatch = async (adapter: JAdapter, raw: string): Promise<JSubmitResult> => {
+const submitPreparedJBatch = async (adapter: JAdapter, raw: string, siblings: string[]): Promise<JSubmitResult> => {
   const transaction = decodePreparedJTransaction(raw, adapter.mode === 'tron');
   if (!transaction.hash) throw new Error('J_PREPARED_HASH_MISSING');
   const txHash = transaction.hash;
   try {
     const notMined = preparedWireFailure(txHash, 'J_SUBMIT_TRANSACTION_NOT_MINED', 'transient');
-    let receipt = await readPreparedWire(() => adapter.provider.getTransactionReceipt(txHash));
+    let receipt: ethers.TransactionReceipt | null = null;
+    for (const wire of [...siblings, raw]) {
+      const hash = decodePreparedJTransaction(wire, adapter.mode === 'tron').hash;
+      if (!hash) throw new Error('J_PREPARED_HASH_MISSING');
+      receipt = await readPreparedWire(() => adapter.provider.getTransactionReceipt(hash));
+      if (receipt) {
+        if (receipt.hash.toLowerCase() !== hash.toLowerCase()) return preparedWireFailure(hash, 'J_PREPARED_RECEIPT_HASH_MISMATCH');
+        if (receipt.status !== 1) return await classifyPreparedRevert(adapter, hash, receipt);
+        return successfulJReceiptResult(receipt, eventCarriers(adapter.depository, adapter.entityProvider));
+      }
+    }
     if (!receipt) {
       const pending = adapter.mode === 'tron' ? null : await readPreparedWire(() => adapter.provider.getTransaction(txHash));
       if (pending) return notMined;
@@ -589,7 +601,7 @@ const submitJTxToAdapter = async (
   jTx: JTx,
 ): Promise<JSubmitResult> => {
   if (jTx.type === 'batch' && jTx.data.runtimeSubmitAttempt?.rawTransaction) {
-    return submitPreparedJBatch(adapter, jTx.data.runtimeSubmitAttempt.rawTransaction);
+    return submitPreparedJBatch(adapter, jTx.data.runtimeSubmitAttempt.rawTransaction, jTx.data.runtimeSubmitAttempt.competingTransactions ?? []);
   }
   const known = await reconcileKnownBatchTransaction(env, adapter, jTx);
   if (known) return known;
@@ -708,6 +720,13 @@ const submitOneJTx = async (
   let result: JSubmitResult;
   try {
   const raw = jTx.type === 'batch' ? jTx.data.runtimeSubmitAttempt?.rawTransaction : undefined;
+  if (raw && jTx.type === 'batch' && adapter.mode !== 'tron') {
+    const feeReplacement = await prepareEvmFeeReplacement(env, adapter, jurisdictionName, jTx);
+    if (feeReplacement) {
+      deps.enqueueRuntimeInputs(env, undefined, [feeReplacement], undefined, env.state.timestamp);
+      return;
+    }
+  }
   const replacement = raw && adapter.mode === 'tron' && adapter.getTronExpiryEvidence
     ? await adapter.getTronExpiryEvidence(raw) : null;
   if (jTx.type === 'batch' && adapter.mode !== 'browservm' && (!raw || replacement)) {
@@ -721,7 +740,9 @@ const submitOneJTx = async (
   }
     result = await submitJTxToAdapter(env, adapter, jTx);
   } catch (error) {
-    const failure = classifyJAdapterFailure(error);
+    const failure = error instanceof EvmFeeReadError
+      ? classifyJAdapterFailure(error, { category: 'transient', code: 'EVM_REPLACEMENT_RPC_UNAVAILABLE' })
+      : classifyJAdapterFailure(error);
     jSubmitLog.error('tx.submit_threw', {
       type: jTx.type,
       entityId: shortId(jTx.entityId),

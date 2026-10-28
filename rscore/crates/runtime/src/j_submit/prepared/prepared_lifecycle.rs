@@ -12,6 +12,7 @@ pub struct JPreparedTransactionData {
     pub jurisdiction_name: String,
     pub attempt_id: String,
     pub raw_transaction: String,
+    pub fee_authorization: Option<super::EvmFeeAuthorization>,
 }
 
 pub(crate) fn decode_prepared(
@@ -26,22 +27,31 @@ pub(crate) fn decode_prepared(
             .ok_or_else(|| error(format!("PREPARED_FIELD:{key}")))
     };
     let object = value.as_object().ok_or_else(|| error("PREPARED_DATA"))?;
-    if object.len() != 3 {
+    if object.len() != 3 + usize::from(object.contains_key("feeAuthorization")) {
         return Err(error("PREPARED_FIELDS"));
     }
     Ok(JPreparedTransactionData {
         jurisdiction_name: field("jurisdictionName")?,
         attempt_id: field("attemptId")?,
         raw_transaction: field("rawTransaction")?,
+        fee_authorization: value
+            .get("feeAuthorization")
+            .map(super::EvmFeeAuthorization::decode)
+            .transpose()
+            .map_err(|e| error(e.to_string()))?,
     })
 }
 
 pub fn encode_j_prepared_transaction(
     data: &JPreparedTransactionData,
 ) -> Result<Value, JSubmitLifecycleError> {
-    Ok(json!({"type":"recordJPreparedTransaction","data":{
+    let mut encoded = json!({"type":"recordJPreparedTransaction","data":{
         "jurisdictionName":data.jurisdiction_name,"attemptId":data.attempt_id,"rawTransaction":data.raw_transaction
-    }}))
+    }});
+    if let Some(auth) = &data.fee_authorization {
+        encoded["data"]["feeAuthorization"] = auth.encode();
+    }
+    Ok(encoded)
 }
 
 pub(super) fn validate_wire(
@@ -118,12 +128,53 @@ pub fn apply_j_prepared_transaction(
         _ => return Err(error("PENDING_ATTEMPT_DUPLICATED")),
     };
     validate_wire(replica, &attempt, &data.raw_transaction)?;
+    let already_prepared = attempt.raw_transaction.is_some();
     if let Some(raw) = &attempt.raw_transaction {
-        return if raw == &data.raw_transaction {
-            Ok(None)
-        } else {
-            Err(error("PREPARED_TRANSACTION_CONFLICT"))
-        };
+        if raw != &data.raw_transaction {
+            // A queued payer authorization may lose to a same-nonce replacement.
+            // Validate its exact known sibling without raising current limits.
+            if let Some(auth) = &data.fee_authorization
+                && attempt
+                    .competing_transactions
+                    .contains(&data.raw_transaction)
+            {
+                auth.validate(
+                    &attempt.jurisdiction_name,
+                    &attempt.attempt_id,
+                    &data.raw_transaction,
+                )
+                .map_err(|e| error(e.to_string()))?;
+                return Ok(None);
+            }
+            return Err(error("PREPARED_TRANSACTION_CONFLICT"));
+        }
+        if data.fee_authorization.is_none() {
+            return Ok(None);
+        }
+    }
+    let native = replica
+        .durable
+        .j_replicas()
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row[0].as_str() == Some(attempt.jurisdiction_name.as_str()))
+        .is_some_and(|row| row[1]["watcherReceiptCommitment"] == "tron-rpc-attested");
+    if native && data.fee_authorization.is_some() {
+        return Err(error("EVM_FEE_AUTHORIZATION_CHAIN"));
+    }
+    if !native {
+        attempt.evm_fee_limits = Some(
+            match &data.fee_authorization {
+                Some(auth) => auth.validate(
+                    &attempt.jurisdiction_name,
+                    &attempt.attempt_id,
+                    &data.raw_transaction,
+                ),
+                None => super::EvmFeeLimits::from_wire(&data.raw_transaction),
+            }
+            .map_err(|e| error(e.to_string()))?,
+        );
     }
     attempt.raw_transaction = Some(data.raw_transaction.clone());
     let rows = infrastructure_pending_mut(&mut replica.durable)?;
@@ -138,7 +189,7 @@ pub fn apply_j_prepared_transaction(
         .ok_or_else(|| error("PREPARED_PENDING_MISSING"))?;
     rows[index] = attempt_value(&attempt)?;
     replica.durable.invalidate_infrastructure_digest();
-    Ok(Some(attempt))
+    Ok((!already_prepared).then_some(attempt))
 }
 
 /// Completed attempts retain their signed wire until a committed Entity/J
@@ -157,11 +208,10 @@ pub fn prune_completed_prepared_attempts(
                 )
                 .is_some_and(|(state, _)| {
                     state.entity.j_batch_state.as_ref().is_some_and(|batch| {
-                        batch.broadcast_count == attempt.batch_generation
-                            && batch.sent_batch.as_ref().is_some_and(|sent| {
-                                format!("0x{}", hex::encode(sent.batch_hash)) == attempt.batch_hash
-                                    && sent.entity_nonce == attempt.sealed.nonce.low_u64()
-                            })
+                        batch.sent_batch.as_ref().is_some_and(|sent| {
+                            format!("0x{}", hex::encode(sent.batch_hash)) == attempt.batch_hash
+                                && sent.entity_nonce == attempt.sealed.nonce.low_u64()
+                        })
                     })
                 })
         })

@@ -1,3 +1,4 @@
+import { decodeEvmFeeAuthorizationRequest } from '../../../runtime/j-submit/evm/evm-fee-control';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
@@ -247,7 +248,11 @@ function assertRequest(
       break;
     case 'control':
       requireExactBoundaryKeys(message, ['v', 'id', 'op', 'action'], [], 'RADAPTER_REQUEST_CONTROL_FIELDS_INVALID');
-      if (message['action'] !== 'verify-chain') decodeSettlementEvidenceRequest(message['action']);
+      if (message['action'] !== 'verify-chain') {
+        const action = requireBoundaryRecord(message['action'], 'RADAPTER_REQUEST_CONTROL_ACTION');
+        if (action['type'] === 'authorize-evm-fees') decodeEvmFeeAuthorizationRequest(action);
+        else decodeSettlementEvidenceRequest(action);
+      }
       break;
     case 'brainvault-derive': {
       requireExactBoundaryKeys(

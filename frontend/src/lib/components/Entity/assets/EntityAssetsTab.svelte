@@ -176,6 +176,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
 
 <section class="asset-action-card">
   <PendingBatchNotice
+  entityId={replica?.state.entityId || tab.entityId}
     debtCount={openOutgoingDebtSummary.count}
     debtUsdLabel={formatApproxUsd(openOutgoingDebtSummary.usdTotal)}
     debtNote="Reserve spends sweep debts first. Enforce or refill before broadcasting risky reserve moves."

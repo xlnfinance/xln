@@ -1,3 +1,4 @@
+import { validateEvmFeeLimits } from '../../../runtime/j-submit/evm/evm-fee-authorization';
 import { validateDisputeReferences } from '../../../jurisdiction/adapter/events/dispute/reference-state';
 import { validateTargetRevealData } from './target-reveal';
 import type { JInput } from '../../../jurisdiction/machine/input';
@@ -34,12 +35,22 @@ const validateAttempt = (value: unknown, code: string): void => {
   requireExactBoundaryKeys(
     attempt,
     ['attemptId', 'attemptNumber', 'attemptedAt', 'batchGeneration'],
-    ['rawTransaction'],
+    ['rawTransaction', 'competingTransactions', 'feeBumpedAt', 'requestedGasBumpBps', 'evmFeeLimits'],
     `${code}_FIELDS`,
   );
   if (attempt['rawTransaction'] !== undefined) {
     const raw = requireString(attempt['rawTransaction'], `${code}_RAW`);
     if (!/^0x(?:[0-9a-f]{2})+$/.test(raw) || raw.length > 524_290) throw new Error(`${code}_RAW_INVALID`);
+    if (raw.startsWith('0x02') && attempt['evmFeeLimits'] === undefined) throw new Error(`${code}_EVM_FEE_LIMITS_MISSING`);
+  }
+  if (attempt['evmFeeLimits'] !== undefined) validateEvmFeeLimits(attempt['evmFeeLimits']);
+  if (attempt['competingTransactions'] !== undefined) {
+    for (const wire of requireStringArray(attempt['competingTransactions'], `${code}_SIBLINGS`)) {
+      if (!/^0x(?:[0-9a-f]{2})+$/.test(wire) || wire.length > 524_290) throw new Error(`${code}_SIBLING_INVALID`);
+    }
+  }
+  for (const field of ['feeBumpedAt', 'requestedGasBumpBps']) {
+    if (attempt[field] !== undefined) requireBoundaryInteger(attempt[field], `${code}_${field}`);
   }
   requireString(attempt['attemptId'], `${code}_ID`);
   requireBoundaryInteger(attempt['attemptNumber'], `${code}_NUMBER`, 1);

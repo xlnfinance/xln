@@ -19,6 +19,76 @@ use super::{Address, JSubmitError, SealedJBatch, Word, encode_j_batch};
 const DOMAIN_TEXT: &[u8] = b"XLN_DEPOSITORY_HANKO_V1";
 const PROCESS_BATCH_SIGNATURE: &[u8] = b"processBatch(bytes,bytes,uint256)";
 
+#[cfg(test)]
+#[test]
+fn q64_prepared_ceiling_covers_override_raised_wire() {
+    struct Market;
+    impl JsonRpc for Market {
+        fn call(&self, method: &str, _: Value) -> Result<Value, crate::j_watcher::JWatcherError> {
+            Ok(match method {
+                "eth_getBlockByNumber" => json!({"baseFeePerGas":"0x64"}),
+                "eth_maxPriorityFeePerGas" => json!("0xa"),
+                _ => panic!("unexpected RPC {method}"),
+            })
+        }
+    }
+    let key = [0x21; 32];
+    let submitter = JSubmitter::new(
+        &Market,
+        JSubmitConfig {
+            chain_id: 31337,
+            depository_address: [0x22; 20],
+            operator_private_key: key,
+            max_fee_per_gas: 200.into(),
+            gas_headroom_bps: 12000,
+        },
+    )
+    .unwrap();
+    for overrides in [
+        JBatchFeeOverrides {
+            gas_bump_bps: Some(1250),
+            ..Default::default()
+        },
+        JBatchFeeOverrides {
+            max_fee_per_gas_wei: Some("240".into()),
+            ..Default::default()
+        },
+    ] {
+        let (priority, max) = submitter.fees(Some(&overrides)).unwrap();
+        assert_eq!(
+            max,
+            U256::from(if overrides.gas_bump_bps.is_some() {
+                225
+            } else {
+                240
+            })
+        );
+        let raw = hex(&Eip1559Transaction {
+            chain_id: 31337,
+            nonce: 7,
+            to: [0x22; 20],
+            value: 0.into(),
+            data: vec![1],
+            gas_limit: 50000.into(),
+            max_fee_per_gas: max,
+            max_priority_fee_per_gas: priority,
+        }
+        .sign(&key)
+        .unwrap()
+        .raw);
+        let record = submitter
+            .prepared_record("SimNet", "q64-attempt", raw.clone())
+            .unwrap();
+        let limits = record
+            .fee_authorization
+            .unwrap()
+            .validate("SimNet", "q64-attempt", &raw)
+            .unwrap();
+        assert_eq!(limits.max_fee_per_gas, max);
+        assert_eq!(limits.max_priority_fee_per_gas, max);
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JSubmitConfig {
     pub chain_id: u64,
@@ -353,6 +423,73 @@ impl<'a> JSubmitter<'a> {
     ) -> Result<JSubmitOutcome, JSubmitError> {
         let raw = self.prepare_calldata(to, calldata, signer_key, fee_overrides, None)?;
         self.broadcast_prepared(&raw, authenticated)
+    }
+
+    pub(crate) fn prepared_record(
+        &self,
+        jurisdiction: &str,
+        id: &str,
+        raw: String,
+    ) -> Result<super::JPreparedTransactionData, JSubmitError> {
+        let fee_authorization = if self.rpc.tron_rpc_attested() {
+            None
+        } else {
+            let wire = super::prepared_wire::decode_prepared_transaction(&raw, false)?;
+            Some(super::EvmFeeAuthorization::sign(
+                jurisdiction,
+                id,
+                &raw,
+                self.config.max_fee_per_gas.max(wire.max_fee),
+                &self.config.operator_private_key,
+            )?)
+        };
+        Ok(super::JPreparedTransactionData {
+            jurisdiction_name: jurisdiction.into(),
+            attempt_id: id.into(),
+            raw_transaction: raw,
+            fee_authorization,
+        })
+    }
+
+    pub(crate) fn prepare_evm_replacement(
+        &self,
+        raw: &str,
+        minimum_bump_bps: u64,
+        force: bool,
+        limits: &super::EvmFeeLimits,
+    ) -> Result<Option<String>, JSubmitError> {
+        if self.rpc.tron_rpc_attested() {
+            return Ok(None);
+        }
+        let old = super::prepared_wire::decode_prepared_transaction(raw, false)?;
+        if address_of_private_key(&self.config.operator_private_key) != Some(old.signer) {
+            return Err(JSubmitError::Transaction("replacement-payer"));
+        }
+        let (market_tip, market_max) = self.fees(None)?;
+        if !force && market_max <= old.max_fee && market_tip <= old.priority_fee {
+            return Ok(None);
+        }
+        let priority = super::evm_fee::bump(old.priority_fee, minimum_bump_bps)?.max(market_tip);
+        let tx = Eip1559Transaction {
+            chain_id: old
+                .chain_id
+                .ok_or(JSubmitError::Transaction("replacement-chain"))?,
+            nonce: old.nonce,
+            to: old.to,
+            value: old.value,
+            data: old.data,
+            gas_limit: old.gas_limit,
+            max_priority_fee_per_gas: priority,
+            max_fee_per_gas: super::evm_fee::bump(old.max_fee, minimum_bump_bps)?
+                .max(market_max)
+                .max(priority),
+        };
+        if !limits.allows(tx.max_fee_per_gas, tx.max_priority_fee_per_gas) {
+            return Ok(None);
+        }
+        let raw_next = hex(&tx.sign(&self.config.operator_private_key)?.raw);
+        super::evm_fee::validate(raw, &raw_next, &hex(&old.hash), minimum_bump_bps)?;
+        Ok(Some(raw_next))
     }
 
     pub(crate) fn prepare_native_replacement(

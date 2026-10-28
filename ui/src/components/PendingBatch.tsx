@@ -1,3 +1,6 @@
+import { requestBatchSpeedUp } from '../runtime/financial/batch-fees';
+import { requireAdapter } from '../runtime/adapter';
+import { BatchFeeWarning, useBatchFeeQuote } from './BatchFeeWarning';
 import { useState } from 'react';
 import type { JBatch } from '@xln/core/api/public/runtime-module';
 import { Icon } from './Icons';
@@ -8,10 +11,6 @@ import { getTokenMeta } from '../runtime/token-meta';
 import { countBatchOps } from '../runtime/financial/move';
 import { displayEntityName, type WalletView } from '../runtime/views';
 import { releaseFundingDrafts } from '../runtime/financial/funding-submission';
-
-/** First rebroadcast asks 10% over the original fee; each further one doubles, to 160%. */
-const FIRST_BUMP_BPS = 1000;
-const MAX_BUMP_BPS = 16_000;
 
 type Item = { key: string; title: string; detail: string };
 
@@ -59,12 +58,11 @@ export function batchItems(batch: JBatch, self: string, names: Map<string, strin
 
 /**
  * The entity's queued on-chain batch. A draft waits for "Sign & send"; a sent
- * batch waits for the chain. Same three actions as the SvelteKit notice.
+ * batch waits for the chain.
  */
 export function PendingBatch({ wallet, compact = false }: { wallet: WalletView; compact?: boolean }) {
 	const toast = useApp(s => s.toast);
 	const commandReady = useApp(s => s.commandReady);
-	const [bumpBps, setBumpBps] = useState(FIRST_BUMP_BPS);
 	const [busy, setBusy] = useState<string | null>(null);
 	const [open, setOpen] = useState(!compact);
 	const state = wallet.frame?.activeEntity?.core?.jBatchState;
@@ -73,33 +71,34 @@ export function PendingBatch({ wallet, compact = false }: { wallet: WalletView; 
 	const clearBlocked = Boolean(state?.sentBatch) || (state?.recoveryBatches?.length ?? 0) > 0;
 	const draftCount = countBatchOps(draft);
 	const sentCount = countBatchOps(sent);
+	const feeRead = useBatchFeeQuote(wallet.entityId, sentCount > 0);
 	if (draftCount === 0 && sentCount === 0) return null;
 	const mode: 'draft' | 'sent' = draftCount > 0 ? 'draft' : 'sent';
 	const batch = (mode === 'draft' ? draft : sent) as JBatch;
 	const items = batchItems(batch, wallet.entityId, wallet.names);
 
 	const run = async (action: 'clear' | 'broadcast' | 'rebroadcast'): Promise<void> => {
-		if (!wallet.signerId || (action === 'clear' && clearBlocked)) return;
+		const signerId = wallet.signerId;
+		if (!signerId || (action === 'clear' && clearBlocked)) return;
 		setBusy(action);
 		try {
-			await sendEntityTxs(wallet.entityId, wallet.signerId, [
-				action === 'clear'
-					? { type: 'j_clear_batch', data: { reason: 'global-batch-bar-clear' } }
-					: action === 'broadcast'
-						? { type: 'j_broadcast', data: {} }
-						: { type: 'j_rebroadcast', data: { gasBumpBps: bumpBps } },
+			if (action === 'rebroadcast' && feeRead.data) {
+				const sent = await requestBatchSpeedUp({ adapter: requireAdapter(), entityId: wallet.entityId, signerId,
+					quote: feeRead.data, confirm: message => window.confirm(message),
+					rebroadcast: gasBumpBps => sendEntityTxs(wallet.entityId, signerId, [{ type: 'j_rebroadcast', data: { gasBumpBps } }]) });
+				if (!sent) return;
+			} else await sendEntityTxs(wallet.entityId, signerId, [
+				action === 'clear' ? { type: 'j_clear_batch', data: { reason: 'global-batch-bar-clear' } }
+					: action === 'broadcast' ? { type: 'j_broadcast', data: {} } : { type: 'j_rebroadcast', data: {} },
 			]);
 			if (action === 'clear') releaseFundingDrafts(wallet.entityId);
-			// One fixed bump cannot free a batch a busy chain has priced out, and
-			// pressing again at the same number changes nothing. Each attempt asks
-			// for more, up to a ceiling, and says what it asked for.
-			if (action === 'rebroadcast') setBumpBps(current => Math.min(MAX_BUMP_BPS, current * 2));
+
 			toast(
 				action === 'clear'
 					? 'Batch cleared'
 					: action === 'broadcast'
 						? 'Batch signed and sent to the chain'
-						: `Batch re-sent at ${(bumpBps / 100).toFixed(bumpBps % 100 === 0 ? 0 : 1)}% above the fee it first offered`,
+						: 'Fee replacement requested',
 			);
 		} catch (error) {
 			toast(error instanceof Error ? error.message : String(error), 'danger');
@@ -135,6 +134,7 @@ export function PendingBatch({ wallet, compact = false }: { wallet: WalletView; 
 					))}
 				</div>
 			) : null}
+			{sentCount > 0 ? <BatchFeeWarning read={feeRead} /> : null}
 			<div className="actions" style={{ marginTop: 12 }}>
 				{mode === 'draft' ? (
 					<>
@@ -147,8 +147,8 @@ export function PendingBatch({ wallet, compact = false }: { wallet: WalletView; 
 						</button>
 					</>
 				) : (
-					<button type="button" className="btn ghost" disabled={busy !== null || !commandReady} onClick={() => void run('rebroadcast')}>
-						{busy === 'rebroadcast' ? 'Sending…' : `Re-send at +${(bumpBps / 100).toFixed(bumpBps % 100 === 0 ? 0 : 1)}%`}
+					<button type="button" className="btn ghost" disabled={busy !== null || !commandReady || feeRead.loading || Boolean(feeRead.error)} onClick={() => void run('rebroadcast')}>
+						{busy === 'rebroadcast' ? 'Signing…' : feeRead.data ? `Speed up · ceiling ${feeRead.data.ceilingWei} wei/gas` : 'Re-send'}
 					</button>
 				)}
 			</div>

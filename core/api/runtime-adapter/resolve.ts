@@ -1,3 +1,4 @@
+import { batchResponseDeadline, quoteJReplacement } from '../../runtime/j-submit/evm/evm-replacement';
 import { readLendingEvidence } from './read/lending-evidence';
 import type { EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
@@ -610,6 +611,22 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
     if (!local && !ctx.env.gossip.getProfile(entityId) && !(await ensureGossipProfiles(ctx.env, [entityId]))) {
       throw new RuntimeAdapterError('E_NOT_FOUND', 'entity profile is unavailable', true);
     }
+  }
+  if (parts.length === 1 && parts[0] === 'j-fee') {
+    if (readAtHeight(query) !== null) throw new RuntimeAdapterError('E_BAD_QUERY', 'fee quotes require the current committed wire');
+    if (!/^0x[0-9a-f]{64}$/i.test(query?.entityId ?? '')) throw new RuntimeAdapterError('E_BAD_QUERY', 'fee quote entityId is required');
+    // Copy the committed wire under the lease; RPC fee estimation must never
+    // hold the Runtime writer or mutate its durable submission metadata.
+    const pending = await withRuntimeCommittedRead(ctx.env, () => {
+      for (const input of ctx.env.infrastructure?.pendingCommittedJOutbox ?? []) {
+        const batch = input.jTxs.find(tx => tx.type === 'batch' && tx.entityId.toLowerCase() === query?.entityId?.toLowerCase()
+          && tx.data.runtimeSubmitAttempt?.rawTransaction);
+        const adapter = ctx.env.infrastructure?.liveJAdapters?.get(input.jurisdictionName);
+        if (batch?.type === 'batch' && adapter && adapter.mode !== 'tron') return { batch: structuredClone(batch), adapter, deadline: batchResponseDeadline(ctx.env, batch) };
+      }
+      return null;
+    });
+    return (pending ? await quoteJReplacement(pending.adapter, pending.batch, Date.now(), pending.deadline) : null) as T;
   }
   if (parts.length === 1 && parts[0] === 'payment-routes') {
     // Route search refreshes gossip over the network (up to about 1 s) and

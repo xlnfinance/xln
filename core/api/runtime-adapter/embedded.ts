@@ -1,3 +1,4 @@
+import { commitEvmFeeAuthorization } from '../../runtime/j-submit/evm/evm-fee-control';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { RuntimeInput, RuntimeReplica } from '../../runtime/types';
 import type {
@@ -185,9 +186,13 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     ));
   }
 
-  control<T = unknown>(action: RuntimeAdapterControlAction): Promise<T> {
+  async control<T = unknown>(action: RuntimeAdapterControlAction): Promise<T> {
     const env = this.resolveEnv();
     if (!env) return Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true));
+    if (typeof action === 'object' && action.type === 'authorize-evm-fees') {
+      requireRuntimeAdapterCommandReady(env);
+      return commitEvmFeeAuthorization(env, action, this.deps.enqueueRuntimeInput) as Promise<T>;
+    }
     if (!this.deps.controlRuntime) {
       return Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'runtime admin control is unavailable'));
     }

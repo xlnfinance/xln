@@ -1,3 +1,4 @@
+import { validateEvmFeeAuthorization } from '../j-submit/evm/evm-fee-authorization';
 import { validateDisputeReferences } from '../../jurisdiction/adapter/events/dispute/reference-state';
 import { validateRuntimeAdapterCommandMarker } from '../command/frontier';
 import { normalizeJurisdictionImportRequest } from '../j-submit/jurisdiction-import-request';
@@ -278,11 +279,17 @@ const validateRuntimeTxData = (type: string, value: unknown, code: string): void
     const raw = requireString(data['rawTransaction'], `${code}_RAW`);
     if (!/^0x(?:[0-9a-f]{2})+$/.test(raw) || raw.length > 524_290) throw new Error(`${code}_RAW`);
     const evidence = requireBoundaryRecord(data['evidence'], `${code}_EVIDENCE`);
+    if (type === 'replaceJPreparedTransaction' && evidence['kind'] === 'evm-fee') {
+      requireExactBoundaryKeys(evidence, ['kind', 'minimumBumpBps'], [], `${code}_EVIDENCE_FIELDS`);
+      requireBoundaryInteger(evidence['minimumBumpBps'], `${code}_BUMP`, 1000);
+      if (Number(evidence['minimumBumpBps']) > 100_000) throw new Error(`${code}_BUMP`);
+    } else {
     requireExactBoundaryKeys(evidence, ['oldTransactionHash', 'blockNumber', 'blockHash', 'timestamp'], [], `${code}_EVIDENCE_FIELDS`);
     requireBytes32(evidence['oldTransactionHash'], `${code}_OLD_HASH`);
     requireBytes32(evidence['blockHash'], `${code}_BLOCK_HASH`);
     requireBoundaryInteger(evidence['blockNumber'], `${code}_BLOCK_NUMBER`, 1);
     requireBoundaryInteger(evidence['timestamp'], `${code}_TIMESTAMP`, 1);
+    }
   } else if (type === 'resolveNumberedRegistrationIntent') validateNumberedResolution(value, code);
   else if (type === 'recordAuthenticatedJAuthority') validateRegistrationEvidence(value, code);
   else if (type === 'observeJRange') validateJObservationData(value, code);
@@ -305,7 +312,8 @@ const validateRuntimeTxData = (type: string, value: unknown, code: string): void
   } else if (type === 'retryJSubmit') validateJSubmit(value, code, false);
   else if (type === 'recordJPreparedTransaction') {
     const data = requireBoundaryRecord(value, code);
-    requireExactBoundaryKeys(data, ['jurisdictionName', 'attemptId', 'rawTransaction'], [], `${code}_FIELDS`);
+    requireExactBoundaryKeys(data, ['jurisdictionName', 'attemptId', 'rawTransaction'], ['feeAuthorization'], `${code}_FIELDS`);
+    if (data['feeAuthorization'] !== undefined) validateEvmFeeAuthorization(data['feeAuthorization']);
     for (const field of ['jurisdictionName', 'attemptId', 'rawTransaction']) requireString(data[field], `${code}_${field}`);
   }
   else if (type === 'recordJSubmitResult') validateJSubmit(value, code, true);

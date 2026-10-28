@@ -19,6 +19,9 @@ export type JAdapterReplicaConnection = Partial<JReplica>;
 export interface JAdapterConfig {
   mode: JAdapterMode;
   chainId: number;
+  replacementMinimumBumpBps?: number;
+  /** Absolute automatic EVM fee ceiling in wei; default is 4x initial max fee. */
+  evmFeeCeilingWei?: string;
   rpcUrl?: string;                    // Required for anvil/rpc
   tronFullHost?: string;              // Required for TRON writes; defaults from rpcUrl
   tronSolidityHost?: string;          // Native nodes expose finalized HTTP on a separate port
@@ -115,6 +118,9 @@ export type JPreparedTransactionAcceptance = 'accepted' | 'rejected';
 export interface JAdapter {
   readonly mode: JAdapterMode;
   readonly chainId: number;
+  /** Configure at least the RPC node txpool price-bump percentage, in basis points. */
+  readonly replacementMinimumBumpBps?: number;
+  readonly evmFeeCeilingWei?: string;
   readonly provider: Provider;
   readonly signer: Signer;
 
