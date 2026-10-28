@@ -1,4 +1,4 @@
-#[path = "../src/local_financial/test_fixtures.rs"]
+#[path = "../src/local_financial/semantic_parity/test_fixtures.rs"]
 mod test_fixtures;
 
 use num_bigint::BigInt;

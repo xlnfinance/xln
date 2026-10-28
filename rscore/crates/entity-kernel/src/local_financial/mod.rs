@@ -33,6 +33,7 @@ pub(crate) use settlement::{ContinuationDisposition, continuation_probe, select_
 mod settlement_semantic_parity;
 mod swap_requests;
 #[cfg(test)]
+#[path = "semantic_parity/test_fixtures.rs"]
 pub(crate) mod test_fixtures;
 mod types;
 
