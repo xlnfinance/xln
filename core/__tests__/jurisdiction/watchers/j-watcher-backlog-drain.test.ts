@@ -31,7 +31,7 @@ import {
 } from '../../../storage/wal/snapshot';
 import { attachLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
 import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
-import { cleanupTestProcesses, spawnTestProcess } from '../../helpers/test-process';
+import { cleanupTestProcesses, spawnTestProcess } from '../../helpers/process/test-process';
 
 const CHAIN_ID = 31_337;
 const RUNTIME_SEED = 'j-watcher-backlog-drain';
