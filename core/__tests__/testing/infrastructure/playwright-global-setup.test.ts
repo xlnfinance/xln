@@ -33,6 +33,7 @@ describe('playwright global setup cleanup', () => {
           XLN_TEST_ARTIFACT_CLEANUP_DONE: undefined,
           XLN_TEST_ARTIFACT_RUN_TOKEN: undefined,
           XLN_MIN_DISK_FREE_BYTES: '1',
+          XLN_FOUNDRY_HOME: join(root, '.foundry'),
         },
         encoding: 'utf8',
       });

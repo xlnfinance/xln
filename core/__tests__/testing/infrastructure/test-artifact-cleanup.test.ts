@@ -65,9 +65,16 @@ const killProcessIfAlive = (pid: number): void => {
 };
 
 const independentTestRunEnv = (
+  root: string,
   overrides: Record<string, string | undefined>,
 ): NodeJS.ProcessEnv => {
-  const env = sanitizeChildProcessEnv({ ...process.env, ...overrides });
+  const env = sanitizeChildProcessEnv({
+    ...process.env,
+    ...overrides,
+    XLN_FOUNDRY_HOME: join(root, '.foundry'),
+  });
+  // Foundry budgets must inspect only this fixture, never the shared home
+  // whose active Anvil processes and state belong to concurrent stacks.
   // These probes deliberately start a new top-level run in a different
   // workspace. A lease is scoped to its cleanup cwd, so inheriting the unit
   // runner's repo-root token here would correctly fail closed on a missing
@@ -364,7 +371,7 @@ describe('test artifact cleanup', () => {
         nestedProbe,
       ], {
         cwd: repoRoot,
-        env: independentTestRunEnv({
+        env: independentTestRunEnv(root, {
           XLN_TEST_LEASE_PROBE_ROOT: root,
         }),
         encoding: 'utf8',
@@ -400,8 +407,7 @@ describe('test artifact cleanup', () => {
     try {
       const result = spawnSync(process.execPath, ['-e', probe], {
         cwd: repoRoot,
-        env: independentTestRunEnv({
-          XLN_FOUNDRY_HOME: join(root, '.foundry'),
+        env: independentTestRunEnv(root, {
           XLN_MIN_DISK_FREE_BYTES: '1',
         }),
         encoding: 'utf8',
@@ -439,7 +445,7 @@ describe('test artifact cleanup', () => {
       childProbe,
     ], {
       cwd: repoRoot,
-      env: independentTestRunEnv({
+      env: independentTestRunEnv(root, {
         XLN_TEST_LEASE_PROBE_ROOT: root,
       }),
       stdio: 'ignore',
@@ -457,7 +463,7 @@ describe('test artifact cleanup', () => {
         cleanupPath,
         `--cwd=${root}`,
         '--reason=live-contender',
-      ], { cwd: repoRoot, env: independentTestRunEnv({}), encoding: 'utf8' });
+      ], { cwd: repoRoot, env: independentTestRunEnv(root, {}), encoding: 'utf8' });
       expect(liveContender.status).toBe(1);
       expect(liveContender.stderr).toContain(`TEST_ARTIFACT_CLEANUP_ACTIVE_RUN:pid=${childPid}`);
       expect(existsSync(activeArtifact)).toBe(true);
@@ -469,7 +475,7 @@ describe('test artifact cleanup', () => {
         cleanupPath,
         `--cwd=${root}`,
         '--reason=dead-child-recovery',
-      ], { cwd: repoRoot, env: independentTestRunEnv({}), encoding: 'utf8' });
+      ], { cwd: repoRoot, env: independentTestRunEnv(root, {}), encoding: 'utf8' });
       expect({ status: deadOwnerRecovery.status, stderr: deadOwnerRecovery.stderr }).toEqual({
         status: 0,
         stderr: '',
@@ -506,7 +512,7 @@ describe('test artifact cleanup', () => {
         childProbe,
       ], {
         cwd: repoRoot,
-        env: independentTestRunEnv({ XLN_TEST_LEASE_PROBE_ROOT: root }),
+        env: independentTestRunEnv(root, { XLN_TEST_LEASE_PROBE_ROOT: root }),
         stdio: 'ignore',
       });
       let childPid = 0;

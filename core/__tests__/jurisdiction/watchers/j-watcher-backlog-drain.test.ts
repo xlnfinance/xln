@@ -1,5 +1,4 @@
 import { afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -32,6 +31,7 @@ import {
 } from '../../../storage/wal/snapshot';
 import { attachLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
 import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
+import { cleanupTestProcesses, spawnTestProcess } from '../../helpers/test-process';
 
 const CHAIN_ID = 31_337;
 const RUNTIME_SEED = 'j-watcher-backlog-drain';
@@ -44,9 +44,7 @@ const singleSignerEncodedBoard = (privateKey: Uint8Array): string =>
   encodeSingleSignerBoard(new ethers.Wallet(ethers.hexlify(privateKey)).address);
 
 type ManagedAnvil = {
-  child: ChildProcessWithoutNullStreams;
   rpcUrl: string;
-  tmpRoot: string;
   output: string;
 };
 
@@ -68,6 +66,7 @@ type RpcGateProxy = {
 };
 
 let managedAnvil: ManagedAnvil | null = null;
+let anvilTmpRoot: string | null = null;
 let adapter: JAdapter | null = null;
 let rpcProxy: RpcGateProxy | null = null;
 
@@ -109,7 +108,8 @@ const waitForRpc = async (managed: ManagedAnvil): Promise<void> => {
 const startAnvil = async (): Promise<ManagedAnvil> => {
   const port = await reservePort();
   const tmpRoot = await mkdtemp(join(tmpdir(), 'xln-j-watcher-backlog-'));
-  const child = spawn(
+  anvilTmpRoot = tmpRoot;
+  const child = spawnTestProcess(
     'anvil',
     [
       '--host',
@@ -129,9 +129,7 @@ const startAnvil = async (): Promise<ManagedAnvil> => {
     { env: { ...process.env, TMPDIR: tmpRoot } },
   );
   const managed: ManagedAnvil = {
-    child,
     rpcUrl: `http://127.0.0.1:${port}`,
-    tmpRoot,
     output: '',
   };
   // Anvil emits RPC/mining logs even with --silent. An unread stdout pipe
@@ -261,19 +259,6 @@ const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
   };
 };
 
-const stopAnvil = async (managed: ManagedAnvil): Promise<void> => {
-  if (managed.child.exitCode === null && managed.child.signalCode === null) {
-    const exited = new Promise<void>(resolve => managed.child.once('exit', () => resolve()));
-    managed.child.kill('SIGTERM');
-    const graceful = await Promise.race([exited.then(() => true), Bun.sleep(3_000).then(() => false)]);
-    if (!graceful && managed.child.exitCode === null && managed.child.signalCode === null) {
-      managed.child.kill('SIGKILL');
-      await exited;
-    }
-  }
-  await rm(managed.tmpRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-};
-
 afterEach(async () => {
   const cleanupErrors: unknown[] = [];
   try {
@@ -287,13 +272,15 @@ afterEach(async () => {
     cleanupErrors.push(error);
   }
   try {
-    if (managedAnvil) await stopAnvil(managedAnvil);
+    await cleanupTestProcesses();
+    if (anvilTmpRoot) await rm(anvilTmpRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   } catch (error) {
     cleanupErrors.push(error);
   }
   adapter = null;
   rpcProxy = null;
   managedAnvil = null;
+  anvilTmpRoot = null;
   if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, 'J_WATCHER_BACKLOG_CLEANUP_FAILED');
 });
 
