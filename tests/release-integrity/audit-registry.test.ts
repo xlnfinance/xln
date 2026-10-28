@@ -153,6 +153,50 @@ describe('canonical audit registry', () => {
     }
   });
 
+  test('EVM fee authorization and wallet controls have canonical audit owners', () => {
+    const runtime = REGISTRY.modules.find(module => module.id === 'runtime-pipeline')!;
+    const wallet = REGISTRY.modules.find(module => module.id === 'wallet-frontend')!;
+    const authorization = REGISTRY.invariants.find(
+      invariant => invariant.id === 'runtime-pipeline.payer-authorized-evm-replacement',
+    );
+    const durableStatus = REGISTRY.invariants.find(
+      invariant => invariant.id === 'wallet-frontend.durable-status-truth',
+    )!;
+    const owns = (path: string, globs: readonly string[]): boolean =>
+      globs.some(glob => matchesAuditGlob(path, glob));
+    expect(authorization).toBeDefined();
+    for (const path of [
+      'core/runtime/j-submit/evm/evm-fee-authorization.ts',
+      'core/runtime/j-submit/evm/evm-fee-control.ts',
+      'core/runtime/j-submit/evm/evm-fees.ts',
+      'core/runtime/j-submit/evm/evm-replacement.ts',
+      'rscore/crates/runtime/src/j_submit/prepared/evm/evm_fee.rs',
+      'rscore/fixtures/evm-fee-authorization-v1.json',
+    ]) {
+      expect(owns(path, REGISTRY.scope.sourceGlobs)).toBe(true);
+      expect(owns(path, runtime.sourceGlobs)).toBe(true);
+      expect(owns(path, authorization!.sourceGlobs)).toBe(true);
+    }
+    for (const path of [
+      'core/__tests__/jurisdiction/submission/evm/evm-fee-replacement.test.ts',
+      'core/__tests__/jurisdiction/submission/recovery/j-submit-prepared-reconciliation.test.ts',
+      'rscore/crates/runtime/src/j_submit/prepared/evm/evm_fee_tests.rs',
+    ]) {
+      expect(owns(path, REGISTRY.scope.testGlobs)).toBe(true);
+      expect(owns(path, runtime.testGlobs)).toBe(true);
+      expect(owns(path, authorization!.testGlobs)).toBe(true);
+    }
+    for (const path of [
+      'ui/src/components/BatchFeeWarning.tsx',
+      'ui/src/components/PendingBatch.tsx',
+      'ui/src/runtime/financial/batch-fees.ts',
+    ]) {
+      expect(owns(path, REGISTRY.scope.sourceGlobs)).toBe(true);
+      expect(owns(path, wallet.sourceGlobs)).toBe(true);
+      expect(owns(path, durableStatus.sourceGlobs)).toBe(true);
+    }
+  });
+
   test('coverage requires every current evidence class and becomes stale on fingerprint drift', () => {
     const target = REGISTRY.invariants.find(invariant => invariant.id === 'api-auth-custody.secret-confinement')!;
     const currentFingerprint = `sha256:${'a'.repeat(64)}`;

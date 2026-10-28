@@ -7,7 +7,7 @@
 //! watcher ingress may retire a sealed batch.
 
 mod calldata;
-#[path = "prepared/evm_fee.rs"]
+#[path = "prepared/evm/evm_fee.rs"]
 pub(crate) mod evm_fee;
 #[path = "prepared/financial_replacement.rs"]
 mod financial_replacement;

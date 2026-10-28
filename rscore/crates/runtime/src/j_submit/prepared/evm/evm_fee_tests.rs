@@ -156,7 +156,7 @@ fn repeated_underpriced_replacements_stop_at_payer_maximum() {
 #[test]
 fn payer_authorization_matches_typescript_bytes_and_rejects_changed_authority() {
     let value: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../../fixtures/evm-fee-authorization-v1.json"
+        "../../../../../../fixtures/evm-fee-authorization-v1.json"
     ))
     .unwrap();
     let text = |key| value[key].as_str().unwrap();

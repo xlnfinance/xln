@@ -16,14 +16,27 @@
       "frontend/src/lib/stores/network/paymentSpotlightStore.ts",
       "frontend/src/lib/view/View.svelte",
       "frontend/src/lib/stores/xlnStore.ts",
-      "frontend/src/lib/utils/xlnInvoice.ts"
+      "frontend/src/lib/utils/xlnInvoice.ts",
+      "rscore/crates/runtime/src/j_submit/prepared/evm/evm_fee.rs",
+      "rscore/crates/runtime/src/j_submit/prepared/financial_replacement.rs",
+      "rscore/crates/runtime/src/j_submit/prepared/prepared_lifecycle.rs",
+      "rscore/crates/runtime/src/j_submit/prepared/prepared_wire.rs",
+      "rscore/crates/runtime/src/j_submit/lifecycle.rs",
+      "rscore/crates/runtime/src/j_submit/submission.rs",
+      "rscore/fixtures/evm-fee-authorization-v1.json",
+      "ui/src/components/BatchFeeWarning.tsx",
+      "ui/src/components/PendingBatch.tsx",
+      "ui/src/runtime/financial/batch-fees.ts"
     ],
     "testGlobs": [
       "core/__tests__/**/*.ts",
       "core/scenarios/**/*.ts",
       "jurisdictions/test/**/*",
       "tests/**/*.ts",
-      "frontend/tests/**/*.ts"
+      "frontend/tests/**/*.ts",
+      "rscore/crates/runtime/src/j_submit/prepared/evm/evm_fee_tests.rs",
+      "rscore/crates/runtime/src/j_submit/prepared/financial_replacement_tests.rs",
+      "rscore/crates/runtime/src/j_submit/prepared/prepared_lifecycle_tests.rs"
     ],
     "exclusions": [
       {
@@ -307,11 +320,23 @@
       "structuralDebt": 2,
       "sourceGlobs": [
         "core/runtime.ts",
-        "core/runtime/**/*.ts"
+        "core/runtime/**/*.ts",
+        "rscore/crates/runtime/src/j_submit/prepared/evm/evm_fee.rs",
+        "rscore/crates/runtime/src/j_submit/prepared/financial_replacement.rs",
+        "rscore/crates/runtime/src/j_submit/prepared/prepared_lifecycle.rs",
+        "rscore/crates/runtime/src/j_submit/prepared/prepared_wire.rs",
+        "rscore/crates/runtime/src/j_submit/lifecycle.rs",
+        "rscore/crates/runtime/src/j_submit/submission.rs",
+        "rscore/fixtures/evm-fee-authorization-v1.json"
       ],
       "testGlobs": [
         "core/__tests__/**/*runtime*",
-        "core/scenarios/**/*.ts"
+        "core/scenarios/**/*.ts",
+        "core/__tests__/jurisdiction/submission/evm/evm-fee-replacement.test.ts",
+        "core/__tests__/jurisdiction/submission/recovery/j-submit-prepared-reconciliation.test.ts",
+        "rscore/crates/runtime/src/j_submit/prepared/evm/evm_fee_tests.rs",
+        "rscore/crates/runtime/src/j_submit/prepared/financial_replacement_tests.rs",
+        "rscore/crates/runtime/src/j_submit/prepared/prepared_lifecycle_tests.rs"
       ],
       "dependencies": [
         "entity-consensus",
@@ -397,7 +422,10 @@
         "frontend/src/lib/stores/network/paymentTerminalMonitor.ts",
         "frontend/src/lib/view/View.svelte",
         "frontend/src/lib/stores/xlnStore.ts",
-        "frontend/src/lib/utils/xlnInvoice.ts"
+        "frontend/src/lib/utils/xlnInvoice.ts",
+        "ui/src/components/BatchFeeWarning.tsx",
+        "ui/src/components/PendingBatch.tsx",
+        "ui/src/runtime/financial/batch-fees.ts"
       ],
       "testGlobs": [
         "frontend/tests/brainvault-*.spec.ts",
@@ -957,6 +985,39 @@
       ]
     },
     {
+      "id": "runtime-pipeline.payer-authorized-evm-replacement",
+      "moduleId": "runtime-pipeline",
+      "title": "EVM replacements preserve the sealed financial intent, obey exact payer-authorized fee ceilings, and retain signed siblings through recovery.",
+      "importance": 100,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ],
+      "sourceGlobs": [
+        "core/runtime/j-submit/evm/*.ts",
+        "core/runtime/j-submit/preparation-driver.ts",
+        "core/runtime/j-submit/prepared-transaction.ts",
+        "rscore/crates/runtime/src/j_submit/prepared/evm/evm_fee.rs",
+        "rscore/crates/runtime/src/j_submit/prepared/financial_replacement.rs",
+        "rscore/crates/runtime/src/j_submit/prepared/prepared_lifecycle.rs",
+        "rscore/crates/runtime/src/j_submit/prepared/prepared_wire.rs",
+        "rscore/crates/runtime/src/j_submit/lifecycle.rs",
+        "rscore/crates/runtime/src/j_submit/submission.rs",
+        "rscore/fixtures/evm-fee-authorization-v1.json"
+      ],
+      "testGlobs": [
+        "core/__tests__/jurisdiction/submission/evm/evm-fee-replacement.test.ts",
+        "core/__tests__/jurisdiction/submission/recovery/j-submit-prepared-reconciliation.test.ts",
+        "rscore/crates/runtime/src/j_submit/prepared/evm/evm_fee_tests.rs",
+        "rscore/crates/runtime/src/j_submit/prepared/financial_replacement_tests.rs",
+        "rscore/crates/runtime/src/j_submit/prepared/prepared_lifecycle_tests.rs"
+      ]
+    },
+    {
       "id": "runtime-pipeline.expected-rejection-isolation",
       "moduleId": "runtime-pipeline",
       "title": "A business-invalid command atomically rolls back its candidate, returns an explicit rejection, and never halts or partially mutates unrelated Runtime work.",
@@ -1104,7 +1165,10 @@
         "frontend/src/lib/stores/network/paymentTerminalMonitor.ts",
         "frontend/src/lib/view/View.svelte",
         "frontend/src/lib/stores/xlnStore.ts",
-        "frontend/src/lib/utils/xlnInvoice.ts"
+        "frontend/src/lib/utils/xlnInvoice.ts",
+        "ui/src/components/BatchFeeWarning.tsx",
+        "ui/src/components/PendingBatch.tsx",
+        "ui/src/runtime/financial/batch-fees.ts"
       ],
       "testGlobs": [
         "frontend/tests/brainvault-*.spec.ts",
