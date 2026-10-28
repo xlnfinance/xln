@@ -286,6 +286,7 @@ export const registerPendingCommittedJOutbox = (env: RuntimeReplica, additions: 
 /** Transfer the entire competing-wire set, including explicit rebroadcast generations. */
 const takePendingJAttemptWire = (env: RuntimeReplica, tx: RetryJSubmitTx): Partial<NonNullable<BatchJTx['data']['runtimeSubmitAttempt']>> => {
   let wire: Partial<NonNullable<BatchJTx['data']['runtimeSubmitAttempt']>> = {};
+  let matched = false;
   if (!env.infrastructure?.pendingCommittedJOutbox) return wire;
   env.infrastructure.pendingCommittedJOutbox = env.infrastructure.pendingCommittedJOutbox.flatMap(input => {
     const jTxs = input.jTxs.filter(pending => {
@@ -293,9 +294,12 @@ const takePendingJAttemptWire = (env: RuntimeReplica, tx: RetryJSubmitTx): Parti
         || normalizeSubmitId(pending.entityId) !== normalizeSubmitId(tx.data.entityId)
         || normalizeSubmitId(pending.data.signerId) !== normalizeSubmitId(tx.data.signerId)
         || normalizeSubmitId(pending.data.batchHash) !== normalizeSubmitId(tx.data.batchHash)
-        || pending.data.entityNonce !== tx.data.entityNonce || !pending.data.runtimeSubmitAttempt?.rawTransaction) return true;
+        || pending.data.entityNonce !== tx.data.entityNonce || !pending.data.runtimeSubmitAttempt
+        || (!completedJSubmitAttempt(env, pending) && pending.data.batchGeneration === tx.data.batchGeneration)) return true;
+      if (matched) throw new Error(`J_SUBMIT_PENDING_ATTEMPT_DUPLICATED:${pending.data.runtimeSubmitAttempt.attemptId}`);
+      matched = true;
       const { rawTransaction, competingTransactions, feeBumpedAt, requestedGasBumpBps, evmFeeLimits } = pending.data.runtimeSubmitAttempt;
-      wire = { rawTransaction, ...(evmFeeLimits ? { evmFeeLimits: { ...evmFeeLimits } } : {}), ...(competingTransactions ? { competingTransactions } : {}),
+      if (rawTransaction) wire = { rawTransaction, ...(evmFeeLimits ? { evmFeeLimits: { ...evmFeeLimits } } : {}), ...(competingTransactions ? { competingTransactions } : {}),
         feeBumpedAt: feeBumpedAt ?? pending.data.runtimeSubmitAttempt.attemptedAt, requestedGasBumpBps: pending.data.batchGeneration === tx.data.batchGeneration ? (requestedGasBumpBps ?? 0) : 0 };
       return false;
     });

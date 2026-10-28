@@ -218,6 +218,51 @@ const canonicalAttempt = async () => {
   return { ...fixture, batch, attempt, raw };
 };
 
+for (const lateCopy of [false, true]) test(`wire-less transient failures retry with only the successor before and after restoreFeeAttempt (late copy: ${lateCopy})`, async () => {
+  const { env, jOutbox } = await commitJSubmitAttempt();
+  let current = jOutbox[0]!.jTxs[0]!;
+  for (let cycle = 0; cycle < 2; cycle++) {
+    if (current.type !== 'batch' || !current.data.runtimeSubmitAttempt) throw new Error('attempt missing');
+    expect(current.data.runtimeSubmitAttempt.rawTransaction).toBeUndefined();
+    await applyRuntimeTx(env, makeJSubmitResultRuntimeTx(current, jurisdictionName, 'transientFailure', {
+      message: 'RPC gas estimation unavailable before prepareOnly',
+    }), { isReplay: true });
+    // Result commit removes unsigned work; a late committed outbox copy must also be retired.
+    if (lateCopy) registerPendingCommittedJOutbox(env, [{ jurisdictionName, jTxs: [structuredClone(current)] }]);
+    env.state.timestamp += 60001;
+    const before = buildStorageRuntimeMachineSnapshot(env);
+    restoreFeeAttempt(env);
+    expect(buildStorageRuntimeMachineSnapshot(env)).toEqual(before);
+    const [retry] = collectDueJSubmitRuntimeTxs(env, env.state.timestamp);
+    if (retry?.type !== 'retryJSubmit') throw new Error('retry missing');
+    const successor = await applyRuntimeTx(env, retry, { isReplay: true });
+    registerPendingCommittedJOutbox(env, successor);
+    expect(env.infrastructure!.pendingCommittedJOutbox).toEqual(successor);
+    expect(successor).toHaveLength(1);
+    expect(successor[0]!.jTxs).toHaveLength(1);
+    const committed = buildStorageRuntimeMachineSnapshot(env);
+    restoreFeeAttempt(env);
+    expect(buildStorageRuntimeMachineSnapshot(env)).toEqual(committed);
+    current = env.infrastructure!.pendingCommittedJOutbox![0]!.jTxs[0]!;
+    expect(current.type === 'batch' && current.data.runtimeSubmitAttempt?.attemptNumber).toBe(cycle + 2);
+  }
+});
+
+test('retry rejects a second matching completed wire-less attempt', async () => {
+  const { env, jOutbox } = await commitJSubmitAttempt();
+  const batch = jOutbox[0]!.jTxs[0]!;
+  if (batch.type !== 'batch') throw new Error('batch missing');
+  await applyRuntimeTx(env, makeJSubmitResultRuntimeTx(batch, jurisdictionName, 'transientFailure', {
+    message: 'RPC gas estimation unavailable before prepareOnly',
+  }), { isReplay: true });
+  registerPendingCommittedJOutbox(env, jOutbox);
+  env.infrastructure!.pendingCommittedJOutbox!.push(structuredClone(jOutbox[0]!));
+  env.state.timestamp += 60001;
+  const [retry] = collectDueJSubmitRuntimeTxs(env, env.state.timestamp);
+  if (retry?.type !== 'retryJSubmit') throw new Error('retry missing');
+  await expect(applyRuntimeTx(env, retry, { isReplay: true })).rejects.toThrow('J_SUBMIT_PENDING_ATTEMPT_DUPLICATED');
+});
+
 test('replacement fsync boundary retains every signed sibling through replay and retry', async () => {
   const { env, replica, jOutbox, batch, attempt, raw } = await canonicalAttempt();
   env.state.timestamp += 180000;

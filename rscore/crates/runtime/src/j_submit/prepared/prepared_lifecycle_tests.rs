@@ -3,8 +3,13 @@ use crate::j_submit::{
     Eip1559Transaction, RetryJSubmitData, SealedJBatch, build_j_submit_attempt_id,
 };
 
-#[test]
-fn prepared_signed_batch_is_exact_idempotent_and_rejects_well_signed_wrong_intent() {
+fn unsigned_prepared_attempt() -> (
+    crate::RuntimeReplica,
+    DurableJSubmitAttempt,
+    RetryJSubmitData,
+    Eip1559Transaction,
+    [u8; 32],
+) {
     let mut replica = crate::machine::tests::replica(crate::RuntimeLimits::default()).unwrap();
     let key = xln_rscore_crypto::derive_signer_key(
         "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
@@ -93,6 +98,60 @@ fn prepared_signed_batch_is_exact_idempotent_and_rejects_well_signed_wrong_inten
         value: 0.into(),
         data: super::super::submission::process_batch_calldata(&encoded, &chain_hanko, 1.into()),
     };
+    (replica, attempt, retry, tx, key)
+}
+
+#[test]
+fn wire_less_transient_failures_retry_with_only_the_successor_after_restore() {
+    let (mut replica, mut current, retry, _, _) = unsigned_prepared_attempt();
+    for cycle in 0..2 {
+        assert!(current.raw_transaction.is_none());
+        super::super::apply_j_submit_result(
+            &mut replica,
+            &super::super::JSubmitResultData {
+                entity_id: retry.entity_id.clone(),
+                signer_id: retry.signer_id.clone(),
+                jurisdiction_name: retry.jurisdiction_name.clone(),
+                batch_hash: retry.batch_hash.clone(),
+                entity_nonce: retry.entity_nonce,
+                batch_generation: retry.batch_generation,
+                attempt_id: current.attempt_id.clone(),
+                attempt_number: current.attempt_number,
+                attempted_at: current.attempted_at,
+                outcome: super::super::JSubmitResultOutcome::TransientFailure,
+                message: Some("RPC gas estimation unavailable before prepareOnly".into()),
+                adapter_failure: None,
+                transaction_hash: None,
+            },
+            current.attempted_at + 1,
+        )
+        .unwrap();
+        // Result commit removes unsigned work; reconcile a late committed copy too.
+        infrastructure_pending_mut(&mut replica.durable)
+            .unwrap()
+            .push(attempt_value(&current).unwrap());
+        let successor =
+            super::super::apply_j_submit_retry(&mut replica, &retry, current.attempted_at + 60_001)
+                .unwrap()
+                .unwrap();
+        assert_eq!(successor.attempt_number, cycle + 2);
+        let committed = replica.durable.infrastructure().clone();
+        let restored: Value =
+            serde_json::from_slice(&serde_json::to_vec(&committed).unwrap()).unwrap();
+        assert_eq!(restored, committed);
+        assert_eq!(
+            super::super::decode_pending_j_submit_attempts(&restored).unwrap(),
+            vec![successor.clone()]
+        );
+        current = successor;
+    }
+}
+
+#[test]
+fn prepared_signed_batch_is_exact_idempotent_and_rejects_well_signed_wrong_intent() {
+    let (mut replica, attempt, retry, tx, key) = unsigned_prepared_attempt();
+    let entity = attempt.sealed.entity_id;
+    let to = tx.to;
     struct Market;
     impl crate::j_watcher::JsonRpc for Market {
         fn call(&self, method: &str, _: Value) -> Result<Value, crate::j_watcher::JWatcherError> {
