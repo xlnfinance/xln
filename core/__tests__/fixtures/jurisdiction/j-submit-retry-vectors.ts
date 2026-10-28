@@ -1,5 +1,6 @@
 // The canonical transition generates expectations at test time; no golden JSON is stored.
 import { ethers } from 'ethers';
+import { safeStringify } from '../../../protocol/serialization';
 import { makeJSubmitDurabilityFixture, jurisdictionName } from './j-submit-durability-fixture';
 import { applyRuntimeTx } from '../../../runtime/tx/tx-handlers';
 import { initialEvmFeeLimits } from '../../../runtime/j-submit/evm/evm-fee-authorization';
@@ -35,4 +36,4 @@ for (const signed of [false, true]) {
   vectors.push({ signed, metadata: { ...(feeBumpedAt === undefined ? {} : { feeBumpedAt }),
     ...(requestedGasBumpBps === undefined ? {} : { requestedGasBumpBps }) } });
 }
-console.log(JSON.stringify(vectors));
+console.log(safeStringify(vectors));
