@@ -4711,6 +4711,7 @@ fn apply_salvage(
             ..Default::default()
         });
     }
+    let binary = binary.to_lowercase();
     let target_hub = nested_text(&route, "target", "entityId")
         .map(normalized)
         .ok_or_else(|| invalid(tx.kind, "TARGET_HUB_MISSING"))?;
@@ -4721,7 +4722,7 @@ fn apply_salvage(
     // Ported peer evidence is not committed authority. Invalid binary/ratio
     // must leave the route intact, exactly like the TS salvage handler.
     let verified =
-        match xln_rscore_engine::verify_hash_ladder_binary(full_hash, partial_root, binary) {
+        match xln_rscore_engine::verify_hash_ladder_binary(full_hash, partial_root, &binary) {
             Ok(ratio) => ratio,
             Err(detail) => {
                 return Ok(CrossJurisdictionApplyResult {
@@ -4734,6 +4735,14 @@ fn apply_salvage(
                 });
             }
         };
+    if verified == 0 {
+        return Ok(CrossJurisdictionApplyResult {
+            events: vec![EntityFrameEvent::Status {
+                message: format!("🌉 Cross-j reveal port ignored for {route_id}: zero fill"),
+            }],
+            ..Default::default()
+        });
+    }
     // Verification returns a uint16 ratio in a u64 container, exactly
     // representable as a JS Number; the claim never enters committed state.
     if verified as f64 != claimed_ratio {
@@ -4753,7 +4762,7 @@ fn apply_salvage(
             ..Default::default()
         });
     }
-    let witness = salvage_witness(binary, verified, tx.kind)?;
+    let witness = salvage_witness(&binary, verified, tx.kind)?;
     let active_dispute = account_views
         .get(&target_hub)
         .and_then(|view| view.dispute.as_ref())

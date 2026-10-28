@@ -211,6 +211,44 @@ test('review 12: forged salvage ratio is absorbed without state changes', async 
   expect(result.newState.crossJurisdictionSwaps!.get(route.orderId)).toEqual(route);
 });
 
+test('q48 salvage: uppercase-prefix full evidence waits for the target dispute clock', async () => {
+  const { state } = context('targetUser');
+  const route = resting();
+  state.crossJurisdictionSwaps!.set(route.orderId, route);
+  const binary = buildCrossJurisdictionPullReveal(route, 65535, deriveCrossJurisdictionPrivateSeed('review-seed', route)).binary;
+  expect(state.accounts.get(route.target.entityId)!.activeDispute).toBeUndefined();
+  const before = computeEntityConsensusSectionDigestsCold(state);
+  const result = await handleCrossJurisdictionSalvageEntityTx(state, { type: 'crossJurisdictionSalvage', data: { routeId: route.orderId, binary: binary.toUpperCase(), fillRatio: 65535 } });
+  expect(result.outputs).toEqual([]);
+  expect(result.newState.crossJurisdictionSwaps!.get(route.orderId)).toEqual({
+    ...route, updatedAt: state.timestamp, pendingTargetRegistryReveal: {
+      fillRatio: 65535, fullSecret: binary,
+      reveals: Array.from({ length: 4 }, () => `0x${'00'.repeat(32)}`),
+    },
+  });
+  expect(result.newState.jBatchState).toEqual(state.jBatchState);
+  expect(computeEntityConsensusSectionDigestsCold(state)).toEqual(before);
+  expect(readEntityFrameEvents(result.newState)).toEqual([
+    { type: 'status', message: `⏳ Cross-j reveal port ${route.orderId}: waiting for the target dispute clock` },
+  ]);
+});
+
+test('q48 salvage: raw uppercase empty prefix is zero fill without state mutation', async () => {
+  const { state } = context('targetUser');
+  const route = resting();
+  state.crossJurisdictionSwaps!.set(route.orderId, route);
+  expect(state.accounts.get(route.target.entityId)!.activeDispute).toBeUndefined();
+  const before = computeEntityConsensusSectionDigestsCold(state);
+  const result = await handleCrossJurisdictionSalvageEntityTx(state, { type: 'crossJurisdictionSalvage', data: { routeId: route.orderId, binary: '0X', fillRatio: 65535 } });
+  expect(result.outputs).toEqual([]);
+  expect(result.newState.crossJurisdictionSwaps!.get(route.orderId)).toEqual(route);
+  expect(computeEntityConsensusSectionDigestsCold(result.newState)).toEqual(before);
+  expect(computeEntityConsensusSectionDigestsCold(state)).toEqual(before);
+  expect(readEntityFrameEvents(result.newState)).toEqual([
+    { type: 'status', message: `🌉 Cross-j reveal port ignored for ${route.orderId}: zero fill` },
+  ]);
+});
+
 for (const status of ['resting', 'settled'] as const) {
   for (const missingPull of [false, true]) {
     test(`q46 salvage: empty binary on owned ${status} route with ${missingPull ? 'missing' : 'valid'} target pull`, async () => {

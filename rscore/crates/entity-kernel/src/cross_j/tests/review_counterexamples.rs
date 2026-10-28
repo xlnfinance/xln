@@ -606,6 +606,80 @@ fn review_3_amend_pending_ratio_prevents_stale_admission() {
 }
 
 #[test]
+fn q48_salvage_uppercase_prefix_full_evidence_waits_for_target_dispute_clock() {
+    let (mut state, _, command) = salvage_setup();
+    let mut route = state
+        .cross_jurisdiction_swaps
+        .as_ref()
+        .unwrap()
+        .get("order-1")
+        .unwrap()
+        .clone();
+    set(&mut route, "status", string("resting")).unwrap();
+    stored(&mut state, route.clone());
+    let mut data = command.frame_data().unwrap().clone();
+    let binary = text(&data, "binary").unwrap().to_string();
+    set(&mut data, "binary", string(&binary.to_uppercase())).unwrap();
+    let command = projected(command.kind, data).unwrap();
+    let before = state.clone();
+    let result = apply_salvage(&mut state, &BTreeMap::new(), &command).unwrap();
+    assert!(result.outputs.is_empty());
+    assert!(result.proposal_work.is_empty());
+    assert_eq!(
+        result.events,
+        vec![EntityFrameEvent::Status {
+            message: "⏳ Cross-j reveal port order-1: waiting for the target dispute clock".into(),
+        }]
+    );
+    let pending = obj(vec![
+        ("fillRatio", number(65535, command.kind, "RATIO").unwrap()),
+        ("fullSecret", string(&binary)),
+        (
+            "reveals",
+            CanonicalValue::Array(vec![string(&format!("0x{}", "00".repeat(32))); 4]),
+        ),
+    ]);
+    set(&mut route, "pendingTargetRegistryReveal", pending).unwrap();
+    set(
+        &mut route,
+        "updatedAt",
+        number(state.timestamp, command.kind, "TIMESTAMP").unwrap(),
+    )
+    .unwrap();
+    let mut expected = before;
+    stored(&mut expected, route);
+    assert_eq!(state, expected);
+}
+
+#[test]
+fn q48_salvage_raw_uppercase_empty_prefix_is_zero_fill_without_state_mutation() {
+    let (mut state, _, command) = salvage_setup();
+    let mut route = state
+        .cross_jurisdiction_swaps
+        .as_ref()
+        .unwrap()
+        .get("order-1")
+        .unwrap()
+        .clone();
+    set(&mut route, "status", string("resting")).unwrap();
+    stored(&mut state, route);
+    let mut data = command.frame_data().unwrap().clone();
+    set(&mut data, "binary", string("0X")).unwrap();
+    let command = projected(command.kind, data).unwrap();
+    let before = state.clone();
+    let result = apply_salvage(&mut state, &BTreeMap::new(), &command).unwrap();
+    assert_eq!(state, before);
+    assert!(result.outputs.is_empty());
+    assert!(result.proposal_work.is_empty());
+    assert_eq!(
+        result.events,
+        vec![EntityFrameEvent::Status {
+            message: "🌉 Cross-j reveal port ignored for order-1: zero fill".into(),
+        }]
+    );
+}
+
+#[test]
 fn q46_salvage_empty_binary_preserves_owned_route_validation_and_finality() {
     for status in ["resting", "settled"] {
         for missing_pull in [false, true] {
