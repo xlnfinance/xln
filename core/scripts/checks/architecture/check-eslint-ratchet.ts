@@ -15,9 +15,9 @@ type EslintFile = {
 };
 
 const DEBT_RULES = new Set(['import/no-duplicates', 'no-restricted-properties']);
-// Exact debt decreases when audited code is removed; new violations remain forbidden.
-const DEBT_COUNT = 317;
-const DEBT_SHA256 = '69684d4689ec32eda7eca938234f1a9d97e32888846fa58ccc05ca160d885360';
+// Exact debt decreases when audited code is removed (calldata recovery deleted); new violations remain forbidden.
+const DEBT_COUNT = 315;
+const DEBT_SHA256 = '2ce06efcf0394912defbc97dd5cf74e07401c8a3b395569fadeaf757634b7008';
 const outputPath = `${tmpdir()}/xln-eslint-${String(process.pid)}.json`;
 
 const result = spawnSync('bunx', ['eslint', 'core', '--ext', '.ts', '--format', 'json', '--output-file', outputPath], {
