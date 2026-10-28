@@ -164,6 +164,7 @@ struct FakeChain {
     blocks: BTreeMap<u64, Value>,
     receipts: BTreeMap<String, Value>,
     token_registry: Vec<Value>,
+    rpc_overrides: BTreeMap<String, Value>,
 }
 
 impl FakeRpcServer {
@@ -181,7 +182,31 @@ impl FakeRpcServer {
             )]),
             receipts: BTreeMap::new(),
             token_registry: vec![token_count_abi(0.into())],
+            rpc_overrides: BTreeMap::new(),
         })
+    }
+
+    pub(crate) fn submission_market() -> Self {
+        let server = Self::idle();
+        server.mutate(|chain| {
+            chain.rpc_overrides = BTreeMap::from([
+                (
+                    "eth_getBlockByNumber".into(),
+                    json!({"baseFeePerGas":"0x2f"}),
+                ),
+                ("eth_maxPriorityFeePerGas".into(), json!("0xb")),
+            ])
+        });
+        server
+    }
+
+    pub(crate) fn reject_underpriced(&self) {
+        self.mutate(|chain| {
+            chain.rpc_overrides.insert(
+                "eth_sendRawTransaction".into(),
+                json!({"error":{"code":-32000,"message":"replacement transaction underpriced"}}),
+            );
+        });
     }
 
     fn start(chain: FakeChain) -> Self {
@@ -240,7 +265,12 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<FakeChain>>) -> st
     };
     let payload: Value = serde_json::from_slice(&request).expect("fake rpc request json");
     let result = rpc_result(&state.lock().expect("fake chain lock"), &payload);
-    let response = json!({"jsonrpc":"2.0","id":1,"result":result}).to_string();
+    let response = if let Some(error) = result.get("error") {
+        json!({"jsonrpc":"2.0","id":1,"error":error})
+    } else {
+        json!({"jsonrpc":"2.0","id":1,"result":result})
+    }
+    .to_string();
     write!(
         stream,
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -293,7 +323,21 @@ fn read_http_body(stream: &mut TcpStream) -> std::io::Result<Option<Vec<u8>>> {
 }
 
 fn rpc_result(chain: &FakeChain, request: &Value) -> Value {
+    if let Some(result) = chain.rpc_overrides.get(request["method"].as_str().unwrap()) {
+        return result.clone();
+    }
     match request["method"].as_str().expect("rpc method") {
+        "eth_sendRawTransaction" => {
+            use sha3::{Digest, Keccak256};
+            let raw = hex::decode(
+                request["params"][0]
+                    .as_str()
+                    .unwrap()
+                    .trim_start_matches("0x"),
+            )
+            .unwrap();
+            json!(format!("0x{}", hex::encode(Keccak256::digest(raw))))
+        }
         "eth_chainId" => Value::String(format!("0x{:x}", chain.chain_id)),
         "eth_blockNumber" => Value::String(format!("0x{:x}", chain.head)),
         "eth_call" => {
@@ -369,6 +413,7 @@ fn fixture_chain() -> FakeChain {
         "logs":[first_log,settled_log],
     });
     FakeChain {
+        rpc_overrides: BTreeMap::new(),
         depository: hex_repeat(0x11, 20),
         chain_id: 31_337,
         head: 43,

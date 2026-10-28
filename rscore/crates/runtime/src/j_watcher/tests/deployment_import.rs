@@ -10,6 +10,7 @@ use crate::transport::{DirectRuntimeIngress, DirectRuntimeIngressConfig, derive_
 fn deployment_minus_one_import_first_poll_recovers_and_rechecks_uncertified_anchor() {
     for changed_anchor in [false, true] {
         let server = FakeRpcServer::start(FakeChain {
+            rpc_overrides: BTreeMap::new(),
             depository: hex_repeat(0x11, 20),
             chain_id: 31337,
             head: 2,

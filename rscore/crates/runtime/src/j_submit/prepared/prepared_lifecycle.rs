@@ -231,4 +231,4 @@ pub fn prune_completed_prepared_attempts(
 
 #[cfg(test)]
 #[path = "prepared_lifecycle_tests.rs"]
-mod tests;
+pub(crate) mod tests;

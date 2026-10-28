@@ -1515,6 +1515,7 @@ fn submit_committed_attempt(
     };
     let mut replacement_evidence = None;
     let mut prepared_record = None;
+    let mut broadcast_hash = None;
     let mut submit = || -> Result<crate::j_submit::JSubmitPreparation, JSubmitError> {
         let (rpc, config, _) =
             live_submit_context(replica, &attempt.jurisdiction_name, operator_private_key)?;
@@ -1612,6 +1613,9 @@ fn submit_committed_attempt(
                 replacement_evidence = Some(evidence);
                 return Ok(crate::j_submit::JSubmitPreparation::Prepared(next));
             }
+            // A node rejection belongs to this exact signed sibling. Keeping an
+            // older hash would hide "replacement underpriced" on the next retry.
+            broadcast_hash = Some(current_hash);
             return submitter
                 .broadcast_prepared(raw, &[])
                 .map(crate::j_submit::JSubmitPreparation::Resolved);
@@ -1725,6 +1729,7 @@ fn submit_committed_attempt(
         }
         Err(error) => {
             let mut result = base();
+            result.transaction_hash = broadcast_hash;
             let transient = matches!(error, JSubmitError::Rpc(_));
             let message = truncate_failure(error.to_string());
             result.outcome = if transient {
@@ -2755,6 +2760,10 @@ impl From<DurableRuntimeProcessorError> for ResidentRuntimeServiceError {
         Self::Processor(Box::new(error))
     }
 }
+
+#[cfg(test)]
+#[path = "live_replacement_tests.rs"]
+mod replacement_tests;
 
 #[cfg(test)]
 mod tests {

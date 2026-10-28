@@ -31,6 +31,8 @@ mod tron;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) use prepared_lifecycle::tests::unsigned_prepared_attempt;
 
 use thiserror::Error;
 

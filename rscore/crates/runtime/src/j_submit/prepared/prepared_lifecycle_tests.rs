@@ -43,7 +43,7 @@ fn assert_ts_retry_metadata(attempt: &DurableJSubmitAttempt, signed: bool) {
     );
 }
 
-fn unsigned_prepared_attempt() -> (
+pub(crate) fn unsigned_prepared_attempt() -> (
     crate::RuntimeReplica,
     DurableJSubmitAttempt,
     RetryJSubmitData,
