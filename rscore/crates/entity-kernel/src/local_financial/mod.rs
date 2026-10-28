@@ -26,6 +26,8 @@ pub(crate) use settlement::{ContinuationDisposition, continuation_probe, select_
 #[path = "semantic_parity/settlement_semantic_parity.rs"]
 mod settlement_semantic_parity;
 mod swap_requests;
+#[cfg(test)]
+pub(crate) mod test_fixtures;
 mod types;
 
 use std::collections::BTreeMap;

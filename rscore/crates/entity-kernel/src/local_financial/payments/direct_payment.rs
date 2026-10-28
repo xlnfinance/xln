@@ -113,6 +113,7 @@ pub(super) fn apply_direct_payment(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::local_financial::test_fixtures::account_view;
 
     fn entity(byte: &str) -> String {
         format!("0x{}", byte.repeat(32))
@@ -125,23 +126,12 @@ mod tests {
         BTreeMap::from([(
             peer.into(),
             super::super::types::LocalAccountFinancialView {
-                active: true,
-                owner_side: xln_rscore_engine::Side::Left,
                 owner_out_capacity: BTreeMap::from([(
                     xln_rscore_engine::TokenId::new(1).unwrap(),
                     BigInt::from(1) << 256_usize,
                 )]),
-                owner_peer_credit_limit: BTreeMap::new(),
-                settlement_workspace: None,
-                settlement_transition_pending: false,
                 settlement_execution: Err("unused".into()),
-                rebalance_active_quote: None,
-                htlc_locks: BTreeMap::new(),
-                pending_htlc_lock_ids: Default::default(),
-                pulls: BTreeMap::new(),
-                swap_offers: BTreeMap::new(),
-                pending_cross_pull_close_ids: Default::default(),
-                dispute: None,
+                ..account_view()
             },
         )])
     }
@@ -156,23 +146,12 @@ mod tests {
         let mut state = EntityStateSlice::empty(owner.clone(), 100);
         state.known_accounts.insert(peer.clone());
         let view = LocalAccountFinancialView {
-            active: true,
-            owner_side: xln_rscore_engine::Side::Left,
             owner_out_capacity: BTreeMap::from([(
                 xln_rscore_engine::TokenId::new(1).unwrap(),
                 0.into(),
             )]),
-            owner_peer_credit_limit: BTreeMap::new(),
-            settlement_workspace: None,
-            settlement_transition_pending: false,
             settlement_execution: Err("unused".into()),
-            rebalance_active_quote: None,
-            htlc_locks: BTreeMap::new(),
-            pending_htlc_lock_ids: Default::default(),
-            pulls: BTreeMap::new(),
-            swap_offers: BTreeMap::new(),
-            pending_cross_pull_close_ids: Default::default(),
-            dispute: None,
+            ..account_view()
         };
         let result = apply_local_entity_financial_txs(
             &mut state,

@@ -1,9 +1,12 @@
+#[path = "../src/local_financial/test_fixtures.rs"]
+mod test_fixtures;
+
 use num_bigint::BigInt;
 use std::collections::BTreeMap;
 use xln_rscore_entity_kernel::{
     CanonicalEntityTx, ConsensusMode, EntityCanonicalCollection, EntityConsensusConfig,
     EntityFrameAuthority, EntityLeaderState, EntityStateSlice, EntityTxKind,
-    apply_cross_jurisdiction_entity_txs,
+    LocalAccountFinancialView, apply_cross_jurisdiction_entity_txs,
 };
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
@@ -135,25 +138,12 @@ fn authority(signer: &str) -> EntityFrameAuthority {
     }
 }
 
-fn source_account_view() -> BTreeMap<String, xln_rscore_entity_kernel::LocalAccountFinancialView> {
-    use xln_rscore_entity_kernel::LocalAccountFinancialView;
+fn source_account_view() -> BTreeMap<String, LocalAccountFinancialView> {
     BTreeMap::from([(
         "source-hub".into(),
         LocalAccountFinancialView {
             dispute_config: xln_rscore_engine::AccountDisputeConfig::new(3600, 86400).unwrap(),
-            active: true,
-            owner_side: xln_rscore_engine::Side::Left,
-            owner_out_capacity: BTreeMap::new(),
-            owner_peer_credit_limit: BTreeMap::new(),
-            settlement_workspace: None,
-            settlement_transition_pending: false,
-            settlement_execution: Err("no settlement".into()),
-            rebalance_active_quote: None,
-            htlc_locks: BTreeMap::new(),
-            pulls: BTreeMap::new(),
-            swap_offers: BTreeMap::new(),
-            pending_cross_pull_close_ids: Default::default(),
-            dispute: None,
+            ..test_fixtures::account_view()
         },
     )])
 }

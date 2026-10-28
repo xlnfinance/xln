@@ -121,6 +121,7 @@ pub(super) fn apply(
 
 #[cfg(test)]
 mod tests {
+    use crate::local_financial::test_fixtures::account_view;
     use std::collections::BTreeMap;
 
     use num_bigint::BigInt;
@@ -168,20 +169,9 @@ mod tests {
             created_timestamp: 1,
         };
         let view = LocalAccountFinancialView {
-            active: true,
-            owner_side: Side::Left,
-            owner_out_capacity: BTreeMap::new(),
-            owner_peer_credit_limit: BTreeMap::new(),
-            settlement_workspace: None,
-            settlement_transition_pending: false,
             settlement_execution: Err("unused".into()),
-            rebalance_active_quote: None,
             htlc_locks: BTreeMap::from([(lock_id.clone(), lock)]),
-            pending_htlc_lock_ids: Default::default(),
-            pulls: BTreeMap::new(),
-            swap_offers: BTreeMap::new(),
-            pending_cross_pull_close_ids: Default::default(),
-            dispute: None,
+            ..account_view()
         };
         for case_only in [false, true] {
             if case_only {
@@ -237,21 +227,9 @@ mod tests {
         let views = BTreeMap::from([(
             peer.clone(),
             LocalAccountFinancialView {
-                dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
-                active: true,
-                owner_side: Side::Left,
-                owner_out_capacity: BTreeMap::new(),
-                owner_peer_credit_limit: BTreeMap::new(),
-                settlement_workspace: None,
-                settlement_transition_pending: false,
                 settlement_execution: Err("unused".into()),
-                rebalance_active_quote: None,
                 htlc_locks: BTreeMap::from([(lock_id.clone(), lock)]),
-                pending_htlc_lock_ids: Default::default(),
-                pulls: BTreeMap::new(),
-                swap_offers: BTreeMap::new(),
-                pending_cross_pull_close_ids: Default::default(),
-                dispute: None,
+                ..account_view()
             },
         )]);
         let mut changes = PaybookChanges::default();

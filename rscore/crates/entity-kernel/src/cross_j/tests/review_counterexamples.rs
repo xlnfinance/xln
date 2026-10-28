@@ -6,24 +6,7 @@ fn stored(state: &mut EntityStateSlice, route: CanonicalValue) {
         .unwrap();
 }
 
-pub(super) fn account_view() -> crate::local_financial::LocalAccountFinancialView {
-    crate::local_financial::LocalAccountFinancialView {
-        dispute_config: xln_rscore_engine::AccountDisputeConfig::new(10, 10).unwrap(),
-        active: true,
-        owner_side: xln_rscore_engine::Side::Left,
-        owner_out_capacity: BTreeMap::new(),
-        owner_peer_credit_limit: BTreeMap::new(),
-        settlement_workspace: None,
-        settlement_transition_pending: false,
-        settlement_execution: Err("no settlement".into()),
-        rebalance_active_quote: None,
-        htlc_locks: BTreeMap::new(),
-        pulls: BTreeMap::new(),
-        swap_offers: BTreeMap::new(),
-        pending_cross_pull_close_ids: BTreeSet::new(),
-        dispute: None,
-    }
-}
+pub(super) use crate::local_financial::test_fixtures::account_view;
 
 fn salvage_setup() -> (
     EntityStateSlice,
