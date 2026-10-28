@@ -2,6 +2,7 @@ mod decode;
 #[path = "payments/direct_payment.rs"]
 mod direct_payment;
 mod dispute;
+#[path = "dispute/dispute_arguments.rs"]
 mod dispute_arguments;
 pub(crate) use dispute::draft_prepared_dispute_start_after_removal;
 pub(crate) use dispute_arguments::{
