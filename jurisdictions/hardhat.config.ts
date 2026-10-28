@@ -16,7 +16,10 @@ const etherscanApiKey = process.env.ETHERSCAN_API_KEY || "";
 const stackManagerChainId = Number(process.env.XLN_STACK_MANAGER_CHAIN_ID || 0);
 
 const config = defineConfig({
-  plugins: [hardhatToolboxMochaEthers],
+  plugins: [hardhatToolboxMochaEthers, {
+    id: 'xln-local-solc',
+    hookHandlers: { solidity: () => import('./scripts/local-solc.ts') },
+  }],
   // test/foundry/**/*.sol is a Foundry-native suite (run via `forge test`), not
   // Hardhat's own Solidity-test feature. Hardhat 3 defaults `tests.solidity` to
   // the whole `test/` tree and auto-detects the sibling foundry.toml, which makes
@@ -32,7 +35,8 @@ const config = defineConfig({
   solidity: {
     version: '0.8.37',
     // Use the exact repository-pinned compiler; generation must not depend on a user cache.
-    path: new URL('../node_modules/solc/soljson.js', import.meta.url).pathname,
+    // Hardhat hashes this path into buildInfoId; keep checkout paths out of it.
+    path: '../node_modules/solc/soljson.js',
     settings: {
       evmVersion: 'osaka',
       optimizer: {

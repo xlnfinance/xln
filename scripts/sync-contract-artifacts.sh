@@ -20,6 +20,7 @@ hash_contract_inputs() {
       scripts/sync-contract-artifacts.sh \
       jurisdictions/contracts \
       jurisdictions/scripts/generate-typechain.cjs \
+      jurisdictions/scripts/local-solc.ts \
       jurisdictions/hardhat.config.ts \
       jurisdictions/package.json \
       jurisdictions/tsconfig.json \
