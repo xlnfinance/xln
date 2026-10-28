@@ -589,6 +589,262 @@ fn review_3_amend_pending_ratio_prevents_stale_admission() {
 }
 
 #[test]
+fn q50_salvage_active_dispute_has_exact_status_and_broadcast() {
+    for sent in [false, true] {
+        for full in [false, true] {
+            let (mut state, views, command) = salvage_setup();
+            let mut route = state
+                .cross_jurisdiction_swaps
+                .as_ref()
+                .unwrap()
+                .get("order-1")
+                .unwrap()
+                .clone();
+            set(&mut route, "status", string("resting")).unwrap();
+            stored(&mut state, route.clone());
+            let mut data = command.frame_data().unwrap().clone();
+            let binary = text(&data, "binary").unwrap().to_string();
+            set(&mut data, "binary", string(&binary.to_uppercase())).unwrap();
+            let command = projected(command.kind, data).unwrap();
+            let mut registration = target_registration(&state, 65535);
+            registration.witness = salvage_witness(&binary, 65535, command.kind).unwrap();
+            let batch = state.j_batch_state.get_or_insert_with(Default::default);
+            let mut unrelated = registration.clone();
+            unrelated.full_hash = [0; 32];
+            if full {
+                for i in 0..32 {
+                    unrelated.full_hash = [i; 32];
+                    batch
+                        .batch
+                        .hash_ladder_registrations
+                        .push(unrelated.clone());
+                }
+            }
+            if sent {
+                let mut sent_batch = crate::j_batch::JBatch::default();
+                sent_batch.hash_ladder_registrations.push(unrelated);
+                batch.status = crate::j_batch::JBatchStatus::Sent;
+                batch.sent_batch = Some(crate::j_batch::SentJBatch {
+                    batch: sent_batch,
+                    batch_hash: [0xab; 32],
+                    encoded_batch: vec![],
+                    entity_nonce: 1,
+                    first_submitted_at: 1000,
+                    last_submitted_at: 1000,
+                    submit_attempts: 1,
+                    fee_overrides: None,
+                    transaction_hash: None,
+                    last_failure: None,
+                    terminal_failure: None,
+                });
+            }
+            let before_batch = batch.clone();
+            let result = apply_salvage(&mut state, &views, &command).unwrap();
+            assert_eq!(result.outputs.len(), usize::from(!sent));
+            if !sent {
+                let output = &result.outputs[0];
+                assert_eq!(output.entity_id, state.entity_id);
+                assert_eq!(output.target_signer_id, None);
+                assert_eq!(output.entity_txs.len(), 1);
+                let LocalEntityOutputTx::Projected(tx) = &output.entity_txs[0] else {
+                    panic!("expected complete j_broadcast payload");
+                };
+                assert_eq!(tx.kind, EntityTxKind::JBroadcast);
+                assert_eq!(tx.frame_data(), Some(&obj(vec![])));
+            }
+            assert!(result.proposal_work.is_empty());
+            let message = if full {
+                "⏳ Cross-j reveal port order-1: deferred until the pending jBatch is acknowledged"
+            } else if sent {
+                "⏳ Cross-j reveal port order-1: queued behind the pending jBatch"
+            } else {
+                "🌉 Cross-j reveal port order-1: registering ratio 65535 on the target chain"
+            };
+            assert_eq!(
+                result.events,
+                vec![EntityFrameEvent::Status {
+                    message: message.into()
+                }],
+                "sent={sent}, full={full}"
+            );
+            let batch = state.j_batch_state.as_ref().unwrap();
+            assert_eq!(batch.sent_batch, before_batch.sent_batch);
+            assert_eq!(batch.auto_broadcast_draft, sent);
+            assert_eq!(
+                batch.batch.hash_ladder_registrations,
+                if full {
+                    before_batch.batch.hash_ladder_registrations
+                } else {
+                    vec![registration.clone()]
+                }
+            );
+            if full {
+                set(
+                    &mut route,
+                    "pendingTargetRegistryReveal",
+                    pending_witness_value(&registration.witness, command.kind).unwrap(),
+                )
+                .unwrap();
+                set(
+                    &mut route,
+                    "updatedAt",
+                    number(state.timestamp, command.kind, "TIMESTAMP").unwrap(),
+                )
+                .unwrap();
+            }
+            assert_eq!(
+                state
+                    .cross_jurisdiction_swaps
+                    .as_ref()
+                    .unwrap()
+                    .get("order-1"),
+                Some(&route)
+            );
+            let before_retry = state.clone();
+            let retry = apply_salvage(&mut state, &views, &command).unwrap();
+            assert!(retry.outputs.is_empty());
+            assert!(retry.events.is_empty());
+            assert!(retry.proposal_work.is_empty());
+            assert_eq!(state, before_retry);
+        }
+    }
+}
+
+#[test]
+fn q50_salvage_empty_route_id_preserves_status_precedence() {
+    for fill_ratio in [0, 65535] {
+        let (mut state, views, command) = salvage_setup();
+        let mut data = command.frame_data().unwrap().clone();
+        set(&mut data, "routeId", string("")).unwrap();
+        set(
+            &mut data,
+            "fillRatio",
+            number(fill_ratio, command.kind, "RATIO").unwrap(),
+        )
+        .unwrap();
+        let command = projected(command.kind, data).unwrap();
+        let before = state.clone();
+        let result = apply_salvage(&mut state, &views, &command).unwrap();
+        assert!(result.outputs.is_empty());
+        assert!(result.proposal_work.is_empty());
+        assert_eq!(
+            result.events,
+            vec![EntityFrameEvent::Status {
+                message: if fill_ratio == 0 {
+                    "🌉 Cross-j reveal port ignored for : invalid result"
+                } else {
+                    "🌉 Cross-j reveal port  skipped: route not owned here"
+                }
+                .into()
+            }]
+        );
+        assert_eq!(state, before);
+    }
+}
+
+#[test]
+fn q50_salvage_partial_ratio_prefix_follows_ts_parse_int() {
+    for prefix in ["001g", "0x01", "+001", "  01"] {
+        let (mut state, _, command) = salvage_setup();
+        let route = state
+            .cross_jurisdiction_swaps
+            .as_ref()
+            .unwrap()
+            .get("order-1")
+            .unwrap();
+        let proof = hash_ladder_proof("runtime-seed", text(route, "routeHash").unwrap());
+        let canonical = reveal_binary(&proof, 1);
+        let mut data = command.frame_data().unwrap().clone();
+        set(
+            &mut data,
+            "binary",
+            string(&format!("0x{prefix}{}", &canonical[6..])),
+        )
+        .unwrap();
+        set(
+            &mut data,
+            "fillRatio",
+            number(1, command.kind, "RATIO").unwrap(),
+        )
+        .unwrap();
+        let command = projected(command.kind, data).unwrap();
+        let witness = salvage_witness(&canonical, 1, command.kind).unwrap();
+        let result = apply_salvage(&mut state, &BTreeMap::new(), &command).unwrap();
+        assert!(result.outputs.is_empty());
+        assert!(result.proposal_work.is_empty());
+        assert_eq!(
+            result.events,
+            vec![EntityFrameEvent::Status {
+                message: "⏳ Cross-j reveal port order-1: waiting for the target dispute clock"
+                    .into()
+            }]
+        );
+        assert_eq!(
+            field(
+                state
+                    .cross_jurisdiction_swaps
+                    .as_ref()
+                    .unwrap()
+                    .get("order-1")
+                    .unwrap(),
+                "pendingTargetRegistryReveal"
+            ),
+            Some(&pending_witness_value(&witness, command.kind).unwrap())
+        );
+        assert!(state.j_batch_state.is_none());
+    }
+}
+
+#[test]
+fn q50_salvage_invalid_evidence_has_exact_status_without_mutation() {
+    for (binary, detail) in [
+        ("abcd".into(), "HASHLADDER_BINARY_INVALID_HEX"),
+        ("0x0".into(), "HASHLADDER_BINARY_INVALID_HEX"),
+        (
+            format!("0x{}", "gg".repeat(32)),
+            "HASHLADDER_FULL_BINARY_INVALID",
+        ),
+        ("0xgg".into(), "HASHLADDER_BINARY_INVALID_LENGTH:1"),
+        (
+            format!("0x0000{}", "00".repeat(128)),
+            "HASHLADDER_PARTIAL_BINARY_RATIO_INVALID:0",
+        ),
+        (
+            format!("0xffff{}", "00".repeat(128)),
+            "HASHLADDER_PARTIAL_BINARY_RATIO_INVALID:65535",
+        ),
+        (
+            format!("0xgggg{}", "00".repeat(128)),
+            "HASHLADDER_PARTIAL_BINARY_RATIO_INVALID:NaN",
+        ),
+        (
+            format!("0x0001{}", "gg".repeat(128)),
+            "HASHLADDER_PARTIAL_BINARY_REVEALS_INVALID",
+        ),
+        (
+            format!("0x{}", "00".repeat(32)),
+            "HASHLADDER_BINARY_VERIFY_FAILED",
+        ),
+    ] {
+        let (mut state, views, command) = salvage_setup();
+        let mut data = command.frame_data().unwrap().clone();
+        set(&mut data, "binary", string(&binary)).unwrap();
+        let command = projected(command.kind, data).unwrap();
+        let before = state.clone();
+        let result = apply_salvage(&mut state, &views, &command).unwrap();
+        assert_eq!(
+            result.events,
+            vec![EntityFrameEvent::Status {
+                message: format!("❌ Cross-j reveal port order-1 invalid pull binary: {detail}")
+            }]
+        );
+        assert!(result.outputs.is_empty());
+        assert!(result.proposal_work.is_empty());
+        assert_eq!(state, before);
+    }
+}
+
+#[test]
 fn q48_salvage_uppercase_prefix_full_evidence_waits_for_target_dispute_clock() {
     let (mut state, _, command) = salvage_setup();
     let mut route = state

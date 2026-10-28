@@ -8,6 +8,7 @@ mod committed;
 #[cfg(test)]
 mod group_d_parity;
 mod opening_proposal;
+mod salvage_binary;
 
 pub(crate) use committed::apply_committed_account_tx_followup;
 pub use opening_proposal::{
@@ -4654,7 +4655,6 @@ fn apply_salvage(
         .frame_data()
         .ok_or_else(|| invalid(tx.kind, "DATA_MISSING"))?;
     let route_id = text(data, "routeId")
-        .filter(|value| !value.is_empty())
         .ok_or_else(|| invalid(tx.kind, "ROUTE_ID_MISSING"))?
         .to_string();
     let binary = text(data, "binary").ok_or_else(|| invalid(tx.kind, "BINARY_MISSING"))?;
@@ -4721,20 +4721,22 @@ fn apply_salvage(
         .ok_or_else(|| invalid(tx.kind, "TARGET_PULL_PARTIAL_ROOT_MISSING"))?;
     // Ported peer evidence is not committed authority. Invalid binary/ratio
     // must leave the route intact, exactly like the TS salvage handler.
-    let verified =
-        match xln_rscore_engine::verify_hash_ladder_binary(full_hash, partial_root, &binary) {
-            Ok(ratio) => ratio,
-            Err(detail) => {
-                return Ok(CrossJurisdictionApplyResult {
-                    events: vec![EntityFrameEvent::Status {
-                        message: format!(
-                            "❌ Cross-j reveal port {route_id} invalid pull binary: {detail}"
-                        ),
-                    }],
-                    ..Default::default()
-                });
-            }
-        };
+    let (binary, verified) = match salvage_binary::normalize(&binary).and_then(|binary| {
+        xln_rscore_engine::verify_hash_ladder_binary(full_hash, partial_root, &binary)
+            .map(|ratio| (binary, ratio))
+    }) {
+        Ok(verified) => verified,
+        Err(detail) => {
+            return Ok(CrossJurisdictionApplyResult {
+                events: vec![EntityFrameEvent::Status {
+                    message: format!(
+                        "❌ Cross-j reveal port {route_id} invalid pull binary: {detail}"
+                    ),
+                }],
+                ..Default::default()
+            });
+        }
+    };
     if verified == 0 {
         return Ok(CrossJurisdictionApplyResult {
             events: vec![EntityFrameEvent::Status {
@@ -4838,25 +4840,34 @@ fn apply_salvage(
             ..Default::default()
         });
     }
-    if !matches!(
-        queued,
-        RegistrationQueueResult::Queued {
-            broadcast_now: true
-        }
-    ) {
-        return Ok(CrossJurisdictionApplyResult::default());
+    match queued {
+        RegistrationQueueResult::Queued { broadcast_now } => Ok(CrossJurisdictionApplyResult {
+            outputs: if broadcast_now {
+                vec![routed(
+                    &local,
+                    None,
+                    vec![projected(
+                        EntityTxKind::JBroadcast,
+                        CanonicalValue::Object(Vec::new()),
+                    )?],
+                )]
+            } else {
+                Vec::new()
+            },
+            events: vec![EntityFrameEvent::Status {
+                message: if broadcast_now {
+                    format!(
+                        "🌉 Cross-j reveal port {route_id}: registering ratio {verified} on the target chain"
+                    )
+                } else {
+                    format!("⏳ Cross-j reveal port {route_id}: queued behind the pending jBatch")
+                },
+            }],
+            ..Default::default()
+        }),
+        RegistrationQueueResult::AlreadyQueued => Ok(CrossJurisdictionApplyResult::default()),
+        RegistrationQueueResult::Deferred => unreachable!("deferred salvage returned above"),
     }
-    Ok(CrossJurisdictionApplyResult {
-        outputs: vec![routed(
-            &local,
-            None,
-            vec![projected(
-                EntityTxKind::JBroadcast,
-                CanonicalValue::Object(Vec::new()),
-            )?],
-        )],
-        ..CrossJurisdictionApplyResult::default()
-    })
 }
 
 fn queue_target_close(
